@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { getServerCurrentUser } from "@/app/services/api/supabase-server";
 import { fetchUserInfoByAuthId } from "@/app/services/api/users-server";
 import { checkAdminPermissions, checkInstructorPermissions } from "@/app/services/auth/permissions";
