@@ -1,4 +1,14 @@
-import { Edit, Eye, EyeOff, FileText, PenLine, Play, Plus, Trash2 } from "lucide-react";
+import {
+  Edit,
+  Eye,
+  EyeOff,
+  FileText,
+  PenLine,
+  Play,
+  Plus,
+  Presentation,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 import { PageTitle } from "@/app/components/PageTitle";
 import { fetchAllContents } from "@/app/services/api/admin-server";
@@ -23,6 +33,8 @@ function getContentIcon(type: ContentType) {
       return <FileText className="h-3 w-3" />;
     case "exercise":
       return <PenLine className="h-3 w-3" />;
+    case "slide":
+      return <Presentation className="h-3 w-3" />;
     default:
       return <FileText className="h-3 w-3" />;
   }
@@ -36,6 +48,8 @@ function getContentTypeLabel(type: ContentType) {
       return "テキスト";
     case "exercise":
       return "演習";
+    case "slide":
+      return "スライド";
     default:
       return type;
   }
@@ -49,7 +63,7 @@ export default async function AdminContentsPage() {
       <div className="flex items-center justify-between mb-6">
         <PageTitle title="コンテンツ管理" description="学習コンテンツの作成・編集・削除" />
         <Button asChild>
-          <Link href="/admin/contents/new">
+          <Link href="/manage/contents/new">
             <Plus className="h-4 w-4" />
             新規作成
           </Link>
@@ -61,7 +75,7 @@ export default async function AdminContentsPage() {
           <CardContent className="py-8 text-center">
             <p className="text-muted-foreground">コンテンツがまだ登録されていません。</p>
             <Button asChild className="mt-4">
-              <Link href="/admin/contents/new">最初のコンテンツを作成</Link>
+              <Link href="/manage/contents/new">最初のコンテンツを作成</Link>
             </Button>
           </CardContent>
         </Card>
@@ -114,7 +128,7 @@ export default async function AdminContentsPage() {
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
                       <Button variant="ghost" size="icon-sm" asChild title="編集">
-                        <Link href={`/admin/contents/${content.id}/edit`}>
+                        <Link href={`/manage/contents/${content.id}/edit`}>
                           <Edit className="h-4 w-4" />
                         </Link>
                       </Button>
@@ -125,7 +139,7 @@ export default async function AdminContentsPage() {
                         title="削除"
                         className="text-destructive hover:text-destructive"
                       >
-                        <Link href={`/admin/contents/${content.id}/delete`}>
+                        <Link href={`/manage/contents/${content.id}/delete`}>
                           <Trash2 className="h-4 w-4" />
                         </Link>
                       </Button>

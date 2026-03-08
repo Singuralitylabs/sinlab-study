@@ -7,7 +7,7 @@ import type {
   LearningWeek,
   UserType,
 } from "@/app/types";
-import { createServerSupabaseClient } from "./supabase-server";
+import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
 // =====================================================
 // テーマ管理
@@ -256,17 +256,38 @@ export async function fetchAllContents(): Promise<{
   return { data, error: null };
 }
 
+export async function fetchContentByIdForAdmin(
+  contentId: number,
+): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("learning_contents")
+    .select("*")
+    .eq("id", contentId)
+    .eq("is_deleted", false)
+    .single();
+
+  if (error) {
+    console.error("コンテンツ取得エラー:", error.message);
+    return { data: null, error };
+  }
+
+  return { data, error: null };
+}
+
 export async function createContent(content: {
   week_id: number;
   title: string;
-  content_type: "video" | "text" | "exercise";
+  content_type: "video" | "text" | "exercise" | "slide";
   video_url?: string;
   text_content?: string;
   exercise_instructions?: string;
+  pdf_url?: string;
   display_order?: number;
   is_published?: boolean;
 }): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createAdminSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_contents")
@@ -286,7 +307,7 @@ export async function updateContent(
   id: number,
   content: Partial<LearningContent>
 ): Promise<{ error: PostgrestError | null }> {
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createAdminSupabaseClient();
 
   const { error } = await supabase.from("learning_contents").update(content).eq("id", id);
 
@@ -299,7 +320,7 @@ export async function updateContent(
 }
 
 export async function deleteContent(id: number): Promise<{ error: PostgrestError | null }> {
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createAdminSupabaseClient();
 
   const { error } = await supabase
     .from("learning_contents")

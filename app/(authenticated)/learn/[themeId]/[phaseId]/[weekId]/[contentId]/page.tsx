@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
+import { PdfSlideViewer } from "@/app/components/PdfSlideViewer";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
 import {
   fetchContentById,
@@ -84,6 +85,10 @@ export default async function ContentPage({ params }: PageProps) {
 
           {content.content_type === "text" && content.text_content && (
             <MarkdownRenderer content={content.text_content} />
+          )}
+
+          {content.content_type === "slide" && content.pdf_url && (
+            <PdfSlideViewer url={content.pdf_url} />
           )}
 
           {content.content_type === "exercise" && content.exercise_instructions && (

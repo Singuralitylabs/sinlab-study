@@ -18,7 +18,7 @@ const ADMIN_NAV_ITEMS = [
   { title: "テーマ管理", href: "/admin/themes", icon: FolderOpen },
   { title: "フェーズ管理", href: "/admin/phases", icon: BookOpen },
   { title: "週管理", href: "/admin/weeks", icon: Calendar },
-  { title: "コンテンツ管理", href: "/admin/contents", icon: FileText },
+  { title: "コンテンツ管理", href: "/manage/contents", icon: FileText },
   { title: "受講生進捗", href: "/admin/students", icon: Users },
   { title: "提出一覧", href: "/admin/submissions", icon: ClipboardList },
 ];

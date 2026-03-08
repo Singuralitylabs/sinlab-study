@@ -17,7 +17,7 @@ export interface UserType {
 }
 
 // Learning content types
-export type ContentType = "video" | "text" | "exercise";
+export type ContentType = "video" | "text" | "exercise" | "slide";
 
 export interface LearningTheme {
   id: number;
@@ -63,6 +63,7 @@ export interface LearningContent {
   video_url: string | null;
   text_content: string | null;
   exercise_instructions: string | null;
+  pdf_url: string | null;
   display_order: number;
   is_published: boolean;
   is_deleted: boolean;
