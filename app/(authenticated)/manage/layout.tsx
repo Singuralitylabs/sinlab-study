@@ -5,9 +5,7 @@ import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Separator } from "@/components/ui/separator";
 
-const MANAGE_NAV_ITEMS = [
-  { title: "コンテンツ管理", href: "/manage/contents", icon: FileText },
-];
+const MANAGE_NAV_ITEMS = [{ title: "コンテンツ管理", href: "/manage/contents", icon: FileText }];
 
 export default async function ManageLayout({ children }: { children: React.ReactNode }) {
   const { userRole } = await getServerAuth();

@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "contentIdとuserIdは必須です" }, { status: 400 });
     }
 
-    // 認証チェック（SKIP_AUTH対応）
+    // 認証チェック
     const auth = await getApiAuth();
     if (!auth.success) {
       return NextResponse.json({ error: auth.error }, { status: auth.status });

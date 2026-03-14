@@ -17,8 +17,6 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
-const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL || "http://localhost:3001";
-
 interface NavItem {
   title: string;
   href: string;
@@ -71,7 +69,7 @@ export function SideNav({ isAdmin, isInstructor }: { isAdmin: boolean; isInstruc
   const handleSignOut = async () => {
     const supabase = createClientSupabaseClient();
     await supabase.auth.signOut();
-    window.location.href = `${PORTAL_URL}/login`;
+    window.location.href = "/login";
   };
 
   const isActive = (href: string) => {

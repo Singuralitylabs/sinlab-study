@@ -22,7 +22,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { title, week_id, content_type, video_url, text_content, exercise_instructions, pdf_url, display_order, is_published } = body;
+    const {
+      title,
+      week_id,
+      content_type,
+      video_url,
+      text_content,
+      exercise_instructions,
+      pdf_url,
+      display_order,
+      is_published,
+    } = body;
 
     if (!title || !week_id || !content_type) {
       return NextResponse.json({ error: "必須パラメータが不足しています" }, { status: 400 });

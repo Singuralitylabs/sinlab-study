@@ -4,7 +4,7 @@
 
 ## プロジェクト概要
 
-「AIと学ぶ実践Web技術講座」の学習コンテンツ配信サービス。Next.js 16 App Routerで構築。2つのサービスで構成されるエコシステムの一部で、本サービスはコース教材と受講生の進捗管理を担当し、別サービスの**Sinlabポータル**（デフォルト: `localhost:3001`）がユーザー登録・ログイン・アカウント管理を担当する。認証はSupabaseを共有しており、ユーザーはポータルで認証後にリダイレクトされる。
+「AIと学ぶ実践Web技術講座」の学習コンテンツ配信サービス。Next.js 16 App Routerで構築。本サービスは独自のSupabaseプロジェクトを使用し、Google OAuthによるログイン機能とユーザー承認フローを備える。コース教材の配信と受講生の進捗管理を担当する。関連サービスとして**Sinlabポータル**が存在するが、認証基盤は独立している。
 
 ## コマンド
 
@@ -33,23 +33,32 @@ bun run db:types     # Supabase型定義の再生成
 
 ```
 app/
+├── (auth)/              # 公開ページ（認証不要）
+│   ├── login/           # Googleログインページ
+│   ├── callback/        # OAuthコールバック（セッション確立 + ユーザー自動登録）
+│   ├── pending/         # 承認待ち画面
+│   └── rejected/        # 却下画面
 ├── (authenticated)/     # 全ページでアクティブなユーザーセッションが必要
-│   ├── admin/           # 管理者専用：フェーズ・週・コンテンツ・受講生・提出物のCRUD
+│   ├── admin/           # 管理者専用：フェーズ・週・コンテンツ・受講生・提出物・ユーザー管理
 │   ├── learn/           # 学習画面: [phaseId]/[weekId]/[contentId]
 │   ├── submissions/     # 受講生の提出履歴
 │   └── page.tsx         # 進捗概要付きダッシュボード
 ├── api/
+│   ├── admin/users/     # PATCH: ユーザー承認・却下
 │   ├── progress/        # POST: コンテンツごとの進捗をupsert
 │   └── submissions/     # POST: コードまたはURLの提出物を作成
 ```
 
 ### 認証・認可フロー
 
-1. **Middleware** (`middleware.ts`) が静的ファイル以外の全リクエストをインターセプト
-2. Supabaseサーバークライアントを生成し、`getUser()` を呼び出し
-3. 未認証 → ポータルの `/login` にリダイレクト
-4. 認証済みだがステータスが `pending`/`rejected` → ポータルの `/pending` または `/rejected` にリダイレクト
-5. `active` ユーザーのみアプリにアクセス可能
+1. **ログイン**: `/login` ページでGoogleログインボタンをクリック → Supabase Auth経由でGoogle OAuth
+2. **コールバック**: `/auth/callback` でOAuthコードをセッションに変換。初回ログイン時は `users` テーブルにレコードを自動作成（`status=pending`）
+3. **Middleware** (`middleware.ts`) が静的ファイル・認証ページ以外の全リクエストをインターセプト
+4. Supabaseサーバークライアントを生成し、`getUser()` を呼び出し
+5. 未認証 → `/login` にリダイレクト
+6. 認証済みだがステータスが `pending`/`rejected` → `/pending` または `/rejected` にリダイレクト
+7. `active` ユーザーのみアプリにアクセス可能
+8. **ユーザー管理**: 管理者が `/admin/users` でユーザーの承認・却下を行う
 
 **ロール**: `admin`（全権限）、`maintainer`（コンテンツ管理）、`member`（受講生）
 **権限チェック**: `app/services/auth/permissions.ts` の `checkAdminPermissions()` と `checkContentPermissions()`
@@ -87,20 +96,18 @@ app/
 `.env.local` に設定が必要（`.env.local.example` 参照）:
 - `NEXT_PUBLIC_SUPABASE_URL` — SupabaseプロジェクトURL
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — Supabase Publishableキー
+- `SUPABASE_SERVICE_ROLE_KEY` — Service Roleキー（管理操作用）
 - `SUPABASE_PROJECT_ID` — Supabase CLI操作用
-- `NEXT_PUBLIC_PORTAL_URL` — ポータルサービスURL（デフォルト: `http://localhost:3001`）
+- `GEMINI_API_KEY` — Gemini API（AIレビュー機能用）
 
-### TODO: クロスドメイン認証の実装
+### TODO: 本番運用前の対応
 
-現在、Vercel環境では認証を一時的にスキップしている（**方法C: SKIP_AUTH**）。
-本番運用前に以下の対応が必要:
-
-1. **トークンリレー方式（方法A）を実装する**: ポータルがリダイレクト時にSupabaseセッショントークンをURLで渡し、スキルアップサービス側で `setSession()` を呼んでセッションを確立する
-2. **Vercelの環境変数を削除する**: トークンリレー実装後、以下の一時的な環境変数を削除すること
-   - `SKIP_AUTH=true`（middleware用）
-   - `NEXT_PUBLIC_SKIP_AUTH=true`（AuthLayout用）
-
-**背景**: 両サービスは異なるドメイン（Vercel）で動作するため、ポータルで設定されたSupabase cookieはスキルアップサービス側では読めない。トークンリレーでクロスドメインのセッション共有を実現する必要がある。
+1. **Supabase Google OAuthプロバイダーの設定**: Supabaseダッシュボードで Google プロバイダーを有効化し、Google Cloud ConsoleのOAuthクライアントIDを設定する
+2. **Vercelの環境変数を更新する**: 以下の一時的な環境変数を削除し、本番用のSupabase URLとキーを設定すること
+   - `SKIP_AUTH=true`（削除）
+   - `NEXT_PUBLIC_SKIP_AUTH=true`（削除）
+3. **Supabase Redirect URLsの設定**: 本番ドメインの `/auth/callback` をSupabaseのRedirect URLsに追加する
+4. **管理者ユーザーの初期設定**: 初回デプロイ後、Supabase管理画面から最初のユーザーのロールを `admin` に変更する
 
 ### データベースマイグレーション
 
