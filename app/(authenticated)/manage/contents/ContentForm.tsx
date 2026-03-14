@@ -34,7 +34,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
   const [videoUrl, setVideoUrl] = useState(initialData?.video_url ?? "");
   const [textContent, setTextContent] = useState(initialData?.text_content ?? "");
   const [exerciseInstructions, setExerciseInstructions] = useState(
-    initialData?.exercise_instructions ?? "",
+    initialData?.exercise_instructions ?? ""
   );
   const [pdfUrl, setPdfUrl] = useState(initialData?.pdf_url ?? "");
   const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
@@ -257,9 +257,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
                   </div>
                 )}
               </div>
-              {pdfUrl && (
-                <p className="text-xs text-muted-foreground break-all">{pdfUrl}</p>
-              )}
+              {pdfUrl && <p className="text-xs text-muted-foreground break-all">{pdfUrl}</p>}
             </div>
           )}
 

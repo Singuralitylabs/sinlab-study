@@ -257,7 +257,7 @@ export async function fetchAllContents(): Promise<{
 }
 
 export async function fetchContentByIdForAdmin(
-  contentId: number,
+  contentId: number
 ): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
 
@@ -329,6 +329,62 @@ export async function deleteContent(id: number): Promise<{ error: PostgrestError
 
   if (error) {
     console.error("コンテンツ削除エラー:", error.message);
+    return { error };
+  }
+
+  return { error: null };
+}
+
+// =====================================================
+// ユーザー管理（承認・却下）
+// =====================================================
+
+export async function fetchAllUsers(): Promise<{
+  data: UserType[] | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("is_deleted", false)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("ユーザー一覧取得エラー:", error.message);
+    return { data: null, error };
+  }
+
+  return { data: data as UserType[], error: null };
+}
+
+export async function approveUser(userId: number): Promise<{ error: PostgrestError | null }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { error } = await supabase
+    .from("users")
+    .update({ status: "active", updated_at: new Date().toISOString() })
+    .eq("id", userId);
+
+  if (error) {
+    console.error("ユーザー承認エラー:", error.message);
+    return { error };
+  }
+
+  return { error: null };
+}
+
+export async function rejectUser(userId: number): Promise<{ error: PostgrestError | null }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { error } = await supabase
+    .from("users")
+    .update({ status: "rejected", updated_at: new Date().toISOString() })
+    .eq("id", userId);
+
+  if (error) {
+    console.error("ユーザー却下エラー:", error.message);
     return { error };
   }
 

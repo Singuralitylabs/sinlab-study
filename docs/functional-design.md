@@ -65,23 +65,25 @@
 ```
 リクエスト受信
     │
-    ├─ 静的ファイル / API / favicon → スキップ（NextResponse.next()）
+    ├─ 静的ファイル / API / 認証ページ → スキップ（NextResponse.next()）
     │
     ├─ Supabase Auth セッション確認
-    │   ├─ 未認証 → ポータル /login にリダイレクト（redirect パラメータ付き）
+    │   ├─ 未認証 → /login にリダイレクト
     │   │
     │   └─ 認証済み → ユーザーステータス確認
-    │       ├─ ステータス取得失敗 → ポータル /pending にリダイレクト
-    │       ├─ pending → ポータル /pending にリダイレクト
-    │       ├─ rejected → ポータル /rejected にリダイレクト
+    │       ├─ ステータス取得失敗 → /pending にリダイレクト
+    │       ├─ pending → /pending にリダイレクト
+    │       ├─ rejected → /rejected にリダイレクト
     │       └─ active → NextResponse.next()（アクセス許可）
 ```
 
 **スキップ条件**:
 - パスが `/_next` で始まる
 - パスが `/api` で始まる
+- パスが `/auth/callback` で始まる
 - パスに `.` を含む（静的ファイル）
 - パスが `/favicon.ico`
+- パスが `/login`、`/pending`、`/rejected`
 
 ### 2.2 サーバー側認証
 
@@ -122,6 +124,41 @@ interface ServerAuthResult {
 - React Context でSupabase Auth の状態を管理
 - `onAuthStateChange` でリアルタイム監視
 - ログアウト機能を提供
+
+### 2.5 Googleログイン
+
+本サービスは独自のSupabaseプロジェクトを使用し、Google OAuthによるログイン機能を提供する。
+
+**ログインページ**: `app/(auth)/login/page.tsx`
+
+**OAuthコールバックルート**: `app/(auth)/callback/route.ts`
+
+```
+GET /auth/callback?code=xxx
+    │
+    ├─ code なし → /login にリダイレクト
+    │
+    ├─ supabase.auth.exchangeCodeForSession(code)
+    │   ├─ 成功 → ユーザーステータス確認
+    │   │   ├─ 未登録 → 自動登録 (pending) → /pending
+    │   │   ├─ pending → /pending
+    │   │   ├─ rejected → /rejected
+    │   │   └─ active → / (ダッシュボード)
+    │   │
+    │   └─ 失敗 → /login にリダイレクト
+```
+
+**ユーザー自動登録**: 初回ログイン時に `users` テーブルにレコードを自動作成（`status=pending`, `role=member`）。
+
+### 2.6 ユーザー管理（管理者向け）
+
+**パス**: `/admin/users`
+
+**アクセス権限**: `admin` ロールのみ
+
+**機能**: ユーザー一覧表示、承認（`pending` → `active`）、却下（`pending` → `rejected`）
+
+詳細は[認証設計書](./auth-design.md)を参照。
 
 ---
 
@@ -589,3 +626,4 @@ interface StudentProgress {
 | 日付 | 内容 |
 |:--|:--|
 | 2026年2月 | 初版作成（実装に基づく） |
+| 2026年3月 | 認証方式を独立認証（Googleログイン + ユーザー承認）に変更。ミドルウェアフロー更新、Googleログイン・ユーザー管理セクション追加 |

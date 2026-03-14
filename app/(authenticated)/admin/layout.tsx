@@ -5,6 +5,7 @@ import {
   FileText,
   FolderOpen,
   LayoutDashboard,
+  UserCog,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -21,6 +22,7 @@ const ADMIN_NAV_ITEMS = [
   { title: "コンテンツ管理", href: "/manage/contents", icon: FileText },
   { title: "受講生進捗", href: "/admin/students", icon: Users },
   { title: "提出一覧", href: "/admin/submissions", icon: ClipboardList },
+  { title: "ユーザー管理", href: "/admin/users", icon: UserCog },
 ];
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
