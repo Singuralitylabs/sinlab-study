@@ -15,55 +15,47 @@ CREATE POLICY "Published themes are viewable by authenticated users"
 -- 管理者はすべてのテーマを閲覧可能
 DROP POLICY IF EXISTS "Admins can view all themes" ON learning_themes;
 CREATE POLICY "Admins can view all themes"
-  ON learning_themes FOR SELECT
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE users.auth_id = auth.uid()
-      AND users.role = 'admin'
-      AND users.is_deleted = false
-    )
-  );
+  ON learning_themes FOR SELECT TO authenticated
+  USING (get_user_role() = 'admin');
+
+-- 講師はすべてのテーマを閲覧可能
+DROP POLICY IF EXISTS "Maintainers can view all themes" ON learning_themes;
+CREATE POLICY "Maintainers can view all themes"
+  ON learning_themes FOR SELECT TO authenticated
+  USING (get_user_role() = 'maintainer');
 
 -- 管理者はテーマを作成可能
 DROP POLICY IF EXISTS "Admins can insert themes" ON learning_themes;
 CREATE POLICY "Admins can insert themes"
-  ON learning_themes FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE users.auth_id = auth.uid()
-      AND users.role = 'admin'
-      AND users.is_deleted = false
-    )
-  );
+  ON learning_themes FOR INSERT TO authenticated
+  WITH CHECK (get_user_role() = 'admin');
+
+-- 講師はテーマを作成可能
+DROP POLICY IF EXISTS "Maintainers can insert themes" ON learning_themes;
+CREATE POLICY "Maintainers can insert themes"
+  ON learning_themes FOR INSERT TO authenticated
+  WITH CHECK (get_user_role() = 'maintainer');
 
 -- 管理者はテーマを更新可能
 DROP POLICY IF EXISTS "Admins can update themes" ON learning_themes;
 CREATE POLICY "Admins can update themes"
-  ON learning_themes FOR UPDATE
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE users.auth_id = auth.uid()
-      AND users.role = 'admin'
-      AND users.is_deleted = false
-    )
-  );
+  ON learning_themes FOR UPDATE TO authenticated
+  USING (get_user_role() = 'admin');
+
+-- 講師はテーマを更新可能
+DROP POLICY IF EXISTS "Maintainers can update themes" ON learning_themes;
+CREATE POLICY "Maintainers can update themes"
+  ON learning_themes FOR UPDATE TO authenticated
+  USING (get_user_role() = 'maintainer');
 
 -- 管理者はテーマを削除可能
 DROP POLICY IF EXISTS "Admins can delete themes" ON learning_themes;
 CREATE POLICY "Admins can delete themes"
-  ON learning_themes FOR DELETE
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE users.auth_id = auth.uid()
-      AND users.role = 'admin'
-      AND users.is_deleted = false
-    )
-  );
+  ON learning_themes FOR DELETE TO authenticated
+  USING (get_user_role() = 'admin');
+
+-- 講師はテーマを削除可能
+DROP POLICY IF EXISTS "Maintainers can delete themes" ON learning_themes;
+CREATE POLICY "Maintainers can delete themes"
+  ON learning_themes FOR DELETE TO authenticated
+  USING (get_user_role() = 'maintainer');

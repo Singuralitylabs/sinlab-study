@@ -1,5 +1,6 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
+import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
@@ -16,27 +17,31 @@ export async function GET(request: NextRequest) {
     options: CookieOptions;
   }[] = [];
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(
-          cookiesToSet: {
-            name: string;
-            value: string;
-            options: CookieOptions;
-          }[],
-        ) {
-          // cookieを配列に蓄積（後でリダイレクトレスポンスに設定する）
-          cookiesToReturn.push(...cookiesToSet);
-        },
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error(
+      "Supabase環境変数が設定されていません: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+    );
+  }
+
+  const supabase = createServerClient(supabaseUrl, supabaseKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(
+        cookiesToSet: {
+          name: string;
+          value: string;
+          options: CookieOptions;
+        }[]
+      ) {
+        // cookieを配列に蓄積（後でリダイレクトレスポンスに設定する）
+        cookiesToReturn.push(...cookiesToSet);
       },
     },
-  );
+  });
 
   const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
@@ -69,8 +74,8 @@ export async function GET(request: NextRequest) {
       email: user.email || "",
       display_name: user.user_metadata?.full_name || user.email || "",
       avatar_url: user.user_metadata?.avatar_url || null,
-      role: "member",
-      status: "pending",
+      role: USER_ROLE.MEMBER,
+      status: USER_STATUS.PENDING,
     });
 
     if (insertError) {
@@ -78,16 +83,14 @@ export async function GET(request: NextRequest) {
     }
 
     redirectPath = "/pending";
-  } else if (existingUser.status === "pending") {
+  } else if (existingUser.status === USER_STATUS.PENDING) {
     redirectPath = "/pending";
-  } else if (existingUser.status === "rejected") {
+  } else if (existingUser.status === USER_STATUS.REJECTED) {
     redirectPath = "/rejected";
   }
 
   // リダイレクトレスポンスを作成し、蓄積したcookieを設定
-  const redirectResponse = NextResponse.redirect(
-    new URL(redirectPath, origin),
-  );
+  const redirectResponse = NextResponse.redirect(new URL(redirectPath, origin));
   for (const { name, value, options } of cookiesToReturn) {
     redirectResponse.cookies.set(name, value, options);
   }

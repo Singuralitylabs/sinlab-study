@@ -50,7 +50,9 @@ export default async function InstructorDashboardPage() {
                     <p className="text-sm text-muted-foreground">{submission.content?.title}</p>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {new Date(submission.submitted_at).toLocaleDateString("ja-JP")}
+                    {submission.submitted_at
+                      ? new Date(submission.submitted_at).toLocaleDateString("ja-JP")
+                      : "-"}
                   </p>
                 </div>
               ))}

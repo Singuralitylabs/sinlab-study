@@ -18,26 +18,15 @@ CREATE TABLE IF NOT EXISTS ai_reviews (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- updated_at 自動更新トリガー
-CREATE OR REPLACE FUNCTION update_ai_reviews_updated_at()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  NEW.updated_at = now();
-  RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER ai_reviews_updated_at
+-- updated_at 自動更新トリガー（001で定義済みの汎用関数を再利用）
+DROP TRIGGER IF EXISTS update_ai_reviews_updated_at ON ai_reviews;
+CREATE TRIGGER update_ai_reviews_updated_at
   BEFORE UPDATE ON ai_reviews
   FOR EACH ROW
-  EXECUTE FUNCTION update_ai_reviews_updated_at();
+  EXECUTE FUNCTION update_updated_at_column();
 
 -- インデックス（submission_id は UNIQUE 制約により暗黙のユニークインデックスが存在するため省略）
-CREATE INDEX idx_ai_reviews_status ON ai_reviews(status);
+CREATE INDEX IF NOT EXISTS idx_ai_reviews_status ON ai_reviews(status);
 
 -- =====================================================
 -- RLSポリシー
@@ -48,43 +37,22 @@ ALTER TABLE ai_reviews ENABLE ROW LEVEL SECURITY;
 -- 受講生: 自分の提出に紐づくレビューのみ閲覧可能
 DROP POLICY IF EXISTS "Users can view own ai reviews" ON ai_reviews;
 CREATE POLICY "Users can view own ai reviews"
-  ON ai_reviews FOR SELECT
-  TO authenticated
+  ON ai_reviews FOR SELECT TO authenticated
   USING (
     submission_id IN (
       SELECT id FROM submissions
-      WHERE user_id IN (
-        SELECT id FROM users
-        WHERE auth_id = auth.uid()
-        AND is_deleted = false
-      )
+      WHERE user_id = get_user_id()
     )
   );
 
 -- 管理者: 全レビュー閲覧可能
 DROP POLICY IF EXISTS "Admins can view all ai reviews" ON ai_reviews;
 CREATE POLICY "Admins can view all ai reviews"
-  ON ai_reviews FOR SELECT
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE users.auth_id = auth.uid()
-      AND users.role = 'admin'
-      AND users.is_deleted = false
-    )
-  );
+  ON ai_reviews FOR SELECT TO authenticated
+  USING (get_user_role() = 'admin');
 
 -- 講師(maintainer): 全レビュー閲覧可能
 DROP POLICY IF EXISTS "Maintainers can view all ai reviews" ON ai_reviews;
 CREATE POLICY "Maintainers can view all ai reviews"
-  ON ai_reviews FOR SELECT
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE users.auth_id = auth.uid()
-      AND users.role = 'maintainer'
-      AND users.is_deleted = false
-    )
-  );
+  ON ai_reviews FOR SELECT TO authenticated
+  USING (get_user_role() = 'maintainer');

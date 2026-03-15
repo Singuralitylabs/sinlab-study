@@ -2,13 +2,14 @@
 
 import { Check, Loader2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import type { UserType } from "@/app/types";
+import { useMemo, useState } from "react";
+import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import type { UserRoleType, UserStatusType, UserType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 const STATUS_LABELS: Record<
-  string,
+  UserStatusType,
   { label: string; variant: "default" | "secondary" | "destructive" }
 > = {
   pending: { label: "承認待ち", variant: "secondary" },
@@ -16,7 +17,7 @@ const STATUS_LABELS: Record<
   rejected: { label: "却下", variant: "destructive" },
 };
 
-const ROLE_LABELS: Record<string, string> = {
+const ROLE_LABELS: Record<UserRoleType, string> = {
   admin: "管理者",
   maintainer: "講師/運営",
   member: "受講生",
@@ -27,9 +28,25 @@ type StatusFilter = "all" | "pending" | "active" | "rejected";
 export function UserManagementTable({ users }: { users: UserType[] }) {
   const router = useRouter();
   const [filter, setFilter] = useState<StatusFilter>("all");
-  const [loadingUserId, setLoadingUserId] = useState<number | null>(null);
+  const [loadingUserIds, setLoadingUserIds] = useState<Set<number>>(new Set());
 
-  const filteredUsers = filter === "all" ? users : users.filter((u) => u.status === filter);
+  const filteredUsers = useMemo(
+    () => (filter === "all" ? users : users.filter((u) => u.status === filter)),
+    [users, filter]
+  );
+
+  const pendingCount = useMemo(
+    () => users.filter((u) => u.status === USER_STATUS.PENDING).length,
+    [users]
+  );
+
+  const setLoading = (id: number, loading: boolean) => {
+    setLoadingUserIds((prev) => {
+      const next = new Set(prev);
+      loading ? next.add(id) : next.delete(id);
+      return next;
+    });
+  };
 
   const handleAction = async (userId: number, action: "approve" | "reject") => {
     const confirmMessage =
@@ -37,7 +54,7 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
 
     if (!confirm(confirmMessage)) return;
 
-    setLoadingUserId(userId);
+    setLoading(userId, true);
     try {
       const res = await fetch("/api/admin/users", {
         method: "PATCH",
@@ -55,11 +72,9 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
     } catch {
       alert("エラーが発生しました");
     } finally {
-      setLoadingUserId(null);
+      setLoading(userId, false);
     }
   };
-
-  const pendingCount = users.filter((u) => u.status === "pending").length;
 
   return (
     <div className="space-y-4">
@@ -73,7 +88,7 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
             onClick={() => setFilter(status)}
           >
             {status === "all" ? "すべて" : STATUS_LABELS[status].label}
-            {status === "pending" && pendingCount > 0 && (
+            {status === USER_STATUS.PENDING && pendingCount > 0 && (
               <Badge variant="destructive" className="ml-1.5 px-1.5 py-0 text-xs">
                 {pendingCount}
               </Badge>
@@ -87,11 +102,21 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-muted/50">
-              <th className="text-left px-4 py-3 font-medium">ユーザー</th>
-              <th className="text-left px-4 py-3 font-medium">ロール</th>
-              <th className="text-left px-4 py-3 font-medium">ステータス</th>
-              <th className="text-left px-4 py-3 font-medium">登録日</th>
-              <th className="text-left px-4 py-3 font-medium">操作</th>
+              <th scope="col" className="text-left px-4 py-3 font-medium">
+                ユーザー
+              </th>
+              <th scope="col" className="text-left px-4 py-3 font-medium">
+                ロール
+              </th>
+              <th scope="col" className="text-left px-4 py-3 font-medium">
+                ステータス
+              </th>
+              <th scope="col" className="text-left px-4 py-3 font-medium">
+                登録日
+              </th>
+              <th scope="col" className="text-left px-4 py-3 font-medium">
+                操作
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -103,11 +128,8 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
               </tr>
             ) : (
               filteredUsers.map((user) => {
-                const statusInfo = STATUS_LABELS[user.status] || {
-                  label: user.status,
-                  variant: "secondary" as const,
-                };
-                const isLoading = loadingUserId === user.id;
+                const statusInfo = STATUS_LABELS[user.status];
+                const isLoading = loadingUserIds.has(user.id);
 
                 return (
                   <tr key={user.id} className="border-b last:border-b-0">
@@ -122,14 +144,17 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
                       <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {new Date(user.created_at).toLocaleDateString("ja-JP")}
+                      {user.created_at
+                        ? new Date(user.created_at).toLocaleDateString("ja-JP")
+                        : "-"}
                     </td>
                     <td className="px-4 py-3">
                       {isLoading ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <div className="flex gap-2">
-                          {(user.status === "pending" || user.status === "rejected") && (
+                          {(user.status === USER_STATUS.PENDING ||
+                            user.status === USER_STATUS.REJECTED) && (
                             <Button
                               size="sm"
                               variant="outline"
@@ -140,8 +165,9 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
                               承認
                             </Button>
                           )}
-                          {(user.status === "pending" || user.status === "active") &&
-                            user.role !== "admin" && (
+                          {(user.status === USER_STATUS.PENDING ||
+                            user.status === USER_STATUS.ACTIVE) &&
+                            user.role !== USER_ROLE.ADMIN && (
                               <Button
                                 size="sm"
                                 variant="outline"

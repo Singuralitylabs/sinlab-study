@@ -5,28 +5,31 @@ import { cookies } from "next/headers";
 
 // サーバーサイド用Supabaseクライアント（認証付き）
 export async function createServerSupabaseClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !key) {
+    throw new Error(
+      "Supabase環境変数が設定されていません: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+    );
+  }
   const cookieStore = await cookies();
 
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
-          try {
-            for (const { name, value, options } of cookiesToSet) {
-              cookieStore.set(name, value, options);
-            }
-          } catch {
-            // サーバーコンポーネントで呼び出された場合のエラーハンドリング
-          }
-        },
+  return createServerClient(url, key, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
       },
-    }
-  );
+      setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
+        try {
+          for (const { name, value, options } of cookiesToSet) {
+            cookieStore.set(name, value, options);
+          }
+        } catch {
+          // サーバーコンポーネントで呼び出された場合のエラーハンドリング
+        }
+      },
+    },
+  });
 }
 
 // サーバーサイド用Supabaseクライアント（Service Role: RLSバイパス）
@@ -34,7 +37,11 @@ export async function createServerSupabaseClient() {
 export async function createAdminSupabaseClient() {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (serviceRoleKey) {
-    return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceRoleKey);
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!url) {
+      throw new Error("Supabase環境変数が設定されていません: NEXT_PUBLIC_SUPABASE_URL");
+    }
+    return createClient(url, serviceRoleKey);
   }
   // Service Role Key未設定時は通常クライアントにフォールバック
   return createServerSupabaseClient();

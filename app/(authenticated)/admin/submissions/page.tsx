@@ -15,7 +15,8 @@ function isValidUrl(url: string): boolean {
   }
 }
 
-function formatDate(dateString: string) {
+function formatDate(dateString: string | null) {
+  if (!dateString) return "-";
   return new Date(dateString).toLocaleString("ja-JP", {
     year: "numeric",
     month: "2-digit",

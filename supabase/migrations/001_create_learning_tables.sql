@@ -2,6 +2,21 @@
 -- Web技術学習支援サービス - データベーススキーマ
 -- =====================================================
 
+-- ユーザー
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  auth_id UUID NOT NULL UNIQUE,
+  email VARCHAR(255) NOT NULL,
+  display_name VARCHAR(255) NOT NULL,
+  avatar_url TEXT,
+  role VARCHAR(20) NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'maintainer', 'member')),
+  status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'rejected')),
+  bio TEXT,
+  is_deleted BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- フェーズ（Phase 1 - GAS基礎 など）
 CREATE TABLE IF NOT EXISTS learning_phases (
   id SERIAL PRIMARY KEY,
@@ -67,12 +82,34 @@ CREATE TABLE IF NOT EXISTS submissions (
 );
 
 -- インデックス作成
+CREATE INDEX IF NOT EXISTS idx_users_auth_role ON users(auth_id, role, is_deleted);
 CREATE INDEX IF NOT EXISTS idx_learning_weeks_phase_id ON learning_weeks(phase_id);
 CREATE INDEX IF NOT EXISTS idx_learning_contents_week_id ON learning_contents(week_id);
 CREATE INDEX IF NOT EXISTS idx_user_progress_user_id ON user_progress(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_progress_content_id ON user_progress(content_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_user_id ON submissions(user_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_content_id ON submissions(content_id);
+
+-- RLSポリシー用ヘルパー関数（SECURITY DEFINERでRLSをバイパスし無限再帰を防止）
+CREATE OR REPLACE FUNCTION public.get_user_role()
+RETURNS TEXT
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT role::text FROM users WHERE auth_id = auth.uid() AND is_deleted = false LIMIT 1;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_user_id()
+RETURNS INTEGER
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT id FROM users WHERE auth_id = auth.uid() AND is_deleted = false LIMIT 1;
+$$;
 
 -- updated_at自動更新トリガー関数
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -84,6 +121,11 @@ END;
 $$ language 'plpgsql';
 
 -- 各テーブルにトリガーを設定
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
+CREATE TRIGGER update_users_updated_at
+  BEFORE UPDATE ON users
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 DROP TRIGGER IF EXISTS update_learning_phases_updated_at ON learning_phases;
 CREATE TRIGGER update_learning_phases_updated_at
   BEFORE UPDATE ON learning_phases

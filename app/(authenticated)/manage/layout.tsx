@@ -1,4 +1,4 @@
-import { FileText, LayoutDashboard } from "lucide-react";
+import { FileText } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
