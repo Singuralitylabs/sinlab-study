@@ -27,9 +27,14 @@ bun run lint         # Biome リントチェック
 bun run format       # Biome フォーマット
 bun run check        # リント + フォーマット一括実行
 bun run db:types     # Supabase型定義の再生成
+bun run test         # Vitestによるユニットテスト実行
+bun run test:all     # build/db:types/lint/format/check/test を一括実行
 ```
 
-テストフレームワークは未導入。
+## プルリクエスト
+
+PRを作成する際は必ず `.github/pull_request_template.md` のテンプレートに従うこと。
+`gh pr create` を使用する場合は `--body` に同テンプレートの全セクションを含めること。
 
 ## コードスタイル (Biome)
 
