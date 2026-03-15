@@ -109,6 +109,6 @@ docs/                    # 設計ドキュメント
 | ドキュメント | 内容 |
 |:--|:--|
 | [要件定義書](./docs/requirements.md) | プロジェクト概要、機能要件、非機能要件、画面一覧 |
-| [データベース設計書](./docs/database-design.md) | テーブル定義、RLS ポリシー、インデックス、トリガー |
-| [機能設計書](./docs/functional-design.md) | アーキテクチャ、API 仕様、画面設計、コンポーネント設計 |
+| [データベース設計書](./docs/database.md) | テーブル定義、RLS ポリシー、インデックス、トリガー |
+| [機能設計書](./docs/specification.md) | アーキテクチャ、認証・認可、API 仕様、画面設計、コンポーネント設計 |
 # web-skillup-service

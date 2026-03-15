@@ -36,8 +36,8 @@
 ### 1.5 関連設計書
 | ドキュメント | 内容 |
 |:--|:--|
-| [データベース設計書](./database-design.md) | テーブル定義、RLS、インデックス、トリガー |
-| [機能設計書](./functional-design.md) | アーキテクチャ、機能詳細、認証・認可、API仕様、画面設計 |
+| [データベース設計書](./database.md) | テーブル定義、RLS、インデックス、トリガー |
+| [機能設計書](./specification.md) | アーキテクチャ、機能詳細、認証・認可、API仕様、画面設計 |
 
 ---
 
@@ -173,7 +173,7 @@ Phase（例：Phase 1 - GAS基礎）
 - Row Level Security（RLS）によるデータベースレベルのアクセス制御
 - isomorphic-dompurifyによるXSSサニタイズ
 - サーバーサイドでのユーザーID検証（API操作時）
-- 独立認証基盤: 本アプリ独自のGoogle OAuth + ユーザー承認フロー（詳細は[機能設計書](./functional-design.md)のセクション2を参照）
+- 独立認証基盤: 本アプリ独自のGoogle OAuth + ユーザー承認フロー（詳細は[機能設計書](./specification.md)のセクション2を参照）
 
 ### 5.4 ダークモード対応
 - `prefers-color-scheme` によるOS設定連動のライト / ダークモード切り替え
