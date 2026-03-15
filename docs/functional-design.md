@@ -30,15 +30,10 @@
 └─────────────┼────────────┼─────────┼─────────────┘
               │            │         │
 ┌─────────────┼────────────┼─────────┼─────────────┐
-│         Supabase                                  │
+│         Supabase（独自プロジェクト）                 │
 │  ┌──────────┴─────────┐  ┌────────┴──────────┐   │
-│  │ PostgreSQL + RLS    │  │ Auth              │   │
+│  │ PostgreSQL + RLS    │  │ Auth (Google OAuth)│   │
 │  └────────────────────┘  └───────────────────┘   │
-└───────────────────────────────────────────────────┘
-              │
-┌─────────────┼─────────────────────────────────────┐
-│  シンラボポータルサイト（外部サービス）              │
-│  ログイン / 登録 / 承認管理                         │
 └───────────────────────────────────────────────────┘
 ```
 
@@ -125,7 +120,7 @@ interface ServerAuthResult {
 - `onAuthStateChange` でリアルタイム監視
 - ログアウト機能を提供
 
-### 2.5 Googleログイン
+### 2.5 Googleログインフロー
 
 本サービスは独自のSupabaseプロジェクトを使用し、Google OAuthによるログイン機能を提供する。
 
@@ -134,31 +129,169 @@ interface ServerAuthResult {
 **OAuthコールバックルート**: `app/(auth)/callback/route.ts`
 
 ```
+ユーザー          学習支援サービス        Google OAuth       Supabase Auth
+  │                    │                    │                   │
+  │  1. /login にアクセス│                    │                   │
+  │───────────────────>│                    │                   │
+  │                    │                    │                   │
+  │  2. 「Googleでログイン」クリック          │                   │
+  │───────────────────>│                    │                   │
+  │                    │  3. signInWithOAuth │                   │
+  │                    │───────────────────────────────────────>│
+  │                    │                    │                   │
+  │  4. Google認証画面   │                    │                   │
+  │<───────────────────────────────────────│                   │
+  │                    │                    │                   │
+  │  5. Googleで認証     │                    │                   │
+  │───────────────────────────────────────>│                   │
+  │                    │                    │  6. code返却       │
+  │                    │  7. /auth/callback  │                   │
+  │───────────────────>│                    │                   │
+  │                    │  8. exchangeCodeForSession              │
+  │                    │───────────────────────────────────────>│
+  │                    │  9. session確立     │                   │
+  │                    │<───────────────────────────────────────│
+  │                    │                    │                   │
+  │                    │  10. ユーザー初回判定  │                   │
+  │                    │      (users テーブル確認)                │
+  │                    │                    │                   │
+  │  11. リダイレクト    │                    │                   │
+  │      初回: /pending │                    │                   │
+  │      承認済: /      │                    │                   │
+  │<───────────────────│                    │                   │
+```
+
+**OAuthコールバック処理フロー**:
+```
 GET /auth/callback?code=xxx
     │
     ├─ code なし → /login にリダイレクト
     │
     ├─ supabase.auth.exchangeCodeForSession(code)
-    │   ├─ 成功 → ユーザーステータス確認
-    │   │   ├─ 未登録 → 自動登録 (pending) → /pending
-    │   │   ├─ pending → /pending
-    │   │   ├─ rejected → /rejected
-    │   │   └─ active → / (ダッシュボード)
     │   │
-    │   └─ 失敗 → /login にリダイレクト
+    │   ├─ 失敗 → /login にリダイレクト
+    │   │
+    │   └─ 成功 → users テーブル確認
+    │       │
+    │       ├─ レコードなし → 自動登録 (pending) → /pending
+    │       ├─ pending → /pending
+    │       ├─ rejected → /rejected
+    │       └─ active → / (ダッシュボード)
 ```
 
-**ユーザー自動登録**: 初回ログイン時に `users` テーブルにレコードを自動作成（`status=pending`, `role=member`）。
+### 2.6 初回ログイン時のユーザー自動登録
 
-### 2.6 ユーザー管理（管理者向け）
+OAuthコールバック処理中、またはクライアント側の `onAuthStateChange` で初回ログインを検知し、`users` テーブルにレコードを自動作成する。
+
+**自動登録データ**:
+
+| カラム | 値 | 取得元 |
+|:--|:--|:--|
+| `auth_id` | Supabase Auth UUID | `user.id` |
+| `email` | Googleアカウントのメール | `user.email` |
+| `display_name` | Google表示名 | `user.user_metadata.full_name` |
+| `avatar_url` | Googleアバター画像 | `user.user_metadata.avatar_url` |
+| `role` | `member` | デフォルト値 |
+| `status` | `pending` | デフォルト値 |
+
+### 2.7 ユーザーステータスによるアクセス制御
+
+```
+ログイン成功後
+    │
+    ├─ users テーブルにレコードなし
+    │   → 自動登録 (status=pending) → /pending にリダイレクト
+    │
+    ├─ status = pending
+    │   → /pending にリダイレクト（承認待ち画面）
+    │
+    ├─ status = rejected
+    │   → /rejected にリダイレクト（却下画面）
+    │
+    └─ status = active
+        → / (ダッシュボード) にリダイレクト
+```
+
+### 2.8 ユーザー管理（管理者向け）
 
 **パス**: `/admin/users`
 
 **アクセス権限**: `admin` ロールのみ
 
-**機能**: ユーザー一覧表示、承認（`pending` → `active`）、却下（`pending` → `rejected`）
+**機能**:
+- 全ユーザー一覧の表示（ステータスでフィルタ可能）
+- ユーザーの承認（`pending` → `active`）
+- ユーザーの却下（`pending` → `rejected`）
+- ステータス変更のリカバリ（`rejected` → `active`）
 
-詳細は[認証設計書](./auth-design.md)を参照。
+**表示項目**:
+
+| 項目 | 説明 |
+|:--|:--|
+| 表示名 | Googleアカウントの名前 |
+| メールアドレス | Googleアカウントのメール |
+| ロール | `admin` / `maintainer` / `member` |
+| ステータス | `pending` / `active` / `rejected` |
+| 登録日時 | 初回ログイン日時 |
+| 操作 | 承認 / 却下ボタン |
+
+### 2.9 ログアウト機能
+
+**実装箇所**: SideNavコンポーネント
+
+**処理**:
+1. `supabase.auth.signOut()` を呼び出し
+2. `/login` にリダイレクト
+
+### 2.10 認証セキュリティ
+
+#### 認証レイヤー
+
+| レイヤー | 保護対象 | 方式 |
+|:--|:--|:--|
+| Middleware | 全ページ | Supabase Auth セッション + ユーザーステータス確認 |
+| AuthLayout | Client Components | `useSupabaseAuth()` フックによるクライアント側ガード |
+| RLS | データベース | `auth.uid()` によるRow Level Security |
+| API Routes | データ更新操作 | `getApiAuth()` によるサーバー側認証 |
+
+#### OAuth セキュリティ
+
+| 項目 | 対策 |
+|:--|:--|
+| PKCE | Supabase Auth が自動的にPKCEフローを使用 |
+| CSRF保護 | OAuth stateパラメータによるCSRF防止（Supabase管理） |
+| セッション管理 | HTTP-only cookieでセッショントークンを管理 |
+| トークン更新 | リフレッシュトークンによる自動更新 |
+
+#### 承認フローのセキュリティ
+
+| リスク | 対策 |
+|:--|:--|
+| 未承認ユーザーのアクセス | ミドルウェア + RLSの二重チェック |
+| ステータス改ざん | `users` テーブルの更新はRLSでadminロールのみに制限 |
+| 自動登録の悪用 | Googleアカウントが必要。登録後は `pending` で管理者の承認が必須 |
+
+### 2.11 Supabase Auth 設定
+
+#### Google OAuth プロバイダー設定
+
+Supabaseダッシュボードの Authentication > Providers で設定する。
+
+**必要な情報**:
+- Google Cloud ConsoleのOAuth 2.0クライアントID
+- Google Cloud ConsoleのOAuth 2.0クライアントシークレット
+- リダイレクトURI: `https://<supabase-project-id>.supabase.co/auth/v1/callback`
+
+**Google Cloud Console側の設定**:
+- 承認済みリダイレクトURI: Supabaseが提供するコールバックURLを追加
+- 承認済みJavaScript生成元: 本アプリのドメインを追加
+
+#### Supabase Auth URL設定
+
+| 設定項目 | 値 |
+|:--|:--|
+| Site URL | 本アプリのURL（`http://localhost:3000` / 本番URL） |
+| Redirect URLs | `http://localhost:3000/auth/callback`, `https://本番ドメイン/auth/callback` |
 
 ---
 
@@ -411,7 +544,40 @@ interface StudentProgress {
 
 ## 7. 画面設計
 
-### 7.1 受講生向け画面
+### 7.1 認証系画面
+
+#### ログイン画面（`/login`）
+
+**表示内容**:
+- サービスロゴ / サービス名
+- 「Googleでログイン」ボタン
+- サービスの簡単な説明文
+
+**デザイン方針**:
+- シンプルで中央寄せのレイアウト
+- ダークモード対応
+
+---
+
+#### 承認待ち画面（`/pending`）
+
+**表示内容**:
+- 「承認待ちです」のメッセージ
+- 管理者に承認を依頼する案内文
+- ログアウトボタン
+
+---
+
+#### 却下画面（`/rejected`）
+
+**表示内容**:
+- 「アクセスが却下されました」のメッセージ
+- 管理者への問い合わせ案内
+- ログアウトボタン
+
+---
+
+### 7.2 受講生向け画面
 
 #### ダッシュボード（`/`）
 
@@ -473,7 +639,7 @@ interface StudentProgress {
 
 ---
 
-### 7.2 管理者向け画面
+### 7.3 管理者向け画面
 
 #### 管理ダッシュボード（`/admin`）
 
@@ -613,7 +779,18 @@ interface StudentProgress {
 | Supabase エラー | 500 | DB操作失敗（`console.error` でログ出力） |
 | 予期しないエラー | 500 | try-catch による一括ハンドリング |
 
-### 10.2 Server Services
+### 10.2 認証エラー
+
+| ケース | 対応 |
+|:--|:--|
+| Google認証キャンセル | `/login` に戻り、エラーメッセージを表示 |
+| OAuth コード交換失敗 | `/login` にリダイレクト |
+| セッション期限切れ | ミドルウェアが `/login` にリダイレクト |
+| Supabase接続エラー | エラーログ出力、`/login` にリダイレクト |
+| `users` テーブルへの INSERT 失敗 | エラーログ出力。ステータス確認不可のため `/pending` 表示 |
+| 重複登録の試行 | `auth_id` のUNIQUE制約で防止。既存レコードを使用 |
+
+### 10.3 Server Services
 
 - 全サービス関数は `{ data, error }` パターンで結果を返却
 - エラー時は `console.error` でサーバーログに出力
@@ -627,3 +804,4 @@ interface StudentProgress {
 |:--|:--|
 | 2026年2月 | 初版作成（実装に基づく） |
 | 2026年3月 | 認証方式を独立認証（Googleログイン + ユーザー承認）に変更。ミドルウェアフロー更新、Googleログイン・ユーザー管理セクション追加 |
+| 2026年3月 | 認証設計書を統合。Googleログインフロー詳細、セキュリティ設計、Supabase Auth設定、認証系画面設計、認証エラーハンドリングを追加 |

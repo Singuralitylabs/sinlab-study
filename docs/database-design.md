@@ -24,7 +24,7 @@
 ## 2. ER図（概念）
 
 ```
-users (ポータル側管理)
+users
   │
   ├──< user_progress >── learning_contents
   │                            │
@@ -171,9 +171,9 @@ learning_phases ─1:N── learning_weeks ─1:N── learning_contents
 
 ---
 
-### 3.6 users（ユーザー）※ ポータルサイト側で管理
+### 3.6 users（ユーザー）
 
-本テーブルはポータルサイト側で作成・管理される。学習サービスからは参照のみ行う。
+本サービスの独自Supabaseプロジェクトで管理する。初回Googleログイン時にOAuthコールバックで自動作成される（`status=pending`, `role=member`）。管理者が承認後、`status=active` に変更することでサービスへのアクセスが可能になる。
 
 | カラム | 型 | NULL | デフォルト | 説明 |
 |:--|:--|:--:|:--|:--|
