@@ -1,0 +1,26 @@
+name: Check console.log and debugger
+
+on:
+  push:
+    paths:
+      - "app/**"
+  pull_request:
+    paths:
+      - "app/**"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for console.log / console.info / debugger
+        run: |
+          if grep -rn --include="*.ts" --include="*.tsx" \
+            -E "console\.(log|info|debug)|debugger" app/; then
+            echo "::error::Detected debug output (console.log / console.info / console.debug / debugger) in app/. Remove before merging."
+            exit 1
+          fi

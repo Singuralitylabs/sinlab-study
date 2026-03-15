@@ -9,7 +9,9 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "check": "biome check --write .",
-    "db:types": "source .env.local && npx supabase gen types --lang=typescript --project-id ${SUPABASE_PROJECT_ID} --schema public > app/types/lib/database.types.ts"
+    "db:types": "source .env.local && npx supabase gen types --lang=typescript --project-id ${SUPABASE_PROJECT_ID} --schema public > app/types/lib/database.types.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -39,7 +41,8 @@
     "@types/react-dom": "^19",
     "supabase": "^2.75.5",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.0"
   },
   "trustedDependencies": [
     "sharp",
