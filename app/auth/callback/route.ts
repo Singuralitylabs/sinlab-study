@@ -16,27 +16,31 @@ export async function GET(request: NextRequest) {
     options: CookieOptions;
   }[] = [];
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(
-          cookiesToSet: {
-            name: string;
-            value: string;
-            options: CookieOptions;
-          }[],
-        ) {
-          // cookieを配列に蓄積（後でリダイレクトレスポンスに設定する）
-          cookiesToReturn.push(...cookiesToSet);
-        },
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error(
+      "Supabase環境変数が設定されていません: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+    );
+  }
+
+  const supabase = createServerClient(supabaseUrl, supabaseKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(
+        cookiesToSet: {
+          name: string;
+          value: string;
+          options: CookieOptions;
+        }[]
+      ) {
+        // cookieを配列に蓄積（後でリダイレクトレスポンスに設定する）
+        cookiesToReturn.push(...cookiesToSet);
       },
     },
-  );
+  });
 
   const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
@@ -85,9 +89,7 @@ export async function GET(request: NextRequest) {
   }
 
   // リダイレクトレスポンスを作成し、蓄積したcookieを設定
-  const redirectResponse = NextResponse.redirect(
-    new URL(redirectPath, origin),
-  );
+  const redirectResponse = NextResponse.redirect(new URL(redirectPath, origin));
   for (const { name, value, options } of cookiesToReturn) {
     redirectResponse.cookies.set(name, value, options);
   }
