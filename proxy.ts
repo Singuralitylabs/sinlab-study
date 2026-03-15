@@ -15,7 +15,7 @@ function shouldSkipMiddleware(pathname: string): boolean {
   );
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 静的ファイル・認証ページなどはスキップ
@@ -35,7 +35,7 @@ export async function middleware(request: NextRequest) {
 
   if (!supabaseUrl || !supabaseKey) {
     console.error(
-      "[middleware] Missing env vars:",
+      "[proxy] Missing env vars:",
       !supabaseUrl ? "NEXT_PUBLIC_SUPABASE_URL" : "",
       !supabaseKey ? "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" : ""
     );
@@ -83,7 +83,7 @@ export async function middleware(request: NextRequest) {
       .maybeSingle();
 
     if (userError) {
-      console.error("[middleware] User data fetch error:", userError);
+      console.error("[proxy] User data fetch error:", userError);
     }
 
     const userStatus = userData?.status as string | null;
@@ -100,7 +100,7 @@ export async function middleware(request: NextRequest) {
     // activeユーザーは通常ページにアクセス可能
     return response;
   } catch (e) {
-    console.error("[middleware] Unhandled error:", e);
+    console.error("[proxy] Unhandled error:", e);
     return response;
   }
 }
