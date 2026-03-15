@@ -1,5 +1,5 @@
-import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function AdminDashboardLoading() {
   return (
@@ -32,7 +32,10 @@ export default function AdminDashboardLoading() {
           </div>
           <div className="space-y-3">
             {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+              <div
+                key={i}
+                className="flex items-center justify-between py-2 border-b border-border last:border-0"
+              >
                 <div className="space-y-1">
                   <Skeleton className="h-4 w-32" />
                   <Skeleton className="h-3 w-48" />

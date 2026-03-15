@@ -11,7 +11,8 @@
     "check": "biome check --write .",
     "db:types": "source .env.local && npx supabase gen types --lang=typescript --project-id ${SUPABASE_PROJECT_ID} --schema public > app/types/lib/database.types.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:all": "bun run build && bun run db:types && bun run lint && bun run format && bun run check && bun run test"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
