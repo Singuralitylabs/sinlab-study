@@ -6,6 +6,18 @@
 
 「AIと学ぶ実践Web技術講座」の学習コンテンツ配信サービス。Next.js 16 App Routerで構築。本サービスは独自のSupabaseプロジェクトを使用し、Google OAuthによるログイン機能とユーザー承認フローを備える。コース教材の配信と受講生の進捗管理を担当する。関連サービスとして**Sinlabポータル**が存在するが、認証基盤は独立している。
 
+## 自動実行の許可
+
+`.claude/settings.local.json` の `allow` リストに登録されているコマンド・ツールはすべて、事前確認なしに即座に実行してよい。これには以下が含まれる：
+
+- `git add`、`git status`、`git checkout`、`git mv`、`git check-ignore` などのgitコマンド
+- `bun run`、`bun add`、`bun pm` などのbunコマンド
+- `ls`、`find`、`grep`、`cat`、`echo`、`cp`、`mkdir`、`curl`、`lsof` などのシェルコマンド
+- `vercel`、`supabase`、`npx supabase`、`gh api` などのCLIコマンド
+- 各種MCPツール（serena、supabase、context7等）
+
+これらのコマンドについては「実行してよいですか？」などの確認を求めず、タスクの一部として自動的に実行すること。
+
 ## コマンド
 
 ```bash
@@ -61,7 +73,7 @@ app/
 8. **ユーザー管理**: 管理者が `/admin/users` でユーザーの承認・却下を行う
 
 **ロール**: `admin`（全権限）、`maintainer`（コンテンツ管理）、`member`（受講生）
-**権限チェック**: `app/services/auth/permissions.ts` の `checkAdminPermissions()` と `checkContentPermissions()`
+**権限チェック**: `app/services/auth/` にロールベースの権限チェックロジックを集約
 
 ### データモデル (Supabase/PostgreSQL)
 
@@ -74,22 +86,16 @@ app/
 
 ### サービス層 (`app/services/`)
 
-- `api/supabase-server.ts` — サーバーサイドSupabaseクライアント生成と `getServerCurrentUser()`
-- `api/supabase-client.ts` — ブラウザサイドSupabaseクライアント
-- `api/learning-server.ts` — フェーズ・週・コンテンツ・進捗の読み取りクエリ
-- `api/admin-server.ts` — 管理者用CRUD操作
-- `api/submissions-server.ts` — 提出物クエリ
-- `api/users-server.ts` / `users-client.ts` — ユーザーデータクエリ
-- `auth/server-auth.ts` — サーバーサイド認証ヘルパー
-- `auth/permissions.ts` — ロールベースの権限チェック
+- `api/` — Supabaseクライアント生成、学習コンテンツ・進捗・提出物・ユーザー・管理者向けのデータアクセス関数
+- `auth/` — サーバーサイド認証ヘルパーとロールベースの権限チェック
 
 ### 主要パターン
 
 - **Server Componentsがデフォルト**: ページとレイアウトは非同期Server ComponentとしてSupabaseを直接呼び出す
 - **Client Components**: 必要な場合のみ `"use client"` を付与（認証プロバイダー、インタラクティブなフォーム、ボタン等）
-- **認証プロバイダー**: `SupabaseAuthProvider` がルートレイアウトでアプリをラップし、`useSupabaseAuth()` フックを公開
-- **コンテンツ描画**: `react-markdown` + `remark-gfm` でMarkdown表示、DOMPurifyでサニタイズ。動画は `react-youtube` で埋め込み
-- **パスエイリアス**: `@/*` がプロジェクトルートにマッピング（例: `@/app/types`）
+- **認証プロバイダー**: ルートレイアウトでSupabase認証コンテキストをラップし、クライアントコンポーネントからフック経由でアクセス可能
+- **コンテンツ描画**: Markdownはサニタイズ処理を経て表示、動画はYouTube埋め込み
+- **パスエイリアス**: `@/*` がプロジェクトルートにマッピング
 
 ### 環境変数
 
@@ -100,18 +106,6 @@ app/
 - `SUPABASE_PROJECT_ID` — Supabase CLI操作用
 - `GEMINI_API_KEY` — Gemini API（AIレビュー機能用）
 
-### TODO: 本番運用前の対応
-
-1. **Supabase Google OAuthプロバイダーの設定**: Supabaseダッシュボードで Google プロバイダーを有効化し、Google Cloud ConsoleのOAuthクライアントIDを設定する
-2. **Vercelの環境変数を更新する**: 以下の一時的な環境変数を削除し、本番用のSupabase URLとキーを設定すること
-   - `SKIP_AUTH=true`（削除）
-   - `NEXT_PUBLIC_SKIP_AUTH=true`（削除）
-3. **Supabase Redirect URLsの設定**: 本番ドメインの `/auth/callback` をSupabaseのRedirect URLsに追加する
-4. **管理者ユーザーの初期設定**: 初回デプロイ後、Supabase管理画面から最初のユーザーのロールを `admin` に変更する
-
 ### データベースマイグレーション
 
-SQLマイグレーションは `supabase/migrations/` に連番で管理:
-- `001_create_learning_tables.sql` — スキーマ作成
-- `002_rls_policies.sql` — RLSポリシー
-- `003_sample_data.sql` — サンプル/シードデータ
+SQLマイグレーションは `supabase/migrations/` に連番のSQLファイルで管理。
