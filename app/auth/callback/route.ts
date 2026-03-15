@@ -1,5 +1,6 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
+import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
@@ -73,8 +74,8 @@ export async function GET(request: NextRequest) {
       email: user.email || "",
       display_name: user.user_metadata?.full_name || user.email || "",
       avatar_url: user.user_metadata?.avatar_url || null,
-      role: "member",
-      status: "pending",
+      role: USER_ROLE.MEMBER,
+      status: USER_STATUS.PENDING,
     });
 
     if (insertError) {
@@ -82,9 +83,9 @@ export async function GET(request: NextRequest) {
     }
 
     redirectPath = "/pending";
-  } else if (existingUser.status === "pending") {
+  } else if (existingUser.status === USER_STATUS.PENDING) {
     redirectPath = "/pending";
-  } else if (existingUser.status === "rejected") {
+  } else if (existingUser.status === USER_STATUS.REJECTED) {
     redirectPath = "/rejected";
   }
 

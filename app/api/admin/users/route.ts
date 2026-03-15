@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { USER_ROLE } from "@/app/constants/user";
 import { approveUser, rejectUser } from "@/app/services/api/admin-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -6,7 +7,7 @@ export async function PATCH(request: Request) {
   try {
     // 管理者権限チェック
     const auth = await getServerAuth();
-    if (!auth.user || auth.userRole !== "admin") {
+    if (!auth.user || auth.userRole !== USER_ROLE.ADMIN) {
       return NextResponse.json({ error: "権限がありません" }, { status: 403 });
     }
 

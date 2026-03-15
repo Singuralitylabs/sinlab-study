@@ -3,6 +3,7 @@
 import { Check, Loader2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import type { UserType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,7 +60,7 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
     }
   };
 
-  const pendingCount = users.filter((u) => u.status === "pending").length;
+  const pendingCount = users.filter((u) => u.status === USER_STATUS.PENDING).length;
 
   return (
     <div className="space-y-4">
@@ -73,7 +74,7 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
             onClick={() => setFilter(status)}
           >
             {status === "all" ? "すべて" : STATUS_LABELS[status].label}
-            {status === "pending" && pendingCount > 0 && (
+            {status === USER_STATUS.PENDING && pendingCount > 0 && (
               <Badge variant="destructive" className="ml-1.5 px-1.5 py-0 text-xs">
                 {pendingCount}
               </Badge>
@@ -131,7 +132,8 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <div className="flex gap-2">
-                          {(user.status === "pending" || user.status === "rejected") && (
+                          {(user.status === USER_STATUS.PENDING ||
+                            user.status === USER_STATUS.REJECTED) && (
                             <Button
                               size="sm"
                               variant="outline"
@@ -142,8 +144,9 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
                               承認
                             </Button>
                           )}
-                          {(user.status === "pending" || user.status === "active") &&
-                            user.role !== "admin" && (
+                          {(user.status === USER_STATUS.PENDING ||
+                            user.status === USER_STATUS.ACTIVE) &&
+                            user.role !== USER_ROLE.ADMIN && (
                               <Button
                                 size="sm"
                                 variant="outline"

@@ -1,4 +1,5 @@
 import type { PostgrestError } from "@supabase/supabase-js";
+import { USER_STATUS } from "@/app/constants/user";
 import type {
   LearningContent,
   LearningPhase,
@@ -364,7 +365,7 @@ export async function approveUser(userId: number): Promise<{ error: PostgrestErr
 
   const { error } = await supabase
     .from("users")
-    .update({ status: "active", updated_at: new Date().toISOString() })
+    .update({ status: USER_STATUS.ACTIVE, updated_at: new Date().toISOString() })
     .eq("id", userId);
 
   if (error) {
@@ -380,7 +381,7 @@ export async function rejectUser(userId: number): Promise<{ error: PostgrestErro
 
   const { error } = await supabase
     .from("users")
-    .update({ status: "rejected", updated_at: new Date().toISOString() })
+    .update({ status: USER_STATUS.REJECTED, updated_at: new Date().toISOString() })
     .eq("id", userId);
 
   if (error) {
@@ -412,7 +413,7 @@ export async function fetchStudentsProgress(): Promise<{
   const { data: users, error: usersError } = await supabase
     .from("users")
     .select("id, display_name, email")
-    .eq("status", "active")
+    .eq("status", USER_STATUS.ACTIVE)
     .eq("is_deleted", false)
     .order("display_name");
 
