@@ -15,7 +15,7 @@ import {
 const dbError = { message: "db error", code: "PGRST001" };
 
 beforeEach(() => {
-  vi.resetAllMocks();
+  vi.clearAllMocks();
 });
 
 // ----------------------------------------------------------------

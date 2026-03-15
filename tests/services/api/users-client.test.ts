@@ -13,7 +13,7 @@ const dbError = { message: "db error", code: "PGRST001" };
 const authId = "auth-uuid-001";
 
 beforeEach(() => {
-  vi.resetAllMocks();
+  vi.clearAllMocks();
 });
 
 // ----------------------------------------------------------------

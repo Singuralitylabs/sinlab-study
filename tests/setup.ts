@@ -1,3 +1,5 @@
-import { vi } from "vitest";
+import { beforeEach, vi } from "vitest";
 
-vi.spyOn(console, "error").mockImplementation(() => {});
+beforeEach(() => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+});

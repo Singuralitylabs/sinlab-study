@@ -18,7 +18,7 @@ const mockUserData = {
 };
 
 beforeEach(() => {
-  vi.resetAllMocks();
+  vi.clearAllMocks();
 });
 
 describe("getServerAuth", () => {
