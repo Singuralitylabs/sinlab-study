@@ -34,11 +34,30 @@ export async function fetchAllThemes(): Promise<{
   return { data, error: null };
 }
 
+export async function fetchThemeById(id: number): Promise<{
+  data: LearningTheme | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("learning_themes")
+    .select("*")
+    .eq("id", id)
+    .eq("is_deleted", false)
+    .single();
+  if (error) {
+    console.error("テーマ取得エラー:", error.message);
+    return { data: null, error };
+  }
+  return { data, error: null };
+}
+
 export async function createTheme(theme: {
   name: string;
   description?: string;
   display_order?: number;
   is_published?: boolean;
+  image_url?: string | null;
 }): Promise<{ data: LearningTheme | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
@@ -106,6 +125,24 @@ export async function fetchAllPhases(): Promise<{
   }
 
   return { data: data as LearningPhaseWithTheme[], error: null };
+}
+
+export async function fetchPhaseById(id: number): Promise<{
+  data: LearningPhase | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("learning_phases")
+    .select("*")
+    .eq("id", id)
+    .eq("is_deleted", false)
+    .single();
+  if (error) {
+    console.error("フェーズ取得エラー:", error.message);
+    return { data: null, error };
+  }
+  return { data, error: null };
 }
 
 export async function createPhase(phase: {
@@ -180,6 +217,24 @@ export async function fetchAllWeeks(): Promise<{
     return { data: null, error };
   }
 
+  return { data, error: null };
+}
+
+export async function fetchWeekById(id: number): Promise<{
+  data: LearningWeek | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("learning_weeks")
+    .select("*")
+    .eq("id", id)
+    .eq("is_deleted", false)
+    .single();
+  if (error) {
+    console.error("週取得エラー:", error.message);
+    return { data: null, error };
+  }
   return { data, error: null };
 }
 

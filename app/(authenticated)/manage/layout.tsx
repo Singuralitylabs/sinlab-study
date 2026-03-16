@@ -1,11 +1,27 @@
-import { FileText } from "lucide-react";
+import {
+  BookOpen,
+  Calendar,
+  ClipboardList,
+  FileText,
+  FolderOpen,
+  LayoutDashboard,
+  Users,
+} from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Separator } from "@/components/ui/separator";
 
-const MANAGE_NAV_ITEMS = [{ title: "コンテンツ管理", href: "/manage/contents", icon: FileText }];
+const MANAGE_NAV_ITEMS = [
+  { title: "ダッシュボード", href: "/manage", icon: LayoutDashboard },
+  { title: "テーマ管理", href: "/manage/themes", icon: FolderOpen },
+  { title: "フェーズ管理", href: "/manage/phases", icon: BookOpen },
+  { title: "週管理", href: "/manage/weeks", icon: Calendar },
+  { title: "コンテンツ管理", href: "/manage/contents", icon: FileText },
+  { title: "受講生進捗", href: "/manage/students", icon: Users },
+  { title: "提出一覧", href: "/manage/submissions", icon: ClipboardList },
+];
 
 export default async function ManageLayout({ children }: { children: React.ReactNode }) {
   const { userRole } = await getServerAuth();
