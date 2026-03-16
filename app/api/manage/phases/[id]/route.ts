@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { deleteContent, updateContent } from "@/app/services/api/admin-server";
+import { deletePhase, updatePhase } from "@/app/services/api/admin-server";
 import { getApiAuth, getApiSupabaseClient } from "@/app/services/auth/api-auth";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 
@@ -9,53 +9,32 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (!auth.success) {
       return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
-
     const supabase = await getApiSupabaseClient();
     const { data: userData } = await supabase
       .from("users")
       .select("role")
       .eq("id", auth.data.userId)
       .single();
-
     if (!userData || !checkContentPermissions(userData.role)) {
-      return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
+      return NextResponse.json({ error: "管理権限がありません" }, { status: 403 });
     }
-
     const { id } = await params;
-    const contentId = Number.parseInt(id, 10);
-    if (Number.isNaN(contentId)) {
+    const phaseId = Number.parseInt(id, 10);
+    if (Number.isNaN(phaseId)) {
       return NextResponse.json({ error: "無効なIDです" }, { status: 400 });
     }
-
     const body = await request.json();
-    const {
-      title,
-      week_id,
-      content_type,
-      video_url,
-      text_content,
-      exercise_instructions,
-      pdf_url,
-      display_order,
-      is_published,
-    } = body;
-
-    const { error } = await updateContent(contentId, {
-      title,
-      week_id,
-      content_type,
-      video_url,
-      text_content,
-      exercise_instructions,
-      pdf_url,
+    const { theme_id, name, description, display_order, is_published } = body;
+    const { error } = await updatePhase(phaseId, {
+      theme_id,
+      name,
+      description,
       display_order,
       is_published,
     });
-
     if (error) {
-      return NextResponse.json({ error: "コンテンツの更新に失敗しました" }, { status: 500 });
+      return NextResponse.json({ error: "フェーズの更新に失敗しました" }, { status: 500 });
     }
-
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("API エラー:", error);
@@ -79,16 +58,16 @@ export async function DELETE(
       .eq("id", auth.data.userId)
       .single();
     if (!userData || !checkContentPermissions(userData.role)) {
-      return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
+      return NextResponse.json({ error: "管理権限がありません" }, { status: 403 });
     }
     const { id } = await params;
-    const contentId = Number.parseInt(id, 10);
-    if (Number.isNaN(contentId)) {
+    const phaseId = Number.parseInt(id, 10);
+    if (Number.isNaN(phaseId)) {
       return NextResponse.json({ error: "無効なIDです" }, { status: 400 });
     }
-    const { error } = await deleteContent(contentId);
+    const { error } = await deletePhase(phaseId);
     if (error) {
-      return NextResponse.json({ error: "コンテンツの削除に失敗しました" }, { status: 500 });
+      return NextResponse.json({ error: "フェーズの削除に失敗しました" }, { status: 500 });
     }
     return NextResponse.json({ success: true });
   } catch (error) {
