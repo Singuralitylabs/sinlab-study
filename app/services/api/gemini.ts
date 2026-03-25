@@ -63,6 +63,9 @@ export async function generateReview(
   const model = genAI.getGenerativeModel({
     model: MODEL_NAME,
     systemInstruction: SYSTEM_PROMPT,
+    generationConfig: {
+      maxOutputTokens: 800,
+    },
   });
 
   let userPrompt: string;
