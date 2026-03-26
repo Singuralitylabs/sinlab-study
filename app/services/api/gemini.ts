@@ -44,7 +44,8 @@ function sleep(ms: number): Promise<void> {
 export async function generateReview(
   exerciseInstructions: string,
   submissionContent: string,
-  submissionType: "code" | "url"
+  submissionType: "code" | "url",
+  referenceAnswer?: string | null
 ): Promise<ReviewResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -60,11 +61,15 @@ export async function generateReview(
     },
   });
 
+  const referenceSection = referenceAnswer
+    ? `\n## 模範回答\n${referenceAnswer}\n`
+    : "";
+
   let userPrompt: string;
   if (submissionType === "url") {
     userPrompt = `## 課題内容
 ${exerciseInstructions}
-
+${referenceSection}
 ## 提出内容（URL）
 ${submissionContent}
 
@@ -77,7 +82,7 @@ ${submissionContent}
 
     userPrompt = `## 課題内容
 ${exerciseInstructions}
-
+${referenceSection}
 ## 提出コード
 \`\`\`
 ${truncated}

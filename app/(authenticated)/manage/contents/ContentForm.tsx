@@ -36,6 +36,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
   const [exerciseInstructions, setExerciseInstructions] = useState(
     initialData?.exercise_instructions ?? ""
   );
+  const [referenceAnswer, setReferenceAnswer] = useState(initialData?.reference_answer ?? "");
   const [pdfUrl, setPdfUrl] = useState(initialData?.pdf_url ?? "");
   const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
@@ -99,6 +100,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       video_url: contentType === "video" ? videoUrl : null,
       text_content: contentType === "text" ? textContent : null,
       exercise_instructions: contentType === "exercise" ? exerciseInstructions : null,
+      reference_answer: contentType === "exercise" ? referenceAnswer || null : null,
       pdf_url: contentType === "slide" ? pdfUrl : null,
     };
 
@@ -262,16 +264,28 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
           )}
 
           {contentType === "exercise" && (
-            <div className="space-y-2">
-              <Label htmlFor="exerciseInstructions">演習指示（Markdown）</Label>
-              <Textarea
-                id="exerciseInstructions"
-                value={exerciseInstructions}
-                onChange={(e) => setExerciseInstructions(e.target.value)}
-                placeholder="演習の指示をMarkdown形式で記述してください..."
-                className="min-h-[300px] font-mono"
-              />
-            </div>
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="exerciseInstructions">演習指示（Markdown）</Label>
+                <Textarea
+                  id="exerciseInstructions"
+                  value={exerciseInstructions}
+                  onChange={(e) => setExerciseInstructions(e.target.value)}
+                  placeholder="演習の指示をMarkdown形式で記述してください..."
+                  className="min-h-[300px] font-mono"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="referenceAnswer">模範回答（AIレビュー採点基準・非公開）</Label>
+                <Textarea
+                  id="referenceAnswer"
+                  value={referenceAnswer}
+                  onChange={(e) => setReferenceAnswer(e.target.value)}
+                  placeholder="模範回答を記述してください。AIレビュー時の採点基準として使用され、受講生には表示されません。"
+                  className="min-h-[200px] font-mono"
+                />
+              </div>
+            </>
           )}
 
           {/* 表示順 */}

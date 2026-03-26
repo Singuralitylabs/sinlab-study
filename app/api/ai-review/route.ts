@@ -8,7 +8,7 @@ import {
 import { generateReview } from "@/app/services/api/gemini";
 import { getApiAuth, getApiSupabaseClient } from "@/app/services/auth/api-auth";
 
-const MAX_CODE_LENGTH = 50000;
+const MAX_CODE_LENGTH = 8000;
 
 export async function POST(request: NextRequest) {
   try {
@@ -129,7 +129,8 @@ export async function POST(request: NextRequest) {
       const result = await generateReview(
         content.exercise_instructions,
         submissionContent,
-        submission.submission_type as "code" | "url"
+        submission.submission_type as "code" | "url",
+        content.reference_answer
       );
 
       // completed 状態で保存
