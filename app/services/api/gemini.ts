@@ -1,34 +1,26 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const MODEL_NAME = "gemini-2.5-flash";
-const MAX_CODE_LENGTH = 50000;
+const MAX_CODE_LENGTH = 8000;
 const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY_MS = 5000;
 
-const SYSTEM_PROMPT = `あなたはWeb技術講座のAI講師アシスタントです。受講生が提出した課題をレビューし、学習を促進するフィードバックを提供してください。
-
-以下の5つのセクションでMarkdown形式のレビューを生成してください：
+const SYSTEM_PROMPT = `Web技術講座のAI採点アシスタントです。以下の形式で簡潔にレビューしてください（日本語・初学者向け・建設的に）。
 
 ## 1. 要件達成度
-課題の各要件について、以下のいずれかで判定してください：
-- **達成**: 要件を満たしている
-- **部分的**: 一部満たしているが改善の余地がある
-- **未達成**: 要件を満たしていない
+各要件を「達成 / 部分的 / 未達成」で判定。
 
 ## 2. コード品質・可読性
-コードの構造、命名規則、フォーマット、ベストプラクティスの観点から評価してください。
+構造・命名・ベストプラクティスを簡潔に評価。
 
-## 3. 改善提案（最大3つ）
-具体的なコード例を含めた改善提案を最大3つ提示してください。
+## 3. 改善提案（最大2つ）
+要点のみ。コード例は必要な場合のみ。
 
 ## 4. 学習アドバイス
-この課題を通じて学ぶべきポイントや、次のステップとして取り組むべきことを提案してください。
+次のステップを1〜2文で。
 
 ## 5. 総合スコア
-100点満点で総合スコアを提示してください。フォーマット: **総合スコア: XX/100**
-
----
-フィードバックは建設的で励ましを含むものにしてください。初学者にもわかりやすい日本語で記述してください。`;
+**総合スコア: XX/100**`;
 
 interface ReviewResult {
   reviewContent: string;
@@ -52,7 +44,8 @@ function sleep(ms: number): Promise<void> {
 export async function generateReview(
   exerciseInstructions: string,
   submissionContent: string,
-  submissionType: "code" | "url"
+  submissionType: "code" | "url",
+  referenceAnswer?: string | null
 ): Promise<ReviewResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -63,13 +56,24 @@ export async function generateReview(
   const model = genAI.getGenerativeModel({
     model: MODEL_NAME,
     systemInstruction: SYSTEM_PROMPT,
+    generationConfig: {
+      maxOutputTokens: 1500,
+      // gemini-2.5-flash は思考モデルのため、thinking tokens が出力トークン枠を消費する。
+      // レビュータスクには思考不要なので無効化してレスポンス出力に全トークンを確保する。
+      // @ts-expect-error: thinkingConfig は @google/generative-ai@0.24.1 の型定義に未追加だがランタイムでは有効
+      thinkingConfig: {
+        thinkingBudget: 0,
+      },
+    },
   });
+
+  const referenceSection = referenceAnswer ? `\n## 模範回答\n${referenceAnswer}\n` : "";
 
   let userPrompt: string;
   if (submissionType === "url") {
     userPrompt = `## 課題内容
 ${exerciseInstructions}
-
+${referenceSection}
 ## 提出内容（URL）
 ${submissionContent}
 
@@ -82,7 +86,7 @@ ${submissionContent}
 
     userPrompt = `## 課題内容
 ${exerciseInstructions}
-
+${referenceSection}
 ## 提出コード
 \`\`\`
 ${truncated}

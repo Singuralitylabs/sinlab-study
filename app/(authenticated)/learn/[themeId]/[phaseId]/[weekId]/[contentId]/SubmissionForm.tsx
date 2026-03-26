@@ -50,6 +50,12 @@ export function SubmissionForm({ contentId, userId }: SubmissionFormProps) {
           updated_at: new Date().toISOString(),
         });
         setMessage({ type: "success", text: "提出が完了しました。AIレビューが生成されました。" });
+      } else if (response.status === 429) {
+        const errorData = await response.json().catch(() => null);
+        setMessage({
+          type: "success",
+          text: errorData?.error ?? "この課題のAIレビューは利用済みです",
+        });
       } else {
         const errorData = await response.json().catch(() => null);
         const errorMsg = errorData?.error || "AIレビューの生成に失敗しました";

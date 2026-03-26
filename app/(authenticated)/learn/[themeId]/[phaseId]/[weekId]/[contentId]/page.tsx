@@ -1,16 +1,19 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Bot, ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
 import { PdfSlideViewer } from "@/app/components/PdfSlideViewer";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
+import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
 import {
   fetchContentById,
   fetchContentsByWeekId,
   fetchUserProgressByContentId,
 } from "@/app/services/api/learning-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -52,9 +55,14 @@ export default async function ContentPage({ params }: PageProps) {
       ? weekContents?.[currentIndex + 1]
       : null;
 
-  const { isCompleted } = userId
-    ? await fetchUserProgressByContentId(userId, contentIdNum)
-    : { isCompleted: false };
+  const [{ isCompleted }, { data: existingReview }] = await Promise.all([
+    userId
+      ? fetchUserProgressByContentId(userId, contentIdNum)
+      : Promise.resolve({ isCompleted: false }),
+    userId && content.content_type === "exercise"
+      ? fetchCompletedAIReviewByContentId(userId, contentIdNum)
+      : Promise.resolve({ data: null }),
+  ]);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -98,6 +106,18 @@ export default async function ContentPage({ params }: PageProps) {
               {userId && (
                 <div className="mt-8">
                   <Separator className="mb-6" />
+                  {existingReview && (
+                    <div className="mb-6">
+                      <div className="flex items-center gap-2 mb-2">
+                        <h3 className="text-lg font-semibold">AIレビュー結果</h3>
+                        <Badge variant="outline" className="gap-1 border-primary/40 text-primary">
+                          <Bot className="h-3 w-3" />
+                          AIレビュー済み
+                        </Badge>
+                      </div>
+                      <AIReviewDisplay review={existingReview} defaultExpanded={false} />
+                    </div>
+                  )}
                   <h3 className="text-lg font-semibold mb-4">課題提出</h3>
                   <SubmissionForm contentId={contentIdNum} userId={userId} />
                 </div>

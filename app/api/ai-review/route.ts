@@ -8,7 +8,7 @@ import {
 import { generateReview } from "@/app/services/api/gemini";
 import { getApiAuth, getApiSupabaseClient } from "@/app/services/auth/api-auth";
 
-const MAX_CODE_LENGTH = 50000;
+const MAX_CODE_LENGTH = 8000;
 
 export async function POST(request: NextRequest) {
   try {
@@ -73,21 +73,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "AIレビュー機能が設定されていません" }, { status: 503 });
     }
 
-    // 既に処理中のレビューがないか確認（重複リクエスト防止）
-    const { data: existingReview } = await supabase
-      .from("ai_reviews")
-      .select("id, status")
-      .eq("submission_id", submissionId)
-      .single();
+    // 同一ユーザー・同一コンテンツでのAIレビュー利用済みチェック（1課題につき1回制限）
+    const contentId = submission.content_id;
+    const { data: userSubmissionsForContent } = await supabase
+      .from("submissions")
+      .select("id")
+      .eq("user_id", auth.data.userId)
+      .eq("content_id", contentId);
 
-    if (existingReview?.status === "processing") {
-      return NextResponse.json(
-        {
-          message: "AIレビューは現在生成中です",
-          review: { id: existingReview.id, status: "processing" },
-        },
-        { status: 202 }
-      );
+    const allSubmissionIdsForContent = (userSubmissionsForContent ?? []).map((s) => s.id);
+
+    if (allSubmissionIdsForContent.length > 0) {
+      const { data: activeReview } = await supabase
+        .from("ai_reviews")
+        .select("id, status, submission_id")
+        .in("submission_id", allSubmissionIdsForContent)
+        .in("status", ["completed", "processing", "pending"])
+        .limit(1)
+        .maybeSingle();
+
+      if (activeReview) {
+        if (activeReview.status === "processing" && activeReview.submission_id === submissionId) {
+          return NextResponse.json(
+            {
+              message: "AIレビューは現在生成中です",
+              review: { id: activeReview.id, status: "processing" },
+            },
+            { status: 202 }
+          );
+        }
+        return NextResponse.json(
+          { error: "この課題のAIレビューは1回のみ利用できます" },
+          { status: 429 }
+        );
+      }
     }
 
     // AIレビューレコードをUPSERT（pending）
@@ -110,7 +129,8 @@ export async function POST(request: NextRequest) {
       const result = await generateReview(
         content.exercise_instructions,
         submissionContent,
-        submission.submission_type as "code" | "url"
+        submission.submission_type as "code" | "url",
+        content.reference_answer
       );
 
       // completed 状態で保存
