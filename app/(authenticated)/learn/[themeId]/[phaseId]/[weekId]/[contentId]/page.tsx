@@ -125,6 +125,10 @@ export default async function ContentPage({ params }: PageProps) {
                     allowedSubmissionTypes={
                       (content.allowed_submission_types as "code" | "url" | "both") ?? "code"
                     }
+                    codeLanguage={
+                      (content.code_language as "javascript" | "typescript" | "html" | "css") ??
+                      "javascript"
+                    }
                   />
                 </div>
               )}

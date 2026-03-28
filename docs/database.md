@@ -113,6 +113,7 @@ learning_phases ─1:N── learning_weeks ─1:N── learning_contents
 | reference_answer | TEXT | YES | NULL | - | 模範回答（exercise時・AIレビュー採点基準・非公開） |
 | pdf_url | TEXT | YES | NULL | - | PDFファイルURL（slide時） |
 | allowed_submission_types | VARCHAR(20) | NO | 'code' | CHECK ('code', 'url', 'both') | 許可する提出方法（exercise時） |
+| code_language | VARCHAR(20) | NO | 'javascript' | CHECK ('javascript', 'typescript', 'html', 'css') | コードエディタの言語（exercise時） |
 | display_order | INTEGER | YES | 0 | - | 表示順（昇順） |
 | is_published | BOOLEAN | YES | false | - | 公開フラグ |
 | is_deleted | BOOLEAN | YES | false | - | 論理削除フラグ |
@@ -121,12 +122,12 @@ learning_phases ─1:N── learning_weeks ─1:N── learning_contents
 
 **content_type別の利用カラム**:
 
-| content_type | video_url | text_content | exercise_instructions | reference_answer | pdf_url | allowed_submission_types |
-|:--|:--:|:--:|:--:|:--:|:--:|:--:|
-| video | 使用 | - | - | - | - | - |
-| text | - | 使用 | - | - | - | - |
-| exercise | - | - | 使用 | 使用 | - | 使用 |
-| slide | - | - | - | - | 使用 | - |
+| content_type | video_url | text_content | exercise_instructions | reference_answer | pdf_url | allowed_submission_types | code_language |
+|:--|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| video | 使用 | - | - | - | - | - | - |
+| text | - | 使用 | - | - | - | - | - |
+| exercise | - | - | 使用 | 使用 | - | 使用 | 使用 |
+| slide | - | - | - | - | 使用 | - | - |
 
 **allowed_submission_types の値**:
 
@@ -135,6 +136,15 @@ learning_phases ─1:N── learning_weeks ─1:N── learning_contents
 | `'code'` | コードのみ（提出方法の選択UI非表示） |
 | `'url'` | URLのみ（提出方法の選択UI非表示） |
 | `'both'` | コード・URL両方から選択可 |
+
+**code_language の値**:
+
+| 値 | 言語 |
+|:--|:--|
+| `'javascript'` | JavaScript / GAS（デフォルト） |
+| `'typescript'` | TypeScript |
+| `'html'` | HTML |
+| `'css'` | CSS |
 
 ---
 
@@ -315,6 +325,7 @@ user_id IN (
 | `010_seed_gas_course_contents.sql` | GAS講座コンテンツのシードデータ |
 | `011_seed_gas_exercises.sql` | GAS講座演習課題のシードデータ |
 | `012_add_allowed_submission_types.sql` | 演習コンテンツごとの許可提出方法カラム追加 |
+| `013_add_code_language.sql` | 演習コンテンツのコードエディタ言語カラム追加 |
 
 ---
 
@@ -348,3 +359,4 @@ user_id IN (
 |:--|:--|
 | 2026年2月 | 初版作成（実装に基づく） |
 | 2026年3月 | learning_contentsに `allowed_submission_types` カラム追加。マイグレーション一覧を最新化 |
+| 2026年3月 | learning_contentsに `code_language` カラム追加（コードエディタの言語設定） |

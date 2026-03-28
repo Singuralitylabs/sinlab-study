@@ -25,6 +25,14 @@ const CONTENT_TYPE_OPTIONS: { value: ContentType; label: string }[] = [
 ];
 
 type AllowedSubmissionTypes = "code" | "url" | "both";
+type CodeLanguage = "javascript" | "typescript" | "html" | "css";
+
+const CODE_LANGUAGE_OPTIONS: { value: CodeLanguage; label: string }[] = [
+  { value: "javascript", label: "JavaScript / GAS" },
+  { value: "typescript", label: "TypeScript" },
+  { value: "html", label: "HTML" },
+  { value: "css", label: "CSS" },
+];
 
 const SUBMISSION_TYPE_OPTIONS: {
   value: AllowedSubmissionTypes;
@@ -55,6 +63,9 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
   const [referenceAnswer, setReferenceAnswer] = useState(initialData?.reference_answer ?? "");
   const [allowedSubmissionTypes, setAllowedSubmissionTypes] = useState<AllowedSubmissionTypes>(
     (initialData?.allowed_submission_types as AllowedSubmissionTypes) ?? "code"
+  );
+  const [codeLanguage, setCodeLanguage] = useState<CodeLanguage>(
+    (initialData?.code_language as CodeLanguage) ?? "javascript"
   );
   const [pdfUrl, setPdfUrl] = useState(initialData?.pdf_url ?? "");
   const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
@@ -121,6 +132,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       exercise_instructions: contentType === "exercise" ? exerciseInstructions : null,
       reference_answer: contentType === "exercise" ? referenceAnswer || null : null,
       allowed_submission_types: contentType === "exercise" ? allowedSubmissionTypes : "code",
+      code_language: contentType === "exercise" ? codeLanguage : "javascript",
       pdf_url: contentType === "slide" ? pdfUrl : null,
     };
 
@@ -304,6 +316,25 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
                   placeholder="模範回答を記述してください。AIレビュー時の採点基準として使用され、受講生には表示されません。"
                   className="min-h-[200px] font-mono"
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>コード言語</Label>
+                <div className="flex gap-2">
+                  {CODE_LANGUAGE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setCodeLanguage(opt.value)}
+                      className={`rounded-lg border-2 px-3 py-2 text-sm transition-colors ${
+                        codeLanguage === opt.value
+                          ? "border-primary bg-primary/5 font-medium"
+                          : "border-border hover:border-muted-foreground"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>提出方法</Label>

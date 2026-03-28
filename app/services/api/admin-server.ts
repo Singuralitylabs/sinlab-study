@@ -452,6 +452,7 @@ export async function createContent(content: {
   exercise_instructions?: string;
   reference_answer?: string;
   allowed_submission_types?: "code" | "url" | "both";
+  code_language?: "javascript" | "typescript" | "html" | "css";
   pdf_url?: string;
   display_order?: number;
   is_published?: boolean;

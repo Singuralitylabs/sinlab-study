@@ -3,20 +3,26 @@
 import { Code, Link as LinkIcon, Loader2, Send } from "lucide-react";
 import { useState } from "react";
 import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
+import { CodeEditor, type CodeLanguage } from "@/app/components/CodeEditor";
 import type { AIReview, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 
 interface SubmissionFormProps {
   contentId: number;
   userId: number;
   allowedSubmissionTypes: "code" | "url" | "both";
+  codeLanguage: CodeLanguage;
 }
 
-export function SubmissionForm({ contentId, userId, allowedSubmissionTypes }: SubmissionFormProps) {
+export function SubmissionForm({
+  contentId,
+  userId,
+  allowedSubmissionTypes,
+  codeLanguage,
+}: SubmissionFormProps) {
   const [submissionType, setSubmissionType] = useState<SubmissionType>(
     allowedSubmissionTypes === "url" ? "url" : "code"
   );
@@ -183,13 +189,13 @@ export function SubmissionForm({ contentId, userId, allowedSubmissionTypes }: Su
         {/* 入力フィールド */}
         {submissionType === "code" ? (
           <div className="space-y-2">
-            <Label htmlFor="code">コード</Label>
-            <Textarea
-              id="code"
+            <Label>コード</Label>
+            <CodeEditor
               value={codeContent}
-              onChange={(e) => setCodeContent(e.target.value)}
-              className="font-mono min-h-[200px]"
+              onChange={setCodeContent}
+              language={codeLanguage}
               placeholder="ここにコードを貼り付けてください..."
+              minHeight="200px"
             />
           </div>
         ) : (
