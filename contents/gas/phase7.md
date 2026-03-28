@@ -26,6 +26,15 @@
 スクリプトプロパティに「API_KEY」というキーで任意の文字列を保存し、その後取得してログに出力するスクリプトを作成してください。
 
 <details>
+<summary>ヒント</summary>
+
+- `PropertiesService.getScriptProperties()` でスクリプトプロパティオブジェクトを取得します
+- `.setProperty("キー", "値")` で保存し、`.getProperty("キー")` で取得します
+- プロパティに保存した値はスクリプトを再実行しても保持されます
+
+</details>
+
+<details>
 <summary>模範回答</summary>
 
 ```javascript
@@ -49,6 +58,16 @@ function saveAndGetProperty() {
 #### 課題12-2: ダイアログの表示
 
 スプレッドシートのメニューから実行できる関数を作成し、「処理を実行しますか？」という確認ダイアログを表示してください。「OK」を押した場合は「実行しました」、「キャンセル」を押した場合は「キャンセルしました」とダイアログで表示してください。
+
+<details>
+<summary>ヒント</summary>
+
+- `SpreadsheetApp.getUi()` でUIオブジェクトを取得します
+- `ui.alert(タイトル, メッセージ, ui.ButtonSet.OK_CANCEL)` で「OK/キャンセル」ボタン付きダイアログを表示します
+- 戻り値を `ui.Button.OK` と比較してどのボタンが押されたか判定します
+- ダイアログはスプレッドシートを開いた状態でしか実行できません
+
+</details>
 
 <details>
 <summary>模範回答</summary>
@@ -77,6 +96,15 @@ function showConfirmDialog() {
 #### 課題12-3: カスタムメニューの追加
 
 スプレッドシートを開いたときに「GASツール」というカスタムメニューを追加し、その中に「データ集計」という項目を作成してください。「データ集計」をクリックすると「集計を実行します」とログに出力されるようにしてください。
+
+<details>
+<summary>ヒント</summary>
+
+- `onOpen()` 関数はスプレッドシートを開いたときに**自動実行**されます
+- `ui.createMenu("メニュー名").addItem("項目名", "実行する関数名").addToUi()` でメニューを追加します
+- `addItem` の第2引数は文字列で関数名を指定します（関数を直接渡すのではありません）
+
+</details>
 
 <details>
 <summary>模範回答</summary>

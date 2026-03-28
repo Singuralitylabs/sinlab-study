@@ -63,10 +63,13 @@ export type Database = {
       };
       learning_contents: {
         Row: {
+          allowed_submission_types: string;
+          code_language: string;
           content_type: string;
           created_at: string | null;
           display_order: number | null;
           exercise_instructions: string | null;
+          hint: string | null;
           id: number;
           is_deleted: boolean | null;
           is_published: boolean | null;
@@ -79,10 +82,13 @@ export type Database = {
           week_id: number;
         };
         Insert: {
+          allowed_submission_types?: string;
+          code_language?: string;
           content_type: string;
           created_at?: string | null;
           display_order?: number | null;
           exercise_instructions?: string | null;
+          hint?: string | null;
           id?: number;
           is_deleted?: boolean | null;
           is_published?: boolean | null;
@@ -95,10 +101,13 @@ export type Database = {
           week_id: number;
         };
         Update: {
+          allowed_submission_types?: string;
+          code_language?: string;
           content_type?: string;
           created_at?: string | null;
           display_order?: number | null;
           exercise_instructions?: string | null;
+          hint?: string | null;
           id?: number;
           is_deleted?: boolean | null;
           is_published?: boolean | null;

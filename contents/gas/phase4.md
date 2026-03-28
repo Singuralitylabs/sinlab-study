@@ -25,6 +25,14 @@ GASによるGmail送信とスプレッドシートを活用したメール配信
 自分のメールアドレス宛に件名「GASテストメール」、本文「GASからメールを送信しました。」というメールを送信するスクリプトを作成してください。
 
 <details>
+<summary>ヒント</summary>
+
+- `GmailApp.sendEmail(宛先メールアドレス, 件名, 本文)` でメールを送信します
+- 初回実行時にGmailへのアクセス許可を求めるダイアログが表示されます
+
+</details>
+
+<details>
 <summary>模範回答</summary>
 
 ```javascript
@@ -56,6 +64,15 @@ function sendTestMail() {
 ```
 
 <details>
+<summary>ヒント</summary>
+
+- 本文の改行は `\n` で表現します
+- 空行（1行空ける）は `\n\n` です
+- 文字列を複数行に分けて書くには `+` で連結するか、バッククォート `` ` `` を使ったテンプレートリテラルが便利です
+
+</details>
+
+<details>
 <summary>模範回答</summary>
 
 ```javascript
@@ -76,6 +93,15 @@ function sendFormattedMail() {
 #### 課題7-3: スプレッドシートからの一括送信
 
 スプレッドシートのA列に名前、B列にメールアドレスが入力されたリストを作成し、各人に「〇〇さん、こんにちは！」という内容のメールを一括送信するスクリプトを作成してください。
+
+<details>
+<summary>ヒント</summary>
+
+- `sheet.getRange(1, 1, lastRow, 2).getValues()` でA〜B列の全データを取得します
+- `for (const row of data)` でループし、`row[0]` が名前、`row[1]` がメールアドレスです
+- `name + "さん、こんにちは！"` のように変数を使って本文を動的に生成します
+
+</details>
 
 <details>
 <summary>模範回答</summary>

@@ -24,6 +24,15 @@
 アクティブなスプレッドシートのA1セルに「こんにちは！」、B1セルに本日の日付をそれぞれ入力するスクリプトを作成してください。
 
 <details>
+<summary>ヒント</summary>
+
+- `SpreadsheetApp.getActiveSpreadsheet().getActiveSheet()` でアクティブなシートを取得します
+- `sheet.getRange("A1").setValue(値)` でセルに値を入力します
+- 現在の日付は `new Date()` で取得できます
+
+</details>
+
+<details>
 <summary>模範回答</summary>
 
 ```javascript
@@ -44,6 +53,14 @@ function writeToCell() {
 A1セルに任意の文字列を手動で入力しておき、スクリプトでその値を取得してログに出力してください。
 
 <details>
+<summary>ヒント</summary>
+
+- `sheet.getRange("A1").getValue()` でセルの値を取得できます
+- `setValue()` で入力、`getValue()` で取得と対になっています
+
+</details>
+
+<details>
 <summary>模範回答</summary>
 
 ```javascript
@@ -62,6 +79,14 @@ function readFromCell() {
 #### 課題4-3: シートの指定
 
 スプレッドシートに「Sheet1」と「データ」の2つのシートを作成し、それぞれのシートのA1セルに異なる値を入力するスクリプトを作成してください。
+
+<details>
+<summary>ヒント</summary>
+
+- `SpreadsheetApp.getActiveSpreadsheet()` でスプレッドシートを取得し、`getSheetByName("シート名")` で名前でシートを指定します
+- スクリプト実行前に、スプレッドシート上に「Sheet1」と「データ」の2つのシートを手動で作成しておいてください
+
+</details>
 
 <details>
 <summary>模範回答</summary>
@@ -101,6 +126,15 @@ function writeToMultipleSheets() {
 A1〜C1に「名前」「年齢」「都市」、A2〜C2に自分のプロフィールデータを2次元配列を使って一括入力するスクリプトを作成してください。
 
 <details>
+<summary>ヒント</summary>
+
+- `sheet.getRange(行, 列, 行数, 列数).setValues(2次元配列)` で複数セルに一括入力できます
+- `setValues()` は `[[値1, 値2, 値3]]` のような**2次元配列**を引数に渡します
+- `getRange(1, 1, 1, 3)` は「1行目・1列目から1行・3列分」を意味します
+
+</details>
+
+<details>
 <summary>模範回答</summary>
 
 ```javascript
@@ -122,6 +156,15 @@ function writeTableData() {
 #### 課題5-2: 行の追加と削除
 
 スプレッドシートの2行目に新しい行を挿入し、その後3行目を削除するスクリプトを作成してください。各操作後にシートの状態をログで確認できるようA1の値を出力してください。
+
+<details>
+<summary>ヒント</summary>
+
+- `sheet.insertRowBefore(2)` で2行目の前に新しい行を挿入します
+- `sheet.deleteRow(3)` で3行目を削除します（行番号は1始まりです）
+- 操作の前後でA1の値をログに出力して変化を確認しましょう
+
+</details>
 
 <details>
 <summary>模範回答</summary>
@@ -147,6 +190,15 @@ function insertAndDeleteRow() {
 #### 課題5-3: シートの追加
 
 アクティブなスプレッドシートに「バックアップ」という名前のシートを新規追加し、シート名の一覧をログに出力するスクリプトを作成してください。
+
+<details>
+<summary>ヒント</summary>
+
+- `ss.insertSheet("シート名")` で新しいシートを追加します
+- `ss.getSheets()` は全シートの**配列**を返します（イテレータではありません）
+- `for...of` で配列をループし、`.getName()` でシート名を取得できます
+
+</details>
 
 <details>
 <summary>模範回答</summary>
@@ -190,6 +242,14 @@ function addSheet() {
 A列に名前が入力されたリストを用意し、データが入力されている最終行番号をログに出力するスクリプトを作成してください。
 
 <details>
+<summary>ヒント</summary>
+
+- `sheet.getLastRow()` はA列に限らず、シート内でデータが入力されている最終行番号を返します
+- データが1件もない場合は `0` を返します
+
+</details>
+
+<details>
 <summary>模範回答</summary>
 
 ```javascript
@@ -208,6 +268,15 @@ function getLastRow() {
 #### 課題6-2: データの検索
 
 A列に名前、B列に点数が入力されたリストから、点数が80点以上の行の名前をログに出力するスクリプトを作成してください。
+
+<details>
+<summary>ヒント</summary>
+
+- `sheet.getRange(1, 1, lastRow, 2).getValues()` で全データを2次元配列として取得します
+- `data[i][0]` がA列（名前）、`data[i][1]` がB列（点数）の値です
+- `for...of` でループし、点数が80以上の行だけ出力します
+
+</details>
 
 <details>
 <summary>模範回答</summary>
@@ -236,6 +305,14 @@ function findHighScorers() {
 #### 課題6-3: データの追加
 
 既存のリストの最終行の次の行に、新しいデータ（名前・点数）を追加するスクリプトを作成してください。
+
+<details>
+<summary>ヒント</summary>
+
+- `sheet.getLastRow()` で現在の最終行番号を取得し、`lastRow + 1` が追加先の行番号です
+- `sheet.getRange(lastRow + 1, 1, 1, 2).setValues([[値1, 値2]])` で2列分のデータを追加できます
+
+</details>
 
 <details>
 <summary>模範回答</summary>
