@@ -12,6 +12,7 @@ import {
   fetchContentsByWeekId,
   fetchUserProgressByContentId,
 } from "@/app/services/api/learning-server";
+import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,14 +56,19 @@ export default async function ContentPage({ params }: PageProps) {
       ? weekContents?.[currentIndex + 1]
       : null;
 
-  const [{ isCompleted }, { data: existingReview }] = await Promise.all([
-    userId
-      ? fetchUserProgressByContentId(userId, contentIdNum)
-      : Promise.resolve({ isCompleted: false }),
-    userId && content.content_type === "exercise"
-      ? fetchCompletedAIReviewByContentId(userId, contentIdNum)
-      : Promise.resolve({ data: null }),
-  ]);
+  const [{ isCompleted }, { data: existingReview }, { data: latestSubmission }] = await Promise.all(
+    [
+      userId
+        ? fetchUserProgressByContentId(userId, contentIdNum)
+        : Promise.resolve({ isCompleted: false }),
+      userId && content.content_type === "exercise"
+        ? fetchCompletedAIReviewByContentId(userId, contentIdNum)
+        : Promise.resolve({ data: null }),
+      userId && content.content_type === "exercise"
+        ? fetchLatestSubmissionByContentId(userId, contentIdNum)
+        : Promise.resolve({ data: null }),
+    ]
+  );
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -118,19 +124,58 @@ export default async function ContentPage({ params }: PageProps) {
               {userId && (
                 <div className="mt-8">
                   <Separator className="mb-6" />
-                  {existingReview && (
-                    <div className="mb-6">
-                      <div className="flex items-center gap-2 mb-2">
-                        <h3 className="text-lg font-semibold">AIレビュー結果</h3>
-                        <Badge variant="outline" className="gap-1 border-primary/40 text-primary">
-                          <Bot className="h-3 w-3" />
-                          AIレビュー済み
-                        </Badge>
+
+                  {/* 提出済み: 提出内容・模範回答・AIレビュー結果 */}
+                  {latestSubmission && (
+                    <>
+                      <div className="mb-6">
+                        <h3 className="text-lg font-semibold mb-3">提出内容</h3>
+                        {latestSubmission.submission_type === "code" ? (
+                          <pre className="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre-wrap">
+                            {latestSubmission.code_content}
+                          </pre>
+                        ) : (
+                          <p className="text-sm text-muted-foreground break-all">
+                            {latestSubmission.url}
+                          </p>
+                        )}
                       </div>
-                      <AIReviewDisplay review={existingReview} defaultExpanded={false} />
-                    </div>
+
+                      {content.reference_answer && (
+                        <div className="mb-6">
+                          <h3 className="text-lg font-semibold mb-3">模範回答</h3>
+                          <pre className="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre-wrap">
+                            {content.reference_answer}
+                          </pre>
+                        </div>
+                      )}
+
+                      {existingReview && (
+                        <div className="mb-6">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h3 className="text-lg font-semibold">AIレビュー結果</h3>
+                            <Badge
+                              variant="outline"
+                              className="gap-1 border-primary/40 text-primary"
+                            >
+                              <Bot className="h-3 w-3" />
+                              AIレビュー済み
+                            </Badge>
+                          </div>
+                          <AIReviewDisplay review={existingReview} defaultExpanded={false} />
+                        </div>
+                      )}
+
+                      <Separator className="mb-6" />
+                    </>
                   )}
-                  <h3 className="text-lg font-semibold mb-4">課題提出</h3>
+
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold">課題提出</h3>
+                    <span className="text-xs text-muted-foreground">
+                      ※ AIレビューは1コンテンツにつき1回のみ利用可能です
+                    </span>
+                  </div>
                   <SubmissionForm
                     contentId={contentIdNum}
                     userId={userId}

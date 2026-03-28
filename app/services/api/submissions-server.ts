@@ -1,5 +1,5 @@
 import type { PostgrestError } from "@supabase/supabase-js";
-import type { SubmissionWithContent, SubmissionWithUser } from "@/app/types";
+import type { Submission, SubmissionWithContent, SubmissionWithUser } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
 /**
@@ -23,6 +23,33 @@ export async function fetchSubmissionsByUserId(userId: number): Promise<{
   }
 
   return { data: data as SubmissionWithContent[], error: null };
+}
+
+/**
+ * ユーザーの特定コンテンツへの最新提出を1件取得（コンテンツページ表示用）
+ * RLS依存を避けるためadminクライアントを使用し、userIdフィルタで安全性を担保
+ */
+export async function fetchLatestSubmissionByContentId(
+  userId: number,
+  contentId: number
+): Promise<{ data: Submission | null; error: PostgrestError | null }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("submissions")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("content_id", contentId)
+    .order("submitted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("最新提出取得エラー:", error.message);
+    return { data: null, error };
+  }
+
+  return { data: data as Submission | null, error: null };
 }
 
 /**
