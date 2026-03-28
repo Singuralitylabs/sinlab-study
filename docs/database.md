@@ -111,6 +111,7 @@ learning_phases ─1:N── learning_weeks ─1:N── learning_contents
 | text_content | TEXT | YES | NULL | - | Markdownテキスト（text時） |
 | exercise_instructions | TEXT | YES | NULL | - | 演習指示文（exercise時） |
 | reference_answer | TEXT | YES | NULL | - | 模範回答（exercise時・AIレビュー採点基準・非公開） |
+| hint | TEXT | YES | NULL | - | ヒント（exercise時・受講生に公開） |
 | pdf_url | TEXT | YES | NULL | - | PDFファイルURL（slide時） |
 | allowed_submission_types | VARCHAR(20) | NO | 'code' | CHECK ('code', 'url', 'both') | 許可する提出方法（exercise時） |
 | code_language | VARCHAR(20) | NO | 'javascript' | CHECK ('javascript', 'typescript', 'html', 'css') | コードエディタの言語（exercise時） |
@@ -122,12 +123,12 @@ learning_phases ─1:N── learning_weeks ─1:N── learning_contents
 
 **content_type別の利用カラム**:
 
-| content_type | video_url | text_content | exercise_instructions | reference_answer | pdf_url | allowed_submission_types | code_language |
-|:--|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
-| video | 使用 | - | - | - | - | - | - |
-| text | - | 使用 | - | - | - | - | - |
-| exercise | - | - | 使用 | 使用 | - | 使用 | 使用 |
-| slide | - | - | - | - | 使用 | - | - |
+| content_type | video_url | text_content | exercise_instructions | reference_answer | hint | pdf_url | allowed_submission_types | code_language |
+|:--|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| video | 使用 | - | - | - | - | - | - | - |
+| text | - | 使用 | - | - | - | - | - | - |
+| exercise | - | - | 使用 | 使用 | 使用 | - | 使用 | 使用 |
+| slide | - | - | - | - | - | 使用 | - | - |
 
 **allowed_submission_types の値**:
 
@@ -326,6 +327,8 @@ user_id IN (
 | `011_seed_gas_exercises.sql` | GAS講座演習課題のシードデータ |
 | `012_add_allowed_submission_types.sql` | 演習コンテンツごとの許可提出方法カラム追加 |
 | `013_add_code_language.sql` | 演習コンテンツのコードエディタ言語カラム追加 |
+| `014_add_hint_column.sql` | 演習コンテンツのヒントカラム追加 |
+| `015_seed_gas_hints.sql` | GAS講座全演習課題へのヒントデータ投入 |
 
 ---
 
@@ -360,3 +363,4 @@ user_id IN (
 | 2026年2月 | 初版作成（実装に基づく） |
 | 2026年3月 | learning_contentsに `allowed_submission_types` カラム追加。マイグレーション一覧を最新化 |
 | 2026年3月 | learning_contentsに `code_language` カラム追加（コードエディタの言語設定） |
+| 2026年3月 | learning_contentsに `hint` カラム追加（演習コンテンツへのヒント表示機能） |
