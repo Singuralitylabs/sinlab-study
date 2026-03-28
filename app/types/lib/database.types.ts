@@ -63,6 +63,7 @@ export type Database = {
       };
       learning_contents: {
         Row: {
+          allowed_submission_types: string;
           content_type: string;
           created_at: string | null;
           display_order: number | null;
@@ -79,6 +80,7 @@ export type Database = {
           week_id: number;
         };
         Insert: {
+          allowed_submission_types?: string;
           content_type: string;
           created_at?: string | null;
           display_order?: number | null;
@@ -95,6 +97,7 @@ export type Database = {
           week_id: number;
         };
         Update: {
+          allowed_submission_types?: string;
           content_type?: string;
           created_at?: string | null;
           display_order?: number | null;

@@ -13,10 +13,13 @@ import { Textarea } from "@/components/ui/textarea";
 interface SubmissionFormProps {
   contentId: number;
   userId: number;
+  allowedSubmissionTypes: "code" | "url" | "both";
 }
 
-export function SubmissionForm({ contentId, userId }: SubmissionFormProps) {
-  const [submissionType, setSubmissionType] = useState<SubmissionType>("code");
+export function SubmissionForm({ contentId, userId, allowedSubmissionTypes }: SubmissionFormProps) {
+  const [submissionType, setSubmissionType] = useState<SubmissionType>(
+    allowedSubmissionTypes === "url" ? "url" : "code"
+  );
   const [codeContent, setCodeContent] = useState("");
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -147,33 +150,35 @@ export function SubmissionForm({ contentId, userId }: SubmissionFormProps) {
   return (
     <div className="space-y-4">
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* 提出タイプ選択 */}
-        <div className="flex gap-4">
-          <button
-            type="button"
-            onClick={() => setSubmissionType("code")}
-            className={`flex-1 p-3 rounded-lg border-2 transition-colors ${
-              submissionType === "code"
-                ? "border-primary bg-primary/5"
-                : "border-border hover:border-muted-foreground"
-            }`}
-          >
-            <Code className="h-5 w-5 mx-auto mb-1" />
-            <span className="text-sm">コードで提出</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setSubmissionType("url")}
-            className={`flex-1 p-3 rounded-lg border-2 transition-colors ${
-              submissionType === "url"
-                ? "border-primary bg-primary/5"
-                : "border-border hover:border-muted-foreground"
-            }`}
-          >
-            <LinkIcon className="h-5 w-5 mx-auto mb-1" />
-            <span className="text-sm">URLで提出</span>
-          </button>
-        </div>
+        {/* 提出タイプ選択（both のときのみ表示） */}
+        {allowedSubmissionTypes === "both" && (
+          <div className="flex gap-4">
+            <button
+              type="button"
+              onClick={() => setSubmissionType("code")}
+              className={`flex-1 p-3 rounded-lg border-2 transition-colors ${
+                submissionType === "code"
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:border-muted-foreground"
+              }`}
+            >
+              <Code className="h-5 w-5 mx-auto mb-1" />
+              <span className="text-sm">コードで提出</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSubmissionType("url")}
+              className={`flex-1 p-3 rounded-lg border-2 transition-colors ${
+                submissionType === "url"
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:border-muted-foreground"
+              }`}
+            >
+              <LinkIcon className="h-5 w-5 mx-auto mb-1" />
+              <span className="text-sm">URLで提出</span>
+            </button>
+          </div>
+        )}
 
         {/* 入力フィールド */}
         {submissionType === "code" ? (

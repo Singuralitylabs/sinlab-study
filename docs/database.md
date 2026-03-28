@@ -106,10 +106,13 @@ learning_phases ─1:N── learning_weeks ─1:N── learning_contents
 | id | SERIAL | NO | auto increment | PK | コンテンツID |
 | week_id | INTEGER | NO | - | FK → learning_weeks(id) ON DELETE CASCADE | 所属週 |
 | title | VARCHAR(255) | NO | - | NOT NULL | タイトル |
-| content_type | VARCHAR(20) | NO | - | CHECK ('video', 'text', 'exercise') | コンテンツ種別 |
+| content_type | VARCHAR(20) | NO | - | CHECK ('video', 'text', 'exercise', 'slide') | コンテンツ種別 |
 | video_url | TEXT | YES | NULL | - | YouTube URL（video時） |
 | text_content | TEXT | YES | NULL | - | Markdownテキスト（text時） |
 | exercise_instructions | TEXT | YES | NULL | - | 演習指示文（exercise時） |
+| reference_answer | TEXT | YES | NULL | - | 模範回答（exercise時・AIレビュー採点基準・非公開） |
+| pdf_url | TEXT | YES | NULL | - | PDFファイルURL（slide時） |
+| allowed_submission_types | VARCHAR(20) | NO | 'code' | CHECK ('code', 'url', 'both') | 許可する提出方法（exercise時） |
 | display_order | INTEGER | YES | 0 | - | 表示順（昇順） |
 | is_published | BOOLEAN | YES | false | - | 公開フラグ |
 | is_deleted | BOOLEAN | YES | false | - | 論理削除フラグ |
@@ -118,11 +121,20 @@ learning_phases ─1:N── learning_weeks ─1:N── learning_contents
 
 **content_type別の利用カラム**:
 
-| content_type | video_url | text_content | exercise_instructions |
-|:--|:--:|:--:|:--:|
-| video | 使用 | - | - |
-| text | - | 使用 | - |
-| exercise | - | - | 使用 |
+| content_type | video_url | text_content | exercise_instructions | reference_answer | pdf_url | allowed_submission_types |
+|:--|:--:|:--:|:--:|:--:|:--:|:--:|
+| video | 使用 | - | - | - | - | - |
+| text | - | 使用 | - | - | - | - |
+| exercise | - | - | 使用 | 使用 | - | 使用 |
+| slide | - | - | - | - | 使用 | - |
+
+**allowed_submission_types の値**:
+
+| 値 | 動作 |
+|:--|:--|
+| `'code'` | コードのみ（提出方法の選択UI非表示） |
+| `'url'` | URLのみ（提出方法の選択UI非表示） |
+| `'both'` | コード・URL両方から選択可 |
 
 ---
 
@@ -294,6 +306,15 @@ user_id IN (
 | `001_create_learning_tables.sql` | テーブル・インデックス・トリガーの作成 |
 | `002_rls_policies.sql` | RLSの有効化とポリシー定義 |
 | `003_sample_data.sql` | 開発用サンプルデータの投入 |
+| `004_add_learning_themes.sql` | 学習テーマテーブルの追加 |
+| `005_learning_themes_rls.sql` | 学習テーマのRLSポリシー定義 |
+| `006_instructor_rls_policy.sql` | maintainerロールのRLSポリシー追加 |
+| `007_create_ai_reviews.sql` | AIレビューテーブルの作成 |
+| `008_add_slide_content_type.sql` | コンテンツ種別にslideを追加 |
+| `009_add_reference_answer.sql` | 模範回答カラムの追加 |
+| `010_seed_gas_course_contents.sql` | GAS講座コンテンツのシードデータ |
+| `011_seed_gas_exercises.sql` | GAS講座演習課題のシードデータ |
+| `012_add_allowed_submission_types.sql` | 演習コンテンツごとの許可提出方法カラム追加 |
 
 ---
 
@@ -326,3 +347,4 @@ user_id IN (
 | 日付 | 内容 |
 |:--|:--|
 | 2026年2月 | 初版作成（実装に基づく） |
+| 2026年3月 | learning_contentsに `allowed_submission_types` カラム追加。マイグレーション一覧を最新化 |

@@ -24,6 +24,22 @@ const CONTENT_TYPE_OPTIONS: { value: ContentType; label: string }[] = [
   { value: "exercise", label: "演習" },
 ];
 
+type AllowedSubmissionTypes = "code" | "url" | "both";
+
+const SUBMISSION_TYPE_OPTIONS: {
+  value: AllowedSubmissionTypes;
+  label: string;
+  description: string;
+}[] = [
+  { value: "code", label: "コードのみ", description: "テキストエリアにコードを貼り付けて提出" },
+  {
+    value: "url",
+    label: "URLのみ",
+    description: "スプレッドシート・デプロイ済みアプリ等のURLで提出",
+  },
+  { value: "both", label: "コード・URL選択", description: "受講生がどちらかを選択して提出" },
+];
+
 export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -37,6 +53,9 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
     initialData?.exercise_instructions ?? ""
   );
   const [referenceAnswer, setReferenceAnswer] = useState(initialData?.reference_answer ?? "");
+  const [allowedSubmissionTypes, setAllowedSubmissionTypes] = useState<AllowedSubmissionTypes>(
+    (initialData?.allowed_submission_types as AllowedSubmissionTypes) ?? "code"
+  );
   const [pdfUrl, setPdfUrl] = useState(initialData?.pdf_url ?? "");
   const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
@@ -101,6 +120,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       text_content: contentType === "text" ? textContent : null,
       exercise_instructions: contentType === "exercise" ? exerciseInstructions : null,
       reference_answer: contentType === "exercise" ? referenceAnswer || null : null,
+      allowed_submission_types: contentType === "exercise" ? allowedSubmissionTypes : "code",
       pdf_url: contentType === "slide" ? pdfUrl : null,
     };
 
@@ -284,6 +304,26 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
                   placeholder="模範回答を記述してください。AIレビュー時の採点基準として使用され、受講生には表示されません。"
                   className="min-h-[200px] font-mono"
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>提出方法</Label>
+                <div className="flex gap-2">
+                  {SUBMISSION_TYPE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setAllowedSubmissionTypes(opt.value)}
+                      className={`flex-1 rounded-lg border-2 px-3 py-2 text-left text-sm transition-colors ${
+                        allowedSubmissionTypes === opt.value
+                          ? "border-primary bg-primary/5 font-medium"
+                          : "border-border hover:border-muted-foreground"
+                      }`}
+                    >
+                      <div>{opt.label}</div>
+                      <div className="mt-0.5 text-xs text-muted-foreground">{opt.description}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
             </>
           )}

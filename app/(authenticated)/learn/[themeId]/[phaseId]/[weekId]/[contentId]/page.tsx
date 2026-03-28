@@ -119,7 +119,13 @@ export default async function ContentPage({ params }: PageProps) {
                     </div>
                   )}
                   <h3 className="text-lg font-semibold mb-4">課題提出</h3>
-                  <SubmissionForm contentId={contentIdNum} userId={userId} />
+                  <SubmissionForm
+                    contentId={contentIdNum}
+                    userId={userId}
+                    allowedSubmissionTypes={
+                      (content.allowed_submission_types as "code" | "url" | "both") ?? "code"
+                    }
+                  />
                 </div>
               )}
             </div>
