@@ -26,8 +26,8 @@ BEGIN
   -- ====================================================
   SELECT id INTO v_theme_id FROM learning_themes WHERE name = 'GAS学習';
   IF v_theme_id IS NULL THEN
-    INSERT INTO learning_themes (name, description, display_order, is_published)
-    VALUES ('GAS学習', 'Google Apps Scriptを使った自動化と開発の基礎を学びます', 1, true)
+    INSERT INTO learning_themes (name, description, display_order, is_published, image_url)
+    VALUES ('GAS学習', 'Google Apps Scriptを使った自動化と開発の基礎を学びます', 1, true, '/images/themes/gas_icon.png')
     RETURNING id INTO v_theme_id;
   END IF;
 
