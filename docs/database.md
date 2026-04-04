@@ -21,36 +21,101 @@
 
 ---
 
-## 2. ER図（概念）
+## 2. ER図
 
-```
-users
-  │
-  ├──< user_progress >── learning_contents
-  │                            │
-  └──< submissions >───────────┘
-        │                      │
-        └──< ai_reviews        │
-                        learning_weeks
-                               │
-                        learning_phases
-                               │
-                        learning_themes
-```
+```mermaid
+erDiagram
+    learning_themes ||--o{ learning_phases : "1:N"
+    learning_phases ||--o{ learning_weeks : "1:N"
+    learning_weeks ||--o{ learning_contents : "1:N"
+    learning_contents ||--o{ user_progress : "1:N"
+    learning_contents ||--o{ submissions : "1:N"
+    users ||--o{ user_progress : "1:N"
+    users ||--o{ submissions : "1:N"
+    submissions ||--o| ai_reviews : "1:1"
 
-### テーブル関連図
-
-```
-learning_themes ─1:N── learning_phases ─1:N── learning_weeks ─1:N── learning_contents
-                                                                            │
-                                                                     ┌──────┴──────┐
-                                                                     │             │
-                                                               user_progress   submissions
-                                                                     │             │
-                                                                     └──────┬──────┘
-                                                                            │
-                                                                          users
-                                                                    submissions ─1:1── ai_reviews
+    learning_themes {
+        serial id PK
+        varchar name
+        text description
+        text image_url
+        int display_order
+        bool is_published
+        bool is_deleted
+    }
+    learning_phases {
+        serial id PK
+        int theme_id FK
+        varchar name
+        text description
+        int display_order
+        bool is_published
+        bool is_deleted
+    }
+    learning_weeks {
+        serial id PK
+        int phase_id FK
+        varchar name
+        text description
+        int display_order
+        bool is_published
+        bool is_deleted
+    }
+    learning_contents {
+        serial id PK
+        int week_id FK
+        varchar title
+        varchar content_type
+        text video_url
+        text text_content
+        text exercise_instructions
+        text reference_answer
+        text hint
+        text pdf_url
+        varchar allowed_submission_types
+        varchar code_language
+        int display_order
+        bool is_published
+        bool is_deleted
+    }
+    users {
+        serial id PK
+        uuid auth_id
+        text email
+        text display_name
+        text avatar_url
+        text role
+        text status
+        bool is_deleted
+    }
+    user_progress {
+        serial id PK
+        int user_id FK
+        int content_id FK
+        bool is_completed
+        timestamptz completed_at
+    }
+    submissions {
+        serial id PK
+        int user_id FK
+        int content_id FK
+        varchar submission_type
+        text code_content
+        text url
+        timestamptz submitted_at
+    }
+    ai_reviews {
+        serial id PK
+        int submission_id FK
+        varchar status
+        text review_content
+        int overall_score
+        varchar model_used
+        int prompt_tokens
+        int completion_tokens
+        text error_message
+        timestamptz reviewed_at
+    }
 ```
 
 ---
