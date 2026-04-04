@@ -1,6 +1,7 @@
 "use client";
 
 import { BookOpen, ClipboardList, House, LogOut, Menu, Settings, UserCog } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -135,7 +136,8 @@ export function SideNav({ isAdmin, isInstructor }: { isAdmin: boolean; isInstruc
                 onClick={() => setOpen(false)}
                 className="text-lg font-bold flex items-center gap-2"
               >
-                Sinlab Skillup
+                <Image src="/icon.png" alt="Sinlab Study" width={24} height={24} />
+                Sinlab Study
               </Link>
             </SheetTitle>
           </SheetHeader>
@@ -149,7 +151,8 @@ export function SideNav({ isAdmin, isInstructor }: { isAdmin: boolean; isInstruc
       <div className="hidden sm:flex h-screen w-64 flex-col fixed left-0 top-0 border-r border-sidebar-border bg-sidebar">
         <div className="px-6 py-5 border-b border-sidebar-border">
           <Link href="/" className="text-xl font-bold flex items-center gap-2">
-            Sinlab Skillup
+            <Image src="/icon.png" alt="Sinlab Study" width={28} height={28} />
+            Sinlab Study
           </Link>
         </div>
         <div className="flex flex-col flex-1 pt-2">
