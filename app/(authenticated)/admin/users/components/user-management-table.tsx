@@ -76,6 +76,29 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
     }
   };
 
+  const handleRoleChange = async (userId: number, role: UserRoleType) => {
+    setLoading(userId, true);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, action: "change_role", role }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || "ロール変更に失敗しました");
+        return;
+      }
+
+      router.refresh();
+    } catch {
+      alert("エラーが発生しました");
+    } finally {
+      setLoading(userId, false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* フィルター */}
@@ -130,6 +153,7 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
               filteredUsers.map((user) => {
                 const statusInfo = STATUS_LABELS[user.status];
                 const isLoading = loadingUserIds.has(user.id);
+                const isAdmin = user.role === USER_ROLE.ADMIN;
 
                 return (
                   <tr key={user.id} className="border-b last:border-b-0">
@@ -139,7 +163,27 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
                         <p className="text-xs text-muted-foreground">{user.email}</p>
                       </div>
                     </td>
-                    <td className="px-4 py-3">{ROLE_LABELS[user.role] || user.role}</td>
+                    <td className="px-4 py-3">
+                      {isLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : isAdmin ? (
+                        <span className="text-muted-foreground">{ROLE_LABELS[user.role]}</span>
+                      ) : (
+                        <select
+                          value={user.role}
+                          onChange={(e) =>
+                            handleRoleChange(user.id, e.target.value as UserRoleType)
+                          }
+                          className="h-8 w-32 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                        >
+                          <option value={USER_ROLE.MEMBER}>{ROLE_LABELS[USER_ROLE.MEMBER]}</option>
+                          <option value={USER_ROLE.MAINTAINER}>
+                            {ROLE_LABELS[USER_ROLE.MAINTAINER]}
+                          </option>
+                          <option value={USER_ROLE.ADMIN}>{ROLE_LABELS[USER_ROLE.ADMIN]}</option>
+                        </select>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
                     </td>
@@ -167,7 +211,7 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
                           )}
                           {(user.status === USER_STATUS.PENDING ||
                             user.status === USER_STATUS.ACTIVE) &&
-                            user.role !== USER_ROLE.ADMIN && (
+                            !isAdmin && (
                               <Button
                                 size="sm"
                                 variant="outline"

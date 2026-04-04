@@ -506,7 +506,7 @@ export async function deleteContent(id: number): Promise<{ error: PostgrestError
 }
 
 // =====================================================
-// ユーザー管理（承認・却下）
+// ユーザー管理（承認・却下・ロール変更）
 // =====================================================
 
 export async function fetchAllUsers(): Promise<{
@@ -555,6 +555,25 @@ export async function rejectUser(userId: number): Promise<{ error: PostgrestErro
 
   if (error) {
     console.error("ユーザー却下エラー:", error.message);
+    return { error };
+  }
+
+  return { error: null };
+}
+
+export async function changeUserRole(
+  userId: number,
+  role: "member" | "maintainer" | "admin"
+): Promise<{ error: PostgrestError | null }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { error } = await supabase
+    .from("users")
+    .update({ role, updated_at: new Date().toISOString() })
+    .eq("id", userId);
+
+  if (error) {
+    console.error("ユーザーロール変更エラー:", error.message);
     return { error };
   }
 
