@@ -21,14 +21,18 @@
 |:--|:--|
 | フロントエンド | Next.js 16.1.6 (App Router, Turbopack) |
 | UI フレームワーク | React 19.2.3 |
+| UI コンポーネント | Shadcn/UI |
 | スタイリング | Tailwind CSS 4 + @tailwindcss/typography |
 | 言語 | TypeScript 5 |
 | ランタイム / パッケージマネージャー | Bun |
 | コード品質 | Biome 2.3.14 (リンター + フォーマッター) |
-| バックエンド / DB / 認証 | Supabase (PostgreSQL + Auth + RLS) |
+| バックエンド / DB / 認証 | Supabase (PostgreSQL + Auth + RLS + Storage) |
+| AI | Google Gemini API (@google/generative-ai) |
+| コードエディタ | CodeMirror 6（@uiw/react-codemirror） |
 | アイコン | Lucide React |
 | Markdown表示 | react-markdown + remark-gfm |
 | 動画埋め込み | react-youtube |
+| PDF表示 | react-pdf |
 | XSS対策 | isomorphic-dompurify |
 | ホスティング | Vercel |
 | 運用コスト | 無料枠で運用（初期） |
@@ -86,13 +90,15 @@
 
 ### 3.2 学習コンテンツ配信
 
-#### コンテンツ構成（3階層）
+#### コンテンツ構成（4階層）
 ```
-Phase（例：Phase 1 - GAS基礎）
-  └── Week（例：Week 1 - はじめの一歩）
-        ├── 動画教材（複数）
-        ├── テキスト教材（複数）
-        └── 演習課題（複数）
+Theme（例：GAS学習）
+  └── Phase（例：Phase 1 - GAS基礎）
+        └── Week（例：Week 1 - はじめの一歩）
+              ├── 動画教材（複数）
+              ├── テキスト教材（複数）
+              ├── スライド（複数）
+              └── 演習課題（複数）
 ```
 
 #### コンテンツ種別
@@ -100,6 +106,7 @@ Phase（例：Phase 1 - GAS基礎）
 |:--|:--|
 | 動画（video） | YouTubeの限定公開動画を埋め込み表示 |
 | テキスト（text） | Markdown形式で記述・表示（GFM対応、XSSサニタイズ） |
+| スライド（slide） | PDFファイルをブラウザ上に表示（Supabase Storage経由） |
 | 演習（exercise） | Markdown形式の演習指示を表示、課題提出フォームと連携 |
 
 #### コンテンツ表示制御
@@ -121,9 +128,16 @@ Phase（例：Phase 1 - GAS基礎）
 - 点数・合否判定は行わない
 - 提出期限は目安のみ（強制なし）
 
-### 3.5 管理機能
-- **管理ダッシュボード**: フェーズ数、週数、コンテンツ数、受講生数、提出数の統計表示
-- **コンテンツ管理**: Phase / Week / コンテンツのCRUD操作
+### 3.5 AIレビュー機能
+- 演習コンテンツへのコード提出に対して、Gemini APIによる自動レビューを実施
+- レビューはコンテンツの演習指示・模範回答を参照して採点・フィードバックを生成
+- レビュー結果（`ai_reviews` テーブル）は提出履歴画面で受講生が確認可能
+- レビューのステータス管理: `pending` → `processing` → `completed` / `failed`
+
+### 3.6 管理機能
+- **管理ダッシュボード**: テーマ数、フェーズ数、週数、コンテンツ数、受講生数、提出数の統計表示
+- **テーマ管理**: Theme の CRUD操作（最上位カテゴリ、サムネイル画像設定可）
+- **コンテンツ管理**: Phase / Week / コンテンツのCRUD操作（PDFスライドのアップロード対応）
 - **受講生管理**: 全受講生の進捗一覧、最終アクティビティ追跡
 - **提出管理**: 全受講生の提出一覧表示
 
@@ -136,22 +150,32 @@ Phase（例：Phase 1 - GAS基礎）
 | パス | 画面名 | 概要 |
 |:--|:--|:--|
 | `/` | ダッシュボード | 全体進捗率、Phase別進捗バー、学習への導線 |
-| `/learn` | Phase一覧 | 公開Phaseの一覧表示 |
-| `/learn/[phaseId]` | Week一覧 | Phase内のWeek一覧、進捗表示 |
-| `/learn/[phaseId]/[weekId]` | コンテンツ一覧 | Week内のコンテンツ一覧、進捗表示 |
-| `/learn/[phaseId]/[weekId]/[contentId]` | コンテンツ詳細 | 動画/テキスト/演習の表示、完了ボタン、課題提出 |
-| `/submissions` | 提出履歴 | 自分の提出済み課題一覧 |
+| `/learn` | テーマ一覧 | 公開Themeのカード一覧 |
+| `/learn/[themeId]` | Phase一覧 | Theme内のPhase一覧、進捗表示 |
+| `/learn/[themeId]/[phaseId]` | Week一覧 | Phase内のWeek一覧、進捗表示 |
+| `/learn/[themeId]/[phaseId]/[weekId]` | コンテンツ一覧 | Week内のコンテンツ一覧、進捗表示 |
+| `/learn/[themeId]/[phaseId]/[weekId]/[contentId]` | コンテンツ詳細 | 動画/テキスト/スライド/演習の表示、完了ボタン、課題提出 |
+| `/submissions` | 提出履歴 | 自分の提出済み課題一覧（AIレビュー結果表示含む） |
 
-### 4.2 管理者向け画面
+### 4.2 管理・講師向け画面（`/manage`）
+
+admin と maintainer（講師）が共通でアクセス可能。`/admin/*` へのアクセスは `/manage/*` にリダイレクトされる。
 
 | パス | 画面名 | 概要 |
 |:--|:--|:--|
-| `/admin` | 管理ダッシュボード | 統計サマリー |
-| `/admin/students` | 受講生一覧 | 全受講生の進捗率、最終アクティビティ |
-| `/admin/submissions` | 提出管理 | 全提出一覧 |
-| `/admin/phases` | フェーズ管理 | PhaseのCRUD |
-| `/admin/weeks` | 週管理 | WeekのCRUD |
-| `/admin/contents` | コンテンツ管理 | コンテンツのCRUD |
+| `/manage` | 管理ダッシュボード | 統計サマリー、最近の提出一覧 |
+| `/manage/themes` | テーマ管理 | ThemeのCRUD（サムネイル画像設定含む） |
+| `/manage/phases` | フェーズ管理 | PhaseのCRUD |
+| `/manage/weeks` | 週管理 | WeekのCRUD |
+| `/manage/contents` | コンテンツ管理 | コンテンツのCRUD（PDFスライドアップロード含む） |
+| `/manage/students` | 受講生一覧 | 全受講生の進捗率、最終アクティビティ |
+| `/manage/submissions` | 提出管理 | 全提出一覧 |
+
+### 4.3 管理者専用画面
+
+| パス | 画面名 | 概要 |
+|:--|:--|:--|
+| `/admin/users` | ユーザー管理 | ユーザー一覧、承認・却下・ロール変更操作 |
 
 ---
 
@@ -187,6 +211,8 @@ Phase（例：Phase 1 - GAS基礎）
 | 連携先 | 用途 | 状態 |
 |:--|:--|:--|
 | YouTube | 動画教材の埋め込み | 実装済み |
+| Google Gemini API | 演習提出コードの自動AIレビュー | 実装済み |
+| Supabase Storage | PDFスライドファイルのホスティング | 実装済み |
 
 ---
 
@@ -229,3 +255,4 @@ Phase（例：Phase 1 - GAS基礎）
 | 2026年3月 | 認証方針を独立認証方式に変更。認証設計書・実装ワークフローへの参照を追加。認証・セキュリティ・外部連携の記述を更新 |
 | 2026年3月 | 課題提出の提出方法をコンテンツ別に設定可能にする要件を追加 |
 | 2026年4月 | ユーザー管理画面にロール変更機能を追加 |
+| 2026年4月 | コンテンツ階層に learning_themes（テーマ）を追加し4階層構造に変更。管理ルートを /manage に移行。AIレビュー機能・PDFスライド対応を追加。技術スタック・画面一覧・外部連携を更新 |

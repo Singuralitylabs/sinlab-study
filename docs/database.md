@@ -29,37 +29,63 @@ users
   ├──< user_progress >── learning_contents
   │                            │
   └──< submissions >───────────┘
-                               │
+        │                      │
+        └──< ai_reviews        │
                         learning_weeks
                                │
                         learning_phases
+                               │
+                        learning_themes
 ```
 
 ### テーブル関連図
 
 ```
-learning_phases ─1:N── learning_weeks ─1:N── learning_contents
-                                                  │
-                                           ┌──────┴──────┐
-                                           │             │
-                                     user_progress   submissions
-                                           │             │
-                                           └──────┬──────┘
-                                                  │
-                                                users
+learning_themes ─1:N── learning_phases ─1:N── learning_weeks ─1:N── learning_contents
+                                                                            │
+                                                                     ┌──────┴──────┐
+                                                                     │             │
+                                                               user_progress   submissions
+                                                                     │             │
+                                                                     └──────┬──────┘
+                                                                            │
+                                                                          users
+                                                                    submissions ─1:1── ai_reviews
 ```
 
 ---
 
 ## 3. テーブル定義
 
-### 3.1 learning_phases（学習フェーズ）
+### 3.1 learning_themes（学習テーマ）
 
-学習カリキュラムの最上位階層。Phase単位で学習内容をグループ化する。
+学習カリキュラムの最上位カテゴリ。複数の学習フェーズをまとめるテーマ（例：GAS学習、Webアプリ開発）。
+
+| カラム | 型 | NULL | デフォルト | 制約 | 説明 |
+|:--|:--|:--:|:--|:--|:--|
+| id | SERIAL | NO | auto increment | PK | テーマID |
+| name | VARCHAR(255) | NO | - | NOT NULL | テーマ名 |
+| description | TEXT | YES | NULL | - | 説明文 |
+| image_url | TEXT | YES | NULL | - | サムネイル画像URL |
+| display_order | INTEGER | YES | 0 | - | 表示順（昇順） |
+| is_published | BOOLEAN | YES | false | - | 公開フラグ |
+| is_deleted | BOOLEAN | YES | false | - | 論理削除フラグ |
+| created_at | TIMESTAMPTZ | YES | NOW() | - | 作成日時 |
+| updated_at | TIMESTAMPTZ | YES | NOW() | トリガーで自動更新 | 更新日時 |
+
+**サンプルデータ例**:
+- GAS学習（Google Apps Scriptを使った自動化と開発の基礎）
+
+---
+
+### 3.2 learning_phases（学習フェーズ）
+
+テーマ配下の学習フェーズ。Phase単位で学習内容をグループ化する。
 
 | カラム | 型 | NULL | デフォルト | 制約 | 説明 |
 |:--|:--|:--:|:--|:--|:--|
 | id | SERIAL | NO | auto increment | PK | フェーズID |
+| theme_id | INTEGER | NO | - | FK → learning_themes(id) ON DELETE CASCADE | 所属テーマ |
 | name | VARCHAR(255) | NO | - | NOT NULL | フェーズ名 |
 | description | TEXT | YES | NULL | - | 説明文 |
 | display_order | INTEGER | YES | 0 | - | 表示順（昇順） |
@@ -75,7 +101,7 @@ learning_phases ─1:N── learning_weeks ─1:N── learning_contents
 
 ---
 
-### 3.2 learning_weeks（学習週）
+### 3.3 learning_weeks（学習週）
 
 フェーズ内の週単位グループ。Weekごとに学習コンテンツをまとめる。
 
@@ -97,9 +123,9 @@ learning_phases ─1:N── learning_weeks ─1:N── learning_contents
 
 ---
 
-### 3.3 learning_contents（学習コンテンツ）
+### 3.4 learning_contents（学習コンテンツ）
 
-個別の学習教材。動画・テキスト・演習の3タイプをサポートする。
+個別の学習教材。動画・テキスト・スライド・演習の4タイプをサポートする。
 
 | カラム | 型 | NULL | デフォルト | 制約 | 説明 |
 |:--|:--|:--:|:--|:--|:--|
@@ -149,7 +175,7 @@ learning_phases ─1:N── learning_weeks ─1:N── learning_contents
 
 ---
 
-### 3.4 user_progress（学習進捗）
+### 3.5 user_progress（学習進捗）
 
 受講生のコンテンツ完了状態を管理する。
 
@@ -168,7 +194,7 @@ learning_phases ─1:N── learning_weeks ─1:N── learning_contents
 
 ---
 
-### 3.5 submissions（課題提出）
+### 3.6 submissions（課題提出）
 
 演習課題に対する受講生の提出データを管理する。
 
@@ -194,7 +220,38 @@ learning_phases ─1:N── learning_weeks ─1:N── learning_contents
 
 ---
 
-### 3.6 users（ユーザー）
+### 3.7 ai_reviews（AIレビュー）
+
+演習課題の提出に対するGemini APIによる自動レビュー結果を管理する。
+
+| カラム | 型 | NULL | デフォルト | 制約 | 説明 |
+|:--|:--|:--:|:--|:--|:--|
+| id | SERIAL | NO | auto increment | PK | レビューID |
+| submission_id | INTEGER | NO | - | FK → submissions(id) ON DELETE CASCADE, UNIQUE | 紐づく提出ID |
+| status | VARCHAR(20) | NO | 'pending' | CHECK ('pending', 'processing', 'completed', 'failed') | レビューステータス |
+| review_content | TEXT | YES | NULL | - | レビュー本文 |
+| overall_score | INTEGER | YES | NULL | CHECK (0 ≤ value ≤ 100) | 総合スコア（0〜100） |
+| model_used | VARCHAR(100) | YES | NULL | - | 使用したGeminiモデル名 |
+| prompt_tokens | INTEGER | YES | NULL | - | プロンプトトークン数 |
+| completion_tokens | INTEGER | YES | NULL | - | 生成トークン数 |
+| error_message | TEXT | YES | NULL | - | エラー詳細（failed時） |
+| reviewed_at | TIMESTAMPTZ | YES | NULL | - | レビュー完了日時 |
+| created_at | TIMESTAMPTZ | NO | NOW() | - | 作成日時 |
+| updated_at | TIMESTAMPTZ | NO | NOW() | トリガーで自動更新 | 更新日時 |
+
+**ステータス遷移**: `pending` → `processing` → `completed` / `failed`
+
+**制約**:
+- `submission_id` に UNIQUE 制約（1提出につき1レビュー）
+- レビュー再実行時は既存レコードを upsert で更新
+
+**アクセス制御**:
+- 受講生: 自分の提出に紐づくレビューのみ閲覧可能（RLS）
+- admin / maintainer: 全レビューの閲覧・操作可能
+
+---
+
+### 3.8 users（ユーザー）
 
 本サービスの独自Supabaseプロジェクトで管理する。初回Googleログイン時にOAuthコールバックで自動作成される（`status=pending`, `role=member`）。管理者が承認後、`status=active` に変更することでサービスへのアクセスが可能になる。
 
@@ -218,12 +275,14 @@ learning_phases ─1:N── learning_weeks ─1:N── learning_contents
 
 | インデックス名 | テーブル | 対象カラム | 用途 |
 |:--|:--|:--|:--|
+| idx_learning_phases_theme_id | learning_phases | theme_id | テーマ内のフェーズ検索 |
 | idx_learning_weeks_phase_id | learning_weeks | phase_id | フェーズ内の週検索 |
 | idx_learning_contents_week_id | learning_contents | week_id | 週内のコンテンツ検索 |
 | idx_user_progress_user_id | user_progress | user_id | ユーザー別の進捗検索 |
 | idx_user_progress_content_id | user_progress | content_id | コンテンツ別の進捗検索 |
 | idx_submissions_user_id | submissions | user_id | ユーザー別の提出検索 |
 | idx_submissions_content_id | submissions | content_id | コンテンツ別の提出検索 |
+| idx_ai_reviews_status | ai_reviews | status | ステータス別のレビュー検索 |
 
 ---
 
@@ -248,9 +307,11 @@ $$ language 'plpgsql';
 
 | トリガー名 | テーブル |
 |:--|:--|
+| update_learning_themes_updated_at | learning_themes |
 | update_learning_phases_updated_at | learning_phases |
 | update_learning_weeks_updated_at | learning_weeks |
 | update_learning_contents_updated_at | learning_contents |
+| update_ai_reviews_updated_at | ai_reviews |
 
 ---
 
@@ -260,7 +321,7 @@ $$ language 'plpgsql';
 
 ### 6.1 学習コンテンツ系テーブル
 
-`learning_phases`、`learning_weeks`、`learning_contents` に共通のポリシーパターン。
+`learning_themes`、`learning_phases`、`learning_weeks`、`learning_contents` に共通のポリシーパターン。
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
@@ -305,6 +366,15 @@ user_id IN (
 | Users can view own submissions | SELECT | 本人 | `user_id` が自身のユーザーIDと一致 |
 | Admins can view all submissions | SELECT | admin | `users.role = 'admin'` |
 | Users can insert own submissions | INSERT | 本人 | `user_id` が自身のユーザーIDと一致 |
+
+### 6.4 ai_reviews
+
+| ポリシー | 操作 | 対象 | 条件 |
+|:--|:--|:--|:--|
+| Users can view own ai reviews | SELECT | 本人 | `submission_id` が自身の提出IDと一致 |
+| Admins can view all ai reviews | SELECT | admin / maintainer | `users.role IN ('admin', 'maintainer')` |
+| Anyone can insert ai reviews | INSERT | 認証済み全ユーザー | - |
+| Anyone can update ai reviews | UPDATE | 認証済み全ユーザー | - |
 
 ---
 
@@ -364,3 +434,4 @@ user_id IN (
 | 2026年3月 | learning_contentsに `allowed_submission_types` カラム追加。マイグレーション一覧を最新化 |
 | 2026年3月 | learning_contentsに `code_language` カラム追加（コードエディタの言語設定） |
 | 2026年3月 | learning_contentsに `hint` カラム追加（演習コンテンツへのヒント表示機能） |
+| 2026年4月 | `learning_themes` テーブル追加・learning_phasesに `theme_id` FK追加。`ai_reviews` テーブル追加。ER図・インデックス・トリガー・RLS・セクション番号を全面更新 |
