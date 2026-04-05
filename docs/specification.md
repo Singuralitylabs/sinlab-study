@@ -583,8 +583,6 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 
 ---
 
----
-
 ## 9. Slack通知機能
 
 ### 9.1 概要
@@ -630,7 +628,7 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 |:--|:--|:--|
 | 表示名 | Google表示名 | `user.user_metadata.full_name` |
 | メール | Googleメール | `user.email` |
-| 登録日時 | ISO 8601形式をJSTに変換して表示 | サーバー現在時刻 |
+| 登録日時 | サーバー現在時刻をJST（`Asia/Tokyo`）でローカル日時文字列として表示 | サーバー現在時刻 |
 | 管理画面リンク | `/admin/users` への絶対URL | `NEXT_PUBLIC_APP_URL` または `request.url` のorigin |
 
 ### 9.5 処理フロー

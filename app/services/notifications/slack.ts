@@ -38,15 +38,27 @@ export async function sendSlackNewUserNotification(
         fields: [
           {
             type: "mrkdwn",
-            text: `*表示名*\n${params.displayName}`,
+            text: "*表示名*",
+          },
+          {
+            type: "plain_text",
+            text: params.displayName,
           },
           {
             type: "mrkdwn",
-            text: `*メール*\n${params.email}`,
+            text: "*メール*",
+          },
+          {
+            type: "plain_text",
+            text: params.email,
           },
           {
             type: "mrkdwn",
-            text: `*登録日時*\n${registeredAt} (JST)`,
+            text: "*登録日時*",
+          },
+          {
+            type: "plain_text",
+            text: `${registeredAt} (JST)`,
           },
         ],
       },

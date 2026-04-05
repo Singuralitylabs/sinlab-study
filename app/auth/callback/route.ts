@@ -83,10 +83,12 @@ export async function GET(request: NextRequest) {
       console.error("ユーザー自動登録エラー:", insertError);
     } else {
       const adminUsersUrl = `${origin}/admin/users`;
-      sendSlackNewUserNotification({
+      void sendSlackNewUserNotification({
         displayName: user.user_metadata?.full_name || user.email || "",
         email: user.email || "",
         adminUsersUrl,
+      }).catch((error) => {
+        console.error("[Slack通知] 予期しないエラーが発生しました:", error);
       });
     }
 
