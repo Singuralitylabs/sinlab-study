@@ -80,7 +80,7 @@ export async function sendSlackNewUserNotification(
       return;
     }
 
-    console.log("[Slack通知] 承認依頼通知を送信しました:", params.email);
+    console.log("[Slack通知] 承認依頼通知を送信しました:", params.email); // allow-console
   } catch (error) {
     console.error("[Slack通知] Webhook POSTでエラーが発生しました:", error);
   }
