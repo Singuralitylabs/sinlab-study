@@ -1,6 +1,7 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { sendSlackNewUserNotification } from "@/app/services/notifications/slack";
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
@@ -80,6 +81,13 @@ export async function GET(request: NextRequest) {
 
     if (insertError) {
       console.error("ユーザー自動登録エラー:", insertError);
+    } else {
+      const adminUsersUrl = `${origin}/admin/users`;
+      sendSlackNewUserNotification({
+        displayName: user.user_metadata?.full_name || user.email || "",
+        email: user.email || "",
+        adminUsersUrl,
+      });
     }
 
     redirectPath = "/pending";
