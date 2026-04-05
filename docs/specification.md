@@ -34,6 +34,14 @@
 │  │ PostgreSQL + RLS    │  │ Auth (Google OAuth)│   │
 │  └────────────────────┘  └───────────────────┘   │
 └───────────────────────────────────────────────────┘
+              │
+┌─────────────┴─────────────────────────────────────┐
+│              外部サービス                            │
+│  ┌────────────────────┐  ┌───────────────────┐    │
+│  │ Slack               │  │ Google Gemini API │    │
+│  │ (Incoming Webhooks) │  │ (AIレビュー)      │    │
+│  └────────────────────┘  └───────────────────┘    │
+└───────────────────────────────────────────────────┘
 ```
 
 ### 1.2 レイヤー構成
@@ -46,6 +54,7 @@
 | API Routes | クライアントからのデータ更新（進捗記録、課題提出等） |
 | Server Services | Supabase クエリ・ビジネスロジック |
 | Auth Services | 認証・ロールベースの権限チェック |
+| Notification Services | 外部通知サービスとの連携（Slack Incoming Webhooks） |
 | Providers | クライアント側の認証状態管理 |
 
 ---
@@ -574,6 +583,95 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 
 ---
 
+## 9. Slack通知機能
+
+### 9.1 概要
+
+初回ログイン時にユーザーが自動登録（`status=pending`）されると、管理者宛に承認依頼をSlackへ通知する。通知先チャンネルはSlack Incoming Webhook URLの設定により決定する。
+
+**通知タイミング**: `GET /auth/callback` における初回ユーザー登録の成功直後
+
+**非同期・非ブロッキング**: Slack通知の失敗はユーザー登録・リダイレクトフローに影響しない。エラーはサーバーログにのみ出力する。
+
+### 9.2 実装構成
+
+| ファイル | 役割 |
+|:--|:--|
+| `app/services/notifications/slack.ts` | Slack Incoming Webhooks へのPOSTリクエスト送信ロジック |
+| `app/auth/callback/route.ts` | 初回登録後に通知サービスを呼び出す |
+
+### 9.3 環境変数
+
+| 変数名 | 説明 | 必須 |
+|:--|:--|:--:|
+| `SLACK_NOTIFICATION_WEBHOOK_URL` | Slack Incoming Webhook URL（通知先チャンネルはWebhook設定で指定） | 任意 |
+
+環境変数が未設定の場合は通知をスキップし、ログに警告を出力する。
+
+### 9.4 Slack通知内容
+
+**メッセージフォーマット** (Block Kit):
+
+```
+[タイトル] 🔔 新規ユーザーが承認を待っています
+
+表示名:   <display_name>
+メール:   <email>
+登録日時: <registered_at> (JST)
+
+[管理画面を開く] → <本番URL>/admin/users
+```
+
+**フィールド詳細**:
+
+| フィールド | 値 | 取得元 |
+|:--|:--|:--|
+| 表示名 | Google表示名 | `user.user_metadata.full_name` |
+| メール | Googleメール | `user.email` |
+| 登録日時 | サーバー現在時刻をJST（`Asia/Tokyo`）でローカル日時文字列として表示 | サーバー現在時刻 |
+| 管理画面リンク | `/admin/users` への絶対URL | `NEXT_PUBLIC_APP_URL` または `request.url` のorigin |
+
+### 9.5 処理フロー
+
+```
+GET /auth/callback
+    │
+    ├─ セッション確立
+    ├─ users テーブル確認
+    │
+    └─ 初回ログイン（レコードなし）
+        ├─ users テーブルに INSERT（pending）
+        │
+        ├─ INSERT 成功
+        │   ├─ sendSlackNewUserNotification() を呼び出し（非同期、await なし）
+        │   │   ├─ SLACK_NOTIFICATION_WEBHOOK_URL 未設定 → ログ警告・スキップ
+        │   │   ├─ Webhook POST 成功 → ログ出力
+        │   │   └─ Webhook POST 失敗 → エラーログ出力（フロー継続）
+        │   └─ /pending にリダイレクト
+        │
+        └─ INSERT 失敗 → ログ出力・/pending にリダイレクト（通知は送らない）
+```
+
+### 9.6 Slack Incoming Webhook 設定手順（運用）
+
+1. Slack App を作成（または既存App を使用）
+2. **Incoming Webhooks** を有効化
+3. 通知先チャンネルを選択し、Webhook URL を発行
+4. 発行した URL を `SLACK_NOTIFICATION_WEBHOOK_URL` 環境変数に設定
+   - ローカル: `.env.local`
+   - 本番: Vercel 環境変数
+
+### 9.7 エラーハンドリング
+
+| ケース | 対応 |
+|:--|:--|
+| `SLACK_NOTIFICATION_WEBHOOK_URL` 未設定 | ログ警告を出力し通知をスキップ。フローは継続 |
+| Webhook POST がネットワークエラー | エラーログを出力し握り潰す。ユーザー登録・リダイレクトは正常完了 |
+| Webhook POST が 4xx / 5xx | エラーログ（ステータスコード含む）を出力し握り潰す |
+| ユーザー INSERT 失敗 | Slack通知は送信しない（中途半端な状態を通知しない） |
+
+---
+
 ## 改訂履歴
 
 | 日付 | 内容 |
@@ -586,3 +684,4 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 | 2026年3月 | 演習コンテンツのヒント表示機能を追加（5.5節） |
 | 2026年4月 | ユーザー管理画面にロール変更機能を追加（2.6節・6.1.3節・7.4節を更新） |
 | 2026年4月 | コンテンツ階層にThemeを追加し4階層化（3.1〜3.3節更新）。管理ルートを /manage に移行（6.1節・7.3節更新）。AIレビューAPI・PDFアップロードAPI追加（6.1.1〜6.1.2節）。スライドコンテンツ種別・PDF Viewerコンポーネント追記 |
+| 2026年4月 | Slack通知機能を追加（セクション9）。アーキテクチャ図・レイヤー構成にNotification Servicesを追加 |
