@@ -148,6 +148,9 @@ export function DemoSubmissionForm({
             </>
           )}
         </Button>
+        <p className="text-xs text-muted-foreground text-center">
+          ※ デモアプリでは実際のAIレビューは行われません。サンプルのレビュー結果が表示されます。
+        </p>
       </form>
 
       {aiReview && (
