@@ -45,8 +45,6 @@ const SAMPLE_REVIEW: AIReview = {
 };
 
 interface DemoSubmissionFormProps {
-  exerciseInstructions: string;
-  referenceAnswer: string | null;
   allowedSubmissionTypes: "code" | "url" | "both";
   codeLanguage: CodeLanguage;
 }

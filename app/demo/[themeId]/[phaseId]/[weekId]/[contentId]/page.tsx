@@ -51,6 +51,13 @@ export default async function DemoContentPage({ params }: PageProps) {
     notFound();
   }
 
+  if (
+    content.week?.phase?.id !== phaseIdNum ||
+    content.week?.phase?.theme?.id !== themeIdNum
+  ) {
+    notFound();
+  }
+
   const themeName = content.week?.phase?.theme?.name ?? "テーマ";
   const phaseName = content.week?.phase?.name ?? "フェーズ";
 
@@ -148,8 +155,6 @@ export default async function DemoContentPage({ params }: PageProps) {
                   </span>
                 </div>
                 <DemoSubmissionForm
-                  exerciseInstructions={content.exercise_instructions}
-                  referenceAnswer={content.reference_answer ?? null}
                   allowedSubmissionTypes={
                     (content.allowed_submission_types as "code" | "url" | "both") ?? "code"
                   }

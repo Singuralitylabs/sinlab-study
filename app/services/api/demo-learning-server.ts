@@ -28,7 +28,10 @@ export async function fetchDemoPublishedThemes(): Promise<{
     .eq("is_published", true)
     .eq("is_deleted", false)
     .order("display_order");
-  if (error) return { data: null, error };
+  if (error) {
+    console.error("デモテーマ一覧取得エラー:", error.message);
+    return { data: null, error };
+  }
   return { data: data as LearningTheme[], error: null };
 }
 
@@ -47,7 +50,10 @@ export async function fetchDemoThemeById(themeId: number): Promise<{
     .eq("is_published", true)
     .eq("is_deleted", false)
     .single();
-  if (error) return { data: null, error };
+  if (error) {
+    console.error("デモテーマ取得エラー:", error.message);
+    return { data: null, error };
+  }
   return { data: data as LearningTheme, error: null };
 }
 
@@ -66,7 +72,10 @@ export async function fetchDemoPhasesByThemeId(themeId: number): Promise<{
     .eq("is_published", true)
     .eq("is_deleted", false)
     .order("display_order");
-  if (error) return { data: null, error };
+  if (error) {
+    console.error("デモフェーズ一覧取得エラー:", error.message);
+    return { data: null, error };
+  }
   return { data: data as LearningPhase[], error: null };
 }
 
@@ -85,7 +94,10 @@ export async function fetchDemoPhaseById(phaseId: number): Promise<{
     .eq("is_published", true)
     .eq("is_deleted", false)
     .single();
-  if (error) return { data: null, error };
+  if (error) {
+    console.error("デモフェーズ取得エラー:", error.message);
+    return { data: null, error };
+  }
   return { data: data as LearningPhase, error: null };
 }
 
