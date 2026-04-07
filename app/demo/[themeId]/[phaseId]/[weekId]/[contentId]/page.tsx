@@ -1,6 +1,6 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Lock } from "lucide-react";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import type { CodeLanguage } from "@/app/components/CodeEditor";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
@@ -42,28 +42,59 @@ export default async function DemoContentPage({ params }: PageProps) {
     notFound();
   }
 
-  const { data: ctx } = await fetchDemoContext();
-
-  if (!ctx) {
-    return (
-      <div className="max-w-4xl mx-auto text-center py-20">
-        <p className="text-muted-foreground">デモコンテンツが準備中です。</p>
-      </div>
-    );
-  }
-
-  if (ctx.week.id !== weekIdNum) {
-    redirect(`/demo/${ctx.theme.id}/${ctx.phase.id}`);
-  }
-
-  const [{ data: content }, { data: weekContents }] = await Promise.all([
+  const [{ data: content }, { data: ctx }] = await Promise.all([
     fetchDemoContentById(contentIdNum),
-    fetchDemoContentsByWeekId(weekIdNum),
+    fetchDemoContext(),
   ]);
 
   if (!content || content.week_id !== weekIdNum) {
     notFound();
   }
+
+  const themeName = content.week?.phase?.theme?.name ?? "テーマ";
+  const phaseName = content.week?.phase?.name ?? "フェーズ";
+
+  const breadcrumbs = [
+    { label: "学習コンテンツ", href: "/demo" },
+    { label: themeName, href: `/demo/${themeIdNum}` },
+    { label: phaseName, href: `/demo/${themeIdNum}/${phaseIdNum}` },
+    { label: content.title },
+  ];
+
+  // デモとしてアクセス可能かどうか（Phase1・Week1のみ）
+  const isDemoAccessible = ctx !== null && content.week_id === ctx.week.id;
+
+  // ロック画面
+  if (!isDemoAccessible) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <PageTitle title={content.title} breadcrumbs={breadcrumbs} />
+
+        <Card>
+          <CardContent className="py-16 flex flex-col items-center text-center gap-4">
+            <div className="p-4 rounded-full bg-muted">
+              <Lock className="h-10 w-10 text-muted-foreground" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold mb-2">
+                承認されたアカウントのみ閲覧できます
+              </h2>
+              <p className="text-sm text-muted-foreground max-w-sm">
+                このコンテンツを閲覧するにはアカウントの承認が必要です。
+                ログインしてアカウント承認をリクエストしてください。
+              </p>
+            </div>
+            <Button asChild className="mt-2">
+              <Link href="/login">ログインして続ける</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // デモアクセス可能なコンテンツ
+  const { data: weekContents } = await fetchDemoContentsByWeekId(weekIdNum);
 
   const currentIndex = weekContents?.findIndex((c) => c.id === contentIdNum) ?? -1;
   const prevContent = currentIndex > 0 ? weekContents?.[currentIndex - 1] : null;
@@ -76,21 +107,7 @@ export default async function DemoContentPage({ params }: PageProps) {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <PageTitle
-        title={content.title}
-        breadcrumbs={[
-          { label: "デモ学習", href: "/demo" },
-          {
-            label: content.week?.phase?.theme?.name ?? "テーマ",
-            href: `/demo/${themeIdNum}`,
-          },
-          {
-            label: content.week?.phase?.name ?? "フェーズ",
-            href: `/demo/${themeIdNum}/${phaseIdNum}`,
-          },
-          { label: content.title },
-        ]}
-      />
+      <PageTitle title={content.title} breadcrumbs={breadcrumbs} />
 
       <Card className="mb-6">
         <CardContent className="pt-6">

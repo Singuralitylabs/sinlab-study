@@ -1,11 +1,12 @@
-import { Calendar, Lock } from "lucide-react";
-import { redirect } from "next/navigation";
+import { Calendar } from "lucide-react";
+import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
 import {
   fetchDemoContext,
+  fetchDemoPhaseById,
+  fetchDemoThemeById,
   fetchDemoWeeksWithContentsByPhaseId,
 } from "@/app/services/api/demo-learning-server";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { DemoContentList } from "../../components/DemoContentList";
 import { DemoProgressBar } from "../../components/DemoProgressBar";
@@ -19,35 +20,33 @@ export default async function DemoPhasePage({ params }: PageProps) {
   const themeIdNum = Number.parseInt(themeId, 10);
   const phaseIdNum = Number.parseInt(phaseId, 10);
 
-  const { data: ctx } = await fetchDemoContext();
+  if (Number.isNaN(themeIdNum) || Number.isNaN(phaseIdNum)) notFound();
 
-  if (!ctx) {
-    return (
-      <div className="max-w-4xl mx-auto text-center py-20">
-        <p className="text-muted-foreground">デモコンテンツが準備中です。</p>
-      </div>
-    );
-  }
+  const [{ data: theme }, { data: phase }, { data: weeks }, { data: ctx }] = await Promise.all([
+    fetchDemoThemeById(themeIdNum),
+    fetchDemoPhaseById(phaseIdNum),
+    fetchDemoWeeksWithContentsByPhaseId(phaseIdNum),
+    fetchDemoContext(),
+  ]);
 
-  if (ctx.theme.id !== themeIdNum || ctx.phase.id !== phaseIdNum) {
-    redirect(`/demo/${ctx.theme.id}/${ctx.phase.id}`);
-  }
+  if (!theme || !phase || phase.theme_id !== themeIdNum) notFound();
 
-  const { data: weeks } = await fetchDemoWeeksWithContentsByPhaseId(ctx.phase.id);
+  // デモでアクセス可能なWeekのID（フェーズが一致する場合のみ）
+  const demoWeekId = ctx && ctx.phase.id === phaseIdNum ? ctx.week.id : null;
 
-  const demoContentIds = weeks
-    ?.find((w) => w.id === ctx.week.id)
-    ?.contents.map((c) => c.id) ?? [];
+  // プログレスバー用: デモWeekのコンテンツIDのみ
+  const demoContentIds =
+    weeks?.find((w) => w.id === demoWeekId)?.contents.map((c) => c.id) ?? [];
 
   return (
     <div className="max-w-4xl mx-auto">
       <PageTitle
-        title={ctx.phase.name}
-        description={ctx.phase.description ?? undefined}
+        title={phase.name}
+        description={phase.description ?? undefined}
         breadcrumbs={[
-          { label: "デモ学習", href: "/demo" },
-          { label: ctx.theme.name, href: `/demo/${ctx.theme.id}` },
-          { label: ctx.phase.name },
+          { label: "学習コンテンツ", href: "/demo" },
+          { label: theme.name, href: `/demo/${themeIdNum}` },
+          { label: phase.name },
         ]}
       />
 
@@ -57,72 +56,40 @@ export default async function DemoPhasePage({ params }: PageProps) {
         <Card>
           <CardContent className="py-8 text-center">
             <Calendar className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">コンテンツはまだ登録されていません。</p>
+            <p className="text-muted-foreground">このフェーズにはまだ週が登録されていません。</p>
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-6">
           {weeks.map((week) => {
-            const isDemoWeek = week.id === ctx.week.id;
+            const isDemoWeek = week.id === demoWeekId;
 
             return (
               <div key={week.id}>
                 <div className="flex items-center gap-3 mb-3">
-                  <div
-                    className={`p-2 rounded-full ${
-                      isDemoWeek
-                        ? "bg-primary/10 text-primary"
-                        : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {isDemoWeek ? (
-                      <Calendar className="h-5 w-5" />
-                    ) : (
-                      <Lock className="h-5 w-5" />
-                    )}
+                  <div className="p-2 rounded-full bg-primary/10 text-primary">
+                    <Calendar className="h-5 w-5" />
                   </div>
                   <div className="flex-1">
-                    <h2
-                      className={`text-base font-semibold ${
-                        isDemoWeek ? "" : "text-muted-foreground"
-                      }`}
-                    >
-                      {week.name}
-                    </h2>
+                    <h2 className="text-base font-semibold">{week.name}</h2>
                     {week.description && (
                       <p className="text-sm text-muted-foreground">{week.description}</p>
                     )}
                   </div>
-                  {isDemoWeek ? (
-                    <Badge variant="outline" className="text-xs shrink-0">
-                      デモ限定
-                    </Badge>
-                  ) : (
-                    <Badge variant="secondary" className="text-xs shrink-0">
-                      ログイン後に利用可
-                    </Badge>
-                  )}
                 </div>
 
-                {isDemoWeek ? (
-                  week.contents.length > 0 ? (
-                    <DemoContentList
-                      contents={week.contents}
-                      themeId={ctx.theme.id}
-                      phaseId={ctx.phase.id}
-                      weekId={week.id}
-                    />
-                  ) : (
-                    <p className="text-sm text-muted-foreground ml-12">
-                      コンテンツはまだ登録されていません。
-                    </p>
-                  )
+                {week.contents.length === 0 ? (
+                  <p className="text-sm text-muted-foreground ml-12">
+                    コンテンツはまだ登録されていません。
+                  </p>
                 ) : (
-                  <div className="ml-5 border-l-2 border-border pl-5 py-2 text-sm text-muted-foreground">
-                    {week.contents.length > 0
-                      ? `${week.contents.length} 件のコンテンツがあります。ログインしてアクセスしてください。`
-                      : "コンテンツはまだ登録されていません。"}
-                  </div>
+                  <DemoContentList
+                    contents={week.contents}
+                    themeId={themeIdNum}
+                    phaseId={phaseIdNum}
+                    weekId={week.id}
+                    locked={!isDemoWeek}
+                  />
                 )}
               </div>
             );

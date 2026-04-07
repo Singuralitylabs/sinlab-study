@@ -15,6 +15,81 @@ export interface DemoContext {
 }
 
 /**
+ * デモ用: 公開テーマ一覧を取得
+ */
+export async function fetchDemoPublishedThemes(): Promise<{
+  data: LearningTheme[] | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase
+    .from("learning_themes")
+    .select("*")
+    .eq("is_published", true)
+    .eq("is_deleted", false)
+    .order("display_order");
+  if (error) return { data: null, error };
+  return { data: data as LearningTheme[], error: null };
+}
+
+/**
+ * デモ用: テーマをIDで取得
+ */
+export async function fetchDemoThemeById(themeId: number): Promise<{
+  data: LearningTheme | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase
+    .from("learning_themes")
+    .select("*")
+    .eq("id", themeId)
+    .eq("is_published", true)
+    .eq("is_deleted", false)
+    .single();
+  if (error) return { data: null, error };
+  return { data: data as LearningTheme, error: null };
+}
+
+/**
+ * デモ用: テーマに属する公開フェーズ一覧を取得
+ */
+export async function fetchDemoPhasesByThemeId(themeId: number): Promise<{
+  data: LearningPhase[] | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase
+    .from("learning_phases")
+    .select("*")
+    .eq("theme_id", themeId)
+    .eq("is_published", true)
+    .eq("is_deleted", false)
+    .order("display_order");
+  if (error) return { data: null, error };
+  return { data: data as LearningPhase[], error: null };
+}
+
+/**
+ * デモ用: フェーズをIDで取得
+ */
+export async function fetchDemoPhaseById(phaseId: number): Promise<{
+  data: LearningPhase | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase
+    .from("learning_phases")
+    .select("*")
+    .eq("id", phaseId)
+    .eq("is_published", true)
+    .eq("is_deleted", false)
+    .single();
+  if (error) return { data: null, error };
+  return { data: data as LearningPhase, error: null };
+}
+
+/**
  * デモ用コンテキストを取得する
  * 最初の公開テーマ → 最初の公開フェーズ → 最初の公開週 を順番にクエリして返す。
  * すべてのデモページのロック基準となる。
