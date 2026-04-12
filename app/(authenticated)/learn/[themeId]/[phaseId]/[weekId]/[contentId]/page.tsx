@@ -107,9 +107,7 @@ export default async function ContentPage({ params }: PageProps) {
           )}
 
           {content.content_type === "slide" && content.pdf_url && (
-            <PdfSlideViewer
-              url={`${process.env.NEXT_PUBLIC_SUPABASE_URL}${content.pdf_url}`}
-            />
+            <PdfSlideViewer url={`${process.env.NEXT_PUBLIC_SUPABASE_URL}${content.pdf_url}`} />
           )}
 
           {content.content_type === "exercise" && content.exercise_instructions && (
