@@ -1,7 +1,8 @@
-import { Calendar, CheckCircle, Clock, FileText, PenLine, Play } from "lucide-react";
+import { Bot, Calendar, CheckCircle, Clock, FileText, PenLine, Play } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
+import { fetchCompletedAIReviewContentIds } from "@/app/services/api/ai-review-server";
 import {
   fetchPhaseById,
   fetchThemeById,
@@ -67,9 +68,19 @@ export default async function PhasePage({ params }: PageProps) {
 
   // 全コンテンツのIDを集めて進捗を一括取得
   const allContentIds = weeks?.flatMap((w) => w.contents.map((c) => c.id)) || [];
-  const { data: progressMap } = userId
-    ? await fetchUserProgressByContentIds(userId, allContentIds)
-    : { data: new Map<number, boolean>() };
+  const exerciseContentIds =
+    weeks?.flatMap((w) =>
+      w.contents.filter((c) => c.content_type === "exercise").map((c) => c.id)
+    ) ?? [];
+
+  const [{ data: progressMap }, { data: reviewedContentIds }] = await Promise.all([
+    userId
+      ? fetchUserProgressByContentIds(userId, allContentIds)
+      : Promise.resolve({ data: new Map<number, boolean>() }),
+    userId
+      ? fetchCompletedAIReviewContentIds(userId, exerciseContentIds)
+      : Promise.resolve({ data: new Set<number>() }),
+  ]);
 
   const completedCount = Array.from(progressMap.values()).filter(Boolean).length;
   const totalCount = allContentIds.length;
@@ -189,6 +200,16 @@ export default async function PhasePage({ params }: PageProps) {
                                   {getContentIcon(content.content_type)}
                                   {getContentTypeLabel(content.content_type)}
                                 </Badge>
+                                {content.content_type === "exercise" &&
+                                  reviewedContentIds.has(content.id) && (
+                                    <Badge
+                                      variant="outline"
+                                      className="gap-1 shrink-0 text-xs border-primary/40 text-primary"
+                                    >
+                                      <Bot className="h-3 w-3" />
+                                      AIレビュー済み
+                                    </Badge>
+                                  )}
                               </div>
                             </CardContent>
                           </Card>

@@ -1,29 +1,11 @@
-import {
-  BookOpen,
-  Calendar,
-  ClipboardList,
-  FileText,
-  FolderOpen,
-  LayoutDashboard,
-  UserCog,
-  Users,
-} from "lucide-react";
+import { UserCog } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { checkAdminPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Separator } from "@/components/ui/separator";
 
-const ADMIN_NAV_ITEMS = [
-  { title: "ダッシュボード", href: "/admin", icon: LayoutDashboard },
-  { title: "テーマ管理", href: "/admin/themes", icon: FolderOpen },
-  { title: "フェーズ管理", href: "/admin/phases", icon: BookOpen },
-  { title: "週管理", href: "/admin/weeks", icon: Calendar },
-  { title: "コンテンツ管理", href: "/manage/contents", icon: FileText },
-  { title: "受講生進捗", href: "/admin/students", icon: Users },
-  { title: "提出一覧", href: "/admin/submissions", icon: ClipboardList },
-  { title: "ユーザー管理", href: "/admin/users", icon: UserCog },
-];
+const ADMIN_NAV_ITEMS = [{ title: "ユーザー管理", href: "/admin/users", icon: UserCog }];
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const { userRole } = await getServerAuth();
@@ -34,7 +16,6 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   return (
     <div>
-      {/* 管理画面ナビゲーション */}
       <nav className="mb-6 overflow-x-auto">
         <div className="flex gap-1 pb-2">
           {ADMIN_NAV_ITEMS.map((item) => (

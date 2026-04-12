@@ -165,7 +165,7 @@ export default async function HomePage() {
                 >
                   <div className="flex">
                     {/* サムネイル */}
-                    <div className="relative w-24 shrink-0 bg-gradient-to-br from-primary/5 to-primary/15">
+                    <div className="relative w-24 shrink-0 bg-linear-to-br from-primary/5 to-primary/15">
                       {theme.image_url ? (
                         <Image
                           src={theme.image_url}

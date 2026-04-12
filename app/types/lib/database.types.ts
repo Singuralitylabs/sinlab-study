@@ -4,7 +4,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.1";
+    PostgrestVersion: "14.4";
   };
   public: {
     Tables: {
@@ -63,14 +63,18 @@ export type Database = {
       };
       learning_contents: {
         Row: {
+          allowed_submission_types: string;
+          code_language: string;
           content_type: string;
           created_at: string | null;
           display_order: number | null;
           exercise_instructions: string | null;
+          hint: string | null;
           id: number;
           is_deleted: boolean | null;
           is_published: boolean | null;
           pdf_url: string | null;
+          reference_answer: string | null;
           text_content: string | null;
           title: string;
           updated_at: string | null;
@@ -78,14 +82,18 @@ export type Database = {
           week_id: number;
         };
         Insert: {
+          allowed_submission_types?: string;
+          code_language?: string;
           content_type: string;
           created_at?: string | null;
           display_order?: number | null;
           exercise_instructions?: string | null;
+          hint?: string | null;
           id?: number;
           is_deleted?: boolean | null;
           is_published?: boolean | null;
           pdf_url?: string | null;
+          reference_answer?: string | null;
           text_content?: string | null;
           title: string;
           updated_at?: string | null;
@@ -93,14 +101,18 @@ export type Database = {
           week_id: number;
         };
         Update: {
+          allowed_submission_types?: string;
+          code_language?: string;
           content_type?: string;
           created_at?: string | null;
           display_order?: number | null;
           exercise_instructions?: string | null;
+          hint?: string | null;
           id?: number;
           is_deleted?: boolean | null;
           is_published?: boolean | null;
           pdf_url?: string | null;
+          reference_answer?: string | null;
           text_content?: string | null;
           title?: string;
           updated_at?: string | null;
@@ -380,7 +392,6 @@ export type Database = {
     Functions: {
       get_user_id: { Args: never; Returns: number };
       get_user_role: { Args: never; Returns: string };
-      is_admin: { Args: never; Returns: boolean };
     };
     Enums: {
       [_ in never]: never;

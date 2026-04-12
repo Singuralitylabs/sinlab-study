@@ -1,14 +1,7 @@
 "use client";
 
-import {
-  BookOpen,
-  ClipboardList,
-  GraduationCap,
-  House,
-  LogOut,
-  Menu,
-  Settings,
-} from "lucide-react";
+import { BookOpen, ClipboardList, House, LogOut, Menu, Settings, UserCog } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -41,16 +34,16 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
   },
 ];
 
-const INSTRUCTOR_NAV_ITEM: NavItem = {
-  title: "講師画面",
-  href: "/instructor",
-  icon: <GraduationCap className="h-5 w-5" />,
+const MANAGE_NAV_ITEM: NavItem = {
+  title: "管理画面",
+  href: "/manage",
+  icon: <Settings className="h-5 w-5" />,
 };
 
-const ADMIN_NAV_ITEM: NavItem = {
-  title: "管理画面",
-  href: "/admin",
-  icon: <Settings className="h-5 w-5" />,
+const ADMIN_USERS_NAV_ITEM: NavItem = {
+  title: "ユーザー管理",
+  href: "/admin/users",
+  icon: <UserCog className="h-5 w-5" />,
 };
 
 export function SideNav({ isAdmin, isInstructor }: { isAdmin: boolean; isInstructor: boolean }) {
@@ -60,8 +53,8 @@ export function SideNav({ isAdmin, isInstructor }: { isAdmin: boolean; isInstruc
   const navItems = useMemo<NavItem[]>(
     () => [
       ...DEFAULT_NAV_ITEMS,
-      ...(isInstructor && !isAdmin ? [INSTRUCTOR_NAV_ITEM] : []),
-      ...(isAdmin ? [ADMIN_NAV_ITEM] : []),
+      ...(isInstructor ? [MANAGE_NAV_ITEM] : []),
+      ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),
     ],
     [isAdmin, isInstructor]
   );
@@ -143,7 +136,8 @@ export function SideNav({ isAdmin, isInstructor }: { isAdmin: boolean; isInstruc
                 onClick={() => setOpen(false)}
                 className="text-lg font-bold flex items-center gap-2"
               >
-                Sinlab Skillup
+                <Image src="/icon.png" alt="Sinlab Study" width={24} height={24} />
+                Sinlab Study
               </Link>
             </SheetTitle>
           </SheetHeader>
@@ -157,7 +151,8 @@ export function SideNav({ isAdmin, isInstructor }: { isAdmin: boolean; isInstruc
       <div className="hidden sm:flex h-screen w-64 flex-col fixed left-0 top-0 border-r border-sidebar-border bg-sidebar">
         <div className="px-6 py-5 border-b border-sidebar-border">
           <Link href="/" className="text-xl font-bold flex items-center gap-2">
-            Sinlab Skillup
+            <Image src="/icon.png" alt="Sinlab Study" width={28} height={28} />
+            Sinlab Study
           </Link>
         </div>
         <div className="flex flex-col flex-1 pt-2">

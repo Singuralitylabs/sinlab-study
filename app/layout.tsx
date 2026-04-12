@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Sinlab Web Skillup",
+  title: "Sinlab Study",
   description: "シンギュラリティ・ラボ Web技術学習支援サービス",
 };
 

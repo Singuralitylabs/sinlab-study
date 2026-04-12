@@ -9,7 +9,7 @@ export default function LoginPage() {
           <div className="flex justify-center">
             <BookOpen className="h-12 w-12 text-primary" />
           </div>
-          <h1 className="text-2xl font-bold">Sinlab Skillup</h1>
+          <h1 className="text-2xl font-bold">Sinlab Study</h1>
           <p className="text-sm text-muted-foreground">AIと学ぶ実践Web技術講座</p>
         </div>
 

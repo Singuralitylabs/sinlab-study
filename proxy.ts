@@ -7,6 +7,7 @@ function shouldSkipMiddleware(pathname: string): boolean {
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api") ||
     pathname.startsWith("/auth/callback") ||
+    pathname.startsWith("/demo") ||
     pathname.includes(".") ||
     pathname === "/favicon.ico" ||
     pathname === "/login" ||

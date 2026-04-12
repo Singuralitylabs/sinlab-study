@@ -34,11 +34,30 @@ export async function fetchAllThemes(): Promise<{
   return { data, error: null };
 }
 
+export async function fetchThemeById(id: number): Promise<{
+  data: LearningTheme | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("learning_themes")
+    .select("*")
+    .eq("id", id)
+    .eq("is_deleted", false)
+    .single();
+  if (error) {
+    console.error("テーマ取得エラー:", error.message);
+    return { data: null, error };
+  }
+  return { data, error: null };
+}
+
 export async function createTheme(theme: {
   name: string;
   description?: string;
   display_order?: number;
   is_published?: boolean;
+  image_url?: string | null;
 }): Promise<{ data: LearningTheme | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
@@ -69,13 +88,76 @@ export async function updateTheme(
 }
 
 export async function deleteTheme(id: number): Promise<{ error: PostgrestError | null }> {
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createAdminSupabaseClient();
 
+  // 配下フェーズIDを取得
+  const { data: phases, error: phaseFetchError } = await supabase
+    .from("learning_phases")
+    .select("id")
+    .eq("theme_id", id)
+    .eq("is_deleted", false);
+  if (phaseFetchError) {
+    console.error("フェーズ取得エラー:", phaseFetchError.message);
+    return { error: phaseFetchError };
+  }
+
+  const phaseIds = phases?.map((p) => p.id) ?? [];
+
+  if (phaseIds.length > 0) {
+    // 配下週IDを取得
+    const { data: weeks, error: weekFetchError } = await supabase
+      .from("learning_weeks")
+      .select("id")
+      .in("phase_id", phaseIds)
+      .eq("is_deleted", false);
+    if (weekFetchError) {
+      console.error("週取得エラー:", weekFetchError.message);
+      return { error: weekFetchError };
+    }
+
+    const weekIds = weeks?.map((w) => w.id) ?? [];
+
+    if (weekIds.length > 0) {
+      // 配下コンテンツを論理削除
+      const { error: contentError } = await supabase
+        .from("learning_contents")
+        .update({ is_deleted: true })
+        .in("week_id", weekIds)
+        .eq("is_deleted", false);
+      if (contentError) {
+        console.error("コンテンツ削除エラー:", contentError.message);
+        return { error: contentError };
+      }
+    }
+
+    // 配下週を論理削除
+    const { error: weekError } = await supabase
+      .from("learning_weeks")
+      .update({ is_deleted: true })
+      .in("phase_id", phaseIds)
+      .eq("is_deleted", false);
+    if (weekError) {
+      console.error("週削除エラー:", weekError.message);
+      return { error: weekError };
+    }
+
+    // 配下フェーズを論理削除
+    const { error: phaseError } = await supabase
+      .from("learning_phases")
+      .update({ is_deleted: true })
+      .eq("theme_id", id)
+      .eq("is_deleted", false);
+    if (phaseError) {
+      console.error("フェーズ削除エラー:", phaseError.message);
+      return { error: phaseError };
+    }
+  }
+
+  // テーマを論理削除
   const { error } = await supabase
     .from("learning_themes")
     .update({ is_deleted: true })
     .eq("id", id);
-
   if (error) {
     console.error("テーマ削除エラー:", error.message);
     return { error };
@@ -106,6 +188,24 @@ export async function fetchAllPhases(): Promise<{
   }
 
   return { data: data as LearningPhaseWithTheme[], error: null };
+}
+
+export async function fetchPhaseById(id: number): Promise<{
+  data: LearningPhase | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("learning_phases")
+    .select("*")
+    .eq("id", id)
+    .eq("is_deleted", false)
+    .single();
+  if (error) {
+    console.error("フェーズ取得エラー:", error.message);
+    return { data: null, error };
+  }
+  return { data, error: null };
 }
 
 export async function createPhase(phase: {
@@ -144,13 +244,50 @@ export async function updatePhase(
 }
 
 export async function deletePhase(id: number): Promise<{ error: PostgrestError | null }> {
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createAdminSupabaseClient();
 
+  // 配下週IDを取得
+  const { data: weeks, error: weekFetchError } = await supabase
+    .from("learning_weeks")
+    .select("id")
+    .eq("phase_id", id)
+    .eq("is_deleted", false);
+  if (weekFetchError) {
+    console.error("週取得エラー:", weekFetchError.message);
+    return { error: weekFetchError };
+  }
+
+  const weekIds = weeks?.map((w) => w.id) ?? [];
+
+  if (weekIds.length > 0) {
+    // 配下コンテンツを論理削除
+    const { error: contentError } = await supabase
+      .from("learning_contents")
+      .update({ is_deleted: true })
+      .in("week_id", weekIds)
+      .eq("is_deleted", false);
+    if (contentError) {
+      console.error("コンテンツ削除エラー:", contentError.message);
+      return { error: contentError };
+    }
+
+    // 配下週を論理削除
+    const { error: weekError } = await supabase
+      .from("learning_weeks")
+      .update({ is_deleted: true })
+      .eq("phase_id", id)
+      .eq("is_deleted", false);
+    if (weekError) {
+      console.error("週削除エラー:", weekError.message);
+      return { error: weekError };
+    }
+  }
+
+  // フェーズを論理削除
   const { error } = await supabase
     .from("learning_phases")
     .update({ is_deleted: true })
     .eq("id", id);
-
   if (error) {
     console.error("フェーズ削除エラー:", error.message);
     return { error };
@@ -180,6 +317,24 @@ export async function fetchAllWeeks(): Promise<{
     return { data: null, error };
   }
 
+  return { data, error: null };
+}
+
+export async function fetchWeekById(id: number): Promise<{
+  data: LearningWeek | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("learning_weeks")
+    .select("*")
+    .eq("id", id)
+    .eq("is_deleted", false)
+    .single();
+  if (error) {
+    console.error("週取得エラー:", error.message);
+    return { data: null, error };
+  }
   return { data, error: null };
 }
 
@@ -219,10 +374,21 @@ export async function updateWeek(
 }
 
 export async function deleteWeek(id: number): Promise<{ error: PostgrestError | null }> {
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createAdminSupabaseClient();
 
+  // 配下コンテンツを論理削除
+  const { error: contentError } = await supabase
+    .from("learning_contents")
+    .update({ is_deleted: true })
+    .eq("week_id", id)
+    .eq("is_deleted", false);
+  if (contentError) {
+    console.error("コンテンツ削除エラー:", contentError.message);
+    return { error: contentError };
+  }
+
+  // 週を論理削除
   const { error } = await supabase.from("learning_weeks").update({ is_deleted: true }).eq("id", id);
-
   if (error) {
     console.error("週削除エラー:", error.message);
     return { error };
@@ -284,6 +450,9 @@ export async function createContent(content: {
   video_url?: string;
   text_content?: string;
   exercise_instructions?: string;
+  reference_answer?: string;
+  allowed_submission_types?: "code" | "url" | "both";
+  code_language?: "javascript" | "typescript" | "html" | "css";
   pdf_url?: string;
   display_order?: number;
   is_published?: boolean;
@@ -337,7 +506,7 @@ export async function deleteContent(id: number): Promise<{ error: PostgrestError
 }
 
 // =====================================================
-// ユーザー管理（承認・却下）
+// ユーザー管理（承認・却下・ロール変更）
 // =====================================================
 
 export async function fetchAllUsers(): Promise<{
@@ -386,6 +555,25 @@ export async function rejectUser(userId: number): Promise<{ error: PostgrestErro
 
   if (error) {
     console.error("ユーザー却下エラー:", error.message);
+    return { error };
+  }
+
+  return { error: null };
+}
+
+export async function changeUserRole(
+  userId: number,
+  role: "member" | "maintainer" | "admin"
+): Promise<{ error: PostgrestError | null }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { error } = await supabase
+    .from("users")
+    .update({ role, updated_at: new Date().toISOString() })
+    .eq("id", userId);
+
+  if (error) {
+    console.error("ユーザーロール変更エラー:", error.message);
     return { error };
   }
 

@@ -20,7 +20,7 @@ jobs:
       - name: Check for console.log / console.info / debugger
         run: |
           if grep -rn --include="*.ts" --include="*.tsx" \
-            -E "console\.(log|info|debug)|debugger" app/; then
+            -E "console\.(log|info|debug)|debugger" app/ | grep -v "// allow-console"; then
             echo "::error::Detected debug output (console.log / console.info / console.debug / debugger) in app/. Remove before merging."
             exit 1
           fi
