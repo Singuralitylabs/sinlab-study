@@ -16,7 +16,7 @@ GASによるGmail送信とスプレッドシートを活用したメール配信
 [Gmailの送信（動画）](https://www.youtube.com/watch?v=EjjHHt-oVKc)
 
 ### スライド
-[Gmailの送信（スライド）](https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-07.pdf)
+[Gmailの送信（スライド）]({{SUPABASE_STORAGE_URL}}/slides/gas/slide-07.pdf)
 
 ### 課題
 

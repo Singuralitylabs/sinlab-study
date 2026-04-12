@@ -17,7 +17,7 @@
 [GASの便利な機能（動画）](https://www.youtube.com/watch?v=vo87BAKkC8E)
 
 ### スライド
-[GASの便利な機能（スライド）](https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-12.pdf)
+[GASの便利な機能（スライド）]({{SUPABASE_STORAGE_URL}}/slides/gas/slide-12.pdf)
 
 ### 課題
 

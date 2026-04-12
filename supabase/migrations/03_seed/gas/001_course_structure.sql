@@ -108,7 +108,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, '基礎文法の学習1（スライド）', 'slide', 'https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-01.pdf', 2, true);
+    VALUES (v_week_id, '基礎文法の学習1（スライド）', 'slide', '/storage/v1/object/public/slides/gas/slide-01.pdf', 2, true);
   END IF;
 
   -- Week 1-2: 基礎文法の学習2
@@ -126,7 +126,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, '基礎文法の学習2（スライド）', 'slide', 'https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-02.pdf', 2, true);
+    VALUES (v_week_id, '基礎文法の学習2（スライド）', 'slide', '/storage/v1/object/public/slides/gas/slide-02.pdf', 2, true);
   END IF;
 
   -- ---- Phase 2 ----------------------------------------
@@ -146,7 +146,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'Googleドライブの操作（スライド）', 'slide', 'https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-03.pdf', 2, true);
+    VALUES (v_week_id, 'Googleドライブの操作（スライド）', 'slide', '/storage/v1/object/public/slides/gas/slide-03.pdf', 2, true);
   END IF;
 
   -- ---- Phase 3 ----------------------------------------
@@ -166,7 +166,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'スプレッドシート操作1（スライド）', 'slide', 'https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-04.pdf', 2, true);
+    VALUES (v_week_id, 'スプレッドシート操作1（スライド）', 'slide', '/storage/v1/object/public/slides/gas/slide-04.pdf', 2, true);
   END IF;
 
   -- Week 3-2: スプレッドシート操作2
@@ -184,7 +184,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'スプレッドシート操作2（スライド）', 'slide', 'https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-05.pdf', 2, true);
+    VALUES (v_week_id, 'スプレッドシート操作2（スライド）', 'slide', '/storage/v1/object/public/slides/gas/slide-05.pdf', 2, true);
   END IF;
 
   -- Week 3-3: データベース活用
@@ -202,7 +202,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'データベース活用（スライド）', 'slide', 'https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-06.pdf', 2, true);
+    VALUES (v_week_id, 'データベース活用（スライド）', 'slide', '/storage/v1/object/public/slides/gas/slide-06.pdf', 2, true);
   END IF;
 
   -- ---- Phase 4 ----------------------------------------
@@ -222,7 +222,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'Gmailの送信（スライド）', 'slide', 'https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-07.pdf', 2, true);
+    VALUES (v_week_id, 'Gmailの送信（スライド）', 'slide', '/storage/v1/object/public/slides/gas/slide-07.pdf', 2, true);
   END IF;
 
   -- ---- Phase 5 ----------------------------------------
@@ -242,7 +242,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'Googleフォーム（スライド）', 'slide', 'https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-08.pdf', 2, true);
+    VALUES (v_week_id, 'Googleフォーム（スライド）', 'slide', '/storage/v1/object/public/slides/gas/slide-08.pdf', 2, true);
   END IF;
 
   -- Week 5-2: Googleフォームの活用
@@ -260,7 +260,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'Googleフォームの活用（スライド）', 'slide', 'https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-09.pdf', 2, true);
+    VALUES (v_week_id, 'Googleフォームの活用（スライド）', 'slide', '/storage/v1/object/public/slides/gas/slide-09.pdf', 2, true);
   END IF;
 
   -- ---- Phase 6 ----------------------------------------
@@ -280,7 +280,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'Googleカレンダー操作（スライド）', 'slide', 'https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-10.pdf', 2, true);
+    VALUES (v_week_id, 'Googleカレンダー操作（スライド）', 'slide', '/storage/v1/object/public/slides/gas/slide-10.pdf', 2, true);
   END IF;
 
   -- Week 6-2: フォームによるカレンダー操作
@@ -298,7 +298,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'フォームによるカレンダー操作（スライド）', 'slide', 'https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-11.pdf', 2, true);
+    VALUES (v_week_id, 'フォームによるカレンダー操作（スライド）', 'slide', '/storage/v1/object/public/slides/gas/slide-11.pdf', 2, true);
   END IF;
 
   -- ---- Phase 7 ----------------------------------------
@@ -318,7 +318,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'GASの便利な機能（スライド）', 'slide', 'https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-12.pdf', 2, true);
+    VALUES (v_week_id, 'GASの便利な機能（スライド）', 'slide', '/storage/v1/object/public/slides/gas/slide-12.pdf', 2, true);
   END IF;
 
 END $$;
