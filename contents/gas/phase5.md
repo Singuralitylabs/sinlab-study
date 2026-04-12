@@ -18,7 +18,7 @@ Googleフォームの作成・トリガー・DB操作を学びます。
 [Googleフォーム（動画）](https://www.youtube.com/watch?v=7EmiOhVmkFs)
 
 ### スライド
-[Googleフォーム（スライド）](https://rityzrpwpwcbgvvtsfsg.supabase.co/storage/v1/object/public/slides/gas/slide-08.pdf)
+[Googleフォーム（スライド）]({{SUPABASE_STORAGE_URL}}/slides/gas/slide-08.pdf)
 
 ### 課題
 
@@ -133,7 +133,7 @@ function updateFormInfo() {
 [Googleフォームの活用（動画）](https://www.youtube.com/watch?v=ioq82NFX0Z4)
 
 ### スライド
-[Googleフォームの活用（スライド）](https://rityzrpwpwcbgvvtsfsg.supabase.co/storage/v1/object/public/slides/gas/slide-09.pdf)
+[Googleフォームの活用（スライド）]({{SUPABASE_STORAGE_URL}}/slides/gas/slide-09.pdf)
 
 ### 課題
 

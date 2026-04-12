@@ -18,7 +18,7 @@ JavaScriptの基礎文法を学びます。
 [基礎文法の学習1（動画）](https://www.youtube.com/watch?v=VkvRU334DYI)
 
 ### スライド
-[基礎文法の学習1（スライド）](https://rityzrpwpwcbgvvtsfsg.supabase.co/storage/v1/object/public/slides/gas/slide-01.pdf)
+[基礎文法の学習1（スライド）]({{SUPABASE_STORAGE_URL}}/slides/gas/slide-01.pdf)
 
 ### 課題
 
@@ -143,7 +143,7 @@ function judgeScore() {
 [基礎文法の学習2（動画）](https://www.youtube.com/watch?v=TCzYJ3Fxbl0)
 
 ### スライド
-[基礎文法の学習2（スライド）](https://rityzrpwpwcbgvvtsfsg.supabase.co/storage/v1/object/public/slides/gas/slide-02.pdf)
+[基礎文法の学習2（スライド）]({{SUPABASE_STORAGE_URL}}/slides/gas/slide-02.pdf)
 
 ### 課題
 

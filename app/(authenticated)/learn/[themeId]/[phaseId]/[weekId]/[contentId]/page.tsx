@@ -98,11 +98,22 @@ export default async function ContentPage({ params }: PageProps) {
           )}
 
           {content.content_type === "text" && content.text_content && (
-            <MarkdownRenderer content={content.text_content} />
+            <MarkdownRenderer
+              content={content.text_content.replace(
+                /\{\{SUPABASE_STORAGE_URL\}\}/g,
+                `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public`
+              )}
+            />
           )}
 
           {content.content_type === "slide" && content.pdf_url && (
-            <PdfSlideViewer url={content.pdf_url} />
+            <PdfSlideViewer
+              url={
+                /^https?:\/\//.test(content.pdf_url)
+                  ? content.pdf_url
+                  : `${process.env.NEXT_PUBLIC_SUPABASE_URL}${content.pdf_url}`
+              }
+            />
           )}
 
           {content.content_type === "exercise" && content.exercise_instructions && (
