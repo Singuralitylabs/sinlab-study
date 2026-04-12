@@ -15,7 +15,7 @@
 [スプレッドシート操作1（動画）](https://www.youtube.com/watch?v=wyx0KM46TwU)
 
 ### スライド
-[スプレッドシート操作1（スライド）](https://rityzrpwpwcbgvvtsfsg.supabase.co/storage/v1/object/public/slides/gas/slide-04.pdf)
+[スプレッドシート操作1（スライド）](https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-04.pdf)
 
 ### 課題
 
@@ -117,7 +117,7 @@ function writeToMultipleSheets() {
 [スプレッドシート操作2（動画）](https://www.youtube.com/watch?v=o-kX-lelHXY)
 
 ### スライド
-[スプレッドシート操作2（スライド）](https://rityzrpwpwcbgvvtsfsg.supabase.co/storage/v1/object/public/slides/gas/slide-05.pdf)
+[スプレッドシート操作2（スライド）](https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-05.pdf)
 
 ### 課題
 
@@ -233,7 +233,7 @@ function addSheet() {
 [データベース活用（動画）](https://www.youtube.com/watch?v=7bkNZbKlszY)
 
 ### スライド
-[データベース活用（スライド）](https://rityzrpwpwcbgvvtsfsg.supabase.co/storage/v1/object/public/slides/gas/slide-06.pdf)
+[データベース活用（スライド）](https://otrcfsvfgiwzuetnkfmk.supabase.co/storage/v1/object/public/slides/gas/slide-06.pdf)
 
 ### 課題
 

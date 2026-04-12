@@ -64,7 +64,7 @@ export function SubmissionForm({
       } else if (response.status === 429) {
         const errorData = await response.json().catch(() => null);
         setMessage({
-          type: "success",
+          type: "error",
           text: errorData?.error ?? "この課題のAIレビューは利用済みです",
         });
       } else {
