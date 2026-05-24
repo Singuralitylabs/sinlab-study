@@ -37,6 +37,7 @@ bun run test:all     # build/db:types/lint/format/check/test を一括実行
 - ブランチ名は変更内容が分かる接頭辞付きで命名する（例: `feature/...`、`fix/...`、`docs/...`、`refactor/...`）。
 - 変更は作業ブランチへコミットし、`main` への反映は必ずプルリクエスト経由で行う。
 - `main` への force push は禁止。
+- **リモートへ push する前には、対象ブランチを問わず必ずユーザーに確認を取ること。** ユーザーの承認を得てから push を実行する。
 
 ## プルリクエスト
 
