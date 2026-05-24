@@ -68,6 +68,8 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
     (initialData?.code_language as CodeLanguage) ?? "javascript"
   );
   const [pdfUrl, setPdfUrl] = useState(initialData?.pdf_url ?? "");
+  const [pdfFolder, setPdfFolder] = useState("");
+  const [slideNumber, setSlideNumber] = useState("");
   const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
 
@@ -85,12 +87,35 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       return;
     }
 
+    const folder = pdfFolder.trim().toLowerCase();
+    if (!folder) {
+      setMessage({ type: "error", text: "保存先フォルダ（コーススラッグ）を入力してください" });
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      return;
+    }
+    if (!/^[a-z0-9-]+$/.test(folder)) {
+      setMessage({
+        type: "error",
+        text: "フォルダ名は英小文字・数字・ハイフンのみ使用できます",
+      });
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      return;
+    }
+
     setIsUploading(true);
     setMessage(null);
 
     try {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("folder", folder);
+      if (slideNumber.trim()) {
+        formData.append("slideNumber", slideNumber.trim());
+      }
 
       const response = await fetch("/api/upload-pdf", {
         method: "POST",
@@ -100,8 +125,8 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       if (response.ok) {
         const data = await response.json();
         setPdfUrl(data.url);
-        setPdfFileName(file.name);
-        setMessage({ type: "success", text: "PDFをアップロードしました" });
+        setPdfFileName(data.path ?? file.name);
+        setMessage({ type: "success", text: `スライドをアップロードしました（${data.path}）` });
       } else {
         const data = await response.json();
         setMessage({ type: "error", text: data.error || "アップロードに失敗しました" });
@@ -251,6 +276,36 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
 
           {contentType === "slide" && (
             <div className="space-y-3">
+              {/* 保存先フォルダ・スライド番号 */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="pdfFolder">保存先フォルダ（コーススラッグ）</Label>
+                  <Input
+                    id="pdfFolder"
+                    value={pdfFolder}
+                    onChange={(e) => setPdfFolder(e.target.value)}
+                    placeholder="例: gas-advanced"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    slides/&lt;フォルダ&gt;/slide-NN.pdf
+                    として保存されます（英小文字・数字・ハイフン）
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="slideNumber">スライド番号</Label>
+                  <Input
+                    id="slideNumber"
+                    type="number"
+                    min={1}
+                    value={slideNumber}
+                    onChange={(e) => setSlideNumber(e.target.value)}
+                    placeholder="空欄で自動採番"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    指定するとその番号で保存（既存は上書き）。空欄なら次の番号を自動採番。
+                  </p>
+                </div>
+              </div>
               <Label>PDFファイル</Label>
               <div className="flex items-center gap-3">
                 <Button
