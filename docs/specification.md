@@ -401,22 +401,35 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 
 **アクセス権限**: `admin` または `maintainer` ロール
 
-**リクエスト**: `multipart/form-data` で PDF ファイルを送信（最大50MB）
+**リクエスト**: `multipart/form-data`（最大50MB）
+
+| フィールド | 必須 | 説明 |
+|:--|:--|:--|
+| `file` | ○ | アップロードする PDF ファイル |
+| `folder` | - | 保存先フォルダ（コーススラッグ。例: `gas-advanced`）。英小文字・数字・ハイフンのみ |
+| `slideNumber` | - | スライド番号（1以上の整数）。`folder` 指定時のみ有効 |
+
+**命名規約**: スライドは `slides` バケット内にオブジェクトキー `<コーススラッグ>/slide-NN.pdf` で保存する（NN は最低2桁のゼロ埋め。1〜99は `01`〜`99`、100以上は `100` のように桁が増える）。例: キー `gas/slide-01.pdf`・`gas-advanced/slide-03.pdf` → 公開URL `.../storage/v1/object/public/slides/gas/slide-01.pdf`。
 
 **処理フロー**:
 1. 認証チェック
 2. ロール確認（admin / maintainer のみ許可）
-3. Supabase Storage の `slides` バケットにアップロード
-4. 公開 URL を返却
+3. 保存先オブジェクトキーの決定
+   - `folder` 指定あり: `<folder>/slide-NN.pdf`
+     - `slideNumber` 指定あり → その番号で保存（同名ファイルは上書き）
+     - `slideNumber` 指定なし → 同フォルダ内の既存 `slide-NN.pdf` を走査し、最大値+1 で自動採番（走査失敗時は500）
+   - `folder` 指定なし: 後方互換のため `<timestamp>_<sanitizedName>` でバケット直下に保存
+4. Supabase Storage の `slides` バケットにアップロード
+5. 公開 URL と保存パスを返却
 
 **レスポンス**:
 
 | ステータス | 条件 |
 |:--|:--|
-| 200 | 正常（`{ url: string }` を返却） |
-| 400 | ファイルなし / サイズ超過 / PDF以外 |
+| 200 | 正常（`{ url: string, path: string }` を返却） |
+| 400 | ファイルなし / サイズ超過 / PDF以外 / フォルダ名不正 / 番号不正 |
 | 403 | 権限なし |
-| 500 | アップロード失敗 / サーバーエラー |
+| 500 | アップロード失敗（自動採番中の重複含む） / サーバーエラー |
 
 ### 6.1.2 AIレビュー API
 
@@ -685,3 +698,4 @@ GET /auth/callback
 | 2026年4月 | ユーザー管理画面にロール変更機能を追加（2.6節・6.1.3節・7.4節を更新） |
 | 2026年4月 | コンテンツ階層にThemeを追加し4階層化（3.1〜3.3節更新）。管理ルートを /manage に移行（6.1節・7.3節更新）。AIレビューAPI・PDFアップロードAPI追加（6.1.1〜6.1.2節）。スライドコンテンツ種別・PDF Viewerコンポーネント追記 |
 | 2026年4月 | Slack通知機能を追加（セクション9）。アーキテクチャ図・レイヤー構成にNotification Servicesを追加 |
+| 2026年5月 | PDFアップロードAPIに保存先フォルダ・連番ファイル名（`slides/<コース>/slide-NN.pdf`）対応を追加（6.1.1節）。自動採番・番号指定上書きに対応 |
