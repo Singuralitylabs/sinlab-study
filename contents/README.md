@@ -7,21 +7,26 @@
 | 講座名 | ディレクトリ | フェーズ数 | 週数 |
 |--------|-------------|-----------|------|
 | [GAS学習](./gas/README.md) | `gas/` | 7 | 12 |
+| [GAS学習（応用編）](./gas-advanced/README.md) | `gas-advanced/` | 2 | 5 |
 
 ## ディレクトリ構成
 
 ```
 contents/
 ├── README.md          # このファイル（講座一覧）
-└── gas/               # GAS学習コース
-    ├── README.md      # GAS講座概要・フェーズ一覧
-    ├── phase1.md      # Phase 1 - 基礎文法
-    ├── phase2.md      # Phase 2 - Googleドライブ
-    ├── phase3.md      # Phase 3 - スプレッドシート活用
-    ├── phase4.md      # Phase 4 - Gmailの送信
-    ├── phase5.md      # Phase 5 - Googleフォーム
-    ├── phase6.md      # Phase 6 - Googleカレンダー
-    └── phase7.md      # Phase 7 - GASの便利な機能
+├── gas/               # GAS学習コース
+│   ├── README.md      # GAS講座概要・フェーズ一覧
+│   ├── phase1.md      # Phase 1 - 基礎文法
+│   ├── phase2.md      # Phase 2 - Googleドライブ
+│   ├── phase3.md      # Phase 3 - スプレッドシート活用
+│   ├── phase4.md      # Phase 4 - Gmailの送信
+│   ├── phase5.md      # Phase 5 - Googleフォーム
+│   ├── phase6.md      # Phase 6 - Googleカレンダー
+│   └── phase7.md      # Phase 7 - GASの便利な機能
+└── gas-advanced/      # GAS学習（応用編）コース
+    ├── README.md      # 応用編講座概要・フェーズ一覧
+    ├── phase1.md      # Phase 1 - Web開発の基礎
+    └── phase2.md      # Phase 2 - Webアプリ公開
 ```
 
 ## 新講座の追加方法
