@@ -48,6 +48,19 @@ const SUBMISSION_TYPE_OPTIONS: {
   { value: "both", label: "コード・URL選択", description: "受講生がどちらかを選択して提出" },
 ];
 
+/**
+ * 既存スライドの pdf_url（例: .../slides/gas-advanced/slide-03.pdf）から
+ * コーススラッグとスライド番号を抽出する。命名規約に沿わない場合は空を返す。
+ */
+function parseSlidePath(pdfUrl: string | null | undefined): {
+  folder: string;
+  slideNumber: string;
+} {
+  const match = pdfUrl?.match(/\/slides\/([a-z0-9-]+)\/slide-(\d+)\.pdf$/);
+  if (!match) return { folder: "", slideNumber: "" };
+  return { folder: match[1], slideNumber: String(Number.parseInt(match[2], 10)) };
+}
+
 export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -67,16 +80,21 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
   const [codeLanguage, setCodeLanguage] = useState<CodeLanguage>(
     (initialData?.code_language as CodeLanguage) ?? "javascript"
   );
+  const initialSlide = parseSlidePath(initialData?.pdf_url);
   const [pdfUrl, setPdfUrl] = useState(initialData?.pdf_url ?? "");
-  const [pdfFolder, setPdfFolder] = useState("");
-  const [slideNumber, setSlideNumber] = useState("");
+  const [pdfFolder, setPdfFolder] = useState(initialSlide.folder);
+  const [slideNumber, setSlideNumber] = useState(initialSlide.slideNumber);
   const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [pdfFileName, setPdfFileName] = useState<string | null>(null);
+  const [pdfFileName, setPdfFileName] = useState<string | null>(
+    initialSlide.folder
+      ? `${initialSlide.folder}/slide-${initialSlide.slideNumber.padStart(2, "0")}.pdf`
+      : null
+  );
 
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

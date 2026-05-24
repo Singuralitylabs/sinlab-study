@@ -14,6 +14,8 @@ const SLIDE_FILE_PATTERN = /^slide-(\d+)\.pdf$/;
 /**
  * 指定フォルダ内の既存 slide-NN.pdf を走査し、次に使う連番（最大値+1）を返す。
  * 既存が無ければ 1 を返す。
+ * 一覧取得に失敗した場合は走査失敗を区別できないため例外を投げる
+ * （誤った自動採番で既存ファイルを上書き／409誤判定するのを防ぐ）。
  */
 async function getNextSlideNumber(
   supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
@@ -22,7 +24,7 @@ async function getNextSlideNumber(
   const { data, error } = await supabase.storage.from(BUCKET_NAME).list(folder, { limit: 1000 });
 
   if (error || !data) {
-    return 1;
+    throw new Error(`スライド一覧の取得に失敗しました: ${error?.message ?? "unknown error"}`);
   }
 
   let maxNumber = 0;
@@ -106,7 +108,15 @@ export async function POST(request: NextRequest) {
         allowOverwrite = true;
       } else {
         // 番号未指定時：同フォルダ内の既存連番から自動採番
-        slideNumber = await getNextSlideNumber(supabase, folder);
+        try {
+          slideNumber = await getNextSlideNumber(supabase, folder);
+        } catch (listError) {
+          console.error("スライド一覧取得エラー:", listError);
+          return NextResponse.json(
+            { error: "スライド一覧の取得に失敗しました。時間をおいて再度お試しください" },
+            { status: 500 }
+          );
+        }
       }
 
       const paddedNumber = String(slideNumber).padStart(2, "0");

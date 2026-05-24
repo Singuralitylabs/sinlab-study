@@ -87,7 +87,7 @@ app/
 - **user_progress**: コンテンツごとの完了状態を記録（user+contentでユニーク）
 - **submissions**: 演習コンテンツに紐づくコードまたはURLの提出物
 
-スライドPDFは Supabase Storage の `slides` バケットに **`slides/<コーススラッグ>/slide-NN.pdf`**（NNは2桁ゼロ埋め）の命名規約で保存する（例: `slides/gas/slide-01.pdf`、`slides/gas-advanced/slide-03.pdf`）。アップロードAPI（`app/api/upload-pdf/route.ts`）はフォルダ指定＋連番（自動採番／番号指定）に対応しており、シードSQL（`supabase/migrations/03_seed/`）もこのパスを前提とする。
+スライドPDFは Supabase Storage の `slides` バケット内に、オブジェクトキー **`<コーススラッグ>/slide-NN.pdf`**（NNは最低2桁のゼロ埋め）で保存する（例: キー `gas-advanced/slide-03.pdf` → 公開URL `.../storage/v1/object/public/slides/gas-advanced/slide-03.pdf`）。アップロードAPI（`app/api/upload-pdf/route.ts`）はフォルダ指定＋連番（自動採番／番号指定）に対応しており、シードSQL（`supabase/migrations/03_seed/`）もこのパスを前提とする。
 
 セキュリティはデータベースレベルの**Row Level Security (RLS)** ポリシーで実現。公開コンテンツは認証済み全ユーザーが閲覧可能、進捗・提出物は本人のみ、管理者は全データの読み書きが可能。
 
