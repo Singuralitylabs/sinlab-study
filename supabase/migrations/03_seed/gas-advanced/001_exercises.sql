@@ -34,6 +34,8 @@ WHERE t.name = 'GAS学習（応用編）' AND w.name = 'GASとHTMLの基礎'
 INSERT INTO learning_contents (week_id, title, content_type, exercise_instructions, reference_answer, hint, allowed_submission_types, code_language, display_order, is_published)
 SELECT w.id, '課題1-2: HTMLファイルを読み込んで表示する', 'exercise', $i$
 `index.html` というHTMLファイルを作成し、見出し・段落・箇条書きリストを含むページをウェブアプリで表示してください。
+
+※ コード提出欄は1つです。`コード.gs`（GAS側のコード）と `index.html`（HTML側のコード）の両方が必要なので、両方を1つの入力欄にまとめて貼り付けてください（`// コード.gs`・`<!-- index.html -->` のコメントで区切ると分かりやすいです）。
 $i$, $a$
 // コード.gs
 function doGet() {
@@ -276,6 +278,8 @@ WHERE t.name = 'GAS学習（応用編）' AND w.name = 'CSSフレームワーク
 INSERT INTO learning_contents (week_id, title, content_type, exercise_instructions, reference_answer, hint, allowed_submission_types, code_language, display_order, is_published)
 SELECT w.id, '課題3-3: レスポンシブ対応のグリッドを作る', 'exercise', $i$
 画面幅に応じて列数が変わるグリッドを作成してください。スマホでは1列、タブレット以上（md）では3列に表示します。
+
+※ コード提出欄は1つです。`コード.gs`（GAS側のコード）と `index.html`（HTML側のコード）の両方が必要なので、両方を1つの入力欄にまとめて貼り付けてください（`// コード.gs`・`<!-- index.html -->` のコメントで区切ると分かりやすいです）。
 $i$, $a$
 // コード.gs
 function doGet() {
@@ -318,6 +322,8 @@ WHERE t.name = 'GAS学習（応用編）' AND w.name = 'CSSフレームワーク
 INSERT INTO learning_contents (week_id, title, content_type, exercise_instructions, reference_answer, hint, allowed_submission_types, code_language, display_order, is_published)
 SELECT w.id, '課題4-1: セルの値をWebアプリに表示する', 'exercise', $i$
 スプレッドシートのA1セルの値を取得し、Webアプリの見出しとして表示してください。
+
+※ コード提出欄は1つです。`コード.gs`（GAS側のコード）と `index.html`（HTML側のコード）の両方が必要なので、両方を1つの入力欄にまとめて貼り付けてください（`// コード.gs`・`<!-- index.html -->` のコメントで区切ると分かりやすいです）。
 $i$, $a$
 // コード.gs
 function doGet() {
@@ -353,6 +359,8 @@ WHERE t.name = 'GAS学習（応用編）' AND w.name = 'スプレッドシート
 INSERT INTO learning_contents (week_id, title, content_type, exercise_instructions, reference_answer, hint, allowed_submission_types, code_language, display_order, is_published)
 SELECT w.id, '課題4-2: スプレッドシートの一覧をテーブルで表示する', 'exercise', $i$
 スプレッドシートの全データを取得し、HTMLのテーブルとして一覧表示してください。
+
+※ コード提出欄は1つです。`コード.gs`（GAS側のコード）と `index.html`（HTML側のコード）の両方が必要なので、両方を1つの入力欄にまとめて貼り付けてください（`// コード.gs`・`<!-- index.html -->` のコメントで区切ると分かりやすいです）。
 $i$, $a$
 // コード.gs
 function doGet() {
@@ -396,6 +404,8 @@ WHERE t.name = 'GAS学習（応用編）' AND w.name = 'スプレッドシート
 INSERT INTO learning_contents (week_id, title, content_type, exercise_instructions, reference_answer, hint, allowed_submission_types, code_language, display_order, is_published)
 SELECT w.id, '課題4-3: ボタンを押してデータ件数を取得する', 'exercise', $i$
 ボタンをクリックすると、`google.script.run` でサーバー関数を呼び出し、スプレッドシートのデータ件数を画面に表示してください。
+
+※ コード提出欄は1つです。`コード.gs`（GAS側のコード）と `index.html`（HTML側のコード）の両方が必要なので、両方を1つの入力欄にまとめて貼り付けてください（`// コード.gs`・`<!-- index.html -->` のコメントで区切ると分かりやすいです）。
 $i$, $a$
 // コード.gs
 function doGet() {
@@ -477,6 +487,8 @@ WHERE t.name = 'GAS学習（応用編）' AND w.name = 'フォーム回答結果
 INSERT INTO learning_contents (week_id, title, content_type, exercise_instructions, reference_answer, hint, allowed_submission_types, code_language, display_order, is_published)
 SELECT w.id, '課題5-2: フォームの内容をスプレッドシートに保存する', 'exercise', $i$
 フォームに入力した名前とメッセージを、`google.script.run` でスプレッドシートに保存してください。
+
+※ コード提出欄は1つです。`コード.gs`（GAS側のコード）と `index.html`（HTML側のコード）の両方が必要なので、両方を1つの入力欄にまとめて貼り付けてください（`// コード.gs`・`<!-- index.html -->` のコメントで区切ると分かりやすいです）。
 $i$, $a$
 // コード.gs
 function doGet() {
@@ -529,6 +541,8 @@ WHERE t.name = 'GAS学習（応用編）' AND w.name = 'フォーム回答結果
 INSERT INTO learning_contents (week_id, title, content_type, exercise_instructions, reference_answer, hint, allowed_submission_types, code_language, display_order, is_published)
 SELECT w.id, '課題5-3: 回答結果を一覧表示する', 'exercise', $i$
 フォーム送信後に、これまでに保存された回答の一覧をWebアプリ上に表示してください。
+
+※ コード提出欄は1つです。`コード.gs`（GAS側のコード）と `index.html`（HTML側のコード）の両方が必要なので、両方を1つの入力欄にまとめて貼り付けてください（`// コード.gs`・`<!-- index.html -->` のコメントで区切ると分かりやすいです）。
 $i$, $a$
 // コード.gs
 function doGet() {
