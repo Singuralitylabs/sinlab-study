@@ -31,6 +31,13 @@ bun run test         # Vitestによるユニットテスト実行
 bun run test:all     # build/db:types/lint/format/check/test を一括実行
 ```
 
+## ブランチ運用
+
+- **`main` ブランチへ直接コミット・直接 push してはならない。** バグ修正・機能追加・ドキュメント更新などあらゆる変更は、必ず作業用のブランチを切ってから行うこと。
+- ブランチ名は変更内容が分かる接頭辞付きで命名する（例: `feature/...`、`fix/...`、`docs/...`、`refactor/...`）。
+- 変更は作業ブランチへコミットし、`main` への反映は必ずプルリクエスト経由で行う。
+- `main` への force push は禁止。
+
 ## プルリクエスト
 
 PRを作成する際は必ず `.github/pull_request_template.md` のテンプレートに従うこと。
