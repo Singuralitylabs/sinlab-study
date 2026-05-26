@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import type { CodeFile } from "@/app/types";
 
 const MODEL_NAME = "gemini-2.5-flash";
 const MAX_CODE_LENGTH = 8000;
@@ -30,6 +31,39 @@ interface ReviewResult {
   completionTokens: number | null;
 }
 
+/**
+ * AIレビュー対象の提出内容。
+ * - url: URL提出（1件）
+ * - code: コード提出（単一/複数ファイル）
+ */
+export type ReviewSubmission =
+  | { type: "url"; content: string }
+  | { type: "code"; files: CodeFile[] };
+
+/**
+ * コードファイル群をプロンプト用のコードセクションに整形する。
+ * - 単一ファイル（ファイル名なし）: 従来どおりコードフェンスのみ
+ * - 複数ファイル: ファイル名・言語のヘッダー付きで各ファイルをフェンス表示
+ */
+function buildCodeSection(files: CodeFile[]): string {
+  if (files.length === 1 && !files[0].filename) {
+    const content = files[0].content;
+    const truncated =
+      content.length > MAX_CODE_LENGTH
+        ? `${content.substring(0, MAX_CODE_LENGTH)}\n\n... (${content.length - MAX_CODE_LENGTH}文字省略)`
+        : content;
+    return `\`\`\`\n${truncated}\n\`\`\``;
+  }
+
+  return files
+    .map((file, index) => {
+      const name = file.filename || `ファイル${index + 1}`;
+      const header = file.language ? `${name} (${file.language})` : name;
+      return `### ${header}\n\`\`\`\n${file.content}\n\`\`\``;
+    })
+    .join("\n\n");
+}
+
 function isRateLimitError(error: unknown): boolean {
   if (error instanceof Error) {
     return error.message.includes("429") || error.message.includes("Too Many Requests");
@@ -43,8 +77,7 @@ function sleep(ms: number): Promise<void> {
 
 export async function generateReview(
   exerciseInstructions: string,
-  submissionContent: string,
-  submissionType: "code" | "url",
+  submission: ReviewSubmission,
   referenceAnswer?: string | null
 ): Promise<ReviewResult> {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -70,27 +103,20 @@ export async function generateReview(
   const referenceSection = referenceAnswer ? `\n## 模範回答\n${referenceAnswer}\n` : "";
 
   let userPrompt: string;
-  if (submissionType === "url") {
+  if (submission.type === "url") {
     userPrompt = `## 課題内容
 ${exerciseInstructions}
 ${referenceSection}
 ## 提出内容（URL）
-${submissionContent}
+${submission.content}
 
 ※ URL提出のため、URLの内容を直接確認することはできません。URL形式の妥当性と、課題要件への適合性（URLの構造やドメインから推測できる範囲）のみ評価してください。`;
   } else {
-    const truncated =
-      submissionContent.length > MAX_CODE_LENGTH
-        ? `${submissionContent.substring(0, MAX_CODE_LENGTH)}\n\n... (${submissionContent.length - MAX_CODE_LENGTH}文字省略)`
-        : submissionContent;
-
     userPrompt = `## 課題内容
 ${exerciseInstructions}
 ${referenceSection}
 ## 提出コード
-\`\`\`
-${truncated}
-\`\`\``;
+${buildCodeSection(submission.files)}`;
   }
 
   let lastError: unknown;

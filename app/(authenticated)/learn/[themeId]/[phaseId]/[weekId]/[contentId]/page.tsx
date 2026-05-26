@@ -5,7 +5,9 @@ import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
 import { PdfSlideViewerNoSSR as PdfSlideViewer } from "@/app/components/PdfSlideViewerNoSSR";
+import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
+import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
 import {
   fetchContentById,
@@ -142,9 +144,10 @@ export default async function ContentPage({ params }: PageProps) {
                       <div className="mb-6">
                         <h3 className="text-lg font-semibold mb-3">提出内容</h3>
                         {latestSubmission.submission_type === "code" ? (
-                          <pre className="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre-wrap">
-                            {latestSubmission.code_content}
-                          </pre>
+                          <SubmissionCodeBlock
+                            files={getSubmissionCodeFiles(latestSubmission)}
+                            preClassName="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre-wrap"
+                          />
                         ) : (
                           <p className="text-sm text-muted-foreground break-all">
                             {latestSubmission.url}
