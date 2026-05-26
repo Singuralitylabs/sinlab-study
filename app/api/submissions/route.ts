@@ -27,9 +27,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "必須パラメータが不足しています" }, { status: 400 });
     }
 
+    // 提出種別の許容値を明示的に検証（不正値はDBのCHECK制約違反→500になる前に400で弾く）
+    if (submissionType !== "code" && submissionType !== "url") {
+      return NextResponse.json({ error: "提出種別が不正です" }, { status: 400 });
+    }
+
     // コード提出時の保存形式を決定（後方互換: 単一ファイルは code_content、複数は code_files）
     let storedCodeContent: string | null = null;
     let storedCodeFiles: CodeFile[] | null = null;
+    let storedUrl: string | null = null;
 
     if (submissionType === "code") {
       const files = sanitizeCodeFiles(codeFiles);
@@ -44,10 +50,13 @@ export async function POST(request: NextRequest) {
       } else {
         return NextResponse.json({ error: "コードが入力されていません" }, { status: 400 });
       }
-    }
-
-    if (submissionType === "url" && !url) {
-      return NextResponse.json({ error: "URLが入力されていません" }, { status: 400 });
+    } else {
+      // URL提出: 空白のみの値を弾き、トリム済みの値を保存する
+      const trimmedUrl = typeof url === "string" ? url.trim() : "";
+      if (trimmedUrl.length === 0) {
+        return NextResponse.json({ error: "URLが入力されていません" }, { status: 400 });
+      }
+      storedUrl = trimmedUrl;
     }
 
     // 認証チェック
@@ -72,7 +81,7 @@ export async function POST(request: NextRequest) {
         submission_type: submissionType,
         code_content: storedCodeContent,
         code_files: storedCodeFiles,
-        url: submissionType === "url" ? url : null,
+        url: storedUrl,
         submitted_at: new Date().toISOString(),
       })
       .select()
