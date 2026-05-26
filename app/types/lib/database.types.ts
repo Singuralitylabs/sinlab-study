@@ -256,6 +256,7 @@ export type Database = {
       submissions: {
         Row: {
           code_content: string | null;
+          code_files: Json | null;
           content_id: number;
           created_at: string | null;
           id: number;
@@ -266,6 +267,7 @@ export type Database = {
         };
         Insert: {
           code_content?: string | null;
+          code_files?: Json | null;
           content_id: number;
           created_at?: string | null;
           id?: number;
@@ -276,6 +278,7 @@ export type Database = {
         };
         Update: {
           code_content?: string | null;
+          code_files?: Json | null;
           content_id?: number;
           created_at?: string | null;
           id?: number;

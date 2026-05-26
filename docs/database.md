@@ -101,6 +101,7 @@ erDiagram
         int content_id FK
         varchar submission_type
         text code_content
+        jsonb code_files
         text url
         timestamptz submitted_at
     }
@@ -269,19 +270,23 @@ erDiagram
 | user_id | INTEGER | NO | - | FK → users(id) ON DELETE CASCADE | ユーザーID |
 | content_id | INTEGER | NO | - | FK → learning_contents(id) ON DELETE CASCADE | コンテンツID |
 | submission_type | VARCHAR(20) | NO | - | CHECK ('code', 'url') | 提出種別 |
-| code_content | TEXT | YES | NULL | - | コード内容（code時） |
+| code_content | TEXT | YES | NULL | - | コード内容（code・単一ファイル時） |
+| code_files | JSONB | YES | NULL | - | コード内容（code・複数ファイル時）。`[{filename, language, content}]` |
 | url | TEXT | YES | NULL | - | URL（url時） |
 | submitted_at | TIMESTAMPTZ | YES | NOW() | - | 提出日時 |
 | created_at | TIMESTAMPTZ | YES | NOW() | - | 作成日時 |
 
 **submission_type別の利用カラム**:
 
-| submission_type | code_content | url |
-|:--|:--:|:--:|
-| code | 使用 | - |
-| url | - | 使用 |
+| submission_type | code_content | code_files | url |
+|:--|:--:|:--:|:--:|
+| code（単一ファイル） | 使用 | - | - |
+| code（複数ファイル） | - | 使用 | - |
+| url | - | - | 使用 |
 
-**補足**: 同一コンテンツに対する複数回提出が可能（ユニーク制約なし）。
+**補足**:
+- 同一コンテンツに対する複数回提出が可能（ユニーク制約なし）。
+- コード提出は単一/複数ファイルに対応。単一ファイルは `code_content`、複数ファイル（例: `コード.gs` + `index.html`）は `code_files` に保存し、もう一方は `NULL`。既存の `code_content` のみの提出はそのまま有効（後方互換）。
 
 ---
 
@@ -464,6 +469,7 @@ user_id IN (
 | `013_add_code_language.sql` | 演習コンテンツのコードエディタ言語カラム追加 |
 | `014_add_hint_column.sql` | 演習コンテンツのヒントカラム追加 |
 | `015_seed_gas_hints.sql` | GAS講座全演習課題へのヒントデータ投入 |
+| `01_schema/002_add_submission_code_files.sql` | submissionsに複数ファイル提出用 `code_files` カラム追加 |
 
 ---
 

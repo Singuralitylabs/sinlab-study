@@ -1,6 +1,6 @@
 "use client";
 
-import { Code, Link as LinkIcon, Loader2, Send } from "lucide-react";
+import { Code, Link as LinkIcon, Loader2, Plus, Send, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
@@ -10,6 +10,20 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+const CODE_LANGUAGE_OPTIONS: { value: CodeLanguage; label: string }[] = [
+  { value: "javascript", label: "JavaScript / GAS" },
+  { value: "typescript", label: "TypeScript" },
+  { value: "html", label: "HTML" },
+  { value: "css", label: "CSS" },
+];
+
+interface CodeFileInput {
+  id: string;
+  filename: string;
+  language: CodeLanguage;
+  content: string;
+}
 
 interface SubmissionFormProps {
   contentId: number;
@@ -28,12 +42,31 @@ export function SubmissionForm({
   const [submissionType, setSubmissionType] = useState<SubmissionType>(
     allowedSubmissionTypes === "url" ? "url" : "code"
   );
-  const [codeContent, setCodeContent] = useState("");
+  const [codeFiles, setCodeFiles] = useState<CodeFileInput[]>([
+    { id: "file-0", filename: "", language: codeLanguage, content: "" },
+  ]);
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [aiReview, setAiReview] = useState<AIReview | null>(null);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
+
+  const isMultiFile = codeFiles.length > 1;
+
+  const updateCodeFile = (index: number, patch: Partial<CodeFileInput>) => {
+    setCodeFiles((prev) => prev.map((file, i) => (i === index ? { ...file, ...patch } : file)));
+  };
+
+  const addCodeFile = () => {
+    setCodeFiles((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), filename: "", language: codeLanguage, content: "" },
+    ]);
+  };
+
+  const removeCodeFile = (index: number) => {
+    setCodeFiles((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const requestAIReview = async (submissionId: number) => {
     setIsReviewLoading(true);
@@ -125,7 +158,14 @@ export function SubmissionForm({
           contentId,
           userId,
           submissionType,
-          codeContent: submissionType === "code" ? codeContent : null,
+          codeFiles:
+            submissionType === "code"
+              ? codeFiles.map((file) => ({
+                  filename: file.filename,
+                  language: file.language,
+                  content: file.content,
+                }))
+              : null,
           url: submissionType === "url" ? url : null,
         }),
       });
@@ -133,7 +173,7 @@ export function SubmissionForm({
       if (response.ok) {
         const data = await response.json();
         setMessage({ type: "success", text: "提出が完了しました。AIレビューを生成中..." });
-        setCodeContent("");
+        setCodeFiles([{ id: "file-0", filename: "", language: codeLanguage, content: "" }]);
         setUrl("");
 
         const submissionId = data.submission.id;
@@ -152,8 +192,15 @@ export function SubmissionForm({
     }
   };
 
+  // コード提出: 全ファイルにコードがあり、複数ファイル時はファイル名も必須
+  const isCodeValid =
+    codeFiles.length > 0 &&
+    codeFiles.every(
+      (file) => file.content.trim().length > 0 && (!isMultiFile || file.filename.trim().length > 0)
+    );
+
   const isValid =
-    (submissionType === "code" && codeContent.trim().length > 0) ||
+    (submissionType === "code" && isCodeValid) ||
     (submissionType === "url" && url.trim().length > 0);
 
   return (
@@ -191,15 +238,72 @@ export function SubmissionForm({
 
         {/* 入力フィールド */}
         {submissionType === "code" ? (
-          <div className="space-y-2">
-            <Label>コード</Label>
-            <CodeEditor
-              value={codeContent}
-              onChange={setCodeContent}
-              language={codeLanguage}
-              placeholder="ここにコードを貼り付けてください..."
-              minHeight="200px"
-            />
+          <div className="space-y-3">
+            {codeFiles.map((file, index) => (
+              <div
+                key={file.id}
+                className={
+                  isMultiFile ? "space-y-2 rounded-lg border border-border p-3" : "space-y-2"
+                }
+              >
+                {isMultiFile ? (
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1 space-y-1">
+                      <Label htmlFor={`filename-${index}`} className="text-xs">
+                        ファイル名
+                      </Label>
+                      <Input
+                        id={`filename-${index}`}
+                        value={file.filename}
+                        onChange={(e) => updateCodeFile(index, { filename: e.target.value })}
+                        placeholder="例: コード.gs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor={`language-${index}`} className="text-xs">
+                        言語
+                      </Label>
+                      <select
+                        id={`language-${index}`}
+                        value={file.language}
+                        onChange={(e) =>
+                          updateCodeFile(index, { language: e.target.value as CodeLanguage })
+                        }
+                        className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                      >
+                        {CODE_LANGUAGE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeCodeFile(index)}
+                      aria-label="このファイルを削除"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <Label>コード</Label>
+                )}
+                <CodeEditor
+                  value={file.content}
+                  onChange={(value) => updateCodeFile(index, { content: value })}
+                  language={file.language}
+                  placeholder="ここにコードを貼り付けてください..."
+                  minHeight="200px"
+                />
+              </div>
+            ))}
+            <Button type="button" variant="outline" size="sm" onClick={addCodeFile}>
+              <Plus className="h-4 w-4" />
+              ファイルを追加
+            </Button>
           </div>
         ) : (
           <div className="space-y-2">

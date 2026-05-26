@@ -2,6 +2,8 @@ import { ClipboardList, Code, ExternalLink, Link as LinkIcon } from "lucide-reac
 import { AIReviewStatusBadge } from "@/app/components/AIReviewDisplay";
 import { AIReviewDisplayClient } from "@/app/components/AIReviewDisplayClient";
 import { PageTitle } from "@/app/components/PageTitle";
+import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
+import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import { fetchAllSubmissionsWithReviews } from "@/app/services/api/ai-review-server";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -71,10 +73,11 @@ export default async function ManageSubmissionsPage() {
                   <span className="text-sm font-medium">{submission.content?.title}</span>
                 </div>
 
-                {submission.submission_type === "code" && submission.code_content && (
-                  <pre className="p-3 bg-muted rounded-lg text-sm overflow-x-auto max-h-40">
-                    <code>{submission.code_content}</code>
-                  </pre>
+                {submission.submission_type === "code" && (
+                  <SubmissionCodeBlock
+                    files={getSubmissionCodeFiles(submission)}
+                    preClassName="p-3 bg-muted rounded-lg text-sm overflow-x-auto max-h-40"
+                  />
                 )}
 
                 {submission.submission_type === "url" &&

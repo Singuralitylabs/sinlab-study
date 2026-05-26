@@ -1,11 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import {
   updateAIReviewCompleted,
   updateAIReviewFailed,
   updateAIReviewProcessing,
   upsertPendingAIReview,
 } from "@/app/services/api/ai-review-server";
-import { generateReview } from "@/app/services/api/gemini";
+import { generateReview, type ReviewSubmission } from "@/app/services/api/gemini";
 import { getApiAuth, getApiSupabaseClient } from "@/app/services/auth/api-auth";
 
 const MAX_CODE_LENGTH = 8000;
@@ -52,20 +53,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 提出内容の取得
-    const submissionContent =
-      submission.submission_type === "code" ? submission.code_content : submission.url;
+    // 提出内容の取得（コードは単一/複数ファイルを正規化して扱う）
+    let reviewSubmission: ReviewSubmission;
+    if (submission.submission_type === "code") {
+      const files = getSubmissionCodeFiles(submission);
+      if (files.length === 0) {
+        return NextResponse.json({ error: "提出内容が空です" }, { status: 400 });
+      }
 
-    if (!submissionContent) {
-      return NextResponse.json({ error: "提出内容が空です" }, { status: 400 });
-    }
+      // 全ファイル合計のコード長チェック
+      const totalLength = files.reduce((sum, file) => sum + file.content.length, 0);
+      if (totalLength > MAX_CODE_LENGTH) {
+        return NextResponse.json(
+          { error: `コードが長すぎます（上限: ${MAX_CODE_LENGTH}文字）` },
+          { status: 400 }
+        );
+      }
 
-    // コード長チェック
-    if (submission.submission_type === "code" && submissionContent.length > MAX_CODE_LENGTH) {
-      return NextResponse.json(
-        { error: `コードが長すぎます（上限: ${MAX_CODE_LENGTH}文字）` },
-        { status: 400 }
-      );
+      reviewSubmission = { type: "code", files };
+    } else {
+      if (!submission.url) {
+        return NextResponse.json({ error: "提出内容が空です" }, { status: 400 });
+      }
+      reviewSubmission = { type: "url", content: submission.url };
     }
 
     // GEMINI_API_KEY 確認
@@ -128,8 +138,7 @@ export async function POST(request: NextRequest) {
     try {
       const result = await generateReview(
         content.exercise_instructions,
-        submissionContent,
-        submission.submission_type as "code" | "url",
+        reviewSubmission,
         content.reference_answer
       );
 
