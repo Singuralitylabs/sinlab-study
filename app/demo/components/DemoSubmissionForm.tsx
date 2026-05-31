@@ -13,6 +13,7 @@ import {
 import { useState } from "react";
 import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
 import {
+  buildDefaultFilename,
   CodeEditor,
   type CodeLanguage,
   DEFAULT_FILENAME_BY_LANGUAGE,
@@ -36,6 +37,8 @@ interface CodeFileInput {
   filename: string;
   language: CodeLanguage;
   content: string;
+  // ユーザーがファイル名を手動編集したか。false の間は言語変更にあわせて初期値を自動更新する
+  filenameEdited: boolean;
 }
 
 // デモ用のサンプルAIレビュー（実際のAPI呼び出しは行わない）
@@ -85,7 +88,7 @@ export function DemoSubmissionForm({
     allowedSubmissionTypes === "url" ? "url" : "code"
   );
   const [codeFiles, setCodeFiles] = useState<CodeFileInput[]>([
-    { id: "file-0", filename: "", language: codeLanguage, content: "" },
+    { id: "file-0", filename: "", language: codeLanguage, content: "", filenameEdited: false },
   ]);
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -98,11 +101,51 @@ export function DemoSubmissionForm({
     setCodeFiles((prev) => prev.map((file, i) => (i === index ? { ...file, ...patch } : file)));
   };
 
+  // ファイル名入力欄の変更。手動編集とみなし、以後は言語変更で初期値を上書きしない
+  const handleFilenameChange = (index: number, filename: string) => {
+    updateCodeFile(index, { filename, filenameEdited: true });
+  };
+
+  // 言語変更。ファイル名が未編集なら、新しい言語のデフォルト名へ追従させる
+  const handleLanguageChange = (index: number, language: CodeLanguage) => {
+    setCodeFiles((prev) =>
+      prev.map((file, i) => {
+        if (i !== index) {
+          return file;
+        }
+        if (file.filenameEdited) {
+          return { ...file, language };
+        }
+        const otherFilenames = prev.filter((_, j) => j !== index).map((f) => f.filename);
+        return { ...file, language, filename: buildDefaultFilename(language, otherFilenames) };
+      })
+    );
+  };
+
   const addCodeFile = () => {
-    setCodeFiles((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), filename: "", language: codeLanguage, content: "" },
-    ]);
+    setCodeFiles((prev) => {
+      // 単一→複数ファイル化の初回は、ファイル名が空のファイルにデフォルト名を補完する
+      // （単一ファイル時はファイル名欄が非表示で未入力のため、複数化と同時に必須化される対策）
+      const assigned: string[] = prev
+        .map((f) => f.filename)
+        .filter((name) => name.trim().length > 0);
+      const backfilled = prev.map((file) => {
+        if (file.filename.trim().length > 0) {
+          return file;
+        }
+        const filename = buildDefaultFilename(file.language, assigned);
+        assigned.push(filename);
+        return { ...file, filename };
+      });
+      const newFile: CodeFileInput = {
+        id: crypto.randomUUID(),
+        filename: buildDefaultFilename(codeLanguage, assigned),
+        language: codeLanguage,
+        content: "",
+        filenameEdited: false,
+      };
+      return [...backfilled, newFile];
+    });
   };
 
   const removeCodeFile = (index: number) => {
@@ -183,7 +226,7 @@ export function DemoSubmissionForm({
                       <Input
                         id={`demo-filename-${index}`}
                         value={file.filename}
-                        onChange={(e) => updateCodeFile(index, { filename: e.target.value })}
+                        onChange={(e) => handleFilenameChange(index, e.target.value)}
                         placeholder={`例: ${DEFAULT_FILENAME_BY_LANGUAGE[file.language]}`}
                       />
                     </div>
@@ -195,7 +238,7 @@ export function DemoSubmissionForm({
                         id={`demo-language-${index}`}
                         value={file.language}
                         onChange={(e) =>
-                          updateCodeFile(index, { language: e.target.value as CodeLanguage })
+                          handleLanguageChange(index, e.target.value as CodeLanguage)
                         }
                         className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
                       >

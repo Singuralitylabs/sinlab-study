@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
 import {
+  buildDefaultFilename,
   CodeEditor,
   type CodeLanguage,
   DEFAULT_FILENAME_BY_LANGUAGE,
@@ -30,23 +31,6 @@ interface CodeFileInput {
   content: string;
   // ユーザーがファイル名を手動編集したか。false の間は言語変更にあわせて初期値を自動更新する
   filenameEdited: boolean;
-}
-
-// 既存のファイル名と衝突しないデフォルトファイル名を生成する（例: index.html → index-2.html）
-function buildDefaultFilename(language: CodeLanguage, existingFilenames: string[]): string {
-  const base = DEFAULT_FILENAME_BY_LANGUAGE[language];
-  const taken = new Set(existingFilenames.map((name) => name.trim()).filter(Boolean));
-  if (!taken.has(base)) {
-    return base;
-  }
-  const dotIndex = base.lastIndexOf(".");
-  const stem = dotIndex === -1 ? base : base.slice(0, dotIndex);
-  const ext = dotIndex === -1 ? "" : base.slice(dotIndex);
-  let counter = 2;
-  while (taken.has(`${stem}-${counter}${ext}`)) {
-    counter += 1;
-  }
-  return `${stem}-${counter}${ext}`;
 }
 
 interface SubmissionFormProps {
