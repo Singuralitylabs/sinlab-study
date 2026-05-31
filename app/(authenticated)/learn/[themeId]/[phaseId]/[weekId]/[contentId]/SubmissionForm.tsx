@@ -209,7 +209,7 @@ export function SubmissionForm({
 
   const [lastSubmissionId, setLastSubmissionId] = useState<number | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage(null);
