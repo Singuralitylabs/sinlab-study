@@ -61,7 +61,9 @@
 
 ## 2. 認証・認可機能
 
-### 2.1 ミドルウェア認証フロー
+### 2.1 プロキシ（proxy.ts）による認証フロー
+
+> Next.js 16 では従来の Middleware が `proxy.ts` に改称された。本サービスの認証フローはこの `proxy.ts`（`proxy()` 関数）で実装している。
 
 ```
 リクエスト受信
@@ -82,7 +84,7 @@
 
 | レイヤー | 保護対象 | 方式 |
 |:--|:--|:--|
-| Middleware | 全ページ | Supabase Auth セッション + ユーザーステータス確認 |
+| プロキシ（`proxy.ts`） | 全ページ | Supabase Auth セッション + ユーザーステータス確認 |
 | クライアント側ガード | Client Components | React Context による認証状態の監視 |
 | RLS | データベース | `auth.uid()` によるRow Level Security |
 | API Routes | データ更新操作 | サーバー側での認証チェック |
@@ -191,7 +193,7 @@ OAuthコールバック処理中に初回ログインを検知し、`users` テ�
 | CSRF保護 | OAuth stateパラメータによるCSRF防止（Supabase管理） |
 | セッション管理 | HTTP-only cookieでセッショントークンを管理 |
 | トークン更新 | リフレッシュトークンによる自動更新 |
-| 未承認ユーザーのアクセス | ミドルウェア + RLSの二重チェック |
+| 未承認ユーザーのアクセス | プロキシ（`proxy.ts`） + RLSの二重チェック |
 | ステータス改ざん | `users` テーブルの更新はRLSでadminロールのみに制限 |
 | 自動登録の悪用 | Googleアカウントが必要。登録後は `pending` で管理者の承認が必須 |
 
@@ -245,11 +247,9 @@ OAuthコールバック処理中に初回ログインを検知し、`users` テ�
    │
    └─ /learn/[themeId]（Phase一覧）
         │
-        └─ /learn/[themeId]/[phaseId]（Week一覧）
+        └─ /learn/[themeId]/[phaseId]（Week・コンテンツ一覧）
              │
-             └─ /learn/[themeId]/[phaseId]/[weekId]（コンテンツ一覧）
-                  │
-                  └─ /learn/[themeId]/[phaseId]/[weekId]/[contentId]（コンテンツ詳細）
+             └─ /learn/[themeId]/[phaseId]/[weekId]/[contentId]（コンテンツ詳細）
 ```
 
 各階層でパンくずリストを表示し、上位階層への導線を提供する。
@@ -524,10 +524,10 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 | パス | 画面名 | 表示内容 |
 |:--|:--|:--|
 | `/` | ダッシュボード | 全体進捗率、Phase別進捗バー、学習への導線リンク |
-| `/learn` | Phase一覧 | 公開Phaseのカード一覧（名前、説明、表示順） |
-| `/learn/[phaseId]` | Week一覧 | パンくずリスト、Weekカード一覧（名前、説明、進捗バー） |
-| `/learn/[phaseId]/[weekId]` | コンテンツ一覧 | パンくずリスト、コンテンツリスト（タイトル、種別アイコン、完了チェック） |
-| `/learn/[phaseId]/[weekId]/[contentId]` | コンテンツ詳細 | パンくずリスト、コンテンツ本体、完了ボタン、提出フォーム（演習のみ）、前後ナビゲーション |
+| `/learn` | Theme一覧 | 公開Themeのカード一覧（名前、説明、サムネイル） |
+| `/learn/[themeId]` | Phase一覧 | パンくずリスト、Phaseカード一覧（名前、説明） |
+| `/learn/[themeId]/[phaseId]` | Week・コンテンツ一覧 | パンくずリスト、Week一覧と各Week内のコンテンツリスト（タイトル、種別アイコン、完了チェック） |
+| `/learn/[themeId]/[phaseId]/[weekId]/[contentId]` | コンテンツ詳細 | パンくずリスト、コンテンツ本体、完了ボタン、提出フォーム（演習のみ）、前後ナビゲーション |
 | `/submissions` | 提出履歴 | 提出一覧（提出日時、コンテンツ名、提出タイプ、内容プレビュー） |
 
 ### 7.3 管理・講師向け画面（`/manage`）
@@ -583,7 +583,7 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 |:--|:--|
 | Google認証キャンセル | `/login` に戻り、エラーメッセージを表示 |
 | OAuth コード交換失敗 | `/login` にリダイレクト |
-| セッション期限切れ | ミドルウェアが `/login` にリダイレクト |
+| セッション期限切れ | プロキシ（`proxy.ts`）が `/login` にリダイレクト |
 | Supabase接続エラー | サーバーログに出力、`/login` にリダイレクト |
 | ユーザー自動登録失敗 | サーバーログに出力。ステータス確認不可のため `/pending` 表示 |
 | 重複登録の試行 | `auth_id` のUNIQUE制約で防止。既存レコードを使用 |

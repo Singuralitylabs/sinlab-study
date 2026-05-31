@@ -397,9 +397,15 @@ $$ language 'plpgsql';
 |:--|:--|:--|:--|
 | Published {table} are viewable by authenticated users | SELECT | 認証済み全ユーザー | `is_published = true AND is_deleted = false` |
 | Admins can view all {table} | SELECT | admin | `users.role = 'admin'` |
+| Maintainers can view all {table} | SELECT | maintainer | `get_user_role() = 'maintainer'` |
 | Admins can insert {table} | INSERT | admin | `users.role = 'admin'` |
+| Maintainers can insert {table} | INSERT | maintainer | `get_user_role() = 'maintainer'` |
 | Admins can update {table} | UPDATE | admin | `users.role = 'admin'` |
+| Maintainers can update {table} | UPDATE | maintainer | `get_user_role() = 'maintainer'` |
 | Admins can delete {table} | DELETE | admin | `users.role = 'admin'` |
+| Maintainers can delete {table} | DELETE | maintainer | `get_user_role() = 'maintainer'` |
+
+admin と maintainer はいずれもコンテンツ系テーブルの全件参照・作成・更新・削除が可能（コンテンツ管理は両ロール共通）。
 
 **ユーザー判定ロジック**:
 ```sql
@@ -435,6 +441,7 @@ user_id IN (
 |:--|:--|:--|:--|
 | Users can view own submissions | SELECT | 本人 | `user_id` が自身のユーザーIDと一致 |
 | Admins can view all submissions | SELECT | admin | `users.role = 'admin'` |
+| Maintainers can view all submissions | SELECT | maintainer | `get_user_role() = 'maintainer'` |
 | Users can insert own submissions | INSERT | 本人 | `user_id` が自身のユーザーIDと一致 |
 
 ### 6.4 ai_reviews
@@ -442,34 +449,26 @@ user_id IN (
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
 | Users can view own ai reviews | SELECT | 本人 | `submission_id` が自身の提出IDと一致 |
-| Admins can view all ai reviews | SELECT | admin / maintainer | `users.role IN ('admin', 'maintainer')` |
-| Anyone can insert ai reviews | INSERT | 認証済み全ユーザー | - |
-| Anyone can update ai reviews | UPDATE | 認証済み全ユーザー | - |
+| Admins can view all ai reviews | SELECT | admin | `users.role = 'admin'` |
+| Maintainers can view all ai reviews | SELECT | maintainer | `get_user_role() = 'maintainer'` |
+
+`ai_reviews` には INSERT / UPDATE のRLSポリシーは定義していない。レビューの作成・更新は AIレビューAPI（`/api/ai-review`）がサーバー側で Service Role キーを用いて行い、RLSをバイパスする。
 
 ---
 
 ## 7. マイグレーション管理
 
-マイグレーションファイルは `supabase/migrations/` ディレクトリで管理する。
+マイグレーションファイルは `supabase/migrations/` ディレクトリで管理する。スキーマ（`01_schema`）・RLS（`02_rls`）・シードデータ（`03_seed`、コーススラッグ別のサブディレクトリ）の3区分で構成する。
 
 | ファイル | 内容 |
 |:--|:--|
-| `001_create_learning_tables.sql` | テーブル・インデックス・トリガーの作成 |
-| `002_rls_policies.sql` | RLSの有効化とポリシー定義 |
-| `003_sample_data.sql` | 開発用サンプルデータの投入 |
-| `004_add_learning_themes.sql` | 学習テーマテーブルの追加 |
-| `005_learning_themes_rls.sql` | 学習テーマのRLSポリシー定義 |
-| `006_instructor_rls_policy.sql` | maintainerロールのRLSポリシー追加 |
-| `007_create_ai_reviews.sql` | AIレビューテーブルの作成 |
-| `008_add_slide_content_type.sql` | コンテンツ種別にslideを追加 |
-| `009_add_reference_answer.sql` | 模範回答カラムの追加 |
-| `010_seed_gas_course_contents.sql` | GAS講座コンテンツのシードデータ |
-| `011_seed_gas_exercises.sql` | GAS講座演習課題のシードデータ |
-| `012_add_allowed_submission_types.sql` | 演習コンテンツごとの許可提出方法カラム追加 |
-| `013_add_code_language.sql` | 演習コンテンツのコードエディタ言語カラム追加 |
-| `014_add_hint_column.sql` | 演習コンテンツのヒントカラム追加 |
-| `015_seed_gas_hints.sql` | GAS講座全演習課題へのヒントデータ投入 |
-| `01_schema/002_add_submission_code_files.sql` | submissionsに複数ファイル提出用 `code_files` カラム追加 |
+| `01_schema/001_create_tables.sql` | 全テーブル・ヘルパー関数・トリガー・インデックスの作成 |
+| `01_schema/002_add_submission_code_files.sql` | submissions に複数ファイル提出用 `code_files`（JSONB）カラムを追加 |
+| `02_rls/001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
+| `03_seed/gas/001_course_structure.sql` | GAS講座のテーマ・フェーズ・週・コンテンツ構造のシード |
+| `03_seed/gas/002_exercises.sql` | GAS講座の演習コンテンツ（課題・模範回答）のシード |
+| `03_seed/gas/003_hints.sql` | GAS講座の全演習課題へのヒントデータ投入 |
+| `03_seed/gas-advanced/001_exercises.sql` | GAS講座（応用編）の演習コンテンツ（課題・ヒント・模範回答）のシード |
 
 ---
 
@@ -506,3 +505,4 @@ user_id IN (
 | 2026年3月 | learning_contentsに `code_language` カラム追加（コードエディタの言語設定） |
 | 2026年3月 | learning_contentsに `hint` カラム追加（演習コンテンツへのヒント表示機能） |
 | 2026年4月 | `learning_themes` テーブル追加・learning_phasesに `theme_id` FK追加。`ai_reviews` テーブル追加。ER図・インデックス・トリガー・RLS・セクション番号を全面更新 |
+| 2026年6月 | マイグレーション一覧を実際のディレクトリ構成（`01_schema` / `02_rls` / `03_seed`）に修正。RLSにmaintainerポリシーを追記し、`ai_reviews` のINSERT/UPDATEポリシー記載を削除（Service Role経由のためRLS対象外） |
