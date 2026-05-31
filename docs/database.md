@@ -470,10 +470,11 @@ user_id = get_user_id()
 |:--|:--|:--|:--|
 | Users can view own record | SELECT | 本人 | `auth_id = auth.uid() AND is_deleted = false` |
 | Admins can view all users | SELECT | admin | `get_user_role() = 'admin'` |
+| Maintainers can view all users | SELECT | maintainer | `get_user_role() = 'maintainer'` |
 | Authenticated users can insert own record | INSERT | 本人 | `auth_id = auth.uid()` |
 | Admins can update users | UPDATE | admin | `get_user_role() = 'admin'` |
 
-初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。
+初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer は受講生進捗（`/manage/students`）の閲覧で `users` を参照するため SELECT のみ許可し、UPDATE は付与しない（ユーザー管理は不可）。
 
 ---
 
