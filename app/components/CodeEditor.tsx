@@ -6,7 +6,17 @@ import { javascript } from "@codemirror/lang-javascript";
 import CodeMirror from "@uiw/react-codemirror";
 import { useEffect, useState } from "react";
 
-export type CodeLanguage = "javascript" | "typescript" | "html" | "css";
+export type CodeLanguage = "javascript" | "typescript" | "gas" | "html" | "css";
+
+// 言語ごとのデフォルトファイル名（提出フォームの初期値・プレースホルダーに使用）
+// JavaScript(.js) と GAS(.gs) は拡張子が異なるため別言語として扱う
+export const DEFAULT_FILENAME_BY_LANGUAGE: Record<CodeLanguage, string> = {
+  javascript: "code.js",
+  typescript: "code.ts",
+  gas: "code.gs",
+  html: "index.html",
+  css: "style.css",
+};
 
 interface CodeEditorProps {
   value: string;
@@ -19,6 +29,8 @@ interface CodeEditorProps {
 function getExtensions(language: CodeLanguage) {
   switch (language) {
     case "javascript":
+    // GAS（Google Apps Script）はJavaScriptベースのため同じシンタックスを使用する
+    case "gas":
       return [javascript()];
     case "typescript":
       return [javascript({ typescript: true })];

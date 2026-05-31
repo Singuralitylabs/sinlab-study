@@ -12,7 +12,11 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
-import { CodeEditor, type CodeLanguage } from "@/app/components/CodeEditor";
+import {
+  CodeEditor,
+  type CodeLanguage,
+  DEFAULT_FILENAME_BY_LANGUAGE,
+} from "@/app/components/CodeEditor";
 import type { AIReview, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -20,8 +24,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 const CODE_LANGUAGE_OPTIONS: { value: CodeLanguage; label: string }[] = [
-  { value: "javascript", label: "JavaScript / GAS" },
+  { value: "javascript", label: "JavaScript" },
   { value: "typescript", label: "TypeScript" },
+  { value: "gas", label: "GAS" },
   { value: "html", label: "HTML" },
   { value: "css", label: "CSS" },
 ];
@@ -179,7 +184,7 @@ export function DemoSubmissionForm({
                         id={`demo-filename-${index}`}
                         value={file.filename}
                         onChange={(e) => updateCodeFile(index, { filename: e.target.value })}
-                        placeholder="例: コード.gs"
+                        placeholder={`例: ${DEFAULT_FILENAME_BY_LANGUAGE[file.language]}`}
                       />
                     </div>
                     <div className="space-y-1">

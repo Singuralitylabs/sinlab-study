@@ -4,7 +4,11 @@ import { Code, Link as LinkIcon, Loader2, Plus, Send, Trash2 } from "lucide-reac
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
-import { CodeEditor, type CodeLanguage } from "@/app/components/CodeEditor";
+import {
+  CodeEditor,
+  type CodeLanguage,
+  DEFAULT_FILENAME_BY_LANGUAGE,
+} from "@/app/components/CodeEditor";
 import type { AIReview, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -12,8 +16,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 const CODE_LANGUAGE_OPTIONS: { value: CodeLanguage; label: string }[] = [
-  { value: "javascript", label: "JavaScript / GAS" },
+  { value: "javascript", label: "JavaScript" },
   { value: "typescript", label: "TypeScript" },
+  { value: "gas", label: "GAS" },
   { value: "html", label: "HTML" },
   { value: "css", label: "CSS" },
 ];
@@ -26,14 +31,6 @@ interface CodeFileInput {
   // ユーザーがファイル名を手動編集したか。false の間は言語変更にあわせて初期値を自動更新する
   filenameEdited: boolean;
 }
-
-// 言語ごとのデフォルトファイル名（複数ファイル化／言語変更時に自動補完する）
-const DEFAULT_FILENAME_BY_LANGUAGE: Record<CodeLanguage, string> = {
-  javascript: "code.gs",
-  typescript: "code.ts",
-  html: "index.html",
-  css: "style.css",
-};
 
 // 既存のファイル名と衝突しないデフォルトファイル名を生成する（例: index.html → index-2.html）
 function buildDefaultFilename(language: CodeLanguage, existingFilenames: string[]): string {
@@ -331,7 +328,7 @@ export function SubmissionForm({
                         id={`filename-${index}`}
                         value={file.filename}
                         onChange={(e) => handleFilenameChange(index, e.target.value)}
-                        placeholder="例: code.gs"
+                        placeholder={`例: ${DEFAULT_FILENAME_BY_LANGUAGE[file.language]}`}
                       />
                     </div>
                     <div className="space-y-1">
