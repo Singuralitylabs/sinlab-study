@@ -328,16 +328,16 @@ erDiagram
 | カラム | 型 | NULL | デフォルト | 説明 |
 |:--|:--|:--:|:--|:--|
 | id | SERIAL | NO | auto increment | ユーザーID |
-| auth_id | UUID | NO | - | Supabase Auth UUID |
-| email | TEXT | NO | - | メールアドレス |
-| display_name | TEXT | NO | - | 表示名 |
+| auth_id | UUID | NO | - | Supabase Auth UUID（UNIQUE） |
+| email | VARCHAR(255) | NO | - | メールアドレス |
+| display_name | VARCHAR(255) | NO | - | 表示名 |
 | avatar_url | TEXT | YES | NULL | アバター画像URL |
-| role | TEXT | NO | - | `admin` / `maintainer` / `member` |
-| status | TEXT | NO | - | `pending` / `active` / `rejected` |
+| role | VARCHAR(20) | NO | 'member' | `admin` / `maintainer` / `member`（CHECK制約） |
+| status | VARCHAR(20) | NO | 'pending' | `pending` / `active` / `rejected`（CHECK制約） |
 | bio | TEXT | YES | NULL | 自己紹介 |
 | is_deleted | BOOLEAN | YES | false | 論理削除フラグ |
 | created_at | TIMESTAMPTZ | YES | NOW() | 作成日時 |
-| updated_at | TIMESTAMPTZ | YES | NOW() | 更新日時 |
+| updated_at | TIMESTAMPTZ | YES | NOW() | 更新日時（トリガーで自動更新） |
 
 ---
 
@@ -353,6 +353,7 @@ erDiagram
 | idx_submissions_user_id | submissions | user_id | ユーザー別の提出検索 |
 | idx_submissions_content_id | submissions | content_id | コンテンツ別の提出検索 |
 | idx_ai_reviews_status | ai_reviews | status | ステータス別のレビュー検索 |
+| idx_users_auth_role | users | auth_id, role, is_deleted | RLSヘルパー関数でのロール・本人判定の高速化 |
 
 ---
 
@@ -382,6 +383,18 @@ $$ language 'plpgsql';
 | update_learning_weeks_updated_at | learning_weeks |
 | update_learning_contents_updated_at | learning_contents |
 | update_ai_reviews_updated_at | ai_reviews |
+| update_users_updated_at | users |
+
+### 5.2 RLSヘルパー関数
+
+RLSポリシーのロール判定・本人判定に使用する `SECURITY DEFINER` 関数。ポリシーが `users` テーブルを直接参照すると再帰（無限ループ）が発生するため、RLSをバイパスするこれらの関数経由で判定する。
+
+| 関数 | 返り値 | 説明 |
+|:--|:--|:--|
+| `get_user_role()` | TEXT | 認証ユーザー（`auth.uid()`）の `role` を返す（`is_deleted = false` が対象） |
+| `get_user_id()` | INTEGER | 認証ユーザーの `users.id` を返す（`is_deleted = false` が対象） |
+
+いずれも `STABLE SECURITY DEFINER`・`SET search_path = public` で定義されている。
 
 ---
 
@@ -396,19 +409,23 @@ $$ language 'plpgsql';
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
 | Published {table} are viewable by authenticated users | SELECT | 認証済み全ユーザー | `is_published = true AND is_deleted = false` |
-| Admins can view all {table} | SELECT | admin | `users.role = 'admin'` |
-| Admins can insert {table} | INSERT | admin | `users.role = 'admin'` |
-| Admins can update {table} | UPDATE | admin | `users.role = 'admin'` |
-| Admins can delete {table} | DELETE | admin | `users.role = 'admin'` |
+| Admins can view all {table} | SELECT | admin | `get_user_role() = 'admin'` |
+| Maintainers can view all {table} | SELECT | maintainer | `get_user_role() = 'maintainer'` |
+| Admins can insert {table} | INSERT | admin | `get_user_role() = 'admin'` |
+| Maintainers can insert {table} | INSERT | maintainer | `get_user_role() = 'maintainer'` |
+| Admins can update {table} | UPDATE | admin | `get_user_role() = 'admin'` |
+| Maintainers can update {table} | UPDATE | maintainer | `get_user_role() = 'maintainer'` |
+| Admins can delete {table} | DELETE | admin | `get_user_role() = 'admin'` |
+| Maintainers can delete {table} | DELETE | maintainer | `get_user_role() = 'maintainer'` |
 
-**ユーザー判定ロジック**:
+admin と maintainer はいずれもコンテンツ系テーブルの全件参照・作成・更新・削除が可能（コンテンツ管理は両ロール共通）。
+
+**ロール判定ロジック**:
+
+ロールチェックは SECURITY DEFINER 関数 `get_user_role()` を用いる（「5.2 RLSヘルパー関数」参照）。
+
 ```sql
-EXISTS (
-  SELECT 1 FROM users
-  WHERE users.auth_id = auth.uid()
-  AND users.role = 'admin'
-  AND users.is_deleted = false
-)
+get_user_role() = 'admin'   -- 例: 管理者向けポリシー
 ```
 
 ### 6.2 user_progress
@@ -416,17 +433,16 @@ EXISTS (
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
 | Users can view own progress | SELECT | 本人 | `user_id` が自身のユーザーIDと一致 |
-| Admins can view all progress | SELECT | admin | `users.role = 'admin'` |
+| Admins can view all progress | SELECT | admin | `get_user_role() = 'admin'` |
 | Users can insert own progress | INSERT | 本人 | `user_id` が自身のユーザーIDと一致 |
 | Users can update own progress | UPDATE | 本人 | `user_id` が自身のユーザーIDと一致 |
 
 **本人判定ロジック**:
+
+本人チェックは SECURITY DEFINER 関数 `get_user_id()`（認証ユーザーの `users.id` を返す）を用いる。
+
 ```sql
-user_id IN (
-  SELECT id FROM users
-  WHERE auth_id = auth.uid()
-  AND is_deleted = false
-)
+user_id = get_user_id()
 ```
 
 ### 6.3 submissions
@@ -434,7 +450,8 @@ user_id IN (
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
 | Users can view own submissions | SELECT | 本人 | `user_id` が自身のユーザーIDと一致 |
-| Admins can view all submissions | SELECT | admin | `users.role = 'admin'` |
+| Admins can view all submissions | SELECT | admin | `get_user_role() = 'admin'` |
+| Maintainers can view all submissions | SELECT | maintainer | `get_user_role() = 'maintainer'` |
 | Users can insert own submissions | INSERT | 本人 | `user_id` が自身のユーザーIDと一致 |
 
 ### 6.4 ai_reviews
@@ -442,34 +459,38 @@ user_id IN (
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
 | Users can view own ai reviews | SELECT | 本人 | `submission_id` が自身の提出IDと一致 |
-| Admins can view all ai reviews | SELECT | admin / maintainer | `users.role IN ('admin', 'maintainer')` |
-| Anyone can insert ai reviews | INSERT | 認証済み全ユーザー | - |
-| Anyone can update ai reviews | UPDATE | 認証済み全ユーザー | - |
+| Admins can view all ai reviews | SELECT | admin | `get_user_role() = 'admin'` |
+| Maintainers can view all ai reviews | SELECT | maintainer | `get_user_role() = 'maintainer'` |
+
+`ai_reviews` には INSERT / UPDATE のRLSポリシーは定義していない。レビューの作成・更新は AIレビューAPI（`/api/ai-review`）がサーバー側で Service Role キーを用いて行い、RLSをバイパスする。
+
+### 6.5 users
+
+| ポリシー | 操作 | 対象 | 条件 |
+|:--|:--|:--|:--|
+| Users can view own record | SELECT | 本人 | `auth_id = auth.uid() AND is_deleted = false` |
+| Admins can view all users | SELECT | admin | `get_user_role() = 'admin'` |
+| Maintainers can view all users | SELECT | maintainer | `get_user_role() = 'maintainer'` |
+| Authenticated users can insert own record | INSERT | 本人 | `auth_id = auth.uid()` |
+| Admins can update users | UPDATE | admin | `get_user_role() = 'admin'` |
+
+初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer は受講生進捗（`/manage/students`）の閲覧で `users` を参照するため SELECT のみ許可し、UPDATE は付与しない（ユーザー管理は不可）。
 
 ---
 
 ## 7. マイグレーション管理
 
-マイグレーションファイルは `supabase/migrations/` ディレクトリで管理する。
+マイグレーションファイルは `supabase/migrations/` ディレクトリで管理する。スキーマ（`01_schema`）・RLS（`02_rls`）・シードデータ（`03_seed`、コーススラッグ別のサブディレクトリ）の3区分で構成する。
 
 | ファイル | 内容 |
 |:--|:--|
-| `001_create_learning_tables.sql` | テーブル・インデックス・トリガーの作成 |
-| `002_rls_policies.sql` | RLSの有効化とポリシー定義 |
-| `003_sample_data.sql` | 開発用サンプルデータの投入 |
-| `004_add_learning_themes.sql` | 学習テーマテーブルの追加 |
-| `005_learning_themes_rls.sql` | 学習テーマのRLSポリシー定義 |
-| `006_instructor_rls_policy.sql` | maintainerロールのRLSポリシー追加 |
-| `007_create_ai_reviews.sql` | AIレビューテーブルの作成 |
-| `008_add_slide_content_type.sql` | コンテンツ種別にslideを追加 |
-| `009_add_reference_answer.sql` | 模範回答カラムの追加 |
-| `010_seed_gas_course_contents.sql` | GAS講座コンテンツのシードデータ |
-| `011_seed_gas_exercises.sql` | GAS講座演習課題のシードデータ |
-| `012_add_allowed_submission_types.sql` | 演習コンテンツごとの許可提出方法カラム追加 |
-| `013_add_code_language.sql` | 演習コンテンツのコードエディタ言語カラム追加 |
-| `014_add_hint_column.sql` | 演習コンテンツのヒントカラム追加 |
-| `015_seed_gas_hints.sql` | GAS講座全演習課題へのヒントデータ投入 |
-| `01_schema/002_add_submission_code_files.sql` | submissionsに複数ファイル提出用 `code_files` カラム追加 |
+| `01_schema/001_create_tables.sql` | 全テーブル・ヘルパー関数・トリガー・インデックスの作成 |
+| `01_schema/002_add_submission_code_files.sql` | submissions に複数ファイル提出用 `code_files`（JSONB）カラムを追加 |
+| `02_rls/001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
+| `03_seed/gas/001_course_structure.sql` | GAS講座のテーマ・フェーズ・週・コンテンツ構造のシード |
+| `03_seed/gas/002_exercises.sql` | GAS講座の演習コンテンツ（課題・模範回答）のシード |
+| `03_seed/gas/003_hints.sql` | GAS講座の全演習課題へのヒントデータ投入 |
+| `03_seed/gas-advanced/001_exercises.sql` | GAS講座（応用編）の演習コンテンツ（課題・ヒント・模範回答）のシード |
 
 ---
 
@@ -506,3 +527,5 @@ user_id IN (
 | 2026年3月 | learning_contentsに `code_language` カラム追加（コードエディタの言語設定） |
 | 2026年3月 | learning_contentsに `hint` カラム追加（演習コンテンツへのヒント表示機能） |
 | 2026年4月 | `learning_themes` テーブル追加・learning_phasesに `theme_id` FK追加。`ai_reviews` テーブル追加。ER図・インデックス・トリガー・RLS・セクション番号を全面更新 |
+| 2026年6月 | マイグレーション一覧を実際のディレクトリ構成（`01_schema` / `02_rls` / `03_seed`）に修正。RLSにmaintainerポリシーを追記し、`ai_reviews` のINSERT/UPDATEポリシー記載を削除（Service Role経由のためRLS対象外） |
+| 2026年6月 | 実DB（Supabase）と照合し差分を修正：RLSヘルパー関数 `get_user_role()` / `get_user_id()` を追記し判定ロジックを実装準拠に修正、`users` テーブルのRLS（6.5）・`update_users_updated_at` トリガー・`idx_users_auth_role` インデックスを追記、`users` の文字列カラム型を VARCHAR に修正 |

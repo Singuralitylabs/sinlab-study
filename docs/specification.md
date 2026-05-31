@@ -8,47 +8,41 @@
 
 ### 1.1 全体構成
 
-```
-┌─────────────────────────────────────────────────┐
-│              ブラウザ（クライアント）                │
-│  ┌────────────────────┐  ┌───────────────────┐   │
-│  │ Server Components   │  │ Client Components │   │
-│  │ (SSR / データ取得)  │  │ (インタラクション) │   │
-│  └──────────┬─────────┘  └────────┬──────────┘   │
-└─────────────┼──────────────────────┼─────────────┘
-              │                      │
-┌─────────────┼──────────────────────┼─────────────┐
-│        Next.js 16 (App Router)                    │
-│  ┌──────────┴─────────┐  ┌────────┴──────────┐   │
-│  │ Server Services     │  │ API Routes        │   │
-│  └──────────┬─────────┘  └────────┬──────────┘   │
-│             │    ┌────────────────┐│              │
-│             │    │  Middleware     ││              │
-│             │    │ (認証・認可)    ││              │
-│             │    └───────┬────────┘│              │
-└─────────────┼────────────┼─────────┼─────────────┘
-              │            │         │
-┌─────────────┼────────────┼─────────┼─────────────┐
-│         Supabase（独自プロジェクト）                 │
-│  ┌──────────┴─────────┐  ┌────────┴──────────┐   │
-│  │ PostgreSQL + RLS    │  │ Auth (Google OAuth)│   │
-│  └────────────────────┘  └───────────────────┘   │
-└───────────────────────────────────────────────────┘
-              │
-┌─────────────┴─────────────────────────────────────┐
-│              外部サービス                            │
-│  ┌────────────────────┐  ┌───────────────────┐    │
-│  │ Slack               │  │ Google Gemini API │    │
-│  │ (Incoming Webhooks) │  │ (AIレビュー)      │    │
-│  └────────────────────┘  └───────────────────┘    │
-└───────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Browser["ブラウザ（クライアント）"]
+        SC["Server Components<br/>(SSR / データ取得)"]
+        CC["Client Components<br/>(インタラクション)"]
+    end
+    subgraph Next["Next.js 16 (App Router)"]
+        SS["Server Services"]
+        API["API Routes"]
+        PX["プロキシ proxy.ts<br/>(認証・認可)"]
+    end
+    subgraph Supabase["Supabase（独自プロジェクト）"]
+        PG["PostgreSQL + RLS"]
+        AUTH["Auth (Google OAuth)"]
+    end
+    subgraph External["外部サービス"]
+        SL["Slack<br/>(Incoming Webhooks)"]
+        GM["Google Gemini API<br/>(AIレビュー)"]
+    end
+
+    SC --> SS
+    CC --> API
+    SS --> PG
+    API --> PG
+    PX --> AUTH
+    SS --> AUTH
+    API --> SL
+    API --> GM
 ```
 
 ### 1.2 レイヤー構成
 
 | レイヤー | 責務 |
 |:--|:--|
-| Middleware | 認証・認可ゲート（静的ファイル・認証ページ以外の全リクエストをインターセプト） |
+| プロキシ（`proxy.ts`） | 認証・認可ゲート（静的ファイル・認証ページ以外の全リクエストをインターセプト） |
 | Pages (Server Components) | ページレンダリング・Supabaseからのデータ取得 |
 | Client Components | ユーザーインタラクション（フォーム、ボタン等） |
 | API Routes | クライアントからのデータ更新（進捗記録、課題提出等） |
@@ -61,28 +55,28 @@
 
 ## 2. 認証・認可機能
 
-### 2.1 ミドルウェア認証フロー
+### 2.1 プロキシ（proxy.ts）による認証フロー
 
-```
-リクエスト受信
-    │
-    ├─ 静的ファイル / API / 認証ページ → そのまま通過
-    │
-    ├─ Supabase Auth セッション確認
-    │   ├─ 未認証 → /login にリダイレクト
-    │   │
-    │   └─ 認証済み → ユーザーステータス確認
-    │       ├─ ステータス取得失敗 → /pending にリダイレクト
-    │       ├─ pending → /pending にリダイレクト
-    │       ├─ rejected → /rejected にリダイレクト
-    │       └─ active → アクセス許可
+> Next.js 16 では従来の Middleware が `proxy.ts` に改称された。本サービスの認証フローはこの `proxy.ts`（`proxy()` 関数）で実装している。
+
+```mermaid
+flowchart TD
+    A[リクエスト受信] --> B{静的ファイル / API / 認証ページ?}
+    B -->|はい| P[そのまま通過]
+    B -->|いいえ| C{Supabase Auth セッション}
+    C -->|未認証| L["/login にリダイレクト"]
+    C -->|認証済み| D{ユーザーステータス}
+    D -->|取得失敗| PE["/pending にリダイレクト"]
+    D -->|pending| PE
+    D -->|rejected| RE["/rejected にリダイレクト"]
+    D -->|active| OK[アクセス許可]
 ```
 
 ### 2.2 認証の多層構造
 
 | レイヤー | 保護対象 | 方式 |
 |:--|:--|:--|
-| Middleware | 全ページ | Supabase Auth セッション + ユーザーステータス確認 |
+| プロキシ（`proxy.ts`） | 全ページ | Supabase Auth セッション + ユーザーステータス確認 |
 | クライアント側ガード | Client Components | React Context による認証状態の監視 |
 | RLS | データベース | `auth.uid()` によるRow Level Security |
 | API Routes | データ更新操作 | サーバー側での認証チェック |
@@ -96,52 +90,37 @@
 
 ### 2.4 Googleログインフロー
 
-```
-ユーザー          学習支援サービス        Google OAuth       Supabase Auth
-  │                    │                    │                   │
-  │  1. /login にアクセス│                    │                   │
-  │───────────────────>│                    │                   │
-  │                    │                    │                   │
-  │  2. 「Googleでログイン」クリック          │                   │
-  │───────────────────>│                    │                   │
-  │                    │  3. OAuth開始       │                   │
-  │                    │───────────────────────────────────────>│
-  │                    │                    │                   │
-  │  4. Google認証画面   │                    │                   │
-  │<───────────────────────────────────────│                   │
-  │                    │                    │                   │
-  │  5. Googleで認証     │                    │                   │
-  │───────────────────────────────────────>│                   │
-  │                    │                    │  6. code返却       │
-  │                    │  7. /auth/callback  │                   │
-  │───────────────────>│                    │                   │
-  │                    │  8. セッション確立    │                   │
-  │                    │<──────────────────────────────────────>│
-  │                    │                    │                   │
-  │                    │  9. ユーザー初回判定   │                   │
-  │                    │                    │                   │
-  │  10. リダイレクト    │                    │                   │
-  │      初回: /pending │                    │                   │
-  │      承認済: /      │                    │                   │
-  │<───────────────────│                    │                   │
+```mermaid
+sequenceDiagram
+    actor U as ユーザー
+    participant App as 学習支援サービス
+    participant G as Google OAuth
+    participant SB as Supabase Auth
+
+    U->>App: 1. /login にアクセス
+    U->>App: 2. 「Googleでログイン」クリック
+    App->>SB: 3. OAuth開始
+    SB-->>U: 4. Google認証画面へリダイレクト
+    U->>G: 5. Googleで認証
+    G->>SB: 6. 認証code返却
+    U->>App: 7. /auth/callback
+    App->>SB: 8. セッション確立
+    App->>App: 9. ユーザー初回判定
+    App-->>U: 10. リダイレクト（初回: /pending、承認済: /）
 ```
 
 **OAuthコールバック処理**:
-```
-GET /auth/callback?code=xxx
-    │
-    ├─ code なし → /login にリダイレクト
-    │
-    ├─ セッション確立
-    │   │
-    │   ├─ 失敗 → /login にリダイレクト
-    │   │
-    │   └─ 成功 → users テーブル確認
-    │       │
-    │       ├─ レコードなし → 自動登録 (pending) → /pending
-    │       ├─ pending → /pending
-    │       ├─ rejected → /rejected
-    │       └─ active → / (ダッシュボード)
+```mermaid
+flowchart TD
+    A["GET /auth/callback?code=xxx"] --> B{code あり?}
+    B -->|なし| L["/login にリダイレクト"]
+    B -->|あり| C{セッション確立}
+    C -->|失敗| L
+    C -->|成功| D{users テーブル確認}
+    D -->|レコードなし| R["自動登録 (pending)"] --> P["/pending"]
+    D -->|pending| P
+    D -->|rejected| RE["/rejected"]
+    D -->|active| H["/ (ダッシュボード)"]
 ```
 
 ### 2.5 初回ログイン時のユーザー自動登録
@@ -191,7 +170,7 @@ OAuthコールバック処理中に初回ログインを検知し、`users` テ�
 | CSRF保護 | OAuth stateパラメータによるCSRF防止（Supabase管理） |
 | セッション管理 | HTTP-only cookieでセッショントークンを管理 |
 | トークン更新 | リフレッシュトークンによる自動更新 |
-| 未承認ユーザーのアクセス | ミドルウェア + RLSの二重チェック |
+| 未承認ユーザーのアクセス | プロキシ（`proxy.ts`） + RLSの二重チェック |
 | ステータス改ざん | `users` テーブルの更新はRLSでadminロールのみに制限 |
 | 自動登録の悪用 | Googleアカウントが必要。登録後は `pending` で管理者の承認が必須 |
 
@@ -240,16 +219,11 @@ OAuthコールバック処理中に初回ログインを検知し、`users` テ�
 
 ### 3.3 画面遷移
 
-```
-/learn（Theme一覧）
-   │
-   └─ /learn/[themeId]（Phase一覧）
-        │
-        └─ /learn/[themeId]/[phaseId]（Week一覧）
-             │
-             └─ /learn/[themeId]/[phaseId]/[weekId]（コンテンツ一覧）
-                  │
-                  └─ /learn/[themeId]/[phaseId]/[weekId]/[contentId]（コンテンツ詳細）
+```mermaid
+flowchart TD
+    A["/learn（Theme一覧）"] --> B["/learn/[themeId]（Phase一覧）"]
+    B --> C["/learn/[themeId]/[phaseId]（Week・コンテンツ一覧）"]
+    C --> D["/learn/[themeId]/[phaseId]/[weekId]/[contentId]（コンテンツ詳細）"]
 ```
 
 各階層でパンくずリストを表示し、上位階層への導線を提供する。
@@ -524,10 +498,10 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 | パス | 画面名 | 表示内容 |
 |:--|:--|:--|
 | `/` | ダッシュボード | 全体進捗率、Phase別進捗バー、学習への導線リンク |
-| `/learn` | Phase一覧 | 公開Phaseのカード一覧（名前、説明、表示順） |
-| `/learn/[phaseId]` | Week一覧 | パンくずリスト、Weekカード一覧（名前、説明、進捗バー） |
-| `/learn/[phaseId]/[weekId]` | コンテンツ一覧 | パンくずリスト、コンテンツリスト（タイトル、種別アイコン、完了チェック） |
-| `/learn/[phaseId]/[weekId]/[contentId]` | コンテンツ詳細 | パンくずリスト、コンテンツ本体、完了ボタン、提出フォーム（演習のみ）、前後ナビゲーション |
+| `/learn` | Theme一覧 | 公開Themeのカード一覧（名前、説明、サムネイル） |
+| `/learn/[themeId]` | Phase一覧 | パンくずリスト、Phaseカード一覧（名前、説明） |
+| `/learn/[themeId]/[phaseId]` | Week・コンテンツ一覧 | パンくずリスト、Week一覧と各Week内のコンテンツリスト（タイトル、種別アイコン、完了チェック） |
+| `/learn/[themeId]/[phaseId]/[weekId]/[contentId]` | コンテンツ詳細 | パンくずリスト、コンテンツ本体、完了ボタン、提出フォーム（演習のみ）、前後ナビゲーション |
 | `/submissions` | 提出履歴 | 提出一覧（提出日時、コンテンツ名、提出タイプ、内容プレビュー） |
 
 ### 7.3 管理・講師向け画面（`/manage`）
@@ -583,7 +557,7 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 |:--|:--|
 | Google認証キャンセル | `/login` に戻り、エラーメッセージを表示 |
 | OAuth コード交換失敗 | `/login` にリダイレクト |
-| セッション期限切れ | ミドルウェアが `/login` にリダイレクト |
+| セッション期限切れ | プロキシ（`proxy.ts`）が `/login` にリダイレクト |
 | Supabase接続エラー | サーバーログに出力、`/login` にリダイレクト |
 | ユーザー自動登録失敗 | サーバーログに出力。ステータス確認不可のため `/pending` 表示 |
 | 重複登録の試行 | `auth_id` のUNIQUE制約で防止。既存レコードを使用 |
@@ -646,23 +620,22 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 
 ### 9.5 処理フロー
 
-```
-GET /auth/callback
-    │
-    ├─ セッション確立
-    ├─ users テーブル確認
-    │
-    └─ 初回ログイン（レコードなし）
-        ├─ users テーブルに INSERT（pending）
-        │
-        ├─ INSERT 成功
-        │   ├─ sendSlackNewUserNotification() を呼び出し（非同期、await なし）
-        │   │   ├─ SLACK_NOTIFICATION_WEBHOOK_URL 未設定 → ログ警告・スキップ
-        │   │   ├─ Webhook POST 成功 → ログ出力
-        │   │   └─ Webhook POST 失敗 → エラーログ出力（フロー継続）
-        │   └─ /pending にリダイレクト
-        │
-        └─ INSERT 失敗 → ログ出力・/pending にリダイレクト（通知は送らない）
+```mermaid
+flowchart TD
+    A["GET /auth/callback"] --> B["セッション確立・users テーブル確認"]
+    B --> C{初回ログイン（レコードなし）?}
+    C -->|いいえ| Z[通常のステータス判定]
+    C -->|はい| D["users テーブルに INSERT（pending）"]
+    D --> E{INSERT 結果}
+    E -->|成功| S[INSERT 成功]
+    S --> F["sendSlackNewUserNotification()<br/>（非同期・await なし）"]
+    S --> P["/pending にリダイレクト"]
+    F --> G1{SLACK_NOTIFICATION_WEBHOOK_URL}
+    G1 -->|未設定| H1[ログ警告・スキップ]
+    G1 -->|設定あり| H2{Webhook POST}
+    H2 -->|成功| I1[ログ出力]
+    H2 -->|失敗| I2["エラーログ出力（フロー継続）"]
+    E -->|失敗| Q["ログ出力・/pending にリダイレクト（通知は送らない）"]
 ```
 
 ### 9.6 Slack Incoming Webhook 設定手順（運用）

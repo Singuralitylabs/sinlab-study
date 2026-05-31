@@ -34,7 +34,7 @@ bun run test:all     # build/db:types/lint/format/check/test を一括実行
 ## ブランチ運用
 
 - **`main` ブランチへ直接コミット・直接 push してはならない。** バグ修正・機能追加・ドキュメント更新などあらゆる変更は、必ず作業用のブランチを切ってから行うこと。
-- ブランチ名は変更内容が分かる接頭辞付きで命名する（例: `feature/...`、`fix/...`、`docs/...`、`refactor/...`）。
+- ブランチ名は変更内容が分かる接頭辞付きで命名する（例: `feature/...`、`bug/...`、`docs/...`、`refactor/...`、`env/...`）。
 - 変更は作業ブランチへコミットし、`main` への反映は必ずプルリクエスト経由で行う。
 - `main` への force push は禁止。
 - **リモートへ push する前には、対象ブランチを問わず必ずユーザーに確認を取ること。** ユーザーの承認を得てから push を実行する。
@@ -78,7 +78,7 @@ app/
 
 1. **ログイン**: `/login` ページでGoogleログインボタンをクリック → Supabase Auth経由でGoogle OAuth
 2. **コールバック**: `/auth/callback` でOAuthコードをセッションに変換。初回ログイン時は `users` テーブルにレコードを自動作成（`status=pending`）
-3. **Middleware** (`middleware.ts`) が静的ファイル・認証ページ以外の全リクエストをインターセプト
+3. **プロキシ** (`proxy.ts`、Next.js 16 における Middleware の後継) が静的ファイル・認証ページ以外の全リクエストをインターセプト
 4. Supabaseサーバークライアントを生成し、`getUser()` を呼び出し
 5. 未認証 → `/login` にリダイレクト
 6. 認証済みだがステータスが `pending`/`rejected` → `/pending` または `/rejected` にリダイレクト

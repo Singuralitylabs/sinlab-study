@@ -86,7 +86,7 @@
 - 本アプリ内にログインページ・承認フローを実装
 - 初回ログイン時にユーザーを自動登録（`status=pending`）、管理者が承認後にアクセス可能
 - 認証済みかつ `active` ステータスのユーザーのみコンテンツにアクセス可能
-- ミドルウェアによるページ単位のアクセス制御
+- プロキシ（`proxy.ts`）によるページ単位のアクセス制御
 - 管理者向けユーザー管理画面（承認・却下・ロール変更操作）
 - 初回ログイン時に指定Slackチャンネルへ承認依頼通知を送信（Slack Incoming Webhooks）
 
@@ -154,14 +154,13 @@ Theme（例：GAS学習）
 | `/` | ダッシュボード | 全体進捗率、Phase別進捗バー、学習への導線 |
 | `/learn` | テーマ一覧 | 公開Themeのカード一覧 |
 | `/learn/[themeId]` | Phase一覧 | Theme内のPhase一覧、進捗表示 |
-| `/learn/[themeId]/[phaseId]` | Week一覧 | Phase内のWeek一覧、進捗表示 |
-| `/learn/[themeId]/[phaseId]/[weekId]` | コンテンツ一覧 | Week内のコンテンツ一覧、進捗表示 |
+| `/learn/[themeId]/[phaseId]` | Week・コンテンツ一覧 | Phase内の各Weekとそのコンテンツを一覧表示、進捗表示 |
 | `/learn/[themeId]/[phaseId]/[weekId]/[contentId]` | コンテンツ詳細 | 動画/テキスト/スライド/演習の表示、完了ボタン、課題提出 |
 | `/submissions` | 提出履歴 | 自分の提出済み課題一覧（AIレビュー結果表示含む） |
 
 ### 4.2 管理・講師向け画面（`/manage`）
 
-admin と maintainer（講師）が共通でアクセス可能。`/admin/*` へのアクセスは `/manage/*` にリダイレクトされる。
+admin と maintainer（講師）が共通でアクセス可能。`/admin` 配下のコンテンツ管理ページ（`/admin/themes`・`/admin/phases`・`/admin/weeks`・`/admin/students`・`/admin/submissions` および `/admin` ルート）と `/instructor` へのアクセスは `/manage` 配下にリダイレクトされる。ユーザー管理（`/admin/users`）は管理者専用で、リダイレクトされない（4.3参照）。
 
 | パス | 画面名 | 概要 |
 |:--|:--|:--|
@@ -195,7 +194,7 @@ admin と maintainer（講師）が共通でアクセス可能。`/admin/*` へ�
 
 ### 5.3 セキュリティ
 - Supabase Authによる認証
-- ミドルウェアによるページ単位のアクセス制御
+- プロキシ（`proxy.ts`）によるページ単位のアクセス制御
 - 承認済み（active）ユーザーのみコンテンツアクセス可
 - Row Level Security（RLS）によるデータベースレベルのアクセス制御
 - isomorphic-dompurifyによるXSSサニタイズ

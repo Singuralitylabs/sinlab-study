@@ -88,7 +88,7 @@ CI のワークフロー一覧は [4.1 GitHub Actions ワークフロー](#41-gi
 | 観点 | CI（自動） | 手動 |
 | --- | --- | --- |
 | 認証制御 | 認証ヘルパー関数の判定ロジック | 未認証ユーザーのリダイレクト |
-| 認可制御 | 権限判定ロジック（admin/maintainer/member 別の許可/拒否） | UI・ミドルウェアでのアクセス制御 |
+| 認可制御 | 権限判定ロジック（admin/maintainer/member 別の許可/拒否） | UI・プロキシ（`proxy.ts`）でのアクセス制御 |
 | 承認ステータス制御 | ステータス判定ロジック（pending/rejected） | 画面遷移の正当性 |
 | データアクセス | ―（ユニットでは検証困難） | RLSによるデータ分離 |
 
@@ -142,7 +142,6 @@ GitHub Actions は CI/CD の実行基盤として利用する。詳細は各ワ�
 | Vitest Unit Tests ([.github/workflows/test.yml](../.github/workflows/test.yml)) | ユニットテスト実行 | ユニットテスト（Vitest） | `push` / `pull_request`（`app/**`, `tests/**`, `vitest.config.ts`, `package.json`）、`workflow_dispatch` |
 | Biome Check ([.github/workflows/biome.yml](../.github/workflows/biome.yml)) | Lint/フォーマット違反を防止 | `bun run check`（Biome lint + format） | `push` / `pull_request`（`app/**`）、`workflow_dispatch` |
 | Check console.log and debugger ([.github/workflows/check_console_log.yml](../.github/workflows/check_console_log.yml)) | デバッグ用出力の混入を防止 | console/debugger 検査 | `push` / `pull_request`（`app/**`）、`workflow_dispatch` |
-| Supabase DB Types Consistency ([.github/workflows/db-types.yml](../.github/workflows/db-types.yml)) | DB 型定義の整合性監視（準備中） | 依存関係インストール（型生成/差分チェックは保留） | `push` / `pull_request`（`supabase/**`, `app/types/lib/database.types.ts` 等）、`workflow_dispatch` |
 
 ### 4.2 導入済みツール / 導入予定ツール
 
