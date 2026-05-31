@@ -159,7 +159,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage(null);

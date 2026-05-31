@@ -104,7 +104,7 @@ export function DemoSubmissionForm({
     setCodeFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     setIsReviewLoading(true);

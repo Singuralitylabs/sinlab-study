@@ -30,7 +30,7 @@ export function WeekForm({ phases, initialData, mode }: WeekFormProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage(null);
