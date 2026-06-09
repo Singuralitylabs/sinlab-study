@@ -174,7 +174,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       video_url: contentType === "video" ? videoUrl : null,
       text_content: contentType === "text" ? textContent : null,
       exercise_instructions: contentType === "exercise" ? exerciseInstructions : null,
-      hint: contentType === "exercise" ? hint || null : null,
+      hint: contentType === "exercise" ? hint.trim() || null : null,
       reference_answer: contentType === "exercise" ? referenceAnswer || null : null,
       allowed_submission_types: contentType === "exercise" ? allowedSubmissionTypes : "code",
       code_language: contentType === "exercise" ? codeLanguage : "javascript",
@@ -383,12 +383,12 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="hint">ヒント（Markdown・受講生に公開）</Label>
+                <Label htmlFor="hint">ヒント（受講生に公開）</Label>
                 <Textarea
                   id="hint"
                   value={hint}
                   onChange={(e) => setHint(e.target.value)}
-                  placeholder="課題提出フォームの上部にアコーディオン形式で表示されます。受講生向けのヒントをMarkdown形式で記述してください。未入力の場合はヒントUIを表示しません。"
+                  placeholder="課題提出フォームの上部にアコーディオン形式で表示されます。受講生向けのヒントを記述してください（Markdown記法は使えますが、レンダリングされずプレーンテキストとして表示されます）。未入力の場合はヒントUIを表示しません。"
                   className="min-h-[200px] font-mono"
                 />
               </div>
