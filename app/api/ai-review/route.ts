@@ -10,6 +10,7 @@ import { generateReview, type ReviewSubmission } from "@/app/services/api/gemini
 import { getApiAuth, getApiSupabaseClient } from "@/app/services/auth/api-auth";
 
 const MAX_CODE_LENGTH = 8000;
+const MONTHLY_LIMIT = 20;
 
 export async function POST(request: NextRequest) {
   try {
@@ -81,6 +82,36 @@ export async function POST(request: NextRequest) {
     // GEMINI_API_KEY 確認
     if (!process.env.GEMINI_API_KEY) {
       return NextResponse.json({ error: "AIレビュー機能が設定されていません" }, { status: 503 });
+    }
+
+    // 月次利用上限チェック
+    const startOfMonth = new Date(
+      Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)
+    ).toISOString();
+
+    const { data: allUserSubmissions } = await supabase
+      .from("submissions")
+      .select("id")
+      .eq("user_id", auth.data.userId);
+
+    const allUserSubmissionIds = (allUserSubmissions ?? []).map((s) => s.id);
+
+    if (allUserSubmissionIds.length > 0) {
+      const { count: monthlyCount } = await supabase
+        .from("ai_reviews")
+        .select("id", { count: "exact", head: true })
+        .in("submission_id", allUserSubmissionIds)
+        .eq("status", "completed")
+        .gte("reviewed_at", startOfMonth);
+
+      if ((monthlyCount ?? 0) >= MONTHLY_LIMIT) {
+        return NextResponse.json(
+          {
+            error: `今月のAIレビュー上限（${MONTHLY_LIMIT}回）に達しました。来月以降にご利用ください。`,
+          },
+          { status: 429 }
+        );
+      }
     }
 
     // 同一ユーザー・同一コンテンツでのAIレビュー利用済みチェック（1課題につき1回制限）

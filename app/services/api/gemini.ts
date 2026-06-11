@@ -6,22 +6,12 @@ const MAX_CODE_LENGTH = 8000;
 const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY_MS = 5000;
 
-const SYSTEM_PROMPT = `Web技術講座のAI採点アシスタントです。以下の形式で簡潔にレビューしてください（日本語・初学者向け・建設的に）。
-
-## 1. 要件達成度
-各要件を「達成 / 部分的 / 未達成」で判定。
-
-## 2. コード品質・可読性
-構造・命名・ベストプラクティスを簡潔に評価。
-
-## 3. 改善提案（最大2つ）
-要点のみ。コード例は必要な場合のみ。
-
-## 4. 学習アドバイス
-次のステップを1〜2文で。
-
-## 5. 総合スコア
-**総合スコア: XX/100**`;
+const SYSTEM_PROMPT = `Web技術講座AI採点。日本語・初学者向け・建設的に。以下の形式で：
+1. 要件達成度：各要件を「達成/部分的/未達成」で判定
+2. コード品質：構造・命名・ベストプラクティスを簡潔に
+3. 改善提案（最大2つ）：要点のみ、コード例は必要時のみ
+4. 学習アドバイス：次のステップを1〜2文
+5. 総合スコア：**総合スコア: XX/100**`;
 
 interface ReviewResult {
   reviewContent: string;
@@ -90,7 +80,7 @@ export async function generateReview(
     model: MODEL_NAME,
     systemInstruction: SYSTEM_PROMPT,
     generationConfig: {
-      maxOutputTokens: 1500,
+      maxOutputTokens: 800,
       // gemini-2.5-flash は思考モデルのため、thinking tokens が出力トークン枠を消費する。
       // レビュータスクには思考不要なので無効化してレスポンス出力に全トークンを確保する。
       // @ts-expect-error: thinkingConfig は @google/generative-ai@0.24.1 の型定義に未追加だがランタイムでは有効
