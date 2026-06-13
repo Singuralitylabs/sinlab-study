@@ -89,20 +89,30 @@ export async function POST(request: NextRequest) {
       Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)
     ).toISOString();
 
-    const { data: allUserSubmissions } = await supabase
+    const { data: allUserSubmissions, error: submissionsError } = await supabase
       .from("submissions")
       .select("id")
       .eq("user_id", auth.data.userId);
 
+    if (submissionsError) {
+      console.error("月次利用上限チェック（submissions取得）エラー:", submissionsError);
+      return NextResponse.json({ error: "利用上限の確認に失敗しました" }, { status: 500 });
+    }
+
     const allUserSubmissionIds = (allUserSubmissions ?? []).map((s) => s.id);
 
     if (allUserSubmissionIds.length > 0) {
-      const { count: monthlyCount } = await supabase
+      const { count: monthlyCount, error: reviewCountError } = await supabase
         .from("ai_reviews")
         .select("id", { count: "exact", head: true })
         .in("submission_id", allUserSubmissionIds)
         .eq("status", "completed")
         .gte("reviewed_at", startOfMonth);
+
+      if (reviewCountError) {
+        console.error("月次利用上限チェック（ai_reviews集計）エラー:", reviewCountError);
+        return NextResponse.json({ error: "利用上限の確認に失敗しました" }, { status: 500 });
+      }
 
       if ((monthlyCount ?? 0) >= MONTHLY_LIMIT) {
         return NextResponse.json(
