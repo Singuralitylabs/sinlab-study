@@ -450,6 +450,7 @@ export async function createContent(content: {
   video_url?: string;
   text_content?: string;
   exercise_instructions?: string;
+  hint?: string;
   reference_answer?: string;
   allowed_submission_types?: "code" | "url" | "both";
   code_language?: "javascript" | "typescript" | "html" | "css";
