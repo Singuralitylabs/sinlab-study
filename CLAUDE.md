@@ -95,7 +95,7 @@ app/
 - **user_progress**: コンテンツごとの完了状態を記録（user+contentでユニーク）
 - **submissions**: 演習コンテンツに紐づくコードまたはURLの提出物。コード提出は単一/複数ファイルに対応する。単一ファイルは `code_content`（TEXT）に保存し、複数ファイル（例: `コード.gs` + `index.html`）は `code_files`（JSONB: `[{filename, language, content}]`）に保存する。どちらか一方のみが値を持ち、もう一方は `NULL`（後方互換: 既存の `code_content` のみの提出はそのまま有効）。表示・AIレビューでは `getSubmissionCodeFiles()`（`app/lib/submission-files.ts`）でファイル配列に正規化して扱う。
 - **ai_reviews**: Gemini によるAIレビュー結果と、1リクエストごとの `prompt_tokens` / `completion_tokens` を保存する
-- **ai_token_monthly_usages**: AIレビューの月次累計トークン数、通知済み状態、管理画面表示用の集計値を保持する
+- **ai_token_monthly_usages**: AIレビューの月次累計トークン数、通知済み状態、管理画面表示用の集計値を保持する予定の集計テーブル（後続実装で追加予定）
 
 スライドPDFは Supabase Storage の `slides` バケット内に、オブジェクトキー **`<コーススラッグ>/slide-NN.pdf`**（NNは最低2桁のゼロ埋め）で保存する（例: キー `gas-advanced/slide-03.pdf` → 公開URL `.../storage/v1/object/public/slides/gas-advanced/slide-03.pdf`）。アップロードAPI（`app/api/upload-pdf/route.ts`）はフォルダ指定＋連番（自動採番／番号指定）に対応しており、シードSQL（`supabase/migrations/03_seed/`）もこのパスを前提とする。
 
@@ -126,6 +126,8 @@ app/
 - `AI_REVIEW_MONTHLY_TOKEN_LIMIT` — AIレビューの月次トークン上限
 - `AI_REVIEW_MONTHLY_WARNING_THRESHOLD_PERCENT` — 警告通知の閾値（例: 80）
 - `SLACK_NOTIFICATION_WEBHOOK_URL` — Slack通知Webhook URL（承認待ち通知・AIトークン使用量アラート共通）
+
+トークン使用量モニタリング関連の項目は設計先行であり、このブランチでは `.env.local.example` にも追記している。実装時はこの設定値を参照して月次上限判定と通知を行う。
 
 ### データベースマイグレーション
 

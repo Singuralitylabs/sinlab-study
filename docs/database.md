@@ -537,7 +537,7 @@ user_id = get_user_id()
 |:--|:--|
 | `01_schema/001_create_tables.sql` | 全テーブル・ヘルパー関数・トリガー・インデックスの作成 |
 | `01_schema/002_add_submission_code_files.sql` | submissions に複数ファイル提出用 `code_files`（JSONB）カラムを追加 |
-| `01_schema/003_add_ai_token_monthly_usages.sql` | 月次トークン使用量集計テーブル `ai_token_monthly_usages` を追加 |
+| `01_schema/003_add_ai_token_monthly_usages.sql`（予定） | 月次トークン使用量集計テーブル `ai_token_monthly_usages` を追加 |
 | `02_rls/001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
 | `03_seed/gas/001_course_structure.sql` | GAS講座のテーマ・フェーズ・週・コンテンツ構造のシード |
 | `03_seed/gas/002_exercises.sql` | GAS講座の演習コンテンツ（課題・模範回答）のシード |
