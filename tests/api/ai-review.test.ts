@@ -28,7 +28,7 @@ function qb(result: Record<string, unknown>) {
     // biome-ignore lint/suspicious/noThenProperty: Supabase クエリビルダーの thenable を再現するため意図的に定義
     then: (
       onfulfilled: (v: Record<string, unknown>) => unknown,
-      onrejected?: (r: unknown) => unknown,
+      onrejected?: (r: unknown) => unknown
     ) => Promise.resolve(result).then(onfulfilled, onrejected),
     catch: (onrejected: (r: unknown) => unknown) => Promise.resolve(result).catch(onrejected),
     finally: (onfinally: () => void) => Promise.resolve(result).finally(onfinally),
@@ -110,8 +110,8 @@ describe("POST /api/ai-review", () => {
         makeClient(
           { data: MOCK_SUBMISSION, error: null },
           { data: [{ id: 1 }], error: null },
-          { count: 20, data: null, error: null },
-        ) as never,
+          { count: 20, data: null, error: null }
+        ) as never
       );
 
       const res = await POST(makeRequest(1));
@@ -132,13 +132,13 @@ describe("POST /api/ai-review", () => {
           { data: MOCK_SUBMISSION, error: null },
           { data: [{ id: 1 }], error: null },
           { count: 19, data: null, error: null },
-          { data: [], error: null }, // 同コンテンツ提出なし → activeReview チェックをスキップ
-        ) as never,
+          { data: [], error: null } // 同コンテンツ提出なし → activeReview チェックをスキップ
+        ) as never
       );
       vi.mocked(upsertPendingAIReview).mockResolvedValue({ id: 1 } as never);
       vi.mocked(updateAIReviewProcessing).mockResolvedValue({ id: 1 } as never);
       vi.mocked(generateReview).mockResolvedValue(MOCK_REVIEW_RESULT);
-      vi.mocked(updateAIReviewCompleted).mockResolvedValue(undefined);
+      vi.mocked(updateAIReviewCompleted).mockResolvedValue(true);
 
       const res = await POST(makeRequest(1));
 
@@ -155,13 +155,13 @@ describe("POST /api/ai-review", () => {
         makeClient(
           { data: MOCK_SUBMISSION, error: null },
           { data: [], error: null }, // 全提出ID空 → カウントをスキップ
-          { data: [], error: null }, // 同コンテンツ提出なし
-        ) as never,
+          { data: [], error: null } // 同コンテンツ提出なし
+        ) as never
       );
       vi.mocked(upsertPendingAIReview).mockResolvedValue({ id: 1 } as never);
       vi.mocked(updateAIReviewProcessing).mockResolvedValue({ id: 1 } as never);
       vi.mocked(generateReview).mockResolvedValue(MOCK_REVIEW_RESULT);
-      vi.mocked(updateAIReviewCompleted).mockResolvedValue(undefined);
+      vi.mocked(updateAIReviewCompleted).mockResolvedValue(true);
 
       const res = await POST(makeRequest(1));
 
@@ -181,8 +181,8 @@ describe("POST /api/ai-review", () => {
           { data: [{ id: 1 }], error: null },
           { count: 5, data: null, error: null },
           { data: [{ id: 1 }], error: null }, // 同コンテンツの提出あり
-          { data: { id: 99, status: "completed", submission_id: 2 }, error: null }, // 既存レビュー
-        ) as never,
+          { data: { id: 99, status: "completed", submission_id: 2 }, error: null } // 既存レビュー
+        ) as never
       );
 
       const res = await POST(makeRequest(1));
