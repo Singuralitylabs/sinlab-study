@@ -50,7 +50,8 @@ type ThemeWithNestedContents = LearningTheme & {
  * 全公開テーマの進捗サマリーを取得（ダッシュボード用）
  *
  * テーマ→フェーズ→週→コンテンツをネストselect 1本で取得し、
- * 完了進捗を1クエリでまとめて照会する（テーマごとの逐次クエリによるN+1を回避）。
+ * 完了進捗をユーザー単位でまとめて照会する（テーマごとの逐次クエリによるN+1を回避）。
+ * 完了進捗の取得に失敗した場合はエラーにせず完了数0で返し、テーマ一覧の表示を維持する。
  */
 export async function fetchThemeProgressSummaries(userId: number): Promise<{
   data: ThemeProgressSummary[] | null;
@@ -73,8 +74,8 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
     .eq("phases.weeks.contents.is_deleted", false)
     .order("display_order");
 
-  if (themesError || !themes) {
-    console.error("テーマ進捗サマリー取得エラー:", themesError?.message);
+  if (themesError) {
+    console.error("テーマ進捗サマリー取得エラー:", themesError.message);
     return { data: null, error: themesError };
   }
 
@@ -85,23 +86,36 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
     ),
   }));
 
-  const allContentIds = themeContents.flatMap((t) => t.contentIds);
+  const hasContents = themeContents.some((t) => t.contentIds.length > 0);
 
-  let completedIds = new Set<number>();
-  if (allContentIds.length > 0) {
+  // 完了済みコンテンツIDをユーザー単位で全件取得する。
+  // content_id での .in() 絞り込みは行わない（分子はテーマごとの Set 突合で確定するため不要で、
+  // 全コンテンツIDをクエリ文字列に直列化するとカタログ増加時にURL長上限を超えるため）。
+  // PostgRESTの1リクエスト最大行数（既定1000行）を超えても取りこぼさないよう range でページングする。
+  const completedIds = new Set<number>();
+  const pageSize = 1000;
+  for (let offset = 0; hasContents; offset += pageSize) {
     const { data: progress, error: progressError } = await supabase
       .from("user_progress")
       .select("content_id")
       .eq("user_id", userId)
       .eq("is_completed", true)
-      .in("content_id", allContentIds);
+      .order("content_id")
+      .range(offset, offset + pageSize - 1);
 
     if (progressError) {
+      // 進捗が取れなくてもテーマ一覧自体は表示できるよう、完了数0にフォールバックして継続する
       console.error("テーマ進捗サマリーの進捗取得エラー:", progressError.message);
-      return { data: null, error: progressError };
+      completedIds.clear();
+      break;
     }
 
-    completedIds = new Set((progress || []).map((p) => p.content_id));
+    for (const p of progress || []) {
+      completedIds.add(p.content_id);
+    }
+    if (!progress || progress.length < pageSize) {
+      break;
+    }
   }
 
   const data = themeContents.map(({ theme, contentIds }) => ({
