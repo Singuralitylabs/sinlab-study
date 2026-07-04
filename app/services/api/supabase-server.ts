@@ -1,5 +1,4 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
-import type { AuthError } from "@supabase/supabase-js";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
@@ -45,23 +44,4 @@ export async function createAdminSupabaseClient() {
   }
   // Service Role Key未設定時は通常クライアントにフォールバック
   return createServerSupabaseClient();
-}
-
-/**
- * サーバーサイドで現在アクセスしている認証ユーザー情報（authId含む）を取得する
- * @returns 認証ユーザー情報（authIdなど）
- */
-export async function getServerCurrentUser(): Promise<{
-  authId: string;
-  error: AuthError | null;
-}> {
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase.auth.getUser();
-
-  if (error || !data?.user) {
-    console.error("認証ユーザー情報取得エラー:", error?.message || "No data found");
-    return { authId: "", error };
-  }
-
-  return { authId: data.user.id, error: null };
 }

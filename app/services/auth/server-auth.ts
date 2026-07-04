@@ -1,4 +1,5 @@
 import type { User } from "@supabase/supabase-js";
+import { cache } from "react";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import type { UserRoleType, UserStatusType } from "@/app/types";
 
@@ -11,7 +12,8 @@ export interface ServerAuthResult {
 }
 
 // サーバーサイドで認証とユーザーステータスを確認
-export async function getServerAuth(): Promise<ServerAuthResult> {
+// React.cache() によりリクエスト単位でメモ化され、layout・page間で重複実行されない
+export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
   try {
     const supabase = await createServerSupabaseClient();
 
@@ -59,4 +61,4 @@ export async function getServerAuth(): Promise<ServerAuthResult> {
       error: "サーバー認証エラーが発生しました",
     };
   }
-}
+});

@@ -1,5 +1,5 @@
 import type { PostgrestError } from "@supabase/supabase-js";
-import type { UserRoleType, UserStatusType } from "@/app/types";
+import type { UserStatusType } from "@/app/types";
 import { createServerSupabaseClient } from "./supabase-server";
 
 /**
@@ -25,28 +25,4 @@ export async function fetchUserStatusByIdInServer({
   }
 
   return { status: data.status as UserStatusType, error: null };
-}
-
-/**
- * usersテーブルから指定のauth_idのユーザーの情報（id, role）を取得する（サーバーサイド用）
- */
-export async function fetchUserInfoByAuthId({
-  authId,
-}: {
-  authId: string;
-}): Promise<{ id: number; role: UserRoleType | null; error: PostgrestError | null }> {
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase
-    .from("users")
-    .select("id, role")
-    .eq("auth_id", authId)
-    .eq("is_deleted", false)
-    .maybeSingle();
-
-  if (error || !data) {
-    console.error("Supabase ユーザー情報取得エラー:", error?.message || "No data found");
-    return { id: 0, role: null, error };
-  }
-
-  return { id: data.id, role: data.role as UserRoleType, error: null };
 }

@@ -49,7 +49,6 @@ flowchart TB
 | Server Services | Supabase クエリ・ビジネスロジック |
 | Auth Services | 認証・ロールベースの権限チェック |
 | Notification Services | 外部通知サービスとの連携（Slack Incoming Webhooks） |
-| Providers | クライアント側の認証状態管理 |
 
 ---
 
@@ -76,8 +75,8 @@ flowchart TD
 
 | レイヤー | 保護対象 | 方式 |
 |:--|:--|:--|
-| プロキシ（`proxy.ts`） | 全ページ | Supabase Auth セッション + ユーザーステータス確認 |
-| クライアント側ガード | Client Components | React Context による認証状態の監視 |
+| プロキシ（`proxy.ts`） | 全ページ | Supabase Auth セッション + ユーザーステータス確認（未認証・pending/rejected のリダイレクトはここで一元化） |
+| Server Components（layout / page） | ロール別の表示・ナビゲーション | `getServerAuth()`（`React.cache()` でリクエスト単位にメモ化）によるロール取得・権限チェック |
 | RLS | データベース | `auth.uid()` によるRow Level Security |
 | API Routes | データ更新操作 | サーバー側での認証チェック |
 

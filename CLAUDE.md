@@ -85,6 +85,9 @@ app/
 7. `active` ユーザーのみアプリにアクセス可能
 8. **ユーザー管理**: 管理者が `/admin/users` でユーザーの承認・却下を行う
 
+**認可の一元化**: 未認証・`pending`/`rejected` のリダイレクト判定はプロキシ（`proxy.ts`）でのみ行う。クライアント側での認証ガードは行わない。
+**サーバー側のユーザー情報取得**: layout・page・API Routeでは `getServerAuth()`（`app/services/auth/server-auth.ts`）を使用する。`React.cache()` によりリクエスト単位でメモ化されるため、layoutとpageの双方から呼んでも認証確認・`users` テーブル照会は1リクエストにつき1回しか実行されない。
+
 **ロール**: `admin`（全権限）、`maintainer`（コンテンツ管理）、`member`（受講生）
 **権限チェック**: `app/services/auth/` にロールベースの権限チェックロジックを集約
 
