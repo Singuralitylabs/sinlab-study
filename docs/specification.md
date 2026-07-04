@@ -75,7 +75,8 @@ flowchart TD
 
 | レイヤー | 保護対象 | 方式 |
 |:--|:--|:--|
-| プロキシ（`proxy.ts`） | 全ページ | Supabase Auth セッション + ユーザーステータス確認（未認証・pending/rejected のリダイレクトはここで一元化） |
+| プロキシ（`proxy.ts`） | 全ページ | Supabase Auth セッション + ユーザーステータス確認（第一の砦。`active` のみ許可するフェイルクローズ方式） |
+| Server Components（`(authenticated)/layout.tsx`） | 認証必須ページ全体 | `getServerAuth()` の `userStatus` を許可リスト検証（`active` 以外はリダイレクト。プロキシのスキップ経路・設定不備に備えた第二の砦） |
 | Server Components（layout / page） | ロール別の表示・ナビゲーション | `getServerAuth()`（`React.cache()` でリクエスト単位にメモ化）によるロール取得・権限チェック |
 | RLS | データベース | `auth.uid()` によるRow Level Security |
 | API Routes | データ更新操作 | サーバー側での認証チェック |

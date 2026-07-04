@@ -36,6 +36,7 @@ export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
       .single();
 
     if (userError || !userData) {
+      console.error("ユーザー情報取得エラー:", userError?.message || "No data found");
       return {
         user,
         userId: null,
@@ -52,6 +53,10 @@ export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
       userRole: userData.role as UserRoleType,
     };
   } catch (error) {
+    // Next.js の制御エラー（動的レンダリング化・redirect等）は握り潰さずに再スロー
+    if (error && typeof error === "object" && "digest" in error) {
+      throw error;
+    }
     console.error("サーバー認証エラー:", error);
     return {
       user: null,

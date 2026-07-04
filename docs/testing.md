@@ -194,4 +194,3 @@ GitHub Actions は CI/CD の実行基盤として利用する。詳細は各ワ�
 | `tests/services/auth/permissions.test.ts` | `app/services/auth/permissions.ts` | `checkAdminPermissions`, `checkContentPermissions`, `checkInstructorPermissions` | ロール（admin/maintainer/member/unknown）ごとの権限判定（許可/拒否）を検証する。 |
 | `tests/services/auth/server-auth.test.ts` | `app/services/auth/server-auth.ts` | `getServerAuth` | 認証エラー、ユーザー情報取得失敗、ステータス別応答、例外時の戻り値とエラーハンドリングを検証する。 |
 | `tests/services/api/learning-server.test.ts` | `app/services/api/learning-server.ts` | 学習コンテンツ取得関数群 | フェーズ・週・コンテンツの取得正常系/異常系を検証する。 |
-| `tests/services/api/users-server.test.ts` | `app/services/api/users-server.ts` | `fetchUserStatusByIdInServer` | ユーザーステータス取得の正常系/異常系を検証する。 |

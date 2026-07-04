@@ -85,7 +85,7 @@ app/
 7. `active` ユーザーのみアプリにアクセス可能
 8. **ユーザー管理**: 管理者が `/admin/users` でユーザーの承認・却下を行う
 
-**認可の一元化**: 未認証・`pending`/`rejected` のリダイレクト判定はプロキシ（`proxy.ts`）でのみ行う。クライアント側での認証ガードは行わない。
+**認可の二層防御**: 未認証・`pending`/`rejected` のリダイレクト判定はプロキシ（`proxy.ts`）を第一の砦とし、`app/(authenticated)/layout.tsx` でも `userStatus` の許可リスト検証（`active` 以外はリダイレクト）を行う。プロキシはフェイルクローズ（環境変数欠落・例外時は `/login` へ）。クライアント側での認証ガードは行わない。
 **サーバー側のユーザー情報取得**: layout・page・API Routeでは `getServerAuth()`（`app/services/auth/server-auth.ts`）を使用する。`React.cache()` によりリクエスト単位でメモ化されるため、layoutとpageの双方から呼んでも認証確認・`users` テーブル照会は1リクエストにつき1回しか実行されない。
 
 **ロール**: `admin`（全権限）、`maintainer`（コンテンツ管理）、`member`（受講生）
@@ -110,8 +110,7 @@ app/
 ### 主要パターン
 
 - **Server Componentsがデフォルト**: ページとレイアウトは非同期Server ComponentとしてSupabaseを直接呼び出す
-- **Client Components**: 必要な場合のみ `"use client"` を付与（認証プロバイダー、インタラクティブなフォーム、ボタン等）
-- **認証プロバイダー**: ルートレイアウトでSupabase認証コンテキストをラップし、クライアントコンポーネントからフック経由でアクセス可能
+- **Client Components**: 必要な場合のみ `"use client"` を付与（インタラクティブなフォーム、ボタン等）
 - **コンテンツ描画**: Markdownはサニタイズ処理を経て表示、動画はYouTube埋め込み
 - **パスエイリアス**: `@/*` がプロジェクトルートにマッピング
 
