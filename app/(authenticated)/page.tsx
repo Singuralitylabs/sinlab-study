@@ -1,105 +1,11 @@
 import { BookOpen, CheckCircle, Clock, TrendingUp } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
+import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
-import type { LearningTheme } from "@/app/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-
-interface ThemeWithProgress {
-  theme: LearningTheme;
-  totalContents: number;
-  completedContents: number;
-}
-
-async function getThemeProgressSummary(userId: number): Promise<{
-  themes: ThemeWithProgress[];
-  totalContents: number;
-  completedContents: number;
-}> {
-  const supabase = await createServerSupabaseClient();
-
-  const { data: themes, error: themesError } = await supabase
-    .from("learning_themes")
-    .select("*")
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .order("display_order");
-
-  if (themesError || !themes) {
-    return { themes: [], totalContents: 0, completedContents: 0 };
-  }
-
-  const themesWithProgress: ThemeWithProgress[] = await Promise.all(
-    themes.map(async (theme) => {
-      const { data: phases } = await supabase
-        .from("learning_phases")
-        .select("id")
-        .eq("theme_id", theme.id)
-        .eq("is_published", true)
-        .eq("is_deleted", false);
-
-      const phaseIds = phases?.map((p) => p.id) || [];
-
-      if (phaseIds.length === 0) {
-        return { theme, totalContents: 0, completedContents: 0 };
-      }
-
-      const { data: weeks } = await supabase
-        .from("learning_weeks")
-        .select("id")
-        .in("phase_id", phaseIds)
-        .eq("is_published", true)
-        .eq("is_deleted", false);
-
-      const weekIds = weeks?.map((w) => w.id) || [];
-
-      if (weekIds.length === 0) {
-        return { theme, totalContents: 0, completedContents: 0 };
-      }
-
-      const { count: totalContents } = await supabase
-        .from("learning_contents")
-        .select("id", { count: "exact", head: true })
-        .in("week_id", weekIds)
-        .eq("is_published", true)
-        .eq("is_deleted", false);
-
-      const { data: contentIds } = await supabase
-        .from("learning_contents")
-        .select("id")
-        .in("week_id", weekIds)
-        .eq("is_published", true)
-        .eq("is_deleted", false);
-
-      const ids = contentIds?.map((c) => c.id) || [];
-
-      if (ids.length === 0) {
-        return { theme, totalContents: totalContents || 0, completedContents: 0 };
-      }
-
-      const { count: completedContents } = await supabase
-        .from("user_progress")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId)
-        .eq("is_completed", true)
-        .in("content_id", ids);
-
-      return {
-        theme,
-        totalContents: totalContents || 0,
-        completedContents: completedContents || 0,
-      };
-    })
-  );
-
-  const totalContents = themesWithProgress.reduce((sum, t) => sum + t.totalContents, 0);
-  const completedContents = themesWithProgress.reduce((sum, t) => sum + t.completedContents, 0);
-
-  return { themes: themesWithProgress, totalContents, completedContents };
-}
 
 export default async function HomePage() {
   const { userId } = await getServerAuth();
@@ -112,7 +18,10 @@ export default async function HomePage() {
     );
   }
 
-  const { themes, totalContents, completedContents } = await getThemeProgressSummary(userId);
+  const { data } = await fetchThemeProgressSummaries(userId);
+  const themes = data ?? [];
+  const totalContents = themes.reduce((sum, t) => sum + t.totalContents, 0);
+  const completedContents = themes.reduce((sum, t) => sum + t.completedContents, 0);
   const overallProgress =
     totalContents > 0 ? Math.round((completedContents / totalContents) * 100) : 0;
 

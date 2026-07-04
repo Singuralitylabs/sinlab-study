@@ -33,6 +33,87 @@ export async function fetchPublishedThemes(): Promise<{
 }
 
 /**
+ * ダッシュボード用のテーマ別進捗サマリー
+ */
+export interface ThemeProgressSummary {
+  theme: LearningTheme;
+  totalContents: number;
+  completedContents: number;
+}
+
+/** ネストselectで取得するテーマ行（フェーズ→週→コンテンツIDの埋め込み付き） */
+type ThemeWithNestedContents = LearningTheme & {
+  phases: { id: number; weeks: { id: number; contents: { id: number }[] }[] }[];
+};
+
+/**
+ * 全公開テーマの進捗サマリーを取得（ダッシュボード用）
+ *
+ * テーマ→フェーズ→週→コンテンツをネストselect 1本で取得し、
+ * 完了進捗を1クエリでまとめて照会する（テーマごとの逐次クエリによるN+1を回避）。
+ */
+export async function fetchThemeProgressSummaries(userId: number): Promise<{
+  data: ThemeProgressSummary[] | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+
+  const { data: themes, error: themesError } = await supabase
+    .from("learning_themes")
+    .select(
+      "*, phases:learning_phases(id, weeks:learning_weeks(id, contents:learning_contents(id)))"
+    )
+    .eq("is_published", true)
+    .eq("is_deleted", false)
+    .eq("phases.is_published", true)
+    .eq("phases.is_deleted", false)
+    .eq("phases.weeks.is_published", true)
+    .eq("phases.weeks.is_deleted", false)
+    .eq("phases.weeks.contents.is_published", true)
+    .eq("phases.weeks.contents.is_deleted", false)
+    .order("display_order");
+
+  if (themesError || !themes) {
+    console.error("テーマ進捗サマリー取得エラー:", themesError?.message);
+    return { data: null, error: themesError };
+  }
+
+  const themeContents = (themes as ThemeWithNestedContents[]).map(({ phases, ...theme }) => ({
+    theme,
+    contentIds: phases.flatMap((phase) =>
+      phase.weeks.flatMap((week) => week.contents.map((content) => content.id))
+    ),
+  }));
+
+  const allContentIds = themeContents.flatMap((t) => t.contentIds);
+
+  let completedIds = new Set<number>();
+  if (allContentIds.length > 0) {
+    const { data: progress, error: progressError } = await supabase
+      .from("user_progress")
+      .select("content_id")
+      .eq("user_id", userId)
+      .eq("is_completed", true)
+      .in("content_id", allContentIds);
+
+    if (progressError) {
+      console.error("テーマ進捗サマリーの進捗取得エラー:", progressError.message);
+      return { data: null, error: progressError };
+    }
+
+    completedIds = new Set((progress || []).map((p) => p.content_id));
+  }
+
+  const data = themeContents.map(({ theme, contentIds }) => ({
+    theme,
+    totalContents: contentIds.length,
+    completedContents: contentIds.filter((id) => completedIds.has(id)).length,
+  }));
+
+  return { data, error: null };
+}
+
+/**
  * テーマ詳細を取得
  */
 export async function fetchThemeById(themeId: number): Promise<{
