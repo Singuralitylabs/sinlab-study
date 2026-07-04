@@ -90,11 +90,14 @@ export async function proxy(request: NextRequest) {
       .eq("is_deleted", false)
       .maybeSingle();
 
-    if (userError) {
+    // ステータスを判定できない場合はフェイルクローズ（/login へ）。
+    // DB一時障害などで userStatus が null になった際に /pending へ誤誘導しないため
+    if (userError || !userData) {
       console.error("[proxy] User data fetch error:", userError);
+      return NextResponse.redirect(new URL("/login", request.url));
     }
 
-    const userStatus = userData?.status as string | null;
+    const userStatus = userData.status as string | null;
 
     // 許可リスト方式: active のみ通過させ、それ以外はステータスに応じてリダイレクト
     // （想定外のステータス値が入った場合も素通りさせない）
