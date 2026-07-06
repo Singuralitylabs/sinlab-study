@@ -86,16 +86,14 @@ export interface SubmissionWithContent extends Submission {
   content: LearningContent | null;
 }
 
-export interface SubmissionWithUser extends Submission {
-  user: Pick<UserType, "id" | "display_name" | "email"> | null;
-  content: LearningContent | null;
-}
-
 export interface SubmissionWithContentAndReview extends SubmissionWithContent {
   ai_review: AIReview | null;
 }
 
-export interface SubmissionWithUserAndReview extends SubmissionWithUser {
+/** 管理者・講師向け提出一覧の1件（content は一覧表示に必要な最小カラムのみ） */
+export interface AdminSubmissionWithReview extends Submission {
+  user: Pick<UserType, "id" | "display_name" | "email"> | null;
+  content: Pick<LearningContent, "id" | "title"> | null;
   ai_review: AIReview | null;
 }
 

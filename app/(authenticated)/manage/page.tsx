@@ -2,21 +2,14 @@ import { BookOpen, Calendar, ClipboardList, FileText, FolderOpen, Users } from "
 import Link from "next/link";
 import { PageTitle } from "@/app/components/PageTitle";
 import { fetchManageCounts } from "@/app/services/api/admin-server";
-import {
-  fetchRecentSubmissions,
-  fetchSubmissionsCount,
-} from "@/app/services/api/submissions-server";
+import { fetchRecentSubmissions } from "@/app/services/api/submissions-server";
 import { Card, CardContent } from "@/components/ui/card";
 
 const RECENT_SUBMISSIONS_LIMIT = 5;
 
 export default async function ManageDashboardPage() {
-  const [{ data: counts }, { count: submissionsCount }, { data: recentSubmissions }] =
-    await Promise.all([
-      fetchManageCounts(),
-      fetchSubmissionsCount(),
-      fetchRecentSubmissions(RECENT_SUBMISSIONS_LIMIT),
-    ]);
+  const [{ data: counts }, { data: recentSubmissions, count: submissionsCount }] =
+    await Promise.all([fetchManageCounts(), fetchRecentSubmissions(RECENT_SUBMISSIONS_LIMIT)]);
 
   const stats = [
     {

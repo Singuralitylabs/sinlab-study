@@ -21,6 +21,7 @@ export function createQueryBuilder(result: QueryResult) {
     order: vi.fn().mockReturnThis(),
     range: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
+    overrideTypes: vi.fn().mockReturnThis(),
     single: vi.fn().mockResolvedValue(result),
     maybeSingle: vi.fn().mockResolvedValue(result),
     // リスト取得は await builder そのものを解決する
@@ -39,7 +40,9 @@ export function createQueryBuilder(result: QueryResult) {
  * @param authResult auth.getUser() の戻り値。省略時は { data: { user: null }, error: null }
  * @param queryResult from().select()... チェーンの解決値。省略時は { data: null, error: null }
  * @param tableResults テーブル名ごとの解決値。指定したテーブルは queryResult より優先される
- *                     （1関数内で複数テーブルを照会するケース用）
+ *                     （1関数内で複数テーブルを照会するケース用）。
+ *                     配列を渡すと from() の呼び出し順に消費される（ページング等の複数回照会用。
+ *                     末尾を超えた呼び出しには最後の要素を返し続ける）
  */
 export function createMockSupabaseClient({
   authResult,
@@ -48,14 +51,24 @@ export function createMockSupabaseClient({
 }: {
   authResult?: { data: { user: unknown }; error: unknown };
   queryResult?: QueryResult;
-  tableResults?: Record<string, QueryResult>;
+  tableResults?: Record<string, QueryResult | QueryResult[]>;
 } = {}) {
+  const callCounts: Record<string, number> = {};
+
   return {
     auth: {
       getUser: vi.fn().mockResolvedValue(authResult ?? { data: { user: null }, error: null }),
     },
     from: vi.fn().mockImplementation((table: string) => {
-      const result = tableResults?.[table] ?? queryResult ?? { data: null, error: null };
+      const configured = tableResults?.[table];
+      let result: QueryResult;
+      if (Array.isArray(configured)) {
+        const index = Math.min(callCounts[table] ?? 0, configured.length - 1);
+        callCounts[table] = (callCounts[table] ?? 0) + 1;
+        result = configured[index];
+      } else {
+        result = configured ?? queryResult ?? { data: null, error: null };
+      }
       return createQueryBuilder(result);
     }),
   };

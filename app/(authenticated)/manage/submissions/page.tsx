@@ -7,6 +7,8 @@ import {
   Link as LinkIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import type { ReactNode } from "react";
 import { AIReviewStatusBadge } from "@/app/components/AIReviewDisplay";
 import { AIReviewDisplayClient } from "@/app/components/AIReviewDisplayClient";
 import { PageTitle } from "@/app/components/PageTitle";
@@ -42,6 +44,32 @@ interface PageProps {
   searchParams: Promise<{ page?: string }>;
 }
 
+function PagerLink({
+  href,
+  disabled,
+  children,
+}: {
+  href: string;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  if (disabled) {
+    return (
+      <span className="inline-flex items-center gap-1 text-sm text-muted-foreground/50">
+        {children}
+      </span>
+    );
+  }
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+    >
+      {children}
+    </Link>
+  );
+}
+
 export default async function ManageSubmissionsPage({ searchParams }: PageProps) {
   const { page: pageParam } = await searchParams;
   const parsedPage = Number.parseInt(pageParam ?? "1", 10);
@@ -51,6 +79,12 @@ export default async function ManageSubmissionsPage({ searchParams }: PageProps)
     page,
     pageSize: PAGE_SIZE,
   });
+
+  // 範囲外ページ（データ空 or range超過エラー）を指定された場合は1ページ目へ戻す
+  if (page > 1 && (!submissions || submissions.length === 0)) {
+    redirect("/manage/submissions");
+  }
+
   const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
   return (
@@ -127,37 +161,17 @@ export default async function ManageSubmissionsPage({ searchParams }: PageProps)
 
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-4 mt-6">
-          {page > 1 ? (
-            <Link
-              href={`/manage/submissions?page=${page - 1}`}
-              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-            >
-              <ChevronLeft className="h-4 w-4" />
-              前へ
-            </Link>
-          ) : (
-            <span className="inline-flex items-center gap-1 text-sm text-muted-foreground/50">
-              <ChevronLeft className="h-4 w-4" />
-              前へ
-            </span>
-          )}
+          <PagerLink href={`/manage/submissions?page=${page - 1}`} disabled={page <= 1}>
+            <ChevronLeft className="h-4 w-4" />
+            前へ
+          </PagerLink>
           <span className="text-sm text-muted-foreground">
             {page} / {totalPages} ページ
           </span>
-          {page < totalPages ? (
-            <Link
-              href={`/manage/submissions?page=${page + 1}`}
-              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-            >
-              次へ
-              <ChevronRight className="h-4 w-4" />
-            </Link>
-          ) : (
-            <span className="inline-flex items-center gap-1 text-sm text-muted-foreground/50">
-              次へ
-              <ChevronRight className="h-4 w-4" />
-            </span>
-          )}
+          <PagerLink href={`/manage/submissions?page=${page + 1}`} disabled={page >= totalPages}>
+            次へ
+            <ChevronRight className="h-4 w-4" />
+          </PagerLink>
         </div>
       )}
     </div>

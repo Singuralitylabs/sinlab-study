@@ -598,57 +598,66 @@ export async function fetchStudentsProgress(): Promise<{
 }> {
   const supabase = await createServerSupabaseClient();
 
-  // アクティブなユーザー一覧を取得
-  const { data: users, error: usersError } = await supabase
-    .from("users")
-    .select("id, display_name, email")
-    .eq("status", USER_STATUS.ACTIVE)
-    .eq("is_deleted", false)
-    .order("display_name");
+  // アクティブなユーザー一覧と公開コンテンツの総数は独立しているため並列で取得する
+  const [usersResult, contentsCountResult] = await Promise.all([
+    supabase
+      .from("users")
+      .select("id, display_name, email")
+      .eq("status", USER_STATUS.ACTIVE)
+      .eq("is_deleted", false)
+      .order("display_name"),
+    supabase
+      .from("learning_contents")
+      .select("id", { count: "exact", head: true })
+      .eq("is_published", true)
+      .eq("is_deleted", false),
+  ]);
+
+  const { data: users, error: usersError } = usersResult;
+  const { count: totalContents } = contentsCountResult;
 
   if (usersError) {
     console.error("ユーザー一覧取得エラー:", usersError.message);
     return { data: null, error: usersError };
   }
 
-  // 公開コンテンツの総数を取得
-  const { count: totalContents } = await supabase
-    .from("learning_contents")
-    .select("id", { count: "exact", head: true })
-    .eq("is_published", true)
-    .eq("is_deleted", false);
-
   // 完了済み進捗を全ユーザー分まとめて取得し、ユーザー単位に集約する
   // （ユーザーごとの逐次クエリによるN+1を回避）。
   // PostgRESTの1リクエスト最大行数（既定1000行）を超えても取りこぼさないよう range でページングする。
+  // サーバー側の max-rows 設定が pageSize より小さい場合でも取りこぼさないよう、
+  // offset は実際に返った行数で進め、0件になった時点で終了する。
   // 進捗の取得に失敗した場合はエラーにせず完了数0で返し、受講生一覧の表示を維持する。
   const progressByUser = new Map<number, { completedCount: number; lastActivity: string | null }>();
-  const pageSize = 1000;
-  for (let offset = 0; (users ?? []).length > 0; offset += pageSize) {
-    const { data: progress, error: progressError } = await supabase
-      .from("user_progress")
-      .select("user_id, completed_at")
-      .eq("is_completed", true)
-      .order("id")
-      .range(offset, offset + pageSize - 1);
+  if ((users ?? []).length > 0) {
+    const pageSize = 1000;
+    let offset = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const { data: progress, error: progressError } = await supabase
+        .from("user_progress")
+        .select("user_id, completed_at")
+        .eq("is_completed", true)
+        .order("id")
+        .range(offset, offset + pageSize - 1);
 
-    if (progressError) {
-      console.error("受講生進捗取得エラー:", progressError.message);
-      progressByUser.clear();
-      break;
-    }
-
-    for (const row of progress ?? []) {
-      const entry = progressByUser.get(row.user_id) ?? { completedCount: 0, lastActivity: null };
-      entry.completedCount += 1;
-      if (row.completed_at && (!entry.lastActivity || row.completed_at > entry.lastActivity)) {
-        entry.lastActivity = row.completed_at;
+      if (progressError) {
+        console.error("受講生進捗取得エラー:", progressError.message);
+        progressByUser.clear();
+        break;
       }
-      progressByUser.set(row.user_id, entry);
-    }
 
-    if (!progress || progress.length < pageSize) {
-      break;
+      const rows = progress ?? [];
+      for (const row of rows) {
+        const entry = progressByUser.get(row.user_id) ?? { completedCount: 0, lastActivity: null };
+        entry.completedCount += 1;
+        if (row.completed_at && (!entry.lastActivity || row.completed_at > entry.lastActivity)) {
+          entry.lastActivity = row.completed_at;
+        }
+        progressByUser.set(row.user_id, entry);
+      }
+
+      offset += rows.length;
+      hasMore = rows.length > 0;
     }
   }
 

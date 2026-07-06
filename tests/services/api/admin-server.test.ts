@@ -26,14 +26,18 @@ describe("fetchStudentsProgress", () => {
       tableResults: {
         users: { data: users, error: null },
         learning_contents: { data: null, error: null, count: 10 },
-        user_progress: {
-          data: [
-            { user_id: 1, completed_at: "2026-07-01T00:00:00+00:00" },
-            { user_id: 1, completed_at: "2026-07-03T00:00:00+00:00" },
-            { user_id: 1, completed_at: "2026-07-02T00:00:00+00:00" },
-          ],
-          error: null,
-        },
+        // 1回目: 進捗3行 → 2回目: 空ページでページング終了
+        user_progress: [
+          {
+            data: [
+              { user_id: 1, completed_at: "2026-07-01T00:00:00+00:00" },
+              { user_id: 1, completed_at: "2026-07-03T00:00:00+00:00" },
+              { user_id: 1, completed_at: "2026-07-02T00:00:00+00:00" },
+            ],
+            error: null,
+          },
+          { data: [], error: null },
+        ],
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
@@ -52,7 +56,47 @@ describe("fetchStudentsProgress", () => {
     ]);
   });
 
-  it("user_progress への照会はユーザー数によらず1回のみ（N+1の解消）", async () => {
+  it("進捗が複数ページにまたがる場合、全ページ分を集約する（max-rows 非依存）", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        users: { data: users, error: null },
+        learning_contents: { data: null, error: null, count: 10 },
+        // サーバーが1回あたり2行しか返さないケース（max-rows < pageSize 相当）
+        user_progress: [
+          {
+            data: [
+              { user_id: 1, completed_at: "2026-07-01T00:00:00+00:00" },
+              { user_id: 2, completed_at: "2026-07-02T00:00:00+00:00" },
+            ],
+            error: null,
+          },
+          { data: [{ user_id: 1, completed_at: "2026-07-04T00:00:00+00:00" }], error: null },
+          { data: [], error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchStudentsProgress();
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([
+      {
+        user: users[0],
+        totalContents: 10,
+        completedContents: 2,
+        lastActivity: "2026-07-04T00:00:00+00:00",
+      },
+      {
+        user: users[1],
+        totalContents: 10,
+        completedContents: 1,
+        lastActivity: "2026-07-02T00:00:00+00:00",
+      },
+    ]);
+  });
+
+  it("user_progress への照会回数はユーザー数に依存しない（N+1の解消）", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         users: { data: users, error: null },

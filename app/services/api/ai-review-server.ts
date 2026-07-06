@@ -1,8 +1,8 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import type {
+  AdminSubmissionWithReview,
   AIReview,
   SubmissionWithContentAndReview,
-  SubmissionWithUserAndReview,
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
@@ -34,6 +34,7 @@ export async function fetchSubmissionsWithReviewsByUserId(userId: number): Promi
 /**
  * 提出+AIレビュー一覧をページネーション付きで取得（管理者・講師用、Service Role）
  * コード本文込みの重い行を全件ロードしないよう range で指定ページ分のみ取得し、総数を count で返す。
+ * content は一覧表示に使うカラムのみ select する（text_content 等の本文は取得しない）。
  */
 export async function fetchAllSubmissionsWithReviews({
   page = 1,
@@ -42,7 +43,7 @@ export async function fetchAllSubmissionsWithReviews({
   page?: number;
   pageSize?: number;
 } = {}): Promise<{
-  data: SubmissionWithUserAndReview[] | null;
+  data: AdminSubmissionWithReview[] | null;
   count: number;
   error: PostgrestError | null;
 }> {
@@ -53,18 +54,19 @@ export async function fetchAllSubmissionsWithReviews({
   const { data, count, error } = await supabase
     .from("submissions")
     .select(
-      `*, user:users(id, display_name, email), content:learning_contents(*), ${AI_REVIEW_SELECT}`,
+      `*, user:users(id, display_name, email), content:learning_contents(id, title), ${AI_REVIEW_SELECT}`,
       { count: "exact" }
     )
     .order("submitted_at", { ascending: false })
-    .range(from, from + pageSize - 1);
+    .range(from, from + pageSize - 1)
+    .overrideTypes<AdminSubmissionWithReview[], { merge: false }>();
 
   if (error) {
     console.error("全提出+レビュー取得エラー:", error.message);
     return { data: null, count: 0, error };
   }
 
-  return { data: data as SubmissionWithUserAndReview[], count: count ?? 0, error: null };
+  return { data, count: count ?? 0, error: null };
 }
 
 /**
