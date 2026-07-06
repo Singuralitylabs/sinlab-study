@@ -32,27 +32,39 @@ export async function fetchSubmissionsWithReviewsByUserId(userId: number): Promi
 }
 
 /**
- * 全提出+AIレビュー一覧を取得（管理者・講師用、Service Role）
+ * 提出+AIレビュー一覧をページネーション付きで取得（管理者・講師用、Service Role）
+ * コード本文込みの重い行を全件ロードしないよう range で指定ページ分のみ取得し、総数を count で返す。
  */
-export async function fetchAllSubmissionsWithReviews(): Promise<{
+export async function fetchAllSubmissionsWithReviews({
+  page = 1,
+  pageSize = 20,
+}: {
+  page?: number;
+  pageSize?: number;
+} = {}): Promise<{
   data: SubmissionWithUserAndReview[] | null;
+  count: number;
   error: PostgrestError | null;
 }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { data, error } = await supabase
+  const from = (page - 1) * pageSize;
+
+  const { data, count, error } = await supabase
     .from("submissions")
     .select(
-      `*, user:users(id, display_name, email), content:learning_contents(*), ${AI_REVIEW_SELECT}`
+      `*, user:users(id, display_name, email), content:learning_contents(*), ${AI_REVIEW_SELECT}`,
+      { count: "exact" }
     )
-    .order("submitted_at", { ascending: false });
+    .order("submitted_at", { ascending: false })
+    .range(from, from + pageSize - 1);
 
   if (error) {
     console.error("全提出+レビュー取得エラー:", error.message);
-    return { data: null, error };
+    return { data: null, count: 0, error };
   }
 
-  return { data: data as SubmissionWithUserAndReview[], error: null };
+  return { data: data as SubmissionWithUserAndReview[], count: count ?? 0, error: null };
 }
 
 /**

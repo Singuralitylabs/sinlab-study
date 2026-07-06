@@ -1,72 +1,62 @@
 import { BookOpen, Calendar, ClipboardList, FileText, FolderOpen, Users } from "lucide-react";
 import Link from "next/link";
 import { PageTitle } from "@/app/components/PageTitle";
+import { fetchManageCounts } from "@/app/services/api/admin-server";
 import {
-  fetchAllContents,
-  fetchAllPhases,
-  fetchAllThemes,
-  fetchAllWeeks,
-  fetchStudentsProgress,
-} from "@/app/services/api/admin-server";
-import { fetchAllSubmissions } from "@/app/services/api/submissions-server";
+  fetchRecentSubmissions,
+  fetchSubmissionsCount,
+} from "@/app/services/api/submissions-server";
 import { Card, CardContent } from "@/components/ui/card";
 
+const RECENT_SUBMISSIONS_LIMIT = 5;
+
 export default async function ManageDashboardPage() {
-  const [
-    { data: themes },
-    { data: phases },
-    { data: weeks },
-    { data: contents },
-    { data: students },
-    { data: submissions },
-  ] = await Promise.all([
-    fetchAllThemes(),
-    fetchAllPhases(),
-    fetchAllWeeks(),
-    fetchAllContents(),
-    fetchStudentsProgress(),
-    fetchAllSubmissions(),
-  ]);
+  const [{ data: counts }, { count: submissionsCount }, { data: recentSubmissions }] =
+    await Promise.all([
+      fetchManageCounts(),
+      fetchSubmissionsCount(),
+      fetchRecentSubmissions(RECENT_SUBMISSIONS_LIMIT),
+    ]);
 
   const stats = [
     {
       title: "テーマ数",
-      value: themes?.length || 0,
+      value: counts.themes,
       href: "/manage/themes",
       icon: FolderOpen,
       bgClass: "bg-chart-1/10 text-chart-1",
     },
     {
       title: "フェーズ数",
-      value: phases?.length || 0,
+      value: counts.phases,
       href: "/manage/phases",
       icon: BookOpen,
       bgClass: "bg-chart-3/10 text-chart-3",
     },
     {
       title: "週数",
-      value: weeks?.length || 0,
+      value: counts.weeks,
       href: "/manage/weeks",
       icon: Calendar,
       bgClass: "bg-chart-2/10 text-chart-2",
     },
     {
       title: "コンテンツ数",
-      value: contents?.length || 0,
+      value: counts.contents,
       href: "/manage/contents",
       icon: FileText,
       bgClass: "bg-chart-5/10 text-chart-5",
     },
     {
       title: "受講生数",
-      value: students?.length || 0,
+      value: counts.students,
       href: "/manage/students",
       icon: Users,
       bgClass: "bg-chart-4/10 text-chart-4",
     },
     {
       title: "提出数",
-      value: submissions?.length || 0,
+      value: submissionsCount,
       href: "/manage/submissions",
       icon: ClipboardList,
       bgClass: "bg-primary/10 text-primary",
@@ -102,11 +92,11 @@ export default async function ManageDashboardPage() {
             </Link>
           </div>
 
-          {!submissions || submissions.length === 0 ? (
+          {!recentSubmissions || recentSubmissions.length === 0 ? (
             <p className="text-muted-foreground">まだ提出がありません。</p>
           ) : (
             <div className="space-y-3">
-              {submissions.slice(0, 5).map((submission) => (
+              {recentSubmissions.map((submission) => (
                 <div
                   key={submission.id}
                   className="flex items-center justify-between py-2 border-b border-border last:border-0"

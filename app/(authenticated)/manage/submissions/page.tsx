@@ -1,4 +1,12 @@
-import { ClipboardList, Code, ExternalLink, Link as LinkIcon } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  Code,
+  ExternalLink,
+  Link as LinkIcon,
+} from "lucide-react";
+import Link from "next/link";
 import { AIReviewStatusBadge } from "@/app/components/AIReviewDisplay";
 import { AIReviewDisplayClient } from "@/app/components/AIReviewDisplayClient";
 import { PageTitle } from "@/app/components/PageTitle";
@@ -28,8 +36,22 @@ function formatDate(dateString: string | null) {
   });
 }
 
-export default async function ManageSubmissionsPage() {
-  const { data: submissions } = await fetchAllSubmissionsWithReviews();
+const PAGE_SIZE = 20;
+
+interface PageProps {
+  searchParams: Promise<{ page?: string }>;
+}
+
+export default async function ManageSubmissionsPage({ searchParams }: PageProps) {
+  const { page: pageParam } = await searchParams;
+  const parsedPage = Number.parseInt(pageParam ?? "1", 10);
+  const page = Number.isNaN(parsedPage) || parsedPage < 1 ? 1 : parsedPage;
+
+  const { data: submissions, count } = await fetchAllSubmissionsWithReviews({
+    page,
+    pageSize: PAGE_SIZE,
+  });
+  const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -100,6 +122,42 @@ export default async function ManageSubmissionsPage() {
               </CardContent>
             </Card>
           ))}
+        </div>
+      )}
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-4 mt-6">
+          {page > 1 ? (
+            <Link
+              href={`/manage/submissions?page=${page - 1}`}
+              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              前へ
+            </Link>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-sm text-muted-foreground/50">
+              <ChevronLeft className="h-4 w-4" />
+              前へ
+            </span>
+          )}
+          <span className="text-sm text-muted-foreground">
+            {page} / {totalPages} ページ
+          </span>
+          {page < totalPages ? (
+            <Link
+              href={`/manage/submissions?page=${page + 1}`}
+              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+            >
+              次へ
+              <ChevronRight className="h-4 w-4" />
+            </Link>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-sm text-muted-foreground/50">
+              次へ
+              <ChevronRight className="h-4 w-4" />
+            </span>
+          )}
         </div>
       )}
     </div>

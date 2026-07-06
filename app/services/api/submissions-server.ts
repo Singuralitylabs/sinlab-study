@@ -1,5 +1,5 @@
 import type { PostgrestError } from "@supabase/supabase-js";
-import type { Submission, SubmissionWithContent, SubmissionWithUser } from "@/app/types";
+import type { LearningContent, Submission, SubmissionWithContent, UserType } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
 /**
@@ -53,24 +53,55 @@ export async function fetchLatestSubmissionByContentId(
 }
 
 /**
- * 全ユーザーの提出履歴を取得（管理者・講師用）
+ * 提出物の総数を取得（管理者・講師用）
  * Service Roleクライアントを使用（呼び出し元で権限チェック済み前提）
  */
-export async function fetchAllSubmissions(): Promise<{
-  data: SubmissionWithUser[] | null;
+export async function fetchSubmissionsCount(): Promise<{
+  count: number;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { count, error } = await supabase
+    .from("submissions")
+    .select("id", { count: "exact", head: true });
+
+  if (error) {
+    console.error("提出数取得エラー:", error.message);
+    return { count: 0, error };
+  }
+
+  return { count: count ?? 0, error: null };
+}
+
+interface RecentSubmission {
+  id: number;
+  submitted_at: string | null;
+  user: Pick<UserType, "display_name"> | null;
+  content: Pick<LearningContent, "title"> | null;
+}
+
+/**
+ * 直近の提出を取得（管理ダッシュボード用。コード本文などの重いカラムは取得しない）
+ * Service Roleクライアントを使用（呼び出し元で権限チェック済み前提）
+ */
+export async function fetchRecentSubmissions(limit: number): Promise<{
+  data: RecentSubmission[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createAdminSupabaseClient();
 
   const { data, error } = await supabase
     .from("submissions")
-    .select("*, user:users(id, display_name, email), content:learning_contents(*)")
-    .order("submitted_at", { ascending: false });
+    .select("id, submitted_at, user:users(display_name), content:learning_contents(title)")
+    .order("submitted_at", { ascending: false })
+    .limit(limit);
 
   if (error) {
-    console.error("全提出履歴取得エラー:", error.message);
+    console.error("直近提出取得エラー:", error.message);
     return { data: null, error };
   }
 
-  return { data: data as SubmissionWithUser[], error: null };
+  // 生成型はリレーションを配列と推論するが、to-one リレーションのため実際は単一オブジェクトが返る
+  return { data: data as unknown as RecentSubmission[], error: null };
 }

@@ -618,24 +618,113 @@ export async function fetchStudentsProgress(): Promise<{
     .eq("is_published", true)
     .eq("is_deleted", false);
 
-  // 各ユーザーの進捗を取得
-  const studentsProgress: StudentProgress[] = await Promise.all(
-    (users || []).map(async (user) => {
-      const { data: progress } = await supabase
-        .from("user_progress")
-        .select("completed_at")
-        .eq("user_id", user.id)
-        .eq("is_completed", true)
-        .order("completed_at", { ascending: false });
+  // 完了済み進捗を全ユーザー分まとめて取得し、ユーザー単位に集約する
+  // （ユーザーごとの逐次クエリによるN+1を回避）。
+  // PostgRESTの1リクエスト最大行数（既定1000行）を超えても取りこぼさないよう range でページングする。
+  // 進捗の取得に失敗した場合はエラーにせず完了数0で返し、受講生一覧の表示を維持する。
+  const progressByUser = new Map<number, { completedCount: number; lastActivity: string | null }>();
+  const pageSize = 1000;
+  for (let offset = 0; (users ?? []).length > 0; offset += pageSize) {
+    const { data: progress, error: progressError } = await supabase
+      .from("user_progress")
+      .select("user_id, completed_at")
+      .eq("is_completed", true)
+      .order("id")
+      .range(offset, offset + pageSize - 1);
 
-      return {
-        user,
-        totalContents: totalContents || 0,
-        completedContents: progress?.length || 0,
-        lastActivity: progress?.[0]?.completed_at || null,
-      };
-    })
-  );
+    if (progressError) {
+      console.error("受講生進捗取得エラー:", progressError.message);
+      progressByUser.clear();
+      break;
+    }
+
+    for (const row of progress ?? []) {
+      const entry = progressByUser.get(row.user_id) ?? { completedCount: 0, lastActivity: null };
+      entry.completedCount += 1;
+      if (row.completed_at && (!entry.lastActivity || row.completed_at > entry.lastActivity)) {
+        entry.lastActivity = row.completed_at;
+      }
+      progressByUser.set(row.user_id, entry);
+    }
+
+    if (!progress || progress.length < pageSize) {
+      break;
+    }
+  }
+
+  const studentsProgress: StudentProgress[] = (users ?? []).map((user) => {
+    const progress = progressByUser.get(user.id);
+    return {
+      user,
+      totalContents: totalContents || 0,
+      completedContents: progress?.completedCount ?? 0,
+      lastActivity: progress?.lastActivity ?? null,
+    };
+  });
 
   return { data: studentsProgress, error: null };
+}
+
+// =====================================================
+// 管理ダッシュボード
+// =====================================================
+
+interface ManageCounts {
+  themes: number;
+  phases: number;
+  weeks: number;
+  contents: number;
+  students: number;
+}
+
+/**
+ * 管理ダッシュボードの各件数を取得（head + count のみでレコード本体は取得しない）
+ * 一部の件数取得に失敗しても 0 として返し、ダッシュボードの表示を維持する。
+ */
+export async function fetchManageCounts(): Promise<{
+  data: ManageCounts;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+
+  const [themes, phases, weeks, contents, students] = await Promise.all([
+    supabase
+      .from("learning_themes")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
+    supabase
+      .from("learning_phases")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
+    supabase
+      .from("learning_weeks")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
+    supabase
+      .from("learning_contents")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
+    supabase
+      .from("users")
+      .select("id", { count: "exact", head: true })
+      .eq("status", USER_STATUS.ACTIVE)
+      .eq("is_deleted", false),
+  ]);
+
+  const firstError =
+    themes.error ?? phases.error ?? weeks.error ?? contents.error ?? students.error ?? null;
+  if (firstError) {
+    console.error("管理ダッシュボード件数取得エラー:", firstError.message);
+  }
+
+  return {
+    data: {
+      themes: themes.count ?? 0,
+      phases: phases.count ?? 0,
+      weeks: weeks.count ?? 0,
+      contents: contents.count ?? 0,
+      students: students.count ?? 0,
+    },
+    error: firstError,
+  };
 }
