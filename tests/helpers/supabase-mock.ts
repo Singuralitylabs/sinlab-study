@@ -61,15 +61,18 @@ export function createMockSupabaseClient({
     },
     from: vi.fn().mockImplementation((table: string) => {
       const configured = tableResults?.[table];
-      let result: QueryResult;
+      let result: QueryResult | undefined;
       if (Array.isArray(configured)) {
-        const index = Math.min(callCounts[table] ?? 0, configured.length - 1);
-        callCounts[table] = (callCounts[table] ?? 0) + 1;
-        result = configured[index];
+        // 空配列は未指定として扱い、queryResult / デフォルト結果にフォールバックする
+        if (configured.length > 0) {
+          const index = Math.min(callCounts[table] ?? 0, configured.length - 1);
+          callCounts[table] = (callCounts[table] ?? 0) + 1;
+          result = configured[index];
+        }
       } else {
-        result = configured ?? queryResult ?? { data: null, error: null };
+        result = configured;
       }
-      return createQueryBuilder(result);
+      return createQueryBuilder(result ?? queryResult ?? { data: null, error: null });
     }),
   };
 }

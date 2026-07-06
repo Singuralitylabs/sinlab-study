@@ -49,7 +49,10 @@ export async function fetchAllSubmissionsWithReviews({
 }> {
   const supabase = await createAdminSupabaseClient();
 
-  const from = (page - 1) * pageSize;
+  // 呼び出し元の値に依存せず range の引数を有効に保つため、page / pageSize は1以上の整数に正規化する
+  const safePage = Math.max(1, Math.floor(page) || 1);
+  const safePageSize = Math.max(1, Math.floor(pageSize) || 1);
+  const from = (safePage - 1) * safePageSize;
 
   const { data, count, error } = await supabase
     .from("submissions")
@@ -58,11 +61,11 @@ export async function fetchAllSubmissionsWithReviews({
       { count: "exact" }
     )
     .order("submitted_at", { ascending: false })
-    .range(from, from + pageSize - 1)
+    .range(from, from + safePageSize - 1)
     .overrideTypes<AdminSubmissionWithReview[], { merge: false }>();
 
   if (error) {
-    console.error("全提出+レビュー取得エラー:", error.message);
+    console.error("提出+レビュー一覧取得エラー:", error.message);
     return { data: null, count: 0, error };
   }
 

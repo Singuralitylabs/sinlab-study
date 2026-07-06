@@ -46,6 +46,18 @@ describe("fetchAllSubmissionsWithReviews", () => {
     expect(builder.range).toHaveBeenCalledWith(0, 19);
   });
 
+  it("page / pageSize が不正値（0・NaN）でも1以上に正規化して range を組み立てる", async () => {
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: [], error: null, count: 0 },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await fetchAllSubmissionsWithReviews({ page: 0, pageSize: Number.NaN });
+
+    const builder = mockClient.from.mock.results[0]?.value;
+    expect(builder.range).toHaveBeenCalledWith(0, 0);
+  });
+
   it("DB エラー時、data: null / count: 0 とエラーを返す", async () => {
     const mockClient = createMockSupabaseClient({
       queryResult: { data: null, error: dbError, count: null },

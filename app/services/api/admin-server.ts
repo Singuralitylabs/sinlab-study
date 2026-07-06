@@ -614,11 +614,16 @@ export async function fetchStudentsProgress(): Promise<{
   ]);
 
   const { data: users, error: usersError } = usersResult;
-  const { count: totalContents } = contentsCountResult;
+  const { count: totalContents, error: contentsCountError } = contentsCountResult;
 
   if (usersError) {
     console.error("ユーザー一覧取得エラー:", usersError.message);
     return { data: null, error: usersError };
+  }
+
+  // 総数が取れなくても受講生一覧の表示は維持するため、エラーはログのみ（totalContents は0扱い）
+  if (contentsCountError) {
+    console.error("公開コンテンツ総数取得エラー:", contentsCountError.message);
   }
 
   // 完了済み進捗を全ユーザー分まとめて取得し、ユーザー単位に集約する
