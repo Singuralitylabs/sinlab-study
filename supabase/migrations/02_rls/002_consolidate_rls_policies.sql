@@ -12,6 +12,9 @@
 --    get_user_role() / get_user_id() の anon ロールからの EXECUTE を revoke
 --
 -- 権限の意味（各ロールがアクセスできる範囲）は従来と変更しない。
+-- ただし user_progress の SELECT のみ maintainer を追加する
+-- （/manage/students は admin・maintainer 共通の画面だが、従来ポリシーでは
+--   maintainer が受講生の進捗を読めず全員 0 件と誤表示されていたため）。
 -- =====================================================
 
 -- =====================================================
@@ -21,6 +24,7 @@
 DROP POLICY IF EXISTS "Published themes are viewable by authenticated users" ON learning_themes;
 DROP POLICY IF EXISTS "Admins can view all themes" ON learning_themes;
 DROP POLICY IF EXISTS "Maintainers can view all themes" ON learning_themes;
+DROP POLICY IF EXISTS "Themes are viewable by users or content managers" ON learning_themes;
 CREATE POLICY "Themes are viewable by users or content managers"
   ON learning_themes FOR SELECT TO authenticated
   USING (
@@ -30,18 +34,21 @@ CREATE POLICY "Themes are viewable by users or content managers"
 
 DROP POLICY IF EXISTS "Admins can insert themes" ON learning_themes;
 DROP POLICY IF EXISTS "Maintainers can insert themes" ON learning_themes;
+DROP POLICY IF EXISTS "Content managers can insert themes" ON learning_themes;
 CREATE POLICY "Content managers can insert themes"
   ON learning_themes FOR INSERT TO authenticated
   WITH CHECK ((select get_user_role()) IN ('admin', 'maintainer'));
 
 DROP POLICY IF EXISTS "Admins can update themes" ON learning_themes;
 DROP POLICY IF EXISTS "Maintainers can update themes" ON learning_themes;
+DROP POLICY IF EXISTS "Content managers can update themes" ON learning_themes;
 CREATE POLICY "Content managers can update themes"
   ON learning_themes FOR UPDATE TO authenticated
   USING ((select get_user_role()) IN ('admin', 'maintainer'));
 
 DROP POLICY IF EXISTS "Admins can delete themes" ON learning_themes;
 DROP POLICY IF EXISTS "Maintainers can delete themes" ON learning_themes;
+DROP POLICY IF EXISTS "Content managers can delete themes" ON learning_themes;
 CREATE POLICY "Content managers can delete themes"
   ON learning_themes FOR DELETE TO authenticated
   USING ((select get_user_role()) IN ('admin', 'maintainer'));
@@ -53,6 +60,7 @@ CREATE POLICY "Content managers can delete themes"
 DROP POLICY IF EXISTS "Published phases are viewable by authenticated users" ON learning_phases;
 DROP POLICY IF EXISTS "Admins can view all phases" ON learning_phases;
 DROP POLICY IF EXISTS "Maintainers can view all phases" ON learning_phases;
+DROP POLICY IF EXISTS "Phases are viewable by users or content managers" ON learning_phases;
 CREATE POLICY "Phases are viewable by users or content managers"
   ON learning_phases FOR SELECT TO authenticated
   USING (
@@ -62,18 +70,21 @@ CREATE POLICY "Phases are viewable by users or content managers"
 
 DROP POLICY IF EXISTS "Admins can insert phases" ON learning_phases;
 DROP POLICY IF EXISTS "Maintainers can insert phases" ON learning_phases;
+DROP POLICY IF EXISTS "Content managers can insert phases" ON learning_phases;
 CREATE POLICY "Content managers can insert phases"
   ON learning_phases FOR INSERT TO authenticated
   WITH CHECK ((select get_user_role()) IN ('admin', 'maintainer'));
 
 DROP POLICY IF EXISTS "Admins can update phases" ON learning_phases;
 DROP POLICY IF EXISTS "Maintainers can update phases" ON learning_phases;
+DROP POLICY IF EXISTS "Content managers can update phases" ON learning_phases;
 CREATE POLICY "Content managers can update phases"
   ON learning_phases FOR UPDATE TO authenticated
   USING ((select get_user_role()) IN ('admin', 'maintainer'));
 
 DROP POLICY IF EXISTS "Admins can delete phases" ON learning_phases;
 DROP POLICY IF EXISTS "Maintainers can delete phases" ON learning_phases;
+DROP POLICY IF EXISTS "Content managers can delete phases" ON learning_phases;
 CREATE POLICY "Content managers can delete phases"
   ON learning_phases FOR DELETE TO authenticated
   USING ((select get_user_role()) IN ('admin', 'maintainer'));
@@ -85,6 +96,7 @@ CREATE POLICY "Content managers can delete phases"
 DROP POLICY IF EXISTS "Published weeks are viewable by authenticated users" ON learning_weeks;
 DROP POLICY IF EXISTS "Admins can view all weeks" ON learning_weeks;
 DROP POLICY IF EXISTS "Maintainers can view all weeks" ON learning_weeks;
+DROP POLICY IF EXISTS "Weeks are viewable by users or content managers" ON learning_weeks;
 CREATE POLICY "Weeks are viewable by users or content managers"
   ON learning_weeks FOR SELECT TO authenticated
   USING (
@@ -94,18 +106,21 @@ CREATE POLICY "Weeks are viewable by users or content managers"
 
 DROP POLICY IF EXISTS "Admins can insert weeks" ON learning_weeks;
 DROP POLICY IF EXISTS "Maintainers can insert weeks" ON learning_weeks;
+DROP POLICY IF EXISTS "Content managers can insert weeks" ON learning_weeks;
 CREATE POLICY "Content managers can insert weeks"
   ON learning_weeks FOR INSERT TO authenticated
   WITH CHECK ((select get_user_role()) IN ('admin', 'maintainer'));
 
 DROP POLICY IF EXISTS "Admins can update weeks" ON learning_weeks;
 DROP POLICY IF EXISTS "Maintainers can update weeks" ON learning_weeks;
+DROP POLICY IF EXISTS "Content managers can update weeks" ON learning_weeks;
 CREATE POLICY "Content managers can update weeks"
   ON learning_weeks FOR UPDATE TO authenticated
   USING ((select get_user_role()) IN ('admin', 'maintainer'));
 
 DROP POLICY IF EXISTS "Admins can delete weeks" ON learning_weeks;
 DROP POLICY IF EXISTS "Maintainers can delete weeks" ON learning_weeks;
+DROP POLICY IF EXISTS "Content managers can delete weeks" ON learning_weeks;
 CREATE POLICY "Content managers can delete weeks"
   ON learning_weeks FOR DELETE TO authenticated
   USING ((select get_user_role()) IN ('admin', 'maintainer'));
@@ -117,6 +132,7 @@ CREATE POLICY "Content managers can delete weeks"
 DROP POLICY IF EXISTS "Published contents are viewable by authenticated users" ON learning_contents;
 DROP POLICY IF EXISTS "Admins can view all contents" ON learning_contents;
 DROP POLICY IF EXISTS "Maintainers can view all contents" ON learning_contents;
+DROP POLICY IF EXISTS "Contents are viewable by users or content managers" ON learning_contents;
 CREATE POLICY "Contents are viewable by users or content managers"
   ON learning_contents FOR SELECT TO authenticated
   USING (
@@ -126,18 +142,21 @@ CREATE POLICY "Contents are viewable by users or content managers"
 
 DROP POLICY IF EXISTS "Admins can insert contents" ON learning_contents;
 DROP POLICY IF EXISTS "Maintainers can insert contents" ON learning_contents;
+DROP POLICY IF EXISTS "Content managers can insert contents" ON learning_contents;
 CREATE POLICY "Content managers can insert contents"
   ON learning_contents FOR INSERT TO authenticated
   WITH CHECK ((select get_user_role()) IN ('admin', 'maintainer'));
 
 DROP POLICY IF EXISTS "Admins can update contents" ON learning_contents;
 DROP POLICY IF EXISTS "Maintainers can update contents" ON learning_contents;
+DROP POLICY IF EXISTS "Content managers can update contents" ON learning_contents;
 CREATE POLICY "Content managers can update contents"
   ON learning_contents FOR UPDATE TO authenticated
   USING ((select get_user_role()) IN ('admin', 'maintainer'));
 
 DROP POLICY IF EXISTS "Admins can delete contents" ON learning_contents;
 DROP POLICY IF EXISTS "Maintainers can delete contents" ON learning_contents;
+DROP POLICY IF EXISTS "Content managers can delete contents" ON learning_contents;
 CREATE POLICY "Content managers can delete contents"
   ON learning_contents FOR DELETE TO authenticated
   USING ((select get_user_role()) IN ('admin', 'maintainer'));
@@ -149,6 +168,7 @@ CREATE POLICY "Content managers can delete contents"
 DROP POLICY IF EXISTS "Users can view own record" ON users;
 DROP POLICY IF EXISTS "Admins can view all users" ON users;
 DROP POLICY IF EXISTS "Maintainers can view all users" ON users;
+DROP POLICY IF EXISTS "Users can view own record, managers can view all" ON users;
 CREATE POLICY "Users can view own record, managers can view all"
   ON users FOR SELECT TO authenticated
   USING (
@@ -170,13 +190,17 @@ CREATE POLICY "Admins can update users"
 -- user_progress ポリシー
 -- =====================================================
 
+-- SELECT は従来の「本人 or admin」に maintainer を追加する。
+-- maintainer は /manage/students（受講生進捗一覧）で全受講生の
+-- user_progress を参照するため（admin と共通の画面）。
 DROP POLICY IF EXISTS "Users can view own progress" ON user_progress;
 DROP POLICY IF EXISTS "Admins can view all progress" ON user_progress;
-CREATE POLICY "Users can view own progress, admins can view all"
+DROP POLICY IF EXISTS "Users can view own progress, managers can view all" ON user_progress;
+CREATE POLICY "Users can view own progress, managers can view all"
   ON user_progress FOR SELECT TO authenticated
   USING (
     user_id = (select get_user_id())
-    OR (select get_user_role()) = 'admin'
+    OR (select get_user_role()) IN ('admin', 'maintainer')
   );
 
 DROP POLICY IF EXISTS "Users can insert own progress" ON user_progress;
@@ -196,6 +220,7 @@ CREATE POLICY "Users can update own progress"
 DROP POLICY IF EXISTS "Users can view own submissions" ON submissions;
 DROP POLICY IF EXISTS "Admins can view all submissions" ON submissions;
 DROP POLICY IF EXISTS "Maintainers can view all submissions" ON submissions;
+DROP POLICY IF EXISTS "Users can view own submissions, managers can view all" ON submissions;
 CREATE POLICY "Users can view own submissions, managers can view all"
   ON submissions FOR SELECT TO authenticated
   USING (
@@ -215,6 +240,7 @@ CREATE POLICY "Users can insert own submissions"
 DROP POLICY IF EXISTS "Users can view own ai reviews" ON ai_reviews;
 DROP POLICY IF EXISTS "Admins can view all ai reviews" ON ai_reviews;
 DROP POLICY IF EXISTS "Maintainers can view all ai reviews" ON ai_reviews;
+DROP POLICY IF EXISTS "Users can view own ai reviews, managers can view all" ON ai_reviews;
 CREATE POLICY "Users can view own ai reviews, managers can view all"
   ON ai_reviews FOR SELECT TO authenticated
   USING (

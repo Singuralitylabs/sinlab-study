@@ -434,9 +434,11 @@ admin と maintainer はいずれもコンテンツ系テーブルの全件参�
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Users can view own progress, admins can view all | SELECT | 本人 / admin（全件） | `user_id = (select get_user_id()) OR (select get_user_role()) = 'admin'` |
+| Users can view own progress, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `user_id = (select get_user_id()) OR (select get_user_role()) IN ('admin', 'maintainer')` |
 | Users can insert own progress | INSERT | 本人 | `user_id` が自身のユーザーIDと一致 |
 | Users can update own progress | UPDATE | 本人 | `user_id` が自身のユーザーIDと一致 |
+
+maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進捗を参照するため、admin と同様に全件の SELECT を許可する。
 
 **本人判定ロジック**:
 
@@ -457,7 +459,7 @@ user_id = (select get_user_id())
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Users can view own ai reviews, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `submission_id` が自身の提出IDと一致 `OR (select get_user_role()) IN ('admin', 'maintainer')` |
+| Users can view own ai reviews, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `submission_id IN (SELECT id FROM submissions WHERE user_id = (select get_user_id())) OR (select get_user_role()) IN ('admin', 'maintainer')` |
 
 `ai_reviews` には INSERT / UPDATE のRLSポリシーは定義していない。レビューの作成・更新は AIレビューAPI（`/api/ai-review`）がサーバー側で Service Role キーを用いて行い、RLSをバイパスする。
 
