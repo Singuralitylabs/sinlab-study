@@ -420,6 +420,8 @@ EXECUTE 権限は `authenticated` / `service_role` にのみ付与しており�
 | Content managers can update {table} | UPDATE | admin・maintainer | `(select get_user_role()) IN ('admin', 'maintainer')` |
 | Content managers can delete {table} | DELETE | admin・maintainer | `(select get_user_role()) IN ('admin', 'maintainer')` |
 
+`{Table}` / `{table}` にはテーブル名（themes / phases / weeks / contents）が入る。実際のポリシー名に合わせ、文頭に置かれる `{Table}` のみ先頭大文字（例: `Themes are viewable by users or content managers` / `Content managers can insert themes`）。
+
 admin と maintainer はいずれもコンテンツ系テーブルの全件参照・作成・更新・削除が可能（コンテンツ管理は両ロール共通）。
 
 **ロール判定ロジック**:
