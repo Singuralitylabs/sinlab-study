@@ -598,44 +598,147 @@ export async function fetchStudentsProgress(): Promise<{
 }> {
   const supabase = await createServerSupabaseClient();
 
-  // アクティブなユーザー一覧を取得
-  const { data: users, error: usersError } = await supabase
-    .from("users")
-    .select("id, display_name, email")
-    .eq("status", USER_STATUS.ACTIVE)
-    .eq("is_deleted", false)
-    .order("display_name");
+  // アクティブなユーザー一覧と公開コンテンツの総数は独立しているため並列で取得する
+  const [usersResult, contentsCountResult] = await Promise.all([
+    supabase
+      .from("users")
+      .select("id, display_name, email")
+      .eq("status", USER_STATUS.ACTIVE)
+      .eq("is_deleted", false)
+      .order("display_name"),
+    supabase
+      .from("learning_contents")
+      .select("id", { count: "exact", head: true })
+      .eq("is_published", true)
+      .eq("is_deleted", false),
+  ]);
+
+  const { data: users, error: usersError } = usersResult;
+  const { count: totalContents, error: contentsCountError } = contentsCountResult;
 
   if (usersError) {
     console.error("ユーザー一覧取得エラー:", usersError.message);
     return { data: null, error: usersError };
   }
 
-  // 公開コンテンツの総数を取得
-  const { count: totalContents } = await supabase
-    .from("learning_contents")
-    .select("id", { count: "exact", head: true })
-    .eq("is_published", true)
-    .eq("is_deleted", false);
+  // 総数が取れなくても受講生一覧の表示は維持するため、エラーはログのみ（totalContents は0扱い）
+  if (contentsCountError) {
+    console.error("公開コンテンツ総数取得エラー:", contentsCountError.message);
+  }
 
-  // 各ユーザーの進捗を取得
-  const studentsProgress: StudentProgress[] = await Promise.all(
-    (users || []).map(async (user) => {
-      const { data: progress } = await supabase
+  // 完了済み進捗を全ユーザー分まとめて取得し、ユーザー単位に集約する
+  // （ユーザーごとの逐次クエリによるN+1を回避）。
+  // PostgRESTの1リクエスト最大行数（既定1000行）を超えても取りこぼさないよう range でページングする。
+  // サーバー側の max-rows 設定が pageSize より小さい場合でも取りこぼさないよう、
+  // offset は実際に返った行数で進め、0件になった時点で終了する。
+  // 進捗の取得に失敗した場合はエラーにせず完了数0で返し、受講生一覧の表示を維持する。
+  const progressByUser = new Map<number, { completedCount: number; lastActivity: string | null }>();
+  if ((users ?? []).length > 0) {
+    const pageSize = 1000;
+    let offset = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const { data: progress, error: progressError } = await supabase
         .from("user_progress")
-        .select("completed_at")
-        .eq("user_id", user.id)
+        .select("user_id, completed_at")
         .eq("is_completed", true)
-        .order("completed_at", { ascending: false });
+        .order("id")
+        .range(offset, offset + pageSize - 1);
 
-      return {
-        user,
-        totalContents: totalContents || 0,
-        completedContents: progress?.length || 0,
-        lastActivity: progress?.[0]?.completed_at || null,
-      };
-    })
-  );
+      if (progressError) {
+        console.error("受講生進捗取得エラー:", progressError.message);
+        progressByUser.clear();
+        break;
+      }
+
+      const rows = progress ?? [];
+      for (const row of rows) {
+        const entry = progressByUser.get(row.user_id) ?? { completedCount: 0, lastActivity: null };
+        entry.completedCount += 1;
+        if (row.completed_at && (!entry.lastActivity || row.completed_at > entry.lastActivity)) {
+          entry.lastActivity = row.completed_at;
+        }
+        progressByUser.set(row.user_id, entry);
+      }
+
+      offset += rows.length;
+      hasMore = rows.length > 0;
+    }
+  }
+
+  const studentsProgress: StudentProgress[] = (users ?? []).map((user) => {
+    const progress = progressByUser.get(user.id);
+    return {
+      user,
+      totalContents: totalContents || 0,
+      completedContents: progress?.completedCount ?? 0,
+      lastActivity: progress?.lastActivity ?? null,
+    };
+  });
 
   return { data: studentsProgress, error: null };
+}
+
+// =====================================================
+// 管理ダッシュボード
+// =====================================================
+
+interface ManageCounts {
+  themes: number;
+  phases: number;
+  weeks: number;
+  contents: number;
+  students: number;
+}
+
+/**
+ * 管理ダッシュボードの各件数を取得（head + count のみでレコード本体は取得しない）
+ * 一部の件数取得に失敗しても 0 として返し、ダッシュボードの表示を維持する。
+ */
+export async function fetchManageCounts(): Promise<{
+  data: ManageCounts;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+
+  const [themes, phases, weeks, contents, students] = await Promise.all([
+    supabase
+      .from("learning_themes")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
+    supabase
+      .from("learning_phases")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
+    supabase
+      .from("learning_weeks")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
+    supabase
+      .from("learning_contents")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
+    supabase
+      .from("users")
+      .select("id", { count: "exact", head: true })
+      .eq("status", USER_STATUS.ACTIVE)
+      .eq("is_deleted", false),
+  ]);
+
+  const firstError =
+    themes.error ?? phases.error ?? weeks.error ?? contents.error ?? students.error ?? null;
+  if (firstError) {
+    console.error("管理ダッシュボード件数取得エラー:", firstError.message);
+  }
+
+  return {
+    data: {
+      themes: themes.count ?? 0,
+      phases: phases.count ?? 0,
+      weeks: weeks.count ?? 0,
+      contents: contents.count ?? 0,
+      students: students.count ?? 0,
+    },
+    error: firstError,
+  };
 }

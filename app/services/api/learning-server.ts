@@ -226,18 +226,25 @@ export async function fetchPhaseById(phaseId: number): Promise<{
   return { data, error: null };
 }
 
+/** フェーズページの一覧表示に必要なコンテンツの最小カラム（text_content 等の本文は含めない） */
+export type PhaseContentSummary = Pick<
+  LearningContent,
+  "id" | "title" | "content_type" | "display_order"
+>;
+
 /**
  * フェーズに属する公開週一覧をコンテンツ付きで取得
+ * コンテンツは一覧表示に必要なカラムのみ select する（本文カラムの全取得を避ける）。
  */
 export async function fetchWeeksWithContentsByPhaseId(phaseId: number): Promise<{
-  data: (LearningWeek & { contents: LearningContent[] })[] | null;
+  data: (LearningWeek & { contents: PhaseContentSummary[] })[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_weeks")
-    .select("*, contents:learning_contents(*)")
+    .select("*, contents:learning_contents(id, title, content_type, display_order)")
     .eq("phase_id", phaseId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -251,7 +258,7 @@ export async function fetchWeeksWithContentsByPhaseId(phaseId: number): Promise<
     return { data: null, error };
   }
 
-  return { data: data as (LearningWeek & { contents: LearningContent[] })[], error: null };
+  return { data: data as (LearningWeek & { contents: PhaseContentSummary[] })[], error: null };
 }
 
 /**

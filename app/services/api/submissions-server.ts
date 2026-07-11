@@ -1,5 +1,5 @@
 import type { PostgrestError } from "@supabase/supabase-js";
-import type { Submission, SubmissionWithContent, SubmissionWithUser } from "@/app/types";
+import type { LearningContent, Submission, SubmissionWithContent, UserType } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
 /**
@@ -52,25 +52,38 @@ export async function fetchLatestSubmissionByContentId(
   return { data: data as Submission | null, error: null };
 }
 
+interface RecentSubmission {
+  id: number;
+  submitted_at: string | null;
+  user: Pick<UserType, "display_name"> | null;
+  content: Pick<LearningContent, "title"> | null;
+}
+
 /**
- * 全ユーザーの提出履歴を取得（管理者・講師用）
+ * 直近の提出と提出総数を取得（管理ダッシュボード用。コード本文などの重いカラムは取得しない）
+ * count: "exact" を併用し、直近N件と総数を1クエリで取得する。
  * Service Roleクライアントを使用（呼び出し元で権限チェック済み前提）
  */
-export async function fetchAllSubmissions(): Promise<{
-  data: SubmissionWithUser[] | null;
+export async function fetchRecentSubmissions(limit: number): Promise<{
+  data: RecentSubmission[] | null;
+  count: number;
   error: PostgrestError | null;
 }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { data, error } = await supabase
+  const { data, count, error } = await supabase
     .from("submissions")
-    .select("*, user:users(id, display_name, email), content:learning_contents(*)")
-    .order("submitted_at", { ascending: false });
+    .select("id, submitted_at, user:users(display_name), content:learning_contents(title)", {
+      count: "exact",
+    })
+    .order("submitted_at", { ascending: false })
+    .limit(limit)
+    .overrideTypes<RecentSubmission[], { merge: false }>();
 
   if (error) {
-    console.error("全提出履歴取得エラー:", error.message);
-    return { data: null, error };
+    console.error("直近提出取得エラー:", error.message);
+    return { data: null, count: 0, error };
   }
 
-  return { data: data as SubmissionWithUser[], error: null };
+  return { data, count: count ?? 0, error: null };
 }
