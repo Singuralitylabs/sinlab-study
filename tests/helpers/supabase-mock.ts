@@ -12,6 +12,7 @@ export function createQueryBuilder(result: { data: unknown; error: unknown }) {
     eq: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
+    range: vi.fn().mockReturnThis(),
     single: vi.fn().mockResolvedValue(result),
     maybeSingle: vi.fn().mockResolvedValue(result),
     // リスト取得は await builder そのものを解決する
