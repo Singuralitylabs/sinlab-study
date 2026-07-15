@@ -396,11 +396,18 @@ RLSポリシーのロール判定・本人判定に使用する `SECURITY DEFINE
 
 いずれも `STABLE SECURITY DEFINER`・`SET search_path = public` で定義されている。
 
+EXECUTE 権限は `authenticated` / `service_role` にのみ付与しており、`anon`（未認証）からの REST RPC 経由の実行は許可しない（`PUBLIC` へのデフォルト付与も取り消し済み）。
+
 ---
 
 ## 6. Row Level Security（RLS）
 
 全テーブルに対してRLSが有効化されている。ポリシーは `authenticated` ロール（Supabase Authで認証済みユーザー）に対して適用される。
+
+パフォーマンスのため、以下の方針でポリシーを定義している（Supabase Performance Advisor の `multiple_permissive_policies` / `auth_rls_initplan` 警告対応）。
+
+- 同一テーブル・同一操作に対する許可ポリシーは `OR` 条件で1つに統合する
+- ポリシー内の関数呼び出しは `(select get_user_role())` のように `(select ...)` で包み、行ごとの再評価を防いでクエリ実行時に1回だけ評価（InitPlan化）させる
 
 ### 6.1 学習コンテンツ系テーブル
 
@@ -408,15 +415,12 @@ RLSポリシーのロール判定・本人判定に使用する `SECURITY DEFINE
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Published {table} are viewable by authenticated users | SELECT | 認証済み全ユーザー | `is_published = true AND is_deleted = false` |
-| Admins can view all {table} | SELECT | admin | `get_user_role() = 'admin'` |
-| Maintainers can view all {table} | SELECT | maintainer | `get_user_role() = 'maintainer'` |
-| Admins can insert {table} | INSERT | admin | `get_user_role() = 'admin'` |
-| Maintainers can insert {table} | INSERT | maintainer | `get_user_role() = 'maintainer'` |
-| Admins can update {table} | UPDATE | admin | `get_user_role() = 'admin'` |
-| Maintainers can update {table} | UPDATE | maintainer | `get_user_role() = 'maintainer'` |
-| Admins can delete {table} | DELETE | admin | `get_user_role() = 'admin'` |
-| Maintainers can delete {table} | DELETE | maintainer | `get_user_role() = 'maintainer'` |
+| {Table} are viewable by users or content managers | SELECT | 認証済み全ユーザー（公開分）/ admin・maintainer（全件） | `(is_published = true AND is_deleted = false) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+| Content managers can insert {table} | INSERT | admin・maintainer | `(select get_user_role()) IN ('admin', 'maintainer')` |
+| Content managers can update {table} | UPDATE | admin・maintainer | `(select get_user_role()) IN ('admin', 'maintainer')` |
+| Content managers can delete {table} | DELETE | admin・maintainer | `(select get_user_role()) IN ('admin', 'maintainer')` |
+
+`{Table}` / `{table}` にはテーブル名（themes / phases / weeks / contents）が入る。実際のポリシー名に合わせ、文頭に置かれる `{Table}` のみ先頭大文字（例: `Themes are viewable by users or content managers` / `Content managers can insert themes`）。
 
 admin と maintainer はいずれもコンテンツ系テーブルの全件参照・作成・更新・削除が可能（コンテンツ管理は両ロール共通）。
 
@@ -425,42 +429,39 @@ admin と maintainer はいずれもコンテンツ系テーブルの全件参�
 ロールチェックは SECURITY DEFINER 関数 `get_user_role()` を用いる（「5.2 RLSヘルパー関数」参照）。
 
 ```sql
-get_user_role() = 'admin'   -- 例: 管理者向けポリシー
+(select get_user_role()) IN ('admin', 'maintainer')   -- 例: コンテンツ管理者向けポリシー
 ```
 
 ### 6.2 user_progress
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Users can view own progress | SELECT | 本人 | `user_id` が自身のユーザーIDと一致 |
-| Admins can view all progress | SELECT | admin | `get_user_role() = 'admin'` |
+| Users can view own progress, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `user_id = (select get_user_id()) OR (select get_user_role()) IN ('admin', 'maintainer')` |
 | Users can insert own progress | INSERT | 本人 | `user_id` が自身のユーザーIDと一致 |
 | Users can update own progress | UPDATE | 本人 | `user_id` が自身のユーザーIDと一致 |
+
+maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進捗を参照するため、admin と同様に全件の SELECT を許可する。
 
 **本人判定ロジック**:
 
 本人チェックは SECURITY DEFINER 関数 `get_user_id()`（認証ユーザーの `users.id` を返す）を用いる。
 
 ```sql
-user_id = get_user_id()
+user_id = (select get_user_id())
 ```
 
 ### 6.3 submissions
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Users can view own submissions | SELECT | 本人 | `user_id` が自身のユーザーIDと一致 |
-| Admins can view all submissions | SELECT | admin | `get_user_role() = 'admin'` |
-| Maintainers can view all submissions | SELECT | maintainer | `get_user_role() = 'maintainer'` |
+| Users can view own submissions, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `user_id = (select get_user_id()) OR (select get_user_role()) IN ('admin', 'maintainer')` |
 | Users can insert own submissions | INSERT | 本人 | `user_id` が自身のユーザーIDと一致 |
 
 ### 6.4 ai_reviews
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Users can view own ai reviews | SELECT | 本人 | `submission_id` が自身の提出IDと一致 |
-| Admins can view all ai reviews | SELECT | admin | `get_user_role() = 'admin'` |
-| Maintainers can view all ai reviews | SELECT | maintainer | `get_user_role() = 'maintainer'` |
+| Users can view own ai reviews, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `submission_id IN (SELECT id FROM submissions WHERE user_id = (select get_user_id())) OR (select get_user_role()) IN ('admin', 'maintainer')` |
 
 `ai_reviews` には INSERT / UPDATE のRLSポリシーは定義していない。レビューの作成・更新は AIレビューAPI（`/api/ai-review`）がサーバー側で Service Role キーを用いて行い、RLSをバイパスする。
 
@@ -468,11 +469,9 @@ user_id = get_user_id()
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Users can view own record | SELECT | 本人 | `auth_id = auth.uid() AND is_deleted = false` |
-| Admins can view all users | SELECT | admin | `get_user_role() = 'admin'` |
-| Maintainers can view all users | SELECT | maintainer | `get_user_role() = 'maintainer'` |
-| Authenticated users can insert own record | INSERT | 本人 | `auth_id = auth.uid()` |
-| Admins can update users | UPDATE | admin | `get_user_role() = 'admin'` |
+| Users can view own record, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `(auth_id = (select auth.uid()) AND is_deleted = false) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+| Authenticated users can insert own record | INSERT | 本人 | `auth_id = (select auth.uid())` |
+| Admins can update users | UPDATE | admin | `(select get_user_role()) = 'admin'` |
 
 初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer は受講生進捗（`/manage/students`）の閲覧で `users` を参照するため SELECT のみ許可し、UPDATE は付与しない（ユーザー管理は不可）。
 
@@ -487,6 +486,7 @@ user_id = get_user_id()
 | `01_schema/001_create_tables.sql` | 全テーブル・ヘルパー関数・トリガー・インデックスの作成 |
 | `01_schema/002_add_submission_code_files.sql` | submissions に複数ファイル提出用 `code_files`（JSONB）カラムを追加 |
 | `02_rls/001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
+| `02_rls/002_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し |
 | `03_seed/gas/001_course_structure.sql` | GAS講座のテーマ・フェーズ・週・コンテンツ構造のシード |
 | `03_seed/gas/002_exercises.sql` | GAS講座の演習コンテンツ（課題・模範回答）のシード |
 | `03_seed/gas/003_hints.sql` | GAS講座の全演習課題へのヒントデータ投入 |
