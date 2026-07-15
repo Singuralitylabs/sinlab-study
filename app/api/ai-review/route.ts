@@ -85,43 +85,32 @@ export async function POST(request: NextRequest) {
     }
 
     // 月次利用上限チェック
+    // 既知の制約: カウント確認〜UPSERT完了までは非原子的なため、同時リクエストが
+    // 上限付近で競合した場合、上限をわずかに超える可能性がある（別Issueで対応予定）
+    const now = new Date();
     const startOfMonth = new Date(
-      Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
     ).toISOString();
 
-    const { data: allUserSubmissions, error: submissionsError } = await supabase
-      .from("submissions")
-      .select("id")
-      .eq("user_id", auth.data.userId);
+    const { count: monthlyCount, error: monthlyCountError } = await supabase
+      .from("ai_reviews")
+      .select("id, submissions!inner(user_id)", { count: "exact", head: true })
+      .eq("submissions.user_id", auth.data.userId)
+      .eq("status", "completed")
+      .gte("reviewed_at", startOfMonth);
 
-    if (submissionsError) {
-      console.error("月次利用上限チェック（submissions取得）エラー:", submissionsError);
+    if (monthlyCountError) {
+      console.error("月次利用上限チェック（ai_reviews集計）エラー:", monthlyCountError);
       return NextResponse.json({ error: "利用上限の確認に失敗しました" }, { status: 500 });
     }
 
-    const allUserSubmissionIds = (allUserSubmissions ?? []).map((s) => s.id);
-
-    if (allUserSubmissionIds.length > 0) {
-      const { count: monthlyCount, error: reviewCountError } = await supabase
-        .from("ai_reviews")
-        .select("id", { count: "exact", head: true })
-        .in("submission_id", allUserSubmissionIds)
-        .eq("status", "completed")
-        .gte("reviewed_at", startOfMonth);
-
-      if (reviewCountError) {
-        console.error("月次利用上限チェック（ai_reviews集計）エラー:", reviewCountError);
-        return NextResponse.json({ error: "利用上限の確認に失敗しました" }, { status: 500 });
-      }
-
-      if ((monthlyCount ?? 0) >= MONTHLY_LIMIT) {
-        return NextResponse.json(
-          {
-            error: `今月のAIレビュー上限（${MONTHLY_LIMIT}回）に達しました。来月以降にご利用ください。`,
-          },
-          { status: 429 }
-        );
-      }
+    if ((monthlyCount ?? 0) >= MONTHLY_LIMIT) {
+      return NextResponse.json(
+        {
+          error: `今月のAIレビュー上限（${MONTHLY_LIMIT}回）に達しました。来月以降にご利用ください。`,
+        },
+        { status: 429 }
+      );
     }
 
     // 同一ユーザー・同一コンテンツでのAIレビュー利用済みチェック（1課題につき1回制限）
