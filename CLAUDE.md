@@ -61,7 +61,6 @@ app/
 ├── (auth)/              # 公開ページ（認証不要）
 │   ├── login/           # Googleログインページ
 │   ├── callback/        # OAuthコールバック（セッション確立 + ユーザー自動登録）
-│   ├── pending/         # 承認待ち画面
 │   └── rejected/        # 却下画面
 ├── (authenticated)/     # 全ページでアクティブなユーザーセッションが必要
 │   ├── admin/           # 管理者専用：フェーズ・週・コンテンツ・受講生・提出物・ユーザー管理
@@ -77,30 +76,41 @@ app/
 ### 認証・認可フロー
 
 1. **ログイン**: `/login` ページでGoogleログインボタンをクリック → Supabase Auth経由でGoogle OAuth
-2. **コールバック**: `/auth/callback` でOAuthコードをセッションに変換。初回ログイン時は `users` テーブルにレコードを自動作成（`status=pending`）
+2. **コールバック**: `/auth/callback` でOAuthコードをセッションに変換。初回ログイン時は `users` テーブルにレコードを自動作成（`status=pending`）し、そのままダッシュボード（`/`）へ遷移
 3. **プロキシ** (`proxy.ts`、Next.js 16 における Middleware の後継) が静的ファイル・認証ページ以外の全リクエストをインターセプト
 4. Supabaseサーバークライアントを生成し、`getUser()` を呼び出し
-5. 未認証 → `/login` にリダイレクト
-6. 認証済みだがステータスが `pending`/`rejected` → `/pending` または `/rejected` にリダイレクト
-7. `active` ユーザーのみアプリにアクセス可能
+5. 未認証・ステータス取得不能（null） → `/login` にリダイレクト（フェイルクローズ）
+6. 認証済みだがステータスが `rejected` → `/rejected` にリダイレクト
+7. `active` ユーザーと `pending`（お試し）ユーザーがアプリにアクセス可能。お試しユーザーには承認待ちであることをアプリ内バナーで通知（`/pending` 承認待ち画面は廃止。アクセス時は `/` へリダイレクト）
 8. **ユーザー管理**: 管理者が `/admin/users` でユーザーの承認・却下を行う
 
-**認可の二層防御**: 未認証・`pending`/`rejected` のリダイレクト判定はプロキシ（`proxy.ts`）を第一の砦とし、`app/(authenticated)/layout.tsx` でも `userStatus` の許可リスト検証（`active` 以外はリダイレクト）を行う。プロキシはフェイルクローズ（環境変数欠落・例外時は `/login` へ）。クライアント側での認証ガードは行わない。
+**認可の二層防御**: 未認証・`rejected` のリダイレクト判定はプロキシ（`proxy.ts`）を第一の砦とし、`app/(authenticated)/layout.tsx` でも `userStatus` の許可リスト検証（`active`/`pending` 以外はリダイレクト）を行う。プロキシはフェイルクローズ（環境変数欠落・例外時は `/login` へ）。クライアント側での認証ガードは行わない。
 **サーバー側のユーザー情報取得**: layout・page・API Routeでは `getServerAuth()`（`app/services/auth/server-auth.ts`）を使用する。`React.cache()` によりリクエスト単位でメモ化されるため、layoutとpageの双方から呼んでも認証確認・`users` テーブル照会は1リクエストにつき1回しか実行されない。
 
 **ロール**: `admin`（全権限）、`maintainer`（コンテンツ管理）、`member`（受講生）
 **権限チェック**: `app/services/auth/` にロールベースの権限チェックロジックを集約
 
+### お試し（trial）ユーザー
+
+承認前ユーザー（`status=pending`）を「**お試し（trial）ユーザー**」と呼ぶ。お試し体験を通じた入会動機の醸成のため、承認前でも通常ログインでき、**お試し公開**指定されたコンテンツのみ閲覧・課題提出できる（DBの status 値 `'pending'` 自体のリネームは #88 で対応予定。新設フラグ名・UI文言には trial 系の名称を用いる）。
+
+- **お試し公開フラグ**: `learning_contents.is_open_to_trial`（`BOOLEAN NOT NULL DEFAULT false`）。コンテンツ編集フォーム（`/manage/contents`、admin/maintainer のみ）のチェックボックス「お試しユーザーにも公開する」で設定する
+- **閲覧範囲**: お試しユーザーは `is_open_to_trial=true` かつ `is_published=true` のコンテンツのみ閲覧・進捗登録・提出が可能
+- **ロック表示**: コースツリー（テーマ/フェーズ/週/コンテンツ一覧）は全件表示しつつ、お試し非公開のコンテンツは鍵アイコンでロックし中身は見せない。直リンク時はロック画面を表示する
+- **ツリー表示のサマリー取得**: RLS強化によりお試し非公開コンテンツのタイトル等が通常クライアントで取得できないため、一覧系のサマリー取得に限り service_role クライアント + カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial` のみ。本文カラムは select しない）で実装する
+- **APIのお試し公開チェック**: 提出API（`/api/submissions`）・進捗API（`/api/progress`）でお試しユーザーはお試し公開コンテンツのみ書き込み可（非公開コンテンツへの直叩きは 403）
+- **提出物の引き継ぎ**: 承認前の提出・進捗は user_id ベースのため、承認後もそのまま引き継がれる。管理者/メンテナーのレビュー一覧にはお試しユーザーの提出も表示される
+
 ### データモデル (Supabase/PostgreSQL)
 
 論理削除と表示順を備えた3層コンテンツ階層:
-- **learning_phases** → **learning_weeks** → **learning_contents**（種別: `video`, `text`, `exercise`）
+- **learning_phases** → **learning_weeks** → **learning_contents**（種別: `video`, `text`, `exercise`。お試し公開フラグ `is_open_to_trial` を持つ）
 - **user_progress**: コンテンツごとの完了状態を記録（user+contentでユニーク）
 - **submissions**: 演習コンテンツに紐づくコードまたはURLの提出物。コード提出は単一/複数ファイルに対応する。単一ファイルは `code_content`（TEXT）に保存し、複数ファイル（例: `コード.gs` + `index.html`）は `code_files`（JSONB: `[{filename, language, content}]`）に保存する。どちらか一方のみが値を持ち、もう一方は `NULL`（後方互換: 既存の `code_content` のみの提出はそのまま有効）。表示・AIレビューでは `getSubmissionCodeFiles()`（`app/lib/submission-files.ts`）でファイル配列に正規化して扱う。
 
 スライドPDFは Supabase Storage の `slides` バケット内に、オブジェクトキー **`<コーススラッグ>/slide-NN.pdf`**（NNは最低2桁のゼロ埋め）で保存する（例: キー `gas-advanced/slide-03.pdf` → 公開URL `.../storage/v1/object/public/slides/gas-advanced/slide-03.pdf`）。アップロードAPI（`app/api/upload-pdf/route.ts`）はフォルダ指定＋連番（自動採番／番号指定）に対応しており、シードSQL（`supabase/migrations/03_seed/`）もこのパスを前提とする。
 
-セキュリティはデータベースレベルの**Row Level Security (RLS)** ポリシーで実現。公開コンテンツは認証済み全ユーザーが閲覧可能、進捗・提出物は本人のみ、管理者は全データの読み書きが可能。
+セキュリティはデータベースレベルの**Row Level Security (RLS)** ポリシーで実現。`get_user_status()` ヘルパー関数でリクエストユーザーのステータスを参照し、公開コンテンツは `active` ユーザーが閲覧可能、お試しユーザー（`status='pending'`）は `is_open_to_trial=true` かつ `is_published=true` のコンテンツのみ SELECT 可（アプリ層のチェックと合わせた二層防御、InitPlan最適化パターンを維持）。進捗・提出物は本人のみで、INSERT には可視コンテンツ限定の EXISTS 条件を課す。管理者は全データの読み書きが可能。
 
 ### サービス層 (`app/services/`)
 
