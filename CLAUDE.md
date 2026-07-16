@@ -58,10 +58,10 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 
 ```
 app/
-├── (auth)/              # 公開ページ（認証不要）
+├── (auth)/              # 公開ページ（認証不要。ルートグループのためURLは /login・/rejected）
 │   ├── login/           # Googleログインページ
-│   ├── callback/        # OAuthコールバック（セッション確立 + ユーザー自動登録）
 │   └── rejected/        # 却下画面
+├── auth/callback/       # OAuthコールバック（セッション確立 + ユーザー自動登録）: /auth/callback
 ├── (authenticated)/     # 全ページで有効なユーザーセッションが必要（active / pending のみ）
 │   ├── admin/           # 管理者専用：ユーザー承認・却下（users/ のみ実体。他は /manage/* への旧パスリダイレクト）
 │   ├── manage/          # admin・maintainer：テーマ・フェーズ・週・コンテンツ・受講生・提出物管理
