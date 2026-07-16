@@ -103,10 +103,11 @@ app/
 - **閲覧範囲**: お試しユーザーは `is_open_to_trial=true` かつ `is_published=true` のコンテンツのみ閲覧・進捗登録・提出が可能
 - **ロック表示**: コースツリー（テーマ/フェーズ/週/コンテンツ一覧）は全件表示しつつ、お試し非公開のコンテンツは鍵アイコンでロックし中身は見せない。直リンク時もロック画面を表示する
 - **RLS強化の対象範囲**: ステータスによる絞り込みを追加するのは `learning_contents` のみ。親階層（`learning_themes`/`learning_phases`/`learning_weeks`）は従来どおりステータス不問で `is_published=true` を閲覧可のため変更しない。したがって通常クライアントで取得できなくなるのは**お試し非公開コンテンツの行のみ**であり、service_role の適用範囲もそこに限定される
-- **service_role によるコンテンツ情報の取得**: 上記により、お試しユーザーには以下の2箇所で service_role クライアント + カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial` のみ。本文カラムは select しない）を使う。それ以外の経路で service_role を使ってはならない
+- **service_role によるコンテンツ情報の取得**: 上記により、**受講生向けのコンテンツ配信経路で RLS をバイパスしてよいのは以下の2箇所のみ**（管理者・講師向けの権限チェック済みクエリや、`user_id` フィルタで担保している既存の service_role 利用は対象外・従来どおり）
   - ツリー表示の一覧サマリー取得（ロック済みコンテンツのタイトル・並び順の表示用）
   - **コンテンツ詳細ページの存在チェック**（直リンク時に「存在しない（404）」と「ロックされている」を区別するため。通常クライアントでは両者とも0行になり判別できない）。ロック済みと判定した場合はタイトルのみ表示するロック画面を返し、本文・動画・スライドは一切取得しない
-- **APIのお試し公開チェック**: 提出API（`/api/submissions`）・進捗API（`/api/progress`）でお試しユーザーはお試し公開コンテンツのみ書き込み可（非公開コンテンツへの直叩きは 403）
+  - いずれも **`is_published = true AND is_deleted = false` で必ず絞り**（service_role はRLSを素通りするため、条件を省くと未公開コンテンツのタイトルが露出する）、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial` のみ。本文カラムは select しない）を用いる。0行なら404扱いとする
+- **APIのお試し公開チェック**: 提出API（`/api/submissions`）・進捗API（`/api/progress`）では、`rejected` を403としたうえで、**ステータスを問わず対象コンテンツが自分に可視でなければ403**とする。判定は通常クライアントで `contentId` を SELECT し0行なら403（RLSがステータスを織り込むため、アプリ層でのステータス分岐は不要。存在しないIDも同時に弾ける）
 - **ダッシュボード進捗率の分母**: お試しユーザーの進捗率は**お試し公開コンテンツのみを分母**とする（体験範囲内の進捗を示す）。ダッシュボードの集計（`fetchThemeProgressSummaries`）は通常クライアントのネスト select のため、RLSによる絞り込みがそのまま分母に反映され、追加実装は不要。ツリーは全件表示・進捗率はお試し公開分の分母、という差異は意図的なもの
 - **提出物の引き継ぎ**: 承認前の提出・進捗は user_id ベースのため、承認後もそのまま引き継がれる。管理者/メンテナーのレビュー一覧にはお試しユーザーの提出も表示される
 - **既知の制約（スライドPDF）**: スライドは公開バケット（`slides`、`public=true`）配信でオブジェクトキーが連番のため、ロック済みコンテンツのPDFもURL推測で取得できる。これは本機能以前からの既存の性質であり、署名付きURL化は別issue（#89）で対応する
@@ -124,7 +125,7 @@ app/
 
 **RLSヘルパー関数**: ロール・ID・ステータスの参照は `get_user_role()` / `get_user_id()` / `get_user_status()` を用いる。いずれも `users` 自身のRLSとの無限再帰を防ぐため `SECURITY DEFINER` + `SET search_path = public` + `STABLE` で定義し、anon からの REST RPC 経由の実行を防ぐため `PUBLIC, anon` から EXECUTE を REVOKE、`authenticated, service_role` へ GRANT する。ポリシー内では `(select get_user_xxx())` の形で包み、行ごとの再評価を防いでInitPlan化させる（`auth_rls_initplan` 対策）。同一操作の許可ポリシーはロール別に分けず OR 条件で1本に統合する（`multiple_permissive_policies` 対策）。
 
-**進捗・提出物の書き込み制限**: `user_progress` / `submissions` の INSERT に加えて、`user_progress` の **UPDATE にも可視コンテンツ限定の EXISTS 条件を課す**。進捗APIは upsert（`onConflict: user_id,content_id`）で、既存行がある場合は UPDATE 経路を通るため、INSERT のみに条件を課すと2回目以降の更新がすり抜けるため。これにより、お試し公開フラグを後から `false` に戻したコンテンツの進捗も書き換えられなくなる。
+**進捗・提出物の書き込み制限**: `user_progress` / `submissions` の INSERT に加えて、`user_progress` の **UPDATE にも可視コンテンツ限定の EXISTS 条件を課す**。進捗APIは upsert（`onConflict: user_id,content_id`）で、既存行がある場合は UPDATE 経路を通るため、INSERT のみに条件を課すと2回目以降の更新がすり抜けるため。これにより、お試し公開フラグを後から `false` に戻したコンテンツの進捗も書き換えられなくなる。この条件はステータスを問わず適用されるため、`active` ユーザーも不可視コンテンツ（未公開・存在しないID）へは書き込めなくなる（通常のUI経路では到達しないため正常系への影響はない）。
 
 ### サービス層 (`app/services/`)
 
