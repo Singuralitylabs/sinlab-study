@@ -422,7 +422,7 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 1. 認証チェック
 2. 提出データと関連コンテンツを取得
 3. 本人の提出であることを確認
-4. Gemini API にコード・演習指示・模範回答を送信してレビュー生成
+4. Gemini API にコード・演習指示・模範回答・ヒント（設定時のみ）を送信してレビュー生成
 5. `ai_reviews` テーブルに結果を upsert（`pending` → `processing` → `completed` / `failed`）
 
 **レスポンス**:

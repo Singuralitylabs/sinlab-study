@@ -78,7 +78,8 @@ function sleep(ms: number): Promise<void> {
 export async function generateReview(
   exerciseInstructions: string,
   submission: ReviewSubmission,
-  referenceAnswer?: string | null
+  referenceAnswer?: string | null,
+  hint?: string | null
 ): Promise<ReviewResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -101,12 +102,13 @@ export async function generateReview(
   });
 
   const referenceSection = referenceAnswer ? `\n## 模範回答\n${referenceAnswer}\n` : "";
+  const hintSection = hint ? `\n## 課題のヒント\n${hint}\n` : "";
 
   let userPrompt: string;
   if (submission.type === "url") {
     userPrompt = `## 課題内容
 ${exerciseInstructions}
-${referenceSection}
+${referenceSection}${hintSection}
 ## 提出内容（URL）
 ${submission.content}
 
@@ -114,7 +116,7 @@ ${submission.content}
   } else {
     userPrompt = `## 課題内容
 ${exerciseInstructions}
-${referenceSection}
+${referenceSection}${hintSection}
 ## 提出コード
 ${buildCodeSection(submission.files)}`;
   }
