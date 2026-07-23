@@ -169,7 +169,8 @@ export async function POST(request: NextRequest) {
       const result = await generateReview(
         content.exercise_instructions,
         reviewSubmission,
-        content.reference_answer
+        content.reference_answer,
+        content.hint
       );
 
       // completed 状態で保存

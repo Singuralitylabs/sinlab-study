@@ -13,37 +13,11 @@ import {
 } from "@/app/services/api/ai-review-server";
 import { generateReview } from "@/app/services/api/gemini";
 import { getApiAuth, getApiSupabaseClient } from "@/app/services/auth/api-auth";
-
-// Supabase クエリビルダーのテスト用実装
-// select/eq/in/gte/limit チェーンと直接 await（thenable）の両方に対応
-function qb(result: Record<string, unknown>) {
-  return {
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    in: vi.fn().mockReturnThis(),
-    gte: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-    single: vi.fn().mockResolvedValue(result),
-    maybeSingle: vi.fn().mockResolvedValue(result),
-    // biome-ignore lint/suspicious/noThenProperty: Supabase クエリビルダーの thenable を再現するため意図的に定義
-    then: (
-      onfulfilled: (v: Record<string, unknown>) => unknown,
-      onrejected?: (r: unknown) => unknown
-    ) => Promise.resolve(result).then(onfulfilled, onrejected),
-    catch: (onrejected: (r: unknown) => unknown) => Promise.resolve(result).catch(onrejected),
-    finally: (onfinally: () => void) => Promise.resolve(result).finally(onfinally),
-  };
-}
+import { createMockSupabaseClientFromSequence } from "@/tests/helpers/supabase-mock";
 
 // from() 呼び出し順に対応した結果を返すモッククライアントを生成する
 // ルートコード内の from() 呼び出し順序に合わせて引数を渡す
-function makeClient(...fromResults: Record<string, unknown>[]) {
-  const mock = { from: vi.fn() };
-  for (const result of fromResults) {
-    mock.from.mockReturnValueOnce(qb(result));
-  }
-  return mock;
-}
+const makeClient = createMockSupabaseClientFromSequence;
 
 const MOCK_SUBMISSION = {
   id: 1,
@@ -141,6 +115,61 @@ describe("POST /api/ai-review", () => {
 
       expect(res.status).toBe(200);
       expect(vi.mocked(generateReview)).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("ヒント連携", () => {
+    // ルート内 from() 呼び出し順（19件 = 上限未達、同コンテンツ提出なし）:
+    // 1. 提出データ → 2. カウント19 → 3. 同コンテンツ提出なし → generateReview
+
+    it("content.hint がある場合、generateReview の第4引数に渡す", async () => {
+      const submissionWithHint = {
+        ...MOCK_SUBMISSION,
+        content: { ...MOCK_SUBMISSION.content, hint: "配列の合計にはreduceを使うとよい" },
+      };
+      vi.mocked(getApiSupabaseClient).mockResolvedValue(
+        makeClient(
+          { data: submissionWithHint, error: null },
+          { count: 19, data: null, error: null },
+          { data: [], error: null }
+        ) as never
+      );
+      vi.mocked(upsertPendingAIReview).mockResolvedValue({ id: 1 } as never);
+      vi.mocked(updateAIReviewProcessing).mockResolvedValue({ id: 1 } as never);
+      vi.mocked(generateReview).mockResolvedValue(MOCK_REVIEW_RESULT);
+      vi.mocked(updateAIReviewCompleted).mockResolvedValue(true);
+
+      await POST(makeRequest(1));
+
+      expect(vi.mocked(generateReview)).toHaveBeenCalledWith(
+        submissionWithHint.content.exercise_instructions,
+        expect.anything(),
+        submissionWithHint.content.reference_answer,
+        "配列の合計にはreduceを使うとよい"
+      );
+    });
+
+    it("content.hint がない場合、generateReview の第4引数に undefined を渡す", async () => {
+      vi.mocked(getApiSupabaseClient).mockResolvedValue(
+        makeClient(
+          { data: MOCK_SUBMISSION, error: null },
+          { count: 19, data: null, error: null },
+          { data: [], error: null }
+        ) as never
+      );
+      vi.mocked(upsertPendingAIReview).mockResolvedValue({ id: 1 } as never);
+      vi.mocked(updateAIReviewProcessing).mockResolvedValue({ id: 1 } as never);
+      vi.mocked(generateReview).mockResolvedValue(MOCK_REVIEW_RESULT);
+      vi.mocked(updateAIReviewCompleted).mockResolvedValue(true);
+
+      await POST(makeRequest(1));
+
+      expect(vi.mocked(generateReview)).toHaveBeenCalledWith(
+        MOCK_SUBMISSION.content.exercise_instructions,
+        expect.anything(),
+        MOCK_SUBMISSION.content.reference_answer,
+        undefined
+      );
     });
   });
 
