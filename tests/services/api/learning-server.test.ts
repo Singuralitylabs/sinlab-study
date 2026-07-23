@@ -5,13 +5,18 @@ vi.mock("@/app/services/api/supabase-server");
 
 import {
   fetchContentsByWeekId,
+  fetchContentVisibilitySummariesByWeekIds,
   fetchPhaseById,
   fetchPublishedPhases,
   fetchThemeProgressSummaries,
   fetchUserProgressByContentId,
   fetchUserProgressByContentIds,
+  fetchWeeksWithContentsByPhaseId,
 } from "@/app/services/api/learning-server";
-import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
+import {
+  createAdminSupabaseClient,
+  createServerSupabaseClient,
+} from "@/app/services/api/supabase-server";
 
 const dbError = { message: "db error", code: "PGRST001" };
 
@@ -376,5 +381,133 @@ describe("fetchUserProgressByContentId", () => {
 
     expect(result.isCompleted).toBe(false);
     expect(result.error).toEqual(dbError);
+  });
+});
+
+// ----------------------------------------------------------------
+// fetchContentVisibilitySummariesByWeekIds
+// ----------------------------------------------------------------
+describe("fetchContentVisibilitySummariesByWeekIds", () => {
+  it("weekIds が空配列の場合、Supabase を呼ばずに空配列を返す", async () => {
+    const mockClient = createMockSupabaseClient();
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchContentVisibilitySummariesByWeekIds([]);
+
+    expect(result.data).toEqual([]);
+    expect(result.error).toBeNull();
+    expect(mockClient.from).not.toHaveBeenCalled();
+  });
+
+  it("正常時、service_role クライアントでコンテンツサマリーを返す（お試し非公開分も含む）", async () => {
+    const summaries = [
+      {
+        id: 1,
+        title: "公開コンテンツ",
+        content_type: "video",
+        display_order: 1,
+        is_open_to_trial: true,
+        week_id: 100,
+      },
+      {
+        id: 2,
+        title: "お試し非公開コンテンツ",
+        content_type: "exercise",
+        display_order: 2,
+        is_open_to_trial: false,
+        week_id: 100,
+      },
+    ];
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: summaries, error: null },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchContentVisibilitySummariesByWeekIds([100]);
+
+    expect(result.data).toEqual(summaries);
+    expect(result.error).toBeNull();
+  });
+
+  it("DB エラー時、data: null とエラーを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: null, error: dbError },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchContentVisibilitySummariesByWeekIds([100]);
+
+    expect(result.data).toBeNull();
+    expect(result.error).toEqual(dbError);
+  });
+});
+
+// ----------------------------------------------------------------
+// fetchWeeksWithContentsByPhaseId
+// ----------------------------------------------------------------
+describe("fetchWeeksWithContentsByPhaseId", () => {
+  it("正常時、週ごとにコンテンツサマリーをグルーピングして返す", async () => {
+    const weeks = [
+      { id: 100, name: "Week 1", display_order: 1 },
+      { id: 101, name: "Week 2", display_order: 2 },
+    ];
+    const summaries = [
+      {
+        id: 1,
+        title: "Content A",
+        content_type: "video",
+        display_order: 1,
+        is_open_to_trial: true,
+        week_id: 100,
+      },
+      {
+        id: 2,
+        title: "Content B",
+        content_type: "text",
+        display_order: 2,
+        is_open_to_trial: false,
+        week_id: 100,
+      },
+    ];
+    const mockServerClient = createMockSupabaseClient({
+      queryResult: { data: weeks, error: null },
+    });
+    const mockAdminClient = createMockSupabaseClient({
+      queryResult: { data: summaries, error: null },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockAdminClient as never);
+
+    const result = await fetchWeeksWithContentsByPhaseId(1);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([
+      { id: 100, name: "Week 1", display_order: 1, contents: summaries },
+      { id: 101, name: "Week 2", display_order: 2, contents: [] },
+    ]);
+  });
+
+  it("週一覧取得エラー時、data: null とエラーを返す（コンテンツは照会しない）", async () => {
+    const mockServerClient = createMockSupabaseClient({
+      queryResult: { data: null, error: dbError },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+
+    const result = await fetchWeeksWithContentsByPhaseId(1);
+
+    expect(result.data).toBeNull();
+    expect(result.error).toEqual(dbError);
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it("週が0件の場合、コンテンツを照会せず空配列を返す", async () => {
+    const mockServerClient = createMockSupabaseClient({ queryResult: { data: [], error: null } });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+
+    const result = await fetchWeeksWithContentsByPhaseId(1);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([]);
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
   });
 });

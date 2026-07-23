@@ -1,9 +1,11 @@
-import { Bot, Calendar, CheckCircle, Clock, FileText, PenLine, Play } from "lucide-react";
+import { Bot, Calendar, CheckCircle, Clock, FileText, Lock, PenLine, Play } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
+import { USER_STATUS } from "@/app/constants/user";
 import { fetchCompletedAIReviewContentIds } from "@/app/services/api/ai-review-server";
 import {
+  type ContentVisibilitySummary,
   fetchPhaseById,
   fetchThemeById,
   fetchUserProgressByContentIds,
@@ -54,7 +56,7 @@ export default async function PhasePage({ params }: PageProps) {
     notFound();
   }
 
-  const { userId } = await getServerAuth();
+  const { userId, userStatus } = await getServerAuth();
 
   const [{ data: theme }, { data: phase }, { data: weeks }] = await Promise.all([
     fetchThemeById(themeIdNum),
@@ -66,11 +68,18 @@ export default async function PhasePage({ params }: PageProps) {
     notFound();
   }
 
-  // 全コンテンツのIDを集めて進捗を一括取得
+  // お試しユーザー（status='pending'）にはお試し非公開コンテンツをロック表示する
+  const isLocked = (content: ContentVisibilitySummary) =>
+    userStatus === USER_STATUS.PENDING && !content.is_open_to_trial;
+
+  // 進捗の分母は可視（ロックされていない）コンテンツのみとする
+  // （お試しユーザーは体験範囲内の進捗を示す。機能設計書 2.6 参照）
   const allContentIds = weeks?.flatMap((w) => w.contents.map((c) => c.id)) || [];
+  const visibleContentIds =
+    weeks?.flatMap((w) => w.contents.filter((c) => !isLocked(c)).map((c) => c.id)) || [];
   const exerciseContentIds =
     weeks?.flatMap((w) =>
-      w.contents.filter((c) => c.content_type === "exercise").map((c) => c.id)
+      w.contents.filter((c) => c.content_type === "exercise" && !isLocked(c)).map((c) => c.id)
     ) ?? [];
 
   const [{ data: progressMap }, { data: reviewedContentIds }] = await Promise.all([
@@ -82,8 +91,8 @@ export default async function PhasePage({ params }: PageProps) {
       : Promise.resolve({ data: new Set<number>() }),
   ]);
 
-  const completedCount = Array.from(progressMap.values()).filter(Boolean).length;
-  const totalCount = allContentIds.length;
+  const completedCount = visibleContentIds.filter((id) => progressMap.get(id)).length;
+  const totalCount = visibleContentIds.length;
   const progressValue = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
   return (
@@ -123,8 +132,11 @@ export default async function PhasePage({ params }: PageProps) {
       ) : (
         <div className="space-y-6">
           {weeks.map((week) => {
-            const weekCompletedCount = week.contents.filter((c) => progressMap.get(c.id)).length;
-            const weekTotalCount = week.contents.length;
+            const weekVisibleContents = week.contents.filter((c) => !isLocked(c));
+            const weekCompletedCount = weekVisibleContents.filter((c) =>
+              progressMap.get(c.id)
+            ).length;
+            const weekTotalCount = weekVisibleContents.length;
             const allCompleted = weekTotalCount > 0 && weekCompletedCount === weekTotalCount;
 
             return (
@@ -163,7 +175,8 @@ export default async function PhasePage({ params }: PageProps) {
                 ) : (
                   <div className="grid gap-2 ml-5 border-l-2 border-border pl-5">
                     {week.contents.map((content) => {
-                      const isCompleted = progressMap.get(content.id) || false;
+                      const locked = isLocked(content);
+                      const isCompleted = !locked && (progressMap.get(content.id) || false);
 
                       return (
                         <Link
@@ -174,7 +187,7 @@ export default async function PhasePage({ params }: PageProps) {
                           <Card
                             className={`transition-all hover:shadow-sm hover:border-primary/20 ${
                               isCompleted ? "border-l-4 border-l-success" : ""
-                            }`}
+                            } ${locked ? "opacity-60" : ""}`}
                           >
                             <CardContent className="py-3 px-4">
                               <div className="flex items-center gap-3">
@@ -185,7 +198,9 @@ export default async function PhasePage({ params }: PageProps) {
                                       : "bg-muted text-muted-foreground"
                                   }`}
                                 >
-                                  {isCompleted ? (
+                                  {locked ? (
+                                    <Lock className="h-4 w-4" />
+                                  ) : isCompleted ? (
                                     <CheckCircle className="h-4 w-4" />
                                   ) : (
                                     <Clock className="h-4 w-4" />
@@ -200,7 +215,14 @@ export default async function PhasePage({ params }: PageProps) {
                                   {getContentIcon(content.content_type)}
                                   {getContentTypeLabel(content.content_type)}
                                 </Badge>
-                                {content.content_type === "exercise" &&
+                                {locked && (
+                                  <Badge variant="outline" className="gap-1 shrink-0 text-xs">
+                                    <Lock className="h-3 w-3" />
+                                    お試し非公開
+                                  </Badge>
+                                )}
+                                {!locked &&
+                                  content.content_type === "exercise" &&
                                   reviewedContentIds.has(content.id) && (
                                     <Badge
                                       variant="outline"

@@ -92,9 +92,8 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    redirectPath = "/pending";
-  } else if (existingUser.status === USER_STATUS.PENDING) {
-    redirectPath = "/pending";
+    // お試しユーザーとしてそのままダッシュボードへ（承認待ちはアプリ内バナーで通知）
+    redirectPath = "/";
   } else if (existingUser.status === USER_STATUS.REJECTED) {
     redirectPath = "/rejected";
   }

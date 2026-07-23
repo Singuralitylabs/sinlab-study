@@ -1,7 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { USER_STATUS } from "@/app/constants/user";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
-import { getApiAuth, getApiSupabaseClient } from "@/app/services/auth/api-auth";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
+import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const BUCKET_NAME = "slides";
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
@@ -40,20 +41,16 @@ async function getNextSlideNumber(
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = await getApiAuth();
-    if (!auth.success) {
-      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    const { user, userId, userStatus, userRole } = await getServerAuth();
+    if (!user || !userId) {
+      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    }
+    if (userStatus === USER_STATUS.REJECTED) {
+      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
     }
 
     // admin または maintainer（講師）のみアップロード可能
-    const supabaseForRole = await getApiSupabaseClient();
-    const { data: userData } = await supabaseForRole
-      .from("users")
-      .select("role")
-      .eq("id", auth.data.userId)
-      .single();
-
-    if (!userData || !checkContentPermissions(userData.role)) {
+    if (!checkContentPermissions(userRole)) {
       return NextResponse.json({ error: "アップロード権限がありません" }, { status: 403 });
     }
 

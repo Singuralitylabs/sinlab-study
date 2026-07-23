@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { USER_STATUS } from "@/app/constants/user";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import {
   updateAIReviewCompleted,
@@ -7,7 +8,8 @@ import {
   upsertPendingAIReview,
 } from "@/app/services/api/ai-review-server";
 import { generateReview, type ReviewSubmission } from "@/app/services/api/gemini";
-import { getApiAuth, getApiSupabaseClient } from "@/app/services/auth/api-auth";
+import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
+import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const MAX_CODE_LENGTH = 8000;
 
@@ -21,12 +23,15 @@ export async function POST(request: NextRequest) {
     }
 
     // 認証チェック
-    const auth = await getApiAuth();
-    if (!auth.success) {
-      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    const { user, userId, userStatus } = await getServerAuth();
+    if (!user || !userId) {
+      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    }
+    if (userStatus === USER_STATUS.REJECTED) {
+      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
     }
 
-    const supabase = await getApiSupabaseClient();
+    const supabase = await createServerSupabaseClient();
 
     // 提出データ + コンテンツ取得
     const { data: submission, error: submissionError } = await supabase
@@ -40,7 +45,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 本人の提出か検証
-    if (submission.user_id !== auth.data.userId) {
+    if (submission.user_id !== userId) {
       return NextResponse.json({ error: "権限がありません" }, { status: 403 });
     }
 
@@ -88,7 +93,7 @@ export async function POST(request: NextRequest) {
     const { data: userSubmissionsForContent } = await supabase
       .from("submissions")
       .select("id")
-      .eq("user_id", auth.data.userId)
+      .eq("user_id", userId)
       .eq("content_id", contentId);
 
     const allSubmissionIdsForContent = (userSubmissionsForContent ?? []).map((s) => s.id);

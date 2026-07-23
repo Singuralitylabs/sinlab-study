@@ -87,6 +87,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
   const [slideNumber, setSlideNumber] = useState(initialSlide.slideNumber);
   const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
+  const [isOpenToTrial, setIsOpenToTrial] = useState(initialData?.is_open_to_trial ?? false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -171,6 +172,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       content_type: contentType,
       display_order: Number(displayOrder),
       is_published: isPublished,
+      is_open_to_trial: isOpenToTrial,
       video_url: contentType === "video" ? videoUrl.trim() || null : null,
       text_content: contentType === "text" ? textContent.trim() || null : null,
       exercise_instructions:
@@ -467,6 +469,23 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
               className="h-4 w-4 rounded border-input"
             />
             <Label htmlFor="isPublished">公開する</Label>
+          </div>
+
+          {/* お試し公開設定 */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <input
+                id="isOpenToTrial"
+                type="checkbox"
+                checked={isOpenToTrial}
+                onChange={(e) => setIsOpenToTrial(e.target.checked)}
+                className="h-4 w-4 rounded border-input"
+              />
+              <Label htmlFor="isOpenToTrial">お試しユーザーにも公開する</Label>
+            </div>
+            <p className="text-xs text-muted-foreground ml-6">
+              無料プラン利用中のユーザーもこのコンテンツを閲覧・提出できるようになります。
+            </p>
           </div>
 
           {/* メッセージ */}

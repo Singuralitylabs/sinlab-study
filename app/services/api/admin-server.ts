@@ -457,6 +457,7 @@ export async function createContent(content: {
   pdf_url?: string;
   display_order?: number;
   is_published?: boolean;
+  is_open_to_trial?: boolean;
 }): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
 

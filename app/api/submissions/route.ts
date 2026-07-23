@@ -1,5 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { getApiAuth, getApiSupabaseClient } from "@/app/services/auth/api-auth";
+import { USER_STATUS } from "@/app/constants/user";
+import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
+import { getServerAuth } from "@/app/services/auth/server-auth";
 import type { CodeFile } from "@/app/types";
 
 /**
@@ -60,17 +62,33 @@ export async function POST(request: NextRequest) {
     }
 
     // 認証チェック
-    const auth = await getApiAuth();
-    if (!auth.success) {
-      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    const { user, userId: authUserId, userStatus } = await getServerAuth();
+    if (!user || !authUserId) {
+      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     }
 
     // ユーザーIDを検証
-    if (auth.data.userId !== userId) {
+    if (authUserId !== userId) {
       return NextResponse.json({ error: "権限がありません" }, { status: 403 });
     }
 
-    const supabase = await getApiSupabaseClient();
+    if (userStatus === USER_STATUS.REJECTED) {
+      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
+    }
+
+    const supabase = await createServerSupabaseClient();
+
+    // コンテンツ可視性チェック: 対象contentIdが自分に不可視なら403
+    // （お試し非公開・未公開・存在しないIDのいずれもRLSにより0行になる）
+    const { data: visibleContent } = await supabase
+      .from("learning_contents")
+      .select("id")
+      .eq("id", contentId)
+      .maybeSingle();
+
+    if (!visibleContent) {
+      return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
+    }
 
     // 提出を作成
     const { data: submission, error: insertError } = await supabase
