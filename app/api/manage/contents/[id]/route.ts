@@ -7,8 +7,11 @@ import { getServerAuth } from "@/app/services/auth/server-auth";
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { user, userId, userStatus, userRole } = await getServerAuth();
-    if (!user || !userId) {
+    if (!user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    }
+    if (!userId) {
+      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
     }
     if (userStatus === USER_STATUS.REJECTED) {
       return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
@@ -75,8 +78,11 @@ export async function DELETE(
 ) {
   try {
     const { user, userId, userStatus, userRole } = await getServerAuth();
-    if (!user || !userId) {
+    if (!user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    }
+    if (!userId) {
+      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
     }
     if (userStatus === USER_STATUS.REJECTED) {
       return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });

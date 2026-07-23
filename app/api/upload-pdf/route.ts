@@ -42,8 +42,11 @@ async function getNextSlideNumber(
 export async function POST(request: NextRequest) {
   try {
     const { user, userId, userStatus, userRole } = await getServerAuth();
-    if (!user || !userId) {
+    if (!user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    }
+    if (!userId) {
+      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
     }
     if (userStatus === USER_STATUS.REJECTED) {
       return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });

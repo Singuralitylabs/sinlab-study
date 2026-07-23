@@ -12,6 +12,8 @@ import {
   fetchUserProgressByContentId,
   fetchUserProgressByContentIds,
   fetchWeeksWithContentsByPhaseId,
+  isContentLockedForUser,
+  isContentVisible,
 } from "@/app/services/api/learning-server";
 import {
   createAdminSupabaseClient,
@@ -509,5 +511,49 @@ describe("fetchWeeksWithContentsByPhaseId", () => {
     expect(result.error).toBeNull();
     expect(result.data).toEqual([]);
     expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+});
+
+// ----------------------------------------------------------------
+// isContentLockedForUser
+// ----------------------------------------------------------------
+describe("isContentLockedForUser", () => {
+  it("pending かつ お試し非公開の場合、true を返す", () => {
+    expect(isContentLockedForUser("pending", false)).toBe(true);
+  });
+
+  it("pending でも お試し公開の場合、false を返す", () => {
+    expect(isContentLockedForUser("pending", true)).toBe(false);
+  });
+
+  it("active の場合、お試し公開フラグに関わらず false を返す", () => {
+    expect(isContentLockedForUser("active", false)).toBe(false);
+    expect(isContentLockedForUser("active", true)).toBe(false);
+  });
+
+  it("rejected / null の場合、false を返す（画面遷移自体が別レイヤーで遮断される想定）", () => {
+    expect(isContentLockedForUser("rejected", false)).toBe(false);
+    expect(isContentLockedForUser(null, false)).toBe(false);
+  });
+});
+
+// ----------------------------------------------------------------
+// isContentVisible
+// ----------------------------------------------------------------
+describe("isContentVisible", () => {
+  it("対象コンテンツが取得できる場合、true を返す", async () => {
+    const mockClient = createMockSupabaseClient({ queryResult: { data: { id: 1 }, error: null } });
+
+    const result = await isContentVisible(mockClient as never, 1);
+
+    expect(result).toBe(true);
+  });
+
+  it("0行（お試し非公開・未公開・存在しないID）の場合、false を返す", async () => {
+    const mockClient = createMockSupabaseClient({ queryResult: { data: null, error: null } });
+
+    const result = await isContentVisible(mockClient as never, 999);
+
+    expect(result).toBe(false);
   });
 });

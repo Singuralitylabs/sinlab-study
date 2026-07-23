@@ -2,7 +2,6 @@ import { Bot, Calendar, CheckCircle, Clock, FileText, Lock, PenLine, Play } from
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
-import { USER_STATUS } from "@/app/constants/user";
 import { fetchCompletedAIReviewContentIds } from "@/app/services/api/ai-review-server";
 import {
   type ContentVisibilitySummary,
@@ -10,6 +9,7 @@ import {
   fetchThemeById,
   fetchUserProgressByContentIds,
   fetchWeeksWithContentsByPhaseId,
+  isContentLockedForUser,
 } from "@/app/services/api/learning-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import type { ContentType } from "@/app/types";
@@ -70,7 +70,7 @@ export default async function PhasePage({ params }: PageProps) {
 
   // お試しユーザー（status='pending'）にはお試し非公開コンテンツをロック表示する
   const isLocked = (content: ContentVisibilitySummary) =>
-    userStatus === USER_STATUS.PENDING && !content.is_open_to_trial;
+    isContentLockedForUser(userStatus, content.is_open_to_trial);
 
   // 進捗の分母は可視（ロックされていない）コンテンツのみとする
   // （お試しユーザーは体験範囲内の進捗を示す。機能設計書 2.6 参照）

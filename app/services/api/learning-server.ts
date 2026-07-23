@@ -1,10 +1,12 @@
 import type { PostgrestError } from "@supabase/supabase-js";
+import { USER_STATUS } from "@/app/constants/user";
 import type {
   LearningContent,
   LearningContentWithWeek,
   LearningPhase,
   LearningTheme,
   LearningWeek,
+  UserStatusType,
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
@@ -234,6 +236,35 @@ export type ContentVisibilitySummary = Pick<
   LearningContent,
   "id" | "title" | "content_type" | "display_order" | "is_open_to_trial"
 > & { week_id: number };
+
+/**
+ * お試しユーザー（status='pending'）に対してコンテンツをロック表示すべきか判定する。
+ * コースツリー（フェーズページ）とコンテンツ詳細ページのロック判定で共通して使用する。
+ */
+export function isContentLockedForUser(
+  userStatus: UserStatusType | null,
+  isOpenToTrial: boolean
+): boolean {
+  return userStatus === USER_STATUS.PENDING && !isOpenToTrial;
+}
+
+/**
+ * 対象コンテンツが、渡されたクライアント（呼び出し元の認証コンテキスト）から可視かどうかを判定する。
+ * RLSにより、お試し非公開・未公開・存在しないコンテンツIDのいずれも0行となり false を返す。
+ * 進捗・提出・AIレビューAPIのコンテンツ可視性チェックに使用する（機能設計書 4.1/5.1 参照）。
+ */
+export async function isContentVisible(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  contentId: number
+): Promise<boolean> {
+  const { data } = await supabase
+    .from("learning_contents")
+    .select("id")
+    .eq("id", contentId)
+    .maybeSingle();
+
+  return !!data;
+}
 
 /**
  * 指定した週IDに属する公開コンテンツのサマリー（タイトル・種別・表示順・お試し公開フラグ）を取得する。

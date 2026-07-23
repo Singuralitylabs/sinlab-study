@@ -7,7 +7,6 @@ import { PageTitle } from "@/app/components/PageTitle";
 import { PdfSlideViewerNoSSR as PdfSlideViewer } from "@/app/components/PdfSlideViewerNoSSR";
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
-import { USER_STATUS } from "@/app/constants/user";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
 import {
@@ -17,6 +16,7 @@ import {
   fetchPhaseById,
   fetchThemeById,
   fetchUserProgressByContentId,
+  isContentLockedForUser,
 } from "@/app/services/api/learning-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -109,7 +109,7 @@ export default async function ContentPage({ params }: PageProps) {
       ? (weekContentSummaries?.[currentIndex + 1] ?? null)
       : null;
 
-  const isLocked = userStatus === USER_STATUS.PENDING && !summary.is_open_to_trial;
+  const isLocked = isContentLockedForUser(userStatus, summary.is_open_to_trial);
 
   if (isLocked) {
     const [{ data: theme }, { data: phase }] = await Promise.all([

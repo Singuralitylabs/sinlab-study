@@ -8,6 +8,7 @@ import {
   upsertPendingAIReview,
 } from "@/app/services/api/ai-review-server";
 import { generateReview, type ReviewSubmission } from "@/app/services/api/gemini";
+import { isContentVisible } from "@/app/services/api/learning-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -24,8 +25,11 @@ export async function POST(request: NextRequest) {
 
     // 認証チェック
     const { user, userId, userStatus } = await getServerAuth();
-    if (!user || !userId) {
+    if (!user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    }
+    if (!userId) {
+      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
     }
     if (userStatus === USER_STATUS.REJECTED) {
       return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
@@ -47,6 +51,13 @@ export async function POST(request: NextRequest) {
     // 本人の提出か検証
     if (submission.user_id !== userId) {
       return NextResponse.json({ error: "権限がありません" }, { status: 403 });
+    }
+
+    // コンテンツ可視性チェック: 提出後にお試し非公開化・非公開化されたコンテンツは403
+    // （nested select の content は RLS により null になるため、先に判定して
+    // 「演習課題が見つかりません」という紛らわしいエラーを避ける）
+    if (!(await isContentVisible(supabase, submission.content_id))) {
+      return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
     }
 
     // 演習コンテンツの確認

@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
+import { isContentVisible } from "@/app/services/api/learning-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -14,8 +15,11 @@ export async function POST(request: NextRequest) {
 
     // 認証チェック
     const { user, userId: authUserId, userStatus } = await getServerAuth();
-    if (!user || !authUserId) {
+    if (!user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    }
+    if (!authUserId) {
+      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
     }
 
     // ユーザーIDを検証
@@ -31,13 +35,7 @@ export async function POST(request: NextRequest) {
 
     // コンテンツ可視性チェック: 対象contentIdが自分に不可視なら403
     // （お試し非公開・未公開・存在しないIDのいずれもRLSにより0行になる）
-    const { data: visibleContent } = await supabase
-      .from("learning_contents")
-      .select("id")
-      .eq("id", contentId)
-      .maybeSingle();
-
-    if (!visibleContent) {
+    if (!(await isContentVisible(supabase, contentId))) {
       return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
     }
 
