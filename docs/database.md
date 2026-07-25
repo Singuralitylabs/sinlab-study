@@ -571,12 +571,8 @@ user_id = (select get_user_id())
 |:--|:--|
 | `01_schema/001_create_tables.sql` | 全テーブル・ヘルパー関数・トリガー・インデックスの作成 |
 | `01_schema/002_add_submission_code_files.sql` | submissions に複数ファイル提出用 `code_files`（JSONB）カラムを追加 |
-<<<<<<< HEAD
 | `01_schema/003_add_is_open_to_trial.sql` | learning_contents にお試し公開フラグ `is_open_to_trial` を追加 |
-| `01_schema/004_add_ai_token_monthly_usages.sql` | 月次トークン使用量集計テーブル `ai_token_monthly_usages` を追加 |
-=======
-| `01_schema/003_add_ai_token_monthly_usages.sql`（予定） | 月次トークン使用量集計テーブル `ai_token_monthly_usages` を追加 |
->>>>>>> レビュー指摘に合わせて設計書の整合性を修正
+| `01_schema/004_add_ai_token_monthly_usages.sql`(予定) | 月次トークン使用量集計テーブル `ai_token_monthly_usages` を追加 |
 | `02_rls/001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
 | `02_rls/002_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し |
 | `02_rls/003_trial_user_policies.sql` | `get_user_status()` の追加と、お試しユーザー制限を含むポリシーへの差し替え（learning_contents の SELECT、user_progress / submissions の書き込み） |
