@@ -10,7 +10,7 @@ const ADMIN_NAV_ITEMS = [{ title: "ユーザー管理", href: "/admin/users", ic
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const { userRole } = await getServerAuth();
 
-  if (!userRole || !checkAdminPermissions(userRole)) {
+  if (!checkAdminPermissions(userRole)) {
     redirect("/");
   }
 

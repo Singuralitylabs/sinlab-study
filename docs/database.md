@@ -76,6 +76,7 @@ erDiagram
         varchar code_language
         int display_order
         bool is_published
+        bool is_open_to_trial
         bool is_deleted
     }
     users {
@@ -209,9 +210,12 @@ erDiagram
 | code_language | VARCHAR(20) | NO | 'javascript' | CHECK ('javascript', 'typescript', 'html', 'css') | コードエディタの言語（exercise時） |
 | display_order | INTEGER | YES | 0 | - | 表示順（昇順） |
 | is_published | BOOLEAN | YES | false | - | 公開フラグ |
+| is_open_to_trial | BOOLEAN | NO | false | NOT NULL | お試し公開フラグ。true の場合、お試しユーザー（`status = 'pending'`）にも公開する |
 | is_deleted | BOOLEAN | YES | false | - | 論理削除フラグ |
 | created_at | TIMESTAMPTZ | YES | NOW() | - | 作成日時 |
 | updated_at | TIMESTAMPTZ | YES | NOW() | トリガーで自動更新 | 更新日時 |
+
+`is_open_to_trial` はお試しユーザー向けの公開範囲のみを制御する。お試しユーザーに実際に見えるのは `is_published = true AND is_open_to_trial = true AND is_deleted = false` の行に限られ、`is_published` による通常の公開制御が優先される（詳細は「6.1 学習コンテンツ系テーブル」参照）。
 
 **content_type別の利用カラム**:
 
@@ -387,14 +391,17 @@ $$ language 'plpgsql';
 
 ### 5.2 RLSヘルパー関数
 
-RLSポリシーのロール判定・本人判定に使用する `SECURITY DEFINER` 関数。ポリシーが `users` テーブルを直接参照すると再帰（無限ループ）が発生するため、RLSをバイパスするこれらの関数経由で判定する。
+RLSポリシーのロール判定・本人判定・ステータス判定に使用する `SECURITY DEFINER` 関数。ポリシーが `users` テーブルを直接参照すると再帰（無限ループ）が発生するため、RLSをバイパスするこれらの関数経由で判定する。
 
 | 関数 | 返り値 | 説明 |
 |:--|:--|:--|
 | `get_user_role()` | TEXT | 認証ユーザー（`auth.uid()`）の `role` を返す（`is_deleted = false` が対象） |
 | `get_user_id()` | INTEGER | 認証ユーザーの `users.id` を返す（`is_deleted = false` が対象） |
+| `get_user_status()` | TEXT | 認証ユーザーの `status`（`pending` / `active` / `rejected`）を返す（`is_deleted = false` が対象）。お試しユーザーのコンテンツ制限に使用する |
 
 いずれも `STABLE SECURITY DEFINER`・`SET search_path = public` で定義されている。
+
+EXECUTE 権限は `authenticated` / `service_role` にのみ付与しており、`anon`（未認証）からの REST RPC 経由の実行は許可しない（`PUBLIC` へのデフォルト付与も取り消し済み）。新たにヘルパー関数を追加する際も、同じパターン（`STABLE SECURITY DEFINER` + `SET search_path = public` + `PUBLIC, anon` からの REVOKE + `authenticated, service_role` への GRANT）を踏襲する。
 
 ---
 
@@ -402,21 +409,23 @@ RLSポリシーのロール判定・本人判定に使用する `SECURITY DEFINE
 
 全テーブルに対してRLSが有効化されている。ポリシーは `authenticated` ロール（Supabase Authで認証済みユーザー）に対して適用される。
 
+パフォーマンスのため、以下の方針でポリシーを定義している（Supabase Performance Advisor の `multiple_permissive_policies` / `auth_rls_initplan` 警告対応）。
+
+- 同一テーブル・同一操作に対する許可ポリシーは `OR` 条件で1つに統合する
+- ポリシー内の関数呼び出しは `(select get_user_role())` のように `(select ...)` で包み、行ごとの再評価を防いでクエリ実行時に1回だけ評価（InitPlan化）させる
+
 ### 6.1 学習コンテンツ系テーブル
 
-`learning_themes`、`learning_phases`、`learning_weeks`、`learning_contents` に共通のポリシーパターン。
+`learning_themes`、`learning_phases`、`learning_weeks`、`learning_contents` に共通のポリシーパターン。ただし SELECT のみ、`learning_contents` はお試しユーザー向けの制限が加わるため別パターンとなる（後述）。
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Published {table} are viewable by authenticated users | SELECT | 認証済み全ユーザー | `is_published = true AND is_deleted = false` |
-| Admins can view all {table} | SELECT | admin | `get_user_role() = 'admin'` |
-| Maintainers can view all {table} | SELECT | maintainer | `get_user_role() = 'maintainer'` |
-| Admins can insert {table} | INSERT | admin | `get_user_role() = 'admin'` |
-| Maintainers can insert {table} | INSERT | maintainer | `get_user_role() = 'maintainer'` |
-| Admins can update {table} | UPDATE | admin | `get_user_role() = 'admin'` |
-| Maintainers can update {table} | UPDATE | maintainer | `get_user_role() = 'maintainer'` |
-| Admins can delete {table} | DELETE | admin | `get_user_role() = 'admin'` |
-| Maintainers can delete {table} | DELETE | maintainer | `get_user_role() = 'maintainer'` |
+| {Table} are viewable by users or content managers | SELECT | 認証済み全ユーザー（公開分）/ admin・maintainer（全件） | `(is_published = true AND is_deleted = false) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+| Content managers can insert {table} | INSERT | admin・maintainer | `(select get_user_role()) IN ('admin', 'maintainer')` |
+| Content managers can update {table} | UPDATE | admin・maintainer | `(select get_user_role()) IN ('admin', 'maintainer')` |
+| Content managers can delete {table} | DELETE | admin・maintainer | `(select get_user_role()) IN ('admin', 'maintainer')` |
+
+`{Table}` / `{table}` にはテーブル名（themes / phases / weeks / contents）が入る。実際のポリシー名に合わせ、文頭に置かれる `{Table}` のみ先頭大文字（例: `Themes are viewable by users or content managers` / `Content managers can insert themes`）。
 
 admin と maintainer はいずれもコンテンツ系テーブルの全件参照・作成・更新・削除が可能（コンテンツ管理は両ロール共通）。
 
@@ -425,42 +434,69 @@ admin と maintainer はいずれもコンテンツ系テーブルの全件参�
 ロールチェックは SECURITY DEFINER 関数 `get_user_role()` を用いる（「5.2 RLSヘルパー関数」参照）。
 
 ```sql
-get_user_role() = 'admin'   -- 例: 管理者向けポリシー
+(select get_user_role()) IN ('admin', 'maintainer')   -- 例: コンテンツ管理者向けポリシー
 ```
+
+**learning_contents の SELECT（お試しユーザー制限）**:
+
+`learning_contents` の SELECT のみ、お試しユーザー（`status = 'pending'`）はお試し公開分に限定する。
+
+| ポリシー | 操作 | 対象 | 条件 |
+|:--|:--|:--|:--|
+| Contents are viewable by users or content managers | SELECT | active（公開分）/ お試しユーザー（お試し公開分のみ）/ admin・maintainer（全件） | `(is_published = true AND is_deleted = false AND ((select get_user_status()) = 'active' OR ((select get_user_status()) = 'pending' AND is_open_to_trial = true))) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+
+親階層（`learning_themes` / `learning_phases` / `learning_weeks`）はステータスによる絞り込みを行わず、従来どおり公開分を認証済み全ユーザーが参照できる。お試しユーザーにもコースツリーの骨格（テーマ・フェーズ・週）を見せてロック表示するための設計であり、これによりステータス判定の対象は `learning_contents` の1テーブルに閉じる。
+
+この制限により、お試し非公開コンテンツはタイトルを含めて通常クライアント（`authenticated`）から取得できなくなる。ツリー表示のロック項目と、詳細ページ直リンク時のロック画面表示に必要な最小限の情報は、アプリ層が service_role クライアント + カラム許可リスト（本文カラムを含めない）で取得する（詳細は[機能設計書](./specification.md)の2.6を参照）。
+
+service_role は RLS を素通りするため、この経路のクエリでは `is_published = true AND is_deleted = false` をアプリ側で必ず指定し、通常の公開制御を再現する。条件を省くと未公開・論理削除済みコンテンツのタイトルが露出し、`active` ユーザーにすら見えないものがお試しユーザーに見える逆転が生じる。
 
 ### 6.2 user_progress
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Users can view own progress | SELECT | 本人 | `user_id` が自身のユーザーIDと一致 |
-| Admins can view all progress | SELECT | admin | `get_user_role() = 'admin'` |
-| Users can insert own progress | INSERT | 本人 | `user_id` が自身のユーザーIDと一致 |
-| Users can update own progress | UPDATE | 本人 | `user_id` が自身のユーザーIDと一致 |
+| Users can view own progress, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `user_id = (select get_user_id()) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+| Users can insert own progress | INSERT | 本人（かつ可視コンテンツのみ） | `user_id` が自身のユーザーIDと一致 **かつ** 対象 `content_id` が自身に可視であること（EXISTS 条件） |
+| Users can update own progress | UPDATE | 本人（かつ可視コンテンツのみ） | 同上 |
+
+maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進捗を参照するため、admin と同様に全件の SELECT を許可する。
+
+**可視コンテンツ限定の EXISTS 条件**:
+
+お試しユーザーがお試し非公開コンテンツの進捗を書き込めないよう、INSERT / UPDATE に対象コンテンツが自身に可視であることの EXISTS 条件を課す。
+
+```sql
+EXISTS (SELECT 1 FROM learning_contents WHERE id = content_id)
+```
+
+`learning_contents` の SELECT ポリシー（6.1）が適用されるため、この EXISTS はお試しユーザーではお試し公開分のみ真になる。
+
+**`active` ユーザーへの影響**: この条件はステータスを問わず適用されるため、`active` ユーザーも不可視コンテンツ（未公開・存在しないID）への書き込みができなくなる。従来は未公開コンテンツへの書き込みが素通りし、存在しないIDはFK違反でエラーになっていたが、いずれもRLSで拒否される。通常のUI経路では不可視コンテンツに到達しないため、正常系への影響はない。
+
+**INSERT だけでなく UPDATE にも課す理由**: 進捗API（`/api/progress`）は upsert（`onConflict: user_id,content_id`）で、既存行がある場合は UPDATE 経路を通る。INSERT のみに条件を課すと2回目以降の更新がすり抜けるため、UPDATE にも同じ条件が必要。これにより、お試し公開フラグを後から `false` に戻したコンテンツの進捗も書き換えられなくなる。
 
 **本人判定ロジック**:
 
 本人チェックは SECURITY DEFINER 関数 `get_user_id()`（認証ユーザーの `users.id` を返す）を用いる。
 
 ```sql
-user_id = get_user_id()
+user_id = (select get_user_id())
 ```
 
 ### 6.3 submissions
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Users can view own submissions | SELECT | 本人 | `user_id` が自身のユーザーIDと一致 |
-| Admins can view all submissions | SELECT | admin | `get_user_role() = 'admin'` |
-| Maintainers can view all submissions | SELECT | maintainer | `get_user_role() = 'maintainer'` |
-| Users can insert own submissions | INSERT | 本人 | `user_id` が自身のユーザーIDと一致 |
+| Users can view own submissions, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `user_id = (select get_user_id()) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+| Users can insert own submissions | INSERT | 本人（かつ可視コンテンツのみ） | `user_id` が自身のユーザーIDと一致 **かつ** 対象 `content_id` が自身に可視であること（EXISTS 条件、6.2 と同じパターン） |
+
+提出物は作成後に受講生が更新・削除することはないため、UPDATE / DELETE のポリシーは定義していない。したがって EXISTS 条件は INSERT のみでよい（進捗のように upsert で UPDATE 経路を通ることがない）。
 
 ### 6.4 ai_reviews
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Users can view own ai reviews | SELECT | 本人 | `submission_id` が自身の提出IDと一致 |
-| Admins can view all ai reviews | SELECT | admin | `get_user_role() = 'admin'` |
-| Maintainers can view all ai reviews | SELECT | maintainer | `get_user_role() = 'maintainer'` |
+| Users can view own ai reviews, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `submission_id IN (SELECT id FROM submissions WHERE user_id = (select get_user_id())) OR (select get_user_role()) IN ('admin', 'maintainer')` |
 
 `ai_reviews` には INSERT / UPDATE のRLSポリシーは定義していない。レビューの作成・更新は AIレビューAPI（`/api/ai-review`）がサーバー側で Service Role キーを用いて行い、RLSをバイパスする。
 
@@ -468,11 +504,9 @@ user_id = get_user_id()
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Users can view own record | SELECT | 本人 | `auth_id = auth.uid() AND is_deleted = false` |
-| Admins can view all users | SELECT | admin | `get_user_role() = 'admin'` |
-| Maintainers can view all users | SELECT | maintainer | `get_user_role() = 'maintainer'` |
-| Authenticated users can insert own record | INSERT | 本人 | `auth_id = auth.uid()` |
-| Admins can update users | UPDATE | admin | `get_user_role() = 'admin'` |
+| Users can view own record, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `(auth_id = (select auth.uid()) AND is_deleted = false) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+| Authenticated users can insert own record | INSERT | 本人 | `auth_id = (select auth.uid())` |
+| Admins can update users | UPDATE | admin | `(select get_user_role()) = 'admin'` |
 
 初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer は受講生進捗（`/manage/students`）の閲覧で `users` を参照するため SELECT のみ許可し、UPDATE は付与しない（ユーザー管理は不可）。
 
@@ -486,7 +520,10 @@ user_id = get_user_id()
 |:--|:--|
 | `01_schema/001_create_tables.sql` | 全テーブル・ヘルパー関数・トリガー・インデックスの作成 |
 | `01_schema/002_add_submission_code_files.sql` | submissions に複数ファイル提出用 `code_files`（JSONB）カラムを追加 |
+| `01_schema/003_add_is_open_to_trial.sql` | learning_contents にお試し公開フラグ `is_open_to_trial` を追加 |
 | `02_rls/001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
+| `02_rls/002_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し |
+| `02_rls/003_trial_user_policies.sql` | `get_user_status()` の追加と、お試しユーザー制限を含むポリシーへの差し替え（learning_contents の SELECT、user_progress / submissions の書き込み） |
 | `03_seed/gas/001_course_structure.sql` | GAS講座のテーマ・フェーズ・週・コンテンツ構造のシード |
 | `03_seed/gas/002_exercises.sql` | GAS講座の演習コンテンツ（課題・模範回答）のシード |
 | `03_seed/gas/003_hints.sql` | GAS講座の全演習課題へのヒントデータ投入 |
@@ -505,6 +542,7 @@ user_id = get_user_id()
 - `is_published` フラグにより、コンテンツの公開/非公開を制御
 - 一般ユーザー（受講生）には公開済みコンテンツのみ表示される
 - 管理者は公開/非公開を問わず全コンテンツを閲覧可能
+- `learning_contents` はさらに `is_open_to_trial` フラグを持ち、お試しユーザー（`status = 'pending'`）に見えるのは `is_published = true AND is_open_to_trial = true` の行のみ。2つのフラグは AND で効き、`is_open_to_trial = true` でも `is_published = false` なら誰にも公開されない
 
 ### 8.3 カスケード削除
 - 外部キーに `ON DELETE CASCADE` を設定
@@ -515,6 +553,7 @@ user_id = get_user_id()
 - `user_progress` は `(user_id, content_id)` のユニーク制約を利用
 - `ON CONFLICT` 句による upsert で完了/未完了のトグルを実現
 - 初回完了時は INSERT、再操作時は UPDATE として処理される
+- **RLSポリシー設計上の注意**: 上記のとおり2回目以降の操作は UPDATE 経路を通るため、書き込み制限を追加する際は INSERT だけでなく UPDATE ポリシーにも同じ条件を課す必要がある（6.2 参照）
 
 ---
 
@@ -529,3 +568,4 @@ user_id = get_user_id()
 | 2026年4月 | `learning_themes` テーブル追加・learning_phasesに `theme_id` FK追加。`ai_reviews` テーブル追加。ER図・インデックス・トリガー・RLS・セクション番号を全面更新 |
 | 2026年6月 | マイグレーション一覧を実際のディレクトリ構成（`01_schema` / `02_rls` / `03_seed`）に修正。RLSにmaintainerポリシーを追記し、`ai_reviews` のINSERT/UPDATEポリシー記載を削除（Service Role経由のためRLS対象外） |
 | 2026年6月 | 実DB（Supabase）と照合し差分を修正：RLSヘルパー関数 `get_user_role()` / `get_user_id()` を追記し判定ロジックを実装準拠に修正、`users` テーブルのRLS（6.5）・`update_users_updated_at` トリガー・`idx_users_auth_role` インデックスを追記、`users` の文字列カラム型を VARCHAR に修正 |
+| 2026年7月 | お試し（trial）ユーザー機能に対応：`learning_contents` に `is_open_to_trial` カラム追加、RLSヘルパー関数 `get_user_status()` 追加、`learning_contents` のSELECTをお試しユーザー制限付きの別パターンに分離、`user_progress` / `submissions` の書き込みに可視コンテンツ限定のEXISTS条件を追記、マイグレーション一覧・公開制御・upsertパターンの注意点を更新 |

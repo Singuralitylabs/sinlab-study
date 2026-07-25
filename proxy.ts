@@ -2,13 +2,18 @@ import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "./app/constants/user";
 
+// 静的アセットとして扱う拡張子（末尾一致のみ）。
+// 「パスに . を含む」という判定は /learn/1/2/3/4. のような細工URLで認証をすり抜けられるため使用しない
+const STATIC_FILE_EXTENSIONS =
+  /\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest)$/i;
+
 function shouldSkipMiddleware(pathname: string): boolean {
   return (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api") ||
     pathname.startsWith("/auth/callback") ||
     pathname.startsWith("/demo") ||
-    pathname.includes(".") ||
+    STATIC_FILE_EXTENSIONS.test(pathname) ||
     pathname === "/favicon.ico" ||
     pathname === "/login" ||
     pathname === "/pending" ||
@@ -34,13 +39,15 @@ export async function proxy(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
+  // 認証ゲートを通せない場合はフェイルクローズ（/login へ）とする。
+  // /login は shouldSkipMiddleware の対象のためリダイレクトループは発生しない
   if (!supabaseUrl || !supabaseKey) {
     console.error(
       "[proxy] Missing env vars:",
       !supabaseUrl ? "NEXT_PUBLIC_SUPABASE_URL" : "",
       !supabaseKey ? "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" : ""
     );
-    return response;
+    return NextResponse.redirect(new URL("/login", request.url));
   }
 
   try {
@@ -83,26 +90,35 @@ export async function proxy(request: NextRequest) {
       .eq("is_deleted", false)
       .maybeSingle();
 
-    if (userError) {
+    // ステータスを判定できない場合はフェイルクローズ（/login へ）。
+    // DB一時障害などで userStatus が null になった際に /pending へ誤誘導しないため
+    if (userError || !userData) {
       console.error("[proxy] User data fetch error:", userError);
+      return NextResponse.redirect(new URL("/login", request.url));
     }
 
-    const userStatus = userData?.status as string | null;
+    const userStatus = userData.status as string | null;
 
-    // ユーザーステータスに応じてリダイレクト
-    if (!userStatus || userStatus === USER_STATUS.PENDING) {
-      return NextResponse.redirect(new URL("/pending", request.url));
+    // 許可リスト方式: active のみ通過させ、それ以外はステータスに応じてリダイレクト
+    // （想定外のステータス値が入った場合も素通りさせない）
+    if (userStatus === USER_STATUS.ACTIVE) {
+      return response;
     }
 
     if (userStatus === USER_STATUS.REJECTED) {
       return NextResponse.redirect(new URL("/rejected", request.url));
     }
 
-    // activeユーザーは通常ページにアクセス可能
-    return response;
+    if (!userStatus || userStatus === USER_STATUS.PENDING) {
+      return NextResponse.redirect(new URL("/pending", request.url));
+    }
+
+    // 未知のステータスは /login へ（フェイルクローズ）
+    console.error("[proxy] Unknown user status:", userStatus);
+    return NextResponse.redirect(new URL("/login", request.url));
   } catch (e) {
     console.error("[proxy] Unhandled error:", e);
-    return response;
+    return NextResponse.redirect(new URL("/login", request.url));
   }
 }
 

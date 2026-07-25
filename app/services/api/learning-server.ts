@@ -33,6 +33,101 @@ export async function fetchPublishedThemes(): Promise<{
 }
 
 /**
+ * ダッシュボード用のテーマ別進捗サマリー
+ */
+export interface ThemeProgressSummary {
+  theme: LearningTheme;
+  totalContents: number;
+  completedContents: number;
+}
+
+/** ネストselectで取得するテーマ行（フェーズ→週→コンテンツIDの埋め込み付き） */
+type ThemeWithNestedContents = LearningTheme & {
+  phases: { id: number; weeks: { id: number; contents: { id: number }[] }[] }[];
+};
+
+/**
+ * 全公開テーマの進捗サマリーを取得（ダッシュボード用）
+ *
+ * テーマ→フェーズ→週→コンテンツをネストselect 1本で取得し、
+ * 完了進捗をユーザー単位でまとめて照会する（テーマごとの逐次クエリによるN+1を回避）。
+ * 完了進捗の取得に失敗した場合はエラーにせず完了数0で返し、テーマ一覧の表示を維持する。
+ */
+export async function fetchThemeProgressSummaries(userId: number): Promise<{
+  data: ThemeProgressSummary[] | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+
+  const { data: themes, error: themesError } = await supabase
+    .from("learning_themes")
+    .select(
+      "*, phases:learning_phases(id, weeks:learning_weeks(id, contents:learning_contents(id)))"
+    )
+    .eq("is_published", true)
+    .eq("is_deleted", false)
+    .eq("phases.is_published", true)
+    .eq("phases.is_deleted", false)
+    .eq("phases.weeks.is_published", true)
+    .eq("phases.weeks.is_deleted", false)
+    .eq("phases.weeks.contents.is_published", true)
+    .eq("phases.weeks.contents.is_deleted", false)
+    .order("display_order");
+
+  if (themesError) {
+    console.error("テーマ進捗サマリー取得エラー:", themesError.message);
+    return { data: null, error: themesError };
+  }
+
+  const themeContents = (themes as ThemeWithNestedContents[]).map(({ phases, ...theme }) => ({
+    theme,
+    contentIds: phases.flatMap((phase) =>
+      phase.weeks.flatMap((week) => week.contents.map((content) => content.id))
+    ),
+  }));
+
+  const hasContents = themeContents.some((t) => t.contentIds.length > 0);
+
+  // 完了済みコンテンツIDをユーザー単位で全件取得する。
+  // content_id での .in() 絞り込みは行わない（分子はテーマごとの Set 突合で確定するため不要で、
+  // 全コンテンツIDをクエリ文字列に直列化するとカタログ増加時にURL長上限を超えるため）。
+  // PostgRESTの1リクエスト最大行数（既定1000行）を超えても取りこぼさないよう range でページングする。
+  const completedIds = new Set<number>();
+  const pageSize = 1000;
+  for (let offset = 0; hasContents; offset += pageSize) {
+    const { data: progress, error: progressError } = await supabase
+      .from("user_progress")
+      .select("content_id")
+      .eq("user_id", userId)
+      .eq("is_completed", true)
+      .order("content_id")
+      .range(offset, offset + pageSize - 1);
+
+    if (progressError) {
+      // 進捗が取れなくてもテーマ一覧自体は表示できるよう、完了数0にフォールバックして継続する
+      console.error("テーマ進捗サマリーの進捗取得エラー:", progressError.message);
+      completedIds.clear();
+      break;
+    }
+
+    for (const p of progress || []) {
+      completedIds.add(p.content_id);
+    }
+    if (!progress || progress.length < pageSize) {
+      break;
+    }
+  }
+
+  const data = themeContents.map(({ theme, contentIds }) => ({
+    theme,
+    totalContents: contentIds.length,
+    completedContents: contentIds.filter((id) => completedIds.has(id)).length,
+  }));
+
+  return { data, error: null };
+}
+
+/**
  * テーマ詳細を取得
  */
 export async function fetchThemeById(themeId: number): Promise<{
@@ -131,18 +226,25 @@ export async function fetchPhaseById(phaseId: number): Promise<{
   return { data, error: null };
 }
 
+/** フェーズページの一覧表示に必要なコンテンツの最小カラム（text_content 等の本文は含めない） */
+export type PhaseContentSummary = Pick<
+  LearningContent,
+  "id" | "title" | "content_type" | "display_order"
+>;
+
 /**
  * フェーズに属する公開週一覧をコンテンツ付きで取得
+ * コンテンツは一覧表示に必要なカラムのみ select する（本文カラムの全取得を避ける）。
  */
 export async function fetchWeeksWithContentsByPhaseId(phaseId: number): Promise<{
-  data: (LearningWeek & { contents: LearningContent[] })[] | null;
+  data: (LearningWeek & { contents: PhaseContentSummary[] })[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_weeks")
-    .select("*, contents:learning_contents(*)")
+    .select("*, contents:learning_contents(id, title, content_type, display_order)")
     .eq("phase_id", phaseId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -156,7 +258,7 @@ export async function fetchWeeksWithContentsByPhaseId(phaseId: number): Promise<
     return { data: null, error };
   }
 
-  return { data: data as (LearningWeek & { contents: LearningContent[] })[], error: null };
+  return { data: data as (LearningWeek & { contents: PhaseContentSummary[] })[], error: null };
 }
 
 /**

@@ -73,6 +73,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
   const [exerciseInstructions, setExerciseInstructions] = useState(
     initialData?.exercise_instructions ?? ""
   );
+  const [hint, setHint] = useState(initialData?.hint ?? "");
   const [referenceAnswer, setReferenceAnswer] = useState(initialData?.reference_answer ?? "");
   const [allowedSubmissionTypes, setAllowedSubmissionTypes] = useState<AllowedSubmissionTypes>(
     (initialData?.allowed_submission_types as AllowedSubmissionTypes) ?? "code"
@@ -170,10 +171,12 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       content_type: contentType,
       display_order: Number(displayOrder),
       is_published: isPublished,
-      video_url: contentType === "video" ? videoUrl : null,
-      text_content: contentType === "text" ? textContent : null,
-      exercise_instructions: contentType === "exercise" ? exerciseInstructions : null,
-      reference_answer: contentType === "exercise" ? referenceAnswer || null : null,
+      video_url: contentType === "video" ? videoUrl.trim() || null : null,
+      text_content: contentType === "text" ? textContent.trim() || null : null,
+      exercise_instructions:
+        contentType === "exercise" ? exerciseInstructions.trim() || null : null,
+      hint: contentType === "exercise" ? hint.trim() || null : null,
+      reference_answer: contentType === "exercise" ? referenceAnswer.trim() || null : null,
       allowed_submission_types: contentType === "exercise" ? allowedSubmissionTypes : "code",
       code_language: contentType === "exercise" ? codeLanguage : "javascript",
       pdf_url: contentType === "slide" ? pdfUrl : null,
@@ -378,6 +381,16 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
                   onChange={(e) => setExerciseInstructions(e.target.value)}
                   placeholder="演習の指示をMarkdown形式で記述してください..."
                   className="min-h-[300px] font-mono"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="hint">ヒント（受講生に公開）</Label>
+                <Textarea
+                  id="hint"
+                  value={hint}
+                  onChange={(e) => setHint(e.target.value)}
+                  placeholder="課題提出フォームの上部にアコーディオン形式で表示されます。受講生向けのヒントを記述してください（Markdown記法は使えますが、レンダリングされずプレーンテキストとして表示されます）。未入力の場合はヒントUIを表示しません。"
+                  className="min-h-[200px] font-mono"
                 />
               </div>
               <div className="space-y-2">

@@ -1,4 +1,5 @@
 import type { User } from "@supabase/supabase-js";
+import { cache } from "react";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import type { UserRoleType, UserStatusType } from "@/app/types";
 
@@ -11,7 +12,8 @@ export interface ServerAuthResult {
 }
 
 // サーバーサイドで認証とユーザーステータスを確認
-export async function getServerAuth(): Promise<ServerAuthResult> {
+// React.cache() によりリクエスト単位でメモ化され、layout・page間で重複実行されない
+export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
   try {
     const supabase = await createServerSupabaseClient();
 
@@ -34,6 +36,7 @@ export async function getServerAuth(): Promise<ServerAuthResult> {
       .single();
 
     if (userError || !userData) {
+      console.error("ユーザー情報取得エラー:", userError?.message || "No data found");
       return {
         user,
         userId: null,
@@ -50,6 +53,10 @@ export async function getServerAuth(): Promise<ServerAuthResult> {
       userRole: userData.role as UserRoleType,
     };
   } catch (error) {
+    // Next.js の制御エラー（動的レンダリング化・redirect等）は握り潰さずに再スロー
+    if (error && typeof error === "object" && "digest" in error) {
+      throw error;
+    }
     console.error("サーバー認証エラー:", error);
     return {
       user: null,
@@ -59,4 +66,4 @@ export async function getServerAuth(): Promise<ServerAuthResult> {
       error: "サーバー認証エラーが発生しました",
     };
   }
-}
+});
