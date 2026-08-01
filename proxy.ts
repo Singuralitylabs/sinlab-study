@@ -16,7 +16,6 @@ function shouldSkipMiddleware(pathname: string): boolean {
     STATIC_FILE_EXTENSIONS.test(pathname) ||
     pathname === "/favicon.ico" ||
     pathname === "/login" ||
-    pathname === "/pending" ||
     pathname === "/rejected"
   );
 }
@@ -91,7 +90,7 @@ export async function proxy(request: NextRequest) {
       .maybeSingle();
 
     // ステータスを判定できない場合はフェイルクローズ（/login へ）。
-    // DB一時障害などで userStatus が null になった際に /pending へ誤誘導しないため
+    // DB一時障害などで userStatus が null になった際に誤って通過させないため
     if (userError || !userData) {
       console.error("[proxy] User data fetch error:", userError);
       return NextResponse.redirect(new URL("/login", request.url));
@@ -99,18 +98,18 @@ export async function proxy(request: NextRequest) {
 
     const userStatus = userData.status as string | null;
 
-    // 許可リスト方式: active のみ通過させ、それ以外はステータスに応じてリダイレクト
+    // 許可リスト方式: active / pending（お試しユーザー）のみ通過させ、それ以外はステータスに応じてリダイレクト
     // （想定外のステータス値が入った場合も素通りさせない）
-    if (userStatus === USER_STATUS.ACTIVE) {
+    if (userStatus === USER_STATUS.ACTIVE || userStatus === USER_STATUS.PENDING) {
+      // 廃止済みの /pending 画面への旧URL流入は / へ誘導する
+      if (pathname === "/pending") {
+        return NextResponse.redirect(new URL("/", request.url));
+      }
       return response;
     }
 
     if (userStatus === USER_STATUS.REJECTED) {
       return NextResponse.redirect(new URL("/rejected", request.url));
-    }
-
-    if (!userStatus || userStatus === USER_STATUS.PENDING) {
-      return NextResponse.redirect(new URL("/pending", request.url));
     }
 
     // 未知のステータスは /login へ（フェイルクローズ）

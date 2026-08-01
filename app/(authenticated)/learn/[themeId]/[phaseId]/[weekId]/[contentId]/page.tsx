@@ -1,4 +1,4 @@
-import { Bot, ChevronLeft, ChevronRight } from "lucide-react";
+import { Bot, ChevronLeft, ChevronRight, Lock } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
@@ -10,9 +10,12 @@ import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
 import {
+  type ContentVisibilitySummary,
   fetchContentById,
-  fetchContentsByWeekId,
+  fetchContentVisibilitySummariesByWeekIds,
   fetchUserProgressByContentId,
+  fetchWeekById,
+  isContentLockedForUser,
 } from "@/app/services/api/learning-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -25,6 +28,48 @@ import { SubmissionForm } from "./SubmissionForm";
 
 interface PageProps {
   params: Promise<{ themeId: string; phaseId: string; weekId: string; contentId: string }>;
+}
+
+function PrevNextNav({
+  themeIdNum,
+  phaseIdNum,
+  weekIdNum,
+  prevContent,
+  nextContent,
+}: {
+  themeIdNum: number;
+  phaseIdNum: number;
+  weekIdNum: number;
+  prevContent: ContentVisibilitySummary | null;
+  nextContent: ContentVisibilitySummary | null;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      {prevContent ? (
+        <Button variant="outline" asChild className="flex-1 justify-start">
+          <Link href={`/learn/${themeIdNum}/${phaseIdNum}/${weekIdNum}/${prevContent.id}`}>
+            <ChevronLeft className="h-4 w-4 mr-2" />
+            <span className="truncate">{prevContent.title}</span>
+          </Link>
+        </Button>
+      ) : (
+        <div className="flex-1" />
+      )}
+
+      {nextContent ? (
+        <Button variant="outline" asChild className="flex-1 justify-end">
+          <Link href={`/learn/${themeIdNum}/${phaseIdNum}/${weekIdNum}/${nextContent.id}`}>
+            <span className="truncate">{nextContent.title}</span>
+            <ChevronRight className="h-4 w-4 ml-2" />
+          </Link>
+        </Button>
+      ) : (
+        <Button asChild className="flex-1 justify-center">
+          <Link href={`/learn/${themeIdNum}/${phaseIdNum}`}>フェーズに戻る</Link>
+        </Button>
+      )}
+    </div>
+  );
 }
 
 export default async function ContentPage({ params }: PageProps) {
@@ -43,20 +88,79 @@ export default async function ContentPage({ params }: PageProps) {
     notFound();
   }
 
-  const { userId } = await getServerAuth();
+  const { userId, userStatus } = await getServerAuth();
+
+  // 存在チェック + ロック判定用のサマリーを取得（service_role。お試し非公開でもタイトルは取得できる）
+  const [{ data: week }, { data: weekContentSummaries }] = await Promise.all([
+    fetchWeekById(weekIdNum),
+    fetchContentVisibilitySummariesByWeekIds([weekIdNum]),
+  ]);
+
+  // URLの themeId/phaseId が実際の週の所属フェーズ・テーマと一致しない場合は404
+  // （パンくず・前後リンクが誤ったURLになるのを防ぐ）
+  if (!week || week.phase_id !== phaseIdNum || week.phase?.theme_id !== themeIdNum) {
+    notFound();
+  }
+
+  const summary = weekContentSummaries?.find((c) => c.id === contentIdNum);
+
+  // 公開コンテンツとして存在しない（未公開・論理削除済み・他の週所属を含む）場合は404
+  if (!summary) {
+    notFound();
+  }
+
+  const currentIndex = weekContentSummaries?.findIndex((c) => c.id === contentIdNum) ?? -1;
+  const prevContent = currentIndex > 0 ? (weekContentSummaries?.[currentIndex - 1] ?? null) : null;
+  const nextContent =
+    currentIndex >= 0 && currentIndex < (weekContentSummaries?.length ?? 0) - 1
+      ? (weekContentSummaries?.[currentIndex + 1] ?? null)
+      : null;
+
+  const isLocked = isContentLockedForUser(userStatus, summary.is_open_to_trial);
+
+  if (isLocked) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <PageTitle
+          title={summary.title}
+          breadcrumbs={[
+            { label: "学習コンテンツ", href: "/learn" },
+            { label: week.phase?.theme?.name || "テーマ", href: `/learn/${themeIdNum}` },
+            {
+              label: week.phase?.name || "フェーズ",
+              href: `/learn/${themeIdNum}/${phaseIdNum}`,
+            },
+            { label: summary.title },
+          ]}
+        />
+
+        <Card className="mb-6">
+          <CardContent className="py-12 text-center">
+            <Lock className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+            <p className="text-muted-foreground">
+              このコンテンツは無料プランでは閲覧できません。
+              <br />
+              本登録後に閲覧・提出できるようになります。
+            </p>
+          </CardContent>
+        </Card>
+
+        <PrevNextNav
+          themeIdNum={themeIdNum}
+          phaseIdNum={phaseIdNum}
+          weekIdNum={weekIdNum}
+          prevContent={prevContent}
+          nextContent={nextContent}
+        />
+      </div>
+    );
+  }
+
   const { data: content } = await fetchContentById(contentIdNum);
 
   if (!content || content.week_id !== weekIdNum) {
     notFound();
   }
-
-  const { data: weekContents } = await fetchContentsByWeekId(weekIdNum);
-  const currentIndex = weekContents?.findIndex((c) => c.id === contentIdNum) ?? -1;
-  const prevContent = currentIndex > 0 ? weekContents?.[currentIndex - 1] : null;
-  const nextContent =
-    currentIndex >= 0 && currentIndex < (weekContents?.length ?? 0) - 1
-      ? weekContents?.[currentIndex + 1]
-      : null;
 
   const [{ isCompleted }, { data: existingReview }, { data: latestSubmission }] = await Promise.all(
     [
@@ -216,31 +320,13 @@ export default async function ContentPage({ params }: PageProps) {
       )}
 
       {/* 前後ナビゲーション */}
-      <div className="flex items-center justify-between gap-4">
-        {prevContent ? (
-          <Button variant="outline" asChild className="flex-1 justify-start">
-            <Link href={`/learn/${themeIdNum}/${phaseIdNum}/${weekIdNum}/${prevContent.id}`}>
-              <ChevronLeft className="h-4 w-4 mr-2" />
-              <span className="truncate">{prevContent.title}</span>
-            </Link>
-          </Button>
-        ) : (
-          <div className="flex-1" />
-        )}
-
-        {nextContent ? (
-          <Button variant="outline" asChild className="flex-1 justify-end">
-            <Link href={`/learn/${themeIdNum}/${phaseIdNum}/${weekIdNum}/${nextContent.id}`}>
-              <span className="truncate">{nextContent.title}</span>
-              <ChevronRight className="h-4 w-4 ml-2" />
-            </Link>
-          </Button>
-        ) : (
-          <Button asChild className="flex-1 justify-center">
-            <Link href={`/learn/${themeIdNum}/${phaseIdNum}`}>フェーズに戻る</Link>
-          </Button>
-        )}
-      </div>
+      <PrevNextNav
+        themeIdNum={themeIdNum}
+        phaseIdNum={phaseIdNum}
+        weekIdNum={weekIdNum}
+        prevContent={prevContent}
+        nextContent={nextContent}
+      />
     </div>
   );
 }

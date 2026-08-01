@@ -72,6 +72,7 @@ export type Database = {
           hint: string | null;
           id: number;
           is_deleted: boolean | null;
+          is_open_to_trial: boolean;
           is_published: boolean | null;
           pdf_url: string | null;
           reference_answer: string | null;
@@ -91,6 +92,7 @@ export type Database = {
           hint?: string | null;
           id?: number;
           is_deleted?: boolean | null;
+          is_open_to_trial?: boolean;
           is_published?: boolean | null;
           pdf_url?: string | null;
           reference_answer?: string | null;
@@ -110,6 +112,7 @@ export type Database = {
           hint?: string | null;
           id?: number;
           is_deleted?: boolean | null;
+          is_open_to_trial?: boolean;
           is_published?: boolean | null;
           pdf_url?: string | null;
           reference_answer?: string | null;
@@ -395,6 +398,7 @@ export type Database = {
     Functions: {
       get_user_id: { Args: never; Returns: number };
       get_user_role: { Args: never; Returns: string };
+      get_user_status: { Args: never; Returns: string };
     };
     Enums: {
       [_ in never]: never;

@@ -1,23 +1,22 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { USER_STATUS } from "@/app/constants/user";
 import { deleteContent, updateContent } from "@/app/services/api/admin-server";
-import { getApiAuth, getApiSupabaseClient } from "@/app/services/auth/api-auth";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
+import { getServerAuth } from "@/app/services/auth/server-auth";
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const auth = await getApiAuth();
-    if (!auth.success) {
-      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    const { user, userId, userStatus, userRole } = await getServerAuth();
+    if (!user) {
+      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     }
-
-    const supabase = await getApiSupabaseClient();
-    const { data: userData } = await supabase
-      .from("users")
-      .select("role")
-      .eq("id", auth.data.userId)
-      .single();
-
-    if (!userData || !checkContentPermissions(userData.role)) {
+    if (!userId) {
+      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
+    }
+    if (userStatus === USER_STATUS.REJECTED) {
+      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
+    }
+    if (!checkContentPermissions(userRole)) {
       return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
     }
 
@@ -42,6 +41,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       pdf_url,
       display_order,
       is_published,
+      is_open_to_trial,
     } = body;
 
     const { error } = await updateContent(contentId, {
@@ -58,6 +58,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       pdf_url,
       display_order,
       is_published,
+      is_open_to_trial,
     });
 
     if (error) {
@@ -76,17 +77,17 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = await getApiAuth();
-    if (!auth.success) {
-      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    const { user, userId, userStatus, userRole } = await getServerAuth();
+    if (!user) {
+      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     }
-    const supabase = await getApiSupabaseClient();
-    const { data: userData } = await supabase
-      .from("users")
-      .select("role")
-      .eq("id", auth.data.userId)
-      .single();
-    if (!userData || !checkContentPermissions(userData.role)) {
+    if (!userId) {
+      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
+    }
+    if (userStatus === USER_STATUS.REJECTED) {
+      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
+    }
+    if (!checkContentPermissions(userRole)) {
       return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
     }
     const { id } = await params;
