@@ -13,9 +13,8 @@ import {
   type ContentVisibilitySummary,
   fetchContentById,
   fetchContentVisibilitySummariesByWeekIds,
-  fetchPhaseById,
-  fetchThemeById,
   fetchUserProgressByContentId,
+  fetchWeekById,
   isContentLockedForUser,
 } from "@/app/services/api/learning-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
@@ -92,9 +91,17 @@ export default async function ContentPage({ params }: PageProps) {
   const { userId, userStatus } = await getServerAuth();
 
   // 存在チェック + ロック判定用のサマリーを取得（service_role。お試し非公開でもタイトルは取得できる）
-  const { data: weekContentSummaries } = await fetchContentVisibilitySummariesByWeekIds([
-    weekIdNum,
+  const [{ data: week }, { data: weekContentSummaries }] = await Promise.all([
+    fetchWeekById(weekIdNum),
+    fetchContentVisibilitySummariesByWeekIds([weekIdNum]),
   ]);
+
+  // URLの themeId/phaseId が実際の週の所属フェーズ・テーマと一致しない場合は404
+  // （パンくず・前後リンクが誤ったURLになるのを防ぐ）
+  if (!week || week.phase_id !== phaseIdNum || week.phase?.theme_id !== themeIdNum) {
+    notFound();
+  }
+
   const summary = weekContentSummaries?.find((c) => c.id === contentIdNum);
 
   // 公開コンテンツとして存在しない（未公開・論理削除済み・他の週所属を含む）場合は404
@@ -112,19 +119,17 @@ export default async function ContentPage({ params }: PageProps) {
   const isLocked = isContentLockedForUser(userStatus, summary.is_open_to_trial);
 
   if (isLocked) {
-    const [{ data: theme }, { data: phase }] = await Promise.all([
-      fetchThemeById(themeIdNum),
-      fetchPhaseById(phaseIdNum),
-    ]);
-
     return (
       <div className="max-w-4xl mx-auto">
         <PageTitle
           title={summary.title}
           breadcrumbs={[
             { label: "学習コンテンツ", href: "/learn" },
-            { label: theme?.name || "テーマ", href: `/learn/${themeIdNum}` },
-            { label: phase?.name || "フェーズ", href: `/learn/${themeIdNum}/${phaseIdNum}` },
+            { label: week.phase?.theme?.name || "テーマ", href: `/learn/${themeIdNum}` },
+            {
+              label: week.phase?.name || "フェーズ",
+              href: `/learn/${themeIdNum}/${phaseIdNum}`,
+            },
             { label: summary.title },
           ]}
         />

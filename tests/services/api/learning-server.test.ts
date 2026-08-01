@@ -556,4 +556,17 @@ describe("isContentVisible", () => {
 
     expect(result).toBe(false);
   });
+
+  it("DB エラー時、エラーをログした上で false を返す（fail-closed）", async () => {
+    const mockClient = createMockSupabaseClient({ queryResult: { data: null, error: dbError } });
+    const consoleErrorSpy = vi.spyOn(console, "error");
+
+    const result = await isContentVisible(mockClient as never, 1);
+
+    expect(result).toBe(false);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "コンテンツ可視性チェックエラー:",
+      dbError.message
+    );
+  });
 });

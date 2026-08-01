@@ -257,11 +257,17 @@ export async function isContentVisible(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
   contentId: number
 ): Promise<boolean> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("learning_contents")
     .select("id")
     .eq("id", contentId)
     .maybeSingle();
+
+  if (error) {
+    // fail-closed（不可視として扱う）は維持しつつ、DB障害と「本当に不可視」を
+    // ログ上で区別できるようにする
+    console.error("コンテンツ可視性チェックエラー:", error.message);
+  }
 
   return !!data;
 }
