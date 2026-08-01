@@ -119,7 +119,9 @@ app/
 - **user_progress**: コンテンツごとの完了状態を記録（user+contentでユニーク）
 - **submissions**: 演習コンテンツに紐づくコードまたはURLの提出物。コード提出は単一/複数ファイルに対応する。単一ファイルは `code_content`（TEXT）に保存し、複数ファイル（例: `コード.gs` + `index.html`）は `code_files`（JSONB: `[{filename, language, content}]`）に保存する。どちらか一方のみが値を持ち、もう一方は `NULL`（後方互換: 既存の `code_content` のみの提出はそのまま有効）。表示・AIレビューでは `getSubmissionCodeFiles()`（`app/lib/submission-files.ts`）でファイル配列に正規化して扱う。
 
-スライドPDFは Supabase Storage の `slides` バケット内に、オブジェクトキー **`<コーススラッグ>/slide-NN.pdf`**（NNは最低2桁のゼロ埋め）で保存する（例: キー `gas-advanced/slide-03.pdf` → 公開URL `.../storage/v1/object/public/slides/gas-advanced/slide-03.pdf`）。アップロードAPI（`app/api/upload-pdf/route.ts`）はフォルダ指定＋連番（自動採番／番号指定）に対応しており、シードSQL（`supabase/migrations/03_seed/`）もこのパスを前提とする。
+スライドPDFは Supabase Storage の `slides` バケット内に、オブジェクトキー **`<コーススラッグ>/slide-NN.pdf`**（NNは最低2桁のゼロ埋め）で保存する（例: キー `gas-advanced/slide-03.pdf` → 公開URL `.../storage/v1/object/public/slides/gas-advanced/slide-03.pdf`）。アップロードAPI（`app/api/upload-pdf/route.ts`）はフォルダ指定＋連番（自動採番／番号指定）に対応しており、シードSQL（`supabase/migrations/03_seed/`）もこのパスを前提とする。スライドPDFはアップロード時にサーバー側でテキスト抽出（`pdfjs-dist` のNode向けビルド）を行い、`learning_contents.slide_markdown`（TEXT、`content_type='slide'` の行のみ使用）に簡易Markdown（`## スライド N` 見出し + 抽出テキスト）として保存する。抽出に失敗した場合は `slide_markdown` を `NULL` のままとし、アップロード自体は失敗させない（AIレビュー側は資料なしとして継続）。
+
+**AIレビューへの講座資料の受け渡し**: `POST /api/ai-review` は演習提出をレビューする際、演習指示・模範回答（`reference_answer`）・ヒント（`hint`）に加えて、同じ週（`week_id`）の公開スライド（`content_type='slide'` かつ `is_published=true` かつ `is_deleted=false`）の `slide_markdown` を `display_order` 順に連結し、「講座資料」としてGeminiへのプロンプトに条件付きで挿入する（`app/services/api/gemini.ts` の `generateReview()` 第5引数 `courseMaterial`）。資料は `MAX_MATERIAL_LENGTH`（2000文字）で切り詰め、入力トークン増加を抑える。取得は提出者本人のRLSスコープのクライアントで行い、service_roleは使用しない（生徒は同じ週の公開コンテンツを閲覧できるため）。
 
 セキュリティはデータベースレベルの**Row Level Security (RLS)** ポリシーで実現。親階層（themes/phases/weeks）の公開コンテンツは認証済み全ユーザーが閲覧可能、`learning_contents` は `active` ユーザーが公開分を閲覧可能・お試しユーザー（`status='pending'`）は `is_open_to_trial=true` かつ `is_published=true` の行のみ SELECT 可（アプリ層のチェックと合わせた二層防御）。進捗・提出物は本人のみ、管理者は全データの読み書きが可能。
 
