@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { USER_ROLE } from "@/app/constants/user";
+import { MEMBERSHIP_TYPES, USER_ROLE } from "@/app/constants/user";
 import { approveUser, changeUserRole, rejectUser } from "@/app/services/api/admin-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -57,9 +57,9 @@ export async function PATCH(request: Request) {
     }
 
     // 承認時は会員種別（コミュニティ会員 / 一般有料会員）の指定を必須とする
-    if (action === "approve" && !["community", "general"].includes(membershipType)) {
+    if (action === "approve" && !MEMBERSHIP_TYPES.includes(membershipType)) {
       return NextResponse.json(
-        { error: "membershipType は community / general を指定してください" },
+        { error: `membershipType は ${MEMBERSHIP_TYPES.join(" / ")} を指定してください` },
         { status: 400 }
       );
     }

@@ -4,6 +4,7 @@ import { Check, Loader2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import {
+  MEMBERSHIP_TYPES,
   USER_MEMBERSHIP,
   USER_MEMBERSHIP_LABELS,
   USER_ROLE,
@@ -60,10 +61,15 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
 
   const handleAction = async (userId: number, action: "approve" | "reject") => {
     const membershipType = getMembership(userId);
+    // 却下すると会員種別は NULL に戻るため、設定済みの場合は解除される旨を明示する
+    const currentMembership = users.find((u) => u.id === userId)?.membership_type;
+    const rejectMessage = currentMembership
+      ? `このユーザーを却下しますか？\n現在の会員種別（${USER_MEMBERSHIP_LABELS[currentMembership]}）の設定は解除されます。`
+      : "このユーザーを却下しますか？";
     const confirmMessage =
       action === "approve"
         ? `このユーザーを「${USER_MEMBERSHIP_LABELS[membershipType]}」として承認しますか？`
-        : "このユーザーを却下しますか？";
+        : rejectMessage;
 
     if (!confirm(confirmMessage)) return;
 
@@ -238,12 +244,11 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
                                 aria-label={`${user.display_name} の会員種別`}
                                 className="h-8 w-36 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
                               >
-                                <option value={USER_MEMBERSHIP.COMMUNITY}>
-                                  {USER_MEMBERSHIP_LABELS.community}
-                                </option>
-                                <option value={USER_MEMBERSHIP.GENERAL}>
-                                  {USER_MEMBERSHIP_LABELS.general}
-                                </option>
+                                {MEMBERSHIP_TYPES.map((type) => (
+                                  <option key={type} value={type}>
+                                    {USER_MEMBERSHIP_LABELS[type]}
+                                  </option>
+                                ))}
                               </select>
                               <Button
                                 size="sm"

@@ -100,9 +100,10 @@ app/
 承認済みユーザーは「**コミュニティ会員**（`community`）」と「**一般有料会員**（`general`）」に分類する。前者はコミュニティ会員プラン、後者は本サービスのみを利用するプランを指す。ロール（権限）とは独立した軸で、**現時点では種別によるコンテンツ・機能のアクセス差はない**（将来の出し分けに備えた区別のみ）。決済連携はスコープ外で、入金確認等は手動運用とする。
 
 - **カラム**: `users.membership_type`（`VARCHAR(20) CHECK (membership_type IN ('community', 'general'))`）。承認前（`pending`）・却下（`rejected`）は `NULL`。CHECK制約はNULLを許容するため `NOT NULL` は付けない
-- **設定タイミング**: 管理者が `/admin/users` の承認操作で種別を選択し、`status=active` と同時に設定する（`approveUser(userId, membershipType)`）。却下時（`rejectUser()`）は `NULL` に戻す
+- **設定タイミング**: 管理者が `/admin/users` の承認操作で種別を選択し、`status=active` と同時に設定する（`approveUser(userId, membershipType)`）。却下時（`rejectUser()`）は `NULL` に戻す。却下ボタンは `active` ユーザーにも出るため、種別が設定済みの場合は確認ダイアログで解除される旨を明示する。承認済みユーザーの種別変更UIは未実装（#95）
 - **API**: `PATCH /api/admin/users` の `approve` アクションは `membershipType`（`community` / `general`）が必須。未指定・不正値は400
-- **型・定数**: `MembershipType`（`app/types`）、`USER_MEMBERSHIP` / `USER_MEMBERSHIP_LABELS`（`app/constants/user.ts`）
+- **型・定数**: `MembershipType`（`app/types`）、`USER_MEMBERSHIP` / `USER_MEMBERSHIP_LABELS` / `MEMBERSHIP_TYPES`（`app/constants/user.ts`）。**許可値の列挙は `MEMBERSHIP_TYPES` に一本化**し、APIのバリデーションと承認UIの `<option>` 生成の双方をここから導出する（リテラルを各所にハードコードしない）
+- **`active` と種別の整合性**: CHECK制約は値の妥当性のみを検証し「`status=active` なら `membership_type` は NOT NULL」までは**DBでは保証していない**。この不変条件は `approveUser()` / `rejectUser()` を経由するアプリ層でのみ担保される
 - **既存データ**: マイグレーション適用時に既存の `active` ユーザーを一括で `community` にバックフィルする
 
 ### お試し（trial）ユーザー
