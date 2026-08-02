@@ -3,8 +3,16 @@ import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
 
-import { fetchManageCounts, fetchStudentsProgress } from "@/app/services/api/admin-server";
-import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
+import {
+  approveUser,
+  fetchManageCounts,
+  fetchStudentsProgress,
+  rejectUser,
+} from "@/app/services/api/admin-server";
+import {
+  createAdminSupabaseClient,
+  createServerSupabaseClient,
+} from "@/app/services/api/supabase-server";
 
 const dbError = { message: "db error", code: "PGRST001" };
 
@@ -201,5 +209,66 @@ describe("fetchManageCounts", () => {
 
     expect(result.error).toEqual(dbError);
     expect(result.data).toEqual({ themes: 2, phases: 0, weeks: 4, contents: 5, students: 6 });
+  });
+});
+
+// ----------------------------------------------------------------
+// approveUser / rejectUser
+// ----------------------------------------------------------------
+describe("approveUser", () => {
+  it("status=active と選択された会員種別を同時に更新する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: null, error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await approveUser(1, "general");
+
+    expect(result.error).toBeNull();
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "active", membership_type: "general" })
+    );
+    expect(builder.eq).toHaveBeenCalledWith("id", 1);
+  });
+
+  it("コミュニティ会員として承認できる", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: null, error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await approveUser(2, "community");
+
+    expect(mockClient.from.mock.results[0].value.update).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "active", membership_type: "community" })
+    );
+  });
+
+  it("更新に失敗した場合はエラーを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: null, error: dbError } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await approveUser(1, "community");
+
+    expect(result.error).toEqual(dbError);
+  });
+});
+
+describe("rejectUser", () => {
+  it("status=rejected に更新し、会員種別を NULL に戻す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: null, error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await rejectUser(3);
+
+    expect(result.error).toBeNull();
+    expect(mockClient.from.mock.results[0].value.update).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "rejected", membership_type: null })
+    );
   });
 });

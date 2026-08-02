@@ -13,7 +13,7 @@ export async function PATCH(request: Request) {
     }
 
     const body = await request.json();
-    const { userId, action, role } = body;
+    const { userId, action, role, membershipType } = body;
 
     if (!userId || !action) {
       return NextResponse.json({ error: "userId と action は必須です" }, { status: 400 });
@@ -56,7 +56,16 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ success: true, action });
     }
 
-    const { error } = action === "approve" ? await approveUser(userId) : await rejectUser(userId);
+    // 承認時は会員種別（コミュニティ会員 / 一般有料会員）の指定を必須とする
+    if (action === "approve" && !["community", "general"].includes(membershipType)) {
+      return NextResponse.json(
+        { error: "membershipType は community / general を指定してください" },
+        { status: 400 }
+      );
+    }
+
+    const { error } =
+      action === "approve" ? await approveUser(userId, membershipType) : await rejectUser(userId);
 
     if (error) {
       return NextResponse.json({ error: "ステータス更新に失敗しました" }, { status: 500 });

@@ -16,6 +16,7 @@ export interface QueryResult {
 export function createQueryBuilder(result: QueryResult) {
   const builder = {
     select: vi.fn().mockReturnThis(),
+    update: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),

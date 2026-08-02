@@ -6,6 +6,7 @@ import type {
   LearningPhaseWithTheme,
   LearningTheme,
   LearningWeek,
+  MembershipType,
   UserType,
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
@@ -531,12 +532,22 @@ export async function fetchAllUsers(): Promise<{
   return { data: data as UserType[], error: null };
 }
 
-export async function approveUser(userId: number): Promise<{ error: PostgrestError | null }> {
+/**
+ * ユーザーを承認する。承認と同時に会員種別（コミュニティ会員 / 一般有料会員）を設定する。
+ */
+export async function approveUser(
+  userId: number,
+  membershipType: MembershipType
+): Promise<{ error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
 
   const { error } = await supabase
     .from("users")
-    .update({ status: USER_STATUS.ACTIVE, updated_at: new Date().toISOString() })
+    .update({
+      status: USER_STATUS.ACTIVE,
+      membership_type: membershipType,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", userId);
 
   if (error) {
@@ -547,12 +558,19 @@ export async function approveUser(userId: number): Promise<{ error: PostgrestErr
   return { error: null };
 }
 
+/**
+ * ユーザーを却下する。却下ユーザーは会員種別を持たないため NULL に戻す。
+ */
 export async function rejectUser(userId: number): Promise<{ error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
 
   const { error } = await supabase
     .from("users")
-    .update({ status: USER_STATUS.REJECTED, updated_at: new Date().toISOString() })
+    .update({
+      status: USER_STATUS.REJECTED,
+      membership_type: null,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", userId);
 
   if (error) {

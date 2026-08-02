@@ -3,8 +3,13 @@
 import { Check, Loader2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
-import type { UserRoleType, UserStatusType, UserType } from "@/app/types";
+import {
+  USER_MEMBERSHIP,
+  USER_MEMBERSHIP_LABELS,
+  USER_ROLE,
+  USER_STATUS,
+} from "@/app/constants/user";
+import type { MembershipType, UserRoleType, UserStatusType, UserType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -29,6 +34,8 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
   const router = useRouter();
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [loadingUserIds, setLoadingUserIds] = useState<Set<number>>(new Set());
+  // 承認時に選択する会員種別（ユーザーIDごと。未選択はコミュニティ会員を既定とする）
+  const [membershipByUserId, setMembershipByUserId] = useState<Record<number, MembershipType>>({});
 
   const filteredUsers = useMemo(
     () => (filter === "all" ? users : users.filter((u) => u.status === filter)),
@@ -48,9 +55,15 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
     });
   };
 
+  const getMembership = (userId: number): MembershipType =>
+    membershipByUserId[userId] ?? USER_MEMBERSHIP.COMMUNITY;
+
   const handleAction = async (userId: number, action: "approve" | "reject") => {
+    const membershipType = getMembership(userId);
     const confirmMessage =
-      action === "approve" ? "このユーザーを承認しますか？" : "このユーザーを却下しますか？";
+      action === "approve"
+        ? `このユーザーを「${USER_MEMBERSHIP_LABELS[membershipType]}」として承認しますか？`
+        : "このユーザーを却下しますか？";
 
     if (!confirm(confirmMessage)) return;
 
@@ -59,7 +72,9 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
       const res = await fetch("/api/admin/users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, action }),
+        body: JSON.stringify(
+          action === "approve" ? { userId, action, membershipType } : { userId, action }
+        ),
       });
 
       if (!res.ok) {
@@ -135,6 +150,9 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
                 ステータス
               </th>
               <th scope="col" className="text-left px-4 py-3 font-medium">
+                会員種別
+              </th>
+              <th scope="col" className="text-left px-4 py-3 font-medium">
                 登録日
               </th>
               <th scope="col" className="text-left px-4 py-3 font-medium">
@@ -145,7 +163,7 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
           <tbody>
             {filteredUsers.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
                   該当するユーザーがいません
                 </td>
               </tr>
@@ -187,6 +205,15 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
                     <td className="px-4 py-3">
                       <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
                     </td>
+                    <td className="px-4 py-3">
+                      {user.membership_type ? (
+                        <Badge variant="outline">
+                          {USER_MEMBERSHIP_LABELS[user.membership_type]}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {user.created_at
                         ? new Date(user.created_at).toLocaleDateString("ja-JP")
@@ -196,18 +223,38 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
                       {isLoading ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 items-center">
                           {(user.status === USER_STATUS.PENDING ||
                             user.status === USER_STATUS.REJECTED) && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleAction(user.id, "approve")}
-                              className="text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-950"
-                            >
-                              <Check className="h-3.5 w-3.5 mr-1" />
-                              承認
-                            </Button>
+                            <>
+                              <select
+                                value={getMembership(user.id)}
+                                onChange={(e) =>
+                                  setMembershipByUserId((prev) => ({
+                                    ...prev,
+                                    [user.id]: e.target.value as MembershipType,
+                                  }))
+                                }
+                                aria-label={`${user.display_name} の会員種別`}
+                                className="h-8 w-36 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                              >
+                                <option value={USER_MEMBERSHIP.COMMUNITY}>
+                                  {USER_MEMBERSHIP_LABELS.community}
+                                </option>
+                                <option value={USER_MEMBERSHIP.GENERAL}>
+                                  {USER_MEMBERSHIP_LABELS.general}
+                                </option>
+                              </select>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleAction(user.id, "approve")}
+                                className="text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-950"
+                              >
+                                <Check className="h-3.5 w-3.5 mr-1" />
+                                承認
+                              </Button>
+                            </>
                           )}
                           {(user.status === USER_STATUS.PENDING ||
                             user.status === USER_STATUS.ACTIVE) &&

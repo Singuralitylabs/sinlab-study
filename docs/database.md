@@ -327,7 +327,7 @@ erDiagram
 
 ### 3.8 users（ユーザー）
 
-本サービスの独自Supabaseプロジェクトで管理する。初回Googleログイン時にOAuthコールバックで自動作成される（`status=pending`, `role=member`）。管理者が承認後、`status=active` に変更することでサービスへのアクセスが可能になる。
+本サービスの独自Supabaseプロジェクトで管理する。初回Googleログイン時にOAuthコールバックで自動作成される（`status=pending`, `role=member`, `membership_type=NULL`）。管理者が承認後、`status=active` に変更することでサービスへのアクセスが可能になる。承認時には会員種別（`membership_type`）も同時に設定する。
 
 | カラム | 型 | NULL | デフォルト | 説明 |
 |:--|:--|:--:|:--|:--|
@@ -338,6 +338,7 @@ erDiagram
 | avatar_url | TEXT | YES | NULL | アバター画像URL |
 | role | VARCHAR(20) | NO | 'member' | `admin` / `maintainer` / `member`（CHECK制約） |
 | status | VARCHAR(20) | NO | 'pending' | `pending` / `active` / `rejected`（CHECK制約） |
+| membership_type | VARCHAR(20) | YES | NULL | 会員種別。`community`（コミュニティ会員）/ `general`（一般有料会員）（CHECK制約）。承認前・却下ユーザーは NULL |
 | bio | TEXT | YES | NULL | 自己紹介 |
 | is_deleted | BOOLEAN | YES | false | 論理削除フラグ |
 | created_at | TIMESTAMPTZ | YES | NOW() | 作成日時 |
@@ -521,6 +522,7 @@ user_id = (select get_user_id())
 | `01_schema/001_create_tables.sql` | 全テーブル・ヘルパー関数・トリガー・インデックスの作成 |
 | `01_schema/002_add_submission_code_files.sql` | submissions に複数ファイル提出用 `code_files`（JSONB）カラムを追加 |
 | `01_schema/003_add_is_open_to_trial.sql` | learning_contents にお試し公開フラグ `is_open_to_trial` を追加 |
+| `01_schema/004_add_membership_type.sql` | users に会員種別 `membership_type` を追加し、既存の `active` ユーザーを `community` にバックフィル |
 | `02_rls/001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
 | `02_rls/002_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し |
 | `02_rls/003_trial_user_policies.sql` | `get_user_status()` の追加と、お試しユーザー制限を含むポリシーへの差し替え（learning_contents の SELECT、user_progress / submissions の書き込み） |
@@ -569,3 +571,4 @@ user_id = (select get_user_id())
 | 2026年6月 | マイグレーション一覧を実際のディレクトリ構成（`01_schema` / `02_rls` / `03_seed`）に修正。RLSにmaintainerポリシーを追記し、`ai_reviews` のINSERT/UPDATEポリシー記載を削除（Service Role経由のためRLS対象外） |
 | 2026年6月 | 実DB（Supabase）と照合し差分を修正：RLSヘルパー関数 `get_user_role()` / `get_user_id()` を追記し判定ロジックを実装準拠に修正、`users` テーブルのRLS（6.5）・`update_users_updated_at` トリガー・`idx_users_auth_role` インデックスを追記、`users` の文字列カラム型を VARCHAR に修正 |
 | 2026年7月 | お試し（trial）ユーザー機能に対応：`learning_contents` に `is_open_to_trial` カラム追加、RLSヘルパー関数 `get_user_status()` 追加、`learning_contents` のSELECTをお試しユーザー制限付きの別パターンに分離、`user_progress` / `submissions` の書き込みに可視コンテンツ限定のEXISTS条件を追記、マイグレーション一覧・公開制御・upsertパターンの注意点を更新 |
+| 2026年8月 | 会員種別の導入に対応：`users` に `membership_type`（`community` / `general`、承認前・却下は NULL）カラム追加、マイグレーション一覧に `01_schema/004_add_membership_type.sql` を追記 |
