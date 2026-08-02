@@ -107,7 +107,9 @@ export async function POST(request: NextRequest) {
       .eq("user_id", userId)
       .eq("content_id", contentId);
 
-    const allSubmissionIdsForContent = (userSubmissionsForContent ?? []).map((s) => s.id);
+    const allSubmissionIdsForContent = (userSubmissionsForContent ?? []).map(
+      (s: { id: number }) => s.id
+    );
 
     if (allSubmissionIdsForContent.length > 0) {
       const { data: activeReview } = await supabase

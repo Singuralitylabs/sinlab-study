@@ -103,7 +103,7 @@ export async function deleteTheme(id: number): Promise<{ error: PostgrestError |
     return { error: phaseFetchError };
   }
 
-  const phaseIds = phases?.map((p) => p.id) ?? [];
+  const phaseIds = phases?.map((p: { id: number }) => p.id) ?? [];
 
   if (phaseIds.length > 0) {
     // 配下週IDを取得
@@ -117,7 +117,7 @@ export async function deleteTheme(id: number): Promise<{ error: PostgrestError |
       return { error: weekFetchError };
     }
 
-    const weekIds = weeks?.map((w) => w.id) ?? [];
+    const weekIds = weeks?.map((w: { id: number }) => w.id) ?? [];
 
     if (weekIds.length > 0) {
       // 配下コンテンツを論理削除
@@ -259,7 +259,7 @@ export async function deletePhase(id: number): Promise<{ error: PostgrestError |
     return { error: weekFetchError };
   }
 
-  const weekIds = weeks?.map((w) => w.id) ?? [];
+  const weekIds = weeks?.map((w: { id: number }) => w.id) ?? [];
 
   if (weekIds.length > 0) {
     // 配下コンテンツを論理削除
@@ -724,7 +724,7 @@ export async function fetchStudentsProgress(): Promise<{
     }
   }
 
-  const studentsProgress: StudentProgress[] = (users ?? []).map((user) => {
+  const studentsProgress: StudentProgress[] = (users ?? []).map((user: UserType) => {
     const progress = progressByUser.get(user.id);
     return {
       user,

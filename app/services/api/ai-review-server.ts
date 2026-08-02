@@ -61,8 +61,7 @@ export async function fetchAllSubmissionsWithReviews({
       { count: "exact" }
     )
     .order("submitted_at", { ascending: false })
-    .range(from, from + safePageSize - 1)
-    .overrideTypes<AdminSubmissionWithReview[], { merge: false }>();
+    .range(from, from + safePageSize - 1);
 
   if (error) {
     console.error("提出+レビュー一覧取得エラー:", error.message);
@@ -93,7 +92,7 @@ export async function fetchCompletedAIReviewByContentId(
     return { data: null, error: subsError };
   }
 
-  const subIds = (subs ?? []).map((s) => s.id);
+  const subIds = (subs ?? []).map((s: { id: number }) => s.id);
   if (subIds.length === 0) {
     return { data: null, error: null };
   }
@@ -140,12 +139,14 @@ export async function fetchCompletedAIReviewContentIds(
     return { data: new Set(), error: subsError };
   }
 
-  const subIds = (subs ?? []).map((s) => s.id);
+  const subIds = (subs ?? []).map((s: { id: number }) => s.id);
   if (subIds.length === 0) {
     return { data: new Set(), error: null };
   }
 
-  const subToContent = new Map((subs ?? []).map((s) => [s.id, s.content_id]));
+  const subToContent = new Map(
+    (subs ?? []).map((s: { id: number; content_id: number }) => [s.id, s.content_id])
+  );
 
   const { data: reviews, error: reviewsError } = await supabase
     .from("ai_reviews")
@@ -158,10 +159,10 @@ export async function fetchCompletedAIReviewContentIds(
     return { data: new Set(), error: reviewsError };
   }
 
-  const reviewedContentIds = new Set(
+  const reviewedContentIds = new Set<number>(
     (reviews ?? [])
-      .map((r) => subToContent.get(r.submission_id))
-      .filter((id): id is number => id !== undefined)
+      .map((r: { submission_id: number }) => subToContent.get(r.submission_id))
+      .filter((id: number | undefined): id is number => id !== undefined)
   );
 
   return { data: reviewedContentIds, error: null };

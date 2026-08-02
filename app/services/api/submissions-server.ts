@@ -77,13 +77,14 @@ export async function fetchRecentSubmissions(limit: number): Promise<{
       count: "exact",
     })
     .order("submitted_at", { ascending: false })
-    .limit(limit)
-    .overrideTypes<RecentSubmission[], { merge: false }>();
+    .limit(limit);
+
+  const typedData = (data ?? []) as RecentSubmission[];
 
   if (error) {
     console.error("直近提出取得エラー:", error.message);
     return { data: null, count: 0, error };
   }
 
-  return { data, count: count ?? 0, error: null };
+  return { data: typedData, count: count ?? 0, error: null };
 }
