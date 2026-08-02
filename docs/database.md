@@ -118,6 +118,16 @@ erDiagram
         text error_message
         timestamptz reviewed_at
     }
+    ai_token_monthly_usages {
+        date month_start PK
+        bigint prompt_tokens_total
+        bigint completion_tokens_total
+        bigint total_tokens_total
+        int request_count
+        int warning_threshold_percent
+        timestamptz warning_notified_at
+        timestamptz limit_notified_at
+    }
 ```
 
 ---
@@ -325,7 +335,37 @@ erDiagram
 
 ---
 
-### 3.8 users（ユーザー）
+### 3.8 ai_token_monthly_usages（月次トークン使用量集計）
+
+AIレビューで消費したトークンの月次累計と、Slackアラートの通知状態を管理する。
+
+`ai_reviews` をリクエスト単位の生データとし、本テーブルは月次監視用の集計結果を保持する。1レコードが1か月分を表し、月初日を `month_start` に保持する。
+
+| カラム | 型 | NULL | デフォルト | 制約 | 説明 |
+|:--|:--|:--:|:--|:--|:--|
+| month_start | DATE | NO | - | PK | 集計対象月の月初日（JST基準） |
+| prompt_tokens_total | BIGINT | NO | 0 | CHECK (value >= 0) | 月内のプロンプトトークン累計 |
+| completion_tokens_total | BIGINT | NO | 0 | CHECK (value >= 0) | 月内の生成トークン累計 |
+| total_tokens_total | BIGINT | NO | 0 | CHECK (value >= 0) | 月内の総トークン累計 |
+| request_count | INTEGER | NO | 0 | CHECK (value >= 0) | 月内に集計対象となったレビュー成功回数 |
+| warning_threshold_percent | INTEGER | YES | NULL | CHECK (1 <= value <= 99) | 警告通知に使用した閾値（例: 80） |
+| warning_notified_at | TIMESTAMPTZ | YES | NULL | - | 警告通知送信日時 |
+| limit_notified_at | TIMESTAMPTZ | YES | NULL | - | 上限到達通知送信日時 |
+| created_at | TIMESTAMPTZ | NO | NOW() | - | 作成日時 |
+| updated_at | TIMESTAMPTZ | NO | NOW() | トリガーで自動更新 | 更新日時 |
+
+**用途**:
+- Gemini API 呼び出し前の月次上限チェック
+- 管理画面での当月使用量・残量の表示
+- 同一月内での重複アラート送信防止
+
+**補足**:
+- 集計対象は `ai_reviews.status = 'completed'` かつトークン数が取得できたレビューのみとする
+- 生データは `ai_reviews` に保持し、本テーブルは高速な月次判定のための集計テーブルとして扱う
+
+---
+
+### 3.9 users（ユーザー）
 
 本サービスの独自Supabaseプロジェクトで管理する。初回Googleログイン時にOAuthコールバックで自動作成される（`status=pending`, `role=member`）。管理者が承認後、`status=active` に変更することでサービスへのアクセスが可能になる。
 
@@ -387,6 +427,7 @@ $$ language 'plpgsql';
 | update_learning_weeks_updated_at | learning_weeks |
 | update_learning_contents_updated_at | learning_contents |
 | update_ai_reviews_updated_at | ai_reviews |
+| update_ai_token_monthly_usages_updated_at | ai_token_monthly_usages |
 | update_users_updated_at | users |
 
 ### 5.2 RLSヘルパー関数
@@ -500,7 +541,17 @@ user_id = (select get_user_id())
 
 `ai_reviews` には INSERT / UPDATE のRLSポリシーは定義していない。レビューの作成・更新は AIレビューAPI（`/api/ai-review`）がサーバー側で Service Role キーを用いて行い、RLSをバイパスする。
 
-### 6.5 users
+### 6.5 ai_token_monthly_usages
+
+`ai_token_monthly_usages` は運用監視専用のサーバー管理テーブルとし、クライアント直接アクセス用のポリシーは定義しない。
+
+- 書き込み: AIレビュー完了時にサーバー側の Service Role で upsert
+- 読み取り: 管理画面や監視APIから Service Role 経由で取得
+- 一般ユーザー: 直接参照不可
+
+`ai_reviews` と同様に、RLSを有効化した上でアプリケーションサーバーの Service Role によるアクセスを前提とする。
+
+### 6.6 users
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
@@ -521,6 +572,7 @@ user_id = (select get_user_id())
 | `01_schema/001_create_tables.sql` | 全テーブル・ヘルパー関数・トリガー・インデックスの作成 |
 | `01_schema/002_add_submission_code_files.sql` | submissions に複数ファイル提出用 `code_files`（JSONB）カラムを追加 |
 | `01_schema/003_add_is_open_to_trial.sql` | learning_contents にお試し公開フラグ `is_open_to_trial` を追加 |
+| `01_schema/004_add_ai_token_monthly_usages.sql`(予定) | 月次トークン使用量集計テーブル `ai_token_monthly_usages` を追加 |
 | `02_rls/001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
 | `02_rls/002_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し |
 | `02_rls/003_trial_user_policies.sql` | `get_user_status()` の追加と、お試しユーザー制限を含むポリシーへの差し替え（learning_contents の SELECT、user_progress / submissions の書き込み） |
@@ -555,6 +607,13 @@ user_id = (select get_user_id())
 - 初回完了時は INSERT、再操作時は UPDATE として処理される
 - **RLSポリシー設計上の注意**: 上記のとおり2回目以降の操作は UPDATE 経路を通るため、書き込み制限を追加する際は INSERT だけでなく UPDATE ポリシーにも同じ条件を課す必要がある（6.2 参照）
 
+### 8.5 AIトークン使用量の集計方針
+- `ai_reviews` をリクエスト単位のソースオブトゥルースとする
+- `ai_token_monthly_usages` は月次上限チェックと通知抑止のための集計テーブルとして保持する
+- 月次の区切りは運用上の扱いやすさを優先し、JSTの月初日を `month_start` に記録する
+- MVPでは Gemini の事前トークン見積もりAPIは使わず、既存レスポンスで取得できる実績トークンを成功時に加算する
+- このため厳密な事前見積もりは行わず、より厳格な事前制御が必要になった場合に `countTokens` 相当の導入を検討する
+
 ---
 
 ## 改訂履歴
@@ -569,3 +628,4 @@ user_id = (select get_user_id())
 | 2026年6月 | マイグレーション一覧を実際のディレクトリ構成（`01_schema` / `02_rls` / `03_seed`）に修正。RLSにmaintainerポリシーを追記し、`ai_reviews` のINSERT/UPDATEポリシー記載を削除（Service Role経由のためRLS対象外） |
 | 2026年6月 | 実DB（Supabase）と照合し差分を修正：RLSヘルパー関数 `get_user_role()` / `get_user_id()` を追記し判定ロジックを実装準拠に修正、`users` テーブルのRLS（6.5）・`update_users_updated_at` トリガー・`idx_users_auth_role` インデックスを追記、`users` の文字列カラム型を VARCHAR に修正 |
 | 2026年7月 | お試し（trial）ユーザー機能に対応：`learning_contents` に `is_open_to_trial` カラム追加、RLSヘルパー関数 `get_user_status()` 追加、`learning_contents` のSELECTをお試しユーザー制限付きの別パターンに分離、`user_progress` / `submissions` の書き込みに可視コンテンツ限定のEXISTS条件を追記、マイグレーション一覧・公開制御・upsertパターンの注意点を更新 |
+| 2026年7月 | AIトークン使用量モニタリング設計を追加。`ai_token_monthly_usages` テーブル、月次集計方針、Service Role前提の運用監視テーブル設計を追記 |
