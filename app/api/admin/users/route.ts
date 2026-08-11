@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { MEMBERSHIP_TYPES, USER_ROLE } from "@/app/constants/user";
+import { MEMBERSHIP_TYPES, USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import { approveUser, changeUserRole, rejectUser } from "@/app/services/api/admin-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -62,6 +62,24 @@ export async function PATCH(request: Request) {
         { error: `membershipType は ${MEMBERSHIP_TYPES.join(" / ")} を指定してください` },
         { status: 400 }
       );
+    }
+
+    // 承認済みユーザーの再承認は不可。approveUser は会員種別も上書きするため、
+    // 古い画面からの再承認で設定済みの種別が既定値に書き換わる事故を防ぐ（種別変更は #95 で対応）
+    if (action === "approve") {
+      const supabase = await createAdminSupabaseClient();
+      const { data: targetUser } = await supabase
+        .from("users")
+        .select("status")
+        .eq("id", userId)
+        .single();
+
+      if (targetUser?.status === USER_STATUS.ACTIVE) {
+        return NextResponse.json(
+          { error: "このユーザーは既に承認済みです。画面を更新して最新の状態を確認してください" },
+          { status: 409 }
+        );
+      }
     }
 
     const { error } =

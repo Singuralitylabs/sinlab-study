@@ -29,6 +29,10 @@ const ROLE_LABELS: Record<UserRoleType, string> = {
   member: "受講生",
 };
 
+// ロール変更・会員種別の両セレクトで共通のスタイル（幅のみ呼び出し側で追加する）
+const SELECT_CLASS =
+  "h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring";
+
 type StatusFilter = "all" | "pending" | "active" | "rejected";
 
 export function UserManagementTable({ users }: { users: UserType[] }) {
@@ -60,16 +64,24 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
     membershipByUserId[userId] ?? USER_MEMBERSHIP.COMMUNITY;
 
   const handleAction = async (userId: number, action: "approve" | "reject") => {
-    const membershipType = getMembership(userId);
-    // 却下すると会員種別は NULL に戻るため、設定済みの場合は解除される旨を明示する
-    const currentMembership = users.find((u) => u.id === userId)?.membership_type;
-    const rejectMessage = currentMembership
-      ? `このユーザーを却下しますか？\n現在の会員種別（${USER_MEMBERSHIP_LABELS[currentMembership]}）の設定は解除されます。`
-      : "このユーザーを却下しますか？";
-    const confirmMessage =
-      action === "approve"
-        ? `このユーザーを「${USER_MEMBERSHIP_LABELS[membershipType]}」として承認しますか？`
-        : rejectMessage;
+    const buildRequest = () => {
+      if (action === "approve") {
+        const membershipType = getMembership(userId);
+        return {
+          confirmMessage: `このユーザーを「${USER_MEMBERSHIP_LABELS[membershipType]}」として承認しますか？`,
+          body: { userId, action, membershipType },
+        };
+      }
+      // 却下すると会員種別は NULL に戻るため、設定済みの場合は解除される旨を明示する
+      const currentMembership = users.find((u) => u.id === userId)?.membership_type;
+      return {
+        confirmMessage: currentMembership
+          ? `このユーザーを却下しますか？\n現在の会員種別（${USER_MEMBERSHIP_LABELS[currentMembership]}）の設定は解除されます。`
+          : "このユーザーを却下しますか？",
+        body: { userId, action },
+      };
+    };
+    const { confirmMessage, body } = buildRequest();
 
     if (!confirm(confirmMessage)) return;
 
@@ -78,9 +90,7 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
       const res = await fetch("/api/admin/users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          action === "approve" ? { userId, action, membershipType } : { userId, action }
-        ),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
@@ -198,7 +208,7 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
                           onChange={(e) =>
                             handleRoleChange(user.id, e.target.value as UserRoleType)
                           }
-                          className="h-8 w-32 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                          className={`${SELECT_CLASS} w-32`}
                         >
                           <option value={USER_ROLE.MEMBER}>{ROLE_LABELS[USER_ROLE.MEMBER]}</option>
                           <option value={USER_ROLE.MAINTAINER}>
@@ -242,7 +252,7 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
                                   }))
                                 }
                                 aria-label={`${user.display_name} の会員種別`}
-                                className="h-8 w-36 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                                className={`${SELECT_CLASS} w-36`}
                               >
                                 {MEMBERSHIP_TYPES.map((type) => (
                                   <option key={type} value={type}>

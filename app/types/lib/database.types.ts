@@ -359,6 +359,7 @@ export type Database = {
           email: string;
           id: number;
           is_deleted: boolean | null;
+          membership_type: string | null;
           role: string;
           status: string;
           updated_at: string | null;
@@ -372,6 +373,7 @@ export type Database = {
           email: string;
           id?: number;
           is_deleted?: boolean | null;
+          membership_type?: string | null;
           role?: string;
           status?: string;
           updated_at?: string | null;
@@ -385,6 +387,7 @@ export type Database = {
           email?: string;
           id?: number;
           is_deleted?: boolean | null;
+          membership_type?: string | null;
           role?: string;
           status?: string;
           updated_at?: string | null;

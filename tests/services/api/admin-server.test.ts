@@ -216,33 +216,23 @@ describe("fetchManageCounts", () => {
 // approveUser / rejectUser
 // ----------------------------------------------------------------
 describe("approveUser", () => {
-  it("status=active と選択された会員種別を同時に更新する", async () => {
+  it.each([
+    "general",
+    "community",
+  ] as const)("status=active と選択された会員種別（%s）を同時に更新する", async (membershipType) => {
     const mockClient = createMockSupabaseClient({
       tableResults: { users: { data: null, error: null } },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await approveUser(1, "general");
+    const result = await approveUser(1, membershipType);
 
     expect(result.error).toBeNull();
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "active", membership_type: "general" })
+      expect.objectContaining({ status: "active", membership_type: membershipType })
     );
     expect(builder.eq).toHaveBeenCalledWith("id", 1);
-  });
-
-  it("コミュニティ会員として承認できる", async () => {
-    const mockClient = createMockSupabaseClient({
-      tableResults: { users: { data: null, error: null } },
-    });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
-
-    await approveUser(2, "community");
-
-    expect(mockClient.from.mock.results[0].value.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "active", membership_type: "community" })
-    );
   });
 
   it("更新に失敗した場合はエラーを返す", async () => {
