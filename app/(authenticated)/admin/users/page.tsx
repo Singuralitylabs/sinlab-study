@@ -1,9 +1,12 @@
 import { PageTitle } from "@/app/components/PageTitle";
-import { fetchAllUsers } from "@/app/services/api/admin-server";
+import { fetchAllUsers, fetchUserIdsWithStripeSubscription } from "@/app/services/api/admin-server";
 import { UserManagementTable } from "./components/user-management-table";
 
 export default async function AdminUsersPage() {
-  const { data: users, error } = await fetchAllUsers();
+  const [{ data: users, error }, { data: subscribedUserIds }] = await Promise.all([
+    fetchAllUsers(),
+    fetchUserIdsWithStripeSubscription(),
+  ]);
 
   return (
     <div>
@@ -11,7 +14,7 @@ export default async function AdminUsersPage() {
 
       {error && <p className="text-destructive text-sm">ユーザー一覧の取得に失敗しました。</p>}
 
-      {users && <UserManagementTable users={users} />}
+      {users && <UserManagementTable users={users} subscribedUserIds={subscribedUserIds ?? []} />}
     </div>
   );
 }

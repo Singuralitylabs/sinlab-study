@@ -533,6 +533,26 @@ export async function fetchAllUsers(): Promise<{
 }
 
 /**
+ * Stripeサブスクリプション行を持つユーザーIDの一覧を取得する
+ * （/admin/users でのサブスク会員バッジ表示用）
+ */
+export async function fetchUserIdsWithStripeSubscription(): Promise<{
+  data: number[] | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { data, error } = await supabase.from("stripe_subscriptions").select("user_id");
+
+  if (error) {
+    console.error("サブスク契約ユーザー一覧取得エラー:", error.message);
+    return { data: null, error };
+  }
+
+  return { data: data.map((row) => row.user_id), error: null };
+}
+
+/**
  * ユーザーを承認する。承認と同時に会員種別（コミュニティ会員 / 一般有料会員）を設定する。
  *
  * 承認済み（active）ユーザーの再承認は不可。会員種別も上書きするため、古い画面からの

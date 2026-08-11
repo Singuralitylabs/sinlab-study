@@ -1,0 +1,77 @@
+import { CheckCircle2, XCircle } from "lucide-react";
+import Link from "next/link";
+import { retrieveCheckoutSession } from "@/app/services/api/stripe-server";
+import {
+  activateUserFromCheckoutSession,
+  extractUserId,
+} from "@/app/services/api/stripe-webhook-server";
+import { getServerAuth } from "@/app/services/auth/server-auth";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+
+export default async function UpgradeSuccessPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ session_id?: string }>;
+}) {
+  const { session_id: sessionId } = await searchParams;
+  const { userId } = await getServerAuth();
+
+  let succeeded = false;
+  let errorMessage = "決済情報を確認できませんでした";
+
+  if (userId && sessionId) {
+    try {
+      const session = await retrieveCheckoutSession(sessionId);
+      const sessionUserId = extractUserId(session.client_reference_id, session.metadata);
+
+      if (session.payment_status !== "paid" || sessionUserId !== userId) {
+        errorMessage = "決済情報を確認できませんでした";
+      } else {
+        // Webhookより先にここへ遷移してくる場合があるため、successページ側でも
+        // 同じ冪等な昇格処理を呼ぶ（Webhookと重複実行しても安全）
+        const { error } = await activateUserFromCheckoutSession(session);
+        if (error) {
+          console.error("会員昇格エラー:", error);
+          errorMessage = "会員登録の反映に失敗しました。時間をおいて再度お試しください";
+        } else {
+          succeeded = true;
+        }
+      }
+    } catch (error) {
+      console.error("Checkoutセッション確認エラー:", error);
+      errorMessage = "決済情報の確認に失敗しました";
+    }
+  }
+
+  return (
+    <div className="max-w-md mx-auto">
+      <Card>
+        <CardContent className="flex flex-col items-center gap-4 py-8 text-center">
+          {succeeded ? (
+            <>
+              <CheckCircle2 className="h-12 w-12 text-success" />
+              <div>
+                <p className="font-medium">ご登録が完了しました</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  すべての学習コンテンツをご利用いただけます
+                </p>
+              </div>
+              <Button asChild>
+                <Link href="/">ダッシュボードへ</Link>
+              </Button>
+            </>
+          ) : (
+            <>
+              <XCircle className="h-12 w-12 text-destructive" />
+              <p className="text-sm text-muted-foreground">{errorMessage}</p>
+              <Button asChild variant="outline">
+                <Link href="/upgrade">アップグレードページへ戻る</Link>
+              </Button>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

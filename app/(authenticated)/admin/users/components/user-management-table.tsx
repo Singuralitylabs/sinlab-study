@@ -35,12 +35,19 @@ const SELECT_CLASS =
 
 type StatusFilter = "all" | "pending" | "active" | "rejected";
 
-export function UserManagementTable({ users }: { users: UserType[] }) {
+export function UserManagementTable({
+  users,
+  subscribedUserIds,
+}: {
+  users: UserType[];
+  subscribedUserIds: number[];
+}) {
   const router = useRouter();
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [loadingUserIds, setLoadingUserIds] = useState<Set<number>>(new Set());
   // 承認時に選択する会員種別（ユーザーIDごと。未選択はコミュニティ会員を既定とする）
   const [membershipByUserId, setMembershipByUserId] = useState<Record<number, MembershipType>>({});
+  const subscribedUserIdSet = useMemo(() => new Set(subscribedUserIds), [subscribedUserIds]);
 
   const filteredUsers = useMemo(
     () => (filter === "all" ? users : users.filter((u) => u.status === filter)),
@@ -74,10 +81,19 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
       }
       // 却下すると会員種別は NULL に戻るため、設定済みの場合は解除される旨を明示する
       const currentMembership = users.find((u) => u.id === userId)?.membership_type;
-      return {
-        confirmMessage: currentMembership
+      const messages = [
+        currentMembership
           ? `このユーザーを却下しますか？\n現在の会員種別（${USER_MEMBERSHIP_LABELS[currentMembership]}）の設定は解除されます。`
           : "このユーザーを却下しますか？",
+      ];
+      // Stripeサブスクの自動キャンセル連携はスコープ外のため、却下してもサブスクは残り続ける
+      if (subscribedUserIdSet.has(userId)) {
+        messages.push(
+          "このユーザーはStripeサブスク契約中です。却下してもサブスクは自動解約されないため、Stripeダッシュボードでの手動キャンセルが別途必要です。"
+        );
+      }
+      return {
+        confirmMessage: messages.join("\n\n"),
         body: { userId, action },
       };
     };
@@ -222,13 +238,18 @@ export function UserManagementTable({ users }: { users: UserType[] }) {
                       <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
                     </td>
                     <td className="px-4 py-3">
-                      {user.membership_type ? (
-                        <Badge variant="outline">
-                          {USER_MEMBERSHIP_LABELS[user.membership_type]}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
+                      <div className="flex flex-wrap items-center gap-1">
+                        {user.membership_type ? (
+                          <Badge variant="outline">
+                            {USER_MEMBERSHIP_LABELS[user.membership_type]}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                        {subscribedUserIdSet.has(user.id) && (
+                          <Badge variant="secondary">サブスク契約中</Badge>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {user.created_at

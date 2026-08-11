@@ -3,7 +3,11 @@ import { USER_MEMBERSHIP, USER_STATUS } from "@/app/constants/user";
 import { assertServiceRoleConfigured, getStripeClient } from "@/app/services/api/stripe-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 
-function extractUserId(
+/**
+ * CheckoutセッションからユーザーIDを特定する。Webhookとsuccessページの両方から
+ * session特定に使うため公開している。
+ */
+export function extractUserId(
   clientReferenceId: string | null,
   metadata: Stripe.Metadata | null | undefined
 ): number | null {

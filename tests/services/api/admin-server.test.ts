@@ -7,6 +7,7 @@ import {
   approveUser,
   fetchManageCounts,
   fetchStudentsProgress,
+  fetchUserIdsWithStripeSubscription,
   rejectUser,
 } from "@/app/services/api/admin-server";
 import {
@@ -276,5 +277,36 @@ describe("rejectUser", () => {
     expect(mockClient.from.mock.results[0].value.update).toHaveBeenCalledWith(
       expect.objectContaining({ status: "rejected", membership_type: null })
     );
+  });
+});
+
+// ----------------------------------------------------------------
+// fetchUserIdsWithStripeSubscription
+// ----------------------------------------------------------------
+describe("fetchUserIdsWithStripeSubscription", () => {
+  it("stripe_subscriptions行を持つユーザーIDの一覧を返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: { data: [{ user_id: 1 }, { user_id: 3 }], error: null },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchUserIdsWithStripeSubscription();
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([1, 3]);
+  });
+
+  it("DBエラー時、data: null とエラーを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { stripe_subscriptions: { data: null, error: dbError } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchUserIdsWithStripeSubscription();
+
+    expect(result.data).toBeNull();
+    expect(result.error).toEqual(dbError);
   });
 });

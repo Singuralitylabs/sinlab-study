@@ -1,4 +1,6 @@
+import type { PostgrestError } from "@supabase/supabase-js";
 import Stripe from "stripe";
+import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 
 let cachedClient: Stripe | null = null;
 
@@ -74,6 +76,40 @@ export async function createPortalSession(stripeCustomerId: string): Promise<{ u
   });
 
   return { url: session.url };
+}
+
+/** Checkoutセッションをsession_idで取得する（successページでの決済確認用） */
+export async function retrieveCheckoutSession(sessionId: string): Promise<Stripe.Checkout.Session> {
+  const stripe = getStripeClient();
+  return await stripe.checkout.sessions.retrieve(sessionId);
+}
+
+/**
+ * ユーザー自身のサブスクリプション状態を取得する（/upgrade ページの表示用）。
+ * RLSにより本人 or admin の行のみ取得できる通常クライアントを使う。
+ */
+export async function fetchStripeSubscriptionByUserId(userId: number): Promise<{
+  data: {
+    status: string;
+    cancel_at_period_end: boolean;
+    current_period_end: string | null;
+  } | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("stripe_subscriptions")
+    .select("status, cancel_at_period_end, current_period_end")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("サブスクリプション取得エラー:", error.message);
+    return { data: null, error };
+  }
+
+  return { data, error: null };
 }
 
 /**
