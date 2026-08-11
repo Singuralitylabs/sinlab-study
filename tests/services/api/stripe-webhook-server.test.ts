@@ -45,11 +45,12 @@ describe("activateUserFromCheckoutSession", () => {
     items: { data: [{ current_period_end: 1750000000 }] },
   };
 
-  it("stripe_subscriptionsをuser_id基準でupsertし、usersをactive/generalに更新する", async () => {
+  it("既存行が無ければstripe_subscriptionsをuser_id基準でupsertし、usersをactive/generalに更新する", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
+        // 1回目: 既存行チェック（無し）、2回目: upsert
         stripe_subscriptions: { data: null, error: null },
-        users: { data: null, error: null },
+        users: { data: [{ id: 1 }], error: null },
       },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
@@ -60,7 +61,8 @@ describe("activateUserFromCheckoutSession", () => {
     const result = await activateUserFromCheckoutSession(baseSession as never);
 
     expect(result.error).toBeNull();
-    const subBuilder = mockClient.from.mock.results[0].value;
+    expect(result.activated).toBe(true);
+    const subBuilder = mockClient.from.mock.results[1].value;
     expect(subBuilder.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         user_id: 1,
@@ -70,10 +72,77 @@ describe("activateUserFromCheckoutSession", () => {
       }),
       { onConflict: "user_id" }
     );
-    const userBuilder = mockClient.from.mock.results[1].value;
+    const userBuilder = mockClient.from.mock.results[2].value;
     expect(userBuilder.update).toHaveBeenCalledWith(
       expect.objectContaining({ status: "active", membership_type: "general" })
     );
+    expect(userBuilder.neq).toHaveBeenCalledWith("status", "rejected");
+  });
+
+  it("同一契約（stripe_subscription_idが一致）の既存行はミラーを上書きし、昇格する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: [
+          { data: { stripe_subscription_id: "sub_123", status: "past_due" }, error: null },
+          { data: null, error: null },
+        ],
+        users: { data: [{ id: 1 }], error: null },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(getStripeClient).mockReturnValue({
+      subscriptions: { retrieve: vi.fn().mockResolvedValue(subscription) },
+    } as never);
+
+    const result = await activateUserFromCheckoutSession(baseSession as never);
+
+    expect(result.error).toBeNull();
+    expect(result.activated).toBe(true);
+    const subBuilder = mockClient.from.mock.results[1].value;
+    expect(subBuilder.upsert).toHaveBeenCalled();
+  });
+
+  it("別の契約が現行（終端状態でない）として記録済みの場合、古いセッションのリプレイでミラーを上書きしない", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: {
+          data: { stripe_subscription_id: "sub_other", status: "active" },
+          error: null,
+        },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(getStripeClient).mockReturnValue({
+      subscriptions: { retrieve: vi.fn().mockResolvedValue(subscription) },
+    } as never);
+
+    const result = await activateUserFromCheckoutSession(baseSession as never);
+
+    expect(result.error).toBeNull();
+    expect(result.activated).toBe(false);
+    // 既存行チェックのみで、upsertは呼ばれない
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("別の契約が現行でも、既に終端状態（解約済み等）ならリプレイでの上書きを許可する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: [
+          { data: { stripe_subscription_id: "sub_other", status: "canceled" }, error: null },
+          { data: null, error: null },
+        ],
+        users: { data: [{ id: 1 }], error: null },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(getStripeClient).mockReturnValue({
+      subscriptions: { retrieve: vi.fn().mockResolvedValue(subscription) },
+    } as never);
+
+    const result = await activateUserFromCheckoutSession(baseSession as never);
+
+    expect(result.error).toBeNull();
+    expect(result.activated).toBe(true);
   });
 
   it("client_reference_idが無い場合はmetadata.user_idにフォールバックする", async () => {
@@ -123,7 +192,7 @@ describe("activateUserFromCheckoutSession", () => {
     expect(mockClient.from).not.toHaveBeenCalled();
   });
 
-  it("stripe_subscriptions更新に失敗した場合はエラーを返す", async () => {
+  it("既存行チェックに失敗した場合はエラーを返す", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: { stripe_subscriptions: { data: null, error: dbError } },
     });
@@ -135,6 +204,27 @@ describe("activateUserFromCheckoutSession", () => {
     const result = await activateUserFromCheckoutSession(baseSession as never);
 
     expect(result.error).toBe(dbError.message);
+    expect(result.activated).toBe(false);
+  });
+
+  it("stripe_subscriptions更新（upsert）に失敗した場合はエラーを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: [
+          { data: null, error: null },
+          { data: null, error: dbError },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(getStripeClient).mockReturnValue({
+      subscriptions: { retrieve: vi.fn().mockResolvedValue(subscription) },
+    } as never);
+
+    const result = await activateUserFromCheckoutSession(baseSession as never);
+
+    expect(result.error).toBe(dbError.message);
+    expect(result.activated).toBe(false);
   });
 
   it.each([
@@ -154,28 +244,10 @@ describe("activateUserFromCheckoutSession", () => {
     const result = await activateUserFromCheckoutSession(baseSession as never);
 
     expect(result.error).toBeNull();
-    // stripe_subscriptionsへの1回のみで、usersへの更新は発生しない
+    expect(result.activated).toBe(false);
+    // 既存行チェック + upsertの2回のみで、usersへの更新は発生しない
     // （解約後のsuccessページURL再訪・コンビニ払い等の未入金checkout完了での昇格を防ぐ）
-    expect(mockClient.from).toHaveBeenCalledTimes(1);
-  });
-
-  it("却下（rejected）済みユーザーは昇格しない", async () => {
-    const mockClient = createMockSupabaseClient({
-      tableResults: {
-        stripe_subscriptions: { data: null, error: null },
-        users: { data: null, error: null },
-      },
-    });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
-    vi.mocked(getStripeClient).mockReturnValue({
-      subscriptions: { retrieve: vi.fn().mockResolvedValue(subscription) },
-    } as never);
-
-    const result = await activateUserFromCheckoutSession(baseSession as never);
-
-    expect(result.error).toBeNull();
-    const userBuilder = mockClient.from.mock.results[1].value;
-    expect(userBuilder.neq).toHaveBeenCalledWith("status", "rejected");
+    expect(mockClient.from).toHaveBeenCalledTimes(2);
   });
 });
 

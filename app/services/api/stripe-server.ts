@@ -66,6 +66,11 @@ export async function createCheckoutSession(
 
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
+    // コンビニ払い・銀行振込等の遅延通知系決済手段は使わずカードのみに限定する。
+    // これらはcheckout.session.completed発火時点でsubscription.statusがincomplete
+    // （未入金）のままになり得るため、Checkoutから戻った瞬間に利用開始できるという
+    // 設計上の前提（会員化のタイミング）が崩れる
+    payment_method_types: ["card"],
     line_items: [{ price: priceId, quantity: 1 }],
     client_reference_id: String(userId),
     ...(email ? { customer_email: email } : {}),

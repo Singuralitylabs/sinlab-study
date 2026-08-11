@@ -31,7 +31,7 @@ beforeEach(() => {
   } as never);
   vi.mocked(isEventProcessed).mockResolvedValue({ processed: false, error: null });
   vi.mocked(recordEventProcessed).mockResolvedValue({ error: null });
-  vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({ error: null });
+  vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({ error: null, activated: true });
   vi.mocked(syncSubscriptionStatus).mockResolvedValue({ error: null });
 });
 
@@ -127,7 +127,10 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
   });
 
   it("ハンドラがエラーを返した場合は500を返し、処理済みとして記録しない（再送時にハンドラへ再到達させるため）", async () => {
-    vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({ error: "失敗しました" });
+    vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({
+      error: "失敗しました",
+      activated: false,
+    });
     mockConstructEvent.mockReturnValue({
       id: "evt_6",
       type: "checkout.session.completed",

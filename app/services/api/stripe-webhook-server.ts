@@ -34,18 +34,21 @@ function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
  * な場合のみ users を active/general に更新する。管理者が承認前に手動承認していた場合を含め、
  * 昇格時は常に上書きする（許容仕様）。却下（rejected）済みユーザーは昇格しない。
  *
- * サブスクの状態を見ずに常に昇格させると、以下のいずれでも無償・未入金のまま昇格してしまう：
- * - Checkout Sessionは決済後もStripe側に不変オブジェクトとして残るため、解約後に
- *   successページのURL（`session_id`）を再訪しただけで再び呼ばれるリプレイ
- * - コンビニ払い等の遅延通知系決済手段では、未入金（`incomplete`）でも
- *   checkout.session.completed が発火する
+ * サブスクの状態を見ずに常に昇格させると、Checkout Sessionが決済後もStripe側に不変オブジェクトとして
+ * 残ることを利用して、解約後にsuccessページのURL（`session_id`）を再訪しただけで無償のまま
+ * 再昇格できてしまう（リプレイ）。`ACTIVATABLE_SUBSCRIPTION_STATUSES` の判定で昇格自体は防げるが、
+ * 加えて「別の（現行の）契約が既にある状態で、古いセッションのリプレイがミラー行を上書きしてしまう」
+ * ことも防ぐ（下記の既存行チェック）。上書きを許すと、以後 syncSubscriptionStatus() が
+ * `stripe_subscription_id` で現行契約を照合できなくなり、解約イベントを取りこぼす。
+ *
+ * @returns activated: 実際に users を昇格したか。successページ側の表示分岐に使う
  */
 export async function activateUserFromCheckoutSession(
   session: Stripe.Checkout.Session
-): Promise<{ error: string | null }> {
+): Promise<{ error: string | null; activated: boolean }> {
   const userId = extractUserId(session.client_reference_id, session.metadata);
   if (userId === null) {
-    return { error: "Checkoutセッションからユーザーを特定できませんでした" };
+    return { error: "Checkoutセッションからユーザーを特定できませんでした", activated: false };
   }
 
   const customerId =
@@ -56,13 +59,37 @@ export async function activateUserFromCheckoutSession(
       : (session.subscription?.id ?? null);
 
   if (!customerId || !subscriptionId) {
-    return { error: "Checkoutセッションにcustomer/subscription情報がありません" };
+    return {
+      error: "Checkoutセッションにcustomer/subscription情報がありません",
+      activated: false,
+    };
   }
 
   assertServiceRoleConfigured();
   const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
   const supabase = await createAdminSupabaseClient();
+
+  const { data: existingRow, error: existingFetchError } = await supabase
+    .from("stripe_subscriptions")
+    .select("stripe_subscription_id, status")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (existingFetchError) {
+    console.error("stripe_subscriptions取得エラー:", existingFetchError.message);
+    return { error: existingFetchError.message, activated: false };
+  }
+
+  // 既に別の契約が現行（終端状態でない）として記録されている場合、古いセッションの
+  // リプレイでミラー行を上書きしない（現行契約のWebhook照合が壊れるため）
+  const isStaleReplay =
+    existingRow != null &&
+    existingRow.stripe_subscription_id !== subscription.id &&
+    !TERMINAL_SUBSCRIPTION_STATUSES.includes(existingRow.status);
+  if (isStaleReplay) {
+    return { error: null, activated: false };
+  }
 
   const { error: subscriptionError } = await supabase.from("stripe_subscriptions").upsert(
     {
@@ -79,14 +106,14 @@ export async function activateUserFromCheckoutSession(
 
   if (subscriptionError) {
     console.error("stripe_subscriptions更新エラー:", subscriptionError.message);
-    return { error: subscriptionError.message };
+    return { error: subscriptionError.message, activated: false };
   }
 
   if (!ACTIVATABLE_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
-    return { error: null };
+    return { error: null, activated: false };
   }
 
-  const { error: userError } = await supabase
+  const { data: updatedUsers, error: userError } = await supabase
     .from("users")
     .update({
       status: USER_STATUS.ACTIVE,
@@ -94,14 +121,15 @@ export async function activateUserFromCheckoutSession(
       updated_at: new Date().toISOString(),
     })
     .eq("id", userId)
-    .neq("status", USER_STATUS.REJECTED);
+    .neq("status", USER_STATUS.REJECTED)
+    .select("id");
 
   if (userError) {
     console.error("ユーザー昇格エラー:", userError.message);
-    return { error: userError.message };
+    return { error: userError.message, activated: false };
   }
 
-  return { error: null };
+  return { error: null, activated: (updatedUsers?.length ?? 0) > 0 };
 }
 
 /**

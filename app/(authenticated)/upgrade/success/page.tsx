@@ -30,10 +30,14 @@ export default async function UpgradeSuccessPage({
       } else {
         // Webhookより先にここへ遷移してくる場合があるため、successページ側でも
         // 同じ冪等な昇格処理を呼ぶ（Webhookと重複実行しても安全）
-        const { error } = await activateUserFromCheckoutSession(session);
+        const { error, activated } = await activateUserFromCheckoutSession(session);
         if (error) {
           console.error("会員昇格エラー:", error);
           errorMessage = "会員登録の反映に失敗しました。時間をおいて再度お試しください";
+        } else if (!activated) {
+          // 解約済み等のセッションURL再訪・未入金など、実際には昇格しなかったケース。
+          // 権限は変わっていないため、成功表示は出さない
+          errorMessage = "このお申し込みは現在有効ではありません";
         } else {
           succeeded = true;
         }
