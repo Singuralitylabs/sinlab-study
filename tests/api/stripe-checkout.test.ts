@@ -3,7 +3,11 @@ import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/supabase-server");
-vi.mock("@/app/services/api/stripe-server");
+// TERMINAL_SUBSCRIPTION_STATUS（定数）は実物のまま使い、createCheckoutSession のみモックする
+vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/app/services/api/stripe-server")>()),
+  createCheckoutSession: vi.fn(),
+}));
 
 import { POST } from "@/app/api/stripe/checkout/route";
 import { createCheckoutSession } from "@/app/services/api/stripe-server";

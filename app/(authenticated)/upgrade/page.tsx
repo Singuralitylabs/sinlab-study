@@ -1,7 +1,10 @@
 import { redirect } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
 import { USER_STATUS } from "@/app/constants/user";
-import { fetchStripeSubscriptionByUserId } from "@/app/services/api/stripe-server";
+import {
+  fetchStripeSubscriptionByUserId,
+  TERMINAL_SUBSCRIPTION_STATUSES,
+} from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { ManageSubscriptionButton } from "./ManageSubscriptionButton";
@@ -14,8 +17,13 @@ export default async function UpgradePage() {
     redirect("/login");
   }
 
-  const subscription =
+  const fetchedSubscription =
     userStatus === USER_STATUS.ACTIVE ? (await fetchStripeSubscriptionByUserId(userId)).data : null;
+  // 解約済み（終端状態）の行が残っているだけの場合は「契約中」として扱わない
+  const subscription =
+    fetchedSubscription && !TERMINAL_SUBSCRIPTION_STATUSES.includes(fetchedSubscription.status)
+      ? fetchedSubscription
+      : null;
 
   return (
     <div className="max-w-2xl mx-auto">

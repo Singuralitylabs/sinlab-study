@@ -284,10 +284,18 @@ describe("rejectUser", () => {
 // fetchUserIdsWithStripeSubscription
 // ----------------------------------------------------------------
 describe("fetchUserIdsWithStripeSubscription", () => {
-  it("stripe_subscriptions行を持つユーザーIDの一覧を返す", async () => {
+  it("現在契約中とみなせるステータスのユーザーIDのみを返す", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
-        stripe_subscriptions: { data: [{ user_id: 1 }, { user_id: 3 }], error: null },
+        stripe_subscriptions: {
+          data: [
+            { user_id: 1, status: "active" },
+            { user_id: 2, status: "canceled" },
+            { user_id: 3, status: "past_due" },
+            { user_id: 4, status: "unpaid" },
+          ],
+          error: null,
+        },
       },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
@@ -295,6 +303,7 @@ describe("fetchUserIdsWithStripeSubscription", () => {
     const result = await fetchUserIdsWithStripeSubscription();
 
     expect(result.error).toBeNull();
+    // canceled(2)・unpaid(4)は終端状態のため除外される
     expect(result.data).toEqual([1, 3]);
   });
 

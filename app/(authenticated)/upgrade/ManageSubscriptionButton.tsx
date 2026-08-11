@@ -24,6 +24,7 @@ export function ManageSubscriptionButton() {
       window.location.href = data.url;
     } catch {
       setError("エラーが発生しました");
+    } finally {
       setIsLoading(false);
     }
   };

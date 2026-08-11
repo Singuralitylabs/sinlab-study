@@ -1,5 +1,6 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import { USER_STATUS } from "@/app/constants/user";
+import { TERMINAL_SUBSCRIPTION_STATUSES } from "@/app/services/api/stripe-server";
 import type {
   LearningContent,
   LearningPhase,
@@ -533,8 +534,11 @@ export async function fetchAllUsers(): Promise<{
 }
 
 /**
- * Stripeサブスクリプション行を持つユーザーIDの一覧を取得する
- * （/admin/users でのサブスク会員バッジ表示用）
+ * 現在契約中とみなせるStripeサブスクリプション行を持つユーザーIDの一覧を取得する
+ * （/admin/users でのサブスク会員バッジ表示用）。
+ *
+ * `stripe_subscriptions` は1ユーザー1行固定で解約後も行が残り続けるため、
+ * 終端状態（TERMINAL_SUBSCRIPTION_STATUSES）の行は「現在は契約していない」として除外する。
  */
 export async function fetchUserIdsWithStripeSubscription(): Promise<{
   data: number[] | null;
@@ -542,14 +546,19 @@ export async function fetchUserIdsWithStripeSubscription(): Promise<{
 }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { data, error } = await supabase.from("stripe_subscriptions").select("user_id");
+  const { data, error } = await supabase.from("stripe_subscriptions").select("user_id, status");
 
   if (error) {
     console.error("サブスク契約ユーザー一覧取得エラー:", error.message);
     return { data: null, error };
   }
 
-  return { data: data.map((row) => row.user_id), error: null };
+  return {
+    data: data
+      .filter((row) => !TERMINAL_SUBSCRIPTION_STATUSES.includes(row.status))
+      .map((row) => row.user_id),
+    error: null,
+  };
 }
 
 /**

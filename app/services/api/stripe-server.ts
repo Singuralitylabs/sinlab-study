@@ -5,6 +5,14 @@ import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 let cachedClient: Stripe | null = null;
 
 /**
+ * サブスクリプションが「終端状態」とみなせるステータス。
+ * `stripe_subscriptions` は1ユーザー1行固定（DELETEなし・常にupsert）で更新されるため、
+ * 一度契約したユーザーの行は解約後も残り続ける。これらのステータスの行は
+ * 「現在は契約していない」とみなし、再契約の許可・管理画面でのバッジ表示から除外する。
+ */
+export const TERMINAL_SUBSCRIPTION_STATUSES = ["canceled", "unpaid", "incomplete_expired"];
+
+/**
  * Stripeクライアントを取得する。STRIPE_SECRET_KEY 未設定時はthrowする
  * （Webhook・Checkout・Portalいずれの経路でも、決済系の呼び出し前に必ず失敗させるため）。
  */
