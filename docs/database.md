@@ -380,6 +380,8 @@ erDiagram
 | updated_at | TIMESTAMPTZ | NO | now() | 更新日時（トリガーで自動更新） |
 
 > **行が解約後も残り続ける点に注意**: `DELETE` は行わず常に `user_id` を key に `upsert` するため、一度でも契約したユーザーの行は解約後（`status` が `canceled` / `unpaid` / `incomplete_expired` などの終端状態）も残り続ける。「現在契約中かどうか」を判定する箇所（再契約可否・管理画面のバッジ表示など）は、行の有無だけでなく `status` が終端状態でないことも確認する必要がある（アプリ側では `TERMINAL_SUBSCRIPTION_STATUSES` 定数で判定）。
+>
+> **`users` への昇格反映は「現に有効」なときのみ**: `stripe_subscriptions` のミラー自体はStripeから取得したステータスをそのまま保存するが、`users.status`/`membership_type` を昇格させるのは `status` が `ACTIVATABLE_SUBSCRIPTION_STATUSES`（`active` / `trialing`）のときのみ（`app/services/api/stripe-server.ts`）。Checkout Sessionは決済後もStripe側に不変オブジェクトとして残るため、`payment_status` だけで判定すると解約後・未入金時にも昇格してしまう経路を防ぐための制御。
 
 ### 3.10 stripe_events（Webhookイベント記録）
 

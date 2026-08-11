@@ -13,6 +13,17 @@ let cachedClient: Stripe | null = null;
 export const TERMINAL_SUBSCRIPTION_STATUSES = ["canceled", "unpaid", "incomplete_expired"];
 
 /**
+ * サブスクリプションが「現に有効」とみなせるステータス。
+ * checkout.session.completed のWebhook・successページからの会員昇格は、このステータスの
+ * ときのみ行う。Checkout Sessionは決済後もStripe側に不変オブジェクトとして残るため、
+ * `payment_status === 'paid'` だけを見ると、解約後にsuccessページのURLを再訪しただけで
+ * 無償のまま昇格してしまう（サブスクの現在状態を見ないため）。同様に、コンビニ払い等の
+ * 遅延通知系決済手段では未入金（`incomplete`）でも checkout.session.completed が発火するため、
+ * このガードが無いと未入金のまま昇格してしまう。
+ */
+export const ACTIVATABLE_SUBSCRIPTION_STATUSES = ["active", "trialing"];
+
+/**
  * Stripeクライアントを取得する。STRIPE_SECRET_KEY 未設定時はthrowする
  * （Webhook・Checkout・Portalいずれの経路でも、決済系の呼び出し前に必ず失敗させるため）。
  */

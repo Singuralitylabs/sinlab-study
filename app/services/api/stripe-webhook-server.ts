@@ -1,6 +1,11 @@
 import type Stripe from "stripe";
 import { USER_MEMBERSHIP, USER_STATUS } from "@/app/constants/user";
-import { assertServiceRoleConfigured, getStripeClient } from "@/app/services/api/stripe-server";
+import {
+  ACTIVATABLE_SUBSCRIPTION_STATUSES,
+  assertServiceRoleConfigured,
+  getStripeClient,
+  TERMINAL_SUBSCRIPTION_STATUSES,
+} from "@/app/services/api/stripe-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 
 /**
@@ -25,8 +30,15 @@ function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
 
 /**
  * checkout.session.completed のWebhook、および successページの両方から呼ばれる冪等な昇格処理。
- * stripe_subscriptions を upsert したうえで users を active/general に更新する。
- * 管理者が承認前に手動承認していた場合も含め、常に上書きする（許容仕様）。
+ * stripe_subscriptions を upsert したうえで、サブスクが現に有効（ACTIVATABLE_SUBSCRIPTION_STATUSES）
+ * な場合のみ users を active/general に更新する。管理者が承認前に手動承認していた場合を含め、
+ * 昇格時は常に上書きする（許容仕様）。却下（rejected）済みユーザーは昇格しない。
+ *
+ * サブスクの状態を見ずに常に昇格させると、以下のいずれでも無償・未入金のまま昇格してしまう：
+ * - Checkout Sessionは決済後もStripe側に不変オブジェクトとして残るため、解約後に
+ *   successページのURL（`session_id`）を再訪しただけで再び呼ばれるリプレイ
+ * - コンビニ払い等の遅延通知系決済手段では、未入金（`incomplete`）でも
+ *   checkout.session.completed が発火する
  */
 export async function activateUserFromCheckoutSession(
   session: Stripe.Checkout.Session
@@ -70,6 +82,10 @@ export async function activateUserFromCheckoutSession(
     return { error: subscriptionError.message };
   }
 
+  if (!ACTIVATABLE_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
+    return { error: null };
+  }
+
   const { error: userError } = await supabase
     .from("users")
     .update({
@@ -77,7 +93,8 @@ export async function activateUserFromCheckoutSession(
       membership_type: USER_MEMBERSHIP.GENERAL,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", userId);
+    .eq("id", userId)
+    .neq("status", USER_STATUS.REJECTED);
 
   if (userError) {
     console.error("ユーザー昇格エラー:", userError.message);
@@ -89,7 +106,8 @@ export async function activateUserFromCheckoutSession(
 
 /**
  * customer.subscription.updated / customer.subscription.deleted で呼ばれる、
- * stripe_subscriptions のミラー更新。canceled/unpaid へ遷移した場合のみ降格する
+ * stripe_subscriptions のミラー更新。終端状態（TERMINAL_SUBSCRIPTION_STATUSES:
+ * canceled/unpaid/incomplete_expired）へ遷移した場合のみ降格する
  * （past_due は猶予期間のため降格しない）。
  *
  * stripe_subscription_id で該当行を特定する。checkout.session.completed 未処理のうちに
@@ -131,7 +149,7 @@ export async function syncSubscriptionStatus(
     return { error: updateError.message };
   }
 
-  if (subscription.status === "canceled" || subscription.status === "unpaid") {
+  if (TERMINAL_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
     return await revertUserToTrial(existing.user_id);
   }
 

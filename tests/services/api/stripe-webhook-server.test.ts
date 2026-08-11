@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
-vi.mock("@/app/services/api/stripe-server");
+// TERMINAL_SUBSCRIPTION_STATUSES / ACTIVATABLE_SUBSCRIPTION_STATUSES（定数）は実物のまま使い、
+// getStripeClient() / assertServiceRoleConfigured() のみモックする
+vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/app/services/api/stripe-server")>()),
+  getStripeClient: vi.fn(),
+  assertServiceRoleConfigured: vi.fn(),
+}));
 
 import { assertServiceRoleConfigured, getStripeClient } from "@/app/services/api/stripe-server";
 import {
@@ -130,6 +136,47 @@ describe("activateUserFromCheckoutSession", () => {
 
     expect(result.error).toBe(dbError.message);
   });
+
+  it.each([
+    "canceled",
+    "unpaid",
+    "incomplete",
+    "incomplete_expired",
+  ])("サブスクが現に有効でない（%s）場合、stripe_subscriptionsのみ更新しusersは昇格しない", async (status) => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { stripe_subscriptions: { data: null, error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(getStripeClient).mockReturnValue({
+      subscriptions: { retrieve: vi.fn().mockResolvedValue({ ...subscription, status }) },
+    } as never);
+
+    const result = await activateUserFromCheckoutSession(baseSession as never);
+
+    expect(result.error).toBeNull();
+    // stripe_subscriptionsへの1回のみで、usersへの更新は発生しない
+    // （解約後のsuccessページURL再訪・コンビニ払い等の未入金checkout完了での昇格を防ぐ）
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("却下（rejected）済みユーザーは昇格しない", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: { data: null, error: null },
+        users: { data: null, error: null },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(getStripeClient).mockReturnValue({
+      subscriptions: { retrieve: vi.fn().mockResolvedValue(subscription) },
+    } as never);
+
+    const result = await activateUserFromCheckoutSession(baseSession as never);
+
+    expect(result.error).toBeNull();
+    const userBuilder = mockClient.from.mock.results[1].value;
+    expect(userBuilder.neq).toHaveBeenCalledWith("status", "rejected");
+  });
 });
 
 // ----------------------------------------------------------------
@@ -165,7 +212,10 @@ describe("syncSubscriptionStatus", () => {
     expect(userBuilder.eq).toHaveBeenNthCalledWith(2, "membership_type", "general");
   });
 
-  it("unpaidへ遷移した場合もrevertUserToTrialを呼ぶ", async () => {
+  it.each([
+    "unpaid",
+    "incomplete_expired",
+  ])("%sへ遷移した場合もrevertUserToTrialを呼ぶ", async (status) => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         stripe_subscriptions: [
@@ -177,7 +227,7 @@ describe("syncSubscriptionStatus", () => {
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    await syncSubscriptionStatus(makeSubscription("unpaid") as never);
+    await syncSubscriptionStatus(makeSubscription(status) as never);
 
     const usersCalls = mockClient.from.mock.calls.filter(([table]) => table === "users");
     expect(usersCalls).toHaveLength(1);
