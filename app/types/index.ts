@@ -10,6 +10,7 @@ export type { Database, Json, Tables, TablesInsert, TablesUpdate } from "./lib/d
 export type UserType = Tables<"users"> & {
   role: UserRoleType;
   status: UserStatusType;
+  membership_type: MembershipType | null;
   is_deleted: boolean;
 };
 export type LearningTheme = Tables<"learning_themes"> & {
@@ -49,6 +50,8 @@ export type AIReview = Tables<"ai_reviews"> & {
 
 export type UserStatusType = "pending" | "active" | "rejected";
 export type UserRoleType = "admin" | "maintainer" | "member";
+/** 承認済みユーザーの会員種別。承認前・却下ユーザーは null */
+export type MembershipType = "community" | "general";
 export type ContentType = "video" | "text" | "exercise" | "slide";
 export type SubmissionType = "code" | "url";
 export type AIReviewStatus = "pending" | "processing" | "completed" | "failed";
