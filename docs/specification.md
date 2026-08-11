@@ -715,18 +715,22 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 
 ### 9.1 概要
 
-初回ログイン時にユーザーが自動登録（`status=pending`）されると、管理者宛に承認依頼をSlackへ通知する。通知先チャンネルはSlack Incoming Webhook URLの設定により決定する。
+以下の2つの通知を、共通のSlack Incoming Webhook URL経由で管理者・運用者へ送る。通知先チャンネルはSlack Incoming Webhook URLの設定により決定する。
 
-**通知タイミング**: `GET /auth/callback` における初回ユーザー登録の成功直後
+- **新規ユーザー承認依頼通知**: 初回ログイン時にユーザーが自動登録（`status=pending`）されると送信する
+- **Stripe支払い失敗通知**（2.11節）: サブスクの請求が失敗（`invoice.payment_failed`）した際に送信する。初回失敗ではユーザーを降格せずStripe Smart Retriesに任せるため、運用者への通知のみを行う
 
-**非同期・非ブロッキング**: Slack通知の失敗はユーザー登録・リダイレクトフローに影響しない。エラーはサーバーログにのみ出力する。
+**通知タイミング**: 新規ユーザー通知は `GET /auth/callback` における初回ユーザー登録の成功直後、支払い失敗通知は `POST /api/stripe/webhook` での `invoice.payment_failed` イベント受信時
+
+**非同期・非ブロッキング**: いずれもSlack通知の失敗は本体のフロー（ユーザー登録・リダイレクト、Webhookの200応答）に影響しない。エラーはサーバーログにのみ出力する。
 
 ### 9.2 実装構成
 
 | ファイル | 役割 |
 |:--|:--|
-| `app/services/notifications/slack.ts` | Slack Incoming Webhooks へのPOSTリクエスト送信ロジック |
-| `app/auth/callback/route.ts` | 初回登録後に通知サービスを呼び出す |
+| `app/services/notifications/slack.ts` | Slack Incoming Webhooks へのPOSTリクエスト送信ロジック（`sendSlackNewUserNotification()` / `sendSlackPaymentFailedNotification()`） |
+| `app/auth/callback/route.ts` | 初回登録後に新規ユーザー通知を呼び出す |
+| `app/api/stripe/webhook/route.ts` | `invoice.payment_failed` 受信時に支払い失敗通知を呼び出す |
 
 ### 9.3 環境変数
 
@@ -738,7 +742,7 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 
 ### 9.4 Slack通知内容
 
-**メッセージフォーマット** (Block Kit):
+**新規ユーザー承認依頼通知（メッセージフォーマット、Block Kit）**:
 
 ```
 [タイトル] 🔔 新規ユーザーが承認を待っています
@@ -758,6 +762,25 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 | メール | Googleメール | `user.email` |
 | 登録日時 | サーバー現在時刻をJST（`Asia/Tokyo`）でローカル日時文字列として表示 | サーバー現在時刻 |
 | 管理画面リンク | `/admin/users` への絶対URL | `NEXT_PUBLIC_APP_URL` または `request.url` のorigin |
+
+**Stripe支払い失敗通知（メッセージフォーマット、Block Kit）**:
+
+```
+[タイトル] ⚠️ Stripeの支払いに失敗しました
+
+メール:   <customer_email>
+請求額:   <amount_due>円
+
+[請求書を開く] → <hosted_invoice_url>（取得できた場合のみ表示）
+```
+
+**フィールド詳細**:
+
+| フィールド | 値 | 取得元 |
+|:--|:--|:--|
+| メール | Stripe請求先メール（無ければ「不明」） | `invoice.customer_email` |
+| 請求額 | 請求金額をそのまま円表示（JPYはStripeのゼロdecimal通貨のため100で割らない。複数通貨対応はスコープ外） | `invoice.amount_due` |
+| 請求書リンク | Stripeホスト型請求書ページのURL | `invoice.hosted_invoice_url` |
 
 ### 9.5 処理フロー
 
