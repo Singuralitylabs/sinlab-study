@@ -221,18 +221,33 @@ describe("approveUser", () => {
     "community",
   ] as const)("status=active と選択された会員種別（%s）を同時に更新する", async (membershipType) => {
     const mockClient = createMockSupabaseClient({
-      tableResults: { users: { data: null, error: null } },
+      tableResults: { users: { data: [{ id: 1 }], error: null } },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
     const result = await approveUser(1, membershipType);
 
     expect(result.error).toBeNull();
+    expect(result.updated).toBe(true);
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.update).toHaveBeenCalledWith(
       expect.objectContaining({ status: "active", membership_type: membershipType })
     );
     expect(builder.eq).toHaveBeenCalledWith("id", 1);
+    // 承認済みユーザーの再承認を原子的に弾く条件（TOCTOU対策）
+    expect(builder.neq).toHaveBeenCalledWith("status", "active");
+  });
+
+  it("更新対象が0行（既に承認済み・存在しない等）の場合、updated: false を返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: [], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await approveUser(1, "community");
+
+    expect(result.error).toBeNull();
+    expect(result.updated).toBe(false);
   });
 
   it("更新に失敗した場合はエラーを返す", async () => {
@@ -244,6 +259,7 @@ describe("approveUser", () => {
     const result = await approveUser(1, "community");
 
     expect(result.error).toEqual(dbError);
+    expect(result.updated).toBe(false);
   });
 });
 

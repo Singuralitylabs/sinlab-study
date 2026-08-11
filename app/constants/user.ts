@@ -30,4 +30,4 @@ export const USER_MEMBERSHIP_LABELS: Record<MembershipType, string> = {
 } as const;
 
 /** 会員種別の許可値。APIのバリデーションと承認UIの選択肢はこの1箇所から導出する */
-export const MEMBERSHIP_TYPES: MembershipType[] = Object.values(USER_MEMBERSHIP);
+export const MEMBERSHIP_TYPES: readonly MembershipType[] = Object.values(USER_MEMBERSHIP);

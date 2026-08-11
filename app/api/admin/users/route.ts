@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { MEMBERSHIP_TYPES, USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { MEMBERSHIP_TYPES, USER_ROLE } from "@/app/constants/user";
 import { approveUser, changeUserRole, rejectUser } from "@/app/services/api/admin-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -64,27 +64,26 @@ export async function PATCH(request: Request) {
       );
     }
 
-    // 承認済みユーザーの再承認は不可。approveUser は会員種別も上書きするため、
-    // 古い画面からの再承認で設定済みの種別が既定値に書き換わる事故を防ぐ（種別変更は #95 で対応）
     if (action === "approve") {
-      const supabase = await createAdminSupabaseClient();
-      const { data: targetUser } = await supabase
-        .from("users")
-        .select("status")
-        .eq("id", userId)
-        .single();
-
-      if (targetUser?.status === USER_STATUS.ACTIVE) {
+      const { error, updated } = await approveUser(userId, membershipType);
+      if (error) {
+        return NextResponse.json({ error: "ステータス更新に失敗しました" }, { status: 500 });
+      }
+      // 0行更新 = 既に承認済み（再承認による会員種別の意図しない上書きを防止。種別変更は #95 で対応）、
+      // または存在しない・削除済みユーザー
+      if (!updated) {
         return NextResponse.json(
-          { error: "このユーザーは既に承認済みです。画面を更新して最新の状態を確認してください" },
+          {
+            error:
+              "このユーザーは承認できません（承認済みか、存在しません）。画面を更新して最新の状態を確認してください",
+          },
           { status: 409 }
         );
       }
+      return NextResponse.json({ success: true, action });
     }
 
-    const { error } =
-      action === "approve" ? await approveUser(userId, membershipType) : await rejectUser(userId);
-
+    const { error } = await rejectUser(userId);
     if (error) {
       return NextResponse.json({ error: "ステータス更新に失敗しました" }, { status: 500 });
     }

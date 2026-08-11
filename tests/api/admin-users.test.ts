@@ -2,13 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/admin-server");
-vi.mock("@/app/services/api/supabase-server");
 
 import { PATCH } from "@/app/api/admin/users/route";
 import { approveUser, rejectUser } from "@/app/services/api/admin-server";
-import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
-import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 const adminAuth = {
   user: { id: "auth-uuid-admin" },
@@ -27,14 +24,8 @@ const request = (body: unknown) =>
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(adminAuth as never);
-  vi.mocked(approveUser).mockResolvedValue({ error: null });
+  vi.mocked(approveUser).mockResolvedValue({ error: null, updated: true });
   vi.mocked(rejectUser).mockResolvedValue({ error: null });
-  // 承認前チェックで参照する対象ユーザーは承認待ちを既定とする
-  vi.mocked(createAdminSupabaseClient).mockResolvedValue(
-    createMockSupabaseClient({
-      tableResults: { users: { data: { status: "pending" }, error: null } },
-    }) as never
-  );
 });
 
 describe("PATCH /api/admin/users - approve", () => {
@@ -60,35 +51,18 @@ describe("PATCH /api/admin/users - approve", () => {
     expect(approveUser).not.toHaveBeenCalled();
   });
 
-  it("既に承認済みのユーザーは409で、承認処理を呼ばない（会員種別の意図しない上書き防止）", async () => {
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(
-      createMockSupabaseClient({
-        tableResults: { users: { data: { status: "active" }, error: null } },
-      }) as never
-    );
+  it("更新対象が0行（既に承認済み・存在しない等）の場合は409を返す", async () => {
+    vi.mocked(approveUser).mockResolvedValue({ error: null, updated: false });
 
     const res = await PATCH(request({ userId: 5, action: "approve", membershipType: "community" }));
 
     expect(res.status).toBe(409);
-    expect(approveUser).not.toHaveBeenCalled();
-  });
-
-  it("却下済みユーザーの再承認（承認し直し）は許可される", async () => {
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(
-      createMockSupabaseClient({
-        tableResults: { users: { data: { status: "rejected" }, error: null } },
-      }) as never
-    );
-
-    const res = await PATCH(request({ userId: 5, action: "approve", membershipType: "general" }));
-
-    expect(res.status).toBe(200);
-    expect(approveUser).toHaveBeenCalledWith(5, "general");
   });
 
   it("承認処理が失敗した場合は500を返す", async () => {
     vi.mocked(approveUser).mockResolvedValue({
       error: { message: "db error", code: "PGRST204" } as never,
+      updated: false,
     });
 
     const res = await PATCH(request({ userId: 5, action: "approve", membershipType: "community" }));

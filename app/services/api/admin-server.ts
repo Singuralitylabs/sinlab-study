@@ -534,28 +534,37 @@ export async function fetchAllUsers(): Promise<{
 
 /**
  * ユーザーを承認する。承認と同時に会員種別（コミュニティ会員 / 一般有料会員）を設定する。
+ *
+ * 承認済み（active）ユーザーの再承認は不可。会員種別も上書きするため、古い画面からの
+ * 再承認で設定済みの種別が既定値に書き換わる事故を防ぐ（種別変更は #95 で対応）。
+ * 事前SELECTによるチェックでは同時リクエスト間で競合し、SELECT失敗時にフェイルオープン
+ * にもなるため、UPDATE自体に条件を折り込み原子的に判定する。
+ *
+ * @returns updated: 更新が行われたか。false は既に承認済み・存在しない・削除済みのいずれか
  */
 export async function approveUser(
   userId: number,
   membershipType: MembershipType
-): Promise<{ error: PostgrestError | null }> {
+): Promise<{ error: PostgrestError | null; updated: boolean }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("users")
     .update({
       status: USER_STATUS.ACTIVE,
       membership_type: membershipType,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", userId);
+    .eq("id", userId)
+    .neq("status", USER_STATUS.ACTIVE)
+    .select("id");
 
   if (error) {
     console.error("ユーザー承認エラー:", error.message);
-    return { error };
+    return { error, updated: false };
   }
 
-  return { error: null };
+  return { error: null, updated: (data?.length ?? 0) > 0 };
 }
 
 /**
