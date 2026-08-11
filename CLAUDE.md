@@ -68,6 +68,7 @@ app/
 │   ├── instructor/      # /manage への旧パスリダイレクト
 │   ├── learn/           # 学習画面: [themeId]/[phaseId]/[weekId]/[contentId]
 │   ├── submissions/     # 受講生の提出履歴
+│   ├── upgrade/         # Stripeサブスク決済でのアップグレード画面（success/ に決済完了画面）
 │   └── page.tsx         # 進捗概要付きダッシュボード
 ├── api/
 │   ├── admin/users/     # PATCH: ユーザー承認・却下
@@ -75,7 +76,8 @@ app/
 │   ├── ai-review/       # POST: 提出物のAIレビュー
 │   ├── upload-pdf/      # POST: スライドPDFのアップロード
 │   ├── progress/        # POST: コンテンツごとの進捗をupsert
-│   └── submissions/     # POST: コードまたはURLの提出物を作成
+│   ├── submissions/     # POST: コードまたはURLの提出物を作成
+│   └── stripe/          # checkout/portal/webhook: サブスク決済（後述）
 ```
 
 ### 認証・認可フロー
@@ -97,7 +99,7 @@ app/
 
 ### 会員種別（membership_type）
 
-承認済みユーザーは「**コミュニティ会員**（`community`）」と「**一般有料会員**（`general`）」に分類する。前者はコミュニティ会員プラン、後者は本サービスのみを利用するプランを指す。ロール（権限）とは独立した軸で、**現時点では種別によるコンテンツ・機能のアクセス差はない**（将来の出し分けに備えた区別のみ）。決済連携はスコープ外で、入金確認等は手動運用とする。
+承認済みユーザーは「**コミュニティ会員**（`community`）」と「**一般有料会員**（`general`）」に分類する。前者はコミュニティ会員プラン、後者は本サービスのみを利用するプランを指す。ロール（権限）とは独立した軸で、**現時点では種別によるコンテンツ・機能のアクセス差はない**（将来の出し分けに備えた区別のみ）。一般有料会員はStripeサブスク決済による自動昇格に対応する（後述）。**コミュニティ会員は決済連携の対象外**で、入金確認等は引き続き手動運用とする。
 
 - **カラム**: `users.membership_type`（`VARCHAR(20) CHECK (membership_type IN ('community', 'general'))`）。承認前（`pending`）・却下（`rejected`）は `NULL`。CHECK制約はNULLを許容するため `NOT NULL` は付けない
 - **設定タイミング**: 管理者が `/admin/users` の承認操作で種別を選択し、`status=active` と同時に設定する（`approveUser(userId, membershipType)`）。却下時（`rejectUser()`）は `NULL` に戻す。却下ボタンは `active` ユーザーにも出るため、種別が設定済みの場合は確認ダイアログで解除される旨を明示する。承認済みユーザーの種別変更UIは未実装（#95）
@@ -122,6 +124,19 @@ app/
 - **ダッシュボード進捗率の分母**: お試しユーザーの進捗率は**お試し公開コンテンツのみを分母**とする（体験範囲内の進捗を示す）。ダッシュボードの集計（`fetchThemeProgressSummaries`）は通常クライアントのネスト select のため、RLSによる絞り込みがそのまま分母に反映され、追加実装は不要。ツリーは全件表示・進捗率はお試し公開分の分母、という差異は意図的なもの
 - **提出物の引き継ぎ**: 承認前の提出・進捗は user_id ベースのため、承認後もそのまま引き継がれる。管理者/メンテナーのレビュー一覧にはお試しユーザーの提出も表示される
 - **既知の制約（スライドPDF）**: スライドは公開バケット（`slides`、`public=true`）配信でオブジェクトキーが連番のため、ロック済みコンテンツのPDFもURL推測で取得できる。これは本機能以前からの既存の性質であり、署名付きURL化は別issue（#89）で対応する
+
+### Stripeサブスク決済（月額課金）
+
+お試しユーザーが `/upgrade` からStripe Checkout（ホスト型）で月額サブスクリプションを契約すると、決済完了と同時に**管理者承認なし**で一般有料会員（`status=active` / `membership_type=general`）へ自動昇格する。**コミュニティ会員はスコープ外**（従来どおり管理者の手動承認のみ）。カード情報は一切扱わず、Checkout・Customer Portal（お支払い管理・解約）ともStripeのホスト型UIに任せる。
+
+- **データモデル**: 専用テーブル `stripe_subscriptions`（ユーザーごとの課金状態のミラー、`user_id UNIQUE` で1ユーザー1行固定・DELETEせず常にupsert）と `stripe_events`（Webhook冪等性用、`event.id` がPK）を追加。**アプリの認可は従来どおり `users.status`/`membership_type` が唯一の真実**で、`users` にStripe関連カラムは足さない
+  - `stripe_subscriptions` の行は解約後も残り続けるため、「現在契約中か」の判定は行の有無だけでなく `status` が終端状態（`TERMINAL_SUBSCRIPTION_STATUSES` = `canceled`/`unpaid`/`incomplete_expired`、`app/services/api/stripe-server.ts`）でないことも確認する
+- **会員化のタイミング**: Webhook（`checkout.session.completed`）を正とし、`activateUserFromCheckoutSession()`（`app/services/api/stripe-webhook-server.ts`）が冪等に `stripe_subscriptions` upsert + `users` 更新を行う。`/upgrade/success` ページのサーバー側でも同一の冪等関数を呼ぶため、Webhookの配信遅延に関係なく決済直後から利用できる
+- **降格のタイミング**: `status` が `canceled`/`unpaid` へ遷移した場合に `revertUserToTrial()` で `status=pending`/`membership_type=NULL` へ戻す。**`membership_type='general'` の行のみ**をUPDATE条件に含めるガードをSQLレベルで持ち、コミュニティ会員・手動承認済みユーザーを誤って巻き込まない。初回の支払い失敗（`past_due`）では降格せず、Stripe Smart Retriesに任せてSlack通知のみ行う（`sendSlackPaymentFailedNotification()`）
+- **Webhook処理**（`app/api/stripe/webhook/route.ts`）: 生ボディ（`request.text()`）のまま署名検証（`stripe.webhooks.constructEvent()`）してから処理する。イベント冪等性は「ハンドラ実行前に `isEventProcessed()` で確認 → ハンドラ**成功後にのみ** `recordEventProcessed()` で記録」の順で行う（先に記録するとハンドラ失敗時にStripeの自動リトライが永久にスキップされるため、確認と記録の関数を分離している）
+- **APIルート**: `POST /api/stripe/checkout`（`getServerAuth()`でお試しユーザーのみ許可、既存の有効なサブスク行があれば409）、`POST /api/stripe/webhook`（署名検証必須）、`POST /api/stripe/portal`（自身の `stripe_subscriptions` 行が無ければ404）。いずれもDB書き込みは `assertServiceRoleConfigured()` で `SUPABASE_SERVICE_ROLE_KEY` の設定を明示的に検証してから `createAdminSupabaseClient()` を使う
+- **RLS**: `stripe_subscriptions` はSELECTのみ「本人 or admin」。書き込みポリシーは作らず、service_role経由（Webhook・successページ）に限定する。`stripe_events` はポリシーなし（service_role専用）
+- **管理画面**: `/admin/users` に「現在契約中とみなせる」サブスク会員バッジを表示し、契約中ユーザーを却下する際は「Stripeダッシュボードでの手動キャンセルが別途必要」の警告を出す（自動キャンセル連携はスコープ外）
 
 ### データモデル (Supabase/PostgreSQL)
 
@@ -158,6 +173,8 @@ app/
 - `SUPABASE_SERVICE_ROLE_KEY` — Service Roleキー（管理操作用）
 - `SUPABASE_PROJECT_ID` — Supabase CLI操作用
 - `GEMINI_API_KEY` — Gemini API（AIレビュー機能用）
+- `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_ID` — Stripeサブスク決済用
+- `NEXT_PUBLIC_APP_URL` — Checkout/Portalのリダイレクト先URL生成に使用
 
 ### データベースマイグレーション
 
