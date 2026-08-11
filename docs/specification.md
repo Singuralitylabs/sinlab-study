@@ -722,7 +722,7 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 
 **通知タイミング**: 新規ユーザー通知は `GET /auth/callback` における初回ユーザー登録の成功直後、支払い失敗通知は `POST /api/stripe/webhook` での `invoice.payment_failed` イベント受信時
 
-**非同期・非ブロッキング**: いずれもSlack通知の失敗は本体のフロー（ユーザー登録・リダイレクト、Webhookの200応答）に影響しない。エラーはサーバーログにのみ出力する。
+**通知失敗時もメインフローは継続**: いずれもSlack通知の失敗は本体のフロー（ユーザー登録・リダイレクト、Webhookの200応答）に影響しない。エラーはサーバーログにのみ出力する。ただし呼び出し方は異なり、新規ユーザー通知は `await` せず発火するだけの非同期・非ブロッキング呼び出しであるのに対し、支払い失敗通知は `await` して待ち合わせる（関数内部で例外・HTTPエラーを捕捉して握り潰すため、待ち合わせても本体のフローを失敗させることはない）。詳細は9.5参照。
 
 ### 9.2 実装構成
 
@@ -784,6 +784,8 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 
 ### 9.5 処理フロー
 
+#### 9.5.1 新規ユーザー承認依頼通知
+
 ```mermaid
 flowchart TD
     A["GET /auth/callback"] --> B["セッション確立・users テーブル確認"]
@@ -802,7 +804,24 @@ flowchart TD
     E -->|失敗| Q["ログ出力・/login にリダイレクト（通知は送らない）"]
 ```
 
-INSERT 成功後はお試しユーザーとしてダッシュボードへ遷移する。承認依頼のSlack通知は従来どおり送信し、管理者は `/admin/users` で承認・却下を行う。
+INSERT 成功後はお試しユーザーとしてダッシュボードへ遷移する。承認依頼のSlack通知は従来どおり送信し、管理者は `/admin/users` で承認・却下を行う。`sendSlackNewUserNotification()` は `await` せずに発火する非同期・非ブロッキング呼び出しで、通知の完了を待たずにリダイレクトへ進む。
+
+#### 9.5.2 Stripe支払い失敗通知
+
+```mermaid
+flowchart TD
+    A["POST /api/stripe/webhook"] --> B["署名検証（stripe.webhooks.constructEvent）"]
+    B -->|失敗| X["400 署名検証エラー"]
+    B -->|成功| C["isEventProcessed() で処理済みか確認"]
+    C -->|処理済み| Y["200 スキップ"]
+    C -->|未処理| D{event.type}
+    D -->|invoice.payment_failed| E["sendSlackPaymentFailedNotification()<br/>（await して待ち合わせる）"]
+    E --> F["recordEventProcessed()"]
+    F --> G["200 received"]
+    D -->|その他のtype| H["対応するハンドラを実行"] --> F
+```
+
+`sendSlackPaymentFailedNotification()` は他のイベント種別のハンドラと同じく `await` して待ち合わせるが、関数内部で例外・HTTPエラーを捕捉して握り潰すため、Slack通知が失敗してもWebhookの200応答自体は失敗しない（9.5.1の新規ユーザー通知のような「発火して待たない」非同期呼び出しではない点に注意）。降格は行わず、通知のみでStripe Smart Retriesに任せる。
 
 ### 9.6 Slack Incoming Webhook 設定手順（運用）
 
@@ -818,9 +837,10 @@ INSERT 成功後はお試しユーザーとしてダッシュボードへ遷移�
 | ケース | 対応 |
 |:--|:--|
 | `SLACK_NOTIFICATION_WEBHOOK_URL` 未設定 | ログ警告を出力し通知をスキップ。フローは継続 |
-| Webhook POST がネットワークエラー | エラーログを出力し握り潰す。ユーザー登録・リダイレクトは正常完了 |
+| Webhook POST がネットワークエラー | エラーログを出力し握り潰す。ユーザー登録・リダイレクト / Stripe Webhookの200応答は正常完了 |
 | Webhook POST が 4xx / 5xx | エラーログ（ステータスコード含む）を出力し握り潰す |
-| ユーザー INSERT 失敗 | Slack通知は送信しない（中途半端な状態を通知しない） |
+| ユーザー INSERT 失敗 | 新規ユーザー通知は送信しない（中途半端な状態を通知しない） |
+| 支払い失敗通知自体の送信エラー | `recordEventProcessed()` はそのまま実行され、`/api/stripe/webhook` は200を返す（通知の成否はStripeへのWebhook応答に影響しない） |
 
 ---
 
