@@ -3,8 +3,8 @@ import type Stripe from "stripe";
 import { assertServiceRoleConfigured, getStripeClient } from "@/app/services/api/stripe-server";
 import {
   activateUserFromCheckoutSession,
-  isEventProcessed,
-  recordEventProcessed,
+  claimEvent,
+  releaseEventClaim,
   syncSubscriptionStatus,
 } from "@/app/services/api/stripe-webhook-server";
 import { sendSlackPaymentFailedNotification } from "@/app/services/notifications/slack";
@@ -28,20 +28,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "署名検証に失敗しました" }, { status: 400 });
   }
 
+  let claimed = false;
+
   try {
     assertServiceRoleConfigured();
 
-    // ハンドラ実行より前に「処理済みか」だけを確認する（記録はハンドラ成功後に行う）。
-    // 先に記録してしまうと、ハンドラが失敗して500を返してもStripeの再送時に
-    // 「処理済み」と誤判定され、二度とハンドラに到達できなくなるため
-    const { processed, error: checkError } = await isEventProcessed(event.id);
-    if (checkError) {
-      console.error("イベント処理済み確認エラー:", checkError);
+    // event.idの処理権を原子的に確保する（素のINSERTのため、同一event.idの並行配信は
+    // 一意制約により片方だけがclaimに成功する）。claimできなければ「他のリクエストが
+    // 既に処理済み、または処理中」であり、ハンドラを実行せずスキップする
+    const { claimed: didClaim, error: claimError } = await claimEvent(event.id, event.type);
+    if (claimError) {
+      console.error("イベントclaimエラー:", claimError);
       return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
     }
-    if (processed) {
+    if (!didClaim) {
       return NextResponse.json({ received: true, skipped: true });
     }
+    claimed = true;
 
     switch (event.type) {
       case "checkout.session.completed": {
@@ -50,6 +53,7 @@ export async function POST(request: NextRequest) {
         );
         if (error) {
           console.error("会員昇格エラー:", error);
+          await releaseEventClaim(event.id);
           return NextResponse.json({ error }, { status: 500 });
         }
         break;
@@ -60,6 +64,7 @@ export async function POST(request: NextRequest) {
         const { error } = await syncSubscriptionStatus(event.data.object as Stripe.Subscription);
         if (error) {
           console.error("サブスク状態同期エラー:", error);
+          await releaseEventClaim(event.id);
           return NextResponse.json({ error }, { status: 500 });
         }
         break;
@@ -78,16 +83,13 @@ export async function POST(request: NextRequest) {
         break;
     }
 
-    // ハンドラが成功した場合のみ処理済みとして記録する（失敗時は500を返し、再送で再度ハンドラへ到達させる）
-    const { error: recordError } = await recordEventProcessed(event.id, event.type);
-    if (recordError) {
-      console.error("イベント処理済み記録エラー:", recordError);
-      return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
-    }
-
     return NextResponse.json({ received: true });
   } catch (error) {
     console.error("Webhook処理エラー:", error);
+    // claim後の予期しない例外もリトライ可能にするため、処理権を解放してから500を返す
+    if (claimed) {
+      await releaseEventClaim(event.id);
+    }
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
   }
 }

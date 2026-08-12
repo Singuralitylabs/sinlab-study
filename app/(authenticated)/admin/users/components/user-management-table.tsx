@@ -38,9 +38,11 @@ type StatusFilter = "all" | "pending" | "active" | "rejected";
 export function UserManagementTable({
   users,
   subscribedUserIds,
+  subscriptionDataUnavailable = false,
 }: {
   users: UserType[];
   subscribedUserIds: number[];
+  subscriptionDataUnavailable?: boolean;
 }) {
   const router = useRouter();
   const [filter, setFilter] = useState<StatusFilter>("all");
@@ -90,6 +92,11 @@ export function UserManagementTable({
       if (subscribedUserIdSet.has(userId)) {
         messages.push(
           "このユーザーはStripeサブスク契約中です。却下してもサブスクは自動解約されないため、Stripeダッシュボードでの手動キャンセルが別途必要です。"
+        );
+      } else if (subscriptionDataUnavailable) {
+        // 契約状況が取得できていないため、契約の有無を判定できない（フェイルクローズ）
+        messages.push(
+          "Stripe契約状況を取得できなかったため、このユーザーが契約中かどうか判定できません。却下する前にStripeダッシュボードで契約の有無をご確認ください。"
         );
       }
       return {

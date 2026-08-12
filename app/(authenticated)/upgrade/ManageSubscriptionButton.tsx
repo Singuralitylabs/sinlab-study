@@ -32,7 +32,14 @@ export function ManageSubscriptionButton() {
   return (
     <div className="space-y-2">
       <Button onClick={handleClick} disabled={isLoading} variant="outline" className="w-full">
-        {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "お支払い情報の管理・解約"}
+        {isLoading ? (
+          <>
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+            <span className="sr-only">処理中</span>
+          </>
+        ) : (
+          "お支払い情報の管理・解約"
+        )}
       </Button>
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>

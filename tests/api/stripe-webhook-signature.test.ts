@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/services/api/stripe-webhook-server");
 
 import { POST } from "@/app/api/stripe/webhook/route";
-import { isEventProcessed } from "@/app/services/api/stripe-webhook-server";
+import { claimEvent } from "@/app/services/api/stripe-webhook-server";
 
 const webhookSecret = "whsec_test_dummy_secret";
 
@@ -20,7 +20,7 @@ beforeEach(() => {
   vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_dummy");
   vi.stubEnv("STRIPE_WEBHOOK_SECRET", webhookSecret);
   vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "service-role-dummy");
-  vi.mocked(isEventProcessed).mockResolvedValue({ processed: true, error: null });
+  vi.mocked(claimEvent).mockResolvedValue({ claimed: false, error: null });
 });
 
 afterEach(() => {
@@ -47,7 +47,7 @@ describe("POST /api/stripe/webhook - 署名検証", () => {
     const res = await POST(request(payload, "t=1,v1=invalid-signature") as never);
 
     expect(res.status).toBe(400);
-    expect(isEventProcessed).not.toHaveBeenCalled();
+    expect(claimEvent).not.toHaveBeenCalled();
   });
 
   it("別のシークレットで署名された場合は400を返す", async () => {
@@ -68,6 +68,6 @@ describe("POST /api/stripe/webhook - 署名検証", () => {
     const res = await POST(request(payload, null) as never);
 
     expect(res.status).toBe(400);
-    expect(isEventProcessed).not.toHaveBeenCalled();
+    expect(claimEvent).not.toHaveBeenCalled();
   });
 });

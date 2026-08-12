@@ -391,9 +391,9 @@ Stripe Webhookイベントの冪等性を担保するための処理済みイベ
 |:--|:--|:--:|:--|:--|
 | id | TEXT | NO | - | Stripe event.id（`evt_...`、PK） |
 | type | TEXT | NO | - | イベント種別（例: `checkout.session.completed`） |
-| processed_at | TIMESTAMPTZ | NO | now() | 記録日時 |
+| processed_at | TIMESTAMPTZ | NO | now() | claim（処理権確保）した日時 |
 
-> **記録タイミング**: `stripe_events` への記録（`recordEventProcessed()`）は、対応するWebhookハンドラの処理が**成功した後にのみ**行う。先に記録してしまうと、ハンドラが失敗して500を返してもStripeの自動リトライ時に「処理済み」と誤判定され、二度とハンドラに到達できなくなるため（`/api/stripe/webhook` は事前に `isEventProcessed()` で確認のみ行い、記録とは分離している）。
+> **claim/releaseによる原子的な冪等性**: `event.id` への素のINSERT（upsertではない）を「claim」として使う（`claimEvent()`）。同一event.idの並行配信はDBの一意制約により片方だけがclaimに成功するため、真に排他的。ハンドラが失敗した場合のみ行を削除して処理権を解放する（`releaseEventClaim()`）。先に成功扱いで記録し、ハンドラが後から失敗するような設計だと、Stripeの自動リトライ時に「処理済み」と誤判定され二度とハンドラに到達できなくなるため、claim（実行前）とrelease（失敗時のみ）を明確に分離している。`/api/stripe/webhook` はclaimに成功した場合のみハンドラを実行する。
 
 ---
 
@@ -638,3 +638,4 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | 2026年7月 | お試し（trial）ユーザー機能に対応：`learning_contents` に `is_open_to_trial` カラム追加、RLSヘルパー関数 `get_user_status()` 追加、`learning_contents` のSELECTをお試しユーザー制限付きの別パターンに分離、`user_progress` / `submissions` の書き込みに可視コンテンツ限定のEXISTS条件を追記、マイグレーション一覧・公開制御・upsertパターンの注意点を更新 |
 | 2026年8月 | 会員種別の導入に対応：`users` に `membership_type`（`community` / `general`、承認前・却下は NULL）カラム追加、マイグレーション一覧に `01_schema/004_add_membership_type.sql` を追記 |
 | 2026年8月 | Stripe月額サブスク決済の導入に対応：`stripe_subscriptions`（課金状態のミラー）・`stripe_events`（Webhook冪等性）テーブルを追加。ER図・テーブル定義（3.9/3.10）・RLS（6.6/6.7）・マイグレーション一覧を更新 |
+| 2026年8月 | PRレビュー指摘を反映：`stripe_events` の冪等性設計を「確認→ハンドラ成功後に記録」から、INSERT自体を処理権のclaimとして使う原子的な排他制御（claim/release）に変更。3.10節を更新 |

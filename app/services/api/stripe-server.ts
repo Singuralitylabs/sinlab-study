@@ -109,6 +109,31 @@ export async function retrieveCheckoutSession(sessionId: string): Promise<Stripe
 }
 
 /**
+ * 月額サブスクリプションのPrice情報を取得する（/upgrade ページでの料金表示用）。
+ * `unit_amount` はJPY（ゼロdecimal通貨）を前提にそのまま円額として扱う
+ * （複数通貨対応はスコープ外。Slack支払い失敗通知の金額表示と同じ前提）。
+ */
+export async function fetchSubscriptionPrice(): Promise<{
+  amount: number | null;
+  currency: string;
+  intervalMonthCount: number;
+}> {
+  const priceId = process.env.STRIPE_PRICE_ID;
+  if (!priceId) {
+    throw new Error("Stripe環境変数が設定されていません: STRIPE_PRICE_ID");
+  }
+  const stripe = getStripeClient();
+  const price = await stripe.prices.retrieve(priceId);
+
+  return {
+    amount: price.unit_amount,
+    currency: price.currency,
+    intervalMonthCount:
+      price.recurring?.interval === "month" ? (price.recurring.interval_count ?? 1) : 1,
+  };
+}
+
+/**
  * ユーザー自身のサブスクリプション状態を取得する（/upgrade ページの表示用）。
  * RLSにより本人 or admin の行のみ取得できる通常クライアントを使う。
  */

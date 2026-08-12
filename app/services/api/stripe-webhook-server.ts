@@ -113,6 +113,14 @@ export async function activateUserFromCheckoutSession(
     return { error: null, activated: false };
   }
 
+  // ミラーupsert〜ここまでの間に解約Webhookが並行して届き、サブスクが終端状態へ
+  // 遷移している可能性があるため、usersを更新する直前でもう一度ライブ状態を確認する
+  // （完全な排他制御ではないが、TOCTOUウィンドウを最小限に縮める）
+  const latestSubscription = await stripe.subscriptions.retrieve(subscriptionId);
+  if (!ACTIVATABLE_SUBSCRIPTION_STATUSES.includes(latestSubscription.status)) {
+    return { error: null, activated: false };
+  }
+
   const { data: updatedUsers, error: userError } = await supabase
     .from("users")
     .update({
@@ -138,14 +146,21 @@ export async function activateUserFromCheckoutSession(
  * canceled/unpaid/incomplete_expired）へ遷移した場合のみ降格する
  * （past_due は猶予期間のため降格しない）。
  *
+ * Webhookイベントは到着順が保証されないため、イベントに埋め込まれたsubscriptionの
+ * スナップショットをそのまま信用せず、Stripe APIから最新状態を取り直してから書き込む。
+ * 例えば canceled 処理後に古い active/past_due のイベントが遅延して届いても、
+ * 再取得した時点のライブ状態（canceled）を書くため、ミラーが古い状態へ巻き戻らない。
+ *
  * stripe_subscription_id で該当行を特定する。checkout.session.completed 未処理のうちに
  * updated/deleted が届いた場合（順序逆転）は対象行が無いため何もしない
  * （後続で checkout.session.completed が処理されれば最新状態で upsert される）。
  */
 export async function syncSubscriptionStatus(
-  subscription: Stripe.Subscription
+  subscriptionFromEvent: Stripe.Subscription
 ): Promise<{ error: string | null }> {
   assertServiceRoleConfigured();
+  const stripe = getStripeClient();
+  const subscription = await stripe.subscriptions.retrieve(subscriptionFromEvent.id);
   const supabase = await createAdminSupabaseClient();
 
   const { data: existing, error: fetchError } = await supabase
@@ -211,49 +226,49 @@ export async function revertUserToTrial(userId: number): Promise<{ error: string
 }
 
 /**
- * Webhookイベントが処理済みかを確認する（読み取りのみ）。
- * ハンドラ実行前に呼び、処理済みイベントの再送をスキップするために使う。
- * 記録（recordEventProcessed）はハンドラ成功後に行うため、ハンドラが失敗して
- * 500を返した場合はここで処理済み扱いにならず、Stripeの自動リトライで再度ハンドラに到達できる。
+ * Webhookイベントの処理権を原子的に確保する。`stripe_events.id`（PK）への素のINSERTを
+ * 「claim」として使う（upsertではなく通常のINSERTのため、同一event.idの並行リクエストは
+ * DBの一意制約により片方だけが成功する＝真に排他的）。
+ *
+ * ハンドラ実行**前**に呼ぶ。claim できた場合のみハンドラを実行し、失敗時は
+ * releaseEventClaim() でclaimを解放してStripeの自動リトライが再度ハンドラへ
+ * 到達できるようにする（claimを解放しないまま成功扱いにすると、リトライが
+ * 「処理済み」と誤判定され永久にスキップされる）。
  */
-export async function isEventProcessed(
-  eventId: string
-): Promise<{ processed: boolean; error: string | null }> {
+export async function claimEvent(
+  eventId: string,
+  type: string
+): Promise<{ claimed: boolean; error: string | null }> {
   assertServiceRoleConfigured();
   const supabase = await createAdminSupabaseClient();
 
-  const { data, error } = await supabase
-    .from("stripe_events")
-    .select("id")
-    .eq("id", eventId)
-    .maybeSingle();
+  const { error } = await supabase.from("stripe_events").insert({ id: eventId, type });
 
   if (error) {
-    console.error("stripe_events確認エラー:", error.message);
-    return { processed: false, error: error.message };
+    // 一意制約違反（PostgreSQLエラーコード23505）は「他のリクエストが既にclaim済み」を意味し、
+    // 正常系としてスキップする。それ以外はDBエラーとして呼び出し元に伝播する
+    if (error.code === "23505") {
+      return { claimed: false, error: null };
+    }
+    console.error("stripe_events claim エラー:", error.message);
+    return { claimed: false, error: error.message };
   }
 
-  return { processed: data !== null, error: null };
+  return { claimed: true, error: null };
 }
 
 /**
- * Webhookイベントを処理済みとして記録する。ハンドラ成功後にのみ呼ぶこと。
- * event.id の重複INSERTは ON CONFLICT DO NOTHING 相当（upsert + ignoreDuplicates）で
- * 安全にスキップする（isEventProcessed とのごく短い競合ウィンドウで二重配信された場合の保険）。
+ * claimEvent() で確保したイベントの処理権を解放する。ハンドラが失敗した場合にのみ呼ぶこと。
+ * 行を削除することで、Stripeの自動リトライ時に claimEvent() が再度成功できるようにする。
  */
-export async function recordEventProcessed(
-  eventId: string,
-  type: string
-): Promise<{ error: string | null }> {
+export async function releaseEventClaim(eventId: string): Promise<{ error: string | null }> {
   assertServiceRoleConfigured();
   const supabase = await createAdminSupabaseClient();
 
-  const { error } = await supabase
-    .from("stripe_events")
-    .upsert({ id: eventId, type }, { onConflict: "id", ignoreDuplicates: true });
+  const { error } = await supabase.from("stripe_events").delete().eq("id", eventId);
 
   if (error) {
-    console.error("stripe_events記録エラー:", error.message);
+    console.error("stripe_events claim解放エラー:", error.message);
     return { error: error.message };
   }
 

@@ -8,8 +8,8 @@ import { POST } from "@/app/api/stripe/webhook/route";
 import { getStripeClient } from "@/app/services/api/stripe-server";
 import {
   activateUserFromCheckoutSession,
-  isEventProcessed,
-  recordEventProcessed,
+  claimEvent,
+  releaseEventClaim,
   syncSubscriptionStatus,
 } from "@/app/services/api/stripe-webhook-server";
 import { sendSlackPaymentFailedNotification } from "@/app/services/notifications/slack";
@@ -29,8 +29,8 @@ beforeEach(() => {
   vi.mocked(getStripeClient).mockReturnValue({
     webhooks: { constructEvent: mockConstructEvent },
   } as never);
-  vi.mocked(isEventProcessed).mockResolvedValue({ processed: false, error: null });
-  vi.mocked(recordEventProcessed).mockResolvedValue({ error: null });
+  vi.mocked(claimEvent).mockResolvedValue({ claimed: true, error: null });
+  vi.mocked(releaseEventClaim).mockResolvedValue({ error: null });
   vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({ error: null, activated: true });
   vi.mocked(syncSubscriptionStatus).mockResolvedValue({ error: null });
 });
@@ -53,8 +53,9 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     expect(res.status).toBe(200);
     expect(activateUserFromCheckoutSession).toHaveBeenCalledWith(session);
     expect(syncSubscriptionStatus).not.toHaveBeenCalled();
-    // ハンドラ成功後にのみ処理済みとして記録される
-    expect(recordEventProcessed).toHaveBeenCalledWith("evt_1", "checkout.session.completed");
+    // 事前にclaimしたうえでハンドラが実行される
+    expect(claimEvent).toHaveBeenCalledWith("evt_1", "checkout.session.completed");
+    expect(releaseEventClaim).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -110,8 +111,8 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     expect(sendSlackPaymentFailedNotification).not.toHaveBeenCalled();
   });
 
-  it("再送済み（event.id重複）の場合はハンドラを呼ばずスキップする", async () => {
-    vi.mocked(isEventProcessed).mockResolvedValue({ processed: true, error: null });
+  it("claimできない（再送・同時配信の重複）場合はハンドラを呼ばずスキップする", async () => {
+    vi.mocked(claimEvent).mockResolvedValue({ claimed: false, error: null });
     mockConstructEvent.mockReturnValue({
       id: "evt_5",
       type: "checkout.session.completed",
@@ -123,10 +124,9 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ received: true, skipped: true });
     expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
-    expect(recordEventProcessed).not.toHaveBeenCalled();
   });
 
-  it("ハンドラがエラーを返した場合は500を返し、処理済みとして記録しない（再送時にハンドラへ再到達させるため）", async () => {
+  it("ハンドラがエラーを返した場合は500を返し、claimを解放する（再送時にハンドラへ再到達させるため）", async () => {
     vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({
       error: "失敗しました",
       activated: false,
@@ -140,6 +140,20 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     const res = await POST(request("{}") as never);
 
     expect(res.status).toBe(500);
-    expect(recordEventProcessed).not.toHaveBeenCalled();
+    expect(releaseEventClaim).toHaveBeenCalledWith("evt_6");
+  });
+
+  it("claim後に例外が発生した場合も500を返し、claimを解放する", async () => {
+    vi.mocked(activateUserFromCheckoutSession).mockRejectedValue(new Error("unexpected"));
+    mockConstructEvent.mockReturnValue({
+      id: "evt_7",
+      type: "checkout.session.completed",
+      data: { object: {} },
+    });
+
+    const res = await POST(request("{}") as never);
+
+    expect(res.status).toBe(500);
+    expect(releaseEventClaim).toHaveBeenCalledWith("evt_7");
   });
 });

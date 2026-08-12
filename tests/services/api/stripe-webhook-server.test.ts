@@ -13,8 +13,8 @@ vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
 import { assertServiceRoleConfigured, getStripeClient } from "@/app/services/api/stripe-server";
 import {
   activateUserFromCheckoutSession,
-  isEventProcessed,
-  recordEventProcessed,
+  claimEvent,
+  releaseEventClaim,
   revertUserToTrial,
   syncSubscriptionStatus,
 } from "@/app/services/api/stripe-webhook-server";
@@ -262,7 +262,19 @@ describe("syncSubscriptionStatus", () => {
     items: { data: [{ current_period_end: 1750000000 }] },
   });
 
+  // Webhookイベントは到着順が保証されないため、イベントのスナップショットではなく
+  // Stripe APIから再取得したライブ状態を使う。テストでは再取得後の状態を
+  // mockGetStripeClient の引数で指定する
+  const mockGetStripeClient = (liveStatus: string) => {
+    vi.mocked(getStripeClient).mockReturnValue({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue({ ...makeSubscription(liveStatus) }),
+      },
+    } as never);
+  };
+
   it("canceledへ遷移した場合、ミラー更新に加えrevertUserToTrialを呼ぶ", async () => {
+    mockGetStripeClient("canceled");
     const mockClient = createMockSupabaseClient({
       tableResults: {
         stripe_subscriptions: [
@@ -288,6 +300,7 @@ describe("syncSubscriptionStatus", () => {
     "unpaid",
     "incomplete_expired",
   ])("%sへ遷移した場合もrevertUserToTrialを呼ぶ", async (status) => {
+    mockGetStripeClient(status);
     const mockClient = createMockSupabaseClient({
       tableResults: {
         stripe_subscriptions: [
@@ -306,6 +319,7 @@ describe("syncSubscriptionStatus", () => {
   });
 
   it("past_dueの場合はミラー更新のみで降格しない", async () => {
+    mockGetStripeClient("past_due");
     const mockClient = createMockSupabaseClient({
       tableResults: {
         stripe_subscriptions: [
@@ -323,7 +337,31 @@ describe("syncSubscriptionStatus", () => {
     expect(usersCalls).toHaveLength(0);
   });
 
+  it("イベントのスナップショットではなく、Stripe APIから再取得したライブ状態を書き込む（順序逆転対策）", async () => {
+    // イベント自体は古い"active"のスナップショットだが、再取得すると既に"canceled"
+    mockGetStripeClient("canceled");
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: [
+          { data: { user_id: 7 }, error: null },
+          { data: null, error: null },
+        ],
+        users: { data: null, error: null },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await syncSubscriptionStatus(makeSubscription("active") as never);
+
+    const subBuilder = mockClient.from.mock.results[1].value;
+    expect(subBuilder.update).toHaveBeenCalledWith(expect.objectContaining({ status: "canceled" }));
+    // 再取得結果が終端状態のため降格まで実行される
+    const usersCalls = mockClient.from.mock.calls.filter(([table]) => table === "users");
+    expect(usersCalls).toHaveLength(1);
+  });
+
   it("該当するstripe_subscriptions行が無い場合は何もしない（イベント順序逆転対策）", async () => {
+    mockGetStripeClient("active");
     const mockClient = createMockSupabaseClient({
       tableResults: { stripe_subscriptions: { data: null, error: null } },
     });
@@ -370,71 +408,76 @@ describe("revertUserToTrial", () => {
 });
 
 // ----------------------------------------------------------------
-// isEventProcessed / recordEventProcessed
+// claimEvent / releaseEventClaim
 //
-// 記録（recordEventProcessed）はハンドラ成功後にのみ呼ぶ設計のため、
-// 確認（isEventProcessed）と記録を分離している（ハンドラ失敗時に処理済みと
-// 誤記録されると、Stripeの再送が永久にスキップされてしまうため）
+// event.idへの素のINSERTを「claim」として使う（upsertではないため、同一event.idの
+// 並行リクエストは一意制約により片方だけが成功する＝原子的な排他制御になる）。
+// ハンドラ失敗時のみreleaseEventClaimで解放し、Stripeの再送が再度claimできるようにする。
 // ----------------------------------------------------------------
-describe("isEventProcessed", () => {
-  it("未処理のイベントの場合、processed=falseを返す", async () => {
+describe("claimEvent", () => {
+  it("未処理のイベントの場合、claimに成功しclaimed=trueを返す", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: { stripe_events: { data: null, error: null } },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await isEventProcessed("evt_1");
+    const result = await claimEvent("evt_1", "checkout.session.completed");
 
-    expect(result).toEqual({ processed: false, error: null });
+    expect(result).toEqual({ claimed: true, error: null });
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.insert).toHaveBeenCalledWith({
+      id: "evt_1",
+      type: "checkout.session.completed",
+    });
   });
 
-  it("処理済みのイベントの場合、processed=trueを返す", async () => {
+  it("既にclaim済み（一意制約違反）の場合、claimed=falseをエラー無しで返す", async () => {
     const mockClient = createMockSupabaseClient({
-      tableResults: { stripe_events: { data: { id: "evt_1" }, error: null } },
+      tableResults: {
+        stripe_events: { data: null, error: { message: "duplicate key", code: "23505" } },
+      },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await isEventProcessed("evt_1");
+    const result = await claimEvent("evt_1", "checkout.session.completed");
 
-    expect(result).toEqual({ processed: true, error: null });
+    expect(result).toEqual({ claimed: false, error: null });
   });
 
-  it("確認に失敗した場合はエラーを返す", async () => {
+  it("一意制約違反以外のDBエラーの場合はエラーを返す", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: { stripe_events: { data: null, error: dbError } },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await isEventProcessed("evt_1");
+    const result = await claimEvent("evt_1", "checkout.session.completed");
 
-    expect(result).toEqual({ processed: false, error: dbError.message });
+    expect(result).toEqual({ claimed: false, error: dbError.message });
   });
 });
 
-describe("recordEventProcessed", () => {
-  it("event.idをON CONFLICT DO NOTHING相当（upsert + ignoreDuplicates）で記録する", async () => {
+describe("releaseEventClaim", () => {
+  it("event.idの行を削除する", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: { stripe_events: { data: null, error: null } },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await recordEventProcessed("evt_1", "checkout.session.completed");
+    const result = await releaseEventClaim("evt_1");
 
     expect(result).toEqual({ error: null });
     const builder = mockClient.from.mock.results[0].value;
-    expect(builder.upsert).toHaveBeenCalledWith(
-      { id: "evt_1", type: "checkout.session.completed" },
-      { onConflict: "id", ignoreDuplicates: true }
-    );
+    expect(builder.delete).toHaveBeenCalled();
+    expect(builder.eq).toHaveBeenCalledWith("id", "evt_1");
   });
 
-  it("記録に失敗した場合はエラーを返す", async () => {
+  it("解放に失敗した場合はエラーを返す", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: { stripe_events: { data: null, error: dbError } },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await recordEventProcessed("evt_1", "checkout.session.completed");
+    const result = await releaseEventClaim("evt_1");
 
     expect(result).toEqual({ error: dbError.message });
   });
