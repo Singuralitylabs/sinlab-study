@@ -33,6 +33,7 @@ erDiagram
     users ||--o{ user_progress : "1:N"
     users ||--o{ submissions : "1:N"
     submissions ||--o| ai_reviews : "1:1"
+    users ||--o| stripe_subscriptions : "1:1"
 
     learning_themes {
         serial id PK
@@ -117,6 +118,20 @@ erDiagram
         int completion_tokens
         text error_message
         timestamptz reviewed_at
+    }
+    stripe_subscriptions {
+        serial id PK
+        int user_id FK
+        text stripe_customer_id
+        text stripe_subscription_id
+        varchar status
+        bool cancel_at_period_end
+        timestamptz current_period_end
+    }
+    stripe_events {
+        text id PK
+        text type
+        timestamptz processed_at
     }
 ```
 
@@ -348,6 +363,44 @@ erDiagram
 
 ---
 
+### 3.9 stripe_subscriptions（Stripeサブスクリプション）
+
+ユーザーごとのStripe課金状態のミラー（1ユーザー1行）。アプリの認可判定は従来どおり `users.status` / `users.membership_type` が唯一の真実であり、このテーブルは課金状態の参照・管理画面表示用に徹する。書き込みはWebhook（`/api/stripe/webhook`）と successページ（`/upgrade/success`）から service_role 経由でのみ行われ、通常クライアントからの書き込みポリシーは存在しない（6.6参照）。
+
+| カラム | 型 | NULL | デフォルト | 説明 |
+|:--|:--|:--:|:--|:--|
+| id | SERIAL | NO | auto increment | ID |
+| user_id | INTEGER | NO | - | `users.id`（UNIQUE, ON DELETE CASCADE）。1ユーザー1行 |
+| stripe_customer_id | TEXT | NO | - | Stripe Customer ID（`cus_...`、UNIQUE） |
+| stripe_subscription_id | TEXT | YES | NULL | Stripe Subscription ID（`sub_...`、UNIQUE） |
+| status | VARCHAR(30) | NO | - | Stripeの `subscription.status` をそのままミラー（例: `active`, `past_due`, `canceled`, `unpaid`）。CHECK制約は設けず、Stripe側の値追加にそのまま追従する |
+| cancel_at_period_end | BOOLEAN | NO | false | 期間終了時に解約予定かどうか |
+| current_period_end | TIMESTAMPTZ | YES | NULL | 現在の請求期間の終了日時 |
+| created_at | TIMESTAMPTZ | NO | now() | 作成日時 |
+| updated_at | TIMESTAMPTZ | NO | now() | 更新日時（トリガーで自動更新） |
+
+> **行が解約後も残り続ける点に注意**: `DELETE` は行わず常に `user_id` を key に `upsert` するため、一度でも契約したユーザーの行は解約後（`status` が `canceled` / `unpaid` / `incomplete_expired` / `paused` などの終端状態）も残り続ける。「現在契約中かどうか」を判定する箇所（再契約可否・管理画面のバッジ表示など）は、行の有無だけでなく `status` が終端状態でないことも確認する必要がある（アプリ側では `TERMINAL_SUBSCRIPTION_STATUSES` 定数で判定）。
+>
+> **`users` への昇格反映は「現に有効」なときのみ**: `stripe_subscriptions` のミラー自体はStripeから取得したステータスをそのまま保存するが、`users.status`/`membership_type` を昇格させるのは `status` が `ACTIVATABLE_SUBSCRIPTION_STATUSES`（`active` / `trialing`）のときのみ（`app/services/api/stripe-server.ts`）。Checkout Sessionは決済後もStripe側に不変オブジェクトとして残るため、`payment_status` だけで判定すると解約後・未入金時にも昇格してしまう経路を防ぐための制御。
+
+### 3.10 stripe_events（Webhookイベント記録）
+
+Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`）をPKにすることで、TTL（後述）以内の再送・重複配信を安全にスキップできる。
+
+| カラム | 型 | NULL | デフォルト | 説明 |
+|:--|:--|:--:|:--|:--|
+| id | TEXT | NO | - | Stripe event.id（`evt_...`、PK） |
+| type | TEXT | NO | - | イベント種別（例: `checkout.session.completed`） |
+| processed_at | TIMESTAMPTZ | NO | now() | claim（処理権確保）した日時 |
+
+> **claim/releaseによる原子的な冪等性**: `event.id` への素のINSERT（upsertではない）を「claim」として使う（`claimEvent()`）。同一event.idの並行配信はDBの一意制約により片方だけがclaimに成功するため、真に排他的。ハンドラが失敗した場合のみ行を削除して処理権を解放する（`releaseEventClaim()`）。先に成功扱いで記録し、ハンドラが後から失敗するような設計だと、Stripeの自動リトライ時に「処理済み」と誤判定され二度とハンドラに到達できなくなるため、claim（実行前）とrelease（失敗時のみ）を明確に分離している。`/api/stripe/webhook` はclaimに成功した場合のみハンドラを実行する。
+>
+> **TTLによる救済（既知の限界への対処）**: サーバーレス関数のタイムアウト・強制終了等でclaim後にrelease処理へ到達できなかった場合、claim行が残り続け以後の再送が永久にスキップされてしまう。これを防ぐため、一意制約違反（既にclaim済み）の場合は既存claimの`processed_at`が`EVENT_CLAIM_TTL_MINUTES`（10分、`app/services/api/stripe-webhook-server.ts`）を超えて放置されていないかを確認し、放置されていれば`processed_at`を更新して再claimする。ハンドラは冪等に設計されているため、まれに完了済みイベントを再claim・再実行しても実害は小さい（Slack通知の重複程度）。
+>
+> **releaseの3者競合対策**: `releaseEventClaim()` は `id` に加えて `claimEvent()` が返した `processed_at` の一致もDELETE条件に含める。TTL経過後に別プロセスが再claimした直後、旧claim保持者が遅れて解放処理に到達すると、`id` のみの無条件DELETEでは新しいclaimまで消してしまい3重処理の窓が開くため。
+
+---
+
 ## 4. インデックス
 
 | インデックス名 | テーブル | 対象カラム | 用途 |
@@ -513,6 +566,18 @@ user_id = (select get_user_id())
 
 初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer は受講生進捗（`/manage/students`）の閲覧で `users` を参照するため SELECT のみ許可し、UPDATE は付与しない（ユーザー管理は不可）。
 
+### 6.6 stripe_subscriptions
+
+| ポリシー | 操作 | 対象 | 条件 |
+|:--|:--|:--|:--|
+| Users can view own subscription, admins can view all | SELECT | 本人 / admin（全件） | `user_id = (select get_user_id()) OR (select get_user_role()) = 'admin'` |
+
+INSERT / UPDATE / DELETE のポリシーは定義していない。昇格・降格を伴う書き込みはアプリの認可判定と密結合しているため、Webhook（`/api/stripe/webhook`）と successページ（`/upgrade/success`）から service_role 経由でのみ行う。
+
+### 6.7 stripe_events
+
+RLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`authenticated` ロールでは SELECT を含め一切のアクセスができない）。
+
 ---
 
 ## 7. マイグレーション管理
@@ -525,9 +590,11 @@ user_id = (select get_user_id())
 | `01_schema/002_add_submission_code_files.sql` | submissions に複数ファイル提出用 `code_files`（JSONB）カラムを追加 |
 | `01_schema/003_add_is_open_to_trial.sql` | learning_contents にお試し公開フラグ `is_open_to_trial` を追加 |
 | `01_schema/004_add_membership_type.sql` | users に会員種別 `membership_type` を追加し、既存の `active` ユーザーを `community` にバックフィル |
+| `01_schema/005_add_stripe_tables.sql` | `stripe_subscriptions` / `stripe_events` テーブルを追加 |
 | `02_rls/001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
 | `02_rls/002_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し |
 | `02_rls/003_trial_user_policies.sql` | `get_user_status()` の追加と、お試しユーザー制限を含むポリシーへの差し替え（learning_contents の SELECT、user_progress / submissions の書き込み） |
+| `02_rls/004_stripe_tables_policies.sql` | `stripe_subscriptions` / `stripe_events` のRLS有効化とポリシー定義（`stripe_subscriptions` はSELECTのみ本人/admin） |
 | `03_seed/gas/001_course_structure.sql` | GAS講座のテーマ・フェーズ・週・コンテンツ構造のシード |
 | `03_seed/gas/002_exercises.sql` | GAS講座の演習コンテンツ（課題・模範回答）のシード |
 | `03_seed/gas/003_hints.sql` | GAS講座の全演習課題へのヒントデータ投入 |
@@ -574,3 +641,8 @@ user_id = (select get_user_id())
 | 2026年6月 | 実DB（Supabase）と照合し差分を修正：RLSヘルパー関数 `get_user_role()` / `get_user_id()` を追記し判定ロジックを実装準拠に修正、`users` テーブルのRLS（6.5）・`update_users_updated_at` トリガー・`idx_users_auth_role` インデックスを追記、`users` の文字列カラム型を VARCHAR に修正 |
 | 2026年7月 | お試し（trial）ユーザー機能に対応：`learning_contents` に `is_open_to_trial` カラム追加、RLSヘルパー関数 `get_user_status()` 追加、`learning_contents` のSELECTをお試しユーザー制限付きの別パターンに分離、`user_progress` / `submissions` の書き込みに可視コンテンツ限定のEXISTS条件を追記、マイグレーション一覧・公開制御・upsertパターンの注意点を更新 |
 | 2026年8月 | 会員種別の導入に対応：`users` に `membership_type`（`community` / `general`、承認前・却下は NULL）カラム追加、マイグレーション一覧に `01_schema/004_add_membership_type.sql` を追記 |
+| 2026年8月 | Stripe月額サブスク決済の導入に対応：`stripe_subscriptions`（課金状態のミラー）・`stripe_events`（Webhook冪等性）テーブルを追加。ER図・テーブル定義（3.9/3.10）・RLS（6.6/6.7）・マイグレーション一覧を更新 |
+| 2026年8月 | PRレビュー指摘を反映：`stripe_events` の冪等性設計を「確認→ハンドラ成功後に記録」から、INSERT自体を処理権のclaimとして使う原子的な排他制御（claim/release）に変更。3.10節を更新 |
+| 2026年8月 | GitHub Copilotレビュー指摘を反映：claimにTTLによる再claim救済を追加（サーバーレス関数の異常終了でclaimが永久に残る問題への対処）し3.10節を更新 |
+| 2026年8月 | 別セッションからの追加レビュー指摘を反映：`TERMINAL_SUBSCRIPTION_STATUSES`に`paused`を追加（トライアル終了後の未払いによる一時停止を終端状態として扱う） |
+| 2026年8月 | 上記に対する独立レビューの指摘を反映：`releaseEventClaim()`の3者競合対策（`processed_at`一致条件）を3.10節に追記 |

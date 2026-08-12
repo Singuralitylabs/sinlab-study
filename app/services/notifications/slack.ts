@@ -97,3 +97,92 @@ export async function sendSlackNewUserNotification(
     console.error("[Slack通知] Webhook POSTでエラーが発生しました:", error);
   }
 }
+
+type PaymentFailedNotificationParams = {
+  customerEmail: string | null;
+  amountDue: number;
+  hostedInvoiceUrl: string | null;
+};
+
+/**
+ * Stripeの支払い失敗（invoice.payment_failed）通知。初回失敗ではユーザーを降格せず
+ * Smart Retriesに任せるため、運用者への通知のみを行う。
+ */
+export async function sendSlackPaymentFailedNotification(
+  params: PaymentFailedNotificationParams
+): Promise<void> {
+  const webhookUrl = process.env.SLACK_NOTIFICATION_WEBHOOK_URL;
+
+  if (!webhookUrl) {
+    console.warn("[Slack通知] SLACK_NOTIFICATION_WEBHOOK_URL が未設定のため通知をスキップしました");
+    return;
+  }
+
+  const body = {
+    blocks: [
+      {
+        type: "header",
+        text: {
+          type: "plain_text",
+          text: "⚠️ Stripeの支払いに失敗しました",
+          emoji: true,
+        },
+      },
+      {
+        type: "section",
+        fields: [
+          {
+            type: "mrkdwn",
+            text: "*メール*",
+          },
+          {
+            type: "plain_text",
+            text: params.customerEmail ?? "不明",
+          },
+          {
+            type: "mrkdwn",
+            text: "*請求額*",
+          },
+          {
+            type: "plain_text",
+            // JPYはStripeのゼロ decimal通貨のため amount_due がそのまま円単位（複数通貨対応はスコープ外）
+            text: `${params.amountDue.toLocaleString("ja-JP")}円`,
+          },
+        ],
+      },
+      ...(params.hostedInvoiceUrl
+        ? [
+            {
+              type: "actions",
+              elements: [
+                {
+                  type: "button",
+                  text: {
+                    type: "plain_text",
+                    text: "請求書を開く",
+                    emoji: true,
+                  },
+                  url: params.hostedInvoiceUrl,
+                },
+              ],
+            },
+          ]
+        : []),
+    ],
+  };
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      console.error(`[Slack通知] Webhook POSTが失敗しました: status=${response.status}`);
+      return;
+    }
+  } catch (error) {
+    console.error("[Slack通知] Webhook POSTでエラーが発生しました:", error);
+  }
+}

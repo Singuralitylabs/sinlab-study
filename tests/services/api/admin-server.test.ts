@@ -7,6 +7,7 @@ import {
   approveUser,
   fetchManageCounts,
   fetchStudentsProgress,
+  fetchUserIdsWithStripeSubscription,
   rejectUser,
 } from "@/app/services/api/admin-server";
 import {
@@ -236,6 +237,9 @@ describe("approveUser", () => {
     expect(builder.eq).toHaveBeenCalledWith("id", 1);
     // 承認済みユーザーの再承認を原子的に弾く条件（TOCTOU対策）
     expect(builder.neq).toHaveBeenCalledWith("status", "active");
+    // updated判定（更新行数）に使うため必須。省略するとPostgRESTがdataを返さず
+    // updatedが常にfalseになる
+    expect(builder.select).toHaveBeenCalledWith("id");
   });
 
   it("更新対象が0行（既に承認済み・存在しない等）の場合、updated: false を返す", async () => {
@@ -276,5 +280,46 @@ describe("rejectUser", () => {
     expect(mockClient.from.mock.results[0].value.update).toHaveBeenCalledWith(
       expect.objectContaining({ status: "rejected", membership_type: null })
     );
+  });
+});
+
+// ----------------------------------------------------------------
+// fetchUserIdsWithStripeSubscription
+// ----------------------------------------------------------------
+describe("fetchUserIdsWithStripeSubscription", () => {
+  it("終端状態をSQL側で除外するクエリを発行し、返された行をそのままIDにマップする", async () => {
+    // 終端状態の除外はSQL側（.not）で行うため、モックは絞り込み後の行を返す想定
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: {
+          data: [{ user_id: 1 }, { user_id: 3 }],
+          error: null,
+        },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchUserIdsWithStripeSubscription();
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([1, 3]);
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.not).toHaveBeenCalledWith(
+      "status",
+      "in",
+      "(canceled,unpaid,incomplete_expired,paused)"
+    );
+  });
+
+  it("DBエラー時、data: null とエラーを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { stripe_subscriptions: { data: null, error: dbError } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchUserIdsWithStripeSubscription();
+
+    expect(result.data).toBeNull();
+    expect(result.error).toEqual(dbError);
   });
 });

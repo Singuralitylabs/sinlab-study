@@ -256,6 +256,68 @@ export type Database = {
           },
         ];
       };
+      stripe_events: {
+        Row: {
+          id: string;
+          processed_at: string;
+          type: string;
+        };
+        Insert: {
+          id: string;
+          processed_at?: string;
+          type: string;
+        };
+        Update: {
+          id?: string;
+          processed_at?: string;
+          type?: string;
+        };
+        Relationships: [];
+      };
+      stripe_subscriptions: {
+        Row: {
+          cancel_at_period_end: boolean;
+          created_at: string;
+          current_period_end: string | null;
+          id: number;
+          status: string;
+          stripe_customer_id: string;
+          stripe_subscription_id: string | null;
+          updated_at: string;
+          user_id: number;
+        };
+        Insert: {
+          cancel_at_period_end?: boolean;
+          created_at?: string;
+          current_period_end?: string | null;
+          id?: number;
+          status: string;
+          stripe_customer_id: string;
+          stripe_subscription_id?: string | null;
+          updated_at?: string;
+          user_id: number;
+        };
+        Update: {
+          cancel_at_period_end?: boolean;
+          created_at?: string;
+          current_period_end?: string | null;
+          id?: number;
+          status?: string;
+          stripe_customer_id?: string;
+          stripe_subscription_id?: string | null;
+          updated_at?: string;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "stripe_subscriptions_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: true;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       submissions: {
         Row: {
           code_content: string | null;
