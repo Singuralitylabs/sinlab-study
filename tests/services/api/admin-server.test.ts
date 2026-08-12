@@ -237,6 +237,9 @@ describe("approveUser", () => {
     expect(builder.eq).toHaveBeenCalledWith("id", 1);
     // 承認済みユーザーの再承認を原子的に弾く条件（TOCTOU対策）
     expect(builder.neq).toHaveBeenCalledWith("status", "active");
+    // updated判定（更新行数）に使うため必須。省略するとPostgRESTがdataを返さず
+    // updatedが常にfalseになる
+    expect(builder.select).toHaveBeenCalledWith("id");
   });
 
   it("更新対象が0行（既に承認済み・存在しない等）の場合、updated: false を返す", async () => {
