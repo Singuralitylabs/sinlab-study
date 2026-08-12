@@ -38,7 +38,7 @@ describe("POST /api/stripe/checkout", () => {
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/xxx" });
-    expect(createCheckoutSession).toHaveBeenCalledWith(5, "auth-uuid", "trial@example.com");
+    expect(createCheckoutSession).toHaveBeenCalledWith(5, "auth-uuid", "trial@example.com", null);
   });
 
   it("未認証の場合は401を返す", async () => {
@@ -95,5 +95,27 @@ describe("POST /api/stripe/checkout", () => {
 
     expect(res.status).toBe(200);
     expect(createCheckoutSession).toHaveBeenCalled();
+  });
+
+  it("解約済みの既存Customerがある場合、新規作成せず再利用する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: {
+          data: { id: 1, status: "canceled", stripe_customer_id: "cus_old" },
+          error: null,
+        },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const res = await POST();
+
+    expect(res.status).toBe(200);
+    expect(createCheckoutSession).toHaveBeenCalledWith(
+      5,
+      "auth-uuid",
+      "trial@example.com",
+      "cus_old"
+    );
   });
 });

@@ -20,7 +20,7 @@ beforeEach(() => {
   vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_dummy");
   vi.stubEnv("STRIPE_WEBHOOK_SECRET", webhookSecret);
   vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "service-role-dummy");
-  vi.mocked(claimEvent).mockResolvedValue({ claimed: false, error: null });
+  vi.mocked(claimEvent).mockResolvedValue({ claimed: false, processedAt: null, error: null });
 });
 
 afterEach(() => {

@@ -1,6 +1,9 @@
 import { CheckCircle2, XCircle } from "lucide-react";
 import Link from "next/link";
-import { retrieveCheckoutSession } from "@/app/services/api/stripe-server";
+import {
+  PAID_CHECKOUT_PAYMENT_STATUSES,
+  retrieveCheckoutSession,
+} from "@/app/services/api/stripe-server";
 import {
   activateUserFromCheckoutSession,
   extractUserId,
@@ -25,7 +28,10 @@ export default async function UpgradeSuccessPage({
       const session = await retrieveCheckoutSession(sessionId);
       const sessionUserId = extractUserId(session.client_reference_id, session.metadata);
 
-      if (session.payment_status !== "paid" || sessionUserId !== userId) {
+      if (
+        !PAID_CHECKOUT_PAYMENT_STATUSES.includes(session.payment_status) ||
+        sessionUserId !== userId
+      ) {
         errorMessage = "決済情報を確認できませんでした";
       } else {
         // Webhookより先にここへ遷移してくる場合があるため、successページ側でも

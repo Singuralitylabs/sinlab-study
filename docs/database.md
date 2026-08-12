@@ -379,7 +379,7 @@ erDiagram
 | created_at | TIMESTAMPTZ | NO | now() | 作成日時 |
 | updated_at | TIMESTAMPTZ | NO | now() | 更新日時（トリガーで自動更新） |
 
-> **行が解約後も残り続ける点に注意**: `DELETE` は行わず常に `user_id` を key に `upsert` するため、一度でも契約したユーザーの行は解約後（`status` が `canceled` / `unpaid` / `incomplete_expired` などの終端状態）も残り続ける。「現在契約中かどうか」を判定する箇所（再契約可否・管理画面のバッジ表示など）は、行の有無だけでなく `status` が終端状態でないことも確認する必要がある（アプリ側では `TERMINAL_SUBSCRIPTION_STATUSES` 定数で判定）。
+> **行が解約後も残り続ける点に注意**: `DELETE` は行わず常に `user_id` を key に `upsert` するため、一度でも契約したユーザーの行は解約後（`status` が `canceled` / `unpaid` / `incomplete_expired` / `paused` などの終端状態）も残り続ける。「現在契約中かどうか」を判定する箇所（再契約可否・管理画面のバッジ表示など）は、行の有無だけでなく `status` が終端状態でないことも確認する必要がある（アプリ側では `TERMINAL_SUBSCRIPTION_STATUSES` 定数で判定）。
 >
 > **`users` への昇格反映は「現に有効」なときのみ**: `stripe_subscriptions` のミラー自体はStripeから取得したステータスをそのまま保存するが、`users.status`/`membership_type` を昇格させるのは `status` が `ACTIVATABLE_SUBSCRIPTION_STATUSES`（`active` / `trialing`）のときのみ（`app/services/api/stripe-server.ts`）。Checkout Sessionは決済後もStripe側に不変オブジェクトとして残るため、`payment_status` だけで判定すると解約後・未入金時にも昇格してしまう経路を防ぐための制御。
 
@@ -642,3 +642,4 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | 2026年8月 | Stripe月額サブスク決済の導入に対応：`stripe_subscriptions`（課金状態のミラー）・`stripe_events`（Webhook冪等性）テーブルを追加。ER図・テーブル定義（3.9/3.10）・RLS（6.6/6.7）・マイグレーション一覧を更新 |
 | 2026年8月 | PRレビュー指摘を反映：`stripe_events` の冪等性設計を「確認→ハンドラ成功後に記録」から、INSERT自体を処理権のclaimとして使う原子的な排他制御（claim/release）に変更。3.10節を更新 |
 | 2026年8月 | GitHub Copilotレビュー指摘を反映：claimにTTLによる再claim救済を追加（サーバーレス関数の異常終了でclaimが永久に残る問題への対処）し3.10節を更新 |
+| 2026年8月 | 別セッションからの追加レビュー指摘を反映：`TERMINAL_SUBSCRIPTION_STATUSES`に`paused`を追加（トライアル終了後の未払いによる一時停止を終端状態として扱う） |

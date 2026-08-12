@@ -24,6 +24,7 @@ export function createQueryBuilder(result: QueryResult) {
     neq: vi.fn().mockReturnThis(),
     lt: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
+    not: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     range: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),

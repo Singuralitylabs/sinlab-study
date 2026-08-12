@@ -15,9 +15,9 @@ import { sendSlackPaymentFailedNotification } from "@/app/services/notifications
  * 予期せずthrowした場合に、解放処理の失敗でハンドラ失敗時の500応答自体を
  * 壊さないようにする（解放できなければclaimは残るが、TTL経過後に再claim可能になる）。
  */
-async function safeReleaseEventClaim(eventId: string): Promise<void> {
+async function safeReleaseEventClaim(eventId: string, processedAt: string): Promise<void> {
   try {
-    await releaseEventClaim(eventId);
+    await releaseEventClaim(eventId, processedAt);
   } catch (error) {
     console.error("イベントclaim解放エラー:", error);
   }
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "署名検証に失敗しました" }, { status: 400 });
   }
 
-  let claimed = false;
+  let claimedProcessedAt: string | null = null;
 
   try {
     assertServiceRoleConfigured();
@@ -50,15 +50,19 @@ export async function POST(request: NextRequest) {
     // event.idの処理権を原子的に確保する（素のINSERTのため、同一event.idの並行配信は
     // 一意制約により片方だけがclaimに成功する）。claimできなければ「他のリクエストが
     // 既に処理済み、または処理中」であり、ハンドラを実行せずスキップする
-    const { claimed: didClaim, error: claimError } = await claimEvent(event.id, event.type);
+    const {
+      claimed: didClaim,
+      processedAt,
+      error: claimError,
+    } = await claimEvent(event.id, event.type);
     if (claimError) {
       console.error("イベントclaimエラー:", claimError);
       return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
     }
-    if (!didClaim) {
+    if (!didClaim || !processedAt) {
       return NextResponse.json({ received: true, skipped: true });
     }
-    claimed = true;
+    claimedProcessedAt = processedAt;
 
     switch (event.type) {
       case "checkout.session.completed": {
@@ -67,7 +71,7 @@ export async function POST(request: NextRequest) {
         );
         if (error) {
           console.error("会員昇格エラー:", error);
-          await safeReleaseEventClaim(event.id);
+          await safeReleaseEventClaim(event.id, processedAt);
           return NextResponse.json({ error }, { status: 500 });
         }
         break;
@@ -78,7 +82,7 @@ export async function POST(request: NextRequest) {
         const { error } = await syncSubscriptionStatus(event.data.object as Stripe.Subscription);
         if (error) {
           console.error("サブスク状態同期エラー:", error);
-          await safeReleaseEventClaim(event.id);
+          await safeReleaseEventClaim(event.id, processedAt);
           return NextResponse.json({ error }, { status: 500 });
         }
         break;
@@ -101,8 +105,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Webhook処理エラー:", error);
     // claim後の予期しない例外もリトライ可能にするため、処理権を解放してから500を返す
-    if (claimed) {
-      await safeReleaseEventClaim(event.id);
+    if (claimedProcessedAt) {
+      await safeReleaseEventClaim(event.id, claimedProcessedAt);
     }
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
   }

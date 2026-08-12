@@ -546,7 +546,10 @@ export async function fetchUserIdsWithStripeSubscription(): Promise<{
 }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { data, error } = await supabase.from("stripe_subscriptions").select("user_id, status");
+  const { data, error } = await supabase
+    .from("stripe_subscriptions")
+    .select("user_id")
+    .not("status", "in", `(${TERMINAL_SUBSCRIPTION_STATUSES.join(",")})`);
 
   if (error) {
     console.error("サブスク契約ユーザー一覧取得エラー:", error.message);
@@ -554,9 +557,7 @@ export async function fetchUserIdsWithStripeSubscription(): Promise<{
   }
 
   return {
-    data: data
-      .filter((row) => !TERMINAL_SUBSCRIPTION_STATUSES.includes(row.status))
-      .map((row) => row.user_id),
+    data: data.map((row) => row.user_id),
     error: null,
   };
 }

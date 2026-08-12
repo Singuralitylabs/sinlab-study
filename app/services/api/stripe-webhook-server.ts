@@ -250,54 +250,72 @@ const EVENT_CLAIM_TTL_MINUTES = 10;
  * claimを奪い直す（`processed_at` を更新できた場合のみ claimed: true）。
  * ハンドラは冪等（upsert/条件付きUPDATE）に設計されているため、まれに完了済みの
  * イベントを再claim・再実行しても実害は小さい（Slack通知の重複程度）。
+ *
+ * @returns processedAt: このclaimで設定した`processed_at`。releaseEventClaim()に
+ * そのまま渡すことで、自分が確保したclaimだけを解放する（後述）
  */
 export async function claimEvent(
   eventId: string,
   type: string
-): Promise<{ claimed: boolean; error: string | null }> {
+): Promise<{ claimed: boolean; processedAt: string | null; error: string | null }> {
   assertServiceRoleConfigured();
   const supabase = await createAdminSupabaseClient();
 
+  const processedAt = new Date().toISOString();
   const { error } = await supabase
     .from("stripe_events")
-    .insert({ id: eventId, type, processed_at: new Date().toISOString() });
+    .insert({ id: eventId, type, processed_at: processedAt });
 
   if (!error) {
-    return { claimed: true, error: null };
+    return { claimed: true, processedAt, error: null };
   }
 
   // 一意制約違反（PostgreSQLエラーコード23505）以外はDBエラーとして呼び出し元に伝播する
   if (error.code !== "23505") {
     console.error("stripe_events claim エラー:", error.message);
-    return { claimed: false, error: error.message };
+    return { claimed: false, processedAt: null, error: error.message };
   }
 
   // 既にclaim済み。TTLを超えて放置されている場合のみ再claimを許可する
   const staleBefore = new Date(Date.now() - EVENT_CLAIM_TTL_MINUTES * 60 * 1000).toISOString();
+  const reclaimedAt = new Date().toISOString();
   const { data: reclaimed, error: reclaimError } = await supabase
     .from("stripe_events")
-    .update({ processed_at: new Date().toISOString() })
+    .update({ processed_at: reclaimedAt })
     .eq("id", eventId)
     .lt("processed_at", staleBefore)
     .select("id");
 
   if (reclaimError) {
     console.error("stripe_events 再claim エラー:", reclaimError.message);
-    return { claimed: false, error: reclaimError.message };
+    return { claimed: false, processedAt: null, error: reclaimError.message };
   }
 
-  return { claimed: (reclaimed?.length ?? 0) > 0, error: null };
+  const claimed = (reclaimed?.length ?? 0) > 0;
+  return { claimed, processedAt: claimed ? reclaimedAt : null, error: null };
 }
 
 /**
  * claimEvent() で確保したイベントの処理権を解放する。ハンドラが失敗した場合にのみ呼ぶこと。
  * 行を削除することで、Stripeの自動リトライ時に claimEvent() が再度成功できるようにする。
+ *
+ * DELETEの条件に `processed_at` の一致を含めるのは、TTL経過後に自分のclaimが既に
+ * 別プロセスによって再claimされている場合に、その新しいclaimまで誤って削除して
+ * しまうのを防ぐため（無条件DELETEだと、旧claim保持者が遅れて解放処理に到達した際に
+ * 新しいclaimを消してしまい、3つ目のリクエストが再claimできてしまう理論上の競合が生じる）。
  */
-export async function releaseEventClaim(eventId: string): Promise<{ error: string | null }> {
+export async function releaseEventClaim(
+  eventId: string,
+  processedAt: string
+): Promise<{ error: string | null }> {
   assertServiceRoleConfigured();
   const supabase = await createAdminSupabaseClient();
 
-  const { error } = await supabase.from("stripe_events").delete().eq("id", eventId);
+  const { error } = await supabase
+    .from("stripe_events")
+    .delete()
+    .eq("id", eventId)
+    .eq("processed_at", processedAt);
 
   if (error) {
     console.error("stripe_events claim解放エラー:", error.message);

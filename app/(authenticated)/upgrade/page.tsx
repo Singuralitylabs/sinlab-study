@@ -11,6 +11,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ManageSubscriptionButton } from "./ManageSubscriptionButton";
 import { UpgradeCheckoutButton } from "./UpgradeCheckoutButton";
 
+function formatDate(isoString: string): string {
+  return new Date(isoString).toLocaleDateString("ja-JP");
+}
+
 function formatMonthlyPrice(amount: number, currency: string): string {
   if (currency.toLowerCase() !== "jpy") {
     // JPY以外は想定していない（複数通貨対応はスコープ外）ため、通貨コード付きでそのまま表示する
@@ -27,7 +31,11 @@ export default async function UpgradePage() {
   }
 
   let subscriptionFetchFailed = false;
-  let fetchedSubscription: { status: string; cancel_at_period_end: boolean } | null = null;
+  let fetchedSubscription: {
+    status: string;
+    cancel_at_period_end: boolean;
+    current_period_end: string | null;
+  } | null = null;
   if (userStatus === USER_STATUS.ACTIVE) {
     const { data, error } = await fetchStripeSubscriptionByUserId(userId);
     if (error) {
@@ -90,7 +98,15 @@ export default async function UpgradePage() {
             <>
               <p className="text-sm">
                 ご契約中です
-                {subscription.cancel_at_period_end && "（次回更新日をもって解約予定です）"}
+                {subscription.current_period_end && (
+                  <>
+                    （
+                    {subscription.cancel_at_period_end
+                      ? `${formatDate(subscription.current_period_end)}をもって解約予定です`
+                      : `次回のお支払い: ${formatDate(subscription.current_period_end)}`}
+                    ）
+                  </>
+                )}
               </p>
               <ManageSubscriptionButton />
             </>

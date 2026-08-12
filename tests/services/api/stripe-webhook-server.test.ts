@@ -423,7 +423,9 @@ describe("claimEvent", () => {
 
     const result = await claimEvent("evt_1", "checkout.session.completed");
 
-    expect(result).toEqual({ claimed: true, error: null });
+    expect(result.claimed).toBe(true);
+    expect(result.error).toBeNull();
+    expect(result.processedAt).toEqual(expect.any(String));
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.insert).toHaveBeenCalledWith(
       expect.objectContaining({ id: "evt_1", type: "checkout.session.completed" })
@@ -444,7 +446,7 @@ describe("claimEvent", () => {
 
     const result = await claimEvent("evt_1", "checkout.session.completed");
 
-    expect(result).toEqual({ claimed: false, error: null });
+    expect(result).toEqual({ claimed: false, processedAt: null, error: null });
   });
 
   it("既にclaim済み（一意制約違反）でTTLを超えて放置されている場合、再claimしclaimed=trueを返す", async () => {
@@ -460,7 +462,9 @@ describe("claimEvent", () => {
 
     const result = await claimEvent("evt_1", "checkout.session.completed");
 
-    expect(result).toEqual({ claimed: true, error: null });
+    expect(result.claimed).toBe(true);
+    expect(result.error).toBeNull();
+    expect(result.processedAt).toEqual(expect.any(String));
     const reclaimBuilder = mockClient.from.mock.results[1].value;
     expect(reclaimBuilder.update).toHaveBeenCalledWith(
       expect.objectContaining({ processed_at: expect.any(String) })
@@ -482,7 +486,7 @@ describe("claimEvent", () => {
 
     const result = await claimEvent("evt_1", "checkout.session.completed");
 
-    expect(result).toEqual({ claimed: false, error: dbError.message });
+    expect(result).toEqual({ claimed: false, processedAt: null, error: dbError.message });
   });
 
   it("一意制約違反以外のDBエラーの場合はエラーを返す", async () => {
@@ -493,23 +497,24 @@ describe("claimEvent", () => {
 
     const result = await claimEvent("evt_1", "checkout.session.completed");
 
-    expect(result).toEqual({ claimed: false, error: dbError.message });
+    expect(result).toEqual({ claimed: false, processedAt: null, error: dbError.message });
   });
 });
 
 describe("releaseEventClaim", () => {
-  it("event.idの行を削除する", async () => {
+  it("event.idかつ自分がclaimしたprocessed_atと一致する行のみ削除する", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: { stripe_events: { data: null, error: null } },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await releaseEventClaim("evt_1");
+    const result = await releaseEventClaim("evt_1", "2026-01-01T00:00:00.000Z");
 
     expect(result).toEqual({ error: null });
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.delete).toHaveBeenCalled();
-    expect(builder.eq).toHaveBeenCalledWith("id", "evt_1");
+    expect(builder.eq).toHaveBeenNthCalledWith(1, "id", "evt_1");
+    expect(builder.eq).toHaveBeenNthCalledWith(2, "processed_at", "2026-01-01T00:00:00.000Z");
   });
 
   it("解放に失敗した場合はエラーを返す", async () => {
@@ -518,7 +523,7 @@ describe("releaseEventClaim", () => {
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await releaseEventClaim("evt_1");
+    const result = await releaseEventClaim("evt_1", "2026-01-01T00:00:00.000Z");
 
     expect(result).toEqual({ error: dbError.message });
   });

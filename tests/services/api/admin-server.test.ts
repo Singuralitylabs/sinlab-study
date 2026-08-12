@@ -287,16 +287,12 @@ describe("rejectUser", () => {
 // fetchUserIdsWithStripeSubscription
 // ----------------------------------------------------------------
 describe("fetchUserIdsWithStripeSubscription", () => {
-  it("現在契約中とみなせるステータスのユーザーIDのみを返す", async () => {
+  it("終端状態をSQL側で除外するクエリを発行し、返された行をそのままIDにマップする", async () => {
+    // 終端状態の除外はSQL側（.not）で行うため、モックは絞り込み後の行を返す想定
     const mockClient = createMockSupabaseClient({
       tableResults: {
         stripe_subscriptions: {
-          data: [
-            { user_id: 1, status: "active" },
-            { user_id: 2, status: "canceled" },
-            { user_id: 3, status: "past_due" },
-            { user_id: 4, status: "unpaid" },
-          ],
+          data: [{ user_id: 1 }, { user_id: 3 }],
           error: null,
         },
       },
@@ -306,8 +302,13 @@ describe("fetchUserIdsWithStripeSubscription", () => {
     const result = await fetchUserIdsWithStripeSubscription();
 
     expect(result.error).toBeNull();
-    // canceled(2)・unpaid(4)は終端状態のため除外される
     expect(result.data).toEqual([1, 3]);
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.not).toHaveBeenCalledWith(
+      "status",
+      "in",
+      "(canceled,unpaid,incomplete_expired,paused)"
+    );
   });
 
   it("DBエラー時、data: null とエラーを返す", async () => {

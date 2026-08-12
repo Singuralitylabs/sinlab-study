@@ -29,7 +29,11 @@ beforeEach(() => {
   vi.mocked(getStripeClient).mockReturnValue({
     webhooks: { constructEvent: mockConstructEvent },
   } as never);
-  vi.mocked(claimEvent).mockResolvedValue({ claimed: true, error: null });
+  vi.mocked(claimEvent).mockResolvedValue({
+    claimed: true,
+    processedAt: "2026-01-01T00:00:00.000Z",
+    error: null,
+  });
   vi.mocked(releaseEventClaim).mockResolvedValue({ error: null });
   vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({ error: null, activated: true });
   vi.mocked(syncSubscriptionStatus).mockResolvedValue({ error: null });
@@ -112,7 +116,11 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
   });
 
   it("claimがDBエラーを返した場合は500を返し、ハンドラを呼ばない", async () => {
-    vi.mocked(claimEvent).mockResolvedValue({ claimed: false, error: "db error" });
+    vi.mocked(claimEvent).mockResolvedValue({
+      claimed: false,
+      processedAt: null,
+      error: "db error",
+    });
     mockConstructEvent.mockReturnValue({
       id: "evt_claim_error",
       type: "checkout.session.completed",
@@ -126,7 +134,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
   });
 
   it("claimできない（再送・同時配信の重複）場合はハンドラを呼ばずスキップする", async () => {
-    vi.mocked(claimEvent).mockResolvedValue({ claimed: false, error: null });
+    vi.mocked(claimEvent).mockResolvedValue({ claimed: false, processedAt: null, error: null });
     mockConstructEvent.mockReturnValue({
       id: "evt_5",
       type: "checkout.session.completed",
@@ -154,7 +162,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     const res = await POST(request("{}") as never);
 
     expect(res.status).toBe(500);
-    expect(releaseEventClaim).toHaveBeenCalledWith("evt_6");
+    expect(releaseEventClaim).toHaveBeenCalledWith("evt_6", "2026-01-01T00:00:00.000Z");
   });
 
   it("claim後に例外が発生した場合も500を返し、claimを解放する", async () => {
@@ -168,6 +176,6 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     const res = await POST(request("{}") as never);
 
     expect(res.status).toBe(500);
-    expect(releaseEventClaim).toHaveBeenCalledWith("evt_7");
+    expect(releaseEventClaim).toHaveBeenCalledWith("evt_7", "2026-01-01T00:00:00.000Z");
   });
 });

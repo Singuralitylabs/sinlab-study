@@ -26,7 +26,7 @@ export async function POST() {
     const supabase = await createAdminSupabaseClient();
     const { data: existing, error: fetchError } = await supabase
       .from("stripe_subscriptions")
-      .select("id, status")
+      .select("id, status, stripe_customer_id")
       .eq("user_id", auth.userId)
       .maybeSingle();
 
@@ -41,7 +41,14 @@ export async function POST() {
       );
     }
 
-    const { url } = await createCheckoutSession(auth.userId, auth.user.id, auth.user.email);
+    // 解約済み等で終端状態の行が残っている場合、以前作成済みのCustomerを再利用する
+    // （毎回新規Customerを作らないことで、保存済みカード・請求履歴の孤児化を防ぐ）
+    const { url } = await createCheckoutSession(
+      auth.userId,
+      auth.user.id,
+      auth.user.email,
+      existing?.stripe_customer_id ?? null
+    );
     return NextResponse.json({ url });
   } catch (error) {
     console.error("Checkout作成APIエラー:", error);

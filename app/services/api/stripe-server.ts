@@ -9,8 +9,18 @@ let cachedClient: Stripe | null = null;
  * `stripe_subscriptions` は1ユーザー1行固定（DELETEなし・常にupsert）で更新されるため、
  * 一度契約したユーザーの行は解約後も残り続ける。これらのステータスの行は
  * 「現在は契約していない」とみなし、再契約の許可・管理画面でのバッジ表示から除外する。
+ *
+ * `paused` を含めるのは、Price側でトライアル期間を設定した場合に、支払い方法未登録の
+ * ままトライアルが終了するとStripeがサブスクを`paused`へ遷移させるため。これを終端状態から
+ * 除外すると、一度も支払わないまま`active`/`general`のまま留まり続けてしまう
+ * （`ACTIVATABLE_SUBSCRIPTION_STATUSES`に`trialing`を含めていることの裏返し）。
  */
-export const TERMINAL_SUBSCRIPTION_STATUSES = ["canceled", "unpaid", "incomplete_expired"];
+export const TERMINAL_SUBSCRIPTION_STATUSES = [
+  "canceled",
+  "unpaid",
+  "incomplete_expired",
+  "paused",
+];
 
 /**
  * サブスクリプションが「現に有効」とみなせるステータス。
@@ -22,6 +32,18 @@ export const TERMINAL_SUBSCRIPTION_STATUSES = ["canceled", "unpaid", "incomplete
  * このガードが無いと未入金のまま昇格してしまう。
  */
 export const ACTIVATABLE_SUBSCRIPTION_STATUSES = ["active", "trialing"];
+
+/**
+ * successページで「決済確認済み」とみなすCheckout Sessionの`payment_status`。
+ * 通常は`paid`だが、Price側でトライアル期間が設定されている場合は決済が発生せず
+ * `no_payment_required`になる（Webhook側は`ACTIVATABLE_SUBSCRIPTION_STATUSES`に
+ * `trialing`を含めており昇格させるため、successページ側だけ`paid`限定にすると
+ * トライアル時に「決済情報を確認できませんでした」という誤ったエラー表示になってしまう）。
+ */
+export const PAID_CHECKOUT_PAYMENT_STATUSES: Stripe.Checkout.Session.PaymentStatus[] = [
+  "paid",
+  "no_payment_required",
+];
 
 /**
  * Stripeクライアントを取得する。STRIPE_SECRET_KEY 未設定時はthrowする
@@ -51,11 +73,18 @@ function getAppUrl(): string {
  * 月額サブスクリプションのCheckoutセッションを作成する。
  * client_reference_id と metadata の双方に user_id を含めることで、
  * Webhookイベント側でどちらが取れても本人特定できるようにする。
+ *
+ * `existingCustomerId` が渡された場合（解約済み等で過去にCustomerが作成済みの場合）は
+ * それを再利用する。渡さないと毎回新規Customerが作成され、保存済みカード・請求履歴ごと
+ * 旧Customerが孤児化し、Customer Portalからも参照できなくなるため。
+ * Stripe APIの仕様上 `customer` と `customer_email` は併用できないため、
+ * 再利用時は `customer_email` を渡さない（既存Customerに登録済みのメールが使われる）。
  */
 export async function createCheckoutSession(
   userId: number,
   authId: string,
-  email: string | undefined
+  email: string | undefined,
+  existingCustomerId: string | null = null
 ): Promise<{ url: string }> {
   const priceId = process.env.STRIPE_PRICE_ID;
   if (!priceId) {
@@ -73,7 +102,11 @@ export async function createCheckoutSession(
     payment_method_types: ["card"],
     line_items: [{ price: priceId, quantity: 1 }],
     client_reference_id: String(userId),
-    ...(email ? { customer_email: email } : {}),
+    ...(existingCustomerId
+      ? { customer: existingCustomerId }
+      : email
+        ? { customer_email: email }
+        : {}),
     metadata: { user_id: String(userId), auth_id: authId },
     subscription_data: {
       metadata: { user_id: String(userId), auth_id: authId },
@@ -108,17 +141,30 @@ export async function retrieveCheckoutSession(sessionId: string): Promise<Stripe
   return await stripe.checkout.sessions.retrieve(sessionId);
 }
 
+const PRICE_CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedPrice: { data: { amount: number | null; currency: string }; expiresAt: number } | null =
+  null;
+
 /**
  * 月額（1ヶ月間隔）サブスクリプションのPrice情報を取得する（/upgrade ページでの料金表示用）。
  * `unit_amount` はJPY（ゼロdecimal通貨）を前提にそのまま円額として扱う
  * （複数通貨対応はスコープ外。Slack支払い失敗通知の金額表示と同じ前提）。
  * 設定されたPriceが1ヶ月間隔でない場合は `amount: null` を返し、呼び出し側で料金非表示にする
  * （「/ 月」表示と実際の請求間隔の食い違いを避けるため）。
+ *
+ * Priceはほぼ不変（変更は運用者がダッシュボードで行う稀な操作）のため、ページ表示のたびに
+ * Stripe APIを呼ぶのを避けるモジュールスコープのTTLキャッシュを持つ（`getStripeClient()`の
+ * `cachedClient`と同じパターン）。サーバーレス環境ではインスタンスごとのキャッシュになるが、
+ * ウォームインスタンスの再利用時には有効。
  */
 export async function fetchSubscriptionPrice(): Promise<{
   amount: number | null;
   currency: string;
 }> {
+  if (cachedPrice && cachedPrice.expiresAt > Date.now()) {
+    return cachedPrice.data;
+  }
+
   const priceId = process.env.STRIPE_PRICE_ID;
   if (!priceId) {
     throw new Error("Stripe環境変数が設定されていません: STRIPE_PRICE_ID");
@@ -129,10 +175,12 @@ export async function fetchSubscriptionPrice(): Promise<{
   const isPlainMonthly =
     price.recurring?.interval === "month" && (price.recurring.interval_count ?? 1) === 1;
 
-  return {
+  const data = {
     amount: isPlainMonthly ? price.unit_amount : null,
     currency: price.currency,
   };
+  cachedPrice = { data, expiresAt: Date.now() + PRICE_CACHE_TTL_MS };
+  return data;
 }
 
 /**
