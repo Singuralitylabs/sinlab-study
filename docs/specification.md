@@ -312,7 +312,7 @@ Stripe APIからのライブ状態取得は、ミラー更新の直前（上記�
 
 | エンドポイント | 内容 |
 |:--|:--|
-| `POST /api/stripe/checkout` | Checkoutセッションを作成しURLを返す。お試しユーザー以外は403、既に契約中・手続き中のサブスク行がある場合は409（解約済みの行が残っているだけの場合は再契約を許可する）。解約済み等で既存のStripe Customerがあれば再利用し、毎回新規作成しない（旧Customerの孤児化・請求履歴の分裂を防ぐ） |
+| `POST /api/stripe/checkout` | Checkoutセッションを作成しURLを返す。お試しユーザー以外は403、既に契約中・手続き中のサブスク行がある場合は409（解約済みの行が残っているだけの場合は再契約を許可する）。解約済み等で既存のStripe Customerがあれば再利用し、毎回新規作成しない（旧Customerの孤児化・請求履歴の分裂を防ぐ）。再利用しようとした既存Customerが（ダッシュボードでの削除等により）Stripe側に存在しない場合は、新規Customerでの作成にフォールバックする（そうしないと当該ユーザーが恒久的にCheckoutへ進めなくなるため） |
 | `POST /api/stripe/webhook` | Stripeからのイベントを受信。生ボディで署名検証し、`event.id` のclaim（原子的な処理権確保）に成功した場合のみイベント種別ごとに処理する |
 | `POST /api/stripe/portal` | Customer Portalセッションを作成しURLを返す。自身の `stripe_subscriptions` 行がないユーザーは404 |
 
@@ -884,3 +884,4 @@ flowchart TD
 | 2026年8月 | PR #98レビュー指摘を反映：Webhookイベントのclaim/release方式への変更、Stripe再取得によるTOCTOU対策、`/upgrade`・`/admin/users`のフェイルクローズ、月額料金表示、既知の限界（会員化の由来を区別できない点）を2.7節・2.11節に追記 |
 | 2026年8月 | GitHub Copilotレビュー指摘を反映：claimのTTL救済、`activateUserFromCheckoutSession`のライブ状態取得を書き込み直前の1箇所に集約、契約取得エラー時もPortal導線を残す旨を2.11節に追記 |
 | 2026年8月 | 別セッションからの追加レビュー指摘を反映：`paused`を終端状態に追加、successページの`no_payment_required`許容、既存Stripe Customerの再利用、月額料金のキャッシュ、`current_period_end`を用いた次回更新日・解約予定日の表示を2.11節に追記 |
+| 2026年8月 | 上記に対する独立レビューの指摘を反映：既存Stripe Customerが見つからない場合の新規Customerへのフォールバックを2.11節に追記 |

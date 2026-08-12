@@ -12,7 +12,7 @@ import { ManageSubscriptionButton } from "./ManageSubscriptionButton";
 import { UpgradeCheckoutButton } from "./UpgradeCheckoutButton";
 
 function formatDate(isoString: string): string {
-  return new Date(isoString).toLocaleDateString("ja-JP");
+  return new Date(isoString).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
 }
 
 function formatMonthlyPrice(amount: number, currency: string): string {

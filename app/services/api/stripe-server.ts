@@ -79,6 +79,8 @@ function getAppUrl(): string {
  * 旧Customerが孤児化し、Customer Portalからも参照できなくなるため。
  * Stripe APIの仕様上 `customer` と `customer_email` は併用できないため、
  * 再利用時は `customer_email` を渡さない（既存Customerに登録済みのメールが使われる）。
+ * 保存済みCustomerがStripe側で見つからない場合（`resource_missing`）は、新規Customerでの
+ * 作成にフォールバックする（そうしないと該当ユーザーが恒久的にCheckoutへ進めなくなるため）。
  */
 export async function createCheckoutSession(
   userId: number,
@@ -93,7 +95,7 @@ export async function createCheckoutSession(
   const appUrl = getAppUrl();
   const stripe = getStripeClient();
 
-  const session = await stripe.checkout.sessions.create({
+  const buildParams = (customerId: string | null): Stripe.Checkout.SessionCreateParams => ({
     mode: "subscription",
     // コンビニ払い・銀行振込等の遅延通知系決済手段は使わずカードのみに限定する。
     // これらはcheckout.session.completed発火時点でsubscription.statusがincomplete
@@ -102,11 +104,7 @@ export async function createCheckoutSession(
     payment_method_types: ["card"],
     line_items: [{ price: priceId, quantity: 1 }],
     client_reference_id: String(userId),
-    ...(existingCustomerId
-      ? { customer: existingCustomerId }
-      : email
-        ? { customer_email: email }
-        : {}),
+    ...(customerId ? { customer: customerId } : email ? { customer_email: email } : {}),
     metadata: { user_id: String(userId), auth_id: authId },
     subscription_data: {
       metadata: { user_id: String(userId), auth_id: authId },
@@ -114,6 +112,24 @@ export async function createCheckoutSession(
     success_url: `${appUrl}/upgrade/success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${appUrl}/upgrade`,
   });
+
+  let session: Stripe.Checkout.Session;
+  try {
+    session = await stripe.checkout.sessions.create(buildParams(existingCustomerId));
+  } catch (error) {
+    // 保存済みCustomerがStripe側で削除済み等で存在しない場合、再利用を諦めて
+    // 新規Customerでの作成にフォールバックする（そうしないと、当該ユーザーは
+    // 恒久的にCheckoutへ進めなくなってしまう）
+    const isMissingCustomer =
+      existingCustomerId &&
+      error instanceof Stripe.errors.StripeError &&
+      error.code === "resource_missing" &&
+      error.param === "customer";
+    if (!isMissingCustomer) {
+      throw error;
+    }
+    session = await stripe.checkout.sessions.create(buildParams(null));
+  }
 
   if (!session.url) {
     throw new Error("Stripe Checkoutセッションの作成に失敗しました");

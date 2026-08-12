@@ -144,7 +144,7 @@ export async function activateUserFromCheckoutSession(
 /**
  * customer.subscription.updated / customer.subscription.deleted で呼ばれる、
  * stripe_subscriptions のミラー更新。終端状態（TERMINAL_SUBSCRIPTION_STATUSES:
- * canceled/unpaid/incomplete_expired）へ遷移した場合のみ降格する
+ * canceled/unpaid/incomplete_expired/paused）へ遷移した場合のみ降格する
  * （past_due は猶予期間のため降格しない）。
  *
  * Webhookイベントは到着順が保証されないため、イベントに埋め込まれたsubscriptionの
