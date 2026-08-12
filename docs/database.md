@@ -385,7 +385,7 @@ erDiagram
 
 ### 3.10 stripe_events（Webhookイベント記録）
 
-Stripe Webhookイベントの冪等性を担保するための処理済みイベント記録。`event.id`（`evt_...`）をPKにすることで、Stripeからの再送・重複配信を安全にスキップできる。
+Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`）をPKにすることで、TTL（後述）以内の再送・重複配信を安全にスキップできる。
 
 | カラム | 型 | NULL | デフォルト | 説明 |
 |:--|:--|:--:|:--|:--|
