@@ -41,6 +41,13 @@ function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
  * ことも防ぐ（下記の既存行チェック）。上書きを許すと、以後 syncSubscriptionStatus() が
  * `stripe_subscription_id` で現行契約を照合できなくなり、解約イベントを取りこぼす。
  *
+ * Stripe APIからのライブ状態取得（`stripe.subscriptions.retrieve()`）は、ミラーupsertの
+ * 直前（既存行チェックの後）に1回だけ行い、その結果をミラーupsertとusers更新の両方に使う。
+ * こうすることで、取得時点から書き込み時点までの間隔（TOCTOUウィンドウ）を最小化する。
+ * それでもミラーupsert〜users更新の間に解約Webhookが並行実行される競合は理論上残るが
+ * （完全な排他制御にはDBトランザクション/RPCが必要でスコープ外）、取得を書き込み直前の
+ * 1箇所に集約することで、古いスナップショットのままミラーだけ巻き戻る事態は避けられる。
+ *
  * @returns activated: 実際に users を昇格したか。successページ側の表示分岐に使う
  */
 export async function activateUserFromCheckoutSession(
@@ -66,8 +73,6 @@ export async function activateUserFromCheckoutSession(
   }
 
   assertServiceRoleConfigured();
-  const stripe = getStripeClient();
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
   const supabase = await createAdminSupabaseClient();
 
   const { data: existingRow, error: existingFetchError } = await supabase
@@ -82,14 +87,18 @@ export async function activateUserFromCheckoutSession(
   }
 
   // 既に別の契約が現行（終端状態でない）として記録されている場合、古いセッションの
-  // リプレイでミラー行を上書きしない（現行契約のWebhook照合が壊れるため）
+  // リプレイでミラー行を上書きしない（現行契約のWebhook照合が壊れるため）。
+  // subscriptionId（session由来の生の文字列）で比較するため、Stripe APIの呼び出しは不要
   const isStaleReplay =
     existingRow != null &&
-    existingRow.stripe_subscription_id !== subscription.id &&
+    existingRow.stripe_subscription_id !== subscriptionId &&
     !TERMINAL_SUBSCRIPTION_STATUSES.includes(existingRow.status);
   if (isStaleReplay) {
     return { error: null, activated: false };
   }
+
+  const stripe = getStripeClient();
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
   const { error: subscriptionError } = await supabase.from("stripe_subscriptions").upsert(
     {
@@ -110,14 +119,6 @@ export async function activateUserFromCheckoutSession(
   }
 
   if (!ACTIVATABLE_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
-    return { error: null, activated: false };
-  }
-
-  // ミラーupsert〜ここまでの間に解約Webhookが並行して届き、サブスクが終端状態へ
-  // 遷移している可能性があるため、usersを更新する直前でもう一度ライブ状態を確認する
-  // （完全な排他制御ではないが、TOCTOUウィンドウを最小限に縮める）
-  const latestSubscription = await stripe.subscriptions.retrieve(subscriptionId);
-  if (!ACTIVATABLE_SUBSCRIPTION_STATUSES.includes(latestSubscription.status)) {
     return { error: null, activated: false };
   }
 
@@ -154,19 +155,20 @@ export async function activateUserFromCheckoutSession(
  * stripe_subscription_id で該当行を特定する。checkout.session.completed 未処理のうちに
  * updated/deleted が届いた場合（順序逆転）は対象行が無いため何もしない
  * （後続で checkout.session.completed が処理されれば最新状態で upsert される）。
+ * この存在チェックはStripe APIの再取得より先に行う。当サービスと無関係な
+ * サブスクのイベントでも毎回Stripe APIを叩くと、無駄な呼び出しやAPI障害時の
+ * 不要な500・再送を招くため。
  */
 export async function syncSubscriptionStatus(
   subscriptionFromEvent: Stripe.Subscription
 ): Promise<{ error: string | null }> {
   assertServiceRoleConfigured();
-  const stripe = getStripeClient();
-  const subscription = await stripe.subscriptions.retrieve(subscriptionFromEvent.id);
   const supabase = await createAdminSupabaseClient();
 
   const { data: existing, error: fetchError } = await supabase
     .from("stripe_subscriptions")
     .select("user_id")
-    .eq("stripe_subscription_id", subscription.id)
+    .eq("stripe_subscription_id", subscriptionFromEvent.id)
     .maybeSingle();
 
   if (fetchError) {
@@ -176,6 +178,9 @@ export async function syncSubscriptionStatus(
   if (!existing) {
     return { error: null };
   }
+
+  const stripe = getStripeClient();
+  const subscription = await stripe.subscriptions.retrieve(subscriptionFromEvent.id);
 
   const { error: updateError } = await supabase
     .from("stripe_subscriptions")
@@ -225,6 +230,9 @@ export async function revertUserToTrial(userId: number): Promise<{ error: string
   return { error: null };
 }
 
+/** claimが放置されたとみなすまでの時間（分）。この時間を超えたclaimは再claim可能にする */
+const EVENT_CLAIM_TTL_MINUTES = 10;
+
 /**
  * Webhookイベントの処理権を原子的に確保する。`stripe_events.id`（PK）への素のINSERTを
  * 「claim」として使う（upsertではなく通常のINSERTのため、同一event.idの並行リクエストは
@@ -234,6 +242,14 @@ export async function revertUserToTrial(userId: number): Promise<{ error: string
  * releaseEventClaim() でclaimを解放してStripeの自動リトライが再度ハンドラへ
  * 到達できるようにする（claimを解放しないまま成功扱いにすると、リトライが
  * 「処理済み」と誤判定され永久にスキップされる）。
+ *
+ * **TTLによる救済**: サーバーレス関数のタイムアウト・強制終了等でclaim後に
+ * releaseEventClaim() へ到達できなかった場合、claim行が残り続けて以後の再送が
+ * 永久にスキップされてしまう。これを防ぐため、一意制約違反時は既存claimが
+ * `EVENT_CLAIM_TTL_MINUTES` を超えて放置されていないかを確認し、放置されていれば
+ * claimを奪い直す（`processed_at` を更新できた場合のみ claimed: true）。
+ * ハンドラは冪等（upsert/条件付きUPDATE）に設計されているため、まれに完了済みの
+ * イベントを再claim・再実行しても実害は小さい（Slack通知の重複程度）。
  */
 export async function claimEvent(
   eventId: string,
@@ -242,19 +258,35 @@ export async function claimEvent(
   assertServiceRoleConfigured();
   const supabase = await createAdminSupabaseClient();
 
-  const { error } = await supabase.from("stripe_events").insert({ id: eventId, type });
+  const { error } = await supabase
+    .from("stripe_events")
+    .insert({ id: eventId, type, processed_at: new Date().toISOString() });
 
-  if (error) {
-    // 一意制約違反（PostgreSQLエラーコード23505）は「他のリクエストが既にclaim済み」を意味し、
-    // 正常系としてスキップする。それ以外はDBエラーとして呼び出し元に伝播する
-    if (error.code === "23505") {
-      return { claimed: false, error: null };
-    }
+  if (!error) {
+    return { claimed: true, error: null };
+  }
+
+  // 一意制約違反（PostgreSQLエラーコード23505）以外はDBエラーとして呼び出し元に伝播する
+  if (error.code !== "23505") {
     console.error("stripe_events claim エラー:", error.message);
     return { claimed: false, error: error.message };
   }
 
-  return { claimed: true, error: null };
+  // 既にclaim済み。TTLを超えて放置されている場合のみ再claimを許可する
+  const staleBefore = new Date(Date.now() - EVENT_CLAIM_TTL_MINUTES * 60 * 1000).toISOString();
+  const { data: reclaimed, error: reclaimError } = await supabase
+    .from("stripe_events")
+    .update({ processed_at: new Date().toISOString() })
+    .eq("id", eventId)
+    .lt("processed_at", staleBefore)
+    .select("id");
+
+  if (reclaimError) {
+    console.error("stripe_events 再claim エラー:", reclaimError.message);
+    return { claimed: false, error: reclaimError.message };
+  }
+
+  return { claimed: (reclaimed?.length ?? 0) > 0, error: null };
 }
 
 /**

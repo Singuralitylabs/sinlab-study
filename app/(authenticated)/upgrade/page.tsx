@@ -76,9 +76,14 @@ export default async function UpgradePage() {
           )}
 
           {userStatus === USER_STATUS.ACTIVE && subscriptionFetchFailed && (
-            <p className="text-sm text-destructive">
-              ご契約状況の取得に失敗しました。時間をおいてページを再読み込みしてください。
-            </p>
+            <>
+              <p className="text-sm text-destructive">
+                ご契約状況の取得に失敗しました。時間をおいてページを再読み込みしてください。
+              </p>
+              {/* 契約状況が不明な間もお支払い管理・解約の導線は残す（/api/stripe/portal は
+                  契約が無ければ404を返すため、契約が無いユーザーが押しても安全） */}
+              <ManageSubscriptionButton />
+            </>
           )}
 
           {userStatus === USER_STATUS.ACTIVE && !subscriptionFetchFailed && subscription && (

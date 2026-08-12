@@ -6,9 +6,10 @@
 -- 唯一の真実であり、このテーブルは Stripe 側の状態を参照可能にするための
 -- ミラーに徹する（RLSポリシーは 02_rls/004 で定義）。
 --
--- stripe_events: Webhookイベントの冪等性を担保するための処理済みイベント記録。
--- event.id（evt_...）をPKにすることで、Stripeからの再送・重複配信を
--- INSERT ... ON CONFLICT (id) DO NOTHING で安全にスキップできる。
+-- stripe_events: Webhookイベントの冪等性を担保するための処理権（claim）記録。
+-- event.id（evt_...）をPKとし、素のINSERTを「claim」として使う原子的排他制御に
+-- 用いる（同一event.idの並行配信は一意制約により片方だけがclaimに成功する）。
+-- processed_atはclaimした日時（TTL判定・再claim判定に使用）。
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS stripe_subscriptions (
@@ -42,4 +43,4 @@ CREATE TABLE IF NOT EXISTS stripe_events (
 );
 
 COMMENT ON TABLE stripe_events IS
-  'Webhookイベントの冪等性担保用。event.idの重複INSERTは ON CONFLICT DO NOTHING でスキップする';
+  'Webhookイベントの冪等性担保用。event.idへの素のINSERTを処理権のclaimとして使う（一意制約による排他制御）。processed_atはTTL判定にも使用';

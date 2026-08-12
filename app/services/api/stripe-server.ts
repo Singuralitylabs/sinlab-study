@@ -109,14 +109,15 @@ export async function retrieveCheckoutSession(sessionId: string): Promise<Stripe
 }
 
 /**
- * 月額サブスクリプションのPrice情報を取得する（/upgrade ページでの料金表示用）。
+ * 月額（1ヶ月間隔）サブスクリプションのPrice情報を取得する（/upgrade ページでの料金表示用）。
  * `unit_amount` はJPY（ゼロdecimal通貨）を前提にそのまま円額として扱う
  * （複数通貨対応はスコープ外。Slack支払い失敗通知の金額表示と同じ前提）。
+ * 設定されたPriceが1ヶ月間隔でない場合は `amount: null` を返し、呼び出し側で料金非表示にする
+ * （「/ 月」表示と実際の請求間隔の食い違いを避けるため）。
  */
 export async function fetchSubscriptionPrice(): Promise<{
   amount: number | null;
   currency: string;
-  intervalMonthCount: number;
 }> {
   const priceId = process.env.STRIPE_PRICE_ID;
   if (!priceId) {
@@ -125,11 +126,12 @@ export async function fetchSubscriptionPrice(): Promise<{
   const stripe = getStripeClient();
   const price = await stripe.prices.retrieve(priceId);
 
+  const isPlainMonthly =
+    price.recurring?.interval === "month" && (price.recurring.interval_count ?? 1) === 1;
+
   return {
-    amount: price.unit_amount,
+    amount: isPlainMonthly ? price.unit_amount : null,
     currency: price.currency,
-    intervalMonthCount:
-      price.recurring?.interval === "month" ? (price.recurring.interval_count ?? 1) : 1,
   };
 }
 

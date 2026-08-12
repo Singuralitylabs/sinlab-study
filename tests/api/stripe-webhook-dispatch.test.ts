@@ -111,6 +111,20 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     expect(sendSlackPaymentFailedNotification).not.toHaveBeenCalled();
   });
 
+  it("claimがDBエラーを返した場合は500を返し、ハンドラを呼ばない", async () => {
+    vi.mocked(claimEvent).mockResolvedValue({ claimed: false, error: "db error" });
+    mockConstructEvent.mockReturnValue({
+      id: "evt_claim_error",
+      type: "checkout.session.completed",
+      data: { object: {} },
+    });
+
+    const res = await POST(request("{}") as never);
+
+    expect(res.status).toBe(500);
+    expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
+  });
+
   it("claimできない（再送・同時配信の重複）場合はハンドラを呼ばずスキップする", async () => {
     vi.mocked(claimEvent).mockResolvedValue({ claimed: false, error: null });
     mockConstructEvent.mockReturnValue({

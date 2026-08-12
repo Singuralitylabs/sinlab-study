@@ -9,6 +9,20 @@ import {
 } from "@/app/services/api/stripe-webhook-server";
 import { sendSlackPaymentFailedNotification } from "@/app/services/notifications/slack";
 
+/**
+ * releaseEventClaim() を例外から保護して呼ぶ。releaseEventClaim() 自体はDBエラーを
+ * throwせず{error}で返す設計だが、内部で呼ぶ assertServiceRoleConfigured() 等が
+ * 予期せずthrowした場合に、解放処理の失敗でハンドラ失敗時の500応答自体を
+ * 壊さないようにする（解放できなければclaimは残るが、TTL経過後に再claim可能になる）。
+ */
+async function safeReleaseEventClaim(eventId: string): Promise<void> {
+  try {
+    await releaseEventClaim(eventId);
+  } catch (error) {
+    console.error("イベントclaim解放エラー:", error);
+  }
+}
+
 export async function POST(request: NextRequest) {
   // JSONパース前の生ボディが署名検証に必須
   const body = await request.text();
@@ -53,7 +67,7 @@ export async function POST(request: NextRequest) {
         );
         if (error) {
           console.error("会員昇格エラー:", error);
-          await releaseEventClaim(event.id);
+          await safeReleaseEventClaim(event.id);
           return NextResponse.json({ error }, { status: 500 });
         }
         break;
@@ -64,7 +78,7 @@ export async function POST(request: NextRequest) {
         const { error } = await syncSubscriptionStatus(event.data.object as Stripe.Subscription);
         if (error) {
           console.error("サブスク状態同期エラー:", error);
-          await releaseEventClaim(event.id);
+          await safeReleaseEventClaim(event.id);
           return NextResponse.json({ error }, { status: 500 });
         }
         break;
@@ -88,7 +102,7 @@ export async function POST(request: NextRequest) {
     console.error("Webhook処理エラー:", error);
     // claim後の予期しない例外もリトライ可能にするため、処理権を解放してから500を返す
     if (claimed) {
-      await releaseEventClaim(event.id);
+      await safeReleaseEventClaim(event.id);
     }
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
   }

@@ -425,16 +425,19 @@ describe("claimEvent", () => {
 
     expect(result).toEqual({ claimed: true, error: null });
     const builder = mockClient.from.mock.results[0].value;
-    expect(builder.insert).toHaveBeenCalledWith({
-      id: "evt_1",
-      type: "checkout.session.completed",
-    });
+    expect(builder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "evt_1", type: "checkout.session.completed" })
+    );
   });
 
-  it("既にclaim済み（一意制約違反）の場合、claimed=falseをエラー無しで返す", async () => {
+  it("既にclaim済み（一意制約違反）でTTL内の場合、再claimせずclaimed=falseをエラー無しで返す", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
-        stripe_events: { data: null, error: { message: "duplicate key", code: "23505" } },
+        // 1回目: INSERTが一意制約違反、2回目: 再claim UPDATEが対象0行（TTL内のため）
+        stripe_events: [
+          { data: null, error: { message: "duplicate key", code: "23505" } },
+          { data: [], error: null },
+        ],
       },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
@@ -442,6 +445,44 @@ describe("claimEvent", () => {
     const result = await claimEvent("evt_1", "checkout.session.completed");
 
     expect(result).toEqual({ claimed: false, error: null });
+  });
+
+  it("既にclaim済み（一意制約違反）でTTLを超えて放置されている場合、再claimしclaimed=trueを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_events: [
+          { data: null, error: { message: "duplicate key", code: "23505" } },
+          { data: [{ id: "evt_1" }], error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await claimEvent("evt_1", "checkout.session.completed");
+
+    expect(result).toEqual({ claimed: true, error: null });
+    const reclaimBuilder = mockClient.from.mock.results[1].value;
+    expect(reclaimBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ processed_at: expect.any(String) })
+    );
+    expect(reclaimBuilder.eq).toHaveBeenCalledWith("id", "evt_1");
+    expect(reclaimBuilder.lt).toHaveBeenCalledWith("processed_at", expect.any(String));
+  });
+
+  it("再claim確認に失敗した場合はエラーを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_events: [
+          { data: null, error: { message: "duplicate key", code: "23505" } },
+          { data: null, error: dbError },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await claimEvent("evt_1", "checkout.session.completed");
+
+    expect(result).toEqual({ claimed: false, error: dbError.message });
   });
 
   it("一意制約違反以外のDBエラーの場合はエラーを返す", async () => {
