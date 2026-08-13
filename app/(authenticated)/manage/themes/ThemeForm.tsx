@@ -1,8 +1,10 @@
 "use client";
 
 import { Loader2, Save } from "lucide-react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { resolveStorageUrl } from "@/app/lib/storage-url";
 import type { LearningTheme } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -25,6 +27,7 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
   const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
@@ -69,6 +72,34 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
     }
   };
 
+  const handleThumbnailUpload = async (file: File | undefined) => {
+    if (!file || !initialData) return;
+
+    setIsUploading(true);
+    setMessage(null);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("themeId", String(initialData.id));
+
+    try {
+      const response = await fetch("/api/upload-thumbnail", { method: "POST", body: formData });
+      const data = await response.json();
+      if (!response.ok) {
+        setMessage({ type: "error", text: data.error || "画像のアップロードに失敗しました" });
+        return;
+      }
+      setImageUrl(data.path);
+      setMessage({
+        type: "success",
+        text: "画像をアップロードしました。更新を押して保存してください",
+      });
+    } catch {
+      setMessage({ type: "error", text: "画像のアップロード中にエラーが発生しました" });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   return (
     <form onSubmit={handleSubmit}>
       <Card>
@@ -95,16 +126,38 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="imageUrl">画像 URL</Label>
-            <Input
-              id="imageUrl"
-              type="url"
-              value={imageUrl}
-              onChange={(e) => setImageUrl(e.target.value)}
-              placeholder="https://example.com/image.jpg（任意）"
-            />
-          </div>
+          {mode === "edit" ? (
+            <div className="space-y-3">
+              <Label htmlFor="thumbnail">サムネイル画像</Label>
+              {imageUrl && (
+                <div className="relative h-40 w-full max-w-xs overflow-hidden rounded-md border">
+                  <Image
+                    src={resolveStorageUrl(imageUrl)}
+                    alt="サムネイルのプレビュー"
+                    fill
+                    className="object-cover"
+                    sizes="320px"
+                  />
+                </div>
+              )}
+              <Input
+                id="thumbnail"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                disabled={isUploading}
+                onChange={(event) => handleThumbnailUpload(event.target.files?.[0])}
+              />
+              <p className="text-sm text-muted-foreground">PNG、JPEG、WebP形式、5MBまで</p>
+              {isUploading && <p className="text-sm text-muted-foreground">アップロード中です…</p>}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label>サムネイル画像</Label>
+              <p className="text-sm text-muted-foreground">
+                テーマを作成した後、編集画面から画像をアップロードできます。
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="displayOrder">表示順</Label>

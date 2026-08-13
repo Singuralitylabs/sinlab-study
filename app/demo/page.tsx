@@ -2,6 +2,7 @@ import { BookOpen, ChevronRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { PageTitle } from "@/app/components/PageTitle";
+import { resolveStorageUrl } from "@/app/lib/storage-url";
 import { fetchDemoPublishedThemes } from "@/app/services/api/demo-learning-server";
 import { Card } from "@/components/ui/card";
 
@@ -25,7 +26,7 @@ export default async function DemoRootPage() {
                 <div className="relative aspect-video bg-linear-to-br from-primary/5 to-primary/15">
                   {theme.image_url ? (
                     <Image
-                      src={theme.image_url}
+                      src={resolveStorageUrl(theme.image_url)}
                       alt={theme.name}
                       fill
                       className="object-cover group-hover:scale-105 transition-transform duration-300"
