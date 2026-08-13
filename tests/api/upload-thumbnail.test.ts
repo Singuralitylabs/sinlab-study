@@ -1,9 +1,10 @@
+import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/supabase-server");
 
-import { POST } from "@/app/api/upload-thumbnail/route";
+import { DELETE, POST } from "@/app/api/upload-thumbnail/route";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -14,10 +15,38 @@ const maintainerAuth = {
   userRole: "maintainer",
 };
 
-const mockSupabase = (upload = vi.fn().mockResolvedValue({ error: null })) => ({
-  storage: {
+interface MockSupabaseOptions {
+  imageUrl?: string | null;
+  theme?: { image_url: string | null } | null;
+  themeError?: unknown;
+  updateError?: unknown;
+  uploadError?: unknown;
+  removeError?: unknown;
+}
+
+const createMockSupabase = ({
+  imageUrl = null,
+  theme = { image_url: imageUrl },
+  themeError = null,
+  updateError = null,
+  uploadError = null,
+  removeError = null,
+}: MockSupabaseOptions = {}) => {
+  const query = {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    update: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn().mockResolvedValue({ data: theme, error: themeError }),
+    // biome-ignore lint/suspicious/noThenProperty: Supabaseクエリビルダーのthenableを再現するため
+    then: (resolve: (value: unknown) => unknown) =>
+      Promise.resolve({ data: null, error: updateError }).then(resolve),
+  };
+  const upload = vi.fn().mockResolvedValue({ error: uploadError });
+  const remove = vi.fn().mockResolvedValue({ error: removeError });
+  const storage = {
     from: vi.fn().mockReturnValue({
       upload,
+      remove,
       getPublicUrl: vi.fn().mockReturnValue({
         data: {
           publicUrl:
@@ -25,8 +54,9 @@ const mockSupabase = (upload = vi.fn().mockResolvedValue({ error: null })) => ({
         },
       }),
     }),
-  },
-});
+  };
+  return { client: { from: vi.fn().mockReturnValue(query), storage }, query, upload, remove };
+};
 
 const request = (file: File | null, themeId = "12") => {
   const formData = new FormData();
@@ -36,16 +66,17 @@ const request = (file: File | null, themeId = "12") => {
 };
 
 beforeEach(() => {
+  vi.restoreAllMocks();
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(maintainerAuth as never);
-  vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockSupabase() as never);
+  vi.mocked(createAdminSupabaseClient).mockResolvedValue(createMockSupabase().client as never);
 });
 
 describe("POST /api/upload-thumbnail", () => {
-  it("管理者・メンテナーはPNGをテーマIDベースの固定キーへアップロードできる", async () => {
+  it("テーマの存在確認後、PNGを固定キーへ保存してDB参照も即時更新する", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1723500000);
-    const upload = vi.fn().mockResolvedValue({ error: null });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockSupabase(upload) as never);
+    const { client, query, upload } = createMockSupabase();
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
 
     const response = await POST(
       request(new File(["png"], "thumbnail.png", { type: "image/png" })) as never
@@ -56,10 +87,40 @@ describe("POST /api/upload-thumbnail", () => {
       path: "/storage/v1/object/public/thumbnails/theme-12/thumbnail.png?v=1723500000",
       url: "https://project.supabase.co/storage/v1/object/public/thumbnails/theme-12/thumbnail.png?v=1723500000",
     });
+    expect(query.select).toHaveBeenCalledWith("image_url");
     expect(upload).toHaveBeenCalledWith("theme-12/thumbnail.png", expect.any(Uint8Array), {
       contentType: "image/png",
       upsert: true,
     });
+    expect(query.update).toHaveBeenCalledWith({
+      image_url: "/storage/v1/object/public/thumbnails/theme-12/thumbnail.png?v=1723500000",
+    });
+  });
+
+  it("拡張子が変わった場合はDB更新後に旧Storageオブジェクトを削除する", async () => {
+    const { client, remove } = createMockSupabase({
+      imageUrl: "/storage/v1/object/public/thumbnails/theme-12/thumbnail.png?v=1",
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const response = await POST(
+      request(new File(["jpg"], "thumbnail.jpg", { type: "image/jpeg" })) as never
+    );
+
+    expect(response.status).toBe(200);
+    expect(remove).toHaveBeenCalledWith(["theme-12/thumbnail.png"]);
+  });
+
+  it("存在しないテーマにはStorageオブジェクトを作成しない", async () => {
+    const { client, upload } = createMockSupabase({ theme: null });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const response = await POST(
+      request(new File(["png"], "thumbnail.png", { type: "image/png" })) as never
+    );
+
+    expect(response.status).toBe(404);
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -90,5 +151,22 @@ describe("POST /api/upload-thumbnail", () => {
 
     expect(response.status).toBe(400);
     expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+});
+
+describe("DELETE /api/upload-thumbnail", () => {
+  it("DB参照を消してから対応するStorageオブジェクトを削除する", async () => {
+    const { client, query, remove } = createMockSupabase({
+      imageUrl: "/storage/v1/object/public/thumbnails/theme-12/thumbnail.png?v=1",
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const response = await DELETE(
+      new NextRequest("http://localhost/api/upload-thumbnail?themeId=12")
+    );
+
+    expect(response.status).toBe(200);
+    expect(query.update).toHaveBeenCalledWith({ image_url: null });
+    expect(remove).toHaveBeenCalledWith(["theme-12/thumbnail.png"]);
   });
 });

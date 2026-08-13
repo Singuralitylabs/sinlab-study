@@ -3,7 +3,7 @@
  * 既存の外部URL・public配下の相対パスは後方互換のためそのまま返す。
  */
 export function resolveStorageUrl(url: string): string {
-  if (/^https?:\/\//.test(url) || !url.startsWith("/storage/")) {
+  if (!url.startsWith("/storage/")) {
     return url;
   }
 

@@ -26,11 +26,6 @@ BEGIN
     RETURNING id INTO v_theme_id;
   END IF;
 
-  UPDATE learning_themes
-  SET image_url = '/storage/v1/object/public/thumbnails/theme-' || v_theme_id || '/thumbnail.png?v=1'
-  WHERE id = v_theme_id
-    AND image_url IS NULL;
-
   -- ====================================================
   -- フェーズ登録（7フェーズ）
   -- ====================================================

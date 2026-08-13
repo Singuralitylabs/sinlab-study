@@ -3,7 +3,7 @@
 import { Loader2, Save } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
 import type { LearningTheme } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -29,6 +29,7 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const thumbnailInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -91,10 +92,36 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
       setImageUrl(data.path);
       setMessage({
         type: "success",
-        text: "画像をアップロードしました。更新を押して保存してください",
+        text: "画像をアップロードして保存しました",
       });
     } catch {
       setMessage({ type: "error", text: "画像のアップロード中にエラーが発生しました" });
+    } finally {
+      setIsUploading(false);
+      if (thumbnailInputRef.current) {
+        thumbnailInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleThumbnailDelete = async () => {
+    if (!initialData) return;
+
+    setIsUploading(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/upload-thumbnail?themeId=${initialData.id}`, {
+        method: "DELETE",
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setMessage({ type: "error", text: data.error || "画像の削除に失敗しました" });
+        return;
+      }
+      setImageUrl("");
+      setMessage({ type: "success", text: "画像を削除しました" });
+    } catch {
+      setMessage({ type: "error", text: "画像の削除中にエラーが発生しました" });
     } finally {
       setIsUploading(false);
     }
@@ -141,12 +168,23 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
                 </div>
               )}
               <Input
+                ref={thumbnailInputRef}
                 id="thumbnail"
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 disabled={isUploading}
                 onChange={(event) => handleThumbnailUpload(event.target.files?.[0])}
               />
+              {imageUrl && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isUploading}
+                  onClick={handleThumbnailDelete}
+                >
+                  画像を削除
+                </Button>
+              )}
               <p className="text-sm text-muted-foreground">PNG、JPEG、WebP形式、5MBまで</p>
               {isUploading && <p className="text-sm text-muted-foreground">アップロード中です…</p>}
             </div>

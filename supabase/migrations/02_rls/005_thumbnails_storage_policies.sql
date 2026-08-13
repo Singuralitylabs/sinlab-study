@@ -18,3 +18,11 @@ CREATE POLICY "Content managers can update thumbnails"
     bucket_id = 'thumbnails'
     AND (select get_user_role()) IN ('admin', 'maintainer')
   );
+
+DROP POLICY IF EXISTS "Content managers can delete thumbnails" ON storage.objects;
+CREATE POLICY "Content managers can delete thumbnails"
+  ON storage.objects FOR DELETE TO authenticated
+  USING (
+    bucket_id = 'thumbnails'
+    AND (select get_user_role()) IN ('admin', 'maintainer')
+  );
