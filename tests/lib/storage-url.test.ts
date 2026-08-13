@@ -16,6 +16,14 @@ describe("resolveStorageUrl", () => {
     );
   });
 
+  it("Supabase URL末尾のスラッシュを除去して結合する", () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co/");
+
+    expect(resolveStorageUrl("/storage/v1/object/public/thumbnails/theme-1/thumbnail.png")).toBe(
+      "https://project.supabase.co/storage/v1/object/public/thumbnails/theme-1/thumbnail.png"
+    );
+  });
+
   it.each([
     "https://example.com/image.png",
     "/images/themes/gas_icon.png",

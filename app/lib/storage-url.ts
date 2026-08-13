@@ -8,5 +8,5 @@ export function resolveStorageUrl(url: string): string {
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  return supabaseUrl ? `${supabaseUrl}${url}` : url;
+  return supabaseUrl ? `${supabaseUrl.replace(/\/$/, "")}${url}` : url;
 }
