@@ -1,5 +1,10 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import Stripe from "stripe";
+import {
+  BILLING_ANCHOR_DAY_OF_MONTH,
+  BILLING_ANCHOR_HOUR_UTC,
+  STRIPE_MINIMUM_CHARGE_AMOUNT_JPY,
+} from "@/app/constants/stripe";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 
 let cachedClient: Stripe | null = null;
@@ -86,7 +91,8 @@ export async function createCheckoutSession(
   userId: number,
   authId: string,
   email: string | undefined,
-  existingCustomerId: string | null = null
+  existingCustomerId: string | null = null,
+  now: Date = new Date()
 ): Promise<{ url: string }> {
   const priceId = process.env.STRIPE_PRICE_ID;
   if (!priceId) {
@@ -94,6 +100,10 @@ export async function createCheckoutSession(
   }
   const appUrl = getAppUrl();
   const stripe = getStripeClient();
+  // 日割り額が最低請求額を下回る場合に限り無償化する（「最低請求額の考慮」参照）。
+  // customerIdの有無に依存しないため、リトライも含め1回だけ判定すればよい
+  const prorationBehavior: Stripe.Checkout.SessionCreateParams.SubscriptionData.ProrationBehavior =
+    (await isProrationBelowMinimum(now)) ? "none" : "create_prorations";
 
   const buildParams = (customerId: string | null): Stripe.Checkout.SessionCreateParams => ({
     mode: "subscription",
@@ -108,6 +118,16 @@ export async function createCheckoutSession(
     metadata: { user_id: String(userId), auth_id: authId },
     subscription_data: {
       metadata: { user_id: String(userId), auth_id: authId },
+      // 決済日を全ユーザー一律で毎月27日（UTC 0:00 = JST 9:00）に固定する。
+      // hour/minute/secondを省略するとサブスク作成時刻がそのまま使われ、
+      // ユーザーごとに請求時刻がバラつくため明示する
+      billing_cycle_anchor_config: {
+        day_of_month: BILLING_ANCHOR_DAY_OF_MONTH,
+        hour: BILLING_ANCHOR_HOUR_UTC,
+        minute: 0,
+        second: 0,
+      },
+      proration_behavior: prorationBehavior,
     },
     success_url: `${appUrl}/upgrade/success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${appUrl}/upgrade`,
@@ -158,25 +178,17 @@ export async function retrieveCheckoutSession(sessionId: string): Promise<Stripe
 }
 
 const PRICE_CACHE_TTL_MS = 5 * 60 * 1000;
-let cachedPrice: { data: { amount: number | null; currency: string }; expiresAt: number } | null =
-  null;
+let cachedPrice: { data: Stripe.Price; expiresAt: number } | null = null;
 
 /**
- * 月額（1ヶ月間隔）サブスクリプションのPrice情報を取得する（/upgrade ページでの料金表示用）。
- * `unit_amount` はJPY（ゼロdecimal通貨）を前提にそのまま円額として扱う
- * （複数通貨対応はスコープ外。Slack支払い失敗通知の金額表示と同じ前提）。
- * 設定されたPriceが1ヶ月間隔でない場合は `amount: null` を返し、呼び出し側で料金非表示にする
- * （「/ 月」表示と実際の請求間隔の食い違いを避けるため）。
- *
- * Priceはほぼ不変（変更は運用者がダッシュボードで行う稀な操作）のため、ページ表示のたびに
+ * サブスクリプション用Priceを取得する（生の `Stripe.Price` を返す）。
+ * Priceはほぼ不変（変更は運用者がダッシュボードで行う稀な操作）のため、呼び出しのたびに
  * Stripe APIを呼ぶのを避けるモジュールスコープのTTLキャッシュを持つ（`getStripeClient()`の
  * `cachedClient`と同じパターン）。サーバーレス環境ではインスタンスごとのキャッシュになるが、
- * ウォームインスタンスの再利用時には有効。
+ * ウォームインスタンスの再利用時には有効。`fetchSubscriptionPrice()` と
+ * `isProrationBelowMinimum()` の双方から利用する共通キャッシュ。
  */
-export async function fetchSubscriptionPrice(): Promise<{
-  amount: number | null;
-  currency: string;
-}> {
+async function getCachedPrice(): Promise<Stripe.Price> {
   if (cachedPrice && cachedPrice.expiresAt > Date.now()) {
     return cachedPrice.data;
   }
@@ -188,15 +200,86 @@ export async function fetchSubscriptionPrice(): Promise<{
   const stripe = getStripeClient();
   const price = await stripe.prices.retrieve(priceId);
 
+  cachedPrice = { data: price, expiresAt: Date.now() + PRICE_CACHE_TTL_MS };
+  return price;
+}
+
+/**
+ * 月額（1ヶ月間隔）サブスクリプションのPrice情報を取得する（/upgrade ページでの料金表示用）。
+ * `unit_amount` はJPY（ゼロdecimal通貨）を前提にそのまま円額として扱う
+ * （複数通貨対応はスコープ外。Slack支払い失敗通知の金額表示と同じ前提）。
+ * 設定されたPriceが1ヶ月間隔でない場合は `amount: null` を返し、呼び出し側で料金非表示にする
+ * （「/ 月」表示と実際の請求間隔の食い違いを避けるため）。
+ */
+export async function fetchSubscriptionPrice(): Promise<{
+  amount: number | null;
+  currency: string;
+}> {
+  const price = await getCachedPrice();
   const isPlainMonthly =
     price.recurring?.interval === "month" && (price.recurring.interval_count ?? 1) === 1;
 
-  const data = {
+  return {
     amount: isPlainMonthly ? price.unit_amount : null,
     currency: price.currency,
   };
-  cachedPrice = { data, expiresAt: Date.now() + PRICE_CACHE_TTL_MS };
-  return data;
+}
+
+/**
+ * 次回・前回の請求アンカー時刻（毎月 `BILLING_ANCHOR_DAY_OF_MONTH` 日
+ * `BILLING_ANCHOR_HOUR_UTC` 時・UTC）を、`now` を基準に算出する。
+ * `nextAnchor - previousAnchor` が初回課金の「満額換算での1周期」の長さになる
+ * （Stripeの日割り計算と同様、月の長さ・うるう年を自動的に考慮できる）。
+ */
+function getBillingAnchorWindow(now: Date): { previousAnchor: Date; nextAnchor: Date } {
+  const anchorInMonth = (monthOffset: number) =>
+    new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth() + monthOffset,
+        BILLING_ANCHOR_DAY_OF_MONTH,
+        BILLING_ANCHOR_HOUR_UTC,
+        0,
+        0
+      )
+    );
+
+  const anchorThisMonth = anchorInMonth(0);
+  const nextAnchor = now < anchorThisMonth ? anchorThisMonth : anchorInMonth(1);
+  const previousAnchor = new Date(
+    Date.UTC(
+      nextAnchor.getUTCFullYear(),
+      nextAnchor.getUTCMonth() - 1,
+      BILLING_ANCHOR_DAY_OF_MONTH,
+      BILLING_ANCHOR_HOUR_UTC,
+      0,
+      0
+    )
+  );
+  return { previousAnchor, nextAnchor };
+}
+
+/**
+ * `now` に登録した場合、初回の日割り請求額がStripeの最低請求額（JPY ¥50）を
+ * 下回るかどうかを判定する。アンカー直前（27日 8:xx〜9:xx JST頃）の登録に限り
+ * `true` を返し、呼び出し側は `proration_behavior: "none"` に切り替える
+ * （「最低請求額の考慮」参照。無償になるのは長くても数時間分のため抜け道にはならない）。
+ *
+ * JPY以外・金額未設定など想定外のPrice設定の場合は判定できないため `false`
+ * （＝日割りあり）を返し、安全側の挙動（Stripe側のエラーで気付ける）に倒す。
+ */
+export async function isProrationBelowMinimum(now: Date = new Date()): Promise<boolean> {
+  const price = await getCachedPrice();
+  if (price.currency.toLowerCase() !== "jpy" || price.unit_amount === null) {
+    return false;
+  }
+
+  const { previousAnchor, nextAnchor } = getBillingAnchorWindow(now);
+  const remainingMs = nextAnchor.getTime() - now.getTime();
+  const fullPeriodMs = nextAnchor.getTime() - previousAnchor.getTime();
+  const proratedAmount = Math.round((price.unit_amount * remainingMs) / fullPeriodMs);
+
+  return proratedAmount < STRIPE_MINIMUM_CHARGE_AMOUNT_JPY;
 }
 
 /**

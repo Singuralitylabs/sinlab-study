@@ -1,6 +1,7 @@
 import { CheckCircle2, XCircle } from "lucide-react";
 import Link from "next/link";
 import {
+  fetchStripeSubscriptionByUserId,
   PAID_CHECKOUT_PAYMENT_STATUSES,
   retrieveCheckoutSession,
 } from "@/app/services/api/stripe-server";
@@ -12,6 +13,10 @@ import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
+function formatDate(isoString: string): string {
+  return new Date(isoString).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
+}
+
 export default async function UpgradeSuccessPage({
   searchParams,
 }: {
@@ -22,6 +27,7 @@ export default async function UpgradeSuccessPage({
 
   let succeeded = false;
   let errorMessage = "決済情報を確認できませんでした";
+  let nextBillingDateLabel: string | null = null;
 
   if (userId && sessionId) {
     try {
@@ -46,6 +52,12 @@ export default async function UpgradeSuccessPage({
           errorMessage = "このお申し込みは現在有効ではありません";
         } else {
           succeeded = true;
+          // 日割りで少額決済された直後のため、次に満額が請求される日を示して
+          // 問い合わせを減らす。取得に失敗しても完了画面自体は表示する（表示のみ省略）
+          const { data: subscription } = await fetchStripeSubscriptionByUserId(userId);
+          if (subscription?.current_period_end) {
+            nextBillingDateLabel = formatDate(subscription.current_period_end);
+          }
         }
       }
     } catch (error) {
@@ -66,6 +78,11 @@ export default async function UpgradeSuccessPage({
                 <p className="mt-1 text-sm text-muted-foreground">
                   すべての学習コンテンツをご利用いただけます
                 </p>
+                {nextBillingDateLabel && (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    次回のお支払い予定日: {nextBillingDateLabel}
+                  </p>
+                )}
               </div>
               <Button asChild>
                 <Link href="/">ダッシュボードへ</Link>
