@@ -285,7 +285,7 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 **決済日の固定**: 決済日（請求サイクルのアンカー）は登録日ベースではなく、全ユーザー一律で**毎月27日 UTC 0:00（＝JST 9:00）**に固定する（`app/constants/stripe.ts` の `BILLING_ANCHOR_DAY_OF_MONTH` / `BILLING_ANCHOR_HOUR_UTC`）。27日を選んだのは全ての月に存在する日付で短い月の繰り上げ処理が不要なため、UTC 0:00（JST 9:00）を選んだのは決済失敗の検知・対応がしやすい日中帯のためである。実装は `createCheckoutSession()` で `subscription_data.billing_cycle_anchor_config`（`day_of_month`/`hour`/`minute`/`second` を明示）を指定する方式で、月の長さ・うるう年の考慮をStripe側に委ねる。`billing_cycle_anchor_config` はCheckoutセッション作成時にのみ適用されるため、既存契約者への遡及適用（アンカー移行）は行わない（スコープ外）。
 
-初回請求は日割り（`proration_behavior: "create_prorations"`）とする。無償（`"none"`）にすると「27日直前に登録して1ヶ月弱を無償で使い切って解約する」抜け道ができるため。ただし、アンカー直前の登録では日割り額がStripeの最低請求額（JPY ¥50）を下回りCheckout作成・決済が失敗しうるため、`isProrationBelowMinimum()` で判定し、下回る場合に限り `proration_behavior` を `"none"` に切り替える（無償になるのは長くても数時間分であり、全面 `"none"` の場合と規模が異なるため抜け道にはならない）。判定にはPriceの `unit_amount`（モジュールスコープのTTLキャッシュ、`fetchSubscriptionPrice()` と共有）を用いる。
+初回請求は日割り（`proration_behavior: "create_prorations"`）とする。無償（`"none"`）にすると「27日直前に登録して1ヶ月弱を無償で使い切って解約する」抜け道ができるため。ただし、アンカー直前の登録では日割り額がStripeの最低請求額（JPY ¥50）を下回りCheckout作成・決済が失敗しうるため、`isProrationBelowMinimum()` で判定し、下回る場合に限り `proration_behavior` を `"none"` に切り替える。無償化されるウィンドウの長さは月額に反比例する（月額¥3000なら約12.4時間、月額が低いほど広がる）。最大でも1ヶ月弱を無償利用できる全面 `"none"` 採用時とは規模が異なるため抜け道にはならない、という判断のもとで採用している。判定にはPriceの `unit_amount`（モジュールスコープのTTLキャッシュ、`fetchSubscriptionPrice()` と共有）を用いる。
 
 **画面構成**:
 
