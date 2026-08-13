@@ -1,7 +1,6 @@
 import { CheckCircle2, XCircle } from "lucide-react";
 import Link from "next/link";
 import {
-  fetchStripeSubscriptionByUserId,
   PAID_CHECKOUT_PAYMENT_STATUSES,
   retrieveCheckoutSession,
 } from "@/app/services/api/stripe-server";
@@ -12,10 +11,7 @@ import {
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-
-function formatDate(isoString: string): string {
-  return new Date(isoString).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
-}
+import { formatDate } from "../format-date";
 
 export default async function UpgradeSuccessPage({
   searchParams,
@@ -42,7 +38,8 @@ export default async function UpgradeSuccessPage({
       } else {
         // Webhookより先にここへ遷移してくる場合があるため、successページ側でも
         // 同じ冪等な昇格処理を呼ぶ（Webhookと重複実行しても安全）
-        const { error, activated } = await activateUserFromCheckoutSession(session);
+        const { error, activated, currentPeriodEnd } =
+          await activateUserFromCheckoutSession(session);
         if (error) {
           console.error("会員昇格エラー:", error);
           errorMessage = "会員登録の反映に失敗しました。時間をおいて再度お試しください";
@@ -53,10 +50,10 @@ export default async function UpgradeSuccessPage({
         } else {
           succeeded = true;
           // 日割りで少額決済された直後のため、次に満額が請求される日を示して
-          // 問い合わせを減らす。取得に失敗しても完了画面自体は表示する（表示のみ省略）
-          const { data: subscription } = await fetchStripeSubscriptionByUserId(userId);
-          if (subscription?.current_period_end) {
-            nextBillingDateLabel = formatDate(subscription.current_period_end);
+          // 問い合わせを減らす。activateUserFromCheckoutSession()が既にStripeから
+          // 取得済みの値を返すため、DBを読み直さない
+          if (currentPeriodEnd) {
+            nextBillingDateLabel = formatDate(currentPeriodEnd);
           }
         }
       }

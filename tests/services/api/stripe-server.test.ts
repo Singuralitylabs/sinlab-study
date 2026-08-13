@@ -34,6 +34,23 @@ import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 
 const dbError = { message: "db error", code: "PGRST001" };
 
+/** `stripe.prices.retrieve()` のモック応答を設定する共通ヘルパー（既定値: 月額¥3000） */
+function mockPrice(
+  overrides: {
+    unitAmount?: number | null;
+    currency?: string;
+    interval?: string;
+    intervalCount?: number;
+  } = {}
+) {
+  const { unitAmount = 3000, currency = "jpy", interval = "month", intervalCount = 1 } = overrides;
+  mockPricesRetrieve.mockResolvedValue({
+    unit_amount: unitAmount,
+    currency,
+    recurring: { interval, interval_count: intervalCount },
+  });
+}
+
 // Priceのモジュールスコープキャッシュ（5分TTL）がテスト間で残らないよう、
 // テストごとに実時刻をTTLより大きい10分ずつ進める。テストが明示的に渡す
 // `now`（アンカー判定用の日時）はDate.now()を使わない実時刻指定のため影響を受けない
@@ -101,11 +118,7 @@ describe("createCheckoutSession", () => {
   beforeEach(() => {
     mockSessionsCreate.mockReset();
     mockPricesRetrieve.mockReset();
-    mockPricesRetrieve.mockResolvedValue({
-      unit_amount: 3000,
-      currency: "jpy",
-      recurring: { interval: "month", interval_count: 1 },
-    });
+    mockPrice();
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_dummy");
     vi.stubEnv("STRIPE_PRICE_ID", "price_dummy");
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://example.com");
@@ -165,6 +178,57 @@ describe("createCheckoutSession", () => {
 
     const params = mockSessionsCreate.mock.calls[0][0];
     expect(params.subscription_data.proration_behavior).toBe("none");
+  });
+
+  it("proration_behaviorがcreate_prorationsのときはexpires_atを指定しない", async () => {
+    mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx" });
+
+    await createCheckoutSession(5, "auth-uuid", "trial@example.com", null, midMonth);
+
+    const params = mockSessionsCreate.mock.calls[0][0];
+    expect(params).not.toHaveProperty("expires_at");
+  });
+
+  it("proration_behaviorがnoneのとき、expires_atをアンカー時刻にクランプする（TOCTOU対策）", async () => {
+    mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx" });
+    // アンカー30分前。Stripeの最低セッション有効期間（30分）とアンカーまでの残り時間が
+    // ちょうど一致するため、expires_atはアンカー時刻そのものになる
+    const justBeforeAnchor = new Date("2026-08-26T23:30:00.000Z");
+
+    await createCheckoutSession(5, "auth-uuid", "trial@example.com", null, justBeforeAnchor);
+
+    const params = mockSessionsCreate.mock.calls[0][0];
+    expect(params.expires_at).toBe(
+      Math.floor(new Date("2026-08-27T00:00:00.000Z").getTime() / 1000)
+    );
+  });
+
+  it("アンカーまで30分未満のときは、expires_atをStripeの最低許容値（30分後）にクランプする", async () => {
+    mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx" });
+    // アンカー10分前。アンカー時刻をそのまま使うとStripeの最低30分要件に違反するため、
+    // now + 30分を使う（結果としてアンカーを10分ほど超える余地が残るが、この10分の
+    // ウィンドウ自体が既に「日割り額¥50未満」というごく狭い範囲の中のさらに一部でしかない）
+    const tenMinutesBeforeAnchor = new Date("2026-08-26T23:50:00.000Z");
+
+    await createCheckoutSession(5, "auth-uuid", "trial@example.com", null, tenMinutesBeforeAnchor);
+
+    const params = mockSessionsCreate.mock.calls[0][0];
+    expect(params.expires_at).toBe(
+      Math.floor(new Date("2026-08-27T00:20:00.000Z").getTime() / 1000)
+    );
+  });
+
+  it("Price取得に失敗した場合はcreate_prorationsにフォールバックし、Checkout作成自体は継続する", async () => {
+    mockPricesRetrieve.mockReset();
+    mockPricesRetrieve.mockRejectedValue(new Error("Stripe API一時エラー"));
+    mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx" });
+
+    const result = await createCheckoutSession(5, "auth-uuid", "trial@example.com", null, midMonth);
+
+    expect(result).toEqual({ url: "https://checkout.stripe.com/xxx" });
+    const params = mockSessionsCreate.mock.calls[0][0];
+    expect(params.subscription_data.proration_behavior).toBe("create_prorations");
+    expect(params).not.toHaveProperty("expires_at");
   });
 
   it("既存Customer IDが無い場合はcustomer_emailを渡す", async () => {
@@ -227,11 +291,7 @@ describe("isProrationBelowMinimum", () => {
   });
 
   it("月中の登録では最低請求額を下回らない", async () => {
-    mockPricesRetrieve.mockResolvedValue({
-      unit_amount: 3000,
-      currency: "jpy",
-      recurring: { interval: "month", interval_count: 1 },
-    });
+    mockPrice();
 
     const result = await isProrationBelowMinimum(new Date("2026-08-10T00:00:00.000Z"));
 
@@ -239,11 +299,7 @@ describe("isProrationBelowMinimum", () => {
   });
 
   it("アンカー30分前の登録は最低請求額を下回る（遠く下回る側のサニティチェック）", async () => {
-    mockPricesRetrieve.mockResolvedValue({
-      unit_amount: 3000,
-      currency: "jpy",
-      recurring: { interval: "month", interval_count: 1 },
-    });
+    mockPrice();
 
     // 月額3000円換算（7月分の周期は31日）で日割り額は約2円（¥50未満）
     const result = await isProrationBelowMinimum(new Date("2026-08-26T23:30:00.000Z"));
@@ -252,11 +308,7 @@ describe("isProrationBelowMinimum", () => {
   });
 
   it("アンカー24時間前の登録は最低請求額を下回らない（遠く下回らない側のサニティチェック）", async () => {
-    mockPricesRetrieve.mockResolvedValue({
-      unit_amount: 3000,
-      currency: "jpy",
-      recurring: { interval: "month", interval_count: 1 },
-    });
+    mockPrice();
 
     // 月額3000円換算（7月分の周期は31日）で日割り額は約97円（¥50以上）
     const result = await isProrationBelowMinimum(new Date("2026-08-26T00:00:00.000Z"));
@@ -265,11 +317,7 @@ describe("isProrationBelowMinimum", () => {
   });
 
   it("日割り額がちょうど49円のとき（¥50未満の境界）はtrueを返す", async () => {
-    mockPricesRetrieve.mockResolvedValue({
-      unit_amount: 3000,
-      currency: "jpy",
-      recurring: { interval: "month", interval_count: 1 },
-    });
+    mockPrice();
 
     // 7月分の周期(31日=2,678,400,000ms)に対し、remainingMs = 49 * 892,800 = 43,747,200ms
     // ちょうど日割り額49円（Math.round(49) = 49 < 50）になる時刻
@@ -279,11 +327,7 @@ describe("isProrationBelowMinimum", () => {
   });
 
   it("日割り額がちょうど50円のとき（¥50ちょうどの境界）はfalseを返す", async () => {
-    mockPricesRetrieve.mockResolvedValue({
-      unit_amount: 3000,
-      currency: "jpy",
-      recurring: { interval: "month", interval_count: 1 },
-    });
+    mockPrice();
 
     // remainingMs = 50 * 892,800 = 44,640,000ms（=12時間24分）
     // ちょうど日割り額50円（Math.round(50) = 50。厳密な不等号 `< 50` によりfalse）になる時刻
@@ -293,12 +337,18 @@ describe("isProrationBelowMinimum", () => {
   });
 
   it("JPY以外の通貨の場合は判定できないためfalseを返す", async () => {
-    mockPricesRetrieve.mockResolvedValue({
-      unit_amount: 3000,
-      currency: "usd",
-      recurring: { interval: "month", interval_count: 1 },
-    });
+    mockPrice({ currency: "usd" });
 
+    const result = await isProrationBelowMinimum(new Date("2026-08-26T23:30:00.000Z"));
+
+    expect(result).toBe(false);
+  });
+
+  it("1ヶ月間隔でないPrice（誤設定）の場合は判定できないためfalseを返す", async () => {
+    mockPrice({ unitAmount: 30000, interval: "year" });
+
+    // 年額換算なら本来ごく僅かな日割り額になるはずの時刻だが、月次前提が崩れるため
+    // 判定自体を行わずfalseを返す
     const result = await isProrationBelowMinimum(new Date("2026-08-26T23:30:00.000Z"));
 
     expect(result).toBe(false);
@@ -317,11 +367,7 @@ describe("fetchSubscriptionPrice", () => {
   });
 
   it("月額(1ヶ月間隔)のPriceは金額を返す", async () => {
-    mockPricesRetrieve.mockResolvedValue({
-      unit_amount: 3000,
-      currency: "jpy",
-      recurring: { interval: "month", interval_count: 1 },
-    });
+    mockPrice();
 
     const result = await fetchSubscriptionPrice();
 
@@ -329,11 +375,7 @@ describe("fetchSubscriptionPrice", () => {
   });
 
   it("月額以外の間隔のPriceはamount: nullを返す", async () => {
-    mockPricesRetrieve.mockResolvedValue({
-      unit_amount: 30000,
-      currency: "jpy",
-      recurring: { interval: "year", interval_count: 1 },
-    });
+    mockPrice({ unitAmount: 30000, interval: "year" });
 
     const result = await fetchSubscriptionPrice();
 

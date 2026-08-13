@@ -285,14 +285,16 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 **決済日の固定**: 決済日（請求サイクルのアンカー）は登録日ベースではなく、全ユーザー一律で**毎月27日 UTC 0:00（＝JST 9:00）**に固定する（`app/constants/stripe.ts` の `BILLING_ANCHOR_DAY_OF_MONTH` / `BILLING_ANCHOR_HOUR_UTC`）。27日を選んだのは全ての月に存在する日付で短い月の繰り上げ処理が不要なため、UTC 0:00（JST 9:00）を選んだのは決済失敗の検知・対応がしやすい日中帯のためである。実装は `createCheckoutSession()` で `subscription_data.billing_cycle_anchor_config`（`day_of_month`/`hour`/`minute`/`second` を明示）を指定する方式で、月の長さ・うるう年の考慮をStripe側に委ねる。`billing_cycle_anchor_config` はCheckoutセッション作成時にのみ適用されるため、既存契約者への遡及適用（アンカー移行）は行わない（スコープ外）。
 
-初回請求は日割り（`proration_behavior: "create_prorations"`）とする。無償（`"none"`）にすると「27日直前に登録して1ヶ月弱を無償で使い切って解約する」抜け道ができるため。ただし、アンカー直前の登録では日割り額がStripeの最低請求額（JPY ¥50）を下回りCheckout作成・決済が失敗しうるため、`isProrationBelowMinimum()` で判定し、下回る場合に限り `proration_behavior` を `"none"` に切り替える。無償化されるウィンドウの長さは月額に反比例する（月額¥3000なら約12.4時間、月額が低いほど広がる）。最大でも1ヶ月弱を無償利用できる全面 `"none"` 採用時とは規模が異なるため抜け道にはならない、という判断のもとで採用している。判定にはPriceの `unit_amount`（モジュールスコープのTTLキャッシュ、`fetchSubscriptionPrice()` と共有）を用いる。
+初回請求は日割り（`proration_behavior: "create_prorations"`）とする。無償（`"none"`）にすると「27日直前に登録して1ヶ月弱を無償で使い切って解約する」抜け道ができるため。ただし、アンカー直前の登録では日割り額がStripeの最低請求額（JPY ¥50）を下回りCheckout作成・決済が失敗しうるため、`isProrationBelowMinimum()` で判定し、下回る場合に限り `proration_behavior` を `"none"` に切り替える。無償化されるウィンドウの長さは月額に反比例する（月額¥3000なら約12.4時間、月額が低いほど広がる）。最大でも1ヶ月弱を無償利用できる全面 `"none"` 採用時とは規模が異なるため抜け道にはならない、という判断のもとで採用している。判定にはPriceの `unit_amount`（モジュールスコープのTTLキャッシュ、`fetchSubscriptionPrice()` と共有）を用いる。Priceが1ヶ月間隔でない（誤設定）場合は判定できないため `false`（日割りあり）を返す。Price取得自体が一時的に失敗した場合も、Checkout作成全体を失敗させず `create_prorations`（安全側）にフォールバックする。
+
+`proration_behavior: "none"` を選んだ根拠は「アンカーまでの残り時間が短いこと」だが、Checkout Sessionは既定で作成から最大24時間有効なため、無償ウィンドウ内にセッションを開いたままアンカー通過後まで決済を遅らせて完了されると、Stripeがサブスク作成時点で次のアンカー（さらに1ヶ月先）を採用し、意図せず約1ヶ月分が無償になりうる（このガードが排除しようとした抜け道の再現）。これを防ぐため、`proration_behavior: "none"` の場合に限り、CheckoutセッションのStripe側有効期限（`expires_at`）をアンカー時刻でクランプする（Stripeの制約で作成時刻から最低30分は必要なため、アンカーがそれより近い場合は30分を優先する）。
 
 **画面構成**:
 
 | 画面 | パス | 内容 |
 |:--|:--|:--|
 | アップグレード | `/upgrade` | お試しユーザー: 月額料金（Stripe PriceからTTLキャッシュ付きで取得。取得失敗時、および設定されたPriceが1ヶ月間隔でない場合は料金非表示のまま特典のみ表示） + 特典説明（毎月27日が決済日であること・初回のみ日割りとなることを明示）+ アップグレードボタン（Stripe Checkoutへ遷移）。契約中の一般有料会員: 「ご契約中です」（次回のお支払い日、または解約予定日を`current_period_end`から表示）+ お支払い情報の管理・解約ボタン（Stripe Customer Portalへ遷移）。それ以外の `active` ユーザー（コミュニティ会員・手動承認済みの一般有料会員）: 本登録済みの案内のみ。契約状況の取得自体に失敗した場合はエラーメッセージを表示し、契約なし・契約ありのいずれとも誤判定しない（フェイルクローズ）。取得失敗時もお支払い情報の管理・解約ボタンは表示し続ける（契約が無ければAPI側が404を返すため安全で、実際に契約中のユーザーが解約手段を失わないようにするため） |
-| アップグレード完了 | `/upgrade/success` | Checkoutから戻った直後のページ。`session_id` をStripe APIでretrieveし、決済完了・本人のセッションであることを確認した上で会員昇格を反映し、完了表示する。日割りで少額決済された直後であるため、`stripe_subscriptions.current_period_end` から次回のお支払い予定日（＝満額請求日）も表示する（取得に失敗しても完了表示自体は行う） |
+| アップグレード完了 | `/upgrade/success` | Checkoutから戻った直後のページ。`session_id` をStripe APIでretrieveし、決済完了・本人のセッションであることを確認した上で会員昇格を反映し、完了表示する。日割りで少額決済された直後であるため、`activateUserFromCheckoutSession()` が返す次回のお支払い予定日（＝満額請求日、DBの再読み込みなしで返す）も表示する（取得できなくても完了表示自体は行う） |
 
 トライアルバナー（`(authenticated)/layout.tsx`、2.6参照）に `/upgrade` へのCTAボタンを表示する。
 

@@ -9,12 +9,9 @@ import {
 } from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatDate } from "./format-date";
 import { ManageSubscriptionButton } from "./ManageSubscriptionButton";
 import { UpgradeCheckoutButton } from "./UpgradeCheckoutButton";
-
-function formatDate(isoString: string): string {
-  return new Date(isoString).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
-}
 
 function formatMonthlyPrice(amount: number, currency: string): string {
   if (currency.toLowerCase() !== "jpy") {
