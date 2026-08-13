@@ -82,7 +82,7 @@ export default async function UpgradePage() {
                 <li>
                   お支払いは毎月{BILLING_ANCHOR_DAY_OF_MONTH}
                   日です。初回のみ、ご登録日から次回のお支払い日（{BILLING_ANCHOR_DAY_OF_MONTH}
-                  日）までの日割り料金となります
+                  日）までの日割り料金となります（登録タイミングによっては初回分が発生しない場合があります）
                 </li>
               </ul>
               <UpgradeCheckoutButton />

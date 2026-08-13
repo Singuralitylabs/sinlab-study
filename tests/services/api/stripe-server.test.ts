@@ -238,7 +238,7 @@ describe("isProrationBelowMinimum", () => {
     expect(result).toBe(false);
   });
 
-  it("アンカー30分前の登録は最低請求額を下回る（境界値: 下回る側）", async () => {
+  it("アンカー30分前の登録は最低請求額を下回る（遠く下回る側のサニティチェック）", async () => {
     mockPricesRetrieve.mockResolvedValue({
       unit_amount: 3000,
       currency: "jpy",
@@ -251,7 +251,7 @@ describe("isProrationBelowMinimum", () => {
     expect(result).toBe(true);
   });
 
-  it("アンカー24時間前の登録は最低請求額を下回らない（境界値: 下回らない側）", async () => {
+  it("アンカー24時間前の登録は最低請求額を下回らない（遠く下回らない側のサニティチェック）", async () => {
     mockPricesRetrieve.mockResolvedValue({
       unit_amount: 3000,
       currency: "jpy",
@@ -260,6 +260,34 @@ describe("isProrationBelowMinimum", () => {
 
     // 月額3000円換算（7月分の周期は31日）で日割り額は約97円（¥50以上）
     const result = await isProrationBelowMinimum(new Date("2026-08-26T00:00:00.000Z"));
+
+    expect(result).toBe(false);
+  });
+
+  it("日割り額がちょうど49円のとき（¥50未満の境界）はtrueを返す", async () => {
+    mockPricesRetrieve.mockResolvedValue({
+      unit_amount: 3000,
+      currency: "jpy",
+      recurring: { interval: "month", interval_count: 1 },
+    });
+
+    // 7月分の周期(31日=2,678,400,000ms)に対し、remainingMs = 49 * 892,800 = 43,747,200ms
+    // ちょうど日割り額49円（Math.round(49) = 49 < 50）になる時刻
+    const result = await isProrationBelowMinimum(new Date("2026-08-26T11:50:52.800Z"));
+
+    expect(result).toBe(true);
+  });
+
+  it("日割り額がちょうど50円のとき（¥50ちょうどの境界）はfalseを返す", async () => {
+    mockPricesRetrieve.mockResolvedValue({
+      unit_amount: 3000,
+      currency: "jpy",
+      recurring: { interval: "month", interval_count: 1 },
+    });
+
+    // remainingMs = 50 * 892,800 = 44,640,000ms（=12時間24分）
+    // ちょうど日割り額50円（Math.round(50) = 50。厳密な不等号 `< 50` によりfalse）になる時刻
+    const result = await isProrationBelowMinimum(new Date("2026-08-26T11:36:00.000Z"));
 
     expect(result).toBe(false);
   });
