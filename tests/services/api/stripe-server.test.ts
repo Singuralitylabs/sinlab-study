@@ -189,32 +189,33 @@ describe("createCheckoutSession", () => {
     expect(params).not.toHaveProperty("expires_at");
   });
 
-  it("proration_behaviorがnoneのとき、expires_atをアンカー時刻にクランプする（TOCTOU対策）", async () => {
+  it("proration_behaviorがnoneのとき、expires_atをアンカー時刻付近にクランプする（TOCTOU対策）", async () => {
     mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx" });
-    // アンカー30分前。Stripeの最低セッション有効期間（30分）とアンカーまでの残り時間が
-    // ちょうど一致するため、expires_atはアンカー時刻そのものになる
+    // アンカー30分前。Stripeの最低セッション有効期間（30分）と安全マージン（2分）の
+    // 合計がアンカーまでの残り時間を上回るため、expires_atはnow+32分側が採用される
     const justBeforeAnchor = new Date("2026-08-26T23:30:00.000Z");
 
     await createCheckoutSession(5, "auth-uuid", "trial@example.com", null, justBeforeAnchor);
 
     const params = mockSessionsCreate.mock.calls[0][0];
     expect(params.expires_at).toBe(
-      Math.floor(new Date("2026-08-27T00:00:00.000Z").getTime() / 1000)
+      Math.floor(new Date("2026-08-27T00:02:00.000Z").getTime() / 1000)
     );
   });
 
-  it("アンカーまで30分未満のときは、expires_atをStripeの最低許容値（30分後）にクランプする", async () => {
+  it("アンカーまで30分未満のときは、expires_atをStripeの最低許容値＋安全マージンにクランプする", async () => {
     mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx" });
     // アンカー10分前。アンカー時刻をそのまま使うとStripeの最低30分要件に違反するため、
-    // now + 30分を使う（結果としてアンカーを10分ほど超える余地が残るが、この10分の
-    // ウィンドウ自体が既に「日割り額¥50未満」というごく狭い範囲の中のさらに一部でしかない）
+    // now + 32分（30分＋安全マージン2分）を使う（結果としてアンカーを22分ほど超える
+    // 余地が残るが、この時間帯自体が既に「日割り額¥50未満」というごく狭い範囲の
+    // 中のさらに一部でしかない）
     const tenMinutesBeforeAnchor = new Date("2026-08-26T23:50:00.000Z");
 
     await createCheckoutSession(5, "auth-uuid", "trial@example.com", null, tenMinutesBeforeAnchor);
 
     const params = mockSessionsCreate.mock.calls[0][0];
     expect(params.expires_at).toBe(
-      Math.floor(new Date("2026-08-27T00:20:00.000Z").getTime() / 1000)
+      Math.floor(new Date("2026-08-27T00:22:00.000Z").getTime() / 1000)
     );
   });
 

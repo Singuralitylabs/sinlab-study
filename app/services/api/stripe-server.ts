@@ -10,6 +10,15 @@ import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 /** StripeがCheckout Sessionの`expires_at`に要求する最小許容値（作成時刻からの経過時間） */
 const MIN_CHECKOUT_SESSION_LIFETIME_MS = 30 * 60 * 1000;
 
+/**
+ * `expires_at` 算出時の安全マージン。`now`（関数呼び出し時点の時刻）と、Stripeが実際に
+ * Checkout Sessionを作成する時刻（`now` 取得後のPrice取得API呼び出し・ネットワーク往復を
+ * 経て確定する）には数百ms〜数秒のずれが生じうる。`now + MIN_CHECKOUT_SESSION_LIFETIME_MS`
+ * ちょうどを指定すると、このずれ分だけStripe側の最低30分要件を割り込みCheckout作成が
+ * 失敗しうるため、余裕を持たせる。
+ */
+const CHECKOUT_SESSION_EXPIRY_SAFETY_MARGIN_MS = 2 * 60 * 1000;
+
 let cachedClient: Stripe | null = null;
 
 /**
@@ -122,14 +131,19 @@ export async function createCheckoutSession(
   // 次のアンカー（さらに1ヶ月先）を採用してしまい、意図せず約1ヶ月分が無償になりうる
   // （このガード自体が排除しようとした抜け道の再現）。expires_atをアンカー時刻で
   // クランプし、アンカー通過後は完了不可（セッション失効）にすることでこれを防ぐ。
-  // Stripeはexpires_atに作成時刻から最低30分を要求するため、アンカーがそれより近い
-  // 場合は30分を優先する（この場合ごく短時間だけアンカーをまたぐ余地が残るが、
-  // 無償ウィンドウ自体が数時間〜半日程度の中のさらに一部でしかなく実害は小さい）
+  // Stripeはexpires_atに作成時刻（Stripe側で確定する時刻）から最低30分＋安全マージンを
+  // 要求するため、アンカーがそれより近い場合はそちらを優先する（この場合ごく短時間だけ
+  // アンカーをまたぐ余地が残るが、無償ウィンドウ自体が数時間〜半日程度の中のさらに
+  // 一部でしかなく実害は小さい。完全に排除するには「アンカー直前は新規Checkout作成を
+  // 一時停止しアンカー後の再試行を促す」設計が必要だが、UXへの影響を伴う仕様判断のため
+  // 本PRのスコープ外とする）
   const expiresAtUnix = belowMinimum
     ? Math.floor(
         Math.max(
           getBillingAnchorWindow(now).nextAnchor.getTime(),
-          now.getTime() + MIN_CHECKOUT_SESSION_LIFETIME_MS
+          now.getTime() +
+            MIN_CHECKOUT_SESSION_LIFETIME_MS +
+            CHECKOUT_SESSION_EXPIRY_SAFETY_MARGIN_MS
         ) / 1000
       )
     : undefined;
