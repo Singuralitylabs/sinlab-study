@@ -72,6 +72,7 @@ export type Database = {
           hint: string | null;
           id: number;
           is_deleted: boolean | null;
+          is_open_to_trial: boolean;
           is_published: boolean | null;
           pdf_url: string | null;
           reference_answer: string | null;
@@ -91,6 +92,7 @@ export type Database = {
           hint?: string | null;
           id?: number;
           is_deleted?: boolean | null;
+          is_open_to_trial?: boolean;
           is_published?: boolean | null;
           pdf_url?: string | null;
           reference_answer?: string | null;
@@ -110,6 +112,7 @@ export type Database = {
           hint?: string | null;
           id?: number;
           is_deleted?: boolean | null;
+          is_open_to_trial?: boolean;
           is_published?: boolean | null;
           pdf_url?: string | null;
           reference_answer?: string | null;
@@ -253,9 +256,72 @@ export type Database = {
           },
         ];
       };
+      stripe_events: {
+        Row: {
+          id: string;
+          processed_at: string;
+          type: string;
+        };
+        Insert: {
+          id: string;
+          processed_at?: string;
+          type: string;
+        };
+        Update: {
+          id?: string;
+          processed_at?: string;
+          type?: string;
+        };
+        Relationships: [];
+      };
+      stripe_subscriptions: {
+        Row: {
+          cancel_at_period_end: boolean;
+          created_at: string;
+          current_period_end: string | null;
+          id: number;
+          status: string;
+          stripe_customer_id: string;
+          stripe_subscription_id: string | null;
+          updated_at: string;
+          user_id: number;
+        };
+        Insert: {
+          cancel_at_period_end?: boolean;
+          created_at?: string;
+          current_period_end?: string | null;
+          id?: number;
+          status: string;
+          stripe_customer_id: string;
+          stripe_subscription_id?: string | null;
+          updated_at?: string;
+          user_id: number;
+        };
+        Update: {
+          cancel_at_period_end?: boolean;
+          created_at?: string;
+          current_period_end?: string | null;
+          id?: number;
+          status?: string;
+          stripe_customer_id?: string;
+          stripe_subscription_id?: string | null;
+          updated_at?: string;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "stripe_subscriptions_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: true;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       submissions: {
         Row: {
           code_content: string | null;
+          code_files: Json | null;
           content_id: number;
           created_at: string | null;
           id: number;
@@ -266,6 +332,7 @@ export type Database = {
         };
         Insert: {
           code_content?: string | null;
+          code_files?: Json | null;
           content_id: number;
           created_at?: string | null;
           id?: number;
@@ -276,6 +343,7 @@ export type Database = {
         };
         Update: {
           code_content?: string | null;
+          code_files?: Json | null;
           content_id?: number;
           created_at?: string | null;
           id?: number;
@@ -353,6 +421,7 @@ export type Database = {
           email: string;
           id: number;
           is_deleted: boolean | null;
+          membership_type: string | null;
           role: string;
           status: string;
           updated_at: string | null;
@@ -366,6 +435,7 @@ export type Database = {
           email: string;
           id?: number;
           is_deleted?: boolean | null;
+          membership_type?: string | null;
           role?: string;
           status?: string;
           updated_at?: string | null;
@@ -379,6 +449,7 @@ export type Database = {
           email?: string;
           id?: number;
           is_deleted?: boolean | null;
+          membership_type?: string | null;
           role?: string;
           status?: string;
           updated_at?: string | null;
@@ -392,6 +463,7 @@ export type Database = {
     Functions: {
       get_user_id: { Args: never; Returns: number };
       get_user_role: { Args: never; Returns: string };
+      get_user_status: { Args: never; Returns: string };
     };
     Enums: {
       [_ in never]: never;

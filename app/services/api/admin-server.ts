@@ -1,11 +1,13 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import { USER_STATUS } from "@/app/constants/user";
+import { TERMINAL_SUBSCRIPTION_STATUSES } from "@/app/services/api/stripe-server";
 import type {
   LearningContent,
   LearningPhase,
   LearningPhaseWithTheme,
   LearningTheme,
   LearningWeek,
+  MembershipType,
   UserType,
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
@@ -450,12 +452,14 @@ export async function createContent(content: {
   video_url?: string;
   text_content?: string;
   exercise_instructions?: string;
+  hint?: string;
   reference_answer?: string;
   allowed_submission_types?: "code" | "url" | "both";
   code_language?: "javascript" | "typescript" | "html" | "css";
   pdf_url?: string;
   display_order?: number;
   is_published?: boolean;
+  is_open_to_trial?: boolean;
 }): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
 
@@ -529,28 +533,83 @@ export async function fetchAllUsers(): Promise<{
   return { data: data as UserType[], error: null };
 }
 
-export async function approveUser(userId: number): Promise<{ error: PostgrestError | null }> {
+/**
+ * 現在契約中とみなせるStripeサブスクリプション行を持つユーザーIDの一覧を取得する
+ * （/admin/users でのサブスク会員バッジ表示用）。
+ *
+ * `stripe_subscriptions` は1ユーザー1行固定で解約後も行が残り続けるため、
+ * 終端状態（TERMINAL_SUBSCRIPTION_STATUSES）の行は「現在は契約していない」として除外する。
+ */
+export async function fetchUserIdsWithStripeSubscription(): Promise<{
+  data: number[] | null;
+  error: PostgrestError | null;
+}> {
   const supabase = await createAdminSupabaseClient();
 
-  const { error } = await supabase
+  const { data, error } = await supabase
+    .from("stripe_subscriptions")
+    .select("user_id")
+    .not("status", "in", `(${TERMINAL_SUBSCRIPTION_STATUSES.join(",")})`);
+
+  if (error) {
+    console.error("サブスク契約ユーザー一覧取得エラー:", error.message);
+    return { data: null, error };
+  }
+
+  return {
+    data: data.map((row) => row.user_id),
+    error: null,
+  };
+}
+
+/**
+ * ユーザーを承認する。承認と同時に会員種別（コミュニティ会員 / 一般有料会員）を設定する。
+ *
+ * 承認済み（active）ユーザーの再承認は不可。会員種別も上書きするため、古い画面からの
+ * 再承認で設定済みの種別が既定値に書き換わる事故を防ぐ（種別変更は #95 で対応）。
+ * 事前SELECTによるチェックでは同時リクエスト間で競合し、SELECT失敗時にフェイルオープン
+ * にもなるため、UPDATE自体に条件を折り込み原子的に判定する。
+ *
+ * @returns updated: 更新が行われたか。false は既に承認済み・存在しない・削除済みのいずれか
+ */
+export async function approveUser(
+  userId: number,
+  membershipType: MembershipType
+): Promise<{ error: PostgrestError | null; updated: boolean }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { data, error } = await supabase
     .from("users")
-    .update({ status: USER_STATUS.ACTIVE, updated_at: new Date().toISOString() })
-    .eq("id", userId);
+    .update({
+      status: USER_STATUS.ACTIVE,
+      membership_type: membershipType,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", userId)
+    .neq("status", USER_STATUS.ACTIVE)
+    .select("id");
 
   if (error) {
     console.error("ユーザー承認エラー:", error.message);
-    return { error };
+    return { error, updated: false };
   }
 
-  return { error: null };
+  return { error: null, updated: (data?.length ?? 0) > 0 };
 }
 
+/**
+ * ユーザーを却下する。却下ユーザーは会員種別を持たないため NULL に戻す。
+ */
 export async function rejectUser(userId: number): Promise<{ error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
 
   const { error } = await supabase
     .from("users")
-    .update({ status: USER_STATUS.REJECTED, updated_at: new Date().toISOString() })
+    .update({
+      status: USER_STATUS.REJECTED,
+      membership_type: null,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", userId);
 
   if (error) {
@@ -597,44 +656,147 @@ export async function fetchStudentsProgress(): Promise<{
 }> {
   const supabase = await createServerSupabaseClient();
 
-  // アクティブなユーザー一覧を取得
-  const { data: users, error: usersError } = await supabase
-    .from("users")
-    .select("id, display_name, email")
-    .eq("status", USER_STATUS.ACTIVE)
-    .eq("is_deleted", false)
-    .order("display_name");
+  // アクティブなユーザー一覧と公開コンテンツの総数は独立しているため並列で取得する
+  const [usersResult, contentsCountResult] = await Promise.all([
+    supabase
+      .from("users")
+      .select("id, display_name, email")
+      .eq("status", USER_STATUS.ACTIVE)
+      .eq("is_deleted", false)
+      .order("display_name"),
+    supabase
+      .from("learning_contents")
+      .select("id", { count: "exact", head: true })
+      .eq("is_published", true)
+      .eq("is_deleted", false),
+  ]);
+
+  const { data: users, error: usersError } = usersResult;
+  const { count: totalContents, error: contentsCountError } = contentsCountResult;
 
   if (usersError) {
     console.error("ユーザー一覧取得エラー:", usersError.message);
     return { data: null, error: usersError };
   }
 
-  // 公開コンテンツの総数を取得
-  const { count: totalContents } = await supabase
-    .from("learning_contents")
-    .select("id", { count: "exact", head: true })
-    .eq("is_published", true)
-    .eq("is_deleted", false);
+  // 総数が取れなくても受講生一覧の表示は維持するため、エラーはログのみ（totalContents は0扱い）
+  if (contentsCountError) {
+    console.error("公開コンテンツ総数取得エラー:", contentsCountError.message);
+  }
 
-  // 各ユーザーの進捗を取得
-  const studentsProgress: StudentProgress[] = await Promise.all(
-    (users || []).map(async (user) => {
-      const { data: progress } = await supabase
+  // 完了済み進捗を全ユーザー分まとめて取得し、ユーザー単位に集約する
+  // （ユーザーごとの逐次クエリによるN+1を回避）。
+  // PostgRESTの1リクエスト最大行数（既定1000行）を超えても取りこぼさないよう range でページングする。
+  // サーバー側の max-rows 設定が pageSize より小さい場合でも取りこぼさないよう、
+  // offset は実際に返った行数で進め、0件になった時点で終了する。
+  // 進捗の取得に失敗した場合はエラーにせず完了数0で返し、受講生一覧の表示を維持する。
+  const progressByUser = new Map<number, { completedCount: number; lastActivity: string | null }>();
+  if ((users ?? []).length > 0) {
+    const pageSize = 1000;
+    let offset = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const { data: progress, error: progressError } = await supabase
         .from("user_progress")
-        .select("completed_at")
-        .eq("user_id", user.id)
+        .select("user_id, completed_at")
         .eq("is_completed", true)
-        .order("completed_at", { ascending: false });
+        .order("id")
+        .range(offset, offset + pageSize - 1);
 
-      return {
-        user,
-        totalContents: totalContents || 0,
-        completedContents: progress?.length || 0,
-        lastActivity: progress?.[0]?.completed_at || null,
-      };
-    })
-  );
+      if (progressError) {
+        console.error("受講生進捗取得エラー:", progressError.message);
+        progressByUser.clear();
+        break;
+      }
+
+      const rows = progress ?? [];
+      for (const row of rows) {
+        const entry = progressByUser.get(row.user_id) ?? { completedCount: 0, lastActivity: null };
+        entry.completedCount += 1;
+        if (row.completed_at && (!entry.lastActivity || row.completed_at > entry.lastActivity)) {
+          entry.lastActivity = row.completed_at;
+        }
+        progressByUser.set(row.user_id, entry);
+      }
+
+      offset += rows.length;
+      hasMore = rows.length > 0;
+    }
+  }
+
+  const studentsProgress: StudentProgress[] = (users ?? []).map((user) => {
+    const progress = progressByUser.get(user.id);
+    return {
+      user,
+      totalContents: totalContents || 0,
+      completedContents: progress?.completedCount ?? 0,
+      lastActivity: progress?.lastActivity ?? null,
+    };
+  });
 
   return { data: studentsProgress, error: null };
+}
+
+// =====================================================
+// 管理ダッシュボード
+// =====================================================
+
+interface ManageCounts {
+  themes: number;
+  phases: number;
+  weeks: number;
+  contents: number;
+  students: number;
+}
+
+/**
+ * 管理ダッシュボードの各件数を取得（head + count のみでレコード本体は取得しない）
+ * 一部の件数取得に失敗しても 0 として返し、ダッシュボードの表示を維持する。
+ */
+export async function fetchManageCounts(): Promise<{
+  data: ManageCounts;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+
+  const [themes, phases, weeks, contents, students] = await Promise.all([
+    supabase
+      .from("learning_themes")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
+    supabase
+      .from("learning_phases")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
+    supabase
+      .from("learning_weeks")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
+    supabase
+      .from("learning_contents")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
+    supabase
+      .from("users")
+      .select("id", { count: "exact", head: true })
+      .eq("status", USER_STATUS.ACTIVE)
+      .eq("is_deleted", false),
+  ]);
+
+  const firstError =
+    themes.error ?? phases.error ?? weeks.error ?? contents.error ?? students.error ?? null;
+  if (firstError) {
+    console.error("管理ダッシュボード件数取得エラー:", firstError.message);
+  }
+
+  return {
+    data: {
+      themes: themes.count ?? 0,
+      phases: phases.count ?? 0,
+      weeks: weeks.count ?? 0,
+      contents: contents.count ?? 0,
+      students: students.count ?? 0,
+    },
+    error: firstError,
+  };
 }

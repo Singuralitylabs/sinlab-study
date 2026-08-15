@@ -3,6 +3,8 @@ import Link from "next/link";
 import { AIReviewStatusBadge } from "@/app/components/AIReviewDisplay";
 import { AIReviewDisplayClient } from "@/app/components/AIReviewDisplayClient";
 import { PageTitle } from "@/app/components/PageTitle";
+import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
+import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import { fetchSubmissionsWithReviewsByUserId } from "@/app/services/api/ai-review-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
@@ -76,10 +78,13 @@ export default async function SubmissionsPage() {
                       {submission.content?.title || "不明なコンテンツ"}
                     </h3>
 
-                    {submission.submission_type === "code" && submission.code_content && (
-                      <pre className="mt-3 p-3 bg-muted rounded-lg text-sm overflow-x-auto max-h-40">
-                        <code>{submission.code_content}</code>
-                      </pre>
+                    {submission.submission_type === "code" && (
+                      <div className="mt-3">
+                        <SubmissionCodeBlock
+                          files={getSubmissionCodeFiles(submission)}
+                          preClassName="p-3 bg-muted rounded-lg text-sm overflow-x-auto max-h-40"
+                        />
+                      </div>
                     )}
 
                     {submission.submission_type === "url" && submission.url && (

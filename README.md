@@ -101,7 +101,7 @@ app/
 └── types/               # TypeScript 型定義
 supabase/
 └── migrations/          # DBマイグレーションSQL
-middleware.ts            # 認証ミドルウェア
+proxy.ts                 # 認証プロキシ（Next.js 16 の Middleware 後継）
 docs/                    # 設計ドキュメント
 ```
 

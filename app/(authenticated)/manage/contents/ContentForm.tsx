@@ -48,6 +48,19 @@ const SUBMISSION_TYPE_OPTIONS: {
   { value: "both", label: "コード・URL選択", description: "受講生がどちらかを選択して提出" },
 ];
 
+/**
+ * 既存スライドの pdf_url（例: .../slides/gas-advanced/slide-03.pdf）から
+ * コーススラッグとスライド番号を抽出する。命名規約に沿わない場合は空を返す。
+ */
+function parseSlidePath(pdfUrl: string | null | undefined): {
+  folder: string;
+  slideNumber: string;
+} {
+  const match = pdfUrl?.match(/\/slides\/([a-z0-9-]+)\/slide-(\d+)\.pdf$/);
+  if (!match) return { folder: "", slideNumber: "" };
+  return { folder: match[1], slideNumber: String(Number.parseInt(match[2], 10)) };
+}
+
 export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -60,6 +73,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
   const [exerciseInstructions, setExerciseInstructions] = useState(
     initialData?.exercise_instructions ?? ""
   );
+  const [hint, setHint] = useState(initialData?.hint ?? "");
   const [referenceAnswer, setReferenceAnswer] = useState(initialData?.reference_answer ?? "");
   const [allowedSubmissionTypes, setAllowedSubmissionTypes] = useState<AllowedSubmissionTypes>(
     (initialData?.allowed_submission_types as AllowedSubmissionTypes) ?? "code"
@@ -67,14 +81,22 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
   const [codeLanguage, setCodeLanguage] = useState<CodeLanguage>(
     (initialData?.code_language as CodeLanguage) ?? "javascript"
   );
+  const initialSlide = parseSlidePath(initialData?.pdf_url);
   const [pdfUrl, setPdfUrl] = useState(initialData?.pdf_url ?? "");
+  const [pdfFolder, setPdfFolder] = useState(initialSlide.folder);
+  const [slideNumber, setSlideNumber] = useState(initialSlide.slideNumber);
   const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
+  const [isOpenToTrial, setIsOpenToTrial] = useState(initialData?.is_open_to_trial ?? false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [pdfFileName, setPdfFileName] = useState<string | null>(null);
+  const [pdfFileName, setPdfFileName] = useState<string | null>(
+    initialSlide.folder
+      ? `${initialSlide.folder}/slide-${initialSlide.slideNumber.padStart(2, "0")}.pdf`
+      : null
+  );
 
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -85,12 +107,35 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       return;
     }
 
+    const folder = pdfFolder.trim().toLowerCase();
+    if (!folder) {
+      setMessage({ type: "error", text: "保存先フォルダ（コーススラッグ）を入力してください" });
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      return;
+    }
+    if (!/^[a-z0-9-]+$/.test(folder)) {
+      setMessage({
+        type: "error",
+        text: "フォルダ名は英小文字・数字・ハイフンのみ使用できます",
+      });
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      return;
+    }
+
     setIsUploading(true);
     setMessage(null);
 
     try {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("folder", folder);
+      if (slideNumber.trim()) {
+        formData.append("slideNumber", slideNumber.trim());
+      }
 
       const response = await fetch("/api/upload-pdf", {
         method: "POST",
@@ -100,8 +145,8 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       if (response.ok) {
         const data = await response.json();
         setPdfUrl(data.url);
-        setPdfFileName(file.name);
-        setMessage({ type: "success", text: "PDFをアップロードしました" });
+        setPdfFileName(data.path ?? file.name);
+        setMessage({ type: "success", text: `スライドをアップロードしました（${data.path}）` });
       } else {
         const data = await response.json();
         setMessage({ type: "error", text: data.error || "アップロードに失敗しました" });
@@ -116,7 +161,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage(null);
@@ -127,10 +172,13 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       content_type: contentType,
       display_order: Number(displayOrder),
       is_published: isPublished,
-      video_url: contentType === "video" ? videoUrl : null,
-      text_content: contentType === "text" ? textContent : null,
-      exercise_instructions: contentType === "exercise" ? exerciseInstructions : null,
-      reference_answer: contentType === "exercise" ? referenceAnswer || null : null,
+      is_open_to_trial: isOpenToTrial,
+      video_url: contentType === "video" ? videoUrl.trim() || null : null,
+      text_content: contentType === "text" ? textContent.trim() || null : null,
+      exercise_instructions:
+        contentType === "exercise" ? exerciseInstructions.trim() || null : null,
+      hint: contentType === "exercise" ? hint.trim() || null : null,
+      reference_answer: contentType === "exercise" ? referenceAnswer.trim() || null : null,
       allowed_submission_types: contentType === "exercise" ? allowedSubmissionTypes : "code",
       code_language: contentType === "exercise" ? codeLanguage : "javascript",
       pdf_url: contentType === "slide" ? pdfUrl : null,
@@ -251,6 +299,36 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
 
           {contentType === "slide" && (
             <div className="space-y-3">
+              {/* 保存先フォルダ・スライド番号 */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="pdfFolder">保存先フォルダ（コーススラッグ）</Label>
+                  <Input
+                    id="pdfFolder"
+                    value={pdfFolder}
+                    onChange={(e) => setPdfFolder(e.target.value)}
+                    placeholder="例: gas-advanced"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    slides/&lt;フォルダ&gt;/slide-NN.pdf
+                    として保存されます（英小文字・数字・ハイフン）
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="slideNumber">スライド番号</Label>
+                  <Input
+                    id="slideNumber"
+                    type="number"
+                    min={1}
+                    value={slideNumber}
+                    onChange={(e) => setSlideNumber(e.target.value)}
+                    placeholder="空欄で自動採番"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    指定するとその番号で保存（既存は上書き）。空欄なら次の番号を自動採番。
+                  </p>
+                </div>
+              </div>
               <Label>PDFファイル</Label>
               <div className="flex items-center gap-3">
                 <Button
@@ -305,6 +383,16 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
                   onChange={(e) => setExerciseInstructions(e.target.value)}
                   placeholder="演習の指示をMarkdown形式で記述してください..."
                   className="min-h-[300px] font-mono"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="hint">ヒント（受講生に公開）</Label>
+                <Textarea
+                  id="hint"
+                  value={hint}
+                  onChange={(e) => setHint(e.target.value)}
+                  placeholder="課題提出フォームの上部にアコーディオン形式で表示されます。受講生向けのヒントを記述してください（Markdown記法は使えますが、レンダリングされずプレーンテキストとして表示されます）。未入力の場合はヒントUIを表示しません。"
+                  className="min-h-[200px] font-mono"
                 />
               </div>
               <div className="space-y-2">
@@ -381,6 +469,23 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
               className="h-4 w-4 rounded border-input"
             />
             <Label htmlFor="isPublished">公開する</Label>
+          </div>
+
+          {/* お試し公開設定 */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <input
+                id="isOpenToTrial"
+                type="checkbox"
+                checked={isOpenToTrial}
+                onChange={(e) => setIsOpenToTrial(e.target.checked)}
+                className="h-4 w-4 rounded border-input"
+              />
+              <Label htmlFor="isOpenToTrial">お試しユーザーにも公開する</Label>
+            </div>
+            <p className="text-xs text-muted-foreground ml-6">
+              無料プラン利用中のユーザーもこのコンテンツを閲覧・提出できるようになります。
+            </p>
           </div>
 
           {/* メッセージ */}

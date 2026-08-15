@@ -1,14 +1,45 @@
 "use client";
 
-import { Bot, Code, FlaskConical, Link as LinkIcon, Loader2, Send } from "lucide-react";
+import {
+  Bot,
+  Code,
+  FlaskConical,
+  Link as LinkIcon,
+  Loader2,
+  Plus,
+  Send,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
-import { CodeEditor, type CodeLanguage } from "@/app/components/CodeEditor";
+import {
+  buildDefaultFilename,
+  CodeEditor,
+  type CodeLanguage,
+  DEFAULT_FILENAME_BY_LANGUAGE,
+} from "@/app/components/CodeEditor";
 import type { AIReview, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+const CODE_LANGUAGE_OPTIONS: { value: CodeLanguage; label: string }[] = [
+  { value: "javascript", label: "JavaScript" },
+  { value: "typescript", label: "TypeScript" },
+  { value: "gas", label: "GAS" },
+  { value: "html", label: "HTML" },
+  { value: "css", label: "CSS" },
+];
+
+interface CodeFileInput {
+  id: string;
+  filename: string;
+  language: CodeLanguage;
+  content: string;
+  // ユーザーがファイル名を手動編集したか。false の間は言語変更にあわせて初期値を自動更新する
+  filenameEdited: boolean;
+}
 
 // デモ用のサンプルAIレビュー（実際のAPI呼び出しは行わない）
 const SAMPLE_REVIEW: AIReview = {
@@ -56,13 +87,72 @@ export function DemoSubmissionForm({
   const [submissionType, setSubmissionType] = useState<SubmissionType>(
     allowedSubmissionTypes === "url" ? "url" : "code"
   );
-  const [codeContent, setCodeContent] = useState("");
+  const [codeFiles, setCodeFiles] = useState<CodeFileInput[]>([
+    { id: "file-0", filename: "", language: codeLanguage, content: "", filenameEdited: false },
+  ]);
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [aiReview, setAiReview] = useState<AIReview | null>(null);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const isMultiFile = codeFiles.length > 1;
+
+  const updateCodeFile = (index: number, patch: Partial<CodeFileInput>) => {
+    setCodeFiles((prev) => prev.map((file, i) => (i === index ? { ...file, ...patch } : file)));
+  };
+
+  // ファイル名入力欄の変更。手動編集とみなし、以後は言語変更で初期値を上書きしない
+  const handleFilenameChange = (index: number, filename: string) => {
+    updateCodeFile(index, { filename, filenameEdited: true });
+  };
+
+  // 言語変更。ファイル名が未編集なら、新しい言語のデフォルト名へ追従させる
+  const handleLanguageChange = (index: number, language: CodeLanguage) => {
+    setCodeFiles((prev) =>
+      prev.map((file, i) => {
+        if (i !== index) {
+          return file;
+        }
+        if (file.filenameEdited) {
+          return { ...file, language };
+        }
+        const otherFilenames = prev.filter((_, j) => j !== index).map((f) => f.filename);
+        return { ...file, language, filename: buildDefaultFilename(language, otherFilenames) };
+      })
+    );
+  };
+
+  const addCodeFile = () => {
+    setCodeFiles((prev) => {
+      // 単一→複数ファイル化の初回は、ファイル名が空のファイルにデフォルト名を補完する
+      // （単一ファイル時はファイル名欄が非表示で未入力のため、複数化と同時に必須化される対策）
+      const assigned: string[] = prev
+        .map((f) => f.filename)
+        .filter((name) => name.trim().length > 0);
+      const backfilled = prev.map((file) => {
+        if (file.filename.trim().length > 0) {
+          return file;
+        }
+        const filename = buildDefaultFilename(file.language, assigned);
+        assigned.push(filename);
+        return { ...file, filename };
+      });
+      const newFile: CodeFileInput = {
+        id: crypto.randomUUID(),
+        filename: buildDefaultFilename(codeLanguage, assigned),
+        language: codeLanguage,
+        content: "",
+        filenameEdited: false,
+      };
+      return [...backfilled, newFile];
+    });
+  };
+
+  const removeCodeFile = (index: number) => {
+    setCodeFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     setIsReviewLoading(true);
@@ -76,8 +166,14 @@ export function DemoSubmissionForm({
     setAiReview(SAMPLE_REVIEW);
   };
 
+  const isCodeValid =
+    codeFiles.length > 0 &&
+    codeFiles.every(
+      (file) => file.content.trim().length > 0 && (!isMultiFile || file.filename.trim().length > 0)
+    );
+
   const isValid =
-    (submissionType === "code" && codeContent.trim().length > 0) ||
+    (submissionType === "code" && isCodeValid) ||
     (submissionType === "url" && url.trim().length > 0);
 
   return (
@@ -113,15 +209,72 @@ export function DemoSubmissionForm({
         )}
 
         {submissionType === "code" ? (
-          <div className="space-y-2">
-            <Label>コード</Label>
-            <CodeEditor
-              value={codeContent}
-              onChange={setCodeContent}
-              language={codeLanguage}
-              placeholder="ここにコードを貼り付けてください..."
-              minHeight="200px"
-            />
+          <div className="space-y-3">
+            {codeFiles.map((file, index) => (
+              <div
+                key={file.id}
+                className={
+                  isMultiFile ? "space-y-2 rounded-lg border border-border p-3" : "space-y-2"
+                }
+              >
+                {isMultiFile ? (
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1 space-y-1">
+                      <Label htmlFor={`demo-filename-${index}`} className="text-xs">
+                        ファイル名
+                      </Label>
+                      <Input
+                        id={`demo-filename-${index}`}
+                        value={file.filename}
+                        onChange={(e) => handleFilenameChange(index, e.target.value)}
+                        placeholder={`例: ${DEFAULT_FILENAME_BY_LANGUAGE[file.language]}`}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor={`demo-language-${index}`} className="text-xs">
+                        言語
+                      </Label>
+                      <select
+                        id={`demo-language-${index}`}
+                        value={file.language}
+                        onChange={(e) =>
+                          handleLanguageChange(index, e.target.value as CodeLanguage)
+                        }
+                        className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                      >
+                        {CODE_LANGUAGE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeCodeFile(index)}
+                      aria-label="このファイルを削除"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <Label>コード</Label>
+                )}
+                <CodeEditor
+                  value={file.content}
+                  onChange={(value) => updateCodeFile(index, { content: value })}
+                  language={file.language}
+                  placeholder="ここにコードを貼り付けてください..."
+                  minHeight="200px"
+                />
+              </div>
+            ))}
+            <Button type="button" variant="outline" size="sm" onClick={addCodeFile}>
+              <Plus className="h-4 w-4" />
+              ファイルを追加
+            </Button>
           </div>
         ) : (
           <div className="space-y-2">

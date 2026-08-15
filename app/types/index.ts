@@ -1,7 +1,7 @@
 import type { Tables } from "./lib/database.types";
 
 // Re-export database types utility
-export type { Database, Tables, TablesInsert, TablesUpdate } from "./lib/database.types";
+export type { Database, Json, Tables, TablesInsert, TablesUpdate } from "./lib/database.types";
 
 // =====================================================
 // Base types derived from database schema
@@ -10,6 +10,7 @@ export type { Database, Tables, TablesInsert, TablesUpdate } from "./lib/databas
 export type UserType = Tables<"users"> & {
   role: UserRoleType;
   status: UserStatusType;
+  membership_type: MembershipType | null;
   is_deleted: boolean;
 };
 export type LearningTheme = Tables<"learning_themes"> & {
@@ -49,9 +50,24 @@ export type AIReview = Tables<"ai_reviews"> & {
 
 export type UserStatusType = "pending" | "active" | "rejected";
 export type UserRoleType = "admin" | "maintainer" | "member";
+/** 承認済みユーザーの会員種別。承認前・却下ユーザーは null */
+export type MembershipType = "community" | "general";
 export type ContentType = "video" | "text" | "exercise" | "slide";
 export type SubmissionType = "code" | "url";
 export type AIReviewStatus = "pending" | "processing" | "completed" | "failed";
+
+/**
+ * 複数ファイル提出の1ファイル分（submissions.code_files の各要素）。
+ * 単一ファイル提出（code_content）との後方互換のため、language/filename は空文字を許容する。
+ *
+ * （interface ではなく type で定義する: Supabase 生成の Json 型へ代入する際に
+ * 暗黙のインデックスシグネチャが必要なため）
+ */
+export type CodeFile = {
+  filename: string;
+  language: string;
+  content: string;
+};
 
 // =====================================================
 // Extended types with relations
@@ -73,16 +89,14 @@ export interface SubmissionWithContent extends Submission {
   content: LearningContent | null;
 }
 
-export interface SubmissionWithUser extends Submission {
-  user: Pick<UserType, "id" | "display_name" | "email"> | null;
-  content: LearningContent | null;
-}
-
 export interface SubmissionWithContentAndReview extends SubmissionWithContent {
   ai_review: AIReview | null;
 }
 
-export interface SubmissionWithUserAndReview extends SubmissionWithUser {
+/** 管理者・講師向け提出一覧の1件（content は一覧表示に必要な最小カラムのみ） */
+export interface AdminSubmissionWithReview extends Submission {
+  user: Pick<UserType, "id" | "display_name" | "email"> | null;
+  content: Pick<LearningContent, "id" | "title"> | null;
   ai_review: AIReview | null;
 }
 

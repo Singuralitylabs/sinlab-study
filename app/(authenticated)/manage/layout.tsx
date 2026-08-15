@@ -26,7 +26,7 @@ const MANAGE_NAV_ITEMS = [
 export default async function ManageLayout({ children }: { children: React.ReactNode }) {
   const { userRole } = await getServerAuth();
 
-  if (!userRole || !checkContentPermissions(userRole)) {
+  if (!checkContentPermissions(userRole)) {
     redirect("/");
   }
 

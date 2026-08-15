@@ -1,6 +1,15 @@
 "use client";
 
-import { BookOpen, ClipboardList, House, LogOut, Menu, Settings, UserCog } from "lucide-react";
+import {
+  BookOpen,
+  ClipboardList,
+  CreditCard,
+  House,
+  LogOut,
+  Menu,
+  Settings,
+  UserCog,
+} from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -31,6 +40,11 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     title: "提出履歴",
     href: "/submissions",
     icon: <ClipboardList className="h-5 w-5" />,
+  },
+  {
+    title: "プラン・お支払い",
+    href: "/upgrade",
+    icon: <CreditCard className="h-5 w-5" />,
   },
 ];
 

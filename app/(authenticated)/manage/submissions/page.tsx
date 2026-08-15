@@ -1,7 +1,19 @@
-import { ClipboardList, Code, ExternalLink, Link as LinkIcon } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  Code,
+  ExternalLink,
+  Link as LinkIcon,
+} from "lucide-react";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import type { ReactNode } from "react";
 import { AIReviewStatusBadge } from "@/app/components/AIReviewDisplay";
 import { AIReviewDisplayClient } from "@/app/components/AIReviewDisplayClient";
 import { PageTitle } from "@/app/components/PageTitle";
+import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
+import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import { fetchAllSubmissionsWithReviews } from "@/app/services/api/ai-review-server";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,8 +38,54 @@ function formatDate(dateString: string | null) {
   });
 }
 
-export default async function ManageSubmissionsPage() {
-  const { data: submissions } = await fetchAllSubmissionsWithReviews();
+const PAGE_SIZE = 20;
+
+interface PageProps {
+  searchParams: Promise<{ page?: string }>;
+}
+
+function PagerLink({
+  href,
+  disabled,
+  children,
+}: {
+  href: string;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  if (disabled) {
+    return (
+      <span className="inline-flex items-center gap-1 text-sm text-muted-foreground/50">
+        {children}
+      </span>
+    );
+  }
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+    >
+      {children}
+    </Link>
+  );
+}
+
+export default async function ManageSubmissionsPage({ searchParams }: PageProps) {
+  const { page: pageParam } = await searchParams;
+  const parsedPage = Number.parseInt(pageParam ?? "1", 10);
+  const page = Number.isNaN(parsedPage) || parsedPage < 1 ? 1 : parsedPage;
+
+  const { data: submissions, count } = await fetchAllSubmissionsWithReviews({
+    page,
+    pageSize: PAGE_SIZE,
+  });
+
+  // 範囲外ページ（データ空 or range超過エラー）を指定された場合は1ページ目へ戻す
+  if (page > 1 && (!submissions || submissions.length === 0)) {
+    redirect("/manage/submissions");
+  }
+
+  const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -71,10 +129,11 @@ export default async function ManageSubmissionsPage() {
                   <span className="text-sm font-medium">{submission.content?.title}</span>
                 </div>
 
-                {submission.submission_type === "code" && submission.code_content && (
-                  <pre className="p-3 bg-muted rounded-lg text-sm overflow-x-auto max-h-40">
-                    <code>{submission.code_content}</code>
-                  </pre>
+                {submission.submission_type === "code" && (
+                  <SubmissionCodeBlock
+                    files={getSubmissionCodeFiles(submission)}
+                    preClassName="p-3 bg-muted rounded-lg text-sm overflow-x-auto max-h-40"
+                  />
                 )}
 
                 {submission.submission_type === "url" &&
@@ -97,6 +156,22 @@ export default async function ManageSubmissionsPage() {
               </CardContent>
             </Card>
           ))}
+        </div>
+      )}
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-4 mt-6">
+          <PagerLink href={`/manage/submissions?page=${page - 1}`} disabled={page <= 1}>
+            <ChevronLeft className="h-4 w-4" />
+            前へ
+          </PagerLink>
+          <span className="text-sm text-muted-foreground">
+            {page} / {totalPages} ページ
+          </span>
+          <PagerLink href={`/manage/submissions?page=${page + 1}`} disabled={page >= totalPages}>
+            次へ
+            <ChevronRight className="h-4 w-4" />
+          </PagerLink>
         </div>
       )}
     </div>

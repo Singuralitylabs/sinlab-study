@@ -88,9 +88,9 @@ CI のワークフロー一覧は [4.1 GitHub Actions ワークフロー](#41-gi
 | 観点 | CI（自動） | 手動 |
 | --- | --- | --- |
 | 認証制御 | 認証ヘルパー関数の判定ロジック | 未認証ユーザーのリダイレクト |
-| 認可制御 | 権限判定ロジック（admin/maintainer/member 別の許可/拒否） | UI・ミドルウェアでのアクセス制御 |
-| 承認ステータス制御 | ステータス判定ロジック（pending/rejected） | 画面遷移の正当性 |
-| データアクセス | ―（ユニットでは検証困難） | RLSによるデータ分離 |
+| 認可制御 | 権限判定ロジック（admin/maintainer/member 別の許可/拒否） | UI・プロキシ（`proxy.ts`）でのアクセス制御 |
+| 承認ステータス制御 | ステータス判定ロジック（pending（お試し）/active/rejected） | 画面遷移の正当性、お試しユーザーへのロック表示 |
+| データアクセス | ―（ユニットでは検証困難） | RLSによるデータ分離。お試しユーザーのアクセストークンでPostgRESTに直接アクセスし、(a) `learning_contents` のSELECTでお試し非公開コンテンツが0行、(b) お試し非公開コンテンツに対する `user_progress` / `submissions` のINSERT・UPDATEが拒否されること |
 
 ### 3.3 型安全性テスト
 
@@ -126,7 +126,10 @@ TypeScript と型生成の運用によって、型の破綻を早期に検知す
   - Google ログイン → ダッシュボード表示 → コンテンツ閲覧 → ログアウト
   - 進捗の記録 → ダッシュボードへの反映
   - admin/maintainer による管理操作（フェーズ・週・コンテンツ管理）→ 一覧/詳細への反映
-  - pending/rejected ユーザーが保護ページへアクセス → 適切な誘導（`/pending` / `/rejected`）
+  - rejected ユーザーが保護ページへアクセス → `/rejected` へ誘導。旧URL `/pending` へのアクセスも `/rejected` に落ち着く
+  - お試し（pending）ユーザーのログイン → ツリー全表示・お試し非公開コンテンツのロック表示・直リンク時のロック画面、お試し公開コンテンツの閲覧/完了/提出が成功、お試し非公開コンテンツへのAPI直叩きが403
+  - お試しユーザーが旧URL `/pending` へアクセス → `/`（ダッシュボード）へリダイレクトされ、承認待ちバナーが表示される
+  - 承認（pending → active）後に承認前の提出・進捗が引き継がれ、管理者のレビュー一覧に表示される
   - 演習コンテンツへの提出物作成 → 提出履歴への反映
 
 ## 4. CI / ツール構成
@@ -142,7 +145,6 @@ GitHub Actions は CI/CD の実行基盤として利用する。詳細は各ワ�
 | Vitest Unit Tests ([.github/workflows/test.yml](../.github/workflows/test.yml)) | ユニットテスト実行 | ユニットテスト（Vitest） | `push` / `pull_request`（`app/**`, `tests/**`, `vitest.config.ts`, `package.json`）、`workflow_dispatch` |
 | Biome Check ([.github/workflows/biome.yml](../.github/workflows/biome.yml)) | Lint/フォーマット違反を防止 | `bun run check`（Biome lint + format） | `push` / `pull_request`（`app/**`）、`workflow_dispatch` |
 | Check console.log and debugger ([.github/workflows/check_console_log.yml](../.github/workflows/check_console_log.yml)) | デバッグ用出力の混入を防止 | console/debugger 検査 | `push` / `pull_request`（`app/**`）、`workflow_dispatch` |
-| Supabase DB Types Consistency ([.github/workflows/db-types.yml](../.github/workflows/db-types.yml)) | DB 型定義の整合性監視（準備中） | 依存関係インストール（型生成/差分チェックは保留） | `push` / `pull_request`（`supabase/**`, `app/types/lib/database.types.ts` 等）、`workflow_dispatch` |
 
 ### 4.2 導入済みツール / 導入予定ツール
 
@@ -195,5 +197,3 @@ GitHub Actions は CI/CD の実行基盤として利用する。詳細は各ワ�
 | `tests/services/auth/permissions.test.ts` | `app/services/auth/permissions.ts` | `checkAdminPermissions`, `checkContentPermissions`, `checkInstructorPermissions` | ロール（admin/maintainer/member/unknown）ごとの権限判定（許可/拒否）を検証する。 |
 | `tests/services/auth/server-auth.test.ts` | `app/services/auth/server-auth.ts` | `getServerAuth` | 認証エラー、ユーザー情報取得失敗、ステータス別応答、例外時の戻り値とエラーハンドリングを検証する。 |
 | `tests/services/api/learning-server.test.ts` | `app/services/api/learning-server.ts` | 学習コンテンツ取得関数群 | フェーズ・週・コンテンツの取得正常系/異常系を検証する。 |
-| `tests/services/api/users-server.test.ts` | `app/services/api/users-server.ts` | ユーザー取得・更新関数群 | ユーザーステータス取得、ユーザー情報取得の正常系/異常系を検証する。 |
-| `tests/services/api/users-client.test.ts` | `app/services/api/users-client.ts` | ユーザー承認・却下関数群 | 承認・却下操作の戻り値・エラーハンドリングを検証する。 |

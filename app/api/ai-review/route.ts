@@ -1,12 +1,16 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { USER_STATUS } from "@/app/constants/user";
+import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import {
   updateAIReviewCompleted,
   updateAIReviewFailed,
   updateAIReviewProcessing,
   upsertPendingAIReview,
 } from "@/app/services/api/ai-review-server";
-import { generateReview } from "@/app/services/api/gemini";
-import { getApiAuth, getApiSupabaseClient } from "@/app/services/auth/api-auth";
+import { generateReview, type ReviewSubmission } from "@/app/services/api/gemini";
+import { isContentVisible } from "@/app/services/api/learning-server";
+import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
+import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const MAX_CODE_LENGTH = 8000;
 
@@ -20,12 +24,18 @@ export async function POST(request: NextRequest) {
     }
 
     // 認証チェック
-    const auth = await getApiAuth();
-    if (!auth.success) {
-      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    const { user, userId, userStatus } = await getServerAuth();
+    if (!user) {
+      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    }
+    if (!userId) {
+      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
+    }
+    if (userStatus === USER_STATUS.REJECTED) {
+      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
     }
 
-    const supabase = await getApiSupabaseClient();
+    const supabase = await createServerSupabaseClient();
 
     // 提出データ + コンテンツ取得
     const { data: submission, error: submissionError } = await supabase
@@ -39,8 +49,15 @@ export async function POST(request: NextRequest) {
     }
 
     // 本人の提出か検証
-    if (submission.user_id !== auth.data.userId) {
+    if (submission.user_id !== userId) {
       return NextResponse.json({ error: "権限がありません" }, { status: 403 });
+    }
+
+    // コンテンツ可視性チェック: 提出後にお試し非公開化・非公開化されたコンテンツは403
+    // （nested select の content は RLS により null になるため、先に判定して
+    // 「演習課題が見つかりません」という紛らわしいエラーを避ける）
+    if (!(await isContentVisible(supabase, submission.content_id))) {
+      return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
     }
 
     // 演習コンテンツの確認
@@ -52,20 +69,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 提出内容の取得
-    const submissionContent =
-      submission.submission_type === "code" ? submission.code_content : submission.url;
+    // 提出内容の取得（コードは単一/複数ファイルを正規化して扱う）
+    let reviewSubmission: ReviewSubmission;
+    if (submission.submission_type === "code") {
+      const files = getSubmissionCodeFiles(submission);
+      if (files.length === 0) {
+        return NextResponse.json({ error: "提出内容が空です" }, { status: 400 });
+      }
 
-    if (!submissionContent) {
-      return NextResponse.json({ error: "提出内容が空です" }, { status: 400 });
-    }
+      // 全ファイル合計のコード長チェック
+      const totalLength = files.reduce((sum, file) => sum + file.content.length, 0);
+      if (totalLength > MAX_CODE_LENGTH) {
+        return NextResponse.json(
+          { error: `コードが長すぎます（上限: ${MAX_CODE_LENGTH}文字）` },
+          { status: 400 }
+        );
+      }
 
-    // コード長チェック
-    if (submission.submission_type === "code" && submissionContent.length > MAX_CODE_LENGTH) {
-      return NextResponse.json(
-        { error: `コードが長すぎます（上限: ${MAX_CODE_LENGTH}文字）` },
-        { status: 400 }
-      );
+      reviewSubmission = { type: "code", files };
+    } else {
+      if (!submission.url) {
+        return NextResponse.json({ error: "提出内容が空です" }, { status: 400 });
+      }
+      reviewSubmission = { type: "url", content: submission.url };
     }
 
     // GEMINI_API_KEY 確認
@@ -78,7 +104,7 @@ export async function POST(request: NextRequest) {
     const { data: userSubmissionsForContent } = await supabase
       .from("submissions")
       .select("id")
-      .eq("user_id", auth.data.userId)
+      .eq("user_id", userId)
       .eq("content_id", contentId);
 
     const allSubmissionIdsForContent = (userSubmissionsForContent ?? []).map((s) => s.id);
@@ -128,8 +154,7 @@ export async function POST(request: NextRequest) {
     try {
       const result = await generateReview(
         content.exercise_instructions,
-        submissionContent,
-        submission.submission_type as "code" | "url",
+        reviewSubmission,
         content.reference_answer
       );
 

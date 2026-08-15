@@ -14,7 +14,7 @@ const INSTRUCTOR_NAV_ITEMS = [
 export default async function InstructorLayout({ children }: { children: React.ReactNode }) {
   const { userRole } = await getServerAuth();
 
-  if (!userRole || !checkInstructorPermissions(userRole)) {
+  if (!checkInstructorPermissions(userRole)) {
     redirect("/");
   }
 

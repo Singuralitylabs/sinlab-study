@@ -135,5 +135,16 @@ describe("getServerAuth", () => {
         error: "サーバー認証エラーが発生しました",
       });
     });
+
+    it("digest を持つ Next.js 制御エラーは握り潰さずそのまま再スローする", async () => {
+      // force-dynamic が外れた際の静的プリレンダー事故を防ぐため、
+      // DYNAMIC_SERVER_USAGE 等の Next.js 制御エラーは catch で飲み込まない
+      const controlError = Object.assign(new Error("Dynamic server usage"), {
+        digest: "DYNAMIC_SERVER_USAGE",
+      });
+      vi.mocked(createServerSupabaseClient).mockRejectedValue(controlError);
+
+      await expect(getServerAuth()).rejects.toBe(controlError);
+    });
   });
 });
