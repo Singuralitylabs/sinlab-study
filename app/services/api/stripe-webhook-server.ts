@@ -48,14 +48,22 @@ function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
  * （完全な排他制御にはDBトランザクション/RPCが必要でスコープ外）、取得を書き込み直前の
  * 1箇所に集約することで、古いスナップショットのままミラーだけ巻き戻る事態は避けられる。
  *
- * @returns activated: 実際に users を昇格したか。successページ側の表示分岐に使う
+ * @returns activated: 実際に users を昇格したか。successページ側の表示分岐に使う。
+ * currentPeriodEnd: 昇格時に確定した次回請求日（ISO文字列）。successページが
+ * `stripe_subscriptions` を読み直さずに表示できるよう、ここで返す
  */
-export async function activateUserFromCheckoutSession(
-  session: Stripe.Checkout.Session
-): Promise<{ error: string | null; activated: boolean }> {
+export async function activateUserFromCheckoutSession(session: Stripe.Checkout.Session): Promise<{
+  error: string | null;
+  activated: boolean;
+  currentPeriodEnd: string | null;
+}> {
   const userId = extractUserId(session.client_reference_id, session.metadata);
   if (userId === null) {
-    return { error: "Checkoutセッションからユーザーを特定できませんでした", activated: false };
+    return {
+      error: "Checkoutセッションからユーザーを特定できませんでした",
+      activated: false,
+      currentPeriodEnd: null,
+    };
   }
 
   const customerId =
@@ -69,6 +77,7 @@ export async function activateUserFromCheckoutSession(
     return {
       error: "Checkoutセッションにcustomer/subscription情報がありません",
       activated: false,
+      currentPeriodEnd: null,
     };
   }
 
@@ -83,7 +92,7 @@ export async function activateUserFromCheckoutSession(
 
   if (existingFetchError) {
     console.error("stripe_subscriptions取得エラー:", existingFetchError.message);
-    return { error: existingFetchError.message, activated: false };
+    return { error: existingFetchError.message, activated: false, currentPeriodEnd: null };
   }
 
   // 既に別の契約が現行（終端状態でない）として記録されている場合、古いセッションの
@@ -94,11 +103,12 @@ export async function activateUserFromCheckoutSession(
     existingRow.stripe_subscription_id !== subscriptionId &&
     !TERMINAL_SUBSCRIPTION_STATUSES.includes(existingRow.status);
   if (isStaleReplay) {
-    return { error: null, activated: false };
+    return { error: null, activated: false, currentPeriodEnd: null };
   }
 
   const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  const currentPeriodEnd = toIsoOrNull(subscription.items.data[0]?.current_period_end);
 
   const { error: subscriptionError } = await supabase.from("stripe_subscriptions").upsert(
     {
@@ -107,7 +117,7 @@ export async function activateUserFromCheckoutSession(
       stripe_subscription_id: subscription.id,
       status: subscription.status,
       cancel_at_period_end: subscription.cancel_at_period_end,
-      current_period_end: toIsoOrNull(subscription.items.data[0]?.current_period_end),
+      current_period_end: currentPeriodEnd,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id" }
@@ -115,11 +125,11 @@ export async function activateUserFromCheckoutSession(
 
   if (subscriptionError) {
     console.error("stripe_subscriptions更新エラー:", subscriptionError.message);
-    return { error: subscriptionError.message, activated: false };
+    return { error: subscriptionError.message, activated: false, currentPeriodEnd: null };
   }
 
   if (!ACTIVATABLE_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
-    return { error: null, activated: false };
+    return { error: null, activated: false, currentPeriodEnd: null };
   }
 
   const { data: updatedUsers, error: userError } = await supabase
@@ -135,10 +145,11 @@ export async function activateUserFromCheckoutSession(
 
   if (userError) {
     console.error("ユーザー昇格エラー:", userError.message);
-    return { error: userError.message, activated: false };
+    return { error: userError.message, activated: false, currentPeriodEnd: null };
   }
 
-  return { error: null, activated: (updatedUsers?.length ?? 0) > 0 };
+  const activated = (updatedUsers?.length ?? 0) > 0;
+  return { error: null, activated, currentPeriodEnd: activated ? currentPeriodEnd : null };
 }
 
 /**

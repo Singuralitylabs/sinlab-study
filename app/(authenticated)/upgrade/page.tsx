@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
+import { BILLING_ANCHOR_DAY_OF_MONTH } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import {
   fetchStripeSubscriptionByUserId,
@@ -8,12 +9,9 @@ import {
 } from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatDate } from "./format-date";
 import { ManageSubscriptionButton } from "./ManageSubscriptionButton";
 import { UpgradeCheckoutButton } from "./UpgradeCheckoutButton";
-
-function formatDate(isoString: string): string {
-  return new Date(isoString).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
-}
 
 function formatMonthlyPrice(amount: number, currency: string): string {
   if (currency.toLowerCase() !== "jpy") {
@@ -78,6 +76,11 @@ export default async function UpgradePage() {
                 <li>すべての学習コンテンツ（動画・テキスト・演習）を閲覧・提出できます</li>
                 <li>月額サブスクリプションで、いつでも解約可能です</li>
                 <li>お手続き完了後、すぐにご利用いただけます</li>
+                <li>
+                  お支払いは毎月{BILLING_ANCHOR_DAY_OF_MONTH}
+                  日です。初回のみ、ご登録日から次回のお支払い日（{BILLING_ANCHOR_DAY_OF_MONTH}
+                  日）までの日割り料金となります（登録タイミングによっては初回分が発生しない場合があります）
+                </li>
               </ul>
               <UpgradeCheckoutButton />
             </>
