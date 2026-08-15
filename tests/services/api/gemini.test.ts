@@ -14,9 +14,9 @@ import { USER_STATUS } from "@/app/constants/user";
 
 const { generateContentMock, GoogleGenAIMock } = vi.hoisted(() => {
   const generateContentMock = vi.fn();
-  const GoogleGenAIMock = vi.fn().mockImplementation(() => ({
-    models: { generateContent: generateContentMock },
-  }));
+  const GoogleGenAIMock = vi.fn(function GoogleGenAI() {
+    return { models: { generateContent: generateContentMock } };
+  });
   return { generateContentMock, GoogleGenAIMock };
 });
 
