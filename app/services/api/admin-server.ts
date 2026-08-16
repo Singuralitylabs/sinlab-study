@@ -557,7 +557,7 @@ export async function fetchUserIdsWithStripeSubscription(): Promise<{
   }
 
   return {
-    data: data.map((row) => row.user_id),
+    data: data.map((row: { user_id: number }) => row.user_id),
     error: null,
   };
 }
