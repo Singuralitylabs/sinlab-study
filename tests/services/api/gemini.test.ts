@@ -316,4 +316,17 @@ describe("generateReview", () => {
     );
     expect(GoogleGenAIMock).not.toHaveBeenCalled();
   });
+
+  it.each([
+    undefined,
+    "",
+    "   ",
+  ])("本文が空（%j）なら例外を投げ、completed にしない", async (text) => {
+    generateContentMock.mockResolvedValue({ text });
+
+    await expect(generateReview(baseParams)).rejects.toThrow(
+      "Gemini APIからレビュー結果を取得できませんでした"
+    );
+    expect(generateContentMock).toHaveBeenCalledTimes(1);
+  });
 });

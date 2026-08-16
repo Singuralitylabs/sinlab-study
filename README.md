@@ -42,7 +42,7 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase Publishable Key>
 SUPABASE_SERVICE_ROLE_KEY=<Supabase Service Role Key>
 SUPABASE_PROJECT_ID=<Supabase プロジェクトID>
 GEMINI_API_KEY=<Gemini API Key（会員用・有料ティア。AIレビュー機能）>
-GEMINI_API_KEY_TRIAL=<Gemini API Key（お試しユーザー用・無料ティア。未設定時は GEMINI_API_KEY にフォールバック）>
+GEMINI_API_KEY_TRIAL=<任意。お試しユーザー用・無料ティア。未設定時は GEMINI_API_KEY にフォールバック>
 ```
 
 ### インストール・起動

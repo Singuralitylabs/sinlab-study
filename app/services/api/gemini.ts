@@ -181,6 +181,9 @@ export async function generateReview({
       });
 
       const reviewContent = response.text ?? "";
+      if (!reviewContent.trim()) {
+        throw new Error("Gemini APIからレビュー結果を取得できませんでした");
+      }
       const usageMetadata = response.usageMetadata;
 
       return {
