@@ -11,6 +11,7 @@ import {
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatDate } from "../format-date";
 
 export default async function UpgradeSuccessPage({
   searchParams,
@@ -22,6 +23,7 @@ export default async function UpgradeSuccessPage({
 
   let succeeded = false;
   let errorMessage = "決済情報を確認できませんでした";
+  let nextBillingDateLabel: string | null = null;
 
   if (userId && sessionId) {
     try {
@@ -36,7 +38,8 @@ export default async function UpgradeSuccessPage({
       } else {
         // Webhookより先にここへ遷移してくる場合があるため、successページ側でも
         // 同じ冪等な昇格処理を呼ぶ（Webhookと重複実行しても安全）
-        const { error, activated } = await activateUserFromCheckoutSession(session);
+        const { error, activated, currentPeriodEnd } =
+          await activateUserFromCheckoutSession(session);
         if (error) {
           console.error("会員昇格エラー:", error);
           errorMessage = "会員登録の反映に失敗しました。時間をおいて再度お試しください";
@@ -46,6 +49,12 @@ export default async function UpgradeSuccessPage({
           errorMessage = "このお申し込みは現在有効ではありません";
         } else {
           succeeded = true;
+          // 日割りで少額決済された直後のため、次に満額が請求される日を示して
+          // 問い合わせを減らす。activateUserFromCheckoutSession()が既にStripeから
+          // 取得済みの値を返すため、DBを読み直さない
+          if (currentPeriodEnd) {
+            nextBillingDateLabel = formatDate(currentPeriodEnd);
+          }
         }
       }
     } catch (error) {
@@ -66,6 +75,11 @@ export default async function UpgradeSuccessPage({
                 <p className="mt-1 text-sm text-muted-foreground">
                   すべての学習コンテンツをご利用いただけます
                 </p>
+                {nextBillingDateLabel && (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    次回のお支払い予定日: {nextBillingDateLabel}
+                  </p>
+                )}
               </div>
               <Button asChild>
                 <Link href="/">ダッシュボードへ</Link>

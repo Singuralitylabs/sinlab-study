@@ -35,7 +35,11 @@ beforeEach(() => {
     error: null,
   });
   vi.mocked(releaseEventClaim).mockResolvedValue({ error: null });
-  vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({ error: null, activated: true });
+  vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({
+    error: null,
+    activated: true,
+    currentPeriodEnd: null,
+  });
   vi.mocked(syncSubscriptionStatus).mockResolvedValue({ error: null });
 });
 
@@ -152,6 +156,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({
       error: "失敗しました",
       activated: false,
+      currentPeriodEnd: null,
     });
     mockConstructEvent.mockReturnValue({
       id: "evt_6",

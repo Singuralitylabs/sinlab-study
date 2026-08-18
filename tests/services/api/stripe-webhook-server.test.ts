@@ -62,6 +62,7 @@ describe("activateUserFromCheckoutSession", () => {
 
     expect(result.error).toBeNull();
     expect(result.activated).toBe(true);
+    expect(result.currentPeriodEnd).toBe(new Date(1750000000 * 1000).toISOString());
     const subBuilder = mockClient.from.mock.results[1].value;
     expect(subBuilder.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -120,6 +121,7 @@ describe("activateUserFromCheckoutSession", () => {
 
     expect(result.error).toBeNull();
     expect(result.activated).toBe(false);
+    expect(result.currentPeriodEnd).toBeNull();
     // 既存行チェックのみで、upsertは呼ばれない
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
@@ -245,6 +247,9 @@ describe("activateUserFromCheckoutSession", () => {
 
     expect(result.error).toBeNull();
     expect(result.activated).toBe(false);
+    // 昇格しなかった場合、currentPeriodEndは（内部的にはStripeから取得済みでも）nullを返す
+    // 権限が変わっていないため、successページに実際の請求日を見せない
+    expect(result.currentPeriodEnd).toBeNull();
     // 既存行チェック + upsertの2回のみで、usersへの更新は発生しない
     // （解約後のsuccessページURL再訪・コンビニ払い等の未入金checkout完了での昇格を防ぐ）
     expect(mockClient.from).toHaveBeenCalledTimes(2);
