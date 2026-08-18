@@ -148,7 +148,7 @@ erDiagram
 | id | SERIAL | NO | auto increment | PK | テーマID |
 | name | VARCHAR(255) | NO | - | NOT NULL | テーマ名 |
 | description | TEXT | YES | NULL | - | 説明文 |
-| image_url | TEXT | YES | NULL | - | サムネイル画像URL |
+| image_url | TEXT | YES | NULL | - | サムネイル画像URL（Storage配信分は `/storage/v1/object/public/thumbnails/theme-{id}/thumbnail.{ext}?v={timestamp}` の相対パス。未設定時はプレースホルダー表示） |
 | display_order | INTEGER | YES | 0 | - | 表示順（昇順） |
 | is_published | BOOLEAN | YES | false | - | 公開フラグ |
 | is_deleted | BOOLEAN | YES | false | - | 論理削除フラグ |
@@ -578,6 +578,18 @@ INSERT / UPDATE / DELETE のポリシーは定義していない。昇格・降�
 
 RLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`authenticated` ロールでは SELECT を含め一切のアクセスができない）。
 
+### 6.8 storage.objects（thumbnails バケット）
+
+テーマのサムネイルを保存する `thumbnails` は公開バケット（`public = true`）のため参照は制限しない。書き込み系の操作のみコンテンツ管理者に限定する。
+
+| ポリシー | 操作 | 対象 | 条件 |
+|:--|:--|:--|:--|
+| Content managers can upload thumbnails | INSERT | admin / maintainer | `bucket_id = 'thumbnails' AND (select get_user_role()) IN ('admin', 'maintainer')` |
+| Content managers can update thumbnails | UPDATE | admin / maintainer | 同上 |
+| Content managers can delete thumbnails | DELETE | admin / maintainer | 同上 |
+
+アップロード・削除APIは `createAdminSupabaseClient()` を使うため、`SUPABASE_SERVICE_ROLE_KEY` が設定されていればRLSをバイパスする。ただし同関数は未設定時に通常クライアントへフォールバックするため、その場合はこれらのポリシーが実際の書き込み可否を決める。スライドPDFの `slides` バケットにはポリシーを定義していない。
+
 ---
 
 ## 7. マイグレーション管理
@@ -591,10 +603,12 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | `01_schema/003_add_is_open_to_trial.sql` | learning_contents にお試し公開フラグ `is_open_to_trial` を追加 |
 | `01_schema/004_add_membership_type.sql` | users に会員種別 `membership_type` を追加し、既存の `active` ユーザーを `community` にバックフィル |
 | `01_schema/005_add_stripe_tables.sql` | `stripe_subscriptions` / `stripe_events` テーブルを追加 |
+| `01_schema/006_add_thumbnails_bucket.sql` | テーマサムネイル用の `thumbnails` 公開バケットを作成 |
 | `02_rls/001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
 | `02_rls/002_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し |
 | `02_rls/003_trial_user_policies.sql` | `get_user_status()` の追加と、お試しユーザー制限を含むポリシーへの差し替え（learning_contents の SELECT、user_progress / submissions の書き込み） |
 | `02_rls/004_stripe_tables_policies.sql` | `stripe_subscriptions` / `stripe_events` のRLS有効化とポリシー定義（`stripe_subscriptions` はSELECTのみ本人/admin） |
+| `02_rls/005_thumbnails_storage_policies.sql` | `thumbnails` バケットへの INSERT / UPDATE / DELETE を admin・maintainer に限定 |
 | `03_seed/gas/001_course_structure.sql` | GAS講座のテーマ・フェーズ・週・コンテンツ構造のシード |
 | `03_seed/gas/002_exercises.sql` | GAS講座の演習コンテンツ（課題・模範回答）のシード |
 | `03_seed/gas/003_hints.sql` | GAS講座の全演習課題へのヒントデータ投入 |
@@ -646,3 +660,4 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | 2026年8月 | GitHub Copilotレビュー指摘を反映：claimにTTLによる再claim救済を追加（サーバーレス関数の異常終了でclaimが永久に残る問題への対処）し3.10節を更新 |
 | 2026年8月 | 別セッションからの追加レビュー指摘を反映：`TERMINAL_SUBSCRIPTION_STATUSES`に`paused`を追加（トライアル終了後の未払いによる一時停止を終端状態として扱う） |
 | 2026年8月 | 上記に対する独立レビューの指摘を反映：`releaseEventClaim()`の3者競合対策（`processed_at`一致条件）を3.10節に追記 |
+| 2026年8月 | テーマサムネイルのStorage管理に対応：`thumbnails` 公開バケットとStorageポリシーを追加。`learning_themes.image_url` の保存形式（3.1）・RLS（6.8）・マイグレーション一覧を更新 |
