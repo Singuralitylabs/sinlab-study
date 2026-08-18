@@ -166,14 +166,20 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "テーマから画像を削除できませんでした" }, { status: 500 });
     }
 
+    // DB参照は既に外しているため削除失敗でも500にはしない（リトライしても image_url は
+    // NULL 済みで対象を特定できない）。呼び出し側が部分失敗を検知できるよう結果を返す
     const previousPath = getThumbnailPath(theme.image_url, themeId);
+    let storageRemoved = true;
     if (previousPath) {
       const { error: removeError } = await supabase.storage
         .from(BUCKET_NAME)
         .remove([previousPath]);
-      if (removeError) console.error("サムネイル削除エラー:", removeError);
+      if (removeError) {
+        console.error("サムネイル削除エラー:", removeError);
+        storageRemoved = false;
+      }
     }
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, storageRemoved });
   } catch (error) {
     console.error("サムネイル削除APIエラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });

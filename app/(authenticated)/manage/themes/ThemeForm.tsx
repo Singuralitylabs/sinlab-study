@@ -33,6 +33,9 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
+    // アップロード中の送信は、フォームが保持する古い image_url でアップロード結果を
+    // 上書きしてしまうため受け付けない（送信ボタンの disabled と二重の防御）
+    if (isUploading) return;
     setIsLoading(true);
     setMessage(null);
 
@@ -119,7 +122,14 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
         return;
       }
       setImageUrl("");
-      setMessage({ type: "success", text: "画像を削除しました" });
+      setMessage(
+        data.storageRemoved === false
+          ? {
+              type: "error",
+              text: "テーマから画像を削除しましたが、ストレージ上のファイルが残っている可能性があります",
+            }
+          : { type: "success", text: "画像を削除しました" }
+      );
     } catch {
       setMessage({ type: "error", text: "画像の削除中にエラーが発生しました" });
     } finally {
@@ -228,7 +238,7 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
           )}
 
           <div className="flex gap-3">
-            <Button type="submit" disabled={isLoading || !name}>
+            <Button type="submit" disabled={isLoading || isUploading || !name}>
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (

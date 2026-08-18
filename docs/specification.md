@@ -663,11 +663,13 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 3. `learning_themes.image_url` を `NULL` に更新
 4. 更新前の `image_url` が上記の命名規約に一致する場合のみ、対応する Storage オブジェクトを削除する（`/images/...` 等の旧形式の値が入っていた場合はDBのクリアのみ行う）
 
+Storage オブジェクトの削除に失敗した場合も、DB参照は既に外れているため 500 とはせず 200 を返し、`storageRemoved: false` で部分失敗を呼び出し側へ伝える（`image_url` が `NULL` 済みで再試行しても対象を特定できないため）。管理画面はこの値を見て「ファイルが残っている可能性がある」旨を警告表示する。
+
 **レスポンス**:
 
 | ステータス | 条件 |
 |:--|:--|
-| 200 | 正常（POST: `{ path: string, url: string }` / DELETE: `{ success: true }` を返却） |
+| 200 | 正常（POST: `{ path: string, url: string }` / DELETE: `{ success: true, storageRemoved: boolean }` を返却） |
 | 400 | ファイルなし / サイズ超過 / 対応形式以外 / テーマID不正 |
 | 401 | 未認証 |
 | 403 | 権限なし、または `rejected` ユーザー |

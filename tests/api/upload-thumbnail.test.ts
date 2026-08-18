@@ -166,7 +166,24 @@ describe("DELETE /api/upload-thumbnail", () => {
     );
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ success: true, storageRemoved: true });
     expect(query.update).toHaveBeenCalledWith({ image_url: null });
     expect(remove).toHaveBeenCalledWith(["theme-12/thumbnail.png"]);
+  });
+
+  it("Storage削除に失敗しても200を返すが、部分失敗を storageRemoved で伝える", async () => {
+    const { client, query } = createMockSupabase({
+      imageUrl: "/storage/v1/object/public/thumbnails/theme-12/thumbnail.png?v=1",
+      removeError: { message: "storage unavailable" },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const response = await DELETE(
+      new NextRequest("http://localhost/api/upload-thumbnail?themeId=12")
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ success: true, storageRemoved: false });
+    expect(query.update).toHaveBeenCalledWith({ image_url: null });
   });
 });
