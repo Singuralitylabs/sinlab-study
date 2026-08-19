@@ -27,7 +27,7 @@
 | ランタイム / パッケージマネージャー | Bun |
 | コード品質 | Biome 2.3.14 (リンター + フォーマッター) |
 | バックエンド / DB / 認証 | Supabase (PostgreSQL + Auth + RLS + Storage) |
-| AI | Google Gemini API (@google/generative-ai) |
+| AI | Google Gemini API (@google/genai) |
 | コードエディタ | CodeMirror 6（@uiw/react-codemirror） |
 | アイコン | Lucide React |
 | Markdown表示 | react-markdown + remark-gfm |

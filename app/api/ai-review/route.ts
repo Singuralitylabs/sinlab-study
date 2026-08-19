@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { GEMINI_MAX_CODE_LENGTH } from "@/app/constants/gemini";
 import { USER_STATUS } from "@/app/constants/user";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import {
@@ -7,12 +8,14 @@ import {
   updateAIReviewProcessing,
   upsertPendingAIReview,
 } from "@/app/services/api/ai-review-server";
-import { generateReview, type ReviewSubmission } from "@/app/services/api/gemini";
+import {
+  generateReview,
+  type ReviewSubmission,
+  resolveGeminiApiKey,
+} from "@/app/services/api/gemini";
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
-
-const MAX_CODE_LENGTH = 8000;
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,6 +36,11 @@ export async function POST(request: NextRequest) {
     }
     if (userStatus === USER_STATUS.REJECTED) {
       return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
+    }
+
+    const apiKey = resolveGeminiApiKey(userStatus);
+    if (!apiKey) {
+      return NextResponse.json({ error: "AIレビュー機能が設定されていません" }, { status: 503 });
     }
 
     const supabase = await createServerSupabaseClient();
@@ -79,9 +87,9 @@ export async function POST(request: NextRequest) {
 
       // 全ファイル合計のコード長チェック
       const totalLength = files.reduce((sum, file) => sum + file.content.length, 0);
-      if (totalLength > MAX_CODE_LENGTH) {
+      if (totalLength > GEMINI_MAX_CODE_LENGTH) {
         return NextResponse.json(
-          { error: `コードが長すぎます（上限: ${MAX_CODE_LENGTH}文字）` },
+          { error: `コードが長すぎます（上限: ${GEMINI_MAX_CODE_LENGTH}文字）` },
           { status: 400 }
         );
       }
@@ -92,11 +100,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "提出内容が空です" }, { status: 400 });
       }
       reviewSubmission = { type: "url", content: submission.url };
-    }
-
-    // GEMINI_API_KEY 確認
-    if (!process.env.GEMINI_API_KEY) {
-      return NextResponse.json({ error: "AIレビュー機能が設定されていません" }, { status: 503 });
     }
 
     // 同一ユーザー・同一コンテンツでのAIレビュー利用済みチェック（1課題につき1回制限）
@@ -152,11 +155,12 @@ export async function POST(request: NextRequest) {
 
     // Gemini API 呼び出し
     try {
-      const result = await generateReview(
-        content.exercise_instructions,
-        reviewSubmission,
-        content.reference_answer
-      );
+      const result = await generateReview({
+        exerciseInstructions: content.exercise_instructions,
+        submission: reviewSubmission,
+        referenceAnswer: content.reference_answer,
+        apiKey,
+      });
 
       // completed 状態で保存
       await updateAIReviewCompleted(reviewRecord.id, {

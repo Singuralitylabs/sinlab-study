@@ -73,7 +73,7 @@ app/
 ├── api/
 │   ├── admin/users/     # PATCH: ユーザー承認・却下
 │   ├── manage/          # テーマ・フェーズ・週・コンテンツのCRUD
-│   ├── ai-review/       # POST: 提出物のAIレビュー
+│   ├── ai-review/       # POST: 提出物のAIレビュー（会員/お試しでGeminiキーを振り分け）
 │   ├── upload-pdf/      # POST: スライドPDFのアップロード
 │   ├── progress/        # POST: コンテンツごとの進捗をupsert
 │   ├── submissions/     # POST: コードまたはURLの提出物を作成
@@ -202,10 +202,13 @@ app/
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — Supabase Publishableキー
 - `SUPABASE_SERVICE_ROLE_KEY` — Service Roleキー（管理操作用）
 - `SUPABASE_PROJECT_ID` — Supabase CLI操作用
-- `GEMINI_API_KEY` — Gemini API（AIレビュー機能用）
+- `GEMINI_API_KEY` — Gemini API（会員用・有料ティア。AIレビュー機能。SDK は `@google/genai`）
+- `GEMINI_API_KEY_TRIAL` — Gemini API（お試しユーザー用・無料ティア。未設定時は `GEMINI_API_KEY` にフォールバック）
 - `STRIPE_ENABLED` — Stripe決済機能の有効化フラグ（`"true"` 以外はフェイルクローズで無効。本番は現在一時停止中。詳細は「Stripeサブスク決済（月額課金）」節を参照）
 - `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_ID` — Stripeサブスク決済用
 - `NEXT_PUBLIC_APP_URL` — Checkout/Portalのリダイレクト先URL生成に使用
+
+**AIレビューのキー振り分け**: `/api/ai-review` は `getServerAuth()` の `userStatus` でキーを選ぶ。`active`（コミュニティ会員・一般有料会員とも）は `GEMINI_API_KEY`、`pending` は `GEMINI_API_KEY_TRIAL`（未設定時は `GEMINI_API_KEY`）。選択ロジックは `resolveGeminiApiKey()`（`app/services/api/gemini.ts`）、モデル名・上限値・環境変数名は `app/constants/gemini.ts` に集約する。キーはサーバー側のみで扱い、レスポンス・ログへ出さない。
 
 ### データベースマイグレーション
 
