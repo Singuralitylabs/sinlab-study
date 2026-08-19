@@ -164,6 +164,8 @@ app/
 
 スライドPDFは Supabase Storage の `slides` バケット内に、オブジェクトキー **`<コーススラッグ>/slide-NN.pdf`**（NNは最低2桁のゼロ埋め）で保存する（例: キー `gas-advanced/slide-03.pdf` → 公開URL `.../storage/v1/object/public/slides/gas-advanced/slide-03.pdf`）。アップロードAPI（`app/api/upload-pdf/route.ts`）はフォルダ指定＋連番（自動採番／番号指定）に対応しており、シードSQL（`supabase/migrations/03_seed/`）もこのパスを前提とする。
 
+テーマのサムネイルは公開の Supabase Storage `thumbnails` バケットで管理する。オブジェクトキーは **`theme-{themeId}/thumbnail.{ext}`**（`ext` は `png` / `jpg` / `webp`）とし、`learning_themes.image_url` には環境非依存の相対パス **`/storage/v1/object/public/thumbnails/...`** を保存する。アップロード時は同じ拡張子の固定キーを上書きし、`image_url` も同じリクエストで `?v=<timestamp>` 付きの相対パスへ更新する。拡張子を変更した場合はDB更新後に旧オブジェクトを削除する。表示時は `resolveStorageUrl()` がSupabase URLを前置する。アップロード・削除はテーマ作成後の編集画面から行い、admin / maintainer のみ実行できる。新規環境のシードテーマは画像未設定（プレースホルダー表示）とし、既存画像はStorageへの移行後に管理画面で設定する。
+
 セキュリティはデータベースレベルの**Row Level Security (RLS)** ポリシーで実現。親階層（themes/phases/weeks）の公開コンテンツは認証済み全ユーザーが閲覧可能、`learning_contents` は `active` ユーザーが公開分を閲覧可能・お試しユーザー（`status='pending'`）は `is_open_to_trial=true` かつ `is_published=true` の行のみ SELECT 可（アプリ層のチェックと合わせた二層防御）。進捗・提出物は本人のみ、管理者は全データの読み書きが可能。
 
 **RLSヘルパー関数**: ロール・ID・ステータスの参照は `get_user_role()` / `get_user_id()` / `get_user_status()` を用いる。いずれも `users` 自身のRLSとの無限再帰を防ぐため `SECURITY DEFINER` + `SET search_path = public` + `STABLE` で定義し、anon からの REST RPC 経由の実行を防ぐため `PUBLIC, anon` から EXECUTE を REVOKE、`authenticated, service_role` へ GRANT する。ポリシー内では `(select get_user_xxx())` の形で包み、行ごとの再評価を防いでInitPlan化させる（`auth_rls_initplan` 対策）。同一操作の許可ポリシーはロール別に分けず OR 条件で1本に統合する（`multiple_permissive_policies` 対策）。

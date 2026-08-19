@@ -1,8 +1,10 @@
 "use client";
 
 import { Loader2, Save } from "lucide-react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { resolveStorageUrl } from "@/app/lib/storage-url";
 import type { LearningTheme } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -25,10 +27,15 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
   const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const thumbnailInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
+    // アップロード中の送信は、フォームが保持する古い image_url でアップロード結果を
+    // 上書きしてしまうため受け付けない（送信ボタンの disabled と二重の防御）
+    if (isUploading) return;
     setIsLoading(true);
     setMessage(null);
 
@@ -69,6 +76,67 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
     }
   };
 
+  const handleThumbnailUpload = async (file: File | undefined) => {
+    if (!file || !initialData) return;
+
+    setIsUploading(true);
+    setMessage(null);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("themeId", String(initialData.id));
+
+    try {
+      const response = await fetch("/api/upload-thumbnail", { method: "POST", body: formData });
+      const data = await response.json();
+      if (!response.ok) {
+        setMessage({ type: "error", text: data.error || "画像のアップロードに失敗しました" });
+        return;
+      }
+      setImageUrl(data.path);
+      setMessage({
+        type: "success",
+        text: "画像をアップロードして保存しました",
+      });
+    } catch {
+      setMessage({ type: "error", text: "画像のアップロード中にエラーが発生しました" });
+    } finally {
+      setIsUploading(false);
+      if (thumbnailInputRef.current) {
+        thumbnailInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleThumbnailDelete = async () => {
+    if (!initialData) return;
+
+    setIsUploading(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/upload-thumbnail?themeId=${initialData.id}`, {
+        method: "DELETE",
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setMessage({ type: "error", text: data.error || "画像の削除に失敗しました" });
+        return;
+      }
+      setImageUrl("");
+      setMessage(
+        data.storageRemoved === false
+          ? {
+              type: "error",
+              text: "テーマから画像を削除しましたが、ストレージ上のファイルが残っている可能性があります",
+            }
+          : { type: "success", text: "画像を削除しました" }
+      );
+    } catch {
+      setMessage({ type: "error", text: "画像の削除中にエラーが発生しました" });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   return (
     <form onSubmit={handleSubmit}>
       <Card>
@@ -95,16 +163,49 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="imageUrl">画像 URL</Label>
-            <Input
-              id="imageUrl"
-              type="url"
-              value={imageUrl}
-              onChange={(e) => setImageUrl(e.target.value)}
-              placeholder="https://example.com/image.jpg（任意）"
-            />
-          </div>
+          {mode === "edit" ? (
+            <div className="space-y-3">
+              <Label htmlFor="thumbnail">サムネイル画像</Label>
+              {imageUrl && (
+                <div className="relative h-40 w-full max-w-xs overflow-hidden rounded-md border">
+                  <Image
+                    src={resolveStorageUrl(imageUrl)}
+                    alt="サムネイルのプレビュー"
+                    fill
+                    className="object-cover"
+                    sizes="320px"
+                  />
+                </div>
+              )}
+              <Input
+                ref={thumbnailInputRef}
+                id="thumbnail"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                disabled={isUploading}
+                onChange={(event) => handleThumbnailUpload(event.target.files?.[0])}
+              />
+              {imageUrl && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isUploading}
+                  onClick={handleThumbnailDelete}
+                >
+                  画像を削除
+                </Button>
+              )}
+              <p className="text-sm text-muted-foreground">PNG、JPEG、WebP形式、5MBまで</p>
+              {isUploading && <p className="text-sm text-muted-foreground">アップロード中です…</p>}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label>サムネイル画像</Label>
+              <p className="text-sm text-muted-foreground">
+                テーマを作成した後、編集画面から画像をアップロードできます。
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="displayOrder">表示順</Label>
@@ -137,7 +238,7 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
           )}
 
           <div className="flex gap-3">
-            <Button type="submit" disabled={isLoading || !name}>
+            <Button type="submit" disabled={isLoading || isUploading || !name}>
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
