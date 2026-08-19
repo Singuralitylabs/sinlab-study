@@ -7,6 +7,11 @@ import {
 } from "@/app/constants/stripe";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 
+// Stripe SDKに依存しない呼び出し元（layout.tsx等）が、この判定のためだけにSDK一式を
+// モジュールグラフへ引き込まずに済むよう、実体は app/constants/stripe.ts に置き再exportする。
+// 既にこのファイルの他のexportを使っているAPIルート・ページからは変更なく利用できる。
+export { isStripeEnabled } from "@/app/constants/stripe";
+
 /** StripeがCheckout Sessionの`expires_at`に要求する最小許容値（作成時刻からの経過時間） */
 const MIN_CHECKOUT_SESSION_LIFETIME_MS = 30 * 60 * 1000;
 

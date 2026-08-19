@@ -3,14 +3,15 @@ import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/supabase-server");
-// TERMINAL_SUBSCRIPTION_STATUS（定数）は実物のまま使い、createCheckoutSession のみモックする
+// TERMINAL_SUBSCRIPTION_STATUS（定数）は実物のまま使い、createCheckoutSession・isStripeEnabled のみモックする
 vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/app/services/api/stripe-server")>()),
   createCheckoutSession: vi.fn(),
+  isStripeEnabled: vi.fn(),
 }));
 
 import { POST } from "@/app/api/stripe/checkout/route";
-import { createCheckoutSession } from "@/app/services/api/stripe-server";
+import { createCheckoutSession, isStripeEnabled } from "@/app/services/api/stripe-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -23,6 +24,7 @@ const pendingAuth = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(isStripeEnabled).mockReturnValue(true);
   vi.mocked(getServerAuth).mockResolvedValue(pendingAuth as never);
   vi.mocked(createCheckoutSession).mockResolvedValue({ url: "https://checkout.stripe.com/xxx" });
 });
@@ -117,5 +119,15 @@ describe("POST /api/stripe/checkout", () => {
       "trial@example.com",
       "cus_old"
     );
+  });
+
+  it("STRIPE_ENABLEDが無効な場合は認証チェック前に503を返す", async () => {
+    vi.mocked(isStripeEnabled).mockReturnValue(false);
+
+    const res = await POST();
+
+    expect(res.status).toBe(503);
+    expect(getServerAuth).not.toHaveBeenCalled();
+    expect(createCheckoutSession).not.toHaveBeenCalled();
   });
 });

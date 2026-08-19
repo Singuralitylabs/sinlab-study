@@ -1,5 +1,6 @@
 import { CheckCircle2, XCircle } from "lucide-react";
 import Link from "next/link";
+import { isStripeEnabled, STRIPE_DISABLED_MESSAGE } from "@/app/constants/stripe";
 import {
   PAID_CHECKOUT_PAYMENT_STATUSES,
   retrieveCheckoutSession,
@@ -25,7 +26,12 @@ export default async function UpgradeSuccessPage({
   let errorMessage = "決済情報を確認できませんでした";
   let nextBillingDateLabel: string | null = null;
 
-  if (userId && sessionId) {
+  if (!isStripeEnabled()) {
+    // 停止中はStripe API呼び出し・会員昇格処理を一切行わない。Stripeのホスト型Checkout
+    // セッションは作成から最大24時間有効なため、フラグOFF直前に開始されたセッションの
+    // successページ再訪でも、無条件に決済確認・昇格が走らないようにする
+    errorMessage = STRIPE_DISABLED_MESSAGE;
+  } else if (userId && sessionId) {
     try {
       const session = await retrieveCheckoutSession(sessionId);
       const sessionUserId = extractUserId(session.client_reference_id, session.metadata);
