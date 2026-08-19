@@ -4,6 +4,7 @@ import { Clock } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { USER_STATUS } from "@/app/constants/user";
+import { isStripeEnabled } from "@/app/services/api/stripe-server";
 import { checkAdminPermissions, checkInstructorPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -29,6 +30,7 @@ export default async function AuthLayout({
 
   const isAdmin = checkAdminPermissions(userRole);
   const isInstructor = checkInstructorPermissions(userRole);
+  const stripeEnabled = isStripeEnabled();
 
   return (
     <div className="sm:flex min-h-screen">
@@ -39,11 +41,16 @@ export default async function AuthLayout({
             <Clock />
             <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
               <span>
-                現在は無料プランでご利用中です。「お試し公開」コンテンツの閲覧・提出が可能です。すべての学習コンテンツを利用するには、アップグレードまたは管理者による本登録が必要です。
+                現在は無料プランでご利用中です。「お試し公開」コンテンツの閲覧・提出が可能です。
+                {stripeEnabled
+                  ? "すべての学習コンテンツを利用するには、アップグレードまたは管理者による本登録が必要です。"
+                  : "すべての学習コンテンツを利用するには、管理者による本登録が必要です。"}
               </span>
-              <Button asChild size="sm">
-                <Link href="/upgrade">アップグレード</Link>
-              </Button>
+              {stripeEnabled && (
+                <Button asChild size="sm">
+                  <Link href="/upgrade">アップグレード</Link>
+                </Button>
+              )}
             </AlertDescription>
           </Alert>
         )}

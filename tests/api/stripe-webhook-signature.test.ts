@@ -17,6 +17,7 @@ const request = (rawBody: string, signature: string | null) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("STRIPE_ENABLED", "true");
   vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_dummy");
   vi.stubEnv("STRIPE_WEBHOOK_SECRET", webhookSecret);
   vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "service-role-dummy");
@@ -68,6 +69,30 @@ describe("POST /api/stripe/webhook - 署名検証", () => {
     const res = await POST(request(payload, null) as never);
 
     expect(res.status).toBe(400);
+    expect(claimEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/stripe/webhook - STRIPE_ENABLEDフラグ", () => {
+  it.each([
+    undefined,
+    "false",
+    "1",
+  ])("STRIPE_ENABLEDが%sの場合は署名検証前に503を返す", async (value) => {
+    if (value === undefined) {
+      vi.unstubAllEnvs();
+      vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_dummy");
+      vi.stubEnv("STRIPE_WEBHOOK_SECRET", webhookSecret);
+      vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "service-role-dummy");
+    } else {
+      vi.stubEnv("STRIPE_ENABLED", value);
+    }
+    const payload = JSON.stringify({ id: "evt_test_5", type: "checkout.session.completed" });
+    const header = Stripe.webhooks.generateTestHeaderString({ payload, secret: webhookSecret });
+
+    const res = await POST(request(payload, header) as never);
+
+    expect(res.status).toBe(503);
     expect(claimEvent).not.toHaveBeenCalled();
   });
 });

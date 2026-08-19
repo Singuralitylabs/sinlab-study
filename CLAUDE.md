@@ -127,6 +127,15 @@ app/
 
 ### Stripeサブスク決済（月額課金）
 
+**一時停止中（#115）**: 本サービスは現在Vercel Hobbyプラン（Fair Use Guidelinesにより個人的・非商用利用に限定）にデプロイしており、Stripeによる月額課金を有効にしたままの本番運用は規約違反となる可能性が高いため、本番（Vercel）では以下のフラグにより本決済機能を一時停止している。**コードは削除せず**、フラグのみで無効化する（Cloudflare Workersへのカットオーバー（#116）完了後、Cloudflare側で同じコードのまま再有効化するため）。
+
+- **フラグ**: `STRIPE_ENABLED`（`isStripeEnabled()`、`app/services/api/stripe-server.ts`）。未設定または `"true"` 以外の値は無効として扱うフェイルクローズ
+- **無効時の挙動**: `/upgrade` はCheckout導線を非表示にし「現在準備中」の案内を表示、お試しユーザー向けバナー（`(authenticated)/layout.tsx`）のアップグレード導線（ボタン）を非表示、`POST /api/stripe/{checkout,portal,webhook}` はいずれも認証・署名検証より前段で503を返す
+- **Webhookを完全停止できる前提**: 停止時点でStripe Live契約者がゼロであることを確認済み（契約者がいる場合は本来Webhookのみ停止せずミラー同期を維持する必要があるが、今回は該当なし）
+- **再開条件**: Cloudflare Workersへのカットオーバー（#116, #120）完了後、稼働先の環境変数で `STRIPE_ENABLED=true` を設定する（コード変更は不要）
+
+以下は無効化以前からの本来の設計（`STRIPE_ENABLED=true` 時の挙動）。
+
 お試しユーザーが `/upgrade` からStripe Checkout（ホスト型）で月額サブスクリプションを契約すると、決済完了と同時に**管理者承認なし**で一般有料会員（`status=active` / `membership_type=general`）へ自動昇格する。**コミュニティ会員はスコープ外**（従来どおり管理者の手動承認のみ）。カード情報は一切扱わず、Checkout・Customer Portal（お支払い管理・解約）ともStripeのホスト型UIに任せる。
 
 - **決済日の固定**: 決済日（請求サイクルのアンカー）は登録日ベースにせず、全ユーザー一律で**毎月27日 UTC 0:00（＝JST 9:00）**に固定する（`app/constants/stripe.ts` の `BILLING_ANCHOR_DAY_OF_MONTH` / `BILLING_ANCHOR_HOUR_UTC`。リテラルを各所にハードコードせずこの定数を参照する）。`createCheckoutSession()` が `subscription_data.billing_cycle_anchor_config`（`day_of_month`/`hour`/`minute`/`second` を明示指定）で設定し、月の長さ・うるう年の考慮はStripe側に委ねる。`billing_cycle_anchor_config` は**サブスク作成時にのみ**適用されるため既存契約者への遡及適用はできず（アンカー移行はスコープ外）、本番での実課金開始前に導入することが前提
@@ -192,6 +201,7 @@ app/
 - `SUPABASE_SERVICE_ROLE_KEY` — Service Roleキー（管理操作用）
 - `SUPABASE_PROJECT_ID` — Supabase CLI操作用
 - `GEMINI_API_KEY` — Gemini API（AIレビュー機能用）
+- `STRIPE_ENABLED` — Stripe決済機能の有効化フラグ（`"true"` 以外はフェイルクローズで無効。本番は現在一時停止中。詳細は「Stripeサブスク決済（月額課金）」節を参照）
 - `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_ID` — Stripeサブスク決済用
 - `NEXT_PUBLIC_APP_URL` — Checkout/Portalのリダイレクト先URL生成に使用
 

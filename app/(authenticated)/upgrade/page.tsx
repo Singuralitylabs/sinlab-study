@@ -5,6 +5,7 @@ import { USER_STATUS } from "@/app/constants/user";
 import {
   fetchStripeSubscriptionByUserId,
   fetchSubscriptionPrice,
+  isStripeEnabled,
   TERMINAL_SUBSCRIPTION_STATUSES,
 } from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -48,8 +49,10 @@ export default async function UpgradePage() {
       ? fetchedSubscription
       : null;
 
+  const stripeEnabled = isStripeEnabled();
+
   let monthlyPriceLabel: string | null = null;
-  if (userStatus === USER_STATUS.PENDING) {
+  if (stripeEnabled && userStatus === USER_STATUS.PENDING) {
     try {
       const price = await fetchSubscriptionPrice();
       if (price.amount !== null) {
@@ -69,7 +72,13 @@ export default async function UpgradePage() {
 
       <Card className="mt-6">
         <CardContent className="space-y-4">
-          {userStatus === USER_STATUS.PENDING && (
+          {userStatus === USER_STATUS.PENDING && !stripeEnabled && (
+            <p className="text-sm text-muted-foreground">
+              アップグレード機能は現在準備中です。しばらくお待ちください。
+            </p>
+          )}
+
+          {userStatus === USER_STATUS.PENDING && stripeEnabled && (
             <>
               {monthlyPriceLabel && <p className="text-2xl font-bold">{monthlyPriceLabel}</p>}
               <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">

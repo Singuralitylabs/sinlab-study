@@ -22,6 +22,16 @@ const CHECKOUT_SESSION_EXPIRY_SAFETY_MARGIN_MS = 2 * 60 * 1000;
 let cachedClient: Stripe | null = null;
 
 /**
+ * Stripe決済機能が有効かどうかを判定する。Vercel Hobbyプランの利用規約対応のための
+ * 暫定停止フラグ（#115）。未設定または `"true"` 以外の値は無効として扱うフェイルクローズ。
+ * コード自体は削除せず、Cloudflare Workersへのカットオーバー完了後に環境変数側で再有効化する
+ * （詳細はCLAUDE.mdの「Stripeサブスク決済（月額課金）」節を参照）。
+ */
+export function isStripeEnabled(): boolean {
+  return process.env.STRIPE_ENABLED === "true";
+}
+
+/**
  * サブスクリプションが「終端状態」とみなせるステータス。
  * `stripe_subscriptions` は1ユーザー1行固定（DELETEなし・常にupsert）で更新されるため、
  * 一度契約したユーザーの行は解約後も残り続ける。これらのステータスの行は

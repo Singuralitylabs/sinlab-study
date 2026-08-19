@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/auth/server-auth");
@@ -23,8 +23,13 @@ const pendingAuth = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("STRIPE_ENABLED", "true");
   vi.mocked(getServerAuth).mockResolvedValue(pendingAuth as never);
   vi.mocked(createCheckoutSession).mockResolvedValue({ url: "https://checkout.stripe.com/xxx" });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("POST /api/stripe/checkout", () => {
@@ -117,5 +122,22 @@ describe("POST /api/stripe/checkout", () => {
       "trial@example.com",
       "cus_old"
     );
+  });
+
+  it.each([
+    undefined,
+    "false",
+    "1",
+  ])("STRIPE_ENABLEDが%sの場合は認証チェック前に503を返す", async (value) => {
+    vi.unstubAllEnvs();
+    if (value !== undefined) {
+      vi.stubEnv("STRIPE_ENABLED", value);
+    }
+
+    const res = await POST();
+
+    expect(res.status).toBe(503);
+    expect(getServerAuth).not.toHaveBeenCalled();
+    expect(createCheckoutSession).not.toHaveBeenCalled();
   });
 });
