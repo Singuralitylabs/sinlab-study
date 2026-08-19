@@ -1,5 +1,5 @@
 /** Gemini モデル名。キーのティアが違っても同一モデルを使う */
-export const GEMINI_MODEL_NAME = "gemini-2.5-flash";
+export const GEMINI_MODEL_NAME = "gemini-3.6-flash";
 
 /** 提出コードの入力上限（文字数）。プロンプト構築と API バリデーションで共有する */
 export const GEMINI_MAX_CODE_LENGTH = 8000;
