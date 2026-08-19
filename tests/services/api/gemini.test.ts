@@ -43,7 +43,8 @@ const TRIAL_KEY = "trial-api-key";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.unstubAllEnvs();
+  vi.stubEnv(GEMINI_API_KEY_ENV, "");
+  vi.stubEnv(GEMINI_API_KEY_TRIAL_ENV, "");
 });
 
 afterEach(() => {

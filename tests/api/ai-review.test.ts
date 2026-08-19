@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GEMINI_API_KEY_ENV, GEMINI_API_KEY_TRIAL_ENV } from "@/app/constants/gemini";
 
 vi.mock("@/app/services/auth/server-auth");
@@ -37,6 +37,11 @@ const request = (body: unknown = { submissionId: 1 }) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv(GEMINI_API_KEY_ENV, "");
+  vi.stubEnv(GEMINI_API_KEY_TRIAL_ENV, "");
+});
+
+afterEach(() => {
   vi.unstubAllEnvs();
 });
 
