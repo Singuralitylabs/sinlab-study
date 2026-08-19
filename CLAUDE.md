@@ -127,6 +127,17 @@ app/
 
 ### Stripeサブスク決済（月額課金）
 
+**一時停止中（#115）**: 本サービスは現在Vercel Hobbyプラン（Fair Use Guidelinesにより個人的・非商用利用に限定）にデプロイしており、Stripeによる月額課金を有効にしたままの本番運用は規約違反となる可能性が高いため、本番（Vercel）では以下のフラグにより本決済機能を一時停止している。**コードは削除せず**、フラグのみで無効化する（Cloudflare Workersへのカットオーバー（#116）完了後、Cloudflare側で同じコードのまま再有効化するため）。
+
+- **フラグ**: `STRIPE_ENABLED`（`isStripeEnabled()`、実体は `app/constants/stripe.ts`。Stripe SDKに依存しないためlayout等の非決済系コードからも軽量に参照でき、`app/services/api/stripe-server.ts` から再exportして決済系コードから使う）。未設定または `"true"` 以外の値は無効として扱うフェイルクローズ
+- **無効時の挙動**: `/upgrade` はCheckout導線（お試しユーザー向け）・お支払い管理導線（一般有料会員向け）をいずれも非表示にし「現在準備中」の案内を表示、`/upgrade/success` も決済確認・会員昇格処理を一切行わず同様の案内を表示（Stripeのホスト型Checkoutセッションは作成から最大24時間有効なため、フラグOFF直前に開始されたセッションでの再訪でも昇格させないためのガード）、お試しユーザー向けバナー（`(authenticated)/layout.tsx`）のアップグレード導線（ボタン）とサイドナビの「プラン・お支払い」項目（`(authenticated)/components/SideNav.tsx`）を非表示、`POST /api/stripe/{checkout,portal,webhook}` はいずれも認証・署名検証より前段で503を返す（503応答メッセージは `STRIPE_DISABLED_MESSAGE` に一元化）
+- **Webhookを完全停止できる前提**: 停止時点でStripe Live契約者がゼロであることを確認済み（契約者がいる場合は本来Webhookのみ停止せずミラー同期を維持する必要があるが、今回は該当なし）
+- **再開条件**: Cloudflare Workersへのカットオーバー（#116, #120）完了後、稼働先の環境変数で `STRIPE_ENABLED=true` を設定する（コード変更は不要）。あわせて以下を行う
+  - Stripeダッシュボード（Liveモード）でWebhookエンドポイントの有効性を確認する。停止中に503応答が続くと、Stripeはイベントを約3日間リトライ後に破棄し、失敗が続くとエンドポイント自体を自動無効化する（無効化前に警告メールあり）ため、再開時は無効化されていないか・新エンドポイント登録が必要かを確認する
+  - 停止期間中に破棄された可能性のあるイベント（解約等）が無いか、Stripe側の実際の契約状態と `stripe_subscriptions` ミラー・`users` の状態を突合する
+
+以下は無効化以前からの本来の設計（`STRIPE_ENABLED=true` 時の挙動）。
+
 お試しユーザーが `/upgrade` からStripe Checkout（ホスト型）で月額サブスクリプションを契約すると、決済完了と同時に**管理者承認なし**で一般有料会員（`status=active` / `membership_type=general`）へ自動昇格する。**コミュニティ会員はスコープ外**（従来どおり管理者の手動承認のみ）。カード情報は一切扱わず、Checkout・Customer Portal（お支払い管理・解約）ともStripeのホスト型UIに任せる。
 
 - **決済日の固定**: 決済日（請求サイクルのアンカー）は登録日ベースにせず、全ユーザー一律で**毎月27日 UTC 0:00（＝JST 9:00）**に固定する（`app/constants/stripe.ts` の `BILLING_ANCHOR_DAY_OF_MONTH` / `BILLING_ANCHOR_HOUR_UTC`。リテラルを各所にハードコードせずこの定数を参照する）。`createCheckoutSession()` が `subscription_data.billing_cycle_anchor_config`（`day_of_month`/`hour`/`minute`/`second` を明示指定）で設定し、月の長さ・うるう年の考慮はStripe側に委ねる。`billing_cycle_anchor_config` は**サブスク作成時にのみ**適用されるため既存契約者への遡及適用はできず（アンカー移行はスコープ外）、本番での実課金開始前に導入することが前提
@@ -164,6 +175,8 @@ app/
 
 スライドPDFは Supabase Storage の `slides` バケット内に、オブジェクトキー **`<コーススラッグ>/slide-NN.pdf`**（NNは最低2桁のゼロ埋め）で保存する（例: キー `gas-advanced/slide-03.pdf` → 公開URL `.../storage/v1/object/public/slides/gas-advanced/slide-03.pdf`）。アップロードAPI（`app/api/upload-pdf/route.ts`）はフォルダ指定＋連番（自動採番／番号指定）に対応しており、シードSQL（`supabase/migrations/03_seed/`）もこのパスを前提とする。
 
+テーマのサムネイルは公開の Supabase Storage `thumbnails` バケットで管理する。オブジェクトキーは **`theme-{themeId}/thumbnail.{ext}`**（`ext` は `png` / `jpg` / `webp`）とし、`learning_themes.image_url` には環境非依存の相対パス **`/storage/v1/object/public/thumbnails/...`** を保存する。アップロード時は同じ拡張子の固定キーを上書きし、`image_url` も同じリクエストで `?v=<timestamp>` 付きの相対パスへ更新する。拡張子を変更した場合はDB更新後に旧オブジェクトを削除する。表示時は `resolveStorageUrl()` がSupabase URLを前置する。アップロード・削除はテーマ作成後の編集画面から行い、admin / maintainer のみ実行できる。新規環境のシードテーマは画像未設定（プレースホルダー表示）とし、既存画像はStorageへの移行後に管理画面で設定する。
+
 セキュリティはデータベースレベルの**Row Level Security (RLS)** ポリシーで実現。親階層（themes/phases/weeks）の公開コンテンツは認証済み全ユーザーが閲覧可能、`learning_contents` は `active` ユーザーが公開分を閲覧可能・お試しユーザー（`status='pending'`）は `is_open_to_trial=true` かつ `is_published=true` の行のみ SELECT 可（アプリ層のチェックと合わせた二層防御）。進捗・提出物は本人のみ、管理者は全データの読み書きが可能。
 
 **RLSヘルパー関数**: ロール・ID・ステータスの参照は `get_user_role()` / `get_user_id()` / `get_user_status()` を用いる。いずれも `users` 自身のRLSとの無限再帰を防ぐため `SECURITY DEFINER` + `SET search_path = public` + `STABLE` で定義し、anon からの REST RPC 経由の実行を防ぐため `PUBLIC, anon` から EXECUTE を REVOKE、`authenticated, service_role` へ GRANT する。ポリシー内では `(select get_user_xxx())` の形で包み、行ごとの再評価を防いでInitPlan化させる（`auth_rls_initplan` 対策）。同一操作の許可ポリシーはロール別に分けず OR 条件で1本に統合する（`multiple_permissive_policies` 対策）。
@@ -191,6 +204,7 @@ app/
 - `SUPABASE_PROJECT_ID` — Supabase CLI操作用
 - `GEMINI_API_KEY` — Gemini API（会員用・有料ティア。AIレビュー機能。SDK は `@google/genai`）
 - `GEMINI_API_KEY_TRIAL` — Gemini API（お試しユーザー用・無料ティア。未設定時は `GEMINI_API_KEY` にフォールバック）
+- `STRIPE_ENABLED` — Stripe決済機能の有効化フラグ（`"true"` 以外はフェイルクローズで無効。本番は現在一時停止中。詳細は「Stripeサブスク決済（月額課金）」節を参照）
 - `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_ID` — Stripeサブスク決済用
 - `NEXT_PUBLIC_APP_URL` — Checkout/Portalのリダイレクト先URL生成に使用
 

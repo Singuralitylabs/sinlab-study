@@ -2,6 +2,7 @@ import { Edit, Eye, EyeOff, ImageIcon, Plus, Trash2 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { PageTitle } from "@/app/components/PageTitle";
+import { resolveStorageUrl } from "@/app/lib/storage-url";
 import { fetchAllThemes } from "@/app/services/api/admin-server";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,7 +61,7 @@ export default async function ManageThemesPage() {
                     {theme.image_url ? (
                       <div className="relative w-10 h-10 rounded overflow-hidden">
                         <Image
-                          src={theme.image_url}
+                          src={resolveStorageUrl(theme.image_url)}
                           alt={theme.name}
                           fill
                           className="object-cover"

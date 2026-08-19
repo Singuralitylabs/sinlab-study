@@ -1,6 +1,7 @@
 import { BookOpen, CheckCircle, Clock, TrendingUp } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { resolveStorageUrl } from "@/app/lib/storage-url";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Button } from "@/components/ui/button";
@@ -77,7 +78,7 @@ export default async function HomePage() {
                     <div className="relative w-24 shrink-0 bg-linear-to-br from-primary/5 to-primary/15">
                       {theme.image_url ? (
                         <Image
-                          src={theme.image_url}
+                          src={resolveStorageUrl(theme.image_url)}
                           alt={theme.name}
                           fill
                           className="object-cover"

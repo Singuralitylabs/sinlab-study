@@ -29,6 +29,7 @@ import {
   fetchStripeSubscriptionByUserId,
   fetchSubscriptionPrice,
   isProrationBelowMinimum,
+  isStripeEnabled,
 } from "@/app/services/api/stripe-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 
@@ -381,5 +382,31 @@ describe("fetchSubscriptionPrice", () => {
     const result = await fetchSubscriptionPrice();
 
     expect(result).toEqual({ amount: null, currency: "jpy" });
+  });
+});
+
+describe("isStripeEnabled", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("STRIPE_ENABLEDが'true'の場合はtrueを返す", () => {
+    vi.stubEnv("STRIPE_ENABLED", "true");
+
+    expect(isStripeEnabled()).toBe(true);
+  });
+
+  it.each([
+    undefined,
+    "false",
+    "1",
+    "TRUE",
+    "",
+  ])("STRIPE_ENABLEDが%s（'true'以外）の場合はfalseを返す（フェイルクローズ）", (value) => {
+    if (value !== undefined) {
+      vi.stubEnv("STRIPE_ENABLED", value);
+    }
+
+    expect(isStripeEnabled()).toBe(false);
   });
 });
