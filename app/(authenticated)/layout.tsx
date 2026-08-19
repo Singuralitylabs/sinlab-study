@@ -3,8 +3,8 @@ export const dynamic = "force-dynamic";
 import { Clock } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
-import { isStripeEnabled } from "@/app/services/api/stripe-server";
 import { checkAdminPermissions, checkInstructorPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -34,7 +34,7 @@ export default async function AuthLayout({
 
   return (
     <div className="sm:flex min-h-screen">
-      <SideNav isAdmin={isAdmin} isInstructor={isInstructor} />
+      <SideNav isAdmin={isAdmin} isInstructor={isInstructor} stripeEnabled={stripeEnabled} />
       <main className="flex-1 sm:ml-64 p-6 pt-20 sm:pt-6">
         {userStatus === USER_STATUS.PENDING && (
           <Alert className="mb-6">

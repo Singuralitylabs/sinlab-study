@@ -74,19 +74,11 @@ describe("POST /api/stripe/webhook - 署名検証", () => {
 });
 
 describe("POST /api/stripe/webhook - STRIPE_ENABLEDフラグ", () => {
-  it.each([
-    undefined,
-    "false",
-    "1",
-  ])("STRIPE_ENABLEDが%sの場合は署名検証前に503を返す", async (value) => {
-    if (value === undefined) {
-      vi.unstubAllEnvs();
-      vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_dummy");
-      vi.stubEnv("STRIPE_WEBHOOK_SECRET", webhookSecret);
-      vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "service-role-dummy");
-    } else {
-      vi.stubEnv("STRIPE_ENABLED", value);
-    }
+  // "true"以外の値ごとのフェイルクローズ挙動はisStripeEnabled()自体の
+  // ユニットテスト（tests/services/api/stripe-server.test.ts）で網羅済みのため、
+  // ここではルートが無効時に503を返すことのみを1ケースで確認する
+  it("STRIPE_ENABLEDが無効な場合は署名検証前に503を返す", async () => {
+    vi.stubEnv("STRIPE_ENABLED", "false");
     const payload = JSON.stringify({ id: "evt_test_5", type: "checkout.session.completed" });
     const header = Stripe.webhooks.generateTestHeaderString({ payload, secret: webhookSecret });
 

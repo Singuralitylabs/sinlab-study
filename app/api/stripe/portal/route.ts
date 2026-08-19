@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { STRIPE_DISABLED_MESSAGE } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import { createPortalSession, isStripeEnabled } from "@/app/services/api/stripe-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
@@ -6,7 +7,7 @@ import { getServerAuth } from "@/app/services/auth/server-auth";
 
 export async function POST() {
   if (!isStripeEnabled()) {
-    return NextResponse.json({ error: "現在準備中です" }, { status: 503 });
+    return NextResponse.json({ error: STRIPE_DISABLED_MESSAGE }, { status: 503 });
   }
 
   try {
