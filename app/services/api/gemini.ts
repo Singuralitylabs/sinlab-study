@@ -7,7 +7,7 @@ import {
   GEMINI_MAX_RETRIES,
   GEMINI_MODEL_NAME,
   GEMINI_RETRY_BASE_DELAY_MS,
-  GEMINI_THINKING_BUDGET,
+  GEMINI_THINKING_LEVEL,
 } from "@/app/constants/gemini";
 import { USER_STATUS } from "@/app/constants/user";
 import type { CodeFile, UserStatusType } from "@/app/types";
@@ -175,7 +175,7 @@ export async function generateReview({
           systemInstruction: SYSTEM_PROMPT,
           maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
           thinkingConfig: {
-            thinkingBudget: GEMINI_THINKING_BUDGET,
+            thinkingLevel: GEMINI_THINKING_LEVEL,
           },
         },
       });
