@@ -6,7 +6,7 @@ vi.mock("@/app/services/api/supabase-server");
 vi.mock("@/app/services/api/stripe-server");
 
 import { POST } from "@/app/api/stripe/portal/route";
-import { createPortalSession } from "@/app/services/api/stripe-server";
+import { createPortalSession, isStripeEnabled } from "@/app/services/api/stripe-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -19,6 +19,7 @@ const activeAuth = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(isStripeEnabled).mockReturnValue(true);
   vi.mocked(getServerAuth).mockResolvedValue(activeAuth as never);
   vi.mocked(createPortalSession).mockResolvedValue({ url: "https://billing.stripe.com/xxx" });
 });
@@ -71,6 +72,16 @@ describe("POST /api/stripe/portal", () => {
     const res = await POST();
 
     expect(res.status).toBe(404);
+    expect(createPortalSession).not.toHaveBeenCalled();
+  });
+
+  it("STRIPE_ENABLEDが無効な場合は認証チェック前に503を返す", async () => {
+    vi.mocked(isStripeEnabled).mockReturnValue(false);
+
+    const res = await POST();
+
+    expect(res.status).toBe(503);
+    expect(getServerAuth).not.toHaveBeenCalled();
     expect(createPortalSession).not.toHaveBeenCalled();
   });
 });

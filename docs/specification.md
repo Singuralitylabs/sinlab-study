@@ -520,7 +520,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 
 ### 6.1 コンテンツ管理
 
-Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可能。削除は論理削除（`is_deleted = true`）。コンテンツ種別 `slide` では、PDF ファイルを Supabase Storage（`slides` バケット）にアップロードして `pdf_url` に保存する。
+Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可能。削除は論理削除（`is_deleted = true`）。コンテンツ種別 `slide` では、PDF ファイルを Supabase Storage（`slides` バケット）にアップロードして `pdf_url` に保存する。テーマのサムネイル画像は Supabase Storage（`thumbnails` バケット）にアップロードして `image_url` に保存する。オブジェクトキーがテーマIDに依存するため、新規作成フォームではアップロードできず、テーマ作成後の編集画面から設定する。
 
 **アクセス権限**: `admin` または `maintainer` ロール
 
@@ -628,6 +628,54 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 | 403 | 管理者権限なし、または admin ユーザーへのロール変更 |
 | 500 | DB 更新失敗 / サーバーエラー |
 
+### 6.1.4 サムネイルアップロード API
+
+テーマのサムネイル画像を Supabase Storage へアップロード・削除する。アップロード成功時は同一リクエスト内で `learning_themes.image_url` も更新するため、フォームの「更新」操作を待たずに反映される。
+
+**エンドポイント**: `POST /api/upload-thumbnail`（アップロード） / `DELETE /api/upload-thumbnail`（削除）
+
+**アクセス権限**: `admin` または `maintainer` ロール
+
+**リクエスト（POST）**: `multipart/form-data`（最大5MB）
+
+| フィールド | 必須 | 説明 |
+|:--|:--|:--|
+| `file` | ○ | アップロードする画像ファイル（`image/png` / `image/jpeg` / `image/webp`） |
+| `themeId` | ○ | 対象テーマID（正の整数） |
+
+**リクエスト（DELETE）**: クエリパラメータ `themeId`（正の整数）
+
+**命名規約**: サムネイルは `thumbnails` バケット内にオブジェクトキー `theme-{themeId}/thumbnail.{ext}` で保存する（`ext` は `png` / `jpg` / `webp`）。`image_url` には環境非依存の相対パス `/storage/v1/object/public/thumbnails/theme-{id}/thumbnail.{ext}?v=<timestamp>` を保存し、表示時に `resolveStorageUrl()` が Supabase URL を前置する。`?v=` は差し替え時に Supabase CDN と `next/image` のキャッシュを切り替えるためのバージョン。
+
+**処理フロー（POST）**:
+1. 認証チェック
+2. ロール確認（admin / maintainer のみ許可）
+3. ファイル形式・サイズ・`themeId` の検証
+4. 対象テーマの存在確認（`is_deleted = false`）。存在しない場合は Storage へ書き込まずに404
+5. `thumbnails` バケットへアップロード（同一拡張子の既存オブジェクトは上書き）
+6. `learning_themes.image_url` を `?v=<timestamp>` 付きの相対パスへ更新。更新に失敗した場合、既存オブジェクトを上書きしていないときに限り、今回作成したオブジェクトを削除する
+7. 拡張子が変わって旧オブジェクトが残る場合は、DB更新の成功後にそれを削除する
+8. 相対パスと公開URLを返却
+
+**処理フロー（DELETE）**:
+1. 認証チェック、ロール確認、`themeId` の検証
+2. 対象テーマの存在確認（`is_deleted = false`）
+3. `learning_themes.image_url` を `NULL` に更新
+4. 更新前の `image_url` が上記の命名規約に一致する場合のみ、対応する Storage オブジェクトを削除する（`/images/...` 等の旧形式の値が入っていた場合はDBのクリアのみ行う）
+
+Storage オブジェクトの削除に失敗した場合も、DB参照は既に外れているため 500 とはせず 200 を返し、`storageRemoved: false` で部分失敗を呼び出し側へ伝える（`image_url` が `NULL` 済みで再試行しても対象を特定できないため）。管理画面はこの値を見て「ファイルが残っている可能性がある」旨を警告表示する。
+
+**レスポンス**:
+
+| ステータス | 条件 |
+|:--|:--|
+| 200 | 正常（POST: `{ path: string, url: string }` / DELETE: `{ success: true, storageRemoved: boolean }` を返却） |
+| 400 | ファイルなし / サイズ超過 / 対応形式以外 / テーマID不正 |
+| 401 | 未認証 |
+| 403 | 権限なし、または `rejected` ユーザー |
+| 404 | テーマが存在しない、または論理削除済み |
+| 500 | アップロード失敗 / DB更新失敗 / サーバーエラー |
+
 ### 6.2 受講生管理
 
 アクティブな受講生の一覧と進捗状況を表示する。
@@ -677,7 +725,7 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 | パス | 画面名 | 表示内容 |
 |:--|:--|:--|
 | `/manage` | 管理ダッシュボード | 統計カード（テーマ・フェーズ・週・コンテンツ・受講生・提出数）、最近の提出リスト |
-| `/manage/themes` | テーマ管理 | CRUD操作（一覧、新規作成、編集、論理削除）、サムネイル画像設定 |
+| `/manage/themes` | テーマ管理 | CRUD操作（一覧、新規作成、編集、論理削除）、サムネイル画像のアップロード・プレビュー・削除（編集画面のみ） |
 | `/manage/phases` | フェーズ管理 | CRUD操作（一覧、新規作成、編集、論理削除） |
 | `/manage/weeks` | 週管理 | CRUD操作（一覧、新規作成、編集、論理削除） |
 | `/manage/contents` | コンテンツ管理 | CRUD操作（一覧、新規作成、編集、論理削除）、PDFアップロード |
@@ -892,3 +940,4 @@ flowchart TD
 | 2026年8月 | 別セッションからの追加レビュー指摘を反映：`paused`を終端状態に追加、successページの`no_payment_required`許容、既存Stripe Customerの再利用、月額料金のキャッシュ、`current_period_end`を用いた次回更新日・解約予定日の表示を2.11節に追記 |
 | 2026年8月 | 上記に対する独立レビューの指摘を反映：既存Stripe Customerが見つからない場合の新規Customerへのフォールバックを2.11節に追記 |
 | 2026年8月 | 決済日を毎月27日（UTC 0:00）に固定する変更を追加（#99）：`billing_cycle_anchor_config`・初回日割り（`proration_behavior`）・最低請求額を下回る場合の無償化ガード（`isProrationBelowMinimum()`）を2.11節に追記、`/upgrade`・`/upgrade/success`の画面説明を更新 |
+| 2026年8月 | テーマサムネイルのStorageアップロード機能を追加（6.1.4節を新設。6.1節に `thumbnails` バケットへの保存と編集画面限定である旨、7.3節にアップロード・プレビュー・削除UIを追記） |

@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { Clock } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import { checkAdminPermissions, checkInstructorPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -29,21 +30,27 @@ export default async function AuthLayout({
 
   const isAdmin = checkAdminPermissions(userRole);
   const isInstructor = checkInstructorPermissions(userRole);
+  const stripeEnabled = isStripeEnabled();
 
   return (
     <div className="sm:flex min-h-screen">
-      <SideNav isAdmin={isAdmin} isInstructor={isInstructor} />
+      <SideNav isAdmin={isAdmin} isInstructor={isInstructor} stripeEnabled={stripeEnabled} />
       <main className="flex-1 sm:ml-64 p-6 pt-20 sm:pt-6">
         {userStatus === USER_STATUS.PENDING && (
           <Alert className="mb-6">
             <Clock />
             <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
               <span>
-                現在は無料プランでご利用中です。「お試し公開」コンテンツの閲覧・提出が可能です。すべての学習コンテンツを利用するには、アップグレードまたは管理者による本登録が必要です。
+                現在は無料プランでご利用中です。「お試し公開」コンテンツの閲覧・提出が可能です。
+                {stripeEnabled
+                  ? "すべての学習コンテンツを利用するには、アップグレードまたは管理者による本登録が必要です。"
+                  : "すべての学習コンテンツを利用するには、管理者による本登録が必要です。"}
               </span>
-              <Button asChild size="sm">
-                <Link href="/upgrade">アップグレード</Link>
-              </Button>
+              {stripeEnabled && (
+                <Button asChild size="sm">
+                  <Link href="/upgrade">アップグレード</Link>
+                </Button>
+              )}
             </AlertDescription>
           </Alert>
         )}

@@ -41,12 +41,13 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     href: "/submissions",
     icon: <ClipboardList className="h-5 w-5" />,
   },
-  {
-    title: "プラン・お支払い",
-    href: "/upgrade",
-    icon: <CreditCard className="h-5 w-5" />,
-  },
 ];
+
+const UPGRADE_NAV_ITEM: NavItem = {
+  title: "プラン・お支払い",
+  href: "/upgrade",
+  icon: <CreditCard className="h-5 w-5" />,
+};
 
 const MANAGE_NAV_ITEM: NavItem = {
   title: "管理画面",
@@ -60,17 +61,27 @@ const ADMIN_USERS_NAV_ITEM: NavItem = {
   icon: <UserCog className="h-5 w-5" />,
 };
 
-export function SideNav({ isAdmin, isInstructor }: { isAdmin: boolean; isInstructor: boolean }) {
+export function SideNav({
+  isAdmin,
+  isInstructor,
+  stripeEnabled,
+}: {
+  isAdmin: boolean;
+  isInstructor: boolean;
+  stripeEnabled: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
   const navItems = useMemo<NavItem[]>(
     () => [
       ...DEFAULT_NAV_ITEMS,
+      // 停止中は決済・お支払い管理の導線を持たないため非表示にする（詳細はCLAUDE.md参照）
+      ...(stripeEnabled ? [UPGRADE_NAV_ITEM] : []),
       ...(isInstructor ? [MANAGE_NAV_ITEM] : []),
       ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),
     ],
-    [isAdmin, isInstructor]
+    [isAdmin, isInstructor, stripeEnabled]
   );
 
   const handleSignOut = async () => {

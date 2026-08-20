@@ -5,7 +5,7 @@ vi.mock("@/app/services/api/stripe-webhook-server");
 vi.mock("@/app/services/notifications/slack");
 
 import { POST } from "@/app/api/stripe/webhook/route";
-import { getStripeClient } from "@/app/services/api/stripe-server";
+import { getStripeClient, isStripeEnabled } from "@/app/services/api/stripe-server";
 import {
   activateUserFromCheckoutSession,
   claimEvent,
@@ -26,6 +26,7 @@ const mockConstructEvent = vi.fn();
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_dummy");
+  vi.mocked(isStripeEnabled).mockReturnValue(true);
   vi.mocked(getStripeClient).mockReturnValue({
     webhooks: { constructEvent: mockConstructEvent },
   } as never);
@@ -182,5 +183,15 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
 
     expect(res.status).toBe(500);
     expect(releaseEventClaim).toHaveBeenCalledWith("evt_7", "2026-01-01T00:00:00.000Z");
+  });
+
+  it("STRIPE_ENABLEDが無効な場合は署名検証前に503を返す", async () => {
+    vi.mocked(isStripeEnabled).mockReturnValue(false);
+
+    const res = await POST(request("{}") as never);
+
+    expect(res.status).toBe(503);
+    expect(mockConstructEvent).not.toHaveBeenCalled();
+    expect(claimEvent).not.toHaveBeenCalled();
   });
 });
