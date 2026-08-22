@@ -1,0 +1,55 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git branch *)",
+      "Bash(git checkout *)",
+      "Bash(git switch *)",
+      "Bash(git add *)",
+      "Bash(git mv *)",
+      "Bash(git check-ignore *)",
+      "Bash(git ls-files *)",
+      "Bash(git rev-parse *)",
+      "Bash(git fetch *)",
+
+      "Bash(bun run *)",
+      "Bash(bun install *)",
+      "Bash(bun add *)",
+      "Bash(bun pm *)",
+      "Bash(bun test *)",
+      "Bash(bunx *)",
+
+      "Bash(ls *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(echo *)",
+      "Bash(cp *)",
+      "Bash(mkdir *)",
+      "Bash(jq *)",
+      "Bash(curl *)",
+      "Bash(lsof *)",
+
+      "Bash(vercel *)",
+      "Bash(supabase *)",
+      "Bash(npx supabase *)",
+      "Bash(gh api *)",
+
+      "Read",
+      "Glob",
+      "Grep"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)"
+    ]
+  }
+}

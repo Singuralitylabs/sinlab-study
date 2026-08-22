@@ -6,7 +6,7 @@
 
 **CLAUDE.md は毎リクエストの先頭に全文が読み込まれる。** 記述を増やすことは常時のコンテキスト消費と、本当に守らせたいルールの埋没を同時に招く。追記の前に必ず以下を確認すること。
 
-- **載せるのは「知らないと壊すこと」だけ。** コマンド・運用ルール・コードスタイル・ディレクトリ構成、そして**不変条件**（「X は必ず Y を経由する」「Z を使ってよいのはここだけ」）に限る。
+- **載せるのは「知らないと壊すこと」だけ。** コマンド・運用ルール・コードスタイル、そして**不変条件**（「X は必ず Y を経由する」「Z を使ってよいのはここだけ」）に限る。ディレクトリ構成やレイヤーの責務は `README.md` / `docs/` の担当。
 - **「なぜそう設計したか」は載せない。** 経緯・トレードオフ・検討の結果は `docs/` に書き、ここには結論の一行と参照先だけを置く。
 - **特定の関数・分岐の落とし穴は、まずコード内コメントに書く。** それを壊しそうな人が最初に目にする場所はソースであり、このファイルではない。
 - **`docs/` と同じ内容を二重に持たない。** 追記の前に `docs/` を検索し、あるなら参照へ置き換える。無いなら「まず `docs/` に書く」を検討する。
@@ -19,11 +19,13 @@
 
 ## プロジェクト概要
 
-「AIと学ぶ実践Web技術講座」の学習コンテンツ配信サービス。Next.js 16 App Routerで構築。独自のSupabaseプロジェクトを使用し、Google OAuthによるログインとユーザー承認フローを備える。関連サービスとして**Sinlabポータル**が存在するが、認証基盤は独立している。
+「AIと学ぶ実践Web技術講座」の学習コンテンツ配信サービス。Next.js 16 App Router + Supabase で構築し、Google OAuthによるログインとユーザー承認フローを備える。
 
 ## 自動実行の許可
 
-`.claude/settings.local.json` の `allow` リストに登録されているコマンド・ツール（git・bun・一般的なシェルコマンド・`vercel`/`supabase`/`gh api` 等のCLI・各種MCPツール）は、**事前確認を求めず**タスクの一部として即座に実行してよい。
+`.claude/settings.json`（チーム共有・コミット対象）の `permissions.allow` に登録されたコマンドは、**事前確認を求めず**タスクの一部として即座に実行してよい。**許可範囲を変えるときはこのファイルを編集する**（このファイルの記述を増やしても許可は増えない）。個人用の追加設定は `.claude/settings.local.json`（gitignore済み）に置く。
+
+`git push` は allow に含めない。「ブランチ運用」のユーザー確認ルールを毎回通すため、意図的に都度確認とする。
 
 ## コマンド
 
@@ -58,37 +60,11 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 - `noUnusedVariables`/`noUnusedImports` はwarnレベル
 - 型のみのインポートには `import type` を使用すること
 
-## アーキテクチャ
+## 実装時に必ず守ること
 
-### ルート構成 (App Router)
+ディレクトリ構成は `README.md` の「プロジェクト構成」、レイヤーの責務は `docs/specification.md` 1.2節を参照。以下は docs に書かれていない、コードを壊さないための不変条件のみを列挙する。
 
-```
-app/
-├── (auth)/              # 認証不要（ルートグループのためURLは /login・/rejected）
-├── auth/callback/       # OAuthコールバック（セッション確立 + ユーザー自動登録）
-├── (authenticated)/     # 有効なセッションが必要（active / pending のみ）
-│   ├── admin/users/     # 管理者専用：ユーザー承認・却下（admin/ の他パスは /manage/* へリダイレクト）
-│   ├── manage/          # admin・maintainer：コンテンツ階層・受講生・提出物管理（instructor/ は旧パス）
-│   ├── learn/           # 学習画面: [themeId]/[phaseId]/[weekId]/[contentId]
-│   ├── submissions/     # 受講生の提出履歴
-│   ├── upgrade/         # アップグレード画面（success/ に決済完了画面）
-│   └── page.tsx         # 進捗概要付きダッシュボード
-└── api/                 # admin/users・manage・ai-review・upload-pdf・progress・submissions・stripe
-```
-
-### サービス層 (`app/services/`)
-
-- `api/` — Supabaseクライアント生成、学習コンテンツ・進捗・提出物・ユーザー・管理者向けのデータアクセス関数
-- `auth/` — サーバーサイド認証ヘルパーとロールベースの権限チェック
-
-### 主要パターン
-
-- **Server Componentsがデフォルト**: ページとレイアウトは非同期Server ComponentとしてSupabaseを直接呼び出す
-- **Client Components**: 必要な場合のみ `"use client"` を付与（インタラクティブなフォーム、ボタン等）
-- **コンテンツ描画**: Markdownはサニタイズ処理を経て表示、動画はYouTube埋め込み
-- **パスエイリアス**: `@/*` がプロジェクトルートにマッピング
-
-### 認証・認可で必ず守ること
+### 認証・認可
 
 フローの全体像・画面ごとの挙動は `docs/specification.md` 2章を参照。
 
@@ -98,7 +74,7 @@ app/
 - **ロール**: `admin`（全権限）/ `maintainer`（コンテンツ管理）/ `member`（受講生）。判定ロジックは `app/services/auth/` に集約する。
 - **ステータス**: `active`（承認済み）/ `pending`（お試し。アプリは使えるがお試し公開コンテンツのみ閲覧可）/ `rejected`（`/rejected` へ。APIでは403）。`/pending` 画面は廃止済み。
 
-### 会員種別・お試しユーザーで必ず守ること
+### 会員種別・お試しユーザー
 
 仕様は `docs/specification.md`（2.6・2.7）と `docs/database.md` を参照。
 
@@ -126,7 +102,7 @@ app/
 - `slides`（公開）: `<コーススラッグ>/slide-NN.pdf`（NNは最低2桁のゼロ埋め）
 - `thumbnails`（公開）: `theme-{themeId}/thumbnail.{png|jpg|webp}`。`learning_themes.image_url` には環境非依存の相対パス `/storage/v1/object/public/thumbnails/...` を保存し、表示時に `resolveStorageUrl()` でSupabase URLを前置する
 
-**RLSで必ず守ること**
+**RLS**
 
 - ロール・ID・ステータスの参照は `get_user_role()` / `get_user_id()` / `get_user_status()` を用いる。いずれも `SECURITY DEFINER` + `SET search_path = public` + `STABLE` で定義し、`PUBLIC, anon` から EXECUTE を REVOKE、`authenticated, service_role` へ GRANT する。
 - ポリシー内では **`(select get_user_xxx())` の形で包む**（`auth_rls_initplan` 対策）。同一操作の許可ポリシーはロール別に分けず **OR 条件で1本に統合する**（`multiple_permissive_policies` 対策）。
