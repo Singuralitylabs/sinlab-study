@@ -25,7 +25,7 @@
 
 `.claude/settings.json`（チーム共有・コミット対象）の `permissions.allow` に登録されたコマンドは、**事前確認を求めず**タスクの一部として即座に実行してよい。**許可範囲を変えるときはこのファイルを編集する**（このファイルの記述を増やしても許可は増えない）。個人用の追加設定は `.claude/settings.local.json`（gitignore済み）に置く。
 
-**allow に入れてよいのはデータ取得系のコマンドだけ。** 外部CLI（`supabase`・`vercel`）はサブコマンド単位で登録し、サーバー側を更新するもの（`supabase db push`、`vercel deploy` 等）は登録しない。`git push` も同様に含めない（「ブランチ運用」のユーザー確認ルールを毎回通すため）。
+**allow に入れてよいのは、参照・データ取得系のコマンドとローカルで完結する作業補助のみ。** 外部CLI（`supabase`・`vercel`）はサブコマンド単位で登録し、サーバー側を更新するもの（`supabase db push`、`vercel deploy` 等）は登録しない。`git push` も同様に含めない（「ブランチ運用」のユーザー確認ルールを毎回通すため）。
 
 ## コマンド
 
