@@ -29,6 +29,33 @@ export default function LoginPage() {
         <p className="text-xs text-muted-foreground text-center">
           ログイン後すぐに、お試し公開コンテンツの閲覧・課題提出をご利用いただけます。
         </p>
+
+        <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <a
+            href="https://sinlab.future-tech-association.org/sinlab-study/privacy.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline"
+          >
+            プライバシーポリシー
+          </a>
+          <a
+            href="https://sinlab.future-tech-association.org/sinlab-study/terms.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline"
+          >
+            利用規約
+          </a>
+          <a
+            href="https://sinlab.future-tech-association.org/sinlab-study/legal.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline"
+          >
+            特定商取引法に基づく表記
+          </a>
+        </div>
       </div>
     </div>
   );
