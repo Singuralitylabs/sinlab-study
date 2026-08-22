@@ -142,7 +142,7 @@ app/
 
 - **決済日の固定**: 決済日（請求サイクルのアンカー）は登録日ベースにせず、全ユーザー一律で**毎月27日 UTC 0:00（＝JST 9:00）**に固定する（`app/constants/stripe.ts` の `BILLING_ANCHOR_DAY_OF_MONTH` / `BILLING_ANCHOR_HOUR_UTC`。リテラルを各所にハードコードせずこの定数を参照する）。`createCheckoutSession()` が `subscription_data.billing_cycle_anchor_config`（`day_of_month`/`hour`/`minute`/`second` を明示指定）で設定し、月の長さ・うるう年の考慮はStripe側に委ねる。`billing_cycle_anchor_config` は**サブスク作成時にのみ**適用されるため既存契約者への遡及適用はできず（アンカー移行はスコープ外）、本番での実課金開始前に導入することが前提
   - 初回請求は日割り（`proration_behavior: "create_prorations"`）とする。無償（`"none"`）にすると「27日直前に登録して1ヶ月弱を無償利用して解約する」抜け道ができるため。ただしアンカー直前の登録では日割り額がStripeの最低請求額（JPY ¥50）を下回りCheckout作成・決済が失敗しうるため、`isProrationBelowMinimum()`（`app/services/api/stripe-server.ts`）で判定し、下回る場合に限り `proration_behavior` を `"none"` に切り替える。無償化されるウィンドウの長さは月額に反比例する（月額¥3000なら約12.4時間、月額が低いほど広がる）。最大でも1ヶ月弱を無償利用できる全面 `"none"` 採用時とは規模が異なるため抜け道にはならない、という判断。判定はPriceの `unit_amount`（`fetchSubscriptionPrice()` と共有するモジュールスコープのTTLキャッシュ）と、次回・前回アンカー時刻から算出した経過比率で行う
-  - `/upgrade`（お試しユーザー向け特典リスト）に、毎月27日が決済日であること・初回のみ日割りとなること（登録タイミングによっては初回分が発生しない場合がある旨も含む）を明示する。課金条件の説明であるため実装（アンカー日・日割り設定）とのズレは事故に直結する。`/upgrade/success`（決済完了画面）はこの一般的な説明文は繰り返さず、`activateUserFromCheckoutSession()` が返す次回のお支払い予定日（実際の値）のみを表示する
+  - `/upgrade`（お試しユーザー向け特典リスト）に、毎月27日が決済日（更新日）であること・初回のみ日割りとなること（登録タイミングによっては初回分が発生しない場合がある旨も含む）を明示する。課金条件の説明であるため実装（アンカー日・日割り設定）とのズレは事故に直結する。`/upgrade/success`（決済完了画面）はこの一般的な説明文は繰り返さず、`activateUserFromCheckoutSession()` が返す次回のお支払い予定日（実際の値）のみを表示する。法定表示の5項目は後述の「`/upgrade` の法定表示」を参照
 - **データモデル**: 専用テーブル `stripe_subscriptions`（ユーザーごとの課金状態のミラー、`user_id UNIQUE` で1ユーザー1行固定・DELETEせず常にupsert）と `stripe_events`（Webhook冪等性用、`event.id` がPK）を追加。**アプリの認可は従来どおり `users.status`/`membership_type` が唯一の真実**で、`users` にStripe関連カラムは足さない
   - `stripe_subscriptions` の行は解約後も残り続けるため、「現在契約中か」の判定は行の有無だけでなく `status` が終端状態（`TERMINAL_SUBSCRIPTION_STATUSES` = `canceled`/`unpaid`/`incomplete_expired`/`paused`、`app/services/api/stripe-server.ts`）でないことも確認する
 - **会員化のタイミング**: Webhook（`checkout.session.completed`）を正とし、`activateUserFromCheckoutSession()`（`app/services/api/stripe-webhook-server.ts`）が冪等に `stripe_subscriptions` upsert + `users` 更新を行う。`/upgrade/success` ページのサーバー側でも同一の冪等関数を呼ぶため、Webhookの配信遅延に関係なく決済直後から利用できる
@@ -165,6 +165,13 @@ app/
 - **フェイルクローズ**: `/upgrade` ページ・`/admin/users` ページはいずれもStripe契約状況の取得エラーを握り潰さず、専用のエラーメッセージを表示する。特に管理画面では、取得エラー時にサブスク契約中バッジ・却下時の手動キャンセル警告が消えると却下操作でStripe課金だけが継続する事故につながるため、取得失敗時は却下確認ダイアログに「契約状況を判定できない」旨の警告を必ず含める
 - **管理画面**: `/admin/users` に「現在契約中とみなせる」サブスク会員バッジを表示し、契約中ユーザーを却下する際は「Stripeダッシュボードでの手動キャンセルが別途必要」の警告を出す（自動キャンセル連携はスコープ外）。終端状態の除外はSQL側（`.not("status", "in", ...)`）で行い、JS側でのフィルタは行わない
 - **`/upgrade` の月額料金表示**: `fetchSubscriptionPrice()` はStripe Priceの `unit_amount`（JPYゼロdecimal通貨前提）をモジュールスコープのTTLキャッシュ（5分）付きで取得する。このキャッシュは `isProrationBelowMinimum()` とも共有する（Priceはほぼ不変のため、ページ表示・Checkout作成のたびにStripe APIを呼ぶのを避ける）。契約中ユーザー向けの次回更新日・解約予定日は `stripe_subscriptions.current_period_end` をそのまま表示する。`/upgrade/success` の決済完了画面では、`activateUserFromCheckoutSession()` が同一リクエスト内で既に取得済みのサブスク状態から次回のお支払い予定日を返すため、DBを再読み込みしない
+- **`/upgrade` の法定表示（#134）**: 法務部指示により、課金に関する下記5項目を契約前の画面に漏れなく表示する。表示は `STRIPE_ENABLED=true` の分岐にのみ置き、無効時の「準備中」案内へ漏れ出させない
+  1. **自動更新**: 月額サブスクリプションであり、解約手続きをしない限り毎月自動で更新・請求されること
+  2. **料金**: 月額1,500円（税込）。表示は `fetchSubscriptionPrice()` による動的取得を維持し（表示金額と実請求額の乖離防止）、取得失敗時は `DISPLAY_MONTHLY_PRICE_JPY`（`app/constants/stripe.ts`）によるフォールバックで法定表示を消さない。実請求額を確認できない場合は Checkout 導線を無効化する
+  3. **支払い・更新タイミング**: 全員一律で毎月 `BILLING_ANCHOR_DAY_OF_MONTH` 日に引き落とし（「27」をリテラルでハードコードしない）。更新日であることも分かる表現にする
+  4. **解約方法と解約後の扱い**: 本画面（プラン・お支払い）の「お支払い情報の管理・解約」からいつでも手続きできること。解約時の日割り計算・返金はなく、解約手続き後も当該請求期間の末日（次回27日）までは利用可能であること。この説明は契約中ユーザー向けの「お支払い情報の管理・解約」ボタン近傍にも出す（解約操作を行うのは契約中ユーザーのため）
+  5. **未成年者注意文言**: 「未成年者は保護者のアカウントにより、保護者の同意を得た上でお申し込みください」（「アップグレードする」ボタン近傍）
+  - Customer Portal の解約設定が「期間末に解約（cancel at period end）」であることが「解約後も27日まで利用可能」表示の前提（即時解約だと表示と実挙動が矛盾する。確認は人間タスク）
 
 ### データモデル (Supabase/PostgreSQL)
 

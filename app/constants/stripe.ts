@@ -4,6 +4,13 @@ export const BILLING_ANCHOR_DAY_OF_MONTH = 27;
 export const BILLING_ANCHOR_HOUR_UTC = 0;
 
 /**
+ * 法務部指示（#134）の表示用月額料金（JPY・税込）。`/upgrade` の料金表示は
+ * `fetchSubscriptionPrice()` による Stripe Price の動的取得を正とするが、
+ * 取得失敗時にも法定表示が消えないよう、この定数をフォールバックに使う。
+ */
+export const DISPLAY_MONTHLY_PRICE_JPY = 1500;
+
+/**
  * Stripeの最低請求額（JPY）。この金額を下回る請求はCheckout作成・決済が失敗しうるため、
  * アンカー直前に登録した場合の初回日割り額がこれを下回るかどうかの判定に用いる。
  */
