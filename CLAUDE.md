@@ -29,23 +29,14 @@
 
 ## コマンド
 
-```bash
-bun dev              # Turbopack使用の開発サーバー起動
-bun run build        # 本番ビルド
-bun run lint         # Biome リントチェック
-bun run format       # Biome フォーマット
-bun run check        # リント + フォーマット一括実行
-bun run db:types     # Supabase型定義の再生成
-bun run test         # Vitestによるユニットテスト実行
-bun run test:all     # build/db:types/lint/format/check/test を一括実行
-```
+パッケージマネージャは **bun**（npm/yarn/pnpm は使わない）。スクリプトの一覧は `README.md` を参照。
+
+- **push 前・作業完了前には必ず `bun run test:all` を通す**（build/db:types/lint/format/check/test を一括実行）。CIで落ちてから気づく流れにしない。
+- DBのスキーマを変更したら `bun run db:types` で型定義を再生成し、生成物（`app/types/lib/database.types.ts`）もコミットする。
 
 ## ブランチ運用
 
-- **`main` ブランチへ直接コミット・直接 push してはならない。** あらゆる変更は必ず作業用のブランチを切ってから行う。
-- ブランチ名は変更内容が分かる接頭辞付きで命名する（例: `feature/...`、`bug/...`、`docs/...`、`refactor/...`、`env/...`）。
-- `main` への反映は必ずプルリクエスト経由で行う。`main` への force push は禁止。
-- **リモートへ push する前には、対象ブランチを問わず必ずユーザーに確認を取ること。**
+**`main` へ直接コミット・push せず、必ず作業ブランチ（`feature/`・`bug/`・`docs/`・`refactor/`・`env/` などの接頭辞付き）を切り、PR 経由でマージする。** push 前のユーザー確認と force push 禁止は `.claude/settings.json` 側で担保しているため、ここには書かない。
 
 ## プルリクエスト
 
