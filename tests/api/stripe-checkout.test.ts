@@ -3,7 +3,7 @@ import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/supabase-server");
-// TERMINAL_SUBSCRIPTION_STATUS（定数）は実物のまま使い、副作用のある関数のみモックする
+// TERMINAL_SUBSCRIPTION_STATUSES（定数）は実物のまま使い、副作用のある関数のみモックする
 vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/app/services/api/stripe-server")>()),
   createCheckoutSession: vi.fn(),
