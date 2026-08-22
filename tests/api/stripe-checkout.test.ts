@@ -3,15 +3,21 @@ import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/supabase-server");
-// TERMINAL_SUBSCRIPTION_STATUS（定数）は実物のまま使い、createCheckoutSession・isStripeEnabled のみモックする
+// TERMINAL_SUBSCRIPTION_STATUS（定数）は実物のまま使い、副作用のある関数のみモックする
 vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/app/services/api/stripe-server")>()),
   createCheckoutSession: vi.fn(),
+  fetchSubscriptionPrice: vi.fn(),
   isStripeEnabled: vi.fn(),
 }));
 
 import { POST } from "@/app/api/stripe/checkout/route";
-import { createCheckoutSession, isStripeEnabled } from "@/app/services/api/stripe-server";
+import { SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE } from "@/app/constants/stripe";
+import {
+  createCheckoutSession,
+  fetchSubscriptionPrice,
+  isStripeEnabled,
+} from "@/app/services/api/stripe-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -27,6 +33,7 @@ beforeEach(() => {
   vi.mocked(isStripeEnabled).mockReturnValue(true);
   vi.mocked(getServerAuth).mockResolvedValue(pendingAuth as never);
   vi.mocked(createCheckoutSession).mockResolvedValue({ url: "https://checkout.stripe.com/xxx" });
+  vi.mocked(fetchSubscriptionPrice).mockResolvedValue({ amount: 1500, currency: "jpy" });
 });
 
 describe("POST /api/stripe/checkout", () => {
@@ -128,6 +135,38 @@ describe("POST /api/stripe/checkout", () => {
 
     expect(res.status).toBe(503);
     expect(getServerAuth).not.toHaveBeenCalled();
+    expect(createCheckoutSession).not.toHaveBeenCalled();
+    expect(fetchSubscriptionPrice).not.toHaveBeenCalled();
+  });
+
+  it("料金取得に失敗した場合は503を返しCheckoutを作らない", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { stripe_subscriptions: { data: null, error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(fetchSubscriptionPrice).mockRejectedValue(new Error("stripe unavailable"));
+
+    const res = await POST();
+
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({ error: SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE });
+    expect(createCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { amount: null, currency: "jpy" },
+    { amount: 1500, currency: "usd" },
+  ])("確認できない料金（amount=$amount, currency=$currency）は503を返す", async (price) => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { stripe_subscriptions: { data: null, error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(fetchSubscriptionPrice).mockResolvedValue(price);
+
+    const res = await POST();
+
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({ error: SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE });
     expect(createCheckoutSession).not.toHaveBeenCalled();
   });
 });

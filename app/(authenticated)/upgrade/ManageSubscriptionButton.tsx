@@ -2,6 +2,7 @@
 
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
+import { MANAGE_SUBSCRIPTION_BUTTON_LABEL } from "@/app/constants/stripe";
 import { Button } from "@/components/ui/button";
 
 export function ManageSubscriptionButton() {
@@ -38,7 +39,7 @@ export function ManageSubscriptionButton() {
             <span className="sr-only">処理中</span>
           </>
         ) : (
-          "お支払い情報の管理・解約"
+          MANAGE_SUBSCRIPTION_BUTTON_LABEL
         )}
       </Button>
       {error && <p className="text-sm text-destructive">{error}</p>}

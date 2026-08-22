@@ -3,7 +3,11 @@ import { PageTitle } from "@/app/components/PageTitle";
 import {
   BILLING_ANCHOR_DAY_OF_MONTH,
   DISPLAY_MONTHLY_PRICE_JPY,
+  isChargeableSubscriptionPrice,
   isStripeEnabled,
+  logDisplayPriceDrift,
+  MANAGE_SUBSCRIPTION_BUTTON_LABEL,
+  SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
 } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import {
@@ -17,15 +21,11 @@ import { formatDate } from "./format-date";
 import { ManageSubscriptionButton } from "./ManageSubscriptionButton";
 import { UpgradeCheckoutButton } from "./UpgradeCheckoutButton";
 
-function formatMonthlyPrice(amount: number, currency: string): string {
-  if (currency.toLowerCase() !== "jpy") {
-    // JPY以外は想定していない（複数通貨対応はスコープ外）ため、通貨コード付きでそのまま表示する
-    return `月額${amount.toLocaleString("ja-JP")} ${currency.toUpperCase()}（税込）`;
-  }
+function formatMonthlyJpyPrice(amount: number): string {
   return `月額${amount.toLocaleString("ja-JP")}円（税込）`;
 }
 
-const FALLBACK_MONTHLY_PRICE_LABEL = formatMonthlyPrice(DISPLAY_MONTHLY_PRICE_JPY, "jpy");
+const FALLBACK_MONTHLY_PRICE_LABEL = formatMonthlyJpyPrice(DISPLAY_MONTHLY_PRICE_JPY);
 
 const CANCELLATION_POLICY_TEXT = `解約時の日割り計算・返金はありません。解約手続き後も、当該請求期間の末日（次回${BILLING_ANCHOR_DAY_OF_MONTH}日）まで引き続きご利用いただけます。`;
 
@@ -61,20 +61,29 @@ export default async function UpgradePage() {
       ? fetchedSubscription
       : null;
 
-  // 法定表示は取得失敗時も消さない。実請求額を確認できない場合は Checkout を無効化する
-  let monthlyPriceLabel = FALLBACK_MONTHLY_PRICE_LABEL;
-  let checkoutDisabled = true;
+  // 確認できた実額だけを正とする。未確認時に Checkout を有効化しない
+  let confirmedPrice: { amount: number; currency: string } | null = null;
+  let priceFetchFailed = false;
   if (stripeEnabled && userStatus === USER_STATUS.PENDING) {
     try {
       const price = await fetchSubscriptionPrice();
-      if (price.amount !== null) {
-        monthlyPriceLabel = formatMonthlyPrice(price.amount, price.currency);
-        checkoutDisabled = false;
+      if (isChargeableSubscriptionPrice(price)) {
+        logDisplayPriceDrift(price.amount);
+        confirmedPrice = price;
       }
     } catch (error) {
+      priceFetchFailed = true;
       console.error("料金情報取得エラー:", error);
     }
   }
+
+  const checkoutDisabled = confirmedPrice === null;
+  // 取得失敗時のみフォールバックで法定表示を残す。非月額・非JPYは月額を断定しない
+  const monthlyPriceLabel = confirmedPrice
+    ? formatMonthlyJpyPrice(confirmedPrice.amount)
+    : priceFetchFailed
+      ? FALLBACK_MONTHLY_PRICE_LABEL
+      : null;
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -88,7 +97,7 @@ export default async function UpgradePage() {
           {userStatus === USER_STATUS.PENDING &&
             (stripeEnabled ? (
               <>
-                <p className="text-2xl font-bold">{monthlyPriceLabel}</p>
+                {monthlyPriceLabel && <p className="text-2xl font-bold">{monthlyPriceLabel}</p>}
                 <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
                   <li>すべての学習コンテンツ（動画・テキスト・演習）を閲覧・提出できます</li>
                   <li>お手続き完了後、すぐにご利用いただけます</li>
@@ -104,13 +113,15 @@ export default async function UpgradePage() {
                     日）までの日割り料金となります（登録タイミングによっては初回分が発生しない場合があります）
                   </li>
                   <li>
-                    解約は、本画面（プラン・お支払い）の「お支払い情報の管理・解約」からいつでもお手続きできます
+                    解約は、本画面（プラン・お支払い）の「{MANAGE_SUBSCRIPTION_BUTTON_LABEL}
+                    」からいつでもお手続きできます
                   </li>
                   <li>{CANCELLATION_POLICY_TEXT}</li>
                 </ul>
                 {checkoutDisabled && (
                   <p className="text-sm text-destructive">
-                    料金を確認できないため、現在お申し込みを受け付けできません。時間をおいてページを再読み込みしてください。
+                    {SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE}
+                    。時間をおいてページを再読み込みしてください。
                   </p>
                 )}
                 <UpgradeCheckoutButton disabled={checkoutDisabled} />
@@ -135,7 +146,6 @@ export default async function UpgradePage() {
                 {/* 契約状況が不明な間もお支払い管理・解約の導線は残す（/api/stripe/portal は
                     契約が無ければ404を返すため、契約が無いユーザーが押しても安全） */}
                 <ManageSubscriptionButton />
-                <p className="text-sm text-muted-foreground">{CANCELLATION_POLICY_TEXT}</p>
               </>
             ) : subscription ? (
               <>

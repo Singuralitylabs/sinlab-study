@@ -267,8 +267,8 @@ function isPlainMonthlyPrice(price: Stripe.Price): boolean {
  * 月額（1ヶ月間隔）サブスクリプションのPrice情報を取得する（/upgrade ページでの料金表示用）。
  * `unit_amount` はJPY（ゼロdecimal通貨）を前提にそのまま円額として扱う
  * （複数通貨対応はスコープ外。Slack支払い失敗通知の金額表示と同じ前提）。
- * 設定されたPriceが1ヶ月間隔でない場合は `amount: null` を返し、呼び出し側で料金非表示にする
- * （「/ 月」表示と実際の請求間隔の食い違いを避けるため）。
+ * 設定されたPriceが1ヶ月間隔でない場合は `amount: null` を返し、呼び出し側で
+ * Checkout を拒否する（「/ 月」表示と実際の請求間隔の食い違いを避けるため）。
  */
 export async function fetchSubscriptionPrice(): Promise<{
   amount: number | null;
