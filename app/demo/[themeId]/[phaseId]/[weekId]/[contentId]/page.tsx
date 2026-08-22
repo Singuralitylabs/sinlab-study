@@ -80,14 +80,13 @@ export default async function DemoContentPage({ params }: PageProps) {
               <Lock className="h-10 w-10 text-muted-foreground" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold mb-2">承認されたアカウントのみ閲覧できます</h2>
+              <h2 className="text-lg font-semibold mb-2">このコンテンツはデモの対象外です</h2>
               <p className="text-sm text-muted-foreground max-w-sm">
-                このコンテンツを閲覧するにはアカウントの承認が必要です。
-                ログインしてアカウント承認をリクエストしてください。
+                デモでご覧いただけるのは最初の週のみです。ログインすると、本サービスでお試し公開コンテンツの閲覧・課題提出をご利用いただけます。
               </p>
             </div>
             <Button asChild className="mt-2">
-              <Link href="/login">ログインして続ける</Link>
+              <Link href="/login">ログインする</Link>
             </Button>
           </CardContent>
         </Card>

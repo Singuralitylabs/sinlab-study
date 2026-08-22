@@ -21,10 +21,13 @@ export default function LoginPage() {
             </p>
           </div>
           <GoogleLoginButton />
+          <p className="text-xs text-muted-foreground text-center">
+            Google側の確認画面で「〜.supabase.co」というドメインへの移動が表示されますが、これは本サービスの認証基盤（Supabase）のドメインです。
+          </p>
         </div>
 
         <p className="text-xs text-muted-foreground text-center">
-          初回ログイン後、管理者の承認が完了するまでお待ちください。
+          ログイン後すぐに、お試し公開コンテンツの閲覧・課題提出をご利用いただけます。
         </p>
       </div>
     </div>

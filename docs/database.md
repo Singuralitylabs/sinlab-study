@@ -342,7 +342,7 @@ erDiagram
 
 ### 3.8 users（ユーザー）
 
-本サービスの独自Supabaseプロジェクトで管理する。初回Googleログイン時にOAuthコールバックで自動作成される（`status=pending`, `role=member`, `membership_type=NULL`）。管理者が承認後、`status=active` に変更することでサービスへのアクセスが可能になる。承認時には会員種別（`membership_type`）も同時に設定する。
+本サービスの独自Supabaseプロジェクトで管理する。初回Googleログイン時にOAuthコールバックで自動作成される（`status=pending`, `role=member`, `membership_type=NULL`）。`status=pending` は「お試し（trial）ユーザー」としてログインしてサービスを利用でき、お試し公開コンテンツ（`is_open_to_trial=true`）の閲覧・課題提出が可能。管理者が承認後、`status=active` に変更することで全コンテンツへのアクセスが可能になる。承認時には会員種別（`membership_type`）も同時に設定する。
 
 | カラム | 型 | NULL | デフォルト | 説明 |
 |:--|:--|:--:|:--|:--|
