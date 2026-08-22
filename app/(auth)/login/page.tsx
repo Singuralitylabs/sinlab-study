@@ -30,7 +30,7 @@ export default function LoginPage() {
           ログイン後すぐに、お試し公開コンテンツの閲覧・課題提出をご利用いただけます。
         </p>
 
-        <div className="flex justify-center gap-4 text-xs text-muted-foreground">
+        <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <a
             href="https://sinlab.future-tech-association.org/sinlab-study/privacy.html"
             target="_blank"
