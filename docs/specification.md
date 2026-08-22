@@ -279,6 +279,17 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 ### 2.11 Stripeサブスク決済によるアップグレード
 
+**機能フラグ（`STRIPE_ENABLED`）**: 本決済機能全体は環境変数 `STRIPE_ENABLED` で有効・無効を切り替える。判定は `isStripeEnabled()`（`app/constants/stripe.ts`）に集約し、未設定または `"true"` 以外の値は無効として扱う（フェイルクローズ）。`app/constants/stripe.ts` はStripe SDKに依存しないため、layout等の非決済系コードからも軽量に参照できる（決済系コードへは `app/services/api/stripe-server.ts` から再exportして提供する）。以降の節は有効時（`STRIPE_ENABLED=true`）の仕様を記述する。
+
+無効時の挙動は以下のとおり。
+
+| 対象 | 挙動 |
+|:--|:--|
+| `/upgrade` | Checkout導線（お試しユーザー向け）・お支払い管理導線（一般有料会員向け）をいずれも非表示にし、準備中である旨の案内を表示 |
+| `/upgrade/success` | 決済確認・会員昇格処理を一切行わず同様の案内を表示。Stripeのホスト型Checkoutセッションは作成から最大24時間有効なため、無効化の直前に開始されたセッションから再訪しても昇格させない |
+| トライアルバナー（`(authenticated)/layout.tsx`）／サイドナビ（`(authenticated)/components/SideNav.tsx`） | アップグレードボタン・「プラン・お支払い」項目を非表示 |
+| `POST /api/stripe/{checkout,portal,webhook}` | 認証・署名検証より前段で503を返す（応答メッセージは `STRIPE_DISABLED_MESSAGE` に一元化） |
+
 **対象フロー**: お試しユーザー（`status=pending`）が `/upgrade` からStripe Checkout（ホスト型）で月額サブスクリプションを契約すると、決済完了と同時に**管理者承認なし**で一般有料会員（`status=active` / `membership_type=general`）へ自動昇格する。**コミュニティ会員はスコープ外**で、従来どおり2.7節の手動承認のみを経由する。
 
 **データモデル**: 専用テーブル `stripe_subscriptions`（ユーザーごとの課金状態のミラー、1ユーザー1行）と `stripe_events`（Webhook冪等性用）を用いる。アプリの認可判定は引き続き `users.status` / `users.membership_type` が唯一の真実であり、`users` テーブルにStripe関連カラムは追加しない（詳細は[データベース設計書](./database.md)の3.9/3.10・6.6/6.7を参照）。
@@ -321,6 +332,8 @@ Stripe APIからのライブ状態取得は、ミラー更新の直前（上記�
 | `POST /api/stripe/checkout` | Checkoutセッションを作成しURLを返す。お試しユーザー以外は403、既に契約中・手続き中のサブスク行がある場合は409（解約済みの行が残っているだけの場合は再契約を許可する）。解約済み等で既存のStripe Customerがあれば再利用し、毎回新規作成しない（旧Customerの孤児化・請求履歴の分裂を防ぐ）。再利用しようとした既存Customerが（ダッシュボードでの削除等により）Stripe側に存在しない場合は、新規Customerでの作成にフォールバックする（そうしないと当該ユーザーが恒久的にCheckoutへ進めなくなるため）。セッション作成直前に `fetchSubscriptionPrice()` で実額を確認し、取得失敗・非月額・非JPYのいずれでも503を返す（`/upgrade` の disabled だけでは古いタブや直接POSTを防げないため） |
 | `POST /api/stripe/webhook` | Stripeからのイベントを受信。生ボディで署名検証し、`event.id` のclaim（原子的な処理権確保）に成功した場合のみイベント種別ごとに処理する |
 | `POST /api/stripe/portal` | Customer Portalセッションを作成しURLを返す。自身の `stripe_subscriptions` 行がないユーザーは404 |
+
+checkout / portal は自分の行を読むSELECTのみのため service_role を必要としない。DB書き込みを行うのはWebhookハンドラ（`app/services/api/stripe-webhook-server.ts` の各関数）のみで、いずれも冒頭で `assertServiceRoleConfigured()` により `SUPABASE_SERVICE_ROLE_KEY` の設定を明示的に検証してから `createAdminSupabaseClient()` を使う。Checkoutの決済手段は `payment_method_types: ["card"]` で明示的にカードのみへ限定する。
 
 **エッジケース**:
 - 二重Checkout: `stripe_subscriptions.user_id` のUNIQUE制約 + `/api/stripe/checkout` 側の409チェックで防止する（ミラー行の存在を前提とするガードのため、いずれも未完了のまま2つのCheckoutセッションを同時に完了させる完全同時実行までは対象外）
@@ -569,6 +582,8 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 **エンドポイント**: `POST /api/ai-review`
 
 **アクセス権限**: 認証済みユーザー（自分の提出のみ対象）
+
+**APIキーの振り分け**: `getServerAuth()` が返す `userStatus` によって使用するGemini APIキーを切り替える。`active`（コミュニティ会員・一般有料会員とも）は有料ティアの `GEMINI_API_KEY`、お試しユーザー（`pending`）は無料ティアの `GEMINI_API_KEY_TRIAL`（未設定時は `GEMINI_API_KEY` にフォールバック）を用いる。選択ロジックは `resolveGeminiApiKey()`（`app/services/api/gemini.ts`）に集約し、モデル名・上限値・環境変数名は `app/constants/gemini.ts` に定義する。キーはサーバー側でのみ扱い、レスポンス・ログへ出力しない。
 
 **リクエストボディ**:
 ```json
