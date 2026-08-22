@@ -42,7 +42,6 @@
       "Bash(vercel whoami *)",
 
       "Bash(ls *)",
-      "Bash(find *)",
       "Bash(grep *)",
       "Bash(rg *)",
       "Bash(cat *)",
