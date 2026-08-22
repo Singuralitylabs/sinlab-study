@@ -50,8 +50,6 @@ STRIPE_PRICE_ID=<月額サブスクリプションの Price ID>
 NEXT_PUBLIC_APP_URL=<Checkout/Portal のリダイレクト先URL生成に使用>
 ```
 
-> Stripe決済は現在 `STRIPE_ENABLED` により本番で一時停止中（#115）。詳細は[機能設計書](./docs/specification.md)の2.11節を参照。
-
 ### インストール・起動
 
 ```bash

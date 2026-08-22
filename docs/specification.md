@@ -279,18 +279,16 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 ### 2.11 Stripeサブスク決済によるアップグレード
 
-**現在の稼働状態（一時停止中・#115）**: 本サービスは現在Vercel Hobbyプラン（Fair Use Guidelinesにより個人的・非商用利用に限定）にデプロイしており、Stripeによる月額課金を有効にしたままの本番運用は規約違反となる可能性が高い。そのため本番では環境変数 `STRIPE_ENABLED` により本決済機能を一時停止している。**コードは削除せずフラグのみで無効化する**（Cloudflare Workersへのカットオーバー（#116）完了後、Cloudflare側で同じコードのまま再有効化するため）。以降の節は `STRIPE_ENABLED=true` 時の本来の設計を記述する。
+**機能フラグ（`STRIPE_ENABLED`）**: 本決済機能全体は環境変数 `STRIPE_ENABLED` で有効・無効を切り替える。判定は `isStripeEnabled()`（`app/constants/stripe.ts`）に集約し、未設定または `"true"` 以外の値は無効として扱う（フェイルクローズ）。`app/constants/stripe.ts` はStripe SDKに依存しないため、layout等の非決済系コードからも軽量に参照できる（決済系コードへは `app/services/api/stripe-server.ts` から再exportして提供する）。以降の節は有効時（`STRIPE_ENABLED=true`）の仕様を記述する。
 
-- **フラグの実体**: `isStripeEnabled()`（`app/constants/stripe.ts`）。Stripe SDKに依存しないためlayout等の非決済系コードからも軽量に参照でき、`app/services/api/stripe-server.ts` から再exportして決済系コードから使う。未設定または `"true"` 以外の値は無効として扱うフェイルクローズ
-- **無効時の挙動**:
-  - `/upgrade`: Checkout導線（お試しユーザー向け）・お支払い管理導線（一般有料会員向け）をいずれも非表示にし「現在準備中」の案内を表示
-  - `/upgrade/success`: 決済確認・会員昇格処理を一切行わず同様の案内を表示。Stripeのホスト型Checkoutセッションは作成から最大24時間有効なため、フラグOFF直前に開始されたセッションでの再訪でも昇格させないためのガード
-  - お試しユーザー向けバナー（`(authenticated)/layout.tsx`）のアップグレードボタン、およびサイドナビ（`(authenticated)/components/SideNav.tsx`）の「プラン・お支払い」項目を非表示
-  - `POST /api/stripe/{checkout,portal,webhook}`: いずれも認証・署名検証より前段で503を返す（応答メッセージは `STRIPE_DISABLED_MESSAGE` に一元化）
-- **Webhookを完全停止できる前提**: 停止時点でStripe Live契約者がゼロであることを確認済み。契約者がいる場合は本来Webhookのみ停止せずミラー同期を維持する必要があるが、今回は該当なし
-- **再開条件**: Cloudflare Workersへのカットオーバー（#116, #120）完了後、稼働先の環境変数で `STRIPE_ENABLED=true` を設定する（コード変更は不要）。あわせて以下を行う
-  - Stripeダッシュボード（Liveモード）でWebhookエンドポイントの有効性を確認する。停止中に503応答が続くと、Stripeはイベントを約3日間リトライ後に破棄し、失敗が続くとエンドポイント自体を自動無効化する（無効化前に警告メールあり）ため、再開時は無効化されていないか・新エンドポイント登録が必要かを確認する
-  - 停止期間中に破棄された可能性のあるイベント（解約等）が無いか、Stripe側の実際の契約状態と `stripe_subscriptions` ミラー・`users` の状態を突合する
+無効時の挙動は以下のとおり。
+
+| 対象 | 挙動 |
+|:--|:--|
+| `/upgrade` | Checkout導線（お試しユーザー向け）・お支払い管理導線（一般有料会員向け）をいずれも非表示にし、準備中である旨の案内を表示 |
+| `/upgrade/success` | 決済確認・会員昇格処理を一切行わず同様の案内を表示。Stripeのホスト型Checkoutセッションは作成から最大24時間有効なため、無効化の直前に開始されたセッションから再訪しても昇格させない |
+| トライアルバナー（`(authenticated)/layout.tsx`）／サイドナビ（`(authenticated)/components/SideNav.tsx`） | アップグレードボタン・「プラン・お支払い」項目を非表示 |
+| `POST /api/stripe/{checkout,portal,webhook}` | 認証・署名検証より前段で503を返す（応答メッセージは `STRIPE_DISABLED_MESSAGE` に一元化） |
 
 **対象フロー**: お試しユーザー（`status=pending`）が `/upgrade` からStripe Checkout（ホスト型）で月額サブスクリプションを契約すると、決済完了と同時に**管理者承認なし**で一般有料会員（`status=active` / `membership_type=general`）へ自動昇格する。**コミュニティ会員はスコープ外**で、従来どおり2.7節の手動承認のみを経由する。
 

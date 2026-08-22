@@ -111,7 +111,7 @@ app/
 
 **本番では `STRIPE_ENABLED` により一時停止中（#115）。コードは削除せず、フラグのみで無効化する。** フラグの実体は `isStripeEnabled()`（`app/constants/stripe.ts`）で、`"true"` 以外はフェイルクローズで無効。
 
-**設計・無効時の挙動・再開手順のすべては `docs/specification.md` 2.11節にある。決済まわりを触る前に必ず読むこと。** アプリの認可は従来どおり `users.status` / `membership_type` が唯一の真実で、`users` にStripe関連カラムは追加しない。
+**仕様（有効時の設計・無効時の挙動）は `docs/specification.md` 2.11節にある。決済まわりを触る前に必ず読むこと。** アプリの認可は従来どおり `users.status` / `membership_type` が唯一の真実で、`users` にStripe関連カラムは追加しない。停止の経緯・再開条件は仕様ではないため設計書には置かず、#115 / #120 を参照する。
 
 ### データモデル (Supabase/PostgreSQL)
 
