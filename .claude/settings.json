@@ -58,10 +58,6 @@
       "Glob",
       "Grep"
     ],
-    "deny": [
-      "Bash(rm -rf *)",
-      "Bash(git push --force *)",
-      "Bash(git push -f *)"
-    ]
+    "deny": ["Bash(rm -rf *)", "Bash(git push --force *)", "Bash(git push -f *)"]
   }
 }
