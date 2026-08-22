@@ -25,7 +25,7 @@
 
 `.claude/settings.json`（チーム共有・コミット対象）の `permissions.allow` に登録されたコマンドは、**事前確認を求めず**タスクの一部として即座に実行してよい。**許可範囲を変えるときはこのファイルを編集する**（このファイルの記述を増やしても許可は増えない）。個人用の追加設定は `.claude/settings.local.json`（gitignore済み）に置く。
 
-`git push` は allow に含めない。「ブランチ運用」のユーザー確認ルールを毎回通すため、意図的に都度確認とする。
+**allow に入れてよいのはデータ取得系のコマンドだけ。** 外部CLI（`supabase`・`vercel`）はサブコマンド単位で登録し、サーバー側を更新するもの（`supabase db push`、`vercel deploy` 等）は登録しない。`git push` も同様に含めない（「ブランチ運用」のユーザー確認ルールを毎回通すため）。
 
 ## コマンド
 
@@ -85,9 +85,10 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 
 ### Stripeサブスク決済（月額課金）
 
-**本番では `STRIPE_ENABLED` により一時停止中（#115）。コードは削除せず、フラグのみで無効化する。** フラグの実体は `isStripeEnabled()`（`app/constants/stripe.ts`）で、`"true"` 以外はフェイルクローズで無効。
+**仕様は `docs/specification.md` 2.11節にある。決済まわりを触る前に必ず読むこと。**
 
-**仕様（有効時の設計・無効時の挙動）は `docs/specification.md` 2.11節にある。決済まわりを触る前に必ず読むこと。** アプリの認可は従来どおり `users.status` / `membership_type` が唯一の真実で、`users` にStripe関連カラムは追加しない。停止の経緯・再開条件は仕様ではないため設計書には置かず、#115 / #120 を参照する。
+- 機能全体の有効・無効は環境変数 `STRIPE_ENABLED` で切り替わる。判定は `isStripeEnabled()`（`app/constants/stripe.ts`）に集約し、`"true"` 以外はフェイルクローズで無効。決済系の導線・APIを追加するときは、無効時の経路も必ず用意する。
+- アプリの認可は `users.status` / `membership_type` が唯一の真実。`users` にStripe関連カラムは追加せず、課金状態は `stripe_subscriptions` のミラーで保持する。
 
 ### データモデル (Supabase/PostgreSQL)
 
