@@ -36,7 +36,7 @@
 
 ## ブランチ運用
 
-**`main` へ直接コミット・push せず、必ず作業ブランチ（`feature/`・`bug/`・`docs/`・`refactor/`・`env/` などの接頭辞付き）を切り、PR 経由でマージする。** push 前のユーザー確認と force push 禁止は `.claude/settings.json` 側で担保しているため、ここには書かない。
+**`main` へ直接コミット・push せず、必ず作業ブランチ（`feature/`・`bug/`・`docs/`・`refactor/`・`env/` などの接頭辞付き）を切り、PR 経由でマージする。**
 
 ## プルリクエスト
 
