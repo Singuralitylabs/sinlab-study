@@ -4,64 +4,18 @@ import { cookies } from "next/headers";
 
 type SupabaseClientLike = ReturnType<typeof createClient> | ReturnType<typeof createServerClient>;
 
-class MissingSupabaseQueryBuilder {
-  select() {
-    return this;
-  }
-
-  insert() {
-    return this;
-  }
-
-  update() {
-    return this;
-  }
-
-  delete() {
-    return this;
-  }
-
-  eq() {
-    return this;
-  }
-
-  in() {
-    return this;
-  }
-
-  order() {
-    return this;
-  }
-
-  limit() {
-    return this;
-  }
-
-  single() {
-    return Promise.resolve({ data: null, error: { message: "Supabase環境変数が未設定です" } });
-  }
-
-  maybeSingle() {
-    return Promise.resolve({ data: null, error: { message: "Supabase環境変数が未設定です" } });
-  }
-}
-
-class MissingSupabaseClient {
-  from() {
-    return new MissingSupabaseQueryBuilder();
-  }
-}
-
-function createMissingSupabaseClient() {
-  return new MissingSupabaseClient();
-}
-
 // サーバーサイド用Supabaseクライアント（認証付き）
 export async function createServerSupabaseClient(): Promise<SupabaseClientLike> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) {
-    return createMissingSupabaseClient();
+    const missing = [
+      !url && "NEXT_PUBLIC_SUPABASE_URL",
+      !key && "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    throw new Error(`Supabase環境変数が未設定です: ${missing}`);
   }
   const cookieStore = await cookies();
 
@@ -90,7 +44,7 @@ export async function createAdminSupabaseClient(): Promise<SupabaseClientLike> {
   if (serviceRoleKey) {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!url) {
-      return createMissingSupabaseClient();
+      throw new Error("Supabase環境変数が未設定です: NEXT_PUBLIC_SUPABASE_URL");
     }
     return createClient(url, serviceRoleKey);
   }
