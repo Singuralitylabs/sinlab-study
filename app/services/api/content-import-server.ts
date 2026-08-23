@@ -20,21 +20,57 @@ export async function importBulkContents(rows: BulkImportRow[]): Promise<{
   const weekCache = new Map<string, number>();
   const weekDisplayOrderCounter = new Map<number, number>();
 
-  const rollback = async () => {
+  // ロールバック対象ごとに update の成否を確認し、失敗した対象のラベルを返す。
+  const rollback = async (): Promise<string[]> => {
+    const failedTargets: string[] = [];
+
     if (createdContentIds.length > 0) {
-      await supabase
+      const { error } = await supabase
         .from("learning_contents")
         .update({ is_deleted: true })
         .in("id", createdContentIds);
+      if (error) {
+        failedTargets.push(`コンテンツ（ID: ${createdContentIds.join(", ")}）`);
+      }
     }
     if (createdWeekIds.length > 0) {
-      await supabase.from("learning_weeks").update({ is_deleted: true }).in("id", createdWeekIds);
+      const { error } = await supabase
+        .from("learning_weeks")
+        .update({ is_deleted: true })
+        .in("id", createdWeekIds);
+      if (error) {
+        failedTargets.push(`週（ID: ${createdWeekIds.join(", ")}）`);
+      }
     }
     if (createdPhaseIds.length > 0) {
-      await supabase.from("learning_phases").update({ is_deleted: true }).in("id", createdPhaseIds);
+      const { error } = await supabase
+        .from("learning_phases")
+        .update({ is_deleted: true })
+        .in("id", createdPhaseIds);
+      if (error) {
+        failedTargets.push(`フェーズ（ID: ${createdPhaseIds.join(", ")}）`);
+      }
     }
     if (createdThemeIds.length > 0) {
-      await supabase.from("learning_themes").update({ is_deleted: true }).in("id", createdThemeIds);
+      const { error } = await supabase
+        .from("learning_themes")
+        .update({ is_deleted: true })
+        .in("id", createdThemeIds);
+      if (error) {
+        failedTargets.push(`テーマ（ID: ${createdThemeIds.join(", ")}）`);
+      }
+    }
+
+    return failedTargets;
+  };
+
+  // rollback() を実行し、一部でも失敗していれば errors に管理者向けの警告を積む。
+  const rollbackAndReportFailures = async () => {
+    const failedTargets = await rollback();
+    if (failedTargets.length > 0) {
+      const message = `ロールバックに失敗し、一部データが削除されずに残っている可能性があります。手動確認をお願いします: ${failedTargets.join(", ")}`;
+      console.error("一括取り込みロールバック失敗:", failedTargets);
+      errors.push(message);
     }
   };
 
@@ -195,7 +231,7 @@ export async function importBulkContents(rows: BulkImportRow[]): Promise<{
       }
       if (existingContent?.id) {
         errors.push(`行 ${rowNumber}: 既に同じタイトルのコンテンツが存在します`);
-        await rollback();
+        await rollbackAndReportFailures();
         return { success: false, createdCount: 0, errors };
       }
 
@@ -249,7 +285,7 @@ export async function importBulkContents(rows: BulkImportRow[]): Promise<{
 
       if (createContentError || !newContent?.id) {
         errors.push(`行 ${rowNumber}: コンテンツの作成に失敗しました`);
-        await rollback();
+        await rollbackAndReportFailures();
         return { success: false, createdCount: 0, errors };
       }
 
@@ -264,7 +300,7 @@ export async function importBulkContents(rows: BulkImportRow[]): Promise<{
   } catch (error) {
     const message = error instanceof Error ? error.message : "不明なエラー";
     errors.push(message);
-    await rollback();
+    await rollbackAndReportFailures();
     return { success: false, createdCount: 0, errors };
   }
 }

@@ -3,6 +3,7 @@
 import { FileSpreadsheet, Loader2, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { MAX_BULK_IMPORT_ROWS } from "@/app/lib/bulk-content-import";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -65,6 +66,7 @@ export function UploadForm() {
               <li>テーマ・フェーズ・週名を指定すると自動で階層を作成します</li>
               <li>動画・テキスト・演習の3種に対応します</li>
               <li>取り込みは全件成功時のみ反映され、失敗時はロールバックされます</li>
+              <li>1回のアップロードは{MAX_BULK_IMPORT_ROWS}行までです</li>
             </ul>
           </div>
 

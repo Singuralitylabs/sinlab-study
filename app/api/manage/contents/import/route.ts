@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
 import {
   decodeCsvBuffer,
+  MAX_BULK_IMPORT_ROWS,
   parseBulkImportCsv,
   validateBulkImportRows,
 } from "@/app/lib/bulk-content-import";
@@ -37,6 +38,15 @@ export async function POST(request: NextRequest) {
       const first = parseErrors[0];
       return NextResponse.json(
         { error: `行 ${first.rowNumber}: ${first.message}` },
+        { status: 400 }
+      );
+    }
+
+    if (rows.length > MAX_BULK_IMPORT_ROWS) {
+      return NextResponse.json(
+        {
+          error: `CSVの行数が上限（${MAX_BULK_IMPORT_ROWS}行）を超えています（${rows.length}行）。分割してアップロードしてください`,
+        },
         { status: 400 }
       );
     }

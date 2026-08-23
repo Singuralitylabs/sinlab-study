@@ -28,6 +28,15 @@ type BulkImportParseResult = {
   errors: BulkImportError[];
 };
 
+/**
+ * 1回のインポートで受け付けるCSVの最大行数（ヘッダー行を除く）。
+ * 現状の実装は1行ごとに複数回Supabaseへ通信するため、行数が多いと
+ * Vercel Hobbyプランの関数タイムアウト（10秒）に抵触し、ロールバックが
+ * 実行されないまま処理が打ち切られるおそれがある。通信をバッチ化する
+ * までの暫定的な安全策として保守的な値にしている。
+ */
+export const MAX_BULK_IMPORT_ROWS = 20;
+
 const VALID_CONTENT_TYPES = ["video", "text", "exercise"] as const;
 const VALID_ALLOWED_SUBMISSION_TYPES = ["code", "url", "both"] as const;
 const VALID_CODE_LANGUAGES = ["javascript", "typescript", "html", "css"] as const;
