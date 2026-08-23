@@ -1,5 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { parseBulkImportCsv, validateBulkImportRows } from "@/app/lib/bulk-content-import";
+import {
+  decodeCsvBuffer,
+  parseBulkImportCsv,
+  validateBulkImportRows,
+} from "@/app/lib/bulk-content-import";
+
+describe("decodeCsvBuffer", () => {
+  it("UTF-8 の CSV を正しくデコードできる", () => {
+    const text = "テーマ名,フェーズ名\n日本語コンテンツ,テスト";
+    const buffer = new TextEncoder().encode(text).buffer;
+
+    expect(decodeCsvBuffer(buffer)).toBe(text);
+  });
+
+  it("Shift-JIS の CSV を正しくデコードできる", () => {
+    const text = "テーマ名,フェーズ名\n日本語コンテンツ,テスト";
+    // 上記文字列を Shift-JIS でエンコードしたバイト列（Python の str.encode("shift_jis") で算出）
+    const shiftJisBytes = new Uint8Array([
+      131, 101, 129, 91, 131, 125, 150, 188, 44, 131, 116, 131, 70, 129, 91, 131, 89, 150, 188, 10,
+      147, 250, 150, 123, 140, 234, 131, 82, 131, 147, 131, 101, 131, 147, 131, 99, 44, 131, 101,
+      131, 88, 131, 103,
+    ]);
+
+    expect(decodeCsvBuffer(shiftJisBytes.buffer)).toBe(text);
+  });
+});
 
 describe("parseBulkImportCsv", () => {
   it("CSV のヘッダーと値を正しくパースできる", () => {

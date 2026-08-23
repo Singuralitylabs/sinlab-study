@@ -1,6 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
-import { parseBulkImportCsv, validateBulkImportRows } from "@/app/lib/bulk-content-import";
+import {
+  decodeCsvBuffer,
+  parseBulkImportCsv,
+  validateBulkImportRows,
+} from "@/app/lib/bulk-content-import";
 import { importBulkContents } from "@/app/services/api/content-import-server";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -27,7 +31,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "CSVファイルが見つかりません" }, { status: 400 });
     }
 
-    const csvText = await file.text();
+    const csvText = decodeCsvBuffer(await file.arrayBuffer());
     const { rows, errors: parseErrors } = parseBulkImportCsv(csvText);
     if (parseErrors.length > 0) {
       return NextResponse.json({ error: parseErrors[0].message }, { status: 400 });

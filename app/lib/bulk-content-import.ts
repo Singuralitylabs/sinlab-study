@@ -87,6 +87,19 @@ function parseCsvLine(line: string): string[] {
   return result.map((value) => value.trim());
 }
 
+/**
+ * CSVファイルのバイナリをテキストへデコードする。
+ * UTF-8として厳密デコードを試み、不正なバイト列（Shift-JIS等）であれば
+ * Shift-JISとしてデコードし直すことで、文字コードを自動判定する。
+ */
+export function decodeCsvBuffer(buffer: ArrayBuffer): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    return new TextDecoder("shift_jis").decode(buffer);
+  }
+}
+
 export function parseBulkImportCsv(csvText: string): BulkImportParseResult {
   const lines = csvText
     .split(/\r?\n/)
