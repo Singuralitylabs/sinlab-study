@@ -34,12 +34,20 @@ export async function POST(request: NextRequest) {
     const csvText = decodeCsvBuffer(await file.arrayBuffer());
     const { rows, errors: parseErrors } = parseBulkImportCsv(csvText);
     if (parseErrors.length > 0) {
-      return NextResponse.json({ error: parseErrors[0].message }, { status: 400 });
+      const first = parseErrors[0];
+      return NextResponse.json(
+        { error: `行 ${first.rowNumber}: ${first.message}` },
+        { status: 400 }
+      );
     }
 
     const { validRows, errors: validationErrors } = validateBulkImportRows(rows);
     if (validationErrors.length > 0) {
-      return NextResponse.json({ error: validationErrors[0].message }, { status: 400 });
+      const first = validationErrors[0];
+      return NextResponse.json(
+        { error: `行 ${first.rowNumber}: ${first.message}` },
+        { status: 400 }
+      );
     }
 
     const result = await importBulkContents(validRows);
