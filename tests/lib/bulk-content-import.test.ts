@@ -54,6 +54,45 @@ Example Theme,Phase 1,Week 1,"Hello, world",text,"This is a long text"`;
     expect(result.rows[0].title).toBe("Hello, world");
     expect(result.rows[0].text_content).toBe("This is a long text");
   });
+
+  it("引用符内に改行を含む複数行 Markdown を1つのフィールドとして保持できる", () => {
+    const csv = [
+      "theme_name,phase_name,week_name,title,content_type,text_content",
+      'Example Theme,Phase 1,Week 1,Markdown content,text,"# 見出し\n\n本文1行目\n本文2行目"',
+      "Example Theme,Phase 1,Week 1,Next row,text,plain",
+    ].join("\n");
+
+    const result = parseBulkImportCsv(csv);
+
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[0].text_content).toBe("# 見出し\n\n本文1行目\n本文2行目");
+    expect(result.rows[1].title).toBe("Next row");
+  });
+
+  it("引用符内の CRLF 改行を LF に正規化して保持できる", () => {
+    const csv = [
+      "theme_name,phase_name,week_name,title,content_type,text_content",
+      'Example Theme,Phase 1,Week 1,CRLF content,text,"1行目\r\n2行目"',
+    ].join("\r\n");
+
+    const result = parseBulkImportCsv(csv);
+
+    expect(result.rows[0].text_content).toBe("1行目\n2行目");
+  });
+
+  it("完全な空行は無視する", () => {
+    const csv = [
+      "theme_name,phase_name,week_name,title,content_type,text_content",
+      "",
+      "Example Theme,Phase 1,Week 1,Row 1,text,plain",
+      "",
+    ].join("\n");
+
+    const result = parseBulkImportCsv(csv);
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].title).toBe("Row 1");
+  });
 });
 
 describe("validateBulkImportRows", () => {

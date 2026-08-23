@@ -56,35 +56,84 @@ function parseCsvNumber(value: string | undefined): number | undefined {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-function parseCsvLine(line: string): string[] {
-  const result: string[] = [];
-  let current = "";
+/**
+ * CSV全体を1回で走査してレコード（行×フィールド）に分解する。
+ * text_content 等は複数行のMarkdownを想定しているため、改行で先に行分割せず、
+ * 引用符の中かどうかを見ながら走査することで、引用符内の改行をフィールドの
+ * 値としてそのまま保持する（=改行を含む本文が途中で分裂しない）。
+ * 完全な空行（フィールドが1つだけで空文字）はレコードから除外する。
+ */
+function parseCsvRecords(csvText: string): string[][] {
+  const records: string[][] = [];
+  let record: string[] = [];
+  let field = "";
   let inQuotes = false;
+  let i = 0;
 
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
+  const endField = () => {
+    record.push(field.trim());
+    field = "";
+  };
+  const endRecord = () => {
+    endField();
+    records.push(record);
+    record = [];
+  };
+
+  while (i < csvText.length) {
+    const char = csvText[i];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (csvText[i + 1] === '"') {
+          field += '"';
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
+        i += 1;
+        continue;
+      }
+      // 引用符内の CRLF は LF に正規化して保持する
+      if (char === "\r" && csvText[i + 1] === "\n") {
+        i += 1;
+        continue;
+      }
+      field += char;
+      i += 1;
+      continue;
+    }
 
     if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
+      inQuotes = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === ",") {
+      endField();
+      i += 1;
+      continue;
+    }
+
+    if (char === "\r" || char === "\n") {
+      if (char === "\r" && csvText[i + 1] === "\n") {
         i += 1;
-      } else {
-        inQuotes = !inQuotes;
       }
+      endRecord();
+      i += 1;
       continue;
     }
 
-    if (char === "," && !inQuotes) {
-      result.push(current);
-      current = "";
-      continue;
-    }
-
-    current += char;
+    field += char;
+    i += 1;
   }
 
-  result.push(current);
-  return result.map((value) => value.trim());
+  if (field.length > 0 || record.length > 0) {
+    endRecord();
+  }
+
+  return records.filter((r) => !(r.length === 1 && r[0] === ""));
 }
 
 /**
@@ -101,18 +150,14 @@ export function decodeCsvBuffer(buffer: ArrayBuffer): string {
 }
 
 export function parseBulkImportCsv(csvText: string): BulkImportParseResult {
-  const lines = csvText
-    .split(/\r?\n/)
-    .map((line) => line.trimEnd())
-    .filter((line) => line.length > 0);
+  const records = parseCsvRecords(csvText);
 
-  if (lines.length === 0) {
+  if (records.length === 0) {
     return { rows: [], errors: [] };
   }
 
-  const headers = parseCsvLine(lines[0]);
-  const rows = lines.slice(1).map((line, _index) => {
-    const values = parseCsvLine(line);
+  const headers = records[0];
+  const rows = records.slice(1).map((values) => {
     const row: Record<string, string> = {};
 
     headers.forEach((header, headerIndex) => {
