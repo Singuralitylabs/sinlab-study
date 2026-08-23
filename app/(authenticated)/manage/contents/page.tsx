@@ -8,6 +8,7 @@ import {
   Plus,
   Presentation,
   Trash2,
+  Upload,
 } from "lucide-react";
 import Link from "next/link";
 import { PageTitle } from "@/app/components/PageTitle";
@@ -62,12 +63,20 @@ export default async function AdminContentsPage() {
     <div className="max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <PageTitle title="コンテンツ管理" description="学習コンテンツの作成・編集・削除" />
-        <Button asChild>
-          <Link href="/manage/contents/new">
-            <Plus className="h-4 w-4" />
-            新規作成
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline">
+            <Link href="/manage/contents/import">
+              <Upload className="h-4 w-4" />
+              CSV一括取り込み
+            </Link>
+          </Button>
+          <Button asChild>
+            <Link href="/manage/contents/new">
+              <Plus className="h-4 w-4" />
+              新規作成
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {!contents || contents.length === 0 ? (

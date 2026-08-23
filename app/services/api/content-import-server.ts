@@ -1,0 +1,405 @@
+import type { PostgrestError } from "@supabase/supabase-js";
+import type { BulkImportRow } from "@/app/lib/bulk-content-import";
+import { createAdminSupabaseClient } from "./supabase-server";
+
+export async function importBulkContents(rows: BulkImportRow[]): Promise<{
+  success: boolean;
+  createdCount: number;
+  errors: string[];
+}> {
+  const supabase = await createAdminSupabaseClient();
+
+  const createdThemeIds: number[] = [];
+  const createdPhaseIds: number[] = [];
+  const createdWeekIds: number[] = [];
+  const createdContentIds: number[] = [];
+  const errors: string[] = [];
+
+  const themeCache = new Map<string, number>();
+  const phaseCache = new Map<string, number>();
+  const weekCache = new Map<string, number>();
+
+  // 新規作成する行の並び順は、既存の兄弟データの最大display_order+1から
+  // 採番する（CSVの行順に連番で増える）。スコープ内で最初に必要になった
+  // タイミングでDBから最大値を1回だけ取得し、以降はメモリ上でカウントする。
+  // Supabaseクライアントがテーブル型定義を持たないため、display_orderの
+  // クエリ結果は any になる。?? による解決は any の場合ナローイングが
+  // 期待通り効かないため、typeof ガードで number であることを明示する。
+  const toDisplayOrder = (value: unknown): number => (typeof value === "number" ? value : 0);
+
+  let nextThemeOrder: number | null = null;
+  const getNextThemeOrder = async (): Promise<number> => {
+    let current = nextThemeOrder;
+    if (current === null) {
+      const { data, error } = await supabase
+        .from("learning_themes")
+        .select("display_order")
+        .eq("is_deleted", false)
+        .not("display_order", "is", null)
+        .order("display_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        throw error;
+      }
+      current = toDisplayOrder(data?.display_order);
+    }
+    current += 1;
+    nextThemeOrder = current;
+    return current;
+  };
+
+  const nextPhaseOrderByTheme = new Map<number, number>();
+  const getNextPhaseOrder = async (themeId: number): Promise<number> => {
+    let current = nextPhaseOrderByTheme.get(themeId);
+    if (current === undefined) {
+      const { data, error } = await supabase
+        .from("learning_phases")
+        .select("display_order")
+        .eq("theme_id", themeId)
+        .eq("is_deleted", false)
+        .not("display_order", "is", null)
+        .order("display_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        throw error;
+      }
+      current = toDisplayOrder(data?.display_order);
+    }
+    current += 1;
+    nextPhaseOrderByTheme.set(themeId, current);
+    return current;
+  };
+
+  const nextWeekOrderByPhase = new Map<number, number>();
+  const getNextWeekOrder = async (phaseId: number): Promise<number> => {
+    let current = nextWeekOrderByPhase.get(phaseId);
+    if (current === undefined) {
+      const { data, error } = await supabase
+        .from("learning_weeks")
+        .select("display_order")
+        .eq("phase_id", phaseId)
+        .eq("is_deleted", false)
+        .not("display_order", "is", null)
+        .order("display_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        throw error;
+      }
+      current = toDisplayOrder(data?.display_order);
+    }
+    current += 1;
+    nextWeekOrderByPhase.set(phaseId, current);
+    return current;
+  };
+
+  const nextContentOrderByWeek = new Map<number, number>();
+  const getNextContentOrder = async (weekId: number): Promise<number> => {
+    let current = nextContentOrderByWeek.get(weekId);
+    if (current === undefined) {
+      const { data, error } = await supabase
+        .from("learning_contents")
+        .select("display_order")
+        .eq("week_id", weekId)
+        .eq("is_deleted", false)
+        .not("display_order", "is", null)
+        .order("display_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        throw error;
+      }
+      current = toDisplayOrder(data?.display_order);
+    }
+    current += 1;
+    nextContentOrderByWeek.set(weekId, current);
+    return current;
+  };
+
+  // ロールバック対象ごとに update の成否を確認し、失敗した対象のラベルを返す。
+  const rollback = async (): Promise<string[]> => {
+    const failedTargets: string[] = [];
+
+    if (createdContentIds.length > 0) {
+      const { error } = await supabase
+        .from("learning_contents")
+        .update({ is_deleted: true })
+        .in("id", createdContentIds);
+      if (error) {
+        failedTargets.push(`コンテンツ（ID: ${createdContentIds.join(", ")}）`);
+      }
+    }
+    if (createdWeekIds.length > 0) {
+      const { error } = await supabase
+        .from("learning_weeks")
+        .update({ is_deleted: true })
+        .in("id", createdWeekIds);
+      if (error) {
+        failedTargets.push(`週（ID: ${createdWeekIds.join(", ")}）`);
+      }
+    }
+    if (createdPhaseIds.length > 0) {
+      const { error } = await supabase
+        .from("learning_phases")
+        .update({ is_deleted: true })
+        .in("id", createdPhaseIds);
+      if (error) {
+        failedTargets.push(`フェーズ（ID: ${createdPhaseIds.join(", ")}）`);
+      }
+    }
+    if (createdThemeIds.length > 0) {
+      const { error } = await supabase
+        .from("learning_themes")
+        .update({ is_deleted: true })
+        .in("id", createdThemeIds);
+      if (error) {
+        failedTargets.push(`テーマ（ID: ${createdThemeIds.join(", ")}）`);
+      }
+    }
+
+    return failedTargets;
+  };
+
+  // rollback() を実行し、一部でも失敗していれば errors に管理者向けの警告を積む。
+  const rollbackAndReportFailures = async () => {
+    const failedTargets = await rollback();
+    if (failedTargets.length > 0) {
+      const message = `ロールバックに失敗し、一部データが削除されずに残っている可能性があります。手動確認をお願いします: ${failedTargets.join(", ")}`;
+      console.error("一括取り込みロールバック失敗:", failedTargets);
+      errors.push(message);
+    }
+  };
+
+  const findOrCreateTheme = async (name: string, description?: string) => {
+    const normalizedName = name.trim();
+    const cached = themeCache.get(normalizedName);
+    if (cached) {
+      return cached;
+    }
+
+    const { data: existingTheme, error: themeError } = await supabase
+      .from("learning_themes")
+      .select("id")
+      .eq("name", normalizedName)
+      .eq("is_deleted", false)
+      .maybeSingle();
+
+    if (themeError) {
+      throw themeError;
+    }
+
+    if (existingTheme?.id) {
+      themeCache.set(normalizedName, existingTheme.id);
+      return existingTheme.id;
+    }
+
+    const { data: newTheme, error: createThemeError } = await supabase
+      .from("learning_themes")
+      .insert({
+        name: normalizedName,
+        description: description?.trim() || null,
+        display_order: await getNextThemeOrder(),
+        is_published: false,
+      })
+      .select("id")
+      .single();
+
+    if (createThemeError || !newTheme?.id) {
+      throw createThemeError ?? new Error("テーマの作成に失敗しました");
+    }
+
+    createdThemeIds.push(newTheme.id);
+    themeCache.set(normalizedName, newTheme.id);
+    return newTheme.id;
+  };
+
+  const findOrCreatePhase = async (themeId: number, name: string, description?: string) => {
+    const normalizedName = name.trim();
+    const cacheKey = `${themeId}:${normalizedName}`;
+    const cached = phaseCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const { data: existingPhase, error: phaseError } = await supabase
+      .from("learning_phases")
+      .select("id")
+      .eq("theme_id", themeId)
+      .eq("name", normalizedName)
+      .eq("is_deleted", false)
+      .maybeSingle();
+
+    if (phaseError) {
+      throw phaseError;
+    }
+
+    if (existingPhase?.id) {
+      phaseCache.set(cacheKey, existingPhase.id);
+      return existingPhase.id;
+    }
+
+    const { data: newPhase, error: createPhaseError } = await supabase
+      .from("learning_phases")
+      .insert({
+        theme_id: themeId,
+        name: normalizedName,
+        description: description?.trim() || null,
+        display_order: await getNextPhaseOrder(themeId),
+        is_published: false,
+      })
+      .select("id")
+      .single();
+
+    if (createPhaseError || !newPhase?.id) {
+      throw createPhaseError ?? new Error("フェーズの作成に失敗しました");
+    }
+
+    createdPhaseIds.push(newPhase.id);
+    phaseCache.set(cacheKey, newPhase.id);
+    return newPhase.id;
+  };
+
+  const findOrCreateWeek = async (phaseId: number, name: string, description?: string) => {
+    const normalizedName = name.trim();
+    const cacheKey = `${phaseId}:${normalizedName}`;
+    const cached = weekCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const { data: existingWeek, error: weekError } = await supabase
+      .from("learning_weeks")
+      .select("id")
+      .eq("phase_id", phaseId)
+      .eq("name", normalizedName)
+      .eq("is_deleted", false)
+      .maybeSingle();
+
+    if (weekError) {
+      throw weekError;
+    }
+
+    if (existingWeek?.id) {
+      weekCache.set(cacheKey, existingWeek.id);
+      return existingWeek.id;
+    }
+
+    const { data: newWeek, error: createWeekError } = await supabase
+      .from("learning_weeks")
+      .insert({
+        phase_id: phaseId,
+        name: normalizedName,
+        description: description?.trim() || null,
+        display_order: await getNextWeekOrder(phaseId),
+        is_published: false,
+      })
+      .select("id")
+      .single();
+
+    if (createWeekError || !newWeek?.id) {
+      throw createWeekError ?? new Error("週の作成に失敗しました");
+    }
+
+    createdWeekIds.push(newWeek.id);
+    weekCache.set(cacheKey, newWeek.id);
+    return newWeek.id;
+  };
+
+  try {
+    for (const [index, row] of rows.entries()) {
+      const rowNumber = index + 2;
+      const normalizedTitle = row.title.trim();
+
+      const themeId = await findOrCreateTheme(row.theme_name, row.theme_description);
+      const phaseId = await findOrCreatePhase(themeId, row.phase_name, row.phase_description);
+      const weekId = await findOrCreateWeek(phaseId, row.week_name, row.week_description);
+
+      const { data: existingContent, error: existingContentError } = await supabase
+        .from("learning_contents")
+        .select("id")
+        .eq("week_id", weekId)
+        .eq("title", normalizedTitle)
+        .eq("is_deleted", false)
+        .maybeSingle();
+
+      if (existingContentError) {
+        throw existingContentError;
+      }
+      if (existingContent?.id) {
+        errors.push(`行 ${rowNumber}: 既に同じタイトルのコンテンツが存在します`);
+        await rollbackAndReportFailures();
+        return { success: false, createdCount: 0, errors };
+      }
+
+      const baseOrder = row.display_order ?? undefined;
+      const nextOrder = await getNextContentOrder(weekId);
+      const displayOrder = baseOrder ?? nextOrder;
+
+      const contentPayload = {
+        week_id: weekId,
+        title: normalizedTitle,
+        content_type: row.content_type.trim().toLowerCase(),
+        video_url:
+          row.content_type.trim().toLowerCase() === "video" ? row.video_url?.trim() || null : null,
+        text_content:
+          row.content_type.trim().toLowerCase() === "text"
+            ? row.text_content?.trim() || null
+            : null,
+        exercise_instructions:
+          row.content_type.trim().toLowerCase() === "exercise"
+            ? row.exercise_instructions?.trim() || null
+            : null,
+        reference_answer:
+          row.content_type.trim().toLowerCase() === "exercise"
+            ? row.reference_answer?.trim() || null
+            : null,
+        hint:
+          row.content_type.trim().toLowerCase() === "exercise" ? row.hint?.trim() || null : null,
+        allowed_submission_types:
+          row.content_type.trim().toLowerCase() === "exercise"
+            ? (row.allowed_submission_types?.trim().toLowerCase() as "code" | "url" | "both") ||
+              "code"
+            : "code",
+        code_language:
+          row.content_type.trim().toLowerCase() === "exercise"
+            ? (row.code_language?.trim().toLowerCase() as
+                | "javascript"
+                | "typescript"
+                | "html"
+                | "css") || "javascript"
+            : "javascript",
+        display_order: displayOrder,
+        is_published: row.is_published ?? false,
+      };
+
+      const { data: newContent, error: createContentError } = await supabase
+        .from("learning_contents")
+        .insert(contentPayload)
+        .select("id")
+        .single();
+
+      if (createContentError || !newContent?.id) {
+        errors.push(`行 ${rowNumber}: コンテンツの作成に失敗しました`);
+        await rollbackAndReportFailures();
+        return { success: false, createdCount: 0, errors };
+      }
+
+      createdContentIds.push(newContent.id);
+    }
+
+    return {
+      success: true,
+      createdCount: createdContentIds.length,
+      errors: [],
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "不明なエラー";
+    errors.push(message);
+    await rollbackAndReportFailures();
+    return { success: false, createdCount: 0, errors };
+  }
+}
+
+export type { PostgrestError };

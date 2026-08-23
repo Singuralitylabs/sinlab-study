@@ -330,7 +330,8 @@ export async function fetchWeeksWithContentsByPhaseId(phaseId: number): Promise<
     return { data: null, error };
   }
 
-  const weekIds = (weeks ?? []).map((week) => week.id);
+  const weekList: LearningWeek[] = weeks ?? [];
+  const weekIds = weekList.map((week) => week.id);
   const { data: contents, error: contentsError } =
     await fetchContentVisibilitySummariesByWeekIds(weekIds);
 
@@ -345,7 +346,7 @@ export async function fetchWeeksWithContentsByPhaseId(phaseId: number): Promise<
     contentsByWeekId.set(content.week_id, list);
   }
 
-  const data = (weeks ?? []).map((week) => ({
+  const data = weekList.map((week) => ({
     ...week,
     contents: contentsByWeekId.get(week.id) ?? [],
   }));
