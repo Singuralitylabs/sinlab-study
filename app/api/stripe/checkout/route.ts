@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server";
-import { STRIPE_DISABLED_MESSAGE } from "@/app/constants/stripe";
+import {
+  isChargeableSubscriptionPrice,
+  logDisplayPriceDrift,
+  STRIPE_DISABLED_MESSAGE,
+  SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
+  type SubscriptionPrice,
+} from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import {
   createCheckoutSession,
+  fetchSubscriptionPrice,
   isStripeEnabled,
   TERMINAL_SUBSCRIPTION_STATUSES,
 } from "@/app/services/api/stripe-server";
@@ -46,6 +53,19 @@ export async function POST() {
         { status: 409 }
       );
     }
+
+    // UIの disabled だけでは古いタブ・直接POSTを防げないため、作成直前にも実額を確認する
+    let price: SubscriptionPrice;
+    try {
+      price = await fetchSubscriptionPrice();
+    } catch (error) {
+      console.error("料金情報取得エラー:", error);
+      return NextResponse.json({ error: SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE }, { status: 503 });
+    }
+    if (!isChargeableSubscriptionPrice(price)) {
+      return NextResponse.json({ error: SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE }, { status: 503 });
+    }
+    logDisplayPriceDrift(price.amount);
 
     // 解約済み等で終端状態の行が残っている場合、以前作成済みのCustomerを再利用する
     // （毎回新規Customerを作らないことで、保存済みカード・請求履歴の孤児化を防ぐ）

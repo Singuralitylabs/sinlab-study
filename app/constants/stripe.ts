@@ -4,6 +4,44 @@ export const BILLING_ANCHOR_DAY_OF_MONTH = 27;
 export const BILLING_ANCHOR_HOUR_UTC = 0;
 
 /**
+ * 法務部指示（#134）の表示用月額料金（JPY・税込）。`/upgrade` の料金表示は
+ * `fetchSubscriptionPrice()` による Stripe Price の動的取得を正とするが、
+ * 取得失敗時にも法定表示が消えないよう、この定数をフォールバックに使う。
+ */
+export const DISPLAY_MONTHLY_PRICE_JPY = 1500;
+
+/** `/upgrade` と Customer Portal 導線で共有する解約・支払い管理ボタンのラベル */
+export const MANAGE_SUBSCRIPTION_BUTTON_LABEL = "お支払い情報の管理・解約";
+
+/** 実請求額を確認できないときに画面・Checkout API で共有する案内 */
+export const SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE =
+  "料金を確認できないため、現在お申し込みを受け付けできません";
+
+export type SubscriptionPrice = {
+  amount: number | null;
+  currency: string;
+};
+
+/**
+ * Checkout を許可してよい月額JPY料金か。非月額（`amount: null`）と非JPYは、
+ * 法定表示（税込円額）と実請求が食い違うため拒否する。
+ */
+export function isChargeableSubscriptionPrice(
+  price: SubscriptionPrice
+): price is { amount: number; currency: string } {
+  return price.amount !== null && price.currency.toLowerCase() === "jpy";
+}
+
+/** 取得できた実額と法定表示フォールバックの乖離をログに残す（Checkout は実額を正とする） */
+export function logDisplayPriceDrift(amount: number): void {
+  if (amount !== DISPLAY_MONTHLY_PRICE_JPY) {
+    console.error(
+      `Stripe Price(${amount}) が DISPLAY_MONTHLY_PRICE_JPY(${DISPLAY_MONTHLY_PRICE_JPY}) と異なります`
+    );
+  }
+}
+
+/**
  * Stripeの最低請求額（JPY）。この金額を下回る請求はCheckout作成・決済が失敗しうるため、
  * アンカー直前に登録した場合の初回日割り額がこれを下回るかどうかの判定に用いる。
  */
