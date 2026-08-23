@@ -18,7 +18,105 @@ export async function importBulkContents(rows: BulkImportRow[]): Promise<{
   const themeCache = new Map<string, number>();
   const phaseCache = new Map<string, number>();
   const weekCache = new Map<string, number>();
-  const weekDisplayOrderCounter = new Map<number, number>();
+
+  // 新規作成する行の並び順は、既存の兄弟データの最大display_order+1から
+  // 採番する（CSVの行順に連番で増える）。スコープ内で最初に必要になった
+  // タイミングでDBから最大値を1回だけ取得し、以降はメモリ上でカウントする。
+  // Supabaseクライアントがテーブル型定義を持たないため、display_orderの
+  // クエリ結果は any になる。?? による解決は any の場合ナローイングが
+  // 期待通り効かないため、typeof ガードで number であることを明示する。
+  const toDisplayOrder = (value: unknown): number => (typeof value === "number" ? value : 0);
+
+  let nextThemeOrder: number | null = null;
+  const getNextThemeOrder = async (): Promise<number> => {
+    let current = nextThemeOrder;
+    if (current === null) {
+      const { data, error } = await supabase
+        .from("learning_themes")
+        .select("display_order")
+        .eq("is_deleted", false)
+        .not("display_order", "is", null)
+        .order("display_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        throw error;
+      }
+      current = toDisplayOrder(data?.display_order);
+    }
+    current += 1;
+    nextThemeOrder = current;
+    return current;
+  };
+
+  const nextPhaseOrderByTheme = new Map<number, number>();
+  const getNextPhaseOrder = async (themeId: number): Promise<number> => {
+    let current = nextPhaseOrderByTheme.get(themeId);
+    if (current === undefined) {
+      const { data, error } = await supabase
+        .from("learning_phases")
+        .select("display_order")
+        .eq("theme_id", themeId)
+        .eq("is_deleted", false)
+        .not("display_order", "is", null)
+        .order("display_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        throw error;
+      }
+      current = toDisplayOrder(data?.display_order);
+    }
+    current += 1;
+    nextPhaseOrderByTheme.set(themeId, current);
+    return current;
+  };
+
+  const nextWeekOrderByPhase = new Map<number, number>();
+  const getNextWeekOrder = async (phaseId: number): Promise<number> => {
+    let current = nextWeekOrderByPhase.get(phaseId);
+    if (current === undefined) {
+      const { data, error } = await supabase
+        .from("learning_weeks")
+        .select("display_order")
+        .eq("phase_id", phaseId)
+        .eq("is_deleted", false)
+        .not("display_order", "is", null)
+        .order("display_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        throw error;
+      }
+      current = toDisplayOrder(data?.display_order);
+    }
+    current += 1;
+    nextWeekOrderByPhase.set(phaseId, current);
+    return current;
+  };
+
+  const nextContentOrderByWeek = new Map<number, number>();
+  const getNextContentOrder = async (weekId: number): Promise<number> => {
+    let current = nextContentOrderByWeek.get(weekId);
+    if (current === undefined) {
+      const { data, error } = await supabase
+        .from("learning_contents")
+        .select("display_order")
+        .eq("week_id", weekId)
+        .eq("is_deleted", false)
+        .not("display_order", "is", null)
+        .order("display_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        throw error;
+      }
+      current = toDisplayOrder(data?.display_order);
+    }
+    current += 1;
+    nextContentOrderByWeek.set(weekId, current);
+    return current;
+  };
 
   // ロールバック対象ごとに update の成否を確認し、失敗した対象のラベルを返す。
   const rollback = async (): Promise<string[]> => {
@@ -102,7 +200,7 @@ export async function importBulkContents(rows: BulkImportRow[]): Promise<{
       .insert({
         name: normalizedName,
         description: description?.trim() || null,
-        display_order: 0,
+        display_order: await getNextThemeOrder(),
         is_published: false,
       })
       .select("id")
@@ -148,7 +246,7 @@ export async function importBulkContents(rows: BulkImportRow[]): Promise<{
         theme_id: themeId,
         name: normalizedName,
         description: description?.trim() || null,
-        display_order: 0,
+        display_order: await getNextPhaseOrder(themeId),
         is_published: false,
       })
       .select("id")
@@ -194,7 +292,7 @@ export async function importBulkContents(rows: BulkImportRow[]): Promise<{
         phase_id: phaseId,
         name: normalizedName,
         description: description?.trim() || null,
-        display_order: 0,
+        display_order: await getNextWeekOrder(phaseId),
         is_published: false,
       })
       .select("id")
@@ -236,9 +334,8 @@ export async function importBulkContents(rows: BulkImportRow[]): Promise<{
       }
 
       const baseOrder = row.display_order ?? undefined;
-      const currentCounter = (weekDisplayOrderCounter.get(weekId) ?? 0) + 1;
-      weekDisplayOrderCounter.set(weekId, currentCounter);
-      const displayOrder = baseOrder ?? currentCounter;
+      const nextOrder = await getNextContentOrder(weekId);
+      const displayOrder = baseOrder ?? nextOrder;
 
       const contentPayload = {
         week_id: weekId,
