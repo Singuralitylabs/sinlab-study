@@ -901,7 +901,7 @@ flowchart TD
 
 INSERT 成功後はお試しユーザーとしてダッシュボードへ遷移する。承認依頼のSlack通知は従来どおり送信し、管理者は `/admin/users` で承認・却下を行う。`sendSlackNewUserNotification()` は `await` せずに発火する非同期・非ブロッキング呼び出しで、通知の完了を待たずにリダイレクトへ進む。
 
-INSERT 失敗時はログを出力し `/login?error=registration_failed` へリダイレクトする（通知は送らない）。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。`/login` は `error` クエリ値を許可リスト方式で解釈し、`registration_failed` のときのみユーザー向けメッセージを表示する。未知の値では何も表示しない。
+INSERT 失敗時はログを出力し `/login?error=registration_failed` へリダイレクトする（通知は送らない）。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認は論理削除済み行も含めて `auth_id` で照合する（通常の SELECT RLS では本人の削除済み行が見えないため、確認のみ RLS をバイパスする。INSERT は通常クライアントのまま）。`/login` は `error` クエリ値を許可リスト方式で解釈し、`registration_failed` のときのみユーザー向けメッセージを表示する。未知の値では何も表示しない。
 
 #### 9.5.2 Stripe支払い失敗通知
 

@@ -1,6 +1,7 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { sendSlackNewUserNotification } from "@/app/services/notifications/slack";
 
 const REGISTRATION_FAILED_PATH = "/login?error=registration_failed";
@@ -59,8 +60,11 @@ export async function GET(request: NextRequest) {
 
   const user = data.session.user;
 
-  // auth_id で存在確認する。論理削除済みレコードも拾うため is_deleted では絞らない
-  const { data: existingUser, error: userError } = await supabase
+  // SELECT RLS は本人行でも is_deleted=false を要求するため、通常クライアントでは
+  // 論理削除済みレコードが見えない。再ログインで INSERT すると UNIQUE 違反になるので、
+  // 存在確認だけ service_role で行い is_deleted では絞らない。INSERT 自体は通常クライアント。
+  const adminSupabase = await createAdminSupabaseClient();
+  const { data: existingUser, error: userError } = await adminSupabase
     .from("users")
     .select("id, status, is_deleted")
     .eq("auth_id", user.id)
