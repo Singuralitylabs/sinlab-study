@@ -1,7 +1,29 @@
 import { BookOpen } from "lucide-react";
 import { GoogleLoginButton } from "./components/google-login-button";
 
-export default function LoginPage() {
+/** `/login?error=` で表示するメッセージ。未知の値は何も出さない */
+const LOGIN_ERROR_MESSAGES = {
+  registration_failed:
+    "アカウント登録に失敗しました。時間をおいて再度お試しください。問題が続く場合は管理者にお問い合わせください。",
+} as const;
+
+type LoginErrorCode = keyof typeof LOGIN_ERROR_MESSAGES;
+
+function loginErrorMessage(error: string | undefined): string | null {
+  if (error && Object.hasOwn(LOGIN_ERROR_MESSAGES, error)) {
+    return LOGIN_ERROR_MESSAGES[error as LoginErrorCode];
+  }
+  return null;
+}
+
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
+  const errorMessage = loginErrorMessage(error);
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm space-y-8">
@@ -20,6 +42,7 @@ export default function LoginPage() {
               Googleアカウントでログインしてください
             </p>
           </div>
+          {errorMessage && <p className="text-sm text-destructive text-center">{errorMessage}</p>}
           <GoogleLoginButton />
           <p className="text-xs text-muted-foreground text-center">
             Google側の確認画面で「〜.supabase.co」というドメインへの移動が表示されますが、これは本サービスの認証基盤（Supabase）のドメインです。

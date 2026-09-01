@@ -32,7 +32,10 @@ export async function createServerSupabaseClient() {
 }
 
 // サーバーサイド用Supabaseクライアント（Service Role: RLSバイパス）
-// レイアウトで権限チェック済みの管理者・講師向けクエリに使用
+// 管理者・講師向けの権限チェック済みクエリ、および通常クライアントでは RLS で
+// 見えない行を読むサーバー処理（OAuthコールバックの users 存在確認）に使用。
+// 未設定時は通常クライアントへフォールバックするため、Cookie の無い文脈では
+// 呼び出す前に SUPABASE_SERVICE_ROLE_KEY の存在を確認すること。
 export async function createAdminSupabaseClient() {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (serviceRoleKey) {

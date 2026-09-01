@@ -129,13 +129,16 @@ flowchart TD
     B -->|あり| C{セッション確立}
     C -->|失敗| L
     C -->|成功| D{users テーブル確認}
-    D -->|レコードなし| R["自動登録 (pending)"] --> H
+    D -->|レコードなし| R["自動登録 (pending)"]
+    R -->|成功| H
+    R -->|失敗| F["/login?error=registration_failed"]
+    D -->|論理削除済み| F
     D -->|pending| H
     D -->|rejected| RE["/rejected"]
     D -->|active| H["/ (ダッシュボード)"]
 ```
 
-初回ログイン（自動登録）後もお試しユーザーとしてそのままダッシュボードへ遷移する。承認待ちであることはアプリ内バナーで通知する。
+初回ログイン（自動登録）後もお試しユーザーとしてそのままダッシュボードへ遷移する。承認待ちであることはアプリ内バナーで通知する。自動登録に失敗した場合、および論理削除済みユーザーの再ログイン時は `/login?error=registration_failed` へリダイレクトする（詳細は9.5.1）。
 
 ### 2.5 初回ログイン時のユーザー自動登録
 
@@ -151,6 +154,8 @@ OAuthコールバック処理中に初回ログインを検知し、`users` テ�
 | `avatar_url` | Googleアバター画像 | ユーザーメタデータ |
 | `role` | `member` | デフォルト値 |
 | `status` | `pending` | デフォルト値 |
+
+INSERT 失敗時は `/login?error=registration_failed` へリダイレクトし、Slack通知は送らない。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認の失敗や service_role 未設定は `error` なしの `/login` へフェイルクローズする。詳細は9.5.1。
 
 ### 2.6 お試し（trial）ユーザーへのコンテンツ制限
 
@@ -715,7 +720,7 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 
 | パス | 画面名 | 表示内容 |
 |:--|:--|:--|
-| `/login` | ログイン画面 | サービス名、「Googleでログイン」ボタン、サービス説明。中央寄せレイアウト、ダークモード対応 |
+| `/login` | ログイン画面 | サービス名、「Googleでログイン」ボタン、サービス説明。`error=registration_failed` のときのみ登録失敗メッセージを表示（未知の `error` 値は何も出さない）。中央寄せレイアウト、ダークモード対応 |
 | `/rejected` | 却下画面 | 却下メッセージ、問い合わせ案内、ログアウトボタン |
 
 承認待ち専用画面（`/pending`）は設けない。お試しユーザーはダッシュボードを含む通常画面にアクセスでき、承認待ちであることはアプリ内バナーで通知する（2.6参照）。`/pending` へのアクセスは `/` にリダイレクトする。
@@ -788,7 +793,9 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 | OAuth コード交換失敗 | `/login` にリダイレクト |
 | セッション期限切れ | プロキシ（`proxy.ts`）が `/login` にリダイレクト |
 | Supabase接続エラー | サーバーログに出力、`/login` にリダイレクト |
-| ユーザー自動登録失敗 | サーバーログに出力。ステータス確認不可のため `/login` にリダイレクト（フェイルクローズ） |
+| ユーザー自動登録失敗 | サーバーログに出力し `/login?error=registration_failed` にリダイレクト（通知は送らない、セッション Cookie は付けない）。`/login` は許可リスト方式でメッセージ表示 |
+| 論理削除済みユーザーの再ログイン | INSERT を試行せず、自動登録失敗と同じ導線（`/login?error=registration_failed`、セッション Cookie なし） |
+| ユーザー存在確認の失敗 / service_role 未設定 | INSERT せず、`error` パラメータなしの `/login` へフェイルクローズ（セッション Cookie なし） |
 | 重複登録の試行 | `auth_id` のUNIQUE制約で防止。既存レコードを使用 |
 
 ### 8.3 Server Services
@@ -876,10 +883,15 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 
 ```mermaid
 flowchart TD
-    A["GET /auth/callback"] --> B["セッション確立・users テーブル確認"]
-    B --> C{初回ログイン（レコードなし）?}
-    C -->|いいえ| Z[通常のステータス判定]
-    C -->|はい| D["users テーブルに INSERT（pending）"]
+    A["GET /auth/callback"] --> B["セッション確立"]
+    B --> K{service_role 設定済み?}
+    K -->|いいえ| L["ログ出力・/login にリダイレクト（error なし）"]
+    K -->|はい| B2["users テーブル確認"]
+    B2 --> C{users レコード}
+    C -->|確認失敗| L
+    C -->|未削除の既存| Z[通常のステータス判定]
+    C -->|論理削除済み| Q["ログ出力・/login?error=registration_failed にリダイレクト（通知は送らない・セッション Cookie なし）"]
+    C -->|なし| D["users テーブルに INSERT（pending）"]
     D --> E{INSERT 結果}
     E -->|成功| S[INSERT 成功]
     S --> F["sendSlackNewUserNotification()<br/>（非同期・await なし）"]
@@ -889,10 +901,12 @@ flowchart TD
     G1 -->|設定あり| H2{Webhook POST}
     H2 -->|成功| I1[ログ出力]
     H2 -->|失敗| I2["エラーログ出力（フロー継続）"]
-    E -->|失敗| Q["ログ出力・/login にリダイレクト（通知は送らない）"]
+    E -->|失敗| Q
 ```
 
 INSERT 成功後はお試しユーザーとしてダッシュボードへ遷移する。承認依頼のSlack通知は従来どおり送信し、管理者は `/admin/users` で承認・却下を行う。`sendSlackNewUserNotification()` は `await` せずに発火する非同期・非ブロッキング呼び出しで、通知の完了を待たずにリダイレクトへ進む。
+
+INSERT 失敗時はログを出力し `/login?error=registration_failed` へリダイレクトする（通知は送らない）。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認は論理削除済み行も含めて `auth_id` で照合する（通常の SELECT RLS では本人の削除済み行が見えないため、確認のみ RLS をバイパスする。INSERT は通常クライアントのまま）。存在確認に失敗した場合、および `SUPABASE_SERVICE_ROLE_KEY` 未設定時は INSERT せず、`error` パラメータなしの `/login` へフェイルクローズする。登録失敗・論理削除済み・確認失敗のエラー導線ではセッション Cookie を付けない。`/login` は `error` クエリ値を許可リスト方式（自前のキーのみ。プロトタイプ継承キーは含めない）で解釈し、`registration_failed` のときのみユーザー向けメッセージを表示する。未知の値では何も表示しない。
 
 #### 9.5.2 Stripe支払い失敗通知
 
@@ -927,7 +941,7 @@ flowchart TD
 | `SLACK_NOTIFICATION_WEBHOOK_URL` 未設定 | ログ警告を出力し通知をスキップ。フローは継続 |
 | Webhook POST がネットワークエラー | エラーログを出力し握り潰す。ユーザー登録・リダイレクト / Stripe Webhookの200応答は正常完了 |
 | Webhook POST が 4xx / 5xx | エラーログ（ステータスコード含む）を出力し握り潰す |
-| ユーザー INSERT 失敗 | 新規ユーザー通知は送信しない（中途半端な状態を通知しない） |
+| ユーザー INSERT 失敗 | 新規ユーザー通知は送信しない（中途半端な状態を通知しない）。`/login?error=registration_failed` へリダイレクトする |
 | 支払い失敗通知自体の送信エラー | `recordEventProcessed()` はそのまま実行され、`/api/stripe/webhook` は200を返す（通知の成否はStripeへのWebhook応答に影響しない） |
 
 ---
@@ -957,3 +971,5 @@ flowchart TD
 | 2026年8月 | 決済日を毎月27日（UTC 0:00）に固定する変更を追加（#99）：`billing_cycle_anchor_config`・初回日割り（`proration_behavior`）・最低請求額を下回る場合の無償化ガード（`isProrationBelowMinimum()`）を2.11節に追記、`/upgrade`・`/upgrade/success`の画面説明を更新 |
 | 2026年8月 | テーマサムネイルのStorageアップロード機能を追加（6.1.4節を新設。6.1節に `thumbnails` バケットへの保存と編集画面限定である旨、7.3節にアップロード・プレビュー・削除UIを追記） |
 | 2026年8月 | `/upgrade` に課金の法定表示を追加（#134）。料金取得失敗時のフォールバック、非月額・非JPY時は月額を断定しないこと、Checkout API側の料金確認ガード（503）、契約状況取得失敗時は解約ポリシー文言を出さないことを2.11節に追記 |
+| 2026年8月 | OAuthコールバックの users INSERT 失敗時と論理削除済みユーザー再ログイン時に `/login?error=registration_failed` へリダイレクトし、許可リスト方式でメッセージ表示する旨を2.4・2.5・8.2・9.5.1節に追記（#44） |
+| 2026年9月 | #44 レビュー反映: service_role 未設定と存在確認失敗は `error` なしの `/login` へフェイルクローズすること、エラー導線ではセッション Cookie を付けないことを 8.2・9.5.1 に追記 |
