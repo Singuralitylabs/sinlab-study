@@ -11,8 +11,9 @@ import {
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { Fragment } from "react";
+import { Fragment, Suspense } from "react";
 import { PageTitle } from "@/app/components/PageTitle";
+import { deriveFilterOptions, filterContents } from "@/app/lib/content-filtering";
 import { groupContentsByWeek, sortContentsByHierarchy } from "@/app/lib/content-grouping";
 import { fetchAllContents } from "@/app/services/api/admin-server";
 import type { ContentType } from "@/app/types";
@@ -27,6 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ContentsFilterBar } from "./ContentsFilterBar";
 
 function getContentIcon(type: ContentType) {
   switch (type) {
@@ -58,9 +60,40 @@ function getContentTypeLabel(type: ContentType) {
   }
 }
 
-export default async function AdminContentsPage() {
+interface AdminContentsPageProps {
+  // App RouterのsearchParamsは同名クエリの重複時に string[] にもなりうる
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+/** 同名クエリが重複して string[] になった場合は先頭の値のみを使う */
+function firstParam(value: string | string[] | undefined): string {
+  return (Array.isArray(value) ? value[0] : value) ?? "";
+}
+
+export default async function AdminContentsPage({ searchParams }: AdminContentsPageProps) {
+  const params = await searchParams;
   const { data: contents } = await fetchAllContents();
-  const groups = contents ? groupContentsByWeek(sortContentsByHierarchy(contents)) : [];
+  const sortedContents = contents ? sortContentsByHierarchy(contents) : [];
+  const filterOptions = deriveFilterOptions(sortedContents);
+
+  const filters = {
+    theme: firstParam(params.theme),
+    phase: firstParam(params.phase),
+    week: firstParam(params.week),
+    type: firstParam(params.type),
+    // 空白のみのqは絞り込みなし扱い（filterContents側のtrimと判定を揃える）
+    q: firstParam(params.q).trim(),
+  };
+  const isFiltered = Object.values(filters).some((value) => value !== "");
+
+  const filteredContents = filterContents(sortedContents, {
+    themeId: filters.theme || undefined,
+    phaseId: filters.phase || undefined,
+    weekId: filters.week || undefined,
+    type: filters.type || undefined,
+    q: filters.q || undefined,
+  });
+  const groups = groupContentsByWeek(filteredContents);
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -84,88 +117,114 @@ export default async function AdminContentsPage() {
           </CardContent>
         </Card>
       ) : (
-        <Card>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-16">順序</TableHead>
-                <TableHead>タイトル</TableHead>
-                <TableHead className="w-24">種類</TableHead>
-                <TableHead className="w-40">状態</TableHead>
-                <TableHead className="text-right w-24">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {groups.map((group) => (
-                <Fragment key={group.key}>
-                  <TableRow className="bg-muted/50 hover:bg-muted/50">
-                    <TableCell colSpan={5} className="text-sm font-medium">
-                      {group.label}
-                      <span className="ml-2 font-normal text-muted-foreground">
-                        （{group.contents.length}件）
-                      </span>
-                    </TableCell>
+        <>
+          <Suspense fallback={null}>
+            <ContentsFilterBar
+              themes={filterOptions.themes}
+              phases={filterOptions.phases}
+              weeks={filterOptions.weeks}
+            />
+          </Suspense>
+
+          {groups.length === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center">
+                <p className="text-muted-foreground">この条件のコンテンツはありません。</p>
+                {isFiltered && (
+                  <Button asChild variant="outline" className="mt-4">
+                    <Link href="/manage/contents">フィルタをクリア</Link>
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-16">順序</TableHead>
+                    <TableHead>タイトル</TableHead>
+                    <TableHead className="w-24">種類</TableHead>
+                    <TableHead className="w-40">状態</TableHead>
+                    <TableHead className="text-right w-24">操作</TableHead>
                   </TableRow>
-                  {group.contents.map((content) => (
-                    <TableRow key={content.id}>
-                      <TableCell className="text-sm">{content.display_order}</TableCell>
-                      <TableCell className="font-medium">
-                        <span className="line-clamp-1">{content.title}</span>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className="gap-1">
-                          {getContentIcon(content.content_type)}
-                          {getContentTypeLabel(content.content_type)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap items-center gap-1">
-                          {content.is_published ? (
-                            <Badge variant="secondary" className="gap-1 bg-success/10 text-success">
-                              <Eye className="h-3 w-3" />
-                              公開
-                            </Badge>
-                          ) : (
+                </TableHeader>
+                <TableBody>
+                  {groups.map((group) => (
+                    <Fragment key={group.key}>
+                      <TableRow className="bg-muted/50 hover:bg-muted/50">
+                        <TableCell colSpan={5} className="text-sm font-medium">
+                          {group.label}
+                          <span className="ml-2 font-normal text-muted-foreground">
+                            （{group.contents.length}件）
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                      {group.contents.map((content) => (
+                        <TableRow key={content.id}>
+                          <TableCell className="text-sm">{content.display_order}</TableCell>
+                          <TableCell className="font-medium">
+                            <span className="line-clamp-1">{content.title}</span>
+                          </TableCell>
+                          <TableCell>
                             <Badge variant="secondary" className="gap-1">
-                              <EyeOff className="h-3 w-3" />
-                              非公開
+                              {getContentIcon(content.content_type)}
+                              {getContentTypeLabel(content.content_type)}
                             </Badge>
-                          )}
-                          {content.is_open_to_trial && (
-                            <Badge variant="outline" className="gap-1">
-                              <Sparkles className="h-3 w-3" />
-                              お試し公開
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center justify-end gap-1">
-                          <Button variant="ghost" size="icon-sm" asChild title="編集">
-                            <Link href={`/manage/contents/${content.id}/edit`}>
-                              <Edit className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            asChild
-                            title="削除"
-                            className="text-destructive hover:text-destructive"
-                          >
-                            <Link href={`/manage/contents/${content.id}/delete`}>
-                              <Trash2 className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap items-center gap-1">
+                              {content.is_published ? (
+                                <Badge
+                                  variant="secondary"
+                                  className="gap-1 bg-success/10 text-success"
+                                >
+                                  <Eye className="h-3 w-3" />
+                                  公開
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary" className="gap-1">
+                                  <EyeOff className="h-3 w-3" />
+                                  非公開
+                                </Badge>
+                              )}
+                              {content.is_open_to_trial && (
+                                <Badge variant="outline" className="gap-1">
+                                  <Sparkles className="h-3 w-3" />
+                                  お試し公開
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-end gap-1">
+                              <Button variant="ghost" size="icon-sm" asChild title="編集">
+                                <Link href={`/manage/contents/${content.id}/edit`}>
+                                  <Edit className="h-4 w-4" />
+                                </Link>
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                asChild
+                                title="削除"
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Link href={`/manage/contents/${content.id}/delete`}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Link>
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </Fragment>
                   ))}
-                </Fragment>
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
+                </TableBody>
+              </Table>
+            </Card>
+          )}
+        </>
       )}
     </div>
   );
