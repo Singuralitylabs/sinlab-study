@@ -421,6 +421,9 @@ export async function fetchAllContents(): Promise<{
     return { data: null, error };
   }
 
+  // このキャストは select が theme まで辿れるネスト形状（week.phase.theme）で
+  // 返すことに依存する。select を変更する場合は content-grouping.ts の
+  // 階層順ソートが参照する week.phase.theme まで含まれることを確認すること
   return { data: data as LearningContentWithWeek[], error: null };
 }
 

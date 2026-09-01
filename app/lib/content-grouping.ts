@@ -13,34 +13,38 @@ export interface ContentGroup {
 }
 
 /**
+ * 階層順ソートにおける display_order の欠落値（未設定の親階層に加え、
+ * display_order 列自体がDB上 NULL のケースも含む）を「その階層内で最後」として扱う。
+ * アプリ側の型は display_order を number と定義しているが、DBのカラム自体は
+ * NULL 許容（NOT NULL制約なし）のため、実行時には null が来ても崩れないようにする。
+ */
+function orderOrLast(order: number | null | undefined): number {
+  return order ?? Number.POSITIVE_INFINITY;
+}
+
+/**
  * テーマ→フェーズ→週→コンテンツの各 display_order 順にコンテンツを並び替える。
  * PostgREST はネストしたテーブルのカラムでトップレベルの並び替えができないため、
  * クライアント側（この純粋関数）で階層順ソートを行う。
- * 週が未設定のコンテンツは、階層が確定している他のコンテンツより後ろにまとめる。
+ * 週が未設定のコンテンツ・display_order が欠落している階層は、末尾にまとめる。
  */
 export function sortContentsByHierarchy(
   contents: LearningContentWithWeek[]
 ): LearningContentWithWeek[] {
   return [...contents].sort((a, b) => {
-    const themeOrderA = a.week?.phase?.theme?.display_order;
-    const themeOrderB = b.week?.phase?.theme?.display_order;
-
-    if (themeOrderA === undefined && themeOrderB === undefined) {
-      return a.display_order - b.display_order;
-    }
-    if (themeOrderA === undefined) return 1;
-    if (themeOrderB === undefined) return -1;
+    const themeOrderA = orderOrLast(a.week?.phase?.theme?.display_order);
+    const themeOrderB = orderOrLast(b.week?.phase?.theme?.display_order);
     if (themeOrderA !== themeOrderB) return themeOrderA - themeOrderB;
 
-    const phaseOrderA = a.week?.phase?.display_order ?? 0;
-    const phaseOrderB = b.week?.phase?.display_order ?? 0;
+    const phaseOrderA = orderOrLast(a.week?.phase?.display_order);
+    const phaseOrderB = orderOrLast(b.week?.phase?.display_order);
     if (phaseOrderA !== phaseOrderB) return phaseOrderA - phaseOrderB;
 
-    const weekOrderA = a.week?.display_order ?? 0;
-    const weekOrderB = b.week?.display_order ?? 0;
+    const weekOrderA = orderOrLast(a.week?.display_order);
+    const weekOrderB = orderOrLast(b.week?.display_order);
     if (weekOrderA !== weekOrderB) return weekOrderA - weekOrderB;
 
-    return a.display_order - b.display_order;
+    return orderOrLast(a.display_order) - orderOrLast(b.display_order);
   });
 }
 

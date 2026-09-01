@@ -97,6 +97,33 @@ const week1 = makeWeek({ id: 1, phase_id: 1, name: "週1", display_order: 2, pha
 const week2 = makeWeek({ id: 2, phase_id: 1, name: "週2", display_order: 1, phase: phase1 });
 const week3 = makeWeek({ id: 3, phase_id: 2, name: "週3", display_order: 1, phase: phase2 });
 
+// display_order はアプリの型では number（非null）だが、DBのカラム自体はNOT NULL制約が
+// ないため実行時には null が来うる。その回帰テスト用に意図的に型を偽装したフィクスチャ。
+const themeWithNullOrder = {
+  id: 3,
+  name: "テーマ(順序未設定)",
+  description: null,
+  display_order: null as unknown as number,
+  is_published: true,
+  is_deleted: false,
+  image_url: null,
+  created_at: null,
+  updated_at: null,
+};
+const phase3 = {
+  id: 3,
+  theme_id: 3,
+  name: "フェーズ3",
+  description: null,
+  display_order: 1,
+  is_published: true,
+  is_deleted: false,
+  created_at: null,
+  updated_at: null,
+  theme: themeWithNullOrder,
+};
+const week4 = makeWeek({ id: 4, phase_id: 3, name: "週4", display_order: 1, phase: phase3 });
+
 describe("sortContentsByHierarchy", () => {
   it("テーマ→フェーズ→週→コンテンツの display_order 順に並び替える", () => {
     const contentA = makeContent({ id: 1, week_id: 1, display_order: 1, week: week1 });
@@ -127,6 +154,15 @@ describe("sortContentsByHierarchy", () => {
     const sorted = sortContentsByHierarchy([unclassifiedA, classified, unclassifiedB]);
 
     expect(sorted.map((c) => c.id)).toEqual([1, 3, 2]);
+  });
+
+  it("テーマの display_order が DB 上 NULL でも末尾にまとめる（number - null が0扱いで先頭に来る回帰）", () => {
+    const classified = makeContent({ id: 1, week_id: 1, display_order: 1, week: week1 });
+    const nullThemeOrder = makeContent({ id: 2, week_id: 4, display_order: 1, week: week4 });
+
+    const sorted = sortContentsByHierarchy([nullThemeOrder, classified]);
+
+    expect(sorted.map((c) => c.id)).toEqual([1, 2]);
   });
 
   it("元の配列を破壊しない", () => {
