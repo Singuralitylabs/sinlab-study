@@ -3,6 +3,7 @@ import { USER_STATUS } from "@/app/constants/user";
 import { TERMINAL_SUBSCRIPTION_STATUSES } from "@/app/services/api/stripe-server";
 import type {
   LearningContent,
+  LearningContentWithWeek,
   LearningPhase,
   LearningPhaseWithTheme,
   LearningTheme,
@@ -404,16 +405,14 @@ export async function deleteWeek(id: number): Promise<{ error: PostgrestError | 
 // =====================================================
 
 export async function fetchAllContents(): Promise<{
-  data:
-    | (LearningContent & { week: (LearningWeek & { phase: LearningPhase | null }) | null })[]
-    | null;
+  data: LearningContentWithWeek[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_contents")
-    .select("*, week:learning_weeks(*, phase:learning_phases(*))")
+    .select("*, week:learning_weeks(*, phase:learning_phases(*, theme:learning_themes(*)))")
     .eq("is_deleted", false)
     .order("display_order");
 
@@ -422,7 +421,10 @@ export async function fetchAllContents(): Promise<{
     return { data: null, error };
   }
 
-  return { data, error: null };
+  // このキャストは select が theme まで辿れるネスト形状（week.phase.theme）で
+  // 返すことに依存する。select を変更する場合は content-grouping.ts の
+  // 階層順ソートが参照する week.phase.theme まで含まれることを確認すること
+  return { data: data as LearningContentWithWeek[], error: null };
 }
 
 export async function fetchContentByIdForAdmin(
