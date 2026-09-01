@@ -46,3 +46,4 @@ supabase/.temp/
 
 # claude code（個人設定。共有設定は .claude/settings.json）
 .claude/settings.local.json
+.claude/worktrees/
