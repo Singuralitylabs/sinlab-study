@@ -11,7 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { Fragment } from "react";
+import { Fragment, Suspense } from "react";
 import { PageTitle } from "@/app/components/PageTitle";
 import { deriveFilterOptions, filterContents } from "@/app/lib/content-filtering";
 import { groupContentsByWeek, sortContentsByHierarchy } from "@/app/lib/content-grouping";
@@ -61,13 +61,13 @@ function getContentTypeLabel(type: ContentType) {
 }
 
 interface AdminContentsPageProps {
-  searchParams: Promise<{
-    theme?: string;
-    phase?: string;
-    week?: string;
-    type?: string;
-    q?: string;
-  }>;
+  // App RouterのsearchParamsは同名クエリの重複時に string[] にもなりうる
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+/** 同名クエリが重複して string[] になった場合は先頭の値のみを使う */
+function firstParam(value: string | string[] | undefined): string {
+  return (Array.isArray(value) ? value[0] : value) ?? "";
 }
 
 export default async function AdminContentsPage({ searchParams }: AdminContentsPageProps) {
@@ -77,11 +77,11 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
   const filterOptions = deriveFilterOptions(sortedContents);
 
   const filters = {
-    theme: params.theme ?? "",
-    phase: params.phase ?? "",
-    week: params.week ?? "",
-    type: params.type ?? "",
-    q: params.q ?? "",
+    theme: firstParam(params.theme),
+    phase: firstParam(params.phase),
+    week: firstParam(params.week),
+    type: firstParam(params.type),
+    q: firstParam(params.q),
   };
   const isFiltered = Object.values(filters).some((value) => value !== "");
 
@@ -117,12 +117,13 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
         </Card>
       ) : (
         <>
-          <ContentsFilterBar
-            themes={filterOptions.themes}
-            phases={filterOptions.phases}
-            weeks={filterOptions.weeks}
-            initialFilters={filters}
-          />
+          <Suspense>
+            <ContentsFilterBar
+              themes={filterOptions.themes}
+              phases={filterOptions.phases}
+              weeks={filterOptions.weeks}
+            />
+          </Suspense>
 
           {groups.length === 0 ? (
             <Card>

@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 import type {
   PhaseFilterOption,
   ThemeFilterOption,
@@ -15,11 +15,17 @@ const CONTENT_TYPE_FILTER_OPTIONS: { value: ContentType; label: string }[] = [
   { value: "video", label: "動画" },
   { value: "text", label: "テキスト" },
   { value: "exercise", label: "演習" },
-  { value: "slide", label: "スライド" },
+  { value: "slide", label: "スライド（PDF）" },
 ];
 
 const SELECT_CLASS_NAME =
   "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs";
+
+interface ContentsFilterBarProps {
+  themes: ThemeFilterOption[];
+  phases: PhaseFilterOption[];
+  weeks: WeekFilterOption[];
+}
 
 interface ContentsFilterValues {
   theme: string;
@@ -29,81 +35,75 @@ interface ContentsFilterValues {
   q: string;
 }
 
-interface ContentsFilterBarProps {
-  themes: ThemeFilterOption[];
-  phases: PhaseFilterOption[];
-  weeks: WeekFilterOption[];
-  initialFilters: ContentsFilterValues;
-}
-
-export function ContentsFilterBar({
-  themes,
-  phases,
-  weeks,
-  initialFilters,
-}: ContentsFilterBarProps) {
+/**
+ * テーマ/フェーズ/週/種別は useSearchParams() を唯一の情報源として直接描画する
+ * （ローカルstateに複製すると、「フィルタをクリア」リンクやブラウザの戻る/進むといった
+ * このコンポーネント外からのURL変化に追従できず、古い選択状態が残ってしまうため）。
+ * タイトル検索のみ、入力のたびの過剰なURL更新を避けるためローカルstateでデバウンスする。
+ */
+export function ContentsFilterBar({ themes, phases, weeks }: ContentsFilterBarProps) {
   const router = useRouter();
-  const [theme, setTheme] = useState(initialFilters.theme);
-  const [phase, setPhase] = useState(initialFilters.phase);
-  const [week, setWeek] = useState(initialFilters.week);
-  const [type, setType] = useState(initialFilters.type);
-  const [q, setQ] = useState(initialFilters.q);
-  const isFirstRender = useRef(true);
+  const searchParams = useSearchParams();
 
-  // タイトル検索のデバウンス発火時に、テーマ/フェーズ/週/種別セレクトの最新値を
-  // 参照するためのref（stateをそのままuseEffectの依存にすると発火のたびにタイマーが
-  // リセットされてしまうため、qのみを依存にしつつrefで最新値を追う）
-  const latestFilters = useRef({ theme, phase, week, type });
-  latestFilters.current = { theme, phase, week, type };
+  const theme = searchParams.get("theme") ?? "";
+  const phase = searchParams.get("phase") ?? "";
+  const week = searchParams.get("week") ?? "";
+  const type = searchParams.get("type") ?? "";
+  const urlQ = searchParams.get("q") ?? "";
 
+  const [q, setQ] = useState(urlQ);
+
+  // URL側のqが外部要因（フィルタクリア・戻る/進む等）で変わったら入力欄も追従させる
+  useEffect(() => {
+    setQ(urlQ);
+  }, [urlQ]);
+
+  // フェーズは選択中のテーマ配下のみ、週は選択中のフェーズ（未選択ならテーマ）配下のみに絞る
   const visiblePhases = phases.filter((p) => !theme || String(p.themeId) === theme);
-  const visibleWeeks = weeks.filter((w) => !phase || String(w.phaseId) === phase);
+  const visiblePhaseIds = new Set(visiblePhases.map((p) => p.id));
+  const visibleWeeks = weeks.filter((w) => {
+    if (phase) return String(w.phaseId) === phase;
+    if (theme) return visiblePhaseIds.has(w.phaseId);
+    return true;
+  });
 
-  function updateQuery(next: ContentsFilterValues) {
-    const query = new URLSearchParams();
-    if (next.theme) query.set("theme", next.theme);
-    if (next.phase) query.set("phase", next.phase);
-    if (next.week) query.set("week", next.week);
-    if (next.type) query.set("type", next.type);
-    if (next.q) query.set("q", next.q);
-    const queryString = query.toString();
-    router.replace(queryString ? `/manage/contents?${queryString}` : "/manage/contents");
-  }
+  const updateQuery = useCallback(
+    (next: ContentsFilterValues) => {
+      const query = new URLSearchParams();
+      if (next.theme) query.set("theme", next.theme);
+      if (next.phase) query.set("phase", next.phase);
+      if (next.week) query.set("week", next.week);
+      if (next.type) query.set("type", next.type);
+      if (next.q) query.set("q", next.q);
+      const queryString = query.toString();
+      router.replace(queryString ? `/manage/contents?${queryString}` : "/manage/contents");
+    },
+    [router]
+  );
 
   function handleThemeChange(value: string) {
-    setTheme(value);
-    setPhase("");
-    setWeek("");
     updateQuery({ theme: value, phase: "", week: "", type, q });
   }
 
   function handlePhaseChange(value: string) {
-    setPhase(value);
-    setWeek("");
     updateQuery({ theme, phase: value, week: "", type, q });
   }
 
   function handleWeekChange(value: string) {
-    setWeek(value);
     updateQuery({ theme, phase, week: value, type, q });
   }
 
   function handleTypeChange(value: string) {
-    setType(value);
     updateQuery({ theme, phase, week, type: value, q });
   }
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: マウント時のURL更新を避けるため依存はqのみに絞る
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
+    if (q === urlQ) return;
     const timer = setTimeout(() => {
-      updateQuery({ ...latestFilters.current, q });
+      updateQuery({ theme, phase, week, type, q });
     }, 300);
     return () => clearTimeout(timer);
-  }, [q]);
+  }, [q, urlQ, theme, phase, week, type, updateQuery]);
 
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5 mb-4">
