@@ -155,7 +155,7 @@ OAuthコールバック処理中に初回ログインを検知し、`users` テ�
 | `role` | `member` | デフォルト値 |
 | `status` | `pending` | デフォルト値 |
 
-INSERT 失敗時は `/login?error=registration_failed` へリダイレクトし、Slack通知は送らない。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。詳細は9.5.1。
+INSERT 失敗時は `/login?error=registration_failed` へリダイレクトし、Slack通知は送らない。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認の失敗や service_role 未設定は `error` なしの `/login` へフェイルクローズする。詳細は9.5.1。
 
 ### 2.6 お試し（trial）ユーザーへのコンテンツ制限
 
@@ -793,8 +793,9 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 | OAuth コード交換失敗 | `/login` にリダイレクト |
 | セッション期限切れ | プロキシ（`proxy.ts`）が `/login` にリダイレクト |
 | Supabase接続エラー | サーバーログに出力、`/login` にリダイレクト |
-| ユーザー自動登録失敗 | サーバーログに出力し `/login?error=registration_failed` にリダイレクト（通知は送らない）。`/login` は許可リスト方式でメッセージ表示 |
-| 論理削除済みユーザーの再ログイン | INSERT を試行せず、自動登録失敗と同じ導線（`/login?error=registration_failed`） |
+| ユーザー自動登録失敗 | サーバーログに出力し `/login?error=registration_failed` にリダイレクト（通知は送らない、セッション Cookie は付けない）。`/login` は許可リスト方式でメッセージ表示 |
+| 論理削除済みユーザーの再ログイン | INSERT を試行せず、自動登録失敗と同じ導線（`/login?error=registration_failed`、セッション Cookie なし） |
+| ユーザー存在確認の失敗 / service_role 未設定 | INSERT せず、`error` パラメータなしの `/login` へフェイルクローズ（セッション Cookie なし） |
 | 重複登録の試行 | `auth_id` のUNIQUE制約で防止。既存レコードを使用 |
 
 ### 8.3 Server Services
@@ -882,10 +883,14 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 
 ```mermaid
 flowchart TD
-    A["GET /auth/callback"] --> B["セッション確立・users テーブル確認"]
-    B --> C{users レコード}
+    A["GET /auth/callback"] --> B["セッション確立"]
+    B --> K{service_role 設定済み?}
+    K -->|いいえ| L["ログ出力・/login にリダイレクト（error なし）"]
+    K -->|はい| B2["users テーブル確認"]
+    B2 --> C{users レコード}
+    C -->|確認失敗| L
     C -->|未削除の既存| Z[通常のステータス判定]
-    C -->|論理削除済み| Q["ログ出力・/login?error=registration_failed にリダイレクト（通知は送らない）"]
+    C -->|論理削除済み| Q["ログ出力・/login?error=registration_failed にリダイレクト（通知は送らない・セッション Cookie なし）"]
     C -->|なし| D["users テーブルに INSERT（pending）"]
     D --> E{INSERT 結果}
     E -->|成功| S[INSERT 成功]
@@ -901,7 +906,7 @@ flowchart TD
 
 INSERT 成功後はお試しユーザーとしてダッシュボードへ遷移する。承認依頼のSlack通知は従来どおり送信し、管理者は `/admin/users` で承認・却下を行う。`sendSlackNewUserNotification()` は `await` せずに発火する非同期・非ブロッキング呼び出しで、通知の完了を待たずにリダイレクトへ進む。
 
-INSERT 失敗時はログを出力し `/login?error=registration_failed` へリダイレクトする（通知は送らない）。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認は論理削除済み行も含めて `auth_id` で照合する（通常の SELECT RLS では本人の削除済み行が見えないため、確認のみ RLS をバイパスする。INSERT は通常クライアントのまま）。`/login` は `error` クエリ値を許可リスト方式で解釈し、`registration_failed` のときのみユーザー向けメッセージを表示する。未知の値では何も表示しない。
+INSERT 失敗時はログを出力し `/login?error=registration_failed` へリダイレクトする（通知は送らない）。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認は論理削除済み行も含めて `auth_id` で照合する（通常の SELECT RLS では本人の削除済み行が見えないため、確認のみ RLS をバイパスする。INSERT は通常クライアントのまま）。存在確認に失敗した場合、および `SUPABASE_SERVICE_ROLE_KEY` 未設定時は INSERT せず、`error` パラメータなしの `/login` へフェイルクローズする。登録失敗・論理削除済み・確認失敗のエラー導線ではセッション Cookie を付けない。`/login` は `error` クエリ値を許可リスト方式（自前のキーのみ。プロトタイプ継承キーは含めない）で解釈し、`registration_failed` のときのみユーザー向けメッセージを表示する。未知の値では何も表示しない。
 
 #### 9.5.2 Stripe支払い失敗通知
 
@@ -967,3 +972,4 @@ flowchart TD
 | 2026年8月 | テーマサムネイルのStorageアップロード機能を追加（6.1.4節を新設。6.1節に `thumbnails` バケットへの保存と編集画面限定である旨、7.3節にアップロード・プレビュー・削除UIを追記） |
 | 2026年8月 | `/upgrade` に課金の法定表示を追加（#134）。料金取得失敗時のフォールバック、非月額・非JPY時は月額を断定しないこと、Checkout API側の料金確認ガード（503）、契約状況取得失敗時は解約ポリシー文言を出さないことを2.11節に追記 |
 | 2026年8月 | OAuthコールバックの users INSERT 失敗時と論理削除済みユーザー再ログイン時に `/login?error=registration_failed` へリダイレクトし、許可リスト方式でメッセージ表示する旨を2.4・2.5・8.2・9.5.1節に追記（#44） |
+| 2026年9月 | #44 レビュー反映: service_role 未設定と存在確認失敗は `error` なしの `/login` へフェイルクローズすること、エラー導線ではセッション Cookie を付けないことを 8.2・9.5.1 に追記 |

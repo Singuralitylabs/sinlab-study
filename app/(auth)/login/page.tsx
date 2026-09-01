@@ -10,7 +10,7 @@ const LOGIN_ERROR_MESSAGES = {
 type LoginErrorCode = keyof typeof LOGIN_ERROR_MESSAGES;
 
 function loginErrorMessage(error: string | undefined): string | null {
-  if (error && error in LOGIN_ERROR_MESSAGES) {
+  if (error && Object.hasOwn(LOGIN_ERROR_MESSAGES, error)) {
     return LOGIN_ERROR_MESSAGES[error as LoginErrorCode];
   }
   return null;

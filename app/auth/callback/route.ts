@@ -60,6 +60,14 @@ export async function GET(request: NextRequest) {
 
   const user = data.session.user;
 
+  // createAdminSupabaseClient() はキー未設定時に Cookie クライアントへ静かにフォールバックする。
+  // この Route は next/headers の Cookie ストアへ書かないため、フォールバック先は未認証になり
+  // 全ユーザーが初回ログイン扱いで UNIQUE 違反 → 登録失敗になる。未設定なら確認自体を中断する。
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.error("SUPABASE_SERVICE_ROLE_KEY が未設定のためユーザー確認を中断");
+    return NextResponse.redirect(new URL("/login", origin));
+  }
+
   // SELECT RLS は本人行でも is_deleted=false を要求するため、通常クライアントでは
   // 論理削除済みレコードが見えない。再ログインで INSERT すると UNIQUE 違反になるので、
   // 存在確認だけ service_role で行い is_deleted では絞らない。INSERT 自体は通常クライアント。
@@ -72,11 +80,12 @@ export async function GET(request: NextRequest) {
 
   if (userError) {
     console.error("ユーザー確認エラー:", userError);
+    return NextResponse.redirect(new URL("/login", origin));
   }
 
   if (existingUser?.is_deleted) {
     console.error("論理削除済みユーザーの再ログイン:", user.id);
-    return redirectWithSessionCookies(new URL(REGISTRATION_FAILED_PATH, origin), cookiesToReturn);
+    return NextResponse.redirect(new URL(REGISTRATION_FAILED_PATH, origin));
   }
 
   // リダイレクト先を決定
@@ -95,7 +104,7 @@ export async function GET(request: NextRequest) {
 
     if (insertError) {
       console.error("ユーザー自動登録エラー:", insertError);
-      return redirectWithSessionCookies(new URL(REGISTRATION_FAILED_PATH, origin), cookiesToReturn);
+      return NextResponse.redirect(new URL(REGISTRATION_FAILED_PATH, origin));
     }
 
     const adminUsersUrl = `${origin}/admin/users`;

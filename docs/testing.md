@@ -197,4 +197,4 @@ GitHub Actions は CI/CD の実行基盤として利用する。詳細は各ワ�
 | `tests/services/auth/permissions.test.ts` | `app/services/auth/permissions.ts` | `checkAdminPermissions`, `checkContentPermissions`, `checkInstructorPermissions` | ロール（admin/maintainer/member/unknown）ごとの権限判定（許可/拒否）を検証する。 |
 | `tests/services/auth/server-auth.test.ts` | `app/services/auth/server-auth.ts` | `getServerAuth` | 認証エラー、ユーザー情報取得失敗、ステータス別応答、例外時の戻り値とエラーハンドリングを検証する。 |
 | `tests/services/api/learning-server.test.ts` | `app/services/api/learning-server.ts` | 学習コンテンツ取得関数群 | フェーズ・週・コンテンツの取得正常系/異常系を検証する。 |
-| `tests/auth/callback.test.ts` | `app/auth/callback/route.ts` | `GET` | 初回ログインの INSERT 成功時は `/` へリダイレクトして Slack 通知を呼び出すこと、INSERT 失敗時は `/login?error=registration_failed` へリダイレクトして通知しないこと、論理削除済みユーザーの再ログインでは INSERT を試行せず同じエラー導線へ流すことを検証する。 |
+| `tests/auth/callback.test.ts` | `app/auth/callback/route.ts` | `GET` | 初回ログインの INSERT 成功時は `/` へリダイレクトして Slack 通知を呼び出すこと、INSERT 失敗時と論理削除済み再ログインは `/login?error=registration_failed` へリダイレクトして通知・セッション Cookie を付けないこと、存在確認失敗と service_role 未設定は `error` なしの `/login` へフェイルクローズすることを検証する。 |
