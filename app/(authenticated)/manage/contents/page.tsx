@@ -7,10 +7,13 @@ import {
   Play,
   Plus,
   Presentation,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
+import { Fragment } from "react";
 import { PageTitle } from "@/app/components/PageTitle";
+import { groupContentsByWeek, sortContentsByHierarchy } from "@/app/lib/content-grouping";
 import { fetchAllContents } from "@/app/services/api/admin-server";
 import type { ContentType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
@@ -57,6 +60,7 @@ function getContentTypeLabel(type: ContentType) {
 
 export default async function AdminContentsPage() {
   const { data: contents } = await fetchAllContents();
+  const groups = contents ? groupContentsByWeek(sortContentsByHierarchy(contents)) : [];
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -80,72 +84,84 @@ export default async function AdminContentsPage() {
           </CardContent>
         </Card>
       ) : (
-        <Card className="overflow-x-auto">
-          <Table className="min-w-[800px]">
+        <Card>
+          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-16">順序</TableHead>
                 <TableHead>タイトル</TableHead>
                 <TableHead className="w-24">種類</TableHead>
-                <TableHead>週</TableHead>
-                <TableHead>フェーズ</TableHead>
-                <TableHead className="text-center w-20">公開</TableHead>
+                <TableHead className="w-40">状態</TableHead>
                 <TableHead className="text-right w-24">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {contents.map((content) => (
-                <TableRow key={content.id}>
-                  <TableCell className="text-sm">{content.display_order}</TableCell>
-                  <TableCell className="font-medium">
-                    <span className="line-clamp-1">{content.title}</span>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="gap-1">
-                      {getContentIcon(content.content_type)}
-                      {getContentTypeLabel(content.content_type)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {content.week?.name || "-"}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {content.week?.phase?.name || "-"}
-                  </TableCell>
-                  <TableCell className="text-center">
-                    {content.is_published ? (
-                      <Badge variant="secondary" className="gap-1 bg-success/10 text-success">
-                        <Eye className="h-3 w-3" />
-                        公開
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary" className="gap-1">
-                        <EyeOff className="h-3 w-3" />
-                        非公開
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="icon-sm" asChild title="編集">
-                        <Link href={`/manage/contents/${content.id}/edit`}>
-                          <Edit className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        asChild
-                        title="削除"
-                        className="text-destructive hover:text-destructive"
-                      >
-                        <Link href={`/manage/contents/${content.id}/delete`}>
-                          <Trash2 className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
+              {groups.map((group) => (
+                <Fragment key={group.key}>
+                  <TableRow className="bg-muted/50 hover:bg-muted/50">
+                    <TableCell colSpan={5} className="text-sm font-medium">
+                      {group.label}
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        （{group.contents.length}件）
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                  {group.contents.map((content) => (
+                    <TableRow key={content.id}>
+                      <TableCell className="text-sm">{content.display_order}</TableCell>
+                      <TableCell className="font-medium">
+                        <span className="line-clamp-1">{content.title}</span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="gap-1">
+                          {getContentIcon(content.content_type)}
+                          {getContentTypeLabel(content.content_type)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap items-center gap-1">
+                          {content.is_published ? (
+                            <Badge variant="secondary" className="gap-1 bg-success/10 text-success">
+                              <Eye className="h-3 w-3" />
+                              公開
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="gap-1">
+                              <EyeOff className="h-3 w-3" />
+                              非公開
+                            </Badge>
+                          )}
+                          {content.is_open_to_trial && (
+                            <Badge variant="outline" className="gap-1">
+                              <Sparkles className="h-3 w-3" />
+                              お試し公開
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="icon-sm" asChild title="編集">
+                            <Link href={`/manage/contents/${content.id}/edit`}>
+                              <Edit className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            asChild
+                            title="削除"
+                            className="text-destructive hover:text-destructive"
+                          >
+                            <Link href={`/manage/contents/${content.id}/delete`}>
+                              <Trash2 className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </Fragment>
               ))}
             </TableBody>
           </Table>
