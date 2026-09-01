@@ -81,7 +81,8 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
     phase: firstParam(params.phase),
     week: firstParam(params.week),
     type: firstParam(params.type),
-    q: firstParam(params.q),
+    // 空白のみのqは絞り込みなし扱い（filterContents側のtrimと判定を揃える）
+    q: firstParam(params.q).trim(),
   };
   const isFiltered = Object.values(filters).some((value) => value !== "");
 
@@ -117,7 +118,7 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
         </Card>
       ) : (
         <>
-          <Suspense>
+          <Suspense fallback={null}>
             <ContentsFilterBar
               themes={filterOptions.themes}
               phases={filterOptions.phases}

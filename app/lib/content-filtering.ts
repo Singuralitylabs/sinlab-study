@@ -2,7 +2,7 @@ import type { ContentType, LearningContentWithWeek } from "@/app/types";
 
 const CONTENT_TYPES: readonly ContentType[] = ["video", "text", "exercise", "slide"];
 
-function isContentType(value: string | undefined): value is ContentType {
+export function isContentType(value: string | undefined): value is ContentType {
   return CONTENT_TYPES.includes(value as ContentType);
 }
 

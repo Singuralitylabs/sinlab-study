@@ -2,10 +2,11 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import type {
-  PhaseFilterOption,
-  ThemeFilterOption,
-  WeekFilterOption,
+import {
+  isContentType,
+  type PhaseFilterOption,
+  type ThemeFilterOption,
+  type WeekFilterOption,
 } from "@/app/lib/content-filtering";
 import type { ContentType } from "@/app/types";
 import { Input } from "@/components/ui/input";
@@ -48,14 +49,20 @@ export function ContentsFilterBar({ themes, phases, weeks }: ContentsFilterBarPr
   const theme = searchParams.get("theme") ?? "";
   const phase = searchParams.get("phase") ?? "";
   const week = searchParams.get("week") ?? "";
-  const type = searchParams.get("type") ?? "";
+  // 手打ちURL等で不正な種別値が来た場合、サーバー側は無視して全件表示するため
+  // セレクトも「すべて」に正規化してUIと結果を一致させる
+  const rawType = searchParams.get("type") ?? "";
+  const type = isContentType(rawType) ? rawType : "";
   const urlQ = searchParams.get("q") ?? "";
 
   const [q, setQ] = useState(urlQ);
 
-  // URL側のqが外部要因（フィルタクリア・戻る/進む等）で変わったら入力欄も追従させる
+  // URL側のqが外部要因（フィルタクリア・戻る/進む等）で変わったら入力欄も追従させる。
+  // 自分自身のデバウンス確定（末尾空白のtrim）による書き戻しでは、入力中の値が
+  // 意味的に変わっていなければ上書きしない（例: 「hello 」と入力中に確定した
+  // URLのq="hello"に同期させてしまうと、続けて入力した文字が空白なしで連結される）
   useEffect(() => {
-    setQ(urlQ);
+    setQ((prevQ) => (urlQ === prevQ.trim() ? prevQ : urlQ));
   }, [urlQ]);
 
   // フェーズは選択中のテーマ配下のみ、週は選択中のフェーズ（未選択ならテーマ）配下のみに絞る
@@ -74,7 +81,8 @@ export function ContentsFilterBar({ themes, phases, weeks }: ContentsFilterBarPr
       if (next.phase) query.set("phase", next.phase);
       if (next.week) query.set("week", next.week);
       if (next.type) query.set("type", next.type);
-      if (next.q) query.set("q", next.q);
+      const trimmedQ = next.q.trim();
+      if (trimmedQ) query.set("q", trimmedQ);
       const queryString = query.toString();
       router.replace(queryString ? `/manage/contents?${queryString}` : "/manage/contents");
     },
@@ -98,7 +106,7 @@ export function ContentsFilterBar({ themes, phases, weeks }: ContentsFilterBarPr
   }
 
   useEffect(() => {
-    if (q === urlQ) return;
+    if (q.trim() === urlQ) return;
     const timer = setTimeout(() => {
       updateQuery({ theme, phase, week, type, q });
     }, 300);
