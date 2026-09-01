@@ -50,6 +50,12 @@ export function ContentsFilterBar({
   const [q, setQ] = useState(initialFilters.q);
   const isFirstRender = useRef(true);
 
+  // タイトル検索のデバウンス発火時に、テーマ/フェーズ/週/種別セレクトの最新値を
+  // 参照するためのref（stateをそのままuseEffectの依存にすると発火のたびにタイマーが
+  // リセットされてしまうため、qのみを依存にしつつrefで最新値を追う）
+  const latestFilters = useRef({ theme, phase, week, type });
+  latestFilters.current = { theme, phase, week, type };
+
   const visiblePhases = phases.filter((p) => !theme || String(p.themeId) === theme);
   const visibleWeeks = weeks.filter((w) => !phase || String(w.phaseId) === phase);
 
@@ -94,7 +100,7 @@ export function ContentsFilterBar({
       return;
     }
     const timer = setTimeout(() => {
-      updateQuery({ theme, phase, week, type, q });
+      updateQuery({ ...latestFilters.current, q });
     }, 300);
     return () => clearTimeout(timer);
   }, [q]);
