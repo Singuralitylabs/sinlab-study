@@ -495,6 +495,31 @@ export async function updateContent(
   return { error: null };
 }
 
+/**
+ * 複数コンテンツへ同一の更新を一括適用する。`.eq("is_deleted", false)` により
+ * 削除済み行への再操作を防ぐ。
+ */
+export async function bulkUpdateContents(
+  ids: number[],
+  patch: Partial<LearningContent>
+): Promise<{ error: PostgrestError | null; updated: number }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("learning_contents")
+    .update(patch)
+    .in("id", ids)
+    .eq("is_deleted", false)
+    .select("id");
+
+  if (error) {
+    console.error("コンテンツ一括更新エラー:", error.message);
+    return { error, updated: 0 };
+  }
+
+  return { error: null, updated: data?.length ?? 0 };
+}
+
 export async function deleteContent(id: number): Promise<{ error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
 
