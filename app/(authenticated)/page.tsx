@@ -81,7 +81,7 @@ export default async function HomePage() {
                           src={resolveStorageUrl(theme.image_url)}
                           alt={theme.name}
                           fill
-                          className="object-cover"
+                          className="object-contain"
                           sizes="96px"
                         />
                       ) : (
