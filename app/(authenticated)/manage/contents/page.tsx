@@ -3,7 +3,11 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { PageTitle } from "@/app/components/PageTitle";
 import { deriveFilterOptions, filterContents } from "@/app/lib/content-filtering";
-import { groupContentsByWeek, sortContentsByHierarchy } from "@/app/lib/content-grouping";
+import {
+  groupContentsByWeek,
+  sortContentsByHierarchy,
+  toContentTableGroups,
+} from "@/app/lib/content-grouping";
 import { fetchAllContents } from "@/app/services/api/admin-server";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -44,6 +48,7 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
     q: filters.q || undefined,
   });
   const groups = groupContentsByWeek(filteredContents);
+  const tableGroups = toContentTableGroups(groups);
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -88,7 +93,7 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
               </CardContent>
             </Card>
           ) : (
-            <ContentsTable groups={groups} />
+            <ContentsTable groups={tableGroups} />
           )}
         </>
       )}

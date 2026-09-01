@@ -14,9 +14,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Fragment, useMemo, useState } from "react";
-import type { ContentGroup } from "@/app/lib/content-grouping";
-import type { ContentType, LearningContentWithWeek } from "@/app/types";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { CONTENT_TYPE_LABELS, CONTENT_TYPES, MAX_BULK_CONTENT_IDS } from "@/app/constants/content";
+import type { ContentTableGroup, ContentTableRow } from "@/app/lib/content-grouping";
+import type { ContentType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,13 +40,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const CONTENT_TYPE_SET_OPTIONS: { value: ContentType; label: string }[] = [
-  { value: "video", label: "動画" },
-  { value: "text", label: "テキスト" },
-  { value: "exercise", label: "演習" },
-  { value: "slide", label: "スライド（PDF）" },
-];
-
 function getContentIcon(type: ContentType) {
   switch (type) {
     case "video":
@@ -61,25 +55,10 @@ function getContentIcon(type: ContentType) {
   }
 }
 
-function getContentTypeLabel(type: ContentType) {
-  switch (type) {
-    case "video":
-      return "動画";
-    case "text":
-      return "テキスト";
-    case "exercise":
-      return "演習";
-    case "slide":
-      return "スライド";
-    default:
-      return type;
-  }
-}
-
-type BulkAction = "publish" | "unpublish" | "open_trial" | "close_trial";
+type BulkAction = "publish" | "unpublish" | "open_trial" | "close_trial" | "set_type" | "delete";
 
 interface ContentsTableProps {
-  groups: ContentGroup[];
+  groups: ContentTableGroup[];
 }
 
 export function ContentsTable({ groups }: ContentsTableProps) {
@@ -91,19 +70,43 @@ export function ContentsTable({ groups }: ContentsTableProps) {
   const [typeDialogOpen, setTypeDialogOpen] = useState(false);
   const [newContentType, setNewContentType] = useState<ContentType>("video");
 
-  const allContents = useMemo<LearningContentWithWeek[]>(
+  const allContents = useMemo<ContentTableRow[]>(
     () => groups.flatMap((group) => group.contents),
     [groups]
   );
   const allIds = useMemo(() => allContents.map((content) => content.id), [allContents]);
   const selectedCount = selectedIds.size;
-  const allSelected = allIds.length > 0 && selectedIds.size === allIds.length;
+  const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
+
+  // フィルタ変更等で表示中のコンテンツ（groups/allIds）が変わったら、選択状態を
+  // 現在表示中のIDとの積集合に絞る。絞らないと、非表示になった行の選択が
+  // Set に残ったまま一括操作（削除含む）の対象に含まれてしまう。
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const visible = new Set(allIds);
+      let changed = false;
+      const next = new Set<number>();
+      for (const id of prev) {
+        if (visible.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [allIds]);
+
+  const publishedSelectedCount = allContents.filter(
+    (content) => selectedIds.has(content.id) && content.is_published
+  ).length;
 
   function toggleAll(checked: boolean) {
     setSelectedIds(checked ? new Set(allIds) : new Set());
   }
 
-  function toggleGroup(group: ContentGroup, checked: boolean) {
+  function toggleGroup(group: ContentTableGroup, checked: boolean) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       for (const content of group.contents) {
@@ -129,30 +132,42 @@ export function ContentsTable({ groups }: ContentsTableProps) {
     });
   }
 
-  async function runBulkAction(
-    action: BulkAction | "set_type" | "delete",
-    contentType?: ContentType
-  ) {
+  async function runBulkAction(action: BulkAction, contentType?: ContentType) {
     setIsLoading(true);
     setErrorMessage(null);
+    const ids = [...selectedIds];
     try {
-      const response = await fetch("/api/manage/contents/bulk", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ids: [...selectedIds],
-          action,
-          ...(action === "set_type" ? { contentType } : {}),
-        }),
-      });
-      if (response.ok) {
-        setSelectedIds(new Set());
-        setDeleteDialogOpen(false);
-        setTypeDialogOpen(false);
-        router.refresh();
-      } else {
+      let totalUpdated = 0;
+      // ids が MAX_BULK_CONTENT_IDS を超える場合、APIの上限に収まるようチャンク分割して送信する
+      for (let i = 0; i < ids.length; i += MAX_BULK_CONTENT_IDS) {
+        const chunk = ids.slice(i, i + MAX_BULK_CONTENT_IDS);
+        const response = await fetch("/api/manage/contents/bulk", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ids: chunk,
+            action,
+            ...(action === "set_type" ? { contentType } : {}),
+          }),
+        });
+        if (!response.ok) {
+          const data = await response.json();
+          setErrorMessage(data.error || "一括操作に失敗しました");
+          return;
+        }
         const data = await response.json();
-        setErrorMessage(data.error || "一括操作に失敗しました");
+        totalUpdated += typeof data.updated === "number" ? data.updated : 0;
+      }
+
+      setSelectedIds(new Set());
+      setDeleteDialogOpen(false);
+      setTypeDialogOpen(false);
+      router.refresh();
+
+      if (totalUpdated < ids.length) {
+        setErrorMessage(
+          `${ids.length}件中${ids.length - totalUpdated}件は更新できませんでした（他の操作により既に削除されている可能性があります）`
+        );
       }
     } catch {
       setErrorMessage("一括操作中にエラーが発生しました");
@@ -290,7 +305,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
                       <TableCell>
                         <Badge variant="secondary" className="gap-1">
                           {getContentIcon(content.content_type)}
-                          {getContentTypeLabel(content.content_type)}
+                          {CONTENT_TYPE_LABELS[content.content_type]}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -351,6 +366,11 @@ export function ContentsTable({ groups }: ContentsTableProps) {
               削除したコンテンツは受講生から見えなくなります。この操作は一覧からは元に戻せません。
             </DialogDescription>
           </DialogHeader>
+          {errorMessage && (
+            <Alert variant="destructive">
+              <AlertDescription>{errorMessage}</AlertDescription>
+            </Alert>
+          )}
           <DialogFooter>
             <Button
               variant="outline"
@@ -379,14 +399,27 @@ export function ContentsTable({ groups }: ContentsTableProps) {
               種別固有の項目（動画URL・本文・演習内容など）は保持されますが、変更後は本文が未設定の状態になり得ます。表示内容は種別を元に戻すと復元されます。
             </DialogDescription>
           </DialogHeader>
+          {publishedSelectedCount > 0 && (
+            <Alert variant="destructive">
+              <AlertDescription>
+                選択中{publishedSelectedCount}
+                件は公開中です。本文が未設定のまま受講生に表示される可能性があるため、先に非公開にすることを推奨します。
+              </AlertDescription>
+            </Alert>
+          )}
+          {errorMessage && (
+            <Alert variant="destructive">
+              <AlertDescription>{errorMessage}</AlertDescription>
+            </Alert>
+          )}
           <select
             value={newContentType}
             onChange={(e) => setNewContentType(e.target.value as ContentType)}
             className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
           >
-            {CONTENT_TYPE_SET_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
+            {CONTENT_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {CONTENT_TYPE_LABELS[type]}
               </option>
             ))}
           </select>

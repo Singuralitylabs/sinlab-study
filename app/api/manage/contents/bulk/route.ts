@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { MAX_BULK_CONTENT_IDS } from "@/app/constants/content";
 import { USER_STATUS } from "@/app/constants/user";
 import { isContentType } from "@/app/lib/content-filtering";
 import { bulkUpdateContents } from "@/app/services/api/admin-server";
@@ -20,17 +21,16 @@ function isBulkAction(value: unknown): value is BulkAction {
   return typeof value === "string" && (BULK_ACTIONS as readonly string[]).includes(value);
 }
 
-const MAX_BULK_IDS = 100;
-
 function isValidIds(value: unknown): value is number[] {
   return (
     Array.isArray(value) &&
     value.length > 0 &&
-    value.length <= MAX_BULK_IDS &&
+    value.length <= MAX_BULK_CONTENT_IDS &&
     value.every((id) => Number.isInteger(id) && id > 0)
   );
 }
 
+/** BulkAction は BULK_ACTIONS 全件を網羅しており、呼び出し前に isBulkAction で検証済みのため到達不能分岐は設けない */
 function buildPatch(
   action: BulkAction,
   contentType: unknown
@@ -51,8 +51,6 @@ function buildPatch(
         return { error: "有効なコンテンツ種別を指定してください" };
       }
       return { content_type: contentType };
-    default:
-      return { error: "不正なactionです" };
   }
 }
 
@@ -73,11 +71,14 @@ export async function PATCH(request: Request) {
     }
 
     const body = await request.json();
+    if (typeof body !== "object" || body === null) {
+      return NextResponse.json({ error: "不正なリクエストボディです" }, { status: 400 });
+    }
     const { ids, action, contentType } = body;
 
     if (!isValidIds(ids)) {
       return NextResponse.json(
-        { error: `idsは1〜${MAX_BULK_IDS}件の正の整数で指定してください` },
+        { error: `idsは1〜${MAX_BULK_CONTENT_IDS}件の正の整数で指定してください` },
         { status: 400 }
       );
     }

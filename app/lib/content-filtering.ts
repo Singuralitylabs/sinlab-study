@@ -1,6 +1,5 @@
+import { CONTENT_TYPES } from "@/app/constants/content";
 import type { ContentType, LearningContentWithWeek } from "@/app/types";
-
-const CONTENT_TYPES: readonly ContentType[] = ["video", "text", "exercise", "slide"];
 
 export function isContentType(value: string | undefined): value is ContentType {
   return CONTENT_TYPES.includes(value as ContentType);

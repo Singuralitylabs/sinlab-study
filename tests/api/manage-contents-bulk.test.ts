@@ -82,6 +82,19 @@ describe("PATCH /api/manage/contents/bulk - 認可", () => {
 });
 
 describe("PATCH /api/manage/contents/bulk - バリデーション", () => {
+  it("リクエストボディがnullの場合は400", async () => {
+    const res = await PATCH(
+      new Request("http://localhost/api/manage/contents/bulk", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: "null",
+      })
+    );
+
+    expect(res.status).toBe(400);
+    expect(bulkUpdateContents).not.toHaveBeenCalled();
+  });
+
   it("idsが空配列の場合は400", async () => {
     const res = await PATCH(request({ ids: [], action: "publish" }));
 

@@ -1,6 +1,26 @@
-import type { LearningContentWithWeek } from "@/app/types";
+import type { ContentType, LearningContentWithWeek } from "@/app/types";
 
 const UNCLASSIFIED_LABEL = "未分類";
+
+/**
+ * コンテンツ管理テーブル（クライアントコンポーネント）が表示に必要とする最小限のフィールド。
+ * `LearningContentWithWeek` の週/フェーズ/テーマの入れ子や本文系フィールドをそのまま
+ * クライアントに渡すとRSCペイロードが不必要に肥大化するため、表示用の型に絞って渡す。
+ */
+export interface ContentTableRow {
+  id: number;
+  title: string;
+  display_order: number | null;
+  content_type: ContentType;
+  is_published: boolean;
+  is_open_to_trial: boolean;
+}
+
+export interface ContentTableGroup {
+  key: string;
+  label: string;
+  contents: ContentTableRow[];
+}
 
 /**
  * コンテンツ管理一覧の週単位グループ。
@@ -102,4 +122,25 @@ export function groupContentsByWeek(contents: LearningContentWithWeek[]): Conten
   }
 
   return groups;
+}
+
+/**
+ * `groupContentsByWeek` の結果から、コンテンツ管理テーブルの表示に必要な最小限の
+ * フィールドのみを抽出する。Server Component から `"use client"` コンポーネントへ
+ * props として渡す直前に呼び出すことで、本文系フィールドや週/フェーズ/テーマの
+ * 入れ子構造がクライアントバンドルへ送られるのを防ぐ。
+ */
+export function toContentTableGroups(groups: ContentGroup[]): ContentTableGroup[] {
+  return groups.map((group) => ({
+    key: group.key,
+    label: group.label,
+    contents: group.contents.map((content) => ({
+      id: content.id,
+      title: content.title,
+      display_order: content.display_order,
+      content_type: content.content_type,
+      is_published: content.is_published,
+      is_open_to_trial: content.is_open_to_trial,
+    })),
+  }));
 }
