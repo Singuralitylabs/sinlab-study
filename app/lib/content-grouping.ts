@@ -23,6 +23,15 @@ function orderOrLast(order: number | null | undefined): number {
 }
 
 /**
+ * 欠落値同士（ともに Number.POSITIVE_INFINITY）を比較すると `Infinity - Infinity` は
+ * NaN になり、Array.prototype.sort の比較関数として不正な値を返してしまう。
+ * 同値は 0 を返すことで NaN を避ける。
+ */
+function compareOrder(orderA: number, orderB: number): number {
+  return orderA === orderB ? 0 : orderA - orderB;
+}
+
+/**
  * テーマ→フェーズ→週→コンテンツの各 display_order 順にコンテンツを並び替える。
  * PostgREST はネストしたテーブルのカラムでトップレベルの並び替えができないため、
  * クライアント側（この純粋関数）で階層順ソートを行う。
@@ -32,19 +41,30 @@ export function sortContentsByHierarchy(
   contents: LearningContentWithWeek[]
 ): LearningContentWithWeek[] {
   return [...contents].sort((a, b) => {
-    const themeOrderA = orderOrLast(a.week?.phase?.theme?.display_order);
-    const themeOrderB = orderOrLast(b.week?.phase?.theme?.display_order);
-    if (themeOrderA !== themeOrderB) return themeOrderA - themeOrderB;
+    const themeCompare = compareOrder(
+      orderOrLast(a.week?.phase?.theme?.display_order),
+      orderOrLast(b.week?.phase?.theme?.display_order)
+    );
+    if (themeCompare !== 0) return themeCompare;
 
-    const phaseOrderA = orderOrLast(a.week?.phase?.display_order);
-    const phaseOrderB = orderOrLast(b.week?.phase?.display_order);
-    if (phaseOrderA !== phaseOrderB) return phaseOrderA - phaseOrderB;
+    const phaseCompare = compareOrder(
+      orderOrLast(a.week?.phase?.display_order),
+      orderOrLast(b.week?.phase?.display_order)
+    );
+    if (phaseCompare !== 0) return phaseCompare;
 
-    const weekOrderA = orderOrLast(a.week?.display_order);
-    const weekOrderB = orderOrLast(b.week?.display_order);
-    if (weekOrderA !== weekOrderB) return weekOrderA - weekOrderB;
+    const weekCompare = compareOrder(
+      orderOrLast(a.week?.display_order),
+      orderOrLast(b.week?.display_order)
+    );
+    if (weekCompare !== 0) return weekCompare;
 
-    return orderOrLast(a.display_order) - orderOrLast(b.display_order);
+    const contentCompare = compareOrder(orderOrLast(a.display_order), orderOrLast(b.display_order));
+    if (contentCompare !== 0) return contentCompare;
+
+    // 全階層のdisplay_orderが同値（欠落含む）の場合でも比較関数は常に数値を
+    // 返す必要があるため、idで確定的にタイブレークする
+    return a.id - b.id;
   });
 }
 

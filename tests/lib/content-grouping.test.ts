@@ -132,7 +132,7 @@ describe("sortContentsByHierarchy", () => {
 
     const sorted = sortContentsByHierarchy([contentA, contentB, contentC]);
 
-    // week2(display_order:1) が week1(display_order:1) より先、
+    // week2(display_order:1) が week1(display_order:2) より先、
     // かつ theme1 配下(week1, week2) が theme2 配下(week3) より先
     expect(sorted.map((c) => c.id)).toEqual([2, 1, 3]);
   });
@@ -161,6 +161,25 @@ describe("sortContentsByHierarchy", () => {
     const nullThemeOrder = makeContent({ id: 2, week_id: 4, display_order: 1, week: week4 });
 
     const sorted = sortContentsByHierarchy([nullThemeOrder, classified]);
+
+    expect(sorted.map((c) => c.id)).toEqual([1, 2]);
+  });
+
+  it("階層情報も display_order も両方欠落する場合はNaNにならずidでタイブレークする", () => {
+    const contentA = makeContent({
+      id: 2,
+      week_id: 99,
+      week: null,
+      display_order: null as unknown as number,
+    });
+    const contentB = makeContent({
+      id: 1,
+      week_id: 99,
+      week: null,
+      display_order: null as unknown as number,
+    });
+
+    const sorted = sortContentsByHierarchy([contentA, contentB]);
 
     expect(sorted.map((c) => c.id)).toEqual([1, 2]);
   });
