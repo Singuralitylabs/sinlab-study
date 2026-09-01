@@ -1,25 +1,12 @@
 import { NextResponse } from "next/server";
-import { MAX_BULK_CONTENT_IDS } from "@/app/constants/content";
+import type { BulkContentAction } from "@/app/constants/content";
+import { isBulkContentAction, MAX_BULK_CONTENT_IDS } from "@/app/constants/content";
 import { USER_STATUS } from "@/app/constants/user";
 import { isContentType } from "@/app/lib/content-filtering";
 import { bulkUpdateContents } from "@/app/services/api/admin-server";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import type { LearningContent } from "@/app/types";
-
-const BULK_ACTIONS = [
-  "publish",
-  "unpublish",
-  "open_trial",
-  "close_trial",
-  "set_type",
-  "delete",
-] as const;
-type BulkAction = (typeof BULK_ACTIONS)[number];
-
-function isBulkAction(value: unknown): value is BulkAction {
-  return typeof value === "string" && (BULK_ACTIONS as readonly string[]).includes(value);
-}
 
 function isValidIds(value: unknown): value is number[] {
   return (
@@ -30,9 +17,9 @@ function isValidIds(value: unknown): value is number[] {
   );
 }
 
-/** BulkAction は BULK_ACTIONS 全件を網羅しており、呼び出し前に isBulkAction で検証済みのため到達不能分岐は設けない */
+/** BulkContentAction は BULK_CONTENT_ACTIONS 全件を網羅しており、呼び出し前に isBulkContentAction で検証済みのため到達不能分岐は設けない */
 function buildPatch(
-  action: BulkAction,
+  action: BulkContentAction,
   contentType: unknown
 ): Partial<LearningContent> | { error: string } {
   switch (action) {
@@ -70,11 +57,16 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
     }
 
-    const body = await request.json();
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "不正なリクエストボディです" }, { status: 400 });
+    }
     if (typeof body !== "object" || body === null) {
       return NextResponse.json({ error: "不正なリクエストボディです" }, { status: 400 });
     }
-    const { ids, action, contentType } = body;
+    const { ids, action, contentType } = body as Record<string, unknown>;
 
     if (!isValidIds(ids)) {
       return NextResponse.json(
@@ -82,7 +74,7 @@ export async function PATCH(request: Request) {
         { status: 400 }
       );
     }
-    if (!isBulkAction(action)) {
+    if (!isBulkContentAction(action)) {
       return NextResponse.json({ error: "不正なactionです" }, { status: 400 });
     }
 

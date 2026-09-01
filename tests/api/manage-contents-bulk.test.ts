@@ -82,6 +82,19 @@ describe("PATCH /api/manage/contents/bulk - 認可", () => {
 });
 
 describe("PATCH /api/manage/contents/bulk - バリデーション", () => {
+  it("リクエストボディが不正なJSON（パース不能）の場合は500ではなく400", async () => {
+    const res = await PATCH(
+      new Request("http://localhost/api/manage/contents/bulk", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: "{invalid-json",
+      })
+    );
+
+    expect(res.status).toBe(400);
+    expect(bulkUpdateContents).not.toHaveBeenCalled();
+  });
+
   it("リクエストボディがnullの場合は400", async () => {
     const res = await PATCH(
       new Request("http://localhost/api/manage/contents/bulk", {

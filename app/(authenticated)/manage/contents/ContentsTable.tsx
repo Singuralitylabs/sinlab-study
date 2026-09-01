@@ -15,6 +15,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useMemo, useState } from "react";
+import type { BulkContentAction } from "@/app/constants/content";
 import { CONTENT_TYPE_LABELS, CONTENT_TYPES, MAX_BULK_CONTENT_IDS } from "@/app/constants/content";
 import type { ContentTableGroup, ContentTableRow } from "@/app/lib/content-grouping";
 import type { ContentType } from "@/app/types";
@@ -54,8 +55,6 @@ function getContentIcon(type: ContentType) {
       return <FileText className="h-3 w-3" />;
   }
 }
-
-type BulkAction = "publish" | "unpublish" | "open_trial" | "close_trial" | "set_type" | "delete";
 
 interface ContentsTableProps {
   groups: ContentTableGroup[];
@@ -132,7 +131,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
     });
   }
 
-  async function runBulkAction(action: BulkAction, contentType?: ContentType) {
+  async function runBulkAction(action: BulkContentAction, contentType?: ContentType) {
     setIsLoading(true);
     setErrorMessage(null);
     const ids = [...selectedIds];
@@ -257,6 +256,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
                 <Checkbox
                   checked={allSelected}
                   onCheckedChange={(checked) => toggleAll(checked === true)}
+                  disabled={isLoading}
                   aria-label="全選択"
                 />
               </TableHead>
@@ -279,6 +279,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
                       <Checkbox
                         checked={groupAllSelected}
                         onCheckedChange={(checked) => toggleGroup(group, checked === true)}
+                        disabled={isLoading}
                         aria-label={`${group.label}を全選択`}
                       />
                     </TableCell>
@@ -295,6 +296,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
                         <Checkbox
                           checked={selectedIds.has(content.id)}
                           onCheckedChange={(checked) => toggleOne(content.id, checked === true)}
+                          disabled={isLoading}
                           aria-label={`${content.title}を選択`}
                         />
                       </TableCell>
