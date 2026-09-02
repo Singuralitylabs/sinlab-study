@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
+import { parsePositiveInteger } from "@/app/lib/positive-integer";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -11,6 +12,9 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const FOLDER_PATTERN = /^[a-z0-9-]+$/;
 // 命名規約に沿ったスライドファイル名（slide-NN.pdf）
 const SLIDE_FILE_PATTERN = /^slide-(\d+)\.pdf$/;
+
+/** 自動採番できる番号が安全な整数の範囲を超えたことを示す（一覧取得の失敗と区別する） */
+class SlideNumberExhaustedError extends Error {}
 
 /**
  * 指定フォルダ内の既存 slide-NN.pdf を走査し、次に使う連番（最大値+1）を返す。
@@ -31,12 +35,24 @@ async function getNextSlideNumber(
   let maxNumber = 0;
   for (const item of data) {
     const match = item.name.match(SLIDE_FILE_PATTERN);
-    if (match) {
-      maxNumber = Math.max(maxNumber, Number.parseInt(match[1], 10));
+    if (!match) {
+      continue;
+    }
+    // 番号指定時と同じ基準で解釈する（桁あふれしたファイル名は採番の基準にしない）
+    const existingNumber = parsePositiveInteger(match[1]);
+    if (existingNumber !== null) {
+      maxNumber = Math.max(maxNumber, existingNumber);
     }
   }
 
-  return maxNumber + 1;
+  const nextNumber = maxNumber + 1;
+  // 採番した番号自体が安全な整数でないと、次回の走査でそのファイルを読み飛ばして
+  // 同じ番号を採番し続ける（409で永久に失敗する）ため、増やす前に枯渇を検出する
+  if (!Number.isSafeInteger(nextNumber)) {
+    throw new SlideNumberExhaustedError("自動採番できる番号の上限に達しました");
+  }
+
+  return nextNumber;
 }
 
 export async function POST(request: NextRequest) {
@@ -78,8 +94,17 @@ export async function POST(request: NextRequest) {
     const supabase = await createAdminSupabaseClient();
 
     // 保存先フォルダ（コーススラッグ）とスライド番号を取得
-    const folderRaw = (formData.get("folder") as string | null)?.trim() ?? "";
-    const slideNumberRaw = (formData.get("slideNumber") as string | null)?.trim() ?? "";
+    // FormData には File が入り得るため、文字列以外は不正入力として扱う
+    const folderValue = formData.get("folder");
+    if (folderValue !== null && typeof folderValue !== "string") {
+      return NextResponse.json(
+        { error: "フォルダ名は英小文字・数字・ハイフンのみ使用できます" },
+        { status: 400 }
+      );
+    }
+    const folderRaw = folderValue?.trim() ?? "";
+    // スライド番号は前後の空白も不正入力として扱うため trim しない
+    const slideNumberValue = formData.get("slideNumber");
 
     let filePath: string;
     // フォルダ指定時は命名規約 slides/<folder>/slide-NN.pdf に沿って保存
@@ -95,10 +120,11 @@ export async function POST(request: NextRequest) {
       }
 
       let slideNumber: number;
-      if (slideNumberRaw) {
+      // 未指定（フィールド自体が無い）だけを自動採番の対象とし、空文字は不正入力として扱う
+      if (slideNumberValue !== null) {
         // 番号指定時：その番号で保存（既存ファイルは上書き）
-        const parsed = Number.parseInt(slideNumberRaw, 10);
-        if (!Number.isInteger(parsed) || parsed < 1) {
+        const parsed = parsePositiveInteger(slideNumberValue);
+        if (parsed === null) {
           return NextResponse.json(
             { error: "スライド番号は1以上の整数を指定してください" },
             { status: 400 }
@@ -111,6 +137,12 @@ export async function POST(request: NextRequest) {
         try {
           slideNumber = await getNextSlideNumber(supabase, folder);
         } catch (listError) {
+          if (listError instanceof SlideNumberExhaustedError) {
+            return NextResponse.json(
+              { error: "自動採番できる番号の上限に達しました。スライド番号を指定してください" },
+              { status: 400 }
+            );
+          }
           console.error("スライド一覧取得エラー:", listError);
           return NextResponse.json(
             { error: "スライド一覧の取得に失敗しました。時間をおいて再度お試しください" },
@@ -140,8 +172,10 @@ export async function POST(request: NextRequest) {
 
     if (uploadError) {
       console.error("PDFアップロードエラー:", uploadError);
-      // 自動採番中に同名ファイルが存在した場合（409 Conflict）はその旨を明示
-      const isDuplicate = uploadError.status === 409 || uploadError.statusCode === "Duplicate";
+      // 自動採番中に同名ファイルが存在した場合（409 Conflict）はその旨を明示。
+      // storage-js は statusCode をレスポンスボディの statusCode / code、無ければ
+      // HTTPステータス文字列から組み立てるため、"Duplicate" ではなく "409" になる
+      const isDuplicate = uploadError.status === 409 || uploadError.statusCode === "409";
       const message = isDuplicate
         ? "同じ番号のスライドが既に存在します。番号を指定して上書きしてください"
         : "アップロードに失敗しました";
