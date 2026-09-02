@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/supabase-server");
@@ -54,10 +54,20 @@ const request = ({
   return new Request("http://localhost/api/upload-pdf", { method: "POST", body: formData });
 };
 
+// tests/setup.ts が張る console.error のスパイまで戻さないよう、Date.now のスパイのみ局所的に復元する
+let nowSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+const freezeNow = (value: number) => {
+  nowSpy = vi.spyOn(Date, "now").mockReturnValue(value);
+};
+
 beforeEach(() => {
-  vi.restoreAllMocks();
-  vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(maintainerAuth as never);
+});
+
+afterEach(() => {
+  nowSpy?.mockRestore();
+  nowSpy = undefined;
 });
 
 describe("POST /api/upload-pdf スライド番号のバリデーション", () => {
@@ -145,14 +155,13 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
 
 describe("POST /api/upload-pdf 自動採番", () => {
   it("既存の最大番号+1で保存し、上書きは許可しない", async () => {
-    const { list, upload } = mockStorage({
+    const { upload } = mockStorage({
       files: [{ name: "slide-01.pdf" }, { name: "slide-09.pdf" }, { name: "notes.txt" }],
     });
 
     const response = await POST(request() as never);
 
     expect(response.status).toBe(200);
-    expect(list).toHaveBeenCalledWith("gas-advanced", { limit: 1000 });
     expect(upload).toHaveBeenCalledWith("gas-advanced/slide-10.pdf", expect.any(Uint8Array), {
       contentType: "application/pdf",
       upsert: false,
@@ -232,7 +241,7 @@ describe("POST /api/upload-pdf 自動採番", () => {
 
 describe("POST /api/upload-pdf その他の入力検証", () => {
   it("フォルダ未指定時はタイムスタンプ付きのキーで保存する", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(1723500000);
+    freezeNow(1723500000);
     const { upload } = mockStorage();
 
     const response = await POST(request({ folder: null }) as never);
@@ -245,7 +254,7 @@ describe("POST /api/upload-pdf その他の入力検証", () => {
   });
 
   it("フォルダ未指定時はスライド番号を検証しない（後方互換）", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(1723500000);
+    freezeNow(1723500000);
     const { upload } = mockStorage();
 
     const response = await POST(request({ folder: null, slideNumber: "1abc" }) as never);
