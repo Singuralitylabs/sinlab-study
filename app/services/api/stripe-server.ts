@@ -108,6 +108,12 @@ const CHECKOUT_CLAIM_GRACE_MS = 10 * 60 * 1000;
 export const CHECKOUT_CLAIM_TTL_MS = CHECKOUT_SESSION_LIFETIME_MS + CHECKOUT_CLAIM_GRACE_MS;
 
 /**
+ * 記録漏れのセッションを照会する際、作成時刻の下限に持たせる余裕（秒）。
+ * 処理権の確保時刻（アプリのDB）とStripeがセッションを作成した時刻には時計のずれがあるため。
+ */
+const CLAIM_LOOKUP_SKEW_SEC = 120;
+
+/**
  * successページで「決済確認済み」とみなすCheckout Sessionの`payment_status`。
  * 通常は`paid`だが、Price側でトライアル期間が設定されている場合は決済が発生せず
  * `no_payment_required`になる（Webhook側は`ACTIVATABLE_SUBSCRIPTION_STATUSES`に
@@ -231,6 +237,38 @@ export async function createCheckoutSession(
   return { url: session.url, id: session.id };
 }
 
+/**
+ * Checkout Sessionの作成・記録に失敗したことを表すエラー。
+ *
+ * `claimReleasable` は「Stripe側に有効なCheckout Sessionが残っていないと確定できるか」。
+ * falseの場合、呼び出し元は処理権を**解放してはならない**。解放すると、記録されていない
+ * 有効なセッションを残したまま次のCheckoutを作れてしまい二重契約になる（残った処理権は
+ * `claimCheckoutSlot()` の復旧（Customerに紐づく有効セッションの再利用）またはTTLで解ける）。
+ */
+export class CheckoutCreationError extends Error {
+  constructor(
+    message: string,
+    readonly claimReleasable: boolean,
+    readonly cause?: unknown
+  ) {
+    super(message);
+    this.name = "CheckoutCreationError";
+  }
+}
+
+/**
+ * Stripeが「そのリクエストを処理せずに拒否した」と確定できるか（4xx応答）。
+ * 通信タイムアウト・5xx・不明なエラーでは、Stripe側でCheckout Sessionが作成されている
+ * 可能性を排除できないため false を返す。
+ */
+function isDefinitelyNotCreated(error: unknown): boolean {
+  if (!(error instanceof Stripe.errors.StripeError)) {
+    return false;
+  }
+  const status = error.statusCode;
+  return typeof status === "number" && status >= 400 && status < 500;
+}
+
 /** Checkout作成が「保存済みCustomerがStripe側に存在しない」ことで失敗したか */
 function isMissingCustomerError(error: unknown): boolean {
   return (
@@ -351,7 +389,51 @@ export async function createCheckoutSessionForUser(
 
   let session: { url: string; id: string };
   try {
-    session = await createCheckoutSession(userId, authId, customerId, now);
+    session = await createSessionWithCustomerRecovery(
+      userId,
+      authId,
+      email,
+      customerId,
+      claimedAt,
+      now
+    );
+  } catch (error) {
+    // Stripeが4xxで拒否した場合のみ「セッションは作られていない」と確定できる。
+    // 通信タイムアウト・5xxでは作成済みの可能性が残るため、処理権を解放させない
+    throw new CheckoutCreationError(
+      "Checkoutセッションの作成に失敗しました",
+      isDefinitelyNotCreated(error),
+      error
+    );
+  }
+
+  // 記録できないと、このセッションと進行中の処理権を紐付けられなくなり、古い成功ページURLの
+  // リプレイで処理権が解除された場合に「有効なセッションが2つ」の窓が開く。作ったばかりの
+  // セッションを失効させ、有効なセッションを残さない状態にしてから失敗させる
+  const saved = await saveCheckoutSessionId(userId, claimedAt, session.id);
+  if (!saved) {
+    const expired = await expireCheckoutSession(session.id);
+    throw new CheckoutCreationError("Checkoutセッションを記録できませんでした", expired);
+  }
+
+  return { url: session.url };
+}
+
+/**
+ * Checkout Sessionを作成する。保存済みCustomerが（ダッシュボードでの削除等により）Stripe側に
+ * 存在しない場合は、Customerを作り直して保存したうえで1度だけ再試行する（そうしないと当該
+ * ユーザーが恒久的にCheckoutへ進めなくなるため）。
+ */
+async function createSessionWithCustomerRecovery(
+  userId: number,
+  authId: string,
+  email: string | undefined,
+  customerId: string,
+  claimedAt: string,
+  now: Date
+): Promise<{ url: string; id: string }> {
+  try {
+    return await createCheckoutSession(userId, authId, customerId, now);
   } catch (error) {
     if (!isMissingCustomerError(error)) {
       throw error;
@@ -363,11 +445,20 @@ export async function createCheckoutSessionForUser(
       claimedAt,
       `${customerIdempotencyKey(userId, email)}-replace-${customerId}`
     );
-    session = await createCheckoutSession(userId, authId, replacementId, now);
+    return await createCheckoutSession(userId, authId, replacementId, now);
   }
+}
 
-  await saveCheckoutSessionId(userId, claimedAt, session.id);
-  return { url: session.url };
+/** Checkout Sessionを失効させる。失効できたかを返す（既に完了・失効済みの場合はfalse） */
+async function expireCheckoutSession(sessionId: string): Promise<boolean> {
+  try {
+    const stripe = getStripeClient();
+    await stripe.checkout.sessions.expire(sessionId);
+    return true;
+  } catch (error) {
+    console.error("Checkoutセッション失効エラー:", error);
+    return false;
+  }
 }
 
 /** Stripe Customer Portalセッションを作成する（お支払い情報の管理・解約） */
@@ -601,7 +692,7 @@ export async function claimCheckoutSlot(
   // 奪えなかった＝契約中か、他の手続きが進行中。どちらかを既存行から判定する
   const { data: existing, error: fetchError } = await supabase
     .from("stripe_subscriptions")
-    .select("status, checkout_claimed_at, checkout_session_id")
+    .select("status, checkout_claimed_at, checkout_session_id, stripe_customer_id")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -615,15 +706,20 @@ export async function claimCheckoutSlot(
   }
 
   const heldClaimedAt = existing.checkout_claimed_at;
-  if (heldClaimedAt && existing.checkout_session_id) {
-    const session = await retrieveClaimedSession(existing.checkout_session_id);
-    if (session?.status === "open" && session.url) {
-      return { outcome: "reusable", url: session.url };
+  if (heldClaimedAt) {
+    const resolution = await resolveHeldSession(
+      existing.checkout_session_id,
+      existing.stripe_customer_id,
+      heldClaimedAt
+    );
+    if (resolution.kind === "reusable") {
+      return { outcome: "reusable", url: resolution.url };
     }
-    if (session?.status === "complete") {
+    if (resolution.kind === "blocked") {
       return { outcome: "conflict" };
     }
-    if (session?.status === "expired") {
+    if (resolution.kind === "finished") {
+      // 有効なセッションが無いと確認できたので、TTLを待たずに奪う
       return await takeCheckoutSlot(supabase, userId, claimedAt, {
         kind: "held",
         claimedAt: heldClaimedAt,
@@ -631,8 +727,7 @@ export async function claimCheckoutSlot(
     }
   }
 
-  // セッションを特定できない場合のみTTLによる救済に委ねる（claim後にセッション作成・
-  // 記録へ到達できなかった場合や、Stripeが一時的に応答しない場合）
+  // 状態を確認できない場合（Stripeが応答しない・Customerも未確保）のみ、TTLによる救済に委ねる
   const staleBefore = new Date(now.getTime() - CHECKOUT_CLAIM_TTL_MS).toISOString();
   return await takeCheckoutSlot(supabase, userId, claimedAt, {
     kind: "stale",
@@ -640,12 +735,80 @@ export async function claimCheckoutSlot(
   });
 }
 
+/**
+ * 有効な処理権が保持しているCheckout Sessionの状況を判定する。
+ * - reusable: まだ決済できるセッションがある（同じURLへ案内する）
+ * - blocked: 決済済みで反映待ち（奪ってはいけない）
+ * - finished: 有効なセッションが無いと確認できた（奪ってよい）
+ * - unknown: Stripeへ確認できなかった（TTLに委ねる）
+ *
+ * セッションidが記録されていない場合（記録前に中断した場合など）は、Customerに紐づく
+ * 「処理権の確保以降に作られたセッション」を照会して同じ判定を行う。記録漏れのまま
+ * 有効なセッションが残っているケースを、TTLを待たずに拾い上げるため。
+ */
+async function resolveHeldSession(
+  sessionId: string | null,
+  customerId: string | null,
+  claimedAt: string
+): Promise<
+  | { kind: "reusable"; url: string }
+  | { kind: "blocked" }
+  | { kind: "finished" }
+  | { kind: "unknown" }
+> {
+  const sessions = sessionId
+    ? await retrieveClaimedSession(sessionId)
+    : await listSessionsSinceClaim(customerId, claimedAt);
+
+  if (sessions === null) {
+    return { kind: "unknown" };
+  }
+  const openSession = sessions.find((session) => session.status === "open" && session.url);
+  if (openSession?.url) {
+    return { kind: "reusable", url: openSession.url };
+  }
+  if (sessions.some((session) => session.status === "complete")) {
+    return { kind: "blocked" };
+  }
+  return { kind: "finished" };
+}
+
 /** claimが保持しているCheckout Sessionを取得する。取得できない場合はnull（TTL判定に委ねる） */
-async function retrieveClaimedSession(sessionId: string): Promise<Stripe.Checkout.Session | null> {
+async function retrieveClaimedSession(
+  sessionId: string
+): Promise<Stripe.Checkout.Session[] | null> {
   try {
-    return await retrieveCheckoutSession(sessionId);
+    return [await retrieveCheckoutSession(sessionId)];
   } catch (error) {
     console.error("手続き中Checkoutセッションの取得エラー:", error);
+    return null;
+  }
+}
+
+/**
+ * 処理権の確保以降に当該Customerで作られたCheckout Sessionを列挙する。
+ * 作成時刻の下限を処理権の確保時刻に置くことで、過去の契約で完了したセッションを
+ * 拾わないようにする（拾うと再契約が不当にブロックされる）。
+ */
+async function listSessionsSinceClaim(
+  customerId: string | null,
+  claimedAt: string
+): Promise<Stripe.Checkout.Session[] | null> {
+  if (!customerId) {
+    // Customerすら確保できていない＝セッションは作られていないが、確証は持てないためTTLに委ねる
+    return null;
+  }
+  try {
+    const stripe = getStripeClient();
+    const createdAfter = Math.floor(new Date(claimedAt).getTime() / 1000) - CLAIM_LOOKUP_SKEW_SEC;
+    const list = await stripe.checkout.sessions.list({
+      customer: customerId,
+      created: { gte: createdAfter },
+      limit: 10,
+    });
+    return list.data;
+  } catch (error) {
+    console.error("手続き中Checkoutセッションの照会エラー:", error);
     return null;
   }
 }
@@ -699,24 +862,28 @@ async function takeCheckoutSlot(
 
 /**
  * claimが確保したCheckout Sessionのidをミラー行へ記録する。次のリクエストが「その手続きが
- * まだ有効か」をStripeに確認できるようにするためで、記録に失敗してもCheckout自体は成立して
- * いるためエラーにはしない（その場合の解放はTTLに委ねる）。
+ * まだ有効か」をStripeへ確認できるようにするためのもので、記録できたかを返す
+ * （記録できないままURLを返すと、進行中の手続きと古いセッションを区別できなくなる）。
  */
 async function saveCheckoutSessionId(
   userId: number,
   claimedAt: string,
   sessionId: string
-): Promise<void> {
+): Promise<boolean> {
   const supabase = await createAdminSupabaseClient();
-  const { error } = await supabase
+  const { data: saved, error } = await supabase
     .from("stripe_subscriptions")
     .update({ checkout_session_id: sessionId })
     .eq("user_id", userId)
-    .eq("checkout_claimed_at", claimedAt);
+    .eq("checkout_claimed_at", claimedAt)
+    .select("id");
 
   if (error) {
     console.error("Checkoutセッションid保存エラー:", error.message);
+    return false;
   }
+  // 0行＝claimを奪われている。このセッションは自分の処理権に紐付けられない
+  return (saved?.length ?? 0) > 0;
 }
 
 /**

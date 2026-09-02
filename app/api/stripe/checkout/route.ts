@@ -7,6 +7,7 @@ import {
 } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import {
+  CheckoutCreationError,
   claimCheckoutSlot,
   createCheckoutSessionForUser,
   fetchSubscriptionPrice,
@@ -79,10 +80,15 @@ export async function POST() {
       );
       return NextResponse.json({ url });
     } catch (error) {
-      // Checkoutへ進めなかったので処理権を返す。成功した場合の解除は、決済完了時の
-      // ミラー更新（activateUserFromCheckoutSession）が行う
       console.error("Checkoutセッション作成エラー:", error);
-      await releaseCheckoutSlot(auth.userId, claim.claimedAt);
+      // 処理権を返してよいのは「Stripe側に有効なセッションが残っていない」と確定できる
+      // 場合だけ。通信タイムアウト等で作成済みかどうか不明なまま解放すると、記録されて
+      // いない有効なセッションの上にもう1件作れてしまう（その場合の処理権は、次回の
+      // claim時の復旧（Customerに紐づく有効セッションの再利用）またはTTLで解ける）
+      const releasable = !(error instanceof CheckoutCreationError) || error.claimReleasable;
+      if (releasable) {
+        await releaseCheckoutSlot(auth.userId, claim.claimedAt);
+      }
       return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
     }
   } catch (error) {

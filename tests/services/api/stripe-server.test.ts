@@ -4,6 +4,8 @@ import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 const {
   mockSessionsCreate,
   mockSessionsRetrieve,
+  mockSessionsList,
+  mockSessionsExpire,
   mockPricesRetrieve,
   mockCustomersCreate,
   MockStripeError,
@@ -11,15 +13,19 @@ const {
   class MockStripeError extends Error {
     code?: string;
     param?: string;
-    constructor(opts: { message: string; code?: string; param?: string }) {
+    statusCode?: number;
+    constructor(opts: { message: string; code?: string; param?: string; statusCode?: number }) {
       super(opts.message);
       this.code = opts.code;
       this.param = opts.param;
+      this.statusCode = opts.statusCode;
     }
   }
   return {
     mockSessionsCreate: vi.fn(),
     mockSessionsRetrieve: vi.fn(),
+    mockSessionsList: vi.fn(),
+    mockSessionsExpire: vi.fn(),
     mockPricesRetrieve: vi.fn(),
     mockCustomersCreate: vi.fn(),
     MockStripeError,
@@ -28,7 +34,14 @@ const {
 
 vi.mock("stripe", () => {
   class MockStripe {
-    checkout = { sessions: { create: mockSessionsCreate, retrieve: mockSessionsRetrieve } };
+    checkout = {
+      sessions: {
+        create: mockSessionsCreate,
+        retrieve: mockSessionsRetrieve,
+        list: mockSessionsList,
+        expire: mockSessionsExpire,
+      },
+    };
     prices = { retrieve: mockPricesRetrieve };
     customers = { create: mockCustomersCreate };
   }
@@ -466,6 +479,7 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
 
   beforeEach(() => {
     mockSessionsRetrieve.mockReset();
+    mockSessionsList.mockReset();
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_dummy");
     vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "service-role-dummy");
   });
@@ -560,11 +574,70 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
     expect(fake.getRow()?.checkout_claimed_at).toBe(now.toISOString());
   });
 
-  it("セッションを記録できていない手続き中の行は、TTL経過後にのみ奪える", async () => {
+  it("セッションid未記録でも、Customerに紐づく有効なセッションがあれば再利用する", async () => {
+    // セッション作成後・記録前に落ちた場合の復旧。記録漏れのまま新しいセッションを作らない
     const fake = createRaceSupabaseClient({
       status: CHECKOUT_PENDING_STATUS,
       checkout_claimed_at: now.toISOString(),
       checkout_session_id: null,
+      stripe_customer_id: "cus_1",
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
+    mockSessionsList.mockResolvedValue({
+      data: [{ id: "cs_untracked", status: "open", url: "https://checkout.stripe.com/untracked" }],
+    });
+
+    const result = await claimCheckoutSlot(5, new Date(now.getTime() + 60 * 1000));
+
+    expect(result).toEqual({ outcome: "reusable", url: "https://checkout.stripe.com/untracked" });
+    // 処理権の確保時刻以降に作られたセッションだけを対象にする（過去の契約を拾わない）
+    expect(mockSessionsList).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: "cus_1", created: { gte: expect.any(Number) } })
+    );
+    expect(fake.getRow()?.checkout_claimed_at).toBe(now.toISOString());
+  });
+
+  it("セッションid未記録で有効なセッションが無ければ、TTLを待たずに奪える", async () => {
+    const fake = createRaceSupabaseClient({
+      status: CHECKOUT_PENDING_STATUS,
+      checkout_claimed_at: now.toISOString(),
+      checkout_session_id: null,
+      stripe_customer_id: "cus_1",
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
+    mockSessionsList.mockResolvedValue({ data: [] });
+
+    const claimedAt = new Date(now.getTime() + 60 * 1000);
+    const result = await claimCheckoutSlot(5, claimedAt);
+
+    expect(result).toMatchObject({ outcome: "claimed", stripeCustomerId: "cus_1" });
+    expect(fake.getRow()?.checkout_claimed_at).toBe(claimedAt.toISOString());
+  });
+
+  it("セッションid未記録でも、決済済みのセッションがあれば奪わない", async () => {
+    const fake = createRaceSupabaseClient({
+      status: CHECKOUT_PENDING_STATUS,
+      checkout_claimed_at: now.toISOString(),
+      checkout_session_id: null,
+      stripe_customer_id: "cus_1",
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
+    mockSessionsList.mockResolvedValue({
+      data: [{ id: "cs_paid", status: "complete", url: null }],
+    });
+
+    const result = await claimCheckoutSlot(5, new Date(now.getTime() + CHECKOUT_CLAIM_TTL_MS + 1));
+
+    expect(result).toEqual({ outcome: "conflict" });
+  });
+
+  it("セッションもCustomerも記録されていない手続き中の行は、TTL経過後にのみ奪える", async () => {
+    // Customerが無い＝Stripeへ照会する手がかりが無いため、TTLによる救済に委ねる
+    const fake = createRaceSupabaseClient({
+      status: CHECKOUT_PENDING_STATUS,
+      checkout_claimed_at: now.toISOString(),
+      checkout_session_id: null,
+      stripe_customer_id: null,
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
 
@@ -598,6 +671,7 @@ describe("claimCheckoutSlot（並行リクエスト）", () => {
 
   beforeEach(() => {
     mockSessionsRetrieve.mockReset();
+    mockSessionsList.mockReset();
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_dummy");
     vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "service-role-dummy");
   });
@@ -682,6 +756,7 @@ describe("createCheckoutSessionForUser", () => {
 
   beforeEach(() => {
     mockSessionsCreate.mockReset();
+    mockSessionsExpire.mockReset();
     mockCustomersCreate.mockReset();
     mockPricesRetrieve.mockReset();
     mockPrice();
@@ -799,6 +874,7 @@ describe("createCheckoutSessionForUser", () => {
           message: "No such customer",
           code: "resource_missing",
           param: "customer",
+          statusCode: 404,
         })
       )
       .mockResolvedValueOnce({ url: "https://checkout.stripe.com/fallback", id: "cs_fallback" });
@@ -830,10 +906,15 @@ describe("createCheckoutSessionForUser", () => {
     expect(fake.getRow()?.stripe_customer_id).toBe("cus_replacement");
   });
 
-  it("Customer以外のStripeエラーは再試行せずthrowする", async () => {
+  it("Customer以外のStripeエラーは再試行しない。4xxは「作成されていない」と確定でき処理権を解放できる", async () => {
     mockSessionsCreate.mockReset();
     mockSessionsCreate.mockRejectedValue(
-      new MockStripeError({ message: "No such price", code: "resource_missing", param: "price" })
+      new MockStripeError({
+        message: "No such price",
+        code: "resource_missing",
+        param: "price",
+        statusCode: 400,
+      })
     );
 
     await expect(
@@ -845,9 +926,66 @@ describe("createCheckoutSessionForUser", () => {
         claimedAt,
         now
       )
-    ).rejects.toThrow("No such price");
+    ).rejects.toMatchObject({ name: "CheckoutCreationError", claimReleasable: true });
     expect(mockCustomersCreate).not.toHaveBeenCalled();
     expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("通信エラー等ではセッションが作られた可能性が残るため、処理権を解放させない", async () => {
+    mockSessionsCreate.mockReset();
+    // タイムアウト等でHTTPステータスを受け取れていないケース
+    mockSessionsCreate.mockRejectedValue(new MockStripeError({ message: "Connection timeout" }));
+
+    await expect(
+      createCheckoutSessionForUser(
+        5,
+        "auth-uuid",
+        "trial@example.com",
+        "cus_existing",
+        claimedAt,
+        now
+      )
+    ).rejects.toMatchObject({ name: "CheckoutCreationError", claimReleasable: false });
+  });
+
+  it("セッションidを記録できない場合は、作ったセッションを失効させてから失敗する", async () => {
+    // 処理権を奪われている等で0行更新になるケース
+    const mockClient = createMockSupabaseClient({
+      tableResults: { stripe_subscriptions: { data: [], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    mockSessionsExpire.mockResolvedValue({ id: "cs_new", status: "expired" });
+
+    await expect(
+      createCheckoutSessionForUser(
+        5,
+        "auth-uuid",
+        "trial@example.com",
+        "cus_existing",
+        claimedAt,
+        now
+      )
+    ).rejects.toMatchObject({ name: "CheckoutCreationError", claimReleasable: true });
+    expect(mockSessionsExpire).toHaveBeenCalledWith("cs_new");
+  });
+
+  it("失効にも失敗した場合は処理権を解放させない（有効なセッションが残りうるため）", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { stripe_subscriptions: { data: [], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    mockSessionsExpire.mockRejectedValue(new Error("expire failed"));
+
+    await expect(
+      createCheckoutSessionForUser(
+        5,
+        "auth-uuid",
+        "trial@example.com",
+        "cus_existing",
+        claimedAt,
+        now
+      )
+    ).rejects.toMatchObject({ name: "CheckoutCreationError", claimReleasable: false });
   });
 });
 
