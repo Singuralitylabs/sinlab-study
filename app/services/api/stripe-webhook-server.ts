@@ -4,6 +4,7 @@ import {
   ACTIVATABLE_SUBSCRIPTION_STATUSES,
   assertServiceRoleConfigured,
   getStripeClient,
+  NON_CURRENT_SUBSCRIPTION_STATUSES,
   TERMINAL_SUBSCRIPTION_STATUSES,
 } from "@/app/services/api/stripe-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
@@ -95,13 +96,15 @@ export async function activateUserFromCheckoutSession(session: Stripe.Checkout.S
     return { error: existingFetchError.message, activated: false, currentPeriodEnd: null };
   }
 
-  // 既に別の契約が現行（終端状態でない）として記録されている場合、古いセッションの
+  // 既に別の契約が現行（終端状態でも手続き中でもない）として記録されている場合、古いセッションの
   // リプレイでミラー行を上書きしない（現行契約のWebhook照合が壊れるため）。
-  // subscriptionId（session由来の生の文字列）で比較するため、Stripe APIの呼び出しは不要
+  // subscriptionId（session由来の生の文字列）で比較するため、Stripe APIの呼び出しは不要。
+  // Checkout作成の処理権を確保しただけの行（CHECKOUT_PENDING_STATUS）はまだ契約を表さないため
+  // 対象外とする（対象にすると、今まさに完了したCheckoutの昇格自体がスキップされてしまう）
   const isStaleReplay =
     existingRow != null &&
     existingRow.stripe_subscription_id !== subscriptionId &&
-    !TERMINAL_SUBSCRIPTION_STATUSES.includes(existingRow.status);
+    !NON_CURRENT_SUBSCRIPTION_STATUSES.includes(existingRow.status);
   if (isStaleReplay) {
     return { error: null, activated: false, currentPeriodEnd: null };
   }
@@ -118,6 +121,8 @@ export async function activateUserFromCheckoutSession(session: Stripe.Checkout.S
       status: subscription.status,
       cancel_at_period_end: subscription.cancel_at_period_end,
       current_period_end: currentPeriodEnd,
+      // 実ステータスを書けた時点でCheckout作成の処理権は役目を終える（claimの正常な解除）
+      checkout_claimed_at: null,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id" }

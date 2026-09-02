@@ -147,6 +147,35 @@ describe("activateUserFromCheckoutSession", () => {
     expect(result.activated).toBe(true);
   });
 
+  it("Checkout手続き中（claim済み）の行はリプレイ扱いせず、ミラーを更新して昇格する", async () => {
+    // claim行は stripe_subscription_id が無く status も番兵値のため、
+    // 「別の現行契約が記録済み」と誤判定すると今まさに完了したCheckoutの昇格ごと失われる
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: [
+          { data: { stripe_subscription_id: null, status: "checkout_pending" }, error: null },
+          { data: null, error: null },
+        ],
+        users: { data: [{ id: 1 }], error: null },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(getStripeClient).mockReturnValue({
+      subscriptions: { retrieve: vi.fn().mockResolvedValue(subscription) },
+    } as never);
+
+    const result = await activateUserFromCheckoutSession(baseSession as never);
+
+    expect(result.error).toBeNull();
+    expect(result.activated).toBe(true);
+    // ミラー更新時に処理権（claim）も解除する
+    const subBuilder = mockClient.from.mock.results[1].value;
+    expect(subBuilder.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "active", checkout_claimed_at: null }),
+      { onConflict: "user_id" }
+    );
+  });
+
   it("client_reference_idが無い場合はmetadata.user_idにフォールバックする", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {

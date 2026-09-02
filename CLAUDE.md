@@ -80,6 +80,7 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 
 - 機能全体の有効・無効は環境変数 `STRIPE_ENABLED` で切り替わる。判定は `isStripeEnabled()`（`app/constants/stripe.ts`）に集約し、`"true"` 以外はフェイルクローズで無効。決済系の導線・APIを追加するときは、無効時の経路も必ず用意する。
 - アプリの認可は `users.status` / `membership_type` が唯一の真実。`users` にStripe関連カラムは追加せず、課金状態は `stripe_subscriptions` のミラーで保持する。
+- **Checkout は「処理権の確保 → Customer の確保 → Stripe 呼び出し」の順を崩さない。** `claimCheckoutSlot()` / `releaseCheckoutSlot()`（`stripe_subscriptions.user_id` の UNIQUE 制約による排他）を素の SELECT チェックへ戻すと、並行リクエストで二重契約・二重課金になる。Stripe Customer はユーザーごとに一意（`ensureCheckoutCustomer()` で確保・保存し以後は再利用）に保ち、`customer_email` による暗黙の作成に戻さない。「現に契約がある」の判定は `NON_CURRENT_SUBSCRIPTION_STATUSES` で行う（終端状態だけでは手続き中の行を契約中と誤判定する）
 - **`/upgrade` の法定表示と Checkout 可否は連動させる。** 実請求額を確認できないときは画面の Checkout を無効化し、`POST /api/stripe/checkout` も 503 にする。判定は `isChargeableSubscriptionPrice()`、料金フォールバックは `DISPLAY_MONTHLY_PRICE_JPY`、決済日は `BILLING_ANCHOR_DAY_OF_MONTH` を参照し、リテラルをハードコードしない。詳細は `docs/specification.md` 2.11節。
 
 ### データモデル (Supabase/PostgreSQL)

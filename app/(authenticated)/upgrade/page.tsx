@@ -13,7 +13,7 @@ import { USER_STATUS } from "@/app/constants/user";
 import {
   fetchStripeSubscriptionByUserId,
   fetchSubscriptionPrice,
-  TERMINAL_SUBSCRIPTION_STATUSES,
+  NON_CURRENT_SUBSCRIPTION_STATUSES,
 } from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
@@ -55,9 +55,9 @@ export default async function UpgradePage() {
       fetchedSubscription = data;
     }
   }
-  // 解約済み（終端状態）の行が残っているだけの場合は「契約中」として扱わない
+  // 解約済み（終端状態）・Checkout手続き中の行が残っているだけの場合は「契約中」として扱わない
   const subscription =
-    fetchedSubscription && !TERMINAL_SUBSCRIPTION_STATUSES.includes(fetchedSubscription.status)
+    fetchedSubscription && !NON_CURRENT_SUBSCRIPTION_STATUSES.includes(fetchedSubscription.status)
       ? fetchedSubscription
       : null;
 
