@@ -287,8 +287,8 @@ describe("rejectUser", () => {
 // fetchUserIdsWithStripeSubscription
 // ----------------------------------------------------------------
 describe("fetchUserIdsWithStripeSubscription", () => {
-  it("終端状態をSQL側で除外するクエリを発行し、返された行をそのままIDにマップする", async () => {
-    // 終端状態の除外はSQL側（.not）で行うため、モックは絞り込み後の行を返す想定
+  it("契約が無い行をSQL側で除外するクエリを発行し、返された行をそのままIDにマップする", async () => {
+    // 終端状態・Checkout手続き中の除外はSQL側（.not）で行うため、モックは絞り込み後の行を返す想定
     const mockClient = createMockSupabaseClient({
       tableResults: {
         stripe_subscriptions: {
@@ -307,7 +307,7 @@ describe("fetchUserIdsWithStripeSubscription", () => {
     expect(builder.not).toHaveBeenCalledWith(
       "status",
       "in",
-      "(canceled,unpaid,incomplete_expired,paused)"
+      "(canceled,unpaid,incomplete_expired,paused,checkout_pending)"
     );
   });
 

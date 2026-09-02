@@ -303,7 +303,12 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 初回請求は日割り（`proration_behavior: "create_prorations"`）とする。無償（`"none"`）にすると「27日直前に登録して1ヶ月弱を無償で使い切って解約する」抜け道ができるため。ただし、アンカー直前の登録では日割り額がStripeの最低請求額（JPY ¥50）を下回りCheckout作成・決済が失敗しうるため、`isProrationBelowMinimum()` で判定し、下回る場合に限り `proration_behavior` を `"none"` に切り替える。無償化されるウィンドウの長さは月額に反比例する（月額¥3000なら約12.4時間、月額が低いほど広がる）。最大でも1ヶ月弱を無償利用できる全面 `"none"` 採用時とは規模が異なるため抜け道にはならない、という判断のもとで採用している。判定にはPriceの `unit_amount`（モジュールスコープのTTLキャッシュ、`fetchSubscriptionPrice()` と共有）を用いる。Priceが1ヶ月間隔でない（誤設定）場合は判定できないため `false`（日割りあり）を返す。Price取得自体が一時的に失敗した場合も、Checkout作成全体を失敗させず `create_prorations`（安全側）にフォールバックする。
 
-`proration_behavior: "none"` を選んだ根拠は「アンカーまでの残り時間が短いこと」だが、Checkout Sessionは既定で作成から最大24時間有効なため、無償ウィンドウ内にセッションを開いたままアンカー通過後まで決済を遅らせて完了されると、Stripeがサブスク作成時点で次のアンカー（さらに1ヶ月先）を採用し、意図せず約1ヶ月分が無償になりうる（このガードが排除しようとした抜け道の再現）。これを防ぐため、`proration_behavior: "none"` の場合に限り、CheckoutセッションのStripe側有効期限（`expires_at`）をアンカー時刻でクランプする（Stripeの制約で作成時刻から最低30分は必要なため、アンカーがそれより近い場合は30分を優先する）。
+**Checkout Sessionの有効期限**: `expires_at` はStripe既定の24時間ではなく、常に作成から32分（Stripeが要求する最低30分＋安全マージン2分）に固定する。理由は2つある。
+
+1. 二重Checkoutの排他（後述のclaim）は、セッションを特定できない場合にTTL経過で解除する設計のため。TTL経過時点で古いセッションがまだ決済可能だと、新旧2つのセッションが同時に成立しうる。TTLは「セッション有効期限 + 猶予10分」としてコードで導出し（`CHECKOUT_CLAIM_TTL_MS`）、この不等号を構造的に保証する
+2. `proration_behavior: "none"`（アンカー直前の無償化）を選んだ根拠は「アンカーまでの残り時間が短いこと」だが、24時間有効なセッションを無償ウィンドウ内に開いたままアンカー通過後まで決済を遅らせて完了されると、Stripeがサブスク作成時点で次のアンカー（さらに1ヶ月先）を採用し、意図せず約1ヶ月分が無償になりうる（このガードが排除しようとした抜け道の再現）。有効期限が32分なら、アンカーまで32分以上ある間は必ずアンカー前に失効する
+
+アンカーまで32分未満の場合はStripeの最低30分要件によりアンカーを跨ぐ余地が残るが、無償ウィンドウ自体が数時間〜半日程度の中のさらに一部でしかなく実害は小さい（完全に排除するには「アンカー直前は新規Checkout作成を一時停止する」設計が必要でスコープ外）。
 
 **画面構成**:
 
@@ -322,7 +327,7 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 Checkoutの決済手段はカードのみに限定する（コンビニ払い等の遅延通知系決済手段は使わない）。これらの決済手段では `checkout.session.completed` 発火時点でも未入金（`incomplete`）のままになり得るため、「Checkoutから戻った瞬間に必ず利用開始できる」という設計上の前提を成立させるための制約である。
 
-`stripe_subscriptions` のミラー更新は、既に**別の**現行契約（終端状態でない行）が記録済みの場合はスキップする。古い成功ページURLのリプレイで現行契約のミラー行が上書きされると、以後の解約Webhookが `stripe_subscription_id` で照合できなくなり、解約しても降格されなくなる事故につながるため。
+`stripe_subscriptions` のミラー更新は、既に**別の**現行契約（終端状態でも手続き中でもない行）が記録済みの場合はスキップする。古い成功ページURLのリプレイで現行契約のミラー行が上書きされると、以後の解約Webhookが `stripe_subscription_id` で照合できなくなり、解約しても降格されなくなる事故につながるため。Checkout作成の処理権を確保しただけの行（`checkout_pending`）はまだ契約を表さないため、この判定の対象外とする（対象にすると、いま完了したCheckoutの昇格自体がスキップされてしまう）。ミラー更新時には `checkout_claimed_at` / `checkout_session_id` をNULLに戻し、処理権を正常に解除する。ただし解除するのは、claimが保持しているセッション自身の処理（またはセッションを特定できない場合）に限る。
 
 Stripe APIからのライブ状態取得は、ミラー更新の直前（上記の既存行チェックの後）に1回だけ行い、その結果をミラー更新とusers更新の両方に使うことで、取得時点から書き込み時点までの間隔を最小化している。それでもミラー更新〜users更新の間に解約Webhookが並行実行される競合は理論上残る（完全な排他制御にはDBトランザクション/RPCが必要でスコープ外）。
 
@@ -334,14 +339,18 @@ Stripe APIからのライブ状態取得は、ミラー更新の直前（上記�
 
 | エンドポイント | 内容 |
 |:--|:--|
-| `POST /api/stripe/checkout` | Checkoutセッションを作成しURLを返す。お試しユーザー以外は403、既に契約中・手続き中のサブスク行がある場合は409（解約済みの行が残っているだけの場合は再契約を許可する）。解約済み等で既存のStripe Customerがあれば再利用し、毎回新規作成しない（旧Customerの孤児化・請求履歴の分裂を防ぐ）。再利用しようとした既存Customerが（ダッシュボードでの削除等により）Stripe側に存在しない場合は、新規Customerでの作成にフォールバックする（そうしないと当該ユーザーが恒久的にCheckoutへ進めなくなるため）。セッション作成直前に `fetchSubscriptionPrice()` で実額を確認し、取得失敗・非月額・非JPYのいずれでも503を返す（`/upgrade` の disabled だけでは古いタブや直接POSTを防げないため） |
+| `POST /api/stripe/checkout` | Checkoutセッションを作成しURLを返す。お試しユーザー以外は403。Checkoutセッションを作る前に処理権（claim）を原子的に確保し、確保できない場合（契約中・決済済みで反映待ち）は409を返す（解約済みの行が残っているだけの場合は再契約を許可する）。手続き中のセッションがまだ有効な場合は、新しいセッションを作らず同じURLを返す。Stripe Customerはユーザーごとに一意に確保して再利用し、毎回新規作成しない（旧Customerの孤児化・請求履歴の分裂、およびPortalから解約できない契約を防ぐ）。保存済みCustomerが（ダッシュボードでの削除等により）Stripe側に存在しない場合は、Customerを作り直して保存したうえで1度だけ再試行する（そうしないと当該ユーザーが恒久的にCheckoutへ進めなくなるため）。実額の確認（`fetchSubscriptionPrice()`）は処理権の確保より前に行い、取得失敗・非月額・非JPYのいずれでも503を返す（`/upgrade` の disabled だけでは古いタブや直接POSTを防げないため。Priceの取得はセッションを作らないため、claimの前でも二重作成の防止に影響しない）。処理権を確保した後にCheckoutを作れなかった場合は、必ず解放してから応答する |
 | `POST /api/stripe/webhook` | Stripeからのイベントを受信。生ボディで署名検証し、`event.id` のclaim（原子的な処理権確保）に成功した場合のみイベント種別ごとに処理する |
-| `POST /api/stripe/portal` | Customer Portalセッションを作成しURLを返す。自身の `stripe_subscriptions` 行がないユーザーは404 |
+| `POST /api/stripe/portal` | Customer Portalセッションを作成しURLを返す。自身の `stripe_subscriptions` 行がない、またはCustomer未確保（Checkout手続き中に離脱した行のみ）のユーザーは404 |
 
-checkout / portal は自分の行を読むSELECTのみのため service_role を必要としない。DB書き込みを行うのはWebhookハンドラ（`app/services/api/stripe-webhook-server.ts` の各関数）のみで、いずれも冒頭で `assertServiceRoleConfigured()` により `SUPABASE_SERVICE_ROLE_KEY` の設定を明示的に検証してから `createAdminSupabaseClient()` を使う。Checkoutの決済手段は `payment_method_types: ["card"]` で明示的にカードのみへ限定する。
+portal は自分の行を読むSELECTのみだが、checkout は処理権のclaim/releaseで `stripe_subscriptions` を書き込む。DB書き込みを行う関数（Webhookハンドラの各関数と、`claimCheckoutSlot()` / `releaseCheckoutSlot()` / Customer保存）は、いずれも冒頭で `assertServiceRoleConfigured()` により `SUPABASE_SERVICE_ROLE_KEY` の設定を明示的に検証してから `createAdminSupabaseClient()` を使う（未設定時にCookieクライアントへ静かにフォールバックしてRLSに阻まれるのを防ぐ）。Checkoutの決済手段は `payment_method_types: ["card"]` で明示的にカードのみへ限定する。
 
 **エッジケース**:
-- 二重Checkout: `stripe_subscriptions.user_id` のUNIQUE制約 + `/api/stripe/checkout` 側の409チェックで防止する（ミラー行の存在を前提とするガードのため、いずれも未完了のまま2つのCheckoutセッションを同時に完了させる完全同時実行までは対象外）
+- 二重Checkout: Checkoutセッションを作る前に `stripe_subscriptions` へ「決済手続き中」行（`status = 'checkout_pending'`）をINSERTして処理権を確保し、`user_id` のUNIQUE制約で排他する（`stripe_events` のclaim/releaseと同じパターン。詳細は[データベース設計書](./database.md)3.9）。決済完了までミラー行が存在しない時間帯を突く並行リクエストも、片方だけがCheckoutセッションを作成できる。Checkout作成に失敗した場合は処理権を解放する
+- Stripe Customerの一意性: Customerはユーザーごとに1つだけ確保して保存し、以後は必ず再利用する。Checkoutごとに新規作成されると、ミラー行に載らないCustomerの契約が生まれ `/api/stripe/portal` から解約できなくなるため。作成にはユーザー単位で固定したidempotency keyを用い、保存前にリトライが起きても同じCustomerが返るようにする
+- 手続き中に離脱した場合: `checkout_pending` の行は残るが「契約中」とは扱わない（`/upgrade` の契約中表示・管理画面の契約中バッジ・Portalの404判定はいずれも `NON_CURRENT_SUBSCRIPTION_STATUSES` で除外する）。同じユーザーが再度アップグレードを押した場合は、claimが保持するセッション（`checkout_session_id`）の状態で分岐する。`open` なら同じURLへ案内（2つ目のセッションを作らずに再開でき、TTLを待たされない）、`expired` なら処理権を奪って新しいセッションを作成、`complete`（決済済みで反映待ち）なら409。セッションを特定できない場合のみTTL（`CHECKOUT_CLAIM_TTL_MS`）の経過を待つ
+- 進行中のCheckoutと古い成功ページURLのリプレイ: 有効なclaimが**別の**セッションを保持している場合、`activateUserFromCheckoutSession()` はミラー更新も処理権の解除も行わない。これを行うと、まだ決済可能なセッションを残したまま次のCheckoutを作れてしまう。加えて、確認から書き込みまでの間に処理権が動いた場合に備え、書き込みは「確認した時点の所有状態」を条件にした条件付きUPDATE（CAS）で行い、0行更新なら読み直して判断からやり直す
+- Checkout作成が失敗したか判別できない場合: Stripeが4xxで拒否したときのみ「セッションは作られていない」と確定できるため処理権を解放する。通信タイムアウト・5xxでは解放せず、次回のclaim時にCustomerへ紐づく有効なセッションを照会して再利用するか、TTLの経過に委ねる（未記録の有効なセッションの上に2件目を作らないため）
 - Checkout手続き中に管理者が手動承認した場合: 決済完了時点で一般有料会員として上書きされる（許容）。降格側は `membership_type=general` ガードで巻き込みを防止する
 - Checkout手続き中に管理者が却下した場合: 決済完了時点でユーザーが `rejected` であれば昇格しない（却下判断を決済完了で上書きしない）
 - Webhookイベントの順序逆転・再送・同一event.idの並行配信: `stripe_events` へのINSERTをclaimとして使う原子的な排他制御と、Stripe APIから再取得したライブ状態のみを書き込むハンドラ設計で吸収する（イベントに埋め込まれたスナップショットは信用しない）
@@ -973,3 +982,6 @@ flowchart TD
 | 2026年8月 | `/upgrade` に課金の法定表示を追加（#134）。料金取得失敗時のフォールバック、非月額・非JPY時は月額を断定しないこと、Checkout API側の料金確認ガード（503）、契約状況取得失敗時は解約ポリシー文言を出さないことを2.11節に追記 |
 | 2026年8月 | OAuthコールバックの users INSERT 失敗時と論理削除済みユーザー再ログイン時に `/login?error=registration_failed` へリダイレクトし、許可リスト方式でメッセージ表示する旨を2.4・2.5・8.2・9.5.1節に追記（#44） |
 | 2026年9月 | #44 レビュー反映: service_role 未設定と存在確認失敗は `error` なしの `/login` へフェイルクローズすること、エラー導線ではセッション Cookie を付けないことを 8.2・9.5.1 に追記 |
+| 2026年9月 | 並行Checkoutによる二重契約・二重課金の対策（#103）を2.11節に追記：Checkoutセッション作成前の処理権claim/releaseによる排他、Stripe Customerのユーザー単位の一意化、Checkout Sessionの有効期限を32分に固定する変更 |
+| 2026年9月 | 上記へのレビュー指摘を反映（#103）：手続き中セッションの状態（open/expired/complete）に応じた再利用・奪取・待機、進行中claimを壊さないリプレイガード、TTLの導出（セッション有効期限＋猶予）を2.11節に追記 |
+| 2026年9月 | 追加レビュー指摘を反映（#103）：ミラー更新のCAS、Checkout作成の結果が不明な場合は処理権を解放しないこと、セッションid未記録時のCustomer経由の復旧を2.11節に追記 |

@@ -4,6 +4,7 @@ import {
   ACTIVATABLE_SUBSCRIPTION_STATUSES,
   assertServiceRoleConfigured,
   getStripeClient,
+  NON_CURRENT_SUBSCRIPTION_STATUSES,
   TERMINAL_SUBSCRIPTION_STATUSES,
 } from "@/app/services/api/stripe-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
@@ -84,49 +85,32 @@ export async function activateUserFromCheckoutSession(session: Stripe.Checkout.S
   assertServiceRoleConfigured();
   const supabase = await createAdminSupabaseClient();
 
-  const { data: existingRow, error: existingFetchError } = await supabase
-    .from("stripe_subscriptions")
-    .select("stripe_subscription_id, status")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (existingFetchError) {
-    console.error("stripe_subscriptions取得エラー:", existingFetchError.message);
-    return { error: existingFetchError.message, activated: false, currentPeriodEnd: null };
+  // 「既存行の確認 → ミラー更新」は複数ステートメントに分かれるため、確認から書き込みまでの
+  // 間に別リクエストが処理権を確保しうる（古い成功ページURLの処理が、後発の有効な処理権を
+  // 消してしまう競合）。書き込み条件に「確認した時点の所有状態」を載せ（CAS）、変わって
+  // いた場合は読み直して判断からやり直す
+  let mirrored: MirrorWriteResult = { kind: "conflict" };
+  for (let attempt = 0; attempt < MIRROR_WRITE_MAX_ATTEMPTS; attempt++) {
+    mirrored = await writeCheckoutMirror(supabase, userId, session, customerId, subscriptionId);
+    if (mirrored.kind !== "conflict") {
+      break;
+    }
   }
 
-  // 既に別の契約が現行（終端状態でない）として記録されている場合、古いセッションの
-  // リプレイでミラー行を上書きしない（現行契約のWebhook照合が壊れるため）。
-  // subscriptionId（session由来の生の文字列）で比較するため、Stripe APIの呼び出しは不要
-  const isStaleReplay =
-    existingRow != null &&
-    existingRow.stripe_subscription_id !== subscriptionId &&
-    !TERMINAL_SUBSCRIPTION_STATUSES.includes(existingRow.status);
-  if (isStaleReplay) {
+  if (mirrored.kind === "error") {
+    return { error: mirrored.message, activated: false, currentPeriodEnd: null };
+  }
+  if (mirrored.kind === "skipped") {
     return { error: null, activated: false, currentPeriodEnd: null };
   }
-
-  const stripe = getStripeClient();
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-  const currentPeriodEnd = toIsoOrNull(subscription.items.data[0]?.current_period_end);
-
-  const { error: subscriptionError } = await supabase.from("stripe_subscriptions").upsert(
-    {
-      user_id: userId,
-      stripe_customer_id: customerId,
-      stripe_subscription_id: subscription.id,
-      status: subscription.status,
-      cancel_at_period_end: subscription.cancel_at_period_end,
-      current_period_end: currentPeriodEnd,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id" }
-  );
-
-  if (subscriptionError) {
-    console.error("stripe_subscriptions更新エラー:", subscriptionError.message);
-    return { error: subscriptionError.message, activated: false, currentPeriodEnd: null };
+  if (mirrored.kind === "conflict") {
+    // 競合が解消しなかった。Webhookは500を返して再送に委ね、successページはエラー表示にする
+    const message = "他の処理と競合したためミラー行を更新できませんでした";
+    console.error("stripe_subscriptions更新エラー:", message);
+    return { error: message, activated: false, currentPeriodEnd: null };
   }
+
+  const { subscription, currentPeriodEnd } = mirrored;
 
   if (!ACTIVATABLE_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
     return { error: null, activated: false, currentPeriodEnd: null };
@@ -150,6 +134,115 @@ export async function activateUserFromCheckoutSession(session: Stripe.Checkout.S
 
   const activated = (updatedUsers?.length ?? 0) > 0;
   return { error: null, activated, currentPeriodEnd: activated ? currentPeriodEnd : null };
+}
+
+/** ミラー更新の再試行回数。1回目で競合した場合に、読み直して判断からやり直す */
+const MIRROR_WRITE_MAX_ATTEMPTS = 3;
+
+type MirrorWriteResult =
+  | { kind: "written"; subscription: Stripe.Subscription; currentPeriodEnd: string | null }
+  | { kind: "skipped" } // 書いてはいけない状況（進行中の別セッション・古いリプレイ）
+  | { kind: "conflict" } // 確認から書き込みまでの間に行が変わった（読み直して再試行）
+  | { kind: "error"; message: string };
+
+/**
+ * 既存行を確認し、書いてよい場合に限りミラー行を更新する（1回分の試行）。
+ *
+ * 書き込みは「確認した時点の所有状態（`checkout_claimed_at` / `stripe_subscription_id`）が
+ * そのまま残っていること」を条件にした条件付きUPDATE（行が無い場合はINSERT）で行う。
+ * 条件に合致しなければ0行更新となり `conflict` を返す。
+ */
+async function writeCheckoutMirror(
+  supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
+  userId: number,
+  session: Stripe.Checkout.Session,
+  customerId: string,
+  subscriptionId: string
+): Promise<MirrorWriteResult> {
+  const { data: existingRow, error: existingFetchError } = await supabase
+    .from("stripe_subscriptions")
+    .select("stripe_subscription_id, status, checkout_claimed_at, checkout_session_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (existingFetchError) {
+    console.error("stripe_subscriptions取得エラー:", existingFetchError.message);
+    return { kind: "error", message: existingFetchError.message };
+  }
+
+  // 進行中のCheckout（有効な処理権）が、**別の**セッションの処理で壊されないようにする。
+  // このガードが無いと、処理権を保持したまま古い成功ページURLを再訪しただけで
+  // `checkout_claimed_at` が解除され、まだ決済可能なセッションを残したまま次のCheckoutを
+  // 作れてしまう（#103の再発）。セッションidは、URLを返す前に必ず記録している
+  const heldSessionId =
+    existingRow?.checkout_claimed_at != null ? existingRow.checkout_session_id : null;
+  if (heldSessionId !== null && heldSessionId !== session.id) {
+    return { kind: "skipped" };
+  }
+
+  // 既に別の契約が現行（終端状態でも手続き中でもない）として記録されている場合、古いセッションの
+  // リプレイでミラー行を上書きしない（現行契約のWebhook照合が壊れるため）。
+  // subscriptionId（session由来の生の文字列）で比較するため、Stripe APIの呼び出しは不要。
+  // Checkout作成の処理権を確保しただけの行（CHECKOUT_PENDING_STATUS）はまだ契約を表さないため
+  // 対象外とする（対象にすると、今まさに完了したCheckoutの昇格自体がスキップされてしまう）
+  const isStaleReplay =
+    existingRow != null &&
+    existingRow.stripe_subscription_id !== subscriptionId &&
+    !NON_CURRENT_SUBSCRIPTION_STATUSES.includes(existingRow.status);
+  if (isStaleReplay) {
+    return { kind: "skipped" };
+  }
+
+  const stripe = getStripeClient();
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  const currentPeriodEnd = toIsoOrNull(subscription.items.data[0]?.current_period_end);
+  const mirror = {
+    stripe_customer_id: customerId,
+    stripe_subscription_id: subscription.id,
+    status: subscription.status,
+    cancel_at_period_end: subscription.cancel_at_period_end,
+    current_period_end: currentPeriodEnd,
+    // 実ステータスを書けた時点でCheckout作成の処理権は役目を終える（正常な解除）
+    checkout_claimed_at: null,
+    checkout_session_id: null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (!existingRow) {
+    const { error: insertError } = await supabase
+      .from("stripe_subscriptions")
+      .insert({ user_id: userId, ...mirror });
+    if (!insertError) {
+      return { kind: "written", subscription, currentPeriodEnd };
+    }
+    // 一意制約違反＝確認後に行が作られた（処理権の確保など）。読み直して判断し直す
+    if (insertError.code === "23505") {
+      return { kind: "conflict" };
+    }
+    console.error("stripe_subscriptions更新エラー:", insertError.message);
+    return { kind: "error", message: insertError.message };
+  }
+
+  const base = supabase.from("stripe_subscriptions").update(mirror).eq("user_id", userId);
+  const withClaimCas =
+    existingRow.checkout_claimed_at === null
+      ? base.is("checkout_claimed_at", null)
+      : base.eq("checkout_claimed_at", existingRow.checkout_claimed_at);
+  const withCas =
+    existingRow.stripe_subscription_id === null
+      ? withClaimCas.is("stripe_subscription_id", null)
+      : withClaimCas.eq("stripe_subscription_id", existingRow.stripe_subscription_id);
+
+  const { data: updated, error: updateError } = await withCas.select("id");
+
+  if (updateError) {
+    console.error("stripe_subscriptions更新エラー:", updateError.message);
+    return { kind: "error", message: updateError.message };
+  }
+  if ((updated?.length ?? 0) === 0) {
+    return { kind: "conflict" };
+  }
+  return { kind: "written", subscription, currentPeriodEnd };
 }
 
 /**

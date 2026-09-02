@@ -277,33 +277,39 @@ export type Database = {
       stripe_subscriptions: {
         Row: {
           cancel_at_period_end: boolean;
+          checkout_claimed_at: string | null;
+          checkout_session_id: string | null;
           created_at: string;
           current_period_end: string | null;
           id: number;
           status: string;
-          stripe_customer_id: string;
+          stripe_customer_id: string | null;
           stripe_subscription_id: string | null;
           updated_at: string;
           user_id: number;
         };
         Insert: {
           cancel_at_period_end?: boolean;
+          checkout_claimed_at?: string | null;
+          checkout_session_id?: string | null;
           created_at?: string;
           current_period_end?: string | null;
           id?: number;
           status: string;
-          stripe_customer_id: string;
+          stripe_customer_id?: string | null;
           stripe_subscription_id?: string | null;
           updated_at?: string;
           user_id: number;
         };
         Update: {
           cancel_at_period_end?: boolean;
+          checkout_claimed_at?: string | null;
+          checkout_session_id?: string | null;
           created_at?: string;
           current_period_end?: string | null;
           id?: number;
           status?: string;
-          stripe_customer_id?: string;
+          stripe_customer_id?: string | null;
           stripe_subscription_id?: string | null;
           updated_at?: string;
           user_id?: number;

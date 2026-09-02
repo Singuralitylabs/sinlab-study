@@ -127,6 +127,8 @@ erDiagram
         varchar status
         bool cancel_at_period_end
         timestamptz current_period_end
+        timestamptz checkout_claimed_at
+        text checkout_session_id
     }
     stripe_events {
         text id PK
@@ -365,21 +367,35 @@ erDiagram
 
 ### 3.9 stripe_subscriptions（Stripeサブスクリプション）
 
-ユーザーごとのStripe課金状態のミラー（1ユーザー1行）。アプリの認可判定は従来どおり `users.status` / `users.membership_type` が唯一の真実であり、このテーブルは課金状態の参照・管理画面表示用に徹する。書き込みはWebhook（`/api/stripe/webhook`）と successページ（`/upgrade/success`）から service_role 経由でのみ行われ、通常クライアントからの書き込みポリシーは存在しない（6.6参照）。
+ユーザーごとのStripe課金状態のミラー（1ユーザー1行）。アプリの認可判定は従来どおり `users.status` / `users.membership_type` が唯一の真実であり、このテーブルは課金状態の参照・管理画面表示用に徹する。加えて、`user_id` のUNIQUE制約をCheckout作成の排他制御（処理権のclaim）にも用いる（後述）。書き込みはWebhook（`/api/stripe/webhook`）・successページ（`/upgrade/success`）・Checkout作成API（`/api/stripe/checkout`、claim/releaseのみ）から service_role 経由でのみ行われ、通常クライアントからの書き込みポリシーは存在しない（6.6参照）。
 
 | カラム | 型 | NULL | デフォルト | 説明 |
 |:--|:--|:--:|:--|:--|
 | id | SERIAL | NO | auto increment | ID |
 | user_id | INTEGER | NO | - | `users.id`（UNIQUE, ON DELETE CASCADE）。1ユーザー1行 |
-| stripe_customer_id | TEXT | NO | - | Stripe Customer ID（`cus_...`、UNIQUE） |
+| stripe_customer_id | TEXT | YES | NULL | Stripe Customer ID（`cus_...`、UNIQUE）。ユーザーごとに一意で、確保後は必ず再利用する。claim直後〜Customer作成前のみ NULL |
 | stripe_subscription_id | TEXT | YES | NULL | Stripe Subscription ID（`sub_...`、UNIQUE） |
-| status | VARCHAR(30) | NO | - | Stripeの `subscription.status` をそのままミラー（例: `active`, `past_due`, `canceled`, `unpaid`）。CHECK制約は設けず、Stripe側の値追加にそのまま追従する |
+| status | VARCHAR(30) | NO | - | Stripeの `subscription.status` をそのままミラー（例: `active`, `past_due`, `canceled`, `unpaid`）。CHECK制約は設けず、Stripe側の値追加にそのまま追従する。例外として、Checkout作成の処理権を確保している間だけ番兵値 `checkout_pending`（Stripe側には存在しない値）が入る |
 | cancel_at_period_end | BOOLEAN | NO | false | 期間終了時に解約予定かどうか |
 | current_period_end | TIMESTAMPTZ | YES | NULL | 現在の請求期間の終了日時 |
+| checkout_claimed_at | TIMESTAMPTZ | YES | NULL | Checkout作成の処理権を確保した日時。NULLは処理権なし（未確保・解放済み・契約記録済み） |
+| checkout_session_id | TEXT | YES | NULL | 処理権が確保しているCheckout Session（`cs_...`）。次のリクエストがStripeで有効性を確認するために保持する |
 | created_at | TIMESTAMPTZ | NO | now() | 作成日時 |
 | updated_at | TIMESTAMPTZ | NO | now() | 更新日時（トリガーで自動更新） |
 
-> **行が解約後も残り続ける点に注意**: `DELETE` は行わず常に `user_id` を key に `upsert` するため、一度でも契約したユーザーの行は解約後（`status` が `canceled` / `unpaid` / `incomplete_expired` / `paused` などの終端状態）も残り続ける。「現在契約中かどうか」を判定する箇所（再契約可否・管理画面のバッジ表示など）は、行の有無だけでなく `status` が終端状態でないことも確認する必要がある（アプリ側では `TERMINAL_SUBSCRIPTION_STATUSES` 定数で判定）。
+> **行が解約後も残り続ける点に注意**: `DELETE` は行わず常に `user_id` を key に `upsert` するため、一度でも契約したユーザーの行は解約後（`status` が `canceled` / `unpaid` / `incomplete_expired` / `paused` などの終端状態）も残り続ける。Checkout手続きを中断したユーザーの行（`checkout_pending`）も同様に残る。「現在契約中かどうか」を判定する箇所（`/upgrade` の契約中表示・管理画面のバッジ表示など）は、行の有無だけでなく `status` が契約を表す値であることも確認する必要がある（アプリ側では `NON_CURRENT_SUBSCRIPTION_STATUSES` 定数＝終端状態＋`checkout_pending` を除外して判定）。
+>
+> **Checkout作成の排他（claim/release）**: `POST /api/stripe/checkout` は、Checkout Sessionを作る**前に** `status = 'checkout_pending'` の行をINSERTして処理権を確保する（`claimCheckoutSlot()`）。`user_id` のUNIQUE制約により、同一ユーザーの並行リクエストは片方だけがclaimに成功する（`stripe_events` のclaimと同じパターン）。既に行がある場合は「契約が記録されておらず（`NON_CURRENT_SUBSCRIPTION_STATUSES`）、かつ奪ってよいclaimの」行だけを条件付きUPDATEで奪う（条件評価と書き込みが1文で完結するためレースにならない）。claim時に契約の痕跡（`stripe_subscription_id`・`cancel_at_period_end`・`current_period_end`）は消さない。`paused` / `unpaid` はStripe側で復帰しうるため、`stripe_subscription_id` を消すと復帰時のWebhookを `syncSubscriptionStatus()` が照合できず取りこぼす。
+>
+> Checkoutを作れなかった場合は `checkout_claimed_at` をNULLに戻して解放し（`releaseCheckoutSlot()`。確保済みCustomerを失わないよう行自体は削除しない）、決済完了時は昇格処理のミラー更新が実ステータスと `checkout_claimed_at = NULL` を書き込むことで解除される。
+>
+> **有効なclaimが残っている場合の判断**: `checkout_session_id` のセッション状態をStripeへ問い合わせ、`open`（まだ決済できる）ならそのURLを再利用し（2つ目のセッションを作らず、手続きを中断したユーザーも即座にやり直せる）、`expired` なら参照した claim をそのまま奪い（claimの確保時刻をCASの条件にする）、`complete`（決済済みで反映待ち）なら奪わない。`checkout_session_id` が記録されていない場合は、Customerに紐づく「claim確保以降に作られたセッション」を照会して同じ判定を行う（作成時刻の下限をclaim確保時刻に置き、過去の契約で完了したセッションを拾わない）。Stripeへ照会できない場合のみ、`CHECKOUT_CLAIM_TTL_MS`（`app/services/api/stripe-server.ts`）経過で再claim可能とする救済に委ねる。TTLはセッション有効期限（32分）＋猶予（10分）としてコードで導出し、「TTL経過時点で当該セッションは必ず失効している」という不等号を構造的に保証する。
+>
+> **処理権を解放してよい条件**: Checkout作成に失敗した場合でも、解放してよいのは「Stripe側に有効なセッションが残っていないと確定できる」ときだけ（Stripeが4xxで拒否した場合、またはセッションを失効させられた場合）。通信タイムアウト・5xxのように作成済みか判別できない場合は解放せず、次回claim時の照会かTTLに委ねる。セッションidを記録できなかった場合は、作成したセッションを失効させてから失敗させる（記録できないと、そのセッションと処理権を紐付けられず、リプレイで処理権が解除されたときに二重契約の窓が開くため）。
+>
+> **ミラー更新のCAS**: 「既存行の確認 → ミラー更新」は複数ステートメントに分かれるため、`activateUserFromCheckoutSession()` の書き込みは、確認した時点の `checkout_claimed_at` / `stripe_subscription_id` が変わっていないことを条件にした条件付きUPDATE（行が無い場合はINSERT）で行う。0行更新なら読み直して判断からやり直す。これが無いと、古い成功ページURLの処理が、確認後に発生した新しい処理権を後から消してしまう。
+>
+> **Stripe Customerはユーザーごとに一意**: `stripe_customer_id` は最初のCheckout作成時に確保して保存し、以後は必ず再利用する（`ensureCheckoutCustomer()`）。Checkoutごとに新しいCustomerが作られると、ミラーに載らないCustomerの契約が生まれ、`/api/stripe/portal`（ミラーの `stripe_customer_id` しか見ない）から解約できなくなるため。
 >
 > **`users` への昇格反映は「現に有効」なときのみ**: `stripe_subscriptions` のミラー自体はStripeから取得したステータスをそのまま保存するが、`users.status`/`membership_type` を昇格させるのは `status` が `ACTIVATABLE_SUBSCRIPTION_STATUSES`（`active` / `trialing`）のときのみ（`app/services/api/stripe-server.ts`）。Checkout Sessionは決済後もStripe側に不変オブジェクトとして残るため、`payment_status` だけで判定すると解約後・未入金時にも昇格してしまう経路を防ぐための制御。
 
@@ -572,7 +588,7 @@ user_id = (select get_user_id())
 |:--|:--|:--|:--|
 | Users can view own subscription, admins can view all | SELECT | 本人 / admin（全件） | `user_id = (select get_user_id()) OR (select get_user_role()) = 'admin'` |
 
-INSERT / UPDATE / DELETE のポリシーは定義していない。昇格・降格を伴う書き込みはアプリの認可判定と密結合しているため、Webhook（`/api/stripe/webhook`）と successページ（`/upgrade/success`）から service_role 経由でのみ行う。
+INSERT / UPDATE / DELETE のポリシーは定義していない。昇格・降格を伴う書き込みはアプリの認可判定と密結合しているため、Webhook（`/api/stripe/webhook`）・successページ（`/upgrade/success`）・Checkout作成API（`/api/stripe/checkout` の処理権claim/release）から service_role 経由でのみ行う。
 
 ### 6.7 stripe_events
 
@@ -604,6 +620,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | `01_schema/004_add_membership_type.sql` | users に会員種別 `membership_type` を追加し、既存の `active` ユーザーを `community` にバックフィル |
 | `01_schema/005_add_stripe_tables.sql` | `stripe_subscriptions` / `stripe_events` テーブルを追加 |
 | `01_schema/006_add_thumbnails_bucket.sql` | テーマサムネイル用の `thumbnails` 公開バケットを作成 |
+| `01_schema/007_add_checkout_claim.sql` | `stripe_subscriptions` に `checkout_claimed_at` / `checkout_session_id` を追加し、`stripe_customer_id` をNULL許容へ変更（Checkout作成の排他制御用） |
 | `02_rls/001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
 | `02_rls/002_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し |
 | `02_rls/003_trial_user_policies.sql` | `get_user_status()` の追加と、お試しユーザー制限を含むポリシーへの差し替え（learning_contents の SELECT、user_progress / submissions の書き込み） |
@@ -661,3 +678,4 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | 2026年8月 | 別セッションからの追加レビュー指摘を反映：`TERMINAL_SUBSCRIPTION_STATUSES`に`paused`を追加（トライアル終了後の未払いによる一時停止を終端状態として扱う） |
 | 2026年8月 | 上記に対する独立レビューの指摘を反映：`releaseEventClaim()`の3者競合対策（`processed_at`一致条件）を3.10節に追記 |
 | 2026年8月 | テーマサムネイルのStorage管理に対応：`thumbnails` 公開バケットとStorageポリシーを追加。`learning_themes.image_url` の保存形式（3.1）・RLS（6.8）・マイグレーション一覧を更新 |
+| 2026年9月 | 並行Checkoutによる二重契約の対策（#103）に対応：`stripe_subscriptions` に `checkout_claimed_at` / `checkout_session_id` を追加し `stripe_customer_id` をNULL許容へ変更。claim/releaseによるCheckout作成の排他、既存セッションの状態に応じた再利用・奪取・待機、Stripe Customerの一意化を3.9節・6.6節・マイグレーション一覧に追記 |

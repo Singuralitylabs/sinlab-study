@@ -4,17 +4,20 @@ import {
   logDisplayPriceDrift,
   STRIPE_DISABLED_MESSAGE,
   SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
-  type SubscriptionPrice,
 } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import {
-  createCheckoutSession,
+  CheckoutCreationError,
+  claimCheckoutSlot,
+  createCheckoutSessionForUser,
   fetchSubscriptionPrice,
   isStripeEnabled,
-  TERMINAL_SUBSCRIPTION_STATUSES,
+  releaseCheckoutSlot,
 } from "@/app/services/api/stripe-server";
-import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
+
+/** 契約中・決済確認中のいずれでも同じ案内を返す（契約状態を推測させないため） */
+const CHECKOUT_CONFLICT_MESSAGE = "既に決済手続き中、またはご契約済みです";
 
 export async function POST() {
   if (!isStripeEnabled()) {
@@ -36,26 +39,10 @@ export async function POST() {
       );
     }
 
-    const supabase = await createAdminSupabaseClient();
-    const { data: existing, error: fetchError } = await supabase
-      .from("stripe_subscriptions")
-      .select("id, status, stripe_customer_id")
-      .eq("user_id", auth.userId)
-      .maybeSingle();
-
-    if (fetchError) {
-      console.error("サブスク存在チェックエラー:", fetchError.message);
-      return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
-    }
-    if (existing && !TERMINAL_SUBSCRIPTION_STATUSES.includes(existing.status)) {
-      return NextResponse.json(
-        { error: "既に決済手続き中、またはご契約済みです" },
-        { status: 409 }
-      );
-    }
-
-    // UIの disabled だけでは古いタブ・直接POSTを防げないため、作成直前にも実額を確認する
-    let price: SubscriptionPrice;
+    // UIの disabled だけでは古いタブ・直接POSTを防げないため、作成直前にも実額を確認する。
+    // Priceの取得（キャッシュ付きの読み取り）はCheckout Sessionを作らないため、処理権を
+    // 確保する前に行い、料金を確認できないだけのリクエストでDBを書かないようにする
+    let price: { amount: number | null; currency: string };
     try {
       price = await fetchSubscriptionPrice();
     } catch (error) {
@@ -67,15 +54,43 @@ export async function POST() {
     }
     logDisplayPriceDrift(price.amount);
 
-    // 解約済み等で終端状態の行が残っている場合、以前作成済みのCustomerを再利用する
-    // （毎回新規Customerを作らないことで、保存済みカード・請求履歴の孤児化を防ぐ）
-    const { url } = await createCheckoutSession(
-      auth.userId,
-      auth.user.id,
-      auth.user.email,
-      existing?.stripe_customer_id ?? null
-    );
-    return NextResponse.json({ url });
+    // Checkout Sessionを作る前に処理権を原子的に確保する。素のSELECTによる存在チェック
+    // だけでは、決済完了までミラー行が存在しない時間帯に並行リクエストがすり抜け、2つの
+    // Checkout Sessionが作られて二重契約・二重課金になる（#103）
+    const claim = await claimCheckoutSlot(auth.userId);
+    if (claim.outcome === "error") {
+      return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
+    }
+    if (claim.outcome === "conflict") {
+      return NextResponse.json({ error: CHECKOUT_CONFLICT_MESSAGE }, { status: 409 });
+    }
+    // 手続き中のセッションがまだ有効な場合は、新しく作らず同じURLへ案内する
+    // （2つ目のセッションを作らないまま、中断・再操作をやり直せるようにする）
+    if (claim.outcome === "reusable") {
+      return NextResponse.json({ url: claim.url });
+    }
+
+    try {
+      const { url } = await createCheckoutSessionForUser(
+        auth.userId,
+        auth.user.id,
+        auth.user.email,
+        claim.stripeCustomerId,
+        claim.claimedAt
+      );
+      return NextResponse.json({ url });
+    } catch (error) {
+      console.error("Checkoutセッション作成エラー:", error);
+      // 処理権を返してよいのは「Stripe側に有効なセッションが残っていない」と確定できる
+      // 場合だけ。通信タイムアウト等で作成済みかどうか不明なまま解放すると、記録されて
+      // いない有効なセッションの上にもう1件作れてしまう（その場合の処理権は、次回の
+      // claim時の復旧（Customerに紐づく有効セッションの再利用）またはTTLで解ける）
+      const releasable = !(error instanceof CheckoutCreationError) || error.claimReleasable;
+      if (releasable) {
+        await releaseCheckoutSlot(auth.userId, claim.claimedAt);
+      }
+      return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
+    }
   } catch (error) {
     console.error("Checkout作成APIエラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
