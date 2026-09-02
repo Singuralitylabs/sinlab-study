@@ -218,8 +218,12 @@ describe("POST /api/upload-pdf 自動採番", () => {
     expect(upload).not.toHaveBeenCalled();
   });
 
-  it("採番した番号が既に存在した場合（409）は重複と分かるメッセージを返す", async () => {
-    mockStorage({ uploadError: { status: 409, statusCode: "Duplicate" } });
+  // storage-js は重複時に { status: 409, statusCode: "409" } を返す（"Duplicate" は message 側）
+  it.each([
+    ["status と statusCode の両方", { status: 409, statusCode: "409" }],
+    ["statusCode のみ", { statusCode: "409" }],
+  ])("採番した番号が既に存在した場合（409・%s）は重複と分かるメッセージを返す", async (_label, uploadError) => {
+    mockStorage({ uploadError });
 
     const response = await POST(request() as never);
 

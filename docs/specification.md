@@ -558,7 +558,7 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 |:--|:--|:--|
 | `file` | ○ | アップロードする PDF ファイル |
 | `folder` | - | 保存先フォルダ（コーススラッグ。例: `gas-advanced`）。英小文字・数字・ハイフンのみ |
-| `slideNumber` | - | スライド番号（1以上の整数）。`folder` 指定時のみ有効 |
+| `slideNumber` | - | スライド番号。`folder` 指定時のみ有効。**文字列全体が半角数字のみ**で1以上の安全な整数（`Number.isSafeInteger()`）である場合のみ受理し、それ以外（`1abc` / `1.5` / `+1` / `1e2` / 全角数字 / 前後に空白を含む値 / 桁あふれ）は400。空文字・未指定は「指定なし」として自動採番へ回る（`folder` と異なり空白の除去は行わない）。解釈は `parsePositiveInteger()`（`app/lib/positive-integer.ts`）に集約する |
 
 **命名規約**: スライドは `slides` バケット内にオブジェクトキー `<コーススラッグ>/slide-NN.pdf` で保存する（NN は最低2桁のゼロ埋め。1〜99は `01`〜`99`、100以上は `100` のように桁が増える）。例: キー `gas/slide-01.pdf`・`gas-advanced/slide-03.pdf` → 公開URL `.../storage/v1/object/public/slides/gas/slide-01.pdf`。
 
@@ -568,7 +568,7 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 3. 保存先オブジェクトキーの決定
    - `folder` 指定あり: `<folder>/slide-NN.pdf`
      - `slideNumber` 指定あり → その番号で保存（同名ファイルは上書き）
-     - `slideNumber` 指定なし → 同フォルダ内の既存 `slide-NN.pdf` を走査し、最大値+1 で自動採番（走査失敗時は500）
+     - `slideNumber` 指定なし → 同フォルダ内の既存 `slide-NN.pdf` を走査し、最大値+1 で自動採番（走査失敗時は500）。番号部分の解釈は指定時と同じ基準のため、安全な整数として読めないファイル名は採番の基準から除外する
    - `folder` 指定なし: 後方互換のため `<timestamp>_<sanitizedName>` でバケット直下に保存
 4. Supabase Storage の `slides` バケットにアップロード
 5. 公開 URL と保存パスを返却

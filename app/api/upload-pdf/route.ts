@@ -155,8 +155,10 @@ export async function POST(request: NextRequest) {
 
     if (uploadError) {
       console.error("PDFアップロードエラー:", uploadError);
-      // 自動採番中に同名ファイルが存在した場合（409 Conflict）はその旨を明示
-      const isDuplicate = uploadError.status === 409 || uploadError.statusCode === "Duplicate";
+      // 自動採番中に同名ファイルが存在した場合（409 Conflict）はその旨を明示。
+      // storage-js は statusCode をレスポンスボディの statusCode / code、無ければ
+      // HTTPステータス文字列から組み立てるため、"Duplicate" ではなく "409" になる
+      const isDuplicate = uploadError.status === 409 || uploadError.statusCode === "409";
       const message = isDuplicate
         ? "同じ番号のスライドが既に存在します。番号を指定して上書きしてください"
         : "アップロードに失敗しました";
