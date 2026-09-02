@@ -631,6 +631,7 @@ export async function approveUser(
  * 対象が admin の場合は却下不可（`change_role` と同様の管理者保護）。事前SELECTでの
  * チェックだと判定と更新の間に競合の余地があり、SELECT失敗時にフェイルオープンにも
  * なるため、UPDATE自体に条件を折り込み原子的に判定する（`approveUser()` と同じ方針）。
+ * service_role クライアントはRLSを迂回するため `is_deleted = false` も明示的に必須。
  * 対象が admin・存在しない・削除済みのいずれの場合も updated: false を返す。
  */
 export async function rejectUser(
@@ -646,6 +647,7 @@ export async function rejectUser(
       updated_at: new Date().toISOString(),
     })
     .eq("id", userId)
+    .eq("is_deleted", false)
     .neq("role", USER_ROLE.ADMIN)
     .select("id");
 
@@ -660,6 +662,7 @@ export async function rejectUser(
 /**
  * ユーザーのロールを変更する。対象が admin の場合は変更不可（降格・誤操作防止）。
  * 却下と同じ理由でUPDATEに条件を折り込み原子的に判定する（`rejectUser()` 参照）。
+ * ロール変更は active ユーザーのみが対象（`docs/specification.md` 2.7）。
  */
 export async function changeUserRole(
   userId: number,
@@ -671,6 +674,8 @@ export async function changeUserRole(
     .from("users")
     .update({ role, updated_at: new Date().toISOString() })
     .eq("id", userId)
+    .eq("is_deleted", false)
+    .eq("status", USER_STATUS.ACTIVE)
     .neq("role", USER_ROLE.ADMIN)
     .select("id");
 

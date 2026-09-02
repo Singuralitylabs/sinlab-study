@@ -46,10 +46,13 @@ export async function PATCH(request: Request) {
       if (error) {
         return NextResponse.json({ error: "ロール更新に失敗しました" }, { status: 500 });
       }
-      // 0行更新 = 対象が admin（降格・誤操作防止のため変更不可）、または存在しない・削除済みユーザー
+      // 0行更新 = 対象が admin（降格・誤操作防止のため変更不可）・active以外・存在しない・削除済みのいずれか
       if (!updated) {
         return NextResponse.json(
-          { error: "ロールを変更できません（管理者ユーザーか、存在しません）" },
+          {
+            error:
+              "ロールを変更できません（管理者ユーザーか、active以外のユーザーか、存在しません）",
+          },
           { status: 403 }
         );
       }

@@ -284,6 +284,8 @@ describe("rejectUser", () => {
       expect.objectContaining({ status: "rejected", membership_type: null })
     );
     expect(builder.eq).toHaveBeenCalledWith("id", 3);
+    // service_role はRLSを迂回するため is_deleted=false をクエリ自体に必須で課す
+    expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
     // 対象が admin の場合は却下不可（管理者保護をUPDATEに原子的に折り込む。#104）
     expect(builder.neq).toHaveBeenCalledWith("role", "admin");
     expect(builder.select).toHaveBeenCalledWith("id");
@@ -328,11 +330,15 @@ describe("changeUserRole", () => {
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.update).toHaveBeenCalledWith(expect.objectContaining({ role: "maintainer" }));
     expect(builder.eq).toHaveBeenCalledWith("id", 3);
+    // service_role はRLSを迂回するため is_deleted=false をクエリ自体に必須で課す
+    expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
+    // ロール変更は active ユーザーのみ対象（docs/specification.md 2.7）
+    expect(builder.eq).toHaveBeenCalledWith("status", "active");
     // 対象が admin の場合はロール変更不可（降格・誤操作防止）
     expect(builder.neq).toHaveBeenCalledWith("role", "admin");
   });
 
-  it("対象が admin・存在しない・削除済みのいずれかで0行更新の場合、updated: false を返す", async () => {
+  it("対象が admin・active以外・存在しない・削除済みのいずれかで0行更新の場合、updated: false を返す", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: { users: { data: [], error: null } },
     });
