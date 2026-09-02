@@ -13,6 +13,9 @@ const FOLDER_PATTERN = /^[a-z0-9-]+$/;
 // 命名規約に沿ったスライドファイル名（slide-NN.pdf）
 const SLIDE_FILE_PATTERN = /^slide-(\d+)\.pdf$/;
 
+/** 自動採番できる番号が安全な整数の範囲を超えたことを示す（一覧取得の失敗と区別する） */
+class SlideNumberExhaustedError extends Error {}
+
 /**
  * 指定フォルダ内の既存 slide-NN.pdf を走査し、次に使う連番（最大値+1）を返す。
  * 既存が無ければ 1 を返す。
@@ -42,7 +45,14 @@ async function getNextSlideNumber(
     }
   }
 
-  return maxNumber + 1;
+  const nextNumber = maxNumber + 1;
+  // 採番した番号自体が安全な整数でないと、次回の走査でそのファイルを読み飛ばして
+  // 同じ番号を採番し続ける（409で永久に失敗する）ため、増やす前に枯渇を検出する
+  if (!Number.isSafeInteger(nextNumber)) {
+    throw new SlideNumberExhaustedError("自動採番できる番号の上限に達しました");
+  }
+
+  return nextNumber;
 }
 
 export async function POST(request: NextRequest) {
@@ -110,7 +120,8 @@ export async function POST(request: NextRequest) {
       }
 
       let slideNumber: number;
-      if (slideNumberValue !== null && slideNumberValue !== "") {
+      // 未指定（フィールド自体が無い）だけを自動採番の対象とし、空文字は不正入力として扱う
+      if (slideNumberValue !== null) {
         // 番号指定時：その番号で保存（既存ファイルは上書き）
         const parsed = parsePositiveInteger(slideNumberValue);
         if (parsed === null) {
@@ -126,6 +137,12 @@ export async function POST(request: NextRequest) {
         try {
           slideNumber = await getNextSlideNumber(supabase, folder);
         } catch (listError) {
+          if (listError instanceof SlideNumberExhaustedError) {
+            return NextResponse.json(
+              { error: "自動採番できる番号の上限に達しました。スライド番号を指定してください" },
+              { status: 400 }
+            );
+          }
           console.error("スライド一覧取得エラー:", listError);
           return NextResponse.json(
             { error: "スライド一覧の取得に失敗しました。時間をおいて再度お試しください" },
