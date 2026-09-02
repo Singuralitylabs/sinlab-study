@@ -32,6 +32,7 @@ beforeEach(() => {
 // ----------------------------------------------------------------
 describe("activateUserFromCheckoutSession", () => {
   const baseSession = {
+    id: "cs_123",
     client_reference_id: "1",
     metadata: { user_id: "1", auth_id: "auth-uuid" },
     customer: "cus_123",
@@ -153,7 +154,15 @@ describe("activateUserFromCheckoutSession", () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         stripe_subscriptions: [
-          { data: { stripe_subscription_id: null, status: "checkout_pending" }, error: null },
+          {
+            data: {
+              stripe_subscription_id: null,
+              status: "checkout_pending",
+              checkout_claimed_at: "2026-08-10T00:00:00.000Z",
+              checkout_session_id: "cs_123",
+            },
+            error: null,
+          },
           { data: null, error: null },
         ],
         users: { data: [{ id: 1 }], error: null },
@@ -171,9 +180,42 @@ describe("activateUserFromCheckoutSession", () => {
     // ミラー更新時に処理権（claim）も解除する
     const subBuilder = mockClient.from.mock.results[1].value;
     expect(subBuilder.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "active", checkout_claimed_at: null }),
+      expect.objectContaining({
+        status: "active",
+        checkout_claimed_at: null,
+        checkout_session_id: null,
+      }),
       { onConflict: "user_id" }
     );
+  });
+
+  it("進行中のCheckout（別セッションのclaim）は古いセッションのリプレイで解除されない", async () => {
+    // 解約済みユーザーが再度アップグレードを開始した直後に、古い成功ページURLを再訪した状況。
+    // ここでclaimを解除すると、まだ決済可能なセッションを残したまま次のCheckoutを作れてしまう
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: {
+          data: {
+            stripe_subscription_id: null,
+            status: "checkout_pending",
+            checkout_claimed_at: "2026-08-10T00:00:00.000Z",
+            checkout_session_id: "cs_in_progress",
+          },
+          error: null,
+        },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(getStripeClient).mockReturnValue({
+      subscriptions: { retrieve: vi.fn().mockResolvedValue(subscription) },
+    } as never);
+
+    const result = await activateUserFromCheckoutSession(baseSession as never);
+
+    expect(result.error).toBeNull();
+    expect(result.activated).toBe(false);
+    // 既存行チェックのみで、upsert（＝claimの解除）は行われない
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
 
   it("client_reference_idが無い場合はmetadata.user_idにフォールバックする", async () => {

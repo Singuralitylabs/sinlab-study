@@ -278,6 +278,7 @@ export type Database = {
         Row: {
           cancel_at_period_end: boolean;
           checkout_claimed_at: string | null;
+          checkout_session_id: string | null;
           created_at: string;
           current_period_end: string | null;
           id: number;
@@ -290,6 +291,7 @@ export type Database = {
         Insert: {
           cancel_at_period_end?: boolean;
           checkout_claimed_at?: string | null;
+          checkout_session_id?: string | null;
           created_at?: string;
           current_period_end?: string | null;
           id?: number;
@@ -302,6 +304,7 @@ export type Database = {
         Update: {
           cancel_at_period_end?: boolean;
           checkout_claimed_at?: string | null;
+          checkout_session_id?: string | null;
           created_at?: string;
           current_period_end?: string | null;
           id?: number;

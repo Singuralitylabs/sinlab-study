@@ -16,11 +16,18 @@
 --   2. claimの保持時刻を記録する `checkout_claimed_at` を追加する。
 --      NULL = claimなし（解放済み・契約記録済み）、値あり = 手続き中。
 --      放置されたclaimはTTL経過後に奪い直せる（`stripe_events` と同じ救済）
+--   3. claimが確保したCheckout Sessionを記録する `checkout_session_id` を追加する。
+--      次のリクエストが「その手続きがまだ有効か」をStripeに問い合わせ、
+--      open ならURLを再利用、expired なら奪取、complete なら待機、と判断できるようにする
+--      （TTLだけに頼ると、中断したユーザーがTTLまで締め出される・決済済みで反映待ちの行を
+--      奪ってしまう、という問題が残る）
 -- =====================================================
 
 ALTER TABLE stripe_subscriptions ALTER COLUMN stripe_customer_id DROP NOT NULL;
 
 ALTER TABLE stripe_subscriptions ADD COLUMN IF NOT EXISTS checkout_claimed_at TIMESTAMPTZ;
+
+ALTER TABLE stripe_subscriptions ADD COLUMN IF NOT EXISTS checkout_session_id TEXT;
 
 COMMENT ON TABLE stripe_subscriptions IS
   'ユーザーごとのStripeサブスクリプション状態のミラー。書き込みはservice_roleのみ（Webhook/successページの昇格処理と、Checkout作成APIによる処理権のclaim/release）';
@@ -30,3 +37,5 @@ COMMENT ON COLUMN stripe_subscriptions.status IS
   'Stripeのsubscription.statusをそのままミラー（例: active, past_due, canceled, unpaid）。ただしCheckout作成の処理権を確保している間だけは番兵値 checkout_pending が入る（Stripe側には存在しない値）';
 COMMENT ON COLUMN stripe_subscriptions.checkout_claimed_at IS
   'Checkout作成の処理権を確保した日時。NULLは処理権なし。TTL経過後は他リクエストが奪い直せる';
+COMMENT ON COLUMN stripe_subscriptions.checkout_session_id IS
+  '処理権が確保しているCheckout Session（cs_...）。次のリクエストがStripeで有効性を確認し、再利用・奪取・待機を判断するために保持する';

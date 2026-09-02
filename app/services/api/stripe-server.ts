@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { PostgrestError } from "@supabase/supabase-js";
 import Stripe from "stripe";
 import {
@@ -87,14 +88,24 @@ export const NON_CURRENT_SUBSCRIPTION_STATUSES = [
 ];
 
 /**
- * Checkout作成の処理権が放置されたとみなすまでの時間（分）。この時間を超えたclaimは
- * 他のリクエストが奪い直せる（`stripe_events` のclaim TTLと同じ救済）。
- *
- * Checkout Sessionの有効期限（`CHECKOUT_SESSION_LIFETIME_MS` = 32分）より必ず長くすること。
- * 短いと、まだ決済可能な古いセッションが残ったまま次のCheckoutを作れてしまい、
- * 二重契約の窓が再び開く。
+ * claimを確保してからCheckout Sessionが実際に作成されるまでの猶予。
+ * `claimCheckoutSlot()` の時刻（`claimedAt`）と、Stripeがセッションを作る時刻には、
+ * Customer作成・DB書き込み・リトライ分のずれがある。TTLをこの分だけ上乗せすることで、
+ * 「TTL経過時点で当該セッションは必ず失効している」という不等号を構造的に保証する。
  */
-export const CHECKOUT_CLAIM_TTL_MINUTES = 35;
+const CHECKOUT_CLAIM_GRACE_MS = 10 * 60 * 1000;
+
+/**
+ * Checkout作成の処理権が放置されたとみなすまでの時間。これを超えたclaimは他のリクエストが
+ * 奪い直せる（`stripe_events` のclaim TTLと同じ救済）。
+ *
+ * セッションの状態をStripeに問い合わせられない場合の**フォールバック**であり、通常は
+ * `claimCheckoutSlot()` が既存セッションの状態（open / expired / complete）を見て
+ * 再利用・奪取・待機を判断するため、ここまで待たされることはない。
+ * セッション有効期限より必ず長くなるよう、定数から導出する（逆転すると、まだ決済可能な
+ * 古いセッションを残したまま次のCheckoutを作れてしまい二重契約の窓が再び開く）。
+ */
+export const CHECKOUT_CLAIM_TTL_MS = CHECKOUT_SESSION_LIFETIME_MS + CHECKOUT_CLAIM_GRACE_MS;
 
 /**
  * successページで「決済確認済み」とみなすCheckout Sessionの`payment_status`。
@@ -149,7 +160,7 @@ export async function createCheckoutSession(
   authId: string,
   customerId: string,
   now: Date = new Date()
-): Promise<{ url: string }> {
+): Promise<{ url: string; id: string }> {
   const priceId = process.env.STRIPE_PRICE_ID;
   if (!priceId) {
     throw new Error("Stripe環境変数が設定されていません: STRIPE_PRICE_ID");
@@ -217,7 +228,7 @@ export async function createCheckoutSession(
     throw new Error("Stripe Checkoutセッションの作成に失敗しました");
   }
 
-  return { url: session.url };
+  return { url: session.url, id: session.id };
 }
 
 /** Checkout作成が「保存済みCustomerがStripe側に存在しない」ことで失敗したか */
@@ -240,7 +251,9 @@ function isMissingCustomerError(error: unknown): boolean {
  *
  * 作成時のidempotency keyをユーザー単位で固定するのは、作成直後にDB保存へ到達できずに
  * リトライされた場合でも、Stripe側に同じCustomerを返させて孤児Customerを増やさないため
- * （Stripeのidempotency keyは24時間有効）。
+ * （Stripeのidempotency keyは24時間有効）。ただしStripeは「同じkeyで異なるパラメータ」を
+ * エラー（idempotency_error）にするため、keyにはメールアドレスのハッシュも含める
+ * （メール変更を挟んだリトライで24時間Checkoutできなくなるのを防ぐ）。
  *
  * @param claimedAt 呼び出し元が保持しているclaimの時刻。この値の行にだけ書き込むことで、
  * TTL経過でclaimを奪われていた場合に、別リクエストが確保したCustomerを上書きしない
@@ -260,8 +273,20 @@ export async function ensureCheckoutCustomer(
     authId,
     email,
     claimedAt,
-    `checkout-customer-${userId}`
+    customerIdempotencyKey(userId, email)
   );
+}
+
+/**
+ * Customer作成のidempotency key。ユーザー単位で固定しつつ、パラメータ（メールアドレス）が
+ * 変わったときはkeyも変える（Stripeは同一keyでのパラメータ不一致をエラーにするため）。
+ */
+function customerIdempotencyKey(userId: number, email: string | undefined): string {
+  const emailHash = createHash("sha256")
+    .update(email ?? "")
+    .digest("hex")
+    .slice(0, 16);
+  return `checkout-customer-${userId}-${emailHash}`;
 }
 
 async function createAndSaveCustomer(
@@ -324,8 +349,9 @@ export async function createCheckoutSessionForUser(
     claimedAt
   );
 
+  let session: { url: string; id: string };
   try {
-    return await createCheckoutSession(userId, authId, customerId, now);
+    session = await createCheckoutSession(userId, authId, customerId, now);
   } catch (error) {
     if (!isMissingCustomerError(error)) {
       throw error;
@@ -335,10 +361,13 @@ export async function createCheckoutSessionForUser(
       authId,
       email,
       claimedAt,
-      `checkout-customer-${userId}-replace-${customerId}`
+      `${customerIdempotencyKey(userId, email)}-replace-${customerId}`
     );
-    return await createCheckoutSession(userId, authId, replacementId, now);
+    session = await createCheckoutSession(userId, authId, replacementId, now);
   }
+
+  await saveCheckoutSessionId(userId, claimedAt, session.id);
+  return { url: session.url };
 }
 
 /** Stripe Customer Portalセッションを作成する（お支払い情報の管理・解約） */
@@ -496,33 +525,47 @@ export async function fetchStripeSubscriptionByUserId(userId: number): Promise<{
   return { data, error: null };
 }
 
-/** `claimCheckoutSlot()` の結果。conflictは「契約中または他リクエストが手続き中」を表す */
+/**
+ * `claimCheckoutSlot()` の結果。
+ * - claimed: 処理権を確保できた（新規・解放済み・失効セッションの奪取）
+ * - reusable: 有効なCheckout Sessionが既にあるため、そのURLを再利用する
+ * - conflict: 契約中、または決済完了済みで反映待ち
+ */
 export type CheckoutSlotClaim =
   | { outcome: "claimed"; claimedAt: string; stripeCustomerId: string | null }
+  | { outcome: "reusable"; url: string }
   | { outcome: "conflict" }
   | { outcome: "error"; message: string };
 
+/** 奪ってよいclaimの状態。`takeCheckoutSlot()` の条件付きUPDATEに載せる */
+type ClaimCondition =
+  | { kind: "released" } // 解放済み（checkout_claimed_at IS NULL）
+  | { kind: "stale"; before: string } // TTLを超えて放置された
+  | { kind: "held"; claimedAt: string }; // 参照した時点のclaimがそのまま残っている
+
 /**
- * Checkout作成の処理権をユーザー単位で原子的に確保する（#103）。**Stripe APIを呼ぶ前に**呼ぶこと。
+ * Checkout作成の処理権をユーザー単位で原子的に確保する（#103）。**Stripe Session を作る前に**
+ * 呼ぶこと。
  *
  * `stripe_subscriptions.user_id` のUNIQUE制約を排他制御に使い、「決済手続き中」を表す行
  * （status = CHECKOUT_PENDING_STATUS）のINSERTをclaimとする（`stripe_events` のclaimと同じ
  * パターン）。素のSELECTで既存行の有無を見るだけでは、決済完了までミラー行が存在しない
  * 時間帯に並行リクエストがすり抜け、2つのCheckout Sessionが作られてしまう。
  *
- * 既に行がある場合（再契約・過去に手続きを中断したユーザー）は、契約が記録されておらず
- * （NON_CURRENT_SUBSCRIPTION_STATUSES）かつ有効なclaimが無い行だけを条件付きUPDATEで奪う。
- * UPDATEの条件判定と書き込みは同一ステートメント内で行われるため、並行実行時は1つだけが
- * 1行を更新できる（PostgreSQLが行ロック取得後に条件を再評価するため、SELECT→UPDATEのような
- * レースにならない）。
+ * 既に行がある場合は、契約が記録されておらず（NON_CURRENT_SUBSCRIPTION_STATUSES）かつ
+ * 奪ってよいclaimの行だけを条件付きUPDATEで奪う。UPDATEの条件判定と書き込みは同一
+ * ステートメント内で行われるため、並行実行時は1つだけが1行を更新できる（PostgreSQLが
+ * 行ロック取得後に条件を再評価するため、SELECT→UPDATEのようなレースにならない）。
  *
- * claim後は必ず、成功時＝`activateUserFromCheckoutSession()` のミラー更新（claimを解除して
- * 実ステータスを書く）、失敗時＝`releaseCheckoutSlot()` のいずれかへ到達させること。
- * どちらにも到達できなかった場合（サーバーレス関数の強制終了等）は、
- * `CHECKOUT_CLAIM_TTL_MINUTES` 経過後に再claim可能になる。
+ * 有効なclaimが残っている場合は、その claim が持つCheckout Sessionの状態で分岐する。
+ * - open（まだ決済できる）: 新しいセッションを作らず同じURLを返す。これにより、手続きを
+ *   中断したユーザーがTTLまで締め出されることも、2つのセッションが並存することもない
+ * - expired（失効済み）: 参照した claim をそのまま奪う（CAS）
+ * - complete（決済済みで反映待ち）: 奪わない。奪うと決済済みの契約の上にもう1件作れてしまう
+ * Stripeへ問い合わせられない場合（セッション未記録・API障害）のみ、TTLによる救済に委ねる。
  *
- * @returns claimed: 確保できた場合。`stripeCustomerId` は既存行に保存済みのCustomer
- * （再利用対象。新規ユーザーはnull）。conflict: 契約中または他リクエストが手続き中
+ * @returns claimed の `stripeCustomerId` は既存行に保存済みのCustomer（再利用対象。
+ * 新規ユーザーはnull）
  */
 export async function claimCheckoutSlot(
   userId: number,
@@ -532,22 +575,15 @@ export async function claimCheckoutSlot(
   const supabase = await createAdminSupabaseClient();
   const claimedAt = now.toISOString();
 
-  const { data: inserted, error: insertError } = await supabase
-    .from("stripe_subscriptions")
-    .insert({
-      user_id: userId,
-      status: CHECKOUT_PENDING_STATUS,
-      checkout_claimed_at: claimedAt,
-    })
-    .select("stripe_customer_id")
-    .maybeSingle();
+  // 行が無ければINSERT自体がclaimになる（新規Customerのため stripeCustomerId は必ずnull）
+  const { error: insertError } = await supabase.from("stripe_subscriptions").insert({
+    user_id: userId,
+    status: CHECKOUT_PENDING_STATUS,
+    checkout_claimed_at: claimedAt,
+  });
 
   if (!insertError) {
-    return {
-      outcome: "claimed",
-      claimedAt,
-      stripeCustomerId: inserted?.stripe_customer_id ?? null,
-    };
+    return { outcome: "claimed", claimedAt, stripeCustomerId: null };
   }
   // 一意制約違反（PostgreSQLエラーコード23505）以外はDBエラーとして呼び出し元に伝播する
   if (insertError.code !== "23505") {
@@ -557,50 +593,98 @@ export async function claimCheckoutSlot(
 
   // 既に行がある。まず「claim解放済み（checkout_claimed_at IS NULL）」の行を奪う。
   // 解約済みの行が残っているだけのユーザーの再契約は、通常こちらの経路になる
-  const released = await takeCheckoutSlot(userId, claimedAt, null);
+  const released = await takeCheckoutSlot(supabase, userId, claimedAt, { kind: "released" });
   if (released.outcome !== "conflict") {
     return released;
   }
 
-  // 次に「TTLを超えて放置されたclaim」を奪う（release処理へ到達できなかった場合の救済）。
-  // 有効なclaimが生きている間はどちらの条件にも合致せず0行となり、呼び出し元は409を返す
-  const staleBefore = new Date(
-    now.getTime() - CHECKOUT_CLAIM_TTL_MINUTES * 60 * 1000
-  ).toISOString();
-  return await takeCheckoutSlot(userId, claimedAt, staleBefore);
+  // 奪えなかった＝契約中か、他の手続きが進行中。どちらかを既存行から判定する
+  const { data: existing, error: fetchError } = await supabase
+    .from("stripe_subscriptions")
+    .select("status, checkout_claimed_at, checkout_session_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error("Checkout処理権の状態取得エラー:", fetchError.message);
+    return { outcome: "error", message: fetchError.message };
+  }
+  // 契約中（終端状態でも手続き中でもない）は再契約させない
+  if (!existing || !NON_CURRENT_SUBSCRIPTION_STATUSES.includes(existing.status)) {
+    return { outcome: "conflict" };
+  }
+
+  const heldClaimedAt = existing.checkout_claimed_at;
+  if (heldClaimedAt && existing.checkout_session_id) {
+    const session = await retrieveClaimedSession(existing.checkout_session_id);
+    if (session?.status === "open" && session.url) {
+      return { outcome: "reusable", url: session.url };
+    }
+    if (session?.status === "complete") {
+      return { outcome: "conflict" };
+    }
+    if (session?.status === "expired") {
+      return await takeCheckoutSlot(supabase, userId, claimedAt, {
+        kind: "held",
+        claimedAt: heldClaimedAt,
+      });
+    }
+  }
+
+  // セッションを特定できない場合のみTTLによる救済に委ねる（claim後にセッション作成・
+  // 記録へ到達できなかった場合や、Stripeが一時的に応答しない場合）
+  const staleBefore = new Date(now.getTime() - CHECKOUT_CLAIM_TTL_MS).toISOString();
+  return await takeCheckoutSlot(supabase, userId, claimedAt, {
+    kind: "stale",
+    before: staleBefore,
+  });
+}
+
+/** claimが保持しているCheckout Sessionを取得する。取得できない場合はnull（TTL判定に委ねる） */
+async function retrieveClaimedSession(sessionId: string): Promise<Stripe.Checkout.Session | null> {
+  try {
+    return await retrieveCheckoutSession(sessionId);
+  } catch (error) {
+    console.error("手続き中Checkoutセッションの取得エラー:", error);
+    return null;
+  }
 }
 
 /**
  * `claimCheckoutSlot()` の条件付きUPDATE本体。契約が記録されていない行
- * （NON_CURRENT_SUBSCRIPTION_STATUSES）だけを対象とし、古い契約の痕跡（subscription ID・
- * 解約予定・期間末）は手続き中の行に残さないようクリアする。`stripe_customer_id` は
- * 再利用するため残す。
+ * （NON_CURRENT_SUBSCRIPTION_STATUSES）だけを対象とする。
  *
- * @param staleBefore 奪ってよいclaimの上限時刻。nullの場合は解放済み（checkout_claimed_atが
- * NULL）の行のみを対象とする
+ * 契約の痕跡（`stripe_subscription_id` ・解約予定・期間末）は消さない。`paused` / `unpaid` は
+ * Stripe側で復帰しうる状態であり、`stripe_subscription_id` を消すと復帰時の
+ * `customer.subscription.updated` を `syncSubscriptionStatus()` が照合できず取りこぼすため
+ * （決済されているのにアプリ上は降格したまま、という不整合になる）。新しい契約が成立すれば
+ * `activateUserFromCheckoutSession()` のupsertが上書きする。
  */
 async function takeCheckoutSlot(
+  supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
   userId: number,
   claimedAt: string,
-  staleBefore: string | null
+  condition: ClaimCondition
 ): Promise<CheckoutSlotClaim> {
-  const supabase = await createAdminSupabaseClient();
   const query = supabase
     .from("stripe_subscriptions")
     .update({
       status: CHECKOUT_PENDING_STATUS,
       checkout_claimed_at: claimedAt,
-      stripe_subscription_id: null,
-      cancel_at_period_end: false,
-      current_period_end: null,
+      // 奪った時点で旧セッション（失効済み）は無関係になる
+      checkout_session_id: null,
     })
     .eq("user_id", userId)
     .in("status", NON_CURRENT_SUBSCRIPTION_STATUSES);
 
-  const { data: claimed, error } = await (staleBefore === null
-    ? query.is("checkout_claimed_at", null)
-    : query.lt("checkout_claimed_at", staleBefore)
-  ).select("stripe_customer_id");
+  const scoped =
+    condition.kind === "released"
+      ? query.is("checkout_claimed_at", null)
+      : condition.kind === "stale"
+        ? query.lt("checkout_claimed_at", condition.before)
+        : query.eq("checkout_claimed_at", condition.claimedAt);
+
+  const { data: claimed, error } = await scoped.select("stripe_customer_id");
 
   if (error) {
     console.error("Checkout処理権のclaimエラー:", error.message);
@@ -614,6 +698,28 @@ async function takeCheckoutSlot(
 }
 
 /**
+ * claimが確保したCheckout Sessionのidをミラー行へ記録する。次のリクエストが「その手続きが
+ * まだ有効か」をStripeに確認できるようにするためで、記録に失敗してもCheckout自体は成立して
+ * いるためエラーにはしない（その場合の解放はTTLに委ねる）。
+ */
+async function saveCheckoutSessionId(
+  userId: number,
+  claimedAt: string,
+  sessionId: string
+): Promise<void> {
+  const supabase = await createAdminSupabaseClient();
+  const { error } = await supabase
+    .from("stripe_subscriptions")
+    .update({ checkout_session_id: sessionId })
+    .eq("user_id", userId)
+    .eq("checkout_claimed_at", claimedAt);
+
+  if (error) {
+    console.error("Checkoutセッションid保存エラー:", error.message);
+  }
+}
+
+/**
  * `claimCheckoutSlot()` で確保した処理権を解放する。Checkout Sessionを作れなかった場合に呼ぶ
  * （解放しないと、当該ユーザーはTTLが切れるまでアップグレードできなくなる）。
  *
@@ -622,7 +728,8 @@ async function takeCheckoutSlot(
  *
  * `checkout_claimed_at` の一致を条件に含めるのは、TTL経過後に自分のclaimが既に別リクエストへ
  * 渡っている場合に、その新しいclaimまで解放してしまうのを防ぐため（`releaseEventClaim()` と
- * 同じ理由）。
+ * 同じ理由）。ミリ秒精度の確保時刻が一致する行＝自分のclaimであるため、statusは条件に
+ * 含めない（並行するWebhookがstatusを書き換えていても、自分のclaimは解放できる）。
  */
 export async function releaseCheckoutSlot(
   userId: number,
@@ -633,9 +740,8 @@ export async function releaseCheckoutSlot(
 
   const { error } = await supabase
     .from("stripe_subscriptions")
-    .update({ checkout_claimed_at: null })
+    .update({ checkout_claimed_at: null, checkout_session_id: null })
     .eq("user_id", userId)
-    .eq("status", CHECKOUT_PENDING_STATUS)
     .eq("checkout_claimed_at", claimedAt);
 
   if (error) {

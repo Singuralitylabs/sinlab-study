@@ -87,13 +87,24 @@ export async function activateUserFromCheckoutSession(session: Stripe.Checkout.S
 
   const { data: existingRow, error: existingFetchError } = await supabase
     .from("stripe_subscriptions")
-    .select("stripe_subscription_id, status")
+    .select("stripe_subscription_id, status, checkout_claimed_at, checkout_session_id")
     .eq("user_id", userId)
     .maybeSingle();
 
   if (existingFetchError) {
     console.error("stripe_subscriptions取得エラー:", existingFetchError.message);
     return { error: existingFetchError.message, activated: false, currentPeriodEnd: null };
+  }
+
+  // 進行中のCheckout（有効なclaim）が、**別の**セッションの処理で壊されないようにする。
+  // このガードが無いと、claimを保持したまま古い成功ページURLを再訪しただけで
+  // `checkout_claimed_at` が解除され、まだ決済可能なセッションを残したまま次のCheckoutを
+  // 作れてしまう（#103の再発）。claimが保持するセッションidが分かる場合のみ判定し、
+  // 記録前に中断した等でidが無い場合は従来どおり処理する（決済済みの昇格を落とさないため）
+  const heldSessionId =
+    existingRow?.checkout_claimed_at != null ? existingRow.checkout_session_id : null;
+  if (heldSessionId !== null && heldSessionId !== session.id) {
+    return { error: null, activated: false, currentPeriodEnd: null };
   }
 
   // 既に別の契約が現行（終端状態でも手続き中でもない）として記録されている場合、古いセッションの
@@ -123,6 +134,7 @@ export async function activateUserFromCheckoutSession(session: Stripe.Checkout.S
       current_period_end: currentPeriodEnd,
       // 実ステータスを書けた時点でCheckout作成の処理権は役目を終える（claimの正常な解除）
       checkout_claimed_at: null,
+      checkout_session_id: null,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id" }
