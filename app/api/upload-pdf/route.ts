@@ -11,6 +11,24 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const FOLDER_PATTERN = /^[a-z0-9-]+$/;
 // 命名規約に沿ったスライドファイル名（slide-NN.pdf）
 const SLIDE_FILE_PATTERN = /^slide-(\d+)\.pdf$/;
+// スライド番号は文字列全体が数字のみ（前後の空白・符号・小数点・指数表記を許さない）
+const SLIDE_NUMBER_PATTERN = /^\d+$/;
+
+/**
+ * スライド番号の文字列を1以上の安全な整数へ変換する。変換できなければ null を返す。
+ * Number.parseInt() は "1abc" や "1.5" を 1 として部分解釈してしまうため使わない。
+ * 桁あふれ（"99999999999999999999" 等）は Number.isSafeInteger() で弾く。
+ */
+function parseSlideNumber(raw: string): number | null {
+  if (!SLIDE_NUMBER_PATTERN.test(raw)) {
+    return null;
+  }
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    return null;
+  }
+  return parsed;
+}
 
 /**
  * 指定フォルダ内の既存 slide-NN.pdf を走査し、次に使う連番（最大値+1）を返す。
@@ -31,8 +49,13 @@ async function getNextSlideNumber(
   let maxNumber = 0;
   for (const item of data) {
     const match = item.name.match(SLIDE_FILE_PATTERN);
-    if (match) {
-      maxNumber = Math.max(maxNumber, Number.parseInt(match[1], 10));
+    if (!match) {
+      continue;
+    }
+    // 番号指定時と同じ基準で解釈する（桁あふれしたファイル名は採番の基準にしない）
+    const existingNumber = parseSlideNumber(match[1]);
+    if (existingNumber !== null) {
+      maxNumber = Math.max(maxNumber, existingNumber);
     }
   }
 
@@ -79,7 +102,8 @@ export async function POST(request: NextRequest) {
 
     // 保存先フォルダ（コーススラッグ）とスライド番号を取得
     const folderRaw = (formData.get("folder") as string | null)?.trim() ?? "";
-    const slideNumberRaw = (formData.get("slideNumber") as string | null)?.trim() ?? "";
+    // スライド番号は前後の空白も不正入力として扱うため trim しない
+    const slideNumberRaw = (formData.get("slideNumber") as string | null) ?? "";
 
     let filePath: string;
     // フォルダ指定時は命名規約 slides/<folder>/slide-NN.pdf に沿って保存
@@ -97,8 +121,8 @@ export async function POST(request: NextRequest) {
       let slideNumber: number;
       if (slideNumberRaw) {
         // 番号指定時：その番号で保存（既存ファイルは上書き）
-        const parsed = Number.parseInt(slideNumberRaw, 10);
-        if (!Number.isInteger(parsed) || parsed < 1) {
+        const parsed = parseSlideNumber(slideNumberRaw);
+        if (parsed === null) {
           return NextResponse.json(
             { error: "スライド番号は1以上の整数を指定してください" },
             { status: 400 }
