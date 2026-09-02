@@ -99,7 +99,7 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 **RLS**
 
 - ロール・ID・ステータスの参照は `get_user_role()` / `get_user_id()` / `get_user_status()` を用いる。いずれも `SECURITY DEFINER` + `SET search_path = public` + `STABLE` で定義し、`PUBLIC, anon` から EXECUTE を REVOKE、`authenticated, service_role` へ GRANT する。
-- `get_user_role()` は `status = 'active'` のユーザーにのみロールを返す。却下・お試しユーザーは NULL となり admin/maintainer 向けポリシーのロールバイパスに乗らない（却下してもロール自体はクリアされないため）。
+- `get_user_role()` は却下（`rejected`）ユーザーには NULL を返す（却下してもロール自体はクリアされないため）。詳細は `docs/database.md` 5.2節を参照。
 - ポリシー内では **`(select get_user_xxx())` の形で包む**（`auth_rls_initplan` 対策）。同一操作の許可ポリシーはロール別に分けず **OR 条件で1本に統合する**（`multiple_permissive_policies` 対策）。
 - `user_progress` は INSERT だけでなく **UPDATE にも可視コンテンツ限定の EXISTS 条件を課す**（進捗APIは upsert のため、INSERT のみだと2回目以降の更新がすり抜ける）。
 

@@ -1,15 +1,7 @@
 import { NextResponse } from "next/server";
-import { MEMBERSHIP_TYPES, USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { MEMBERSHIP_TYPES, USER_ROLE, USER_ROLES, USER_STATUS } from "@/app/constants/user";
 import { approveUser, changeUserRole, rejectUser } from "@/app/services/api/admin-server";
-import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
-
-/** 対象ユーザーの role を取得する（change_role / reject の admin 保護チェック用） */
-async function fetchTargetUserRole(userId: number): Promise<string | null> {
-  const supabase = await createAdminSupabaseClient();
-  const { data } = await supabase.from("users").select("role").eq("id", userId).single();
-  return data?.role ?? null;
-}
 
 export async function PATCH(request: Request) {
   try {
@@ -43,24 +35,23 @@ export async function PATCH(request: Request) {
     }
 
     if (action === "change_role") {
-      if (!role || !["member", "maintainer", "admin"].includes(role)) {
+      if (!role || !USER_ROLES.includes(role)) {
         return NextResponse.json(
-          { error: "role は member / maintainer / admin を指定してください" },
+          { error: `role は ${USER_ROLES.join(" / ")} を指定してください` },
           { status: 400 }
         );
       }
 
-      // 対象ユーザーが admin の場合はロール変更不可
-      if ((await fetchTargetUserRole(userId)) === USER_ROLE.ADMIN) {
-        return NextResponse.json(
-          { error: "管理者ユーザーのロールは変更できません" },
-          { status: 403 }
-        );
-      }
-
-      const { error } = await changeUserRole(userId, role);
+      const { error, updated } = await changeUserRole(userId, role);
       if (error) {
         return NextResponse.json({ error: "ロール更新に失敗しました" }, { status: 500 });
+      }
+      // 0行更新 = 対象が admin（降格・誤操作防止のため変更不可）、または存在しない・削除済みユーザー
+      if (!updated) {
+        return NextResponse.json(
+          { error: "ロールを変更できません（管理者ユーザーか、存在しません）" },
+          { status: 403 }
+        );
       }
       return NextResponse.json({ success: true, action });
     }
@@ -92,14 +83,16 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ success: true, action });
     }
 
-    // 対象ユーザーが admin の場合は却下不可（change_role と同様の保護）
-    if ((await fetchTargetUserRole(userId)) === USER_ROLE.ADMIN) {
-      return NextResponse.json({ error: "管理者ユーザーは却下できません" }, { status: 403 });
-    }
-
-    const { error } = await rejectUser(userId);
+    const { error, updated } = await rejectUser(userId);
     if (error) {
       return NextResponse.json({ error: "ステータス更新に失敗しました" }, { status: 500 });
+    }
+    // 0行更新 = 対象が admin（change_role と同様の保護のため却下不可）、または存在しない・削除済みユーザー
+    if (!updated) {
+      return NextResponse.json(
+        { error: "却下できません（管理者ユーザーか、存在しません）" },
+        { status: 403 }
+      );
     }
 
     return NextResponse.json({ success: true, action });

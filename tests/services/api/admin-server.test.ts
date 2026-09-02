@@ -5,6 +5,7 @@ vi.mock("@/app/services/api/supabase-server");
 
 import {
   approveUser,
+  changeUserRole,
   fetchManageCounts,
   fetchStudentsProgress,
   fetchUserIdsWithStripeSubscription,
@@ -270,16 +271,89 @@ describe("approveUser", () => {
 describe("rejectUser", () => {
   it("status=rejected に更新し、会員種別を NULL に戻す", async () => {
     const mockClient = createMockSupabaseClient({
-      tableResults: { users: { data: null, error: null } },
+      tableResults: { users: { data: [{ id: 3 }], error: null } },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
     const result = await rejectUser(3);
 
     expect(result.error).toBeNull();
-    expect(mockClient.from.mock.results[0].value.update).toHaveBeenCalledWith(
+    expect(result.updated).toBe(true);
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.update).toHaveBeenCalledWith(
       expect.objectContaining({ status: "rejected", membership_type: null })
     );
+    expect(builder.eq).toHaveBeenCalledWith("id", 3);
+    // 対象が admin の場合は却下不可（管理者保護をUPDATEに原子的に折り込む。#104）
+    expect(builder.neq).toHaveBeenCalledWith("role", "admin");
+    expect(builder.select).toHaveBeenCalledWith("id");
+  });
+
+  it("対象が admin・存在しない・削除済みのいずれかで0行更新の場合、updated: false を返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: [], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await rejectUser(3);
+
+    expect(result.error).toBeNull();
+    expect(result.updated).toBe(false);
+  });
+
+  it("更新に失敗した場合はエラーを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: null, error: dbError } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await rejectUser(3);
+
+    expect(result.error).toEqual(dbError);
+    expect(result.updated).toBe(false);
+  });
+});
+
+describe("changeUserRole", () => {
+  it("role を更新する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: [{ id: 3 }], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await changeUserRole(3, "maintainer");
+
+    expect(result.error).toBeNull();
+    expect(result.updated).toBe(true);
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.update).toHaveBeenCalledWith(expect.objectContaining({ role: "maintainer" }));
+    expect(builder.eq).toHaveBeenCalledWith("id", 3);
+    // 対象が admin の場合はロール変更不可（降格・誤操作防止）
+    expect(builder.neq).toHaveBeenCalledWith("role", "admin");
+  });
+
+  it("対象が admin・存在しない・削除済みのいずれかで0行更新の場合、updated: false を返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: [], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await changeUserRole(3, "member");
+
+    expect(result.error).toBeNull();
+    expect(result.updated).toBe(false);
+  });
+
+  it("更新に失敗した場合はエラーを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: null, error: dbError } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await changeUserRole(3, "member");
+
+    expect(result.error).toEqual(dbError);
+    expect(result.updated).toBe(false);
   });
 });
 
