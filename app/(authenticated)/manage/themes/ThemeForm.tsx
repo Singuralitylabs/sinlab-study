@@ -167,12 +167,12 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
             <div className="space-y-3">
               <Label htmlFor="thumbnail">サムネイル画像</Label>
               {imageUrl && (
-                <div className="relative h-40 w-full max-w-xs overflow-hidden rounded-md border">
+                <div className="relative aspect-video w-full max-w-xs overflow-hidden rounded-md border bg-linear-to-br from-primary/5 to-primary/15">
                   <Image
                     src={resolveStorageUrl(imageUrl)}
                     alt="サムネイルのプレビュー"
                     fill
-                    className="object-cover"
+                    className="object-contain"
                     sizes="320px"
                   />
                 </div>

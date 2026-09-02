@@ -30,7 +30,7 @@ export default async function LearnPage() {
                       src={resolveStorageUrl(theme.image_url)}
                       alt={theme.name}
                       fill
-                      className="object-cover group-hover:scale-105 transition-transform duration-300"
+                      className="object-contain group-hover:scale-105 transition-transform duration-300"
                       sizes="(max-width: 640px) 100vw, 50vw"
                     />
                   ) : (

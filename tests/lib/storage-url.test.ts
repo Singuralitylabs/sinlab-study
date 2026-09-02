@@ -26,7 +26,7 @@ describe("resolveStorageUrl", () => {
 
   it.each([
     "https://example.com/image.png",
-    "/images/themes/gas_icon.png",
+    "/images/themes/example.png",
   ])("既存URLは変更しない: %s", (url) => {
     expect(resolveStorageUrl(url)).toBe(url);
   });
