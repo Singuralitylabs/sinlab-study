@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/admin-server");
+vi.mock("@/app/services/api/supabase-server");
 
 import { PATCH } from "@/app/api/admin/users/route";
-import { approveUser, rejectUser } from "@/app/services/api/admin-server";
+import { approveUser, changeUserRole, rejectUser } from "@/app/services/api/admin-server";
+import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const adminAuth = {
@@ -21,11 +24,21 @@ const request = (body: unknown) =>
     body: JSON.stringify(body),
   });
 
+/** 対象ユーザー（reject / change_role 先）の role 参照クエリのモックを設定する */
+const mockTargetUserRole = (role: string | null) => {
+  const mockClient = createMockSupabaseClient({
+    tableResults: { users: { data: role ? { role } : null, error: null } },
+  });
+  vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(adminAuth as never);
   vi.mocked(approveUser).mockResolvedValue({ error: null, updated: true });
   vi.mocked(rejectUser).mockResolvedValue({ error: null });
+  vi.mocked(changeUserRole).mockResolvedValue({ error: null });
+  mockTargetUserRole("member");
 });
 
 describe("PATCH /api/admin/users - approve", () => {
@@ -79,9 +92,50 @@ describe("PATCH /api/admin/users - reject", () => {
     expect(rejectUser).toHaveBeenCalledWith(5);
     expect(approveUser).not.toHaveBeenCalled();
   });
+
+  it("対象ユーザーが admin の場合は403で、却下処理を呼ばない (#104)", async () => {
+    mockTargetUserRole("admin");
+
+    const res = await PATCH(request({ userId: 5, action: "reject" }));
+
+    expect(res.status).toBe(403);
+    expect(rejectUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("PATCH /api/admin/users - change_role", () => {
+  it("対象ユーザーが admin の場合は403で、ロール変更処理を呼ばない", async () => {
+    mockTargetUserRole("admin");
+
+    const res = await PATCH(request({ userId: 5, action: "change_role", role: "member" }));
+
+    expect(res.status).toBe(403);
+    expect(changeUserRole).not.toHaveBeenCalled();
+  });
+
+  it("対象ユーザーが admin 以外の場合はロールを変更できる", async () => {
+    const res = await PATCH(request({ userId: 5, action: "change_role", role: "maintainer" }));
+
+    expect(res.status).toBe(200);
+    expect(changeUserRole).toHaveBeenCalledWith(5, "maintainer");
+  });
 });
 
 describe("PATCH /api/admin/users - 認可", () => {
+  it("未認証の場合は401で、承認処理を呼ばない", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({
+      user: null,
+      userId: null,
+      userStatus: null,
+      userRole: null,
+    } as never);
+
+    const res = await PATCH(request({ userId: 5, action: "approve", membershipType: "community" }));
+
+    expect(res.status).toBe(401);
+    expect(approveUser).not.toHaveBeenCalled();
+  });
+
   it("admin 以外は403で、承認処理を呼ばない", async () => {
     vi.mocked(getServerAuth).mockResolvedValue({ ...adminAuth, userRole: "maintainer" } as never);
 
@@ -89,5 +143,25 @@ describe("PATCH /api/admin/users - 認可", () => {
 
     expect(res.status).toBe(403);
     expect(approveUser).not.toHaveBeenCalled();
+  });
+
+  it("却下済み（rejected）の場合は role が admin のままでも403で、承認処理を呼ばない (#104)", async () => {
+    // 却下時に role はクリアされないため、Authセッションが有効な却下済み admin を想定
+    vi.mocked(getServerAuth).mockResolvedValue({
+      ...adminAuth,
+      userStatus: "rejected",
+    } as never);
+
+    const res = await PATCH(request({ userId: 5, action: "approve", membershipType: "community" }));
+
+    expect(res.status).toBe(403);
+    expect(approveUser).not.toHaveBeenCalled();
+  });
+
+  it("active な admin は従来どおり操作できる", async () => {
+    const res = await PATCH(request({ userId: 5, action: "approve", membershipType: "community" }));
+
+    expect(res.status).toBe(200);
+    expect(approveUser).toHaveBeenCalledWith(5, "community");
   });
 });

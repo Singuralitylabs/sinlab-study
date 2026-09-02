@@ -1,14 +1,30 @@
 import { NextResponse } from "next/server";
-import { MEMBERSHIP_TYPES, USER_ROLE } from "@/app/constants/user";
+import { MEMBERSHIP_TYPES, USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import { approveUser, changeUserRole, rejectUser } from "@/app/services/api/admin-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
+/** 対象ユーザーの role を取得する（change_role / reject の admin 保護チェック用） */
+async function fetchTargetUserRole(userId: number): Promise<string | null> {
+  const supabase = await createAdminSupabaseClient();
+  const { data } = await supabase.from("users").select("role").eq("id", userId).single();
+  return data?.role ?? null;
+}
+
 export async function PATCH(request: Request) {
   try {
-    // 管理者権限チェック
     const auth = await getServerAuth();
-    if (!auth.user || auth.userRole !== USER_ROLE.ADMIN) {
+    if (!auth.user) {
+      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    }
+    // 却下済みユーザーはAuthセッションが有効な間もアクセス不可とする
+    // （却下前に admin/maintainer だった場合、role 自体は却下時にクリアされないため
+    // ロールチェックだけでは弾けない。他の管理系APIと同じステータスゲート）
+    if (auth.userStatus === USER_STATUS.REJECTED) {
+      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
+    }
+    // 管理者権限チェック
+    if (auth.userRole !== USER_ROLE.ADMIN) {
       return NextResponse.json({ error: "権限がありません" }, { status: 403 });
     }
 
@@ -35,14 +51,7 @@ export async function PATCH(request: Request) {
       }
 
       // 対象ユーザーが admin の場合はロール変更不可
-      const supabase = await createAdminSupabaseClient();
-      const { data: targetUser } = await supabase
-        .from("users")
-        .select("role")
-        .eq("id", userId)
-        .single();
-
-      if (targetUser?.role === USER_ROLE.ADMIN) {
+      if ((await fetchTargetUserRole(userId)) === USER_ROLE.ADMIN) {
         return NextResponse.json(
           { error: "管理者ユーザーのロールは変更できません" },
           { status: 403 }
@@ -81,6 +90,11 @@ export async function PATCH(request: Request) {
         );
       }
       return NextResponse.json({ success: true, action });
+    }
+
+    // 対象ユーザーが admin の場合は却下不可（change_role と同様の保護）
+    if ((await fetchTargetUserRole(userId)) === USER_ROLE.ADMIN) {
+      return NextResponse.json({ error: "管理者ユーザーは却下できません" }, { status: 403 });
     }
 
     const { error } = await rejectUser(userId);
