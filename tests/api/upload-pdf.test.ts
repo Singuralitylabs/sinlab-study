@@ -14,24 +14,26 @@ const maintainerAuth = {
   userRole: "maintainer",
 };
 
-interface MockSupabaseOptions {
+interface MockStorageOptions {
   files?: { name: string }[];
   listError?: unknown;
   uploadError?: unknown;
 }
 
-const createMockSupabase = ({
+/** Storageのモックを作り、createAdminSupabaseClient() の戻り値として登録する */
+const mockStorage = ({
   files = [],
   listError = null,
   uploadError = null,
-}: MockSupabaseOptions = {}) => {
+}: MockStorageOptions = {}) => {
   const list = vi.fn().mockResolvedValue({ data: listError ? null : files, error: listError });
   const upload = vi.fn().mockResolvedValue({ error: uploadError });
   const getPublicUrl = vi.fn().mockImplementation((path: string) => ({
     data: { publicUrl: `https://project.supabase.co/storage/v1/object/public/slides/${path}` },
   }));
   const storage = { from: vi.fn().mockReturnValue({ list, upload, getPublicUrl }) };
-  return { client: { storage }, list, upload };
+  vi.mocked(createAdminSupabaseClient).mockResolvedValue({ storage } as never);
+  return { list, upload };
 };
 
 const pdf = () => new File(["%PDF-1.4"], "slide.pdf", { type: "application/pdf" });
@@ -42,8 +44,8 @@ const request = ({
   slideNumber,
 }: {
   file?: File | null;
-  folder?: string | null;
-  slideNumber?: string;
+  folder?: string | File | null;
+  slideNumber?: string | File;
 } = {}) => {
   const formData = new FormData();
   if (file) formData.append("file", file);
@@ -56,7 +58,6 @@ beforeEach(() => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(maintainerAuth as never);
-  vi.mocked(createAdminSupabaseClient).mockResolvedValue(createMockSupabase().client as never);
 });
 
 describe("POST /api/upload-pdf スライド番号のバリデーション", () => {
@@ -77,10 +78,25 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
   ] as const;
 
   it.each(invalidNumbers)("%s（%j）は400で拒否し、アップロードしない", async (_label, value) => {
-    const { client, upload } = createMockSupabase();
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+    const { list, upload } = mockStorage();
 
     const response = await POST(request({ slideNumber: value }) as never);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "スライド番号は1以上の整数を指定してください",
+    });
+    expect(upload).not.toHaveBeenCalled();
+    // 番号指定時は自動採番の一覧取得へ回らない
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("ファイルパートで送られたスライド番号も400で拒否する", async () => {
+    const { upload } = mockStorage();
+
+    const response = await POST(
+      request({ slideNumber: new File(["1"], "n.txt", { type: "text/plain" }) }) as never
+    );
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
@@ -97,8 +113,7 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
   ] as const;
 
   it.each(validNumbers)("%j は受理し %s へ上書き保存する", async (value, expectedPath) => {
-    const { client, upload } = createMockSupabase();
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+    const { list, upload } = mockStorage();
 
     const response = await POST(request({ slideNumber: value }) as never);
 
@@ -111,11 +126,12 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
       contentType: "application/pdf",
       upsert: true,
     });
+    // 番号指定時は自動採番の一覧取得を行わない
+    expect(list).not.toHaveBeenCalled();
   });
 
   it("空文字の番号は未指定として扱い、自動採番へ回す", async () => {
-    const { client, upload } = createMockSupabase({ files: [{ name: "slide-03.pdf" }] });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+    const { upload } = mockStorage({ files: [{ name: "slide-03.pdf" }] });
 
     const response = await POST(request({ slideNumber: "" }) as never);
 
@@ -129,10 +145,9 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
 
 describe("POST /api/upload-pdf 自動採番", () => {
   it("既存の最大番号+1で保存し、上書きは許可しない", async () => {
-    const { client, list, upload } = createMockSupabase({
+    const { list, upload } = mockStorage({
       files: [{ name: "slide-01.pdf" }, { name: "slide-09.pdf" }, { name: "notes.txt" }],
     });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
 
     const response = await POST(request() as never);
 
@@ -145,8 +160,19 @@ describe("POST /api/upload-pdf 自動採番", () => {
   });
 
   it("既存ファイルが無ければ slide-01.pdf から始める", async () => {
-    const { client, upload } = createMockSupabase();
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+    const { upload } = mockStorage();
+
+    const response = await POST(request() as never);
+
+    expect(response.status).toBe(200);
+    expect(upload).toHaveBeenCalledWith("gas-advanced/slide-01.pdf", expect.any(Uint8Array), {
+      contentType: "application/pdf",
+      upsert: false,
+    });
+  });
+
+  it("slide-00.pdf は採番に影響しない", async () => {
+    const { upload } = mockStorage({ files: [{ name: "slide-00.pdf" }] });
 
     const response = await POST(request() as never);
 
@@ -158,10 +184,9 @@ describe("POST /api/upload-pdf 自動採番", () => {
   });
 
   it("桁あふれしたファイル名は採番の基準にしない", async () => {
-    const { client, upload } = createMockSupabase({
+    const { upload } = mockStorage({
       files: [{ name: "slide-02.pdf" }, { name: "slide-99999999999999999999.pdf" }],
     });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
 
     const response = await POST(request() as never);
 
@@ -173,8 +198,7 @@ describe("POST /api/upload-pdf 自動採番", () => {
   });
 
   it("一覧取得に失敗したら500を返し、アップロードしない", async () => {
-    const { client, upload } = createMockSupabase({ listError: { message: "boom" } });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+    const { upload } = mockStorage({ listError: { message: "boom" } });
 
     const response = await POST(request() as never);
 
@@ -184,13 +208,32 @@ describe("POST /api/upload-pdf 自動採番", () => {
     });
     expect(upload).not.toHaveBeenCalled();
   });
+
+  it("採番した番号が既に存在した場合（409）は重複と分かるメッセージを返す", async () => {
+    mockStorage({ uploadError: { status: 409, statusCode: "Duplicate" } });
+
+    const response = await POST(request() as never);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "同じ番号のスライドが既に存在します。番号を指定して上書きしてください",
+    });
+  });
+
+  it("重複以外のアップロード失敗は汎用メッセージを返す", async () => {
+    mockStorage({ uploadError: { status: 500, statusCode: "InternalError" } });
+
+    const response = await POST(request() as never);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: "アップロードに失敗しました" });
+  });
 });
 
 describe("POST /api/upload-pdf その他の入力検証", () => {
   it("フォルダ未指定時はタイムスタンプ付きのキーで保存する", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1723500000);
-    const { client, upload } = createMockSupabase();
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+    const { upload } = mockStorage();
 
     const response = await POST(request({ folder: null }) as never);
 
@@ -203,8 +246,7 @@ describe("POST /api/upload-pdf その他の入力検証", () => {
 
   it("フォルダ未指定時はスライド番号を検証しない（後方互換）", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1723500000);
-    const { client, upload } = createMockSupabase();
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+    const { upload } = mockStorage();
 
     const response = await POST(request({ folder: null, slideNumber: "1abc" }) as never);
 
@@ -216,8 +258,7 @@ describe("POST /api/upload-pdf その他の入力検証", () => {
   });
 
   it("不正なフォルダ名は400で拒否する", async () => {
-    const { client, upload } = createMockSupabase();
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+    const { upload } = mockStorage();
 
     const response = await POST(request({ folder: "gas_advanced" }) as never);
 
@@ -225,10 +266,23 @@ describe("POST /api/upload-pdf その他の入力検証", () => {
     expect(upload).not.toHaveBeenCalled();
   });
 
+  it("ファイルパートで送られたフォルダ名は500ではなく400で拒否する", async () => {
+    const { upload } = mockStorage();
+
+    const response = await POST(
+      request({ folder: new File(["gas"], "f.txt", { type: "text/plain" }) }) as never
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "フォルダ名は英小文字・数字・ハイフンのみ使用できます",
+    });
+    expect(upload).not.toHaveBeenCalled();
+  });
+
   it("権限のないロールは403で拒否する", async () => {
     vi.mocked(getServerAuth).mockResolvedValue({ ...maintainerAuth, userRole: "member" } as never);
-    const { client, upload } = createMockSupabase();
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+    const { upload } = mockStorage();
 
     const response = await POST(request({ slideNumber: "1" }) as never);
 

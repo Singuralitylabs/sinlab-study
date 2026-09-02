@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
+import { parsePositiveInteger } from "@/app/lib/positive-integer";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -11,24 +12,6 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const FOLDER_PATTERN = /^[a-z0-9-]+$/;
 // 命名規約に沿ったスライドファイル名（slide-NN.pdf）
 const SLIDE_FILE_PATTERN = /^slide-(\d+)\.pdf$/;
-// スライド番号は文字列全体が数字のみ（前後の空白・符号・小数点・指数表記を許さない）
-const SLIDE_NUMBER_PATTERN = /^\d+$/;
-
-/**
- * スライド番号の文字列を1以上の安全な整数へ変換する。変換できなければ null を返す。
- * Number.parseInt() は "1abc" や "1.5" を 1 として部分解釈してしまうため使わない。
- * 桁あふれ（"99999999999999999999" 等）は Number.isSafeInteger() で弾く。
- */
-function parseSlideNumber(raw: string): number | null {
-  if (!SLIDE_NUMBER_PATTERN.test(raw)) {
-    return null;
-  }
-  const parsed = Number(raw);
-  if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    return null;
-  }
-  return parsed;
-}
 
 /**
  * 指定フォルダ内の既存 slide-NN.pdf を走査し、次に使う連番（最大値+1）を返す。
@@ -53,7 +36,7 @@ async function getNextSlideNumber(
       continue;
     }
     // 番号指定時と同じ基準で解釈する（桁あふれしたファイル名は採番の基準にしない）
-    const existingNumber = parseSlideNumber(match[1]);
+    const existingNumber = parsePositiveInteger(match[1]);
     if (existingNumber !== null) {
       maxNumber = Math.max(maxNumber, existingNumber);
     }
@@ -101,9 +84,17 @@ export async function POST(request: NextRequest) {
     const supabase = await createAdminSupabaseClient();
 
     // 保存先フォルダ（コーススラッグ）とスライド番号を取得
-    const folderRaw = (formData.get("folder") as string | null)?.trim() ?? "";
+    // FormData には File が入り得るため、文字列以外は不正入力として扱う
+    const folderValue = formData.get("folder");
+    if (folderValue !== null && typeof folderValue !== "string") {
+      return NextResponse.json(
+        { error: "フォルダ名は英小文字・数字・ハイフンのみ使用できます" },
+        { status: 400 }
+      );
+    }
+    const folderRaw = folderValue?.trim() ?? "";
     // スライド番号は前後の空白も不正入力として扱うため trim しない
-    const slideNumberRaw = (formData.get("slideNumber") as string | null) ?? "";
+    const slideNumberValue = formData.get("slideNumber");
 
     let filePath: string;
     // フォルダ指定時は命名規約 slides/<folder>/slide-NN.pdf に沿って保存
@@ -119,9 +110,9 @@ export async function POST(request: NextRequest) {
       }
 
       let slideNumber: number;
-      if (slideNumberRaw) {
+      if (slideNumberValue !== null && slideNumberValue !== "") {
         // 番号指定時：その番号で保存（既存ファイルは上書き）
-        const parsed = parseSlideNumber(slideNumberRaw);
+        const parsed = parsePositiveInteger(slideNumberValue);
         if (parsed === null) {
           return NextResponse.json(
             { error: "スライド番号は1以上の整数を指定してください" },

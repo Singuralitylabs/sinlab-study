@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
+import { parsePositiveInteger } from "@/app/lib/positive-integer";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -14,15 +15,6 @@ const ALLOWED_CONTENT_TYPES = {
 
 const THUMBNAIL_PATH_PATTERN =
   /^\/storage\/v1\/object\/public\/thumbnails\/(theme-\d+\/thumbnail\.(?:jpg|png|webp))(?:\?.*)?$/;
-
-function getThemeId(value: FormDataEntryValue | null): number | null {
-  if (typeof value !== "string" || !/^\d+$/.test(value)) {
-    return null;
-  }
-
-  const themeId = Number(value);
-  return Number.isSafeInteger(themeId) && themeId > 0 ? themeId : null;
-}
 
 function getThumbnailPath(imageUrl: string | null, themeId: number): string | null {
   if (!imageUrl) return null;
@@ -62,7 +54,7 @@ export async function POST(request: NextRequest) {
 
     const formData = await request.formData();
     const file = formData.get("file");
-    const themeId = getThemeId(formData.get("themeId"));
+    const themeId = parsePositiveInteger(formData.get("themeId"));
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "画像ファイルを選択してください" }, { status: 400 });
@@ -141,7 +133,7 @@ export async function DELETE(request: NextRequest) {
     const { error: authError } = await authenticateContentManager();
     if (authError) return authError;
 
-    const themeId = getThemeId(request.nextUrl.searchParams.get("themeId"));
+    const themeId = parsePositiveInteger(request.nextUrl.searchParams.get("themeId"));
     if (!themeId) {
       return NextResponse.json({ error: "テーマIDが不正です" }, { status: 400 });
     }
