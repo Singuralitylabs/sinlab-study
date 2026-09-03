@@ -9,16 +9,22 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { contentId, isCompleted } = body;
 
-    if (!contentId) {
-      return NextResponse.json({ error: "contentIdは必須です" }, { status: 400 });
+    if (!Number.isInteger(contentId) || contentId <= 0) {
+      return NextResponse.json({ error: "contentIdは正の整数で指定してください" }, { status: 400 });
+    }
+    if (typeof isCompleted !== "boolean") {
+      return NextResponse.json(
+        { error: "isCompletedはbooleanで指定してください" },
+        { status: 400 }
+      );
     }
 
     // 認証チェック
-    const { user, userId: authUserId, userStatus } = await getServerAuth();
+    const { user, userId, userStatus } = await getServerAuth();
     if (!user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     }
-    if (!authUserId) {
+    if (!userId) {
       return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
     }
 
@@ -37,7 +43,7 @@ export async function POST(request: NextRequest) {
     // 進捗をupsert
     const { error: upsertError } = await supabase.from("user_progress").upsert(
       {
-        user_id: authUserId,
+        user_id: userId,
         content_id: contentId,
         is_completed: isCompleted,
         completed_at: isCompleted ? new Date().toISOString() : null,

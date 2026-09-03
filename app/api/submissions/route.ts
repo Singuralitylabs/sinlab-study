@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { contentId, submissionType, codeContent, codeFiles, url } = body;
 
-    if (!contentId || !submissionType) {
+    if (!Number.isInteger(contentId) || contentId <= 0 || !submissionType) {
       return NextResponse.json({ error: "必須パラメータが不足しています" }, { status: 400 });
     }
 
@@ -63,11 +63,11 @@ export async function POST(request: NextRequest) {
     }
 
     // 認証チェック
-    const { user, userId: authUserId, userStatus } = await getServerAuth();
+    const { user, userId, userStatus } = await getServerAuth();
     if (!user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     }
-    if (!authUserId) {
+    if (!userId) {
       return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
     }
 
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
     const { data: submission, error: insertError } = await supabase
       .from("submissions")
       .insert({
-        user_id: authUserId,
+        user_id: userId,
         content_id: contentId,
         submission_type: submissionType,
         code_content: storedCodeContent,
