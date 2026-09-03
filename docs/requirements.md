@@ -33,7 +33,6 @@
 | Markdown表示 | react-markdown + remark-gfm |
 | 動画埋め込み | react-youtube |
 | PDF表示 | react-pdf |
-| XSS対策 | isomorphic-dompurify |
 | 通知 | Slack Incoming Webhooks（外部HTTPリクエスト、追加ライブラリ不要） |
 | ホスティング | Vercel |
 | 運用コスト | 無料枠で運用（初期） |
@@ -112,7 +111,7 @@ Theme（例：GAS学習）
 | 種別 | 表示方法 |
 |:--|:--|
 | 動画（video） | YouTubeの限定公開動画を埋め込み表示 |
-| テキスト（text） | Markdown形式で記述・表示（GFM対応、XSSサニタイズ） |
+| テキスト（text） | Markdown形式で記述・表示（GFM対応） |
 | スライド（slide） | PDFファイルをブラウザ上に表示（Supabase Storage経由） |
 | 演習（exercise） | Markdown形式の演習指示を表示、課題提出フォームと連携 |
 
@@ -209,7 +208,7 @@ admin と maintainer（講師）が共通でアクセス可能。`/admin` 配下
 - プロキシ（`proxy.ts`）によるページ単位のアクセス制御
 - 承認済み（active）ユーザーは全公開コンテンツ、お試し（pending）ユーザーはお試し公開コンテンツのみアクセス可。却下済み（rejected）は遮断
 - Row Level Security（RLS）によるデータベースレベルのアクセス制御（お試しユーザーへのコンテンツ制限はアプリ層とRLSの二層で担保）
-- isomorphic-dompurifyによるXSSサニタイズ
+- Markdown表示は react-markdown のデフォルト動作（生HTMLタグを描画しない）によりXSSを防止
 - 認証セッションからユーザーIDを導出（API操作時、クライアント送信値では認可しない）
 - 独立認証基盤: 本アプリ独自のGoogle OAuth + ユーザー承認フロー（詳細は[機能設計書](./specification.md)のセクション2を参照）
 

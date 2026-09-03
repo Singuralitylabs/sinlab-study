@@ -1,5 +1,5 @@
 import type { PostgrestError } from "@supabase/supabase-js";
-import type { CodeLanguage } from "@/app/components/CodeEditor";
+import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import {
   fetchStripeSubscriptionByUserId,

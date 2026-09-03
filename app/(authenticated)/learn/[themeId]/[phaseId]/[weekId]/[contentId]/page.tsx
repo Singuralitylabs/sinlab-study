@@ -2,7 +2,7 @@ import { Bot, ChevronLeft, ChevronRight, Lock } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
-import type { CodeLanguage } from "@/app/components/CodeEditor";
+import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
 import { PdfSlideViewerNoSSR as PdfSlideViewer } from "@/app/components/PdfSlideViewerNoSSR";

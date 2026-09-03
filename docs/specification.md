@@ -407,11 +407,11 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 | 種別 | 表示方法 |
 |:--|:--|
 | 動画（video） | YouTube動画の埋め込み表示（URLからVideo IDを自動抽出、レスポンシブ対応） |
-| テキスト（text） | Markdown形式で記述・表示（GFM対応）。DOMPurifyによるXSSサニタイズ |
+| テキスト（text） | Markdown形式で記述・表示（GFM対応） |
 | スライド（slide） | Supabase StorageのPDF URLを react-pdf でブラウザ内表示 |
 | 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携 |
 
-動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア上部に概要欄カードを表示する。未入力（NULL）の既存コンテンツでは概要欄自体を表示しない。表示にはテキスト・演習と同じ `MarkdownRenderer`（DOMPurifyによるサニタイズ）を用いる。
+動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア上部に概要欄カードを表示する。未入力（NULL）の既存コンテンツでは概要欄自体を表示しない。表示にはテキスト・演習と同じ `MarkdownRenderer` を用いる。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）は `"use client"` を持たない共有コンポーネント（hooksやNode専用APIを使わないため）。Server Component（learn/demoの`page.tsx`）からはサーバーで、Client Component（`AIReviewDisplay`、AIレビュー結果表示用）からはクライアントバンドルに含まれてクライアントで、同じ実装のまま描画される。
 
 ### 3.3 画面遷移
 
@@ -544,6 +544,8 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 - シンタックスハイライト
 - 自動インデント・ブラケット補完
 - ライト / ダークモード対応（OSテーマ連動）
+
+CodeMirror本体は数百KB規模のため、`next/dynamic`（`ssr: false`）で遅延読み込みする（`app/components/CodeEditorNoSSR.tsx`、`PdfSlideViewerNoSSR` と同方式）。読み込み中はプレースホルダーを表示する。
 
 **レスポンス**:
 
@@ -819,7 +821,7 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 |:--|:--|
 | サイドナビゲーション | アプリ全体のナビゲーション。デスクトップは固定サイドバー、モバイルはドロワー。管理者メニューの動的表示。ログアウト機能 |
 | パンくずリスト | ページヘッダーと階層ナビゲーションの表示 |
-| Markdownレンダラー | Markdownの安全なレンダリング（DOMPurifyでサニタイズ → GFM対応Markdown変換 → Typographyスタイリング） |
+| Markdownレンダラー | Markdownの安全なレンダリング（GFM対応Markdown変換 → Typographyスタイリング。react-markdownは生HTMLタグを描画しないためXSSは発生しない） |
 | YouTube埋め込み | YouTube URLからVideo IDを抽出して動画を埋め込み表示 |
 | 完了ボタン | コンテンツ完了状態のトグル。進捗記録APIを呼び出し |
 | 提出フォーム | 課題提出フォーム。コンテンツの `allowed_submission_types` に応じてコード・URL・両方から選択して提出 |

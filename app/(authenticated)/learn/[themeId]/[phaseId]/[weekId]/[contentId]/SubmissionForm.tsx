@@ -4,12 +4,12 @@ import { Code, Link as LinkIcon, Loader2, Plus, Send, Trash2 } from "lucide-reac
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
+import { CodeEditorNoSSR as CodeEditor } from "@/app/components/CodeEditorNoSSR";
 import {
   buildDefaultFilename,
-  CodeEditor,
   type CodeLanguage,
   DEFAULT_FILENAME_BY_LANGUAGE,
-} from "@/app/components/CodeEditor";
+} from "@/app/components/code-editor-utils";
 import type { AIReview, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -349,7 +349,6 @@ export function SubmissionForm({
                   onChange={(value) => updateCodeFile(index, { content: value })}
                   language={file.language}
                   placeholder="ここにコードを貼り付けてください..."
-                  minHeight="200px"
                 />
               </div>
             ))}
