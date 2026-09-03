@@ -9,6 +9,7 @@ import { PdfSlideViewerNoSSR as PdfSlideViewer } from "@/app/components/PdfSlide
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
+import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
 import {
@@ -204,6 +205,17 @@ export default async function ContentPage({ params }: PageProps) {
         badge={<UnpublishedBadge isPublished={isFullyPublished} />}
       />
 
+      {/* 概要欄（video / slide かつ概要が入力されている場合のみ表示） */}
+      {(content.content_type === "video" || content.content_type === "slide") &&
+        content.description && (
+          <Card className="mb-6">
+            <CardContent className="pt-6">
+              <h2 className="text-sm font-semibold text-muted-foreground mb-2">概要</h2>
+              <MarkdownRenderer content={resolveMarkdownStorageUrls(content.description)} />
+            </CardContent>
+          </Card>
+        )}
+
       {/* コンテンツ本体 */}
       <Card className="mb-6">
         <CardContent className="pt-6">
@@ -214,12 +226,7 @@ export default async function ContentPage({ params }: PageProps) {
           )}
 
           {content.content_type === "text" && content.text_content && (
-            <MarkdownRenderer
-              content={content.text_content.replace(
-                /\{\{SUPABASE_STORAGE_URL\}\}/g,
-                `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public`
-              )}
-            />
+            <MarkdownRenderer content={resolveMarkdownStorageUrls(content.text_content)} />
           )}
 
           {content.content_type === "slide" && content.pdf_url && (

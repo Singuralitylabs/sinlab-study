@@ -411,6 +411,8 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 | スライド（slide） | Supabase StorageのPDF URLを react-pdf でブラウザ内表示 |
 | 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携 |
 
+動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア上部に概要欄カードを表示する。未入力（NULL）の既存コンテンツでは概要欄自体を表示しない。表示にはテキスト・演習と同じ `MarkdownRenderer`（DOMPurifyによるサニタイズ）を用いる。
+
 ### 3.3 画面遷移
 
 ```mermaid
@@ -581,6 +583,8 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 **管理ルート**: `/manage` 配下（`/manage/themes`、`/manage/phases`、`/manage/weeks`、`/manage/contents`）
 
 **お試し公開の設定**: コンテンツ作成・編集フォーム（`/manage/contents`）にチェックボックス「お試しユーザーにも公開する」を設け、`is_open_to_trial` を設定する。デフォルトは未チェック（`false`）で、種別を問わず全コンテンツで設定可能（2.6参照）。
+
+**概要欄の設定**: コンテンツ種別が動画・スライドの場合のみ、コンテンツ作成・編集フォームに概要入力欄（Markdown・任意）を表示し、`description` として保存する（`exercise_instructions` / `hint` と同じ、未入力なら `null` で保存するパターン）。テキスト・演習では表示せず、`description` は常に `null` として送信する。
 
 ### 6.1.1 PDFアップロード API
 
@@ -1032,3 +1036,4 @@ flowchart TD
 | 2026年9月 | admin / maintainer による未公開コンテンツのプレビュー機能を追加（#68）：2.12節を新設。`learning-server.ts` の取得関数がロールに応じて `is_published` 絞り込みを外す旨、未公開バッジ表示、進捗登録・提出・AIレビューはプレビュー中も許可しない旨（`isContentVisible()` の `is_published` 絞り込み）を追記。3.1節・4.1節を更新 |
 | 2026年9月 | PR #157レビュー指摘を反映（#68）：`isContentVisible()` に週・フェーズ・テーマの全階層および `is_deleted` の判定を追加（コンテンツ行の `is_published` だけでは admin / maintainer 向けRLSの無条件許可により論理削除済み・未公開階層配下への操作が通ってしまうため）。`isContentFullyPublished()` を新設しコンテンツ詳細ページのバッジ・操作可否判定に使用。コースツリーの進捗分母から未公開コンテンツを除外。バッジ文言を `/manage` 配下と統一（「非公開」）。2.12節・4.1節を更新 |
 | 2026年9月 | GitHub Copilotレビュー指摘を反映（#68）：`isContentFullyPublished()` に週・フェーズ・テーマの `is_deleted` 判定を追加（`fetchContentById()` の親階層 select には is_deleted フィルタがなく、論理削除済みの親を持つコンテンツでUIとAPIの可否表示が食い違っていたため）。コースツリーの進捗分母・分子に週・フェーズ・テーマの公開状態も反映。service_role 経路（受講生向け）の select カラムから `is_published` を除去し、CLAUDE.md の許可リストへの準拠を復元（select せず常に true を補う方式に戻す）。2.12節を更新 |
+| 2026年9月 | スライド・動画ページに概要欄カードを追加（#66）：`learning_contents` に概要用の `description` カラム（NULL可・Markdown・任意入力）を追加し、コンテンツ編集フォームで動画・スライド選択時に入力可能にした。学習画面では概要が入力されている場合のみプレイヤー／ビューア上部に概要欄カードを表示し、未入力の既存コンテンツでは非表示のまま（後方互換）。3.2節・6.1節を更新 |

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resolveStorageUrl } from "@/app/lib/storage-url";
+import { resolveMarkdownStorageUrls, resolveStorageUrl } from "@/app/lib/storage-url";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -36,6 +36,48 @@ describe("resolveStorageUrl", () => {
 
     expect(resolveStorageUrl("/storage/v1/object/public/thumbnails/theme-1/thumbnail.png")).toBe(
       "/storage/v1/object/public/thumbnails/theme-1/thumbnail.png"
+    );
+  });
+});
+
+describe("resolveMarkdownStorageUrls", () => {
+  it("Markdown内の {{SUPABASE_STORAGE_URL}} をStorageの公開URLプレフィックスへ置換する", () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co");
+
+    expect(
+      resolveMarkdownStorageUrls("![sample]({{SUPABASE_STORAGE_URL}}/thumbnails/sample.png)")
+    ).toBe("![sample](https://project.supabase.co/storage/v1/object/public/thumbnails/sample.png)");
+  });
+
+  it("複数出現する場合はすべて置換する", () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co");
+
+    expect(
+      resolveMarkdownStorageUrls("{{SUPABASE_STORAGE_URL}}/a.png {{SUPABASE_STORAGE_URL}}/b.png")
+    ).toBe(
+      "https://project.supabase.co/storage/v1/object/public/a.png https://project.supabase.co/storage/v1/object/public/b.png"
+    );
+  });
+
+  it("プレースホルダを含まない場合はそのまま返す", () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co");
+
+    expect(resolveMarkdownStorageUrls("# 見出し\n本文です")).toBe("# 見出し\n本文です");
+  });
+
+  it("Supabase URL末尾のスラッシュを除去して結合する", () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co/");
+
+    expect(resolveMarkdownStorageUrls("{{SUPABASE_STORAGE_URL}}/a.png")).toBe(
+      "https://project.supabase.co/storage/v1/object/public/a.png"
+    );
+  });
+
+  it("Supabase URLが未設定なら undefined を埋め込まず相対パスへ置換する", () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+
+    expect(resolveMarkdownStorageUrls("{{SUPABASE_STORAGE_URL}}/a.png")).toBe(
+      "/storage/v1/object/public/a.png"
     );
   });
 });

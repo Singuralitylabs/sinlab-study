@@ -70,6 +70,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
   const [weekId, setWeekId] = useState(initialData?.week_id?.toString() ?? "");
   const [contentType, setContentType] = useState<ContentType>(initialData?.content_type ?? "video");
   const [videoUrl, setVideoUrl] = useState(initialData?.video_url ?? "");
+  const [description, setDescription] = useState(initialData?.description ?? "");
   const [textContent, setTextContent] = useState(initialData?.text_content ?? "");
   const [exerciseInstructions, setExerciseInstructions] = useState(
     initialData?.exercise_instructions ?? ""
@@ -193,6 +194,8 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       is_published: isPublished,
       is_open_to_trial: isOpenToTrial,
       video_url: contentType === "video" ? videoUrl.trim() || null : null,
+      description:
+        contentType === "video" || contentType === "slide" ? description.trim() || null : null,
       text_content: contentType === "text" ? textContent.trim() || null : null,
       exercise_instructions:
         contentType === "exercise" ? exerciseInstructions.trim() || null : null,
@@ -288,6 +291,20 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
               ))}
             </div>
           </div>
+
+          {/* 概要（video / slide のみ。詳細ページのプレイヤー／ビューア上部に表示） */}
+          {(contentType === "video" || contentType === "slide") && (
+            <div className="space-y-2">
+              <Label htmlFor="description">概要（Markdown・任意）</Label>
+              <Textarea
+                id="description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="このコンテンツで学べることを記述してください。未入力の場合は概要欄を表示しません。"
+                className="min-h-[120px] font-mono"
+              />
+            </div>
+          )}
 
           {/* 種別ごとの入力フィールド */}
           {contentType === "video" && (

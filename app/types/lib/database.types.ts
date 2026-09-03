@@ -67,6 +67,7 @@ export type Database = {
           code_language: string;
           content_type: string;
           created_at: string | null;
+          description: string | null;
           display_order: number | null;
           exercise_instructions: string | null;
           hint: string | null;
@@ -87,6 +88,7 @@ export type Database = {
           code_language?: string;
           content_type: string;
           created_at?: string | null;
+          description?: string | null;
           display_order?: number | null;
           exercise_instructions?: string | null;
           hint?: string | null;
@@ -107,6 +109,7 @@ export type Database = {
           code_language?: string;
           content_type?: string;
           created_at?: string | null;
+          description?: string | null;
           display_order?: number | null;
           exercise_instructions?: string | null;
           hint?: string | null;

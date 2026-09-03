@@ -218,6 +218,7 @@ erDiagram
 | title | VARCHAR(255) | NO | - | NOT NULL | タイトル |
 | content_type | VARCHAR(20) | NO | - | CHECK ('video', 'text', 'exercise', 'slide') | コンテンツ種別 |
 | video_url | TEXT | YES | NULL | - | YouTube URL（video時） |
+| description | TEXT | YES | NULL | - | 概要（Markdown、video / slide 時・任意入力）。未入力時は詳細ページの概要欄カードを表示しない |
 | text_content | TEXT | YES | NULL | - | Markdownテキスト（text時） |
 | exercise_instructions | TEXT | YES | NULL | - | 演習指示文（exercise時） |
 | reference_answer | TEXT | YES | NULL | - | 模範回答（exercise時・AIレビュー採点基準・非公開） |
@@ -236,12 +237,12 @@ erDiagram
 
 **content_type別の利用カラム**:
 
-| content_type | video_url | text_content | exercise_instructions | reference_answer | hint | pdf_url | allowed_submission_types | code_language |
-|:--|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
-| video | 使用 | - | - | - | - | - | - | - |
-| text | - | 使用 | - | - | - | - | - | - |
-| exercise | - | - | 使用 | 使用 | 使用 | - | 使用 | 使用 |
-| slide | - | - | - | - | - | 使用 | - | - |
+| content_type | video_url | description | text_content | exercise_instructions | reference_answer | hint | pdf_url | allowed_submission_types | code_language |
+|:--|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| video | 使用 | 使用（任意） | - | - | - | - | - | - | - |
+| text | - | - | 使用 | - | - | - | - | - | - |
+| exercise | - | - | - | 使用 | 使用 | 使用 | - | 使用 | 使用 |
+| slide | - | 使用（任意） | - | - | - | - | 使用 | - | - |
 
 **allowed_submission_types の値**:
 
@@ -624,6 +625,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | `01_schema/007_add_checkout_claim.sql` | `stripe_subscriptions` に `checkout_claimed_at` / `checkout_session_id` を追加し、`stripe_customer_id` をNULL許容へ変更（Checkout作成の排他制御用） |
 | `01_schema/008_secure_get_user_role.sql` | `get_user_role()` に `status <> 'rejected'` 条件を追加し、却下ユーザーが admin/maintainer ロールを保持したまま認可を突破できないようにする（#104） |
 | `01_schema/009_add_gas_code_language.sql` | `learning_contents.code_language` のCHECK制約に `gas` を追加（#56） |
+| `01_schema/010_add_content_description.sql` | learning_contents に概要欄用の `description` カラムを追加（#66） |
 | `02_rls/001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
 | `02_rls/002_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し |
 | `02_rls/003_trial_user_policies.sql` | `get_user_status()` の追加と、お試しユーザー制限を含むポリシーへの差し替え（learning_contents の SELECT、user_progress / submissions の書き込み） |
@@ -683,3 +685,4 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | 2026年8月 | テーマサムネイルのStorage管理に対応：`thumbnails` 公開バケットとStorageポリシーを追加。`learning_themes.image_url` の保存形式（3.1）・RLS（6.8）・マイグレーション一覧を更新 |
 | 2026年9月 | 並行Checkoutによる二重契約の対策（#103）に対応：`stripe_subscriptions` に `checkout_claimed_at` / `checkout_session_id` を追加し `stripe_customer_id` をNULL許容へ変更。claim/releaseによるCheckout作成の排他、既存セッションの状態に応じた再利用・奪取・待機、Stripe Customerの一意化を3.9節・6.6節・マイグレーション一覧に追記 |
 | 2026年9月 | 管理画面の課題編集でGASを既定言語にできるよう対応（#56）：`learning_contents.code_language` のCHECK制約に `gas` を追加。3.4節の値一覧を更新 |
+| 2026年9月 | 動画・スライドページに概要欄カードを追加（#66）：`learning_contents` に概要用の `description` カラム（NULL可・Markdown）を追加。3.4節の値一覧を更新 |

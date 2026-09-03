@@ -32,6 +32,7 @@ function makeContent(
     is_open_to_trial: false,
     is_deleted: false,
     video_url: null,
+    description: null,
     text_content: null,
     exercise_instructions: null,
     hint: null,

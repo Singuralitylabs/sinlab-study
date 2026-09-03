@@ -457,6 +457,7 @@ export async function createContent(content: {
   content_type: "video" | "text" | "exercise" | "slide";
   video_url?: string;
   text_content?: string;
+  description?: string;
   exercise_instructions?: string;
   hint?: string;
   reference_answer?: string;
