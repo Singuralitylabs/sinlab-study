@@ -597,6 +597,7 @@ export async function fetchUserIdsWithStripeSubscription(): Promise<{
  * 再承認で設定済みの種別が既定値に書き換わる事故を防ぐ（種別変更は #95 で対応）。
  * 事前SELECTによるチェックでは同時リクエスト間で競合し、SELECT失敗時にフェイルオープン
  * にもなるため、UPDATE自体に条件を折り込み原子的に判定する。
+ * service_role クライアントはRLSを迂回するため `is_deleted = false` も明示的に必須。
  *
  * @returns updated: 更新が行われたか。false は既に承認済み・存在しない・削除済みのいずれか
  */
@@ -614,6 +615,7 @@ export async function approveUser(
       updated_at: new Date().toISOString(),
     })
     .eq("id", userId)
+    .eq("is_deleted", false)
     .neq("status", USER_STATUS.ACTIVE)
     .select("id");
 
