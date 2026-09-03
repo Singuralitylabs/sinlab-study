@@ -17,6 +17,12 @@ import { isContentVisible } from "@/app/services/api/learning-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
+// Next.jsのroute segment configはリテラル値のみ静的解析されるため定数化できない。
+// generateReview()内で全試行+リトライ待機の合計を GEMINI_TOTAL_BUDGET_MS（app/constants/gemini.ts）
+// で頭打ちにしているため、Gemini呼び出しにかかる時間はこの値を超えない。
+// DB往復等のオーバーヘッド分の余裕を残して、GEMINI_TOTAL_BUDGET_MS より大きい60秒に設定している。
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
