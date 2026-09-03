@@ -3,6 +3,7 @@
 import { Loader2, Save, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import type { CodeLanguage } from "@/app/components/CodeEditor";
 import type { ContentType, LearningContent, LearningPhase, LearningWeek } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -25,11 +26,11 @@ const CONTENT_TYPE_OPTIONS: { value: ContentType; label: string }[] = [
 ];
 
 type AllowedSubmissionTypes = "code" | "url" | "both";
-type CodeLanguage = "javascript" | "typescript" | "html" | "css";
 
 const CODE_LANGUAGE_OPTIONS: { value: CodeLanguage; label: string }[] = [
-  { value: "javascript", label: "JavaScript / GAS" },
+  { value: "javascript", label: "JavaScript" },
   { value: "typescript", label: "TypeScript" },
+  { value: "gas", label: "GAS" },
   { value: "html", label: "HTML" },
   { value: "css", label: "CSS" },
 ];

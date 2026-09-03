@@ -2,6 +2,7 @@ import { Bot, ChevronLeft, ChevronRight, Lock } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
+import type { CodeLanguage } from "@/app/components/CodeEditor";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
 import { PdfSlideViewerNoSSR as PdfSlideViewer } from "@/app/components/PdfSlideViewerNoSSR";
@@ -300,10 +301,7 @@ export default async function ContentPage({ params }: PageProps) {
                     allowedSubmissionTypes={
                       (content.allowed_submission_types as "code" | "url" | "both") ?? "code"
                     }
-                    codeLanguage={
-                      (content.code_language as "javascript" | "typescript" | "html" | "css") ??
-                      "javascript"
-                    }
+                    codeLanguage={(content.code_language as CodeLanguage) ?? "javascript"}
                   />
                 </div>
               )}
