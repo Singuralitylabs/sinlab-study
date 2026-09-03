@@ -9,6 +9,7 @@ import {
   GEMINI_REQUEST_TIMEOUT_MS,
   GEMINI_RETRY_BASE_DELAY_MS,
   GEMINI_THINKING_LEVEL,
+  GEMINI_TOTAL_BUDGET_MS,
 } from "@/app/constants/gemini";
 import { USER_STATUS } from "@/app/constants/user";
 import type { CodeFile, UserStatusType } from "@/app/types";
@@ -131,19 +132,23 @@ export function isRateLimitError(error: unknown): boolean {
 }
 
 /**
- * config.abortSignal（AbortSignal.timeout()）による中断かどうかを判定する。
+ * config.abortSignal（AbortSignal.timeout()/AbortSignal.any()）による中断かどうかを判定する。
  *
  * SDK内部は呼び出し元のシグナルを直接fetchへ渡さず、独自のAbortControllerでラップして
- * `controller.abort()`（reasonなし）を呼ぶため、実際に観測されるのは
+ * `controller.abort()`（reasonなし）を呼ぶため、実際に観測されるのは通常
  * DOMException "AbortError"（"TimeoutError"ではない）。本関数呼び出し元では
  * config.abortSignal にタイムアウト用シグナル以外を渡さないため、
  * AbortError = タイムアウトとして扱ってよい。
  *
- * この判定は @google/genai のSDK内部実装（非公開）に依存する。SDKバージョンを
- * 上げた際は、この関数が引き続き想定どおり動作するか要再確認。
+ * SDKバージョン更新等で reason 付きの abort（"TimeoutError"）が素通りするようになっても
+ * 誤ってタイムアウトメッセージを出し損なわないよう、両方の名前を許容する。
+ * ただし判定自体は @google/genai のSDK内部実装（非公開）に依存しているため、
+ * SDKバージョンを上げた際はこの関数が引き続き想定どおり動作するか要再確認。
  */
 export function isTimeoutError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
+  return (
+    error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")
+  );
 }
 
 export function redactApiKey(text: string, apiKey: string): string {
@@ -183,6 +188,11 @@ export async function generateReview({
 
   let lastError: unknown;
 
+  // 個々の試行が429で即座に失敗せずGEMINI_REQUEST_TIMEOUT_MS近くまで待たされても、
+  // 全試行+リトライ待機の合計をGEMINI_TOTAL_BUDGET_MSで頭打ちにする（maxDuration対策）
+  const deadlineAt = Date.now() + GEMINI_TOTAL_BUDGET_MS;
+  const overallSignal = AbortSignal.timeout(GEMINI_TOTAL_BUDGET_MS);
+
   for (let attempt = 0; attempt <= GEMINI_MAX_RETRIES; attempt++) {
     try {
       const response = await ai.models.generateContent({
@@ -194,7 +204,10 @@ export async function generateReview({
           thinkingConfig: {
             thinkingLevel: GEMINI_THINKING_LEVEL,
           },
-          abortSignal: AbortSignal.timeout(GEMINI_REQUEST_TIMEOUT_MS),
+          abortSignal: AbortSignal.any([
+            AbortSignal.timeout(GEMINI_REQUEST_TIMEOUT_MS),
+            overallSignal,
+          ]),
         },
       });
 
@@ -214,8 +227,12 @@ export async function generateReview({
     } catch (error) {
       lastError = error;
 
-      if (isRateLimitError(error) && attempt < GEMINI_MAX_RETRIES) {
-        const delay = GEMINI_RETRY_BASE_DELAY_MS * 2 ** attempt;
+      const delay = GEMINI_RETRY_BASE_DELAY_MS * 2 ** attempt;
+      if (
+        isRateLimitError(error) &&
+        attempt < GEMINI_MAX_RETRIES &&
+        Date.now() + delay < deadlineAt
+      ) {
         console.warn(
           `Gemini APIレート制限 (試行 ${attempt + 1}/${GEMINI_MAX_RETRIES + 1})、${delay}ms後にリトライ`
         );

@@ -1,5 +1,40 @@
 import { SLACK_WEBHOOK_TIMEOUT_MS } from "@/app/constants/notifications";
 
+/**
+ * Slack Webhookへのブロック送信を共通化する。
+ * URL未設定時はスキップ、送信失敗（非2xx・例外）は握りつぶし、
+ * 呼び出し元（承認依頼・Stripe Webhook等の主処理）には一切伝播させない。
+ */
+async function postSlackWebhook(
+  body: { blocks: unknown[] },
+  onSuccess?: () => void
+): Promise<void> {
+  const webhookUrl = process.env.SLACK_NOTIFICATION_WEBHOOK_URL;
+
+  if (!webhookUrl) {
+    console.warn("[Slack通知] SLACK_NOTIFICATION_WEBHOOK_URL が未設定のため通知をスキップしました");
+    return;
+  }
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(SLACK_WEBHOOK_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      console.error(`[Slack通知] Webhook POSTが失敗しました: status=${response.status}`);
+      return;
+    }
+
+    onSuccess?.();
+  } catch (error) {
+    console.error("[Slack通知] Webhook POSTでエラーが発生しました:", error);
+  }
+}
+
 type NewUserNotificationParams = {
   displayName: string;
   email: string;
@@ -9,13 +44,6 @@ type NewUserNotificationParams = {
 export async function sendSlackNewUserNotification(
   params: NewUserNotificationParams
 ): Promise<void> {
-  const webhookUrl = process.env.SLACK_NOTIFICATION_WEBHOOK_URL;
-
-  if (!webhookUrl) {
-    console.warn("[Slack通知] SLACK_NOTIFICATION_WEBHOOK_URL が未設定のため通知をスキップしました");
-    return;
-  }
-
   const registeredAt = new Date().toLocaleString("ja-JP", {
     timeZone: "Asia/Tokyo",
     year: "numeric",
@@ -82,23 +110,9 @@ export async function sendSlackNewUserNotification(
     ],
   };
 
-  try {
-    const response = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(SLACK_WEBHOOK_TIMEOUT_MS),
-    });
-
-    if (!response.ok) {
-      console.error(`[Slack通知] Webhook POSTが失敗しました: status=${response.status}`);
-      return;
-    }
-
+  await postSlackWebhook(body, () => {
     console.log("[Slack通知] 承認依頼通知を送信しました:", params.email); // allow-console
-  } catch (error) {
-    console.error("[Slack通知] Webhook POSTでエラーが発生しました:", error);
-  }
+  });
 }
 
 type PaymentFailedNotificationParams = {
@@ -114,13 +128,6 @@ type PaymentFailedNotificationParams = {
 export async function sendSlackPaymentFailedNotification(
   params: PaymentFailedNotificationParams
 ): Promise<void> {
-  const webhookUrl = process.env.SLACK_NOTIFICATION_WEBHOOK_URL;
-
-  if (!webhookUrl) {
-    console.warn("[Slack通知] SLACK_NOTIFICATION_WEBHOOK_URL が未設定のため通知をスキップしました");
-    return;
-  }
-
   const body = {
     blocks: [
       {
@@ -174,19 +181,5 @@ export async function sendSlackPaymentFailedNotification(
     ],
   };
 
-  try {
-    const response = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(SLACK_WEBHOOK_TIMEOUT_MS),
-    });
-
-    if (!response.ok) {
-      console.error(`[Slack通知] Webhook POSTが失敗しました: status=${response.status}`);
-      return;
-    }
-  } catch (error) {
-    console.error("[Slack通知] Webhook POSTでエラーが発生しました:", error);
-  }
+  await postSlackWebhook(body);
 }

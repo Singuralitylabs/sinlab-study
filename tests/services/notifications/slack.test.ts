@@ -14,6 +14,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("sendSlackNewUserNotification", () => {
@@ -35,7 +36,7 @@ describe("sendSlackNewUserNotification", () => {
     );
   });
 
-  it("fetchがタイムアウト（AbortError）で例外を投げても呼び出し元へ伝播しない", async () => {
+  it("fetchがタイムアウト（TimeoutError）で例外を投げても呼び出し元へ伝播しない", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError"));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -68,7 +69,7 @@ describe("sendSlackPaymentFailedNotification", () => {
     );
   });
 
-  it("fetchがタイムアウト（AbortError）で例外を投げても呼び出し元（Stripe Webhook主処理）へ伝播しない", async () => {
+  it("fetchがタイムアウト（TimeoutError）で例外を投げても呼び出し元（Stripe Webhook主処理）へ伝播しない", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError"));
     vi.stubGlobal("fetch", fetchMock);
 

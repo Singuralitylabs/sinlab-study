@@ -10,6 +10,7 @@ import {
   GEMINI_REQUEST_TIMEOUT_MS,
   GEMINI_RETRY_BASE_DELAY_MS,
   GEMINI_THINKING_LEVEL,
+  GEMINI_TOTAL_BUDGET_MS,
 } from "@/app/constants/gemini";
 import { USER_STATUS } from "@/app/constants/user";
 
@@ -155,8 +156,12 @@ describe("isTimeoutError", () => {
     expect(isTimeoutError(new DOMException("The operation was aborted.", "AbortError"))).toBe(true);
   });
 
+  it("DOMException(TimeoutError) も true（SDKがreason付きでabortするようになった場合の保険）", () => {
+    expect(isTimeoutError(new DOMException("timed out", "TimeoutError"))).toBe(true);
+  });
+
   it("名前が異なる DOMException や通常の Error は false", () => {
-    expect(isTimeoutError(new DOMException("timed out", "TimeoutError"))).toBe(false);
+    expect(isTimeoutError(new DOMException("aborted", "SyntaxError"))).toBe(false);
     expect(isTimeoutError(new Error("timeout"))).toBe(false);
     expect(isTimeoutError(null)).toBe(false);
   });
@@ -333,6 +338,39 @@ describe("generateReview", () => {
     await generateReview(baseParams);
 
     expect(timeoutSpy).toHaveBeenCalledWith(GEMINI_REQUEST_TIMEOUT_MS);
+  });
+
+  it("個々の試行タイムアウトと、全試行共有のGEMINI_TOTAL_BUDGET_MSをAbortSignal.anyで合成する", async () => {
+    const anySpy = vi.spyOn(AbortSignal, "any");
+    generateContentMock.mockResolvedValue({ text: "総合スコア: 50/100" });
+
+    await generateReview(baseParams);
+
+    expect(anySpy).toHaveBeenCalledWith([expect.any(AbortSignal), expect.any(AbortSignal)]);
+  });
+
+  it("429が即座に返らず全体予算を使い切った場合は、リトライ回数が残っていても待機せず打ち切る", async () => {
+    vi.useFakeTimers();
+    const rateLimitError = new ApiError({ message: "Too Many Requests", status: 429 });
+    // 1回目の試行がGEMINI_TOTAL_BUDGET_MS近くまでかかったことを模擬する
+    // （「429はサーバー側から即時に返る」という前提が崩れたケース）
+    generateContentMock.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          setTimeout(() => reject(rateLimitError), GEMINI_TOTAL_BUDGET_MS - 1000);
+        })
+    );
+
+    const resultPromise = generateReview(baseParams);
+    const assertion = expect(resultPromise).rejects.toThrow(
+      "Gemini APIの利用上限に達しました。しばらく時間を置いてから再試行してください。"
+    );
+    await vi.runAllTimersAsync();
+    await assertion;
+
+    // 残り予算(1秒)よりリトライ待機(GEMINI_RETRY_BASE_DELAY_MS=5秒)の方が長いため、
+    // リトライ上限に達していなくても2回目の試行は行われない
+    expect(generateContentMock).toHaveBeenCalledTimes(1);
   });
 
   it("応答がタイムアウトした場合は日本語のタイムアウトメッセージを投げ、リトライしない", async () => {
