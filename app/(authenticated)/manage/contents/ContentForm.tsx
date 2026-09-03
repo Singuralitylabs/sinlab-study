@@ -3,7 +3,7 @@
 import { Loader2, Save, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import type { CodeLanguage } from "@/app/components/CodeEditor";
+import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import type { ContentType, LearningContent, LearningPhase, LearningWeek } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
