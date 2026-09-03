@@ -13,27 +13,10 @@ const FOLDER_PATTERN = /^[a-z0-9-]+$/;
 // 命名規約に沿ったスライドファイル名（slide-NN.pdf）
 const SLIDE_FILE_PATTERN = /^slide-(\d+)\.pdf$/;
 
-// 存在確認の list() は search が完全一致ではないため複数件返り得る。完全一致で絞るまでの取得上限
-const EXISTENCE_CHECK_LIST_LIMIT = 100;
+type AdminSupabaseClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>;
 
 /** 自動採番できる番号が安全な整数の範囲を超えたことを示す（一覧取得の失敗と区別する） */
 class SlideNumberExhaustedError extends Error {}
-
-/** アップロード後にオブジェクトの実体を確認できなかったことを示す（アップロード自体の失敗と区別する） */
-class SlideVerificationError extends Error {}
-
-/** オブジェクトキーをフォルダ名とファイル名に分割する（バケット直下は folder が空文字） */
-function splitObjectKey(key: string): { folder: string; name: string } {
-  const separatorIndex = key.lastIndexOf("/");
-  return separatorIndex === -1
-    ? { folder: "", name: key }
-    : { folder: key.slice(0, separatorIndex), name: key.slice(separatorIndex + 1) };
-}
-
-/** 先頭スラッシュの有無だけで不一致と誤判定しないようキーを正規化する */
-function normalizeObjectKey(key: string): string {
-  return key.replace(/^\/+/, "");
-}
 
 /**
  * アップロード直後に対象オブジェクトの実体を照合する。
@@ -42,53 +25,44 @@ function normalizeObjectKey(key: string): string {
  * 「成功したのに実体が無い」URLが learning_contents.pdf_url に保存されるのを防ぐ防波堤。
  * 照合できない場合は必ず例外を投げる（呼び出し側は成功として扱ってはならない）。
  *
- * 照合に失敗してもアップロード済みオブジェクトの削除は行わない。
- * 失敗原因が一時的な list() の失敗だった場合、正常なファイルを消してしまうため。
+ * 照合に失敗してもアップロード済みオブジェクトの削除は行わない
+ * （失敗原因が一時的な通信エラーだった場合、正常なファイルを消してしまうため）。
+ * 番号未指定で再アップロードすると残ったファイルの次の番号が採番されるため、
+ * 409にはならず「どこからも参照されない孤児ファイルと欠番」が残る。
  */
 async function verifyUploadedObject(
-  supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
-  uploadedPath: string | null | undefined,
+  supabase: AdminSupabaseClient,
+  uploadData: { path: string; fullPath: string } | null,
   expectedPath: string
 ): Promise<void> {
-  // storage-js はエラー無しでも data を null にし得るため、path の存在と一致をまず確認する
-  if (!uploadedPath) {
-    throw new SlideVerificationError("アップロード結果にパスが含まれていません");
+  // storage-js はエラー無しでも data を null にし得る
+  if (!uploadData) {
+    throw new Error("アップロード結果が空です");
   }
-  if (normalizeObjectKey(uploadedPath) !== normalizeObjectKey(expectedPath)) {
-    throw new SlideVerificationError(
-      `アップロード先が想定と異なります: expected=${expectedPath}, actual=${uploadedPath}`
+
+  // data.path は storage-js が引数のパスから組み立てて返すだけで検証の役に立たない。
+  // サーバー応答（data.Key）由来の fullPath で、実際の保存先を確かめる
+  const expectedFullPath = `${BUCKET_NAME}/${expectedPath}`;
+  if (uploadData.fullPath !== expectedFullPath) {
+    throw new Error(
+      `アップロード先が想定と異なります: expected=${expectedFullPath}, actual=${uploadData.fullPath}`
     );
   }
 
-  const { folder, name } = splitObjectKey(expectedPath);
-  const { data, error } = await supabase.storage
-    .from(BUCKET_NAME)
-    .list(folder, { search: name, limit: EXISTENCE_CHECK_LIST_LIMIT });
-
-  if (error || !data) {
-    throw new SlideVerificationError(
-      `存在確認の一覧取得に失敗しました: ${error?.message ?? "unknown error"}`
-    );
-  }
-
-  // search は完全一致ではない（slide-01.pdf の検索が slide-01.pdf.bak にも当たる）ため、
-  // 名前の完全一致で判定する
-  if (!data.some((item) => item.name === name)) {
-    throw new SlideVerificationError(
-      `アップロードしたオブジェクトが見つかりません: ${expectedPath}`
-    );
+  // exists() は対象キーへのHEAD。list({ search }) と違い部分一致も件数上限も無いため、
+  // 存在するのに見つけられない窓が無い。400/404 は data:false、それ以外の失敗は例外になる
+  const { data: exists } = await supabase.storage.from(BUCKET_NAME).exists(expectedPath);
+  if (!exists) {
+    throw new Error(`アップロードしたオブジェクトが見つかりません: ${expectedPath}`);
   }
 }
 
 /**
  * 確定済みのオブジェクトキーから配信URLを組み立てる。
- * 存在確認（verifyUploadedObject）と分離してあるため、#89 で署名付きURL配信へ移行する際は
- * この関数を createSignedUrl() に差し替えるだけでよい。
+ * 存在確認（verifyUploadedObject）がキーだけを扱うため、配信方式の変更はこの関数に閉じる。
+ * #89 で createSignedUrl() へ移行する際は、この関数が非同期になり失敗分岐が1つ増える。
  */
-function buildSlideDeliveryUrl(
-  supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
-  objectKey: string
-): string {
+function buildSlideDeliveryUrl(supabase: AdminSupabaseClient, objectKey: string): string {
   const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(objectKey);
   return data.publicUrl;
 }
@@ -99,10 +73,7 @@ function buildSlideDeliveryUrl(
  * 一覧取得に失敗した場合は走査失敗を区別できないため例外を投げる
  * （誤った自動採番で既存ファイルを上書き／409誤判定するのを防ぐ）。
  */
-async function getNextSlideNumber(
-  supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
-  folder: string
-): Promise<number> {
+async function getNextSlideNumber(supabase: AdminSupabaseClient, folder: string): Promise<number> {
   const { data, error } = await supabase.storage.from(BUCKET_NAME).list(folder, { limit: 1000 });
 
   if (error || !data) {
@@ -261,11 +232,15 @@ export async function POST(request: NextRequest) {
 
     // 実体を確認できるまでURLを返さない（不正な pdf_url がコンテンツに保存されるのを防ぐ）
     try {
-      await verifyUploadedObject(supabase, uploadData?.path, filePath);
+      await verifyUploadedObject(supabase, uploadData, filePath);
     } catch (verificationError) {
       console.error("PDFアップロードの存在確認エラー:", verificationError);
+      // 消費したキーを伝える（自動採番ではこの番号が孤児として残り、再試行では次の番号になる）
       return NextResponse.json(
-        { error: "アップロードの完了を確認できませんでした。時間をおいて再度お試しください" },
+        {
+          error: `アップロードの完了を確認できませんでした（${filePath}）。時間をおいて再度お試しください`,
+          path: filePath,
+        },
         { status: 500 }
       );
     }
