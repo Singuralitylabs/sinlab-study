@@ -18,8 +18,11 @@ import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 // Next.jsのroute segment configはリテラル値のみ静的解析されるため定数化できない。
-// GEMINI_REQUEST_TIMEOUT_MS × (GEMINI_MAX_RETRIES + 1) にリトライ待機（GEMINI_RETRY_BASE_DELAY_MS基準の指数バックオフ）
-// を加えた合計（既定値では最大 約40秒）が収まるよう60秒に設定している（app/constants/gemini.ts）。
+// generateReview()はタイムアウト（AbortError）をリトライしないため、タイムアウトが起こり得るのは
+// 最終試行の1回のみ。既定値では最悪ケースでも
+// リトライ待機（GEMINI_RETRY_BASE_DELAY_MS基準の指数バックオフ: 5秒+10秒）+ 最終試行のタイムアウト
+// （GEMINI_REQUEST_TIMEOUT_MS: 25秒）= 約40秒（DB往復等のオーバーヘッドは含まず）。
+// この合計が収まるよう60秒に設定している（app/constants/gemini.ts）。
 export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {

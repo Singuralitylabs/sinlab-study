@@ -138,6 +138,9 @@ export function isRateLimitError(error: unknown): boolean {
  * DOMException "AbortError"（"TimeoutError"ではない）。本関数呼び出し元では
  * config.abortSignal にタイムアウト用シグナル以外を渡さないため、
  * AbortError = タイムアウトとして扱ってよい。
+ *
+ * この判定は @google/genai のSDK内部実装（非公開）に依存する。SDKバージョンを
+ * 上げた際は、この関数が引き続き想定どおり動作するか要再確認。
  */
 export function isTimeoutError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
