@@ -13,7 +13,7 @@ const FOLDER_PATTERN = /^[a-z0-9-]+$/;
 // 命名規約に沿ったスライドファイル名（slide-NN.pdf）
 const SLIDE_FILE_PATTERN = /^slide-(\d+)\.pdf$/;
 
-// 存在確認の list() は search が部分一致のため複数件返り得る。完全一致で絞るまでの取得上限
+// 存在確認の list() は search が完全一致ではないため複数件返り得る。完全一致で絞るまでの取得上限
 const EXISTENCE_CHECK_LIST_LIMIT = 100;
 
 /** 自動採番できる番号が安全な整数の範囲を超えたことを示す（一覧取得の失敗と区別する） */
@@ -71,7 +71,8 @@ async function verifyUploadedObject(
     );
   }
 
-  // search は部分一致（slide-1.pdf の検索が slide-10.pdf に当たる）ため、必ず完全一致で判定する
+  // search は完全一致ではない（slide-01.pdf の検索が slide-01.pdf.bak にも当たる）ため、
+  // 名前の完全一致で判定する
   if (!data.some((item) => item.name === name)) {
     throw new SlideVerificationError(
       `アップロードしたオブジェクトが見つかりません: ${expectedPath}`

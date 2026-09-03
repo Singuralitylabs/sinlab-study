@@ -49,7 +49,7 @@ const mockStorage = (options: MockStorageOptions = {}) => {
       }
       const existing =
         verifyFiles ?? (uploadedPath ? [{ name: uploadedPath.split("/").pop() }] : []);
-      // 本物の search は部分一致なので、モックでも部分一致で返す
+      // 本物の search は完全一致ではないため、モックでも部分一致で返す
       return {
         data: existing.filter((item) => item.name?.includes(listOptions.search as string)),
         error: null,
@@ -419,8 +419,8 @@ describe("POST /api/upload-pdf アップロード後の存在確認", () => {
     expect(getPublicUrl).not.toHaveBeenCalled();
   });
 
-  // search は部分一致のため、slide-1.pdf の検索が slide-10.pdf に当たる。完全一致で判定していることを担保する
-  it("部分一致の別ファイルしか無い場合は存在扱いにしない", async () => {
+  // search は完全一致ではなく slide-01.pdf.bak なども返り得る。完全一致で判定していることを担保する
+  it("名前が前方一致するだけの別ファイルしか無い場合は存在扱いにしない", async () => {
     const { getPublicUrl } = mockStorage({ verifyFiles: [{ name: "slide-01.pdf.bak" }] });
 
     const response = await POST(request({ slideNumber: "1" }) as never);

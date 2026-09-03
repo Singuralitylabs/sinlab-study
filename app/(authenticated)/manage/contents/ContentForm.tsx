@@ -171,7 +171,9 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       setMessage({ type: "error", text: "アップロードの完了をお待ちください" });
       return;
     }
-    if (contentType === "slide" && !pdfUrl.trim()) {
+    // PDF必須の判定は新規作成時のみ。編集時にも課すと、一括操作で slide 種別へ変更された
+    // pdf_url が空の既存コンテンツを、タイトル修正や種別の戻しすら保存できなくなる
+    if (mode === "create" && contentType === "slide" && !pdfUrl.trim()) {
       setMessage({ type: "error", text: "スライドPDFをアップロードしてください" });
       return;
     }
@@ -194,7 +196,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       reference_answer: contentType === "exercise" ? referenceAnswer.trim() || null : null,
       allowed_submission_types: contentType === "exercise" ? allowedSubmissionTypes : "code",
       code_language: contentType === "exercise" ? codeLanguage : "javascript",
-      pdf_url: contentType === "slide" ? pdfUrl : null,
+      pdf_url: contentType === "slide" ? pdfUrl.trim() || null : null,
     };
 
     try {
@@ -519,7 +521,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
                 isUploading ||
                 !title ||
                 !weekId ||
-                (contentType === "slide" && !pdfUrl.trim())
+                (mode === "create" && contentType === "slide" && !pdfUrl.trim())
               }
             >
               {isLoading ? (
