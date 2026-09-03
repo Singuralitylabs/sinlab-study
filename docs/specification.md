@@ -506,8 +506,9 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 
 | 値 | 言語 | 用途例 |
 |:--|:--|:--|
-| `'javascript'` | JavaScript / GAS | GAS課題（デフォルト） |
+| `'javascript'` | JavaScript（デフォルト） | JavaScript課題 |
 | `'typescript'` | TypeScript | TypeScript課題 |
+| `'gas'` | GAS（Google Apps Script） | GAS課題 |
 | `'html'` | HTML | フロントエンド課題 |
 | `'css'` | CSS | スタイリング課題 |
 

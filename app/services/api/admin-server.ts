@@ -1,4 +1,5 @@
 import type { PostgrestError } from "@supabase/supabase-js";
+import type { CodeLanguage } from "@/app/components/CodeEditor";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import { NON_CURRENT_SUBSCRIPTION_STATUSES } from "@/app/services/api/stripe-server";
 import type {
@@ -457,7 +458,7 @@ export async function createContent(content: {
   hint?: string;
   reference_answer?: string;
   allowed_submission_types?: "code" | "url" | "both";
-  code_language?: "javascript" | "typescript" | "html" | "css";
+  code_language?: CodeLanguage;
   pdf_url?: string;
   display_order?: number;
   is_published?: boolean;
