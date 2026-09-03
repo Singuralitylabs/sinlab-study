@@ -585,14 +585,15 @@ describe("fetchContentVisibilitySummariesByWeekIds", () => {
   });
 
   it("正常時、service_role クライアントでコンテンツサマリーを返す（お試し非公開分も含む）", async () => {
-    const summaries = [
+    // is_published は許可リスト外のため select されない（DBレスポンスにも含まれない）。
+    // 関数側で常に true を補うことを検証する。
+    const summariesWithoutIsPublished = [
       {
         id: 1,
         title: "公開コンテンツ",
         content_type: "video",
         display_order: 1,
         is_open_to_trial: true,
-        is_published: true,
         week_id: 100,
       },
       {
@@ -601,18 +602,24 @@ describe("fetchContentVisibilitySummariesByWeekIds", () => {
         content_type: "exercise",
         display_order: 2,
         is_open_to_trial: false,
-        is_published: true,
         week_id: 100,
       },
     ];
     const mockClient = createMockSupabaseClient({
-      queryResult: { data: summaries, error: null },
+      queryResult: { data: summariesWithoutIsPublished, error: null },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
     const result = await fetchContentVisibilitySummariesByWeekIds([100]);
 
-    expect(result.data).toEqual(summaries);
+    expect(result.data).toEqual(
+      summariesWithoutIsPublished.map((s) => ({ ...s, is_published: true }))
+    );
+    const builder = mockClient.from.mock.results[0].value;
+    // service_role 経路は CLAUDE.md の許可リストのみを select する（is_published は含めない）
+    expect(builder.select).toHaveBeenCalledWith(
+      "id, title, content_type, display_order, is_open_to_trial, week_id"
+    );
     expect(result.error).toBeNull();
   });
 
@@ -894,15 +901,17 @@ describe("isContentFullyPublished", () => {
     week: {
       id: 100,
       is_published: true,
+      is_deleted: false,
       phase: {
         id: 10,
         is_published: true,
-        theme: { id: 1, is_published: true },
+        is_deleted: false,
+        theme: { id: 1, is_published: true, is_deleted: false },
       },
     },
   } as unknown as Parameters<typeof isContentFullyPublished>[0];
 
-  it("コンテンツ・週・フェーズ・テーマがすべて公開済みの場合、true を返す", () => {
+  it("コンテンツ・週・フェーズ・テーマがすべて公開済み・未削除の場合、true を返す", () => {
     expect(isContentFullyPublished(baseContent)).toBe(true);
   });
 
@@ -933,6 +942,29 @@ describe("isContentFullyPublished", () => {
       week: { ...week, phase: { ...phase, theme: { ...phase.theme, is_published: false } } },
     } as typeof baseContent;
     expect(isContentFullyPublished(themeUnpublished)).toBe(false);
+  });
+
+  it("週・フェーズ・テーマのいずれかが論理削除済みの場合、is_published が true でも false を返す（UIとAPIの不整合防止）", () => {
+    const week = baseContent.week as NonNullable<typeof baseContent.week>;
+    const phase = week.phase as NonNullable<typeof week.phase>;
+
+    const weekDeleted = {
+      ...baseContent,
+      week: { ...week, is_deleted: true },
+    } as typeof baseContent;
+    expect(isContentFullyPublished(weekDeleted)).toBe(false);
+
+    const phaseDeleted = {
+      ...baseContent,
+      week: { ...week, phase: { ...phase, is_deleted: true } },
+    } as typeof baseContent;
+    expect(isContentFullyPublished(phaseDeleted)).toBe(false);
+
+    const themeDeleted = {
+      ...baseContent,
+      week: { ...week, phase: { ...phase, theme: { ...phase.theme, is_deleted: true } } },
+    } as typeof baseContent;
+    expect(isContentFullyPublished(themeDeleted)).toBe(false);
   });
 
   it("week / phase / theme が null の場合、false を返す（データ不整合時のフェイルクローズ）", () => {

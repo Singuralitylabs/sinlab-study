@@ -308,27 +308,40 @@ export async function isContentVisible(
 }
 
 /**
- * コンテンツ自身だけでなく、週・フェーズ・テーマの全階層が公開済みかどうかを判定する。
+ * コンテンツ自身だけでなく、週・フェーズ・テーマの全階層が公開済み・未削除かどうかを判定する。
  * admin / maintainer のプレビュー画面で「未公開」バッジ表示・完了ボタン / 提出フォームの
- * 表示可否に使う（コンテンツ行自体は公開済みでも、親階層のいずれかが未公開ならプレビュー扱いとする。
- * issue #68）。実際の進捗登録・提出・AIレビューの可否は `isContentVisible()` がDB側で判定する。
+ * 表示可否に使う（コンテンツ行自体は公開済みでも、親階層のいずれかが未公開・論理削除済みなら
+ * プレビュー扱いとする。issue #68）。
+ *
+ * `fetchContentById()` の select は親階層（week/phase/theme）に is_deleted のフィルタを
+ * 課していない（`.eq("is_deleted", false)` はコンテンツ自身にのみ適用）ため、ここで明示的に
+ * 判定する。判定しないと、論理削除済みの親を持つコンテンツで「完了ボタン等は表示されるが
+ * `isContentVisible()` は必ず403を返す」というUIとAPIの不整合が起きる。
  */
 export function isContentFullyPublished(content: LearningContentWithWeek): boolean {
+  const week = content.week;
+  const phase = week?.phase;
+  const theme = phase?.theme;
+
   return (
     content.is_published &&
-    (content.week?.is_published ?? false) &&
-    (content.week?.phase?.is_published ?? false) &&
-    (content.week?.phase?.theme?.is_published ?? false)
+    week?.is_published === true &&
+    week?.is_deleted === false &&
+    phase?.is_published === true &&
+    phase?.is_deleted === false &&
+    theme?.is_published === true &&
+    theme?.is_deleted === false
   );
 }
 
 /**
- * ロック表示・存在チェック用サマリーで select するカラム許可リスト（機能設計書 2.6 参照）。
- * service_role 経由（受講生向け）・通常クライアント経由（admin / maintainer 向け）の
- * 両経路で共有し、リストがずれないようにする。本文カラム（text_content 等）は含めない。
+ * service_role 経路（受講生向け）の select カラム許可リスト（CLAUDE.md・機能設計書 2.6 の
+ * 不変条件）。`id, title, content_type, display_order, is_open_to_trial, week_id` の6列のみで、
+ * `is_published` は含めない（このリストを拡張すると service_role が RLS を素通りして
+ * 追加カラムを返してしまうため、admin / maintainer 向け経路とは別に維持する）。
  */
 const CONTENT_VISIBILITY_SUMMARY_COLUMNS =
-  "id, title, content_type, display_order, is_open_to_trial, is_published, week_id";
+  "id, title, content_type, display_order, is_open_to_trial, week_id";
 
 /**
  * 指定した週IDに属する公開コンテンツのサマリー（タイトル・種別・表示順・お試し公開フラグ）を取得する。
@@ -337,7 +350,10 @@ const CONTENT_VISIBILITY_SUMMARY_COLUMNS =
  * SELECT では取得できないため）。コースツリーのロック表示、およびコンテンツ詳細ページの
  * 存在チェック（404 とロックの区別）に使用する（機能設計書 2.6 参照）。
  * service_role は RLS を素通りするため is_published / is_deleted は必ず絞り込み、
- * 本文カラム（text_content 等）は select しない。
+ * 本文カラム（text_content 等）は select しない。カラムは `CONTENT_VISIBILITY_SUMMARY_COLUMNS`
+ * の許可リストのみを select し、`is_published` は select せず常に `true` を補う
+ * （下の `.eq("is_published", true)` と対になっている。フィルタ条件を変える場合はこの補完も
+ * 合わせて見直すこと）。
  */
 export async function fetchContentVisibilitySummariesByWeekIds(weekIds: number[]): Promise<{
   data: ContentVisibilitySummary[] | null;
@@ -362,15 +378,18 @@ export async function fetchContentVisibilitySummariesByWeekIds(weekIds: number[]
     return { data: null, error };
   }
 
-  return { data: data as ContentVisibilitySummary[], error: null };
+  const summaries = (data ?? []).map((content) => ({ ...content, is_published: true as const }));
+  return { data: summaries, error: null };
 }
 
 /**
  * 指定した週IDに属するコンテンツのサマリーを、未公開分も含めて通常クライアントで取得する。
  * admin / maintainer のプレビュー専用の経路（issue #68）。RLS（is_published = true OR
  * ロールが admin/maintainer）により、実際に未公開分まで返るのは admin / maintainer のみ。
- * service_role は使わないため is_published の絞り込みは不要だが、is_deleted は必ず絞り込む
- * （admin / maintainer 向け SELECT RLS は is_deleted を見ないため）。
+ * service_role を使わず RLS 適用下で取得するため、`is_published`（バッジ表示用）も
+ * select してよい（`CONTENT_VISIBILITY_SUMMARY_COLUMNS` の許可リストは service_role 経路専用
+ * なのでここでは使わない）。is_deleted は必ず絞り込む（admin / maintainer 向け SELECT RLS は
+ * is_deleted を見ないため）。
  */
 async function fetchContentSummariesByWeekIdsForManager(weekIds: number[]): Promise<{
   data: ContentVisibilitySummary[] | null;
@@ -384,7 +403,7 @@ async function fetchContentSummariesByWeekIdsForManager(weekIds: number[]): Prom
 
   const { data, error } = await supabase
     .from("learning_contents")
-    .select(CONTENT_VISIBILITY_SUMMARY_COLUMNS)
+    .select("id, title, content_type, display_order, is_open_to_trial, is_published, week_id")
     .in("week_id", weekIds)
     .eq("is_deleted", false)
     .order("display_order");

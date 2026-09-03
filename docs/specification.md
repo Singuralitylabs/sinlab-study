@@ -375,11 +375,11 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 
 **ロック表示用サマリー（2.6節）との関係**: 受講生向けのロック表示・存在チェックに使う service_role 経路（`fetchContentVisibilitySummariesByWeekIds()`）は変更しない（`is_published = true AND is_deleted = false` の絞り込みを維持）。admin / maintainer 向けには、通常クライアント（RLS適用）で未公開分も取得する別関数 `fetchContentSummariesByWeekIdsForManager()` を新設し、ロールに応じてどちらを呼ぶかを `fetchContentSummariesByWeekIds(weekIds, userRole)` が振り分ける。service_role を使ってよい箇所は2.6節の2箇所のまま増えない。
 
-**未公開バッジ**: プレビュー中であることを明示するため、`is_published = false` の階層・コンテンツには「非公開」バッジ（`app/components/UnpublishedBadge.tsx`。`/manage` 配下の既存バッジと文言・見た目を統一）を一覧・詳細の両方に表示する。バッジの表示可否はデータ（各行の `is_published`）で判定し、ロール分岐はコンポーネント側に書かない。コンテンツ詳細ページのみ、コンテンツ行自体は公開済みでも所属する週・フェーズ・テーマのいずれかが未公開ならプレビュー扱いとする必要があるため、`isContentFullyPublished()`（`learning-server.ts`）で全階層の `is_published` を判定してからバッジ・完了ボタン・提出フォームの表示可否を決める。
+**未公開バッジ**: プレビュー中であることを明示するため、`is_published = false` の階層・コンテンツには「非公開」バッジ（`app/components/UnpublishedBadge.tsx`。`isPublished` propを受け取り自身で表示要否を判定する。`/manage` 配下の既存バッジと文言・見た目を統一）を一覧・詳細の両方に表示する。バッジの表示可否はデータ（各行の `is_published`）で判定し、ロール分岐はコンポーネント側に書かない。コンテンツ詳細ページのみ、コンテンツ行自体は公開済みでも所属する週・フェーズ・テーマのいずれかが未公開・論理削除済みならプレビュー扱いとする必要があるため、`isContentFullyPublished()`（`learning-server.ts`）で全階層の `is_published`/`is_deleted` を判定してからバッジ・完了ボタン・提出フォームの表示可否を決める（`fetchContentById()` の select は親階層に `is_deleted` フィルタを課していないため、これを省くと論理削除済みの親を持つコンテンツでUIとAPI（`isContentVisible()`）の可否表示が食い違う）。
 
 **未公開コンテンツでの操作制限**: 進捗登録・課題提出・AIレビューはプレビュー中であっても許可しない。UI側は `isContentFullyPublished()` が false の間、完了ボタン・提出フォームを表示しない。API側は `isContentVisible()`（4.1節・5.1節参照）がコンテンツ自身に加えて週・フェーズ・テーマの全階層について `is_published = true AND is_deleted = false` を明示的に判定することで、admin / maintainer が直接APIを叩いた場合も含めて一律403にする（ロールに関わらないフェイルクローズ）。`learning_contents` の SELECT RLS は admin / maintainer に無条件で許可されるため、コンテンツ行の `is_published` だけを見ると、論理削除済みのコンテンツや未公開階層配下の（誤って公開フラグが立った）コンテンツへの操作が通ってしまう点に注意する。
 
-**進捗率の分母**: コースツリー（フェーズページ）の進捗分母・分子は、ロック済み（お試し非公開）に加えて未公開コンテンツも除外する。admin / maintainer のプレビュー中は完了不能な下書きコンテンツが含まれるため、分母に含めると進捗率がずれる。
+**進捗率の分母**: コースツリー（フェーズページ）の進捗分母・分子は、ロック済み（お試し非公開）に加えて、コンテンツ・週・フェーズ・テーマのいずれかが未公開のものも除外する。admin / maintainer のプレビュー中は完了不能な下書きコンテンツ（公開済みでも未公開の週配下にあるコンテンツを含む）が含まれるため、分母に含めると進捗率がずれる。
 
 ---
 
@@ -1031,3 +1031,4 @@ flowchart TD
 | 2026年9月 | 承認済み（active）ユーザーの会員種別変更機能を追加（#95）：2.7節・6.1.3節を更新。Stripe契約中ユーザーは承認・変更のいずれも一般有料会員以外を選べない（一般有料会員への是正は常に許可） |
 | 2026年9月 | admin / maintainer による未公開コンテンツのプレビュー機能を追加（#68）：2.12節を新設。`learning-server.ts` の取得関数がロールに応じて `is_published` 絞り込みを外す旨、未公開バッジ表示、進捗登録・提出・AIレビューはプレビュー中も許可しない旨（`isContentVisible()` の `is_published` 絞り込み）を追記。3.1節・4.1節を更新 |
 | 2026年9月 | PR #157レビュー指摘を反映（#68）：`isContentVisible()` に週・フェーズ・テーマの全階層および `is_deleted` の判定を追加（コンテンツ行の `is_published` だけでは admin / maintainer 向けRLSの無条件許可により論理削除済み・未公開階層配下への操作が通ってしまうため）。`isContentFullyPublished()` を新設しコンテンツ詳細ページのバッジ・操作可否判定に使用。コースツリーの進捗分母から未公開コンテンツを除外。バッジ文言を `/manage` 配下と統一（「非公開」）。2.12節・4.1節を更新 |
+| 2026年9月 | GitHub Copilotレビュー指摘を反映（#68）：`isContentFullyPublished()` に週・フェーズ・テーマの `is_deleted` 判定を追加（`fetchContentById()` の親階層 select には is_deleted フィルタがなく、論理削除済みの親を持つコンテンツでUIとAPIの可否表示が食い違っていたため）。コースツリーの進捗分母・分子に週・フェーズ・テーマの公開状態も反映。service_role 経路（受講生向け）の select カラムから `is_published` を除去し、CLAUDE.md の許可リストへの準拠を復元（select せず常に true を補う方式に戻す）。2.12節を更新 |
