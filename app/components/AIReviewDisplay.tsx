@@ -5,7 +5,7 @@ import { useState } from "react";
 import type { AIReview } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MarkdownRendererClient } from "./MarkdownRendererClient";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 
 interface AIReviewDisplayProps {
   review: AIReview | null;
@@ -115,7 +115,7 @@ export function AIReviewDisplay({
       </div>
       {isExpanded && review.review_content && (
         <div className="p-4 border-t">
-          <MarkdownRendererClient content={review.review_content} className="text-sm" />
+          <MarkdownRenderer content={review.review_content} className="text-sm" />
         </div>
       )}
     </div>

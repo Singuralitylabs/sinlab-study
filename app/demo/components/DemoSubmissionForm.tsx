@@ -267,7 +267,6 @@ export function DemoSubmissionForm({
                   onChange={(value) => updateCodeFile(index, { content: value })}
                   language={file.language}
                   placeholder="ここにコードを貼り付けてください..."
-                  minHeight="200px"
                 />
               </div>
             ))}

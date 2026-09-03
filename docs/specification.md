@@ -411,7 +411,7 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 | スライド（slide） | Supabase StorageのPDF URLを react-pdf でブラウザ内表示 |
 | 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携 |
 
-動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア上部に概要欄カードを表示する。未入力（NULL）の既存コンテンツでは概要欄自体を表示しない。表示にはテキスト・演習と同じ `MarkdownRenderer` を用いる。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）はServer Component。クライアントコンポーネントから動的なMarkdown（AIレビュー結果等）を表示する場合は、これを import せず `MarkdownRendererClient`（`app/components/MarkdownRendererClient.tsx`）を使う（Server ComponentをClient Componentから import しない）。
+動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア上部に概要欄カードを表示する。未入力（NULL）の既存コンテンツでは概要欄自体を表示しない。表示にはテキスト・演習と同じ `MarkdownRenderer` を用いる。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）は `"use client"` を持たない共有コンポーネント（hooksやNode専用APIを使わないため）。Server Component（learn/demoの`page.tsx`）からはサーバーで、Client Component（`AIReviewDisplay`、AIレビュー結果表示用）からはクライアントバンドルに含まれてクライアントで、同じ実装のまま描画される。
 
 ### 3.3 画面遷移
 

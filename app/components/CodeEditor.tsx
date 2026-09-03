@@ -12,7 +12,6 @@ export interface CodeEditorProps {
   onChange: (value: string) => void;
   language: CodeLanguage;
   placeholder?: string;
-  minHeight?: string;
 }
 
 function getExtensions(language: CodeLanguage) {
@@ -30,13 +29,7 @@ function getExtensions(language: CodeLanguage) {
   }
 }
 
-export function CodeEditor({
-  value,
-  onChange,
-  language,
-  placeholder,
-  minHeight = "200px",
-}: CodeEditorProps) {
+export function CodeEditor({ value, onChange, language, placeholder }: CodeEditorProps) {
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
@@ -62,7 +55,7 @@ export function CodeEditor({
         closeBrackets: true,
         indentOnInput: true,
       }}
-      style={{ minHeight }}
+      style={{ minHeight: "200px" }}
       className="overflow-hidden rounded-md border border-input text-sm"
     />
   );
