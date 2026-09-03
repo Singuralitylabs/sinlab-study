@@ -1,3 +1,5 @@
+import { SLACK_WEBHOOK_TIMEOUT_MS } from "@/app/constants/notifications";
+
 type NewUserNotificationParams = {
   displayName: string;
   email: string;
@@ -85,6 +87,7 @@ export async function sendSlackNewUserNotification(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(SLACK_WEBHOOK_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -176,6 +179,7 @@ export async function sendSlackPaymentFailedNotification(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(SLACK_WEBHOOK_TIMEOUT_MS),
     });
 
     if (!response.ok) {

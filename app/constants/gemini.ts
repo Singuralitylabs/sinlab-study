@@ -24,6 +24,13 @@ export const GEMINI_MAX_RETRIES = 2;
 /** 429 リトライの初回待機（ms）。以降は 2^attempt で指数バックオフ */
 export const GEMINI_RETRY_BASE_DELAY_MS = 5000;
 
+/**
+ * Gemini 呼び出し1回あたりのタイムアウト（ms）。
+ * `/api/ai-review` の `maxDuration`（route.ts に定数として直書き）内に、
+ * リトライ待機を含めた合計が収まるよう調整すること。
+ */
+export const GEMINI_REQUEST_TIMEOUT_MS = 25_000;
+
 /** 会員（status=active）向け API キーの環境変数名 */
 export const GEMINI_API_KEY_ENV = "GEMINI_API_KEY";
 

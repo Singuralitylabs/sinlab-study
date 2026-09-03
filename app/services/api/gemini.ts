@@ -6,6 +6,7 @@ import {
   GEMINI_MAX_OUTPUT_TOKENS,
   GEMINI_MAX_RETRIES,
   GEMINI_MODEL_NAME,
+  GEMINI_REQUEST_TIMEOUT_MS,
   GEMINI_RETRY_BASE_DELAY_MS,
   GEMINI_THINKING_LEVEL,
 } from "@/app/constants/gemini";
@@ -129,6 +130,19 @@ export function isRateLimitError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 429;
 }
 
+/**
+ * config.abortSignal（AbortSignal.timeout()）による中断かどうかを判定する。
+ *
+ * SDK内部は呼び出し元のシグナルを直接fetchへ渡さず、独自のAbortControllerでラップして
+ * `controller.abort()`（reasonなし）を呼ぶため、実際に観測されるのは
+ * DOMException "AbortError"（"TimeoutError"ではない）。本関数呼び出し元では
+ * config.abortSignal にタイムアウト用シグナル以外を渡さないため、
+ * AbortError = タイムアウトとして扱ってよい。
+ */
+export function isTimeoutError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 export function redactApiKey(text: string, apiKey: string): string {
   if (!apiKey || !text.includes(apiKey)) {
     return text;
@@ -177,6 +191,7 @@ export async function generateReview({
           thinkingConfig: {
             thinkingLevel: GEMINI_THINKING_LEVEL,
           },
+          abortSignal: AbortSignal.timeout(GEMINI_REQUEST_TIMEOUT_MS),
         },
       });
 
@@ -212,6 +227,12 @@ export async function generateReview({
   if (isRateLimitError(lastError)) {
     throw new Error(
       "Gemini APIの利用上限に達しました。しばらく時間を置いてから再試行してください。"
+    );
+  }
+
+  if (isTimeoutError(lastError)) {
+    throw new Error(
+      "Gemini APIの応答がタイムアウトしました。しばらく時間を置いてから再試行してください。"
     );
   }
 

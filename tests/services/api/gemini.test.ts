@@ -7,6 +7,7 @@ import {
   GEMINI_MAX_OUTPUT_TOKENS,
   GEMINI_MAX_RETRIES,
   GEMINI_MODEL_NAME,
+  GEMINI_REQUEST_TIMEOUT_MS,
   GEMINI_RETRY_BASE_DELAY_MS,
   GEMINI_THINKING_LEVEL,
 } from "@/app/constants/gemini";
@@ -33,6 +34,7 @@ import {
   extractOverallScore,
   generateReview,
   isRateLimitError,
+  isTimeoutError,
   redactApiKey,
   resolveGeminiApiKey,
   SYSTEM_PROMPT,
@@ -148,6 +150,18 @@ describe("isRateLimitError", () => {
   });
 });
 
+describe("isTimeoutError", () => {
+  it("DOMException(AbortError) は true（SDK内部のAbortControllerがreasonなしでabortするため）", () => {
+    expect(isTimeoutError(new DOMException("The operation was aborted.", "AbortError"))).toBe(true);
+  });
+
+  it("名前が異なる DOMException や通常の Error は false", () => {
+    expect(isTimeoutError(new DOMException("timed out", "TimeoutError"))).toBe(false);
+    expect(isTimeoutError(new Error("timeout"))).toBe(false);
+    expect(isTimeoutError(null)).toBe(false);
+  });
+});
+
 describe("buildUserPrompt", () => {
   it("URL提出のプロンプトを組み立てる", () => {
     const prompt = buildUserPrompt("フォームを作る", {
@@ -244,6 +258,7 @@ describe("generateReview", () => {
         systemInstruction: SYSTEM_PROMPT,
         maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
         thinkingConfig: { thinkingLevel: GEMINI_THINKING_LEVEL },
+        abortSignal: expect.any(AbortSignal),
       },
     });
     expect(result).toEqual({
@@ -308,6 +323,27 @@ describe("generateReview", () => {
     generateContentMock.mockRejectedValue(new Error(`invalid API key ${MEMBER_KEY}`));
 
     await expect(generateReview(baseParams)).rejects.toThrow("invalid API key [redacted]");
+    expect(generateContentMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("GEMINI_REQUEST_TIMEOUT_MS でリクエストごとのタイムアウトを設定する", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    generateContentMock.mockResolvedValue({ text: "総合スコア: 50/100" });
+
+    await generateReview(baseParams);
+
+    expect(timeoutSpy).toHaveBeenCalledWith(GEMINI_REQUEST_TIMEOUT_MS);
+  });
+
+  it("応答がタイムアウトした場合は日本語のタイムアウトメッセージを投げ、リトライしない", async () => {
+    // SDK内部のAbortControllerがreasonなしでabortするため、実際に投げられるのは
+    // DOMException "AbortError"（"TimeoutError"ではない）
+    const timeoutError = new DOMException("The operation was aborted.", "AbortError");
+    generateContentMock.mockRejectedValue(timeoutError);
+
+    await expect(generateReview(baseParams)).rejects.toThrow(
+      "Gemini APIの応答がタイムアウトしました。しばらく時間を置いてから再試行してください。"
+    );
     expect(generateContentMock).toHaveBeenCalledTimes(1);
   });
 
