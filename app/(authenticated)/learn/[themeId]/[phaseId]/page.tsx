@@ -109,7 +109,7 @@ export default async function PhasePage({ params }: PageProps) {
           { label: theme.name, href: `/learn/${themeIdNum}` },
           { label: phase.name },
         ]}
-        badge={!phase.is_published && <UnpublishedBadge />}
+        badge={<UnpublishedBadge isPublished={phase.is_published} />}
       />
 
       {/* 進捗サマリー */}
@@ -162,7 +162,7 @@ export default async function PhasePage({ params }: PageProps) {
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <h2 className="text-base font-semibold">{week.name}</h2>
-                      {!week.is_published && <UnpublishedBadge />}
+                      <UnpublishedBadge isPublished={week.is_published} />
                     </div>
                     {week.description && (
                       <p className="text-sm text-muted-foreground">{week.description}</p>
@@ -229,7 +229,7 @@ export default async function PhasePage({ params }: PageProps) {
                                     お試し非公開
                                   </Badge>
                                 )}
-                                {!content.is_published && <UnpublishedBadge />}
+                                <UnpublishedBadge isPublished={content.is_published} />
                                 {!locked &&
                                   content.content_type === "exercise" &&
                                   reviewedContentIds.has(content.id) && (

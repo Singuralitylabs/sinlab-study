@@ -136,7 +136,7 @@ export default async function ContentPage({ params }: PageProps) {
             },
             { label: summary.title },
           ]}
-          badge={!summary.is_published && <UnpublishedBadge />}
+          badge={<UnpublishedBadge isPublished={summary.is_published} />}
         />
 
         <Card className="mb-6">
@@ -201,7 +201,7 @@ export default async function ContentPage({ params }: PageProps) {
           },
           { label: content.title },
         ]}
-        badge={!isFullyPublished && <UnpublishedBadge />}
+        badge={<UnpublishedBadge isPublished={isFullyPublished} />}
       />
 
       {/* コンテンツ本体 */}

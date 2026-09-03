@@ -50,7 +50,7 @@ export default async function LearnPage() {
                       <h2 className="text-lg font-semibold group-hover:text-primary transition-colors truncate">
                         {theme.name}
                       </h2>
-                      {!theme.is_published && <UnpublishedBadge />}
+                      <UnpublishedBadge isPublished={theme.is_published} />
                     </div>
                     <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
                   </div>

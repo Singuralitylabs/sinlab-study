@@ -36,7 +36,7 @@ export default async function ThemePage({ params }: PageProps) {
         title={theme.name}
         description={theme.description || undefined}
         breadcrumbs={[{ label: "学習コンテンツ", href: "/learn" }, { label: theme.name }]}
-        badge={!theme.is_published && <UnpublishedBadge />}
+        badge={<UnpublishedBadge isPublished={theme.is_published} />}
       />
 
       {!phases || phases.length === 0 ? (
@@ -64,7 +64,7 @@ export default async function ThemePage({ params }: PageProps) {
                           <h2 className="text-lg font-semibold group-hover:text-primary transition-colors">
                             {phase.name}
                           </h2>
-                          {!phase.is_published && <UnpublishedBadge />}
+                          <UnpublishedBadge isPublished={phase.is_published} />
                         </div>
                         {phase.description && (
                           <p className="text-sm text-muted-foreground mt-1">{phase.description}</p>
