@@ -162,8 +162,26 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
     }
   };
 
+  // スライドのPDFが必要なのは「新規作成」と「既にPDFがある既存コンテンツ」。
+  // 編集時に一律で必須にすると、一括操作で slide 種別へ変更された pdf_url が空の既存
+  // コンテンツを、タイトル修正や種別の戻しすら保存できなくなる
+  const requiresSlidePdf = mode === "create" || Boolean(initialData?.pdf_url);
+  const isSlidePdfMissing = contentType === "slide" && requiresSlidePdf && !pdfUrl.trim();
+
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    // アップロード未完了・失敗のまま保存すると、実体の無い pdf_url を持つコンテンツができる。
+    // 送信ボタンの disabled 条件が変わっても保存を止められるよう、ここでも同じ条件で弾く
+    if (isUploading) {
+      setMessage({ type: "error", text: "アップロードの完了をお待ちください" });
+      return;
+    }
+    if (isSlidePdfMissing) {
+      setMessage({ type: "error", text: "スライドPDFをアップロードしてください" });
+      return;
+    }
+
     setIsLoading(true);
     setMessage(null);
 
@@ -182,7 +200,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       reference_answer: contentType === "exercise" ? referenceAnswer.trim() || null : null,
       allowed_submission_types: contentType === "exercise" ? allowedSubmissionTypes : "code",
       code_language: contentType === "exercise" ? codeLanguage : "javascript",
-      pdf_url: contentType === "slide" ? pdfUrl : null,
+      pdf_url: contentType === "slide" ? pdfUrl.trim() || null : null,
     };
 
     try {
@@ -500,7 +518,10 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
 
           {/* 送信ボタン */}
           <div className="flex gap-3">
-            <Button type="submit" disabled={isLoading || !title || !weekId}>
+            <Button
+              type="submit"
+              disabled={isLoading || isUploading || !title || !weekId || isSlidePdfMissing}
+            >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (

@@ -15,25 +15,47 @@ const maintainerAuth = {
 };
 
 interface MockStorageOptions {
+  /** 自動採番の list() が返す既存ファイル */
   files?: { name: string }[];
   listError?: unknown;
   uploadError?: unknown;
+  /** upload() の戻り値 data（省略時は保存先キーから組み立てる。null で「エラー無しの data: null」を再現） */
+  uploadData?: { path: string; fullPath: string } | null;
+  /** 存在確認 exists() の結果。Error を渡すとその例外を投げる（400/404以外の失敗の再現） */
+  exists?: boolean | Error;
 }
 
 /** Storageのモックを作り、createAdminSupabaseClient() の戻り値として登録する */
-const mockStorage = ({
-  files = [],
-  listError = null,
-  uploadError = null,
-}: MockStorageOptions = {}) => {
+const mockStorage = (options: MockStorageOptions = {}) => {
+  const { files = [], listError = null, uploadError = null, exists: existsResult = true } = options;
+
   const list = vi.fn().mockResolvedValue({ data: listError ? null : files, error: listError });
-  const upload = vi.fn().mockResolvedValue({ error: uploadError });
+
+  const upload = vi.fn().mockImplementation(async (path: string) => {
+    if (uploadError) {
+      return { data: null, error: uploadError };
+    }
+    // null（data:null の再現）は尊重しつつ、undefined は既定の組み立てへフォールバックする
+    const data =
+      options.uploadData !== undefined
+        ? options.uploadData
+        : { id: "object-id", path, fullPath: `slides/${path}` };
+    return { data, error: null };
+  });
+
+  const exists = vi.fn().mockImplementation(async () => {
+    if (existsResult instanceof Error) {
+      throw existsResult;
+    }
+    return { data: existsResult, error: null };
+  });
+
   const getPublicUrl = vi.fn().mockImplementation((path: string) => ({
     data: { publicUrl: `https://project.supabase.co/storage/v1/object/public/slides/${path}` },
   }));
-  const storage = { from: vi.fn().mockReturnValue({ list, upload, getPublicUrl }) };
+  const storage = { from: vi.fn().mockReturnValue({ list, upload, exists, getPublicUrl }) };
   vi.mocked(createAdminSupabaseClient).mockResolvedValue({ storage } as never);
-  return { list, upload };
+  return { list, upload, exists, getPublicUrl };
 };
 
 const pdf = () => new File(["%PDF-1.4"], "slide.pdf", { type: "application/pdf" });
@@ -123,7 +145,7 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
   ] as const;
 
   it.each(validNumbers)("%j は受理し %s へ上書き保存する", async (value, expectedPath) => {
-    const { list, upload } = mockStorage();
+    const { list, upload, exists } = mockStorage();
 
     const response = await POST(request({ slideNumber: value }) as never);
 
@@ -138,6 +160,7 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
     });
     // 番号指定時は自動採番の一覧取得を行わない
     expect(list).not.toHaveBeenCalled();
+    expect(exists).toHaveBeenCalledWith(expectedPath);
   });
 
   it("明示的に送られた空文字は400で拒否する（自動採番はフィールド省略時のみ）", async () => {
@@ -316,5 +339,104 @@ describe("POST /api/upload-pdf その他の入力検証", () => {
 
     expect(response.status).toBe(403);
     expect(upload).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/upload-pdf アップロード後の存在確認", () => {
+  const verifyFailed = (path: string) =>
+    `アップロードの完了を確認できませんでした（${path}）。時間をおいて再度お試しください`;
+
+  it("エラー無しで data: null が返った場合は失敗扱いとし、URLを返さない", async () => {
+    const { getPublicUrl, exists } = mockStorage({ uploadData: null });
+
+    const response = await POST(request({ slideNumber: "1" }) as never);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: verifyFailed("gas-advanced/slide-01.pdf"),
+      path: "gas-advanced/slide-01.pdf",
+    });
+    expect(exists).not.toHaveBeenCalled();
+    expect(getPublicUrl).not.toHaveBeenCalled();
+  });
+
+  // path は storage-js が引数から組み立てて返すだけなので、サーバー由来の fullPath で検証する
+  it("upload() が想定と異なる fullPath を返した場合は失敗扱いとし、URLを返さない", async () => {
+    const { getPublicUrl, exists } = mockStorage({
+      uploadData: {
+        path: "gas-advanced/slide-01.pdf",
+        fullPath: "slides/gas-advanced/slide-99.pdf",
+      },
+    });
+
+    const response = await POST(request({ slideNumber: "1" }) as never);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: verifyFailed("gas-advanced/slide-01.pdf"),
+      path: "gas-advanced/slide-01.pdf",
+    });
+    expect(exists).not.toHaveBeenCalled();
+    expect(getPublicUrl).not.toHaveBeenCalled();
+  });
+
+  it("バケット名の異なる fullPath も失敗扱いにする", async () => {
+    const { getPublicUrl } = mockStorage({
+      uploadData: {
+        path: "gas-advanced/slide-01.pdf",
+        fullPath: "other/gas-advanced/slide-01.pdf",
+      },
+    });
+
+    const response = await POST(request({ slideNumber: "1" }) as never);
+
+    expect(response.status).toBe(500);
+    expect(getPublicUrl).not.toHaveBeenCalled();
+  });
+
+  it("存在確認が false を返した場合はURLを返さない", async () => {
+    const { getPublicUrl } = mockStorage({ exists: false });
+
+    const response = await POST(request({ slideNumber: "1" }) as never);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: verifyFailed("gas-advanced/slide-01.pdf"),
+      path: "gas-advanced/slide-01.pdf",
+    });
+    expect(getPublicUrl).not.toHaveBeenCalled();
+  });
+
+  // exists() は 400/404 以外の失敗（500・通信断など）を例外として投げる
+  it("存在確認が例外を投げた場合もURLを返さない", async () => {
+    const { getPublicUrl } = mockStorage({ exists: new Error("network down") });
+
+    const response = await POST(request({ slideNumber: "1" }) as never);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: verifyFailed("gas-advanced/slide-01.pdf"),
+      path: "gas-advanced/slide-01.pdf",
+    });
+    expect(getPublicUrl).not.toHaveBeenCalled();
+  });
+
+  it("自動採番時は採番したキーで存在確認を行う", async () => {
+    const { exists } = mockStorage({ files: [{ name: "slide-04.pdf" }] });
+
+    const response = await POST(request() as never);
+
+    expect(response.status).toBe(200);
+    expect(exists).toHaveBeenCalledWith("gas-advanced/slide-05.pdf");
+  });
+
+  it("フォルダ未指定（バケット直下）でも存在確認を行う", async () => {
+    freezeNow(1723500000);
+    const { exists } = mockStorage();
+
+    const response = await POST(request({ folder: null }) as never);
+
+    expect(response.status).toBe(200);
+    expect(exists).toHaveBeenCalledWith("1723500000_slide.pdf");
   });
 });
