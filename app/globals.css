@@ -132,15 +132,29 @@
 }
 
 /*
- * MarkdownRenderer（rehype-highlight）が付与するコードブロックの配色。
- * 既存のカラートークン（--primary 等）を参照するため、:root/.dark の
- * 切り替えに自動追従し、`.dark` 個別の複製は不要。
+ * MarkdownRendererが付与するコードブロックの配色。
+ * @tailwindcss/typography の pre 背景（--tw-prose-pre-bg / --tw-prose-invert-pre-bg）は
+ * ライト/ダークいずれのサイトテーマでも常に暗色であるため、トークン色をサイトの
+ * --primary 等（:root/.dark で明暗が入れ替わる変数）に連動させると、ライトテーマ時に
+ * 暗背景との contrast が不足する。そのため、暗背景を前提にした固定パレットを
+ * --hljs-* として1箇所に定義し、サイトのテーマ切り替えとは独立させる
+ * （各色は prose の pre 背景・invert pre 背景の両方に対しWCAG AA 4.5:1以上を確認済み）。
  * prose（@tailwindcss/typography）のレイヤーより後に評価されるよう、
  * @layer に含めず素のCSSとして定義する。
  */
+:root {
+  --hljs-keyword: oklch(0.65 0.2 255);
+  --hljs-string: oklch(0.63 0.18 145);
+  --hljs-number: oklch(0.7 0.15 30);
+  --hljs-variable: oklch(0.63 0.14 200);
+  --hljs-meta: oklch(0.67 0.14 330);
+  --hljs-comment: oklch(0.7 0.02 245);
+  --hljs-deletion: oklch(0.67 0.2 27.325);
+}
+
 .hljs-comment,
 .hljs-quote {
-  color: var(--muted-foreground);
+  color: var(--hljs-comment);
   font-style: italic;
 }
 
@@ -150,7 +164,7 @@
 .hljs-name,
 .hljs-built_in,
 .hljs-literal {
-  color: var(--primary);
+  color: var(--hljs-keyword);
   font-weight: 600;
 }
 
@@ -159,20 +173,20 @@
 .hljs-attribute,
 .hljs-regexp,
 .hljs-addition {
-  color: var(--success);
+  color: var(--hljs-string);
 }
 
 .hljs-number,
 .hljs-symbol,
 .hljs-bullet {
-  color: var(--chart-4);
+  color: var(--hljs-number);
 }
 
 .hljs-title,
 .hljs-title.class_,
 .hljs-title.function_,
 .hljs-section {
-  color: var(--chart-1);
+  color: var(--hljs-keyword);
   font-weight: 600;
 }
 
@@ -181,16 +195,16 @@
 .hljs-params,
 .hljs-selector-class,
 .hljs-selector-id {
-  color: var(--chart-3);
+  color: var(--hljs-variable);
 }
 
 .hljs-meta,
 .hljs-meta .hljs-keyword {
-  color: var(--chart-5);
+  color: var(--hljs-meta);
 }
 
 .hljs-deletion {
-  color: var(--destructive);
+  color: var(--hljs-deletion);
 }
 
 .hljs-emphasis {
