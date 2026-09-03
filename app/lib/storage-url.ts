@@ -19,8 +19,5 @@ const STORAGE_URL_PLACEHOLDER = /\{\{SUPABASE_STORAGE_URL\}\}/g;
  * （text_content・description等）から、環境非依存でStorage内の画像等を参照できるようにする。
  */
 export function resolveMarkdownStorageUrls(content: string): string {
-  return content.replace(
-    STORAGE_URL_PLACEHOLDER,
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public`
-  );
+  return content.replace(STORAGE_URL_PLACEHOLDER, resolveStorageUrl("/storage/v1/object/public"));
 }

@@ -64,4 +64,20 @@ describe("resolveMarkdownStorageUrls", () => {
 
     expect(resolveMarkdownStorageUrls("# 見出し\n本文です")).toBe("# 見出し\n本文です");
   });
+
+  it("Supabase URL末尾のスラッシュを除去して結合する", () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co/");
+
+    expect(resolveMarkdownStorageUrls("{{SUPABASE_STORAGE_URL}}/a.png")).toBe(
+      "https://project.supabase.co/storage/v1/object/public/a.png"
+    );
+  });
+
+  it("Supabase URLが未設定なら undefined を埋め込まず相対パスへ置換する", () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+
+    expect(resolveMarkdownStorageUrls("{{SUPABASE_STORAGE_URL}}/a.png")).toBe(
+      "/storage/v1/object/public/a.png"
+    );
+  });
 });
