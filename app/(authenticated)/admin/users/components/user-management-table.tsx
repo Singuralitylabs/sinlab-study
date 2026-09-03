@@ -35,6 +35,27 @@ const SELECT_CLASS =
 
 type StatusFilter = "all" | "pending" | "active" | "rejected";
 
+/**
+ * 会員種別セレクトの `<option>` 一覧。承認時・変更時の両セレクトで共有する。
+ * `restrictToGeneral` が true の場合、コミュニティ会員は選択不可にする
+ * （Stripe契約中ユーザーを一般有料会員以外に設定させないため。2.7節参照）。
+ */
+function MembershipOptions({ restrictToGeneral }: { restrictToGeneral: boolean }) {
+  return (
+    <>
+      {MEMBERSHIP_TYPES.map((type) => (
+        <option
+          key={type}
+          value={type}
+          disabled={restrictToGeneral && type === USER_MEMBERSHIP.COMMUNITY}
+        >
+          {USER_MEMBERSHIP_LABELS[type]}
+        </option>
+      ))}
+    </>
+  );
+}
+
 export function UserManagementTable({
   users,
   subscribedUserIds,
@@ -47,7 +68,8 @@ export function UserManagementTable({
   const router = useRouter();
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [loadingUserIds, setLoadingUserIds] = useState<Set<number>>(new Set());
-  // 承認時に選択する会員種別（ユーザーIDごと。未選択はコミュニティ会員を既定とする）
+  // 承認時に選択する会員種別（ユーザーIDごと。未選択はコミュニティ会員を既定とする。
+  // ただしStripe契約中のユーザーはコミュニティ会員を選べないため一般有料会員を既定にする）
   const [membershipByUserId, setMembershipByUserId] = useState<Record<number, MembershipType>>({});
   const subscribedUserIdSet = useMemo(() => new Set(subscribedUserIds), [subscribedUserIds]);
 
@@ -70,7 +92,36 @@ export function UserManagementTable({
   };
 
   const getMembership = (userId: number): MembershipType =>
-    membershipByUserId[userId] ?? USER_MEMBERSHIP.COMMUNITY;
+    membershipByUserId[userId] ??
+    (subscribedUserIdSet.has(userId) ? USER_MEMBERSHIP.GENERAL : USER_MEMBERSHIP.COMMUNITY);
+
+  /** PATCH /api/admin/users への共通リクエスト処理（ローディング状態・エラー表示・一覧更新をまとめる） */
+  const patchUser = async (
+    userId: number,
+    body: Record<string, unknown>,
+    fallbackErrorMessage: string
+  ) => {
+    setLoading(userId, true);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, ...body }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || fallbackErrorMessage);
+        return;
+      }
+
+      router.refresh();
+    } catch {
+      alert("エラーが発生しました");
+    } finally {
+      setLoading(userId, false);
+    }
+  };
 
   const handleAction = async (userId: number, action: "approve" | "reject") => {
     const buildRequest = () => {
@@ -78,7 +129,7 @@ export function UserManagementTable({
         const membershipType = getMembership(userId);
         return {
           confirmMessage: `このユーザーを「${USER_MEMBERSHIP_LABELS[membershipType]}」として承認しますか？`,
-          body: { userId, action, membershipType },
+          body: { action, membershipType },
         };
       }
       // 却下すると会員種別は NULL に戻るため、設定済みの場合は解除される旨を明示する
@@ -101,80 +152,25 @@ export function UserManagementTable({
       }
       return {
         confirmMessage: messages.join("\n\n"),
-        body: { userId, action },
+        body: { action },
       };
     };
     const { confirmMessage, body } = buildRequest();
 
     if (!confirm(confirmMessage)) return;
 
-    setLoading(userId, true);
-    try {
-      const res = await fetch("/api/admin/users", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        alert(data.error || "操作に失敗しました");
-        return;
-      }
-
-      router.refresh();
-    } catch {
-      alert("エラーが発生しました");
-    } finally {
-      setLoading(userId, false);
-    }
+    await patchUser(userId, body, "操作に失敗しました");
   };
 
-  const handleRoleChange = async (userId: number, role: UserRoleType) => {
-    setLoading(userId, true);
-    try {
-      const res = await fetch("/api/admin/users", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, action: "change_role", role }),
-      });
+  const handleRoleChange = (userId: number, role: UserRoleType) =>
+    patchUser(userId, { action: "change_role", role }, "ロール変更に失敗しました");
 
-      if (!res.ok) {
-        const data = await res.json();
-        alert(data.error || "ロール変更に失敗しました");
-        return;
-      }
-
-      router.refresh();
-    } catch {
-      alert("エラーが発生しました");
-    } finally {
-      setLoading(userId, false);
-    }
-  };
-
-  const handleMembershipTypeChange = async (userId: number, membershipType: MembershipType) => {
-    setLoading(userId, true);
-    try {
-      const res = await fetch("/api/admin/users", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, action: "change_membership", membershipType }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        alert(data.error || "会員種別の変更に失敗しました");
-        return;
-      }
-
-      router.refresh();
-    } catch {
-      alert("エラーが発生しました");
-    } finally {
-      setLoading(userId, false);
-    }
-  };
+  const handleMembershipTypeChange = (userId: number, membershipType: MembershipType) =>
+    patchUser(
+      userId,
+      { action: "change_membership", membershipType },
+      "会員種別の変更に失敗しました"
+    );
 
   return (
     <div className="space-y-4">
@@ -234,10 +230,8 @@ export function UserManagementTable({
                 const statusInfo = STATUS_LABELS[user.status];
                 const isLoading = loadingUserIds.has(user.id);
                 const isAdmin = user.role === USER_ROLE.ADMIN;
-                // Stripe契約中(または契約状況を取得できず判定不能)の場合は会員種別変更を無効化する
-                // （membership_type と課金状態の不整合を防ぐ。フェイルクローズ）
-                const isMembershipLocked =
-                  subscribedUserIdSet.has(user.id) || subscriptionDataUnavailable;
+                // Stripe契約中と確定しているか（バッジ表示にも使う一覧が根拠なので確度は高い）
+                const isSubscribed = subscribedUserIdSet.has(user.id);
 
                 return (
                   <tr key={user.id} className="border-b last:border-b-0">
@@ -275,41 +269,44 @@ export function UserManagementTable({
                       {isLoading ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        <div className="flex flex-wrap items-center gap-1">
-                          {user.status === USER_STATUS.ACTIVE && user.membership_type ? (
-                            <select
-                              value={user.membership_type}
-                              disabled={isMembershipLocked}
-                              title={
-                                isMembershipLocked
-                                  ? "Stripe契約中のため変更できません。Stripe側で解約後に変更してください。"
-                                  : undefined
-                              }
-                              onChange={(e) =>
-                                handleMembershipTypeChange(
-                                  user.id,
-                                  e.target.value as MembershipType
-                                )
-                              }
-                              aria-label={`${user.display_name} の会員種別`}
-                              className={`${SELECT_CLASS} w-36`}
-                            >
-                              {MEMBERSHIP_TYPES.map((type) => (
-                                <option key={type} value={type}>
-                                  {USER_MEMBERSHIP_LABELS[type]}
-                                </option>
-                              ))}
-                            </select>
-                          ) : user.membership_type ? (
-                            <Badge variant="outline">
-                              {USER_MEMBERSHIP_LABELS[user.membership_type]}
-                            </Badge>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                          {subscribedUserIdSet.has(user.id) && (
-                            <Badge variant="secondary">サブスク契約中</Badge>
-                          )}
+                        <div className="flex flex-col gap-1">
+                          <div className="flex flex-wrap items-center gap-1">
+                            {user.status === USER_STATUS.ACTIVE && user.membership_type ? (
+                              <select
+                                value={user.membership_type}
+                                disabled={subscriptionDataUnavailable}
+                                onChange={(e) =>
+                                  handleMembershipTypeChange(
+                                    user.id,
+                                    e.target.value as MembershipType
+                                  )
+                                }
+                                aria-label={`${user.display_name} の会員種別`}
+                                className={`${SELECT_CLASS} w-36`}
+                              >
+                                <MembershipOptions restrictToGeneral={isSubscribed} />
+                              </select>
+                            ) : user.membership_type ? (
+                              <Badge variant="outline">
+                                {USER_MEMBERSHIP_LABELS[user.membership_type]}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                            {isSubscribed && <Badge variant="secondary">サブスク契約中</Badge>}
+                          </div>
+                          {user.status === USER_STATUS.ACTIVE &&
+                            (subscriptionDataUnavailable ? (
+                              <span className="text-xs text-muted-foreground">
+                                Stripe契約状況を取得できないため変更できません
+                              </span>
+                            ) : (
+                              isSubscribed && (
+                                <span className="text-xs text-muted-foreground">
+                                  契約中は一般有料会員のみ選択できます（変更するにはStripe側で解約してください）
+                                </span>
+                              )
+                            ))}
                         </div>
                       )}
                     </td>
@@ -322,50 +319,55 @@ export function UserManagementTable({
                       {isLoading ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        <div className="flex gap-2 items-center">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex gap-2 items-center">
+                            {(user.status === USER_STATUS.PENDING ||
+                              user.status === USER_STATUS.REJECTED) && (
+                              <>
+                                <select
+                                  value={getMembership(user.id)}
+                                  onChange={(e) =>
+                                    setMembershipByUserId((prev) => ({
+                                      ...prev,
+                                      [user.id]: e.target.value as MembershipType,
+                                    }))
+                                  }
+                                  aria-label={`${user.display_name} の会員種別`}
+                                  className={`${SELECT_CLASS} w-36`}
+                                >
+                                  <MembershipOptions restrictToGeneral={isSubscribed} />
+                                </select>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleAction(user.id, "approve")}
+                                  className="text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-950"
+                                >
+                                  <Check className="h-3.5 w-3.5 mr-1" />
+                                  承認
+                                </Button>
+                              </>
+                            )}
+                            {(user.status === USER_STATUS.PENDING ||
+                              user.status === USER_STATUS.ACTIVE) &&
+                              !isAdmin && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleAction(user.id, "reject")}
+                                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                >
+                                  <X className="h-3.5 w-3.5 mr-1" />
+                                  却下
+                                </Button>
+                              )}
+                          </div>
                           {(user.status === USER_STATUS.PENDING ||
-                            user.status === USER_STATUS.REJECTED) && (
-                            <>
-                              <select
-                                value={getMembership(user.id)}
-                                onChange={(e) =>
-                                  setMembershipByUserId((prev) => ({
-                                    ...prev,
-                                    [user.id]: e.target.value as MembershipType,
-                                  }))
-                                }
-                                aria-label={`${user.display_name} の会員種別`}
-                                className={`${SELECT_CLASS} w-36`}
-                              >
-                                {MEMBERSHIP_TYPES.map((type) => (
-                                  <option key={type} value={type}>
-                                    {USER_MEMBERSHIP_LABELS[type]}
-                                  </option>
-                                ))}
-                              </select>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleAction(user.id, "approve")}
-                                className="text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-950"
-                              >
-                                <Check className="h-3.5 w-3.5 mr-1" />
-                                承認
-                              </Button>
-                            </>
-                          )}
-                          {(user.status === USER_STATUS.PENDING ||
-                            user.status === USER_STATUS.ACTIVE) &&
-                            !isAdmin && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleAction(user.id, "reject")}
-                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              >
-                                <X className="h-3.5 w-3.5 mr-1" />
-                                却下
-                              </Button>
+                            user.status === USER_STATUS.REJECTED) &&
+                            isSubscribed && (
+                              <span className="text-xs text-muted-foreground">
+                                契約中は一般有料会員のみ選択できます
+                              </span>
                             )}
                         </div>
                       )}

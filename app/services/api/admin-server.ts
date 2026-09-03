@@ -1,7 +1,10 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import type { CodeLanguage } from "@/app/components/CodeEditor";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
-import { NON_CURRENT_SUBSCRIPTION_STATUSES } from "@/app/services/api/stripe-server";
+import {
+  fetchStripeSubscriptionByUserId,
+  NON_CURRENT_SUBSCRIPTION_STATUSES,
+} from "@/app/services/api/stripe-server";
 import type {
   LearningContent,
   LearningContentWithWeek,
@@ -587,6 +590,29 @@ export async function fetchUserIdsWithStripeSubscription(): Promise<{
 
   return {
     data: data.map((row) => row.user_id),
+    error: null,
+  };
+}
+
+/**
+ * 指定ユーザーが現在Stripeサブスクを契約中とみなせるか判定する（承認・会員種別変更時の
+ * Stripeロックに使う単一ユーザー版）。`fetchUserIdsWithStripeSubscription()` と同じ
+ * `NON_CURRENT_SUBSCRIPTION_STATUSES` 基準で判定するが、対象1名のみの照会で済ませるため
+ * `fetchStripeSubscriptionByUserId()`（`stripe-server.ts`）を用いる。admin は RLS で
+ * 他ユーザーの行も参照できる（`stripe_subscriptions` のSELECTポリシー参照）。
+ */
+export async function isUserCurrentlySubscribed(userId: number): Promise<{
+  data: boolean | null;
+  error: PostgrestError | null;
+}> {
+  const { data, error } = await fetchStripeSubscriptionByUserId(userId);
+
+  if (error) {
+    return { data: null, error };
+  }
+
+  return {
+    data: data !== null && !NON_CURRENT_SUBSCRIPTION_STATUSES.includes(data.status),
     error: null,
   };
 }

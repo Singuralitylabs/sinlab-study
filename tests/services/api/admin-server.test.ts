@@ -10,6 +10,7 @@ import {
   fetchManageCounts,
   fetchStudentsProgress,
   fetchUserIdsWithStripeSubscription,
+  isUserCurrentlySubscribed,
   rejectUser,
 } from "@/app/services/api/admin-server";
 import {
@@ -411,6 +412,68 @@ describe("changeMembershipType", () => {
 
     expect(result.error).toEqual(dbError);
     expect(result.updated).toBe(false);
+  });
+});
+
+describe("isUserCurrentlySubscribed", () => {
+  it("終端状態・手続き中でないステータスの行がある場合、契約中と判定する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: {
+          data: { status: "active", cancel_at_period_end: false, current_period_end: null },
+          error: null,
+        },
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await isUserCurrentlySubscribed(5);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toBe(true);
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.eq).toHaveBeenCalledWith("user_id", 5);
+  });
+
+  it("終端状態（例: canceled）の行しかない場合、契約中ではないと判定する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: {
+          data: { status: "canceled", cancel_at_period_end: false, current_period_end: null },
+          error: null,
+        },
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await isUserCurrentlySubscribed(5);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toBe(false);
+  });
+
+  it("行が存在しない場合、契約中ではないと判定する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { stripe_subscriptions: { data: null, error: null } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await isUserCurrentlySubscribed(5);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toBe(false);
+  });
+
+  it("DBエラー時、data: null とエラーを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { stripe_subscriptions: { data: null, error: dbError } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await isUserCurrentlySubscribed(5);
+
+    expect(result.data).toBeNull();
+    expect(result.error).toEqual(dbError);
   });
 });
 
