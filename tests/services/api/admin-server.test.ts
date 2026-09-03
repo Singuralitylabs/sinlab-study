@@ -236,6 +236,8 @@ describe("approveUser", () => {
       expect.objectContaining({ status: "active", membership_type: membershipType })
     );
     expect(builder.eq).toHaveBeenCalledWith("id", 1);
+    // service_role はRLSを迂回するため is_deleted=false をクエリ自体に必須で課す
+    expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
     // 承認済みユーザーの再承認を原子的に弾く条件（TOCTOU対策）
     expect(builder.neq).toHaveBeenCalledWith("status", "active");
     // updated判定（更新行数）に使うため必須。省略するとPostgRESTがdataを返さず
@@ -243,7 +245,7 @@ describe("approveUser", () => {
     expect(builder.select).toHaveBeenCalledWith("id");
   });
 
-  it("更新対象が0行（既に承認済み・存在しない等）の場合、updated: false を返す", async () => {
+  it("更新対象が0行（既に承認済み・存在しない・削除済み等）の場合、updated: false を返す", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: { users: { data: [], error: null } },
     });
