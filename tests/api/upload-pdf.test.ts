@@ -35,8 +35,9 @@ const mockStorage = (options: MockStorageOptions = {}) => {
     if (uploadError) {
       return { data: null, error: uploadError };
     }
+    // null（data:null の再現）は尊重しつつ、undefined は既定の組み立てへフォールバックする
     const data =
-      "uploadData" in options
+      options.uploadData !== undefined
         ? options.uploadData
         : { id: "object-id", path, fullPath: `slides/${path}` };
     return { data, error: null };
