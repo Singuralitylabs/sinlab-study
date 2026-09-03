@@ -2,7 +2,9 @@ import { BookOpen, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
+import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { fetchPhasesByThemeId, fetchThemeById } from "@/app/services/api/learning-server";
+import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
 
 interface PageProps {
@@ -17,9 +19,11 @@ export default async function ThemePage({ params }: PageProps) {
     notFound();
   }
 
+  const { userRole } = await getServerAuth();
+
   const [{ data: theme }, { data: phases }] = await Promise.all([
-    fetchThemeById(themeIdNum),
-    fetchPhasesByThemeId(themeIdNum),
+    fetchThemeById(themeIdNum, userRole),
+    fetchPhasesByThemeId(themeIdNum, userRole),
   ]);
 
   if (!theme) {
@@ -32,6 +36,7 @@ export default async function ThemePage({ params }: PageProps) {
         title={theme.name}
         description={theme.description || undefined}
         breadcrumbs={[{ label: "学習コンテンツ", href: "/learn" }, { label: theme.name }]}
+        badge={<UnpublishedBadge isPublished={theme.is_published} />}
       />
 
       {!phases || phases.length === 0 ? (
@@ -55,9 +60,12 @@ export default async function ThemePage({ params }: PageProps) {
                         <BookOpen className="h-6 w-6 text-primary" />
                       </div>
                       <div>
-                        <h2 className="text-lg font-semibold group-hover:text-primary transition-colors">
-                          {phase.name}
-                        </h2>
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-lg font-semibold group-hover:text-primary transition-colors">
+                            {phase.name}
+                          </h2>
+                          <UnpublishedBadge isPublished={phase.is_published} />
+                        </div>
                         {phase.description && (
                           <p className="text-sm text-muted-foreground mt-1">{phase.description}</p>
                         )}

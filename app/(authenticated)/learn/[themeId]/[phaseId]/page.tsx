@@ -2,6 +2,7 @@ import { Bot, Calendar, CheckCircle, Clock, FileText, Lock, PenLine, Play } from
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
+import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { fetchCompletedAIReviewContentIds } from "@/app/services/api/ai-review-server";
 import {
   type ContentVisibilitySummary,
@@ -56,12 +57,12 @@ export default async function PhasePage({ params }: PageProps) {
     notFound();
   }
 
-  const { userId, userStatus } = await getServerAuth();
+  const { userId, userStatus, userRole } = await getServerAuth();
 
   const [{ data: theme }, { data: phase }, { data: weeks }] = await Promise.all([
-    fetchThemeById(themeIdNum),
-    fetchPhaseById(phaseIdNum),
-    fetchWeeksWithContentsByPhaseId(phaseIdNum),
+    fetchThemeById(themeIdNum, userRole),
+    fetchPhaseById(phaseIdNum, userRole),
+    fetchWeeksWithContentsByPhaseId(phaseIdNum, userRole),
   ]);
 
   if (!theme || !phase || phase.theme_id !== themeIdNum) {
@@ -72,11 +73,16 @@ export default async function PhasePage({ params }: PageProps) {
   const isLocked = (content: ContentVisibilitySummary) =>
     isContentLockedForUser(userStatus, content.is_open_to_trial);
 
-  // 進捗の分母は可視（ロックされていない）コンテンツのみとする
-  // （お試しユーザーは体験範囲内の進捗を示す。機能設計書 2.6 参照）
+  // 進捗の分母は可視（ロックされていない）かつ、コンテンツ・週・フェーズ・テーマの
+  // 全階層が公開済みのもののみとする（お試しユーザーは体験範囲内の進捗を示す。機能設計書 2.6
+  // 参照。admin / maintainer がプレビュー中の未公開コンテンツ・未公開の週配下のコンテンツは
+  // 完了不能なため分母から除く。issue #68）
+  const ancestorsPublished = theme.is_published && phase.is_published;
+  const isCountable = (content: ContentVisibilitySummary, week: { is_published: boolean }) =>
+    !isLocked(content) && content.is_published && week.is_published && ancestorsPublished;
   const allContentIds = weeks?.flatMap((w) => w.contents.map((c) => c.id)) || [];
   const visibleContentIds =
-    weeks?.flatMap((w) => w.contents.filter((c) => !isLocked(c)).map((c) => c.id)) || [];
+    weeks?.flatMap((w) => w.contents.filter((c) => isCountable(c, w)).map((c) => c.id)) || [];
   const exerciseContentIds =
     weeks?.flatMap((w) =>
       w.contents.filter((c) => c.content_type === "exercise" && !isLocked(c)).map((c) => c.id)
@@ -105,6 +111,7 @@ export default async function PhasePage({ params }: PageProps) {
           { label: theme.name, href: `/learn/${themeIdNum}` },
           { label: phase.name },
         ]}
+        badge={<UnpublishedBadge isPublished={phase.is_published} />}
       />
 
       {/* 進捗サマリー */}
@@ -132,7 +139,7 @@ export default async function PhasePage({ params }: PageProps) {
       ) : (
         <div className="space-y-6">
           {weeks.map((week) => {
-            const weekVisibleContents = week.contents.filter((c) => !isLocked(c));
+            const weekVisibleContents = week.contents.filter((c) => isCountable(c, week));
             const weekCompletedCount = weekVisibleContents.filter((c) =>
               progressMap.get(c.id)
             ).length;
@@ -155,7 +162,10 @@ export default async function PhasePage({ params }: PageProps) {
                     )}
                   </div>
                   <div className="flex-1">
-                    <h2 className="text-base font-semibold">{week.name}</h2>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base font-semibold">{week.name}</h2>
+                      <UnpublishedBadge isPublished={week.is_published} />
+                    </div>
                     {week.description && (
                       <p className="text-sm text-muted-foreground">{week.description}</p>
                     )}
@@ -221,6 +231,7 @@ export default async function PhasePage({ params }: PageProps) {
                                     お試し非公開
                                   </Badge>
                                 )}
+                                <UnpublishedBadge isPublished={content.is_published} />
                                 {!locked &&
                                   content.content_type === "exercise" &&
                                   reviewedContentIds.has(content.id) && (

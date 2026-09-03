@@ -71,8 +71,9 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 
 - **許可値の列挙は `MEMBERSHIP_TYPES`（`app/constants/user.ts`）に一本化する。** APIのバリデーションも承認UIの `<option>` 生成もここから導出し、`'community'` / `'general'` のリテラルをハードコードしない。
 - **`status=active` と `membership_type` の整合性はDBでは保証されない**（CHECK制約は値の妥当性のみ）。`approveUser()` / `rejectUser()` を迂回して `status` を書き換えないこと。
-- **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select する。0行なら404扱い。権限チェック済みの管理者向けクエリや `user_id` フィルタで担保している既存利用は対象外。
-- **提出API・進捗APIの可視性チェックは通常クライアントの SELECT で行う。** `contentId` を SELECT して0行なら403。RLSがステータスを織り込むため、アプリ層でステータス分岐を書かない。
+- **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select する。0行なら404扱い。権限チェック済みの管理者向けクエリや `user_id` フィルタで担保している既存利用は対象外。admin / maintainer 向けの未公開プレビュー（`docs/specification.md` 2.12節）はこの2箇所を増やさず、通常クライアント（RLS適用）の別経路で取得する。
+- **`learning-server.ts` の取得関数は `userRole` を受け取り、admin / maintainer の場合のみ `is_published` 絞り込みを外す**（RLSは既に許可済み。詳細は `docs/specification.md` 2.12節）。member / お試しユーザー向けの挙動・RLSの適用範囲は変更しない。
+- **提出API・進捗APIの可視性チェックは通常クライアントの SELECT で行う。** `contentId` を `is_published = true` 付きで SELECT して0行なら403。RLSがステータスを織り込むため、アプリ層でステータス分岐を書かない（`is_published` の絞り込みのみ明示する。`isContentVisible()`（`learning-server.ts`）の絞り込み条件・意図は `docs/specification.md` 2.12節を参照）。
 
 ### Stripeサブスク決済（月額課金）
 
