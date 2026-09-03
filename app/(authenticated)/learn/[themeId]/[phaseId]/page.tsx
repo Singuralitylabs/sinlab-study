@@ -2,6 +2,7 @@ import { Bot, Calendar, CheckCircle, Clock, FileText, Lock, PenLine, Play } from
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
+import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { fetchCompletedAIReviewContentIds } from "@/app/services/api/ai-review-server";
 import {
   type ContentVisibilitySummary,
@@ -56,12 +57,12 @@ export default async function PhasePage({ params }: PageProps) {
     notFound();
   }
 
-  const { userId, userStatus } = await getServerAuth();
+  const { userId, userStatus, userRole } = await getServerAuth();
 
   const [{ data: theme }, { data: phase }, { data: weeks }] = await Promise.all([
-    fetchThemeById(themeIdNum),
-    fetchPhaseById(phaseIdNum),
-    fetchWeeksWithContentsByPhaseId(phaseIdNum),
+    fetchThemeById(themeIdNum, userRole),
+    fetchPhaseById(phaseIdNum, userRole),
+    fetchWeeksWithContentsByPhaseId(phaseIdNum, userRole),
   ]);
 
   if (!theme || !phase || phase.theme_id !== themeIdNum) {
@@ -105,6 +106,7 @@ export default async function PhasePage({ params }: PageProps) {
           { label: theme.name, href: `/learn/${themeIdNum}` },
           { label: phase.name },
         ]}
+        badge={!phase.is_published && <UnpublishedBadge />}
       />
 
       {/* 進捗サマリー */}
@@ -155,7 +157,10 @@ export default async function PhasePage({ params }: PageProps) {
                     )}
                   </div>
                   <div className="flex-1">
-                    <h2 className="text-base font-semibold">{week.name}</h2>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base font-semibold">{week.name}</h2>
+                      {!week.is_published && <UnpublishedBadge />}
+                    </div>
                     {week.description && (
                       <p className="text-sm text-muted-foreground">{week.description}</p>
                     )}
@@ -221,6 +226,7 @@ export default async function PhasePage({ params }: PageProps) {
                                     お試し非公開
                                   </Badge>
                                 )}
+                                {!content.is_published && <UnpublishedBadge />}
                                 {!locked &&
                                   content.content_type === "exercise" &&
                                   reviewedContentIds.has(content.id) && (

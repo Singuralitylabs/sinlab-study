@@ -2,12 +2,15 @@ import { BookOpen, ChevronRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { PageTitle } from "@/app/components/PageTitle";
+import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
 import { fetchPublishedThemes } from "@/app/services/api/learning-server";
+import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card } from "@/components/ui/card";
 
 export default async function LearnPage() {
-  const { data: themes } = await fetchPublishedThemes();
+  const { userRole } = await getServerAuth();
+  const { data: themes } = await fetchPublishedThemes(userRole);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -43,9 +46,12 @@ export default async function LearnPage() {
                 {/* テキストエリア */}
                 <div className="p-5">
                   <div className="flex items-center justify-between mb-2">
-                    <h2 className="text-lg font-semibold group-hover:text-primary transition-colors">
-                      {theme.name}
-                    </h2>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <h2 className="text-lg font-semibold group-hover:text-primary transition-colors truncate">
+                        {theme.name}
+                      </h2>
+                      {!theme.is_published && <UnpublishedBadge />}
+                    </div>
                     <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
                   </div>
                   {theme.description && (

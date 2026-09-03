@@ -1,30 +1,32 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import { USER_STATUS } from "@/app/constants/user";
+import { checkContentPermissions } from "@/app/services/auth/permissions";
 import type {
   LearningContent,
   LearningContentWithWeek,
   LearningPhase,
   LearningTheme,
   LearningWeek,
+  UserRoleType,
   UserStatusType,
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
 /**
- * 公開テーマ一覧を取得
+ * テーマ一覧を取得。
+ * admin / maintainer は未公開テーマもプレビューとして取得できる（issue #68）。
  */
-export async function fetchPublishedThemes(): Promise<{
+export async function fetchPublishedThemes(userRole: UserRoleType | null = null): Promise<{
   data: LearningTheme[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase
-    .from("learning_themes")
-    .select("*")
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .order("display_order");
+  let query = supabase.from("learning_themes").select("*").eq("is_deleted", false);
+  if (!checkContentPermissions(userRole)) {
+    query = query.eq("is_published", true);
+  }
+  const { data, error } = await query.order("display_order");
 
   if (error) {
     console.error("テーマ一覧取得エラー:", error.message);
@@ -130,21 +132,27 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
 }
 
 /**
- * テーマ詳細を取得
+ * テーマ詳細を取得。
+ * admin / maintainer は未公開テーマもプレビューとして取得できる（issue #68）。
  */
-export async function fetchThemeById(themeId: number): Promise<{
+export async function fetchThemeById(
+  themeId: number,
+  userRole: UserRoleType | null = null
+): Promise<{
   data: LearningTheme | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("learning_themes")
     .select("*")
     .eq("id", themeId)
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .single();
+    .eq("is_deleted", false);
+  if (!checkContentPermissions(userRole)) {
+    query = query.eq("is_published", true);
+  }
+  const { data, error } = await query.single();
 
   if (error) {
     console.error("テーマ詳細取得エラー:", error.message);
@@ -155,21 +163,27 @@ export async function fetchThemeById(themeId: number): Promise<{
 }
 
 /**
- * テーマに属する公開フェーズ一覧を取得
+ * テーマに属するフェーズ一覧を取得。
+ * admin / maintainer は未公開フェーズもプレビューとして取得できる（issue #68）。
  */
-export async function fetchPhasesByThemeId(themeId: number): Promise<{
+export async function fetchPhasesByThemeId(
+  themeId: number,
+  userRole: UserRoleType | null = null
+): Promise<{
   data: LearningPhase[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("learning_phases")
     .select("*")
     .eq("theme_id", themeId)
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .order("display_order");
+    .eq("is_deleted", false);
+  if (!checkContentPermissions(userRole)) {
+    query = query.eq("is_published", true);
+  }
+  const { data, error } = await query.order("display_order");
 
   if (error) {
     console.error("テーマ別フェーズ一覧取得エラー:", error.message);
@@ -204,21 +218,27 @@ export async function fetchPublishedPhases(): Promise<{
 }
 
 /**
- * フェーズ詳細を取得
+ * フェーズ詳細を取得。
+ * admin / maintainer は未公開フェーズもプレビューとして取得できる（issue #68）。
  */
-export async function fetchPhaseById(phaseId: number): Promise<{
+export async function fetchPhaseById(
+  phaseId: number,
+  userRole: UserRoleType | null = null
+): Promise<{
   data: LearningPhase | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("learning_phases")
     .select("*")
     .eq("id", phaseId)
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .single();
+    .eq("is_deleted", false);
+  if (!checkContentPermissions(userRole)) {
+    query = query.eq("is_published", true);
+  }
+  const { data, error } = await query.single();
 
   if (error) {
     console.error("フェーズ詳細取得エラー:", error.message);
@@ -231,10 +251,11 @@ export async function fetchPhaseById(phaseId: number): Promise<{
 /**
  * ロック表示に必要な最小限のコンテンツサマリー（本文カラムは含めない）。
  * お試し非公開コンテンツもタイトルを含めて取得できるよう service_role で取得する。
+ * is_published は未公開バッジ表示（admin / maintainer のプレビュー時）に使用する。
  */
 export type ContentVisibilitySummary = Pick<
   LearningContent,
-  "id" | "title" | "content_type" | "display_order" | "is_open_to_trial"
+  "id" | "title" | "content_type" | "display_order" | "is_open_to_trial" | "is_published"
 > & { week_id: number };
 
 /**
@@ -252,6 +273,8 @@ export function isContentLockedForUser(
  * 対象コンテンツが、渡されたクライアント（呼び出し元の認証コンテキスト）から可視かどうかを判定する。
  * RLSにより、お試し非公開・未公開・存在しないコンテンツIDのいずれも0行となり false を返す。
  * 進捗・提出・AIレビューAPIのコンテンツ可視性チェックに使用する（機能設計書 4.1/5.1 参照）。
+ * is_published を明示的に絞り込むことで、admin / maintainer のプレビュー中であっても
+ * 未公開コンテンツへの進捗登録・提出・AIレビューは常に不可とする（issue #68 の既定）。
  */
 export async function isContentVisible(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
@@ -261,6 +284,7 @@ export async function isContentVisible(
     .from("learning_contents")
     .select("id")
     .eq("id", contentId)
+    .eq("is_published", true)
     .maybeSingle();
 
   if (error) {
@@ -304,26 +328,82 @@ export async function fetchContentVisibilitySummariesByWeekIds(weekIds: number[]
     return { data: null, error };
   }
 
+  // service_role 経路は is_published = true のみを扱うため、常に true を補う
+  const summaries = (data ?? []).map((content) => ({ ...content, is_published: true }));
+  return { data: summaries as ContentVisibilitySummary[], error: null };
+}
+
+/**
+ * 指定した週IDに属するコンテンツのサマリーを、未公開分も含めて通常クライアントで取得する。
+ * admin / maintainer のプレビュー専用の経路（issue #68）。RLS（is_published = true OR
+ * ロールが admin/maintainer）により、実際に未公開分まで返るのは admin / maintainer のみ。
+ */
+async function fetchContentSummariesByWeekIdsForManager(weekIds: number[]): Promise<{
+  data: ContentVisibilitySummary[] | null;
+  error: PostgrestError | null;
+}> {
+  if (weekIds.length === 0) {
+    return { data: [], error: null };
+  }
+
+  const supabase = await createServerSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("learning_contents")
+    .select("id, title, content_type, display_order, is_open_to_trial, is_published, week_id")
+    .in("week_id", weekIds)
+    .eq("is_deleted", false)
+    .order("display_order");
+
+  if (error) {
+    console.error("コンテンツサマリー取得エラー（管理者向け）:", error.message);
+    return { data: null, error };
+  }
+
   return { data: data as ContentVisibilitySummary[], error: null };
 }
 
 /**
- * フェーズに属する公開週一覧をコンテンツ付きで取得
- * コンテンツはロック表示に必要な最小限のサマリー（service_role取得）を付与する。
+ * 指定した週IDに属するコンテンツのサマリーをロールに応じて取得する。
+ * admin / maintainer は未公開コンテンツも含めて取得する（通常クライアント経由）。
+ * それ以外（member / お試しユーザー）は従来どおり service_role 経由で公開分のみ取得する
+ * （CLAUDE.md の service_role 利用条件を維持するため）。
  */
-export async function fetchWeeksWithContentsByPhaseId(phaseId: number): Promise<{
+export async function fetchContentSummariesByWeekIds(
+  weekIds: number[],
+  userRole: UserRoleType | null = null
+): Promise<{
+  data: ContentVisibilitySummary[] | null;
+  error: PostgrestError | null;
+}> {
+  if (checkContentPermissions(userRole)) {
+    return fetchContentSummariesByWeekIdsForManager(weekIds);
+  }
+  return fetchContentVisibilitySummariesByWeekIds(weekIds);
+}
+
+/**
+ * フェーズに属する週一覧をコンテンツ付きで取得。
+ * admin / maintainer は未公開の週・コンテンツもプレビューとして取得できる（issue #68）。
+ */
+export async function fetchWeeksWithContentsByPhaseId(
+  phaseId: number,
+  userRole: UserRoleType | null = null
+): Promise<{
   data: (LearningWeek & { contents: ContentVisibilitySummary[] })[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data: weeks, error } = await supabase
+  let query = supabase
     .from("learning_weeks")
     .select("*")
     .eq("phase_id", phaseId)
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .order("display_order");
+    .eq("is_deleted", false);
+  if (!checkContentPermissions(userRole)) {
+    query = query.eq("is_published", true);
+  }
+  const { data: weeks, error } = await query.order("display_order");
 
   if (error) {
     console.error("週一覧取得エラー:", error.message);
@@ -331,8 +411,10 @@ export async function fetchWeeksWithContentsByPhaseId(phaseId: number): Promise<
   }
 
   const weekIds = (weeks ?? []).map((week) => week.id);
-  const { data: contents, error: contentsError } =
-    await fetchContentVisibilitySummariesByWeekIds(weekIds);
+  const { data: contents, error: contentsError } = await fetchContentSummariesByWeekIds(
+    weekIds,
+    userRole
+  );
 
   if (contentsError) {
     return { data: null, error: contentsError };
@@ -379,9 +461,13 @@ export async function fetchWeeksByPhaseId(phaseId: number): Promise<{
 }
 
 /**
- * 週詳細を取得（フェーズ・テーマ情報付き）
+ * 週詳細を取得（フェーズ・テーマ情報付き）。
+ * admin / maintainer は未公開週もプレビューとして取得できる（issue #68）。
  */
-export async function fetchWeekById(weekId: number): Promise<{
+export async function fetchWeekById(
+  weekId: number,
+  userRole: UserRoleType | null = null
+): Promise<{
   data:
     | (LearningWeek & {
         phase: (LearningPhase & { theme: LearningTheme | null }) | null;
@@ -391,13 +477,15 @@ export async function fetchWeekById(weekId: number): Promise<{
 }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("learning_weeks")
     .select("*, phase:learning_phases(*, theme:learning_themes(*))")
     .eq("id", weekId)
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .single();
+    .eq("is_deleted", false);
+  if (!checkContentPermissions(userRole)) {
+    query = query.eq("is_published", true);
+  }
+  const { data, error } = await query.single();
 
   if (error) {
     console.error("週詳細取得エラー:", error.message);
@@ -433,21 +521,27 @@ export async function fetchContentsByWeekId(weekId: number): Promise<{
 }
 
 /**
- * コンテンツ詳細を取得（週・フェーズ・テーマ情報付き）
+ * コンテンツ詳細を取得（週・フェーズ・テーマ情報付き）。
+ * admin / maintainer は未公開コンテンツもプレビューとして取得できる（issue #68）。
  */
-export async function fetchContentById(contentId: number): Promise<{
+export async function fetchContentById(
+  contentId: number,
+  userRole: UserRoleType | null = null
+): Promise<{
   data: LearningContentWithWeek | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("learning_contents")
     .select("*, week:learning_weeks(*, phase:learning_phases(*, theme:learning_themes(*)))")
     .eq("id", contentId)
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .single();
+    .eq("is_deleted", false);
+  if (!checkContentPermissions(userRole)) {
+    query = query.eq("is_published", true);
+  }
+  const { data, error } = await query.single();
 
   if (error) {
     console.error("コンテンツ詳細取得エラー:", error.message);

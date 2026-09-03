@@ -363,6 +363,22 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 
 **スコープ外**: プランカタログ・複数通貨・クーポン・領収書カスタマイズ・却下時のサブスク自動キャンセル連携・年額プラン・プラン変更時のアンカー再設定・既存契約者へのアンカー移行（`billing_cycle_anchor_config` はサブスク作成時にのみ適用されるため、決済日固定の導入は本番での実課金開始前に行うことが前提）。
 
+### 2.12 admin / maintainer による未公開コンテンツのプレビュー
+
+`is_published = false`（下書き）のテーマ・フェーズ・週・コンテンツを、admin / maintainer ロールに限り通常の学習画面（`/learn/...`）でそのまま閲覧できる（issue #68）。公開前のコンテンツを確認するためだけに一度公開する、という運用を避けるための機能で、専用のプレビュー用ルートは設けない。
+
+**権限判定**: `app/services/auth/permissions.ts` の `checkContentPermissions()` を用いる（admin / maintainer が true）。ページコンポーネント側ではロール分岐を行わず、`learning-server.ts` の各取得関数に `getServerAuth()` の `userRole` を渡すことで、取得関数の内部だけで判定する。
+
+**RLS**: `02_rls/002_consolidate_rls_policies.sql` で、`learning_themes` / `learning_phases` / `learning_weeks` / `learning_contents` の SELECT ポリシーはいずれも `(is_published = true AND is_deleted = false) OR (select get_user_role()) IN ('admin', 'maintainer')` であり、admin / maintainer への未公開行の許可は本機能追加前から既に成立している。今回変更したのはアプリ層（`learning-server.ts` が独自に課していた `is_published = true` の絞り込み）のみ。
+
+**アプリ層の変更**: `fetchPublishedThemes` / `fetchThemeById` / `fetchPhasesByThemeId` / `fetchPhaseById` / `fetchWeekById` / `fetchContentById` / `fetchWeeksWithContentsByPhaseId` はいずれも `userRole` 引数（既定 `null`）を取り、`checkContentPermissions(userRole)` が true の場合のみ `is_published` の絞り込みを外す（`is_deleted = false` は常に維持）。member / お試しユーザーの取得結果・RLSの適用範囲は変更しない。
+
+**ロック表示用サマリー（2.6節）との関係**: 受講生向けのロック表示・存在チェックに使う service_role 経路（`fetchContentVisibilitySummariesByWeekIds()`）は変更しない（`is_published = true AND is_deleted = false` の絞り込みを維持）。admin / maintainer 向けには、通常クライアント（RLS適用）で未公開分も取得する別関数 `fetchContentSummariesByWeekIdsForManager()` を新設し、ロールに応じてどちらを呼ぶかを `fetchContentSummariesByWeekIds(weekIds, userRole)` が振り分ける。service_role を使ってよい箇所は2.6節の2箇所のまま増えない。
+
+**未公開バッジ**: プレビュー中であることを明示するため、`is_published = false` の階層・コンテンツには「未公開」バッジ（`app/components/UnpublishedBadge.tsx`）を一覧・詳細の両方に表示する。バッジの表示可否はデータ（各行の `is_published`）で判定し、ロール分岐はコンポーネント側に書かない。
+
+**未公開コンテンツでの操作制限**: 進捗登録・課題提出・AIレビューはプレビュー中であっても許可しない。UI側は `content.is_published` が false の間、完了ボタン・提出フォームを表示しない。API側は `isContentVisible()`（4.1節・5.1節参照）が `is_published = true` を明示的に絞り込むことで、admin / maintainer が直接APIを叩いた場合も含めて一律403にする（ロールに関わらないフェイルクローズ）。
+
 ---
 
 ## 3. 学習コンテンツ配信機能
@@ -381,6 +397,8 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 - 週内の公開コンテンツ一覧 / コンテンツ詳細（週・フェーズ・テーマ情報付き）
 
 お試しユーザー（`status = 'pending'`）の場合、コンテンツ（`learning_contents`）はRLSにより `is_open_to_trial = true` の行のみが返る。ロック表示に必要なサマリー・存在チェックのみ service_role クライアントで別途取得する（2.6参照）。
+
+admin / maintainer ロールの場合、上記の `is_published = true` 絞り込みをアプリ層で外し、未公開のテーマ・フェーズ・週・コンテンツもプレビューとして取得する（2.12参照）。
 
 ### 3.2 コンテンツ種別ごとの表示
 
@@ -429,7 +447,7 @@ flowchart TD
    - 完了時: `completed_at` に現在日時を設定
    - 未完了時: `completed_at` を null に設定
 
-**可視性チェックの実装方法**: 通常クライアント（`authenticated`）で対象 `contentId` を SELECT し、0行なら403とする。`learning_contents` のRLSがステータスを織り込むため（データベース設計書の6.1参照）、アプリ層でステータス別の分岐を書く必要はない。この方式は「存在しない contentId」「未公開コンテンツ」も同時に弾ける。
+**可視性チェックの実装方法**: 通常クライアント（`authenticated`）で対象 `contentId` を `is_published = true` 付きで SELECT し、0行なら403とする。`learning_contents` のRLSがステータスを織り込むため（データベース設計書の6.1参照）、アプリ層でステータス別の分岐を書く必要はない。`is_published` の絞り込みのみアプリ層で明示する（RLSは admin / maintainer に未公開行の SELECT を許可しているため、それだけでは未公開コンテンツへの進捗登録・提出・AIレビューまで通ってしまう。2.12節のプレビュー機能でも、これらの操作は許可しない）。この方式は「存在しない contentId」「未公開コンテンツ」「お試し非公開コンテンツ」のいずれも同時に弾ける。
 
 **`active` ユーザーへの影響**: RLSに可視コンテンツ限定のEXISTS条件を追加した結果、`active` ユーザーも不可視コンテンツ（未公開・存在しないID）へは書き込めなくなる。従来は未公開コンテンツへの書き込みが素通りし、存在しないIDはFK違反で500になっていたが、いずれも403に統一される。
 
@@ -1009,3 +1027,4 @@ flowchart TD
 | 2026年9月 | 追加レビュー指摘を反映（#103）：ミラー更新のCAS、Checkout作成の結果が不明な場合は処理権を解放しないこと、セッションid未記録時のCustomer経由の復旧を2.11節に追記 |
 | 2026年9月 | PDFアップロードAPIの成功判定を厳密化（#53）：`upload()` の戻り値検証とアップロード直後の存在確認を処理フローに追加し、確認できるまでURLを返さない旨・確認失敗時の500を6.1.1節に追記 |
 | 2026年9月 | 承認済み（active）ユーザーの会員種別変更機能を追加（#95）：2.7節・6.1.3節を更新。Stripe契約中ユーザーは承認・変更のいずれも一般有料会員以外を選べない（一般有料会員への是正は常に許可） |
+| 2026年9月 | admin / maintainer による未公開コンテンツのプレビュー機能を追加（#68）：2.12節を新設。`learning-server.ts` の取得関数がロールに応じて `is_published` 絞り込みを外す旨、未公開バッジ表示、進捗登録・提出・AIレビューはプレビュー中も許可しない旨（`isContentVisible()` の `is_published` 絞り込み）を追記。3.1節・4.1節を更新 |

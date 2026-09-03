@@ -7,13 +7,14 @@ import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
 import { PdfSlideViewerNoSSR as PdfSlideViewer } from "@/app/components/PdfSlideViewerNoSSR";
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
+import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
 import {
   type ContentVisibilitySummary,
   fetchContentById,
-  fetchContentVisibilitySummariesByWeekIds,
+  fetchContentSummariesByWeekIds,
   fetchUserProgressByContentId,
   fetchWeekById,
   isContentLockedForUser,
@@ -89,12 +90,13 @@ export default async function ContentPage({ params }: PageProps) {
     notFound();
   }
 
-  const { userId, userStatus } = await getServerAuth();
+  const { userId, userStatus, userRole } = await getServerAuth();
 
-  // 存在チェック + ロック判定用のサマリーを取得（service_role。お試し非公開でもタイトルは取得できる）
+  // 存在チェック + ロック判定用のサマリーを取得
+  // （member / お試しユーザーは service_role、admin / maintainer は通常クライアントで未公開分も取得）
   const [{ data: week }, { data: weekContentSummaries }] = await Promise.all([
-    fetchWeekById(weekIdNum),
-    fetchContentVisibilitySummariesByWeekIds([weekIdNum]),
+    fetchWeekById(weekIdNum, userRole),
+    fetchContentSummariesByWeekIds([weekIdNum], userRole),
   ]);
 
   // URLの themeId/phaseId が実際の週の所属フェーズ・テーマと一致しない場合は404
@@ -133,6 +135,7 @@ export default async function ContentPage({ params }: PageProps) {
             },
             { label: summary.title },
           ]}
+          badge={!summary.is_published && <UnpublishedBadge />}
         />
 
         <Card className="mb-6">
@@ -157,7 +160,7 @@ export default async function ContentPage({ params }: PageProps) {
     );
   }
 
-  const { data: content } = await fetchContentById(contentIdNum);
+  const { data: content } = await fetchContentById(contentIdNum, userRole);
 
   if (!content || content.week_id !== weekIdNum) {
     notFound();
@@ -193,6 +196,7 @@ export default async function ContentPage({ params }: PageProps) {
           },
           { label: content.title },
         ]}
+        badge={!content.is_published && <UnpublishedBadge />}
       />
 
       {/* コンテンツ本体 */}
@@ -289,19 +293,27 @@ export default async function ContentPage({ params }: PageProps) {
                     </>
                   )}
 
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold">課題提出</h3>
-                    <span className="text-xs text-muted-foreground">
-                      ※ AIレビューは1コンテンツにつき1回のみ利用可能です
-                    </span>
-                  </div>
-                  <SubmissionForm
-                    contentId={contentIdNum}
-                    allowedSubmissionTypes={
-                      (content.allowed_submission_types as "code" | "url" | "both") ?? "code"
-                    }
-                    codeLanguage={(content.code_language as CodeLanguage) ?? "javascript"}
-                  />
+                  {content.is_published ? (
+                    <>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-semibold">課題提出</h3>
+                        <span className="text-xs text-muted-foreground">
+                          ※ AIレビューは1コンテンツにつき1回のみ利用可能です
+                        </span>
+                      </div>
+                      <SubmissionForm
+                        contentId={contentIdNum}
+                        allowedSubmissionTypes={
+                          (content.allowed_submission_types as "code" | "url" | "both") ?? "code"
+                        }
+                        codeLanguage={(content.code_language as CodeLanguage) ?? "javascript"}
+                      />
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      未公開コンテンツのプレビュー中は課題提出・AIレビューを利用できません。
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -309,8 +321,8 @@ export default async function ContentPage({ params }: PageProps) {
         </CardContent>
       </Card>
 
-      {/* 完了ボタン */}
-      {userId && (
+      {/* 完了ボタン（未公開コンテンツのプレビュー中は進捗登録できないため非表示） */}
+      {userId && content.is_published && (
         <div className="mb-6">
           <CompleteButton contentId={contentIdNum} initialCompleted={isCompleted} />
         </div>
