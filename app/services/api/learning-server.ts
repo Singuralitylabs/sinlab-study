@@ -13,6 +13,16 @@ import type {
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
 /**
+ * admin / maintainer 以外は is_published = true で絞り込む（issue #68 のプレビュー機能）。
+ * 各取得関数の `.eq("is_deleted", false)` の後に挟んで使う共通ヘルパー。
+ */
+function applyPublishedFilterUnlessManager<
+  Q extends { eq(column: "is_published", value: boolean): Q },
+>(query: Q, userRole: UserRoleType | null): Q {
+  return checkContentPermissions(userRole) ? query : query.eq("is_published", true);
+}
+
+/**
  * テーマ一覧を取得。
  * admin / maintainer は未公開テーマもプレビューとして取得できる（issue #68）。
  */
@@ -22,10 +32,10 @@ export async function fetchPublishedThemes(userRole: UserRoleType | null = null)
 }> {
   const supabase = await createServerSupabaseClient();
 
-  let query = supabase.from("learning_themes").select("*").eq("is_deleted", false);
-  if (!checkContentPermissions(userRole)) {
-    query = query.eq("is_published", true);
-  }
+  const query = applyPublishedFilterUnlessManager(
+    supabase.from("learning_themes").select("*").eq("is_deleted", false),
+    userRole
+  );
   const { data, error } = await query.order("display_order");
 
   if (error) {
@@ -144,14 +154,10 @@ export async function fetchThemeById(
 }> {
   const supabase = await createServerSupabaseClient();
 
-  let query = supabase
-    .from("learning_themes")
-    .select("*")
-    .eq("id", themeId)
-    .eq("is_deleted", false);
-  if (!checkContentPermissions(userRole)) {
-    query = query.eq("is_published", true);
-  }
+  const query = applyPublishedFilterUnlessManager(
+    supabase.from("learning_themes").select("*").eq("id", themeId).eq("is_deleted", false),
+    userRole
+  );
   const { data, error } = await query.single();
 
   if (error) {
@@ -175,14 +181,10 @@ export async function fetchPhasesByThemeId(
 }> {
   const supabase = await createServerSupabaseClient();
 
-  let query = supabase
-    .from("learning_phases")
-    .select("*")
-    .eq("theme_id", themeId)
-    .eq("is_deleted", false);
-  if (!checkContentPermissions(userRole)) {
-    query = query.eq("is_published", true);
-  }
+  const query = applyPublishedFilterUnlessManager(
+    supabase.from("learning_phases").select("*").eq("theme_id", themeId).eq("is_deleted", false),
+    userRole
+  );
   const { data, error } = await query.order("display_order");
 
   if (error) {
@@ -230,14 +232,10 @@ export async function fetchPhaseById(
 }> {
   const supabase = await createServerSupabaseClient();
 
-  let query = supabase
-    .from("learning_phases")
-    .select("*")
-    .eq("id", phaseId)
-    .eq("is_deleted", false);
-  if (!checkContentPermissions(userRole)) {
-    query = query.eq("is_published", true);
-  }
+  const query = applyPublishedFilterUnlessManager(
+    supabase.from("learning_phases").select("*").eq("id", phaseId).eq("is_deleted", false),
+    userRole
+  );
   const { data, error } = await query.single();
 
   if (error) {
@@ -271,10 +269,14 @@ export function isContentLockedForUser(
 
 /**
  * 対象コンテンツが、渡されたクライアント（呼び出し元の認証コンテキスト）から可視かどうかを判定する。
- * RLSにより、お試し非公開・未公開・存在しないコンテンツIDのいずれも0行となり false を返す。
  * 進捗・提出・AIレビューAPIのコンテンツ可視性チェックに使用する（機能設計書 4.1/5.1 参照）。
- * is_published を明示的に絞り込むことで、admin / maintainer のプレビュー中であっても
- * 未公開コンテンツへの進捗登録・提出・AIレビューは常に不可とする（issue #68 の既定）。
+ *
+ * コンテンツ自身だけでなく、所属する週・フェーズ・テーマの全階層について
+ * `is_published = true AND is_deleted = false` を明示的に判定する。`learning_contents` の
+ * SELECT RLS は admin / maintainer に無条件で許可されるため、コンテンツ行の is_published だけを
+ * 見ると、論理削除済みのコンテンツや、未公開の週・フェーズ・テーマ配下にある（誤って公開フラグが
+ * 立った）コンテンツへの進捗登録・提出・AIレビューが admin / maintainer に対して通ってしまう。
+ * ロールに関わらず、いずれかの階層が公開・未削除でなければ false を返す（issue #68 の既定）。
  */
 export async function isContentVisible(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
@@ -282,9 +284,18 @@ export async function isContentVisible(
 ): Promise<boolean> {
   const { data, error } = await supabase
     .from("learning_contents")
-    .select("id")
+    .select(
+      "id, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
+    )
     .eq("id", contentId)
     .eq("is_published", true)
+    .eq("is_deleted", false)
+    .eq("week.is_published", true)
+    .eq("week.is_deleted", false)
+    .eq("week.phase.is_published", true)
+    .eq("week.phase.is_deleted", false)
+    .eq("week.phase.theme.is_published", true)
+    .eq("week.phase.theme.is_deleted", false)
     .maybeSingle();
 
   if (error) {
@@ -295,6 +306,29 @@ export async function isContentVisible(
 
   return !!data;
 }
+
+/**
+ * コンテンツ自身だけでなく、週・フェーズ・テーマの全階層が公開済みかどうかを判定する。
+ * admin / maintainer のプレビュー画面で「未公開」バッジ表示・完了ボタン / 提出フォームの
+ * 表示可否に使う（コンテンツ行自体は公開済みでも、親階層のいずれかが未公開ならプレビュー扱いとする。
+ * issue #68）。実際の進捗登録・提出・AIレビューの可否は `isContentVisible()` がDB側で判定する。
+ */
+export function isContentFullyPublished(content: LearningContentWithWeek): boolean {
+  return (
+    content.is_published &&
+    (content.week?.is_published ?? false) &&
+    (content.week?.phase?.is_published ?? false) &&
+    (content.week?.phase?.theme?.is_published ?? false)
+  );
+}
+
+/**
+ * ロック表示・存在チェック用サマリーで select するカラム許可リスト（機能設計書 2.6 参照）。
+ * service_role 経由（受講生向け）・通常クライアント経由（admin / maintainer 向け）の
+ * 両経路で共有し、リストがずれないようにする。本文カラム（text_content 等）は含めない。
+ */
+const CONTENT_VISIBILITY_SUMMARY_COLUMNS =
+  "id, title, content_type, display_order, is_open_to_trial, is_published, week_id";
 
 /**
  * 指定した週IDに属する公開コンテンツのサマリー（タイトル・種別・表示順・お試し公開フラグ）を取得する。
@@ -317,7 +351,7 @@ export async function fetchContentVisibilitySummariesByWeekIds(weekIds: number[]
 
   const { data, error } = await supabase
     .from("learning_contents")
-    .select("id, title, content_type, display_order, is_open_to_trial, week_id")
+    .select(CONTENT_VISIBILITY_SUMMARY_COLUMNS)
     .in("week_id", weekIds)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -328,15 +362,15 @@ export async function fetchContentVisibilitySummariesByWeekIds(weekIds: number[]
     return { data: null, error };
   }
 
-  // service_role 経路は is_published = true のみを扱うため、常に true を補う
-  const summaries = (data ?? []).map((content) => ({ ...content, is_published: true }));
-  return { data: summaries as ContentVisibilitySummary[], error: null };
+  return { data: data as ContentVisibilitySummary[], error: null };
 }
 
 /**
  * 指定した週IDに属するコンテンツのサマリーを、未公開分も含めて通常クライアントで取得する。
  * admin / maintainer のプレビュー専用の経路（issue #68）。RLS（is_published = true OR
  * ロールが admin/maintainer）により、実際に未公開分まで返るのは admin / maintainer のみ。
+ * service_role は使わないため is_published の絞り込みは不要だが、is_deleted は必ず絞り込む
+ * （admin / maintainer 向け SELECT RLS は is_deleted を見ないため）。
  */
 async function fetchContentSummariesByWeekIdsForManager(weekIds: number[]): Promise<{
   data: ContentVisibilitySummary[] | null;
@@ -350,7 +384,7 @@ async function fetchContentSummariesByWeekIdsForManager(weekIds: number[]): Prom
 
   const { data, error } = await supabase
     .from("learning_contents")
-    .select("id, title, content_type, display_order, is_open_to_trial, is_published, week_id")
+    .select(CONTENT_VISIBILITY_SUMMARY_COLUMNS)
     .in("week_id", weekIds)
     .eq("is_deleted", false)
     .order("display_order");
@@ -395,14 +429,10 @@ export async function fetchWeeksWithContentsByPhaseId(
 }> {
   const supabase = await createServerSupabaseClient();
 
-  let query = supabase
-    .from("learning_weeks")
-    .select("*")
-    .eq("phase_id", phaseId)
-    .eq("is_deleted", false);
-  if (!checkContentPermissions(userRole)) {
-    query = query.eq("is_published", true);
-  }
+  const query = applyPublishedFilterUnlessManager(
+    supabase.from("learning_weeks").select("*").eq("phase_id", phaseId).eq("is_deleted", false),
+    userRole
+  );
   const { data: weeks, error } = await query.order("display_order");
 
   if (error) {
@@ -477,14 +507,14 @@ export async function fetchWeekById(
 }> {
   const supabase = await createServerSupabaseClient();
 
-  let query = supabase
-    .from("learning_weeks")
-    .select("*, phase:learning_phases(*, theme:learning_themes(*))")
-    .eq("id", weekId)
-    .eq("is_deleted", false);
-  if (!checkContentPermissions(userRole)) {
-    query = query.eq("is_published", true);
-  }
+  const query = applyPublishedFilterUnlessManager(
+    supabase
+      .from("learning_weeks")
+      .select("*, phase:learning_phases(*, theme:learning_themes(*))")
+      .eq("id", weekId)
+      .eq("is_deleted", false),
+    userRole
+  );
   const { data, error } = await query.single();
 
   if (error) {
@@ -533,14 +563,14 @@ export async function fetchContentById(
 }> {
   const supabase = await createServerSupabaseClient();
 
-  let query = supabase
-    .from("learning_contents")
-    .select("*, week:learning_weeks(*, phase:learning_phases(*, theme:learning_themes(*)))")
-    .eq("id", contentId)
-    .eq("is_deleted", false);
-  if (!checkContentPermissions(userRole)) {
-    query = query.eq("is_published", true);
-  }
+  const query = applyPublishedFilterUnlessManager(
+    supabase
+      .from("learning_contents")
+      .select("*, week:learning_weeks(*, phase:learning_phases(*, theme:learning_themes(*)))")
+      .eq("id", contentId)
+      .eq("is_deleted", false),
+    userRole
+  );
   const { data, error } = await query.single();
 
   if (error) {

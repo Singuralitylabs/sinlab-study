@@ -18,6 +18,7 @@ import {
   fetchUserProgressByContentIds,
   fetchWeekById,
   fetchWeeksWithContentsByPhaseId,
+  isContentFullyPublished,
   isContentLockedForUser,
   isContentVisible,
 } from "@/app/services/api/learning-server";
@@ -591,6 +592,7 @@ describe("fetchContentVisibilitySummariesByWeekIds", () => {
         content_type: "video",
         display_order: 1,
         is_open_to_trial: true,
+        is_published: true,
         week_id: 100,
       },
       {
@@ -599,6 +601,7 @@ describe("fetchContentVisibilitySummariesByWeekIds", () => {
         content_type: "exercise",
         display_order: 2,
         is_open_to_trial: false,
+        is_published: true,
         week_id: 100,
       },
     ];
@@ -609,7 +612,7 @@ describe("fetchContentVisibilitySummariesByWeekIds", () => {
 
     const result = await fetchContentVisibilitySummariesByWeekIds([100]);
 
-    expect(result.data).toEqual(summaries.map((s) => ({ ...s, is_published: true })));
+    expect(result.data).toEqual(summaries);
     expect(result.error).toBeNull();
   });
 
@@ -638,6 +641,7 @@ describe("fetchContentSummariesByWeekIds", () => {
         content_type: "video",
         display_order: 1,
         is_open_to_trial: true,
+        is_published: true,
         week_id: 100,
       },
     ];
@@ -648,7 +652,7 @@ describe("fetchContentSummariesByWeekIds", () => {
 
     const result = await fetchContentSummariesByWeekIds([100]);
 
-    expect(result.data).toEqual(summaries.map((s) => ({ ...s, is_published: true })));
+    expect(result.data).toEqual(summaries);
     expect(createAdminSupabaseClient).toHaveBeenCalled();
     expect(createServerSupabaseClient).not.toHaveBeenCalled();
   });
@@ -680,6 +684,9 @@ describe("fetchContentSummariesByWeekIds", () => {
     expect(createAdminSupabaseClient).not.toHaveBeenCalled();
     const builder = mockServerClient.from.mock.results[0].value;
     expect(builder.eq).not.toHaveBeenCalledWith("is_published", true);
+    // service_role を使わない経路でも is_deleted は必ず絞り込む
+    // （admin / maintainer 向け SELECT RLS は is_deleted を見ないため）
+    expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
   });
 });
 
@@ -699,6 +706,7 @@ describe("fetchWeeksWithContentsByPhaseId", () => {
         content_type: "video",
         display_order: 1,
         is_open_to_trial: true,
+        is_published: true,
         week_id: 100,
       },
       {
@@ -707,6 +715,7 @@ describe("fetchWeeksWithContentsByPhaseId", () => {
         content_type: "text",
         display_order: 2,
         is_open_to_trial: false,
+        is_published: true,
         week_id: 100,
       },
     ];
@@ -727,7 +736,7 @@ describe("fetchWeeksWithContentsByPhaseId", () => {
         id: 100,
         name: "Week 1",
         display_order: 1,
-        contents: summaries.map((s) => ({ ...s, is_published: true })),
+        contents: summaries,
       },
       { id: 101, name: "Week 2", display_order: 2, contents: [] },
     ]);
@@ -858,12 +867,77 @@ describe("isContentVisible", () => {
     );
   });
 
-  it("is_published=true で絞り込む（admin / maintainer のプレビュー中でも未公開への進捗・提出・AIレビューは常に不可）", async () => {
+  it("コンテンツ自身と週・フェーズ・テーマの全階層を is_published=true / is_deleted=false で絞り込む（admin / maintainer のプレビュー中でも未公開・論理削除済みへの進捗・提出・AIレビューは常に不可）", async () => {
     const mockClient = createMockSupabaseClient({ queryResult: { data: { id: 1 }, error: null } });
 
     await isContentVisible(mockClient as never, 1);
 
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.eq).toHaveBeenCalledWith("is_published", true);
+    expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
+    expect(builder.eq).toHaveBeenCalledWith("week.is_published", true);
+    expect(builder.eq).toHaveBeenCalledWith("week.is_deleted", false);
+    expect(builder.eq).toHaveBeenCalledWith("week.phase.is_published", true);
+    expect(builder.eq).toHaveBeenCalledWith("week.phase.is_deleted", false);
+    expect(builder.eq).toHaveBeenCalledWith("week.phase.theme.is_published", true);
+    expect(builder.eq).toHaveBeenCalledWith("week.phase.theme.is_deleted", false);
+  });
+});
+
+// ----------------------------------------------------------------
+// isContentFullyPublished（issue #68 PRレビュー対応: 親階層が未公開のケース）
+// ----------------------------------------------------------------
+describe("isContentFullyPublished", () => {
+  const baseContent = {
+    id: 1,
+    is_published: true,
+    week: {
+      id: 100,
+      is_published: true,
+      phase: {
+        id: 10,
+        is_published: true,
+        theme: { id: 1, is_published: true },
+      },
+    },
+  } as unknown as Parameters<typeof isContentFullyPublished>[0];
+
+  it("コンテンツ・週・フェーズ・テーマがすべて公開済みの場合、true を返す", () => {
+    expect(isContentFullyPublished(baseContent)).toBe(true);
+  });
+
+  it("コンテンツ自身が未公開の場合、false を返す", () => {
+    expect(isContentFullyPublished({ ...baseContent, is_published: false })).toBe(false);
+  });
+
+  it("親の週が未公開の場合、コンテンツ自身が公開済みでも false を返す", () => {
+    const content = {
+      ...baseContent,
+      week: { ...baseContent.week, is_published: false },
+    } as typeof baseContent;
+    expect(isContentFullyPublished(content)).toBe(false);
+  });
+
+  it("親のフェーズ・テーマが未公開の場合も false を返す", () => {
+    const week = baseContent.week as NonNullable<typeof baseContent.week>;
+    const phase = week.phase as NonNullable<typeof week.phase>;
+
+    const phaseUnpublished = {
+      ...baseContent,
+      week: { ...week, phase: { ...phase, is_published: false } },
+    } as typeof baseContent;
+    expect(isContentFullyPublished(phaseUnpublished)).toBe(false);
+
+    const themeUnpublished = {
+      ...baseContent,
+      week: { ...week, phase: { ...phase, theme: { ...phase.theme, is_published: false } } },
+    } as typeof baseContent;
+    expect(isContentFullyPublished(themeUnpublished)).toBe(false);
+  });
+
+  it("week / phase / theme が null の場合、false を返す（データ不整合時のフェイルクローズ）", () => {
+    expect(isContentFullyPublished({ ...baseContent, week: null } as typeof baseContent)).toBe(
+      false
+    );
   });
 });

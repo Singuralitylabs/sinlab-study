@@ -17,6 +17,7 @@ import {
   fetchContentSummariesByWeekIds,
   fetchUserProgressByContentId,
   fetchWeekById,
+  isContentFullyPublished,
   isContentLockedForUser,
 } from "@/app/services/api/learning-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
@@ -166,6 +167,10 @@ export default async function ContentPage({ params }: PageProps) {
     notFound();
   }
 
+  // コンテンツ行自体が公開済みでも、所属する週・フェーズ・テーマのいずれかが未公開なら
+  // プレビュー扱いとする（バッジ表示・完了ボタン/提出フォームの表示可否に使う）。
+  const isFullyPublished = isContentFullyPublished(content);
+
   const [{ isCompleted }, { data: existingReview }, { data: latestSubmission }] = await Promise.all(
     [
       userId
@@ -196,7 +201,7 @@ export default async function ContentPage({ params }: PageProps) {
           },
           { label: content.title },
         ]}
-        badge={!content.is_published && <UnpublishedBadge />}
+        badge={!isFullyPublished && <UnpublishedBadge />}
       />
 
       {/* コンテンツ本体 */}
@@ -293,7 +298,7 @@ export default async function ContentPage({ params }: PageProps) {
                     </>
                   )}
 
-                  {content.is_published ? (
+                  {isFullyPublished ? (
                     <>
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="text-lg font-semibold">課題提出</h3>
@@ -311,7 +316,7 @@ export default async function ContentPage({ params }: PageProps) {
                     </>
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      未公開コンテンツのプレビュー中は課題提出・AIレビューを利用できません。
+                      非公開コンテンツのプレビュー中は課題提出・AIレビューを利用できません。
                     </p>
                   )}
                 </div>
@@ -322,7 +327,7 @@ export default async function ContentPage({ params }: PageProps) {
       </Card>
 
       {/* 完了ボタン（未公開コンテンツのプレビュー中は進捗登録できないため非表示） */}
-      {userId && content.is_published && (
+      {userId && isFullyPublished && (
         <div className="mb-6">
           <CompleteButton contentId={contentIdNum} initialCompleted={isCompleted} />
         </div>
