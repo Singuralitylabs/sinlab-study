@@ -271,9 +271,17 @@ export function UserManagementTable({
                       ) : (
                         <div className="flex flex-col gap-1">
                           <div className="flex flex-wrap items-center gap-1">
-                            {user.status === USER_STATUS.ACTIVE && user.membership_type ? (
+                            {user.status === USER_STATUS.ACTIVE ? (
                               <select
-                                value={user.membership_type}
+                                // status=active と membership_type の整合性はDBでは保証されないため
+                                // (CLAUDE.md参照)、未設定（NULL）の active ユーザーも復旧できるよう
+                                // membership_type の有無に関わらずセレクトを表示する
+                                value={
+                                  user.membership_type ??
+                                  (isSubscribed
+                                    ? USER_MEMBERSHIP.GENERAL
+                                    : USER_MEMBERSHIP.COMMUNITY)
+                                }
                                 disabled={subscriptionDataUnavailable}
                                 onChange={(e) =>
                                   handleMembershipTypeChange(
