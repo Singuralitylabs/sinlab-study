@@ -12,6 +12,9 @@ export const USER_ROLE: Record<string, UserRoleType> = {
   MEMBER: "member",
 } as const;
 
+/** ロールの許可値。APIのバリデーション等はこの1箇所から導出する */
+export const USER_ROLES: readonly UserRoleType[] = Object.values(USER_ROLE);
+
 /**
  * 会員種別。承認時に管理者が選択する（承認前・却下ユーザーは null）。
  *
