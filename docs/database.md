@@ -224,7 +224,7 @@ erDiagram
 | hint | TEXT | YES | NULL | - | ヒント（exercise時・受講生に公開） |
 | pdf_url | TEXT | YES | NULL | - | PDFファイルURL（slide時） |
 | allowed_submission_types | VARCHAR(20) | NO | 'code' | CHECK ('code', 'url', 'both') | 許可する提出方法（exercise時） |
-| code_language | VARCHAR(20) | NO | 'javascript' | CHECK ('javascript', 'typescript', 'html', 'css') | コードエディタの言語（exercise時） |
+| code_language | VARCHAR(20) | NO | 'javascript' | CHECK ('javascript', 'typescript', 'gas', 'html', 'css') | コードエディタの言語（exercise時） |
 | display_order | INTEGER | YES | 0 | - | 表示順（昇順） |
 | is_published | BOOLEAN | YES | false | - | 公開フラグ |
 | is_open_to_trial | BOOLEAN | NO | false | NOT NULL | お試し公開フラグ。true の場合、お試しユーザー（`status = 'pending'`）にも公開する |
@@ -255,8 +255,9 @@ erDiagram
 
 | 値 | 言語 |
 |:--|:--|
-| `'javascript'` | JavaScript / GAS（デフォルト） |
+| `'javascript'` | JavaScript（デフォルト） |
 | `'typescript'` | TypeScript |
+| `'gas'` | GAS（Google Apps Script） |
 | `'html'` | HTML |
 | `'css'` | CSS |
 
@@ -622,6 +623,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | `01_schema/006_add_thumbnails_bucket.sql` | テーマサムネイル用の `thumbnails` 公開バケットを作成 |
 | `01_schema/007_add_checkout_claim.sql` | `stripe_subscriptions` に `checkout_claimed_at` / `checkout_session_id` を追加し、`stripe_customer_id` をNULL許容へ変更（Checkout作成の排他制御用） |
 | `01_schema/008_secure_get_user_role.sql` | `get_user_role()` に `status <> 'rejected'` 条件を追加し、却下ユーザーが admin/maintainer ロールを保持したまま認可を突破できないようにする（#104） |
+| `01_schema/009_add_gas_code_language.sql` | `learning_contents.code_language` のCHECK制約に `gas` を追加（#56） |
 | `02_rls/001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
 | `02_rls/002_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し |
 | `02_rls/003_trial_user_policies.sql` | `get_user_status()` の追加と、お試しユーザー制限を含むポリシーへの差し替え（learning_contents の SELECT、user_progress / submissions の書き込み） |
@@ -680,3 +682,4 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | 2026年8月 | 上記に対する独立レビューの指摘を反映：`releaseEventClaim()`の3者競合対策（`processed_at`一致条件）を3.10節に追記 |
 | 2026年8月 | テーマサムネイルのStorage管理に対応：`thumbnails` 公開バケットとStorageポリシーを追加。`learning_themes.image_url` の保存形式（3.1）・RLS（6.8）・マイグレーション一覧を更新 |
 | 2026年9月 | 並行Checkoutによる二重契約の対策（#103）に対応：`stripe_subscriptions` に `checkout_claimed_at` / `checkout_session_id` を追加し `stripe_customer_id` をNULL許容へ変更。claim/releaseによるCheckout作成の排他、既存セッションの状態に応じた再利用・奪取・待機、Stripe Customerの一意化を3.9節・6.6節・マイグレーション一覧に追記 |
+| 2026年9月 | 管理画面の課題編集でGASを既定言語にできるよう対応（#56）：`learning_contents.code_language` のCHECK制約に `gas` を追加。3.4節の値一覧を更新 |
