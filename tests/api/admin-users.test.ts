@@ -4,7 +4,13 @@ vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/admin-server");
 
 import { PATCH } from "@/app/api/admin/users/route";
-import { approveUser, changeUserRole, rejectUser } from "@/app/services/api/admin-server";
+import {
+  approveUser,
+  changeMembershipType,
+  changeUserRole,
+  isUserCurrentlySubscribed,
+  rejectUser,
+} from "@/app/services/api/admin-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const adminAuth = {
@@ -27,6 +33,27 @@ beforeEach(() => {
   vi.mocked(approveUser).mockResolvedValue({ error: null, updated: true });
   vi.mocked(rejectUser).mockResolvedValue({ error: null, updated: true });
   vi.mocked(changeUserRole).mockResolvedValue({ error: null, updated: true });
+  vi.mocked(changeMembershipType).mockResolvedValue({ error: null, updated: true });
+  vi.mocked(isUserCurrentlySubscribed).mockResolvedValue({ data: false, error: null });
+});
+
+describe("PATCH /api/admin/users - userId 検証", () => {
+  it("userId が文字列の場合は400で、いずれの処理も呼ばない", async () => {
+    const res = await PATCH(
+      request({ userId: "5", action: "change_membership", membershipType: "community" })
+    );
+
+    expect(res.status).toBe(400);
+    expect(changeMembershipType).not.toHaveBeenCalled();
+    expect(isUserCurrentlySubscribed).not.toHaveBeenCalled();
+  });
+
+  it("userId が小数の場合は400を返す", async () => {
+    const res = await PATCH(request({ userId: 5.5, action: "change_role", role: "member" }));
+
+    expect(res.status).toBe(400);
+    expect(changeUserRole).not.toHaveBeenCalled();
+  });
 });
 
 describe("PATCH /api/admin/users - approve", () => {
@@ -69,6 +96,36 @@ describe("PATCH /api/admin/users - approve", () => {
     const res = await PATCH(request({ userId: 5, action: "approve", membershipType: "community" }));
 
     expect(res.status).toBe(500);
+  });
+
+  it("対象ユーザーがStripe契約中で membershipType が community の場合は409で、承認処理を呼ばない", async () => {
+    vi.mocked(isUserCurrentlySubscribed).mockResolvedValue({ data: true, error: null });
+
+    const res = await PATCH(request({ userId: 5, action: "approve", membershipType: "community" }));
+
+    expect(res.status).toBe(409);
+    expect(approveUser).not.toHaveBeenCalled();
+  });
+
+  it("対象ユーザーがStripe契約中でも membershipType が general なら承認できる", async () => {
+    vi.mocked(isUserCurrentlySubscribed).mockResolvedValue({ data: true, error: null });
+
+    const res = await PATCH(request({ userId: 5, action: "approve", membershipType: "general" }));
+
+    expect(res.status).toBe(200);
+    expect(approveUser).toHaveBeenCalledWith(5, "general");
+  });
+
+  it("Stripe契約状況の取得に失敗しても承認フロー自体は止めない（お試しユーザー承認を優先）", async () => {
+    vi.mocked(isUserCurrentlySubscribed).mockResolvedValue({
+      data: null,
+      error: { message: "db error", code: "PGRST204" } as never,
+    });
+
+    const res = await PATCH(request({ userId: 5, action: "approve", membershipType: "community" }));
+
+    expect(res.status).toBe(200);
+    expect(approveUser).toHaveBeenCalledWith(5, "community");
   });
 });
 
@@ -122,6 +179,104 @@ describe("PATCH /api/admin/users - change_role", () => {
     const res = await PATCH(request({ userId: 5, action: "change_role", role: "member" }));
 
     expect(res.status).toBe(403);
+  });
+});
+
+describe("PATCH /api/admin/users - change_membership", () => {
+  it("membershipType を指定すると会員種別が変更される", async () => {
+    const res = await PATCH(
+      request({ userId: 5, action: "change_membership", membershipType: "general" })
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true, action: "change_membership" });
+    expect(changeMembershipType).toHaveBeenCalledWith(5, "general");
+  });
+
+  it("membershipType が許可値以外の場合は400で、変更処理を呼ばない", async () => {
+    const res = await PATCH(
+      request({ userId: 5, action: "change_membership", membershipType: "premium" })
+    );
+
+    expect(res.status).toBe(400);
+    expect(changeMembershipType).not.toHaveBeenCalled();
+  });
+
+  it("membershipType 未指定の場合は400で、変更処理を呼ばない", async () => {
+    const res = await PATCH(request({ userId: 5, action: "change_membership" }));
+
+    expect(res.status).toBe(400);
+    expect(changeMembershipType).not.toHaveBeenCalled();
+  });
+
+  it("対象が pending / rejected 等で0行更新の場合は409を返す", async () => {
+    vi.mocked(changeMembershipType).mockResolvedValue({ error: null, updated: false });
+
+    const res = await PATCH(
+      request({ userId: 5, action: "change_membership", membershipType: "community" })
+    );
+
+    expect(res.status).toBe(409);
+  });
+
+  it("変更処理が失敗した場合は500を返す", async () => {
+    vi.mocked(changeMembershipType).mockResolvedValue({
+      error: { message: "db error", code: "PGRST204" } as never,
+      updated: false,
+    });
+
+    const res = await PATCH(
+      request({ userId: 5, action: "change_membership", membershipType: "community" })
+    );
+
+    expect(res.status).toBe(500);
+  });
+
+  it("admin 以外は403で、変更処理を呼ばない", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({ ...adminAuth, userRole: "maintainer" } as never);
+
+    const res = await PATCH(
+      request({ userId: 5, action: "change_membership", membershipType: "community" })
+    );
+
+    expect(res.status).toBe(403);
+    expect(changeMembershipType).not.toHaveBeenCalled();
+  });
+
+  it("対象ユーザーがStripeサブスク契約中で community に変更しようとした場合は409で、変更処理を呼ばない", async () => {
+    vi.mocked(isUserCurrentlySubscribed).mockResolvedValue({ data: true, error: null });
+
+    const res = await PATCH(
+      request({ userId: 5, action: "change_membership", membershipType: "community" })
+    );
+
+    expect(res.status).toBe(409);
+    expect(changeMembershipType).not.toHaveBeenCalled();
+  });
+
+  it("対象ユーザーがStripeサブスク契約中でも general への変更は許可する（不整合の是正経路を塞がない）", async () => {
+    vi.mocked(isUserCurrentlySubscribed).mockResolvedValue({ data: true, error: null });
+
+    const res = await PATCH(
+      request({ userId: 5, action: "change_membership", membershipType: "general" })
+    );
+
+    expect(res.status).toBe(200);
+    expect(changeMembershipType).toHaveBeenCalledWith(5, "general");
+  });
+
+  it("Stripe契約状況を取得できない場合は503で、変更処理を呼ばない（フェイルクローズ）", async () => {
+    vi.mocked(isUserCurrentlySubscribed).mockResolvedValue({
+      data: null,
+      error: { message: "db error", code: "PGRST204" } as never,
+    });
+
+    const res = await PATCH(
+      request({ userId: 5, action: "change_membership", membershipType: "community" })
+    );
+
+    expect(res.status).toBe(503);
+    expect(changeMembershipType).not.toHaveBeenCalled();
   });
 });
 

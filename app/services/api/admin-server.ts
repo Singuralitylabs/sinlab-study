@@ -1,7 +1,10 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import type { CodeLanguage } from "@/app/components/CodeEditor";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
-import { NON_CURRENT_SUBSCRIPTION_STATUSES } from "@/app/services/api/stripe-server";
+import {
+  fetchStripeSubscriptionByUserId,
+  NON_CURRENT_SUBSCRIPTION_STATUSES,
+} from "@/app/services/api/stripe-server";
 import type {
   LearningContent,
   LearningContentWithWeek,
@@ -592,10 +595,33 @@ export async function fetchUserIdsWithStripeSubscription(): Promise<{
 }
 
 /**
+ * 指定ユーザーが現在Stripeサブスクを契約中とみなせるか判定する（承認・会員種別変更時の
+ * Stripeロックに使う単一ユーザー版）。`fetchUserIdsWithStripeSubscription()` と同じ
+ * `NON_CURRENT_SUBSCRIPTION_STATUSES` 基準で判定するが、対象1名のみの照会で済ませるため
+ * `fetchStripeSubscriptionByUserId()`（`stripe-server.ts`）を用いる。admin は RLS で
+ * 他ユーザーの行も参照できる（`stripe_subscriptions` のSELECTポリシー参照）。
+ */
+export async function isUserCurrentlySubscribed(userId: number): Promise<{
+  data: boolean | null;
+  error: PostgrestError | null;
+}> {
+  const { data, error } = await fetchStripeSubscriptionByUserId(userId);
+
+  if (error) {
+    return { data: null, error };
+  }
+
+  return {
+    data: data !== null && !NON_CURRENT_SUBSCRIPTION_STATUSES.includes(data.status),
+    error: null,
+  };
+}
+
+/**
  * ユーザーを承認する。承認と同時に会員種別（コミュニティ会員 / 一般有料会員）を設定する。
  *
  * 承認済み（active）ユーザーの再承認は不可。会員種別も上書きするため、古い画面からの
- * 再承認で設定済みの種別が既定値に書き換わる事故を防ぐ（種別変更は #95 で対応）。
+ * 再承認で設定済みの種別が既定値に書き換わる事故を防ぐ（種別変更は `changeMembershipType()` で行う）。
  * 事前SELECTによるチェックでは同時リクエスト間で競合し、SELECT失敗時にフェイルオープン
  * にもなるため、UPDATE自体に条件を折り込み原子的に判定する。
  * service_role クライアントはRLSを迂回するため `is_deleted = false` も明示的に必須。
@@ -684,6 +710,35 @@ export async function changeUserRole(
 
   if (error) {
     console.error("ユーザーロール変更エラー:", error.message);
+    return { error, updated: false };
+  }
+
+  return { error: null, updated: (data?.length ?? 0) > 0 };
+}
+
+/**
+ * 承認済み（active）ユーザーの会員種別を変更する。`status` は書き換えない
+ * （却下からの再承認で種別を選び直させないための `approveUser()` の設計とは独立）。
+ * ロール変更と同じ理由でUPDATEに条件を折り込み原子的に判定する（`changeUserRole()` 参照）。
+ * 対象は active ユーザーのみ（`docs/specification.md` 2.7）。Stripe契約中ユーザーの
+ * 変更可否は呼び出し側（APIルート）で判定する。
+ */
+export async function changeMembershipType(
+  userId: number,
+  membershipType: MembershipType
+): Promise<{ error: PostgrestError | null; updated: boolean }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("users")
+    .update({ membership_type: membershipType, updated_at: new Date().toISOString() })
+    .eq("id", userId)
+    .eq("is_deleted", false)
+    .eq("status", USER_STATUS.ACTIVE)
+    .select("id");
+
+  if (error) {
+    console.error("ユーザー会員種別変更エラー:", error.message);
     return { error, updated: false };
   }
 
