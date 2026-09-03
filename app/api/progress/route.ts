@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     }
-    if (!userId) {
+    if (userId == null) {
       return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
     }
 

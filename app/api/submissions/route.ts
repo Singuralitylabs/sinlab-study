@@ -26,8 +26,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { contentId, submissionType, codeContent, codeFiles, url } = body;
 
-    if (!Number.isInteger(contentId) || contentId <= 0 || !submissionType) {
-      return NextResponse.json({ error: "必須パラメータが不足しています" }, { status: 400 });
+    if (!Number.isInteger(contentId) || contentId <= 0) {
+      return NextResponse.json({ error: "contentIdは正の整数で指定してください" }, { status: 400 });
+    }
+    if (!submissionType) {
+      return NextResponse.json({ error: "submissionTypeは必須です" }, { status: 400 });
     }
 
     // 提出種別の許容値を明示的に検証（不正値はDBのCHECK制約違反→500になる前に400で弾く）
@@ -67,7 +70,7 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     }
-    if (!userId) {
+    if (userId == null) {
       return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
     }
 

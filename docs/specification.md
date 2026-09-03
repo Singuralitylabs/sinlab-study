@@ -469,17 +469,19 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 {
   "contentId": 1,
   "submissionType": "code",
-  "codeContent": "function myFunction() { ... }",
+  "codeFiles": [{ "filename": "main.js", "language": "javascript", "content": "function myFunction() { ... }" }],
   "url": null
 }
 ```
+
+`codeFiles` は複数ファイル提出用の配列。単一ファイルの後方互換として `codeContent`（文字列）も受け付けるが、`codeFiles` が優先される（データモデルの `code_content` / `code_files` の使い分けはデータベース設計書を参照）。
 
 ユーザーIDはボディで受け取らず、`getServerAuth()` が返す認証ユーザーのIDのみを使用する（4.1と同じ）。
 
 **処理フロー**:
 1. リクエストボディのバリデーション
    - `contentId` は正の整数、`submissionType` は必須
-   - `code` タイプ: `codeContent` は必須
+   - `code` タイプ: `codeFiles`（複数ファイル・単一ファイルとも可）または後方互換の `codeContent` のいずれかが必須
    - `url` タイプ: `url` は必須
 2. `getServerAuth()` による認証チェック（ステータス取得を含む）
 3. ステータスに基づく認可: `rejected` は403
