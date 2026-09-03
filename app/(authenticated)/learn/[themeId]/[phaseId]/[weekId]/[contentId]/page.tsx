@@ -204,6 +204,17 @@ export default async function ContentPage({ params }: PageProps) {
         badge={<UnpublishedBadge isPublished={isFullyPublished} />}
       />
 
+      {/* 概要欄（video / slide かつ概要が入力されている場合のみ表示） */}
+      {(content.content_type === "video" || content.content_type === "slide") &&
+        content.description && (
+          <Card className="mb-6">
+            <CardContent className="pt-6">
+              <h2 className="text-sm font-semibold text-muted-foreground mb-2">概要</h2>
+              <MarkdownRenderer content={content.description} />
+            </CardContent>
+          </Card>
+        )}
+
       {/* コンテンツ本体 */}
       <Card className="mb-6">
         <CardContent className="pt-6">
