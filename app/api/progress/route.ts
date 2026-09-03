@@ -7,10 +7,10 @@ import { getServerAuth } from "@/app/services/auth/server-auth";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { contentId, userId, isCompleted } = body;
+    const { contentId, isCompleted } = body;
 
-    if (!contentId || !userId) {
-      return NextResponse.json({ error: "contentIdとuserIdは必須です" }, { status: 400 });
+    if (!contentId) {
+      return NextResponse.json({ error: "contentIdは必須です" }, { status: 400 });
     }
 
     // 認証チェック
@@ -20,11 +20,6 @@ export async function POST(request: NextRequest) {
     }
     if (!authUserId) {
       return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-
-    // ユーザーIDを検証
-    if (authUserId !== userId) {
-      return NextResponse.json({ error: "権限がありません" }, { status: 403 });
     }
 
     if (userStatus === USER_STATUS.REJECTED) {
@@ -42,7 +37,7 @@ export async function POST(request: NextRequest) {
     // 進捗をupsert
     const { error: upsertError } = await supabase.from("user_progress").upsert(
       {
-        user_id: userId,
+        user_id: authUserId,
         content_id: contentId,
         is_completed: isCompleted,
         completed_at: isCompleted ? new Date().toISOString() : null,

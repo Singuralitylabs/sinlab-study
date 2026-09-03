@@ -24,9 +24,9 @@ function sanitizeCodeFiles(input: unknown): CodeFile[] {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { contentId, userId, submissionType, codeContent, codeFiles, url } = body;
+    const { contentId, submissionType, codeContent, codeFiles, url } = body;
 
-    if (!contentId || !userId || !submissionType) {
+    if (!contentId || !submissionType) {
       return NextResponse.json({ error: "必須パラメータが不足しています" }, { status: 400 });
     }
 
@@ -71,11 +71,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
     }
 
-    // ユーザーIDを検証
-    if (authUserId !== userId) {
-      return NextResponse.json({ error: "権限がありません" }, { status: 403 });
-    }
-
     if (userStatus === USER_STATUS.REJECTED) {
       return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
     }
@@ -92,7 +87,7 @@ export async function POST(request: NextRequest) {
     const { data: submission, error: insertError } = await supabase
       .from("submissions")
       .insert({
-        user_id: userId,
+        user_id: authUserId,
         content_id: contentId,
         submission_type: submissionType,
         code_content: storedCodeContent,

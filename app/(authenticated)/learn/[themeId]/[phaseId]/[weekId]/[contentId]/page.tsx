@@ -297,7 +297,6 @@ export default async function ContentPage({ params }: PageProps) {
                   </div>
                   <SubmissionForm
                     contentId={contentIdNum}
-                    userId={userId}
                     allowedSubmissionTypes={
                       (content.allowed_submission_types as "code" | "url" | "both") ?? "code"
                     }
@@ -313,7 +312,7 @@ export default async function ContentPage({ params }: PageProps) {
       {/* 完了ボタン */}
       {userId && (
         <div className="mb-6">
-          <CompleteButton contentId={contentIdNum} userId={userId} initialCompleted={isCompleted} />
+          <CompleteButton contentId={contentIdNum} initialCompleted={isCompleted} />
         </div>
       )}
 

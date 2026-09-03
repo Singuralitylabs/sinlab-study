@@ -410,18 +410,18 @@ flowchart TD
 ```json
 {
   "contentId": 1,
-  "userId": 1,
   "isCompleted": true
 }
 ```
 
+ユーザーIDはボディで受け取らず、`getServerAuth()` が返す認証ユーザーのIDのみを使用する（クライアント由来の値で認可判定しない）。
+
 **処理フロー**:
-1. リクエストボディのバリデーション（`contentId`, `userId` は必須）
+1. リクエストボディのバリデーション（`contentId` は必須）
 2. `getServerAuth()` による認証チェック（ステータス取得を含む）
-3. ユーザーID検証（認証ユーザーと一致するか）
-4. ステータスに基づく認可: `rejected` は403
-5. コンテンツ可視性チェック: **ステータスを問わず、対象 `contentId` が自分に可視でなければ403**（後述）
-6. `user_progress` テーブルへの upsert
+3. ステータスに基づく認可: `rejected` は403
+4. コンテンツ可視性チェック: **ステータスを問わず、対象 `contentId` が自分に可視でなければ403**（後述）
+5. `user_progress` テーブルへの upsert
    - 完了時: `completed_at` に現在日時を設定
    - 未完了時: `completed_at` を null に設定
 
@@ -438,7 +438,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 | 200 | 正常（完了状態を返却） |
 | 400 | バリデーションエラー |
 | 401 | 未認証 |
-| 403 | ユーザーID不一致 / `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
+| 403 | `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
 | 500 | サーバーエラー |
 
 ### 4.2 進捗集計
@@ -468,23 +468,23 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 ```json
 {
   "contentId": 1,
-  "userId": 1,
   "submissionType": "code",
   "codeContent": "function myFunction() { ... }",
   "url": null
 }
 ```
 
+ユーザーIDはボディで受け取らず、`getServerAuth()` が返す認証ユーザーのIDのみを使用する（4.1と同じ）。
+
 **処理フロー**:
 1. リクエストボディのバリデーション
-   - `contentId`, `userId`, `submissionType` は必須
+   - `contentId`, `submissionType` は必須
    - `code` タイプ: `codeContent` は必須
    - `url` タイプ: `url` は必須
 2. `getServerAuth()` による認証チェック（ステータス取得を含む）
-3. ユーザーID検証（認証ユーザーと一致するか）
-4. ステータスに基づく認可: `rejected` は403
-5. コンテンツ可視性チェック: ステータスを問わず、対象 `contentId` が自分に可視でなければ403（判定方法は4.1と同じ）
-6. `submissions` テーブルへの INSERT
+3. ステータスに基づく認可: `rejected` は403
+4. コンテンツ可視性チェック: ステータスを問わず、対象 `contentId` が自分に可視でなければ403（判定方法は4.1と同じ）
+5. `submissions` テーブルへの INSERT
 
 ### 5.3 提出方法のコンテンツ別制御
 
@@ -524,7 +524,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 | 200 | 正常（提出データを返却） |
 | 400 | バリデーションエラー |
 | 401 | 未認証 |
-| 403 | ユーザーID不一致 / `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
+| 403 | `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
 | 500 | サーバーエラー |
 
 ### 5.5 ヒント表示
