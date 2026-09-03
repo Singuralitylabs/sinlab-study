@@ -164,6 +164,18 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    // アップロード未完了・失敗のまま保存すると、実体の無い pdf_url を持つコンテンツができる。
+    // 送信ボタンの disabled だけでは Enter キー送信を防げないため、ここでも止める
+    if (isUploading) {
+      setMessage({ type: "error", text: "アップロードの完了をお待ちください" });
+      return;
+    }
+    if (contentType === "slide" && !pdfUrl.trim()) {
+      setMessage({ type: "error", text: "スライドPDFをアップロードしてください" });
+      return;
+    }
+
     setIsLoading(true);
     setMessage(null);
 
@@ -500,7 +512,16 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
 
           {/* 送信ボタン */}
           <div className="flex gap-3">
-            <Button type="submit" disabled={isLoading || !title || !weekId}>
+            <Button
+              type="submit"
+              disabled={
+                isLoading ||
+                isUploading ||
+                !title ||
+                !weekId ||
+                (contentType === "slide" && !pdfUrl.trim())
+              }
+            >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (

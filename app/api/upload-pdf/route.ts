@@ -13,8 +13,84 @@ const FOLDER_PATTERN = /^[a-z0-9-]+$/;
 // 命名規約に沿ったスライドファイル名（slide-NN.pdf）
 const SLIDE_FILE_PATTERN = /^slide-(\d+)\.pdf$/;
 
+// 存在確認の list() は search が部分一致のため複数件返り得る。完全一致で絞るまでの取得上限
+const EXISTENCE_CHECK_LIST_LIMIT = 100;
+
 /** 自動採番できる番号が安全な整数の範囲を超えたことを示す（一覧取得の失敗と区別する） */
 class SlideNumberExhaustedError extends Error {}
+
+/** アップロード後にオブジェクトの実体を確認できなかったことを示す（アップロード自体の失敗と区別する） */
+class SlideVerificationError extends Error {}
+
+/** オブジェクトキーをフォルダ名とファイル名に分割する（バケット直下は folder が空文字） */
+function splitObjectKey(key: string): { folder: string; name: string } {
+  const separatorIndex = key.lastIndexOf("/");
+  return separatorIndex === -1
+    ? { folder: "", name: key }
+    : { folder: key.slice(0, separatorIndex), name: key.slice(separatorIndex + 1) };
+}
+
+/** 先頭スラッシュの有無だけで不一致と誤判定しないようキーを正規化する */
+function normalizeObjectKey(key: string): string {
+  return key.replace(/^\/+/, "");
+}
+
+/**
+ * アップロード直後に対象オブジェクトの実体を照合する。
+ *
+ * getPublicUrl() はパスを文字列連結するだけで存在を保証しないため、
+ * 「成功したのに実体が無い」URLが learning_contents.pdf_url に保存されるのを防ぐ防波堤。
+ * 照合できない場合は必ず例外を投げる（呼び出し側は成功として扱ってはならない）。
+ *
+ * 照合に失敗してもアップロード済みオブジェクトの削除は行わない。
+ * 失敗原因が一時的な list() の失敗だった場合、正常なファイルを消してしまうため。
+ */
+async function verifyUploadedObject(
+  supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
+  uploadedPath: string | null | undefined,
+  expectedPath: string
+): Promise<void> {
+  // storage-js はエラー無しでも data を null にし得るため、path の存在と一致をまず確認する
+  if (!uploadedPath) {
+    throw new SlideVerificationError("アップロード結果にパスが含まれていません");
+  }
+  if (normalizeObjectKey(uploadedPath) !== normalizeObjectKey(expectedPath)) {
+    throw new SlideVerificationError(
+      `アップロード先が想定と異なります: expected=${expectedPath}, actual=${uploadedPath}`
+    );
+  }
+
+  const { folder, name } = splitObjectKey(expectedPath);
+  const { data, error } = await supabase.storage
+    .from(BUCKET_NAME)
+    .list(folder, { search: name, limit: EXISTENCE_CHECK_LIST_LIMIT });
+
+  if (error || !data) {
+    throw new SlideVerificationError(
+      `存在確認の一覧取得に失敗しました: ${error?.message ?? "unknown error"}`
+    );
+  }
+
+  // search は部分一致（slide-1.pdf の検索が slide-10.pdf に当たる）ため、必ず完全一致で判定する
+  if (!data.some((item) => item.name === name)) {
+    throw new SlideVerificationError(
+      `アップロードしたオブジェクトが見つかりません: ${expectedPath}`
+    );
+  }
+}
+
+/**
+ * 確定済みのオブジェクトキーから配信URLを組み立てる。
+ * 存在確認（verifyUploadedObject）と分離してあるため、#89 で署名付きURL配信へ移行する際は
+ * この関数を createSignedUrl() に差し替えるだけでよい。
+ */
+function buildSlideDeliveryUrl(
+  supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
+  objectKey: string
+): string {
+  const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(objectKey);
+  return data.publicUrl;
+}
 
 /**
  * 指定フォルダ内の既存 slide-NN.pdf を走査し、次に使う連番（最大値+1）を返す。
@@ -163,7 +239,7 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = new Uint8Array(arrayBuffer);
 
-    const { error: uploadError } = await supabase.storage
+    const { data: uploadData, error: uploadError } = await supabase.storage
       .from(BUCKET_NAME)
       .upload(filePath, buffer, {
         contentType: "application/pdf",
@@ -182,9 +258,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: message }, { status: 500 });
     }
 
-    const { data: urlData } = supabase.storage.from(BUCKET_NAME).getPublicUrl(filePath);
+    // 実体を確認できるまでURLを返さない（不正な pdf_url がコンテンツに保存されるのを防ぐ）
+    try {
+      await verifyUploadedObject(supabase, uploadData?.path, filePath);
+    } catch (verificationError) {
+      console.error("PDFアップロードの存在確認エラー:", verificationError);
+      return NextResponse.json(
+        { error: "アップロードの完了を確認できませんでした。時間をおいて再度お試しください" },
+        { status: 500 }
+      );
+    }
 
-    return NextResponse.json({ url: urlData.publicUrl, path: filePath });
+    return NextResponse.json({ url: buildSlideDeliveryUrl(supabase, filePath), path: filePath });
   } catch (error) {
     console.error("API エラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });

@@ -15,26 +15,67 @@ const maintainerAuth = {
 };
 
 interface MockStorageOptions {
+  /** 自動採番の list()（search なし）が返す既存ファイル */
   files?: { name: string }[];
   listError?: unknown;
   uploadError?: unknown;
+  /** upload() の戻り値 data（省略時はアップロード先パスをそのまま返す。null で「エラー無しの data: null」を再現） */
+  uploadData?: { path: string } | null;
+  /** 存在確認の list()（search あり）が返すファイル（省略時はアップロードしたファイルが存在する） */
+  verifyFiles?: { name: string }[];
+  verifyError?: unknown;
 }
 
 /** Storageのモックを作り、createAdminSupabaseClient() の戻り値として登録する */
-const mockStorage = ({
-  files = [],
-  listError = null,
-  uploadError = null,
-}: MockStorageOptions = {}) => {
-  const list = vi.fn().mockResolvedValue({ data: listError ? null : files, error: listError });
-  const upload = vi.fn().mockResolvedValue({ error: uploadError });
+const mockStorage = (options: MockStorageOptions = {}) => {
+  const {
+    files = [],
+    listError = null,
+    uploadError = null,
+    verifyFiles,
+    verifyError = null,
+  } = options;
+  let uploadedPath: string | null = null;
+
+  // 自動採番（search なし）と存在確認（search あり）で同じ list() を使い分ける
+  const list = vi
+    .fn()
+    .mockImplementation(async (_prefix: string, listOptions?: { search?: string }) => {
+      if (listOptions?.search === undefined) {
+        return { data: listError ? null : files, error: listError };
+      }
+      if (verifyError) {
+        return { data: null, error: verifyError };
+      }
+      const existing =
+        verifyFiles ?? (uploadedPath ? [{ name: uploadedPath.split("/").pop() }] : []);
+      // 本物の search は部分一致なので、モックでも部分一致で返す
+      return {
+        data: existing.filter((item) => item.name?.includes(listOptions.search as string)),
+        error: null,
+      };
+    });
+
+  const upload = vi.fn().mockImplementation(async (path: string) => {
+    uploadedPath = path;
+    if (uploadError) {
+      return { data: null, error: uploadError };
+    }
+    return { data: "uploadData" in options ? options.uploadData : { path }, error: null };
+  });
+
   const getPublicUrl = vi.fn().mockImplementation((path: string) => ({
     data: { publicUrl: `https://project.supabase.co/storage/v1/object/public/slides/${path}` },
   }));
-  const storage = { from: vi.fn().mockReturnValue({ list, upload, getPublicUrl }) };
+  const remove = vi.fn().mockResolvedValue({ data: [], error: null });
+  const storage = { from: vi.fn().mockReturnValue({ list, upload, getPublicUrl, remove }) };
   vi.mocked(createAdminSupabaseClient).mockResolvedValue({ storage } as never);
-  return { list, upload };
+  return { list, upload, getPublicUrl, remove };
 };
+
+/** 自動採番のための一覧取得（search なし）が呼ばれた回数 */
+const autoNumberingListCalls = (list: ReturnType<typeof vi.fn>) =>
+  list.mock.calls.filter(([, listOptions]) => listOptions?.search === undefined).length;
 
 const pdf = () => new File(["%PDF-1.4"], "slide.pdf", { type: "application/pdf" });
 
@@ -136,8 +177,12 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
       contentType: "application/pdf",
       upsert: true,
     });
-    // 番号指定時は自動採番の一覧取得を行わない
-    expect(list).not.toHaveBeenCalled();
+    // 番号指定時は自動採番の一覧取得を行わない（list はアップロード後の存在確認のみ）
+    expect(autoNumberingListCalls(list)).toBe(0);
+    expect(list).toHaveBeenCalledWith(
+      "gas-advanced",
+      expect.objectContaining({ search: expectedPath.split("/")[1] })
+    );
   });
 
   it("明示的に送られた空文字は400で拒否する（自動採番はフィールド省略時のみ）", async () => {
@@ -316,5 +361,107 @@ describe("POST /api/upload-pdf その他の入力検証", () => {
 
     expect(response.status).toBe(403);
     expect(upload).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/upload-pdf アップロード後の存在確認", () => {
+  const VERIFY_FAILED = "アップロードの完了を確認できませんでした。時間をおいて再度お試しください";
+
+  it("エラー無しで data: null が返った場合は失敗扱いとし、URLを返さない", async () => {
+    const { getPublicUrl } = mockStorage({ uploadData: null });
+
+    const response = await POST(request({ slideNumber: "1" }) as never);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: VERIFY_FAILED });
+    expect(getPublicUrl).not.toHaveBeenCalled();
+  });
+
+  it("upload() が想定と異なる path を返した場合は失敗扱いとし、URLを返さない", async () => {
+    const { getPublicUrl } = mockStorage({ uploadData: { path: "gas-advanced/slide-99.pdf" } });
+
+    const response = await POST(request({ slideNumber: "1" }) as never);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: VERIFY_FAILED });
+    expect(getPublicUrl).not.toHaveBeenCalled();
+  });
+
+  it("先頭スラッシュの有無だけの差は一致として扱う", async () => {
+    mockStorage({ uploadData: { path: "/gas-advanced/slide-01.pdf" } });
+
+    const response = await POST(request({ slideNumber: "1" }) as never);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      path: "gas-advanced/slide-01.pdf",
+      url: "https://project.supabase.co/storage/v1/object/public/slides/gas-advanced/slide-01.pdf",
+    });
+  });
+
+  it("存在確認の一覧取得に失敗した場合はURLを返さない", async () => {
+    const { getPublicUrl } = mockStorage({ verifyError: { message: "boom" } });
+
+    const response = await POST(request({ slideNumber: "1" }) as never);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: VERIFY_FAILED });
+    expect(getPublicUrl).not.toHaveBeenCalled();
+  });
+
+  it("存在確認で対象が見つからない場合はURLを返さない", async () => {
+    const { getPublicUrl } = mockStorage({ verifyFiles: [] });
+
+    const response = await POST(request({ slideNumber: "1" }) as never);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: VERIFY_FAILED });
+    expect(getPublicUrl).not.toHaveBeenCalled();
+  });
+
+  // search は部分一致のため、slide-1.pdf の検索が slide-10.pdf に当たる。完全一致で判定していることを担保する
+  it("部分一致の別ファイルしか無い場合は存在扱いにしない", async () => {
+    const { getPublicUrl } = mockStorage({ verifyFiles: [{ name: "slide-01.pdf.bak" }] });
+
+    const response = await POST(request({ slideNumber: "1" }) as never);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: VERIFY_FAILED });
+    expect(getPublicUrl).not.toHaveBeenCalled();
+  });
+
+  it("存在確認は対象フォルダとファイル名を指定して行う", async () => {
+    const { list } = mockStorage({ files: [{ name: "slide-04.pdf" }] });
+
+    const response = await POST(request() as never);
+
+    expect(response.status).toBe(200);
+    expect(list).toHaveBeenLastCalledWith(
+      "gas-advanced",
+      expect.objectContaining({ search: "slide-05.pdf" })
+    );
+  });
+
+  it("フォルダ未指定（バケット直下）でも存在確認を行う", async () => {
+    freezeNow(1723500000);
+    const { list } = mockStorage();
+
+    const response = await POST(request({ folder: null }) as never);
+
+    expect(response.status).toBe(200);
+    expect(list).toHaveBeenLastCalledWith(
+      "",
+      expect.objectContaining({ search: "1723500000_slide.pdf" })
+    );
+  });
+
+  // 一時的な list() 失敗で正常なファイルを消さないため、失敗時も削除はしない
+  it("存在確認に失敗してもアップロード済みオブジェクトは削除しない", async () => {
+    const { remove } = mockStorage({ verifyFiles: [] });
+
+    const response = await POST(request({ slideNumber: "1" }) as never);
+
+    expect(response.status).toBe(500);
+    expect(remove).not.toHaveBeenCalled();
   });
 });
