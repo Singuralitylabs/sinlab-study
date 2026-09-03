@@ -35,14 +35,12 @@ interface CodeFileInput {
 
 interface SubmissionFormProps {
   contentId: number;
-  userId: number;
   allowedSubmissionTypes: "code" | "url" | "both";
   codeLanguage: CodeLanguage;
 }
 
 export function SubmissionForm({
   contentId,
-  userId,
   allowedSubmissionTypes,
   codeLanguage,
 }: SubmissionFormProps) {
@@ -204,7 +202,6 @@ export function SubmissionForm({
         },
         body: JSON.stringify({
           contentId,
-          userId,
           submissionType,
           codeFiles:
             submissionType === "code"

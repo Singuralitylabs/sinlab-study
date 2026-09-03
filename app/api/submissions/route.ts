@@ -24,10 +24,13 @@ function sanitizeCodeFiles(input: unknown): CodeFile[] {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { contentId, userId, submissionType, codeContent, codeFiles, url } = body;
+    const { contentId, submissionType, codeContent, codeFiles, url } = body;
 
-    if (!contentId || !userId || !submissionType) {
-      return NextResponse.json({ error: "必須パラメータが不足しています" }, { status: 400 });
+    if (!Number.isInteger(contentId) || contentId <= 0) {
+      return NextResponse.json({ error: "contentIdは正の整数で指定してください" }, { status: 400 });
+    }
+    if (!submissionType) {
+      return NextResponse.json({ error: "submissionTypeは必須です" }, { status: 400 });
     }
 
     // 提出種別の許容値を明示的に検証（不正値はDBのCHECK制約違反→500になる前に400で弾く）
@@ -63,17 +66,12 @@ export async function POST(request: NextRequest) {
     }
 
     // 認証チェック
-    const { user, userId: authUserId, userStatus } = await getServerAuth();
+    const { user, userId, userStatus } = await getServerAuth();
     if (!user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     }
-    if (!authUserId) {
+    if (userId == null) {
       return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-
-    // ユーザーIDを検証
-    if (authUserId !== userId) {
-      return NextResponse.json({ error: "権限がありません" }, { status: 403 });
     }
 
     if (userStatus === USER_STATUS.REJECTED) {

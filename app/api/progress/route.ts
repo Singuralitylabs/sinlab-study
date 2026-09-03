@@ -7,24 +7,25 @@ import { getServerAuth } from "@/app/services/auth/server-auth";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { contentId, userId, isCompleted } = body;
+    const { contentId, isCompleted } = body;
 
-    if (!contentId || !userId) {
-      return NextResponse.json({ error: "contentIdとuserIdは必須です" }, { status: 400 });
+    if (!Number.isInteger(contentId) || contentId <= 0) {
+      return NextResponse.json({ error: "contentIdは正の整数で指定してください" }, { status: 400 });
+    }
+    if (typeof isCompleted !== "boolean") {
+      return NextResponse.json(
+        { error: "isCompletedはbooleanで指定してください" },
+        { status: 400 }
+      );
     }
 
     // 認証チェック
-    const { user, userId: authUserId, userStatus } = await getServerAuth();
+    const { user, userId, userStatus } = await getServerAuth();
     if (!user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     }
-    if (!authUserId) {
+    if (userId == null) {
       return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-
-    // ユーザーIDを検証
-    if (authUserId !== userId) {
-      return NextResponse.json({ error: "権限がありません" }, { status: 403 });
     }
 
     if (userStatus === USER_STATUS.REJECTED) {

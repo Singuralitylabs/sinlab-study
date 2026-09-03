@@ -410,18 +410,18 @@ flowchart TD
 ```json
 {
   "contentId": 1,
-  "userId": 1,
   "isCompleted": true
 }
 ```
 
+ユーザーIDはボディで受け取らず、`getServerAuth()` が返す認証ユーザーのIDのみを使用する（クライアント由来の値で認可判定しない）。
+
 **処理フロー**:
-1. リクエストボディのバリデーション（`contentId`, `userId` は必須）
+1. リクエストボディのバリデーション（`contentId` は正の整数、`isCompleted` は boolean で必須）
 2. `getServerAuth()` による認証チェック（ステータス取得を含む）
-3. ユーザーID検証（認証ユーザーと一致するか）
-4. ステータスに基づく認可: `rejected` は403
-5. コンテンツ可視性チェック: **ステータスを問わず、対象 `contentId` が自分に可視でなければ403**（後述）
-6. `user_progress` テーブルへの upsert
+3. ステータスに基づく認可: `rejected` は403
+4. コンテンツ可視性チェック: **ステータスを問わず、対象 `contentId` が自分に可視でなければ403**（後述）
+5. `user_progress` テーブルへの upsert
    - 完了時: `completed_at` に現在日時を設定
    - 未完了時: `completed_at` を null に設定
 
@@ -438,7 +438,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 | 200 | 正常（完了状態を返却） |
 | 400 | バリデーションエラー |
 | 401 | 未認証 |
-| 403 | ユーザーID不一致 / `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
+| 403 | `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
 | 500 | サーバーエラー |
 
 ### 4.2 進捗集計
@@ -468,23 +468,25 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 ```json
 {
   "contentId": 1,
-  "userId": 1,
   "submissionType": "code",
-  "codeContent": "function myFunction() { ... }",
+  "codeFiles": [{ "filename": "main.js", "language": "javascript", "content": "function myFunction() { ... }" }],
   "url": null
 }
 ```
 
+`codeFiles` は複数ファイル提出用の配列。単一ファイルの後方互換として `codeContent`（文字列）も受け付けるが、`codeFiles` が優先される（データモデルの `code_content` / `code_files` の使い分けはデータベース設計書を参照）。
+
+ユーザーIDはボディで受け取らず、`getServerAuth()` が返す認証ユーザーのIDのみを使用する（4.1と同じ）。
+
 **処理フロー**:
 1. リクエストボディのバリデーション
-   - `contentId`, `userId`, `submissionType` は必須
-   - `code` タイプ: `codeContent` は必須
+   - `contentId` は正の整数、`submissionType` は必須
+   - `code` タイプ: `codeFiles`（複数ファイル・単一ファイルとも可）または後方互換の `codeContent` のいずれかが必須
    - `url` タイプ: `url` は必須
 2. `getServerAuth()` による認証チェック（ステータス取得を含む）
-3. ユーザーID検証（認証ユーザーと一致するか）
-4. ステータスに基づく認可: `rejected` は403
-5. コンテンツ可視性チェック: ステータスを問わず、対象 `contentId` が自分に可視でなければ403（判定方法は4.1と同じ）
-6. `submissions` テーブルへの INSERT
+3. ステータスに基づく認可: `rejected` は403
+4. コンテンツ可視性チェック: ステータスを問わず、対象 `contentId` が自分に可視でなければ403（判定方法は4.1と同じ）
+5. `submissions` テーブルへの INSERT
 
 ### 5.3 提出方法のコンテンツ別制御
 
@@ -524,7 +526,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 | 200 | 正常（提出データを返却） |
 | 400 | バリデーションエラー |
 | 401 | 未認証 |
-| 403 | ユーザーID不一致 / `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
+| 403 | `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
 | 500 | サーバーエラー |
 
 ### 5.5 ヒント表示
@@ -791,7 +793,7 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 |:--|:--|:--|
 | バリデーションエラー | 400 | リクエストボディの必須項目チェック |
 | 認証エラー | 401 | Supabase Auth のセッション不在 |
-| 認可エラー | 403 | ユーザーID不一致（他人のデータ操作を防止） |
+| 認可エラー | 403 | `rejected` ユーザー / 対象データが自分に不可視・操作不可（ロール不足を含む） |
 | Supabase エラー | 500 | DB操作失敗（サーバーログに出力） |
 | 予期しないエラー | 500 | try-catch による一括ハンドリング |
 

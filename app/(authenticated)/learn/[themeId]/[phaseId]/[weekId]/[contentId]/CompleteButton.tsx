@@ -6,11 +6,10 @@ import { Button } from "@/components/ui/button";
 
 interface CompleteButtonProps {
   contentId: number;
-  userId: number;
   initialCompleted: boolean;
 }
 
-export function CompleteButton({ contentId, userId, initialCompleted }: CompleteButtonProps) {
+export function CompleteButton({ contentId, initialCompleted }: CompleteButtonProps) {
   const [isCompleted, setIsCompleted] = useState(initialCompleted);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -25,7 +24,6 @@ export function CompleteButton({ contentId, userId, initialCompleted }: Complete
         },
         body: JSON.stringify({
           contentId,
-          userId,
           isCompleted: !isCompleted,
         }),
       });
