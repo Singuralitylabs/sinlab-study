@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { MEMBERSHIP_TYPES, USER_ROLE, USER_ROLES, USER_STATUS } from "@/app/constants/user";
-import { approveUser, changeUserRole, rejectUser } from "@/app/services/api/admin-server";
+import {
+  approveUser,
+  changeMembershipType,
+  changeUserRole,
+  fetchUserIdsWithStripeSubscription,
+  rejectUser,
+} from "@/app/services/api/admin-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 export async function PATCH(request: Request) {
@@ -27,11 +33,67 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "userId と action は必須です" }, { status: 400 });
     }
 
-    if (action !== "approve" && action !== "reject" && action !== "change_role") {
+    if (
+      action !== "approve" &&
+      action !== "reject" &&
+      action !== "change_role" &&
+      action !== "change_membership"
+    ) {
       return NextResponse.json(
-        { error: "action は approve / reject / change_role を指定してください" },
+        {
+          error: "action は approve / reject / change_role / change_membership を指定してください",
+        },
         { status: 400 }
       );
+    }
+
+    if (action === "change_membership") {
+      if (!MEMBERSHIP_TYPES.includes(membershipType)) {
+        return NextResponse.json(
+          { error: `membershipType は ${MEMBERSHIP_TYPES.join(" / ")} を指定してください` },
+          { status: 400 }
+        );
+      }
+
+      // Stripe契約中ユーザーは、種別変更でmembership_typeと課金状態が食い違うのを防ぐため
+      // Stripe側で解約するまで変更不可とする（着手前提の決定）。取得に失敗した場合は
+      // 契約状況を判定できないためフェイルクローズで変更不可とする。
+      const { data: subscribedUserIds, error: subscriptionsError } =
+        await fetchUserIdsWithStripeSubscription();
+      if (subscriptionsError) {
+        return NextResponse.json(
+          {
+            error:
+              "Stripe契約状況を取得できなかったため会員種別を変更できません。時間をおいて再度お試しください",
+          },
+          { status: 503 }
+        );
+      }
+      if ((subscribedUserIds ?? []).includes(userId)) {
+        return NextResponse.json(
+          {
+            error:
+              "このユーザーはStripeサブスク契約中のため会員種別を変更できません。Stripe側で解約してから変更してください",
+          },
+          { status: 409 }
+        );
+      }
+
+      const { error, updated } = await changeMembershipType(userId, membershipType);
+      if (error) {
+        return NextResponse.json({ error: "会員種別更新に失敗しました" }, { status: 500 });
+      }
+      // 0行更新 = 対象が active以外・存在しない・削除済みのいずれか
+      if (!updated) {
+        return NextResponse.json(
+          {
+            error:
+              "会員種別を変更できません（active以外のユーザーか、存在しません）。画面を更新して最新の状態を確認してください",
+          },
+          { status: 409 }
+        );
+      }
+      return NextResponse.json({ success: true, action });
     }
 
     if (action === "change_role") {
@@ -72,7 +134,7 @@ export async function PATCH(request: Request) {
       if (error) {
         return NextResponse.json({ error: "ステータス更新に失敗しました" }, { status: 500 });
       }
-      // 0行更新 = 既に承認済み（再承認による会員種別の意図しない上書きを防止。種別変更は #95 で対応）、
+      // 0行更新 = 既に承認済み（再承認による会員種別の意図しない上書きを防止。種別変更は change_membership で行う）、
       // または存在しない・削除済みユーザー
       if (!updated) {
         return NextResponse.json(

@@ -153,6 +153,29 @@ export function UserManagementTable({
     }
   };
 
+  const handleMembershipTypeChange = async (userId: number, membershipType: MembershipType) => {
+    setLoading(userId, true);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, action: "change_membership", membershipType }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || "会員種別の変更に失敗しました");
+        return;
+      }
+
+      router.refresh();
+    } catch {
+      alert("エラーが発生しました");
+    } finally {
+      setLoading(userId, false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* フィルター */}
@@ -211,6 +234,10 @@ export function UserManagementTable({
                 const statusInfo = STATUS_LABELS[user.status];
                 const isLoading = loadingUserIds.has(user.id);
                 const isAdmin = user.role === USER_ROLE.ADMIN;
+                // Stripe契約中(または契約状況を取得できず判定不能)の場合は会員種別変更を無効化する
+                // （membership_type と課金状態の不整合を防ぐ。フェイルクローズ）
+                const isMembershipLocked =
+                  subscribedUserIdSet.has(user.id) || subscriptionDataUnavailable;
 
                 return (
                   <tr key={user.id} className="border-b last:border-b-0">
@@ -245,18 +272,46 @@ export function UserManagementTable({
                       <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-1">
-                        {user.membership_type ? (
-                          <Badge variant="outline">
-                            {USER_MEMBERSHIP_LABELS[user.membership_type]}
-                          </Badge>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                        {subscribedUserIdSet.has(user.id) && (
-                          <Badge variant="secondary">サブスク契約中</Badge>
-                        )}
-                      </div>
+                      {isLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-1">
+                          {user.status === USER_STATUS.ACTIVE && user.membership_type ? (
+                            <select
+                              value={user.membership_type}
+                              disabled={isMembershipLocked}
+                              title={
+                                isMembershipLocked
+                                  ? "Stripe契約中のため変更できません。Stripe側で解約後に変更してください。"
+                                  : undefined
+                              }
+                              onChange={(e) =>
+                                handleMembershipTypeChange(
+                                  user.id,
+                                  e.target.value as MembershipType
+                                )
+                              }
+                              aria-label={`${user.display_name} の会員種別`}
+                              className={`${SELECT_CLASS} w-36`}
+                            >
+                              {MEMBERSHIP_TYPES.map((type) => (
+                                <option key={type} value={type}>
+                                  {USER_MEMBERSHIP_LABELS[type]}
+                                </option>
+                              ))}
+                            </select>
+                          ) : user.membership_type ? (
+                            <Badge variant="outline">
+                              {USER_MEMBERSHIP_LABELS[user.membership_type]}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                          {subscribedUserIdSet.has(user.id) && (
+                            <Badge variant="secondary">サブスク契約中</Badge>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {user.created_at

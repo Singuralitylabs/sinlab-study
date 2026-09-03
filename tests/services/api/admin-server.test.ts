@@ -5,6 +5,7 @@ vi.mock("@/app/services/api/supabase-server");
 
 import {
   approveUser,
+  changeMembershipType,
   changeUserRole,
   fetchManageCounts,
   fetchStudentsProgress,
@@ -359,6 +360,54 @@ describe("changeUserRole", () => {
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
     const result = await changeUserRole(3, "member");
+
+    expect(result.error).toEqual(dbError);
+    expect(result.updated).toBe(false);
+  });
+});
+
+describe("changeMembershipType", () => {
+  it("active ユーザーの membership_type を更新する（status は書き換えない）", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: [{ id: 3 }], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await changeMembershipType(3, "general");
+
+    expect(result.error).toBeNull();
+    expect(result.updated).toBe(true);
+    const builder = mockClient.from.mock.results[0].value;
+    const updatePayload = builder.update.mock.calls[0][0];
+    expect(updatePayload).toEqual(expect.objectContaining({ membership_type: "general" }));
+    expect(updatePayload).not.toHaveProperty("status");
+    expect(builder.eq).toHaveBeenCalledWith("id", 3);
+    // service_role はRLSを迂回するため is_deleted=false をクエリ自体に必須で課す
+    expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
+    // 対象は active ユーザーのみ（docs/specification.md 2.7）
+    expect(builder.eq).toHaveBeenCalledWith("status", "active");
+    expect(builder.select).toHaveBeenCalledWith("id");
+  });
+
+  it("対象が active以外・存在しない・削除済みのいずれかで0行更新の場合、updated: false を返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: [], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await changeMembershipType(3, "community");
+
+    expect(result.error).toBeNull();
+    expect(result.updated).toBe(false);
+  });
+
+  it("更新に失敗した場合はエラーを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: null, error: dbError } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await changeMembershipType(3, "community");
 
     expect(result.error).toEqual(dbError);
     expect(result.updated).toBe(false);
