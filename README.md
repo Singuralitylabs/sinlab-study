@@ -63,6 +63,8 @@ bunx supabase db push
 bun dev
 ```
 
+`supabase/migrations/` はCLIの走査仕様に合わせてサブディレクトリを持たないフラット構成にしている（連番ファイル名で適用順を表現）。既存環境からの移行時の注意点は [`docs/database.md`](./docs/database.md) 7章を参照。
+
 `http://localhost:3000` でアクセス可能。
 
 ### 主要なスクリプト

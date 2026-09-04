@@ -369,7 +369,7 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 
 **権限判定**: `app/services/auth/permissions.ts` の `checkContentPermissions()` を用いる（admin / maintainer が true）。ページコンポーネント側ではロール分岐を行わず、`learning-server.ts` の各取得関数に `getServerAuth()` の `userRole` を渡すことで、取得関数の内部だけで判定する。
 
-**RLS**: `02_rls/002_consolidate_rls_policies.sql` で、`learning_themes` / `learning_phases` / `learning_weeks` / `learning_contents` の SELECT ポリシーはいずれも `(is_published = true AND is_deleted = false) OR (select get_user_role()) IN ('admin', 'maintainer')` であり、admin / maintainer への未公開行の許可は本機能追加前から既に成立している。今回変更したのはアプリ層（`learning-server.ts` が独自に課していた `is_published = true` の絞り込み）のみ。
+**RLS**: `012_consolidate_rls_policies.sql` で、`learning_themes` / `learning_phases` / `learning_weeks` / `learning_contents` の SELECT ポリシーはいずれも `(is_published = true AND is_deleted = false) OR (select get_user_role()) IN ('admin', 'maintainer')` であり、admin / maintainer への未公開行の許可は本機能追加前から既に成立している。今回変更したのはアプリ層（`learning-server.ts` が独自に課していた `is_published = true` の絞り込み）のみ。
 
 **アプリ層の変更**: `fetchPublishedThemes` / `fetchThemeById` / `fetchPhasesByThemeId` / `fetchPhaseById` / `fetchWeekById` / `fetchContentById` / `fetchWeeksWithContentsByPhaseId` はいずれも `userRole` 引数（既定 `null`）を取り、`checkContentPermissions(userRole)` が true の場合のみ `is_published` の絞り込みを外す（`is_deleted = false` は常に維持）。member / お試しユーザーの取得結果・RLSの適用範囲は変更しない。
 
