@@ -154,8 +154,16 @@ export function ContentForm({
     mode === "create" && themes.some((t) => String(t.id) === initialWeekSelection?.themeId)
       ? (initialWeekSelection?.themeId ?? "")
       : "";
+  // フェーズは選択肢に存在するだけでなく、採用済みのテーマ配下であることも検証する
+  // （例: ?theme=1&phase=2 のように、実在はするが互いに不整合なクエリを渡された場合、
+  // テーマ1を表示したままテーマ2配下の週が絞り込まれてしまうのを防ぐ）
   const initialPhaseIdFallback =
-    mode === "create" && phases.some((p) => String(p.id) === initialWeekSelection?.phaseId)
+    mode === "create" &&
+    phases.some(
+      (p) =>
+        String(p.id) === initialWeekSelection?.phaseId &&
+        (!initialThemeIdFallback || String(p.themeId) === initialThemeIdFallback)
+    )
       ? (initialWeekSelection?.phaseId ?? "")
       : "";
 
