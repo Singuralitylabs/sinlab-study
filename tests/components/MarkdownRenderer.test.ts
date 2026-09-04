@@ -29,9 +29,9 @@ describe("MarkdownRenderer", () => {
     const html = renderToStaticMarkup(createElement(MarkdownRenderer, { content }));
 
     expect(html).not.toMatch(/<div class="a">/);
-    expect(html).toContain("&lt;");
-    expect(html).toContain("&quot;a&quot;");
-    expect(html).toContain("hi");
+    // ハイライトによりhljs-*のspanタグが挿入されるため、タグを除去した上で
+    // エスケープ済みの内容が欠落・順序入れ替えなく完全に一致することを確認する
+    expect(html.replace(/<[^>]+>/g, "")).toContain("&lt;div class=&quot;a&quot;&gt;hi&lt;/div&gt;");
   });
 
   it("言語指定のあるコードフェンスはシンタックスハイライトのクラスが付与される", () => {
@@ -66,8 +66,18 @@ describe("MarkdownRenderer", () => {
 
     const html = renderToStaticMarkup(createElement(MarkdownRenderer, { content }));
 
-    expect(html).not.toContain("hljs-keyword");
-    expect(html).toContain("puts");
+    // hljsクラスが一切付与されず、`<code class="language-ruby">`のプレーン表示のままであること
+    expect(html).not.toContain("hljs");
+    expect(html).toContain('<code class="language-ruby">puts &quot;hi&quot;\n</code>');
+  });
+
+  it("xmlはhtmlの別名としてハイライトされる", () => {
+    const content = '```xml\n<a href="x">y</a>\n```';
+
+    const html = renderToStaticMarkup(createElement(MarkdownRenderer, { content }));
+
+    expect(html).toContain('class="hljs language-xml"');
+    expect(html).toContain("hljs-tag");
   });
 
   it("インラインコードにはハイライトのクラスが付与されず、コードブロックと区別される", () => {

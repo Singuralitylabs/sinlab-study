@@ -8,6 +8,7 @@ import python from "highlight.js/lib/languages/python";
 import typescript from "highlight.js/lib/languages/typescript";
 import html from "highlight.js/lib/languages/xml";
 import { createLowlight } from "lowlight";
+import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
@@ -28,6 +29,7 @@ import { cn } from "@/lib/utils";
 // GAS（Google Apps Script）はJavaScriptベースのため、javascriptの別名として扱う。
 const lowlight = createLowlight({ html, css, javascript, typescript, python, json, bash });
 lowlight.registerAlias({
+  html: ["xml"],
   javascript: ["js", "gas"],
   typescript: ["ts"],
   bash: ["sh", "shell"],
@@ -64,17 +66,25 @@ function rehypeHighlightSubset() {
       }
 
       const language = getFenceLanguage(node);
-      if (!language || !lowlight.registered(language)) {
+      if (
+        !language ||
+        !lowlight.registered(language) ||
+        !Array.isArray(node.properties.className)
+      ) {
         return;
       }
 
-      const result = lowlight.highlight(language, toText(node, { whitespace: "pre" }), {
-        prefix: "hljs-",
-      });
-
-      if (!Array.isArray(node.properties.className)) {
-        node.properties.className = [];
+      let result: ReturnType<typeof lowlight.highlight>;
+      try {
+        result = lowlight.highlight(language, toText(node, { whitespace: "pre" }), {
+          prefix: "hljs-",
+        });
+      } catch {
+        // highlight.js内部の文法バグ等で例外が投げられた場合、ページ全体を巻き込んで
+        // 落ちないよう、ハイライトを諦めてプレーン表示のまま描画する
+        return;
       }
+
       node.properties.className.unshift("hljs");
       // lowlightの出力は常にhast要素・テキストのみ（DoctypeやCommentは生成されない）
       node.children = result.children as ElementContent[];
@@ -87,7 +97,12 @@ interface MarkdownRendererProps {
   className?: string;
 }
 
-export function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
+// content・classNameが変化しない限り再描画・再ハイライトをスキップする
+// （AIReviewDisplayでは、フォームの他状態が更新されるたびに親が再描画されるため）
+export const MarkdownRenderer = memo(function MarkdownRenderer({
+  content,
+  className,
+}: MarkdownRendererProps) {
   return (
     <div className={cn("prose prose-stone dark:prose-invert max-w-none", className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlightSubset]}>
@@ -95,4 +110,4 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
       </ReactMarkdown>
     </div>
   );
-}
+});
