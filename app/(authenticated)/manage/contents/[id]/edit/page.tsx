@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
+import { deriveWeekSelectOptions } from "@/app/lib/content-filtering";
 import { fetchAllWeeks, fetchContentByIdForAdmin } from "@/app/services/api/admin-server";
 import { ContentForm } from "../../ContentForm";
 
@@ -24,6 +25,8 @@ export default async function EditContentPage({ params }: PageProps) {
     notFound();
   }
 
+  const filterOptions = deriveWeekSelectOptions(weeks ?? []);
+
   return (
     <div className="max-w-3xl mx-auto">
       <PageTitle
@@ -33,7 +36,13 @@ export default async function EditContentPage({ params }: PageProps) {
           { label: content.title },
         ]}
       />
-      <ContentForm weeks={weeks ?? []} initialData={content} mode="edit" />
+      <ContentForm
+        themes={filterOptions.themes}
+        phases={filterOptions.phases}
+        weeks={filterOptions.weeks}
+        initialData={content}
+        mode="edit"
+      />
     </div>
   );
 }

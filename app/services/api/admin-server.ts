@@ -1,6 +1,7 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { sortWeeksByHierarchy } from "@/app/lib/content-grouping";
 import {
   fetchStripeSubscriptionByUserId,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
@@ -12,6 +13,7 @@ import type {
   LearningPhaseWithTheme,
   LearningTheme,
   LearningWeek,
+  LearningWeekWithPhase,
   MembershipType,
   UserType,
 } from "@/app/types";
@@ -308,23 +310,22 @@ export async function deletePhase(id: number): Promise<{ error: PostgrestError |
 // =====================================================
 
 export async function fetchAllWeeks(): Promise<{
-  data: (LearningWeek & { phase: LearningPhase | null })[] | null;
+  data: LearningWeekWithPhase[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_weeks")
-    .select("*, phase:learning_phases(*)")
-    .eq("is_deleted", false)
-    .order("display_order");
+    .select("*, phase:learning_phases(*, theme:learning_themes(*))")
+    .eq("is_deleted", false);
 
   if (error) {
     console.error("週一覧取得エラー:", error.message);
     return { data: null, error };
   }
 
-  return { data, error: null };
+  return { data: sortWeeksByHierarchy(data), error: null };
 }
 
 export async function fetchWeekById(id: number): Promise<{

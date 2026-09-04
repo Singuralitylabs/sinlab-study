@@ -1,4 +1,4 @@
-import type { ContentType, LearningContentWithWeek } from "@/app/types";
+import type { ContentType, LearningContentWithWeek, LearningWeekWithPhase } from "@/app/types";
 
 const UNCLASSIFIED_LABEL = "未分類";
 
@@ -84,6 +84,33 @@ export function sortContentsByHierarchy(
 
     // 全階層のdisplay_orderが同値（欠落含む）の場合でも比較関数は常に数値を
     // 返す必要があるため、idで確定的にタイブレークする
+    return a.id - b.id;
+  });
+}
+
+/**
+ * テーマ→フェーズ→週の各 display_order 順に週を並び替える。
+ * PostgREST はネストしたテーブルのカラムでトップレベルの並び替えができないため、
+ * クライアント側（この純粋関数）で階層順ソートを行う。`sortContentsByHierarchy` と
+ * 同じ規則（display_order 欠落は末尾、id タイブレーク）に揃える。
+ */
+export function sortWeeksByHierarchy(weeks: LearningWeekWithPhase[]): LearningWeekWithPhase[] {
+  return [...weeks].sort((a, b) => {
+    const themeCompare = compareOrder(
+      orderOrLast(a.phase?.theme?.display_order),
+      orderOrLast(b.phase?.theme?.display_order)
+    );
+    if (themeCompare !== 0) return themeCompare;
+
+    const phaseCompare = compareOrder(
+      orderOrLast(a.phase?.display_order),
+      orderOrLast(b.phase?.display_order)
+    );
+    if (phaseCompare !== 0) return phaseCompare;
+
+    const weekCompare = compareOrder(orderOrLast(a.display_order), orderOrLast(b.display_order));
+    if (weekCompare !== 0) return weekCompare;
+
     return a.id - b.id;
   });
 }

@@ -1,5 +1,5 @@
 import { CONTENT_TYPES } from "@/app/constants/content";
-import type { ContentType, LearningContentWithWeek } from "@/app/types";
+import type { ContentType, LearningContentWithWeek, LearningWeekWithPhase } from "@/app/types";
 
 export function isContentType(value: string | undefined): value is ContentType {
   return CONTENT_TYPES.includes(value as ContentType);
@@ -60,6 +60,35 @@ export function deriveFilterOptions(contents: LearningContentWithWeek[]): Conten
     themes: [...themes.values()],
     phases: [...phases.values()],
     weeks: [...weeks.values()],
+  };
+}
+
+/**
+ * 週一覧（join結果）からテーマ→フェーズ→週の連動セレクトの選択肢を導出する。追加フェッチは行わない。
+ * 呼び出し前に sortWeeksByHierarchy を通しておくことで、選択肢もテーマ→フェーズ→週の
+ * 階層順になる。`learning_weeks.phase_id` は NOT NULL のため、週は常に選択肢に含める
+ * （`deriveFilterOptions` と異なり「週未設定」の除外は発生しない）。
+ */
+export function deriveWeekSelectOptions(weeks: LearningWeekWithPhase[]): ContentFilterOptions {
+  const themes = new Map<number, ThemeFilterOption>();
+  const phases = new Map<number, PhaseFilterOption>();
+
+  for (const week of weeks) {
+    const phase = week.phase;
+    const theme = phase?.theme;
+
+    if (theme && !themes.has(theme.id)) {
+      themes.set(theme.id, { id: theme.id, name: theme.name });
+    }
+    if (phase && !phases.has(phase.id)) {
+      phases.set(phase.id, { id: phase.id, name: phase.name, themeId: phase.theme_id });
+    }
+  }
+
+  return {
+    themes: [...themes.values()],
+    phases: [...phases.values()],
+    weeks: weeks.map((week) => ({ id: week.id, name: week.name, phaseId: week.phase_id })),
   };
 }
 

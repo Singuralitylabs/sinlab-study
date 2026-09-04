@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { groupContentsByWeek, sortContentsByHierarchy } from "@/app/lib/content-grouping";
+import {
+  groupContentsByWeek,
+  sortContentsByHierarchy,
+  sortWeeksByHierarchy,
+} from "@/app/lib/content-grouping";
 import type { LearningContentWithWeek, LearningWeekWithPhase } from "@/app/types";
 
 function makeWeek(
@@ -193,6 +197,51 @@ describe("sortContentsByHierarchy", () => {
     sortContentsByHierarchy(original);
 
     expect(original.map((c) => c.id)).toEqual([1, 2]);
+  });
+});
+
+describe("sortWeeksByHierarchy", () => {
+  it("テーマ→フェーズ→週の display_order 順に並び替える", () => {
+    // week3(theme2配下) → week2・week1(theme1配下、週のdisplay_orderは2→1の逆順で並べる)
+    const sorted = sortWeeksByHierarchy([week3, week1, week2]);
+
+    expect(sorted.map((w) => w.id)).toEqual([2, 1, 3]);
+  });
+
+  it("フェーズの display_order が DB 上 NULL でも末尾にまとめる", () => {
+    const phaseWithNullOrder = {
+      ...phase1,
+      id: 4,
+      display_order: null as unknown as number,
+    };
+    const weekWithNullPhaseOrder = makeWeek({
+      id: 5,
+      phase_id: 4,
+      name: "週5",
+      display_order: 1,
+      phase: phaseWithNullOrder,
+    });
+
+    const sorted = sortWeeksByHierarchy([weekWithNullPhaseOrder, week1]);
+
+    expect(sorted.map((w) => w.id)).toEqual([1, 5]);
+  });
+
+  it("階層情報がすべて欠落する場合はNaNにならずidでタイブレークする", () => {
+    const weekA = makeWeek({ id: 2, phase_id: 99, display_order: null as unknown as number });
+    const weekB = makeWeek({ id: 1, phase_id: 99, display_order: null as unknown as number });
+
+    const sorted = sortWeeksByHierarchy([weekA, weekB]);
+
+    expect(sorted.map((w) => w.id)).toEqual([1, 2]);
+  });
+
+  it("元の配列を破壊しない", () => {
+    const original = [week1, week2];
+
+    sortWeeksByHierarchy(original);
+
+    expect(original.map((w) => w.id)).toEqual([1, 2]);
   });
 });
 
