@@ -61,7 +61,7 @@ export async function fetchThemeById(id: number): Promise<{
 
 export async function createTheme(theme: {
   name: string;
-  description?: string;
+  description?: string | null;
   display_order?: number;
   is_published?: boolean;
   image_url?: string | null;
@@ -218,7 +218,7 @@ export async function fetchPhaseById(id: number): Promise<{
 export async function createPhase(phase: {
   theme_id: number;
   name: string;
-  description?: string;
+  description?: string | null;
   display_order?: number;
   is_published?: boolean;
 }): Promise<{ data: LearningPhase | null; error: PostgrestError | null }> {
@@ -348,7 +348,7 @@ export async function fetchWeekById(id: number): Promise<{
 export async function createWeek(week: {
   phase_id: number;
   name: string;
-  description?: string;
+  description?: string | null;
   display_order?: number;
   is_published?: boolean;
 }): Promise<{ data: LearningWeek | null; error: PostgrestError | null }> {
@@ -455,15 +455,15 @@ export async function createContent(content: {
   week_id: number;
   title: string;
   content_type: "video" | "text" | "exercise" | "slide";
-  video_url?: string;
-  text_content?: string;
-  description?: string;
-  exercise_instructions?: string;
-  hint?: string;
-  reference_answer?: string;
+  video_url?: string | null;
+  text_content?: string | null;
+  description?: string | null;
+  exercise_instructions?: string | null;
+  hint?: string | null;
+  reference_answer?: string | null;
   allowed_submission_types?: "code" | "url" | "both";
   code_language?: CodeLanguage;
-  pdf_url?: string;
+  pdf_url?: string | null;
   display_order?: number;
   is_published?: boolean;
   is_open_to_trial?: boolean;

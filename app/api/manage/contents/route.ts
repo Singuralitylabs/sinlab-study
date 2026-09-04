@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
 import { createContent } from "@/app/services/api/admin-server";
+import { ContentCreateSchema, validateRequest } from "@/app/services/api/schemas";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -20,7 +21,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
     }
 
-    const body = await request.json();
+    const validation = await validateRequest(request, ContentCreateSchema);
+    if (!validation.success) {
+      return validation.response;
+    }
     const {
       title,
       week_id,
@@ -37,11 +41,7 @@ export async function POST(request: NextRequest) {
       display_order,
       is_published,
       is_open_to_trial,
-    } = body;
-
-    if (!title || !week_id || !content_type) {
-      return NextResponse.json({ error: "必須パラメータが不足しています" }, { status: 400 });
-    }
+    } = validation.data;
 
     const { data, error } = await createContent({
       title,

@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
 import { deletePhase, updatePhase } from "@/app/services/api/admin-server";
+import { PhaseUpdateSchema, validateRequest } from "@/app/services/api/schemas";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -24,8 +25,13 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (Number.isNaN(phaseId)) {
       return NextResponse.json({ error: "無効なIDです" }, { status: 400 });
     }
-    const body = await request.json();
-    const { theme_id, name, description, display_order, is_published } = body;
+
+    const validation = await validateRequest(request, PhaseUpdateSchema);
+    if (!validation.success) {
+      return validation.response;
+    }
+    const { theme_id, name, description, display_order, is_published } = validation.data;
+
     const { error } = await updatePhase(phaseId, {
       theme_id,
       name,

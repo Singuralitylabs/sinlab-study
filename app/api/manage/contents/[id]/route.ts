@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
 import { deleteContent, updateContent } from "@/app/services/api/admin-server";
+import { ContentUpdateSchema, validateRequest } from "@/app/services/api/schemas";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -26,7 +27,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: "無効なIDです" }, { status: 400 });
     }
 
-    const body = await request.json();
+    const validation = await validateRequest(request, ContentUpdateSchema);
+    if (!validation.success) {
+      return validation.response;
+    }
     const {
       title,
       week_id,
@@ -43,7 +47,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       display_order,
       is_published,
       is_open_to_trial,
-    } = body;
+    } = validation.data;
 
     const { error } = await updateContent(contentId, {
       title,

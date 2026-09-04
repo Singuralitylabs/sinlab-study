@@ -1,11 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  MEMBERSHIP_TYPES,
-  USER_MEMBERSHIP,
-  USER_ROLE,
-  USER_ROLES,
-  USER_STATUS,
-} from "@/app/constants/user";
+import { USER_MEMBERSHIP, USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import {
   approveUser,
   changeMembershipType,
@@ -13,6 +7,7 @@ import {
   isUserCurrentlySubscribed,
   rejectUser,
 } from "@/app/services/api/admin-server";
+import { AdminUserActionSchema, validateRequest } from "@/app/services/api/schemas";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 export async function PATCH(request: Request) {
@@ -32,43 +27,12 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "権限がありません" }, { status: 403 });
     }
 
-    const body = await request.json();
-    const { userId, action, role, membershipType } = body;
-
-    if (!userId || !action) {
-      return NextResponse.json({ error: "userId と action は必須です" }, { status: 400 });
+    const validation = await validateRequest(request, AdminUserActionSchema);
+    if (!validation.success) {
+      return validation.response;
     }
-
-    // userId が文字列で送られると、後続のStripe契約中判定・DB更新の対象特定がずれうるため
-    // ここで明示的に整数であることを検証する
-    if (!Number.isInteger(userId)) {
-      return NextResponse.json({ error: "userId は整数で指定してください" }, { status: 400 });
-    }
-
-    if (
-      action !== "approve" &&
-      action !== "reject" &&
-      action !== "change_role" &&
-      action !== "change_membership"
-    ) {
-      return NextResponse.json(
-        {
-          error: "action は approve / reject / change_role / change_membership を指定してください",
-        },
-        { status: 400 }
-      );
-    }
-
-    // 承認・会員種別変更はともに membershipType を要求するため、バリデーションを共通化する
-    if (
-      (action === "approve" || action === "change_membership") &&
-      !MEMBERSHIP_TYPES.includes(membershipType)
-    ) {
-      return NextResponse.json(
-        { error: `membershipType は ${MEMBERSHIP_TYPES.join(" / ")} を指定してください` },
-        { status: 400 }
-      );
-    }
+    const { data } = validation;
+    const { userId, action } = data;
 
     // Stripe契約中ユーザーは、membership_typeと課金状態が食い違わないよう一般有料会員以外への
     // 設定を拒否する（着手前提の決定）。承認・会員種別変更の両アクションに共通のルールとする
@@ -80,12 +44,12 @@ export async function PATCH(request: Request) {
     //   フェイルクローズで拒否する
     // - approve は主目的がお試しユーザーの承認であり対象の大半はStripe非契約のため、
     //   Stripe側の一時的な取得失敗で承認フロー全体を止めない（契約中と判定できた場合のみガードする）
-    if (action === "approve" || action === "change_membership") {
+    if (data.action === "approve" || data.action === "change_membership") {
       const { data: isSubscribed, error: subscriptionError } =
         await isUserCurrentlySubscribed(userId);
 
       if (subscriptionError) {
-        if (action === "change_membership") {
+        if (data.action === "change_membership") {
           return NextResponse.json(
             {
               error:
@@ -94,7 +58,7 @@ export async function PATCH(request: Request) {
             { status: 503 }
           );
         }
-      } else if (isSubscribed && membershipType !== USER_MEMBERSHIP.GENERAL) {
+      } else if (isSubscribed && data.membershipType !== USER_MEMBERSHIP.GENERAL) {
         return NextResponse.json(
           {
             error:
@@ -105,8 +69,8 @@ export async function PATCH(request: Request) {
       }
     }
 
-    if (action === "change_membership") {
-      const { error, updated } = await changeMembershipType(userId, membershipType);
+    if (data.action === "change_membership") {
+      const { error, updated } = await changeMembershipType(userId, data.membershipType);
       if (error) {
         return NextResponse.json({ error: "会員種別更新に失敗しました" }, { status: 500 });
       }
@@ -123,15 +87,8 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ success: true, action });
     }
 
-    if (action === "change_role") {
-      if (!role || !USER_ROLES.includes(role)) {
-        return NextResponse.json(
-          { error: `role は ${USER_ROLES.join(" / ")} を指定してください` },
-          { status: 400 }
-        );
-      }
-
-      const { error, updated } = await changeUserRole(userId, role);
+    if (data.action === "change_role") {
+      const { error, updated } = await changeUserRole(userId, data.role);
       if (error) {
         return NextResponse.json({ error: "ロール更新に失敗しました" }, { status: 500 });
       }
@@ -148,8 +105,8 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ success: true, action });
     }
 
-    if (action === "approve") {
-      const { error, updated } = await approveUser(userId, membershipType);
+    if (data.action === "approve") {
+      const { error, updated } = await approveUser(userId, data.membershipType);
       if (error) {
         return NextResponse.json({ error: "ステータス更新に失敗しました" }, { status: 500 });
       }

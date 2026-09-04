@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
 import { createWeek } from "@/app/services/api/admin-server";
+import { validateRequest, WeekCreateSchema } from "@/app/services/api/schemas";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -19,11 +20,13 @@ export async function POST(request: NextRequest) {
     if (!checkContentPermissions(userRole)) {
       return NextResponse.json({ error: "管理権限がありません" }, { status: 403 });
     }
-    const body = await request.json();
-    const { phase_id, name, description, display_order, is_published } = body;
-    if (!name || !phase_id) {
-      return NextResponse.json({ error: "週名とフェーズは必須です" }, { status: 400 });
+
+    const validation = await validateRequest(request, WeekCreateSchema);
+    if (!validation.success) {
+      return validation.response;
     }
+    const { phase_id, name, description, display_order, is_published } = validation.data;
+
     const { data, error } = await createWeek({
       phase_id,
       name,

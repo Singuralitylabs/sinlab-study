@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
 import { deleteTheme, updateTheme } from "@/app/services/api/admin-server";
+import { ThemeUpdateSchema, validateRequest } from "@/app/services/api/schemas";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -24,8 +25,13 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (Number.isNaN(themeId)) {
       return NextResponse.json({ error: "無効なIDです" }, { status: 400 });
     }
-    const body = await request.json();
-    const { name, description, display_order, is_published, image_url } = body;
+
+    const validation = await validateRequest(request, ThemeUpdateSchema);
+    if (!validation.success) {
+      return validation.response;
+    }
+    const { name, description, display_order, is_published, image_url } = validation.data;
+
     const { error } = await updateTheme(themeId, {
       name,
       description,

@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
 import { isContentVisible } from "@/app/services/api/learning-server";
+import { SubmissionCreateSchema, validateRequest } from "@/app/services/api/schemas";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import type { CodeFile } from "@/app/types";
@@ -23,20 +24,11 @@ function sanitizeCodeFiles(input: unknown): CodeFile[] {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { contentId, submissionType, codeContent, codeFiles, url } = body;
-
-    if (!Number.isInteger(contentId) || contentId <= 0) {
-      return NextResponse.json({ error: "contentIdは正の整数で指定してください" }, { status: 400 });
+    const validation = await validateRequest(request, SubmissionCreateSchema);
+    if (!validation.success) {
+      return validation.response;
     }
-    if (!submissionType) {
-      return NextResponse.json({ error: "submissionTypeは必須です" }, { status: 400 });
-    }
-
-    // 提出種別の許容値を明示的に検証（不正値はDBのCHECK制約違反→500になる前に400で弾く）
-    if (submissionType !== "code" && submissionType !== "url") {
-      return NextResponse.json({ error: "提出種別が不正です" }, { status: 400 });
-    }
+    const { contentId, submissionType, codeContent, codeFiles, url } = validation.data;
 
     // コード提出時の保存形式を決定（後方互換: 単一ファイルは code_content、複数は code_files）
     let storedCodeContent: string | null = null;

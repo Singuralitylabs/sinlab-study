@@ -653,7 +653,7 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 | ステータス | 条件 |
 |:--|:--|
 | 200 | 正常（`{ review: AIReview }` を返却） |
-| 400 | submissionId 未指定 |
+| 400 | submissionId 未指定・不正（正の整数以外） |
 | 403 | 他人の提出 |
 | 404 | 提出データなし |
 | 500 | Gemini API エラー / サーバーエラー |
@@ -688,7 +688,7 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 
 **制約**:
 - `admin` ロールのユーザーへのロール変更は不可（403）
-- `userId` と `action` は必須（省略時は 400）。`userId` は整数のみ許可する（文字列等は400。文字列を許すと後述のStripe契約中判定を型不一致ですり抜けうるため）
+- `userId` と `action` は必須（省略時は 400）。`userId` は正の整数のみ許可する（文字列・0以下等は400。文字列を許すと後述のStripe契約中判定を型不一致ですり抜けうるため）
 - `approve` では `membershipType` が必須（未指定・不正値は 400）。承認と同時に `status=active` と `membership_type` を更新する
 - `reject` では `membership_type` を `NULL` に戻す
 - `change_membership` では `membershipType` が必須（未指定・不正値は 400）。対象が `active` 以外・存在しない・削除済みのいずれかで0行更新の場合は 409
@@ -836,11 +836,25 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 
 | エラー種別 | HTTPステータス | ハンドリング |
 |:--|:--|:--|
-| バリデーションエラー | 400 | リクエストボディの必須項目チェック |
+| バリデーションエラー | 400 | リクエストボディのスキーマ検証（後述） |
 | 認証エラー | 401 | Supabase Auth のセッション不在 |
 | 認可エラー | 403 | `rejected` ユーザー / 対象データが自分に不可視・操作不可（ロール不足を含む） |
 | Supabase エラー | 500 | DB操作失敗（サーバーログに出力） |
 | 予期しないエラー | 500 | try-catch による一括ハンドリング |
+
+#### 8.1.1 リクエストボディのスキーマ検証
+
+JSONボディを受け取る API Route の入力検証は [zod](https://zod.dev/) に統一し、`app/services/api/schemas.ts` にRouteごとのスキーマを定義する。許可値（`content_type` / `membershipType` / `role` 等）はハードコードせず、`app/constants/` の既存定数（`CONTENT_TYPES` / `MEMBERSHIP_TYPES` / `USER_ROLES` 等）や、既存定数が無い項目のために追加した定数（`SUBMISSION_TYPES` / `ALLOWED_SUBMISSION_TYPES` / `USER_MANAGEMENT_ACTIONS` / `CODE_LANGUAGES`）から導出する。
+
+各 Route は共通ヘルパー `validateRequest(request, schema)`（同ファイル）を呼び出すだけでよい。このヘルパーが以下をすべて吸収し、失敗時は統一形式のレスポンスをそのまま返す:
+
+- リクエストボディのJSONパース（パース不能な場合も400。従来は一部のRouteのみが個別に400化しており、それ以外は例外として500になっていた）
+- スキーマ検証（`schema.safeParse()`）
+- 検証失敗時のレスポンス組み立て
+
+**失敗時の統一レスポンス形式**: `{ "error": string }` を HTTP 400 で返す（成功時のレスポンス形状は Route ごとに異なる、既存の契約を維持）。`error` は該当した検証エラーメッセージを ` / ` 区切りで連結した日本語文字列で、以前から全 Route が返していた `{ error: string }` 形状と互換のため、既存のクライアント側エラーハンドリング（`.error` を読むだけの処理）に影響しない。
+
+**スコープ外の Route**: `multipart/form-data` を受け取る `POST /api/upload-pdf` / `POST /api/upload-thumbnail` は、ファイル（`File`）を含む値をzodスキーマで表現する効果が薄く、既存のフィールドごとの手書き検証（ファイル形式・サイズ・`parsePositiveInteger()` 等）をそのまま維持する。`POST /api/stripe/checkout` / `POST /api/stripe/portal` はリクエストボディを持たず、`POST /api/stripe/webhook` は署名検証のため生のテキストボディを扱う関係でJSONスキーマ検証の対象外とする。
 
 ### 8.2 認証エラー
 

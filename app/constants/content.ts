@@ -1,7 +1,17 @@
-import type { ContentType } from "@/app/types";
+import type { ContentType, SubmissionType } from "@/app/types";
 
 /** コンテンツ種別の許可値。バリデーション・ラベル表示・選択肢はこの1箇所から導出する */
 export const CONTENT_TYPES: readonly ContentType[] = ["video", "text", "exercise", "slide"];
+
+/** 提出種別（submissions.submission_type）の許可値。バリデーションはこの1箇所から導出する */
+export const SUBMISSION_TYPES: readonly SubmissionType[] = ["code", "url"];
+
+/**
+ * 演習コンテンツが受け付ける提出方法（learning_contents.allowed_submission_types）。
+ * 提出物そのものの種別（SubmissionType）とは異なり、両方許可する "both" を含む。
+ */
+export type AllowedSubmissionType = "code" | "url" | "both";
+export const ALLOWED_SUBMISSION_TYPES: readonly AllowedSubmissionType[] = ["code", "url", "both"];
 
 export const CONTENT_TYPE_LABELS: Record<ContentType, string> = {
   video: "動画",
