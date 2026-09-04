@@ -10,11 +10,6 @@ import {
 } from "@/app/constants/content";
 import { MEMBERSHIP_TYPES, USER_MANAGEMENT_ACTIONS, USER_ROLES } from "@/app/constants/user";
 
-/** 既存定数の readonly 配列をそのまま zod の enum に変換する（値の重複定義を避ける） */
-function toZodEnum<T extends string>(values: readonly T[]) {
-  return z.enum(values as [T, ...T[]]);
-}
-
 // ==================== 共通スキーマ ====================
 
 /** DBの主キー・件数上限等、Route間で共通の正の整数 */
@@ -26,13 +21,15 @@ export const PositiveIntSchema = z
 export const ContentIdSchema = PositiveIntSchema;
 export const UserIdSchema = PositiveIntSchema;
 
-export const ContentTypeSchema = toZodEnum(CONTENT_TYPES);
-export const SubmissionTypeSchema = toZodEnum(SUBMISSION_TYPES);
-export const AllowedSubmissionTypeSchema = toZodEnum(ALLOWED_SUBMISSION_TYPES);
-export const CodeLanguageSchema = toZodEnum(CODE_LANGUAGES);
-export const MembershipTypeSchema = toZodEnum(MEMBERSHIP_TYPES);
-export const UserRoleSchema = toZodEnum(USER_ROLES);
-export const BulkContentActionSchema = toZodEnum(BULK_CONTENT_ACTIONS);
+// z.enum() は readonly 配列をそのまま受け取れる（固定している zod 4系の型定義より）ため、
+// 既存定数の readonly 配列を変換せず直接渡す
+export const ContentTypeSchema = z.enum(CONTENT_TYPES);
+export const SubmissionTypeSchema = z.enum(SUBMISSION_TYPES);
+export const AllowedSubmissionTypeSchema = z.enum(ALLOWED_SUBMISSION_TYPES);
+export const CodeLanguageSchema = z.enum(CODE_LANGUAGES);
+export const MembershipTypeSchema = z.enum(MEMBERSHIP_TYPES);
+export const UserRoleSchema = z.enum(USER_ROLES);
+export const BulkContentActionSchema = z.enum(BULK_CONTENT_ACTIONS);
 
 // 既存の `!title` 等の truthy チェックと同じ範囲（空文字のみ拒否）を保つため、
 // 前後の空白を除去するトリムは行わない（トリムすると、従来は許可されていた
@@ -44,7 +41,10 @@ const RequiredStringSchema = z
 /** Markdown本文など、未入力時に null を送る任意項目 */
 const OptionalNullableString = z.string().nullable().optional();
 const OptionalBoolean = z.boolean().optional();
-const OptionalDisplayOrder = z.number().int({ message: "整数で指定してください" }).optional();
+const OptionalDisplayOrder = z
+  .number({ message: "数値で指定してください" })
+  .int({ message: "整数で指定してください" })
+  .optional();
 
 // ==================== /api/progress ====================
 
@@ -86,16 +86,16 @@ const AdminUserBaseSchema = z.object({ userId: UserIdSchema });
 const ADMIN_USER_ACTION_SCHEMAS = {
   approve: AdminUserBaseSchema.extend({
     action: z.literal("approve"),
-    membershipType: toZodEnum(MEMBERSHIP_TYPES),
+    membershipType: z.enum(MEMBERSHIP_TYPES),
   }),
   reject: AdminUserBaseSchema.extend({ action: z.literal("reject") }),
   change_role: AdminUserBaseSchema.extend({
     action: z.literal("change_role"),
-    role: toZodEnum(USER_ROLES),
+    role: z.enum(USER_ROLES),
   }),
   change_membership: AdminUserBaseSchema.extend({
     action: z.literal("change_membership"),
-    membershipType: toZodEnum(MEMBERSHIP_TYPES),
+    membershipType: z.enum(MEMBERSHIP_TYPES),
   }),
 } as const satisfies Record<(typeof USER_MANAGEMENT_ACTIONS)[number], z.ZodType>;
 
@@ -165,15 +165,13 @@ export const ContentUpdateSchema = ContentCreateSchema.partial();
 
 // ==================== /api/manage/contents/bulk ====================
 
+const BULK_CONTENT_IDS_MESSAGE = `idsは1〜${MAX_BULK_CONTENT_IDS}件の正の整数で指定してください`;
+
 export const BulkContentUpdateSchema = z.object({
   ids: z
-    .array(PositiveIntSchema, {
-      message: `idsは1〜${MAX_BULK_CONTENT_IDS}件の正の整数で指定してください`,
-    })
-    .min(1, { message: `idsは1〜${MAX_BULK_CONTENT_IDS}件の正の整数で指定してください` })
-    .max(MAX_BULK_CONTENT_IDS, {
-      message: `idsは1〜${MAX_BULK_CONTENT_IDS}件の正の整数で指定してください`,
-    }),
+    .array(PositiveIntSchema, { message: BULK_CONTENT_IDS_MESSAGE })
+    .min(1, { message: BULK_CONTENT_IDS_MESSAGE })
+    .max(MAX_BULK_CONTENT_IDS, { message: BULK_CONTENT_IDS_MESSAGE }),
   action: BulkContentActionSchema,
   // set_type アクションの時だけ必須、というaction依存の相関チェックは既存の buildPatch() に残す
   // （値そのものの妥当性は buildPatch() 側で isContentType() により検証されるため、ここでは受け取るだけ）

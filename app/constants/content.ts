@@ -33,7 +33,3 @@ export const BULK_CONTENT_ACTIONS = [
   "delete",
 ] as const;
 export type BulkContentAction = (typeof BULK_CONTENT_ACTIONS)[number];
-
-export function isBulkContentAction(value: unknown): value is BulkContentAction {
-  return typeof value === "string" && (BULK_CONTENT_ACTIONS as readonly string[]).includes(value);
-}

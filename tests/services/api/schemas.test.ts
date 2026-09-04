@@ -203,6 +203,15 @@ describe("ThemeCreateSchema / ThemeUpdateSchema", () => {
   it("image_urlはnullを許容する", () => {
     expect(ThemeCreateSchema.safeParse({ name: "テーマ1", image_url: null }).success).toBe(true);
   });
+
+  it("display_orderが数値以外の場合は他の数値項目と同じ日本語メッセージを返す", () => {
+    // フォームは display_order: Number(displayOrder) を送るため、数値以外の入力は
+    // NaN → JSONでは null になって届く（コードレビュー指摘の具体的な発火経路）
+    const result = ThemeCreateSchema.safeParse({ name: "テーマ1", display_order: null });
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("unreachable");
+    expect(result.error.issues.map((i) => i.message)).toContain("数値で指定してください");
+  });
 });
 
 describe("PhaseCreateSchema", () => {
