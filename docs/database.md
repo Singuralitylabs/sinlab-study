@@ -614,50 +614,50 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 
 マイグレーションファイルは `supabase/migrations/` 直下にフラットに配置する（サブディレクトリは作らない）。Supabase CLI の `migration list` / `db push` は `supabase/migrations/` 直下の `.sql` ファイルのみを走査し、サブディレクトリを再帰的にスキャンしないため（#149）。
 
-ファイル名は `<3桁連番>_<説明>.sql` とし、連番がCLIの管理するバージョン識別子（適用順）になる。スキーマ／RLS／シードの区分はディレクトリではなく連番の範囲とファイル名中の説明（RLSは `_policies`、シードは `seed_<コーススラッグ>_` 接頭辞）で表現する。新規追加時は既存ファイルの最大連番の次番号を使う。
+ファイル名は `<14桁タイムスタンプ>_<説明>.sql` とし、タイムスタンプがCLIの管理するバージョン識別子（適用順）になる。`supabase migration new <説明>` で生成される標準形式に合わせている。新規追加時は `date -u +%Y%m%d%H%M%S` 相当の現在時刻を使う（過去の番号と衝突しないことが自明なため）。区分はディレクトリではなく説明文（RLSは `_policies`、シードは `seed_<コーススラッグ>_` 接頭辞）で表現する。
 
 | ファイル | 内容 |
 |:--|:--|
-| `001_create_tables.sql` | 全テーブル・ヘルパー関数・トリガー・インデックスの作成 |
-| `002_add_submission_code_files.sql` | submissions に複数ファイル提出用 `code_files`（JSONB）カラムを追加 |
-| `003_add_is_open_to_trial.sql` | learning_contents にお試し公開フラグ `is_open_to_trial` を追加 |
-| `004_add_membership_type.sql` | users に会員種別 `membership_type` を追加し、既存の `active` ユーザーを `community` にバックフィル |
-| `005_add_stripe_tables.sql` | `stripe_subscriptions` / `stripe_events` テーブルを追加 |
-| `006_add_thumbnails_bucket.sql` | テーマサムネイル用の `thumbnails` 公開バケットを作成 |
-| `007_add_checkout_claim.sql` | `stripe_subscriptions` に `checkout_claimed_at` / `checkout_session_id` を追加し、`stripe_customer_id` をNULL許容へ変更（Checkout作成の排他制御用） |
-| `008_secure_get_user_role.sql` | `get_user_role()` に `status <> 'rejected'` 条件を追加し、却下ユーザーが admin/maintainer ロールを保持したまま認可を突破できないようにする（#104） |
-| `009_add_gas_code_language.sql` | `learning_contents.code_language` のCHECK制約に `gas` を追加（#56） |
-| `010_add_content_description.sql` | learning_contents に概要欄用の `description` カラムを追加（#66） |
-| `011_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
-| `012_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し |
-| `013_trial_user_policies.sql` | `get_user_status()` の追加と、お試しユーザー制限を含むポリシーへの差し替え（learning_contents の SELECT、user_progress / submissions の書き込み） |
-| `014_stripe_tables_policies.sql` | `stripe_subscriptions` / `stripe_events` のRLS有効化とポリシー定義（`stripe_subscriptions` はSELECTのみ本人/admin） |
-| `015_thumbnails_storage_policies.sql` | `thumbnails` バケットへの INSERT / UPDATE / DELETE を admin・maintainer に限定 |
-| `016_seed_gas_course_structure.sql` | GAS講座のテーマ・フェーズ・週・コンテンツ構造のシード |
-| `017_seed_gas_exercises.sql` | GAS講座の演習コンテンツ（課題・模範回答）のシード |
-| `018_seed_gas_hints.sql` | GAS講座の全演習課題へのヒントデータ投入 |
-| `019_seed_gas_advanced_exercises.sql` | GAS講座（応用編）の演習コンテンツ（課題・ヒント・模範回答）のシード |
+| `20260412010000_create_tables.sql` | 全テーブル・ヘルパー関数・トリガー・インデックスの作成 |
+| `20260412010001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
+| `20260412010002_seed_gas_course_structure.sql` | GAS講座のテーマ・フェーズ・週・コンテンツ構造のシード |
+| `20260412010003_seed_gas_exercises.sql` | GAS講座の演習コンテンツ（課題・模範回答）のシード |
+| `20260412010004_seed_gas_hints.sql` | GAS講座の全演習課題へのヒントデータ投入 |
+| `20260524000000_seed_gas_advanced_exercises.sql` | GAS講座（応用編）の演習コンテンツ（課題・ヒント・模範回答）のシード |
+| `20260527000000_add_submission_code_files.sql` | submissions に複数ファイル提出用 `code_files`（JSONB）カラムを追加 |
+| `20260614080707_seed_gas_practical_course_structure.sql` | GAS講座（実践編）のフェーズ・週・コンテンツ構造のシード（#149調査で復元。7.1節参照） |
+| `20260715233228_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し（#77） |
+| `20260801000001_add_is_open_to_trial.sql` | learning_contents にお試し公開フラグ `is_open_to_trial` を追加 |
+| `20260801000002_trial_user_policies.sql` | `get_user_status()` の追加と、お試しユーザー制限を含むポリシーへの差し替え（learning_contents の SELECT、user_progress / submissions の書き込み） |
+| `20260811000000_add_membership_type.sql` | users に会員種別 `membership_type` を追加し、既存の `active` ユーザーを `community` にバックフィル |
+| `20260812000000_add_stripe_tables.sql` | `stripe_subscriptions` / `stripe_events` テーブルを追加 |
+| `20260812000001_stripe_tables_policies.sql` | `stripe_subscriptions` / `stripe_events` のRLS有効化とポリシー定義（`stripe_subscriptions` はSELECTのみ本人/admin） |
+| `20260819000000_add_thumbnails_bucket.sql` | テーマサムネイル用の `thumbnails` 公開バケットを作成 |
+| `20260819000001_thumbnails_storage_policies.sql` | `thumbnails` バケットへの INSERT / UPDATE / DELETE を admin・maintainer に限定 |
+| `20260903000001_add_checkout_claim.sql` | `stripe_subscriptions` に `checkout_claimed_at` / `checkout_session_id` を追加し、`stripe_customer_id` をNULL許容へ変更（Checkout作成の排他制御用） |
+| `20260903000002_secure_get_user_role.sql` | `get_user_role()` に `status <> 'rejected'` 条件を追加し、却下ユーザーが admin/maintainer ロールを保持したまま認可を突破できないようにする（#104） |
+| `20260903000003_add_gas_code_language.sql` | `learning_contents.code_language` のCHECK制約に `gas` を追加（#56） |
+| `20260904000000_add_content_description.sql` | learning_contents に概要欄用の `description` カラムを追加（#66） |
 
-### 7.1 リモート適用履歴との整合（#149）
+### 7.1 リモート適用履歴との整合（#149・確定版）
 
-**この節の整合が完了するまで、既存環境（リモートに適用履歴がある環境）で `bunx supabase db push` を実行しないこと。** 新規に空のSupabaseプロジェクトを作る場合はこの節は無関係で、そのまま `db push` してよい。
+`supabase_migrations.schema_migrations`（リモートに記録された適用済みバージョン一覧）を実際に取得し、`statements` 列（各バージョンで実行されたSQL本文）を全19ファイルと突き合わせた結果、以下が確定した。**当初「番号が偶然一致している」と推測していたが、これは誤りだった**（フラット化直後の`001`〜`019`という連番は、リモートの旧フラット時代の`001`〜`015`と番号は同じでも中身は無関係な組み合わせが大半で、そのまま`repair`すると誤った対応関係を記録するところだった）。この節のファイル名は上記の調査結果を反映した最終版であり、そのままの対応関係で問題ない。
 
-上記の連番は本リポジトリ内での適用順を表すに過ぎない。`migration list` / `db push` は **バージョン文字列の一致だけを見てSQL内容までは比較しない**ため、次の2点は区別して扱う必要がある。
+**判明した事実:**
 
-- **注意: バージョン番号が一致していても中身が一致しているとは限らない。** 本issue（#149）に記載の通り、リモートには過去のフラット構成時代の履歴として `001`〜`015` と、タイムスタンプ形式のバージョンが2件（`20260614080707` / `20260715233228`）記録されている。今回の再編後のファイル名 `001_create_tables.sql`〜`015_thumbnails_storage_policies.sql` はこの `001`〜`015` と**数字上たまたま一致する**が、リポジトリのgit履歴上、過去に複数のALTER TABLE移行を`001_create_tables.sql`へ統合した経緯があり（コミット `c14bbe9`）、この数字の一致が実際のSQL内容の一致を意味するとは限らない。CLIは文字列が一致していれば「適用済み」とみなしてそのまま何もしない（＝内容の差分があっても検出されない）ため、`repair` を使わずに一致を鵜呑みにしてはならない。
-- シード4ファイル（現行 `016`〜`019`）に対応するリモート側の記録は、上記2件のタイムスタンプバージョンしかなく、ファイル数（4件）と一致しない。1:1対応しない前提で調査すること。
+1. リモートの `001`〜`015`（旧フラット構成時代の履歴）は、2026年4月のディレクトリ再編（コミット `c14bbe9`）で全て `20260412010000_create_tables.sql` / `20260412010001_rls_policies.sql` / `20260412010002〜4_seed_gas_*.sql` の4ファイルに統合・消滅済み。個別バージョンとしては現存しない（例: 旧`004`(add_learning_themes)・`007`(create_ai_reviews)・`008`(add_slide_content_type)・`009`(add_reference_answer)・`012`(add_allowed_submission_types)・`013`(add_code_language)・`014`(add_hint_column) は全て `20260412010000_create_tables.sql` に統合されている）。
+2. `20260715233228`（`consolidate_rls_policies`、#77）は、`20260715233228_consolidate_rls_policies.sql` と**内容が完全一致**（コメント文まで一致）することを確認済み。ファイル名にこの実際のバージョンをそのまま採用している。
+3. `20260614080707`（`seed_gas_practical_course_structure`）は、リポジトリのどのファイルにも対応がなく完全に欠落していた。`schema_migrations.statements` から内容を復元し、`20260614080707_seed_gas_practical_course_structure.sql` として追加した。
+4. **未解決の欠落（本節では対応しきれていない）**: 上記3を復元しても、このファイルは `learning_themes.name = 'GAS学習（実践編）'` の行が事前に存在しないと `RAISE EXCEPTION` で失敗する。また `20260524000000_seed_gas_advanced_exercises.sql` も `learning_themes.name = 'GAS学習（応用編）'` の週・フェーズが既に存在する前提で `learning_contents` のみを INSERT している。**この2テーマ（応用編・実践編）の `learning_themes` / `learning_phases` / `learning_weeks` を作成するSQLは、リポジトリのどこにも存在しない**（`grep`で全ファイルを検索して確認済み）。Supabaseダッシュボード等で直接作成されたとみられ、本番の該当行を `SELECT` で書き出してシードSQLとして追加しない限り、このリポジトリのマイグレーションを空のプロジェクトに適用しても本番と同じ状態にはならない。別途対応が必要。
+5. `20260412010000_create_tables.sql`（旧`001_create_tables.sql`）以外の残りのファイル（会員種別・Stripe・サムネイル・チェックアウト排他・お試しユーザー・GAS言語追加・概要欄など）は、2026年4月の再編以降に追加された**リモートの旧履歴に一切記録のない新規マイグレーション**である。これらは本番で機能として稼働済みであることから、CLIを経由せず手動（SQLエディタ等）で適用されたとみられるが、`schema_migrations` に記録がないため個別の裏付けは取れていない。ファイル名のタイムスタンプは、対応する機能追加のgitコミット日時から逆算した目安であり、実際の適用日時そのものではない。
 
-整合を確定させる手順（DB接続情報を持つ担当者が実施）:
+**この結果、リモートとの整合手順は以下の通り（DB接続情報を持つ担当者が実施）:**
 
-1. `supabase migration list --db-url <接続文字列>` でリモートの適用済みバージョン一覧（`001`〜`015` および2件のタイムスタンプ）を取得する。
-2. リモートの `supabase_migrations.schema_migrations` テーブル、または実際のスキーマ状態（`\d`・`pg_policies` 等）を確認し、各バージョンが上表のどのファイルの内容に実際に対応するかを検証する。**「番号が同じだから対応している」と推測だけで判断しない。**
-3. 検証結果を本issue（#149）または本節にコメントとして記録する。
-4. 対応関係が確定したら、以下のいずれかで repair する（SQLは再実行されない）。
-   - ローカルファイルのバージョン番号とリモートの記録済みバージョンが**内容も含めて一致**する場合: 何もしなくてよい（既に一致扱いになっている）。
-   - ローカルファイルの内容が既にリモートに反映されているが、バージョン番号が異なる／リモートに該当バージョンが存在しない場合: `supabase migration repair --status applied <ローカルのバージョン> --db-url <接続文字列>` で記録する。
-   - リモートに記録されているが、現行のどのローカルファイルにも対応しない（統合・廃止済みの）バージョンは、`supabase migration repair --status reverted <該当バージョン> --db-url <接続文字列>` で履歴から外す。
-   - `008_secure_get_user_role.sql` はSQLエディタ経由で適用済みでリモートの履歴には一切乗っていないため、内容がリモートに反映されていることを確認したうえで `repair --status applied 008` を行う。
-5. 上記が完了し `supabase migration list` で全ファイルの `Local` / `Remote` が一致することを確認できて初めて、`bunx supabase db push` は新規追加したマイグレーションのみを適用する安全な状態になる。
+1. 旧`001`〜`015`は完全に消滅しており対応ファイルがないため、`supabase migration repair --status reverted 001 002 003 004 005 006 007 008 009 010 011 012 013 014 015 --db-url <接続文字列>` で履歴から一括で外す（`db push`の判定に影響しないため急ぎではないが、`migration list`の出力を整理するために推奨）。
+2. `20260715233228` と `20260614080707` は内容確認済みのため、何もしなくてよい（既にその正しい内容で「適用済み」の状態）。
+3. 本節の表にある残り17ファイル（`20260412010000`〜`20260412010004`、`20260524000000`、`20260527000000`、`20260801000001`〜`20260904000000`）について、各ファイルの内容が実際にリモートへ反映済みであることを確認したうえで、`supabase migration repair --status applied <version> --db-url <接続文字列>` を1件ずつ実行する。確認方法は、`information_schema.columns` / `pg_constraint` / `pg_policies` / `pg_proc` 等で該当オブジェクトを直接クエリする（例: `SELECT prosrc FROM pg_proc WHERE proname = 'get_user_role'` で `20260903000002_secure_get_user_role.sql` の反映を確認するなど）。
+4. 上記が完了し `supabase migration list` で全19ファイルの `Local` / `Remote` が一致することを確認できて初めて、`bunx supabase db push` は新規追加したマイグレーションのみを適用する安全な状態になる。
+5. **別対応**: 「GAS学習（応用編）」「GAS学習（実践編）」の `learning_themes` / `learning_phases` / `learning_weeks` の作成SQLが存在しない件は、本番の該当データを `SELECT` で書き出し、新規シードマイグレーションとして追加する（本issueの範囲外、別issue化を推奨）。
 
 ---
 
@@ -709,4 +709,5 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | 2026年9月 | 並行Checkoutによる二重契約の対策（#103）に対応：`stripe_subscriptions` に `checkout_claimed_at` / `checkout_session_id` を追加し `stripe_customer_id` をNULL許容へ変更。claim/releaseによるCheckout作成の排他、既存セッションの状態に応じた再利用・奪取・待機、Stripe Customerの一意化を3.9節・6.6節・マイグレーション一覧に追記 |
 | 2026年9月 | 管理画面の課題編集でGASを既定言語にできるよう対応（#56）：`learning_contents.code_language` のCHECK制約に `gas` を追加。3.4節の値一覧を更新 |
 | 2026年9月 | 動画・スライドページに概要欄カードを追加（#66）：`learning_contents` に概要用の `description` カラム（NULL可・Markdown）を追加。3.4節の値一覧を更新 |
-| 2026年9月 | Supabase CLIがサブディレクトリを走査できず `migration list` / `db push` がローカルのマイグレーションを検出できない問題（#149）に対応：`supabase/migrations/` を `01_schema` / `02_rls` / `03_seed` のサブディレクトリからフラット構成（連番ファイル名）へ再編。7章にリモート適用履歴との整合手順（7.1）を追記 |
+| 2026年9月 | Supabase CLIがサブディレクトリを走査できず `migration list` / `db push` がローカルのマイグレーションを検出できない問題（#149）に対応：`supabase/migrations/` を `01_schema` / `02_rls` / `03_seed` のサブディレクトリからフラット構成へ再編。7章にリモート適用履歴との整合手順（7.1）を追記 |
+| 2026年9月 | 上記の続報（#149）：リモートの `schema_migrations.statements` を実際に取得し、連番ファイル名が旧履歴と番号だけ一致し中身は無関係だったことが判明したため、ファイル名を実際に検証済みのタイムスタンプ識別子へ全面的に振り直し。欠落していた「GAS学習（実践編）」シードを復元し、「応用編」「実践編」テーマ自体の作成SQLが存在しない別の欠落を7.1節に記録 |
