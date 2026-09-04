@@ -52,18 +52,18 @@ NEXT_PUBLIC_APP_URL=<Checkout/Portal のリダイレクト先URL生成に使用>
 
 ### インストール・起動
 
+`supabase/migrations/` はCLIの走査仕様に合わせてサブディレクトリを持たないフラット構成にしている（連番ファイル名で適用順を表現）。**新規のSupabaseプロジェクトではそのまま以下の手順でよいが、既にマイグレーション適用履歴があるプロジェクトに接続する場合は、`db push` の前に [`docs/database.md`](./docs/database.md) 7.1節の整合手順を完了させること**（未整合のまま push すると、リモートに既に存在するオブジェクトを作成しようとしてエラーになる場合がある）。
+
 ```bash
 # 依存関係のインストール
 bun install
 
-# データベースマイグレーション（Supabase CLIを使用）
+# データベースマイグレーション（Supabase CLIを使用。既存環境は上記の注意を参照）
 bunx supabase db push
 
 # 開発サーバー起動
 bun dev
 ```
-
-`supabase/migrations/` はCLIの走査仕様に合わせてサブディレクトリを持たないフラット構成にしている（連番ファイル名で適用順を表現）。既存環境からの移行時の注意点は [`docs/database.md`](./docs/database.md) 7章を参照。
 
 `http://localhost:3000` でアクセス可能。
 
