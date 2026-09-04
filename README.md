@@ -75,7 +75,7 @@ bun dev
 | `bun run lint` | Biome によるリント |
 | `bun run format` | Biome によるフォーマット |
 | `bun run check` | Biome によるリント + フォーマット |
-| `bun run db:types` | Supabase から TypeScript 型定義を生成 |
+| `bun run db:types` | Supabase から TypeScript 型定義を生成（`.env.local` があれば読み込み、なければ環境変数 `SUPABASE_PROJECT_ID` を使用） |
 | `bun run test` | Vitest によるユニットテスト実行 |
 | `bun run test:all` | build/db:types/lint/format/check/test を一括実行 |
 
