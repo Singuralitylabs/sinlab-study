@@ -50,12 +50,22 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
   const groups = groupContentsByWeek(filteredContents);
   const tableGroups = toContentTableGroups(groups);
 
+  // 一覧の階層フィルタ（テーマ/フェーズ/週）を新規作成フォームの初期選択に引き継ぐ
+  const newContentQuery = new URLSearchParams();
+  if (filters.theme) newContentQuery.set("theme", filters.theme);
+  if (filters.phase) newContentQuery.set("phase", filters.phase);
+  if (filters.week) newContentQuery.set("week", filters.week);
+  const newContentQueryString = newContentQuery.toString();
+  const newContentHref = newContentQueryString
+    ? `/manage/contents/new?${newContentQueryString}`
+    : "/manage/contents/new";
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <PageTitle title="コンテンツ管理" description="学習コンテンツの作成・編集・削除" />
         <Button asChild>
-          <Link href="/manage/contents/new">
+          <Link href={newContentHref}>
             <Plus className="h-4 w-4" />
             新規作成
           </Link>

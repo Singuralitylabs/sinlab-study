@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { deriveFilterOptions, filterContents } from "@/app/lib/content-filtering";
+import {
+  deriveFilterOptions,
+  deriveWeekSelectOptions,
+  filterContents,
+} from "@/app/lib/content-filtering";
 import type { LearningContentWithWeek, LearningWeekWithPhase } from "@/app/types";
 
 function makeWeek(
@@ -128,6 +132,42 @@ describe("deriveFilterOptions", () => {
     const options = deriveFilterOptions(contents);
 
     expect(options).toEqual({ themes: [], phases: [], weeks: [] });
+  });
+});
+
+describe("deriveWeekSelectOptions", () => {
+  it("週一覧から重複のないテーマ・フェーズ・週の選択肢を導出する", () => {
+    const options = deriveWeekSelectOptions([week1, week2, week3]);
+
+    expect(options.themes).toEqual([
+      { id: 1, name: "テーマ1" },
+      { id: 2, name: "テーマ2" },
+    ]);
+    expect(options.phases).toEqual([
+      { id: 1, name: "フェーズ1", themeId: 1 },
+      { id: 2, name: "フェーズ2", themeId: 2 },
+    ]);
+    expect(options.weeks).toEqual([
+      { id: 1, name: "週1", phaseId: 1 },
+      { id: 2, name: "週2", phaseId: 1 },
+      { id: 3, name: "週3", phaseId: 2 },
+    ]);
+  });
+
+  it("週のフェーズ join が欠落していても週自体は選択肢に含める（phase_id は NOT NULL のため）", () => {
+    const weekWithoutPhaseJoin = makeWeek({ id: 4, phase_id: 99, name: "週4", phase: null });
+
+    const options = deriveWeekSelectOptions([weekWithoutPhaseJoin]);
+
+    expect(options).toEqual({
+      themes: [],
+      phases: [],
+      weeks: [{ id: 4, name: "週4", phaseId: 99 }],
+    });
+  });
+
+  it("空配列を渡すと全て空配列を返す", () => {
+    expect(deriveWeekSelectOptions([])).toEqual({ themes: [], phases: [], weeks: [] });
   });
 });
 

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { groupContentsByWeek, sortContentsByHierarchy } from "@/app/lib/content-grouping";
+import {
+  groupContentsByWeek,
+  sortContentsByHierarchy,
+  sortWeeksByHierarchy,
+} from "@/app/lib/content-grouping";
 import type { LearningContentWithWeek, LearningWeekWithPhase } from "@/app/types";
 
 function makeWeek(
@@ -193,6 +197,86 @@ describe("sortContentsByHierarchy", () => {
     sortContentsByHierarchy(original);
 
     expect(original.map((c) => c.id)).toEqual([1, 2]);
+  });
+
+  it("テーマ・フェーズの display_order が同値でも、id タイブレークにより別の親同士のコンテンツが混在しない", () => {
+    // 新規作成フォームの display_order 初期値は0のため、テーマ・フェーズ間で同値が揃うのは
+    // 珍しくない。このとき週・コンテンツ自身の display_order だけで比較すると、
+    // 本来別グループのコンテンツ同士が混在してしまう回帰を防ぐ
+    const themeX = { ...theme1, id: 10, display_order: 0 };
+    const themeY = { ...theme1, id: 20, display_order: 0 };
+    const phaseX = { ...phase1, id: 10, theme_id: 10, display_order: 0, theme: themeX };
+    const phaseY = { ...phase1, id: 20, theme_id: 20, display_order: 0, theme: themeY };
+    const weekX = makeWeek({ id: 10, phase_id: 10, display_order: 5, phase: phaseX });
+    const weekY = makeWeek({ id: 20, phase_id: 20, display_order: 1, phase: phaseY });
+    const contentX = makeContent({ id: 10, week_id: 10, display_order: 1, week: weekX });
+    const contentY = makeContent({ id: 20, week_id: 20, display_order: 1, week: weekY });
+
+    const sorted = sortContentsByHierarchy([contentY, contentX]);
+
+    // themeX(id10) が themeY(id20) よりidタイブレークで先。週のdisplay_order（weekY:1 < weekX:5）
+    // だけで比較すると誤って contentY が先に来てしまう
+    expect(sorted.map((c) => c.id)).toEqual([10, 20]);
+  });
+});
+
+describe("sortWeeksByHierarchy", () => {
+  it("テーマ→フェーズ→週の display_order 順に並び替える", () => {
+    // week3(theme2配下) → week2・week1(theme1配下、週のdisplay_orderは2→1の逆順で並べる)
+    const sorted = sortWeeksByHierarchy([week3, week1, week2]);
+
+    expect(sorted.map((w) => w.id)).toEqual([2, 1, 3]);
+  });
+
+  it("フェーズの display_order が DB 上 NULL でも末尾にまとめる", () => {
+    const phaseWithNullOrder = {
+      ...phase1,
+      id: 4,
+      display_order: null as unknown as number,
+    };
+    const weekWithNullPhaseOrder = makeWeek({
+      id: 5,
+      phase_id: 4,
+      name: "週5",
+      display_order: 1,
+      phase: phaseWithNullOrder,
+    });
+
+    const sorted = sortWeeksByHierarchy([weekWithNullPhaseOrder, week1]);
+
+    expect(sorted.map((w) => w.id)).toEqual([1, 5]);
+  });
+
+  it("階層情報がすべて欠落する場合はNaNにならずidでタイブレークする", () => {
+    const weekA = makeWeek({ id: 2, phase_id: 99, display_order: null as unknown as number });
+    const weekB = makeWeek({ id: 1, phase_id: 99, display_order: null as unknown as number });
+
+    const sorted = sortWeeksByHierarchy([weekA, weekB]);
+
+    expect(sorted.map((w) => w.id)).toEqual([1, 2]);
+  });
+
+  it("元の配列を破壊しない", () => {
+    const original = [week1, week2];
+
+    sortWeeksByHierarchy(original);
+
+    expect(original.map((w) => w.id)).toEqual([1, 2]);
+  });
+
+  it("テーマ・フェーズの display_order が同値でも、id タイブレークにより別の親同士の週が混在しない", () => {
+    const themeX = { ...theme1, id: 10, display_order: 0 };
+    const themeY = { ...theme1, id: 20, display_order: 0 };
+    const phaseX = { ...phase1, id: 10, theme_id: 10, display_order: 0, theme: themeX };
+    const phaseY = { ...phase1, id: 20, theme_id: 20, display_order: 0, theme: themeY };
+    const weekX = makeWeek({ id: 10, phase_id: 10, display_order: 5, phase: phaseX });
+    const weekY = makeWeek({ id: 20, phase_id: 20, display_order: 1, phase: phaseY });
+
+    const sorted = sortWeeksByHierarchy([weekY, weekX]);
+
+    // themeX(id10) が themeY(id20) よりidタイブレークで先。週自身のdisplay_order
+    // （weekY:1 < weekX:5）だけで比較すると誤って weekY が先に来てしまう
+    expect(sorted.map((w) => w.id)).toEqual([10, 20]);
   });
 });
 

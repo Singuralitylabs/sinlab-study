@@ -12,6 +12,7 @@ import type {
   LearningPhaseWithTheme,
   LearningTheme,
   LearningWeek,
+  LearningWeekWithPhase,
   MembershipType,
   UserType,
 } from "@/app/types";
@@ -307,15 +308,21 @@ export async function deletePhase(id: number): Promise<{ error: PostgrestError |
 // 週管理
 // =====================================================
 
+/**
+ * 週一覧を取得する。`display_order`（週自身の表示順）でソートして返す。
+ * テーマ→フェーズ→週の階層順が必要な呼び出し元（`ContentForm` 用の選択肢導出）は、
+ * `sortContentsByHierarchy` と同様に呼び出し側で `sortWeeksByHierarchy` を通すこと
+ * （`/manage/weeks` 一覧は本関数の並び順をそのまま使うため、ここではソートしない）。
+ */
 export async function fetchAllWeeks(): Promise<{
-  data: (LearningWeek & { phase: LearningPhase | null })[] | null;
+  data: LearningWeekWithPhase[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_weeks")
-    .select("*, phase:learning_phases(*)")
+    .select("*, phase:learning_phases(*, theme:learning_themes(*))")
     .eq("is_deleted", false)
     .order("display_order");
 

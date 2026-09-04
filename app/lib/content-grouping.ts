@@ -1,4 +1,4 @@
-import type { ContentType, LearningContentWithWeek } from "@/app/types";
+import type { ContentType, LearningContentWithWeek, LearningWeekWithPhase } from "@/app/types";
 
 const UNCLASSIFIED_LABEL = "未分類";
 
@@ -52,6 +52,23 @@ function compareOrder(orderA: number, orderB: number): number {
 }
 
 /**
+ * 中間階層（テーマ・フェーズ）の並び替えに使う。display_order が同値の場合、その階層自身の
+ * id でタイブレークしてから下位階層の比較に進む。新規作成フォームの display_order の
+ * デフォルト値は0で、テーマ・フェーズ間で同値が揃うことが珍しくないため、ここでidタイブレーク
+ * をしないと別の親を持つ子要素同士が display_order だけで混在してしまう。
+ */
+function compareGroupLevel(
+  orderA: number | null | undefined,
+  orderB: number | null | undefined,
+  idA: number | undefined,
+  idB: number | undefined
+): number {
+  const orderCompare = compareOrder(orderOrLast(orderA), orderOrLast(orderB));
+  if (orderCompare !== 0) return orderCompare;
+  return compareOrder(orderOrLast(idA), orderOrLast(idB));
+}
+
+/**
  * テーマ→フェーズ→週→コンテンツの各 display_order 順にコンテンツを並び替える。
  * PostgREST はネストしたテーブルのカラムでトップレベルの並び替えができないため、
  * クライアント側（この純粋関数）で階層順ソートを行う。
@@ -61,21 +78,27 @@ export function sortContentsByHierarchy(
   contents: LearningContentWithWeek[]
 ): LearningContentWithWeek[] {
   return [...contents].sort((a, b) => {
-    const themeCompare = compareOrder(
-      orderOrLast(a.week?.phase?.theme?.display_order),
-      orderOrLast(b.week?.phase?.theme?.display_order)
+    const themeCompare = compareGroupLevel(
+      a.week?.phase?.theme?.display_order,
+      b.week?.phase?.theme?.display_order,
+      a.week?.phase?.theme?.id,
+      b.week?.phase?.theme?.id
     );
     if (themeCompare !== 0) return themeCompare;
 
-    const phaseCompare = compareOrder(
-      orderOrLast(a.week?.phase?.display_order),
-      orderOrLast(b.week?.phase?.display_order)
+    const phaseCompare = compareGroupLevel(
+      a.week?.phase?.display_order,
+      b.week?.phase?.display_order,
+      a.week?.phase?.id,
+      b.week?.phase?.id
     );
     if (phaseCompare !== 0) return phaseCompare;
 
-    const weekCompare = compareOrder(
-      orderOrLast(a.week?.display_order),
-      orderOrLast(b.week?.display_order)
+    const weekCompare = compareGroupLevel(
+      a.week?.display_order,
+      b.week?.display_order,
+      a.week?.id,
+      b.week?.id
     );
     if (weekCompare !== 0) return weekCompare;
 
@@ -84,6 +107,38 @@ export function sortContentsByHierarchy(
 
     // 全階層のdisplay_orderが同値（欠落含む）の場合でも比較関数は常に数値を
     // 返す必要があるため、idで確定的にタイブレークする
+    return a.id - b.id;
+  });
+}
+
+/**
+ * テーマ→フェーズ→週の各 display_order 順に週を並び替える。
+ * PostgREST はネストしたテーブルのカラムでトップレベルの並び替えができないため、
+ * クライアント側（この純粋関数）で階層順ソートを行う。`sortContentsByHierarchy` と
+ * 同じ規則（display_order 欠落は末尾、中間階層はidタイブレーク、最後は自身のidタイブレーク）
+ * に揃える。
+ */
+export function sortWeeksByHierarchy(weeks: LearningWeekWithPhase[]): LearningWeekWithPhase[] {
+  return [...weeks].sort((a, b) => {
+    const themeCompare = compareGroupLevel(
+      a.phase?.theme?.display_order,
+      b.phase?.theme?.display_order,
+      a.phase?.theme?.id,
+      b.phase?.theme?.id
+    );
+    if (themeCompare !== 0) return themeCompare;
+
+    const phaseCompare = compareGroupLevel(
+      a.phase?.display_order,
+      b.phase?.display_order,
+      a.phase?.id,
+      b.phase?.id
+    );
+    if (phaseCompare !== 0) return phaseCompare;
+
+    const weekCompare = compareOrder(orderOrLast(a.display_order), orderOrLast(b.display_order));
+    if (weekCompare !== 0) return weekCompare;
+
     return a.id - b.id;
   });
 }

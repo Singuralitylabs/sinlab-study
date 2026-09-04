@@ -4,7 +4,12 @@ import { Loader2, Save, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
-import type { ContentType, LearningContent, LearningPhase, LearningWeek } from "@/app/types";
+import type {
+  PhaseFilterOption,
+  ThemeFilterOption,
+  WeekFilterOption,
+} from "@/app/lib/content-filtering";
+import type { ContentType, LearningContent } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,10 +17,68 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
+const SELECT_CLASS_NAME =
+  "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs";
+
+/** 一覧フィルタからの引き継ぎ（作成モードのみ）や編集時の初期選択に使う、週選択カスケードの初期値 */
+interface InitialWeekSelection {
+  themeId?: string;
+  phaseId?: string;
+  weekId?: string;
+}
+
 interface ContentFormProps {
-  weeks: (LearningWeek & { phase: LearningPhase | null })[];
+  themes: ThemeFilterOption[];
+  phases: PhaseFilterOption[];
+  weeks: WeekFilterOption[];
   initialData?: LearningContent;
+  initialWeekSelection?: InitialWeekSelection;
   mode: "create" | "edit";
+}
+
+/**
+ * 週IDからテーマ・フェーズを逆引きし、カスケードセレクトの初期選択状態を求める。
+ * 週が選択肢に存在しない場合（未分類・削除済み等）はテーマ・フェーズの初期選択は行わない
+ * （週セレクトの値だけは保持し、既存の週の値を保存し直せるようにする。呼び出し側で
+ * 作成モードのクエリ値は事前に選択肢の存在チェック済みであることを前提とする）。
+ */
+function resolveWeekSelection(
+  weekId: string,
+  phases: PhaseFilterOption[],
+  weeks: WeekFilterOption[]
+): { themeId: string; phaseId: string; weekId: string } {
+  const week = weekId ? weeks.find((w) => String(w.id) === weekId) : undefined;
+  if (!week) {
+    return { themeId: "", phaseId: "", weekId };
+  }
+  const phase = phases.find((p) => p.id === week.phaseId);
+  return {
+    themeId: phase ? String(phase.themeId) : "",
+    phaseId: String(week.phaseId),
+    weekId,
+  };
+}
+
+/**
+ * 週セレクトの選択肢ラベル。テーマ・フェーズ未選択のまま週を直接選べる仕様のため、
+ * 絞り込まれていない親階層（テーマ／フェーズ）の名前を「テーマ / フェーズ / 週」の形で
+ * ラベルに含め、テーマ・フェーズが異なる同名週を区別できるようにする。
+ */
+function buildWeekOptionLabel(
+  week: WeekFilterOption,
+  phases: PhaseFilterOption[],
+  themes: ThemeFilterOption[],
+  themeId: string,
+  phaseId: string
+): string {
+  if (phaseId) return week.name;
+
+  const phase = phases.find((p) => p.id === week.phaseId);
+  if (themeId) return phase ? `${phase.name} / ${week.name}` : week.name;
+
+  const theme = phase ? themes.find((t) => t.id === phase.themeId) : undefined;
+  const prefix = [theme?.name, phase?.name].filter(Boolean).join(" / ");
+  return prefix ? `${prefix} / ${week.name}` : week.name;
 }
 
 const CONTENT_TYPE_OPTIONS: { value: ContentType; label: string }[] = [
@@ -62,12 +125,56 @@ function parseSlidePath(pdfUrl: string | null | undefined): {
   return { folder: match[1], slideNumber: String(Number.parseInt(match[2], 10)) };
 }
 
-export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
+export function ContentForm({
+  themes,
+  phases,
+  weeks,
+  initialData,
+  initialWeekSelection,
+  mode,
+}: ContentFormProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [title, setTitle] = useState(initialData?.title ?? "");
-  const [weekId, setWeekId] = useState(initialData?.week_id?.toString() ?? "");
+
+  // 編集モードは initialData.week_id から週セレクトの初期値を得る（週が未分類・削除済みで
+  // 選択肢に存在しない場合も、送信時に既存の値を壊さないよう値だけは保持する）。
+  // 作成モードは一覧フィルタからの引き継ぎ（initialWeekSelection、URLクエリ由来）を使うが、
+  // 選択肢に実在しない値をそのまま状態に残すと、見た目は未選択なのに送信可能になってしまう
+  // ため、テーマ・フェーズ・週のいずれも選択肢に存在する場合のみ採用する。
+  const initialWeekIdValue =
+    mode === "edit"
+      ? (initialData?.week_id?.toString() ?? "")
+      : weeks.some((w) => String(w.id) === initialWeekSelection?.weekId)
+        ? (initialWeekSelection?.weekId ?? "")
+        : "";
+  const resolvedInitialSelection = resolveWeekSelection(initialWeekIdValue, phases, weeks);
+  const initialThemeIdFallback =
+    mode === "create" && themes.some((t) => String(t.id) === initialWeekSelection?.themeId)
+      ? (initialWeekSelection?.themeId ?? "")
+      : "";
+  // フェーズは選択肢に存在するだけでなく、採用済みのテーマ配下であることも検証する
+  // （例: ?theme=1&phase=2 のように、実在はするが互いに不整合なクエリを渡された場合、
+  // テーマ1を表示したままテーマ2配下の週が絞り込まれてしまうのを防ぐ）
+  const initialPhaseIdFallback =
+    mode === "create" &&
+    phases.some(
+      (p) =>
+        String(p.id) === initialWeekSelection?.phaseId &&
+        (!initialThemeIdFallback || String(p.themeId) === initialThemeIdFallback)
+    )
+      ? (initialWeekSelection?.phaseId ?? "")
+      : "";
+
+  const [themeId, setThemeId] = useState(
+    resolvedInitialSelection.themeId || initialThemeIdFallback
+  );
+  const [phaseId, setPhaseId] = useState(
+    resolvedInitialSelection.phaseId || initialPhaseIdFallback
+  );
+  const [weekId, setWeekId] = useState(resolvedInitialSelection.weekId);
+
   const [contentType, setContentType] = useState<ContentType>(initialData?.content_type ?? "video");
   const [videoUrl, setVideoUrl] = useState(initialData?.video_url ?? "");
   const [description, setDescription] = useState(initialData?.description ?? "");
@@ -99,6 +206,27 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       ? `${initialSlide.folder}/slide-${initialSlide.slideNumber.padStart(2, "0")}.pdf`
       : null
   );
+
+  // フェーズは選択中のテーマ配下のみ、週は選択中のフェーズ（未選択ならテーマ）配下のみに絞る
+  // （ContentsFilterBar と同じロジック）
+  const visiblePhases = phases.filter((p) => !themeId || String(p.themeId) === themeId);
+  const visiblePhaseIds = new Set(visiblePhases.map((p) => p.id));
+  const visibleWeeks = weeks.filter((w) => {
+    if (phaseId) return String(w.phaseId) === phaseId;
+    if (themeId) return visiblePhaseIds.has(w.phaseId);
+    return true;
+  });
+
+  function handleThemeChange(value: string) {
+    setThemeId(value);
+    setPhaseId("");
+    setWeekId("");
+  }
+
+  function handlePhaseChange(value: string) {
+    setPhaseId(value);
+    setWeekId("");
+  }
 
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -251,24 +379,59 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
             />
           </div>
 
-          {/* 週の選択 */}
-          <div className="space-y-2">
-            <Label htmlFor="weekId">週</Label>
-            <select
-              id="weekId"
-              value={weekId}
-              onChange={(e) => setWeekId(e.target.value)}
-              required
-              className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
-            >
-              <option value="">選択してください</option>
-              {weeks.map((week) => (
-                <option key={week.id} value={week.id}>
-                  {week.phase?.name ? `${week.phase.name} / ` : ""}
-                  {week.name}
-                </option>
-              ))}
-            </select>
+          {/* テーマ→フェーズ→週の連動セレクト（テーマ・フェーズは絞り込み用、必須は週のみ） */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="themeId">テーマ</Label>
+              <select
+                id="themeId"
+                value={themeId}
+                onChange={(e) => handleThemeChange(e.target.value)}
+                className={SELECT_CLASS_NAME}
+              >
+                <option value="">すべて</option>
+                {themes.map((theme) => (
+                  <option key={theme.id} value={theme.id}>
+                    {theme.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="phaseId">フェーズ</Label>
+              <select
+                id="phaseId"
+                value={phaseId}
+                onChange={(e) => handlePhaseChange(e.target.value)}
+                className={SELECT_CLASS_NAME}
+              >
+                <option value="">すべて</option>
+                {visiblePhases.map((phase) => (
+                  <option key={phase.id} value={phase.id}>
+                    {phase.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="weekId">週</Label>
+              <select
+                id="weekId"
+                value={weekId}
+                onChange={(e) => setWeekId(e.target.value)}
+                required
+                className={SELECT_CLASS_NAME}
+              >
+                <option value="">選択してください</option>
+                {visibleWeeks.map((week) => (
+                  <option key={week.id} value={week.id}>
+                    {buildWeekOptionLabel(week, phases, themes, themeId, phaseId)}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* コンテンツ種別 */}
