@@ -34,3 +34,12 @@ export const USER_MEMBERSHIP_LABELS: Record<MembershipType, string> = {
 
 /** 会員種別の許可値。APIのバリデーションと承認UIの選択肢はこの1箇所から導出する */
 export const MEMBERSHIP_TYPES: readonly MembershipType[] = Object.values(USER_MEMBERSHIP);
+
+/** `PATCH /api/admin/users` の許可action。バリデーションはこの1箇所から導出する */
+export const USER_MANAGEMENT_ACTIONS = [
+  "approve",
+  "reject",
+  "change_role",
+  "change_membership",
+] as const;
+export type UserManagementAction = (typeof USER_MANAGEMENT_ACTIONS)[number];

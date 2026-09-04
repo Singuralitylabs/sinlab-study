@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
 import { createPhase } from "@/app/services/api/admin-server";
+import { PhaseCreateSchema, validateRequest } from "@/app/services/api/schemas";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -19,11 +20,13 @@ export async function POST(request: NextRequest) {
     if (!checkContentPermissions(userRole)) {
       return NextResponse.json({ error: "管理権限がありません" }, { status: 403 });
     }
-    const body = await request.json();
-    const { theme_id, name, description, display_order, is_published } = body;
-    if (!name || !theme_id) {
-      return NextResponse.json({ error: "フェーズ名とテーマは必須です" }, { status: 400 });
+
+    const validation = await validateRequest(request, PhaseCreateSchema);
+    if (!validation.success) {
+      return validation.response;
     }
+    const { theme_id, name, description, display_order, is_published } = validation.data;
+
     const { data, error } = await createPhase({
       theme_id,
       name,

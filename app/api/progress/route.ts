@@ -1,23 +1,17 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
 import { isContentVisible } from "@/app/services/api/learning-server";
+import { ProgressUpdateSchema, validateRequest } from "@/app/services/api/schemas";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { contentId, isCompleted } = body;
-
-    if (!Number.isInteger(contentId) || contentId <= 0) {
-      return NextResponse.json({ error: "contentIdは正の整数で指定してください" }, { status: 400 });
+    const validation = await validateRequest(request, ProgressUpdateSchema);
+    if (!validation.success) {
+      return validation.response;
     }
-    if (typeof isCompleted !== "boolean") {
-      return NextResponse.json(
-        { error: "isCompletedはbooleanで指定してください" },
-        { status: 400 }
-      );
-    }
+    const { contentId, isCompleted } = validation.data;
 
     // 認証チェック
     const { user, userId, userStatus } = await getServerAuth();

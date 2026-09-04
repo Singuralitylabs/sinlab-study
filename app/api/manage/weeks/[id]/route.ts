@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
 import { deleteWeek, updateWeek } from "@/app/services/api/admin-server";
+import { validateRequest, WeekUpdateSchema } from "@/app/services/api/schemas";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -24,8 +25,13 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (Number.isNaN(weekId)) {
       return NextResponse.json({ error: "無効なIDです" }, { status: 400 });
     }
-    const body = await request.json();
-    const { phase_id, name, description, display_order, is_published } = body;
+
+    const validation = await validateRequest(request, WeekUpdateSchema);
+    if (!validation.success) {
+      return validation.response;
+    }
+    const { phase_id, name, description, display_order, is_published } = validation.data;
+
     const { error } = await updateWeek(weekId, {
       phase_id,
       name,

@@ -10,6 +10,9 @@ export const DEFAULT_FILENAME_BY_LANGUAGE: Record<CodeLanguage, string> = {
   css: "style.css",
 };
 
+/** コード言語の許可値。バリデーション（learning_contents.code_language）はこの1箇所から導出する */
+export const CODE_LANGUAGES = Object.keys(DEFAULT_FILENAME_BY_LANGUAGE) as CodeLanguage[];
+
 // 既存のファイル名と衝突しないデフォルトファイル名を生成する（例: index.html → index-2.html）
 export function buildDefaultFilename(language: CodeLanguage, existingFilenames: string[]): string {
   const base = DEFAULT_FILENAME_BY_LANGUAGE[language];

@@ -14,6 +14,7 @@ import {
   resolveGeminiApiKey,
 } from "@/app/services/api/gemini";
 import { isContentVisible } from "@/app/services/api/learning-server";
+import { AiReviewRequestSchema, validateRequest } from "@/app/services/api/schemas";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -25,12 +26,11 @@ export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { submissionId } = body;
-
-    if (!submissionId) {
-      return NextResponse.json({ error: "submissionId は必須です" }, { status: 400 });
+    const validation = await validateRequest(request, AiReviewRequestSchema);
+    if (!validation.success) {
+      return validation.response;
     }
+    const { submissionId } = validation.data;
 
     // 認証チェック
     const { user, userId, userStatus } = await getServerAuth();

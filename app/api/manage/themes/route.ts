@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
 import { createTheme } from "@/app/services/api/admin-server";
+import { ThemeCreateSchema, validateRequest } from "@/app/services/api/schemas";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -19,11 +20,13 @@ export async function POST(request: NextRequest) {
     if (!checkContentPermissions(userRole)) {
       return NextResponse.json({ error: "管理権限がありません" }, { status: 403 });
     }
-    const body = await request.json();
-    const { name, description, display_order, is_published, image_url } = body;
-    if (!name) {
-      return NextResponse.json({ error: "テーマ名は必須です" }, { status: 400 });
+
+    const validation = await validateRequest(request, ThemeCreateSchema);
+    if (!validation.success) {
+      return validation.response;
     }
+    const { name, description, display_order, is_published, image_url } = validation.data;
+
     const { data, error } = await createTheme({
       name,
       description,
