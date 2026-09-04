@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
 import { deriveWeekSelectOptions } from "@/app/lib/content-filtering";
+import { sortWeeksByHierarchy } from "@/app/lib/content-grouping";
 import { fetchAllWeeks, fetchContentByIdForAdmin } from "@/app/services/api/admin-server";
 import { ContentForm } from "../../ContentForm";
 
@@ -25,7 +26,8 @@ export default async function EditContentPage({ params }: PageProps) {
     notFound();
   }
 
-  const filterOptions = deriveWeekSelectOptions(weeks ?? []);
+  const sortedWeeks = weeks ? sortWeeksByHierarchy(weeks) : [];
+  const filterOptions = deriveWeekSelectOptions(sortedWeeks);
 
   return (
     <div className="max-w-3xl mx-auto">

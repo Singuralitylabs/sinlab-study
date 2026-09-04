@@ -198,6 +198,26 @@ describe("sortContentsByHierarchy", () => {
 
     expect(original.map((c) => c.id)).toEqual([1, 2]);
   });
+
+  it("テーマ・フェーズの display_order が同値でも、id タイブレークにより別の親同士のコンテンツが混在しない", () => {
+    // 新規作成フォームの display_order 初期値は0のため、テーマ・フェーズ間で同値が揃うのは
+    // 珍しくない。このとき週・コンテンツ自身の display_order だけで比較すると、
+    // 本来別グループのコンテンツ同士が混在してしまう回帰を防ぐ
+    const themeX = { ...theme1, id: 10, display_order: 0 };
+    const themeY = { ...theme1, id: 20, display_order: 0 };
+    const phaseX = { ...phase1, id: 10, theme_id: 10, display_order: 0, theme: themeX };
+    const phaseY = { ...phase1, id: 20, theme_id: 20, display_order: 0, theme: themeY };
+    const weekX = makeWeek({ id: 10, phase_id: 10, display_order: 5, phase: phaseX });
+    const weekY = makeWeek({ id: 20, phase_id: 20, display_order: 1, phase: phaseY });
+    const contentX = makeContent({ id: 10, week_id: 10, display_order: 1, week: weekX });
+    const contentY = makeContent({ id: 20, week_id: 20, display_order: 1, week: weekY });
+
+    const sorted = sortContentsByHierarchy([contentY, contentX]);
+
+    // themeX(id10) が themeY(id20) よりidタイブレークで先。週のdisplay_order（weekY:1 < weekX:5）
+    // だけで比較すると誤って contentY が先に来てしまう
+    expect(sorted.map((c) => c.id)).toEqual([10, 20]);
+  });
 });
 
 describe("sortWeeksByHierarchy", () => {
@@ -242,6 +262,21 @@ describe("sortWeeksByHierarchy", () => {
     sortWeeksByHierarchy(original);
 
     expect(original.map((w) => w.id)).toEqual([1, 2]);
+  });
+
+  it("テーマ・フェーズの display_order が同値でも、id タイブレークにより別の親同士の週が混在しない", () => {
+    const themeX = { ...theme1, id: 10, display_order: 0 };
+    const themeY = { ...theme1, id: 20, display_order: 0 };
+    const phaseX = { ...phase1, id: 10, theme_id: 10, display_order: 0, theme: themeX };
+    const phaseY = { ...phase1, id: 20, theme_id: 20, display_order: 0, theme: themeY };
+    const weekX = makeWeek({ id: 10, phase_id: 10, display_order: 5, phase: phaseX });
+    const weekY = makeWeek({ id: 20, phase_id: 20, display_order: 1, phase: phaseY });
+
+    const sorted = sortWeeksByHierarchy([weekY, weekX]);
+
+    // themeX(id10) が themeY(id20) よりidタイブレークで先。週自身のdisplay_order
+    // （weekY:1 < weekX:5）だけで比較すると誤って weekY が先に来てしまう
+    expect(sorted.map((w) => w.id)).toEqual([10, 20]);
   });
 });
 

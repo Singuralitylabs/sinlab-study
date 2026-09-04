@@ -1,7 +1,6 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
-import { sortWeeksByHierarchy } from "@/app/lib/content-grouping";
 import {
   fetchStripeSubscriptionByUserId,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
@@ -309,6 +308,12 @@ export async function deletePhase(id: number): Promise<{ error: PostgrestError |
 // 週管理
 // =====================================================
 
+/**
+ * 週一覧を取得する。`display_order`（週自身の表示順）でソートして返す。
+ * テーマ→フェーズ→週の階層順が必要な呼び出し元（`ContentForm` 用の選択肢導出）は、
+ * `sortContentsByHierarchy` と同様に呼び出し側で `sortWeeksByHierarchy` を通すこと
+ * （`/manage/weeks` 一覧は本関数の並び順をそのまま使うため、ここではソートしない）。
+ */
 export async function fetchAllWeeks(): Promise<{
   data: LearningWeekWithPhase[] | null;
   error: PostgrestError | null;
@@ -318,14 +323,15 @@ export async function fetchAllWeeks(): Promise<{
   const { data, error } = await supabase
     .from("learning_weeks")
     .select("*, phase:learning_phases(*, theme:learning_themes(*))")
-    .eq("is_deleted", false);
+    .eq("is_deleted", false)
+    .order("display_order");
 
   if (error) {
     console.error("週一覧取得エラー:", error.message);
     return { data: null, error };
   }
 
-  return { data: sortWeeksByHierarchy(data), error: null };
+  return { data, error: null };
 }
 
 export async function fetchWeekById(id: number): Promise<{

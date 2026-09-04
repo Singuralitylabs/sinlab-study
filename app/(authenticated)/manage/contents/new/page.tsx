@@ -1,5 +1,6 @@
 import { PageTitle } from "@/app/components/PageTitle";
 import { deriveWeekSelectOptions } from "@/app/lib/content-filtering";
+import { sortWeeksByHierarchy } from "@/app/lib/content-grouping";
 import { fetchAllWeeks } from "@/app/services/api/admin-server";
 import { ContentForm } from "../ContentForm";
 
@@ -16,7 +17,8 @@ function firstParam(value: string | string[] | undefined): string {
 export default async function NewContentPage({ searchParams }: NewContentPageProps) {
   const params = await searchParams;
   const { data: weeks } = await fetchAllWeeks();
-  const filterOptions = deriveWeekSelectOptions(weeks ?? []);
+  const sortedWeeks = weeks ? sortWeeksByHierarchy(weeks) : [];
+  const filterOptions = deriveWeekSelectOptions(sortedWeeks);
 
   return (
     <div className="max-w-3xl mx-auto">

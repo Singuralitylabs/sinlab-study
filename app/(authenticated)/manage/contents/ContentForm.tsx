@@ -39,7 +39,8 @@ interface ContentFormProps {
 /**
  * 週IDからテーマ・フェーズを逆引きし、カスケードセレクトの初期選択状態を求める。
  * 週が選択肢に存在しない場合（未分類・削除済み等）はテーマ・フェーズの初期選択は行わない
- * （週セレクトの値だけは保持し、既存の週の値を保存し直せるようにする）。
+ * （週セレクトの値だけは保持し、既存の週の値を保存し直せるようにする。呼び出し側で
+ * 作成モードのクエリ値は事前に選択肢の存在チェック済みであることを前提とする）。
  */
 function resolveWeekSelection(
   weekId: string,
@@ -56,6 +57,28 @@ function resolveWeekSelection(
     phaseId: String(week.phaseId),
     weekId,
   };
+}
+
+/**
+ * 週セレクトの選択肢ラベル。テーマ・フェーズ未選択のまま週を直接選べる仕様のため、
+ * 絞り込まれていない親階層（テーマ／フェーズ）の名前を「テーマ / フェーズ / 週」の形で
+ * ラベルに含め、テーマ・フェーズが異なる同名週を区別できるようにする。
+ */
+function buildWeekOptionLabel(
+  week: WeekFilterOption,
+  phases: PhaseFilterOption[],
+  themes: ThemeFilterOption[],
+  themeId: string,
+  phaseId: string
+): string {
+  if (phaseId) return week.name;
+
+  const phase = phases.find((p) => p.id === week.phaseId);
+  if (themeId) return phase ? `${phase.name} / ${week.name}` : week.name;
+
+  const theme = phase ? themes.find((t) => t.id === phase.themeId) : undefined;
+  const prefix = [theme?.name, phase?.name].filter(Boolean).join(" / ");
+  return prefix ? `${prefix} / ${week.name}` : week.name;
 }
 
 const CONTENT_TYPE_OPTIONS: { value: ContentType; label: string }[] = [
@@ -115,15 +138,32 @@ export function ContentForm({
 
   const [title, setTitle] = useState(initialData?.title ?? "");
 
-  // 編集モードは initialData.week_id から、作成モードは一覧フィルタからの引き継ぎ
-  // （initialWeekSelection.weekId）から、週セレクトの初期値とテーマ・フェーズの逆引きを行う
-  const initialWeekIdValue = initialData?.week_id?.toString() ?? initialWeekSelection?.weekId ?? "";
+  // 編集モードは initialData.week_id から週セレクトの初期値を得る（週が未分類・削除済みで
+  // 選択肢に存在しない場合も、送信時に既存の値を壊さないよう値だけは保持する）。
+  // 作成モードは一覧フィルタからの引き継ぎ（initialWeekSelection、URLクエリ由来）を使うが、
+  // 選択肢に実在しない値をそのまま状態に残すと、見た目は未選択なのに送信可能になってしまう
+  // ため、テーマ・フェーズ・週のいずれも選択肢に存在する場合のみ採用する。
+  const initialWeekIdValue =
+    mode === "edit"
+      ? (initialData?.week_id?.toString() ?? "")
+      : weeks.some((w) => String(w.id) === initialWeekSelection?.weekId)
+        ? (initialWeekSelection?.weekId ?? "")
+        : "";
   const resolvedInitialSelection = resolveWeekSelection(initialWeekIdValue, phases, weeks);
+  const initialThemeIdFallback =
+    mode === "create" && themes.some((t) => String(t.id) === initialWeekSelection?.themeId)
+      ? (initialWeekSelection?.themeId ?? "")
+      : "";
+  const initialPhaseIdFallback =
+    mode === "create" && phases.some((p) => String(p.id) === initialWeekSelection?.phaseId)
+      ? (initialWeekSelection?.phaseId ?? "")
+      : "";
+
   const [themeId, setThemeId] = useState(
-    resolvedInitialSelection.themeId || initialWeekSelection?.themeId || ""
+    resolvedInitialSelection.themeId || initialThemeIdFallback
   );
   const [phaseId, setPhaseId] = useState(
-    resolvedInitialSelection.phaseId || initialWeekSelection?.phaseId || ""
+    resolvedInitialSelection.phaseId || initialPhaseIdFallback
   );
   const [weekId, setWeekId] = useState(resolvedInitialSelection.weekId);
 
@@ -379,7 +419,7 @@ export function ContentForm({
                 <option value="">選択してください</option>
                 {visibleWeeks.map((week) => (
                   <option key={week.id} value={week.id}>
-                    {week.name}
+                    {buildWeekOptionLabel(week, phases, themes, themeId, phaseId)}
                   </option>
                 ))}
               </select>
