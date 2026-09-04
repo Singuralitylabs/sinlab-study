@@ -8,7 +8,7 @@ import {
   MAX_BULK_CONTENT_IDS,
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
-import { MEMBERSHIP_TYPES, USER_ROLES } from "@/app/constants/user";
+import { MEMBERSHIP_TYPES, USER_MANAGEMENT_ACTIONS, USER_ROLES } from "@/app/constants/user";
 
 /** 既存定数の readonly 配列をそのまま zod の enum に変換する（値の重複定義を避ける） */
 function toZodEnum<T extends string>(values: readonly T[]) {
@@ -34,10 +34,11 @@ export const MembershipTypeSchema = toZodEnum(MEMBERSHIP_TYPES);
 export const UserRoleSchema = toZodEnum(USER_ROLES);
 export const BulkContentActionSchema = toZodEnum(BULK_CONTENT_ACTIONS);
 
-/** 前後の空白を除去したうえで1文字以上を要求する（タイトル・名前等） */
-const NonEmptyTrimmedStringSchema = z
+// 既存の `!title` 等の truthy チェックと同じ範囲（空文字のみ拒否）を保つため、
+// 前後の空白を除去するトリムは行わない（トリムすると、従来は許可されていた
+// 空白のみの文字列が新たに拒否されてしまい、入力検証の置き換えの範囲を超える）
+const RequiredStringSchema = z
   .string({ message: "文字列で指定してください" })
-  .trim()
   .min(1, { message: "空文字は指定できません" });
 
 /** Markdown本文など、未入力時に null を送る任意項目 */
@@ -76,32 +77,41 @@ const AdminUserBaseSchema = z.object({ userId: UserIdSchema });
 
 /**
  * actionごとに必須項目が異なるため discriminatedUnion で表現する
- * （approve/change_membership は membershipType 必須、change_role は role 必須、reject は追加項目なし）
+ * （approve/change_membership は membershipType 必須、change_role は role 必須、reject は追加項目なし）。
+ * `Record<UserManagementAction, ...>` にすることで、USER_MANAGEMENT_ACTIONS に含まれる
+ * action を network 漏れなく網羅していることをコンパイル時に保証しつつ、実際に
+ * discriminatedUnion へ渡す配列自体は USER_MANAGEMENT_ACTIONS から導出する
+ * （action文字列そのものをここで再度ハードコードしない）
  */
+const ADMIN_USER_ACTION_SCHEMAS = {
+  approve: AdminUserBaseSchema.extend({
+    action: z.literal("approve"),
+    membershipType: toZodEnum(MEMBERSHIP_TYPES),
+  }),
+  reject: AdminUserBaseSchema.extend({ action: z.literal("reject") }),
+  change_role: AdminUserBaseSchema.extend({
+    action: z.literal("change_role"),
+    role: toZodEnum(USER_ROLES),
+  }),
+  change_membership: AdminUserBaseSchema.extend({
+    action: z.literal("change_membership"),
+    membershipType: toZodEnum(MEMBERSHIP_TYPES),
+  }),
+} as const satisfies Record<(typeof USER_MANAGEMENT_ACTIONS)[number], z.ZodType>;
+
 export const AdminUserActionSchema = z.discriminatedUnion(
   "action",
-  [
-    AdminUserBaseSchema.extend({
-      action: z.literal("approve"),
-      membershipType: toZodEnum(MEMBERSHIP_TYPES),
-    }),
-    AdminUserBaseSchema.extend({ action: z.literal("reject") }),
-    AdminUserBaseSchema.extend({
-      action: z.literal("change_role"),
-      role: toZodEnum(USER_ROLES),
-    }),
-    AdminUserBaseSchema.extend({
-      action: z.literal("change_membership"),
-      membershipType: toZodEnum(MEMBERSHIP_TYPES),
-    }),
+  USER_MANAGEMENT_ACTIONS.map((action) => ADMIN_USER_ACTION_SCHEMAS[action]) as [
+    (typeof ADMIN_USER_ACTION_SCHEMAS)[keyof typeof ADMIN_USER_ACTION_SCHEMAS],
+    ...(typeof ADMIN_USER_ACTION_SCHEMAS)[keyof typeof ADMIN_USER_ACTION_SCHEMAS][],
   ],
-  { message: "action は approve / reject / change_role / change_membership を指定してください" }
+  { message: `action は ${USER_MANAGEMENT_ACTIONS.join(" / ")} を指定してください` }
 );
 
 // ==================== /api/manage/themes ====================
 
 export const ThemeCreateSchema = z.object({
-  name: NonEmptyTrimmedStringSchema,
+  name: RequiredStringSchema,
   description: OptionalNullableString,
   display_order: OptionalDisplayOrder,
   is_published: OptionalBoolean,
@@ -113,7 +123,7 @@ export const ThemeUpdateSchema = ThemeCreateSchema.partial();
 
 export const PhaseCreateSchema = z.object({
   theme_id: PositiveIntSchema,
-  name: NonEmptyTrimmedStringSchema,
+  name: RequiredStringSchema,
   description: OptionalNullableString,
   display_order: OptionalDisplayOrder,
   is_published: OptionalBoolean,
@@ -124,7 +134,7 @@ export const PhaseUpdateSchema = PhaseCreateSchema.partial();
 
 export const WeekCreateSchema = z.object({
   phase_id: PositiveIntSchema,
-  name: NonEmptyTrimmedStringSchema,
+  name: RequiredStringSchema,
   description: OptionalNullableString,
   display_order: OptionalDisplayOrder,
   is_published: OptionalBoolean,
@@ -134,7 +144,7 @@ export const WeekUpdateSchema = WeekCreateSchema.partial();
 // ==================== /api/manage/contents ====================
 
 export const ContentCreateSchema = z.object({
-  title: NonEmptyTrimmedStringSchema,
+  title: RequiredStringSchema,
   week_id: PositiveIntSchema,
   content_type: ContentTypeSchema,
   video_url: OptionalNullableString,

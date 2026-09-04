@@ -37,11 +37,11 @@ describe("POST /api/manage/themes - バリデーション", () => {
     expect(createTheme).not.toHaveBeenCalled();
   });
 
-  it("nameが空白のみの場合は400", async () => {
+  it("nameが空白のみの場合も、既存の !name チェックと同じ範囲で許可される", async () => {
     const res = await POST(request({ name: "   " }) as never);
 
-    expect(res.status).toBe(400);
-    expect(createTheme).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(createTheme).toHaveBeenCalledWith(expect.objectContaining({ name: "   " }));
   });
 
   it("正常な入力は200で、作成処理へそのまま渡す", async () => {

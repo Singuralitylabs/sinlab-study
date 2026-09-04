@@ -5,7 +5,7 @@ import {
   CONTENT_TYPES,
   MAX_BULK_CONTENT_IDS,
 } from "@/app/constants/content";
-import { MEMBERSHIP_TYPES, USER_ROLES } from "@/app/constants/user";
+import { MEMBERSHIP_TYPES, USER_MANAGEMENT_ACTIONS, USER_ROLES } from "@/app/constants/user";
 import {
   AdminUserActionSchema,
   AiReviewRequestSchema,
@@ -158,6 +158,24 @@ describe("AdminUserActionSchema", () => {
     expect(AdminUserActionSchema.safeParse({ userId: 1, action: "delete" }).success).toBe(false);
   });
 
+  it("受理するactionはUSER_MANAGEMENT_ACTIONSから導出され、それ以外は含まない", () => {
+    const validBodies: Record<string, unknown> = {
+      approve: { userId: 1, action: "approve", membershipType: MEMBERSHIP_TYPES[0] },
+      reject: { userId: 1, action: "reject" },
+      change_role: { userId: 1, action: "change_role", role: USER_ROLES[0] },
+      change_membership: {
+        userId: 1,
+        action: "change_membership",
+        membershipType: MEMBERSHIP_TYPES[0],
+      },
+    };
+
+    for (const action of USER_MANAGEMENT_ACTIONS) {
+      expect(AdminUserActionSchema.safeParse(validBodies[action]).success).toBe(true);
+    }
+    expect(Object.keys(validBodies).sort()).toEqual([...USER_MANAGEMENT_ACTIONS].sort());
+  });
+
   it.each([undefined, "1", 0, -1, 1.5])("userIdが%sの場合は検証エラー", (userId) => {
     expect(AdminUserActionSchema.safeParse({ userId, action: "reject" }).success).toBe(false);
   });
@@ -167,8 +185,11 @@ describe("ThemeCreateSchema / ThemeUpdateSchema", () => {
   it("nameが必須", () => {
     expect(ThemeCreateSchema.safeParse({}).success).toBe(false);
     expect(ThemeCreateSchema.safeParse({ name: "" }).success).toBe(false);
-    expect(ThemeCreateSchema.safeParse({ name: "  " }).success).toBe(false);
     expect(ThemeCreateSchema.safeParse({ name: "テーマ1" }).success).toBe(true);
+  });
+
+  it("nameは既存の !name チェックと同じ範囲（空文字のみ拒否）で、空白のみの文字列は許容する", () => {
+    expect(ThemeCreateSchema.safeParse({ name: "  " }).success).toBe(true);
   });
 
   it("Updateは全項目が任意で、空オブジェクトも受理する", () => {
