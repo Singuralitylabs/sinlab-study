@@ -348,31 +348,29 @@ describe("activateUserFromCheckoutSession", () => {
     expect(result.activated).toBe(false);
   });
 
-  it.each([
-    "canceled",
-    "unpaid",
-    "incomplete",
-    "incomplete_expired",
-  ])("サブスクが現に有効でない（%s）場合、stripe_subscriptionsのみ更新しusersは昇格しない", async (status) => {
-    const mockClient = createMockSupabaseClient({
-      tableResults: { stripe_subscriptions: { data: null, error: null } },
-    });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
-    vi.mocked(getStripeClient).mockReturnValue({
-      subscriptions: { retrieve: vi.fn().mockResolvedValue({ ...subscription, status }) },
-    } as never);
+  it.each(["canceled", "unpaid", "incomplete", "incomplete_expired"])(
+    "サブスクが現に有効でない（%s）場合、stripe_subscriptionsのみ更新しusersは昇格しない",
+    async (status) => {
+      const mockClient = createMockSupabaseClient({
+        tableResults: { stripe_subscriptions: { data: null, error: null } },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      vi.mocked(getStripeClient).mockReturnValue({
+        subscriptions: { retrieve: vi.fn().mockResolvedValue({ ...subscription, status }) },
+      } as never);
 
-    const result = await activateUserFromCheckoutSession(baseSession as never);
+      const result = await activateUserFromCheckoutSession(baseSession as never);
 
-    expect(result.error).toBeNull();
-    expect(result.activated).toBe(false);
-    // 昇格しなかった場合、currentPeriodEndは（内部的にはStripeから取得済みでも）nullを返す
-    // 権限が変わっていないため、successページに実際の請求日を見せない
-    expect(result.currentPeriodEnd).toBeNull();
-    // 既存行チェック + upsertの2回のみで、usersへの更新は発生しない
-    // （解約後のsuccessページURL再訪・コンビニ払い等の未入金checkout完了での昇格を防ぐ）
-    expect(mockClient.from).toHaveBeenCalledTimes(2);
-  });
+      expect(result.error).toBeNull();
+      expect(result.activated).toBe(false);
+      // 昇格しなかった場合、currentPeriodEndは（内部的にはStripeから取得済みでも）nullを返す
+      // 権限が変わっていないため、successページに実際の請求日を見せない
+      expect(result.currentPeriodEnd).toBeNull();
+      // 既存行チェック + upsertの2回のみで、usersへの更新は発生しない
+      // （解約後のsuccessページURL再訪・コンビニ払い等の未入金checkout完了での昇格を防ぐ）
+      expect(mockClient.from).toHaveBeenCalledTimes(2);
+    }
+  );
 });
 
 // ----------------------------------------------------------------
@@ -420,27 +418,27 @@ describe("syncSubscriptionStatus", () => {
     expect(userBuilder.eq).toHaveBeenNthCalledWith(2, "membership_type", "general");
   });
 
-  it.each([
-    "unpaid",
-    "incomplete_expired",
-  ])("%sへ遷移した場合もrevertUserToTrialを呼ぶ", async (status) => {
-    mockGetStripeClient(status);
-    const mockClient = createMockSupabaseClient({
-      tableResults: {
-        stripe_subscriptions: [
-          { data: { user_id: 7 }, error: null },
-          { data: null, error: null },
-        ],
-        users: { data: null, error: null },
-      },
-    });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+  it.each(["unpaid", "incomplete_expired"])(
+    "%sへ遷移した場合もrevertUserToTrialを呼ぶ",
+    async (status) => {
+      mockGetStripeClient(status);
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: [
+            { data: { user_id: 7 }, error: null },
+            { data: null, error: null },
+          ],
+          users: { data: null, error: null },
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    await syncSubscriptionStatus(makeSubscription(status) as never);
+      await syncSubscriptionStatus(makeSubscription(status) as never);
 
-    const usersCalls = mockClient.from.mock.calls.filter(([table]) => table === "users");
-    expect(usersCalls).toHaveLength(1);
-  });
+      const usersCalls = mockClient.from.mock.calls.filter(([table]) => table === "users");
+      expect(usersCalls).toHaveLength(1);
+    }
+  );
 
   it("past_dueの場合はミラー更新のみで降格しない", async () => {
     mockGetStripeClient("past_due");

@@ -102,20 +102,20 @@ describe("fetchPhaseById", () => {
     expect(builder.eq).toHaveBeenCalledWith("is_published", true);
   });
 
-  it.each([
-    "admin",
-    "maintainer",
-  ] as const)("%s の場合、is_published による絞り込みを行わない（未公開もプレビュー可能）", async (role) => {
-    const phase = { id: 1, title: "未公開フェーズ", is_published: false, is_deleted: false };
-    const mockClient = createMockSupabaseClient({ queryResult: { data: phase, error: null } });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+  it.each(["admin", "maintainer"] as const)(
+    "%s の場合、is_published による絞り込みを行わない（未公開もプレビュー可能）",
+    async (role) => {
+      const phase = { id: 1, title: "未公開フェーズ", is_published: false, is_deleted: false };
+      const mockClient = createMockSupabaseClient({ queryResult: { data: phase, error: null } });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await fetchPhaseById(1, role);
+      const result = await fetchPhaseById(1, role);
 
-    expect(result.data).toEqual(phase);
-    const builder = mockClient.from.mock.results[0].value;
-    expect(builder.eq).not.toHaveBeenCalledWith("is_published", true);
-  });
+      expect(result.data).toEqual(phase);
+      const builder = mockClient.from.mock.results[0].value;
+      expect(builder.eq).not.toHaveBeenCalledWith("is_published", true);
+    }
+  );
 });
 
 // ----------------------------------------------------------------
@@ -134,23 +134,23 @@ describe("fetchPublishedThemes", () => {
     expect(builder.eq).toHaveBeenCalledWith("is_published", true);
   });
 
-  it.each([
-    "admin",
-    "maintainer",
-  ] as const)("%s の場合、未公開テーマも含めて取得する（is_published絞り込みなし）", async (role) => {
-    const themes = [
-      { id: 1, name: "公開テーマ", display_order: 1, is_published: true },
-      { id: 2, name: "未公開テーマ", display_order: 2, is_published: false },
-    ];
-    const mockClient = createMockSupabaseClient({ queryResult: { data: themes, error: null } });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+  it.each(["admin", "maintainer"] as const)(
+    "%s の場合、未公開テーマも含めて取得する（is_published絞り込みなし）",
+    async (role) => {
+      const themes = [
+        { id: 1, name: "公開テーマ", display_order: 1, is_published: true },
+        { id: 2, name: "未公開テーマ", display_order: 2, is_published: false },
+      ];
+      const mockClient = createMockSupabaseClient({ queryResult: { data: themes, error: null } });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await fetchPublishedThemes(role);
+      const result = await fetchPublishedThemes(role);
 
-    expect(result.data).toEqual(themes);
-    const builder = mockClient.from.mock.results[0].value;
-    expect(builder.eq).not.toHaveBeenCalledWith("is_published", true);
-  });
+      expect(result.data).toEqual(themes);
+      const builder = mockClient.from.mock.results[0].value;
+      expect(builder.eq).not.toHaveBeenCalledWith("is_published", true);
+    }
+  );
 
   it("DB エラー時、data: null とエラーを返す", async () => {
     const mockClient = createMockSupabaseClient({ queryResult: { data: null, error: dbError } });
@@ -664,37 +664,37 @@ describe("fetchContentSummariesByWeekIds", () => {
     expect(createServerSupabaseClient).not.toHaveBeenCalled();
   });
 
-  it.each([
-    "admin",
-    "maintainer",
-  ] as const)("%s の場合、通常クライアント経由で未公開コンテンツも含めて取得する", async (role) => {
-    const summaries = [
-      {
-        id: 1,
-        title: "未公開コンテンツ",
-        content_type: "exercise",
-        display_order: 1,
-        is_open_to_trial: false,
-        is_published: false,
-        week_id: 100,
-      },
-    ];
-    const mockServerClient = createMockSupabaseClient({
-      queryResult: { data: summaries, error: null },
-    });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+  it.each(["admin", "maintainer"] as const)(
+    "%s の場合、通常クライアント経由で未公開コンテンツも含めて取得する",
+    async (role) => {
+      const summaries = [
+        {
+          id: 1,
+          title: "未公開コンテンツ",
+          content_type: "exercise",
+          display_order: 1,
+          is_open_to_trial: false,
+          is_published: false,
+          week_id: 100,
+        },
+      ];
+      const mockServerClient = createMockSupabaseClient({
+        queryResult: { data: summaries, error: null },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
 
-    const result = await fetchContentSummariesByWeekIds([100], role);
+      const result = await fetchContentSummariesByWeekIds([100], role);
 
-    expect(result.data).toEqual(summaries);
-    expect(createServerSupabaseClient).toHaveBeenCalled();
-    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
-    const builder = mockServerClient.from.mock.results[0].value;
-    expect(builder.eq).not.toHaveBeenCalledWith("is_published", true);
-    // service_role を使わない経路でも is_deleted は必ず絞り込む
-    // （admin / maintainer 向け SELECT RLS は is_deleted を見ないため）
-    expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
-  });
+      expect(result.data).toEqual(summaries);
+      expect(createServerSupabaseClient).toHaveBeenCalled();
+      expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+      const builder = mockServerClient.from.mock.results[0].value;
+      expect(builder.eq).not.toHaveBeenCalledWith("is_published", true);
+      // service_role を使わない経路でも is_deleted は必ず絞り込む
+      // （admin / maintainer 向け SELECT RLS は is_deleted を見ないため）
+      expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
+    }
+  );
 });
 
 // ----------------------------------------------------------------

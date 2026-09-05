@@ -260,16 +260,19 @@ describe("POST /api/upload-pdf 自動採番", () => {
   it.each([
     ["status と statusCode の両方", { status: 409, statusCode: "409" }],
     ["statusCode のみ", { statusCode: "409" }],
-  ])("採番した番号が既に存在した場合（409・%s）は重複と分かるメッセージを返す", async (_label, uploadError) => {
-    mockStorage({ uploadError });
+  ])(
+    "採番した番号が既に存在した場合（409・%s）は重複と分かるメッセージを返す",
+    async (_label, uploadError) => {
+      mockStorage({ uploadError });
 
-    const response = await POST(request() as never);
+      const response = await POST(request() as never);
 
-    expect(response.status).toBe(500);
-    await expect(response.json()).resolves.toEqual({
-      error: "同じ番号のスライドが既に存在します。番号を指定して上書きしてください",
-    });
-  });
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: "同じ番号のスライドが既に存在します。番号を指定して上書きしてください",
+      });
+    }
+  );
 
   it("重複以外のアップロード失敗は汎用メッセージを返す", async () => {
     mockStorage({ uploadError: { status: 500, statusCode: "InternalError" } });

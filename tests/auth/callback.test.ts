@@ -54,9 +54,10 @@ function createAdminClient({
 
 function mockSessionClient(sessionClient: ReturnType<typeof createSessionClient>) {
   vi.mocked(createServerClient).mockImplementation((_url, _key, options) => {
-    options?.cookies.setAll?.([
-      { name: "sb-access-token", value: "token", options: { path: "/" } },
-    ]);
+    options?.cookies.setAll?.(
+      [{ name: "sb-access-token", value: "token", options: { path: "/" } }],
+      {}
+    );
     return sessionClient as never;
   });
 }

@@ -488,36 +488,32 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
     vi.unstubAllEnvs();
   });
 
-  it.each([
-    "active",
-    "trialing",
-    "past_due",
-    "incomplete",
-  ])("契約が記録されている行（%s）は奪わずconflictを返す", async (status) => {
-    const fake = createRaceSupabaseClient({ status, stripe_customer_id: "cus_1" });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
+  it.each(["active", "trialing", "past_due", "incomplete"])(
+    "契約が記録されている行（%s）は奪わずconflictを返す",
+    async (status) => {
+      const fake = createRaceSupabaseClient({ status, stripe_customer_id: "cus_1" });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
 
-    const result = await claimCheckoutSlot(5, now);
+      const result = await claimCheckoutSlot(5, now);
 
-    expect(result).toEqual({ outcome: "conflict" });
-    expect(fake.getRow()?.status).toBe(status);
-    expect(mockSessionsRetrieve).not.toHaveBeenCalled();
-  });
+      expect(result).toEqual({ outcome: "conflict" });
+      expect(fake.getRow()?.status).toBe(status);
+      expect(mockSessionsRetrieve).not.toHaveBeenCalled();
+    }
+  );
 
-  it.each([
-    "canceled",
-    "unpaid",
-    "incomplete_expired",
-    "paused",
-  ])("契約が終わっている行（%s）は再契約のために奪える", async (status) => {
-    const fake = createRaceSupabaseClient({ status, stripe_customer_id: "cus_1" });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
+  it.each(["canceled", "unpaid", "incomplete_expired", "paused"])(
+    "契約が終わっている行（%s）は再契約のために奪える",
+    async (status) => {
+      const fake = createRaceSupabaseClient({ status, stripe_customer_id: "cus_1" });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
 
-    const result = await claimCheckoutSlot(5, now);
+      const result = await claimCheckoutSlot(5, now);
 
-    expect(result).toMatchObject({ outcome: "claimed", stripeCustomerId: "cus_1" });
-    expect(fake.getRow()?.status).toBe(CHECKOUT_PENDING_STATUS);
-  });
+      expect(result).toMatchObject({ outcome: "claimed", stripeCustomerId: "cus_1" });
+      expect(fake.getRow()?.status).toBe(CHECKOUT_PENDING_STATUS);
+    }
+  );
 
   it("手続き中のセッションがまだ有効なら、新しく作らず同じURLを再利用する", async () => {
     const fake = createRaceSupabaseClient({
@@ -1104,17 +1100,14 @@ describe("isStripeEnabled", () => {
     expect(isStripeEnabled()).toBe(true);
   });
 
-  it.each([
-    undefined,
-    "false",
-    "1",
-    "TRUE",
-    "",
-  ])("STRIPE_ENABLEDが%s（'true'以外）の場合はfalseを返す（フェイルクローズ）", (value) => {
-    if (value !== undefined) {
-      vi.stubEnv("STRIPE_ENABLED", value);
-    }
+  it.each([undefined, "false", "1", "TRUE", ""])(
+    "STRIPE_ENABLEDが%s（'true'以外）の場合はfalseを返す（フェイルクローズ）",
+    (value) => {
+      if (value !== undefined) {
+        vi.stubEnv("STRIPE_ENABLED", value);
+      }
 
-    expect(isStripeEnabled()).toBe(false);
-  });
+      expect(isStripeEnabled()).toBe(false);
+    }
+  );
 });
