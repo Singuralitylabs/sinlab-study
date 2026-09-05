@@ -52,11 +52,17 @@ function createAdminClient({
   };
 }
 
+// @supabase/ssr がセッション Cookie 書き込み時に setAll へ渡すヘッダー（CDN キャッシュ防止）
+const SESSION_RESPONSE_HEADERS = {
+  "Cache-Control": "private, no-cache, no-store, must-revalidate, max-age=0",
+  Pragma: "no-cache",
+};
+
 function mockSessionClient(sessionClient: ReturnType<typeof createSessionClient>) {
   vi.mocked(createServerClient).mockImplementation((_url, _key, options) => {
     options?.cookies.setAll?.(
       [{ name: "sb-access-token", value: "token", options: { path: "/" } }],
-      {}
+      SESSION_RESPONSE_HEADERS
     );
     return sessionClient as never;
   });
@@ -90,6 +96,9 @@ describe("GET /auth/callback", () => {
     expect(res.headers.get("location")).toBe("http://localhost/");
     expect(sendSlackNewUserNotification).toHaveBeenCalled();
     expect(setCookieHeader(res)).toContain("sb-access-token=token");
+    // セッション Cookie を含む応答には ssr が渡した Cache-Control 等が転写される
+    expect(res.headers.get("cache-control")).toBe(SESSION_RESPONSE_HEADERS["Cache-Control"]);
+    expect(res.headers.get("pragma")).toBe("no-cache");
   });
 
   it("insert 失敗時は /login?error=registration_failed へリダイレクトし、通知もセッション Cookie も付けない", async () => {

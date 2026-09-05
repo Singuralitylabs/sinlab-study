@@ -60,11 +60,17 @@ export async function proxy(request: NextRequest) {
             name: string;
             value: string;
             options: CookieOptions;
-          }[]
+          }[],
+          headers: Record<string, string>
         ) {
           for (const { name, value, options } of cookiesToSet) {
             request.cookies.set(name, value);
             response.cookies.set(name, value, options);
+          }
+          // セッション Cookie を書き換えた応答は CDN にキャッシュさせない（@supabase/ssr が
+          // Cache-Control: private, no-store 等を渡してくる）。省くと他人のトークンが配信されうる
+          for (const [key, value] of Object.entries(headers)) {
+            response.headers.set(key, value);
           }
         },
       },

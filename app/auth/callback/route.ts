@@ -12,10 +12,18 @@ type CookieToSet = {
   options: CookieOptions;
 };
 
-function redirectWithSessionCookies(url: URL, cookies: CookieToSet[]) {
+function redirectWithSessionCookies(
+  url: URL,
+  cookies: CookieToSet[],
+  headers: Record<string, string>
+) {
   const redirectResponse = NextResponse.redirect(url);
   for (const { name, value, options } of cookies) {
     redirectResponse.cookies.set(name, value, options);
+  }
+  // セッション Cookie を含む応答は CDN にキャッシュさせない（@supabase/ssr が渡す Cache-Control 等）
+  for (const [key, value] of Object.entries(headers)) {
+    redirectResponse.headers.set(key, value);
   }
   return redirectResponse;
 }
@@ -30,6 +38,7 @@ export async function GET(request: NextRequest) {
 
   // cookieを蓄積するための配列
   const cookiesToReturn: CookieToSet[] = [];
+  const headersToReturn: Record<string, string> = {};
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -44,9 +53,10 @@ export async function GET(request: NextRequest) {
       getAll() {
         return request.cookies.getAll();
       },
-      setAll(cookiesToSet: CookieToSet[]) {
-        // cookieを配列に蓄積（後でリダイレクトレスポンスに設定する）
+      setAll(cookiesToSet: CookieToSet[], headers: Record<string, string>) {
+        // cookie と付随ヘッダーを蓄積（後でリダイレクトレスポンスに設定する）
         cookiesToReturn.push(...cookiesToSet);
+        Object.assign(headersToReturn, headers);
       },
     },
   });
@@ -122,5 +132,9 @@ export async function GET(request: NextRequest) {
     redirectPath = "/rejected";
   }
 
-  return redirectWithSessionCookies(new URL(redirectPath, origin), cookiesToReturn);
+  return redirectWithSessionCookies(
+    new URL(redirectPath, origin),
+    cookiesToReturn,
+    headersToReturn
+  );
 }

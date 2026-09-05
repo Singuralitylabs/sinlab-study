@@ -18,6 +18,8 @@ export async function createServerSupabaseClient() {
       getAll() {
         return cookieStore.getAll();
       },
+      // 第2引数 headers（Cache-Control 等）は next/headers 経由ではレスポンスに設定できないため受け取らない。
+      // トークン更新は通常 proxy.ts で先に行われ、そちらでヘッダーを付与している
       setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
         try {
           for (const { name, value, options } of cookiesToSet) {
