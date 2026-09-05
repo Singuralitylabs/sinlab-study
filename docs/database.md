@@ -645,15 +645,18 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 
 **判明した事実:**
 
-1. リモートの `001`〜`015`（旧フラット構成時代の履歴）は、2026年4月のディレクトリ再編（コミット `c14bbe9`）で全て `20260412010000_create_tables.sql` / `20260412010001_rls_policies.sql` / `20260412010002〜4_seed_gas_*.sql` の4ファイルに統合・消滅済み。個別バージョンとしては現存しない（例: 旧`004`(add_learning_themes)・`007`(create_ai_reviews)・`008`(add_slide_content_type)・`009`(add_reference_answer)・`012`(add_allowed_submission_types)・`013`(add_code_language)・`014`(add_hint_column) は全て `20260412010000_create_tables.sql` に統合されている）。
+1. リモートの `001`〜`015`（旧フラット構成時代の履歴）は、2026年4月のディレクトリ再編（コミット `c14bbe9`）で全て `20260412010000_create_tables.sql` / `20260412010001_rls_policies.sql` / `20260412010002〜4_seed_gas_*.sql` の5ファイルに統合・消滅済み。個別バージョンとしては現存しない（例: 旧`004`(add_learning_themes)・`007`(create_ai_reviews)・`008`(add_slide_content_type)・`009`(add_reference_answer)・`012`(add_allowed_submission_types)・`013`(add_code_language)・`014`(add_hint_column) は全て `20260412010000_create_tables.sql` に統合されている）。
 2. `20260715233228`（`consolidate_rls_policies`、#77）は、`20260715233228_consolidate_rls_policies.sql` と**内容が完全一致**（コメント文まで一致）することを確認済み。ファイル名にこの実際のバージョンをそのまま採用している。
 3. `20260614080707`（`seed_gas_practical_course_structure`）は、リポジトリのどのファイルにも対応がなく完全に欠落していた。`schema_migrations.statements` から内容を復元し、`20260614080707_seed_gas_practical_course_structure.sql` として追加した。
-4. **未解決の欠落（本節では対応しきれていない）**: 上記3を復元しても、このファイルは `learning_themes.name = 'GAS学習（実践編）'` の行が事前に存在しないと `RAISE EXCEPTION` で失敗する。また `20260524000000_seed_gas_advanced_exercises.sql` も `learning_themes.name = 'GAS学習（応用編）'` の週・フェーズが既に存在する前提で `learning_contents` のみを INSERT している。**この2テーマ（応用編・実践編）の `learning_themes` / `learning_phases` / `learning_weeks` を作成するSQLは、リポジトリのどこにも存在しない**（`grep`で全ファイルを検索して確認済み）。Supabaseダッシュボード等で直接作成されたとみられ、本番の該当行を `SELECT` で書き出してシードSQLとして追加しない限り、このリポジトリのマイグレーションを空のプロジェクトに適用しても本番と同じ状態にはならない。別途対応が必要。
-5. `20260412010000_create_tables.sql`（旧`001_create_tables.sql`）以外の残りのファイル（会員種別・Stripe・サムネイル・チェックアウト排他・お試しユーザー・GAS言語追加・概要欄など）は、2026年4月の再編以降に追加された**リモートの旧履歴に一切記録のない新規マイグレーション**である。これらは本番で機能として稼働済みであることから、CLIを経由せず手動（SQLエディタ等）で適用されたとみられるが、`schema_migrations` に記録がないため個別の裏付けは取れていない。ファイル名のタイムスタンプは、対応する機能追加のgitコミット日時から逆算した目安であり、実際の適用日時そのものではない。
+4. **未解決の欠落（本節では対応しきれていない）**: 上記3で復元した `20260614080707_seed_gas_practical_course_structure.sql` は、`learning_themes.name = 'GAS学習（実践編）'` の行が事前に存在しない場合 `RAISE NOTICE` を出して何もせず終了する（`db push` 自体は止めない）。また `20260524000000_seed_gas_advanced_exercises.sql` も `learning_themes.name = 'GAS学習（応用編）'` の週・フェーズが既に存在する前提で `learning_contents` のみを INSERT しており、対象が無ければ0行INSERTで無害に終わる。ただしいずれも**この2テーマ（応用編・実践編）の `learning_themes` / `learning_phases` / `learning_weeks` を作成するSQLがリポジトリのどこにも存在しない**という根本原因は解消していない（`grep`で全ファイルを検索して確認済み）。Supabaseダッシュボード等で直接作成されたとみられ、本番の該当行を `SELECT` で書き出してシードSQLとして追加しない限り、このリポジトリのマイグレーションを空のプロジェクトに適用しても本番と同じ状態にはならない（`db push` はエラーなく完走するが、この2コースぶんのデータだけ欠落する）。別途対応が必要。
+5. 残りのファイルは以下の2グループに分かれる。
+   - **消滅した旧`001`〜`015`の一部を含むベースラインファイル**: `20260412010001_rls_policies.sql`（旧`002`/`005`/`006`のRLSを統合）、`20260412010002〜4_seed_gas_*.sql`（旧`010`/`011`/`015`のGAS基礎シードを統合）。上記1の対象であり、それぞれ個別のリモートバージョンとしては現存しない。
+   - **2026年4月の再編以降に追加された、リモートの旧履歴に一切記録のない新規マイグレーション**: 会員種別・Stripe・サムネイル・チェックアウト排他・お試しユーザー・GAS言語追加・概要欄・GAS応用編シード・複数ファイル提出対応の13ファイル。これらは本番で機能として稼働済みであることから、CLIを経由せず手動（SQLエディタ等）で適用されたとみられるが、`schema_migrations` に記録がないため個別の裏付けは取れていない。ファイル名のタイムスタンプは、対応する機能追加のgitコミット日時から逆算した目安であり、実際の適用日時そのものではない。
+   - （`20260614080707` と `20260715233228` は上記2グループのいずれでもなく、既にリモートに正しい内容で記録済みの上記2の対象。）
 
 **この結果、リモートとの整合手順は以下の通り（DB接続情報を持つ担当者が実施）:**
 
-1. 旧`001`〜`015`は完全に消滅しており対応ファイルがないため、`supabase migration repair --status reverted 001 002 003 004 005 006 007 008 009 010 011 012 013 014 015 --db-url <接続文字列>` で履歴から一括で外す（`db push`の判定に影響しないため急ぎではないが、`migration list`の出力を整理するために推奨）。
+1. **必須**: 旧`001`〜`015`は完全に消滅しており対応ファイルがない。Supabase CLIはローカルに対応ファイルがないリモートバージョンが存在すると、マイグレーション履歴が不整合とみなして `db push` を拒否する。そのため、`supabase migration repair --status reverted 001 002 003 004 005 006 007 008 009 010 011 012 013 014 015 --db-url <接続文字列>` で履歴から一括で外すことが、以降の手順（`db push` を新規マイグレーションの適用に使えるようにすること）の前提条件となる。
 2. `20260715233228` と `20260614080707` は内容確認済みのため、何もしなくてよい（既にその正しい内容で「適用済み」の状態）。
 3. 本節の表にある残り18ファイル（`20260412010000`〜`20260412010004`、`20260524000000`、`20260527000000`、`20260801000001`〜`20260904000000`）について、各ファイルの内容が実際にリモートへ反映済みであることを確認したうえで、`supabase migration repair --status applied <version> --db-url <接続文字列>` を1件ずつ実行する。確認方法は、`information_schema.columns` / `pg_constraint` / `pg_policies` / `pg_proc` 等で該当オブジェクトを直接クエリする（例: `SELECT prosrc FROM pg_proc WHERE proname = 'get_user_role'` で `20260903000002_secure_get_user_role.sql` の反映を確認するなど）。
 4. 上記が完了し `supabase migration list` で全20ファイルの `Local` / `Remote` が一致することを確認できて初めて、`bunx supabase db push` は新規追加したマイグレーションのみを適用する安全な状態になる。
@@ -699,7 +702,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | 2026年6月 | マイグレーション一覧を実際のディレクトリ構成（`01_schema` / `02_rls` / `03_seed`）に修正。RLSにmaintainerポリシーを追記し、`ai_reviews` のINSERT/UPDATEポリシー記載を削除（Service Role経由のためRLS対象外） |
 | 2026年6月 | 実DB（Supabase）と照合し差分を修正：RLSヘルパー関数 `get_user_role()` / `get_user_id()` を追記し判定ロジックを実装準拠に修正、`users` テーブルのRLS（6.5）・`update_users_updated_at` トリガー・`idx_users_auth_role` インデックスを追記、`users` の文字列カラム型を VARCHAR に修正 |
 | 2026年7月 | お試し（trial）ユーザー機能に対応：`learning_contents` に `is_open_to_trial` カラム追加、RLSヘルパー関数 `get_user_status()` 追加、`learning_contents` のSELECTをお試しユーザー制限付きの別パターンに分離、`user_progress` / `submissions` の書き込みに可視コンテンツ限定のEXISTS条件を追記、マイグレーション一覧・公開制御・upsertパターンの注意点を更新 |
-| 2026年8月 | 会員種別の導入に対応：`users` に `membership_type`（`community` / `general`、承認前・却下は NULL）カラム追加、マイグレーション一覧に `01_schema/004_add_membership_type.sql` を追記 |
+| 2026年8月 | 会員種別の導入に対応：`users` に `membership_type`（`community` / `general`、承認前・却下は NULL）カラム追加、マイグレーション一覧に追記（当時のファイル名は `01_schema/004_add_membership_type.sql`。その後のフラット化・再採番を経て現在は `20260811000000_add_membership_type.sql`） |
 | 2026年8月 | Stripe月額サブスク決済の導入に対応：`stripe_subscriptions`（課金状態のミラー）・`stripe_events`（Webhook冪等性）テーブルを追加。ER図・テーブル定義（3.9/3.10）・RLS（6.6/6.7）・マイグレーション一覧を更新 |
 | 2026年8月 | PRレビュー指摘を反映：`stripe_events` の冪等性設計を「確認→ハンドラ成功後に記録」から、INSERT自体を処理権のclaimとして使う原子的な排他制御（claim/release）に変更。3.10節を更新 |
 | 2026年8月 | GitHub Copilotレビュー指摘を反映：claimにTTLによる再claim救済を追加（サーバーレス関数の異常終了でclaimが永久に残る問題への対処）し3.10節を更新 |
