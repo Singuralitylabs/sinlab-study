@@ -798,43 +798,27 @@ export async function fetchStudentsProgress(): Promise<{
     console.error("公開コンテンツ総数取得エラー:", contentsCountError.message);
   }
 
-  // 完了済み進捗を全ユーザー分まとめて取得し、ユーザー単位に集約する
-  // （ユーザーごとの逐次クエリによるN+1を回避）。
-  // PostgRESTの1リクエスト最大行数（既定1000行）を超えても取りこぼさないよう range でページングする。
-  // サーバー側の max-rows 設定が pageSize より小さい場合でも取りこぼさないよう、
-  // offset は実際に返った行数で進め、0件になった時点で終了する。
+  // ユーザー単位の完了数・最終活動日時はDB側（GROUP BY user_id）で集約する
+  // RPC `get_students_progress_summary`（マイグレーション参照）に問い合わせる。
+  // 旧実装（user_progress の完了済み全行を range でページングしJS側で集約）は
+  // 受講生・完了行数に比例して転送量・リクエスト回数が増え、offsetページング
+  // 途中の行更新で集計がずれる余地もあったため置き換えた（#83）。
   // 進捗の取得に失敗した場合はエラーにせず完了数0で返し、受講生一覧の表示を維持する。
   const progressByUser = new Map<number, { completedCount: number; lastActivity: string | null }>();
   if ((users ?? []).length > 0) {
-    const pageSize = 1000;
-    let offset = 0;
-    let hasMore = true;
-    while (hasMore) {
-      const { data: progress, error: progressError } = await supabase
-        .from("user_progress")
-        .select("user_id, completed_at")
-        .eq("is_completed", true)
-        .order("id")
-        .range(offset, offset + pageSize - 1);
+    const { data: progressSummary, error: progressError } = await supabase.rpc(
+      "get_students_progress_summary"
+    );
 
-      if (progressError) {
-        console.error("受講生進捗取得エラー:", progressError.message);
-        progressByUser.clear();
-        break;
+    if (progressError) {
+      console.error("受講生進捗取得エラー:", progressError.message);
+    } else {
+      for (const row of progressSummary ?? []) {
+        progressByUser.set(row.user_id, {
+          completedCount: row.completed_count,
+          lastActivity: row.last_activity,
+        });
       }
-
-      const rows = progress ?? [];
-      for (const row of rows) {
-        const entry = progressByUser.get(row.user_id) ?? { completedCount: 0, lastActivity: null };
-        entry.completedCount += 1;
-        if (row.completed_at && (!entry.lastActivity || row.completed_at > entry.lastActivity)) {
-          entry.lastActivity = row.completed_at;
-        }
-        progressByUser.set(row.user_id, entry);
-      }
-
-      offset += rows.length;
-      hasMore = rows.length > 0;
     }
   }
 

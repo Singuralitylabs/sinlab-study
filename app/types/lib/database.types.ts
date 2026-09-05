@@ -4,7 +4,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.4";
+    PostgrestVersion: "14.5";
   };
   public: {
     Tables: {
@@ -470,6 +470,14 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      get_students_progress_summary: {
+        Args: never;
+        Returns: {
+          completed_count: number;
+          last_activity: string;
+          user_id: number;
+        }[];
+      };
       get_user_id: { Args: never; Returns: number };
       get_user_role: { Args: never; Returns: string };
       get_user_status: { Args: never; Returns: string };

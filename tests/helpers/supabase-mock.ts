@@ -51,17 +51,22 @@ export function createQueryBuilder(result: QueryResult) {
  *                     （1関数内で複数テーブルを照会するケース用）。
  *                     配列を渡すと from() の呼び出し順に消費される（ページング等の複数回照会用。
  *                     末尾を超えた呼び出しには最後の要素を返し続ける）
+ * @param rpcResults RPC関数名ごとの解決値。tableResults と同様、配列を渡すと rpc() の
+ *                   呼び出し順に消費される
  */
 export function createMockSupabaseClient({
   authResult,
   queryResult,
   tableResults,
+  rpcResults,
 }: {
   authResult?: { data: { user: unknown }; error: unknown };
   queryResult?: QueryResult;
   tableResults?: Record<string, QueryResult | QueryResult[]>;
+  rpcResults?: Record<string, QueryResult | QueryResult[]>;
 } = {}) {
   const callCounts: Record<string, number> = {};
+  const rpcCallCounts: Record<string, number> = {};
 
   return {
     auth: {
@@ -81,6 +86,20 @@ export function createMockSupabaseClient({
         result = configured;
       }
       return createQueryBuilder(result ?? queryResult ?? { data: null, error: null });
+    }),
+    rpc: vi.fn().mockImplementation((fn: string) => {
+      const configured = rpcResults?.[fn];
+      let result: QueryResult | undefined;
+      if (Array.isArray(configured)) {
+        if (configured.length > 0) {
+          const index = Math.min(rpcCallCounts[fn] ?? 0, configured.length - 1);
+          rpcCallCounts[fn] = (rpcCallCounts[fn] ?? 0) + 1;
+          result = configured[index];
+        }
+      } else {
+        result = configured;
+      }
+      return Promise.resolve(result ?? { data: null, error: null });
     }),
   };
 }

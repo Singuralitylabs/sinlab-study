@@ -535,6 +535,8 @@ service_role は RLS を素通りするため、この経路のクエリでは `
 
 maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進捗を参照するため、admin と同様に全件の SELECT を許可する。
 
+**受講生進捗一覧の集計**: `/manage/students` はユーザーごとの完了数・最終活動日時を、RPC `get_students_progress_summary()`（`GROUP BY user_id`、#83）から取得する。この関数は `SECURITY DEFINER` を使わないプレーンな SQL 関数（デフォルトの `SECURITY INVOKER`）で、呼び出し元の権限のまま上記SELECTポリシーに従う。そのため member が直接呼び出しても本人の1行しか返らず、admin/maintainer が呼び出したときだけ全件が返る（RPC側でのロールチェックは不要）。
+
 **可視コンテンツ限定の EXISTS 条件**:
 
 お試しユーザーがお試し非公開コンテンツの進捗を書き込めないよう、INSERT / UPDATE に対象コンテンツが自身に可視であることの EXISTS 条件を課す。
@@ -639,6 +641,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | `20260903000002_secure_get_user_role.sql` | `get_user_role()` に `status <> 'rejected'` 条件を追加し、却下ユーザーが admin/maintainer ロールを保持したまま認可を突破できないようにする（#104） |
 | `20260903000003_add_gas_code_language.sql` | `learning_contents.code_language` のCHECK制約に `gas` を追加（#56） |
 | `20260904000000_add_content_description.sql` | learning_contents に概要欄用の `description` カラムを追加（#66） |
+| `20260905000000_add_student_progress_summary_rpc.sql` | 受講生進捗集計をDB側集約するRPC `get_students_progress_summary()`（`GROUP BY user_id`）を追加（#83） |
 
 ### 7.1 リモート適用履歴との整合（#149・確定版）
 
@@ -727,3 +730,4 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | 2026年9月 | Supabase CLIがサブディレクトリを走査できず `migration list` / `db push` がローカルのマイグレーションを検出できない問題（#149）に対応：`supabase/migrations/` を `01_schema` / `02_rls` / `03_seed` のサブディレクトリからフラット構成へ再編。7章にリモート適用履歴との整合手順（7.1）を追記 |
 | 2026年9月 | 上記の続報（#149）：リモートの `schema_migrations.statements` を実際に取得し、連番ファイル名が旧履歴と番号だけ一致し中身は無関係だったことが判明したため、ファイル名を実際に検証済みのタイムスタンプ識別子へ全面的に振り直し。欠落していた「GAS学習（実践編）」シードを復元し、「応用編」「実践編」テーマ自体の作成SQLが存在しない別の欠落を7.1節に記録 |
 | 2026年9月 | #49対応：「GAS学習（応用編）」のテーマ・フェーズ・週・video/slideコンテンツ構造のシード（`20260521000000_seed_gas_advanced_course_structure.sql`）を追加し、本番の実値をSELECTで確認のうえ実装。マイグレーション一覧・7.1節（未解決事項4・整合手順5）を更新し、応用編側の欠落解消と実践編側が引き続き未解決である旨を反映 |
+| 2026年9月 | #83対応：受講生進捗集計をDB側集約（RPC `get_students_progress_summary()`）へ移行。従来は `user_progress` の完了済み全行をアプリ側でページング集計しておりN+1は解消済みだったが転送量・リクエスト回数が受講生数に比例していた。`SECURITY DEFINER` を使わずRLSに委譲する方針を6.2節に追記し、マイグレーション一覧を更新 |

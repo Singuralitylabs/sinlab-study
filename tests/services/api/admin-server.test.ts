@@ -33,23 +33,17 @@ describe("fetchStudentsProgress", () => {
     { id: 2, display_name: "受講生B", email: "b@example.com" },
   ];
 
-  it("完了済み進捗をユーザー単位に集約して返す", async () => {
+  it("完了済み進捗をユーザー単位に集約して返す（RPCがGROUP BY user_idの結果を返す）", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         users: { data: users, error: null },
         learning_contents: { data: null, error: null, count: 10 },
-        // 1回目: 進捗3行 → 2回目: 空ページでページング終了
-        user_progress: [
-          {
-            data: [
-              { user_id: 1, completed_at: "2026-07-01T00:00:00+00:00" },
-              { user_id: 1, completed_at: "2026-07-03T00:00:00+00:00" },
-              { user_id: 1, completed_at: "2026-07-02T00:00:00+00:00" },
-            ],
-            error: null,
-          },
-          { data: [], error: null },
-        ],
+      },
+      rpcResults: {
+        get_students_progress_summary: {
+          data: [{ user_id: 1, completed_count: 3, last_activity: "2026-07-03T00:00:00+00:00" }],
+          error: null,
+        },
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
@@ -68,60 +62,28 @@ describe("fetchStudentsProgress", () => {
     ]);
   });
 
-  it("進捗が複数ページにまたがる場合、全ページ分を集約する（max-rows 非依存）", async () => {
+  it("user_progress の集計はRPCへの1回の呼び出しに閉じる（N+1・ページングの解消）", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         users: { data: users, error: null },
         learning_contents: { data: null, error: null, count: 10 },
-        // サーバーが1回あたり2行しか返さないケース（max-rows < pageSize 相当）
-        user_progress: [
-          {
-            data: [
-              { user_id: 1, completed_at: "2026-07-01T00:00:00+00:00" },
-              { user_id: 2, completed_at: "2026-07-02T00:00:00+00:00" },
-            ],
-            error: null,
-          },
-          { data: [{ user_id: 1, completed_at: "2026-07-04T00:00:00+00:00" }], error: null },
-          { data: [], error: null },
-        ],
       },
-    });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
-
-    const result = await fetchStudentsProgress();
-
-    expect(result.error).toBeNull();
-    expect(result.data).toEqual([
-      {
-        user: users[0],
-        totalContents: 10,
-        completedContents: 2,
-        lastActivity: "2026-07-04T00:00:00+00:00",
-      },
-      {
-        user: users[1],
-        totalContents: 10,
-        completedContents: 1,
-        lastActivity: "2026-07-02T00:00:00+00:00",
-      },
-    ]);
-  });
-
-  it("user_progress への照会回数はユーザー数に依存しない（N+1の解消）", async () => {
-    const mockClient = createMockSupabaseClient({
-      tableResults: {
-        users: { data: users, error: null },
-        learning_contents: { data: null, error: null, count: 10 },
-        user_progress: { data: [], error: null },
+      rpcResults: {
+        get_students_progress_summary: { data: [], error: null },
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
 
     await fetchStudentsProgress();
 
-    const progressCalls = mockClient.from.mock.calls.filter(([table]) => table === "user_progress");
+    const progressCalls = mockClient.rpc.mock.calls.filter(
+      ([fn]) => fn === "get_students_progress_summary"
+    );
     expect(progressCalls).toHaveLength(1);
+    const tableProgressCalls = mockClient.from.mock.calls.filter(
+      ([table]) => table === "user_progress"
+    );
+    expect(tableProgressCalls).toHaveLength(0);
   });
 
   it("進捗取得エラー時は完了数0にフォールバックし、受講生一覧は返す", async () => {
@@ -129,7 +91,9 @@ describe("fetchStudentsProgress", () => {
       tableResults: {
         users: { data: users, error: null },
         learning_contents: { data: null, error: null, count: 10 },
-        user_progress: { data: null, error: dbError },
+      },
+      rpcResults: {
+        get_students_progress_summary: { data: null, error: dbError },
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
@@ -156,8 +120,7 @@ describe("fetchStudentsProgress", () => {
 
     expect(result.error).toBeNull();
     expect(result.data).toEqual([]);
-    const progressCalls = mockClient.from.mock.calls.filter(([table]) => table === "user_progress");
-    expect(progressCalls).toHaveLength(0);
+    expect(mockClient.rpc).not.toHaveBeenCalled();
   });
 
   it("ユーザー一覧取得エラー時、data: null とエラーを返す", async () => {
