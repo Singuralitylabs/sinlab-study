@@ -180,10 +180,10 @@ function getRowCount() {
 - 回答結果の一覧表示
 
 ### 動画
-[フォーム回答結果のWebアプリ公開（動画）](https://www.youtube.com/watch?v=oUmvnQDoIUI)
+[フォームのWebアプリ公開（動画）](https://www.youtube.com/watch?v=oUmvnQDoIUI)
 
 ### スライド
-[フォーム回答結果のWebアプリ公開（スライド）]({{SUPABASE_STORAGE_URL}}/slides/gas-advanced/slide-05.pdf)
+[フォームのWebアプリ公開（スライド）]({{SUPABASE_STORAGE_URL}}/slides/gas-advanced/slide-05.pdf)
 
 ### 課題
 
