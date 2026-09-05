@@ -665,7 +665,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 
 ### 7.2 マイグレーション追加後の運用
 
-このリポジトリには `supabase/config.toml` がなく、Docker上のローカルSupabaseスタック（`supabase start` / `db reset`）は未整備。そのため動作確認は `.env.local` がリンクしている開発用プロジェクトに対して行う。
+このリポジトリには `supabase/config.toml` がなく、Docker上のローカルSupabaseスタック（`supabase start` / `supabase db reset`）は未整備。そのため動作確認は `.env.local` がリンクしている開発用プロジェクトに対して行う。
 
 1. `bunx supabase migration new <説明>` でファイルを作成し、内容を実装する。
 2. `bunx supabase db push` で開発用プロジェクトに適用し、アプリを動かして動作確認する。
