@@ -93,6 +93,14 @@ bun dev
 | `bun run test` | Vitest によるユニットテスト実行 |
 | `bun run test:all` | build/db:types/lint/format/check/test を一括実行 |
 
+## Dependabot PR のマージ運用
+
+依存関係の更新は [Dependabot](./.github/dependabot.yml) が週次（npm）・月次（GitHub Actions）で自動検出し、更新 PR を作成する。マイナー・パッチ更新は `@supabase/*`・`@codemirror/*` を含めグループごとに集約され、メジャー更新は個別 PR になる。
+
+- レビュー・マージ担当はリポジトリ管理者（Issue #35 起票者）が週次で確認する。
+- マイナー・パッチのグループ PR は、既存 CI（Biome / 型チェック / ユニットテスト / ビルド）が通過していればそのままマージしてよい。
+- メジャー更新の PR は Breaking Changes を確認したうえでマージする。特に `next` はリリースノートを確認すること。
+
 ## プロジェクト構成
 
 ```
