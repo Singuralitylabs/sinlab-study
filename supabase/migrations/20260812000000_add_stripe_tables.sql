@@ -4,7 +4,7 @@
 -- stripe_subscriptions: ユーザーごとの課金状態のミラー（1ユーザー1行）。
 -- アプリの認可判定は従来どおり users.status / users.membership_type が
 -- 唯一の真実であり、このテーブルは Stripe 側の状態を参照可能にするための
--- ミラーに徹する（RLSポリシーは 014_stripe_tables_policies.sql で定義）。
+-- ミラーに徹する（RLSポリシーは 20260812000001_stripe_tables_policies.sql で定義）。
 --
 -- stripe_events: Webhookイベントの冪等性を担保するための処理権（claim）記録。
 -- event.id（evt_...）をPKとし、素のINSERTを「claim」として使う原子的排他制御に
