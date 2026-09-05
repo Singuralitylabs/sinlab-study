@@ -73,9 +73,6 @@ bun install
 # データベースマイグレーション（Supabase CLIを使用。既存環境は上記の注意を参照）
 bunx supabase db push
 
-# ローカルでの動作確認（ローカルDBを空の状態から全マイグレーション＋シードで再構築。既存のローカルデータは失われる）
-bunx supabase db reset
-
 # 開発サーバー起動
 bun dev
 ```
