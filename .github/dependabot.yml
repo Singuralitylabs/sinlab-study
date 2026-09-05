@@ -19,6 +19,8 @@ updates:
           - "minor"
           - "patch"
       bun-minor-patch:
+        patterns:
+          - "*"
         exclude-patterns:
           - "@supabase/*"
           - "@codemirror/*"
