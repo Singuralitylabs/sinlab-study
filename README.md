@@ -34,37 +34,13 @@
 
 ### Bun のインストール手順
 
-Bun のバージョンは `.bun-version` と `package.json` の `packageManager` で **`1.3.8`** に固定している（CI の `oven-sh/setup-bun` も `.bun-version` を参照する）。ローカルでも同じバージョンを使うこと。
+本リポジトリでは Bun のバージョンを **`1.3.8`** に固定している（`.bun-version` と `package.json` の `packageManager`。CI の `oven-sh/setup-bun` も `.bun-version` を参照する）。インストール方法は [公式ドキュメント](https://bun.sh/docs/installation) を参照し、`bun --version` が `1.3.8` を出力することを確認する。
 
-**mise を使う場合**（推奨。`.bun-version` を自動で読み取る）
+[mise](https://mise.jdx.dev/) を使う場合は、以下の設定を一度行っておくと `mise install` で `.bun-version` のバージョンが自動的に導入される。
 
 ```bash
-# mise のインストール（未導入の場合）
-curl https://mise.run | sh
-
-# .bun-version を mise に読み取らせる設定（初回のみ）
 mise settings add idiomatic_version_file_enable_tools bun
-
-# リポジトリ直下で実行すると .bun-version のバージョン（1.3.8）が導入される
-cd sinlab-study
-mise install
 ```
-
-**asdf を使う場合**
-
-```bash
-asdf plugin add bun
-asdf install bun 1.3.8
-asdf set bun 1.3.8   # asdf v0.16 未満は `asdf local bun 1.3.8`
-```
-
-**公式インストーラで特定バージョンを入れる場合**
-
-```bash
-curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.8"
-```
-
-導入後は `bun --version` が `1.3.8` を出力することを確認する。
 
 > **バージョンを上げるときのルール**: `.bun-version` / `package.json` の `packageManager` / この節の記載を**同時に**更新すること。CI は `.bun-version` を参照しているため、ファイル間で値がずれると CI とローカルの環境差異が再発する。
 
