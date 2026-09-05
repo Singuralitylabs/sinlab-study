@@ -764,6 +764,17 @@ interface StudentProgress {
   lastActivity: string | null;
 }
 
+/**
+ * RPC `get_students_progress_summary()` の返り値の型。生成型（database.types.ts）は
+ * `last_activity` を非null扱いにしているが、`completed_at` がnullableな以上、
+ * 実際には全行が未完了時刻無しの場合などにnullになりうるため、ここで明示的に上書きする。
+ */
+interface StudentProgressSummaryRow {
+  user_id: number;
+  completed_count: number;
+  last_activity: string | null;
+}
+
 export async function fetchStudentsProgress(): Promise<{
   data: StudentProgress[] | null;
   error: PostgrestError | null;
@@ -810,10 +821,17 @@ export async function fetchStudentsProgress(): Promise<{
     let offset = 0;
     let hasMore = true;
     while (hasMore) {
-      const { data: progressSummary, error: progressError } = await supabase
+      // completed_at はnullableで max() は全NULLならNULLを返すため、
+      // last_activity は実際には null になりうる（生成型は非null）。
+      // .overrideTypes() はこの関数内の他の .from().select() 呼び出しと同居すると
+      // postgrest-js側の型推論がずれてビルドできないため、awaitの戻り値を直接castする。
+      const { data: progressSummary, error: progressError } = (await supabase
         .rpc("get_students_progress_summary")
         .order("user_id")
-        .range(offset, offset + pageSize - 1);
+        .range(offset, offset + pageSize - 1)) as unknown as {
+        data: StudentProgressSummaryRow[] | null;
+        error: PostgrestError | null;
+      };
 
       if (progressError) {
         console.error("受講生進捗取得エラー:", progressError.message);
@@ -823,11 +841,9 @@ export async function fetchStudentsProgress(): Promise<{
 
       const rows = progressSummary ?? [];
       for (const row of rows) {
-        // completed_at はnullableで max() は全NULLならNULLを返すため、
-        // last_activity は実際には null になりうる（生成型は非null）
         progressByUser.set(row.user_id, {
           completedCount: row.completed_count,
-          lastActivity: row.last_activity ?? null,
+          lastActivity: row.last_activity,
         });
       }
 

@@ -68,6 +68,33 @@ describe("fetchStudentsProgress", () => {
     ]);
   });
 
+  // last_activity はRPCの生成型上は非nullだが、completed_at がnullableな以上
+  // 実際にはnullが返りうる（overrideTypesで型を上書きしている）。ここではRPCが
+  // nullを返した場合に、StudentProgress.lastActivityへnullのまま落とすことを保証する。
+  it("RPCが last_activity: null を返した場合、そのままnullとしてマッピングする", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        users: { data: users, error: null },
+        learning_contents: { data: null, error: null, count: 10 },
+      },
+      rpcResults: {
+        get_students_progress_summary: [
+          { data: [{ user_id: 1, completed_count: 1, last_activity: null }], error: null },
+          { data: [], error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchStudentsProgress();
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([
+      { user: users[0], totalContents: 10, completedContents: 1, lastActivity: null },
+      { user: users[1], totalContents: 10, completedContents: 0, lastActivity: null },
+    ]);
+  });
+
   it("RPCの返り値が複数ページにまたがる場合、全ページ分を集約する（db-max-rows非依存）", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {

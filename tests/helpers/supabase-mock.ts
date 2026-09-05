@@ -43,18 +43,6 @@ export function createQueryBuilder(result: QueryResult) {
 }
 
 /**
- * Supabase クライアントモックを生成する。
- *
- * @param authResult auth.getUser() の戻り値。省略時は { data: { user: null }, error: null }
- * @param queryResult from().select()... チェーンの解決値。省略時は { data: null, error: null }
- * @param tableResults テーブル名ごとの解決値。指定したテーブルは queryResult より優先される
- *                     （1関数内で複数テーブルを照会するケース用）。
- *                     配列を渡すと from() の呼び出し順に消費される（ページング等の複数回照会用。
- *                     末尾を超えた呼び出しには最後の要素を返し続ける）
- * @param rpcResults RPC関数名ごとの解決値。tableResults と同様、配列を渡すと rpc() の
- *                   呼び出し順に消費される
- */
-/**
  * 呼び出し順に応じて設定済みの結果を1件選ぶ。配列は呼び出し順に消費し
  * （末尾を超えたら最後の要素を返し続ける）、空配列は未指定として扱う。
  */
@@ -74,6 +62,18 @@ function pickConfiguredResult(
   return configured[index];
 }
 
+/**
+ * Supabase クライアントモックを生成する。
+ *
+ * @param authResult auth.getUser() の戻り値。省略時は { data: { user: null }, error: null }
+ * @param queryResult from().select()... / rpc() チェーンの解決値。省略時は { data: null, error: null }
+ * @param tableResults テーブル名ごとの解決値。指定したテーブルは queryResult より優先される
+ *                     （1関数内で複数テーブルを照会するケース用）。
+ *                     配列を渡すと from() の呼び出し順に消費される（ページング等の複数回照会用。
+ *                     末尾を超えた呼び出しには最後の要素を返し続ける）
+ * @param rpcResults RPC関数名ごとの解決値。tableResults と同様、配列を渡すと rpc() の
+ *                   呼び出し順に消費される。未指定の関数は from() と同様 queryResult にフォールバックする
+ */
 export function createMockSupabaseClient({
   authResult,
   queryResult,
@@ -99,7 +99,7 @@ export function createMockSupabaseClient({
     // .order() / .range() 等でチェーンされるため from() と同じビルダーを返す
     rpc: vi.fn().mockImplementation((fn: string) => {
       const result = pickConfiguredResult(rpcResults?.[fn], rpcCallCounts, fn);
-      return createQueryBuilder(result ?? { data: null, error: null });
+      return createQueryBuilder(result ?? queryResult ?? { data: null, error: null });
     }),
   };
 }
