@@ -40,6 +40,5 @@ $$;
 -- 既存ヘルパー関数と同じ規約（PUBLIC, anon からのREST RPC実行を禁止）。
 -- SECURITY INVOKER のためRLSは効くが、未認証（anon）からの実行自体は
 -- 許可しない。
-REVOKE ALL ON FUNCTION public.get_students_progress_summary() FROM PUBLIC;
-REVOKE EXECUTE ON FUNCTION public.get_students_progress_summary() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.get_students_progress_summary() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_students_progress_summary() TO authenticated, service_role;
