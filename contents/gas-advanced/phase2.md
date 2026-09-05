@@ -170,7 +170,7 @@ function getRowCount() {
 
 ---
 
-## Week 2-2: フォームのWebアプリ公開
+## Week 2-2: フォーム回答結果のWebアプリ公開
 
 ### 学習トピック
 - HTMLフォームの作成（input・textarea・button）
@@ -180,10 +180,10 @@ function getRowCount() {
 - 回答結果の一覧表示
 
 ### 動画
-[フォームのWebアプリ公開（動画）](https://www.youtube.com/watch?v=oUmvnQDoIUI)
+[フォーム回答結果のWebアプリ公開（動画）](https://www.youtube.com/watch?v=oUmvnQDoIUI)
 
 ### スライド
-[フォームのWebアプリ公開（スライド）]({{SUPABASE_STORAGE_URL}}/slides/gas-advanced/slide-05.pdf)
+[フォーム回答結果のWebアプリ公開（スライド）]({{SUPABASE_STORAGE_URL}}/slides/gas-advanced/slide-05.pdf)
 
 ### 課題
 
