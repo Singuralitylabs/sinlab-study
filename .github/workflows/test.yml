@@ -8,6 +8,7 @@ on:
       - "vitest.config.ts"
       - "package.json"
       - "bun.lock"
+      - ".bun-version"
   pull_request:
     paths:
       - "app/**"
@@ -15,6 +16,7 @@ on:
       - "vitest.config.ts"
       - "package.json"
       - "bun.lock"
+      - ".bun-version"
   workflow_dispatch:
 
 jobs:

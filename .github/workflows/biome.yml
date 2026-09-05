@@ -7,12 +7,14 @@ on:
       - "biome.json"
       - "package.json"
       - "bun.lock"
+      - ".bun-version"
   pull_request:
     paths:
       - "app/**"
       - "biome.json"
       - "package.json"
       - "bun.lock"
+      - ".bun-version"
   workflow_dispatch:
 
 jobs:

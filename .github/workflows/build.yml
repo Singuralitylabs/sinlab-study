@@ -6,6 +6,7 @@ on:
       - "app/**"
       - "package.json"
       - "bun.lock"
+      - ".bun-version"
       - "next.config.ts"
       - "tsconfig.json"
   pull_request:
@@ -13,6 +14,7 @@ on:
       - "app/**"
       - "package.json"
       - "bun.lock"
+      - ".bun-version"
       - "next.config.ts"
       - "tsconfig.json"
   workflow_dispatch:
