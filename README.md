@@ -29,8 +29,20 @@
 
 ### 前提条件
 
-- [Bun](https://bun.sh/) がインストール済みであること
+- [Bun](https://bun.sh/) がインストール済みであること（バージョンは下記「Bun のインストール手順」を参照）
 - Supabase プロジェクトが作成済みであること
+
+### Bun のインストール手順
+
+本リポジトリでは Bun のバージョンを **`1.3.8`** に固定している（`.bun-version` と `package.json` の `packageManager`。CI の `oven-sh/setup-bun` も `.bun-version` を参照する）。インストール方法は [公式ドキュメント](https://bun.sh/docs/installation) を参照し、`bun --version` が `1.3.8` を出力することを確認する。
+
+[mise](https://mise.jdx.dev/) を使う場合は、以下の設定を一度行っておくと `mise install` で `.bun-version` のバージョンが自動的に導入される。
+
+```bash
+mise settings add idiomatic_version_file_enable_tools bun
+```
+
+> **バージョンを上げるときのルール**: `.bun-version` / `package.json` の `packageManager` / この節の記載を**同時に**更新すること。CI は `.bun-version` を参照しているため、ファイル間で値がずれると CI とローカルの環境差異が再発する。
 
 ### 環境変数
 
