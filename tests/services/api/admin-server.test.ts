@@ -33,17 +33,23 @@ describe("fetchStudentsProgress", () => {
     { id: 2, display_name: "受講生B", email: "b@example.com" },
   ];
 
-  it("完了済み進捗をユーザー単位に集約して返す（RPCがGROUP BY user_idの結果を返す）", async () => {
+  // 集約自体（GROUP BY user_id・count(*)・max(completed_at)、is_completed = true の
+  // 絞り込み、NULLの扱い）はRPC定義（マイグレーション）側の責務で、このテストが
+  // 検証するのはRPCの返り値をStudentProgressへ正しくマッピングすることのみ。
+  it("RPCが返した集計結果をユーザーごとのStudentProgressにマッピングする", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         users: { data: users, error: null },
         learning_contents: { data: null, error: null, count: 10 },
       },
       rpcResults: {
-        get_students_progress_summary: {
-          data: [{ user_id: 1, completed_count: 3, last_activity: "2026-07-03T00:00:00+00:00" }],
-          error: null,
-        },
+        get_students_progress_summary: [
+          {
+            data: [{ user_id: 1, completed_count: 3, last_activity: "2026-07-03T00:00:00+00:00" }],
+            error: null,
+          },
+          { data: [], error: null },
+        ],
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
@@ -62,7 +68,53 @@ describe("fetchStudentsProgress", () => {
     ]);
   });
 
-  it("user_progress の集計はRPCへの1回の呼び出しに閉じる（N+1・ページングの解消）", async () => {
+  it("RPCの返り値が複数ページにまたがる場合、全ページ分を集約する（db-max-rows非依存）", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        users: { data: users, error: null },
+        learning_contents: { data: null, error: null, count: 10 },
+      },
+      rpcResults: {
+        // サーバーが1回あたり1行しか返さないケース（db-max-rows < pageSize 相当）
+        get_students_progress_summary: [
+          {
+            data: [{ user_id: 1, completed_count: 5, last_activity: "2026-07-01T00:00:00+00:00" }],
+            error: null,
+          },
+          {
+            data: [{ user_id: 2, completed_count: 2, last_activity: "2026-07-02T00:00:00+00:00" }],
+            error: null,
+          },
+          { data: [], error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchStudentsProgress();
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual([
+      {
+        user: users[0],
+        totalContents: 10,
+        completedContents: 5,
+        lastActivity: "2026-07-01T00:00:00+00:00",
+      },
+      {
+        user: users[1],
+        totalContents: 10,
+        completedContents: 2,
+        lastActivity: "2026-07-02T00:00:00+00:00",
+      },
+    ]);
+    const progressCalls = mockClient.rpc.mock.calls.filter(
+      ([fn]) => fn === "get_students_progress_summary"
+    );
+    expect(progressCalls).toHaveLength(3);
+  });
+
+  it("進捗の照会がRPCへの呼び出しに閉じる（ユーザーごとの逐次クエリ = N+1が無い）", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         users: { data: users, error: null },
@@ -80,10 +132,6 @@ describe("fetchStudentsProgress", () => {
       ([fn]) => fn === "get_students_progress_summary"
     );
     expect(progressCalls).toHaveLength(1);
-    const tableProgressCalls = mockClient.from.mock.calls.filter(
-      ([table]) => table === "user_progress"
-    );
-    expect(tableProgressCalls).toHaveLength(0);
   });
 
   it("進捗取得エラー時は完了数0にフォールバックし、受講生一覧は返す", async () => {

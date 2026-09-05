@@ -54,6 +54,26 @@ export function createQueryBuilder(result: QueryResult) {
  * @param rpcResults RPC関数名ごとの解決値。tableResults と同様、配列を渡すと rpc() の
  *                   呼び出し順に消費される
  */
+/**
+ * 呼び出し順に応じて設定済みの結果を1件選ぶ。配列は呼び出し順に消費し
+ * （末尾を超えたら最後の要素を返し続ける）、空配列は未指定として扱う。
+ */
+function pickConfiguredResult(
+  configured: QueryResult | QueryResult[] | undefined,
+  callCounts: Record<string, number>,
+  key: string
+): QueryResult | undefined {
+  if (!Array.isArray(configured)) {
+    return configured;
+  }
+  if (configured.length === 0) {
+    return undefined;
+  }
+  const index = Math.min(callCounts[key] ?? 0, configured.length - 1);
+  callCounts[key] = (callCounts[key] ?? 0) + 1;
+  return configured[index];
+}
+
 export function createMockSupabaseClient({
   authResult,
   queryResult,
@@ -73,33 +93,13 @@ export function createMockSupabaseClient({
       getUser: vi.fn().mockResolvedValue(authResult ?? { data: { user: null }, error: null }),
     },
     from: vi.fn().mockImplementation((table: string) => {
-      const configured = tableResults?.[table];
-      let result: QueryResult | undefined;
-      if (Array.isArray(configured)) {
-        // 空配列は未指定として扱い、queryResult / デフォルト結果にフォールバックする
-        if (configured.length > 0) {
-          const index = Math.min(callCounts[table] ?? 0, configured.length - 1);
-          callCounts[table] = (callCounts[table] ?? 0) + 1;
-          result = configured[index];
-        }
-      } else {
-        result = configured;
-      }
+      const result = pickConfiguredResult(tableResults?.[table], callCounts, table);
       return createQueryBuilder(result ?? queryResult ?? { data: null, error: null });
     }),
+    // .order() / .range() 等でチェーンされるため from() と同じビルダーを返す
     rpc: vi.fn().mockImplementation((fn: string) => {
-      const configured = rpcResults?.[fn];
-      let result: QueryResult | undefined;
-      if (Array.isArray(configured)) {
-        if (configured.length > 0) {
-          const index = Math.min(rpcCallCounts[fn] ?? 0, configured.length - 1);
-          rpcCallCounts[fn] = (rpcCallCounts[fn] ?? 0) + 1;
-          result = configured[index];
-        }
-      } else {
-        result = configured;
-      }
-      return Promise.resolve(result ?? { data: null, error: null });
+      const result = pickConfiguredResult(rpcResults?.[fn], rpcCallCounts, fn);
+      return createQueryBuilder(result ?? { data: null, error: null });
     }),
   };
 }

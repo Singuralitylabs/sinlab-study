@@ -798,27 +798,41 @@ export async function fetchStudentsProgress(): Promise<{
     console.error("公開コンテンツ総数取得エラー:", contentsCountError.message);
   }
 
-  // ユーザー単位の完了数・最終活動日時はDB側（GROUP BY user_id）で集約する
-  // RPC `get_students_progress_summary`（マイグレーション参照）に問い合わせる。
-  // 旧実装（user_progress の完了済み全行を range でページングしJS側で集約）は
-  // 受講生・完了行数に比例して転送量・リクエスト回数が増え、offsetページング
-  // 途中の行更新で集計がずれる余地もあったため置き換えた（#83）。
+  // ユーザー単位の完了数・最終活動日時はRPC `get_students_progress_summary`
+  // （GROUP BY user_id でDB側集約。マイグレーション参照）に問い合わせる（#83）。
   // 進捗の取得に失敗した場合はエラーにせず完了数0で返し、受講生一覧の表示を維持する。
+  // RPCの返り値もPostgRESTのdb-max-rows（既定1000行）の対象になるため、
+  // user_progress の旧実装と同様に range でページングする
+  // （RPC側の ORDER BY user_id と .order() により安定した順序で進める）。
   const progressByUser = new Map<number, { completedCount: number; lastActivity: string | null }>();
   if ((users ?? []).length > 0) {
-    const { data: progressSummary, error: progressError } = await supabase.rpc(
-      "get_students_progress_summary"
-    );
+    const pageSize = 1000;
+    let offset = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const { data: progressSummary, error: progressError } = await supabase
+        .rpc("get_students_progress_summary")
+        .order("user_id")
+        .range(offset, offset + pageSize - 1);
 
-    if (progressError) {
-      console.error("受講生進捗取得エラー:", progressError.message);
-    } else {
-      for (const row of progressSummary ?? []) {
+      if (progressError) {
+        console.error("受講生進捗取得エラー:", progressError.message);
+        progressByUser.clear();
+        break;
+      }
+
+      const rows = progressSummary ?? [];
+      for (const row of rows) {
+        // completed_at はnullableで max() は全NULLならNULLを返すため、
+        // last_activity は実際には null になりうる（生成型は非null）
         progressByUser.set(row.user_id, {
           completedCount: row.completed_count,
-          lastActivity: row.last_activity,
+          lastActivity: row.last_activity ?? null,
         });
       }
+
+      offset += rows.length;
+      hasMore = rows.length > 0;
     }
   }
 
