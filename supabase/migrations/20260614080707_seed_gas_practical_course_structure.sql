@@ -8,8 +8,8 @@
 -- version=20260614080707 として記録されていたが、過去のディレクトリ再編時に
 -- リポジトリから失われていたものを、その記録から復元した。
 -- 前提となる learning_themes.name = 'GAS学習（実践編）' の行は本ファイルでは
--- 作成しない（存在しない場合は例外を送出する）。このテーマ行および
--- 'GAS学習（応用編）'（019_seed_gas_advanced_exercises.sql が前提とする）の
+-- 作成しない（存在しない場合は何もせず終了する）。このテーマ行および
+-- 'GAS学習（応用編）'（20260524000000_seed_gas_advanced_exercises.sql が前提とする）の
 -- learning_themes/learning_phases/learning_weeks の作成SQLは、調査時点で
 -- リポジトリのどこにも見つかっておらず、本番環境で直接作成されたとみられる。
 -- 完全な再現には、本番の該当行を別途シードSQLとして追加する必要がある。
@@ -25,7 +25,10 @@ DECLARE
 BEGIN
   SELECT id INTO v_theme_id FROM learning_themes WHERE name = 'GAS学習（実践編）';
   IF v_theme_id IS NULL THEN
-    RAISE EXCEPTION 'theme "GAS学習（実践編）" が見つかりません';
+    -- テーマ自体の作成SQLがリポジトリにないため、新規プロジェクト等でまだ
+    -- 存在しない場合は db push 全体を止めずにスキップする（advanced_exercises と同様の方針）
+    RAISE NOTICE 'theme "GAS学習（実践編）" が見つからないためスキップします';
+    RETURN;
   END IF;
 
   FOR r IN

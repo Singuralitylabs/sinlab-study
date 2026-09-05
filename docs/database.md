@@ -655,8 +655,8 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 
 1. 旧`001`〜`015`は完全に消滅しており対応ファイルがないため、`supabase migration repair --status reverted 001 002 003 004 005 006 007 008 009 010 011 012 013 014 015 --db-url <接続文字列>` で履歴から一括で外す（`db push`の判定に影響しないため急ぎではないが、`migration list`の出力を整理するために推奨）。
 2. `20260715233228` と `20260614080707` は内容確認済みのため、何もしなくてよい（既にその正しい内容で「適用済み」の状態）。
-3. 本節の表にある残り17ファイル（`20260412010000`〜`20260412010004`、`20260524000000`、`20260527000000`、`20260801000001`〜`20260904000000`）について、各ファイルの内容が実際にリモートへ反映済みであることを確認したうえで、`supabase migration repair --status applied <version> --db-url <接続文字列>` を1件ずつ実行する。確認方法は、`information_schema.columns` / `pg_constraint` / `pg_policies` / `pg_proc` 等で該当オブジェクトを直接クエリする（例: `SELECT prosrc FROM pg_proc WHERE proname = 'get_user_role'` で `20260903000002_secure_get_user_role.sql` の反映を確認するなど）。
-4. 上記が完了し `supabase migration list` で全19ファイルの `Local` / `Remote` が一致することを確認できて初めて、`bunx supabase db push` は新規追加したマイグレーションのみを適用する安全な状態になる。
+3. 本節の表にある残り18ファイル（`20260412010000`〜`20260412010004`、`20260524000000`、`20260527000000`、`20260801000001`〜`20260904000000`）について、各ファイルの内容が実際にリモートへ反映済みであることを確認したうえで、`supabase migration repair --status applied <version> --db-url <接続文字列>` を1件ずつ実行する。確認方法は、`information_schema.columns` / `pg_constraint` / `pg_policies` / `pg_proc` 等で該当オブジェクトを直接クエリする（例: `SELECT prosrc FROM pg_proc WHERE proname = 'get_user_role'` で `20260903000002_secure_get_user_role.sql` の反映を確認するなど）。
+4. 上記が完了し `supabase migration list` で全20ファイルの `Local` / `Remote` が一致することを確認できて初めて、`bunx supabase db push` は新規追加したマイグレーションのみを適用する安全な状態になる。
 5. **別対応**: 「GAS学習（応用編）」「GAS学習（実践編）」の `learning_themes` / `learning_phases` / `learning_weeks` の作成SQLが存在しない件は、本番の該当データを `SELECT` で書き出し、新規シードマイグレーションとして追加する（本issueの範囲外、別issue化を推奨）。
 
 ---

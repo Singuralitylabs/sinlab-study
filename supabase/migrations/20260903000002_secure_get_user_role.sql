@@ -14,7 +14,7 @@
 -- 本issueのスコープに限定するため <> 'rejected' を採用する。
 --
 -- get_user_status() は 20260801000002_trial_user_policies.sql で定義されており、
--- 本ファイルより後に適用される。定義順の問題を避けるため
+-- 本ファイルより先に適用されるが、関数間の依存を増やさないよう
 -- get_user_status() には依存せず、条件を関数本体に直接組み込む。
 --
 -- CREATE OR REPLACE FUNCTION は同一シグネチャであれば既存の権限設定
