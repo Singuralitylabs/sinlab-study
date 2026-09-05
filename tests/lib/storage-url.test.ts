@@ -24,12 +24,12 @@ describe("resolveStorageUrl", () => {
     );
   });
 
-  it.each([
-    "https://example.com/image.png",
-    "/images/themes/example.png",
-  ])("既存URLは変更しない: %s", (url) => {
-    expect(resolveStorageUrl(url)).toBe(url);
-  });
+  it.each(["https://example.com/image.png", "/images/themes/example.png"])(
+    "既存URLは変更しない: %s",
+    (url) => {
+      expect(resolveStorageUrl(url)).toBe(url);
+    }
+  );
 
   it("Supabase URLが未設定なら相対パスをそのまま返す", () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");

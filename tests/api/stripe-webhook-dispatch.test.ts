@@ -67,19 +67,19 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     expect(releaseEventClaim).not.toHaveBeenCalled();
   });
 
-  it.each([
-    "customer.subscription.updated",
-    "customer.subscription.deleted",
-  ])("%s はsyncSubscriptionStatusを呼ぶ", async (type) => {
-    const subscription = { id: "sub_1" };
-    mockConstructEvent.mockReturnValue({ id: "evt_2", type, data: { object: subscription } });
+  it.each(["customer.subscription.updated", "customer.subscription.deleted"])(
+    "%s はsyncSubscriptionStatusを呼ぶ",
+    async (type) => {
+      const subscription = { id: "sub_1" };
+      mockConstructEvent.mockReturnValue({ id: "evt_2", type, data: { object: subscription } });
 
-    const res = await POST(request("{}") as never);
+      const res = await POST(request("{}") as never);
 
-    expect(res.status).toBe(200);
-    expect(syncSubscriptionStatus).toHaveBeenCalledWith(subscription);
-    expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
-  });
+      expect(res.status).toBe(200);
+      expect(syncSubscriptionStatus).toHaveBeenCalledWith(subscription);
+      expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
+    }
+  );
 
   it("invoice.payment_failed は降格せずSlack通知のみ行う", async () => {
     const invoice = {
