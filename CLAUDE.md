@@ -108,6 +108,8 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 
 `supabase/migrations/` **直下にフラットなSQLファイルで管理する（サブディレクトリを作らない）**。Supabase CLIの `migration list` / `db push` はサブディレクトリを再帰走査しないため（#149）。ファイル名は `supabase migration new` と同じ `<14桁タイムスタンプ>_<説明>.sql`。**タイムスタンプはリモートの適用履歴と比較される一意なバージョン識別子なので、既存ファイルのリネームは必ず `supabase migration list` で対応関係を確認してから行う**（過去に中身が食い違う事故あり。`docs/database.md` 7.1節）。RLSはより小さいタイムスタンプのファイルで参照先カラム・関数が追加済みであること。
 
+マイグレーション追加後の動作確認・型再生成の手順は `docs/database.md` 7.2節を参照。**破壊的変更（カラム削除・リネーム・型変更）を含む場合は、本番反映前に Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)に従うこと**（本番反映・ロールバック手順自体はこのリポジトリでは管理しない）。
+
 ### 環境変数
 
 `.env.local` に設定する。**用途を含む正式な一覧は `README.md` を参照**（ここでは名前のみ）。

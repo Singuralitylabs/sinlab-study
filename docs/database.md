@@ -663,6 +663,17 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 4. 上記が完了し `supabase migration list` で全21ファイルの `Local` / `Remote` が一致することを確認できて初めて、`bunx supabase db push` は新規追加したマイグレーションのみを適用する安全な状態になる。
 5. **別対応**: 「GAS学習（実践編）」の `learning_themes` / `learning_phases` / `learning_weeks` の作成SQLが存在しない件は、本番の該当データを `SELECT` で書き出し、新規シードマイグレーションとして追加する（#49の応用編側と同様の対応。本issueの範囲外、別issue化を推奨）。「GAS学習（応用編）」側は `20260521000000_seed_gas_advanced_course_structure.sql`（#49）で解消済み。
 
+### 7.2 マイグレーション追加後の運用
+
+このリポジトリには `supabase/config.toml` がなく、Docker上のローカルSupabaseスタック（`supabase start` / `supabase db reset`）は未整備。そのため動作確認は `.env.local` がリンクしている開発用プロジェクトに対して行う。
+
+1. `bunx supabase migration new <説明>` でファイルを作成し、内容を実装する。
+2. `bunx supabase db push` で開発用プロジェクトに適用し、アプリを動かして動作確認する。
+3. **`bun run db:types` はリンク先プロジェクトのリモートスキーマから型を生成するため、必ず上記の `db push` の後に実行する**（`db push` 前に実行しても新しいカラム等は反映されない）。生成物（`app/types/lib/database.types.ts`）もコミットする。
+4. 対応する Issue / PR にマイグレーションファイルをひも付けてレビューを受ける。
+
+カラム削除・リネーム・型変更など既存データに影響する破壊的変更を含む場合は、本番反映前に Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)（Step 3 にDBマイグレーション、末尾にロールバック方針を記載）に従うこと。
+
 ---
 
 ## 8. 設計上の補足事項
