@@ -170,7 +170,7 @@ function getRowCount() {
 
 ---
 
-## Week 2-2: フォームのWebアプリ公開
+## Week 2-2: フォーム回答結果のWebアプリ公開
 
 ### 学習トピック
 - HTMLフォームの作成（input・textarea・button）
