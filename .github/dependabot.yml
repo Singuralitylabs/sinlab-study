@@ -1,8 +1,7 @@
 version: 2
 
 updates:
-  # 実体は Bun だが、Dependabot は npm エコシステムとして bun.lock / package.json を解釈する
-  - package-ecosystem: "npm"
+  - package-ecosystem: "bun"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -19,7 +18,7 @@ updates:
         update-types:
           - "minor"
           - "patch"
-      npm-minor-patch:
+      bun-minor-patch:
         exclude-patterns:
           - "@supabase/*"
           - "@codemirror/*"
