@@ -764,6 +764,17 @@ interface StudentProgress {
   lastActivity: string | null;
 }
 
+/**
+ * RPC `get_students_progress_summary()` の返り値の型。生成型（database.types.ts）は
+ * `last_activity` を非null扱いにしているが、`completed_at` がnullableな以上、
+ * 実際には全行が未完了時刻無しの場合などにnullになりうるため、ここで明示的に上書きする。
+ */
+interface StudentProgressSummaryRow {
+  user_id: number;
+  completed_count: number;
+  last_activity: string | null;
+}
+
 export async function fetchStudentsProgress(): Promise<{
   data: StudentProgress[] | null;
   error: PostgrestError | null;
@@ -798,24 +809,29 @@ export async function fetchStudentsProgress(): Promise<{
     console.error("公開コンテンツ総数取得エラー:", contentsCountError.message);
   }
 
-  // 完了済み進捗を全ユーザー分まとめて取得し、ユーザー単位に集約する
-  // （ユーザーごとの逐次クエリによるN+1を回避）。
-  // PostgRESTの1リクエスト最大行数（既定1000行）を超えても取りこぼさないよう range でページングする。
-  // サーバー側の max-rows 設定が pageSize より小さい場合でも取りこぼさないよう、
-  // offset は実際に返った行数で進め、0件になった時点で終了する。
+  // ユーザー単位の完了数・最終活動日時はRPC `get_students_progress_summary`
+  // （GROUP BY user_id でDB側集約。マイグレーション参照）に問い合わせる（#83）。
   // 進捗の取得に失敗した場合はエラーにせず完了数0で返し、受講生一覧の表示を維持する。
+  // RPCの返り値もPostgRESTのdb-max-rows（既定1000行）の対象になるため、
+  // user_progress の旧実装と同様に range でページングする
+  // （RPC側の ORDER BY user_id と .order() により安定した順序で進める）。
   const progressByUser = new Map<number, { completedCount: number; lastActivity: string | null }>();
   if ((users ?? []).length > 0) {
     const pageSize = 1000;
     let offset = 0;
     let hasMore = true;
     while (hasMore) {
-      const { data: progress, error: progressError } = await supabase
-        .from("user_progress")
-        .select("user_id, completed_at")
-        .eq("is_completed", true)
-        .order("id")
-        .range(offset, offset + pageSize - 1);
+      // completed_at はnullableで max() は全NULLならNULLを返すため、
+      // last_activity は実際には null になりうる（生成型は非null）。
+      // .overrideTypes() はこの関数内の他の .from().select() 呼び出しと同居すると
+      // postgrest-js側の型推論がずれてビルドできないため、awaitの戻り値を直接castする。
+      const { data: progressSummary, error: progressError } = (await supabase
+        .rpc("get_students_progress_summary")
+        .order("user_id")
+        .range(offset, offset + pageSize - 1)) as unknown as {
+        data: StudentProgressSummaryRow[] | null;
+        error: PostgrestError | null;
+      };
 
       if (progressError) {
         console.error("受講生進捗取得エラー:", progressError.message);
@@ -823,14 +839,12 @@ export async function fetchStudentsProgress(): Promise<{
         break;
       }
 
-      const rows = progress ?? [];
+      const rows = progressSummary ?? [];
       for (const row of rows) {
-        const entry = progressByUser.get(row.user_id) ?? { completedCount: 0, lastActivity: null };
-        entry.completedCount += 1;
-        if (row.completed_at && (!entry.lastActivity || row.completed_at > entry.lastActivity)) {
-          entry.lastActivity = row.completed_at;
-        }
-        progressByUser.set(row.user_id, entry);
+        progressByUser.set(row.user_id, {
+          completedCount: row.completed_count,
+          lastActivity: row.last_activity,
+        });
       }
 
       offset += rows.length;
