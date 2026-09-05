@@ -63,7 +63,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "mcp__Supabase__execute_sql",
+        "matcher": "^mcp__.+__execute_sql$",
         "hooks": [
           {
             "type": "command",
