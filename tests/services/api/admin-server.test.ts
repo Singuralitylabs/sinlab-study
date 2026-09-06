@@ -635,6 +635,10 @@ describe("createTheme", () => {
       InvalidInsertAfterIdError
     );
     expect(mockClient.from).toHaveBeenCalledTimes(1);
+    // 999がmock dataに含まれていないだけでなく、is_deleted=falseの絞り込み自体が
+    // 実際にクエリへ付与されていることも検証する（絞り込みが消える回帰の検出用）
+    const siblingsBuilder = mockClient.from.mock.results[0].value;
+    expect(siblingsBuilder.eq).toHaveBeenCalledWith("is_deleted", false);
   });
 
   it("再採番のUPDATEが失敗した場合、INSERTを行わずエラーを返す", async () => {
@@ -684,7 +688,9 @@ describe("createPhase", () => {
   });
 
   it("insertAfterIdが別テーマ配下のフェーズを指す場合、InvalidInsertAfterIdErrorを投げる", async () => {
-    // 兄弟取得は theme_id=1 で絞り込む前提のため、別テーマのフェーズは結果に含まれない
+    // 兄弟取得は theme_id=1 で絞り込む前提のため、別テーマのフェーズは結果に含まれない。
+    // mock dataに999を含めていないだけでは絞り込み自体の検証にならないため、
+    // theme_id・is_deletedの絞り込みが実際にクエリへ付与されていることも検証する
     const mockClient = createMockSupabaseClient({
       tableResults: { learning_phases: { data: [], error: null } },
     });
@@ -693,6 +699,10 @@ describe("createPhase", () => {
     await expect(
       createPhase({ theme_id: 1, name: "新フェーズ", insertAfterId: 999 })
     ).rejects.toThrow(InvalidInsertAfterIdError);
+
+    const siblingsBuilder = mockClient.from.mock.results[0].value;
+    expect(siblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 1);
+    expect(siblingsBuilder.eq).toHaveBeenCalledWith("is_deleted", false);
   });
 });
 
@@ -751,7 +761,11 @@ describe("createContent", () => {
   });
 
   it("insertAfterIdが削除済みコンテンツを指す場合、InvalidInsertAfterIdErrorを投げる", async () => {
-    // 兄弟取得は is_deleted=false で絞り込む前提のため、削除済みコンテンツは結果に含まれない
+    // モックのクエリビルダーは .eq() の引数に関わらず設定した data をそのまま返すため、
+    // 「999が結果に無い」だけでは is_deleted=false によって除外されたことの検証にならない
+    // （絞り込み自体を削除する回帰があっても、999をmock dataに含めていない限りこのテストは
+    // 通ってしまう）。そのため兄弟取得クエリに is_deleted=false が実際に付与されていることも
+    // 明示的に検証する
     const mockClient = createMockSupabaseClient({
       tableResults: { learning_contents: { data: [{ id: 1, display_order: 1 }], error: null } },
     });
@@ -765,5 +779,8 @@ describe("createContent", () => {
         insertAfterId: 999,
       })
     ).rejects.toThrow(InvalidInsertAfterIdError);
+
+    const siblingsBuilder = mockClient.from.mock.results[0].value;
+    expect(siblingsBuilder.eq).toHaveBeenCalledWith("is_deleted", false);
   });
 });

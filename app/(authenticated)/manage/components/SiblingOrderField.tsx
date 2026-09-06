@@ -71,26 +71,25 @@ export function SiblingOrderField({ siblings, insertAfterId, onChange }: Sibling
         ))}
       </select>
 
-      {siblings.length === 0 ? (
+      {siblings.length === 0 && (
         <p className="text-sm text-muted-foreground">既存の要素はまだありません</p>
-      ) : (
-        <ul className="divide-y divide-border rounded-md border text-sm">
-          {insertAfterId === null && (
-            <li className="bg-primary/5 px-3 py-2 text-primary">ここに追加</li>
-          )}
-          {siblings.map((sibling) => (
-            <li key={sibling.id}>
-              <div className="flex items-center justify-between gap-2 px-3 py-2">
-                <span className="truncate">{sibling.label}</span>
-                <UnpublishedBadge isPublished={sibling.isPublished} />
-              </div>
-              {insertAfterId === sibling.id && (
-                <div className="bg-primary/5 px-3 py-2 text-primary">ここに追加</div>
-              )}
-            </li>
-          ))}
-        </ul>
       )}
+      <ul className="divide-y divide-border rounded-md border text-sm">
+        {insertAfterId === null && (
+          <li className="bg-primary/5 px-3 py-2 text-primary">ここに追加</li>
+        )}
+        {siblings.map((sibling) => (
+          <li key={sibling.id}>
+            <div className="flex items-center justify-between gap-2 px-3 py-2">
+              <span className="truncate">{sibling.label}</span>
+              <UnpublishedBadge isPublished={sibling.isPublished} />
+            </div>
+            {insertAfterId === sibling.id && (
+              <div className="bg-primary/5 px-3 py-2 text-primary">ここに追加</div>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
