@@ -6,6 +6,7 @@ import type {
 } from "@/app/types";
 
 const UNCLASSIFIED_LABEL = "未分類";
+const UNCLASSIFIED_KEY = "unclassified";
 
 /**
  * コンテンツ管理テーブル（クライアントコンポーネント）が表示に必要とする最小限のフィールド。
@@ -200,7 +201,6 @@ function groupByKeyLabel<T>(
   keyOf: (item: T) => string,
   labelOf: (item: T) => string
 ): Array<{ key: string; label: string; items: T[] }> {
-  const groups: Array<{ key: string; label: string; items: T[] }> = [];
   const groupByKey = new Map<string, { key: string; label: string; items: T[] }>();
 
   for (const item of items) {
@@ -210,24 +210,21 @@ function groupByKeyLabel<T>(
     if (!group) {
       group = { key, label: labelOf(item), items: [] };
       groupByKey.set(key, group);
-      groups.push(group);
     }
     group.items.push(item);
   }
 
-  return groups;
+  // Map は挿入順を保持するため、出現順（事前ソート済みの階層順）がそのまま維持される
+  return Array.from(groupByKey.values());
 }
 
-function buildGroupLabel(content: LearningContentWithWeek): string {
-  if (!content.week) {
-    return UNCLASSIFIED_LABEL;
-  }
-
-  const themeName = content.week.phase?.theme?.name;
-  const phaseName = content.week.phase?.name;
-  const weekName = content.week.name;
-
-  return [themeName, phaseName, weekName].filter(Boolean).join(" › ");
+/**
+ * 階層名（テーマ名・フェーズ名・週名など）を「 › 」区切りで結合してラベルを作る。
+ * 祖先が未設定、または名前が空白のみで欠落扱いになる場合は「未分類」にする
+ * （`RequiredStringSchema` は意図的にトリムしないため、空白のみの名前がDBに入りうる）。
+ */
+function joinHierarchyLabel(...names: Array<string | undefined>): string {
+  return names.filter(Boolean).join(" › ") || UNCLASSIFIED_LABEL;
 }
 
 /**
@@ -238,20 +235,14 @@ function buildGroupLabel(content: LearningContentWithWeek): string {
 export function groupContentsByWeek(contents: LearningContentWithWeek[]): ContentGroup[] {
   return groupByKeyLabel(
     contents,
-    (content) => (content.week ? String(content.week.id) : "unclassified"),
-    buildGroupLabel
+    (content) => (content.week ? String(content.week.id) : UNCLASSIFIED_KEY),
+    (content) =>
+      joinHierarchyLabel(
+        content.week?.phase?.theme?.name,
+        content.week?.phase?.name,
+        content.week?.name
+      )
   ).map((group) => ({ key: group.key, label: group.label, contents: group.items }));
-}
-
-function buildWeekGroupLabel(week: LearningWeekWithPhase): string {
-  if (!week.phase) {
-    return UNCLASSIFIED_LABEL;
-  }
-
-  const themeName = week.phase.theme?.name;
-  const phaseName = week.phase.name;
-
-  return [themeName, phaseName].filter(Boolean).join(" › ");
 }
 
 /**
@@ -262,13 +253,9 @@ function buildWeekGroupLabel(week: LearningWeekWithPhase): string {
 export function groupWeeksByPhase(weeks: LearningWeekWithPhase[]): WeekGroup[] {
   return groupByKeyLabel(
     weeks,
-    (week) => (week.phase ? String(week.phase.id) : "unclassified"),
-    buildWeekGroupLabel
+    (week) => (week.phase ? String(week.phase.id) : UNCLASSIFIED_KEY),
+    (week) => joinHierarchyLabel(week.phase?.theme?.name, week.phase?.name)
   ).map((group) => ({ key: group.key, label: group.label, weeks: group.items }));
-}
-
-function buildPhaseGroupLabel(phase: LearningPhaseWithTheme): string {
-  return phase.theme?.name ?? UNCLASSIFIED_LABEL;
 }
 
 /**
@@ -279,8 +266,8 @@ function buildPhaseGroupLabel(phase: LearningPhaseWithTheme): string {
 export function groupPhasesByTheme(phases: LearningPhaseWithTheme[]): PhaseGroup[] {
   return groupByKeyLabel(
     phases,
-    (phase) => (phase.theme ? String(phase.theme.id) : "unclassified"),
-    buildPhaseGroupLabel
+    (phase) => (phase.theme ? String(phase.theme.id) : UNCLASSIFIED_KEY),
+    (phase) => joinHierarchyLabel(phase.theme?.name)
   ).map((group) => ({ key: group.key, label: group.label, phases: group.items }));
 }
 

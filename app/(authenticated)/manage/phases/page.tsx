@@ -18,7 +18,7 @@ import {
 
 export default async function ManagePhasesPage() {
   const { data: phases } = await fetchAllPhases();
-  const groups = phases ? groupPhasesByTheme(sortPhasesByHierarchy(phases)) : [];
+  const groups = groupPhasesByTheme(sortPhasesByHierarchy(phases ?? []));
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -32,7 +32,7 @@ export default async function ManagePhasesPage() {
         </Button>
       </div>
 
-      {!phases || phases.length === 0 ? (
+      {groups.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center">
             <p className="text-muted-foreground">フェーズがまだ登録されていません。</p>

@@ -18,7 +18,7 @@ import {
 
 export default async function ManageWeeksPage() {
   const { data: weeks } = await fetchAllWeeks();
-  const groups = weeks ? groupWeeksByPhase(sortWeeksByHierarchy(weeks)) : [];
+  const groups = groupWeeksByPhase(sortWeeksByHierarchy(weeks ?? []));
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -32,7 +32,7 @@ export default async function ManageWeeksPage() {
         </Button>
       </div>
 
-      {!weeks || weeks.length === 0 ? (
+      {groups.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center">
             <p className="text-muted-foreground">週がまだ登録されていません。</p>
