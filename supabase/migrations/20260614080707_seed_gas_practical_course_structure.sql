@@ -143,6 +143,21 @@ BEGIN
     -- 週 get-or-create（概要を description に格納）
     SELECT id INTO v_week_id FROM learning_weeks
       WHERE phase_id = v_phase_id AND name = r.topic;
+
+    -- #168: 本ファイルの旧バージョン（フェーズ誤り）が既に実行され、
+    -- 「その他GAS活用」配下に同名の週が作成済みの環境向けの移行措置。
+    -- 新規INSERTで重複させず、既存行を正しいフェーズ・display_orderへ移動する。
+    IF v_week_id IS NULL AND r.topic = 'Geminiを使ったドキュメント自動要約' THEN
+      SELECT lw.id INTO v_week_id
+      FROM learning_weeks lw
+      JOIN learning_phases lp ON lp.id = lw.phase_id
+      WHERE lp.theme_id = v_theme_id AND lp.name = 'その他GAS活用' AND lw.name = r.topic;
+      IF v_week_id IS NOT NULL THEN
+        UPDATE learning_weeks SET phase_id = v_phase_id, display_order = v_week_order
+          WHERE id = v_week_id;
+      END IF;
+    END IF;
+
     IF v_week_id IS NULL THEN
       INSERT INTO learning_weeks (phase_id, name, description, display_order, is_published)
       VALUES (v_phase_id, r.topic, r.descr, v_week_order, false)
