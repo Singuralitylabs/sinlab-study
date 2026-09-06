@@ -1,5 +1,5 @@
 -- =====================================================
--- GAS学習（実践編）: テーマ行の登録 + 基礎コーステーマ名のリネーム
+-- GAS学習（実践編）: テーマ行の登録
 -- 階層: learning_themes > learning_phases > learning_weeks > learning_contents
 -- 参考: 20260521000000_seed_gas_advanced_course_structure.sql（#49・応用編側の同種対応）
 --
@@ -9,10 +9,16 @@
 -- 既に担っているが、そのテーマ行が存在しない場合は何もせず終了する実装のため、
 -- 本ファイルで先にテーマ行を作成する（get-or-create。本番の実値をSELECTで確認済み）。
 --
--- 併せて、基礎コースのテーマ名が本番では 'GAS学習' ではなく 'GAS学習（基礎編）' に
--- リネームされている差異（20260412010002_seed_gas_course_structure.sql には未反映）も
--- ここで解消する。名前が 'GAS学習' のときのみリネームする冪等な UPDATE とし、
--- 新規プロジェクト・本番環境のどちらに適用しても最終的に 'GAS学習（基礎編）' になる。
+-- 注意: 本ファイルが作成するテーマ行は is_published=true（本番の実値）だが、
+-- 20260614080707 が作成するフェーズ・週・コンテンツは is_published=false（下書き）。
+-- そのためフレッシュ環境（`supabase db reset` 直後等）では、公開済みテーマの配下に
+-- 公開コンテンツが1件も無い状態になり、受講生からは「0/0」のカードに見える。
+-- 本番ではその後の管理画面操作でフェーズ・週・コンテンツが個別に公開されており、
+-- この差はテーマ作成SQLの欠落とは別の既知差異（本Issueの対象外）。
+--
+-- 基礎コースのテーマ名リネーム（'GAS学習' → 'GAS学習（基礎編）'）は、本ファイルとは
+-- 別の 20260906000000_rename_gas_basic_theme.sql で扱う（get-or-createの前提が
+-- 異なるため分離。詳細は同ファイルのコメントを参照）。
 --
 -- タイムスタンプについて: 20260521000000 と同様、フェーズ・週の作成を担う
 -- 20260614080707_seed_gas_practical_course_structure.sql より前に適用される必要が
@@ -22,28 +28,11 @@
 -- 適用済みとして記録する。
 -- =====================================================
 
-DO $$
-DECLARE
-  v_theme_id INTEGER;
-BEGIN
-  -- ====================================================
-  -- 基礎コースのテーマ名リネーム（'GAS学習' → 'GAS学習（基礎編）'）
-  -- ====================================================
-  UPDATE learning_themes
-  SET name = 'GAS学習（基礎編）'
-  WHERE name = 'GAS学習';
-
-  -- ====================================================
-  -- テーマ取得（なければ作成）: GAS学習（実践編）
-  -- ====================================================
-  SELECT id INTO v_theme_id FROM learning_themes WHERE name = 'GAS学習（実践編）';
-  IF v_theme_id IS NULL THEN
-    INSERT INTO learning_themes (name, description, display_order, is_published)
-    VALUES (
-      'GAS学習（実践編）',
-      'GASを使って、実際にどんなことができるのか、さまざまな実例を紹介します。',
-      3, true
-    )
-    RETURNING id INTO v_theme_id;
-  END IF;
-END $$;
+INSERT INTO learning_themes (name, description, display_order, is_published)
+SELECT
+  'GAS学習（実践編）',
+  'GASを使って、実際にどんなことができるのか、さまざまな実例を紹介します。',
+  3, true
+WHERE NOT EXISTS (
+  SELECT 1 FROM learning_themes WHERE name = 'GAS学習（実践編）'
+);
