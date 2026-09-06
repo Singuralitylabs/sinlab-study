@@ -488,6 +488,19 @@ describe("resolveSiblingResequence", () => {
     expect(() => resolveSiblingResequence([], 99)).toThrow(InvalidInsertAfterIdError);
   });
 
+  it("InvalidInsertAfterIdErrorのmessageは利用者向け文言で、insertAfterIdはプロパティにのみ保持する（サーバーログ用）", () => {
+    try {
+      resolveSiblingResequence([], 99);
+      throw new Error("unreachable");
+    } catch (error) {
+      expect(error).toBeInstanceOf(InvalidInsertAfterIdError);
+      const invalidInsertAfterIdError = error as InvalidInsertAfterIdError;
+      expect(invalidInsertAfterIdError.insertAfterId).toBe(99);
+      expect(invalidInsertAfterIdError.message).not.toContain("99");
+      expect(invalidInsertAfterIdError.message).not.toContain("insert_after_id");
+    }
+  });
+
   it("先頭に挿入する場合、全既存兄弟のdisplay_orderが1つずつ後ろにずれる", () => {
     const siblings = [row(10, 1), row(20, 2), row(30, 3)];
 

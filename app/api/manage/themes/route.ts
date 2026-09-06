@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, theme: data });
   } catch (error) {
     if (error instanceof InvalidInsertAfterIdError) {
+      console.error("テーマ作成エラー（insert_after_id不正）:", error.insertAfterId);
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     console.error("API エラー:", error);

@@ -19,6 +19,48 @@ import type {
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
+type SiblingTable = "learning_themes" | "learning_phases" | "learning_weeks" | "learning_contents";
+
+/**
+ * `createTheme` / `createPhase` / `createWeek` / `createContent` に共通する、挿入位置からの
+ * 再採番処理（兄弟をSELECT → `resolveSiblingResequence` → 変化した行だけUPDATE）を1本化した
+ * ヘルパー。`parentFilter` はテーマのみ null（親を持たないため全件が対象）。
+ * 呼び出し元は返り値の `error` が null であることを確認したうえで `displayOrder` をINSERTに使う。
+ * `insertAfterId` が同じ親配下・未削除の要素として存在しない場合は
+ * `resolveSiblingResequence` が投げる `InvalidInsertAfterIdError` がそのまま伝播する。
+ */
+async function resequenceSiblingsForInsert(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  table: SiblingTable,
+  parentFilter: { column: "theme_id" | "phase_id" | "week_id"; value: number } | null,
+  insertAfterId: number | null
+): Promise<{ displayOrder: number; error: null } | { displayOrder: null; error: PostgrestError }> {
+  let query = supabase.from(table).select("id, display_order").eq("is_deleted", false);
+  if (parentFilter) {
+    query = query.eq(parentFilter.column, parentFilter.value);
+  }
+  const { data: siblings, error: siblingsError } = await query;
+  if (siblingsError) {
+    return { displayOrder: null, error: siblingsError };
+  }
+
+  const { displayOrder, updates } = resolveSiblingResequence(siblings ?? [], insertAfterId);
+
+  if (updates.length > 0) {
+    const updateResults = await Promise.all(
+      updates.map((row) =>
+        supabase.from(table).update({ display_order: row.display_order }).eq("id", row.id)
+      )
+    );
+    const updateError = updateResults.find((result) => result.error)?.error;
+    if (updateError) {
+      return { displayOrder: null, error: updateError };
+    }
+  }
+
+  return { displayOrder, error: null };
+}
+
 // =====================================================
 // テーマ管理
 // =====================================================
@@ -77,32 +119,17 @@ export async function createTheme(theme: {
 }): Promise<{ data: LearningTheme | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data: siblings, error: siblingsError } = await supabase
-    .from("learning_themes")
-    .select("id, display_order")
-    .eq("is_deleted", false);
-  if (siblingsError) {
-    console.error("テーマ作成エラー（兄弟取得）:", siblingsError.message);
-    return { data: null, error: siblingsError };
+  const resequenced = await resequenceSiblingsForInsert(
+    supabase,
+    "learning_themes",
+    null,
+    theme.insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("テーマ作成エラー（再採番）:", resequenced.error.message);
+    return { data: null, error: resequenced.error };
   }
-
-  const { displayOrder, updates } = resolveSiblingResequence(siblings ?? [], theme.insertAfterId);
-
-  if (updates.length > 0) {
-    const updateResults = await Promise.all(
-      updates.map((row) =>
-        supabase
-          .from("learning_themes")
-          .update({ display_order: row.display_order })
-          .eq("id", row.id)
-      )
-    );
-    const updateError = updateResults.find((result) => result.error)?.error;
-    if (updateError) {
-      console.error("テーマ作成エラー（再採番）:", updateError.message);
-      return { data: null, error: updateError };
-    }
-  }
+  const { displayOrder } = resequenced;
 
   const { data, error } = await supabase
     .from("learning_themes")
@@ -280,33 +307,17 @@ export async function createPhase(phase: {
 }): Promise<{ data: LearningPhase | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data: siblings, error: siblingsError } = await supabase
-    .from("learning_phases")
-    .select("id, display_order")
-    .eq("theme_id", phase.theme_id)
-    .eq("is_deleted", false);
-  if (siblingsError) {
-    console.error("フェーズ作成エラー（兄弟取得）:", siblingsError.message);
-    return { data: null, error: siblingsError };
+  const resequenced = await resequenceSiblingsForInsert(
+    supabase,
+    "learning_phases",
+    { column: "theme_id", value: phase.theme_id },
+    phase.insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("フェーズ作成エラー（再採番）:", resequenced.error.message);
+    return { data: null, error: resequenced.error };
   }
-
-  const { displayOrder, updates } = resolveSiblingResequence(siblings ?? [], phase.insertAfterId);
-
-  if (updates.length > 0) {
-    const updateResults = await Promise.all(
-      updates.map((row) =>
-        supabase
-          .from("learning_phases")
-          .update({ display_order: row.display_order })
-          .eq("id", row.id)
-      )
-    );
-    const updateError = updateResults.find((result) => result.error)?.error;
-    if (updateError) {
-      console.error("フェーズ作成エラー（再採番）:", updateError.message);
-      return { data: null, error: updateError };
-    }
-  }
+  const { displayOrder } = resequenced;
 
   const { data, error } = await supabase
     .from("learning_phases")
@@ -458,33 +469,17 @@ export async function createWeek(week: {
 }): Promise<{ data: LearningWeek | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data: siblings, error: siblingsError } = await supabase
-    .from("learning_weeks")
-    .select("id, display_order")
-    .eq("phase_id", week.phase_id)
-    .eq("is_deleted", false);
-  if (siblingsError) {
-    console.error("週作成エラー（兄弟取得）:", siblingsError.message);
-    return { data: null, error: siblingsError };
+  const resequenced = await resequenceSiblingsForInsert(
+    supabase,
+    "learning_weeks",
+    { column: "phase_id", value: week.phase_id },
+    week.insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("週作成エラー（再採番）:", resequenced.error.message);
+    return { data: null, error: resequenced.error };
   }
-
-  const { displayOrder, updates } = resolveSiblingResequence(siblings ?? [], week.insertAfterId);
-
-  if (updates.length > 0) {
-    const updateResults = await Promise.all(
-      updates.map((row) =>
-        supabase
-          .from("learning_weeks")
-          .update({ display_order: row.display_order })
-          .eq("id", row.id)
-      )
-    );
-    const updateError = updateResults.find((result) => result.error)?.error;
-    if (updateError) {
-      console.error("週作成エラー（再採番）:", updateError.message);
-      return { data: null, error: updateError };
-    }
-  }
+  const { displayOrder } = resequenced;
 
   const { data, error } = await supabase
     .from("learning_weeks")
@@ -620,33 +615,17 @@ export async function createContent(content: {
 }): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { data: siblings, error: siblingsError } = await supabase
-    .from("learning_contents")
-    .select("id, display_order")
-    .eq("week_id", content.week_id)
-    .eq("is_deleted", false);
-  if (siblingsError) {
-    console.error("コンテンツ作成エラー（兄弟取得）:", siblingsError.message);
-    return { data: null, error: siblingsError };
+  const resequenced = await resequenceSiblingsForInsert(
+    supabase,
+    "learning_contents",
+    { column: "week_id", value: content.week_id },
+    content.insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("コンテンツ作成エラー（再採番）:", resequenced.error.message);
+    return { data: null, error: resequenced.error };
   }
-
-  const { displayOrder, updates } = resolveSiblingResequence(siblings ?? [], content.insertAfterId);
-
-  if (updates.length > 0) {
-    const updateResults = await Promise.all(
-      updates.map((row) =>
-        supabase
-          .from("learning_contents")
-          .update({ display_order: row.display_order })
-          .eq("id", row.id)
-      )
-    );
-    const updateError = updateResults.find((result) => result.error)?.error;
-    if (updateError) {
-      console.error("コンテンツ作成エラー（再採番）:", updateError.message);
-      return { data: null, error: updateError };
-    }
-  }
+  const { displayOrder } = resequenced;
 
   const { data, error } = await supabase
     .from("learning_contents")

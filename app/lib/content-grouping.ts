@@ -309,10 +309,21 @@ export interface SiblingOrderRow {
  * `insert_after_id` が同じ親配下の未削除要素として存在しない場合に投げるエラー
  * （別の親配下・論理削除済み・存在しないIDのいずれか）。呼び出し側（APIルート）で
  * catch し、400 として返すこと。
+ *
+ * `message` は API のエラーレスポンス（`{ error: string }`）経由でそのまま新規作成フォームに
+ * 表示される（`route.ts` の catch → `data.error` → `setMessage()`）。原因はいずれも
+ * 「フォーム表示後に兄弟一覧が古くなった」ケースのため、内部識別子は含めず、画面の
+ * 再読み込みを促す利用者向けの文言にする。`insertAfterId` はサーバーログ用に
+ * `insertAfterId` プロパティへ保持し、呼び出し側の `console.error` で使う。
  */
 export class InvalidInsertAfterIdError extends Error {
+  readonly insertAfterId: number;
+
   constructor(insertAfterId: number) {
-    super(`insert_after_id(${insertAfterId})は同じ親配下の有効な要素ではありません`);
+    super(
+      "選択した挿入位置は既に変更されています。画面を再読み込みしてから、もう一度お試しください。"
+    );
+    this.insertAfterId = insertAfterId;
   }
 }
 
