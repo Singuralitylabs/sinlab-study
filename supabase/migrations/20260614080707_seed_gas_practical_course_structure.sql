@@ -14,6 +14,11 @@
 -- 本番環境で直接作成されたとみられる状態だった。その後、応用編側は
 -- 20260521000000_seed_gas_advanced_course_structure.sql（#49）、実践編側のテーマ行は
 -- 20260613000000_seed_gas_practical_theme.sql（#166）でそれぞれ解消済み。
+--
+-- 修正（#168）: 復元時点のVALUESでは「Geminiを使ったドキュメント自動要約」の所属フェーズを
+-- 「その他GAS活用」（phase_no=5）としていたが、本番の実際の所属は「Googleドキュメント活用」
+-- （phase_no=4）だったため、本番データとの1点の食い違いとして修正した。本番の週display_order
+-- は1,2の次が6（3〜5は欠番）のため、ループ内で該当週のみ明示的に上書きしている。
 -- =====================================================
 DO $$
 DECLARE
@@ -107,7 +112,8 @@ BEGIN
       (23, 5, 'その他GAS活用', 'ひとこと掲示板Webアプリ',
         E'GASによるWebアプリ開発とは / GASによるWebアプリのデプロイ / スプレッドシートとWebの掲示板を連携するアプリを作ろう\n\n[スライド]\nhttps://docs.google.com/presentation/d/1Rv4w2GNZVceKycRFJuzRUV-r6c7f3sGIZ6OTCqGdDIo/edit?usp=sharing\n\n[サンプル スプレッドシート]\nhttps://docs.google.com/spreadsheets/d/1y22-yig3DF-QlRg3yDS6L-1yvTqQ_WJSOP_EekNVTAU/edit?usp=drive_link',
         'https://youtu.be/-S-YtVUX4dM', 'slide-20'),
-      (24, 5, 'その他GAS活用', 'Geminiを使ったドキュメント自動要約',
+      -- #168: 本番の実際の所属フェーズは「その他GAS活用」ではなく「Googleドキュメント活用」
+      (24, 4, 'Googleドキュメント活用', 'Geminiを使ったドキュメント自動要約',
         E'GeminiのAPIを呼び出し、Googleドキュメントの内容を要約します\n- google Geminiとは\n- ドキュメント内容の取得、Gemini用プロンプトの作成、Gemini API利用設定\n- 要約結果をドキュメントに追記\n\n[スライド]\nhttps://docs.google.com/presentation/d/1GK3F7MV2Igbq1WarCsPHR6_E5yYc8rpq7fgQhyynWNQ/edit\n[サンプルドキュメント]\nhttps://docs.google.com/document/d/1aBwOMguZEosEVBXppZ5IPup26SgkPy8pFMYMSW-5baQ/edit',
         'https://youtu.be/kD3OZ-TWlZg', 'slide-21')
     ) AS t(ordinal, phase_no, phase_name, topic, descr, video_url, slide)
@@ -128,6 +134,11 @@ BEGIN
       v_week_order := 0;
     END IF;
     v_week_order := v_week_order + 1;
+    -- #168: 本番の実際の display_order は 1,2 の次が 6（3〜5は欠番）。
+    -- フェーズ移動に伴う自動採番（3）を上書きする。
+    IF r.topic = 'Geminiを使ったドキュメント自動要約' THEN
+      v_week_order := 6;
+    END IF;
 
     -- 週 get-or-create（概要を description に格納）
     SELECT id INTO v_week_id FROM learning_weeks
