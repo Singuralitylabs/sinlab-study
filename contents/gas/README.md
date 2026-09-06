@@ -1,4 +1,4 @@
-# GAS学習
+# GAS学習（基礎編）
 
 Google Apps Script を使った自動化と開発の基礎を学びます。
 
