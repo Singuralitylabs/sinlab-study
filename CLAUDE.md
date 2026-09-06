@@ -27,6 +27,8 @@
 
 **allow に入れてよいのは、参照・データ取得系のコマンドとローカルで完結する作業補助のみ。** 外部CLI（`supabase`・`vercel`）はサブコマンド単位で登録し、サーバー側を更新するもの（`supabase db push`、`vercel deploy` 等）は登録しない。`git push` も同様に含めない（「ブランチ運用」のユーザー確認ルールを毎回通すため）。
 
+**Supabase MCP の `execute_sql` は allow に入れない**（読み取り専用クエリの自動許可は PreToolUse フック `.claude/hooks/allow-readonly-sql.mjs`、接続設定は `README.md`「Claude Code から Supabase MCP を使う」を参照）。
+
 ## コマンド
 
 パッケージマネージャは **bun**（npm/yarn/pnpm は使わない）。スクリプトの一覧は `README.md` を参照。

@@ -93,6 +93,17 @@ bun dev
 | `bun run test` | Vitest によるユニットテスト実行 |
 | `bun run test:all` | build/db:types/lint/format/check/test を一括実行 |
 
+### Claude Code から Supabase MCP を使う
+
+Claude Code で Supabase MCP サーバーを使う場合、**必ず read-only モードで登録する**。`execute_sql` はこのモードだと読み取り専用の Postgres ユーザーで実行され、書き込みが DB 側で拒否される。
+
+- リモート（推奨）: `https://mcp.supabase.com/mcp?project_ref=<SUPABASE_PROJECT_ID>&read_only=true`
+- ローカル（npm）: `npx -y @supabase/mcp-server-supabase@latest --project-ref=<SUPABASE_PROJECT_ID> --read-only`
+
+詳細は [Supabase MCP Server](https://supabase.com/docs/guides/ai-tools/mcp) を参照。サーバーの登録名は任意（`.claude/settings.json` のフックはどの名前でも `execute_sql` に反応する）。
+
+`.claude/settings.json` の PreToolUse フック（`.claude/hooks/allow-readonly-sql.mjs`）は、`execute_sql` の `query` が読み取り専用（SELECT 等）と判定できたときだけ許可確認をスキップする**利便性のための仕組み**で、書き込み防止の実体ではない。SELECT 内で副作用のある関数を呼ぶクエリは通るため、read-only モードを省略しないこと。`execute_sql` 自体を `permissions.allow` に登録してはならない（`CLAUDE.md`「自動実行の許可」参照）。
+
 ## Dependabot PR のマージ運用
 
 依存関係の更新は [Dependabot](./.github/dependabot.yml) が週次（Bun）・月次（GitHub Actions）で自動検出し、更新 PR を作成する。マイナー・パッチ更新は `@supabase/*`・`@codemirror/*` を含めグループごとに集約され、メジャー更新は個別 PR になる。
