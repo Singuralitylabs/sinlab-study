@@ -444,6 +444,23 @@ describe("groupPhasesByTheme", () => {
     expect(groups[1].phases.map((p) => p.id)).toEqual([6, 7]);
   });
 
+  it("テーマ名が空白のみの場合もラベルは「未分類」になる（joinHierarchyLabelでトリムして欠落扱い）", () => {
+    const themeBlankName = { ...theme1, id: 30, name: "   " };
+    const phaseWithBlankThemeName = {
+      ...phase1,
+      id: 30,
+      theme_id: 30,
+      theme: themeBlankName,
+    };
+
+    const groups = groupPhasesByTheme([phaseWithBlankThemeName]);
+
+    // テーマ自体は設定されているためグルーピングキーはテーマidのまま（「未分類」グループには
+    // 統合されない）が、ラベルは名前が空白のみのため「未分類」表示になる
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ key: "30", label: "未分類" });
+  });
+
   it("sortPhasesByHierarchy と組み合わせると「未分類」グループが末尾になる", () => {
     const unclassified = { ...phase1, id: 8, theme_id: 99, display_order: 1, theme: null };
 

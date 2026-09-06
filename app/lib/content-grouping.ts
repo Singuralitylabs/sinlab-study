@@ -224,7 +224,12 @@ function groupByKeyLabel<T>(
  * （`RequiredStringSchema` は意図的にトリムしないため、空白のみの名前がDBに入りうる）。
  */
 function joinHierarchyLabel(...names: Array<string | undefined>): string {
-  return names.filter(Boolean).join(" › ") || UNCLASSIFIED_LABEL;
+  return (
+    names
+      .map((name) => name?.trim())
+      .filter(Boolean)
+      .join(" › ") || UNCLASSIFIED_LABEL
+  );
 }
 
 /**
