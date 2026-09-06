@@ -18,15 +18,23 @@
 -- 修正（#168）: 復元時点のVALUESでは「Geminiを使ったドキュメント自動要約」の所属フェーズを
 -- 「その他GAS活用」（phase_no=5）としていたが、本番の実際の所属は「Googleドキュメント活用」
 -- （phase_no=4）だったため、本番データとの1点の食い違いとして修正した。本番の週display_order
--- は1,2の次が6（3〜5は欠番）のため、ループ内で該当週のみ明示的に上書きしている。
+-- は1,2の次が6（3〜5は欠番）のため、ループ内で該当週の挿入値のみ明示的に上書きしている
+-- （カウンタ自体（v_week_order）は書き換えず、以降にフェーズ4へ週を追加した場合の採番
+-- （4, 5, ...）に影響しないようにしている）。
+--
+-- なお、本ファイルの旧バージョン（フェーズ誤り）が既に db push 済みの環境（version自体は
+-- 記録済みのため本ファイルの変更は再実行されない）向けの移行措置は、本ファイルではなく
+-- 独立した `20260906090000_move_gas_practical_gemini_week.sql` が担う（#168のレビュー指摘。
+-- 詳細は同ファイルのコメントを参照）。
 -- =====================================================
 DO $$
 DECLARE
-  v_theme_id   INTEGER;
-  v_phase_id   INTEGER;
-  v_week_id    INTEGER;
-  v_cur_phase  TEXT := NULL;
-  v_week_order INTEGER := 0;
+  v_theme_id    INTEGER;
+  v_phase_id    INTEGER;
+  v_week_id     INTEGER;
+  v_cur_phase   TEXT := NULL;
+  v_week_order  INTEGER := 0;
+  v_insert_order INTEGER;
   r RECORD;
 BEGIN
   SELECT id INTO v_theme_id FROM learning_themes WHERE name = 'GAS学習（実践編）';
@@ -135,32 +143,18 @@ BEGIN
     END IF;
     v_week_order := v_week_order + 1;
     -- #168: 本番の実際の display_order は 1,2 の次が 6（3〜5は欠番）。
-    -- フェーズ移動に伴う自動採番（3）を上書きする。
+    -- カウンタ（v_week_order）はそのまま自然な連番として進め、挿入値のみ上書きする。
+    v_insert_order := v_week_order;
     IF r.topic = 'Geminiを使ったドキュメント自動要約' THEN
-      v_week_order := 6;
+      v_insert_order := 6;
     END IF;
 
     -- 週 get-or-create（概要を description に格納）
     SELECT id INTO v_week_id FROM learning_weeks
       WHERE phase_id = v_phase_id AND name = r.topic;
-
-    -- #168: 本ファイルの旧バージョン（フェーズ誤り）が既に実行され、
-    -- 「その他GAS活用」配下に同名の週が作成済みの環境向けの移行措置。
-    -- 新規INSERTで重複させず、既存行を正しいフェーズ・display_orderへ移動する。
-    IF v_week_id IS NULL AND r.topic = 'Geminiを使ったドキュメント自動要約' THEN
-      SELECT lw.id INTO v_week_id
-      FROM learning_weeks lw
-      JOIN learning_phases lp ON lp.id = lw.phase_id
-      WHERE lp.theme_id = v_theme_id AND lp.name = 'その他GAS活用' AND lw.name = r.topic;
-      IF v_week_id IS NOT NULL THEN
-        UPDATE learning_weeks SET phase_id = v_phase_id, display_order = v_week_order
-          WHERE id = v_week_id;
-      END IF;
-    END IF;
-
     IF v_week_id IS NULL THEN
       INSERT INTO learning_weeks (phase_id, name, description, display_order, is_published)
-      VALUES (v_phase_id, r.topic, r.descr, v_week_order, false)
+      VALUES (v_phase_id, r.topic, r.descr, v_insert_order, false)
       RETURNING id INTO v_week_id;
     END IF;
 
