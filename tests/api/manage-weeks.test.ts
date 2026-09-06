@@ -5,6 +5,7 @@ vi.mock("@/app/services/api/admin-server");
 
 import { PUT } from "@/app/api/manage/weeks/[id]/route";
 import { POST } from "@/app/api/manage/weeks/route";
+import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
 import { createWeek, updateWeek } from "@/app/services/api/admin-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -65,5 +66,20 @@ describe("PUT /api/manage/weeks/[id] - バリデーション", () => {
 
     expect(res.status).toBe(400);
     expect(updateWeek).not.toHaveBeenCalled();
+  });
+
+  it("insert_after_idを指定した場合、insertAfterIdとして更新処理へ渡す", async () => {
+    const res = await PUT(request({ insert_after_id: null }) as never, { params });
+
+    expect(res.status).toBe(200);
+    expect(updateWeek).toHaveBeenCalledWith(1, expect.objectContaining({ insertAfterId: null }));
+  });
+
+  it("updateWeekがInvalidInsertAfterIdErrorを投げた場合は400", async () => {
+    vi.mocked(updateWeek).mockRejectedValue(new InvalidInsertAfterIdError(999));
+
+    const res = await PUT(request({ insert_after_id: 999 }) as never, { params });
+
+    expect(res.status).toBe(400);
   });
 });

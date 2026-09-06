@@ -41,14 +41,12 @@ const RequiredStringSchema = z
 /** Markdown本文など、未入力時に null を送る任意項目 */
 const OptionalNullableString = z.string().nullable().optional();
 const OptionalBoolean = z.boolean().optional();
-const OptionalDisplayOrder = z
-  .number({ message: "数値で指定してください" })
-  .int({ message: "整数で指定してください" })
-  .optional();
 /**
- * 新規作成フォームの挿入位置。null は「先頭」、数値はその兄弟要素IDの直後を表す。
- * 同じ親配下の未削除要素であることの検証（別の親・削除済み・存在しないID）はスキーマでは
- * 行わず、`resolveSiblingResequence()`（`app/lib/content-grouping.ts`）に委ねる。
+ * 挿入位置。null は「先頭」、数値はその兄弟要素IDの直後を表す。新規作成では必須、
+ * 編集では省略可能（省略時は表示順を変更しない。`.partial()` で更に optional 化される）。
+ * 同じ親配下の未削除要素であることの検証（別の親・削除済み・存在しないID、編集時は
+ * 自分自身も含む）はスキーマでは行わず、`resolveSiblingResequence()`
+ * （`app/lib/content-grouping.ts`）に委ねる。
  */
 const InsertAfterIdSchema = PositiveIntSchema.nullable();
 
@@ -116,9 +114,9 @@ export const AdminUserActionSchema = z.discriminatedUnion(
 
 // ==================== /api/manage/themes ====================
 
-// POST（新規作成）は挿入位置（insert_after_id）、PUT（更新）は引き続き display_order を
-// 受け取る。編集フォームの挿入位置UI化は別イシューで扱うため、Updateは Create からの
-// .partial() 派生ではなく、共通項目（ThemeBaseSchema）に display_order を足して定義する。
+// POST（新規作成）・PUT（更新）とも挿入位置（insert_after_id）を受け取る。Updateは
+// Create からの .partial() 派生ではなく、共通項目（ThemeBaseSchema）に insert_after_id を
+// 足して定義する（Createは必須、Updateは.partial()で省略可能にする点だけが異なるため）。
 const ThemeBaseSchema = z.object({
   name: RequiredStringSchema,
   description: OptionalNullableString,
@@ -129,7 +127,7 @@ export const ThemeCreateSchema = ThemeBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
 export const ThemeUpdateSchema = ThemeBaseSchema.extend({
-  display_order: OptionalDisplayOrder,
+  insert_after_id: InsertAfterIdSchema,
 }).partial();
 
 // ==================== /api/manage/phases ====================
@@ -144,7 +142,7 @@ export const PhaseCreateSchema = PhaseBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
 export const PhaseUpdateSchema = PhaseBaseSchema.extend({
-  display_order: OptionalDisplayOrder,
+  insert_after_id: InsertAfterIdSchema,
 }).partial();
 
 // ==================== /api/manage/weeks ====================
@@ -159,7 +157,7 @@ export const WeekCreateSchema = WeekBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
 export const WeekUpdateSchema = WeekBaseSchema.extend({
-  display_order: OptionalDisplayOrder,
+  insert_after_id: InsertAfterIdSchema,
 }).partial();
 
 // ==================== /api/manage/contents ====================
@@ -185,7 +183,7 @@ export const ContentCreateSchema = ContentBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
 export const ContentUpdateSchema = ContentBaseSchema.extend({
-  display_order: OptionalDisplayOrder,
+  insert_after_id: InsertAfterIdSchema,
 }).partial();
 
 // ==================== /api/manage/contents/bulk ====================

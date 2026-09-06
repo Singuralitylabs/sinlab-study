@@ -17,6 +17,10 @@ import {
   fetchUserIdsWithStripeSubscription,
   isUserCurrentlySubscribed,
   rejectUser,
+  updateContent,
+  updatePhase,
+  updateTheme,
+  updateWeek,
 } from "@/app/services/api/admin-server";
 import {
   createAdminSupabaseClient,
@@ -782,5 +786,293 @@ describe("createContent", () => {
 
     const siblingsBuilder = mockClient.from.mock.results[0].value;
     expect(siblingsBuilder.eq).toHaveBeenCalledWith("is_deleted", false);
+  });
+});
+
+// ----------------------------------------------------------------
+// updateTheme / updatePhase / updateWeek / updateContent（編集時の再採番。issue #189）
+// ----------------------------------------------------------------
+describe("updateTheme（編集時の再採番）", () => {
+  it("insertAfterIdを省略した場合、兄弟取得も再採番も行わず、そのまま更新する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { learning_themes: { data: null, error: null } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await updateTheme(1, { name: "更新後" });
+
+    expect(result).toEqual({ error: null });
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+    const updateBuilder = mockClient.from.mock.results[0].value;
+    expect(updateBuilder.update).toHaveBeenCalledWith({ name: "更新後" });
+  });
+
+  it("insertAfterIdに自分自身のIDを指定した場合、InvalidInsertAfterIdErrorを投げる（自分自身は兄弟一覧から除外されるため）", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_themes: { data: [{ id: 2, display_order: 1 }], error: null },
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await expect(updateTheme(1, { name: "更新後", insertAfterId: 1 })).rejects.toThrow(
+      InvalidInsertAfterIdError
+    );
+    const siblingsBuilder = mockClient.from.mock.results[0].value;
+    expect(siblingsBuilder.neq).toHaveBeenCalledWith("id", 1);
+  });
+
+  it("insertAfterIdを指定した場合、自分自身を除いた兄弟のうち変化する行だけ再採番してから更新する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_themes: [
+          {
+            data: [
+              { id: 2, display_order: 1 },
+              { id: 3, display_order: 2 },
+            ],
+            error: null,
+          },
+          { data: null, error: null },
+          { data: null, error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    // id=2の直後に挿入 → id=3だけ display_order が2→3にずれ、自分自身は2になる
+    const result = await updateTheme(1, { name: "更新後", insertAfterId: 2 });
+
+    expect(result).toEqual({ error: null });
+    const shiftBuilder = mockClient.from.mock.results[1].value;
+    expect(shiftBuilder.update).toHaveBeenCalledWith({ display_order: 3 });
+    expect(shiftBuilder.eq).toHaveBeenCalledWith("id", 3);
+    const bodyUpdateBuilder = mockClient.from.mock.results[2].value;
+    expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "更新後", display_order: 2 })
+    );
+  });
+});
+
+describe("updatePhase（編集時の再採番）", () => {
+  it("insertAfterIdもtheme_idも省略した場合、現在値取得も再採番も行わずそのまま更新する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { learning_phases: { data: null, error: null } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await updatePhase(10, { name: "名称変更のみ" });
+
+    expect(result).toEqual({ error: null });
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+    const updateBuilder = mockClient.from.mock.results[0].value;
+    expect(updateBuilder.update).toHaveBeenCalledWith({ name: "名称変更のみ" });
+  });
+
+  it("theme_idが変わらない場合、移動先（同じtheme_id配下・自分自身を除く）だけを先頭へ再採番する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_phases: [
+          { data: { theme_id: 1 }, error: null },
+          {
+            data: [
+              { id: 2, display_order: 1 },
+              { id: 3, display_order: 2 },
+            ],
+            error: null,
+          },
+          { data: null, error: null },
+          { data: null, error: null },
+          { data: null, error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await updatePhase(10, { theme_id: 1, insertAfterId: null });
+
+    expect(result).toEqual({ error: null });
+    const currentFetchBuilder = mockClient.from.mock.results[0].value;
+    expect(currentFetchBuilder.select).toHaveBeenCalledWith("theme_id");
+    expect(currentFetchBuilder.eq).toHaveBeenCalledWith("id", 10);
+    const siblingsBuilder = mockClient.from.mock.results[1].value;
+    expect(siblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 1);
+    expect(siblingsBuilder.neq).toHaveBeenCalledWith("id", 10);
+    // 先頭挿入のため既存の2件とも display_order が1つずつ後ろへずれる
+    const update1 = mockClient.from.mock.results[2].value;
+    expect(update1.update).toHaveBeenCalledWith({ display_order: 2 });
+    expect(update1.eq).toHaveBeenCalledWith("id", 2);
+    const update2 = mockClient.from.mock.results[3].value;
+    expect(update2.update).toHaveBeenCalledWith({ display_order: 3 });
+    expect(update2.eq).toHaveBeenCalledWith("id", 3);
+    const bodyUpdateBuilder = mockClient.from.mock.results[4].value;
+    expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ theme_id: 1, display_order: 1 })
+    );
+  });
+
+  it("theme_idを変更した場合、移動先の末尾に追加し（insertAfterId省略時）、移動元に残った兄弟の欠番も再採番する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_phases: [
+          { data: { theme_id: 1 }, error: null },
+          { data: [{ id: 20, display_order: 1 }], error: null },
+          {
+            data: [
+              { id: 2, display_order: 1 },
+              { id: 3, display_order: 3 },
+            ],
+            error: null,
+          },
+          { data: null, error: null },
+          { data: null, error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await updatePhase(10, { theme_id: 2 });
+
+    expect(result).toEqual({ error: null });
+    const destinationSiblingsBuilder = mockClient.from.mock.results[1].value;
+    expect(destinationSiblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 2);
+    // 移動先の唯一の兄弟(id=20)は既に末尾なので display_order は変化せず、UPDATEは発生しない
+    const sourceSiblingsBuilder = mockClient.from.mock.results[2].value;
+    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 1);
+    expect(sourceSiblingsBuilder.neq).toHaveBeenCalledWith("id", 10);
+    // 移動元に残ったid=3は欠番(order=3)を詰めて2になる
+    const sourceUpdateBuilder = mockClient.from.mock.results[3].value;
+    expect(sourceUpdateBuilder.update).toHaveBeenCalledWith({ display_order: 2 });
+    expect(sourceUpdateBuilder.eq).toHaveBeenCalledWith("id", 3);
+    const bodyUpdateBuilder = mockClient.from.mock.results[4].value;
+    expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ theme_id: 2, display_order: 2 })
+    );
+  });
+
+  it("insertAfterIdが別テーマ配下のフェーズを指す場合、InvalidInsertAfterIdErrorを投げる", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_phases: [
+          { data: { theme_id: 1 }, error: null },
+          { data: [], error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await expect(updatePhase(10, { theme_id: 1, insertAfterId: 999 })).rejects.toThrow(
+      InvalidInsertAfterIdError
+    );
+  });
+
+  it("insertAfterIdに自分自身のIDを指定した場合、InvalidInsertAfterIdErrorを投げる", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_phases: [
+          { data: { theme_id: 1 }, error: null },
+          { data: [{ id: 2, display_order: 1 }], error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await expect(updatePhase(10, { theme_id: 1, insertAfterId: 10 })).rejects.toThrow(
+      InvalidInsertAfterIdError
+    );
+  });
+});
+
+describe("updateWeek（編集時の再採番）", () => {
+  it("phase_idが変わらず、insertAfterIdも省略した場合、現在値取得も再採番も行わない", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { learning_weeks: { data: null, error: null } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await updateWeek(10, { name: "名称変更のみ" });
+
+    expect(result).toEqual({ error: null });
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("phase_idを変更した場合、移動先(phase_id)配下を対象に再採番し、移動元(phase_id)配下も再採番する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_weeks: [
+          { data: { phase_id: 1 }, error: null },
+          { data: [], error: null },
+          {
+            data: [
+              { id: 2, display_order: 1 },
+              { id: 3, display_order: 3 },
+            ],
+            error: null,
+          },
+          { data: null, error: null },
+          { data: null, error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await updateWeek(10, { phase_id: 2 });
+
+    expect(result).toEqual({ error: null });
+    const destinationSiblingsBuilder = mockClient.from.mock.results[1].value;
+    expect(destinationSiblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 2);
+    const sourceSiblingsBuilder = mockClient.from.mock.results[2].value;
+    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 1);
+    const sourceUpdateBuilder = mockClient.from.mock.results[3].value;
+    expect(sourceUpdateBuilder.update).toHaveBeenCalledWith({ display_order: 2 });
+    const bodyUpdateBuilder = mockClient.from.mock.results[4].value;
+    expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ phase_id: 2, display_order: 1 })
+    );
+  });
+});
+
+describe("updateContent（編集時の再採番）", () => {
+  it("createAdminSupabaseClientを使い、week_idが変わらずinsertAfterIdも省略した場合は再採番しない", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { learning_contents: { data: null, error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await updateContent(10, { title: "タイトル変更のみ" });
+
+    expect(result).toEqual({ error: null });
+    expect(createAdminSupabaseClient).toHaveBeenCalled();
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("week_idを変更した場合、移動先の兄弟一覧を再採番し、移動元の欠番も詰め直す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          { data: { week_id: 1 }, error: null },
+          { data: [{ id: 20, display_order: 1 }], error: null },
+          { data: [{ id: 3, display_order: 3 }], error: null },
+          { data: null, error: null },
+          { data: null, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await updateContent(10, { week_id: 2 });
+
+    expect(result).toEqual({ error: null });
+    const destinationSiblingsBuilder = mockClient.from.mock.results[1].value;
+    expect(destinationSiblingsBuilder.eq).toHaveBeenCalledWith("week_id", 2);
+    const sourceSiblingsBuilder = mockClient.from.mock.results[2].value;
+    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("week_id", 1);
+    // 移動元に残ったid=3は欠番(order=3)を詰めて1になる
+    const sourceUpdateBuilder = mockClient.from.mock.results[3].value;
+    expect(sourceUpdateBuilder.update).toHaveBeenCalledWith({ display_order: 1 });
+    const bodyUpdateBuilder = mockClient.from.mock.results[4].value;
+    expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ week_id: 2, display_order: 2 })
+    );
   });
 });

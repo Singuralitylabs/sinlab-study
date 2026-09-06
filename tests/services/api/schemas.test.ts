@@ -195,16 +195,17 @@ describe("ThemeCreateSchema / ThemeUpdateSchema", () => {
     expect(ThemeCreateSchema.safeParse({ name: "  ", insert_after_id: null }).success).toBe(true);
   });
 
-  it("Updateは全項目が任意で、空オブジェクトも受理する（display_orderを引き続き受け取る）", () => {
-    expect(ThemeUpdateSchema.safeParse({}).success).toBe(true);
-    expect(ThemeUpdateSchema.safeParse({ display_order: 5 }).success).toBe(true);
-  });
-
-  it("Updateはinsert_after_idを受け付けない（編集フォームは非対象）", () => {
-    const result = ThemeUpdateSchema.safeParse({ insert_after_id: 1 });
+  it("Updateは全項目が任意で、空オブジェクトも受理する（insert_after_id省略時は表示順を変更しない）", () => {
+    const result = ThemeUpdateSchema.safeParse({});
     expect(result.success).toBe(true);
     if (!result.success) throw new Error("unreachable");
-    expect(result.data).not.toHaveProperty("insert_after_id");
+    expect(result.data.insert_after_id).toBeUndefined();
+  });
+
+  it("Updateはinsert_after_idを任意項目として受け付ける（null・正の整数のいずれも可）", () => {
+    expect(ThemeUpdateSchema.safeParse({ insert_after_id: null }).success).toBe(true);
+    expect(ThemeUpdateSchema.safeParse({ insert_after_id: 1 }).success).toBe(true);
+    expect(ThemeUpdateSchema.safeParse({ insert_after_id: 0 }).success).toBe(false);
   });
 
   it("Updateでもnameを指定する場合は空文字を許容しない", () => {
@@ -381,9 +382,17 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(ContentCreateSchema.safeParse({ ...base, insert_after_id: 1.5 }).success).toBe(false);
   });
 
-  it("Updateは全項目が任意で、空オブジェクトも受理する（display_orderを引き続き受け取る）", () => {
-    expect(ContentUpdateSchema.safeParse({}).success).toBe(true);
-    expect(ContentUpdateSchema.safeParse({ display_order: 3 }).success).toBe(true);
+  it("Updateは全項目が任意で、空オブジェクトも受理する（insert_after_id省略時は表示順を変更しない）", () => {
+    const result = ContentUpdateSchema.safeParse({});
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error("unreachable");
+    expect(result.data.insert_after_id).toBeUndefined();
+  });
+
+  it("Updateはinsert_after_idを任意項目として受け付ける（null・正の整数のいずれも可）", () => {
+    expect(ContentUpdateSchema.safeParse({ insert_after_id: null }).success).toBe(true);
+    expect(ContentUpdateSchema.safeParse({ insert_after_id: 2 }).success).toBe(true);
+    expect(ContentUpdateSchema.safeParse({ insert_after_id: 0 }).success).toBe(false);
   });
 });
 

@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
+import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
 import { deleteWeek, updateWeek } from "@/app/services/api/admin-server";
 import { validateRequest, WeekUpdateSchema } from "@/app/services/api/schemas";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
@@ -30,13 +31,13 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (!validation.success) {
       return validation.response;
     }
-    const { phase_id, name, description, display_order, is_published } = validation.data;
+    const { phase_id, name, description, insert_after_id, is_published } = validation.data;
 
     const { error } = await updateWeek(weekId, {
       phase_id,
       name,
       description,
-      display_order,
+      insertAfterId: insert_after_id,
       is_published,
     });
     if (error) {
@@ -44,6 +45,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     }
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof InvalidInsertAfterIdError) {
+      console.error("週更新エラー（insert_after_id不正）:", error.insertAfterId);
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("API エラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
   }

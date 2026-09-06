@@ -5,6 +5,7 @@ vi.mock("@/app/services/api/admin-server");
 
 import { PUT } from "@/app/api/manage/phases/[id]/route";
 import { POST } from "@/app/api/manage/phases/route";
+import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
 import { createPhase, updatePhase } from "@/app/services/api/admin-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -68,5 +69,20 @@ describe("PUT /api/manage/phases/[id] - バリデーション", () => {
 
     expect(res.status).toBe(400);
     expect(updatePhase).not.toHaveBeenCalled();
+  });
+
+  it("insert_after_idを指定した場合、insertAfterIdとして更新処理へ渡す", async () => {
+    const res = await PUT(request({ theme_id: 1, insert_after_id: 2 }) as never, { params });
+
+    expect(res.status).toBe(200);
+    expect(updatePhase).toHaveBeenCalledWith(1, expect.objectContaining({ insertAfterId: 2 }));
+  });
+
+  it("updatePhaseがInvalidInsertAfterIdErrorを投げた場合は400", async () => {
+    vi.mocked(updatePhase).mockRejectedValue(new InvalidInsertAfterIdError(999));
+
+    const res = await PUT(request({ theme_id: 1, insert_after_id: 999 }) as never, { params });
+
+    expect(res.status).toBe(400);
   });
 });
