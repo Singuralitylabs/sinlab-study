@@ -178,6 +178,11 @@ export async function deleteTheme(id: number): Promise<{ error: PostgrestError |
 // フェーズ管理
 // =====================================================
 
+/**
+ * フェーズ一覧を取得する。`display_order`（フェーズ自身の表示順）でソートして返すが、
+ * テーマ→フェーズの階層順が必要な呼び出し元（`/manage/phases` 一覧）は、
+ * 呼び出し側で `sortPhasesByHierarchy` を通すこと。
+ */
 export async function fetchAllPhases(): Promise<{
   data: LearningPhaseWithTheme[] | null;
   error: PostgrestError | null;
@@ -309,10 +314,9 @@ export async function deletePhase(id: number): Promise<{ error: PostgrestError |
 // =====================================================
 
 /**
- * 週一覧を取得する。`display_order`（週自身の表示順）でソートして返す。
- * テーマ→フェーズ→週の階層順が必要な呼び出し元（`ContentForm` 用の選択肢導出）は、
- * `sortContentsByHierarchy` と同様に呼び出し側で `sortWeeksByHierarchy` を通すこと
- * （`/manage/weeks` 一覧は本関数の並び順をそのまま使うため、ここではソートしない）。
+ * 週一覧を取得する。`display_order`（週自身の表示順）でソートして返すが、
+ * テーマ→フェーズ→週の階層順が必要な呼び出し元（`/manage/weeks` 一覧・`ContentForm`
+ * 用の選択肢導出）は、いずれも呼び出し側で `sortWeeksByHierarchy` を通すこと。
  */
 export async function fetchAllWeeks(): Promise<{
   data: LearningWeekWithPhase[] | null;

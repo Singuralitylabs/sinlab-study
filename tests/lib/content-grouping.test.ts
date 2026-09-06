@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   groupContentsByWeek,
+  groupPhasesByTheme,
+  groupWeeksByPhase,
   sortContentsByHierarchy,
+  sortPhasesByHierarchy,
   sortWeeksByHierarchy,
 } from "@/app/lib/content-grouping";
 import type { LearningContentWithWeek, LearningWeekWithPhase } from "@/app/types";
@@ -317,6 +320,151 @@ describe("groupContentsByWeek", () => {
     const classified = makeContent({ id: 2, week_id: 1, display_order: 1, week: week1 });
 
     const groups = groupContentsByWeek(sortContentsByHierarchy([unclassified, classified]));
+
+    expect(groups.map((g) => g.key)).toEqual(["1", "unclassified"]);
+  });
+});
+
+describe("sortPhasesByHierarchy", () => {
+  it("テーマ→フェーズの display_order 順に並び替える", () => {
+    const phaseA = { ...phase1, id: 11, display_order: 2 };
+    const phaseB = { ...phase1, id: 12, display_order: 1 };
+    const phaseC = { ...phase2, id: 13, display_order: 1 };
+
+    const sorted = sortPhasesByHierarchy([phaseC, phaseA, phaseB]);
+
+    // phaseB(theme1, display_order:1) が phaseA(theme1, display_order:2) より先、
+    // かつ theme1 配下(phaseA, phaseB) が theme2 配下(phaseC) より先
+    expect(sorted.map((p) => p.id)).toEqual([12, 11, 13]);
+  });
+
+  it("テーマの display_order が DB 上 NULL でも末尾にまとめる", () => {
+    const sorted = sortPhasesByHierarchy([phase3, phase1]);
+
+    expect(sorted.map((p) => p.id)).toEqual([1, 3]);
+  });
+
+  it("階層情報も display_order も両方欠落する場合はNaNにならずidでタイブレークする", () => {
+    const phaseA = {
+      ...phase1,
+      id: 2,
+      theme_id: 99,
+      display_order: null as unknown as number,
+      theme: null,
+    };
+    const phaseB = {
+      ...phase1,
+      id: 1,
+      theme_id: 99,
+      display_order: null as unknown as number,
+      theme: null,
+    };
+
+    const sorted = sortPhasesByHierarchy([phaseA, phaseB]);
+
+    expect(sorted.map((p) => p.id)).toEqual([1, 2]);
+  });
+
+  it("元の配列を破壊しない", () => {
+    const phaseA = { ...phase1, id: 11, display_order: 2 };
+    const phaseB = { ...phase1, id: 12, display_order: 1 };
+    const original = [phaseA, phaseB];
+
+    sortPhasesByHierarchy(original);
+
+    expect(original.map((p) => p.id)).toEqual([11, 12]);
+  });
+
+  it("テーマの display_order が同値でも、id タイブレークにより別の親同士のフェーズが混在しない", () => {
+    const themeX = { ...theme1, id: 10, display_order: 0 };
+    const themeY = { ...theme1, id: 20, display_order: 0 };
+    const phaseX = { ...phase1, id: 100, theme_id: 10, display_order: 5, theme: themeX };
+    const phaseY = { ...phase1, id: 200, theme_id: 20, display_order: 1, theme: themeY };
+
+    const sorted = sortPhasesByHierarchy([phaseY, phaseX]);
+
+    // themeX(id10) が themeY(id20) よりidタイブレークで先。フェーズ自身のdisplay_order
+    // （phaseY:1 < phaseX:5）だけで比較すると誤って phaseY が先に来てしまう
+    expect(sorted.map((p) => p.id)).toEqual([100, 200]);
+  });
+});
+
+describe("groupWeeksByPhase", () => {
+  it("フェーズ単位でグルーピングし、テーマ›フェーズのラベルを付与する", () => {
+    const groups = groupWeeksByPhase(sortWeeksByHierarchy([week3, week1, week2]));
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toMatchObject({ key: "1", label: "テーマ1 › フェーズ1" });
+    expect(groups[0].weeks.map((w) => w.id)).toEqual([2, 1]);
+    expect(groups[1]).toMatchObject({ key: "2", label: "テーマ2 › フェーズ2" });
+    expect(groups[1].weeks.map((w) => w.id)).toEqual([3]);
+  });
+
+  it("フェーズ未設定の週は「未分類」グループにまとめる", () => {
+    const unclassifiedA = makeWeek({ id: 6, phase_id: 99, display_order: 1, phase: null });
+    const unclassifiedB = makeWeek({ id: 7, phase_id: 99, display_order: 2, phase: null });
+
+    const groups = groupWeeksByPhase([week1, unclassifiedA, unclassifiedB]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[1]).toMatchObject({ key: "unclassified", label: "未分類" });
+    expect(groups[1].weeks.map((w) => w.id)).toEqual([6, 7]);
+  });
+
+  it("sortWeeksByHierarchy と組み合わせると「未分類」グループが末尾になる", () => {
+    const unclassified = makeWeek({ id: 8, phase_id: 99, display_order: 1, phase: null });
+
+    const groups = groupWeeksByPhase(sortWeeksByHierarchy([unclassified, week1]));
+
+    expect(groups.map((g) => g.key)).toEqual(["1", "unclassified"]);
+  });
+});
+
+describe("groupPhasesByTheme", () => {
+  it("テーマ単位でグルーピングし、テーマ名のラベルを付与する", () => {
+    const phase1b = { ...phase1, id: 5, display_order: 2 };
+
+    const groups = groupPhasesByTheme(sortPhasesByHierarchy([phase2, phase1b, phase1]));
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toMatchObject({ key: "1", label: "テーマ1" });
+    expect(groups[0].phases.map((p) => p.id)).toEqual([1, 5]);
+    expect(groups[1]).toMatchObject({ key: "2", label: "テーマ2" });
+    expect(groups[1].phases.map((p) => p.id)).toEqual([2]);
+  });
+
+  it("テーマ未設定のフェーズは「未分類」グループにまとめる", () => {
+    const unclassifiedA = { ...phase1, id: 6, theme_id: 99, display_order: 1, theme: null };
+    const unclassifiedB = { ...phase1, id: 7, theme_id: 99, display_order: 2, theme: null };
+
+    const groups = groupPhasesByTheme([phase1, unclassifiedA, unclassifiedB]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[1]).toMatchObject({ key: "unclassified", label: "未分類" });
+    expect(groups[1].phases.map((p) => p.id)).toEqual([6, 7]);
+  });
+
+  it("テーマ名が空白のみの場合もラベルは「未分類」になる（joinHierarchyLabelでトリムして欠落扱い）", () => {
+    const themeBlankName = { ...theme1, id: 30, name: "   " };
+    const phaseWithBlankThemeName = {
+      ...phase1,
+      id: 30,
+      theme_id: 30,
+      theme: themeBlankName,
+    };
+
+    const groups = groupPhasesByTheme([phaseWithBlankThemeName]);
+
+    // テーマ自体は設定されているためグルーピングキーはテーマidのまま（「未分類」グループには
+    // 統合されない）が、ラベルは名前が空白のみのため「未分類」表示になる
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ key: "30", label: "未分類" });
+  });
+
+  it("sortPhasesByHierarchy と組み合わせると「未分類」グループが末尾になる", () => {
+    const unclassified = { ...phase1, id: 8, theme_id: 99, display_order: 1, theme: null };
+
+    const groups = groupPhasesByTheme(sortPhasesByHierarchy([unclassified, phase1]));
 
     expect(groups.map((g) => g.key)).toEqual(["1", "unclassified"]);
   });

@@ -1,6 +1,8 @@
 import { Edit, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
+import { Fragment } from "react";
 import { PageTitle } from "@/app/components/PageTitle";
+import { groupWeeksByPhase, sortWeeksByHierarchy } from "@/app/lib/content-grouping";
 import { fetchAllWeeks } from "@/app/services/api/admin-server";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +18,7 @@ import {
 
 export default async function ManageWeeksPage() {
   const { data: weeks } = await fetchAllWeeks();
+  const groups = groupWeeksByPhase(sortWeeksByHierarchy(weeks ?? []));
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -29,7 +32,7 @@ export default async function ManageWeeksPage() {
         </Button>
       </div>
 
-      {!weeks || weeks.length === 0 ? (
+      {groups.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center">
             <p className="text-muted-foreground">週がまだ登録されていません。</p>
@@ -44,54 +47,62 @@ export default async function ManageWeeksPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-16">順序</TableHead>
-                <TableHead>フェーズ</TableHead>
                 <TableHead>名前</TableHead>
                 <TableHead className="text-center w-16">公開</TableHead>
                 <TableHead className="text-right w-24">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {weeks.map((week) => (
-                <TableRow key={week.id}>
-                  <TableCell className="text-sm">{week.display_order}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {week.phase?.name || "-"}
-                  </TableCell>
-                  <TableCell className="font-medium">{week.name}</TableCell>
-                  <TableCell className="text-center">
-                    {week.is_published ? (
-                      <Badge variant="secondary" className="gap-1 bg-success/10 text-success">
-                        <Eye className="h-3 w-3" />
-                        公開
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary" className="gap-1">
-                        <EyeOff className="h-3 w-3" />
-                        非公開
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="icon-sm" asChild title="編集">
-                        <Link href={`/manage/weeks/${week.id}/edit`}>
-                          <Edit className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        asChild
-                        title="削除"
-                        className="text-destructive hover:text-destructive"
-                      >
-                        <Link href={`/manage/weeks/${week.id}/delete`}>
-                          <Trash2 className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
+              {groups.map((group) => (
+                <Fragment key={group.key}>
+                  <TableRow className="bg-muted/50 hover:bg-muted/50">
+                    <TableCell colSpan={4} className="text-sm font-medium">
+                      {group.label}
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        （{group.weeks.length}件）
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                  {group.weeks.map((week) => (
+                    <TableRow key={week.id}>
+                      <TableCell className="text-sm">{week.display_order}</TableCell>
+                      <TableCell className="font-medium">{week.name}</TableCell>
+                      <TableCell className="text-center">
+                        {week.is_published ? (
+                          <Badge variant="secondary" className="gap-1 bg-success/10 text-success">
+                            <Eye className="h-3 w-3" />
+                            公開
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="gap-1">
+                            <EyeOff className="h-3 w-3" />
+                            非公開
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="icon-sm" asChild title="編集">
+                            <Link href={`/manage/weeks/${week.id}/edit`}>
+                              <Edit className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            asChild
+                            title="削除"
+                            className="text-destructive hover:text-destructive"
+                          >
+                            <Link href={`/manage/weeks/${week.id}/delete`}>
+                              <Trash2 className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </Fragment>
               ))}
             </TableBody>
           </Table>
