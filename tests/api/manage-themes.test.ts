@@ -38,20 +38,37 @@ describe("POST /api/manage/themes - バリデーション", () => {
   });
 
   it("nameが空白のみの場合も、既存の !name チェックと同じ範囲で許可される", async () => {
-    const res = await POST(request({ name: "   " }) as never);
+    const res = await POST(request({ name: "   ", insert_after_id: null }) as never);
 
     expect(res.status).toBe(200);
     expect(createTheme).toHaveBeenCalledWith(expect.objectContaining({ name: "   " }));
   });
 
-  it("正常な入力は200で、作成処理へそのまま渡す", async () => {
+  it("insert_after_idが未指定の場合は400で、作成処理を呼ばない", async () => {
+    const res = await POST(request({ name: "テーマ1" }) as never);
+
+    expect(res.status).toBe(400);
+    expect(createTheme).not.toHaveBeenCalled();
+  });
+
+  it("正常な入力は200で、insertAfterIdとして作成処理へ渡す", async () => {
     const res = await POST(
-      request({ name: "テーマ1", description: "説明", is_published: true }) as never
+      request({
+        name: "テーマ1",
+        description: "説明",
+        insert_after_id: 3,
+        is_published: true,
+      }) as never
     );
 
     expect(res.status).toBe(200);
     expect(createTheme).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "テーマ1", description: "説明", is_published: true })
+      expect.objectContaining({
+        name: "テーマ1",
+        description: "説明",
+        insertAfterId: 3,
+        is_published: true,
+      })
     );
   });
 });

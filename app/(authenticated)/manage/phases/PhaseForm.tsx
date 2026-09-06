@@ -10,36 +10,63 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  getDefaultInsertAfterId,
+  type SiblingCandidate,
+  SiblingOrderField,
+} from "../components/SiblingOrderField";
 
 interface PhaseFormProps {
   themes: LearningTheme[];
   initialData?: LearningPhase;
+  /** 新規作成フォームの挿入位置ピッカーに表示する全フェーズ候補（作成モードのみ使用） */
+  siblingCandidates?: SiblingCandidate[];
   mode: "create" | "edit";
 }
 
-export function PhaseForm({ themes, initialData, mode }: PhaseFormProps) {
+export function PhaseForm({ themes, initialData, siblingCandidates = [], mode }: PhaseFormProps) {
   const router = useRouter();
 
   const [themeId, setThemeId] = useState(initialData?.theme_id?.toString() ?? "");
   const [name, setName] = useState(initialData?.name ?? "");
   const [description, setDescription] = useState(initialData?.description ?? "");
   const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
+  const visibleSiblings = siblingCandidates.filter((c) => String(c.parentId) === themeId);
+  const [insertAfterId, setInsertAfterId] = useState(() =>
+    getDefaultInsertAfterId(visibleSiblings)
+  );
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  function handleThemeChange(value: string) {
+    setThemeId(value);
+    setInsertAfterId(
+      getDefaultInsertAfterId(siblingCandidates.filter((c) => String(c.parentId) === value))
+    );
+  }
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage(null);
 
-    const body = {
-      theme_id: Number(themeId),
-      name,
-      description: description || null,
-      display_order: Number(displayOrder),
-      is_published: isPublished,
-    };
+    const body =
+      mode === "create"
+        ? {
+            theme_id: Number(themeId),
+            name,
+            description: description || null,
+            insert_after_id: insertAfterId,
+            is_published: isPublished,
+          }
+        : {
+            theme_id: Number(themeId),
+            name,
+            description: description || null,
+            display_order: Number(displayOrder),
+            is_published: isPublished,
+          };
 
     try {
       const url =
@@ -79,7 +106,7 @@ export function PhaseForm({ themes, initialData, mode }: PhaseFormProps) {
             <select
               id="themeId"
               value={themeId}
-              onChange={(e) => setThemeId(e.target.value)}
+              onChange={(e) => handleThemeChange(e.target.value)}
               required
               className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
             >
@@ -114,16 +141,24 @@ export function PhaseForm({ themes, initialData, mode }: PhaseFormProps) {
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="displayOrder">表示順</Label>
-            <Input
-              id="displayOrder"
-              type="number"
-              value={displayOrder}
-              onChange={(e) => setDisplayOrder(e.target.value)}
-              className="w-24"
+          {mode === "create" ? (
+            <SiblingOrderField
+              siblings={themeId ? visibleSiblings : null}
+              insertAfterId={insertAfterId}
+              onChange={setInsertAfterId}
             />
-          </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="displayOrder">表示順</Label>
+              <Input
+                id="displayOrder"
+                type="number"
+                value={displayOrder}
+                onChange={(e) => setDisplayOrder(e.target.value)}
+                className="w-24"
+              />
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             <input

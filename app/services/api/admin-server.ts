@@ -1,6 +1,7 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { resolveSiblingResequence } from "@/app/lib/content-grouping";
 import {
   fetchStripeSubscriptionByUserId,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
@@ -17,6 +18,48 @@ import type {
   UserType,
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
+
+type SiblingTable = "learning_themes" | "learning_phases" | "learning_weeks" | "learning_contents";
+
+/**
+ * `createTheme` / `createPhase` / `createWeek` / `createContent` に共通する、挿入位置からの
+ * 再採番処理（兄弟をSELECT → `resolveSiblingResequence` → 変化した行だけUPDATE）を1本化した
+ * ヘルパー。`parentFilter` はテーマのみ null（親を持たないため全件が対象）。
+ * 呼び出し元は返り値の `error` が null であることを確認したうえで `displayOrder` をINSERTに使う。
+ * `insertAfterId` が同じ親配下・未削除の要素として存在しない場合は
+ * `resolveSiblingResequence` が投げる `InvalidInsertAfterIdError` がそのまま伝播する。
+ */
+async function resequenceSiblingsForInsert(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  table: SiblingTable,
+  parentFilter: { column: "theme_id" | "phase_id" | "week_id"; value: number } | null,
+  insertAfterId: number | null
+): Promise<{ displayOrder: number; error: null } | { displayOrder: null; error: PostgrestError }> {
+  let query = supabase.from(table).select("id, display_order").eq("is_deleted", false);
+  if (parentFilter) {
+    query = query.eq(parentFilter.column, parentFilter.value);
+  }
+  const { data: siblings, error: siblingsError } = await query;
+  if (siblingsError) {
+    return { displayOrder: null, error: siblingsError };
+  }
+
+  const { displayOrder, updates } = resolveSiblingResequence(siblings ?? [], insertAfterId);
+
+  if (updates.length > 0) {
+    const updateResults = await Promise.all(
+      updates.map((row) =>
+        supabase.from(table).update({ display_order: row.display_order }).eq("id", row.id)
+      )
+    );
+    const updateError = updateResults.find((result) => result.error)?.error;
+    if (updateError) {
+      return { displayOrder: null, error: updateError };
+    }
+  }
+
+  return { displayOrder, error: null };
+}
 
 // =====================================================
 // テーマ管理
@@ -60,16 +103,45 @@ export async function fetchThemeById(id: number): Promise<{
   return { data, error: null };
 }
 
+/**
+ * テーマを作成する。`insertAfterId`（null=先頭、数値=そのテーマIDの直後）から
+ * `display_order` をサーバー側で決定し、対象範囲（テーマは親を持たないため全テーマ）の
+ * 兄弟を1からの連番に再採番してからINSERTする（`resolveSiblingResequence` 参照）。
+ * `insertAfterId` が未削除テーマとして存在しない場合は `InvalidInsertAfterIdError` を投げる
+ * （呼び出し側のAPIルートで400に変換すること）。
+ */
 export async function createTheme(theme: {
   name: string;
   description?: string | null;
-  display_order?: number;
+  insertAfterId: number | null;
   is_published?: boolean;
   image_url?: string | null;
 }): Promise<{ data: LearningTheme | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase.from("learning_themes").insert(theme).select().single();
+  const resequenced = await resequenceSiblingsForInsert(
+    supabase,
+    "learning_themes",
+    null,
+    theme.insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("テーマ作成エラー（再採番）:", resequenced.error.message);
+    return { data: null, error: resequenced.error };
+  }
+  const { displayOrder } = resequenced;
+
+  const { data, error } = await supabase
+    .from("learning_themes")
+    .insert({
+      name: theme.name,
+      description: theme.description,
+      is_published: theme.is_published,
+      image_url: theme.image_url,
+      display_order: displayOrder,
+    })
+    .select()
+    .single();
 
   if (error) {
     console.error("テーマ作成エラー:", error.message);
@@ -221,16 +293,43 @@ export async function fetchPhaseById(id: number): Promise<{
   return { data, error: null };
 }
 
+/**
+ * フェーズを作成する。`insertAfterId` から `display_order` をサーバー側で決定し、
+ * 同じ `theme_id` 配下の兄弟を1からの連番に再採番してからINSERTする
+ * （`createTheme` と同じ方針。詳細は `resolveSiblingResequence` 参照）。
+ */
 export async function createPhase(phase: {
   theme_id: number;
   name: string;
   description?: string | null;
-  display_order?: number;
+  insertAfterId: number | null;
   is_published?: boolean;
 }): Promise<{ data: LearningPhase | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase.from("learning_phases").insert(phase).select().single();
+  const resequenced = await resequenceSiblingsForInsert(
+    supabase,
+    "learning_phases",
+    { column: "theme_id", value: phase.theme_id },
+    phase.insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("フェーズ作成エラー（再採番）:", resequenced.error.message);
+    return { data: null, error: resequenced.error };
+  }
+  const { displayOrder } = resequenced;
+
+  const { data, error } = await supabase
+    .from("learning_phases")
+    .insert({
+      theme_id: phase.theme_id,
+      name: phase.name,
+      description: phase.description,
+      is_published: phase.is_published,
+      display_order: displayOrder,
+    })
+    .select()
+    .single();
 
   if (error) {
     console.error("フェーズ作成エラー:", error.message);
@@ -356,16 +455,43 @@ export async function fetchWeekById(id: number): Promise<{
   return { data, error: null };
 }
 
+/**
+ * 週を作成する。`insertAfterId` から `display_order` をサーバー側で決定し、
+ * 同じ `phase_id` 配下の兄弟を1からの連番に再採番してからINSERTする
+ * （`createTheme` と同じ方針。詳細は `resolveSiblingResequence` 参照）。
+ */
 export async function createWeek(week: {
   phase_id: number;
   name: string;
   description?: string | null;
-  display_order?: number;
+  insertAfterId: number | null;
   is_published?: boolean;
 }): Promise<{ data: LearningWeek | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase.from("learning_weeks").insert(week).select().single();
+  const resequenced = await resequenceSiblingsForInsert(
+    supabase,
+    "learning_weeks",
+    { column: "phase_id", value: week.phase_id },
+    week.insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("週作成エラー（再採番）:", resequenced.error.message);
+    return { data: null, error: resequenced.error };
+  }
+  const { displayOrder } = resequenced;
+
+  const { data, error } = await supabase
+    .from("learning_weeks")
+    .insert({
+      phase_id: week.phase_id,
+      name: week.name,
+      description: week.description,
+      is_published: week.is_published,
+      display_order: displayOrder,
+    })
+    .select()
+    .single();
 
   if (error) {
     console.error("週作成エラー:", error.message);
@@ -462,6 +588,14 @@ export async function fetchContentByIdForAdmin(
   return { data, error: null };
 }
 
+/**
+ * コンテンツを作成する。`insertAfterId` から `display_order` をサーバー側で決定し、
+ * 同じ `week_id` 配下の兄弟を1からの連番に再採番してからINSERTする
+ * （`createTheme` と同じ方針。詳細は `resolveSiblingResequence` 参照）。
+ * 兄弟の取得・再採番は他の3関数と異なり `createAdminSupabaseClient()` を使う
+ * （createContent 自体が従来から service_role を使っているため。CLAUDE.mdの
+ * service_role制限対象は「受講生向け配信経路」であり、この管理者専用の作成経路は対象外）。
+ */
 export async function createContent(content: {
   week_id: number;
   title: string;
@@ -475,15 +609,43 @@ export async function createContent(content: {
   allowed_submission_types?: "code" | "url" | "both";
   code_language?: CodeLanguage;
   pdf_url?: string | null;
-  display_order?: number;
+  insertAfterId: number | null;
   is_published?: boolean;
   is_open_to_trial?: boolean;
 }): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
 
+  const resequenced = await resequenceSiblingsForInsert(
+    supabase,
+    "learning_contents",
+    { column: "week_id", value: content.week_id },
+    content.insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("コンテンツ作成エラー（再採番）:", resequenced.error.message);
+    return { data: null, error: resequenced.error };
+  }
+  const { displayOrder } = resequenced;
+
   const { data, error } = await supabase
     .from("learning_contents")
-    .insert(content)
+    .insert({
+      week_id: content.week_id,
+      title: content.title,
+      content_type: content.content_type,
+      video_url: content.video_url,
+      text_content: content.text_content,
+      description: content.description,
+      exercise_instructions: content.exercise_instructions,
+      hint: content.hint,
+      reference_answer: content.reference_answer,
+      allowed_submission_types: content.allowed_submission_types,
+      code_language: content.code_language,
+      pdf_url: content.pdf_url,
+      is_published: content.is_published,
+      is_open_to_trial: content.is_open_to_trial,
+      display_order: displayOrder,
+    })
     .select()
     .single();
 

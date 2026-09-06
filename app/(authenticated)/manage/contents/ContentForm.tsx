@@ -16,6 +16,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  getDefaultInsertAfterId,
+  type SiblingCandidate,
+  SiblingOrderField,
+} from "../components/SiblingOrderField";
 
 const SELECT_CLASS_NAME =
   "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs";
@@ -33,6 +38,8 @@ interface ContentFormProps {
   weeks: WeekFilterOption[];
   initialData?: LearningContent;
   initialWeekSelection?: InitialWeekSelection;
+  /** 新規作成フォームの挿入位置ピッカーに表示する全コンテンツ候補（作成モードのみ使用） */
+  siblingCandidates?: SiblingCandidate[];
   mode: "create" | "edit";
 }
 
@@ -131,6 +138,7 @@ export function ContentForm({
   weeks,
   initialData,
   initialWeekSelection,
+  siblingCandidates = [],
   mode,
 }: ContentFormProps) {
   const router = useRouter();
@@ -174,6 +182,10 @@ export function ContentForm({
     resolvedInitialSelection.phaseId || initialPhaseIdFallback
   );
   const [weekId, setWeekId] = useState(resolvedInitialSelection.weekId);
+  const visibleSiblings = siblingCandidates.filter((c) => String(c.parentId) === weekId);
+  const [insertAfterId, setInsertAfterId] = useState(() =>
+    getDefaultInsertAfterId(visibleSiblings)
+  );
 
   const [contentType, setContentType] = useState<ContentType>(initialData?.content_type ?? "video");
   const [videoUrl, setVideoUrl] = useState(initialData?.video_url ?? "");
@@ -221,11 +233,20 @@ export function ContentForm({
     setThemeId(value);
     setPhaseId("");
     setWeekId("");
+    setInsertAfterId(null);
   }
 
   function handlePhaseChange(value: string) {
     setPhaseId(value);
     setWeekId("");
+    setInsertAfterId(null);
+  }
+
+  function handleWeekChange(value: string) {
+    setWeekId(value);
+    setInsertAfterId(
+      getDefaultInsertAfterId(siblingCandidates.filter((c) => String(c.parentId) === value))
+    );
   }
 
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -318,7 +339,9 @@ export function ContentForm({
       title,
       week_id: Number(weekId),
       content_type: contentType,
-      display_order: Number(displayOrder),
+      ...(mode === "create"
+        ? { insert_after_id: insertAfterId }
+        : { display_order: Number(displayOrder) }),
       is_published: isPublished,
       is_open_to_trial: isOpenToTrial,
       video_url: contentType === "video" ? videoUrl.trim() || null : null,
@@ -420,7 +443,7 @@ export function ContentForm({
               <select
                 id="weekId"
                 value={weekId}
-                onChange={(e) => setWeekId(e.target.value)}
+                onChange={(e) => handleWeekChange(e.target.value)}
                 required
                 className={SELECT_CLASS_NAME}
               >
@@ -646,17 +669,25 @@ export function ContentForm({
             </>
           )}
 
-          {/* 表示順 */}
-          <div className="space-y-2">
-            <Label htmlFor="displayOrder">表示順</Label>
-            <Input
-              id="displayOrder"
-              type="number"
-              value={displayOrder}
-              onChange={(e) => setDisplayOrder(e.target.value)}
-              className="w-24"
+          {/* 表示順 / 挿入位置 */}
+          {mode === "create" ? (
+            <SiblingOrderField
+              siblings={weekId ? visibleSiblings : null}
+              insertAfterId={insertAfterId}
+              onChange={setInsertAfterId}
             />
-          </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="displayOrder">表示順</Label>
+              <Input
+                id="displayOrder"
+                type="number"
+                value={displayOrder}
+                onChange={(e) => setDisplayOrder(e.target.value)}
+                className="w-24"
+              />
+            </div>
+          )}
 
           {/* 公開設定 */}
           <div className="flex items-center gap-2">

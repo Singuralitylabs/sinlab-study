@@ -31,8 +31,9 @@ beforeEach(() => {
 
 describe("POST /api/manage/weeks - バリデーション", () => {
   it.each([
-    ["phase_id未指定", { name: "週1" }],
-    ["name未指定", { phase_id: 1 }],
+    ["phase_id未指定", { name: "週1", insert_after_id: null }],
+    ["name未指定", { phase_id: 1, insert_after_id: null }],
+    ["insert_after_id未指定", { phase_id: 1, name: "週1" }],
   ])("%sの場合は400で、作成処理を呼ばない", async (_label, body) => {
     const res = await POST(request(body) as never);
 
@@ -40,11 +41,13 @@ describe("POST /api/manage/weeks - バリデーション", () => {
     expect(createWeek).not.toHaveBeenCalled();
   });
 
-  it("正常な入力は200", async () => {
-    const res = await POST(request({ phase_id: 1, name: "週1" }) as never);
+  it("正常な入力は200で、insertAfterIdとして作成処理へ渡す", async () => {
+    const res = await POST(request({ phase_id: 1, name: "週1", insert_after_id: null }) as never);
 
     expect(res.status).toBe(200);
-    expect(createWeek).toHaveBeenCalledWith(expect.objectContaining({ phase_id: 1, name: "週1" }));
+    expect(createWeek).toHaveBeenCalledWith(
+      expect.objectContaining({ phase_id: 1, name: "週1", insertAfterId: null })
+    );
   });
 });
 

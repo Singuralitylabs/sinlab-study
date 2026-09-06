@@ -3,10 +3,15 @@ import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
 
+import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
 import {
   approveUser,
   changeMembershipType,
   changeUserRole,
+  createContent,
+  createPhase,
+  createTheme,
+  createWeek,
   fetchManageCounts,
   fetchStudentsProgress,
   fetchUserIdsWithStripeSubscription,
@@ -553,5 +558,229 @@ describe("fetchUserIdsWithStripeSubscription", () => {
 
     expect(result.data).toBeNull();
     expect(result.error).toEqual(dbError);
+  });
+});
+
+// ----------------------------------------------------------------
+// createTheme / createPhase / createWeek / createContent（挿入位置からの再採番）
+// ----------------------------------------------------------------
+describe("createTheme", () => {
+  it("兄弟が存在しない場合、display_order: 1 で作成する", async () => {
+    const createdTheme = { id: 100, name: "新テーマ", display_order: 1 };
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_themes: [
+          { data: [], error: null },
+          { data: createdTheme, error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await createTheme({ name: "新テーマ", insertAfterId: null });
+
+    expect(result).toEqual({ data: createdTheme, error: null });
+    const insertBuilder = mockClient.from.mock.results[1].value;
+    expect(insertBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "新テーマ", display_order: 1 })
+    );
+  });
+
+  it("既存兄弟がいる場合、display_orderが変わる行だけUPDATEしてからINSERTする", async () => {
+    const createdTheme = { id: 100, name: "新テーマ", display_order: 1 };
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_themes: [
+          { data: [{ id: 5, display_order: 1 }], error: null },
+          { data: null, error: null },
+          { data: createdTheme, error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await createTheme({ name: "新テーマ", insertAfterId: null });
+
+    expect(result).toEqual({ data: createdTheme, error: null });
+    const updateBuilder = mockClient.from.mock.results[1].value;
+    expect(updateBuilder.update).toHaveBeenCalledWith({ display_order: 2 });
+    expect(updateBuilder.eq).toHaveBeenCalledWith("id", 5);
+    const insertBuilder = mockClient.from.mock.results[2].value;
+    expect(insertBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ display_order: 1 })
+    );
+  });
+
+  it("兄弟一覧の取得に失敗した場合、UPDATE・INSERTを行わずエラーを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { learning_themes: { data: null, error: dbError } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await createTheme({ name: "新テーマ", insertAfterId: null });
+
+    expect(result).toEqual({ data: null, error: dbError });
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("insertAfterIdが兄弟一覧に存在しない場合、InvalidInsertAfterIdErrorを投げてINSERTしない", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_themes: { data: [{ id: 5, display_order: 1 }], error: null },
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await expect(createTheme({ name: "新テーマ", insertAfterId: 999 })).rejects.toThrow(
+      InvalidInsertAfterIdError
+    );
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+    // 999がmock dataに含まれていないだけでなく、is_deleted=falseの絞り込み自体が
+    // 実際にクエリへ付与されていることも検証する（絞り込みが消える回帰の検出用）
+    const siblingsBuilder = mockClient.from.mock.results[0].value;
+    expect(siblingsBuilder.eq).toHaveBeenCalledWith("is_deleted", false);
+  });
+
+  it("再採番のUPDATEが失敗した場合、INSERTを行わずエラーを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_themes: [
+          { data: [{ id: 5, display_order: 1 }], error: null },
+          { data: null, error: dbError },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await createTheme({ name: "新テーマ", insertAfterId: null });
+
+    expect(result).toEqual({ data: null, error: dbError });
+    expect(mockClient.from).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("createPhase", () => {
+  it("同じtheme_id配下だけを兄弟として絞り込み、display_orderを決定してから作成する", async () => {
+    const createdPhase = { id: 100, theme_id: 1, name: "新フェーズ", display_order: 2 };
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_phases: [
+          { data: [{ id: 5, display_order: 1 }], error: null },
+          { data: createdPhase, error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await createPhase({
+      theme_id: 1,
+      name: "新フェーズ",
+      insertAfterId: 5,
+    });
+
+    expect(result).toEqual({ data: createdPhase, error: null });
+    const siblingsBuilder = mockClient.from.mock.results[0].value;
+    expect(siblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 1);
+    const insertBuilder = mockClient.from.mock.results[1].value;
+    expect(insertBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ theme_id: 1, display_order: 2 })
+    );
+  });
+
+  it("insertAfterIdが別テーマ配下のフェーズを指す場合、InvalidInsertAfterIdErrorを投げる", async () => {
+    // 兄弟取得は theme_id=1 で絞り込む前提のため、別テーマのフェーズは結果に含まれない。
+    // mock dataに999を含めていないだけでは絞り込み自体の検証にならないため、
+    // theme_id・is_deletedの絞り込みが実際にクエリへ付与されていることも検証する
+    const mockClient = createMockSupabaseClient({
+      tableResults: { learning_phases: { data: [], error: null } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await expect(
+      createPhase({ theme_id: 1, name: "新フェーズ", insertAfterId: 999 })
+    ).rejects.toThrow(InvalidInsertAfterIdError);
+
+    const siblingsBuilder = mockClient.from.mock.results[0].value;
+    expect(siblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 1);
+    expect(siblingsBuilder.eq).toHaveBeenCalledWith("is_deleted", false);
+  });
+});
+
+describe("createWeek", () => {
+  it("同じphase_id配下だけを兄弟として絞り込み、display_orderを決定してから作成する", async () => {
+    const createdWeek = { id: 100, phase_id: 1, name: "新週", display_order: 1 };
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_weeks: [
+          { data: [{ id: 5, display_order: 1 }], error: null },
+          { data: null, error: null },
+          { data: createdWeek, error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await createWeek({ phase_id: 1, name: "新週", insertAfterId: null });
+
+    expect(result).toEqual({ data: createdWeek, error: null });
+    const siblingsBuilder = mockClient.from.mock.results[0].value;
+    expect(siblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 1);
+    const updateBuilder = mockClient.from.mock.results[1].value;
+    expect(updateBuilder.update).toHaveBeenCalledWith({ display_order: 2 });
+  });
+});
+
+describe("createContent", () => {
+  it("createAdminSupabaseClientを使い、同じweek_id配下だけを兄弟として絞り込む", async () => {
+    const createdContent = { id: 100, week_id: 1, title: "新コンテンツ", display_order: 1 };
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          { data: [], error: null },
+          { data: createdContent, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await createContent({
+      week_id: 1,
+      title: "新コンテンツ",
+      content_type: "video",
+      insertAfterId: null,
+    });
+
+    expect(result).toEqual({ data: createdContent, error: null });
+    expect(createAdminSupabaseClient).toHaveBeenCalled();
+    const siblingsBuilder = mockClient.from.mock.results[0].value;
+    expect(siblingsBuilder.eq).toHaveBeenCalledWith("week_id", 1);
+    const insertBuilder = mockClient.from.mock.results[1].value;
+    expect(insertBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ week_id: 1, title: "新コンテンツ", display_order: 1 })
+    );
+  });
+
+  it("insertAfterIdが削除済みコンテンツを指す場合、InvalidInsertAfterIdErrorを投げる", async () => {
+    // モックのクエリビルダーは .eq() の引数に関わらず設定した data をそのまま返すため、
+    // 「999が結果に無い」だけでは is_deleted=false によって除外されたことの検証にならない
+    // （絞り込み自体を削除する回帰があっても、999をmock dataに含めていない限りこのテストは
+    // 通ってしまう）。そのため兄弟取得クエリに is_deleted=false が実際に付与されていることも
+    // 明示的に検証する
+    const mockClient = createMockSupabaseClient({
+      tableResults: { learning_contents: { data: [{ id: 1, display_order: 1 }], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await expect(
+      createContent({
+        week_id: 1,
+        title: "新コンテンツ",
+        content_type: "video",
+        insertAfterId: 999,
+      })
+    ).rejects.toThrow(InvalidInsertAfterIdError);
+
+    const siblingsBuilder = mockClient.from.mock.results[0].value;
+    expect(siblingsBuilder.eq).toHaveBeenCalledWith("is_deleted", false);
   });
 });

@@ -9,6 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  getDefaultInsertAfterId,
+  type SiblingCandidate,
+  SiblingOrderField,
+} from "../components/SiblingOrderField";
 
 interface PhaseWithTheme extends LearningPhase {
   theme: LearningTheme | null;
@@ -17,30 +22,51 @@ interface PhaseWithTheme extends LearningPhase {
 interface WeekFormProps {
   phases: PhaseWithTheme[];
   initialData?: LearningWeek;
+  /** 新規作成フォームの挿入位置ピッカーに表示する全週候補（作成モードのみ使用） */
+  siblingCandidates?: SiblingCandidate[];
   mode: "create" | "edit";
 }
 
-export function WeekForm({ phases, initialData, mode }: WeekFormProps) {
+export function WeekForm({ phases, initialData, siblingCandidates = [], mode }: WeekFormProps) {
   const router = useRouter();
 
   const [phaseId, setPhaseId] = useState(initialData?.phase_id?.toString() ?? "");
   const [name, setName] = useState(initialData?.name ?? "");
   const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
+  const visibleSiblings = siblingCandidates.filter((c) => String(c.parentId) === phaseId);
+  const [insertAfterId, setInsertAfterId] = useState(() =>
+    getDefaultInsertAfterId(visibleSiblings)
+  );
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  function handlePhaseChange(value: string) {
+    setPhaseId(value);
+    setInsertAfterId(
+      getDefaultInsertAfterId(siblingCandidates.filter((c) => String(c.parentId) === value))
+    );
+  }
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage(null);
 
-    const body = {
-      phase_id: Number(phaseId),
-      name,
-      display_order: Number(displayOrder),
-      is_published: isPublished,
-    };
+    const body =
+      mode === "create"
+        ? {
+            phase_id: Number(phaseId),
+            name,
+            insert_after_id: insertAfterId,
+            is_published: isPublished,
+          }
+        : {
+            phase_id: Number(phaseId),
+            name,
+            display_order: Number(displayOrder),
+            is_published: isPublished,
+          };
 
     try {
       const url = mode === "create" ? "/api/manage/weeks" : `/api/manage/weeks/${initialData?.id}`;
@@ -79,7 +105,7 @@ export function WeekForm({ phases, initialData, mode }: WeekFormProps) {
             <select
               id="phaseId"
               value={phaseId}
-              onChange={(e) => setPhaseId(e.target.value)}
+              onChange={(e) => handlePhaseChange(e.target.value)}
               required
               className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
             >
@@ -104,16 +130,24 @@ export function WeekForm({ phases, initialData, mode }: WeekFormProps) {
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="displayOrder">表示順</Label>
-            <Input
-              id="displayOrder"
-              type="number"
-              value={displayOrder}
-              onChange={(e) => setDisplayOrder(e.target.value)}
-              className="w-24"
+          {mode === "create" ? (
+            <SiblingOrderField
+              siblings={phaseId ? visibleSiblings : null}
+              insertAfterId={insertAfterId}
+              onChange={setInsertAfterId}
             />
-          </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="displayOrder">表示順</Label>
+              <Input
+                id="displayOrder"
+                type="number"
+                value={displayOrder}
+                onChange={(e) => setDisplayOrder(e.target.value)}
+                className="w-24"
+              />
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             <input
