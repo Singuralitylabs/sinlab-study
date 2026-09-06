@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  getCurrentPositionInsertAfterId,
   getDefaultInsertAfterId,
   type SiblingCandidate,
   SiblingOrderField,
@@ -22,7 +23,11 @@ interface PhaseWithTheme extends LearningPhase {
 interface WeekFormProps {
   phases: PhaseWithTheme[];
   initialData?: LearningWeek;
-  /** 新規作成フォームの挿入位置ピッカーに表示する全週候補（作成モードのみ使用） */
+  /**
+   * 挿入位置ピッカーに表示する全週候補。作成モードは対象そのもの、編集モードは編集対象
+   * 自身を含む一覧を渡す（自分自身の現在位置を求めるため。表示直前にフォーム内で
+   * 自分自身を除く）。
+   */
   siblingCandidates?: SiblingCandidate[];
   mode: "create" | "edit";
 }
@@ -32,10 +37,12 @@ export function WeekForm({ phases, initialData, siblingCandidates = [], mode }: 
 
   const [phaseId, setPhaseId] = useState(initialData?.phase_id?.toString() ?? "");
   const [name, setName] = useState(initialData?.name ?? "");
-  const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
-  const visibleSiblings = siblingCandidates.filter((c) => String(c.parentId) === phaseId);
+  const allSiblingsForPhase = siblingCandidates.filter((c) => String(c.parentId) === phaseId);
+  const visibleSiblings = allSiblingsForPhase.filter((c) => c.id !== initialData?.id);
   const [insertAfterId, setInsertAfterId] = useState(() =>
-    getDefaultInsertAfterId(visibleSiblings)
+    mode === "edit" && initialData
+      ? getCurrentPositionInsertAfterId(initialData.id, allSiblingsForPhase)
+      : getDefaultInsertAfterId(allSiblingsForPhase)
   );
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
@@ -43,9 +50,10 @@ export function WeekForm({ phases, initialData, siblingCandidates = [], mode }: 
 
   function handlePhaseChange(value: string) {
     setPhaseId(value);
-    setInsertAfterId(
-      getDefaultInsertAfterId(siblingCandidates.filter((c) => String(c.parentId) === value))
-    );
+    const newVisibleSiblings = siblingCandidates
+      .filter((c) => String(c.parentId) === value)
+      .filter((c) => c.id !== initialData?.id);
+    setInsertAfterId(getDefaultInsertAfterId(newVisibleSiblings));
   }
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
@@ -53,20 +61,12 @@ export function WeekForm({ phases, initialData, siblingCandidates = [], mode }: 
     setIsLoading(true);
     setMessage(null);
 
-    const body =
-      mode === "create"
-        ? {
-            phase_id: Number(phaseId),
-            name,
-            insert_after_id: insertAfterId,
-            is_published: isPublished,
-          }
-        : {
-            phase_id: Number(phaseId),
-            name,
-            display_order: Number(displayOrder),
-            is_published: isPublished,
-          };
+    const body = {
+      phase_id: Number(phaseId),
+      name,
+      insert_after_id: insertAfterId,
+      is_published: isPublished,
+    };
 
     try {
       const url = mode === "create" ? "/api/manage/weeks" : `/api/manage/weeks/${initialData?.id}`;
@@ -130,24 +130,12 @@ export function WeekForm({ phases, initialData, siblingCandidates = [], mode }: 
             />
           </div>
 
-          {mode === "create" ? (
-            <SiblingOrderField
-              siblings={phaseId ? visibleSiblings : null}
-              insertAfterId={insertAfterId}
-              onChange={setInsertAfterId}
-            />
-          ) : (
-            <div className="space-y-2">
-              <Label htmlFor="displayOrder">表示順</Label>
-              <Input
-                id="displayOrder"
-                type="number"
-                value={displayOrder}
-                onChange={(e) => setDisplayOrder(e.target.value)}
-                className="w-24"
-              />
-            </div>
-          )}
+          <SiblingOrderField
+            siblings={phaseId ? visibleSiblings : null}
+            insertAfterId={insertAfterId}
+            onChange={setInsertAfterId}
+            placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
+          />
 
           <div className="flex items-center gap-2">
             <input

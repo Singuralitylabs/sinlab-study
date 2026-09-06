@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  getCurrentPositionInsertAfterId,
   getDefaultInsertAfterId,
   SiblingOrderField,
   type SiblingOrderItem,
@@ -20,7 +21,11 @@ import {
 
 interface ThemeFormProps {
   initialData?: LearningTheme;
-  /** 新規作成フォームの挿入位置ピッカーに表示する全テーマ（並び順ソート済み・作成モードのみ使用） */
+  /**
+   * 挿入位置ピッカーに表示する全テーマ（並び順ソート済み）。作成モードは対象そのもの、
+   * 編集モードは編集対象自身を含む一覧を渡す（自分自身の現在位置を求めるため。
+   * 表示直前にフォーム内で自分自身を除く）。
+   */
   siblings?: SiblingOrderItem[];
   mode: "create" | "edit";
 }
@@ -31,8 +36,12 @@ export function ThemeForm({ initialData, siblings = [], mode }: ThemeFormProps) 
   const [name, setName] = useState(initialData?.name ?? "");
   const [description, setDescription] = useState(initialData?.description ?? "");
   const [imageUrl, setImageUrl] = useState(initialData?.image_url ?? "");
-  const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
-  const [insertAfterId, setInsertAfterId] = useState(() => getDefaultInsertAfterId(siblings));
+  const visibleSiblings = siblings.filter((s) => s.id !== initialData?.id);
+  const [insertAfterId, setInsertAfterId] = useState(() =>
+    mode === "edit" && initialData
+      ? getCurrentPositionInsertAfterId(initialData.id, siblings)
+      : getDefaultInsertAfterId(siblings)
+  );
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -47,22 +56,13 @@ export function ThemeForm({ initialData, siblings = [], mode }: ThemeFormProps) 
     setIsLoading(true);
     setMessage(null);
 
-    const body =
-      mode === "create"
-        ? {
-            name,
-            description: description || null,
-            image_url: imageUrl || null,
-            insert_after_id: insertAfterId,
-            is_published: isPublished,
-          }
-        : {
-            name,
-            description: description || null,
-            image_url: imageUrl || null,
-            display_order: Number(displayOrder),
-            is_published: isPublished,
-          };
+    const body = {
+      name,
+      description: description || null,
+      image_url: imageUrl || null,
+      insert_after_id: insertAfterId,
+      is_published: isPublished,
+    };
 
     try {
       const url =
@@ -224,24 +224,12 @@ export function ThemeForm({ initialData, siblings = [], mode }: ThemeFormProps) 
             </div>
           )}
 
-          {mode === "create" ? (
-            <SiblingOrderField
-              siblings={siblings}
-              insertAfterId={insertAfterId}
-              onChange={setInsertAfterId}
-            />
-          ) : (
-            <div className="space-y-2">
-              <Label htmlFor="displayOrder">表示順</Label>
-              <Input
-                id="displayOrder"
-                type="number"
-                value={displayOrder}
-                onChange={(e) => setDisplayOrder(e.target.value)}
-                className="w-24"
-              />
-            </div>
-          )}
+          <SiblingOrderField
+            siblings={visibleSiblings}
+            insertAfterId={insertAfterId}
+            onChange={setInsertAfterId}
+            placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
+          />
 
           <div className="flex items-center gap-2">
             <input

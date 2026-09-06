@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  getCurrentPositionInsertAfterId,
   getDefaultInsertAfterId,
   type SiblingCandidate,
   SiblingOrderField,
@@ -38,7 +39,11 @@ interface ContentFormProps {
   weeks: WeekFilterOption[];
   initialData?: LearningContent;
   initialWeekSelection?: InitialWeekSelection;
-  /** 新規作成フォームの挿入位置ピッカーに表示する全コンテンツ候補（作成モードのみ使用） */
+  /**
+   * 挿入位置ピッカーに表示する全コンテンツ候補。作成モードは対象そのもの、編集モードは
+   * 編集対象自身を含む一覧を渡す（自分自身の現在位置を求めるため。表示直前にフォーム内で
+   * 自分自身を除く）。
+   */
   siblingCandidates?: SiblingCandidate[];
   mode: "create" | "edit";
 }
@@ -182,9 +187,12 @@ export function ContentForm({
     resolvedInitialSelection.phaseId || initialPhaseIdFallback
   );
   const [weekId, setWeekId] = useState(resolvedInitialSelection.weekId);
-  const visibleSiblings = siblingCandidates.filter((c) => String(c.parentId) === weekId);
+  const allSiblingsForWeek = siblingCandidates.filter((c) => String(c.parentId) === weekId);
+  const visibleSiblings = allSiblingsForWeek.filter((c) => c.id !== initialData?.id);
   const [insertAfterId, setInsertAfterId] = useState(() =>
-    getDefaultInsertAfterId(visibleSiblings)
+    mode === "edit" && initialData
+      ? getCurrentPositionInsertAfterId(initialData.id, allSiblingsForWeek)
+      : getDefaultInsertAfterId(allSiblingsForWeek)
   );
 
   const [contentType, setContentType] = useState<ContentType>(initialData?.content_type ?? "video");
@@ -206,7 +214,6 @@ export function ContentForm({
   const [pdfUrl, setPdfUrl] = useState(initialData?.pdf_url ?? "");
   const [pdfFolder, setPdfFolder] = useState(initialSlide.folder);
   const [slideNumber, setSlideNumber] = useState(initialSlide.slideNumber);
-  const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isOpenToTrial, setIsOpenToTrial] = useState(initialData?.is_open_to_trial ?? false);
 
@@ -244,9 +251,10 @@ export function ContentForm({
 
   function handleWeekChange(value: string) {
     setWeekId(value);
-    setInsertAfterId(
-      getDefaultInsertAfterId(siblingCandidates.filter((c) => String(c.parentId) === value))
-    );
+    const newVisibleSiblings = siblingCandidates
+      .filter((c) => String(c.parentId) === value)
+      .filter((c) => c.id !== initialData?.id);
+    setInsertAfterId(getDefaultInsertAfterId(newVisibleSiblings));
   }
 
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -339,9 +347,7 @@ export function ContentForm({
       title,
       week_id: Number(weekId),
       content_type: contentType,
-      ...(mode === "create"
-        ? { insert_after_id: insertAfterId }
-        : { display_order: Number(displayOrder) }),
+      insert_after_id: insertAfterId,
       is_published: isPublished,
       is_open_to_trial: isOpenToTrial,
       video_url: contentType === "video" ? videoUrl.trim() || null : null,
@@ -669,25 +675,13 @@ export function ContentForm({
             </>
           )}
 
-          {/* 表示順 / 挿入位置 */}
-          {mode === "create" ? (
-            <SiblingOrderField
-              siblings={weekId ? visibleSiblings : null}
-              insertAfterId={insertAfterId}
-              onChange={setInsertAfterId}
-            />
-          ) : (
-            <div className="space-y-2">
-              <Label htmlFor="displayOrder">表示順</Label>
-              <Input
-                id="displayOrder"
-                type="number"
-                value={displayOrder}
-                onChange={(e) => setDisplayOrder(e.target.value)}
-                className="w-24"
-              />
-            </div>
-          )}
+          {/* 挿入位置 */}
+          <SiblingOrderField
+            siblings={weekId ? visibleSiblings : null}
+            insertAfterId={insertAfterId}
+            onChange={setInsertAfterId}
+            placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
+          />
 
           {/* 公開設定 */}
           <div className="flex items-center gap-2">

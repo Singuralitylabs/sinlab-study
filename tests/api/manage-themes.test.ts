@@ -5,6 +5,7 @@ vi.mock("@/app/services/api/admin-server");
 
 import { PUT } from "@/app/api/manage/themes/[id]/route";
 import { POST } from "@/app/api/manage/themes/route";
+import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
 import { createTheme, updateTheme } from "@/app/services/api/admin-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -95,5 +96,30 @@ describe("PUT /api/manage/themes/[id] - バリデーション", () => {
 
     expect(res.status).toBe(400);
     expect(updateTheme).not.toHaveBeenCalled();
+  });
+
+  it("insert_after_idを指定した場合、insertAfterIdとして更新処理へ渡す", async () => {
+    const res = await PUT(request({ insert_after_id: 3 }) as never, { params });
+
+    expect(res.status).toBe(200);
+    expect(updateTheme).toHaveBeenCalledWith(1, expect.objectContaining({ insertAfterId: 3 }));
+  });
+
+  it("insert_after_idを省略した場合、insertAfterIdはundefinedとして更新処理へ渡す（表示順を変更しない）", async () => {
+    const res = await PUT(request({ name: "テーマ1" }) as never, { params });
+
+    expect(res.status).toBe(200);
+    expect(updateTheme).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ insertAfterId: undefined })
+    );
+  });
+
+  it("updateThemeがInvalidInsertAfterIdErrorを投げた場合は400", async () => {
+    vi.mocked(updateTheme).mockRejectedValue(new InvalidInsertAfterIdError(999));
+
+    const res = await PUT(request({ insert_after_id: 999 }) as never, { params });
+
+    expect(res.status).toBe(400);
   });
 });
