@@ -1,4 +1,9 @@
-import type { ContentType, LearningContentWithWeek, LearningWeekWithPhase } from "@/app/types";
+import type {
+  ContentType,
+  LearningContentWithWeek,
+  LearningPhaseWithTheme,
+  LearningWeekWithPhase,
+} from "@/app/types";
 
 const UNCLASSIFIED_LABEL = "未分類";
 
@@ -30,6 +35,26 @@ export interface ContentGroup {
   key: string;
   label: string;
   contents: LearningContentWithWeek[];
+}
+
+/**
+ * 週管理一覧のフェーズ単位グループ。
+ * label は「テーマ名 › フェーズ名」、フェーズ未設定の週は「未分類」になる。
+ */
+export interface WeekGroup {
+  key: string;
+  label: string;
+  weeks: LearningWeekWithPhase[];
+}
+
+/**
+ * フェーズ管理一覧のテーマ単位グループ。
+ * label は「テーマ名」、テーマ未設定のフェーズは「未分類」になる。
+ */
+export interface PhaseGroup {
+  key: string;
+  label: string;
+  phases: LearningPhaseWithTheme[];
 }
 
 /**
@@ -143,6 +168,56 @@ export function sortWeeksByHierarchy(weeks: LearningWeekWithPhase[]): LearningWe
   });
 }
 
+/**
+ * テーマ→フェーズの各 display_order 順にフェーズを並び替える。
+ * `sortWeeksByHierarchy` / `sortContentsByHierarchy` と同じ規則（display_order 欠落は
+ * 末尾、中間階層はidタイブレーク、最後は自身のidタイブレーク）に揃える。
+ */
+export function sortPhasesByHierarchy(phases: LearningPhaseWithTheme[]): LearningPhaseWithTheme[] {
+  return [...phases].sort((a, b) => {
+    const themeCompare = compareGroupLevel(
+      a.theme?.display_order,
+      b.theme?.display_order,
+      a.theme?.id,
+      b.theme?.id
+    );
+    if (themeCompare !== 0) return themeCompare;
+
+    const phaseCompare = compareOrder(orderOrLast(a.display_order), orderOrLast(b.display_order));
+    if (phaseCompare !== 0) return phaseCompare;
+
+    return a.id - b.id;
+  });
+}
+
+/**
+ * key/label の導出方法だけを差し替えて要素をグルーピングする内部ヘルパー。
+ * `groupContentsByWeek` / `groupWeeksByPhase` / `groupPhasesByTheme` の共通部分。
+ * 出現順は入力配列の順序をそのまま維持する（事前に階層順ソートしておく前提）。
+ */
+function groupByKeyLabel<T>(
+  items: T[],
+  keyOf: (item: T) => string,
+  labelOf: (item: T) => string
+): Array<{ key: string; label: string; items: T[] }> {
+  const groups: Array<{ key: string; label: string; items: T[] }> = [];
+  const groupByKey = new Map<string, { key: string; label: string; items: T[] }>();
+
+  for (const item of items) {
+    const key = keyOf(item);
+
+    let group = groupByKey.get(key);
+    if (!group) {
+      group = { key, label: labelOf(item), items: [] };
+      groupByKey.set(key, group);
+      groups.push(group);
+    }
+    group.items.push(item);
+  }
+
+  return groups;
+}
+
 function buildGroupLabel(content: LearningContentWithWeek): string {
   if (!content.week) {
     return UNCLASSIFIED_LABEL;
@@ -161,22 +236,52 @@ function buildGroupLabel(content: LearningContentWithWeek): string {
  * テーマ→フェーズ→週の階層順・末尾が「未分類」になる。
  */
 export function groupContentsByWeek(contents: LearningContentWithWeek[]): ContentGroup[] {
-  const groups: ContentGroup[] = [];
-  const groupByKey = new Map<string, ContentGroup>();
+  return groupByKeyLabel(
+    contents,
+    (content) => (content.week ? String(content.week.id) : "unclassified"),
+    buildGroupLabel
+  ).map((group) => ({ key: group.key, label: group.label, contents: group.items }));
+}
 
-  for (const content of contents) {
-    const key = content.week ? String(content.week.id) : "unclassified";
-
-    let group = groupByKey.get(key);
-    if (!group) {
-      group = { key, label: buildGroupLabel(content), contents: [] };
-      groupByKey.set(key, group);
-      groups.push(group);
-    }
-    group.contents.push(content);
+function buildWeekGroupLabel(week: LearningWeekWithPhase): string {
+  if (!week.phase) {
+    return UNCLASSIFIED_LABEL;
   }
 
-  return groups;
+  const themeName = week.phase.theme?.name;
+  const phaseName = week.phase.name;
+
+  return [themeName, phaseName].filter(Boolean).join(" › ");
+}
+
+/**
+ * 週をフェーズ単位（フェーズ未設定は「未分類」）にグルーピングする。
+ * 事前に sortWeeksByHierarchy で並び替えておくことで、グループの出現順が
+ * テーマ→フェーズの階層順・末尾が「未分類」になる。
+ */
+export function groupWeeksByPhase(weeks: LearningWeekWithPhase[]): WeekGroup[] {
+  return groupByKeyLabel(
+    weeks,
+    (week) => (week.phase ? String(week.phase.id) : "unclassified"),
+    buildWeekGroupLabel
+  ).map((group) => ({ key: group.key, label: group.label, weeks: group.items }));
+}
+
+function buildPhaseGroupLabel(phase: LearningPhaseWithTheme): string {
+  return phase.theme?.name ?? UNCLASSIFIED_LABEL;
+}
+
+/**
+ * フェーズをテーマ単位（テーマ未設定は「未分類」）にグルーピングする。
+ * 事前に sortPhasesByHierarchy で並び替えておくことで、グループの出現順が
+ * テーマの階層順・末尾が「未分類」になる。
+ */
+export function groupPhasesByTheme(phases: LearningPhaseWithTheme[]): PhaseGroup[] {
+  return groupByKeyLabel(
+    phases,
+    (phase) => (phase.theme ? String(phase.theme.id) : "unclassified"),
+    buildPhaseGroupLabel
+  ).map((group) => ({ key: group.key, label: group.label, phases: group.items }));
 }
 
 /**

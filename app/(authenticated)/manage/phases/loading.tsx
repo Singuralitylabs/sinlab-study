@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -28,9 +29,6 @@ export default function ManagePhasesLoading() {
                 <Skeleton className="h-4 w-8" />
               </TableHead>
               <TableHead>
-                <Skeleton className="h-4 w-16" />
-              </TableHead>
-              <TableHead>
                 <Skeleton className="h-4 w-12" />
               </TableHead>
               <TableHead>
@@ -45,30 +43,36 @@ export default function ManagePhasesLoading() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {[1, 2, 3, 4, 5].map((i) => (
-              <TableRow key={i}>
-                <TableCell>
-                  <Skeleton className="h-4 w-6" />
-                </TableCell>
-                <TableCell>
-                  <Skeleton className="h-4 w-24" />
-                </TableCell>
-                <TableCell>
-                  <Skeleton className="h-4 w-40" />
-                </TableCell>
-                <TableCell>
-                  <Skeleton className="h-4 w-56" />
-                </TableCell>
-                <TableCell>
-                  <Skeleton className="h-5 w-14 rounded-full" />
-                </TableCell>
-                <TableCell>
-                  <div className="flex justify-end gap-1">
-                    <Skeleton className="h-7 w-7 rounded" />
-                    <Skeleton className="h-7 w-7 rounded" />
-                  </div>
-                </TableCell>
-              </TableRow>
+            {[1, 2].map((group) => (
+              <Fragment key={group}>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  <TableCell colSpan={5}>
+                    <Skeleton className="h-4 w-32" />
+                  </TableCell>
+                </TableRow>
+                {[1, 2, 3].map((row) => (
+                  <TableRow key={row}>
+                    <TableCell>
+                      <Skeleton className="h-4 w-6" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-40" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-56" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-5 w-14 rounded-full" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex justify-end gap-1">
+                        <Skeleton className="h-7 w-7 rounded" />
+                        <Skeleton className="h-7 w-7 rounded" />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </Fragment>
             ))}
           </TableBody>
         </Table>
