@@ -45,6 +45,12 @@ const OptionalDisplayOrder = z
   .number({ message: "数値で指定してください" })
   .int({ message: "整数で指定してください" })
   .optional();
+/**
+ * 新規作成フォームの挿入位置。null は「先頭」、数値はその兄弟要素IDの直後を表す。
+ * 同じ親配下の未削除要素であることの検証（別の親・削除済み・存在しないID）はスキーマでは
+ * 行わず、`resolveSiblingResequence()`（`app/lib/content-grouping.ts`）に委ねる。
+ */
+const InsertAfterIdSchema = PositiveIntSchema.nullable();
 
 // ==================== /api/progress ====================
 
@@ -110,40 +116,55 @@ export const AdminUserActionSchema = z.discriminatedUnion(
 
 // ==================== /api/manage/themes ====================
 
-export const ThemeCreateSchema = z.object({
+// POST（新規作成）は挿入位置（insert_after_id）、PUT（更新）は引き続き display_order を
+// 受け取る。編集フォームの挿入位置UI化は別イシューで扱うため、Updateは Create からの
+// .partial() 派生ではなく、共通項目（ThemeBaseSchema）に display_order を足して定義する。
+const ThemeBaseSchema = z.object({
   name: RequiredStringSchema,
   description: OptionalNullableString,
-  display_order: OptionalDisplayOrder,
   is_published: OptionalBoolean,
   image_url: OptionalNullableString,
 });
-export const ThemeUpdateSchema = ThemeCreateSchema.partial();
+export const ThemeCreateSchema = ThemeBaseSchema.extend({
+  insert_after_id: InsertAfterIdSchema,
+});
+export const ThemeUpdateSchema = ThemeBaseSchema.extend({
+  display_order: OptionalDisplayOrder,
+}).partial();
 
 // ==================== /api/manage/phases ====================
 
-export const PhaseCreateSchema = z.object({
+const PhaseBaseSchema = z.object({
   theme_id: PositiveIntSchema,
   name: RequiredStringSchema,
   description: OptionalNullableString,
-  display_order: OptionalDisplayOrder,
   is_published: OptionalBoolean,
 });
-export const PhaseUpdateSchema = PhaseCreateSchema.partial();
+export const PhaseCreateSchema = PhaseBaseSchema.extend({
+  insert_after_id: InsertAfterIdSchema,
+});
+export const PhaseUpdateSchema = PhaseBaseSchema.extend({
+  display_order: OptionalDisplayOrder,
+}).partial();
 
 // ==================== /api/manage/weeks ====================
 
-export const WeekCreateSchema = z.object({
+const WeekBaseSchema = z.object({
   phase_id: PositiveIntSchema,
   name: RequiredStringSchema,
   description: OptionalNullableString,
-  display_order: OptionalDisplayOrder,
   is_published: OptionalBoolean,
 });
-export const WeekUpdateSchema = WeekCreateSchema.partial();
+export const WeekCreateSchema = WeekBaseSchema.extend({
+  insert_after_id: InsertAfterIdSchema,
+});
+export const WeekUpdateSchema = WeekBaseSchema.extend({
+  display_order: OptionalDisplayOrder,
+}).partial();
 
 // ==================== /api/manage/contents ====================
 
-export const ContentCreateSchema = z.object({
+const ContentBaseSchema = z.object({
   title: RequiredStringSchema,
   week_id: PositiveIntSchema,
   content_type: ContentTypeSchema,
@@ -157,11 +178,15 @@ export const ContentCreateSchema = z.object({
   allowed_submission_types: AllowedSubmissionTypeSchema.optional(),
   code_language: CodeLanguageSchema.optional(),
   pdf_url: OptionalNullableString,
-  display_order: OptionalDisplayOrder,
   is_published: OptionalBoolean,
   is_open_to_trial: OptionalBoolean,
 });
-export const ContentUpdateSchema = ContentCreateSchema.partial();
+export const ContentCreateSchema = ContentBaseSchema.extend({
+  insert_after_id: InsertAfterIdSchema,
+});
+export const ContentUpdateSchema = ContentBaseSchema.extend({
+  display_order: OptionalDisplayOrder,
+}).partial();
 
 // ==================== /api/manage/contents/bulk ====================
 

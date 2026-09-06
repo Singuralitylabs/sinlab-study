@@ -1,7 +1,7 @@
 import { PageTitle } from "@/app/components/PageTitle";
 import { deriveWeekSelectOptions } from "@/app/lib/content-filtering";
-import { sortWeeksByHierarchy } from "@/app/lib/content-grouping";
-import { fetchAllWeeks } from "@/app/services/api/admin-server";
+import { compareGroupLevel, sortWeeksByHierarchy } from "@/app/lib/content-grouping";
+import { fetchAllContents, fetchAllWeeks } from "@/app/services/api/admin-server";
 import { ContentForm } from "../ContentForm";
 
 interface NewContentPageProps {
@@ -16,9 +16,23 @@ function firstParam(value: string | string[] | undefined): string {
 
 export default async function NewContentPage({ searchParams }: NewContentPageProps) {
   const params = await searchParams;
-  const { data: weeks } = await fetchAllWeeks();
+  const [{ data: weeks }, { data: contents }] = await Promise.all([
+    fetchAllWeeks(),
+    fetchAllContents(),
+  ]);
   const sortedWeeks = weeks ? sortWeeksByHierarchy(weeks) : [];
   const filterOptions = deriveWeekSelectOptions(sortedWeeks);
+
+  // 挿入位置ピッカーの兄弟候補（週選択後にフォーム側で week_id により絞り込む）。
+  // content-grouping.ts の階層順ソートと同じ比較関数（display_order昇順・idタイブレーク）で揃える
+  const siblingCandidates = [...(contents ?? [])]
+    .sort((a, b) => compareGroupLevel(a.display_order, b.display_order, a.id, b.id))
+    .map((content) => ({
+      id: content.id,
+      label: content.title,
+      isPublished: content.is_published,
+      parentId: content.week_id,
+    }));
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -35,6 +49,7 @@ export default async function NewContentPage({ searchParams }: NewContentPagePro
           phaseId: firstParam(params.phase),
           weekId: firstParam(params.week),
         }}
+        siblingCandidates={siblingCandidates}
         mode="create"
       />
     </div>

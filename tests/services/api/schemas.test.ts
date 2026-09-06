@@ -182,18 +182,29 @@ describe("AdminUserActionSchema", () => {
 });
 
 describe("ThemeCreateSchema / ThemeUpdateSchema", () => {
-  it("nameが必須", () => {
+  it("nameとinsert_after_idが必須", () => {
     expect(ThemeCreateSchema.safeParse({}).success).toBe(false);
     expect(ThemeCreateSchema.safeParse({ name: "" }).success).toBe(false);
-    expect(ThemeCreateSchema.safeParse({ name: "テーマ1" }).success).toBe(true);
+    expect(ThemeCreateSchema.safeParse({ name: "テーマ1" }).success).toBe(false);
+    expect(ThemeCreateSchema.safeParse({ name: "テーマ1", insert_after_id: null }).success).toBe(
+      true
+    );
   });
 
   it("nameは既存の !name チェックと同じ範囲（空文字のみ拒否）で、空白のみの文字列は許容する", () => {
-    expect(ThemeCreateSchema.safeParse({ name: "  " }).success).toBe(true);
+    expect(ThemeCreateSchema.safeParse({ name: "  ", insert_after_id: null }).success).toBe(true);
   });
 
-  it("Updateは全項目が任意で、空オブジェクトも受理する", () => {
+  it("Updateは全項目が任意で、空オブジェクトも受理する（display_orderを引き続き受け取る）", () => {
     expect(ThemeUpdateSchema.safeParse({}).success).toBe(true);
+    expect(ThemeUpdateSchema.safeParse({ display_order: 5 }).success).toBe(true);
+  });
+
+  it("Updateはinsert_after_idを受け付けない（編集フォームは非対象）", () => {
+    const result = ThemeUpdateSchema.safeParse({ insert_after_id: 1 });
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error("unreachable");
+    expect(result.data).not.toHaveProperty("insert_after_id");
   });
 
   it("Updateでもnameを指定する場合は空文字を許容しない", () => {
@@ -201,13 +212,30 @@ describe("ThemeCreateSchema / ThemeUpdateSchema", () => {
   });
 
   it("image_urlはnullを許容する", () => {
-    expect(ThemeCreateSchema.safeParse({ name: "テーマ1", image_url: null }).success).toBe(true);
+    expect(
+      ThemeCreateSchema.safeParse({ name: "テーマ1", insert_after_id: null, image_url: null })
+        .success
+    ).toBe(true);
   });
 
-  it("display_orderが数値以外の場合は他の数値項目と同じ日本語メッセージを返す", () => {
-    // フォームは display_order: Number(displayOrder) を送るため、数値以外の入力は
-    // NaN → JSONでは null になって届く（コードレビュー指摘の具体的な発火経路）
-    const result = ThemeCreateSchema.safeParse({ name: "テーマ1", display_order: null });
+  it("insert_after_idはnullまたは正の整数、0以下・小数・文字列は検証エラー", () => {
+    expect(ThemeCreateSchema.safeParse({ name: "テーマ1", insert_after_id: null }).success).toBe(
+      true
+    );
+    expect(ThemeCreateSchema.safeParse({ name: "テーマ1", insert_after_id: 1 }).success).toBe(true);
+    expect(ThemeCreateSchema.safeParse({ name: "テーマ1", insert_after_id: 0 }).success).toBe(
+      false
+    );
+    expect(ThemeCreateSchema.safeParse({ name: "テーマ1", insert_after_id: 1.5 }).success).toBe(
+      false
+    );
+    expect(ThemeCreateSchema.safeParse({ name: "テーマ1", insert_after_id: "1" }).success).toBe(
+      false
+    );
+  });
+
+  it("insert_after_id未指定の場合は他の数値項目と同じ日本語メッセージを返す", () => {
+    const result = ThemeCreateSchema.safeParse({ name: "テーマ1" });
     expect(result.success).toBe(false);
     if (result.success) throw new Error("unreachable");
     expect(result.error.issues.map((i) => i.message)).toContain("数値で指定してください");
@@ -215,40 +243,66 @@ describe("ThemeCreateSchema / ThemeUpdateSchema", () => {
 });
 
 describe("PhaseCreateSchema", () => {
-  it("theme_idとnameが必須", () => {
-    expect(PhaseCreateSchema.safeParse({ name: "フェーズ1" }).success).toBe(false);
-    expect(PhaseCreateSchema.safeParse({ theme_id: 1 }).success).toBe(false);
-    expect(PhaseCreateSchema.safeParse({ theme_id: 1, name: "フェーズ1" }).success).toBe(true);
+  it("theme_id・name・insert_after_idが必須", () => {
+    expect(PhaseCreateSchema.safeParse({ name: "フェーズ1", insert_after_id: null }).success).toBe(
+      false
+    );
+    expect(PhaseCreateSchema.safeParse({ theme_id: 1, insert_after_id: null }).success).toBe(false);
+    expect(PhaseCreateSchema.safeParse({ theme_id: 1, name: "フェーズ1" }).success).toBe(false);
+    expect(
+      PhaseCreateSchema.safeParse({ theme_id: 1, name: "フェーズ1", insert_after_id: null }).success
+    ).toBe(true);
   });
 
   it("theme_idが正の整数以外なら検証エラー", () => {
-    expect(PhaseCreateSchema.safeParse({ theme_id: 0, name: "フェーズ1" }).success).toBe(false);
+    expect(
+      PhaseCreateSchema.safeParse({ theme_id: 0, name: "フェーズ1", insert_after_id: null }).success
+    ).toBe(false);
   });
 });
 
 describe("WeekCreateSchema", () => {
-  it("phase_idとnameが必須", () => {
-    expect(WeekCreateSchema.safeParse({ name: "週1" }).success).toBe(false);
-    expect(WeekCreateSchema.safeParse({ phase_id: 1, name: "週1" }).success).toBe(true);
+  it("phase_id・name・insert_after_idが必須", () => {
+    expect(WeekCreateSchema.safeParse({ name: "週1", insert_after_id: null }).success).toBe(false);
+    expect(
+      WeekCreateSchema.safeParse({ phase_id: 1, name: "週1", insert_after_id: null }).success
+    ).toBe(true);
+    expect(WeekCreateSchema.safeParse({ phase_id: 1, name: "週1" }).success).toBe(false);
   });
 });
 
 describe("ContentCreateSchema / ContentUpdateSchema", () => {
-  it("title・week_id・content_typeが必須", () => {
+  it("title・week_id・content_type・insert_after_idが必須", () => {
     expect(ContentCreateSchema.safeParse({}).success).toBe(false);
-    expect(ContentCreateSchema.safeParse({ title: "コンテンツ1", week_id: 1 }).success).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({ title: "コンテンツ1", week_id: 1, insert_after_id: null })
+        .success
+    ).toBe(false);
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
         week_id: 1,
         content_type: "video",
       }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        title: "コンテンツ1",
+        week_id: 1,
+        content_type: "video",
+        insert_after_id: null,
+      }).success
     ).toBe(true);
   });
 
   it.each(CONTENT_TYPES)("content_typeの許可値 %s を受理する", (content_type) => {
     expect(
-      ContentCreateSchema.safeParse({ title: "コンテンツ1", week_id: 1, content_type }).success
+      ContentCreateSchema.safeParse({
+        title: "コンテンツ1",
+        week_id: 1,
+        content_type,
+        insert_after_id: null,
+      }).success
     ).toBe(true);
   });
 
@@ -258,6 +312,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
         title: "コンテンツ1",
         week_id: 1,
         content_type: "quiz",
+        insert_after_id: null,
       }).success
     ).toBe(false);
   });
@@ -269,6 +324,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
         week_id: 1,
         content_type: "exercise",
         allowed_submission_types: value,
+        insert_after_id: null,
       }).success
     ).toBe(true);
   });
@@ -280,6 +336,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
         week_id: 1,
         content_type: "exercise",
         code_language: value,
+        insert_after_id: null,
       }).success
     ).toBe(true);
   });
@@ -291,6 +348,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
       content_type: "video",
       description: null,
       video_url: null,
+      insert_after_id: null,
     });
     expect(result.success).toBe(true);
   });
@@ -302,6 +360,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
         week_id: 1,
         content_type: "exercise",
         allowed_submission_types: null,
+        insert_after_id: null,
       }).success
     ).toBe(false);
     expect(
@@ -310,12 +369,21 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
         week_id: 1,
         content_type: "exercise",
         code_language: null,
+        insert_after_id: null,
       }).success
     ).toBe(false);
   });
 
-  it("Updateは全項目が任意で、空オブジェクトも受理する", () => {
+  it("insert_after_idはnullまたは正の整数、0以下・小数は検証エラー", () => {
+    const base = { title: "コンテンツ1", week_id: 1, content_type: "video" as const };
+    expect(ContentCreateSchema.safeParse({ ...base, insert_after_id: 2 }).success).toBe(true);
+    expect(ContentCreateSchema.safeParse({ ...base, insert_after_id: 0 }).success).toBe(false);
+    expect(ContentCreateSchema.safeParse({ ...base, insert_after_id: 1.5 }).success).toBe(false);
+  });
+
+  it("Updateは全項目が任意で、空オブジェクトも受理する（display_orderを引き続き受け取る）", () => {
     expect(ContentUpdateSchema.safeParse({}).success).toBe(true);
+    expect(ContentUpdateSchema.safeParse({ display_order: 3 }).success).toBe(true);
   });
 });
 

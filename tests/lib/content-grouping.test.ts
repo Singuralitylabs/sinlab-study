@@ -3,6 +3,9 @@ import {
   groupContentsByWeek,
   groupPhasesByTheme,
   groupWeeksByPhase,
+  InvalidInsertAfterIdError,
+  resolveSiblingResequence,
+  type SiblingOrderRow,
   sortContentsByHierarchy,
   sortPhasesByHierarchy,
   sortWeeksByHierarchy,
@@ -467,5 +470,91 @@ describe("groupPhasesByTheme", () => {
     const groups = groupPhasesByTheme(sortPhasesByHierarchy([unclassified, phase1]));
 
     expect(groups.map((g) => g.key)).toEqual(["1", "unclassified"]);
+  });
+});
+
+describe("resolveSiblingResequence", () => {
+  function row(id: number, display_order: number | null): SiblingOrderRow {
+    return { id, display_order };
+  }
+
+  it("兄弟が存在しない場合、insertAfterIdはnullのみ許可され、displayOrderは1・updatesは空になる", () => {
+    const result = resolveSiblingResequence([], null);
+
+    expect(result).toEqual({ displayOrder: 1, updates: [] });
+  });
+
+  it("兄弟が存在しないのにinsertAfterIdが数値の場合はInvalidInsertAfterIdErrorを投げる", () => {
+    expect(() => resolveSiblingResequence([], 99)).toThrow(InvalidInsertAfterIdError);
+  });
+
+  it("先頭に挿入する場合、全既存兄弟のdisplay_orderが1つずつ後ろにずれる", () => {
+    const siblings = [row(10, 1), row(20, 2), row(30, 3)];
+
+    const result = resolveSiblingResequence(siblings, null);
+
+    expect(result.displayOrder).toBe(1);
+    expect(result.updates).toEqual(
+      expect.arrayContaining([
+        { id: 10, display_order: 2 },
+        { id: 20, display_order: 3 },
+        { id: 30, display_order: 4 },
+      ])
+    );
+    expect(result.updates).toHaveLength(3);
+  });
+
+  it("末尾（最後の兄弟の直後）に挿入する場合、既存兄弟のdisplay_orderは変わらずupdatesは空になる", () => {
+    const siblings = [row(10, 1), row(20, 2), row(30, 3)];
+
+    const result = resolveSiblingResequence(siblings, 30);
+
+    expect(result.displayOrder).toBe(4);
+    expect(result.updates).toEqual([]);
+  });
+
+  it("中間に挿入する場合、挿入位置より後ろの兄弟だけdisplay_orderが変わる", () => {
+    const siblings = [row(10, 1), row(20, 2), row(30, 3)];
+
+    const result = resolveSiblingResequence(siblings, 10);
+
+    expect(result.displayOrder).toBe(2);
+    expect(result.updates).toEqual([
+      { id: 20, display_order: 3 },
+      { id: 30, display_order: 4 },
+    ]);
+  });
+
+  it("display_orderが重複・欠落した既存兄弟も1からの連番に再採番される（idタイブレークで確定順序）", () => {
+    // 新規作成フォームの display_order 初期値0の連発や、DB上NULLの回帰と同じ状況を再現
+    const siblings = [row(30, 0), row(10, 0), row(20, null)];
+
+    const result = resolveSiblingResequence(siblings, null);
+
+    // compareGroupLevelの並び: display_order昇順（0, 0, null=Infinity）→ 同値はidタイブレーク
+    // なので並び順は id10(0) → id30(0) → id20(null)。先頭挿入のため全兄弟が1つずつ後ろにずれる
+    expect(result.updates).toEqual(
+      expect.arrayContaining([
+        { id: 10, display_order: 2 },
+        { id: 30, display_order: 3 },
+        { id: 20, display_order: 4 },
+      ])
+    );
+    expect(result.displayOrder).toBe(1);
+  });
+
+  it("insertAfterIdが兄弟一覧に存在しない場合はInvalidInsertAfterIdErrorを投げる（別の親配下・削除済み・存在しないIDの共通経路）", () => {
+    const siblings = [row(10, 1), row(20, 2)];
+
+    expect(() => resolveSiblingResequence(siblings, 999)).toThrow(InvalidInsertAfterIdError);
+  });
+
+  it("兄弟一覧の入力配列を破壊しない", () => {
+    const siblings = [row(20, 2), row(10, 1)];
+    const original = [...siblings];
+
+    resolveSiblingResequence(siblings, null);
+
+    expect(siblings).toEqual(original);
   });
 });

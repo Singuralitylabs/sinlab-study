@@ -31,9 +31,10 @@ beforeEach(() => {
 
 describe("POST /api/manage/phases - バリデーション", () => {
   it.each([
-    ["theme_id未指定", { name: "フェーズ1" }],
-    ["name未指定", { theme_id: 1 }],
-    ["theme_idが0以下", { theme_id: 0, name: "フェーズ1" }],
+    ["theme_id未指定", { name: "フェーズ1", insert_after_id: null }],
+    ["name未指定", { theme_id: 1, insert_after_id: null }],
+    ["theme_idが0以下", { theme_id: 0, name: "フェーズ1", insert_after_id: null }],
+    ["insert_after_id未指定", { theme_id: 1, name: "フェーズ1" }],
   ])("%sの場合は400で、作成処理を呼ばない", async (_label, body) => {
     const res = await POST(request(body) as never);
 
@@ -41,12 +42,14 @@ describe("POST /api/manage/phases - バリデーション", () => {
     expect(createPhase).not.toHaveBeenCalled();
   });
 
-  it("正常な入力は200", async () => {
-    const res = await POST(request({ theme_id: 1, name: "フェーズ1" }) as never);
+  it("正常な入力は200で、insertAfterIdとして作成処理へ渡す", async () => {
+    const res = await POST(
+      request({ theme_id: 1, name: "フェーズ1", insert_after_id: 2 }) as never
+    );
 
     expect(res.status).toBe(200);
     expect(createPhase).toHaveBeenCalledWith(
-      expect.objectContaining({ theme_id: 1, name: "フェーズ1" })
+      expect.objectContaining({ theme_id: 1, name: "フェーズ1", insertAfterId: 2 })
     );
   });
 });

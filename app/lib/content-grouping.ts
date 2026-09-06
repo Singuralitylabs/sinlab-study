@@ -83,7 +83,7 @@ function compareOrder(orderA: number, orderB: number): number {
  * デフォルト値は0で、テーマ・フェーズ間で同値が揃うことが珍しくないため、ここでidタイブレーク
  * をしないと別の親を持つ子要素同士が display_order だけで混在してしまう。
  */
-function compareGroupLevel(
+export function compareGroupLevel(
   orderA: number | null | undefined,
   orderB: number | null | undefined,
   idA: number | undefined,
@@ -295,4 +295,58 @@ export function toContentTableGroups(groups: ContentGroup[]): ContentTableGroup[
       is_open_to_trial: content.is_open_to_trial,
     })),
   }));
+}
+
+// ==================== 兄弟要素の挿入位置（新規作成フォーム用） ====================
+
+/** 兄弟要素の再採番に使う最小限のフィールド */
+export interface SiblingOrderRow {
+  id: number;
+  display_order: number | null;
+}
+
+/**
+ * `insert_after_id` が同じ親配下の未削除要素として存在しない場合に投げるエラー
+ * （別の親配下・論理削除済み・存在しないIDのいずれか）。呼び出し側（APIルート）で
+ * catch し、400 として返すこと。
+ */
+export class InvalidInsertAfterIdError extends Error {
+  constructor(insertAfterId: number) {
+    super(`insert_after_id(${insertAfterId})は同じ親配下の有効な要素ではありません`);
+  }
+}
+
+/**
+ * 兄弟要素一覧と挿入位置（insert_after_id）から、新要素の display_order と、
+ * 既存兄弟のうち display_order を更新すべき行を求める。兄弟一覧は事前ソート済みである
+ * 必要はなく、この関数自身が compareGroupLevel（各 sortXxxByHierarchy と同じ比較関数）
+ * で並び替える。常に1から連番に再採番するため、既存の重複値（新規作成フォームの
+ * display_order 初期値0の連発など）もここで解消される。
+ *
+ * @throws InvalidInsertAfterIdError insertAfterId が兄弟一覧に存在しない場合。
+ *   呼び出し側は兄弟一覧を同じ親・is_deleted=falseで絞り込んで渡すこと。
+ */
+export function resolveSiblingResequence(
+  siblings: SiblingOrderRow[],
+  insertAfterId: number | null
+): { displayOrder: number; updates: SiblingOrderRow[] } {
+  const sorted = [...siblings].sort((a, b) =>
+    compareGroupLevel(a.display_order, b.display_order, a.id, b.id)
+  );
+
+  if (insertAfterId !== null && !sorted.some((sibling) => sibling.id === insertAfterId)) {
+    throw new InvalidInsertAfterIdError(insertAfterId);
+  }
+
+  const insertIndex =
+    insertAfterId === null ? 0 : sorted.findIndex((sibling) => sibling.id === insertAfterId) + 1;
+
+  const updates = sorted
+    .map((sibling, index) => ({
+      id: sibling.id,
+      display_order: index < insertIndex ? index + 1 : index + 2,
+    }))
+    .filter((row, index) => row.display_order !== sorted[index].display_order);
+
+  return { displayOrder: insertIndex + 1, updates };
 }

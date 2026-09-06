@@ -31,9 +31,10 @@ beforeEach(() => {
 
 describe("POST /api/manage/contents - バリデーション", () => {
   it.each([
-    ["title未指定", { week_id: 1, content_type: "video" }],
-    ["week_id未指定", { title: "コンテンツ1", content_type: "video" }],
-    ["content_type未指定", { title: "コンテンツ1", week_id: 1 }],
+    ["title未指定", { week_id: 1, content_type: "video", insert_after_id: null }],
+    ["week_id未指定", { title: "コンテンツ1", content_type: "video", insert_after_id: null }],
+    ["content_type未指定", { title: "コンテンツ1", week_id: 1, insert_after_id: null }],
+    ["insert_after_id未指定", { title: "コンテンツ1", week_id: 1, content_type: "video" }],
   ])("%sの場合は400で、作成処理を呼ばない", async (_label, body) => {
     const res = await POST(request(body) as never);
 
@@ -50,13 +51,14 @@ describe("POST /api/manage/contents - バリデーション", () => {
     expect(createContent).not.toHaveBeenCalled();
   });
 
-  it("正常な入力は200で、null項目もそのまま渡す", async () => {
+  it("正常な入力は200で、null項目もそのままinsertAfterIdとして渡す", async () => {
     const res = await POST(
       request({
         title: "コンテンツ1",
         week_id: 1,
         content_type: "video",
         description: null,
+        insert_after_id: null,
       }) as never
     );
 
@@ -67,6 +69,7 @@ describe("POST /api/manage/contents - バリデーション", () => {
         week_id: 1,
         content_type: "video",
         description: null,
+        insertAfterId: null,
       })
     );
   });
@@ -78,6 +81,7 @@ describe("POST /api/manage/contents - バリデーション", () => {
         week_id: 1,
         content_type: "exercise",
         allowed_submission_types: "email",
+        insert_after_id: null,
       }) as never
     );
 

@@ -1,6 +1,7 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { resolveSiblingResequence } from "@/app/lib/content-grouping";
 import {
   fetchStripeSubscriptionByUserId,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
@@ -60,16 +61,60 @@ export async function fetchThemeById(id: number): Promise<{
   return { data, error: null };
 }
 
+/**
+ * テーマを作成する。`insertAfterId`（null=先頭、数値=そのテーマIDの直後）から
+ * `display_order` をサーバー側で決定し、対象範囲（テーマは親を持たないため全テーマ）の
+ * 兄弟を1からの連番に再採番してからINSERTする（`resolveSiblingResequence` 参照）。
+ * `insertAfterId` が未削除テーマとして存在しない場合は `InvalidInsertAfterIdError` を投げる
+ * （呼び出し側のAPIルートで400に変換すること）。
+ */
 export async function createTheme(theme: {
   name: string;
   description?: string | null;
-  display_order?: number;
+  insertAfterId: number | null;
   is_published?: boolean;
   image_url?: string | null;
 }): Promise<{ data: LearningTheme | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase.from("learning_themes").insert(theme).select().single();
+  const { data: siblings, error: siblingsError } = await supabase
+    .from("learning_themes")
+    .select("id, display_order")
+    .eq("is_deleted", false);
+  if (siblingsError) {
+    console.error("テーマ作成エラー（兄弟取得）:", siblingsError.message);
+    return { data: null, error: siblingsError };
+  }
+
+  const { displayOrder, updates } = resolveSiblingResequence(siblings ?? [], theme.insertAfterId);
+
+  if (updates.length > 0) {
+    const updateResults = await Promise.all(
+      updates.map((row) =>
+        supabase
+          .from("learning_themes")
+          .update({ display_order: row.display_order })
+          .eq("id", row.id)
+      )
+    );
+    const updateError = updateResults.find((result) => result.error)?.error;
+    if (updateError) {
+      console.error("テーマ作成エラー（再採番）:", updateError.message);
+      return { data: null, error: updateError };
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("learning_themes")
+    .insert({
+      name: theme.name,
+      description: theme.description,
+      is_published: theme.is_published,
+      image_url: theme.image_url,
+      display_order: displayOrder,
+    })
+    .select()
+    .single();
 
   if (error) {
     console.error("テーマ作成エラー:", error.message);
@@ -221,16 +266,59 @@ export async function fetchPhaseById(id: number): Promise<{
   return { data, error: null };
 }
 
+/**
+ * フェーズを作成する。`insertAfterId` から `display_order` をサーバー側で決定し、
+ * 同じ `theme_id` 配下の兄弟を1からの連番に再採番してからINSERTする
+ * （`createTheme` と同じ方針。詳細は `resolveSiblingResequence` 参照）。
+ */
 export async function createPhase(phase: {
   theme_id: number;
   name: string;
   description?: string | null;
-  display_order?: number;
+  insertAfterId: number | null;
   is_published?: boolean;
 }): Promise<{ data: LearningPhase | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase.from("learning_phases").insert(phase).select().single();
+  const { data: siblings, error: siblingsError } = await supabase
+    .from("learning_phases")
+    .select("id, display_order")
+    .eq("theme_id", phase.theme_id)
+    .eq("is_deleted", false);
+  if (siblingsError) {
+    console.error("フェーズ作成エラー（兄弟取得）:", siblingsError.message);
+    return { data: null, error: siblingsError };
+  }
+
+  const { displayOrder, updates } = resolveSiblingResequence(siblings ?? [], phase.insertAfterId);
+
+  if (updates.length > 0) {
+    const updateResults = await Promise.all(
+      updates.map((row) =>
+        supabase
+          .from("learning_phases")
+          .update({ display_order: row.display_order })
+          .eq("id", row.id)
+      )
+    );
+    const updateError = updateResults.find((result) => result.error)?.error;
+    if (updateError) {
+      console.error("フェーズ作成エラー（再採番）:", updateError.message);
+      return { data: null, error: updateError };
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("learning_phases")
+    .insert({
+      theme_id: phase.theme_id,
+      name: phase.name,
+      description: phase.description,
+      is_published: phase.is_published,
+      display_order: displayOrder,
+    })
+    .select()
+    .single();
 
   if (error) {
     console.error("フェーズ作成エラー:", error.message);
@@ -356,16 +444,59 @@ export async function fetchWeekById(id: number): Promise<{
   return { data, error: null };
 }
 
+/**
+ * 週を作成する。`insertAfterId` から `display_order` をサーバー側で決定し、
+ * 同じ `phase_id` 配下の兄弟を1からの連番に再採番してからINSERTする
+ * （`createTheme` と同じ方針。詳細は `resolveSiblingResequence` 参照）。
+ */
 export async function createWeek(week: {
   phase_id: number;
   name: string;
   description?: string | null;
-  display_order?: number;
+  insertAfterId: number | null;
   is_published?: boolean;
 }): Promise<{ data: LearningWeek | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase.from("learning_weeks").insert(week).select().single();
+  const { data: siblings, error: siblingsError } = await supabase
+    .from("learning_weeks")
+    .select("id, display_order")
+    .eq("phase_id", week.phase_id)
+    .eq("is_deleted", false);
+  if (siblingsError) {
+    console.error("週作成エラー（兄弟取得）:", siblingsError.message);
+    return { data: null, error: siblingsError };
+  }
+
+  const { displayOrder, updates } = resolveSiblingResequence(siblings ?? [], week.insertAfterId);
+
+  if (updates.length > 0) {
+    const updateResults = await Promise.all(
+      updates.map((row) =>
+        supabase
+          .from("learning_weeks")
+          .update({ display_order: row.display_order })
+          .eq("id", row.id)
+      )
+    );
+    const updateError = updateResults.find((result) => result.error)?.error;
+    if (updateError) {
+      console.error("週作成エラー（再採番）:", updateError.message);
+      return { data: null, error: updateError };
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("learning_weeks")
+    .insert({
+      phase_id: week.phase_id,
+      name: week.name,
+      description: week.description,
+      is_published: week.is_published,
+      display_order: displayOrder,
+    })
+    .select()
+    .single();
 
   if (error) {
     console.error("週作成エラー:", error.message);
@@ -462,6 +593,14 @@ export async function fetchContentByIdForAdmin(
   return { data, error: null };
 }
 
+/**
+ * コンテンツを作成する。`insertAfterId` から `display_order` をサーバー側で決定し、
+ * 同じ `week_id` 配下の兄弟を1からの連番に再採番してからINSERTする
+ * （`createTheme` と同じ方針。詳細は `resolveSiblingResequence` 参照）。
+ * 兄弟の取得・再採番は他の3関数と異なり `createAdminSupabaseClient()` を使う
+ * （createContent 自体が従来から service_role を使っているため。CLAUDE.mdの
+ * service_role制限対象は「受講生向け配信経路」であり、この管理者専用の作成経路は対象外）。
+ */
 export async function createContent(content: {
   week_id: number;
   title: string;
@@ -475,15 +614,59 @@ export async function createContent(content: {
   allowed_submission_types?: "code" | "url" | "both";
   code_language?: CodeLanguage;
   pdf_url?: string | null;
-  display_order?: number;
+  insertAfterId: number | null;
   is_published?: boolean;
   is_open_to_trial?: boolean;
 }): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
 
+  const { data: siblings, error: siblingsError } = await supabase
+    .from("learning_contents")
+    .select("id, display_order")
+    .eq("week_id", content.week_id)
+    .eq("is_deleted", false);
+  if (siblingsError) {
+    console.error("コンテンツ作成エラー（兄弟取得）:", siblingsError.message);
+    return { data: null, error: siblingsError };
+  }
+
+  const { displayOrder, updates } = resolveSiblingResequence(siblings ?? [], content.insertAfterId);
+
+  if (updates.length > 0) {
+    const updateResults = await Promise.all(
+      updates.map((row) =>
+        supabase
+          .from("learning_contents")
+          .update({ display_order: row.display_order })
+          .eq("id", row.id)
+      )
+    );
+    const updateError = updateResults.find((result) => result.error)?.error;
+    if (updateError) {
+      console.error("コンテンツ作成エラー（再採番）:", updateError.message);
+      return { data: null, error: updateError };
+    }
+  }
+
   const { data, error } = await supabase
     .from("learning_contents")
-    .insert(content)
+    .insert({
+      week_id: content.week_id,
+      title: content.title,
+      content_type: content.content_type,
+      video_url: content.video_url,
+      text_content: content.text_content,
+      description: content.description,
+      exercise_instructions: content.exercise_instructions,
+      hint: content.hint,
+      reference_answer: content.reference_answer,
+      allowed_submission_types: content.allowed_submission_types,
+      code_language: content.code_language,
+      pdf_url: content.pdf_url,
+      is_published: content.is_published,
+      is_open_to_trial: content.is_open_to_trial,
+      display_order: displayOrder,
+    })
     .select()
     .single();
 

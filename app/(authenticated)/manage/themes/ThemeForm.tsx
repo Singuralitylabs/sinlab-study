@@ -12,19 +12,27 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  getDefaultInsertAfterId,
+  SiblingOrderField,
+  type SiblingOrderItem,
+} from "../components/SiblingOrderField";
 
 interface ThemeFormProps {
   initialData?: LearningTheme;
+  /** 新規作成フォームの挿入位置ピッカーに表示する全テーマ（並び順ソート済み・作成モードのみ使用） */
+  siblings?: SiblingOrderItem[];
   mode: "create" | "edit";
 }
 
-export function ThemeForm({ initialData, mode }: ThemeFormProps) {
+export function ThemeForm({ initialData, siblings = [], mode }: ThemeFormProps) {
   const router = useRouter();
 
   const [name, setName] = useState(initialData?.name ?? "");
   const [description, setDescription] = useState(initialData?.description ?? "");
   const [imageUrl, setImageUrl] = useState(initialData?.image_url ?? "");
   const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
+  const [insertAfterId, setInsertAfterId] = useState(() => getDefaultInsertAfterId(siblings));
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -39,13 +47,22 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
     setIsLoading(true);
     setMessage(null);
 
-    const body = {
-      name,
-      description: description || null,
-      image_url: imageUrl || null,
-      display_order: Number(displayOrder),
-      is_published: isPublished,
-    };
+    const body =
+      mode === "create"
+        ? {
+            name,
+            description: description || null,
+            image_url: imageUrl || null,
+            insert_after_id: insertAfterId,
+            is_published: isPublished,
+          }
+        : {
+            name,
+            description: description || null,
+            image_url: imageUrl || null,
+            display_order: Number(displayOrder),
+            is_published: isPublished,
+          };
 
     try {
       const url =
@@ -207,16 +224,24 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
             </div>
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor="displayOrder">表示順</Label>
-            <Input
-              id="displayOrder"
-              type="number"
-              value={displayOrder}
-              onChange={(e) => setDisplayOrder(e.target.value)}
-              className="w-24"
+          {mode === "create" ? (
+            <SiblingOrderField
+              siblings={siblings}
+              insertAfterId={insertAfterId}
+              onChange={setInsertAfterId}
             />
-          </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="displayOrder">表示順</Label>
+              <Input
+                id="displayOrder"
+                type="number"
+                value={displayOrder}
+                onChange={(e) => setDisplayOrder(e.target.value)}
+                className="w-24"
+              />
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             <input
