@@ -14,14 +14,27 @@
 -- 本番環境で直接作成されたとみられる状態だった。その後、応用編側は
 -- 20260521000000_seed_gas_advanced_course_structure.sql（#49）、実践編側のテーマ行は
 -- 20260613000000_seed_gas_practical_theme.sql（#166）でそれぞれ解消済み。
+--
+-- 修正（#168）: 復元時点のVALUESでは「Geminiを使ったドキュメント自動要約」の所属フェーズを
+-- 「その他GAS活用」（phase_no=5）としていたが、本番の実際の所属は「Googleドキュメント活用」
+-- （phase_no=4）だったため、本番データとの1点の食い違いとして修正した。本番の週display_order
+-- は1,2の次が6（3〜5は欠番）のため、ループ内で該当週の挿入値のみ明示的に上書きしている
+-- （カウンタ自体（v_week_order）は書き換えず、以降にフェーズ4へ週を追加した場合の採番
+-- （4, 5, ...）に影響しないようにしている）。
+--
+-- なお、本ファイルの旧バージョン（フェーズ誤り）が既に db push 済みの環境（version自体は
+-- 記録済みのため本ファイルの変更は再実行されない）向けの移行措置は、本ファイルではなく
+-- 独立した `20260906090000_move_gas_practical_gemini_week.sql` が担う。詳細は同ファイルの
+-- コメントを参照（#168のレビュー指摘を反映して分離した）。
 -- =====================================================
 DO $$
 DECLARE
-  v_theme_id   INTEGER;
-  v_phase_id   INTEGER;
-  v_week_id    INTEGER;
-  v_cur_phase  TEXT := NULL;
-  v_week_order INTEGER := 0;
+  v_theme_id    INTEGER;
+  v_phase_id    INTEGER;
+  v_week_id     INTEGER;
+  v_cur_phase   TEXT := NULL;
+  v_week_order  INTEGER := 0;
+  v_insert_order INTEGER;
   r RECORD;
 BEGIN
   SELECT id INTO v_theme_id FROM learning_themes WHERE name = 'GAS学習（実践編）';
@@ -107,7 +120,8 @@ BEGIN
       (23, 5, 'その他GAS活用', 'ひとこと掲示板Webアプリ',
         E'GASによるWebアプリ開発とは / GASによるWebアプリのデプロイ / スプレッドシートとWebの掲示板を連携するアプリを作ろう\n\n[スライド]\nhttps://docs.google.com/presentation/d/1Rv4w2GNZVceKycRFJuzRUV-r6c7f3sGIZ6OTCqGdDIo/edit?usp=sharing\n\n[サンプル スプレッドシート]\nhttps://docs.google.com/spreadsheets/d/1y22-yig3DF-QlRg3yDS6L-1yvTqQ_WJSOP_EekNVTAU/edit?usp=drive_link',
         'https://youtu.be/-S-YtVUX4dM', 'slide-20'),
-      (24, 5, 'その他GAS活用', 'Geminiを使ったドキュメント自動要約',
+      -- #168: 本番の実際の所属フェーズは「その他GAS活用」ではなく「Googleドキュメント活用」
+      (24, 4, 'Googleドキュメント活用', 'Geminiを使ったドキュメント自動要約',
         E'GeminiのAPIを呼び出し、Googleドキュメントの内容を要約します\n- google Geminiとは\n- ドキュメント内容の取得、Gemini用プロンプトの作成、Gemini API利用設定\n- 要約結果をドキュメントに追記\n\n[スライド]\nhttps://docs.google.com/presentation/d/1GK3F7MV2Igbq1WarCsPHR6_E5yYc8rpq7fgQhyynWNQ/edit\n[サンプルドキュメント]\nhttps://docs.google.com/document/d/1aBwOMguZEosEVBXppZ5IPup26SgkPy8pFMYMSW-5baQ/edit',
         'https://youtu.be/kD3OZ-TWlZg', 'slide-21')
     ) AS t(ordinal, phase_no, phase_name, topic, descr, video_url, slide)
@@ -128,13 +142,19 @@ BEGIN
       v_week_order := 0;
     END IF;
     v_week_order := v_week_order + 1;
+    -- #168: 本番の実際の display_order は 1,2 の次が 6（3〜5は欠番）。
+    -- カウンタ（v_week_order）はそのまま自然な連番として進め、挿入値のみ上書きする。
+    v_insert_order := v_week_order;
+    IF r.topic = 'Geminiを使ったドキュメント自動要約' THEN
+      v_insert_order := 6;
+    END IF;
 
     -- 週 get-or-create（概要を description に格納）
     SELECT id INTO v_week_id FROM learning_weeks
       WHERE phase_id = v_phase_id AND name = r.topic;
     IF v_week_id IS NULL THEN
       INSERT INTO learning_weeks (phase_id, name, description, display_order, is_published)
-      VALUES (v_phase_id, r.topic, r.descr, v_week_order, false)
+      VALUES (v_phase_id, r.topic, r.descr, v_insert_order, false)
       RETURNING id INTO v_week_id;
     END IF;
 
