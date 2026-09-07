@@ -7,7 +7,7 @@
  * 初期値として旧形式が流れてきても壊れないよう、ここで同じ規則でキーへ変換する。
  * Storage ポリシーは `pdf_url = storage.objects.name` の等値比較のため、
  * この正規化はマイグレーション（`20260908000000_secure_slides_bucket.sql`）の
- * `regexp_replace(btrim(pdf_url), ...)` と同じ規則（trim → 接頭辞除去）でなければならない。
+ * `regexp_replace(btrim(pdf_url, E' \t\r\n'), ...)` と同じ規則（trim → 接頭辞除去）でなければならない。
  */
 const LEGACY_PUBLIC_URL_PREFIX = /^(?:https?:\/\/[^/]+)?\/storage\/v1\/object\/public\/slides\//;
 

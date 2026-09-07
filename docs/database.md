@@ -614,7 +614,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Slides are viewable via visible contents or by content managers | SELECT | authenticated | `bucket_id = 'slides' AND ((select get_user_role()) IN ('admin', 'maintainer') OR EXISTS (SELECT 1 FROM learning_contents lc WHERE lc.pdf_url = storage.objects.name AND lc.is_deleted = false))` |
+| Slides are viewable via visible contents or by content managers | SELECT | authenticated | `bucket_id = 'slides' AND ((select get_user_role()) IN ('admin', 'maintainer') OR EXISTS (SELECT 1 FROM learning_contents lc WHERE lc.pdf_url = storage.objects.name AND lc.is_published = true AND lc.is_deleted = false))` |
 | Content managers can upload slides | INSERT | admin / maintainer | `bucket_id = 'slides' AND (select get_user_role()) IN ('admin', 'maintainer')` |
 | Content managers can update slides | UPDATE | admin / maintainer | 同上 |
 | Content managers can delete slides | DELETE | admin / maintainer | 同上 |

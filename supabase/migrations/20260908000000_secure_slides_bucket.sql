@@ -33,14 +33,16 @@ ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public;
 --   - 管理画面由来の完全URL:  https://<project>.supabase.co/storage/v1/object/public/slides/gas/slide-01.pdf
 -- いずれも接頭辞を落とすとオブジェクトキー（gas/slide-01.pdf）になる。
 -- アプリ側の toSlideObjectKey()（app/lib/slide-object-key.ts）と同じ規則
--- （前後の空白を除去してから接頭辞を落とす）。
+-- （前後の空白（JS の trim() と同じくタブ・改行を含む）を除去してから接頭辞を落とす）。
+-- 接頭辞の無い行も trim の対象にするため、pdf_url を持つ全行を UPDATE する（正規化済みの行は no-op）。
 -- ロールバック時は、pdf_url に '/storage/v1/object/public/slides/' を前置して戻すのに加え、
 -- storage.buckets の slides を public = true に戻し、下記3節の4ポリシーを DROP する。
 -- =====================================================
 
 UPDATE public.learning_contents
-SET pdf_url = regexp_replace(btrim(pdf_url), '^(https?://[^/]+)?/storage/v1/object/public/slides/', '')
-WHERE btrim(pdf_url) ~ '^(https?://[^/]+)?/storage/v1/object/public/slides/';
+SET pdf_url = regexp_replace(btrim(pdf_url, E' \t\r\n'), '^(https?://[^/]+)?/storage/v1/object/public/slides/', '')
+WHERE pdf_url IS NOT NULL
+  AND pdf_url <> regexp_replace(btrim(pdf_url, E' \t\r\n'), '^(https?://[^/]+)?/storage/v1/object/public/slides/', '');
 
 COMMENT ON COLUMN public.learning_contents.pdf_url IS
   'スライドPDFの slides バケット内オブジェクトキー（例: gas/slide-01.pdf）。配信時にサーバー側で署名付きURLを発行する';
@@ -49,10 +51,11 @@ COMMENT ON COLUMN public.learning_contents.pdf_url IS
 -- 3. storage.objects ポリシー（slides バケット）
 --
 -- SELECT: admin / maintainer は無条件。それ以外は「pdf_url がこのオブジェクトキーと
--- 一致する learning_contents の行が（呼び出しユーザーの RLS 下で）見える」場合のみ。
+-- 一致する公開済み learning_contents の行が（呼び出しユーザーの RLS 下で）見える」場合のみ。
 -- ポリシー式内のサブクエリにも呼び出しユーザーの RLS が適用されるため、
 -- learning_contents の SELECT ポリシー（is_published / is_deleted / status /
--- is_open_to_trial）がそのまま Storage の可視範囲になる。
+-- is_open_to_trial）がそのまま Storage の可視範囲になる。is_published / is_deleted は
+-- RLS が既に絞り込むが、受講生向け経路の二層防御として明示する（CLAUDE.md の方針）。
 -- anon（未認証）向けのポリシーは作らない（デモ画面はサーバー側で service_role により
 -- お試し公開スライドのみ署名する）。
 -- =====================================================
@@ -67,6 +70,7 @@ CREATE POLICY "Slides are viewable via visible contents or by content managers"
       OR EXISTS (
         SELECT 1 FROM public.learning_contents lc
         WHERE lc.pdf_url = storage.objects.name
+          AND lc.is_published = true
           AND lc.is_deleted = false
       )
     )
