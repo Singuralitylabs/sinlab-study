@@ -119,7 +119,7 @@ describe("GET /auth/callback", () => {
     mockSessionClient(sessionClient);
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(
       createAdminClient({
-        existingUser: { id: 1, status: "pending", is_deleted: true },
+        existingUser: { id: 1, status: "trial", is_deleted: true },
       }) as never
     );
 

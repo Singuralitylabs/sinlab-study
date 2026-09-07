@@ -104,9 +104,9 @@ export async function proxy(request: NextRequest) {
 
     const userStatus = userData.status as string | null;
 
-    // 許可リスト方式: active / pending（お試しユーザー）のみ通過させ、それ以外はステータスに応じてリダイレクト
+    // 許可リスト方式: active / trial（お試しユーザー）のみ通過させ、それ以外はステータスに応じてリダイレクト
     // （想定外のステータス値が入った場合も素通りさせない）
-    if (userStatus === USER_STATUS.ACTIVE || userStatus === USER_STATUS.PENDING) {
+    if (userStatus === USER_STATUS.ACTIVE || userStatus === USER_STATUS.TRIAL) {
       // 廃止済みの /pending 画面への旧URL流入は / へ誘導する
       if (pathname === "/pending") {
         return NextResponse.redirect(new URL("/", request.url));

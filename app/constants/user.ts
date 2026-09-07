@@ -1,16 +1,21 @@
 import type { MembershipType, UserRoleType, UserStatusType } from "../types";
 
-export const USER_STATUS: Record<string, UserStatusType> = {
-  PENDING: "pending",
+/**
+ * ユーザーステータス。`Record<string, UserStatusType>` の型注釈を付けると `as const` が
+ * 無効化され、キーのtypoが型チェックを通り実行時 undefined になるため、
+ * `USER_MEMBERSHIP` と同様に `satisfies` で値だけを検証する。
+ */
+export const USER_STATUS = {
+  TRIAL: "trial",
   ACTIVE: "active",
   REJECTED: "rejected",
-} as const;
+} as const satisfies Record<string, UserStatusType>;
 
-export const USER_ROLE: Record<string, UserRoleType> = {
+export const USER_ROLE = {
   ADMIN: "admin",
   MAINTAINER: "maintainer",
   MEMBER: "member",
-} as const;
+} as const satisfies Record<string, UserRoleType>;
 
 /** ロールの許可値。APIのバリデーション等はこの1箇所から導出する */
 export const USER_ROLES: readonly UserRoleType[] = Object.values(USER_ROLE);

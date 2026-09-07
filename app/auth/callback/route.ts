@@ -109,7 +109,7 @@ export async function GET(request: NextRequest) {
       display_name: user.user_metadata?.full_name || user.email || "",
       avatar_url: user.user_metadata?.avatar_url || null,
       role: USER_ROLE.MEMBER,
-      status: USER_STATUS.PENDING,
+      status: USER_STATUS.TRIAL,
     });
 
     if (insertError) {

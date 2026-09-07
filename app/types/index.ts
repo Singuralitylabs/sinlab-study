@@ -48,7 +48,7 @@ export type AIReview = Tables<"ai_reviews"> & {
 // Enum-like types (narrower than DB string type)
 // =====================================================
 
-export type UserStatusType = "pending" | "active" | "rejected";
+export type UserStatusType = "trial" | "active" | "rejected";
 export type UserRoleType = "admin" | "maintainer" | "member";
 /** 承認済みユーザーの会員種別。承認前・却下ユーザーは null */
 export type MembershipType = "community" | "general";

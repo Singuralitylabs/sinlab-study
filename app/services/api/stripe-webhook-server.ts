@@ -319,7 +319,7 @@ export async function revertUserToTrial(userId: number): Promise<{ error: string
   const { error } = await supabase
     .from("users")
     .update({
-      status: USER_STATUS.PENDING,
+      status: USER_STATUS.TRIAL,
       membership_type: null,
       updated_at: new Date().toISOString(),
     })

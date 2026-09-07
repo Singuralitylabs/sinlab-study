@@ -37,10 +37,10 @@ const memberAuth = {
   userRole: "member",
 };
 
-const pendingAuth = {
+const trialAuth = {
   user: { id: "auth-uuid-trial" },
   userId: 3,
-  userStatus: "pending",
+  userStatus: "trial",
   userRole: "member",
 };
 
@@ -87,8 +87,8 @@ describe("POST /api/ai-review", () => {
     expect(generateReview).not.toHaveBeenCalled();
   });
 
-  it("pending で会員用・お試し用キーがどちらも未設定なら503", async () => {
-    vi.mocked(getServerAuth).mockResolvedValue(pendingAuth as never);
+  it("trial で会員用・お試し用キーがどちらも未設定なら503", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue(trialAuth as never);
 
     const res = await POST(request() as never);
 

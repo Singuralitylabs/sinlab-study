@@ -60,7 +60,7 @@ export interface GenerateReviewParams {
 /**
  * userStatus に応じて Gemini API キーを返す。
  * - active: 会員用（`GEMINI_API_KEY`）。未設定なら undefined
- * - pending: お試し用（`GEMINI_API_KEY_TRIAL`）。未設定なら会員用へフォールバック
+ * - trial: お試し用（`GEMINI_API_KEY_TRIAL`）。未設定なら会員用へフォールバック
  * - それ以外（rejected / null 等）: undefined（呼び出し側で 403 等を返す）
  */
 export function resolveGeminiApiKey(userStatus: UserStatusType | null): string | undefined {
@@ -68,7 +68,7 @@ export function resolveGeminiApiKey(userStatus: UserStatusType | null): string |
   if (userStatus === USER_STATUS.ACTIVE) {
     return memberKey || undefined;
   }
-  if (userStatus === USER_STATUS.PENDING) {
+  if (userStatus === USER_STATUS.TRIAL) {
     return process.env[GEMINI_API_KEY_TRIAL_ENV] || memberKey || undefined;
   }
   return undefined;

@@ -65,7 +65,7 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 - **認可は二層防御。** `proxy.ts`（Next.js 16 における Middleware の後継）を第一の砦とし、`app/(authenticated)/layout.tsx` でも `userStatus` の許可リスト検証を行う。**クライアント側での認証ガードは行わない。**
 - **プロキシはフェイルクローズ。** 環境変数欠落・例外・ステータス取得不能（null）はすべて `/login` へリダイレクトする。
 - **ロール**: `admin`（全権限）/ `maintainer`（コンテンツ管理）/ `member`（受講生）。判定ロジックは `app/services/auth/` に集約する。
-- **ステータス**: `active`（承認済み）/ `pending`（お試し。アプリは使えるがお試し公開コンテンツのみ閲覧可）/ `rejected`（`/rejected` へ。APIでは403）。`/pending` 画面は廃止済み。
+- **ステータス**: `active`（承認済み）/ `trial`（お試し。アプリは使えるがお試し公開コンテンツのみ閲覧可）/ `rejected`（`/rejected` へ。APIでは403）。`/pending` 画面は廃止済み。
 
 ### 会員種別・お試しユーザー
 

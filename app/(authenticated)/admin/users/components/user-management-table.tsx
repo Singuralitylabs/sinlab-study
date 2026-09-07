@@ -18,7 +18,7 @@ const STATUS_LABELS: Record<
   UserStatusType,
   { label: string; variant: "default" | "secondary" | "destructive" }
 > = {
-  pending: { label: "承認待ち", variant: "secondary" },
+  trial: { label: "お試し", variant: "secondary" },
   active: { label: "承認済み", variant: "default" },
   rejected: { label: "却下", variant: "destructive" },
 };
@@ -33,7 +33,9 @@ const ROLE_LABELS: Record<UserRoleType, string> = {
 const SELECT_CLASS =
   "h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring";
 
-type StatusFilter = "all" | "pending" | "active" | "rejected";
+/** ステータスフィルターの選択肢。APIのステータス値（`USER_STATUS`）から導出する */
+const STATUS_FILTERS = ["all", ...Object.values(USER_STATUS)] as const;
+type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 /**
  * 会員種別セレクトの `<option>` 一覧。承認時・変更時の両セレクトで共有する。
@@ -78,8 +80,8 @@ export function UserManagementTable({
     [users, filter]
   );
 
-  const pendingCount = useMemo(
-    () => users.filter((u) => u.status === USER_STATUS.PENDING).length,
+  const trialCount = useMemo(
+    () => users.filter((u) => u.status === USER_STATUS.TRIAL).length,
     [users]
   );
 
@@ -176,7 +178,7 @@ export function UserManagementTable({
     <div className="space-y-4">
       {/* フィルター */}
       <div className="flex gap-2 flex-wrap">
-        {(["all", "pending", "active", "rejected"] as const).map((status) => (
+        {STATUS_FILTERS.map((status) => (
           <Button
             key={status}
             variant={filter === status ? "default" : "outline"}
@@ -184,9 +186,9 @@ export function UserManagementTable({
             onClick={() => setFilter(status)}
           >
             {status === "all" ? "すべて" : STATUS_LABELS[status].label}
-            {status === USER_STATUS.PENDING && pendingCount > 0 && (
+            {status === USER_STATUS.TRIAL && trialCount > 0 && (
               <Badge variant="destructive" className="ml-1.5 px-1.5 py-0 text-xs">
-                {pendingCount}
+                {trialCount}
               </Badge>
             )}
           </Button>
@@ -329,7 +331,7 @@ export function UserManagementTable({
                       ) : (
                         <div className="flex flex-col gap-1">
                           <div className="flex gap-2 items-center">
-                            {(user.status === USER_STATUS.PENDING ||
+                            {(user.status === USER_STATUS.TRIAL ||
                               user.status === USER_STATUS.REJECTED) && (
                               <>
                                 <select
@@ -356,7 +358,7 @@ export function UserManagementTable({
                                 </Button>
                               </>
                             )}
-                            {(user.status === USER_STATUS.PENDING ||
+                            {(user.status === USER_STATUS.TRIAL ||
                               user.status === USER_STATUS.ACTIVE) &&
                               !isAdmin && (
                                 <Button
@@ -370,7 +372,7 @@ export function UserManagementTable({
                                 </Button>
                               )}
                           </div>
-                          {(user.status === USER_STATUS.PENDING ||
+                          {(user.status === USER_STATUS.TRIAL ||
                             user.status === USER_STATUS.REJECTED) &&
                             isSubscribed && (
                               <span className="text-xs text-muted-foreground">

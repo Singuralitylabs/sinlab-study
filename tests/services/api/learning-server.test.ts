@@ -822,12 +822,12 @@ describe("fetchWeeksWithContentsByPhaseId", () => {
 // isContentLockedForUser
 // ----------------------------------------------------------------
 describe("isContentLockedForUser", () => {
-  it("pending かつ お試し非公開の場合、true を返す", () => {
-    expect(isContentLockedForUser("pending", false)).toBe(true);
+  it("trial かつ お試し非公開の場合、true を返す", () => {
+    expect(isContentLockedForUser("trial", false)).toBe(true);
   });
 
-  it("pending でも お試し公開の場合、false を返す", () => {
-    expect(isContentLockedForUser("pending", true)).toBe(false);
+  it("trial でも お試し公開の場合、false を返す", () => {
+    expect(isContentLockedForUser("trial", true)).toBe(false);
   });
 
   it("active の場合、お試し公開フラグに関わらず false を返す", () => {

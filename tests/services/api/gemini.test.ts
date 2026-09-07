@@ -75,34 +75,34 @@ describe("resolveGeminiApiKey", () => {
     expect(resolveGeminiApiKey(USER_STATUS.ACTIVE)).toBeUndefined();
   });
 
-  it("pending はお試し用キーを返す", () => {
+  it("trial はお試し用キーを返す", () => {
     vi.stubEnv(GEMINI_API_KEY_ENV, MEMBER_KEY);
     vi.stubEnv(GEMINI_API_KEY_TRIAL_ENV, TRIAL_KEY);
 
-    expect(resolveGeminiApiKey(USER_STATUS.PENDING)).toBe(TRIAL_KEY);
+    expect(resolveGeminiApiKey(USER_STATUS.TRIAL)).toBe(TRIAL_KEY);
   });
 
-  it("pending でお試し用キー未設定なら会員用キーにフォールバックする", () => {
+  it("trial でお試し用キー未設定なら会員用キーにフォールバックする", () => {
     vi.stubEnv(GEMINI_API_KEY_ENV, MEMBER_KEY);
 
-    expect(resolveGeminiApiKey(USER_STATUS.PENDING)).toBe(MEMBER_KEY);
+    expect(resolveGeminiApiKey(USER_STATUS.TRIAL)).toBe(MEMBER_KEY);
   });
 
-  it("pending でお試し用キーが空文字なら会員用キーにフォールバックする", () => {
+  it("trial でお試し用キーが空文字なら会員用キーにフォールバックする", () => {
     vi.stubEnv(GEMINI_API_KEY_ENV, MEMBER_KEY);
     vi.stubEnv(GEMINI_API_KEY_TRIAL_ENV, "");
 
-    expect(resolveGeminiApiKey(USER_STATUS.PENDING)).toBe(MEMBER_KEY);
+    expect(resolveGeminiApiKey(USER_STATUS.TRIAL)).toBe(MEMBER_KEY);
   });
 
-  it("pending でお試し用キーのみならそのキーを返す", () => {
+  it("trial でお試し用キーのみならそのキーを返す", () => {
     vi.stubEnv(GEMINI_API_KEY_TRIAL_ENV, TRIAL_KEY);
 
-    expect(resolveGeminiApiKey(USER_STATUS.PENDING)).toBe(TRIAL_KEY);
+    expect(resolveGeminiApiKey(USER_STATUS.TRIAL)).toBe(TRIAL_KEY);
   });
 
-  it("pending で両方未設定なら undefined", () => {
-    expect(resolveGeminiApiKey(USER_STATUS.PENDING)).toBeUndefined();
+  it("trial で両方未設定なら undefined", () => {
+    expect(resolveGeminiApiKey(USER_STATUS.TRIAL)).toBeUndefined();
   });
 
   it("rejected / null はキーを返さない", () => {
