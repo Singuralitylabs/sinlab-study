@@ -647,8 +647,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | `20260905000000_add_student_progress_summary_rpc.sql` | 受講生進捗集計をDB側集約するRPC `get_students_progress_summary()`（`GROUP BY user_id`）を追加（#83） |
 | `20260906000000_rename_gas_basic_theme.sql` | 基礎コースのテーマ名を `GAS学習` → `GAS学習（基礎編）` にリネーム（#166）。他マイグレーションとの適用順序の制約が無いため、意図的な過去日付を使わない通常のタイムスタンプ |
 | `20260906090000_move_gas_practical_gemini_week.sql` | GAS講座（実践編）の週「Geminiを使ったドキュメント自動要約」を、誤ったフェーズ（その他GAS活用）配下に存在する場合のみ正しいフェーズ（Googleドキュメント活用）へ移動する冪等なUPDATE（#168）。`20260614080707`のVALUES修正だけでは version 記録済みの環境に届かないため、独立ファイルとして新規タイムスタンプで追加 |
-| `20260907010000_rename_pending_status_to_trial.sql` | `users.status` の値を `'pending'` から `'trial'` へリネーム（#88）。`users_status_check` 制約のDROP→既存行のUPDATE→制約のADDの順で適用し、DEFAULTも `'trial'` に変更。アプリコードの `USER_STATUS.TRIAL` への切り替えと同時にリリースする必要がある |
-| `20260907010001_trial_status_rls_update.sql` | 上記のステータス値リネームに伴い、`learning_contents` のSELECTポリシー（`20260801000002_trial_user_policies.sql` で追加）内の比較値を `'pending'` から `'trial'` に更新（#88） |
+| `20260907010000_rename_pending_status_to_trial.sql` | `users.status` の値を `'pending'` から `'trial'` へリネーム（#88）。`users_status_check` 制約のDROP→既存行のUPDATE→制約のADDと、`learning_contents` のSELECTポリシー（`20260801000002_trial_user_policies.sql` で追加）内の比較値の更新を同一トランザクションで適用し、DEFAULTも `'trial'` に変更。値のリネームとポリシー更新を分けると片方だけ適用された瞬間にお試しユーザーから見て `learning_contents` が0行になるため1ファイルにまとめている。アプリコードの `USER_STATUS.TRIAL` への切り替えと同時にリリースする必要がある |
 
 ### 7.1 リモート適用履歴との整合（#149・確定版）
 
@@ -740,4 +739,4 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | 2026年9月 | #83対応：受講生進捗集計をDB側集約（RPC `get_students_progress_summary()`）へ移行。従来は `user_progress` の完了済み全行をアプリ側でページング集計しておりN+1は解消済みだったが転送量・リクエスト回数が受講生数に比例していた。`SECURITY DEFINER` を使わずRLSに委譲する方針を6.2節に追記し、マイグレーション一覧を更新 |
 | 2026年9月 | #166対応：「GAS学習（実践編）」のテーマ行作成SQL（`20260613000000_seed_gas_practical_theme.sql`）を追加し、本番の実値をSELECTで確認のうえ実装。あわせて基礎コースのテーマ名リネーム（`GAS学習`→`GAS学習（基礎編）`）を独立マイグレーション（`20260906000000_rename_gas_basic_theme.sql`）として解消。マイグレーション一覧・7.1節（判明した事実4・5、整合手順3）を更新し、応用編・実践編ともにテーマ作成SQLの欠落解消を反映 |
 | 2026年9月 | #168対応：「GAS学習（実践編）」の`20260614080707_seed_gas_practical_course_structure.sql`が、週「Geminiを使ったドキュメント自動要約」の所属フェーズを本番の実際の配置（「その他GAS活用」ではなく「Googleドキュメント活用」、display_orderは1,2の次の6）と取り違えていた1点の食い違いを修正。ただしSupabase CLIはバージョン番号のみで適用判定するため、このVALUES修正はフレッシュ環境にしか届かない。旧内容で本ファイルを既に適用済みの環境にも届くよう、実データの移動は独立した新規マイグレーション（`20260906090000_move_gas_practical_gemini_week.sql`）で対応。マイグレーション一覧・7.1節（判明した事実4・整合手順2・5）を更新 |
-| 2026年9月 | #88対応：`users.status` の値 `'pending'` を `'trial'` にリネーム。`users_status_check` 制約のDROP→UPDATE→ADD（`20260907010000_rename_pending_status_to_trial.sql`）と、`get_user_status()` を参照するlearning_contentsのSELECTポリシーの比較値更新（`20260907010001_trial_status_rls_update.sql`）の2ファイルを追加。3.4節・3.8節・5.2節・6.1節・マイグレーション一覧を更新。`ai_reviews.status` の `'pending'`（AIレビューのジョブ状態）は対象外 |
+| 2026年9月 | #88対応：`users.status` の値 `'pending'` を `'trial'` にリネーム。`users_status_check` 制約のDROP→UPDATE→ADDと、`get_user_status()` を参照するlearning_contentsのSELECTポリシーの比較値更新を同一トランザクションで適用する`20260907010000_rename_pending_status_to_trial.sql`を追加。3.4節・3.8節・5.2節・6.1節・マイグレーション一覧を更新。`ai_reviews.status` の `'pending'`（AIレビューのジョブ状態）は対象外 |

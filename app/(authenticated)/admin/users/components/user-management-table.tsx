@@ -33,7 +33,9 @@ const ROLE_LABELS: Record<UserRoleType, string> = {
 const SELECT_CLASS =
   "h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring";
 
-type StatusFilter = "all" | "trial" | "active" | "rejected";
+/** ステータスフィルターの選択肢。APIのステータス値（`USER_STATUS`）から導出する */
+const STATUS_FILTERS = ["all", ...Object.values(USER_STATUS)] as const;
+type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 /**
  * 会員種別セレクトの `<option>` 一覧。承認時・変更時の両セレクトで共有する。
@@ -176,7 +178,7 @@ export function UserManagementTable({
     <div className="space-y-4">
       {/* フィルター */}
       <div className="flex gap-2 flex-wrap">
-        {(["all", "trial", "active", "rejected"] as const).map((status) => (
+        {STATUS_FILTERS.map((status) => (
           <Button
             key={status}
             variant={filter === status ? "default" : "outline"}

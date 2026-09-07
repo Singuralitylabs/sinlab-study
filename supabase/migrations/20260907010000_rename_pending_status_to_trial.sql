@@ -10,6 +10,14 @@
 -- インラインCHECKからPostgresが自動命名したもの。
 -- DROP → UPDATE → ADD の順で適用する（逆順だと制約違反になる）。
 --
+-- learning_contents の SELECTポリシー（20260801000002_trial_user_policies.sql で
+-- 追加）内の比較値（get_user_status() の返り値との比較）も同一トランザクション内で
+-- 差し替える。値のリネームとポリシー更新を別ファイル（別トランザクション）に分けると、
+-- 前者のコミット後・後者の適用前の間はお試しユーザーから見て
+-- learning_contents が0行になる（get_user_status() = 'trial' だが
+-- ポリシーはまだ 'pending' と比較するため）。get_user_status() 自体は
+-- status カラムをそのまま返すのみで変更不要。
+--
 -- ai_reviews.status の 'pending'（AIレビューのジョブ状態）は別概念のため対象外。
 --
 -- 【重要】本マイグレーションはアプリコードの USER_STATUS.TRIAL への切り替えと
@@ -23,16 +31,20 @@ ALTER TABLE public.users ALTER COLUMN status SET DEFAULT 'trial';
 
 UPDATE public.users SET status = 'trial' WHERE status = 'pending';
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conrelid = 'public.users'::regclass
-      AND conname = 'users_status_check'
-  ) THEN
-    ALTER TABLE public.users
-      ADD CONSTRAINT users_status_check
-      CHECK (status IN ('trial', 'active', 'rejected'));
-  END IF;
-END $$;
+ALTER TABLE public.users
+  ADD CONSTRAINT users_status_check
+  CHECK (status IN ('trial', 'active', 'rejected'));
+
+DROP POLICY IF EXISTS "Contents are viewable by users or content managers" ON learning_contents;
+CREATE POLICY "Contents are viewable by users or content managers"
+  ON learning_contents FOR SELECT TO authenticated
+  USING (
+    (
+      is_published = true AND is_deleted = false
+      AND (
+        (select get_user_status()) = 'active'
+        OR ((select get_user_status()) = 'trial' AND is_open_to_trial = true)
+      )
+    )
+    OR (select get_user_role()) IN ('admin', 'maintainer')
+  );
