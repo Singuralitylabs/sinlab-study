@@ -72,7 +72,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'GASとHTMLの基礎（スライド）', 'slide', '/storage/v1/object/public/slides/gas-advanced/slide-01.pdf', 2, true);
+    VALUES (v_week_id, 'GASとHTMLの基礎（スライド）', 'slide', 'gas-advanced/slide-01.pdf', 2, true);
   END IF;
 
   -- Week: GASとCSSの基礎
@@ -88,7 +88,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'GASとCSSの基礎（スライド）', 'slide', '/storage/v1/object/public/slides/gas-advanced/slide-02.pdf', 2, true);
+    VALUES (v_week_id, 'GASとCSSの基礎（スライド）', 'slide', 'gas-advanced/slide-02.pdf', 2, true);
   END IF;
 
   -- Week: CSSフレームワーク
@@ -102,7 +102,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'CSSフレームワーク（スライド）', 'slide', '/storage/v1/object/public/slides/gas-advanced/slide-03.pdf', 2, true);
+    VALUES (v_week_id, 'CSSフレームワーク（スライド）', 'slide', 'gas-advanced/slide-03.pdf', 2, true);
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'video') THEN
     INSERT INTO learning_contents (week_id, title, content_type, video_url, display_order, is_published)
@@ -137,7 +137,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'スプレッドシートのWebアプリ公開（スライド）', 'slide', '/storage/v1/object/public/slides/gas-advanced/slide-04.pdf', 2, true);
+    VALUES (v_week_id, 'スプレッドシートのWebアプリ公開（スライド）', 'slide', 'gas-advanced/slide-04.pdf', 2, true);
   END IF;
 
   -- Week: フォーム回答結果のWebアプリ公開
@@ -153,6 +153,6 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
     INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
-    VALUES (v_week_id, 'フォームのWebアプリ公開（スライド）', 'slide', '/storage/v1/object/public/slides/gas-advanced/slide-05.pdf', 2, true);
+    VALUES (v_week_id, 'フォームのWebアプリ公開（スライド）', 'slide', 'gas-advanced/slide-05.pdf', 2, true);
   END IF;
 END $$;

@@ -50,12 +50,11 @@ const mockStorage = (options: MockStorageOptions = {}) => {
     return { data: existsResult, error: null };
   });
 
-  const getPublicUrl = vi.fn().mockImplementation((path: string) => ({
-    data: { publicUrl: `https://project.supabase.co/storage/v1/object/public/slides/${path}` },
-  }));
-  const storage = { from: vi.fn().mockReturnValue({ list, upload, exists, getPublicUrl }) };
+  // 配信URL（公開URL・署名付きURL）はアップロードAPIでは一切発行しない（issue #89）。
+  // 呼ばれたらテストが落ちるよう、URL生成系のメソッドはモックに含めない
+  const storage = { from: vi.fn().mockReturnValue({ list, upload, exists }) };
   vi.mocked(createAdminSupabaseClient).mockResolvedValue({ storage } as never);
-  return { list, upload, exists, getPublicUrl };
+  return { list, upload, exists };
 };
 
 const pdf = () => new File(["%PDF-1.4"], "slide.pdf", { type: "application/pdf" });
@@ -150,10 +149,8 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
     const response = await POST(request({ slideNumber: value }) as never);
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      path: expectedPath,
-      url: `https://project.supabase.co/storage/v1/object/public/slides/${expectedPath}`,
-    });
+    // 保存値はオブジェクトキーのみ。URLは閲覧時に署名して発行するため返さない
+    await expect(response.json()).resolves.toEqual({ path: expectedPath });
     expect(upload).toHaveBeenCalledWith(expectedPath, expect.any(Uint8Array), {
       contentType: "application/pdf",
       upsert: true,
@@ -349,8 +346,8 @@ describe("POST /api/upload-pdf アップロード後の存在確認", () => {
   const verifyFailed = (path: string) =>
     `アップロードの完了を確認できませんでした（${path}）。時間をおいて再度お試しください`;
 
-  it("エラー無しで data: null が返った場合は失敗扱いとし、URLを返さない", async () => {
-    const { getPublicUrl, exists } = mockStorage({ uploadData: null });
+  it("エラー無しで data: null が返った場合は失敗扱いとし、キーを返さない", async () => {
+    const { exists } = mockStorage({ uploadData: null });
 
     const response = await POST(request({ slideNumber: "1" }) as never);
 
@@ -360,12 +357,11 @@ describe("POST /api/upload-pdf アップロード後の存在確認", () => {
       path: "gas-advanced/slide-01.pdf",
     });
     expect(exists).not.toHaveBeenCalled();
-    expect(getPublicUrl).not.toHaveBeenCalled();
   });
 
   // path は storage-js が引数から組み立てて返すだけなので、サーバー由来の fullPath で検証する
-  it("upload() が想定と異なる fullPath を返した場合は失敗扱いとし、URLを返さない", async () => {
-    const { getPublicUrl, exists } = mockStorage({
+  it("upload() が想定と異なる fullPath を返した場合は失敗扱いとし、キーを返さない", async () => {
+    const { exists } = mockStorage({
       uploadData: {
         path: "gas-advanced/slide-01.pdf",
         fullPath: "slides/gas-advanced/slide-99.pdf",
@@ -380,11 +376,10 @@ describe("POST /api/upload-pdf アップロード後の存在確認", () => {
       path: "gas-advanced/slide-01.pdf",
     });
     expect(exists).not.toHaveBeenCalled();
-    expect(getPublicUrl).not.toHaveBeenCalled();
   });
 
   it("バケット名の異なる fullPath も失敗扱いにする", async () => {
-    const { getPublicUrl } = mockStorage({
+    mockStorage({
       uploadData: {
         path: "gas-advanced/slide-01.pdf",
         fullPath: "other/gas-advanced/slide-01.pdf",
@@ -394,11 +389,10 @@ describe("POST /api/upload-pdf アップロード後の存在確認", () => {
     const response = await POST(request({ slideNumber: "1" }) as never);
 
     expect(response.status).toBe(500);
-    expect(getPublicUrl).not.toHaveBeenCalled();
   });
 
-  it("存在確認が false を返した場合はURLを返さない", async () => {
-    const { getPublicUrl } = mockStorage({ exists: false });
+  it("存在確認が false を返した場合はキーを返さない", async () => {
+    mockStorage({ exists: false });
 
     const response = await POST(request({ slideNumber: "1" }) as never);
 
@@ -407,12 +401,11 @@ describe("POST /api/upload-pdf アップロード後の存在確認", () => {
       error: verifyFailed("gas-advanced/slide-01.pdf"),
       path: "gas-advanced/slide-01.pdf",
     });
-    expect(getPublicUrl).not.toHaveBeenCalled();
   });
 
   // exists() は 400/404 以外の失敗（500・通信断など）を例外として投げる
-  it("存在確認が例外を投げた場合もURLを返さない", async () => {
-    const { getPublicUrl } = mockStorage({ exists: new Error("network down") });
+  it("存在確認が例外を投げた場合もキーを返さない", async () => {
+    mockStorage({ exists: new Error("network down") });
 
     const response = await POST(request({ slideNumber: "1" }) as never);
 
@@ -421,7 +414,6 @@ describe("POST /api/upload-pdf アップロード後の存在確認", () => {
       error: verifyFailed("gas-advanced/slide-01.pdf"),
       path: "gas-advanced/slide-01.pdf",
     });
-    expect(getPublicUrl).not.toHaveBeenCalled();
   });
 
   it("自動採番時は採番したキーで存在確認を行う", async () => {

@@ -4,9 +4,10 @@ import { notFound } from "next/navigation";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
-import { PdfSlideViewerNoSSR as PdfSlideViewer } from "@/app/components/PdfSlideViewerNoSSR";
+import { SlideContent } from "@/app/components/SlideContent";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
 import {
+  createDemoSlideSignedUrl,
   fetchDemoContentById,
   fetchDemoContentsByWeekId,
   fetchDemoContext,
@@ -106,6 +107,14 @@ export default async function DemoContentPage({ params }: PageProps) {
 
   const demoBasePath = `/demo/${themeIdNum}/${phaseIdNum}/${weekIdNum}`;
 
+  // デモ（未認証）で署名付きURLを発行するのは、お試しユーザーと同じ範囲
+  // （公開済み・お試し公開 is_open_to_trial = true）のスライドに限る（issue #89）。
+  // fetchDemoContentById() が is_published / is_deleted を絞り込み済み
+  const slideSignedUrl =
+    content.content_type === "slide" && content.pdf_url && content.is_open_to_trial
+      ? await createDemoSlideSignedUrl(content.pdf_url)
+      : null;
+
   return (
     <div className="max-w-4xl mx-auto">
       <PageTitle title={content.title} breadcrumbs={breadcrumbs} />
@@ -122,15 +131,15 @@ export default async function DemoContentPage({ params }: PageProps) {
             <MarkdownRenderer content={content.text_content} />
           )}
 
-          {content.content_type === "slide" && content.pdf_url && (
-            <PdfSlideViewer
-              url={
-                /^https?:\/\//.test(content.pdf_url)
-                  ? content.pdf_url
-                  : `${process.env.NEXT_PUBLIC_SUPABASE_URL}${content.pdf_url}`
-              }
-            />
-          )}
+          {content.content_type === "slide" &&
+            content.pdf_url &&
+            (content.is_open_to_trial ? (
+              <SlideContent signedUrl={slideSignedUrl} />
+            ) : (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                このスライドはお試し公開の対象外です。ログイン後に本登録すると閲覧できます。
+              </p>
+            ))}
 
           {content.content_type === "exercise" && content.exercise_instructions && (
             <div>

@@ -1,11 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { SLIDES_BUCKET } from "@/app/constants/storage";
 import { USER_STATUS } from "@/app/constants/user";
 import { parsePositiveInteger } from "@/app/lib/positive-integer";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
-const BUCKET_NAME = "slides";
+const BUCKET_NAME = SLIDES_BUCKET;
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 // フォルダ名（コーススラッグ）は英小文字・数字・ハイフンのみ許可
@@ -21,8 +22,8 @@ class SlideNumberExhaustedError extends Error {}
 /**
  * アップロード直後に対象オブジェクトの実体を照合する。
  *
- * getPublicUrl() はパスを文字列連結するだけで存在を保証しないため、
- * 「成功したのに実体が無い」URLが learning_contents.pdf_url に保存されるのを防ぐ防波堤。
+ * upload() の戻り値だけでは実体を保証できないため、
+ * 「成功したのに実体が無い」キーが learning_contents.pdf_url に保存されるのを防ぐ防波堤。
  * 照合できない場合は必ず例外を投げる（呼び出し側は成功として扱ってはならない）。
  *
  * 照合に失敗してもアップロード済みオブジェクトの削除は行わない
@@ -55,16 +56,6 @@ async function verifyUploadedObject(
   if (!exists) {
     throw new Error(`アップロードしたオブジェクトが見つかりません: ${expectedPath}`);
   }
-}
-
-/**
- * 確定済みのオブジェクトキーから配信URLを組み立てる。
- * 存在確認（verifyUploadedObject）がキーだけを扱うため、配信方式の変更はこの関数に閉じる。
- * #89 で createSignedUrl() へ移行する際は、この関数が非同期になり失敗分岐が1つ増える。
- */
-function buildSlideDeliveryUrl(supabase: AdminSupabaseClient, objectKey: string): string {
-  const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(objectKey);
-  return data.publicUrl;
 }
 
 /**
@@ -230,7 +221,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: message }, { status: 500 });
     }
 
-    // 実体を確認できるまでURLを返さない（不正な pdf_url がコンテンツに保存されるのを防ぐ）
+    // 実体を確認できるまでキーを返さない（不正な pdf_url がコンテンツに保存されるのを防ぐ）
     try {
       await verifyUploadedObject(supabase, uploadData, filePath);
     } catch (verificationError) {
@@ -245,7 +236,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ url: buildSlideDeliveryUrl(supabase, filePath), path: filePath });
+    // 保存値はオブジェクトキーのみ（issue #89）。配信URLは閲覧時にサーバー側で署名して発行する
+    // ため、ここでは公開URLも署名付きURLも返さない
+    return NextResponse.json({ path: filePath });
   } catch (error) {
     console.error("API エラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });

@@ -9,6 +9,7 @@ import type {
   ThemeFilterOption,
   WeekFilterOption,
 } from "@/app/lib/content-filtering";
+import { parseSlideObjectKey, toSlideObjectKey } from "@/app/lib/slide-object-key";
 import type { ContentType, LearningContent } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -125,16 +126,16 @@ const SUBMISSION_TYPE_OPTIONS: {
 ];
 
 /**
- * 既存スライドの pdf_url（例: .../slides/gas-advanced/slide-03.pdf）から
- * コーススラッグとスライド番号を抽出する。命名規約に沿わない場合は空を返す。
+ * 既存スライドの pdf_url（オブジェクトキー `gas-advanced/slide-03.pdf`。旧形式の公開URLも許容）
+ * からコーススラッグとスライド番号を抽出する。命名規約に沿わない場合は空を返す。
  */
 function parseSlidePath(pdfUrl: string | null | undefined): {
   folder: string;
   slideNumber: string;
 } {
-  const match = pdfUrl?.match(/\/slides\/([a-z0-9-]+)\/slide-(\d+)\.pdf$/);
-  if (!match) return { folder: "", slideNumber: "" };
-  return { folder: match[1], slideNumber: String(Number.parseInt(match[2], 10)) };
+  const parsed = parseSlideObjectKey(pdfUrl);
+  if (!parsed) return { folder: "", slideNumber: "" };
+  return { folder: parsed.folder, slideNumber: String(parsed.slideNumber) };
 }
 
 export function ContentForm({
@@ -215,7 +216,9 @@ export function ContentForm({
     (initialData?.code_language as CodeLanguage) ?? "javascript"
   );
   const initialSlide = parseSlidePath(initialData?.pdf_url);
-  const [pdfUrl, setPdfUrl] = useState(initialData?.pdf_url ?? "");
+  // 保存値はオブジェクトキーのみ（issue #89）。旧形式の公開URLが初期値に残っていても
+  // そのまま再保存せず、キーへ正規化した値を持つ（正規化できない値は空扱い）
+  const [pdfUrl, setPdfUrl] = useState(toSlideObjectKey(initialData?.pdf_url) ?? "");
   const [pdfFolder, setPdfFolder] = useState(initialSlide.folder);
   const [slideNumber, setSlideNumber] = useState(initialSlide.slideNumber);
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
@@ -313,7 +316,7 @@ export function ContentForm({
 
       if (response.ok) {
         const data = await response.json();
-        setPdfUrl(data.url);
+        setPdfUrl(data.path);
         setPdfFileName(data.path ?? file.name);
         setMessage({ type: "success", text: `スライドをアップロードしました（${data.path}）` });
       } else {

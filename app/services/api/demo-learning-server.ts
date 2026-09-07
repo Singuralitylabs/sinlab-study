@@ -6,6 +6,7 @@ import type {
   LearningTheme,
   LearningWeek,
 } from "@/app/types";
+import { createSlideSignedUrlWithClient } from "./slides-server";
 import { createAdminSupabaseClient } from "./supabase-server";
 
 export interface DemoContext {
@@ -239,4 +240,16 @@ export async function fetchDemoContentById(contentId: number): Promise<{
   }
 
   return { data: data as LearningContentWithWeek, error: null };
+}
+
+/**
+ * デモ用: お試し公開スライドの署名付きURLを発行
+ *
+ * デモ画面は未認証のためユーザー権限のクライアントが無く、他のデモ取得関数と同じく
+ * service_role で署名する。呼び出し側は `is_open_to_trial = true` かつ公開済みの
+ * コンテンツに限定すること（お試しユーザーと同じ範囲だけを未認証に見せる。issue #89）。
+ */
+export async function createDemoSlideSignedUrl(pdfUrl: string): Promise<string | null> {
+  const supabase = await createAdminSupabaseClient();
+  return createSlideSignedUrlWithClient(supabase, pdfUrl);
 }

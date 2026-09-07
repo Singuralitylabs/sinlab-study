@@ -169,7 +169,7 @@ BEGIN
       IF NOT EXISTS (SELECT 1 FROM learning_contents WHERE week_id = v_week_id AND content_type = 'slide') THEN
         INSERT INTO learning_contents (week_id, title, content_type, pdf_url, display_order, is_published)
         VALUES (v_week_id, r.topic || '（スライド）', 'slide',
-          '/storage/v1/object/public/slides/gas-practical/' || r.slide || '.pdf', 2, false);
+          'gas-practical/' || r.slide || '.pdf', 2, false);
       END IF;
     END IF;
   END LOOP;

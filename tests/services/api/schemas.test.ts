@@ -296,6 +296,43 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     ).toBe(true);
   });
 
+  describe("pdf_url（スライドのオブジェクトキー）", () => {
+    const base = { title: "スライド", week_id: 1, content_type: "slide", insert_after_id: null };
+
+    it("オブジェクトキーはそのまま受理する", () => {
+      const result = ContentCreateSchema.safeParse({ ...base, pdf_url: "gas/slide-01.pdf" });
+      expect(result.success).toBe(true);
+      expect(result.data?.pdf_url).toBe("gas/slide-01.pdf");
+    });
+
+    it("旧形式の公開URLはキーへ正規化して受理する", () => {
+      const result = ContentUpdateSchema.safeParse({
+        pdf_url: "https://project.supabase.co/storage/v1/object/public/slides/gas/slide-01.pdf",
+      });
+      expect(result.success).toBe(true);
+      expect(result.data?.pdf_url).toBe("gas/slide-01.pdf");
+    });
+
+    it.each([
+      ["null", null],
+      ["空文字", ""],
+      ["未指定", undefined],
+    ])("未設定（%s）はそのまま受理する", (_label, pdf_url) => {
+      const result = ContentCreateSchema.safeParse({ ...base, pdf_url });
+      expect(result.success).toBe(true);
+      expect(result.data?.pdf_url).toBe(pdf_url);
+    });
+
+    it.each([
+      ["外部URL", "https://example.com/slide.pdf"],
+      ["スラッシュ始まり", "/gas/slide-01.pdf"],
+      ["親ディレクトリ参照", "gas/../slide-01.pdf"],
+    ])("キーとして解釈できない値（%s）は検証エラーになる", (_label, pdf_url) => {
+      expect(ContentCreateSchema.safeParse({ ...base, pdf_url }).success).toBe(false);
+      expect(ContentUpdateSchema.safeParse({ pdf_url }).success).toBe(false);
+    });
+  });
+
   it.each(CONTENT_TYPES)("content_typeの許可値 %s を受理する", (content_type) => {
     expect(
       ContentCreateSchema.safeParse({

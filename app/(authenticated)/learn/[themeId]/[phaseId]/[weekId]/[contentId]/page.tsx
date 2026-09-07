@@ -5,7 +5,7 @@ import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
-import { PdfSlideViewerNoSSR as PdfSlideViewer } from "@/app/components/PdfSlideViewerNoSSR";
+import { SlideContent } from "@/app/components/SlideContent";
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
@@ -21,6 +21,7 @@ import {
   isContentFullyPublished,
   isContentLockedForUser,
 } from "@/app/services/api/learning-server";
+import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
@@ -172,6 +173,13 @@ export default async function ContentPage({ params }: PageProps) {
   // プレビュー扱いとする（バッジ表示・完了ボタン/提出フォームの表示可否に使う）。
   const isFullyPublished = isContentFullyPublished(content);
 
+  // スライドの署名付きURLは、ロック判定（isLocked）と RLS 適用の fetchContentById() を
+  // 通過した後にのみ発行する。ロック済み・未公開のコンテンツではここに到達しない（issue #89）
+  const slideSignedUrl =
+    content.content_type === "slide" && content.pdf_url
+      ? await createSlideSignedUrl(content.pdf_url)
+      : null;
+
   const [{ isCompleted }, { data: existingReview }, { data: latestSubmission }] = await Promise.all(
     [
       userId
@@ -230,13 +238,7 @@ export default async function ContentPage({ params }: PageProps) {
           )}
 
           {content.content_type === "slide" && content.pdf_url && (
-            <PdfSlideViewer
-              url={
-                /^https?:\/\//.test(content.pdf_url)
-                  ? content.pdf_url
-                  : `${process.env.NEXT_PUBLIC_SUPABASE_URL}${content.pdf_url}`
-              }
-            />
+            <SlideContent signedUrl={slideSignedUrl} />
           )}
 
           {content.content_type === "exercise" && content.exercise_instructions && (
