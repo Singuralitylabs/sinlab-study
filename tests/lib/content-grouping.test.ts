@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  getSiblingTailId,
   groupContentsByWeek,
   groupPhasesByTheme,
   groupWeeksByPhase,
   InvalidInsertAfterIdError,
+  resolveSiblingRenumber,
   resolveSiblingResequence,
   type SiblingOrderRow,
   sortContentsByHierarchy,
@@ -569,5 +571,66 @@ describe("resolveSiblingResequence", () => {
     resolveSiblingResequence(siblings, null);
 
     expect(siblings).toEqual(original);
+  });
+});
+
+describe("resolveSiblingRenumber", () => {
+  function row(id: number, display_order: number | null): SiblingOrderRow {
+    return { id, display_order };
+  }
+
+  it("兄弟が存在しない場合、updatesは空になる", () => {
+    expect(resolveSiblingRenumber([])).toEqual([]);
+  });
+
+  it("既に1からの連番の場合、updatesは空になる（不要なUPDATEを発生させない）", () => {
+    const siblings = [row(10, 1), row(20, 2)];
+
+    expect(resolveSiblingRenumber(siblings)).toEqual([]);
+  });
+
+  it("欠番がある場合、並び順を保ったまま1からの連番に詰め直す", () => {
+    // 親変更でid=20が抜けた後の残存兄弟（display_orderが1と3で欠番）を想定
+    const siblings = [row(10, 1), row(30, 3)];
+
+    expect(resolveSiblingRenumber(siblings)).toEqual([{ id: 30, display_order: 2 }]);
+  });
+
+  it("display_orderが同値の場合はidでタイブレークして並び順を決める（resolveSiblingResequenceと同じ規則）", () => {
+    const siblings = [row(30, 1), row(10, 1)];
+
+    // id昇順（10, 30）でタイブレークされ、id=10が1のまま・id=30が2にずれる
+    expect(resolveSiblingRenumber(siblings)).toEqual([{ id: 30, display_order: 2 }]);
+  });
+
+  it("兄弟一覧の入力配列を破壊しない", () => {
+    const siblings = [row(30, 3), row(10, 1)];
+    const original = [...siblings];
+
+    resolveSiblingRenumber(siblings);
+
+    expect(siblings).toEqual(original);
+  });
+});
+
+describe("getSiblingTailId", () => {
+  function row(id: number, display_order: number | null): SiblingOrderRow {
+    return { id, display_order };
+  }
+
+  it("兄弟が存在しない場合はnull（先頭扱い）を返す", () => {
+    expect(getSiblingTailId([])).toBeNull();
+  });
+
+  it("並び順で最後の兄弟のIDを返す（入力配列の順序に依存しない）", () => {
+    const siblings = [row(30, 3), row(10, 1), row(20, 2)];
+
+    expect(getSiblingTailId(siblings)).toBe(30);
+  });
+
+  it("display_orderが同値の場合はidでタイブレークする（resolveSiblingResequenceと同じ規則）", () => {
+    const siblings = [row(10, 1), row(30, 1)];
+
+    expect(getSiblingTailId(siblings)).toBe(30);
   });
 });

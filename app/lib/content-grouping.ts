@@ -361,3 +361,30 @@ export function resolveSiblingResequence(
 
   return { displayOrder: insertIndex + 1, updates };
 }
+
+/**
+ * 兄弟一覧（挿入を伴わない）を現在の並び順のまま1からの連番に詰め直す。編集フォームで
+ * 親を変更した際、移動元に残った兄弟の欠番を埋めるために使う（issue #189）。
+ * ソート規則は `resolveSiblingResequence` と同じ `compareGroupLevel` を使う。
+ */
+export function resolveSiblingRenumber(siblings: SiblingOrderRow[]): SiblingOrderRow[] {
+  const sorted = [...siblings].sort((a, b) =>
+    compareGroupLevel(a.display_order, b.display_order, a.id, b.id)
+  );
+  return sorted
+    .map((sibling, index) => ({ id: sibling.id, display_order: index + 1 }))
+    .filter((row, index) => row.display_order !== sorted[index].display_order);
+}
+
+/**
+ * 兄弟一覧（並び順ソート済みである必要はない）のうち、現在の並び順で最後の要素のIDを返す。
+ * 兄弟が存在しない場合は null（＝先頭）。編集フォームで親を変更し、かつ `insertAfterId` が
+ * 省略された場合の既定値（移動先の末尾）を求めるために使う（issue #189）。
+ */
+export function getSiblingTailId(siblings: SiblingOrderRow[]): number | null {
+  if (siblings.length === 0) return null;
+  const sorted = [...siblings].sort((a, b) =>
+    compareGroupLevel(a.display_order, b.display_order, a.id, b.id)
+  );
+  return sorted[sorted.length - 1].id;
+}

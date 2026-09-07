@@ -2,7 +2,7 @@
 
 import { Loader2, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { LearningPhase, LearningTheme } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  getCurrentPositionInsertAfterId,
   getDefaultInsertAfterId,
   type SiblingCandidate,
   SiblingOrderField,
@@ -19,7 +20,11 @@ import {
 interface PhaseFormProps {
   themes: LearningTheme[];
   initialData?: LearningPhase;
-  /** 新規作成フォームの挿入位置ピッカーに表示する全フェーズ候補（作成モードのみ使用） */
+  /**
+   * 挿入位置ピッカーに表示する全フェーズ候補。作成モードは対象そのもの、編集モードは
+   * 編集対象自身を含む一覧を渡す（自分自身の現在位置を求めるため。表示直前にフォーム内で
+   * 自分自身を除く）。
+   */
   siblingCandidates?: SiblingCandidate[];
   mode: "create" | "edit";
 }
@@ -27,23 +32,35 @@ interface PhaseFormProps {
 export function PhaseForm({ themes, initialData, siblingCandidates = [], mode }: PhaseFormProps) {
   const router = useRouter();
 
-  const [themeId, setThemeId] = useState(initialData?.theme_id?.toString() ?? "");
+  const initialThemeId = initialData?.theme_id?.toString() ?? "";
+  const [themeId, setThemeId] = useState(initialThemeId);
   const [name, setName] = useState(initialData?.name ?? "");
   const [description, setDescription] = useState(initialData?.description ?? "");
-  const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
-  const visibleSiblings = siblingCandidates.filter((c) => String(c.parentId) === themeId);
+  const allSiblingsForTheme = siblingCandidates.filter((c) => String(c.parentId) === themeId);
+  const visibleSiblings = allSiblingsForTheme.filter((c) => c.id !== initialData?.id);
   const [insertAfterId, setInsertAfterId] = useState(() =>
-    getDefaultInsertAfterId(visibleSiblings)
+    mode === "edit" && initialData
+      ? getCurrentPositionInsertAfterId(initialData.id, allSiblingsForTheme)
+      : getDefaultInsertAfterId(allSiblingsForTheme)
   );
+  // 編集時、親・位置のいずれも操作していない場合に送信ボディから insert_after_id を
+  // 省略するための初期値（PUT側は省略時に表示順を変更しない）
+  const initialInsertAfterId = useRef(insertAfterId);
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   function handleThemeChange(value: string) {
     setThemeId(value);
-    setInsertAfterId(
-      getDefaultInsertAfterId(siblingCandidates.filter((c) => String(c.parentId) === value))
-    );
+    const newSiblingsForValue = siblingCandidates.filter((c) => String(c.parentId) === value);
+    // 元の親に選び直した場合は現在位置に戻す（末尾リセットのままだと、親セレクトを
+    // 触っただけで意図せず末尾へ移動してしまう）
+    if (mode === "edit" && initialData && value === initialThemeId) {
+      setInsertAfterId(getCurrentPositionInsertAfterId(initialData.id, newSiblingsForValue));
+      return;
+    }
+    const newVisibleSiblings = newSiblingsForValue.filter((c) => c.id !== initialData?.id);
+    setInsertAfterId(getDefaultInsertAfterId(newVisibleSiblings));
   }
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
@@ -51,22 +68,17 @@ export function PhaseForm({ themes, initialData, siblingCandidates = [], mode }:
     setIsLoading(true);
     setMessage(null);
 
-    const body =
-      mode === "create"
-        ? {
-            theme_id: Number(themeId),
-            name,
-            description: description || null,
-            insert_after_id: insertAfterId,
-            is_published: isPublished,
-          }
-        : {
-            theme_id: Number(themeId),
-            name,
-            description: description || null,
-            display_order: Number(displayOrder),
-            is_published: isPublished,
-          };
+    const positionUnchanged =
+      mode === "edit" &&
+      themeId === initialThemeId &&
+      insertAfterId === initialInsertAfterId.current;
+    const body = {
+      theme_id: Number(themeId),
+      name,
+      description: description || null,
+      insert_after_id: positionUnchanged ? undefined : insertAfterId,
+      is_published: isPublished,
+    };
 
     try {
       const url =
@@ -141,24 +153,12 @@ export function PhaseForm({ themes, initialData, siblingCandidates = [], mode }:
             />
           </div>
 
-          {mode === "create" ? (
-            <SiblingOrderField
-              siblings={themeId ? visibleSiblings : null}
-              insertAfterId={insertAfterId}
-              onChange={setInsertAfterId}
-            />
-          ) : (
-            <div className="space-y-2">
-              <Label htmlFor="displayOrder">表示順</Label>
-              <Input
-                id="displayOrder"
-                type="number"
-                value={displayOrder}
-                onChange={(e) => setDisplayOrder(e.target.value)}
-                className="w-24"
-              />
-            </div>
-          )}
+          <SiblingOrderField
+            siblings={themeId ? visibleSiblings : null}
+            insertAfterId={insertAfterId}
+            onChange={setInsertAfterId}
+            placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
+          />
 
           <div className="flex items-center gap-2">
             <input

@@ -5,6 +5,7 @@ vi.mock("@/app/services/api/admin-server");
 
 import { PUT } from "@/app/api/manage/contents/[id]/route";
 import { POST } from "@/app/api/manage/contents/route";
+import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
 import { createContent, updateContent } from "@/app/services/api/admin-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -111,5 +112,20 @@ describe("PUT /api/manage/contents/[id] - バリデーション", () => {
 
     expect(res.status).toBe(400);
     expect(updateContent).not.toHaveBeenCalled();
+  });
+
+  it("insert_after_idを指定した場合、insertAfterIdとして更新処理へ渡す", async () => {
+    const res = await PUT(request({ insert_after_id: null }) as never, { params });
+
+    expect(res.status).toBe(200);
+    expect(updateContent).toHaveBeenCalledWith(1, expect.objectContaining({ insertAfterId: null }));
+  });
+
+  it("updateContentがInvalidInsertAfterIdErrorを投げた場合は400", async () => {
+    vi.mocked(updateContent).mockRejectedValue(new InvalidInsertAfterIdError(999));
+
+    const res = await PUT(request({ insert_after_id: 999 }) as never, { params });
+
+    expect(res.status).toBe(400);
   });
 });
