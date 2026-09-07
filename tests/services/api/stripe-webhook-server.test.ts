@@ -413,7 +413,7 @@ describe("syncSubscriptionStatus", () => {
     expect(result.error).toBeNull();
     const userBuilder = mockClient.from.mock.results[2].value;
     expect(userBuilder.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "pending", membership_type: null })
+      expect.objectContaining({ status: "trial", membership_type: null })
     );
     expect(userBuilder.eq).toHaveBeenNthCalledWith(2, "membership_type", "general");
   });
@@ -511,7 +511,7 @@ describe("revertUserToTrial", () => {
     expect(result.error).toBeNull();
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "pending", membership_type: null })
+      expect.objectContaining({ status: "trial", membership_type: null })
     );
     expect(builder.eq).toHaveBeenNthCalledWith(1, "id", 9);
     expect(builder.eq).toHaveBeenNthCalledWith(2, "membership_type", "general");

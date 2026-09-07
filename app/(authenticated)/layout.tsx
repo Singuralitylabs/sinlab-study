@@ -19,9 +19,9 @@ export default async function AuthLayout({
   const { userStatus, userRole } = await getServerAuth();
 
   // 認可の第一の砦は proxy.ts だが、プロキシのスキップ経路や設定不備に備え、
-  // サーバー側でも active / pending（お試しユーザー）のみ許可する（許可リスト方式の二層防御）。
+  // サーバー側でも active / trial（お試しユーザー）のみ許可する（許可リスト方式の二層防御）。
   // getServerAuth() は React.cache() でメモ化済みのため追加のDBアクセスは発生しない
-  if (userStatus !== USER_STATUS.ACTIVE && userStatus !== USER_STATUS.PENDING) {
+  if (userStatus !== USER_STATUS.ACTIVE && userStatus !== USER_STATUS.TRIAL) {
     if (userStatus === USER_STATUS.REJECTED) {
       redirect("/rejected");
     }
@@ -36,7 +36,7 @@ export default async function AuthLayout({
     <div className="sm:flex min-h-screen">
       <SideNav isAdmin={isAdmin} isInstructor={isInstructor} stripeEnabled={stripeEnabled} />
       <main className="flex-1 sm:ml-64 p-6 pt-20 sm:pt-6">
-        {userStatus === USER_STATUS.PENDING && (
+        {userStatus === USER_STATUS.TRIAL && (
           <Alert className="mb-6">
             <Clock />
             <AlertDescription className="flex flex-wrap items-center justify-between gap-3">

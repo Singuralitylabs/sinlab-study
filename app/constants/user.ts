@@ -1,7 +1,7 @@
 import type { MembershipType, UserRoleType, UserStatusType } from "../types";
 
 export const USER_STATUS: Record<string, UserStatusType> = {
-  PENDING: "pending",
+  TRIAL: "trial",
   ACTIVE: "active",
   REJECTED: "rejected",
 } as const;

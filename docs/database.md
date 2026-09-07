@@ -228,7 +228,7 @@ erDiagram
 | code_language | VARCHAR(20) | NO | 'javascript' | CHECK ('javascript', 'typescript', 'gas', 'html', 'css') | コードエディタの言語（exercise時） |
 | display_order | INTEGER | YES | 0 | - | 表示順（昇順） |
 | is_published | BOOLEAN | YES | false | - | 公開フラグ |
-| is_open_to_trial | BOOLEAN | NO | false | NOT NULL | お試し公開フラグ。true の場合、お試しユーザー（`status = 'pending'`）にも公開する |
+| is_open_to_trial | BOOLEAN | NO | false | NOT NULL | お試し公開フラグ。true の場合、お試しユーザー（`status = 'trial'`）にも公開する |
 | is_deleted | BOOLEAN | YES | false | - | 論理削除フラグ |
 | created_at | TIMESTAMPTZ | YES | NOW() | - | 作成日時 |
 | updated_at | TIMESTAMPTZ | YES | NOW() | トリガーで自動更新 | 更新日時 |
@@ -346,7 +346,7 @@ erDiagram
 
 ### 3.8 users（ユーザー）
 
-本サービスの独自Supabaseプロジェクトで管理する。初回Googleログイン時にOAuthコールバックで自動作成される（`status=pending`, `role=member`, `membership_type=NULL`）。`status=pending` は「お試し（trial）ユーザー」としてログインしてサービスを利用でき、お試し公開コンテンツ（`is_open_to_trial=true`）の閲覧・課題提出が可能。管理者が承認後、`status=active` に変更することで全コンテンツへのアクセスが可能になる。承認時には会員種別（`membership_type`）も同時に設定する。
+本サービスの独自Supabaseプロジェクトで管理する。初回Googleログイン時にOAuthコールバックで自動作成される（`status=trial`, `role=member`, `membership_type=NULL`）。`status=trial` は「お試し（trial）ユーザー」としてログインしてサービスを利用でき、お試し公開コンテンツ（`is_open_to_trial=true`）の閲覧・課題提出が可能。管理者が承認後、`status=active` に変更することで全コンテンツへのアクセスが可能になる。承認時には会員種別（`membership_type`）も同時に設定する。
 
 | カラム | 型 | NULL | デフォルト | 説明 |
 |:--|:--|:--:|:--|:--|
@@ -356,7 +356,7 @@ erDiagram
 | display_name | VARCHAR(255) | NO | - | 表示名 |
 | avatar_url | TEXT | YES | NULL | アバター画像URL |
 | role | VARCHAR(20) | NO | 'member' | `admin` / `maintainer` / `member`（CHECK制約） |
-| status | VARCHAR(20) | NO | 'pending' | `pending` / `active` / `rejected`（CHECK制約） |
+| status | VARCHAR(20) | NO | 'trial' | `trial` / `active` / `rejected`（CHECK制約） |
 | membership_type | VARCHAR(20) | YES | NULL | 会員種別。`community`（コミュニティ会員）/ `general`（一般有料会員）（CHECK制約）。承認前・却下ユーザーは NULL |
 | bio | TEXT | YES | NULL | 自己紹介 |
 | is_deleted | BOOLEAN | YES | false | 論理削除フラグ |
@@ -469,9 +469,9 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 
 | 関数 | 返り値 | 説明 |
 |:--|:--|:--|
-| `get_user_role()` | TEXT | 認証ユーザー（`auth.uid()`）の `role` を返す（`is_deleted = false` かつ `status <> 'rejected'` が対象。却下（`rejected`）ユーザーは NULL となり、admin/maintainer 向けポリシーのロールバイパスに一切乗らない。却下前に付与されていたロールを保持したまま Auth セッションが有効な間に認可を突破する事故を防ぐ（#104）。`pending` は対象外にしない（アプリ層は元々 rejected のみを弾く設計であり、`active` 限定にすると pending の admin/maintainer でアプリ層とRLSの認可判定が食い違うため）） |
+| `get_user_role()` | TEXT | 認証ユーザー（`auth.uid()`）の `role` を返す（`is_deleted = false` かつ `status <> 'rejected'` が対象。却下（`rejected`）ユーザーは NULL となり、admin/maintainer 向けポリシーのロールバイパスに一切乗らない。却下前に付与されていたロールを保持したまま Auth セッションが有効な間に認可を突破する事故を防ぐ（#104）。`trial` は対象外にしない（アプリ層は元々 rejected のみを弾く設計であり、`active` 限定にすると trial の admin/maintainer でアプリ層とRLSの認可判定が食い違うため）） |
 | `get_user_id()` | INTEGER | 認証ユーザーの `users.id` を返す（`is_deleted = false` が対象） |
-| `get_user_status()` | TEXT | 認証ユーザーの `status`（`pending` / `active` / `rejected`）を返す（`is_deleted = false` が対象）。お試しユーザーのコンテンツ制限に使用する |
+| `get_user_status()` | TEXT | 認証ユーザーの `status`（`trial` / `active` / `rejected`）を返す（`is_deleted = false` が対象）。お試しユーザーのコンテンツ制限に使用する |
 
 いずれも `STABLE SECURITY DEFINER`・`SET search_path = public` で定義されている。
 
@@ -515,11 +515,11 @@ admin と maintainer はいずれもコンテンツ系テーブルの全件参�
 
 **learning_contents の SELECT（お試しユーザー制限）**:
 
-`learning_contents` の SELECT のみ、お試しユーザー（`status = 'pending'`）はお試し公開分に限定する。
+`learning_contents` の SELECT のみ、お試しユーザー（`status = 'trial'`）はお試し公開分に限定する。
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Contents are viewable by users or content managers | SELECT | active（公開分）/ お試しユーザー（お試し公開分のみ）/ admin・maintainer（全件） | `(is_published = true AND is_deleted = false AND ((select get_user_status()) = 'active' OR ((select get_user_status()) = 'pending' AND is_open_to_trial = true))) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+| Contents are viewable by users or content managers | SELECT | active（公開分）/ お試しユーザー（お試し公開分のみ）/ admin・maintainer（全件） | `(is_published = true AND is_deleted = false AND ((select get_user_status()) = 'active' OR ((select get_user_status()) = 'trial' AND is_open_to_trial = true))) OR (select get_user_role()) IN ('admin', 'maintainer')` |
 
 親階層（`learning_themes` / `learning_phases` / `learning_weeks`）はステータスによる絞り込みを行わず、従来どおり公開分を認証済み全ユーザーが参照できる。お試しユーザーにもコースツリーの骨格（テーマ・フェーズ・週）を見せてロック表示するための設計であり、これによりステータス判定の対象は `learning_contents` の1テーブルに閉じる。
 
@@ -647,6 +647,8 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | `20260905000000_add_student_progress_summary_rpc.sql` | 受講生進捗集計をDB側集約するRPC `get_students_progress_summary()`（`GROUP BY user_id`）を追加（#83） |
 | `20260906000000_rename_gas_basic_theme.sql` | 基礎コースのテーマ名を `GAS学習` → `GAS学習（基礎編）` にリネーム（#166）。他マイグレーションとの適用順序の制約が無いため、意図的な過去日付を使わない通常のタイムスタンプ |
 | `20260906090000_move_gas_practical_gemini_week.sql` | GAS講座（実践編）の週「Geminiを使ったドキュメント自動要約」を、誤ったフェーズ（その他GAS活用）配下に存在する場合のみ正しいフェーズ（Googleドキュメント活用）へ移動する冪等なUPDATE（#168）。`20260614080707`のVALUES修正だけでは version 記録済みの環境に届かないため、独立ファイルとして新規タイムスタンプで追加 |
+| `20260907010000_rename_pending_status_to_trial.sql` | `users.status` の値を `'pending'` から `'trial'` へリネーム（#88）。`users_status_check` 制約のDROP→既存行のUPDATE→制約のADDの順で適用し、DEFAULTも `'trial'` に変更。アプリコードの `USER_STATUS.TRIAL` への切り替えと同時にリリースする必要がある |
+| `20260907010001_trial_status_rls_update.sql` | 上記のステータス値リネームに伴い、`learning_contents` のSELECTポリシー（`20260801000002_trial_user_policies.sql` で追加）内の比較値を `'pending'` から `'trial'` に更新（#88） |
 
 ### 7.1 リモート適用履歴との整合（#149・確定版）
 
@@ -695,7 +697,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 - `is_published` フラグにより、コンテンツの公開/非公開を制御
 - 一般ユーザー（受講生）には公開済みコンテンツのみ表示される
 - 管理者は公開/非公開を問わず全コンテンツを閲覧可能
-- `learning_contents` はさらに `is_open_to_trial` フラグを持ち、お試しユーザー（`status = 'pending'`）に見えるのは `is_published = true AND is_open_to_trial = true` の行のみ。2つのフラグは AND で効き、`is_open_to_trial = true` でも `is_published = false` なら誰にも公開されない
+- `learning_contents` はさらに `is_open_to_trial` フラグを持ち、お試しユーザー（`status = 'trial'`）に見えるのは `is_published = true AND is_open_to_trial = true` の行のみ。2つのフラグは AND で効き、`is_open_to_trial = true` でも `is_published = false` なら誰にも公開されない
 
 ### 8.3 カスケード削除
 - 外部キーに `ON DELETE CASCADE` を設定
@@ -738,3 +740,4 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | 2026年9月 | #83対応：受講生進捗集計をDB側集約（RPC `get_students_progress_summary()`）へ移行。従来は `user_progress` の完了済み全行をアプリ側でページング集計しておりN+1は解消済みだったが転送量・リクエスト回数が受講生数に比例していた。`SECURITY DEFINER` を使わずRLSに委譲する方針を6.2節に追記し、マイグレーション一覧を更新 |
 | 2026年9月 | #166対応：「GAS学習（実践編）」のテーマ行作成SQL（`20260613000000_seed_gas_practical_theme.sql`）を追加し、本番の実値をSELECTで確認のうえ実装。あわせて基礎コースのテーマ名リネーム（`GAS学習`→`GAS学習（基礎編）`）を独立マイグレーション（`20260906000000_rename_gas_basic_theme.sql`）として解消。マイグレーション一覧・7.1節（判明した事実4・5、整合手順3）を更新し、応用編・実践編ともにテーマ作成SQLの欠落解消を反映 |
 | 2026年9月 | #168対応：「GAS学習（実践編）」の`20260614080707_seed_gas_practical_course_structure.sql`が、週「Geminiを使ったドキュメント自動要約」の所属フェーズを本番の実際の配置（「その他GAS活用」ではなく「Googleドキュメント活用」、display_orderは1,2の次の6）と取り違えていた1点の食い違いを修正。ただしSupabase CLIはバージョン番号のみで適用判定するため、このVALUES修正はフレッシュ環境にしか届かない。旧内容で本ファイルを既に適用済みの環境にも届くよう、実データの移動は独立した新規マイグレーション（`20260906090000_move_gas_practical_gemini_week.sql`）で対応。マイグレーション一覧・7.1節（判明した事実4・整合手順2・5）を更新 |
+| 2026年9月 | #88対応：`users.status` の値 `'pending'` を `'trial'` にリネーム。`users_status_check` 制約のDROP→UPDATE→ADD（`20260907010000_rename_pending_status_to_trial.sql`）と、`get_user_status()` を参照するlearning_contentsのSELECTポリシーの比較値更新（`20260907010001_trial_status_rls_update.sql`）の2ファイルを追加。3.4節・3.8節・5.2節・6.1節・マイグレーション一覧を更新。`ai_reviews.status` の `'pending'`（AIレビューのジョブ状態）は対象外 |

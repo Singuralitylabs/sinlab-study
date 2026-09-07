@@ -32,7 +32,7 @@ export async function POST() {
     if (!auth.userId) {
       return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
     }
-    if (auth.userStatus !== USER_STATUS.PENDING) {
+    if (auth.userStatus !== USER_STATUS.TRIAL) {
       return NextResponse.json(
         { error: "アップグレードはお試しユーザーのみ利用できます" },
         { status: 403 }

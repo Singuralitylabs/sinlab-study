@@ -22,10 +22,10 @@ import {
 } from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
-const pendingAuth = {
+const trialAuth = {
   user: { id: "auth-uuid", email: "trial@example.com" },
   userId: 5,
-  userStatus: "pending",
+  userStatus: "trial",
   userRole: "member",
 };
 
@@ -34,7 +34,7 @@ const claimedAt = "2026-08-10T00:00:00.000Z";
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isStripeEnabled).mockReturnValue(true);
-  vi.mocked(getServerAuth).mockResolvedValue(pendingAuth as never);
+  vi.mocked(getServerAuth).mockResolvedValue(trialAuth as never);
   vi.mocked(claimCheckoutSlot).mockResolvedValue({
     outcome: "claimed",
     claimedAt,
@@ -113,7 +113,7 @@ describe("POST /api/stripe/checkout", () => {
   });
 
   it.each(["active", "rejected"])("%sユーザーは403を返す", async (userStatus) => {
-    vi.mocked(getServerAuth).mockResolvedValue({ ...pendingAuth, userStatus } as never);
+    vi.mocked(getServerAuth).mockResolvedValue({ ...trialAuth, userStatus } as never);
 
     const res = await POST();
 

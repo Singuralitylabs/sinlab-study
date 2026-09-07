@@ -257,14 +257,14 @@ export type ContentVisibilitySummary = Pick<
 > & { week_id: number };
 
 /**
- * お試しユーザー（status='pending'）に対してコンテンツをロック表示すべきか判定する。
+ * お試しユーザー（status='trial'）に対してコンテンツをロック表示すべきか判定する。
  * コースツリー（フェーズページ）とコンテンツ詳細ページのロック判定で共通して使用する。
  */
 export function isContentLockedForUser(
   userStatus: UserStatusType | null,
   isOpenToTrial: boolean
 ): boolean {
-  return userStatus === USER_STATUS.PENDING && !isOpenToTrial;
+  return userStatus === USER_STATUS.TRIAL && !isOpenToTrial;
 }
 
 /**

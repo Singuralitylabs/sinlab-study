@@ -209,7 +209,7 @@ describe("PATCH /api/admin/users - change_membership", () => {
     expect(changeMembershipType).not.toHaveBeenCalled();
   });
 
-  it("対象が pending / rejected 等で0行更新の場合は409を返す", async () => {
+  it("対象が trial / rejected 等で0行更新の場合は409を返す", async () => {
     vi.mocked(changeMembershipType).mockResolvedValue({ error: null, updated: false });
 
     const res = await PATCH(

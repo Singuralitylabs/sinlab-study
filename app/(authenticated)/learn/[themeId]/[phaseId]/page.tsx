@@ -69,7 +69,7 @@ export default async function PhasePage({ params }: PageProps) {
     notFound();
   }
 
-  // お試しユーザー（status='pending'）にはお試し非公開コンテンツをロック表示する
+  // お試しユーザー（status='trial'）にはお試し非公開コンテンツをロック表示する
   const isLocked = (content: ContentVisibilitySummary) =>
     isContentLockedForUser(userStatus, content.is_open_to_trial);
 

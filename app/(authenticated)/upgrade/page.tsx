@@ -64,7 +64,7 @@ export default async function UpgradePage() {
   // 確認できた実額だけを正とする。未確認時に Checkout を有効化しない
   let confirmedPrice: { amount: number; currency: string } | null = null;
   let priceFetchFailed = false;
-  if (stripeEnabled && userStatus === USER_STATUS.PENDING) {
+  if (stripeEnabled && userStatus === USER_STATUS.TRIAL) {
     try {
       const price = await fetchSubscriptionPrice();
       if (isChargeableSubscriptionPrice(price)) {
@@ -94,7 +94,7 @@ export default async function UpgradePage() {
 
       <Card className="mt-6">
         <CardContent className="space-y-4">
-          {userStatus === USER_STATUS.PENDING &&
+          {userStatus === USER_STATUS.TRIAL &&
             (stripeEnabled ? (
               <>
                 {monthlyPriceLabel && <p className="text-2xl font-bold">{monthlyPriceLabel}</p>}

@@ -106,17 +106,17 @@ describe("getServerAuth", () => {
       });
     });
 
-    it("pending な admin ユーザーの場合、そのステータスとロールを返す", async () => {
+    it("trial な admin ユーザーの場合、そのステータスとロールを返す", async () => {
       const mockClient = createMockSupabaseClient({
         authResult: { data: { user: mockUser }, error: null },
-        queryResult: { data: { id: 2, status: "pending", role: "admin" }, error: null },
+        queryResult: { data: { id: 2, status: "trial", role: "admin" }, error: null },
       });
       vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
 
       const result = await getServerAuth();
 
       expect(result.userId).toBe(2);
-      expect(result.userStatus).toBe("pending");
+      expect(result.userStatus).toBe("trial");
       expect(result.userRole).toBe("admin");
     });
   });

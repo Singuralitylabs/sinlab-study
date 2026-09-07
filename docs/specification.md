@@ -67,18 +67,18 @@ flowchart TD
     C -->|認証済み| D{ユーザーステータス}
     D -->|取得失敗| L
     D -->|rejected| RE["/rejected にリダイレクト"]
-    D -->|pending| OK
+    D -->|trial| OK
     D -->|active| OK[アクセス許可]
 ```
 
-ステータス取得失敗（null）時は `/login` へ送るフェイルクローズとする。お試しユーザー（`pending`）はページアクセス自体は許可し、コンテンツ単位の制限はアプリ層とRLSで担保する（2.6参照）。
+ステータス取得失敗（null）時は `/login` へ送るフェイルクローズとする。お試しユーザー（`trial`）はページアクセス自体は許可し、コンテンツ単位の制限はアプリ層とRLSで担保する（2.6参照）。
 
 ### 2.2 認証の多層構造
 
 | レイヤー | 保護対象 | 方式 |
 |:--|:--|:--|
-| プロキシ（`proxy.ts`） | 全ページ | Supabase Auth セッション + ユーザーステータス確認（第一の砦。`active` / `pending` のみ許可するフェイルクローズ方式） |
-| Server Components（`(authenticated)/layout.tsx`） | 認証必須ページ全体 | `getServerAuth()` の `userStatus` を許可リスト検証（`active` / `pending` 以外はリダイレクト。プロキシのスキップ経路・設定不備に備えた第二の砦） |
+| プロキシ（`proxy.ts`） | 全ページ | Supabase Auth セッション + ユーザーステータス確認（第一の砦。`active` / `trial` のみ許可するフェイルクローズ方式） |
+| Server Components（`(authenticated)/layout.tsx`） | 認証必須ページ全体 | `getServerAuth()` の `userStatus` を許可リスト検証（`active` / `trial` 以外はリダイレクト。プロキシのスキップ経路・設定不備に備えた第二の砦） |
 | Server Components（layout / page） | ロール別の表示・ナビゲーション | `getServerAuth()`（`React.cache()` でリクエスト単位にメモ化）によるロール取得・権限チェック |
 | Server Components（コンテンツ表示） | お試しユーザーへのコンテンツ制限 | `userStatus` と `is_open_to_trial` によるロック判定（RLSと合わせた二層防御の第一層） |
 | RLS | データベース | `auth.uid()` によるRow Level Security。お試しユーザーには `learning_contents` をお試し公開分のみに制限（二層防御の第二層） |
@@ -91,7 +91,7 @@ flowchart TD
 | 管理者権限 | `admin` のみ | 管理ダッシュボード、受講生管理、ユーザー管理 |
 | コンテンツ管理権限 | `admin` または `maintainer` | コンテンツ CRUD 操作 |
 
-**会員種別（`membership_type`）**: 承認済みユーザーは「コミュニティ会員（`community`）」と「一般有料会員（`general`）」に分類する。コミュニティ会員はコミュニティ会員プラン、一般有料会員は本サービスのみを利用するプランを指す。ロール（権限）とは独立した軸であり、**現時点では種別によるコンテンツ・機能のアクセス差はない**（将来の出し分けに備えた区別のみ）。承認前（`pending`）・却下（`rejected`）ユーザーは `NULL`。
+**会員種別（`membership_type`）**: 承認済みユーザーは「コミュニティ会員（`community`）」と「一般有料会員（`general`）」に分類する。コミュニティ会員はコミュニティ会員プラン、一般有料会員は本サービスのみを利用するプランを指す。ロール（権限）とは独立した軸であり、**現時点では種別によるコンテンツ・機能のアクセス差はない**（将来の出し分けに備えた区別のみ）。承認前（`trial`）・却下（`rejected`）ユーザーは `NULL`。
 
 一般有料会員への昇格には2通りの経路がある。
 
@@ -129,11 +129,11 @@ flowchart TD
     B -->|あり| C{セッション確立}
     C -->|失敗| L
     C -->|成功| D{users テーブル確認}
-    D -->|レコードなし| R["自動登録 (pending)"]
+    D -->|レコードなし| R["自動登録 (trial)"]
     R -->|成功| H
     R -->|失敗| F["/login?error=registration_failed"]
     D -->|論理削除済み| F
-    D -->|pending| H
+    D -->|trial| H
     D -->|rejected| RE["/rejected"]
     D -->|active| H["/ (ダッシュボード)"]
 ```
@@ -153,15 +153,13 @@ OAuthコールバック処理中に初回ログインを検知し、`users` テ�
 | `display_name` | Google表示名 | ユーザーメタデータ |
 | `avatar_url` | Googleアバター画像 | ユーザーメタデータ |
 | `role` | `member` | デフォルト値 |
-| `status` | `pending` | デフォルト値 |
+| `status` | `trial` | デフォルト値 |
 
 INSERT 失敗時は `/login?error=registration_failed` へリダイレクトし、Slack通知は送らない。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認の失敗や service_role 未設定は `error` なしの `/login` へフェイルクローズする。詳細は9.5.1。
 
 ### 2.6 お試し（trial）ユーザーへのコンテンツ制限
 
-承認前ユーザー（`status = 'pending'`）を「**お試し（trial）ユーザー**」と呼ぶ。お試し体験を通じた入会動機の醸成のため、承認前でも通常どおりログインでき、お試し公開指定されたコンテンツのみ閲覧・課題提出できる。
-
-> DB上の status 値 `'pending'` 自体のリネームは別issueで対応予定のため、新設するフラグ名・UI文言にのみ trial 系の名称を用いる。
+承認前ユーザー（`status = 'trial'`）を「**お試し（trial）ユーザー**」と呼ぶ。お試し体験を通じた入会動機の醸成のため、承認前でも通常どおりログインでき、お試し公開指定されたコンテンツのみ閲覧・課題提出できる。
 
 **閲覧範囲**: `is_published = true` かつ `is_open_to_trial = true` のコンテンツのみ閲覧・進捗登録・提出が可能。
 
@@ -174,12 +172,12 @@ INSERT 失敗時は `/login?error=registration_failed` へリダイレクトし�
 | ロック済みコンテンツへの直リンク | ロック画面を表示する（404にはしない） |
 | 承認待ちの通知 | アプリ内バナーで通知（`/pending` 承認待ち専用画面は設けない） |
 
-**承認待ちバナーの表示場所**: `(authenticated)/layout.tsx` で `getServerAuth()` の `userStatus` が `pending` の場合にバナーを表示する。認証必須ページ全体で共通表示となり、ページごとの実装は不要。
+**承認待ちバナーの表示場所**: `(authenticated)/layout.tsx` で `getServerAuth()` の `userStatus` が `trial` の場合にバナーを表示する。認証必須ページ全体で共通表示となり、ページごとの実装は不要。
 
 **`/pending` の廃止方法**: 旧URLのブックマークからの流入に備え、`/pending` は404にせず `/` へリダイレクトする。実装は以下の2点をプロキシ（`proxy.ts`）で行い、リダイレクト判定を1箇所に集約する。
 
 1. `shouldSkipMiddleware()` の対象から `/pending` を外す（対象に残したままだとプロキシが判定せず素通りさせ、ページ削除後は404になる）
-2. ステータス判定を通過した `active` / `pending` ユーザーについて、パスが `/pending` の場合は `/` へリダイレクトする
+2. ステータス判定を通過した `active` / `trial` ユーザーについて、パスが `/pending` の場合は `/` へリダイレクトする
 
 これにより `rejected` は既存のステータス判定で `/rejected` へ、ステータス取得不能時は `/login` へ送られ、旧URLでも各ステータスの行き先が通常パスと一致する。承認待ち画面（`app/(auth)/pending/`）自体は削除する。
 
@@ -212,7 +210,7 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 **進捗率の分母**: ダッシュボードの進捗率は、お試しユーザーではお試し公開コンテンツのみを分母とする（体験範囲内の進捗を示す）。集計は通常クライアントのネスト select で行うため、RLSによる絞り込みがそのまま分母に反映される。ツリーは全件表示・進捗率はお試し公開分の分母、という差異は意図的なもの。
 
-**提出物の引き継ぎ**: 承認前の提出・進捗は `user_id` ベースで記録されるため、承認後（`pending` → `active`）もそのまま引き継がれる。管理者 / メンテナーのレビュー一覧にもお試しユーザーの提出が表示される。
+**提出物の引き継ぎ**: 承認前の提出・進捗は `user_id` ベースで記録されるため、承認後（`trial` → `active`）もそのまま引き継がれる。管理者 / メンテナーのレビュー一覧にもお試しユーザーの提出が表示される。
 
 **既知のエッジケース（お試し公開フラグの取り下げ）**: 提出済みコンテンツの `is_open_to_trial` を後から `false` に戻すと、提出履歴画面（提出物とコンテンツを通常クライアントでネスト取得している）でお試しユーザーにはコンテンツのタイトルが取得できず、表示が欠ける。提出レコード自体は残り、承認後は再び表示される。運用上まれなケースのため、タイトル欠落時のフォールバック表示（「非公開のコンテンツ」等）に留める。
 
@@ -226,8 +224,8 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 **機能**:
 - 全ユーザー一覧の表示（ステータスでフィルタ可能）
-- ユーザーの承認（`pending` → `active`）。承認時に会員種別を選択する
-- ユーザーの却下（`pending` → `rejected`）
+- ユーザーの承認（`trial` → `active`）。承認時に会員種別を選択する
+- ユーザーの却下（`trial` → `rejected`）
 - ステータス変更のリカバリ（`rejected` → `active`）
 - ユーザーのロール変更（`member` / `maintainer` / `admin` を画面上のセレクトボックスで切り替え）
 
@@ -240,13 +238,13 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 - 承認ボタンの隣のセレクトボックスで「コミュニティ会員」「一般有料会員」を選択し、承認と同時に `membership_type` を設定する（既定は「コミュニティ会員」。ただし対象がStripe契約中の場合は下記のとおり「一般有料会員」が既定になる）
 - 却下すると `membership_type` は `NULL` に戻る（承認前・却下ユーザーは会員種別を持たない）
 - 却下ボタンは `active` ユーザーにも表示されるため、種別が設定済みのユーザーを却下する際は、確認ダイアログに現在の種別と「設定は解除されます」を明示する（誤操作で種別が失われることを防ぐ）
-- `active` ユーザーは会員種別欄がセレクトボックスになり、選択変更と同時に `membership_type` が更新される（ロール変更セレクトと同じ操作感で、確認ダイアログなし）。`pending` / `rejected` ユーザーは種別を持たないため表示しない
+- `active` ユーザーは会員種別欄がセレクトボックスになり、選択変更と同時に `membership_type` が更新される（ロール変更セレクトと同じ操作感で、確認ダイアログなし）。`trial` / `rejected` ユーザーは種別を持たないため表示しない
 
-**Stripe契約中ユーザーの会員種別制約**: `membership_type` と課金状態の不整合を防ぐため、Stripeサブスク契約中（現在契約中とみなせるステータスの `stripe_subscriptions` 行を持つ）ユーザーは、承認時・変更時のいずれも「一般有料会員」以外を選べない（コミュニティ会員の選択肢を無効化し、注記を表示する）。「一般有料会員」への設定自体は契約中でも常に許可する。これは、却下や `pending` からの再承認・種別誤選択などで「契約中なのに `community`」という不整合が生じた場合に、`change_membership` で「一般有料会員」へ是正する経路を塞がないため（承認だけにガードを掛けると是正できない詰みが生じる）。契約状況を取得できない場合の扱いはアクション・画面ごとに異なる:
+**Stripe契約中ユーザーの会員種別制約**: `membership_type` と課金状態の不整合を防ぐため、Stripeサブスク契約中（現在契約中とみなせるステータスの `stripe_subscriptions` 行を持つ）ユーザーは、承認時・変更時のいずれも「一般有料会員」以外を選べない（コミュニティ会員の選択肢を無効化し、注記を表示する）。「一般有料会員」への設定自体は契約中でも常に許可する。これは、却下や `trial` からの再承認・種別誤選択などで「契約中なのに `community`」という不整合が生じた場合に、`change_membership` で「一般有料会員」へ是正する経路を塞がないため（承認だけにガードを掛けると是正できない詰みが生じる）。契約状況を取得できない場合の扱いはアクション・画面ごとに異なる:
 - **会員種別変更（`active` ユーザー）**: 契約の有無を判定できないため、セレクトボックス自体を無効化する（「Stripe契約状況を取得できないため変更できません」。フェイルクローズ）
-- **承認（`pending` / `rejected` ユーザー）**: 承認対象の大半はStripe非契約のお試しユーザーであり、承認フロー自体をStripeの一時的な取得失敗で止めないため、制約は掛けない（契約中と判定できた場合のみガードする）
+- **承認（`trial` / `rejected` ユーザー）**: 承認対象の大半はStripe非契約のお試しユーザーであり、承認フロー自体をStripeの一時的な取得失敗で止めないため、制約は掛けない（契約中と判定できた場合のみガードする）
 
-**表示項目**: 表示名、メールアドレス、ロール（編集可能）、ステータス、会員種別（`active` はセレクトボックス、`pending`/`rejected` はバッジ。未設定は `-`）、Stripeサブスク契約中バッジ（現在契約中とみなせるステータスの `stripe_subscriptions` 行を持つユーザーのみ表示。2.11参照）、登録日時、操作ボタン
+**表示項目**: 表示名、メールアドレス、ロール（編集可能）、ステータス、会員種別（`active` はセレクトボックス、`trial`/`rejected` はバッジ。未設定は `-`）、Stripeサブスク契約中バッジ（現在契約中とみなせるステータスの `stripe_subscriptions` 行を持つユーザーのみ表示。2.11参照）、登録日時、操作ボタン
 
 **Stripeサブスク契約中ユーザーの却下**: 却下してもStripe側のサブスクリプションは自動解約されない（自動連携はスコープ外）。却下確認ダイアログに「Stripeダッシュボードでの手動キャンセルが別途必要です」の警告を表示する。手動キャンセル手順は運用者向けドキュメントを参照。
 
@@ -267,7 +265,7 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 | 却下済みユーザーのアクセス | プロキシ（`proxy.ts`） + `(authenticated)/layout.tsx` + RLSの多重チェック |
 | 承認前ユーザーのアクセス範囲 | お試し公開コンテンツのみ。アプリ層のロック判定 + RLS（`learning_contents` のSELECT制限）の二層で担保（2.6参照） |
 | ステータス改ざん | `users` テーブルの更新はRLSでadminロールのみに制限 |
-| 自動登録の悪用 | Googleアカウントが必要。登録後は `pending`（お試し）となり、お試し公開コンテンツ以外の閲覧には管理者の承認が必須 |
+| 自動登録の悪用 | Googleアカウントが必要。登録後は `trial`（お試し）となり、お試し公開コンテンツ以外の閲覧には管理者の承認が必須 |
 
 ### 2.10 Supabase Auth 設定
 
@@ -299,7 +297,7 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 | トライアルバナー（`(authenticated)/layout.tsx`）／サイドナビ（`(authenticated)/components/SideNav.tsx`） | アップグレードボタン・「プラン・お支払い」項目を非表示 |
 | `POST /api/stripe/{checkout,portal,webhook}` | 認証・署名検証より前段で503を返す（応答メッセージは `STRIPE_DISABLED_MESSAGE` に一元化） |
 
-**対象フロー**: お試しユーザー（`status=pending`）が `/upgrade` からStripe Checkout（ホスト型）で月額サブスクリプションを契約すると、決済完了と同時に**管理者承認なし**で一般有料会員（`status=active` / `membership_type=general`）へ自動昇格する。**コミュニティ会員はスコープ外**で、従来どおり2.7節の手動承認のみを経由する。
+**対象フロー**: お試しユーザー（`status=trial`）が `/upgrade` からStripe Checkout（ホスト型）で月額サブスクリプションを契約すると、決済完了と同時に**管理者承認なし**で一般有料会員（`status=active` / `membership_type=general`）へ自動昇格する。**コミュニティ会員はスコープ外**で、従来どおり2.7節の手動承認のみを経由する。
 
 **データモデル**: 専用テーブル `stripe_subscriptions`（ユーザーごとの課金状態のミラー、1ユーザー1行）と `stripe_events`（Webhook冪等性用）を用いる。アプリの認可判定は引き続き `users.status` / `users.membership_type` が唯一の真実であり、`users` テーブルにStripe関連カラムは追加しない（詳細は[データベース設計書](./database.md)の3.9/3.10・6.6/6.7を参照）。
 
@@ -335,7 +333,7 @@ Checkoutの決済手段はカードのみに限定する（コンビニ払い等
 
 Stripe APIからのライブ状態取得は、ミラー更新の直前（上記の既存行チェックの後）に1回だけ行い、その結果をミラー更新とusers更新の両方に使うことで、取得時点から書き込み時点までの間隔を最小化している。それでもミラー更新〜users更新の間に解約Webhookが並行実行される競合は理論上残る（完全な排他制御にはDBトランザクション/RPCが必要でスコープ外）。
 
-**降格のタイミング**: サブスクリプションが終端状態（`canceled` / `unpaid` / `incomplete_expired` / `paused`）へ遷移した場合（解約完了・支払いリトライ全滅・未入金のまま期限切れ・トライアル終了後の支払い方法未登録による一時停止）に、お試しユーザーへ自動的に戻す（`status=pending`, `membership_type=NULL`）。降格は **`membership_type=general` のユーザーのみ**が対象で、コミュニティ会員・管理者が手動承認したユーザーを誤って巻き込まない。初回の支払い失敗（`past_due`）では降格せず、Stripe Smart Retriesに任せて運用者へSlack通知のみ行う（9章のSlack通知機能と同じ実装パターン）。進捗・提出データは `user_id` 基準で保持されるため、降格後に再課金しても引き継がれる。
+**降格のタイミング**: サブスクリプションが終端状態（`canceled` / `unpaid` / `incomplete_expired` / `paused`）へ遷移した場合（解約完了・支払いリトライ全滅・未入金のまま期限切れ・トライアル終了後の支払い方法未登録による一時停止）に、お試しユーザーへ自動的に戻す（`status=trial`, `membership_type=NULL`）。降格は **`membership_type=general` のユーザーのみ**が対象で、コミュニティ会員・管理者が手動承認したユーザーを誤って巻き込まない。初回の支払い失敗（`past_due`）では降格せず、Stripe Smart Retriesに任せて運用者へSlack通知のみ行う（9章のSlack通知機能と同じ実装パターン）。進捗・提出データは `user_id` 基準で保持されるため、降格後に再課金しても引き継がれる。
 
 **既知の限界**: この降格ガードは「`membership_type` が現在generalか」しか見ておらず、Stripe経由で契約したユーザーと管理者が手動でgeneral承認したユーザーを区別できない。却下 → 管理者が手動でgeneral再承認 → その間に旧契約の遅延Webhookが届く、という順序が発生すると手動承認分が誤って降格されうる（会員化の由来を永続化する設計変更が必要。2.7節の会員種別変更UIでも同じ限界がある既知の課題）。
 
@@ -398,7 +396,7 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 - フェーズ内の公開週一覧 / 週詳細（フェーズ・テーマ情報付き）
 - 週内の公開コンテンツ一覧 / コンテンツ詳細（週・フェーズ・テーマ情報付き）
 
-お試しユーザー（`status = 'pending'`）の場合、コンテンツ（`learning_contents`）はRLSにより `is_open_to_trial = true` の行のみが返る。ロック表示に必要なサマリー・存在チェックのみ service_role クライアントで別途取得する（2.6参照）。
+お試しユーザー（`status = 'trial'`）の場合、コンテンツ（`learning_contents`）はRLSにより `is_open_to_trial = true` の行のみが返る。ロック表示に必要なサマリー・存在チェックのみ service_role クライアントで別途取得する（2.6参照）。
 
 admin / maintainer ロールの場合、上記の `is_published = true` 絞り込みをアプリ層で外し、未公開のテーマ・フェーズ・週・コンテンツもプレビューとして取得する（2.12参照）。
 
@@ -642,7 +640,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 
 **アクセス権限**: 認証済みユーザー（自分の提出のみ対象）
 
-**APIキーの振り分け**: `getServerAuth()` が返す `userStatus` によって使用するGemini APIキーを切り替える。`active`（コミュニティ会員・一般有料会員とも）は有料ティアの `GEMINI_API_KEY`、お試しユーザー（`pending`）は無料ティアの `GEMINI_API_KEY_TRIAL`（未設定時は `GEMINI_API_KEY` にフォールバック）を用いる。選択ロジックは `resolveGeminiApiKey()`（`app/services/api/gemini.ts`）に集約し、モデル名・上限値・環境変数名は `app/constants/gemini.ts` に定義する。キーはサーバー側でのみ扱い、レスポンス・ログへ出力しない。
+**APIキーの振り分け**: `getServerAuth()` が返す `userStatus` によって使用するGemini APIキーを切り替える。`active`（コミュニティ会員・一般有料会員とも）は有料ティアの `GEMINI_API_KEY`、お試しユーザー（`trial`）は無料ティアの `GEMINI_API_KEY_TRIAL`（未設定時は `GEMINI_API_KEY` にフォールバック）を用いる。選択ロジックは `resolveGeminiApiKey()`（`app/services/api/gemini.ts`）に集約し、モデル名・上限値・環境変数名は `app/constants/gemini.ts` に定義する。キーはサーバー側でのみ扱い、レスポンス・ログへ出力しない。
 
 **リクエストボディ**:
 ```json
@@ -891,7 +889,7 @@ JSONボディを受け取る API Route の入力検証は [zod](https://zod.dev/
 
 以下の2つの通知を、共通のSlack Incoming Webhook URL経由で管理者・運用者へ送る。通知先チャンネルはSlack Incoming Webhook URLの設定により決定する。
 
-- **新規ユーザー承認依頼通知**: 初回ログイン時にユーザーが自動登録（`status=pending`）されると送信する
+- **新規ユーザー承認依頼通知**: 初回ログイン時にユーザーが自動登録（`status=trial`）されると送信する
 - **Stripe支払い失敗通知**（2.11節）: サブスクの請求が失敗（`invoice.payment_failed`）した際に送信する。初回失敗ではユーザーを降格せずStripe Smart Retriesに任せるため、運用者への通知のみを行う
 
 **通知タイミング**: 新規ユーザー通知は `GET /auth/callback` における初回ユーザー登録の成功直後、支払い失敗通知は `POST /api/stripe/webhook` での `invoice.payment_failed` イベント受信時
@@ -970,7 +968,7 @@ flowchart TD
     C -->|確認失敗| L
     C -->|未削除の既存| Z[通常のステータス判定]
     C -->|論理削除済み| Q["ログ出力・/login?error=registration_failed にリダイレクト（通知は送らない・セッション Cookie なし）"]
-    C -->|なし| D["users テーブルに INSERT（pending）"]
+    C -->|なし| D["users テーブルに INSERT（trial）"]
     D --> E{INSERT 結果}
     E -->|成功| S[INSERT 成功]
     S --> F["sendSlackNewUserNotification()<br/>（非同期・await なし）"]
@@ -1065,3 +1063,4 @@ flowchart TD
 | 2026年9月 | 週管理・フェーズ管理を階層グルーピング表示に刷新（#184、#108の横展開）：`sortPhasesByHierarchy` / `groupWeeksByPhase` / `groupPhasesByTheme` を `content-grouping.ts` に追加し、`/manage/weeks` をフェーズ単位、`/manage/phases` をテーマ単位のグループヘッダ付きテーブルに変更。親階層列（フェーズ・テーマ）はグループヘッダへ移動して削除。データ取得（`fetchAllWeeks()` / `fetchAllPhases()`）に変更はない。6.1節を更新 |
 | 2026年9月 | テーマ・フェーズ・週・コンテンツの新規作成フォームに挿入位置指定機能を追加（#188）：`display_order` の数値直接入力を廃止し、共通コンポーネント `SiblingOrderField` による兄弟一覧表示・挿入位置セレクトに置き換えた（編集フォームは対象外、従来どおり）。`POST /api/manage/{themes,phases,weeks,contents}` は `display_order` の代わりに `insert_after_id` を受け取り、サーバー側（`createTheme` / `createPhase` / `createWeek` / `createContent`）で対象親配下の兄弟を1からの連番に再採番してからINSERTする。再採番ロジック（`resolveSiblingResequence`）と兄弟の並び順比較（`compareGroupLevel`）は `content-grouping.ts` に集約し、階層順ソートと二重実装しない。6.1節を更新 |
 | 2026年9月 | #188の挿入位置指定機能を編集フォームにも横展開（#189）：編集フォームも `SiblingOrderField` を使い、自分自身を除いた兄弟一覧・「ここに移動」プレースホルダーを表示する。既定値は親不変なら現在位置、親変更なら末尾。`PUT /api/manage/{themes,phases,weeks,contents}/[id]` は `display_order` を廃止し任意項目 `insert_after_id` を追加（省略時は表示順を維持）。`updateTheme` / `updatePhase` / `updateWeek` / `updateContent` は移動先を再採番し、親変更時は移動元の欠番も `resolveSiblingRenumber`（新設）で詰め直す。再採番ロジックは新規作成と共通化。6.1節を更新 |
+| 2026年9月 | #88対応：`users.status` の値 `'pending'` を `'trial'` にリネームし、「お試しユーザー = `status='pending'`」の命名の二重管理を解消（#86で新設したフラグ名・UI文言のみtrial系という暫定対応を解消）。2.6節の暫定注記を削除し、認証フロー図・ステータス値・RLSポリシー記載を全面更新。`ai_reviews.status` の `'pending'`（AIレビューのジョブ状態）は対象外 |

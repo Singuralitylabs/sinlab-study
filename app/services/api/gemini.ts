@@ -68,7 +68,7 @@ export function resolveGeminiApiKey(userStatus: UserStatusType | null): string |
   if (userStatus === USER_STATUS.ACTIVE) {
     return memberKey || undefined;
   }
-  if (userStatus === USER_STATUS.PENDING) {
+  if (userStatus === USER_STATUS.TRIAL) {
     return process.env[GEMINI_API_KEY_TRIAL_ENV] || memberKey || undefined;
   }
   return undefined;

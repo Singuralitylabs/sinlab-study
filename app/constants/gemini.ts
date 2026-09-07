@@ -43,5 +43,5 @@ export const GEMINI_TOTAL_BUDGET_MS = 45_000;
 /** 会員（status=active）向け API キーの環境変数名 */
 export const GEMINI_API_KEY_ENV = "GEMINI_API_KEY";
 
-/** お試しユーザー（status=pending）向け API キーの環境変数名 */
+/** お試しユーザー（status=trial）向け API キーの環境変数名 */
 export const GEMINI_API_KEY_TRIAL_ENV = "GEMINI_API_KEY_TRIAL";
