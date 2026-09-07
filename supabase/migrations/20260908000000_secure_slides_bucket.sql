@@ -32,13 +32,15 @@ ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public;
 --   - シード由来の相対パス:   /storage/v1/object/public/slides/gas/slide-01.pdf
 --   - 管理画面由来の完全URL:  https://<project>.supabase.co/storage/v1/object/public/slides/gas/slide-01.pdf
 -- いずれも接頭辞を落とすとオブジェクトキー（gas/slide-01.pdf）になる。
--- アプリ側の toSlideObjectKey()（app/lib/slide-object-key.ts）と同じ規則。
--- ロールバック時は '/storage/v1/object/public/slides/' || pdf_url を前置すれば戻る。
+-- アプリ側の toSlideObjectKey()（app/lib/slide-object-key.ts）と同じ規則
+-- （前後の空白を除去してから接頭辞を落とす）。
+-- ロールバック時は、pdf_url に '/storage/v1/object/public/slides/' を前置して戻すのに加え、
+-- storage.buckets の slides を public = true に戻し、下記3節の4ポリシーを DROP する。
 -- =====================================================
 
 UPDATE public.learning_contents
-SET pdf_url = regexp_replace(pdf_url, '^(https?://[^/]+)?/storage/v1/object/public/slides/', '')
-WHERE pdf_url ~ '^(https?://[^/]+)?/storage/v1/object/public/slides/';
+SET pdf_url = regexp_replace(btrim(pdf_url), '^(https?://[^/]+)?/storage/v1/object/public/slides/', '')
+WHERE btrim(pdf_url) ~ '^(https?://[^/]+)?/storage/v1/object/public/slides/';
 
 COMMENT ON COLUMN public.learning_contents.pdf_url IS
   'スライドPDFの slides バケット内オブジェクトキー（例: gas/slide-01.pdf）。配信時にサーバー側で署名付きURLを発行する';
