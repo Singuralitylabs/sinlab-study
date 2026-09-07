@@ -99,7 +99,13 @@ async function resequenceSiblingsForInsert(
 
 /**
  * `updateTheme` / `updatePhase` / `updateWeek` / `updateContent` に共通する、編集時の
- * 挿入位置からの再採番処理（issue #189）。
+ * 挿入位置からの再採番処理（issue #189）。移動先（destinationParentFilter）配下のみを
+ * 対象にする。移動元の詰め直しはこの関数の責務ではなく、呼び出し側が本体のUPDATE
+ * （親の付け替え）に成功した**後**に `renumberSourceSiblingsAfterMove` を呼ぶこと
+ * （先に移動元を詰めると、本体UPDATEが失敗した場合に、まだ移動元に残っている自分自身と
+ * 詰め直し後の兄弟の `display_order` が重複し、既存の兄弟同士の表示順が入れ替わりうる。
+ * 詰め直しを本体UPDATEの後に行えば、失敗時に生じるのは欠番のみで、既存要素間の順序は
+ * 保たれる）。
  *
  * - `insertAfterId` が省略され、かつ親が変わっていない場合（`parentChanged: false`）は
  *   何もせず `displayOrder: undefined` を返す（呼び出し側は display_order を更新しない）。
@@ -109,16 +115,12 @@ async function resequenceSiblingsForInsert(
  *   `InvalidInsertAfterIdError` になる）に対して再採番する。
  *   `insertAfterId` が省略され親が変わった場合は、移動先の末尾（`getSiblingTailId`）を
  *   既定値にする。
- * - 親が変わった場合は、移動元に残った兄弟（自分自身は既に対象外）の欠番も
- *   `resolveSiblingRenumber` で詰め直す（挿入を伴わないため `resolveSiblingResequence` とは
- *   別の関数を使う）。
  */
-async function resequenceSiblingsForUpdate(
+async function resequenceDestinationForUpdate(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
   table: SiblingTable,
   selfId: number,
   destinationParentFilter: SiblingParentFilter,
-  sourceParentFilter: SiblingParentFilter,
   parentChanged: boolean,
   insertAfterId: number | null | undefined
 ): Promise<{ displayOrder: number | undefined; error: PostgrestError | null }> {
@@ -148,27 +150,30 @@ async function resequenceSiblingsForUpdate(
     return { displayOrder: undefined, error: destinationUpdateError };
   }
 
-  if (parentChanged && sourceParentFilter) {
-    const { data: sourceSiblings, error: sourceError } = await fetchSiblings(
-      supabase,
-      table,
-      sourceParentFilter,
-      selfId
-    );
-    if (sourceError) {
-      return { displayOrder: undefined, error: sourceError };
-    }
-    const sourceUpdateError = await applySiblingUpdates(
-      supabase,
-      table,
-      resolveSiblingRenumber(sourceSiblings ?? [])
-    );
-    if (sourceUpdateError) {
-      return { displayOrder: undefined, error: sourceUpdateError };
-    }
-  }
-
   return { displayOrder, error: null };
+}
+
+/**
+ * 親を変更した編集で、移動元に残った兄弟（自分自身は既にそちらから抜けている前提）の
+ * 欠番を1からの連番に詰め直す。本体UPDATE（親の付け替え）が成功した**後**に呼ぶこと
+ * （`resequenceDestinationForUpdate` のコメント参照）。
+ */
+async function renumberSourceSiblingsAfterMove(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  table: SiblingTable,
+  selfId: number,
+  sourceParentFilter: SiblingParentFilter
+): Promise<PostgrestError | null> {
+  const { data: sourceSiblings, error: sourceError } = await fetchSiblings(
+    supabase,
+    table,
+    sourceParentFilter,
+    selfId
+  );
+  if (sourceError) {
+    return sourceError;
+  }
+  return applySiblingUpdates(supabase, table, resolveSiblingRenumber(sourceSiblings ?? []));
 }
 
 // =====================================================
@@ -263,7 +268,7 @@ export async function createTheme(theme: {
 
 /**
  * テーマを更新する。`insertAfterId` が省略された場合は表示順を変更しない。指定された場合は
- * 全テーマ（自分自身を除く）を対象に `resequenceSiblingsForUpdate` で再採番する
+ * 全テーマ（自分自身を除く）を対象に `resequenceDestinationForUpdate` で再採番する
  * （テーマは親を持たないため親変更の分岐は発生しない）。
  */
 export async function updateTheme(
@@ -273,11 +278,10 @@ export async function updateTheme(
   const supabase = await createServerSupabaseClient();
   const { insertAfterId, ...patch } = theme;
 
-  const resequenced = await resequenceSiblingsForUpdate(
+  const resequenced = await resequenceDestinationForUpdate(
     supabase,
     "learning_themes",
     id,
-    null,
     null,
     false,
     insertAfterId
@@ -476,8 +480,9 @@ export async function createPhase(phase: {
 
 /**
  * フェーズを更新する。`insertAfterId` が省略され、かつ `theme_id` が変わっていない場合は
- * 表示順を変更しない。それ以外は移動先（`theme_id` 変更後の親）配下を再採番し、親が
- * 変わった場合は移動元の親配下も再採番する（`resequenceSiblingsForUpdate` 参照）。
+ * 表示順を変更しない。それ以外は移動先（`theme_id` 変更後の親）配下を再採番してから本体を
+ * UPDATEし、親が変わった場合は本体UPDATE成功後に移動元の親配下も再採番する
+ * （順序の理由は `resequenceDestinationForUpdate` のコメント参照）。
  */
 export async function updatePhase(
   id: number,
@@ -495,6 +500,7 @@ export async function updatePhase(
       .from("learning_phases")
       .select("theme_id")
       .eq("id", id)
+      .eq("is_deleted", false)
       .single();
     if (currentError) {
       console.error("フェーズ更新エラー（現在値取得）:", currentError.message);
@@ -506,12 +512,11 @@ export async function updatePhase(
     sourceFilter = { column: "theme_id", value: current.theme_id };
   }
 
-  const resequenced = await resequenceSiblingsForUpdate(
+  const resequenced = await resequenceDestinationForUpdate(
     supabase,
     "learning_phases",
     id,
     destinationFilter,
-    sourceFilter,
     parentChanged,
     insertAfterId
   );
@@ -530,6 +535,19 @@ export async function updatePhase(
   if (error) {
     console.error("フェーズ更新エラー:", error.message);
     return { error };
+  }
+
+  if (parentChanged) {
+    const sourceError = await renumberSourceSiblingsAfterMove(
+      supabase,
+      "learning_phases",
+      id,
+      sourceFilter
+    );
+    if (sourceError) {
+      console.error("フェーズ更新エラー（移動元の再採番）:", sourceError.message);
+      return { error: sourceError };
+    }
   }
 
   return { error: null };
@@ -683,9 +701,9 @@ export async function createWeek(week: {
 
 /**
  * 週を更新する。`insertAfterId` が省略され、かつ `phase_id` が変わっていない場合は
- * 表示順を変更しない。それ以外は移動先（`phase_id` 変更後の親）配下を再採番し、親が
- * 変わった場合は移動元の親配下も再採番する（`updatePhase` と同じ方針。
- * `resequenceSiblingsForUpdate` 参照）。
+ * 表示順を変更しない。それ以外は移動先（`phase_id` 変更後の親）配下を再採番してから本体を
+ * UPDATEし、親が変わった場合は本体UPDATE成功後に移動元の親配下も再採番する
+ * （`updatePhase` と同じ方針。順序の理由は `resequenceDestinationForUpdate` のコメント参照）。
  */
 export async function updateWeek(
   id: number,
@@ -703,6 +721,7 @@ export async function updateWeek(
       .from("learning_weeks")
       .select("phase_id")
       .eq("id", id)
+      .eq("is_deleted", false)
       .single();
     if (currentError) {
       console.error("週更新エラー（現在値取得）:", currentError.message);
@@ -714,12 +733,11 @@ export async function updateWeek(
     sourceFilter = { column: "phase_id", value: current.phase_id };
   }
 
-  const resequenced = await resequenceSiblingsForUpdate(
+  const resequenced = await resequenceDestinationForUpdate(
     supabase,
     "learning_weeks",
     id,
     destinationFilter,
-    sourceFilter,
     parentChanged,
     insertAfterId
   );
@@ -738,6 +756,19 @@ export async function updateWeek(
   if (error) {
     console.error("週更新エラー:", error.message);
     return { error };
+  }
+
+  if (parentChanged) {
+    const sourceError = await renumberSourceSiblingsAfterMove(
+      supabase,
+      "learning_weeks",
+      id,
+      sourceFilter
+    );
+    if (sourceError) {
+      console.error("週更新エラー（移動元の再採番）:", sourceError.message);
+      return { error: sourceError };
+    }
   }
 
   return { error: null };
@@ -885,10 +916,11 @@ export async function createContent(content: {
 
 /**
  * コンテンツを更新する。`insertAfterId` が省略され、かつ `week_id` が変わっていない場合は
- * 表示順を変更しない。それ以外は移動先（`week_id` 変更後の親）配下を再採番し、親が
- * 変わった場合は移動元の親配下も再採番する（`updatePhase` と同じ方針。
- * `resequenceSiblingsForUpdate` 参照）。兄弟の取得・再採番は他の3関数と異なり
- * `createAdminSupabaseClient()` を使う（`createContent` と同じ理由。同関数のコメント参照）。
+ * 表示順を変更しない。それ以外は移動先（`week_id` 変更後の親）配下を再採番してから本体を
+ * UPDATEし、親が変わった場合は本体UPDATE成功後に移動元の親配下も再採番する
+ * （`updatePhase` と同じ方針。順序の理由は `resequenceDestinationForUpdate` のコメント参照）。
+ * 兄弟の取得・再採番は他の3関数と異なり `createAdminSupabaseClient()` を使う
+ * （`createContent` と同じ理由。同関数のコメント参照）。
  */
 export async function updateContent(
   id: number,
@@ -906,6 +938,7 @@ export async function updateContent(
       .from("learning_contents")
       .select("week_id")
       .eq("id", id)
+      .eq("is_deleted", false)
       .single();
     if (currentError) {
       console.error("コンテンツ更新エラー（現在値取得）:", currentError.message);
@@ -917,12 +950,11 @@ export async function updateContent(
     sourceFilter = { column: "week_id", value: current.week_id };
   }
 
-  const resequenced = await resequenceSiblingsForUpdate(
+  const resequenced = await resequenceDestinationForUpdate(
     supabase,
     "learning_contents",
     id,
     destinationFilter,
-    sourceFilter,
     parentChanged,
     insertAfterId
   );
@@ -941,6 +973,19 @@ export async function updateContent(
   if (error) {
     console.error("コンテンツ更新エラー:", error.message);
     return { error };
+  }
+
+  if (parentChanged) {
+    const sourceError = await renumberSourceSiblingsAfterMove(
+      supabase,
+      "learning_contents",
+      id,
+      sourceFilter
+    );
+    if (sourceError) {
+      console.error("コンテンツ更新エラー（移動元の再採番）:", sourceError.message);
+      return { error: sourceError };
+    }
   }
 
   return { error: null };

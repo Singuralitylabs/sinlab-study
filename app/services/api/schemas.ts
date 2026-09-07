@@ -115,8 +115,8 @@ export const AdminUserActionSchema = z.discriminatedUnion(
 // ==================== /api/manage/themes ====================
 
 // POST（新規作成）・PUT（更新）とも挿入位置（insert_after_id）を受け取る。Updateは
-// Create からの .partial() 派生ではなく、共通項目（ThemeBaseSchema）に insert_after_id を
-// 足して定義する（Createは必須、Updateは.partial()で省略可能にする点だけが異なるため）。
+// Createの全項目を任意化するだけなので `XxxCreateSchema.partial()` から派生する
+// （`insert_after_id` は Create では必須、Update では省略可能になる）。
 const ThemeBaseSchema = z.object({
   name: RequiredStringSchema,
   description: OptionalNullableString,
@@ -126,9 +126,7 @@ const ThemeBaseSchema = z.object({
 export const ThemeCreateSchema = ThemeBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
-export const ThemeUpdateSchema = ThemeBaseSchema.extend({
-  insert_after_id: InsertAfterIdSchema,
-}).partial();
+export const ThemeUpdateSchema = ThemeCreateSchema.partial();
 
 // ==================== /api/manage/phases ====================
 
@@ -141,9 +139,7 @@ const PhaseBaseSchema = z.object({
 export const PhaseCreateSchema = PhaseBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
-export const PhaseUpdateSchema = PhaseBaseSchema.extend({
-  insert_after_id: InsertAfterIdSchema,
-}).partial();
+export const PhaseUpdateSchema = PhaseCreateSchema.partial();
 
 // ==================== /api/manage/weeks ====================
 
@@ -156,9 +152,7 @@ const WeekBaseSchema = z.object({
 export const WeekCreateSchema = WeekBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
-export const WeekUpdateSchema = WeekBaseSchema.extend({
-  insert_after_id: InsertAfterIdSchema,
-}).partial();
+export const WeekUpdateSchema = WeekCreateSchema.partial();
 
 // ==================== /api/manage/contents ====================
 
@@ -182,9 +176,7 @@ const ContentBaseSchema = z.object({
 export const ContentCreateSchema = ContentBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
-export const ContentUpdateSchema = ContentBaseSchema.extend({
-  insert_after_id: InsertAfterIdSchema,
-}).partial();
+export const ContentUpdateSchema = ContentCreateSchema.partial();
 
 // ==================== /api/manage/contents/bulk ====================
 

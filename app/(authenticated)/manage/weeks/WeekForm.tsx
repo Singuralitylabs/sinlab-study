@@ -2,7 +2,7 @@
 
 import { Loader2, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { LearningPhase, LearningTheme, LearningWeek } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,8 @@ interface WeekFormProps {
 export function WeekForm({ phases, initialData, siblingCandidates = [], mode }: WeekFormProps) {
   const router = useRouter();
 
-  const [phaseId, setPhaseId] = useState(initialData?.phase_id?.toString() ?? "");
+  const initialPhaseId = initialData?.phase_id?.toString() ?? "";
+  const [phaseId, setPhaseId] = useState(initialPhaseId);
   const [name, setName] = useState(initialData?.name ?? "");
   const allSiblingsForPhase = siblingCandidates.filter((c) => String(c.parentId) === phaseId);
   const visibleSiblings = allSiblingsForPhase.filter((c) => c.id !== initialData?.id);
@@ -44,15 +45,23 @@ export function WeekForm({ phases, initialData, siblingCandidates = [], mode }: 
       ? getCurrentPositionInsertAfterId(initialData.id, allSiblingsForPhase)
       : getDefaultInsertAfterId(allSiblingsForPhase)
   );
+  // 編集時、親・位置のいずれも操作していない場合に送信ボディから insert_after_id を
+  // 省略するための初期値（PUT側は省略時に表示順を変更しない）
+  const initialInsertAfterId = useRef(insertAfterId);
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   function handlePhaseChange(value: string) {
     setPhaseId(value);
-    const newVisibleSiblings = siblingCandidates
-      .filter((c) => String(c.parentId) === value)
-      .filter((c) => c.id !== initialData?.id);
+    const newSiblingsForValue = siblingCandidates.filter((c) => String(c.parentId) === value);
+    // 元の親に選び直した場合は現在位置に戻す（末尾リセットのままだと、親セレクトを
+    // 触っただけで意図せず末尾へ移動してしまう）
+    if (mode === "edit" && initialData && value === initialPhaseId) {
+      setInsertAfterId(getCurrentPositionInsertAfterId(initialData.id, newSiblingsForValue));
+      return;
+    }
+    const newVisibleSiblings = newSiblingsForValue.filter((c) => c.id !== initialData?.id);
     setInsertAfterId(getDefaultInsertAfterId(newVisibleSiblings));
   }
 
@@ -61,10 +70,14 @@ export function WeekForm({ phases, initialData, siblingCandidates = [], mode }: 
     setIsLoading(true);
     setMessage(null);
 
+    const positionUnchanged =
+      mode === "edit" &&
+      phaseId === initialPhaseId &&
+      insertAfterId === initialInsertAfterId.current;
     const body = {
       phase_id: Number(phaseId),
       name,
-      insert_after_id: insertAfterId,
+      insert_after_id: positionUnchanged ? undefined : insertAfterId,
       is_published: isPublished,
     };
 

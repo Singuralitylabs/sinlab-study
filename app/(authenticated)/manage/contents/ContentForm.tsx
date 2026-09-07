@@ -186,7 +186,8 @@ export function ContentForm({
   const [phaseId, setPhaseId] = useState(
     resolvedInitialSelection.phaseId || initialPhaseIdFallback
   );
-  const [weekId, setWeekId] = useState(resolvedInitialSelection.weekId);
+  const initialWeekId = resolvedInitialSelection.weekId;
+  const [weekId, setWeekId] = useState(initialWeekId);
   const allSiblingsForWeek = siblingCandidates.filter((c) => String(c.parentId) === weekId);
   const visibleSiblings = allSiblingsForWeek.filter((c) => c.id !== initialData?.id);
   const [insertAfterId, setInsertAfterId] = useState(() =>
@@ -194,6 +195,9 @@ export function ContentForm({
       ? getCurrentPositionInsertAfterId(initialData.id, allSiblingsForWeek)
       : getDefaultInsertAfterId(allSiblingsForWeek)
   );
+  // 編集時、週・位置のいずれも操作していない場合に送信ボディから insert_after_id を
+  // 省略するための初期値（PUT側は省略時に表示順を変更しない）
+  const initialInsertAfterId = useRef(insertAfterId);
 
   const [contentType, setContentType] = useState<ContentType>(initialData?.content_type ?? "video");
   const [videoUrl, setVideoUrl] = useState(initialData?.video_url ?? "");
@@ -251,9 +255,15 @@ export function ContentForm({
 
   function handleWeekChange(value: string) {
     setWeekId(value);
-    const newVisibleSiblings = siblingCandidates
-      .filter((c) => String(c.parentId) === value)
-      .filter((c) => c.id !== initialData?.id);
+    const newSiblingsForValue = siblingCandidates.filter((c) => String(c.parentId) === value);
+    // 元の週に選び直した場合は現在位置に戻す（末尾リセットのままだと、テーマ・フェーズの
+    // セレクトを触って週が一旦クリアされ、同じ週を選び直しただけで意図せず末尾へ
+    // 移動してしまう）
+    if (mode === "edit" && initialData && value === initialWeekId) {
+      setInsertAfterId(getCurrentPositionInsertAfterId(initialData.id, newSiblingsForValue));
+      return;
+    }
+    const newVisibleSiblings = newSiblingsForValue.filter((c) => c.id !== initialData?.id);
     setInsertAfterId(getDefaultInsertAfterId(newVisibleSiblings));
   }
 
@@ -343,11 +353,13 @@ export function ContentForm({
     setIsLoading(true);
     setMessage(null);
 
+    const positionUnchanged =
+      mode === "edit" && weekId === initialWeekId && insertAfterId === initialInsertAfterId.current;
     const body: Record<string, unknown> = {
       title,
       week_id: Number(weekId),
       content_type: contentType,
-      insert_after_id: insertAfterId,
+      insert_after_id: positionUnchanged ? undefined : insertAfterId,
       is_published: isPublished,
       is_open_to_trial: isOpenToTrial,
       video_url: contentType === "video" ? videoUrl.trim() || null : null,

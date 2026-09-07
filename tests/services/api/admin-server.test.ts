@@ -895,6 +895,7 @@ describe("updatePhase（編集時の再採番）", () => {
     const currentFetchBuilder = mockClient.from.mock.results[0].value;
     expect(currentFetchBuilder.select).toHaveBeenCalledWith("theme_id");
     expect(currentFetchBuilder.eq).toHaveBeenCalledWith("id", 10);
+    expect(currentFetchBuilder.eq).toHaveBeenCalledWith("is_deleted", false);
     const siblingsBuilder = mockClient.from.mock.results[1].value;
     expect(siblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 1);
     expect(siblingsBuilder.neq).toHaveBeenCalledWith("id", 10);
@@ -911,12 +912,16 @@ describe("updatePhase（編集時の再採番）", () => {
     );
   });
 
-  it("theme_idを変更した場合、移動先の末尾に追加し（insertAfterId省略時）、移動元に残った兄弟の欠番も再採番する", async () => {
+  it("theme_idを変更した場合、移動先の末尾に追加し（insertAfterId省略時）、本体UPDATE成功後に移動元に残った兄弟の欠番も再採番する", async () => {
+    // 呼び出し順は 現在値取得 → 移動先兄弟取得 → 本体UPDATE → 移動元兄弟取得 → 移動元UPDATE。
+    // 本体UPDATEを移動元の詰め直しより先に行うことで、途中失敗時に移動元の兄弟同士の
+    // 表示順が入れ替わらないようにする（詳細は resequenceDestinationForUpdate のコメント参照）
     const mockClient = createMockSupabaseClient({
       tableResults: {
         learning_phases: [
           { data: { theme_id: 1 }, error: null },
           { data: [{ id: 20, display_order: 1 }], error: null },
+          { data: null, error: null },
           {
             data: [
               { id: 2, display_order: 1 },
@@ -924,7 +929,6 @@ describe("updatePhase（編集時の再採番）", () => {
             ],
             error: null,
           },
-          { data: null, error: null },
           { data: null, error: null },
         ],
       },
@@ -937,17 +941,36 @@ describe("updatePhase（編集時の再採番）", () => {
     const destinationSiblingsBuilder = mockClient.from.mock.results[1].value;
     expect(destinationSiblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 2);
     // 移動先の唯一の兄弟(id=20)は既に末尾なので display_order は変化せず、UPDATEは発生しない
-    const sourceSiblingsBuilder = mockClient.from.mock.results[2].value;
-    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 1);
-    expect(sourceSiblingsBuilder.neq).toHaveBeenCalledWith("id", 10);
-    // 移動元に残ったid=3は欠番(order=3)を詰めて2になる
-    const sourceUpdateBuilder = mockClient.from.mock.results[3].value;
-    expect(sourceUpdateBuilder.update).toHaveBeenCalledWith({ display_order: 2 });
-    expect(sourceUpdateBuilder.eq).toHaveBeenCalledWith("id", 3);
-    const bodyUpdateBuilder = mockClient.from.mock.results[4].value;
+    const bodyUpdateBuilder = mockClient.from.mock.results[2].value;
     expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
       expect.objectContaining({ theme_id: 2, display_order: 2 })
     );
+    const sourceSiblingsBuilder = mockClient.from.mock.results[3].value;
+    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 1);
+    expect(sourceSiblingsBuilder.neq).toHaveBeenCalledWith("id", 10);
+    // 移動元に残ったid=3は欠番(order=3)を詰めて2になる
+    const sourceUpdateBuilder = mockClient.from.mock.results[4].value;
+    expect(sourceUpdateBuilder.update).toHaveBeenCalledWith({ display_order: 2 });
+    expect(sourceUpdateBuilder.eq).toHaveBeenCalledWith("id", 3);
+  });
+
+  it("親変更時に本体UPDATEが失敗した場合、移動元の再採番は行わずエラーを返す（本体UPDATEを先に行うことで、失敗時に移動元の兄弟同士の表示順を壊さない）", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_phases: [
+          { data: { theme_id: 1 }, error: null },
+          { data: [{ id: 20, display_order: 1 }], error: null },
+          { data: null, error: dbError },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await updatePhase(10, { theme_id: 2 });
+
+    expect(result).toEqual({ error: dbError });
+    // 現在値取得・移動先兄弟取得・本体UPDATEの3回のみで、移動元の再採番には到達しない
+    expect(mockClient.from).toHaveBeenCalledTimes(3);
   });
 
   it("insertAfterIdが別テーマ配下のフェーズを指す場合、InvalidInsertAfterIdErrorを投げる", async () => {
@@ -996,12 +1019,13 @@ describe("updateWeek（編集時の再採番）", () => {
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
 
-  it("phase_idを変更した場合、移動先(phase_id)配下を対象に再採番し、移動元(phase_id)配下も再採番する", async () => {
+  it("phase_idを変更した場合、移動先(phase_id)配下を対象に再採番してから本体UPDATEし、成功後に移動元(phase_id)配下も再採番する", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         learning_weeks: [
           { data: { phase_id: 1 }, error: null },
           { data: [], error: null },
+          { data: null, error: null },
           {
             data: [
               { id: 2, display_order: 1 },
@@ -1009,7 +1033,6 @@ describe("updateWeek（編集時の再採番）", () => {
             ],
             error: null,
           },
-          { data: null, error: null },
           { data: null, error: null },
         ],
       },
@@ -1021,14 +1044,14 @@ describe("updateWeek（編集時の再採番）", () => {
     expect(result).toEqual({ error: null });
     const destinationSiblingsBuilder = mockClient.from.mock.results[1].value;
     expect(destinationSiblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 2);
-    const sourceSiblingsBuilder = mockClient.from.mock.results[2].value;
-    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 1);
-    const sourceUpdateBuilder = mockClient.from.mock.results[3].value;
-    expect(sourceUpdateBuilder.update).toHaveBeenCalledWith({ display_order: 2 });
-    const bodyUpdateBuilder = mockClient.from.mock.results[4].value;
+    const bodyUpdateBuilder = mockClient.from.mock.results[2].value;
     expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
       expect.objectContaining({ phase_id: 2, display_order: 1 })
     );
+    const sourceSiblingsBuilder = mockClient.from.mock.results[3].value;
+    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 1);
+    const sourceUpdateBuilder = mockClient.from.mock.results[4].value;
+    expect(sourceUpdateBuilder.update).toHaveBeenCalledWith({ display_order: 2 });
   });
 });
 
@@ -1046,14 +1069,14 @@ describe("updateContent（編集時の再採番）", () => {
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
 
-  it("week_idを変更した場合、移動先の兄弟一覧を再採番し、移動元の欠番も詰め直す", async () => {
+  it("week_idを変更した場合、移動先の兄弟一覧を再採番してから本体UPDATEし、成功後に移動元の欠番も詰め直す", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         learning_contents: [
           { data: { week_id: 1 }, error: null },
           { data: [{ id: 20, display_order: 1 }], error: null },
-          { data: [{ id: 3, display_order: 3 }], error: null },
           { data: null, error: null },
+          { data: [{ id: 3, display_order: 3 }], error: null },
           { data: null, error: null },
         ],
       },
@@ -1065,14 +1088,14 @@ describe("updateContent（編集時の再採番）", () => {
     expect(result).toEqual({ error: null });
     const destinationSiblingsBuilder = mockClient.from.mock.results[1].value;
     expect(destinationSiblingsBuilder.eq).toHaveBeenCalledWith("week_id", 2);
-    const sourceSiblingsBuilder = mockClient.from.mock.results[2].value;
-    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("week_id", 1);
-    // 移動元に残ったid=3は欠番(order=3)を詰めて1になる
-    const sourceUpdateBuilder = mockClient.from.mock.results[3].value;
-    expect(sourceUpdateBuilder.update).toHaveBeenCalledWith({ display_order: 1 });
-    const bodyUpdateBuilder = mockClient.from.mock.results[4].value;
+    const bodyUpdateBuilder = mockClient.from.mock.results[2].value;
     expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
       expect.objectContaining({ week_id: 2, display_order: 2 })
     );
+    const sourceSiblingsBuilder = mockClient.from.mock.results[3].value;
+    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("week_id", 1);
+    // 移動元に残ったid=3は欠番(order=3)を詰めて1になる
+    const sourceUpdateBuilder = mockClient.from.mock.results[4].value;
+    expect(sourceUpdateBuilder.update).toHaveBeenCalledWith({ display_order: 1 });
   });
 });

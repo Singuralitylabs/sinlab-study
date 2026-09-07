@@ -42,6 +42,10 @@ export function ThemeForm({ initialData, siblings = [], mode }: ThemeFormProps) 
       ? getCurrentPositionInsertAfterId(initialData.id, siblings)
       : getDefaultInsertAfterId(siblings)
   );
+  // 編集時、位置を一切操作していない場合に送信ボディから insert_after_id を省略するための
+  // 初期値。PUT側は insert_after_id 省略時に表示順を変更しないため、これにより
+  // 「兄弟一覧が古くなっている」ケースでの無関係な保存の失敗・巻き戻しを避ける
+  const initialInsertAfterId = useRef(insertAfterId);
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -60,7 +64,10 @@ export function ThemeForm({ initialData, siblings = [], mode }: ThemeFormProps) 
       name,
       description: description || null,
       image_url: imageUrl || null,
-      insert_after_id: insertAfterId,
+      insert_after_id:
+        mode === "edit" && insertAfterId === initialInsertAfterId.current
+          ? undefined
+          : insertAfterId,
       is_published: isPublished,
     };
 
