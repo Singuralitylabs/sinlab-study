@@ -95,11 +95,12 @@ export default async function ContentPage({ params }: PageProps) {
 
   const { userId, userStatus, userRole } = await getServerAuth();
 
-  // 存在チェック + ロック判定用のサマリーを取得
-  // （member / お試しユーザーは service_role、admin / maintainer は通常クライアントで未公開分も取得）
-  const [{ data: week }, { data: weekContentSummaries }] = await Promise.all([
+  // 存在チェック + ロック判定用のサマリーおよびコンテンツ詳細を取得
+  // （member / お試しユーザーはサマリーを service_role、admin / maintainer は通常クライアントで未公開分も取得）
+  const [{ data: week }, { data: weekContentSummaries }, { data: content }] = await Promise.all([
     fetchWeekById(weekIdNum, userRole),
     fetchContentSummariesByWeekIds([weekIdNum], userRole),
+    fetchContentById(contentIdNum, userRole),
   ]);
 
   // URLの themeId/phaseId が実際の週の所属フェーズ・テーマと一致しない場合は404
@@ -162,8 +163,6 @@ export default async function ContentPage({ params }: PageProps) {
       </div>
     );
   }
-
-  const { data: content } = await fetchContentById(contentIdNum, userRole);
 
   if (!content || content.week_id !== weekIdNum) {
     notFound();

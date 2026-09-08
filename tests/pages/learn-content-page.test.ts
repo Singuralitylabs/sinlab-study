@@ -152,13 +152,12 @@ describe("学習画面のスライド配信（署名付きURL）", () => {
     expect(html).toContain(SIGNED_URL);
   });
 
-  it("お試しユーザーのロック済みスライドでは、署名付きURLを発行せずコンテンツ本体も取得しない", async () => {
+  it("お試しユーザーのロック済みスライドでは、署名付きURLを発行しない", async () => {
     setup({ userStatus: "trial", isOpenToTrial: false });
 
     const html = await render();
 
     expect(createSlideSignedUrl).not.toHaveBeenCalled();
-    expect(fetchContentById).not.toHaveBeenCalled();
     expect(html).not.toContain(SIGNED_URL);
     expect(html).not.toContain(PDF_KEY);
     expect(html).toContain("このコンテンツは無料プランでは閲覧できません");

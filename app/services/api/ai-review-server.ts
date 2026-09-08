@@ -82,37 +82,31 @@ export async function fetchCompletedAIReviewByContentId(
 ): Promise<{ data: AIReview | null; error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { data: subs, error: subsError } = await supabase
+  const { data: submission, error } = await supabase
     .from("submissions")
-    .select("id")
+    .select("id, content_id, ai_review:ai_reviews!inner(*)")
     .eq("user_id", userId)
-    .eq("content_id", contentId);
-
-  if (subsError) {
-    console.error("提出取得エラー (fetchCompletedAIReviewByContentId):", subsError.message);
-    return { data: null, error: subsError };
-  }
-
-  const subIds = (subs ?? []).map((s) => s.id);
-  if (subIds.length === 0) {
-    return { data: null, error: null };
-  }
-
-  const { data: review, error: reviewError } = await supabase
-    .from("ai_reviews")
-    .select("*")
-    .in("submission_id", subIds)
-    .eq("status", "completed")
-    .order("reviewed_at", { ascending: false })
+    .eq("content_id", contentId)
+    .eq("ai_review.status", "completed")
+    .order("submitted_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (reviewError) {
-    console.error("AIレビュー取得エラー (fetchCompletedAIReviewByContentId):", reviewError.message);
-    return { data: null, error: reviewError };
+  if (error) {
+    console.error("AIレビュー取得エラー (fetchCompletedAIReviewByContentId):", error.message);
+    return { data: null, error };
   }
 
-  return { data: review as AIReview | null, error: null };
+  if (!submission?.ai_review) {
+    return { data: null, error: null };
+  }
+
+  // ai_reviews は submissions と 1対1 (または 1対0)
+  const review = Array.isArray(submission.ai_review)
+    ? (submission.ai_review[0] ?? null)
+    : submission.ai_review;
+
+  return { data: (review as AIReview) ?? null, error: null };
 }
 
 /**
@@ -129,40 +123,19 @@ export async function fetchCompletedAIReviewContentIds(
 
   const supabase = await createAdminSupabaseClient();
 
-  const { data: subs, error: subsError } = await supabase
+  const { data: subs, error } = await supabase
     .from("submissions")
-    .select("id, content_id")
+    .select("content_id, ai_review:ai_reviews!inner(status)")
     .eq("user_id", userId)
-    .in("content_id", contentIds);
+    .in("content_id", contentIds)
+    .eq("ai_review.status", "completed");
 
-  if (subsError) {
-    console.error("提出取得エラー (fetchCompletedAIReviewContentIds):", subsError.message);
-    return { data: new Set(), error: subsError };
+  if (error) {
+    console.error("AIレビュー取得エラー (fetchCompletedAIReviewContentIds):", error.message);
+    return { data: new Set(), error };
   }
 
-  const subIds = (subs ?? []).map((s) => s.id);
-  if (subIds.length === 0) {
-    return { data: new Set(), error: null };
-  }
-
-  const subToContent = new Map((subs ?? []).map((s) => [s.id, s.content_id]));
-
-  const { data: reviews, error: reviewsError } = await supabase
-    .from("ai_reviews")
-    .select("submission_id")
-    .in("submission_id", subIds)
-    .eq("status", "completed");
-
-  if (reviewsError) {
-    console.error("AIレビュー取得エラー (fetchCompletedAIReviewContentIds):", reviewsError.message);
-    return { data: new Set(), error: reviewsError };
-  }
-
-  const reviewedContentIds = new Set(
-    (reviews ?? [])
-      .map((r) => subToContent.get(r.submission_id))
-      .filter((id): id is number => id !== undefined)
-  );
+  const reviewedContentIds = new Set((subs ?? []).map((s) => s.content_id));
 
   return { data: reviewedContentIds, error: null };
 }
