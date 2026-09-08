@@ -101,12 +101,9 @@ export async function fetchCompletedAIReviewByContentId(
     return { data: null, error: null };
   }
 
-  // ai_reviews は submissions と 1対1 (または 1対0)
-  const review = Array.isArray(submission.ai_review)
-    ? (submission.ai_review[0] ?? null)
-    : submission.ai_review;
-
-  return { data: (review as AIReview) ?? null, error: null };
+  // ai_reviews.submission_id は UNIQUE のため PostgREST は to-one（単一オブジェクト）を返す。
+  // 生成型は to-many も許容するため unknown 経由でキャストする。
+  return { data: submission.ai_review as unknown as AIReview, error: null };
 }
 
 /**
