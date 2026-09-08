@@ -11,6 +11,12 @@ export const USER_STATUS = {
   REJECTED: "rejected",
 } as const satisfies Record<string, UserStatusType>;
 
+/** 認証・認可を通過できるステータスの許可値（proxy / layout / server-auth 共通） */
+export const ALLOWED_USER_STATUSES: readonly UserStatusType[] = [
+  USER_STATUS.ACTIVE,
+  USER_STATUS.TRIAL,
+];
+
 export const USER_ROLE = {
   ADMIN: "admin",
   MAINTAINER: "maintainer",
