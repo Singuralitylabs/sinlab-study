@@ -1,5 +1,6 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
+import { AUTH_HEADERS } from "./app/constants/auth";
 import { USER_STATUS } from "./app/constants/user";
 
 // 静的アセットとして扱う拡張子（末尾一致のみ）。
@@ -28,9 +29,15 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // 外部からのヘッダー偽装を防ぐため、受信ヘッダーから認証情報ヘッダーを必ず削除する
+  const requestHeaders = new Headers(request.headers);
+  for (const headerName of Object.values(AUTH_HEADERS)) {
+    requestHeaders.delete(headerName);
+  }
+
   const response = NextResponse.next({
     request: {
-      headers: request.headers,
+      headers: requestHeaders,
     },
   });
 
@@ -87,10 +94,10 @@ export async function proxy(request: NextRequest) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
 
-    // 認証済みユーザーのステータスを確認
+    // 認証済みユーザーのステータスとロール・IDを確認
     const { data: userData, error: userError } = await supabase
       .from("users")
-      .select("status")
+      .select("id, status, role")
       .eq("auth_id", user.id)
       .eq("is_deleted", false)
       .maybeSingle();
@@ -111,7 +118,19 @@ export async function proxy(request: NextRequest) {
       if (pathname === "/pending") {
         return NextResponse.redirect(new URL("/", request.url));
       }
-      return response;
+
+      // 下流（Server Components / getServerAuth）へユーザー情報を引き渡す
+      requestHeaders.set(AUTH_HEADERS.AUTH_ID, user.id);
+      requestHeaders.set(AUTH_HEADERS.USER_ID, String(userData.id));
+      requestHeaders.set(AUTH_HEADERS.USER_STATUS, userData.status);
+      requestHeaders.set(AUTH_HEADERS.USER_ROLE, userData.role);
+
+      return NextResponse.next({
+        request: {
+          headers: requestHeaders,
+        },
+        headers: response.headers,
+      });
     }
 
     if (userStatus === USER_STATUS.REJECTED) {
@@ -129,9 +148,7 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and all static files, unless found in search params
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    // Always run for API routes
-    "/(api|trpc)(.*)",
+    // Next.js の内部パスおよび静的アセット（STATIC_FILE_EXTENSIONS と一致）を除外
+    "/((?!_next|[^?]*\\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest)).*)",
   ],
 };

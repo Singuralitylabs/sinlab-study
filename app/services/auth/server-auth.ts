@@ -1,5 +1,8 @@
 import type { User } from "@supabase/supabase-js";
+import { headers } from "next/headers";
 import { cache } from "react";
+import { AUTH_HEADERS } from "@/app/constants/auth";
+import { USER_ROLES, USER_STATUS } from "@/app/constants/user";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import type { UserRoleType, UserStatusType } from "@/app/types";
 
@@ -27,7 +30,48 @@ export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
       return { user: null, userId: null, userStatus: null, userRole: null };
     }
 
-    // ユーザーステータス確認
+    // proxy.ts から渡されたヘッダーを確認
+    // proxy を経由する通常ページでは DB への再問い合わせを省略する
+    try {
+      const headerList = await headers();
+      const headerAuthId = headerList.get(AUTH_HEADERS.AUTH_ID);
+      const headerUserId = headerList.get(AUTH_HEADERS.USER_ID);
+      const headerUserStatus = headerList.get(AUTH_HEADERS.USER_STATUS);
+      const headerUserRole = headerList.get(AUTH_HEADERS.USER_ROLE);
+
+      // 改ざん検知: auth.getUser() の user.id とヘッダーの auth_id を突合し、
+      // かつステータス・ロールが有効な値の場合のみヘッダーを採用する
+      const isValidStatus =
+        headerUserStatus === USER_STATUS.ACTIVE ||
+        headerUserStatus === USER_STATUS.TRIAL ||
+        headerUserStatus === USER_STATUS.REJECTED;
+      const isValidRole =
+        headerUserRole !== null && USER_ROLES.includes(headerUserRole as UserRoleType);
+      const parsedUserId = headerUserId ? Number.parseInt(headerUserId, 10) : Number.NaN;
+
+      if (
+        headerAuthId &&
+        headerAuthId === user.id &&
+        !Number.isNaN(parsedUserId) &&
+        isValidStatus &&
+        isValidRole
+      ) {
+        return {
+          user,
+          userId: parsedUserId,
+          userStatus: headerUserStatus as UserStatusType,
+          userRole: headerUserRole as UserRoleType,
+        };
+      }
+    } catch (headerError) {
+      // Next.js の制御エラーは再スロー
+      if (headerError && typeof headerError === "object" && "digest" in headerError) {
+        throw headerError;
+      }
+      // headers() 取得失敗時は DB 照会へフォールバック
+    }
+
+    // proxy をスキップする API Route やヘッダー不一致時は従来どおり DB から取得
     const { data: userData, error: userError } = await supabase
       .from("users")
       .select("id, status, role")

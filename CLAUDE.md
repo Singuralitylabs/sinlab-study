@@ -61,7 +61,7 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 
 フローの全体像・画面ごとの挙動は `docs/specification.md` 2章を参照。
 
-- **サーバー側のユーザー情報取得は `getServerAuth()`（`app/services/auth/server-auth.ts`）に一本化する。** layout・page・API Route のいずれからも他の手段を使わない（`React.cache()` でメモ化されるため重複呼び出しは無害）。旧 `getApiAuth()` は使用しない。
+- **サーバー側のユーザー情報取得は `getServerAuth()`（`app/services/auth/server-auth.ts`）に一本化する。** layout・page・API Route のいずれからも他の手段を使わない（`proxy.ts` からリクエストヘッダ経由で渡されたユーザー情報による `users` 再照会省略経路を持つ。`React.cache()` でメモ化されるため重複呼び出しは無害）。旧 `getApiAuth()` は使用しない。
 - **認可は二層防御。** `proxy.ts`（Next.js 16 における Middleware の後継）を第一の砦とし、`app/(authenticated)/layout.tsx` でも `userStatus` の許可リスト検証を行う。**クライアント側での認証ガードは行わない。**
 - **プロキシはフェイルクローズ。** 環境変数欠落・例外・ステータス取得不能（null）はすべて `/login` へリダイレクトする。
 - **ロール**: `admin`（全権限）/ `maintainer`（コンテンツ管理）/ `member`（受講生）。判定ロジックは `app/services/auth/` に集約する。
