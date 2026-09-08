@@ -33,8 +33,9 @@ ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public;
 --   - 管理画面由来の完全URL:  https://<project>.supabase.co/storage/v1/object/public/slides/gas/slide-01.pdf
 -- いずれも接頭辞を落とすとオブジェクトキー（gas/slide-01.pdf）になる。
 -- アプリ側の toSlideObjectKey()（app/lib/slide-object-key.ts）と同じ規則
--- （前後の空白（JS の trim() と同じくタブ・改行を含む）を除去してから接頭辞を落とす）。
--- 接頭辞の無い行も trim の対象にするため、pdf_url を持つ全行を UPDATE する（正規化済みの行は no-op）。
+-- （前後の空白・タブ・CR・LF を除去してから接頭辞を落とす）。
+-- 正規化後の値が現在値と異なる行のみ UPDATE する（接頭辞の無い行も前後に空白があれば対象。
+-- 正規化済みの行は更新しない。NULL は対象外）。
 -- ロールバック時は、pdf_url に '/storage/v1/object/public/slides/' を前置して戻すのに加え、
 -- storage.buckets の slides を public = true に戻し、下記3節の4ポリシーを DROP する。
 -- =====================================================

@@ -7,7 +7,8 @@
  * 初期値として旧形式が流れてきても壊れないよう、ここで同じ規則でキーへ変換する。
  * Storage ポリシーは `pdf_url = storage.objects.name` の等値比較のため、
  * この正規化はマイグレーション（`20260908000000_secure_slides_bucket.sql`）の
- * `regexp_replace(btrim(pdf_url, E' \t\r\n'), ...)` と同じ規則（trim → 接頭辞除去）でなければならない。
+ * `regexp_replace(btrim(pdf_url, E' \t\r\n'), ...)` と同じ規則（前後の空白・タブ・CR・LF の除去 →
+ * 接頭辞除去）でなければならない。
  */
 const LEGACY_PUBLIC_URL_PREFIX = /^(?:https?:\/\/[^/]+)?\/storage\/v1\/object\/public\/slides\//;
 
@@ -24,7 +25,9 @@ export function toSlideObjectKey(pdfUrl: string | null | undefined): string | nu
     return null;
   }
 
-  const key = pdfUrl.trim().replace(LEGACY_PUBLIC_URL_PREFIX, "");
+  // マイグレーションの btrim(pdf_url, E' \t\r\n') と除去対象を厳密に揃える（String.prototype.trim は
+  // 全角スペース等も除去するため使わない）
+  const key = pdfUrl.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "").replace(LEGACY_PUBLIC_URL_PREFIX, "");
   if (
     key === "" ||
     key.startsWith("/") ||

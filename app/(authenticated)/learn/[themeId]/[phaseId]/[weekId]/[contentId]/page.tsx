@@ -174,14 +174,10 @@ export default async function ContentPage({ params }: PageProps) {
   const isFullyPublished = isContentFullyPublished(content);
 
   // スライドの署名付きURLは、ロック判定（isLocked）と RLS 適用の fetchContentById() を
-  // 通過した後にのみ発行する。ロック済み・未公開のコンテンツではここに到達しない（issue #89）
-  const slideSignedUrl =
-    content.content_type === "slide" && content.pdf_url
-      ? await createSlideSignedUrl(content.pdf_url)
-      : null;
-
-  const [{ isCompleted }, { data: existingReview }, { data: latestSubmission }] = await Promise.all(
-    [
+  // 通過した後にのみ発行する。ロック済み・未公開（admin / maintainer のプレビューを除く）の
+  // コンテンツではここに到達しない（issue #89）。進捗等の取得と並列に実行する
+  const [{ isCompleted }, { data: existingReview }, { data: latestSubmission }, slideSignedUrl] =
+    await Promise.all([
       userId
         ? fetchUserProgressByContentId(userId, contentIdNum)
         : Promise.resolve({ isCompleted: false }),
@@ -191,8 +187,10 @@ export default async function ContentPage({ params }: PageProps) {
       userId && content.content_type === "exercise"
         ? fetchLatestSubmissionByContentId(userId, contentIdNum)
         : Promise.resolve({ data: null }),
-    ]
-  );
+      content.content_type === "slide" && content.pdf_url
+        ? createSlideSignedUrl(content.pdf_url)
+        : Promise.resolve(null),
+    ]);
 
   return (
     <div className="max-w-4xl mx-auto">

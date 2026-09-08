@@ -217,7 +217,9 @@ export function ContentForm({
   );
   const initialSlide = parseSlidePath(initialData?.pdf_url);
   // 保存値はオブジェクトキーのみ（issue #89）。旧形式の公開URLが初期値に残っていても
-  // そのまま再保存せず、キーへ正規化した値を持つ（正規化できない値は空扱い）
+  // そのまま再保存せず、キーへ正規化した値を持つ。正規化できない値（外部URL等）は空扱いになるが、
+  // その場合は requiresSlidePdf（initialData.pdf_url が truthy）により再アップロードするまで
+  // 保存できないため、値が黙って消えることはない
   const [pdfUrl, setPdfUrl] = useState(toSlideObjectKey(initialData?.pdf_url) ?? "");
   const [pdfFolder, setPdfFolder] = useState(initialSlide.folder);
   const [slideNumber, setSlideNumber] = useState(initialSlide.slideNumber);
