@@ -9,6 +9,7 @@ import {
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
 import { MEMBERSHIP_TYPES, USER_MANAGEMENT_ACTIONS, USER_ROLES } from "@/app/constants/user";
+import { toSlideObjectKey } from "@/app/lib/slide-object-key";
 
 // ==================== 共通スキーマ ====================
 
@@ -40,6 +41,32 @@ const RequiredStringSchema = z
 
 /** Markdown本文など、未入力時に null を送る任意項目 */
 const OptionalNullableString = z.string().nullable().optional();
+
+/**
+ * スライドPDFの保存値（`slides` バケットのオブジェクトキー。例: `gas/slide-01.pdf`）。
+ * 旧形式の公開URLはキーへ正規化して受理し、外部URL等のキーとして解釈できない値は拒否する
+ * （Storage の SELECT ポリシーが `pdf_url = storage.objects.name` の等値比較のため、
+ * キー以外の値を保存すると署名付きURLを発行できないコンテンツができる。issue #89）。
+ * 空文字は従来どおり null と同じ「未設定」として扱う。
+ */
+const SlidePdfUrlSchema = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((value, ctx) => {
+    if (value === undefined || value === null || value === "") {
+      return value;
+    }
+    const objectKey = toSlideObjectKey(value);
+    if (!objectKey) {
+      ctx.addIssue({
+        code: "custom",
+        message: "pdf_urlはスライドのオブジェクトキー（例: gas/slide-01.pdf）で指定してください",
+      });
+      return z.NEVER;
+    }
+    return objectKey;
+  });
 const OptionalBoolean = z.boolean().optional();
 /**
  * 挿入位置。null は「先頭」、数値はその兄弟要素IDの直後を表す。新規作成では必須、
@@ -169,7 +196,7 @@ const ContentBaseSchema = z.object({
   // DBのCHECK制約がNOT NULL（既定値あり）のため、他の任意項目と異なりnullは許容しない
   allowed_submission_types: AllowedSubmissionTypeSchema.optional(),
   code_language: CodeLanguageSchema.optional(),
-  pdf_url: OptionalNullableString,
+  pdf_url: SlidePdfUrlSchema,
   is_published: OptionalBoolean,
   is_open_to_trial: OptionalBoolean,
 });

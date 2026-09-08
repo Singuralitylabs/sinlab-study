@@ -5,7 +5,7 @@ import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
-import { PdfSlideViewerNoSSR as PdfSlideViewer } from "@/app/components/PdfSlideViewerNoSSR";
+import { SlideContent } from "@/app/components/SlideContent";
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
@@ -21,6 +21,7 @@ import {
   isContentFullyPublished,
   isContentLockedForUser,
 } from "@/app/services/api/learning-server";
+import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
@@ -172,8 +173,11 @@ export default async function ContentPage({ params }: PageProps) {
   // プレビュー扱いとする（バッジ表示・完了ボタン/提出フォームの表示可否に使う）。
   const isFullyPublished = isContentFullyPublished(content);
 
-  const [{ isCompleted }, { data: existingReview }, { data: latestSubmission }] = await Promise.all(
-    [
+  // スライドの署名付きURLは、ロック判定（isLocked）と RLS 適用の fetchContentById() を
+  // 通過した後にのみ発行する。ロック済み・未公開（admin / maintainer のプレビューを除く）の
+  // コンテンツではここに到達しない（issue #89）。進捗等の取得と並列に実行する
+  const [{ isCompleted }, { data: existingReview }, { data: latestSubmission }, slideSignedUrl] =
+    await Promise.all([
       userId
         ? fetchUserProgressByContentId(userId, contentIdNum)
         : Promise.resolve({ isCompleted: false }),
@@ -183,8 +187,10 @@ export default async function ContentPage({ params }: PageProps) {
       userId && content.content_type === "exercise"
         ? fetchLatestSubmissionByContentId(userId, contentIdNum)
         : Promise.resolve({ data: null }),
-    ]
-  );
+      content.content_type === "slide" && content.pdf_url
+        ? createSlideSignedUrl(content.pdf_url)
+        : Promise.resolve(null),
+    ]);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -230,13 +236,7 @@ export default async function ContentPage({ params }: PageProps) {
           )}
 
           {content.content_type === "slide" && content.pdf_url && (
-            <PdfSlideViewer
-              url={
-                /^https?:\/\//.test(content.pdf_url)
-                  ? content.pdf_url
-                  : `${process.env.NEXT_PUBLIC_SUPABASE_URL}${content.pdf_url}`
-              }
-            />
+            <SlideContent signedUrl={slideSignedUrl} />
           )}
 
           {content.content_type === "exercise" && content.exercise_instructions && (

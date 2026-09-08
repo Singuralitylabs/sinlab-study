@@ -4,9 +4,10 @@ import { notFound } from "next/navigation";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
-import { PdfSlideViewerNoSSR as PdfSlideViewer } from "@/app/components/PdfSlideViewerNoSSR";
+import { SlideContent } from "@/app/components/SlideContent";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
 import {
+  createDemoSlideSignedUrl,
   fetchDemoContentById,
   fetchDemoContentsByWeekId,
   fetchDemoContext,
@@ -94,8 +95,15 @@ export default async function DemoContentPage({ params }: PageProps) {
     );
   }
 
-  // デモアクセス可能なコンテンツ
-  const { data: weekContents } = await fetchDemoContentsByWeekId(weekIdNum);
+  // デモアクセス可能なコンテンツ。スライドの署名付きURL（お試しユーザーと同じ範囲、
+  // つまり公開済み・お試し公開 is_open_to_trial = true のスライドに限る。判定は
+  // createDemoSlideSignedUrl() 自身が行う。issue #89）は週のコンテンツ一覧と並列に取得する
+  const [{ data: weekContents }, slideSignedUrl] = await Promise.all([
+    fetchDemoContentsByWeekId(weekIdNum),
+    content.content_type === "slide" && content.is_open_to_trial
+      ? createDemoSlideSignedUrl(content)
+      : Promise.resolve(null),
+  ]);
 
   const currentIndex = weekContents?.findIndex((c) => c.id === contentIdNum) ?? -1;
   const prevContent = currentIndex > 0 ? weekContents?.[currentIndex - 1] : null;
@@ -122,15 +130,15 @@ export default async function DemoContentPage({ params }: PageProps) {
             <MarkdownRenderer content={content.text_content} />
           )}
 
-          {content.content_type === "slide" && content.pdf_url && (
-            <PdfSlideViewer
-              url={
-                /^https?:\/\//.test(content.pdf_url)
-                  ? content.pdf_url
-                  : `${process.env.NEXT_PUBLIC_SUPABASE_URL}${content.pdf_url}`
-              }
-            />
-          )}
+          {content.content_type === "slide" &&
+            content.pdf_url &&
+            (content.is_open_to_trial ? (
+              <SlideContent signedUrl={slideSignedUrl} />
+            ) : (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                このスライドはお試し公開の対象外です。ログイン後に本登録すると閲覧できます。
+              </p>
+            ))}
 
           {content.content_type === "exercise" && content.exercise_instructions && (
             <div>

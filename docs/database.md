@@ -223,7 +223,7 @@ erDiagram
 | exercise_instructions | TEXT | YES | NULL | - | 演習指示文（exercise時） |
 | reference_answer | TEXT | YES | NULL | - | 模範回答（exercise時・AIレビュー採点基準・非公開） |
 | hint | TEXT | YES | NULL | - | ヒント（exercise時・受講生に公開） |
-| pdf_url | TEXT | YES | NULL | - | PDFファイルURL（slide時） |
+| pdf_url | TEXT | YES | NULL | - | スライドPDFの `slides` バケット内オブジェクトキー（slide時。例: `gas/slide-01.pdf`。URLではなくキーのみを保存し、配信時にサーバー側で署名付きURLを発行する。6.8参照） |
 | allowed_submission_types | VARCHAR(20) | NO | 'code' | CHECK ('code', 'url', 'both') | 許可する提出方法（exercise時） |
 | code_language | VARCHAR(20) | NO | 'javascript' | CHECK ('javascript', 'typescript', 'gas', 'html', 'css') | コードエディタの言語（exercise時） |
 | display_order | INTEGER | YES | 0 | - | 表示順（昇順） |
@@ -600,17 +600,22 @@ INSERT / UPDATE / DELETE のポリシーは定義していない。昇格・降�
 
 RLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`authenticated` ロールでは SELECT を含め一切のアクセスができない）。
 
-### 6.8 storage.objects（thumbnails バケット）
+### 6.8 storage.objects（thumbnails / slides バケット）
 
-テーマのサムネイルを保存する `thumbnails` は公開バケット（`public = true`）のため参照は制限しない。書き込み系の操作のみコンテンツ管理者に限定する。
+テーマのサムネイルを保存する `thumbnails` は公開バケット（`public = true`）のため参照は制限しない。スライドPDFを保存する `slides` は**非公開バケット**（`public = false`、#89）で、参照はコンテンツの可視性に連動させる。書き込み系（INSERT / UPDATE / DELETE）は両バケットともコンテンツ管理者に限定し、操作ごとに1本のポリシーへ統合している（`multiple_permissive_policies` 対策。#89 で `thumbnails` 単独のポリシーを統合済み）。
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Content managers can upload thumbnails | INSERT | admin / maintainer | `bucket_id = 'thumbnails' AND (select get_user_role()) IN ('admin', 'maintainer')` |
-| Content managers can update thumbnails | UPDATE | admin / maintainer | 同上 |
-| Content managers can delete thumbnails | DELETE | admin / maintainer | 同上 |
+| Slides are viewable via visible contents or by content managers | SELECT | authenticated | `bucket_id = 'slides' AND ((select get_user_role()) IN ('admin', 'maintainer') OR EXISTS (SELECT 1 FROM learning_contents lc WHERE lc.pdf_url = storage.objects.name AND lc.is_published = true AND lc.is_deleted = false))` |
+| Content managers can upload content assets | INSERT | admin / maintainer | `bucket_id IN ('thumbnails', 'slides') AND (select get_user_role()) IN ('admin', 'maintainer')` |
+| Content managers can update content assets | UPDATE | admin / maintainer | 同上（USING / WITH CHECK） |
+| Content managers can delete content assets | DELETE | admin / maintainer | 同上 |
 
-アップロード・削除APIは `createAdminSupabaseClient()` を使うため、`SUPABASE_SERVICE_ROLE_KEY` が設定されていればRLSをバイパスする。ただし同関数は未設定時に通常クライアントへフォールバックするため、その場合はこれらのポリシーが実際の書き込み可否を決める。スライドPDFの `slides` バケットにはポリシーを定義していない。
+SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの RLS が適用されるため、`learning_contents` の SELECT ポリシー（`is_published` / `is_deleted` / `status` / `is_open_to_trial`）がそのまま Storage の可視範囲になる。すなわち「`pdf_url` がそのオブジェクトキーに一致する可視コンテンツが存在する」場合だけ署名付きURLの発行（`createSignedUrl()`）やダウンロードが許可され、お試しユーザーがロック済みスライドのキーを推測しても取得できない。この等値比較のため、`pdf_url` にはオブジェクトキー以外（公開URL等）を保存してはならない。`anon` 向けのポリシーは無く、未認証のデモ画面はサーバー側で service_role によりお試し公開スライドのみ署名する（機能設計書 3.2）。
+
+**既知の制約**: `learning_contents` の SELECT ポリシーはコンテンツ行自身の `is_published` / `is_deleted` しか見ず、所属する週・フェーズ・テーマの未公開はアプリ層（`isContentVisible()` / `fetchWeekById()`）で補っている。Storage ポリシーはこの RLS の見え方を継承するため、「コンテンツ行は公開済みだが親階層が未公開」のスライドは、member が Storage API を直接叩けば署名できる。画面からは親階層の判定で404になるため導線は無い。
+
+アップロード・削除APIは `createAdminSupabaseClient()` を使うため、`SUPABASE_SERVICE_ROLE_KEY` が設定されていればRLSをバイパスする。ただし同関数は未設定時に通常クライアントへフォールバックするため、その場合はこれらのポリシーが実際の書き込み可否を決める。
 
 ---
 
@@ -639,7 +644,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | `20260812000000_add_stripe_tables.sql` | `stripe_subscriptions` / `stripe_events` テーブルを追加 |
 | `20260812000001_stripe_tables_policies.sql` | `stripe_subscriptions` / `stripe_events` のRLS有効化とポリシー定義（`stripe_subscriptions` はSELECTのみ本人/admin） |
 | `20260819000000_add_thumbnails_bucket.sql` | テーマサムネイル用の `thumbnails` 公開バケットを作成 |
-| `20260819000001_thumbnails_storage_policies.sql` | `thumbnails` バケットへの INSERT / UPDATE / DELETE を admin・maintainer に限定 |
+| `20260819000001_thumbnails_storage_policies.sql` | `thumbnails` バケットへの INSERT / UPDATE / DELETE を admin・maintainer に限定（後に `20260908000000` で `slides` と統合） |
 | `20260903000001_add_checkout_claim.sql` | `stripe_subscriptions` に `checkout_claimed_at` / `checkout_session_id` を追加し、`stripe_customer_id` をNULL許容へ変更（Checkout作成の排他制御用） |
 | `20260903000002_secure_get_user_role.sql` | `get_user_role()` に `status <> 'rejected'` 条件を追加し、却下ユーザーが admin/maintainer ロールを保持したまま認可を突破できないようにする（#104） |
 | `20260903000003_add_gas_code_language.sql` | `learning_contents.code_language` のCHECK制約に `gas` を追加（#56） |
@@ -648,6 +653,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | `20260906000000_rename_gas_basic_theme.sql` | 基礎コースのテーマ名を `GAS学習` → `GAS学習（基礎編）` にリネーム（#166）。他マイグレーションとの適用順序の制約が無いため、意図的な過去日付を使わない通常のタイムスタンプ |
 | `20260906090000_move_gas_practical_gemini_week.sql` | GAS講座（実践編）の週「Geminiを使ったドキュメント自動要約」を、誤ったフェーズ（その他GAS活用）配下に存在する場合のみ正しいフェーズ（Googleドキュメント活用）へ移動する冪等なUPDATE（#168）。`20260614080707`のVALUES修正だけでは version 記録済みの環境に届かないため、独立ファイルとして新規タイムスタンプで追加 |
 | `20260907010000_rename_pending_status_to_trial.sql` | `users.status` の値を `'pending'` から `'trial'` へリネーム（#88）。`users_status_check` 制約のDROP→既存行のUPDATE→制約のADDと、`learning_contents` のSELECTポリシー（`20260801000002_trial_user_policies.sql` で追加）内の比較値の更新を同一トランザクションで適用し、DEFAULTも `'trial'` に変更。値のリネームとポリシー更新を分けると片方だけ適用された瞬間にお試しユーザーから見て `learning_contents` が0行になるため1ファイルにまとめている。アプリコードの `USER_STATUS.TRIAL` への切り替えと同時にリリースする必要がある |
+| `20260908000000_secure_slides_bucket.sql` | スライドPDFの署名付きURL配信（#89）: `slides` バケットを非公開化し、`learning_contents.pdf_url` を公開URLからオブジェクトキーへ一括正規化、`storage.objects` に `slides` の SELECT ポリシー（`learning_contents` の RLS に委譲）を追加し、INSERT / UPDATE / DELETE は `thumbnails` のポリシーと統合して両バケット対象の1本ずつにする。正規化後にキーとして解釈できない `pdf_url` が残っていれば例外で中断する。**アプリ側の署名付きURL配信と同時にリリースすること**（旧コードは pdf_url を公開URLとして組み立てるため） |
 
 ### 7.1 リモート適用履歴との整合（#149・確定版）
 
@@ -740,3 +746,4 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | 2026年9月 | #166対応：「GAS学習（実践編）」のテーマ行作成SQL（`20260613000000_seed_gas_practical_theme.sql`）を追加し、本番の実値をSELECTで確認のうえ実装。あわせて基礎コースのテーマ名リネーム（`GAS学習`→`GAS学習（基礎編）`）を独立マイグレーション（`20260906000000_rename_gas_basic_theme.sql`）として解消。マイグレーション一覧・7.1節（判明した事実4・5、整合手順3）を更新し、応用編・実践編ともにテーマ作成SQLの欠落解消を反映 |
 | 2026年9月 | #168対応：「GAS学習（実践編）」の`20260614080707_seed_gas_practical_course_structure.sql`が、週「Geminiを使ったドキュメント自動要約」の所属フェーズを本番の実際の配置（「その他GAS活用」ではなく「Googleドキュメント活用」、display_orderは1,2の次の6）と取り違えていた1点の食い違いを修正。ただしSupabase CLIはバージョン番号のみで適用判定するため、このVALUES修正はフレッシュ環境にしか届かない。旧内容で本ファイルを既に適用済みの環境にも届くよう、実データの移動は独立した新規マイグレーション（`20260906090000_move_gas_practical_gemini_week.sql`）で対応。マイグレーション一覧・7.1節（判明した事実4・整合手順2・5）を更新 |
 | 2026年9月 | #88対応：`users.status` の値 `'pending'` を `'trial'` にリネーム。`users_status_check` 制約のDROP→UPDATE→ADDと、`get_user_status()` を参照するlearning_contentsのSELECTポリシーの比較値更新を同一トランザクションで適用する`20260907010000_rename_pending_status_to_trial.sql`を追加。3.4節・3.8節・5.2節・6.1節・マイグレーション一覧を更新。`ai_reviews.status` の `'pending'`（AIレビューのジョブ状態）は対象外 |
+| 2026年9月 | スライドPDFの署名付きURL配信（#89）に対応：`slides` バケットを非公開化し、`learning_contents.pdf_url` の保存形式をオブジェクトキーに統一（3.4）。`storage.objects` の `slides` ポリシー（SELECT は `learning_contents` の RLS に委譲）を6.8に追記、マイグレーション一覧を更新 |
