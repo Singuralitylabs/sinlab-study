@@ -203,6 +203,56 @@ describe("getServerAuth", () => {
       expect(mockClient.from).toHaveBeenCalledWith("users");
     });
 
+    it("ヘッダーのステータスが rejected の場合（proxyからは渡されない値）、ヘッダーを無視して DB から取得する", async () => {
+      const requestHeaders = new Headers();
+      requestHeaders.set(AUTH_HEADERS.AUTH_ID, mockUser.id);
+      requestHeaders.set(AUTH_HEADERS.USER_ID, "1");
+      requestHeaders.set(AUTH_HEADERS.USER_STATUS, "rejected");
+      requestHeaders.set(AUTH_HEADERS.USER_ROLE, "member");
+      vi.mocked(headers).mockResolvedValue(requestHeaders);
+
+      const mockClient = createMockSupabaseClient({
+        authResult: { data: { user: mockUser }, error: null },
+        queryResult: { data: mockUserData, error: null },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+      const result = await getServerAuth();
+
+      expect(result).toEqual({
+        user: mockUser,
+        userId: 1,
+        userStatus: "active",
+        userRole: "member",
+      });
+      expect(mockClient.from).toHaveBeenCalledWith("users");
+    });
+
+    it("ヘッダーの userId が不正な形式（'42abc' など）の場合、ヘッダーを無視して DB から取得する", async () => {
+      const requestHeaders = new Headers();
+      requestHeaders.set(AUTH_HEADERS.AUTH_ID, mockUser.id);
+      requestHeaders.set(AUTH_HEADERS.USER_ID, "42abc");
+      requestHeaders.set(AUTH_HEADERS.USER_STATUS, "active");
+      requestHeaders.set(AUTH_HEADERS.USER_ROLE, "member");
+      vi.mocked(headers).mockResolvedValue(requestHeaders);
+
+      const mockClient = createMockSupabaseClient({
+        authResult: { data: { user: mockUser }, error: null },
+        queryResult: { data: mockUserData, error: null },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+      const result = await getServerAuth();
+
+      expect(result).toEqual({
+        user: mockUser,
+        userId: 1,
+        userStatus: "active",
+        userRole: "member",
+      });
+      expect(mockClient.from).toHaveBeenCalledWith("users");
+    });
+
     it("ヘッダーのロールが無効な値の場合、ヘッダーを無視して DB から取得する", async () => {
       const requestHeaders = new Headers();
       requestHeaders.set(AUTH_HEADERS.AUTH_ID, mockUser.id);
