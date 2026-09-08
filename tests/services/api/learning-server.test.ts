@@ -284,6 +284,11 @@ describe("fetchContentsByWeekId", () => {
 
     expect(result.data).toEqual(contents);
     expect(result.error).toBeNull();
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.select).toHaveBeenCalledWith(expect.not.stringContaining("text_content"));
+    expect(builder.select).toHaveBeenCalledWith(
+      expect.not.stringContaining("exercise_instructions")
+    );
   });
 
   it("DB エラー時、data: null とエラーを返す", async () => {

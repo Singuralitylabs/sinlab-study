@@ -3,8 +3,14 @@ import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
 
-import { fetchRecentSubmissions } from "@/app/services/api/submissions-server";
-import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
+import {
+  fetchRecentSubmissions,
+  fetchSubmissionsByUserId,
+} from "@/app/services/api/submissions-server";
+import {
+  createAdminSupabaseClient,
+  createServerSupabaseClient,
+} from "@/app/services/api/supabase-server";
 
 const dbError = { message: "db error", code: "PGRST001" };
 
@@ -50,5 +56,35 @@ describe("fetchRecentSubmissions", () => {
     expect(result.data).toBeNull();
     expect(result.count).toBe(0);
     expect(result.error).toEqual(dbError);
+  });
+});
+
+// ----------------------------------------------------------------
+// fetchSubmissionsByUserId
+// ----------------------------------------------------------------
+describe("fetchSubmissionsByUserId", () => {
+  it("content の本文などの重いカラムを取得しないカラム定義で select する", async () => {
+    const rows = [
+      {
+        id: 1,
+        user_id: 10,
+        content_id: 100,
+        content: { id: 100, title: "課題1", content_type: "exercise" },
+      },
+    ];
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: rows, error: null },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchSubmissionsByUserId(10);
+
+    expect(result.data).toEqual(rows);
+    expect(result.error).toBeNull();
+    const builder = mockClient.from.mock.results[0]?.value;
+    expect(builder.select).toHaveBeenCalledWith(expect.not.stringContaining("text_content"));
+    expect(builder.select).toHaveBeenCalledWith(
+      expect.not.stringContaining("exercise_instructions")
+    );
   });
 });

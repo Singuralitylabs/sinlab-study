@@ -7,8 +7,12 @@ import {
   fetchAllSubmissionsWithReviews,
   fetchCompletedAIReviewByContentId,
   fetchCompletedAIReviewContentIds,
+  fetchSubmissionsWithReviewsByUserId,
 } from "@/app/services/api/ai-review-server";
-import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
+import {
+  createAdminSupabaseClient,
+  createServerSupabaseClient,
+} from "@/app/services/api/supabase-server";
 
 const dbError = { message: "db error", code: "PGRST001" };
 
@@ -179,5 +183,36 @@ describe("fetchCompletedAIReviewContentIds", () => {
 
     expect(result.data).toEqual(new Set());
     expect(result.error).toEqual(dbError);
+  });
+});
+
+// ----------------------------------------------------------------
+// fetchSubmissionsWithReviewsByUserId
+// ----------------------------------------------------------------
+describe("fetchSubmissionsWithReviewsByUserId", () => {
+  it("content の本文などの重いカラムを取得しないカラム定義で select する", async () => {
+    const rows = [
+      {
+        id: 1,
+        user_id: 10,
+        content_id: 100,
+        content: { id: 100, title: "課題1", content_type: "exercise" },
+        ai_review: { id: 50, status: "completed" },
+      },
+    ];
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: rows, error: null },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchSubmissionsWithReviewsByUserId(10);
+
+    expect(result.data).toEqual(rows);
+    expect(result.error).toBeNull();
+    const builder = mockClient.from.mock.results[0]?.value;
+    expect(builder.select).toHaveBeenCalledWith(expect.not.stringContaining("text_content"));
+    expect(builder.select).toHaveBeenCalledWith(
+      expect.not.stringContaining("exercise_instructions")
+    );
   });
 });

@@ -13,13 +13,58 @@ import type {
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
 /**
+ * 学習テーマ一覧・詳細用のカラム定義（表示に必要な最小限のカラム）
+ */
+export const LEARNING_THEME_COLUMNS =
+  "id, name, description, image_url, display_order, is_published, is_deleted, created_at, updated_at";
+
+/**
+ * 学習フェーズ一覧・詳細用のカラム定義
+ */
+export const LEARNING_PHASE_COLUMNS =
+  "id, theme_id, name, description, display_order, is_published, is_deleted, created_at, updated_at";
+
+/**
+ * 学習週一覧・詳細用のカラム定義
+ */
+export const LEARNING_WEEK_COLUMNS =
+  "id, phase_id, name, description, display_order, is_published, is_deleted, created_at, updated_at";
+
+/**
+ * コンテンツ一覧用のカラム定義（本文・指示・模範解答・ヒント等の重いテキストカラムを除外）
+ */
+export const LEARNING_CONTENT_LIST_COLUMNS =
+  "id, week_id, title, content_type, video_url, pdf_url, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at";
+
+/**
+ * パンくず・所属判定用の親テーブルカラム定義
+ */
+export const BREADCRUMB_THEME_COLUMNS = "id, name, is_published, is_deleted";
+export const BREADCRUMB_PHASE_COLUMNS =
+  "id, theme_id, name, is_published, is_deleted, theme:learning_themes(id, name, is_published, is_deleted)";
+export const BREADCRUMB_WEEK_COLUMNS =
+  "id, phase_id, name, is_published, is_deleted, phase:learning_phases(id, theme_id, name, is_published, is_deleted, theme:learning_themes(id, name, is_published, is_deleted))";
+
+/**
+ * 週詳細用（所属フェーズおよびテーマ情報を含む）のカラム定義
+ */
+export const LEARNING_WEEK_DETAIL_COLUMNS =
+  "*, phase:learning_phases(id, theme_id, name, is_published, is_deleted, theme:learning_themes(id, name, is_published, is_deleted))";
+
+/**
+ * コンテンツ詳細用（本文含む全カラム＋親階層パンくず情報）のカラム定義
+ */
+export const LEARNING_CONTENT_DETAIL_COLUMNS =
+  "*, week:learning_weeks(id, phase_id, name, is_published, is_deleted, phase:learning_phases(id, theme_id, name, is_published, is_deleted, theme:learning_themes(id, name, is_published, is_deleted)))";
+
+/**
  * admin / maintainer 以外は is_published = true で絞り込む（issue #68 のプレビュー機能）。
  * 各取得関数の `.eq("is_deleted", false)` の後に挟んで使う共通ヘルパー。
  */
-function applyPublishedFilterUnlessManager<
-  Q extends { eq(column: "is_published", value: boolean): Q },
->(query: Q, userRole: UserRoleType | null): Q {
-  return checkContentPermissions(userRole) ? query : query.eq("is_published", true);
+function applyPublishedFilterUnlessManager<Q>(query: Q, userRole: UserRoleType | null): Q {
+  return checkContentPermissions(userRole)
+    ? query
+    : (query as unknown as { eq: (col: string, val: unknown) => Q }).eq("is_published", true);
 }
 
 /**
@@ -33,7 +78,7 @@ export async function fetchPublishedThemes(userRole: UserRoleType | null = null)
   const supabase = await createServerSupabaseClient();
 
   const query = applyPublishedFilterUnlessManager(
-    supabase.from("learning_themes").select("*").eq("is_deleted", false),
+    supabase.from("learning_themes").select(LEARNING_THEME_COLUMNS).eq("is_deleted", false),
     userRole
   );
   const { data, error } = await query.order("display_order");
@@ -43,7 +88,7 @@ export async function fetchPublishedThemes(userRole: UserRoleType | null = null)
     return { data: null, error };
   }
 
-  return { data, error: null };
+  return { data: data as LearningTheme[] | null, error: null };
 }
 
 /**
@@ -76,7 +121,7 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
   const { data: themes, error: themesError } = await supabase
     .from("learning_themes")
     .select(
-      "*, phases:learning_phases(id, weeks:learning_weeks(id, contents:learning_contents(id)))"
+      "id, name, description, image_url, display_order, is_published, is_deleted, created_at, updated_at, phases:learning_phases(id, weeks:learning_weeks(id, contents:learning_contents(id)))"
     )
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -155,7 +200,11 @@ export async function fetchThemeById(
   const supabase = await createServerSupabaseClient();
 
   const query = applyPublishedFilterUnlessManager(
-    supabase.from("learning_themes").select("*").eq("id", themeId).eq("is_deleted", false),
+    supabase
+      .from("learning_themes")
+      .select(LEARNING_THEME_COLUMNS)
+      .eq("id", themeId)
+      .eq("is_deleted", false),
     userRole
   );
   const { data, error } = await query.single();
@@ -182,7 +231,11 @@ export async function fetchPhasesByThemeId(
   const supabase = await createServerSupabaseClient();
 
   const query = applyPublishedFilterUnlessManager(
-    supabase.from("learning_phases").select("*").eq("theme_id", themeId).eq("is_deleted", false),
+    supabase
+      .from("learning_phases")
+      .select(LEARNING_PHASE_COLUMNS)
+      .eq("theme_id", themeId)
+      .eq("is_deleted", false),
     userRole
   );
   const { data, error } = await query.order("display_order");
@@ -206,7 +259,7 @@ export async function fetchPublishedPhases(): Promise<{
 
   const { data, error } = await supabase
     .from("learning_phases")
-    .select("*")
+    .select(LEARNING_PHASE_COLUMNS)
     .eq("is_published", true)
     .eq("is_deleted", false)
     .order("display_order");
@@ -233,7 +286,11 @@ export async function fetchPhaseById(
   const supabase = await createServerSupabaseClient();
 
   const query = applyPublishedFilterUnlessManager(
-    supabase.from("learning_phases").select("*").eq("id", phaseId).eq("is_deleted", false),
+    supabase
+      .from("learning_phases")
+      .select(LEARNING_PHASE_COLUMNS)
+      .eq("id", phaseId)
+      .eq("is_deleted", false),
     userRole
   );
   const { data, error } = await query.single();
@@ -449,7 +506,11 @@ export async function fetchWeeksWithContentsByPhaseId(
   const supabase = await createServerSupabaseClient();
 
   const query = applyPublishedFilterUnlessManager(
-    supabase.from("learning_weeks").select("*").eq("phase_id", phaseId).eq("is_deleted", false),
+    supabase
+      .from("learning_weeks")
+      .select(LEARNING_WEEK_COLUMNS)
+      .eq("phase_id", phaseId)
+      .eq("is_deleted", false),
     userRole
   );
   const { data: weeks, error } = await query.order("display_order");
@@ -459,7 +520,8 @@ export async function fetchWeeksWithContentsByPhaseId(
     return { data: null, error };
   }
 
-  const weekIds = (weeks ?? []).map((week) => week.id);
+  const weekList = (weeks as LearningWeek[] | null) ?? [];
+  const weekIds = weekList.map((week) => week.id);
   const { data: contents, error: contentsError } = await fetchContentSummariesByWeekIds(
     weekIds,
     userRole
@@ -476,7 +538,7 @@ export async function fetchWeeksWithContentsByPhaseId(
     contentsByWeekId.set(content.week_id, list);
   }
 
-  const data = (weeks ?? []).map((week) => ({
+  const data = weekList.map((week) => ({
     ...week,
     contents: contentsByWeekId.get(week.id) ?? [],
   }));
@@ -495,7 +557,7 @@ export async function fetchWeeksByPhaseId(phaseId: number): Promise<{
 
   const { data, error } = await supabase
     .from("learning_weeks")
-    .select("*")
+    .select(LEARNING_WEEK_COLUMNS)
     .eq("phase_id", phaseId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -529,7 +591,7 @@ export async function fetchWeekById(
   const query = applyPublishedFilterUnlessManager(
     supabase
       .from("learning_weeks")
-      .select("*, phase:learning_phases(*, theme:learning_themes(*))")
+      .select(LEARNING_WEEK_DETAIL_COLUMNS)
       .eq("id", weekId)
       .eq("is_deleted", false),
     userRole
@@ -541,11 +603,18 @@ export async function fetchWeekById(
     return { data: null, error };
   }
 
-  return { data, error: null };
+  return {
+    data: data as
+      | (LearningWeek & {
+          phase: (LearningPhase & { theme: LearningTheme | null }) | null;
+        })
+      | null,
+    error: null,
+  };
 }
 
 /**
- * 週に属する公開コンテンツ一覧を取得
+ * 週に属する公開コンテンツ一覧を取得（本文・指示・ヒント等の重いカラムは除外）
  */
 export async function fetchContentsByWeekId(weekId: number): Promise<{
   data: LearningContent[] | null;
@@ -555,7 +624,7 @@ export async function fetchContentsByWeekId(weekId: number): Promise<{
 
   const { data, error } = await supabase
     .from("learning_contents")
-    .select("*")
+    .select(LEARNING_CONTENT_LIST_COLUMNS)
     .eq("week_id", weekId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -566,7 +635,7 @@ export async function fetchContentsByWeekId(weekId: number): Promise<{
     return { data: null, error };
   }
 
-  return { data, error: null };
+  return { data: data as LearningContent[] | null, error: null };
 }
 
 /**
@@ -585,7 +654,7 @@ export async function fetchContentById(
   const query = applyPublishedFilterUnlessManager(
     supabase
       .from("learning_contents")
-      .select("*, week:learning_weeks(*, phase:learning_phases(*, theme:learning_themes(*)))")
+      .select(LEARNING_CONTENT_DETAIL_COLUMNS)
       .eq("id", contentId)
       .eq("is_deleted", false),
     userRole

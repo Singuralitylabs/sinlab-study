@@ -86,7 +86,10 @@ export interface LearningContentWithWeek extends LearningContent {
 }
 
 export interface SubmissionWithContent extends Submission {
-  content: LearningContent | null;
+  content: Pick<
+    LearningContent,
+    "id" | "title" | "content_type" | "is_published" | "is_open_to_trial" | "week_id"
+  > | null;
 }
 
 export interface SubmissionWithContentAndReview extends SubmissionWithContent {

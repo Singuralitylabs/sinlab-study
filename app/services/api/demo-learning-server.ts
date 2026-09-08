@@ -6,6 +6,13 @@ import type {
   LearningTheme,
   LearningWeek,
 } from "@/app/types";
+import {
+  LEARNING_CONTENT_DETAIL_COLUMNS,
+  LEARNING_CONTENT_LIST_COLUMNS,
+  LEARNING_PHASE_COLUMNS,
+  LEARNING_THEME_COLUMNS,
+  LEARNING_WEEK_COLUMNS,
+} from "./learning-server";
 import { createSlideSignedUrlWithClient } from "./slides-server";
 import { createAdminSupabaseClient } from "./supabase-server";
 
@@ -25,7 +32,7 @@ export async function fetchDemoPublishedThemes(): Promise<{
   const supabase = await createAdminSupabaseClient();
   const { data, error } = await supabase
     .from("learning_themes")
-    .select("*")
+    .select(LEARNING_THEME_COLUMNS)
     .eq("is_published", true)
     .eq("is_deleted", false)
     .order("display_order");
@@ -46,7 +53,7 @@ export async function fetchDemoThemeById(themeId: number): Promise<{
   const supabase = await createAdminSupabaseClient();
   const { data, error } = await supabase
     .from("learning_themes")
-    .select("*")
+    .select(LEARNING_THEME_COLUMNS)
     .eq("id", themeId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -68,7 +75,7 @@ export async function fetchDemoPhasesByThemeId(themeId: number): Promise<{
   const supabase = await createAdminSupabaseClient();
   const { data, error } = await supabase
     .from("learning_phases")
-    .select("*")
+    .select(LEARNING_PHASE_COLUMNS)
     .eq("theme_id", themeId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -90,7 +97,7 @@ export async function fetchDemoPhaseById(phaseId: number): Promise<{
   const supabase = await createAdminSupabaseClient();
   const { data, error } = await supabase
     .from("learning_phases")
-    .select("*")
+    .select(LEARNING_PHASE_COLUMNS)
     .eq("id", phaseId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -115,7 +122,7 @@ export async function fetchDemoContext(): Promise<{
 
   const { data: theme, error: themeError } = await supabase
     .from("learning_themes")
-    .select("*")
+    .select(LEARNING_THEME_COLUMNS)
     .eq("is_published", true)
     .eq("is_deleted", false)
     .order("display_order")
@@ -128,7 +135,7 @@ export async function fetchDemoContext(): Promise<{
 
   const { data: phase, error: phaseError } = await supabase
     .from("learning_phases")
-    .select("*")
+    .select(LEARNING_PHASE_COLUMNS)
     .eq("theme_id", theme.id)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -142,7 +149,7 @@ export async function fetchDemoContext(): Promise<{
 
   const { data: week, error: weekError } = await supabase
     .from("learning_weeks")
-    .select("*")
+    .select(LEARNING_WEEK_COLUMNS)
     .eq("phase_id", phase.id)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -165,7 +172,7 @@ export async function fetchDemoContext(): Promise<{
 }
 
 /**
- * デモ用: 週に属するコンテンツ一覧を取得
+ * デモ用: 週に属するコンテンツ一覧を取得（本文等の重いカラムは除外）
  */
 export async function fetchDemoContentsByWeekId(weekId: number): Promise<{
   data: LearningContent[] | null;
@@ -175,7 +182,7 @@ export async function fetchDemoContentsByWeekId(weekId: number): Promise<{
 
   const { data, error } = await supabase
     .from("learning_contents")
-    .select("*")
+    .select(LEARNING_CONTENT_LIST_COLUMNS)
     .eq("week_id", weekId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -190,7 +197,7 @@ export async function fetchDemoContentsByWeekId(weekId: number): Promise<{
 }
 
 /**
- * デモ用: フェーズに属する公開週一覧をコンテンツ付きで取得
+ * デモ用: フェーズに属する公開週一覧をコンテンツ付きで取得（本文等の重いカラムは除外）
  */
 export async function fetchDemoWeeksWithContentsByPhaseId(phaseId: number): Promise<{
   data: (LearningWeek & { contents: LearningContent[] })[] | null;
@@ -200,7 +207,9 @@ export async function fetchDemoWeeksWithContentsByPhaseId(phaseId: number): Prom
 
   const { data, error } = await supabase
     .from("learning_weeks")
-    .select("*, contents:learning_contents(*)")
+    .select(
+      "id, phase_id, name, description, display_order, is_published, is_deleted, created_at, updated_at, contents:learning_contents(id, week_id, title, content_type, video_url, pdf_url, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at)"
+    )
     .eq("phase_id", phaseId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -228,7 +237,7 @@ export async function fetchDemoContentById(contentId: number): Promise<{
 
   const { data, error } = await supabase
     .from("learning_contents")
-    .select("*, week:learning_weeks(*, phase:learning_phases(*, theme:learning_themes(*)))")
+    .select(LEARNING_CONTENT_DETAIL_COLUMNS)
     .eq("id", contentId)
     .eq("is_published", true)
     .eq("is_deleted", false)
