@@ -125,19 +125,6 @@ const SUBMISSION_TYPE_OPTIONS: {
   { value: "both", label: "コード・URL選択", description: "受講生がどちらかを選択して提出" },
 ];
 
-/**
- * 既存スライドの pdf_url（オブジェクトキー `gas-advanced/slide-03.pdf`。旧形式の公開URLも許容）
- * からコーススラッグとスライド番号を抽出する。命名規約に沿わない場合は空を返す。
- */
-function parseSlidePath(pdfUrl: string | null | undefined): {
-  folder: string;
-  slideNumber: string;
-} {
-  const parsed = parseSlideObjectKey(pdfUrl);
-  if (!parsed) return { folder: "", slideNumber: "" };
-  return { folder: parsed.folder, slideNumber: String(parsed.slideNumber) };
-}
-
 export function ContentForm({
   themes,
   phases,
@@ -215,25 +202,25 @@ export function ContentForm({
   const [codeLanguage, setCodeLanguage] = useState<CodeLanguage>(
     (initialData?.code_language as CodeLanguage) ?? "javascript"
   );
-  const initialSlide = parseSlidePath(initialData?.pdf_url);
   // 保存値はオブジェクトキーのみ（issue #89）。旧形式の公開URLが初期値に残っていても
   // そのまま再保存せず、キーへ正規化した値を持つ。正規化できない値（外部URL等）は空扱いになるが、
   // その場合は requiresSlidePdf（initialData.pdf_url が truthy）により再アップロードするまで
   // 保存できないため、値が黙って消えることはない
-  const [pdfUrl, setPdfUrl] = useState(toSlideObjectKey(initialData?.pdf_url) ?? "");
-  const [pdfFolder, setPdfFolder] = useState(initialSlide.folder);
-  const [slideNumber, setSlideNumber] = useState(initialSlide.slideNumber);
+  const initialPdfKey = toSlideObjectKey(initialData?.pdf_url);
+  // 命名規約に沿ったキーならコーススラッグと番号をフォームの初期値にする（規約外なら空）
+  const initialSlide = parseSlideObjectKey(initialPdfKey);
+  const [pdfUrl, setPdfUrl] = useState(initialPdfKey ?? "");
+  const [pdfFolder, setPdfFolder] = useState(initialSlide?.folder ?? "");
+  const [slideNumber, setSlideNumber] = useState(
+    initialSlide ? String(initialSlide.slideNumber) : ""
+  );
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isOpenToTrial, setIsOpenToTrial] = useState(initialData?.is_open_to_trial ?? false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [pdfFileName, setPdfFileName] = useState<string | null>(
-    initialSlide.folder
-      ? `${initialSlide.folder}/slide-${initialSlide.slideNumber.padStart(2, "0")}.pdf`
-      : null
-  );
+  const [pdfFileName, setPdfFileName] = useState<string | null>(initialPdfKey);
 
   // フェーズは選択中のテーマ配下のみ、週は選択中のフェーズ（未選択ならテーマ）配下のみに絞る
   // （ContentsFilterBar と同じロジック）

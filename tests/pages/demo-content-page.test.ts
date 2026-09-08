@@ -72,7 +72,9 @@ describe("デモ画面のスライド配信（署名付きURL）", () => {
     const html = await render();
 
     expect(createDemoSlideSignedUrl).toHaveBeenCalledTimes(1);
-    expect(createDemoSlideSignedUrl).toHaveBeenCalledWith(PDF_KEY);
+    expect(createDemoSlideSignedUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ pdf_url: PDF_KEY, is_open_to_trial: true })
+    );
     expect(html).toContain(SIGNED_URL);
   });
 

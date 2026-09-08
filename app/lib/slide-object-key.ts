@@ -12,8 +12,25 @@
  */
 const LEGACY_PUBLIC_URL_PREFIX = /^(?:https?:\/\/[^/]+)?\/storage\/v1\/object\/public\/slides\//;
 
-/** 命名規約 `<コーススラッグ>/slide-NN.pdf` に沿ったオブジェクトキー */
+/**
+ * 命名規約 `<コーススラッグ>/slide-NN.pdf`（NN は最低2桁のゼロ埋め）の構成要素。
+ * アップロードAPI（キーの組み立て・自動採番の走査）と管理画面（キーの解釈）の両方が
+ * ここを参照する。規約を変えるときはこのファイルだけを変更する。
+ */
+/** コーススラッグ（フォルダ名）は英小文字・数字・ハイフンのみ */
+export const SLIDE_FOLDER_PATTERN = /^[a-z0-9-]+$/;
+/** フォルダ内のファイル名 `slide-NN.pdf`（番号部分をキャプチャ） */
+export const SLIDE_FILE_NAME_PATTERN = /^slide-(\d+)\.pdf$/;
+/** オブジェクトキー全体 `<slug>/slide-NN.pdf`（スラッグと番号をキャプチャ） */
 const SLIDE_OBJECT_KEY_PATTERN = /^([a-z0-9-]+)\/slide-(\d+)\.pdf$/;
+
+/**
+ * コーススラッグとスライド番号から命名規約どおりのオブジェクトキーを組み立てる。
+ * 番号は最低2桁のゼロ埋め（1〜99 は `01`〜`99`、100 以上はそのまま桁が増える）。
+ */
+export function buildSlideObjectKey(folder: string, slideNumber: number): string {
+  return `${folder}/slide-${String(slideNumber).padStart(2, "0")}.pdf`;
+}
 
 /**
  * pdf_url（新形式のキー、または旧形式の公開URL）をオブジェクトキーへ正規化する。

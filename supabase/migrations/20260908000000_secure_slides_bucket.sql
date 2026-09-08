@@ -35,15 +35,39 @@ ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public;
 -- アプリ側の toSlideObjectKey()（app/lib/slide-object-key.ts）と同じ規則
 -- （前後の空白・タブ・CR・LF を除去してから接頭辞を落とす）。
 -- 正規化後の値が現在値と異なる行のみ UPDATE する（接頭辞の無い行も前後に空白があれば対象。
--- 正規化済みの行は更新しない。NULL は対象外）。
+-- 正規化済みの行は更新しない（updated_at を動かさない）。NULL は対象外）。
 -- ロールバック時は、pdf_url に '/storage/v1/object/public/slides/' を前置して戻すのに加え、
 -- storage.buckets の slides を public = true に戻し、下記3節の4ポリシーを DROP する。
 -- =====================================================
 
-UPDATE public.learning_contents
-SET pdf_url = regexp_replace(btrim(pdf_url, E' \t\r\n'), '^(https?://[^/]+)?/storage/v1/object/public/slides/', '')
-WHERE pdf_url IS NOT NULL
-  AND pdf_url <> regexp_replace(btrim(pdf_url, E' \t\r\n'), '^(https?://[^/]+)?/storage/v1/object/public/slides/', '');
+-- 正規化式はサブクエリで1回だけ書き、SET と WHERE で同じ値を参照する
+-- （式を片方だけ直して WHERE が一致しなくなる事故を防ぐ）。
+UPDATE public.learning_contents lc
+SET pdf_url = n.normalized
+FROM (
+  SELECT
+    id,
+    regexp_replace(btrim(pdf_url, E' \t\r\n'), '^(https?://[^/]+)?/storage/v1/object/public/slides/', '') AS normalized
+  FROM public.learning_contents
+  WHERE pdf_url IS NOT NULL
+) n
+WHERE lc.id = n.id
+  AND lc.pdf_url <> n.normalized;
+
+-- 正規化後もオブジェクトキーとして解釈できない値（外部URL・`/` 始まり）が残っていれば
+-- 適用を中断する。残すと Storage ポリシーの等値比較が成立せず、そのスライドは受講生に
+-- 「表示できません」と出続ける。本番・開発の実データでは該当0件を確認済み。
+DO $$
+DECLARE
+  bad_count integer;
+BEGIN
+  SELECT count(*) INTO bad_count
+  FROM public.learning_contents
+  WHERE pdf_url IS NOT NULL AND pdf_url ~ '^([a-zA-Z][a-zA-Z0-9+.-]*:|/)';
+  IF bad_count > 0 THEN
+    RAISE EXCEPTION 'learning_contents.pdf_url にオブジェクトキーとして解釈できない値が % 件あります。手動で修正してから再適用してください', bad_count;
+  END IF;
+END $$;
 
 COMMENT ON COLUMN public.learning_contents.pdf_url IS
   'スライドPDFの slides バケット内オブジェクトキー（例: gas/slide-01.pdf）。配信時にサーバー側で署名付きURLを発行する';
@@ -77,33 +101,44 @@ CREATE POLICY "Slides are viewable via visible contents or by content managers"
     )
   );
 
--- 書き込み系はコンテンツ管理者に限定する（thumbnails と同じ構成）。
+-- 書き込み系はコンテンツ管理者に限定する。
+-- thumbnails（20260819000001）と slides で操作ごとに permissive ポリシーが2本並ぶと
+-- Supabase advisor の multiple_permissive_policies が発火するため（CLAUDE.md「同一操作の
+-- 許可ポリシーは OR 条件で1本に統合する」）、thumbnails 側のポリシーを DROP し、
+-- 両バケットを対象にした1本へ統合する。
 -- 現行のアップロードAPIは service_role で書き込むため必須ではないが、
 -- 通常クライアントからの経路を将来追加しても壊れないよう揃えておく。
+DROP POLICY IF EXISTS "Content managers can upload thumbnails" ON storage.objects;
+DROP POLICY IF EXISTS "Content managers can update thumbnails" ON storage.objects;
+DROP POLICY IF EXISTS "Content managers can delete thumbnails" ON storage.objects;
 DROP POLICY IF EXISTS "Content managers can upload slides" ON storage.objects;
-CREATE POLICY "Content managers can upload slides"
+DROP POLICY IF EXISTS "Content managers can update slides" ON storage.objects;
+DROP POLICY IF EXISTS "Content managers can delete slides" ON storage.objects;
+
+DROP POLICY IF EXISTS "Content managers can upload content assets" ON storage.objects;
+CREATE POLICY "Content managers can upload content assets"
   ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (
-    bucket_id = 'slides'
+    bucket_id IN ('thumbnails', 'slides')
     AND (select public.get_user_role()) IN ('admin', 'maintainer')
   );
 
-DROP POLICY IF EXISTS "Content managers can update slides" ON storage.objects;
-CREATE POLICY "Content managers can update slides"
+DROP POLICY IF EXISTS "Content managers can update content assets" ON storage.objects;
+CREATE POLICY "Content managers can update content assets"
   ON storage.objects FOR UPDATE TO authenticated
   USING (
-    bucket_id = 'slides'
+    bucket_id IN ('thumbnails', 'slides')
     AND (select public.get_user_role()) IN ('admin', 'maintainer')
   )
   WITH CHECK (
-    bucket_id = 'slides'
+    bucket_id IN ('thumbnails', 'slides')
     AND (select public.get_user_role()) IN ('admin', 'maintainer')
   );
 
-DROP POLICY IF EXISTS "Content managers can delete slides" ON storage.objects;
-CREATE POLICY "Content managers can delete slides"
+DROP POLICY IF EXISTS "Content managers can delete content assets" ON storage.objects;
+CREATE POLICY "Content managers can delete content assets"
   ON storage.objects FOR DELETE TO authenticated
   USING (
-    bucket_id = 'slides'
+    bucket_id IN ('thumbnails', 'slides')
     AND (select public.get_user_role()) IN ('admin', 'maintainer')
   );

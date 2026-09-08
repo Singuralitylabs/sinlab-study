@@ -246,10 +246,27 @@ export async function fetchDemoContentById(contentId: number): Promise<{
  * デモ用: お試し公開スライドの署名付きURLを発行
  *
  * デモ画面は未認証のためユーザー権限のクライアントが無く、他のデモ取得関数と同じく
- * service_role で署名する。呼び出し側は `is_open_to_trial = true` かつ公開済みの
- * コンテンツに限定すること（お試しユーザーと同じ範囲だけを未認証に見せる。issue #89）。
+ * service_role で署名する。service_role は RLS を素通りするため、「公開済み・未削除・
+ * お試し公開（is_open_to_trial = true）のスライド」という条件（お試しユーザーと同じ範囲。
+ * CLAUDE.md の不変条件、issue #89）はこの関数自身が判定し、満たさなければ Storage を
+ * 呼ばず null を返す。呼び出し側の分岐に依存しない。
  */
-export async function createDemoSlideSignedUrl(pdfUrl: string): Promise<string | null> {
+export async function createDemoSlideSignedUrl(
+  content: Pick<
+    LearningContent,
+    "content_type" | "pdf_url" | "is_published" | "is_deleted" | "is_open_to_trial"
+  >
+): Promise<string | null> {
+  if (
+    content.content_type !== "slide" ||
+    !content.pdf_url ||
+    !content.is_published ||
+    content.is_deleted ||
+    !content.is_open_to_trial
+  ) {
+    return null;
+  }
+
   const supabase = await createAdminSupabaseClient();
-  return createSlideSignedUrlWithClient(supabase, pdfUrl);
+  return createSlideSignedUrlWithClient(supabase, content.pdf_url);
 }

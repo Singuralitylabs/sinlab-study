@@ -13,15 +13,23 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+const openSlide = {
+  content_type: "slide",
+  pdf_url: "gas/slide-01.pdf",
+  is_published: true,
+  is_deleted: false,
+  is_open_to_trial: true,
+} as const;
+
 describe("createDemoSlideSignedUrl", () => {
-  it("未認証のデモ向けに service_role クライアントで署名する", async () => {
+  it("公開済み・お試し公開のスライドは service_role クライアントで署名する", async () => {
     const createSignedUrl = vi
       .fn()
       .mockResolvedValue({ data: { signedUrl: "https://signed" }, error: null });
     const from = vi.fn().mockReturnValue({ createSignedUrl });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue({ storage: { from } } as never);
 
-    await expect(createDemoSlideSignedUrl("gas/slide-01.pdf")).resolves.toBe("https://signed");
+    await expect(createDemoSlideSignedUrl(openSlide)).resolves.toBe("https://signed");
     expect(createAdminSupabaseClient).toHaveBeenCalledTimes(1);
     expect(createServerSupabaseClient).not.toHaveBeenCalled();
     expect(from).toHaveBeenCalledWith(SLIDES_BUCKET);
@@ -31,12 +39,25 @@ describe("createDemoSlideSignedUrl", () => {
     );
   });
 
+  it.each([
+    ["お試し非公開", { is_open_to_trial: false }],
+    ["未公開", { is_published: false }],
+    ["論理削除済み", { is_deleted: true }],
+    ["スライド以外の種別", { content_type: "video" }],
+    ["pdf_url が無い", { pdf_url: null }],
+  ])("%s のコンテンツでは Storage を呼ばず null を返す", async (_label, overrides) => {
+    await expect(
+      createDemoSlideSignedUrl({ ...openSlide, ...overrides } as never)
+    ).resolves.toBeNull();
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
   it("発行に失敗した場合は null を返す", async () => {
     const createSignedUrl = vi.fn().mockResolvedValue({ data: null, error: { message: "x" } });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue({
       storage: { from: vi.fn().mockReturnValue({ createSignedUrl }) },
     } as never);
 
-    await expect(createDemoSlideSignedUrl("gas/slide-01.pdf")).resolves.toBeNull();
+    await expect(createDemoSlideSignedUrl(openSlide)).resolves.toBeNull();
   });
 });

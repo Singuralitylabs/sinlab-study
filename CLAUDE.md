@@ -96,7 +96,7 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 
 **Storage のオブジェクトキー規約**（変更するとシードSQLとアップロードAPIが揃って壊れる）
 
-- `slides`（**非公開**）: `<コーススラッグ>/slide-NN.pdf`（NNは最低2桁のゼロ埋め）。`learning_contents.pdf_url` には**このオブジェクトキーのみ**を保存し（公開URL・署名付きURLを保存しない）、配信は閲覧権限チェックの後にサーバー側で `createSlideSignedUrl()`（`app/services/api/slides-server.ts`）が署名付きURLを発行する。`storage.objects` の SELECT ポリシーは `pdf_url = name` の等値比較で `learning_contents` の RLS に委譲しているため、キー以外の形式を保存するとそのスライドは閲覧不能になる（`docs/specification.md` 3.2節）
+- `slides`（**非公開**）: `<コーススラッグ>/slide-NN.pdf`（NNは最低2桁のゼロ埋め）。`learning_contents.pdf_url` には**このオブジェクトキーのみ**を保存し（公開URL・署名付きURLを保存しない）、配信は閲覧権限チェックの後にサーバー側で `createSlideSignedUrl()`（`app/services/api/slides-server.ts`）が署名付きURLを発行する。キー以外の形式を保存するとそのスライドは閲覧不能になる（Storage ポリシーの仕組みは `docs/specification.md` 3.2節・`docs/database.md` 6.8節）
 - `thumbnails`（公開）: `theme-{themeId}/thumbnail.{png|jpg|webp}`。`learning_themes.image_url` には環境非依存の相対パス `/storage/v1/object/public/thumbnails/...` を保存し、表示時に `resolveStorageUrl()` でSupabase URLを前置する
 
 **RLS**

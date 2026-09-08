@@ -2,17 +2,17 @@ import { type NextRequest, NextResponse } from "next/server";
 import { SLIDES_BUCKET } from "@/app/constants/storage";
 import { USER_STATUS } from "@/app/constants/user";
 import { parsePositiveInteger } from "@/app/lib/positive-integer";
+import {
+  buildSlideObjectKey,
+  SLIDE_FILE_NAME_PATTERN,
+  SLIDE_FOLDER_PATTERN,
+} from "@/app/lib/slide-object-key";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const BUCKET_NAME = SLIDES_BUCKET;
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
-
-// フォルダ名（コーススラッグ）は英小文字・数字・ハイフンのみ許可
-const FOLDER_PATTERN = /^[a-z0-9-]+$/;
-// 命名規約に沿ったスライドファイル名（slide-NN.pdf）
-const SLIDE_FILE_PATTERN = /^slide-(\d+)\.pdf$/;
 
 type AdminSupabaseClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>;
 
@@ -73,7 +73,7 @@ async function getNextSlideNumber(supabase: AdminSupabaseClient, folder: string)
 
   let maxNumber = 0;
   for (const item of data) {
-    const match = item.name.match(SLIDE_FILE_PATTERN);
+    const match = item.name.match(SLIDE_FILE_NAME_PATTERN);
     if (!match) {
       continue;
     }
@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
 
     if (folderRaw) {
       const folder = folderRaw.toLowerCase();
-      if (!FOLDER_PATTERN.test(folder)) {
+      if (!SLIDE_FOLDER_PATTERN.test(folder)) {
         return NextResponse.json(
           { error: "フォルダ名は英小文字・数字・ハイフンのみ使用できます" },
           { status: 400 }
@@ -190,8 +190,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const paddedNumber = String(slideNumber).padStart(2, "0");
-      filePath = `${folder}/slide-${paddedNumber}.pdf`;
+      filePath = buildSlideObjectKey(folder, slideNumber);
     } else {
       // フォルダ未指定時は従来のタイムスタンプ付きファイル名（後方互換）
       const timestamp = Date.now();
