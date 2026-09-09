@@ -253,6 +253,7 @@ describe("fetchContentById", () => {
 
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.eq).toHaveBeenCalledWith("is_published", true);
+    expect(builder.maybeSingle).toHaveBeenCalled();
   });
 
   it("maintainer の場合、未公開コンテンツも取得できる", async () => {
@@ -265,6 +266,19 @@ describe("fetchContentById", () => {
     expect(result.data).toEqual(content);
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.eq).not.toHaveBeenCalledWith("is_published", true);
+  });
+
+  it("0行（RLS不可視・未存在）の場合、エラーログせず data: null を返す", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mockClient = createMockSupabaseClient({ queryResult: { data: null, error: null } });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchContentById(999, "member");
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBeNull();
+    expect(consoleSpy).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
   });
 });
 

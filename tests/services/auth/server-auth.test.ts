@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
+vi.mock("next/headers", () => ({
+  headers: vi.fn(),
+}));
 
+import { headers } from "next/headers";
+import { AUTH_HEADERS } from "@/app/constants/auth";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -19,6 +24,7 @@ const mockUserData = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(headers).mockResolvedValue(new Headers());
 });
 
 describe("getServerAuth", () => {
@@ -118,6 +124,198 @@ describe("getServerAuth", () => {
       expect(result.userId).toBe(2);
       expect(result.userStatus).toBe("trial");
       expect(result.userRole).toBe("admin");
+    });
+  });
+
+  describe("proxy からのヘッダー経由（案Aのキャッシュ利用）", () => {
+    it("有効なヘッダーが揃っており auth.getUser().id と一致する場合、users テーブルを照会せずヘッダー値から結果を返す", async () => {
+      const requestHeaders = new Headers();
+      requestHeaders.set(AUTH_HEADERS.AUTH_ID, mockUser.id);
+      requestHeaders.set(AUTH_HEADERS.USER_ID, "10");
+      requestHeaders.set(AUTH_HEADERS.USER_STATUS, "active");
+      requestHeaders.set(AUTH_HEADERS.USER_ROLE, "maintainer");
+      vi.mocked(headers).mockResolvedValue(requestHeaders);
+
+      const mockClient = createMockSupabaseClient({
+        authResult: { data: { user: mockUser }, error: null },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+      const result = await getServerAuth();
+
+      expect(result).toEqual({
+        user: mockUser,
+        userId: 10,
+        userStatus: "active",
+        userRole: "maintainer",
+      });
+      // users テーブルへの照会が行われていないこと（二重ラウンドトリップ解消）
+      expect(mockClient.from).not.toHaveBeenCalled();
+    });
+
+    it("ヘッダーの auth_id と auth.getUser() の user.id が不一致の場合、ヘッダーを無視して DB から取得する", async () => {
+      const requestHeaders = new Headers();
+      requestHeaders.set(AUTH_HEADERS.AUTH_ID, "forged-auth-id");
+      requestHeaders.set(AUTH_HEADERS.USER_ID, "999");
+      requestHeaders.set(AUTH_HEADERS.USER_STATUS, "active");
+      requestHeaders.set(AUTH_HEADERS.USER_ROLE, "admin");
+      vi.mocked(headers).mockResolvedValue(requestHeaders);
+
+      const mockClient = createMockSupabaseClient({
+        authResult: { data: { user: mockUser }, error: null },
+        queryResult: { data: mockUserData, error: null },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+      const result = await getServerAuth();
+
+      expect(result).toEqual({
+        user: mockUser,
+        userId: 1,
+        userStatus: "active",
+        userRole: "member",
+      });
+      expect(mockClient.from).toHaveBeenCalledWith("users");
+    });
+
+    it("ヘッダーのステータスが無効な値の場合、ヘッダーを無視して DB から取得する", async () => {
+      const requestHeaders = new Headers();
+      requestHeaders.set(AUTH_HEADERS.AUTH_ID, mockUser.id);
+      requestHeaders.set(AUTH_HEADERS.USER_ID, "1");
+      requestHeaders.set(AUTH_HEADERS.USER_STATUS, "invalid_status");
+      requestHeaders.set(AUTH_HEADERS.USER_ROLE, "member");
+      vi.mocked(headers).mockResolvedValue(requestHeaders);
+
+      const mockClient = createMockSupabaseClient({
+        authResult: { data: { user: mockUser }, error: null },
+        queryResult: { data: mockUserData, error: null },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+      const result = await getServerAuth();
+
+      expect(result).toEqual({
+        user: mockUser,
+        userId: 1,
+        userStatus: "active",
+        userRole: "member",
+      });
+      expect(mockClient.from).toHaveBeenCalledWith("users");
+    });
+
+    it("ヘッダーのステータスが rejected の場合（proxyからは渡されない値）、ヘッダーを無視して DB から取得する", async () => {
+      const requestHeaders = new Headers();
+      requestHeaders.set(AUTH_HEADERS.AUTH_ID, mockUser.id);
+      requestHeaders.set(AUTH_HEADERS.USER_ID, "1");
+      requestHeaders.set(AUTH_HEADERS.USER_STATUS, "rejected");
+      requestHeaders.set(AUTH_HEADERS.USER_ROLE, "member");
+      vi.mocked(headers).mockResolvedValue(requestHeaders);
+
+      const mockClient = createMockSupabaseClient({
+        authResult: { data: { user: mockUser }, error: null },
+        queryResult: { data: mockUserData, error: null },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+      const result = await getServerAuth();
+
+      expect(result).toEqual({
+        user: mockUser,
+        userId: 1,
+        userStatus: "active",
+        userRole: "member",
+      });
+      expect(mockClient.from).toHaveBeenCalledWith("users");
+    });
+
+    it("ヘッダーの userId が不正な形式（'42abc' など）の場合、ヘッダーを無視して DB から取得する", async () => {
+      const requestHeaders = new Headers();
+      requestHeaders.set(AUTH_HEADERS.AUTH_ID, mockUser.id);
+      requestHeaders.set(AUTH_HEADERS.USER_ID, "42abc");
+      requestHeaders.set(AUTH_HEADERS.USER_STATUS, "active");
+      requestHeaders.set(AUTH_HEADERS.USER_ROLE, "member");
+      vi.mocked(headers).mockResolvedValue(requestHeaders);
+
+      const mockClient = createMockSupabaseClient({
+        authResult: { data: { user: mockUser }, error: null },
+        queryResult: { data: mockUserData, error: null },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+      const result = await getServerAuth();
+
+      expect(result).toEqual({
+        user: mockUser,
+        userId: 1,
+        userStatus: "active",
+        userRole: "member",
+      });
+      expect(mockClient.from).toHaveBeenCalledWith("users");
+    });
+
+    it("ヘッダーのロールが無効な値の場合、ヘッダーを無視して DB から取得する", async () => {
+      const requestHeaders = new Headers();
+      requestHeaders.set(AUTH_HEADERS.AUTH_ID, mockUser.id);
+      requestHeaders.set(AUTH_HEADERS.USER_ID, "1");
+      requestHeaders.set(AUTH_HEADERS.USER_STATUS, "active");
+      requestHeaders.set(AUTH_HEADERS.USER_ROLE, "superadmin");
+      vi.mocked(headers).mockResolvedValue(requestHeaders);
+
+      const mockClient = createMockSupabaseClient({
+        authResult: { data: { user: mockUser }, error: null },
+        queryResult: { data: mockUserData, error: null },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+      const result = await getServerAuth();
+
+      expect(result).toEqual({
+        user: mockUser,
+        userId: 1,
+        userStatus: "active",
+        userRole: "member",
+      });
+      expect(mockClient.from).toHaveBeenCalledWith("users");
+    });
+
+    it("headers() 呼び出しで例外が発生した場合（API Route等）、DB 照会へフォールバックする", async () => {
+      vi.mocked(headers).mockRejectedValue(new Error("headers not available"));
+
+      const mockClient = createMockSupabaseClient({
+        authResult: { data: { user: mockUser }, error: null },
+        queryResult: { data: mockUserData, error: null },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+      const result = await getServerAuth();
+
+      expect(result).toEqual({
+        user: mockUser,
+        userId: 1,
+        userStatus: "active",
+        userRole: "member",
+      });
+      expect(mockClient.from).toHaveBeenCalledWith("users");
+    });
+
+    it("ヘッダーが一切存在しない場合（API Routeなど proxy スキップ時）、自前で DB 照会する", async () => {
+      vi.mocked(headers).mockResolvedValue(new Headers());
+
+      const mockClient = createMockSupabaseClient({
+        authResult: { data: { user: mockUser }, error: null },
+        queryResult: { data: mockUserData, error: null },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+      const result = await getServerAuth();
+
+      expect(result).toEqual({
+        user: mockUser,
+        userId: 1,
+        userStatus: "active",
+        userRole: "member",
+      });
+      expect(mockClient.from).toHaveBeenCalledWith("users");
     });
   });
 
