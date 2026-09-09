@@ -590,14 +590,16 @@ export async function fetchContentById(
       .eq("is_deleted", false),
     userRole
   );
-  const { data, error } = await query.single();
+  // 0行（RLSで不可視・未存在・ロック済み並行取得など）は想定内のため maybeSingle。
+  // .single() だと PGRST116 がエラーログになり、コンテンツ詳細ページの並列化で誤検知する。
+  const { data, error } = await query.maybeSingle();
 
   if (error) {
     console.error("コンテンツ詳細取得エラー:", error.message);
     return { data: null, error };
   }
 
-  return { data: data as LearningContentWithWeek, error: null };
+  return { data: data as LearningContentWithWeek | null, error: null };
 }
 
 /**
