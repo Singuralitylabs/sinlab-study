@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SUBMISSION_CONTENT_COLUMNS } from "@/app/services/api/submissions-server";
 import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
@@ -210,9 +211,8 @@ describe("fetchSubmissionsWithReviewsByUserId", () => {
     expect(result.data).toEqual(rows);
     expect(result.error).toBeNull();
     const builder = mockClient.from.mock.results[0]?.value;
-    expect(builder.select).toHaveBeenCalledWith(expect.not.stringContaining("text_content"));
     expect(builder.select).toHaveBeenCalledWith(
-      expect.not.stringContaining("exercise_instructions")
+      `*, content:learning_contents(${SUBMISSION_CONTENT_COLUMNS}), ai_review:ai_reviews(*)`
     );
   });
 });

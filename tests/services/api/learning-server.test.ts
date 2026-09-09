@@ -21,6 +21,7 @@ import {
   isContentFullyPublished,
   isContentLockedForUser,
   isContentVisible,
+  LEARNING_CONTENT_LIST_COLUMNS,
 } from "@/app/services/api/learning-server";
 import {
   createAdminSupabaseClient,
@@ -299,10 +300,7 @@ describe("fetchContentsByWeekId", () => {
     expect(result.data).toEqual(contents);
     expect(result.error).toBeNull();
     const builder = mockClient.from.mock.results[0].value;
-    expect(builder.select).toHaveBeenCalledWith(expect.not.stringContaining("text_content"));
-    expect(builder.select).toHaveBeenCalledWith(
-      expect.not.stringContaining("exercise_instructions")
-    );
+    expect(builder.select).toHaveBeenCalledWith(LEARNING_CONTENT_LIST_COLUMNS);
   });
 
   it("DB エラー時、data: null とエラーを返す", async () => {

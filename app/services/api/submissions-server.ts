@@ -6,7 +6,7 @@ import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabas
  * 提出履歴一覧用: content は一覧表示に必要な最小カラムのみ（本文等の重いテキストは取得しない）
  */
 export const SUBMISSION_CONTENT_COLUMNS =
-  "id, title, content_type, is_published, is_open_to_trial, week_id" as const;
+  "id, title, content_type, is_published, is_open_to_trial, week_id";
 
 /**
  * ユーザーの提出履歴を取得（content の本文系カラムは除外）

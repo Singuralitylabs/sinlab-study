@@ -3,32 +3,16 @@ import { USER_STATUS } from "@/app/constants/user";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import type {
   LearningContent,
-  LearningContentWithWeek,
+  LearningContentListItem,
+  LearningContentWithBreadcrumb,
   LearningPhase,
   LearningTheme,
   LearningWeek,
+  LearningWeekWithBreadcrumb,
   UserRoleType,
   UserStatusType,
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
-
-/**
- * 学習テーマ一覧・詳細用のカラム定義（表示に必要な最小限のカラム）
- */
-export const LEARNING_THEME_COLUMNS =
-  "id, name, description, image_url, display_order, is_published, is_deleted, created_at, updated_at";
-
-/**
- * 学習フェーズ一覧・詳細用のカラム定義
- */
-export const LEARNING_PHASE_COLUMNS =
-  "id, theme_id, name, description, display_order, is_published, is_deleted, created_at, updated_at";
-
-/**
- * 学習週一覧・詳細用のカラム定義
- */
-export const LEARNING_WEEK_COLUMNS =
-  "id, phase_id, name, description, display_order, is_published, is_deleted, created_at, updated_at";
 
 /**
  * コンテンツ一覧用のカラム定義（本文・指示・模範解答・ヒント等の重いテキストカラムを除外）
@@ -37,34 +21,33 @@ export const LEARNING_CONTENT_LIST_COLUMNS =
   "id, week_id, title, content_type, video_url, pdf_url, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at";
 
 /**
- * パンくず・所属判定用の親テーブルカラム定義
+ * パンくず・所属判定用の親テーブルカラム定義。
+ * DETAIL 定数はこれらを合成して使う（重複インライン展開を避ける）。
  */
 export const BREADCRUMB_THEME_COLUMNS = "id, name, is_published, is_deleted";
-export const BREADCRUMB_PHASE_COLUMNS =
-  "id, theme_id, name, is_published, is_deleted, theme:learning_themes(id, name, is_published, is_deleted)";
-export const BREADCRUMB_WEEK_COLUMNS =
-  "id, phase_id, name, is_published, is_deleted, phase:learning_phases(id, theme_id, name, is_published, is_deleted, theme:learning_themes(id, name, is_published, is_deleted))";
+export const BREADCRUMB_PHASE_COLUMNS = `id, theme_id, name, is_published, is_deleted, theme:learning_themes(${BREADCRUMB_THEME_COLUMNS})`;
+export const BREADCRUMB_WEEK_COLUMNS = `id, phase_id, name, is_published, is_deleted, phase:learning_phases(${BREADCRUMB_PHASE_COLUMNS})`;
 
 /**
- * 週詳細用（所属フェーズおよびテーマ情報を含む）のカラム定義
+ * 週詳細用（本体は全カラム、所属フェーズ/テーマはパンくず用）
  */
-export const LEARNING_WEEK_DETAIL_COLUMNS =
-  "*, phase:learning_phases(id, theme_id, name, is_published, is_deleted, theme:learning_themes(id, name, is_published, is_deleted))";
+export const LEARNING_WEEK_DETAIL_COLUMNS = `*, phase:learning_phases(${BREADCRUMB_PHASE_COLUMNS})`;
 
 /**
- * コンテンツ詳細用（本文含む全カラム＋親階層パンくず情報）のカラム定義
+ * コンテンツ詳細用（本文含む全カラム＋親階層パンくず情報）
  */
-export const LEARNING_CONTENT_DETAIL_COLUMNS =
-  "*, week:learning_weeks(id, phase_id, name, is_published, is_deleted, phase:learning_phases(id, theme_id, name, is_published, is_deleted, theme:learning_themes(id, name, is_published, is_deleted)))";
+export const LEARNING_CONTENT_DETAIL_COLUMNS = `*, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
 
 /**
  * admin / maintainer 以外は is_published = true で絞り込む（issue #68 のプレビュー機能）。
  * 各取得関数の `.eq("is_deleted", false)` の後に挟んで使う共通ヘルパー。
+ * theme/phase/week は select("*") のため PostgREST の型推論が浅く、
+ * `.eq("is_published", true)` のカラム制約をそのまま書ける。
  */
-function applyPublishedFilterUnlessManager<Q>(query: Q, userRole: UserRoleType | null): Q {
-  return checkContentPermissions(userRole)
-    ? query
-    : (query as unknown as { eq: (col: string, val: unknown) => Q }).eq("is_published", true);
+function applyPublishedFilterUnlessManager<
+  Q extends { eq(column: "is_published", value: boolean): Q },
+>(query: Q, userRole: UserRoleType | null): Q {
+  return checkContentPermissions(userRole) ? query : query.eq("is_published", true);
 }
 
 /**
@@ -78,7 +61,7 @@ export async function fetchPublishedThemes(userRole: UserRoleType | null = null)
   const supabase = await createServerSupabaseClient();
 
   const query = applyPublishedFilterUnlessManager(
-    supabase.from("learning_themes").select(LEARNING_THEME_COLUMNS).eq("is_deleted", false),
+    supabase.from("learning_themes").select("*").eq("is_deleted", false),
     userRole
   );
   const { data, error } = await query.order("display_order");
@@ -88,7 +71,7 @@ export async function fetchPublishedThemes(userRole: UserRoleType | null = null)
     return { data: null, error };
   }
 
-  return { data: data as LearningTheme[] | null, error: null };
+  return { data, error: null };
 }
 
 /**
@@ -121,7 +104,7 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
   const { data: themes, error: themesError } = await supabase
     .from("learning_themes")
     .select(
-      "id, name, description, image_url, display_order, is_published, is_deleted, created_at, updated_at, phases:learning_phases(id, weeks:learning_weeks(id, contents:learning_contents(id)))"
+      "*, phases:learning_phases(id, weeks:learning_weeks(id, contents:learning_contents(id)))"
     )
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -200,11 +183,7 @@ export async function fetchThemeById(
   const supabase = await createServerSupabaseClient();
 
   const query = applyPublishedFilterUnlessManager(
-    supabase
-      .from("learning_themes")
-      .select(LEARNING_THEME_COLUMNS)
-      .eq("id", themeId)
-      .eq("is_deleted", false),
+    supabase.from("learning_themes").select("*").eq("id", themeId).eq("is_deleted", false),
     userRole
   );
   const { data, error } = await query.single();
@@ -231,11 +210,7 @@ export async function fetchPhasesByThemeId(
   const supabase = await createServerSupabaseClient();
 
   const query = applyPublishedFilterUnlessManager(
-    supabase
-      .from("learning_phases")
-      .select(LEARNING_PHASE_COLUMNS)
-      .eq("theme_id", themeId)
-      .eq("is_deleted", false),
+    supabase.from("learning_phases").select("*").eq("theme_id", themeId).eq("is_deleted", false),
     userRole
   );
   const { data, error } = await query.order("display_order");
@@ -259,7 +234,7 @@ export async function fetchPublishedPhases(): Promise<{
 
   const { data, error } = await supabase
     .from("learning_phases")
-    .select(LEARNING_PHASE_COLUMNS)
+    .select("*")
     .eq("is_published", true)
     .eq("is_deleted", false)
     .order("display_order");
@@ -286,11 +261,7 @@ export async function fetchPhaseById(
   const supabase = await createServerSupabaseClient();
 
   const query = applyPublishedFilterUnlessManager(
-    supabase
-      .from("learning_phases")
-      .select(LEARNING_PHASE_COLUMNS)
-      .eq("id", phaseId)
-      .eq("is_deleted", false),
+    supabase.from("learning_phases").select("*").eq("id", phaseId).eq("is_deleted", false),
     userRole
   );
   const { data, error } = await query.single();
@@ -375,7 +346,7 @@ export async function isContentVisible(
  * 判定する。判定しないと、論理削除済みの親を持つコンテンツで「完了ボタン等は表示されるが
  * `isContentVisible()` は必ず403を返す」というUIとAPIの不整合が起きる。
  */
-export function isContentFullyPublished(content: LearningContentWithWeek): boolean {
+export function isContentFullyPublished(content: LearningContentWithBreadcrumb): boolean {
   const week = content.week;
   const phase = week?.phase;
   const theme = phase?.theme;
@@ -506,11 +477,7 @@ export async function fetchWeeksWithContentsByPhaseId(
   const supabase = await createServerSupabaseClient();
 
   const query = applyPublishedFilterUnlessManager(
-    supabase
-      .from("learning_weeks")
-      .select(LEARNING_WEEK_COLUMNS)
-      .eq("phase_id", phaseId)
-      .eq("is_deleted", false),
+    supabase.from("learning_weeks").select("*").eq("phase_id", phaseId).eq("is_deleted", false),
     userRole
   );
   const { data: weeks, error } = await query.order("display_order");
@@ -520,7 +487,7 @@ export async function fetchWeeksWithContentsByPhaseId(
     return { data: null, error };
   }
 
-  const weekList = (weeks as LearningWeek[] | null) ?? [];
+  const weekList = weeks ?? [];
   const weekIds = weekList.map((week) => week.id);
   const { data: contents, error: contentsError } = await fetchContentSummariesByWeekIds(
     weekIds,
@@ -557,7 +524,7 @@ export async function fetchWeeksByPhaseId(phaseId: number): Promise<{
 
   const { data, error } = await supabase
     .from("learning_weeks")
-    .select(LEARNING_WEEK_COLUMNS)
+    .select("*")
     .eq("phase_id", phaseId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -579,11 +546,7 @@ export async function fetchWeekById(
   weekId: number,
   userRole: UserRoleType | null = null
 ): Promise<{
-  data:
-    | (LearningWeek & {
-        phase: (LearningPhase & { theme: LearningTheme | null }) | null;
-      })
-    | null;
+  data: LearningWeekWithBreadcrumb | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
@@ -603,21 +566,14 @@ export async function fetchWeekById(
     return { data: null, error };
   }
 
-  return {
-    data: data as
-      | (LearningWeek & {
-          phase: (LearningPhase & { theme: LearningTheme | null }) | null;
-        })
-      | null,
-    error: null,
-  };
+  return { data: data as LearningWeekWithBreadcrumb | null, error: null };
 }
 
 /**
  * 週に属する公開コンテンツ一覧を取得（本文・指示・ヒント等の重いカラムは除外）
  */
 export async function fetchContentsByWeekId(weekId: number): Promise<{
-  data: LearningContent[] | null;
+  data: LearningContentListItem[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
@@ -635,7 +591,7 @@ export async function fetchContentsByWeekId(weekId: number): Promise<{
     return { data: null, error };
   }
 
-  return { data: data as LearningContent[] | null, error: null };
+  return { data: data as LearningContentListItem[] | null, error: null };
 }
 
 /**
@@ -646,7 +602,7 @@ export async function fetchContentById(
   contentId: number,
   userRole: UserRoleType | null = null
 ): Promise<{
-  data: LearningContentWithWeek | null;
+  data: LearningContentWithBreadcrumb | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
@@ -668,7 +624,7 @@ export async function fetchContentById(
     return { data: null, error };
   }
 
-  return { data: data as LearningContentWithWeek | null, error: null };
+  return { data: data as LearningContentWithBreadcrumb | null, error: null };
 }
 
 /**

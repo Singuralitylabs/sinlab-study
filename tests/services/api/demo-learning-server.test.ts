@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { LEARNING_CONTENT_LIST_COLUMNS } from "@/app/services/api/learning-server";
 import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
@@ -74,10 +75,7 @@ describe("fetchDemoContentsByWeekId", () => {
 
     expect(result.data).toEqual(contents);
     const builder = mockClient.from.mock.results[0].value;
-    expect(builder.select).toHaveBeenCalledWith(expect.not.stringContaining("text_content"));
-    expect(builder.select).toHaveBeenCalledWith(
-      expect.not.stringContaining("exercise_instructions")
-    );
+    expect(builder.select).toHaveBeenCalledWith(LEARNING_CONTENT_LIST_COLUMNS);
   });
 });
 
@@ -94,9 +92,8 @@ describe("fetchDemoWeeksWithContentsByPhaseId", () => {
 
     expect(result.data).toEqual(weeks);
     const builder = mockClient.from.mock.results[0].value;
-    expect(builder.select).toHaveBeenCalledWith(expect.not.stringContaining("text_content"));
     expect(builder.select).toHaveBeenCalledWith(
-      expect.not.stringContaining("exercise_instructions")
+      `*, contents:learning_contents(${LEARNING_CONTENT_LIST_COLUMNS})`
     );
   });
 });

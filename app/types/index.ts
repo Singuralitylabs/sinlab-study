@@ -85,6 +85,52 @@ export interface LearningContentWithWeek extends LearningContent {
   week: LearningWeekWithPhase | null;
 }
 
+/** コンテンツ一覧用（本文・演習指示・模範解答・ヒント等の重いカラムを含まない） */
+export type LearningContentListItem = Pick<
+  LearningContent,
+  | "id"
+  | "week_id"
+  | "title"
+  | "content_type"
+  | "video_url"
+  | "pdf_url"
+  | "is_open_to_trial"
+  | "is_published"
+  | "is_deleted"
+  | "display_order"
+  | "created_at"
+  | "updated_at"
+>;
+
+/** パンくず・所属判定用のテーマ（ネスト取得の最小セット） */
+export type BreadcrumbTheme = Pick<LearningTheme, "id" | "name" | "is_published" | "is_deleted">;
+
+/** パンくず・所属判定用のフェーズ */
+export type BreadcrumbPhase = Pick<
+  LearningPhase,
+  "id" | "theme_id" | "name" | "is_published" | "is_deleted"
+> & {
+  theme: BreadcrumbTheme | null;
+};
+
+/** パンくず・所属判定用の週 */
+export type BreadcrumbWeek = Pick<
+  LearningWeek,
+  "id" | "phase_id" | "name" | "is_published" | "is_deleted"
+> & {
+  phase: BreadcrumbPhase | null;
+};
+
+/** 週詳細（本体は全カラム、親フェーズ/テーマはパンくず用） */
+export type LearningWeekWithBreadcrumb = LearningWeek & {
+  phase: BreadcrumbPhase | null;
+};
+
+/** コンテンツ詳細（本体は全カラム、親階層はパンくず用） */
+export type LearningContentWithBreadcrumb = LearningContent & {
+  week: BreadcrumbWeek | null;
+};
+
 export interface SubmissionWithContent extends Submission {
   content: Pick<
     LearningContent,

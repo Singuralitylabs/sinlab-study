@@ -6,6 +6,7 @@ vi.mock("@/app/services/api/supabase-server");
 import {
   fetchRecentSubmissions,
   fetchSubmissionsByUserId,
+  SUBMISSION_CONTENT_COLUMNS,
 } from "@/app/services/api/submissions-server";
 import {
   createAdminSupabaseClient,
@@ -82,9 +83,8 @@ describe("fetchSubmissionsByUserId", () => {
     expect(result.data).toEqual(rows);
     expect(result.error).toBeNull();
     const builder = mockClient.from.mock.results[0]?.value;
-    expect(builder.select).toHaveBeenCalledWith(expect.not.stringContaining("text_content"));
     expect(builder.select).toHaveBeenCalledWith(
-      expect.not.stringContaining("exercise_instructions")
+      `*, content:learning_contents(${SUBMISSION_CONTENT_COLUMNS})`
     );
   });
 });

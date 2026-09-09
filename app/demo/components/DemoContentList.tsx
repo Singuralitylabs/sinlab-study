@@ -2,13 +2,13 @@
 
 import { CheckCircle, Clock, FileText, Lock, PenLine, Play, Presentation } from "lucide-react";
 import Link from "next/link";
-import type { LearningContent } from "@/app/types";
+import type { LearningContentListItem } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { useDemoProgress } from "../hooks/useDemoProgress";
 
 interface DemoContentListProps {
-  contents: LearningContent[];
+  contents: LearningContentListItem[];
   themeId: number;
   phaseId: number;
   weekId: number;
