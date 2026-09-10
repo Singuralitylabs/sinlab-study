@@ -2,13 +2,23 @@ import { Plus } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { PageTitle } from "@/app/components/PageTitle";
-import { deriveFilterOptions, filterContents, isContentType } from "@/app/lib/content-filtering";
+import {
+  deriveWeekSelectOptions,
+  filterContents,
+  isContentType,
+} from "@/app/lib/content-filtering";
 import {
   groupContentsByWeek,
   sortContentsByHierarchy,
+  sortWeeksByHierarchy,
   toContentTableGroups,
 } from "@/app/lib/content-grouping";
-import { fetchAllContents } from "@/app/services/api/admin-server";
+import {
+  fetchAllContents,
+  fetchAllWeeks,
+  hasAnyManageContents,
+} from "@/app/services/api/admin-server";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ContentsFilterBar } from "./ContentsFilterBar";
@@ -34,11 +44,9 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
     // 空白のみのqは絞り込みなし扱い（filterContents側のtrimと判定を揃える）
     q: firstParam(params.q).trim(),
   };
-  const isFiltered = Object.values(filters).some((value) => value !== "");
 
   // テーマ/フェーズ/週/種別は SQL 側で絞り、タイトル検索だけ JS に残す（#196）。
-  // フィルタ選択肢は未フィルタ一覧から導出するため、構造フィルタがあるときだけ
-  // 選択肢用の別取得を並列で行う（カラム絞り込み済みのためコストは許容範囲）。
+  // フィルタ選択肢は週一覧（軽量）から導出し、構造フィルタ時に全件を二重取得しない。
   const structuralFilters = {
     themeId: filters.theme || undefined,
     phaseId: filters.phase || undefined,
@@ -46,16 +54,32 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
     contentType: isContentType(filters.type) ? filters.type : undefined,
   };
   const hasStructuralFilter = Object.values(structuralFilters).some((value) => value !== undefined);
+  const isFiltered = hasStructuralFilter || filters.q !== "";
 
-  const [listResult, optionsResult] = await Promise.all([
+  const [listResult, weeksResult, anyContentsResult] = await Promise.all([
     fetchAllContents(structuralFilters),
-    hasStructuralFilter ? fetchAllContents() : Promise.resolve(null),
+    fetchAllWeeks(),
+    hasAnyManageContents(),
   ]);
-  const { data: contents } = listResult;
-  const optionsSource = optionsResult?.data ?? contents;
-  const hasAnyContents = (optionsSource?.length ?? 0) > 0;
-  const sortedForOptions = optionsSource ? sortContentsByHierarchy(optionsSource) : [];
-  const filterOptions = deriveFilterOptions(sortedForOptions);
+
+  if (listResult.error || weeksResult.error || anyContentsResult.error) {
+    return (
+      <div className="max-w-6xl mx-auto">
+        <PageTitle title="コンテンツ管理" description="学習コンテンツの作成・編集・削除" />
+        <Alert variant="destructive">
+          <AlertDescription>
+            コンテンツ一覧の取得に失敗しました。時間をおいて再度お試しください。
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  const contents = listResult.data;
+  const hasAnyContents = anyContentsResult.data === true;
+  const filterOptions = deriveWeekSelectOptions(
+    weeksResult.data ? sortWeeksByHierarchy(weeksResult.data) : []
+  );
 
   const sortedContents = contents ? sortContentsByHierarchy(contents) : [];
   const filteredContents = filterContents(sortedContents, {

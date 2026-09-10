@@ -32,6 +32,9 @@ export interface ContentFilterOptions {
  * コンテンツ一覧（join結果）からフィルタセレクトの選択肢を導出する。追加フェッチは行わない。
  * 呼び出し前に sortContentsByHierarchy を通しておくことで、選択肢もテーマ→フェーズ→週の
  * 階層順になる。
+ *
+ * 管理画面一覧は `deriveWeekSelectOptions`（週一覧）を使う。本関数はテストと、
+ * コンテンツ join 結果から選択肢を作りたい呼び出し向けに残す。
  */
 export function deriveFilterOptions(contents: ManageContentListItem[]): ContentFilterOptions {
   const themes = new Map<number, ThemeFilterOption>();
@@ -93,41 +96,21 @@ export function deriveWeekSelectOptions(weeks: ManageWeekListItem[]): ContentFil
 }
 
 export interface ContentFilterParams {
-  themeId?: string;
-  phaseId?: string;
-  weekId?: string;
-  type?: string;
   q?: string;
 }
 
 /**
- * テーマ / フェーズ / 週 / 種別 / タイトル検索でコンテンツを絞り込む。
- * テーマ・フェーズは content.week の join（phase.theme_id / week.phase_id）で判定するため、
- * 週が未設定（＝未分類）のコンテンツはいずれかの階層フィルタが指定されている場合は除外される。
+ * タイトル検索でコンテンツを絞り込む。
+ * テーマ / フェーズ / 週 / 種別は `fetchAllContents` 側の SQL フィルタに寄せた（#196）。
  */
 export function filterContents(
   contents: ManageContentListItem[],
   params: ContentFilterParams
 ): ManageContentListItem[] {
-  const type = isContentType(params.type) ? params.type : undefined;
   const q = params.q?.trim().toLowerCase();
+  if (!q) {
+    return contents;
+  }
 
-  return contents.filter((content) => {
-    if (params.themeId && String(content.week?.phase?.theme_id) !== params.themeId) {
-      return false;
-    }
-    if (params.phaseId && String(content.week?.phase_id) !== params.phaseId) {
-      return false;
-    }
-    if (params.weekId && String(content.week_id) !== params.weekId) {
-      return false;
-    }
-    if (type && content.content_type !== type) {
-      return false;
-    }
-    if (q && !content.title.toLowerCase().includes(q)) {
-      return false;
-    }
-    return true;
-  });
+  return contents.filter((content) => content.title.toLowerCase().includes(q));
 }

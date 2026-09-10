@@ -12,10 +12,12 @@ import {
   createPhase,
   createTheme,
   createWeek,
+  fetchAllContents,
   fetchManageCounts,
   fetchStudentsProgress,
   fetchUserIdsWithStripeSubscription,
   isUserCurrentlySubscribed,
+  parseStrictFilterId,
   rejectUser,
   updateContent,
   updatePhase,
@@ -52,10 +54,14 @@ describe("fetchStudentsProgress", () => {
         learning_contents: { data: null, error: null, count: 10 },
       },
       rpcResults: {
-        get_students_progress_summary: {
-          data: [{ user_id: 1, completed_count: 3, last_activity: "2026-07-03T00:00:00+00:00" }],
-          error: null,
-        },
+        // user 2 は進捗0でRPCに出ないため、users未充足 → 空ページで打ち切る
+        get_students_progress_summary: [
+          {
+            data: [{ user_id: 1, completed_count: 3, last_activity: "2026-07-03T00:00:00+00:00" }],
+            error: null,
+          },
+          { data: [], error: null },
+        ],
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
@@ -84,10 +90,10 @@ describe("fetchStudentsProgress", () => {
         learning_contents: { data: null, error: null, count: 10 },
       },
       rpcResults: {
-        get_students_progress_summary: {
-          data: [{ user_id: 1, completed_count: 1, last_activity: null }],
-          error: null,
-        },
+        get_students_progress_summary: [
+          { data: [{ user_id: 1, completed_count: 1, last_activity: null }], error: null },
+          { data: [], error: null },
+        ],
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
@@ -157,7 +163,7 @@ describe("fetchStudentsProgress", () => {
     expect(progressCalls).toHaveLength(2);
   });
 
-  it("RPCが pageSize 未満の行しか返さない場合、空ページを取りに行かない（#196）", async () => {
+  it("activeユーザー全員分の進捗が短ページに収まる場合、空ページを取りに行かない（#196）", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         users: { data: users, error: null },
@@ -165,7 +171,10 @@ describe("fetchStudentsProgress", () => {
       },
       rpcResults: {
         get_students_progress_summary: {
-          data: [{ user_id: 1, completed_count: 3, last_activity: "2026-07-03T00:00:00+00:00" }],
+          data: [
+            { user_id: 1, completed_count: 3, last_activity: "2026-07-03T00:00:00+00:00" },
+            { user_id: 2, completed_count: 1, last_activity: null },
+          ],
           error: null,
         },
       },
@@ -178,6 +187,50 @@ describe("fetchStudentsProgress", () => {
       ([fn]) => fn === "get_students_progress_summary"
     );
     expect(progressCalls).toHaveLength(1);
+  });
+
+  it("db-max-rows相当の短ページでも未充足なら続行し、取りこぼさない", async () => {
+    // pageSize=1000 だがサーバーが500行しか返さないケースを、users未充足で再現する
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        users: { data: users, error: null },
+        learning_contents: { data: null, error: null, count: 10 },
+      },
+      rpcResults: {
+        get_students_progress_summary: [
+          {
+            data: [{ user_id: 1, completed_count: 5, last_activity: "2026-07-01T00:00:00+00:00" }],
+            error: null,
+          },
+          {
+            data: [{ user_id: 2, completed_count: 2, last_activity: "2026-07-02T00:00:00+00:00" }],
+            error: null,
+          },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchStudentsProgress();
+
+    expect(result.data).toEqual([
+      {
+        user: users[0],
+        totalContents: 10,
+        completedContents: 5,
+        lastActivity: "2026-07-01T00:00:00+00:00",
+      },
+      {
+        user: users[1],
+        totalContents: 10,
+        completedContents: 2,
+        lastActivity: "2026-07-02T00:00:00+00:00",
+      },
+    ]);
+    const progressCalls = mockClient.rpc.mock.calls.filter(
+      ([fn]) => fn === "get_students_progress_summary"
+    );
+    expect(progressCalls).toHaveLength(2);
   });
 
   it("進捗の照会がRPCへの呼び出しに閉じる（ユーザーごとの逐次クエリ = N+1が無い）", async () => {
@@ -596,6 +649,33 @@ describe("fetchUserIdsWithStripeSubscription", () => {
 });
 
 // ----------------------------------------------------------------
+
+// ----------------------------------------------------------------
+// parseStrictFilterId / fetchAllContents の不正フィルタ
+// ----------------------------------------------------------------
+describe("parseStrictFilterId", () => {
+  it("整数文字列のみを受け入れる", () => {
+    expect(parseStrictFilterId("12")).toBe(12);
+    expect(parseStrictFilterId(undefined)).toBeUndefined();
+    expect(parseStrictFilterId("")).toBeUndefined();
+    expect(parseStrictFilterId("abc")).toBeUndefined();
+    expect(parseStrictFilterId("01")).toBeUndefined();
+    expect(parseStrictFilterId("2.0")).toBeUndefined();
+  });
+});
+
+describe("fetchAllContents（不正なフィルタID）", () => {
+  it("整数として不正な weekId ではクエリを発行せず空配列を返す", async () => {
+    const mockClient = createMockSupabaseClient();
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchAllContents({ weekId: "abc" });
+
+    expect(result).toEqual({ data: [], error: null });
+    expect(mockClient.from).not.toHaveBeenCalled();
+  });
+});
+
 // createTheme / createPhase / createWeek / createContent（挿入位置からの再採番）
 // ----------------------------------------------------------------
 describe("createTheme", () => {

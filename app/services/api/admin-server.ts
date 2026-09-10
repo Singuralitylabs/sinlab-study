@@ -31,36 +31,44 @@ import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabas
 type SiblingTable = "learning_themes" | "learning_phases" | "learning_weeks" | "learning_contents";
 type SiblingParentFilter = { column: "theme_id" | "phase_id" | "week_id"; value: number } | null;
 
-/** 管理画面コンテンツ一覧の select（ネストは一覧・階層ソートに必要な最小セット） */
-const MANAGE_CONTENT_LIST_SELECT = `
-  id, title, content_type, display_order, is_published, is_open_to_trial, week_id,
-  week:learning_weeks(
-    id, name, display_order, phase_id,
-    phase:learning_phases(
-      id, name, display_order, theme_id,
-      theme:learning_themes(id, name, display_order)
-    )
-  )
-`
-  .replace(/\s+/g, " ")
-  .trim();
-
 /**
- * テーマ/フェーズ絞り込み時はネストを `!inner` にして、未分類（week なし）を除外する。
+ * 管理画面コンテンツ一覧の select（ネストは一覧・階層ソートに必要な最小セット）。
+ * テーマ/フェーズ絞り込み時はネストを `!inner` にして未分類（week なし）を除外する。
  * PostgREST の埋め込みフィルタは inner join でないと親行を落とさないため。
  */
-const MANAGE_CONTENT_LIST_SELECT_INNER = `
-  id, title, content_type, display_order, is_published, is_open_to_trial, week_id,
-  week:learning_weeks!inner(
-    id, name, display_order, phase_id,
-    phase:learning_phases!inner(
-      id, name, display_order, theme_id,
-      theme:learning_themes!inner(id, name, display_order)
+function manageContentListSelect(innerJoin: boolean): string {
+  const weekRel = innerJoin ? "week:learning_weeks!inner" : "week:learning_weeks";
+  const phaseRel = innerJoin ? "phase:learning_phases!inner" : "phase:learning_phases";
+  const themeRel = innerJoin ? "theme:learning_themes!inner" : "theme:learning_themes";
+  return `
+    id, title, content_type, display_order, is_published, is_open_to_trial, week_id,
+    ${weekRel}(
+      id, name, display_order, phase_id,
+      ${phaseRel}(
+        id, name, display_order, theme_id,
+        ${themeRel}(id, name, display_order)
+      )
     )
-  )
-`
-  .replace(/\s+/g, " ")
-  .trim();
+  `
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * URL クエリの ID を厳密な整数として解釈する。
+ * `Number("abc")`→NaN や `Number("01")`→1 / `Number("2.0")`→2 のような
+ * 従来の JS 文字列比較と食い違う変換を避け、不正値は undefined を返す。
+ */
+export function parseStrictFilterId(value: string | undefined): number | undefined {
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || String(parsed) !== value) {
+    return undefined;
+  }
+  return parsed;
+}
 
 const MANAGE_THEME_LIST_SELECT = "id, name, description, image_url, display_order, is_published";
 
@@ -880,25 +888,39 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
   data: ManageContentListItem[] | null;
   error: PostgrestError | null;
 }> {
+  const themeId = parseStrictFilterId(filters.themeId);
+  const phaseId = parseStrictFilterId(filters.phaseId);
+  const weekId = parseStrictFilterId(filters.weekId);
+
+  // クエリ文字列が整数として不正な場合は PostgREST 400 を起こさず「該当なし」とする
+  // （従来の JS 文字列比較でも一致しなかった入力と同じ扱い）。
+  if (
+    (filters.themeId && themeId === undefined) ||
+    (filters.phaseId && phaseId === undefined) ||
+    (filters.weekId && weekId === undefined)
+  ) {
+    return { data: [], error: null };
+  }
+
   const supabase = await createServerSupabaseClient();
-  const needsInnerJoin = Boolean(filters.themeId || filters.phaseId);
+  const needsInnerJoin = themeId !== undefined || phaseId !== undefined;
 
   let query = supabase
     .from("learning_contents")
-    .select(needsInnerJoin ? MANAGE_CONTENT_LIST_SELECT_INNER : MANAGE_CONTENT_LIST_SELECT)
+    .select(manageContentListSelect(needsInnerJoin))
     .eq("is_deleted", false);
 
-  if (filters.weekId) {
-    query = query.eq("week_id", Number(filters.weekId));
+  if (weekId !== undefined) {
+    query = query.eq("week_id", weekId);
   }
   if (filters.contentType) {
     query = query.eq("content_type", filters.contentType);
   }
-  if (filters.themeId) {
-    query = query.eq("week.phase.theme_id", Number(filters.themeId));
+  if (themeId !== undefined) {
+    query = query.eq("week.phase.theme_id", themeId);
   }
-  if (filters.phaseId) {
-    query = query.eq("week.phase_id", Number(filters.phaseId));
+  if (phaseId !== undefined) {
+    query = query.eq("week.phase_id", phaseId);
   }
 
   const { data, error } = await query.order("display_order");
@@ -912,6 +934,28 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
   // 返すことに依存する。select を変更する場合は content-grouping.ts の
   // 階層順ソートが参照する week.phase.theme まで含まれることを確認すること
   return { data: data as unknown as ManageContentListItem[], error: null };
+}
+
+/**
+ * 管理画面に未削除コンテンツが1件でもあるか（head count）。
+ * フィルタ選択肢は週一覧から取るため、空状態判定だけに使う（#196 レビュー指摘）。
+ */
+export async function hasAnyManageContents(): Promise<{
+  data: boolean | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+  const { count, error } = await supabase
+    .from("learning_contents")
+    .select("id", { count: "exact", head: true })
+    .eq("is_deleted", false);
+
+  if (error) {
+    console.error("コンテンツ件数取得エラー:", error.message);
+    return { data: null, error };
+  }
+
+  return { data: (count ?? 0) > 0, error: null };
 }
 
 /**
@@ -1450,10 +1494,16 @@ export async function fetchStudentsProgress(): Promise<{
         });
       }
 
-      // 満杯ページ（pageSize 行）のときだけ続行する。
-      // `rows.length > 0` だと最終ページの次に必ず空ページを1回余分に取りに行く（#196）。
+      // 終了条件（#196 + レビュー指摘）:
+      // - 空ページなら終了（最終ページの次を取りに行かないのが主目的）
+      // - pageSize 満杯なら続行（1000行超の取りこぼし防止）
+      // - 短ページでも progressByUser.size < users.length なら続行
+      //   （db-max-rows が pageSize 未満に下がっている場合の取りこぼし防止。
+      //    進捗0の受講生はRPCに出ないため、その場合だけ空ページ1回が発生しうる）
       offset += rows.length;
-      hasMore = rows.length >= pageSize;
+      const activeUserCount = (users ?? []).length;
+      hasMore =
+        rows.length > 0 && (rows.length >= pageSize || progressByUser.size < activeUserCount);
     }
   }
 
