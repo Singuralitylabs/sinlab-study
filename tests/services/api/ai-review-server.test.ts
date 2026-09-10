@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SUBMISSION_CONTENT_COLUMNS } from "@/app/services/api/submissions-server";
 import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
@@ -191,18 +190,65 @@ describe("fetchCompletedAIReviewContentIds", () => {
 // fetchSubmissionsWithReviewsByUserId
 // ----------------------------------------------------------------
 describe("fetchSubmissionsWithReviewsByUserId", () => {
-  it("content の本文などの重いカラムを取得しないカラム定義で select する", async () => {
+  const listSelect =
+    "*, content:learning_contents(id, title), ai_review:ai_reviews(id, status, overall_score, review_content, reviewed_at, error_message)";
+
+  it("指定ページの提出一覧と総数を返す（2ページ目は range(20, 39)）", async () => {
+    const rows = [{ id: 21 }, { id: 22 }];
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: rows, error: null, count: 42 },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchSubmissionsWithReviewsByUserId(10, { page: 2, pageSize: 20 });
+
+    expect(result.data).toEqual(rows);
+    expect(result.count).toBe(42);
+    expect(result.error).toBeNull();
+    const builder = mockClient.from.mock.results[0]?.value;
+    expect(builder.select).toHaveBeenCalledWith(listSelect, { count: "exact" });
+    expect(builder.eq).toHaveBeenCalledWith("user_id", 10);
+    expect(builder.range).toHaveBeenCalledWith(20, 39);
+  });
+
+  it("引数省略時は1ページ目を range(0, 19) で取得する", async () => {
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: [], error: null, count: 0 },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchSubmissionsWithReviewsByUserId(10);
+
+    expect(result.data).toEqual([]);
+    expect(result.count).toBe(0);
+    const builder = mockClient.from.mock.results[0]?.value;
+    expect(builder.range).toHaveBeenCalledWith(0, 19);
+  });
+
+  it("page / pageSize が不正値（0・NaN）でも1以上に正規化して range を組み立てる", async () => {
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: [], error: null, count: 0 },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await fetchSubmissionsWithReviewsByUserId(10, { page: 0, pageSize: Number.NaN });
+
+    const builder = mockClient.from.mock.results[0]?.value;
+    expect(builder.range).toHaveBeenCalledWith(0, 0);
+  });
+
+  it("content / ai_reviews は一覧表示に必要なカラムのみ select する", async () => {
     const rows = [
       {
         id: 1,
         user_id: 10,
         content_id: 100,
-        content: { id: 100, title: "課題1", content_type: "exercise" },
+        content: { id: 100, title: "課題1" },
         ai_review: { id: 50, status: "completed" },
       },
     ];
     const mockClient = createMockSupabaseClient({
-      queryResult: { data: rows, error: null },
+      queryResult: { data: rows, error: null, count: 1 },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
 
@@ -211,8 +257,19 @@ describe("fetchSubmissionsWithReviewsByUserId", () => {
     expect(result.data).toEqual(rows);
     expect(result.error).toBeNull();
     const builder = mockClient.from.mock.results[0]?.value;
-    expect(builder.select).toHaveBeenCalledWith(
-      `*, content:learning_contents(${SUBMISSION_CONTENT_COLUMNS}), ai_review:ai_reviews(*)`
-    );
+    expect(builder.select).toHaveBeenCalledWith(listSelect, { count: "exact" });
+  });
+
+  it("DB エラー時、data: null / count: 0 とエラーを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: null, error: dbError, count: null },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchSubmissionsWithReviewsByUserId(10, { page: 1, pageSize: 20 });
+
+    expect(result.data).toBeNull();
+    expect(result.count).toBe(0);
+    expect(result.error).toEqual(dbError);
   });
 });

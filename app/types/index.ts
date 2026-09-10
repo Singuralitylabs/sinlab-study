@@ -138,7 +138,9 @@ export interface SubmissionWithContent extends Submission {
   > | null;
 }
 
-export interface SubmissionWithContentAndReview extends SubmissionWithContent {
+/** 受講生向け提出+レビュー一覧（content はタイトル表示用の最小カラムのみ） */
+export interface SubmissionWithContentAndReview extends Submission {
+  content: Pick<LearningContent, "id" | "title"> | null;
   ai_review: AIReview | null;
 }
 

@@ -1,9 +1,12 @@
 import { ClipboardList, Code, ExternalLink, Link as LinkIcon } from "lucide-react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AIReviewStatusBadge } from "@/app/components/AIReviewDisplay";
 import { AIReviewDisplayClient } from "@/app/components/AIReviewDisplayClient";
 import { PageTitle } from "@/app/components/PageTitle";
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
+import { SubmissionsPager } from "@/app/components/SubmissionsPager";
+import { SUBMISSIONS_PAGE_SIZE } from "@/app/constants/submissions";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import { fetchSubmissionsWithReviewsByUserId } from "@/app/services/api/ai-review-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -22,7 +25,11 @@ function formatDate(dateString: string | null) {
   });
 }
 
-export default async function SubmissionsPage() {
+interface PageProps {
+  searchParams: Promise<{ page?: string }>;
+}
+
+export default async function SubmissionsPage({ searchParams }: PageProps) {
   const { userId } = await getServerAuth();
 
   if (!userId) {
@@ -33,7 +40,21 @@ export default async function SubmissionsPage() {
     );
   }
 
-  const { data: submissions } = await fetchSubmissionsWithReviewsByUserId(userId);
+  const { page: pageParam } = await searchParams;
+  const parsedPage = Number.parseInt(pageParam ?? "1", 10);
+  const page = Number.isNaN(parsedPage) || parsedPage < 1 ? 1 : parsedPage;
+
+  const { data: submissions, count } = await fetchSubmissionsWithReviewsByUserId(userId, {
+    page,
+    pageSize: SUBMISSIONS_PAGE_SIZE,
+  });
+
+  // 範囲外ページ（データ空 or range超過）を指定された場合は1ページ目へ戻す
+  if (page > 1 && (!submissions || submissions.length === 0)) {
+    redirect("/submissions");
+  }
+
+  const totalPages = Math.max(1, Math.ceil(count / SUBMISSIONS_PAGE_SIZE));
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -109,6 +130,8 @@ export default async function SubmissionsPage() {
           ))}
         </div>
       )}
+
+      <SubmissionsPager basePath="/submissions" page={page} totalPages={totalPages} />
     </div>
   );
 }
