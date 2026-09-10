@@ -10,7 +10,7 @@ import {
   USER_ROLE,
   USER_STATUS,
 } from "@/app/constants/user";
-import type { MembershipType, UserRoleType, UserStatusType, UserType } from "@/app/types";
+import type { ManageUserListItem, MembershipType, UserRoleType, UserStatusType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -63,7 +63,7 @@ export function UserManagementTable({
   subscribedUserIds,
   subscriptionDataUnavailable = false,
 }: {
-  users: UserType[];
+  users: ManageUserListItem[];
   subscribedUserIds: number[];
   subscriptionDataUnavailable?: boolean;
 }) {

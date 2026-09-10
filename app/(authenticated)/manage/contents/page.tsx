@@ -2,7 +2,7 @@ import { Plus } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { PageTitle } from "@/app/components/PageTitle";
-import { deriveFilterOptions, filterContents } from "@/app/lib/content-filtering";
+import { deriveFilterOptions, filterContents, isContentType } from "@/app/lib/content-filtering";
 import {
   groupContentsByWeek,
   sortContentsByHierarchy,
@@ -26,10 +26,6 @@ function firstParam(value: string | string[] | undefined): string {
 
 export default async function AdminContentsPage({ searchParams }: AdminContentsPageProps) {
   const params = await searchParams;
-  const { data: contents } = await fetchAllContents();
-  const sortedContents = contents ? sortContentsByHierarchy(contents) : [];
-  const filterOptions = deriveFilterOptions(sortedContents);
-
   const filters = {
     theme: firstParam(params.theme),
     phase: firstParam(params.phase),
@@ -40,11 +36,29 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
   };
   const isFiltered = Object.values(filters).some((value) => value !== "");
 
-  const filteredContents = filterContents(sortedContents, {
+  // テーマ/フェーズ/週/種別は SQL 側で絞り、タイトル検索だけ JS に残す（#196）。
+  // フィルタ選択肢は未フィルタ一覧から導出するため、構造フィルタがあるときだけ
+  // 選択肢用の別取得を並列で行う（カラム絞り込み済みのためコストは許容範囲）。
+  const structuralFilters = {
     themeId: filters.theme || undefined,
     phaseId: filters.phase || undefined,
     weekId: filters.week || undefined,
-    type: filters.type || undefined,
+    contentType: isContentType(filters.type) ? filters.type : undefined,
+  };
+  const hasStructuralFilter = Object.values(structuralFilters).some((value) => value !== undefined);
+
+  const [listResult, optionsResult] = await Promise.all([
+    fetchAllContents(structuralFilters),
+    hasStructuralFilter ? fetchAllContents() : Promise.resolve(null),
+  ]);
+  const { data: contents } = listResult;
+  const optionsSource = optionsResult?.data ?? contents;
+  const hasAnyContents = (optionsSource?.length ?? 0) > 0;
+  const sortedForOptions = optionsSource ? sortContentsByHierarchy(optionsSource) : [];
+  const filterOptions = deriveFilterOptions(sortedForOptions);
+
+  const sortedContents = contents ? sortContentsByHierarchy(contents) : [];
+  const filteredContents = filterContents(sortedContents, {
     q: filters.q || undefined,
   });
   const groups = groupContentsByWeek(filteredContents);
@@ -72,7 +86,7 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
         </Button>
       </div>
 
-      {!contents || contents.length === 0 ? (
+      {!hasAnyContents ? (
         <Card>
           <CardContent className="py-8 text-center">
             <p className="text-muted-foreground">コンテンツがまだ登録されていません。</p>

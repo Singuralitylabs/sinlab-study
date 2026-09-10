@@ -3,7 +3,7 @@
 import { Loader2, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import type { LearningPhase, LearningTheme, LearningWeek } from "@/app/types";
+import type { LearningWeek, ManagePhaseListItem } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,12 +16,8 @@ import {
   SiblingOrderField,
 } from "../components/SiblingOrderField";
 
-interface PhaseWithTheme extends LearningPhase {
-  theme: LearningTheme | null;
-}
-
 interface WeekFormProps {
-  phases: PhaseWithTheme[];
+  phases: ManagePhaseListItem[];
   initialData?: LearningWeek;
   /**
    * 挿入位置ピッカーに表示する全週候補。作成モードは対象そのもの、編集モードは編集対象

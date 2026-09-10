@@ -1,5 +1,5 @@
 import { CONTENT_TYPES } from "@/app/constants/content";
-import type { ContentType, LearningContentWithWeek, LearningWeekWithPhase } from "@/app/types";
+import type { ContentType, ManageContentListItem, ManageWeekListItem } from "@/app/types";
 
 export function isContentType(value: string | undefined): value is ContentType {
   return CONTENT_TYPES.includes(value as ContentType);
@@ -33,7 +33,7 @@ export interface ContentFilterOptions {
  * 呼び出し前に sortContentsByHierarchy を通しておくことで、選択肢もテーマ→フェーズ→週の
  * 階層順になる。
  */
-export function deriveFilterOptions(contents: LearningContentWithWeek[]): ContentFilterOptions {
+export function deriveFilterOptions(contents: ManageContentListItem[]): ContentFilterOptions {
   const themes = new Map<number, ThemeFilterOption>();
   const phases = new Map<number, PhaseFilterOption>();
   const weeks = new Map<number, WeekFilterOption>();
@@ -69,7 +69,7 @@ export function deriveFilterOptions(contents: LearningContentWithWeek[]): Conten
  * 階層順になる。`learning_weeks.phase_id` は NOT NULL のため、週は常に選択肢に含める
  * （`deriveFilterOptions` と異なり「週未設定」の除外は発生しない）。
  */
-export function deriveWeekSelectOptions(weeks: LearningWeekWithPhase[]): ContentFilterOptions {
+export function deriveWeekSelectOptions(weeks: ManageWeekListItem[]): ContentFilterOptions {
   const themes = new Map<number, ThemeFilterOption>();
   const phases = new Map<number, PhaseFilterOption>();
 
@@ -106,9 +106,9 @@ export interface ContentFilterParams {
  * 週が未設定（＝未分類）のコンテンツはいずれかの階層フィルタが指定されている場合は除外される。
  */
 export function filterContents(
-  contents: LearningContentWithWeek[],
+  contents: ManageContentListItem[],
   params: ContentFilterParams
-): LearningContentWithWeek[] {
+): ManageContentListItem[] {
   const type = isContentType(params.type) ? params.type : undefined;
   const q = params.q?.trim().toLowerCase();
 

@@ -539,6 +539,8 @@ maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進
 
 **受講生進捗一覧の集計**: `/manage/students` はユーザーごとの完了数・最終活動日時を、RPC `get_students_progress_summary()`（`GROUP BY user_id`、#83）から取得する。この関数は `SECURITY DEFINER` を使わないプレーンな SQL 関数（デフォルトの `SECURITY INVOKER`）で、呼び出し元の権限のまま上記SELECTポリシーに従う。そのため member が直接呼び出しても本人の1行しか返らず、admin/maintainer が呼び出したときだけ全件が返る（RPC側でのロールチェックは不要）。
 
+**兄弟要素の display_order 一括更新**: 管理画面の挿入位置指定（#190 / #191）は、RPC `bulk_update_sibling_display_order(p_table, p_updates)`（#196）で変化した兄弟行の `display_order` を1回の `UPDATE … FROM` で更新する。upsert ではなく純粋な UPDATE のため INSERT 経路に乗らず、`updated_at` の BEFORE UPDATE トリガーも通常どおり発火する。`SECURITY INVOKER` で呼び出し元の UPDATE ポリシーに従う（許可テーブルは `learning_themes` / `learning_phases` / `learning_weeks` / `learning_contents` のみ）。
+
 **可視コンテンツ限定の EXISTS 条件**:
 
 お試しユーザーがお試し非公開コンテンツの進捗を書き込めないよう、INSERT / UPDATE に対象コンテンツが自身に可視であることの EXISTS 条件を課す。
@@ -654,6 +656,7 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 | `20260906090000_move_gas_practical_gemini_week.sql` | GAS講座（実践編）の週「Geminiを使ったドキュメント自動要約」を、誤ったフェーズ（その他GAS活用）配下に存在する場合のみ正しいフェーズ（Googleドキュメント活用）へ移動する冪等なUPDATE（#168）。`20260614080707`のVALUES修正だけでは version 記録済みの環境に届かないため、独立ファイルとして新規タイムスタンプで追加 |
 | `20260907010000_rename_pending_status_to_trial.sql` | `users.status` の値を `'pending'` から `'trial'` へリネーム（#88）。`users_status_check` 制約のDROP→既存行のUPDATE→制約のADDと、`learning_contents` のSELECTポリシー（`20260801000002_trial_user_policies.sql` で追加）内の比較値の更新を同一トランザクションで適用し、DEFAULTも `'trial'` に変更。値のリネームとポリシー更新を分けると片方だけ適用された瞬間にお試しユーザーから見て `learning_contents` が0行になるため1ファイルにまとめている。アプリコードの `USER_STATUS.TRIAL` への切り替えと同時にリリースする必要がある |
 | `20260908000000_secure_slides_bucket.sql` | スライドPDFの署名付きURL配信（#89）: `slides` バケットを非公開化し、`learning_contents.pdf_url` を公開URLからオブジェクトキーへ一括正規化、`storage.objects` に `slides` の SELECT ポリシー（`learning_contents` の RLS に委譲）を追加し、INSERT / UPDATE / DELETE は `thumbnails` のポリシーと統合して両バケット対象の1本ずつにする。正規化後にキーとして解釈できない `pdf_url` が残っていれば例外で中断する。**アプリ側の署名付きURL配信と同時にリリースすること**（旧コードは pdf_url を公開URLとして組み立てるため） |
+| `20260910093449_add_bulk_update_sibling_display_order_rpc.sql` | 兄弟要素の `display_order` 一括更新 RPC `bulk_update_sibling_display_order(p_table, p_updates)`（#196）。挿入位置指定時の N 文 UPDATE を 1 回の UPDATE … FROM に置き換える。SECURITY INVOKER・許可テーブル限定・純粋な UPDATE のみ（upsert ではない） |
 
 ### 7.1 リモート適用履歴との整合（#149・確定版）
 
@@ -747,3 +750,4 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 | 2026年9月 | #168対応：「GAS学習（実践編）」の`20260614080707_seed_gas_practical_course_structure.sql`が、週「Geminiを使ったドキュメント自動要約」の所属フェーズを本番の実際の配置（「その他GAS活用」ではなく「Googleドキュメント活用」、display_orderは1,2の次の6）と取り違えていた1点の食い違いを修正。ただしSupabase CLIはバージョン番号のみで適用判定するため、このVALUES修正はフレッシュ環境にしか届かない。旧内容で本ファイルを既に適用済みの環境にも届くよう、実データの移動は独立した新規マイグレーション（`20260906090000_move_gas_practical_gemini_week.sql`）で対応。マイグレーション一覧・7.1節（判明した事実4・整合手順2・5）を更新 |
 | 2026年9月 | #88対応：`users.status` の値 `'pending'` を `'trial'` にリネーム。`users_status_check` 制約のDROP→UPDATE→ADDと、`get_user_status()` を参照するlearning_contentsのSELECTポリシーの比較値更新を同一トランザクションで適用する`20260907010000_rename_pending_status_to_trial.sql`を追加。3.4節・3.8節・5.2節・6.1節・マイグレーション一覧を更新。`ai_reviews.status` の `'pending'`（AIレビューのジョブ状態）は対象外 |
 | 2026年9月 | スライドPDFの署名付きURL配信（#89）に対応：`slides` バケットを非公開化し、`learning_contents.pdf_url` の保存形式をオブジェクトキーに統一（3.4）。`storage.objects` の `slides` ポリシー（SELECT は `learning_contents` の RLS に委譲）を6.8に追記、マイグレーション一覧を更新 |
+| 2026年9月 | #196対応：兄弟要素の `display_order` 一括更新 RPC `bulk_update_sibling_display_order()` を追加。6.2節・マイグレーション一覧を更新 |

@@ -12,13 +12,17 @@ import {
   NON_CURRENT_SUBSCRIPTION_STATUSES,
 } from "@/app/services/api/stripe-server";
 import type {
+  ContentSiblingCandidateRow,
+  ContentType,
   LearningContent,
-  LearningContentWithWeek,
   LearningPhase,
-  LearningPhaseWithTheme,
   LearningTheme,
   LearningWeek,
-  LearningWeekWithPhase,
+  ManageContentListItem,
+  ManagePhaseListItem,
+  ManageThemeListItem,
+  ManageUserListItem,
+  ManageWeekListItem,
   MembershipType,
   UserType,
 } from "@/app/types";
@@ -26,6 +30,69 @@ import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabas
 
 type SiblingTable = "learning_themes" | "learning_phases" | "learning_weeks" | "learning_contents";
 type SiblingParentFilter = { column: "theme_id" | "phase_id" | "week_id"; value: number } | null;
+
+/** 管理画面コンテンツ一覧の select（ネストは一覧・階層ソートに必要な最小セット） */
+const MANAGE_CONTENT_LIST_SELECT = `
+  id, title, content_type, display_order, is_published, is_open_to_trial, week_id,
+  week:learning_weeks(
+    id, name, display_order, phase_id,
+    phase:learning_phases(
+      id, name, display_order, theme_id,
+      theme:learning_themes(id, name, display_order)
+    )
+  )
+`
+  .replace(/\s+/g, " ")
+  .trim();
+
+/**
+ * テーマ/フェーズ絞り込み時はネストを `!inner` にして、未分類（week なし）を除外する。
+ * PostgREST の埋め込みフィルタは inner join でないと親行を落とさないため。
+ */
+const MANAGE_CONTENT_LIST_SELECT_INNER = `
+  id, title, content_type, display_order, is_published, is_open_to_trial, week_id,
+  week:learning_weeks!inner(
+    id, name, display_order, phase_id,
+    phase:learning_phases!inner(
+      id, name, display_order, theme_id,
+      theme:learning_themes!inner(id, name, display_order)
+    )
+  )
+`
+  .replace(/\s+/g, " ")
+  .trim();
+
+const MANAGE_THEME_LIST_SELECT = "id, name, description, image_url, display_order, is_published";
+
+const MANAGE_PHASE_LIST_SELECT = `
+  id, name, description, display_order, is_published, theme_id,
+  theme:learning_themes(id, name, display_order)
+`
+  .replace(/\s+/g, " ")
+  .trim();
+
+const MANAGE_WEEK_LIST_SELECT = `
+  id, name, display_order, is_published, phase_id,
+  phase:learning_phases(
+    id, name, display_order, theme_id,
+    theme:learning_themes(id, name, display_order)
+  )
+`
+  .replace(/\s+/g, " ")
+  .trim();
+
+const CONTENT_SIBLING_CANDIDATE_SELECT = "id, title, display_order, is_published, week_id";
+
+const MANAGE_USER_LIST_SELECT =
+  "id, display_name, email, role, status, membership_type, created_at";
+
+/** `/manage/contents` の構造フィルタ（タイトル検索 `q` は含めない。JS側で行う） */
+export interface FetchContentsFilters {
+  themeId?: string;
+  phaseId?: string;
+  weekId?: string;
+  contentType?: ContentType;
+}
 
 /**
  * 兄弟一覧（同じ親配下・未削除、`excludeId` があれば自分自身を除く）を取得する。
@@ -47,7 +114,11 @@ async function fetchSiblings(
   return query;
 }
 
-/** `updates`（display_order が変わる行のみ）を個別UPDATEする。0件なら何もしない。 */
+/**
+ * `updates`（display_order が変わる行のみ）を RPC で一括 UPDATEする。0件なら何もしない。
+ * 個別 `.update().eq("id")` の N 往復を避け、兄弟数によらず定数回（1 RPC）にする（#196）。
+ * upsert ではなく UPDATE 専用 RPC のため、INSERT 扱いにならず `updated_at` トリガーも通常どおり発火する。
+ */
 async function applySiblingUpdates(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
   table: SiblingTable,
@@ -56,12 +127,11 @@ async function applySiblingUpdates(
   if (updates.length === 0) {
     return null;
   }
-  const results = await Promise.all(
-    updates.map((row) =>
-      supabase.from(table).update({ display_order: row.display_order }).eq("id", row.id)
-    )
-  );
-  return results.find((result) => result.error)?.error ?? null;
+  const { error } = await supabase.rpc("bulk_update_sibling_display_order", {
+    p_table: table,
+    p_updates: updates,
+  });
+  return error;
 }
 
 /**
@@ -181,14 +251,14 @@ async function renumberSourceSiblingsAfterMove(
 // =====================================================
 
 export async function fetchAllThemes(): Promise<{
-  data: LearningTheme[] | null;
+  data: ManageThemeListItem[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_themes")
-    .select("*")
+    .select(MANAGE_THEME_LIST_SELECT)
     .eq("is_deleted", false)
     .order("display_order");
 
@@ -395,14 +465,14 @@ export async function deleteTheme(id: number): Promise<{ error: PostgrestError |
  * 呼び出し側で `sortPhasesByHierarchy` を通すこと。
  */
 export async function fetchAllPhases(): Promise<{
-  data: LearningPhaseWithTheme[] | null;
+  data: ManagePhaseListItem[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_phases")
-    .select("*, theme:learning_themes(*)")
+    .select(MANAGE_PHASE_LIST_SELECT)
     .eq("is_deleted", false)
     .order("display_order");
 
@@ -411,7 +481,7 @@ export async function fetchAllPhases(): Promise<{
     return { data: null, error };
   }
 
-  return { data: data as LearningPhaseWithTheme[], error: null };
+  return { data: data as unknown as ManagePhaseListItem[], error: null };
 }
 
 export async function fetchPhaseById(id: number): Promise<{
@@ -616,14 +686,14 @@ export async function deletePhase(id: number): Promise<{ error: PostgrestError |
  * 用の選択肢導出）は、いずれも呼び出し側で `sortWeeksByHierarchy` を通すこと。
  */
 export async function fetchAllWeeks(): Promise<{
-  data: LearningWeekWithPhase[] | null;
+  data: ManageWeekListItem[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_weeks")
-    .select("*, phase:learning_phases(*, theme:learning_themes(*))")
+    .select(MANAGE_WEEK_LIST_SELECT)
     .eq("is_deleted", false)
     .order("display_order");
 
@@ -632,7 +702,7 @@ export async function fetchAllWeeks(): Promise<{
     return { data: null, error };
   }
 
-  return { data, error: null };
+  return { data: data as unknown as ManageWeekListItem[], error: null };
 }
 
 export async function fetchWeekById(id: number): Promise<{
@@ -802,17 +872,36 @@ export async function deleteWeek(id: number): Promise<{ error: PostgrestError | 
 // コンテンツ管理
 // =====================================================
 
-export async function fetchAllContents(): Promise<{
-  data: LearningContentWithWeek[] | null;
+/**
+ * コンテンツ管理一覧を取得する（#196）。本文系カラムは含めない。
+ * テーマ/フェーズ/週/種別は SQL 側で絞り、タイトル検索は呼び出し側の JS に残す。
+ */
+export async function fetchAllContents(filters: FetchContentsFilters = {}): Promise<{
+  data: ManageContentListItem[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
+  const needsInnerJoin = Boolean(filters.themeId || filters.phaseId);
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("learning_contents")
-    .select("*, week:learning_weeks(*, phase:learning_phases(*, theme:learning_themes(*)))")
-    .eq("is_deleted", false)
-    .order("display_order");
+    .select(needsInnerJoin ? MANAGE_CONTENT_LIST_SELECT_INNER : MANAGE_CONTENT_LIST_SELECT)
+    .eq("is_deleted", false);
+
+  if (filters.weekId) {
+    query = query.eq("week_id", Number(filters.weekId));
+  }
+  if (filters.contentType) {
+    query = query.eq("content_type", filters.contentType);
+  }
+  if (filters.themeId) {
+    query = query.eq("week.phase.theme_id", Number(filters.themeId));
+  }
+  if (filters.phaseId) {
+    query = query.eq("week.phase_id", Number(filters.phaseId));
+  }
+
+  const { data, error } = await query.order("display_order");
 
   if (error) {
     console.error("コンテンツ一覧取得エラー:", error.message);
@@ -822,7 +911,37 @@ export async function fetchAllContents(): Promise<{
   // このキャストは select が theme まで辿れるネスト形状（week.phase.theme）で
   // 返すことに依存する。select を変更する場合は content-grouping.ts の
   // 階層順ソートが参照する week.phase.theme まで含まれることを確認すること
-  return { data: data as LearningContentWithWeek[], error: null };
+  return { data: data as unknown as ManageContentListItem[], error: null };
+}
+
+/**
+ * コンテンツ新規作成/編集フォームの挿入位置ピッカー用の兄弟候補（#196）。
+ * 一覧用の本文・4階層ネストを持たず、`week_id` で任意に絞り込める。
+ * `weekId` を省略した場合は全週分を返し、フォーム側で週切替時に絞り込む。
+ */
+export async function fetchContentSiblingCandidates(weekId?: number): Promise<{
+  data: ContentSiblingCandidateRow[] | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+
+  let query = supabase
+    .from("learning_contents")
+    .select(CONTENT_SIBLING_CANDIDATE_SELECT)
+    .eq("is_deleted", false);
+
+  if (weekId !== undefined) {
+    query = query.eq("week_id", weekId);
+  }
+
+  const { data, error } = await query.order("display_order");
+
+  if (error) {
+    console.error("コンテンツ兄弟候補取得エラー:", error.message);
+    return { data: null, error };
+  }
+
+  return { data, error: null };
 }
 
 export async function fetchContentByIdForAdmin(
@@ -1037,14 +1156,14 @@ export async function deleteContent(id: number): Promise<{ error: PostgrestError
 // =====================================================
 
 export async function fetchAllUsers(): Promise<{
-  data: UserType[] | null;
+  data: ManageUserListItem[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createAdminSupabaseClient();
 
   const { data, error } = await supabase
     .from("users")
-    .select("*")
+    .select(MANAGE_USER_LIST_SELECT)
     .eq("is_deleted", false)
     .order("created_at", { ascending: false });
 
@@ -1053,7 +1172,7 @@ export async function fetchAllUsers(): Promise<{
     return { data: null, error };
   }
 
-  return { data: data as UserType[], error: null };
+  return { data: data as ManageUserListItem[], error: null };
 }
 
 /**
@@ -1331,8 +1450,10 @@ export async function fetchStudentsProgress(): Promise<{
         });
       }
 
+      // 満杯ページ（pageSize 行）のときだけ続行する。
+      // `rows.length > 0` だと最終ページの次に必ず空ページを1回余分に取りに行く（#196）。
       offset += rows.length;
-      hasMore = rows.length > 0;
+      hasMore = rows.length >= pageSize;
     }
   }
 

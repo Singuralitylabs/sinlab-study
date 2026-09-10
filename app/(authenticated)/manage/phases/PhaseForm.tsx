@@ -3,7 +3,7 @@
 import { Loader2, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import type { LearningPhase, LearningTheme } from "@/app/types";
+import type { LearningPhase, ManageThemeListItem } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,7 +18,7 @@ import {
 } from "../components/SiblingOrderField";
 
 interface PhaseFormProps {
-  themes: LearningTheme[];
+  themes: ManageThemeListItem[];
   initialData?: LearningPhase;
   /**
    * 挿入位置ピッカーに表示する全フェーズ候補。作成モードは対象そのもの、編集モードは
