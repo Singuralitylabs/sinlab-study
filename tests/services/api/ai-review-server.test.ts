@@ -38,6 +38,8 @@ describe("fetchAllSubmissionsWithReviews", () => {
     expect(result.error).toBeNull();
     const builder = mockClient.from.mock.results[0]?.value;
     expect(builder.range).toHaveBeenCalledWith(20, 39);
+    expect(builder.order).toHaveBeenCalledWith("submitted_at", { ascending: false });
+    expect(builder.order).toHaveBeenCalledWith("id", { ascending: false });
   });
 
   it("引数省略時は1ページ目を range(0, 19) で取得する", async () => {
@@ -209,6 +211,8 @@ describe("fetchSubmissionsWithReviewsByUserId", () => {
     expect(builder.select).toHaveBeenCalledWith(listSelect, { count: "exact" });
     expect(builder.eq).toHaveBeenCalledWith("user_id", 10);
     expect(builder.range).toHaveBeenCalledWith(20, 39);
+    expect(builder.order).toHaveBeenCalledWith("submitted_at", { ascending: false });
+    expect(builder.order).toHaveBeenCalledWith("id", { ascending: false });
   });
 
   it("引数省略時は1ページ目を range(0, 19) で取得する", async () => {

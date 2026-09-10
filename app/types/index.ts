@@ -138,17 +138,21 @@ export interface SubmissionWithContent extends Submission {
   > | null;
 }
 
-/** 受講生向け提出+レビュー一覧（content はタイトル表示用の最小カラムのみ） */
+/** 提出一覧表示用の ai_reviews（token 等のメタは含めない） */
+export type AIReviewListItem = Pick<
+  AIReview,
+  "id" | "status" | "overall_score" | "review_content" | "reviewed_at" | "error_message"
+>;
+
+/** 受講生向け提出+レビュー一覧（content / ai_review は一覧表示用の最小カラムのみ） */
 export interface SubmissionWithContentAndReview extends Submission {
   content: Pick<LearningContent, "id" | "title"> | null;
-  ai_review: AIReview | null;
+  ai_review: AIReviewListItem | null;
 }
 
-/** 管理者・講師向け提出一覧の1件（content は一覧表示に必要な最小カラムのみ） */
-export interface AdminSubmissionWithReview extends Submission {
+/** 管理者・講師向け提出一覧の1件（受講生一覧＋提出者情報） */
+export interface AdminSubmissionWithReview extends SubmissionWithContentAndReview {
   user: Pick<UserType, "id" | "display_name" | "email"> | null;
-  content: Pick<LearningContent, "id" | "title"> | null;
-  ai_review: AIReview | null;
 }
 
 // =====================================================

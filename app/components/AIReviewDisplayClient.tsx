@@ -1,10 +1,10 @@
 "use client";
 
-import type { AIReview } from "@/app/types";
+import type { AIReviewListItem } from "@/app/types";
 import { AIReviewDisplay } from "./AIReviewDisplay";
 
 interface AIReviewDisplayClientProps {
-  review: AIReview;
+  review: AIReviewListItem;
 }
 
 export function AIReviewDisplayClient({ review }: AIReviewDisplayClientProps) {

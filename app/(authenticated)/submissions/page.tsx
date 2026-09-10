@@ -8,6 +8,11 @@ import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { SubmissionsPager } from "@/app/components/SubmissionsPager";
 import { SUBMISSIONS_PAGE_SIZE } from "@/app/constants/submissions";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
+import {
+  calcTotalPages,
+  parsePageParam,
+  shouldRedirectOutOfRangePage,
+} from "@/app/lib/submissions-pagination";
 import { fetchSubmissionsWithReviewsByUserId } from "@/app/services/api/ai-review-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
@@ -41,20 +46,37 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
   }
 
   const { page: pageParam } = await searchParams;
-  const parsedPage = Number.parseInt(pageParam ?? "1", 10);
-  const page = Number.isNaN(parsedPage) || parsedPage < 1 ? 1 : parsedPage;
+  const page = parsePageParam(pageParam);
 
-  const { data: submissions, count } = await fetchSubmissionsWithReviewsByUserId(userId, {
+  const {
+    data: submissions,
+    count,
+    error,
+  } = await fetchSubmissionsWithReviewsByUserId(userId, {
     page,
     pageSize: SUBMISSIONS_PAGE_SIZE,
   });
 
-  // 範囲外ページ（データ空 or range超過）を指定された場合は1ページ目へ戻す
-  if (page > 1 && (!submissions || submissions.length === 0)) {
+  if (
+    shouldRedirectOutOfRangePage({
+      page,
+      dataLength: submissions?.length ?? 0,
+      errorCode: error?.code,
+    })
+  ) {
     redirect("/submissions");
   }
 
-  const totalPages = Math.max(1, Math.ceil(count / SUBMISSIONS_PAGE_SIZE));
+  if (error) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <PageTitle title="提出履歴" description="これまでに提出した課題の一覧です" />
+        <p className="text-destructive text-sm">提出履歴の取得に失敗しました。</p>
+      </div>
+    );
+  }
+
+  const totalPages = calcTotalPages(count, SUBMISSIONS_PAGE_SIZE);
 
   return (
     <div className="max-w-4xl mx-auto">

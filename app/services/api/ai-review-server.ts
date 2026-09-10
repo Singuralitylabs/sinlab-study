@@ -1,5 +1,6 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import { SUBMISSIONS_PAGE_SIZE } from "@/app/constants/submissions";
+import { resolvePageRange } from "@/app/lib/submissions-pagination";
 import type {
   AdminSubmissionWithReview,
   AIReview,
@@ -33,11 +34,7 @@ export async function fetchSubmissionsWithReviewsByUserId(
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
-
-  // 呼び出し元の値に依存せず range の引数を有効に保つため、page / pageSize は1以上の整数に正規化する
-  const safePage = Math.max(1, Math.floor(page) || 1);
-  const safePageSize = Math.max(1, Math.floor(pageSize) || 1);
-  const from = (safePage - 1) * safePageSize;
+  const { from, to } = resolvePageRange(page, pageSize);
 
   const { data, count, error } = await supabase
     .from("submissions")
@@ -46,7 +43,8 @@ export async function fetchSubmissionsWithReviewsByUserId(
     })
     .eq("user_id", userId)
     .order("submitted_at", { ascending: false })
-    .range(from, from + safePageSize - 1);
+    .order("id", { ascending: false })
+    .range(from, to);
 
   if (error) {
     console.error("提出+レビュー取得エラー:", error.message);
@@ -77,11 +75,7 @@ export async function fetchAllSubmissionsWithReviews({
   error: PostgrestError | null;
 }> {
   const supabase = await createAdminSupabaseClient();
-
-  // 呼び出し元の値に依存せず range の引数を有効に保つため、page / pageSize は1以上の整数に正規化する
-  const safePage = Math.max(1, Math.floor(page) || 1);
-  const safePageSize = Math.max(1, Math.floor(pageSize) || 1);
-  const from = (safePage - 1) * safePageSize;
+  const { from, to } = resolvePageRange(page, pageSize);
 
   const { data, count, error } = await supabase
     .from("submissions")
@@ -90,7 +84,8 @@ export async function fetchAllSubmissionsWithReviews({
       { count: "exact" }
     )
     .order("submitted_at", { ascending: false })
-    .range(from, from + safePageSize - 1)
+    .order("id", { ascending: false })
+    .range(from, to)
     .overrideTypes<AdminSubmissionWithReview[], { merge: false }>();
 
   if (error) {
@@ -118,6 +113,7 @@ export async function fetchCompletedAIReviewByContentId(
     .eq("content_id", contentId)
     .eq("ai_review.status", "completed")
     .order("submitted_at", { ascending: false })
+    .order("id", { ascending: false })
     .limit(1)
     .maybeSingle();
 

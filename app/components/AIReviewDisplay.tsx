@@ -2,13 +2,13 @@
 
 import { Bot, ChevronDown, ChevronUp, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 import { useState } from "react";
-import type { AIReview } from "@/app/types";
+import type { AIReviewListItem } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
 interface AIReviewDisplayProps {
-  review: AIReview | null;
+  review: AIReviewListItem | null;
   isLoading?: boolean;
   onRetry?: () => void;
   defaultExpanded?: boolean;
@@ -122,7 +122,7 @@ export function AIReviewDisplay({
   );
 }
 
-export function AIReviewStatusBadge({ review }: { review: AIReview | null }) {
+export function AIReviewStatusBadge({ review }: { review: AIReviewListItem | null }) {
   if (!review) return null;
 
   switch (review.status) {
