@@ -4,12 +4,13 @@ import type {
   AIReview,
   SubmissionWithContentAndReview,
 } from "@/app/types";
+import { SUBMISSION_CONTENT_COLUMNS } from "./submissions-server";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
 const AI_REVIEW_SELECT = "ai_review:ai_reviews(*)";
 
 /**
- * ユーザーの提出+AIレビュー一覧を取得（RLS経由）
+ * ユーザーの提出+AIレビュー一覧を取得（RLS経由、content は一覧用カラムのみ取得）
  */
 export async function fetchSubmissionsWithReviewsByUserId(userId: number): Promise<{
   data: SubmissionWithContentAndReview[] | null;
@@ -19,7 +20,7 @@ export async function fetchSubmissionsWithReviewsByUserId(userId: number): Promi
 
   const { data, error } = await supabase
     .from("submissions")
-    .select(`*, content:learning_contents(*), ${AI_REVIEW_SELECT}`)
+    .select(`*, content:learning_contents(${SUBMISSION_CONTENT_COLUMNS}), ${AI_REVIEW_SELECT}`)
     .eq("user_id", userId)
     .order("submitted_at", { ascending: false });
 

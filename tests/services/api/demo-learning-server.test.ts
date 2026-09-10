@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { LEARNING_CONTENT_LIST_COLUMNS } from "@/app/services/api/learning-server";
+import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
 
@@ -59,5 +61,39 @@ describe("createDemoSlideSignedUrl", () => {
     } as never);
 
     await expect(createDemoSlideSignedUrl(openSlide)).resolves.toBeNull();
+  });
+});
+
+describe("fetchDemoContentsByWeekId", () => {
+  it("本文などの重いカラムを取得しないカラム定義で select する", async () => {
+    const contents = [{ id: 1, title: "コンテンツ1" }];
+    const mockClient = createMockSupabaseClient({ queryResult: { data: contents, error: null } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const { fetchDemoContentsByWeekId } = await import("@/app/services/api/demo-learning-server");
+    const result = await fetchDemoContentsByWeekId(10);
+
+    expect(result.data).toEqual(contents);
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.select).toHaveBeenCalledWith(LEARNING_CONTENT_LIST_COLUMNS);
+  });
+});
+
+describe("fetchDemoWeeksWithContentsByPhaseId", () => {
+  it("週に紐づくコンテンツの本文などの重いカラムを取得しない", async () => {
+    const weeks = [{ id: 1, name: "Week 1", contents: [{ id: 10, title: "コンテンツ10" }] }];
+    const mockClient = createMockSupabaseClient({ queryResult: { data: weeks, error: null } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const { fetchDemoWeeksWithContentsByPhaseId } = await import(
+      "@/app/services/api/demo-learning-server"
+    );
+    const result = await fetchDemoWeeksWithContentsByPhaseId(1);
+
+    expect(result.data).toEqual(weeks);
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.select).toHaveBeenCalledWith(
+      `*, contents:learning_contents(${LEARNING_CONTENT_LIST_COLUMNS})`
+    );
   });
 });

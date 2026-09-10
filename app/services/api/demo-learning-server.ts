@@ -1,11 +1,13 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import type {
   LearningContent,
-  LearningContentWithWeek,
+  LearningContentListItem,
+  LearningContentWithBreadcrumb,
   LearningPhase,
   LearningTheme,
   LearningWeek,
 } from "@/app/types";
+import { LEARNING_CONTENT_DETAIL_COLUMNS, LEARNING_CONTENT_LIST_COLUMNS } from "./learning-server";
 import { createSlideSignedUrlWithClient } from "./slides-server";
 import { createAdminSupabaseClient } from "./supabase-server";
 
@@ -165,17 +167,17 @@ export async function fetchDemoContext(): Promise<{
 }
 
 /**
- * デモ用: 週に属するコンテンツ一覧を取得
+ * デモ用: 週に属するコンテンツ一覧を取得（本文等の重いカラムは除外）
  */
 export async function fetchDemoContentsByWeekId(weekId: number): Promise<{
-  data: LearningContent[] | null;
+  data: LearningContentListItem[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createAdminSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_contents")
-    .select("*")
+    .select(LEARNING_CONTENT_LIST_COLUMNS)
     .eq("week_id", weekId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -186,21 +188,21 @@ export async function fetchDemoContentsByWeekId(weekId: number): Promise<{
     return { data: null, error };
   }
 
-  return { data: data as LearningContent[], error: null };
+  return { data: data as LearningContentListItem[], error: null };
 }
 
 /**
- * デモ用: フェーズに属する公開週一覧をコンテンツ付きで取得
+ * デモ用: フェーズに属する公開週一覧をコンテンツ付きで取得（本文等の重いカラムは除外）
  */
 export async function fetchDemoWeeksWithContentsByPhaseId(phaseId: number): Promise<{
-  data: (LearningWeek & { contents: LearningContent[] })[] | null;
+  data: (LearningWeek & { contents: LearningContentListItem[] })[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createAdminSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_weeks")
-    .select("*, contents:learning_contents(*)")
+    .select(`*, contents:learning_contents(${LEARNING_CONTENT_LIST_COLUMNS})`)
     .eq("phase_id", phaseId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -214,21 +216,21 @@ export async function fetchDemoWeeksWithContentsByPhaseId(phaseId: number): Prom
     return { data: null, error };
   }
 
-  return { data: data as (LearningWeek & { contents: LearningContent[] })[], error: null };
+  return { data: data as (LearningWeek & { contents: LearningContentListItem[] })[], error: null };
 }
 
 /**
  * デモ用: コンテンツ詳細を取得（週・フェーズ・テーマ情報付き）
  */
 export async function fetchDemoContentById(contentId: number): Promise<{
-  data: LearningContentWithWeek | null;
+  data: LearningContentWithBreadcrumb | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createAdminSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_contents")
-    .select("*, week:learning_weeks(*, phase:learning_phases(*, theme:learning_themes(*)))")
+    .select(LEARNING_CONTENT_DETAIL_COLUMNS)
     .eq("id", contentId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -239,7 +241,7 @@ export async function fetchDemoContentById(contentId: number): Promise<{
     return { data: null, error };
   }
 
-  return { data: data as LearningContentWithWeek, error: null };
+  return { data: data as LearningContentWithBreadcrumb, error: null };
 }
 
 /**
