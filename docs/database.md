@@ -423,15 +423,19 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 | インデックス名 | テーブル | 対象カラム | 用途 |
 |:--|:--|:--|:--|
-| idx_learning_phases_theme_id | learning_phases | theme_id | テーマ内のフェーズ検索 |
-| idx_learning_weeks_phase_id | learning_weeks | phase_id | フェーズ内の週検索 |
-| idx_learning_contents_week_id | learning_contents | week_id | 週内のコンテンツ検索 |
+| idx_learning_phases_theme_id | learning_phases | theme_id, display_order | テーマ内のフェーズ一覧（`ORDER BY display_order`） |
+| idx_learning_weeks_phase_id | learning_weeks | phase_id, display_order | フェーズ内の週一覧（`ORDER BY display_order`） |
+| idx_learning_contents_week_id | learning_contents | week_id, display_order | 週内のコンテンツ一覧（`ORDER BY display_order`） |
 | idx_user_progress_user_id | user_progress | user_id | ユーザー別の進捗検索 |
+| idx_user_progress_user_id_completed | user_progress | user_id（部分: `is_completed = true`） | 完了済み進捗の集計・絞り込み |
 | idx_user_progress_content_id | user_progress | content_id | コンテンツ別の進捗検索 |
-| idx_submissions_user_id | submissions | user_id | ユーザー別の提出検索 |
+| idx_submissions_user_id | submissions | user_id, submitted_at DESC | ユーザー別の提出一覧（`ORDER BY submitted_at DESC`） |
+| idx_submissions_submitted_at | submissions | submitted_at DESC | 管理者向け提出一覧（`ORDER BY submitted_at DESC` + range） |
 | idx_submissions_content_id | submissions | content_id | コンテンツ別の提出検索 |
 | idx_ai_reviews_status | ai_reviews | status | ステータス別のレビュー検索 |
-| idx_users_auth_role | users | auth_id, role, is_deleted | RLSヘルパー関数でのロール・本人判定の高速化 |
+| idx_ai_reviews_submission_id_reviewed_at | ai_reviews | submission_id, reviewed_at DESC | 提出に紐づく最新レビュー取得 |
+| idx_users_auth_id_covering | users | auth_id INCLUDE (id, role, status, is_deleted) | RLSヘルパー（`get_user_id` / `get_user_role` / `get_user_status`）の index-only scan |
+| idx_users_status_not_deleted | users | status（部分: `is_deleted = false`） | ステータス別のユーザー一覧（論理削除除外） |
 
 ---
 
@@ -657,6 +661,7 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 | `20260907010000_rename_pending_status_to_trial.sql` | `users.status` の値を `'pending'` から `'trial'` へリネーム（#88）。`users_status_check` 制約のDROP→既存行のUPDATE→制約のADDと、`learning_contents` のSELECTポリシー（`20260801000002_trial_user_policies.sql` で追加）内の比較値の更新を同一トランザクションで適用し、DEFAULTも `'trial'` に変更。値のリネームとポリシー更新を分けると片方だけ適用された瞬間にお試しユーザーから見て `learning_contents` が0行になるため1ファイルにまとめている。アプリコードの `USER_STATUS.TRIAL` への切り替えと同時にリリースする必要がある |
 | `20260908000000_secure_slides_bucket.sql` | スライドPDFの署名付きURL配信（#89）: `slides` バケットを非公開化し、`learning_contents.pdf_url` を公開URLからオブジェクトキーへ一括正規化、`storage.objects` に `slides` の SELECT ポリシー（`learning_contents` の RLS に委譲）を追加し、INSERT / UPDATE / DELETE は `thumbnails` のポリシーと統合して両バケット対象の1本ずつにする。正規化後にキーとして解釈できない `pdf_url` が残っていれば例外で中断する。**アプリ側の署名付きURL配信と同時にリリースすること**（旧コードは pdf_url を公開URLとして組み立てるため） |
 | `20260910093449_add_bulk_update_sibling_display_order_rpc.sql` | 兄弟要素の `display_order` 一括更新 RPC `bulk_update_sibling_display_order(p_table, p_updates)`（#196）。挿入位置指定時の N 文 UPDATE を 1 回の UPDATE … FROM に置き換える。SECURITY INVOKER・許可テーブル限定・純粋な UPDATE のみ（upsert ではない）。**アプリ側の create/update（兄弟再採番）と同時にリリースすること**（未適用だと `PGRST202` で兄弟ありの作成・更新が失敗する） |
+| `20260911010345_add_query_pattern_indexes.sql` | クエリパターンに合わせたインデックス追加（#197 PR1）。階層一覧の `(parent_id, display_order)` 複合化、`submissions` の `submitted_at` 系、`user_progress` / `users` の部分インデックス、`ai_reviews` の提出×レビュー時刻、`users` の auth covering index。認可（RLS）は変更しない |
 
 ### 7.1 リモート適用履歴との整合（#149・確定版）
 
@@ -751,3 +756,4 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 | 2026年9月 | #88対応：`users.status` の値 `'pending'` を `'trial'` にリネーム。`users_status_check` 制約のDROP→UPDATE→ADDと、`get_user_status()` を参照するlearning_contentsのSELECTポリシーの比較値更新を同一トランザクションで適用する`20260907010000_rename_pending_status_to_trial.sql`を追加。3.4節・3.8節・5.2節・6.1節・マイグレーション一覧を更新。`ai_reviews.status` の `'pending'`（AIレビューのジョブ状態）は対象外 |
 | 2026年9月 | スライドPDFの署名付きURL配信（#89）に対応：`slides` バケットを非公開化し、`learning_contents.pdf_url` の保存形式をオブジェクトキーに統一（3.4）。`storage.objects` の `slides` ポリシー（SELECT は `learning_contents` の RLS に委譲）を6.8に追記、マイグレーション一覧を更新 |
 | 2026年9月 | #196対応：兄弟要素の `display_order` 一括更新 RPC `bulk_update_sibling_display_order()` を追加。6.2節・マイグレーション一覧を更新 |
+| 2026年9月 | #197 PR1対応：クエリパターンに合わせたインデックス追加（階層一覧の複合化、`submissions` / `user_progress` / `users` / `ai_reviews`）。§4 インデックス表・マイグレーション一覧を更新 |
