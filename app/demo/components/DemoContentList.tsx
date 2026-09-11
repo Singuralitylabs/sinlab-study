@@ -50,12 +50,12 @@ export function DemoContentList({
   weekId,
   locked = false,
 }: DemoContentListProps) {
-  const { isCompleted } = useDemoProgress();
+  const { isCompleted, hydrated } = useDemoProgress();
 
   return (
     <div className="grid gap-2 ml-5 border-l-2 border-border pl-5">
       {contents.map((content) => {
-        const completed = !locked && isCompleted(content.id);
+        const completed = hydrated && !locked && isCompleted(content.id);
 
         return (
           <Link

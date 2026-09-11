@@ -61,6 +61,74 @@ const ADMIN_USERS_NAV_ITEM: NavItem = {
   icon: <UserCog className="h-5 w-5" />,
 };
 
+function isNavActive(pathname: string, href: string) {
+  if (href === "/") return pathname === "/";
+  return pathname.startsWith(href);
+}
+
+function SideNavLink({
+  item,
+  pathname,
+  onClick,
+}: {
+  item: NavItem;
+  pathname: string;
+  onClick?: () => void;
+}) {
+  const active = isNavActive(pathname, item.href);
+
+  return (
+    <Link
+      href={item.href}
+      onClick={onClick}
+      className={`flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
+        active
+          ? "bg-primary/10 text-primary"
+          : "text-muted-foreground hover:text-foreground hover:bg-accent"
+      }`}
+    >
+      {item.icon}
+      {item.title}
+    </Link>
+  );
+}
+
+function SideNavSidebarContent({
+  navItems,
+  pathname,
+  onItemClick,
+  onSignOut,
+}: {
+  navItems: NavItem[];
+  pathname: string;
+  onItemClick?: () => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <>
+      <nav className="flex-1 px-3 py-2 space-y-1">
+        {navItems.map((item) => (
+          <SideNavLink key={item.title} item={item} pathname={pathname} onClick={onItemClick} />
+        ))}
+      </nav>
+      <div className="px-3 pb-4">
+        <Separator className="mb-3" />
+        <button
+          type="button"
+          onClick={() => {
+            onSignOut();
+            onItemClick?.();
+          }}
+          className="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:text-foreground hover:bg-accent w-full text-left"
+        >
+          <LogOut className="h-5 w-5" />
+          ログアウト
+        </button>
+      </div>
+    </>
+  );
+}
+
 export function SideNav({
   isAdmin,
   isInstructor,
@@ -89,54 +157,6 @@ export function SideNav({
     await supabase.auth.signOut();
     window.location.href = "/login";
   };
-
-  const isActive = (href: string) => {
-    if (href === "/") return pathname === "/";
-    return pathname.startsWith(href);
-  };
-
-  const NavLink = ({ item, onClick }: { item: NavItem; onClick?: () => void }) => {
-    const active = isActive(item.href);
-
-    return (
-      <Link
-        href={item.href}
-        onClick={onClick}
-        className={`flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
-          active
-            ? "bg-primary/10 text-primary"
-            : "text-muted-foreground hover:text-foreground hover:bg-accent"
-        }`}
-      >
-        {item.icon}
-        {item.title}
-      </Link>
-    );
-  };
-
-  const SidebarContent = ({ onItemClick }: { onItemClick?: () => void }) => (
-    <>
-      <nav className="flex-1 px-3 py-2 space-y-1">
-        {navItems.map((item) => (
-          <NavLink key={item.title} item={item} onClick={onItemClick} />
-        ))}
-      </nav>
-      <div className="px-3 pb-4">
-        <Separator className="mb-3" />
-        <button
-          type="button"
-          onClick={() => {
-            handleSignOut();
-            onItemClick?.();
-          }}
-          className="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:text-foreground hover:bg-accent w-full text-left"
-        >
-          <LogOut className="h-5 w-5" />
-          ログアウト
-        </button>
-      </div>
-    </>
-  );
 
   return (
     <>
@@ -167,7 +187,12 @@ export function SideNav({
             </SheetTitle>
           </SheetHeader>
           <div className="flex flex-col h-[calc(100%-73px)]">
-            <SidebarContent onItemClick={() => setOpen(false)} />
+            <SideNavSidebarContent
+              navItems={navItems}
+              pathname={pathname}
+              onItemClick={() => setOpen(false)}
+              onSignOut={handleSignOut}
+            />
           </div>
         </SheetContent>
       </Sheet>
@@ -181,7 +206,11 @@ export function SideNav({
           </Link>
         </div>
         <div className="flex flex-col flex-1 pt-2">
-          <SidebarContent />
+          <SideNavSidebarContent
+            navItems={navItems}
+            pathname={pathname}
+            onSignOut={handleSignOut}
+          />
         </div>
       </div>
     </>

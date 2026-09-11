@@ -9,12 +9,13 @@ interface DemoProgressBarProps {
 }
 
 export function DemoProgressBar({ contentIds }: DemoProgressBarProps) {
-  const { completedCount } = useDemoProgress();
+  const { completedCount, hydrated } = useDemoProgress();
 
   const total = contentIds.length;
   if (total === 0) return null;
 
-  const completed = completedCount(contentIds);
+  // hydrated 前は SSR と同じ 0 を表示し、mismatch と誤表示のちらつきを抑える
+  const completed = hydrated ? completedCount(contentIds) : 0;
   const percent = Math.round((completed / total) * 100);
 
   return (

@@ -3,7 +3,7 @@
 import { Code, Link as LinkIcon, Loader2, Plus, Send, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
+import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import { CodeEditorNoSSR as CodeEditor } from "@/app/components/CodeEditorNoSSR";
 import {
   buildDefaultFilename,
@@ -392,20 +392,22 @@ export function SubmissionForm({
         </Button>
       </form>
 
-      {/* AIレビュー表示 */}
-      <AIReviewDisplay
-        review={aiReview}
-        isLoading={isReviewLoading}
-        defaultExpanded={true}
-        onRetry={
-          lastSubmissionId
-            ? () => {
-                setAiReview(null);
-                requestAIReview(lastSubmissionId);
-              }
-            : undefined
-        }
-      />
+      {/* AIレビュー表示（レビュー／ローディング時のみチャンクを取得） */}
+      {(aiReview || isReviewLoading) && (
+        <AIReviewDisplayNoSSR
+          review={aiReview}
+          isLoading={isReviewLoading}
+          defaultExpanded={true}
+          onRetry={
+            lastSubmissionId
+              ? () => {
+                  setAiReview(null);
+                  requestAIReview(lastSubmissionId);
+                }
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 }

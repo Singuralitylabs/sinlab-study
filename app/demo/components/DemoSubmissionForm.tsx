@@ -11,7 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useState } from "react";
-import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
+import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import { CodeEditorNoSSR as CodeEditor } from "@/app/components/CodeEditorNoSSR";
 import {
   buildDefaultFilename,
@@ -316,7 +316,13 @@ export function DemoSubmissionForm({
         </Alert>
       )}
 
-      <AIReviewDisplay review={aiReview} isLoading={isReviewLoading} defaultExpanded={true} />
+      {(aiReview || isReviewLoading) && (
+        <AIReviewDisplayNoSSR
+          review={aiReview}
+          isLoading={isReviewLoading}
+          defaultExpanded={true}
+        />
+      )}
     </div>
   );
 }

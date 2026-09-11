@@ -8,19 +8,29 @@ const supabaseProtocol: "http" | "https" | undefined = supabaseUrlParts
     : "https"
   : undefined;
 
+const remotePatterns: NonNullable<NonNullable<NextConfig["images"]>["remotePatterns"]> = [
+  {
+    protocol: "https",
+    hostname: "i.ytimg.com",
+    pathname: "/vi/**",
+  },
+];
+
+if (supabaseUrlParts && supabaseProtocol) {
+  remotePatterns.push({
+    protocol: supabaseProtocol,
+    hostname: supabaseUrlParts.hostname,
+    pathname: "/storage/v1/object/public/thumbnails/**",
+  });
+}
+
 const nextConfig: NextConfig = {
-  images:
-    supabaseUrlParts && supabaseProtocol
-      ? {
-          remotePatterns: [
-            {
-              protocol: supabaseProtocol,
-              hostname: supabaseUrlParts.hostname,
-              pathname: "/storage/v1/object/public/thumbnails/**",
-            },
-          ],
-        }
-      : undefined,
+  images: {
+    remotePatterns,
+  },
+  experimental: {
+    optimizePackageImports: ["lucide-react", "radix-ui"],
+  },
   turbopack: {
     resolveAlias: {
       // react-pdf: canvas依存を除外（サーバーサイドビルドエラー防止）

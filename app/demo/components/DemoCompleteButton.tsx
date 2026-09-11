@@ -9,14 +9,15 @@ interface DemoCompleteButtonProps {
 }
 
 export function DemoCompleteButton({ contentId }: DemoCompleteButtonProps) {
-  const { isCompleted, toggleComplete } = useDemoProgress();
-  const completed = isCompleted(contentId);
+  const { isCompleted, toggleComplete, hydrated } = useDemoProgress();
+  const completed = hydrated && isCompleted(contentId);
 
   return (
     <Button
       onClick={() => toggleComplete(contentId)}
       variant={completed ? "secondary" : "default"}
       size="lg"
+      disabled={!hydrated}
       className={`w-full ${completed ? "border-success/30 bg-success/10 text-success hover:bg-success/20" : ""}`}
     >
       {completed ? (
