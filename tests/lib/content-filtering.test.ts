@@ -200,31 +200,6 @@ describe("filterContents", () => {
     expect(filterContents(contents, {})).toEqual(contents);
   });
 
-  it("テーマIDで絞り込む（未分類は除外される）", () => {
-    const result = filterContents(contents, { themeId: "1" });
-    expect(result.map((c) => c.id)).toEqual([1, 2]);
-  });
-
-  it("フェーズIDで絞り込む", () => {
-    const result = filterContents(contents, { phaseId: "2" });
-    expect(result.map((c) => c.id)).toEqual([3]);
-  });
-
-  it("週IDで絞り込む", () => {
-    const result = filterContents(contents, { weekId: "2" });
-    expect(result.map((c) => c.id)).toEqual([2]);
-  });
-
-  it("種別で絞り込む", () => {
-    const result = filterContents(contents, { type: "video" });
-    expect(result.map((c) => c.id)).toEqual([1, 3]);
-  });
-
-  it("不正な種別は無視して絞り込まない", () => {
-    const result = filterContents(contents, { type: "invalid" });
-    expect(result.map((c) => c.id)).toEqual([1, 2, 3, 4]);
-  });
-
   it("タイトル検索は大文字小文字を区別せず部分一致する", () => {
     const result = filterContents(contents, { q: "gas" });
     expect(result.map((c) => c.id)).toEqual([1, 2]);
@@ -235,13 +210,8 @@ describe("filterContents", () => {
     expect(result.map((c) => c.id)).toEqual([1, 2, 3, 4]);
   });
 
-  it("複数条件はAND条件で絞り込む", () => {
-    const result = filterContents(contents, { themeId: "1", type: "exercise" });
-    expect(result.map((c) => c.id)).toEqual([2]);
-  });
-
   it("条件に合致するコンテンツがなければ空配列を返す", () => {
-    const result = filterContents(contents, { themeId: "1", type: "slide" });
+    const result = filterContents(contents, { q: "存在しないタイトル" });
     expect(result).toEqual([]);
   });
 });

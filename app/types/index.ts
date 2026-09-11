@@ -102,6 +102,58 @@ export type LearningContentListItem = Pick<
   | "updated_at"
 >;
 
+/**
+ * 管理画面一覧用のカラム絞り込み型（#196）。
+ * `fetchAllThemes` / `fetchAllPhases` / `fetchAllWeeks` / `fetchAllContents` が返す形に合わせる。
+ */
+export type ManageThemeListItem = Pick<
+  LearningTheme,
+  "id" | "name" | "description" | "image_url" | "display_order" | "is_published"
+>;
+
+export type ManagePhaseListItem = Pick<
+  LearningPhase,
+  "id" | "name" | "description" | "display_order" | "is_published" | "theme_id"
+> & {
+  theme: Pick<LearningTheme, "id" | "name" | "display_order"> | null;
+};
+
+export type ManageWeekListItem = Pick<
+  LearningWeek,
+  "id" | "name" | "display_order" | "is_published" | "phase_id"
+> & {
+  phase:
+    | (Pick<LearningPhase, "id" | "name" | "display_order" | "theme_id"> & {
+        theme: Pick<LearningTheme, "id" | "name" | "display_order"> | null;
+      })
+    | null;
+};
+
+export type ManageContentListItem = Pick<
+  LearningContent,
+  | "id"
+  | "title"
+  | "content_type"
+  | "display_order"
+  | "is_published"
+  | "is_open_to_trial"
+  | "week_id"
+> & {
+  week: ManageWeekListItem | null;
+};
+
+/** コンテンツ挿入位置ピッカー用の兄弟候補（#196） */
+export type ContentSiblingCandidateRow = Pick<
+  LearningContent,
+  "id" | "title" | "display_order" | "is_published" | "week_id"
+>;
+
+/** ユーザー管理一覧用（#196。ページネーションは追加しない） */
+export type ManageUserListItem = Pick<
+  UserType,
+  "id" | "display_name" | "email" | "role" | "status" | "membership_type" | "created_at"
+>;
+
 /** パンくず・所属判定用のテーマ（ネスト取得の最小セット） */
 export type BreadcrumbTheme = Pick<LearningTheme, "id" | "name" | "is_published" | "is_deleted">;
 

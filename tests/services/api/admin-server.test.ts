@@ -12,10 +12,12 @@ import {
   createPhase,
   createTheme,
   createWeek,
+  fetchAllContents,
   fetchManageCounts,
   fetchStudentsProgress,
   fetchUserIdsWithStripeSubscription,
   isUserCurrentlySubscribed,
+  parseStrictFilterId,
   rejectUser,
   updateContent,
   updatePhase,
@@ -52,6 +54,7 @@ describe("fetchStudentsProgress", () => {
         learning_contents: { data: null, error: null, count: 10 },
       },
       rpcResults: {
+        // user 2 は進捗0でRPCに出ないため、users未充足 → 空ページで打ち切る
         get_students_progress_summary: [
           {
             data: [{ user_id: 1, completed_count: 3, last_activity: "2026-07-03T00:00:00+00:00" }],
@@ -105,23 +108,33 @@ describe("fetchStudentsProgress", () => {
   });
 
   it("RPCの返り値が複数ページにまたがる場合、全ページ分を集約する（db-max-rows非依存）", async () => {
+    // pageSize=1000 満杯のときだけ次ページを取りに行く（#196）。
+    const page1 = Array.from({ length: 1000 }, (_, i) => ({
+      user_id: i + 1,
+      completed_count: 1,
+      last_activity: null as string | null,
+    }));
+    page1[0] = {
+      user_id: 1,
+      completed_count: 5,
+      last_activity: "2026-07-01T00:00:00+00:00",
+    };
+    const page2 = [
+      {
+        user_id: 2,
+        completed_count: 2,
+        last_activity: "2026-07-02T00:00:00+00:00",
+      },
+    ];
     const mockClient = createMockSupabaseClient({
       tableResults: {
         users: { data: users, error: null },
         learning_contents: { data: null, error: null, count: 10 },
       },
       rpcResults: {
-        // サーバーが1回あたり1行しか返さないケース（db-max-rows < pageSize 相当）
         get_students_progress_summary: [
-          {
-            data: [{ user_id: 1, completed_count: 5, last_activity: "2026-07-01T00:00:00+00:00" }],
-            error: null,
-          },
-          {
-            data: [{ user_id: 2, completed_count: 2, last_activity: "2026-07-02T00:00:00+00:00" }],
-            error: null,
-          },
-          { data: [], error: null },
+          { data: page1, error: null },
+          { data: page2, error: null },
         ],
       },
     });
@@ -147,7 +160,77 @@ describe("fetchStudentsProgress", () => {
     const progressCalls = mockClient.rpc.mock.calls.filter(
       ([fn]) => fn === "get_students_progress_summary"
     );
-    expect(progressCalls).toHaveLength(3);
+    expect(progressCalls).toHaveLength(2);
+  });
+
+  it("activeユーザー全員分の進捗が短ページに収まる場合、空ページを取りに行かない（#196）", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        users: { data: users, error: null },
+        learning_contents: { data: null, error: null, count: 10 },
+      },
+      rpcResults: {
+        get_students_progress_summary: {
+          data: [
+            { user_id: 1, completed_count: 3, last_activity: "2026-07-03T00:00:00+00:00" },
+            { user_id: 2, completed_count: 1, last_activity: null },
+          ],
+          error: null,
+        },
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await fetchStudentsProgress();
+
+    const progressCalls = mockClient.rpc.mock.calls.filter(
+      ([fn]) => fn === "get_students_progress_summary"
+    );
+    expect(progressCalls).toHaveLength(1);
+  });
+
+  it("db-max-rows相当の短ページでも未充足なら続行し、取りこぼさない", async () => {
+    // pageSize=1000 だがサーバーが500行しか返さないケースを、users未充足で再現する
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        users: { data: users, error: null },
+        learning_contents: { data: null, error: null, count: 10 },
+      },
+      rpcResults: {
+        get_students_progress_summary: [
+          {
+            data: [{ user_id: 1, completed_count: 5, last_activity: "2026-07-01T00:00:00+00:00" }],
+            error: null,
+          },
+          {
+            data: [{ user_id: 2, completed_count: 2, last_activity: "2026-07-02T00:00:00+00:00" }],
+            error: null,
+          },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchStudentsProgress();
+
+    expect(result.data).toEqual([
+      {
+        user: users[0],
+        totalContents: 10,
+        completedContents: 5,
+        lastActivity: "2026-07-01T00:00:00+00:00",
+      },
+      {
+        user: users[1],
+        totalContents: 10,
+        completedContents: 2,
+        lastActivity: "2026-07-02T00:00:00+00:00",
+      },
+    ]);
+    const progressCalls = mockClient.rpc.mock.calls.filter(
+      ([fn]) => fn === "get_students_progress_summary"
+    );
+    expect(progressCalls).toHaveLength(2);
   });
 
   it("進捗の照会がRPCへの呼び出しに閉じる（ユーザーごとの逐次クエリ = N+1が無い）", async () => {
@@ -566,6 +649,33 @@ describe("fetchUserIdsWithStripeSubscription", () => {
 });
 
 // ----------------------------------------------------------------
+
+// ----------------------------------------------------------------
+// parseStrictFilterId / fetchAllContents の不正フィルタ
+// ----------------------------------------------------------------
+describe("parseStrictFilterId", () => {
+  it("整数文字列のみを受け入れる", () => {
+    expect(parseStrictFilterId("12")).toBe(12);
+    expect(parseStrictFilterId(undefined)).toBeUndefined();
+    expect(parseStrictFilterId("")).toBeUndefined();
+    expect(parseStrictFilterId("abc")).toBeUndefined();
+    expect(parseStrictFilterId("01")).toBeUndefined();
+    expect(parseStrictFilterId("2.0")).toBeUndefined();
+  });
+});
+
+describe("fetchAllContents（不正なフィルタID）", () => {
+  it("整数として不正な weekId ではクエリを発行せず空配列を返す", async () => {
+    const mockClient = createMockSupabaseClient();
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchAllContents({ weekId: "abc" });
+
+    expect(result).toEqual({ data: [], error: null });
+    expect(mockClient.from).not.toHaveBeenCalled();
+  });
+});
+
 // createTheme / createPhase / createWeek / createContent（挿入位置からの再採番）
 // ----------------------------------------------------------------
 describe("createTheme", () => {
@@ -590,15 +700,17 @@ describe("createTheme", () => {
     );
   });
 
-  it("既存兄弟がいる場合、display_orderが変わる行だけUPDATEしてからINSERTする", async () => {
+  it("既存兄弟がいる場合、display_orderが変わる行だけ一括RPCでUPDATEしてからINSERTする", async () => {
     const createdTheme = { id: 100, name: "新テーマ", display_order: 1 };
     const mockClient = createMockSupabaseClient({
       tableResults: {
         learning_themes: [
           { data: [{ id: 5, display_order: 1 }], error: null },
-          { data: null, error: null },
           { data: createdTheme, error: null },
         ],
+      },
+      rpcResults: {
+        bulk_update_sibling_display_order: { data: null, error: null },
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
@@ -606,10 +718,11 @@ describe("createTheme", () => {
     const result = await createTheme({ name: "新テーマ", insertAfterId: null });
 
     expect(result).toEqual({ data: createdTheme, error: null });
-    const updateBuilder = mockClient.from.mock.results[1].value;
-    expect(updateBuilder.update).toHaveBeenCalledWith({ display_order: 2 });
-    expect(updateBuilder.eq).toHaveBeenCalledWith("id", 5);
-    const insertBuilder = mockClient.from.mock.results[2].value;
+    expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
+      p_table: "learning_themes",
+      p_updates: [{ id: 5, display_order: 2 }],
+    });
+    const insertBuilder = mockClient.from.mock.results[1].value;
     expect(insertBuilder.insert).toHaveBeenCalledWith(
       expect.objectContaining({ display_order: 1 })
     );
@@ -645,13 +758,13 @@ describe("createTheme", () => {
     expect(siblingsBuilder.eq).toHaveBeenCalledWith("is_deleted", false);
   });
 
-  it("再採番のUPDATEが失敗した場合、INSERTを行わずエラーを返す", async () => {
+  it("再採番の UPDATE（RPC）が失敗した場合、INSERTを行わずエラーを返す", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
-        learning_themes: [
-          { data: [{ id: 5, display_order: 1 }], error: null },
-          { data: null, error: dbError },
-        ],
+        learning_themes: [{ data: [{ id: 5, display_order: 1 }], error: null }],
+      },
+      rpcResults: {
+        bulk_update_sibling_display_order: { data: null, error: dbError },
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
@@ -659,7 +772,8 @@ describe("createTheme", () => {
     const result = await createTheme({ name: "新テーマ", insertAfterId: null });
 
     expect(result).toEqual({ data: null, error: dbError });
-    expect(mockClient.from).toHaveBeenCalledTimes(2);
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+    expect(mockClient.rpc).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -717,9 +831,11 @@ describe("createWeek", () => {
       tableResults: {
         learning_weeks: [
           { data: [{ id: 5, display_order: 1 }], error: null },
-          { data: null, error: null },
           { data: createdWeek, error: null },
         ],
+      },
+      rpcResults: {
+        bulk_update_sibling_display_order: { data: null, error: null },
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
@@ -729,8 +845,10 @@ describe("createWeek", () => {
     expect(result).toEqual({ data: createdWeek, error: null });
     const siblingsBuilder = mockClient.from.mock.results[0].value;
     expect(siblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 1);
-    const updateBuilder = mockClient.from.mock.results[1].value;
-    expect(updateBuilder.update).toHaveBeenCalledWith({ display_order: 2 });
+    expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
+      p_table: "learning_weeks",
+      p_updates: [{ id: 5, display_order: 2 }],
+    });
   });
 });
 
@@ -822,7 +940,7 @@ describe("updateTheme（編集時の再採番）", () => {
     expect(siblingsBuilder.neq).toHaveBeenCalledWith("id", 1);
   });
 
-  it("insertAfterIdを指定した場合、自分自身を除いた兄弟のうち変化する行だけ再採番してから更新する", async () => {
+  it("insertAfterIdを指定した場合、自分自身を除いた兄弟のうち変化する行だけ一括RPCで再採番してから更新する", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         learning_themes: [
@@ -834,8 +952,10 @@ describe("updateTheme（編集時の再採番）", () => {
             error: null,
           },
           { data: null, error: null },
-          { data: null, error: null },
         ],
+      },
+      rpcResults: {
+        bulk_update_sibling_display_order: { data: null, error: null },
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
@@ -844,10 +964,11 @@ describe("updateTheme（編集時の再採番）", () => {
     const result = await updateTheme(1, { name: "更新後", insertAfterId: 2 });
 
     expect(result).toEqual({ error: null });
-    const shiftBuilder = mockClient.from.mock.results[1].value;
-    expect(shiftBuilder.update).toHaveBeenCalledWith({ display_order: 3 });
-    expect(shiftBuilder.eq).toHaveBeenCalledWith("id", 3);
-    const bodyUpdateBuilder = mockClient.from.mock.results[2].value;
+    expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
+      p_table: "learning_themes",
+      p_updates: [{ id: 3, display_order: 3 }],
+    });
+    const bodyUpdateBuilder = mockClient.from.mock.results[1].value;
     expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
       expect.objectContaining({ name: "更新後", display_order: 2 })
     );
@@ -869,7 +990,7 @@ describe("updatePhase（編集時の再採番）", () => {
     expect(updateBuilder.update).toHaveBeenCalledWith({ name: "名称変更のみ" });
   });
 
-  it("theme_idが変わらない場合、移動先（同じtheme_id配下・自分自身を除く）だけを先頭へ再採番する", async () => {
+  it("theme_idが変わらない場合、移動先（同じtheme_id配下・自分自身を除く）だけを先頭へ一括RPCで再採番する", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         learning_phases: [
@@ -882,9 +1003,10 @@ describe("updatePhase（編集時の再採番）", () => {
             error: null,
           },
           { data: null, error: null },
-          { data: null, error: null },
-          { data: null, error: null },
         ],
+      },
+      rpcResults: {
+        bulk_update_sibling_display_order: { data: null, error: null },
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
@@ -899,21 +1021,22 @@ describe("updatePhase（編集時の再採番）", () => {
     const siblingsBuilder = mockClient.from.mock.results[1].value;
     expect(siblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 1);
     expect(siblingsBuilder.neq).toHaveBeenCalledWith("id", 10);
-    // 先頭挿入のため既存の2件とも display_order が1つずつ後ろへずれる
-    const update1 = mockClient.from.mock.results[2].value;
-    expect(update1.update).toHaveBeenCalledWith({ display_order: 2 });
-    expect(update1.eq).toHaveBeenCalledWith("id", 2);
-    const update2 = mockClient.from.mock.results[3].value;
-    expect(update2.update).toHaveBeenCalledWith({ display_order: 3 });
-    expect(update2.eq).toHaveBeenCalledWith("id", 3);
-    const bodyUpdateBuilder = mockClient.from.mock.results[4].value;
+    // 先頭挿入のため既存の2件とも display_order が1つずつ後ろへずれる（1 RPC）
+    expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
+      p_table: "learning_phases",
+      p_updates: [
+        { id: 2, display_order: 2 },
+        { id: 3, display_order: 3 },
+      ],
+    });
+    const bodyUpdateBuilder = mockClient.from.mock.results[2].value;
     expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
       expect.objectContaining({ theme_id: 1, display_order: 1 })
     );
   });
 
   it("theme_idを変更した場合、移動先の末尾に追加し（insertAfterId省略時）、本体UPDATE成功後に移動元に残った兄弟の欠番も再採番する", async () => {
-    // 呼び出し順は 現在値取得 → 移動先兄弟取得 → 本体UPDATE → 移動元兄弟取得 → 移動元UPDATE。
+    // 呼び出し順は 現在値取得 → 移動先兄弟取得 → 本体UPDATE → 移動元兄弟取得 → 移動元一括RPC。
     // 本体UPDATEを移動元の詰め直しより先に行うことで、途中失敗時に移動元の兄弟同士の
     // 表示順が入れ替わらないようにする（詳細は resequenceDestinationForUpdate のコメント参照）
     const mockClient = createMockSupabaseClient({
@@ -929,8 +1052,10 @@ describe("updatePhase（編集時の再採番）", () => {
             ],
             error: null,
           },
-          { data: null, error: null },
         ],
+      },
+      rpcResults: {
+        bulk_update_sibling_display_order: { data: null, error: null },
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
@@ -948,10 +1073,11 @@ describe("updatePhase（編集時の再採番）", () => {
     const sourceSiblingsBuilder = mockClient.from.mock.results[3].value;
     expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 1);
     expect(sourceSiblingsBuilder.neq).toHaveBeenCalledWith("id", 10);
-    // 移動元に残ったid=3は欠番(order=3)を詰めて2になる
-    const sourceUpdateBuilder = mockClient.from.mock.results[4].value;
-    expect(sourceUpdateBuilder.update).toHaveBeenCalledWith({ display_order: 2 });
-    expect(sourceUpdateBuilder.eq).toHaveBeenCalledWith("id", 3);
+    // 移動元に残ったid=3は欠番(order=3)を詰めて2になる（1 RPC）
+    expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
+      p_table: "learning_phases",
+      p_updates: [{ id: 3, display_order: 2 }],
+    });
   });
 
   it("親変更時に本体UPDATEが失敗した場合、移動元の再採番は行わずエラーを返す（本体UPDATEを先に行うことで、失敗時に移動元の兄弟同士の表示順を壊さない）", async () => {
@@ -1033,8 +1159,10 @@ describe("updateWeek（編集時の再採番）", () => {
             ],
             error: null,
           },
-          { data: null, error: null },
         ],
+      },
+      rpcResults: {
+        bulk_update_sibling_display_order: { data: null, error: null },
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
@@ -1050,8 +1178,10 @@ describe("updateWeek（編集時の再採番）", () => {
     );
     const sourceSiblingsBuilder = mockClient.from.mock.results[3].value;
     expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 1);
-    const sourceUpdateBuilder = mockClient.from.mock.results[4].value;
-    expect(sourceUpdateBuilder.update).toHaveBeenCalledWith({ display_order: 2 });
+    expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
+      p_table: "learning_weeks",
+      p_updates: [{ id: 3, display_order: 2 }],
+    });
   });
 });
 
@@ -1077,8 +1207,10 @@ describe("updateContent（編集時の再採番）", () => {
           { data: [{ id: 20, display_order: 1 }], error: null },
           { data: null, error: null },
           { data: [{ id: 3, display_order: 3 }], error: null },
-          { data: null, error: null },
         ],
+      },
+      rpcResults: {
+        bulk_update_sibling_display_order: { data: null, error: null },
       },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
@@ -1094,8 +1226,10 @@ describe("updateContent（編集時の再採番）", () => {
     );
     const sourceSiblingsBuilder = mockClient.from.mock.results[3].value;
     expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("week_id", 1);
-    // 移動元に残ったid=3は欠番(order=3)を詰めて1になる
-    const sourceUpdateBuilder = mockClient.from.mock.results[4].value;
-    expect(sourceUpdateBuilder.update).toHaveBeenCalledWith({ display_order: 1 });
+    // 移動元に残ったid=3は欠番(order=3)を詰めて1になる（1 RPC）
+    expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
+      p_table: "learning_contents",
+      p_updates: [{ id: 3, display_order: 1 }],
+    });
   });
 });

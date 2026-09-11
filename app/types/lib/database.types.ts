@@ -470,6 +470,10 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      bulk_update_sibling_display_order: {
+        Args: { p_table: string; p_updates: Json };
+        Returns: undefined;
+      };
       get_students_progress_summary: {
         Args: never;
         Returns: {

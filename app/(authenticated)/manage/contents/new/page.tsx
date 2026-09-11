@@ -1,7 +1,7 @@
 import { PageTitle } from "@/app/components/PageTitle";
 import { deriveWeekSelectOptions } from "@/app/lib/content-filtering";
 import { compareGroupLevel, sortWeeksByHierarchy } from "@/app/lib/content-grouping";
-import { fetchAllContents, fetchAllWeeks } from "@/app/services/api/admin-server";
+import { fetchAllWeeks, fetchContentSiblingCandidates } from "@/app/services/api/admin-server";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ContentForm } from "../ContentForm";
 
@@ -19,7 +19,7 @@ export default async function NewContentPage({ searchParams }: NewContentPagePro
   const params = await searchParams;
   const [{ data: weeks }, { data: contents, error: contentsError }] = await Promise.all([
     fetchAllWeeks(),
-    fetchAllContents(),
+    fetchContentSiblingCandidates(),
   ]);
   const sortedWeeks = weeks ? sortWeeksByHierarchy(weeks) : [];
   const filterOptions = deriveWeekSelectOptions(sortedWeeks);

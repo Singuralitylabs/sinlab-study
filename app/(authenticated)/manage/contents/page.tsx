@@ -2,13 +2,23 @@ import { Plus } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { PageTitle } from "@/app/components/PageTitle";
-import { deriveFilterOptions, filterContents } from "@/app/lib/content-filtering";
+import {
+  deriveWeekSelectOptions,
+  filterContents,
+  isContentType,
+} from "@/app/lib/content-filtering";
 import {
   groupContentsByWeek,
   sortContentsByHierarchy,
+  sortWeeksByHierarchy,
   toContentTableGroups,
 } from "@/app/lib/content-grouping";
-import { fetchAllContents } from "@/app/services/api/admin-server";
+import {
+  fetchAllContents,
+  fetchAllWeeks,
+  hasAnyManageContents,
+} from "@/app/services/api/admin-server";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ContentsFilterBar } from "./ContentsFilterBar";
@@ -26,10 +36,6 @@ function firstParam(value: string | string[] | undefined): string {
 
 export default async function AdminContentsPage({ searchParams }: AdminContentsPageProps) {
   const params = await searchParams;
-  const { data: contents } = await fetchAllContents();
-  const sortedContents = contents ? sortContentsByHierarchy(contents) : [];
-  const filterOptions = deriveFilterOptions(sortedContents);
-
   const filters = {
     theme: firstParam(params.theme),
     phase: firstParam(params.phase),
@@ -38,13 +44,45 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
     // 空白のみのqは絞り込みなし扱い（filterContents側のtrimと判定を揃える）
     q: firstParam(params.q).trim(),
   };
-  const isFiltered = Object.values(filters).some((value) => value !== "");
 
-  const filteredContents = filterContents(sortedContents, {
+  // テーマ/フェーズ/週/種別は SQL 側で絞り、タイトル検索だけ JS に残す（#196）。
+  // フィルタ選択肢は週一覧（軽量）から導出し、構造フィルタ時に全件を二重取得しない。
+  const structuralFilters = {
     themeId: filters.theme || undefined,
     phaseId: filters.phase || undefined,
     weekId: filters.week || undefined,
-    type: filters.type || undefined,
+    contentType: isContentType(filters.type) ? filters.type : undefined,
+  };
+  const hasStructuralFilter = Object.values(structuralFilters).some((value) => value !== undefined);
+  const isFiltered = hasStructuralFilter || filters.q !== "";
+
+  const [listResult, weeksResult, anyContentsResult] = await Promise.all([
+    fetchAllContents(structuralFilters),
+    fetchAllWeeks(),
+    hasAnyManageContents(),
+  ]);
+
+  if (listResult.error || weeksResult.error || anyContentsResult.error) {
+    return (
+      <div className="max-w-6xl mx-auto">
+        <PageTitle title="コンテンツ管理" description="学習コンテンツの作成・編集・削除" />
+        <Alert variant="destructive">
+          <AlertDescription>
+            コンテンツ一覧の取得に失敗しました。時間をおいて再度お試しください。
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  const contents = listResult.data;
+  const hasAnyContents = anyContentsResult.data === true;
+  const filterOptions = deriveWeekSelectOptions(
+    weeksResult.data ? sortWeeksByHierarchy(weeksResult.data) : []
+  );
+
+  const sortedContents = contents ? sortContentsByHierarchy(contents) : [];
+  const filteredContents = filterContents(sortedContents, {
     q: filters.q || undefined,
   });
   const groups = groupContentsByWeek(filteredContents);
@@ -72,7 +110,7 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
         </Button>
       </div>
 
-      {!contents || contents.length === 0 ? (
+      {!hasAnyContents ? (
         <Card>
           <CardContent className="py-8 text-center">
             <p className="text-muted-foreground">コンテンツがまだ登録されていません。</p>

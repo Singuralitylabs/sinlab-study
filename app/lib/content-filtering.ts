@@ -1,5 +1,5 @@
 import { CONTENT_TYPES } from "@/app/constants/content";
-import type { ContentType, LearningContentWithWeek, LearningWeekWithPhase } from "@/app/types";
+import type { ContentType, ManageContentListItem, ManageWeekListItem } from "@/app/types";
 
 export function isContentType(value: string | undefined): value is ContentType {
   return CONTENT_TYPES.includes(value as ContentType);
@@ -32,8 +32,11 @@ export interface ContentFilterOptions {
  * コンテンツ一覧（join結果）からフィルタセレクトの選択肢を導出する。追加フェッチは行わない。
  * 呼び出し前に sortContentsByHierarchy を通しておくことで、選択肢もテーマ→フェーズ→週の
  * 階層順になる。
+ *
+ * 管理画面一覧は `deriveWeekSelectOptions`（週一覧）を使う。本関数はテストと、
+ * コンテンツ join 結果から選択肢を作りたい呼び出し向けに残す。
  */
-export function deriveFilterOptions(contents: LearningContentWithWeek[]): ContentFilterOptions {
+export function deriveFilterOptions(contents: ManageContentListItem[]): ContentFilterOptions {
   const themes = new Map<number, ThemeFilterOption>();
   const phases = new Map<number, PhaseFilterOption>();
   const weeks = new Map<number, WeekFilterOption>();
@@ -69,7 +72,7 @@ export function deriveFilterOptions(contents: LearningContentWithWeek[]): Conten
  * 階層順になる。`learning_weeks.phase_id` は NOT NULL のため、週は常に選択肢に含める
  * （`deriveFilterOptions` と異なり「週未設定」の除外は発生しない）。
  */
-export function deriveWeekSelectOptions(weeks: LearningWeekWithPhase[]): ContentFilterOptions {
+export function deriveWeekSelectOptions(weeks: ManageWeekListItem[]): ContentFilterOptions {
   const themes = new Map<number, ThemeFilterOption>();
   const phases = new Map<number, PhaseFilterOption>();
 
@@ -93,41 +96,21 @@ export function deriveWeekSelectOptions(weeks: LearningWeekWithPhase[]): Content
 }
 
 export interface ContentFilterParams {
-  themeId?: string;
-  phaseId?: string;
-  weekId?: string;
-  type?: string;
   q?: string;
 }
 
 /**
- * テーマ / フェーズ / 週 / 種別 / タイトル検索でコンテンツを絞り込む。
- * テーマ・フェーズは content.week の join（phase.theme_id / week.phase_id）で判定するため、
- * 週が未設定（＝未分類）のコンテンツはいずれかの階層フィルタが指定されている場合は除外される。
+ * タイトル検索でコンテンツを絞り込む。
+ * テーマ / フェーズ / 週 / 種別は `fetchAllContents` 側の SQL フィルタに寄せた（#196）。
  */
 export function filterContents(
-  contents: LearningContentWithWeek[],
+  contents: ManageContentListItem[],
   params: ContentFilterParams
-): LearningContentWithWeek[] {
-  const type = isContentType(params.type) ? params.type : undefined;
+): ManageContentListItem[] {
   const q = params.q?.trim().toLowerCase();
+  if (!q) {
+    return contents;
+  }
 
-  return contents.filter((content) => {
-    if (params.themeId && String(content.week?.phase?.theme_id) !== params.themeId) {
-      return false;
-    }
-    if (params.phaseId && String(content.week?.phase_id) !== params.phaseId) {
-      return false;
-    }
-    if (params.weekId && String(content.week_id) !== params.weekId) {
-      return false;
-    }
-    if (type && content.content_type !== type) {
-      return false;
-    }
-    if (q && !content.title.toLowerCase().includes(q)) {
-      return false;
-    }
-    return true;
-  });
+  return contents.filter((content) => content.title.toLowerCase().includes(q));
 }

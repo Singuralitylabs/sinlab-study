@@ -1,8 +1,8 @@
 import type {
   ContentType,
-  LearningContentWithWeek,
-  LearningPhaseWithTheme,
-  LearningWeekWithPhase,
+  ManageContentListItem,
+  ManagePhaseListItem,
+  ManageWeekListItem,
 } from "@/app/types";
 
 const UNCLASSIFIED_LABEL = "未分類";
@@ -35,7 +35,7 @@ export interface ContentTableGroup {
 export interface ContentGroup {
   key: string;
   label: string;
-  contents: LearningContentWithWeek[];
+  contents: ManageContentListItem[];
 }
 
 /**
@@ -45,7 +45,7 @@ export interface ContentGroup {
 export interface WeekGroup {
   key: string;
   label: string;
-  weeks: LearningWeekWithPhase[];
+  weeks: ManageWeekListItem[];
 }
 
 /**
@@ -55,7 +55,7 @@ export interface WeekGroup {
 export interface PhaseGroup {
   key: string;
   label: string;
-  phases: LearningPhaseWithTheme[];
+  phases: ManagePhaseListItem[];
 }
 
 /**
@@ -101,8 +101,8 @@ export function compareGroupLevel(
  * 週が未設定のコンテンツ・display_order が欠落している階層は、末尾にまとめる。
  */
 export function sortContentsByHierarchy(
-  contents: LearningContentWithWeek[]
-): LearningContentWithWeek[] {
+  contents: ManageContentListItem[]
+): ManageContentListItem[] {
   return [...contents].sort((a, b) => {
     const themeCompare = compareGroupLevel(
       a.week?.phase?.theme?.display_order,
@@ -144,7 +144,7 @@ export function sortContentsByHierarchy(
  * 同じ規則（display_order 欠落は末尾、中間階層はidタイブレーク、最後は自身のidタイブレーク）
  * に揃える。
  */
-export function sortWeeksByHierarchy(weeks: LearningWeekWithPhase[]): LearningWeekWithPhase[] {
+export function sortWeeksByHierarchy(weeks: ManageWeekListItem[]): ManageWeekListItem[] {
   return [...weeks].sort((a, b) => {
     const themeCompare = compareGroupLevel(
       a.phase?.theme?.display_order,
@@ -174,7 +174,7 @@ export function sortWeeksByHierarchy(weeks: LearningWeekWithPhase[]): LearningWe
  * `sortWeeksByHierarchy` / `sortContentsByHierarchy` と同じ規則（display_order 欠落は
  * 末尾、中間階層はidタイブレーク、最後は自身のidタイブレーク）に揃える。
  */
-export function sortPhasesByHierarchy(phases: LearningPhaseWithTheme[]): LearningPhaseWithTheme[] {
+export function sortPhasesByHierarchy(phases: ManagePhaseListItem[]): ManagePhaseListItem[] {
   return [...phases].sort((a, b) => {
     const themeCompare = compareGroupLevel(
       a.theme?.display_order,
@@ -237,7 +237,7 @@ function joinHierarchyLabel(...names: Array<string | undefined>): string {
  * 事前に sortContentsByHierarchy で並び替えておくことで、グループの出現順が
  * テーマ→フェーズ→週の階層順・末尾が「未分類」になる。
  */
-export function groupContentsByWeek(contents: LearningContentWithWeek[]): ContentGroup[] {
+export function groupContentsByWeek(contents: ManageContentListItem[]): ContentGroup[] {
   return groupByKeyLabel(
     contents,
     (content) => (content.week ? String(content.week.id) : UNCLASSIFIED_KEY),
@@ -255,7 +255,7 @@ export function groupContentsByWeek(contents: LearningContentWithWeek[]): Conten
  * 事前に sortWeeksByHierarchy で並び替えておくことで、グループの出現順が
  * テーマ→フェーズの階層順・末尾が「未分類」になる。
  */
-export function groupWeeksByPhase(weeks: LearningWeekWithPhase[]): WeekGroup[] {
+export function groupWeeksByPhase(weeks: ManageWeekListItem[]): WeekGroup[] {
   return groupByKeyLabel(
     weeks,
     (week) => (week.phase ? String(week.phase.id) : UNCLASSIFIED_KEY),
@@ -268,7 +268,7 @@ export function groupWeeksByPhase(weeks: LearningWeekWithPhase[]): WeekGroup[] {
  * 事前に sortPhasesByHierarchy で並び替えておくことで、グループの出現順が
  * テーマの階層順・末尾が「未分類」になる。
  */
-export function groupPhasesByTheme(phases: LearningPhaseWithTheme[]): PhaseGroup[] {
+export function groupPhasesByTheme(phases: ManagePhaseListItem[]): PhaseGroup[] {
   return groupByKeyLabel(
     phases,
     (phase) => (phase.theme ? String(phase.theme.id) : UNCLASSIFIED_KEY),

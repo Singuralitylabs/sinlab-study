@@ -3,9 +3,9 @@ import { PageTitle } from "@/app/components/PageTitle";
 import { deriveWeekSelectOptions } from "@/app/lib/content-filtering";
 import { compareGroupLevel, sortWeeksByHierarchy } from "@/app/lib/content-grouping";
 import {
-  fetchAllContents,
   fetchAllWeeks,
   fetchContentByIdForAdmin,
+  fetchContentSiblingCandidates,
 } from "@/app/services/api/admin-server";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ContentForm } from "../../ContentForm";
@@ -23,7 +23,11 @@ export default async function EditContentPage({ params }: PageProps) {
   }
 
   const [{ data: content }, { data: weeks }, { data: contents, error: contentsError }] =
-    await Promise.all([fetchContentByIdForAdmin(contentId), fetchAllWeeks(), fetchAllContents()]);
+    await Promise.all([
+      fetchContentByIdForAdmin(contentId),
+      fetchAllWeeks(),
+      fetchContentSiblingCandidates(),
+    ]);
 
   if (!content) {
     notFound();
