@@ -476,11 +476,11 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 |:--|:--|:--|
 | `get_user_role()` | TEXT | 認証ユーザー（`auth.uid()`）の `role` を返す（`is_deleted = false` かつ `status <> 'rejected'` が対象。却下（`rejected`）ユーザーは NULL となり、admin/maintainer 向けポリシーのロールバイパスに一切乗らない。却下前に付与されていたロールを保持したまま Auth セッションが有効な間に認可を突破する事故を防ぐ（#104）。`trial` は対象外にしない（アプリ層は元々 rejected のみを弾く設計であり、`active` 限定にすると trial の admin/maintainer でアプリ層とRLSの認可判定が食い違うため）） |
 | `get_user_id()` | INTEGER | 認証ユーザーの `users.id` を返す（`is_deleted = false` が対象） |
-| `get_user_status()` | TEXT | 認証ユーザーの `status`（`trial` / `active` / `rejected`）を返す（`is_deleted = false` が対象）。お試しユーザーのコンテンツ制限に使用する |
+| `get_user_status()` | TEXT | 認証ユーザーの `status`（`trial` / `active` / `rejected`）を返す（`is_deleted = false` が対象）。お試しユーザーのコンテンツ制限に使用する。`learning_contents` の SELECT では `CASE (select get_user_status())` によりポリシー内で1回だけ評価する（#197 PR2）。`rejected` は CASE の ELSE に落ち公開コンテンツも不可。ロールバイパスは `get_user_role()` 側（却下時 NULL）に委ねる |
 
 いずれも `STABLE SECURITY DEFINER`・`SET search_path = public` で定義されている。
 
-EXECUTE 権限は `authenticated` / `service_role` にのみ付与しており、`anon`（未認証）からの REST RPC 経由の実行は許可しない（`PUBLIC` へのデフォルト付与も取り消し済み）。新たにヘルパー関数を追加する際も、同じパターン（`STABLE SECURITY DEFINER` + `SET search_path = public` + `PUBLIC, anon` からの REVOKE + `authenticated, service_role` への GRANT）を踏襲する。
+EXECUTE 権限は `authenticated` / `service_role` にのみ付与しており、`anon`（未認証）からの REST RPC 経由の実行は許可しない（`PUBLIC` へのデフォルト付与も取り消し済み）。新たにヘルパー関数を追加する際も、同じパターン（`STABLE SECURITY DEFINER` + `SET search_path = public` + `PUBLIC, anon` からの REVOKE + `authenticated, service_role` への GRANT）を踏襲する。ヘルパーの GRANT/REVOKE や関数本体は認可ロジックの変更時以外いじらない（#197 PR2 もポリシー式のみ変更）。
 
 **この `SECURITY DEFINER` の規約は、ポリシー内から呼ぶRLSヘルパーに限る。** アプリから直接叩くRPC（例: `get_students_progress_summary()`。6.2節参照）は逆に `SECURITY DEFINER` にしてはならない。`SECURITY DEFINER` にするとRLSを迂回するため、`authenticated` にGRANTしたままだと任意のmemberが他ユーザーの行まで取得できてしまう。呼び出し元の権限のままRLSに従わせる `SECURITY INVOKER`（デフォルト）を維持すること。
 
@@ -494,6 +494,8 @@ EXECUTE 権限は `authenticated` / `service_role` にのみ付与しており�
 
 - 同一テーブル・同一操作に対する許可ポリシーは `OR` 条件で1つに統合する
 - ポリシー内の関数呼び出しは `(select get_user_role())` のように `(select ...)` で包み、行ごとの再評価を防いでクエリ実行時に1回だけ評価（InitPlan化）させる
+- 同一ヘルパーを1ポリシー内で複数回書くと、Postgres は構文的に別の InitPlan を必ずしも共有しない。`get_user_status()` のように分岐が必要なときは `CASE (select get_user_status()) ...` で1回評価に折り畳む（#197 PR2）
+- 相関サブクエリは `IN (SELECT ...)` より `EXISTS (SELECT 1 ...)` を用い、ヘルパー呼び出しは引き続き `(select ...)` で包む（`ai_reviews` SELECT、#197 PR2）
 
 ### 6.1 学習コンテンツ系テーブル
 
@@ -524,7 +526,18 @@ admin と maintainer はいずれもコンテンツ系テーブルの全件参�
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Contents are viewable by users or content managers | SELECT | active（公開分）/ お試しユーザー（お試し公開分のみ）/ admin・maintainer（全件） | `(is_published = true AND is_deleted = false AND ((select get_user_status()) = 'active' OR ((select get_user_status()) = 'trial' AND is_open_to_trial = true))) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+| Contents are viewable by users or content managers | SELECT | active（公開分）/ お試しユーザー（お試し公開分のみ）/ admin・maintainer（全件） / rejected は公開分も不可（ロールバイパスなし） | `(is_published = true AND is_deleted = false AND CASE (select get_user_status()) WHEN 'active' THEN true WHEN 'trial' THEN is_open_to_trial ELSE false END) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+
+公開済み・未削除行についての許可（ロールバイパス無し）:
+
+| `get_user_status()` | `is_open_to_trial` | 可視 |
+|:--|:--|:--|
+| `active` | true / false | 可 |
+| `trial` | true | 可 |
+| `trial` | false | 不可 |
+| `rejected` / その他 | true / false | 不可 |
+
+admin / maintainer は `get_user_role()` の OR 枝で未公開行も含め全件可視。`get_user_role()` は `rejected` に NULL を返すため、却下済みの元管理者もバイパスしない（#104）。
 
 親階層（`learning_themes` / `learning_phases` / `learning_weeks`）はステータスによる絞り込みを行わず、従来どおり公開分を認証済み全ユーザーが参照できる。お試しユーザーにもコースツリーの骨格（テーマ・フェーズ・週）を見せてロック表示するための設計であり、これによりステータス判定の対象は `learning_contents` の1テーブルに閉じる。
 
@@ -581,7 +594,7 @@ user_id = (select get_user_id())
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Users can view own ai reviews, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `submission_id IN (SELECT id FROM submissions WHERE user_id = (select get_user_id())) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+| Users can view own ai reviews, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `EXISTS (SELECT 1 FROM submissions s WHERE s.id = ai_reviews.submission_id AND s.user_id = (select get_user_id())) OR (select get_user_role()) IN ('admin', 'maintainer')` |
 
 `ai_reviews` には INSERT / UPDATE のRLSポリシーは定義していない。レビューの作成・更新は AIレビューAPI（`/api/ai-review`）がサーバー側で Service Role キーを用いて行い、RLSをバイパスする。
 
@@ -663,6 +676,7 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 | `20260908000000_secure_slides_bucket.sql` | スライドPDFの署名付きURL配信（#89）: `slides` バケットを非公開化し、`learning_contents.pdf_url` を公開URLからオブジェクトキーへ一括正規化、`storage.objects` に `slides` の SELECT ポリシー（`learning_contents` の RLS に委譲）を追加し、INSERT / UPDATE / DELETE は `thumbnails` のポリシーと統合して両バケット対象の1本ずつにする。正規化後にキーとして解釈できない `pdf_url` が残っていれば例外で中断する。**アプリ側の署名付きURL配信と同時にリリースすること**（旧コードは pdf_url を公開URLとして組み立てるため） |
 | `20260910093449_add_bulk_update_sibling_display_order_rpc.sql` | 兄弟要素の `display_order` 一括更新 RPC `bulk_update_sibling_display_order(p_table, p_updates)`（#196）。挿入位置指定時の N 文 UPDATE を 1 回の UPDATE … FROM に置き換える。SECURITY INVOKER・許可テーブル限定・純粋な UPDATE のみ（upsert ではない）。**アプリ側の create/update（兄弟再採番）と同時にリリースすること**（未適用だと `PGRST202` で兄弟ありの作成・更新が失敗する） |
 | `20260911010345_add_query_pattern_indexes.sql` | クエリパターンに合わせたインデックス整備（#197 PR1）。階層一覧の `(parent_id, display_order)` 複合化、`submissions` の `(submitted_at DESC, id DESC)` 系、RPC向け `user_progress` 部分インデックス、`idx_users_auth_role` / 冗長な `idx_user_progress_user_id` の削除。UNIQUE 制約と重複する covering / `ai_reviews` 複合 / `users(status)` 部分は追加しない。認可（RLS）は変更しない |
+| `20260911061708_lighten_rls_policy_helper_calls.sql` | RLS ポリシーのヘルパー呼び出し軽量化（#197 PR2）。`learning_contents` SELECT の `get_user_status()` を `CASE` で1回評価に折り畳み、`ai_reviews` SELECT の `IN (SELECT ...)` を `EXISTS` に変更。許可・拒否の真理値とヘルパーの GRANT/REVOKE は変更しない |
 
 ### 7.1 リモート適用履歴との整合（#149・確定版）
 
@@ -758,3 +772,4 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 | 2026年9月 | スライドPDFの署名付きURL配信（#89）に対応：`slides` バケットを非公開化し、`learning_contents.pdf_url` の保存形式をオブジェクトキーに統一（3.4）。`storage.objects` の `slides` ポリシー（SELECT は `learning_contents` の RLS に委譲）を6.8に追記、マイグレーション一覧を更新 |
 | 2026年9月 | #196対応：兄弟要素の `display_order` 一括更新 RPC `bulk_update_sibling_display_order()` を追加。6.2節・マイグレーション一覧を更新 |
 | 2026年9月 | #197 PR1対応：クエリパターンに合わせたインデックス整備（階層一覧の複合化、`submissions` のタイブレーカー付きソートキー、RPC向け `user_progress` 部分インデックス、UNIQUE と重複する候補の除外）。§4 に制約由来インデックスを併記 |
+| 2026年9月 | #197 PR2対応：RLS ポリシーのヘルパー呼び出し軽量化。`learning_contents` SELECT を `CASE (select get_user_status())` に書き換え、`ai_reviews` SELECT を `EXISTS` に変更。§5.2・§6 の方針・ポリシー表・マイグレーション一覧を更新 |
