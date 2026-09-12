@@ -4,6 +4,7 @@ import {
   type NavigationContentInput,
   type NavigationWeek,
   resolveAdjacentContents,
+  resolveContentNavigation,
 } from "@/app/lib/content-navigation";
 
 function makeWeek(
@@ -261,5 +262,47 @@ describe("resolveAdjacentContents", () => {
   it("currentContentId が列に無い / 通し列が空 → { prev: null, next: null }", () => {
     expect(resolveAdjacentContents(ordered, 999)).toEqual({ prev: null, next: null });
     expect(resolveAdjacentContents([], 11)).toEqual({ prev: null, next: null });
+  });
+});
+
+describe("resolveContentNavigation", () => {
+  const phase = makePhase(1, 1, "導入");
+  const weeks = [
+    makeWeek({ id: 1, name: "第1週", display_order: 1, phase }),
+    makeWeek({ id: 2, name: "第2週", display_order: 2, phase }),
+  ];
+  const contents = [
+    makeContent({ id: 11, title: "A", week_id: 1, display_order: 1 }),
+    makeContent({ id: 12, title: "B", week_id: 1, display_order: 2 }),
+    makeContent({ id: 21, title: "C", week_id: 2, display_order: 1 }),
+  ];
+  const ordered = buildThemeContentOrder(weeks, contents);
+
+  it("通し列に現在があるテーマ末尾は endFallback が theme", () => {
+    const result = resolveContentNavigation(ordered, 21, []);
+    expect(result.next).toBeNull();
+    expect(result.prev?.id).toBe(12);
+    expect(result.endFallback).toBe("theme");
+  });
+
+  it("通し列が空の縮退時は週ローカルの前後を使い、endFallback が phase", () => {
+    const weekLocal = buildThemeContentOrder(
+      [makeWeek({ id: 1, name: "第1週", display_order: 1, phase })],
+      [
+        makeContent({ id: 11, title: "A", week_id: 1, display_order: 1 }),
+        makeContent({ id: 12, title: "B", week_id: 1, display_order: 2 }),
+      ]
+    );
+
+    const result = resolveContentNavigation([], 11, weekLocal);
+    expect(result.prev).toBeNull();
+    expect(result.next?.id).toBe(12);
+    expect(result.next?.boundary).toBe("same-week");
+    expect(result.endFallback).toBe("phase");
+  });
+
+  it("通し列に現在が無い縮退時も endFallback が phase", () => {
+    const result = resolveContentNavigation(ordered, 999, []);
+    expect(result).toEqual({ prev: null, next: null, endFallback: "phase" });
   });
 });

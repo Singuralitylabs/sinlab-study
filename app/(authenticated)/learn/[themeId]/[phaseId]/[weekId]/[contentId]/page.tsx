@@ -8,7 +8,7 @@ import { SlideContent } from "@/app/components/SlideContent";
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
-import { resolveAdjacentContents } from "@/app/lib/content-navigation";
+import { buildThemeContentOrder, resolveContentNavigation } from "@/app/lib/content-navigation";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
@@ -74,7 +74,29 @@ export default async function ContentPage({ params }: PageProps) {
     notFound();
   }
 
-  const { prev, next } = resolveAdjacentContents(navigation?.orderedContents ?? [], contentIdNum);
+  const weekLocalContents =
+    week.phase != null
+      ? buildThemeContentOrder(
+          [
+            {
+              id: week.id,
+              name: week.name,
+              display_order: week.display_order,
+              phase: {
+                id: week.phase.id,
+                name: week.phase.name,
+                display_order: null,
+              },
+            },
+          ],
+          weekContentSummaries ?? []
+        )
+      : [];
+  const { prev, next, endFallback } = resolveContentNavigation(
+    navigation?.orderedContents ?? [],
+    contentIdNum,
+    weekLocalContents
+  );
 
   const isLocked = isContentLockedForUser(userStatus, summary.is_open_to_trial);
 
@@ -106,7 +128,13 @@ export default async function ContentPage({ params }: PageProps) {
           </CardContent>
         </Card>
 
-        <PrevNextNav themeId={themeIdNum} prev={prev} next={next} />
+        <PrevNextNav
+          themeId={themeIdNum}
+          phaseId={phaseIdNum}
+          prev={prev}
+          next={next}
+          endFallback={endFallback}
+        />
       </div>
     );
   }
@@ -287,7 +315,13 @@ export default async function ContentPage({ params }: PageProps) {
       )}
 
       {/* 前後ナビゲーション */}
-      <PrevNextNav themeId={themeIdNum} prev={prev} next={next} />
+      <PrevNextNav
+        themeId={themeIdNum}
+        phaseId={phaseIdNum}
+        prev={prev}
+        next={next}
+        endFallback={endFallback}
+      />
     </div>
   );
 }

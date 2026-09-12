@@ -112,6 +112,7 @@ const setup = ({
   isPublished = true,
   signedUrl = SIGNED_URL,
   orderedContents,
+  extraWeekContents = [],
 }: {
   userStatus: "active" | "trial";
   userRole?: "member" | "admin" | "maintainer";
@@ -119,6 +120,13 @@ const setup = ({
   isPublished?: boolean;
   signedUrl?: string | null;
   orderedContents?: NavigationContent[];
+  extraWeekContents?: Array<{
+    id: number;
+    title: string;
+    display_order: number;
+    is_open_to_trial?: boolean;
+    is_published?: boolean;
+  }>;
 }) => {
   vi.mocked(getServerAuth).mockResolvedValue({
     user: { id: "auth-uuid" },
@@ -130,7 +138,18 @@ const setup = ({
   vi.mocked(fetchThemeNavigationIndex).mockResolvedValue({
     data: {
       orderedContents: orderedContents ?? [currentNav],
-      currentWeekContents: [currentSummary(isOpenToTrial, isPublished)],
+      currentWeekContents: [
+        currentSummary(isOpenToTrial, isPublished),
+        ...extraWeekContents.map((content) => ({
+          id: content.id,
+          title: content.title,
+          content_type: "text" as const,
+          display_order: content.display_order,
+          is_open_to_trial: content.is_open_to_trial ?? true,
+          is_published: content.is_published ?? true,
+          week_id: 3,
+        })),
+      ],
     },
     error: null,
   } as never);
@@ -351,12 +370,44 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
     }
   );
 
-  it("ナビ縮退時（orderedContents: []）でもページが落ちず テーマに戻る が出る", async () => {
+  it("ナビ縮退時（orderedContents: []）でもページが落ちず フェーズに戻る が出る", async () => {
     setup({ userStatus: "active", isOpenToTrial: false, orderedContents: [] });
 
     const html = await render();
 
-    expect(html).toContain("テーマに戻る");
-    expect(html).toContain('href="/learn/1"');
+    expect(html).toContain("フェーズに戻る");
+    expect(html).toContain('href="/learn/1/2"');
+    expect(html).not.toContain("テーマに戻る");
+  });
+
+  it("ナビ縮退時でも同じ週の次へは出る", async () => {
+    setup({
+      userStatus: "active",
+      isOpenToTrial: false,
+      orderedContents: [],
+      extraWeekContents: [{ id: 11, title: "同じ週の次", display_order: 2 }],
+    });
+
+    const html = await render();
+
+    expect(html).toContain('href="/learn/1/2/3/11"');
+    expect(html).toContain("同じ週の次");
+    expect(html).not.toContain("次の週:");
+    expect(html).not.toContain("テーマに戻る");
+    expect(html).not.toContain("フェーズに戻る");
+  });
+
+  it("通し列に現在が無い縮退時は フェーズに戻る（テーマ末尾と区別）", async () => {
+    setup({
+      userStatus: "active",
+      isOpenToTrial: false,
+      orderedContents: [nextWeek],
+    });
+
+    const html = await render();
+
+    expect(html).toContain("フェーズに戻る");
+    expect(html).toContain('href="/learn/1/2"');
+    expect(html).not.toContain("テーマに戻る");
   });
 });

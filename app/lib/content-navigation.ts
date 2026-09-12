@@ -129,3 +129,35 @@ export function resolveAdjacentContents(
     next: toAdjacent(current, orderedContents[index + 1]),
   };
 }
+
+/** 末尾ボタンの行き先。通し列上のテーマ末尾は theme、ナビ縮退時は phase */
+export type NavigationEndFallback = "theme" | "phase";
+
+/**
+ * コンテンツ詳細の前後ナビを解決する。
+ *
+ * 現在のコンテンツがテーマ通し列にあるときはテーマ内遷移（末尾は「テーマに戻る」）。
+ * 通し列が空、または現在のコンテンツが列に無い縮退時（未公開フェーズ配下の公開週など）は
+ * 現在の週のサマリーだけで前後を算出し、末尾は従来どおり「フェーズに戻る」。
+ */
+export function resolveContentNavigation(
+  orderedContents: NavigationContent[],
+  currentContentId: number,
+  weekLocalContents: NavigationContent[]
+): {
+  prev: AdjacentContent | null;
+  next: AdjacentContent | null;
+  endFallback: NavigationEndFallback;
+} {
+  if (orderedContents.some((content) => content.id === currentContentId)) {
+    return {
+      ...resolveAdjacentContents(orderedContents, currentContentId),
+      endFallback: "theme",
+    };
+  }
+
+  return {
+    ...resolveAdjacentContents(weekLocalContents, currentContentId),
+    endFallback: "phase",
+  };
+}

@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
-import type { AdjacentContent } from "@/app/lib/content-navigation";
+import type { AdjacentContent, NavigationEndFallback } from "@/app/lib/content-navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -35,12 +35,16 @@ function NavLinkText({
 
 export function PrevNextNav({
   themeId,
+  phaseId,
   prev,
   next,
+  endFallback,
 }: {
   themeId: number;
+  phaseId: number;
   prev: AdjacentContent | null;
   next: AdjacentContent | null;
+  endFallback: NavigationEndFallback;
 }) {
   const prevAnnotation = prev ? boundaryAnnotation(prev, "prev") : null;
   const nextAnnotation = next ? boundaryAnnotation(next, "next") : null;
@@ -82,7 +86,11 @@ export function PrevNextNav({
         </Button>
       ) : (
         <Button asChild className="flex-1 justify-center">
-          <Link href={`/learn/${themeId}`}>テーマに戻る</Link>
+          {endFallback === "phase" ? (
+            <Link href={`/learn/${themeId}/${phaseId}`}>フェーズに戻る</Link>
+          ) : (
+            <Link href={`/learn/${themeId}`}>テーマに戻る</Link>
+          )}
         </Button>
       )}
     </div>
