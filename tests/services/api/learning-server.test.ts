@@ -711,8 +711,52 @@ describe("fetchContentSummariesByWeekIds", () => {
       // service_role を使わない経路でも is_deleted は必ず絞り込む
       // （admin / maintainer 向け SELECT RLS は is_deleted を見ないため）
       expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
+      expect(builder.order).toHaveBeenCalledWith("display_order");
+      expect(builder.order).toHaveBeenCalledWith("id");
+      expect(builder.range).toHaveBeenCalledWith(0, 999);
     }
   );
+
+  it("PostgREST 上限を超える場合、range で次ページを結合して全件返す", async () => {
+    const firstPage = Array.from({ length: 1000 }, (_, index) => ({
+      id: index + 1,
+      title: `他週${index + 1}`,
+      content_type: "text",
+      display_order: 1,
+      is_open_to_trial: true,
+      is_published: true,
+      week_id: 20,
+    }));
+    const secondPage = [
+      {
+        id: 2001,
+        title: "現在の週",
+        content_type: "text",
+        display_order: 1,
+        is_open_to_trial: true,
+        is_published: true,
+        week_id: 10,
+      },
+    ];
+    const mockAdminClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          { data: firstPage, error: null },
+          { data: secondPage, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockAdminClient as never);
+
+    const result = await fetchContentSummariesByWeekIds([10, 20]);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toHaveLength(1001);
+    expect(result.data?.[1000]).toEqual({ ...secondPage[0], is_published: true });
+    expect(mockAdminClient.from).toHaveBeenCalledTimes(2);
+    expect(mockAdminClient.from.mock.results[0].value.range).toHaveBeenCalledWith(0, 999);
+    expect(mockAdminClient.from.mock.results[1].value.range).toHaveBeenCalledWith(1000, 1999);
+  });
 });
 
 // ----------------------------------------------------------------
@@ -804,6 +848,62 @@ describe("fetchThemeNavigationIndex", () => {
       "id, title, content_type, display_order, is_open_to_trial, week_id"
     );
     expect(contentBuilder.in).toHaveBeenCalledWith("week_id", [10, 20]);
+    expect(contentBuilder.order).toHaveBeenCalledWith("display_order");
+    expect(contentBuilder.order).toHaveBeenCalledWith("id");
+    expect(contentBuilder.range).toHaveBeenCalledWith(0, 999);
+  });
+
+  it("コンテンツが1000行で切り詰められても、次ページの現在の週が currentWeekContents に残る", async () => {
+    const firstPage = Array.from({ length: 1000 }, (_, index) => ({
+      id: 1000 + index,
+      title: `他週${index}`,
+      content_type: "text",
+      display_order: 1,
+      is_open_to_trial: true,
+      is_published: true,
+      week_id: 20,
+    }));
+    const currentWeekPage = [
+      {
+        id: 1,
+        title: "週1-先",
+        content_type: "video",
+        display_order: 1,
+        is_open_to_trial: true,
+        is_published: true,
+        week_id: 10,
+      },
+      {
+        id: 2,
+        title: "週1-後",
+        content_type: "text",
+        display_order: 2,
+        is_open_to_trial: false,
+        is_published: true,
+        week_id: 10,
+      },
+    ];
+    const mockServerClient = createMockSupabaseClient({
+      queryResult: { data: weeks, error: null },
+    });
+    const mockAdminClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          { data: firstPage, error: null },
+          { data: currentWeekPage, error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockAdminClient as never);
+
+    const result = await fetchThemeNavigationIndex(1, 10, "member");
+
+    expect(result.error).toBeNull();
+    expect(result.data?.currentWeekContents.map((c) => c.id)).toEqual([1, 2]);
+    expect(result.data?.orderedContents.some((c) => c.id === 1)).toBe(true);
+    expect(createAdminSupabaseClient).toHaveBeenCalledTimes(1);
+    expect(mockAdminClient.from).toHaveBeenCalledTimes(2);
   });
 
   it.each(["admin", "maintainer"] as const)(
@@ -1009,6 +1109,49 @@ describe("fetchWeeksWithContentsByPhaseId", () => {
       },
       { id: 101, name: "Week 2", display_order: 2, contents: [] },
     ]);
+  });
+
+  it("display_order 同値の週・コンテンツは id でタイブレークし、ナビと同じ compareGroupLevel 順になる", async () => {
+    const weeks = [
+      { id: 2, name: "Week B", display_order: 1 },
+      { id: 1, name: "Week A", display_order: 1 },
+    ];
+    const summaries = [
+      {
+        id: 20,
+        title: "後",
+        content_type: "text",
+        display_order: 1,
+        is_open_to_trial: true,
+        is_published: true,
+        week_id: 1,
+      },
+      {
+        id: 10,
+        title: "先",
+        content_type: "video",
+        display_order: 1,
+        is_open_to_trial: true,
+        is_published: true,
+        week_id: 1,
+      },
+    ];
+    const mockServerClient = createMockSupabaseClient({
+      queryResult: { data: weeks, error: null },
+    });
+    const mockAdminClient = createMockSupabaseClient({
+      queryResult: { data: summaries, error: null },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockAdminClient as never);
+
+    const result = await fetchWeeksWithContentsByPhaseId(1);
+
+    expect(result.data?.map((week) => week.id)).toEqual([1, 2]);
+    expect(result.data?.[0].contents.map((content) => content.id)).toEqual([10, 20]);
+    const weekBuilder = mockServerClient.from.mock.results[0].value;
+    expect(weekBuilder.order).toHaveBeenCalledWith("display_order");
+    expect(weekBuilder.order).toHaveBeenCalledWith("id");
   });
 
   it("admin / maintainer の場合、未公開の週も通常クライアントで取得する（is_published絞り込みなし）", async () => {

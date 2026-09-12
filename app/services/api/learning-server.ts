@@ -1,5 +1,6 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import { USER_STATUS } from "@/app/constants/user";
+import { compareGroupLevel } from "@/app/lib/content-grouping";
 import {
   buildThemeContentOrder,
   type NavigationContent,
@@ -376,6 +377,30 @@ export function isContentFullyPublished(content: LearningContentWithBreadcrumb):
 const CONTENT_VISIBILITY_SUMMARY_COLUMNS =
   "id, title, content_type, display_order, is_open_to_trial, week_id";
 
+/** PostgREST の1リクエスト既定上限。切り詰めで行が欠けるのを防ぐため range でページングする */
+const POSTGREST_MAX_ROWS = 1000;
+
+async function collectPagedRows<T>(
+  fetchPage: (
+    from: number,
+    to: number
+  ) => Promise<{ data: T[] | null; error: PostgrestError | null }>
+): Promise<{ data: T[] | null; error: PostgrestError | null }> {
+  const rows: T[] = [];
+  for (let offset = 0; ; offset += POSTGREST_MAX_ROWS) {
+    const { data, error } = await fetchPage(offset, offset + POSTGREST_MAX_ROWS - 1);
+    if (error) {
+      return { data: null, error };
+    }
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < POSTGREST_MAX_ROWS) {
+      break;
+    }
+  }
+  return { data: rows, error: null };
+}
+
 /**
  * 指定した週IDに属する公開コンテンツのサマリー（タイトル・種別・表示順・お試し公開フラグ）を取得する。
  *
@@ -387,6 +412,11 @@ const CONTENT_VISIBILITY_SUMMARY_COLUMNS =
  * の許可リストのみを select し、`is_published` は select せず常に `true` を補う
  * （下の `.eq("is_published", true)` と対になっている。フィルタ条件を変える場合はこの補完も
  * 合わせて見直すこと）。
+ *
+ * 並びは `display_order` → `id`（`compareGroupLevel` と同じタイブレーク）。
+ * PostgREST の1リクエスト上限（既定1000行）を超えても取りこぼさないよう range でページングする。
+ * ページングしないと、テーマ全体を `display_order` 昇順で切った結果から現在の週の行が落ち、
+ * コンテンツ詳細の `summary` 未検出で404になる。
  */
 export async function fetchContentVisibilitySummariesByWeekIds(weekIds: number[]): Promise<{
   data: ContentVisibilitySummary[] | null;
@@ -397,14 +427,18 @@ export async function fetchContentVisibilitySummariesByWeekIds(weekIds: number[]
   }
 
   const supabase = await createAdminSupabaseClient();
-
-  const { data, error } = await supabase
-    .from("learning_contents")
-    .select(CONTENT_VISIBILITY_SUMMARY_COLUMNS)
-    .in("week_id", weekIds)
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .order("display_order");
+  const { data, error } = await collectPagedRows(async (from, to) => {
+    const result = await supabase
+      .from("learning_contents")
+      .select(CONTENT_VISIBILITY_SUMMARY_COLUMNS)
+      .in("week_id", weekIds)
+      .eq("is_published", true)
+      .eq("is_deleted", false)
+      .order("display_order")
+      .order("id")
+      .range(from, to);
+    return { data: result.data, error: result.error };
+  });
 
   if (error) {
     console.error("コンテンツ可視性サマリー取得エラー:", error.message);
@@ -433,13 +467,17 @@ async function fetchContentSummariesByWeekIdsForManager(weekIds: number[]): Prom
   }
 
   const supabase = await createServerSupabaseClient();
-
-  const { data, error } = await supabase
-    .from("learning_contents")
-    .select("id, title, content_type, display_order, is_open_to_trial, is_published, week_id")
-    .in("week_id", weekIds)
-    .eq("is_deleted", false)
-    .order("display_order");
+  const { data, error } = await collectPagedRows(async (from, to) => {
+    const result = await supabase
+      .from("learning_contents")
+      .select("id, title, content_type, display_order, is_open_to_trial, is_published, week_id")
+      .in("week_id", weekIds)
+      .eq("is_deleted", false)
+      .order("display_order")
+      .order("id")
+      .range(from, to);
+    return { data: result.data, error: result.error };
+  });
 
   if (error) {
     console.error("コンテンツサマリー取得エラー（管理者向け）:", error.message);
@@ -496,9 +534,10 @@ export interface ThemeNavigationIndex {
  * ページ描画と404/ロック判定は `currentWeekContents` で死守する）。
  * コンテンツクエリ失敗時は `{ data: null, error }` を返す。
  *
- * PostgREST の1リクエスト上限（既定1000行）に達するとナビが黙って切り詰められる
- * （404にはならない）。現行カタログでは到達しないが、`fetchThemeProgressSummaries()` と
- * 同様に上限があることを明示する。
+ * コンテンツサマリーは `fetchContentSummariesByWeekIds()` 内で range ページングする
+ * （`fetchThemeProgressSummaries()` と同じ方針）。ページングせずテーマ全体を
+ * `display_order` 昇順のまま切ると、現在の週の行が欠落して `summary` 未検出の404になる。
+ * 呼び出し箇所は従来どおり1つで、現行カタログでは1リクエストのまま終わる。
  */
 export async function fetchThemeNavigationIndex(
   themeId: number,
@@ -571,6 +610,8 @@ export async function fetchThemeNavigationIndex(
 /**
  * フェーズに属する週一覧をコンテンツ付きで取得。
  * admin / maintainer は未公開の週・コンテンツもプレビューとして取得できる（issue #68）。
+ * 週・コンテンツの並びは `compareGroupLevel`（display_order 同値は id タイブレーク）で、
+ * コンテンツ詳細の前後ナビと同じ規則にする。
  */
 export async function fetchWeeksWithContentsByPhaseId(
   phaseId: number,
@@ -585,14 +626,16 @@ export async function fetchWeeksWithContentsByPhaseId(
     supabase.from("learning_weeks").select("*").eq("phase_id", phaseId).eq("is_deleted", false),
     userRole
   );
-  const { data: weeks, error } = await query.order("display_order");
+  const { data: weeks, error } = await query.order("display_order").order("id");
 
   if (error) {
     console.error("週一覧取得エラー:", error.message);
     return { data: null, error };
   }
 
-  const weekList = weeks ?? [];
+  const weekList = [...(weeks ?? [])].sort((a, b) =>
+    compareGroupLevel(a.display_order, b.display_order, a.id, b.id)
+  );
   const weekIds = weekList.map((week) => week.id);
   const { data: contents, error: contentsError } = await fetchContentSummariesByWeekIds(
     weekIds,
@@ -608,6 +651,9 @@ export async function fetchWeeksWithContentsByPhaseId(
     const list = contentsByWeekId.get(content.week_id) ?? [];
     list.push(content);
     contentsByWeekId.set(content.week_id, list);
+  }
+  for (const list of contentsByWeekId.values()) {
+    list.sort((a, b) => compareGroupLevel(a.display_order, b.display_order, a.id, b.id));
   }
 
   const data = weekList.map((week) => ({
