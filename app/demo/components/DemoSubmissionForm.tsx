@@ -316,13 +316,7 @@ export function DemoSubmissionForm({
         </Alert>
       )}
 
-      {(aiReview || isReviewLoading) && (
-        <AIReviewDisplayNoSSR
-          review={aiReview}
-          isLoading={isReviewLoading}
-          defaultExpanded={true}
-        />
-      )}
+      <AIReviewDisplayNoSSR review={aiReview} isLoading={isReviewLoading} defaultExpanded={true} />
     </div>
   );
 }

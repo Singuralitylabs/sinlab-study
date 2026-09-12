@@ -404,14 +404,14 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 
 | 種別 | 表示方法 |
 |:--|:--|
-| 動画（video） | YouTube facade（サムネイル + 再生ボタン）。クリック前は `i.ytimg.com` の hqdefault のみ取得し、クリック後に `react-youtube` を遅延読み込みして autoplay 再生（URLから Video ID を自動抽出、レスポンシブ対応） |
+| 動画（video） | YouTube facade（サムネイル + 再生ボタン）。クリック前はブラウザが `i.ytimg.com` の hqdefault を直接取得し、クリック後に `react-youtube` を遅延読み込みして autoplay 再生（URLから Video ID を自動抽出、レスポンシブ対応） |
 | テキスト（text） | Markdown形式で記述・表示（GFM対応） |
 | スライド（slide） | 非公開バケット `slides` のPDFを、閲覧権限チェック後にサーバー側で発行した署名付きURLで react-pdf によりブラウザ内表示（後述） |
 | 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携 |
 
 動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア上部に概要欄カードを表示する。未入力（NULL）の既存コンテンツでは概要欄自体を表示しない。表示にはテキスト・演習と同じ `MarkdownRenderer` を用いる。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）は `"use client"` を持たない共有コンポーネント（hooksやNode専用APIを使わないため）。Server Component（learn/demoの`page.tsx`）からはサーバーで、Client Component（`AIReviewDisplay`、AIレビュー結果表示用）からはクライアントバンドルに含まれてクライアントで、同じ実装のまま描画される。`AIReviewDisplay` 自体は `AIReviewDisplayNoSSR`（`next/dynamic`・`ssr: false`）経由でレビュー表示時のみ遅延読み込みし、コンテンツ本文の Markdown 描画経路（Server Component）は client 化しない。
 
-**YouTube facade（#198）**: `YouTubeEmbed` は初期表示でサムネイル（`https://i.ytimg.com/vi/{id}/hqdefault.jpg`、`next/image`）と再生ボタンのみを描画する。クリックまでは `youtube.com` およびサムネイル以外の `ytimg.com` へ通信しない。クリック後に `YouTubePlayer`（`react-youtube`）を `next/dynamic` で読み込み、`autoplay: 1` で再生を開始する。`next.config.ts` の `images.remotePatterns` には `i.ytimg.com` の `/vi/**` のみを追加する。
+**YouTube facade（#198）**: `YouTubeEmbed` は初期表示でサムネイル（`https://i.ytimg.com/vi/{id}/hqdefault.jpg`）と再生ボタンのみを描画する。hqdefault は最適化の恩恵がほぼ無いため `next/image` Optimizer は使わず `<img>` で `i.ytimg.com` を直接参照する（クリック前に `youtube.com` へは通信しない）。クリック後に `YouTubePlayer`（`react-youtube`）を `next/dynamic` で読み込み、`autoplay: 1` で再生を開始する（チャンク読み込み中は黒背景 + スピナーを表示）。なお iOS Safari では gesture 後に生成した cross-origin iframe の音声付き autoplay が拒否され、再生ボタンへの追加タップが必要になる場合がある（facade 化の既知の制約）。
 
 **スライドPDFの配信（署名付きURL、#89）**
 
@@ -558,7 +558,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 **エディタ機能**:
 - シンタックスハイライト
 - 自動インデント・ブラケット補完
-- ライト / ダークモード対応（`layout.tsx` が `document.documentElement` に付与する `dark` クラス連動。`useSyncExternalStore` で初期値を取得し、マウント直後のライト→ダークちらつきを防ぐ）
+- ライト / ダークモード対応（`layout.tsx` が起動時に1回付与する `dark` クラス連動。`useSyncExternalStore` で初期値を取得し、マウント直後のライト→ダークちらつきを防ぐ。表示中の OS テーマ切替には追従せず再読み込みで反映——Tailwind の `dark:` と同じ）
 
 CodeMirror本体は数百KB規模のため、`next/dynamic`（`ssr: false`）で遅延読み込みする（`app/components/CodeEditorNoSSR.tsx`、`PdfSlideViewerNoSSR` と同方式）。読み込み中はプレースホルダーを表示する。`PdfSlideViewerNoSSR` も同様に `loading:` プレースホルダ（ビューアの `isLoading` と同じ高さ）を表示する。
 
@@ -572,9 +572,9 @@ AIレビュー結果表示（`AIReviewDisplay`）は Markdown + ハイライタ�
 |:--|:--|:--|
 | CodeMirror | `CodeEditorNoSSR`（`ssr: false` + loading） | 演習フォームのみ |
 | pdf.js / react-pdf | `PdfSlideViewerNoSSR`（`ssr: false` + loading） | スライドのみ |
-| AIレビュー（Markdown + lowlight） | `AIReviewDisplayNoSSR`（`ssr: false`） | レビュー表示時のみ。本文 Markdown の RSC 経路は維持 |
-| react-youtube | facade + `YouTubePlayer` の dynamic | クリック前は youtube.com 非通信。サムネイルは `i.ytimg.com` のみ |
-| lucide-react / radix-ui | `experimental.optimizePackageImports` | バレル import の tree-shake |
+| AIレビュー（Markdown + lowlight） | `AIReviewDisplayNoSSR`（`ssr: false`） | レビュー／ローディング時のみマウント。本文 Markdown の RSC 経路は維持 |
+| react-youtube | facade + `YouTubePlayer` の dynamic | クリック前は youtube.com 非通信。サムネイルは `<img>` で `i.ytimg.com` を直接参照 |
+| radix-ui | `experimental.optimizePackageImports` | バレル import の tree-shake（`lucide-react` は Next.js 既定リストに含まれるため明示指定しない） |
 
 **レスポンス**:
 

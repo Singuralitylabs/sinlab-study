@@ -45,8 +45,10 @@ function getDarkClassServerSnapshot() {
 }
 
 export function CodeEditor({ value, onChange, language, placeholder }: CodeEditorProps) {
-  // layout.tsx のインラインスクリプトが付けた dark クラスを初期値に使う
-  // （prefers-color-scheme の useEffect 遅延だとダークモード利用者が一度ライトでマウントされる）
+  // layout.tsx のインラインスクリプトが起動時に1回付ける dark クラスを初期値に使う。
+  // prefers-color-scheme の useEffect 遅延だとダークモード利用者が一度ライトでマウントされる。
+  // dark クラスは起動時のみ付与されアプリ内で変更されないため、表示中の OS テーマ切替には
+  // 追従しない（Tailwind の dark: バリアントと同じ。再読み込みで反映）。
   const isDark = useSyncExternalStore(
     subscribeDarkClass,
     getDarkClassSnapshot,

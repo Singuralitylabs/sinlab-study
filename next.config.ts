@@ -8,13 +8,8 @@ const supabaseProtocol: "http" | "https" | undefined = supabaseUrlParts
     : "https"
   : undefined;
 
-const remotePatterns: NonNullable<NonNullable<NextConfig["images"]>["remotePatterns"]> = [
-  {
-    protocol: "https",
-    hostname: "i.ytimg.com",
-    pathname: "/vi/**",
-  },
-];
+// YouTube サムネイルは `<img>` で i.ytimg.com を直接参照するため remotePatterns に含めない
+const remotePatterns: NonNullable<NonNullable<NextConfig["images"]>["remotePatterns"]> = [];
 
 if (supabaseUrlParts && supabaseProtocol) {
   remotePatterns.push({
@@ -29,7 +24,8 @@ const nextConfig: NextConfig = {
     remotePatterns,
   },
   experimental: {
-    optimizePackageImports: ["lucide-react", "radix-ui"],
+    // lucide-react は Next.js 既定の optimizePackageImports に含まれるためここでは指定しない
+    optimizePackageImports: ["radix-ui"],
   },
   turbopack: {
     resolveAlias: {

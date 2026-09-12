@@ -4,7 +4,8 @@ import { Bot, Loader2, TriangleAlert } from "lucide-react";
 import type { AIReviewListItem } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 
-function ScoreBadge({ score }: { score: number }) {
+/** 一覧・詳細で共有するスコアバッジ（閾値 50/70 を一箇所に集約）。 */
+export function ScoreBadge({ score }: { score: number }) {
   let variant: "default" | "secondary" | "destructive" = "default";
   if (score < 50) {
     variant = "destructive";

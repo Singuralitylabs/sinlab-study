@@ -392,22 +392,20 @@ export function SubmissionForm({
         </Button>
       </form>
 
-      {/* AIレビュー表示（レビュー／ローディング時のみチャンクを取得） */}
-      {(aiReview || isReviewLoading) && (
-        <AIReviewDisplayNoSSR
-          review={aiReview}
-          isLoading={isReviewLoading}
-          defaultExpanded={true}
-          onRetry={
-            lastSubmissionId
-              ? () => {
-                  setAiReview(null);
-                  requestAIReview(lastSubmissionId);
-                }
-              : undefined
-          }
-        />
-      )}
+      {/* AIレビュー表示（NoSSR 側でレビュー／ローディング時のみチャンクをマウント） */}
+      <AIReviewDisplayNoSSR
+        review={aiReview}
+        isLoading={isReviewLoading}
+        defaultExpanded={true}
+        onRetry={
+          lastSubmissionId
+            ? () => {
+                setAiReview(null);
+                requestAIReview(lastSubmissionId);
+              }
+            : undefined
+        }
+      />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // pdfjs-dist は Node.js 環境で DOMMatrix 等のブラウザAPIを使うため SSR 不可
 // "use client" ファイル内で ssr: false を指定してクライアント専用にする
@@ -11,7 +12,7 @@ export const PdfSlideViewerNoSSR = dynamic(
     ssr: false,
     loading: () => (
       <div className="flex flex-col items-center gap-4">
-        <div className="h-10 w-full max-w-sm animate-pulse rounded-lg border bg-muted/50" />
+        <Skeleton className="h-10 w-full max-w-sm rounded-lg border" />
         <div className="relative w-full overflow-hidden rounded-lg border bg-muted/30">
           <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
             スライドを読み込み中...

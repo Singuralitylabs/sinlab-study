@@ -10,7 +10,8 @@ interface DemoCompleteButtonProps {
 
 export function DemoCompleteButton({ contentId }: DemoCompleteButtonProps) {
   const { isCompleted, toggleComplete, hydrated } = useDemoProgress();
-  const completed = hydrated && isCompleted(contentId);
+  // isCompleted は未 hydrate 時 false を返す。disabled={!hydrated} だけが追加で必要。
+  const completed = isCompleted(contentId);
 
   return (
     <Button

@@ -3,8 +3,8 @@
 import { Bot, ChevronDown, ChevronUp, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import type { AIReviewListItem } from "@/app/types";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ScoreBadge } from "./AIReviewStatusBadge";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
 export interface AIReviewDisplayProps {
@@ -12,21 +12,6 @@ export interface AIReviewDisplayProps {
   isLoading?: boolean;
   onRetry?: () => void;
   defaultExpanded?: boolean;
-}
-
-function ScoreBadge({ score }: { score: number }) {
-  let variant: "default" | "secondary" | "destructive" = "default";
-  if (score < 50) {
-    variant = "destructive";
-  } else if (score < 70) {
-    variant = "secondary";
-  }
-
-  return (
-    <Badge variant={variant} className="text-sm">
-      {score}/100
-    </Badge>
-  );
 }
 
 export function AIReviewDisplay({
