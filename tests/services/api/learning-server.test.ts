@@ -13,6 +13,7 @@ import {
   fetchPublishedPhases,
   fetchPublishedThemes,
   fetchThemeById,
+  fetchThemeNavigationIndex,
   fetchThemeProgressSummaries,
   fetchUserProgressByContentId,
   fetchUserProgressByContentIds,
@@ -712,6 +713,250 @@ describe("fetchContentSummariesByWeekIds", () => {
       expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
     }
   );
+});
+
+// ----------------------------------------------------------------
+// fetchThemeNavigationIndex（issue #208: テーマ内通しの前後ナビ）
+// ----------------------------------------------------------------
+describe("fetchThemeNavigationIndex", () => {
+  const weeks = [
+    {
+      id: 10,
+      phase_id: 1,
+      name: "第1週",
+      display_order: 2,
+      phase: { id: 1, name: "導入", display_order: 1, theme_id: 1 },
+    },
+    {
+      id: 20,
+      phase_id: 1,
+      name: "第2週",
+      display_order: 1,
+      phase: { id: 1, name: "導入", display_order: 1, theme_id: 1 },
+    },
+  ];
+  const contents = [
+    {
+      id: 1,
+      title: "週1-先",
+      content_type: "video",
+      display_order: 1,
+      is_open_to_trial: true,
+      is_published: true,
+      week_id: 10,
+    },
+    {
+      id: 2,
+      title: "週1-後",
+      content_type: "text",
+      display_order: 2,
+      is_open_to_trial: false,
+      is_published: true,
+      week_id: 10,
+    },
+    {
+      id: 3,
+      title: "週2",
+      content_type: "slide",
+      display_order: 1,
+      is_open_to_trial: true,
+      is_published: true,
+      week_id: 20,
+    },
+  ];
+
+  it("member: 週クエリに theme / 公開 / 未削除のフィルタと !inner が課される", async () => {
+    const mockServerClient = createMockSupabaseClient({
+      queryResult: { data: weeks, error: null },
+    });
+    const mockAdminClient = createMockSupabaseClient({
+      queryResult: { data: contents, error: null },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockAdminClient as never);
+
+    await fetchThemeNavigationIndex(1, 10, "member");
+
+    const weekBuilder = mockServerClient.from.mock.results[0].value;
+    expect(weekBuilder.select.mock.calls[0][0]).toContain("!inner");
+    expect(weekBuilder.eq).toHaveBeenCalledWith("phase.theme_id", 1);
+    expect(weekBuilder.eq).toHaveBeenCalledWith("is_published", true);
+    expect(weekBuilder.eq).toHaveBeenCalledWith("phase.is_published", true);
+    expect(weekBuilder.eq).toHaveBeenCalledWith("is_deleted", false);
+    expect(weekBuilder.eq).toHaveBeenCalledWith("phase.is_deleted", false);
+  });
+
+  it("member: コンテンツ側は service_role 経由で、許可リスト6列と全週＋現在の週を in() する", async () => {
+    const mockServerClient = createMockSupabaseClient({
+      queryResult: { data: weeks, error: null },
+    });
+    const mockAdminClient = createMockSupabaseClient({
+      queryResult: { data: contents, error: null },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockAdminClient as never);
+
+    await fetchThemeNavigationIndex(1, 10, "member");
+
+    expect(createAdminSupabaseClient).toHaveBeenCalled();
+    const contentBuilder = mockAdminClient.from.mock.results[0].value;
+    expect(contentBuilder.select).toHaveBeenCalledWith(
+      "id, title, content_type, display_order, is_open_to_trial, week_id"
+    );
+    expect(contentBuilder.in).toHaveBeenCalledWith("week_id", [10, 20]);
+  });
+
+  it.each(["admin", "maintainer"] as const)(
+    "%s: is_published 系のフィルタが付かず、service_role も使わない。未公開が通し列に含まれる",
+    async (role) => {
+      const unpublished = [
+        {
+          id: 9,
+          title: "未公開",
+          content_type: "text",
+          display_order: 1,
+          is_open_to_trial: false,
+          is_published: false,
+          week_id: 10,
+        },
+      ];
+      const mockServerClient = createMockSupabaseClient({
+        tableResults: {
+          learning_weeks: { data: weeks, error: null },
+          learning_contents: { data: unpublished, error: null },
+        },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+
+      const result = await fetchThemeNavigationIndex(1, 10, role);
+
+      expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+      const weekBuilder = mockServerClient.from.mock.results[0].value;
+      expect(weekBuilder.eq).not.toHaveBeenCalledWith("is_published", true);
+      expect(weekBuilder.eq).not.toHaveBeenCalledWith("phase.is_published", true);
+      expect(result.data?.orderedContents.map((c) => c.id)).toEqual([9]);
+    }
+  );
+
+  it("orderedContents は階層順、currentWeekContents は現在の週のみ・display_order 順", async () => {
+    const mockServerClient = createMockSupabaseClient({
+      queryResult: { data: weeks, error: null },
+    });
+    const mockAdminClient = createMockSupabaseClient({
+      queryResult: { data: contents, error: null },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockAdminClient as never);
+
+    const result = await fetchThemeNavigationIndex(1, 10, "member");
+
+    expect(result.error).toBeNull();
+    expect(result.data?.orderedContents.map((c) => c.id)).toEqual([3, 1, 2]);
+    expect(result.data?.currentWeekContents.map((c) => c.id)).toEqual([1, 2]);
+  });
+
+  it("現在の週がテーマ内週リストに無い場合、in() に現在の週が含まれ currentWeekContents は埋まる", async () => {
+    const mockServerClient = createMockSupabaseClient({
+      queryResult: { data: weeks, error: null },
+    });
+    const extraContents = [
+      ...contents,
+      {
+        id: 99,
+        title: "現在の週のみ",
+        content_type: "text",
+        display_order: 1,
+        is_open_to_trial: true,
+        is_published: true,
+        week_id: 99,
+      },
+    ];
+    const mockAdminClient = createMockSupabaseClient({
+      queryResult: { data: extraContents, error: null },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockAdminClient as never);
+
+    const result = await fetchThemeNavigationIndex(1, 99, "member");
+
+    const contentBuilder = mockAdminClient.from.mock.results[0].value;
+    expect(contentBuilder.in).toHaveBeenCalledWith("week_id", [10, 20, 99]);
+    expect(result.data?.currentWeekContents.map((c) => c.id)).toEqual([99]);
+    expect(result.data?.orderedContents.map((c) => c.id)).toEqual([3, 1, 2]);
+  });
+
+  it("週クエリがDBエラーでも error を返さず、currentWeekContents は埋まり orderedContents は空", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error");
+    const mockServerClient = createMockSupabaseClient({
+      queryResult: { data: null, error: dbError },
+    });
+    const mockAdminClient = createMockSupabaseClient({
+      queryResult: { data: contents, error: null },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockAdminClient as never);
+
+    const result = await fetchThemeNavigationIndex(1, 10, "member");
+
+    expect(result.error).toBeNull();
+    expect(result.data?.orderedContents).toEqual([]);
+    expect(result.data?.currentWeekContents.map((c) => c.id)).toEqual([1, 2]);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "テーマ内ナビ用週一覧取得エラー:",
+      dbError.message
+    );
+    const contentBuilder = mockAdminClient.from.mock.results[0].value;
+    expect(contentBuilder.in).toHaveBeenCalledWith("week_id", [10]);
+  });
+
+  it("コンテンツクエリがDBエラーの場合、{ data: null, error } を返す", async () => {
+    const mockServerClient = createMockSupabaseClient({
+      queryResult: { data: weeks, error: null },
+    });
+    const mockAdminClient = createMockSupabaseClient({
+      queryResult: { data: null, error: dbError },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockAdminClient as never);
+
+    const result = await fetchThemeNavigationIndex(1, 10, "member");
+
+    expect(result.data).toBeNull();
+    expect(result.error).toEqual(dbError);
+  });
+
+  it("現在の週が既に週リストにある場合、in() に重複が渡らない", async () => {
+    const mockServerClient = createMockSupabaseClient({
+      queryResult: { data: weeks, error: null },
+    });
+    const mockAdminClient = createMockSupabaseClient({
+      queryResult: { data: contents, error: null },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockAdminClient as never);
+
+    await fetchThemeNavigationIndex(1, 10, "member");
+
+    const contentBuilder = mockAdminClient.from.mock.results[0].value;
+    const weekIds = contentBuilder.in.mock.calls[0][1] as number[];
+    expect(weekIds).toEqual([10, 20]);
+    expect(new Set(weekIds).size).toBe(weekIds.length);
+  });
+
+  it("trial 相当で is_open_to_trial = false のコンテンツも orderedContents に含まれる", async () => {
+    const mockServerClient = createMockSupabaseClient({
+      queryResult: { data: weeks, error: null },
+    });
+    const mockAdminClient = createMockSupabaseClient({
+      queryResult: { data: contents, error: null },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockServerClient as never);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockAdminClient as never);
+
+    const result = await fetchThemeNavigationIndex(1, 10, "member");
+
+    expect(result.data?.orderedContents.some((c) => c.id === 2)).toBe(true);
+  });
 });
 
 // ----------------------------------------------------------------

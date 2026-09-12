@@ -20,7 +20,7 @@ vi.mock("@/app/services/api/learning-server", async (importOriginal) => {
   return {
     ...actual,
     fetchWeekById: vi.fn(),
-    fetchContentSummariesByWeekIds: vi.fn(),
+    fetchThemeNavigationIndex: vi.fn(),
     fetchContentById: vi.fn(),
     fetchUserProgressByContentId: vi.fn().mockResolvedValue({ isCompleted: false }),
   };
@@ -42,9 +42,10 @@ vi.mock(
 );
 
 import ContentPage from "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/page";
+import type { NavigationContent } from "@/app/lib/content-navigation";
 import {
   fetchContentById,
-  fetchContentSummariesByWeekIds,
+  fetchThemeNavigationIndex,
   fetchWeekById,
 } from "@/app/services/api/learning-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
@@ -71,6 +72,25 @@ const week = {
   },
 };
 
+const currentNav: NavigationContent = {
+  id: 10,
+  title: "基礎文法（スライド）",
+  weekId: 3,
+  weekName: "第1週",
+  phaseId: 2,
+  phaseName: "フェーズ1",
+};
+
+const currentSummary = (isOpenToTrial: boolean, isPublished: boolean) => ({
+  id: 10,
+  title: "基礎文法（スライド）",
+  content_type: "slide",
+  display_order: 1,
+  is_open_to_trial: isOpenToTrial,
+  is_published: isPublished,
+  week_id: 3,
+});
+
 const slideContent = (overrides: Record<string, unknown> = {}) => ({
   id: 10,
   week_id: 3,
@@ -91,12 +111,14 @@ const setup = ({
   isOpenToTrial,
   isPublished = true,
   signedUrl = SIGNED_URL,
+  orderedContents,
 }: {
   userStatus: "active" | "trial";
   userRole?: "member" | "admin" | "maintainer";
   isOpenToTrial: boolean;
   isPublished?: boolean;
   signedUrl?: string | null;
+  orderedContents?: NavigationContent[];
 }) => {
   vi.mocked(getServerAuth).mockResolvedValue({
     user: { id: "auth-uuid" },
@@ -105,18 +127,11 @@ const setup = ({
     userRole,
   } as never);
   vi.mocked(fetchWeekById).mockResolvedValue({ data: week, error: null } as never);
-  vi.mocked(fetchContentSummariesByWeekIds).mockResolvedValue({
-    data: [
-      {
-        id: 10,
-        title: "基礎文法（スライド）",
-        content_type: "slide",
-        display_order: 1,
-        is_open_to_trial: isOpenToTrial,
-        is_published: isPublished,
-        week_id: 3,
-      },
-    ],
+  vi.mocked(fetchThemeNavigationIndex).mockResolvedValue({
+    data: {
+      orderedContents: orderedContents ?? [currentNav],
+      currentWeekContents: [currentSummary(isOpenToTrial, isPublished)],
+    },
     error: null,
   } as never);
   vi.mocked(fetchContentById).mockResolvedValue({
@@ -182,5 +197,166 @@ describe("学習画面のスライド配信（署名付きURL）", () => {
 
     expect(html).toContain("SLIDE_UNAVAILABLE");
     expect(html).not.toContain(PDF_KEY);
+  });
+});
+
+describe("コンテンツ詳細の前後ナビゲーション（issue #208）", () => {
+  const nextWeek: NavigationContent = {
+    id: 20,
+    title: "テンプレートを作る",
+    weekId: 4,
+    weekName: "第2週",
+    phaseId: 2,
+    phaseName: "フェーズ1",
+  };
+  const nextPhase: NavigationContent = {
+    id: 30,
+    title: "応用の最初",
+    weekId: 5,
+    weekName: "第1週",
+    phaseId: 3,
+    phaseName: "フェーズ2",
+  };
+  const sameWeekNext: NavigationContent = {
+    id: 11,
+    title: "同じ週の次",
+    weekId: 3,
+    weekName: "第1週",
+    phaseId: 2,
+    phaseName: "フェーズ1",
+  };
+  const lockedNext: NavigationContent = {
+    id: 21,
+    title: "ロック済みの次",
+    weekId: 4,
+    weekName: "第2週",
+    phaseId: 2,
+    phaseName: "フェーズ1",
+  };
+  const unpublishedNext: NavigationContent = {
+    id: 40,
+    title: "未公開の次",
+    weekId: 4,
+    weekName: "第2週",
+    phaseId: 2,
+    phaseName: "フェーズ1",
+  };
+
+  it("週末尾: 次週の先頭への href（weekId が現在URLと違う）を含み、次の週: を含む", async () => {
+    setup({
+      userStatus: "active",
+      isOpenToTrial: false,
+      orderedContents: [currentNav, nextWeek],
+    });
+
+    const html = await render();
+
+    expect(html).toContain('href="/learn/1/2/4/20"');
+    expect(html).toContain("次の週: ");
+    expect(html).toContain("第2週");
+  });
+
+  it("フェーズ末尾: 次フェーズの先頭への href（phaseId も違う）を含み、次のフェーズ: を含む", async () => {
+    setup({
+      userStatus: "active",
+      isOpenToTrial: false,
+      orderedContents: [currentNav, nextPhase],
+    });
+
+    const html = await render();
+
+    expect(html).toContain('href="/learn/1/3/5/30"');
+    expect(html).toContain("次のフェーズ: ");
+    expect(html).toContain("フェーズ2");
+  });
+
+  it("同一週内: 次の週: も 次のフェーズ: も含まない", async () => {
+    setup({
+      userStatus: "active",
+      isOpenToTrial: false,
+      orderedContents: [currentNav, sameWeekNext],
+    });
+
+    const html = await render();
+
+    expect(html).toContain('href="/learn/1/2/3/11"');
+    expect(html).not.toContain("次の週:");
+    expect(html).not.toContain("次のフェーズ:");
+  });
+
+  it("テーマ末尾: テーマに戻る と href=/learn/{themeId} を含み、フェーズに戻る を含まない", async () => {
+    setup({ userStatus: "active", isOpenToTrial: false, orderedContents: [currentNav] });
+
+    const html = await render();
+
+    expect(html).toContain("テーマに戻る");
+    expect(html).toContain('href="/learn/1"');
+    expect(html).not.toContain("フェーズに戻る");
+  });
+
+  it("テーマ先頭: 「前へ」リンクが無い", async () => {
+    setup({
+      userStatus: "active",
+      isOpenToTrial: false,
+      orderedContents: [currentNav, sameWeekNext],
+    });
+
+    const html = await render();
+
+    expect(html).not.toContain('href="/learn/1/2/3/9"');
+    expect(html).toContain('href="/learn/1/2/3/11"');
+  });
+
+  it("trial のロック画面でも前後ナビが描画される", async () => {
+    setup({
+      userStatus: "trial",
+      isOpenToTrial: false,
+      orderedContents: [currentNav, nextWeek],
+    });
+
+    const html = await render();
+
+    expect(html).toContain("このコンテンツは無料プランでは閲覧できません");
+    expect(html).toContain('href="/learn/1/2/4/20"');
+  });
+
+  it("trial でロック済み（is_open_to_trial: false）コンテンツが遷移先になる", async () => {
+    setup({
+      userStatus: "trial",
+      isOpenToTrial: true,
+      orderedContents: [currentNav, lockedNext],
+    });
+
+    const html = await render();
+
+    expect(html).toContain('href="/learn/1/2/4/21"');
+    expect(html).toContain("ロック済みの次");
+  });
+
+  it.each(["admin", "maintainer"] as const)(
+    "%s で is_published: false の次コンテンツへのリンクが出る",
+    async (userRole) => {
+      setup({
+        userStatus: "active",
+        userRole,
+        isOpenToTrial: false,
+        isPublished: true,
+        orderedContents: [currentNav, unpublishedNext],
+      });
+
+      const html = await render();
+
+      expect(html).toContain('href="/learn/1/2/4/40"');
+      expect(html).toContain("未公開の次");
+    }
+  );
+
+  it("ナビ縮退時（orderedContents: []）でもページが落ちず テーマに戻る が出る", async () => {
+    setup({ userStatus: "active", isOpenToTrial: false, orderedContents: [] });
+
+    const html = await render();
+
+    expect(html).toContain("テーマに戻る");
+    expect(html).toContain('href="/learn/1"');
   });
 });

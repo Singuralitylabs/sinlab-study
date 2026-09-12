@@ -1,5 +1,4 @@
-import { Bot, ChevronLeft, ChevronRight, Lock } from "lucide-react";
-import Link from "next/link";
+import { Bot, Lock } from "lucide-react";
 import { notFound } from "next/navigation";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
@@ -9,13 +8,13 @@ import { SlideContent } from "@/app/components/SlideContent";
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
+import { resolveAdjacentContents } from "@/app/lib/content-navigation";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
 import {
-  type ContentVisibilitySummary,
   fetchContentById,
-  fetchContentSummariesByWeekIds,
+  fetchThemeNavigationIndex,
   fetchUserProgressByContentId,
   fetchWeekById,
   isContentFullyPublished,
@@ -25,56 +24,14 @@ import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { CompleteButton } from "./CompleteButton";
+import { PrevNextNav } from "./PrevNextNav";
 import { SubmissionForm } from "./SubmissionForm";
 
 interface PageProps {
   params: Promise<{ themeId: string; phaseId: string; weekId: string; contentId: string }>;
-}
-
-function PrevNextNav({
-  themeIdNum,
-  phaseIdNum,
-  weekIdNum,
-  prevContent,
-  nextContent,
-}: {
-  themeIdNum: number;
-  phaseIdNum: number;
-  weekIdNum: number;
-  prevContent: ContentVisibilitySummary | null;
-  nextContent: ContentVisibilitySummary | null;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      {prevContent ? (
-        <Button variant="outline" asChild className="flex-1 justify-start">
-          <Link href={`/learn/${themeIdNum}/${phaseIdNum}/${weekIdNum}/${prevContent.id}`}>
-            <ChevronLeft className="h-4 w-4 mr-2" />
-            <span className="truncate">{prevContent.title}</span>
-          </Link>
-        </Button>
-      ) : (
-        <div className="flex-1" />
-      )}
-
-      {nextContent ? (
-        <Button variant="outline" asChild className="flex-1 justify-end">
-          <Link href={`/learn/${themeIdNum}/${phaseIdNum}/${weekIdNum}/${nextContent.id}`}>
-            <span className="truncate">{nextContent.title}</span>
-            <ChevronRight className="h-4 w-4 ml-2" />
-          </Link>
-        </Button>
-      ) : (
-        <Button asChild className="flex-1 justify-center">
-          <Link href={`/learn/${themeIdNum}/${phaseIdNum}`}>フェーズに戻る</Link>
-        </Button>
-      )}
-    </div>
-  );
 }
 
 export default async function ContentPage({ params }: PageProps) {
@@ -97,9 +54,9 @@ export default async function ContentPage({ params }: PageProps) {
 
   // 存在チェック + ロック判定用のサマリーおよびコンテンツ詳細を取得
   // （member / お試しユーザーはサマリーを service_role、admin / maintainer は通常クライアントで未公開分も取得）
-  const [{ data: week }, { data: weekContentSummaries }, { data: content }] = await Promise.all([
+  const [{ data: week }, { data: navigation }, { data: content }] = await Promise.all([
     fetchWeekById(weekIdNum, userRole),
-    fetchContentSummariesByWeekIds([weekIdNum], userRole),
+    fetchThemeNavigationIndex(themeIdNum, weekIdNum, userRole),
     fetchContentById(contentIdNum, userRole),
   ]);
 
@@ -109,6 +66,7 @@ export default async function ContentPage({ params }: PageProps) {
     notFound();
   }
 
+  const weekContentSummaries = navigation?.currentWeekContents;
   const summary = weekContentSummaries?.find((c) => c.id === contentIdNum);
 
   // 公開コンテンツとして存在しない（未公開・論理削除済み・他の週所属を含む）場合は404
@@ -116,12 +74,7 @@ export default async function ContentPage({ params }: PageProps) {
     notFound();
   }
 
-  const currentIndex = weekContentSummaries?.findIndex((c) => c.id === contentIdNum) ?? -1;
-  const prevContent = currentIndex > 0 ? (weekContentSummaries?.[currentIndex - 1] ?? null) : null;
-  const nextContent =
-    currentIndex >= 0 && currentIndex < (weekContentSummaries?.length ?? 0) - 1
-      ? (weekContentSummaries?.[currentIndex + 1] ?? null)
-      : null;
+  const { prev, next } = resolveAdjacentContents(navigation?.orderedContents ?? [], contentIdNum);
 
   const isLocked = isContentLockedForUser(userStatus, summary.is_open_to_trial);
 
@@ -153,13 +106,7 @@ export default async function ContentPage({ params }: PageProps) {
           </CardContent>
         </Card>
 
-        <PrevNextNav
-          themeIdNum={themeIdNum}
-          phaseIdNum={phaseIdNum}
-          weekIdNum={weekIdNum}
-          prevContent={prevContent}
-          nextContent={nextContent}
-        />
+        <PrevNextNav themeId={themeIdNum} prev={prev} next={next} />
       </div>
     );
   }
@@ -340,13 +287,7 @@ export default async function ContentPage({ params }: PageProps) {
       )}
 
       {/* 前後ナビゲーション */}
-      <PrevNextNav
-        themeIdNum={themeIdNum}
-        phaseIdNum={phaseIdNum}
-        weekIdNum={weekIdNum}
-        prevContent={prevContent}
-        nextContent={nextContent}
-      />
+      <PrevNextNav themeId={themeIdNum} prev={prev} next={next} />
     </div>
   );
 }

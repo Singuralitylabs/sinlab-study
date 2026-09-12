@@ -1,5 +1,10 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import { USER_STATUS } from "@/app/constants/user";
+import {
+  buildThemeContentOrder,
+  type NavigationContent,
+  type NavigationWeek,
+} from "@/app/lib/content-navigation";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import type {
   LearningContent,
@@ -461,6 +466,89 @@ export async function fetchContentSummariesByWeekIds(
     return fetchContentSummariesByWeekIdsForManager(weekIds);
   }
   return fetchContentVisibilitySummariesByWeekIds(weekIds);
+}
+
+const THEME_NAVIGATION_WEEK_COLUMNS =
+  "id, phase_id, name, display_order, phase:learning_phases!inner(id, name, display_order, theme_id)";
+
+export interface ThemeNavigationIndex {
+  orderedContents: NavigationContent[];
+  currentWeekContents: ContentVisibilitySummary[];
+}
+
+/**
+ * コンテンツ詳細ページの前後ナビ用に、テーマ内通し列と現在の週のサマリーを返す。
+ *
+ * 内部で2クエリを実行する。
+ * 1. 通常クライアント（RLS適用）でテーマ配下の週＋フェーズを取得する。**service_role は使わない。**
+ * 2. 既存の `fetchContentSummariesByWeekIds()` を1回呼ぶ（受講生向けは従来どおり
+ *    service_role 1回。新しい service_role 呼び出し箇所は増やさない）。
+ *
+ * 落とし穴:
+ * - 週クエリの埋め込みは **`learning_phases!inner` が必須**。`!inner` を外すと埋め込み側の
+ *   `is_published` / `is_deleted` フィルタは「phase が null になる」だけでトップレベルの週行が
+ *   残り、未公開フェーズ配下の週が受講生のナビに混入する（実質的な公開範囲の拡大）。
+ * - コンテンツ取得の `weekIds` には **`currentWeekId` を必ず union** する。週クエリ失敗時や、
+ *   現在の週が通し列から外れるエッジ（未公開フェーズ配下など）でも現在の週のサマリーを取り、
+ *   404 / ロック判定を現状と一致させる。union を外すとエッジで誤って404になる。
+ *
+ * 週クエリ失敗時は `console.error` のうえ週リストを空として続行する（ナビが消えるだけで、
+ * ページ描画と404/ロック判定は `currentWeekContents` で死守する）。
+ * コンテンツクエリ失敗時は `{ data: null, error }` を返す。
+ *
+ * PostgREST の1リクエスト上限（既定1000行）に達するとナビが黙って切り詰められる
+ * （404にはならない）。現行カタログでは到達しないが、`fetchThemeProgressSummaries()` と
+ * 同様に上限があることを明示する。
+ */
+export async function fetchThemeNavigationIndex(
+  themeId: number,
+  currentWeekId: number,
+  userRole: UserRoleType | null = null
+): Promise<{
+  data: ThemeNavigationIndex | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+
+  let weekQuery = supabase
+    .from("learning_weeks")
+    .select(THEME_NAVIGATION_WEEK_COLUMNS)
+    .eq("phase.theme_id", themeId)
+    .eq("is_deleted", false)
+    .eq("phase.is_deleted", false);
+
+  weekQuery = applyPublishedFilterUnlessManager(weekQuery, userRole);
+  if (!checkContentPermissions(userRole)) {
+    weekQuery = weekQuery.eq("phase.is_published", true);
+  }
+
+  const { data: weekRows, error: weeksError } = await weekQuery;
+
+  let weeks: NavigationWeek[] = [];
+  if (weeksError) {
+    console.error("テーマ内ナビ用週一覧取得エラー:", weeksError.message);
+  } else {
+    weeks = (weekRows ?? []) as NavigationWeek[];
+  }
+
+  const weekIds = [...new Set([...weeks.map((week) => week.id), currentWeekId])];
+  const { data: contents, error: contentsError } = await fetchContentSummariesByWeekIds(
+    weekIds,
+    userRole
+  );
+
+  if (contentsError) {
+    return { data: null, error: contentsError };
+  }
+
+  const summaries = contents ?? [];
+  return {
+    data: {
+      orderedContents: buildThemeContentOrder(weeks, summaries),
+      currentWeekContents: summaries.filter((content) => content.week_id === currentWeekId),
+    },
+    error: null,
+  };
 }
 
 /**

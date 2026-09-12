@@ -190,7 +190,7 @@ RLS強化により、お試し非公開コンテンツはタイトルを含め�
 | 用途 | 理由 |
 |:--|:--|
 | ツリー表示の一覧サマリー取得 | ロック済みコンテンツのタイトル・並び順を表示するため |
-| コンテンツ詳細ページの存在チェック | 直リンク時に「存在しない（404）」と「ロックされている」を区別するため。通常クライアントでは両者とも0行になり判別できない |
+| コンテンツ詳細ページの存在チェック | 直リンク時に「存在しない（404）」と「ロックされている」を区別するため。通常クライアントでは両者とも0行になり判別できない。同じ取得結果を前後ナビの通し列にも用いるため `weekIds` はテーマ内の全週に広がるが、WHERE条件・カラム許可リスト・呼び出し箇所は変わらない（3.3参照） |
 
 > この制限は受講生向けのコンテンツ配信経路に限った話であり、管理者 / 講師向けの権限チェック済みクエリ（`admin-server.ts`・`/api/admin/users`・`/api/upload-pdf`・AIレビュー等）や、`user_id` フィルタで安全性を担保している既存の service_role 利用（`submissions-server.ts` 等）は従来どおりで、本設計の対象外。
 
@@ -369,7 +369,7 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 
 **RLS**: `20260715233228_consolidate_rls_policies.sql` で、`learning_themes` / `learning_phases` / `learning_weeks` / `learning_contents` の SELECT ポリシーはいずれも `(is_published = true AND is_deleted = false) OR (select get_user_role()) IN ('admin', 'maintainer')` であり、admin / maintainer への未公開行の許可は本機能追加前から既に成立している。今回変更したのはアプリ層（`learning-server.ts` が独自に課していた `is_published = true` の絞り込み）のみ。
 
-**アプリ層の変更**: `fetchPublishedThemes` / `fetchThemeById` / `fetchPhasesByThemeId` / `fetchPhaseById` / `fetchWeekById` / `fetchContentById` / `fetchWeeksWithContentsByPhaseId` はいずれも `userRole` 引数（既定 `null`）を取り、`checkContentPermissions(userRole)` が true の場合のみ `is_published` の絞り込みを外す（`is_deleted = false` は常に維持）。member / お試しユーザーの取得結果・RLSの適用範囲は変更しない。
+**アプリ層の変更**: `fetchPublishedThemes` / `fetchThemeById` / `fetchPhasesByThemeId` / `fetchPhaseById` / `fetchWeekById` / `fetchContentById` / `fetchWeeksWithContentsByPhaseId` / `fetchThemeNavigationIndex` はいずれも `userRole` 引数（既定 `null`）を取り、`checkContentPermissions(userRole)` が true の場合のみ `is_published` の絞り込みを外す（`is_deleted = false` は常に維持）。`fetchThemeNavigationIndex` は週と埋め込みフェーズの双方に `is_published` 絞り込みを課す（`!inner` 結合のため未公開フェーズ配下の週はナビに現れない）。member / お試しユーザーの取得結果・RLSの適用範囲は変更しない。
 
 **ロック表示用サマリー（2.6節）との関係**: 受講生向けのロック表示・存在チェックに使う service_role 経路（`fetchContentVisibilitySummariesByWeekIds()`）は変更しない（`is_published = true AND is_deleted = false` の絞り込みを維持）。admin / maintainer 向けには、通常クライアント（RLS適用）で未公開分も取得する別関数 `fetchContentSummariesByWeekIdsForManager()` を新設し、ロールに応じてどちらを呼ぶかを `fetchContentSummariesByWeekIds(weekIds, userRole)` が振り分ける。service_role を使ってよい箇所は2.6節の2箇所のまま増えない。
 
@@ -435,9 +435,26 @@ flowchart TD
     A["/learn（Theme一覧）"] --> B["/learn/[themeId]（Phase一覧）"]
     B --> C["/learn/[themeId]/[phaseId]（Week・コンテンツ一覧）"]
     C --> D["/learn/[themeId]/[phaseId]/[weekId]/[contentId]（コンテンツ詳細）"]
+    D -- 前後ナビ（テーマ内通し） --> D
 ```
 
 各階層でパンくずリストを表示し、上位階層への導線を提供する。
+
+#### 前後ナビゲーション
+
+コンテンツ詳細ページ（`/learn/[themeId]/[phaseId]/[weekId]/[contentId]`）の「次へ」「前へ」は、**同じテーマ内を通し**で遷移する。週末尾の次は次の週の先頭、フェーズ末尾の次は次フェーズの先頭。**テーマはまたがない。** `/demo` は対象外。
+
+| 項目 | 仕様 |
+|:--|:--|
+| 末尾 | テーマ末尾では「テーマに戻る」（`/learn/[themeId]`）。「フェーズに戻る」は出さない |
+| 先頭 | テーマ先頭では「前へ」を出さない（「次へ」を右端に保つための空スペーサのみ） |
+| 並び順 | フェーズ→週→コンテンツの `display_order` 昇順。同値は `id` でタイブレーク。空の週・空のフェーズは通し列に寄与せず自動スキップ |
+| ロック済み | お試し非公開コンテンツも遷移先に含める（スキップしない）。ロック画面にも前後ナビを出す |
+| 境界の併記 | 週・フェーズをまたぐときだけボタン内に「次の週: 〇〇」「次のフェーズ: 〇〇」を併記。同一週内はコンテンツ名のみ |
+| データ取得 | `fetchThemeNavigationIndex()` が通常クライアントでテーマ配下の週＋フェーズを取得し、既存の `fetchContentSummariesByWeekIds()` を1回呼ぶ。**service_role の呼び出し箇所・回数は増えない**（受講生向けは従来どおり1ページ描画あたり1回） |
+| 404判定 | 従来どおり `fetchWeekById()` と現在の週のサマリーのみで行う。通し列は加算的な情報として扱い、通し列に現在のコンテンツが無くても404にはしない |
+
+リンクURLは現在URLの流用ではなく、遷移先コンテンツ自身の `phaseId` / `weekId` から組み立てる。
 
 ---
 
@@ -827,7 +844,7 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 | `/learn` | Theme一覧 | 公開Themeのカード一覧（名前、説明、サムネイル） |
 | `/learn/[themeId]` | Phase一覧 | パンくずリスト、Phaseカード一覧（名前、説明） |
 | `/learn/[themeId]/[phaseId]` | Week・コンテンツ一覧 | パンくずリスト、Week一覧と各Week内のコンテンツリスト（タイトル、種別アイコン、完了チェック） |
-| `/learn/[themeId]/[phaseId]/[weekId]/[contentId]` | コンテンツ詳細 | パンくずリスト、コンテンツ本体、完了ボタン、提出フォーム（演習のみ）、前後ナビゲーション |
+| `/learn/[themeId]/[phaseId]/[weekId]/[contentId]` | コンテンツ詳細 | パンくずリスト、コンテンツ本体、完了ボタン、提出フォーム（演習のみ）、前後ナビゲーション（テーマ内を通しで遷移、3.3参照） |
 | `/submissions` | 提出履歴 | 提出一覧（提出日時、コンテンツ名、提出タイプ、内容プレビュー） |
 | `/upgrade` | アップグレード | ステータス別の出し分け（2.11参照）。サイドナビ「プラン・お支払い」から全認証ユーザーがアクセス可能 |
 | `/upgrade/success` | アップグレード完了 | Checkoutから戻った直後の決済確認・完了表示（2.11参照） |
@@ -1095,3 +1112,4 @@ flowchart TD
 | 2026年9月 | テーマ・フェーズ・週・コンテンツの新規作成フォームに挿入位置指定機能を追加（#188）：`display_order` の数値直接入力を廃止し、共通コンポーネント `SiblingOrderField` による兄弟一覧表示・挿入位置セレクトに置き換えた（編集フォームは対象外、従来どおり）。`POST /api/manage/{themes,phases,weeks,contents}` は `display_order` の代わりに `insert_after_id` を受け取り、サーバー側（`createTheme` / `createPhase` / `createWeek` / `createContent`）で対象親配下の兄弟を1からの連番に再採番してからINSERTする。再採番ロジック（`resolveSiblingResequence`）と兄弟の並び順比較（`compareGroupLevel`）は `content-grouping.ts` に集約し、階層順ソートと二重実装しない。6.1節を更新 |
 | 2026年9月 | #188の挿入位置指定機能を編集フォームにも横展開（#189）：編集フォームも `SiblingOrderField` を使い、自分自身を除いた兄弟一覧・「ここに移動」プレースホルダーを表示する。既定値は親不変なら現在位置、親変更なら末尾。`PUT /api/manage/{themes,phases,weeks,contents}/[id]` は `display_order` を廃止し任意項目 `insert_after_id` を追加（省略時は表示順を維持）。`updateTheme` / `updatePhase` / `updateWeek` / `updateContent` は移動先を再採番し、親変更時は移動元の欠番も `resolveSiblingRenumber`（新設）で詰め直す。再採番ロジックは新規作成と共通化。6.1節を更新 |
 | 2026年9月 | #88対応：`users.status` の値 `'pending'` を `'trial'` にリネームし、「お試しユーザー = `status='pending'`」の命名の二重管理を解消（#86で新設したフラグ名・UI文言のみtrial系という暫定対応を解消）。2.6節の暫定注記を削除し、認証フロー図・ステータス値・RLSポリシー記載を全面更新。`ai_reviews.status` の `'pending'`（AIレビューのジョブ状態）は対象外 |
+| 2026年9月 | コンテンツ詳細の前後ナビをテーマ内通し遷移に変更（#208）：週末尾→次週先頭、フェーズ末尾→次フェーズ先頭。テーマ末尾は「テーマに戻る」。境界時のみ所属を併記。`fetchThemeNavigationIndex` を追加（service_role の呼び出し箇所・回数は増えない）。3.3節・7.2節・2.6節・2.12節を更新 |
