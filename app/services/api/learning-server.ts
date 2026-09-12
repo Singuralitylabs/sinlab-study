@@ -528,7 +528,24 @@ export async function fetchThemeNavigationIndex(
   if (weeksError) {
     console.error("テーマ内ナビ用週一覧取得エラー:", weeksError.message);
   } else {
-    weeks = (weekRows ?? []) as NavigationWeek[];
+    // `!inner` 埋め込みは生成型が配列になることがあるが、many-to-one の実行時値はオブジェクト。
+    // どちらでも通し列を組み立てられるよう単一の phase に正規化する。
+    weeks = (weekRows ?? []).map((row) => {
+      const rawPhase = row.phase;
+      const phase = Array.isArray(rawPhase) ? (rawPhase[0] ?? null) : rawPhase;
+      return {
+        id: row.id,
+        name: row.name,
+        display_order: row.display_order,
+        phase: phase
+          ? {
+              id: phase.id,
+              name: phase.name,
+              display_order: phase.display_order,
+            }
+          : null,
+      };
+    });
   }
 
   const weekIds = [...new Set([...weeks.map((week) => week.id), currentWeekId])];

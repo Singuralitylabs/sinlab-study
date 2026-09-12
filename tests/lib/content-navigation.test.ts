@@ -16,7 +16,7 @@ function makeWeek(
   return {
     id: overrides.id,
     name: overrides.name ?? `週${overrides.id}`,
-    display_order: overrides.display_order ?? 0,
+    display_order: overrides.display_order === undefined ? 0 : overrides.display_order,
     phase: overrides.phase,
   };
 }
@@ -36,7 +36,7 @@ function makeContent(
     id: overrides.id,
     title: overrides.title ?? `コンテンツ${overrides.id}`,
     week_id: overrides.week_id,
-    display_order: overrides.display_order ?? 0,
+    display_order: overrides.display_order === undefined ? 0 : overrides.display_order,
   };
 }
 
