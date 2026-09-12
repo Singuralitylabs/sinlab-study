@@ -4,7 +4,7 @@ import { css } from "@codemirror/lang-css";
 import { html } from "@codemirror/lang-html";
 import { javascript } from "@codemirror/lang-javascript";
 import CodeMirror from "@uiw/react-codemirror";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 
 export interface CodeEditorProps {
@@ -29,16 +29,31 @@ function getExtensions(language: CodeLanguage) {
   }
 }
 
-export function CodeEditor({ value, onChange, language, placeholder }: CodeEditorProps) {
-  const [isDark, setIsDark] = useState(false);
+function subscribeDarkClass(onStoreChange: () => void) {
+  const root = document.documentElement;
+  const observer = new MutationObserver(onStoreChange);
+  observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+  return () => observer.disconnect();
+}
 
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    setIsDark(mediaQuery.matches);
-    const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
-    mediaQuery.addEventListener("change", handler);
-    return () => mediaQuery.removeEventListener("change", handler);
-  }, []);
+function getDarkClassSnapshot() {
+  return document.documentElement.classList.contains("dark");
+}
+
+function getDarkClassServerSnapshot() {
+  return false;
+}
+
+export function CodeEditor({ value, onChange, language, placeholder }: CodeEditorProps) {
+  // layout.tsx のインラインスクリプトが起動時に1回付ける dark クラスを初期値に使う。
+  // prefers-color-scheme の useEffect 遅延だとダークモード利用者が一度ライトでマウントされる。
+  // dark クラスは起動時のみ付与されアプリ内で変更されないため、表示中の OS テーマ切替には
+  // 追従しない（Tailwind の dark: バリアントと同じ。再読み込みで反映）。
+  const isDark = useSyncExternalStore(
+    subscribeDarkClass,
+    getDarkClassSnapshot,
+    getDarkClassServerSnapshot
+  );
 
   return (
     <CodeMirror

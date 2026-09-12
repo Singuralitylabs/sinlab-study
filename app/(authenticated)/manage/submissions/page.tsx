@@ -1,7 +1,7 @@
 import { ClipboardList, Code, ExternalLink, Link as LinkIcon } from "lucide-react";
 import { redirect } from "next/navigation";
-import { AIReviewStatusBadge } from "@/app/components/AIReviewDisplay";
 import { AIReviewDisplayClient } from "@/app/components/AIReviewDisplayClient";
+import { AIReviewStatusBadge } from "@/app/components/AIReviewStatusBadge";
 import { PageTitle } from "@/app/components/PageTitle";
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { SubmissionsPager } from "@/app/components/SubmissionsPager";

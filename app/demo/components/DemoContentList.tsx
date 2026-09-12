@@ -55,6 +55,7 @@ export function DemoContentList({
   return (
     <div className="grid gap-2 ml-5 border-l-2 border-border pl-5">
       {contents.map((content) => {
+        // isCompleted は未 hydrate 時 false（SSR と同じ）を返す
         const completed = !locked && isCompleted(content.id);
 
         return (

@@ -3,7 +3,7 @@
 import { Code, Link as LinkIcon, Loader2, Plus, Send, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { AIReviewDisplay } from "@/app/components/AIReviewDisplay";
+import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import { CodeEditorNoSSR as CodeEditor } from "@/app/components/CodeEditorNoSSR";
 import {
   buildDefaultFilename,
@@ -392,8 +392,8 @@ export function SubmissionForm({
         </Button>
       </form>
 
-      {/* AIレビュー表示 */}
-      <AIReviewDisplay
+      {/* AIレビュー表示（NoSSR 側でレビュー／ローディング時のみチャンクをマウント） */}
+      <AIReviewDisplayNoSSR
         review={aiReview}
         isLoading={isReviewLoading}
         defaultExpanded={true}

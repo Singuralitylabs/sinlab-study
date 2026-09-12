@@ -30,7 +30,7 @@ vi.mock("@/app/components/SlideContent", () => ({
   SlideContent: ({ signedUrl }: { signedUrl: string | null }) =>
     createElement("div", { "data-testid": "slide-content" }, signedUrl ?? "SLIDE_UNAVAILABLE"),
 }));
-vi.mock("@/app/components/AIReviewDisplay", () => ({ AIReviewDisplay: () => null }));
+vi.mock("@/app/components/AIReviewDisplayNoSSR", () => ({ AIReviewDisplayNoSSR: () => null }));
 vi.mock("@/app/components/YouTubeEmbed", () => ({ YouTubeEmbed: () => null }));
 vi.mock(
   "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/CompleteButton",

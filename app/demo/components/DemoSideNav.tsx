@@ -17,45 +17,52 @@ const NAV_ITEMS = [
   },
 ];
 
-export function DemoSideNav() {
-  const [open, setOpen] = useState(false);
-  const pathname = usePathname();
+function isDemoNavActive(pathname: string, href: string) {
+  return pathname.startsWith(href);
+}
 
-  const isActive = (href: string) => pathname.startsWith(href);
+function DemoNavLink({
+  title,
+  href,
+  icon,
+  pathname,
+  onClick,
+}: {
+  title: string;
+  href: string;
+  icon: React.ReactNode;
+  pathname: string;
+  onClick?: () => void;
+}) {
+  const active = isDemoNavActive(pathname, href);
+  return (
+    <Link
+      href={href}
+      onClick={onClick}
+      className={`flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
+        active
+          ? "bg-primary/10 text-primary"
+          : "text-muted-foreground hover:text-foreground hover:bg-accent"
+      }`}
+    >
+      {icon}
+      {title}
+    </Link>
+  );
+}
 
-  const NavLink = ({
-    title,
-    href,
-    icon,
-    onClick,
-  }: {
-    title: string;
-    href: string;
-    icon: React.ReactNode;
-    onClick?: () => void;
-  }) => {
-    const active = isActive(href);
-    return (
-      <Link
-        href={href}
-        onClick={onClick}
-        className={`flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
-          active
-            ? "bg-primary/10 text-primary"
-            : "text-muted-foreground hover:text-foreground hover:bg-accent"
-        }`}
-      >
-        {icon}
-        {title}
-      </Link>
-    );
-  };
-
-  const SidebarContent = ({ onItemClick }: { onItemClick?: () => void }) => (
+function DemoSidebarContent({
+  pathname,
+  onItemClick,
+}: {
+  pathname: string;
+  onItemClick?: () => void;
+}) {
+  return (
     <>
       <nav className="flex-1 px-3 py-2 space-y-1">
         {NAV_ITEMS.map((item) => (
-          <NavLink key={item.title} {...item} onClick={onItemClick} />
+          <DemoNavLink key={item.title} {...item} pathname={pathname} onClick={onItemClick} />
         ))}
       </nav>
       <div className="px-3 pb-4">
@@ -71,6 +78,11 @@ export function DemoSideNav() {
       </div>
     </>
   );
+}
+
+export function DemoSideNav() {
+  const [open, setOpen] = useState(false);
+  const pathname = usePathname();
 
   return (
     <>
@@ -102,7 +114,7 @@ export function DemoSideNav() {
             </SheetTitle>
           </SheetHeader>
           <div className="flex flex-col h-[calc(100%-73px)]">
-            <SidebarContent onItemClick={() => setOpen(false)} />
+            <DemoSidebarContent pathname={pathname} onItemClick={() => setOpen(false)} />
           </div>
         </SheetContent>
       </Sheet>
@@ -117,7 +129,7 @@ export function DemoSideNav() {
           </Link>
         </div>
         <div className="flex flex-col flex-1 pt-2">
-          <SidebarContent />
+          <DemoSidebarContent pathname={pathname} />
         </div>
       </div>
     </>

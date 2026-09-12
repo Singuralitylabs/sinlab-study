@@ -3,30 +3,15 @@
 import { Bot, ChevronDown, ChevronUp, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import type { AIReviewListItem } from "@/app/types";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ScoreBadge } from "./AIReviewStatusBadge";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
-interface AIReviewDisplayProps {
+export interface AIReviewDisplayProps {
   review: AIReviewListItem | null;
   isLoading?: boolean;
   onRetry?: () => void;
   defaultExpanded?: boolean;
-}
-
-function ScoreBadge({ score }: { score: number }) {
-  let variant: "default" | "secondary" | "destructive" = "default";
-  if (score < 50) {
-    variant = "destructive";
-  } else if (score < 70) {
-    variant = "secondary";
-  }
-
-  return (
-    <Badge variant={variant} className="text-sm">
-      {score}/100
-    </Badge>
-  );
 }
 
 export function AIReviewDisplay({
@@ -120,38 +105,4 @@ export function AIReviewDisplay({
       )}
     </div>
   );
-}
-
-export function AIReviewStatusBadge({ review }: { review: AIReviewListItem | null }) {
-  if (!review) return null;
-
-  switch (review.status) {
-    case "completed":
-      return (
-        <div className="flex items-center gap-1.5">
-          <Badge variant="default" className="gap-1">
-            <Bot className="h-3 w-3" />
-            レビュー済み
-          </Badge>
-          {review.overall_score != null && <ScoreBadge score={review.overall_score} />}
-        </div>
-      );
-    case "processing":
-    case "pending":
-      return (
-        <Badge variant="secondary" className="gap-1">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          レビュー中
-        </Badge>
-      );
-    case "failed":
-      return (
-        <Badge variant="destructive" className="gap-1">
-          <TriangleAlert className="h-3 w-3" />
-          レビュー失敗
-        </Badge>
-      );
-    default:
-      return null;
-  }
 }

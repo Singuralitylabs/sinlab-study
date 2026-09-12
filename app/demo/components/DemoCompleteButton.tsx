@@ -9,7 +9,8 @@ interface DemoCompleteButtonProps {
 }
 
 export function DemoCompleteButton({ contentId }: DemoCompleteButtonProps) {
-  const { isCompleted, toggleComplete } = useDemoProgress();
+  const { isCompleted, toggleComplete, hydrated } = useDemoProgress();
+  // isCompleted は未 hydrate 時 false を返す。disabled={!hydrated} だけが追加で必要。
   const completed = isCompleted(contentId);
 
   return (
@@ -17,6 +18,7 @@ export function DemoCompleteButton({ contentId }: DemoCompleteButtonProps) {
       onClick={() => toggleComplete(contentId)}
       variant={completed ? "secondary" : "default"}
       size="lg"
+      disabled={!hydrated}
       className={`w-full ${completed ? "border-success/30 bg-success/10 text-success hover:bg-success/20" : ""}`}
     >
       {completed ? (
