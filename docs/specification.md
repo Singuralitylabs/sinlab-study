@@ -67,19 +67,19 @@ flowchart TD
     C -->|認証済み| D{ユーザーステータス}
     D -->|取得失敗| L
     D -->|rejected| RE["/rejected にリダイレクト"]
-    D -->|pending| OK
+    D -->|trial| OK
     D -->|active| OK[アクセス許可]
 ```
 
-ステータス取得失敗（null）時は `/login` へ送るフェイルクローズとする。お試しユーザー（`pending`）はページアクセス自体は許可し、コンテンツ単位の制限はアプリ層とRLSで担保する（2.6参照）。
+ステータス取得失敗（null）時は `/login` へ送るフェイルクローズとする。お試しユーザー（`trial`）はページアクセス自体は許可し、コンテンツ単位の制限はアプリ層とRLSで担保する（2.6参照）。
 
 ### 2.2 認証の多層構造
 
 | レイヤー | 保護対象 | 方式 |
 |:--|:--|:--|
-| プロキシ（`proxy.ts`） | 全ページ | Supabase Auth セッション + ユーザーステータス確認（第一の砦。`active` / `pending` のみ許可するフェイルクローズ方式） |
-| Server Components（`(authenticated)/layout.tsx`） | 認証必須ページ全体 | `getServerAuth()` の `userStatus` を許可リスト検証（`active` / `pending` 以外はリダイレクト。プロキシのスキップ経路・設定不備に備えた第二の砦） |
-| Server Components（layout / page） | ロール別の表示・ナビゲーション | `getServerAuth()`（`React.cache()` でリクエスト単位にメモ化）によるロール取得・権限チェック |
+| プロキシ（`proxy.ts`） | 全ページ | Supabase Auth セッション + ユーザーステータス確認（第一の砦。`active` / `trial` のみ許可するフェイルクローズ方式。通過時に受信ヘッダー偽装を削除した上で `x-sinlab-*` リクエストヘッダーにユーザー情報を設定して下流へ引き渡す。スキップ対象パスでも偽装ヘッダーを削除） |
+| Server Components（`(authenticated)/layout.tsx`） | 認証必須ページ全体 | `getServerAuth()` の `userStatus` を許可リスト検証（`active` / `trial` 以外はリダイレクト。プロキシのスキップ経路・設定不備に備えた第二の砦） |
+| Server Components（layout / page） | ロール別の表示・ナビゲーション | `getServerAuth()`（`React.cache()` でリクエスト単位にメモ化。proxy からヘッダーが渡された場合は突合確認の上で `users` の再 SELECT を省略。`auth.getUser()` 検証は改ざん検知のため維持）によるロール取得・権限チェック |
 | Server Components（コンテンツ表示） | お試しユーザーへのコンテンツ制限 | `userStatus` と `is_open_to_trial` によるロック判定（RLSと合わせた二層防御の第一層） |
 | RLS | データベース | `auth.uid()` によるRow Level Security。お試しユーザーには `learning_contents` をお試し公開分のみに制限（二層防御の第二層） |
 | API Routes | データ更新操作 | サーバー側での認証チェック + ステータスに基づく認可（`rejected` は403、お試しユーザーはお試し公開コンテンツのみ書き込み可） |
@@ -91,7 +91,7 @@ flowchart TD
 | 管理者権限 | `admin` のみ | 管理ダッシュボード、受講生管理、ユーザー管理 |
 | コンテンツ管理権限 | `admin` または `maintainer` | コンテンツ CRUD 操作 |
 
-**会員種別（`membership_type`）**: 承認済みユーザーは「コミュニティ会員（`community`）」と「一般有料会員（`general`）」に分類する。コミュニティ会員はコミュニティ会員プラン、一般有料会員は本サービスのみを利用するプランを指す。ロール（権限）とは独立した軸であり、**現時点では種別によるコンテンツ・機能のアクセス差はない**（将来の出し分けに備えた区別のみ）。承認前（`pending`）・却下（`rejected`）ユーザーは `NULL`。
+**会員種別（`membership_type`）**: 承認済みユーザーは「コミュニティ会員（`community`）」と「一般有料会員（`general`）」に分類する。コミュニティ会員はコミュニティ会員プラン、一般有料会員は本サービスのみを利用するプランを指す。ロール（権限）とは独立した軸であり、**現時点では種別によるコンテンツ・機能のアクセス差はない**（将来の出し分けに備えた区別のみ）。承認前（`trial`）・却下（`rejected`）ユーザーは `NULL`。
 
 一般有料会員への昇格には2通りの経路がある。
 
@@ -129,13 +129,16 @@ flowchart TD
     B -->|あり| C{セッション確立}
     C -->|失敗| L
     C -->|成功| D{users テーブル確認}
-    D -->|レコードなし| R["自動登録 (pending)"] --> H
-    D -->|pending| H
+    D -->|レコードなし| R["自動登録 (trial)"]
+    R -->|成功| H
+    R -->|失敗| F["/login?error=registration_failed"]
+    D -->|論理削除済み| F
+    D -->|trial| H
     D -->|rejected| RE["/rejected"]
     D -->|active| H["/ (ダッシュボード)"]
 ```
 
-初回ログイン（自動登録）後もお試しユーザーとしてそのままダッシュボードへ遷移する。承認待ちであることはアプリ内バナーで通知する。
+初回ログイン（自動登録）後もお試しユーザーとしてそのままダッシュボードへ遷移する。承認待ちであることはアプリ内バナーで通知する。自動登録に失敗した場合、および論理削除済みユーザーの再ログイン時は `/login?error=registration_failed` へリダイレクトする（詳細は9.5.1）。
 
 ### 2.5 初回ログイン時のユーザー自動登録
 
@@ -150,13 +153,13 @@ OAuthコールバック処理中に初回ログインを検知し、`users` テ�
 | `display_name` | Google表示名 | ユーザーメタデータ |
 | `avatar_url` | Googleアバター画像 | ユーザーメタデータ |
 | `role` | `member` | デフォルト値 |
-| `status` | `pending` | デフォルト値 |
+| `status` | `trial` | デフォルト値 |
+
+INSERT 失敗時は `/login?error=registration_failed` へリダイレクトし、Slack通知は送らない。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認の失敗や service_role 未設定は `error` なしの `/login` へフェイルクローズする。詳細は9.5.1。
 
 ### 2.6 お試し（trial）ユーザーへのコンテンツ制限
 
-承認前ユーザー（`status = 'pending'`）を「**お試し（trial）ユーザー**」と呼ぶ。お試し体験を通じた入会動機の醸成のため、承認前でも通常どおりログインでき、お試し公開指定されたコンテンツのみ閲覧・課題提出できる。
-
-> DB上の status 値 `'pending'` 自体のリネームは別issueで対応予定のため、新設するフラグ名・UI文言にのみ trial 系の名称を用いる。
+承認前ユーザー（`status = 'trial'`）を「**お試し（trial）ユーザー**」と呼ぶ。お試し体験を通じた入会動機の醸成のため、承認前でも通常どおりログインでき、お試し公開指定されたコンテンツのみ閲覧・課題提出できる。
 
 **閲覧範囲**: `is_published = true` かつ `is_open_to_trial = true` のコンテンツのみ閲覧・進捗登録・提出が可能。
 
@@ -169,12 +172,12 @@ OAuthコールバック処理中に初回ログインを検知し、`users` テ�
 | ロック済みコンテンツへの直リンク | ロック画面を表示する（404にはしない） |
 | 承認待ちの通知 | アプリ内バナーで通知（`/pending` 承認待ち専用画面は設けない） |
 
-**承認待ちバナーの表示場所**: `(authenticated)/layout.tsx` で `getServerAuth()` の `userStatus` が `pending` の場合にバナーを表示する。認証必須ページ全体で共通表示となり、ページごとの実装は不要。
+**承認待ちバナーの表示場所**: `(authenticated)/layout.tsx` で `getServerAuth()` の `userStatus` が `trial` の場合にバナーを表示する。認証必須ページ全体で共通表示となり、ページごとの実装は不要。
 
 **`/pending` の廃止方法**: 旧URLのブックマークからの流入に備え、`/pending` は404にせず `/` へリダイレクトする。実装は以下の2点をプロキシ（`proxy.ts`）で行い、リダイレクト判定を1箇所に集約する。
 
 1. `shouldSkipMiddleware()` の対象から `/pending` を外す（対象に残したままだとプロキシが判定せず素通りさせ、ページ削除後は404になる）
-2. ステータス判定を通過した `active` / `pending` ユーザーについて、パスが `/pending` の場合は `/` へリダイレクトする
+2. ステータス判定を通過した `active` / `trial` ユーザーについて、パスが `/pending` の場合は `/` へリダイレクトする
 
 これにより `rejected` は既存のステータス判定で `/rejected` へ、ステータス取得不能時は `/login` へ送られ、旧URLでも各ステータスの行き先が通常パスと一致する。承認待ち画面（`app/(auth)/pending/`）自体は削除する。
 
@@ -187,7 +190,7 @@ RLS強化により、お試し非公開コンテンツはタイトルを含め�
 | 用途 | 理由 |
 |:--|:--|
 | ツリー表示の一覧サマリー取得 | ロック済みコンテンツのタイトル・並び順を表示するため |
-| コンテンツ詳細ページの存在チェック | 直リンク時に「存在しない（404）」と「ロックされている」を区別するため。通常クライアントでは両者とも0行になり判別できない |
+| コンテンツ詳細ページの存在チェック | 直リンク時に「存在しない（404）」と「ロックされている」を区別するため。通常クライアントでは両者とも0行になり判別できない。同じ取得結果を前後ナビの通し列にも用いるため `weekIds` はテーマ内の全週に広がるが、WHERE条件・カラム許可リスト・呼び出し箇所は変わらない（3.3参照） |
 
 > この制限は受講生向けのコンテンツ配信経路に限った話であり、管理者 / 講師向けの権限チェック済みクエリ（`admin-server.ts`・`/api/admin/users`・`/api/upload-pdf`・AIレビュー等）や、`user_id` フィルタで安全性を担保している既存の service_role 利用（`submissions-server.ts` 等）は従来どおりで、本設計の対象外。
 
@@ -207,11 +210,11 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 **進捗率の分母**: ダッシュボードの進捗率は、お試しユーザーではお試し公開コンテンツのみを分母とする（体験範囲内の進捗を示す）。集計は通常クライアントのネスト select で行うため、RLSによる絞り込みがそのまま分母に反映される。ツリーは全件表示・進捗率はお試し公開分の分母、という差異は意図的なもの。
 
-**提出物の引き継ぎ**: 承認前の提出・進捗は `user_id` ベースで記録されるため、承認後（`pending` → `active`）もそのまま引き継がれる。管理者 / メンテナーのレビュー一覧にもお試しユーザーの提出が表示される。
+**提出物の引き継ぎ**: 承認前の提出・進捗は `user_id` ベースで記録されるため、承認後（`trial` → `active`）もそのまま引き継がれる。管理者 / メンテナーのレビュー一覧にもお試しユーザーの提出が表示される。
 
 **既知のエッジケース（お試し公開フラグの取り下げ）**: 提出済みコンテンツの `is_open_to_trial` を後から `false` に戻すと、提出履歴画面（提出物とコンテンツを通常クライアントでネスト取得している）でお試しユーザーにはコンテンツのタイトルが取得できず、表示が欠ける。提出レコード自体は残り、承認後は再び表示される。運用上まれなケースのため、タイトル欠落時のフォールバック表示（「非公開のコンテンツ」等）に留める。
 
-**既知の制約（スライドPDF）**: スライドは公開バケット（`slides`、`public = true`）配信でオブジェクトキーが連番のため、ロック済みコンテンツのPDFもURL推測で取得できる。これは本機能以前からの既存の性質であり、署名付きURL化は別issueで対応する。
+**スライドPDF**: ロック済みコンテンツの本文と同様、スライドPDFもロック画面では取得しない。`slides` バケットは非公開で、署名付きURLはロック判定の後にのみ発行する（3.2節。#89 で公開バケットによる推測アクセスを解消済み）。
 
 ### 2.7 ユーザー管理（管理者向け）
 
@@ -221,8 +224,8 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 **機能**:
 - 全ユーザー一覧の表示（ステータスでフィルタ可能）
-- ユーザーの承認（`pending` → `active`）。承認時に会員種別を選択する
-- ユーザーの却下（`pending` → `rejected`）
+- ユーザーの承認（`trial` → `active`）。承認時に会員種別を選択する
+- ユーザーの却下（`trial` → `rejected`）
 - ステータス変更のリカバリ（`rejected` → `active`）
 - ユーザーのロール変更（`member` / `maintainer` / `admin` を画面上のセレクトボックスで切り替え）
 
@@ -232,12 +235,16 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 - ロール変更後はページを即時リロードして反映
 
 **会員種別の設定**:
-- 承認ボタンの隣のセレクトボックスで「コミュニティ会員」「一般有料会員」を選択し、承認と同時に `membership_type` を設定する（既定は「コミュニティ会員」）
+- 承認ボタンの隣のセレクトボックスで「コミュニティ会員」「一般有料会員」を選択し、承認と同時に `membership_type` を設定する（既定は「コミュニティ会員」。ただし対象がStripe契約中の場合は下記のとおり「一般有料会員」が既定になる）
 - 却下すると `membership_type` は `NULL` に戻る（承認前・却下ユーザーは会員種別を持たない）
 - 却下ボタンは `active` ユーザーにも表示されるため、種別が設定済みのユーザーを却下する際は、確認ダイアログに現在の種別と「設定は解除されます」を明示する（誤操作で種別が失われることを防ぐ）
-- 承認済みユーザーの種別を後から変更するUIは現時点では持たない（#95）
+- `active` ユーザーは会員種別欄がセレクトボックスになり、選択変更と同時に `membership_type` が更新される（ロール変更セレクトと同じ操作感で、確認ダイアログなし）。`trial` / `rejected` ユーザーは種別を持たないため表示しない
 
-**表示項目**: 表示名、メールアドレス、ロール（編集可能）、ステータス、会員種別（バッジ。未設定は `-`）、Stripeサブスク契約中バッジ（現在契約中とみなせるステータスの `stripe_subscriptions` 行を持つユーザーのみ表示。2.11参照）、登録日時、操作ボタン
+**Stripe契約中ユーザーの会員種別制約**: `membership_type` と課金状態の不整合を防ぐため、Stripeサブスク契約中（現在契約中とみなせるステータスの `stripe_subscriptions` 行を持つ）ユーザーは、承認時・変更時のいずれも「一般有料会員」以外を選べない（コミュニティ会員の選択肢を無効化し、注記を表示する）。「一般有料会員」への設定自体は契約中でも常に許可する。これは、却下や `trial` からの再承認・種別誤選択などで「契約中なのに `community`」という不整合が生じた場合に、`change_membership` で「一般有料会員」へ是正する経路を塞がないため（承認だけにガードを掛けると是正できない詰みが生じる）。契約状況を取得できない場合の扱いはアクション・画面ごとに異なる:
+- **会員種別変更（`active` ユーザー）**: 契約の有無を判定できないため、セレクトボックス自体を無効化する（「Stripe契約状況を取得できないため変更できません」。フェイルクローズ）
+- **承認（`trial` / `rejected` ユーザー）**: 承認対象の大半はStripe非契約のお試しユーザーであり、承認フロー自体をStripeの一時的な取得失敗で止めないため、制約は掛けない（契約中と判定できた場合のみガードする）
+
+**表示項目**: 表示名、メールアドレス、ロール（編集可能）、ステータス、会員種別（`active` はセレクトボックス、`trial`/`rejected` はバッジ。未設定は `-`）、Stripeサブスク契約中バッジ（現在契約中とみなせるステータスの `stripe_subscriptions` 行を持つユーザーのみ表示。2.11参照）、登録日時、操作ボタン
 
 **Stripeサブスク契約中ユーザーの却下**: 却下してもStripe側のサブスクリプションは自動解約されない（自動連携はスコープ外）。却下確認ダイアログに「Stripeダッシュボードでの手動キャンセルが別途必要です」の警告を表示する。手動キャンセル手順は運用者向けドキュメントを参照。
 
@@ -258,7 +265,7 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 | 却下済みユーザーのアクセス | プロキシ（`proxy.ts`） + `(authenticated)/layout.tsx` + RLSの多重チェック |
 | 承認前ユーザーのアクセス範囲 | お試し公開コンテンツのみ。アプリ層のロック判定 + RLS（`learning_contents` のSELECT制限）の二層で担保（2.6参照） |
 | ステータス改ざん | `users` テーブルの更新はRLSでadminロールのみに制限 |
-| 自動登録の悪用 | Googleアカウントが必要。登録後は `pending`（お試し）となり、お試し公開コンテンツ以外の閲覧には管理者の承認が必須 |
+| 自動登録の悪用 | Googleアカウントが必要。登録後は `trial`（お試し）となり、お試し公開コンテンツ以外の閲覧には管理者の承認が必須 |
 
 ### 2.10 Supabase Auth 設定
 
@@ -279,7 +286,18 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 ### 2.11 Stripeサブスク決済によるアップグレード
 
-**対象フロー**: お試しユーザー（`status=pending`）が `/upgrade` からStripe Checkout（ホスト型）で月額サブスクリプションを契約すると、決済完了と同時に**管理者承認なし**で一般有料会員（`status=active` / `membership_type=general`）へ自動昇格する。**コミュニティ会員はスコープ外**で、従来どおり2.7節の手動承認のみを経由する。
+**機能フラグ（`STRIPE_ENABLED`）**: 本決済機能全体は環境変数 `STRIPE_ENABLED` で有効・無効を切り替える。判定は `isStripeEnabled()`（`app/constants/stripe.ts`）に集約し、未設定または `"true"` 以外の値は無効として扱う（フェイルクローズ）。`app/constants/stripe.ts` はStripe SDKに依存しないため、layout等の非決済系コードからも軽量に参照できる（決済系コードへは `app/services/api/stripe-server.ts` から再exportして提供する）。以降の節は有効時（`STRIPE_ENABLED=true`）の仕様を記述する。
+
+無効時の挙動は以下のとおり。
+
+| 対象 | 挙動 |
+|:--|:--|
+| `/upgrade` | Checkout導線（お試しユーザー向け）・お支払い管理導線（一般有料会員向け）をいずれも非表示にし、準備中である旨の案内を表示 |
+| `/upgrade/success` | 決済確認・会員昇格処理を一切行わず同様の案内を表示。Stripeのホスト型Checkoutセッションは作成から最大24時間有効なため、無効化の直前に開始されたセッションから再訪しても昇格させない |
+| トライアルバナー（`(authenticated)/layout.tsx`）／サイドナビ（`(authenticated)/components/SideNav.tsx`） | アップグレードボタン・「プラン・お支払い」項目を非表示 |
+| `POST /api/stripe/{checkout,portal,webhook}` | 認証・署名検証より前段で503を返す（応答メッセージは `STRIPE_DISABLED_MESSAGE` に一元化） |
+
+**対象フロー**: お試しユーザー（`status=trial`）が `/upgrade` からStripe Checkout（ホスト型）で月額サブスクリプションを契約すると、決済完了と同時に**管理者承認なし**で一般有料会員（`status=active` / `membership_type=general`）へ自動昇格する。**コミュニティ会員はスコープ外**で、従来どおり2.7節の手動承認のみを経由する。
 
 **データモデル**: 専用テーブル `stripe_subscriptions`（ユーザーごとの課金状態のミラー、1ユーザー1行）と `stripe_events`（Webhook冪等性用）を用いる。アプリの認可判定は引き続き `users.status` / `users.membership_type` が唯一の真実であり、`users` テーブルにStripe関連カラムは追加しない（詳細は[データベース設計書](./database.md)の3.9/3.10・6.6/6.7を参照）。
 
@@ -287,13 +305,18 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 初回請求は日割り（`proration_behavior: "create_prorations"`）とする。無償（`"none"`）にすると「27日直前に登録して1ヶ月弱を無償で使い切って解約する」抜け道ができるため。ただし、アンカー直前の登録では日割り額がStripeの最低請求額（JPY ¥50）を下回りCheckout作成・決済が失敗しうるため、`isProrationBelowMinimum()` で判定し、下回る場合に限り `proration_behavior` を `"none"` に切り替える。無償化されるウィンドウの長さは月額に反比例する（月額¥3000なら約12.4時間、月額が低いほど広がる）。最大でも1ヶ月弱を無償利用できる全面 `"none"` 採用時とは規模が異なるため抜け道にはならない、という判断のもとで採用している。判定にはPriceの `unit_amount`（モジュールスコープのTTLキャッシュ、`fetchSubscriptionPrice()` と共有）を用いる。Priceが1ヶ月間隔でない（誤設定）場合は判定できないため `false`（日割りあり）を返す。Price取得自体が一時的に失敗した場合も、Checkout作成全体を失敗させず `create_prorations`（安全側）にフォールバックする。
 
-`proration_behavior: "none"` を選んだ根拠は「アンカーまでの残り時間が短いこと」だが、Checkout Sessionは既定で作成から最大24時間有効なため、無償ウィンドウ内にセッションを開いたままアンカー通過後まで決済を遅らせて完了されると、Stripeがサブスク作成時点で次のアンカー（さらに1ヶ月先）を採用し、意図せず約1ヶ月分が無償になりうる（このガードが排除しようとした抜け道の再現）。これを防ぐため、`proration_behavior: "none"` の場合に限り、CheckoutセッションのStripe側有効期限（`expires_at`）をアンカー時刻でクランプする（Stripeの制約で作成時刻から最低30分は必要なため、アンカーがそれより近い場合は30分を優先する）。
+**Checkout Sessionの有効期限**: `expires_at` はStripe既定の24時間ではなく、常に作成から32分（Stripeが要求する最低30分＋安全マージン2分）に固定する。理由は2つある。
+
+1. 二重Checkoutの排他（後述のclaim）は、セッションを特定できない場合にTTL経過で解除する設計のため。TTL経過時点で古いセッションがまだ決済可能だと、新旧2つのセッションが同時に成立しうる。TTLは「セッション有効期限 + 猶予10分」としてコードで導出し（`CHECKOUT_CLAIM_TTL_MS`）、この不等号を構造的に保証する
+2. `proration_behavior: "none"`（アンカー直前の無償化）を選んだ根拠は「アンカーまでの残り時間が短いこと」だが、24時間有効なセッションを無償ウィンドウ内に開いたままアンカー通過後まで決済を遅らせて完了されると、Stripeがサブスク作成時点で次のアンカー（さらに1ヶ月先）を採用し、意図せず約1ヶ月分が無償になりうる（このガードが排除しようとした抜け道の再現）。有効期限が32分なら、アンカーまで32分以上ある間は必ずアンカー前に失効する
+
+アンカーまで32分未満の場合はStripeの最低30分要件によりアンカーを跨ぐ余地が残るが、無償ウィンドウ自体が数時間〜半日程度の中のさらに一部でしかなく実害は小さい（完全に排除するには「アンカー直前は新規Checkout作成を一時停止する」設計が必要でスコープ外）。
 
 **画面構成**:
 
 | 画面 | パス | 内容 |
 |:--|:--|:--|
-| アップグレード | `/upgrade` | お試しユーザー: 月額料金（Stripe PriceからTTLキャッシュ付きで取得。取得失敗時、および設定されたPriceが1ヶ月間隔でない場合は料金非表示のまま特典のみ表示） + 特典説明（毎月27日が決済日であること・初回のみ日割りとなることを明示）+ アップグレードボタン（Stripe Checkoutへ遷移）。契約中の一般有料会員: 「ご契約中です」（次回のお支払い日、または解約予定日を`current_period_end`から表示）+ お支払い情報の管理・解約ボタン（Stripe Customer Portalへ遷移）。それ以外の `active` ユーザー（コミュニティ会員・手動承認済みの一般有料会員）: 本登録済みの案内のみ。契約状況の取得自体に失敗した場合はエラーメッセージを表示し、契約なし・契約ありのいずれとも誤判定しない（フェイルクローズ）。取得失敗時もお支払い情報の管理・解約ボタンは表示し続ける（契約が無ければAPI側が404を返すため安全で、実際に契約中のユーザーが解約手段を失わないようにするため） |
+| アップグレード | `/upgrade` | お試しユーザー: 月額料金（Stripe PriceからTTLキャッシュ付きで取得。JPY・1ヶ月間隔で取得できた場合は「月額N円（税込）」を表示。取得失敗時は `DISPLAY_MONTHLY_PRICE_JPY` のフォールバックで法定表示を残す。取得成功だが非月額・非JPYの場合は月額を断定せず見出しを出さない）+ 法定表示5項目（自動更新・料金・支払日/更新日・解約方法と解約後の扱い・未成年者注意文言）+ アップグレードボタン。実請求額を確認できない場合はボタンを無効化する。契約中の一般有料会員: 「ご契約中です」（次回のお支払い日、または解約予定日を`current_period_end`から表示）+ お支払い情報の管理・解約ボタン（Stripe Customer Portalへ遷移）+ 解約後の扱い（日割り返金なし・当該請求期間の末日まで利用可能）。それ以外の `active` ユーザー（コミュニティ会員・手動承認済みの一般有料会員）: 本登録済みの案内のみ。契約状況の取得自体に失敗した場合はエラーメッセージを表示し、契約なし・契約ありのいずれとも誤判定しない（フェイルクローズ）。取得失敗時もお支払い情報の管理・解約ボタンは表示し続けるが、契約の有無が不明なため解約ポリシー文言は出さない（契約が無ければAPI側が404を返すためボタン自体は安全） |
 | アップグレード完了 | `/upgrade/success` | Checkoutから戻った直後のページ。`session_id` をStripe APIでretrieveし、決済完了・本人のセッションであることを確認した上で会員昇格を反映し、完了表示する。日割りで少額決済された直後であるため、`activateUserFromCheckoutSession()` が返す次回のお支払い予定日（＝満額請求日、DBの再読み込みなしで返す）も表示する（取得できなくても完了表示自体は行う） |
 
 トライアルバナー（`(authenticated)/layout.tsx`、2.6参照）に `/upgrade` へのCTAボタンを表示する。
@@ -306,31 +329,55 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 Checkoutの決済手段はカードのみに限定する（コンビニ払い等の遅延通知系決済手段は使わない）。これらの決済手段では `checkout.session.completed` 発火時点でも未入金（`incomplete`）のままになり得るため、「Checkoutから戻った瞬間に必ず利用開始できる」という設計上の前提を成立させるための制約である。
 
-`stripe_subscriptions` のミラー更新は、既に**別の**現行契約（終端状態でない行）が記録済みの場合はスキップする。古い成功ページURLのリプレイで現行契約のミラー行が上書きされると、以後の解約Webhookが `stripe_subscription_id` で照合できなくなり、解約しても降格されなくなる事故につながるため。
+`stripe_subscriptions` のミラー更新は、既に**別の**現行契約（終端状態でも手続き中でもない行）が記録済みの場合はスキップする。古い成功ページURLのリプレイで現行契約のミラー行が上書きされると、以後の解約Webhookが `stripe_subscription_id` で照合できなくなり、解約しても降格されなくなる事故につながるため。Checkout作成の処理権を確保しただけの行（`checkout_pending`）はまだ契約を表さないため、この判定の対象外とする（対象にすると、いま完了したCheckoutの昇格自体がスキップされてしまう）。ミラー更新時には `checkout_claimed_at` / `checkout_session_id` をNULLに戻し、処理権を正常に解除する。ただし解除するのは、claimが保持しているセッション自身の処理（またはセッションを特定できない場合）に限る。
 
 Stripe APIからのライブ状態取得は、ミラー更新の直前（上記の既存行チェックの後）に1回だけ行い、その結果をミラー更新とusers更新の両方に使うことで、取得時点から書き込み時点までの間隔を最小化している。それでもミラー更新〜users更新の間に解約Webhookが並行実行される競合は理論上残る（完全な排他制御にはDBトランザクション/RPCが必要でスコープ外）。
 
-**降格のタイミング**: サブスクリプションが終端状態（`canceled` / `unpaid` / `incomplete_expired` / `paused`）へ遷移した場合（解約完了・支払いリトライ全滅・未入金のまま期限切れ・トライアル終了後の支払い方法未登録による一時停止）に、お試しユーザーへ自動的に戻す（`status=pending`, `membership_type=NULL`）。降格は **`membership_type=general` のユーザーのみ**が対象で、コミュニティ会員・管理者が手動承認したユーザーを誤って巻き込まない。初回の支払い失敗（`past_due`）では降格せず、Stripe Smart Retriesに任せて運用者へSlack通知のみ行う（9章のSlack通知機能と同じ実装パターン）。進捗・提出データは `user_id` 基準で保持されるため、降格後に再課金しても引き継がれる。
+**降格のタイミング**: サブスクリプションが終端状態（`canceled` / `unpaid` / `incomplete_expired` / `paused`）へ遷移した場合（解約完了・支払いリトライ全滅・未入金のまま期限切れ・トライアル終了後の支払い方法未登録による一時停止）に、お試しユーザーへ自動的に戻す（`status=trial`, `membership_type=NULL`）。降格は **`membership_type=general` のユーザーのみ**が対象で、コミュニティ会員・管理者が手動承認したユーザーを誤って巻き込まない。初回の支払い失敗（`past_due`）では降格せず、Stripe Smart Retriesに任せて運用者へSlack通知のみ行う（9章のSlack通知機能と同じ実装パターン）。進捗・提出データは `user_id` 基準で保持されるため、降格後に再課金しても引き継がれる。
 
-**既知の限界**: この降格ガードは「`membership_type` が現在generalか」しか見ておらず、Stripe経由で契約したユーザーと管理者が手動でgeneral承認したユーザーを区別できない。却下 → 管理者が手動でgeneral再承認 → その間に旧契約の遅延Webhookが届く、という順序が発生すると手動承認分が誤って降格されうる（会員化の由来を永続化する設計変更が必要。会員種別変更UIの#95と合わせて要検討の既知課題）。
+**既知の限界**: この降格ガードは「`membership_type` が現在generalか」しか見ておらず、Stripe経由で契約したユーザーと管理者が手動でgeneral承認したユーザーを区別できない。却下 → 管理者が手動でgeneral再承認 → その間に旧契約の遅延Webhookが届く、という順序が発生すると手動承認分が誤って降格されうる（会員化の由来を永続化する設計変更が必要。2.7節の会員種別変更UIでも同じ限界がある既知の課題）。
 
 **API**:
 
 | エンドポイント | 内容 |
 |:--|:--|
-| `POST /api/stripe/checkout` | Checkoutセッションを作成しURLを返す。お試しユーザー以外は403、既に契約中・手続き中のサブスク行がある場合は409（解約済みの行が残っているだけの場合は再契約を許可する）。解約済み等で既存のStripe Customerがあれば再利用し、毎回新規作成しない（旧Customerの孤児化・請求履歴の分裂を防ぐ）。再利用しようとした既存Customerが（ダッシュボードでの削除等により）Stripe側に存在しない場合は、新規Customerでの作成にフォールバックする（そうしないと当該ユーザーが恒久的にCheckoutへ進めなくなるため） |
+| `POST /api/stripe/checkout` | Checkoutセッションを作成しURLを返す。お試しユーザー以外は403。Checkoutセッションを作る前に処理権（claim）を原子的に確保し、確保できない場合（契約中・決済済みで反映待ち）は409を返す（解約済みの行が残っているだけの場合は再契約を許可する）。手続き中のセッションがまだ有効な場合は、新しいセッションを作らず同じURLを返す。Stripe Customerはユーザーごとに一意に確保して再利用し、毎回新規作成しない（旧Customerの孤児化・請求履歴の分裂、およびPortalから解約できない契約を防ぐ）。保存済みCustomerが（ダッシュボードでの削除等により）Stripe側に存在しない場合は、Customerを作り直して保存したうえで1度だけ再試行する（そうしないと当該ユーザーが恒久的にCheckoutへ進めなくなるため）。実額の確認（`fetchSubscriptionPrice()`）は処理権の確保より前に行い、取得失敗・非月額・非JPYのいずれでも503を返す（`/upgrade` の disabled だけでは古いタブや直接POSTを防げないため。Priceの取得はセッションを作らないため、claimの前でも二重作成の防止に影響しない）。処理権を確保した後にCheckoutを作れなかった場合は、必ず解放してから応答する |
 | `POST /api/stripe/webhook` | Stripeからのイベントを受信。生ボディで署名検証し、`event.id` のclaim（原子的な処理権確保）に成功した場合のみイベント種別ごとに処理する |
-| `POST /api/stripe/portal` | Customer Portalセッションを作成しURLを返す。自身の `stripe_subscriptions` 行がないユーザーは404 |
+| `POST /api/stripe/portal` | Customer Portalセッションを作成しURLを返す。自身の `stripe_subscriptions` 行がない、またはCustomer未確保（Checkout手続き中に離脱した行のみ）のユーザーは404 |
+
+portal は自分の行を読むSELECTのみだが、checkout は処理権のclaim/releaseで `stripe_subscriptions` を書き込む。DB書き込みを行う関数（Webhookハンドラの各関数と、`claimCheckoutSlot()` / `releaseCheckoutSlot()` / Customer保存）は、いずれも冒頭で `assertServiceRoleConfigured()` により `SUPABASE_SERVICE_ROLE_KEY` の設定を明示的に検証してから `createAdminSupabaseClient()` を使う（未設定時にCookieクライアントへ静かにフォールバックしてRLSに阻まれるのを防ぐ）。Checkoutの決済手段は `payment_method_types: ["card"]` で明示的にカードのみへ限定する。
 
 **エッジケース**:
-- 二重Checkout: `stripe_subscriptions.user_id` のUNIQUE制約 + `/api/stripe/checkout` 側の409チェックで防止する（ミラー行の存在を前提とするガードのため、いずれも未完了のまま2つのCheckoutセッションを同時に完了させる完全同時実行までは対象外）
+- 二重Checkout: Checkoutセッションを作る前に `stripe_subscriptions` へ「決済手続き中」行（`status = 'checkout_pending'`）をINSERTして処理権を確保し、`user_id` のUNIQUE制約で排他する（`stripe_events` のclaim/releaseと同じパターン。詳細は[データベース設計書](./database.md)3.9）。決済完了までミラー行が存在しない時間帯を突く並行リクエストも、片方だけがCheckoutセッションを作成できる。Checkout作成に失敗した場合は処理権を解放する
+- Stripe Customerの一意性: Customerはユーザーごとに1つだけ確保して保存し、以後は必ず再利用する。Checkoutごとに新規作成されると、ミラー行に載らないCustomerの契約が生まれ `/api/stripe/portal` から解約できなくなるため。作成にはユーザー単位で固定したidempotency keyを用い、保存前にリトライが起きても同じCustomerが返るようにする
+- 手続き中に離脱した場合: `checkout_pending` の行は残るが「契約中」とは扱わない（`/upgrade` の契約中表示・管理画面の契約中バッジ・Portalの404判定はいずれも `NON_CURRENT_SUBSCRIPTION_STATUSES` で除外する）。同じユーザーが再度アップグレードを押した場合は、claimが保持するセッション（`checkout_session_id`）の状態で分岐する。`open` なら同じURLへ案内（2つ目のセッションを作らずに再開でき、TTLを待たされない）、`expired` なら処理権を奪って新しいセッションを作成、`complete`（決済済みで反映待ち）なら409。セッションを特定できない場合のみTTL（`CHECKOUT_CLAIM_TTL_MS`）の経過を待つ
+- 進行中のCheckoutと古い成功ページURLのリプレイ: 有効なclaimが**別の**セッションを保持している場合、`activateUserFromCheckoutSession()` はミラー更新も処理権の解除も行わない。これを行うと、まだ決済可能なセッションを残したまま次のCheckoutを作れてしまう。加えて、確認から書き込みまでの間に処理権が動いた場合に備え、書き込みは「確認した時点の所有状態」を条件にした条件付きUPDATE（CAS）で行い、0行更新なら読み直して判断からやり直す
+- Checkout作成が失敗したか判別できない場合: Stripeが4xxで拒否したときのみ「セッションは作られていない」と確定できるため処理権を解放する。通信タイムアウト・5xxでは解放せず、次回のclaim時にCustomerへ紐づく有効なセッションを照会して再利用するか、TTLの経過に委ねる（未記録の有効なセッションの上に2件目を作らないため）
 - Checkout手続き中に管理者が手動承認した場合: 決済完了時点で一般有料会員として上書きされる（許容）。降格側は `membership_type=general` ガードで巻き込みを防止する
 - Checkout手続き中に管理者が却下した場合: 決済完了時点でユーザーが `rejected` であれば昇格しない（却下判断を決済完了で上書きしない）
 - Webhookイベントの順序逆転・再送・同一event.idの並行配信: `stripe_events` へのINSERTをclaimとして使う原子的な排他制御と、Stripe APIから再取得したライブ状態のみを書き込むハンドラ設計で吸収する（イベントに埋め込まれたスナップショットは信用しない）
 - claim後にサーバーレス関数がタイムアウト・強制終了しrelease処理へ到達できない場合: claimしたまま10分（`EVENT_CLAIM_TTL_MINUTES`）が経過すると再claim可能になる（ハンドラは冪等なため、まれに完了済みイベントを再実行しても実害は小さい）
-- Stripe契約状況の取得エラー（`/upgrade`・`/admin/users`）: 「契約なし」に誤ってフォールバックせず、専用のエラーメッセージを表示する（フェイルクローズ）。特に管理画面での却下操作は、契約状況を判定できない場合も却下確認ダイアログに警告を表示する（却下操作自体は禁止せず、警告表示に留める意図的な判断。#95での会員種別変更UI検討時に再考の余地あり）
+- Stripe契約状況の取得エラー（`/upgrade`・`/admin/users`）: 「契約なし」に誤ってフォールバックせず、専用のエラーメッセージを表示する（フェイルクローズ）。特に管理画面での却下操作は、契約状況を判定できない場合も却下確認ダイアログに警告を表示する（却下操作自体は禁止せず、警告表示に留める意図的な判断）。会員種別変更（2.7節）は却下と異なり操作自体を無効化するフェイルクローズとする
 
 **スコープ外**: プランカタログ・複数通貨・クーポン・領収書カスタマイズ・却下時のサブスク自動キャンセル連携・年額プラン・プラン変更時のアンカー再設定・既存契約者へのアンカー移行（`billing_cycle_anchor_config` はサブスク作成時にのみ適用されるため、決済日固定の導入は本番での実課金開始前に行うことが前提）。
+
+### 2.12 admin / maintainer による未公開コンテンツのプレビュー
+
+`is_published = false`（下書き）のテーマ・フェーズ・週・コンテンツを、admin / maintainer ロールに限り通常の学習画面（`/learn/...`）でそのまま閲覧できる（issue #68）。公開前のコンテンツを確認するためだけに一度公開する、という運用を避けるための機能で、専用のプレビュー用ルートは設けない。
+
+**権限判定**: `app/services/auth/permissions.ts` の `checkContentPermissions()` を用いる（admin / maintainer が true）。ページコンポーネント側ではロール分岐を行わず、`learning-server.ts` の各取得関数に `getServerAuth()` の `userRole` を渡すことで、取得関数の内部だけで判定する。
+
+**RLS**: `20260715233228_consolidate_rls_policies.sql` で、`learning_themes` / `learning_phases` / `learning_weeks` / `learning_contents` の SELECT ポリシーはいずれも `(is_published = true AND is_deleted = false) OR (select get_user_role()) IN ('admin', 'maintainer')` であり、admin / maintainer への未公開行の許可は本機能追加前から既に成立している。今回変更したのはアプリ層（`learning-server.ts` が独自に課していた `is_published = true` の絞り込み）のみ。
+
+**アプリ層の変更**: `fetchPublishedThemes` / `fetchThemeById` / `fetchPhasesByThemeId` / `fetchPhaseById` / `fetchWeekById` / `fetchContentById` / `fetchWeeksWithContentsByPhaseId` / `fetchThemeNavigationIndex` はいずれも `userRole` 引数（既定 `null`）を取り、`checkContentPermissions(userRole)` が true の場合のみ `is_published` の絞り込みを外す（`is_deleted = false` は常に維持）。`fetchThemeNavigationIndex` は週と埋め込みフェーズの双方に `is_published` 絞り込みを課す（`!inner` 結合のため未公開フェーズ配下の週はナビに現れない）。member / お試しユーザーの取得結果・RLSの適用範囲は変更しない。
+
+**ロック表示用サマリー（2.6節）との関係**: 受講生向けのロック表示・存在チェックに使う service_role 経路（`fetchContentVisibilitySummariesByWeekIds()`）は変更しない（`is_published = true AND is_deleted = false` の絞り込みを維持）。admin / maintainer 向けには、通常クライアント（RLS適用）で未公開分も取得する別関数 `fetchContentSummariesByWeekIdsForManager()` を新設し、ロールに応じてどちらを呼ぶかを `fetchContentSummariesByWeekIds(weekIds, userRole)` が振り分ける。service_role を使ってよい箇所は2.6節の2箇所のまま増えない。
+
+**未公開バッジ**: プレビュー中であることを明示するため、`is_published = false` の階層・コンテンツには「非公開」バッジ（`app/components/UnpublishedBadge.tsx`。`isPublished` propを受け取り自身で表示要否を判定する。`/manage` 配下の既存バッジと文言・見た目を統一）を一覧・詳細の両方に表示する。バッジの表示可否はデータ（各行の `is_published`）で判定し、ロール分岐はコンポーネント側に書かない。コンテンツ詳細ページのみ、コンテンツ行自体は公開済みでも所属する週・フェーズ・テーマのいずれかが未公開・論理削除済みならプレビュー扱いとする必要があるため、`isContentFullyPublished()`（`learning-server.ts`）で全階層の `is_published`/`is_deleted` を判定してからバッジ・完了ボタン・提出フォームの表示可否を決める（`fetchContentById()` の select は親階層に `is_deleted` フィルタを課していないため、これを省くと論理削除済みの親を持つコンテンツでUIとAPI（`isContentVisible()`）の可否表示が食い違う）。
+
+**未公開コンテンツでの操作制限**: 進捗登録・課題提出・AIレビューはプレビュー中であっても許可しない。UI側は `isContentFullyPublished()` が false の間、完了ボタン・提出フォームを表示しない。API側は `isContentVisible()`（4.1節・5.1節参照）がコンテンツ自身に加えて週・フェーズ・テーマの全階層について `is_published = true AND is_deleted = false` を明示的に判定することで、admin / maintainer が直接APIを叩いた場合も含めて一律403にする（ロールに関わらないフェイルクローズ）。`learning_contents` の SELECT RLS は admin / maintainer に無条件で許可されるため、コンテンツ行の `is_published` だけを見ると、論理削除済みのコンテンツや未公開階層配下の（誤って公開フラグが立った）コンテンツへの操作が通ってしまう点に注意する。
+
+**進捗率の分母**: コースツリー（フェーズページ）の進捗分母・分子は、ロック済み（お試し非公開）に加えて、コンテンツ・週・フェーズ・テーマのいずれかが未公開のものも除外する。admin / maintainer のプレビュー中は完了不能な下書きコンテンツ（公開済みでも未公開の週配下にあるコンテンツを含む）が含まれるため、分母に含めると進捗率がずれる。
 
 ---
 
@@ -349,16 +396,37 @@ Stripe APIからのライブ状態取得は、ミラー更新の直前（上記�
 - フェーズ内の公開週一覧 / 週詳細（フェーズ・テーマ情報付き）
 - 週内の公開コンテンツ一覧 / コンテンツ詳細（週・フェーズ・テーマ情報付き）
 
-お試しユーザー（`status = 'pending'`）の場合、コンテンツ（`learning_contents`）はRLSにより `is_open_to_trial = true` の行のみが返る。ロック表示に必要なサマリー・存在チェックのみ service_role クライアントで別途取得する（2.6参照）。
+お試しユーザー（`status = 'trial'`）の場合、コンテンツ（`learning_contents`）はRLSにより `is_open_to_trial = true` の行のみが返る。ロック表示に必要なサマリー・存在チェックのみ service_role クライアントで別途取得する（2.6参照）。
+
+admin / maintainer ロールの場合、上記の `is_published = true` 絞り込みをアプリ層で外し、未公開のテーマ・フェーズ・週・コンテンツもプレビューとして取得する（2.12参照）。
 
 ### 3.2 コンテンツ種別ごとの表示
 
 | 種別 | 表示方法 |
 |:--|:--|
-| 動画（video） | YouTube動画の埋め込み表示（URLからVideo IDを自動抽出、レスポンシブ対応） |
-| テキスト（text） | Markdown形式で記述・表示（GFM対応）。DOMPurifyによるXSSサニタイズ |
-| スライド（slide） | Supabase StorageのPDF URLを react-pdf でブラウザ内表示 |
+| 動画（video） | YouTube facade（サムネイル + 再生ボタン）。クリック前はブラウザが `i.ytimg.com` の hqdefault を直接取得し、クリック後に `react-youtube` を遅延読み込みして autoplay 再生（URLから Video ID を自動抽出、レスポンシブ対応） |
+| テキスト（text） | Markdown形式で記述・表示（GFM対応） |
+| スライド（slide） | 非公開バケット `slides` のPDFを、閲覧権限チェック後にサーバー側で発行した署名付きURLで react-pdf によりブラウザ内表示（後述） |
 | 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携 |
+
+動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア上部に概要欄カードを表示する。未入力（NULL）の既存コンテンツでは概要欄自体を表示しない。表示にはテキスト・演習と同じ `MarkdownRenderer` を用いる。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）は `"use client"` を持たない共有コンポーネント（hooksやNode専用APIを使わないため）。Server Component（learn/demoの`page.tsx`）からはサーバーで、Client Component（`AIReviewDisplay`、AIレビュー結果表示用）からはクライアントバンドルに含まれてクライアントで、同じ実装のまま描画される。`AIReviewDisplay` 自体は `AIReviewDisplayNoSSR`（`next/dynamic`・`ssr: false`）経由でレビュー表示時のみ遅延読み込みし、コンテンツ本文の Markdown 描画経路（Server Component）は client 化しない。
+
+**YouTube facade（#198）**: `YouTubeEmbed` は初期表示でサムネイル（`https://i.ytimg.com/vi/{id}/hqdefault.jpg`）と再生ボタンのみを描画する。hqdefault は最適化の恩恵がほぼ無いため `next/image` Optimizer は使わず `<img>` で `i.ytimg.com` を直接参照する（クリック前に `youtube.com` へは通信しない）。クリック後に `YouTubePlayer`（`react-youtube`）を `next/dynamic` で読み込み、`autoplay: 1` で再生を開始する（チャンク読み込み中は黒背景 + スピナーを表示）。なお iOS Safari では gesture 後に生成した cross-origin iframe の音声付き autoplay が拒否され、再生ボタンへの追加タップが必要になる場合がある（facade 化の既知の制約）。
+
+**スライドPDFの配信（署名付きURL、#89）**
+
+`slides` バケットは非公開（`public = false`）で、`learning_contents.pdf_url` にはオブジェクトキー（例: `gas/slide-01.pdf`）のみを保存する。配信の流れは次のとおり。
+
+1. コンテンツ詳細ページ（`app/(authenticated)/learn/.../[contentId]/page.tsx`）は、`isContentLockedForUser()` によるロック判定と、RLS適用の `fetchContentById()` によるコンテンツ行の取得を通過した後に、`createSlideSignedUrl()`（`app/services/api/slides-server.ts`）で署名付きURLを発行し `PdfSlideViewer` へ渡す。ロック済み・未公開（admin / maintainer のプレビューを除く）・存在しないコンテンツではURL自体を発行しない
+2. 署名は**通常クライアント（ログインユーザーの権限・RLS適用）**で行い、service_role は使わない。`storage.objects` の SELECT ポリシーは「`pdf_url` がそのオブジェクトキーと一致する `learning_contents` の行が、呼び出しユーザーの RLS 下で見える」場合にのみ許可する（データベース設計書 6.8）。そのため、お試しユーザーがロック済みスライドのキーを推測しても、アプリ経由でも Storage API の直叩きでも署名は発行されない。admin / maintainer はロールで無条件に許可される
+3. 有効期限は `SLIDE_SIGNED_URL_EXPIRES_IN_SECONDS`（`app/constants/storage.ts`、1時間）。ページ描画時に発行し、期限切れ後はリロードで再発行される。pdf.js は表示直後に残りのチャンクを裏で取得し切るため、閲覧中に期限が切れてもページ送りは失敗しない
+4. 発行に失敗した場合（Storage障害・キーとして解釈できない値）は `SlideContent`（`app/components/SlideContent.tsx`）が「現在表示できない」旨の中立なメッセージを表示し、ページ全体は落とさない（原因が一時障害か不正な保存値かを利用者側で区別できないため、再読み込みを促す文言にはしない）
+
+未認証のデモ画面（`/demo`）にはユーザー権限のクライアントが無いため、`createDemoSlideSignedUrl()`（`demo-learning-server.ts`）が他のデモ取得関数と同じく service_role で署名する。対象は**公開済み・未削除かつ `is_open_to_trial = true` のスライドのみ**（お試しユーザーと同じ範囲を未認証に見せる）で、この条件は呼び出し側ではなく同関数自身がコンテンツ行を受け取って判定する（満たさなければ Storage を呼ばず null）。それ以外のスライドはお試し公開の対象外である旨を表示する。
+
+**既知の制約**: Storage の SELECT ポリシーは `learning_contents` の RLS の見え方を継承するため、2.12節と同様に「コンテンツ行は公開済みだが所属する週・フェーズ・テーマが未公開」のスライドは、member が Storage API を直接叩けば署名できる（画面からは親階層の判定で404になるため導線は無い。データベース設計書 6.8）。
+
+`pdf_url` の旧形式（公開URLの完全URL・相対パス）はマイグレーション `20260908000000_secure_slides_bucket.sql` でキーへ一括正規化済み。アプリ側の `toSlideObjectKey()`（`app/lib/slide-object-key.ts`）も同じ規則で正規化するため、管理画面の編集フォームやコンテンツ管理APIに旧形式が流れてきてもキーとして保存される。外部URLなどキーとして解釈できない値はAPIで400として拒否する。
 
 ### 3.3 画面遷移
 
@@ -367,9 +435,26 @@ flowchart TD
     A["/learn（Theme一覧）"] --> B["/learn/[themeId]（Phase一覧）"]
     B --> C["/learn/[themeId]/[phaseId]（Week・コンテンツ一覧）"]
     C --> D["/learn/[themeId]/[phaseId]/[weekId]/[contentId]（コンテンツ詳細）"]
+    D -- 前後ナビ（テーマ内通し） --> D
 ```
 
 各階層でパンくずリストを表示し、上位階層への導線を提供する。
+
+#### 前後ナビゲーション
+
+コンテンツ詳細ページ（`/learn/[themeId]/[phaseId]/[weekId]/[contentId]`）の「次へ」「前へ」は、**同じテーマ内を通し**で遷移する。週末尾の次は次の週の先頭、フェーズ末尾の次は次フェーズの先頭。**テーマはまたがない。** `/demo` は対象外。
+
+| 項目 | 仕様 |
+|:--|:--|
+| 末尾 | 通し列上のテーマ末尾では「テーマに戻る」（`/learn/[themeId]`）。ナビ縮退時（通し列が空、または現在のコンテンツが通し列に無い。未公開フェーズ配下の公開週など）は従来どおり「フェーズに戻る」（`/learn/[themeId]/[phaseId]`）に倒し、現在の週のサマリーだけで前後を出す |
+| 先頭 | テーマ先頭では「前へ」を出さない（「次へ」を右端に保つための空スペーサのみ） |
+| 並び順 | フェーズ→週→コンテンツの `display_order` 昇順。同値は `id` でタイブレーク。空の週・空のフェーズは通し列に寄与せず自動スキップ |
+| ロック済み | お試し非公開コンテンツも遷移先に含める（スキップしない）。ロック画面にも前後ナビを出す |
+| 境界の併記 | 週・フェーズをまたぐときだけボタン内に「次の週: 〇〇」「次のフェーズ: 〇〇」を併記。同一週内はコンテンツ名のみ |
+| データ取得 | `fetchThemeNavigationIndex()` が通常クライアントでテーマ配下の週＋フェーズを取得し、既存の `fetchContentSummariesByWeekIds()` を1回呼ぶ。**service_role の呼び出し箇所は増えない**（受講生向けは従来どおり同じ1経路。現行カタログでは1リクエスト）。コンテンツサマリーは PostgREST の1リクエスト上限（既定1000行）を range ページングで越え、テーマ全体の `display_order` 切り詰めで現在の週が欠落しないようにする |
+| 404判定 | 従来どおり `fetchWeekById()` と現在の週のサマリーのみで行う。通し列は加算的な情報として扱い、通し列に現在のコンテンツが無くても404にはしない。サマリー側をページングしないと、1000行上限の切り詰めで現在の週が落ちて誤404になる |
+
+リンクURLは現在URLの流用ではなく、遷移先コンテンツ自身の `phaseId` / `weekId` から組み立てる。
 
 ---
 
@@ -383,22 +468,22 @@ flowchart TD
 ```json
 {
   "contentId": 1,
-  "userId": 1,
   "isCompleted": true
 }
 ```
 
+ユーザーIDはボディで受け取らず、`getServerAuth()` が返す認証ユーザーのIDのみを使用する（クライアント由来の値で認可判定しない）。
+
 **処理フロー**:
-1. リクエストボディのバリデーション（`contentId`, `userId` は必須）
+1. リクエストボディのバリデーション（`contentId` は正の整数、`isCompleted` は boolean で必須）
 2. `getServerAuth()` による認証チェック（ステータス取得を含む）
-3. ユーザーID検証（認証ユーザーと一致するか）
-4. ステータスに基づく認可: `rejected` は403
-5. コンテンツ可視性チェック: **ステータスを問わず、対象 `contentId` が自分に可視でなければ403**（後述）
-6. `user_progress` テーブルへの upsert
+3. ステータスに基づく認可: `rejected` は403
+4. コンテンツ可視性チェック: **ステータスを問わず、対象 `contentId` が自分に可視でなければ403**（後述）
+5. `user_progress` テーブルへの upsert
    - 完了時: `completed_at` に現在日時を設定
    - 未完了時: `completed_at` を null に設定
 
-**可視性チェックの実装方法**: 通常クライアント（`authenticated`）で対象 `contentId` を SELECT し、0行なら403とする。`learning_contents` のRLSがステータスを織り込むため（データベース設計書の6.1参照）、アプリ層でステータス別の分岐を書く必要はない。この方式は「存在しない contentId」「未公開コンテンツ」も同時に弾ける。
+**可視性チェックの実装方法**: 通常クライアント（`authenticated`）で対象 `contentId` を、コンテンツ自身と週・フェーズ・テーマの全階層について `is_published = true AND is_deleted = false` 付きで SELECT し、0行なら403とする。`learning_contents` のRLSがステータスを織り込むため（データベース設計書の6.1参照）、アプリ層でステータス別の分岐を書く必要はない。`is_published` / `is_deleted` の絞り込みのみアプリ層で明示する（RLSは admin / maintainer に無条件で SELECT を許可しているため、それだけでは論理削除済みや未公開階層配下のコンテンツへの進捗登録・提出・AIレビューまで通ってしまう。2.12節のプレビュー機能でも、これらの操作は許可しない）。この方式は「存在しない contentId」「未公開コンテンツ」「お試し非公開コンテンツ」「論理削除済みコンテンツ」のいずれも同時に弾ける。
 
 **`active` ユーザーへの影響**: RLSに可視コンテンツ限定のEXISTS条件を追加した結果、`active` ユーザーも不可視コンテンツ（未公開・存在しないID）へは書き込めなくなる。従来は未公開コンテンツへの書き込みが素通りし、存在しないIDはFK違反で500になっていたが、いずれも403に統一される。
 
@@ -411,7 +496,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 | 200 | 正常（完了状態を返却） |
 | 400 | バリデーションエラー |
 | 401 | 未認証 |
-| 403 | ユーザーID不一致 / `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
+| 403 | `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
 | 500 | サーバーエラー |
 
 ### 4.2 進捗集計
@@ -441,23 +526,25 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 ```json
 {
   "contentId": 1,
-  "userId": 1,
   "submissionType": "code",
-  "codeContent": "function myFunction() { ... }",
+  "codeFiles": [{ "filename": "main.js", "language": "javascript", "content": "function myFunction() { ... }" }],
   "url": null
 }
 ```
 
+`codeFiles` は複数ファイル提出用の配列。単一ファイルの後方互換として `codeContent`（文字列）も受け付けるが、`codeFiles` が優先される（データモデルの `code_content` / `code_files` の使い分けはデータベース設計書を参照）。
+
+ユーザーIDはボディで受け取らず、`getServerAuth()` が返す認証ユーザーのIDのみを使用する（4.1と同じ）。
+
 **処理フロー**:
 1. リクエストボディのバリデーション
-   - `contentId`, `userId`, `submissionType` は必須
-   - `code` タイプ: `codeContent` は必須
+   - `contentId` は正の整数、`submissionType` は必須
+   - `code` タイプ: `codeFiles`（複数ファイル・単一ファイルとも可）または後方互換の `codeContent` のいずれかが必須
    - `url` タイプ: `url` は必須
 2. `getServerAuth()` による認証チェック（ステータス取得を含む）
-3. ユーザーID検証（認証ユーザーと一致するか）
-4. ステータスに基づく認可: `rejected` は403
-5. コンテンツ可視性チェック: ステータスを問わず、対象 `contentId` が自分に可視でなければ403（判定方法は4.1と同じ）
-6. `submissions` テーブルへの INSERT
+3. ステータスに基づく認可: `rejected` は403
+4. コンテンツ可視性チェック: ステータスを問わず、対象 `contentId` が自分に可視でなければ403（判定方法は4.1と同じ）
+5. `submissions` テーブルへの INSERT
 
 ### 5.3 提出方法のコンテンツ別制御
 
@@ -479,15 +566,32 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 
 | 値 | 言語 | 用途例 |
 |:--|:--|:--|
-| `'javascript'` | JavaScript / GAS | GAS課題（デフォルト） |
+| `'javascript'` | JavaScript（デフォルト） | JavaScript課題 |
 | `'typescript'` | TypeScript | TypeScript課題 |
+| `'gas'` | GAS（Google Apps Script） | GAS課題 |
 | `'html'` | HTML | フロントエンド課題 |
 | `'css'` | CSS | スタイリング課題 |
 
 **エディタ機能**:
 - シンタックスハイライト
 - 自動インデント・ブラケット補完
-- ライト / ダークモード対応（OSテーマ連動）
+- ライト / ダークモード対応（`layout.tsx` が起動時に1回付与する `dark` クラス連動。`useSyncExternalStore` で初期値を取得し、マウント直後のライト→ダークちらつきを防ぐ。表示中の OS テーマ切替には追従せず再読み込みで反映——Tailwind の `dark:` と同じ）
+
+CodeMirror本体は数百KB規模のため、`next/dynamic`（`ssr: false`）で遅延読み込みする（`app/components/CodeEditorNoSSR.tsx`、`PdfSlideViewerNoSSR` と同方式）。読み込み中はプレースホルダーを表示する。`PdfSlideViewerNoSSR` も同様に `loading:` プレースホルダ（ビューアの `isLoading` と同じ高さ）を表示する。
+
+AIレビュー結果表示（`AIReviewDisplay`）は Markdown + ハイライタを含むため、`AIReviewDisplayNoSSR` で遅延読み込みし、レビューが無いコンテンツ詳細では First Load JS に含めない。
+
+#### 5.4.6 クライアント読み込み方針
+
+重いクライアント依存はページ初期 JS から切り離す。
+
+| 対象 | 方式 | 備考 |
+|:--|:--|:--|
+| CodeMirror | `CodeEditorNoSSR`（`ssr: false` + loading） | 演習フォームのみ |
+| pdf.js / react-pdf | `PdfSlideViewerNoSSR`（`ssr: false` + loading） | スライドのみ |
+| AIレビュー（Markdown + lowlight） | `AIReviewDisplayNoSSR`（`ssr: false`） | レビュー／ローディング時のみマウント。本文 Markdown の RSC 経路は維持 |
+| react-youtube | facade + `YouTubePlayer` の dynamic | クリック前は youtube.com 非通信。サムネイルは `<img>` で `i.ytimg.com` を直接参照 |
+| radix-ui | `experimental.optimizePackageImports` | バレル import の tree-shake（`lucide-react` は Next.js 既定リストに含まれるため明示指定しない） |
 
 **レスポンス**:
 
@@ -496,7 +600,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 | 200 | 正常（提出データを返却） |
 | 400 | バリデーションエラー |
 | 401 | 未認証 |
-| 403 | ユーザーID不一致 / `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
+| 403 | `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
 | 500 | サーバーエラー |
 
 ### 5.5 ヒント表示
@@ -511,8 +615,8 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 
 ### 5.6 提出履歴
 
-- **受講生**: 自分の提出履歴を提出日時の降順で取得（コンテンツ情報付き）
-- **管理者**: 全受講生の提出一覧を提出日時の降順で取得（ユーザー・コンテンツ情報付き）
+- **受講生**: 自分の提出履歴を提出日時の降順でページネーション付き取得（`SUBMISSIONS_PAGE_SIZE`、content は id/title、ai_reviews は一覧表示用カラムのみ）
+- **管理者**: 全受講生の提出一覧を提出日時の降順でページネーション付き取得（ユーザー・コンテンツ情報付き。件数定数は受講生側と共有）
 
 ---
 
@@ -528,6 +632,16 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 
 **お試し公開の設定**: コンテンツ作成・編集フォーム（`/manage/contents`）にチェックボックス「お試しユーザーにも公開する」を設け、`is_open_to_trial` を設定する。デフォルトは未チェック（`false`）で、種別を問わず全コンテンツで設定可能（2.6参照）。
 
+**概要欄の設定**: コンテンツ種別が動画・スライドの場合のみ、コンテンツ作成・編集フォームに概要入力欄（Markdown・任意）を表示し、`description` として保存する（`exercise_instructions` / `hint` と同じ、未入力なら `null` で保存するパターン）。テキスト・演習では表示せず、`description` は常に `null` として送信する。
+
+**所属週の選択（テーマ→フェーズ→週の連動セレクト）**: コンテンツ作成・編集フォーム（`/manage/contents/new`・`/manage/contents/[id]/edit`）の所属週選択は、コンテンツ一覧（`/manage/contents`）のテーマ→フェーズ→週の階層フィルタ（`ContentsFilterBar`）と同じ導出ロジック・絞り込み操作感の3段セレクトにする。親（テーマ→フェーズ）を変更すると子の選択はリセットされ、選択肢は親配下のみに絞られる。必須は週セレクトのみで、テーマ・フェーズは絞り込み用のため未選択のまま週を直接選択できる（後方互換）。編集画面では所属週から所属フェーズ・テーマを逆引きして初期選択する。送信するリクエストボディは従来どおり `week_id` のみで、API・DBに変更はない。一覧のテーマ/フェーズ/週フィルタが指定された状態で「新規作成」を押すと、同じ条件を新規作成フォームの初期選択に引き継ぐ。`/manage/weeks` 一覧はテーマ→フェーズ→週の階層順ソート（`sortWeeksByHierarchy`）をフェーズ単位でグルーピングして表示し、`/manage/phases` 一覧はテーマ→フェーズの階層順ソート（`sortPhasesByHierarchy`）をテーマ単位でグルーピングして表示する（`/manage/contents` の週単位グルーピングと同じ形式。グループヘッダに「テーマ名 › フェーズ名」または「テーマ名」と件数を表示し、親階層未設定の週・フェーズは末尾の「未分類」グループにまとめる）。
+
+**新規作成・編集フォームの挿入位置指定（`SiblingOrderField`、issue #188 / #189）**: テーマ・フェーズ・週・コンテンツの新規作成・編集フォームは、`display_order` の数値直接入力を廃止し、共通コンポーネント `SiblingOrderField`（`app/(authenticated)/manage/components/`）による挿入位置セレクトに置き換える。親（テーマ・フェーズ・週）を選択すると、その配下の既存要素（非公開を含み、論理削除済みは除く。編集時は編集対象自身も除く）を現在の並び順で読み取り専用リスト表示し、選択した挿入位置にプレースホルダー行を表示する（新規作成は「ここに追加」、編集は「ここに移動」）。テーマは親を持たないため常に全テーマを一覧表示する。並び順は `content-grouping.ts` の階層順ソートと同じ比較関数（`compareGroupLevel`：`display_order` 昇順・同値は `id` でタイブレーク）を用い、二重実装しない。
+
+新規作成の既定の挿入位置は末尾（既存要素が無い場合は先頭のみ）で、親を選び直すと末尾へリセットする。編集フォームの既定値は、親を変更していない場合は**現在位置**（直前の兄弟要素の直後。先頭なら「先頭」）、親を変更した場合は新規作成と同じ**末尾**にリセットする（テーマは親を持たないため親変更の分岐は無い）。`ContentForm` の編集で、週セレクトの選択肢に無い週ID（未分類・削除済み等）が `week_id` に設定されている場合は、その週IDのまま兄弟候補を絞り込むため、同じ週に属する他の未削除コンテンツがあればそのまま兄弟一覧・現在位置に反映される（週を選び直せば選択肢にある週の兄弟一覧に切り替わる）。
+
+API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）は `display_order` の代わりに `insert_after_id: number | null`（`null` = 先頭、数値 = その兄弟要素IDの直後）を受け取る。`POST` は必須、`PUT` は任意項目で、**省略した場合は表示順を変更しない**（親を変更しない更新なら現状維持、親を変更する更新なら移動先の末尾に付ける）。サーバー側（`createTheme` / `createPhase` / `createWeek` / `createContent` および `updateTheme` / `updatePhase` / `updateWeek` / `updateContent`。`app/services/api/admin-server.ts`）は、`insert_after_id` が同じ親配下・未削除の兄弟要素として存在することを検証し（別の親・削除済み・存在しないID、編集時は自分自身も含めていずれも `InvalidInsertAfterIdError` を投げ、APIルートが400へ変換する）、対象範囲の兄弟を現在の並び順で取得して1からの連番に再採番してから新要素をINSERT、または対象行をUPDATEする（`display_order` が変わる行のみUPDATEし、既存の重複値も解消される）。編集で親（テーマ・フェーズ・週）を変更した場合は、移動先だけでなく移動元に残った兄弟の欠番も1からの連番に詰め直す（`resolveSiblingRenumber`）。再採番のロジック自体（`resolveSiblingResequence` / `resolveSiblingRenumber`）は `content-grouping.ts` の純粋関数で、新規作成・編集の両方から共用する。Supabase JSがトランザクションを持たないため再採番と本体のINSERT/UPDATEはアトミックではないが、途中失敗しても番号の欠番・重複が残るだけでデータは失われない。
+
 ### 6.1.1 PDFアップロード API
 
 **エンドポイント**: `POST /api/upload-pdf`
@@ -540,9 +654,9 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 |:--|:--|:--|
 | `file` | ○ | アップロードする PDF ファイル |
 | `folder` | - | 保存先フォルダ（コーススラッグ。例: `gas-advanced`）。英小文字・数字・ハイフンのみ |
-| `slideNumber` | - | スライド番号（1以上の整数）。`folder` 指定時のみ有効 |
+| `slideNumber` | - | スライド番号。`folder` 指定時のみ有効。**文字列全体が半角数字のみ**で1以上の安全な整数（`Number.isSafeInteger()`）である場合のみ受理し、それ以外（`1abc` / `1.5` / `+1` / `1e2` / 全角数字 / 前後に空白を含む値 / 空文字 / 桁あふれ）は400（`folder` と異なり空白の除去は行わない）。**フィールド自体を送らなかった場合のみ**「指定なし」として自動採番へ回る。解釈は `parsePositiveInteger()`（`app/lib/positive-integer.ts`）に集約する |
 
-**命名規約**: スライドは `slides` バケット内にオブジェクトキー `<コーススラッグ>/slide-NN.pdf` で保存する（NN は最低2桁のゼロ埋め。1〜99は `01`〜`99`、100以上は `100` のように桁が増える）。例: キー `gas/slide-01.pdf`・`gas-advanced/slide-03.pdf` → 公開URL `.../storage/v1/object/public/slides/gas/slide-01.pdf`。
+**命名規約**: スライドは `slides` バケット（非公開）内にオブジェクトキー `<コーススラッグ>/slide-NN.pdf` で保存する（NN は最低2桁のゼロ埋め。1〜99は `01`〜`99`、100以上は `100` のように桁が増える）。例: `gas/slide-01.pdf`・`gas-advanced/slide-03.pdf`。`learning_contents.pdf_url` にはこのキーをそのまま保存し、配信URLは閲覧時に署名して発行する（3.2節）。
 
 **処理フロー**:
 1. 認証チェック
@@ -550,25 +664,31 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 3. 保存先オブジェクトキーの決定
    - `folder` 指定あり: `<folder>/slide-NN.pdf`
      - `slideNumber` 指定あり → その番号で保存（同名ファイルは上書き）
-     - `slideNumber` 指定なし → 同フォルダ内の既存 `slide-NN.pdf` を走査し、最大値+1 で自動採番（走査失敗時は500）
+     - `slideNumber` 指定なし → 同フォルダ内の既存 `slide-NN.pdf` を走査し、最大値+1 で自動採番（走査失敗時は500）。番号部分の解釈は指定時と同じ基準のため、安全な整数として読めないファイル名は採番の基準から除外する。採番結果自体が安全な整数を超える場合は、同じ番号を採番し続けて永久に409になるのを避けるため400を返す（番号を明示指定すれば回避できる）
    - `folder` 指定なし: 後方互換のため `<timestamp>_<sanitizedName>` でバケット直下に保存
 4. Supabase Storage の `slides` バケットにアップロード
-5. 公開 URL と保存パスを返却
+5. アップロード結果の検証（`upload()` の戻り値が存在し、`fullPath` が `slides/<保存先キー>` と一致すること）。`data.path` は storage-js が引数のパスから組み立てて返すだけなので検証に使わず、サーバー応答由来の `fullPath` を用いる
+6. 実体の存在確認（`exists(<保存先キー>)` による対象キーへのHEAD。完全一致で、件数上限による取りこぼしが無い）
+   - 5・6 のいずれかを満たせない場合は500を返し、**保存用のキーを成功として返さない**（実体の無い `pdf_url` がコンテンツに保存されるのを防ぐ）
+   - 確認に失敗してもアップロード済みオブジェクトは削除しない（一時的な通信エラーで正常なファイルを消さないため）。この場合、番号未指定で再アップロードすると残ったファイルの次の番号が採番されるため、409にはならず**どこからも参照されない孤児ファイルと欠番**が残る。どのキーを消費したかを利用者へ伝えるため、500のレスポンスには `path` を含める
+7. 保存先のオブジェクトキーを返却する。配信URL（公開URL・署名付きURL）はアップロードAPIでは発行しない（閲覧時にサーバー側で署名する。3.2節）
 
 **レスポンス**:
 
 | ステータス | 条件 |
 |:--|:--|
-| 200 | 正常（`{ url: string, path: string }` を返却） |
-| 400 | ファイルなし / サイズ超過 / PDF以外 / フォルダ名不正 / 番号不正 |
+| 200 | 正常（`{ path: string }` を返却。`path` は `learning_contents.pdf_url` にそのまま保存するオブジェクトキー） |
+| 400 | ファイルなし / サイズ超過 / PDF以外 / フォルダ名不正 / 番号不正 / 自動採番の上限到達 |
 | 403 | 権限なし |
-| 500 | アップロード失敗（自動採番中の重複含む） / サーバーエラー |
+| 500 | アップロード失敗（自動採番中の重複含む） / アップロード後の存在確認に失敗 / サーバーエラー |
 
 ### 6.1.2 AIレビュー API
 
 **エンドポイント**: `POST /api/ai-review`
 
 **アクセス権限**: 認証済みユーザー（自分の提出のみ対象）
+
+**APIキーの振り分け**: `getServerAuth()` が返す `userStatus` によって使用するGemini APIキーを切り替える。`active`（コミュニティ会員・一般有料会員とも）は有料ティアの `GEMINI_API_KEY`、お試しユーザー（`trial`）は無料ティアの `GEMINI_API_KEY_TRIAL`（未設定時は `GEMINI_API_KEY` にフォールバック）を用いる。選択ロジックは `resolveGeminiApiKey()`（`app/services/api/gemini.ts`）に集約し、モデル名・上限値・環境変数名は `app/constants/gemini.ts` に定義する。キーはサーバー側でのみ扱い、レスポンス・ログへ出力しない。
 
 **リクエストボディ**:
 ```json
@@ -587,7 +707,7 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 | ステータス | 条件 |
 |:--|:--|
 | 200 | 正常（`{ review: AIReview }` を返却） |
-| 400 | submissionId 未指定 |
+| 400 | submissionId 未指定・不正（正の整数以外） |
 | 403 | 他人の提出 |
 | 404 | 提出データなし |
 | 500 | Gemini API エラー / サーバーエラー |
@@ -613,20 +733,31 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 
 `role` に指定可能な値: `member` / `maintainer` / `admin`
 
+**リクエストボディ（会員種別変更）**:
+```json
+{ "userId": 1, "action": "change_membership", "membershipType": "general" }
+```
+
+`membershipType` に指定可能な値は `approve` と同じく `MEMBERSHIP_TYPES`（`community` / `general`）から導出する。対象は `status=active` のユーザーのみ（`status` 自体は変更しない）。
+
 **制約**:
 - `admin` ロールのユーザーへのロール変更は不可（403）
-- `userId` と `action` は必須（省略時は 400）
+- `userId` と `action` は必須（省略時は 400）。`userId` は正の整数のみ許可する（文字列・0以下等は400。文字列を許すと後述のStripe契約中判定を型不一致ですり抜けうるため）
 - `approve` では `membershipType` が必須（未指定・不正値は 400）。承認と同時に `status=active` と `membership_type` を更新する
 - `reject` では `membership_type` を `NULL` に戻す
+- `change_membership` では `membershipType` が必須（未指定・不正値は 400）。対象が `active` 以外・存在しない・削除済みのいずれかで0行更新の場合は 409
+- **Stripe契約中ユーザーの制約（`approve` / `change_membership` 共通）**: 対象ユーザーが現在Stripeサブスク契約中の場合、`membershipType` に `general` 以外を指定すると409（`general` の指定は常に許可）。取得失敗時の扱いは非対称: `change_membership` はフェイルクローズで503を返すが、`approve` は主目的である承認フローを止めないため取得失敗時もブロックしない（2.7節参照）
 
 **レスポンス**:
 
 | ステータス | 条件 |
 |:--|:--|
 | 200 | 正常（`{ success: true, action }` を返却） |
-| 400 | バリデーションエラー |
+| 400 | バリデーションエラー（`userId` 不正含む） |
 | 403 | 管理者権限なし、または admin ユーザーへのロール変更 |
+| 409 | `approve` の重複承認、`change_membership` の対象不正、Stripe契約中ユーザーへの `general` 以外の指定 |
 | 500 | DB 更新失敗 / サーバーエラー |
+| 503 | `change_membership` でStripe契約状況を取得できない |
 
 ### 6.1.4 サムネイルアップロード API
 
@@ -700,7 +831,7 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 
 | パス | 画面名 | 表示内容 |
 |:--|:--|:--|
-| `/login` | ログイン画面 | サービス名、「Googleでログイン」ボタン、サービス説明。中央寄せレイアウト、ダークモード対応 |
+| `/login` | ログイン画面 | サービス名、「Googleでログイン」ボタン、サービス説明。`error=registration_failed` のときのみ登録失敗メッセージを表示（未知の `error` 値は何も出さない）。中央寄せレイアウト、ダークモード対応 |
 | `/rejected` | 却下画面 | 却下メッセージ、問い合わせ案内、ログアウトボタン |
 
 承認待ち専用画面（`/pending`）は設けない。お試しユーザーはダッシュボードを含む通常画面にアクセスでき、承認待ちであることはアプリ内バナーで通知する（2.6参照）。`/pending` へのアクセスは `/` にリダイレクトする。
@@ -713,7 +844,7 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 | `/learn` | Theme一覧 | 公開Themeのカード一覧（名前、説明、サムネイル） |
 | `/learn/[themeId]` | Phase一覧 | パンくずリスト、Phaseカード一覧（名前、説明） |
 | `/learn/[themeId]/[phaseId]` | Week・コンテンツ一覧 | パンくずリスト、Week一覧と各Week内のコンテンツリスト（タイトル、種別アイコン、完了チェック） |
-| `/learn/[themeId]/[phaseId]/[weekId]/[contentId]` | コンテンツ詳細 | パンくずリスト、コンテンツ本体、完了ボタン、提出フォーム（演習のみ）、前後ナビゲーション |
+| `/learn/[themeId]/[phaseId]/[weekId]/[contentId]` | コンテンツ詳細 | パンくずリスト、コンテンツ本体、完了ボタン、提出フォーム（演習のみ）、前後ナビゲーション（テーマ内を通しで遷移、3.3参照） |
 | `/submissions` | 提出履歴 | 提出一覧（提出日時、コンテンツ名、提出タイプ、内容プレビュー） |
 | `/upgrade` | アップグレード | ステータス別の出し分け（2.11参照）。サイドナビ「プラン・お支払い」から全認証ユーザーがアクセス可能 |
 | `/upgrade/success` | アップグレード完了 | Checkoutから戻った直後の決済確認・完了表示（2.11参照） |
@@ -744,8 +875,8 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 |:--|:--|
 | サイドナビゲーション | アプリ全体のナビゲーション。デスクトップは固定サイドバー、モバイルはドロワー。管理者メニューの動的表示。ログアウト機能 |
 | パンくずリスト | ページヘッダーと階層ナビゲーションの表示 |
-| Markdownレンダラー | Markdownの安全なレンダリング（DOMPurifyでサニタイズ → GFM対応Markdown変換 → Typographyスタイリング） |
-| YouTube埋め込み | YouTube URLからVideo IDを抽出して動画を埋め込み表示 |
+| Markdownレンダラー | Markdownの安全なレンダリング（GFM対応Markdown変換 → Typographyスタイリング。react-markdownは生HTMLタグを描画しないためXSSは発生しない） |
+| YouTube埋め込み | facade（サムネイル + 再生ボタン）。クリック後に react-youtube を遅延読み込みして再生 |
 | 完了ボタン | コンテンツ完了状態のトグル。進捗記録APIを呼び出し |
 | 提出フォーム | 課題提出フォーム。コンテンツの `allowed_submission_types` に応じてコード・URL・両方から選択して提出 |
 | AIレビューボタン | 提出後にAIレビューをリクエストし、結果を提出履歴画面に表示 |
@@ -759,11 +890,25 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 
 | エラー種別 | HTTPステータス | ハンドリング |
 |:--|:--|:--|
-| バリデーションエラー | 400 | リクエストボディの必須項目チェック |
+| バリデーションエラー | 400 | リクエストボディのスキーマ検証（後述） |
 | 認証エラー | 401 | Supabase Auth のセッション不在 |
-| 認可エラー | 403 | ユーザーID不一致（他人のデータ操作を防止） |
+| 認可エラー | 403 | `rejected` ユーザー / 対象データが自分に不可視・操作不可（ロール不足を含む） |
 | Supabase エラー | 500 | DB操作失敗（サーバーログに出力） |
 | 予期しないエラー | 500 | try-catch による一括ハンドリング |
+
+#### 8.1.1 リクエストボディのスキーマ検証
+
+JSONボディを受け取る API Route の入力検証は [zod](https://zod.dev/) に統一し、`app/services/api/schemas.ts` にRouteごとのスキーマを定義する。許可値（`content_type` / `membershipType` / `role` 等）はハードコードせず、`app/constants/` の既存定数（`CONTENT_TYPES` / `MEMBERSHIP_TYPES` / `USER_ROLES` 等）や、既存定数が無い項目のために追加した定数（`SUBMISSION_TYPES` / `ALLOWED_SUBMISSION_TYPES` / `USER_MANAGEMENT_ACTIONS` / `CODE_LANGUAGES`）から導出する。
+
+各 Route は共通ヘルパー `validateRequest(request, schema)`（同ファイル）を呼び出すだけでよい。このヘルパーが以下をすべて吸収し、失敗時は統一形式のレスポンスをそのまま返す:
+
+- リクエストボディのJSONパース（パース不能な場合も400。従来は一部のRouteのみが個別に400化しており、それ以外は例外として500になっていた）
+- スキーマ検証（`schema.safeParse()`）
+- 検証失敗時のレスポンス組み立て
+
+**失敗時の統一レスポンス形式**: `{ "error": string }` を HTTP 400 で返す（成功時のレスポンス形状は Route ごとに異なる、既存の契約を維持）。`error` は該当した検証エラーメッセージを ` / ` 区切りで連結した日本語文字列で、以前から全 Route が返していた `{ error: string }` 形状と互換のため、既存のクライアント側エラーハンドリング（`.error` を読むだけの処理）に影響しない。
+
+**スコープ外の Route**: `multipart/form-data` を受け取る `POST /api/upload-pdf` / `POST /api/upload-thumbnail` は、ファイル（`File`）を含む値をzodスキーマで表現する効果が薄く、既存のフィールドごとの手書き検証（ファイル形式・サイズ・`parsePositiveInteger()` 等）をそのまま維持する。`POST /api/stripe/checkout` / `POST /api/stripe/portal` はリクエストボディを持たず、`POST /api/stripe/webhook` は署名検証のため生のテキストボディを扱う関係でJSONスキーマ検証の対象外とする。
 
 ### 8.2 認証エラー
 
@@ -773,7 +918,9 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 | OAuth コード交換失敗 | `/login` にリダイレクト |
 | セッション期限切れ | プロキシ（`proxy.ts`）が `/login` にリダイレクト |
 | Supabase接続エラー | サーバーログに出力、`/login` にリダイレクト |
-| ユーザー自動登録失敗 | サーバーログに出力。ステータス確認不可のため `/login` にリダイレクト（フェイルクローズ） |
+| ユーザー自動登録失敗 | サーバーログに出力し `/login?error=registration_failed` にリダイレクト（通知は送らない、セッション Cookie は付けない）。`/login` は許可リスト方式でメッセージ表示 |
+| 論理削除済みユーザーの再ログイン | INSERT を試行せず、自動登録失敗と同じ導線（`/login?error=registration_failed`、セッション Cookie なし） |
+| ユーザー存在確認の失敗 / service_role 未設定 | INSERT せず、`error` パラメータなしの `/login` へフェイルクローズ（セッション Cookie なし） |
 | 重複登録の試行 | `auth_id` のUNIQUE制約で防止。既存レコードを使用 |
 
 ### 8.3 Server Services
@@ -790,7 +937,7 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 
 以下の2つの通知を、共通のSlack Incoming Webhook URL経由で管理者・運用者へ送る。通知先チャンネルはSlack Incoming Webhook URLの設定により決定する。
 
-- **新規ユーザー承認依頼通知**: 初回ログイン時にユーザーが自動登録（`status=pending`）されると送信する
+- **新規ユーザー承認依頼通知**: 初回ログイン時にユーザーが自動登録（`status=trial`）されると送信する
 - **Stripe支払い失敗通知**（2.11節）: サブスクの請求が失敗（`invoice.payment_failed`）した際に送信する。初回失敗ではユーザーを降格せずStripe Smart Retriesに任せるため、運用者への通知のみを行う
 
 **通知タイミング**: 新規ユーザー通知は `GET /auth/callback` における初回ユーザー登録の成功直後、支払い失敗通知は `POST /api/stripe/webhook` での `invoice.payment_failed` イベント受信時
@@ -861,10 +1008,15 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 
 ```mermaid
 flowchart TD
-    A["GET /auth/callback"] --> B["セッション確立・users テーブル確認"]
-    B --> C{初回ログイン（レコードなし）?}
-    C -->|いいえ| Z[通常のステータス判定]
-    C -->|はい| D["users テーブルに INSERT（pending）"]
+    A["GET /auth/callback"] --> B["セッション確立"]
+    B --> K{service_role 設定済み?}
+    K -->|いいえ| L["ログ出力・/login にリダイレクト（error なし）"]
+    K -->|はい| B2["users テーブル確認"]
+    B2 --> C{users レコード}
+    C -->|確認失敗| L
+    C -->|未削除の既存| Z[通常のステータス判定]
+    C -->|論理削除済み| Q["ログ出力・/login?error=registration_failed にリダイレクト（通知は送らない・セッション Cookie なし）"]
+    C -->|なし| D["users テーブルに INSERT（trial）"]
     D --> E{INSERT 結果}
     E -->|成功| S[INSERT 成功]
     S --> F["sendSlackNewUserNotification()<br/>（非同期・await なし）"]
@@ -874,10 +1026,12 @@ flowchart TD
     G1 -->|設定あり| H2{Webhook POST}
     H2 -->|成功| I1[ログ出力]
     H2 -->|失敗| I2["エラーログ出力（フロー継続）"]
-    E -->|失敗| Q["ログ出力・/login にリダイレクト（通知は送らない）"]
+    E -->|失敗| Q
 ```
 
 INSERT 成功後はお試しユーザーとしてダッシュボードへ遷移する。承認依頼のSlack通知は従来どおり送信し、管理者は `/admin/users` で承認・却下を行う。`sendSlackNewUserNotification()` は `await` せずに発火する非同期・非ブロッキング呼び出しで、通知の完了を待たずにリダイレクトへ進む。
+
+INSERT 失敗時はログを出力し `/login?error=registration_failed` へリダイレクトする（通知は送らない）。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認は論理削除済み行も含めて `auth_id` で照合する（通常の SELECT RLS では本人の削除済み行が見えないため、確認のみ RLS をバイパスする。INSERT は通常クライアントのまま）。存在確認に失敗した場合、および `SUPABASE_SERVICE_ROLE_KEY` 未設定時は INSERT せず、`error` パラメータなしの `/login` へフェイルクローズする。登録失敗・論理削除済み・確認失敗のエラー導線ではセッション Cookie を付けない。`/login` は `error` クエリ値を許可リスト方式（自前のキーのみ。プロトタイプ継承キーは含めない）で解釈し、`registration_failed` のときのみユーザー向けメッセージを表示する。未知の値では何も表示しない。
 
 #### 9.5.2 Stripe支払い失敗通知
 
@@ -912,7 +1066,7 @@ flowchart TD
 | `SLACK_NOTIFICATION_WEBHOOK_URL` 未設定 | ログ警告を出力し通知をスキップ。フローは継続 |
 | Webhook POST がネットワークエラー | エラーログを出力し握り潰す。ユーザー登録・リダイレクト / Stripe Webhookの200応答は正常完了 |
 | Webhook POST が 4xx / 5xx | エラーログ（ステータスコード含む）を出力し握り潰す |
-| ユーザー INSERT 失敗 | 新規ユーザー通知は送信しない（中途半端な状態を通知しない） |
+| ユーザー INSERT 失敗 | 新規ユーザー通知は送信しない（中途半端な状態を通知しない）。`/login?error=registration_failed` へリダイレクトする |
 | 支払い失敗通知自体の送信エラー | `recordEventProcessed()` はそのまま実行され、`/api/stripe/webhook` は200を返す（通知の成否はStripeへのWebhook応答に影響しない） |
 
 ---
@@ -941,3 +1095,23 @@ flowchart TD
 | 2026年8月 | 上記に対する独立レビューの指摘を反映：既存Stripe Customerが見つからない場合の新規Customerへのフォールバックを2.11節に追記 |
 | 2026年8月 | 決済日を毎月27日（UTC 0:00）に固定する変更を追加（#99）：`billing_cycle_anchor_config`・初回日割り（`proration_behavior`）・最低請求額を下回る場合の無償化ガード（`isProrationBelowMinimum()`）を2.11節に追記、`/upgrade`・`/upgrade/success`の画面説明を更新 |
 | 2026年8月 | テーマサムネイルのStorageアップロード機能を追加（6.1.4節を新設。6.1節に `thumbnails` バケットへの保存と編集画面限定である旨、7.3節にアップロード・プレビュー・削除UIを追記） |
+| 2026年8月 | `/upgrade` に課金の法定表示を追加（#134）。料金取得失敗時のフォールバック、非月額・非JPY時は月額を断定しないこと、Checkout API側の料金確認ガード（503）、契約状況取得失敗時は解約ポリシー文言を出さないことを2.11節に追記 |
+| 2026年8月 | OAuthコールバックの users INSERT 失敗時と論理削除済みユーザー再ログイン時に `/login?error=registration_failed` へリダイレクトし、許可リスト方式でメッセージ表示する旨を2.4・2.5・8.2・9.5.1節に追記（#44） |
+| 2026年9月 | #44 レビュー反映: service_role 未設定と存在確認失敗は `error` なしの `/login` へフェイルクローズすること、エラー導線ではセッション Cookie を付けないことを 8.2・9.5.1 に追記 |
+| 2026年9月 | 並行Checkoutによる二重契約・二重課金の対策（#103）を2.11節に追記：Checkoutセッション作成前の処理権claim/releaseによる排他、Stripe Customerのユーザー単位の一意化、Checkout Sessionの有効期限を32分に固定する変更 |
+| 2026年9月 | 上記へのレビュー指摘を反映（#103）：手続き中セッションの状態（open/expired/complete）に応じた再利用・奪取・待機、進行中claimを壊さないリプレイガード、TTLの導出（セッション有効期限＋猶予）を2.11節に追記 |
+| 2026年9月 | 追加レビュー指摘を反映（#103）：ミラー更新のCAS、Checkout作成の結果が不明な場合は処理権を解放しないこと、セッションid未記録時のCustomer経由の復旧を2.11節に追記 |
+| 2026年9月 | PDFアップロードAPIの成功判定を厳密化（#53）：`upload()` の戻り値検証とアップロード直後の存在確認を処理フローに追加し、確認できるまでURLを返さない旨・確認失敗時の500を6.1.1節に追記 |
+| 2026年9月 | 承認済み（active）ユーザーの会員種別変更機能を追加（#95）：2.7節・6.1.3節を更新。Stripe契約中ユーザーは承認・変更のいずれも一般有料会員以外を選べない（一般有料会員への是正は常に許可） |
+| 2026年9月 | admin / maintainer による未公開コンテンツのプレビュー機能を追加（#68）：2.12節を新設。`learning-server.ts` の取得関数がロールに応じて `is_published` 絞り込みを外す旨、未公開バッジ表示、進捗登録・提出・AIレビューはプレビュー中も許可しない旨（`isContentVisible()` の `is_published` 絞り込み）を追記。3.1節・4.1節を更新 |
+| 2026年9月 | PR #157レビュー指摘を反映（#68）：`isContentVisible()` に週・フェーズ・テーマの全階層および `is_deleted` の判定を追加（コンテンツ行の `is_published` だけでは admin / maintainer 向けRLSの無条件許可により論理削除済み・未公開階層配下への操作が通ってしまうため）。`isContentFullyPublished()` を新設しコンテンツ詳細ページのバッジ・操作可否判定に使用。コースツリーの進捗分母から未公開コンテンツを除外。バッジ文言を `/manage` 配下と統一（「非公開」）。2.12節・4.1節を更新 |
+| 2026年9月 | GitHub Copilotレビュー指摘を反映（#68）：`isContentFullyPublished()` に週・フェーズ・テーマの `is_deleted` 判定を追加（`fetchContentById()` の親階層 select には is_deleted フィルタがなく、論理削除済みの親を持つコンテンツでUIとAPIの可否表示が食い違っていたため）。コースツリーの進捗分母・分子に週・フェーズ・テーマの公開状態も反映。service_role 経路（受講生向け）の select カラムから `is_published` を除去し、CLAUDE.md の許可リストへの準拠を復元（select せず常に true を補う方式に戻す）。2.12節を更新 |
+| 2026年9月 | スライド・動画ページに概要欄カードを追加（#66）：`learning_contents` に概要用の `description` カラム（NULL可・Markdown・任意入力）を追加し、コンテンツ編集フォームで動画・スライド選択時に入力可能にした。学習画面では概要が入力されている場合のみプレイヤー／ビューア上部に概要欄カードを表示し、未入力の既存コンテンツでは非表示のまま（後方互換）。3.2節・6.1節を更新 |
+| 2026年9月 | コンテンツ作成・編集フォームの週選択をテーマ→フェーズ→週の連動セレクトに変更（#147）：`fetchAllWeeks()` をテーマまで join するようにした（並び順は従来どおり週自身の `display_order` 順のまま、API・DB変更なし）。テーマ→フェーズ→週の階層順ソートは `ContentForm` 用の呼び出し側でのみ適用し、`/manage/weeks` 一覧の表示順への影響はない。コンテンツ一覧の階層フィルタ（`ContentsFilterBar`）と同じ絞り込み操作感にし、一覧のフィルタ状態を新規作成フォームへ引き継ぐ機能を追加。6.1節を更新 |
+| 2026年9月 | 週管理・フェーズ管理を階層グルーピング表示に刷新（#184、#108の横展開）：`sortPhasesByHierarchy` / `groupWeeksByPhase` / `groupPhasesByTheme` を `content-grouping.ts` に追加し、`/manage/weeks` をフェーズ単位、`/manage/phases` をテーマ単位のグループヘッダ付きテーブルに変更。親階層列（フェーズ・テーマ）はグループヘッダへ移動して削除。データ取得（`fetchAllWeeks()` / `fetchAllPhases()`）に変更はない。6.1節を更新 |
+| 2026年9月 | テーマ・フェーズ・週・コンテンツの新規作成フォームに挿入位置指定機能を追加（#188）：`display_order` の数値直接入力を廃止し、共通コンポーネント `SiblingOrderField` による兄弟一覧表示・挿入位置セレクトに置き換えた（編集フォームは対象外、従来どおり）。`POST /api/manage/{themes,phases,weeks,contents}` は `display_order` の代わりに `insert_after_id` を受け取り、サーバー側（`createTheme` / `createPhase` / `createWeek` / `createContent`）で対象親配下の兄弟を1からの連番に再採番してからINSERTする。再採番ロジック（`resolveSiblingResequence`）と兄弟の並び順比較（`compareGroupLevel`）は `content-grouping.ts` に集約し、階層順ソートと二重実装しない。6.1節を更新 |
+| 2026年9月 | #188の挿入位置指定機能を編集フォームにも横展開（#189）：編集フォームも `SiblingOrderField` を使い、自分自身を除いた兄弟一覧・「ここに移動」プレースホルダーを表示する。既定値は親不変なら現在位置、親変更なら末尾。`PUT /api/manage/{themes,phases,weeks,contents}/[id]` は `display_order` を廃止し任意項目 `insert_after_id` を追加（省略時は表示順を維持）。`updateTheme` / `updatePhase` / `updateWeek` / `updateContent` は移動先を再採番し、親変更時は移動元の欠番も `resolveSiblingRenumber`（新設）で詰め直す。再採番ロジックは新規作成と共通化。6.1節を更新 |
+| 2026年9月 | #88対応：`users.status` の値 `'pending'` を `'trial'` にリネームし、「お試しユーザー = `status='pending'`」の命名の二重管理を解消（#86で新設したフラグ名・UI文言のみtrial系という暫定対応を解消）。2.6節の暫定注記を削除し、認証フロー図・ステータス値・RLSポリシー記載を全面更新。`ai_reviews.status` の `'pending'`（AIレビューのジョブ状態）は対象外 |
+| 2026年9月 | コンテンツ詳細の前後ナビをテーマ内通し遷移に変更（#208）：週末尾→次週先頭、フェーズ末尾→次フェーズ先頭。テーマ末尾は「テーマに戻る」。境界時のみ所属を併記。`fetchThemeNavigationIndex` を追加（service_role の呼び出し箇所・回数は増えない）。3.3節・7.2節・2.6節・2.12節を更新 |
+| 2026年9月 | #208 レビュー反映: コンテンツサマリー取得を PostgREST 1000行上限に対して range ページングし、切り詰めで現在の週が欠落して404になる経路を塞いだ。フェーズツリーの週・コンテンツ並びを `compareGroupLevel`（id タイブレーク）でナビと揃えた。3.3節を更新 |
+| 2026年9月 | #208 追加レビュー反映: ナビ縮退時（通し列に現在のコンテンツが無い）は「テーマに戻る」ではなく従来の「フェーズに戻る」に倒し、同じ週の前後は現在の週サマリーから復元する。3.3節を更新 |

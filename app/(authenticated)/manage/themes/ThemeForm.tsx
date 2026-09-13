@@ -12,19 +12,40 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  getCurrentPositionInsertAfterId,
+  getDefaultInsertAfterId,
+  SiblingOrderField,
+  type SiblingOrderItem,
+} from "../components/SiblingOrderField";
 
 interface ThemeFormProps {
   initialData?: LearningTheme;
+  /**
+   * 挿入位置ピッカーに表示する全テーマ（並び順ソート済み）。作成モードは対象そのもの、
+   * 編集モードは編集対象自身を含む一覧を渡す（自分自身の現在位置を求めるため。
+   * 表示直前にフォーム内で自分自身を除く）。
+   */
+  siblings?: SiblingOrderItem[];
   mode: "create" | "edit";
 }
 
-export function ThemeForm({ initialData, mode }: ThemeFormProps) {
+export function ThemeForm({ initialData, siblings = [], mode }: ThemeFormProps) {
   const router = useRouter();
 
   const [name, setName] = useState(initialData?.name ?? "");
   const [description, setDescription] = useState(initialData?.description ?? "");
   const [imageUrl, setImageUrl] = useState(initialData?.image_url ?? "");
-  const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
+  const visibleSiblings = siblings.filter((s) => s.id !== initialData?.id);
+  const [insertAfterId, setInsertAfterId] = useState(() =>
+    mode === "edit" && initialData
+      ? getCurrentPositionInsertAfterId(initialData.id, siblings)
+      : getDefaultInsertAfterId(siblings)
+  );
+  // 編集時、位置を一切操作していない場合に送信ボディから insert_after_id を省略するための
+  // 初期値。PUT側は insert_after_id 省略時に表示順を変更しないため、これにより
+  // 「兄弟一覧が古くなっている」ケースでの無関係な保存の失敗・巻き戻しを避ける
+  const initialInsertAfterId = useRef(insertAfterId);
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -43,7 +64,10 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
       name,
       description: description || null,
       image_url: imageUrl || null,
-      display_order: Number(displayOrder),
+      insert_after_id:
+        mode === "edit" && insertAfterId === initialInsertAfterId.current
+          ? undefined
+          : insertAfterId,
       is_published: isPublished,
     };
 
@@ -167,12 +191,12 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
             <div className="space-y-3">
               <Label htmlFor="thumbnail">サムネイル画像</Label>
               {imageUrl && (
-                <div className="relative h-40 w-full max-w-xs overflow-hidden rounded-md border">
+                <div className="relative aspect-video w-full max-w-xs overflow-hidden rounded-md border bg-linear-to-br from-primary/5 to-primary/15">
                   <Image
                     src={resolveStorageUrl(imageUrl)}
                     alt="サムネイルのプレビュー"
                     fill
-                    className="object-cover"
+                    className="object-contain"
                     sizes="320px"
                   />
                 </div>
@@ -207,16 +231,12 @@ export function ThemeForm({ initialData, mode }: ThemeFormProps) {
             </div>
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor="displayOrder">表示順</Label>
-            <Input
-              id="displayOrder"
-              type="number"
-              value={displayOrder}
-              onChange={(e) => setDisplayOrder(e.target.value)}
-              className="w-24"
-            />
-          </div>
+          <SiblingOrderField
+            siblings={visibleSiblings}
+            insertAfterId={insertAfterId}
+            onChange={setInsertAfterId}
+            placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
+          />
 
           <div className="flex items-center gap-2">
             <input

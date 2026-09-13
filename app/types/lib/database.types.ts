@@ -4,7 +4,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.4";
+    PostgrestVersion: "14.5";
   };
   public: {
     Tables: {
@@ -67,6 +67,7 @@ export type Database = {
           code_language: string;
           content_type: string;
           created_at: string | null;
+          description: string | null;
           display_order: number | null;
           exercise_instructions: string | null;
           hint: string | null;
@@ -87,6 +88,7 @@ export type Database = {
           code_language?: string;
           content_type: string;
           created_at?: string | null;
+          description?: string | null;
           display_order?: number | null;
           exercise_instructions?: string | null;
           hint?: string | null;
@@ -107,6 +109,7 @@ export type Database = {
           code_language?: string;
           content_type?: string;
           created_at?: string | null;
+          description?: string | null;
           display_order?: number | null;
           exercise_instructions?: string | null;
           hint?: string | null;
@@ -277,33 +280,39 @@ export type Database = {
       stripe_subscriptions: {
         Row: {
           cancel_at_period_end: boolean;
+          checkout_claimed_at: string | null;
+          checkout_session_id: string | null;
           created_at: string;
           current_period_end: string | null;
           id: number;
           status: string;
-          stripe_customer_id: string;
+          stripe_customer_id: string | null;
           stripe_subscription_id: string | null;
           updated_at: string;
           user_id: number;
         };
         Insert: {
           cancel_at_period_end?: boolean;
+          checkout_claimed_at?: string | null;
+          checkout_session_id?: string | null;
           created_at?: string;
           current_period_end?: string | null;
           id?: number;
           status: string;
-          stripe_customer_id: string;
+          stripe_customer_id?: string | null;
           stripe_subscription_id?: string | null;
           updated_at?: string;
           user_id: number;
         };
         Update: {
           cancel_at_period_end?: boolean;
+          checkout_claimed_at?: string | null;
+          checkout_session_id?: string | null;
           created_at?: string;
           current_period_end?: string | null;
           id?: number;
           status?: string;
-          stripe_customer_id?: string;
+          stripe_customer_id?: string | null;
           stripe_subscription_id?: string | null;
           updated_at?: string;
           user_id?: number;
@@ -461,6 +470,18 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      bulk_update_sibling_display_order: {
+        Args: { p_table: string; p_updates: Json };
+        Returns: undefined;
+      };
+      get_students_progress_summary: {
+        Args: never;
+        Returns: {
+          completed_count: number;
+          last_activity: string;
+          user_id: number;
+        }[];
+      };
       get_user_id: { Args: never; Returns: number };
       get_user_role: { Args: never; Returns: string };
       get_user_status: { Args: never; Returns: string };

@@ -1,0 +1,35 @@
+version: 2
+
+updates:
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      supabase:
+        patterns:
+          - "@supabase/*"
+        update-types:
+          - "minor"
+          - "patch"
+      codemirror:
+        patterns:
+          - "@codemirror/*"
+        update-types:
+          - "minor"
+          - "patch"
+      bun-minor-patch:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "@supabase/*"
+          - "@codemirror/*"
+        update-types:
+          - "minor"
+          - "patch"
+    # メジャーアップデートはグループ対象外とし、個別 PR で確認する
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"

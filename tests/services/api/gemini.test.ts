@@ -7,8 +7,10 @@ import {
   GEMINI_MAX_OUTPUT_TOKENS,
   GEMINI_MAX_RETRIES,
   GEMINI_MODEL_NAME,
+  GEMINI_REQUEST_TIMEOUT_MS,
   GEMINI_RETRY_BASE_DELAY_MS,
   GEMINI_THINKING_LEVEL,
+  GEMINI_TOTAL_BUDGET_MS,
 } from "@/app/constants/gemini";
 import { USER_STATUS } from "@/app/constants/user";
 
@@ -33,6 +35,7 @@ import {
   extractOverallScore,
   generateReview,
   isRateLimitError,
+  isTimeoutError,
   redactApiKey,
   resolveGeminiApiKey,
   SYSTEM_PROMPT,
@@ -72,34 +75,34 @@ describe("resolveGeminiApiKey", () => {
     expect(resolveGeminiApiKey(USER_STATUS.ACTIVE)).toBeUndefined();
   });
 
-  it("pending はお試し用キーを返す", () => {
+  it("trial はお試し用キーを返す", () => {
     vi.stubEnv(GEMINI_API_KEY_ENV, MEMBER_KEY);
     vi.stubEnv(GEMINI_API_KEY_TRIAL_ENV, TRIAL_KEY);
 
-    expect(resolveGeminiApiKey(USER_STATUS.PENDING)).toBe(TRIAL_KEY);
+    expect(resolveGeminiApiKey(USER_STATUS.TRIAL)).toBe(TRIAL_KEY);
   });
 
-  it("pending でお試し用キー未設定なら会員用キーにフォールバックする", () => {
+  it("trial でお試し用キー未設定なら会員用キーにフォールバックする", () => {
     vi.stubEnv(GEMINI_API_KEY_ENV, MEMBER_KEY);
 
-    expect(resolveGeminiApiKey(USER_STATUS.PENDING)).toBe(MEMBER_KEY);
+    expect(resolveGeminiApiKey(USER_STATUS.TRIAL)).toBe(MEMBER_KEY);
   });
 
-  it("pending でお試し用キーが空文字なら会員用キーにフォールバックする", () => {
+  it("trial でお試し用キーが空文字なら会員用キーにフォールバックする", () => {
     vi.stubEnv(GEMINI_API_KEY_ENV, MEMBER_KEY);
     vi.stubEnv(GEMINI_API_KEY_TRIAL_ENV, "");
 
-    expect(resolveGeminiApiKey(USER_STATUS.PENDING)).toBe(MEMBER_KEY);
+    expect(resolveGeminiApiKey(USER_STATUS.TRIAL)).toBe(MEMBER_KEY);
   });
 
-  it("pending でお試し用キーのみならそのキーを返す", () => {
+  it("trial でお試し用キーのみならそのキーを返す", () => {
     vi.stubEnv(GEMINI_API_KEY_TRIAL_ENV, TRIAL_KEY);
 
-    expect(resolveGeminiApiKey(USER_STATUS.PENDING)).toBe(TRIAL_KEY);
+    expect(resolveGeminiApiKey(USER_STATUS.TRIAL)).toBe(TRIAL_KEY);
   });
 
-  it("pending で両方未設定なら undefined", () => {
-    expect(resolveGeminiApiKey(USER_STATUS.PENDING)).toBeUndefined();
+  it("trial で両方未設定なら undefined", () => {
+    expect(resolveGeminiApiKey(USER_STATUS.TRIAL)).toBeUndefined();
   });
 
   it("rejected / null はキーを返さない", () => {
@@ -145,6 +148,22 @@ describe("isRateLimitError", () => {
   it("Error 以外は false", () => {
     expect(isRateLimitError({ status: 429 })).toBe(false);
     expect(isRateLimitError(null)).toBe(false);
+  });
+});
+
+describe("isTimeoutError", () => {
+  it("DOMException(AbortError) は true（SDK内部のAbortControllerがreasonなしでabortするため）", () => {
+    expect(isTimeoutError(new DOMException("The operation was aborted.", "AbortError"))).toBe(true);
+  });
+
+  it("DOMException(TimeoutError) も true（SDKがreason付きでabortするようになった場合の保険）", () => {
+    expect(isTimeoutError(new DOMException("timed out", "TimeoutError"))).toBe(true);
+  });
+
+  it("名前が異なる DOMException や通常の Error は false", () => {
+    expect(isTimeoutError(new DOMException("aborted", "SyntaxError"))).toBe(false);
+    expect(isTimeoutError(new Error("timeout"))).toBe(false);
+    expect(isTimeoutError(null)).toBe(false);
   });
 });
 
@@ -244,6 +263,7 @@ describe("generateReview", () => {
         systemInstruction: SYSTEM_PROMPT,
         maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
         thinkingConfig: { thinkingLevel: GEMINI_THINKING_LEVEL },
+        abortSignal: expect.any(AbortSignal),
       },
     });
     expect(result).toEqual({
@@ -311,6 +331,60 @@ describe("generateReview", () => {
     expect(generateContentMock).toHaveBeenCalledTimes(1);
   });
 
+  it("GEMINI_REQUEST_TIMEOUT_MS でリクエストごとのタイムアウトを設定する", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    generateContentMock.mockResolvedValue({ text: "総合スコア: 50/100" });
+
+    await generateReview(baseParams);
+
+    expect(timeoutSpy).toHaveBeenCalledWith(GEMINI_REQUEST_TIMEOUT_MS);
+  });
+
+  it("個々の試行タイムアウトと、全試行共有のGEMINI_TOTAL_BUDGET_MSをAbortSignal.anyで合成する", async () => {
+    const anySpy = vi.spyOn(AbortSignal, "any");
+    generateContentMock.mockResolvedValue({ text: "総合スコア: 50/100" });
+
+    await generateReview(baseParams);
+
+    expect(anySpy).toHaveBeenCalledWith([expect.any(AbortSignal), expect.any(AbortSignal)]);
+  });
+
+  it("429が即座に返らず全体予算を使い切った場合は、リトライ回数が残っていても待機せず打ち切る", async () => {
+    vi.useFakeTimers();
+    const rateLimitError = new ApiError({ message: "Too Many Requests", status: 429 });
+    // 1回目の試行がGEMINI_TOTAL_BUDGET_MS近くまでかかったことを模擬する
+    // （「429はサーバー側から即時に返る」という前提が崩れたケース）
+    generateContentMock.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          setTimeout(() => reject(rateLimitError), GEMINI_TOTAL_BUDGET_MS - 1000);
+        })
+    );
+
+    const resultPromise = generateReview(baseParams);
+    const assertion = expect(resultPromise).rejects.toThrow(
+      "Gemini APIの利用上限に達しました。しばらく時間を置いてから再試行してください。"
+    );
+    await vi.runAllTimersAsync();
+    await assertion;
+
+    // 残り予算(1秒)よりリトライ待機(GEMINI_RETRY_BASE_DELAY_MS=5秒)の方が長いため、
+    // リトライ上限に達していなくても2回目の試行は行われない
+    expect(generateContentMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("応答がタイムアウトした場合は日本語のタイムアウトメッセージを投げ、リトライしない", async () => {
+    // SDK内部のAbortControllerがreasonなしでabortするため、実際に投げられるのは
+    // DOMException "AbortError"（"TimeoutError"ではない）
+    const timeoutError = new DOMException("The operation was aborted.", "AbortError");
+    generateContentMock.mockRejectedValue(timeoutError);
+
+    await expect(generateReview(baseParams)).rejects.toThrow(
+      "Gemini APIの応答がタイムアウトしました。しばらく時間を置いてから再試行してください。"
+    );
+    expect(generateContentMock).toHaveBeenCalledTimes(1);
+  });
+
   it("apiKey が空なら SDK を呼ばない", async () => {
     await expect(generateReview({ ...baseParams, apiKey: "" })).rejects.toThrow(
       "Gemini APIキーが設定されていません"
@@ -318,16 +392,15 @@ describe("generateReview", () => {
     expect(GoogleGenAIMock).not.toHaveBeenCalled();
   });
 
-  it.each([
-    undefined,
-    "",
-    "   ",
-  ])("本文が空（%j）なら例外を投げ、completed にしない", async (text) => {
-    generateContentMock.mockResolvedValue({ text });
+  it.each([undefined, "", "   "])(
+    "本文が空（%j）なら例外を投げ、completed にしない",
+    async (text) => {
+      generateContentMock.mockResolvedValue({ text });
 
-    await expect(generateReview(baseParams)).rejects.toThrow(
-      "Gemini APIからレビュー結果を取得できませんでした"
-    );
-    expect(generateContentMock).toHaveBeenCalledTimes(1);
-  });
+      await expect(generateReview(baseParams)).rejects.toThrow(
+        "Gemini APIからレビュー結果を取得できませんでした"
+      );
+      expect(generateContentMock).toHaveBeenCalledTimes(1);
+    }
+  );
 });

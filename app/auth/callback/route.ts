@@ -1,7 +1,32 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { sendSlackNewUserNotification } from "@/app/services/notifications/slack";
+
+const REGISTRATION_FAILED_PATH = "/login?error=registration_failed";
+
+type CookieToSet = {
+  name: string;
+  value: string;
+  options: CookieOptions;
+};
+
+function redirectWithSessionCookies(
+  url: URL,
+  cookies: CookieToSet[],
+  headers: Record<string, string>
+) {
+  const redirectResponse = NextResponse.redirect(url);
+  for (const { name, value, options } of cookies) {
+    redirectResponse.cookies.set(name, value, options);
+  }
+  // セッション Cookie を含む応答は CDN にキャッシュさせない（@supabase/ssr が渡す Cache-Control 等）
+  for (const [key, value] of Object.entries(headers)) {
+    redirectResponse.headers.set(key, value);
+  }
+  return redirectResponse;
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
@@ -12,11 +37,8 @@ export async function GET(request: NextRequest) {
   }
 
   // cookieを蓄積するための配列
-  const cookiesToReturn: {
-    name: string;
-    value: string;
-    options: CookieOptions;
-  }[] = [];
+  const cookiesToReturn: CookieToSet[] = [];
+  const headersToReturn: Record<string, string> = {};
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -31,15 +53,10 @@ export async function GET(request: NextRequest) {
       getAll() {
         return request.cookies.getAll();
       },
-      setAll(
-        cookiesToSet: {
-          name: string;
-          value: string;
-          options: CookieOptions;
-        }[]
-      ) {
-        // cookieを配列に蓄積（後でリダイレクトレスポンスに設定する）
+      setAll(cookiesToSet: CookieToSet[], headers: Record<string, string>) {
+        // cookie と付随ヘッダーを蓄積（後でリダイレクトレスポンスに設定する）
         cookiesToReturn.push(...cookiesToSet);
+        Object.assign(headersToReturn, headers);
       },
     },
   });
@@ -53,16 +70,32 @@ export async function GET(request: NextRequest) {
 
   const user = data.session.user;
 
-  // usersテーブルでユーザーの存在を確認
-  const { data: existingUser, error: userError } = await supabase
+  // createAdminSupabaseClient() はキー未設定時に Cookie クライアントへ静かにフォールバックする。
+  // この Route は next/headers の Cookie ストアへ書かないため、フォールバック先は未認証になり
+  // 全ユーザーが初回ログイン扱いで UNIQUE 違反 → 登録失敗になる。未設定なら確認自体を中断する。
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.error("SUPABASE_SERVICE_ROLE_KEY が未設定のためユーザー確認を中断");
+    return NextResponse.redirect(new URL("/login", origin));
+  }
+
+  // SELECT RLS は本人行でも is_deleted=false を要求するため、通常クライアントでは
+  // 論理削除済みレコードが見えない。再ログインで INSERT すると UNIQUE 違反になるので、
+  // 存在確認だけ service_role で行い is_deleted では絞らない。INSERT 自体は通常クライアント。
+  const adminSupabase = await createAdminSupabaseClient();
+  const { data: existingUser, error: userError } = await adminSupabase
     .from("users")
-    .select("id, status")
+    .select("id, status, is_deleted")
     .eq("auth_id", user.id)
-    .eq("is_deleted", false)
     .maybeSingle();
 
   if (userError) {
     console.error("ユーザー確認エラー:", userError);
+    return NextResponse.redirect(new URL("/login", origin));
+  }
+
+  if (existingUser?.is_deleted) {
+    console.error("論理削除済みユーザーの再ログイン:", user.id);
+    return NextResponse.redirect(new URL(REGISTRATION_FAILED_PATH, origin));
   }
 
   // リダイレクト先を決定
@@ -76,21 +109,22 @@ export async function GET(request: NextRequest) {
       display_name: user.user_metadata?.full_name || user.email || "",
       avatar_url: user.user_metadata?.avatar_url || null,
       role: USER_ROLE.MEMBER,
-      status: USER_STATUS.PENDING,
+      status: USER_STATUS.TRIAL,
     });
 
     if (insertError) {
       console.error("ユーザー自動登録エラー:", insertError);
-    } else {
-      const adminUsersUrl = `${origin}/admin/users`;
-      void sendSlackNewUserNotification({
-        displayName: user.user_metadata?.full_name || user.email || "",
-        email: user.email || "",
-        adminUsersUrl,
-      }).catch((error) => {
-        console.error("[Slack通知] 予期しないエラーが発生しました:", error);
-      });
+      return NextResponse.redirect(new URL(REGISTRATION_FAILED_PATH, origin));
     }
+
+    const adminUsersUrl = `${origin}/admin/users`;
+    void sendSlackNewUserNotification({
+      displayName: user.user_metadata?.full_name || user.email || "",
+      email: user.email || "",
+      adminUsersUrl,
+    }).catch((error) => {
+      console.error("[Slack通知] 予期しないエラーが発生しました:", error);
+    });
 
     // お試しユーザーとしてそのままダッシュボードへ（承認待ちはアプリ内バナーで通知）
     redirectPath = "/";
@@ -98,11 +132,9 @@ export async function GET(request: NextRequest) {
     redirectPath = "/rejected";
   }
 
-  // リダイレクトレスポンスを作成し、蓄積したcookieを設定
-  const redirectResponse = NextResponse.redirect(new URL(redirectPath, origin));
-  for (const { name, value, options } of cookiesToReturn) {
-    redirectResponse.cookies.set(name, value, options);
-  }
-
-  return redirectResponse;
+  return redirectWithSessionCookies(
+    new URL(redirectPath, origin),
+    cookiesToReturn,
+    headersToReturn
+  );
 }

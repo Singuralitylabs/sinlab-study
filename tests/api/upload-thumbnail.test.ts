@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/supabase-server");
@@ -65,16 +65,28 @@ const request = (file: File | null, themeId = "12") => {
   return new Request("http://localhost/api/upload-thumbnail", { method: "POST", body: formData });
 };
 
+// tests/setup.ts が張る console.error のスパイまで戻さないよう、Date.now のスパイのみ局所的に復元する
+let nowSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+const freezeNow = (value: number) => {
+  nowSpy = vi.spyOn(Date, "now").mockReturnValue(value);
+};
+
 beforeEach(() => {
-  vi.restoreAllMocks();
+  // createAdminSupabaseClient の呼び出し回数を検証するケースがあるため履歴はクリアする
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(maintainerAuth as never);
   vi.mocked(createAdminSupabaseClient).mockResolvedValue(createMockSupabase().client as never);
 });
 
+afterEach(() => {
+  nowSpy?.mockRestore();
+  nowSpy = undefined;
+});
+
 describe("POST /api/upload-thumbnail", () => {
   it("テーマの存在確認後、PNGを固定キーへ保存してDB参照も即時更新する", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(1723500000);
+    freezeNow(1723500000);
     const { client, query, upload } = createMockSupabase();
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
 

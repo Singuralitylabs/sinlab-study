@@ -89,8 +89,8 @@ CI のワークフロー一覧は [4.1 GitHub Actions ワークフロー](#41-gi
 | --- | --- | --- |
 | 認証制御 | 認証ヘルパー関数の判定ロジック | 未認証ユーザーのリダイレクト |
 | 認可制御 | 権限判定ロジック（admin/maintainer/member 別の許可/拒否） | UI・プロキシ（`proxy.ts`）でのアクセス制御 |
-| 承認ステータス制御 | ステータス判定ロジック（pending（お試し）/active/rejected） | 画面遷移の正当性、お試しユーザーへのロック表示 |
-| データアクセス | ―（ユニットでは検証困難） | RLSによるデータ分離。お試しユーザーのアクセストークンでPostgRESTに直接アクセスし、(a) `learning_contents` のSELECTでお試し非公開コンテンツが0行、(b) お試し非公開コンテンツに対する `user_progress` / `submissions` のINSERT・UPDATEが拒否されること |
+| 承認ステータス制御 | ステータス判定ロジック（trial（お試し）/active/rejected） | 画面遷移の正当性、お試しユーザーへのロック表示 |
+| データアクセス | ―（ユニットでは検証困難） | RLSによるデータ分離。お試しユーザーのアクセストークンでPostgRESTに直接アクセスし、(a) `learning_contents` のSELECTでお試し非公開コンテンツが0行、(b) お試し非公開コンテンツに対する `user_progress` / `submissions` のINSERT・UPDATEが拒否されること、(c) お試し非公開スライドのオブジェクトキーに対する `POST /storage/v1/object/sign/slides/<キー>`（署名付きURLの発行）と `GET /storage/v1/object/authenticated/slides/<キー>` が拒否され、お試し公開スライドでは許可されること |
 
 ### 3.3 型安全性テスト
 
@@ -127,9 +127,9 @@ TypeScript と型生成の運用によって、型の破綻を早期に検知す
   - 進捗の記録 → ダッシュボードへの反映
   - admin/maintainer による管理操作（フェーズ・週・コンテンツ管理）→ 一覧/詳細への反映
   - rejected ユーザーが保護ページへアクセス → `/rejected` へ誘導。旧URL `/pending` へのアクセスも `/rejected` に落ち着く
-  - お試し（pending）ユーザーのログイン → ツリー全表示・お試し非公開コンテンツのロック表示・直リンク時のロック画面、お試し公開コンテンツの閲覧/完了/提出が成功、お試し非公開コンテンツへのAPI直叩きが403
+  - お試し（trial）ユーザーのログイン → ツリー全表示・お試し非公開コンテンツのロック表示・直リンク時のロック画面、お試し公開コンテンツの閲覧/完了/提出が成功、お試し非公開コンテンツへのAPI直叩きが403
   - お試しユーザーが旧URL `/pending` へアクセス → `/`（ダッシュボード）へリダイレクトされ、承認待ちバナーが表示される
-  - 承認（pending → active）後に承認前の提出・進捗が引き継がれ、管理者のレビュー一覧に表示される
+  - 承認（trial → active）後に承認前の提出・進捗が引き継がれ、管理者のレビュー一覧に表示される
   - 演習コンテンツへの提出物作成 → 提出履歴への反映
 
 ## 4. CI / ツール構成
@@ -197,3 +197,6 @@ GitHub Actions は CI/CD の実行基盤として利用する。詳細は各ワ�
 | `tests/services/auth/permissions.test.ts` | `app/services/auth/permissions.ts` | `checkAdminPermissions`, `checkContentPermissions`, `checkInstructorPermissions` | ロール（admin/maintainer/member/unknown）ごとの権限判定（許可/拒否）を検証する。 |
 | `tests/services/auth/server-auth.test.ts` | `app/services/auth/server-auth.ts` | `getServerAuth` | 認証エラー、ユーザー情報取得失敗、ステータス別応答、例外時の戻り値とエラーハンドリングを検証する。 |
 | `tests/services/api/learning-server.test.ts` | `app/services/api/learning-server.ts` | 学習コンテンツ取得関数群 | フェーズ・週・コンテンツの取得正常系/異常系を検証する。 |
+| `tests/auth/callback.test.ts` | `app/auth/callback/route.ts` | `GET` | 初回ログインの INSERT 成功時は `/` へリダイレクトして Slack 通知を呼び出すこと、INSERT 失敗時と論理削除済み再ログインは `/login?error=registration_failed` へリダイレクトして通知・セッション Cookie を付けないこと、存在確認失敗と service_role 未設定は `error` なしの `/login` へフェイルクローズすることを検証する。 |
+| `tests/lib/content-filtering.test.ts` | `app/lib/content-filtering.ts` | `deriveFilterOptions`, `deriveWeekSelectOptions`, `filterContents` | コンテンツ一覧・週一覧のjoin結果からのフィルタ選択肢導出（重複排除、未分類・フェーズjoin欠落の扱い）と、タイトル検索による絞り込みを検証する。テーマ/フェーズ/週/種別は SQL 側（`fetchAllContents`）に寄せた。 |
+| `tests/lib/content-grouping.test.ts` | `app/lib/content-grouping.ts` | `sortContentsByHierarchy`, `sortWeeksByHierarchy`, `sortPhasesByHierarchy`, `groupContentsByWeek`, `groupWeeksByPhase`, `groupPhasesByTheme`, `resolveSiblingResequence`, `InvalidInsertAfterIdError` | コンテンツ・週・フェーズのテーマ→フェーズ→週階層順ソート（display_orderのNULL欠落を末尾扱い、idタイブレーク、非破壊）と、週単位・フェーズ単位・テーマ単位グルーピング（「未分類」グループの扱い）を検証する。加えて、新規作成フォームの挿入位置からの再採番（`resolveSiblingResequence`：先頭・中間・末尾への挿入、display_orderの重複・欠落からの再採番、非破壊）と、`insert_after_id`が兄弟一覧に存在しない場合に`InvalidInsertAfterIdError`を投げること（メッセージが利用者向け文言でinsertAfterIdの値を含まないことを含む）を検証する。 |

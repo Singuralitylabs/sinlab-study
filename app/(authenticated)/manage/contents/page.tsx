@@ -1,76 +1,116 @@
-import {
-  Edit,
-  Eye,
-  EyeOff,
-  FileText,
-  PenLine,
-  Play,
-  Plus,
-  Presentation,
-  Trash2,
-} from "lucide-react";
+import { Plus } from "lucide-react";
 import Link from "next/link";
+import { Suspense } from "react";
 import { PageTitle } from "@/app/components/PageTitle";
-import { fetchAllContents } from "@/app/services/api/admin-server";
-import type { ContentType } from "@/app/types";
-import { Badge } from "@/components/ui/badge";
+import {
+  deriveWeekSelectOptions,
+  filterContents,
+  isContentType,
+} from "@/app/lib/content-filtering";
+import {
+  groupContentsByWeek,
+  sortContentsByHierarchy,
+  sortWeeksByHierarchy,
+  toContentTableGroups,
+} from "@/app/lib/content-grouping";
+import {
+  fetchAllContents,
+  fetchAllWeeks,
+  hasAnyManageContents,
+} from "@/app/services/api/admin-server";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { ContentsFilterBar } from "./ContentsFilterBar";
+import { ContentsTable } from "./ContentsTable";
 
-function getContentIcon(type: ContentType) {
-  switch (type) {
-    case "video":
-      return <Play className="h-3 w-3" />;
-    case "text":
-      return <FileText className="h-3 w-3" />;
-    case "exercise":
-      return <PenLine className="h-3 w-3" />;
-    case "slide":
-      return <Presentation className="h-3 w-3" />;
-    default:
-      return <FileText className="h-3 w-3" />;
-  }
+interface AdminContentsPageProps {
+  // App RouterのsearchParamsは同名クエリの重複時に string[] にもなりうる
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-function getContentTypeLabel(type: ContentType) {
-  switch (type) {
-    case "video":
-      return "動画";
-    case "text":
-      return "テキスト";
-    case "exercise":
-      return "演習";
-    case "slide":
-      return "スライド";
-    default:
-      return type;
-  }
+/** 同名クエリが重複して string[] になった場合は先頭の値のみを使う */
+function firstParam(value: string | string[] | undefined): string {
+  return (Array.isArray(value) ? value[0] : value) ?? "";
 }
 
-export default async function AdminContentsPage() {
-  const { data: contents } = await fetchAllContents();
+export default async function AdminContentsPage({ searchParams }: AdminContentsPageProps) {
+  const params = await searchParams;
+  const filters = {
+    theme: firstParam(params.theme),
+    phase: firstParam(params.phase),
+    week: firstParam(params.week),
+    type: firstParam(params.type),
+    // 空白のみのqは絞り込みなし扱い（filterContents側のtrimと判定を揃える）
+    q: firstParam(params.q).trim(),
+  };
+
+  // テーマ/フェーズ/週/種別は SQL 側で絞り、タイトル検索だけ JS に残す（#196）。
+  // フィルタ選択肢は週一覧（軽量）から導出し、構造フィルタ時に全件を二重取得しない。
+  const structuralFilters = {
+    themeId: filters.theme || undefined,
+    phaseId: filters.phase || undefined,
+    weekId: filters.week || undefined,
+    contentType: isContentType(filters.type) ? filters.type : undefined,
+  };
+  const hasStructuralFilter = Object.values(structuralFilters).some((value) => value !== undefined);
+  const isFiltered = hasStructuralFilter || filters.q !== "";
+
+  const [listResult, weeksResult, anyContentsResult] = await Promise.all([
+    fetchAllContents(structuralFilters),
+    fetchAllWeeks(),
+    hasAnyManageContents(),
+  ]);
+
+  if (listResult.error || weeksResult.error || anyContentsResult.error) {
+    return (
+      <div className="max-w-6xl mx-auto">
+        <PageTitle title="コンテンツ管理" description="学習コンテンツの作成・編集・削除" />
+        <Alert variant="destructive">
+          <AlertDescription>
+            コンテンツ一覧の取得に失敗しました。時間をおいて再度お試しください。
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  const contents = listResult.data;
+  const hasAnyContents = anyContentsResult.data === true;
+  const filterOptions = deriveWeekSelectOptions(
+    weeksResult.data ? sortWeeksByHierarchy(weeksResult.data) : []
+  );
+
+  const sortedContents = contents ? sortContentsByHierarchy(contents) : [];
+  const filteredContents = filterContents(sortedContents, {
+    q: filters.q || undefined,
+  });
+  const groups = groupContentsByWeek(filteredContents);
+  const tableGroups = toContentTableGroups(groups);
+
+  // 一覧の階層フィルタ（テーマ/フェーズ/週）を新規作成フォームの初期選択に引き継ぐ
+  const newContentQuery = new URLSearchParams();
+  if (filters.theme) newContentQuery.set("theme", filters.theme);
+  if (filters.phase) newContentQuery.set("phase", filters.phase);
+  if (filters.week) newContentQuery.set("week", filters.week);
+  const newContentQueryString = newContentQuery.toString();
+  const newContentHref = newContentQueryString
+    ? `/manage/contents/new?${newContentQueryString}`
+    : "/manage/contents/new";
 
   return (
     <div className="max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <PageTitle title="コンテンツ管理" description="学習コンテンツの作成・編集・削除" />
         <Button asChild>
-          <Link href="/manage/contents/new">
+          <Link href={newContentHref}>
             <Plus className="h-4 w-4" />
             新規作成
           </Link>
         </Button>
       </div>
 
-      {!contents || contents.length === 0 ? (
+      {!hasAnyContents ? (
         <Card>
           <CardContent className="py-8 text-center">
             <p className="text-muted-foreground">コンテンツがまだ登録されていません。</p>
@@ -80,76 +120,30 @@ export default async function AdminContentsPage() {
           </CardContent>
         </Card>
       ) : (
-        <Card className="overflow-x-auto">
-          <Table className="min-w-[800px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-16">順序</TableHead>
-                <TableHead>タイトル</TableHead>
-                <TableHead className="w-24">種類</TableHead>
-                <TableHead>週</TableHead>
-                <TableHead>フェーズ</TableHead>
-                <TableHead className="text-center w-20">公開</TableHead>
-                <TableHead className="text-right w-24">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {contents.map((content) => (
-                <TableRow key={content.id}>
-                  <TableCell className="text-sm">{content.display_order}</TableCell>
-                  <TableCell className="font-medium">
-                    <span className="line-clamp-1">{content.title}</span>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="gap-1">
-                      {getContentIcon(content.content_type)}
-                      {getContentTypeLabel(content.content_type)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {content.week?.name || "-"}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {content.week?.phase?.name || "-"}
-                  </TableCell>
-                  <TableCell className="text-center">
-                    {content.is_published ? (
-                      <Badge variant="secondary" className="gap-1 bg-success/10 text-success">
-                        <Eye className="h-3 w-3" />
-                        公開
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary" className="gap-1">
-                        <EyeOff className="h-3 w-3" />
-                        非公開
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="icon-sm" asChild title="編集">
-                        <Link href={`/manage/contents/${content.id}/edit`}>
-                          <Edit className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        asChild
-                        title="削除"
-                        className="text-destructive hover:text-destructive"
-                      >
-                        <Link href={`/manage/contents/${content.id}/delete`}>
-                          <Trash2 className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
+        <>
+          <Suspense fallback={null}>
+            <ContentsFilterBar
+              themes={filterOptions.themes}
+              phases={filterOptions.phases}
+              weeks={filterOptions.weeks}
+            />
+          </Suspense>
+
+          {groups.length === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center">
+                <p className="text-muted-foreground">この条件のコンテンツはありません。</p>
+                {isFiltered && (
+                  <Button asChild variant="outline" className="mt-4">
+                    <Link href="/manage/contents">フィルタをクリア</Link>
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <ContentsTable groups={tableGroups} />
+          )}
+        </>
       )}
     </div>
   );

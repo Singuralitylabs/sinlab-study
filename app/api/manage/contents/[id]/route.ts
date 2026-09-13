@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
+import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
 import { deleteContent, updateContent } from "@/app/services/api/admin-server";
+import { ContentUpdateSchema, validateRequest } from "@/app/services/api/schemas";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -26,23 +28,27 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: "無効なIDです" }, { status: 400 });
     }
 
-    const body = await request.json();
+    const validation = await validateRequest(request, ContentUpdateSchema);
+    if (!validation.success) {
+      return validation.response;
+    }
     const {
       title,
       week_id,
       content_type,
       video_url,
       text_content,
+      description,
       exercise_instructions,
       hint,
       reference_answer,
       allowed_submission_types,
       code_language,
       pdf_url,
-      display_order,
+      insert_after_id,
       is_published,
       is_open_to_trial,
-    } = body;
+    } = validation.data;
 
     const { error } = await updateContent(contentId, {
       title,
@@ -50,13 +56,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       content_type,
       video_url,
       text_content,
+      description,
       exercise_instructions,
       hint,
       reference_answer,
       allowed_submission_types,
       code_language,
       pdf_url,
-      display_order,
+      insertAfterId: insert_after_id,
       is_published,
       is_open_to_trial,
     });
@@ -67,6 +74,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof InvalidInsertAfterIdError) {
+      console.error("コンテンツ更新エラー（insert_after_id不正）:", error.insertAfterId);
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("API エラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
   }

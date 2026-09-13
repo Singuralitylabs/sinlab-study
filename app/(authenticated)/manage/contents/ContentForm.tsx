@@ -3,18 +3,95 @@
 import { Loader2, Save, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import type { ContentType, LearningContent, LearningPhase, LearningWeek } from "@/app/types";
+import type { CodeLanguage } from "@/app/components/code-editor-utils";
+import type {
+  PhaseFilterOption,
+  ThemeFilterOption,
+  WeekFilterOption,
+} from "@/app/lib/content-filtering";
+import { parseSlideObjectKey, toSlideObjectKey } from "@/app/lib/slide-object-key";
+import type { ContentType, LearningContent } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  getCurrentPositionInsertAfterId,
+  getDefaultInsertAfterId,
+  type SiblingCandidate,
+  SiblingOrderField,
+} from "../components/SiblingOrderField";
+
+const SELECT_CLASS_NAME =
+  "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs";
+
+/** 一覧フィルタからの引き継ぎ（作成モードのみ）や編集時の初期選択に使う、週選択カスケードの初期値 */
+interface InitialWeekSelection {
+  themeId?: string;
+  phaseId?: string;
+  weekId?: string;
+}
 
 interface ContentFormProps {
-  weeks: (LearningWeek & { phase: LearningPhase | null })[];
+  themes: ThemeFilterOption[];
+  phases: PhaseFilterOption[];
+  weeks: WeekFilterOption[];
   initialData?: LearningContent;
+  initialWeekSelection?: InitialWeekSelection;
+  /**
+   * 挿入位置ピッカーに表示する全コンテンツ候補。作成モードは対象そのもの、編集モードは
+   * 編集対象自身を含む一覧を渡す（自分自身の現在位置を求めるため。表示直前にフォーム内で
+   * 自分自身を除く）。
+   */
+  siblingCandidates?: SiblingCandidate[];
   mode: "create" | "edit";
+}
+
+/**
+ * 週IDからテーマ・フェーズを逆引きし、カスケードセレクトの初期選択状態を求める。
+ * 週が選択肢に存在しない場合（未分類・削除済み等）はテーマ・フェーズの初期選択は行わない
+ * （週セレクトの値だけは保持し、既存の週の値を保存し直せるようにする。呼び出し側で
+ * 作成モードのクエリ値は事前に選択肢の存在チェック済みであることを前提とする）。
+ */
+function resolveWeekSelection(
+  weekId: string,
+  phases: PhaseFilterOption[],
+  weeks: WeekFilterOption[]
+): { themeId: string; phaseId: string; weekId: string } {
+  const week = weekId ? weeks.find((w) => String(w.id) === weekId) : undefined;
+  if (!week) {
+    return { themeId: "", phaseId: "", weekId };
+  }
+  const phase = phases.find((p) => p.id === week.phaseId);
+  return {
+    themeId: phase ? String(phase.themeId) : "",
+    phaseId: String(week.phaseId),
+    weekId,
+  };
+}
+
+/**
+ * 週セレクトの選択肢ラベル。テーマ・フェーズ未選択のまま週を直接選べる仕様のため、
+ * 絞り込まれていない親階層（テーマ／フェーズ）の名前を「テーマ / フェーズ / 週」の形で
+ * ラベルに含め、テーマ・フェーズが異なる同名週を区別できるようにする。
+ */
+function buildWeekOptionLabel(
+  week: WeekFilterOption,
+  phases: PhaseFilterOption[],
+  themes: ThemeFilterOption[],
+  themeId: string,
+  phaseId: string
+): string {
+  if (phaseId) return week.name;
+
+  const phase = phases.find((p) => p.id === week.phaseId);
+  if (themeId) return phase ? `${phase.name} / ${week.name}` : week.name;
+
+  const theme = phase ? themes.find((t) => t.id === phase.themeId) : undefined;
+  const prefix = [theme?.name, phase?.name].filter(Boolean).join(" / ");
+  return prefix ? `${prefix} / ${week.name}` : week.name;
 }
 
 const CONTENT_TYPE_OPTIONS: { value: ContentType; label: string }[] = [
@@ -25,11 +102,11 @@ const CONTENT_TYPE_OPTIONS: { value: ContentType; label: string }[] = [
 ];
 
 type AllowedSubmissionTypes = "code" | "url" | "both";
-type CodeLanguage = "javascript" | "typescript" | "html" | "css";
 
 const CODE_LANGUAGE_OPTIONS: { value: CodeLanguage; label: string }[] = [
-  { value: "javascript", label: "JavaScript / GAS" },
+  { value: "javascript", label: "JavaScript" },
   { value: "typescript", label: "TypeScript" },
+  { value: "gas", label: "GAS" },
   { value: "html", label: "HTML" },
   { value: "css", label: "CSS" },
 ];
@@ -48,27 +125,71 @@ const SUBMISSION_TYPE_OPTIONS: {
   { value: "both", label: "コード・URL選択", description: "受講生がどちらかを選択して提出" },
 ];
 
-/**
- * 既存スライドの pdf_url（例: .../slides/gas-advanced/slide-03.pdf）から
- * コーススラッグとスライド番号を抽出する。命名規約に沿わない場合は空を返す。
- */
-function parseSlidePath(pdfUrl: string | null | undefined): {
-  folder: string;
-  slideNumber: string;
-} {
-  const match = pdfUrl?.match(/\/slides\/([a-z0-9-]+)\/slide-(\d+)\.pdf$/);
-  if (!match) return { folder: "", slideNumber: "" };
-  return { folder: match[1], slideNumber: String(Number.parseInt(match[2], 10)) };
-}
-
-export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
+export function ContentForm({
+  themes,
+  phases,
+  weeks,
+  initialData,
+  initialWeekSelection,
+  siblingCandidates = [],
+  mode,
+}: ContentFormProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [title, setTitle] = useState(initialData?.title ?? "");
-  const [weekId, setWeekId] = useState(initialData?.week_id?.toString() ?? "");
+
+  // 編集モードは initialData.week_id から週セレクトの初期値を得る（週が未分類・削除済みで
+  // 選択肢に存在しない場合も、送信時に既存の値を壊さないよう値だけは保持する）。
+  // 作成モードは一覧フィルタからの引き継ぎ（initialWeekSelection、URLクエリ由来）を使うが、
+  // 選択肢に実在しない値をそのまま状態に残すと、見た目は未選択なのに送信可能になってしまう
+  // ため、テーマ・フェーズ・週のいずれも選択肢に存在する場合のみ採用する。
+  const initialWeekIdValue =
+    mode === "edit"
+      ? (initialData?.week_id?.toString() ?? "")
+      : weeks.some((w) => String(w.id) === initialWeekSelection?.weekId)
+        ? (initialWeekSelection?.weekId ?? "")
+        : "";
+  const resolvedInitialSelection = resolveWeekSelection(initialWeekIdValue, phases, weeks);
+  const initialThemeIdFallback =
+    mode === "create" && themes.some((t) => String(t.id) === initialWeekSelection?.themeId)
+      ? (initialWeekSelection?.themeId ?? "")
+      : "";
+  // フェーズは選択肢に存在するだけでなく、採用済みのテーマ配下であることも検証する
+  // （例: ?theme=1&phase=2 のように、実在はするが互いに不整合なクエリを渡された場合、
+  // テーマ1を表示したままテーマ2配下の週が絞り込まれてしまうのを防ぐ）
+  const initialPhaseIdFallback =
+    mode === "create" &&
+    phases.some(
+      (p) =>
+        String(p.id) === initialWeekSelection?.phaseId &&
+        (!initialThemeIdFallback || String(p.themeId) === initialThemeIdFallback)
+    )
+      ? (initialWeekSelection?.phaseId ?? "")
+      : "";
+
+  const [themeId, setThemeId] = useState(
+    resolvedInitialSelection.themeId || initialThemeIdFallback
+  );
+  const [phaseId, setPhaseId] = useState(
+    resolvedInitialSelection.phaseId || initialPhaseIdFallback
+  );
+  const initialWeekId = resolvedInitialSelection.weekId;
+  const [weekId, setWeekId] = useState(initialWeekId);
+  const allSiblingsForWeek = siblingCandidates.filter((c) => String(c.parentId) === weekId);
+  const visibleSiblings = allSiblingsForWeek.filter((c) => c.id !== initialData?.id);
+  const [insertAfterId, setInsertAfterId] = useState(() =>
+    mode === "edit" && initialData
+      ? getCurrentPositionInsertAfterId(initialData.id, allSiblingsForWeek)
+      : getDefaultInsertAfterId(allSiblingsForWeek)
+  );
+  // 編集時、週・位置のいずれも操作していない場合に送信ボディから insert_after_id を
+  // 省略するための初期値（PUT側は省略時に表示順を変更しない）
+  const initialInsertAfterId = useRef(insertAfterId);
+
   const [contentType, setContentType] = useState<ContentType>(initialData?.content_type ?? "video");
   const [videoUrl, setVideoUrl] = useState(initialData?.video_url ?? "");
+  const [description, setDescription] = useState(initialData?.description ?? "");
   const [textContent, setTextContent] = useState(initialData?.text_content ?? "");
   const [exerciseInstructions, setExerciseInstructions] = useState(
     initialData?.exercise_instructions ?? ""
@@ -81,22 +202,62 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
   const [codeLanguage, setCodeLanguage] = useState<CodeLanguage>(
     (initialData?.code_language as CodeLanguage) ?? "javascript"
   );
-  const initialSlide = parseSlidePath(initialData?.pdf_url);
-  const [pdfUrl, setPdfUrl] = useState(initialData?.pdf_url ?? "");
-  const [pdfFolder, setPdfFolder] = useState(initialSlide.folder);
-  const [slideNumber, setSlideNumber] = useState(initialSlide.slideNumber);
-  const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
+  // 保存値はオブジェクトキーのみ（issue #89）。旧形式の公開URLが初期値に残っていても
+  // そのまま再保存せず、キーへ正規化した値を持つ。正規化できない値（外部URL等）は空扱いになるが、
+  // その場合は requiresSlidePdf（initialData.pdf_url が truthy）により再アップロードするまで
+  // 保存できないため、値が黙って消えることはない
+  const initialPdfKey = toSlideObjectKey(initialData?.pdf_url);
+  // 命名規約に沿ったキーならコーススラッグと番号をフォームの初期値にする（規約外なら空）
+  const initialSlide = parseSlideObjectKey(initialPdfKey);
+  const [pdfUrl, setPdfUrl] = useState(initialPdfKey ?? "");
+  const [pdfFolder, setPdfFolder] = useState(initialSlide?.folder ?? "");
+  const [slideNumber, setSlideNumber] = useState(
+    initialSlide ? String(initialSlide.slideNumber) : ""
+  );
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isOpenToTrial, setIsOpenToTrial] = useState(initialData?.is_open_to_trial ?? false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [pdfFileName, setPdfFileName] = useState<string | null>(
-    initialSlide.folder
-      ? `${initialSlide.folder}/slide-${initialSlide.slideNumber.padStart(2, "0")}.pdf`
-      : null
-  );
+  const [pdfFileName, setPdfFileName] = useState<string | null>(initialPdfKey);
+
+  // フェーズは選択中のテーマ配下のみ、週は選択中のフェーズ（未選択ならテーマ）配下のみに絞る
+  // （ContentsFilterBar と同じロジック）
+  const visiblePhases = phases.filter((p) => !themeId || String(p.themeId) === themeId);
+  const visiblePhaseIds = new Set(visiblePhases.map((p) => p.id));
+  const visibleWeeks = weeks.filter((w) => {
+    if (phaseId) return String(w.phaseId) === phaseId;
+    if (themeId) return visiblePhaseIds.has(w.phaseId);
+    return true;
+  });
+
+  function handleThemeChange(value: string) {
+    setThemeId(value);
+    setPhaseId("");
+    setWeekId("");
+    setInsertAfterId(null);
+  }
+
+  function handlePhaseChange(value: string) {
+    setPhaseId(value);
+    setWeekId("");
+    setInsertAfterId(null);
+  }
+
+  function handleWeekChange(value: string) {
+    setWeekId(value);
+    const newSiblingsForValue = siblingCandidates.filter((c) => String(c.parentId) === value);
+    // 元の週に選び直した場合は現在位置に戻す（末尾リセットのままだと、テーマ・フェーズの
+    // セレクトを触って週が一旦クリアされ、同じ週を選び直しただけで意図せず末尾へ
+    // 移動してしまう）
+    if (mode === "edit" && initialData && value === initialWeekId) {
+      setInsertAfterId(getCurrentPositionInsertAfterId(initialData.id, newSiblingsForValue));
+      return;
+    }
+    const newVisibleSiblings = newSiblingsForValue.filter((c) => c.id !== initialData?.id);
+    setInsertAfterId(getDefaultInsertAfterId(newVisibleSiblings));
+  }
 
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -144,7 +305,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
 
       if (response.ok) {
         const data = await response.json();
-        setPdfUrl(data.url);
+        setPdfUrl(data.path);
         setPdfFileName(data.path ?? file.name);
         setMessage({ type: "success", text: `スライドをアップロードしました（${data.path}）` });
       } else {
@@ -161,19 +322,41 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
     }
   };
 
+  // スライドのPDFが必要なのは「新規作成」と「既にPDFがある既存コンテンツ」。
+  // 編集時に一律で必須にすると、一括操作で slide 種別へ変更された pdf_url が空の既存
+  // コンテンツを、タイトル修正や種別の戻しすら保存できなくなる
+  const requiresSlidePdf = mode === "create" || Boolean(initialData?.pdf_url);
+  const isSlidePdfMissing = contentType === "slide" && requiresSlidePdf && !pdfUrl.trim();
+
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    // アップロード未完了・失敗のまま保存すると、実体の無い pdf_url を持つコンテンツができる。
+    // 送信ボタンの disabled 条件が変わっても保存を止められるよう、ここでも同じ条件で弾く
+    if (isUploading) {
+      setMessage({ type: "error", text: "アップロードの完了をお待ちください" });
+      return;
+    }
+    if (isSlidePdfMissing) {
+      setMessage({ type: "error", text: "スライドPDFをアップロードしてください" });
+      return;
+    }
+
     setIsLoading(true);
     setMessage(null);
 
+    const positionUnchanged =
+      mode === "edit" && weekId === initialWeekId && insertAfterId === initialInsertAfterId.current;
     const body: Record<string, unknown> = {
       title,
       week_id: Number(weekId),
       content_type: contentType,
-      display_order: Number(displayOrder),
+      insert_after_id: positionUnchanged ? undefined : insertAfterId,
       is_published: isPublished,
       is_open_to_trial: isOpenToTrial,
       video_url: contentType === "video" ? videoUrl.trim() || null : null,
+      description:
+        contentType === "video" || contentType === "slide" ? description.trim() || null : null,
       text_content: contentType === "text" ? textContent.trim() || null : null,
       exercise_instructions:
         contentType === "exercise" ? exerciseInstructions.trim() || null : null,
@@ -181,7 +364,7 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
       reference_answer: contentType === "exercise" ? referenceAnswer.trim() || null : null,
       allowed_submission_types: contentType === "exercise" ? allowedSubmissionTypes : "code",
       code_language: contentType === "exercise" ? codeLanguage : "javascript",
-      pdf_url: contentType === "slide" ? pdfUrl : null,
+      pdf_url: contentType === "slide" ? pdfUrl.trim() || null : null,
     };
 
     try {
@@ -229,24 +412,59 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
             />
           </div>
 
-          {/* 週の選択 */}
-          <div className="space-y-2">
-            <Label htmlFor="weekId">週</Label>
-            <select
-              id="weekId"
-              value={weekId}
-              onChange={(e) => setWeekId(e.target.value)}
-              required
-              className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
-            >
-              <option value="">選択してください</option>
-              {weeks.map((week) => (
-                <option key={week.id} value={week.id}>
-                  {week.phase?.name ? `${week.phase.name} / ` : ""}
-                  {week.name}
-                </option>
-              ))}
-            </select>
+          {/* テーマ→フェーズ→週の連動セレクト（テーマ・フェーズは絞り込み用、必須は週のみ） */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="themeId">テーマ</Label>
+              <select
+                id="themeId"
+                value={themeId}
+                onChange={(e) => handleThemeChange(e.target.value)}
+                className={SELECT_CLASS_NAME}
+              >
+                <option value="">すべて</option>
+                {themes.map((theme) => (
+                  <option key={theme.id} value={theme.id}>
+                    {theme.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="phaseId">フェーズ</Label>
+              <select
+                id="phaseId"
+                value={phaseId}
+                onChange={(e) => handlePhaseChange(e.target.value)}
+                className={SELECT_CLASS_NAME}
+              >
+                <option value="">すべて</option>
+                {visiblePhases.map((phase) => (
+                  <option key={phase.id} value={phase.id}>
+                    {phase.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="weekId">週</Label>
+              <select
+                id="weekId"
+                value={weekId}
+                onChange={(e) => handleWeekChange(e.target.value)}
+                required
+                className={SELECT_CLASS_NAME}
+              >
+                <option value="">選択してください</option>
+                {visibleWeeks.map((week) => (
+                  <option key={week.id} value={week.id}>
+                    {buildWeekOptionLabel(week, phases, themes, themeId, phaseId)}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* コンテンツ種別 */}
@@ -269,6 +487,20 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
               ))}
             </div>
           </div>
+
+          {/* 概要（video / slide のみ。詳細ページのプレイヤー／ビューア上部に表示） */}
+          {(contentType === "video" || contentType === "slide") && (
+            <div className="space-y-2">
+              <Label htmlFor="description">概要（Markdown・任意）</Label>
+              <Textarea
+                id="description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="このコンテンツで学べることを記述してください。未入力の場合は概要欄を表示しません。"
+                className="min-h-[120px] font-mono"
+              />
+            </div>
+          )}
 
           {/* 種別ごとの入力フィールド */}
           {contentType === "video" && (
@@ -447,17 +679,13 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
             </>
           )}
 
-          {/* 表示順 */}
-          <div className="space-y-2">
-            <Label htmlFor="displayOrder">表示順</Label>
-            <Input
-              id="displayOrder"
-              type="number"
-              value={displayOrder}
-              onChange={(e) => setDisplayOrder(e.target.value)}
-              className="w-24"
-            />
-          </div>
+          {/* 挿入位置 */}
+          <SiblingOrderField
+            siblings={weekId ? visibleSiblings : null}
+            insertAfterId={insertAfterId}
+            onChange={setInsertAfterId}
+            placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
+          />
 
           {/* 公開設定 */}
           <div className="flex items-center gap-2">
@@ -499,7 +727,10 @@ export function ContentForm({ weeks, initialData, mode }: ContentFormProps) {
 
           {/* 送信ボタン */}
           <div className="flex gap-3">
-            <Button type="submit" disabled={isLoading || !title || !weekId}>
+            <Button
+              type="submit"
+              disabled={isLoading || isUploading || !title || !weekId || isSlidePdfMissing}
+            >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (

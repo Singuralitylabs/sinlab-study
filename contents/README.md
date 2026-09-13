@@ -6,7 +6,7 @@
 
 | 講座名 | ディレクトリ | フェーズ数 | 週数 |
 |--------|-------------|-----------|------|
-| [GAS学習](./gas/README.md) | `gas/` | 7 | 12 |
+| [GAS学習（基礎編）](./gas/README.md) | `gas/` | 7 | 12 |
 | [GAS学習（応用編）](./gas-advanced/README.md) | `gas-advanced/` | 2 | 5 |
 
 ## ディレクトリ構成
@@ -14,7 +14,7 @@
 ```
 contents/
 ├── README.md          # このファイル（講座一覧）
-├── gas/               # GAS学習コース
+├── gas/               # GAS学習（基礎編）コース
 │   ├── README.md      # GAS講座概要・フェーズ一覧
 │   ├── phase1.md      # Phase 1 - 基礎文法
 │   ├── phase2.md      # Phase 2 - Googleドライブ

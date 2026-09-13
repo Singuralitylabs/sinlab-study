@@ -29,8 +29,20 @@
 
 ### 前提条件
 
-- [Bun](https://bun.sh/) がインストール済みであること
+- [Bun](https://bun.sh/) がインストール済みであること（バージョンは下記「Bun のインストール手順」を参照）
 - Supabase プロジェクトが作成済みであること
+
+### Bun のインストール手順
+
+本リポジトリでは Bun のバージョンを **`1.3.8`** に固定している（`.bun-version` と `package.json` の `packageManager`。CI の `oven-sh/setup-bun` も `.bun-version` を参照する）。インストール方法は [公式ドキュメント](https://bun.sh/docs/installation) を参照し、`bun --version` が `1.3.8` を出力することを確認する。
+
+[mise](https://mise.jdx.dev/) を使う場合は、以下の設定を一度行っておくと `mise install` で `.bun-version` のバージョンが自動的に導入される。
+
+```bash
+mise settings add idiomatic_version_file_enable_tools bun
+```
+
+> **バージョンを上げるときのルール**: `.bun-version` / `package.json` の `packageManager` / この節の記載を**同時に**更新すること。CI は `.bun-version` を参照しているため、ファイル間で値がずれると CI とローカルの環境差異が再発する。
 
 ### 環境変数
 
@@ -43,15 +55,22 @@ SUPABASE_SERVICE_ROLE_KEY=<Supabase Service Role Key>
 SUPABASE_PROJECT_ID=<Supabase プロジェクトID>
 GEMINI_API_KEY=<Gemini API Key（会員用・有料ティア。AIレビュー機能）>
 GEMINI_API_KEY_TRIAL=<任意。お試しユーザー用・無料ティア。未設定時は GEMINI_API_KEY にフォールバック>
+STRIPE_ENABLED=<Stripe決済機能の有効化フラグ。"true" 以外はフェイルクローズで無効>
+STRIPE_SECRET_KEY=<Stripe Secret Key>
+STRIPE_WEBHOOK_SECRET=<Stripe Webhook 署名シークレット>
+STRIPE_PRICE_ID=<月額サブスクリプションの Price ID>
+NEXT_PUBLIC_APP_URL=<Checkout/Portal のリダイレクト先URL生成に使用>
 ```
 
 ### インストール・起動
+
+`supabase/migrations/` はCLIの走査仕様に合わせてサブディレクトリを持たないフラット構成にしている（`<タイムスタンプ>_<説明>.sql` のファイル名で適用順を表現）。**新規のSupabaseプロジェクトではそのまま以下の手順でよいが、既にマイグレーション適用履歴があるプロジェクトに接続する場合は、`db push` の前に [`docs/database.md`](./docs/database.md) 7.1節の整合手順を完了させること**（未整合のまま push すると、リモートに既に存在するオブジェクトを作成しようとしてエラーになる場合がある）。
 
 ```bash
 # 依存関係のインストール
 bun install
 
-# データベースマイグレーション（Supabase CLIを使用）
+# データベースマイグレーション（Supabase CLIを使用。既存環境は上記の注意を参照）
 bunx supabase db push
 
 # 開発サーバー起動
@@ -70,9 +89,28 @@ bun dev
 | `bun run lint` | Biome によるリント |
 | `bun run format` | Biome によるフォーマット |
 | `bun run check` | Biome によるリント + フォーマット |
-| `bun run db:types` | Supabase から TypeScript 型定義を生成 |
+| `bun run db:types` | Supabase から TypeScript 型定義を生成（`.env.local` があれば読み込み、なければ環境変数 `SUPABASE_PROJECT_ID` を使用） |
 | `bun run test` | Vitest によるユニットテスト実行 |
 | `bun run test:all` | build/db:types/lint/format/check/test を一括実行 |
+
+### Claude Code から Supabase MCP を使う
+
+Claude Code で Supabase MCP サーバーを使う場合、**必ず read-only モードで登録する**。`execute_sql` はこのモードだと読み取り専用の Postgres ユーザーで実行され、書き込みが DB 側で拒否される。
+
+- リモート（推奨）: `https://mcp.supabase.com/mcp?project_ref=<SUPABASE_PROJECT_ID>&read_only=true`
+- ローカル（npm）: `npx -y @supabase/mcp-server-supabase@latest --project-ref=<SUPABASE_PROJECT_ID> --read-only`
+
+詳細は [Supabase MCP Server](https://supabase.com/docs/guides/ai-tools/mcp) を参照。サーバーの登録名は任意（`.claude/settings.json` のフックはどの名前でも `execute_sql` に反応する）。
+
+`.claude/settings.json` の PreToolUse フック（`.claude/hooks/allow-readonly-sql.mjs`）は、`execute_sql` の `query` が読み取り専用（SELECT 等）と判定できたときだけ許可確認をスキップする**利便性のための仕組み**で、書き込み防止の実体ではない。SELECT 内で副作用のある関数を呼ぶクエリは通るため、read-only モードを省略しないこと。`execute_sql` 自体を `permissions.allow` に登録してはならない（`CLAUDE.md`「自動実行の許可」参照）。
+
+## Dependabot PR のマージ運用
+
+依存関係の更新は [Dependabot](./.github/dependabot.yml) が週次（Bun）・月次（GitHub Actions）で自動検出し、更新 PR を作成する。マイナー・パッチ更新は `@supabase/*`・`@codemirror/*` を含めグループごとに集約され、メジャー更新は個別 PR になる。
+
+- レビュー・マージ担当は [@yamashin01](https://github.com/yamashin01) が週次で確認する。
+- マイナー・パッチのグループ PR は、既存 CI（Biome / 型チェック / ユニットテスト / ビルド）が通過していればそのままマージしてよい。
+- メジャー更新の PR は Breaking Changes を確認したうえでマージする。特に `next` はリリースノートを確認すること。
 
 ## プロジェクト構成
 

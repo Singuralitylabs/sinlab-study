@@ -3,7 +3,13 @@ import type { LearningContent, Submission, SubmissionWithContent, UserType } fro
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
 /**
- * ユーザーの提出履歴を取得
+ * 提出履歴一覧用: content は一覧表示に必要な最小カラムのみ（本文等の重いテキストは取得しない）
+ */
+export const SUBMISSION_CONTENT_COLUMNS =
+  "id, title, content_type, is_published, is_open_to_trial, week_id";
+
+/**
+ * ユーザーの提出履歴を取得（content の本文系カラムは除外）
  */
 export async function fetchSubmissionsByUserId(userId: number): Promise<{
   data: SubmissionWithContent[] | null;
@@ -13,9 +19,10 @@ export async function fetchSubmissionsByUserId(userId: number): Promise<{
 
   const { data, error } = await supabase
     .from("submissions")
-    .select("*, content:learning_contents(*)")
+    .select(`*, content:learning_contents(${SUBMISSION_CONTENT_COLUMNS})`)
     .eq("user_id", userId)
-    .order("submitted_at", { ascending: false });
+    .order("submitted_at", { ascending: false })
+    .order("id", { ascending: false });
 
   if (error) {
     console.error("提出履歴取得エラー:", error.message);
@@ -41,6 +48,7 @@ export async function fetchLatestSubmissionByContentId(
     .eq("user_id", userId)
     .eq("content_id", contentId)
     .order("submitted_at", { ascending: false })
+    .order("id", { ascending: false })
     .limit(1)
     .maybeSingle();
 
@@ -77,6 +85,7 @@ export async function fetchRecentSubmissions(limit: number): Promise<{
       count: "exact",
     })
     .order("submitted_at", { ascending: false })
+    .order("id", { ascending: false })
     .limit(limit)
     .overrideTypes<RecentSubmission[], { merge: false }>();
 

@@ -1,16 +1,30 @@
 import type { MembershipType, UserRoleType, UserStatusType } from "../types";
 
-export const USER_STATUS: Record<string, UserStatusType> = {
-  PENDING: "pending",
+/**
+ * ユーザーステータス。`Record<string, UserStatusType>` の型注釈を付けると `as const` が
+ * 無効化され、キーのtypoが型チェックを通り実行時 undefined になるため、
+ * `USER_MEMBERSHIP` と同様に `satisfies` で値だけを検証する。
+ */
+export const USER_STATUS = {
+  TRIAL: "trial",
   ACTIVE: "active",
   REJECTED: "rejected",
-} as const;
+} as const satisfies Record<string, UserStatusType>;
 
-export const USER_ROLE: Record<string, UserRoleType> = {
+/** 認証・認可を通過できるステータスの許可値（proxy / layout / server-auth 共通） */
+export const ALLOWED_USER_STATUSES: readonly UserStatusType[] = [
+  USER_STATUS.ACTIVE,
+  USER_STATUS.TRIAL,
+];
+
+export const USER_ROLE = {
   ADMIN: "admin",
   MAINTAINER: "maintainer",
   MEMBER: "member",
-} as const;
+} as const satisfies Record<string, UserRoleType>;
+
+/** ロールの許可値。APIのバリデーション等はこの1箇所から導出する */
+export const USER_ROLES: readonly UserRoleType[] = Object.values(USER_ROLE);
 
 /**
  * 会員種別。承認時に管理者が選択する（承認前・却下ユーザーは null）。
@@ -31,3 +45,12 @@ export const USER_MEMBERSHIP_LABELS: Record<MembershipType, string> = {
 
 /** 会員種別の許可値。APIのバリデーションと承認UIの選択肢はこの1箇所から導出する */
 export const MEMBERSHIP_TYPES: readonly MembershipType[] = Object.values(USER_MEMBERSHIP);
+
+/** `PATCH /api/admin/users` の許可action。バリデーションはこの1箇所から導出する */
+export const USER_MANAGEMENT_ACTIONS = [
+  "approve",
+  "reject",
+  "change_role",
+  "change_membership",
+] as const;
+export type UserManagementAction = (typeof USER_MANAGEMENT_ACTIONS)[number];

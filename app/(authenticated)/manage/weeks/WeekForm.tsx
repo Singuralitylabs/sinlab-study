@@ -2,43 +2,78 @@
 
 import { Loader2, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import type { LearningPhase, LearningTheme, LearningWeek } from "@/app/types";
+import { useRef, useState } from "react";
+import type { LearningWeek, ManagePhaseListItem } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
-interface PhaseWithTheme extends LearningPhase {
-  theme: LearningTheme | null;
-}
+import {
+  getCurrentPositionInsertAfterId,
+  getDefaultInsertAfterId,
+  type SiblingCandidate,
+  SiblingOrderField,
+} from "../components/SiblingOrderField";
 
 interface WeekFormProps {
-  phases: PhaseWithTheme[];
+  phases: ManagePhaseListItem[];
   initialData?: LearningWeek;
+  /**
+   * 挿入位置ピッカーに表示する全週候補。作成モードは対象そのもの、編集モードは編集対象
+   * 自身を含む一覧を渡す（自分自身の現在位置を求めるため。表示直前にフォーム内で
+   * 自分自身を除く）。
+   */
+  siblingCandidates?: SiblingCandidate[];
   mode: "create" | "edit";
 }
 
-export function WeekForm({ phases, initialData, mode }: WeekFormProps) {
+export function WeekForm({ phases, initialData, siblingCandidates = [], mode }: WeekFormProps) {
   const router = useRouter();
 
-  const [phaseId, setPhaseId] = useState(initialData?.phase_id?.toString() ?? "");
+  const initialPhaseId = initialData?.phase_id?.toString() ?? "";
+  const [phaseId, setPhaseId] = useState(initialPhaseId);
   const [name, setName] = useState(initialData?.name ?? "");
-  const [displayOrder, setDisplayOrder] = useState(initialData?.display_order?.toString() ?? "0");
+  const allSiblingsForPhase = siblingCandidates.filter((c) => String(c.parentId) === phaseId);
+  const visibleSiblings = allSiblingsForPhase.filter((c) => c.id !== initialData?.id);
+  const [insertAfterId, setInsertAfterId] = useState(() =>
+    mode === "edit" && initialData
+      ? getCurrentPositionInsertAfterId(initialData.id, allSiblingsForPhase)
+      : getDefaultInsertAfterId(allSiblingsForPhase)
+  );
+  // 編集時、親・位置のいずれも操作していない場合に送信ボディから insert_after_id を
+  // 省略するための初期値（PUT側は省略時に表示順を変更しない）
+  const initialInsertAfterId = useRef(insertAfterId);
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  function handlePhaseChange(value: string) {
+    setPhaseId(value);
+    const newSiblingsForValue = siblingCandidates.filter((c) => String(c.parentId) === value);
+    // 元の親に選び直した場合は現在位置に戻す（末尾リセットのままだと、親セレクトを
+    // 触っただけで意図せず末尾へ移動してしまう）
+    if (mode === "edit" && initialData && value === initialPhaseId) {
+      setInsertAfterId(getCurrentPositionInsertAfterId(initialData.id, newSiblingsForValue));
+      return;
+    }
+    const newVisibleSiblings = newSiblingsForValue.filter((c) => c.id !== initialData?.id);
+    setInsertAfterId(getDefaultInsertAfterId(newVisibleSiblings));
+  }
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage(null);
 
+    const positionUnchanged =
+      mode === "edit" &&
+      phaseId === initialPhaseId &&
+      insertAfterId === initialInsertAfterId.current;
     const body = {
       phase_id: Number(phaseId),
       name,
-      display_order: Number(displayOrder),
+      insert_after_id: positionUnchanged ? undefined : insertAfterId,
       is_published: isPublished,
     };
 
@@ -79,7 +114,7 @@ export function WeekForm({ phases, initialData, mode }: WeekFormProps) {
             <select
               id="phaseId"
               value={phaseId}
-              onChange={(e) => setPhaseId(e.target.value)}
+              onChange={(e) => handlePhaseChange(e.target.value)}
               required
               className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
             >
@@ -104,16 +139,12 @@ export function WeekForm({ phases, initialData, mode }: WeekFormProps) {
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="displayOrder">表示順</Label>
-            <Input
-              id="displayOrder"
-              type="number"
-              value={displayOrder}
-              onChange={(e) => setDisplayOrder(e.target.value)}
-              className="w-24"
-            />
-          </div>
+          <SiblingOrderField
+            siblings={phaseId ? visibleSiblings : null}
+            insertAfterId={insertAfterId}
+            onChange={setInsertAfterId}
+            placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
+          />
 
           <div className="flex items-center gap-2">
             <input

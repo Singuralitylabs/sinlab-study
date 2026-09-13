@@ -1,11 +1,14 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import type {
   LearningContent,
-  LearningContentWithWeek,
+  LearningContentListItem,
+  LearningContentWithBreadcrumb,
   LearningPhase,
   LearningTheme,
   LearningWeek,
 } from "@/app/types";
+import { LEARNING_CONTENT_DETAIL_COLUMNS, LEARNING_CONTENT_LIST_COLUMNS } from "./learning-server";
+import { createSlideSignedUrlWithClient } from "./slides-server";
 import { createAdminSupabaseClient } from "./supabase-server";
 
 export interface DemoContext {
@@ -164,17 +167,17 @@ export async function fetchDemoContext(): Promise<{
 }
 
 /**
- * デモ用: 週に属するコンテンツ一覧を取得
+ * デモ用: 週に属するコンテンツ一覧を取得（本文等の重いカラムは除外）
  */
 export async function fetchDemoContentsByWeekId(weekId: number): Promise<{
-  data: LearningContent[] | null;
+  data: LearningContentListItem[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createAdminSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_contents")
-    .select("*")
+    .select(LEARNING_CONTENT_LIST_COLUMNS)
     .eq("week_id", weekId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -185,21 +188,21 @@ export async function fetchDemoContentsByWeekId(weekId: number): Promise<{
     return { data: null, error };
   }
 
-  return { data: data as LearningContent[], error: null };
+  return { data: data as LearningContentListItem[], error: null };
 }
 
 /**
- * デモ用: フェーズに属する公開週一覧をコンテンツ付きで取得
+ * デモ用: フェーズに属する公開週一覧をコンテンツ付きで取得（本文等の重いカラムは除外）
  */
 export async function fetchDemoWeeksWithContentsByPhaseId(phaseId: number): Promise<{
-  data: (LearningWeek & { contents: LearningContent[] })[] | null;
+  data: (LearningWeek & { contents: LearningContentListItem[] })[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createAdminSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_weeks")
-    .select("*, contents:learning_contents(*)")
+    .select(`*, contents:learning_contents(${LEARNING_CONTENT_LIST_COLUMNS})`)
     .eq("phase_id", phaseId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -213,21 +216,21 @@ export async function fetchDemoWeeksWithContentsByPhaseId(phaseId: number): Prom
     return { data: null, error };
   }
 
-  return { data: data as (LearningWeek & { contents: LearningContent[] })[], error: null };
+  return { data: data as (LearningWeek & { contents: LearningContentListItem[] })[], error: null };
 }
 
 /**
  * デモ用: コンテンツ詳細を取得（週・フェーズ・テーマ情報付き）
  */
 export async function fetchDemoContentById(contentId: number): Promise<{
-  data: LearningContentWithWeek | null;
+  data: LearningContentWithBreadcrumb | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createAdminSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_contents")
-    .select("*, week:learning_weeks(*, phase:learning_phases(*, theme:learning_themes(*)))")
+    .select(LEARNING_CONTENT_DETAIL_COLUMNS)
     .eq("id", contentId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -238,5 +241,34 @@ export async function fetchDemoContentById(contentId: number): Promise<{
     return { data: null, error };
   }
 
-  return { data: data as LearningContentWithWeek, error: null };
+  return { data: data as LearningContentWithBreadcrumb, error: null };
+}
+
+/**
+ * デモ用: お試し公開スライドの署名付きURLを発行
+ *
+ * デモ画面は未認証のためユーザー権限のクライアントが無く、他のデモ取得関数と同じく
+ * service_role で署名する。service_role は RLS を素通りするため、「公開済み・未削除・
+ * お試し公開（is_open_to_trial = true）のスライド」という条件（お試しユーザーと同じ範囲。
+ * CLAUDE.md の不変条件、issue #89）はこの関数自身が判定し、満たさなければ Storage を
+ * 呼ばず null を返す。呼び出し側の分岐に依存しない。
+ */
+export async function createDemoSlideSignedUrl(
+  content: Pick<
+    LearningContent,
+    "content_type" | "pdf_url" | "is_published" | "is_deleted" | "is_open_to_trial"
+  >
+): Promise<string | null> {
+  if (
+    content.content_type !== "slide" ||
+    !content.pdf_url ||
+    !content.is_published ||
+    content.is_deleted ||
+    !content.is_open_to_trial
+  ) {
+    return null;
+  }
+
+  const supabase = await createAdminSupabaseClient();
+  return createSlideSignedUrlWithClient(supabase, content.pdf_url);
 }

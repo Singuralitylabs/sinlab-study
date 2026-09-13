@@ -48,7 +48,7 @@ export type AIReview = Tables<"ai_reviews"> & {
 // Enum-like types (narrower than DB string type)
 // =====================================================
 
-export type UserStatusType = "pending" | "active" | "rejected";
+export type UserStatusType = "trial" | "active" | "rejected";
 export type UserRoleType = "admin" | "maintainer" | "member";
 /** 承認済みユーザーの会員種別。承認前・却下ユーザーは null */
 export type MembershipType = "community" | "general";
@@ -85,19 +85,126 @@ export interface LearningContentWithWeek extends LearningContent {
   week: LearningWeekWithPhase | null;
 }
 
+/** コンテンツ一覧用（本文・演習指示・模範解答・ヒント等の重いカラムを含まない） */
+export type LearningContentListItem = Pick<
+  LearningContent,
+  | "id"
+  | "week_id"
+  | "title"
+  | "content_type"
+  | "video_url"
+  | "pdf_url"
+  | "is_open_to_trial"
+  | "is_published"
+  | "is_deleted"
+  | "display_order"
+  | "created_at"
+  | "updated_at"
+>;
+
+/**
+ * 管理画面一覧用のカラム絞り込み型（#196）。
+ * `fetchAllThemes` / `fetchAllPhases` / `fetchAllWeeks` / `fetchAllContents` が返す形に合わせる。
+ */
+export type ManageThemeListItem = Pick<
+  LearningTheme,
+  "id" | "name" | "description" | "image_url" | "display_order" | "is_published"
+>;
+
+export type ManagePhaseListItem = Pick<
+  LearningPhase,
+  "id" | "name" | "description" | "display_order" | "is_published" | "theme_id"
+> & {
+  theme: Pick<LearningTheme, "id" | "name" | "display_order"> | null;
+};
+
+export type ManageWeekListItem = Pick<
+  LearningWeek,
+  "id" | "name" | "display_order" | "is_published" | "phase_id"
+> & {
+  phase:
+    | (Pick<LearningPhase, "id" | "name" | "display_order" | "theme_id"> & {
+        theme: Pick<LearningTheme, "id" | "name" | "display_order"> | null;
+      })
+    | null;
+};
+
+export type ManageContentListItem = Pick<
+  LearningContent,
+  | "id"
+  | "title"
+  | "content_type"
+  | "display_order"
+  | "is_published"
+  | "is_open_to_trial"
+  | "week_id"
+> & {
+  week: ManageWeekListItem | null;
+};
+
+/** コンテンツ挿入位置ピッカー用の兄弟候補（#196） */
+export type ContentSiblingCandidateRow = Pick<
+  LearningContent,
+  "id" | "title" | "display_order" | "is_published" | "week_id"
+>;
+
+/** ユーザー管理一覧用（#196。ページネーションは追加しない） */
+export type ManageUserListItem = Pick<
+  UserType,
+  "id" | "display_name" | "email" | "role" | "status" | "membership_type" | "created_at"
+>;
+
+/** パンくず・所属判定用のテーマ（ネスト取得の最小セット） */
+export type BreadcrumbTheme = Pick<LearningTheme, "id" | "name" | "is_published" | "is_deleted">;
+
+/** パンくず・所属判定用のフェーズ */
+export type BreadcrumbPhase = Pick<
+  LearningPhase,
+  "id" | "theme_id" | "name" | "is_published" | "is_deleted"
+> & {
+  theme: BreadcrumbTheme | null;
+};
+
+/** パンくず・所属判定用の週 */
+export type BreadcrumbWeek = Pick<
+  LearningWeek,
+  "id" | "phase_id" | "name" | "is_published" | "is_deleted"
+> & {
+  phase: BreadcrumbPhase | null;
+};
+
+/** 週詳細（本体は全カラム、親フェーズ/テーマはパンくず用） */
+export type LearningWeekWithBreadcrumb = LearningWeek & {
+  phase: BreadcrumbPhase | null;
+};
+
+/** コンテンツ詳細（本体は全カラム、親階層はパンくず用） */
+export type LearningContentWithBreadcrumb = LearningContent & {
+  week: BreadcrumbWeek | null;
+};
+
 export interface SubmissionWithContent extends Submission {
-  content: LearningContent | null;
+  content: Pick<
+    LearningContent,
+    "id" | "title" | "content_type" | "is_published" | "is_open_to_trial" | "week_id"
+  > | null;
 }
 
-export interface SubmissionWithContentAndReview extends SubmissionWithContent {
-  ai_review: AIReview | null;
-}
+/** 提出一覧表示用の ai_reviews（token 等のメタは含めない） */
+export type AIReviewListItem = Pick<
+  AIReview,
+  "id" | "status" | "overall_score" | "review_content" | "reviewed_at" | "error_message"
+>;
 
-/** 管理者・講師向け提出一覧の1件（content は一覧表示に必要な最小カラムのみ） */
-export interface AdminSubmissionWithReview extends Submission {
-  user: Pick<UserType, "id" | "display_name" | "email"> | null;
+/** 受講生向け提出+レビュー一覧（content / ai_review は一覧表示用の最小カラムのみ） */
+export interface SubmissionWithContentAndReview extends Submission {
   content: Pick<LearningContent, "id" | "title"> | null;
-  ai_review: AIReview | null;
+  ai_review: AIReviewListItem | null;
+}
+
+/** 管理者・講師向け提出一覧の1件（受講生一覧＋提出者情報） */
+export interface AdminSubmissionWithReview extends SubmissionWithContentAndReview {
+  user: Pick<UserType, "id" | "display_name" | "email"> | null;
 }
 
 // =====================================================

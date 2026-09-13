@@ -33,7 +33,8 @@ export async function POST() {
       console.error("サブスク取得エラー:", fetchError.message);
       return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
     }
-    if (!subscription) {
+    // Checkout作成の処理権を確保しただけ（Customer未作成）の行も「契約情報なし」として扱う
+    if (!subscription?.stripe_customer_id) {
       return NextResponse.json({ error: "ご契約情報が見つかりません" }, { status: 404 });
     }
 

@@ -75,6 +75,20 @@ describe("POST /api/stripe/portal", () => {
     expect(createPortalSession).not.toHaveBeenCalled();
   });
 
+  it("Checkout手続き中でCustomer未確保の行しか無い場合は404を返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: { data: { stripe_customer_id: null }, error: null },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const res = await POST();
+
+    expect(res.status).toBe(404);
+    expect(createPortalSession).not.toHaveBeenCalled();
+  });
+
   it("STRIPE_ENABLEDが無効な場合は認証チェック前に503を返す", async () => {
     vi.mocked(isStripeEnabled).mockReturnValue(false);
 

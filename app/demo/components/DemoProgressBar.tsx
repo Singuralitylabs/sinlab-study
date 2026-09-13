@@ -14,6 +14,7 @@ export function DemoProgressBar({ contentIds }: DemoProgressBarProps) {
   const total = contentIds.length;
   if (total === 0) return null;
 
+  // completedCount は未 hydrate 時 0（SSR と同じ）を返す
   const completed = completedCount(contentIds);
   const percent = Math.round((completed / total) * 100);
 

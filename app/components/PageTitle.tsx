@@ -1,5 +1,6 @@
 import { ChevronRight, Home } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 interface BreadcrumbItem {
   label: string;
@@ -10,9 +11,11 @@ interface PageTitleProps {
   title: string;
   breadcrumbs?: BreadcrumbItem[];
   description?: string;
+  /** タイトル横に表示する補助バッジ（未公開バッジ等） */
+  badge?: ReactNode;
 }
 
-export function PageTitle({ title, breadcrumbs, description }: PageTitleProps) {
+export function PageTitle({ title, breadcrumbs, description, badge }: PageTitleProps) {
   return (
     <div className="mb-6">
       {breadcrumbs && breadcrumbs.length > 0 && (
@@ -34,7 +37,10 @@ export function PageTitle({ title, breadcrumbs, description }: PageTitleProps) {
           ))}
         </nav>
       )}
-      <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
+      <div className="flex items-center gap-2">
+        <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
+        {badge}
+      </div>
       {description && <p className="text-muted-foreground mt-1">{description}</p>}
     </div>
   );

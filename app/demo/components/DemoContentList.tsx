@@ -2,13 +2,13 @@
 
 import { CheckCircle, Clock, FileText, Lock, PenLine, Play, Presentation } from "lucide-react";
 import Link from "next/link";
-import type { LearningContent } from "@/app/types";
+import type { LearningContentListItem } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { useDemoProgress } from "../hooks/useDemoProgress";
 
 interface DemoContentListProps {
-  contents: LearningContent[];
+  contents: LearningContentListItem[];
   themeId: number;
   phaseId: number;
   weekId: number;
@@ -55,6 +55,7 @@ export function DemoContentList({
   return (
     <div className="grid gap-2 ml-5 border-l-2 border-border pl-5">
       {contents.map((content) => {
+        // isCompleted は未 hydrate 時 false（SSR と同じ）を返す
         const completed = !locked && isCompleted(content.id);
 
         return (

@@ -4,43 +4,14 @@ import { css } from "@codemirror/lang-css";
 import { html } from "@codemirror/lang-html";
 import { javascript } from "@codemirror/lang-javascript";
 import CodeMirror from "@uiw/react-codemirror";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
+import type { CodeLanguage } from "@/app/components/code-editor-utils";
 
-export type CodeLanguage = "javascript" | "typescript" | "gas" | "html" | "css";
-
-// 言語ごとのデフォルトファイル名（提出フォームの初期値・プレースホルダーに使用）
-// JavaScript(.js) と GAS(.gs) は拡張子が異なるため別言語として扱う
-export const DEFAULT_FILENAME_BY_LANGUAGE: Record<CodeLanguage, string> = {
-  javascript: "code.js",
-  typescript: "code.ts",
-  gas: "code.gs",
-  html: "index.html",
-  css: "style.css",
-};
-
-// 既存のファイル名と衝突しないデフォルトファイル名を生成する（例: index.html → index-2.html）
-export function buildDefaultFilename(language: CodeLanguage, existingFilenames: string[]): string {
-  const base = DEFAULT_FILENAME_BY_LANGUAGE[language];
-  const taken = new Set(existingFilenames.map((name) => name.trim()).filter(Boolean));
-  if (!taken.has(base)) {
-    return base;
-  }
-  const dotIndex = base.lastIndexOf(".");
-  const stem = dotIndex === -1 ? base : base.slice(0, dotIndex);
-  const ext = dotIndex === -1 ? "" : base.slice(dotIndex);
-  let counter = 2;
-  while (taken.has(`${stem}-${counter}${ext}`)) {
-    counter += 1;
-  }
-  return `${stem}-${counter}${ext}`;
-}
-
-interface CodeEditorProps {
+export interface CodeEditorProps {
   value: string;
   onChange: (value: string) => void;
   language: CodeLanguage;
   placeholder?: string;
-  minHeight?: string;
 }
 
 function getExtensions(language: CodeLanguage) {
@@ -58,22 +29,31 @@ function getExtensions(language: CodeLanguage) {
   }
 }
 
-export function CodeEditor({
-  value,
-  onChange,
-  language,
-  placeholder,
-  minHeight = "200px",
-}: CodeEditorProps) {
-  const [isDark, setIsDark] = useState(false);
+function subscribeDarkClass(onStoreChange: () => void) {
+  const root = document.documentElement;
+  const observer = new MutationObserver(onStoreChange);
+  observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+  return () => observer.disconnect();
+}
 
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    setIsDark(mediaQuery.matches);
-    const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
-    mediaQuery.addEventListener("change", handler);
-    return () => mediaQuery.removeEventListener("change", handler);
-  }, []);
+function getDarkClassSnapshot() {
+  return document.documentElement.classList.contains("dark");
+}
+
+function getDarkClassServerSnapshot() {
+  return false;
+}
+
+export function CodeEditor({ value, onChange, language, placeholder }: CodeEditorProps) {
+  // layout.tsx のインラインスクリプトが起動時に1回付ける dark クラスを初期値に使う。
+  // prefers-color-scheme の useEffect 遅延だとダークモード利用者が一度ライトでマウントされる。
+  // dark クラスは起動時のみ付与されアプリ内で変更されないため、表示中の OS テーマ切替には
+  // 追従しない（Tailwind の dark: バリアントと同じ。再読み込みで反映）。
+  const isDark = useSyncExternalStore(
+    subscribeDarkClass,
+    getDarkClassSnapshot,
+    getDarkClassServerSnapshot
+  );
 
   return (
     <CodeMirror
@@ -90,7 +70,7 @@ export function CodeEditor({
         closeBrackets: true,
         indentOnInput: true,
       }}
-      style={{ minHeight }}
+      style={{ minHeight: "200px" }}
       className="overflow-hidden rounded-md border border-input text-sm"
     />
   );

@@ -1,30 +1,272 @@
 import type { PostgrestError } from "@supabase/supabase-js";
-import { USER_STATUS } from "@/app/constants/user";
-import { TERMINAL_SUBSCRIPTION_STATUSES } from "@/app/services/api/stripe-server";
+import type { CodeLanguage } from "@/app/components/code-editor-utils";
+import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import {
+  getSiblingTailId,
+  resolveSiblingRenumber,
+  resolveSiblingResequence,
+  type SiblingOrderRow,
+} from "@/app/lib/content-grouping";
+import {
+  fetchStripeSubscriptionByUserId,
+  NON_CURRENT_SUBSCRIPTION_STATUSES,
+} from "@/app/services/api/stripe-server";
 import type {
+  ContentSiblingCandidateRow,
+  ContentType,
   LearningContent,
   LearningPhase,
-  LearningPhaseWithTheme,
   LearningTheme,
   LearningWeek,
+  ManageContentListItem,
+  ManagePhaseListItem,
+  ManageThemeListItem,
+  ManageUserListItem,
+  ManageWeekListItem,
   MembershipType,
   UserType,
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
+
+type SiblingTable = "learning_themes" | "learning_phases" | "learning_weeks" | "learning_contents";
+type SiblingParentFilter = { column: "theme_id" | "phase_id" | "week_id"; value: number } | null;
+
+/**
+ * 管理画面コンテンツ一覧の select（ネストは一覧・階層ソートに必要な最小セット）。
+ * テーマ/フェーズ絞り込み時はネストを `!inner` にして未分類（week なし）を除外する。
+ * PostgREST の埋め込みフィルタは inner join でないと親行を落とさないため。
+ */
+function manageContentListSelect(innerJoin: boolean): string {
+  const weekRel = innerJoin ? "week:learning_weeks!inner" : "week:learning_weeks";
+  const phaseRel = innerJoin ? "phase:learning_phases!inner" : "phase:learning_phases";
+  const themeRel = innerJoin ? "theme:learning_themes!inner" : "theme:learning_themes";
+  return `
+    id, title, content_type, display_order, is_published, is_open_to_trial, week_id,
+    ${weekRel}(
+      id, name, display_order, phase_id,
+      ${phaseRel}(
+        id, name, display_order, theme_id,
+        ${themeRel}(id, name, display_order)
+      )
+    )
+  `
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * URL クエリの ID を厳密な整数として解釈する。
+ * `Number("abc")`→NaN や `Number("01")`→1 / `Number("2.0")`→2 のような
+ * 従来の JS 文字列比較と食い違う変換を避け、不正値は undefined を返す。
+ */
+export function parseStrictFilterId(value: string | undefined): number | undefined {
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || String(parsed) !== value) {
+    return undefined;
+  }
+  return parsed;
+}
+
+const MANAGE_THEME_LIST_SELECT = "id, name, description, image_url, display_order, is_published";
+
+const MANAGE_PHASE_LIST_SELECT = `
+  id, name, description, display_order, is_published, theme_id,
+  theme:learning_themes(id, name, display_order)
+`
+  .replace(/\s+/g, " ")
+  .trim();
+
+const MANAGE_WEEK_LIST_SELECT = `
+  id, name, display_order, is_published, phase_id,
+  phase:learning_phases(
+    id, name, display_order, theme_id,
+    theme:learning_themes(id, name, display_order)
+  )
+`
+  .replace(/\s+/g, " ")
+  .trim();
+
+const CONTENT_SIBLING_CANDIDATE_SELECT = "id, title, display_order, is_published, week_id";
+
+const MANAGE_USER_LIST_SELECT =
+  "id, display_name, email, role, status, membership_type, created_at";
+
+/** `/manage/contents` の構造フィルタ（タイトル検索 `q` は含めない。JS側で行う） */
+export interface FetchContentsFilters {
+  themeId?: string;
+  phaseId?: string;
+  weekId?: string;
+  contentType?: ContentType;
+}
+
+/**
+ * 兄弟一覧（同じ親配下・未削除、`excludeId` があれば自分自身を除く）を取得する。
+ * `createXxx` / `updateXxx` の再採番処理の共通の起点。
+ */
+async function fetchSiblings(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  table: SiblingTable,
+  parentFilter: SiblingParentFilter,
+  excludeId?: number
+): Promise<{ data: SiblingOrderRow[] | null; error: PostgrestError | null }> {
+  let query = supabase.from(table).select("id, display_order").eq("is_deleted", false);
+  if (parentFilter) {
+    query = query.eq(parentFilter.column, parentFilter.value);
+  }
+  if (excludeId !== undefined) {
+    query = query.neq("id", excludeId);
+  }
+  return query;
+}
+
+/**
+ * `updates`（display_order が変わる行のみ）を RPC で一括 UPDATEする。0件なら何もしない。
+ * 個別 `.update().eq("id")` の N 往復を避け、兄弟数によらず定数回（1 RPC）にする（#196）。
+ * upsert ではなく UPDATE 専用 RPC のため、INSERT 扱いにならず `updated_at` トリガーも通常どおり発火する。
+ */
+async function applySiblingUpdates(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  table: SiblingTable,
+  updates: SiblingOrderRow[]
+): Promise<PostgrestError | null> {
+  if (updates.length === 0) {
+    return null;
+  }
+  const { error } = await supabase.rpc("bulk_update_sibling_display_order", {
+    p_table: table,
+    p_updates: updates,
+  });
+  return error;
+}
+
+/**
+ * `createTheme` / `createPhase` / `createWeek` / `createContent` に共通する、挿入位置からの
+ * 再採番処理（兄弟をSELECT → `resolveSiblingResequence` → 変化した行だけUPDATE）を1本化した
+ * ヘルパー。`parentFilter` はテーマのみ null（親を持たないため全件が対象）。
+ * 呼び出し元は返り値の `error` が null であることを確認したうえで `displayOrder` をINSERTに使う。
+ * `insertAfterId` が同じ親配下・未削除の要素として存在しない場合は
+ * `resolveSiblingResequence` が投げる `InvalidInsertAfterIdError` がそのまま伝播する。
+ */
+async function resequenceSiblingsForInsert(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  table: SiblingTable,
+  parentFilter: SiblingParentFilter,
+  insertAfterId: number | null
+): Promise<{ displayOrder: number; error: null } | { displayOrder: null; error: PostgrestError }> {
+  const { data: siblings, error: siblingsError } = await fetchSiblings(
+    supabase,
+    table,
+    parentFilter
+  );
+  if (siblingsError) {
+    return { displayOrder: null, error: siblingsError };
+  }
+
+  const { displayOrder, updates } = resolveSiblingResequence(siblings ?? [], insertAfterId);
+
+  const updateError = await applySiblingUpdates(supabase, table, updates);
+  if (updateError) {
+    return { displayOrder: null, error: updateError };
+  }
+
+  return { displayOrder, error: null };
+}
+
+/**
+ * `updateTheme` / `updatePhase` / `updateWeek` / `updateContent` に共通する、編集時の
+ * 挿入位置からの再採番処理（issue #189）。移動先（destinationParentFilter）配下のみを
+ * 対象にする。移動元の詰め直しはこの関数の責務ではなく、呼び出し側が本体のUPDATE
+ * （親の付け替え）に成功した**後**に `renumberSourceSiblingsAfterMove` を呼ぶこと
+ * （先に移動元を詰めると、本体UPDATEが失敗した場合に、まだ移動元に残っている自分自身と
+ * 詰め直し後の兄弟の `display_order` が重複し、既存の兄弟同士の表示順が入れ替わりうる。
+ * 詰め直しを本体UPDATEの後に行えば、失敗時に生じるのは欠番のみで、既存要素間の順序は
+ * 保たれる）。
+ *
+ * - `insertAfterId` が省略され、かつ親が変わっていない場合（`parentChanged: false`）は
+ *   何もせず `displayOrder: undefined` を返す（呼び出し側は display_order を更新しない）。
+ * - それ以外は、移動先の兄弟（自分自身を除く。`resequenceSiblingsForInsert` と同じ
+ *   `resolveSiblingResequence` を、兄弟一覧から自分自身を除いたうえで呼び出すことで共用する。
+ *   `insertAfterId` に自分自身のIDを指定した場合も一覧に存在しないため
+ *   `InvalidInsertAfterIdError` になる）に対して再採番する。
+ *   `insertAfterId` が省略され親が変わった場合は、移動先の末尾（`getSiblingTailId`）を
+ *   既定値にする。
+ */
+async function resequenceDestinationForUpdate(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  table: SiblingTable,
+  selfId: number,
+  destinationParentFilter: SiblingParentFilter,
+  parentChanged: boolean,
+  insertAfterId: number | null | undefined
+): Promise<{ displayOrder: number | undefined; error: PostgrestError | null }> {
+  if (insertAfterId === undefined && !parentChanged) {
+    return { displayOrder: undefined, error: null };
+  }
+
+  const { data: destinationSiblings, error: destinationError } = await fetchSiblings(
+    supabase,
+    table,
+    destinationParentFilter,
+    selfId
+  );
+  if (destinationError) {
+    return { displayOrder: undefined, error: destinationError };
+  }
+
+  const effectiveInsertAfterId =
+    insertAfterId !== undefined ? insertAfterId : getSiblingTailId(destinationSiblings ?? []);
+
+  const { displayOrder, updates } = resolveSiblingResequence(
+    destinationSiblings ?? [],
+    effectiveInsertAfterId
+  );
+  const destinationUpdateError = await applySiblingUpdates(supabase, table, updates);
+  if (destinationUpdateError) {
+    return { displayOrder: undefined, error: destinationUpdateError };
+  }
+
+  return { displayOrder, error: null };
+}
+
+/**
+ * 親を変更した編集で、移動元に残った兄弟（自分自身は既にそちらから抜けている前提）の
+ * 欠番を1からの連番に詰め直す。本体UPDATE（親の付け替え）が成功した**後**に呼ぶこと
+ * （`resequenceDestinationForUpdate` のコメント参照）。
+ */
+async function renumberSourceSiblingsAfterMove(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  table: SiblingTable,
+  selfId: number,
+  sourceParentFilter: SiblingParentFilter
+): Promise<PostgrestError | null> {
+  const { data: sourceSiblings, error: sourceError } = await fetchSiblings(
+    supabase,
+    table,
+    sourceParentFilter,
+    selfId
+  );
+  if (sourceError) {
+    return sourceError;
+  }
+  return applySiblingUpdates(supabase, table, resolveSiblingRenumber(sourceSiblings ?? []));
+}
 
 // =====================================================
 // テーマ管理
 // =====================================================
 
 export async function fetchAllThemes(): Promise<{
-  data: LearningTheme[] | null;
+  data: ManageThemeListItem[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_themes")
-    .select("*")
+    .select(MANAGE_THEME_LIST_SELECT)
     .eq("is_deleted", false)
     .order("display_order");
 
@@ -54,16 +296,45 @@ export async function fetchThemeById(id: number): Promise<{
   return { data, error: null };
 }
 
+/**
+ * テーマを作成する。`insertAfterId`（null=先頭、数値=そのテーマIDの直後）から
+ * `display_order` をサーバー側で決定し、対象範囲（テーマは親を持たないため全テーマ）の
+ * 兄弟を1からの連番に再採番してからINSERTする（`resolveSiblingResequence` 参照）。
+ * `insertAfterId` が未削除テーマとして存在しない場合は `InvalidInsertAfterIdError` を投げる
+ * （呼び出し側のAPIルートで400に変換すること）。
+ */
 export async function createTheme(theme: {
   name: string;
-  description?: string;
-  display_order?: number;
+  description?: string | null;
+  insertAfterId: number | null;
   is_published?: boolean;
   image_url?: string | null;
 }): Promise<{ data: LearningTheme | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase.from("learning_themes").insert(theme).select().single();
+  const resequenced = await resequenceSiblingsForInsert(
+    supabase,
+    "learning_themes",
+    null,
+    theme.insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("テーマ作成エラー（再採番）:", resequenced.error.message);
+    return { data: null, error: resequenced.error };
+  }
+  const { displayOrder } = resequenced;
+
+  const { data, error } = await supabase
+    .from("learning_themes")
+    .insert({
+      name: theme.name,
+      description: theme.description,
+      is_published: theme.is_published,
+      image_url: theme.image_url,
+      display_order: displayOrder,
+    })
+    .select()
+    .single();
 
   if (error) {
     console.error("テーマ作成エラー:", error.message);
@@ -73,13 +344,37 @@ export async function createTheme(theme: {
   return { data, error: null };
 }
 
+/**
+ * テーマを更新する。`insertAfterId` が省略された場合は表示順を変更しない。指定された場合は
+ * 全テーマ（自分自身を除く）を対象に `resequenceDestinationForUpdate` で再採番する
+ * （テーマは親を持たないため親変更の分岐は発生しない）。
+ */
 export async function updateTheme(
   id: number,
-  theme: Partial<LearningTheme>
+  theme: Partial<LearningTheme> & { insertAfterId?: number | null }
 ): Promise<{ error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
+  const { insertAfterId, ...patch } = theme;
 
-  const { error } = await supabase.from("learning_themes").update(theme).eq("id", id);
+  const resequenced = await resequenceDestinationForUpdate(
+    supabase,
+    "learning_themes",
+    id,
+    null,
+    false,
+    insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("テーマ更新エラー（再採番）:", resequenced.error.message);
+    return { error: resequenced.error };
+  }
+
+  const updatePayload =
+    resequenced.displayOrder !== undefined
+      ? { ...patch, display_order: resequenced.displayOrder }
+      : patch;
+
+  const { error } = await supabase.from("learning_themes").update(updatePayload).eq("id", id);
 
   if (error) {
     console.error("テーマ更新エラー:", error.message);
@@ -172,15 +467,20 @@ export async function deleteTheme(id: number): Promise<{ error: PostgrestError |
 // フェーズ管理
 // =====================================================
 
+/**
+ * フェーズ一覧を取得する。`display_order`（フェーズ自身の表示順）でソートして返すが、
+ * テーマ→フェーズの階層順が必要な呼び出し元（`/manage/phases` 一覧）は、
+ * 呼び出し側で `sortPhasesByHierarchy` を通すこと。
+ */
 export async function fetchAllPhases(): Promise<{
-  data: LearningPhaseWithTheme[] | null;
+  data: ManagePhaseListItem[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_phases")
-    .select("*, theme:learning_themes(*)")
+    .select(MANAGE_PHASE_LIST_SELECT)
     .eq("is_deleted", false)
     .order("display_order");
 
@@ -189,7 +489,7 @@ export async function fetchAllPhases(): Promise<{
     return { data: null, error };
   }
 
-  return { data: data as LearningPhaseWithTheme[], error: null };
+  return { data: data as unknown as ManagePhaseListItem[], error: null };
 }
 
 export async function fetchPhaseById(id: number): Promise<{
@@ -210,16 +510,43 @@ export async function fetchPhaseById(id: number): Promise<{
   return { data, error: null };
 }
 
+/**
+ * フェーズを作成する。`insertAfterId` から `display_order` をサーバー側で決定し、
+ * 同じ `theme_id` 配下の兄弟を1からの連番に再採番してからINSERTする
+ * （`createTheme` と同じ方針。詳細は `resolveSiblingResequence` 参照）。
+ */
 export async function createPhase(phase: {
   theme_id: number;
   name: string;
-  description?: string;
-  display_order?: number;
+  description?: string | null;
+  insertAfterId: number | null;
   is_published?: boolean;
 }): Promise<{ data: LearningPhase | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase.from("learning_phases").insert(phase).select().single();
+  const resequenced = await resequenceSiblingsForInsert(
+    supabase,
+    "learning_phases",
+    { column: "theme_id", value: phase.theme_id },
+    phase.insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("フェーズ作成エラー（再採番）:", resequenced.error.message);
+    return { data: null, error: resequenced.error };
+  }
+  const { displayOrder } = resequenced;
+
+  const { data, error } = await supabase
+    .from("learning_phases")
+    .insert({
+      theme_id: phase.theme_id,
+      name: phase.name,
+      description: phase.description,
+      is_published: phase.is_published,
+      display_order: displayOrder,
+    })
+    .select()
+    .single();
 
   if (error) {
     console.error("フェーズ作成エラー:", error.message);
@@ -229,17 +556,76 @@ export async function createPhase(phase: {
   return { data, error: null };
 }
 
+/**
+ * フェーズを更新する。`insertAfterId` が省略され、かつ `theme_id` が変わっていない場合は
+ * 表示順を変更しない。それ以外は移動先（`theme_id` 変更後の親）配下を再採番してから本体を
+ * UPDATEし、親が変わった場合は本体UPDATE成功後に移動元の親配下も再採番する
+ * （順序の理由は `resequenceDestinationForUpdate` のコメント参照）。
+ */
 export async function updatePhase(
   id: number,
-  phase: Partial<LearningPhase>
+  phase: Partial<LearningPhase> & { insertAfterId?: number | null }
 ): Promise<{ error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
+  const { insertAfterId, ...patch } = phase;
 
-  const { error } = await supabase.from("learning_phases").update(phase).eq("id", id);
+  let destinationFilter: SiblingParentFilter = null;
+  let sourceFilter: SiblingParentFilter = null;
+  let parentChanged = false;
+
+  if (insertAfterId !== undefined || patch.theme_id !== undefined) {
+    const { data: current, error: currentError } = await supabase
+      .from("learning_phases")
+      .select("theme_id")
+      .eq("id", id)
+      .eq("is_deleted", false)
+      .single();
+    if (currentError) {
+      console.error("フェーズ更新エラー（現在値取得）:", currentError.message);
+      return { error: currentError };
+    }
+    const destinationThemeId = patch.theme_id ?? current.theme_id;
+    parentChanged = destinationThemeId !== current.theme_id;
+    destinationFilter = { column: "theme_id", value: destinationThemeId };
+    sourceFilter = { column: "theme_id", value: current.theme_id };
+  }
+
+  const resequenced = await resequenceDestinationForUpdate(
+    supabase,
+    "learning_phases",
+    id,
+    destinationFilter,
+    parentChanged,
+    insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("フェーズ更新エラー（再採番）:", resequenced.error.message);
+    return { error: resequenced.error };
+  }
+
+  const updatePayload =
+    resequenced.displayOrder !== undefined
+      ? { ...patch, display_order: resequenced.displayOrder }
+      : patch;
+
+  const { error } = await supabase.from("learning_phases").update(updatePayload).eq("id", id);
 
   if (error) {
     console.error("フェーズ更新エラー:", error.message);
     return { error };
+  }
+
+  if (parentChanged) {
+    const sourceError = await renumberSourceSiblingsAfterMove(
+      supabase,
+      "learning_phases",
+      id,
+      sourceFilter
+    );
+    if (sourceError) {
+      console.error("フェーズ更新エラー（移動元の再採番）:", sourceError.message);
+      return { error: sourceError };
+    }
   }
 
   return { error: null };
@@ -302,15 +688,20 @@ export async function deletePhase(id: number): Promise<{ error: PostgrestError |
 // 週管理
 // =====================================================
 
+/**
+ * 週一覧を取得する。`display_order`（週自身の表示順）でソートして返すが、
+ * テーマ→フェーズ→週の階層順が必要な呼び出し元（`/manage/weeks` 一覧・`ContentForm`
+ * 用の選択肢導出）は、いずれも呼び出し側で `sortWeeksByHierarchy` を通すこと。
+ */
 export async function fetchAllWeeks(): Promise<{
-  data: (LearningWeek & { phase: LearningPhase | null })[] | null;
+  data: ManageWeekListItem[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase
     .from("learning_weeks")
-    .select("*, phase:learning_phases(*)")
+    .select(MANAGE_WEEK_LIST_SELECT)
     .eq("is_deleted", false)
     .order("display_order");
 
@@ -319,7 +710,7 @@ export async function fetchAllWeeks(): Promise<{
     return { data: null, error };
   }
 
-  return { data, error: null };
+  return { data: data as unknown as ManageWeekListItem[], error: null };
 }
 
 export async function fetchWeekById(id: number): Promise<{
@@ -340,16 +731,43 @@ export async function fetchWeekById(id: number): Promise<{
   return { data, error: null };
 }
 
+/**
+ * 週を作成する。`insertAfterId` から `display_order` をサーバー側で決定し、
+ * 同じ `phase_id` 配下の兄弟を1からの連番に再採番してからINSERTする
+ * （`createTheme` と同じ方針。詳細は `resolveSiblingResequence` 参照）。
+ */
 export async function createWeek(week: {
   phase_id: number;
   name: string;
-  description?: string;
-  display_order?: number;
+  description?: string | null;
+  insertAfterId: number | null;
   is_published?: boolean;
 }): Promise<{ data: LearningWeek | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase.from("learning_weeks").insert(week).select().single();
+  const resequenced = await resequenceSiblingsForInsert(
+    supabase,
+    "learning_weeks",
+    { column: "phase_id", value: week.phase_id },
+    week.insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("週作成エラー（再採番）:", resequenced.error.message);
+    return { data: null, error: resequenced.error };
+  }
+  const { displayOrder } = resequenced;
+
+  const { data, error } = await supabase
+    .from("learning_weeks")
+    .insert({
+      phase_id: week.phase_id,
+      name: week.name,
+      description: week.description,
+      is_published: week.is_published,
+      display_order: displayOrder,
+    })
+    .select()
+    .single();
 
   if (error) {
     console.error("週作成エラー:", error.message);
@@ -359,17 +777,76 @@ export async function createWeek(week: {
   return { data, error: null };
 }
 
+/**
+ * 週を更新する。`insertAfterId` が省略され、かつ `phase_id` が変わっていない場合は
+ * 表示順を変更しない。それ以外は移動先（`phase_id` 変更後の親）配下を再採番してから本体を
+ * UPDATEし、親が変わった場合は本体UPDATE成功後に移動元の親配下も再採番する
+ * （`updatePhase` と同じ方針。順序の理由は `resequenceDestinationForUpdate` のコメント参照）。
+ */
 export async function updateWeek(
   id: number,
-  week: Partial<LearningWeek>
+  week: Partial<LearningWeek> & { insertAfterId?: number | null }
 ): Promise<{ error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
+  const { insertAfterId, ...patch } = week;
 
-  const { error } = await supabase.from("learning_weeks").update(week).eq("id", id);
+  let destinationFilter: SiblingParentFilter = null;
+  let sourceFilter: SiblingParentFilter = null;
+  let parentChanged = false;
+
+  if (insertAfterId !== undefined || patch.phase_id !== undefined) {
+    const { data: current, error: currentError } = await supabase
+      .from("learning_weeks")
+      .select("phase_id")
+      .eq("id", id)
+      .eq("is_deleted", false)
+      .single();
+    if (currentError) {
+      console.error("週更新エラー（現在値取得）:", currentError.message);
+      return { error: currentError };
+    }
+    const destinationPhaseId = patch.phase_id ?? current.phase_id;
+    parentChanged = destinationPhaseId !== current.phase_id;
+    destinationFilter = { column: "phase_id", value: destinationPhaseId };
+    sourceFilter = { column: "phase_id", value: current.phase_id };
+  }
+
+  const resequenced = await resequenceDestinationForUpdate(
+    supabase,
+    "learning_weeks",
+    id,
+    destinationFilter,
+    parentChanged,
+    insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("週更新エラー（再採番）:", resequenced.error.message);
+    return { error: resequenced.error };
+  }
+
+  const updatePayload =
+    resequenced.displayOrder !== undefined
+      ? { ...patch, display_order: resequenced.displayOrder }
+      : patch;
+
+  const { error } = await supabase.from("learning_weeks").update(updatePayload).eq("id", id);
 
   if (error) {
     console.error("週更新エラー:", error.message);
     return { error };
+  }
+
+  if (parentChanged) {
+    const sourceError = await renumberSourceSiblingsAfterMove(
+      supabase,
+      "learning_weeks",
+      id,
+      sourceFilter
+    );
+    if (sourceError) {
+      console.error("週更新エラー（移動元の再採番）:", sourceError.message);
+      return { error: sourceError };
+    }
   }
 
   return { error: null };
@@ -403,22 +880,108 @@ export async function deleteWeek(id: number): Promise<{ error: PostgrestError | 
 // コンテンツ管理
 // =====================================================
 
-export async function fetchAllContents(): Promise<{
-  data:
-    | (LearningContent & { week: (LearningWeek & { phase: LearningPhase | null }) | null })[]
-    | null;
+/**
+ * コンテンツ管理一覧を取得する（#196）。本文系カラムは含めない。
+ * テーマ/フェーズ/週/種別は SQL 側で絞り、タイトル検索は呼び出し側の JS に残す。
+ */
+export async function fetchAllContents(filters: FetchContentsFilters = {}): Promise<{
+  data: ManageContentListItem[] | null;
+  error: PostgrestError | null;
+}> {
+  const themeId = parseStrictFilterId(filters.themeId);
+  const phaseId = parseStrictFilterId(filters.phaseId);
+  const weekId = parseStrictFilterId(filters.weekId);
+
+  // クエリ文字列が整数として不正な場合は PostgREST 400 を起こさず「該当なし」とする
+  // （従来の JS 文字列比較でも一致しなかった入力と同じ扱い）。
+  if (
+    (filters.themeId && themeId === undefined) ||
+    (filters.phaseId && phaseId === undefined) ||
+    (filters.weekId && weekId === undefined)
+  ) {
+    return { data: [], error: null };
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const needsInnerJoin = themeId !== undefined || phaseId !== undefined;
+
+  let query = supabase
+    .from("learning_contents")
+    .select(manageContentListSelect(needsInnerJoin))
+    .eq("is_deleted", false);
+
+  if (weekId !== undefined) {
+    query = query.eq("week_id", weekId);
+  }
+  if (filters.contentType) {
+    query = query.eq("content_type", filters.contentType);
+  }
+  if (themeId !== undefined) {
+    query = query.eq("week.phase.theme_id", themeId);
+  }
+  if (phaseId !== undefined) {
+    query = query.eq("week.phase_id", phaseId);
+  }
+
+  const { data, error } = await query.order("display_order");
+
+  if (error) {
+    console.error("コンテンツ一覧取得エラー:", error.message);
+    return { data: null, error };
+  }
+
+  // このキャストは select が theme まで辿れるネスト形状（week.phase.theme）で
+  // 返すことに依存する。select を変更する場合は content-grouping.ts の
+  // 階層順ソートが参照する week.phase.theme まで含まれることを確認すること
+  return { data: data as unknown as ManageContentListItem[], error: null };
+}
+
+/**
+ * 管理画面に未削除コンテンツが1件でもあるか（head count）。
+ * フィルタ選択肢は週一覧から取るため、空状態判定だけに使う（#196 レビュー指摘）。
+ */
+export async function hasAnyManageContents(): Promise<{
+  data: boolean | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+  const { count, error } = await supabase
+    .from("learning_contents")
+    .select("id", { count: "exact", head: true })
+    .eq("is_deleted", false);
+
+  if (error) {
+    console.error("コンテンツ件数取得エラー:", error.message);
+    return { data: null, error };
+  }
+
+  return { data: (count ?? 0) > 0, error: null };
+}
+
+/**
+ * コンテンツ新規作成/編集フォームの挿入位置ピッカー用の兄弟候補（#196）。
+ * 一覧用の本文・4階層ネストを持たず、`week_id` で任意に絞り込める。
+ * `weekId` を省略した場合は全週分を返し、フォーム側で週切替時に絞り込む。
+ */
+export async function fetchContentSiblingCandidates(weekId?: number): Promise<{
+  data: ContentSiblingCandidateRow[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("learning_contents")
-    .select("*, week:learning_weeks(*, phase:learning_phases(*))")
-    .eq("is_deleted", false)
-    .order("display_order");
+    .select(CONTENT_SIBLING_CANDIDATE_SELECT)
+    .eq("is_deleted", false);
+
+  if (weekId !== undefined) {
+    query = query.eq("week_id", weekId);
+  }
+
+  const { data, error } = await query.order("display_order");
 
   if (error) {
-    console.error("コンテンツ一覧取得エラー:", error.message);
+    console.error("コンテンツ兄弟候補取得エラー:", error.message);
     return { data: null, error };
   }
 
@@ -445,27 +1008,64 @@ export async function fetchContentByIdForAdmin(
   return { data, error: null };
 }
 
+/**
+ * コンテンツを作成する。`insertAfterId` から `display_order` をサーバー側で決定し、
+ * 同じ `week_id` 配下の兄弟を1からの連番に再採番してからINSERTする
+ * （`createTheme` と同じ方針。詳細は `resolveSiblingResequence` 参照）。
+ * 兄弟の取得・再採番は他の3関数と異なり `createAdminSupabaseClient()` を使う
+ * （createContent 自体が従来から service_role を使っているため。CLAUDE.mdの
+ * service_role制限対象は「受講生向け配信経路」であり、この管理者専用の作成経路は対象外）。
+ */
 export async function createContent(content: {
   week_id: number;
   title: string;
   content_type: "video" | "text" | "exercise" | "slide";
-  video_url?: string;
-  text_content?: string;
-  exercise_instructions?: string;
-  hint?: string;
-  reference_answer?: string;
+  video_url?: string | null;
+  text_content?: string | null;
+  description?: string | null;
+  exercise_instructions?: string | null;
+  hint?: string | null;
+  reference_answer?: string | null;
   allowed_submission_types?: "code" | "url" | "both";
-  code_language?: "javascript" | "typescript" | "html" | "css";
-  pdf_url?: string;
-  display_order?: number;
+  code_language?: CodeLanguage;
+  pdf_url?: string | null;
+  insertAfterId: number | null;
   is_published?: boolean;
   is_open_to_trial?: boolean;
 }): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
 
+  const resequenced = await resequenceSiblingsForInsert(
+    supabase,
+    "learning_contents",
+    { column: "week_id", value: content.week_id },
+    content.insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("コンテンツ作成エラー（再採番）:", resequenced.error.message);
+    return { data: null, error: resequenced.error };
+  }
+  const { displayOrder } = resequenced;
+
   const { data, error } = await supabase
     .from("learning_contents")
-    .insert(content)
+    .insert({
+      week_id: content.week_id,
+      title: content.title,
+      content_type: content.content_type,
+      video_url: content.video_url,
+      text_content: content.text_content,
+      description: content.description,
+      exercise_instructions: content.exercise_instructions,
+      hint: content.hint,
+      reference_answer: content.reference_answer,
+      allowed_submission_types: content.allowed_submission_types,
+      code_language: content.code_language,
+      pdf_url: content.pdf_url,
+      is_published: content.is_published,
+      is_open_to_trial: content.is_open_to_trial,
+      display_order: displayOrder,
+    })
     .select()
     .single();
 
@@ -477,20 +1077,106 @@ export async function createContent(content: {
   return { data, error: null };
 }
 
+/**
+ * コンテンツを更新する。`insertAfterId` が省略され、かつ `week_id` が変わっていない場合は
+ * 表示順を変更しない。それ以外は移動先（`week_id` 変更後の親）配下を再採番してから本体を
+ * UPDATEし、親が変わった場合は本体UPDATE成功後に移動元の親配下も再採番する
+ * （`updatePhase` と同じ方針。順序の理由は `resequenceDestinationForUpdate` のコメント参照）。
+ * 兄弟の取得・再採番は他の3関数と異なり `createAdminSupabaseClient()` を使う
+ * （`createContent` と同じ理由。同関数のコメント参照）。
+ */
 export async function updateContent(
   id: number,
-  content: Partial<LearningContent>
+  content: Partial<LearningContent> & { insertAfterId?: number | null }
 ): Promise<{ error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
+  const { insertAfterId, ...patch } = content;
 
-  const { error } = await supabase.from("learning_contents").update(content).eq("id", id);
+  let destinationFilter: SiblingParentFilter = null;
+  let sourceFilter: SiblingParentFilter = null;
+  let parentChanged = false;
+
+  if (insertAfterId !== undefined || patch.week_id !== undefined) {
+    const { data: current, error: currentError } = await supabase
+      .from("learning_contents")
+      .select("week_id")
+      .eq("id", id)
+      .eq("is_deleted", false)
+      .single();
+    if (currentError) {
+      console.error("コンテンツ更新エラー（現在値取得）:", currentError.message);
+      return { error: currentError };
+    }
+    const destinationWeekId = patch.week_id ?? current.week_id;
+    parentChanged = destinationWeekId !== current.week_id;
+    destinationFilter = { column: "week_id", value: destinationWeekId };
+    sourceFilter = { column: "week_id", value: current.week_id };
+  }
+
+  const resequenced = await resequenceDestinationForUpdate(
+    supabase,
+    "learning_contents",
+    id,
+    destinationFilter,
+    parentChanged,
+    insertAfterId
+  );
+  if (resequenced.error) {
+    console.error("コンテンツ更新エラー（再採番）:", resequenced.error.message);
+    return { error: resequenced.error };
+  }
+
+  const updatePayload =
+    resequenced.displayOrder !== undefined
+      ? { ...patch, display_order: resequenced.displayOrder }
+      : patch;
+
+  const { error } = await supabase.from("learning_contents").update(updatePayload).eq("id", id);
 
   if (error) {
     console.error("コンテンツ更新エラー:", error.message);
     return { error };
   }
 
+  if (parentChanged) {
+    const sourceError = await renumberSourceSiblingsAfterMove(
+      supabase,
+      "learning_contents",
+      id,
+      sourceFilter
+    );
+    if (sourceError) {
+      console.error("コンテンツ更新エラー（移動元の再採番）:", sourceError.message);
+      return { error: sourceError };
+    }
+  }
+
   return { error: null };
+}
+
+/**
+ * 複数コンテンツへ同一の更新を一括適用する。`.eq("is_deleted", false)` により
+ * 削除済み行への再操作を防ぐ。
+ */
+export async function bulkUpdateContents(
+  ids: number[],
+  patch: Partial<LearningContent>
+): Promise<{ error: PostgrestError | null; updated: number }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("learning_contents")
+    .update(patch)
+    .in("id", ids)
+    .eq("is_deleted", false)
+    .select("id");
+
+  if (error) {
+    console.error("コンテンツ一括更新エラー:", error.message);
+    return { error, updated: 0 };
+  }
+
+  return { error: null, updated: data?.length ?? 0 };
 }
 
 export async function deleteContent(id: number): Promise<{ error: PostgrestError | null }> {
@@ -514,14 +1200,14 @@ export async function deleteContent(id: number): Promise<{ error: PostgrestError
 // =====================================================
 
 export async function fetchAllUsers(): Promise<{
-  data: UserType[] | null;
+  data: ManageUserListItem[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createAdminSupabaseClient();
 
   const { data, error } = await supabase
     .from("users")
-    .select("*")
+    .select(MANAGE_USER_LIST_SELECT)
     .eq("is_deleted", false)
     .order("created_at", { ascending: false });
 
@@ -530,7 +1216,7 @@ export async function fetchAllUsers(): Promise<{
     return { data: null, error };
   }
 
-  return { data: data as UserType[], error: null };
+  return { data: data as ManageUserListItem[], error: null };
 }
 
 /**
@@ -538,7 +1224,8 @@ export async function fetchAllUsers(): Promise<{
  * （/admin/users でのサブスク会員バッジ表示用）。
  *
  * `stripe_subscriptions` は1ユーザー1行固定で解約後も行が残り続けるため、
- * 終端状態（TERMINAL_SUBSCRIPTION_STATUSES）の行は「現在は契約していない」として除外する。
+ * 契約が記録されていない行（NON_CURRENT_SUBSCRIPTION_STATUSES: 終端状態およびCheckout
+ * 手続き中）は「現在は契約していない」として除外する。
  */
 export async function fetchUserIdsWithStripeSubscription(): Promise<{
   data: number[] | null;
@@ -549,7 +1236,7 @@ export async function fetchUserIdsWithStripeSubscription(): Promise<{
   const { data, error } = await supabase
     .from("stripe_subscriptions")
     .select("user_id")
-    .not("status", "in", `(${TERMINAL_SUBSCRIPTION_STATUSES.join(",")})`);
+    .not("status", "in", `(${NON_CURRENT_SUBSCRIPTION_STATUSES.join(",")})`);
 
   if (error) {
     console.error("サブスク契約ユーザー一覧取得エラー:", error.message);
@@ -563,12 +1250,36 @@ export async function fetchUserIdsWithStripeSubscription(): Promise<{
 }
 
 /**
+ * 指定ユーザーが現在Stripeサブスクを契約中とみなせるか判定する（承認・会員種別変更時の
+ * Stripeロックに使う単一ユーザー版）。`fetchUserIdsWithStripeSubscription()` と同じ
+ * `NON_CURRENT_SUBSCRIPTION_STATUSES` 基準で判定するが、対象1名のみの照会で済ませるため
+ * `fetchStripeSubscriptionByUserId()`（`stripe-server.ts`）を用いる。admin は RLS で
+ * 他ユーザーの行も参照できる（`stripe_subscriptions` のSELECTポリシー参照）。
+ */
+export async function isUserCurrentlySubscribed(userId: number): Promise<{
+  data: boolean | null;
+  error: PostgrestError | null;
+}> {
+  const { data, error } = await fetchStripeSubscriptionByUserId(userId);
+
+  if (error) {
+    return { data: null, error };
+  }
+
+  return {
+    data: data !== null && !NON_CURRENT_SUBSCRIPTION_STATUSES.includes(data.status),
+    error: null,
+  };
+}
+
+/**
  * ユーザーを承認する。承認と同時に会員種別（コミュニティ会員 / 一般有料会員）を設定する。
  *
  * 承認済み（active）ユーザーの再承認は不可。会員種別も上書きするため、古い画面からの
- * 再承認で設定済みの種別が既定値に書き換わる事故を防ぐ（種別変更は #95 で対応）。
+ * 再承認で設定済みの種別が既定値に書き換わる事故を防ぐ（種別変更は `changeMembershipType()` で行う）。
  * 事前SELECTによるチェックでは同時リクエスト間で競合し、SELECT失敗時にフェイルオープン
  * にもなるため、UPDATE自体に条件を折り込み原子的に判定する。
+ * service_role クライアントはRLSを迂回するため `is_deleted = false` も明示的に必須。
  *
  * @returns updated: 更新が行われたか。false は既に承認済み・存在しない・削除済みのいずれか
  */
@@ -586,6 +1297,7 @@ export async function approveUser(
       updated_at: new Date().toISOString(),
     })
     .eq("id", userId)
+    .eq("is_deleted", false)
     .neq("status", USER_STATUS.ACTIVE)
     .select("id");
 
@@ -599,44 +1311,93 @@ export async function approveUser(
 
 /**
  * ユーザーを却下する。却下ユーザーは会員種別を持たないため NULL に戻す。
+ *
+ * 対象が admin の場合は却下不可（`change_role` と同様の管理者保護）。事前SELECTでの
+ * チェックだと判定と更新の間に競合の余地があり、SELECT失敗時にフェイルオープンにも
+ * なるため、UPDATE自体に条件を折り込み原子的に判定する（`approveUser()` と同じ方針）。
+ * service_role クライアントはRLSを迂回するため `is_deleted = false` も明示的に必須。
+ * 対象が admin・存在しない・削除済みのいずれの場合も updated: false を返す。
  */
-export async function rejectUser(userId: number): Promise<{ error: PostgrestError | null }> {
+export async function rejectUser(
+  userId: number
+): Promise<{ error: PostgrestError | null; updated: boolean }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("users")
     .update({
       status: USER_STATUS.REJECTED,
       membership_type: null,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", userId);
+    .eq("id", userId)
+    .eq("is_deleted", false)
+    .neq("role", USER_ROLE.ADMIN)
+    .select("id");
 
   if (error) {
     console.error("ユーザー却下エラー:", error.message);
-    return { error };
+    return { error, updated: false };
   }
 
-  return { error: null };
+  return { error: null, updated: (data?.length ?? 0) > 0 };
 }
 
+/**
+ * ユーザーのロールを変更する。対象が admin の場合は変更不可（降格・誤操作防止）。
+ * 却下と同じ理由でUPDATEに条件を折り込み原子的に判定する（`rejectUser()` 参照）。
+ * ロール変更は active ユーザーのみが対象（`docs/specification.md` 2.7）。
+ */
 export async function changeUserRole(
   userId: number,
   role: "member" | "maintainer" | "admin"
-): Promise<{ error: PostgrestError | null }> {
+): Promise<{ error: PostgrestError | null; updated: boolean }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("users")
     .update({ role, updated_at: new Date().toISOString() })
-    .eq("id", userId);
+    .eq("id", userId)
+    .eq("is_deleted", false)
+    .eq("status", USER_STATUS.ACTIVE)
+    .neq("role", USER_ROLE.ADMIN)
+    .select("id");
 
   if (error) {
     console.error("ユーザーロール変更エラー:", error.message);
-    return { error };
+    return { error, updated: false };
   }
 
-  return { error: null };
+  return { error: null, updated: (data?.length ?? 0) > 0 };
+}
+
+/**
+ * 承認済み（active）ユーザーの会員種別を変更する。`status` は書き換えない
+ * （却下からの再承認で種別を選び直させないための `approveUser()` の設計とは独立）。
+ * ロール変更と同じ理由でUPDATEに条件を折り込み原子的に判定する（`changeUserRole()` 参照）。
+ * 対象は active ユーザーのみ（`docs/specification.md` 2.7）。Stripe契約中ユーザーの
+ * 変更可否は呼び出し側（APIルート）で判定する。
+ */
+export async function changeMembershipType(
+  userId: number,
+  membershipType: MembershipType
+): Promise<{ error: PostgrestError | null; updated: boolean }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("users")
+    .update({ membership_type: membershipType, updated_at: new Date().toISOString() })
+    .eq("id", userId)
+    .eq("is_deleted", false)
+    .eq("status", USER_STATUS.ACTIVE)
+    .select("id");
+
+  if (error) {
+    console.error("ユーザー会員種別変更エラー:", error.message);
+    return { error, updated: false };
+  }
+
+  return { error: null, updated: (data?.length ?? 0) > 0 };
 }
 
 // =====================================================
@@ -648,6 +1409,17 @@ interface StudentProgress {
   totalContents: number;
   completedContents: number;
   lastActivity: string | null;
+}
+
+/**
+ * RPC `get_students_progress_summary()` の返り値の型。生成型（database.types.ts）は
+ * `last_activity` を非null扱いにしているが、`completed_at` がnullableな以上、
+ * 実際には全行が未完了時刻無しの場合などにnullになりうるため、ここで明示的に上書きする。
+ */
+interface StudentProgressSummaryRow {
+  user_id: number;
+  completed_count: number;
+  last_activity: string | null;
 }
 
 export async function fetchStudentsProgress(): Promise<{
@@ -684,24 +1456,29 @@ export async function fetchStudentsProgress(): Promise<{
     console.error("公開コンテンツ総数取得エラー:", contentsCountError.message);
   }
 
-  // 完了済み進捗を全ユーザー分まとめて取得し、ユーザー単位に集約する
-  // （ユーザーごとの逐次クエリによるN+1を回避）。
-  // PostgRESTの1リクエスト最大行数（既定1000行）を超えても取りこぼさないよう range でページングする。
-  // サーバー側の max-rows 設定が pageSize より小さい場合でも取りこぼさないよう、
-  // offset は実際に返った行数で進め、0件になった時点で終了する。
+  // ユーザー単位の完了数・最終活動日時はRPC `get_students_progress_summary`
+  // （GROUP BY user_id でDB側集約。マイグレーション参照）に問い合わせる（#83）。
   // 進捗の取得に失敗した場合はエラーにせず完了数0で返し、受講生一覧の表示を維持する。
+  // RPCの返り値もPostgRESTのdb-max-rows（既定1000行）の対象になるため、
+  // user_progress の旧実装と同様に range でページングする
+  // （RPC側の ORDER BY user_id と .order() により安定した順序で進める）。
   const progressByUser = new Map<number, { completedCount: number; lastActivity: string | null }>();
   if ((users ?? []).length > 0) {
     const pageSize = 1000;
     let offset = 0;
     let hasMore = true;
     while (hasMore) {
-      const { data: progress, error: progressError } = await supabase
-        .from("user_progress")
-        .select("user_id, completed_at")
-        .eq("is_completed", true)
-        .order("id")
-        .range(offset, offset + pageSize - 1);
+      // completed_at はnullableで max() は全NULLならNULLを返すため、
+      // last_activity は実際には null になりうる（生成型は非null）。
+      // .overrideTypes() はこの関数内の他の .from().select() 呼び出しと同居すると
+      // postgrest-js側の型推論がずれてビルドできないため、awaitの戻り値を直接castする。
+      const { data: progressSummary, error: progressError } = (await supabase
+        .rpc("get_students_progress_summary")
+        .order("user_id")
+        .range(offset, offset + pageSize - 1)) as unknown as {
+        data: StudentProgressSummaryRow[] | null;
+        error: PostgrestError | null;
+      };
 
       if (progressError) {
         console.error("受講生進捗取得エラー:", progressError.message);
@@ -709,18 +1486,24 @@ export async function fetchStudentsProgress(): Promise<{
         break;
       }
 
-      const rows = progress ?? [];
+      const rows = progressSummary ?? [];
       for (const row of rows) {
-        const entry = progressByUser.get(row.user_id) ?? { completedCount: 0, lastActivity: null };
-        entry.completedCount += 1;
-        if (row.completed_at && (!entry.lastActivity || row.completed_at > entry.lastActivity)) {
-          entry.lastActivity = row.completed_at;
-        }
-        progressByUser.set(row.user_id, entry);
+        progressByUser.set(row.user_id, {
+          completedCount: row.completed_count,
+          lastActivity: row.last_activity,
+        });
       }
 
+      // 終了条件（#196 + レビュー指摘）:
+      // - 空ページなら終了（最終ページの次を取りに行かないのが主目的）
+      // - pageSize 満杯なら続行（1000行超の取りこぼし防止）
+      // - 短ページでも progressByUser.size < users.length なら続行
+      //   （db-max-rows が pageSize 未満に下がっている場合の取りこぼし防止。
+      //    進捗0の受講生はRPCに出ないため、その場合だけ空ページ1回が発生しうる）
       offset += rows.length;
-      hasMore = rows.length > 0;
+      const activeUserCount = (users ?? []).length;
+      hasMore =
+        rows.length > 0 && (rows.length >= pageSize || progressByUser.size < activeUserCount);
     }
   }
 

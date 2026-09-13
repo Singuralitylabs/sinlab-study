@@ -8,19 +8,25 @@ const supabaseProtocol: "http" | "https" | undefined = supabaseUrlParts
     : "https"
   : undefined;
 
+// YouTube サムネイルは `<img>` で i.ytimg.com を直接参照するため remotePatterns に含めない
+const remotePatterns: NonNullable<NonNullable<NextConfig["images"]>["remotePatterns"]> = [];
+
+if (supabaseUrlParts && supabaseProtocol) {
+  remotePatterns.push({
+    protocol: supabaseProtocol,
+    hostname: supabaseUrlParts.hostname,
+    pathname: "/storage/v1/object/public/thumbnails/**",
+  });
+}
+
 const nextConfig: NextConfig = {
-  images:
-    supabaseUrlParts && supabaseProtocol
-      ? {
-          remotePatterns: [
-            {
-              protocol: supabaseProtocol,
-              hostname: supabaseUrlParts.hostname,
-              pathname: "/storage/v1/object/public/thumbnails/**",
-            },
-          ],
-        }
-      : undefined,
+  images: {
+    remotePatterns,
+  },
+  experimental: {
+    // lucide-react は Next.js 既定の optimizePackageImports に含まれるためここでは指定しない
+    optimizePackageImports: ["radix-ui"],
+  },
   turbopack: {
     resolveAlias: {
       // react-pdf: canvas依存を除外（サーバーサイドビルドエラー防止）

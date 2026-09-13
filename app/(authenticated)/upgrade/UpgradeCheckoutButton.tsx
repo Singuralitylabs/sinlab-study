@@ -4,7 +4,7 @@ import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
-export function UpgradeCheckoutButton() {
+export function UpgradeCheckoutButton({ disabled = false }: { disabled?: boolean }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,7 +31,7 @@ export function UpgradeCheckoutButton() {
 
   return (
     <div className="space-y-2">
-      <Button onClick={handleClick} disabled={isLoading} size="lg" className="w-full">
+      <Button onClick={handleClick} disabled={isLoading || disabled} size="lg" className="w-full">
         {isLoading ? (
           <>
             <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />

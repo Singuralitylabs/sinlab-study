@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
+import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
 import { createPhase } from "@/app/services/api/admin-server";
+import { PhaseCreateSchema, validateRequest } from "@/app/services/api/schemas";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -19,16 +21,18 @@ export async function POST(request: NextRequest) {
     if (!checkContentPermissions(userRole)) {
       return NextResponse.json({ error: "管理権限がありません" }, { status: 403 });
     }
-    const body = await request.json();
-    const { theme_id, name, description, display_order, is_published } = body;
-    if (!name || !theme_id) {
-      return NextResponse.json({ error: "フェーズ名とテーマは必須です" }, { status: 400 });
+
+    const validation = await validateRequest(request, PhaseCreateSchema);
+    if (!validation.success) {
+      return validation.response;
     }
+    const { theme_id, name, description, insert_after_id, is_published } = validation.data;
+
     const { data, error } = await createPhase({
       theme_id,
       name,
       description,
-      display_order,
+      insertAfterId: insert_after_id,
       is_published,
     });
     if (error) {
@@ -36,6 +40,10 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ success: true, phase: data });
   } catch (error) {
+    if (error instanceof InvalidInsertAfterIdError) {
+      console.error("フェーズ作成エラー（insert_after_id不正）:", error.insertAfterId);
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("API エラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
   }

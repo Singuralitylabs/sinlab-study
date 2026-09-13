@@ -24,6 +24,7 @@ export function SubmissionCodeBlock({ files, preClassName }: SubmissionCodeBlock
   return (
     <div className="space-y-3">
       {files.map((file, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: 提出済みファイルの読み取り専用表示で並び替え・追加削除は発生せず、filename は空や重複がありうるため index を含める
         <div key={`${index}-${file.filename}`}>
           <div className="mb-1 flex items-center gap-2 text-xs font-medium text-muted-foreground">
             <span className="font-mono">{file.filename || `ファイル${index + 1}`}</span>

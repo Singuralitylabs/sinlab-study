@@ -130,3 +130,84 @@
     @apply bg-background text-foreground font-sans antialiased;
   }
 }
+
+/*
+ * MarkdownRendererが付与するコードブロック（`.prose pre code.hljs`）の配色。
+ * @tailwindcss/typography の pre 背景（--tw-prose-pre-bg / --tw-prose-invert-pre-bg）は
+ * ライト/ダークいずれのサイトテーマでも常に暗色であるため、トークン色をサイトの
+ * --primary 等（:root/.dark で明暗が入れ替わる変数）に連動させると、ライトテーマ時に
+ * 暗背景とのcontrastが不足する。そのため、暗背景を前提にした固定パレットを
+ * --hljs-* として定義し、サイトのテーマ切り替えとは独立させる
+ * （各色は prose の pre 背景・invert pre 背景の両方に対しWCAG AA 4.5:1以上を確認済み）。
+ * `.prose pre code.hljs` 配下にのみ影響するようスコープし、他の暗背景の<pre>
+ * （SubmissionCodeBlock等、この固定パレットを前提としていない箇所）に配色が
+ * 意図せず波及しないようにする。
+ * このルールは @layer に含めないため、CSS Cascade Layersの仕様上、
+ * @layerに属する@tailwindcss/typographyのスタイルより優先度が高く評価される。
+ *
+ * 対象言語（html/css/javascript/typescript/python/json/bash）が実際に出力する
+ * hljs-*クラスのみを実測（highlight.js/lowlightの出力を直接確認）した上で定義しており、
+ * 出力されないクラス（quote/addition/deletion/bullet/section/template-variable/
+ * emphasis/strongなど、diff・Markdown等の他言語向け）は含めない。
+ * hljs-punctuation（JSONの記号）・hljs-subst（テンプレートリテラルの補間部分）は
+ * 実際に出力されるが、可読性のため配色せず地の文の色を継承させる。
+ */
+.prose pre code.hljs {
+  --hljs-keyword: oklch(0.65 0.2 255);
+  --hljs-string: oklch(0.63 0.18 145);
+  --hljs-number: oklch(0.7 0.15 30);
+  --hljs-variable: oklch(0.63 0.14 200);
+  --hljs-meta: oklch(0.67 0.14 330);
+  --hljs-comment: oklch(0.7 0.02 245);
+}
+
+.prose pre code.hljs .hljs-comment {
+  color: var(--hljs-comment);
+  font-style: italic;
+}
+
+.prose pre code.hljs .hljs-keyword,
+.prose pre code.hljs .hljs-selector-tag,
+.prose pre code.hljs .hljs-built_in,
+.prose pre code.hljs .hljs-literal,
+.prose pre code.hljs .hljs-title,
+.prose pre code.hljs .hljs-function {
+  color: var(--hljs-keyword);
+  font-weight: 600;
+}
+
+/*
+ * タグ名・要素名はキーワードと同系色にするが、太字にはしない。
+ * 太字にすると入れ子の hljs-attr / hljs-string（属性名・属性値）まで
+ * font-weightを継承して太字になってしまうため。
+ */
+.prose pre code.hljs .hljs-tag,
+.prose pre code.hljs .hljs-name {
+  color: var(--hljs-keyword);
+}
+
+.prose pre code.hljs .hljs-string,
+.prose pre code.hljs .hljs-regexp {
+  color: var(--hljs-string);
+}
+
+.prose pre code.hljs .hljs-number,
+.prose pre code.hljs .hljs-symbol {
+  color: var(--hljs-number);
+}
+
+.prose pre code.hljs .hljs-variable,
+.prose pre code.hljs .hljs-params,
+.prose pre code.hljs .hljs-type,
+.prose pre code.hljs .hljs-attr,
+.prose pre code.hljs .hljs-attribute,
+.prose pre code.hljs .hljs-selector-attr,
+.prose pre code.hljs .hljs-selector-class,
+.prose pre code.hljs .hljs-selector-id,
+.prose pre code.hljs .hljs-selector-pseudo {
+  color: var(--hljs-variable);
+}
+
+.prose pre code.hljs .hljs-meta {
+  color: var(--hljs-meta);
+}

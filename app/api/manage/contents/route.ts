@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { USER_STATUS } from "@/app/constants/user";
+import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
 import { createContent } from "@/app/services/api/admin-server";
+import { ContentCreateSchema, validateRequest } from "@/app/services/api/schemas";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -20,27 +22,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
     }
 
-    const body = await request.json();
+    const validation = await validateRequest(request, ContentCreateSchema);
+    if (!validation.success) {
+      return validation.response;
+    }
     const {
       title,
       week_id,
       content_type,
       video_url,
       text_content,
+      description,
       exercise_instructions,
       hint,
       reference_answer,
       allowed_submission_types,
       code_language,
       pdf_url,
-      display_order,
+      insert_after_id,
       is_published,
       is_open_to_trial,
-    } = body;
-
-    if (!title || !week_id || !content_type) {
-      return NextResponse.json({ error: "必須パラメータが不足しています" }, { status: 400 });
-    }
+    } = validation.data;
 
     const { data, error } = await createContent({
       title,
@@ -48,13 +50,14 @@ export async function POST(request: NextRequest) {
       content_type,
       video_url,
       text_content,
+      description,
       exercise_instructions,
       hint,
       reference_answer,
       allowed_submission_types,
       code_language,
       pdf_url,
-      display_order,
+      insertAfterId: insert_after_id,
       is_published,
       is_open_to_trial,
     });
@@ -65,6 +68,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, content: data });
   } catch (error) {
+    if (error instanceof InvalidInsertAfterIdError) {
+      console.error("コンテンツ作成エラー（insert_after_id不正）:", error.insertAfterId);
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("API エラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
   }

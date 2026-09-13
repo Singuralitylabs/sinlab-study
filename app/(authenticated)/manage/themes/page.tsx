@@ -59,6 +59,8 @@ export default async function ManageThemesPage() {
                   <TableCell className="text-sm">{theme.display_order}</TableCell>
                   <TableCell>
                     {theme.image_url ? (
+                      // 40x40のアイコンサイズではobject-containの余白が目立つため、
+                      // 他箇所（/learn等）と異なりobject-coverのまま据え置く（#114）
                       <div className="relative w-10 h-10 rounded overflow-hidden">
                         <Image
                           src={resolveStorageUrl(theme.image_url)}
