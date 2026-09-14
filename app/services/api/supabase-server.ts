@@ -1,5 +1,5 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 // サーバーサイド用Supabaseクライアント（認証付き）
@@ -36,23 +36,27 @@ export async function createServerSupabaseClient() {
 // サーバーサイド用Supabaseクライアント（Service Role: RLSバイパス）
 // 管理者・講師向けの権限チェック済みクエリ、および通常クライアントでは RLS で
 // 見えない行を読むサーバー処理（OAuthコールバックの users 存在確認）に使用。
-// 未設定時は通常クライアントへフォールバックするため、Cookie の無い文脈では
-// 呼び出す前に SUPABASE_SERVICE_ROLE_KEY の存在を確認すること。
-let cachedAdminClient: ReturnType<typeof createClient> | null = null;
+// SUPABASE_SERVICE_ROLE_KEY 未設定時は throw する（通常クライアントへの暗黙フォールバックはしない）。
+// RLS 適用の通常クライアントが必要な経路は、呼び出し側が createServerSupabaseClient() を明示的に選ぶ。
+// キャッシュ変数は SupabaseClient（Database=any）で保持する。
+// ReturnType<typeof createClient> だとフォールバック削除後に空スキーマ扱いになり、
+// 呼び出し側の .from().update() 等が never になる（以前は createServerClient の any とのユニオンで隠れていた）。
+let cachedAdminClient: SupabaseClient | null = null;
 
 export async function createAdminSupabaseClient() {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (serviceRoleKey) {
-    if (cachedAdminClient) {
-      return cachedAdminClient;
-    }
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!url) {
-      throw new Error("Supabase環境変数が設定されていません: NEXT_PUBLIC_SUPABASE_URL");
-    }
-    cachedAdminClient = createClient(url, serviceRoleKey);
+  if (!serviceRoleKey) {
+    throw new Error(
+      "SUPABASE_SERVICE_ROLE_KEY が設定されていません。Service Role クライアントにはキーが必須です"
+    );
+  }
+  if (cachedAdminClient) {
     return cachedAdminClient;
   }
-  // Service Role Key未設定時は通常クライアントにフォールバック
-  return createServerSupabaseClient();
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!url) {
+    throw new Error("Supabase環境変数が設定されていません: NEXT_PUBLIC_SUPABASE_URL");
+  }
+  cachedAdminClient = createClient(url, serviceRoleKey);
+  return cachedAdminClient;
 }

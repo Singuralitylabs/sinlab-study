@@ -921,8 +921,8 @@ export async function releaseCheckoutSlot(
 
 /**
  * Service Roleキーの設定を明示的に検証する。
- * createAdminSupabaseClient() は未設定時にCookieクライアントへ静かにフォールバックするため、
- * Cookieの無いWebhook文脈では黙って失敗しRLSに阻まれる。Stripe系の書き込み前に必ず呼ぶ。
+ * createAdminSupabaseClient() も未設定時に throw するが、Stripe系の書き込み前に
+ * より具体的なエラーメッセージで早期失敗させるために残している。
  */
 export function assertServiceRoleConfigured(): void {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {

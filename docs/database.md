@@ -635,7 +635,7 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 
 **既知の制約**: `learning_contents` の SELECT ポリシーはコンテンツ行自身の `is_published` / `is_deleted` しか見ず、所属する週・フェーズ・テーマの未公開はアプリ層（`isContentVisible()` / `fetchWeekById()`）で補っている。Storage ポリシーはこの RLS の見え方を継承するため、「コンテンツ行は公開済みだが親階層が未公開」のスライドは、member が Storage API を直接叩けば署名できる。画面からは親階層の判定で404になるため導線は無い。
 
-アップロード・削除APIは `createAdminSupabaseClient()` を使うため、`SUPABASE_SERVICE_ROLE_KEY` が設定されていればRLSをバイパスする。ただし同関数は未設定時に通常クライアントへフォールバックするため、その場合はこれらのポリシーが実際の書き込み可否を決める。
+アップロード・削除APIは `createAdminSupabaseClient()` を使うため、`SUPABASE_SERVICE_ROLE_KEY` が必須である（未設定時は throw。通常クライアントへの暗黙フォールバックはしない）。キー設定時は RLS をバイパスする。ポリシーは通常クライアント経由の書き込みや、キー設定ミス時の防御層としても機能する。
 
 ---
 
