@@ -73,7 +73,6 @@ export async function GET(request: NextRequest) {
   // SELECT RLS は本人行でも is_deleted=false を要求するため、通常クライアントでは
   // 論理削除済みレコードが見えない。再ログインで INSERT すると UNIQUE 違反になるので、
   // 存在確認だけ service_role で行い is_deleted では絞らない。INSERT 自体は通常クライアント。
-  // createAdminSupabaseClient() はキー未設定時に throw する（暗黙フォールバックなし）。
   const adminSupabase = await createAdminSupabaseClient();
   const { data: existingUser, error: userError } = await adminSupabase
     .from("users")

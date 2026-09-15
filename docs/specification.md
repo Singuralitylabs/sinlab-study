@@ -345,7 +345,7 @@ Stripe APIからのライブ状態取得は、ミラー更新の直前（上記�
 | `POST /api/stripe/webhook` | Stripeからのイベントを受信。生ボディで署名検証し、`event.id` のclaim（原子的な処理権確保）に成功した場合のみイベント種別ごとに処理する |
 | `POST /api/stripe/portal` | Customer Portalセッションを作成しURLを返す。自身の `stripe_subscriptions` 行がない、またはCustomer未確保（Checkout手続き中に離脱した行のみ）のユーザーは404 |
 
-portal は自分の行を読むSELECTのみだが、checkout は処理権のclaim/releaseで `stripe_subscriptions` を書き込む。`createAdminSupabaseClient()` は `SUPABASE_SERVICE_ROLE_KEY` 未設定時に throw する（通常クライアントへの暗黙フォールバックはしない）。DB書き込みを行う関数（Webhookハンドラの各関数と、`claimCheckoutSlot()` / `releaseCheckoutSlot()` / Customer保存）は、いずれも冒頭で `assertServiceRoleConfigured()` によりより具体的なエラーメッセージで早期失敗させてから `createAdminSupabaseClient()` を使う。Checkoutの決済手段は `payment_method_types: ["card"]` で明示的にカードのみへ限定する。
+portal は自分の行を読むSELECTのみだが、checkout は処理権のclaim/releaseで `stripe_subscriptions` を書き込む。`createAdminSupabaseClient()` は `SUPABASE_SERVICE_ROLE_KEY` 未設定時に throw する（通常クライアントへの暗黙フォールバックはしない）。DB書き込みを行う関数は、いずれも `createAdminSupabaseClient()` 経由で service_role クライアントを取得する（二重の事前チェックは置かない。Customer作成前に admin client を確保することで孤児Customerを防ぐ）。Checkoutの決済手段は `payment_method_types: ["card"]` で明示的にカードのみへ限定する。
 
 **エッジケース**:
 - 二重Checkout: Checkoutセッションを作る前に `stripe_subscriptions` へ「決済手続き中」行（`status = 'checkout_pending'`）をINSERTして処理権を確保し、`user_id` のUNIQUE制約で排他する（`stripe_events` のclaim/releaseと同じパターン。詳細は[データベース設計書](./database.md)3.9）。決済完了までミラー行が存在しない時間帯を突く並行リクエストも、片方だけがCheckoutセッションを作成できる。Checkout作成に失敗した場合は処理権を解放する
@@ -422,7 +422,7 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 3. 有効期限は `SLIDE_SIGNED_URL_EXPIRES_IN_SECONDS`（`app/constants/storage.ts`、1時間）。ページ描画時に発行し、期限切れ後はリロードで再発行される。pdf.js は表示直後に残りのチャンクを裏で取得し切るため、閲覧中に期限が切れてもページ送りは失敗しない
 4. 発行に失敗した場合（Storage障害・キーとして解釈できない値）は `SlideContent`（`app/components/SlideContent.tsx`）が「現在表示できない」旨の中立なメッセージを表示し、ページ全体は落とさない（原因が一時障害か不正な保存値かを利用者側で区別できないため、再読み込みを促す文言にはしない）
 
-未認証のデモ画面（`/demo`）にはユーザー権限のクライアントが無いため、`createDemoSlideSignedUrl()`（`demo-learning-server.ts`）が他のデモ取得関数と同じく service_role で署名する。対象は**公開済み・未削除かつ `is_open_to_trial = true` のスライドのみ**（お試しユーザーと同じ範囲を未認証に見せる）で、この条件は呼び出し側ではなく同関数自身がコンテンツ行を受け取って判定する（満たさなければ Storage を呼ばず null）。それ以外のスライドはお試し公開の対象外である旨を表示する。
+未認証のデモ画面（`/demo`）のルート一覧（`app/demo/page.tsx`）は ISR（`revalidate = 3600`）でキャッシュする（ビルド時に service_role が無い環境では CI が placeholder キーを渡し、誤ったキーでは取得失敗して空表示になる）。ユーザー権限のクライアントが無いため、`createDemoSlideSignedUrl()`（`demo-learning-server.ts`）が他のデモ取得関数と同じく service_role で署名する。対象は**公開済み・未削除かつ `is_open_to_trial = true` のスライドのみ**（お試しユーザーと同じ範囲を未認証に見せる）で、この条件は呼び出し側ではなく同関数自身がコンテンツ行を受け取って判定する（満たさなければ Storage を呼ばず null）。それ以外のスライドはお試し公開の対象外である旨を表示する。
 
 **既知の制約**: Storage の SELECT ポリシーは `learning_contents` の RLS の見え方を継承するため、2.12節と同様に「コンテンツ行は公開済みだが所属する週・フェーズ・テーマが未公開」のスライドは、member が Storage API を直接叩けば署名できる（画面からは親階層の判定で404になるため導線は無い。データベース設計書 6.8）。
 
@@ -917,11 +917,11 @@ JSONボディを受け取る API Route の入力検証は [zod](https://zod.dev/
 | Google認証キャンセル | `/login` に戻り、エラーメッセージを表示 |
 | OAuth コード交換失敗 | `/login` にリダイレクト |
 | セッション期限切れ | プロキシ（`proxy.ts`）が `/login` にリダイレクト |
-| Supabase接続エラー | サーバーログに出力、`/login` にリダイレクト |
+| Supabase接続エラー（コード交換・存在確認のDBエラー等） | サーバーログに出力、`/login` にリダイレクト |
 | ユーザー自動登録失敗 | サーバーログに出力し `/login?error=registration_failed` にリダイレクト（通知は送らない、セッション Cookie は付けない）。`/login` は許可リスト方式でメッセージ表示 |
 | 論理削除済みユーザーの再ログイン | INSERT を試行せず、自動登録失敗と同じ導線（`/login?error=registration_failed`、セッション Cookie なし） |
 | ユーザー存在確認の失敗 | INSERT せず、`error` パラメータなしの `/login` へフェイルクローズ（セッション Cookie なし） |
-| service_role 未設定 | `createAdminSupabaseClient()` が throw（通常クライアントへの暗黙フォールバックなし。個別事前チェックは置かない） |
+| service_role 未設定 | `createAdminSupabaseClient()` が throw し、ユーザーには 500 として見える（通常クライアントへの暗黙フォールバックなし。個別事前チェックは置かない。throw はセッション Cookie 付与より前のため Cookie は発行されない） |
 | 重複登録の試行 | `auth_id` のUNIQUE制約で防止。既存レコードを使用 |
 
 ### 8.3 Server Services
@@ -1010,9 +1010,7 @@ JSONボディを受け取る API Route の入力検証は [zod](https://zod.dev/
 ```mermaid
 flowchart TD
     A["GET /auth/callback"] --> B["セッション確立"]
-    B --> K{service_role 設定済み?}
-    K -->|いいえ| T["createAdminSupabaseClient() が throw"]
-    K -->|はい| B2["users テーブル確認"]
+    B --> B2["users テーブル確認<br/>（createAdminSupabaseClient。未設定時は throw→500）"]
     B2 --> C{users レコード}
     C -->|確認失敗| L["ログ出力・/login にリダイレクト（error なし）"]
     C -->|未削除の既存| Z[通常のステータス判定]
@@ -1117,3 +1115,4 @@ flowchart TD
 | 2026年9月 | #208 レビュー反映: コンテンツサマリー取得を PostgREST 1000行上限に対して range ページングし、切り詰めで現在の週が欠落して404になる経路を塞いだ。フェーズツリーの週・コンテンツ並びを `compareGroupLevel`（id タイブレーク）でナビと揃えた。3.3節を更新 |
 | 2026年9月 | #208 追加レビュー反映: ナビ縮退時（通し列に現在のコンテンツが無い）は「テーマに戻る」ではなく従来の「フェーズに戻る」に倒し、同じ週の前後は現在の週サマリーから復元する。3.3節を更新 |
 | 2026年9月 | `createAdminSupabaseClient()` の service_role 未設定時の暗黙フォールバックを廃止し throw に統一（#215）。OAuth コールバックの個別事前チェックを削除。2.5・2.11・8.2・9.5.1節および database.md 6.8 を更新 |
+| 2026年9月 | #215 レビュー反映: `/demo` を force-dynamic から ISR（revalidate=3600）へ変更し CI に service_role placeholder を追加。`assertServiceRoleConfigured()` を削除して `createAdminSupabaseClient()` に一本化。OAuth の service_role 未設定時は 500 になることを 8.2・9.5.1 に明記。database.md 6.8 の防御層記述を修正 |

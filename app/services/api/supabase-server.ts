@@ -38,9 +38,8 @@ export async function createServerSupabaseClient() {
 // 見えない行を読むサーバー処理（OAuthコールバックの users 存在確認）に使用。
 // SUPABASE_SERVICE_ROLE_KEY 未設定時は throw する（通常クライアントへの暗黙フォールバックはしない）。
 // RLS 適用の通常クライアントが必要な経路は、呼び出し側が createServerSupabaseClient() を明示的に選ぶ。
-// キャッシュ変数は SupabaseClient（Database=any）で保持する。
-// ReturnType<typeof createClient> だとフォールバック削除後に空スキーマ扱いになり、
-// 呼び出し側の .from().update() 等が never になる（以前は createServerClient の any とのユニオンで隠れていた）。
+// ReturnType<typeof createClient> はジェネリック制約側に解決されスキーマが never になるため SupabaseClient を使う。
+// async は呼び出し側互換のため残す（内部に await は無い）。
 let cachedAdminClient: SupabaseClient | null = null;
 
 export async function createAdminSupabaseClient() {

@@ -334,8 +334,9 @@ async function createAndSaveCustomer(
   claimedAt: string,
   idempotencyKey: string
 ): Promise<string> {
-  // 保存できない環境でCustomerだけ作ると孤児化するため、Stripeを呼ぶ前に検証する
-  assertServiceRoleConfigured();
+  // 保存できない環境でCustomerだけ作ると孤児化するため、Stripe呼び出し前に admin client を確保する
+  // （createAdminSupabaseClient はキー未設定時に throw。モジュールキャッシュありで副作用なし）
+  const supabase = await createAdminSupabaseClient();
 
   const stripe = getStripeClient();
   const customer = await stripe.customers.create(
@@ -343,7 +344,6 @@ async function createAndSaveCustomer(
     { idempotencyKey }
   );
 
-  const supabase = await createAdminSupabaseClient();
   const { data: saved, error } = await supabase
     .from("stripe_subscriptions")
     .update({ stripe_customer_id: customer.id })
@@ -662,7 +662,6 @@ export async function claimCheckoutSlot(
   userId: number,
   now: Date = new Date()
 ): Promise<CheckoutSlotClaim> {
-  assertServiceRoleConfigured();
   const supabase = await createAdminSupabaseClient();
   const claimedAt = now.toISOString();
 
@@ -902,7 +901,6 @@ export async function releaseCheckoutSlot(
   userId: number,
   claimedAt: string
 ): Promise<{ error: string | null }> {
-  assertServiceRoleConfigured();
   const supabase = await createAdminSupabaseClient();
 
   const { error } = await supabase
@@ -917,17 +915,4 @@ export async function releaseCheckoutSlot(
   }
 
   return { error: null };
-}
-
-/**
- * Service Roleキーの設定を明示的に検証する。
- * createAdminSupabaseClient() も未設定時に throw するが、Stripe系の書き込み前に
- * より具体的なエラーメッセージで早期失敗させるために残している。
- */
-export function assertServiceRoleConfigured(): void {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error(
-      "SUPABASE_SERVICE_ROLE_KEY が設定されていません。Stripe関連の書き込みにはService Roleキーが必須です"
-    );
-  }
 }

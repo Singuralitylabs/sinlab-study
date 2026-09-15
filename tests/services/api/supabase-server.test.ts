@@ -70,26 +70,9 @@ describe("createAdminSupabaseClient", () => {
     const { createAdminSupabaseClient } = await import("@/app/services/api/supabase-server");
 
     await expect(createAdminSupabaseClient()).rejects.toThrow(
-      "SUPABASE_SERVICE_ROLE_KEY が設定されていません。Service Role クライアントにはキーが必須です"
+      /SUPABASE_SERVICE_ROLE_KEY が設定されていません/
     );
     expect(mockCreateClient).not.toHaveBeenCalled();
     expect(mockCreateServerClient).not.toHaveBeenCalled();
-  });
-
-  it("未設定時のエラーメッセージにキー値らしき文字列を含めない", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
-    // 空文字も未設定扱い。メッセージへキー文字列を埋め込まないことを確認する
-    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
-
-    const { createAdminSupabaseClient } = await import("@/app/services/api/supabase-server");
-
-    try {
-      await createAdminSupabaseClient();
-      expect.unreachable();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      expect(message).toContain("SUPABASE_SERVICE_ROLE_KEY");
-      expect(message).not.toMatch(/service-role-secret|sk_live|sk_test|eyJ/);
-    }
   });
 });

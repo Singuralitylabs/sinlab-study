@@ -467,10 +467,12 @@ describe("claimCheckoutSlot", () => {
     expect(result).toEqual({ outcome: "error", message: dbError.message });
   });
 
-  it("SUPABASE_SERVICE_ROLE_KEY未設定時はthrowする（Cookieクライアントへの暗黙のフォールバック防止）", async () => {
-    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
+  it("createAdminSupabaseClient が throw したとき（service_role 未設定等）は伝播する", async () => {
+    vi.mocked(createAdminSupabaseClient).mockRejectedValue(
+      new Error("SUPABASE_SERVICE_ROLE_KEY が設定されていません")
+    );
 
-    await expect(claimCheckoutSlot(5, now)).rejects.toThrow("SUPABASE_SERVICE_ROLE_KEY");
+    await expect(claimCheckoutSlot(5, now)).rejects.toThrow(/SUPABASE_SERVICE_ROLE_KEY/);
   });
 });
 

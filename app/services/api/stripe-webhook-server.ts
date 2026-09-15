@@ -2,7 +2,6 @@ import type Stripe from "stripe";
 import { USER_MEMBERSHIP, USER_STATUS } from "@/app/constants/user";
 import {
   ACTIVATABLE_SUBSCRIPTION_STATUSES,
-  assertServiceRoleConfigured,
   getStripeClient,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
   TERMINAL_SUBSCRIPTION_STATUSES,
@@ -82,7 +81,6 @@ export async function activateUserFromCheckoutSession(session: Stripe.Checkout.S
     };
   }
 
-  assertServiceRoleConfigured();
   const supabase = await createAdminSupabaseClient();
 
   // 「既存行の確認 → ミラー更新」は複数ステートメントに分かれるため、確認から書き込みまでの
@@ -266,7 +264,6 @@ async function writeCheckoutMirror(
 export async function syncSubscriptionStatus(
   subscriptionFromEvent: Stripe.Subscription
 ): Promise<{ error: string | null }> {
-  assertServiceRoleConfigured();
   const supabase = await createAdminSupabaseClient();
 
   const { data: existing, error: fetchError } = await supabase
@@ -313,7 +310,6 @@ export async function syncSubscriptionStatus(
  * UPDATE自体に折り込む（コミュニティ会員・手動承認済みユーザーを誤って巻き込まない）。
  */
 export async function revertUserToTrial(userId: number): Promise<{ error: string | null }> {
-  assertServiceRoleConfigured();
   const supabase = await createAdminSupabaseClient();
 
   const { error } = await supabase
@@ -362,7 +358,6 @@ export async function claimEvent(
   eventId: string,
   type: string
 ): Promise<{ claimed: boolean; processedAt: string | null; error: string | null }> {
-  assertServiceRoleConfigured();
   const supabase = await createAdminSupabaseClient();
 
   const processedAt = new Date().toISOString();
@@ -412,7 +407,6 @@ export async function releaseEventClaim(
   eventId: string,
   processedAt: string
 ): Promise<{ error: string | null }> {
-  assertServiceRoleConfigured();
   const supabase = await createAdminSupabaseClient();
 
   const { error } = await supabase

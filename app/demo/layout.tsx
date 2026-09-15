@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic";
-
 import { DemoBanner } from "./components/DemoBanner";
 import { DemoSideNav } from "./components/DemoSideNav";
 

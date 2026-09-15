@@ -6,6 +6,10 @@ import { resolveStorageUrl } from "@/app/lib/storage-url";
 import { fetchDemoPublishedThemes } from "@/app/services/api/demo-learning-server";
 import { Card } from "@/components/ui/card";
 
+// 公開テーマ一覧は service_role で取得する。force-dynamic にはせず ISR で鮮度を担保する
+// （ビルド時のキー未設定対策は CI の placeholder キー側。詳細は docs/specification.md）
+export const revalidate = 3600;
+
 export default async function DemoRootPage() {
   const { data: themes } = await fetchDemoPublishedThemes();
 
