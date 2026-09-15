@@ -284,6 +284,28 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 | Site URL | 本アプリのURL（`http://localhost:3000` / 本番URL） |
 | Redirect URLs | `http://localhost:3000/auth/callback`, `https://本番ドメイン/auth/callback` |
 
+**Google同意画面のブランディング設定（運用）**
+
+Googleのアカウント選択画面に表示される「〜に移動」の文字列は、Google Cloud側のOAuth設定で決まり、アプリのコードからは制御できない。既定では Supabase プロジェクトのドメイン（`<supabase-project-id>.supabase.co`）が表示されるため、受講生からはフィッシングと区別がつきにくい。アプリ名「Sinlab Study」を表示させるには、Google Auth Platform でブランド情報を登録し、ブランド確認（審査）を通す。Supabase の Client ID / クライアントシークレット・リダイレクトURIは変更しないため、この作業で認証フローは停止しない。
+
+1. Search Console で `future-tech-association.org` の所有権を確認する（GCPプロジェクトのオーナーと同じGoogleアカウントで行う。これが未了だと承認済みドメインに登録できない）
+2. Google Auth Platform > Branding（`console.cloud.google.com/auth/branding`）を設定する
+
+   | 設定項目 | 値 |
+   |:--|:--|
+   | アプリ名 | `Sinlab Study` |
+   | アプリのロゴ | 120x120 PNG（`public/icon.png` 相当。ロゴを登録するとブランド確認が必須になる） |
+   | アプリのホームページ | `https://sinlab.future-tech-association.org/sinlab-study/` |
+   | プライバシーポリシー / 利用規約 | 同ディレクトリの `privacy.html` / `terms.html`（ログイン画面のリンクと同じURL） |
+   | 承認済みドメイン | `future-tech-association.org`（リダイレクト先の `supabase.co` が登録済みならそのまま残す） |
+   | サポートメール / デベロッパー連絡先 | 運営のメールアドレス |
+
+3. Audience を「外部 / 本番（In production）」に公開する（Testingのままでは未確認アプリの警告が出続ける）。スコープは `openid` / `userinfo.email` / `userinfo.profile` のみで機微・制限付きスコープを含まないため、スコープ審査は不要
+4. Verification からブランド確認を申請する（審査は数営業日）
+5. 承認後、シークレットウィンドウで本番の `/login` からログインし、アカウント選択画面が「Sinlab Study に移動」になっていることを確認する。確認できたら、ログイン画面（`app/(auth)/login/page.tsx`）の「〜.supabase.co というドメインへの移動が表示されます」という注意書きを削除する（審査中は事実として正しいため残す）
+
+**却下された場合のフォールバック**: Googleはホームページのドメインとリダイレクト先ドメインの関係を見るため、リダイレクト先が `*.supabase.co` であることを理由に通らない可能性がある。その場合は [Supabaseカスタムドメイン](https://supabase.com/docs/guides/platform/custom-domains)（Proプラン + Add-onの有料機能）で `auth.future-tech-association.org` をSupabaseにCNAMEで向け、`NEXT_PUBLIC_SUPABASE_URL` を差し替える。アプリ側にプロジェクトURLのハードコードは無く、`next.config.ts` の `images.remotePatterns` と `resolveStorageUrl()` は同env varから導出されるため、変更は環境変数（+ `.env.local.example`・CIのプレースホルダ）のみで済む。GoogleのOAuthクライアントには新しいコールバックURL `https://auth.future-tech-association.org/auth/v1/callback` を**追加**する（既存URIは残す）。
+
 ### 2.11 Stripeサブスク決済によるアップグレード
 
 **機能フラグ（`STRIPE_ENABLED`）**: 本決済機能全体は環境変数 `STRIPE_ENABLED` で有効・無効を切り替える。判定は `isStripeEnabled()`（`app/constants/stripe.ts`）に集約し、未設定または `"true"` 以外の値は無効として扱う（フェイルクローズ）。`app/constants/stripe.ts` はStripe SDKに依存しないため、layout等の非決済系コードからも軽量に参照できる（決済系コードへは `app/services/api/stripe-server.ts` から再exportして提供する）。以降の節は有効時（`STRIPE_ENABLED=true`）の仕様を記述する。
@@ -1115,3 +1137,4 @@ flowchart TD
 | 2026年9月 | コンテンツ詳細の前後ナビをテーマ内通し遷移に変更（#208）：週末尾→次週先頭、フェーズ末尾→次フェーズ先頭。テーマ末尾は「テーマに戻る」。境界時のみ所属を併記。`fetchThemeNavigationIndex` を追加（service_role の呼び出し箇所・回数は増えない）。3.3節・7.2節・2.6節・2.12節を更新 |
 | 2026年9月 | #208 レビュー反映: コンテンツサマリー取得を PostgREST 1000行上限に対して range ページングし、切り詰めで現在の週が欠落して404になる経路を塞いだ。フェーズツリーの週・コンテンツ並びを `compareGroupLevel`（id タイブレーク）でナビと揃えた。3.3節を更新 |
 | 2026年9月 | #208 追加レビュー反映: ナビ縮退時（通し列に現在のコンテンツが無い）は「テーマに戻る」ではなく従来の「フェーズに戻る」に倒し、同じ週の前後は現在の週サマリーから復元する。3.3節を更新 |
+| 2026年9月 | Googleログインのアカウント選択画面に `<supabase-project-id>.supabase.co` が表示される件への対応手順を2.10節に追記：Google Auth Platform の Branding にアプリ名「Sinlab Study」・ロゴ・承認済みドメインを登録してブランド確認を申請する運用手順と、却下時のフォールバック（Supabaseカスタムドメイン）を記載。アプリのコード・Supabase側の設定値は変更しない |
