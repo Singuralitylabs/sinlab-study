@@ -26,6 +26,9 @@ jobs:
     env:
       NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: placeholder-key
+      # createAdminSupabaseClient() は未設定時に throw する。ビルド時の /demo 静的生成で
+      # 落ちないよう placeholder を置く（実API呼び出しは失敗し空表示になる）
+      SUPABASE_SERVICE_ROLE_KEY: placeholder-service-role-key
 
     steps:
       - name: Checkout

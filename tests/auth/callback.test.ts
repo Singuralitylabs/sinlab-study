@@ -148,18 +148,17 @@ describe("GET /auth/callback", () => {
     expect(setCookieHeader(res)).toBeNull();
   });
 
-  it("SUPABASE_SERVICE_ROLE_KEY 未設定時は存在確認も insert もせず /login へフェイルクローズする", async () => {
-    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
+  it("createAdminSupabaseClient が throw した場合は存在確認も insert もせず、レスポンス（Cookie含む）を返さない", async () => {
     const sessionClient = createSessionClient();
     mockSessionClient(sessionClient);
+    vi.mocked(createAdminSupabaseClient).mockRejectedValue(
+      new Error("SUPABASE_SERVICE_ROLE_KEY が設定されていません")
+    );
 
-    const res = await GET(callbackRequest());
-
-    expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toBe("http://localhost/login");
-    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+    await expect(GET(callbackRequest())).rejects.toThrow(/SUPABASE_SERVICE_ROLE_KEY/);
+    expect(createAdminSupabaseClient).toHaveBeenCalled();
     expect(sessionClient.insert).not.toHaveBeenCalled();
     expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
-    expect(setCookieHeader(res)).toBeNull();
+    // throw により Response が返らないため、セッション Cookie も発行されない
   });
 });
