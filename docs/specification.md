@@ -1114,3 +1114,4 @@ flowchart TD
 | 2026年9月 | #208 追加レビュー反映: ナビ縮退時（通し列に現在のコンテンツが無い）は「テーマに戻る」ではなく従来の「フェーズに戻る」に倒し、同じ週の前後は現在の週サマリーから復元する。3.3節を更新 |
 | 2026年9月 | `createAdminSupabaseClient()` の service_role 未設定時の暗黙フォールバックを廃止し throw に統一（#215）。OAuth コールバックの個別事前チェックを削除。2.5・2.11・8.2・9.5.1節および database.md 6.8 を更新 |
 | 2026年9月 | #215 レビュー反映: `/demo` を force-dynamic から ISR（revalidate=3600）へ変更し CI に service_role placeholder を追加。`assertServiceRoleConfigured()` を削除して `createAdminSupabaseClient()` に一本化。OAuth の service_role 未設定時は 500 になることを 8.2・9.5.1 に明記。database.md 6.8 の防御層記述を修正 |
+| 2026年9月 | #216対応：slides の `storage.objects` SELECT に親階層（week / phase / theme）の公開・未削除判定を追加し、`isContentVisible()` と同条件に揃える（方針A）。3.2節の既知の制約を解消 |
