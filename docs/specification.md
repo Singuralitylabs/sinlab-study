@@ -418,15 +418,13 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 `slides` バケットは非公開（`public = false`）で、`learning_contents.pdf_url` にはオブジェクトキー（例: `gas/slide-01.pdf`）のみを保存する。配信の流れは次のとおり。
 
 1. コンテンツ詳細ページ（`app/(authenticated)/learn/.../[contentId]/page.tsx`）は、`isContentLockedForUser()` によるロック判定と、RLS適用の `fetchContentById()` によるコンテンツ行の取得を通過した後に、`createSlideSignedUrl()`（`app/services/api/slides-server.ts`）で署名付きURLを発行し `PdfSlideViewer` へ渡す。ロック済み・未公開（admin / maintainer のプレビューを除く）・存在しないコンテンツではURL自体を発行しない
-2. 署名は**通常クライアント（ログインユーザーの権限・RLS適用）**で行い、service_role は使わない。`storage.objects` の SELECT ポリシーは「`pdf_url` がそのオブジェクトキーと一致する `learning_contents` の行が、呼び出しユーザーの RLS 下で見える」場合にのみ許可する（データベース設計書 6.8）。そのため、お試しユーザーがロック済みスライドのキーを推測しても、アプリ経由でも Storage API の直叩きでも署名は発行されない。admin / maintainer はロールで無条件に許可される
+2. 署名は**通常クライアント（ログインユーザーの権限・RLS適用）**で行い、service_role は使わない。`storage.objects` の SELECT ポリシーは「`pdf_url` がそのオブジェクトキーと一致する `learning_contents` の行が、呼び出しユーザーの RLS 下で見え、かつ所属する週・フェーズ・テーマを含む4階層すべてが `is_published = true AND is_deleted = false`」の場合にのみ許可する（`isContentVisible()` と同条件。#216。データベース設計書 6.8）。そのため、お試しユーザーがロック済みスライドのキーを推測しても、アプリ経由でも Storage API の直叩きでも署名は発行されない。admin / maintainer はロールで無条件に許可される
 3. 有効期限は `SLIDE_SIGNED_URL_EXPIRES_IN_SECONDS`（`app/constants/storage.ts`、1時間）。ページ描画時に発行し、期限切れ後はリロードで再発行される。pdf.js は表示直後に残りのチャンクを裏で取得し切るため、閲覧中に期限が切れてもページ送りは失敗しない
 4. 発行に失敗した場合（Storage障害・キーとして解釈できない値）は `SlideContent`（`app/components/SlideContent.tsx`）が「現在表示できない」旨の中立なメッセージを表示し、ページ全体は落とさない（原因が一時障害か不正な保存値かを利用者側で区別できないため、再読み込みを促す文言にはしない）
 
 未認証のデモ画面（`/demo`）のルート一覧（`app/demo/page.tsx`）は ISR（`revalidate = 3600`）でキャッシュする（ビルド時に service_role が無い環境では CI が placeholder キーを渡し、誤ったキーでは取得失敗して空表示になる）。ユーザー権限のクライアントが無いため、`createDemoSlideSignedUrl()`（`demo-learning-server.ts`）が他のデモ取得関数と同じく service_role で署名する。対象は**公開済み・未削除かつ `is_open_to_trial = true` のスライドのみ**（お試しユーザーと同じ範囲を未認証に見せる）で、この条件は呼び出し側ではなく同関数自身がコンテンツ行を受け取って判定する（満たさなければ Storage を呼ばず null）。それ以外のスライドはお試し公開の対象外である旨を表示する。
 
-**既知の制約**: Storage の SELECT ポリシーは `learning_contents` の RLS の見え方を継承するため、2.12節と同様に「コンテンツ行は公開済みだが所属する週・フェーズ・テーマが未公開」のスライドは、member が Storage API を直接叩けば署名できる（画面からは親階層の判定で404になるため導線は無い。データベース設計書 6.8）。
-
-`pdf_url` の旧形式（公開URLの完全URL・相対パス）はマイグレーション `20260908000000_secure_slides_bucket.sql` でキーへ一括正規化済み。アプリ側の `toSlideObjectKey()`（`app/lib/slide-object-key.ts`）も同じ規則で正規化するため、管理画面の編集フォームやコンテンツ管理APIに旧形式が流れてきてもキーとして保存される。外部URLなどキーとして解釈できない値はAPIで400として拒否する。
+`pdf_url` の旧形式（公開URLの完全URL・相対パス）はマイグレーション `20260908000000_secure_slides_bucket.sql` でキーへ一括正規化済み。アプリ側の `toSlideObjectKey()`（`app/lib/slide-object-key.ts`）も同じ規則で正規化するため、管理画面の編集フォームやコンテンツ管理APIに旧形式が流れてきてもキーとして保存される。外部URLなどキーとして解釈できない値はAPIで400として拒否する。親階層の公開判定は `20260916002654_slides_storage_select_parent_hierarchy.sql`（#216）で Storage ポリシー側に追加済み。
 
 ### 3.3 画面遷移
 
