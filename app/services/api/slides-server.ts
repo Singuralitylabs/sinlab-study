@@ -38,11 +38,13 @@ export async function createSlideSignedUrlWithClient(
 /**
  * ログイン中のユーザー権限（通常クライアント・RLS適用）でスライドの署名付きURLを発行する。
  *
- * `storage.objects` の SELECT ポリシーは、`pdf_url = storage.objects.name` を満たす
- * `learning_contents` が呼び出しユーザーの RLS 下で見え、かつ week / phase / theme を含む
- * 4階層すべてが公開済み・未削除の場合にのみ許可する（`isContentVisible()` と同条件。#216）。
+ * `storage.objects` の SELECT ポリシーは、member / お試しユーザーに対しては
+ * `pdf_url = storage.objects.name` を満たす `learning_contents` が呼び出しユーザーの RLS 下で見え、
+ * かつ week / phase / theme を含む4階層すべてが公開済み・未削除の場合にのみ許可する
+ * （`isContentVisible()` と同じ4階層条件。#216）。admin / maintainer はプレビューのため
+ * ロールで無条件に許可される（仕様 2.12。`isContentVisible()` 自体はロール非依存のフェイルクローズ）。
  * お試しユーザーがロック済みコンテンツのキーを推測しても、この経路でも Storage API 直叩きでも
- * 署名は発行されない。admin / maintainer はロールで無条件に許可される。service_role は使わない。
+ * 署名は発行されない。service_role は使わない。
  */
 export async function createSlideSignedUrl(pdfUrl: string): Promise<string | null> {
   const supabase = await createServerSupabaseClient();

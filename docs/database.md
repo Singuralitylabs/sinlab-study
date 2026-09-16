@@ -428,6 +428,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 | idx_learning_phases_theme_id | learning_phases | theme_id, display_order | テーマ内のフェーズ一覧（`ORDER BY display_order`） |
 | idx_learning_weeks_phase_id | learning_weeks | phase_id, display_order | フェーズ内の週一覧（`ORDER BY display_order`） |
 | idx_learning_contents_week_id | learning_contents | week_id, display_order | 週内のコンテンツ一覧（`ORDER BY display_order`） |
+| idx_learning_contents_pdf_url | learning_contents | pdf_url（部分: `pdf_url IS NOT NULL`） | slides Storage SELECT の EXISTS（`pdf_url = storage.objects.name`）向け。#216 |
 | user_progress_user_id_content_id_key | user_progress | user_id, content_id（UNIQUE） | ユーザー×コンテンツの一意制約。`user_id` 絞り込みや `ORDER BY content_id` も賄う |
 | idx_user_progress_user_id_completed | user_progress | user_id, completed_at（部分: `is_completed = true`） | RPC `get_students_progress_summary` の完了集計（`GROUP BY user_id` + `max(completed_at)`） |
 | idx_user_progress_content_id | user_progress | content_id | コンテンツ別の進捗検索 |
@@ -567,7 +568,7 @@ maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進
 EXISTS (SELECT 1 FROM learning_contents WHERE id = content_id)
 ```
 
-`learning_contents` の SELECT ポリシー（6.1）が適用されるため、この EXISTS はお試しユーザーではお試し公開分のみ真になる。
+`learning_contents` の SELECT ポリシー（6.1）が適用されるため、この EXISTS はお試しユーザーではお試し公開分のみ真になる。**親階層（week / phase / theme）の公開・削除は見ない**ため、コンテンツ行が公開済みでも親が未公開・論理削除の場合に EXISTS だけでは防げない。進捗APIはアプリ層の `isContentVisible()` で親階層まで判定すること（#216。Storage 側のみ方針Aで親階層を閉じ、こちらはアプリ層に残す）。
 
 **`active` ユーザーへの影響**: この条件はステータスを問わず適用されるため、`active` ユーザーも不可視コンテンツ（未公開・存在しないID）への書き込みができなくなる。従来は未公開コンテンツへの書き込みが素通りし、存在しないIDはFK違反でエラーになっていたが、いずれもRLSで拒否される。通常のUI経路では不可視コンテンツに到達しないため、正常系への影響はない。
 
@@ -588,7 +589,7 @@ user_id = (select get_user_id())
 | Users can view own submissions, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `user_id = (select get_user_id()) OR (select get_user_role()) IN ('admin', 'maintainer')` |
 | Users can insert own submissions | INSERT | 本人（かつ可視コンテンツのみ） | `user_id` が自身のユーザーIDと一致 **かつ** 対象 `content_id` が自身に可視であること（EXISTS 条件、6.2 と同じパターン） |
 
-提出物は作成後に受講生が更新・削除することはないため、UPDATE / DELETE のポリシーは定義していない。したがって EXISTS 条件は INSERT のみでよい（進捗のように upsert で UPDATE 経路を通ることがない）。
+提出物は作成後に受講生が更新・削除することはないため、UPDATE / DELETE のポリシーは定義していない。したがって EXISTS 条件は INSERT のみでよい（進捗のように upsert で UPDATE 経路を通ることがない）。EXISTS は `learning_contents` 行の可視性に委譲するだけで親階層は見ないため、提出APIもアプリ層の `isContentVisible()` で親階層まで判定すること（6.2 と同じ注意。#216）。
 
 ### 6.4 ai_reviews
 
@@ -626,14 +627,14 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Slides are viewable via visible contents or by content managers | SELECT | authenticated | `bucket_id = 'slides' AND ((select get_user_role()) IN ('admin', 'maintainer') OR EXISTS (SELECT 1 FROM learning_contents lc JOIN learning_weeks lw ON lw.id = lc.week_id JOIN learning_phases lp ON lp.id = lw.phase_id JOIN learning_themes lt ON lt.id = lp.theme_id WHERE lc.pdf_url = storage.objects.name AND 4階層すべて is_published = true AND is_deleted = false))`（#216。`isContentVisible()` と同条件） |
+| Slides are viewable via visible contents or by content managers | SELECT | authenticated | `bucket_id = 'slides' AND ((select get_user_role()) IN ('admin', 'maintainer') OR EXISTS (SELECT 1 FROM learning_contents lc JOIN learning_weeks lw ON lw.id = lc.week_id JOIN learning_phases lp ON lp.id = lw.phase_id JOIN learning_themes lt ON lt.id = lp.theme_id WHERE lc.pdf_url = storage.objects.name AND lc.is_published = true AND lc.is_deleted = false AND lw.is_published = true AND lw.is_deleted = false AND lp.is_published = true AND lp.is_deleted = false AND lt.is_published = true AND lt.is_deleted = false))`（#216。member / お試しは `isContentVisible()` と同じ4階層条件。admin / maintainer は無条件） |
 | Content managers can upload content assets | INSERT | admin / maintainer | `bucket_id IN ('thumbnails', 'slides') AND (select get_user_role()) IN ('admin', 'maintainer')` |
 | Content managers can update content assets | UPDATE | admin / maintainer | 同上（USING / WITH CHECK） |
 | Content managers can delete content assets | DELETE | admin / maintainer | 同上 |
 
-SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの RLS が適用されるため、`learning_contents` の SELECT ポリシー（`is_published` / `is_deleted` / `status` / `is_open_to_trial`）がコンテンツ行の可視範囲として効く。加えて `#216` で week / phase / theme への JOIN と各階層の `is_published` / `is_deleted` を明示し、アプリ層の `isContentVisible()` と同じ真理値にする（方針A: Storage 側のみ拡張。`learning_contents` の SELECT RLS 自体は親階層を見ないまま）。すなわち「`pdf_url` がそのオブジェクトキーに一致し、4階層すべてが公開済み・未削除の可視コンテンツが存在する」場合だけ署名付きURLの発行（`createSignedUrl()`）やダウンロードが許可され、お試しユーザーがロック済みスライドのキーを推測しても取得できない。この等値比較のため、`pdf_url` にはオブジェクトキー以外（公開URL等）を保存してはならない。`anon` 向けのポリシーは無く、未認証のデモ画面はサーバー側で service_role によりお試し公開スライドのみ署名する（機能設計書 3.2）。
+SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの RLS が適用されるため、`learning_contents` の SELECT ポリシー（`is_published` / `is_deleted` / `status` / `is_open_to_trial`）がコンテンツ行の可視範囲として効く。加えて `#216` で week / phase / theme への JOIN と各階層の `is_published` / `is_deleted` を明示し、**member / お試しユーザー**に対してはアプリ層の `isContentVisible()` と同じ4階層条件にする（方針A: Storage 側のみ拡張。`learning_contents` の SELECT RLS 自体は親階層を見ないまま。方針Bを採らない理由は、お試しユーザー向けの階層骨格表示と `user_progress` / `submissions` の書き込み RLS まで波及するため）。admin / maintainer はプレビューのためロールで無条件許可する（仕様 2.12。`isContentVisible()` 自体はロール非依存のフェイルクローズなので、未公開階層・orphan ではポリシーと `isContentVisible()` の真理値は一致しない）。すなわち member / お試しでは「`pdf_url` がそのオブジェクトキーに一致し、4階層すべてが公開済み・未削除の可視コンテンツが存在する」場合だけ署名付きURLの発行（`createSignedUrl()`）やダウンロードが許可され、お試しユーザーがロック済みスライドのキーを推測しても取得できない。この等値比較のため、`pdf_url` にはオブジェクトキー以外（公開URL等）を保存してはならない。`EXISTS` の `pdf_url` 等値比較向けに部分インデックス `idx_learning_contents_pdf_url`（`WHERE pdf_url IS NOT NULL`）を置く。`anon` 向けのポリシーは無く、未認証のデモ画面はサーバー側で service_role によりお試し公開スライドのみ署名する（機能設計書 3.2）。
 
-**補足**: `learning_contents` の SELECT ポリシーは引き続きコンテンツ行自身の `is_published` / `is_deleted` しか見ない。進捗・提出・AIレビューAPIの可視性はアプリ層の `isContentVisible()` が親階層まで補う。Storage の SELECT だけは `#216` で親階層条件をポリシー側に持たせ、受講生向け配信経路の二層防御のズレを解消している。
+**補足**: `learning_contents` の SELECT ポリシーは引き続きコンテンツ行自身の `is_published` / `is_deleted` しか見ない。進捗・提出・AIレビューAPIの可視性はアプリ層の `isContentVisible()` が親階層まで補う（6.2 / 6.3 の EXISTS もコンテンツ行の可視性に委譲するだけなので、親階層判定を省いてはならない）。Storage の SELECT だけは `#216` で親階層条件をポリシー側に持たせ、受講生向けスライド配信経路の二層防御のズレを解消している。
 
 アップロード・削除APIは `createAdminSupabaseClient()` を使うため、`SUPABASE_SERVICE_ROLE_KEY` が必須である（未設定時は throw。通常クライアントへの暗黙フォールバックはしない）。キー設定時は RLS をバイパスする。Storage の RLS ポリシーは、呼び出し側が通常クライアント（`createServerSupabaseClient()`）を明示的に選んだ経路に対する防御層として機能する。キー未設定は throw、キーが誤っている場合は PostgREST が 401 を返し RLS は評価されない。
 
@@ -677,7 +678,7 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 | `20260910093449_add_bulk_update_sibling_display_order_rpc.sql` | 兄弟要素の `display_order` 一括更新 RPC `bulk_update_sibling_display_order(p_table, p_updates)`（#196）。挿入位置指定時の N 文 UPDATE を 1 回の UPDATE … FROM に置き換える。SECURITY INVOKER・許可テーブル限定・純粋な UPDATE のみ（upsert ではない）。**アプリ側の create/update（兄弟再採番）と同時にリリースすること**（未適用だと `PGRST202` で兄弟ありの作成・更新が失敗する） |
 | `20260911010345_add_query_pattern_indexes.sql` | クエリパターンに合わせたインデックス整備（#197 PR1）。階層一覧の `(parent_id, display_order)` 複合化、`submissions` の `(submitted_at DESC, id DESC)` 系、RPC向け `user_progress` 部分インデックス、`idx_users_auth_role` / 冗長な `idx_user_progress_user_id` の削除。UNIQUE 制約と重複する covering / `ai_reviews` 複合 / `users(status)` 部分は追加しない。認可（RLS）は変更しない |
 | `20260911061708_lighten_rls_policy_helper_calls.sql` | RLS ポリシーのヘルパー呼び出し軽量化（#197 PR2）。`learning_contents` SELECT の重複 InitPlan を `CASE (select get_user_status())` で1本に折り畳み、`ai_reviews` SELECT の無相関 `IN` を相関 `EXISTS` に変更（点検索で PK プローブも選択可能に）。許可・拒否の真理値とヘルパーの GRANT/REVOKE・関数本体は変更しない |
-| `20260916002654_slides_storage_select_parent_hierarchy.sql` | slides の `storage.objects` SELECT に week / phase / theme の公開・未削除判定を JOIN で追加（#216 方針A）。`isContentVisible()` と同条件。admin / maintainer の無条件許可と `(select get_user_role())` / OR 1本の形は維持。`learning_contents` の SELECT RLS は変更しない |
+| `20260916002654_slides_storage_select_parent_hierarchy.sql` | slides の `storage.objects` SELECT に week / phase / theme の公開・未削除判定を JOIN で追加（#216 方針A）。member / お試しは `isContentVisible()` と同じ4階層条件。admin / maintainer は無条件許可。`(select get_user_role())` / OR 1本の形は維持。`idx_learning_contents_pdf_url` 部分インデックスを追加。`learning_contents` の SELECT RLS は変更しない |
 
 ### 7.1 リモート適用履歴との整合（#149・確定版）
 
@@ -774,4 +775,4 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 | 2026年9月 | #196対応：兄弟要素の `display_order` 一括更新 RPC `bulk_update_sibling_display_order()` を追加。6.2節・マイグレーション一覧を更新 |
 | 2026年9月 | #197 PR1対応：クエリパターンに合わせたインデックス整備（階層一覧の複合化、`submissions` のタイブレーカー付きソートキー、RPC向け `user_progress` 部分インデックス、UNIQUE と重複する候補の除外）。§4 に制約由来インデックスを併記 |
 | 2026年9月 | #197 PR2対応：RLS ポリシーのヘルパー呼び出し軽量化。`learning_contents` SELECT の重複 InitPlan を `CASE (select get_user_status())` で1本に折り畳み、`ai_reviews` SELECT の無相関 `IN` を相関 `EXISTS` に変更。§6 の方針・ポリシー表・マイグレーション一覧を更新（§5.2 は関数契約のみ） |
-| 2026年9月 | #216対応：slides の `storage.objects` SELECT に親階層（week / phase / theme）の `is_published` / `is_deleted` 判定を追加（方針A）。6.8節のポリシー表・説明・既知の制約を更新し、マイグレーション一覧に追記 |
+| 2026年9月 | #216対応：slides の `storage.objects` SELECT に親階層（week / phase / theme）の `is_published` / `is_deleted` 判定を追加（方針A。member / お試しは `isContentVisible()` と同じ4階層条件）。`idx_learning_contents_pdf_url` を追加。6.2 / 6.3 に親階層はアプリ層判定である旨を追記。6.8節・マイグレーション一覧を更新 |

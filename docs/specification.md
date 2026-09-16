@@ -418,13 +418,13 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 `slides` バケットは非公開（`public = false`）で、`learning_contents.pdf_url` にはオブジェクトキー（例: `gas/slide-01.pdf`）のみを保存する。配信の流れは次のとおり。
 
 1. コンテンツ詳細ページ（`app/(authenticated)/learn/.../[contentId]/page.tsx`）は、`isContentLockedForUser()` によるロック判定と、RLS適用の `fetchContentById()` によるコンテンツ行の取得を通過した後に、`createSlideSignedUrl()`（`app/services/api/slides-server.ts`）で署名付きURLを発行し `PdfSlideViewer` へ渡す。ロック済み・未公開（admin / maintainer のプレビューを除く）・存在しないコンテンツではURL自体を発行しない
-2. 署名は**通常クライアント（ログインユーザーの権限・RLS適用）**で行い、service_role は使わない。`storage.objects` の SELECT ポリシーは「`pdf_url` がそのオブジェクトキーと一致する `learning_contents` の行が、呼び出しユーザーの RLS 下で見え、かつ所属する週・フェーズ・テーマを含む4階層すべてが `is_published = true AND is_deleted = false`」の場合にのみ許可する（`isContentVisible()` と同条件。#216。データベース設計書 6.8）。そのため、お試しユーザーがロック済みスライドのキーを推測しても、アプリ経由でも Storage API の直叩きでも署名は発行されない。admin / maintainer はロールで無条件に許可される
+2. 署名は**通常クライアント（ログインユーザーの権限・RLS適用）**で行い、service_role は使わない。`storage.objects` の SELECT ポリシーは、member / お試しユーザーに対しては「`pdf_url` がそのオブジェクトキーと一致する `learning_contents` の行が、呼び出しユーザーの RLS 下で見え、かつ所属する週・フェーズ・テーマを含む4階層すべてが `is_published = true AND is_deleted = false`」の場合にのみ許可する（`isContentVisible()` と同じ4階層条件。#216。データベース設計書 6.8）。admin / maintainer はプレビューのためロールで無条件に許可される（2.12節。`isContentVisible()` 自体はロール非依存のフェイルクローズ）
 3. 有効期限は `SLIDE_SIGNED_URL_EXPIRES_IN_SECONDS`（`app/constants/storage.ts`、1時間）。ページ描画時に発行し、期限切れ後はリロードで再発行される。pdf.js は表示直後に残りのチャンクを裏で取得し切るため、閲覧中に期限が切れてもページ送りは失敗しない
-4. 発行に失敗した場合（Storage障害・キーとして解釈できない値）は `SlideContent`（`app/components/SlideContent.tsx`）が「現在表示できない」旨の中立なメッセージを表示し、ページ全体は落とさない（原因が一時障害か不正な保存値かを利用者側で区別できないため、再読み込みを促す文言にはしない）
+4. 発行に失敗した場合（Storage障害・キーとして解釈できない値・親階層未公開によるポリシー拒否）は `SlideContent`（`app/components/SlideContent.tsx`）が「現在表示できない」旨の中立なメッセージを表示し、ページ全体は落とさない（原因が一時障害か不正な保存値かを利用者側で区別できないため、再読み込みを促す文言にはしない）。学習画面のコンテンツ詳細では、member / お試しユーザーが親階層未公開のコンテンツに到達した場合は署名発行前に `notFound()` する（theme だけ未公開だと week/phase ガードをすり抜けうるため。#216）
 
 未認証のデモ画面（`/demo`）のルート一覧（`app/demo/page.tsx`）は ISR（`revalidate = 3600`）でキャッシュする（ビルド時に service_role が無い環境では CI が placeholder キーを渡し、誤ったキーでは取得失敗して空表示になる）。ユーザー権限のクライアントが無いため、`createDemoSlideSignedUrl()`（`demo-learning-server.ts`）が他のデモ取得関数と同じく service_role で署名する。対象は**公開済み・未削除かつ `is_open_to_trial = true` のスライドのみ**（お試しユーザーと同じ範囲を未認証に見せる）で、この条件は呼び出し側ではなく同関数自身がコンテンツ行を受け取って判定する（満たさなければ Storage を呼ばず null）。それ以外のスライドはお試し公開の対象外である旨を表示する。
 
-`pdf_url` の旧形式（公開URLの完全URL・相対パス）はマイグレーション `20260908000000_secure_slides_bucket.sql` でキーへ一括正規化済み。アプリ側の `toSlideObjectKey()`（`app/lib/slide-object-key.ts`）も同じ規則で正規化するため、管理画面の編集フォームやコンテンツ管理APIに旧形式が流れてきてもキーとして保存される。外部URLなどキーとして解釈できない値はAPIで400として拒否する。親階層の公開判定は `20260916002654_slides_storage_select_parent_hierarchy.sql`（#216）で Storage ポリシー側に追加済み。
+`pdf_url` の旧形式（公開URLの完全URL・相対パス）はマイグレーション `20260908000000_secure_slides_bucket.sql` でキーへ一括正規化済み。アプリ側の `toSlideObjectKey()`（`app/lib/slide-object-key.ts`）も同じ規則で正規化するため、管理画面の編集フォームやコンテンツ管理APIに旧形式が流れてきてもキーとして保存される。外部URLなどキーとして解釈できない値はAPIで400として拒否する。親階層の公開判定は `20260916002654_slides_storage_select_parent_hierarchy.sql`（#216）で Storage ポリシー側に追加済み（member / お試し向け）。
 
 ### 3.3 画面遷移
 
@@ -1114,4 +1114,4 @@ flowchart TD
 | 2026年9月 | #208 追加レビュー反映: ナビ縮退時（通し列に現在のコンテンツが無い）は「テーマに戻る」ではなく従来の「フェーズに戻る」に倒し、同じ週の前後は現在の週サマリーから復元する。3.3節を更新 |
 | 2026年9月 | `createAdminSupabaseClient()` の service_role 未設定時の暗黙フォールバックを廃止し throw に統一（#215）。OAuth コールバックの個別事前チェックを削除。2.5・2.11・8.2・9.5.1節および database.md 6.8 を更新 |
 | 2026年9月 | #215 レビュー反映: `/demo` を force-dynamic から ISR（revalidate=3600）へ変更し CI に service_role placeholder を追加。`assertServiceRoleConfigured()` を削除して `createAdminSupabaseClient()` に一本化。OAuth の service_role 未設定時は 500 になることを 8.2・9.5.1 に明記。database.md 6.8 の防御層記述を修正 |
-| 2026年9月 | #216対応：slides の `storage.objects` SELECT に親階層（week / phase / theme）の公開・未削除判定を追加し、`isContentVisible()` と同条件に揃える（方針A）。3.2節の既知の制約を解消 |
+| 2026年9月 | #216対応：slides の `storage.objects` SELECT に親階層（week / phase / theme）の公開・未削除判定を追加し、member / お試しは `isContentVisible()` と同じ4階層条件に揃える（方針A）。学習画面は親階層未公開時に member / お試しを `notFound()`。3.2節を更新 |
