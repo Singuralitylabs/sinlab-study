@@ -22,6 +22,7 @@ import {
 } from "@/app/services/api/learning-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
+import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -143,9 +144,13 @@ export default async function ContentPage({ params }: PageProps) {
     notFound();
   }
 
-  // コンテンツ行自体が公開済みでも、所属する週・フェーズ・テーマのいずれかが未公開なら
-  // プレビュー扱いとする（バッジ表示・完了ボタン/提出フォームの表示可否に使う）。
+  // コンテンツ行自体が公開済みでも、所属する週・フェーズ・テーマのいずれかが未公開・論理削除
+  // ならプレビュー扱い（バッジ・完了ボタン/提出フォームの可否）。member / お試しユーザーには
+  // 404 とする（theme だけ未公開だと week/phase ガードをすり抜けて到達しうるため。#216）。
   const isFullyPublished = isContentFullyPublished(content);
+  if (!isFullyPublished && !checkContentPermissions(userRole)) {
+    notFound();
+  }
 
   // スライドの署名付きURLは、ロック判定（isLocked）と RLS 適用の fetchContentById() を
   // 通過した後にのみ発行する。ロック済み・未公開（admin / maintainer のプレビューを除く）の

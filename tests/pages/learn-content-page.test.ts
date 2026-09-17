@@ -113,6 +113,8 @@ const setup = ({
   signedUrl = SIGNED_URL,
   orderedContents,
   extraWeekContents = [],
+  weekOverride,
+  contentWeekOverride,
 }: {
   userStatus: "active" | "trial";
   userRole?: "member" | "admin" | "maintainer";
@@ -127,6 +129,10 @@ const setup = ({
     is_open_to_trial?: boolean;
     is_published?: boolean;
   }>;
+  /** fetchWeekById が返す週（theme 未公開など親階層のケース用） */
+  weekOverride?: typeof week;
+  /** fetchContentById の week 埋め込み（isContentFullyPublished 判定用） */
+  contentWeekOverride?: typeof week;
 }) => {
   vi.mocked(getServerAuth).mockResolvedValue({
     user: { id: "auth-uuid" },
@@ -134,7 +140,10 @@ const setup = ({
     userStatus,
     userRole,
   } as never);
-  vi.mocked(fetchWeekById).mockResolvedValue({ data: week, error: null } as never);
+  vi.mocked(fetchWeekById).mockResolvedValue({
+    data: weekOverride ?? week,
+    error: null,
+  } as never);
   vi.mocked(fetchThemeNavigationIndex).mockResolvedValue({
     data: {
       orderedContents: orderedContents ?? [currentNav],
@@ -154,7 +163,11 @@ const setup = ({
     error: null,
   } as never);
   vi.mocked(fetchContentById).mockResolvedValue({
-    data: slideContent({ is_open_to_trial: isOpenToTrial, is_published: isPublished }),
+    data: slideContent({
+      is_open_to_trial: isOpenToTrial,
+      is_published: isPublished,
+      week: contentWeekOverride ?? weekOverride ?? week,
+    }),
     error: null,
   } as never);
   vi.mocked(createSlideSignedUrl).mockResolvedValue(signedUrl);
@@ -217,6 +230,51 @@ describe("学習画面のスライド配信（署名付きURL）", () => {
     expect(html).toContain("SLIDE_UNAVAILABLE");
     expect(html).not.toContain(PDF_KEY);
   });
+
+  it("member は theme だけ未公開のとき 404（署名を発行しない）", async () => {
+    // week.phase.theme_id は一致するが theme 埋め込みが未公開（RLS で null になるケースと同等）
+    const weekThemeUnpublished = {
+      ...week,
+      phase: {
+        ...week.phase,
+        theme: { id: 1, name: "GAS", is_published: false, is_deleted: false },
+      },
+    };
+    setup({
+      userStatus: "active",
+      isOpenToTrial: false,
+      weekOverride: weekThemeUnpublished,
+      contentWeekOverride: weekThemeUnpublished,
+    });
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(createSlideSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it.each(["admin", "maintainer"] as const)(
+    "%s は theme 未公開でもプレビューとして署名付きURLを発行する",
+    async (userRole) => {
+      const weekThemeUnpublished = {
+        ...week,
+        phase: {
+          ...week.phase,
+          theme: { id: 1, name: "GAS", is_published: false, is_deleted: false },
+        },
+      };
+      setup({
+        userStatus: "active",
+        userRole,
+        isOpenToTrial: false,
+        weekOverride: weekThemeUnpublished,
+        contentWeekOverride: weekThemeUnpublished,
+      });
+
+      const html = await render();
+
+      expect(createSlideSignedUrl).toHaveBeenCalledWith(PDF_KEY);
+      expect(html).toContain(SIGNED_URL);
+    }
+  );
 });
 
 describe("コンテンツ詳細の前後ナビゲーション（issue #208）", () => {

@@ -90,7 +90,7 @@ CI のワークフロー一覧は [4.1 GitHub Actions ワークフロー](#41-gi
 | 認証制御 | 認証ヘルパー関数の判定ロジック | 未認証ユーザーのリダイレクト |
 | 認可制御 | 権限判定ロジック（admin/maintainer/member 別の許可/拒否） | UI・プロキシ（`proxy.ts`）でのアクセス制御 |
 | 承認ステータス制御 | ステータス判定ロジック（trial（お試し）/active/rejected） | 画面遷移の正当性、お試しユーザーへのロック表示 |
-| データアクセス | ―（ユニットでは検証困難） | RLSによるデータ分離。お試しユーザーのアクセストークンでPostgRESTに直接アクセスし、(a) `learning_contents` のSELECTでお試し非公開コンテンツが0行、(b) お試し非公開コンテンツに対する `user_progress` / `submissions` のINSERT・UPDATEが拒否されること、(c) お試し非公開スライドのオブジェクトキーに対する `POST /storage/v1/object/sign/slides/<キー>`（署名付きURLの発行）と `GET /storage/v1/object/authenticated/slides/<キー>` が拒否され、お試し公開スライドでは許可されること |
+| データアクセス | ―（ユニットでは検証困難） | RLSによるデータ分離。お試しユーザーのアクセストークンでPostgRESTに直接アクセスし、(a) `learning_contents` のSELECTでお試し非公開コンテンツが0行、(b) お試し非公開コンテンツに対する `user_progress` / `submissions` のINSERT・UPDATEが拒否されること、(c) お試し非公開スライドのオブジェクトキーに対する `POST /storage/v1/object/sign/slides/<キー>`（署名付きURLの発行）と `GET /storage/v1/object/authenticated/slides/<キー>` が拒否され、お試し公開スライドでは許可されること。(d) コンテンツ行は公開済みだが所属 week / phase / theme のいずれかが未公開または論理削除済みのスライドキーは、member / お試しの通常クライアントで署名発行が拒否されること（#216。admin / maintainer はプレビューのため許可） |
 
 ### 3.3 型安全性テスト
 
