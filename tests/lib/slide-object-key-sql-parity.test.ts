@@ -4,7 +4,17 @@ import { describe, expect, it } from "vitest";
 import { toSlideObjectKey } from "@/app/lib/slide-object-key";
 
 /**
- * `20260917011152_validate_slide_pdf_url_object_keys.sql` の不正判定 WHERE 句。
+ * `20260917011152_validate_slide_pdf_url_object_keys.sql` の正規化式。
+ * UPDATE / 検証 DO の両方、およびこの定数が一致していることを下のテストで担保する。
+ */
+const SLIDE_PDF_URL_SQL_NORMALIZE_EXPR = `regexp_replace(
+      btrim(pdf_url, E' \\t\\r\\n'),
+      '^(https?://[^/]+)?/storage/v1/object/public/slides/',
+      ''
+    )`;
+
+/**
+ * 同マイグレーションの不正判定 WHERE 句。
  * マイグレーション側とこの定数が一致していることを下のテストで担保する。
  * どちらか片方だけを変えると落ちる（#217）。
  */
@@ -74,9 +84,13 @@ const PARITY_CASES: Array<[string, string]> = [
 ];
 
 describe("slide pdf_url SQL 検証と toSlideObjectKey の一致 (#217)", () => {
-  it("マイグレーションに SQL 不正判定定数がそのまま含まれる", () => {
+  it("マイグレーションに正規化式・不正判定定数がそのまま含まれる", () => {
     const migrationSql = readFileSync(MIGRATION_FILE, "utf8");
+    expect(migrationSql).toContain(SLIDE_PDF_URL_SQL_NORMALIZE_EXPR);
     expect(migrationSql).toContain(SLIDE_PDF_URL_SQL_INVALID_PREDICATE);
+    // UPDATE と検証 DO の両方で同じ正規化式を使う（片方だけ変える事故を防ぐ）
+    const normalizeOccurrences = migrationSql.split(SLIDE_PDF_URL_SQL_NORMALIZE_EXPR).length - 1;
+    expect(normalizeOccurrences).toBe(2);
   });
 
   it.each(PARITY_CASES)("同じ入力で JS と SQL 規則が一致する（%s）", (_label, value) => {

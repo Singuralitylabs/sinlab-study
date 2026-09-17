@@ -7,9 +7,11 @@
 -- 残すと Storage ポリシーの等値比較が成立せず、当該スライドだけ署名不能になる。
 --
 -- 本マイグレーションは適用済みの `20260908000000` を書き換えず、
--- アプリ側 `toSlideObjectKey()`（`app/lib/slide-object-key.ts`）と同じ規則
--- （前後の空白・タブ・CR・LF 除去 → 旧公開URL接頭辞の除去 → 拒否条件）で
--- 再検査し、該当行があれば例外で中断する。
+--   1. 同ファイルと同じ規則で `pdf_url` を再正規化し（旧公開URL・前後空白）、
+--   2. アプリ側 `toSlideObjectKey()`（`app/lib/slide-object-key.ts`）と同じ拒否条件で
+--      再検査し、該当行があれば例外で中断する。
+-- 1 を先に行うことで、正規化すれば有効になる保存値（旧接頭辞・前後空白）も
+-- Storage の `pdf_url = storage.objects.name` 等値比較を満たす形へ直す。
 --
 -- 拒否条件（正規化後の key に対して）:
 --   - 空文字
@@ -18,8 +20,28 @@
 --   - 空セグメント / `.` / `..` セグメント
 --
 -- テスト（`tests/lib/slide-object-key-sql-parity.test.ts`）が本ファイルの
--- 判定式と JS 側の突き合わせを担保する。式を変えるときはテスト定数も更新すること。
+-- 正規化式・判定式と JS 側の突き合わせを担保する。式を変えるときはテスト定数も更新すること。
 -- =====================================================
+
+-- 正規化式はサブクエリで1回だけ書き、SET と WHERE で同じ値を参照する
+-- （式を片方だけ直して WHERE が一致しなくなる事故を防ぐ）。
+-- 式本文は検証 DO ブロックおよび tests/lib/slide-object-key-sql-parity.test.ts の
+-- SLIDE_PDF_URL_SQL_NORMALIZE_EXPR と同一であること。
+UPDATE public.learning_contents lc
+SET pdf_url = n.normalized
+FROM (
+  SELECT
+    id,
+    regexp_replace(
+      btrim(pdf_url, E' \t\r\n'),
+      '^(https?://[^/]+)?/storage/v1/object/public/slides/',
+      ''
+    ) AS normalized
+  FROM public.learning_contents
+  WHERE pdf_url IS NOT NULL
+) n
+WHERE lc.id = n.id
+  AND lc.pdf_url <> n.normalized;
 
 DO $$
 DECLARE
@@ -29,10 +51,10 @@ BEGIN
   FROM (
     SELECT
       regexp_replace(
-        btrim(pdf_url, E' \t\r\n'),
-        '^(https?://[^/]+)?/storage/v1/object/public/slides/',
-        ''
-      ) AS key
+      btrim(pdf_url, E' \t\r\n'),
+      '^(https?://[^/]+)?/storage/v1/object/public/slides/',
+      ''
+    ) AS key
     FROM public.learning_contents
     WHERE pdf_url IS NOT NULL
   ) n
