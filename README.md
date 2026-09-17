@@ -55,12 +55,15 @@ SUPABASE_SERVICE_ROLE_KEY=<Supabase Service Role Key>
 SUPABASE_PROJECT_ID=<Supabase プロジェクトID>
 GEMINI_API_KEY=<Gemini API Key（会員用・有料ティア。AIレビュー機能）>
 GEMINI_API_KEY_TRIAL=<任意。お試しユーザー用・無料ティア。未設定時は GEMINI_API_KEY にフォールバック>
+SLACK_NOTIFICATION_WEBHOOK_URL=<任意。初回ログイン承認依頼・Stripe支払い失敗のSlack通知。未設定時は通知をスキップ>
 STRIPE_ENABLED=<Stripe決済機能の有効化フラグ。"true" 以外はフェイルクローズで無効>
 STRIPE_SECRET_KEY=<Stripe Secret Key>
 STRIPE_WEBHOOK_SECRET=<Stripe Webhook 署名シークレット>
 STRIPE_PRICE_ID=<月額サブスクリプションの Price ID>
 NEXT_PUBLIC_APP_URL=<Checkout/Portal のリダイレクト先URL生成に使用>
 ```
+
+本番リリース時の環境変数確認は Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順) Step 5 を参照（一覧の正本はこの節と `.env.local.example`）。
 
 ### インストール・起動
 
