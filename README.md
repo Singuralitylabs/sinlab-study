@@ -156,5 +156,4 @@ docs/                    # 設計ドキュメント
 | [要件定義書](./docs/requirements.md) | プロジェクト概要、機能要件、非機能要件、画面一覧 |
 | [データベース設計書](./docs/database.md) | テーブル定義、RLS ポリシー、インデックス、トリガー |
 | [機能設計書](./docs/specification.md) | アーキテクチャ、認証・認可、API 仕様、画面設計、コンポーネント設計 |
-| [後方互換でないデータ移行のリリース手順](./docs/breaking-migration-release.md) | expand/migrate/contract、分割リリース、短窓運用、ロールバック、PR チェック項目 |
 # web-skillup-service
