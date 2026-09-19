@@ -66,6 +66,7 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 - **プロキシはフェイルクローズ。** 環境変数欠落・例外・ステータス取得不能（null）はすべて `/login` へリダイレクトする。
 - **ロール**: `admin`（全権限）/ `maintainer`（コンテンツ管理）/ `member`（受講生）。判定ロジックは `app/services/auth/` に集約する。
 - **ステータス**: `active`（承認済み）/ `trial`（お試し。アプリは使えるがお試し公開コンテンツのみ閲覧可）/ `rejected`（`/rejected` へ。APIでは403）。`/pending` 画面は廃止済み。
+- **初回登録の INSERT は同意 Cookie 必須。** 同意なしでは `users` 行を作らず `/login?error=terms_required` へ戻す。`terms_accepted_at` は callback でのみ書き、既存ユーザーの分岐では参照も更新もしない。
 
 ### 会員種別・お試しユーザー
 
