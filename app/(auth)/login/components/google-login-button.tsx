@@ -2,16 +2,30 @@
 
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
+import { TERMS_CONSENT_COOKIE_MAX_AGE, TERMS_CONSENT_COOKIE_NAME } from "@/app/constants/auth";
 import { createClientSupabaseClient } from "@/app/services/api/supabase-client";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+
+const TERMS_URL = "https://sinlab.future-tech-association.org/sinlab-study/terms.html";
+const PRIVACY_URL = "https://sinlab.future-tech-association.org/sinlab-study/privacy.html";
 
 export function GoogleLoginButton() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [agreed, setAgreed] = useState(false);
 
   const handleGoogleLogin = async () => {
+    if (!agreed) {
+      return;
+    }
     setLoading(true);
     setError(null);
+
+    // 初回登録の同意チェックをサーバー側で検証できるよう、OAuth 開始直前に
+    // 短寿命の同意 Cookie をセットする（SameSite=Lax のため OAuth の往復を跨いで届く）。
+    const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `${TERMS_CONSENT_COOKIE_NAME}=1; Max-Age=${TERMS_CONSENT_COOKIE_MAX_AGE}; Path=/; SameSite=Lax${secure}`;
 
     const supabase = createClientSupabaseClient();
     const { error } = await supabase.auth.signInWithOAuth({
@@ -30,9 +44,37 @@ export function GoogleLoginButton() {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-start gap-2">
+        <Checkbox
+          id="terms-consent"
+          checked={agreed}
+          onCheckedChange={(checked) => setAgreed(checked === true)}
+          aria-describedby="terms-consent-description"
+        />
+        <label htmlFor="terms-consent" className="text-xs text-muted-foreground leading-relaxed">
+          <a
+            href={TERMS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground"
+          >
+            利用規約
+          </a>
+          および
+          <a
+            href={PRIVACY_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground"
+          >
+            プライバシーポリシー
+          </a>
+          に同意する
+        </label>
+      </div>
       <Button
         onClick={handleGoogleLogin}
-        disabled={loading}
+        disabled={loading || !agreed}
         className="w-full h-12 text-base"
         variant="outline"
       >
@@ -60,6 +102,11 @@ export function GoogleLoginButton() {
         )}
         Googleでログイン
       </Button>
+      {!agreed && (
+        <p id="terms-consent-description" className="text-xs text-muted-foreground text-center">
+          ログインするには上記の同意が必要です
+        </p>
+      )}
       {error && <p className="text-sm text-destructive text-center">{error}</p>}
     </div>
   );

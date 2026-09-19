@@ -13,3 +13,15 @@ export const AUTH_HEADERS = {
 } as const;
 
 export const AUTH_HEADER_NAMES: readonly string[] = Object.values(AUTH_HEADERS);
+
+/**
+ * 初回登録時の利用規約・プライバシーポリシーへの同意を示す短寿命Cookie名。
+ * `GoogleLoginButton` が `signInWithOAuth` 直前にセットし、
+ * `app/auth/callback/route.ts` の初回登録分岐で必須チェックする。
+ * OAuth の往復（Google → Supabase → `/auth/callback`）を跨いで届くよう
+ * `SameSite=Lax`（トップレベル GET ナビゲーションで送信される）で運用する。
+ */
+export const TERMS_CONSENT_COOKIE_NAME = "sinlab-terms-consent";
+
+/** 同意 Cookie の有効期間（秒）。OAuth の往復に十分な10分。 */
+export const TERMS_CONSENT_COOKIE_MAX_AGE = 600;

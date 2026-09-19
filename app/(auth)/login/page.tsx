@@ -5,6 +5,8 @@ import { GoogleLoginButton } from "./components/google-login-button";
 const LOGIN_ERROR_MESSAGES = {
   registration_failed:
     "アカウント登録に失敗しました。時間をおいて再度お試しください。問題が続く場合は管理者にお問い合わせください。",
+  terms_required:
+    "利用規約およびプライバシーポリシーへの同意が必要です。チェックボックスにチェックを入れてから再度お試しください。",
 } as const;
 
 type LoginErrorCode = keyof typeof LOGIN_ERROR_MESSAGES;

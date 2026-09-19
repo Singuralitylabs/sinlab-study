@@ -129,7 +129,9 @@ flowchart TD
     B -->|あり| C{セッション確立}
     C -->|失敗| L
     C -->|成功| D{users テーブル確認}
-    D -->|レコードなし| R["自動登録 (trial)"]
+    D -->|レコードなし| T{同意 Cookie あり?}
+    T -->|なし| TE["/login?error=terms_required"]
+    T -->|あり| R["自動登録 (trial + 同意日時)"]
     R -->|成功| H
     R -->|失敗| F["/login?error=registration_failed"]
     D -->|論理削除済み| F
@@ -138,11 +140,11 @@ flowchart TD
     D -->|active| H["/ (ダッシュボード)"]
 ```
 
-初回ログイン（自動登録）後もお試しユーザーとしてそのままダッシュボードへ遷移する。承認待ちであることはアプリ内バナーで通知する。自動登録に失敗した場合、および論理削除済みユーザーの再ログイン時は `/login?error=registration_failed` へリダイレクトする（詳細は9.5.1）。
+初回ログイン（自動登録）後もお試しユーザーとしてそのままダッシュボードへ遷移する。承認待ちであることはアプリ内バナーで通知する。自動登録に失敗した場合、および論理削除済みユーザーの再ログイン時は `/login?error=registration_failed` へリダイレクトする（詳細は9.5.1）。同意 Cookie（`/login` のチェックボックスが `signInWithOAuth` 直前にセットする短寿命 Cookie。`app/constants/auth.ts` の定数）なしで初回登録に到達した場合は INSERT を行わず `/login?error=terms_required` へリダイレクトする。いずれの経路でも応答で同意 Cookie を削除し、既存ユーザーの分岐では Cookie を参照も更新もしない。
 
 ### 2.5 初回ログイン時のユーザー自動登録
 
-OAuthコールバック処理中に初回ログインを検知し、`users` テーブルにレコードを自動作成する。
+OAuthコールバック処理中に初回ログインを検知し、`users` テーブルにレコードを自動作成する。`/login` には「利用規約およびプライバシーポリシーに同意する」チェックボックスを1つ置き、未チェックの間は Google ログインボタンを無効化する。チェックボックスのラベル内に利用規約・プライバシーポリシーの外部リンクを含める。同意は `GoogleLoginButton` が `signInWithOAuth` 直前にセットする短寿命の同意 Cookie（`SameSite=Lax`、有効期間10分）で callback へ持ち回り、`redirectTo` のクエリパラメータでは持ち回らない。規約改定時の再同意・管理画面での同意日時表示・規約本文のアプリ内ホスティングはスコープ外。
 
 **自動登録データ**:
 
@@ -154,8 +156,9 @@ OAuthコールバック処理中に初回ログインを検知し、`users` テ�
 | `avatar_url` | Googleアバター画像 | ユーザーメタデータ |
 | `role` | `member` | デフォルト値 |
 | `status` | `trial` | デフォルト値 |
+| `terms_accepted_at` | 登録時刻 | サーバー現在時刻（同意 Cookie ありの場合のみ INSERT） |
 
-INSERT 失敗時は `/login?error=registration_failed` へリダイレクトし、Slack通知は送らない。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認の失敗は `error` なしの `/login` へフェイルクローズする。`SUPABASE_SERVICE_ROLE_KEY` 未設定時は `createAdminSupabaseClient()` が throw し、通常クライアントへの暗黙フォールバックはしない。詳細は9.5.1。
+INSERT 失敗時は `/login?error=registration_failed` へリダイレクトし、Slack通知は送らない。同意 Cookie なしの初回登録では INSERT 自体を行わず `/login?error=terms_required` へリダイレクトする。新規登録ユーザーのみが対象で、既存ユーザーの `terms_accepted_at` は `NULL` のまま利用継続でき、既存ユーザーの分岐では同意 Cookie を参照も更新もしない。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認の失敗は `error` なしの `/login` へフェイルクローズする。`SUPABASE_SERVICE_ROLE_KEY` 未設定時は `createAdminSupabaseClient()` が throw し、通常クライアントへの暗黙フォールバックはしない。詳細は9.5.1。
 
 ### 2.6 お試し（trial）ユーザーへのコンテンツ制限
 
@@ -829,7 +832,7 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 
 | パス | 画面名 | 表示内容 |
 |:--|:--|:--|
-| `/login` | ログイン画面 | サービス名、「Googleでログイン」ボタン、サービス説明。`error=registration_failed` のときのみ登録失敗メッセージを表示（未知の `error` 値は何も出さない）。中央寄せレイアウト、ダークモード対応 |
+| `/login` | ログイン画面 | サービス名、利用規約・プライバシーポリシーへの同意チェックボックス（未チェックの間は「Googleでログイン」ボタンを無効化）、「Googleでログイン」ボタン、サービス説明。`error=registration_failed` のときは登録失敗メッセージ、`error=terms_required` のときは同意要求メッセージを表示（未知の `error` 値は何も出さない）。中央寄せレイアウト、ダークモード対応 |
 | `/rejected` | 却下画面 | 却下メッセージ、問い合わせ案内、ログアウトボタン |
 
 承認待ち専用画面（`/pending`）は設けない。お試しユーザーはダッシュボードを含む通常画面にアクセスでき、承認待ちであることはアプリ内バナーで通知する（2.6参照）。`/pending` へのアクセスは `/` にリダイレクトする。
@@ -917,6 +920,7 @@ JSONボディを受け取る API Route の入力検証は [zod](https://zod.dev/
 | セッション期限切れ | プロキシ（`proxy.ts`）が `/login` にリダイレクト |
 | Supabase接続エラー（コード交換・存在確認のDBエラー等） | サーバーログに出力、`/login` にリダイレクト |
 | ユーザー自動登録失敗 | サーバーログに出力し `/login?error=registration_failed` にリダイレクト（通知は送らない、セッション Cookie は付けない）。`/login` は許可リスト方式でメッセージ表示 |
+| 同意 Cookie なしの初回登録 | INSERT を行わず `/login?error=terms_required` にリダイレクト（通知は送らない、セッション Cookie は付けない）。既存ユーザーの分岐では参照しない |
 | 論理削除済みユーザーの再ログイン | INSERT を試行せず、自動登録失敗と同じ導線（`/login?error=registration_failed`、セッション Cookie なし） |
 | ユーザー存在確認の失敗 | INSERT せず、`error` パラメータなしの `/login` へフェイルクローズ（セッション Cookie なし） |
 | service_role 未設定 | `createAdminSupabaseClient()` が throw し、ユーザーには 500 として見える（通常クライアントへの暗黙フォールバックなし。個別事前チェックは置かない。throw はセッション Cookie 付与より前のため Cookie は発行されない） |
@@ -1013,7 +1017,9 @@ flowchart TD
     C -->|確認失敗| L["ログ出力・/login にリダイレクト（error なし）"]
     C -->|未削除の既存| Z[通常のステータス判定]
     C -->|論理削除済み| Q["ログ出力・/login?error=registration_failed にリダイレクト（通知は送らない・セッション Cookie なし）"]
-    C -->|なし| D["users テーブルに INSERT（trial）"]
+    C -->|なし| T{同意 Cookie}
+    T -->|なし| W["/login?error=terms_required にリダイレクト（INSERT せず・通知は送らない・セッション Cookie なし）"]
+    T -->|あり| D["users テーブルに INSERT（trial + terms_accepted_at）"]
     D --> E{INSERT 結果}
     E -->|成功| S[INSERT 成功]
     S --> F["sendSlackNewUserNotification()<br/>（非同期・await なし）"]
@@ -1028,7 +1034,7 @@ flowchart TD
 
 INSERT 成功後はお試しユーザーとしてダッシュボードへ遷移する。承認依頼のSlack通知は従来どおり送信し、管理者は `/admin/users` で承認・却下を行う。`sendSlackNewUserNotification()` は `await` せずに発火する非同期・非ブロッキング呼び出しで、通知の完了を待たずにリダイレクトへ進む。
 
-INSERT 失敗時はログを出力し `/login?error=registration_failed` へリダイレクトする（通知は送らない）。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認は論理削除済み行も含めて `auth_id` で照合する（通常の SELECT RLS では本人の削除済み行が見えないため、確認のみ RLS をバイパスする。INSERT は通常クライアントのまま）。存在確認に失敗した場合は INSERT せず、`error` パラメータなしの `/login` へフェイルクローズする。`SUPABASE_SERVICE_ROLE_KEY` 未設定時は `createAdminSupabaseClient()` が throw し、通常クライアントへの暗黙フォールバックはしない（コールバック側の個別事前チェックは置かない）。登録失敗・論理削除済み・確認失敗のエラー導線ではセッション Cookie を付けない。`/login` は `error` クエリ値を許可リスト方式（自前のキーのみ。プロトタイプ継承キーは含めない）で解釈し、`registration_failed` のときのみユーザー向けメッセージを表示する。未知の値では何も表示しない。
+INSERT 失敗時はログを出力し `/login?error=registration_failed` へリダイレクトする（通知は送らない）。同意 Cookie なしの初回登録では INSERT 自体を行わず `/login?error=terms_required` へリダイレクトする（通知は送らない）。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認は論理削除済み行も含めて `auth_id` で照合する（通常の SELECT RLS では本人の削除済み行が見えないため、確認のみ RLS をバイパスする。INSERT は通常クライアントのまま）。存在確認に失敗した場合は INSERT せず、`error` パラメータなしの `/login` へフェイルクローズする。`SUPABASE_SERVICE_ROLE_KEY` 未設定時は `createAdminSupabaseClient()` が throw し、通常クライアントへの暗黙フォールバックはしない（コールバック側の個別事前チェックは置かない）。登録失敗・同意なし・論理削除済み・確認失敗のエラー導線ではセッション Cookie を付けない。いずれの経路の応答でも同意 Cookie は削除する。`/login` は `error` クエリ値を許可リスト方式（自前のキーのみ。プロトタイプ継承キーは含めない）で解釈し、`registration_failed`・`terms_required` のときのみユーザー向けメッセージを表示する。未知の値では何も表示しない。
 
 #### 9.5.2 Stripe支払い失敗通知
 
@@ -1115,3 +1121,4 @@ flowchart TD
 | 2026年9月 | `createAdminSupabaseClient()` の service_role 未設定時の暗黙フォールバックを廃止し throw に統一（#215）。OAuth コールバックの個別事前チェックを削除。2.5・2.11・8.2・9.5.1節および database.md 6.8 を更新 |
 | 2026年9月 | #215 レビュー反映: `/demo` を force-dynamic から ISR（revalidate=3600）へ変更し CI に service_role placeholder を追加。`assertServiceRoleConfigured()` を削除して `createAdminSupabaseClient()` に一本化。OAuth の service_role 未設定時は 500 になることを 8.2・9.5.1 に明記。database.md 6.8 の防御層記述を修正 |
 | 2026年9月 | #216対応：slides の `storage.objects` SELECT に親階層（week / phase / theme）の公開・未削除判定を追加し、member / お試しは `isContentVisible()` と同じ4階層条件に揃える（方針A）。学習画面は親階層未公開時に member / お試しを `notFound()`。3.2節を更新 |
+| 2026年9月 | #226対応：初回ログイン時に利用規約・プライバシーポリシーへの同意チェックボックスを追加。`/login` で未チェックの間は Google ログインボタンを無効化し、同意は短寿命 Cookie で callback へ持ち回る。同意なしの初回登録は INSERT せず `/login?error=terms_required` へ戻し、同意ありの初回登録は `users.terms_accepted_at` に登録時刻を記録する。2.4・2.5・7.1・8.2・9.5.1節を更新 |

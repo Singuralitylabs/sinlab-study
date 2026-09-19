@@ -346,7 +346,7 @@ erDiagram
 
 ### 3.8 users（ユーザー）
 
-本サービスの独自Supabaseプロジェクトで管理する。初回Googleログイン時にOAuthコールバックで自動作成される（`status=trial`, `role=member`, `membership_type=NULL`）。`status=trial` は「お試し（trial）ユーザー」としてログインしてサービスを利用でき、お試し公開コンテンツ（`is_open_to_trial=true`）の閲覧・課題提出が可能。管理者が承認後、`status=active` に変更することで全コンテンツへのアクセスが可能になる。承認時には会員種別（`membership_type`）も同時に設定する。
+本サービスの独自Supabaseプロジェクトで管理する。初回Googleログイン時にOAuthコールバックで自動作成される（`status=trial`, `role=member`, `membership_type=NULL`, `terms_accepted_at=登録時刻`）。`status=trial` は「お試し（trial）ユーザー」としてログインしてサービスを利用でき、お試し公開コンテンツ（`is_open_to_trial=true`）の閲覧・課題提出が可能。管理者が承認後、`status=active` に変更することで全コンテンツへのアクセスが可能になる。承認時には会員種別（`membership_type`）も同時に設定する。`terms_accepted_at` は新規登録時のみ記録し、既存ユーザーは `NULL` のまま利用継続できる（再同意は求めない）。
 
 | カラム | 型 | NULL | デフォルト | 説明 |
 |:--|:--|:--:|:--|:--|
@@ -358,6 +358,7 @@ erDiagram
 | role | VARCHAR(20) | NO | 'member' | `admin` / `maintainer` / `member`（CHECK制約） |
 | status | VARCHAR(20) | NO | 'trial' | `trial` / `active` / `rejected`（CHECK制約） |
 | membership_type | VARCHAR(20) | YES | NULL | 会員種別。`community`（コミュニティ会員）/ `general`（一般有料会員）（CHECK制約）。承認前・却下ユーザーは NULL |
+| terms_accepted_at | TIMESTAMPTZ | YES | NULL | 利用規約・プライバシーポリシーへの同意日時。初回登録時に記録し、既存ユーザーは NULL のまま |
 | bio | TEXT | YES | NULL | 自己紹介 |
 | is_deleted | BOOLEAN | YES | false | 論理削除フラグ |
 | created_at | TIMESTAMPTZ | YES | NOW() | 作成日時 |
@@ -680,6 +681,7 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 | `20260911061708_lighten_rls_policy_helper_calls.sql` | RLS ポリシーのヘルパー呼び出し軽量化（#197 PR2）。`learning_contents` SELECT の重複 InitPlan を `CASE (select get_user_status())` で1本に折り畳み、`ai_reviews` SELECT の無相関 `IN` を相関 `EXISTS` に変更（点検索で PK プローブも選択可能に）。許可・拒否の真理値とヘルパーの GRANT/REVOKE・関数本体は変更しない |
 | `20260916002654_slides_storage_select_parent_hierarchy.sql` | slides の `storage.objects` SELECT に week / phase / theme の公開・未削除判定を JOIN で追加（#216 方針A）。member / お試しは `isContentVisible()` と同じ4階層条件。admin / maintainer は無条件許可。`(select get_user_role())` / OR 1本の形は維持。`idx_learning_contents_pdf_url` 部分インデックスを追加。`learning_contents` の SELECT RLS は変更しない |
 | `20260917011152_validate_slide_pdf_url_object_keys.sql` | `learning_contents.pdf_url` のオブジェクトキー検証を `toSlideObjectKey()` と等価に強化（#217）。適用済み `20260908000000` は書き換えず、同規則で再正規化（旧公開URL・前後空白）したうえで、空セグメント・`.` / `..`・スキーム・`/` 始まりを含む不正値があれば例外で中断する |
+| `20260919000000_add_terms_accepted_at_to_users.sql` | `users` に利用規約の同意日時 `terms_accepted_at`（TIMESTAMPTZ, NULL許容）を追加（#226）。RLS変更なし |
 
 ### 7.1 リモート適用履歴との整合（#149・確定版）
 
@@ -781,3 +783,4 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 | 2026年9月 | #216対応：slides の `storage.objects` SELECT に親階層（week / phase / theme）の `is_published` / `is_deleted` 判定を追加（方針A。member / お試しは `isContentVisible()` と同じ4階層条件）。`idx_learning_contents_pdf_url` を追加。6.2 / 6.3 に親階層はアプリ層判定である旨を追記。6.8節・マイグレーション一覧を更新 |
 | 2026年9月 | #217対応：`learning_contents.pdf_url` の検証を `toSlideObjectKey()` と等価に強化（空セグメント・`.` / `..` 等）。適用済み `20260908000000` は書き換えず新規マイグレーションで再検査。マイグレーション一覧を更新 |
 | 2026年9月 | #218対応：7.1節の対象が開発用プロジェクトであること、本番は履歴整合済みでリリース時は `migration list` 確認後に `db push` すること、開発用 `repair` の根拠を開発用の反映確認に揃えることを明記。Wiki「本番環境リリース手順」も同方針へ更新 |
+| 2026年9月 | #226対応：`users` に利用規約の同意日時 `terms_accepted_at`（TIMESTAMPTZ, NULL許容）を追加。3.8節・マイグレーション一覧を更新 |
