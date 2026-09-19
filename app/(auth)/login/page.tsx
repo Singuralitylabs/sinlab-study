@@ -48,9 +48,6 @@ export default async function LoginPage({
           </div>
           {errorMessage && <p className="text-sm text-destructive text-center">{errorMessage}</p>}
           <GoogleLoginButton />
-          <p className="text-xs text-muted-foreground text-center">
-            Google側の確認画面で「〜.supabase.co」というドメインへの移動が表示されますが、これは本サービスの認証基盤（Supabase）のドメインです。
-          </p>
         </div>
 
         <p className="text-xs text-muted-foreground text-center">
