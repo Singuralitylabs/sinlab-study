@@ -1,12 +1,16 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
-import { TERMS_CONSENT_COOKIE_NAME } from "@/app/constants/auth";
+import {
+  TERMS_CONSENT_COOKIE_NAME,
+  TERMS_CONSENT_COOKIE_VALUE,
+  TERMS_REQUIRED_ERROR_CODE,
+} from "@/app/constants/auth";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { sendSlackNewUserNotification } from "@/app/services/notifications/slack";
 
 const REGISTRATION_FAILED_PATH = "/login?error=registration_failed";
-const TERMS_REQUIRED_PATH = "/login?error=terms_required";
+const TERMS_REQUIRED_PATH = `/login?error=${TERMS_REQUIRED_ERROR_CODE}`;
 
 type CookieToSet = {
   name: string;
@@ -107,7 +111,8 @@ export async function GET(request: NextRequest) {
   if (!existingUser) {
     // 初回ログイン: 同意 Cookie なしには users 行を作らない（同意操作の迂回防止）。
     // 既存ユーザーの分岐では Cookie を参照しない。
-    const hasConsented = request.cookies.get(TERMS_CONSENT_COOKIE_NAME)?.value === "1";
+    const hasConsented =
+      request.cookies.get(TERMS_CONSENT_COOKIE_NAME)?.value === TERMS_CONSENT_COOKIE_VALUE;
     if (!hasConsented) {
       return redirectWithoutSession(new URL(TERMS_REQUIRED_PATH, origin));
     }

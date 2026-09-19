@@ -1,11 +1,13 @@
 import { BookOpen } from "lucide-react";
+import { TERMS_REQUIRED_ERROR_CODE } from "@/app/constants/auth";
+import { PRIVACY_URL, TERMS_URL } from "@/app/constants/legal";
 import { GoogleLoginButton } from "./components/google-login-button";
 
 /** `/login?error=` で表示するメッセージ。未知の値は何も出さない */
 const LOGIN_ERROR_MESSAGES = {
   registration_failed:
     "アカウント登録に失敗しました。時間をおいて再度お試しください。問題が続く場合は管理者にお問い合わせください。",
-  terms_required:
+  [TERMS_REQUIRED_ERROR_CODE]:
     "利用規約およびプライバシーポリシーへの同意が必要です。チェックボックスにチェックを入れてから再度お試しください。",
 } as const;
 
@@ -57,19 +59,14 @@ export default async function LoginPage({
 
         <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <a
-            href="https://sinlab.future-tech-association.org/sinlab-study/privacy.html"
+            href={PRIVACY_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="hover:underline"
           >
             プライバシーポリシー
           </a>
-          <a
-            href="https://sinlab.future-tech-association.org/sinlab-study/terms.html"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:underline"
-          >
+          <a href={TERMS_URL} target="_blank" rel="noopener noreferrer" className="hover:underline">
             利用規約
           </a>
           <a

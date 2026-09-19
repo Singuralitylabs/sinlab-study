@@ -9,7 +9,7 @@ vi.mock("@/app/services/notifications/slack");
 
 import { createServerClient } from "@supabase/ssr";
 import { GET } from "@/app/auth/callback/route";
-import { TERMS_CONSENT_COOKIE_NAME } from "@/app/constants/auth";
+import { TERMS_CONSENT_COOKIE_NAME, TERMS_CONSENT_COOKIE_VALUE } from "@/app/constants/auth";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { sendSlackNewUserNotification } from "@/app/services/notifications/slack";
 
@@ -25,7 +25,7 @@ function callbackRequest(code = "oauth-code") {
 
 function callbackRequestWithConsent(code = "oauth-code") {
   return new NextRequest(`http://localhost/auth/callback?code=${code}`, {
-    headers: { cookie: `${TERMS_CONSENT_COOKIE_NAME}=1` },
+    headers: { cookie: `${TERMS_CONSENT_COOKIE_NAME}=${TERMS_CONSENT_COOKIE_VALUE}` },
   });
 }
 
@@ -200,6 +200,7 @@ describe("GET /auth/callback", () => {
       expect(res.headers.get("location")).toBe("http://localhost/rejected");
       expect(sessionClient.insert).not.toHaveBeenCalled();
       expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+      expectConsentCookieDeleted(res);
     }
   });
 
