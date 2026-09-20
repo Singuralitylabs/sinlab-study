@@ -433,6 +433,7 @@ export type Database = {
           membership_type: string | null;
           role: string;
           status: string;
+          terms_accepted_at: string | null;
           updated_at: string | null;
         };
         Insert: {
@@ -447,6 +448,7 @@ export type Database = {
           membership_type?: string | null;
           role?: string;
           status?: string;
+          terms_accepted_at?: string | null;
           updated_at?: string | null;
         };
         Update: {
@@ -461,6 +463,7 @@ export type Database = {
           membership_type?: string | null;
           role?: string;
           status?: string;
+          terms_accepted_at?: string | null;
           updated_at?: string | null;
         };
         Relationships: [];
