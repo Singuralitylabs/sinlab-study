@@ -1,0 +1,43 @@
+name: Supabase Keepalive
+
+# Supabase 無料プランの自動 Pause 防止のため、REST API に毎日アクセスする。
+# RLS で 0 行でも HTTP 200 が返れば API アクセスとしてカウントされる。
+# push / pull_request では起動しない (Secrets を fork PR に晒さないため)。
+on:
+  schedule:
+    # 毎日 JST 06:00 (UTC 21:00 前日)
+    - cron: "0 21 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        target: [dev, prod]
+      fail-fast: false
+
+    steps:
+      - name: Keep Supabase project active (${{ matrix.target }})
+        run: |
+          if [ "${{ matrix.target }}" = "dev" ]; then
+            SUPABASE_URL="${{ secrets.SUPABASE_KEEPALIVE_DEV_URL }}"
+            SUPABASE_KEY="${{ secrets.SUPABASE_KEEPALIVE_DEV_KEY }}"
+          else
+            SUPABASE_URL="${{ secrets.SUPABASE_KEEPALIVE_PROD_URL }}"
+            SUPABASE_KEY="${{ secrets.SUPABASE_KEEPALIVE_PROD_KEY }}"
+          fi
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
+            echo "::error::Supabase keepalive secrets are not set for target '${{ matrix.target }}'."
+            exit 1
+          fi
+          # publishable key のみを使用する (service_role は使わない)。
+          # -v は使わない (URL・key がログに出るため)。
+          # HTTP 200 以外は --fail-with-body でジョブを失敗させる。
+          curl --fail-with-body --silent --show-error --max-time 60 \
+            "${SUPABASE_URL}/rest/v1/learning_themes?select=id&limit=1" \
+            -H "apikey: ${SUPABASE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_KEY}"
