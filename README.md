@@ -107,14 +107,6 @@ Claude Code で Supabase MCP サーバーを使う場合、**必ず read-only �
 
 `.claude/settings.json` の PreToolUse フック（`.claude/hooks/allow-readonly-sql.mjs`）は、`execute_sql` の `query` が読み取り専用（SELECT 等）と判定できたときだけ許可確認をスキップする**利便性のための仕組み**で、書き込み防止の実体ではない。SELECT 内で副作用のある関数を呼ぶクエリは通るため、read-only モードを省略しないこと。`execute_sql` 自体を `permissions.allow` に登録してはならない（`CLAUDE.md`「自動実行の許可」参照）。
 
-## Supabase Keepalive（自動Pause防止）
-
-Supabase 無料プランは7日間APIアクセスが無いと自動Pauseするため、[supabase-keepalive.yml](./.github/workflows/supabase-keepalive.yml) が毎日JST 06:00（`schedule`）に開発用・本番用の両プロジェクトへREST APIでアクセスする（`learning_themes` への `select=id&limit=1`。anon へのテーブル SELECT 権限が前提で、0行でもHTTP 200が返ればカウントされる）。
-
-- リポジトリSecrets（4件。値はいずれもpublishable keyでservice_roleは使わない）: `SUPABASE_KEEPALIVE_DEV_URL` / `SUPABASE_KEEPALIVE_DEV_KEY` / `SUPABASE_KEEPALIVE_PROD_URL` / `SUPABASE_KEEPALIVE_PROD_KEY`
-- 手動実行: Actions画面から「Supabase Keepalive」→「Run workflow」
-- 60日間コミットが無いとGitHubがscheduleを自動無効化するため、長期停止後はActions画面で再有効化すること。失敗時の標準通知メールは同ワークフローファイルの最終コミッターにのみ届くため、担当交代時は空コミットで通知先を更新すること。Pause済みプロジェクトの復旧はSupabaseダッシュボードから手動で行う。
-
 ## Dependabot PR のマージ運用
 
 依存関係の更新は [Dependabot](./.github/dependabot.yml) が週次（Bun）・月次（GitHub Actions）で自動検出し、更新 PR を作成する。マイナー・パッチ更新は `@supabase/*`・`@codemirror/*` を含めグループごとに集約され、メジャー更新は個別 PR になる。
