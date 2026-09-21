@@ -7,6 +7,8 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { Button } from "@/components/ui/button";
 
+// public/pdf.worker.min.mjs は pdfjs-dist と同一バージョン・同一ビルド（legacy）に保つこと。
+// react-pdf 更新時は node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs で必ず差し替える。
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
 interface PdfSlideViewerProps {
