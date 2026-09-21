@@ -31,11 +31,17 @@ const nextConfig: NextConfig = {
     resolveAlias: {
       // react-pdf: canvas依存を除外（サーバーサイドビルドエラー防止）
       canvas: { browser: "./empty-module.js" },
+      // pdf.js 6 の通常ビルドは最新ブラウザ専用（polyfill なし）のため legacy ビルドへ差し替える
+      "pdfjs-dist": "pdfjs-dist/legacy/build/pdf.mjs",
+      "pdfjs-dist/web/pdf_viewer.mjs": "pdfjs-dist/legacy/web/pdf_viewer.mjs",
     },
   },
   webpack: (config) => {
     // react-pdf: canvas依存を除外（webpack使用時）
     config.resolve.alias.canvas = false;
+    // pdf.js 6 の通常ビルドは最新ブラウザ専用（polyfill なし）のため legacy ビルドへ差し替える
+    config.resolve.alias["pdfjs-dist$"] = "pdfjs-dist/legacy/build/pdf.mjs";
+    config.resolve.alias["pdfjs-dist/web/pdf_viewer.mjs$"] = "pdfjs-dist/legacy/web/pdf_viewer.mjs";
     return config;
   },
 };
