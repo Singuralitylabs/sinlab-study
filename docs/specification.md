@@ -1122,4 +1122,4 @@ flowchart TD
 | 2026年9月 | #215 レビュー反映: `/demo` を force-dynamic から ISR（revalidate=3600）へ変更し CI に service_role placeholder を追加。`assertServiceRoleConfigured()` を削除して `createAdminSupabaseClient()` に一本化。OAuth の service_role 未設定時は 500 になることを 8.2・9.5.1 に明記。database.md 6.8 の防御層記述を修正 |
 | 2026年9月 | #216対応：slides の `storage.objects` SELECT に親階層（week / phase / theme）の公開・未削除判定を追加し、member / お試しは `isContentVisible()` と同じ4階層条件に揃える（方針A）。学習画面は親階層未公開時に member / お試しを `notFound()`。3.2節を更新 |
 | 2026年9月 | #226対応：初回ログイン時に利用規約・プライバシーポリシーへの同意チェックボックスを追加。`/login` で未チェックの間は Google ログインボタンを無効化し、同意は短寿命 Cookie で callback へ持ち回る。同意なしの初回登録は INSERT せず `/login?error=terms_required` へ戻し、同意ありの初回登録は `users.terms_accepted_at` に登録時刻を記録する。2.4・2.5・7.1・8.2・9.5.1節を更新 |
-| 2026年9月 | 動画・スライドの概要欄カードをプレイヤー／ビューアの下部へ移動（#221）：概要が長い場合にファーストビューが概要で占有されコンテンツ本体に届きにくいため、本体カードの直後・完了ボタンの直前に表示順を変更（表示条件・マークアップ・スタイルは不変）。3.2節を更新 |
+| 2026年9月 | #221対応：動画・スライドの概要欄カードをプレイヤー／ビューアの下部へ移動。概要が長い場合にファーストビューが概要で占有されコンテンツ本体に届きにくいため、本体カードの直後・完了ボタンの直前に表示順を変更（表示条件・マークアップ・スタイルは不変）。3.2節を更新 |
