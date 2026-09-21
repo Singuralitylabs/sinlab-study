@@ -653,14 +653,14 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 |:--|:--|
 | `20260412010000_create_tables.sql` | 全テーブル・ヘルパー関数・トリガー・インデックスの作成 |
 | `20260412010001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
-| `20260412010002_seed_gas_course_structure.sql` | GAS講座のテーマ・フェーズ・週・コンテンツ構造のシード |
+| `20260412010002_seed_gas_course_structure.sql` | GAS講座のテーマ・フェーズ・週・コンテンツ構造のシード（`WHERE name = 'GAS学習'` の get-or-create のため、リネーム後の環境で再実行するとテーマ・フェーズが重複作成される。適用済みマイグレーションを再実行しないこと） |
 | `20260412010003_seed_gas_exercises.sql` | GAS講座の演習コンテンツ（課題・模範回答）のシード |
 | `20260412010004_seed_gas_hints.sql` | GAS講座の全演習課題へのヒントデータ投入 |
-| `20260521000000_seed_gas_advanced_course_structure.sql` | GAS講座（応用編）のテーマ・フェーズ・週・video/slideコンテンツ構造のシード（#49）。タイムスタンプは演習seedよりフレッシュ環境での適用順を前にするため意図的に選定したもので、実際の適用日時ではない |
+| `20260521000000_seed_gas_advanced_course_structure.sql` | GAS講座（応用編）のテーマ・フェーズ・週・video/slideコンテンツ構造のシード（#49）。タイムスタンプは演習seedよりフレッシュ環境での適用順を前にするため意図的に選定したもので、実際の適用日時ではない（適用済みの後続バージョンより小さい過去日付のため、素の `db push` は拒否され `--include-all` が必要になる） |
 | `20260524000000_seed_gas_advanced_exercises.sql` | GAS講座（応用編）の演習コンテンツ（課題・ヒント・模範回答）のシード |
 | `20260527000000_add_submission_code_files.sql` | submissions に複数ファイル提出用 `code_files`（JSONB）カラムを追加 |
-| `20260613000000_seed_gas_practical_theme.sql` | GAS講座（実践編）のテーマ行を作成（#166）。タイムスタンプは実践編のフェーズ・週シードよりフレッシュ環境での適用順を前にするため意図的に選定したもので、実際の適用日時ではない |
-| `20260614080707_seed_gas_practical_course_structure.sql` | GAS講座（実践編）のフェーズ・週・コンテンツ構造のシード（#149調査で復元）。Week「Geminiを使ったドキュメント自動要約」の所属フェーズ・display_orderを本番の実値に合わせて修正済み（#168。ただしこの修正はテーマ未投入のフレッシュ環境向けで、既に本ファイルを旧内容で適用済みの環境へは届かない。後者は`20260906090000_move_gas_practical_gemini_week.sql`が担う） |
+| `20260613000000_seed_gas_practical_theme.sql` | GAS講座（実践編）のテーマ行を作成（#166）。タイムスタンプは実践編のフェーズ・週シードよりフレッシュ環境での適用順を前にするため意図的に選定したもので、実際の適用日時ではない（適用済みの後続バージョンより小さい過去日付のため、素の `db push` は拒否され `--include-all` が必要になる） |
+| `20260614080707_seed_gas_practical_course_structure.sql` | GAS講座（実践編）のフェーズ・週・コンテンツ構造のシード（#149調査で復元）。Week「Geminiを使ったドキュメント自動要約」の所属フェーズ・display_orderを本番の実値に合わせて修正済み（#168。ただしこの修正はテーマ未投入のフレッシュ環境向けで、既に本ファイルを旧内容で適用済みの環境へは届かない。後者は`20260906090000_move_gas_practical_gemini_week.sql`が担う。リモートの `schema_migrations.statements` とは意図的に内容が異なるため、`migration fetch` 等で上書きしないこと） |
 | `20260715233228_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し（#77） |
 | `20260801000001_add_is_open_to_trial.sql` | learning_contents にお試し公開フラグ `is_open_to_trial` を追加 |
 | `20260801000002_trial_user_policies.sql` | `get_user_status()` の追加と、お試しユーザー制限を含むポリシーへの差し替え（learning_contents の SELECT、user_progress / submissions の書き込み） |
@@ -687,7 +687,7 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 
 ### 7.1 マイグレーション追加後の運用
 
-本番への適用は、リリース時に `supabase migration list` で未適用分（`Remote` が空の行）だけであることを確認したうえで `bunx supabase db push` で行う（詳細は Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順) Step 3）。SQL Editor で手動適用すると履歴に記録されず、次回の `db push` で再実行されるため行わないこと。過去の履歴整合の経緯（#149・#218）は本書に残さず、git / Issue 履歴を参照すること（#185）。
+本番への適用は、リリース時に `supabase migration list --db-url <本番>` で未適用分（`Remote` が空の行）だけであることを確認したうえで `bunx supabase db push --db-url <本番>` で行う（詳細は Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順) Step 3）。SQL Editor で手動適用すると履歴に記録されず、次回の `db push` で再実行されるため行わないこと。
 
 このリポジトリには `supabase/config.toml` がなく、Docker上のローカルSupabaseスタック（`supabase start` / `supabase db reset`）は未整備。そのため動作確認は `.env.local` がリンクしている開発用プロジェクトに対して行う。
 
