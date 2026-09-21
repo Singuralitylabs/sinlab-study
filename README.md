@@ -109,11 +109,11 @@ Claude Code で Supabase MCP サーバーを使う場合、**必ず read-only �
 
 ## Supabase Keepalive（自動Pause防止）
 
-Supabase 無料プランは7日間APIアクセスが無いと自動Pauseするため、[supabase-keepalive.yml](./.github/workflows/supabase-keepalive.yml) が毎日JST 06:00（`schedule`）に開発用・本番用の両プロジェクトへREST APIでアクセスする（`learning_themes` への `select=id&limit=1`。RLSで0行でもHTTP 200が返ればカウントされる）。
+Supabase 無料プランは7日間APIアクセスが無いと自動Pauseするため、[supabase-keepalive.yml](./.github/workflows/supabase-keepalive.yml) が毎日JST 06:00（`schedule`）に開発用・本番用の両プロジェクトへREST APIでアクセスする（`learning_themes` への `select=id&limit=1`。anon へのテーブル SELECT 権限が前提で、0行でもHTTP 200が返ればカウントされる）。
 
 - リポジトリSecrets（4件。値はいずれもpublishable keyでservice_roleは使わない）: `SUPABASE_KEEPALIVE_DEV_URL` / `SUPABASE_KEEPALIVE_DEV_KEY` / `SUPABASE_KEEPALIVE_PROD_URL` / `SUPABASE_KEEPALIVE_PROD_KEY`
 - 手動実行: Actions画面から「Supabase Keepalive」→「Run workflow」
-- 60日間コミットが無いとGitHubがscheduleを自動無効化するため、長期停止後はActions画面で再有効化すること。失敗時はActionsの標準通知で検知し、Pause済みプロジェクトの復旧はSupabaseダッシュボードから手動で行う。
+- 60日間コミットが無いとGitHubがscheduleを自動無効化するため、長期停止後はActions画面で再有効化すること。失敗時の標準通知メールは同ワークフローファイルの最終コミッターにのみ届くため、担当交代時は空コミットで通知先を更新すること。Pause済みプロジェクトの復旧はSupabaseダッシュボードから手動で行う。
 
 ## Dependabot PR のマージ運用
 

@@ -1,7 +1,10 @@
 name: Supabase Keepalive
 
 # Supabase 無料プランの自動 Pause 防止のため、REST API に毎日アクセスする。
-# RLS で 0 行でも HTTP 200 が返れば API アクセスとしてカウントされる。
+# learning_themes への publishable key での SELECT が HTTP 200 で返ればカウントされる。
+# 200 (0 行含む) になるのは anon ロールにテーブル SELECT 権限 (Supabase 既定 GRANT) が
+# 残っていることが前提。anon から REVOKE すると 401/403 で毎日失敗するため、
+# テーブル権限を見直す場合はこの到達先も更新すること。
 # push / pull_request では起動しない (Secrets を fork PR に晒さないため)。
 on:
   schedule:
@@ -16,28 +19,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     strategy:
-      matrix:
-        target: [dev, prod]
       fail-fast: false
+      matrix:
+        include:
+          - target: dev
+            url_secret: SUPABASE_KEEPALIVE_DEV_URL
+            key_secret: SUPABASE_KEEPALIVE_DEV_KEY
+          - target: prod
+            url_secret: SUPABASE_KEEPALIVE_PROD_URL
+            key_secret: SUPABASE_KEEPALIVE_PROD_KEY
 
     steps:
       - name: Keep Supabase project active (${{ matrix.target }})
+        env:
+          SUPABASE_URL: ${{ secrets[matrix.url_secret] }}
+          SUPABASE_KEY: ${{ secrets[matrix.key_secret] }}
+          TARGET: ${{ matrix.target }}
         run: |
-          if [ "${{ matrix.target }}" = "dev" ]; then
-            SUPABASE_URL="${{ secrets.SUPABASE_KEEPALIVE_DEV_URL }}"
-            SUPABASE_KEY="${{ secrets.SUPABASE_KEEPALIVE_DEV_KEY }}"
-          else
-            SUPABASE_URL="${{ secrets.SUPABASE_KEEPALIVE_PROD_URL }}"
-            SUPABASE_KEY="${{ secrets.SUPABASE_KEEPALIVE_PROD_KEY }}"
-          fi
           if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
-            echo "::error::Supabase keepalive secrets are not set for target '${{ matrix.target }}'."
+            echo "::error::Supabase keepalive secrets are not set for target '${TARGET}'."
             exit 1
           fi
           # publishable key のみを使用する (service_role は使わない)。
-          # -v は使わない (URL・key がログに出るため)。
+          # -v / --show-error は使わない (URL・key・ホスト名がログに出るため)。
           # HTTP 200 以外は --fail-with-body でジョブを失敗させる。
-          curl --fail-with-body --silent --show-error --max-time 60 \
+          if ! curl --fail-with-body --silent --max-time 60 -o /dev/null \
             "${SUPABASE_URL}/rest/v1/learning_themes?select=id&limit=1" \
             -H "apikey: ${SUPABASE_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_KEY}"
+            -H "Authorization: Bearer ${SUPABASE_KEY}"; then
+            echo "::error::Supabase keepalive request failed for target '${TARGET}'."
+            exit 1
+          fi
