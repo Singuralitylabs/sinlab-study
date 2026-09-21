@@ -107,6 +107,10 @@ export function PdfSlideViewer({ url }: PdfSlideViewerProps) {
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={(error) => console.error("PDF読み込みエラー:", error)}
           loading={null}
+          // react-pdf v11 は suspense が既定で有効になり、読み込み失敗時に
+          // Error Boundary へ例外が伝播する。独自の isLoading / onLoadError に
+          // 依存した従来挙動を維持するため無効化する。
+          suspense={false}
           className="flex justify-center py-4"
         >
           <Page
