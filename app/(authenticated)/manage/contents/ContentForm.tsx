@@ -488,7 +488,7 @@ export function ContentForm({
             </div>
           </div>
 
-          {/* 概要（video / slide のみ。詳細ページのプレイヤー／ビューア上部に表示） */}
+          {/* 概要（video / slide のみ。詳細ページのプレイヤー／ビューア下部に表示） */}
           {(contentType === "video" || contentType === "slide") && (
             <div className="space-y-2">
               <Label htmlFor="description">概要（Markdown・任意）</Label>

@@ -190,17 +190,6 @@ export default async function ContentPage({ params }: PageProps) {
         badge={<UnpublishedBadge isPublished={isFullyPublished} />}
       />
 
-      {/* 概要欄（video / slide かつ概要が入力されている場合のみ表示） */}
-      {(content.content_type === "video" || content.content_type === "slide") &&
-        content.description && (
-          <Card className="mb-6">
-            <CardContent className="pt-6">
-              <h2 className="text-sm font-semibold text-muted-foreground mb-2">概要</h2>
-              <MarkdownRenderer content={resolveMarkdownStorageUrls(content.description)} />
-            </CardContent>
-          </Card>
-        )}
-
       {/* コンテンツ本体 */}
       <Card className="mb-6">
         <CardContent className="pt-6">
@@ -311,6 +300,17 @@ export default async function ContentPage({ params }: PageProps) {
           )}
         </CardContent>
       </Card>
+
+      {/* 概要欄（video / slide かつ概要が入力されている場合のみ表示。本体の下に表示する） */}
+      {(content.content_type === "video" || content.content_type === "slide") &&
+        content.description && (
+          <Card className="mb-6">
+            <CardContent className="pt-6">
+              <h2 className="text-sm font-semibold text-muted-foreground mb-2">概要</h2>
+              <MarkdownRenderer content={resolveMarkdownStorageUrls(content.description)} />
+            </CardContent>
+          </Card>
+        )}
 
       {/* 完了ボタン（未公開コンテンツのプレビュー中は進捗登録できないため非表示） */}
       {userId && isFullyPublished && (

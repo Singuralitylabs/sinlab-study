@@ -412,7 +412,7 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 | スライド（slide） | 非公開バケット `slides` のPDFを、閲覧権限チェック後にサーバー側で発行した署名付きURLで react-pdf によりブラウザ内表示（後述） |
 | 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携 |
 
-動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア上部に概要欄カードを表示する。未入力（NULL）の既存コンテンツでは概要欄自体を表示しない。表示にはテキスト・演習と同じ `MarkdownRenderer` を用いる。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）は `"use client"` を持たない共有コンポーネント（hooksやNode専用APIを使わないため）。Server Component（learn/demoの`page.tsx`）からはサーバーで、Client Component（`AIReviewDisplay`、AIレビュー結果表示用）からはクライアントバンドルに含まれてクライアントで、同じ実装のまま描画される。`AIReviewDisplay` 自体は `AIReviewDisplayNoSSR`（`next/dynamic`・`ssr: false`）経由でレビュー表示時のみ遅延読み込みし、コンテンツ本文の Markdown 描画経路（Server Component）は client 化しない。
+動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア下部に概要欄カードを表示する。未入力（NULL）の既存コンテンツでは概要欄自体を表示しない。表示にはテキスト・演習と同じ `MarkdownRenderer` を用いる。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）は `"use client"` を持たない共有コンポーネント（hooksやNode専用APIを使わないため）。Server Component（learn/demoの`page.tsx`）からはサーバーで、Client Component（`AIReviewDisplay`、AIレビュー結果表示用）からはクライアントバンドルに含まれてクライアントで、同じ実装のまま描画される。`AIReviewDisplay` 自体は `AIReviewDisplayNoSSR`（`next/dynamic`・`ssr: false`）経由でレビュー表示時のみ遅延読み込みし、コンテンツ本文の Markdown 描画経路（Server Component）は client 化しない。
 
 **YouTube facade（#198）**: `YouTubeEmbed` は初期表示でサムネイル（`https://i.ytimg.com/vi/{id}/hqdefault.jpg`）と再生ボタンのみを描画する。hqdefault は最適化の恩恵がほぼ無いため `next/image` Optimizer は使わず `<img>` で `i.ytimg.com` を直接参照する（クリック前に `youtube.com` へは通信しない）。クリック後に `YouTubePlayer`（`react-youtube`）を `next/dynamic` で読み込み、`autoplay: 1` で再生を開始する（チャンク読み込み中は黒背景 + スピナーを表示）。なお iOS Safari では gesture 後に生成した cross-origin iframe の音声付き autoplay が拒否され、再生ボタンへの追加タップが必要になる場合がある（facade 化の既知の制約）。
 
@@ -1122,3 +1122,4 @@ flowchart TD
 | 2026年9月 | #215 レビュー反映: `/demo` を force-dynamic から ISR（revalidate=3600）へ変更し CI に service_role placeholder を追加。`assertServiceRoleConfigured()` を削除して `createAdminSupabaseClient()` に一本化。OAuth の service_role 未設定時は 500 になることを 8.2・9.5.1 に明記。database.md 6.8 の防御層記述を修正 |
 | 2026年9月 | #216対応：slides の `storage.objects` SELECT に親階層（week / phase / theme）の公開・未削除判定を追加し、member / お試しは `isContentVisible()` と同じ4階層条件に揃える（方針A）。学習画面は親階層未公開時に member / お試しを `notFound()`。3.2節を更新 |
 | 2026年9月 | #226対応：初回ログイン時に利用規約・プライバシーポリシーへの同意チェックボックスを追加。`/login` で未チェックの間は Google ログインボタンを無効化し、同意は短寿命 Cookie で callback へ持ち回る。同意なしの初回登録は INSERT せず `/login?error=terms_required` へ戻し、同意ありの初回登録は `users.terms_accepted_at` に登録時刻を記録する。2.4・2.5・7.1・8.2・9.5.1節を更新 |
+| 2026年9月 | #221対応：動画・スライドの概要欄カードをプレイヤー／ビューアの下部へ移動。概要が長い場合にファーストビューが概要で占有されコンテンツ本体に届きにくいため、本体カードの直後・完了ボタンの直前に表示順を変更（表示条件・マークアップ・スタイルは不変）。3.2節を更新 |
