@@ -469,3 +469,29 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
     expect(html).not.toContain("テーマに戻る");
   });
 });
+
+describe("概要欄カードの表示位置（issue #221）", () => {
+  it("概要ありスライドでは概要カードがビューアの下に表示される", async () => {
+    setup({ userStatus: "active", isOpenToTrial: false });
+    vi.mocked(fetchContentById).mockResolvedValue({
+      data: slideContent({ description: "概要テスト本文" }),
+      error: null,
+    } as never);
+
+    const html = await render();
+
+    expect(html).toContain("概要");
+    expect(html).toContain("概要テスト本文");
+    expect(html).toContain('data-testid="slide-content"');
+    expect(html.indexOf("概要")).toBeGreaterThan(html.indexOf('data-testid="slide-content"'));
+  });
+
+  it("概要未設定（NULL）のスライドでは概要カードを表示しない", async () => {
+    setup({ userStatus: "active", isOpenToTrial: false });
+
+    const html = await render();
+
+    expect(html).toContain('data-testid="slide-content"');
+    expect(html).not.toContain("概要");
+  });
+});
