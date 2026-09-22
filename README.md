@@ -131,6 +131,7 @@ app/
 │   ├── admin/users/     #   ユーザー承認・却下・ロール変更
 │   ├── ai-review/       #   AIレビュー（Gemini API）
 │   ├── manage/          #   コンテンツ管理（phases/weeks/contents/themes）
+│   ├── onboarding/      #   初回利用ガイドの完了記録
 │   ├── progress/        #   進捗更新
 │   ├── submissions/     #   課題提出
 │   └── upload-pdf/      #   PDFスライドアップロード（Supabase Storage）

@@ -359,6 +359,7 @@ erDiagram
 | status | VARCHAR(20) | NO | 'trial' | `trial` / `active` / `rejected`（CHECK制約） |
 | membership_type | VARCHAR(20) | YES | NULL | 会員種別。`community`（コミュニティ会員）/ `general`（一般有料会員）（CHECK制約）。承認前・却下ユーザーは NULL |
 | terms_accepted_at | TIMESTAMPTZ | YES | NULL | 利用規約・プライバシーポリシーへの同意日時。初回登録時に記録し、既存ユーザーは NULL のまま |
+| onboarding_completed_at | TIMESTAMPTZ | YES | NULL | 初回利用ガイド（ウェルカムダイアログ）の完了日時。閉じたときに記録し、既存ユーザーは NULL のまま |
 | bio | TEXT | YES | NULL | 自己紹介 |
 | is_deleted | BOOLEAN | YES | false | 論理削除フラグ |
 | created_at | TIMESTAMPTZ | YES | NOW() | 作成日時 |
@@ -610,6 +611,8 @@ user_id = (select get_user_id())
 
 初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer は受講生進捗（`/manage/students`）の閲覧で `users` を参照するため SELECT のみ許可し、UPDATE は付与しない（ユーザー管理は不可）。
 
+本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため。`#16`）。
+
 ### 6.6 stripe_subscriptions
 
 | ポリシー | 操作 | 対象 | 条件 |
@@ -682,6 +685,7 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 | `20260916002654_slides_storage_select_parent_hierarchy.sql` | slides の `storage.objects` SELECT に week / phase / theme の公開・未削除判定を JOIN で追加（#216 方針A）。member / お試しは `isContentVisible()` と同じ4階層条件。admin / maintainer は無条件許可。`(select get_user_role())` / OR 1本の形は維持。`idx_learning_contents_pdf_url` 部分インデックスを追加。`learning_contents` の SELECT RLS は変更しない |
 | `20260917011152_validate_slide_pdf_url_object_keys.sql` | `learning_contents.pdf_url` のオブジェクトキー検証を `toSlideObjectKey()` と等価に強化（#217）。適用済み `20260908000000` は書き換えず、同規則で再正規化（旧公開URL・前後空白）したうえで、空セグメント・`.` / `..`・スキーム・`/` 始まりを含む不正値があれば例外で中断する |
 | `20260919000000_add_terms_accepted_at_to_users.sql` | `users` に利用規約の同意日時 `terms_accepted_at`（TIMESTAMPTZ, NULL許容）を追加（#226）。RLS変更なし |
+| `20260922000000_add_onboarding_completed_at_to_users.sql` | `users` に初回利用ガイドの完了日時 `onboarding_completed_at`（TIMESTAMPTZ, NULL許容）を追加（#16）。RLS変更なし |
 
 ### 7.1 リモート適用履歴との整合（#149・確定版）
 

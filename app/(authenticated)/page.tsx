@@ -1,15 +1,24 @@
 import { BookOpen, CheckCircle, Clock, TrendingUp } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { getWelcomeStepsForStatus } from "@/app/constants/onboarding";
+import { isStripeEnabled } from "@/app/constants/stripe";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
+import {
+  fetchGettingStartedProgress,
+  fetchOnboardingStatus,
+} from "@/app/services/api/onboarding-server";
+import { checkInstructorPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { GettingStartedChecklist } from "./components/GettingStartedChecklist";
+import { WelcomeDialog } from "./components/WelcomeDialog";
 
 export default async function HomePage() {
-  const { userId } = await getServerAuth();
+  const { userId, userRole, userStatus } = await getServerAuth();
 
   if (!userId) {
     return (
@@ -19,16 +28,50 @@ export default async function HomePage() {
     );
   }
 
-  const { data } = await fetchThemeProgressSummaries(userId);
-  const themes = data ?? [];
+  const isMember = !checkInstructorPermissions(userRole);
+
+  const [{ data: themeData }, onboardingResult, gettingStartedResult] = await Promise.all([
+    fetchThemeProgressSummaries(userId),
+    isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
+    isMember
+      ? fetchGettingStartedProgress(userId)
+      : Promise.resolve({ data: { hasSubmission: true, hasCompletedReview: true }, error: null }),
+  ]);
+  const themes = themeData ?? [];
   const totalContents = themes.reduce((sum, t) => sum + t.totalContents, 0);
   const completedContents = themes.reduce((sum, t) => sum + t.completedContents, 0);
   const overallProgress =
     totalContents > 0 ? Math.round((completedContents / totalContents) * 100) : 0;
 
+  const showWelcomeDialog =
+    isMember && onboardingResult.error === null && onboardingResult.data?.completedAt == null;
+
+  const firstThemeHref = themes.length > 0 ? `/learn/${themes[0].theme.id}` : "/learn";
+  const gettingStartedItems = [
+    { key: "complete-content", completed: completedContents > 0, href: firstThemeHref },
+    {
+      key: "submit-exercise",
+      completed: gettingStartedResult.data.hasSubmission,
+      href: firstThemeHref,
+    },
+    {
+      key: "receive-ai-review",
+      completed: gettingStartedResult.data.hasCompletedReview,
+      href: "/submissions",
+    },
+  ];
+  const showChecklist = isMember && gettingStartedItems.some((item) => !item.completed);
+
   return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-3xl font-bold tracking-tight mb-6">ダッシュボード</h1>
+
+      {showWelcomeDialog && (
+        <WelcomeDialog
+          steps={getWelcomeStepsForStatus(userStatus)}
+          stripeEnabled={isStripeEnabled()}
+        />
+      )}
 
       {/* 全体進捗 */}
       <Card className="mb-6">
@@ -48,6 +91,8 @@ export default async function HomePage() {
           <p className="text-right text-sm text-muted-foreground mt-2">{overallProgress}%</p>
         </CardContent>
       </Card>
+
+      {showChecklist && <GettingStartedChecklist items={gettingStartedItems} />}
 
       {/* テーマ一覧 */}
       <div className="grid gap-4">

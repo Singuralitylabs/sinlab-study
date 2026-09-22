@@ -457,6 +457,40 @@ flowchart TD
 
 リンクURLは現在URLの流用ではなく、遷移先コンテンツ自身の `phaseId` / `weekId` から組み立てる。
 
+### 3.4 初回利用ガイド（オンボーディング）
+
+初めて利用する受講生向けに、ウェルカムダイアログとはじめかたチェックリストを提供する。対象は `role = member` のみ（`trial` / `active` の両方）。判定は `app/services/auth/` の既存関数（`checkInstructorPermissions()` が false）を使い、ロールのリテラル比較はしない。
+
+**ウェルカムダイアログ**（`app/(authenticated)/components/WelcomeDialog.tsx`、shadcn `Dialog`）
+- 表示条件: `/` ダッシュボードで `role = member` かつ `users.onboarding_completed_at IS NULL` のとき、ページ表示時に開いた状態で1回表示する。他のページでは表示しない
+- ステップ定義は `app/constants/onboarding.ts` に集約し、サーバー側で `status` に応じて絞り込んだものを props で渡す
+  1. ようこそ: サービス概要とテーマ → フェーズ → 週 → コンテンツの4階層構成
+  2. 学習の進め方: 「完了」ボタンによる進捗記録、演習の提出とAIレビュー（1コンテンツにつき1回）
+  3. プランについて（`status = trial` のときのみ）: お試し公開コンテンツのみ閲覧・提出可、鍵アイコンは本登録後に閲覧可。本登録は管理者による承認（`isStripeEnabled()` が true のときは `/upgrade` へのリンクも案内）
+  4. 困ったときは: 不明点は管理者に問い合わせる旨
+- 閉じたとき（「はじめる」・×・オーバーレイクリック）は `POST /api/onboarding/complete` を呼び、成功可否に関わらず閉じる（API失敗時は次回表示時に再度出るだけで、ユーザー操作をブロックしない）
+- モバイル幅でも崩れないこと
+
+**はじめかたチェックリスト**（`app/(authenticated)/components/GettingStartedChecklist.tsx`、`/` の「学習進捗」カード直下・「学習テーマ」一覧の上に `Card` で表示）
+- 表示条件: `role = member` かつ未達成のステップがあるとき。全達成で非表示（永続化不要）
+- 判定はすべてサーバー側で行う
+
+| # | ステップ | 達成判定 | 導線リンク |
+|:--|:--|:--|:--|
+| 1 | 学習コンテンツを1つ完了する | `fetchThemeProgressSummaries()` の `completedContents` 合計 > 0 | 最初のテーマ（`/learn/{themes[0].id}`）。テーマが無ければ `/learn` |
+| 2 | 演習課題を提出する | `submissions` に本人の行が1件以上（`limit(1)` で存在確認） | 同上 |
+| 3 | AIレビューを受ける | 本人の `submissions` に紐づく `ai_reviews.status = 'completed'` が1件以上（`limit(1)` で存在確認） | `/submissions` |
+
+- 各行にチェックアイコン（達成: `CheckCircle` + `text-success`、未達成: `Circle` + `text-muted-foreground`）、ラベル、短い説明、導線リンク。達成数（例: 1 / 3）を見出しに表示する
+- お試し公開の演習が無い場合、ステップ2・3は達成不能になりうる。これは仕様として許容し、チェックリスト側で特別扱いはしない
+
+**API**（`POST /api/onboarding/complete`、リクエストボディ無し）
+- `getServerAuth()` で認証し、未認証は401、`userId` 無し / `rejected` は403（`app/api/progress/route.ts` と同じ分岐）。`role` が member 以外でも成功扱いにする
+- 更新は service_role クライアント（`createAdminSupabaseClient()`）で `users` を `.eq("id", userId)` に絞り、`onboarding_completed_at` の1列のみ `now()` で UPDATE する（`user_id` フィルタで担保する service_role 利用の既存パターン）。冪等で2回目以降は上書きするだけ
+- 本人 UPDATE の RLS ポリシー追加は採らない（`users` の UPDATE を本人に開くと `role` / `status` の自己書き換え対策が必要になり影響範囲が大きいため）
+- 読み取りは `app/services/api/onboarding-server.ts` の `fetchOnboardingStatus()`（通常クライアントで自分の `onboarding_completed_at` を SELECT）と `fetchGettingStartedProgress()`（ステップ2・3の判定）に置く。`getServerAuth()` と `proxy.ts` のヘッダーには載せない（`/` でしか使わないため）
+- `app/(authenticated)/page.tsx` は既存の `fetchThemeProgressSummaries()` と上記2関数を `Promise.all` で並列取得し、member のときのみダイアログ・チェックリストを描画する
+
 ---
 
 ## 4. 進捗管理機能
@@ -841,7 +875,7 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 
 | パス | 画面名 | 表示内容 |
 |:--|:--|:--|
-| `/` | ダッシュボード | 全体進捗率、Phase別進捗バー、学習への導線リンク |
+| `/` | ダッシュボード | 全体進捗率、Phase別進捗バー、学習への導線リンク、ウェルカムダイアログ・はじめかたチェックリスト（member のみ、3.4参照） |
 | `/learn` | Theme一覧 | 公開Themeのカード一覧（名前、説明、サムネイル） |
 | `/learn/[themeId]` | Phase一覧 | パンくずリスト、Phaseカード一覧（名前、説明） |
 | `/learn/[themeId]/[phaseId]` | Week・コンテンツ一覧 | パンくずリスト、Week一覧と各Week内のコンテンツリスト（タイトル、種別アイコン、完了チェック） |
@@ -882,6 +916,8 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 | 提出フォーム | 課題提出フォーム。コンテンツの `allowed_submission_types` に応じてコード・URL・両方から選択して提出 |
 | AIレビューボタン | 提出後にAIレビューをリクエストし、結果を提出履歴画面に表示 |
 | PDF Viewer | Supabase Storage のPDFをブラウザ内で表示（react-pdf） |
+| ウェルカムダイアログ | 初回1回だけ表示する3〜4ステップの案内（3.4参照）。閉じると `POST /api/onboarding/complete` で完了を記録する |
+| はじめかたチェックリスト | ダッシュボード常設の3ステップ達成表示（3.4参照）。全達成で非表示 |
 
 ---
 
