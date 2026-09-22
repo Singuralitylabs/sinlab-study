@@ -22,6 +22,7 @@ export default async function DeleteContentPage({ params }: { params: Promise<{ 
             <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0" />
             <p className="text-sm">
               コンテンツ「<strong>{content.title}</strong>」を削除しますか？
+              紐づくスライドPDFファイルもストレージから完全に削除され、元に戻せません。
               受講生の進捗・提出物データも参照できなくなる場合があります。
             </p>
           </div>

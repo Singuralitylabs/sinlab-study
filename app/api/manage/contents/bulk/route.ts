@@ -59,13 +59,13 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: patch.error }, { status: 400 });
     }
 
-    const { error, updated } = await bulkUpdateContents(ids, patch);
+    const { error, updated, storageRemoved } = await bulkUpdateContents(ids, patch);
 
     if (error) {
       return NextResponse.json({ error: "コンテンツの一括更新に失敗しました" }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, updated });
+    return NextResponse.json({ success: true, updated, storageRemoved });
   } catch (error) {
     console.error("API エラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });

@@ -4,8 +4,12 @@ vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/supabase-server");
 
 import { POST } from "@/app/api/upload-pdf/route";
+import { SLIDE_NUMBER_MAX } from "@/app/constants/slides";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
+
+const invalidSlideNumberMessage = `スライド番号は1以上${SLIDE_NUMBER_MAX}以下の整数を指定してください`;
+const slideNumberExhaustedMessage = `自動採番できる番号の上限（${SLIDE_NUMBER_MAX}）に達しました。スライド番号を指定してください`;
 
 const maintainerAuth = {
   user: { id: "auth-uuid" },
@@ -115,7 +119,7 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "スライド番号は1以上の整数を指定してください",
+      error: invalidSlideNumberMessage,
     });
     expect(upload).not.toHaveBeenCalled();
     // 番号指定時は自動採番の一覧取得へ回らない
@@ -131,7 +135,7 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "スライド番号は1以上の整数を指定してください",
+      error: invalidSlideNumberMessage,
     });
     expect(upload).not.toHaveBeenCalled();
   });
@@ -141,6 +145,7 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
     ["01", "gas-advanced/slide-01.pdf"],
     ["12", "gas-advanced/slide-12.pdf"],
     ["100", "gas-advanced/slide-100.pdf"],
+    [String(SLIDE_NUMBER_MAX), `gas-advanced/slide-${SLIDE_NUMBER_MAX}.pdf`],
   ] as const;
 
   it.each(validNumbers)("%j は受理し %s へ上書き保存する", async (value, expectedPath) => {
@@ -167,7 +172,20 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "スライド番号は1以上の整数を指定してください",
+      error: invalidSlideNumberMessage,
+    });
+    expect(upload).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it(`上限（${SLIDE_NUMBER_MAX}）+1 は400で拒否し、アップロードしない`, async () => {
+    const { list, upload } = mockStorage();
+
+    const response = await POST(request({ slideNumber: String(SLIDE_NUMBER_MAX + 1) }) as never);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: invalidSlideNumberMessage,
     });
     expect(upload).not.toHaveBeenCalled();
     expect(list).not.toHaveBeenCalled();
@@ -227,18 +245,46 @@ describe("POST /api/upload-pdf 自動採番", () => {
     });
   });
 
-  it("採番できる番号が安全な整数を超える場合は400を返し、アップロードしない", async () => {
+  it("安全な整数の上限のファイル名は採番の基準にしない（ドメイン上限を超えるため）", async () => {
     const { upload } = mockStorage({
       files: [{ name: `slide-${Number.MAX_SAFE_INTEGER}.pdf` }],
     });
 
     const response = await POST(request() as never);
 
+    expect(response.status).toBe(200);
+    expect(upload).toHaveBeenCalledWith("gas-advanced/slide-01.pdf", expect.any(Uint8Array), {
+      contentType: "application/pdf",
+      upsert: false,
+    });
+  });
+
+  it(`上限（${SLIDE_NUMBER_MAX}）に達している場合は400を返し、アップロードしない`, async () => {
+    const { upload } = mockStorage({
+      files: [{ name: `slide-${SLIDE_NUMBER_MAX}.pdf` }],
+    });
+
+    const response = await POST(request() as never);
+
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "自動採番できる番号の上限に達しました。スライド番号を指定してください",
+      error: slideNumberExhaustedMessage,
     });
     expect(upload).not.toHaveBeenCalled();
+  });
+
+  it(`上限超過のファイル名は採番の基準にしない（${SLIDE_NUMBER_MAX}+1 があっても次は上限内で採番する）`, async () => {
+    const { upload } = mockStorage({
+      files: [{ name: "slide-02.pdf" }, { name: `slide-${SLIDE_NUMBER_MAX + 1}.pdf` }],
+    });
+
+    const response = await POST(request() as never);
+
+    expect(response.status).toBe(200);
+    expect(upload).toHaveBeenCalledWith("gas-advanced/slide-03.pdf", expect.any(Uint8Array), {
+      contentType: "application/pdf",
+      upsert: false,
+    });
   });
 
   it("一覧取得に失敗したら500を返し、アップロードしない", async () => {
