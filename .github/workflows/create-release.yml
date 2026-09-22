@@ -18,12 +18,12 @@ on:
 
 # タグ push と GitHub Release 作成に contents: write、
 # リリース PR 本文からのサマリー抽出に pull-requests: read を使う。
-# 承認ゲートの保護ルール確認（Environment の required_reviewers 検証）に environments: read を使う。
+# 承認ゲートの保護ルール確認（GET /repos/{repo}/environments/{name}）に actions: read を使う。
 # いずれも必要最小限であり、書き込みはタグ・Release 作成に限定する（db push 等は含まない）。
 permissions:
   contents: write
   pull-requests: read
-  environments: read
+  actions: read
 
 # 同一ワークフローの同時実行を抑止する。実行中のものはキャンセルせず後続をキュー待ちさせる。
 concurrency:
