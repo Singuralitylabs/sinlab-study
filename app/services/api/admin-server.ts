@@ -1246,8 +1246,11 @@ export async function updateContent(
   let sourceFilter: SiblingParentFilter = null;
   let parentChanged = false;
 
-  // pdf_url 差し替え時の旧オブジェクト削除用に、更新前の値を保持する
+  // pdf_url 差し替え時の旧オブジェクト削除用に、更新前の値を保持する。
+  // 取得失敗時は更新全体を中断せず、旧キー不明のまま続行して storageRemoved: false で
+  // 報告する（deleteContent 等と同じ扱い。削除済み行への更新試行もここでは弾かない）
   let previousPdfUrl: string | null = null;
+  let pdfFetchFailed = false;
   const pdfUrlChanged = patch.pdf_url !== undefined;
   if (pdfUrlChanged) {
     const { data: previous, error: previousError } = await supabase
@@ -1258,9 +1261,10 @@ export async function updateContent(
       .single();
     if (previousError) {
       console.error("コンテンツ更新エラー（現在値取得）:", previousError.message);
-      return { error: previousError, storageRemoved: true };
+      pdfFetchFailed = true;
+    } else {
+      previousPdfUrl = (previous as { pdf_url: string | null } | null)?.pdf_url ?? null;
     }
-    previousPdfUrl = (previous as { pdf_url: string | null } | null)?.pdf_url ?? null;
   }
 
   if (insertAfterId !== undefined || patch.week_id !== undefined) {
@@ -1319,13 +1323,18 @@ export async function updateContent(
   }
 
   // pdf_url が差し替わった場合、旧オブジェクトが他から参照されていなければ物理削除する。
-  // 同一フォルダ・同一番号の上書き（upsert）はキーが変わらないため削除対象にならない
+  // 同一フォルダ・同一番号の上書き（upsert）はキーが変わらないため削除対象にならない。
+  // 事前取得に失敗していた場合は旧キーが不明のため削除を試みず false で報告する
   let storageRemoved = true;
   if (pdfUrlChanged) {
-    const previousKey = toSlideObjectKey(previousPdfUrl);
-    const nextKey = toSlideObjectKey(patch.pdf_url ?? null);
-    if (previousKey !== null && previousKey !== nextKey) {
-      storageRemoved = await removeUnreferencedSlideObjects(supabase, [previousKey]);
+    if (pdfFetchFailed) {
+      storageRemoved = false;
+    } else {
+      const previousKey = toSlideObjectKey(previousPdfUrl);
+      const nextKey = toSlideObjectKey(patch.pdf_url ?? null);
+      if (previousKey !== null && previousKey !== nextKey) {
+        storageRemoved = await removeUnreferencedSlideObjects(supabase, [previousKey]);
+      }
     }
   }
 

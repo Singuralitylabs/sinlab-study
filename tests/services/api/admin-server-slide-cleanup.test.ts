@@ -395,4 +395,22 @@ describe("レビュー指摘の回帰テスト", () => {
     expect(result.storageRemoved).toBe(false);
     expect(remove).not.toHaveBeenCalled();
   });
+
+  it("旧 pdf_url の事前取得に失敗しても更新は続行し storageRemoved: false を返す", async () => {
+    const { mockClient, remove } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          { data: null, error: dbError },
+          { data: null, error: null },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { pdf_url: "gas/slide-02.pdf" });
+
+    expect(result).toEqual({ error: null, storageRemoved: false });
+    expect(remove).not.toHaveBeenCalled();
+    // 事前取得＋本体UPDATEの2回のみで、参照確認には進まない
+    expect(mockClient.from).toHaveBeenCalledTimes(2);
+  });
 });
