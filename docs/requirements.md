@@ -156,6 +156,12 @@ Theme（例：GAS学習）
 - **受講生管理**: 全受講生の進捗一覧、最終アクティビティ追跡
 - **提出管理**: 全受講生の提出一覧表示
 
+### 3.7 初回利用ガイド
+- 初回1回だけ表示するウェルカムダイアログ（`/` ダッシュボード、`role = member` かつ `users.onboarding_completed_at IS NULL` のとき）
+- ダッシュボードに常設するはじめかたチェックリスト（未達成がある `role = member` のときのみ表示、全達成で非表示）
+- 対象は `role = member` のみ（`trial` / `active` の両方）。`admin` / `maintainer` には表示しない
+- 記録先は `users.onboarding_completed_at`（TIMESTAMPTZ、NULL許容）。チェックリストは既存データからの自動判定のみで永続化しない
+
 ---
 
 ## 4. 画面一覧
@@ -164,7 +170,7 @@ Theme（例：GAS学習）
 
 | パス | 画面名 | 概要 |
 |:--|:--|:--|
-| `/` | ダッシュボード | 全体進捗率、Phase別進捗バー、学習への導線 |
+| `/` | ダッシュボード | 全体進捗率、Phase別進捗バー、学習への導線、初回ガイド・はじめかたチェックリスト |
 | `/learn` | テーマ一覧 | 公開Themeのカード一覧 |
 | `/learn/[themeId]` | Phase一覧 | Theme内のPhase一覧、進捗表示 |
 | `/learn/[themeId]/[phaseId]` | Week・コンテンツ一覧 | Phase内の各Weekとそのコンテンツを一覧表示、進捗表示 |
