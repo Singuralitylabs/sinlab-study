@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { WelcomeDialogStep } from "@/app/constants/onboarding";
 import { Button } from "@/components/ui/button";
@@ -15,11 +16,23 @@ import {
 
 /**
  * オンボーディングの完了を記録する。ユーザー操作をブロックしないため
- * fire-and-forget で送る（失敗時は次回表示時に再度出るだけ）。
+ * fire-and-forget で送る（API失敗時は次回表示時に再度出るだけで、閉じる・遷移は止めない）。
  * `keepalive: true` でダイアログ内リンク経由の遷移中も打ち切られないようにする。
+ * 失敗時は警告ログを残し（運用側が恒常的失敗に気付けるようにする）、
+ * 成功時は表示側の再取得を促すコールバックを呼ぶ。
  */
-export function requestOnboardingComplete(): void {
-  fetch("/api/onboarding/complete", { method: "POST", keepalive: true }).catch(() => undefined);
+export function requestOnboardingComplete(onCompleted?: () => void): void {
+  fetch("/api/onboarding/complete", { method: "POST", keepalive: true })
+    .then((res) => {
+      if (!res.ok) {
+        console.warn(`オンボーディングの完了記録に失敗しました: ${res.status}`);
+        return;
+      }
+      onCompleted?.();
+    })
+    .catch(() => {
+      console.warn("オンボーディングの完了記録に失敗しました");
+    });
 }
 
 /**
@@ -37,6 +50,7 @@ export function WelcomeDialog({
 }) {
   const [open, setOpen] = useState(true);
   const [index, setIndex] = useState(0);
+  const router = useRouter();
 
   if (steps.length === 0) {
     return null;
@@ -46,9 +60,12 @@ export function WelcomeDialog({
   const isFirst = index <= 0;
   const isLast = index >= steps.length - 1;
 
+  // 成功時はダッシュボードのサーバー表示を再取得し、再表示の競合を抑える
+  const completeAndRefresh = () => requestOnboardingComplete(() => router.refresh());
+
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
-      requestOnboardingComplete();
+      completeAndRefresh();
       setOpen(false);
     } else {
       setOpen(true);
@@ -56,13 +73,13 @@ export function WelcomeDialog({
   };
 
   const handleStart = () => {
-    requestOnboardingComplete();
+    completeAndRefresh();
     setOpen(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{current.title}</DialogTitle>
           <DialogDescription>
@@ -75,7 +92,7 @@ export function WelcomeDialog({
             <p className="mt-3">
               <Link
                 href="/upgrade"
-                onClick={requestOnboardingComplete}
+                onClick={completeAndRefresh}
                 className="text-primary underline underline-offset-4"
               >
                 プラン・お支払いを見る

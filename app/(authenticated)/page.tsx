@@ -1,11 +1,7 @@
 import { BookOpen, CheckCircle, Clock, TrendingUp } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import {
-  GETTING_STARTED_STEPS,
-  type GettingStartedStepKey,
-  getWelcomeStepsForStatus,
-} from "@/app/constants/onboarding";
+import { getWelcomeStepsForStatus } from "@/app/constants/onboarding";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
@@ -18,7 +14,10 @@ import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { GettingStartedChecklist } from "./components/GettingStartedChecklist";
+import {
+  buildGettingStartedItems,
+  GettingStartedChecklist,
+} from "./components/GettingStartedChecklist";
 import { WelcomeDialog } from "./components/WelcomeDialog";
 
 export default async function HomePage() {
@@ -37,9 +36,7 @@ export default async function HomePage() {
   const [{ data: themeData }, onboardingResult, gettingStartedResult] = await Promise.all([
     fetchThemeProgressSummaries(userId),
     isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
-    isMember
-      ? fetchGettingStartedProgress(userId)
-      : Promise.resolve({ data: { hasSubmission: true, hasCompletedReview: true }, error: null }),
+    isMember ? fetchGettingStartedProgress(userId) : Promise.resolve({ data: null, error: null }),
   ]);
   const themes = themeData ?? [];
   const totalContents = themes.reduce((sum, t) => sum + t.totalContents, 0);
@@ -51,21 +48,11 @@ export default async function HomePage() {
     isMember && onboardingResult.error === null && onboardingResult.data?.completedAt == null;
 
   const firstThemeHref = themes.length > 0 ? `/learn/${themes[0].theme.id}` : "/learn";
-  const completionByKey: Record<GettingStartedStepKey, boolean> = {
-    "complete-content": completedContents > 0,
-    "submit-exercise": gettingStartedResult.data.hasSubmission,
-    "receive-ai-review": gettingStartedResult.data.hasCompletedReview,
-  };
-  const hrefByKey: Record<GettingStartedStepKey, string> = {
-    "complete-content": firstThemeHref,
-    "submit-exercise": firstThemeHref,
-    "receive-ai-review": "/submissions",
-  };
-  const gettingStartedItems = GETTING_STARTED_STEPS.map((step) => ({
-    key: step.key,
-    completed: completionByKey[step.key],
-    href: hrefByKey[step.key],
-  }));
+  const gettingStartedItems = buildGettingStartedItems(
+    completedContents,
+    isMember ? gettingStartedResult.data : null,
+    firstThemeHref
+  );
 
   return (
     <div className="max-w-4xl mx-auto">

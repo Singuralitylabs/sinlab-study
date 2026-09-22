@@ -1,6 +1,7 @@
 import { CheckCircle, Circle } from "lucide-react";
 import Link from "next/link";
 import { GETTING_STARTED_STEPS, type GettingStartedStepKey } from "@/app/constants/onboarding";
+import type { GettingStartedProgress } from "@/app/services/api/onboarding-server";
 import { Card, CardContent } from "@/components/ui/card";
 
 export type GettingStartedChecklistItem = {
@@ -8,6 +9,36 @@ export type GettingStartedChecklistItem = {
   completed: boolean;
   href: string;
 };
+
+/**
+ * 判定結果からチェックリスト項目を組み立てる。`progress` が null（非 member 等）のときは
+ * 空配列を返し、描画側の全達成時と同じく非表示になる。達成判定の組み立てはここに閉じ込め、
+ * 呼び出し側でダミーの達成値を用意しない。
+ */
+export function buildGettingStartedItems(
+  completedContents: number,
+  progress: GettingStartedProgress | null,
+  firstThemeHref: string
+): GettingStartedChecklistItem[] {
+  if (progress == null) {
+    return [];
+  }
+  const completionByKey: Record<GettingStartedStepKey, boolean> = {
+    "complete-content": completedContents > 0,
+    "submit-exercise": progress.hasSubmission,
+    "receive-ai-review": progress.hasCompletedReview,
+  };
+  const hrefByKey: Record<GettingStartedStepKey, string> = {
+    "complete-content": firstThemeHref,
+    "submit-exercise": firstThemeHref,
+    "receive-ai-review": "/submissions",
+  };
+  return GETTING_STARTED_STEPS.map((step) => ({
+    key: step.key,
+    completed: completionByKey[step.key],
+    href: hrefByKey[step.key],
+  }));
+}
 
 /**
  * ダッシュボードに常設するはじめかたチェックリスト。

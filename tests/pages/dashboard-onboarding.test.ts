@@ -17,13 +17,20 @@ vi.mock("@/app/(authenticated)/components/WelcomeDialog", () => ({
       "welcome"
     ),
 }));
-vi.mock("@/app/(authenticated)/components/GettingStartedChecklist", () => ({
-  // 実コンポーネントと同様、全達成のときは描画しない
-  GettingStartedChecklist: ({ items }: { items: { completed: boolean }[] }) =>
-    items.some((item) => !item.completed)
-      ? createElement("div", { "data-testid": "getting-started" }, "steps")
-      : null,
-}));
+vi.mock("@/app/(authenticated)/components/GettingStartedChecklist", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/app/(authenticated)/components/GettingStartedChecklist")
+    >();
+  return {
+    ...actual,
+    // 実コンポーネントと同様、全達成のときは描画しない
+    GettingStartedChecklist: ({ items }: { items: { completed: boolean }[] }) =>
+      items.some((item) => !item.completed)
+        ? createElement("div", { "data-testid": "getting-started" }, "steps")
+        : null,
+  };
+});
 
 import HomePage from "@/app/(authenticated)/page";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
@@ -78,6 +85,10 @@ const setup = ({
 
 const render = async () => renderToStaticMarkup(await HomePage());
 
+/** ダイアログの data-steps 属性値だけを取り出して検証する（ページ全体の部分一致は使わない） */
+const stepsOf = (html: string): string[] =>
+  (html.match(/data-steps="([^"]*)"/)?.[1] ?? "").split(",");
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -95,12 +106,11 @@ describe("ダッシュボードの初回ガイド表示条件（issue #16）", (
   it("trial にはプランのステップを含め、active には含めない", async () => {
     setup({ userStatus: "trial" });
     const trialHtml = await render();
-    expect(trialHtml).toContain('data-steps="welcome,how-to-learn,plan,help"');
+    expect(stepsOf(trialHtml)).toEqual(["welcome", "how-to-learn", "plan", "help"]);
 
     setup({ userStatus: "active" });
     const activeHtml = await render();
-    expect(activeHtml).toContain('data-steps="welcome,how-to-learn,help"');
-    expect(activeHtml).not.toContain("plan");
+    expect(stepsOf(activeHtml)).toEqual(["welcome", "how-to-learn", "help"]);
   });
 
   it("完了済み・全達成の member にはいずれも表示しない", async () => {

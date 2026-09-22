@@ -63,20 +63,19 @@ export async function fetchGettingStartedProgress(userId: number): Promise<{
 
   if (submissionResult.error) {
     console.error("はじめかた進捗の提出取得エラー:", submissionResult.error.message);
-    return {
-      data: { hasSubmission: false, hasCompletedReview: false },
-      error: submissionResult.error,
-    };
   }
-
-  const hasSubmission = !!submissionResult.data;
-
   if (reviewResult.error) {
     console.error("はじめかた進捗のAIレビュー取得エラー:", reviewResult.error.message);
-    return { data: { hasSubmission, hasCompletedReview: false }, error: reviewResult.error };
   }
 
-  return { data: { hasSubmission, hasCompletedReview: !!reviewResult.data }, error: null };
+  // 2つの照会は独立に評価する（片方の失敗で他方の結果を捨てない）
+  return {
+    data: {
+      hasSubmission: !submissionResult.error && !!submissionResult.data,
+      hasCompletedReview: !reviewResult.error && !!reviewResult.data,
+    },
+    error: submissionResult.error ?? reviewResult.error,
+  };
 }
 
 /**

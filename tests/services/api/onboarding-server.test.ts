@@ -104,10 +104,27 @@ describe("fetchGettingStartedProgress", () => {
     expect(result.data).toEqual({ hasSubmission: true, hasCompletedReview: true });
   });
 
-  it("提出クエリ失敗時は未達成扱いで継続する", async () => {
+  it("提出クエリ失敗時は提出だけ未達成にし、レビューの結果は維持する", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         submissions: { data: null, error: dbError },
+        ai_reviews: { data: { id: 10 }, error: null },
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchGettingStartedProgress(2);
+
+    expect(result.data).toEqual({ hasSubmission: false, hasCompletedReview: true });
+    expect(result.error).toEqual(dbError);
+  });
+
+  it("両クエリ失敗時は両方未達成にし、最初のエラーを返す", async () => {
+    const reviewError = { message: "review error", code: "PGRST002" };
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        submissions: { data: null, error: dbError },
+        ai_reviews: { data: null, error: reviewError },
       },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
