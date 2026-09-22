@@ -164,6 +164,22 @@ describe("POST /api/upload-thumbnail", () => {
     expect(response.status).toBe(400);
     expect(createAdminSupabaseClient).not.toHaveBeenCalled();
   });
+
+  it("スライド番号の上限（999）を超えるテーマIDでも受理する（upload-thumbnail に上限は適用しない）", async () => {
+    const { client, upload } = createMockSupabase();
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const response = await POST(
+      request(new File(["png"], "thumbnail.png", { type: "image/png" }), "1000") as never
+    );
+
+    expect(response.status).toBe(200);
+    expect(upload).toHaveBeenCalledWith(
+      "theme-1000/thumbnail.png",
+      expect.any(Uint8Array),
+      expect.objectContaining({ upsert: true })
+    );
+  });
 });
 
 describe("DELETE /api/upload-thumbnail", () => {

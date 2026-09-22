@@ -24,7 +24,11 @@ const request = (body: unknown) =>
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(maintainerAuth as never);
-  vi.mocked(bulkUpdateContents).mockResolvedValue({ error: null, updated: 3 });
+  vi.mocked(bulkUpdateContents).mockResolvedValue({
+    error: null,
+    updated: 3,
+    storageRemoved: true,
+  });
 });
 
 describe("PATCH /api/manage/contents/bulk - 認可", () => {
@@ -174,7 +178,7 @@ describe("PATCH /api/manage/contents/bulk - action→patchマッピング", () =
 
     expect(res.status).toBe(200);
     expect(bulkUpdateContents).toHaveBeenCalledWith([1, 2, 3], expectedPatch);
-    await expect(res.json()).resolves.toEqual({ success: true, updated: 3 });
+    await expect(res.json()).resolves.toEqual({ success: true, updated: 3, storageRemoved: true });
   });
 
   it("set_typeはcontentTypeをcontent_typeとして渡す", async () => {
@@ -190,6 +194,7 @@ describe("PATCH /api/manage/contents/bulk - 更新失敗", () => {
     vi.mocked(bulkUpdateContents).mockResolvedValue({
       error: { message: "db error", code: "PGRST204" } as never,
       updated: 0,
+      storageRemoved: true,
     });
 
     const res = await PATCH(request({ ids: [1], action: "publish" }));

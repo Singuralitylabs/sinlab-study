@@ -1194,7 +1194,7 @@ describe("updateContent（編集時の再採番）", () => {
 
     const result = await updateContent(10, { title: "タイトル変更のみ" });
 
-    expect(result).toEqual({ error: null });
+    expect(result).toEqual({ error: null, storageRemoved: true });
     expect(createAdminSupabaseClient).toHaveBeenCalled();
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
@@ -1217,7 +1217,7 @@ describe("updateContent（編集時の再採番）", () => {
 
     const result = await updateContent(10, { week_id: 2 });
 
-    expect(result).toEqual({ error: null });
+    expect(result).toEqual({ error: null, storageRemoved: true });
     const destinationSiblingsBuilder = mockClient.from.mock.results[1].value;
     expect(destinationSiblingsBuilder.eq).toHaveBeenCalledWith("week_id", 2);
     const bodyUpdateBuilder = mockClient.from.mock.results[2].value;
