@@ -43,6 +43,31 @@ jobs:
             exit 1
           fi
 
+      # 再利用ワークフロー（uses:）は dispatch 元ブランチをチェックアウトする一方、
+      # PR 作成・検出処理はすべて origin/main を対象にする。別ブランチから起動すると
+      # そのブランチでチェックが通れば main が壊れていても PR が作られるため、main からの起動を要求する。
+      - name: 起動ブランチチェック（main のみ許可）
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::release-pr.yml は main ブランチから起動してください（起動元: ${{ github.ref }}）。"
+            exit 1
+          fi
+
+      # 既出バージョンの入力を create-release まで持ち越すと、main→release マージ
+      # （＝本番デプロイ）後にタグ重複で失敗するため、PR 作成前に事前チェックする。
+      - name: タグ重複の事前チェック
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v${VERSION}" --silent >/dev/null 2>&1; then
+            echo "::error::タグ \`v${VERSION}\` は既に存在します。バージョン番号を変更してください。"
+            exit 1
+          fi
+          echo "タグ \`v${VERSION}\` は未使用です。続行します。"
+
   # 品質ゲートは既存ワークフローの再利用にする。チェック内容の二重定義を作らない。
   # GITHUB_TOKEN で作成した PR は on: pull_request の他ワークフローを起動しないため、
   # PR 作成「前」にここで品質チェックを通す構成が必須である。
@@ -126,35 +151,62 @@ jobs:
 
       # 後方互換でない変更を含むマイグレーションを検出して警告する。
       # Wiki が「リリースを2回に分ける」判断を求めている箇所。ブロックはせず注意喚起に留める。
+      # 誤検出を抑えるため、判定前に行コメント（--）とブロックコメント（/* */）を除去し、
+      # 以下の絞り込みを行う:
+      # - DROP TRIGGER IF EXISTS の定型プレリュードは除外（同ファイルでの CREATE と対になる再作成が通例のため）
+      # - ALTER ... TYPE は ALTER TABLE ... ALTER COLUMN ... TYPE の列型変更に限定（content_type 等の列名に反応させない）
+      # - UPDATE / DELETE は文頭の DML 文のみを対象にし、関数本体（$$ ... $$）内は除外する
+      #   （ON DELETE CASCADE / BEFORE UPDATE / トリガー名 update_..._updated_at / 実行時ロジックへの反応を防ぐ）
       - name: 後方互換でないマイグレーションを検出
         id: breaking
         env:
           MIGRATION_FILES: ${{ steps.migrations.outputs.files }}
         run: |
           set -euo pipefail
+          strip_comments() {
+            sed -E 's/--.*$//' | sed -E ':a; s|/\*[^*]*\*/||g; ta'
+          }
+          # ドルクォート関数本体（$$ ... $$）を除去する。UPDATE / DELETE の判定では
+          # デプロイ時に実行されるトップレベルの DML のみを対象にし、関数・トリガー本体内の
+          # 実行時ロジックには反応させない。grep が標準入力を消費するため、先に変数へ退避する。
+          strip_function_bodies() {
+            local input
+            input=$(cat)
+            if printf '%s' "$input" | grep -q '\$\$'; then
+              printf '%s' "$input" | awk 'BEGIN { in_body = 0 } { n = gsub(/\$\$/, "&"); if (n % 2 == 1) { in_body = !in_body }; if (!in_body) print }'
+            else
+              printf '%s' "$input"
+            fi
+          }
           WARNINGS=""
           if [ -n "$(printf '%s' "$MIGRATION_FILES" | tr -d '[:space:]')" ]; then
             while IFS= read -r f; do
               [ -z "$f" ] && continue
               CONTENT=$(git show "origin/main:$f" 2>/dev/null || true)
               [ -z "$CONTENT" ] && continue
+              CODE=$(printf '%s' "$CONTENT" | strip_comments)
+              TOP_LEVEL=$(printf '%s' "$CODE" | strip_function_bodies)
+              ONE_LINE=$(printf '%s' "$CODE" | tr '\n' ' ')
               MATCHES=""
-              if printf '%s' "$CONTENT" | grep -Eiq '(^|[^A-Za-z_])DROP[[:space:]]+(TABLE|COLUMN|INDEX|POLICY|FUNCTION|TRIGGER|VIEW|CONSTRAINT)'; then
+              if printf '%s' "$CODE" | grep -Eiq '(^|[^A-Za-z_])DROP[[:space:]]+(TABLE|COLUMN|INDEX|POLICY|FUNCTION|VIEW|CONSTRAINT)'; then
                 MATCHES="$MATCHES DROP,"
               fi
-              if printf '%s' "$CONTENT" | grep -Eiq 'ALTER[^;]*TYPE'; then
+              if printf '%s' "$CODE" | grep -Ei '(^|[^A-Za-z_])DROP[[:space:]]+TRIGGER[[:space:]]+[A-Za-z_]' | grep -Evi 'IF[[:space:]]+EXISTS' | grep -q .; then
+                MATCHES="$MATCHES DROP,"
+              fi
+              if printf '%s' "$ONE_LINE" | grep -Eiq 'ALTER[[:space:]]+TABLE[[:space:]]+[^;]*ALTER[[:space:]]+COLUMN[^;]*TYPE'; then
                 MATCHES="$MATCHES ALTER...TYPE,"
               fi
-              if printf '%s' "$CONTENT" | grep -Eiq 'RENAME[[:space:]]+(COLUMN|TO)'; then
+              if printf '%s' "$CODE" | grep -Eiq 'RENAME[[:space:]]+(COLUMN|TO)'; then
                 MATCHES="$MATCHES RENAME,"
               fi
-              if printf '%s' "$CONTENT" | grep -Eiq '(^|[^A-Za-z_])(UPDATE|DELETE)[[:space:]]'; then
+              if printf '%s' "$TOP_LEVEL" | grep -Eiqm1 '^[[:space:]]*(UPDATE|DELETE)[[:space:]]'; then
                 MATCHES="$MATCHES UPDATE/DELETE,"
               fi
-              if printf '%s' "$CONTENT" | grep -Eq 'storage\.buckets'; then
+              if printf '%s' "$CODE" | grep -Eq 'storage\.buckets'; then
                 MATCHES="$MATCHES storage.buckets,"
               fi
-              if printf '%s' "$CONTENT" | grep -Eiq '(CREATE|ALTER|DROP)[[:space:]]+POLICY'; then
+              if printf '%s' "$CODE" | grep -Eiq '(CREATE|ALTER|DROP)[[:space:]]+POLICY'; then
                 MATCHES="$MATCHES POLICY,"
               fi
               if [ -n "$MATCHES" ]; then
