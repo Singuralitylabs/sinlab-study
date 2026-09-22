@@ -1,10 +1,10 @@
 import { CheckCircle, Circle } from "lucide-react";
 import Link from "next/link";
-import { GETTING_STARTED_STEPS } from "@/app/constants/onboarding";
+import { GETTING_STARTED_STEPS, type GettingStartedStepKey } from "@/app/constants/onboarding";
 import { Card, CardContent } from "@/components/ui/card";
 
 export type GettingStartedChecklistItem = {
-  key: string;
+  key: GettingStartedStepKey;
   completed: boolean;
   href: string;
 };

@@ -1,7 +1,11 @@
 import { BookOpen, CheckCircle, Clock, TrendingUp } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { getWelcomeStepsForStatus } from "@/app/constants/onboarding";
+import {
+  GETTING_STARTED_STEPS,
+  type GettingStartedStepKey,
+  getWelcomeStepsForStatus,
+} from "@/app/constants/onboarding";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
@@ -47,20 +51,21 @@ export default async function HomePage() {
     isMember && onboardingResult.error === null && onboardingResult.data?.completedAt == null;
 
   const firstThemeHref = themes.length > 0 ? `/learn/${themes[0].theme.id}` : "/learn";
-  const gettingStartedItems = [
-    { key: "complete-content", completed: completedContents > 0, href: firstThemeHref },
-    {
-      key: "submit-exercise",
-      completed: gettingStartedResult.data.hasSubmission,
-      href: firstThemeHref,
-    },
-    {
-      key: "receive-ai-review",
-      completed: gettingStartedResult.data.hasCompletedReview,
-      href: "/submissions",
-    },
-  ];
-  const showChecklist = isMember && gettingStartedItems.some((item) => !item.completed);
+  const completionByKey: Record<GettingStartedStepKey, boolean> = {
+    "complete-content": completedContents > 0,
+    "submit-exercise": gettingStartedResult.data.hasSubmission,
+    "receive-ai-review": gettingStartedResult.data.hasCompletedReview,
+  };
+  const hrefByKey: Record<GettingStartedStepKey, string> = {
+    "complete-content": firstThemeHref,
+    "submit-exercise": firstThemeHref,
+    "receive-ai-review": "/submissions",
+  };
+  const gettingStartedItems = GETTING_STARTED_STEPS.map((step) => ({
+    key: step.key,
+    completed: completionByKey[step.key],
+    href: hrefByKey[step.key],
+  }));
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -92,7 +97,7 @@ export default async function HomePage() {
         </CardContent>
       </Card>
 
-      {showChecklist && <GettingStartedChecklist items={gettingStartedItems} />}
+      {isMember && <GettingStartedChecklist items={gettingStartedItems} />}
 
       {/* テーマ一覧 */}
       <div className="grid gap-4">

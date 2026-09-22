@@ -34,15 +34,15 @@ export async function fetchOnboardingStatus(userId: number): Promise<{
   }
 
   return {
-    data: { completedAt: (data?.onboarding_completed_at as string | null) ?? null },
+    data: { completedAt: data?.onboarding_completed_at ?? null },
     error: null,
   };
 }
 
 /**
  * チェックリストのステップ2・3（提出・AIレビュー完了）を判定する。
- * 存在確認のみのため limit(1) で取得し、全件取得しない。
- * クエリ失敗時は未達成扱いで継続する（ダッシュボード表示をブロックしない）。
+ * 存在確認のみのため limit(1) で取得し、全件取得しない。2つの照会は独立しているため
+ * 並列に実行する。クエリ失敗時は未達成扱いで継続する（ダッシュボード表示をブロックしない）。
  */
 export async function fetchGettingStartedProgress(userId: number): Promise<{
   data: GettingStartedProgress;
@@ -50,34 +50,33 @@ export async function fetchGettingStartedProgress(userId: number): Promise<{
 }> {
   const supabase = await createServerSupabaseClient();
 
-  const { data: submission, error: submissionError } = await supabase
-    .from("submissions")
-    .select("id")
-    .eq("user_id", userId)
-    .limit(1)
-    .maybeSingle();
+  const [submissionResult, reviewResult] = await Promise.all([
+    supabase.from("submissions").select("id").eq("user_id", userId).limit(1).maybeSingle(),
+    supabase
+      .from("ai_reviews")
+      .select("id, submission:submissions!inner(user_id)")
+      .eq("submission.user_id", userId)
+      .eq("status", "completed")
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
-  if (submissionError) {
-    console.error("はじめかた進捗の提出取得エラー:", submissionError.message);
-    return { data: { hasSubmission: false, hasCompletedReview: false }, error: submissionError };
+  if (submissionResult.error) {
+    console.error("はじめかた進捗の提出取得エラー:", submissionResult.error.message);
+    return {
+      data: { hasSubmission: false, hasCompletedReview: false },
+      error: submissionResult.error,
+    };
   }
 
-  const hasSubmission = !!submission;
+  const hasSubmission = !!submissionResult.data;
 
-  const { data: review, error: reviewError } = await supabase
-    .from("ai_reviews")
-    .select("id, submission:submissions!inner(user_id)")
-    .eq("submission.user_id", userId)
-    .eq("status", "completed")
-    .limit(1)
-    .maybeSingle();
-
-  if (reviewError) {
-    console.error("はじめかた進捗のAIレビュー取得エラー:", reviewError.message);
-    return { data: { hasSubmission, hasCompletedReview: false }, error: reviewError };
+  if (reviewResult.error) {
+    console.error("はじめかた進捗のAIレビュー取得エラー:", reviewResult.error.message);
+    return { data: { hasSubmission, hasCompletedReview: false }, error: reviewResult.error };
   }
 
-  return { data: { hasSubmission, hasCompletedReview: !!review }, error: null };
+  return { data: { hasSubmission, hasCompletedReview: !!reviewResult.data }, error: null };
 }
 
 /**

@@ -12,9 +12,12 @@ export type WelcomeDialogStep = {
   showsUpgradeLink: boolean;
 };
 
+/** はじめかたチェックリストの項目キー（`page.tsx` 側のリテラル重複を防ぐため型で共有する） */
+export type GettingStartedStepKey = "complete-content" | "submit-exercise" | "receive-ai-review";
+
 /** はじめかたチェックリストの1項目定義 */
 export type GettingStartedStep = {
-  key: string;
+  key: GettingStartedStepKey;
   label: string;
   description: string;
 };
@@ -37,7 +40,7 @@ export const WELCOME_DIALOG_STEPS: readonly WelcomeDialogStep[] = [
   {
     id: "plan",
     title: "プランについて",
-    body: "無料プランではお試し公開コンテンツのみ閲覧・提出でき、鍵アイコンのコンテンツは本登録後に閲覧できます。本登録は管理者による承認で行います。",
+    body: "無料プランではお試し公開コンテンツのみ閲覧・提出でき、鍵アイコンのコンテンツは本登録後に閲覧できます。本登録は管理者による承認、またはプランのアップグレードで行います。",
     trialOnly: true,
     showsUpgradeLink: true,
   },
@@ -48,7 +51,7 @@ export const WELCOME_DIALOG_STEPS: readonly WelcomeDialogStep[] = [
     trialOnly: false,
     showsUpgradeLink: false,
   },
-] as const;
+];
 
 /**
  * ステータスに応じて表示するダイアログステップを絞り込む。
@@ -77,4 +80,4 @@ export const GETTING_STARTED_STEPS: readonly GettingStartedStep[] = [
     label: "AIレビューを受ける",
     description: "提出後にAIレビューを受けてフィードバックを確認しましょう。",
   },
-] as const;
+];

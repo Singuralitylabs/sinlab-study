@@ -14,10 +14,19 @@ import {
 } from "@/components/ui/dialog";
 
 /**
+ * オンボーディングの完了を記録する。ユーザー操作をブロックしないため
+ * fire-and-forget で送る（失敗時は次回表示時に再度出るだけ）。
+ * `keepalive: true` でダイアログ内リンク経由の遷移中も打ち切られないようにする。
+ */
+export function requestOnboardingComplete(): void {
+  fetch("/api/onboarding/complete", { method: "POST", keepalive: true }).catch(() => undefined);
+}
+
+/**
  * 初回1回だけ表示するウェルカムダイアログ。
  * 表示するステップはサーバー側で status に応じて絞り込んだものを props で受け取る。
- * 閉じるとき（はじめる・×・オーバーレイクリック）に POST /api/onboarding/complete を呼び、
- * 成功可否に関わらずダイアログを閉じる（API失敗時は次回表示時に再度出るだけ）。
+ * 閉じるとき（はじめる・×・オーバーレイクリック・ダイアログ内リンク）は完了記録を送り、
+ * 成功可否に関わらずダイアログを閉じる。
  */
 export function WelcomeDialog({
   steps,
@@ -37,14 +46,9 @@ export function WelcomeDialog({
   const isFirst = index <= 0;
   const isLast = index >= steps.length - 1;
 
-  const completeOnboarding = () => {
-    // ユーザー操作をブロックしない。失敗時は次回表示時に再度出る
-    fetch("/api/onboarding/complete", { method: "POST" }).catch(() => undefined);
-  };
-
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
-      completeOnboarding();
+      requestOnboardingComplete();
       setOpen(false);
     } else {
       setOpen(true);
@@ -52,7 +56,7 @@ export function WelcomeDialog({
   };
 
   const handleStart = () => {
-    completeOnboarding();
+    requestOnboardingComplete();
     setOpen(false);
   };
 
@@ -69,7 +73,11 @@ export function WelcomeDialog({
           <p>{current.body}</p>
           {current.showsUpgradeLink && stripeEnabled && (
             <p className="mt-3">
-              <Link href="/upgrade" className="text-primary underline underline-offset-4">
+              <Link
+                href="/upgrade"
+                onClick={requestOnboardingComplete}
+                className="text-primary underline underline-offset-4"
+              >
                 プラン・お支払いを見る
               </Link>
             </p>
