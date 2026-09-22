@@ -487,6 +487,16 @@ export function ContentForm({
                 </button>
               ))}
             </div>
+            {/* 既存スライドを他種別へ変更して保存すると、紐づくPDFはストレージから
+                完全削除される（孤児化を防ぐため。戻してもPDFは復元されない） */}
+            {mode === "edit" &&
+              initialData?.content_type === "slide" &&
+              Boolean(initialData?.pdf_url) &&
+              contentType !== "slide" && (
+                <p className="text-xs text-destructive">
+                  他の種別に変更して保存すると、紐づくスライドPDFはストレージから完全に削除されます。スライドに戻す場合はPDFの再アップロードが必要です。
+                </p>
+              )}
           </div>
 
           {/* 概要（video / slide のみ。詳細ページのプレイヤー／ビューア下部に表示） */}

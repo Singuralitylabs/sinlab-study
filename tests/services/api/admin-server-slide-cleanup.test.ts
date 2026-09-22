@@ -303,3 +303,96 @@ describe("updateContent の pdf_url 差し替え（issue #145）", () => {
     expect(result).toEqual({ error: null, storageRemoved: false });
   });
 });
+
+describe("レビュー指摘の回帰テスト", () => {
+  it("pdf_url 取得に失敗した単体削除では Storage に触れず storageRemoved: false を返す", async () => {
+    const { remove } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          { data: null, error: dbError },
+          { data: null, error: null },
+        ],
+      },
+    });
+
+    const result = await deleteContent(1);
+
+    expect(result).toEqual({ error: null, storageRemoved: false });
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("pdf_url 取得に失敗した週削除では Storage に触れず storageRemoved: false を返す", async () => {
+    const { remove } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          { data: null, error: dbError },
+          { data: null, error: null },
+        ],
+        learning_weeks: { data: null, error: null },
+      },
+    });
+
+    const result = await deleteWeek(1);
+
+    expect(result).toEqual({ error: null, storageRemoved: false });
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("週の論理削除に失敗した場合は Storage 削除を行わない（DB失敗・PDF削除済みの不整合を作らない）", async () => {
+    const { remove } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          { data: [{ pdf_url: "gas/slide-01.pdf" }], error: null },
+          { data: null, error: null },
+        ],
+        learning_weeks: { data: null, error: dbError },
+      },
+    });
+
+    const result = await deleteWeek(1);
+
+    expect(result.error).toEqual(dbError);
+    expect(result.storageRemoved).toBe(true);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("フェーズの論理削除に失敗した場合は Storage 削除を行わない", async () => {
+    const { remove } = mockAdminWithStorage({
+      tableResults: {
+        learning_weeks: [
+          { data: [{ id: 10 }], error: null },
+          { data: null, error: null },
+        ],
+        learning_contents: [
+          { data: [{ pdf_url: "gas/slide-01.pdf" }], error: null },
+          { data: null, error: null },
+        ],
+        learning_phases: { data: null, error: dbError },
+      },
+    });
+
+    const result = await deletePhase(5);
+
+    expect(result.error).toEqual(dbError);
+    expect(result.storageRemoved).toBe(true);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("一括削除の pdf_url 取得に失敗した場合は storageRemoved: false を返す", async () => {
+    const { remove } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          { data: null, error: dbError },
+          { data: [{ id: 1 }], error: null },
+        ],
+      },
+    });
+
+    const result = await bulkUpdateContents([1], { is_deleted: true });
+
+    expect(result.error).toBeNull();
+    expect(result.updated).toBe(1);
+    expect(result.storageRemoved).toBe(false);
+    expect(remove).not.toHaveBeenCalled();
+  });
+});

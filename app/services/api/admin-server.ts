@@ -90,28 +90,28 @@ async function removeUnreferencedSlideObjects(
   return storageRemoved;
 }
 
-/** 指定コンテンツID群の `pdf_url`（生死を問わない）を取得する。取得失敗時は空配列を返す */
+/** 指定コンテンツID群の `pdf_url`（生死を問わない）を取得する。取得失敗時は null を返す */
 async function fetchPdfUrlsByContentIds(
   supabase: AdminSupabaseClient,
   ids: number[]
-): Promise<string[]> {
+): Promise<string[] | null> {
   if (ids.length === 0) {
     return [];
   }
   const { data, error } = await supabase.from("learning_contents").select("pdf_url").in("id", ids);
   if (error) {
     console.error("スライド参照取得エラー:", error.message);
-    return [];
+    return null;
   }
   const rows = (data ?? []) as { pdf_url: string | null }[];
   return rows.map((row) => row.pdf_url).filter((url): url is string => url !== null);
 }
 
-/** 指定週配下の生きたコンテンツの `pdf_url` を取得する。取得失敗時は空配列を返す */
+/** 指定週配下の生きたコンテンツの `pdf_url` を取得する。取得失敗時は null を返す */
 async function fetchPdfUrlsByWeekIds(
   supabase: AdminSupabaseClient,
   weekIds: number[]
-): Promise<string[]> {
+): Promise<string[] | null> {
   if (weekIds.length === 0) {
     return [];
   }
@@ -122,7 +122,7 @@ async function fetchPdfUrlsByWeekIds(
     .eq("is_deleted", false);
   if (error) {
     console.error("スライド参照取得エラー:", error.message);
-    return [];
+    return null;
   }
   const rows = (data ?? []) as { pdf_url: string | null }[];
   return rows.map((row) => row.pdf_url).filter((url): url is string => url !== null);
@@ -486,6 +486,9 @@ export async function deleteTheme(
 ): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
   const supabase = await createAdminSupabaseClient();
   let storageRemoved = true;
+  // テーマ配下の全コンテンツの pdf_url（Storage 削除対象）。取得失敗時は null のまま残し、
+  // 最後の Storage 削除を試みず storageRemoved: false で報告する
+  let targetPdfUrls: string[] | null = null;
 
   // 配下フェーズIDを取得
   const { data: phases, error: phaseFetchError } = await supabase
@@ -514,9 +517,15 @@ export async function deleteTheme(
 
     const weekIds = weeks?.map((w) => w.id) ?? [];
 
+    // Storage 削除のため、論理削除前に配下の pdf_url を取得する。
+    // 取得失敗時は削除対象が特定できないため、後段の Storage 削除を試みず
+    // storageRemoved: false で報告する（成功扱いにしない）
+    targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, weekIds);
+    if (targetPdfUrls === null) {
+      storageRemoved = false;
+    }
+
     if (weekIds.length > 0) {
-      // Storage 削除のため、論理削除前に配下の pdf_url を取得する
-      const targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, weekIds);
       // 配下コンテンツを論理削除
       const { error: contentError } = await supabase
         .from("learning_contents")
@@ -527,8 +536,6 @@ export async function deleteTheme(
         console.error("コンテンツ削除エラー:", contentError.message);
         return { error: contentError, storageRemoved };
       }
-      // 行は論理削除のまま残し、他から参照されていない Storage オブジェクトのみ物理削除する
-      storageRemoved = await removeUnreferencedSlideObjects(supabase, targetPdfUrls);
     }
 
     // 配下週を論理削除
@@ -562,6 +569,13 @@ export async function deleteTheme(
   if (error) {
     console.error("テーマ削除エラー:", error.message);
     return { error, storageRemoved };
+  }
+
+  // すべてのDB書き込みが成功した後に、他から参照されていない
+  // Storage オブジェクトのみ物理削除する（後段の失敗で「DBは失敗・PDFだけ消えた」
+  // 状態を作らないため）。行は論理削除のまま残す
+  if (targetPdfUrls !== null && targetPdfUrls.length > 0) {
+    storageRemoved = await removeUnreferencedSlideObjects(supabase, targetPdfUrls);
   }
 
   return { error: null, storageRemoved };
@@ -754,8 +768,14 @@ export async function deletePhase(
 
   const weekIds = weeks?.map((w) => w.id) ?? [];
 
+  // Storage 削除のため、論理削除前に配下の pdf_url を取得する。
+  // 取得失敗時は storageRemoved: false で報告する（成功扱いにしない）
+  const targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, weekIds);
+  if (targetPdfUrls === null) {
+    storageRemoved = false;
+  }
+
   if (weekIds.length > 0) {
-    const targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, weekIds);
     // 配下コンテンツを論理削除
     const { error: contentError } = await supabase
       .from("learning_contents")
@@ -766,7 +786,6 @@ export async function deletePhase(
       console.error("コンテンツ削除エラー:", contentError.message);
       return { error: contentError, storageRemoved };
     }
-    storageRemoved = await removeUnreferencedSlideObjects(supabase, targetPdfUrls);
 
     // 配下週を論理削除
     const { error: weekError } = await supabase
@@ -788,6 +807,12 @@ export async function deletePhase(
   if (error) {
     console.error("フェーズ削除エラー:", error.message);
     return { error, storageRemoved };
+  }
+
+  // すべてのDB書き込みが成功した後に、他から参照されていない
+  // Storage オブジェクトのみ物理削除する
+  if (targetPdfUrls !== null && targetPdfUrls.length > 0) {
+    storageRemoved = await removeUnreferencedSlideObjects(supabase, targetPdfUrls);
   }
 
   return { error: null, storageRemoved };
@@ -965,8 +990,15 @@ export async function deleteWeek(
   id: number
 ): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
   const supabase = await createAdminSupabaseClient();
+  let storageRemoved = true;
 
+  // Storage 削除のため、論理削除前に配下の pdf_url を取得する。
+  // 取得失敗時は storageRemoved: false で報告する（成功扱いにしない）
   const targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, [id]);
+  if (targetPdfUrls === null) {
+    storageRemoved = false;
+  }
+
   // 配下コンテンツを論理削除
   const { error: contentError } = await supabase
     .from("learning_contents")
@@ -975,15 +1007,20 @@ export async function deleteWeek(
     .eq("is_deleted", false);
   if (contentError) {
     console.error("コンテンツ削除エラー:", contentError.message);
-    return { error: contentError, storageRemoved: true };
+    return { error: contentError, storageRemoved };
   }
-  const storageRemoved = await removeUnreferencedSlideObjects(supabase, targetPdfUrls);
 
   // 週を論理削除
   const { error } = await supabase.from("learning_weeks").update({ is_deleted: true }).eq("id", id);
   if (error) {
     console.error("週削除エラー:", error.message);
     return { error, storageRemoved };
+  }
+
+  // すべてのDB書き込みが成功した後に、他から参照されていない
+  // Storage オブジェクトのみ物理削除する
+  if (targetPdfUrls !== null && targetPdfUrls.length > 0) {
+    storageRemoved = await removeUnreferencedSlideObjects(supabase, targetPdfUrls);
   }
 
   return { error: null, storageRemoved };
@@ -1308,7 +1345,9 @@ export async function bulkUpdateContents(
   const supabase = await createAdminSupabaseClient();
 
   const isBulkDelete = patch.is_deleted === true;
+  // 取得失敗時（null）は削除対象が特定できないため storageRemoved: false で報告する
   const targetPdfUrls = isBulkDelete ? await fetchPdfUrlsByContentIds(supabase, ids) : [];
+  let storageRemoved = targetPdfUrls === null ? false : true;
 
   const { data, error } = await supabase
     .from("learning_contents")
@@ -1319,13 +1358,13 @@ export async function bulkUpdateContents(
 
   if (error) {
     console.error("コンテンツ一括更新エラー:", error.message);
-    return { error, updated: 0, storageRemoved: true };
+    return { error, updated: 0, storageRemoved };
   }
 
   const updated = data?.length ?? 0;
-  const storageRemoved = isBulkDelete
-    ? await removeUnreferencedSlideObjects(supabase, targetPdfUrls)
-    : true;
+  if (isBulkDelete && targetPdfUrls !== null && targetPdfUrls.length > 0) {
+    storageRemoved = await removeUnreferencedSlideObjects(supabase, targetPdfUrls);
+  }
 
   return { error: null, updated, storageRemoved };
 }
@@ -1335,7 +1374,9 @@ export async function deleteContent(
 ): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
   const supabase = await createAdminSupabaseClient();
 
+  // 取得失敗時（null）は削除対象が特定できないため storageRemoved: false で報告する
   const targetPdfUrls = await fetchPdfUrlsByContentIds(supabase, [id]);
+  let storageRemoved = targetPdfUrls === null ? false : true;
 
   const { error } = await supabase
     .from("learning_contents")
@@ -1344,10 +1385,12 @@ export async function deleteContent(
 
   if (error) {
     console.error("コンテンツ削除エラー:", error.message);
-    return { error, storageRemoved: true };
+    return { error, storageRemoved };
   }
 
-  const storageRemoved = await removeUnreferencedSlideObjects(supabase, targetPdfUrls);
+  if (targetPdfUrls !== null && targetPdfUrls.length > 0) {
+    storageRemoved = await removeUnreferencedSlideObjects(supabase, targetPdfUrls);
+  }
 
   return { error: null, storageRemoved };
 }
