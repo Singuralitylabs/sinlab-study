@@ -1,0 +1,487 @@
+name: Release PR
+
+# main から release へのリリース PR を作成するワークフロー。
+# 手動起動時にバージョン番号を受け取り、品質ゲートとリリース時の事前作業
+# （マイグレーション・新規環境変数・本番DBの migration list）を自動で検出し、
+# PR 本文に記載する。Wiki の本番環境リリース手順 Step 1・2 を置き換える。
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "リリースバージョン番号（X.Y.Z 形式 / 例: 1.2.3）"
+        required: true
+        type: string
+      summary:
+        description: "リリースサマリー（任意 / PR 本文の冒頭に挿入され、Release ノートへ転記される）"
+        required: false
+        type: string
+
+# GITHUB_TOKEN の権限を必要最小限に制限する。
+# PR 作成に pull-requests: write、参照系（checkout・差分取得）に contents: read のみを使う。
+permissions:
+  contents: read
+  pull-requests: write
+
+# 連打による二重 PR 作成を防止する。実行中のジョブはキャンセルせず後発をキュー待ちにする。
+concurrency:
+  group: release-pr
+  cancel-in-progress: false
+
+jobs:
+  # 入力バリデーション。後段ジョブの無駄な実行を防ぐため最初に実行する。
+  validate-input:
+    name: 入力値の検証
+    runs-on: ubuntu-latest
+    steps:
+      - name: バージョン形式チェック
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::バージョン番号は X.Y.Z 形式で指定してください（指定値: $VERSION）"
+            exit 1
+          fi
+
+      # 再利用ワークフロー（uses:）は dispatch 元ブランチをチェックアウトする一方、
+      # PR 作成・検出処理はすべて origin/main を対象にする。別ブランチから起動すると
+      # そのブランチでチェックが通れば main が壊れていても PR が作られるため、main からの起動を要求する。
+      - name: 起動ブランチチェック（main のみ許可）
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::release-pr.yml は main ブランチから起動してください（起動元: ${{ github.ref }}）。"
+            exit 1
+          fi
+
+      # 既出バージョンの入力を create-release まで持ち越すと、main→release マージ
+      # （＝本番デプロイ）後にタグ重複で失敗するため、PR 作成前に事前チェックする。
+      - name: タグ重複の事前チェック
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v${VERSION}" --silent >/dev/null 2>&1; then
+            echo "::error::タグ \`v${VERSION}\` は既に存在します。バージョン番号を変更してください。"
+            exit 1
+          fi
+          echo "タグ \`v${VERSION}\` は未使用です。続行します。"
+
+  # 品質ゲートは既存ワークフローの再利用にする。チェック内容の二重定義を作らない。
+  # GITHUB_TOKEN で作成した PR は on: pull_request の他ワークフローを起動しないため、
+  # PR 作成「前」にここで品質チェックを通す構成が必須である。
+  quality-biome:
+    name: 品質ゲート Biome
+    needs: validate-input
+    uses: ./.github/workflows/biome.yml
+
+  quality-build:
+    name: 品質ゲート Build
+    needs: validate-input
+    uses: ./.github/workflows/build.yml
+
+  quality-test:
+    name: 品質ゲート Test
+    needs: validate-input
+    uses: ./.github/workflows/test.yml
+
+  quality-typecheck:
+    name: 品質ゲート Typecheck
+    needs: validate-input
+    uses: ./.github/workflows/typecheck.yml
+
+  quality-check-logs:
+    name: 品質ゲート Console Log
+    needs: validate-input
+    uses: ./.github/workflows/check_console_log.yml
+
+  # 事前作業の検出とリリース PR 作成。
+  create-pr:
+    name: リリース PR 作成
+    runs-on: ubuntu-latest
+    needs:
+      - validate-input
+      - quality-biome
+      - quality-build
+      - quality-test
+      - quality-typecheck
+      - quality-check-logs
+    # 本番DBの読み取り専用接続文字列は Environment スコープの Secret で受け取る。
+    # リポジトリ Secret にすると任意のワークフローから参照可能になるため、
+    # 到達範囲をこのワークフローに絞る目的で Environment を使う（保護ルールは設定しない）。
+    environment: production-db-readonly
+    steps:
+      # release / main 両ブランチの履歴を遡るため全履歴を取得する。
+      - name: Checkout repository (full history)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # release と main の双方を最新化する。
+      - name: Fetch release and main branches
+        run: |
+          set -euo pipefail
+          git fetch origin main:refs/remotes/origin/main
+          git fetch origin release:refs/remotes/origin/release
+
+      # release..main で追加・変更されたマイグレーションファイルを抽出する。
+      - name: マイグレーション差分を検出
+        id: migrations
+        run: |
+          set -euo pipefail
+          MIGRATIONS=$(git diff --name-only --diff-filter=AM \
+            origin/release..origin/main -- 'supabase/migrations/' \
+            | grep -E '\.sql$' || true)
+
+          {
+            echo "list<<MIGRATIONS_EOF"
+            if [ -z "$MIGRATIONS" ]; then
+              echo "- なし"
+            else
+              echo "$MIGRATIONS" | while IFS= read -r f; do
+                [ -n "$f" ] && echo "- \`$f\`"
+              done
+            fi
+            echo "MIGRATIONS_EOF"
+            echo "files<<MIGRATIONS_FILES_EOF"
+            printf '%s\n' "$MIGRATIONS"
+            echo "MIGRATIONS_FILES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # 後方互換でない変更を含むマイグレーションを検出して警告する。
+      # Wiki が「リリースを2回に分ける」判断を求めている箇所。ブロックはせず注意喚起に留める。
+      # 誤検出を抑えるため、判定前に行コメント（--）とブロックコメント（/* */）を除去し、
+      # 以下の絞り込みを行う:
+      # - DROP TRIGGER IF EXISTS の定型プレリュードは除外（同ファイルでの CREATE と対になる再作成が通例のため）
+      # - ALTER ... TYPE は ALTER TABLE ... ALTER COLUMN ... TYPE の列型変更に限定（content_type 等の列名に反応させない）
+      # - UPDATE / DELETE は文頭の DML 文のみを対象にし、関数本体（$$ ... $$）内は除外する
+      #   （ON DELETE CASCADE / BEFORE UPDATE / トリガー名 update_..._updated_at / 実行時ロジックへの反応を防ぐ）
+      - name: 後方互換でないマイグレーションを検出
+        id: breaking
+        env:
+          MIGRATION_FILES: ${{ steps.migrations.outputs.files }}
+        run: |
+          set -euo pipefail
+          strip_comments() {
+            sed -E 's/--.*$//' | sed -E ':a; s|/\*[^*]*\*/||g; ta'
+          }
+          # ドルクォート関数本体（$$ ... $$）を除去する。UPDATE / DELETE の判定では
+          # デプロイ時に実行されるトップレベルの DML のみを対象にし、関数・トリガー本体内の
+          # 実行時ロジックには反応させない。grep が標準入力を消費するため、先に変数へ退避する。
+          strip_function_bodies() {
+            local input
+            input=$(cat)
+            if printf '%s' "$input" | grep -q '\$\$'; then
+              printf '%s' "$input" | awk 'BEGIN { in_body = 0 } { n = gsub(/\$\$/, "&"); if (n % 2 == 1) { in_body = !in_body }; if (!in_body) print }'
+            else
+              printf '%s' "$input"
+            fi
+          }
+          WARNINGS=""
+          if [ -n "$(printf '%s' "$MIGRATION_FILES" | tr -d '[:space:]')" ]; then
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              CONTENT=$(git show "origin/main:$f" 2>/dev/null || true)
+              [ -z "$CONTENT" ] && continue
+              CODE=$(printf '%s' "$CONTENT" | strip_comments)
+              TOP_LEVEL=$(printf '%s' "$CODE" | strip_function_bodies)
+              ONE_LINE=$(printf '%s' "$CODE" | tr '\n' ' ')
+              MATCHES=""
+              if printf '%s' "$CODE" | grep -Eiq '(^|[^A-Za-z_])DROP[[:space:]]+(TABLE|COLUMN|INDEX|POLICY|FUNCTION|VIEW|CONSTRAINT)'; then
+                MATCHES="$MATCHES DROP,"
+              fi
+              if printf '%s' "$CODE" | grep -Ei '(^|[^A-Za-z_])DROP[[:space:]]+TRIGGER[[:space:]]+[A-Za-z_]' | grep -Evi 'IF[[:space:]]+EXISTS' | grep -q .; then
+                MATCHES="$MATCHES DROP,"
+              fi
+              if printf '%s' "$ONE_LINE" | grep -Eiq 'ALTER[[:space:]]+TABLE[[:space:]]+[^;]*ALTER[[:space:]]+COLUMN[^;]*TYPE'; then
+                MATCHES="$MATCHES ALTER...TYPE,"
+              fi
+              if printf '%s' "$CODE" | grep -Eiq 'RENAME[[:space:]]+(COLUMN|TO)'; then
+                MATCHES="$MATCHES RENAME,"
+              fi
+              if printf '%s' "$TOP_LEVEL" | grep -Eiqm1 '^[[:space:]]*(UPDATE|DELETE)[[:space:]]'; then
+                MATCHES="$MATCHES UPDATE/DELETE,"
+              fi
+              if printf '%s' "$CODE" | grep -Eq 'storage\.buckets'; then
+                MATCHES="$MATCHES storage.buckets,"
+              fi
+              if printf '%s' "$CODE" | grep -Eiq '(CREATE|ALTER|DROP)[[:space:]]+POLICY'; then
+                MATCHES="$MATCHES POLICY,"
+              fi
+              if [ -n "$MATCHES" ]; then
+                WARNINGS="$WARNINGS- \`$f\`（${MATCHES%,} を含む）"$'\n'
+              fi
+            done <<< "$MIGRATION_FILES"
+          fi
+
+          {
+            echo "list<<BREAKING_EOF"
+            if [ -z "$WARNINGS" ]; then
+              echo "- なし"
+            else
+              printf '%s' "$WARNINGS"
+            fi
+            echo "BREAKING_EOF"
+            if [ -n "$WARNINGS" ]; then
+              echo "has_warnings=true"
+            else
+              echo "has_warnings=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
+
+      # 新規環境変数を2系統で検出する。
+      # (1) .env.local.example のキー差分（release..main で追加。コメントアウトされた任意項目も含める）
+      # (2) コード側の process.env.X と process.env[定数] の両形式（定数は定義値まで解決する）
+      # 「コードから参照されているのに .env.local.example に未記載」の変数は警告として明示する。
+      - name: 新規環境変数を検出
+        id: env-vars
+        run: |
+          set -euo pipefail
+          git show origin/release:.env.local.example > /tmp/env.release 2>/dev/null || : > /tmp/env.release
+          git show origin/main:.env.local.example > /tmp/env.main 2>/dev/null || : > /tmp/env.main
+
+          # 先頭のコメント記号（#）を除去してから KEY= 形式を抽出する。
+          # # GEMINI_API_KEY_TRIAL= のような任意項目の取りこぼしを防ぐため。
+          extract_keys() {
+            sed -E 's/^[[:space:]]*#[[:space:]]?//' "$1" \
+              | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' \
+              | sed -E 's/=.*$//' \
+              | sort -u
+          }
+
+          extract_keys /tmp/env.release > /tmp/keys.release || : > /tmp/keys.release
+          extract_keys /tmp/env.main > /tmp/keys.main || : > /tmp/keys.main
+
+          NEW_KEYS=$(comm -13 /tmp/keys.release /tmp/keys.main || true)
+
+          # main 時点のコード参照を収集する（両形式）。
+          git show origin/main:app/services/api/gemini.ts > /dev/null 2>&1 || true
+          TMPDIR_CODE=$(mktemp -d)
+          git archive origin/main app | tar -x -C "$TMPDIR_CODE"
+
+          DIRECT_KEYS=$(grep -rhoE 'process\.env\.[A-Za-z_][A-Za-z0-9_]*' "$TMPDIR_CODE/app" 2>/dev/null \
+            | sed -E 's/.*process\.env\.//' | sort -u || true)
+
+          BRACKET_CONSTS=$(grep -rhoE 'process\.env\[[A-Za-z_][A-Za-z0-9_]*\]' "$TMPDIR_CODE/app" 2>/dev/null \
+            | sed -E 's/.*\[//; s/\]//' | sort -u || true)
+
+          RESOLVED_KEYS=""
+          UNRESOLVED_CONSTS=""
+          if [ -n "$BRACKET_CONSTS" ]; then
+            while IFS= read -r c; do
+              [ -z "$c" ] && continue
+              # app/constants 配下（フォールバックで app 全体）から CONST = "VALUE" の定義値を解決する。
+              VAL=$(grep -rhoE "${c}[[:space:]]*=[[:space:]]*[\"'][A-Za-z_][A-Za-z0-9_]*[\"']" "$TMPDIR_CODE/app/constants" 2>/dev/null \
+                | head -n1 | sed -E "s/.*=[[:space:]]*[\"']//; s/[\"']//" || true)
+              if [ -z "$VAL" ]; then
+                VAL=$(grep -rhoE "${c}[[:space:]]*=[[:space:]]*[\"'][A-Za-z_][A-Za-z0-9_]*[\"']" "$TMPDIR_CODE/app" 2>/dev/null \
+                  | head -n1 | sed -E "s/.*=[[:space:]]*[\"']//; s/[\"']//" || true)
+              fi
+              if [ -n "$VAL" ]; then
+                RESOLVED_KEYS="$RESOLVED_KEYS$VAL"$'\n'
+              else
+                UNRESOLVED_CONSTS="$UNRESOLVED_CONSTS$c"$'\n'
+              fi
+            done <<< "$BRACKET_CONSTS"
+          fi
+
+          CODE_KEYS=$(printf '%s\n%s' "$DIRECT_KEYS" "$RESOLVED_KEYS" \
+            | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' | sort -u || true)
+
+          # コード参照されているが .env.local.example に未記載のキー = 警告対象。
+          MISSING_KEYS=$(comm -23 <(printf '%s\n' "$CODE_KEYS") /tmp/keys.main || true)
+          MISSING_KEYS=$(printf '%s' "$MISSING_KEYS" | grep -E '^[A-Za-z_]' || true)
+
+          {
+            echo "added<<ENV_ADDED_EOF"
+            if [ -z "$(printf '%s' "$NEW_KEYS" | tr -d '[:space:]')" ]; then
+              echo "- なし"
+            else
+              printf '%s\n' "$NEW_KEYS" | while IFS= read -r k; do
+                [ -n "$k" ] && echo "- \`$k\`"
+              done
+            fi
+            echo "ENV_ADDED_EOF"
+
+            echo "code_refs<<ENV_CODE_EOF"
+            if [ -z "$(printf '%s' "$CODE_KEYS" | tr -d '[:space:]')" ]; then
+              echo "- なし"
+            else
+              printf '%s\n' "$CODE_KEYS" | while IFS= read -r k; do
+                [ -n "$k" ] && echo "- \`$k\`"
+              done
+            fi
+            echo "ENV_CODE_EOF"
+
+            echo "missing<<ENV_MISSING_EOF"
+            if [ -n "$(printf '%s' "$MISSING_KEYS" | tr -d '[:space:]')" ]; then
+              printf '%s\n' "$MISSING_KEYS" | while IFS= read -r k; do
+                [ -n "$k" ] && echo "- \`$k\`"
+              done
+            fi
+            if [ -n "$(printf '%s' "$UNRESOLVED_CONSTS" | tr -d '[:space:]')" ]; then
+              printf '%s\n' "$UNRESOLVED_CONSTS" | while IFS= read -r k; do
+                [ -n "$k" ] && echo "- \`process.env[$k]\`（定義値を解決できませんでした。要目視確認）"
+              done
+            fi
+            echo "ENV_MISSING_EOF"
+
+            if [ -n "$(printf '%s' "$MISSING_KEYS" | tr -d '[:space:]')" ] || [ -n "$(printf '%s' "$UNRESOLVED_CONSTS" | tr -d '[:space:]')" ]; then
+              echo "has_missing=true"
+            else
+              echo "has_missing=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
+
+      # 本番DBに対して migration list を読み取り専用で実行し、未適用ファイルと履歴不整合を掲載する。
+      # db push は実行しない。接続失敗でリリースをブロックせず、PR 本文に手動確認の案内を出す。
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ".bun-version"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: 本番DBの migration list を取得
+        id: migration-list
+        env:
+          SUPABASE_READONLY_DB_URL: ${{ secrets.SUPABASE_READONLY_DB_URL }}
+        run: |
+          set -euo pipefail
+          # 接続文字列をログに出さない。set -x / -v は使わない。
+          if [ -z "${SUPABASE_READONLY_DB_URL:-}" ]; then
+            {
+              echo "body<<MIGRATION_LIST_EOF"
+              echo "自動確認できませんでした（Secret 未設定）。手元で \`bunx supabase migration list\` を実行して確認してください。"
+              echo "MIGRATION_LIST_EOF"
+              echo "confirmed=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Session Pooler の接続文字列を使うこと（直接接続は IPv6 のみで到達できない場合がある）。
+          # --db-url は環境変数経由で渡し、コマンドライン展開をログに出さない。
+          if OUTPUT=$(bunx supabase migration list --db-url "$SUPABASE_READONLY_DB_URL" 2>&1); then
+            {
+              echo "body<<MIGRATION_LIST_EOF"
+              echo '```'
+              printf '%s\n' "$OUTPUT"
+              echo '```'
+              echo "MIGRATION_LIST_EOF"
+              echo "confirmed=true"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "body<<MIGRATION_LIST_EOF"
+              echo "自動確認できませんでした（DB Pause 等の可能性あり）。手元で \`bunx supabase migration list\` を実行して確認してください。"
+              echo "MIGRATION_LIST_EOF"
+              echo "confirmed=false"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      # 既存の main→release オープン PR がある場合は二重作成しない。
+      - name: 既存リリース PR の存在確認
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          NUMBER=$(gh pr list --base release --head main --state open \
+            --json number --jq '.[0].number // empty')
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: 既存 PR があれば中断
+        if: ${{ steps.existing.outputs.number != '' }}
+        run: |
+          echo "::error::既存のリリース PR #${{ steps.existing.outputs.number }} が open 状態です。先にこれをマージ／クローズしてください。"
+          exit 1
+
+      - name: リリース PR を作成
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          SUMMARY: ${{ inputs.summary }}
+          MIGRATIONS_LIST: ${{ steps.migrations.outputs.list }}
+          BREAKING_LIST: ${{ steps.breaking.outputs.list }}
+          HAS_BREAKING: ${{ steps.breaking.outputs.has_warnings }}
+          ENV_ADDED_LIST: ${{ steps.env-vars.outputs.added }}
+          ENV_CODE_LIST: ${{ steps.env-vars.outputs.code_refs }}
+          ENV_MISSING_LIST: ${{ steps.env-vars.outputs.missing }}
+          HAS_ENV_MISSING: ${{ steps.env-vars.outputs.has_missing }}
+          MIGRATION_LIST_BODY: ${{ steps.migration-list.outputs.body }}
+          MIGRATION_CONFIRMED: ${{ steps.migration-list.outputs.confirmed }}
+        run: |
+          set -euo pipefail
+          # NOTE: HTML コメントマーカーは create-release.yml が PR 本文からサマリーのみを抽出して
+          # Release ノートに転記するために使用する。マーカーで囲むのはサマリー本文だけにし、
+          # 「### リリースサマリー」見出しは PR 表示用にマーカー外へ配置する。
+          if [ -n "$(printf '%s' "${SUMMARY:-}" | tr -d '[:space:]')" ]; then
+            SUMMARY_SECTION=$(printf '### リリースサマリー\n\n<!-- release-summary-start -->\n%s\n<!-- release-summary-end -->' "$SUMMARY")
+          else
+            SUMMARY_SECTION=""
+          fi
+
+          if [ "$HAS_BREAKING" = "true" ]; then
+            BREAKING_SECTION=$(printf '### ⚠️ 後方互換でない変更の可能性\n\nリリースを2回に分ける判断が必要な場合があります。[本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)の該当節を確認してください。\n\n%s' "$BREAKING_LIST")
+          else
+            BREAKING_SECTION="### 後方互換でない変更の可能性"$'\n\n- なし'
+          fi
+
+          if [ "$HAS_ENV_MISSING" = "true" ]; then
+            ENV_MISSING_SECTION=$(printf '### ⚠️ .env.local.example 未記載の参照\n\nコードから参照されているのに \`.env.local.example\` に記載がありません。Vercel への登録漏れが無いか確認してください。\n\n%s' "$ENV_MISSING_LIST")
+          else
+            ENV_MISSING_SECTION=""
+          fi
+
+          if [ "$MIGRATION_CONFIRMED" != "true" ]; then
+            MIGRATION_NOTICE="> ⚠️ 本番DBへの自動接続ができなかったため、手元で \`bunx supabase migration list\` を実行して未適用分を確認してください。"
+          else
+            MIGRATION_NOTICE=""
+          fi
+
+          BODY=$(cat <<EOF
+          ## リリース v${VERSION}
+
+          このPRは \`main\` ブランチを \`release\` ブランチへマージするためのリリース PR です。
+          マージ後に \`create-release.yml\` が起動し、承認後に Git タグと GitHub Release が作成されます。
+
+          ${SUMMARY_SECTION}
+
+          ${BREAKING_SECTION}
+
+          ### 事前作業の検出結果
+
+          **マイグレーションファイル（release..main で追加・変更）:**
+          ${MIGRATIONS_LIST}
+
+          **後方互換でない変更の可能性があるファイル:**
+          ${BREAKING_LIST}
+
+          **新規環境変数（.env.local.example で追加）:**
+          ${ENV_ADDED_LIST}
+
+          **コード側の環境変数参照（process.env.X / process.env[定数] を解決済み）:**
+          ${ENV_CODE_LIST}
+
+          ${ENV_MISSING_SECTION}
+
+          **本番DBの migration list（読み取り専用・db push は実行しない）:**
+          ${MIGRATION_NOTICE}
+          ${MIGRATION_LIST_BODY}
+
+          ### マージ前チェックリスト
+
+          - [ ] 上記マイグレーションを本番 Supabase に適用済み（\`supabase migration list\` で履歴一致を確認）
+          - [ ] 上記環境変数を本番環境（Vercel）に登録済み
+          - [ ] 後方互換でない変更が無いか確認済み（ある場合はリリース分割の判断済み）
+          - [ ] 差分内容を確認済み
+          - [ ] Step 8 の本番動作確認後に create-release の承認を行うことを把握している
+          EOF
+          )
+
+          gh pr create \
+            --base release \
+            --head main \
+            --title "リリース ${VERSION}" \
+            --body "$BODY"

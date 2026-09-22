@@ -142,11 +142,13 @@ GitHub Actions は CI/CD の実行基盤として利用する。詳細は各ワ�
 
 | Workflow | 目的 | 主な実行内容 | トリガー |
 | --- | --- | --- | --- |
-| Build Test ([.github/workflows/build.yml](../.github/workflows/build.yml)) | 本番相当のビルド成立性を検証 | 依存関係インストール + ビルド | `push` / `pull_request`（`app/**`）、`workflow_dispatch` |
-| TypeScript Type Check ([.github/workflows/typecheck.yml](../.github/workflows/typecheck.yml)) | 型安全性の早期検出 | 型チェック（`tsc --noEmit`） | `push` / `pull_request`（`app/**`, `*.ts(x)` 等）、`workflow_dispatch` |
-| Vitest Unit Tests ([.github/workflows/test.yml](../.github/workflows/test.yml)) | ユニットテスト実行 | ユニットテスト（Vitest） | `push` / `pull_request`（`app/**`, `tests/**`, `vitest.config.ts`, `package.json`）、`workflow_dispatch` |
-| Biome Check ([.github/workflows/biome.yml](../.github/workflows/biome.yml)) | Lint/フォーマット違反を防止 | `bun run check`（Biome lint + format） | `push` / `pull_request`（`app/**`）、`workflow_dispatch` |
-| Check console.log and debugger ([.github/workflows/check_console_log.yml](../.github/workflows/check_console_log.yml)) | デバッグ用出力の混入を防止 | console/debugger 検査 | `push` / `pull_request`（`app/**`）、`workflow_dispatch` |
+| Build Test ([.github/workflows/build.yml](../.github/workflows/build.yml)) | 本番相当のビルド成立性を検証 | 依存関係インストール + ビルド | `push` / `pull_request`（`app/**`）、`workflow_dispatch`、`workflow_call` |
+| TypeScript Type Check ([.github/workflows/typecheck.yml](../.github/workflows/typecheck.yml)) | 型安全性の早期検出 | 型チェック（`tsc --noEmit`） | `push` / `pull_request`（`app/**`, `*.ts(x)` 等）、`workflow_dispatch`、`workflow_call` |
+| Vitest Unit Tests ([.github/workflows/test.yml](../.github/workflows/test.yml)) | ユニットテスト実行 | ユニットテスト（Vitest） | `push` / `pull_request`（`app/**`, `tests/**`, `vitest.config.ts`, `package.json`）、`workflow_dispatch`、`workflow_call` |
+| Biome Check ([.github/workflows/biome.yml](../.github/workflows/biome.yml)) | Lint/フォーマット違反を防止 | `bun run check`（Biome lint + format） | `push` / `pull_request`（`app/**`）、`workflow_dispatch`、`workflow_call` |
+| Check console.log and debugger ([.github/workflows/check_console_log.yml](../.github/workflows/check_console_log.yml)) | デバッグ用出力の混入を防止 | console/debugger 検査 | `push` / `pull_request`（`app/**`）、`workflow_dispatch`、`workflow_call` |
+| Release PR ([.github/workflows/release-pr.yml](../.github/workflows/release-pr.yml)) | main→release のリリース PR を作成 | 品質ゲート（既存5ワークフローの再利用）＋事前作業の検出（マイグレーション・新規環境変数・migration list）＋ PR 作成 | `workflow_dispatch`（バージョン番号・サマリーを入力） |
+| Create Release ([.github/workflows/create-release.yml](../.github/workflows/create-release.yml)) | 承認後にタグと GitHub Release を作成 | ガード条件チェック → 承認ゲート（Environment）→ タグ作成 → Release 公開 | release への PR マージ後、`workflow_dispatch` |
 
 ### 4.2 導入済みツール / 導入予定ツール
 

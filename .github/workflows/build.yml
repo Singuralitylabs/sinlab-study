@@ -17,6 +17,7 @@ on:
       - ".bun-version"
       - "next.config.ts"
       - "tsconfig.json"
+  workflow_call:
   workflow_dispatch:
 
 jobs:
