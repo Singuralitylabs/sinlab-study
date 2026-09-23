@@ -15,6 +15,7 @@ on:
       - "package.json"
       - "bun.lock"
       - ".bun-version"
+  workflow_call:
   workflow_dispatch:
 
 jobs:

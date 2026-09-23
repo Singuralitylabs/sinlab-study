@@ -1,5 +1,7 @@
 # テスト設計書
 
+> 本書は現在の仕様のみを記載する。変更履歴は git / PR 履歴で管理し、改訂履歴節は設けない（#185）。調査ログ・一時的な運用手順は本書に残さない。
+
 ## 目次
 
 1. [概要](#1-概要)
@@ -90,7 +92,7 @@ CI のワークフロー一覧は [4.1 GitHub Actions ワークフロー](#41-gi
 | 認証制御 | 認証ヘルパー関数の判定ロジック | 未認証ユーザーのリダイレクト |
 | 認可制御 | 権限判定ロジック（admin/maintainer/member 別の許可/拒否） | UI・プロキシ（`proxy.ts`）でのアクセス制御 |
 | 承認ステータス制御 | ステータス判定ロジック（trial（お試し）/active/rejected） | 画面遷移の正当性、お試しユーザーへのロック表示 |
-| データアクセス | ―（ユニットでは検証困難） | RLSによるデータ分離。お試しユーザーのアクセストークンでPostgRESTに直接アクセスし、(a) `learning_contents` のSELECTでお試し非公開コンテンツが0行、(b) お試し非公開コンテンツに対する `user_progress` / `submissions` のINSERT・UPDATEが拒否されること、(c) お試し非公開スライドのオブジェクトキーに対する `POST /storage/v1/object/sign/slides/<キー>`（署名付きURLの発行）と `GET /storage/v1/object/authenticated/slides/<キー>` が拒否され、お試し公開スライドでは許可されること |
+| データアクセス | ―（ユニットでは検証困難） | RLSによるデータ分離。お試しユーザーのアクセストークンでPostgRESTに直接アクセスし、(a) `learning_contents` のSELECTでお試し非公開コンテンツが0行、(b) お試し非公開コンテンツに対する `user_progress` / `submissions` のINSERT・UPDATEが拒否されること、(c) お試し非公開スライドのオブジェクトキーに対する `POST /storage/v1/object/sign/slides/<キー>`（署名付きURLの発行）と `GET /storage/v1/object/authenticated/slides/<キー>` が拒否され、お試し公開スライドでは許可されること。(d) コンテンツ行は公開済みだが所属 week / phase / theme のいずれかが未公開または論理削除済みのスライドキーは、member / お試しの通常クライアントで署名発行が拒否されること（#216。admin / maintainer はプレビューのため許可） |
 
 ### 3.3 型安全性テスト
 
@@ -140,11 +142,13 @@ GitHub Actions は CI/CD の実行基盤として利用する。詳細は各ワ�
 
 | Workflow | 目的 | 主な実行内容 | トリガー |
 | --- | --- | --- | --- |
-| Build Test ([.github/workflows/build.yml](../.github/workflows/build.yml)) | 本番相当のビルド成立性を検証 | 依存関係インストール + ビルド | `push` / `pull_request`（`app/**`）、`workflow_dispatch` |
-| TypeScript Type Check ([.github/workflows/typecheck.yml](../.github/workflows/typecheck.yml)) | 型安全性の早期検出 | 型チェック（`tsc --noEmit`） | `push` / `pull_request`（`app/**`, `*.ts(x)` 等）、`workflow_dispatch` |
-| Vitest Unit Tests ([.github/workflows/test.yml](../.github/workflows/test.yml)) | ユニットテスト実行 | ユニットテスト（Vitest） | `push` / `pull_request`（`app/**`, `tests/**`, `vitest.config.ts`, `package.json`）、`workflow_dispatch` |
-| Biome Check ([.github/workflows/biome.yml](../.github/workflows/biome.yml)) | Lint/フォーマット違反を防止 | `bun run check`（Biome lint + format） | `push` / `pull_request`（`app/**`）、`workflow_dispatch` |
-| Check console.log and debugger ([.github/workflows/check_console_log.yml](../.github/workflows/check_console_log.yml)) | デバッグ用出力の混入を防止 | console/debugger 検査 | `push` / `pull_request`（`app/**`）、`workflow_dispatch` |
+| Build Test ([.github/workflows/build.yml](../.github/workflows/build.yml)) | 本番相当のビルド成立性を検証 | 依存関係インストール + ビルド | `push` / `pull_request`（`app/**`）、`workflow_dispatch`、`workflow_call` |
+| TypeScript Type Check ([.github/workflows/typecheck.yml](../.github/workflows/typecheck.yml)) | 型安全性の早期検出 | 型チェック（`tsc --noEmit`） | `push` / `pull_request`（`app/**`, `*.ts(x)` 等）、`workflow_dispatch`、`workflow_call` |
+| Vitest Unit Tests ([.github/workflows/test.yml](../.github/workflows/test.yml)) | ユニットテスト実行 | ユニットテスト（Vitest） | `push` / `pull_request`（`app/**`, `tests/**`, `vitest.config.ts`, `package.json`）、`workflow_dispatch`、`workflow_call` |
+| Biome Check ([.github/workflows/biome.yml](../.github/workflows/biome.yml)) | Lint/フォーマット違反を防止 | `bun run check`（Biome lint + format） | `push` / `pull_request`（`app/**`）、`workflow_dispatch`、`workflow_call` |
+| Check console.log and debugger ([.github/workflows/check_console_log.yml](../.github/workflows/check_console_log.yml)) | デバッグ用出力の混入を防止 | console/debugger 検査 | `push` / `pull_request`（`app/**`）、`workflow_dispatch`、`workflow_call` |
+| Release PR ([.github/workflows/release-pr.yml](../.github/workflows/release-pr.yml)) | main→release のリリース PR を作成 | 品質ゲート（既存5ワークフローの再利用）＋事前作業の検出（マイグレーション・新規環境変数・migration list）＋ PR 作成 | `workflow_dispatch`（バージョン番号・サマリーを入力） |
+| Create Release ([.github/workflows/create-release.yml](../.github/workflows/create-release.yml)) | 承認後にタグと GitHub Release を作成 | ガード条件チェック → 承認ゲート（Environment）→ タグ作成 → Release 公開 | release への PR マージ後、`workflow_dispatch` |
 
 ### 4.2 導入済みツール / 導入予定ツール
 

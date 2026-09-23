@@ -3,14 +3,13 @@ import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
 // TERMINAL_SUBSCRIPTION_STATUSES / ACTIVATABLE_SUBSCRIPTION_STATUSES（定数）は実物のまま使い、
-// getStripeClient() / assertServiceRoleConfigured() のみモックする
+// getStripeClient() のみモックする
 vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/app/services/api/stripe-server")>()),
   getStripeClient: vi.fn(),
-  assertServiceRoleConfigured: vi.fn(),
 }));
 
-import { assertServiceRoleConfigured, getStripeClient } from "@/app/services/api/stripe-server";
+import { getStripeClient } from "@/app/services/api/stripe-server";
 import {
   activateUserFromCheckoutSession,
   claimEvent,
@@ -24,7 +23,6 @@ const dbError = { message: "db error", code: "PGRST001" };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(assertServiceRoleConfigured).mockReturnValue(undefined);
 });
 
 // ----------------------------------------------------------------

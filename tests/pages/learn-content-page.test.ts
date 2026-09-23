@@ -31,10 +31,12 @@ vi.mock("@/app/components/SlideContent", () => ({
     createElement("div", { "data-testid": "slide-content" }, signedUrl ?? "SLIDE_UNAVAILABLE"),
 }));
 vi.mock("@/app/components/AIReviewDisplayNoSSR", () => ({ AIReviewDisplayNoSSR: () => null }));
-vi.mock("@/app/components/YouTubeEmbed", () => ({ YouTubeEmbed: () => null }));
+vi.mock("@/app/components/YouTubeEmbed", () => ({
+  YouTubeEmbed: () => createElement("div", { "data-testid": "youtube-embed" }),
+}));
 vi.mock(
   "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/CompleteButton",
-  () => ({ CompleteButton: () => null })
+  () => ({ CompleteButton: () => createElement("div", { "data-testid": "complete-button" }) })
 );
 vi.mock(
   "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/SubmissionForm",
@@ -113,6 +115,8 @@ const setup = ({
   signedUrl = SIGNED_URL,
   orderedContents,
   extraWeekContents = [],
+  weekOverride,
+  contentWeekOverride,
 }: {
   userStatus: "active" | "trial";
   userRole?: "member" | "admin" | "maintainer";
@@ -127,6 +131,10 @@ const setup = ({
     is_open_to_trial?: boolean;
     is_published?: boolean;
   }>;
+  /** fetchWeekById が返す週（theme 未公開など親階層のケース用） */
+  weekOverride?: typeof week;
+  /** fetchContentById の week 埋め込み（isContentFullyPublished 判定用） */
+  contentWeekOverride?: typeof week;
 }) => {
   vi.mocked(getServerAuth).mockResolvedValue({
     user: { id: "auth-uuid" },
@@ -134,7 +142,10 @@ const setup = ({
     userStatus,
     userRole,
   } as never);
-  vi.mocked(fetchWeekById).mockResolvedValue({ data: week, error: null } as never);
+  vi.mocked(fetchWeekById).mockResolvedValue({
+    data: weekOverride ?? week,
+    error: null,
+  } as never);
   vi.mocked(fetchThemeNavigationIndex).mockResolvedValue({
     data: {
       orderedContents: orderedContents ?? [currentNav],
@@ -154,7 +165,11 @@ const setup = ({
     error: null,
   } as never);
   vi.mocked(fetchContentById).mockResolvedValue({
-    data: slideContent({ is_open_to_trial: isOpenToTrial, is_published: isPublished }),
+    data: slideContent({
+      is_open_to_trial: isOpenToTrial,
+      is_published: isPublished,
+      week: contentWeekOverride ?? weekOverride ?? week,
+    }),
     error: null,
   } as never);
   vi.mocked(createSlideSignedUrl).mockResolvedValue(signedUrl);
@@ -217,6 +232,51 @@ describe("学習画面のスライド配信（署名付きURL）", () => {
     expect(html).toContain("SLIDE_UNAVAILABLE");
     expect(html).not.toContain(PDF_KEY);
   });
+
+  it("member は theme だけ未公開のとき 404（署名を発行しない）", async () => {
+    // week.phase.theme_id は一致するが theme 埋め込みが未公開（RLS で null になるケースと同等）
+    const weekThemeUnpublished = {
+      ...week,
+      phase: {
+        ...week.phase,
+        theme: { id: 1, name: "GAS", is_published: false, is_deleted: false },
+      },
+    };
+    setup({
+      userStatus: "active",
+      isOpenToTrial: false,
+      weekOverride: weekThemeUnpublished,
+      contentWeekOverride: weekThemeUnpublished,
+    });
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(createSlideSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it.each(["admin", "maintainer"] as const)(
+    "%s は theme 未公開でもプレビューとして署名付きURLを発行する",
+    async (userRole) => {
+      const weekThemeUnpublished = {
+        ...week,
+        phase: {
+          ...week.phase,
+          theme: { id: 1, name: "GAS", is_published: false, is_deleted: false },
+        },
+      };
+      setup({
+        userStatus: "active",
+        userRole,
+        isOpenToTrial: false,
+        weekOverride: weekThemeUnpublished,
+        contentWeekOverride: weekThemeUnpublished,
+      });
+
+      const html = await render();
+
+      expect(createSlideSignedUrl).toHaveBeenCalledWith(PDF_KEY);
+      expect(html).toContain(SIGNED_URL);
+    }
+  );
 });
 
 describe("コンテンツ詳細の前後ナビゲーション（issue #208）", () => {
@@ -409,5 +469,58 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
     expect(html).toContain("フェーズに戻る");
     expect(html).toContain('href="/learn/1/2"');
     expect(html).not.toContain("テーマに戻る");
+  });
+});
+
+describe("概要欄カードの表示位置（issue #221）", () => {
+  it("概要ありスライドでは概要カードがビューアの下・完了ボタンの前に表示される", async () => {
+    setup({ userStatus: "active", isOpenToTrial: false });
+    vi.mocked(fetchContentById).mockResolvedValue({
+      data: slideContent({ description: "概要テスト本文" }),
+      error: null,
+    } as never);
+
+    const html = await render();
+
+    const bodyIndex = html.indexOf('data-testid="slide-content"');
+    const overviewIndex = html.indexOf("概要テスト本文");
+    const completeIndex = html.indexOf('data-testid="complete-button"');
+    expect(bodyIndex).toBeGreaterThanOrEqual(0);
+    expect(overviewIndex).toBeGreaterThan(bodyIndex);
+    expect(completeIndex).toBeGreaterThan(overviewIndex);
+    expect(html).toContain(">概要</h2>");
+  });
+
+  it("概要あり動画では概要カードがプレイヤーの下・完了ボタンの前に表示される", async () => {
+    setup({ userStatus: "active", isOpenToTrial: false });
+    vi.mocked(fetchContentById).mockResolvedValue({
+      data: {
+        ...slideContent({ description: "概要テスト本文" }),
+        content_type: "video",
+        video_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        pdf_url: null,
+      },
+      error: null,
+    } as never);
+
+    const html = await render();
+
+    const bodyIndex = html.indexOf('data-testid="youtube-embed"');
+    const overviewIndex = html.indexOf("概要テスト本文");
+    const completeIndex = html.indexOf('data-testid="complete-button"');
+    expect(bodyIndex).toBeGreaterThanOrEqual(0);
+    expect(overviewIndex).toBeGreaterThan(bodyIndex);
+    expect(completeIndex).toBeGreaterThan(overviewIndex);
+    expect(html).toContain(">概要</h2>");
+  });
+
+  it("概要未設定（NULL）のスライドでは概要カードを表示しない", async () => {
+    setup({ userStatus: "active", isOpenToTrial: false });
+
+    const html = await render();
+
+    expect(html).toContain('data-testid="slide-content"');
+    expect(html).not.toContain("概要テスト本文");
+    expect(html).not.toContain(">概要</h2>");
   });
 });

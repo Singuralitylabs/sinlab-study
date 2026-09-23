@@ -1,11 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { STRIPE_DISABLED_MESSAGE } from "@/app/constants/stripe";
-import {
-  assertServiceRoleConfigured,
-  getStripeClient,
-  isStripeEnabled,
-} from "@/app/services/api/stripe-server";
+import { getStripeClient, isStripeEnabled } from "@/app/services/api/stripe-server";
 import {
   activateUserFromCheckoutSession,
   claimEvent,
@@ -16,7 +12,7 @@ import { sendSlackPaymentFailedNotification } from "@/app/services/notifications
 
 /**
  * releaseEventClaim() を例外から保護して呼ぶ。releaseEventClaim() 自体はDBエラーを
- * throwせず{error}で返す設計だが、内部で呼ぶ assertServiceRoleConfigured() 等が
+ * throwせず{error}で返す設計だが、内部で呼ぶ createAdminSupabaseClient() 等が
  * 予期せずthrowした場合に、解放処理の失敗でハンドラ失敗時の500応答自体を
  * 壊さないようにする（解放できなければclaimは残るが、TTL経過後に再claim可能になる）。
  */
@@ -56,8 +52,6 @@ export async function POST(request: NextRequest) {
   let claimedProcessedAt: string | null = null;
 
   try {
-    assertServiceRoleConfigured();
-
     // event.idの処理権を原子的に確保する（素のINSERTのため、同一event.idの並行配信は
     // 一意制約により片方だけがclaimに成功する）。claimできなければ「他のリクエストが
     // 既に処理済み、または処理中」であり、ハンドラを実行せずスキップする

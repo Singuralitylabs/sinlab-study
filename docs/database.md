@@ -2,6 +2,8 @@
 
 本書は、Web技術学習支援サービスのデータベース設計について記載する。
 
+> 本書は現在の仕様のみを記載する。変更履歴は git / PR 履歴で管理し、改訂履歴節は設けない（#185）。調査ログ・一時的な運用手順は本書に残さない。
+
 ---
 
 ## 1. 概要
@@ -346,7 +348,7 @@ erDiagram
 
 ### 3.8 users（ユーザー）
 
-本サービスの独自Supabaseプロジェクトで管理する。初回Googleログイン時にOAuthコールバックで自動作成される（`status=trial`, `role=member`, `membership_type=NULL`）。`status=trial` は「お試し（trial）ユーザー」としてログインしてサービスを利用でき、お試し公開コンテンツ（`is_open_to_trial=true`）の閲覧・課題提出が可能。管理者が承認後、`status=active` に変更することで全コンテンツへのアクセスが可能になる。承認時には会員種別（`membership_type`）も同時に設定する。
+本サービスの独自Supabaseプロジェクトで管理する。初回Googleログイン時にOAuthコールバックで自動作成される（`status=trial`, `role=member`, `membership_type=NULL`, `terms_accepted_at=登録時刻`）。`status=trial` は「お試し（trial）ユーザー」としてログインしてサービスを利用でき、お試し公開コンテンツ（`is_open_to_trial=true`）の閲覧・課題提出が可能。管理者が承認後、`status=active` に変更することで全コンテンツへのアクセスが可能になる。承認時には会員種別（`membership_type`）も同時に設定する。`terms_accepted_at` は新規登録時のみ記録し、既存ユーザーは `NULL` のまま利用継続できる（再同意は求めない）。
 
 | カラム | 型 | NULL | デフォルト | 説明 |
 |:--|:--|:--:|:--|:--|
@@ -358,6 +360,8 @@ erDiagram
 | role | VARCHAR(20) | NO | 'member' | `admin` / `maintainer` / `member`（CHECK制約） |
 | status | VARCHAR(20) | NO | 'trial' | `trial` / `active` / `rejected`（CHECK制約） |
 | membership_type | VARCHAR(20) | YES | NULL | 会員種別。`community`（コミュニティ会員）/ `general`（一般有料会員）（CHECK制約）。承認前・却下ユーザーは NULL |
+| terms_accepted_at | TIMESTAMPTZ | YES | NULL | 利用規約・プライバシーポリシーへの同意日時。初回登録時に記録し、既存ユーザーは NULL のまま |
+| onboarding_completed_at | TIMESTAMPTZ | YES | NULL | 初回利用ガイド（ウェルカムダイアログ）の完了日時。閉じたときに記録し、既存ユーザーは NULL のまま |
 | bio | TEXT | YES | NULL | 自己紹介 |
 | is_deleted | BOOLEAN | YES | false | 論理削除フラグ |
 | created_at | TIMESTAMPTZ | YES | NOW() | 作成日時 |
@@ -428,6 +432,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 | idx_learning_phases_theme_id | learning_phases | theme_id, display_order | テーマ内のフェーズ一覧（`ORDER BY display_order`） |
 | idx_learning_weeks_phase_id | learning_weeks | phase_id, display_order | フェーズ内の週一覧（`ORDER BY display_order`） |
 | idx_learning_contents_week_id | learning_contents | week_id, display_order | 週内のコンテンツ一覧（`ORDER BY display_order`） |
+| idx_learning_contents_pdf_url | learning_contents | pdf_url（部分: `pdf_url IS NOT NULL`） | slides Storage SELECT の EXISTS（`pdf_url = storage.objects.name`）向け。#216 |
 | user_progress_user_id_content_id_key | user_progress | user_id, content_id（UNIQUE） | ユーザー×コンテンツの一意制約。`user_id` 絞り込みや `ORDER BY content_id` も賄う |
 | idx_user_progress_user_id_completed | user_progress | user_id, completed_at（部分: `is_completed = true`） | RPC `get_students_progress_summary` の完了集計（`GROUP BY user_id` + `max(completed_at)`） |
 | idx_user_progress_content_id | user_progress | content_id | コンテンツ別の進捗検索 |
@@ -567,7 +572,7 @@ maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進
 EXISTS (SELECT 1 FROM learning_contents WHERE id = content_id)
 ```
 
-`learning_contents` の SELECT ポリシー（6.1）が適用されるため、この EXISTS はお試しユーザーではお試し公開分のみ真になる。
+`learning_contents` の SELECT ポリシー（6.1）が適用されるため、この EXISTS はお試しユーザーではお試し公開分のみ真になる。**親階層（week / phase / theme）の公開・削除は見ない**ため、コンテンツ行が公開済みでも親が未公開・論理削除の場合に EXISTS だけでは防げない。進捗APIはアプリ層の `isContentVisible()` で親階層まで判定すること（#216。Storage 側のみ方針Aで親階層を閉じ、こちらはアプリ層に残す）。
 
 **`active` ユーザーへの影響**: この条件はステータスを問わず適用されるため、`active` ユーザーも不可視コンテンツ（未公開・存在しないID）への書き込みができなくなる。従来は未公開コンテンツへの書き込みが素通りし、存在しないIDはFK違反でエラーになっていたが、いずれもRLSで拒否される。通常のUI経路では不可視コンテンツに到達しないため、正常系への影響はない。
 
@@ -588,7 +593,7 @@ user_id = (select get_user_id())
 | Users can view own submissions, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `user_id = (select get_user_id()) OR (select get_user_role()) IN ('admin', 'maintainer')` |
 | Users can insert own submissions | INSERT | 本人（かつ可視コンテンツのみ） | `user_id` が自身のユーザーIDと一致 **かつ** 対象 `content_id` が自身に可視であること（EXISTS 条件、6.2 と同じパターン） |
 
-提出物は作成後に受講生が更新・削除することはないため、UPDATE / DELETE のポリシーは定義していない。したがって EXISTS 条件は INSERT のみでよい（進捗のように upsert で UPDATE 経路を通ることがない）。
+提出物は作成後に受講生が更新・削除することはないため、UPDATE / DELETE のポリシーは定義していない。したがって EXISTS 条件は INSERT のみでよい（進捗のように upsert で UPDATE 経路を通ることがない）。EXISTS は `learning_contents` 行の可視性に委譲するだけで親階層は見ないため、提出APIもアプリ層の `isContentVisible()` で親階層まで判定すること（6.2 と同じ注意。#216）。
 
 ### 6.4 ai_reviews
 
@@ -608,6 +613,8 @@ user_id = (select get_user_id())
 
 初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer は受講生進捗（`/manage/students`）の閲覧で `users` を参照するため SELECT のみ許可し、UPDATE は付与しない（ユーザー管理は不可）。
 
+本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため。`#16`）。
+
 ### 6.6 stripe_subscriptions
 
 | ポリシー | 操作 | 対象 | 条件 |
@@ -626,16 +633,16 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 
 | ポリシー | 操作 | 対象 | 条件 |
 |:--|:--|:--|:--|
-| Slides are viewable via visible contents or by content managers | SELECT | authenticated | `bucket_id = 'slides' AND ((select get_user_role()) IN ('admin', 'maintainer') OR EXISTS (SELECT 1 FROM learning_contents lc WHERE lc.pdf_url = storage.objects.name AND lc.is_published = true AND lc.is_deleted = false))` |
+| Slides are viewable via visible contents or by content managers | SELECT | authenticated | `bucket_id = 'slides' AND ((select get_user_role()) IN ('admin', 'maintainer') OR EXISTS (SELECT 1 FROM learning_contents lc JOIN learning_weeks lw ON lw.id = lc.week_id JOIN learning_phases lp ON lp.id = lw.phase_id JOIN learning_themes lt ON lt.id = lp.theme_id WHERE lc.pdf_url = storage.objects.name AND lc.is_published = true AND lc.is_deleted = false AND lw.is_published = true AND lw.is_deleted = false AND lp.is_published = true AND lp.is_deleted = false AND lt.is_published = true AND lt.is_deleted = false))`（#216。member / お試しは `isContentVisible()` と同じ4階層条件。admin / maintainer は無条件） |
 | Content managers can upload content assets | INSERT | admin / maintainer | `bucket_id IN ('thumbnails', 'slides') AND (select get_user_role()) IN ('admin', 'maintainer')` |
 | Content managers can update content assets | UPDATE | admin / maintainer | 同上（USING / WITH CHECK） |
 | Content managers can delete content assets | DELETE | admin / maintainer | 同上 |
 
-SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの RLS が適用されるため、`learning_contents` の SELECT ポリシー（`is_published` / `is_deleted` / `status` / `is_open_to_trial`）がそのまま Storage の可視範囲になる。すなわち「`pdf_url` がそのオブジェクトキーに一致する可視コンテンツが存在する」場合だけ署名付きURLの発行（`createSignedUrl()`）やダウンロードが許可され、お試しユーザーがロック済みスライドのキーを推測しても取得できない。この等値比較のため、`pdf_url` にはオブジェクトキー以外（公開URL等）を保存してはならない。`anon` 向けのポリシーは無く、未認証のデモ画面はサーバー側で service_role によりお試し公開スライドのみ署名する（機能設計書 3.2）。
+SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの RLS が適用されるため、`learning_contents` の SELECT ポリシー（`is_published` / `is_deleted` / `status` / `is_open_to_trial`）がコンテンツ行の可視範囲として効く。加えて `#216` で week / phase / theme への JOIN と各階層の `is_published` / `is_deleted` を明示し、**member / お試しユーザー**に対してはアプリ層の `isContentVisible()` と同じ4階層条件にする（方針A: Storage 側のみ拡張。`learning_contents` の SELECT RLS 自体は親階層を見ないまま。方針Bを採らない理由は、お試しユーザー向けの階層骨格表示と `user_progress` / `submissions` の書き込み RLS まで波及するため）。admin / maintainer はプレビューのためロールで無条件許可する（仕様 2.12。`isContentVisible()` 自体はロール非依存のフェイルクローズなので、未公開階層・orphan ではポリシーと `isContentVisible()` の真理値は一致しない）。すなわち member / お試しでは「`pdf_url` がそのオブジェクトキーに一致し、4階層すべてが公開済み・未削除の可視コンテンツが存在する」場合だけ署名付きURLの発行（`createSignedUrl()`）やダウンロードが許可され、お試しユーザーがロック済みスライドのキーを推測しても取得できない。この等値比較のため、`pdf_url` にはオブジェクトキー以外（公開URL等）を保存してはならない。`EXISTS` の `pdf_url` 等値比較向けに部分インデックス `idx_learning_contents_pdf_url`（`WHERE pdf_url IS NOT NULL`）を置く。`anon` 向けのポリシーは無く、未認証のデモ画面はサーバー側で service_role によりお試し公開スライドのみ署名する（機能設計書 3.2）。
 
-**既知の制約**: `learning_contents` の SELECT ポリシーはコンテンツ行自身の `is_published` / `is_deleted` しか見ず、所属する週・フェーズ・テーマの未公開はアプリ層（`isContentVisible()` / `fetchWeekById()`）で補っている。Storage ポリシーはこの RLS の見え方を継承するため、「コンテンツ行は公開済みだが親階層が未公開」のスライドは、member が Storage API を直接叩けば署名できる。画面からは親階層の判定で404になるため導線は無い。
+**補足**: `learning_contents` の SELECT ポリシーは引き続きコンテンツ行自身の `is_published` / `is_deleted` しか見ない。進捗・提出・AIレビューAPIの可視性はアプリ層の `isContentVisible()` が親階層まで補う（6.2 / 6.3 の EXISTS もコンテンツ行の可視性に委譲するだけなので、親階層判定を省いてはならない）。Storage の SELECT だけは `#216` で親階層条件をポリシー側に持たせ、受講生向けスライド配信経路の二層防御のズレを解消している。
 
-アップロード・削除APIは `createAdminSupabaseClient()` を使うため、`SUPABASE_SERVICE_ROLE_KEY` が設定されていればRLSをバイパスする。ただし同関数は未設定時に通常クライアントへフォールバックするため、その場合はこれらのポリシーが実際の書き込み可否を決める。
+アップロード・削除APIは `createAdminSupabaseClient()` を使うため、`SUPABASE_SERVICE_ROLE_KEY` が必須である（未設定時は throw。通常クライアントへの暗黙フォールバックはしない）。キー設定時は RLS をバイパスする。Storage の RLS ポリシーは、呼び出し側が通常クライアント（`createServerSupabaseClient()`）を明示的に選んだ経路に対する防御層として機能する。キー未設定は throw、キーが誤っている場合は PostgREST が 401 を返し RLS は評価されない。
 
 ---
 
@@ -649,14 +656,14 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 |:--|:--|
 | `20260412010000_create_tables.sql` | 全テーブル・ヘルパー関数・トリガー・インデックスの作成 |
 | `20260412010001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
-| `20260412010002_seed_gas_course_structure.sql` | GAS講座のテーマ・フェーズ・週・コンテンツ構造のシード |
+| `20260412010002_seed_gas_course_structure.sql` | GAS講座のテーマ・フェーズ・週・コンテンツ構造のシード（`WHERE name = 'GAS学習'` の get-or-create のため、リネーム後の環境で再実行するとテーマ・フェーズが重複作成される。適用済みマイグレーションを再実行しないこと） |
 | `20260412010003_seed_gas_exercises.sql` | GAS講座の演習コンテンツ（課題・模範回答）のシード |
 | `20260412010004_seed_gas_hints.sql` | GAS講座の全演習課題へのヒントデータ投入 |
-| `20260521000000_seed_gas_advanced_course_structure.sql` | GAS講座（応用編）のテーマ・フェーズ・週・video/slideコンテンツ構造のシード（#49）。タイムスタンプは演習seedよりフレッシュ環境での適用順を前にするため意図的に選定したもので、実際の適用日時ではない（7.1節参照） |
+| `20260521000000_seed_gas_advanced_course_structure.sql` | GAS講座（応用編）のテーマ・フェーズ・週・video/slideコンテンツ構造のシード（#49）。タイムスタンプは演習seedよりフレッシュ環境での適用順を前にするため意図的に選定したもので、実際の適用日時ではない（適用済みの後続バージョンより小さい過去日付のため、素の `db push` は拒否され `--include-all` が必要になる） |
 | `20260524000000_seed_gas_advanced_exercises.sql` | GAS講座（応用編）の演習コンテンツ（課題・ヒント・模範回答）のシード |
 | `20260527000000_add_submission_code_files.sql` | submissions に複数ファイル提出用 `code_files`（JSONB）カラムを追加 |
-| `20260613000000_seed_gas_practical_theme.sql` | GAS講座（実践編）のテーマ行を作成（#166）。タイムスタンプは実践編のフェーズ・週シードよりフレッシュ環境での適用順を前にするため意図的に選定したもので、実際の適用日時ではない（7.1節参照） |
-| `20260614080707_seed_gas_practical_course_structure.sql` | GAS講座（実践編）のフェーズ・週・コンテンツ構造のシード（#149調査で復元。7.1節参照）。Week「Geminiを使ったドキュメント自動要約」の所属フェーズ・display_orderを本番の実値に合わせて修正済み（#168。ただしこの修正はテーマ未投入のフレッシュ環境向けで、既に本ファイルを旧内容で適用済みの環境へは届かない。後者は`20260906090000_move_gas_practical_gemini_week.sql`が担う） |
+| `20260613000000_seed_gas_practical_theme.sql` | GAS講座（実践編）のテーマ行を作成（#166）。タイムスタンプは実践編のフェーズ・週シードよりフレッシュ環境での適用順を前にするため意図的に選定したもので、実際の適用日時ではない（適用済みの後続バージョンより小さい過去日付のため、素の `db push` は拒否され `--include-all` が必要になる） |
+| `20260614080707_seed_gas_practical_course_structure.sql` | GAS講座（実践編）のフェーズ・週・コンテンツ構造のシード（#149調査で復元）。Week「Geminiを使ったドキュメント自動要約」の所属フェーズ・display_orderを本番の実値に合わせて修正済み（#168。ただしこの修正はテーマ未投入のフレッシュ環境向けで、既に本ファイルを旧内容で適用済みの環境へは届かない。後者は`20260906090000_move_gas_practical_gemini_week.sql`が担う。リモートの `schema_migrations.statements` とは意図的に内容が異なるため、`migration fetch` 等で上書きしないこと） |
 | `20260715233228_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し（#77） |
 | `20260801000001_add_is_open_to_trial.sql` | learning_contents にお試し公開フラグ `is_open_to_trial` を追加 |
 | `20260801000002_trial_user_policies.sql` | `get_user_status()` の追加と、お試しユーザー制限を含むポリシーへの差し替え（learning_contents の SELECT、user_progress / submissions の書き込み） |
@@ -677,31 +684,14 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 | `20260910093449_add_bulk_update_sibling_display_order_rpc.sql` | 兄弟要素の `display_order` 一括更新 RPC `bulk_update_sibling_display_order(p_table, p_updates)`（#196）。挿入位置指定時の N 文 UPDATE を 1 回の UPDATE … FROM に置き換える。SECURITY INVOKER・許可テーブル限定・純粋な UPDATE のみ（upsert ではない）。**アプリ側の create/update（兄弟再採番）と同時にリリースすること**（未適用だと `PGRST202` で兄弟ありの作成・更新が失敗する） |
 | `20260911010345_add_query_pattern_indexes.sql` | クエリパターンに合わせたインデックス整備（#197 PR1）。階層一覧の `(parent_id, display_order)` 複合化、`submissions` の `(submitted_at DESC, id DESC)` 系、RPC向け `user_progress` 部分インデックス、`idx_users_auth_role` / 冗長な `idx_user_progress_user_id` の削除。UNIQUE 制約と重複する covering / `ai_reviews` 複合 / `users(status)` 部分は追加しない。認可（RLS）は変更しない |
 | `20260911061708_lighten_rls_policy_helper_calls.sql` | RLS ポリシーのヘルパー呼び出し軽量化（#197 PR2）。`learning_contents` SELECT の重複 InitPlan を `CASE (select get_user_status())` で1本に折り畳み、`ai_reviews` SELECT の無相関 `IN` を相関 `EXISTS` に変更（点検索で PK プローブも選択可能に）。許可・拒否の真理値とヘルパーの GRANT/REVOKE・関数本体は変更しない |
+| `20260916002654_slides_storage_select_parent_hierarchy.sql` | slides の `storage.objects` SELECT に week / phase / theme の公開・未削除判定を JOIN で追加（#216 方針A）。member / お試しは `isContentVisible()` と同じ4階層条件。admin / maintainer は無条件許可。`(select get_user_role())` / OR 1本の形は維持。`idx_learning_contents_pdf_url` 部分インデックスを追加。`learning_contents` の SELECT RLS は変更しない |
+| `20260917011152_validate_slide_pdf_url_object_keys.sql` | `learning_contents.pdf_url` のオブジェクトキー検証を `toSlideObjectKey()` と等価に強化（#217）。適用済み `20260908000000` は書き換えず、同規則で再正規化（旧公開URL・前後空白）したうえで、空セグメント・`.` / `..`・スキーム・`/` 始まりを含む不正値があれば例外で中断する |
+| `20260919000000_add_terms_accepted_at_to_users.sql` | `users` に利用規約の同意日時 `terms_accepted_at`（TIMESTAMPTZ, NULL許容）を追加（#226）。RLS変更なし |
+| `20260922000000_add_onboarding_completed_at_to_users.sql` | `users` に初回利用ガイドの完了日時 `onboarding_completed_at`（TIMESTAMPTZ, NULL許容）を追加（#16）。RLS変更なし |
 
-### 7.1 リモート適用履歴との整合（#149・確定版）
+### 7.1 マイグレーション追加後の運用
 
-`supabase_migrations.schema_migrations`（リモートに記録された適用済みバージョン一覧）を実際に取得し、`statements` 列（各バージョンで実行されたSQL本文）を全19ファイルと突き合わせた結果、以下が確定した。**当初「番号が偶然一致している」と推測していたが、これは誤りだった**（フラット化直後の`001`〜`019`という連番は、リモートの旧フラット時代の`001`〜`015`と番号は同じでも中身は無関係な組み合わせが大半で、そのまま`repair`すると誤った対応関係を記録するところだった）。この節のファイル名は上記の調査結果を反映した最終版であり、そのままの対応関係で問題ない。
-
-**判明した事実:**
-
-1. リモートの `001`〜`015`（旧フラット構成時代の履歴）は、2026年4月のディレクトリ再編（コミット `c14bbe9`）で全て `20260412010000_create_tables.sql` / `20260412010001_rls_policies.sql` / `20260412010002〜4_seed_gas_*.sql` の5ファイルに統合・消滅済み。個別バージョンとしては現存しない（例: 旧`004`(add_learning_themes)・`007`(create_ai_reviews)・`008`(add_slide_content_type)・`009`(add_reference_answer)・`012`(add_allowed_submission_types)・`013`(add_code_language)・`014`(add_hint_column) は全て `20260412010000_create_tables.sql` に統合されている）。
-2. `20260715233228`（`consolidate_rls_policies`、#77）は、`20260715233228_consolidate_rls_policies.sql` と**内容が完全一致**（コメント文まで一致）することを確認済み。ファイル名にこの実際のバージョンをそのまま採用している。
-3. `20260614080707`（`seed_gas_practical_course_structure`）は、リポジトリのどのファイルにも対応がなく完全に欠落していた。`schema_migrations.statements` から内容を復元し、`20260614080707_seed_gas_practical_course_structure.sql` として追加した。
-4. **解消済み**: 上記3で復元した `20260614080707_seed_gas_practical_course_structure.sql` は、`learning_themes.name = 'GAS学習（実践編）'` の行が事前に存在しない場合 `RAISE NOTICE` を出して何もせず終了する（`db push` 自体は止めない）。また `20260524000000_seed_gas_advanced_exercises.sql` は `learning_themes.name = 'GAS学習（応用編）'` の週・フェーズが既に存在する前提で `learning_contents` のみを INSERT している。これらが前提とする `learning_themes` / `learning_phases` / `learning_weeks` の作成SQLはリポジトリのどこにも存在せず、Supabaseダッシュボード等で直接作成されたとみられる、という根本原因があった（`grep`で全ファイルを検索して確認済み）。**「GAS学習（応用編）」側はこの根本原因を `20260521000000_seed_gas_advanced_course_structure.sql`（#49）で、「GAS学習（実践編）」側（テーマ行のみ。フェーズ・週は`20260614080707`が既に担う）は `20260613000000_seed_gas_practical_theme.sql`（#166）でそれぞれ解消済み**（いずれも本番プロジェクトへ直接SELECTし実値を確認したうえで実装）。あわせて、基礎コースのテーマ名が本番では `20260412010002_seed_gas_course_structure.sql` が作成する `GAS学習` ではなく `GAS学習（基礎編）` にリネームされている差異（マイグレーション上は未記録のUPDATE）も、`20260906000000_rename_gas_basic_theme.sql` で解消した（`20260613000000` とは異なり他マイグレーションとの適用順序の制約が無いため、意図的な過去日付を使わない独立ファイルとした）。なお `20260412010002_seed_gas_course_structure.sql` 自体は `WHERE name = 'GAS学習'` の get-or-create のため、リネーム後の環境で `db push --include-all` 等により誤って再実行されると `GAS学習` テーマ・フェーズが重複作成される残存リスクがあるが、通常の運用（既に適用済みのマイグレーションを再実行しない）では発生しない。**さらに（#168）**: 上記の`20260614080707_seed_gas_practical_course_structure.sql`は、復元時点のVALUESで週「Geminiを使ったドキュメント自動要約」の所属フェーズを「その他GAS活用」としていたが、本番の実際の所属は「Googleドキュメント活用」（display_orderも1,2の次の6）だったため修正した。本番では過去にダッシュボード等で当該週のみ手動移動されたとみられ、`schema_migrations.statements` に記録された適用済みの生テキストとは異なる内容になっている（意図的な差分であり、`supabase migration fetch` 等でリモートの生テキストへ上書きしないこと）。ただしSupabase CLIは`db push`時にバージョン番号の存在有無のみで適用済みかどうかを判定するため、`20260614080707`を旧内容（フェーズ誤り）で既に`db push`済みの環境（本番以外に存在した場合）には、このVALUES修正だけでは届かない。そのためデータ側の実際の移動は独立した新規バージョン`20260906090000_move_gas_practical_gemini_week.sql`が担う（対象週が誤ったフェーズに存在する場合のみ移動する冪等なUPDATEで、本番のように既に正しい配置の環境や、#168修正後の内容で初めて`db push`した環境では対象行が無く no-op）。
-5. 残りのファイルは以下の2グループに分かれる。
-   - **消滅した旧`001`〜`015`の一部を含むベースラインファイル**: `20260412010001_rls_policies.sql`（旧`002`/`005`/`006`のRLSを統合）、`20260412010002〜4_seed_gas_*.sql`（旧`010`/`011`/`015`のGAS基礎シードを統合）。上記1の対象であり、それぞれ個別のリモートバージョンとしては現存しない。
-   - **2026年4月の再編以降に追加された、リモートの旧履歴に一切記録のない新規マイグレーション**: 会員種別・Stripe・サムネイル・チェックアウト排他・お試しユーザー・GAS言語追加・概要欄・GAS応用編シード・複数ファイル提出対応・却下ユーザーのロール認可修正（#104）・受講生進捗集計RPC（#83）・GAS実践編テーマシード（#166）・基礎コーステーマ名リネーム（#166）の17ファイル。これらは本番で機能として稼働済みであることから、CLIを経由せず手動（SQLエディタ等）で適用されたとみられるが、`schema_migrations` に記録がないため個別の裏付けは取れていない。ファイル名のタイムスタンプは、対応する機能追加のgitコミット日時から逆算した目安であり、実際の適用日時そのものではない。
-   - （`20260614080707` と `20260715233228` は上記2グループのいずれでもなく、既にリモートに正しい内容で記録済みの上記2の対象。）
-
-**この結果、リモートとの整合手順は以下の通り（DB接続情報を持つ担当者が実施）:**
-
-1. **必須**: 旧`001`〜`015`は完全に消滅しており対応ファイルがない。Supabase CLIはローカルに対応ファイルがないリモートバージョンが存在すると、マイグレーション履歴が不整合とみなして `db push` を拒否する。そのため、`supabase migration repair --status reverted 001 002 003 004 005 006 007 008 009 010 011 012 013 014 015 --db-url <接続文字列>` で履歴から一括で外すことが、以降の手順（`db push` を新規マイグレーションの適用に使えるようにすること）の前提条件となる。
-2. `20260715233228` は内容確認済みのため、何もしなくてよい（既にその正しい内容で「適用済み」の状態）。`20260614080707` はバージョン自体は適用済みだが、`schema_migrations.statements` の生テキストは#168で修正した1点（週「Geminiを使ったドキュメント自動要約」の所属フェーズ）についてローカルの現在の内容と意図的に異なる（判明した事実4参照）。このバージョンについても改めて何かする必要はない（`repair`は不要、`migration fetch`等でリモートへ同期し直さないこと）が、これは「ローカルとリモートの内容が完全一致している」ことの確認ではない点に注意。データ側の実際の移動は`20260906090000_move_gas_practical_gemini_week.sql`が別途担う（下記5参照）。
-3. 本節の表にある残り22ファイル（`20260412010000`〜`20260412010004`、`20260521000000`、`20260524000000`、`20260527000000`、`20260613000000`、`20260801000001`〜`20260906000000`）について、各ファイルの内容が実際にリモートへ反映済みであることを確認したうえで、`supabase migration repair --status applied <version> --db-url <接続文字列>` を1件ずつ実行する。確認方法は、`information_schema.columns` / `pg_constraint` / `pg_policies` / `pg_proc` 等で該当オブジェクトを直接クエリする（例: `SELECT prosrc FROM pg_proc WHERE proname = 'get_user_role'` で `20260903000002_secure_get_user_role.sql` の反映を確認するなど）。**`20260521000000_seed_gas_advanced_course_structure.sql` および `20260613000000_seed_gas_practical_theme.sql` は他のファイルと異なり、タイムスタンプが実際の機能追加コミット日時の目安ではなく、それぞれ演習seed（`20260524000000`）・実践編のフェーズ/週seed（`20260614080707`）よりフレッシュ環境での適用順を前に置くために意図的に選んだ過去日付である。そのためリモートに既に適用済みの `20260614080707` / `20260715233228` より小さいバージョンとなり、そのまま `db push` すると「リモートの最終適用バージョンより前に挿入しようとしている」として拒否され `--include-all` が必要になる。両ファイルの内容は本番の実値と一致する（0行差分）ことをSELECTで確認済みのため、`db push --include-all` で改めて実行する必要はなく、他のバックフィル済みファイルと同様に `repair --status applied <version>` で「適用済み」として記録すればよい（`20260906000000_rename_gas_basic_theme.sql` は他マイグレーションとの適用順序の制約が無いため、この過去日付の対象には含まれない。ただし本番では既に手動でリネーム済みのため、他の稼働済みファイルと同様に `repair --status applied` で記録してよい）。**
-4. 上記が完了し `supabase migration list` で本節の表に記載された全ファイルの `Local` / `Remote` が一致することを確認できて初めて、`bunx supabase db push` は新規追加したマイグレーションのみを適用する安全な状態になる。
-5. 「GAS学習（応用編）」「GAS学習（実践編）」ともにテーマ作成SQLの欠落は解消済み（上記「判明した事実」4参照）。あわせて「GAS学習（実践編）」の週「Geminiを使ったドキュメント自動要約」の所属フェーズ不整合も解消済み（#168。上記「判明した事実」4参照）。後者の実データ側の修正を担う`20260906090000_move_gas_practical_gemini_week.sql`は、バックフィル対象の22ファイルとは異なり本番へ手動適用された実績が無い正真正銘の新規マイグレーションのため、`repair`は不要で通常の`db push`でそのまま適用してよい（対象週が既に正しい配置なら対象行が無く no-op）。
-
-### 7.2 マイグレーション追加後の運用
+本番への適用は、リリース時に `supabase migration list --db-url <本番>` で未適用分（`Remote` が空の行）だけであることを確認したうえで `bunx supabase db push --db-url <本番>` で行う（詳細は Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順) Step 3）。SQL Editor で手動適用すると履歴に記録されず、次回の `db push` で再実行されるため行わないこと。
 
 このリポジトリには `supabase/config.toml` がなく、Docker上のローカルSupabaseスタック（`supabase start` / `supabase db reset`）は未整備。そのため動作確認は `.env.local` がリンクしている開発用プロジェクトに対して行う。
 
@@ -710,7 +700,7 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 3. **`bun run db:types` はリンク先プロジェクトのリモートスキーマから型を生成するため、必ず上記の `db push` の後に実行する**（`db push` 前に実行しても新しいカラム等は反映されない）。生成物（`app/types/lib/database.types.ts`）もコミットする。
 4. 対応する Issue / PR にマイグレーションファイルをひも付けてレビューを受ける。
 
-カラム削除・リネーム・型変更など既存データに影響する破壊的変更を含む場合は、本番反映前に Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)（Step 3 にDBマイグレーション、末尾にロールバック方針を記載）に従うこと。
+カラム削除・リネーム・型変更、既存行の値を書き換えるデータ移行、Storageバケット・ポリシーの変更など既存データに影響する破壊的変更を含む場合は、本番反映前に Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)（Step 1 に後方互換でないマイグレーションの確認、Step 3 にDBマイグレーション、末尾にロールバック方針を記載）に従うこと。
 
 ---
 
@@ -737,39 +727,3 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 - `ON CONFLICT` 句による upsert で完了/未完了のトグルを実現
 - 初回完了時は INSERT、再操作時は UPDATE として処理される
 - **RLSポリシー設計上の注意**: 上記のとおり2回目以降の操作は UPDATE 経路を通るため、書き込み制限を追加する際は INSERT だけでなく UPDATE ポリシーにも同じ条件を課す必要がある（6.2 参照）
-
----
-
-## 改訂履歴
-
-| 日付 | 内容 |
-|:--|:--|
-| 2026年2月 | 初版作成（実装に基づく） |
-| 2026年3月 | learning_contentsに `allowed_submission_types` カラム追加。マイグレーション一覧を最新化 |
-| 2026年3月 | learning_contentsに `code_language` カラム追加（コードエディタの言語設定） |
-| 2026年3月 | learning_contentsに `hint` カラム追加（演習コンテンツへのヒント表示機能） |
-| 2026年4月 | `learning_themes` テーブル追加・learning_phasesに `theme_id` FK追加。`ai_reviews` テーブル追加。ER図・インデックス・トリガー・RLS・セクション番号を全面更新 |
-| 2026年6月 | マイグレーション一覧を実際のディレクトリ構成（`01_schema` / `02_rls` / `03_seed`）に修正。RLSにmaintainerポリシーを追記し、`ai_reviews` のINSERT/UPDATEポリシー記載を削除（Service Role経由のためRLS対象外） |
-| 2026年6月 | 実DB（Supabase）と照合し差分を修正：RLSヘルパー関数 `get_user_role()` / `get_user_id()` を追記し判定ロジックを実装準拠に修正、`users` テーブルのRLS（6.5）・`update_users_updated_at` トリガー・`idx_users_auth_role` インデックスを追記、`users` の文字列カラム型を VARCHAR に修正 |
-| 2026年7月 | お試し（trial）ユーザー機能に対応：`learning_contents` に `is_open_to_trial` カラム追加、RLSヘルパー関数 `get_user_status()` 追加、`learning_contents` のSELECTをお試しユーザー制限付きの別パターンに分離、`user_progress` / `submissions` の書き込みに可視コンテンツ限定のEXISTS条件を追記、マイグレーション一覧・公開制御・upsertパターンの注意点を更新 |
-| 2026年8月 | 会員種別の導入に対応：`users` に `membership_type`（`community` / `general`、承認前・却下は NULL）カラム追加、マイグレーション一覧に追記（当時のファイル名は `01_schema/004_add_membership_type.sql`。その後のフラット化・再採番を経て現在は `20260811000000_add_membership_type.sql`） |
-| 2026年8月 | Stripe月額サブスク決済の導入に対応：`stripe_subscriptions`（課金状態のミラー）・`stripe_events`（Webhook冪等性）テーブルを追加。ER図・テーブル定義（3.9/3.10）・RLS（6.6/6.7）・マイグレーション一覧を更新 |
-| 2026年8月 | PRレビュー指摘を反映：`stripe_events` の冪等性設計を「確認→ハンドラ成功後に記録」から、INSERT自体を処理権のclaimとして使う原子的な排他制御（claim/release）に変更。3.10節を更新 |
-| 2026年8月 | GitHub Copilotレビュー指摘を反映：claimにTTLによる再claim救済を追加（サーバーレス関数の異常終了でclaimが永久に残る問題への対処）し3.10節を更新 |
-| 2026年8月 | 別セッションからの追加レビュー指摘を反映：`TERMINAL_SUBSCRIPTION_STATUSES`に`paused`を追加（トライアル終了後の未払いによる一時停止を終端状態として扱う） |
-| 2026年8月 | 上記に対する独立レビューの指摘を反映：`releaseEventClaim()`の3者競合対策（`processed_at`一致条件）を3.10節に追記 |
-| 2026年8月 | テーマサムネイルのStorage管理に対応：`thumbnails` 公開バケットとStorageポリシーを追加。`learning_themes.image_url` の保存形式（3.1）・RLS（6.8）・マイグレーション一覧を更新 |
-| 2026年9月 | 並行Checkoutによる二重契約の対策（#103）に対応：`stripe_subscriptions` に `checkout_claimed_at` / `checkout_session_id` を追加し `stripe_customer_id` をNULL許容へ変更。claim/releaseによるCheckout作成の排他、既存セッションの状態に応じた再利用・奪取・待機、Stripe Customerの一意化を3.9節・6.6節・マイグレーション一覧に追記 |
-| 2026年9月 | 管理画面の課題編集でGASを既定言語にできるよう対応（#56）：`learning_contents.code_language` のCHECK制約に `gas` を追加。3.4節の値一覧を更新 |
-| 2026年9月 | 動画・スライドページに概要欄カードを追加（#66）：`learning_contents` に概要用の `description` カラム（NULL可・Markdown）を追加。3.4節の値一覧を更新 |
-| 2026年9月 | Supabase CLIがサブディレクトリを走査できず `migration list` / `db push` がローカルのマイグレーションを検出できない問題（#149）に対応：`supabase/migrations/` を `01_schema` / `02_rls` / `03_seed` のサブディレクトリからフラット構成へ再編。7章にリモート適用履歴との整合手順（7.1）を追記 |
-| 2026年9月 | 上記の続報（#149）：リモートの `schema_migrations.statements` を実際に取得し、連番ファイル名が旧履歴と番号だけ一致し中身は無関係だったことが判明したため、ファイル名を実際に検証済みのタイムスタンプ識別子へ全面的に振り直し。欠落していた「GAS学習（実践編）」シードを復元し、「応用編」「実践編」テーマ自体の作成SQLが存在しない別の欠落を7.1節に記録 |
-| 2026年9月 | #49対応：「GAS学習（応用編）」のテーマ・フェーズ・週・video/slideコンテンツ構造のシード（`20260521000000_seed_gas_advanced_course_structure.sql`）を追加し、本番の実値をSELECTで確認のうえ実装。マイグレーション一覧・7.1節（未解決事項4・整合手順5）を更新し、応用編側の欠落解消と実践編側が引き続き未解決である旨を反映 |
-| 2026年9月 | #83対応：受講生進捗集計をDB側集約（RPC `get_students_progress_summary()`）へ移行。従来は `user_progress` の完了済み全行をアプリ側でページング集計しておりN+1は解消済みだったが転送量・リクエスト回数が受講生数に比例していた。`SECURITY DEFINER` を使わずRLSに委譲する方針を6.2節に追記し、マイグレーション一覧を更新 |
-| 2026年9月 | #166対応：「GAS学習（実践編）」のテーマ行作成SQL（`20260613000000_seed_gas_practical_theme.sql`）を追加し、本番の実値をSELECTで確認のうえ実装。あわせて基礎コースのテーマ名リネーム（`GAS学習`→`GAS学習（基礎編）`）を独立マイグレーション（`20260906000000_rename_gas_basic_theme.sql`）として解消。マイグレーション一覧・7.1節（判明した事実4・5、整合手順3）を更新し、応用編・実践編ともにテーマ作成SQLの欠落解消を反映 |
-| 2026年9月 | #168対応：「GAS学習（実践編）」の`20260614080707_seed_gas_practical_course_structure.sql`が、週「Geminiを使ったドキュメント自動要約」の所属フェーズを本番の実際の配置（「その他GAS活用」ではなく「Googleドキュメント活用」、display_orderは1,2の次の6）と取り違えていた1点の食い違いを修正。ただしSupabase CLIはバージョン番号のみで適用判定するため、このVALUES修正はフレッシュ環境にしか届かない。旧内容で本ファイルを既に適用済みの環境にも届くよう、実データの移動は独立した新規マイグレーション（`20260906090000_move_gas_practical_gemini_week.sql`）で対応。マイグレーション一覧・7.1節（判明した事実4・整合手順2・5）を更新 |
-| 2026年9月 | #88対応：`users.status` の値 `'pending'` を `'trial'` にリネーム。`users_status_check` 制約のDROP→UPDATE→ADDと、`get_user_status()` を参照するlearning_contentsのSELECTポリシーの比較値更新を同一トランザクションで適用する`20260907010000_rename_pending_status_to_trial.sql`を追加。3.4節・3.8節・5.2節・6.1節・マイグレーション一覧を更新。`ai_reviews.status` の `'pending'`（AIレビューのジョブ状態）は対象外 |
-| 2026年9月 | スライドPDFの署名付きURL配信（#89）に対応：`slides` バケットを非公開化し、`learning_contents.pdf_url` の保存形式をオブジェクトキーに統一（3.4）。`storage.objects` の `slides` ポリシー（SELECT は `learning_contents` の RLS に委譲）を6.8に追記、マイグレーション一覧を更新 |
-| 2026年9月 | #196対応：兄弟要素の `display_order` 一括更新 RPC `bulk_update_sibling_display_order()` を追加。6.2節・マイグレーション一覧を更新 |
-| 2026年9月 | #197 PR1対応：クエリパターンに合わせたインデックス整備（階層一覧の複合化、`submissions` のタイブレーカー付きソートキー、RPC向け `user_progress` 部分インデックス、UNIQUE と重複する候補の除外）。§4 に制約由来インデックスを併記 |
-| 2026年9月 | #197 PR2対応：RLS ポリシーのヘルパー呼び出し軽量化。`learning_contents` SELECT の重複 InitPlan を `CASE (select get_user_status())` で1本に折り畳み、`ai_reviews` SELECT の無相関 `IN` を相関 `EXISTS` に変更。§6 の方針・ポリシー表・マイグレーション一覧を更新（§5.2 は関数契約のみ） |

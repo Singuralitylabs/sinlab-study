@@ -77,11 +77,11 @@ export async function DELETE(
     if (Number.isNaN(weekId)) {
       return NextResponse.json({ error: "無効なIDです" }, { status: 400 });
     }
-    const { error } = await deleteWeek(weekId);
+    const { error, storageRemoved } = await deleteWeek(weekId);
     if (error) {
       return NextResponse.json({ error: "週の削除に失敗しました" }, { status: 500 });
     }
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, storageRemoved });
   } catch (error) {
     console.error("API エラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });

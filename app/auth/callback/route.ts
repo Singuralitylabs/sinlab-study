@@ -1,10 +1,16 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
+import {
+  TERMS_CONSENT_COOKIE_NAME,
+  TERMS_CONSENT_COOKIE_VALUE,
+  TERMS_REQUIRED_ERROR_CODE,
+} from "@/app/constants/auth";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { sendSlackNewUserNotification } from "@/app/services/notifications/slack";
 
 const REGISTRATION_FAILED_PATH = "/login?error=registration_failed";
+const TERMS_REQUIRED_PATH = `/login?error=${TERMS_REQUIRED_ERROR_CODE}`;
 
 type CookieToSet = {
   name: string;
@@ -21,10 +27,19 @@ function redirectWithSessionCookies(
   for (const { name, value, options } of cookies) {
     redirectResponse.cookies.set(name, value, options);
   }
+  // 同意 Cookie は使い捨てのため、セッション付きの応答でも確実に削除する
+  redirectResponse.cookies.delete(TERMS_CONSENT_COOKIE_NAME);
   // セッション Cookie を含む応答は CDN にキャッシュさせない（@supabase/ssr が渡す Cache-Control 等）
   for (const [key, value] of Object.entries(headers)) {
     redirectResponse.headers.set(key, value);
   }
+  return redirectResponse;
+}
+
+/** セッション Cookie を付けないエラー導線のリダイレクト。同意 Cookie の削除のみ行う */
+function redirectWithoutSession(url: URL) {
+  const redirectResponse = NextResponse.redirect(url);
+  redirectResponse.cookies.delete(TERMS_CONSENT_COOKIE_NAME);
   return redirectResponse;
 }
 
@@ -33,7 +48,7 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get("code");
 
   if (!code) {
-    return NextResponse.redirect(new URL("/login", origin));
+    return redirectWithoutSession(new URL("/login", origin));
   }
 
   // cookieを蓄積するための配列
@@ -65,18 +80,10 @@ export async function GET(request: NextRequest) {
 
   if (error || !data.session) {
     console.error("セッション交換エラー:", error);
-    return NextResponse.redirect(new URL("/login", origin));
+    return redirectWithoutSession(new URL("/login", origin));
   }
 
   const user = data.session.user;
-
-  // createAdminSupabaseClient() はキー未設定時に Cookie クライアントへ静かにフォールバックする。
-  // この Route は next/headers の Cookie ストアへ書かないため、フォールバック先は未認証になり
-  // 全ユーザーが初回ログイン扱いで UNIQUE 違反 → 登録失敗になる。未設定なら確認自体を中断する。
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.error("SUPABASE_SERVICE_ROLE_KEY が未設定のためユーザー確認を中断");
-    return NextResponse.redirect(new URL("/login", origin));
-  }
 
   // SELECT RLS は本人行でも is_deleted=false を要求するため、通常クライアントでは
   // 論理削除済みレコードが見えない。再ログインで INSERT すると UNIQUE 違反になるので、
@@ -90,19 +97,27 @@ export async function GET(request: NextRequest) {
 
   if (userError) {
     console.error("ユーザー確認エラー:", userError);
-    return NextResponse.redirect(new URL("/login", origin));
+    return redirectWithoutSession(new URL("/login", origin));
   }
 
   if (existingUser?.is_deleted) {
     console.error("論理削除済みユーザーの再ログイン:", user.id);
-    return NextResponse.redirect(new URL(REGISTRATION_FAILED_PATH, origin));
+    return redirectWithoutSession(new URL(REGISTRATION_FAILED_PATH, origin));
   }
 
   // リダイレクト先を決定
   let redirectPath = "/";
 
   if (!existingUser) {
-    // 初回ログイン: ユーザーを自動登録
+    // 初回ログイン: 同意 Cookie なしには users 行を作らない（同意操作の迂回防止）。
+    // 既存ユーザーの分岐では Cookie を参照しない。
+    const hasConsented =
+      request.cookies.get(TERMS_CONSENT_COOKIE_NAME)?.value === TERMS_CONSENT_COOKIE_VALUE;
+    if (!hasConsented) {
+      return redirectWithoutSession(new URL(TERMS_REQUIRED_PATH, origin));
+    }
+
+    // 初回ログイン: ユーザーを自動登録（同意日時を記録）
     const { error: insertError } = await supabase.from("users").insert({
       auth_id: user.id,
       email: user.email || "",
@@ -110,11 +125,12 @@ export async function GET(request: NextRequest) {
       avatar_url: user.user_metadata?.avatar_url || null,
       role: USER_ROLE.MEMBER,
       status: USER_STATUS.TRIAL,
+      terms_accepted_at: new Date().toISOString(),
     });
 
     if (insertError) {
       console.error("ユーザー自動登録エラー:", insertError);
-      return NextResponse.redirect(new URL(REGISTRATION_FAILED_PATH, origin));
+      return redirectWithoutSession(new URL(REGISTRATION_FAILED_PATH, origin));
     }
 
     const adminUsersUrl = `${origin}/admin/users`;

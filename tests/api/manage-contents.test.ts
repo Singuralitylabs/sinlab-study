@@ -27,7 +27,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(maintainerAuth as never);
   vi.mocked(createContent).mockResolvedValue({ data: { id: 1 } as never, error: null });
-  vi.mocked(updateContent).mockResolvedValue({ error: null });
+  vi.mocked(updateContent).mockResolvedValue({ error: null, storageRemoved: true });
 });
 
 describe("POST /api/manage/contents - バリデーション", () => {

@@ -1,3 +1,5 @@
+import { parsePositiveInteger } from "@/app/lib/positive-integer";
+
 /**
  * `learning_contents.pdf_url` に保存する値は `slides` バケット内のオブジェクトキー
  * （例: `gas/slide-01.pdf`）のみとする（issue #89）。
@@ -70,8 +72,12 @@ export function parseSlideObjectKey(
     return null;
   }
 
-  const slideNumber = Number.parseInt(match[2], 10);
-  if (!Number.isSafeInteger(slideNumber)) {
+  // 番号指定時（upload-pdf）と同じ解釈基準に寄せる（issue #144）。
+  // 入力は正規表現の `(\d+)` のため現状の実害はないが、#105 で一本化した
+  // `parsePositiveInteger()` の基準から外れている唯一の残りのため。
+  // ドメイン上限（SLIDE_NUMBER_MAX）は受理規則であり既存キーの解釈には課さない。
+  const slideNumber = parsePositiveInteger(match[2]);
+  if (slideNumber === null) {
     return null;
   }
 

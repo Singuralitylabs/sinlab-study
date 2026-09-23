@@ -431,8 +431,10 @@ export type Database = {
           id: number;
           is_deleted: boolean | null;
           membership_type: string | null;
+          onboarding_completed_at: string | null;
           role: string;
           status: string;
+          terms_accepted_at: string | null;
           updated_at: string | null;
         };
         Insert: {
@@ -445,8 +447,10 @@ export type Database = {
           id?: number;
           is_deleted?: boolean | null;
           membership_type?: string | null;
+          onboarding_completed_at?: string | null;
           role?: string;
           status?: string;
+          terms_accepted_at?: string | null;
           updated_at?: string | null;
         };
         Update: {
@@ -459,8 +463,10 @@ export type Database = {
           id?: number;
           is_deleted?: boolean | null;
           membership_type?: string | null;
+          onboarding_completed_at?: string | null;
           role?: string;
           status?: string;
+          terms_accepted_at?: string | null;
           updated_at?: string | null;
         };
         Relationships: [];

@@ -7,6 +7,8 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { Button } from "@/components/ui/button";
 
+// public/pdf.worker.min.mjs は pdfjs-dist と同一バージョン・同一ビルド（legacy）に保つこと。
+// react-pdf 更新時は node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs で必ず差し替える。
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
 interface PdfSlideViewerProps {
@@ -107,6 +109,10 @@ export function PdfSlideViewer({ url }: PdfSlideViewerProps) {
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={(error) => console.error("PDF読み込みエラー:", error)}
           loading={null}
+          // react-pdf v11 は suspense が既定で有効になり、読み込み失敗時に
+          // Error Boundary へ例外が伝播する。独自の isLoading / onLoadError に
+          // 依存した従来挙動を維持するため無効化する。
+          suspense={false}
           className="flex justify-center py-4"
         >
           <Page

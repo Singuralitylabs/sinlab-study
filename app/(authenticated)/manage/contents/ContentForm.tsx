@@ -4,6 +4,7 @@ import { Loader2, Save, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
+import { SLIDE_NUMBER_MAX } from "@/app/constants/slides";
 import type {
   PhaseFilterOption,
   ThemeFilterOption,
@@ -486,9 +487,18 @@ export function ContentForm({
                 </button>
               ))}
             </div>
+            {/* 既存PDFを持つ行を他種別へ変更して保存すると、紐づくPDFはストレージから
+                完全削除される（孤児化を防ぐため。戻してもPDFは復元されない）。
+                一括操作で種別変更済みの行（pdf_url が残ったまま）も対象のため、
+                初期種別は問わず pdf_url の有無で判定する */}
+            {mode === "edit" && Boolean(initialData?.pdf_url) && contentType !== "slide" && (
+              <p className="text-xs text-destructive">
+                他の種別に変更して保存すると、紐づくスライドPDFはストレージから完全に削除されます。スライドに戻す場合はPDFの再アップロードが必要です。
+              </p>
+            )}
           </div>
 
-          {/* 概要（video / slide のみ。詳細ページのプレイヤー／ビューア上部に表示） */}
+          {/* 概要（video / slide のみ。詳細ページのプレイヤー／ビューア下部に表示） */}
           {(contentType === "video" || contentType === "slide") && (
             <div className="space-y-2">
               <Label htmlFor="description">概要（Markdown・任意）</Label>
@@ -552,6 +562,8 @@ export function ContentForm({
                     id="slideNumber"
                     type="number"
                     min={1}
+                    step={1}
+                    max={SLIDE_NUMBER_MAX}
                     value={slideNumber}
                     onChange={(e) => setSlideNumber(e.target.value)}
                     placeholder="空欄で自動採番"

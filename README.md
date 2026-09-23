@@ -55,6 +55,7 @@ SUPABASE_SERVICE_ROLE_KEY=<Supabase Service Role Key>
 SUPABASE_PROJECT_ID=<Supabase プロジェクトID>
 GEMINI_API_KEY=<Gemini API Key（会員用・有料ティア。AIレビュー機能）>
 GEMINI_API_KEY_TRIAL=<任意。お試しユーザー用・無料ティア。未設定時は GEMINI_API_KEY にフォールバック>
+SLACK_NOTIFICATION_WEBHOOK_URL=<任意。初回ログイン承認依頼・Stripe支払い失敗のSlack通知。未設定時は通知をスキップ>
 STRIPE_ENABLED=<Stripe決済機能の有効化フラグ。"true" 以外はフェイルクローズで無効>
 STRIPE_SECRET_KEY=<Stripe Secret Key>
 STRIPE_WEBHOOK_SECRET=<Stripe Webhook 署名シークレット>
@@ -62,9 +63,11 @@ STRIPE_PRICE_ID=<月額サブスクリプションの Price ID>
 NEXT_PUBLIC_APP_URL=<Checkout/Portal のリダイレクト先URL生成に使用>
 ```
 
+本番リリース時の環境変数確認は Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順) Step 5 を参照（一覧の正本はこの節と `.env.local.example`）。
+
 ### インストール・起動
 
-`supabase/migrations/` はCLIの走査仕様に合わせてサブディレクトリを持たないフラット構成にしている（`<タイムスタンプ>_<説明>.sql` のファイル名で適用順を表現）。**新規のSupabaseプロジェクトではそのまま以下の手順でよいが、既にマイグレーション適用履歴があるプロジェクトに接続する場合は、`db push` の前に [`docs/database.md`](./docs/database.md) 7.1節の整合手順を完了させること**（未整合のまま push すると、リモートに既に存在するオブジェクトを作成しようとしてエラーになる場合がある）。
+`supabase/migrations/` はCLIの走査仕様に合わせてサブディレクトリを持たないフラット構成にしている（`<タイムスタンプ>_<説明>.sql` のファイル名で適用順を表現）。**既にマイグレーション適用履歴があるプロジェクトに接続する場合は、`db push` の前に `supabase migration list` でローカルとリモートの履歴が一致していることを確認すること**（未整合のまま push すると、リモートに既に存在するオブジェクトを作成しようとしてエラーになる場合がある。一致しない場合の対処は Issue #185 のコメントに退避した開発用履歴整合手順を参照。過去の履歴整合の経緯は git / Issue（#149・#218）、本番への適用手順は Wiki の[本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)を参照）。
 
 ```bash
 # 依存関係のインストール
@@ -128,6 +131,7 @@ app/
 │   ├── admin/users/     #   ユーザー承認・却下・ロール変更
 │   ├── ai-review/       #   AIレビュー（Gemini API）
 │   ├── manage/          #   コンテンツ管理（phases/weeks/contents/themes）
+│   ├── onboarding/      #   初回利用ガイドの完了記録
 │   ├── progress/        #   進捗更新
 │   ├── submissions/     #   課題提出
 │   └── upload-pdf/      #   PDFスライドアップロード（Supabase Storage）

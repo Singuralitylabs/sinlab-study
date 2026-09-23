@@ -50,7 +50,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       is_open_to_trial,
     } = validation.data;
 
-    const { error } = await updateContent(contentId, {
+    const { error, storageRemoved } = await updateContent(contentId, {
       title,
       week_id,
       content_type,
@@ -72,7 +72,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: "コンテンツの更新に失敗しました" }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, storageRemoved });
   } catch (error) {
     if (error instanceof InvalidInsertAfterIdError) {
       console.error("コンテンツ更新エラー（insert_after_id不正）:", error.insertAfterId);
@@ -106,11 +106,11 @@ export async function DELETE(
     if (Number.isNaN(contentId)) {
       return NextResponse.json({ error: "無効なIDです" }, { status: 400 });
     }
-    const { error } = await deleteContent(contentId);
+    const { error, storageRemoved } = await deleteContent(contentId);
     if (error) {
       return NextResponse.json({ error: "コンテンツの削除に失敗しました" }, { status: 500 });
     }
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, storageRemoved });
   } catch (error) {
     console.error("API エラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
