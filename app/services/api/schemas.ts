@@ -9,7 +9,7 @@ import {
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
 import { MEMBERSHIP_TYPES, USER_MANAGEMENT_ACTIONS, USER_ROLES } from "@/app/constants/user";
-import { toSlideObjectKey } from "@/app/lib/slide-object-key";
+import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
 
 // ==================== 共通スキーマ ====================
 
@@ -47,15 +47,20 @@ const OptionalNullableString = z.string().nullable().optional();
  * 旧形式の公開URLはキーへ正規化して受理し、外部URL等のキーとして解釈できない値は拒否する
  * （Storage の SELECT ポリシーが `pdf_url = storage.objects.name` の等値比較のため、
  * キー以外の値を保存すると署名付きURLを発行できないコンテンツができる。issue #89）。
- * 空文字は従来どおり null と同じ「未設定」として扱う。
+ * 空文字・空白のみは「未設定」として null に正規化する。空文字のまま保存すると、
+ * アプリは「スライド無し」として扱う一方で、マイグレーションの pdf_url 検証
+ * （`20260917011152_validate_slide_pdf_url_object_keys.sql`）は不正値として中断するため（issue #243）。
  */
 const SlidePdfUrlSchema = z
   .string()
   .nullable()
   .optional()
   .transform((value, ctx) => {
-    if (value === undefined || value === null || value === "") {
+    if (value === undefined || value === null) {
       return value;
+    }
+    if (isBlankSlidePdfUrl(value)) {
+      return null;
     }
     const objectKey = toSlideObjectKey(value);
     if (!objectKey) {
