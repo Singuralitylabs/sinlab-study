@@ -8,7 +8,7 @@ const LOGIN_ERROR_MESSAGES = {
   registration_failed:
     "アカウント登録に失敗しました。時間をおいて再度お試しください。問題が続く場合は管理者にお問い合わせください。",
   [TERMS_REQUIRED_ERROR_CODE]:
-    "利用規約およびプライバシーポリシーへの同意の確認ができませんでした。チェックボックスにチェックを入れて再度ログインしてください。",
+    "利用規約およびプライバシーポリシーへの同意の確認ができませんでした。チェックを入れてから時間が経過した場合も確認できなくなるため、チェックボックスにチェックを入れて再度ログインしてください。",
 } as const;
 
 type LoginErrorCode = keyof typeof LOGIN_ERROR_MESSAGES;

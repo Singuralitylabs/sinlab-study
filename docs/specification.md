@@ -146,7 +146,7 @@ flowchart TD
 
 ### 2.5 初回ログイン時のユーザー自動登録
 
-OAuthコールバック処理中に初回ログインを検知し、`users` テーブルにレコードを自動作成する。`/login` には「利用規約およびプライバシーポリシーに同意する」チェックボックスを1つ置き、未チェックの間は Google ログインボタンを無効化する。チェックボックスのラベル内に利用規約・プライバシーポリシーの外部リンクを含める。同意は `GoogleLoginButton` が `signInWithOAuth` 直前にセットする短寿命の同意 Cookie（`SameSite=Lax`、有効期間10分）で callback へ持ち回り、`redirectTo` のクエリパラメータでは持ち回らない。規約改定時の再同意・管理画面での同意日時表示・規約本文のアプリ内ホスティングはスコープ外。
+OAuthコールバック処理中に初回ログインを検知し、`users` テーブルにレコードを自動作成する。`/login` には「利用規約およびプライバシーポリシーに同意する」チェックボックスを1つ置き、未チェックの間は Google ログインボタンを無効化する。チェックボックスのラベル内に利用規約・プライバシーポリシーの外部リンクを含める。同意は `GoogleLoginButton` が `signInWithOAuth` 直前にセットする短寿命の同意 Cookie（`SameSite=Lax`、有効期間30分。Google 側の2段階認証等で OAuth の往復が長引いても失効しない値）で callback へ持ち回り、`redirectTo` のクエリパラメータでは持ち回らない。規約改定時の再同意・管理画面での同意日時表示・規約本文のアプリ内ホスティングはスコープ外。
 
 **自動登録データ**:
 
@@ -962,7 +962,7 @@ JSONボディを受け取る API Route の入力検証は [zod](https://zod.dev/
 | セッション期限切れ | プロキシ（`proxy.ts`）が `/login` にリダイレクト |
 | Supabase接続エラー（コード交換・存在確認のDBエラー等） | サーバーログに出力、`/login` にリダイレクト |
 | ユーザー自動登録失敗 | サーバーログに出力し `/login?error=registration_failed` にリダイレクト（通知は送らない、セッション Cookie は付けない）。`/login` は許可リスト方式でメッセージ表示 |
-| 同意 Cookie なしの初回登録 | INSERT を行わず `/login?error=terms_required` にリダイレクト（通知は送らない、セッション Cookie は付けない）。既存ユーザーの分岐では参照しない |
+| 同意 Cookie なしの初回登録 | INSERT を行わず `/login?error=terms_required` にリダイレクト（通知は送らない、セッション Cookie は付けない）。同意 Cookie の失効（有効期間30分）もこの経路になるため、メッセージで再度チェックしてやり直すよう案内する。既存ユーザーの分岐では参照しない |
 | 論理削除済みユーザーの再ログイン | INSERT を試行せず、自動登録失敗と同じ導線（`/login?error=registration_failed`、セッション Cookie なし） |
 | ユーザー存在確認の失敗 | INSERT せず、`error` パラメータなしの `/login` へフェイルクローズ（セッション Cookie なし） |
 | service_role 未設定 | `createAdminSupabaseClient()` が throw し、ユーザーには 500 として見える（通常クライアントへの暗黙フォールバックなし。個別事前チェックは置かない。throw はセッション Cookie 付与より前のため Cookie は発行されない） |

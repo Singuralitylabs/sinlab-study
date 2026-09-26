@@ -26,8 +26,12 @@ export const TERMS_CONSENT_COOKIE_NAME = "sinlab-terms-consent";
 /** 同意 Cookie にセットする値。callback 側の有無判定と一致させること。 */
 export const TERMS_CONSENT_COOKIE_VALUE = "1";
 
-/** 同意 Cookie の有効期間（秒）。OAuth の往復に十分な10分。 */
-export const TERMS_CONSENT_COOKIE_MAX_AGE = 600;
+/**
+ * 同意 Cookie の有効期間（秒）。Google 側のアカウント選択・2段階認証などで
+ * OAuth の往復が長引いても失効しないよう30分とする。Cookie は callback の全経路で
+ * 削除され、INSERT 可否の判定にしか使わない（同意の記録は `terms_accepted_at`）。
+ */
+export const TERMS_CONSENT_COOKIE_MAX_AGE = 1800;
 
 /** 同意なしの初回登録で `/login` に戻す際の `error` クエリ値。 */
 export const TERMS_REQUIRED_ERROR_CODE = "terms_required";
