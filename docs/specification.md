@@ -346,7 +346,7 @@ Stripe APIからのライブ状態取得は、ミラー更新の直前（上記�
 
 | エンドポイント | 内容 |
 |:--|:--|
-| `POST /api/stripe/checkout` | Checkoutセッションを作成しURLを返す。お試しユーザー以外は403。Checkoutセッションを作る前に処理権（claim）を原子的に確保し、確保できない場合（契約中・他の手続きが進行中）は409を返す（解約済みの行が残っているだけの場合は再契約を許可する）。処理権が決済済みのセッションを反映されないまま保持している場合は、その場で反映してから処理権の確保を1度だけやり直す（下記エッジケース「決済済みのまま反映されなかった場合」）。手続き中のセッションがまだ有効な場合は、新しいセッションを作らず同じURLを返す。Stripe Customerはユーザーごとに一意に確保して再利用し、毎回新規作成しない（旧Customerの孤児化・請求履歴の分裂、およびPortalから解約できない契約を防ぐ）。保存済みCustomerが（ダッシュボードでの削除等により）Stripe側に存在しない場合は、Customerを作り直して保存したうえで1度だけ再試行する（そうしないと当該ユーザーが恒久的にCheckoutへ進めなくなるため）。実額の確認（`fetchSubscriptionPrice()`）は処理権の確保より前に行い、取得失敗・非月額・非JPYのいずれでも503を返す（`/upgrade` の disabled だけでは古いタブや直接POSTを防げないため。Priceの取得はセッションを作らないため、claimの前でも二重作成の防止に影響しない）。処理権を確保した後にCheckoutを作れなかった場合は、必ず解放してから応答する |
+| `POST /api/stripe/checkout` | Checkoutセッションを作成しURLを返す。お試しユーザー以外は403。Checkoutセッションを作る前に処理権（claim）を原子的に確保し、確保できない場合（契約中・他の手続きが進行中）は409を返す（解約済みの行が残っているだけの場合は再契約を許可する）。処理権が決済済みのセッションを反映されないまま保持している場合は、その場で反映してから処理権の確保を1度だけやり直す（反映で昇格した場合は successページのURLを返す）。確保が conflict になったお試しユーザーについては、ミラー行に有効な契約があれば再昇格して `/upgrade` のURLを返す（下記エッジケース「決済済みのまま反映されなかった場合」「契約済みなのにお試しのままの不整合」）。手続き中のセッションがまだ有効な場合は、新しいセッションを作らず同じURLを返す。Stripe Customerはユーザーごとに一意に確保して再利用し、毎回新規作成しない（旧Customerの孤児化・請求履歴の分裂、およびPortalから解約できない契約を防ぐ）。保存済みCustomerが（ダッシュボードでの削除等により）Stripe側に存在しない場合は、Customerを作り直して保存したうえで1度だけ再試行する（そうしないと当該ユーザーが恒久的にCheckoutへ進めなくなるため）。実額の確認（`fetchSubscriptionPrice()`）は処理権の確保より前に行い、取得失敗・非月額・非JPYのいずれでも503を返す（`/upgrade` の disabled だけでは古いタブや直接POSTを防げないため。Priceの取得はセッションを作らないため、claimの前でも二重作成の防止に影響しない）。処理権を確保した後にCheckoutを作れなかった場合は、必ず解放してから応答する |
 | `POST /api/stripe/webhook` | Stripeからのイベントを受信。生ボディで署名検証し、`event.id` のclaim（原子的な処理権確保）に成功した場合のみイベント種別ごとに処理する |
 | `POST /api/stripe/portal` | Customer Portalセッションを作成しURLを返す。自身の `stripe_subscriptions` 行がない、またはCustomer未確保（Checkout手続き中に離脱した行のみ）のユーザーは404 |
 
@@ -356,7 +356,8 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 - 二重Checkout: Checkoutセッションを作る前に `stripe_subscriptions` へ「決済手続き中」行（`status = 'checkout_pending'`）をINSERTして処理権を確保し、`user_id` のUNIQUE制約で排他する（`stripe_events` のclaim/releaseと同じパターン。詳細は[データベース設計書](./database.md)3.9）。決済完了までミラー行が存在しない時間帯を突く並行リクエストも、片方だけがCheckoutセッションを作成できる。Checkout作成に失敗した場合は処理権を解放する
 - Stripe Customerの一意性: Customerはユーザーごとに1つだけ確保して保存し、以後は必ず再利用する。Checkoutごとに新規作成されると、ミラー行に載らないCustomerの契約が生まれ `/api/stripe/portal` から解約できなくなるため。作成にはユーザー単位で固定したidempotency keyを用い、保存前にリトライが起きても同じCustomerが返るようにする
 - 手続き中に離脱した場合: `checkout_pending` の行は残るが「契約中」とは扱わない（`/upgrade` の契約中表示・管理画面の契約中バッジ・Portalの404判定はいずれも `NON_CURRENT_SUBSCRIPTION_STATUSES` で除外する）。同じユーザーが再度アップグレードを押した場合は、claimが保持するセッション（`checkout_session_id`）の状態で分岐する。`open` なら同じURLへ案内（2つ目のセッションを作らずに再開でき、TTLを待たされない）、`expired` なら処理権を奪って新しいセッションを作成、`complete`（決済済みで反映待ち）なら処理権は奪わずに反映する（次項）。セッションを特定できない場合のみTTL（`CHECKOUT_CLAIM_TTL_MS`）の経過を待つ
-- 決済済みのまま反映されなかった場合（Webhookとsuccessページの両方が失敗した場合。#250）: Checkout Sessionの `complete` は不変でTTLの救済も働かないため、放置すると409が永久に続く。そこで `POST /api/stripe/checkout` は、`claimCheckoutSlot()` が `blocked`（保持している決済済みセッションを伴う）を返した場合に、そのセッションを `activateUserFromCheckoutSession()` で反映する。反映はStripeから取り直したサブスクのライブ状態をミラー行に書き、処理権を解除する（既存のガード・CASはそのまま通る）。サブスクが有効（`active` / `trialing`）なら会員へ昇格し、新しいセッションは作らず再読み込みを促す409を返す。それ以外は処理権の確保を1度だけやり直し、ミラー行の実状態に従って分岐する（終端状態なら新しいCheckoutを作成、`incomplete` / `past_due` など契約が残っていれば409）。反映がミラー行の書き込み前に失敗した場合（Stripe API・DBの障害）は処理権を残したまま500を返し、次のリクエストで再試行される。ミラー行の書き込み（処理権の解除を含む）後に会員昇格の更新だけが失敗した場合は、行が有効な契約を示すため以後は409となり、昇格は `/upgrade/success` の再訪またはWebhookの再送で行われる。セッションidが未記録で照会により決済済みのセッションが複数見つかった場合（1つの処理権では通常起こらない）は自動では反映せず409を返し、エラーログを残して運用者の対応に委ねる（1件目の反映で処理権が解けた後に2件目の反映が失敗すると、有効な契約を残したまま次のCheckoutを作れてしまうため）。セッションのユーザー（`client_reference_id` / `metadata.user_id`）が本人と一致しない場合も、他人の契約を書き込まないよう自動では反映せず409を返す（エラーログを残す）。反映処理は `stripe-webhook-server.ts` にあり同ファイルが `stripe-server.ts` を import しているため、呼び出しは Route Handler 側で行う（循環 import を作らない）
+- 決済済みのまま反映されなかった場合（Webhookとsuccessページの両方が失敗した場合。#250）: Checkout Sessionの `complete` は不変でTTLの救済も働かないため、放置すると409が永久に続く。そこで `POST /api/stripe/checkout` は、`claimCheckoutSlot()` が `blocked`（保持している決済済みセッションと、判定に使った処理権の確保時刻を伴う）を返した場合に、そのセッションを `activateUserFromCheckoutSession()` で反映する。反映はStripeから取り直したサブスクのライブ状態をミラー行に書き、処理権を解除する（既存のガード・CASはそのまま通る）。反映時は観測した処理権の確保時刻（`expectedClaimedAt`）を渡し、処理権がその値のままのときだけ書く。並行する別リクエストが先に反映・再claimした直後（セッションid記録前で既存のガードが効かない）に、その新しい処理権を解除させないためである。サブスクが有効（`active` / `trialing`）なら会員へ昇格し、新しいセッションは作らず `/upgrade/success?session_id=...` を200で返す（successページが同じ冪等な反映を行い、次回請求日つきの完了画面を出す）。それ以外は処理権の確保を1度だけやり直し、ミラー行の実状態に従って分岐する（終端状態なら新しいCheckoutを作成、`incomplete` / `past_due` など契約が残っていれば409）。反映がミラー行の書き込み前に失敗した場合（Stripe API・DBの一時的な障害）は処理権を残したまま500を返し、次のリクエストで再試行される。セッションidが未記録の照会経路で決済済みのセッションとまだ決済できる（`open`）セッションが並存する場合は、決済済みの側を優先し、`open` のセッションを失効させてから反映する（`open` へ案内すると二重払いになる。失効できなければ何もせず409）。次の場合は再試行しても結果が変わらないため自動では反映せず、409を返してSlack（`sendSlackCheckoutRecoveryNotification()`）で運用者へ通知する: 決済済みのセッションが複数ある（1件目の反映で処理権が解けた後に2件目の反映が失敗すると、有効な契約を残したまま次のCheckoutを作れてしまうため）、セッションのユーザー（`client_reference_id` / `metadata.user_id`）が本人と一致しない、セッションに `customer` / `subscription` が無い。反映処理は `stripe-webhook-server.ts` にあり同ファイルが `stripe-server.ts` を import しているため、呼び出しは Route Handler 側で行う（循環 import を作らない）
+- 契約済みなのにお試しのままの不整合（#250）: 反映でミラー行の書き込み（処理権の解除を含む）までは成功し、会員昇格の更新だけが失敗すると、ミラー行は有効な契約を示すのにユーザーはお試しのまま残る。Webhookが届かない環境ではsuccessページのURLも手元に無いため、`POST /api/stripe/checkout` は処理権の確保が conflict になったとき、`reactivateUserFromMirror()` でこの不整合を解消する。ミラー行が有効（`active` / `trialing`）かつ処理権を保持していない場合に限り、Stripeから取り直したライブ状態が有効なら昇格させ、`/upgrade` を200で返す（契約中の表示になる）。管理画面には有料会員をお試しへ戻す操作が無く、お試しへの降格は終端状態への遷移時に限られるため、この組み合わせは不整合としてのみ生じる
 - 進行中のCheckoutと古い成功ページURLのリプレイ: 有効なclaimが**別の**セッションを保持している場合、`activateUserFromCheckoutSession()` はミラー更新も処理権の解除も行わない。これを行うと、まだ決済可能なセッションを残したまま次のCheckoutを作れてしまう。加えて、確認から書き込みまでの間に処理権が動いた場合に備え、書き込みは「確認した時点の所有状態」を条件にした条件付きUPDATE（CAS）で行い、0行更新なら読み直して判断からやり直す
 - Checkout作成が失敗したか判別できない場合: Stripeが4xxで拒否したときのみ「セッションは作られていない」と確定できるため処理権を解放する。通信タイムアウト・5xxでは解放せず、次回のclaim時にCustomerへ紐づく有効なセッションを照会して再利用するか、TTLの経過に委ねる（未記録の有効なセッションの上に2件目を作らないため）
 - Checkout手続き中に管理者が手動承認した場合: 決済完了時点で一般有料会員として上書きされる（許容）。降格側は `membership_type=general` ガードで巻き込みを防止する
@@ -979,22 +980,24 @@ JSONボディを受け取る API Route の入力検証は [zod](https://zod.dev/
 
 ### 9.1 概要
 
-以下の2つの通知を、共通のSlack Incoming Webhook URL経由で管理者・運用者へ送る。通知先チャンネルはSlack Incoming Webhook URLの設定により決定する。
+以下の3つの通知を、共通のSlack Incoming Webhook URL経由で管理者・運用者へ送る。通知先チャンネルはSlack Incoming Webhook URLの設定により決定する。
 
 - **新規ユーザー承認依頼通知**: 初回ログイン時にユーザーが自動登録（`status=trial`）されると送信する
 - **Stripe支払い失敗通知**（2.11節）: サブスクの請求が失敗（`invoice.payment_failed`）した際に送信する。初回失敗ではユーザーを降格せずStripe Smart Retriesに任せるため、運用者への通知のみを行う
+- **Checkout自動復旧不可通知**（2.11節、#250）: 決済済みのまま反映されなかったCheckoutを、`POST /api/stripe/checkout` が自動では反映できなかった（決済済みセッションが複数・ユーザー不一致・customer/subscription欠落）際に送信する。該当ユーザーはアップグレードのたびに409を受け続けるため、手動対応につなげる
 
-**通知タイミング**: 新規ユーザー通知は `GET /auth/callback` における初回ユーザー登録の成功直後、支払い失敗通知は `POST /api/stripe/webhook` での `invoice.payment_failed` イベント受信時
+**通知タイミング**: 新規ユーザー通知は `GET /auth/callback` における初回ユーザー登録の成功直後、支払い失敗通知は `POST /api/stripe/webhook` での `invoice.payment_failed` イベント受信時、自動復旧不可通知は `POST /api/stripe/checkout` で自動復旧できないと判定した時（ユーザーがアップグレードを押すたびに送信される）
 
-**通知失敗時もメインフローは継続**: いずれもSlack通知の失敗は本体のフロー（ユーザー登録・リダイレクト、Webhookの200応答）に影響しない。エラーはサーバーログにのみ出力する。ただし呼び出し方は異なり、新規ユーザー通知は `await` せず発火するだけの非同期・非ブロッキング呼び出しであるのに対し、支払い失敗通知は `await` して待ち合わせる（関数内部で例外・HTTPエラーを捕捉して握り潰すため、待ち合わせても本体のフローを失敗させることはない）。詳細は9.5参照。
+**通知失敗時もメインフローは継続**: いずれもSlack通知の失敗は本体のフロー（ユーザー登録・リダイレクト、Webhookの200応答）に影響しない。エラーはサーバーログにのみ出力する。ただし呼び出し方は異なり、新規ユーザー通知は `await` せず発火するだけの非同期・非ブロッキング呼び出しであるのに対し、支払い失敗通知・自動復旧不可通知は `await` して待ち合わせる（関数内部で例外・HTTPエラーを捕捉して握り潰すため、待ち合わせても本体のフローを失敗させることはない）。詳細は9.5参照。
 
 ### 9.2 実装構成
 
 | ファイル | 役割 |
 |:--|:--|
-| `app/services/notifications/slack.ts` | Slack Incoming Webhooks へのPOSTリクエスト送信ロジック（`sendSlackNewUserNotification()` / `sendSlackPaymentFailedNotification()`） |
+| `app/services/notifications/slack.ts` | Slack Incoming Webhooks へのPOSTリクエスト送信ロジック（`sendSlackNewUserNotification()` / `sendSlackPaymentFailedNotification()` / `sendSlackCheckoutRecoveryNotification()`） |
 | `app/auth/callback/route.ts` | 初回登録後に新規ユーザー通知を呼び出す |
 | `app/api/stripe/webhook/route.ts` | `invoice.payment_failed` 受信時に支払い失敗通知を呼び出す |
+| `app/api/stripe/checkout/route.ts` | 決済済みCheckoutを自動復旧できないときに自動復旧不可通知を呼び出す |
 
 ### 9.3 環境変数
 
@@ -1045,6 +1048,18 @@ JSONボディを受け取る API Route の入力検証は [zod](https://zod.dev/
 | メール | Stripe請求先メール（無ければ「不明」） | `invoice.customer_email` |
 | 請求額 | 請求金額をそのまま円表示（JPYはStripeのゼロdecimal通貨のため100で割らない。複数通貨対応はスコープ外） | `invoice.amount_due` |
 | 請求書リンク | Stripeホスト型請求書ページのURL | `invoice.hosted_invoice_url` |
+
+**Checkout自動復旧不可通知（メッセージフォーマット、Block Kit）**:
+
+```
+[タイトル] ⚠️ 決済済みのCheckoutを自動で反映できませんでした
+
+ユーザーID:          <user_id>
+理由:                <reason>
+Checkoutセッション:  <session_id>, ...
+```
+
+メールアドレス等の個人情報は載せず、`users.id` とStripeのCheckoutセッションidから運用者が状況を確認する。
 
 ### 9.5 処理フロー
 

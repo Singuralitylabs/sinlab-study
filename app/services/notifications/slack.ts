@@ -183,3 +183,44 @@ export async function sendSlackPaymentFailedNotification(
 
   await postSlackWebhook(body);
 }
+
+type CheckoutRecoveryNotificationParams = {
+  userId: number;
+  reason: string;
+  sessionIds: string[];
+};
+
+/**
+ * 決済済みのまま反映されなかったCheckoutを、Checkout APIが自動では復旧できなかったときの通知
+ * （#250）。該当ユーザーはアップグレードのたびに409を受け続けるため、ログだけでなく運用者へ
+ * 知らせて手動対応につなげる。
+ */
+export async function sendSlackCheckoutRecoveryNotification(
+  params: CheckoutRecoveryNotificationParams
+): Promise<void> {
+  const body = {
+    blocks: [
+      {
+        type: "header",
+        text: {
+          type: "plain_text",
+          text: "⚠️ 決済済みのCheckoutを自動で反映できませんでした",
+          emoji: true,
+        },
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: "*ユーザーID*" },
+          { type: "plain_text", text: String(params.userId) },
+          { type: "mrkdwn", text: "*理由*" },
+          { type: "plain_text", text: params.reason },
+          { type: "mrkdwn", text: "*Checkoutセッション*" },
+          { type: "plain_text", text: params.sessionIds.join(", ") || "-" },
+        ],
+      },
+    ],
+  };
+
+  await postSlackWebhook(body);
+}

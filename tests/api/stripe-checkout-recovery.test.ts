@@ -53,10 +53,12 @@ vi.mock("stripe", () => {
 });
 vi.mock("@/app/services/api/supabase-server");
 vi.mock("@/app/services/auth/server-auth");
+vi.mock("@/app/services/notifications/slack");
 
 import { POST } from "@/app/api/stripe/checkout/route";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
+import { sendSlackCheckoutRecoveryNotification } from "@/app/services/notifications/slack";
 
 type Row = Record<string, unknown>;
 type Filter = (row: Row) => boolean;
@@ -71,10 +73,13 @@ function createFakeDatabase(initial: { subscription: Row; user: Row }) {
     stripe_subscriptions: [{ ...initial.subscription }],
     users: [{ ...initial.user }],
   };
+  /** 次の1回だけDBエラーにするテーブル（UPDATE）。反映の途中失敗を再現する */
+  const failNextUpdate = new Set<string>();
 
   return {
     subscription: () => tables.stripe_subscriptions[0],
     user: () => tables.users[0],
+    failNextUpdate: (table: string) => failNextUpdate.add(table),
     from(table: string) {
       let operation: "select" | "insert" | "update" = "select";
       let payload: Row = {};
@@ -89,6 +94,9 @@ function createFakeDatabase(initial: { subscription: Row; user: Row }) {
           }
           rows.push({ ...payload });
           return { data: null, error: null };
+        }
+        if (operation === "update" && failNextUpdate.delete(table)) {
+          return { data: null, error: { code: "PGRST001", message: "db error" } };
         }
         const matched = rows.filter((row) => filters.every((filter) => filter(row)));
         if (operation === "select") {
@@ -258,16 +266,16 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
   });
 
-  it("サブスクが有効なら、会員へ昇格させて再読み込みを促し、新しいセッションは作らない", async () => {
+  it("サブスクが有効なら、会員へ昇格させてsuccessページへ案内し、新しいセッションは作らない", async () => {
     const db = stuckDatabase();
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
     mockSubscriptionsRetrieve.mockResolvedValue(subscriptionWithStatus("active"));
 
     const res = await POST();
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({
-      error: "お支払い済みのご契約を反映しました。ページを再読み込みしてください",
+      url: "/upgrade/success?session_id=cs_live_paid",
     });
     expect(mockSessionsCreate).not.toHaveBeenCalled();
     expect(db.subscription()).toMatchObject({
@@ -333,7 +341,7 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
   });
 
-  it("照会で決済済みセッションが複数見つかった場合は、何も書き換えず409のまま（途中失敗で有効な契約の上に2件目を作らせない）", async () => {
+  it("照会で決済済みセッションが複数見つかった場合は、何も書き換えず409のまま運用者へ通知する（途中失敗で有効な契約の上に2件目を作らせない）", async () => {
     const db = stuckDatabase();
     Object.assign(db.subscription(), { checkout_session_id: null });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
@@ -360,5 +368,93 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
       checkout_claimed_at: HELD_CLAIMED_AT,
       stripe_subscription_id: null,
     });
+    expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledWith({
+      userId: USER_ID,
+      reason: "決済済みのセッションが複数あります",
+      sessionIds: ["cs_paid_old", "cs_live_paid"],
+    });
+  });
+
+  it("決済済みのセッションとまだ決済できるセッションが並存する場合は、後者を失効させてから復旧する（二重払いへ案内しない）", async () => {
+    const db = stuckDatabase();
+    Object.assign(db.subscription(), { checkout_session_id: null });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
+    mockSessionsList.mockResolvedValue({
+      data: [
+        paidSession,
+        { id: "cs_open", status: "open", url: "https://checkout.stripe.com/cs_open" },
+      ],
+    });
+    mockSessionsExpire.mockResolvedValue({ id: "cs_open", status: "expired" });
+    mockSubscriptionsRetrieve.mockResolvedValue(subscriptionWithStatus("active"));
+
+    const res = await POST();
+
+    expect(mockSessionsExpire).toHaveBeenCalledWith("cs_open");
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      url: "/upgrade/success?session_id=cs_live_paid",
+    });
+    expect(mockSessionsCreate).not.toHaveBeenCalled();
+    expect(db.user()).toMatchObject({ status: "active", membership_type: "general" });
+  });
+
+  it("並存するまだ決済できるセッションを失効させられなければ、何も書き換えず409のまま", async () => {
+    const db = stuckDatabase();
+    Object.assign(db.subscription(), { checkout_session_id: null });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
+    mockSessionsList.mockResolvedValue({
+      data: [
+        paidSession,
+        { id: "cs_open", status: "open", url: "https://checkout.stripe.com/cs_open" },
+      ],
+    });
+    mockSessionsExpire.mockRejectedValue(new Error("Stripe API一時エラー"));
+
+    const res = await POST();
+
+    expect(res.status).toBe(409);
+    expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
+    expect(mockSessionsCreate).not.toHaveBeenCalled();
+    expect(db.subscription()).toMatchObject({
+      status: "checkout_pending",
+      checkout_claimed_at: HELD_CLAIMED_AT,
+    });
+  });
+
+  it("セッションにsubscriptionが無い（反映が必ず失敗する）場合は、500を繰り返さず409として運用者へ通知する", async () => {
+    const db = stuckDatabase();
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
+    mockSessionsRetrieve.mockResolvedValue({ ...paidSession, subscription: null });
+
+    const res = await POST();
+
+    expect(res.status).toBe(409);
+    expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID, sessionIds: ["cs_live_paid"] })
+    );
+    expect(db.subscription()).toMatchObject({ checkout_claimed_at: HELD_CLAIMED_AT });
+  });
+
+  it("反映で会員昇格の更新だけが失敗しても、次のリクエストでミラー行の有効な契約から再昇格する", async () => {
+    const db = stuckDatabase();
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
+    mockSubscriptionsRetrieve.mockResolvedValue(subscriptionWithStatus("active"));
+    db.failNextUpdate("users");
+
+    const failed = await POST();
+
+    // ミラー行（処理権の解除を含む）は書けたが、ユーザーはお試しのまま
+    expect(failed.status).toBe(500);
+    expect(db.subscription()).toMatchObject({ status: "active", checkout_claimed_at: null });
+    expect(db.user()).toMatchObject({ status: "trial" });
+
+    const retried = await POST();
+
+    // 契約中として409を返し続けるのではなく、Stripeのライブ状態を確かめて昇格させる
+    expect(retried.status).toBe(200);
+    await expect(retried.json()).resolves.toEqual({ url: "/upgrade" });
+    expect(db.user()).toMatchObject({ status: "active", membership_type: "general" });
+    expect(mockSessionsCreate).not.toHaveBeenCalled();
   });
 });

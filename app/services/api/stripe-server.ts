@@ -623,6 +623,8 @@ export async function fetchStripeSubscriptionByUserId(userId: number): Promise<{
  * - blocked: 処理権が決済済み（complete）のセッションを保持したまま、反映されていない
  *   （Webhookとsuccessページの両方が失敗した）。呼び出し元は `completedSessions` を
  *   `activateUserFromCheckoutSession()` で反映してから claim をやり直す（#250）。
+ *   `heldClaimedAt` は判定に使った処理権の確保時刻（DBから読んだ値そのまま）で、反映時に
+ *   `expectedClaimedAt` として渡し、並行リクエストが確保し直した処理権を解除させない。
  *   `stripe-webhook-server.ts` がこのファイルを import しているため、反映処理はここから
  *   呼ばない（循環 import を作らない）
  * - conflict: 契約中、または他の手続きが進行中
@@ -630,7 +632,7 @@ export async function fetchStripeSubscriptionByUserId(userId: number): Promise<{
 export type CheckoutSlotClaim =
   | { outcome: "claimed"; claimedAt: string; stripeCustomerId: string | null }
   | { outcome: "reusable"; url: string }
-  | { outcome: "blocked"; completedSessions: Stripe.Checkout.Session[] }
+  | { outcome: "blocked"; completedSessions: Stripe.Checkout.Session[]; heldClaimedAt: string }
   | { outcome: "conflict" }
   | { outcome: "error"; message: string };
 
@@ -723,7 +725,14 @@ export async function claimCheckoutSlot(
       return { outcome: "reusable", url: resolution.url };
     }
     if (resolution.kind === "blocked") {
-      return { outcome: "blocked", completedSessions: resolution.completedSessions };
+      return {
+        outcome: "blocked",
+        completedSessions: resolution.completedSessions,
+        heldClaimedAt,
+      };
+    }
+    if (resolution.kind === "pending") {
+      return { outcome: "conflict" };
     }
     if (resolution.kind === "finished") {
       // 有効なセッションが無いと確認できたので、TTLを待たずに奪う
@@ -746,6 +755,8 @@ export async function claimCheckoutSlot(
  * 有効な処理権が保持しているCheckout Sessionの状況を判定する。
  * - reusable: まだ決済できるセッションがある（同じURLへ案内する）
  * - blocked: 決済済みで反映待ち（奪ってはいけない）。反映に使う決済済みセッションを返す
+ * - pending: 決済済みのセッションと、失効させられなかったまだ決済できるセッションが並存する
+ *   （反映も奪取もせず待たせる）
  * - finished: 有効なセッションが無いと確認できた（奪ってよい）
  * - unknown: Stripeへ確認できなかった（TTLに委ねる）
  *
@@ -764,6 +775,7 @@ async function resolveHeldSession(
 ): Promise<
   | { kind: "reusable"; url: string }
   | { kind: "blocked"; completedSessions: Stripe.Checkout.Session[] }
+  | { kind: "pending" }
   | { kind: "finished" }
   | { kind: "unknown" }
 > {
@@ -774,13 +786,21 @@ async function resolveHeldSession(
   if (sessions === null) {
     return { kind: "unknown" };
   }
+  const completedSessions = sessions.filter((session) => session.status === "complete");
+  if (completedSessions.length > 0) {
+    // 決済済みがあるのに、まだ決済できるセッション（照会経路でのみ並存しうる）へ案内すると
+    // 二重払いになる。先に失効させ、1件でも失効できなければ（その間に決済された等）待たせる
+    const openSessions = sessions.filter((session) => session.status === "open");
+    for (const openSession of openSessions) {
+      if (!(await expireCheckoutSession(openSession.id))) {
+        return { kind: "pending" };
+      }
+    }
+    return { kind: "blocked", completedSessions };
+  }
   const openSession = sessions.find((session) => session.status === "open" && session.url);
   if (openSession?.url) {
     return { kind: "reusable", url: openSession.url };
-  }
-  const completedSessions = sessions.filter((session) => session.status === "complete");
-  if (completedSessions.length > 0) {
-    return { kind: "blocked", completedSessions };
   }
   return { kind: "finished" };
 }

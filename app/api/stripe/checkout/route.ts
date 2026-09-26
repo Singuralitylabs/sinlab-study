@@ -18,15 +18,31 @@ import {
 import {
   activateUserFromCheckoutSession,
   extractUserId,
+  reactivateUserFromMirror,
 } from "@/app/services/api/stripe-webhook-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
+import { sendSlackCheckoutRecoveryNotification } from "@/app/services/notifications/slack";
 
 /** 契約中・決済確認中のいずれでも同じ案内を返す（契約状態を推測させないため） */
 const CHECKOUT_CONFLICT_MESSAGE = "既に決済手続き中、またはご契約済みです";
 
-/** 反映されていなかった決済をこのリクエストで反映し、会員へ昇格させた場合の案内 */
-const CHECKOUT_RECOVERED_MESSAGE =
-  "お支払い済みのご契約を反映しました。ページを再読み込みしてください";
+/**
+ * 反映されていなかった決済をこのリクエストで反映し、会員へ昇格させた場合の遷移先。
+ * successページは同じ冪等な反映処理を呼び直したうえで完了画面（次回請求日つき）を出すため、
+ * 復旧を正常系として案内できる（エラー表示で再読み込みを促さない）
+ */
+function checkoutSuccessPath(sessionId: string): string {
+  return `/upgrade/success?session_id=${encodeURIComponent(sessionId)}`;
+}
+
+/** 昇格だけが漏れていた契約を再昇格させた場合の遷移先（契約中の表示になる） */
+const REACTIVATED_PATH = "/upgrade";
+
+type CheckoutRecovery =
+  | { kind: "activated"; sessionId: string }
+  | { kind: "applied" }
+  | { kind: "unrecoverable" }
+  | { kind: "error" };
 
 /**
  * 処理権が保持したまま反映されていない決済済みセッション（Webhookとsuccessページの両方が
@@ -36,41 +52,70 @@ const CHECKOUT_RECOVERED_MESSAGE =
  * 反映後に claim をやり直すことで、次の分岐はミラー行の実状態に従う。有効・未入金など
  * 契約が残っていれば conflict（新しいセッションは作らない）、終端状態なら再契約できる。
  *
- * 決済済みセッションが複数ある場合（1つの処理権では通常起こらない）は反映しない。1件目の
- * 反映で処理権が解けた後に2件目の反映が失敗すると、2件目の有効な契約を残したまま次の
- * Checkoutを作れてしまう（二重契約）ため、自動では解かず運用者の対応に委ねる。
+ * 次の場合は自動では反映せず（unrecoverable）、運用者へ通知する。いずれも時間が経っても
+ * 変わらない状態で、再試行しても同じ結果になる。
+ * - 決済済みセッションが複数ある（1つの処理権では通常起こらない）: 1件目の反映で処理権が
+ *   解けた後に2件目の反映が失敗すると、2件目の有効な契約を残したまま次のCheckoutを
+ *   作れてしまう（二重契約）
+ * - セッションのユーザーが本人と一致しない: 他人の契約を書き込むことになる
+ * - セッションに customer / subscription が無い: 反映処理が必ず失敗する
  *
- * @returns activated: 会員へ昇格した / applied: 反映したが昇格はしていない /
- * unrecoverable: 自動では反映しない / error: 反映できなかった
+ * @param heldClaimedAt 判定に使った処理権の確保時刻。並行する別リクエストが確保し直した
+ * 処理権を、この反映が解除しないようにする（`activateUserFromCheckoutSession()` 参照）
  */
 async function applyCompletedCheckout(
   userId: number,
-  sessions: Stripe.Checkout.Session[]
-): Promise<"activated" | "applied" | "unrecoverable" | "error"> {
+  sessions: Stripe.Checkout.Session[],
+  heldClaimedAt: string
+): Promise<CheckoutRecovery> {
+  const unrecoverable = async (reason: string): Promise<CheckoutRecovery> => {
+    const sessionIds = sessions.map((session) => session.id);
+    console.error(`決済済みCheckoutを自動復旧できません（${reason}）:`, userId, sessionIds);
+    await sendSlackCheckoutRecoveryNotification({ userId, reason, sessionIds });
+    return { kind: "unrecoverable" };
+  };
+
   if (sessions.length !== 1) {
-    console.error(
-      "処理権が複数の決済済みCheckoutセッションを保持しているため自動復旧しません:",
-      sessions.map((session) => session.id)
-    );
-    return "unrecoverable";
+    return await unrecoverable("決済済みのセッションが複数あります");
   }
   const [session] = sessions;
-  // Customerはユーザーごとに一意のため通常は一致する。一致しないセッションを反映すると
-  // 他人の契約を書き込むことになるため、反映せずに止める
+  // Customerはユーザーごとに一意のため通常は一致する
   if (extractUserId(session.client_reference_id, session.metadata) !== userId) {
-    console.error("決済済みCheckoutセッションのユーザーが一致しません:", session.id);
-    return "unrecoverable";
+    return await unrecoverable("セッションのユーザーが一致しません");
+  }
+  if (!session.customer || !session.subscription) {
+    return await unrecoverable("セッションにcustomer/subscription情報がありません");
   }
   try {
-    const result = await activateUserFromCheckoutSession(session);
+    const result = await activateUserFromCheckoutSession(session, {
+      expectedClaimedAt: heldClaimedAt,
+    });
     if (result.error) {
       console.error("決済済みCheckoutセッションの反映エラー:", result.error);
-      return "error";
+      return { kind: "error" };
     }
-    return result.activated ? "activated" : "applied";
+    return result.activated ? { kind: "activated", sessionId: session.id } : { kind: "applied" };
   } catch (error) {
     console.error("決済済みCheckoutセッションの反映エラー:", error);
-    return "error";
+    return { kind: "error" };
+  }
+}
+
+/**
+ * お試しユーザーの Checkout が conflict になったとき、ミラー行が有効な契約を記録している
+ * のに昇格していない不整合（反映で users の更新だけが失敗した場合に残る。#250）を解消する。
+ * 失敗しても従来どおり409を返せばよいため、例外は握りつぶして false を返す。
+ */
+async function tryReactivateFromMirror(userId: number): Promise<boolean> {
+  try {
+    const { error, activated } = await reactivateUserFromMirror(userId);
+    if (error) {
+      console.error("契約済みユーザーの再昇格エラー:", error);
+    }
+    return activated;
+  } catch (error) {
+    console.error("契約済みユーザーの再昇格エラー:", error);
+    return false;
   }
 }
 
@@ -116,24 +161,36 @@ export async function POST() {
     // 決済済みのまま反映されていない処理権は、時間が経っても解けない（TTLの対象外）。
     // ここで反映して自己復旧させ、claimを1度だけやり直す（#250）
     if (claim.outcome === "blocked") {
-      const recovery = await applyCompletedCheckout(auth.userId, claim.completedSessions);
-      if (recovery === "error") {
+      const recovery = await applyCompletedCheckout(
+        auth.userId,
+        claim.completedSessions,
+        claim.heldClaimedAt
+      );
+      if (recovery.kind === "error") {
         return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
       }
-      if (recovery === "unrecoverable") {
+      if (recovery.kind === "unrecoverable") {
         return NextResponse.json({ error: CHECKOUT_CONFLICT_MESSAGE }, { status: 409 });
       }
-      if (recovery === "activated") {
-        return NextResponse.json({ error: CHECKOUT_RECOVERED_MESSAGE }, { status: 409 });
+      // 有効な契約を反映して昇格した。新しいセッションは作らず、完了画面へ案内する
+      if (recovery.kind === "activated") {
+        return NextResponse.json({ url: checkoutSuccessPath(recovery.sessionId) });
       }
       claim = await claimCheckoutSlot(auth.userId);
     }
     if (claim.outcome === "error") {
       return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
     }
+    if (claim.outcome === "conflict") {
+      // 有効な契約がミラー行にあるのにお試しのまま、という不整合なら再昇格して案内する
+      if (await tryReactivateFromMirror(auth.userId)) {
+        return NextResponse.json({ url: REACTIVATED_PATH });
+      }
+      return NextResponse.json({ error: CHECKOUT_CONFLICT_MESSAGE }, { status: 409 });
+    }
     // やり直しても blocked のまま（並行する別の手続きが決済済みになった等）なら、
     // 反映を繰り返さず従来どおり待たせる
-    if (claim.outcome === "conflict" || claim.outcome === "blocked") {
+    if (claim.outcome === "blocked") {
       return NextResponse.json({ error: CHECKOUT_CONFLICT_MESSAGE }, { status: 409 });
     }
     // 手続き中のセッションがまだ有効な場合は、新しく作らず同じURLへ案内する
