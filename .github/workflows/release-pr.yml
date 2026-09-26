@@ -125,32 +125,94 @@ jobs:
           git fetch origin main:refs/remotes/origin/main
           git fetch origin release:refs/remotes/origin/release
 
-      # release..main で追加・変更されたマイグレーションファイルを抽出する。
+      # release..main のマイグレーション差分を「追加」と「適用済みファイルの変更・削除」に分けて抽出する。
+      # 後方互換の検出（次ステップ）は追加ファイルのみを対象にする。コメント修正だけの適用済み
+      # ファイルまで全文スキャンすると、既に本番で実行済みの UPDATE 等が ⚠️ 節に並び、
+      # 本当に注意が必要な新規マイグレーションの判断のノイズになるため（#247）。
+      # 変更・削除は内容が再適用されないが、履歴との不整合の注意喚起として別枠で一覧表示する。
+      # --no-renames: リネームは「旧名の削除 + 新名の追加」として扱う。タイムスタンプ（先頭14桁の
+      # バージョン）が変わったファイルは本番の適用履歴から見て新しいバージョンであり、db push で
+      # 再実行されるため、追加として後方互換の検出にかける。バージョンが同じまま説明部分だけ
+      # 変えたリネームは再適用されないため、追加から外して「変更」と同じ別枠に出す。
       - name: マイグレーション差分を検出
         id: migrations
         run: |
           set -euo pipefail
-          MIGRATIONS=$(git diff --name-only --diff-filter=AM \
-            origin/release..origin/main -- 'supabase/migrations/' \
-            | grep -E '\.sql$' || true)
+          list_migrations() {
+            git diff --no-renames --name-only --diff-filter="$1" \
+              origin/release..origin/main -- 'supabase/migrations/' \
+              | grep -E '\.sql$' || true
+          }
+          ADDED_ALL=$(list_migrations A)
+          MODIFIED=$(list_migrations M)
+          DELETED_ALL=$(list_migrations D)
+          version_of() { basename "$1" | grep -oE '^[0-9]{14}' || true; }
+          DELETED_VERSIONS=$(printf '%s\n' "$DELETED_ALL" | while IFS= read -r f; do
+            [ -n "$f" ] && version_of "$f"
+          done || true)
+          ADDED=""
+          RENAMED=""
+          RENAMED_FROM=""
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            v=$(version_of "$f")
+            if [ -n "$v" ] && printf '%s\n' "$DELETED_VERSIONS" | grep -qx "$v"; then
+              RENAMED="$RENAMED$f"$'\n'
+              RENAMED_FROM="$RENAMED_FROM$v"$'\n'
+            else
+              ADDED="$ADDED$f"$'\n'
+            fi
+          done <<< "$ADDED_ALL"
+          ADDED=$(printf '%s' "$ADDED" | sed '/^$/d')
+          RENAMED=$(printf '%s' "$RENAMED" | sed '/^$/d')
+          # 同一バージョンのリネーム元は「削除」ではなく「リネーム」として1行にまとめる
+          DELETED=$(printf '%s\n' "$DELETED_ALL" | while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if printf '%s' "$RENAMED_FROM" | grep -qx "$(version_of "$f")"; then continue; fi
+            echo "$f"
+          done || true)
 
           {
             echo "list<<MIGRATIONS_EOF"
-            if [ -z "$MIGRATIONS" ]; then
+            if [ -z "$ADDED" ]; then
               echo "- なし"
             else
-              echo "$MIGRATIONS" | while IFS= read -r f; do
+              echo "$ADDED" | while IFS= read -r f; do
                 [ -n "$f" ] && echo "- \`$f\`"
               done
             fi
             echo "MIGRATIONS_EOF"
             echo "files<<MIGRATIONS_FILES_EOF"
-            printf '%s\n' "$MIGRATIONS"
+            printf '%s\n' "$ADDED"
             echo "MIGRATIONS_FILES_EOF"
+            echo "changed<<MIGRATIONS_CHANGED_EOF"
+            if [ -n "$MODIFIED" ]; then
+              echo "$MODIFIED" | while IFS= read -r f; do
+                [ -n "$f" ] && echo "- \`$f\`（変更）"
+              done
+            fi
+            if [ -n "$RENAMED" ]; then
+              echo "$RENAMED" | while IFS= read -r f; do
+                [ -n "$f" ] && echo "- \`$f\`（リネーム。バージョン不変のため再適用されない）"
+              done
+            fi
+            if [ -n "$DELETED" ]; then
+              echo "$DELETED" | while IFS= read -r f; do
+                [ -n "$f" ] && echo "- \`$f\`（削除）"
+              done
+            fi
+            echo "MIGRATIONS_CHANGED_EOF"
+            if [ -n "$MODIFIED$RENAMED$DELETED" ]; then
+              echo "has_changed=true"
+            else
+              echo "has_changed=false"
+            fi
           } >> "$GITHUB_OUTPUT"
 
       # 後方互換でない変更を含むマイグレーションを検出して警告する。
       # Wiki が「リリースを2回に分ける」判断を求めている箇所。ブロックはせず注意喚起に留める。
+      # 対象は release..main で追加されたファイルのみ（前ステップの files）。変更のみの適用済み
+      # ファイルは内容が再適用されないため対象外（#247）。
       # 誤検出を抑えるため、判定前に行コメント（--）とブロックコメント（/* */）を除去し、
       # 以下の絞り込みを行う:
       # - DROP TRIGGER IF EXISTS の定型プレリュードは除外（同ファイルでの CREATE と対になる再作成が通例のため）
@@ -403,6 +465,8 @@ jobs:
           VERSION: ${{ inputs.version }}
           SUMMARY: ${{ inputs.summary }}
           MIGRATIONS_LIST: ${{ steps.migrations.outputs.list }}
+          MIGRATIONS_CHANGED_LIST: ${{ steps.migrations.outputs.changed }}
+          HAS_MIGRATIONS_CHANGED: ${{ steps.migrations.outputs.has_changed }}
           BREAKING_LIST: ${{ steps.breaking.outputs.list }}
           HAS_BREAKING: ${{ steps.breaking.outputs.has_warnings }}
           ENV_ADDED_LIST: ${{ steps.env-vars.outputs.added }}
@@ -428,8 +492,14 @@ jobs:
             BREAKING_SECTION="### 後方互換でない変更の可能性"$'\n\n- なし'
           fi
 
+          if [ "$HAS_MIGRATIONS_CHANGED" = "true" ]; then
+            MIGRATIONS_CHANGED_SECTION=$(printf '**適用済みマイグレーションの変更・削除（後方互換の検出対象外）:**\n\n`release` に含まれるファイルは本番に適用済みである前提で、内容を変更しても再適用されません。意図した変更か、`supabase migration list` の履歴と不整合が生じないかを確認してください（前回リリースで未適用のまま残ったファイルがある場合は、下の migration list で確認してください）。\n\n%s' "$MIGRATIONS_CHANGED_LIST")
+          else
+            MIGRATIONS_CHANGED_SECTION=""
+          fi
+
           if [ "$HAS_ENV_MISSING" = "true" ]; then
-            ENV_MISSING_SECTION=$(printf '### ⚠️ .env.local.example 未記載の参照\n\nコードから参照されているのに \`.env.local.example\` に記載がありません。Vercel への登録漏れが無いか確認してください。\n\n%s' "$ENV_MISSING_LIST")
+            ENV_MISSING_SECTION=$(printf '### ⚠️ .env.local.example 未記載の参照\n\nコードから参照されているのに `.env.local.example` に記載がありません。Vercel への登録漏れが無いか確認してください。\n\n%s' "$ENV_MISSING_LIST")
           else
             ENV_MISSING_SECTION=""
           fi
@@ -452,10 +522,12 @@ jobs:
 
           ### 事前作業の検出結果
 
-          **マイグレーションファイル（release..main で追加・変更）:**
+          **マイグレーションファイル（release..main で追加）:**
           ${MIGRATIONS_LIST}
 
-          **後方互換でない変更の可能性があるファイル:**
+          ${MIGRATIONS_CHANGED_SECTION}
+
+          **後方互換でない変更の可能性があるファイル（追加分が対象）:**
           ${BREAKING_LIST}
 
           **新規環境変数（.env.local.example で追加）:**
