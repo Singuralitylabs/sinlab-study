@@ -36,34 +36,42 @@ const CHECKOUT_RECOVERED_MESSAGE =
  * 反映後に claim をやり直すことで、次の分岐はミラー行の実状態に従う。有効・未入金など
  * 契約が残っていれば conflict（新しいセッションは作らない）、終端状態なら再契約できる。
  *
+ * 決済済みセッションが複数ある場合（1つの処理権では通常起こらない）は反映しない。1件目の
+ * 反映で処理権が解けた後に2件目の反映が失敗すると、2件目の有効な契約を残したまま次の
+ * Checkoutを作れてしまう（二重契約）ため、自動では解かず運用者の対応に委ねる。
+ *
  * @returns activated: 会員へ昇格した / applied: 反映したが昇格はしていない /
- * error: 反映できなかった（処理権は残るため、次回のリクエストで再試行される）
+ * unrecoverable: 自動では反映しない / error: 反映できなかった
  */
-async function applyCompletedCheckouts(
+async function applyCompletedCheckout(
   userId: number,
   sessions: Stripe.Checkout.Session[]
-): Promise<"activated" | "applied" | "error"> {
-  let activated = false;
-  for (const session of sessions) {
-    // Customerはユーザーごとに一意のため通常は一致する。一致しないセッションを反映すると
-    // 他人の契約を書き込むことになるため、反映せずに止める
-    if (extractUserId(session.client_reference_id, session.metadata) !== userId) {
-      console.error("決済済みCheckoutセッションのユーザーが一致しません:", session.id);
-      return "error";
-    }
-    try {
-      const result = await activateUserFromCheckoutSession(session);
-      if (result.error) {
-        console.error("決済済みCheckoutセッションの反映エラー:", result.error);
-        return "error";
-      }
-      activated ||= result.activated;
-    } catch (error) {
-      console.error("決済済みCheckoutセッションの反映エラー:", error);
-      return "error";
-    }
+): Promise<"activated" | "applied" | "unrecoverable" | "error"> {
+  if (sessions.length !== 1) {
+    console.error(
+      "処理権が複数の決済済みCheckoutセッションを保持しているため自動復旧しません:",
+      sessions.map((session) => session.id)
+    );
+    return "unrecoverable";
   }
-  return activated ? "activated" : "applied";
+  const [session] = sessions;
+  // Customerはユーザーごとに一意のため通常は一致する。一致しないセッションを反映すると
+  // 他人の契約を書き込むことになるため、反映せずに止める
+  if (extractUserId(session.client_reference_id, session.metadata) !== userId) {
+    console.error("決済済みCheckoutセッションのユーザーが一致しません:", session.id);
+    return "unrecoverable";
+  }
+  try {
+    const result = await activateUserFromCheckoutSession(session);
+    if (result.error) {
+      console.error("決済済みCheckoutセッションの反映エラー:", result.error);
+      return "error";
+    }
+    return result.activated ? "activated" : "applied";
+  } catch (error) {
+    console.error("決済済みCheckoutセッションの反映エラー:", error);
+    return "error";
+  }
 }
 
 export async function POST() {
@@ -108,9 +116,12 @@ export async function POST() {
     // 決済済みのまま反映されていない処理権は、時間が経っても解けない（TTLの対象外）。
     // ここで反映して自己復旧させ、claimを1度だけやり直す（#250）
     if (claim.outcome === "blocked") {
-      const recovery = await applyCompletedCheckouts(auth.userId, claim.completedSessions);
+      const recovery = await applyCompletedCheckout(auth.userId, claim.completedSessions);
       if (recovery === "error") {
         return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
+      }
+      if (recovery === "unrecoverable") {
+        return NextResponse.json({ error: CHECKOUT_CONFLICT_MESSAGE }, { status: 409 });
       }
       if (recovery === "activated") {
         return NextResponse.json({ error: CHECKOUT_RECOVERED_MESSAGE }, { status: 409 });

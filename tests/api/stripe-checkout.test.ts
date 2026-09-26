@@ -358,34 +358,28 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
     expect(releaseCheckoutSlot).not.toHaveBeenCalled();
   });
 
-  it("本人以外のユーザーのセッションは反映しない", async () => {
+  it("本人以外のユーザーのセッションは反映せず409を返す", async () => {
     vi.mocked(claimCheckoutSlot).mockResolvedValue(
       mockBlocked([{ ...paidSession, client_reference_id: "99", metadata: { user_id: "99" } }])
     );
 
     const res = await POST();
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(409);
     expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
     expect(createCheckoutSessionForUser).not.toHaveBeenCalled();
   });
 
-  it("決済済みのセッションが複数ある場合はすべて反映し、1件でも昇格すれば新しいセッションを作らない", async () => {
+  it("決済済みのセッションが複数ある場合は自動では反映せず409を返す（途中失敗で二重契約の窓を開かない）", async () => {
     const otherPaid = { ...paidSession, id: "cs_paid_2", subscription: "sub_2" };
     vi.mocked(claimCheckoutSlot).mockResolvedValue(mockBlocked([paidSession, otherPaid]));
-    vi.mocked(activateUserFromCheckoutSession)
-      .mockResolvedValueOnce({ error: null, activated: false, currentPeriodEnd: null })
-      .mockResolvedValueOnce({
-        error: null,
-        activated: true,
-        currentPeriodEnd: "2026-10-27T00:00:00.000Z",
-      });
 
     const res = await POST();
 
     expect(res.status).toBe(409);
-    expect(activateUserFromCheckoutSession).toHaveBeenNthCalledWith(1, paidSession);
-    expect(activateUserFromCheckoutSession).toHaveBeenNthCalledWith(2, otherPaid);
+    await expect(res.json()).resolves.toEqual({ error: "既に決済手続き中、またはご契約済みです" });
+    expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
+    expect(claimCheckoutSlot).toHaveBeenCalledTimes(1);
     expect(createCheckoutSessionForUser).not.toHaveBeenCalled();
   });
 

@@ -319,23 +319,46 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     await expect(retried.json()).resolves.toEqual({ url: "https://checkout.stripe.com/cs_new" });
   });
 
-  it("セッションid未記録で、照会で見つかった決済済みセッションのうち1件でも有効なら新しいセッションを作らない", async () => {
+  it("セッションid未記録でも、照会で見つかった決済済みセッションが1件なら同じく復旧する", async () => {
+    const db = stuckDatabase();
+    Object.assign(db.subscription(), { checkout_session_id: null });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
+    mockSessionsList.mockResolvedValue({ data: [paidSession] });
+    mockSubscriptionsRetrieve.mockResolvedValue(subscriptionWithStatus("canceled"));
+
+    const res = await POST();
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/cs_new" });
+    expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("照会で決済済みセッションが複数見つかった場合は、何も書き換えず409のまま（途中失敗で有効な契約の上に2件目を作らせない）", async () => {
     const db = stuckDatabase();
     Object.assign(db.subscription(), { checkout_session_id: null });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
     const canceledPaid = { ...paidSession, id: "cs_paid_old", subscription: "sub_old" };
     mockSessionsList.mockResolvedValue({ data: [canceledPaid, paidSession] });
-    mockSubscriptionsRetrieve.mockImplementation(async (id: string) =>
-      id === "sub_old"
-        ? { ...subscriptionWithStatus("canceled"), id: "sub_old" }
-        : subscriptionWithStatus("active")
-    );
+    // 1件目は解約済み、2件目（有効）の取得は一時エラー。1件ずつ反映すると、1件目で処理権が
+    // 解けた後に2件目で失敗し、次のリクエストが有効な契約の上に新しいCheckoutを作れてしまう
+    mockSubscriptionsRetrieve.mockImplementation(async (id: string) => {
+      if (id === "sub_old") {
+        return { ...subscriptionWithStatus("canceled"), id: "sub_old" };
+      }
+      throw new Error("Stripe API一時エラー");
+    });
 
-    const res = await POST();
+    const first = await POST();
+    const second = await POST();
 
-    expect(res.status).toBe(409);
+    expect(first.status).toBe(409);
+    expect(second.status).toBe(409);
+    expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
     expect(mockSessionsCreate).not.toHaveBeenCalled();
-    expect(db.subscription()).toMatchObject({ status: "active", stripe_subscription_id: "sub_19" });
-    expect(db.user()).toMatchObject({ status: "active", membership_type: "general" });
+    expect(db.subscription()).toMatchObject({
+      status: "checkout_pending",
+      checkout_claimed_at: HELD_CLAIMED_AT,
+      stripe_subscription_id: null,
+    });
   });
 });
