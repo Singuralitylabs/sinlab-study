@@ -61,11 +61,11 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 
 フローの全体像・画面ごとの挙動は `docs/specification.md` 2章を参照。
 
-- **サーバー側のユーザー情報取得は `getServerAuth()`（`app/services/auth/server-auth.ts`）に一本化する。** layout・page・API Route のいずれからも他の手段を使わない（`React.cache()` でメモ化。proxy からのヘッダ経由による `users` 再照会省略経路は `docs/specification.md` 2.2 参照）。旧 `getApiAuth()` は使用しない。
+- **サーバー側のユーザー情報取得は `getServerAuth()`（`app/services/auth/server-auth.ts`）に一本化する。** layout・page・API Route のいずれからも他の手段を使わない（`React.cache()` でメモ化。proxy からのヘッダ経由による `users` 再照会省略経路は `docs/specification.md` 2.2 参照）。
 - **認可は二層防御。** `proxy.ts`（Next.js 16 における Middleware の後継）を第一の砦とし、`app/(authenticated)/layout.tsx` でも `userStatus` の許可リスト検証を行う。**クライアント側での認証ガードは行わない。**
 - **プロキシはフェイルクローズ。** 環境変数欠落・例外・ステータス取得不能（null）はすべて `/login` へリダイレクトする。
 - **ロール**: `admin`（全権限）/ `maintainer`（コンテンツ管理）/ `member`（受講生）。判定ロジックは `app/services/auth/` に集約する。
-- **ステータス**: `active`（承認済み）/ `trial`（お試し。アプリは使えるがお試し公開コンテンツのみ閲覧可）/ `rejected`（`/rejected` へ。APIでは403）。`/pending` 画面は廃止済み。
+- **ステータス**: `active`（承認済み）/ `trial`（お試し。アプリは使えるがお試し公開コンテンツのみ閲覧可）/ `rejected`（`/rejected` へ。APIでは403）。
 - **初回登録の INSERT は同意 Cookie 必須。** 同意なしでは `users` 行を作らず `/login?error=terms_required` へ戻す。`terms_accepted_at` は callback でのみ書き、既存ユーザーの分岐では参照も更新もしない。
 
 ### 会員種別・お試しユーザー
@@ -74,8 +74,8 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 
 - **許可値の列挙は `MEMBERSHIP_TYPES`（`app/constants/user.ts`）に一本化する。** APIのバリデーションも承認UIの `<option>` 生成もここから導出し、`'community'` / `'general'` のリテラルをハードコードしない。
 - **`status=active` と `membership_type` の整合性はDBでは保証されない**（CHECK制約は値の妥当性のみ）。`approveUser()` / `rejectUser()` を迂回して `status` を書き換えないこと。
-- **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select する。0行なら404扱い。権限チェック済みの管理者向けクエリや `user_id` フィルタで担保している既存利用は対象外。admin / maintainer 向けの未公開プレビュー（`docs/specification.md` 2.12節）はこの2箇所を増やさず、通常クライアント（RLS適用）の別経路で取得する。未認証のデモ画面（`/demo`、`demo-learning-server.ts`）は受講生向け配信経路ではなく従来から service_role 専用の別経路であり、スライドの署名付きURLは **`is_published = true AND is_open_to_trial = true` のコンテンツに限って**発行する。
-- **`learning-server.ts` の取得関数は `userRole` を受け取り、admin / maintainer の場合のみ `is_published` 絞り込みを外す**（RLSは既に許可済み。詳細は `docs/specification.md` 2.12節）。member / お試しユーザー向けの挙動・RLSの適用範囲は変更しない。
+- **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select する。0行なら404扱い。権限チェック済みの管理者向けクエリや `user_id` フィルタで担保している既存利用は対象外。admin / maintainer 向けの未公開プレビュー（`docs/specification.md` 2.12節）はこの2箇所を増やさず、通常クライアント（RLS適用）の別経路で取得する。未認証のデモ画面（`/demo`、`demo-learning-server.ts`）は受講生向け配信経路ではなく service_role 専用の別経路であり、スライドの署名付きURLは **`is_published = true AND is_open_to_trial = true` のコンテンツに限って**発行する。
+- **`learning-server.ts` の取得関数は `userRole` を受け取り、admin / maintainer の場合のみ `is_published` 絞り込みを外す**（RLSは既に許可済み。詳細は `docs/specification.md` 2.12節）。member / お試しユーザーでは `is_published = true` の絞り込みを常に維持する。
 - **提出API・進捗APIの可視性チェックは通常クライアントの SELECT で行う。** `contentId` を `is_published = true` 付きで SELECT して0行なら403。RLSがステータスを織り込むため、アプリ層でステータス分岐を書かない（`is_published` の絞り込みのみ明示する。`isContentVisible()`（`learning-server.ts`）の絞り込み条件・意図は `docs/specification.md` 2.12節を参照）。
 
 ### Stripeサブスク決済（月額課金）
@@ -109,7 +109,7 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 
 ### データベースマイグレーション
 
-`supabase/migrations/` **直下にフラットなSQLファイルで管理する（サブディレクトリを作らない）**。Supabase CLIの `migration list` / `db push` はサブディレクトリを再帰走査しないため（#149）。ファイル名は `supabase migration new` と同じ `<14桁タイムスタンプ>_<説明>.sql`。**タイムスタンプはリモートの適用履歴と比較される一意なバージョン識別子なので、既存ファイルのリネームは必ず `supabase migration list` で対応関係を確認してから行う**（過去に中身が食い違う事故あり。履歴整合の経緯は git / Issue（#149・#218）を参照し、本番への適用時は `migration list` で未適用分を確認してから `db push` する）。RLSはより小さいタイムスタンプのファイルで参照先カラム・関数が追加済みであること。
+`supabase/migrations/` **直下にフラットなSQLファイルで管理する（サブディレクトリを作らない）**。Supabase CLIの `migration list` / `db push` はサブディレクトリを再帰走査しないため（#149）。ファイル名は `supabase migration new` と同じ `<14桁タイムスタンプ>_<説明>.sql`。**タイムスタンプはリモートの適用履歴と比較される一意なバージョン識別子なので、既存ファイルのリネームは必ず `supabase migration list` で対応関係を確認してから行う**（本番への適用時は `migration list` で未適用分を確認してから `db push` する）。RLSはより小さいタイムスタンプのファイルで参照先カラム・関数が追加済みであること。
 
 マイグレーション追加後の動作確認・型再生成の手順は `docs/database.md` 7.1節を参照。**破壊的変更（カラム削除・リネーム・型変更、既存行の値を書き換えるデータ移行、Storageバケット・ポリシーの変更）を含む場合は、本番反映前に Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)に従うこと**（本番反映・ロールバック手順自体はこのリポジトリでは管理しない）。
 
