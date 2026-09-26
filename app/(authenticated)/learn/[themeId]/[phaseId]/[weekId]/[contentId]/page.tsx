@@ -154,7 +154,8 @@ export default async function ContentPage({ params }: PageProps) {
 
   // コンテンツ行自体が公開済みでも、所属する週・フェーズ・テーマのいずれかが未公開・論理削除
   // ならプレビュー扱い（バッジ・完了ボタン/提出フォームの可否）。member / お試しユーザーには
-  // 404 とする（theme だけ未公開だと week/phase ガードをすり抜けて到達しうるため。#216）。
+  // 404 とする（#216）。member / お試しは前段のロック判定前のガード（#242）で既に弾かれており、
+  // ここは同じ条件をコンテンツ行の埋め込みで確かめる二重防御。
   const isFullyPublished = isContentFullyPublished(content);
   if (!isFullyPublished && !checkContentPermissions(userRole)) {
     notFound();
