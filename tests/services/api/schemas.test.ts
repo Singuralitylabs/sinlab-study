@@ -315,12 +315,29 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
 
     it.each([
       ["null", null],
-      ["空文字", ""],
       ["未指定", undefined],
     ])("未設定（%s）はそのまま受理する", (_label, pdf_url) => {
       const result = ContentCreateSchema.safeParse({ ...base, pdf_url });
       expect(result.success).toBe(true);
       expect(result.data?.pdf_url).toBe(pdf_url);
+    });
+
+    it.each([
+      ["空文字", ""],
+      ["空白のみ", "   "],
+      ["タブ・改行のみ", "\t\r\n"],
+    ])("%s は null に正規化して受理する（空文字の行を作らない。issue #243）", (_label, pdf_url) => {
+      const created = ContentCreateSchema.safeParse({ ...base, pdf_url });
+      expect(created.success).toBe(true);
+      expect(created.data?.pdf_url).toBeNull();
+      const updated = ContentUpdateSchema.safeParse({ pdf_url });
+      expect(updated.success).toBe(true);
+      expect(updated.data?.pdf_url).toBeNull();
+    });
+
+    it("全角スペースはマイグレーションの btrim 対象外のため、空扱い（null 化）しない", () => {
+      const result = ContentUpdateSchema.safeParse({ pdf_url: "\u3000" });
+      expect(result.success ? result.data?.pdf_url : "rejected").not.toBeNull();
     });
 
     it.each([

@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { toSlideObjectKey } from "@/app/lib/slide-object-key";
+import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
+import { ContentUpdateSchema } from "@/app/services/api/schemas";
 
 /**
  * `20260917011152_validate_slide_pdf_url_object_keys.sql` の正規化式。
@@ -115,5 +116,54 @@ describe("slide pdf_url SQL 検証と toSlideObjectKey の一致 (#217)", () => 
   it("正常なキーのみなら SQL 規則は何も拒否しない", () => {
     expect(isRejectedBySqlPredicate("gas/slide-01.pdf")).toBe(false);
     expect(toSlideObjectKey("gas/slide-01.pdf")).toBe("gas/slide-01.pdf");
+  });
+});
+
+/**
+ * `20260926000000_normalize_blank_slide_pdf_url.sql` の NULL 化条件（#243）。
+ * マイグレーション側とこの定数が一致していることを下のテストで担保する。
+ */
+const BLANK_PDF_URL_SQL_PREDICATE = `pdf_url IS NOT NULL
+  AND btrim(pdf_url, E' \\t\\r\\n') = ''`;
+
+const BLANK_NORMALIZE_MIGRATION_FILE = resolve(
+  __dirname,
+  "../../supabase/migrations/20260926000000_normalize_blank_slide_pdf_url.sql"
+);
+
+/** NULL 化条件を JS で評価する（btrim(pdf_url, E' \t\r\n') = ''） */
+function isNulledBySqlBlankPredicate(pdfUrl: string): boolean {
+  return pdfUrl.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "") === "";
+}
+
+describe("pdf_url 空文字の正規化: SQL と管理APIスキーマの一致 (#243)", () => {
+  it("マイグレーションに NULL 化条件の定数がそのまま含まれる", () => {
+    const migrationSql = readFileSync(BLANK_NORMALIZE_MIGRATION_FILE, "utf8");
+    expect(migrationSql).toContain(BLANK_PDF_URL_SQL_PREDICATE);
+    expect(migrationSql).toContain("SET pdf_url = NULL");
+  });
+
+  it.each(PARITY_CASES)(
+    "マイグレーションが NULL 化する値と、スキーマが null に正規化する値が一致する（%s）",
+    (_label, value) => {
+      const sqlNulls = isNulledBySqlBlankPredicate(value);
+      expect(isBlankSlidePdfUrl(value)).toBe(sqlNulls);
+      const parsed = ContentUpdateSchema.safeParse({ pdf_url: value });
+      if (sqlNulls) {
+        expect(parsed.success).toBe(true);
+        expect(parsed.data?.pdf_url).toBeNull();
+      } else {
+        // 空でない値はキーへ正規化して受理するか、解釈できなければ拒否する（null にはしない）
+        expect(parsed.success ? parsed.data?.pdf_url : "rejected").not.toBeNull();
+      }
+    }
+  );
+
+  it("空文字・空白のみは、NULL 化後に既存の SQL 検証（#217）の対象外になる", () => {
+    // 20260917011152 は空文字を不正値として中断するが、NULL は WHERE pdf_url IS NOT NULL で除外される
+    for (const value of ["", "   ", "\t\r\n"]) {
+      expect(isRejectedBySqlPredicate(value)).toBe(true);
+      expect(isNulledBySqlBlankPredicate(value)).toBe(true);
+    }
   });
 });

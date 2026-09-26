@@ -35,6 +35,24 @@ export function buildSlideObjectKey(folder: string, slideNumber: number): string
 }
 
 /**
+ * マイグレーションの btrim(pdf_url, E' \t\r\n') と除去対象を厳密に揃えた前後空白の除去
+ * （String.prototype.trim は全角スペース等も除去するため使わない）
+ */
+function trimLikeMigration(value: string): string {
+  return value.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "");
+}
+
+/**
+ * pdf_url の入力値が「未設定」（空文字・空白のみ）かどうか。
+ * 管理APIはこれを null に正規化して保存し、空文字の行を作らない（issue #243）。
+ * マイグレーション `20260926000000_normalize_blank_slide_pdf_url.sql` の
+ * `btrim(pdf_url, E' \t\r\n') = ''`（既存行の NULL 化条件）と同じ規則。
+ */
+export function isBlankSlidePdfUrl(pdfUrl: string): boolean {
+  return trimLikeMigration(pdfUrl) === "";
+}
+
+/**
  * pdf_url（新形式のキー、または旧形式の公開URL）をオブジェクトキーへ正規化する。
  * `slides` バケットのオブジェクトとして解釈できない値（外部URL・空文字・`/` 始まり・
  * `..` を含むパス）は null を返す。呼び出し側は null を「署名できない」として扱う。
@@ -44,9 +62,7 @@ export function toSlideObjectKey(pdfUrl: string | null | undefined): string | nu
     return null;
   }
 
-  // マイグレーションの btrim(pdf_url, E' \t\r\n') と除去対象を厳密に揃える（String.prototype.trim は
-  // 全角スペース等も除去するため使わない）
-  const key = pdfUrl.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "").replace(LEGACY_PUBLIC_URL_PREFIX, "");
+  const key = trimLikeMigration(pdfUrl).replace(LEGACY_PUBLIC_URL_PREFIX, "");
   if (
     key === "" ||
     key.startsWith("/") ||
