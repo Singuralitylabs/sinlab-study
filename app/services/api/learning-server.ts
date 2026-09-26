@@ -381,7 +381,7 @@ export function isWeekHierarchyPublished(week: BreadcrumbWeek | null | undefined
 }
 
 /**
- * service_role 経路（受講生向け）の select カラム許可リスト（CLAUDE.md・機能設計書 2.6 の
+ * service_role 経路（受講生向け）の select カラム許可リスト（AGENTS.md・機能設計書 2.6 の
  * 不変条件）。`id, title, content_type, display_order, is_open_to_trial, week_id` の6列のみで、
  * `is_published` は含めない（このリストを拡張すると service_role が RLS を素通りして
  * 追加カラムを返してしまうため、admin / maintainer 向け経路とは別に維持する）。
@@ -503,7 +503,7 @@ async function fetchContentSummariesByWeekIdsForManager(weekIds: number[]): Prom
  * 指定した週IDに属するコンテンツのサマリーをロールに応じて取得する。
  * admin / maintainer は未公開コンテンツも含めて取得する（通常クライアント経由）。
  * それ以外（member / お試しユーザー）は従来どおり service_role 経由で公開分のみ取得する
- * （CLAUDE.md の service_role 利用条件を維持するため）。
+ * （AGENTS.md の service_role 利用条件を維持するため）。
  */
 export async function fetchContentSummariesByWeekIds(
   weekIds: number[],

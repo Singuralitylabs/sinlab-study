@@ -51,7 +51,7 @@ export const STRIPE_MINIMUM_CHARGE_AMOUNT_JPY = 50;
  * Stripe決済機能が有効かどうかを判定する。Vercel Hobbyプランの利用規約対応のための
  * 暫定停止フラグ（#115）。未設定または `"true"` 以外の値は無効として扱うフェイルクローズ。
  * コード自体は削除せず、Cloudflare Workersへのカットオーバー完了後に環境変数側で再有効化する
- * （詳細はCLAUDE.mdの「Stripeサブスク決済（月額課金）」節を参照）。
+ * （詳細はAGENTS.mdの「Stripeサブスク決済（月額課金）」節を参照）。
  *
  * `stripe-server.ts` ではなくここに置くのは、Stripe SDKへの依存を持たないため。
  * 認証済み全ページを包む `(authenticated)/layout.tsx` など、決済処理を行わない箇所からの

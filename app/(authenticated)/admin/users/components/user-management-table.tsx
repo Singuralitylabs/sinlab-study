@@ -276,7 +276,7 @@ export function UserManagementTable({
                             {user.status === USER_STATUS.ACTIVE ? (
                               <select
                                 // status=active と membership_type の整合性はDBでは保証されないため
-                                // (CLAUDE.md参照)、未設定（NULL）の active ユーザーも復旧できるよう
+                                // (AGENTS.md参照)、未設定（NULL）の active ユーザーも復旧できるよう
                                 // membership_type の有無に関わらずセレクトを表示する
                                 value={
                                   user.membership_type ??

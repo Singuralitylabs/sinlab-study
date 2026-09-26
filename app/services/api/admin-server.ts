@@ -1179,7 +1179,7 @@ export async function fetchContentByIdForAdmin(
  * 同じ `week_id` 配下の兄弟を1からの連番に再採番してからINSERTする
  * （`createTheme` と同じ方針。詳細は `resolveSiblingResequence` 参照）。
  * 兄弟の取得・再採番は他の3関数と異なり `createAdminSupabaseClient()` を使う
- * （createContent 自体が従来から service_role を使っているため。CLAUDE.mdの
+ * （createContent 自体が従来から service_role を使っているため。AGENTS.mdの
  * service_role制限対象は「受講生向け配信経路」であり、この管理者専用の作成経路は対象外）。
  */
 export async function createContent(content: {

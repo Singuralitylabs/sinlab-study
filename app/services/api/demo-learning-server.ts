@@ -250,7 +250,7 @@ export async function fetchDemoContentById(contentId: number): Promise<{
  * デモ画面は未認証のためユーザー権限のクライアントが無く、他のデモ取得関数と同じく
  * service_role で署名する。service_role は RLS を素通りするため、「公開済み・未削除・
  * お試し公開（is_open_to_trial = true）のスライド」という条件（お試しユーザーと同じ範囲。
- * CLAUDE.md の不変条件、issue #89）はこの関数自身が判定し、満たさなければ Storage を
+ * AGENTS.md の不変条件、issue #89）はこの関数自身が判定し、満たさなければ Storage を
  * 呼ばず null を返す。呼び出し側の分岐に依存しない。
  */
 export async function createDemoSlideSignedUrl(
