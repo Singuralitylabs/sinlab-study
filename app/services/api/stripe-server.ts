@@ -40,14 +40,6 @@ const CHECKOUT_SESSION_LIFETIME_MS =
 let cachedClient: Stripe | null = null;
 
 /**
- * Stripe API のバージョン。インストール済み SDK が固定する版（`Stripe.LatestApiVersion`）と
- * 同じ値を明示する。SDK 更新で固定版が変わると型エラーになるため、API バージョンが暗黙に
- * 変わるのを防ぎ、Stripe ダッシュボードの Webhook エンドポイント側の API バージョンも
- * 合わせて更新する契機にする（手順は docs/specification.md 2.11節「Stripe Webhook 設定手順」）。
- */
-const STRIPE_API_VERSION: Stripe.LatestApiVersion = "2026-08-26.dahlia";
-
-/**
  * サブスクリプションが「終端状態」とみなせるステータス。
  * `stripe_subscriptions` は1ユーザー1行固定（DELETEなし・常にupsert）で更新されるため、
  * 一度契約したユーザーの行は解約後も残り続ける。これらのステータスの行は
@@ -145,7 +137,9 @@ export function getStripeClient(): Stripe {
   if (!secretKey) {
     throw new Error("Stripe環境変数が設定されていません: STRIPE_SECRET_KEY");
   }
-  cachedClient = new Stripe(secretKey, { apiVersion: STRIPE_API_VERSION });
+  // apiVersion は明示せず SDK が固定する版（Stripe.API_VERSION）を使う。明示すると SDK の
+  // 毎月のマイナー更新ごとに型エラーになるため（判断の理由は docs/specification.md 2.11節）
+  cachedClient = new Stripe(secretKey);
   return cachedClient;
 }
 

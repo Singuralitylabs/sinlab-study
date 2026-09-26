@@ -160,7 +160,7 @@ OAuthコールバック処理中に初回ログインを検知し、`users` テ�
 | `status` | `trial` | デフォルト値 |
 | `terms_accepted_at` | 登録時刻 | サーバー現在時刻（同意 Cookie ありの場合のみ INSERT） |
 
-INSERT 失敗時は `/login?error=registration_failed` へリダイレクトし、Slack通知は送らない。同意 Cookie なしの初回登録では INSERT 自体を行わず `/login?error=terms_required` へリダイレクトする。新規登録ユーザーのみが対象で、既存ユーザーの `terms_accepted_at` は `NULL` のまま利用継続でき、既存ユーザーの分岐では同意 Cookie を参照も更新もしない。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認の失敗は `error` なしの `/login` へフェイルクローズする。`SUPABASE_SERVICE_ROLE_KEY` 未設定時は `createAdminSupabaseClient()` が throw し、通常クライアントへの暗黙フォールバックはしない。callback はこの例外を捕捉し、存在確認の失敗と同じく `error` なしの `/login` へフェイルクローズする（500 にしない）。詳細は9.5.1。
+INSERT 失敗時は `/login?error=registration_failed` へリダイレクトし、Slack通知は送らない。同意 Cookie なしの初回登録では INSERT 自体を行わず `/login?error=terms_required` へリダイレクトする。新規登録ユーザーのみが対象で、既存ユーザーの `terms_accepted_at` は `NULL` のまま利用継続でき、既存ユーザーの分岐では同意 Cookie を参照も更新もしない。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認の失敗は `error` なしの `/login` へフェイルクローズする。`SUPABASE_SERVICE_ROLE_KEY` 未設定時は `createAdminSupabaseClient()` が throw し、通常クライアントへの暗黙フォールバックはしない。callback はハンドラ全体を try/catch で包み、この例外や `NEXT_PUBLIC_SUPABASE_*` の欠落などの予期しない例外を、存在確認の失敗と同じく `error` なしの `/login` へフェイルクローズする（500 にしない）。詳細は9.5.1。
 
 ### 2.6 お試し（trial）ユーザーへのコンテンツ制限
 
@@ -363,11 +363,11 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 - Checkout手続き中に管理者が手動承認した場合: 決済完了時点で一般有料会員として上書きされる（許容）。降格側は `membership_type=general` ガードで巻き込みを防止する
 - Checkout手続き中に管理者が却下した場合: 決済完了時点でユーザーが `rejected` であれば昇格しない（却下判断を決済完了で上書きしない）
 - Webhookイベントの順序逆転・再送・同一event.idの並行配信: `stripe_events` へのINSERTをclaimとして使う原子的な排他制御と、Stripe APIから再取得したライブ状態のみを書き込むハンドラ設計で吸収する（イベントに埋め込まれたスナップショットは信用しない）
-- イベント本文の構造のAPIバージョン依存: Webhookのイベント本文（`event.data.object`）の構造はエンドポイントに設定したAPIバージョンで決まり、アプリがStripe APIを呼ぶ版（`STRIPE_API_VERSION`）とは独立している。このため本文から直接読んでよいのはID類（Checkout Sessionの `id` / `client_reference_id` / `metadata` / `customer` / `subscription`、Subscriptionの `id`）に限り、状態は常にStripe APIからのライブ取得を正とする。例外は `invoice.payment_failed` の運用者向けSlack通知で、本文の `customer_email` / `amount_due` / `hosted_invoice_url` を通知の表示にのみ使う（認可・会員状態の判定には使わない）。本文の他のフィールドを直接使う変更を入れる場合は、エンドポイントのAPIバージョンが `STRIPE_API_VERSION` と一致していることを前提にする（下記「Stripe Webhook 設定手順」）
+- イベント本文の構造のAPIバージョン依存: Webhookのイベント本文（`event.data.object`）の構造はエンドポイントに設定したAPIバージョンで決まり、アプリがStripe APIを呼ぶ版（SDKが固定する `Stripe.API_VERSION`）とは独立している。このため本文から直接読んでよいのはID類（Checkout Sessionの `id` / `client_reference_id` / `metadata` / `customer` / `subscription`、Subscriptionの `id`）に限り、状態は常にStripe APIからのライブ取得を正とする。例外は `invoice.payment_failed` の運用者向けSlack通知で、本文の `customer_email` / `amount_due` / `hosted_invoice_url` を通知の表示にのみ使う（認可・会員状態の判定には使わない）。本文の他のフィールドを直接使う変更を入れる場合は、その時点でエンドポイントのAPIバージョンを `Stripe.API_VERSION` に合わせる（下記「Stripe Webhook 設定手順」）
 - claim後にサーバーレス関数がタイムアウト・強制終了しrelease処理へ到達できない場合: claimしたまま10分（`EVENT_CLAIM_TTL_MINUTES`）が経過すると再claim可能になる（ハンドラは冪等なため、まれに完了済みイベントを再実行しても実害は小さい）
 - Stripe契約状況の取得エラー（`/upgrade`・`/admin/users`）: 「契約なし」に誤ってフォールバックせず、専用のエラーメッセージを表示する（フェイルクローズ）。特に管理画面での却下操作は、契約状況を判定できない場合も却下確認ダイアログに警告を表示する（却下操作自体は禁止せず、警告表示に留める意図的な判断）。会員種別変更（2.7節）は却下と異なり操作自体を無効化するフェイルクローズとする
 
-**Stripe APIバージョン**: `getStripeClient()` は `apiVersion` にSDKが固定する版と同じ値（`STRIPE_API_VERSION`、`app/services/api/stripe-server.ts`）を明示する。型を `Stripe.LatestApiVersion` にしているため、SDK更新で固定版が変わると型チェックが失敗し、APIバージョンが暗黙に変わらない（Dependabotのマイナー更新でも気づける）。値を更新するときは、下記手順4に従ってWebhookエンドポイント側のAPIバージョンも合わせる。
+**Stripe APIバージョン**: `getStripeClient()` は `apiVersion` を明示せず、SDKが固定する版（`Stripe.API_VERSION`）を使う。stripe-node はマイナー版ごと（ほぼ毎月）に同じリリース名（例: `.dahlia`）内の後方互換な版へ固定版を上げ、破壊的変更を含むリリース名の変更はメジャー版でのみ行う。明示すると型（`Stripe.LatestApiVersion`）により毎月のマイナー更新で型チェックが失敗し、Dependabot のグループ更新全体を止めるため明示しない。リリース名が変わるメジャー更新は Dependabot でもグループ外の個別PRになるため、そこで下記手順4に従いWebhookエンドポイント側も合わせる。
 
 **スコープ外**: プランカタログ・複数通貨・クーポン・領収書カスタマイズ・却下時のサブスク自動キャンセル連携・年額プラン・プラン変更時のアンカー再設定・既存契約者へのアンカー移行（`billing_cycle_anchor_config` はサブスク作成時にのみ適用されるため、決済日固定の導入は本番での実課金開始前に行うことが前提）。
 
@@ -381,8 +381,9 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
    - `customer.subscription.updated`
    - `customer.subscription.deleted`
    - `invoice.payment_failed`
-4. API バージョンを SDK が固定する版（`STRIPE_API_VERSION`）に合わせる
-   - SDK の版は `node_modules/stripe/cjs/apiVersion.js` の `ApiVersion` 定数で確認できる
+4. API バージョンを SDK が固定する版（`Stripe.API_VERSION`）に合わせる
+   - SDK の版は `Stripe.API_VERSION`、または stripe-node の CHANGELOG（`bun.lock` の版の「pinned API version」）で確認できる
+   - 作り直しが必要なのは、SDK のメジャー更新でリリース名（例: `.dahlia`）が変わったときと、イベント本文から ID 類以外のフィールドを読む変更を入れるときに限る。同じリリース名内の差（SDK のマイナー更新）は後方互換で、本文は ID 類しか読まないため合わせなくてよい
    - API バージョンはエンドポイントの作成時に指定する（未指定のエンドポイントはアカウント既定の版に従うため、アカウントの版を上げるとイベント本文の構造も変わる。SDK の更新には追従しない）
    - 既存エンドポイントの API バージョンは Webhook Endpoint API の更新項目に含まれないため、版を変えるときは新しい版でエンドポイントを作り直し、手順5の署名シークレットを再設定してから古いエンドポイントを削除する
 5. エンドポイントごとに発行される署名シークレット（`whsec_…`）を `STRIPE_WEBHOOK_SECRET` 環境変数に設定
@@ -987,7 +988,7 @@ JSONボディを受け取る API Route の入力検証は [zod](https://zod.dev/
 | 同意 Cookie なしの初回登録 | INSERT を行わず `/login?error=terms_required` にリダイレクト（通知は送らない、セッション Cookie は付けない）。同意 Cookie の失効（有効期間30分）もこの経路になるため、メッセージで再度チェックしてやり直すよう案内する。既存ユーザーの分岐では参照しない |
 | 論理削除済みユーザーの再ログイン | INSERT を試行せず、自動登録失敗と同じ導線（`/login?error=registration_failed`、セッション Cookie なし） |
 | ユーザー存在確認の失敗 | INSERT せず、`error` パラメータなしの `/login` へフェイルクローズ（セッション Cookie なし） |
-| service_role 未設定 | `createAdminSupabaseClient()` が throw し、callback がそれを捕捉してサーバーログに出力の上、`error` パラメータなしの `/login` へフェイルクローズ（500 にしない。例外の内容はレスポンスに出さない。通常クライアントへの暗黙フォールバックなし。個別事前チェックは置かない。セッション Cookie は付けず、同意 Cookie は削除する） |
+| 環境変数の欠落（`SUPABASE_SERVICE_ROLE_KEY`・`NEXT_PUBLIC_SUPABASE_*`）などの予期しない例外 | callback がハンドラ全体の try/catch で捕捉し、サーバーログ（`[auth/callback]` タグ）に出力の上、`error` パラメータなしの `/login` へフェイルクローズ（500 にしない。例外の内容はレスポンスに出さない。通常クライアントへの暗黙フォールバックなし。セッション Cookie は付けず、同意 Cookie は削除する）。監視上は 5xx として現れないため、サーバーログのタグで検知する |
 | 重複登録の試行 | `auth_id` のUNIQUE制約で防止。既存レコードを使用 |
 
 ### 8.3 Server Services
@@ -1113,7 +1114,7 @@ flowchart TD
 
 INSERT 成功後はお試しユーザーとしてダッシュボードへ遷移する。承認依頼のSlack通知は従来どおり送信し、管理者は `/admin/users` で承認・却下を行う。`sendSlackNewUserNotification()` は `await` せずに発火する非同期・非ブロッキング呼び出しで、通知の完了を待たずにリダイレクトへ進む。
 
-INSERT 失敗時はログを出力し `/login?error=registration_failed` へリダイレクトする（通知は送らない）。同意 Cookie なしの初回登録では INSERT 自体を行わず `/login?error=terms_required` へリダイレクトする（通知は送らない）。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認は論理削除済み行も含めて `auth_id` で照合する（通常の SELECT RLS では本人の削除済み行が見えないため、確認のみ RLS をバイパスする。INSERT は通常クライアントのまま）。存在確認に失敗した場合は INSERT せず、`error` パラメータなしの `/login` へフェイルクローズする。`SUPABASE_SERVICE_ROLE_KEY` 未設定時は `createAdminSupabaseClient()` が throw し、通常クライアントへの暗黙フォールバックはしない（コールバック側の個別事前チェックは置かない）。callback はこの例外を捕捉してログに残し、`error` パラメータなしの `/login` へフェイルクローズする（例外の内容はレスポンスに出さない）。登録失敗・同意なし・論理削除済み・確認失敗のエラー導線ではセッション Cookie を付けない。いずれの経路の応答でも同意 Cookie は削除する。`/login` は `error` クエリ値を許可リスト方式（自前のキーのみ。プロトタイプ継承キーは含めない）で解釈し、`registration_failed`・`terms_required` のときのみユーザー向けメッセージを表示する。未知の値では何も表示しない。
+INSERT 失敗時はログを出力し `/login?error=registration_failed` へリダイレクトする（通知は送らない）。同意 Cookie なしの初回登録では INSERT 自体を行わず `/login?error=terms_required` へリダイレクトする（通知は送らない）。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認は論理削除済み行も含めて `auth_id` で照合する（通常の SELECT RLS では本人の削除済み行が見えないため、確認のみ RLS をバイパスする。INSERT は通常クライアントのまま）。存在確認に失敗した場合は INSERT せず、`error` パラメータなしの `/login` へフェイルクローズする。`SUPABASE_SERVICE_ROLE_KEY` 未設定時は `createAdminSupabaseClient()` が throw し、通常クライアントへの暗黙フォールバックはしない（コールバック側の個別事前チェックは置かない）。callback はハンドラ全体を try/catch で包み、この例外や `NEXT_PUBLIC_SUPABASE_*` の欠落などの予期しない例外をログ（`[auth/callback]` タグ）に残して、`error` パラメータなしの `/login` へフェイルクローズする（例外の内容はレスポンスに出さない。監視上は 5xx として現れない）。登録失敗・同意なし・論理削除済み・確認失敗のエラー導線ではセッション Cookie を付けない。いずれの経路の応答でも同意 Cookie は削除する。`/login` は `error` クエリ値を許可リスト方式（自前のキーのみ。プロトタイプ継承キーは含めない）で解釈し、`registration_failed`・`terms_required` のときのみユーザー向けメッセージを表示する。未知の値では何も表示しない。
 
 #### 9.5.2 Stripe支払い失敗通知
 

@@ -100,6 +100,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  // mockImplementationOnce の差し替えは clearAllMocks では消えないため、後続テストへ漏らさない
+  vi.mocked(createAdminSupabaseClient).mockReset();
 });
 
 describe("GET /auth/callback", () => {
@@ -254,8 +256,8 @@ describe("GET /auth/callback", () => {
       expect(res.headers.get("location")).toBe("http://localhost/login");
       expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
       expectConsentCookieDeleted(res);
-      // 例外の内容（キー名など）はレスポンスに出さない
-      expect(await res.text()).not.toContain("SUPABASE_SERVICE_ROLE_KEY");
+      // 例外の内容（キー名など）をリダイレクト先に載せない
+      expect(res.headers.get("location")).not.toContain("SUPABASE_SERVICE_ROLE_KEY");
     }
     expect(createAdminSupabaseClient).toHaveBeenCalled();
     expect(sessionClient.insert).not.toHaveBeenCalled();
@@ -268,7 +270,6 @@ describe("GET /auth/callback", () => {
     const actual = await vi.importActual<typeof import("@/app/services/api/supabase-server")>(
       "@/app/services/api/supabase-server"
     );
-    // 後続テストへ実装を持ち越さないよう1回限りで差し替える
     vi.mocked(createAdminSupabaseClient).mockImplementationOnce(actual.createAdminSupabaseClient);
     const sessionClient = createSessionClient();
     mockSessionClient(sessionClient);
@@ -282,4 +283,21 @@ describe("GET /auth/callback", () => {
     expectConsentCookieDeleted(res);
     expect(console.error).toHaveBeenCalled();
   });
+
+  it.each(["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"])(
+    "%s 未設定時は 500 にせず /login へフェイルクローズする",
+    async (envName) => {
+      vi.stubEnv(envName, "");
+
+      const res = await GET(callbackRequestWithConsent());
+
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe("http://localhost/login");
+      expect(createServerClient).not.toHaveBeenCalled();
+      expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+      expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
+      expectConsentCookieDeleted(res);
+      expect(console.error).toHaveBeenCalled();
+    }
+  );
 });
