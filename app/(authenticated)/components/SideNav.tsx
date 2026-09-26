@@ -144,7 +144,7 @@ export function SideNav({
   const navItems = useMemo<NavItem[]>(
     () => [
       ...DEFAULT_NAV_ITEMS,
-      // 停止中は決済・お支払い管理の導線を持たないため非表示にする（詳細はCLAUDE.md参照）
+      // 停止中は決済・お支払い管理の導線を持たないため非表示にする（詳細はAGENTS.md参照）
       ...(stripeEnabled ? [UPGRADE_NAV_ITEM] : []),
       ...(isInstructor ? [MANAGE_NAV_ITEM] : []),
       ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),

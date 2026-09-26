@@ -26,7 +26,7 @@ async function safeReleaseEventClaim(eventId: string, processedAt: string): Prom
 
 export async function POST(request: NextRequest) {
   // 停止中は署名検証・イベント処理を一切行わない（既存Live契約者ゼロを前提に完全停止する。
-  // 詳細はCLAUDE.mdの「Stripeサブスク決済（月額課金）」節を参照）
+  // 詳細はAGENTS.mdの「Stripeサブスク決済（月額課金）」節を参照）
   if (!isStripeEnabled()) {
     return NextResponse.json({ error: STRIPE_DISABLED_MESSAGE }, { status: 503 });
   }

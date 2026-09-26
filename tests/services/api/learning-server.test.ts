@@ -634,7 +634,7 @@ describe("fetchContentVisibilitySummariesByWeekIds", () => {
       summariesWithoutIsPublished.map((s) => ({ ...s, is_published: true }))
     );
     const builder = mockClient.from.mock.results[0].value;
-    // service_role 経路は CLAUDE.md の許可リストのみを select する（is_published は含めない）
+    // service_role 経路は AGENTS.md の許可リストのみを select する（is_published は含めない）
     expect(builder.select).toHaveBeenCalledWith(
       "id, title, content_type, display_order, is_open_to_trial, week_id"
     );

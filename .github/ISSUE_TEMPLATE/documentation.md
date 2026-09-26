@@ -20,7 +20,7 @@ assignees: ""
 
 - [ ] ドキュメントの更新
   - [ ] README.md
-  - [ ] CLAUDE.md
+  - [ ] AGENTS.md
 
 ## 補足事項
 
