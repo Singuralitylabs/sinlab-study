@@ -22,6 +22,7 @@ import {
   isContentFullyPublished,
   isContentLockedForUser,
   isContentVisible,
+  isWeekHierarchyPublished,
   LEARNING_CONTENT_LIST_COLUMNS,
 } from "@/app/services/api/learning-server";
 import {
@@ -1376,5 +1377,56 @@ describe("isContentFullyPublished", () => {
     expect(isContentFullyPublished({ ...baseContent, week: null } as typeof baseContent)).toBe(
       false
     );
+  });
+});
+
+// ----------------------------------------------------------------
+// isWeekHierarchyPublished（issue #242: ロック判定より先に親階層を確認する）
+// ----------------------------------------------------------------
+describe("isWeekHierarchyPublished", () => {
+  const publishedWeek = {
+    id: 100,
+    phase_id: 10,
+    name: "第1週",
+    is_published: true,
+    is_deleted: false,
+    phase: {
+      id: 10,
+      theme_id: 1,
+      name: "フェーズ1",
+      is_published: true,
+      is_deleted: false,
+      theme: { id: 1, name: "GAS", is_published: true, is_deleted: false },
+    },
+  };
+
+  it("週・フェーズ・テーマがすべて公開済み・未削除の場合、true を返す", () => {
+    expect(isWeekHierarchyPublished(publishedWeek)).toBe(true);
+  });
+
+  it("テーマだけ未公開・論理削除の場合、false を返す", () => {
+    for (const theme of [
+      { ...publishedWeek.phase.theme, is_published: false },
+      { ...publishedWeek.phase.theme, is_deleted: true },
+    ]) {
+      expect(
+        isWeekHierarchyPublished({ ...publishedWeek, phase: { ...publishedWeek.phase, theme } })
+      ).toBe(false);
+    }
+  });
+
+  it("RLS でテーマ・フェーズの埋め込みが null になった場合、false を返す", () => {
+    expect(
+      isWeekHierarchyPublished({
+        ...publishedWeek,
+        phase: { ...publishedWeek.phase, theme: null },
+      })
+    ).toBe(false);
+    expect(isWeekHierarchyPublished({ ...publishedWeek, phase: null })).toBe(false);
+  });
+
+  it("週自体が null / undefined の場合、false を返す", () => {
+    expect(isWeekHierarchyPublished(null)).toBe(false);
+    expect(isWeekHierarchyPublished(undefined)).toBe(false);
   });
 });
