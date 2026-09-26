@@ -11,6 +11,7 @@ import type {
   WeekFilterOption,
 } from "@/app/lib/content-filtering";
 import { parseSlideObjectKey, toSlideObjectKey } from "@/app/lib/slide-object-key";
+import { getSlideStorageWarning } from "@/app/lib/slide-storage-warning";
 import type { ContentType, LearningContent } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -380,6 +381,15 @@ export function ContentForm({
       });
 
       if (response.ok) {
+        const data: unknown = await response.json().catch(() => null);
+        const warning = mode === "edit" ? getSlideStorageWarning(data, "update") : null;
+        if (warning) {
+          // 更新自体は成功している。pdf_url の差し替え・種別変更で旧スライドPDFが Storage に
+          // 残ったことを知らせるため、一覧へ遷移せずこの画面に警告を出す（issue #241）
+          setMessage({ type: "error", text: warning });
+          router.refresh();
+          return;
+        }
         setMessage({
           type: "success",
           text: mode === "create" ? "コンテンツを作成しました" : "コンテンツを更新しました",

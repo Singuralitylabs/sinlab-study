@@ -18,6 +18,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import type { BulkContentAction } from "@/app/constants/content";
 import { CONTENT_TYPE_LABELS, CONTENT_TYPES, MAX_BULK_CONTENT_IDS } from "@/app/constants/content";
 import type { ContentTableGroup, ContentTableRow } from "@/app/lib/content-grouping";
+import { getSlideStorageWarning } from "@/app/lib/slide-storage-warning";
 import type { ContentType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -137,6 +138,8 @@ export function ContentsTable({ groups }: ContentsTableProps) {
     const ids = [...selectedIds];
     try {
       let totalUpdated = 0;
+      // 一括削除で、いずれかのチャンクのスライドPDFが Storage に残ったか（issue #241）
+      let storageWarning: string | null = null;
       // ids が MAX_BULK_CONTENT_IDS を超える場合、APIの上限に収まるようチャンク分割して送信する
       for (let i = 0; i < ids.length; i += MAX_BULK_CONTENT_IDS) {
         const chunk = ids.slice(i, i + MAX_BULK_CONTENT_IDS);
@@ -156,6 +159,9 @@ export function ContentsTable({ groups }: ContentsTableProps) {
         }
         const data = await response.json();
         totalUpdated += typeof data.updated === "number" ? data.updated : 0;
+        if (action === "delete") {
+          storageWarning ??= getSlideStorageWarning(data, "bulkDelete");
+        }
       }
 
       setSelectedIds(new Set());
@@ -163,10 +169,14 @@ export function ContentsTable({ groups }: ContentsTableProps) {
       setTypeDialogOpen(false);
       router.refresh();
 
-      if (totalUpdated < ids.length) {
-        setErrorMessage(
-          `${ids.length}件中${ids.length - totalUpdated}件は更新できませんでした（他の操作により既に削除されている可能性があります）`
-        );
+      const warnings = [
+        totalUpdated < ids.length
+          ? `${ids.length}件中${ids.length - totalUpdated}件は更新できませんでした（他の操作により既に削除されている可能性があります）`
+          : null,
+        storageWarning,
+      ].filter((warning): warning is string => warning !== null);
+      if (warnings.length > 0) {
+        setErrorMessage(warnings.join("。"));
       }
     } catch {
       setErrorMessage("一括操作中にエラーが発生しました");

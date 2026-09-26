@@ -45,6 +45,9 @@ type AdminSupabaseClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>
  * （`is_deleted = false`）が残っていないか必ず確認する。
  * Storage の削除失敗ではDB操作全体を失敗させず、結果を `storageRemoved` で返す
  * （サムネイル DELETE の `storageRemoved` と同じ前例）。
+ *
+ * 往復はキー数に依らず最大2回（生きた参照の一括取得 → 未参照キーの一括削除。issue #246）。
+ * 参照の取得に失敗した場合は、参照中のキーを誤って消さないよう削除を試みず false を返す。
  */
 async function removeUnreferencedSlideObjects(
   supabase: AdminSupabaseClient,
@@ -58,36 +61,36 @@ async function removeUnreferencedSlideObjects(
   if (keys.length === 0) {
     return true;
   }
-  let storageRemoved = true;
-  for (const key of keys) {
-    try {
-      const { data, error } = await supabase
-        .from("learning_contents")
-        .select("id")
-        .eq("pdf_url", key)
-        .eq("is_deleted", false)
-        .limit(1);
-      if (error) {
-        console.error("スライド参照確認エラー:", error.message);
-        storageRemoved = false;
-        continue;
-      }
-      const rows = data as unknown[] | null;
-      // 他の生きたコンテンツが参照している場合は削除しない
-      if (rows && rows.length > 0) {
-        continue;
-      }
-      const { error: removeError } = await supabase.storage.from(SLIDES_BUCKET).remove([key]);
-      if (removeError) {
-        console.error("スライド削除エラー:", removeError.message);
-        storageRemoved = false;
-      }
-    } catch (cleanupError) {
-      console.error("スライド削除エラー:", cleanupError);
-      storageRemoved = false;
+  try {
+    const { data, error } = await supabase
+      .from("learning_contents")
+      .select("pdf_url")
+      .in("pdf_url", keys)
+      .eq("is_deleted", false);
+    if (error) {
+      console.error("スライド参照確認エラー:", error.message);
+      return false;
     }
+    // 他の生きたコンテンツが参照しているキーは削除しない
+    const referencedKeys = new Set(
+      ((data ?? []) as { pdf_url: string | null }[]).map((row) => row.pdf_url)
+    );
+    const unreferencedKeys = keys.filter((key) => !referencedKeys.has(key));
+    if (unreferencedKeys.length === 0) {
+      return true;
+    }
+    const { error: removeError } = await supabase.storage
+      .from(SLIDES_BUCKET)
+      .remove(unreferencedKeys);
+    if (removeError) {
+      console.error("スライド削除エラー:", removeError.message);
+      return false;
+    }
+    return true;
+  } catch (cleanupError) {
+    console.error("スライド削除エラー:", cleanupError);
+    return false;
   }
-  return storageRemoved;
 }
 
 /** 指定コンテンツID群の `pdf_url`（生死を問わない）を取得する。取得失敗時は null を返す */
@@ -753,7 +756,6 @@ export async function deletePhase(
   id: number
 ): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
   const supabase = await createAdminSupabaseClient();
-  let storageRemoved = true;
 
   // 配下週IDを取得
   const { data: weeks, error: weekFetchError } = await supabase
@@ -763,7 +765,7 @@ export async function deletePhase(
     .eq("is_deleted", false);
   if (weekFetchError) {
     console.error("週取得エラー:", weekFetchError.message);
-    return { error: weekFetchError, storageRemoved };
+    return { error: weekFetchError, storageRemoved: true };
   }
 
   const weekIds = weeks?.map((w) => w.id) ?? [];
@@ -771,9 +773,7 @@ export async function deletePhase(
   // Storage 削除のため、論理削除前に配下の pdf_url を取得する。
   // 取得失敗時は storageRemoved: false で報告する（成功扱いにしない）
   const targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, weekIds);
-  if (targetPdfUrls === null) {
-    storageRemoved = false;
-  }
+  let storageRemoved = targetPdfUrls !== null;
 
   if (weekIds.length > 0) {
     // 配下コンテンツを論理削除
@@ -990,14 +990,11 @@ export async function deleteWeek(
   id: number
 ): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
   const supabase = await createAdminSupabaseClient();
-  let storageRemoved = true;
 
   // Storage 削除のため、論理削除前に配下の pdf_url を取得する。
   // 取得失敗時は storageRemoved: false で報告する（成功扱いにしない）
   const targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, [id]);
-  if (targetPdfUrls === null) {
-    storageRemoved = false;
-  }
+  let storageRemoved = targetPdfUrls !== null;
 
   // 配下コンテンツを論理削除
   const { error: contentError } = await supabase
@@ -1246,42 +1243,36 @@ export async function updateContent(
   let sourceFilter: SiblingParentFilter = null;
   let parentChanged = false;
 
-  // pdf_url 差し替え時の旧オブジェクト削除用に、更新前の値を保持する。
-  // 取得失敗時は更新全体を中断せず、旧キー不明のまま続行して storageRemoved: false で
-  // 報告する（deleteContent 等と同じ扱い。削除済み行への更新試行もここでは弾かない）
+  // 表示順・親の移動判定（week_id）と pdf_url 差し替え時の旧オブジェクト削除（pdf_url）に
+  // 必要な更新前の値は、1回の SELECT でまとめて取得する（issue #246）。
+  // pdf_url のためだけに取得している場合、取得失敗でも更新全体は中断せず、旧キー不明のまま
+  // 続行して storageRemoved: false で報告する（deleteContent 等と同じ扱い）
+  const needsCurrentWeek = insertAfterId !== undefined || patch.week_id !== undefined;
+  const needsCurrentPdf = patch.pdf_url !== undefined;
   let previousPdfUrl: string | null = null;
   let pdfFetchFailed = false;
-  const pdfUrlChanged = patch.pdf_url !== undefined;
-  if (pdfUrlChanged) {
-    const { data: previous, error: previousError } = await supabase
-      .from("learning_contents")
-      .select("pdf_url")
-      .eq("id", id)
-      .eq("is_deleted", false)
-      .single();
-    if (previousError) {
-      console.error("コンテンツ更新エラー（現在値取得）:", previousError.message);
-      pdfFetchFailed = true;
-    } else {
-      previousPdfUrl = (previous as { pdf_url: string | null } | null)?.pdf_url ?? null;
-    }
-  }
-
-  if (insertAfterId !== undefined || patch.week_id !== undefined) {
+  if (needsCurrentWeek || needsCurrentPdf) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
-      .select("week_id")
+      .select("week_id, pdf_url")
       .eq("id", id)
       .eq("is_deleted", false)
       .single();
     if (currentError) {
       console.error("コンテンツ更新エラー（現在値取得）:", currentError.message);
-      return { error: currentError, storageRemoved: true };
+      if (needsCurrentWeek) {
+        return { error: currentError, storageRemoved: true };
+      }
+      pdfFetchFailed = true;
+    } else {
+      previousPdfUrl = current.pdf_url;
+      if (needsCurrentWeek) {
+        const destinationWeekId = patch.week_id ?? current.week_id;
+        parentChanged = destinationWeekId !== current.week_id;
+        destinationFilter = { column: "week_id", value: destinationWeekId };
+        sourceFilter = { column: "week_id", value: current.week_id };
+      }
     }
-    const destinationWeekId = patch.week_id ?? current.week_id;
-    parentChanged = destinationWeekId !== current.week_id;
-    destinationFilter = { column: "week_id", value: destinationWeekId };
-    sourceFilter = { column: "week_id", value: current.week_id };
   }
 
   const resequenced = await resequenceDestinationForUpdate(
@@ -1322,11 +1313,12 @@ export async function updateContent(
     }
   }
 
-  // pdf_url が差し替わった場合、旧オブジェクトが他から参照されていなければ物理削除する。
-  // 同一フォルダ・同一番号の上書き（upsert）はキーが変わらないため削除対象にならない。
+  // pdf_url が正規化後のキーとして実際に変わった場合のみ、旧オブジェクトが他から参照されて
+  // いなければ物理削除する。PUT は pdf_url を常に渡す（非スライドなら null）ため、キーが同じ
+  // 更新（タイトル修正・同一フォルダ／同一番号の上書き）は削除対象にしない。
   // 事前取得に失敗していた場合は旧キーが不明のため削除を試みず false で報告する
   let storageRemoved = true;
-  if (pdfUrlChanged) {
+  if (needsCurrentPdf) {
     if (pdfFetchFailed) {
       storageRemoved = false;
     } else {
@@ -1356,7 +1348,7 @@ export async function bulkUpdateContents(
   const isBulkDelete = patch.is_deleted === true;
   // 取得失敗時（null）は削除対象が特定できないため storageRemoved: false で報告する
   const targetPdfUrls = isBulkDelete ? await fetchPdfUrlsByContentIds(supabase, ids) : [];
-  let storageRemoved = targetPdfUrls === null ? false : true;
+  let storageRemoved = targetPdfUrls !== null;
 
   const { data, error } = await supabase
     .from("learning_contents")
@@ -1385,7 +1377,7 @@ export async function deleteContent(
 
   // 取得失敗時（null）は削除対象が特定できないため storageRemoved: false で報告する
   const targetPdfUrls = await fetchPdfUrlsByContentIds(supabase, [id]);
-  let storageRemoved = targetPdfUrls === null ? false : true;
+  let storageRemoved = targetPdfUrls !== null;
 
   const { error } = await supabase
     .from("learning_contents")
