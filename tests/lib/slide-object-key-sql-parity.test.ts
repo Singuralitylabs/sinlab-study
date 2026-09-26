@@ -71,6 +71,7 @@ const PARITY_CASES: Array<[string, string]> = [
   ["前後空白付きの正常キー", "  gas/slide-01.pdf  "],
   ["空文字", ""],
   ["空白のみ", "   "],
+  ["タブ・CR・LF のみ", "\t\r\n"],
   ["空セグメント", "gas//slide-01.pdf"],
   ["親ディレクトリ参照", "gas/../slide-01.pdf"],
   ["カレントセグメント", "gas/./slide-01.pdf"],
@@ -120,11 +121,21 @@ describe("slide pdf_url SQL 検証と toSlideObjectKey の一致 (#217)", () => 
 });
 
 /**
- * `20260926000000_normalize_blank_slide_pdf_url.sql` の NULL 化条件（#243）。
- * マイグレーション側とこの定数が一致していることを下のテストで担保する。
+ * `20260926000000_normalize_blank_slide_pdf_url.sql` の実行文（コメント・空行を除いた全文。#243）。
+ * 部分一致ではなく完全一致で比較するため、条件の追加（OR 句など）や SET 句の変更も検出する。
  */
-const BLANK_PDF_URL_SQL_PREDICATE = `pdf_url IS NOT NULL
-  AND btrim(pdf_url, E' \\t\\r\\n') = ''`;
+const BLANK_NORMALIZE_MIGRATION_STATEMENT = `UPDATE public.learning_contents
+SET pdf_url = NULL
+WHERE pdf_url IS NOT NULL
+  AND btrim(pdf_url, E' \\t\\r\\n') = '';`;
+
+/** SQL から行コメント（--）と空行を除く（本マイグレーションはブロックコメントを使わない） */
+function stripSqlLineComments(sql: string): string {
+  return sql
+    .split("\n")
+    .filter((line) => !/^\s*--/.test(line) && line.trim() !== "")
+    .join("\n");
+}
 
 const BLANK_NORMALIZE_MIGRATION_FILE = resolve(
   __dirname,
@@ -137,10 +148,9 @@ function isNulledBySqlBlankPredicate(pdfUrl: string): boolean {
 }
 
 describe("pdf_url 空文字の正規化: SQL と管理APIスキーマの一致 (#243)", () => {
-  it("マイグレーションに NULL 化条件の定数がそのまま含まれる", () => {
+  it("マイグレーションの実行文が定数と完全に一致する（条件の追加・変更を検出する）", () => {
     const migrationSql = readFileSync(BLANK_NORMALIZE_MIGRATION_FILE, "utf8");
-    expect(migrationSql).toContain(BLANK_PDF_URL_SQL_PREDICATE);
-    expect(migrationSql).toContain("SET pdf_url = NULL");
+    expect(stripSqlLineComments(migrationSql)).toBe(BLANK_NORMALIZE_MIGRATION_STATEMENT);
   });
 
   it.each(PARITY_CASES)(
@@ -159,11 +169,15 @@ describe("pdf_url 空文字の正規化: SQL と管理APIスキーマの一致 (
     }
   );
 
-  it("空文字・空白のみは、NULL 化後に既存の SQL 検証（#217）の対象外になる", () => {
-    // 20260917011152 は空文字を不正値として中断するが、NULL は WHERE pdf_url IS NOT NULL で除外される
+  it("#217 の検証が拒否する空の値はすべて NULL 化の対象で、NULL 行は #217 の検証が対象にしない", () => {
+    // 20260917011152 は空文字・空白のみを不正値として中断する。本マイグレーションはそれらを
+    // 漏れなく NULL にし、#217 の正規化 UPDATE・検証 DO はどちらも `WHERE pdf_url IS NOT NULL`
+    // で NULL 行を対象外にする（正規化式の出現2回と同じ回数だけ絞り込みがあること）
     for (const value of ["", "   ", "\t\r\n"]) {
       expect(isRejectedBySqlPredicate(value)).toBe(true);
       expect(isNulledBySqlBlankPredicate(value)).toBe(true);
     }
+    const validationSql = readFileSync(MIGRATION_FILE, "utf8");
+    expect(validationSql.split("WHERE pdf_url IS NOT NULL").length - 1).toBe(2);
   });
 });
