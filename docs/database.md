@@ -690,7 +690,7 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 | `20260917011152_validate_slide_pdf_url_object_keys.sql` | `learning_contents.pdf_url` のオブジェクトキー検証を `toSlideObjectKey()` と等価に強化（#217）。適用済み `20260908000000` は書き換えず、同規則で再正規化（旧公開URL・前後空白）したうえで、空セグメント・`.` / `..`・スキーム・`/` 始まりを含む不正値があれば例外で中断する |
 | `20260919000000_add_terms_accepted_at_to_users.sql` | `users` に利用規約の同意日時 `terms_accepted_at`（TIMESTAMPTZ, NULL許容）を追加（#226）。RLS変更なし |
 | `20260922000000_add_onboarding_completed_at_to_users.sql` | `users` に初回利用ガイドの完了日時 `onboarding_completed_at`（TIMESTAMPTZ, NULL許容）を追加（#16）。RLS変更なし |
-| `20260926000000_normalize_blank_slide_pdf_url.sql` | `learning_contents.pdf_url` の空文字・空白のみ（`btrim(pdf_url, E' \t\r\n') = ''`）を NULL に正規化（#243）。アプリ側は `SlidePdfUrlSchema` で空文字・空白のみを null に正規化して保存するため、以後は発生しない。適用済み `20260917011152` は書き換えない（`20260917011152` が未適用かつ空文字の行が残る環境では、`db push` が先に同ファイルの検証で中断するため、本ファイルと同じ UPDATE を事前に手動実行する）。カラム定義・RLS変更なし |
+| `20260926000000_normalize_blank_slide_pdf_url.sql` | `learning_contents.pdf_url` の空文字・空白のみ（`btrim(pdf_url, E' \t\r\n') = ''`）を NULL に正規化（#243）。アプリ側は `SlidePdfUrlSchema` で空文字・空白のみを null に正規化して保存するため、以後は発生しない。適用済み `20260917011152` は書き換えない。カラム定義・RLS変更なし |
 
 ### 7.1 マイグレーション追加後の運用
 
