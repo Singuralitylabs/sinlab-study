@@ -92,6 +92,7 @@ type FakeSubscriptionRow = {
   checkout_claimed_at: string | null;
   checkout_session_id: string | null;
   stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
 };
 
 /**
@@ -109,6 +110,7 @@ function createRaceSupabaseClient(initialRow?: Partial<FakeSubscriptionRow>) {
         checkout_claimed_at: null,
         checkout_session_id: null,
         stripe_customer_id: null,
+        stripe_subscription_id: null,
         ...initialRow,
       }
     : null;
@@ -140,6 +142,7 @@ function createRaceSupabaseClient(initialRow?: Partial<FakeSubscriptionRow>) {
             checkout_claimed_at: (payload.checkout_claimed_at as string | null) ?? null,
             checkout_session_id: null,
             stripe_customer_id: null,
+            stripe_subscription_id: null,
           };
           return { data: null, error: null };
         }
@@ -669,6 +672,53 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
     expect(result).toEqual({
       outcome: "blocked",
       completedSessions: [paid],
+      heldClaimedAt: now.toISOString(),
+    });
+  });
+
+  it("照会で拾った直前の契約（ミラー行に記録済み）の決済済みセッションは、反映待ちとして数えない", async () => {
+    // 処理権の確保より前（時計のずれの余裕の範囲）に作られた、反映済みの前回契約のセッション
+    const fake = createRaceSupabaseClient({
+      status: CHECKOUT_PENDING_STATUS,
+      checkout_claimed_at: now.toISOString(),
+      checkout_session_id: null,
+      stripe_customer_id: "cus_1",
+      stripe_subscription_id: "sub_previous",
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
+    mockSessionsList.mockResolvedValue({
+      data: [{ id: "cs_previous", status: "complete", url: null, subscription: "sub_previous" }],
+    });
+
+    const claimedAt = new Date(now.getTime() + 60 * 1000);
+    const result = await claimCheckoutSlot(5, claimedAt);
+
+    // 反映し直して処理権を解除したり、今回の決済と合わせて「複数」と数えたりしない
+    expect(result).toMatchObject({ outcome: "claimed", stripeCustomerId: "cus_1" });
+  });
+
+  it("直前の契約のセッションと今回の決済済みセッションが並存する場合は、今回の1件だけを反映へ回す", async () => {
+    const fake = createRaceSupabaseClient({
+      status: CHECKOUT_PENDING_STATUS,
+      checkout_claimed_at: now.toISOString(),
+      checkout_session_id: null,
+      stripe_customer_id: "cus_1",
+      stripe_subscription_id: "sub_previous",
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
+    const current = { id: "cs_current", status: "complete", url: null, subscription: "sub_new" };
+    mockSessionsList.mockResolvedValue({
+      data: [
+        { id: "cs_previous", status: "complete", url: null, subscription: "sub_previous" },
+        current,
+      ],
+    });
+
+    const result = await claimCheckoutSlot(5, new Date(now.getTime() + 60 * 1000));
+
+    expect(result).toEqual({
+      outcome: "blocked",
+      completedSessions: [current],
       heldClaimedAt: now.toISOString(),
     });
   });

@@ -419,6 +419,8 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 >
 > **TTLによる救済（既知の限界への対処）**: サーバーレス関数のタイムアウト・強制終了等でclaim後にrelease処理へ到達できなかった場合、claim行が残り続け以後の再送が永久にスキップされてしまう。これを防ぐため、一意制約違反（既にclaim済み）の場合は既存claimの`processed_at`が`EVENT_CLAIM_TTL_MINUTES`（10分、`app/services/api/stripe-webhook-server.ts`）を超えて放置されていないかを確認し、放置されていれば`processed_at`を更新して再claimする。ハンドラは冪等に設計されているため、まれに完了済みイベントを再claim・再実行しても実害は小さい（Slack通知の重複程度）。
 >
+> **Webhook以外の用途（通知の重複抑止）**: Checkout自動復旧不可通知（[機能設計書](./specification.md)2.11節）の重複抑止にも、同じclaimを流用する。キーは `checkout_recovery_notice:<users.id>:<Checkout Session id,...>`、`type` は `app.checkout_recovery_notice` で、Stripeの `event.id`（`evt_...`）とは衝突しない。TTLは60分（`claimEvent()` の `ttlMinutes` で指定）で、releaseはしない（60分経過後に再claimできた場合のみ再通知する）。
+>
 > **releaseの3者競合対策**: `releaseEventClaim()` は `id` に加えて `claimEvent()` が返した `processed_at` の一致もDELETE条件に含める。TTL経過後に別プロセスが再claimした直後、旧claim保持者が遅れて解放処理に到達すると、`id` のみの無条件DELETEでは新しいclaimまで消してしまい3重処理の窓が開くため。
 
 ---

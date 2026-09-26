@@ -491,8 +491,10 @@ describe("reactivateUserFromMirror", () => {
     expect(result).toEqual({ error: null, activated: true });
     expect(retrieve).toHaveBeenCalledWith("sub_123");
     const subBuilder = mockClient.from.mock.results[1].value;
-    // 読んだ時点と同じ契約・処理権なしのままの行だけを更新する
+    // 読んだ時点と同じ契約・同じ状態・処理権なしのままの行だけを更新する（取得後に並行する
+    // 解約Webhookが書いた canceled を、古いスナップショットで上書きしない）
     expect(subBuilder.eq).toHaveBeenCalledWith("stripe_subscription_id", "sub_123");
+    expect(subBuilder.eq).toHaveBeenCalledWith("status", "active");
     expect(subBuilder.is).toHaveBeenCalledWith("checkout_claimed_at", null);
     const userBuilder = mockClient.from.mock.results[2].value;
     expect(userBuilder.update).toHaveBeenCalledWith(
@@ -506,8 +508,7 @@ describe("reactivateUserFromMirror", () => {
     ["契約が記録されていない", { ...activeRow, stripe_subscription_id: null }],
     ["手続き中（処理権あり）", { ...activeRow, checkout_claimed_at: "2026-09-26T00:00:00+00:00" }],
     ["解約済み", { ...activeRow, status: "canceled" }],
-    ["未入金", { ...activeRow, status: "incomplete" }],
-    ["支払い遅延", { ...activeRow, status: "past_due" }],
+    ["手続き中の番兵値", { ...activeRow, status: "checkout_pending" }],
   ])("ミラー行が対象外（%s）なら何もしない", async (_label, row) => {
     const retrieve = vi.fn();
     const mockClient = createMockSupabaseClient({
@@ -522,6 +523,32 @@ describe("reactivateUserFromMirror", () => {
     expect(retrieve).not.toHaveBeenCalled();
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["incomplete", "past_due"])(
+    "ミラー行が %s のままでも、Stripe上で有効になっていれば昇格する（Webhookが届かなかった場合）",
+    async (mirrorStatus) => {
+      const retrieve = vi.fn().mockResolvedValue(liveSubscription("active"));
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: [
+            { data: { ...activeRow, status: mirrorStatus }, error: null },
+            { data: [{ id: 1 }], error: null },
+          ],
+          users: { data: [{ id: 1 }], error: null },
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      vi.mocked(getStripeClient).mockReturnValue({ subscriptions: { retrieve } } as never);
+
+      const result = await reactivateUserFromMirror(1);
+
+      expect(result).toEqual({ error: null, activated: true });
+      expect(retrieve).toHaveBeenCalledWith("sub_123");
+      const subBuilder = mockClient.from.mock.results[1].value;
+      expect(subBuilder.update).toHaveBeenCalledWith(expect.objectContaining({ status: "active" }));
+      expect(subBuilder.eq).toHaveBeenCalledWith("status", mirrorStatus);
+    }
+  );
 
   it("Stripeのライブ状態が有効でなければ、ミラーだけ更新して昇格しない", async () => {
     const mockClient = createMockSupabaseClient({
@@ -795,6 +822,27 @@ describe("claimEvent", () => {
     );
     expect(reclaimBuilder.eq).toHaveBeenCalledWith("id", "evt_1");
     expect(reclaimBuilder.lt).toHaveBeenCalledWith("processed_at", expect.any(String));
+  });
+
+  it("TTLを指定した場合は、その時間を超えて放置されたclaimだけを再claimする（通知の重複抑止用）", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-26T04:00:00.000Z"));
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_events: [
+          { data: null, error: { code: "23505", message: "duplicate key" } },
+          { data: [], error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await claimEvent("checkout_recovery_notice:1:cs_1", "notice", 60);
+
+    expect(result).toEqual({ claimed: false, processedAt: null, error: null });
+    const builder = mockClient.from.mock.results[1].value;
+    expect(builder.lt).toHaveBeenCalledWith("processed_at", "2026-09-26T03:00:00.000Z");
+    vi.useRealTimers();
   });
 
   it("再claim確認に失敗した場合はエラーを返す", async () => {

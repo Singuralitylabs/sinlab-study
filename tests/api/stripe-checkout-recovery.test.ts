@@ -72,11 +72,13 @@ function createFakeDatabase(initial: { subscription: Row; user: Row }) {
   const tables: Record<string, Row[]> = {
     stripe_subscriptions: [{ ...initial.subscription }],
     users: [{ ...initial.user }],
+    stripe_events: [],
   };
   /** 次の1回だけDBエラーにするテーブル（UPDATE）。反映の途中失敗を再現する */
   const failNextUpdate = new Set<string>();
 
   return {
+    events: () => tables.stripe_events,
     subscription: () => tables.stripe_subscriptions[0],
     user: () => tables.users[0],
     failNextUpdate: (table: string) => failNextUpdate.add(table),
@@ -89,7 +91,8 @@ function createFakeDatabase(initial: { subscription: Row; user: Row }) {
       const run = () => {
         const rows = tables[table];
         if (operation === "insert") {
-          if (table === "stripe_subscriptions" && rows.some((r) => r.user_id === payload.user_id)) {
+          const uniqueKey = table === "stripe_events" ? "id" : "user_id";
+          if (table !== "users" && rows.some((r) => r[uniqueKey] === payload[uniqueKey])) {
             return { data: null, error: { code: "23505", message: "duplicate key" } };
           }
           rows.push({ ...payload });
@@ -456,5 +459,64 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     await expect(retried.json()).resolves.toEqual({ url: "/upgrade" });
     expect(db.user()).toMatchObject({ status: "active", membership_type: "general" });
     expect(mockSessionsCreate).not.toHaveBeenCalled();
+  });
+
+  it("セッションのユーザーが本人と一致しない場合は、他人の契約を書き込まず409のまま運用者へ通知する", async () => {
+    const db = stuckDatabase();
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
+    mockSessionsRetrieve.mockResolvedValue({
+      ...paidSession,
+      client_reference_id: "99",
+      metadata: { user_id: "99", auth_id: "other-auth" },
+    });
+
+    const res = await POST();
+
+    expect(res.status).toBe(409);
+    expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
+    expect(mockSessionsCreate).not.toHaveBeenCalled();
+    expect(db.subscription()).toMatchObject({
+      status: "checkout_pending",
+      checkout_claimed_at: HELD_CLAIMED_AT,
+      stripe_subscription_id: null,
+    });
+    expect(db.user()).toMatchObject({ status: "trial", membership_type: null });
+    expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledWith({
+      userId: USER_ID,
+      reason: "セッションのユーザーが一致しません",
+      sessionIds: ["cs_live_paid"],
+    });
+  });
+
+  it("Stripeがサブスクを返せない（404）恒久的な失敗は、500を繰り返さず409として運用者へ通知する", async () => {
+    const db = stuckDatabase();
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
+    const notFound = Object.assign(new MockStripeError("No such subscription"), {
+      statusCode: 404,
+    });
+    mockSubscriptionsRetrieve.mockRejectedValue(notFound);
+
+    const res = await POST();
+
+    expect(res.status).toBe(409);
+    expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "Stripeが処理を拒否しました（404）" })
+    );
+    expect(db.subscription()).toMatchObject({ checkout_claimed_at: HELD_CLAIMED_AT });
+  });
+
+  it("自動復旧できない状態で何度押されても、運用者への通知は1回に抑える", async () => {
+    const db = stuckDatabase();
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
+    mockSessionsRetrieve.mockResolvedValue({ ...paidSession, subscription: null });
+
+    for (let i = 0; i < 5; i++) {
+      expect((await POST()).status).toBe(409);
+    }
+
+    expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledTimes(1);
+    expect(db.events()).toEqual([
+      expect.objectContaining({ id: `checkout_recovery_notice:${USER_ID}:cs_live_paid` }),
+    ]);
   });
 });

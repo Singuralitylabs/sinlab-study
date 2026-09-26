@@ -14,6 +14,7 @@ vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
 vi.mock("@/app/services/api/stripe-webhook-server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/app/services/api/stripe-webhook-server")>()),
   activateUserFromCheckoutSession: vi.fn(),
+  claimEvent: vi.fn(),
   reactivateUserFromMirror: vi.fn(),
 }));
 vi.mock("@/app/services/notifications/slack");
@@ -29,6 +30,7 @@ import {
 } from "@/app/services/api/stripe-server";
 import {
   activateUserFromCheckoutSession,
+  claimEvent,
   reactivateUserFromMirror,
 } from "@/app/services/api/stripe-webhook-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -58,6 +60,7 @@ beforeEach(() => {
   vi.mocked(releaseCheckoutSlot).mockResolvedValue({ error: null });
   vi.mocked(fetchSubscriptionPrice).mockResolvedValue({ amount: 1500, currency: "jpy" });
   vi.mocked(reactivateUserFromMirror).mockResolvedValue({ error: null, activated: false });
+  vi.mocked(claimEvent).mockResolvedValue({ claimed: true, processedAt: claimedAt, error: null });
 });
 
 describe("POST /api/stripe/checkout", () => {
