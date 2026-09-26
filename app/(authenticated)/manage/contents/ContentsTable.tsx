@@ -136,10 +136,13 @@ export function ContentsTable({ groups }: ContentsTableProps) {
     setIsLoading(true);
     setErrorMessage(null);
     const ids = [...selectedIds];
+    // 一括削除で、いずれかのチャンクのスライドPDFが Storage に残ったか（issue #241）。
+    // 後続チャンクが失敗しても、先行チャンクの削除は成立済みのため警告を落とさない
+    let storageWarning: string | null = null;
+    const withStorageWarning = (message: string) =>
+      storageWarning ? `${message}。${storageWarning}` : message;
     try {
       let totalUpdated = 0;
-      // 一括削除で、いずれかのチャンクのスライドPDFが Storage に残ったか（issue #241）
-      let storageWarning: string | null = null;
       // ids が MAX_BULK_CONTENT_IDS を超える場合、APIの上限に収まるようチャンク分割して送信する
       for (let i = 0; i < ids.length; i += MAX_BULK_CONTENT_IDS) {
         const chunk = ids.slice(i, i + MAX_BULK_CONTENT_IDS);
@@ -154,7 +157,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
         });
         if (!response.ok) {
           const data = await response.json();
-          setErrorMessage(data.error || "一括操作に失敗しました");
+          setErrorMessage(withStorageWarning(data.error || "一括操作に失敗しました"));
           return;
         }
         const data = await response.json();
@@ -179,7 +182,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
         setErrorMessage(warnings.join("。"));
       }
     } catch {
-      setErrorMessage("一括操作中にエラーが発生しました");
+      setErrorMessage(withStorageWarning("一括操作中にエラーが発生しました"));
     } finally {
       setIsLoading(false);
     }
