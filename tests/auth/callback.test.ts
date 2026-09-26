@@ -100,8 +100,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
-  // console.error の spy をアサーション失敗時も確実に戻す
-  vi.restoreAllMocks();
 });
 
 describe("GET /auth/callback", () => {
@@ -248,7 +246,6 @@ describe("GET /auth/callback", () => {
     vi.mocked(createAdminSupabaseClient).mockRejectedValue(
       new Error("SUPABASE_SERVICE_ROLE_KEY が設定されていません")
     );
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     for (const request of [callbackRequest(), callbackRequestWithConsent()]) {
       const res = await GET(request);
@@ -263,7 +260,7 @@ describe("GET /auth/callback", () => {
     expect(createAdminSupabaseClient).toHaveBeenCalled();
     expect(sessionClient.insert).not.toHaveBeenCalled();
     expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
-    expect(consoleError).toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalled();
   });
 
   it("SUPABASE_SERVICE_ROLE_KEY 未設定時は 500 にせず /login へフェイルクローズする", async () => {
@@ -275,7 +272,6 @@ describe("GET /auth/callback", () => {
     vi.mocked(createAdminSupabaseClient).mockImplementationOnce(actual.createAdminSupabaseClient);
     const sessionClient = createSessionClient();
     mockSessionClient(sessionClient);
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const res = await GET(callbackRequestWithConsent());
 
@@ -284,6 +280,6 @@ describe("GET /auth/callback", () => {
     expect(sessionClient.insert).not.toHaveBeenCalled();
     expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
     expectConsentCookieDeleted(res);
-    expect(consoleError).toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalled();
   });
 });
