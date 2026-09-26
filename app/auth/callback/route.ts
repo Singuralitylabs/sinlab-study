@@ -88,7 +88,15 @@ export async function GET(request: NextRequest) {
   // SELECT RLS は本人行でも is_deleted=false を要求するため、通常クライアントでは
   // 論理削除済みレコードが見えない。再ログインで INSERT すると UNIQUE 違反になるので、
   // 存在確認だけ service_role で行い is_deleted では絞らない。INSERT 自体は通常クライアント。
-  const adminSupabase = await createAdminSupabaseClient();
+  // SUPABASE_SERVICE_ROLE_KEY 欠落時は throw するため、500 にせず /login へフェイルクローズする
+  // （例外の内容はレスポンスに出さずログのみ）。
+  let adminSupabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>;
+  try {
+    adminSupabase = await createAdminSupabaseClient();
+  } catch (adminClientError) {
+    console.error("Service Role クライアント生成エラー:", adminClientError);
+    return redirectWithoutSession(new URL("/login", origin));
+  }
   const { data: existingUser, error: userError } = await adminSupabase
     .from("users")
     .select("id, status, is_deleted")

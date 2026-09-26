@@ -240,17 +240,48 @@ describe("GET /auth/callback", () => {
     expectConsentCookieDeleted(res);
   });
 
-  it("createAdminSupabaseClient が throw した場合は存在確認も insert もせず、レスポンス（Cookie含む）を返さない", async () => {
+  it("createAdminSupabaseClient が throw した場合（キー未設定）は insert せず、error なしの /login へフェイルクローズする", async () => {
     const sessionClient = createSessionClient();
     mockSessionClient(sessionClient);
     vi.mocked(createAdminSupabaseClient).mockRejectedValue(
       new Error("SUPABASE_SERVICE_ROLE_KEY が設定されていません")
     );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(GET(callbackRequest())).rejects.toThrow(/SUPABASE_SERVICE_ROLE_KEY/);
+    for (const request of [callbackRequest(), callbackRequestWithConsent()]) {
+      const res = await GET(request);
+
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe("http://localhost/login");
+      expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
+      expectConsentCookieDeleted(res);
+      // 例外の内容（キー名など）はレスポンスに出さない
+      expect(await res.text()).not.toContain("SUPABASE_SERVICE_ROLE_KEY");
+    }
     expect(createAdminSupabaseClient).toHaveBeenCalled();
     expect(sessionClient.insert).not.toHaveBeenCalled();
     expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
-    // throw により Response が返らないため、セッション Cookie も発行されない
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("SUPABASE_SERVICE_ROLE_KEY 未設定時は 500 にせず /login へフェイルクローズする", async () => {
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
+    const actual = await vi.importActual<typeof import("@/app/services/api/supabase-server")>(
+      "@/app/services/api/supabase-server"
+    );
+    vi.mocked(createAdminSupabaseClient).mockImplementation(actual.createAdminSupabaseClient);
+    const sessionClient = createSessionClient();
+    mockSessionClient(sessionClient);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await GET(callbackRequestWithConsent());
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("http://localhost/login");
+    expect(sessionClient.insert).not.toHaveBeenCalled();
+    expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
+    expectConsentCookieDeleted(res);
+    consoleError.mockRestore();
   });
 });
