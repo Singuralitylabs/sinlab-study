@@ -556,20 +556,26 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
     expect(fake.getRow()?.checkout_session_id).toBeNull();
   });
 
-  it("決済済みで反映待ちのセッションは奪わない（決済済みの上に2件目を作らせない）", async () => {
+  it("決済済みで反映待ちのセッションは奪わず、反映用にセッションを返す（決済済みの上に2件目を作らせない）", async () => {
     const fake = createRaceSupabaseClient({
       status: CHECKOUT_PENDING_STATUS,
       checkout_claimed_at: now.toISOString(),
       checkout_session_id: "cs_paid",
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
-    mockSessionsRetrieve.mockResolvedValue({ id: "cs_paid", status: "complete", url: null });
+    const paidSession = { id: "cs_paid", status: "complete", url: null };
+    mockSessionsRetrieve.mockResolvedValue(paidSession);
 
     // TTLを超えた時刻でも奪わない
     const result = await claimCheckoutSlot(5, new Date(now.getTime() + CHECKOUT_CLAIM_TTL_MS + 1));
 
-    expect(result).toEqual({ outcome: "conflict" });
-    expect(fake.getRow()?.checkout_claimed_at).toBe(now.toISOString());
+    expect(result).toEqual({ outcome: "blocked", completedSessions: [paidSession] });
+    // 行は書き換えない（反映は呼び出し元が activateUserFromCheckoutSession() で行う）
+    expect(fake.getRow()).toMatchObject({
+      status: CHECKOUT_PENDING_STATUS,
+      checkout_claimed_at: now.toISOString(),
+      checkout_session_id: "cs_paid",
+    });
   });
 
   it("セッションid未記録でも、Customerに紐づく有効なセッションがあれば再利用する", async () => {
@@ -612,7 +618,28 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
     expect(fake.getRow()?.checkout_claimed_at).toBe(claimedAt.toISOString());
   });
 
-  it("セッションid未記録でも、決済済みのセッションがあれば奪わない", async () => {
+  it("セッションid未記録でも、決済済みのセッションがあれば奪わず、決済済みのものをすべて返す", async () => {
+    const fake = createRaceSupabaseClient({
+      status: CHECKOUT_PENDING_STATUS,
+      checkout_claimed_at: now.toISOString(),
+      checkout_session_id: null,
+      stripe_customer_id: "cus_1",
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
+    const paidA = { id: "cs_paid_a", status: "complete", url: null };
+    const paidB = { id: "cs_paid_b", status: "complete", url: null };
+    mockSessionsList.mockResolvedValue({
+      data: [paidA, { id: "cs_expired", status: "expired", url: null }, paidB],
+    });
+
+    const result = await claimCheckoutSlot(5, new Date(now.getTime() + CHECKOUT_CLAIM_TTL_MS + 1));
+
+    // 1件だけを反映すると、残りが有効な契約だった場合に二重契約の窓が開くため全件返す
+    expect(result).toEqual({ outcome: "blocked", completedSessions: [paidA, paidB] });
+    expect(fake.getRow()?.checkout_claimed_at).toBe(now.toISOString());
+  });
+
+  it("有効なセッションと決済済みのセッションが並存する場合は、有効なセッションの再利用を優先する", async () => {
     const fake = createRaceSupabaseClient({
       status: CHECKOUT_PENDING_STATUS,
       checkout_claimed_at: now.toISOString(),
@@ -621,12 +648,15 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
     mockSessionsList.mockResolvedValue({
-      data: [{ id: "cs_paid", status: "complete", url: null }],
+      data: [
+        { id: "cs_paid", status: "complete", url: null },
+        { id: "cs_open", status: "open", url: "https://checkout.stripe.com/open" },
+      ],
     });
 
-    const result = await claimCheckoutSlot(5, new Date(now.getTime() + CHECKOUT_CLAIM_TTL_MS + 1));
+    const result = await claimCheckoutSlot(5, new Date(now.getTime() + 60 * 1000));
 
-    expect(result).toEqual({ outcome: "conflict" });
+    expect(result).toEqual({ outcome: "reusable", url: "https://checkout.stripe.com/open" });
   });
 
   it("セッションもCustomerも記録されていない手続き中の行は、TTL経過後にのみ奪える", async () => {

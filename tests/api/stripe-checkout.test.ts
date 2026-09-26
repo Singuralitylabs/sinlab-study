@@ -10,6 +10,11 @@ vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
   isStripeEnabled: vi.fn(),
   releaseCheckoutSlot: vi.fn(),
 }));
+// extractUserId（純粋関数）は実物のまま使い、反映処理のみモックする
+vi.mock("@/app/services/api/stripe-webhook-server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/app/services/api/stripe-webhook-server")>()),
+  activateUserFromCheckoutSession: vi.fn(),
+}));
 
 import { POST } from "@/app/api/stripe/checkout/route";
 import { SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE } from "@/app/constants/stripe";
@@ -20,6 +25,7 @@ import {
   isStripeEnabled,
   releaseCheckoutSlot,
 } from "@/app/services/api/stripe-server";
+import { activateUserFromCheckoutSession } from "@/app/services/api/stripe-webhook-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const trialAuth = {
@@ -221,4 +227,198 @@ describe("POST /api/stripe/checkout", () => {
     expect(res.status).toBe(500);
     expect(releaseCheckoutSlot).toHaveBeenCalledWith(5, claimedAt);
   });
+});
+
+describe("POST /api/stripe/checkout（決済済みのまま反映されていない処理権の自己復旧 #250）", () => {
+  /** 処理権が保持している決済済みセッション（本人のもの） */
+  const paidSession = {
+    id: "cs_paid",
+    status: "complete",
+    client_reference_id: "5",
+    metadata: { user_id: "5" },
+    customer: "cus_1",
+    subscription: "sub_1",
+  };
+
+  function mockBlocked(sessions: unknown[] = [paidSession]) {
+    return { outcome: "blocked" as const, completedSessions: sessions as never };
+  }
+
+  it("サブスクが解約済みなら、反映して処理権を解除したうえで再claimし、新しいCheckoutのURLを返す", async () => {
+    vi.mocked(claimCheckoutSlot)
+      .mockResolvedValueOnce(mockBlocked())
+      .mockResolvedValueOnce({ outcome: "claimed", claimedAt, stripeCustomerId: "cus_1" });
+    vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({
+      error: null,
+      activated: false,
+      currentPeriodEnd: null,
+    });
+
+    const res = await POST();
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/xxx" });
+    expect(activateUserFromCheckoutSession).toHaveBeenCalledWith(paidSession);
+    expect(claimCheckoutSlot).toHaveBeenCalledTimes(2);
+    expect(createCheckoutSessionForUser).toHaveBeenCalledWith(
+      5,
+      "auth-uuid",
+      "trial@example.com",
+      "cus_1",
+      claimedAt
+    );
+  });
+
+  it("反映はStripeの呼び出し前・再claimの前に行う（処理権の確保 → Stripe呼び出しの順を崩さない）", async () => {
+    const order: string[] = [];
+    vi.mocked(claimCheckoutSlot).mockImplementation(async () => {
+      order.push("claim");
+      return order.includes("activate")
+        ? { outcome: "claimed", claimedAt, stripeCustomerId: "cus_1" }
+        : mockBlocked();
+    });
+    vi.mocked(activateUserFromCheckoutSession).mockImplementation(async () => {
+      order.push("activate");
+      return { error: null, activated: false, currentPeriodEnd: null };
+    });
+    vi.mocked(createCheckoutSessionForUser).mockImplementation(async () => {
+      order.push("checkout");
+      return { url: "https://checkout.stripe.com/xxx" };
+    });
+
+    await POST();
+
+    expect(order).toEqual(["claim", "activate", "claim", "checkout"]);
+  });
+
+  it("サブスクが有効なら、反映で会員へ昇格させ、新しいセッションは作らず再読み込みを促す409を返す", async () => {
+    vi.mocked(claimCheckoutSlot).mockResolvedValue(mockBlocked());
+    vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({
+      error: null,
+      activated: true,
+      currentPeriodEnd: "2026-10-27T00:00:00.000Z",
+    });
+
+    const res = await POST();
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      error: "お支払い済みのご契約を反映しました。ページを再読み込みしてください",
+    });
+    // 有効な契約がある状態で再claim・新しいセッション作成をしない（二重契約の防止）
+    expect(claimCheckoutSlot).toHaveBeenCalledTimes(1);
+    expect(createCheckoutSessionForUser).not.toHaveBeenCalled();
+    expect(releaseCheckoutSlot).not.toHaveBeenCalled();
+  });
+
+  it("サブスクが未入金（incomplete）なら、反映後の再claimがconflictとなり409を返す（Checkoutは作らない）", async () => {
+    vi.mocked(claimCheckoutSlot)
+      .mockResolvedValueOnce(mockBlocked())
+      .mockResolvedValueOnce({ outcome: "conflict" });
+    vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({
+      error: null,
+      activated: false,
+      currentPeriodEnd: null,
+    });
+
+    const res = await POST();
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({ error: "既に決済手続き中、またはご契約済みです" });
+    expect(activateUserFromCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(createCheckoutSessionForUser).not.toHaveBeenCalled();
+    expect(releaseCheckoutSlot).not.toHaveBeenCalled();
+  });
+
+  it("反映処理がエラーを返した場合は500を返し、処理権は残したまま（次回のリクエストで再試行）", async () => {
+    vi.mocked(claimCheckoutSlot).mockResolvedValue(mockBlocked());
+    vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({
+      error: "db error",
+      activated: false,
+      currentPeriodEnd: null,
+    });
+
+    const res = await POST();
+
+    expect(res.status).toBe(500);
+    expect(claimCheckoutSlot).toHaveBeenCalledTimes(1);
+    expect(createCheckoutSessionForUser).not.toHaveBeenCalled();
+    expect(releaseCheckoutSlot).not.toHaveBeenCalled();
+  });
+
+  it("反映処理が例外を投げた場合（Stripe API障害等）も500を返し、処理権は残したまま", async () => {
+    vi.mocked(claimCheckoutSlot).mockResolvedValue(mockBlocked());
+    vi.mocked(activateUserFromCheckoutSession).mockRejectedValue(new Error("stripe unavailable"));
+
+    const res = await POST();
+
+    expect(res.status).toBe(500);
+    expect(claimCheckoutSlot).toHaveBeenCalledTimes(1);
+    expect(createCheckoutSessionForUser).not.toHaveBeenCalled();
+    expect(releaseCheckoutSlot).not.toHaveBeenCalled();
+  });
+
+  it("本人以外のユーザーのセッションは反映しない", async () => {
+    vi.mocked(claimCheckoutSlot).mockResolvedValue(
+      mockBlocked([{ ...paidSession, client_reference_id: "99", metadata: { user_id: "99" } }])
+    );
+
+    const res = await POST();
+
+    expect(res.status).toBe(500);
+    expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
+    expect(createCheckoutSessionForUser).not.toHaveBeenCalled();
+  });
+
+  it("決済済みのセッションが複数ある場合はすべて反映し、1件でも昇格すれば新しいセッションを作らない", async () => {
+    const otherPaid = { ...paidSession, id: "cs_paid_2", subscription: "sub_2" };
+    vi.mocked(claimCheckoutSlot).mockResolvedValue(mockBlocked([paidSession, otherPaid]));
+    vi.mocked(activateUserFromCheckoutSession)
+      .mockResolvedValueOnce({ error: null, activated: false, currentPeriodEnd: null })
+      .mockResolvedValueOnce({
+        error: null,
+        activated: true,
+        currentPeriodEnd: "2026-10-27T00:00:00.000Z",
+      });
+
+    const res = await POST();
+
+    expect(res.status).toBe(409);
+    expect(activateUserFromCheckoutSession).toHaveBeenNthCalledWith(1, paidSession);
+    expect(activateUserFromCheckoutSession).toHaveBeenNthCalledWith(2, otherPaid);
+    expect(createCheckoutSessionForUser).not.toHaveBeenCalled();
+  });
+
+  it("再claimでも決済済みのまま（並行する手続きが決済済みになった等）なら反映を繰り返さず409を返す", async () => {
+    vi.mocked(claimCheckoutSlot).mockResolvedValue(mockBlocked());
+    vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({
+      error: null,
+      activated: false,
+      currentPeriodEnd: null,
+    });
+
+    const res = await POST();
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({ error: "既に決済手続き中、またはご契約済みです" });
+    expect(claimCheckoutSlot).toHaveBeenCalledTimes(2);
+    expect(activateUserFromCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(createCheckoutSessionForUser).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { outcome: "reusable" as const, url: "https://checkout.stripe.com/live" },
+    { outcome: "conflict" as const },
+    { outcome: "claimed" as const, claimedAt, stripeCustomerId: null },
+  ])(
+    "blocked 以外（$outcome）では反映処理を呼ばない（既存経路の挙動を変えない）",
+    async (claim) => {
+      vi.mocked(claimCheckoutSlot).mockResolvedValue(claim);
+
+      await POST();
+
+      expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
+      expect(claimCheckoutSlot).toHaveBeenCalledTimes(1);
+    }
+  );
 });

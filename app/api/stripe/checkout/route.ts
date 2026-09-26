@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type Stripe from "stripe";
 import {
   isChargeableSubscriptionPrice,
   logDisplayPriceDrift,
@@ -14,10 +15,56 @@ import {
   isStripeEnabled,
   releaseCheckoutSlot,
 } from "@/app/services/api/stripe-server";
+import {
+  activateUserFromCheckoutSession,
+  extractUserId,
+} from "@/app/services/api/stripe-webhook-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 /** 契約中・決済確認中のいずれでも同じ案内を返す（契約状態を推測させないため） */
 const CHECKOUT_CONFLICT_MESSAGE = "既に決済手続き中、またはご契約済みです";
+
+/** 反映されていなかった決済をこのリクエストで反映し、会員へ昇格させた場合の案内 */
+const CHECKOUT_RECOVERED_MESSAGE =
+  "お支払い済みのご契約を反映しました。ページを再読み込みしてください";
+
+/**
+ * 処理権が保持したまま反映されていない決済済みセッション（Webhookとsuccessページの両方が
+ * 失敗した場合に残る。#250）を、既存の冪等な反映処理で反映する。反映によりサブスクの
+ * ライブ状態がミラー行に書かれ、処理権は解除される（有効な契約なら会員へ昇格する）。
+ *
+ * 反映後に claim をやり直すことで、次の分岐はミラー行の実状態に従う。有効・未入金など
+ * 契約が残っていれば conflict（新しいセッションは作らない）、終端状態なら再契約できる。
+ *
+ * @returns activated: 会員へ昇格した / applied: 反映したが昇格はしていない /
+ * error: 反映できなかった（処理権は残るため、次回のリクエストで再試行される）
+ */
+async function applyCompletedCheckouts(
+  userId: number,
+  sessions: Stripe.Checkout.Session[]
+): Promise<"activated" | "applied" | "error"> {
+  let activated = false;
+  for (const session of sessions) {
+    // Customerはユーザーごとに一意のため通常は一致する。一致しないセッションを反映すると
+    // 他人の契約を書き込むことになるため、反映せずに止める
+    if (extractUserId(session.client_reference_id, session.metadata) !== userId) {
+      console.error("決済済みCheckoutセッションのユーザーが一致しません:", session.id);
+      return "error";
+    }
+    try {
+      const result = await activateUserFromCheckoutSession(session);
+      if (result.error) {
+        console.error("決済済みCheckoutセッションの反映エラー:", result.error);
+        return "error";
+      }
+      activated ||= result.activated;
+    } catch (error) {
+      console.error("決済済みCheckoutセッションの反映エラー:", error);
+      return "error";
+    }
+  }
+  return activated ? "activated" : "applied";
+}
 
 export async function POST() {
   if (!isStripeEnabled()) {
@@ -57,11 +104,25 @@ export async function POST() {
     // Checkout Sessionを作る前に処理権を原子的に確保する。素のSELECTによる存在チェック
     // だけでは、決済完了までミラー行が存在しない時間帯に並行リクエストがすり抜け、2つの
     // Checkout Sessionが作られて二重契約・二重課金になる（#103）
-    const claim = await claimCheckoutSlot(auth.userId);
+    let claim = await claimCheckoutSlot(auth.userId);
+    // 決済済みのまま反映されていない処理権は、時間が経っても解けない（TTLの対象外）。
+    // ここで反映して自己復旧させ、claimを1度だけやり直す（#250）
+    if (claim.outcome === "blocked") {
+      const recovery = await applyCompletedCheckouts(auth.userId, claim.completedSessions);
+      if (recovery === "error") {
+        return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
+      }
+      if (recovery === "activated") {
+        return NextResponse.json({ error: CHECKOUT_RECOVERED_MESSAGE }, { status: 409 });
+      }
+      claim = await claimCheckoutSlot(auth.userId);
+    }
     if (claim.outcome === "error") {
       return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
     }
-    if (claim.outcome === "conflict") {
+    // やり直しても blocked のまま（並行する別の手続きが決済済みになった等）なら、
+    // 反映を繰り返さず従来どおり待たせる
+    if (claim.outcome === "conflict" || claim.outcome === "blocked") {
       return NextResponse.json({ error: CHECKOUT_CONFLICT_MESSAGE }, { status: 409 });
     }
     // 手続き中のセッションがまだ有効な場合は、新しく作らず同じURLへ案内する
