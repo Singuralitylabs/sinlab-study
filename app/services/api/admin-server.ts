@@ -35,6 +35,9 @@ type SiblingParentFilter = { column: "theme_id" | "phase_id" | "week_id"; value:
 
 type AdminSupabaseClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>;
 
+/** スライド孤児削除で、参照確認・Storage 削除を1回にまとめるキー数の上限 */
+const SLIDE_CLEANUP_CHUNK_SIZE = 100;
+
 /**
  * `slides` バケットの孤児PDF削除（issue #145）。
  *
@@ -46,8 +49,11 @@ type AdminSupabaseClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>
  * Storage の削除失敗ではDB操作全体を失敗させず、結果を `storageRemoved` で返す
  * （サムネイル DELETE の `storageRemoved` と同じ前例）。
  *
- * 往復はキー数に依らず最大2回（生きた参照の一括取得 → 未参照キーの一括削除。issue #246）。
- * 参照の取得に失敗した場合は、参照中のキーを誤って消さないよう削除を試みず false を返す。
+ * 往復は `SLIDE_CLEANUP_CHUNK_SIZE` 件ごとのチャンクあたり最大2回（生きた参照の一括取得 →
+ * 未参照キーの一括削除。issue #246）。チャンクに分けるのは、スライドの多いテーマの削除で
+ * PostgREST の `in.(...)` クエリ文字列が長くなりすぎないようにし、失敗をチャンク単位に
+ * 局所化するため。参照の取得に失敗したチャンクは、参照中のキーを誤って消さないよう削除を
+ * 試みず、全体の結果を false にする（他のチャンクの削除は続行する）。
  */
 async function removeUnreferencedSlideObjects(
   supabase: AdminSupabaseClient,
@@ -58,9 +64,22 @@ async function removeUnreferencedSlideObjects(
       pdfUrls.map((url) => toSlideObjectKey(url)).filter((key): key is string => key !== null)
     ),
   ];
-  if (keys.length === 0) {
-    return true;
+  let storageRemoved = true;
+  for (let i = 0; i < keys.length; i += SLIDE_CLEANUP_CHUNK_SIZE) {
+    const removed = await removeUnreferencedSlideObjectChunk(
+      supabase,
+      keys.slice(i, i + SLIDE_CLEANUP_CHUNK_SIZE)
+    );
+    storageRemoved &&= removed;
   }
+  return storageRemoved;
+}
+
+/** 孤児削除の1チャンク分（`keys` は正規化・重複排除済み） */
+async function removeUnreferencedSlideObjectChunk(
+  supabase: AdminSupabaseClient,
+  keys: string[]
+): Promise<boolean> {
   try {
     const { data, error } = await supabase
       .from("learning_contents")

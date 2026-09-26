@@ -387,6 +387,9 @@ export function ContentForm({
           // 更新自体は成功している。pdf_url の差し替え・種別変更で旧スライドPDFが Storage に
           // 残ったことを知らせるため、一覧へ遷移せずこの画面に警告を出す（issue #241）
           setMessage({ type: "error", text: warning });
+          // 保存済みの位置を新たな初期値とし、そのまま再保存しても insert_after_id を再送して
+          // 再採番が走らないようにする（週は refresh 後の initialData.week_id から再導出される）
+          initialInsertAfterId.current = insertAfterId;
           router.refresh();
           return;
         }

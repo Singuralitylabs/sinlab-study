@@ -141,6 +141,17 @@ export function ContentsTable({ groups }: ContentsTableProps) {
     let storageWarning: string | null = null;
     const withStorageWarning = (message: string) =>
       storageWarning ? `${message}。${storageWarning}` : message;
+    // 成功したチャンクのID。後続チャンクが失敗しても、成立済みの分は選択から外して一覧を更新する
+    const processedIds: number[] = [];
+    const settlePartialSuccess = () => {
+      if (processedIds.length === 0) return;
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of processedIds) next.delete(id);
+        return next;
+      });
+      router.refresh();
+    };
     try {
       let totalUpdated = 0;
       // ids が MAX_BULK_CONTENT_IDS を超える場合、APIの上限に収まるようチャンク分割して送信する
@@ -158,10 +169,12 @@ export function ContentsTable({ groups }: ContentsTableProps) {
         if (!response.ok) {
           const data = await response.json();
           setErrorMessage(withStorageWarning(data.error || "一括操作に失敗しました"));
+          settlePartialSuccess();
           return;
         }
         const data = await response.json();
         totalUpdated += typeof data.updated === "number" ? data.updated : 0;
+        processedIds.push(...chunk);
         if (action === "delete") {
           storageWarning ??= getSlideStorageWarning(data, "bulkDelete");
         }
@@ -183,6 +196,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
       }
     } catch {
       setErrorMessage(withStorageWarning("一括操作中にエラーが発生しました"));
+      settlePartialSuccess();
     } finally {
       setIsLoading(false);
     }

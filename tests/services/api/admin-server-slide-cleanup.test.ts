@@ -612,3 +612,61 @@ describe("updateContent の現在値取得の一本化（issue #246）", () => {
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("スライド孤児削除のチャンク分割（PR #260 レビュー対応）", () => {
+  const keys = Array.from(
+    { length: 150 },
+    (_, i) => `big/slide-${String(i + 1).padStart(3, "0")}.pdf`
+  );
+  const ids = keys.map((_, i) => i + 1);
+
+  it("100件を超えるキーは100件ごとに参照確認・削除する", async () => {
+    const { mockClient, remove } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          { data: keys.map((pdf_url) => ({ pdf_url })), error: null },
+          { data: ids.map((id) => ({ id })), error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+        ],
+      },
+    });
+
+    const result = await bulkUpdateContents(ids, { is_deleted: true });
+
+    expect(result.storageRemoved).toBe(true);
+    // pdf_url 取得・一括UPDATE・参照確認2チャンク
+    expect(mockClient.from).toHaveBeenCalledTimes(4);
+    expect(mockClient.from.mock.results[2].value.in).toHaveBeenCalledWith(
+      "pdf_url",
+      keys.slice(0, 100)
+    );
+    expect(mockClient.from.mock.results[3].value.in).toHaveBeenCalledWith(
+      "pdf_url",
+      keys.slice(100)
+    );
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(remove).toHaveBeenNthCalledWith(1, keys.slice(0, 100));
+    expect(remove).toHaveBeenNthCalledWith(2, keys.slice(100));
+  });
+
+  it("あるチャンクの参照確認に失敗しても他のチャンクは削除し、全体は storageRemoved: false", async () => {
+    const { remove } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          { data: keys.map((pdf_url) => ({ pdf_url })), error: null },
+          { data: ids.map((id) => ({ id })), error: null },
+          { data: null, error: dbError },
+          { data: [], error: null },
+        ],
+      },
+    });
+
+    const result = await bulkUpdateContents(ids, { is_deleted: true });
+
+    expect(result.storageRemoved).toBe(false);
+    // 失敗したチャンク（先頭100件）は削除せず、残りのチャンクだけ削除する
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith(keys.slice(100));
+  });
+});
