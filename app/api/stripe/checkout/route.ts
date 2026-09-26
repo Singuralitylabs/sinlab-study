@@ -7,6 +7,10 @@ import {
 } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import {
+  reactivatePaidTrialUser,
+  recoverCompletedCheckout,
+} from "@/app/services/api/stripe-checkout-recovery-server";
+import {
   CheckoutCreationError,
   claimCheckoutSlot,
   createCheckoutSessionForUser,
@@ -18,6 +22,18 @@ import { getServerAuth } from "@/app/services/auth/server-auth";
 
 /** 契約中・決済確認中のいずれでも同じ案内を返す（契約状態を推測させないため） */
 const CHECKOUT_CONFLICT_MESSAGE = "既に決済手続き中、またはご契約済みです";
+
+/**
+ * 反映されていなかった決済をこのリクエストで反映し、会員へ昇格させた場合の遷移先。
+ * successページは同じ冪等な反映処理を呼び直したうえで完了画面（次回請求日つき）を出すため、
+ * 復旧を正常系として案内できる（エラー表示で再読み込みを促さない）
+ */
+function checkoutSuccessPath(sessionId: string): string {
+  return `/upgrade/success?session_id=${encodeURIComponent(sessionId)}`;
+}
+
+/** 昇格が漏れていた契約を再昇格させた場合の遷移先（契約中の表示になる） */
+const REACTIVATED_PATH = "/upgrade";
 
 export async function POST() {
   if (!isStripeEnabled()) {
@@ -57,11 +73,40 @@ export async function POST() {
     // Checkout Sessionを作る前に処理権を原子的に確保する。素のSELECTによる存在チェック
     // だけでは、決済完了までミラー行が存在しない時間帯に並行リクエストがすり抜け、2つの
     // Checkout Sessionが作られて二重契約・二重課金になる（#103）
-    const claim = await claimCheckoutSlot(auth.userId);
+    let claim = await claimCheckoutSlot(auth.userId);
+    // 決済済みのまま反映されていない処理権は、時間が経っても解けない（TTLの対象外）。
+    // ここで反映して自己復旧させ、claimを1度だけやり直す（#250）
+    if (claim.outcome === "blocked") {
+      const recovery = await recoverCompletedCheckout(
+        auth.userId,
+        claim.completedSessions,
+        claim.heldClaimedAt
+      );
+      if (recovery.kind === "error") {
+        return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
+      }
+      if (recovery.kind === "unrecoverable") {
+        return NextResponse.json({ error: CHECKOUT_CONFLICT_MESSAGE }, { status: 409 });
+      }
+      // 有効な契約を反映して昇格した。新しいセッションは作らず、完了画面へ案内する
+      if (recovery.kind === "activated") {
+        return NextResponse.json({ url: checkoutSuccessPath(recovery.sessionId) });
+      }
+      claim = await claimCheckoutSlot(auth.userId);
+    }
     if (claim.outcome === "error") {
       return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
     }
     if (claim.outcome === "conflict") {
+      // 有効な契約がミラー行にあるのにお試しのまま、という不整合なら再昇格して案内する
+      if (await reactivatePaidTrialUser(auth.userId)) {
+        return NextResponse.json({ url: REACTIVATED_PATH });
+      }
+      return NextResponse.json({ error: CHECKOUT_CONFLICT_MESSAGE }, { status: 409 });
+    }
+    // やり直しても blocked のまま（並行する別の手続きが決済済みになった等）なら、
+    // 反映を繰り返さず従来どおり待たせる
+    if (claim.outcome === "blocked") {
       return NextResponse.json({ error: CHECKOUT_CONFLICT_MESSAGE }, { status: 409 });
     }
     // 手続き中のセッションがまだ有効な場合は、新しく作らず同じURLへ案内する

@@ -29,6 +29,20 @@ function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
 }
 
 /**
+ * Stripeから取り直したサブスクのライブ状態を、ミラー行（`stripe_subscriptions`）の列へ写す。
+ * ミラーを書く経路（Checkout完了の反映・サブスク更新Webhook・再昇格）はすべてこれを使い、
+ * 列を追加したときに経路ごとに内容がずれないようにする。
+ */
+function subscriptionMirrorFields(subscription: Stripe.Subscription) {
+  return {
+    status: subscription.status,
+    cancel_at_period_end: subscription.cancel_at_period_end,
+    current_period_end: toIsoOrNull(subscription.items.data[0]?.current_period_end),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+/**
  * checkout.session.completed のWebhook、および successページの両方から呼ばれる冪等な昇格処理。
  * stripe_subscriptions を upsert したうえで、サブスクが現に有効（ACTIVATABLE_SUBSCRIPTION_STATUSES）
  * な場合のみ users を active/general に更新する。管理者が承認前に手動承認していた場合を含め、
@@ -48,11 +62,19 @@ function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
  * （完全な排他制御にはDBトランザクション/RPCが必要でスコープ外）、取得を書き込み直前の
  * 1箇所に集約することで、古いスナップショットのままミラーだけ巻き戻る事態は避けられる。
  *
+ * @param options.expectedClaimedAt 呼び出し元が観測した処理権の確保時刻。指定した場合は、
+ * ミラー行の `checkout_claimed_at` がこの値のままのときだけ書き込む（異なれば `skipped`
+ * 相当で何もしない）。Checkout API の自己復旧（#250）が、並行する別リクエストの再claimで
+ * 確保されたばかりの処理権（セッションid記録前で上記のガードが効かない）を解除しないように
+ * するためのもの。Webhook・successページは指定しない（従来どおり）
  * @returns activated: 実際に users を昇格したか。successページ側の表示分岐に使う。
  * currentPeriodEnd: 昇格時に確定した次回請求日（ISO文字列）。successページが
  * `stripe_subscriptions` を読み直さずに表示できるよう、ここで返す
  */
-export async function activateUserFromCheckoutSession(session: Stripe.Checkout.Session): Promise<{
+export async function activateUserFromCheckoutSession(
+  session: Stripe.Checkout.Session,
+  options: { expectedClaimedAt?: string } = {}
+): Promise<{
   error: string | null;
   activated: boolean;
   currentPeriodEnd: string | null;
@@ -89,7 +111,14 @@ export async function activateUserFromCheckoutSession(session: Stripe.Checkout.S
   // いた場合は読み直して判断からやり直す
   let mirrored: MirrorWriteResult = { kind: "conflict" };
   for (let attempt = 0; attempt < MIRROR_WRITE_MAX_ATTEMPTS; attempt++) {
-    mirrored = await writeCheckoutMirror(supabase, userId, session, customerId, subscriptionId);
+    mirrored = await writeCheckoutMirror(
+      supabase,
+      userId,
+      session,
+      customerId,
+      subscriptionId,
+      options.expectedClaimedAt
+    );
     if (mirrored.kind !== "conflict") {
       break;
     }
@@ -114,6 +143,26 @@ export async function activateUserFromCheckoutSession(session: Stripe.Checkout.S
     return { error: null, activated: false, currentPeriodEnd: null };
   }
 
+  const promoted = await promoteUserToGeneral(supabase, userId);
+  if (promoted.error) {
+    return { error: promoted.error, activated: false, currentPeriodEnd: null };
+  }
+  return {
+    error: null,
+    activated: promoted.activated,
+    currentPeriodEnd: promoted.activated ? currentPeriodEnd : null,
+  };
+}
+
+/**
+ * ユーザーを一般有料会員（active / general）へ昇格する。却下（rejected）済みユーザーは昇格しない。
+ * 呼び出し元は、サブスクが現に有効（ACTIVATABLE_SUBSCRIPTION_STATUSES）であることを
+ * Stripeから取り直したライブ状態で確認してから呼ぶこと。
+ */
+async function promoteUserToGeneral(
+  supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
+  userId: number
+): Promise<{ error: string | null; activated: boolean }> {
   const { data: updatedUsers, error: userError } = await supabase
     .from("users")
     .update({
@@ -127,11 +176,76 @@ export async function activateUserFromCheckoutSession(session: Stripe.Checkout.S
 
   if (userError) {
     console.error("ユーザー昇格エラー:", userError.message);
-    return { error: userError.message, activated: false, currentPeriodEnd: null };
+    return { error: userError.message, activated: false };
+  }
+  return { error: null, activated: (updatedUsers?.length ?? 0) > 0 };
+}
+
+/**
+ * ミラー行に契約が記録されている（終端状態でも手続き中でもない）のに、ユーザーが昇格して
+ * いない状態を解消する（#250）。反映処理でミラー行の書き込み（処理権の解除を含む）までは
+ * 成功し users の更新だけが失敗した場合や、未入金（`incomplete`）等で反映した後にStripe上で
+ * 有効になったがWebhookが届かなかった場合に残る状態で、successページのURLも手元に無く、
+ * Checkout APIは契約中として409を返し続けてしまう。
+ *
+ * お試しユーザーからの Checkout API が conflict になったときにだけ呼ぶ（管理画面には
+ * 有料会員をお試しへ戻す操作が無く、お試しへの降格は終端状態への遷移時に限られるため、
+ * この組み合わせは不整合としてのみ生じる）。ミラー行の値は信用せず、Stripeから取り直した
+ * ライブ状態が有効な場合だけ昇格する。処理権を保持している行（手続き中）は対象外。
+ */
+export async function reactivateUserFromMirror(
+  userId: number
+): Promise<{ error: string | null; activated: boolean }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { data: row, error: fetchError } = await supabase
+    .from("stripe_subscriptions")
+    .select("stripe_subscription_id, status, checkout_claimed_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error("stripe_subscriptions取得エラー:", fetchError.message);
+    return { error: fetchError.message, activated: false };
+  }
+  // 契約が記録されている行（終端状態でも手続き中でもない）が対象。ミラーの status 自体は
+  // 信用しない: Webhookが届かない前提では `incomplete` / `past_due` のまま、Stripe上は入金済みで
+  // `active` になっていることがある
+  if (
+    !row?.stripe_subscription_id ||
+    row.checkout_claimed_at !== null ||
+    NON_CURRENT_SUBSCRIPTION_STATUSES.includes(row.status)
+  ) {
+    return { error: null, activated: false };
   }
 
-  const activated = (updatedUsers?.length ?? 0) > 0;
-  return { error: null, activated, currentPeriodEnd: activated ? currentPeriodEnd : null };
+  const stripe = getStripeClient();
+  const subscription = await stripe.subscriptions.retrieve(row.stripe_subscription_id);
+
+  // 読み取りから書き込みまでに行が変わっていない（同じ契約・同じ状態で、処理権も確保されて
+  // いない）ことを条件にしてライブ状態を書く。status を条件に含めないと、取得後に並行する
+  // 解約Webhookが書いた canceled を、古いスナップショットの active で上書きして昇格させてしまう
+  const { data: updated, error: updateError } = await supabase
+    .from("stripe_subscriptions")
+    .update(subscriptionMirrorFields(subscription))
+    .eq("user_id", userId)
+    .eq("stripe_subscription_id", subscription.id)
+    .eq("status", row.status)
+    .is("checkout_claimed_at", null)
+    .select("id");
+
+  if (updateError) {
+    console.error("stripe_subscriptions更新エラー:", updateError.message);
+    return { error: updateError.message, activated: false };
+  }
+  if ((updated?.length ?? 0) === 0) {
+    return { error: null, activated: false };
+  }
+  if (!ACTIVATABLE_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
+    return { error: null, activated: false };
+  }
+
+  return await promoteUserToGeneral(supabase, userId);
 }
 
 /** ミラー更新の再試行回数。1回目で競合した場合に、読み直して判断からやり直す */
@@ -155,7 +269,8 @@ async function writeCheckoutMirror(
   userId: number,
   session: Stripe.Checkout.Session,
   customerId: string,
-  subscriptionId: string
+  subscriptionId: string,
+  expectedClaimedAt: string | undefined
 ): Promise<MirrorWriteResult> {
   const { data: existingRow, error: existingFetchError } = await supabase
     .from("stripe_subscriptions")
@@ -166,6 +281,17 @@ async function writeCheckoutMirror(
   if (existingFetchError) {
     console.error("stripe_subscriptions取得エラー:", existingFetchError.message);
     return { kind: "error", message: existingFetchError.message };
+  }
+
+  // 呼び出し元が観測した処理権が既に入れ替わっている（別リクエストが再claimした）なら書かない。
+  // 書き込みは下のCASで「ここで読んだ checkout_claimed_at」を条件にするため、読んだ後に
+  // 入れ替わった場合も conflict → 読み直しでこの判定に戻る。expectedClaimedAt は呼び出し元が
+  // 同じ列をDBから読んだ値そのものなので、文字列の比較で足りる（表記の揺れが生じない）
+  if (
+    expectedClaimedAt !== undefined &&
+    (existingRow?.checkout_claimed_at ?? null) !== expectedClaimedAt
+  ) {
+    return { kind: "skipped" };
   }
 
   // 進行中のCheckout（有効な処理権）が、**別の**セッションの処理で壊されないようにする。
@@ -193,17 +319,15 @@ async function writeCheckoutMirror(
 
   const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-  const currentPeriodEnd = toIsoOrNull(subscription.items.data[0]?.current_period_end);
+  const liveFields = subscriptionMirrorFields(subscription);
+  const currentPeriodEnd = liveFields.current_period_end;
   const mirror = {
     stripe_customer_id: customerId,
     stripe_subscription_id: subscription.id,
-    status: subscription.status,
-    cancel_at_period_end: subscription.cancel_at_period_end,
-    current_period_end: currentPeriodEnd,
+    ...liveFields,
     // 実ステータスを書けた時点でCheckout作成の処理権は役目を終える（正常な解除）
     checkout_claimed_at: null,
     checkout_session_id: null,
-    updated_at: new Date().toISOString(),
   };
 
   if (!existingRow) {
@@ -285,12 +409,7 @@ export async function syncSubscriptionStatus(
 
   const { error: updateError } = await supabase
     .from("stripe_subscriptions")
-    .update({
-      status: subscription.status,
-      cancel_at_period_end: subscription.cancel_at_period_end,
-      current_period_end: toIsoOrNull(subscription.items.data[0]?.current_period_end),
-      updated_at: new Date().toISOString(),
-    })
+    .update(subscriptionMirrorFields(subscription))
     .eq("stripe_subscription_id", subscription.id);
 
   if (updateError) {
@@ -351,12 +470,15 @@ const EVENT_CLAIM_TTL_MINUTES = 10;
  * ハンドラは冪等（upsert/条件付きUPDATE）に設計されているため、まれに完了済みの
  * イベントを再claim・再実行しても実害は小さい（Slack通知の重複程度）。
  *
+ * @param ttlMinutes 再claimを許すまでの時間。Webhook以外の用途（Checkout自動復旧不可通知の
+ * 重複抑止）で、一定期間に1回だけ処理したい場合に指定する（既定はWebhook用のTTL）
  * @returns processedAt: このclaimで設定した`processed_at`。releaseEventClaim()に
  * そのまま渡すことで、自分が確保したclaimだけを解放する（後述）
  */
 export async function claimEvent(
   eventId: string,
-  type: string
+  type: string,
+  ttlMinutes: number = EVENT_CLAIM_TTL_MINUTES
 ): Promise<{ claimed: boolean; processedAt: string | null; error: string | null }> {
   const supabase = await createAdminSupabaseClient();
 
@@ -376,7 +498,7 @@ export async function claimEvent(
   }
 
   // 既にclaim済み。TTLを超えて放置されている場合のみ再claimを許可する
-  const staleBefore = new Date(Date.now() - EVENT_CLAIM_TTL_MINUTES * 60 * 1000).toISOString();
+  const staleBefore = new Date(Date.now() - ttlMinutes * 60 * 1000).toISOString();
   const reclaimedAt = new Date().toISOString();
   const { data: reclaimed, error: reclaimError } = await supabase
     .from("stripe_events")

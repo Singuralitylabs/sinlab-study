@@ -395,7 +395,7 @@ erDiagram
 >
 > Checkoutを作れなかった場合は `checkout_claimed_at` をNULLに戻して解放し（`releaseCheckoutSlot()`。確保済みCustomerを失わないよう行自体は削除しない）、決済完了時は昇格処理のミラー更新が実ステータスと `checkout_claimed_at = NULL` を書き込むことで解除される。
 >
-> **有効なclaimが残っている場合の判断**: `checkout_session_id` のセッション状態をStripeへ問い合わせ、`open`（まだ決済できる）ならそのURLを再利用し（2つ目のセッションを作らず、手続きを中断したユーザーも即座にやり直せる）、`expired` なら参照した claim をそのまま奪い（claimの確保時刻をCASの条件にする）、`complete`（決済済みで反映待ち）なら奪わない。`checkout_session_id` が記録されていない場合は、Customerに紐づく「claim確保以降に作られたセッション」を照会して同じ判定を行う（作成時刻の下限をclaim確保時刻に置き、過去の契約で完了したセッションを拾わない）。Stripeへ照会できない場合のみ、`CHECKOUT_CLAIM_TTL_MS`（`app/services/api/stripe-server.ts`）経過で再claim可能とする救済に委ねる。TTLはセッション有効期限（32分）＋猶予（10分）としてコードで導出し、「TTL経過時点で当該セッションは必ず失効している」という不等号を構造的に保証する。
+> **有効なclaimが残っている場合の判断**: `checkout_session_id` のセッション状態をStripeへ問い合わせ、`open`（まだ決済できる）ならそのURLを再利用し（2つ目のセッションを作らず、手続きを中断したユーザーも即座にやり直せる）、`expired` なら参照した claim をそのまま奪い（claimの確保時刻をCASの条件にする）、`complete`（決済済みで反映待ち）なら奪わず、呼び出し元（`POST /api/stripe/checkout`）がそのセッションを反映してから claim をやり直す（Webhookとsuccessページの両方が失敗した場合の自己復旧。[機能設計書](./specification.md)2.11節）。`checkout_session_id` が記録されていない場合は、Customerに紐づく「claim確保以降に作られたセッション」を照会して同じ判定を行う（作成時刻の下限をclaim確保時刻に置き、過去の契約で完了したセッションを拾わない。照会で `complete` と `open` が並存する場合は `complete` を優先し、`open` を失効させてから反映する）。Stripeへ照会できない場合のみ、`CHECKOUT_CLAIM_TTL_MS`（`app/services/api/stripe-server.ts`）経過で再claim可能とする救済に委ねる。TTLはセッション有効期限（32分）＋猶予（10分）としてコードで導出し、「TTL経過時点で当該セッションは必ず失効している」という不等号を構造的に保証する。
 >
 > **処理権を解放してよい条件**: Checkout作成に失敗した場合でも、解放してよいのは「Stripe側に有効なセッションが残っていないと確定できる」ときだけ（Stripeが4xxで拒否した場合、またはセッションを失効させられた場合）。通信タイムアウト・5xxのように作成済みか判別できない場合は解放せず、次回claim時の照会かTTLに委ねる。セッションidを記録できなかった場合は、作成したセッションを失効させてから失敗させる（記録できないと、そのセッションと処理権を紐付けられず、リプレイで処理権が解除されたときに二重契約の窓が開くため）。
 >
@@ -418,6 +418,8 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 > **claim/releaseによる原子的な冪等性**: `event.id` への素のINSERT（upsertではない）を「claim」として使う（`claimEvent()`）。同一event.idの並行配信はDBの一意制約により片方だけがclaimに成功するため、真に排他的。ハンドラが失敗した場合のみ行を削除して処理権を解放する（`releaseEventClaim()`）。先に成功扱いで記録し、ハンドラが後から失敗するような設計だと、Stripeの自動リトライ時に「処理済み」と誤判定され二度とハンドラに到達できなくなるため、claim（実行前）とrelease（失敗時のみ）を明確に分離している。`/api/stripe/webhook` はclaimに成功した場合のみハンドラを実行する。
 >
 > **TTLによる救済（既知の限界への対処）**: サーバーレス関数のタイムアウト・強制終了等でclaim後にrelease処理へ到達できなかった場合、claim行が残り続け以後の再送が永久にスキップされてしまう。これを防ぐため、一意制約違反（既にclaim済み）の場合は既存claimの`processed_at`が`EVENT_CLAIM_TTL_MINUTES`（10分、`app/services/api/stripe-webhook-server.ts`）を超えて放置されていないかを確認し、放置されていれば`processed_at`を更新して再claimする。ハンドラは冪等に設計されているため、まれに完了済みイベントを再claim・再実行しても実害は小さい（Slack通知の重複程度）。
+>
+> **Webhook以外の用途（通知の重複抑止）**: Checkout自動復旧不可通知（[機能設計書](./specification.md)2.11節）の重複抑止にも、同じclaimを流用する。キーは `checkout_recovery_notice:<users.id>:<Checkout Session id,...>`、`type` は `app.checkout_recovery_notice` で、Stripeの `event.id`（`evt_...`）とは衝突しない。TTLは60分（`claimEvent()` の `ttlMinutes` で指定）で、releaseはしない（60分経過後に再claimできた場合のみ再通知する）。
 >
 > **releaseの3者競合対策**: `releaseEventClaim()` は `id` に加えて `claimEvent()` が返した `processed_at` の一致もDELETE条件に含める。TTL経過後に別プロセスが再claimした直後、旧claim保持者が遅れて解放処理に到達すると、`id` のみの無条件DELETEでは新しいclaimまで消してしまい3重処理の窓が開くため。
 

@@ -620,11 +620,19 @@ export async function fetchStripeSubscriptionByUserId(userId: number): Promise<{
  * `claimCheckoutSlot()` の結果。
  * - claimed: 処理権を確保できた（新規・解放済み・失効セッションの奪取）
  * - reusable: 有効なCheckout Sessionが既にあるため、そのURLを再利用する
- * - conflict: 契約中、または決済完了済みで反映待ち
+ * - blocked: 処理権が決済済み（complete）のセッションを保持したまま、反映されていない
+ *   （Webhookとsuccessページの両方が失敗した）。呼び出し元は `completedSessions` を
+ *   `activateUserFromCheckoutSession()` で反映してから claim をやり直す（#250）。
+ *   `heldClaimedAt` は判定に使った処理権の確保時刻（DBから読んだ値そのまま）で、反映時に
+ *   `expectedClaimedAt` として渡し、並行リクエストが確保し直した処理権を解除させない。
+ *   `stripe-webhook-server.ts` がこのファイルを import しているため、反映処理はここから
+ *   呼ばない（循環 import を作らない）
+ * - conflict: 契約中、または他の手続きが進行中
  */
 export type CheckoutSlotClaim =
   | { outcome: "claimed"; claimedAt: string; stripeCustomerId: string | null }
   | { outcome: "reusable"; url: string }
+  | { outcome: "blocked"; completedSessions: Stripe.Checkout.Session[]; heldClaimedAt: string }
   | { outcome: "conflict" }
   | { outcome: "error"; message: string };
 
@@ -652,7 +660,9 @@ type ClaimCondition =
  * - open（まだ決済できる）: 新しいセッションを作らず同じURLを返す。これにより、手続きを
  *   中断したユーザーがTTLまで締め出されることも、2つのセッションが並存することもない
  * - expired（失効済み）: 参照した claim をそのまま奪う（CAS）
- * - complete（決済済みで反映待ち）: 奪わない。奪うと決済済みの契約の上にもう1件作れてしまう
+ * - complete（決済済みで反映待ち）: 奪わない。奪うと決済済みの契約の上にもう1件作れてしまう。
+ *   Checkout Sessionの complete は不変でTTLでも解けないため、`blocked` としてセッションを
+ *   返し、呼び出し元に反映（ライブ状態のミラーへの書き込みと claim の解除）を委ねる
  * Stripeへ問い合わせられない場合（セッション未記録・API障害）のみ、TTLによる救済に委ねる。
  *
  * @returns claimed の `stripeCustomerId` は既存行に保存済みのCustomer（再利用対象。
@@ -691,7 +701,9 @@ export async function claimCheckoutSlot(
   // 奪えなかった＝契約中か、他の手続きが進行中。どちらかを既存行から判定する
   const { data: existing, error: fetchError } = await supabase
     .from("stripe_subscriptions")
-    .select("status, checkout_claimed_at, checkout_session_id, stripe_customer_id")
+    .select(
+      "status, checkout_claimed_at, checkout_session_id, stripe_customer_id, stripe_subscription_id"
+    )
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -709,12 +721,20 @@ export async function claimCheckoutSlot(
     const resolution = await resolveHeldSession(
       existing.checkout_session_id,
       existing.stripe_customer_id,
-      heldClaimedAt
+      heldClaimedAt,
+      existing.stripe_subscription_id
     );
     if (resolution.kind === "reusable") {
       return { outcome: "reusable", url: resolution.url };
     }
     if (resolution.kind === "blocked") {
+      return {
+        outcome: "blocked",
+        completedSessions: resolution.completedSessions,
+        heldClaimedAt,
+      };
+    }
+    if (resolution.kind === "pending") {
       return { outcome: "conflict" };
     }
     if (resolution.kind === "finished") {
@@ -737,21 +757,35 @@ export async function claimCheckoutSlot(
 /**
  * 有効な処理権が保持しているCheckout Sessionの状況を判定する。
  * - reusable: まだ決済できるセッションがある（同じURLへ案内する）
- * - blocked: 決済済みで反映待ち（奪ってはいけない）
+ * - blocked: 決済済みで反映待ち（奪ってはいけない）。反映に使う決済済みセッションを返す
+ * - pending: 決済済みのセッションと、失効させられなかったまだ決済できるセッションが並存する
+ *   （反映も奪取もせず待たせる）
  * - finished: 有効なセッションが無いと確認できた（奪ってよい）
  * - unknown: Stripeへ確認できなかった（TTLに委ねる）
  *
  * セッションidが記録されていない場合（記録前に中断した場合など）は、Customerに紐づく
  * 「処理権の確保以降に作られたセッション」を照会して同じ判定を行う。記録漏れのまま
  * 有効なセッションが残っているケースを、TTLを待たずに拾い上げるため。
+ *
+ * 決済済みのセッションは（照会経路で複数ありうるため）すべて返す。1件だけを選んで返すと、
+ * 呼び出し元はそれが解約済みで別の1件が有効だった場合を見分けられず、有効な契約を残した
+ * まま claim を解いて次のCheckoutを作れてしまう（二重契約）。
+ *
+ * ただし、ミラー行に記録済みの契約（`mirroredSubscriptionId`）のセッションは反映済みなので
+ * 決済済みとして数えない。照会経路は時計のずれの余裕（CLAIM_LOOKUP_SKEW_SEC）の分だけ
+ * 処理権の確保より前に作られたセッションも拾うため、直前の契約のセッションが混ざりうる。
+ * 数えると、反映済みのセッションを反映し直して進行中の処理権を解除したり、今回の決済済み
+ * セッションと合わせて「複数」と判定して恒久的に自動復旧できなくなったりする。
  */
 async function resolveHeldSession(
   sessionId: string | null,
   customerId: string | null,
-  claimedAt: string
+  claimedAt: string,
+  mirroredSubscriptionId: string | null
 ): Promise<
   | { kind: "reusable"; url: string }
-  | { kind: "blocked" }
+  | { kind: "blocked"; completedSessions: Stripe.Checkout.Session[] }
+  | { kind: "pending" }
   | { kind: "finished" }
   | { kind: "unknown" }
 > {
@@ -762,14 +796,35 @@ async function resolveHeldSession(
   if (sessions === null) {
     return { kind: "unknown" };
   }
+  const completedSessions = sessions.filter(
+    (session) =>
+      session.status === "complete" &&
+      (mirroredSubscriptionId === null || subscriptionIdOf(session) !== mirroredSubscriptionId)
+  );
+  if (completedSessions.length > 0) {
+    // 決済済みがあるのに、まだ決済できるセッション（照会経路でのみ並存しうる）へ案内すると
+    // 二重払いになる。先に失効させ、1件でも失効できなければ（その間に決済された等）待たせる
+    const openSessions = sessions.filter((session) => session.status === "open");
+    const expired = await Promise.all(
+      openSessions.map((openSession) => expireCheckoutSession(openSession.id))
+    );
+    if (expired.includes(false)) {
+      return { kind: "pending" };
+    }
+    return { kind: "blocked", completedSessions };
+  }
   const openSession = sessions.find((session) => session.status === "open" && session.url);
   if (openSession?.url) {
     return { kind: "reusable", url: openSession.url };
   }
-  if (sessions.some((session) => session.status === "complete")) {
-    return { kind: "blocked" };
-  }
   return { kind: "finished" };
+}
+
+/** Checkout Sessionが作成したサブスクのid（未作成ならnull） */
+function subscriptionIdOf(session: Stripe.Checkout.Session): string | null {
+  return typeof session.subscription === "string"
+    ? session.subscription
+    : (session.subscription?.id ?? null);
 }
 
 /** claimが保持しているCheckout Sessionを取得する。取得できない場合はnull（TTL判定に委ねる） */
