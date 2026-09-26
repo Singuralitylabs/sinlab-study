@@ -1089,8 +1089,9 @@ Checkoutセッション:  <session_id>, ...
 ```mermaid
 flowchart TD
     A["GET /auth/callback"] --> B["セッション確立"]
-    B --> B2["users テーブル確認<br/>（createAdminSupabaseClient。未設定時は throw→500）"]
+    B --> B2["users テーブル確認<br/>（createAdminSupabaseClient）"]
     B2 --> C{users レコード}
+    B2 -->|service_role 未設定で throw| L
     C -->|確認失敗| L["ログ出力・/login にリダイレクト（error なし）"]
     C -->|未削除の既存| Z[通常のステータス判定]
     C -->|論理削除済み| Q["ログ出力・/login?error=registration_failed にリダイレクト（通知は送らない・セッション Cookie なし）"]
