@@ -279,6 +279,74 @@ describe("学習画面のスライド配信（署名付きURL）", () => {
   );
 });
 
+describe("親階層が未公開のロック対象コンテンツ（issue #242）", () => {
+  const themeUnpublishedWeek = {
+    ...week,
+    phase: {
+      ...week.phase,
+      theme: { id: 1, name: "非公開テーマ", is_published: false, is_deleted: false },
+    },
+  };
+
+  it("お試しユーザーは theme だけ未公開のロック対象コンテンツで、ロック画面ではなく 404 になる", async () => {
+    // サマリー（service_role）はコンテンツ行の is_published しか見ないため見つかる
+    setup({
+      userStatus: "trial",
+      isOpenToTrial: false,
+      weekOverride: themeUnpublishedWeek,
+      contentWeekOverride: themeUnpublishedWeek,
+    });
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(createSlideSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("お試しユーザーは RLS で theme 埋め込みが null のときも 404 になる", async () => {
+    const themeHiddenWeek = { ...week, phase: { ...week.phase, theme: null } };
+    setup({
+      userStatus: "trial",
+      isOpenToTrial: false,
+      weekOverride: themeHiddenWeek as unknown as typeof week,
+      contentWeekOverride: themeHiddenWeek as unknown as typeof week,
+    });
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+
+  it("お試しユーザーは phase が論理削除済みのロック対象コンテンツでも 404 になる", async () => {
+    const phaseDeletedWeek = { ...week, phase: { ...week.phase, is_deleted: true } };
+    setup({
+      userStatus: "trial",
+      isOpenToTrial: false,
+      weekOverride: phaseDeletedWeek,
+      contentWeekOverride: phaseDeletedWeek,
+    });
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+
+  it("お試しユーザーは theme だけ未公開のお試し公開コンテンツでも 404 になる", async () => {
+    setup({
+      userStatus: "trial",
+      isOpenToTrial: true,
+      weekOverride: themeUnpublishedWeek,
+      contentWeekOverride: themeUnpublishedWeek,
+    });
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(createSlideSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("全階層が公開済みならロック画面は従来どおり表示される", async () => {
+    setup({ userStatus: "trial", isOpenToTrial: false });
+
+    const html = await render();
+
+    expect(html).toContain("このコンテンツは無料プランでは閲覧できません");
+    expect(html).toContain("基礎文法（スライド）");
+  });
+});
+
 describe("コンテンツ詳細の前後ナビゲーション（issue #208）", () => {
   const nextWeek: NavigationContent = {
     id: 20,

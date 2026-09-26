@@ -8,6 +8,7 @@ import {
 } from "@/app/lib/content-navigation";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import type {
+  BreadcrumbWeek,
   LearningContent,
   LearningContentListItem,
   LearningContentWithBreadcrumb,
@@ -353,12 +354,23 @@ export async function isContentVisible(
  * `isContentVisible()` は必ず403を返す」というUIとAPIの不整合が起きる。
  */
 export function isContentFullyPublished(content: LearningContentWithBreadcrumb): boolean {
-  const week = content.week;
+  return content.is_published && isWeekHierarchyPublished(content.week);
+}
+
+/**
+ * 週・フェーズ・テーマの3階層がすべて公開済み・未削除かどうかを判定する。
+ * RLS で親階層の埋め込みが null になった場合（受講生から未公開のフェーズ・テーマ）も false。
+ *
+ * コンテンツ詳細ページでは、member / お試しユーザーに対して **ロック判定より先に** これで
+ * 親階層を確認する（issue #242）。ロック画面のサマリーは service_role 経路で取得しており
+ * コンテンツ行の `is_published` しか見ないため、後回しにすると未公開テーマ配下のタイトルと
+ * パンくずがロック画面に表示されてしまう。
+ */
+export function isWeekHierarchyPublished(week: BreadcrumbWeek | null | undefined): boolean {
   const phase = week?.phase;
   const theme = phase?.theme;
 
   return (
-    content.is_published &&
     week?.is_published === true &&
     week?.is_deleted === false &&
     phase?.is_published === true &&

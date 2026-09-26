@@ -19,6 +19,7 @@ import {
   fetchWeekById,
   isContentFullyPublished,
   isContentLockedForUser,
+  isWeekHierarchyPublished,
 } from "@/app/services/api/learning-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
@@ -72,6 +73,13 @@ export default async function ContentPage({ params }: PageProps) {
 
   // 公開コンテンツとして存在しない（未公開・論理削除済み・他の週所属を含む）場合は404
   if (!summary) {
+    notFound();
+  }
+
+  // member / お試しユーザーは、親階層（週・フェーズ・テーマ）のいずれかが未公開・論理削除なら
+  // ロック判定より先に 404 にする。サマリーは service_role 経路でコンテンツ行の is_published
+  // しか見ないため、ロック画面を先に描画すると未公開テーマ配下のタイトル・パンくずが見える（#242）
+  if (!checkContentPermissions(userRole) && !isWeekHierarchyPublished(week)) {
     notFound();
   }
 
@@ -146,7 +154,8 @@ export default async function ContentPage({ params }: PageProps) {
 
   // コンテンツ行自体が公開済みでも、所属する週・フェーズ・テーマのいずれかが未公開・論理削除
   // ならプレビュー扱い（バッジ・完了ボタン/提出フォームの可否）。member / お試しユーザーには
-  // 404 とする（theme だけ未公開だと week/phase ガードをすり抜けて到達しうるため。#216）。
+  // 404 とする（#216）。member / お試しは前段のロック判定前のガード（#242）で既に弾かれており、
+  // ここは同じ条件をコンテンツ行の埋め込みで確かめる二重防御。
   const isFullyPublished = isContentFullyPublished(content);
   if (!isFullyPublished && !checkContentPermissions(userRole)) {
     notFound();
