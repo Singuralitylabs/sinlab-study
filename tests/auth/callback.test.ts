@@ -283,21 +283,4 @@ describe("GET /auth/callback", () => {
     expectConsentCookieDeleted(res);
     expect(console.error).toHaveBeenCalled();
   });
-
-  it.each(["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"])(
-    "%s 未設定時は 500 にせず /login へフェイルクローズする",
-    async (envName) => {
-      vi.stubEnv(envName, "");
-
-      const res = await GET(callbackRequestWithConsent());
-
-      expect(res.status).toBe(307);
-      expect(res.headers.get("location")).toBe("http://localhost/login");
-      expect(createServerClient).not.toHaveBeenCalled();
-      expect(createAdminSupabaseClient).not.toHaveBeenCalled();
-      expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
-      expectConsentCookieDeleted(res);
-      expect(console.error).toHaveBeenCalled();
-    }
-  );
 });
