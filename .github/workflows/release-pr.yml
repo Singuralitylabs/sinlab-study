@@ -130,9 +130,10 @@ jobs:
       # ファイルまで全文スキャンすると、既に本番で実行済みの UPDATE 等が ⚠️ 節に並び、
       # 本当に注意が必要な新規マイグレーションの判断のノイズになるため（#247）。
       # 変更・削除は内容が再適用されないが、履歴との不整合の注意喚起として別枠で一覧表示する。
-      # --no-renames: リネームは「旧名の削除 + 新名の追加」として扱う。タイムスタンプが変わった
-      # ファイルは本番の適用履歴から見て新しいバージョンであり、db push で再実行されるため、
-      # 追加として後方互換の検出にかける。
+      # --no-renames: リネームは「旧名の削除 + 新名の追加」として扱う。タイムスタンプ（先頭14桁の
+      # バージョン）が変わったファイルは本番の適用履歴から見て新しいバージョンであり、db push で
+      # 再実行されるため、追加として後方互換の検出にかける。バージョンが同じまま説明部分だけ
+      # 変えたリネームは再適用されないため、追加から外して「変更」と同じ別枠に出す。
       - name: マイグレーション差分を検出
         id: migrations
         run: |
@@ -142,9 +143,34 @@ jobs:
               origin/release..origin/main -- 'supabase/migrations/' \
               | grep -E '\.sql$' || true
           }
-          ADDED=$(list_migrations A)
+          ADDED_ALL=$(list_migrations A)
           MODIFIED=$(list_migrations M)
-          DELETED=$(list_migrations D)
+          DELETED_ALL=$(list_migrations D)
+          version_of() { basename "$1" | grep -oE '^[0-9]{14}' || true; }
+          DELETED_VERSIONS=$(printf '%s\n' "$DELETED_ALL" | while IFS= read -r f; do
+            [ -n "$f" ] && version_of "$f"
+          done || true)
+          ADDED=""
+          RENAMED=""
+          RENAMED_FROM=""
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            v=$(version_of "$f")
+            if [ -n "$v" ] && printf '%s\n' "$DELETED_VERSIONS" | grep -qx "$v"; then
+              RENAMED="$RENAMED$f"$'\n'
+              RENAMED_FROM="$RENAMED_FROM$v"$'\n'
+            else
+              ADDED="$ADDED$f"$'\n'
+            fi
+          done <<< "$ADDED_ALL"
+          ADDED=$(printf '%s' "$ADDED" | sed '/^$/d')
+          RENAMED=$(printf '%s' "$RENAMED" | sed '/^$/d')
+          # 同一バージョンのリネーム元は「削除」ではなく「リネーム」として1行にまとめる
+          DELETED=$(printf '%s\n' "$DELETED_ALL" | while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if printf '%s' "$RENAMED_FROM" | grep -qx "$(version_of "$f")"; then continue; fi
+            echo "$f"
+          done || true)
 
           {
             echo "list<<MIGRATIONS_EOF"
@@ -165,13 +191,18 @@ jobs:
                 [ -n "$f" ] && echo "- \`$f\`（変更）"
               done
             fi
+            if [ -n "$RENAMED" ]; then
+              echo "$RENAMED" | while IFS= read -r f; do
+                [ -n "$f" ] && echo "- \`$f\`（リネーム。バージョン不変のため再適用されない）"
+              done
+            fi
             if [ -n "$DELETED" ]; then
               echo "$DELETED" | while IFS= read -r f; do
                 [ -n "$f" ] && echo "- \`$f\`（削除）"
               done
             fi
             echo "MIGRATIONS_CHANGED_EOF"
-            if [ -n "$MODIFIED$DELETED" ]; then
+            if [ -n "$MODIFIED$RENAMED$DELETED" ]; then
               echo "has_changed=true"
             else
               echo "has_changed=false"
@@ -462,7 +493,7 @@ jobs:
           fi
 
           if [ "$HAS_MIGRATIONS_CHANGED" = "true" ]; then
-            MIGRATIONS_CHANGED_SECTION=$(printf '**適用済みマイグレーションの変更・削除（後方互換の検出対象外）:**\n\n本番に適用済みのファイルは、内容を変更しても再適用されません。意図した変更か、`supabase migration list` の履歴と不整合が生じないかを確認してください。\n\n%s' "$MIGRATIONS_CHANGED_LIST")
+            MIGRATIONS_CHANGED_SECTION=$(printf '**適用済みマイグレーションの変更・削除（後方互換の検出対象外）:**\n\n`release` に含まれるファイルは本番に適用済みである前提で、内容を変更しても再適用されません。意図した変更か、`supabase migration list` の履歴と不整合が生じないかを確認してください（前回リリースで未適用のまま残ったファイルがある場合は、下の migration list で確認してください）。\n\n%s' "$MIGRATIONS_CHANGED_LIST")
           else
             MIGRATIONS_CHANGED_SECTION=""
           fi
