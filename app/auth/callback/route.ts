@@ -69,10 +69,12 @@ async function handleCallback(request: NextRequest) {
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  // 環境変数欠落時は 500 にせず /login へフェイルクローズする（値はレスポンス・ログに出さない）
   if (!supabaseUrl || !supabaseKey) {
-    throw new Error(
+    console.error(
       "Supabase環境変数が設定されていません: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
     );
+    return redirectWithoutSession(new URL("/login", origin));
   }
 
   const supabase = createServerClient(supabaseUrl, supabaseKey, {

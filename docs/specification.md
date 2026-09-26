@@ -989,6 +989,7 @@ JSONボディを受け取る API Route の入力検証は [zod](https://zod.dev/
 | 論理削除済みユーザーの再ログイン | INSERT を試行せず、自動登録失敗と同じ導線（`/login?error=registration_failed`、セッション Cookie なし） |
 | ユーザー存在確認の失敗 | INSERT せず、`error` パラメータなしの `/login` へフェイルクローズ（セッション Cookie なし） |
 | service_role 未設定 | `createAdminSupabaseClient()` が throw し、callback がそれを捕捉してサーバーログに出力の上、`error` パラメータなしの `/login` へフェイルクローズ（500 にしない。例外の内容はレスポンスに出さない。通常クライアントへの暗黙フォールバックなし。個別事前チェックは置かない。セッション Cookie は付けず、同意 Cookie は削除する） |
+| Supabase 接続用の環境変数未設定（`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`） | callback はセッション交換の前に検出し、サーバーログに出力の上、`error` パラメータなしの `/login` へフェイルクローズ（500 にしない。値はレスポンス・ログに出さない。セッション Cookie は付けず、同意 Cookie は削除する） |
 | 重複登録の試行 | `auth_id` のUNIQUE制約で防止。既存レコードを使用 |
 | 上記以外の予期しない例外 | callback はハンドラ全体を try/catch で包み、サーバーログ（`[auth/callback]` タグ）に出力の上、`error` パラメータなしの `/login` へフェイルクローズ（500 にしない。例外の内容はレスポンスに出さない。セッション Cookie は付けず、同意 Cookie は削除する）。監視上は 5xx として現れないため、サーバーログのタグで検知する |
 
@@ -1092,6 +1093,7 @@ Checkoutセッション:  <session_id>, ...
 ```mermaid
 flowchart TD
     A["GET /auth/callback"] --> B["セッション確立"]
+    A -->|Supabase 接続用の環境変数未設定| L
     B --> B2["users テーブル確認<br/>（createAdminSupabaseClient）"]
     B2 --> C{users レコード}
     B2 -->|service_role 未設定で throw| L
@@ -1115,7 +1117,7 @@ flowchart TD
 
 INSERT 成功後はお試しユーザーとしてダッシュボードへ遷移する。承認依頼のSlack通知は従来どおり送信し、管理者は `/admin/users` で承認・却下を行う。`sendSlackNewUserNotification()` は `await` せずに発火する非同期・非ブロッキング呼び出しで、通知の完了を待たずにリダイレクトへ進む。
 
-INSERT 失敗時はログを出力し `/login?error=registration_failed` へリダイレクトする（通知は送らない）。同意 Cookie なしの初回登録では INSERT 自体を行わず `/login?error=terms_required` へリダイレクトする（通知は送らない）。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認は論理削除済み行も含めて `auth_id` で照合する（通常の SELECT RLS では本人の削除済み行が見えないため、確認のみ RLS をバイパスする。INSERT は通常クライアントのまま）。存在確認に失敗した場合は INSERT せず、`error` パラメータなしの `/login` へフェイルクローズする。`SUPABASE_SERVICE_ROLE_KEY` 未設定時は `createAdminSupabaseClient()` が throw し、通常クライアントへの暗黙フォールバックはしない（コールバック側の個別事前チェックは置かない）。callback はこの例外を捕捉してログに残し、`error` パラメータなしの `/login` へフェイルクローズする（例外の内容はレスポンスに出さない）。登録失敗・同意なし・論理削除済み・確認失敗のエラー導線ではセッション Cookie を付けない。いずれの経路の応答でも同意 Cookie は削除する。`/login` は `error` クエリ値を許可リスト方式（自前のキーのみ。プロトタイプ継承キーは含めない）で解釈し、`registration_failed`・`terms_required` のときのみユーザー向けメッセージを表示する。未知の値では何も表示しない。
+INSERT 失敗時はログを出力し `/login?error=registration_failed` へリダイレクトする（通知は送らない）。同意 Cookie なしの初回登録では INSERT 自体を行わず `/login?error=terms_required` へリダイレクトする（通知は送らない）。論理削除済み（`is_deleted = true`）の既存レコードを持つユーザーの再ログインでは INSERT を試行せず、同じエラー導線へ流す。存在確認は論理削除済み行も含めて `auth_id` で照合する（通常の SELECT RLS では本人の削除済み行が見えないため、確認のみ RLS をバイパスする。INSERT は通常クライアントのまま）。存在確認に失敗した場合は INSERT せず、`error` パラメータなしの `/login` へフェイルクローズする。`SUPABASE_SERVICE_ROLE_KEY` 未設定時は `createAdminSupabaseClient()` が throw し、通常クライアントへの暗黙フォールバックはしない（コールバック側の個別事前チェックは置かない）。callback はこの例外を捕捉してログに残し、`error` パラメータなしの `/login` へフェイルクローズする（例外の内容はレスポンスに出さない）。`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` の未設定もセッション交換の前に検出し、同じくログに残して `error` パラメータなしの `/login` へフェイルクローズする（500 にしない。値はレスポンス・ログに出さない）。登録失敗・同意なし・論理削除済み・確認失敗・環境変数未設定のエラー導線ではセッション Cookie を付けない。いずれの経路の応答でも同意 Cookie は削除する。`/login` は `error` クエリ値を許可リスト方式（自前のキーのみ。プロトタイプ継承キーは含めない）で解釈し、`registration_failed`・`terms_required` のときのみユーザー向けメッセージを表示する。未知の値では何も表示しない。
 
 #### 9.5.2 Stripe支払い失敗通知
 
