@@ -363,8 +363,29 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 - Checkout手続き中に管理者が手動承認した場合: 決済完了時点で一般有料会員として上書きされる（許容）。降格側は `membership_type=general` ガードで巻き込みを防止する
 - Checkout手続き中に管理者が却下した場合: 決済完了時点でユーザーが `rejected` であれば昇格しない（却下判断を決済完了で上書きしない）
 - Webhookイベントの順序逆転・再送・同一event.idの並行配信: `stripe_events` へのINSERTをclaimとして使う原子的な排他制御と、Stripe APIから再取得したライブ状態のみを書き込むハンドラ設計で吸収する（イベントに埋め込まれたスナップショットは信用しない）
+- イベント本文の構造のAPIバージョン依存: Webhookのイベント本文（`event.data.object`）の構造はエンドポイントに設定したAPIバージョンで決まり、アプリがStripe APIを呼ぶ版（`STRIPE_API_VERSION`）とは独立している。このため本文から直接読んでよいのはID類（Checkout Sessionの `id` / `client_reference_id` / `metadata` / `customer` / `subscription`、Subscriptionの `id`）に限り、状態は常にStripe APIからのライブ取得を正とする。例外は `invoice.payment_failed` の運用者向けSlack通知で、本文の `customer_email` / `amount_due` / `hosted_invoice_url` を通知の表示にのみ使う（認可・会員状態の判定には使わない）。本文の他のフィールドを直接使う変更を入れる場合は、エンドポイントのAPIバージョンが `STRIPE_API_VERSION` と一致していることを前提にする（下記「Stripe Webhook 設定手順」）
 - claim後にサーバーレス関数がタイムアウト・強制終了しrelease処理へ到達できない場合: claimしたまま10分（`EVENT_CLAIM_TTL_MINUTES`）が経過すると再claim可能になる（ハンドラは冪等なため、まれに完了済みイベントを再実行しても実害は小さい）
 - Stripe契約状況の取得エラー（`/upgrade`・`/admin/users`）: 「契約なし」に誤ってフォールバックせず、専用のエラーメッセージを表示する（フェイルクローズ）。特に管理画面での却下操作は、契約状況を判定できない場合も却下確認ダイアログに警告を表示する（却下操作自体は禁止せず、警告表示に留める意図的な判断）。会員種別変更（2.7節）は却下と異なり操作自体を無効化するフェイルクローズとする
+
+**Stripe APIバージョン**: `getStripeClient()` は `apiVersion` にSDKが固定する版と同じ値（`STRIPE_API_VERSION`、`app/services/api/stripe-server.ts`）を明示する。型を `Stripe.LatestApiVersion` にしているため、SDK更新で固定版が変わると型チェックが失敗し、APIバージョンが暗黙に変わらない（Dependabotのマイナー更新でも気づける）。値を更新するときは、下記手順4のWebhookエンドポイント側のAPIバージョンも合わせて更新する。
+
+#### Stripe Webhook 設定手順（運用）
+
+1. Stripe ダッシュボードの Webhook 設定でエンドポイントを作成（テスト環境・本番環境それぞれ）
+2. エンドポイント URL に `<NEXT_PUBLIC_APP_URL>/api/stripe/webhook` を設定
+   - パスの typo（例: `/api/stripe/webook`）は 404 となり、決済完了が一切反映されない
+3. 購読イベントに次の4件を選択（`app/api/stripe/webhook/route.ts` の分岐と一致させる）
+   - `checkout.session.completed`
+   - `customer.subscription.updated`
+   - `customer.subscription.deleted`
+   - `invoice.payment_failed`
+4. API バージョンを SDK が固定する版（`STRIPE_API_VERSION`）に合わせる
+   - SDK の版は `node_modules/stripe/cjs/apiVersion.js` の `ApiVersion` 定数で確認できる
+   - エンドポイントの API バージョンは作成時のアカウント既定値で固定され、アカウントや SDK を更新しても自動では追従しないため、エンドポイントごとに設定を変更する
+5. エンドポイントごとに発行される署名シークレット（`whsec_…`）を `STRIPE_WEBHOOK_SECRET` 環境変数に設定
+   - ローカル: `.env.local`
+   - 本番: Vercel 環境変数
+   - URL の編集ではシークレットは変わらないが、エンドポイントを作り直した場合は再設定が必要
 
 **スコープ外**: プランカタログ・複数通貨・クーポン・領収書カスタマイズ・却下時のサブスク自動キャンセル連携・年額プラン・プラン変更時のアンカー再設定・既存契約者へのアンカー移行（`billing_cycle_anchor_config` はサブスク作成時にのみ適用されるため、決済日固定の導入は本番での実課金開始前に行うことが前提）。
 
