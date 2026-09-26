@@ -18,6 +18,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import type { BulkContentAction } from "@/app/constants/content";
 import { CONTENT_TYPE_LABELS, CONTENT_TYPES, MAX_BULK_CONTENT_IDS } from "@/app/constants/content";
 import type { ContentTableGroup, ContentTableRow } from "@/app/lib/content-grouping";
+import { getSlideStorageWarning } from "@/app/lib/slide-storage-warning";
 import type { ContentType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -135,6 +136,22 @@ export function ContentsTable({ groups }: ContentsTableProps) {
     setIsLoading(true);
     setErrorMessage(null);
     const ids = [...selectedIds];
+    // 一括削除で、いずれかのチャンクのスライドPDFが Storage に残ったか（issue #241）。
+    // 後続チャンクが失敗しても、先行チャンクの削除は成立済みのため警告を落とさない
+    let storageWarning: string | null = null;
+    const withStorageWarning = (message: string) =>
+      storageWarning ? `${message}。${storageWarning}` : message;
+    // 成功したチャンクのID。後続チャンクが失敗しても、成立済みの分は選択から外して一覧を更新する
+    const processedIds: number[] = [];
+    const settlePartialSuccess = () => {
+      if (processedIds.length === 0) return;
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of processedIds) next.delete(id);
+        return next;
+      });
+      router.refresh();
+    };
     try {
       let totalUpdated = 0;
       // ids が MAX_BULK_CONTENT_IDS を超える場合、APIの上限に収まるようチャンク分割して送信する
@@ -151,11 +168,16 @@ export function ContentsTable({ groups }: ContentsTableProps) {
         });
         if (!response.ok) {
           const data = await response.json();
-          setErrorMessage(data.error || "一括操作に失敗しました");
+          setErrorMessage(withStorageWarning(data.error || "一括操作に失敗しました"));
+          settlePartialSuccess();
           return;
         }
         const data = await response.json();
         totalUpdated += typeof data.updated === "number" ? data.updated : 0;
+        processedIds.push(...chunk);
+        if (action === "delete") {
+          storageWarning ??= getSlideStorageWarning(data, "bulkDelete");
+        }
       }
 
       setSelectedIds(new Set());
@@ -163,13 +185,18 @@ export function ContentsTable({ groups }: ContentsTableProps) {
       setTypeDialogOpen(false);
       router.refresh();
 
-      if (totalUpdated < ids.length) {
-        setErrorMessage(
-          `${ids.length}件中${ids.length - totalUpdated}件は更新できませんでした（他の操作により既に削除されている可能性があります）`
-        );
+      const warnings = [
+        totalUpdated < ids.length
+          ? `${ids.length}件中${ids.length - totalUpdated}件は更新できませんでした（他の操作により既に削除されている可能性があります）`
+          : null,
+        storageWarning,
+      ].filter((warning): warning is string => warning !== null);
+      if (warnings.length > 0) {
+        setErrorMessage(warnings.join("。"));
       }
     } catch {
-      setErrorMessage("一括操作中にエラーが発生しました");
+      setErrorMessage(withStorageWarning("一括操作中にエラーが発生しました"));
+      settlePartialSuccess();
     } finally {
       setIsLoading(false);
     }
