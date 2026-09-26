@@ -44,6 +44,18 @@ function redirectWithoutSession(url: URL) {
 }
 
 export async function GET(request: NextRequest) {
+  // 環境変数の欠落（createAdminSupabaseClient() の throw を含む）などの予期しない例外で
+  // 500 にせず /login へフェイルクローズする（proxy.ts と同じ方針。例外の内容はログのみ）。
+  // 監視上は 5xx として現れないため、ログのタグで検知する
+  try {
+    return await handleCallback(request);
+  } catch (error) {
+    console.error("[auth/callback] 予期しないエラー:", error);
+    return redirectWithoutSession(new URL("/login", new URL(request.url).origin));
+  }
+}
+
+async function handleCallback(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
 
@@ -57,10 +69,12 @@ export async function GET(request: NextRequest) {
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  // 環境変数欠落時は 500 にせず /login へフェイルクローズする（値はレスポンス・ログに出さない）
   if (!supabaseUrl || !supabaseKey) {
-    throw new Error(
+    console.error(
       "Supabase環境変数が設定されていません: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
     );
+    return redirectWithoutSession(new URL("/login", origin));
   }
 
   const supabase = createServerClient(supabaseUrl, supabaseKey, {
@@ -88,6 +102,7 @@ export async function GET(request: NextRequest) {
   // SELECT RLS は本人行でも is_deleted=false を要求するため、通常クライアントでは
   // 論理削除済みレコードが見えない。再ログインで INSERT すると UNIQUE 違反になるので、
   // 存在確認だけ service_role で行い is_deleted では絞らない。INSERT 自体は通常クライアント。
+  // SUPABASE_SERVICE_ROLE_KEY 欠落時の throw は GET の catch で /login へフェイルクローズする。
   const adminSupabase = await createAdminSupabaseClient();
   const { data: existingUser, error: userError } = await adminSupabase
     .from("users")

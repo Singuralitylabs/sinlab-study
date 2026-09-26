@@ -137,6 +137,8 @@ export function getStripeClient(): Stripe {
   if (!secretKey) {
     throw new Error("Stripe環境変数が設定されていません: STRIPE_SECRET_KEY");
   }
+  // apiVersion は明示せず SDK が固定する版（Stripe.API_VERSION）を使う。明示すると SDK の
+  // 毎月のマイナー更新ごとに型エラーになるため（判断の理由は docs/specification.md 2.11節）
   cachedClient = new Stripe(secretKey);
   return cachedClient;
 }
