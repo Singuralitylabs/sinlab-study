@@ -77,32 +77,6 @@ export function ServiceIntro({ showMonthlyPrice }: { showMonthlyPrice: boolean }
         </p>
       </div>
 
-      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
-        {FEATURES.map(({ id, icon: Icon, lead, emphasis, trail, description }, index) => (
-          <li
-            key={id}
-            className="flex flex-col gap-2.5 rounded-2xl border border-border bg-card p-5"
-          >
-            <div className="flex items-center gap-2.5">
-              <span className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-accent text-accent-foreground">
-                <Icon className="h-5 w-5" aria-hidden="true" />
-              </span>
-              <span className="text-[11px] font-extrabold tracking-widest text-accent-foreground">
-                FEATURE {String(index + 1).padStart(2, "0")}
-              </span>
-            </div>
-            <h3 className="text-base font-extrabold leading-normal">
-              {lead}
-              {emphasis && <span className="text-primary">{emphasis}</span>}
-              {trail}
-            </h3>
-            <p className="text-sm leading-relaxed text-muted-foreground lg:text-[13px]">
-              {description}
-            </p>
-          </li>
-        ))}
-      </ul>
-
       <div className="space-y-4">
         <p className="text-sm leading-relaxed lg:text-[15px]">
           まずは無料で始められます。
@@ -137,6 +111,32 @@ export function ServiceIntro({ showMonthlyPrice }: { showMonthlyPrice: boolean }
           </Button>
         </div>
       </div>
+
+      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+        {FEATURES.map(({ id, icon: Icon, lead, emphasis, trail, description }, index) => (
+          <li
+            key={id}
+            className="flex flex-col gap-2.5 rounded-2xl border border-border bg-card p-5"
+          >
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-accent text-accent-foreground">
+                <Icon className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <span className="text-[11px] font-extrabold tracking-widest text-accent-foreground">
+                FEATURE {String(index + 1).padStart(2, "0")}
+              </span>
+            </div>
+            <h3 className="text-base font-extrabold leading-normal">
+              {lead}
+              {emphasis && <span className="text-primary">{emphasis}</span>}
+              {trail}
+            </h3>
+            <p className="text-sm leading-relaxed text-muted-foreground lg:text-[13px]">
+              {description}
+            </p>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

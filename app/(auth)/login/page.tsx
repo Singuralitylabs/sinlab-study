@@ -4,6 +4,7 @@ import { TERMS_REQUIRED_ERROR_CODE } from "@/app/constants/auth";
 import { COMMERCIAL_TRANSACTIONS_URL, PRIVACY_URL, TERMS_URL } from "@/app/constants/legal";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { GoogleLoginButton } from "./components/google-login-button";
+import { LearningScreens } from "./components/learning-screens";
 import { ServiceIntro } from "./components/service-intro";
 
 // LP と同じ書体。ログイン画面だけで使うため、ルートレイアウトではなくここで読み込む。
@@ -39,16 +40,17 @@ export default async function LoginPage({
   const { error } = await searchParams;
   const errorMessage = loginErrorMessage(error);
 
-  // スマホ・タブレット幅は ブランド → ログインカード → 紹介 の縦積み（DOM 順）。紹介の帯は
-  // 画面端まで・画面下端まで伸ばすため、グリッド自体には lg 未満の左右・下のパディングを付けない。
-  // lg 以上は左列に ブランド／紹介、右列にログインカードを置く2カラム。
+  // スマホ・タブレット幅は ブランド → ログインカード → 紹介 → 学習画面 の縦積み（DOM 順）。紹介と
+  // 学習画面の帯は画面端まで・画面下端まで1枚につなげて伸ばすため、グリッド自体には lg 未満の
+  // 左右・下のパディングと行間を付けない。lg 以上は左列に ブランド／紹介、右列にログインカードを
+  // 置く2カラムで、学習画面はその下に全幅で並べる。
   // word-break: auto-phrase は日本語を文節単位で折り返す（非対応ブラウザは通常の折り返し）
   return (
     <div
       className={`login-theme ${notoSansJp.className} min-h-screen bg-background text-foreground [word-break:auto-phrase]`}
     >
-      <div className="mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 grid-rows-[auto_auto_1fr] gap-6 pt-10 lg:grid-cols-[minmax(0,1fr)_400px] lg:grid-rows-[auto_auto] lg:content-center lg:items-center lg:gap-x-16 lg:gap-y-7 lg:px-8 lg:py-14">
-        <header className="flex flex-col items-center gap-1.5 px-4 text-center lg:col-start-1 lg:row-start-1 lg:flex-row lg:gap-3 lg:px-0 lg:text-left">
+      <div className="mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 grid-rows-[auto_auto_auto_1fr] pt-10 lg:grid-cols-[minmax(0,1fr)_400px] lg:grid-rows-[auto_auto_auto] lg:content-center lg:items-center lg:gap-x-16 lg:gap-y-7 lg:px-8 lg:py-14">
+        <header className="flex flex-col items-center gap-1.5 px-4 pb-6 text-center lg:col-start-1 lg:row-start-1 lg:flex-row lg:gap-3 lg:px-0 lg:pb-0 lg:text-left">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground lg:h-10 lg:w-10">
             <BookOpen className="h-6 w-6" aria-hidden="true" />
           </div>
@@ -100,9 +102,15 @@ export default async function LoginPage({
           </div>
         </div>
 
-        <div className="mt-4 bg-secondary px-4 py-10 lg:col-start-1 lg:row-start-2 lg:mt-0 lg:bg-transparent lg:p-0">
+        <div className="mt-10 bg-secondary px-4 py-10 lg:col-start-1 lg:row-start-2 lg:mt-0 lg:bg-transparent lg:p-0">
           <div className="mx-auto max-w-xl lg:max-w-none">
             <ServiceIntro showMonthlyPrice={isStripeEnabled()} />
+          </div>
+        </div>
+
+        <div className="bg-secondary px-4 pb-10 lg:col-span-2 lg:row-start-3 lg:mt-7 lg:border-t lg:border-border lg:bg-transparent lg:px-0 lg:pt-12 lg:pb-0">
+          <div className="mx-auto max-w-xl lg:max-w-none">
+            <LearningScreens />
           </div>
         </div>
       </div>

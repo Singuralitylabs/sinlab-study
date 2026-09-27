@@ -109,6 +109,29 @@ describe("LoginPage", () => {
     expect(text).toContain("サービス紹介を見る");
   });
 
+  it("料金1行とリンクを4つの仕組みのカードより前に表示する", async () => {
+    const text = textOf(await render());
+
+    const firstFeature = text.indexOf("学習の「地図」が手に入る");
+    expect(text.indexOf("まずは無料で始められます。")).toBeLessThan(firstFeature);
+    expect(text.indexOf("デモを試す")).toBeLessThan(firstFeature);
+    expect(text.indexOf("サービス紹介を見る")).toBeLessThan(firstFeature);
+  });
+
+  it("実際の学習画面として4枚の画面を表示する", async () => {
+    const html = await render();
+
+    expect(textOf(html)).toContain("実際の学習画面");
+    for (const alt of [
+      "動画コンテンツの画面",
+      "スライドコンテンツの画面",
+      "課題提出の画面",
+      "AIレビュー結果の画面",
+    ]) {
+      expect(html).toContain(`alt="${alt}"`);
+    }
+  });
+
   it("ログインボタンと既存の案内・法務リンクを維持する", async () => {
     const html = await render();
 
