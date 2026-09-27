@@ -7,8 +7,8 @@ export const BILLING_ANCHOR_HOUR_UTC = 0;
  * 法務部指示（#134）の表示用月額料金（JPY・税込）。`/upgrade` の料金表示は
  * `fetchSubscriptionPrice()` による Stripe Price の動的取得を正とするが、
  * 取得失敗時にも法定表示が消えないよう、この定数をフォールバックに使う。
- * `/login` のサービス紹介は LP と同じ告知文言として扱い、この定数を常に表示する
- * （未認証画面から Stripe を呼ばない。LP と同様 `STRIPE_ENABLED` にも連動させない）。
+ * `/login` のサービス紹介も、決済機能が有効なときはこの定数で月額を表示する
+ * （未認証画面から Stripe を呼ばないため。無効時は月額の文言自体を出さない）。
  * 料金を改定するときは Stripe Price・この定数・LP をそろえて更新する。
  */
 export const DISPLAY_MONTHLY_PRICE_JPY = 1500;

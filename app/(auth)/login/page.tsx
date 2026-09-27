@@ -2,12 +2,14 @@ import { BookOpen } from "lucide-react";
 import { Noto_Sans_JP } from "next/font/google";
 import { TERMS_REQUIRED_ERROR_CODE } from "@/app/constants/auth";
 import { COMMERCIAL_TRANSACTIONS_URL, PRIVACY_URL, TERMS_URL } from "@/app/constants/legal";
+import { isStripeEnabled } from "@/app/constants/stripe";
 import { GoogleLoginButton } from "./components/google-login-button";
 import { ServiceIntro } from "./components/service-intro";
 
-// LP と同じ書体。ログイン画面だけで使うため、ルートレイアウトではなくここで読み込む
+// LP と同じ書体。ログイン画面だけで使うため、ルートレイアウトではなくここで読み込む。
+// CJK フォントは unicode-range で数十ファイルに分割されるため preload せず、LP と同じ swap で表示する
+// （切り替わり時のずれは next/font が自動生成するサイズ調整済みフォールバックで抑える）
 const notoSansJp = Noto_Sans_JP({
-  subsets: ["latin"],
   display: "swap",
   preload: false,
 });
@@ -100,7 +102,7 @@ export default async function LoginPage({
 
         <div className="mt-4 bg-secondary px-4 py-10 lg:col-start-1 lg:row-start-2 lg:mt-0 lg:bg-transparent lg:p-0">
           <div className="mx-auto max-w-xl lg:max-w-none">
-            <ServiceIntro />
+            <ServiceIntro showMonthlyPrice={isStripeEnabled()} />
           </div>
         </div>
       </div>

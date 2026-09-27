@@ -83,13 +83,14 @@
  * ログイン画面（`/login`）専用の配色。LP（SERVICE_LP_URL）の配色に合わせ、
  * `.login-theme` 配下だけセマンティックトークンを上書きする（他の画面は上の :root / .dark のまま）。
  * オーバースクロール時に body の地色が見えないよう、`.login-theme` を含むページでは
- * :root にも同じ値を適用する（:has 非対応ブラウザでも `.login-theme` 配下は上書きされる）。
+ * :root にも同じ値を適用する。セレクタは寛容なセレクタリストの :is() でまとめ、:has 非対応
+ * ブラウザでも `.login-theme` 配下の上書きが無効にならないようにしている（通常のカンマ区切りだと
+ * 解釈できないセレクタが1つあるだけでルール全体が破棄される）。
  * LP のアクセント #FF6B3D は文字色としてコントラスト 4.5:1 を満たさないため、ライトの
  * primary は #BF3F16（白 5.33:1・#FFF8F0 5.06:1・#FFEFE0 4.74:1）、accent-foreground は
  * #A8390F（#FFE4CB 5.28:1）まで濃くしている。
  */
-.login-theme,
-:root:has(.login-theme) {
+:is(.login-theme, :root:has(.login-theme)) {
   --background: #fff8f0;
   --foreground: #1e1a38;
   --card: #ffffff;
@@ -110,8 +111,7 @@
   --login-card-shadow: 0 24px 60px -20px rgba(30, 26, 56, 0.22);
 }
 
-.dark .login-theme,
-:root.dark:has(.login-theme) {
+:is(.dark .login-theme, :root.dark:has(.login-theme)) {
   --background: #16132a;
   --foreground: #f4f1ec;
   --card: #1f1b38;

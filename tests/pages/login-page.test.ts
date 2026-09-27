@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // `/login` のサービス紹介ブロックと、error= ごとのメッセージ表示をページ単位で検証する（issue #264）。
 
@@ -35,6 +35,10 @@ const TERMS_REQUIRED_MESSAGE =
   "利用規約およびプライバシーポリシーへの同意の確認ができませんでした。";
 
 describe("LoginPage", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("キャッチコピー・サブコピーを表示する", async () => {
     const text = textOf(await render());
 
@@ -64,13 +68,26 @@ describe("LoginPage", () => {
     }
   });
 
-  it("料金を DISPLAY_MONTHLY_PRICE_JPY から導出した1行で表示する", async () => {
+  it("決済機能が有効なときは料金を DISPLAY_MONTHLY_PRICE_JPY から導出した1行で表示する", async () => {
+    vi.stubEnv("STRIPE_ENABLED", "true");
     const text = textOf(await render());
 
     expect(text).toContain(
       `まずは無料で始められます。全コンテンツの利用は月額${DISPLAY_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円（税込）。`
     );
   });
+
+  it.each([undefined, "false"])(
+    "決済機能が無効（STRIPE_ENABLED=%s）のときは月額料金の文言を出さない",
+    async (value) => {
+      vi.stubEnv("STRIPE_ENABLED", value);
+      const text = textOf(await render());
+
+      expect(text).toContain("まずは無料で始められます。");
+      expect(text).not.toContain("月額");
+      expect(text).not.toContain("全コンテンツの利用は");
+    }
+  );
 
   it("デモは内部リンク、LP・無料体験会フォームは別タブの外部リンクで表示する", async () => {
     const html = await render();

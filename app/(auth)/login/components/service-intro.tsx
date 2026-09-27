@@ -3,8 +3,10 @@ import { ArrowRight, ExternalLink, Layers, MapIcon, Sparkles, TrendingUp } from 
 import Link from "next/link";
 import { FREE_TRIAL_FORM_URL, SERVICE_LP_URL } from "@/app/constants/marketing";
 import { DISPLAY_MONTHLY_PRICE_JPY, formatMonthlyJpyPrice } from "@/app/constants/stripe";
+import { Button } from "@/components/ui/button";
 
 type Feature = {
+  id: string;
   icon: LucideIcon;
   /** 見出しの強調部分（LP と同じくアクセント色で表示）。無い見出しは `lead` のみ */
   lead: string;
@@ -17,6 +19,7 @@ type Feature = {
 // アプリの階層数（テーマ → フェーズ → 週 → コンテンツ）と LP の記載が異なるため、階層数には触れない
 const FEATURES: Feature[] = [
   {
+    id: "roadmap",
     icon: MapIcon,
     lead: "学習の",
     emphasis: "「地図」",
@@ -24,6 +27,7 @@ const FEATURES: Feature[] = [
     description: "全体ロードマップで道筋が見え、次のステップが自動で提示される",
   },
   {
+    id: "progress",
     icon: TrendingUp,
     lead: "進捗が",
     emphasis: "「見える」",
@@ -31,11 +35,13 @@ const FEATURES: Feature[] = [
     description: "ダッシュボードの進捗率・進捗バーで成長がビジュアルで見える",
   },
   {
+    id: "materials",
     icon: Layers,
     lead: "動画 × テキスト × 演習で、理解を確実に定着させる",
     description: "「見るだけ」で終わらない、必ず手を動かす演習つき",
   },
   {
+    id: "ai-review",
     icon: Sparkles,
     lead: "提出直後に",
     emphasis: "AI",
@@ -44,11 +50,14 @@ const FEATURES: Feature[] = [
   },
 ];
 
-const PILL_LINK_CLASS =
-  "inline-flex h-12 w-full items-center justify-center gap-2 rounded-full border-[1.5px] border-foreground px-5 text-sm font-bold transition-colors hover:bg-foreground/5 sm:h-11 sm:w-auto";
+// 枠線は「Googleでログイン」（同じ outline バリアント）と同じ強さに留め、ログインより目立たせない
+const PILL_LINK_CLASS = "h-12 w-full rounded-full px-5 font-bold has-[>svg]:px-5 sm:h-11 sm:w-auto";
 
-/** `/login` のサービス紹介（表示専用）。ログインの導線を優先するため、リンクは枠線・文字リンクに留める */
-export function ServiceIntro() {
+/**
+ * `/login` のサービス紹介（表示専用）。ログインの導線を優先するため、リンクは枠線・文字リンクに留める。
+ * `showMonthlyPrice` が false（決済機能の無効時）は、申し込めない月額料金をうたわないよう料金の文言を省く
+ */
+export function ServiceIntro({ showMonthlyPrice }: { showMonthlyPrice: boolean }) {
   return (
     <section aria-labelledby="service-intro-heading" className="space-y-7">
       <div className="space-y-4">
@@ -69,9 +78,9 @@ export function ServiceIntro() {
       </div>
 
       <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
-        {FEATURES.map(({ icon: Icon, lead, emphasis, trail, description }, index) => (
+        {FEATURES.map(({ id, icon: Icon, lead, emphasis, trail, description }, index) => (
           <li
-            key={lead}
+            key={id}
             className="flex flex-col gap-2.5 rounded-2xl border border-border bg-card p-5"
           >
             <div className="flex items-center gap-2.5">
@@ -96,35 +105,36 @@ export function ServiceIntro() {
 
       <div className="space-y-4">
         <p className="text-sm leading-relaxed lg:text-[15px]">
-          まずは無料で始められます。全コンテンツの利用は
-          <strong className="font-extrabold">
-            {formatMonthlyJpyPrice(DISPLAY_MONTHLY_PRICE_JPY)}
-          </strong>
-          。
+          まずは無料で始められます。
+          {showMonthlyPrice && (
+            <>
+              全コンテンツの利用は
+              <strong className="font-extrabold">
+                {formatMonthlyJpyPrice(DISPLAY_MONTHLY_PRICE_JPY)}
+              </strong>
+              。
+            </>
+          )}
         </p>
         <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-          <Link href="/demo" className={PILL_LINK_CLASS}>
-            デモを試す
-            <ArrowRight className="h-4 w-4" aria-hidden="true" />
-          </Link>
-          <a
-            href={FREE_TRIAL_FORM_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={PILL_LINK_CLASS}
-          >
-            無料体験会に申込む
-            <ExternalLink className="h-4 w-4" aria-hidden="true" />
-          </a>
-          <a
-            href={SERVICE_LP_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex h-11 items-center justify-center gap-1.5 px-2 text-sm font-bold text-primary underline underline-offset-4"
-          >
-            サービス紹介を見る
-            <ExternalLink className="h-4 w-4" aria-hidden="true" />
-          </a>
+          <Button asChild variant="outline" className={PILL_LINK_CLASS}>
+            <Link href="/demo">
+              デモを試す
+              <ArrowRight aria-hidden="true" />
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className={PILL_LINK_CLASS}>
+            <a href={FREE_TRIAL_FORM_URL} target="_blank" rel="noopener noreferrer">
+              無料体験会に申込む
+              <ExternalLink aria-hidden="true" />
+            </a>
+          </Button>
+          <Button asChild variant="link" className="h-11 px-2 font-bold underline has-[>svg]:px-2">
+            <a href={SERVICE_LP_URL} target="_blank" rel="noopener noreferrer">
+              サービス紹介を見る
+              <ExternalLink aria-hidden="true" />
+            </a>
+          </Button>
         </div>
       </div>
     </section>
