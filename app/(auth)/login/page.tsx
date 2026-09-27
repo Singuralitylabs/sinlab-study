@@ -1,7 +1,20 @@
 import { BookOpen } from "lucide-react";
+import { Noto_Sans_JP } from "next/font/google";
 import { TERMS_REQUIRED_ERROR_CODE } from "@/app/constants/auth";
-import { PRIVACY_URL, TERMS_URL } from "@/app/constants/legal";
+import { COMMERCIAL_TRANSACTIONS_URL, PRIVACY_URL, TERMS_URL } from "@/app/constants/legal";
+import { isStripeEnabled } from "@/app/constants/stripe";
 import { GoogleLoginButton } from "./components/google-login-button";
+import { LearningScreens } from "./components/learning-screens";
+import { ServiceIntro } from "./components/service-intro";
+
+// LP と同じ書体。ログイン画面だけで使うため、ルートレイアウトではなくここで読み込む。
+// CJK フォントは unicode-range で数十ファイルに分割されるため preload せず、LP と同じ swap で表示する。
+// 自動生成のフォールバック（Arial + size-adjust）で抑えられるのはラテン文字のずれだけで、日本語は
+// 読み込み完了まで OS 標準の CJK フォントで表示される
+const notoSansJp = Noto_Sans_JP({
+  display: "swap",
+  preload: false,
+});
 
 /** `/login?error=` で表示するメッセージ。未知の値は何も出さない */
 const LOGIN_ERROR_MESSAGES = {
@@ -28,52 +41,78 @@ export default async function LoginPage({
   const { error } = await searchParams;
   const errorMessage = loginErrorMessage(error);
 
+  // スマホ・タブレット幅は ブランド → ログインカード → 紹介 → 学習画面 の縦積み（DOM 順）。紹介と
+  // 学習画面の帯は画面端まで・画面下端まで1枚につなげて伸ばすため、グリッド自体には lg 未満の
+  // 左右・下のパディングと行間を付けない。lg 以上は左列に ブランド／紹介、右列にログインカードを
+  // 置く2カラムで、学習画面はその下に全幅で並べる。
+  // word-break: auto-phrase は日本語を文節単位で折り返す（非対応ブラウザは通常の折り返し）
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm space-y-8">
-        <div className="text-center space-y-2">
-          <div className="flex justify-center">
-            <BookOpen className="h-12 w-12 text-primary" />
+    <div
+      className={`login-theme ${notoSansJp.className} min-h-screen bg-background text-foreground [word-break:auto-phrase]`}
+    >
+      <div className="mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 grid-rows-[auto_auto_auto_1fr] pt-10 lg:grid-cols-[minmax(0,1fr)_400px] lg:grid-rows-[auto_auto_auto] lg:content-center lg:items-center lg:gap-x-16 lg:gap-y-7 lg:px-8 lg:py-14">
+        <header className="flex flex-col items-center gap-1.5 px-4 pb-6 text-center lg:col-start-1 lg:row-start-1 lg:flex-row lg:gap-3 lg:px-0 lg:pb-0 lg:text-left">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground lg:h-10 lg:w-10">
+            <BookOpen className="h-6 w-6" aria-hidden="true" />
           </div>
-          <h1 className="text-2xl font-bold">Sinlab Study</h1>
+          <h1 className="mt-1.5 text-2xl font-extrabold lg:mt-0 lg:text-xl">Sinlab Study</h1>
           <p className="text-sm text-muted-foreground">AIと学ぶ実践Web技術講座</p>
-        </div>
+        </header>
 
-        <div className="border border-border rounded-lg p-6 space-y-6 bg-card">
-          <div className="text-center">
-            <h2 className="text-lg font-semibold">ログイン</h2>
-            <p className="text-sm text-muted-foreground mt-1">
-              Googleアカウントでログインしてください
-            </p>
+        <div className="mx-auto w-full max-w-md space-y-5 px-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:max-w-none lg:px-0">
+          <div className="space-y-6 rounded-2xl border border-border bg-card px-5 py-6 shadow-[var(--login-card-shadow)] sm:p-8">
+            <div className="text-center">
+              <h2 className="text-xl font-extrabold">ログイン</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Googleアカウントでログインしてください
+              </p>
+            </div>
+            {errorMessage && <p className="text-sm text-destructive text-center">{errorMessage}</p>}
+            <GoogleLoginButton />
           </div>
-          {errorMessage && <p className="text-sm text-destructive text-center">{errorMessage}</p>}
-          <GoogleLoginButton />
+
+          <p className="text-xs text-muted-foreground text-center">
+            ログイン後すぐに、お試し公開コンテンツの閲覧・課題提出をご利用いただけます。
+          </p>
+
+          <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <a
+              href={PRIVACY_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:underline"
+            >
+              プライバシーポリシー
+            </a>
+            <a
+              href={TERMS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:underline"
+            >
+              利用規約
+            </a>
+            <a
+              href={COMMERCIAL_TRANSACTIONS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:underline"
+            >
+              特定商取引法に基づく表記
+            </a>
+          </div>
         </div>
 
-        <p className="text-xs text-muted-foreground text-center">
-          ログイン後すぐに、お試し公開コンテンツの閲覧・課題提出をご利用いただけます。
-        </p>
+        <div className="mt-10 bg-secondary px-4 py-10 lg:col-start-1 lg:row-start-2 lg:mt-0 lg:bg-transparent lg:p-0">
+          <div className="mx-auto max-w-xl lg:max-w-none">
+            <ServiceIntro showMonthlyPrice={isStripeEnabled()} />
+          </div>
+        </div>
 
-        <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <a
-            href={PRIVACY_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:underline"
-          >
-            プライバシーポリシー
-          </a>
-          <a href={TERMS_URL} target="_blank" rel="noopener noreferrer" className="hover:underline">
-            利用規約
-          </a>
-          <a
-            href="https://sinlab.future-tech-association.org/sinlab-study/legal.html"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:underline"
-          >
-            特定商取引法に基づく表記
-          </a>
+        <div className="bg-secondary px-4 pb-10 lg:col-span-2 lg:row-start-3 lg:mt-7 lg:border-t lg:border-border lg:bg-transparent lg:px-0 lg:pt-12 lg:pb-0">
+          <div className="mx-auto max-w-xl lg:max-w-none">
+            <LearningScreens />
+          </div>
         </div>
       </div>
     </div>
