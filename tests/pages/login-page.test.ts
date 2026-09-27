@@ -14,6 +14,7 @@ vi.mock("@/app/(auth)/login/components/google-login-button", () => ({
 
 import LoginPage from "@/app/(auth)/login/page";
 import { TERMS_REQUIRED_ERROR_CODE } from "@/app/constants/auth";
+import { COMMERCIAL_TRANSACTIONS_URL } from "@/app/constants/legal";
 import { FREE_TRIAL_FORM_URL, SERVICE_LP_URL } from "@/app/constants/marketing";
 import { DISPLAY_MONTHLY_PRICE_JPY } from "@/app/constants/stripe";
 
@@ -65,10 +66,9 @@ describe("LoginPage", () => {
 
   it("料金を DISPLAY_MONTHLY_PRICE_JPY から導出した1行で表示する", async () => {
     const text = textOf(await render());
-    const price = DISPLAY_MONTHLY_PRICE_JPY.toLocaleString("ja-JP");
 
     expect(text).toContain(
-      `まずは無料で始められます。全コンテンツの利用は月額${price}円（税込）。`
+      `まずは無料で始められます。全コンテンツの利用は月額${DISPLAY_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円（税込）。`
     );
   });
 
@@ -100,6 +100,7 @@ describe("LoginPage", () => {
       "ログイン後すぐに、お試し公開コンテンツの閲覧・課題提出をご利用いただけます。"
     );
     expect(textOf(html)).toContain("特定商取引法に基づく表記");
+    expect(anchorTag(html, COMMERCIAL_TRANSACTIONS_URL)).toBeDefined();
   });
 
   it("error=registration_failed で登録失敗メッセージを表示する", async () => {

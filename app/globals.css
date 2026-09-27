@@ -82,31 +82,36 @@
 /*
  * ログイン画面（`/login`）専用の配色。LP（SERVICE_LP_URL）の配色に合わせ、
  * `.login-theme` 配下だけセマンティックトークンを上書きする（他の画面は上の :root / .dark のまま）。
- * LP のアクセント #FF6B3D は白・クリーム地に対して文字のコントラスト 4.5:1 を満たさないため、
- * ライトの primary は一段濃い #E04F1E にしている。
+ * オーバースクロール時に body の地色が見えないよう、`.login-theme` を含むページでは
+ * :root にも同じ値を適用する（:has 非対応ブラウザでも `.login-theme` 配下は上書きされる）。
+ * LP のアクセント #FF6B3D は文字色としてコントラスト 4.5:1 を満たさないため、ライトの
+ * primary は #BF3F16（白 5.33:1・#FFF8F0 5.06:1・#FFEFE0 4.74:1）、accent-foreground は
+ * #A8390F（#FFE4CB 5.28:1）まで濃くしている。
  */
-.login-theme {
+.login-theme,
+:root:has(.login-theme) {
   --background: #fff8f0;
   --foreground: #1e1a38;
   --card: #ffffff;
   --card-foreground: #1e1a38;
   --popover: #ffffff;
   --popover-foreground: #1e1a38;
-  --primary: #e04f1e;
+  --primary: #bf3f16;
   --primary-foreground: #ffffff;
   --secondary: #ffefe0;
   --secondary-foreground: #1e1a38;
   --muted: #ffefe0;
   --muted-foreground: #5a567a;
   --accent: #ffe4cb;
-  --accent-foreground: #c8431a;
+  --accent-foreground: #a8390f;
   --border: rgba(30, 26, 56, 0.12);
   --input: rgba(30, 26, 56, 0.22);
-  --ring: #e04f1e;
+  --ring: #bf3f16;
   --login-card-shadow: 0 24px 60px -20px rgba(30, 26, 56, 0.22);
 }
 
-.dark .login-theme {
+.dark .login-theme,
+:root.dark:has(.login-theme) {
   --background: #16132a;
   --foreground: #f4f1ec;
   --card: #1f1b38;

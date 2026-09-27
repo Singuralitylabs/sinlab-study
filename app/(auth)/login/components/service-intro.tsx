@@ -2,7 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import { ArrowRight, ExternalLink, Layers, MapIcon, Sparkles, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { FREE_TRIAL_FORM_URL, SERVICE_LP_URL } from "@/app/constants/marketing";
-import { DISPLAY_MONTHLY_PRICE_JPY } from "@/app/constants/stripe";
+import { DISPLAY_MONTHLY_PRICE_JPY, formatMonthlyJpyPrice } from "@/app/constants/stripe";
 
 type Feature = {
   icon: LucideIcon;
@@ -49,8 +49,6 @@ const PILL_LINK_CLASS =
 
 /** `/login` のサービス紹介（表示専用）。ログインの導線を優先するため、リンクは枠線・文字リンクに留める */
 export function ServiceIntro() {
-  const monthlyPrice = DISPLAY_MONTHLY_PRICE_JPY.toLocaleString("ja-JP");
-
   return (
     <section aria-labelledby="service-intro-heading" className="space-y-7">
       <div className="space-y-4">
@@ -98,8 +96,11 @@ export function ServiceIntro() {
 
       <div className="space-y-4">
         <p className="text-sm leading-relaxed lg:text-[15px]">
-          まずは無料で始められます。全コンテンツの利用は月額
-          <strong className="font-extrabold">{monthlyPrice}円</strong>（税込）。
+          まずは無料で始められます。全コンテンツの利用は
+          <strong className="font-extrabold">
+            {formatMonthlyJpyPrice(DISPLAY_MONTHLY_PRICE_JPY)}
+          </strong>
+          。
         </p>
         <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           <Link href="/demo" className={PILL_LINK_CLASS}>

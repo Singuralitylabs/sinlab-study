@@ -1,7 +1,7 @@
 import { BookOpen } from "lucide-react";
 import { Noto_Sans_JP } from "next/font/google";
 import { TERMS_REQUIRED_ERROR_CODE } from "@/app/constants/auth";
-import { PRIVACY_URL, TERMS_URL } from "@/app/constants/legal";
+import { COMMERCIAL_TRANSACTIONS_URL, PRIVACY_URL, TERMS_URL } from "@/app/constants/legal";
 import { GoogleLoginButton } from "./components/google-login-button";
 import { ServiceIntro } from "./components/service-intro";
 
@@ -37,15 +37,16 @@ export default async function LoginPage({
   const { error } = await searchParams;
   const errorMessage = loginErrorMessage(error);
 
-  // スマホ幅は ブランド → ログインカード → 紹介 の縦積み（DOM 順）。
+  // スマホ・タブレット幅は ブランド → ログインカード → 紹介 の縦積み（DOM 順）。紹介の帯は
+  // 画面端まで・画面下端まで伸ばすため、グリッド自体には lg 未満の左右・下のパディングを付けない。
   // lg 以上は左列に ブランド／紹介、右列にログインカードを置く2カラム。
   // word-break: auto-phrase は日本語を文節単位で折り返す（非対応ブラウザは通常の折り返し）
   return (
     <div
       className={`login-theme ${notoSansJp.className} min-h-screen bg-background text-foreground [word-break:auto-phrase]`}
     >
-      <div className="mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 content-center gap-6 px-4 py-10 lg:grid-cols-[minmax(0,1fr)_400px] lg:grid-rows-[auto_auto] lg:items-center lg:gap-x-16 lg:gap-y-7 lg:px-8 lg:py-14">
-        <header className="flex flex-col items-center gap-1.5 text-center lg:col-start-1 lg:row-start-1 lg:flex-row lg:gap-3 lg:text-left">
+      <div className="mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 grid-rows-[auto_auto_1fr] gap-6 pt-10 lg:grid-cols-[minmax(0,1fr)_400px] lg:grid-rows-[auto_auto] lg:content-center lg:items-center lg:gap-x-16 lg:gap-y-7 lg:px-8 lg:py-14">
+        <header className="flex flex-col items-center gap-1.5 px-4 text-center lg:col-start-1 lg:row-start-1 lg:flex-row lg:gap-3 lg:px-0 lg:text-left">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground lg:h-10 lg:w-10">
             <BookOpen className="h-6 w-6" aria-hidden="true" />
           </div>
@@ -53,7 +54,7 @@ export default async function LoginPage({
           <p className="text-sm text-muted-foreground">AIと学ぶ実践Web技術講座</p>
         </header>
 
-        <div className="space-y-5 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+        <div className="mx-auto w-full max-w-md space-y-5 px-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:max-w-none lg:px-0">
           <div className="space-y-6 rounded-2xl border border-border bg-card px-5 py-6 shadow-[var(--login-card-shadow)] sm:p-8">
             <div className="text-center">
               <h2 className="text-xl font-extrabold">ログイン</h2>
@@ -87,7 +88,7 @@ export default async function LoginPage({
               利用規約
             </a>
             <a
-              href="https://sinlab.future-tech-association.org/sinlab-study/legal.html"
+              href={COMMERCIAL_TRANSACTIONS_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="hover:underline"
@@ -97,8 +98,10 @@ export default async function LoginPage({
           </div>
         </div>
 
-        <div className="-mx-4 mt-4 -mb-10 bg-secondary px-4 py-10 lg:col-start-1 lg:row-start-2 lg:mx-0 lg:mt-0 lg:mb-0 lg:bg-transparent lg:p-0">
-          <ServiceIntro />
+        <div className="mt-4 bg-secondary px-4 py-10 lg:col-start-1 lg:row-start-2 lg:mt-0 lg:bg-transparent lg:p-0">
+          <div className="mx-auto max-w-xl lg:max-w-none">
+            <ServiceIntro />
+          </div>
         </div>
       </div>
     </div>

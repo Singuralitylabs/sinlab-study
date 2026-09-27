@@ -3,6 +3,7 @@ import { PageTitle } from "@/app/components/PageTitle";
 import {
   BILLING_ANCHOR_DAY_OF_MONTH,
   DISPLAY_MONTHLY_PRICE_JPY,
+  formatMonthlyJpyPrice,
   isChargeableSubscriptionPrice,
   isStripeEnabled,
   logDisplayPriceDrift,
@@ -20,10 +21,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { formatDate } from "./format-date";
 import { ManageSubscriptionButton } from "./ManageSubscriptionButton";
 import { UpgradeCheckoutButton } from "./UpgradeCheckoutButton";
-
-function formatMonthlyJpyPrice(amount: number): string {
-  return `月額${amount.toLocaleString("ja-JP")}円（税込）`;
-}
 
 const FALLBACK_MONTHLY_PRICE_LABEL = formatMonthlyJpyPrice(DISPLAY_MONTHLY_PRICE_JPY);
 
