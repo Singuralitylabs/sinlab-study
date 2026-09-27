@@ -8,8 +8,9 @@ import { LearningScreens } from "./components/learning-screens";
 import { ServiceIntro } from "./components/service-intro";
 
 // LP と同じ書体。ログイン画面だけで使うため、ルートレイアウトではなくここで読み込む。
-// CJK フォントは unicode-range で数十ファイルに分割されるため preload せず、LP と同じ swap で表示する
-// （切り替わり時のずれは next/font が自動生成するサイズ調整済みフォールバックで抑える）
+// CJK フォントは unicode-range で数十ファイルに分割されるため preload せず、LP と同じ swap で表示する。
+// 自動生成のフォールバック（Arial + size-adjust）で抑えられるのはラテン文字のずれだけで、日本語は
+// 読み込み完了まで OS 標準の CJK フォントで表示される
 const notoSansJp = Noto_Sans_JP({
   display: "swap",
   preload: false,

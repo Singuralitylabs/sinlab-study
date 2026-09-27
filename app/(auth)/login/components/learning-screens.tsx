@@ -7,7 +7,7 @@ type Screen = {
 };
 
 // 実際のアプリ画面のスクリーンショット（public/images/login/）。
-// 動画画面は講師のワイプ部分を塗りつぶして除去済み
+// 動画画面は講師のワイプ部分を塗りつぶし、AIレビュー画面は模範回答のコードをぼかし済み
 const SCREENS: Screen[] = [
   { src: "/images/login/video.webp", alt: "動画コンテンツの画面", caption: "動画で学ぶ" },
   {
@@ -46,7 +46,7 @@ export function LearningScreens() {
                   alt={alt}
                   fill
                   className="object-cover object-left-top"
-                  sizes="(min-width: 1024px) 270px, (min-width: 640px) 50vw, 100vw"
+                  sizes="(min-width: 1024px) 270px, (min-width: 640px) 280px, 100vw"
                 />
               </div>
               <figcaption className="text-sm font-bold">{caption}</figcaption>
