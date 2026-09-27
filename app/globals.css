@@ -79,6 +79,54 @@
   --sidebar-ring: oklch(0.65 0.2 255);
 }
 
+/*
+ * ログイン画面（`/login`）専用の配色。LP（SERVICE_LP_URL）の配色に合わせ、
+ * `.login-theme` 配下だけセマンティックトークンを上書きする（他の画面は上の :root / .dark のまま）。
+ * LP のアクセント #FF6B3D は白・クリーム地に対して文字のコントラスト 4.5:1 を満たさないため、
+ * ライトの primary は一段濃い #E04F1E にしている。
+ */
+.login-theme {
+  --background: #fff8f0;
+  --foreground: #1e1a38;
+  --card: #ffffff;
+  --card-foreground: #1e1a38;
+  --popover: #ffffff;
+  --popover-foreground: #1e1a38;
+  --primary: #e04f1e;
+  --primary-foreground: #ffffff;
+  --secondary: #ffefe0;
+  --secondary-foreground: #1e1a38;
+  --muted: #ffefe0;
+  --muted-foreground: #5a567a;
+  --accent: #ffe4cb;
+  --accent-foreground: #c8431a;
+  --border: rgba(30, 26, 56, 0.12);
+  --input: rgba(30, 26, 56, 0.22);
+  --ring: #e04f1e;
+  --login-card-shadow: 0 24px 60px -20px rgba(30, 26, 56, 0.22);
+}
+
+.dark .login-theme {
+  --background: #16132a;
+  --foreground: #f4f1ec;
+  --card: #1f1b38;
+  --card-foreground: #f4f1ec;
+  --popover: #1f1b38;
+  --popover-foreground: #f4f1ec;
+  --primary: #ff8a63;
+  --primary-foreground: #1e1a38;
+  --secondary: #221e3d;
+  --secondary-foreground: #f4f1ec;
+  --muted: #221e3d;
+  --muted-foreground: #b4b0c9;
+  --accent: rgba(255, 107, 61, 0.16);
+  --accent-foreground: #ff8a63;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.24);
+  --ring: #ff8a63;
+  --login-card-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.6);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
