@@ -1,12 +1,19 @@
 import type Stripe from "stripe";
+import { isChargeableSubscriptionPrice } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP, USER_STATUS } from "@/app/constants/user";
 import {
   ACTIVATABLE_SUBSCRIPTION_STATUSES,
   getStripeClient,
+  isPlainMonthlyPrice,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
   TERMINAL_SUBSCRIPTION_STATUSES,
 } from "@/app/services/api/stripe-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
+import {
+  scheduleCancelScheduledEmail,
+  scheduleSubscriptionEndedEmail,
+  scheduleUpgradedEmail,
+} from "@/app/services/notifications/user-emails";
 
 /**
  * CheckoutセッションからユーザーIDを特定する。Webhookとsuccessページの両方から
@@ -26,6 +33,23 @@ export function extractUserId(
 
 function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
   return typeof unixSeconds === "number" ? new Date(unixSeconds * 1000).toISOString() : null;
+}
+
+/**
+ * 契約（Stripeから取り直したサブスク）の実請求額（JPY・月額）。JPYの1ヶ月間隔でない場合は
+ * 税込円額として示せないため null を返す（有料会員化メールでは料金の行を載せない）。
+ */
+function chargedMonthlyAmountJpy(subscription: Stripe.Subscription): number | null {
+  const item = subscription.items.data[0];
+  const price = item?.price;
+  if (!price || !isPlainMonthlyPrice(price)) {
+    return null;
+  }
+  const amount = { amount: price.unit_amount, currency: price.currency };
+  if (!isChargeableSubscriptionPrice(amount)) {
+    return null;
+  }
+  return amount.amount * (item.quantity ?? 1);
 }
 
 /**
@@ -146,6 +170,15 @@ export async function activateUserFromCheckoutSession(
   const promoted = await promoteUserToGeneral(supabase, userId);
   if (promoted.error) {
     return { error: promoted.error, activated: false, currentPeriodEnd: null };
+  }
+  if (promoted.activated) {
+    // Webhook と successページの両方が昇格を返しうるが、送信ログの UNIQUE（契約id）で1通に抑える
+    scheduleUpgradedEmail({
+      userId,
+      subscriptionId: subscription.id,
+      monthlyAmountJpy: chargedMonthlyAmountJpy(subscription),
+      currentPeriodEnd,
+    });
   }
   return {
     error: null,
@@ -392,7 +425,7 @@ export async function syncSubscriptionStatus(
 
   const { data: existing, error: fetchError } = await supabase
     .from("stripe_subscriptions")
-    .select("user_id")
+    .select("user_id, cancel_at_period_end")
     .eq("stripe_subscription_id", subscriptionFromEvent.id)
     .maybeSingle();
 
@@ -406,10 +439,11 @@ export async function syncSubscriptionStatus(
 
   const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve(subscriptionFromEvent.id);
+  const mirrorFields = subscriptionMirrorFields(subscription);
 
   const { error: updateError } = await supabase
     .from("stripe_subscriptions")
-    .update(subscriptionMirrorFields(subscription))
+    .update(mirrorFields)
     .eq("stripe_subscription_id", subscription.id);
 
   if (updateError) {
@@ -418,7 +452,22 @@ export async function syncSubscriptionStatus(
   }
 
   if (TERMINAL_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
-    return await revertUserToTrial(existing.user_id);
+    const reverted = await revertUserToTrial(existing.user_id);
+    if (reverted.error === null && reverted.reverted) {
+      scheduleSubscriptionEndedEmail({ userId: existing.user_id, subscriptionId: subscription.id });
+    }
+    return { error: reverted.error };
+  }
+
+  // 解約予約の受付（false → true）。比較する両辺は「書き込み前のミラー行」と「Stripeから
+  // 取り直したライブ状態」のため、遅延・順序逆転したイベントのスナップショットでは発火しない。
+  // 並行する複数イベントが同時に遷移と判定しても、送信ログの UNIQUE（契約id）で1通に抑える
+  if (!existing.cancel_at_period_end && subscription.cancel_at_period_end) {
+    scheduleCancelScheduledEmail({
+      userId: existing.user_id,
+      subscriptionId: subscription.id,
+      currentPeriodEnd: mirrorFields.current_period_end,
+    });
   }
 
   return { error: null };
@@ -427,11 +476,16 @@ export async function syncSubscriptionStatus(
 /**
  * ユーザーをお試しユーザーに戻す。membership_type='general' の場合のみ実行するガードを
  * UPDATE自体に折り込む（コミュニティ会員・手動承認済みユーザーを誤って巻き込まない）。
+ *
+ * @returns reverted: 実際に行を更新したか。ガードで更新されなかった場合（既に降格済み・
+ * 一般有料会員以外）は false で、有料会員終了メールを送らない判定に使う
  */
-export async function revertUserToTrial(userId: number): Promise<{ error: string | null }> {
+export async function revertUserToTrial(
+  userId: number
+): Promise<{ error: string | null; reverted: boolean }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("users")
     .update({
       status: USER_STATUS.TRIAL,
@@ -439,14 +493,15 @@ export async function revertUserToTrial(userId: number): Promise<{ error: string
       updated_at: new Date().toISOString(),
     })
     .eq("id", userId)
-    .eq("membership_type", USER_MEMBERSHIP.GENERAL);
+    .eq("membership_type", USER_MEMBERSHIP.GENERAL)
+    .select("id");
 
   if (error) {
     console.error("ユーザー降格エラー:", error.message);
-    return { error: error.message };
+    return { error: error.message, reverted: false };
   }
 
-  return { error: null };
+  return { error: null, reverted: (data?.length ?? 0) > 0 };
 }
 
 /** claimが放置されたとみなすまでの時間（分）。この時間を超えたclaimは再claim可能にする */

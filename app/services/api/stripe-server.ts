@@ -515,7 +515,7 @@ async function getCachedPrice(): Promise<Stripe.Price> {
  * 誤設定を検知して呼び出し側で安全側に倒すために使う（`fetchSubscriptionPrice()` と
  * `isProrationBelowMinimum()` の双方で共有する）。
  */
-function isPlainMonthlyPrice(price: Stripe.Price): boolean {
+export function isPlainMonthlyPrice(price: Stripe.Price): boolean {
   return price.recurring?.interval === "month" && (price.recurring.interval_count ?? 1) === 1;
 }
 

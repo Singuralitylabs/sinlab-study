@@ -9,6 +9,7 @@ import {
 } from "@/app/services/api/admin-server";
 import { AdminUserActionSchema, validateRequest } from "@/app/services/api/schemas";
 import { getServerAuth } from "@/app/services/auth/server-auth";
+import { scheduleApprovedEmail } from "@/app/services/notifications/user-emails";
 
 export async function PATCH(request: Request) {
   try {
@@ -106,7 +107,7 @@ export async function PATCH(request: Request) {
     }
 
     if (data.action === "approve") {
-      const { error, updated } = await approveUser(userId, data.membershipType);
+      const { error, updated, approvedAt } = await approveUser(userId, data.membershipType);
       if (error) {
         return NextResponse.json({ error: "ステータス更新に失敗しました" }, { status: 500 });
       }
@@ -120,6 +121,9 @@ export async function PATCH(request: Request) {
           },
           { status: 409 }
         );
+      }
+      if (approvedAt) {
+        scheduleApprovedEmail({ userId, membershipType: data.membershipType, approvedAt });
       }
       return NextResponse.json({ success: true, action });
     }
