@@ -40,6 +40,9 @@ function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
  * 契約（Stripeから取り直したサブスク）の月額料金（JPY・単価×数量）。JPYの1ヶ月間隔でない場合は
  * 税込円額として示せないため null を返す（有料会員化メールでは料金の行を載せない）。
  * サブスク・アイテムに割引（クーポン等）が付いている場合も、実請求額と食い違うため null を返す。
+ * Customer に直接付けた割引（`customer.discount`）は `subscription.discounts` に含まれないため
+ * 検知できず、定価が載る（取得には Customer の追加取得が要る。Checkout のプロモーションコードは
+ * サブスク側に付くため通常の導線では起きず、Dashboard・API での手動付与に限られるため許容する）。
  */
 function chargedMonthlyAmountJpy(subscription: Stripe.Subscription): number | null {
   const item = subscription.items.data[0];
