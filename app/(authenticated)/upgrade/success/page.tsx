@@ -1,6 +1,7 @@
 import { CheckCircle2, XCircle } from "lucide-react";
 import Link from "next/link";
 import { isStripeEnabled, STRIPE_DISABLED_MESSAGE } from "@/app/constants/stripe";
+import { formatDate } from "@/app/lib/format-date";
 import {
   PAID_CHECKOUT_PAYMENT_STATUSES,
   retrieveCheckoutSession,
@@ -12,7 +13,6 @@ import {
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { formatDate } from "../format-date";
 
 export default async function UpgradeSuccessPage({
   searchParams,

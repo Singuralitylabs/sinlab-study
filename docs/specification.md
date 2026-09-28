@@ -1200,11 +1200,16 @@ flowchart TD
 |:--|:--|:--|:--|
 | `signup` | 初回登録の INSERT 成功後（`GET /auth/callback`。Slack 承認依頼と同じ箇所）。INSERT は通常クライアントで行い id を返さないため、送信時に `auth_id` で `users.id` を引き直す | `users.id` | ようこそ、お試しで閲覧・提出できること、最初の学習コンテンツ（`/learn`）へのリンク、本登録の案内（Stripe 有効時のみアップグレード `/upgrade` も案内） |
 | `approved` | `approveUser()` が更新したとき（`PATCH /api/admin/users` の `approve`） | 承認時刻（`approveUser()` が `updated_at` に書いた ISO 文字列） | 本登録の完了、全コンテンツが使えること、会員種別、ダッシュボードへのリンク |
-| `upgraded` | `activateUserFromCheckoutSession()` が実際に昇格したとき。Webhook・`/upgrade/success`・Checkout API の自己復旧のいずれから呼ばれても、UNIQUE で1通に抑える | `stripe_subscription_id` | 一般有料会員になったこと、月額料金（Stripe から取り直したサブスクの実請求額。JPY の1ヶ月間隔で確認できなければ料金の行を載せず、`DISPLAY_MONTHLY_PRICE_JPY` では代用しない）、次回請求日、`/upgrade` のお支払い管理への案内 |
-| `cancel_scheduled` | `syncSubscriptionStatus()` で `cancel_at_period_end` が `false → true` に遷移したとき（終端状態への遷移時を除く） | `stripe_subscription_id` | 解約を受け付けたこと、`current_period_end` まで全コンテンツを利用できること、期限までに Portal から取り消せること |
+| `upgraded` | `activateUserFromCheckoutSession()` または `reactivateUserFromMirror()`（2.11節の不整合の解消）が昇格したとき。Webhook・`/upgrade/success`・Checkout API の自己復旧のいずれから呼ばれても、UNIQUE で1通に抑える | `stripe_subscription_id` | 一般有料会員になったこと、月額料金（Stripe から取り直したサブスクの実請求額。JPY の1ヶ月間隔で確認できなければ料金の行を載せず、`DISPLAY_MONTHLY_PRICE_JPY` では代用しない）、次回請求日、`/upgrade` のお支払い管理への案内 |
+| `cancel_scheduled` | `syncSubscriptionStatus()` で、Stripe から取り直したライブ状態が解約予約中（`cancel_at_period_end` が true、または `cancel_at` が設定済み）のとき（終端状態への遷移時を除く） | `stripe_subscription_id` | 解約を受け付けたこと、利用期限（`cancel_at`、無ければ `current_period_end`）まで全コンテンツを利用できること、期限までに Portal から取り消せること |
 | `subscription_ended` | `syncSubscriptionStatus()` が終端状態への遷移で `revertUserToTrial()` を呼び、実際に行を更新したとき（`membership_type = general` ガードで更新されなかった場合は送らない） | `stripe_subscription_id` | 有料会員が終了しお試しユーザーに戻ったこと、お試し公開コンテンツは引き続き利用できること、再開は `/upgrade` からできること |
 
-`cancel_scheduled` の遷移判定は「書き込み前のミラー行の `cancel_at_period_end`」と「Stripe から取り直したライブ状態」を比べる（2.11節の順序逆転対策と同じく、イベントのスナップショットは使わない）。遅延・再送したイベントではミラー行が既に `true` のため発火せず、並行する複数イベントが同時に遷移と判定しても UNIQUE で1通に抑える。同じ契約で解約予約を取り消して再度予約した場合も、reference_key が同じため2通目は送らない。
+`cancel_scheduled` は、Stripe から取り直したライブ状態だけで判定する（2.11節の順序逆転対策と同じく、イベントのスナップショットは使わない）。
+
+- **両方のフラグを見る理由**: flexible billing mode（API 2025-09-30.clover 以降の新規サブスクの既定）では、Customer Portal で解約すると `cancel_at` に終了日時が入り、`cancel_at_period_end` は false のままになる
+- **ミラー行との比較（`false → true` の遷移）で判定しない理由**: ライブ状態をミラーへ書く経路は他にもある（successページ再訪・Checkout 自己復旧での反映、`reactivateUserFromMirror()`）。それらが Webhook より先に書くと遷移が消費され、メールが欠落する
+
+このためサブスク更新のイベントが届くたび、解約予約中であれば予約し、Webhook の再送・並行イベントの重複は UNIQUE で1通に抑える。同じ契約で解約予約を取り消して再度予約した場合も、reference_key が同じため2通目は送らない。
 
 対象外: 却下通知、支払い失敗のユーザー向け通知（Stripe の自動メールに任せる。運営向け Slack 通知は既存のまま）、AI レビュー完了通知。定期メール・配信停止・お知らせ連動は本章の範囲外で、`sendEmail()`・共通レイアウト・`email_logs` を再利用して追加する。
 

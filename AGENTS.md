@@ -114,4 +114,4 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 
 `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_PROJECT_ID` / `GEMINI_API_KEY` / `GEMINI_API_KEY_TRIAL` / `SLACK_NOTIFICATION_WEBHOOK_URL` / `RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `STRIPE_ENABLED` / `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_ID` / `NEXT_PUBLIC_APP_URL`
 
-**AIレビューのキー振り分け**: 選択ロジックは `resolveGeminiApiKey()`（`app/services/api/gemini.ts`）、モデル名・上限値・環境変数名は `app/constants/gemini.ts` に集約する。**キーはサーバー側でのみ扱い、レスポンス・ログへ出さない**（メール通知の `RESEND_API_KEY` も同じ。`docs/specification.md` 10章）。仕様は `docs/specification.md` 6.1.2節を参照。
+**AIレビューのキー振り分け**: 選択ロジックは `resolveGeminiApiKey()`（`app/services/api/gemini.ts`）、モデル名・上限値・環境変数名は `app/constants/gemini.ts` に集約する。**キーはサーバー側でのみ扱い、レスポンス・ログへ出さない。** 仕様は `docs/specification.md` 6.1.2節を参照。

@@ -122,9 +122,7 @@ export async function PATCH(request: Request) {
           { status: 409 }
         );
       }
-      if (approvedAt) {
-        scheduleApprovedEmail({ userId, membershipType: data.membershipType, approvedAt });
-      }
+      scheduleApprovedEmail({ userId, membershipType: data.membershipType, approvedAt });
       return NextResponse.json({ success: true, action });
     }
 

@@ -11,6 +11,7 @@ import {
   SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
 } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
+import { formatDate } from "@/app/lib/format-date";
 import {
   fetchStripeSubscriptionByUserId,
   fetchSubscriptionPrice,
@@ -18,7 +19,6 @@ import {
 } from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
-import { formatDate } from "./format-date";
 import { ManageSubscriptionButton } from "./ManageSubscriptionButton";
 import { UpgradeCheckoutButton } from "./UpgradeCheckoutButton";
 

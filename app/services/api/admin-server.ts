@@ -1507,7 +1507,10 @@ export async function isUserCurrentlySubscribed(userId: number): Promise<{
 export async function approveUser(
   userId: number,
   membershipType: MembershipType
-): Promise<{ error: PostgrestError | null; updated: boolean; approvedAt: string | null }> {
+): Promise<
+  | { error: PostgrestError | null; updated: false; approvedAt: null }
+  | { error: null; updated: true; approvedAt: string }
+> {
   const supabase = await createAdminSupabaseClient();
   const approvedAt = new Date().toISOString();
 
@@ -1528,8 +1531,10 @@ export async function approveUser(
     return { error, updated: false, approvedAt: null };
   }
 
-  const updated = (data?.length ?? 0) > 0;
-  return { error: null, updated, approvedAt: updated ? approvedAt : null };
+  if ((data?.length ?? 0) === 0) {
+    return { error: null, updated: false, approvedAt: null };
+  }
+  return { error: null, updated: true, approvedAt };
 }
 
 /**

@@ -13,34 +13,38 @@ export type EmailContent = {
 
 export type SendEmailResult =
   | { status: "sent"; messageId: string | null }
-  | { status: "skipped" }
   | { status: "failed"; error: string };
+
+function getEmailConfig(): { apiKey: string; fromAddress: string } | null {
+  const apiKey = process.env.RESEND_API_KEY;
+  const fromAddress = process.env.EMAIL_FROM_ADDRESS;
+  return apiKey && fromAddress ? { apiKey, fromAddress } : null;
+}
 
 /**
  * メール送信に必要な環境変数（`RESEND_API_KEY` / `EMAIL_FROM_ADDRESS`）がそろっているか。
- * 送信ログの claim より前に判定し、未設定の環境で送信ログだけが積み上がらないようにする。
+ * 未設定時のスキップ（warn ログ）は送信の入口（`user-emails.ts` の `deliverToUser()`）の
+ * 1箇所で判定し、宛先の読み込み・送信ログの claim より前に打ち切る（未設定の環境で
+ * 送信ログだけが積み上がらないようにする）。
  */
 export function isEmailConfigured(): boolean {
-  return Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM_ADDRESS);
+  return getEmailConfig() !== null;
 }
 
 /**
  * Resend の REST API でメールを1通送る。Slack 通知（`postSlackWebhook()`）と同じ方針で、
- * 環境変数未設定時はスキップ（warn ログ）、送信失敗（非2xx・タイムアウト・例外）はログに残して
- * `failed` を返し、例外は一切 throw しない（呼び出し元の主処理へ伝播させない）。
+ * 送信失敗（非2xx・タイムアウト・例外）はログに残して `failed` を返し、例外は一切 throw しない
+ * （呼び出し元の主処理へ伝播させない）。送信設定の有無は呼び出し元が `isEmailConfigured()` で
+ * 判定済みであることを前提とし、未設定で呼ばれた場合も `failed` を返す。
  *
  * `RESEND_API_KEY` はリクエストヘッダにのみ載せ、戻り値・ログには含めない。
  */
 export async function sendEmail(params: { to: string } & EmailContent): Promise<SendEmailResult> {
-  const apiKey = process.env.RESEND_API_KEY;
-  const fromAddress = process.env.EMAIL_FROM_ADDRESS;
-
-  if (!apiKey || !fromAddress) {
-    console.warn(
-      "[メール通知] RESEND_API_KEY または EMAIL_FROM_ADDRESS が未設定のため送信をスキップしました"
-    );
-    return { status: "skipped" };
+  const config = getEmailConfig();
+  if (!config) {
+    return { status: "failed", error: "RESEND_API_KEY または EMAIL_FROM_ADDRESS が未設定です" };
   }
+  const { apiKey, fromAddress } = config;
 
   try {
     const response = await fetch(RESEND_API_URL, {

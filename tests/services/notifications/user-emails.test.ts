@@ -79,7 +79,7 @@ describe("deliverUserEmail", () => {
       ],
     });
 
-    const result = await deliverUserEmail(deliverParams);
+    const result = await deliverUserEmail(client as never, deliverParams);
 
     expect(result).toBe("sent");
     const [claim, record] = emailLogBuilders(client);
@@ -99,7 +99,7 @@ describe("deliverUserEmail", () => {
   it("UNIQUE 違反（同一事象を別経路・再送が送信済み）なら送信しない", async () => {
     const client = mockAdmin({ email_logs: duplicate });
 
-    const result = await deliverUserEmail(deliverParams);
+    const result = await deliverUserEmail(client as never, deliverParams);
 
     expect(result).toBe("duplicate");
     expect(sendEmail).not.toHaveBeenCalled();
@@ -108,9 +108,11 @@ describe("deliverUserEmail", () => {
   });
 
   it("claim が他のDBエラーで失敗した場合は、二重送信を防げないため送信しない", async () => {
-    mockAdmin({ email_logs: { data: null, error: { code: "PGRST000", message: "db down" } } });
+    const client = mockAdmin({
+      email_logs: { data: null, error: { code: "PGRST000", message: "db down" } },
+    });
 
-    const result = await deliverUserEmail(deliverParams);
+    const result = await deliverUserEmail(client as never, deliverParams);
 
     expect(result).toBe("failed");
     expect(sendEmail).not.toHaveBeenCalled();
@@ -125,7 +127,7 @@ describe("deliverUserEmail", () => {
       ],
     });
 
-    const result = await deliverUserEmail(deliverParams);
+    const result = await deliverUserEmail(client as never, deliverParams);
 
     expect(result).toBe("failed");
     const [, record] = emailLogBuilders(client);
@@ -134,25 +136,14 @@ describe("deliverUserEmail", () => {
     expect(sendEmail).toHaveBeenCalledTimes(1);
   });
 
-  it("送信設定が無い環境では claim もせずスキップする", async () => {
-    vi.stubEnv("RESEND_API_KEY", "");
-    const client = mockAdmin({});
-
-    const result = await deliverUserEmail(deliverParams);
-
-    expect(result).toBe("skipped");
-    expect(client.from).not.toHaveBeenCalled();
-    expect(sendEmail).not.toHaveBeenCalled();
-  });
-
   it("同一事象が並行して2回届いても（Webhook と /upgrade/success）1通だけ送る", async () => {
-    mockAdmin({
+    const client = mockAdmin({
       email_logs: [{ data: { id: 11 }, error: null }, duplicate, { data: null, error: null }],
     });
 
     const results = await Promise.all([
-      deliverUserEmail(deliverParams),
-      deliverUserEmail(deliverParams),
+      deliverUserEmail(client as never, deliverParams),
+      deliverUserEmail(client as never, deliverParams),
     ]);
 
     expect(results.sort()).toEqual(["duplicate", "sent"]);
@@ -195,6 +186,17 @@ describe("schedule*Email（after() による予約）", () => {
     scheduleApprovedEmail({ userId: 7, membershipType: "community", approvedAt: "t" });
 
     await expect(runScheduled()).resolves.toBeUndefined();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("送信設定が無い環境では、宛先も読まず claim もせずスキップする", async () => {
+    vi.stubEnv("RESEND_API_KEY", "");
+    const client = mockAdmin({ users: { data: recipientRow, error: null } });
+
+    scheduleSubscriptionEndedEmail({ userId: 7, subscriptionId: "sub_123" });
+    await runScheduled();
+
+    expect(client.from).not.toHaveBeenCalled();
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
@@ -334,7 +336,7 @@ describe("schedule*Email（after() による予約）", () => {
     scheduleCancelScheduledEmail({
       userId: 7,
       subscriptionId: "sub_123",
-      currentPeriodEnd: "2026-10-26T15:00:00.000Z",
+      periodEnd: "2026-10-26T15:00:00.000Z",
     });
     await runScheduled();
     scheduleSubscriptionEndedEmail({ userId: 7, subscriptionId: "sub_123" });

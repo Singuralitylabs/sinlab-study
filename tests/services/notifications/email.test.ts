@@ -67,18 +67,19 @@ describe("sendEmail", () => {
   it.each([
     ["RESEND_API_KEY", "RESEND_API_KEY"],
     ["EMAIL_FROM_ADDRESS", "EMAIL_FROM_ADDRESS"],
-  ])("%s が未設定なら送信せずスキップし、warn ログを残す", async (_label, envName) => {
-    vi.stubEnv(envName, "");
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  ])(
+    "%s が未設定のまま呼ばれた場合は送信せず failed を返す（スキップの判定は入口で行う）",
+    async (_label, envName) => {
+      vi.stubEnv(envName, "");
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
 
-    const result = await sendEmail(content);
+      const result = await sendEmail(content);
 
-    expect(result).toEqual({ status: "skipped" });
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(warnSpy).toHaveBeenCalled();
-  });
+      expect(result).toEqual({ status: "failed", error: expect.any(String) });
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
 
   it("非2xxの応答は failed を返し、throwしない", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 422 }));

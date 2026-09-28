@@ -2,6 +2,7 @@ import { after } from "next/server";
 import { EMAIL_KIND, type EmailKind } from "@/app/constants/notifications";
 import { formatMonthlyJpyPrice, isStripeEnabled } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP_LABELS } from "@/app/constants/user";
+import { formatDate } from "@/app/lib/format-date";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import {
   type EmailContent,
@@ -16,6 +17,8 @@ import {
   buildUpgradedEmail,
 } from "@/app/services/notifications/email-templates";
 import type { MembershipType } from "@/app/types";
+
+type AdminClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>;
 
 type Recipient = { userId: number; email: string; displayName: string };
 
@@ -32,23 +35,18 @@ function getAppUrl(): string | null {
   return process.env.NEXT_PUBLIC_APP_URL || null;
 }
 
-function formatDateJst(isoString: string): string {
-  return new Date(isoString).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
-}
-
 /**
  * `email_logs` への INSERT を処理権（claim）として確保してから1通送り、結果を同じ行に記録する。
  * UNIQUE (user_id, kind, reference_key) の違反（23505）は「同一事象を別の経路・再送が既に
  * 送った（または送信中）」ことを意味するため、送信しない。claim 自体が他のDBエラーで失敗した
  * 場合も、二重送信を防げないため送信しない。
+ *
+ * 送信設定の有無は入口（`deliverToUser()`）で判定済みであることを前提とする。
  */
-export async function deliverUserEmail(params: DeliverParams): Promise<DeliverResult> {
-  if (!isEmailConfigured()) {
-    console.warn(
-      `[メール通知] RESEND_API_KEY または EMAIL_FROM_ADDRESS が未設定のため送信をスキップしました: kind=${params.kind}`
-    );
-    return "skipped";
-  }
+export async function deliverUserEmail(
+  supabase: AdminClient,
+  params: DeliverParams
+): Promise<DeliverResult> {
   if (!params.recipient.email) {
     console.warn(
       `[メール通知] 宛先メールアドレスが無いため送信をスキップしました: kind=${params.kind}`
@@ -56,7 +54,6 @@ export async function deliverUserEmail(params: DeliverParams): Promise<DeliverRe
     return "skipped";
   }
 
-  const supabase = await createAdminSupabaseClient();
   const { data: claimed, error: claimError } = await supabase
     .from("email_logs")
     .insert({
@@ -82,7 +79,7 @@ export async function deliverUserEmail(params: DeliverParams): Promise<DeliverRe
     .update(
       result.status === "sent"
         ? { sent_at: new Date().toISOString(), provider_message_id: result.messageId }
-        : { error: result.status === "failed" ? result.error : "送信をスキップしました" }
+        : { error: result.error }
     )
     .eq("id", claimed.id);
 
@@ -93,10 +90,12 @@ export async function deliverUserEmail(params: DeliverParams): Promise<DeliverRe
   return result.status === "sent" ? "sent" : "failed";
 }
 
+type RecipientLookup = { column: "id"; value: number } | { column: "auth_id"; value: string };
+
 async function fetchRecipient(
-  by: { column: "id"; value: number } | { column: "auth_id"; value: string }
+  supabase: AdminClient,
+  by: RecipientLookup
 ): Promise<Recipient | null> {
-  const supabase = await createAdminSupabaseClient();
   const { data, error } = await supabase
     .from("users")
     .select("id, email, display_name")
@@ -137,13 +136,14 @@ function scheduleEmail(label: EmailKind, task: () => Promise<unknown>): void {
 }
 
 /**
- * 宛先を読み込み、テンプレートを組み立てて送る共通手順。送信設定・アプリURLが無い環境では
- * 宛先の読み込みより前にスキップする（本文のリンクは `NEXT_PUBLIC_APP_URL` 起点でのみ作る）。
+ * 宛先を読み込み、テンプレートを組み立てて送る共通手順（送信の入口）。送信設定・アプリURLが
+ * 無い環境では宛先の読み込みより前にスキップする（本文のリンクは `NEXT_PUBLIC_APP_URL` 起点で
+ * のみ作る）。宛先の読み込みと送信ログの claim・記録は、同じ admin クライアントで行う。
  */
 async function deliverToUser(
   kind: EmailKind,
   referenceKey: string | ((recipient: Recipient) => string),
-  loadRecipient: () => Promise<Recipient | null>,
+  recipientLookup: RecipientLookup,
   build: (recipient: Recipient, appUrl: string) => EmailContent
 ): Promise<DeliverResult> {
   if (!isEmailConfigured()) {
@@ -160,13 +160,14 @@ async function deliverToUser(
     return "skipped";
   }
 
-  const recipient = await loadRecipient();
+  const supabase = await createAdminSupabaseClient();
+  const recipient = await fetchRecipient(supabase, recipientLookup);
   if (!recipient) {
     console.warn(`[メール通知] 宛先ユーザーが見つからないため送信をスキップしました: kind=${kind}`);
     return "skipped";
   }
 
-  return await deliverUserEmail({
+  return await deliverUserEmail(supabase, {
     kind,
     referenceKey: typeof referenceKey === "string" ? referenceKey : referenceKey(recipient),
     recipient,
@@ -183,7 +184,7 @@ export function scheduleSignupEmail(params: { authId: string }): void {
     deliverToUser(
       EMAIL_KIND.SIGNUP,
       (recipient) => String(recipient.userId),
-      () => fetchRecipient({ column: "auth_id", value: params.authId }),
+      { column: "auth_id", value: params.authId },
       (recipient, appUrl) =>
         buildSignupEmail({
           displayName: recipient.displayName,
@@ -204,7 +205,7 @@ export function scheduleApprovedEmail(params: {
     deliverToUser(
       EMAIL_KIND.APPROVED,
       params.approvedAt,
-      () => fetchRecipient({ column: "id", value: params.userId }),
+      { column: "id", value: params.userId },
       (recipient, appUrl) =>
         buildApprovedEmail({
           displayName: recipient.displayName,
@@ -232,7 +233,7 @@ export function scheduleUpgradedEmail(params: {
     deliverToUser(
       EMAIL_KIND.UPGRADED,
       params.subscriptionId,
-      () => fetchRecipient({ column: "id", value: params.userId }),
+      { column: "id", value: params.userId },
       (recipient, appUrl) =>
         buildUpgradedEmail({
           displayName: recipient.displayName,
@@ -242,31 +243,34 @@ export function scheduleUpgradedEmail(params: {
               ? formatMonthlyJpyPrice(params.monthlyAmountJpy)
               : null,
           nextBillingDateLabel: params.currentPeriodEnd
-            ? formatDateJst(params.currentPeriodEnd)
+            ? formatDate(params.currentPeriodEnd)
             : null,
         })
     )
   );
 }
 
-/** 解約予約（`cancel_at_period_end` が false → true）。reference_key は `stripe_subscription_id` */
+/**
+ * 解約予約（Stripeから取り直したライブ状態が解約予約中のとき。判定は `syncSubscriptionStatus()`）。
+ * reference_key は `stripe_subscription_id`
+ *
+ * @param periodEnd 利用できる最終日時（`cancel_at`、無ければ `current_period_end`）
+ */
 export function scheduleCancelScheduledEmail(params: {
   userId: number;
   subscriptionId: string;
-  currentPeriodEnd: string | null;
+  periodEnd: string | null;
 }): void {
   scheduleEmail(EMAIL_KIND.CANCEL_SCHEDULED, () =>
     deliverToUser(
       EMAIL_KIND.CANCEL_SCHEDULED,
       params.subscriptionId,
-      () => fetchRecipient({ column: "id", value: params.userId }),
+      { column: "id", value: params.userId },
       (recipient, appUrl) =>
         buildCancelScheduledEmail({
           displayName: recipient.displayName,
           appUrl,
-          periodEndDateLabel: params.currentPeriodEnd
-            ? formatDateJst(params.currentPeriodEnd)
-            : null,
+          periodEndDateLabel: params.periodEnd ? formatDate(params.periodEnd) : null,
         })
     )
   );
@@ -281,7 +285,7 @@ export function scheduleSubscriptionEndedEmail(params: {
     deliverToUser(
       EMAIL_KIND.SUBSCRIPTION_ENDED,
       params.subscriptionId,
-      () => fetchRecipient({ column: "id", value: params.userId }),
+      { column: "id", value: params.userId },
       (recipient, appUrl) =>
         buildSubscriptionEndedEmail({ displayName: recipient.displayName, appUrl })
     )

@@ -4,9 +4,9 @@ import { USER_MEMBERSHIP, USER_STATUS } from "@/app/constants/user";
 import {
   ACTIVATABLE_SUBSCRIPTION_STATUSES,
   getStripeClient,
-  isPlainMonthlyPrice,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
   TERMINAL_SUBSCRIPTION_STATUSES,
+  toSubscriptionPrice,
 } from "@/app/services/api/stripe-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import {
@@ -41,15 +41,41 @@ function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
  */
 function chargedMonthlyAmountJpy(subscription: Stripe.Subscription): number | null {
   const item = subscription.items.data[0];
-  const price = item?.price;
-  if (!price || !isPlainMonthlyPrice(price)) {
+  if (!item?.price) {
     return null;
   }
-  const amount = { amount: price.unit_amount, currency: price.currency };
-  if (!isChargeableSubscriptionPrice(amount)) {
+  const price = toSubscriptionPrice(item.price);
+  if (!isChargeableSubscriptionPrice(price)) {
     return null;
   }
-  return amount.amount * (item.quantity ?? 1);
+  return price.amount * (item.quantity ?? 1);
+}
+
+/**
+ * 一般有料会員化のメールを予約する。昇格を行う経路（Checkout完了の反映・ミラーからの再昇格）は
+ * すべてこれを通す。reference_key は契約id のため、複数の経路・再送が昇格を返しても1通に抑える
+ */
+function scheduleUpgradedEmailFor(
+  userId: number,
+  subscription: Stripe.Subscription,
+  currentPeriodEnd: string | null
+): void {
+  scheduleUpgradedEmail({
+    userId,
+    subscriptionId: subscription.id,
+    monthlyAmountJpy: chargedMonthlyAmountJpy(subscription),
+    currentPeriodEnd,
+  });
+}
+
+/**
+ * 解約が予約されているか（期間末で終了する予定か）。classic billing mode では
+ * `cancel_at_period_end`、flexible billing mode（API 2025-09-30.clover 以降の新規サブスクの既定）
+ * の Customer Portal での解約では `cancel_at` に終了日時が入り `cancel_at_period_end` は false のまま
+ * になるため、両方を見る。
+ */
+function isCancellationScheduled(subscription: Stripe.Subscription): boolean {
+  return subscription.cancel_at_period_end || subscription.cancel_at != null;
 }
 
 /**
@@ -173,12 +199,7 @@ export async function activateUserFromCheckoutSession(
   }
   if (promoted.activated) {
     // Webhook と successページの両方が昇格を返しうるが、送信ログの UNIQUE（契約id）で1通に抑える
-    scheduleUpgradedEmail({
-      userId,
-      subscriptionId: subscription.id,
-      monthlyAmountJpy: chargedMonthlyAmountJpy(subscription),
-      currentPeriodEnd,
-    });
+    scheduleUpgradedEmailFor(userId, subscription, currentPeriodEnd);
   }
   return {
     error: null,
@@ -254,13 +275,14 @@ export async function reactivateUserFromMirror(
 
   const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve(row.stripe_subscription_id);
+  const mirrorFields = subscriptionMirrorFields(subscription);
 
   // 読み取りから書き込みまでに行が変わっていない（同じ契約・同じ状態で、処理権も確保されて
   // いない）ことを条件にしてライブ状態を書く。status を条件に含めないと、取得後に並行する
   // 解約Webhookが書いた canceled を、古いスナップショットの active で上書きして昇格させてしまう
   const { data: updated, error: updateError } = await supabase
     .from("stripe_subscriptions")
-    .update(subscriptionMirrorFields(subscription))
+    .update(mirrorFields)
     .eq("user_id", userId)
     .eq("stripe_subscription_id", subscription.id)
     .eq("status", row.status)
@@ -278,7 +300,13 @@ export async function reactivateUserFromMirror(
     return { error: null, activated: false };
   }
 
-  return await promoteUserToGeneral(supabase, userId);
+  const promoted = await promoteUserToGeneral(supabase, userId);
+  if (promoted.activated) {
+    // 初回の反映（activateUserFromCheckoutSession）で昇格しなかった契約が、ここで初めて
+    // 有料会員化することがある。既に送信済みなら送信ログの UNIQUE（契約id）で抑止される
+    scheduleUpgradedEmailFor(userId, subscription, mirrorFields.current_period_end);
+  }
+  return promoted;
 }
 
 /** ミラー更新の再試行回数。1回目で競合した場合に、読み直して判断からやり直す */
@@ -425,7 +453,7 @@ export async function syncSubscriptionStatus(
 
   const { data: existing, error: fetchError } = await supabase
     .from("stripe_subscriptions")
-    .select("user_id, cancel_at_period_end")
+    .select("user_id")
     .eq("stripe_subscription_id", subscriptionFromEvent.id)
     .maybeSingle();
 
@@ -459,14 +487,16 @@ export async function syncSubscriptionStatus(
     return { error: reverted.error };
   }
 
-  // 解約予約の受付（false → true）。比較する両辺は「書き込み前のミラー行」と「Stripeから
-  // 取り直したライブ状態」のため、遅延・順序逆転したイベントのスナップショットでは発火しない。
-  // 並行する複数イベントが同時に遷移と判定しても、送信ログの UNIQUE（契約id）で1通に抑える
-  if (!existing.cancel_at_period_end && subscription.cancel_at_period_end) {
+  // 解約予約の受付。ミラー行との比較（false → true の遷移）では判定しない: ライブ状態を
+  // ミラーへ書く経路は他にもあり（Checkout完了の反映・ミラーからの再昇格）、それらが先に
+  // 書くと遷移が消費されてメールが欠落するため。Stripeから取り直したライブ状態が解約予約中なら
+  // 毎回予約し、重複は送信ログの UNIQUE（契約id）で1通に抑える（遅延・順序逆転したイベントの
+  // スナップショットは見ないため、解約予約の取り消し後に届いた古いイベントでは発火しない）
+  if (isCancellationScheduled(subscription)) {
     scheduleCancelScheduledEmail({
       userId: existing.user_id,
       subscriptionId: subscription.id,
-      currentPeriodEnd: mirrorFields.current_period_end,
+      periodEnd: toIsoOrNull(subscription.cancel_at) ?? mirrorFields.current_period_end,
     });
   }
 
