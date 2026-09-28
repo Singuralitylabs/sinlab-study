@@ -137,6 +137,16 @@ erDiagram
         text type
         timestamptz processed_at
     }
+    email_logs {
+        serial id PK
+        int user_id FK
+        text kind
+        text reference_key
+        timestamptz sent_at
+        text provider_message_id
+        text error
+        timestamptz created_at
+    }
 ```
 
 ---
@@ -423,6 +433,25 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 >
 > **releaseの3者競合対策**: `releaseEventClaim()` は `id` に加えて `claimEvent()` が返した `processed_at` の一致もDELETE条件に含める。TTL経過後に別プロセスが再claimした直後、旧claim保持者が遅れて解放処理に到達すると、`id` のみの無条件DELETEでは新しいclaimまで消してしまい3重処理の窓が開くため。
 
+### 3.11 email_logs（メール送信ログ）
+
+受講生向けトランザクションメール（[機能設計書](./specification.md)10章）の送信記録。送信前のINSERTを処理権（claim）として使い、同一事象の二重送信を防ぐ。
+
+| カラム | 型 | NULL | デフォルト | 説明 |
+|:--|:--|:--:|:--|:--|
+| id | SERIAL | NO | - | PK |
+| user_id | INTEGER | NO | - | FK → users.id（ON DELETE CASCADE） |
+| kind | TEXT | NO | - | メール種別（`signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended`。値はアプリの `EMAIL_KIND` で管理し、種別の追加に追従できるよう CHECK 制約は設けない） |
+| reference_key | TEXT | NO | - | 同一事象の識別子（`signup` は `users.id`、`approved` は承認時刻、Stripe 系は `stripe_subscription_id`） |
+| sent_at | TIMESTAMPTZ | YES | - | 送信に成功した日時 |
+| provider_message_id | TEXT | YES | - | Resend のメッセージid |
+| error | TEXT | YES | - | 送信に失敗した場合のエラー内容（APIキー等の秘匿情報は含めない） |
+| created_at | TIMESTAMPTZ | NO | now() | claim した日時 |
+
+制約: `UNIQUE (user_id, kind, reference_key)`（`email_logs_user_kind_reference_key`）
+
+> **claimによる二重送信防止**: 送信前に `(user_id, kind, reference_key)` をINSERTし、一意制約違反（23505）なら送信しない（`stripe_events` のclaimと同じパターン。`deliverUserEmail()`）。Webhook と `/upgrade/success` の両経路・Webhookの再送・同時配信で同じ事象のメールを複数回送ろうとしても、INSERTに成功した1つだけが送信する。送信失敗時は行を削除せず `error` を記録する（再送はしない）。claim後に処理が中断した行は `sent_at` / `error` が共に NULL のまま残り、以後その事象のメールは送られない（重複よりも欠落を許容する）。
+
 ---
 
 ## 4. インデックス
@@ -444,6 +473,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 | idx_ai_reviews_status | ai_reviews | status | ステータス別のレビュー検索 |
 | ai_reviews_submission_id_key | ai_reviews | submission_id（UNIQUE） | 提出に紐づくレビュー取得（1提出1行） |
 | users_auth_id_key | users | auth_id（UNIQUE） | RLSヘルパー（`get_user_id` / `get_user_role` / `get_user_status`）の `auth_id` 検索 |
+| email_logs_user_kind_reference_key | email_logs | user_id, kind, reference_key（UNIQUE） | メールの二重送信防止（claim の一意制約） |
 
 ---
 
@@ -646,6 +676,10 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 
 アップロード・削除APIは `createAdminSupabaseClient()` を使うため、`SUPABASE_SERVICE_ROLE_KEY` が必須である（未設定時は throw。通常クライアントへの暗黙フォールバックはしない）。キー設定時は RLS をバイパスする。Storage の RLS ポリシーは、呼び出し側が通常クライアント（`createServerSupabaseClient()`）を明示的に選んだ経路に対する防御層として機能する。キー未設定は throw、キーが誤っている場合は PostgREST が 401 を返し RLS は評価されない。
 
+### 6.9 email_logs
+
+RLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`stripe_events` と同じ）。受講生・管理画面からは参照せず、`authenticated` ロールでは SELECT を含め一切のアクセスができない。
+
 ---
 
 ## 7. マイグレーション管理
@@ -691,6 +725,7 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 | `20260919000000_add_terms_accepted_at_to_users.sql` | `users` に利用規約の同意日時 `terms_accepted_at`（TIMESTAMPTZ, NULL許容）を追加（#226）。RLS変更なし |
 | `20260922000000_add_onboarding_completed_at_to_users.sql` | `users` に初回利用ガイドの完了日時 `onboarding_completed_at`（TIMESTAMPTZ, NULL許容）を追加（#16）。RLS変更なし |
 | `20260926000000_normalize_blank_slide_pdf_url.sql` | `learning_contents.pdf_url` の空文字・空白のみ（`btrim(pdf_url, E' \t\r\n') = ''`）を NULL に正規化（#243）。アプリ側は `SlidePdfUrlSchema` で空文字・空白のみを null に正規化して保存するため、以後は発生しない。適用済み `20260917011152` は書き換えない。カラム定義・RLS変更なし |
+| `20260928000000_add_email_logs.sql` | 受講生向けメールの送信ログ `email_logs` を追加（#252）。`UNIQUE (user_id, kind, reference_key)` で二重送信を防ぐ。RLSを有効化しポリシーは作らない（service_role専用） |
 
 ### 7.1 マイグレーション追加後の運用
 
