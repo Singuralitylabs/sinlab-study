@@ -29,7 +29,7 @@ type DeliverParams = {
   content: EmailContent;
 };
 
-export type DeliverResult = "sent" | "duplicate" | "skipped" | "failed";
+type DeliverResult = "sent" | "duplicate" | "skipped" | "failed";
 
 function getAppUrl(): string | null {
   return process.env.NEXT_PUBLIC_APP_URL || null;
@@ -43,7 +43,7 @@ function getAppUrl(): string | null {
  *
  * 送信設定の有無は入口（`deliverToUser()`）で判定済みであることを前提とする。
  */
-export async function deliverUserEmail(
+async function deliverUserEmail(
   supabase: AdminClient,
   params: DeliverParams
 ): Promise<DeliverResult> {

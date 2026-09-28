@@ -12,7 +12,6 @@ import { after } from "next/server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { sendEmail } from "@/app/services/notifications/email";
 import {
-  deliverUserEmail,
   scheduleApprovedEmail,
   scheduleCancelScheduledEmail,
   scheduleSignupEmail,
@@ -63,32 +62,31 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-const deliverParams = {
-  kind: "upgraded" as const,
-  referenceKey: "sub_123",
-  recipient: { userId: 7, email: "user@example.com", displayName: "山田" },
-  content: { subject: "件名", text: "本文", html: "<p>本文</p>" },
-};
+/** 1通分の送信（宛先の読み込み → claim → 送信 → 記録）を予約して実行する */
+async function deliverOnce() {
+  scheduleSubscriptionEndedEmail({ userId: 7, subscriptionId: "sub_123" });
+  await runScheduled();
+}
 
-describe("deliverUserEmail", () => {
+describe("送信ログ（email_logs）の claim → 送信 → 記録", () => {
   it("email_logs へ claim を INSERT してから送信し、成功を同じ行に記録する", async () => {
     const client = mockAdmin({
+      users: { data: recipientRow, error: null },
       email_logs: [
         { data: { id: 11 }, error: null },
         { data: null, error: null },
       ],
     });
 
-    const result = await deliverUserEmail(client as never, deliverParams);
+    await deliverOnce();
 
-    expect(result).toBe("sent");
     const [claim, record] = emailLogBuilders(client);
     expect(claim.insert).toHaveBeenCalledWith({
       user_id: 7,
-      kind: "upgraded",
+      kind: "subscription_ended",
       reference_key: "sub_123",
     });
-    expect(sendEmail).toHaveBeenCalledWith({ to: "user@example.com", ...deliverParams.content });
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "user@example.com" }));
     expect(record.update).toHaveBeenCalledWith({
       sent_at: expect.any(String),
       provider_message_id: "msg_1",
@@ -97,39 +95,38 @@ describe("deliverUserEmail", () => {
   });
 
   it("UNIQUE 違反（同一事象を別経路・再送が送信済み）なら送信しない", async () => {
-    const client = mockAdmin({ email_logs: duplicate });
+    const client = mockAdmin({ users: { data: recipientRow, error: null }, email_logs: duplicate });
 
-    const result = await deliverUserEmail(client as never, deliverParams);
+    await deliverOnce();
 
-    expect(result).toBe("duplicate");
     expect(sendEmail).not.toHaveBeenCalled();
     // claim の INSERT のみで、記録の UPDATE は行わない
     expect(emailLogBuilders(client)).toHaveLength(1);
   });
 
   it("claim が他のDBエラーで失敗した場合は、二重送信を防げないため送信しない", async () => {
-    const client = mockAdmin({
+    mockAdmin({
+      users: { data: recipientRow, error: null },
       email_logs: { data: null, error: { code: "PGRST000", message: "db down" } },
     });
 
-    const result = await deliverUserEmail(client as never, deliverParams);
+    await deliverOnce();
 
-    expect(result).toBe("failed");
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
   it("送信に失敗した場合は error を記録して行を残す（再送しない）", async () => {
     vi.mocked(sendEmail).mockResolvedValue({ status: "failed", error: "status=500" });
     const client = mockAdmin({
+      users: { data: recipientRow, error: null },
       email_logs: [
         { data: { id: 11 }, error: null },
         { data: null, error: null },
       ],
     });
 
-    const result = await deliverUserEmail(client as never, deliverParams);
+    await deliverOnce();
 
-    expect(result).toBe("failed");
     const [, record] = emailLogBuilders(client);
     expect(record.update).toHaveBeenCalledWith({ error: "status=500" });
     expect(record.delete).not.toHaveBeenCalled();
@@ -137,16 +134,15 @@ describe("deliverUserEmail", () => {
   });
 
   it("同一事象が並行して2回届いても（Webhook と /upgrade/success）1通だけ送る", async () => {
-    const client = mockAdmin({
+    mockAdmin({
+      users: { data: recipientRow, error: null },
       email_logs: [{ data: { id: 11 }, error: null }, duplicate, { data: null, error: null }],
     });
 
-    const results = await Promise.all([
-      deliverUserEmail(client as never, deliverParams),
-      deliverUserEmail(client as never, deliverParams),
-    ]);
+    scheduleSubscriptionEndedEmail({ userId: 7, subscriptionId: "sub_123" });
+    scheduleSubscriptionEndedEmail({ userId: 7, subscriptionId: "sub_123" });
+    await runScheduled();
 
-    expect(results.sort()).toEqual(["duplicate", "sent"]);
     expect(sendEmail).toHaveBeenCalledTimes(1);
   });
 });

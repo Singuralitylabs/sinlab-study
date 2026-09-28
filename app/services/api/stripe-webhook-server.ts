@@ -36,12 +36,16 @@ function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
 }
 
 /**
- * 契約（Stripeから取り直したサブスク）の実請求額（JPY・月額）。JPYの1ヶ月間隔でない場合は
+ * 契約（Stripeから取り直したサブスク）の月額料金（JPY・単価×数量）。JPYの1ヶ月間隔でない場合は
  * 税込円額として示せないため null を返す（有料会員化メールでは料金の行を載せない）。
+ * サブスク・アイテムに割引（クーポン等）が付いている場合も、実請求額と食い違うため null を返す。
  */
 function chargedMonthlyAmountJpy(subscription: Stripe.Subscription): number | null {
   const item = subscription.items.data[0];
   if (!item?.price) {
+    return null;
+  }
+  if ((subscription.discounts?.length ?? 0) > 0 || (item.discounts?.length ?? 0) > 0) {
     return null;
   }
   const price = toSubscriptionPrice(item.price);
@@ -53,19 +57,24 @@ function chargedMonthlyAmountJpy(subscription: Stripe.Subscription): number | nu
 
 /**
  * 一般有料会員化のメールを予約する。昇格を行う経路（Checkout完了の反映・ミラーからの再昇格）は
- * すべてこれを通す。reference_key は契約id のため、複数の経路・再送が昇格を返しても1通に抑える
+ * すべてこれを通す。reference_key は契約id のため、複数の経路・再送が昇格を返しても1通に抑える。
+ * 料金の算出を含めて例外は握りつぶし、昇格の結果（Webhookの応答・successページ）に影響させない
  */
 function scheduleUpgradedEmailFor(
   userId: number,
   subscription: Stripe.Subscription,
   currentPeriodEnd: string | null
 ): void {
-  scheduleUpgradedEmail({
-    userId,
-    subscriptionId: subscription.id,
-    monthlyAmountJpy: chargedMonthlyAmountJpy(subscription),
-    currentPeriodEnd,
-  });
+  try {
+    scheduleUpgradedEmail({
+      userId,
+      subscriptionId: subscription.id,
+      monthlyAmountJpy: chargedMonthlyAmountJpy(subscription),
+      currentPeriodEnd,
+    });
+  } catch (error) {
+    console.error("[メール通知] 有料会員化メールの予約に失敗しました:", error);
+  }
 }
 
 /**
@@ -96,7 +105,8 @@ function subscriptionMirrorFields(subscription: Stripe.Subscription) {
  * checkout.session.completed のWebhook、および successページの両方から呼ばれる冪等な昇格処理。
  * stripe_subscriptions を upsert したうえで、サブスクが現に有効（ACTIVATABLE_SUBSCRIPTION_STATUSES）
  * な場合のみ users を active/general に更新する。管理者が承認前に手動承認していた場合を含め、
- * 昇格時は常に上書きする（許容仕様）。却下（rejected）済みユーザーは昇格しない。
+ * 昇格時は一般有料会員へ上書きする（許容仕様。既に一般有料会員なら更新しない）。
+ * 却下（rejected）済みユーザーは昇格しない。
  *
  * サブスクの状態を見ずに常に昇格させると、Checkout Sessionが決済後もStripe側に不変オブジェクトとして
  * 残ることを利用して、解約後にsuccessページのURL（`session_id`）を再訪しただけで無償のまま
@@ -197,8 +207,8 @@ export async function activateUserFromCheckoutSession(
   if (promoted.error) {
     return { error: promoted.error, activated: false, currentPeriodEnd: null };
   }
-  if (promoted.activated) {
-    // Webhook と successページの両方が昇格を返しうるが、送信ログの UNIQUE（契約id）で1通に抑える
+  if (promoted.changed) {
+    // Webhook と successページが並行して昇格しうるが、送信ログの UNIQUE（契約id）で1通に抑える
     scheduleUpgradedEmailFor(userId, subscription, currentPeriodEnd);
   }
   return {
@@ -212,11 +222,19 @@ export async function activateUserFromCheckoutSession(
  * ユーザーを一般有料会員（active / general）へ昇格する。却下（rejected）済みユーザーは昇格しない。
  * 呼び出し元は、サブスクが現に有効（ACTIVATABLE_SUBSCRIPTION_STATUSES）であることを
  * Stripeから取り直したライブ状態で確認してから呼ぶこと。
+ *
+ * UPDATE は「まだ一般有料会員でない」行だけに当てる。successページの再訪・Webhookの再送のように
+ * 既に昇格済みの場合は更新せず、現在の状態を読んで `activated` だけを返す。
+ *
+ * @returns activated: 呼び出し後に一般有料会員であるか（successページの表示分岐に使う）。
+ * changed: この呼び出しで実際に昇格させたか。有料会員化メールはこれが true のときだけ予約する
+ * （昇格済みユーザーの再訪・再送で、無関係なタイミングにメールを送らない。管理者が先に一般有料会員
+ * として手動承認していた場合も changed は false になり、承認メールで案内済みとして送らない）
  */
 async function promoteUserToGeneral(
   supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
   userId: number
-): Promise<{ error: string | null; activated: boolean }> {
+): Promise<{ error: string | null; activated: boolean; changed: boolean }> {
   const { data: updatedUsers, error: userError } = await supabase
     .from("users")
     .update({
@@ -226,13 +244,33 @@ async function promoteUserToGeneral(
     })
     .eq("id", userId)
     .neq("status", USER_STATUS.REJECTED)
+    .or(
+      `status.neq.${USER_STATUS.ACTIVE},membership_type.is.null,membership_type.neq.${USER_MEMBERSHIP.GENERAL}`
+    )
     .select("id");
 
   if (userError) {
     console.error("ユーザー昇格エラー:", userError.message);
-    return { error: userError.message, activated: false };
+    return { error: userError.message, activated: false, changed: false };
   }
-  return { error: null, activated: (updatedUsers?.length ?? 0) > 0 };
+  if ((updatedUsers?.length ?? 0) > 0) {
+    return { error: null, activated: true, changed: true };
+  }
+
+  // 更新なし: 既に一般有料会員か、却下済み・存在しないかのいずれか
+  const { data: current, error: fetchError } = await supabase
+    .from("users")
+    .select("id")
+    .eq("id", userId)
+    .eq("status", USER_STATUS.ACTIVE)
+    .eq("membership_type", USER_MEMBERSHIP.GENERAL)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error("ユーザー取得エラー:", fetchError.message);
+    return { error: fetchError.message, activated: false, changed: false };
+  }
+  return { error: null, activated: current !== null, changed: false };
 }
 
 /**
@@ -301,12 +339,12 @@ export async function reactivateUserFromMirror(
   }
 
   const promoted = await promoteUserToGeneral(supabase, userId);
-  if (promoted.activated) {
+  if (promoted.changed) {
     // 初回の反映（activateUserFromCheckoutSession）で昇格しなかった契約が、ここで初めて
     // 有料会員化することがある。既に送信済みなら送信ログの UNIQUE（契約id）で抑止される
     scheduleUpgradedEmailFor(userId, subscription, mirrorFields.current_period_end);
   }
-  return promoted;
+  return { error: promoted.error, activated: promoted.activated };
 }
 
 /** ミラー更新の再試行回数。1回目で競合した場合に、読み直して判断からやり直す */

@@ -808,6 +808,7 @@ describe("トランザクションメールのフック", () => {
     status: "active",
     cancel_at_period_end: false,
     cancel_at: null,
+    discounts: [],
     items: {
       data: [
         {
@@ -852,6 +853,71 @@ describe("トランザクションメールのフック", () => {
       });
     });
 
+    it("既に一般有料会員（successページの再訪・Webhookの再送）なら、昇格扱いのまま予約しない", async () => {
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: { data: null, error: null },
+          // 1回目: 「まだ一般有料会員でない」行だけを更新（0行）、2回目: 現在の状態
+          users: [
+            { data: [], error: null },
+            { data: { id: 1 }, error: null },
+          ],
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      mockRetrieve(liveSubscription());
+
+      const result = await activateUserFromCheckoutSession(baseSession as never);
+
+      expect(result.activated).toBe(true);
+      expect(result.currentPeriodEnd).toBe(periodEndIso);
+      const usersBuilders = mockClient.from.mock.calls
+        .map(([table], index) => ({ table, builder: mockClient.from.mock.results[index].value }))
+        .filter(({ table }) => table === "users")
+        .map(({ builder }) => builder);
+      expect(usersBuilders[0].or).toHaveBeenCalledWith(
+        "status.neq.active,membership_type.is.null,membership_type.neq.general"
+      );
+      expect(usersBuilders[1].eq).toHaveBeenCalledWith("membership_type", "general");
+      expect(scheduleUpgradedEmail).not.toHaveBeenCalled();
+    });
+
+    it("割引（クーポン等）が付いた契約では、実請求額と食い違うため料金をnullで渡す", async () => {
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: { data: null, error: null },
+          users: { data: [{ id: 1 }], error: null },
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      mockRetrieve(liveSubscription({ discounts: ["di_123"] }));
+
+      await activateUserFromCheckoutSession(baseSession as never);
+
+      expect(scheduleUpgradedEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ monthlyAmountJpy: null })
+      );
+    });
+
+    it("メールの予約が例外を投げても、昇格の結果には影響しない", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.mocked(scheduleUpgradedEmail).mockImplementationOnce(() => {
+        throw new Error("unexpected");
+      });
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: { data: null, error: null },
+          users: { data: [{ id: 1 }], error: null },
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      mockRetrieve(liveSubscription());
+
+      const result = await activateUserFromCheckoutSession(baseSession as never);
+
+      expect(result).toEqual({ error: null, activated: true, currentPeriodEnd: periodEndIso });
+    });
+
     it.each([
       ["JPY以外", { unit_amount: 1500, currency: "usd", recurring: { interval: "month" } }],
       ["年額", { unit_amount: 15000, currency: "jpy", recurring: { interval: "year" } }],
@@ -885,7 +951,13 @@ describe("トランザクションメールのフック", () => {
       ],
       [
         "却下済み等でusersが更新されない",
-        { stripe_subscriptions: { data: null, error: null }, users: { data: [], error: null } },
+        {
+          stripe_subscriptions: { data: null, error: null },
+          users: [
+            { data: [], error: null },
+            { data: null, error: null },
+          ],
+        },
         {},
       ],
       [
