@@ -61,6 +61,47 @@ export type Database = {
           },
         ];
       };
+      email_logs: {
+        Row: {
+          created_at: string;
+          error: string | null;
+          id: number;
+          kind: string;
+          provider_message_id: string | null;
+          reference_key: string;
+          sent_at: string | null;
+          user_id: number;
+        };
+        Insert: {
+          created_at?: string;
+          error?: string | null;
+          id?: number;
+          kind: string;
+          provider_message_id?: string | null;
+          reference_key: string;
+          sent_at?: string | null;
+          user_id: number;
+        };
+        Update: {
+          created_at?: string;
+          error?: string | null;
+          id?: number;
+          kind?: string;
+          provider_message_id?: string | null;
+          reference_key?: string;
+          sent_at?: string | null;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "email_logs_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       learning_contents: {
         Row: {
           allowed_submission_types: string;
@@ -279,6 +320,7 @@ export type Database = {
       };
       stripe_subscriptions: {
         Row: {
+          cancel_at: string | null;
           cancel_at_period_end: boolean;
           checkout_claimed_at: string | null;
           checkout_session_id: string | null;
@@ -292,6 +334,7 @@ export type Database = {
           user_id: number;
         };
         Insert: {
+          cancel_at?: string | null;
           cancel_at_period_end?: boolean;
           checkout_claimed_at?: string | null;
           checkout_session_id?: string | null;
@@ -305,6 +348,7 @@ export type Database = {
           user_id: number;
         };
         Update: {
+          cancel_at?: string | null;
           cancel_at_period_end?: boolean;
           checkout_claimed_at?: string | null;
           checkout_session_id?: string | null;

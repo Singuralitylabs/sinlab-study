@@ -323,7 +323,7 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 | 画面 | パス | 内容 |
 |:--|:--|:--|
-| アップグレード | `/upgrade` | お試しユーザー: 月額料金（Stripe PriceからTTLキャッシュ付きで取得。JPY・1ヶ月間隔で取得できた場合は「月額N円（税込）」を表示。取得失敗時は `DISPLAY_MONTHLY_PRICE_JPY` のフォールバックで法定表示を残す。取得成功だが非月額・非JPYの場合は月額を断定せず見出しを出さない）+ 法定表示5項目（自動更新・料金・支払日/更新日・解約方法と解約後の扱い・未成年者注意文言）+ アップグレードボタン。実請求額を確認できない場合はボタンを無効化する。契約中の一般有料会員: 「ご契約中です」（次回のお支払い日、または解約予定日を`current_period_end`から表示）+ お支払い情報の管理・解約ボタン（Stripe Customer Portalへ遷移）+ 解約後の扱い（日割り返金なし・当該請求期間の末日まで利用可能）。それ以外の `active` ユーザー（コミュニティ会員・手動承認済みの一般有料会員）: 本登録済みの案内のみ。契約状況の取得自体に失敗した場合はエラーメッセージを表示し、契約なし・契約ありのいずれとも誤判定しない（フェイルクローズ）。取得失敗時もお支払い情報の管理・解約ボタンは表示し続けるが、契約の有無が不明なため解約ポリシー文言は出さない（契約が無ければAPI側が404を返すためボタン自体は安全） |
+| アップグレード | `/upgrade` | お試しユーザー: 月額料金（Stripe PriceからTTLキャッシュ付きで取得。JPY・1ヶ月間隔で取得できた場合は「月額N円（税込）」を表示。取得失敗時は `DISPLAY_MONTHLY_PRICE_JPY` のフォールバックで法定表示を残す。取得成功だが非月額・非JPYの場合は月額を断定せず見出しを出さない）+ 法定表示5項目（自動更新・料金・支払日/更新日・解約方法と解約後の扱い・未成年者注意文言）+ アップグレードボタン。実請求額を確認できない場合はボタンを無効化する。契約中の一般有料会員: 「ご契約中です」（次回のお支払い日、または解約予定日を表示。解約予約中の判定は `cancel_at_period_end` と `cancel_at` の両方で行い、解約予定日は `cancel_at`、無ければ `current_period_end` から表示する。flexible billing mode の Portal 解約は `cancel_at` にだけ現れるため。`docs/database.md` 3.9節）+ お支払い情報の管理・解約ボタン（Stripe Customer Portalへ遷移）+ 解約後の扱い（日割り返金なし・当該請求期間の末日まで利用可能）。それ以外の `active` ユーザー（コミュニティ会員・手動承認済みの一般有料会員）: 本登録済みの案内のみ。契約状況の取得自体に失敗した場合はエラーメッセージを表示し、契約なし・契約ありのいずれとも誤判定しない（フェイルクローズ）。取得失敗時もお支払い情報の管理・解約ボタンは表示し続けるが、契約の有無が不明なため解約ポリシー文言は出さない（契約が無ければAPI側が404を返すためボタン自体は安全） |
 | アップグレード完了 | `/upgrade/success` | Checkoutから戻った直後のページ。`session_id` をStripe APIでretrieveし、決済完了・本人のセッションであることを確認した上で会員昇格を反映し、完了表示する。日割りで少額決済された直後であるため、`activateUserFromCheckoutSession()` が返す次回のお支払い予定日（＝満額請求日、DBの再読み込みなしで返す）も表示する（取得できなくても完了表示自体は行う） |
 
 トライアルバナー（`(authenticated)/layout.tsx`、2.6参照）に `/upgrade` へのCTAボタンを表示する。
@@ -364,6 +364,7 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 - Checkout作成が失敗したか判別できない場合: Stripeが4xxで拒否したときのみ「セッションは作られていない」と確定できるため処理権を解放する。通信タイムアウト・5xxでは解放せず、次回のclaim時にCustomerへ紐づく有効なセッションを照会して再利用するか、TTLの経過に委ねる（未記録の有効なセッションの上に2件目を作らないため）
 - Checkout手続き中に管理者が手動承認した場合: 決済完了時点で一般有料会員として上書きされる（許容）。降格側は `membership_type=general` ガードで巻き込みを防止する
 - Checkout手続き中に管理者が却下した場合: 決済完了時点でユーザーが `rejected` であれば昇格しない（却下判断を決済完了で上書きしない）
+- 受講生向けメール（10章）: 有料会員化・解約予約・有料会員終了のメールは、昇格・ミラー更新・降格が成功した後にのみ `after()` へ予約し、`email_logs` の UNIQUE で1通に抑える。送信の成否はWebhookの応答・claimの解放（再送判定）に影響しない
 - Webhookイベントの順序逆転・再送・同一event.idの並行配信: `stripe_events` へのINSERTをclaimとして使う原子的な排他制御と、Stripe APIから再取得したライブ状態のみを書き込むハンドラ設計で吸収する（イベントに埋め込まれたスナップショットは信用しない）
 - イベント本文の構造のAPIバージョン依存: Webhookのイベント本文（`event.data.object`）の構造はエンドポイントに設定したAPIバージョンで決まり、アプリがStripe APIを呼ぶ版（SDKが固定する `Stripe.API_VERSION`）とは独立している。このため本文から直接読んでよいのはID類（Checkout Sessionの `id` / `client_reference_id` / `metadata` / `customer` / `subscription`、Subscriptionの `id`）に限り、状態は常にStripe APIからのライブ取得を正とする。例外は `invoice.payment_failed` の運用者向けSlack通知で、本文の `customer_email` / `amount_due` / `hosted_invoice_url` を通知の表示にのみ使う（認可・会員状態の判定には使わない）。本文の他のフィールドを直接使う変更を入れる場合は、その時点でエンドポイントのAPIバージョンを `Stripe.API_VERSION` に合わせる（下記「Stripe Webhook 設定手順」）
 - claim後にサーバーレス関数がタイムアウト・強制終了しrelease処理へ到達できない場合: claimしたまま10分（`EVENT_CLAIM_TTL_MINUTES`）が経過すると再claim可能になる（ハンドラは冪等なため、まれに完了済みイベントを再実行しても実害は小さい）
@@ -1156,3 +1157,70 @@ flowchart TD
 | Webhook POST が 4xx / 5xx | エラーログ（ステータスコード含む）を出力し握り潰す |
 | ユーザー INSERT 失敗 | 新規ユーザー通知は送信しない（中途半端な状態を通知しない）。`/login?error=registration_failed` へリダイレクトする |
 | 支払い失敗通知自体の送信エラー | `recordEventProcessed()` はそのまま実行され、`/api/stripe/webhook` は200を返す（通知の成否はStripeへのWebhook応答に影響しない） |
+
+---
+
+## 10. メール通知機能
+
+### 10.1 概要
+
+受講生の状態が変わったときに、本人へトランザクションメールを送る（要件は `docs/requirements.md` 3.8節）。運営向けの Slack 通知（9章）とは独立しており、Slack 通知はそのまま残す。送信プロバイダは Resend で、送信元は返信不可のアドレス（`EMAIL_FROM_ADDRESS`、`noreply@...`）とする。
+
+送信基盤は次の方針で作る（Slack 通知の `postSlackWebhook()` と同じ考え方）。
+
+- **未設定はスキップ**: `RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `NEXT_PUBLIC_APP_URL` のいずれかが未設定なら、warn ログを出して送信しない（送信ログも作らない）
+- **失敗は握りつぶす**: 送信失敗（非2xx）・タイムアウト（`EMAIL_SEND_TIMEOUT_MS`）・例外はログと `email_logs.error` に残し、呼び出し元の主処理（登録・承認・Stripe Webhook・`/upgrade/success`）のレスポンスや再送判定には一切影響させない
+- **レスポンス後に送る**: 各フックは Next.js の `after()`（`next/server`）に送信処理を予約するだけで、レスポンスを遅らせない。`after()` はサーバーレス関数の終了まで処理を延長するため、送信が途中で打ち切られない。リクエストスコープ外で `after()` が使えない場合は、その場で発火だけ行う
+- **二重送信の防止**: 送信前に `email_logs` へ `(user_id, kind, reference_key)` を INSERT して処理権（claim）とし、UNIQUE 制約違反なら送信しない（`stripe_events` の claim と同じパターン）。claim が他のDBエラーで失敗した場合も、重複を防げないため送信しない。送信失敗時は `error` を記録して行を残し、再送はしない
+- **秘匿情報**: `RESEND_API_KEY` はサーバー側の送信リクエストのヘッダにのみ載せ、レスポンス・ログ・`email_logs` には出さない（`NEXT_PUBLIC_` を付けないためクライアントバンドルにも含まれない）
+- **リンクは環境非依存**: 本文のリンクはすべて `NEXT_PUBLIC_APP_URL` を起点に生成する（リクエストの origin は使わない）
+
+### 10.2 実装構成
+
+| ファイル | 役割 |
+|:--|:--|
+| `app/services/notifications/email.ts` | Resend REST API への送信（`sendEmail()`）と送信設定の判定（`isEmailConfigured()`） |
+| `app/services/notifications/email-templates.ts` | 種別ごとに「件名 + テキスト本文 + HTML 本文」を返す純粋関数と、共通レイアウト（ヘッダー・本文・フッター）の `renderEmailLayout()`。フッターには送信元がサービスであることと返信不可である旨を入れ、追加行（将来の配信停止リンク等）を差し込める |
+| `app/services/notifications/user-emails.ts` | `email_logs` の claim → 送信 → 結果記録（`deliverUserEmail()`）と、各フックから呼ぶ `schedule*Email()`（宛先の読み込み・テンプレート組み立て・`after()` への予約） |
+| `app/constants/notifications.ts` | `EMAIL_SEND_TIMEOUT_MS`・`EMAIL_FROM_NAME`・`EMAIL_SERVICE_NAME`・種別 `EMAIL_KIND` |
+
+### 10.3 環境変数
+
+| 変数名 | 説明 | 必須 |
+|:--|:--|:--:|
+| `RESEND_API_KEY` | Resend の API キー（サーバー側のみ） | 任意（未設定時は送信をスキップ） |
+| `EMAIL_FROM_ADDRESS` | 送信元アドレス（返信不可の `noreply@...`。Resend で認証済みのドメイン。開発時は `onboarding@resend.dev`） | 任意（未設定時は送信をスキップ） |
+| `NEXT_PUBLIC_APP_URL` | 本文のリンクの起点（Stripe と共通） | 任意（未設定時は送信をスキップ） |
+
+### 10.4 メールの種別とトリガー
+
+いずれも主処理が成功した後にのみ予約する。
+
+| kind | トリガー（フック位置） | reference_key | 内容 |
+|:--|:--|:--|:--|
+| `signup` | 初回登録の INSERT 成功後（`GET /auth/callback`。Slack 承認依頼と同じ箇所）。INSERT は通常クライアントで行い id を返さないため、送信時に `auth_id` で `users.id` を引き直す | `users.id` | ようこそ、お試しで閲覧・提出できること、最初の学習コンテンツ（`/learn`）へのリンク、本登録の案内（Stripe 有効時のみアップグレード `/upgrade` も案内） |
+| `approved` | `approveUser()` が更新したとき（`PATCH /api/admin/users` の `approve`） | 承認時刻（`approveUser()` が `updated_at` に書いた ISO 文字列） | 本登録の完了、全コンテンツが使えること、会員種別、ダッシュボードへのリンク |
+| `upgraded` | `activateUserFromCheckoutSession()` または `reactivateUserFromMirror()`（2.11節の不整合の解消）が、まだ一般有料会員でなかったユーザーを実際に昇格させたとき（successページの再訪・Webhook の再送など、既に昇格済みの場合は予約しない）。Webhook・`/upgrade/success`・Checkout API の自己復旧が並行しても、UNIQUE で1通に抑える | `stripe_subscription_id` | 一般有料会員になったこと、月額料金（Stripe から取り直したサブスクの Price の単価×数量。JPY の1ヶ月間隔で確認できない場合と、サブスク・アイテムに割引が付いていて実請求額と食い違う場合は料金の行を載せず、`DISPLAY_MONTHLY_PRICE_JPY` では代用しない。例外として、Customer に直接付けた割引（`customer.discount`）はサブスクの `discounts` に含まれないため検知できず、定価が載る。Checkout のプロモーションコードはサブスク側に付くため通常の導線では起きず、Dashboard・API で Customer にクーポンを付けた場合に限られる）、次回請求日、`/upgrade` のお支払い管理への案内 |
+| `cancel_scheduled` | `syncSubscriptionStatus()` で、Stripe から取り直したライブ状態が解約予約中（`cancel_at_period_end` が true、または `cancel_at` が設定済み）のとき（終端状態への遷移時を除く） | `stripe_subscription_id` | 解約を受け付けたこと、利用期限（`cancel_at`、無ければ `current_period_end`）まで全コンテンツを利用できること、期限までに Portal から取り消せること |
+| `subscription_ended` | `syncSubscriptionStatus()` が終端状態への遷移で `revertUserToTrial()` を呼び、実際に行を更新したとき（`membership_type = general` ガードで更新されなかった場合は送らない） | `stripe_subscription_id` | 有料会員が終了しお試しユーザーに戻ったこと、お試し公開コンテンツは引き続き利用できること、再開は `/upgrade` からできること |
+
+`cancel_scheduled` は、Stripe から取り直したライブ状態だけで判定する（2.11節の順序逆転対策と同じく、イベントのスナップショットは使わない）。
+
+- **両方のフラグを見る理由**: flexible billing mode（API 2025-09-30.clover 以降の新規サブスクの既定）では、Customer Portal で解約すると `cancel_at` に終了日時が入り、`cancel_at_period_end` は false のままになる
+- **ミラー行との比較（`false → true` の遷移）で判定しない理由**: ライブ状態をミラーへ書く経路は他にもある（successページ再訪・Checkout 自己復旧での反映、`reactivateUserFromMirror()`）。それらが Webhook より先に書くと遷移が消費され、メールが欠落する
+
+このためサブスク更新のイベントが届くたび、解約予約中であれば予約し、Webhook の再送・並行イベントの重複は UNIQUE で1通に抑える。同じ契約で解約予約を取り消して再度予約した場合も、reference_key が同じため2通目は送らない。
+
+対象外: 却下通知、支払い失敗のユーザー向け通知（Stripe の自動メールに任せる。運営向け Slack 通知は既存のまま）、AI レビュー完了通知。定期メール・配信停止・お知らせ連動は本章の範囲外で、`sendEmail()`・共通レイアウト・`email_logs` を再利用して追加する。
+
+### 10.5 送信ログ（`email_logs`）
+
+テーブル定義は `docs/database.md` 3.11節（RLSは6.9節）。service_role からのみ読み書きし（RLS 有効・ポリシー無し）、受講生・管理画面からは参照しない。`sent_at` が入っていれば送信成功、`error` が入っていれば送信失敗、どちらも NULL なら claim 後に処理が中断したことを示す。
+
+### 10.6 Resend 設定手順（運用）
+
+1. Resend のアカウントを作成し、送信ドメイン（`future-tech-association.org` のサブドメイン）を追加する
+2. 表示される SPF / DKIM の DNS レコードを設定し、ドメインの認証を完了する
+3. API キー（Sending access）を発行し、`RESEND_API_KEY` に設定する。`EMAIL_FROM_ADDRESS` には認証済みドメインの `noreply@...` を設定する
+   - ローカル: `.env.local`（ドメイン認証前は `onboarding@resend.dev` を送信元にし、Resend アカウントのメールアドレス宛てで確認する）
+   - 本番: Vercel 環境変数（Production / Preview）
