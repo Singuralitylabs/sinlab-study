@@ -128,6 +128,7 @@ erDiagram
         text stripe_subscription_id
         varchar status
         bool cancel_at_period_end
+        timestamptz cancel_at
         timestamptz current_period_end
         timestamptz checkout_claimed_at
         text checkout_session_id
@@ -392,12 +393,15 @@ erDiagram
 | stripe_customer_id | TEXT | YES | NULL | Stripe Customer ID（`cus_...`、UNIQUE）。ユーザーごとに一意で、確保後は必ず再利用する。claim直後〜Customer作成前のみ NULL |
 | stripe_subscription_id | TEXT | YES | NULL | Stripe Subscription ID（`sub_...`、UNIQUE） |
 | status | VARCHAR(30) | NO | - | Stripeの `subscription.status` をそのままミラー（例: `active`, `past_due`, `canceled`, `unpaid`）。CHECK制約は設けず、Stripe側の値追加にそのまま追従する。例外として、Checkout作成の処理権を確保している間だけ番兵値 `checkout_pending`（Stripe側には存在しない値）が入る |
-| cancel_at_period_end | BOOLEAN | NO | false | 期間終了時に解約予定かどうか |
+| cancel_at_period_end | BOOLEAN | NO | false | 期間終了時に解約予定かどうか（Stripe の `subscription.cancel_at_period_end` のミラー） |
+| cancel_at | TIMESTAMPTZ | YES | NULL | 解約予定日時（Stripe の `subscription.cancel_at` のミラー）。未設定なら NULL |
 | current_period_end | TIMESTAMPTZ | YES | NULL | 現在の請求期間の終了日時 |
 | checkout_claimed_at | TIMESTAMPTZ | YES | NULL | Checkout作成の処理権を確保した日時。NULLは処理権なし（未確保・解放済み・契約記録済み） |
 | checkout_session_id | TEXT | YES | NULL | 処理権が確保しているCheckout Session（`cs_...`）。次のリクエストがStripeで有効性を確認するために保持する |
 | created_at | TIMESTAMPTZ | NO | now() | 作成日時 |
 | updated_at | TIMESTAMPTZ | NO | now() | 更新日時（トリガーで自動更新） |
+
+> **解約予約の判定は2列で行う**: flexible billing mode（Stripe API 2025-09-30.clover 以降の新規サブスクの既定）では、Customer Portal での解約は `cancel_at` に終了日時が入り、`cancel_at_period_end` は false のままになる。このため「解約予約中」は `cancel_at_period_end = true` または `cancel_at IS NOT NULL`、利用期限は `cancel_at`（無ければ `current_period_end`）で判定する。判定は `isCancellationScheduled()` / `cancellationEndsAt()`（`app/lib/subscription-period.ts`）に集約し、`/upgrade` の表示と解約予約メールで共有する。両列とも Stripe の値をそのままミラーし、アプリ側で合成した値は書かない。
 
 > **行が解約後も残り続ける点に注意**: `DELETE` は行わず常に `user_id` を key に `upsert` するため、一度でも契約したユーザーの行は解約後（`status` が `canceled` / `unpaid` / `incomplete_expired` / `paused` などの終端状態）も残り続ける。Checkout手続きを中断したユーザーの行（`checkout_pending`）も同様に残る。「現在契約中かどうか」を判定する箇所（`/upgrade` の契約中表示・管理画面のバッジ表示など）は、行の有無だけでなく `status` が契約を表す値であることも確認する必要がある（アプリ側では `NON_CURRENT_SUBSCRIPTION_STATUSES` 定数＝終端状態＋`checkout_pending` を除外して判定）。
 >
@@ -726,6 +730,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | `20260922000000_add_onboarding_completed_at_to_users.sql` | `users` に初回利用ガイドの完了日時 `onboarding_completed_at`（TIMESTAMPTZ, NULL許容）を追加（#16）。RLS変更なし |
 | `20260926000000_normalize_blank_slide_pdf_url.sql` | `learning_contents.pdf_url` の空文字・空白のみ（`btrim(pdf_url, E' \t\r\n') = ''`）を NULL に正規化（#243）。アプリ側は `SlidePdfUrlSchema` で空文字・空白のみを null に正規化して保存するため、以後は発生しない。適用済み `20260917011152` は書き換えない。カラム定義・RLS変更なし |
 | `20260928000000_add_email_logs.sql` | 受講生向けメールの送信ログ `email_logs` を追加（#252）。`UNIQUE (user_id, kind, reference_key)` で二重送信を防ぐ。RLSを有効化しポリシーは作らない（service_role専用） |
+| `20260929000000_add_cancel_at_to_stripe_subscriptions.sql` | `stripe_subscriptions` に解約予定日時 `cancel_at`（TIMESTAMPTZ, NULL許容）を追加。flexible billing mode の Portal 解約は `cancel_at` にだけ現れるため（3.9節）。RLS変更なし。**アプリより先に適用すること**（未適用のままだと、`cancel_at` を含むミラー書き込みが失敗し、Webhook・successページの反映が止まる） |
 
 ### 7.1 マイグレーション追加後の運用
 

@@ -603,6 +603,7 @@ export async function fetchStripeSubscriptionByUserId(userId: number): Promise<{
   data: {
     status: string;
     cancel_at_period_end: boolean;
+    cancel_at: string | null;
     current_period_end: string | null;
   } | null;
   error: PostgrestError | null;
@@ -611,7 +612,7 @@ export async function fetchStripeSubscriptionByUserId(userId: number): Promise<{
 
   const { data, error } = await supabase
     .from("stripe_subscriptions")
-    .select("status, cancel_at_period_end, current_period_end")
+    .select("status, cancel_at_period_end, cancel_at, current_period_end")
     .eq("user_id", userId)
     .maybeSingle();
 

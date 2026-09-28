@@ -320,6 +320,7 @@ export type Database = {
       };
       stripe_subscriptions: {
         Row: {
+          cancel_at: string | null;
           cancel_at_period_end: boolean;
           checkout_claimed_at: string | null;
           checkout_session_id: string | null;
@@ -333,6 +334,7 @@ export type Database = {
           user_id: number;
         };
         Insert: {
+          cancel_at?: string | null;
           cancel_at_period_end?: boolean;
           checkout_claimed_at?: string | null;
           checkout_session_id?: string | null;
@@ -346,6 +348,7 @@ export type Database = {
           user_id: number;
         };
         Update: {
+          cancel_at?: string | null;
           cancel_at_period_end?: boolean;
           checkout_claimed_at?: string | null;
           checkout_session_id?: string | null;

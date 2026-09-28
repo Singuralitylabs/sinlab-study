@@ -1,6 +1,7 @@
 import type Stripe from "stripe";
 import { isChargeableSubscriptionPrice } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP, USER_STATUS } from "@/app/constants/user";
+import { cancellationEndsAt, isCancellationScheduled } from "@/app/lib/subscription-period";
 import {
   ACTIVATABLE_SUBSCRIPTION_STATUSES,
   getStripeClient,
@@ -78,16 +79,6 @@ function scheduleUpgradedEmailFor(
 }
 
 /**
- * 解約が予約されているか（期間末で終了する予定か）。classic billing mode では
- * `cancel_at_period_end`、flexible billing mode（API 2025-09-30.clover 以降の新規サブスクの既定）
- * の Customer Portal での解約では `cancel_at` に終了日時が入り `cancel_at_period_end` は false のまま
- * になるため、両方を見る。
- */
-function isCancellationScheduled(subscription: Stripe.Subscription): boolean {
-  return subscription.cancel_at_period_end || subscription.cancel_at != null;
-}
-
-/**
  * Stripeから取り直したサブスクのライブ状態を、ミラー行（`stripe_subscriptions`）の列へ写す。
  * ミラーを書く経路（Checkout完了の反映・サブスク更新Webhook・再昇格）はすべてこれを使い、
  * 列を追加したときに経路ごとに内容がずれないようにする。
@@ -96,6 +87,8 @@ function subscriptionMirrorFields(subscription: Stripe.Subscription) {
   return {
     status: subscription.status,
     cancel_at_period_end: subscription.cancel_at_period_end,
+    // flexible billing mode の解約予約は cancel_at にだけ現れる（`isCancellationScheduled()`）
+    cancel_at: toIsoOrNull(subscription.cancel_at),
     current_period_end: toIsoOrNull(subscription.items.data[0]?.current_period_end),
     updated_at: new Date().toISOString(),
   };
@@ -530,11 +523,11 @@ export async function syncSubscriptionStatus(
   // 書くと遷移が消費されてメールが欠落するため。Stripeから取り直したライブ状態が解約予約中なら
   // 毎回予約し、重複は送信ログの UNIQUE（契約id）で1通に抑える（遅延・順序逆転したイベントの
   // スナップショットは見ないため、解約予約の取り消し後に届いた古いイベントでは発火しない）
-  if (isCancellationScheduled(subscription)) {
+  if (isCancellationScheduled(mirrorFields)) {
     scheduleCancelScheduledEmail({
       userId: existing.user_id,
       subscriptionId: subscription.id,
-      periodEnd: toIsoOrNull(subscription.cancel_at) ?? mirrorFields.current_period_end,
+      periodEnd: cancellationEndsAt(mirrorFields),
     });
   }
 

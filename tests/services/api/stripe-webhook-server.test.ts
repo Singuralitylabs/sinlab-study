@@ -675,6 +675,41 @@ describe("syncSubscriptionStatus", () => {
     }
   );
 
+  it.each([
+    [
+      "cancel_at が設定されていればISO文字列で",
+      1760886000,
+      new Date(1760886000 * 1000).toISOString(),
+    ],
+    ["cancel_at が未設定ならnullで", null, null],
+  ])(
+    "ミラーへ %s cancel_at を書き込む（flexible billing mode の解約予約）",
+    async (_label, cancelAt, expected) => {
+      vi.mocked(getStripeClient).mockReturnValue({
+        subscriptions: {
+          retrieve: vi
+            .fn()
+            .mockResolvedValue({ ...makeSubscription("active"), cancel_at: cancelAt }),
+        },
+      } as never);
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: [
+            { data: { user_id: 7 }, error: null },
+            { data: null, error: null },
+          ],
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+      await syncSubscriptionStatus(makeSubscription("active") as never);
+
+      expect(mockClient.from.mock.results[1].value.update).toHaveBeenCalledWith(
+        expect.objectContaining({ cancel_at_period_end: false, cancel_at: expected })
+      );
+    }
+  );
+
   it("past_dueの場合はミラー更新のみで降格しない", async () => {
     mockGetStripeClient("past_due");
     const mockClient = createMockSupabaseClient({
