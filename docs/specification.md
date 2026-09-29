@@ -1245,11 +1245,11 @@ flowchart TD
 
 - **共通の対象**: `role = member` かつ `status IN (active, trial)`、`is_deleted = false`、`email_opt_out_at IS NULL`。admin / maintainer は学習者ではないため送らない
 - **日付は JST の暦日で判定する**: 「登録から N 日目」は `users.created_at` を JST の暦日に丸め、登録日を0日目とする。週は月曜始まりで、「先週」は前週の月曜 0:00〜今週の月曜 0:00（JST）。日次実行が失敗した日の N 日目の分は翌日以降に拾わない（取りこぼしを許容する）
-- **1人1日1通**: `trial_nurture` と `inactivity_reminder` が同じ日に重なるお試しユーザーには `trial_nurture` だけを送る。N 日目の案内を送る日は週次進捗を送らず、翌日以降の実行に回す
+- **1人1日1通**: `trial_nurture` と `inactivity_reminder` が同じ日に重なるお試しユーザーには `trial_nurture` だけを送る。N 日目の案内を送る日は週次進捗を送らず、翌日以降の実行に回す。今日（JST 0:00 以降）すでに案内系メールの `email_logs` を持つユーザーは、同じ日の再実行（手動実行・Cron の再起動）で対象から外す（朝の実行後に承認されて `status` が変わっても、別種別の2通目を送らない）
 - **お試しユーザーの範囲**: 次に学ぶコンテンツ・残り本数・最初の1本は、お試し公開（`is_open_to_trial = true`）のコンテンツだけで判定する（ダッシュボードの進捗の分母と同じ。4.2節）
 - **集計**: 抽出はユーザーセッションの無いバッチのため service_role クライアントで行う（`user_id` 単位の集計であり、受講生へコンテンツを返す配信経路ではない）。コンテンツは `fetchThemeProgressSummaries()` と同じネスト select で全階層を `is_published = true AND is_deleted = false` に絞り、本文を含まないカラム（`id, title, display_order, is_open_to_trial, week_id` と各階層の名前・表示順）だけを読む。学習順はコンテンツ詳細の前後ナビと同じ `buildThemeContentOrder()` で並べる。新しい集計 SQL（RPC）は追加しない
-- **二重送信の防止**: 1通ごとに `email_logs` の claim を通す（10.1節と同じ `deliverUserEmail()`）。同じ日の再実行・Cron の重複起動でも UNIQUE 違反で送らない。送信失敗は `error` を記録して再送しない
-- **1回あたりの上限**: 送信を試みた通数（成功・失敗。重複は数えない）が `EMAIL_DIGEST_MAX_PER_RUN`（80通。Resend 無料枠の日次100通に、同日のトランザクションメールの余裕を残す）に達するか、経過時間が `EMAIL_DIGEST_TIME_BUDGET_MS`（45秒。ルートの `maxDuration` は60秒）を超えたら新しい送信を始めない。送れなかった通数は warn ログに残す。キューは N 日目の案内を先、週次進捗を後に並べるため、上限に掛かるのは通常は週次進捗で、同じ週の翌日以降の実行で送られる（今週分を `email_logs` に持たないユーザーを毎日判定する）。N 日目の案内だけで上限を超えた場合の残りは繰り越さない
+- **二重送信の防止**: 1通ごとに `email_logs` の claim を通す（10.1節と同じ `deliverUserEmail()`）。同じ日の再実行・Cron の重複起動でも UNIQUE 違反で送らない。送信失敗は `error` を記録して再送しない。重複起動が並行しても、各実行は同じ順序のキューの先頭から上限件数までしか扱わない（重複も上限に数える）ため、合計の送信数は上限を超えない
+- **1日の上限**: `EMAIL_DIGEST_MAX_PER_RUN`（80通。Resend 無料枠の日次100通に、同日のトランザクションメールの余裕を残す）は同じ日（JST）の実行の合計に効かせる。実行の開始時に今日すでに作られた案内系の `email_logs` の行数を差し引いた数を今回の上限とし、処理した通数（成功・失敗・重複）がそれに達するか、経過時間が `EMAIL_DIGEST_TIME_BUDGET_MS`（45秒。ルートの `maxDuration` は60秒）を超えたら新しい送信を始めない。送れなかった通数は warn ログに残す。キューは N 日目の案内を先、週次進捗を後に並べるため、上限に掛かるのは通常は週次進捗で、同じ週の翌日以降の実行で送られる（今週分を `email_logs` に持たないユーザーを毎日判定する）。N 日目の案内だけで上限を超えた場合の残りは繰り越さない
 - **レート制限**: Resend API（既定 2 リクエスト/秒）を超えないよう、送信の開始間隔を `EMAIL_DIGEST_SEND_INTERVAL_MS`（500ms）以上空ける
 - **送信設定が無い環境**: `RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `NEXT_PUBLIC_APP_URL` / `EMAIL_UNSUBSCRIBE_SECRET` のいずれかが無ければ DB に触れずに終了する（配信停止リンクを作れない案内メールは送らない）
 

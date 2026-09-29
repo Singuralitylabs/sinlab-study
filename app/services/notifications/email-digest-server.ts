@@ -3,6 +3,7 @@ import {
   EMAIL_DIGEST_SEND_INTERVAL_MS,
   EMAIL_DIGEST_TIME_BUDGET_MS,
   EMAIL_KIND,
+  PROMOTIONAL_EMAIL_KINDS,
   type PromotionalEmailKind,
 } from "@/app/constants/notifications";
 import { isStripeEnabled } from "@/app/constants/stripe";
@@ -303,6 +304,26 @@ async function fetchWeeklyStats(
   return stats;
 }
 
+/**
+ * 今日（JST 0:00 以降）に claim された案内系メールの送信ログ。1日の上限と「1人1日1通」を
+ * 実行をまたいで守るために使う（同じ日の再実行・Cron の重複起動・手動 curl を含む）。
+ */
+async function fetchTodayPromotionalLogs(
+  supabase: AdminClient,
+  today: string
+): Promise<{ count: number; userIds: Set<number> }> {
+  const rows = await fetchAllPages<{ user_id: number }>((from, to) =>
+    supabase
+      .from("email_logs")
+      .select("user_id")
+      .in("kind", [...PROMOTIONAL_EMAIL_KINDS])
+      .gte("created_at", jstStartOfDayIso(today))
+      .order("id")
+      .range(from, to)
+  );
+  return { count: rows.length, userIds: new Set(rows.map((row) => row.user_id)) };
+}
+
 /** 送信キューの1通。本文は送る直前に組み立てる */
 type QueuedEmail = {
   kind: PromotionalEmailKind;
@@ -341,7 +362,8 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
 /**
  * 送信キューを作る。今日（JST）が登録から N 日目のユーザーの `trial_nurture` /
  * `inactivity_reminder` を先に、`weekly_digest` を後に並べる（N 日目の案内は翌日に拾わないため、
- * 上限に掛かったときは繰り越せる週次進捗の方を後回しにする）。1人に同じ日に送る案内系メールは1通まで。
+ * 上限に掛かったときは繰り越せる週次進捗の方を後回しにする）。1人に同じ日に送る案内系メールは1通まで
+ * （今日すでに案内系メールを claim したユーザーは、呼び出し元が `users` から除いておく）。
  */
 async function buildQueue(
   supabase: AdminClient,
@@ -461,9 +483,12 @@ async function buildQueue(
  *
  * - **二重送信の防止**: 1通ごとに `email_logs` へ `(user_id, kind, reference_key)` を claim してから
  *   送る（`deliverUserEmail()`）。同じ日の再実行・Cron の重複起動でも UNIQUE 違反で送らない
- * - **1回あたりの上限**: 送信を試みた通数（成功・失敗）が `EMAIL_DIGEST_MAX_PER_RUN` に達するか、
- *   経過時間が `EMAIL_DIGEST_TIME_BUDGET_MS` を超えたら打ち切る。残りはログに残し、週次進捗は
- *   同じ週の翌日以降の実行で送る
+ * - **1人1日1通**: 今日すでに案内系メールを claim したユーザーは、同じ日の再実行で対象から外す
+ *   （朝の実行後にステータスが変わっても、別種別の2通目を送らない）
+ * - **1日の上限**: 今日すでに claim した案内系メールの数を `EMAIL_DIGEST_MAX_PER_RUN` から引いた数を
+ *   今回の上限とし、処理した通数（成功・失敗・重複）が達するか、経過時間が
+ *   `EMAIL_DIGEST_TIME_BUDGET_MS` を超えたら打ち切る。残りはログに残し、週次進捗は同じ週の
+ *   翌日以降の実行で送る
  * - **配信停止**: 抽出の段階で `email_opt_out_at IS NULL` に絞り、全通のフッターに配信停止リンクを入れる
  *
  * 送信設定（`RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `NEXT_PUBLIC_APP_URL`）か
@@ -489,9 +514,15 @@ export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<
 
   let supabase: AdminClient;
   let queue: QueuedEmail[];
+  let limit: number;
   try {
     supabase = await createAdminSupabaseClient();
-    queue = await buildQueue(supabase, await fetchDigestUsers(supabase), today, appUrl);
+    const todayLogs = await fetchTodayPromotionalLogs(supabase, today);
+    limit = Math.max(0, EMAIL_DIGEST_MAX_PER_RUN - todayLogs.count);
+    const users = (await fetchDigestUsers(supabase)).filter(
+      (user) => !todayLogs.userIds.has(user.userId)
+    );
+    queue = await buildQueue(supabase, users, today, appUrl);
   } catch (error) {
     console.error(
       "[定期メール] 送信対象の抽出でエラーが発生しました:",
@@ -505,11 +536,10 @@ export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<
   let index = 0;
 
   for (; index < queue.length; index++) {
-    const attempted = counts.sent + counts.failed;
-    if (
-      attempted >= EMAIL_DIGEST_MAX_PER_RUN ||
-      clock() - startedAt >= EMAIL_DIGEST_TIME_BUDGET_MS
-    ) {
+    // 重複（他の実行が claim 済み）も数える。Cron の重複起動が並行しても、各実行は同じ順序の
+    // キューの先頭 limit 件までしか扱わないため、合計の送信数は limit を超えない
+    const processed = counts.sent + counts.failed + counts.duplicate;
+    if (processed >= limit || clock() - startedAt >= EMAIL_DIGEST_TIME_BUDGET_MS) {
       break;
     }
     if (lastApiCallAt !== null) {
@@ -553,7 +583,7 @@ export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<
   if (rest.length > 0) {
     const carried = rest.filter((item) => item.carriesOver).length;
     console.warn(
-      `[定期メール] 1回あたりの上限（${EMAIL_DIGEST_MAX_PER_RUN}通）または実行時間の上限に達したため、${rest.length}通を送りませんでした（週次進捗 ${carried}通は同じ週の翌日以降に繰り越し、登録からN日目の案内 ${rest.length - carried}通は繰り越しません）`
+      `[定期メール] 1日の上限（${EMAIL_DIGEST_MAX_PER_RUN}通）または実行時間の上限に達したため、${rest.length}通を送りませんでした（週次進捗 ${carried}通は同じ週の翌日以降に繰り越し、登録からN日目の案内 ${rest.length - carried}通は繰り越しません）`
     );
   }
 

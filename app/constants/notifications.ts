@@ -57,7 +57,8 @@ export const TRIAL_NURTURE_DAYS = [2, 5, 7, 14] as const;
 export type TrialNurtureDay = (typeof TRIAL_NURTURE_DAYS)[number];
 
 /**
- * Cron（`GET /api/cron/email-digest`）の1回の実行で送る上限（送信を試みた通数）。
+ * Cron（`GET /api/cron/email-digest`）で送る案内系メールの上限。1回の実行ごとではなく、
+ * 同じ日（JST）の実行の合計（その日に claim した `email_logs` の行数）に対して効かせる。
  * Resend 無料枠の日次 100 通に、同日のトランザクションメール分の余裕を残す。
  * 超過分は週次進捗なら同じ週の翌日以降の実行に繰り越す（`docs/specification.md` 10.7）
  */

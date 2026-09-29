@@ -27,6 +27,8 @@ type Filter = (row: Row) => boolean;
 function createFakeDb(tables: Record<string, Row[]>) {
   const db: Record<string, Row[]> = { email_logs: [], ...tables };
   let nextId = 1;
+  /** INSERT した行の created_at（DB の now()）。runDigest() が実行日時に合わせる */
+  const clock = { now: new Date() };
 
   function from(table: string) {
     let op: "select" | "insert" | "update" = "select";
@@ -48,7 +50,13 @@ function createFakeDb(tables: Record<string, Row[]>) {
         if (duplicate) {
           return { data: null, error: { code: "23505", message: "duplicate key" } };
         }
-        const inserted = { id: nextId++, sent_at: null, error: null, ...payload };
+        const inserted = {
+          id: nextId++,
+          sent_at: null,
+          error: null,
+          created_at: clock.now.toISOString(),
+          ...payload,
+        };
         rows.push(inserted);
         db[table] = rows;
         return { data: [inserted], error: null };
@@ -111,7 +119,7 @@ function createFakeDb(tables: Record<string, Row[]>) {
     return builder;
   }
 
-  return { db, client: { from: vi.fn(from) } };
+  return { db, clock, client: { from: vi.fn(from) } };
 }
 
 const APP_URL = "https://study.example.com";
@@ -219,10 +227,19 @@ function setup(tables: { users: Row[]; user_progress?: Row[]; submissions?: Row[
     ...tables,
   });
   vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake.client as never);
+  fakeClock = fake.clock;
   return fake;
 }
 
 const noWait = { sleep: vi.fn(async () => {}) };
+
+let fakeClock: { now: Date };
+
+/** 実行日時を DB の now()（email_logs.created_at）にも反映して定期メールを実行する */
+function runDigest(now: Date, options: Parameters<typeof runEmailDigest>[0] = {}) {
+  fakeClock.now = now;
+  return runEmailDigest({ now, ...noWait, ...options });
+}
 
 function sentTo(): string[] {
   return vi.mocked(sendEmail).mock.calls.map(([params]) => params.to);
@@ -259,7 +276,7 @@ describe("送信設定（フェイルクローズ）", () => {
     vi.stubEnv(name, "");
     const { client } = setup({ users: [userRow(1)] });
 
-    const result = await runEmailDigest({ now: MONDAY, ...noWait });
+    const result = await runDigest(MONDAY);
 
     expect(result.status).toBe("skipped");
     expect(client.from).not.toHaveBeenCalled();
@@ -279,7 +296,7 @@ describe("送信対象の抽出", () => {
       ],
     });
 
-    await runEmailDigest({ now: MONDAY, ...noWait });
+    await runDigest(MONDAY);
 
     expect(sentTo()).toEqual(["u1@example.com"]);
   });
@@ -311,7 +328,7 @@ describe("送信対象の抽出", () => {
       ],
     });
 
-    await runEmailDigest({ now: MONDAY, ...noWait });
+    await runDigest(MONDAY);
 
     const email = sentEmailTo("u1@example.com");
     expect(email.subject).toContain("今週の学習");
@@ -335,7 +352,7 @@ describe("送信対象の抽出", () => {
       ],
     });
 
-    await runEmailDigest({ now: MONDAY, ...noWait });
+    await runDigest(MONDAY);
 
     const email = sentEmailTo("u1@example.com");
     expect(email.text).toContain("次に学ぶコンテンツ: HTML入門");
@@ -354,7 +371,7 @@ describe("送信対象の抽出", () => {
       })),
     });
 
-    await runEmailDigest({ now: MONDAY, ...noWait });
+    await runDigest(MONDAY);
 
     expect(sendEmail).not.toHaveBeenCalled();
   });
@@ -362,7 +379,7 @@ describe("送信対象の抽出", () => {
   it("週次進捗: 今週（月曜以降）に登録したユーザーには送らない", async () => {
     setup({ users: [userRow(1, { created_at: "2026-10-04T15:30:00.000Z" })] }); // 月曜 0:30 JST
 
-    await runEmailDigest({ now: MONDAY, ...noWait });
+    await runDigest(MONDAY);
 
     expect(sendEmail).not.toHaveBeenCalled();
   });
@@ -380,7 +397,7 @@ describe("送信対象の抽出", () => {
       submissions: [{ id: 1, user_id: 3, submitted_at: "2026-10-01T00:00:00.000Z" }],
     });
 
-    await runEmailDigest({ now: TUESDAY, ...noWait });
+    await runDigest(TUESDAY);
 
     // 7日目は 10/6（火）。u1 だけが未学習リマインド、u2・u3 は週次進捗（月曜に未送信の繰り越し）
     const reminder = sentEmailTo("u1@example.com");
@@ -395,7 +412,7 @@ describe("送信対象の抽出", () => {
       users: [userRow(1, { status: "trial", created_at: createdOn("2026-09-28") })],
     });
 
-    await runEmailDigest({ now: MONDAY, ...noWait });
+    await runDigest(MONDAY);
 
     expect(sendEmail).toHaveBeenCalledTimes(1);
     expect(sentEmailTo("u1@example.com").subject).toContain("本登録で学べる内容");
@@ -408,7 +425,7 @@ describe("送信対象の抽出", () => {
     vi.stubEnv("STRIPE_ENABLED", "false");
     setup({ users: [userRow(1, { status: "trial", created_at: createdOn("2026-09-28") })] });
 
-    await runEmailDigest({ now: MONDAY, ...noWait });
+    await runDigest(MONDAY);
 
     const email = sentEmailTo("u1@example.com");
     expect(email.text).not.toContain("/upgrade");
@@ -425,7 +442,7 @@ describe("送信対象の抽出", () => {
       ],
     });
 
-    await runEmailDigest({ now: MONDAY, ...noWait });
+    await runDigest(MONDAY);
 
     expect(sendEmail).toHaveBeenCalledTimes(3);
     for (const [params] of vi.mocked(sendEmail).mock.calls) {
@@ -442,8 +459,8 @@ describe("二重送信の防止（email_logs の claim）", () => {
       users: [userRow(1), userRow(2, { status: "trial", created_at: createdOn("2026-10-03") })],
     });
 
-    const first = await runEmailDigest({ now: MONDAY, ...noWait });
-    const second = await runEmailDigest({ now: MONDAY, ...noWait });
+    const first = await runDigest(MONDAY);
+    const second = await runDigest(MONDAY);
 
     expect(first).toMatchObject({ status: "completed", sent: 2 });
     expect(second).toMatchObject({ status: "completed", sent: 0 });
@@ -454,20 +471,44 @@ describe("二重送信の防止（email_logs の claim）", () => {
   it("Cron の重複起動が並行しても、1人に同じメールは1通だけ送る", async () => {
     setup({ users: [userRow(1), userRow(2)] });
 
-    await Promise.all([
-      runEmailDigest({ now: MONDAY, ...noWait }),
-      runEmailDigest({ now: MONDAY, ...noWait }),
-    ]);
+    await Promise.all([runDigest(MONDAY), runDigest(MONDAY)]);
 
     expect(sentTo().sort()).toEqual(["u1@example.com", "u2@example.com"]);
+  });
+
+  it("同じ日に案内系メールを受け取ったユーザーには、朝の実行後にステータスが変わっても2通目を送らない", async () => {
+    const { db } = setup({
+      users: [userRow(1, { status: "trial", created_at: createdOn("2026-09-28") })], // 7日目
+    });
+    await runDigest(MONDAY);
+    expect(sentEmailTo("u1@example.com").subject).toContain("本登録で学べる内容");
+
+    // 同じ日に管理者が承認（未学習のままなら inactivity_reminder の候補になる）→ 再実行
+    db.users[0].status = "active";
+    await runDigest(new Date("2026-10-05T01:00:00Z"));
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(db.email_logs).toHaveLength(1);
+  });
+
+  it("前日に案内系メールを受け取っていても、今日の分は送る", async () => {
+    setup({ users: [userRow(1, { status: "trial", created_at: createdOn("2026-10-03") })] });
+
+    await runDigest(new Date("2026-10-04T23:00:00Z")); // 10/5 = 2日目（trial_nurture）
+    await runDigest(new Date("2026-10-05T23:00:00Z")); // 10/6 = 週次進捗の繰り越し
+
+    expect(vi.mocked(sendEmail).mock.calls.map(([params]) => params.subject)).toEqual([
+      expect.stringContaining("演習を出してみましょう"),
+      expect.stringContaining("今週の学習"),
+    ]);
   });
 
   it("送信に失敗した分は error を記録して行を残し、再実行で再送しない", async () => {
     vi.mocked(sendEmail).mockResolvedValue({ status: "failed", error: "status=500" });
     const { db } = setup({ users: [userRow(1)] });
 
-    const first = await runEmailDigest({ now: MONDAY, ...noWait });
-    await runEmailDigest({ now: TUESDAY, ...noWait });
+    const first = await runDigest(MONDAY);
+    await runDigest(TUESDAY);
 
     expect(first).toMatchObject({ failed: 1 });
     expect(sendEmail).toHaveBeenCalledTimes(1);
@@ -485,12 +526,12 @@ describe("1回あたりの上限と繰り越し", () => {
   it(`送信は ${EMAIL_DIGEST_MAX_PER_RUN} 通で打ち切り、週次進捗の残りは同じ週の翌日に送る`, async () => {
     const { db } = setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_RUN + 5) });
 
-    const monday = await runEmailDigest({ now: MONDAY, ...noWait });
+    const monday = await runDigest(MONDAY);
 
     expect(monday).toMatchObject({ sent: EMAIL_DIGEST_MAX_PER_RUN, deferred: 5 });
     expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_RUN);
 
-    const tuesday = await runEmailDigest({ now: TUESDAY, ...noWait });
+    const tuesday = await runDigest(TUESDAY);
 
     expect(tuesday).toMatchObject({ sent: 5, deferred: 0 });
     expect(new Set(sentTo()).size).toBe(EMAIL_DIGEST_MAX_PER_RUN + 5);
@@ -505,20 +546,30 @@ describe("1回あたりの上限と繰り越し", () => {
       ],
     });
 
-    await runEmailDigest({ now: MONDAY, ...noWait });
+    await runDigest(MONDAY);
 
     expect(sentTo()[0]).toBe("u1000@example.com");
     expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_RUN);
   });
 
-  it("重複（送信済み）は上限の通数に数えない", async () => {
-    setup({ users: manyUsers(3) });
-    await runEmailDigest({ now: MONDAY, ...noWait });
-    vi.mocked(sendEmail).mockClear();
+  it("上限は1日（JST）の合計に効かせ、同じ日に再実行しても超えない", async () => {
+    setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_RUN + 5) });
+    await runDigest(MONDAY);
 
-    const result = await runEmailDigest({ now: MONDAY, ...noWait });
+    // 同じ月曜の 9 時台に手動で再実行
+    const rerun = await runDigest(new Date("2026-10-05T00:30:00Z"));
 
-    expect(result).toMatchObject({ sent: 0, deferred: 0 });
+    expect(rerun).toMatchObject({ sent: 0, deferred: 5 });
+    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_RUN);
+  });
+
+  it("Cron の重複起動が並行しても、合計の送信数は1日の上限を超えない", async () => {
+    setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_RUN + 20) });
+
+    await Promise.all([runDigest(MONDAY), runDigest(MONDAY)]);
+
+    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_RUN);
+    expect(new Set(sentTo()).size).toBe(EMAIL_DIGEST_MAX_PER_RUN);
   });
 
   it("実行時間の上限を超えたら新しい送信を始めない", async () => {
@@ -529,7 +580,7 @@ describe("1回あたりの上限と繰り越し", () => {
       return { status: "sent", messageId: "msg" };
     });
 
-    const result = await runEmailDigest({ now: MONDAY, clock: () => now, ...noWait });
+    const result = await runDigest(MONDAY, { clock: () => now });
 
     expect(result).toMatchObject({ sent: 2, deferred: 1 });
   });
@@ -538,7 +589,7 @@ describe("1回あたりの上限と繰り越し", () => {
     setup({ users: manyUsers(3) });
     const sleep = vi.fn(async () => {});
 
-    await runEmailDigest({ now: MONDAY, clock: () => 0, sleep });
+    await runDigest(MONDAY, { clock: () => 0, sleep });
 
     expect(sleep).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledWith(EMAIL_DIGEST_SEND_INTERVAL_MS);
