@@ -54,16 +54,15 @@ export default async function ContentPage({ params }: PageProps) {
 
   const { userId, userStatus, userRole } = await getServerAuth();
 
-  // 存在チェック + ロック判定用のサマリーおよびコンテンツ詳細を取得
-  // （member / お試しユーザーはサマリーを service_role、admin / maintainer は通常クライアントで未公開分も取得）
   const [{ data: week }, { data: navigation }, { data: content }] = await Promise.all([
     fetchWeekById(weekIdNum, userRole),
     fetchThemeNavigationIndex(themeIdNum, weekIdNum, userRole),
     fetchContentById(contentIdNum, userRole),
   ]);
 
-  // URLの themeId/phaseId が実際の週の所属フェーズ・テーマと一致しない場合は404
-  // （パンくず・前後リンクが誤ったURLになるのを防ぐ）
+  // 404 when the URL's themeId/phaseId don't match the week's actual phase/theme (keeps breadcrumbs
+  // and prev/next
+  // links from pointing at wrong URLs).
   if (!week || week.phase_id !== phaseIdNum || week.phase?.theme_id !== themeIdNum) {
     notFound();
   }
@@ -71,14 +70,15 @@ export default async function ContentPage({ params }: PageProps) {
   const weekContentSummaries = navigation?.currentWeekContents;
   const summary = weekContentSummaries?.find((c) => c.id === contentIdNum);
 
-  // 公開コンテンツとして存在しない（未公開・論理削除済み・他の週所属を含む）場合は404
   if (!summary) {
     notFound();
   }
 
-  // member / お試しユーザーは、親階層（週・フェーズ・テーマ）のいずれかが未公開・論理削除なら
-  // ロック判定より先に 404 にする。サマリーは service_role 経路でコンテンツ行の is_published
-  // しか見ないため、ロック画面を先に描画すると未公開テーマ配下のタイトル・パンくずが見える（#242）
+  // For members/trial users, 404 before the lock check if any parent (week/phase/theme) is
+  // unpublished or deleted.
+  // The summary goes through service_role and only sees the content row's is_published, so
+  // rendering the lock
+  // screen first would leak titles/breadcrumbs under an unpublished theme (#242).
   if (!checkContentPermissions(userRole) && !isWeekHierarchyPublished(week)) {
     notFound();
   }
@@ -152,18 +152,23 @@ export default async function ContentPage({ params }: PageProps) {
     notFound();
   }
 
-  // コンテンツ行自体が公開済みでも、所属する週・フェーズ・テーマのいずれかが未公開・論理削除
-  // ならプレビュー扱い（バッジ・完了ボタン/提出フォームの可否）。member / お試しユーザーには
-  // 404 とする（#216）。member / お試しは前段のロック判定前のガード（#242）で既に弾かれており、
-  // ここは同じ条件をコンテンツ行の埋め込みで確かめる二重防御。
+  // Even when the content row is published, an unpublished/deleted week/phase/theme makes it a
+  // preview (badge,
+  // completion button/submission form availability); members/trial users get 404 (#216). They are
+  // already rejected
+  // by the guard before the lock check (#242), so this re-verifies the same condition via the
+  // embedded content row
+  // as a second layer.
   const isFullyPublished = isContentFullyPublished(content);
   if (!isFullyPublished && !checkContentPermissions(userRole)) {
     notFound();
   }
 
-  // スライドの署名付きURLは、ロック判定（isLocked）と RLS 適用の fetchContentById() を
-  // 通過した後にのみ発行する。ロック済み・未公開（admin / maintainer のプレビューを除く）の
-  // コンテンツではここに到達しない（issue #89）。進捗等の取得と並列に実行する
+  // Issue the slide signed URL only after the lock check (isLocked) and the RLS-applied
+  // fetchContentById() pass;
+  // locked or unpublished content (except admin/maintainer preview) never gets here (#89). Runs in
+  // parallel with
+  // the progress fetches.
   const [{ isCompleted }, { data: existingReview }, { data: latestSubmission }, slideSignedUrl] =
     await Promise.all([
       userId
@@ -199,7 +204,6 @@ export default async function ContentPage({ params }: PageProps) {
         badge={<UnpublishedBadge isPublished={isFullyPublished} />}
       />
 
-      {/* コンテンツ本体 */}
       <Card className="mb-6">
         <CardContent className="pt-6">
           {content.content_type === "video" && content.video_url && (
@@ -236,7 +240,6 @@ export default async function ContentPage({ params }: PageProps) {
                 <div className="mt-8">
                   <Separator className="mb-6" />
 
-                  {/* 提出済み: 提出内容・模範回答・AIレビュー結果 */}
                   {latestSubmission && (
                     <>
                       <div className="mb-6">
@@ -310,7 +313,6 @@ export default async function ContentPage({ params }: PageProps) {
         </CardContent>
       </Card>
 
-      {/* 概要欄（video / slide かつ概要が入力されている場合のみ表示。本体の下に表示する） */}
       {(content.content_type === "video" || content.content_type === "slide") &&
         content.description && (
           <Card className="mb-6">
@@ -321,14 +323,13 @@ export default async function ContentPage({ params }: PageProps) {
           </Card>
         )}
 
-      {/* 完了ボタン（未公開コンテンツのプレビュー中は進捗登録できないため非表示） */}
+      {/* Hidden while previewing unpublished content since progress can't be recorded. */}
       {userId && isFullyPublished && (
         <div className="mb-6">
           <CompleteButton contentId={contentIdNum} initialCompleted={isCompleted} />
         </div>
       )}
 
-      {/* 前後ナビゲーション */}
       <PrevNextNav
         themeId={themeIdNum}
         phaseId={phaseIdNum}

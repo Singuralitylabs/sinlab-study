@@ -37,10 +37,12 @@ interface ContentsFilterValues {
 }
 
 /**
- * テーマ/フェーズ/週/種別は useSearchParams() を唯一の情報源として直接描画する
- * （ローカルstateに複製すると、「フィルタをクリア」リンクやブラウザの戻る/進むといった
- * このコンポーネント外からのURL変化に追従できず、古い選択状態が残ってしまうため）。
- * タイトル検索のみ、入力のたびの過剰なURL更新を避けるためローカルstateでデバウンスする。
+ * Theme/phase/week/type render straight from useSearchParams() as the single source of truth:
+ * mirroring them in
+ * local state would miss URL changes from outside this component (the "clear filters" link, browser
+ * back/forward) and leave a stale selection. Only the title search uses debounced local state, to
+ * avoid a URL
+ * update per keystroke.
  */
 export function ContentsFilterBar({ themes, phases, weeks }: ContentsFilterBarProps) {
   const router = useRouter();
@@ -49,23 +51,24 @@ export function ContentsFilterBar({ themes, phases, weeks }: ContentsFilterBarPr
   const theme = searchParams.get("theme") ?? "";
   const phase = searchParams.get("phase") ?? "";
   const week = searchParams.get("week") ?? "";
-  // 手打ちURL等で不正な種別値が来た場合、サーバー側は無視して全件表示するため
-  // セレクトも「すべて」に正規化してUIと結果を一致させる
+  // For an invalid type from a hand-typed URL the server ignores it and shows everything, so
+  // normalize the select
+  // to "all" to keep the UI consistent with the results.
   const rawType = searchParams.get("type") ?? "";
   const type = isContentType(rawType) ? rawType : "";
   const urlQ = searchParams.get("q") ?? "";
 
   const [q, setQ] = useState(urlQ);
 
-  // URL側のqが外部要因（フィルタクリア・戻る/進む等）で変わったら入力欄も追従させる。
-  // 自分自身のデバウンス確定（末尾空白のtrim）による書き戻しでは、入力中の値が
-  // 意味的に変わっていなければ上書きしない（例: 「hello 」と入力中に確定した
-  // URLのq="hello"に同期させてしまうと、続けて入力した文字が空白なしで連結される）
+  // Follow external changes to q in the URL (clear, back/forward) in the input. Don't overwrite
+  // when our own
+  // debounce commit (trailing-space trim) wrote back a semantically equal value; e.g. syncing
+  // q="hello" while
+  // typing "hello " would concatenate the next characters without the space.
   useEffect(() => {
     setQ((prevQ) => (urlQ === prevQ.trim() ? prevQ : urlQ));
   }, [urlQ]);
 
-  // フェーズは選択中のテーマ配下のみ、週は選択中のフェーズ（未選択ならテーマ）配下のみに絞る
   const visiblePhases = phases.filter((p) => !theme || String(p.themeId) === theme);
   const visiblePhaseIds = new Set(visiblePhases.map((p) => p.id));
   const visibleWeeks = weeks.filter((w) => {

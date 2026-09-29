@@ -36,9 +36,6 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-// ----------------------------------------------------------------
-// fetchPublishedPhases
-// ----------------------------------------------------------------
 describe("fetchPublishedPhases", () => {
   it("正常時、フェーズ一覧を返す", async () => {
     const phases = [
@@ -67,9 +64,6 @@ describe("fetchPublishedPhases", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// fetchPhaseById
-// ----------------------------------------------------------------
 describe("fetchPhaseById", () => {
   it("正常時、指定 ID のフェーズを返す", async () => {
     const phase = { id: 1, title: "Phase 1", is_published: true, is_deleted: false };
@@ -121,9 +115,6 @@ describe("fetchPhaseById", () => {
   );
 });
 
-// ----------------------------------------------------------------
-// fetchPublishedThemes（issue #68: admin / maintainer の未公開プレビュー）
-// ----------------------------------------------------------------
 describe("fetchPublishedThemes", () => {
   it("role未指定（member / お試しユーザー）の場合、is_published=true で絞り込む", async () => {
     const themes = [{ id: 1, name: "Theme 1", display_order: 1 }];
@@ -166,10 +157,6 @@ describe("fetchPublishedThemes", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// fetchThemeById / fetchPhasesByThemeId / fetchWeekById / fetchContentById
-// （issue #68: admin / maintainer の未公開プレビュー）
-// ----------------------------------------------------------------
 describe("fetchThemeById", () => {
   it("member の場合、is_published=true で絞り込む", async () => {
     const theme = { id: 1, name: "Theme 1", is_published: true };
@@ -285,9 +272,6 @@ describe("fetchContentById", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// fetchContentsByWeekId
-// ----------------------------------------------------------------
 describe("fetchContentsByWeekId", () => {
   it("正常時、コンテンツ一覧を返す", async () => {
     const contents = [
@@ -318,13 +302,10 @@ describe("fetchContentsByWeekId", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// fetchThemeProgressSummaries
-// ----------------------------------------------------------------
 describe("fetchThemeProgressSummaries", () => {
   /**
-   * テーブルごとに異なるクエリ結果を返すモッククライアントを作る。
-   * progress に配列を渡すと user_progress への呼び出しごとに順番に消費する（ページング検証用）。
+   * Mock client returning per-table results; an array for progress is consumed one entry per
+   * user_progress call (paging tests).
    */
   function createPerTableMockClient(results: {
     themes: { data: unknown; error: unknown };
@@ -472,7 +453,6 @@ describe("fetchThemeProgressSummaries", () => {
         ],
       },
     ];
-    // 1ページ目: 1000行ちょうど → 2ページ目: 残り300行
     const page1 = Array.from({ length: 1000 }, (_, i) => ({ content_id: i + 1 }));
     const page2 = Array.from({ length: 300 }, (_, i) => ({ content_id: 1000 + i + 1 }));
     const mockClient = createPerTableMockClient({
@@ -494,14 +474,10 @@ describe("fetchThemeProgressSummaries", () => {
         completedContents: 1300,
       },
     ]);
-    // learning_themes 1回 + user_progress 2ページ分
     expect(mockClient.from).toHaveBeenCalledTimes(3);
   });
 });
 
-// ----------------------------------------------------------------
-// fetchUserProgressByContentIds
-// ----------------------------------------------------------------
 describe("fetchUserProgressByContentIds", () => {
   it("contentIds が空配列の場合、Supabase を呼ばずに空の Map を返す", async () => {
     const mockClient = createMockSupabaseClient();
@@ -547,9 +523,6 @@ describe("fetchUserProgressByContentIds", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// fetchUserProgressByContentId
-// ----------------------------------------------------------------
 describe("fetchUserProgressByContentId", () => {
   it("進捗が存在し完了している場合、isCompleted: true を返す", async () => {
     const mockClient = createMockSupabaseClient({
@@ -588,9 +561,6 @@ describe("fetchUserProgressByContentId", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// fetchContentVisibilitySummariesByWeekIds
-// ----------------------------------------------------------------
 describe("fetchContentVisibilitySummariesByWeekIds", () => {
   it("weekIds が空配列の場合、Supabase を呼ばずに空配列を返す", async () => {
     const mockClient = createMockSupabaseClient();
@@ -604,8 +574,8 @@ describe("fetchContentVisibilitySummariesByWeekIds", () => {
   });
 
   it("正常時、service_role クライアントでコンテンツサマリーを返す（お試し非公開分も含む）", async () => {
-    // is_published は許可リスト外のため select されない（DBレスポンスにも含まれない）。
-    // 関数側で常に true を補うことを検証する。
+    // is_published is outside the select allowlist, so the DB response lacks it; the function must
+    // always fill in true.
     const summariesWithoutIsPublished = [
       {
         id: 1,
@@ -635,7 +605,7 @@ describe("fetchContentVisibilitySummariesByWeekIds", () => {
       summariesWithoutIsPublished.map((s) => ({ ...s, is_published: true }))
     );
     const builder = mockClient.from.mock.results[0].value;
-    // service_role 経路は AGENTS.md の許可リストのみを select する（is_published は含めない）
+    // The service_role path selects only the AGENTS.md allowlist (no is_published).
     expect(builder.select).toHaveBeenCalledWith(
       "id, title, content_type, display_order, is_open_to_trial, week_id"
     );
@@ -655,9 +625,6 @@ describe("fetchContentVisibilitySummariesByWeekIds", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// fetchContentSummariesByWeekIds（issue #68: admin / maintainer の未公開プレビュー）
-// ----------------------------------------------------------------
 describe("fetchContentSummariesByWeekIds", () => {
   it("role未指定（member / お試しユーザー）の場合、service_role 経由（公開分のみ）で取得する", async () => {
     const summaries = [
@@ -709,8 +676,8 @@ describe("fetchContentSummariesByWeekIds", () => {
       expect(createAdminSupabaseClient).not.toHaveBeenCalled();
       const builder = mockServerClient.from.mock.results[0].value;
       expect(builder.eq).not.toHaveBeenCalledWith("is_published", true);
-      // service_role を使わない経路でも is_deleted は必ず絞り込む
-      // （admin / maintainer 向け SELECT RLS は is_deleted を見ないため）
+      // Even without service_role, is_deleted must be filtered (admin/maintainer SELECT RLS ignores
+      // is_deleted).
       expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
       expect(builder.order).toHaveBeenCalledWith("display_order");
       expect(builder.order).toHaveBeenCalledWith("id");
@@ -760,9 +727,6 @@ describe("fetchContentSummariesByWeekIds", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// fetchThemeNavigationIndex（issue #208: テーマ内通しの前後ナビ）
-// ----------------------------------------------------------------
 describe("fetchThemeNavigationIndex", () => {
   const weeks = [
     {
@@ -1060,9 +1024,6 @@ describe("fetchThemeNavigationIndex", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// fetchWeeksWithContentsByPhaseId
-// ----------------------------------------------------------------
 describe("fetchWeeksWithContentsByPhaseId", () => {
   it("正常時、週ごとにコンテンツサマリーをグルーピングして返す", async () => {
     const weeks = [
@@ -1195,7 +1156,7 @@ describe("fetchWeeksWithContentsByPhaseId", () => {
       { ...weeks[0], contents: [summaries[0]] },
       { ...weeks[1], contents: [summaries[1]] },
     ]);
-    // 管理者向け経路は通常クライアントのみで完結する（service_role は使わない）
+    // The admin path uses the normal client only (no service_role).
     expect(createAdminSupabaseClient).not.toHaveBeenCalled();
   });
 
@@ -1224,9 +1185,6 @@ describe("fetchWeeksWithContentsByPhaseId", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// isContentLockedForUser
-// ----------------------------------------------------------------
 describe("isContentLockedForUser", () => {
   it("trial かつ お試し非公開の場合、true を返す", () => {
     expect(isContentLockedForUser("trial", false)).toBe(true);
@@ -1247,9 +1205,6 @@ describe("isContentLockedForUser", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// isContentVisible
-// ----------------------------------------------------------------
 describe("isContentVisible", () => {
   it("対象コンテンツが取得できる場合、true を返す", async () => {
     const mockClient = createMockSupabaseClient({ queryResult: { data: { id: 1 }, error: null } });
@@ -1297,9 +1252,6 @@ describe("isContentVisible", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// isContentFullyPublished（issue #68 PRレビュー対応: 親階層が未公開のケース）
-// ----------------------------------------------------------------
 describe("isContentFullyPublished", () => {
   const baseContent = {
     id: 1,
@@ -1380,9 +1332,6 @@ describe("isContentFullyPublished", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// isWeekHierarchyPublished（issue #242: ロック判定より先に親階層を確認する）
-// ----------------------------------------------------------------
 describe("isWeekHierarchyPublished", () => {
   const publishedWeek = {
     id: 100,

@@ -15,11 +15,13 @@ import {
 } from "@/components/ui/dialog";
 
 /**
- * オンボーディングの完了を記録する。ユーザー操作をブロックしないため
- * fire-and-forget で送る（API失敗時は次回表示時に再度出るだけで、閉じる・遷移は止めない）。
- * `keepalive: true` でダイアログ内リンク経由の遷移中も打ち切られないようにする。
- * 失敗時は警告ログを残し（運用側が恒常的失敗に気付けるようにする）、
- * 成功時は表示側の再取得を促すコールバックを呼ぶ。
+ * Records onboarding completion fire-and-forget so it never blocks the user (on API failure the
+ * dialog just shows
+ * again next time; closing/navigation isn't stopped). keepalive: true keeps the request alive
+ * during navigation
+ * via in-dialog links. Failures log a warning so ops can notice persistent failures; success calls
+ * a callback
+ * to refresh the display side.
  */
 export function requestOnboardingComplete(onCompleted?: () => void): void {
   fetch("/api/onboarding/complete", { method: "POST", keepalive: true })
@@ -36,10 +38,9 @@ export function requestOnboardingComplete(onCompleted?: () => void): void {
 }
 
 /**
- * 初回1回だけ表示するウェルカムダイアログ。
- * 表示するステップはサーバー側で status に応じて絞り込んだものを props で受け取る。
- * 閉じるとき（はじめる・×・オーバーレイクリック・ダイアログ内リンク）は完了記録を送り、
- * 成功可否に関わらずダイアログを閉じる。
+ * Steps are filtered by status on the server. Closing by any route sends the completion record and
+ * closes the
+ * dialog regardless of whether it succeeds.
  */
 export function WelcomeDialog({
   steps,
@@ -60,7 +61,7 @@ export function WelcomeDialog({
   const isFirst = index <= 0;
   const isLast = index >= steps.length - 1;
 
-  // 成功時はダッシュボードのサーバー表示を再取得し、再表示の競合を抑える
+  // Refetch the dashboard server render on success to reduce re-display races.
   const completeAndRefresh = () => requestOnboardingComplete(() => router.refresh());
 
   const handleOpenChange = (nextOpen: boolean) => {

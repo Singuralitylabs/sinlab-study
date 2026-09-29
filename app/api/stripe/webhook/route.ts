@@ -11,10 +11,11 @@ import {
 import { sendSlackPaymentFailedNotification } from "@/app/services/notifications/slack";
 
 /**
- * releaseEventClaim() を例外から保護して呼ぶ。releaseEventClaim() 自体はDBエラーを
- * throwせず{error}で返す設計だが、内部で呼ぶ createAdminSupabaseClient() 等が
- * 予期せずthrowした場合に、解放処理の失敗でハンドラ失敗時の500応答自体を
- * 壊さないようにする（解放できなければclaimは残るが、TTL経過後に再claim可能になる）。
+ * Calls releaseEventClaim() guarded against exceptions. It reports DB errors via {error} instead of
+ * throwing,
+ * but internals such as createAdminSupabaseClient() may throw unexpectedly; a release failure must
+ * not break the
+ * 500 response for a handler failure (an unreleased claim becomes claimable again after the TTL).
  */
 async function safeReleaseEventClaim(eventId: string, processedAt: string): Promise<void> {
   try {
@@ -25,13 +26,14 @@ async function safeReleaseEventClaim(eventId: string, processedAt: string): Prom
 }
 
 export async function POST(request: NextRequest) {
-  // 停止中は署名検証・イベント処理を一切行わない（既存Live契約者ゼロを前提に完全停止する。
-  // 詳細はAGENTS.mdの「Stripeサブスク決済（月額課金）」節を参照）
+  // While disabled, do no signature verification or event processing at all (fully stopped on the
+  // premise of
+  // zero existing live subscribers; see AGENTS.md).
   if (!isStripeEnabled()) {
     return NextResponse.json({ error: STRIPE_DISABLED_MESSAGE }, { status: 503 });
   }
 
-  // JSONパース前の生ボディが署名検証に必須
+  // The raw body (before JSON parsing) is required for signature verification.
   const body = await request.text();
   const signature = request.headers.get("stripe-signature");
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -52,9 +54,11 @@ export async function POST(request: NextRequest) {
   let claimedProcessedAt: string | null = null;
 
   try {
-    // event.idの処理権を原子的に確保する（素のINSERTのため、同一event.idの並行配信は
-    // 一意制約により片方だけがclaimに成功する）。claimできなければ「他のリクエストが
-    // 既に処理済み、または処理中」であり、ハンドラを実行せずスキップする
+    // Atomically acquire event.id via a plain INSERT: of concurrent deliveries of the same event.id
+    // only one wins
+    // on the unique constraint. If not claimed, another request already processed or is processing
+    // it, so skip
+    // the handler.
     const {
       claimed: didClaim,
       processedAt,
@@ -81,7 +85,9 @@ export async function POST(request: NextRequest) {
         }
         break;
       }
-      // deleted時点でsubscription.statusは既に'canceled'のため、updatedと同じ同期処理で降格まで完結する
+      // By the time of deleted, subscription.status is already 'canceled', so the same sync as
+      // updated also completes
+      // the demotion.
       case "customer.subscription.updated":
       case "customer.subscription.deleted": {
         const { error } = await syncSubscriptionStatus(event.data.object as Stripe.Subscription);
@@ -93,7 +99,7 @@ export async function POST(request: NextRequest) {
         break;
       }
       case "invoice.payment_failed": {
-        // 初回失敗では降格せずSmart Retriesに任せる。運用者への通知のみ行う
+        // Don't demote on the first failure; leave it to Smart Retries and only notify operators.
         const invoice = event.data.object as Stripe.Invoice;
         await sendSlackPaymentFailedNotification({
           customerEmail: invoice.customer_email,
@@ -109,7 +115,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true });
   } catch (error) {
     console.error("Webhook処理エラー:", error);
-    // claim後の予期しない例外もリトライ可能にするため、処理権を解放してから500を返す
+    // Release the claim before returning 500 so unexpected exceptions after claiming stay
+    // retryable.
     if (claimedProcessedAt) {
       await safeReleaseEventClaim(event.id, claimedProcessedAt);
     }

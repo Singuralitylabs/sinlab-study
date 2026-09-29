@@ -2,16 +2,13 @@ import { SUBMISSIONS_PAGE_SIZE } from "@/app/constants/submissions";
 import { parsePositiveInteger } from "@/app/lib/positive-integer";
 
 /**
- * searchParams の page を1以上の整数へ解釈する。未指定・不正値は1。
- * Number.parseInt の部分解釈（"3abc"→3 等）を避けるため parsePositiveInteger を使う。
+ * Parse the page param as an integer >= 1 (missing/invalid = 1). Uses parsePositiveInteger to avoid
+ * Number.parseInt's partial parsing ("3abc" -> 3).
  */
 export function parsePageParam(value: string | undefined): number {
   return parsePositiveInteger(value ?? null) ?? 1;
 }
 
-/**
- * page / pageSize を1以上の整数に正規化し、PostgREST `.range(from, to)` の引数を返す。
- */
 export function resolvePageRange(
   page: number,
   pageSize: number = SUBMISSIONS_PAGE_SIZE
@@ -27,16 +24,14 @@ export function resolvePageRange(
   };
 }
 
-/** 総件数から総ページ数を算出（最低1） */
 export function calcTotalPages(count: number, pageSize: number = SUBMISSIONS_PAGE_SIZE): number {
   return Math.max(1, Math.ceil(count / pageSize));
 }
 
 /**
- * 範囲外ページへ誘導すべきか。
- * - PostgREST の range 超過（PGRST103）
- * - エラーなしでページ>1 かつ0件（境界外の空結果）
- * それ以外の DB エラーは呼び出し元でエラー表示する。
+ * Whether to redirect to an out-of-range page: PostgREST range overflow (PGRST103), or no error but
+ * page > 1
+ * with zero rows. Other DB errors are shown by the caller.
  */
 export function shouldRedirectOutOfRangePage({
   page,
@@ -53,7 +48,7 @@ export function shouldRedirectOutOfRangePage({
   if (errorCode === "PGRST103") {
     return true;
   }
-  // 一時的な DB エラー（data null）はリダイレクトせず、呼び出し元でエラー表示する
+  // Transient DB errors (data null) must not redirect; the caller shows the error.
   if (errorCode) {
     return false;
   }

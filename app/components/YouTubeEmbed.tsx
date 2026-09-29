@@ -11,7 +11,8 @@ interface YouTubeEmbedProps {
 }
 
 function extractVideoId(url: string): string | null {
-  // 末尾スラッシュを許容しつつ ID 本体だけを取る（`.../embed/abc123/` で //hqdefault にならないように）
+  // Allow a trailing slash while capturing only the ID (so `.../embed/abc123/` doesn't yield
+  // //hqdefault).
   const patterns = [/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#/]+)/];
 
   for (const pattern of patterns) {
@@ -45,12 +46,12 @@ const YouTubePlayerNoSSR = dynamic(
 );
 
 /**
- * lite-youtube-embed 相当の facade。
- * クリック前はサムネイルのみ表示し、youtube.com / ytimg.com（hqdefault 以外）へ通信しない。
- * クリック後に react-youtube を遅延読み込みし autoplay で再生を開始する。
- *
- * サムネイルは hqdefault（480×360 JPEG）のため Next Image Optimizer を経由せず
- * `i.ytimg.com` から直接取得する（source image 枚数消費と仕様記述のずれを避ける）。
+ * Facade like lite-youtube-embed: before click it shows only the thumbnail and contacts no
+ * youtube.com / ytimg.com
+ * resource other than hqdefault; after click it lazy-loads react-youtube and autoplays. hqdefault
+ * (480x360 JPEG)
+ * is fetched straight from i.ytimg.com, bypassing the Next Image Optimizer (avoids source-image
+ * quota use and spec drift).
  */
 export function YouTubeEmbed({ url, className }: YouTubeEmbedProps) {
   const videoId = extractVideoId(url);
@@ -78,7 +79,7 @@ export function YouTubeEmbed({ url, className }: YouTubeEmbedProps) {
           className="relative block h-full w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label="動画を再生"
         >
-          {/* biome-ignore lint/performance/noImgElement: hqdefault は Optimizer 不要。i.ytimg.com を直接参照する */}
+          {/* biome-ignore lint/performance/noImgElement: hqdefault needs no Optimizer; references i.ytimg.com directly */}
           <img
             src={`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`}
             alt=""

@@ -6,9 +6,6 @@ import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import type { CodeFile } from "@/app/types";
 
-/**
- * リクエストの codeFiles を検証し、content が空でないファイルのみ抽出する。
- */
 function sanitizeCodeFiles(input: unknown): CodeFile[] {
   if (!Array.isArray(input)) {
     return [];
@@ -30,7 +27,8 @@ export async function POST(request: NextRequest) {
     }
     const { contentId, submissionType, codeContent, codeFiles, url } = validation.data;
 
-    // コード提出時の保存形式を決定（後方互換: 単一ファイルは code_content、複数は code_files）
+    // Storage format: a single file goes in code_content, multiple in code_files (backward
+    // compatibility).
     let storedCodeContent: string | null = null;
     let storedCodeFiles: CodeFile[] | null = null;
     let storedUrl: string | null = null;
@@ -49,7 +47,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "コードが入力されていません" }, { status: 400 });
       }
     } else {
-      // URL提出: 空白のみの値を弾き、トリム済みの値を保存する
       const trimmedUrl = typeof url === "string" ? url.trim() : "";
       if (trimmedUrl.length === 0) {
         return NextResponse.json({ error: "URLが入力されていません" }, { status: 400 });
@@ -57,7 +54,6 @@ export async function POST(request: NextRequest) {
       storedUrl = trimmedUrl;
     }
 
-    // 認証チェック
     const { user, userId, userStatus } = await getServerAuth();
     if (!user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
@@ -72,13 +68,13 @@ export async function POST(request: NextRequest) {
 
     const supabase = await createServerSupabaseClient();
 
-    // コンテンツ可視性チェック: 対象contentIdが自分に不可視なら403
-    // （お試し非公開・未公開・存在しないIDのいずれもRLSにより0行になる）
+    // Visibility check: 403 if contentId isn't visible to the user (trial-closed, unpublished and
+    // nonexistent IDs all
+    // give 0 rows via RLS).
     if (!(await isContentVisible(supabase, contentId))) {
       return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
     }
 
-    // 提出を作成
     const { data: submission, error: insertError } = await supabase
       .from("submissions")
       .insert({

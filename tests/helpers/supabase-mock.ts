@@ -1,6 +1,5 @@
 import { vi } from "vitest";
 
-/** from().select()... チェーンの解決値（count クエリは count も返す） */
 export interface QueryResult {
   data: unknown;
   error: unknown;
@@ -8,10 +7,9 @@ export interface QueryResult {
 }
 
 /**
- * Supabase クエリビルダーのモックを作成する。
- *
- * リスト取得（.order() 後に直接 await）と単一取得（.single() / .maybeSingle()）の
- * 両パターンに対応するため、then/catch/finally を実装して thenable にしている。
+ * Supabase query builder mock. Implemented as a thenable (then/catch/finally) to support both list
+ * queries
+ * (awaited right after .order()) and single queries (.single() / .maybeSingle()).
  */
 export function createQueryBuilder(result: QueryResult) {
   const builder = {
@@ -32,8 +30,8 @@ export function createQueryBuilder(result: QueryResult) {
     overrideTypes: vi.fn().mockReturnThis(),
     single: vi.fn().mockResolvedValue(result),
     maybeSingle: vi.fn().mockResolvedValue(result),
-    // リスト取得は await builder そのものを解決する
-    // biome-ignore lint/suspicious/noThenProperty: Supabase クエリビルダーの thenable を再現するため意図的に定義
+    // List queries resolve by awaiting the builder itself.
+    // biome-ignore lint/suspicious/noThenProperty: mimics the Supabase builder thenable
     then: (onfulfilled: (v: typeof result) => unknown, onrejected?: (r: unknown) => unknown) =>
       Promise.resolve(result).then(onfulfilled, onrejected),
     catch: (onrejected: (r: unknown) => unknown) => Promise.resolve(result).catch(onrejected),
@@ -43,8 +41,9 @@ export function createQueryBuilder(result: QueryResult) {
 }
 
 /**
- * 呼び出し順に応じて設定済みの結果を1件選ぶ。配列は呼び出し順に消費し
- * （末尾を超えたら最後の要素を返し続ける）、空配列は未指定として扱う。
+ * Pick the configured result by call order: arrays are consumed per call (the last element repeats
+ * past the
+ * end); an empty array counts as unspecified.
  */
 function pickConfiguredResult(
   configured: QueryResult | QueryResult[] | undefined,
@@ -63,16 +62,17 @@ function pickConfiguredResult(
 }
 
 /**
- * Supabase クライアントモックを生成する。
- *
- * @param authResult auth.getUser() の戻り値。省略時は { data: { user: null }, error: null }
- * @param queryResult from().select()... / rpc() チェーンの解決値。省略時は { data: null, error: null }
- * @param tableResults テーブル名ごとの解決値。指定したテーブルは queryResult より優先される
- *                     （1関数内で複数テーブルを照会するケース用）。
- *                     配列を渡すと from() の呼び出し順に消費される（ページング等の複数回照会用。
- *                     末尾を超えた呼び出しには最後の要素を返し続ける）
- * @param rpcResults RPC関数名ごとの解決値。tableResults と同様、配列を渡すと rpc() の
- *                   呼び出し順に消費される。未指定の関数は from() と同様 queryResult にフォールバックする
+ * Creates a Supabase client mock.
+ * @param authResult auth.getUser() result (default { data: { user: null }, error: null })
+ * @param queryResult resolved value of from().select()... / rpc() chains (default { data: null,
+ * error: null })
+ * @param tableResults per-table results, taking precedence over queryResult (for functions querying
+ * several
+ *   tables). An array is consumed per from() call (paging, repeated queries); the last element
+ *   repeats past the end.
+ * @param rpcResults per-RPC results; arrays are consumed per rpc() call like tableResults.
+ * Unspecified
+ *   functions fall back to queryResult, like from().
  */
 export function createMockSupabaseClient({
   authResult,
@@ -96,7 +96,7 @@ export function createMockSupabaseClient({
       const result = pickConfiguredResult(tableResults?.[table], callCounts, table);
       return createQueryBuilder(result ?? queryResult ?? { data: null, error: null });
     }),
-    // .order() / .range() 等でチェーンされるため from() と同じビルダーを返す
+    // Chained with .order() / .range() etc., so return the same builder as from().
     rpc: vi.fn().mockImplementation((fn: string) => {
       const result = pickConfiguredResult(rpcResults?.[fn], rpcCallCounts, fn);
       return createQueryBuilder(result ?? queryResult ?? { data: null, error: null });

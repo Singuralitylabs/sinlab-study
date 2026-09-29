@@ -35,18 +35,14 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-// ----------------------------------------------------------------
-// fetchStudentsProgress
-// ----------------------------------------------------------------
 describe("fetchStudentsProgress", () => {
   const users = [
     { id: 1, display_name: "受講生A", email: "a@example.com" },
     { id: 2, display_name: "受講生B", email: "b@example.com" },
   ];
 
-  // 集約自体（GROUP BY user_id・count(*)・max(completed_at)、is_completed = true の
-  // 絞り込み、NULLの扱い）はRPC定義（マイグレーション）側の責務で、このテストが
-  // 検証するのはRPCの返り値をStudentProgressへ正しくマッピングすることのみ。
+  // Aggregation is the RPC's responsibility (migration); this only tests mapping the RPC result to
+  // StudentProgress.
   it("RPCが返した集計結果をユーザーごとのStudentProgressにマッピングする", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
@@ -54,7 +50,8 @@ describe("fetchStudentsProgress", () => {
         learning_contents: { data: null, error: null, count: 10 },
       },
       rpcResults: {
-        // user 2 は進捗0でRPCに出ないため、users未充足 → 空ページで打ち切る
+        // User 2 has no progress and is absent from the RPC; users are unfilled, so stop on the
+        // empty page.
         get_students_progress_summary: [
           {
             data: [{ user_id: 1, completed_count: 3, last_activity: "2026-07-03T00:00:00+00:00" }],
@@ -80,9 +77,9 @@ describe("fetchStudentsProgress", () => {
     ]);
   });
 
-  // last_activity はRPCの生成型上は非nullだが、completed_at がnullableな以上
-  // 実際にはnullが返りうる（overrideTypesで型を上書きしている）。ここではRPCが
-  // nullを返した場合に、StudentProgress.lastActivityへnullのまま落とすことを保証する。
+  // last_activity is non-null in the generated RPC type but can be null at runtime (completed_at is
+  // nullable;
+  // types are overridden via overrideTypes). Ensure null passes through.
   it("RPCが last_activity: null を返した場合、そのままnullとしてマッピングする", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
@@ -108,7 +105,7 @@ describe("fetchStudentsProgress", () => {
   });
 
   it("RPCの返り値が複数ページにまたがる場合、全ページ分を集約する（db-max-rows非依存）", async () => {
-    // pageSize=1000 満杯のときだけ次ページを取りに行く（#196）。
+    // Fetch the next page only when a full page (1000 rows) came back (#196).
     const page1 = Array.from({ length: 1000 }, (_, i) => ({
       user_id: i + 1,
       completed_count: 1,
@@ -190,7 +187,7 @@ describe("fetchStudentsProgress", () => {
   });
 
   it("db-max-rows相当の短ページでも未充足なら続行し、取りこぼさない", async () => {
-    // pageSize=1000 だがサーバーが500行しか返さないケースを、users未充足で再現する
+    // The server returns 500 rows despite pageSize=1000; simulated via unfilled users.
     const mockClient = createMockSupabaseClient({
       tableResults: {
         users: { data: users, error: null },
@@ -305,9 +302,6 @@ describe("fetchStudentsProgress", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// fetchManageCounts
-// ----------------------------------------------------------------
 describe("fetchManageCounts", () => {
   it("各テーブルの件数を返す", async () => {
     const mockClient = createMockSupabaseClient({
@@ -346,9 +340,6 @@ describe("fetchManageCounts", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// approveUser / rejectUser
-// ----------------------------------------------------------------
 describe("approveUser", () => {
   it.each(["general", "community"] as const)(
     "status=active と選択された会員種別（%s）を同時に更新する",
@@ -367,12 +358,12 @@ describe("approveUser", () => {
         expect.objectContaining({ status: "active", membership_type: membershipType })
       );
       expect(builder.eq).toHaveBeenCalledWith("id", 1);
-      // service_role はRLSを迂回するため is_deleted=false をクエリ自体に必須で課す
+      // service_role bypasses RLS, so is_deleted=false must be in the query itself.
       expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
-      // 承認済みユーザーの再承認を原子的に弾く条件（TOCTOU対策）
+      // Atomically rejects re-approving an active user (TOCTOU).
       expect(builder.neq).toHaveBeenCalledWith("status", "active");
-      // updated判定（更新行数）に使うため必須。省略するとPostgRESTがdataを返さず
-      // updatedが常にfalseになる
+      // Needed for the updated check; without it PostgREST returns no data and updated is always
+      // false.
       expect(builder.select).toHaveBeenCalledWith("id");
     }
   );
@@ -418,9 +409,9 @@ describe("rejectUser", () => {
       expect.objectContaining({ status: "rejected", membership_type: null })
     );
     expect(builder.eq).toHaveBeenCalledWith("id", 3);
-    // service_role はRLSを迂回するため is_deleted=false をクエリ自体に必須で課す
+    // service_role bypasses RLS, so is_deleted=false must be in the query itself.
     expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
-    // 対象が admin の場合は却下不可（管理者保護をUPDATEに原子的に折り込む。#104）
+    // Admin targets cannot be rejected (admin protection folded into the UPDATE, #104).
     expect(builder.neq).toHaveBeenCalledWith("role", "admin");
     expect(builder.select).toHaveBeenCalledWith("id");
   });
@@ -464,11 +455,11 @@ describe("changeUserRole", () => {
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.update).toHaveBeenCalledWith(expect.objectContaining({ role: "maintainer" }));
     expect(builder.eq).toHaveBeenCalledWith("id", 3);
-    // service_role はRLSを迂回するため is_deleted=false をクエリ自体に必須で課す
+    // service_role bypasses RLS, so is_deleted=false must be in the query itself.
     expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
-    // ロール変更は active ユーザーのみ対象（docs/specification.md 2.7）
+    // Role changes apply to active users only.
     expect(builder.eq).toHaveBeenCalledWith("status", "active");
-    // 対象が admin の場合はロール変更不可（降格・誤操作防止）
+    // Admin targets cannot have their role changed.
     expect(builder.neq).toHaveBeenCalledWith("role", "admin");
   });
 
@@ -513,9 +504,9 @@ describe("changeMembershipType", () => {
     expect(updatePayload).toEqual(expect.objectContaining({ membership_type: "general" }));
     expect(updatePayload).not.toHaveProperty("status");
     expect(builder.eq).toHaveBeenCalledWith("id", 3);
-    // service_role はRLSを迂回するため is_deleted=false をクエリ自体に必須で課す
+    // service_role bypasses RLS, so is_deleted=false must be in the query itself.
     expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
-    // 対象は active ユーザーのみ（docs/specification.md 2.7）
+    // Only active users are targeted.
     expect(builder.eq).toHaveBeenCalledWith("status", "active");
     expect(builder.select).toHaveBeenCalledWith("id");
   });
@@ -607,12 +598,10 @@ describe("isUserCurrentlySubscribed", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// fetchUserIdsWithStripeSubscription
-// ----------------------------------------------------------------
 describe("fetchUserIdsWithStripeSubscription", () => {
   it("契約が無い行をSQL側で除外するクエリを発行し、返された行をそのままIDにマップする", async () => {
-    // 終端状態・Checkout手続き中の除外はSQL側（.not）で行うため、モックは絞り込み後の行を返す想定
+    // Terminal/checkout-pending exclusion happens in SQL (.not), so the mock returns post-filter
+    // rows.
     const mockClient = createMockSupabaseClient({
       tableResults: {
         stripe_subscriptions: {
@@ -648,11 +637,6 @@ describe("fetchUserIdsWithStripeSubscription", () => {
   });
 });
 
-// ----------------------------------------------------------------
-
-// ----------------------------------------------------------------
-// parseStrictFilterId / fetchAllContents の不正フィルタ
-// ----------------------------------------------------------------
 describe("parseStrictFilterId", () => {
   it("整数文字列のみを受け入れる", () => {
     expect(parseStrictFilterId("12")).toBe(12);
@@ -676,8 +660,6 @@ describe("fetchAllContents（不正なフィルタID）", () => {
   });
 });
 
-// createTheme / createPhase / createWeek / createContent（挿入位置からの再採番）
-// ----------------------------------------------------------------
 describe("createTheme", () => {
   it("兄弟が存在しない場合、display_order: 1 で作成する", async () => {
     const createdTheme = { id: 100, name: "新テーマ", display_order: 1 };
@@ -752,8 +734,9 @@ describe("createTheme", () => {
       InvalidInsertAfterIdError
     );
     expect(mockClient.from).toHaveBeenCalledTimes(1);
-    // 999がmock dataに含まれていないだけでなく、is_deleted=falseの絞り込み自体が
-    // 実際にクエリへ付与されていることも検証する（絞り込みが消える回帰の検出用）
+    // Also verify the is_deleted=false filter is actually applied; the absence of 999 in the mock
+    // data alone
+    // wouldn't catch a regression.
     const siblingsBuilder = mockClient.from.mock.results[0].value;
     expect(siblingsBuilder.eq).toHaveBeenCalledWith("is_deleted", false);
   });
@@ -806,9 +789,9 @@ describe("createPhase", () => {
   });
 
   it("insertAfterIdが別テーマ配下のフェーズを指す場合、InvalidInsertAfterIdErrorを投げる", async () => {
-    // 兄弟取得は theme_id=1 で絞り込む前提のため、別テーマのフェーズは結果に含まれない。
-    // mock dataに999を含めていないだけでは絞り込み自体の検証にならないため、
-    // theme_id・is_deletedの絞り込みが実際にクエリへ付与されていることも検証する
+    // The sibling fetch filters by theme_id and is_deleted; verify both are applied, since the mock
+    // returns its
+    // data regardless of filters.
     const mockClient = createMockSupabaseClient({
       tableResults: { learning_phases: { data: [], error: null } },
     });
@@ -883,11 +866,9 @@ describe("createContent", () => {
   });
 
   it("insertAfterIdが削除済みコンテンツを指す場合、InvalidInsertAfterIdErrorを投げる", async () => {
-    // モックのクエリビルダーは .eq() の引数に関わらず設定した data をそのまま返すため、
-    // 「999が結果に無い」だけでは is_deleted=false によって除外されたことの検証にならない
-    // （絞り込み自体を削除する回帰があっても、999をmock dataに含めていない限りこのテストは
-    // 通ってしまう）。そのため兄弟取得クエリに is_deleted=false が実際に付与されていることも
-    // 明示的に検証する
+    // The mock builder ignores .eq() arguments and returns the configured data, so verify
+    // explicitly that
+    // is_deleted=false is applied; otherwise removing the filter would still pass.
     const mockClient = createMockSupabaseClient({
       tableResults: { learning_contents: { data: [{ id: 1, display_order: 1 }], error: null } },
     });
@@ -907,9 +888,6 @@ describe("createContent", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// updateTheme / updatePhase / updateWeek / updateContent（編集時の再採番。issue #189）
-// ----------------------------------------------------------------
 describe("updateTheme（編集時の再採番）", () => {
   it("insertAfterIdを省略した場合、兄弟取得も再採番も行わず、そのまま更新する", async () => {
     const mockClient = createMockSupabaseClient({
@@ -960,7 +938,6 @@ describe("updateTheme（編集時の再採番）", () => {
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
 
-    // id=2の直後に挿入 → id=3だけ display_order が2→3にずれ、自分自身は2になる
     const result = await updateTheme(1, { name: "更新後", insertAfterId: 2 });
 
     expect(result).toEqual({ error: null });
@@ -1021,7 +998,6 @@ describe("updatePhase（編集時の再採番）", () => {
     const siblingsBuilder = mockClient.from.mock.results[1].value;
     expect(siblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 1);
     expect(siblingsBuilder.neq).toHaveBeenCalledWith("id", 10);
-    // 先頭挿入のため既存の2件とも display_order が1つずつ後ろへずれる（1 RPC）
     expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
       p_table: "learning_phases",
       p_updates: [
@@ -1036,9 +1012,11 @@ describe("updatePhase（編集時の再採番）", () => {
   });
 
   it("theme_idを変更した場合、移動先の末尾に追加し（insertAfterId省略時）、本体UPDATE成功後に移動元に残った兄弟の欠番も再採番する", async () => {
-    // 呼び出し順は 現在値取得 → 移動先兄弟取得 → 本体UPDATE → 移動元兄弟取得 → 移動元一括RPC。
-    // 本体UPDATEを移動元の詰め直しより先に行うことで、途中失敗時に移動元の兄弟同士の
-    // 表示順が入れ替わらないようにする（詳細は resequenceDestinationForUpdate のコメント参照）
+    // Call order: current values -> destination siblings -> body UPDATE -> source siblings ->
+    // source bulk RPC.
+    // Updating the body before compacting the source keeps source siblings' order intact if a step
+    // fails
+    // (see resequenceDestinationForUpdate).
     const mockClient = createMockSupabaseClient({
       tableResults: {
         learning_phases: [
@@ -1065,7 +1043,6 @@ describe("updatePhase（編集時の再採番）", () => {
     expect(result).toEqual({ error: null });
     const destinationSiblingsBuilder = mockClient.from.mock.results[1].value;
     expect(destinationSiblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 2);
-    // 移動先の唯一の兄弟(id=20)は既に末尾なので display_order は変化せず、UPDATEは発生しない
     const bodyUpdateBuilder = mockClient.from.mock.results[2].value;
     expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
       expect.objectContaining({ theme_id: 2, display_order: 2 })
@@ -1073,7 +1050,6 @@ describe("updatePhase（編集時の再採番）", () => {
     const sourceSiblingsBuilder = mockClient.from.mock.results[3].value;
     expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("theme_id", 1);
     expect(sourceSiblingsBuilder.neq).toHaveBeenCalledWith("id", 10);
-    // 移動元に残ったid=3は欠番(order=3)を詰めて2になる（1 RPC）
     expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
       p_table: "learning_phases",
       p_updates: [{ id: 3, display_order: 2 }],
@@ -1095,7 +1071,6 @@ describe("updatePhase（編集時の再採番）", () => {
     const result = await updatePhase(10, { theme_id: 2 });
 
     expect(result).toEqual({ error: dbError });
-    // 現在値取得・移動先兄弟取得・本体UPDATEの3回のみで、移動元の再採番には到達しない
     expect(mockClient.from).toHaveBeenCalledTimes(3);
   });
 
@@ -1226,7 +1201,6 @@ describe("updateContent（編集時の再採番）", () => {
     );
     const sourceSiblingsBuilder = mockClient.from.mock.results[3].value;
     expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("week_id", 1);
-    // 移動元に残ったid=3は欠番(order=3)を詰めて1になる（1 RPC）
     expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
       p_table: "learning_contents",
       p_updates: [{ id: 3, display_order: 1 }],

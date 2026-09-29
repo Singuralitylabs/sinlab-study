@@ -11,9 +11,9 @@ export type GettingStartedChecklistItem = {
 };
 
 /**
- * 判定結果からチェックリスト項目を組み立てる。`progress` が null（非 member 等）のときは
- * 空配列を返し、描画側の全達成時と同じく非表示になる。達成判定の組み立てはここに閉じ込め、
- * 呼び出し側でダミーの達成値を用意しない。
+ * Returns an empty array when progress is null (non-member etc.), which hides the list just like
+ * the all-done
+ * case. Keep the achievement logic here so callers don't fabricate dummy values.
  */
 export function buildGettingStartedItems(
   completedContents: number,
@@ -40,11 +40,6 @@ export function buildGettingStartedItems(
   }));
 }
 
-/**
- * ダッシュボードに常設するはじめかたチェックリスト。
- * 判定結果を受け取って描画するだけの純粋な表示コンポーネント。
- * 全ステップ達成のときは描画しない（永続化不要）。
- */
 export function GettingStartedChecklist({ items }: { items: GettingStartedChecklistItem[] }) {
   const unachievedExists = items.some((item) => !item.completed);
   if (!unachievedExists) {

@@ -70,7 +70,6 @@ import {
 
 const dbError = { message: "db error", code: "PGRST001" };
 
-/** `stripe.prices.retrieve()` のモック応答を設定する共通ヘルパー（既定値: 月額¥3000） */
 function mockPrice(
   overrides: {
     unitAmount?: number | null;
@@ -96,12 +95,12 @@ type FakeSubscriptionRow = {
 };
 
 /**
- * `stripe_subscriptions` の1行だけを保持するインメモリのSupabaseモック。
- * claim/release の排他は `user_id` のUNIQUE制約（重複INSERTは23505）と、条件付きUPDATEが
- * 「条件に合致する行が無ければ0行」になることに依存しているため、固定応答のモックでは
- * 並行リクエストやステータス絞り込みの挙動を検証できない。ここではその2点を再現する。
- *
- * @param initialRow 事前に存在する行（再契約・契約中ユーザーの検証用）
+ * In-memory Supabase mock holding a single stripe_subscriptions row. Claim/release exclusion relies
+ * on the
+ * user_id UNIQUE constraint (duplicate INSERT -> 23505) and on a conditional UPDATE matching zero
+ * rows,
+ * which a fixed-response mock can't verify; this reproduces both.
+ * @param initialRow pre-existing row (re-subscription / active-contract cases)
  */
 function createRaceSupabaseClient(initialRow?: Partial<FakeSubscriptionRow>) {
   let row: FakeSubscriptionRow | null = initialRow
@@ -152,7 +151,6 @@ function createRaceSupabaseClient(initialRow?: Partial<FakeSubscriptionRow>) {
         if (!current) {
           return { data: [], error: null };
         }
-        // claim（.in("status", ...) 付き）の条件付きUPDATE
         if (statuses !== null) {
           const claimable =
             claimFilter?.kind === "released"
@@ -167,7 +165,6 @@ function createRaceSupabaseClient(initialRow?: Partial<FakeSubscriptionRow>) {
           row = { ...current, ...payload } as FakeSubscriptionRow;
           return { data: [{ stripe_customer_id: current.stripe_customer_id }], error: null };
         }
-        // Customer保存・セッションid保存・releaseなど、等値条件のみのUPDATE
         if (!matchesEquals(current)) {
           return { data: selected ? [] : null, error: null };
         }
@@ -207,7 +204,7 @@ function createRaceSupabaseClient(initialRow?: Partial<FakeSubscriptionRow>) {
           return builder;
         },
         maybeSingle: () => Promise.resolve(run()),
-        // biome-ignore lint/suspicious/noThenProperty: Supabase クエリビルダーの thenable を再現するため意図的に定義
+        // biome-ignore lint/suspicious/noThenProperty: mimics the Supabase builder thenable
         then: (onfulfilled: (v: ReturnType<typeof run>) => unknown) =>
           Promise.resolve(run()).then(onfulfilled),
       };
@@ -216,9 +213,9 @@ function createRaceSupabaseClient(initialRow?: Partial<FakeSubscriptionRow>) {
   };
 }
 
-// Priceのモジュールスコープキャッシュ（5分TTL）がテスト間で残らないよう、
-// テストごとに実時刻をTTLより大きい10分ずつ進める。テストが明示的に渡す
-// `now`（アンカー判定用の日時）はDate.now()を使わない実時刻指定のため影響を受けない
+// The module-scope price cache (5 min TTL) must not leak between tests, so advance the fake clock
+// 10 minutes
+// per test. Explicit `now` args (anchor computation) don't use Date.now() and are unaffected.
 let fakeNowMs = new Date("2099-01-01T00:00:00.000Z").getTime();
 
 beforeEach(() => {
@@ -276,10 +273,10 @@ describe("fetchStripeSubscriptionByUserId", () => {
 });
 
 describe("createCheckoutSession", () => {
-  // 月中の登録を想定した固定時刻（アンカーまで十分な余裕があり、日割り額が最低請求額を
-  // 下回らないケース）。個別テストで境界値を検証する際は上書きする
+  // Mid-month fixed time: far from the anchor, so proration isn't below the minimum. Override for
+  // boundary tests.
   const midMonth = new Date("2026-08-10T00:00:00.000Z");
-  /** Checkout Sessionの有効期間（Stripeの最低30分＋安全マージン2分） */
+  /** Checkout Session lifetime: Stripe minimum 30 min + 2 min margin. */
   const sessionLifetimeMs = 32 * 60 * 1000;
 
   beforeEach(() => {
@@ -332,7 +329,6 @@ describe("createCheckoutSession", () => {
 
   it("アンカー直前（日割り額が最低請求額を下回る）の登録はproration_behaviorがnoneになる", async () => {
     mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
-    // 27日 0:00 UTC の30分前 = 月額3000円換算（7月分の周期は31日）で日割り額は約2円（¥50未満）
     const justBeforeAnchor = new Date("2026-08-26T23:30:00.000Z");
 
     await createCheckoutSession(5, "auth-uuid", "cus_existing", justBeforeAnchor);
@@ -351,13 +347,12 @@ describe("createCheckoutSession", () => {
   });
 
   it("Checkout Sessionの有効期限はclaimのTTLより短い（TTL経過時に古いセッションが必ず失効する）", () => {
-    // TTLは有効期限からの導出値のため、この不等号は構造的に保たれる（回帰検知用の確認）
+    // The TTL is derived from the expiry, so this inequality holds structurally (regression guard).
     expect(sessionLifetimeMs).toBeLessThan(CHECKOUT_CLAIM_TTL_MS);
   });
 
   it("アンカー直前でもexpires_atは32分後（アンカーを跨ぐ猶予はStripeの最低30分要件の範囲内）", async () => {
     mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
-    // アンカー30分前。無償化ウィンドウ内だが、有効期限は一律32分後（アンカーの2分後）となる
     const justBeforeAnchor = new Date("2026-08-26T23:30:00.000Z");
 
     await createCheckoutSession(5, "auth-uuid", "cus_existing", justBeforeAnchor);
@@ -448,10 +443,10 @@ describe("claimCheckoutSlot", () => {
       stripeCustomerId: "cus_old",
     });
     const builder = mockClient.from.mock.results[1].value;
-    // 契約が記録されていない行だけを対象にし、解放済み（NULL）の行を奪う
+    // Targets only rows with no recorded contract; also takes over released (NULL) rows.
     expect(builder.in).toHaveBeenCalledWith("status", NON_CURRENT_SUBSCRIPTION_STATUSES);
     expect(builder.is).toHaveBeenCalledWith("checkout_claimed_at", null);
-    // 復帰しうる契約の痕跡（subscription id・期間末）は消さない
+    // Keep traces of a possibly resumable contract (subscription id, period end).
     expect(builder.update).toHaveBeenCalledWith({
       status: CHECKOUT_PENDING_STATUS,
       checkout_claimed_at: now.toISOString(),
@@ -538,7 +533,6 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
 
     expect(result).toEqual({ outcome: "reusable", url: "https://checkout.stripe.com/live" });
     expect(mockSessionsRetrieve).toHaveBeenCalledWith("cs_live");
-    // claimは奪わない（確保時刻は元のまま）
     expect(fake.getRow()?.checkout_claimed_at).toBe(now.toISOString());
   });
 
@@ -570,16 +564,15 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
     const paidSession = { id: "cs_paid", status: "complete", url: null };
     mockSessionsRetrieve.mockResolvedValue(paidSession);
 
-    // TTLを超えた時刻でも奪わない
     const result = await claimCheckoutSlot(5, new Date(now.getTime() + CHECKOUT_CLAIM_TTL_MS + 1));
 
-    // 判定に使った処理権の確保時刻（DBの値そのまま）も返し、反映時のガードに使わせる
+    // Also return the claim time used for the decision (raw DB value) so the caller can use it as a
+    // guard when applying.
     expect(result).toEqual({
       outcome: "blocked",
       completedSessions: [paidSession],
       heldClaimedAt: now.toISOString(),
     });
-    // 行は書き換えない（反映は呼び出し元が activateUserFromCheckoutSession() で行う）
     expect(fake.getRow()).toMatchObject({
       status: CHECKOUT_PENDING_STATUS,
       checkout_claimed_at: now.toISOString(),
@@ -588,7 +581,8 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
   });
 
   it("セッションid未記録でも、Customerに紐づく有効なセッションがあれば再利用する", async () => {
-    // セッション作成後・記録前に落ちた場合の復旧。記録漏れのまま新しいセッションを作らない
+    // Recovery when it crashed between session creation and recording: don't create a new session
+    // with the record missing.
     const fake = createRaceSupabaseClient({
       status: CHECKOUT_PENDING_STATUS,
       checkout_claimed_at: now.toISOString(),
@@ -603,7 +597,7 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
     const result = await claimCheckoutSlot(5, new Date(now.getTime() + 60 * 1000));
 
     expect(result).toEqual({ outcome: "reusable", url: "https://checkout.stripe.com/untracked" });
-    // 処理権の確保時刻以降に作られたセッションだけを対象にする（過去の契約を拾わない）
+    // Only sessions created at/after the claim time (don't pick up past contracts).
     expect(mockSessionsList).toHaveBeenCalledWith(
       expect.objectContaining({ customer: "cus_1", created: { gte: expect.any(Number) } })
     );
@@ -643,7 +637,8 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
 
     const result = await claimCheckoutSlot(5, new Date(now.getTime() + CHECKOUT_CLAIM_TTL_MS + 1));
 
-    // 1件だけを反映すると、残りが有効な契約だった場合に二重契約の窓が開くため全件返す
+    // Return all: applying just one could open a double-contract window if the rest are live
+    // contracts.
     expect(result).toEqual({
       outcome: "blocked",
       completedSessions: [paidA, paidB],
@@ -677,7 +672,8 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
   });
 
   it("照会で拾った直前の契約（ミラー行に記録済み）の決済済みセッションは、反映待ちとして数えない", async () => {
-    // 処理権の確保より前（時計のずれの余裕の範囲）に作られた、反映済みの前回契約のセッション
+    // Session of an already-applied previous contract, created within the clock-skew margin before
+    // the claim.
     const fake = createRaceSupabaseClient({
       status: CHECKOUT_PENDING_STATUS,
       checkout_claimed_at: now.toISOString(),
@@ -693,7 +689,8 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
     const claimedAt = new Date(now.getTime() + 60 * 1000);
     const result = await claimCheckoutSlot(5, claimedAt);
 
-    // 反映し直して処理権を解除したり、今回の決済と合わせて「複数」と数えたりしない
+    // Neither re-apply and release the claim, nor count it as "multiple" together with the current
+    // payment.
     expect(result).toMatchObject({ outcome: "claimed", stripeCustomerId: "cus_1" });
   });
 
@@ -737,7 +734,6 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
         { id: "cs_open", status: "open", url: "https://checkout.stripe.com/open" },
       ],
     });
-    // 失効の直前に決済された等
     mockSessionsExpire.mockRejectedValue(new Error("session is not open"));
 
     const result = await claimCheckoutSlot(5, new Date(now.getTime() + 60 * 1000));
@@ -747,7 +743,7 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
   });
 
   it("セッションもCustomerも記録されていない手続き中の行は、TTL経過後にのみ奪える", async () => {
-    // Customerが無い＝Stripeへ照会する手がかりが無いため、TTLによる救済に委ねる
+    // No Customer means nothing to query Stripe with; leave recovery to the TTL.
     const fake = createRaceSupabaseClient({
       status: CHECKOUT_PENDING_STATUS,
       checkout_claimed_at: now.toISOString(),
@@ -804,7 +800,8 @@ describe("claimCheckoutSlot（並行リクエスト）", () => {
     ]);
 
     const outcomes = [first.outcome, second.outcome].sort();
-    // セッション未記録の間は再利用もできないため、後発は待たされる（二重作成はしない）
+    // Without a recorded session it can't be reused, so the later request waits (no double
+    // creation).
     expect(outcomes).toEqual(["claimed", "conflict"]);
   });
 
@@ -906,7 +903,6 @@ describe("createCheckoutSessionForUser", () => {
     expect(result).toEqual({ url: "https://checkout.stripe.com/xxx" });
     expect(mockCustomersCreate).not.toHaveBeenCalled();
     expect(mockSessionsCreate.mock.calls[0][0].customer).toBe("cus_existing");
-    // 次のリクエストが有効性を確認できるよう、確保したセッションを記録する
     expect(fake.getRow()?.checkout_session_id).toBe("cs_new");
   });
 
@@ -933,7 +929,7 @@ describe("createCheckoutSessionForUser", () => {
         email: "trial@example.com",
         metadata: { user_id: "5", auth_id: "auth-uuid" },
       },
-      // ユーザー単位で固定しつつ、パラメータ（メール）が変わればkeyも変わる
+      // Fixed per user, but the key changes when the params (email) change.
       { idempotencyKey: expect.stringMatching(/^checkout-customer-5-[0-9a-f]{16}$/) }
     );
     expect(fake.getRow()?.stripe_customer_id).toBe("cus_new");
@@ -1048,7 +1044,6 @@ describe("createCheckoutSessionForUser", () => {
 
   it("通信エラー等ではセッションが作られた可能性が残るため、処理権を解放させない", async () => {
     mockSessionsCreate.mockReset();
-    // タイムアウト等でHTTPステータスを受け取れていないケース
     mockSessionsCreate.mockRejectedValue(new MockStripeError({ message: "Connection timeout" }));
 
     await expect(
@@ -1064,7 +1059,6 @@ describe("createCheckoutSessionForUser", () => {
   });
 
   it("セッションidを記録できない場合は、作ったセッションを失効させてから失敗する", async () => {
-    // 処理権を奪われている等で0行更新になるケース
     const mockClient = createMockSupabaseClient({
       tableResults: { stripe_subscriptions: { data: [], error: null } },
     });
@@ -1126,7 +1120,6 @@ describe("isProrationBelowMinimum", () => {
   it("アンカー30分前の登録は最低請求額を下回る（遠く下回る側のサニティチェック）", async () => {
     mockPrice();
 
-    // 月額3000円換算（7月分の周期は31日）で日割り額は約2円（¥50未満）
     const result = await isProrationBelowMinimum(new Date("2026-08-26T23:30:00.000Z"));
 
     expect(result).toBe(true);
@@ -1135,7 +1128,6 @@ describe("isProrationBelowMinimum", () => {
   it("アンカー24時間前の登録は最低請求額を下回らない（遠く下回らない側のサニティチェック）", async () => {
     mockPrice();
 
-    // 月額3000円換算（7月分の周期は31日）で日割り額は約97円（¥50以上）
     const result = await isProrationBelowMinimum(new Date("2026-08-26T00:00:00.000Z"));
 
     expect(result).toBe(false);
@@ -1144,8 +1136,9 @@ describe("isProrationBelowMinimum", () => {
   it("日割り額がちょうど49円のとき（¥50未満の境界）はtrueを返す", async () => {
     mockPrice();
 
-    // 7月分の周期(31日=2,678,400,000ms)に対し、remainingMs = 49 * 892,800 = 43,747,200ms
-    // ちょうど日割り額49円（Math.round(49) = 49 < 50）になる時刻
+    // Boundary: July cycle is 31 days = 2,678,400,000 ms; remainingMs = 49 * 892,800 = 43,747,200
+    // ms gives a
+    // proration of exactly 49 yen (Math.round(49) = 49 < 50).
     const result = await isProrationBelowMinimum(new Date("2026-08-26T11:50:52.800Z"));
 
     expect(result).toBe(true);
@@ -1154,8 +1147,8 @@ describe("isProrationBelowMinimum", () => {
   it("日割り額がちょうど50円のとき（¥50ちょうどの境界）はfalseを返す", async () => {
     mockPrice();
 
-    // remainingMs = 50 * 892,800 = 44,640,000ms（=12時間24分）
-    // ちょうど日割り額50円（Math.round(50) = 50。厳密な不等号 `< 50` によりfalse）になる時刻
+    // remainingMs = 50 * 892,800 = 44,640,000 ms (12h24m) gives exactly 50 yen (not below, due to
+    // the strict `< 50`).
     const result = await isProrationBelowMinimum(new Date("2026-08-26T11:36:00.000Z"));
 
     expect(result).toBe(false);
@@ -1172,8 +1165,8 @@ describe("isProrationBelowMinimum", () => {
   it("1ヶ月間隔でないPrice（誤設定）の場合は判定できないためfalseを返す", async () => {
     mockPrice({ unitAmount: 30000, interval: "year" });
 
-    // 年額換算なら本来ごく僅かな日割り額になるはずの時刻だが、月次前提が崩れるため
-    // 判定自体を行わずfalseを返す
+    // Would normally be a tiny proration on a yearly price, but the monthly premise fails, so skip
+    // the check and return false.
     const result = await isProrationBelowMinimum(new Date("2026-08-26T23:30:00.000Z"));
 
     expect(result).toBe(false);

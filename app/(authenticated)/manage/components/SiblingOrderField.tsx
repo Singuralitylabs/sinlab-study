@@ -6,7 +6,6 @@ import { Label } from "@/components/ui/label";
 const SELECT_CLASS_NAME =
   "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs";
 
-/** 挿入位置ピッカーが表示する兄弟1件（表示対象の親で絞り込み済み・並び順ソート済み） */
 export interface SiblingOrderItem {
   id: number;
   label: string;
@@ -14,27 +13,29 @@ export interface SiblingOrderItem {
 }
 
 /**
- * 親が未確定な状態で渡す全候補1件。`parentId` で絞り込んでから `SiblingOrderItem[]` として
- * `SiblingOrderField` に渡す（テーマは親を持たないため候補=対象そのもので、この型は使わない）。
+ * One candidate before the parent is known: filter by parentId, then pass as SiblingOrderItem[] to
+ * SiblingOrderField (themes have no parent, so candidates are the targets themselves and this type
+ * isn't used).
  */
 export interface SiblingCandidate extends SiblingOrderItem {
   parentId: number;
 }
 
 /**
- * 挿入位置（insert_after_id）の既定値を求める。末尾（最後の兄弟の直後）が既定で、
- * 兄弟が存在しない場合のみ先頭（null）になる。新規作成時、および編集時に親を変更した
- * 直後の既定値（移動先の末尾）に使う。
+ * Default insert_after_id: the tail (after the last sibling); null (head) only when there are no
+ * siblings.
+ * Used on create and right after an edit changes the parent.
  */
 export function getDefaultInsertAfterId(siblings: SiblingOrderItem[]): number | null {
   return siblings.length > 0 ? siblings[siblings.length - 1].id : null;
 }
 
 /**
- * 編集フォームで親を変更していない場合の挿入位置の既定値（＝現在位置）を求める。
- * `siblingsIncludingSelf` は編集対象自身を含む・並び順ソート済みの一覧を渡すこと。
- * 自分自身が一覧の先頭、または一覧に存在しない（週未分類・削除済みなどで兄弟一覧が
- * 空になるケース）場合は先頭（null）を返す（issue #189）。
+ * Default (= current position) when an edit doesn't change the parent. Pass a sorted list that
+ * includes the
+ * target itself. Returns null when it is first or missing from the list (an unclassified/deleted
+ * week leaves
+ * the sibling list empty) (#189).
  */
 export function getCurrentPositionInsertAfterId(
   selfId: number,
@@ -45,21 +46,23 @@ export function getCurrentPositionInsertAfterId(
 }
 
 interface SiblingOrderFieldProps {
-  /** 表示対象の親で絞り込み済み・並び順ソート済みの兄弟一覧（編集時は自分自身を除く）。親未選択時は null */
+  /**
+   * Siblings of the displayed parent, already filtered and sorted (excluding itself in edit mode);
+   * null while no parent is selected.
+   */
   siblings: SiblingOrderItem[] | null;
-  /** 挿入位置。null = 先頭、数値 = その兄弟要素IDの直後 */
   insertAfterId: number | null;
   onChange: (insertAfterId: number | null) => void;
-  /** プレースホルダー行の文言。新規作成は「ここに追加」、編集は「ここに移動」（既定は「ここに追加」） */
   placeholderLabel?: string;
 }
 
 /**
- * 新規作成・編集フォーム共通の「挿入位置」フィールド（issue #188 / #189）。
- * 兄弟要素（非公開を含み、論理削除済み・編集時は自分自身を除く）を並び順で読み取り専用
- * リスト表示し、挿入位置セレクトで選んだ位置にプレースホルダー行を表示する。
- * 兄弟一覧の並び順は呼び出し側（各 new/edit page.tsx。compareGroupLevel 準拠）が決めるため、
- * このコンポーネント自身では並び替えを行わない。
+ * Shared "insert position" field for the create/edit forms (#188, #189): shows siblings (including
+ * unpublished;
+ * excluding deleted and, in edit mode, itself) as a read-only list with a placeholder row at the
+ * chosen position.
+ * Sort order is decided by the caller (each new/edit page.tsx, per compareGroupLevel), so this
+ * component doesn't sort.
  */
 export function SiblingOrderField({
   siblings,

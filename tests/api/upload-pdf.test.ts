@@ -19,17 +19,18 @@ const maintainerAuth = {
 };
 
 interface MockStorageOptions {
-  /** 自動採番の list() が返す既存ファイル */
   files?: { name: string }[];
   listError?: unknown;
   uploadError?: unknown;
-  /** upload() の戻り値 data（省略時は保存先キーから組み立てる。null で「エラー無しの data: null」を再現） */
+  /**
+   * data returned by upload() (built from the saved key when omitted; null reproduces "data: null
+   * without an error").
+   */
   uploadData?: { path: string; fullPath: string } | null;
-  /** 存在確認 exists() の結果。Error を渡すとその例外を投げる（400/404以外の失敗の再現） */
+  /** Result of exists(); an Error is thrown as-is (reproduces failures other than 400/404). */
   exists?: boolean | Error;
 }
 
-/** Storageのモックを作り、createAdminSupabaseClient() の戻り値として登録する */
 const mockStorage = (options: MockStorageOptions = {}) => {
   const { files = [], listError = null, uploadError = null, exists: existsResult = true } = options;
 
@@ -39,7 +40,7 @@ const mockStorage = (options: MockStorageOptions = {}) => {
     if (uploadError) {
       return { data: null, error: uploadError };
     }
-    // null（data:null の再現）は尊重しつつ、undefined は既定の組み立てへフォールバックする
+    // Respect null (reproduces data: null) but fall back to the default build for undefined.
     const data =
       options.uploadData !== undefined
         ? options.uploadData
@@ -54,8 +55,9 @@ const mockStorage = (options: MockStorageOptions = {}) => {
     return { data: existsResult, error: null };
   });
 
-  // 配信URL（公開URL・署名付きURL）はアップロードAPIでは一切発行しない（issue #89）。
-  // 呼ばれたらテストが落ちるよう、URL生成系のメソッドはモックに含めない
+  // The upload API never issues delivery URLs (public/signed; #89); URL-generating methods are left
+  // out of the
+  // mock so a call fails the test.
   const storage = { from: vi.fn().mockReturnValue({ list, upload, exists }) };
   vi.mocked(createAdminSupabaseClient).mockResolvedValue({ storage } as never);
   return { list, upload, exists };
@@ -79,7 +81,7 @@ const request = ({
   return new Request("http://localhost/api/upload-pdf", { method: "POST", body: formData });
 };
 
-// tests/setup.ts が張る console.error のスパイまで戻さないよう、Date.now のスパイのみ局所的に復元する
+// Restore only the Date.now spy, not the console.error spy installed by tests/setup.ts.
 let nowSpy: ReturnType<typeof vi.spyOn> | undefined;
 
 const freezeNow = (value: number) => {
@@ -96,7 +98,8 @@ afterEach(() => {
 });
 
 describe("POST /api/upload-pdf スライド番号のバリデーション", () => {
-  // Number.parseInt() の部分解釈で不正な文字列が既存PDFを上書きしないことを担保する
+  // Ensures Number.parseInt's partial parsing can't let an invalid string overwrite an existing
+  // PDF.
   const invalidNumbers = [
     ["部分解釈される英字混じり", "1abc"],
     ["小数", "1.5"],
@@ -122,7 +125,6 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
       error: invalidSlideNumberMessage,
     });
     expect(upload).not.toHaveBeenCalled();
-    // 番号指定時は自動採番の一覧取得へ回らない
     expect(list).not.toHaveBeenCalled();
   });
 
@@ -154,13 +156,11 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
     const response = await POST(request({ slideNumber: value }) as never);
 
     expect(response.status).toBe(200);
-    // 保存値はオブジェクトキーのみ。URLは閲覧時に署名して発行するため返さない
     await expect(response.json()).resolves.toEqual({ path: expectedPath });
     expect(upload).toHaveBeenCalledWith(expectedPath, expect.any(Uint8Array), {
       contentType: "application/pdf",
       upsert: true,
     });
-    // 番号指定時は自動採番の一覧取得を行わない
     expect(list).not.toHaveBeenCalled();
     expect(exists).toHaveBeenCalledWith(expectedPath);
   });
@@ -299,7 +299,8 @@ describe("POST /api/upload-pdf 自動採番", () => {
     expect(upload).not.toHaveBeenCalled();
   });
 
-  // storage-js は重複時に { status: 409, statusCode: "409" } を返す（"Duplicate" は message 側）
+  // storage-js returns { status: 409, statusCode: "409" } on duplicates ("Duplicate" is only in
+  // message).
   it.each([
     ["status と statusCode の両方", { status: 409, statusCode: "409" }],
     ["statusCode のみ", { statusCode: "409" }],
@@ -405,7 +406,8 @@ describe("POST /api/upload-pdf アップロード後の存在確認", () => {
     expect(exists).not.toHaveBeenCalled();
   });
 
-  // path は storage-js が引数から組み立てて返すだけなので、サーバー由来の fullPath で検証する
+  // path is merely built from the argument by storage-js, so verify with the server-derived
+  // fullPath.
   it("upload() が想定と異なる fullPath を返した場合は失敗扱いとし、キーを返さない", async () => {
     const { exists } = mockStorage({
       uploadData: {
@@ -449,7 +451,7 @@ describe("POST /api/upload-pdf アップロード後の存在確認", () => {
     });
   });
 
-  // exists() は 400/404 以外の失敗（500・通信断など）を例外として投げる
+  // exists() throws on failures other than 400/404 (500, network loss).
   it("存在確認が例外を投げた場合もキーを返さない", async () => {
     mockStorage({ exists: new Error("network down") });
 

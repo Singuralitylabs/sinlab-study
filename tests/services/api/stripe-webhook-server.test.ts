@@ -2,8 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
-// TERMINAL_SUBSCRIPTION_STATUSES / ACTIVATABLE_SUBSCRIPTION_STATUSES（定数）は実物のまま使い、
-// getStripeClient() のみモックする
+// Keep the real status constants; mock only getStripeClient().
 vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/app/services/api/stripe-server")>()),
   getStripeClient: vi.fn(),
@@ -26,9 +25,6 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-// ----------------------------------------------------------------
-// activateUserFromCheckoutSession
-// ----------------------------------------------------------------
 describe("activateUserFromCheckoutSession", () => {
   const baseSession = {
     id: "cs_123",
@@ -48,7 +44,6 @@ describe("activateUserFromCheckoutSession", () => {
   it("既存行が無ければstripe_subscriptionsへINSERTし、usersをactive/generalに更新する", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
-        // 1回目: 既存行チェック（無し）、2回目: upsert
         stripe_subscriptions: { data: null, error: null },
         users: { data: [{ id: 1 }], error: null },
       },
@@ -108,7 +103,7 @@ describe("activateUserFromCheckoutSession", () => {
     expect(result.activated).toBe(true);
     const subBuilder = mockClient.from.mock.results[1].value;
     expect(subBuilder.update).toHaveBeenCalled();
-    // 確認した時点の所有状態が変わっていない場合だけ書き込む（CAS）
+    // Write only if the observed ownership state is unchanged (CAS).
     expect(subBuilder.is).toHaveBeenCalledWith("checkout_claimed_at", null);
     expect(subBuilder.eq).toHaveBeenCalledWith("stripe_subscription_id", "sub_123");
   });
@@ -132,7 +127,6 @@ describe("activateUserFromCheckoutSession", () => {
     expect(result.error).toBeNull();
     expect(result.activated).toBe(false);
     expect(result.currentPeriodEnd).toBeNull();
-    // 既存行チェックのみで、upsertは呼ばれない
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
 
@@ -158,8 +152,9 @@ describe("activateUserFromCheckoutSession", () => {
   });
 
   it("Checkout手続き中（claim済み）の行はリプレイ扱いせず、ミラーを更新して昇格する", async () => {
-    // claim行は stripe_subscription_id が無く status も番兵値のため、
-    // 「別の現行契約が記録済み」と誤判定すると今まさに完了したCheckoutの昇格ごと失われる
+    // A claim row has no stripe_subscription_id and a sentinel status; misreading it as "another
+    // current contract
+    // recorded" would lose the promotion of the Checkout that just completed.
     const mockClient = createMockSupabaseClient({
       tableResults: {
         stripe_subscriptions: [
@@ -186,7 +181,6 @@ describe("activateUserFromCheckoutSession", () => {
 
     expect(result.error).toBeNull();
     expect(result.activated).toBe(true);
-    // ミラー更新時に処理権（claim）も解除する
     const subBuilder = mockClient.from.mock.results[1].value;
     expect(subBuilder.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -195,12 +189,12 @@ describe("activateUserFromCheckoutSession", () => {
         checkout_session_id: null,
       })
     );
-    // 確認した処理権がそのまま残っている場合だけ解除する（CAS）
+    // Release only if the observed claim is still held (CAS).
     expect(subBuilder.eq).toHaveBeenCalledWith("checkout_claimed_at", "2026-08-10T00:00:00.000Z");
   });
 
   it("確認後に行が変わった場合は書き込まず、競合が解消しなければエラーを返す（再送に委ねる）", async () => {
-    // 条件付きUPDATEが0行＝確認から書き込みまでの間に処理権が動いた状況
+    // A conditional UPDATE matching 0 rows means the claim moved between check and write.
     const existing = {
       data: {
         stripe_subscription_id: "sub_123",
@@ -213,7 +207,6 @@ describe("activateUserFromCheckoutSession", () => {
     const noRowUpdated = { data: [], error: null };
     const mockClient = createMockSupabaseClient({
       tableResults: {
-        // 「確認 → 0行更新」を試行回数ぶん繰り返す
         stripe_subscriptions: [
           existing,
           noRowUpdated,
@@ -237,8 +230,9 @@ describe("activateUserFromCheckoutSession", () => {
   });
 
   it("進行中のCheckout（別セッションのclaim）は古いセッションのリプレイで解除されない", async () => {
-    // 解約済みユーザーが再度アップグレードを開始した直後に、古い成功ページURLを再訪した状況。
-    // ここでclaimを解除すると、まだ決済可能なセッションを残したまま次のCheckoutを作れてしまう
+    // Scenario: a canceled user starts upgrading again, then revisits an old success page URL.
+    // Releasing the claim
+    // here would let a next Checkout be created while a payable session remains.
     const mockClient = createMockSupabaseClient({
       tableResults: {
         stripe_subscriptions: {
@@ -261,7 +255,6 @@ describe("activateUserFromCheckoutSession", () => {
 
     expect(result.error).toBeNull();
     expect(result.activated).toBe(false);
-    // 既存行チェックのみで、upsert（＝claimの解除）は行われない
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
 
@@ -362,11 +355,13 @@ describe("activateUserFromCheckoutSession", () => {
 
       expect(result.error).toBeNull();
       expect(result.activated).toBe(false);
-      // 昇格しなかった場合、currentPeriodEndは（内部的にはStripeから取得済みでも）nullを返す
-      // 権限が変わっていないため、successページに実際の請求日を見せない
+      // When not promoted, currentPeriodEnd is null even if fetched from Stripe: entitlement is
+      // unchanged, so the
+      // success page must not show a real billing date.
       expect(result.currentPeriodEnd).toBeNull();
-      // 既存行チェック + upsertの2回のみで、usersへの更新は発生しない
-      // （解約後のsuccessページURL再訪・コンビニ払い等の未入金checkout完了での昇格を防ぐ）
+      // Only the existing-row check + upsert, no users update (prevents promotion via a revisited
+      // success URL after
+      // cancellation, or an unpaid checkout completion such as convenience-store payment).
       expect(mockClient.from).toHaveBeenCalledTimes(2);
     }
   );
@@ -434,7 +429,6 @@ describe("activateUserFromCheckoutSession", () => {
         tableResults: {
           stripe_subscriptions: [
             { data: pendingRow(heldClaimedAt), error: null },
-            // CAS（checkout_claimed_at = heldClaimedAt）が0行＝入れ替わった
             { data: [], error: null },
             { data: pendingRow("2026-09-26T02:00:00+00:00"), error: null },
           ],
@@ -450,15 +444,11 @@ describe("activateUserFromCheckoutSession", () => {
       });
 
       expect(result).toEqual({ error: null, activated: false, currentPeriodEnd: null });
-      // 読み取り → CAS失敗 → 読み直しで止まり、usersは更新しない
       expect(mockClient.from).toHaveBeenCalledTimes(3);
     });
   });
 });
 
-// ----------------------------------------------------------------
-// reactivateUserFromMirror
-// ----------------------------------------------------------------
 describe("reactivateUserFromMirror", () => {
   const liveSubscription = (status: string) => ({
     id: "sub_123",
@@ -491,8 +481,9 @@ describe("reactivateUserFromMirror", () => {
     expect(result).toEqual({ error: null, activated: true });
     expect(retrieve).toHaveBeenCalledWith("sub_123");
     const subBuilder = mockClient.from.mock.results[1].value;
-    // 読んだ時点と同じ契約・同じ状態・処理権なしのままの行だけを更新する（取得後に並行する
-    // 解約Webhookが書いた canceled を、古いスナップショットで上書きしない）
+    // Update only the row still on the same contract/state with no claim as read, so a stale
+    // snapshot doesn't
+    // overwrite a `canceled` written by a concurrent cancel webhook.
     expect(subBuilder.eq).toHaveBeenCalledWith("stripe_subscription_id", "sub_123");
     expect(subBuilder.eq).toHaveBeenCalledWith("status", "active");
     expect(subBuilder.is).toHaveBeenCalledWith("checkout_claimed_at", null);
@@ -602,9 +593,6 @@ describe("reactivateUserFromMirror", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// syncSubscriptionStatus
-// ----------------------------------------------------------------
 describe("syncSubscriptionStatus", () => {
   const makeSubscription = (status: string) => ({
     id: "sub_123",
@@ -613,9 +601,9 @@ describe("syncSubscriptionStatus", () => {
     items: { data: [{ current_period_end: 1750000000 }] },
   });
 
-  // Webhookイベントは到着順が保証されないため、イベントのスナップショットではなく
-  // Stripe APIから再取得したライブ状態を使う。テストでは再取得後の状態を
-  // mockGetStripeClient の引数で指定する
+  // Webhook delivery order isn't guaranteed, so use the live state re-fetched from Stripe, not the
+  // event
+  // snapshot. Tests set the re-fetched state via mockGetStripeClient.
   const mockGetStripeClient = (liveStatus: string) => {
     vi.mocked(getStripeClient).mockReturnValue({
       subscriptions: {
@@ -689,7 +677,6 @@ describe("syncSubscriptionStatus", () => {
   });
 
   it("イベントのスナップショットではなく、Stripe APIから再取得したライブ状態を書き込む（順序逆転対策）", async () => {
-    // イベント自体は古い"active"のスナップショットだが、再取得すると既に"canceled"
     mockGetStripeClient("canceled");
     const mockClient = createMockSupabaseClient({
       tableResults: {
@@ -706,7 +693,6 @@ describe("syncSubscriptionStatus", () => {
 
     const subBuilder = mockClient.from.mock.results[1].value;
     expect(subBuilder.update).toHaveBeenCalledWith(expect.objectContaining({ status: "canceled" }));
-    // 再取得結果が終端状態のため降格まで実行される
     const usersCalls = mockClient.from.mock.calls.filter(([table]) => table === "users");
     expect(usersCalls).toHaveLength(1);
   });
@@ -725,9 +711,6 @@ describe("syncSubscriptionStatus", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// revertUserToTrial
-// ----------------------------------------------------------------
 describe("revertUserToTrial", () => {
   it("membership_type='general'の行のみを対象にUPDATEする", async () => {
     const mockClient = createMockSupabaseClient({
@@ -758,13 +741,11 @@ describe("revertUserToTrial", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// claimEvent / releaseEventClaim
-//
-// event.idへの素のINSERTを「claim」として使う（upsertではないため、同一event.idの
-// 並行リクエストは一意制約により片方だけが成功する＝原子的な排他制御になる）。
-// ハンドラ失敗時のみreleaseEventClaimで解放し、Stripeの再送が再度claimできるようにする。
-// ----------------------------------------------------------------
+// claimEvent uses a plain INSERT on event.id as the claim (not upsert), so of concurrent requests
+// with the same
+// event.id only one succeeds via the unique constraint. releaseEventClaim frees it only on handler
+// failure so a
+// Stripe retry can claim again.
 describe("claimEvent", () => {
   it("未処理のイベントの場合、claimに成功しclaimed=trueを返す", async () => {
     const mockClient = createMockSupabaseClient({
@@ -786,7 +767,6 @@ describe("claimEvent", () => {
   it("既にclaim済み（一意制約違反）でTTL内の場合、再claimせずclaimed=falseをエラー無しで返す", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
-        // 1回目: INSERTが一意制約違反、2回目: 再claim UPDATEが対象0行（TTL内のため）
         stripe_events: [
           { data: null, error: { message: "duplicate key", code: "23505" } },
           { data: [], error: null },

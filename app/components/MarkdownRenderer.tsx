@@ -14,19 +14,19 @@ import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
 import { cn } from "@/lib/utils";
 
-// "use client" を持たない共有コンポーネント。hooksやNode専用APIを使わないため、
-// Server Component（learn/demo の page.tsx）からはサーバーで、
-// Client Component（AIReviewDisplay）からはクライアントバンドルに含まれてクライアントで、
-// それぞれ同じ実装のまま描画される。
-// react-markdown はデフォルトで生HTMLタグをレンダリングしない
-// （rehype-raw 未導入のため、Markdown中の <script> 等は常にエスケープされたテキストとして表示される）
-// ため、追加のサニタイズは行わない。
+// Shared component without "use client": no hooks or Node-only APIs, so the same implementation
+// renders on the
+// server (learn/demo page.tsx) and on the client (AIReviewDisplay, bundled there).
+// react-markdown doesn't render raw HTML by default (no rehype-raw), so <script> etc. in Markdown
+// is always
+// escaped text; no extra sanitizing is done.
 
-// バンドルサイズ抑制のため、対応言語をこの講座で使う範囲に限定して個別importする。
-// rehype-highlightパッケージは既定でlowlightのcommon（37言語）を無条件にimportするため、
-// languagesオプションで絞ってもバンドルには全言語が含まれてしまう。そのためlowlightを直接
-// 利用し、登録した言語のみがバンドルに含まれる最小限のrehypeプラグインを自前で実装する。
-// GAS（Google Apps Script）はJavaScriptベースのため、javascriptの別名として扱う。
+// Import only the languages this course uses, individually, to limit bundle size. rehype-highlight
+// always
+// imports lowlight's common set (37 languages), so the languages option wouldn't shrink the bundle;
+// use lowlight
+// directly with a minimal own rehype plugin so only registered languages are bundled.
+// GAS (Google Apps Script) is JavaScript-based, so alias it to javascript.
 const lowlight = createLowlight({ html, css, javascript, typescript, python, json, bash });
 lowlight.registerAlias({
   html: ["xml"],
@@ -51,8 +51,9 @@ function getFenceLanguage(node: Element): string | undefined {
   return undefined;
 }
 
-// fenced code block（`pre > code`）にのみハイライトを適用し、インラインコードは対象外とする。
-// 言語未指定・未登録言語（lowlightに存在しない）のコードブロックはプレーン表示のまま変更しない。
+// Highlight only fenced code blocks (`pre > code`), not inline code. Blocks with no or an
+// unregistered language
+// stay plain.
 function rehypeHighlightSubset() {
   return (tree: Root) => {
     visit(tree, "element", (node, _index, parent) => {
@@ -80,13 +81,13 @@ function rehypeHighlightSubset() {
           prefix: "hljs-",
         });
       } catch {
-        // highlight.js内部の文法バグ等で例外が投げられた場合、ページ全体を巻き込んで
-        // 落ちないよう、ハイライトを諦めてプレーン表示のまま描画する
+        // If highlight.js throws (e.g. an internal grammar bug), give up highlighting and render
+        // plain rather than
+        // crash the whole page.
         return;
       }
 
       node.properties.className.unshift("hljs");
-      // lowlightの出力は常にhast要素・テキストのみ（DoctypeやCommentは生成されない）
       node.children = result.children as ElementContent[];
     });
   };
@@ -97,8 +98,9 @@ interface MarkdownRendererProps {
   className?: string;
 }
 
-// content・classNameが変化しない限り再描画・再ハイライトをスキップする
-// （AIReviewDisplayでは、フォームの他状態が更新されるたびに親が再描画されるため）
+// Skip re-render/re-highlight unless content/className change (in AIReviewDisplay the parent
+// re-renders on
+// every other form state update).
 export const MarkdownRenderer = memo(function MarkdownRenderer({
   content,
   className,

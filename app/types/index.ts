@@ -1,11 +1,6 @@
 import type { Tables } from "./lib/database.types";
 
-// Re-export database types utility
 export type { Database, Json, Tables, TablesInsert, TablesUpdate } from "./lib/database.types";
-
-// =====================================================
-// Base types derived from database schema
-// =====================================================
 
 export type UserType = Tables<"users"> & {
   role: UserRoleType;
@@ -44,34 +39,26 @@ export type AIReview = Tables<"ai_reviews"> & {
   status: AIReviewStatus;
 };
 
-// =====================================================
-// Enum-like types (narrower than DB string type)
-// =====================================================
-
 export type UserStatusType = "trial" | "active" | "rejected";
 export type UserRoleType = "admin" | "maintainer" | "member";
-/** 承認済みユーザーの会員種別。承認前・却下ユーザーは null */
+/** null for unapproved and rejected users. */
 export type MembershipType = "community" | "general";
 export type ContentType = "video" | "text" | "exercise" | "slide";
 export type SubmissionType = "code" | "url";
 export type AIReviewStatus = "pending" | "processing" | "completed" | "failed";
 
 /**
- * 複数ファイル提出の1ファイル分（submissions.code_files の各要素）。
- * 単一ファイル提出（code_content）との後方互換のため、language/filename は空文字を許容する。
- *
- * （interface ではなく type で定義する: Supabase 生成の Json 型へ代入する際に
- * 暗黙のインデックスシグネチャが必要なため）
+ * One file of a multi-file submission (submissions.code_files element). language/filename may be
+ * empty for
+ * compatibility with single-file submissions (code_content).
+ * Defined as `type`, not `interface`: assigning to Supabase's Json type needs an implicit index
+ * signature.
  */
 export type CodeFile = {
   filename: string;
   language: string;
   content: string;
 };
-
-// =====================================================
-// Extended types with relations
-// =====================================================
 
 export interface LearningPhaseWithTheme extends LearningPhase {
   theme: LearningTheme | null;
@@ -85,7 +72,6 @@ export interface LearningContentWithWeek extends LearningContent {
   week: LearningWeekWithPhase | null;
 }
 
-/** コンテンツ一覧用（本文・演習指示・模範解答・ヒント等の重いカラムを含まない） */
 export type LearningContentListItem = Pick<
   LearningContent,
   | "id"
@@ -102,10 +88,6 @@ export type LearningContentListItem = Pick<
   | "updated_at"
 >;
 
-/**
- * 管理画面一覧用のカラム絞り込み型（#196）。
- * `fetchAllThemes` / `fetchAllPhases` / `fetchAllWeeks` / `fetchAllContents` が返す形に合わせる。
- */
 export type ManageThemeListItem = Pick<
   LearningTheme,
   "id" | "name" | "description" | "image_url" | "display_order" | "is_published"
@@ -142,22 +124,18 @@ export type ManageContentListItem = Pick<
   week: ManageWeekListItem | null;
 };
 
-/** コンテンツ挿入位置ピッカー用の兄弟候補（#196） */
 export type ContentSiblingCandidateRow = Pick<
   LearningContent,
   "id" | "title" | "display_order" | "is_published" | "week_id"
 >;
 
-/** ユーザー管理一覧用（#196。ページネーションは追加しない） */
 export type ManageUserListItem = Pick<
   UserType,
   "id" | "display_name" | "email" | "role" | "status" | "membership_type" | "created_at"
 >;
 
-/** パンくず・所属判定用のテーマ（ネスト取得の最小セット） */
 export type BreadcrumbTheme = Pick<LearningTheme, "id" | "name" | "is_published" | "is_deleted">;
 
-/** パンくず・所属判定用のフェーズ */
 export type BreadcrumbPhase = Pick<
   LearningPhase,
   "id" | "theme_id" | "name" | "is_published" | "is_deleted"
@@ -165,7 +143,6 @@ export type BreadcrumbPhase = Pick<
   theme: BreadcrumbTheme | null;
 };
 
-/** パンくず・所属判定用の週 */
 export type BreadcrumbWeek = Pick<
   LearningWeek,
   "id" | "phase_id" | "name" | "is_published" | "is_deleted"
@@ -173,12 +150,10 @@ export type BreadcrumbWeek = Pick<
   phase: BreadcrumbPhase | null;
 };
 
-/** 週詳細（本体は全カラム、親フェーズ/テーマはパンくず用） */
 export type LearningWeekWithBreadcrumb = LearningWeek & {
   phase: BreadcrumbPhase | null;
 };
 
-/** コンテンツ詳細（本体は全カラム、親階層はパンくず用） */
 export type LearningContentWithBreadcrumb = LearningContent & {
   week: BreadcrumbWeek | null;
 };
@@ -190,26 +165,19 @@ export interface SubmissionWithContent extends Submission {
   > | null;
 }
 
-/** 提出一覧表示用の ai_reviews（token 等のメタは含めない） */
 export type AIReviewListItem = Pick<
   AIReview,
   "id" | "status" | "overall_score" | "review_content" | "reviewed_at" | "error_message"
 >;
 
-/** 受講生向け提出+レビュー一覧（content / ai_review は一覧表示用の最小カラムのみ） */
 export interface SubmissionWithContentAndReview extends Submission {
   content: Pick<LearningContent, "id" | "title"> | null;
   ai_review: AIReviewListItem | null;
 }
 
-/** 管理者・講師向け提出一覧の1件（受講生一覧＋提出者情報） */
 export interface AdminSubmissionWithReview extends SubmissionWithContentAndReview {
   user: Pick<UserType, "id" | "display_name" | "email"> | null;
 }
-
-// =====================================================
-// Progress summary types
-// =====================================================
 
 export interface ThemeProgress {
   theme: LearningTheme;

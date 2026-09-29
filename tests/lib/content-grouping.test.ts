@@ -110,8 +110,9 @@ const week1 = makeWeek({ id: 1, phase_id: 1, name: "週1", display_order: 2, pha
 const week2 = makeWeek({ id: 2, phase_id: 1, name: "週2", display_order: 1, phase: phase1 });
 const week3 = makeWeek({ id: 3, phase_id: 2, name: "週3", display_order: 1, phase: phase2 });
 
-// display_order はアプリの型では number（非null）だが、DBのカラム自体はNOT NULL制約が
-// ないため実行時には null が来うる。その回帰テスト用に意図的に型を偽装したフィクスチャ。
+// display_order is number (non-null) in app types, but the DB column has no NOT NULL, so null can
+// occur at
+// runtime. Fixture with a deliberately forged type for that regression.
 const themeWithNullOrder = {
   id: 3,
   name: "テーマ(順序未設定)",
@@ -145,8 +146,6 @@ describe("sortContentsByHierarchy", () => {
 
     const sorted = sortContentsByHierarchy([contentA, contentB, contentC]);
 
-    // week2(display_order:1) が week1(display_order:2) より先、
-    // かつ theme1 配下(week1, week2) が theme2 配下(week3) より先
     expect(sorted.map((c) => c.id)).toEqual([2, 1, 3]);
   });
 
@@ -208,9 +207,9 @@ describe("sortContentsByHierarchy", () => {
   });
 
   it("テーマ・フェーズの display_order が同値でも、id タイブレークにより別の親同士のコンテンツが混在しない", () => {
-    // 新規作成フォームの display_order 初期値は0のため、テーマ・フェーズ間で同値が揃うのは
-    // 珍しくない。このとき週・コンテンツ自身の display_order だけで比較すると、
-    // 本来別グループのコンテンツ同士が混在してしまう回帰を防ぐ
+    // The create form's default display_order is 0, so ties across themes/phases are common.
+    // Comparing only by the
+    // week/content display_order would interleave contents of different groups (regression guard).
     const themeX = { ...theme1, id: 10, display_order: 0 };
     const themeY = { ...theme1, id: 20, display_order: 0 };
     const phaseX = { ...phase1, id: 10, theme_id: 10, display_order: 0, theme: themeX };
@@ -222,15 +221,15 @@ describe("sortContentsByHierarchy", () => {
 
     const sorted = sortContentsByHierarchy([contentY, contentX]);
 
-    // themeX(id10) が themeY(id20) よりidタイブレークで先。週のdisplay_order（weekY:1 < weekX:5）
-    // だけで比較すると誤って contentY が先に来てしまう
+    // themeX(id10) precedes themeY(id20) via the id tiebreak; comparing only by the week
+    // display_order
+    // (weekY:1 < weekX:5) would wrongly put contentY first.
     expect(sorted.map((c) => c.id)).toEqual([10, 20]);
   });
 });
 
 describe("sortWeeksByHierarchy", () => {
   it("テーマ→フェーズ→週の display_order 順に並び替える", () => {
-    // week3(theme2配下) → week2・week1(theme1配下、週のdisplay_orderは2→1の逆順で並べる)
     const sorted = sortWeeksByHierarchy([week3, week1, week2]);
 
     expect(sorted.map((w) => w.id)).toEqual([2, 1, 3]);
@@ -282,8 +281,9 @@ describe("sortWeeksByHierarchy", () => {
 
     const sorted = sortWeeksByHierarchy([weekY, weekX]);
 
-    // themeX(id10) が themeY(id20) よりidタイブレークで先。週自身のdisplay_order
-    // （weekY:1 < weekX:5）だけで比較すると誤って weekY が先に来てしまう
+    // themeX(id10) precedes themeY(id20) via the id tiebreak; comparing only by the week's own
+    // display_order
+    // (weekY:1 < weekX:5) would wrongly put weekY first.
     expect(sorted.map((w) => w.id)).toEqual([10, 20]);
   });
 });
@@ -338,8 +338,6 @@ describe("sortPhasesByHierarchy", () => {
 
     const sorted = sortPhasesByHierarchy([phaseC, phaseA, phaseB]);
 
-    // phaseB(theme1, display_order:1) が phaseA(theme1, display_order:2) より先、
-    // かつ theme1 配下(phaseA, phaseB) が theme2 配下(phaseC) より先
     expect(sorted.map((p) => p.id)).toEqual([12, 11, 13]);
   });
 
@@ -388,8 +386,9 @@ describe("sortPhasesByHierarchy", () => {
 
     const sorted = sortPhasesByHierarchy([phaseY, phaseX]);
 
-    // themeX(id10) が themeY(id20) よりidタイブレークで先。フェーズ自身のdisplay_order
-    // （phaseY:1 < phaseX:5）だけで比較すると誤って phaseY が先に来てしまう
+    // themeX(id10) precedes themeY(id20) via the id tiebreak; comparing only by the phase's own
+    // display_order
+    // (phaseY:1 < phaseX:5) would wrongly put phaseY first.
     expect(sorted.map((p) => p.id)).toEqual([100, 200]);
   });
 });
@@ -460,8 +459,9 @@ describe("groupPhasesByTheme", () => {
 
     const groups = groupPhasesByTheme([phaseWithBlankThemeName]);
 
-    // テーマ自体は設定されているためグルーピングキーはテーマidのまま（「未分類」グループには
-    // 統合されない）が、ラベルは名前が空白のみのため「未分類」表示になる
+    // The theme is set, so the group key stays the theme id (not merged into the unclassified
+    // group), but the
+    // label falls back to unclassified because the name is whitespace-only.
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({ key: "30", label: "未分類" });
   });
@@ -541,13 +541,14 @@ describe("resolveSiblingResequence", () => {
   });
 
   it("display_orderが重複・欠落した既存兄弟も1からの連番に再採番される（idタイブレークで確定順序）", () => {
-    // 新規作成フォームの display_order 初期値0の連発や、DB上NULLの回帰と同じ状況を再現
+    // Reproduces repeated default 0 from the create form and NULL in the DB.
     const siblings = [row(30, 0), row(10, 0), row(20, null)];
 
     const result = resolveSiblingResequence(siblings, null);
 
-    // compareGroupLevelの並び: display_order昇順（0, 0, null=Infinity）→ 同値はidタイブレーク
-    // なので並び順は id10(0) → id30(0) → id20(null)。先頭挿入のため全兄弟が1つずつ後ろにずれる
+    // compareGroupLevel order: display_order ascending (0, 0, null=Infinity), ties by id, so
+    // id10(0) -> id30(0) ->
+    // id20(null). Inserting at the head shifts every sibling by one.
     expect(result.updates).toEqual(
       expect.arrayContaining([
         { id: 10, display_order: 2 },
@@ -590,7 +591,6 @@ describe("resolveSiblingRenumber", () => {
   });
 
   it("欠番がある場合、並び順を保ったまま1からの連番に詰め直す", () => {
-    // 親変更でid=20が抜けた後の残存兄弟（display_orderが1と3で欠番）を想定
     const siblings = [row(10, 1), row(30, 3)];
 
     expect(resolveSiblingRenumber(siblings)).toEqual([{ id: 30, display_order: 2 }]);
@@ -599,7 +599,6 @@ describe("resolveSiblingRenumber", () => {
   it("display_orderが同値の場合はidでタイブレークして並び順を決める（resolveSiblingResequenceと同じ規則）", () => {
     const siblings = [row(30, 1), row(10, 1)];
 
-    // id昇順（10, 30）でタイブレークされ、id=10が1のまま・id=30が2にずれる
     expect(resolveSiblingRenumber(siblings)).toEqual([{ id: 30, display_order: 2 }]);
   });
 

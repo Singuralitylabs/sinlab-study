@@ -1,11 +1,12 @@
 /**
- * コンテンツ管理APIの `storageRemoved`（スライドPDFの Storage 削除結果）を画面の警告文へ変換する
- * （issue #241）。
- *
- * API は Storage の削除失敗では DB 操作を失敗させず、`{ success: true, storageRemoved: false }`
- * を返す（機能設計書 6.1）。DB 側の操作は成立しているため画面は成功扱いのまま、
- * スライドPDFが Storage に残っている旨を警告する（`ThemeForm` のサムネイル削除と同じ扱い）。
- * `storageRemoved` が無い・`true` の応答では警告しない。
+ * Converts the content-management API's `storageRemoved` (Storage deletion result of the slide PDF)
+ * into a screen
+ * warning (#241). The API doesn't fail the DB operation on a Storage deletion failure; it returns
+ * { success: true, storageRemoved: false } (spec 6.1). The DB operation succeeded, so the screen
+ * stays in the
+ * success state and warns that the slide PDF remains in Storage (same as ThemeForm's thumbnail
+ * deletion).
+ * No warning when storageRemoved is missing or true.
  */
 
 export type SlideStorageOperation = "delete" | "update" | "bulkDelete";
@@ -19,7 +20,6 @@ const SLIDE_STORAGE_WARNINGS: Record<SlideStorageOperation, string> = {
     "コンテンツを削除しましたが、一部のスライドPDFの削除に失敗したため、ストレージ上にファイルが残っている可能性があります",
 };
 
-/** API レスポンスの JSON が Storage 削除の失敗（`storageRemoved: false`）を示しているか */
 export function isSlideStorageRemovalFailed(data: unknown): boolean {
   return (
     typeof data === "object" &&
@@ -28,7 +28,6 @@ export function isSlideStorageRemovalFailed(data: unknown): boolean {
   );
 }
 
-/** Storage 削除に失敗していれば警告文を、そうでなければ null を返す */
 export function getSlideStorageWarning(
   data: unknown,
   operation: SlideStorageOperation

@@ -29,7 +29,6 @@ import {
 const SELECT_CLASS_NAME =
   "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs";
 
-/** 一覧フィルタからの引き継ぎ（作成モードのみ）や編集時の初期選択に使う、週選択カスケードの初期値 */
 interface InitialWeekSelection {
   themeId?: string;
   phaseId?: string;
@@ -43,19 +42,17 @@ interface ContentFormProps {
   initialData?: LearningContent;
   initialWeekSelection?: InitialWeekSelection;
   /**
-   * 挿入位置ピッカーに表示する全コンテンツ候補。作成モードは対象そのもの、編集モードは
-   * 編集対象自身を含む一覧を渡す（自分自身の現在位置を求めるため。表示直前にフォーム内で
-   * 自分自身を除く）。
+   * Includes the target itself in edit mode so its current position can be found; filtered out in
+   * the form before display.
    */
   siblingCandidates?: SiblingCandidate[];
   mode: "create" | "edit";
 }
 
 /**
- * 週IDからテーマ・フェーズを逆引きし、カスケードセレクトの初期選択状態を求める。
- * 週が選択肢に存在しない場合（未分類・削除済み等）はテーマ・フェーズの初期選択は行わない
- * （週セレクトの値だけは保持し、既存の週の値を保存し直せるようにする。呼び出し側で
- * 作成モードのクエリ値は事前に選択肢の存在チェック済みであることを前提とする）。
+ * Reverse-lookup of theme/phase from a week id. If the week is missing from the options
+ * (unclassified/deleted),
+ * skip theme/phase preselection but keep the week value so it can be re-saved.
  */
 function resolveWeekSelection(
   weekId: string,
@@ -75,9 +72,9 @@ function resolveWeekSelection(
 }
 
 /**
- * 週セレクトの選択肢ラベル。テーマ・フェーズ未選択のまま週を直接選べる仕様のため、
- * 絞り込まれていない親階層（テーマ／フェーズ）の名前を「テーマ / フェーズ / 週」の形で
- * ラベルに含め、テーマ・フェーズが異なる同名週を区別できるようにする。
+ * Labels include the unfiltered parent names because a week can be picked without choosing
+ * theme/phase;
+ * this disambiguates same-named weeks.
  */
 function buildWeekOptionLabel(
   week: WeekFilterOption,
@@ -141,11 +138,11 @@ export function ContentForm({
 
   const [title, setTitle] = useState(initialData?.title ?? "");
 
-  // 編集モードは initialData.week_id から週セレクトの初期値を得る（週が未分類・削除済みで
-  // 選択肢に存在しない場合も、送信時に既存の値を壊さないよう値だけは保持する）。
-  // 作成モードは一覧フィルタからの引き継ぎ（initialWeekSelection、URLクエリ由来）を使うが、
-  // 選択肢に実在しない値をそのまま状態に残すと、見た目は未選択なのに送信可能になってしまう
-  // ため、テーマ・フェーズ・週のいずれも選択肢に存在する場合のみ採用する。
+  // Edit mode keeps initialData.week_id even if it is not in the options so saving doesn't clobber
+  // it.
+  // Create mode adopts the query-derived selection only when theme, phase and week all exist;
+  // otherwise the
+  // form would look unselected yet be submittable.
   const initialWeekIdValue =
     mode === "edit"
       ? (initialData?.week_id?.toString() ?? "")
@@ -157,9 +154,9 @@ export function ContentForm({
     mode === "create" && themes.some((t) => String(t.id) === initialWeekSelection?.themeId)
       ? (initialWeekSelection?.themeId ?? "")
       : "";
-  // フェーズは選択肢に存在するだけでなく、採用済みのテーマ配下であることも検証する
-  // （例: ?theme=1&phase=2 のように、実在はするが互いに不整合なクエリを渡された場合、
-  // テーマ1を表示したままテーマ2配下の週が絞り込まれてしまうのを防ぐ）
+  // The phase must also belong to the adopted theme; a query like ?theme=1&phase=2 can be
+  // individually
+  // valid but inconsistent.
   const initialPhaseIdFallback =
     mode === "create" &&
     phases.some(
@@ -185,8 +182,9 @@ export function ContentForm({
       ? getCurrentPositionInsertAfterId(initialData.id, allSiblingsForWeek)
       : getDefaultInsertAfterId(allSiblingsForWeek)
   );
-  // 編集時、週・位置のいずれも操作していない場合に送信ボディから insert_after_id を
-  // 省略するための初期値（PUT側は省略時に表示順を変更しない）
+  // Omit insert_after_id from the PUT body when neither week nor position was touched (the server
+  // then
+  // leaves display order alone).
   const initialInsertAfterId = useRef(insertAfterId);
 
   const [contentType, setContentType] = useState<ContentType>(initialData?.content_type ?? "video");
@@ -204,12 +202,12 @@ export function ContentForm({
   const [codeLanguage, setCodeLanguage] = useState<CodeLanguage>(
     (initialData?.code_language as CodeLanguage) ?? "javascript"
   );
-  // 保存値はオブジェクトキーのみ（issue #89）。旧形式の公開URLが初期値に残っていても
-  // そのまま再保存せず、キーへ正規化した値を持つ。正規化できない値（外部URL等）は空扱いになるが、
-  // その場合は requiresSlidePdf（initialData.pdf_url が truthy）により再アップロードするまで
-  // 保存できないため、値が黙って消えることはない
+  // Only the object key is stored (#89). Legacy public URLs are normalized to a key; unnormalizable
+  // values
+  // become empty, but requiresSlidePdf (initialData.pdf_url truthy) blocks saving until re-upload,
+  // so values
+  // never vanish silently.
   const initialPdfKey = toSlideObjectKey(initialData?.pdf_url);
-  // 命名規約に沿ったキーならコーススラッグと番号をフォームの初期値にする（規約外なら空）
   const initialSlide = parseSlideObjectKey(initialPdfKey);
   const [pdfUrl, setPdfUrl] = useState(initialPdfKey ?? "");
   const [pdfFolder, setPdfFolder] = useState(initialSlide?.folder ?? "");
@@ -224,8 +222,6 @@ export function ContentForm({
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [pdfFileName, setPdfFileName] = useState<string | null>(initialPdfKey);
 
-  // フェーズは選択中のテーマ配下のみ、週は選択中のフェーズ（未選択ならテーマ）配下のみに絞る
-  // （ContentsFilterBar と同じロジック）
   const visiblePhases = phases.filter((p) => !themeId || String(p.themeId) === themeId);
   const visiblePhaseIds = new Set(visiblePhases.map((p) => p.id));
   const visibleWeeks = weeks.filter((w) => {
@@ -250,9 +246,9 @@ export function ContentForm({
   function handleWeekChange(value: string) {
     setWeekId(value);
     const newSiblingsForValue = siblingCandidates.filter((c) => String(c.parentId) === value);
-    // 元の週に選び直した場合は現在位置に戻す（末尾リセットのままだと、テーマ・フェーズの
-    // セレクトを触って週が一旦クリアされ、同じ週を選び直しただけで意図せず末尾へ
-    // 移動してしまう）
+    // Re-selecting the original week restores the current position; otherwise clearing the week via
+    // the
+    // theme/phase selects and picking it again would move the item to the tail.
     if (mode === "edit" && initialData && value === initialWeekId) {
       setInsertAfterId(getCurrentPositionInsertAfterId(initialData.id, newSiblingsForValue));
       return;
@@ -324,17 +320,19 @@ export function ContentForm({
     }
   };
 
-  // スライドのPDFが必要なのは「新規作成」と「既にPDFがある既存コンテンツ」。
-  // 編集時に一律で必須にすると、一括操作で slide 種別へ変更された pdf_url が空の既存
-  // コンテンツを、タイトル修正や種別の戻しすら保存できなくなる
+  // A slide PDF is required for create and for rows that already have one. Requiring it on every
+  // edit would
+  // block fixing the title or reverting the type of rows bulk-changed to slide with an empty
+  // pdf_url.
   const requiresSlidePdf = mode === "create" || Boolean(initialData?.pdf_url);
   const isSlidePdfMissing = contentType === "slide" && requiresSlidePdf && !pdfUrl.trim();
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    // アップロード未完了・失敗のまま保存すると、実体の無い pdf_url を持つコンテンツができる。
-    // 送信ボタンの disabled 条件が変わっても保存を止められるよう、ここでも同じ条件で弾く
+    // Saving with an unfinished/failed upload would store a pdf_url with no object. Guard here too,
+    // in case
+    // the submit button's disabled condition changes.
     if (isUploading) {
       setMessage({ type: "error", text: "アップロードの完了をお待ちください" });
       return;
@@ -384,11 +382,11 @@ export function ContentForm({
         const data: unknown = await response.json().catch(() => null);
         const warning = mode === "edit" ? getSlideStorageWarning(data, "update") : null;
         if (warning) {
-          // 更新自体は成功している。pdf_url の差し替え・種別変更で旧スライドPDFが Storage に
-          // 残ったことを知らせるため、一覧へ遷移せずこの画面に警告を出す（issue #241）
+          // The update itself succeeded; stay on this screen to warn that the old slide PDF
+          // remained in Storage (#241).
           setMessage({ type: "error", text: warning });
-          // 保存済みの位置を新たな初期値とし、そのまま再保存しても insert_after_id を再送して
-          // 再採番が走らないようにする（週は refresh 後の initialData.week_id から再導出される）
+          // Adopt the saved position as the new baseline so re-saving doesn't resend
+          // insert_after_id and trigger renumbering.
           initialInsertAfterId.current = insertAfterId;
           router.refresh();
           return;
@@ -414,7 +412,6 @@ export function ContentForm({
     <form onSubmit={handleSubmit}>
       <Card>
         <CardContent className="space-y-6 pt-6">
-          {/* タイトル */}
           <div className="space-y-2">
             <Label htmlFor="title">タイトル</Label>
             <Input
@@ -426,7 +423,6 @@ export function ContentForm({
             />
           </div>
 
-          {/* テーマ→フェーズ→週の連動セレクト（テーマ・フェーズは絞り込み用、必須は週のみ） */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="space-y-2">
               <Label htmlFor="themeId">テーマ</Label>
@@ -481,7 +477,6 @@ export function ContentForm({
             </div>
           </div>
 
-          {/* コンテンツ種別 */}
           <div className="space-y-2">
             <Label>コンテンツ種別</Label>
             <div className="flex gap-2">
@@ -500,10 +495,7 @@ export function ContentForm({
                 </button>
               ))}
             </div>
-            {/* 既存PDFを持つ行を他種別へ変更して保存すると、紐づくPDFはストレージから
-                完全削除される（孤児化を防ぐため。戻してもPDFは復元されない）。
-                一括操作で種別変更済みの行（pdf_url が残ったまま）も対象のため、
-                初期種別は問わず pdf_url の有無で判定する */}
+            {/* Changing a row that has a PDF to another type deletes the PDF from Storage (avoids orphans; not restored on revert). Bulk-changed rows keep pdf_url, so decide by pdf_url presence, not the initial type. */}
             {mode === "edit" && Boolean(initialData?.pdf_url) && contentType !== "slide" && (
               <p className="text-xs text-destructive">
                 他の種別に変更して保存すると、紐づくスライドPDFはストレージから完全に削除されます。スライドに戻す場合はPDFの再アップロードが必要です。
@@ -511,7 +503,6 @@ export function ContentForm({
             )}
           </div>
 
-          {/* 概要（video / slide のみ。詳細ページのプレイヤー／ビューア下部に表示） */}
           {(contentType === "video" || contentType === "slide") && (
             <div className="space-y-2">
               <Label htmlFor="description">概要（Markdown・任意）</Label>
@@ -525,7 +516,6 @@ export function ContentForm({
             </div>
           )}
 
-          {/* 種別ごとの入力フィールド */}
           {contentType === "video" && (
             <div className="space-y-2">
               <Label htmlFor="videoUrl">YouTube URL</Label>
@@ -554,7 +544,6 @@ export function ContentForm({
 
           {contentType === "slide" && (
             <div className="space-y-3">
-              {/* 保存先フォルダ・スライド番号 */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="pdfFolder">保存先フォルダ（コーススラッグ）</Label>
@@ -704,7 +693,6 @@ export function ContentForm({
             </>
           )}
 
-          {/* 挿入位置 */}
           <SiblingOrderField
             siblings={weekId ? visibleSiblings : null}
             insertAfterId={insertAfterId}
@@ -712,7 +700,6 @@ export function ContentForm({
             placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
           />
 
-          {/* 公開設定 */}
           <div className="flex items-center gap-2">
             <input
               id="isPublished"
@@ -724,7 +711,6 @@ export function ContentForm({
             <Label htmlFor="isPublished">公開する</Label>
           </div>
 
-          {/* お試し公開設定 */}
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <input
@@ -741,7 +727,6 @@ export function ContentForm({
             </p>
           </div>
 
-          {/* メッセージ */}
           {message && (
             <Alert variant={message.type === "error" ? "destructive" : "default"}>
               <AlertDescription className={message.type === "success" ? "text-success" : ""}>
@@ -750,7 +735,6 @@ export function ContentForm({
             </Alert>
           )}
 
-          {/* 送信ボタン */}
           <div className="flex gap-3">
             <Button
               type="submit"

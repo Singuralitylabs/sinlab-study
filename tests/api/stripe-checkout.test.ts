@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/auth/server-auth");
-// 定数（メッセージ等）は実物のまま使い、副作用のある関数のみモックする
+// Keep the real constants (messages etc.) and mock only side-effecting functions.
 vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/app/services/api/stripe-server")>()),
   claimCheckoutSlot: vi.fn(),
@@ -10,7 +10,7 @@ vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
   isStripeEnabled: vi.fn(),
   releaseCheckoutSlot: vi.fn(),
 }));
-// extractUserId（純粋関数）は実物のまま使い、反映処理のみモックする
+// Keep the pure extractUserId real and mock only the apply logic.
 vi.mock("@/app/services/api/stripe-webhook-server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/app/services/api/stripe-webhook-server")>()),
   activateUserFromCheckoutSession: vi.fn(),
@@ -146,12 +146,12 @@ describe("POST /api/stripe/checkout", () => {
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toEqual({ error: "既に決済手続き中、またはご契約済みです" });
     expect(createCheckoutSessionForUser).not.toHaveBeenCalled();
-    // 自分が確保したものではない処理権を解放しない
+    // Don't release a claim that this request didn't acquire.
     expect(releaseCheckoutSlot).not.toHaveBeenCalled();
   });
 
   it("同一ユーザーの並行リクエストでは1つだけがCheckoutセッションを作成できる", async () => {
-    // 実DBのUNIQUE制約に相当する挙動（先着1件のみclaim成功）をモックで再現する
+    // Mocks the real DB's UNIQUE-constraint behavior (only the first claim succeeds).
     vi.mocked(claimCheckoutSlot)
       .mockResolvedValueOnce({ outcome: "claimed", claimedAt, stripeCustomerId: null })
       .mockResolvedValue({ outcome: "conflict" });
@@ -241,7 +241,6 @@ describe("POST /api/stripe/checkout", () => {
 
 describe("POST /api/stripe/checkout（決済済みのまま反映されていない処理権の自己復旧 #250）", () => {
   const heldClaimedAt = "2026-09-20T00:00:00+00:00";
-  /** 処理権が保持している決済済みセッション（本人のもの） */
   const paidSession = {
     id: "cs_paid",
     status: "complete",
@@ -271,7 +270,7 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/xxx" });
-    // 並行リクエストが確保し直した処理権を解除しないよう、観測した処理権を渡す
+    // Pass the observed claim so a claim re-acquired by a concurrent request isn't released.
     expect(activateUserFromCheckoutSession).toHaveBeenCalledWith(paidSession, {
       expectedClaimedAt: heldClaimedAt,
     });
@@ -317,11 +316,12 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
 
     const res = await POST();
 
-    // エラー表示ではなく通常の遷移として扱えるよう200でURLを返す（successページは冪等に同じ
-    // 反映を行い、次回請求日つきの完了画面を出す）
+    // Return the URL with 200 so it is handled as a normal redirect, not an error (the success page
+    // applies the same
+    // idempotent promotion and shows the completion screen with the next billing date).
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "/upgrade/success?session_id=cs_paid" });
-    // 有効な契約がある状態で再claim・新しいセッション作成をしない（二重契約の防止）
+    // No re-claim or new session while a live contract exists (prevents double contracts).
     expect(claimCheckoutSlot).toHaveBeenCalledTimes(1);
     expect(createCheckoutSessionForUser).not.toHaveBeenCalled();
     expect(releaseCheckoutSlot).not.toHaveBeenCalled();
@@ -356,7 +356,7 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
     expect(claimCheckoutSlot).toHaveBeenCalledTimes(1);
     expect(createCheckoutSessionForUser).not.toHaveBeenCalled();
     expect(releaseCheckoutSlot).not.toHaveBeenCalled();
-    // 一時的な失敗は再試行で解消しうるため、運用者への通知はしない
+    // A transient failure may resolve on retry, so no operator notification.
     expect(sendSlackCheckoutRecoveryNotification).not.toHaveBeenCalled();
   });
 
