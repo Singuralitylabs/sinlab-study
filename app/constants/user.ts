@@ -28,9 +28,8 @@ export const USER_ROLES: readonly UserRoleType[] = Object.values(USER_ROLE);
 
 /**
  * Membership type, chosen by the admin on approval (null before approval and for rejected users).
- * Same
- * `satisfies` rationale as USER_STATUS: a Record annotation would disable `as const`, so typos like
- * USER_MEMBERSHIP.COMUNITY would pass type checks and be undefined at runtime.
+ * Same `satisfies` rationale as USER_STATUS: a Record annotation would disable `as const`, so typos
+ * like USER_MEMBERSHIP.COMUNITY would pass type checks and be undefined at runtime.
  */
 export const USER_MEMBERSHIP = {
   COMMUNITY: "community",

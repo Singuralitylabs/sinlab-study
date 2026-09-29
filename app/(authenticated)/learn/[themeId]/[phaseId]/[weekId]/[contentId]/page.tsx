@@ -54,6 +54,8 @@ export default async function ContentPage({ params }: PageProps) {
 
   const { userId, userStatus, userRole } = await getServerAuth();
 
+  // Members/trial users fetch the summary via service_role; admin/maintainer use the normal client so
+  // unpublished content is included.
   const [{ data: week }, { data: navigation }, { data: content }] = await Promise.all([
     fetchWeekById(weekIdNum, userRole),
     fetchThemeNavigationIndex(themeIdNum, weekIdNum, userRole),

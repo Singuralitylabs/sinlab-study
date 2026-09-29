@@ -170,9 +170,8 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
 
   it("generateReviewが例外を投げた場合（タイムアウト等）はprocessingのまま残さずfailedへ遷移し502を返す", async () => {
     // Timeout detection and error messages inside generateReview() are covered in
-    // tests/services/api/gemini.test.ts;
-    // here only check that the route always moves to failed regardless of why generateReview()
-    // failed.
+    // tests/services/api/gemini.test.ts; here only check that the route always moves to failed
+    // regardless of why generateReview() failed.
     vi.mocked(generateReview).mockRejectedValue(new Error("boom"));
 
     const res = await POST(request() as never);

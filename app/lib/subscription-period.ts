@@ -25,8 +25,7 @@ export function isCancellationScheduled(
 
 /**
  * Last moment a cancellation-scheduled contract can be used: cancel_at first, else
- * current_period_end (classic
- * period-end cancellation), else null.
+ * current_period_end (classic period-end cancellation), else null.
  */
 export function cancellationEndsAt(fields: SubscriptionPeriodFields): string | null {
   return fields.cancel_at ?? fields.current_period_end;

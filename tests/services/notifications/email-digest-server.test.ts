@@ -456,9 +456,9 @@ describe("送信対象の抽出", () => {
   it("週次進捗: 先週をまるごと利用できた（前週の月曜以前に登録した）ユーザーだけに送る", async () => {
     setup({
       users: [
-        userRow(1, { created_at: createdOn("2026-09-28") }),
-        userRow(2, { created_at: createdOn("2026-09-29") }),
-        userRow(3, { created_at: createdOn("2026-10-04") }),
+        userRow(1, { created_at: createdOn("2026-09-28") }), // Monday of last week
+        userRow(2, { created_at: createdOn("2026-09-29") }), // Tuesday of last week
+        userRow(3, { created_at: createdOn("2026-10-04") }), // Sunday of last week (the day before this Monday)
       ],
       // u1 is day 7, so add learning records to exclude them from the unstudied reminder.
       user_progress: [
@@ -489,9 +489,9 @@ describe("送信対象の抽出", () => {
   it("未学習リマインド: 登録から7日目で進捗も提出も無い active ユーザーに、最初の1本を案内する", async () => {
     setup({
       users: [
-        userRow(1, { created_at: createdOn("2026-09-29") }),
-        userRow(2, { created_at: createdOn("2026-09-29") }),
-        userRow(3, { created_at: createdOn("2026-09-29") }),
+        userRow(1, { created_at: createdOn("2026-09-29") }), // no activity
+        userRow(2, { created_at: createdOn("2026-09-29") }), // has progress
+        userRow(3, { created_at: createdOn("2026-09-29") }), // has a submission
       ],
       user_progress: [
         { id: 1, user_id: 2, content_id: 1000, is_completed: false, completed_at: null },
@@ -541,8 +541,8 @@ describe("送信対象の抽出", () => {
     setup({
       users: [
         userRow(1),
-        userRow(2, { status: "trial", created_at: createdOn("2026-10-03") }),
-        userRow(3, { created_at: createdOn("2026-09-28") }),
+        userRow(2, { status: "trial", created_at: createdOn("2026-10-03") }), // day 2
+        userRow(3, { created_at: createdOn("2026-09-28") }), // day 7, no activity
       ],
     });
 
@@ -584,7 +584,7 @@ describe("二重送信の防止（email_logs の claim）", () => {
 
   it("同じ日に案内系メールを受け取ったユーザーには、朝の実行後にステータスが変わっても2通目を送らない", async () => {
     const { db } = setup({
-      users: [userRow(1, { status: "trial", created_at: createdOn("2026-09-28") })],
+      users: [userRow(1, { status: "trial", created_at: createdOn("2026-09-28") })], // day 7
     });
     await runDigest(MONDAY);
     expect(sentEmailTo("u1@example.com").subject).toContain("本登録で学べる内容");
@@ -649,7 +649,7 @@ describe("1回あたりの上限と繰り越し", () => {
     setup({
       users: [
         ...manyUsers(EMAIL_DIGEST_MAX_PER_DAY),
-        userRow(1000, { status: "trial", created_at: createdOn("2026-10-03") }),
+        userRow(1000, { status: "trial", created_at: createdOn("2026-10-03") }), // day 2
       ],
     });
 
@@ -695,7 +695,7 @@ describe("1回あたりの上限と繰り越し", () => {
   it("Cron を週の途中（金曜）に初めて動かしても、週次進捗は次の月曜まで送らず、予約が無いことを返す", async () => {
     setup({ users: [userRow(1), userRow(2)] });
 
-    const friday = await runDigest(new Date("2026-10-08T23:00:00Z"));
+    const friday = await runDigest(new Date("2026-10-08T23:00:00Z")); // Friday 10/9 JST
 
     expect(friday).toMatchObject({ queued: 0, weeklyReservationMissing: true });
     expect(sendEmail).not.toHaveBeenCalled();
@@ -734,7 +734,7 @@ describe("1回あたりの上限と繰り越し", () => {
   it("予約が無いまま水曜以降になったら週次進捗は送らず、予約が無いことを返す", async () => {
     setup({ users: [userRow(1)] });
 
-    const wednesday = await runDigest(new Date("2026-10-06T23:00:00Z"));
+    const wednesday = await runDigest(new Date("2026-10-06T23:00:00Z")); // Wednesday 10/7 JST
 
     expect(wednesday).toMatchObject({ queued: 0, weeklyReservationMissing: true });
     expect(sendEmail).not.toHaveBeenCalled();
@@ -949,7 +949,7 @@ describe("お知らせのメール一斉送信（#254）", () => {
 
   it("同じ日に登録からN日目の案内を受け取るユーザーには翌日に送り、それまで完了にしない", async () => {
     const { db } = setup({
-      users: [userRow(1, { status: "trial", created_at: createdOn("2026-10-05") })],
+      users: [userRow(1, { status: "trial", created_at: createdOn("2026-10-05") })], // day 2 on 10/7
       announcements: [announcementRow()],
     });
 

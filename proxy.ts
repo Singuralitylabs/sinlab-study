@@ -49,8 +49,7 @@ export async function proxy(request: NextRequest) {
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
   // Fail closed (to /login) when the auth gate can't run. /login is skipped by
-  // shouldSkipMiddleware, so no
-  // redirect loop.
+  // shouldSkipMiddleware, so no redirect loop.
   if (!supabaseUrl || !supabaseKey) {
     console.error(
       "[proxy] Missing env vars:",

@@ -69,8 +69,7 @@ export function UserManagementTable({
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [loadingUserIds, setLoadingUserIds] = useState<Set<number>>(new Set());
   // Membership chosen on approval, per user id. Default is community, but general for
-  // Stripe-subscribed users
-  // since they can't pick community.
+  // Stripe-subscribed users since they can't pick community.
   const [membershipByUserId, setMembershipByUserId] = useState<Record<number, MembershipType>>({});
   const subscribedUserIdSet = useMemo(() => new Set(subscribedUserIds), [subscribedUserIds]);
 

@@ -207,8 +207,8 @@ describe("sortContentsByHierarchy", () => {
 
   it("テーマ・フェーズの display_order が同値でも、id タイブレークにより別の親同士のコンテンツが混在しない", () => {
     // The create form's default display_order is 0, so ties across themes/phases are common.
-    // Comparing only by the
-    // week/content display_order would interleave contents of different groups (regression guard).
+    // Comparing only by the week/content display_order would interleave contents of different
+    // groups (regression guard).
     const themeX = { ...theme1, id: 10, display_order: 0 };
     const themeY = { ...theme1, id: 20, display_order: 0 };
     const phaseX = { ...phase1, id: 10, theme_id: 10, display_order: 0, theme: themeX };

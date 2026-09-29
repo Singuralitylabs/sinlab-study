@@ -236,8 +236,8 @@ describe("activateUserFromCheckoutSession", () => {
 
   it("進行中のCheckout（別セッションのclaim）は古いセッションのリプレイで解除されない", async () => {
     // Scenario: a canceled user starts upgrading again, then revisits an old success page URL.
-    // Releasing the claim
-    // here would let a next Checkout be created while a payable session remains.
+    // Releasing the claim here would let a next Checkout be created while a payable session
+    // remains.
     const mockClient = createMockSupabaseClient({
       tableResults: {
         stripe_subscriptions: {

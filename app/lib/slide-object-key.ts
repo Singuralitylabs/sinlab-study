@@ -12,8 +12,7 @@ const LEGACY_PUBLIC_URL_PREFIX = /^(?:https?:\/\/[^/]+)?\/storage\/v1\/object\/p
 
 /**
  * Single source of the naming convention <course-slug>/slide-NN.pdf (NN zero-padded to 2+ digits);
- * the upload
- * API and the admin UI both use it. Change the convention only here.
+ * the upload API and the admin UI both use it. Change the convention only here.
  */
 export const SLIDE_FOLDER_PATTERN = /^[a-z0-9-]+$/;
 export const SLIDE_FILE_NAME_PATTERN = /^slide-(\d+)\.pdf$/;

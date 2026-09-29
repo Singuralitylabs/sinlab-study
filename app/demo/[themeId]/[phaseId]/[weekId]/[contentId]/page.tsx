@@ -94,8 +94,8 @@ export default async function DemoContentPage({ params }: PageProps) {
   }
 
   // Slide signed URL (same scope as trial users: only published, is_open_to_trial = true slides;
-  // decided by
-  // createDemoSlideSignedUrl() itself; #89) is fetched in parallel with the week's content list.
+  // decided by createDemoSlideSignedUrl() itself; #89) is fetched in parallel with the week's
+  // content list.
   const [{ data: weekContents }, slideSignedUrl] = await Promise.all([
     fetchDemoContentsByWeekId(weekIdNum),
     content.content_type === "slide" && content.is_open_to_trial

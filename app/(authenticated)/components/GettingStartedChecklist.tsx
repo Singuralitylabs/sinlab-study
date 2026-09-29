@@ -40,6 +40,8 @@ export function buildGettingStartedItems(
 }
 
 export function GettingStartedChecklist({ items }: { items: GettingStartedChecklistItem[] }) {
+  // Hidden once every step is done. Completion is derived from existing data on each render, so
+  // there is nothing to persist.
   const unachievedExists = items.some((item) => !item.completed);
   if (!unachievedExists) {
     return null;

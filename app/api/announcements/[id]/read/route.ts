@@ -10,10 +10,9 @@ import { getServerAuth } from "@/app/services/auth/server-auth";
 
 /**
  * Records the announcement as read (called from the client when the detail screen opens).
- * Announcements the user
- * can't see (draft, deleted, not targeted, unknown ID) give 404. Already-read counts as success.
- * Not recorded
- * during page rendering so link prefetching doesn't mark it read.
+ * Announcements the user can't see (draft, deleted, not targeted, unknown ID) give 404.
+ * Already-read counts as success. Not recorded during page rendering so link prefetching doesn't
+ * mark it read.
  */
 export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {

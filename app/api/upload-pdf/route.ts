@@ -13,7 +13,7 @@ import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const BUCKET_NAME = SLIDES_BUCKET;
-const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 
 type AdminSupabaseClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>;
 
