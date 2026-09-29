@@ -4,14 +4,12 @@ import { toSlideObjectKey } from "@/app/lib/slide-object-key";
 import { createServerSupabaseClient } from "./supabase-server";
 
 /**
- * スライドPDFの署名付きURLを発行する（issue #89）。
- *
- * 【不変条件】この関数はコンテンツの閲覧権限チェックの後にのみ呼ぶこと。
- * 学習画面では `isContentLockedForUser()` でロック判定し、`fetchContentById()`（RLS適用）で
- * コンテンツ行を取得できた後に呼ぶ。ロック済み・未公開のコンテンツではURL自体を発行しない。
- *
- * 発行に失敗した場合（Storage障害・ポリシーで不可視・キーとして解釈できない値）は
- * null を返し、呼び出し側はビューアの代わりにエラーメッセージを表示する。
+ * Issues a signed URL for a slide PDF (issue #89).
+ * Invariant: call only AFTER the content view-permission check. The learning page decides the
+ * lock with isContentLockedForUser() and calls this after fetchContentById() (RLS applied)
+ * returned the row. Locked or unpublished contents get no URL.
+ * On failure (Storage error, invisible by policy, value not interpretable as a key) returns null
+ * and the caller shows an error instead of the viewer.
  */
 export async function createSlideSignedUrlWithClient(
   supabase: Pick<SupabaseClient, "storage">,
@@ -36,15 +34,14 @@ export async function createSlideSignedUrlWithClient(
 }
 
 /**
- * ログイン中のユーザー権限（通常クライアント・RLS適用）でスライドの署名付きURLを発行する。
- *
- * `storage.objects` の SELECT ポリシーは、member / お試しユーザーに対しては
- * `pdf_url = storage.objects.name` を満たす `learning_contents` が呼び出しユーザーの RLS 下で見え、
- * かつ week / phase / theme を含む4階層すべてが公開済み・未削除の場合にのみ許可する
- * （`isContentVisible()` と同じ4階層条件。#216）。admin / maintainer はプレビューのため
- * ロールで無条件に許可される（仕様 2.12。`isContentVisible()` 自体はロール非依存のフェイルクローズ）。
- * お試しユーザーがロック済みコンテンツのキーを推測しても、この経路でも Storage API 直叩きでも
- * 署名は発行されない。service_role は使わない。
+ * Signs with the logged-in user's client (normal client, RLS applied), never service_role.
+ * The `storage.objects` SELECT policy allows member / trial users only when a `learning_contents`
+ * row with `pdf_url = storage.objects.name` is visible under the caller's RLS and all four levels
+ * including week / phase / theme are published and not deleted (same four-level rule as
+ * isContentVisible(); #216). admin / maintainer are allowed unconditionally by role for preview
+ * (spec 2.12; isContentVisible() itself is role-independent and fail-closed). A trial user
+ * guessing the key of a locked content gets no signature, via this path or the Storage API
+ * directly.
  */
 export async function createSlideSignedUrl(pdfUrl: string): Promise<string | null> {
   const supabase = await createServerSupabaseClient();

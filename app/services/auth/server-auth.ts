@@ -14,20 +14,21 @@ export interface ServerAuthResult {
   error?: string;
 }
 
-/** Next.js の制御エラー（動的レンダリング化・redirect等）は握り潰さずに再スロー */
+/**
+ * Rethrow Next.js control errors (dynamic rendering bailout, redirect, etc.) instead of
+ * swallowing them.
+ */
 function rethrowIfControlError(error: unknown): void {
   if (error && typeof error === "object" && "digest" in error) {
     throw error;
   }
 }
 
-// サーバーサイドで認証とユーザーステータスを確認
-// React.cache() によりリクエスト単位でメモ化され、layout・page間で重複実行されない
+// Memoized per request via React.cache(), so layouts and pages do not repeat it.
 export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
   try {
     const supabase = await createServerSupabaseClient();
 
-    // ユーザー認証確認（セキュア）
     const {
       data: { user },
       error: authError,
@@ -37,8 +38,7 @@ export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
       return { user: null, userId: null, userStatus: null, userRole: null };
     }
 
-    // proxy.ts から渡されたヘッダーを確認
-    // proxy を経由する通常ページでは DB への再問い合わせを省略する
+    // Use the headers set by proxy.ts: pages that go through the proxy skip the DB re-query.
     try {
       const headerList = await headers();
       const headerAuthId = headerList.get(AUTH_HEADERS.AUTH_ID);
@@ -46,9 +46,9 @@ export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
       const headerUserStatus = headerList.get(AUTH_HEADERS.USER_STATUS);
       const headerUserRole = headerList.get(AUTH_HEADERS.USER_ROLE);
 
-      // 改ざん検知: auth.getUser() の user.id とヘッダーの auth_id を突合し、
-      // かつステータス・ロールが有効な値の場合のみヘッダーを採用する。
-      // proxy がヘッダーを設定するのは active / trial のみのため、ステータスは ALLOWED_USER_STATUSES に限定する
+      // Tamper check: the auth.getUser() user.id must match the header auth_id, and status/role
+      // must be valid values before trusting the headers. The proxy only sets them for active /
+      // trial, so status is limited to ALLOWED_USER_STATUSES.
       const isValidStatus =
         headerUserStatus !== null &&
         ALLOWED_USER_STATUSES.includes(headerUserStatus as (typeof ALLOWED_USER_STATUSES)[number]);
@@ -73,10 +73,10 @@ export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
       }
     } catch (headerError) {
       rethrowIfControlError(headerError);
-      // headers() 取得失敗時は DB 照会へフォールバック
+      // If headers() fails, fall back to the DB query.
     }
 
-    // proxy をスキップする API Route やヘッダー不一致時は従来どおり DB から取得
+    // API routes that skip the proxy, or a header mismatch, read from the DB as before.
     const { data: userData, error: userError } = await supabase
       .from("users")
       .select("id, status, role")

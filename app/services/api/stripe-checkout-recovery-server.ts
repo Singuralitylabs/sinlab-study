@@ -8,18 +8,23 @@ import {
 import { sendSlackCheckoutRecoveryNotification } from "@/app/services/notifications/slack";
 
 /**
- * Checkout API（`POST /api/stripe/checkout`）の自己復旧処理（#250）。
- *
- * Webhookとsuccessページの両方が失敗すると、Checkout作成の処理権が決済済みのセッションを
- * 保持したまま残り、そのままでは409が永久に続く。ここではその状態を、Webhookと同じ冪等な
- * 反映処理で解消する。`stripe-webhook-server.ts` が `stripe-server.ts` を import している
- * ため、両方を使うこの処理は独立したモジュールに置く（循環 import を作らない）。
+ * Self-recovery for the Checkout API (`POST /api/stripe/checkout`) (#250).
+ * If both the webhook and the success page fail, the Checkout claim keeps holding a paid session
+ * and 409 would continue forever. This resolves it with the same idempotent reflection as the
+ * webhook. Lives in its own module because stripe-webhook-server.ts imports stripe-server.ts and
+ * this needs both (avoids a circular import).
  */
 
-/** 自動復旧不可通知の重複を抑止する期間（分）。同じ状態の通知は、この間に1回だけ送る */
+/**
+ * Window (minutes) for suppressing duplicate unrecoverable notices: the same state is notified
+ * once per window.
+ */
 const RECOVERY_NOTICE_INTERVAL_MINUTES = 60;
 
-/** 自動復旧不可通知の重複抑止に使う `stripe_events` の種別（Webhookのイベント種別と区別する） */
+/**
+ * `stripe_events` type used to deduplicate unrecoverable notices (distinct from webhook event
+ * types).
+ */
 const RECOVERY_NOTICE_TYPE = "app.checkout_recovery_notice";
 
 export type CheckoutRecovery =
@@ -29,25 +34,23 @@ export type CheckoutRecovery =
   | { kind: "error" };
 
 /**
- * 処理権が保持したまま反映されていない決済済みセッションを、既存の冪等な反映処理で反映する。
- * 反映によりサブスクのライブ状態がミラー行に書かれ、処理権は解除される（有効な契約なら
- * 会員へ昇格する）。呼び出し元は、昇格しなかった場合（applied）に claim をやり直し、
- * ミラー行の実状態に従って分岐する。
- *
- * 次の場合は自動では反映せず（unrecoverable）、運用者へ通知する。いずれも時間が経っても
- * 変わらない状態で、再試行しても同じ結果になる。
- * - 決済済みセッションが複数ある（1つの処理権では通常起こらない）: 1件目の反映で処理権が
- *   解けた後に2件目の反映が失敗すると、2件目の有効な契約を残したまま次のCheckoutを
- *   作れてしまう（二重契約）
- * - セッションのユーザーが本人と一致しない: 他人の契約を書き込むことになる
- * - セッションに customer / subscription が無い: 反映処理が必ず失敗する
- * - Stripeが恒久的なエラー（サブスクが存在しない等の4xx）を返した
- *
- * @param heldClaimedAt 判定に使った処理権の確保時刻。並行する別リクエストが確保し直した
- * 処理権を、この反映が解除しないようにする（`activateUserFromCheckoutSession()` 参照）
- * @returns activated: 会員へ昇格した / applied: 反映したが昇格はしていない /
- * unrecoverable: 自動では反映しない / error: 一時的な障害で反映できなかった（処理権が
- * 残っていれば次のリクエストで再試行される）
+ * Reflects paid sessions still held by the claim through the existing idempotent path. Reflection
+ * writes the live subscription state to the mirror and releases the claim (promoting to member
+ * when the subscription is valid). If not promoted (applied), the caller re-claims and branches
+ * on the mirror's actual state.
+ * Not reflected automatically (unrecoverable) and reported to operators; these states do not
+ * change over time, so retrying gives the same result:
+ * - multiple paid sessions (normally impossible with one claim): if the first reflection releases
+ *   the claim and the second fails, a next Checkout could be created while the second valid
+ *   subscription remains (double subscription)
+ * - session user does not match the caller: it would write someone else's subscription
+ * - session has no customer / subscription: reflection always fails
+ * - Stripe returned a permanent error (4xx such as subscription missing)
+ * @param heldClaimedAt claim time used for the decision, so this reflection cannot release a
+ *   claim re-acquired by a concurrent request (see activateUserFromCheckoutSession()).
+ * @returns activated: promoted to member / applied: reflected but not promoted / unrecoverable:
+ *   not reflected automatically / error: transient failure (retried on the next request if the
+ *   claim remains)
  */
 export async function recoverCompletedCheckout(
   userId: number,
@@ -65,7 +68,7 @@ export async function recoverCompletedCheckout(
     return await unrecoverable("決済済みのセッションが複数あります");
   }
   const [session] = sessions;
-  // Customerはユーザーごとに一意のため通常は一致する
+  // Customers are unique per user, so normally these match.
   if (extractUserId(session.client_reference_id, session.metadata) !== userId) {
     return await unrecoverable("セッションのユーザーが一致しません");
   }
@@ -92,9 +95,9 @@ export async function recoverCompletedCheckout(
 }
 
 /**
- * お試しユーザーの Checkout が conflict になったとき、ミラー行に契約が記録されているのに
- * 昇格していない不整合を解消する（`reactivateUserFromMirror()` 参照）。
- * 失敗しても呼び出し元は従来どおり409を返せばよいため、例外は握りつぶして false を返す。
+ * Repairs the inconsistency where the mirror records a subscription but the user is not promoted,
+ * when a trial user's Checkout hits conflict (see reactivateUserFromMirror()). The caller can
+ * still return 409 on failure, so exceptions are swallowed and false is returned.
  */
 export async function reactivatePaidTrialUser(userId: number): Promise<boolean> {
   try {
@@ -110,8 +113,8 @@ export async function reactivatePaidTrialUser(userId: number): Promise<boolean> 
 }
 
 /**
- * 再試行しても結果が変わらないStripeのエラーか（4xx）。409（同時実行による競合）と
- * 429（レート制限）は時間を置けば通りうるため除く。通信エラー・5xxは一時的な障害とみなす。
+ * Whether retrying cannot change the outcome (4xx). 409 (concurrency conflict) and 429 (rate
+ * limit) are excluded since they can pass later; network errors and 5xx are treated as transient.
  */
 function isPermanentStripeError(error: unknown): error is Stripe.errors.StripeError & {
   statusCode: number;
@@ -126,11 +129,11 @@ function isPermanentStripeError(error: unknown): error is Stripe.errors.StripeEr
 }
 
 /**
- * 自動復旧不可を運用者へ通知する。状態が変わらない限りユーザーが押すたびに同じ判定になるため、
- * 同じユーザー・セッションの通知は `RECOVERY_NOTICE_INTERVAL_MINUTES` に1回だけ送る
- * （連打やスクリプトで運用チャンネルを埋めさせない）。重複の判定には `stripe_events` の
- * 一意制約によるclaimを使う（Webhookのイベントidと衝突しない接頭辞のキー）。
- * 判定に失敗した場合は、通知を取りこぼさないよう送る側に倒す。
+ * Notifies operators of an unrecoverable state. The same state repeats on every user click, so
+ * notify once per RECOVERY_NOTICE_INTERVAL_MINUTES per user and session (prevents mashing or
+ * scripts from flooding the ops channel). Deduplication uses the `stripe_events`
+ * unique-constraint claim with a prefixed key that cannot collide with webhook event ids. If the
+ * check itself fails, err on sending so no notice is lost.
  */
 async function notifyUnrecoverable(
   userId: number,

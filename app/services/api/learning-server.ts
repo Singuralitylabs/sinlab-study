@@ -21,35 +21,23 @@ import type {
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
-/**
- * コンテンツ一覧用のカラム定義（本文・指示・模範解答・ヒント等の重いテキストカラムを除外）
- */
+/** Excludes heavy text columns (body, instructions, model answer, hints). */
 export const LEARNING_CONTENT_LIST_COLUMNS =
   "id, week_id, title, content_type, video_url, pdf_url, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at";
 
-/**
- * パンくず・所属判定用の親テーブルカラム定義。
- * DETAIL 定数はこれらを合成して使う（重複インライン展開を避ける）。
- */
+/** Parent-table columns for breadcrumbs / membership checks; the DETAIL constants compose these. */
 export const BREADCRUMB_THEME_COLUMNS = "id, name, is_published, is_deleted";
 export const BREADCRUMB_PHASE_COLUMNS = `id, theme_id, name, is_published, is_deleted, theme:learning_themes(${BREADCRUMB_THEME_COLUMNS})`;
 export const BREADCRUMB_WEEK_COLUMNS = `id, phase_id, name, is_published, is_deleted, phase:learning_phases(${BREADCRUMB_PHASE_COLUMNS})`;
 
-/**
- * 週詳細用（本体は全カラム、所属フェーズ/テーマはパンくず用）
- */
 export const LEARNING_WEEK_DETAIL_COLUMNS = `*, phase:learning_phases(${BREADCRUMB_PHASE_COLUMNS})`;
 
-/**
- * コンテンツ詳細用（本文含む全カラム＋親階層パンくず情報）
- */
 export const LEARNING_CONTENT_DETAIL_COLUMNS = `*, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
 
 /**
- * admin / maintainer 以外は is_published = true で絞り込む（issue #68 のプレビュー機能）。
- * 各取得関数の `.eq("is_deleted", false)` の後に挟んで使う共通ヘルパー。
- * theme/phase/week は select("*") のため PostgREST の型推論が浅く、
- * `.eq("is_published", true)` のカラム制約をそのまま書ける。
+ * Unless admin / maintainer, restrict to is_published = true (issue #68 preview). Insert after
+ * each fetcher's `.eq("is_deleted", false)`. theme/phase/week use select("*"), so PostgREST type
+ * inference is shallow and the column constraint can be written directly.
  */
 function applyPublishedFilterUnlessManager<
   Q extends { eq(column: "is_published", value: boolean): Q },
@@ -57,10 +45,7 @@ function applyPublishedFilterUnlessManager<
   return checkContentPermissions(userRole) ? query : query.eq("is_published", true);
 }
 
-/**
- * テーマ一覧を取得。
- * admin / maintainer は未公開テーマもプレビューとして取得できる（issue #68）。
- */
+/** admin / maintainer also get unpublished themes as preview (issue #68). */
 export async function fetchPublishedThemes(userRole: UserRoleType | null = null): Promise<{
   data: LearningTheme[] | null;
   error: PostgrestError | null;
@@ -81,26 +66,21 @@ export async function fetchPublishedThemes(userRole: UserRoleType | null = null)
   return { data, error: null };
 }
 
-/**
- * ダッシュボード用のテーマ別進捗サマリー
- */
 export interface ThemeProgressSummary {
   theme: LearningTheme;
   totalContents: number;
   completedContents: number;
 }
 
-/** ネストselectで取得するテーマ行（フェーズ→週→コンテンツIDの埋め込み付き） */
+/** Theme row from a nested select (phase -> week -> content IDs). */
 type ThemeWithNestedContents = LearningTheme & {
   phases: { id: number; weeks: { id: number; contents: { id: number }[] }[] }[];
 };
 
 /**
- * 全公開テーマの進捗サマリーを取得（ダッシュボード用）
- *
- * テーマ→フェーズ→週→コンテンツをネストselect 1本で取得し、
- * 完了進捗をユーザー単位でまとめて照会する（テーマごとの逐次クエリによるN+1を回避）。
- * 完了進捗の取得に失敗した場合はエラーにせず完了数0で返し、テーマ一覧の表示を維持する。
+ * Fetches themes -> phases -> weeks -> contents in one nested select and queries the user's
+ * completed progress in bulk (avoids N+1 per theme). A failed progress query returns completed
+ * count 0 so the theme list still renders.
  */
 export async function fetchThemeProgressSummaries(userId: number): Promise<{
   data: ThemeProgressSummary[] | null;
@@ -137,10 +117,10 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
 
   const hasContents = themeContents.some((t) => t.contentIds.length > 0);
 
-  // 完了済みコンテンツIDをユーザー単位で全件取得する。
-  // content_id での .in() 絞り込みは行わない（分子はテーマごとの Set 突合で確定するため不要で、
-  // 全コンテンツIDをクエリ文字列に直列化するとカタログ増加時にURL長上限を超えるため）。
-  // PostgRESTの1リクエスト最大行数（既定1000行）を超えても取りこぼさないよう range でページングする。
+  // Fetch all completed content IDs for the user, without a content_id `.in()` filter: the
+  // numerator is settled by per-theme Set matching, and serializing every content ID into the
+  // query string would exceed URL length limits as the catalog grows. Page with range so
+  // PostgREST's max rows (default 1000) does not drop rows.
   const completedIds = new Set<number>();
   const pageSize = 1000;
   for (let offset = 0; hasContents; offset += pageSize) {
@@ -153,7 +133,7 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
       .range(offset, offset + pageSize - 1);
 
     if (progressError) {
-      // 進捗が取れなくてもテーマ一覧自体は表示できるよう、完了数0にフォールバックして継続する
+      // Fall back to completed count 0 so the theme list is still shown.
       console.error("テーマ進捗サマリーの進捗取得エラー:", progressError.message);
       completedIds.clear();
       break;
@@ -176,10 +156,7 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
   return { data, error: null };
 }
 
-/**
- * テーマ詳細を取得。
- * admin / maintainer は未公開テーマもプレビューとして取得できる（issue #68）。
- */
+/** admin / maintainer also get unpublished themes as preview (issue #68). */
 export async function fetchThemeById(
   themeId: number,
   userRole: UserRoleType | null = null
@@ -203,10 +180,7 @@ export async function fetchThemeById(
   return { data, error: null };
 }
 
-/**
- * テーマに属するフェーズ一覧を取得。
- * admin / maintainer は未公開フェーズもプレビューとして取得できる（issue #68）。
- */
+/** admin / maintainer also get unpublished phases as preview (issue #68). */
 export async function fetchPhasesByThemeId(
   themeId: number,
   userRole: UserRoleType | null = null
@@ -230,9 +204,6 @@ export async function fetchPhasesByThemeId(
   return { data, error: null };
 }
 
-/**
- * 公開フェーズ一覧を取得
- */
 export async function fetchPublishedPhases(): Promise<{
   data: LearningPhase[] | null;
   error: PostgrestError | null;
@@ -254,10 +225,7 @@ export async function fetchPublishedPhases(): Promise<{
   return { data, error: null };
 }
 
-/**
- * フェーズ詳細を取得。
- * admin / maintainer は未公開フェーズもプレビューとして取得できる（issue #68）。
- */
+/** admin / maintainer also get unpublished phases as preview (issue #68). */
 export async function fetchPhaseById(
   phaseId: number,
   userRole: UserRoleType | null = null
@@ -282,9 +250,9 @@ export async function fetchPhaseById(
 }
 
 /**
- * ロック表示に必要な最小限のコンテンツサマリー（本文カラムは含めない）。
- * お試し非公開コンテンツもタイトルを含めて取得できるよう service_role で取得する。
- * is_published は未公開バッジ表示（admin / maintainer のプレビュー時）に使用する。
+ * Minimal content summary for the locked view (no body columns). Fetched with service_role so
+ * titles of trial-locked contents are available. is_published drives the unpublished badge for
+ * admin / maintainer preview.
  */
 export type ContentVisibilitySummary = Pick<
   LearningContent,
@@ -292,8 +260,8 @@ export type ContentVisibilitySummary = Pick<
 > & { week_id: number };
 
 /**
- * お試しユーザー（status='trial'）に対してコンテンツをロック表示すべきか判定する。
- * コースツリー（フェーズページ）とコンテンツ詳細ページのロック判定で共通して使用する。
+ * Shared lock decision for trial users (status='trial') on the course tree (phase page) and the
+ * content detail page.
  */
 export function isContentLockedForUser(
   userStatus: UserStatusType | null,
@@ -303,15 +271,13 @@ export function isContentLockedForUser(
 }
 
 /**
- * 対象コンテンツが、渡されたクライアント（呼び出し元の認証コンテキスト）から可視かどうかを判定する。
- * 進捗・提出・AIレビューAPIのコンテンツ可視性チェックに使用する（機能設計書 4.1/5.1 参照）。
- *
- * コンテンツ自身だけでなく、所属する週・フェーズ・テーマの全階層について
- * `is_published = true AND is_deleted = false` を明示的に判定する。`learning_contents` の
- * SELECT RLS は admin / maintainer に無条件で許可されるため、コンテンツ行の is_published だけを
- * 見ると、論理削除済みのコンテンツや、未公開の週・フェーズ・テーマ配下にある（誤って公開フラグが
- * 立った）コンテンツへの進捗登録・提出・AIレビューが admin / maintainer に対して通ってしまう。
- * ロールに関わらず、いずれかの階層が公開・未削除でなければ false を返す（issue #68 の既定）。
+ * Whether the content is visible to the given client (caller's auth context); used by the
+ * progress / submission / AI review APIs (specification 4.1/5.1).
+ * Checks `is_published = true AND is_deleted = false` for the content AND its week, phase and
+ * theme. The learning_contents SELECT RLS allows admin / maintainer unconditionally, so checking
+ * only the content row would let them record progress, submit, or request AI review for
+ * soft-deleted contents or contents under unpublished parents. Returns false if any level is
+ * unpublished or deleted, regardless of role (issue #68 default).
  */
 export async function isContentVisible(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
@@ -334,8 +300,8 @@ export async function isContentVisible(
     .maybeSingle();
 
   if (error) {
-    // fail-closed（不可視として扱う）は維持しつつ、DB障害と「本当に不可視」を
-    // ログ上で区別できるようにする
+    // Stay fail-closed (treat as invisible) but let logs distinguish a DB failure from truly
+    // invisible.
     console.error("コンテンツ可視性チェックエラー:", error.message);
   }
 
@@ -343,28 +309,25 @@ export async function isContentVisible(
 }
 
 /**
- * コンテンツ自身だけでなく、週・フェーズ・テーマの全階層が公開済み・未削除かどうかを判定する。
- * admin / maintainer のプレビュー画面で「未公開」バッジ表示・完了ボタン / 提出フォームの
- * 表示可否に使う（コンテンツ行自体は公開済みでも、親階層のいずれかが未公開・論理削除済みなら
- * プレビュー扱いとする。issue #68）。
- *
- * `fetchContentById()` の select は親階層（week/phase/theme）に is_deleted のフィルタを
- * 課していない（`.eq("is_deleted", false)` はコンテンツ自身にのみ適用）ため、ここで明示的に
- * 判定する。判定しないと、論理削除済みの親を持つコンテンツで「完了ボタン等は表示されるが
- * `isContentVisible()` は必ず403を返す」というUIとAPIの不整合が起きる。
+ * Whether the content and its week / phase / theme are all published and not deleted. Used in
+ * admin / maintainer preview for the "unpublished" badge and for showing the complete button /
+ * submission form (a published content under an unpublished or deleted parent counts as preview;
+ * issue #68).
+ * fetchContentById() does not filter parents' is_deleted (`.eq("is_deleted", false)` applies only
+ * to the content), so check here explicitly. Otherwise the UI shows the complete button while
+ * isContentVisible() always returns 403.
  */
 export function isContentFullyPublished(content: LearningContentWithBreadcrumb): boolean {
   return content.is_published && isWeekHierarchyPublished(content.week);
 }
 
 /**
- * 週・フェーズ・テーマの3階層がすべて公開済み・未削除かどうかを判定する。
- * RLS で親階層の埋め込みが null になった場合（受講生から未公開のフェーズ・テーマ）も false。
- *
- * コンテンツ詳細ページでは、member / お試しユーザーに対して **ロック判定より先に** これで
- * 親階層を確認する（issue #242）。ロック画面のサマリーは service_role 経路で取得しており
- * コンテンツ行の `is_published` しか見ないため、後回しにすると未公開テーマ配下のタイトルと
- * パンくずがロック画面に表示されてしまう。
+ * Whether week, phase and theme are all published and not deleted. Also false when RLS nulls an
+ * embedded parent (unpublished for students).
+ * On the content detail page, check this for member / trial users BEFORE the lock decision (issue
+ * #242): the locked-view summary comes from the service_role path and only checks the content
+ * row's is_published, so checking later would leak titles and breadcrumbs under an unpublished
+ * theme.
  */
 export function isWeekHierarchyPublished(week: BreadcrumbWeek | null | undefined): boolean {
   const phase = week?.phase;
@@ -381,15 +344,15 @@ export function isWeekHierarchyPublished(week: BreadcrumbWeek | null | undefined
 }
 
 /**
- * service_role 経路（受講生向け）の select カラム許可リスト（AGENTS.md・機能設計書 2.6 の
- * 不変条件）。`id, title, content_type, display_order, is_open_to_trial, week_id` の6列のみで、
- * `is_published` は含めない（このリストを拡張すると service_role が RLS を素通りして
- * 追加カラムを返してしまうため、admin / maintainer 向け経路とは別に維持する）。
+ * Column allowlist for the student-facing service_role path (invariant in AGENTS.md /
+ * specification 2.6): only `id, title, content_type, display_order, is_open_to_trial, week_id`,
+ * without `is_published`. Extending it would expose extra columns because service_role bypasses
+ * RLS; keep it separate from the admin / maintainer path.
  */
 const CONTENT_VISIBILITY_SUMMARY_COLUMNS =
   "id, title, content_type, display_order, is_open_to_trial, week_id";
 
-/** PostgREST の1リクエスト既定上限。切り詰めで行が欠けるのを防ぐため range でページングする */
+/** PostgREST default per-request limit; page with range so truncation does not drop rows. */
 const POSTGREST_MAX_ROWS = 1000;
 
 async function collectPagedRows<T>(
@@ -414,21 +377,16 @@ async function collectPagedRows<T>(
 }
 
 /**
- * 指定した週IDに属する公開コンテンツのサマリー（タイトル・種別・表示順・お試し公開フラグ）を取得する。
- *
- * service_role クライアントを使用する（RLS強化により、お試し非公開コンテンツは通常クライアントの
- * SELECT では取得できないため）。コースツリーのロック表示、およびコンテンツ詳細ページの
- * 存在チェック（404 とロックの区別）に使用する（機能設計書 2.6 参照）。
- * service_role は RLS を素通りするため is_published / is_deleted は必ず絞り込み、
- * 本文カラム（text_content 等）は select しない。カラムは `CONTENT_VISIBILITY_SUMMARY_COLUMNS`
- * の許可リストのみを select し、`is_published` は select せず常に `true` を補う
- * （下の `.eq("is_published", true)` と対になっている。フィルタ条件を変える場合はこの補完も
- * 合わせて見直すこと）。
- *
- * 並びは `display_order` → `id`（`compareGroupLevel` と同じタイブレーク）。
- * PostgREST の1リクエスト上限（既定1000行）を超えても取りこぼさないよう range でページングする。
- * ページングしないと、テーマ全体を `display_order` 昇順で切った結果から現在の週の行が落ち、
- * コンテンツ詳細の `summary` 未検出で404になる。
+ * Summaries (title, type, order, trial flag) of published contents for the given week IDs.
+ * Uses service_role because RLS hides trial-closed contents from the normal client. Used for the
+ * course-tree lock view and the content detail existence check (404 vs locked; specification
+ * 2.6). service_role bypasses RLS, so is_published / is_deleted MUST be filtered and body columns
+ * (text_content etc.) never selected. Select only CONTENT_VISIBILITY_SUMMARY_COLUMNS and fill
+ * `is_published` with a constant `true` (paired with the `.eq("is_published", true)` below;
+ * revisit both together).
+ * Order is display_order then id (same tie-break as compareGroupLevel). Page with range past
+ * PostgREST's 1000-row limit: otherwise cutting the whole theme by display_order can drop the
+ * current week's rows and the detail page 404s with `summary` not found.
  */
 export async function fetchContentVisibilitySummariesByWeekIds(weekIds: number[]): Promise<{
   data: ContentVisibilitySummary[] | null;
@@ -462,13 +420,12 @@ export async function fetchContentVisibilitySummariesByWeekIds(weekIds: number[]
 }
 
 /**
- * 指定した週IDに属するコンテンツのサマリーを、未公開分も含めて通常クライアントで取得する。
- * admin / maintainer のプレビュー専用の経路（issue #68）。RLS（is_published = true OR
- * ロールが admin/maintainer）により、実際に未公開分まで返るのは admin / maintainer のみ。
- * service_role を使わず RLS 適用下で取得するため、`is_published`（バッジ表示用）も
- * select してよい（`CONTENT_VISIBILITY_SUMMARY_COLUMNS` の許可リストは service_role 経路専用
- * なのでここでは使わない）。is_deleted は必ず絞り込む（admin / maintainer 向け SELECT RLS は
- * is_deleted を見ないため）。
+ * Summaries including unpublished ones via the normal client; admin / maintainer preview only
+ * (issue #68). RLS (is_published = true OR admin/maintainer role) means only they actually get
+ * unpublished rows.
+ * No service_role here, so `is_published` (for the badge) may be selected; the service_role
+ * allowlist does not apply. is_deleted must still be filtered because the admin / maintainer
+ * SELECT RLS ignores it.
  */
 async function fetchContentSummariesByWeekIdsForManager(weekIds: number[]): Promise<{
   data: ContentVisibilitySummary[] | null;
@@ -500,10 +457,9 @@ async function fetchContentSummariesByWeekIdsForManager(weekIds: number[]): Prom
 }
 
 /**
- * 指定した週IDに属するコンテンツのサマリーをロールに応じて取得する。
- * admin / maintainer は未公開コンテンツも含めて取得する（通常クライアント経由）。
- * それ以外（member / お試しユーザー）は従来どおり service_role 経由で公開分のみ取得する
- * （AGENTS.md の service_role 利用条件を維持するため）。
+ * admin / maintainer read via the normal client including unpublished contents; everyone else
+ * (member / trial) stays on the service_role path with published only, keeping the AGENTS.md
+ * service_role conditions.
  */
 export async function fetchContentSummariesByWeekIds(
   weekIds: number[],
@@ -527,29 +483,26 @@ export interface ThemeNavigationIndex {
 }
 
 /**
- * コンテンツ詳細ページの前後ナビ用に、テーマ内通し列と現在の週のサマリーを返す。
- *
- * 内部で2クエリを実行する。
- * 1. 通常クライアント（RLS適用）でテーマ配下の週＋フェーズを取得する。**service_role は使わない。**
- * 2. 既存の `fetchContentSummariesByWeekIds()` を1回呼ぶ（受講生向けは従来どおり
- *    service_role 1回。新しい service_role 呼び出し箇所は増やさない）。
- *
- * 落とし穴:
- * - 週クエリの埋め込みは **`learning_phases!inner` が必須**。`!inner` を外すと埋め込み側の
- *   `is_published` / `is_deleted` フィルタは「phase が null になる」だけでトップレベルの週行が
- *   残り、未公開フェーズ配下の週が受講生のナビに混入する（実質的な公開範囲の拡大）。
- * - コンテンツ取得の `weekIds` には **`currentWeekId` を必ず union** する。週クエリ失敗時や、
- *   現在の週が通し列から外れるエッジ（未公開フェーズ配下など）でも現在の週のサマリーを取り、
- *   404 / ロック判定を現状と一致させる。union を外すとエッジで誤って404になる。
- *
- * 週クエリ失敗時は `console.error` のうえ週リストを空として続行する（ナビが消えるだけで、
- * ページ描画と404/ロック判定は `currentWeekContents` で死守する）。
- * コンテンツクエリ失敗時は `{ data: null, error }` を返す。
- *
- * コンテンツサマリーは `fetchContentSummariesByWeekIds()` 内で range ページングする
- * （`fetchThemeProgressSummaries()` と同じ方針）。ページングせずテーマ全体を
- * `display_order` 昇順のまま切ると、現在の週の行が欠落して `summary` 未検出の404になる。
- * 呼び出し箇所は従来どおり1つで、現行カタログでは1リクエストのまま終わる。
+ * Returns the theme-wide ordered list and the current week's summaries for prev/next navigation
+ * on the content detail page.
+ * Two queries:
+ * 1. Weeks + phases of the theme via the normal client (RLS). Never service_role.
+ * 2. One call to fetchContentSummariesByWeekIds() (students: the existing single service_role
+ *   call; do not add new service_role call sites).
+ * Pitfalls:
+ * - The week query must embed `learning_phases!inner`. Without `!inner`, the embedded
+ *   is_published / is_deleted filters only null the phase while the top-level week row stays,
+ *   leaking weeks under unpublished phases into student navigation (widens visibility).
+ * - Always union `currentWeekId` into the content `weekIds`. If the week query fails or the
+ *   current week drops out of the ordered list (e.g. under an unpublished phase), its summary is
+ *   still fetched so 404 / lock decisions match current behavior; without the union the edge case
+ *   wrongly 404s.
+ * On week query failure, console.error and continue with an empty week list (only navigation
+ * disappears; rendering and 404/lock decisions rely on currentWeekContents). On content query
+ * failure return `{ data: null, error }`.
+ * Content summaries are range-paged inside fetchContentSummariesByWeekIds() (like
+ * fetchThemeProgressSummaries()); cutting the whole theme by display_order without paging would
+ * drop the current week's rows and 404.
  */
 export async function fetchThemeNavigationIndex(
   themeId: number,
@@ -579,8 +532,8 @@ export async function fetchThemeNavigationIndex(
   if (weeksError) {
     console.error("テーマ内ナビ用週一覧取得エラー:", weeksError.message);
   } else {
-    // `!inner` 埋め込みは生成型が配列になることがあるが、many-to-one の実行時値はオブジェクト。
-    // どちらでも通し列を組み立てられるよう単一の phase に正規化する。
+    // Generated types may make a `!inner` embed an array, but the runtime value for many-to-one
+    // is an object; normalize to a single phase so both work.
     weeks = (weekRows ?? []).map((row) => {
       const rawPhase = row.phase;
       const phase = Array.isArray(rawPhase) ? (rawPhase[0] ?? null) : rawPhase;
@@ -620,10 +573,9 @@ export async function fetchThemeNavigationIndex(
 }
 
 /**
- * フェーズに属する週一覧をコンテンツ付きで取得。
- * admin / maintainer は未公開の週・コンテンツもプレビューとして取得できる（issue #68）。
- * 週・コンテンツの並びは `compareGroupLevel`（display_order 同値は id タイブレーク）で、
- * コンテンツ詳細の前後ナビと同じ規則にする。
+ * Weeks of a phase with contents. admin / maintainer also get unpublished weeks and contents
+ * (issue #68). Weeks and contents are ordered by compareGroupLevel (id tie-break on equal
+ * display_order), the same rule as prev/next navigation on the detail page.
  */
 export async function fetchWeeksWithContentsByPhaseId(
   phaseId: number,
@@ -676,9 +628,6 @@ export async function fetchWeeksWithContentsByPhaseId(
   return { data, error: null };
 }
 
-/**
- * フェーズに属する公開週一覧を取得
- */
 export async function fetchWeeksByPhaseId(phaseId: number): Promise<{
   data: LearningWeek[] | null;
   error: PostgrestError | null;
@@ -701,10 +650,7 @@ export async function fetchWeeksByPhaseId(phaseId: number): Promise<{
   return { data, error: null };
 }
 
-/**
- * 週詳細を取得（フェーズ・テーマ情報付き）。
- * admin / maintainer は未公開週もプレビューとして取得できる（issue #68）。
- */
+/** admin / maintainer also get unpublished weeks as preview (issue #68). */
 export async function fetchWeekById(
   weekId: number,
   userRole: UserRoleType | null = null
@@ -732,9 +678,6 @@ export async function fetchWeekById(
   return { data: data as LearningWeekWithBreadcrumb | null, error: null };
 }
 
-/**
- * 週に属する公開コンテンツ一覧を取得（本文・指示・ヒント等の重いカラムは除外）
- */
 export async function fetchContentsByWeekId(weekId: number): Promise<{
   data: LearningContentListItem[] | null;
   error: PostgrestError | null;
@@ -757,10 +700,7 @@ export async function fetchContentsByWeekId(weekId: number): Promise<{
   return { data: data as LearningContentListItem[] | null, error: null };
 }
 
-/**
- * コンテンツ詳細を取得（週・フェーズ・テーマ情報付き）。
- * admin / maintainer は未公開コンテンツもプレビューとして取得できる（issue #68）。
- */
+/** admin / maintainer also get unpublished contents as preview (issue #68). */
 export async function fetchContentById(
   contentId: number,
   userRole: UserRoleType | null = null
@@ -778,8 +718,9 @@ export async function fetchContentById(
       .eq("is_deleted", false),
     userRole
   );
-  // 0行（RLSで不可視・未存在・ロック済み並行取得など）は想定内のため maybeSingle。
-  // .single() だと PGRST116 がエラーログになり、コンテンツ詳細ページの並列化で誤検知する。
+  // Zero rows is expected (invisible via RLS, missing, concurrent fetch while locked), hence
+  // maybeSingle. .single() logs PGRST116 as an error, which would be a false alarm with the
+  // parallelized detail page.
   const { data, error } = await query.maybeSingle();
 
   if (error) {
@@ -790,9 +731,6 @@ export async function fetchContentById(
   return { data: data as LearningContentWithBreadcrumb | null, error: null };
 }
 
-/**
- * ユーザーの進捗を取得
- */
 export async function fetchUserProgressByContentIds(
   userId: number,
   contentIds: number[]
@@ -825,9 +763,6 @@ export async function fetchUserProgressByContentIds(
   return { data: progressMap, error: null };
 }
 
-/**
- * 特定コンテンツの進捗を取得
- */
 export async function fetchUserProgressByContentId(
   userId: number,
   contentId: number
