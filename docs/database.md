@@ -3,6 +3,8 @@
 本書は、Web技術学習支援サービスのデータベース設計について記載する。
 
 > 本書は現在の仕様のみを記載する。変更履歴は git / PR 履歴で管理し、改訂履歴節は設けない（#185）。調査ログ・一時的な運用手順は本書に残さない。
+>
+> **カラム・型・DEFAULT・CHECK/FK 制約・インデックス・RLS ポリシーの定義そのものは `supabase/migrations/` と `app/types/lib/database.types.ts` が正**であり、本書には転記しない。本書は、そこから読み取れない意図・不変条件・設計判断だけを記載する。
 
 ---
 
@@ -12,14 +14,10 @@
 - **DBMS**: PostgreSQL（Supabase マネージドサービス）
 - **認証**: Supabase Auth（`auth.uid()` による認証ユーザー識別）
 - **アクセス制御**: Row Level Security（RLS）
-- **タイムゾーン**: TIMESTAMPTZ（タイムゾーン付きタイムスタンプ）
+- **日時**: すべて TIMESTAMPTZ
 
 ### 1.2 設計方針
-- 論理削除方式（`is_deleted` フラグ）によるデータ保全
-- 公開制御（`is_published` フラグ）によるコンテンツ管理
-- `display_order` によるユーザー任意の表示順制御
-- `updated_at` の自動更新トリガーによるデータ整合性の確保
-- 外部キー制約 + `ON DELETE CASCADE` によるデータ一貫性の保証
+論理削除・公開制御・カスケード削除・進捗 upsert の方針は「8. 設計上の補足事項」を参照。
 
 ---
 
@@ -36,142 +34,12 @@ erDiagram
     users ||--o{ submissions : "1:N"
     submissions ||--o| ai_reviews : "1:1"
     users ||--o| stripe_subscriptions : "1:1"
+    users ||--o{ email_logs : "1:N"
     announcements ||--o{ announcement_reads : "1:N"
     users ||--o{ announcement_reads : "1:N"
-
-    learning_themes {
-        serial id PK
-        varchar name
-        text description
-        text image_url
-        int display_order
-        bool is_published
-        bool is_deleted
-    }
-    learning_phases {
-        serial id PK
-        int theme_id FK
-        varchar name
-        text description
-        int display_order
-        bool is_published
-        bool is_deleted
-    }
-    learning_weeks {
-        serial id PK
-        int phase_id FK
-        varchar name
-        text description
-        int display_order
-        bool is_published
-        bool is_deleted
-    }
-    learning_contents {
-        serial id PK
-        int week_id FK
-        varchar title
-        varchar content_type
-        text video_url
-        text text_content
-        text exercise_instructions
-        text reference_answer
-        text hint
-        text pdf_url
-        varchar allowed_submission_types
-        varchar code_language
-        int display_order
-        bool is_published
-        bool is_open_to_trial
-        bool is_deleted
-    }
-    users {
-        serial id PK
-        uuid auth_id
-        text email
-        text display_name
-        text avatar_url
-        text role
-        text status
-        bool is_deleted
-    }
-    user_progress {
-        serial id PK
-        int user_id FK
-        int content_id FK
-        bool is_completed
-        timestamptz completed_at
-    }
-    submissions {
-        serial id PK
-        int user_id FK
-        int content_id FK
-        varchar submission_type
-        text code_content
-        jsonb code_files
-        text url
-        timestamptz submitted_at
-    }
-    ai_reviews {
-        serial id PK
-        int submission_id FK
-        varchar status
-        text review_content
-        int overall_score
-        varchar model_used
-        int prompt_tokens
-        int completion_tokens
-        text error_message
-        timestamptz reviewed_at
-    }
-    stripe_subscriptions {
-        serial id PK
-        int user_id FK
-        text stripe_customer_id
-        text stripe_subscription_id
-        varchar status
-        bool cancel_at_period_end
-        timestamptz cancel_at
-        timestamptz current_period_end
-        timestamptz checkout_claimed_at
-        text checkout_session_id
-    }
-    stripe_events {
-        text id PK
-        text type
-        timestamptz processed_at
-    }
-    email_logs {
-        serial id PK
-        int user_id FK
-        text kind
-        text reference_key
-        timestamptz sent_at
-        text provider_message_id
-        text error
-        timestamptz created_at
-    }
-    cron_locks {
-        text name PK
-        timestamptz locked_at
-    }
-    announcements {
-        serial id PK
-        text title
-        text body
-        text_array target_statuses
-        text_array target_membership_types
-        timestamptz published_at
-        bool send_email
-        timestamptz email_sent_at
-        int created_by FK
-        bool is_deleted
-    }
-    announcement_reads {
-        int announcement_id PK
-        int user_id PK
-        timestamptz read_at
-    }
 ```
+
+`stripe_events` / `cron_locks` は他テーブルと関連を持たない独立テーブル。
 
 ---
 
@@ -179,261 +47,90 @@ erDiagram
 
 ### 3.1 learning_themes（学習テーマ）
 
-学習カリキュラムの最上位カテゴリ。複数の学習フェーズをまとめるテーマ（例：GAS学習、Webアプリ開発）。
+学習カリキュラムの最上位カテゴリ。複数の学習フェーズをまとめる（例：GAS学習）。
 
-| カラム | 型 | NULL | デフォルト | 制約 | 説明 |
-|:--|:--|:--:|:--|:--|:--|
-| id | SERIAL | NO | auto increment | PK | テーマID |
-| name | VARCHAR(255) | NO | - | NOT NULL | テーマ名 |
-| description | TEXT | YES | NULL | - | 説明文 |
-| image_url | TEXT | YES | NULL | - | サムネイル画像URL（Storage配信分は `/storage/v1/object/public/thumbnails/theme-{id}/thumbnail.{ext}?v={timestamp}` の相対パス。未設定時はプレースホルダー表示） |
-| display_order | INTEGER | YES | 0 | - | 表示順（昇順） |
-| is_published | BOOLEAN | YES | false | - | 公開フラグ |
-| is_deleted | BOOLEAN | YES | false | - | 論理削除フラグ |
-| created_at | TIMESTAMPTZ | YES | NOW() | - | 作成日時 |
-| updated_at | TIMESTAMPTZ | YES | NOW() | トリガーで自動更新 | 更新日時 |
+`learning_themes` / `learning_phases` / `learning_weeks` / `learning_contents` は共通して `display_order`（昇順の表示順）・`is_published`（公開フラグ、既定 false）・`is_deleted`（論理削除フラグ）を持つ。
 
-**サンプルデータ例**:
-- GAS学習（Google Apps Scriptを使った自動化と開発の基礎）
-
----
+- `image_url`: サムネイル画像。Storage 配信分は環境非依存の相対パス `/storage/v1/object/public/thumbnails/theme-{id}/thumbnail.{ext}?v={timestamp}` を保存する。未設定時はプレースホルダー表示
 
 ### 3.2 learning_phases（学習フェーズ）
 
-テーマ配下の学習フェーズ。Phase単位で学習内容をグループ化する。
-
-| カラム | 型 | NULL | デフォルト | 制約 | 説明 |
-|:--|:--|:--:|:--|:--|:--|
-| id | SERIAL | NO | auto increment | PK | フェーズID |
-| theme_id | INTEGER | NO | - | FK → learning_themes(id) ON DELETE CASCADE | 所属テーマ |
-| name | VARCHAR(255) | NO | - | NOT NULL | フェーズ名 |
-| description | TEXT | YES | NULL | - | 説明文 |
-| display_order | INTEGER | YES | 0 | - | 表示順（昇順） |
-| is_published | BOOLEAN | YES | false | - | 公開フラグ |
-| is_deleted | BOOLEAN | YES | false | - | 論理削除フラグ |
-| created_at | TIMESTAMPTZ | YES | NOW() | - | 作成日時 |
-| updated_at | TIMESTAMPTZ | YES | NOW() | トリガーで自動更新 | 更新日時 |
-
-**サンプルデータ例**:
-- Phase 1 - GAS基礎
-- Phase 2 - Web API基礎
-- Phase 3 - フロントエンド基礎
-
----
+テーマ配下のグループ（例：Phase 1 - GAS基礎）。`theme_id` が親（`ON DELETE CASCADE`）。
 
 ### 3.3 learning_weeks（学習週）
 
-フェーズ内の週単位グループ。Weekごとに学習コンテンツをまとめる。
-
-| カラム | 型 | NULL | デフォルト | 制約 | 説明 |
-|:--|:--|:--:|:--|:--|:--|
-| id | SERIAL | NO | auto increment | PK | 週ID |
-| phase_id | INTEGER | NO | - | FK → learning_phases(id) ON DELETE CASCADE | 所属フェーズ |
-| name | VARCHAR(255) | NO | - | NOT NULL | 週名 |
-| description | TEXT | YES | NULL | - | 説明文 |
-| display_order | INTEGER | YES | 0 | - | 表示順（昇順） |
-| is_published | BOOLEAN | YES | false | - | 公開フラグ |
-| is_deleted | BOOLEAN | YES | false | - | 論理削除フラグ |
-| created_at | TIMESTAMPTZ | YES | NOW() | - | 作成日時 |
-| updated_at | TIMESTAMPTZ | YES | NOW() | トリガーで自動更新 | 更新日時 |
-
-**サンプルデータ例**:
-- Week 1 - はじめの一歩（Phase 1所属）
-- Week 2 - スプレッドシート操作（Phase 1所属）
-
----
+フェーズ内の週単位グループ（例：Week 1 - はじめの一歩）。`phase_id` が親（`ON DELETE CASCADE`）。
 
 ### 3.4 learning_contents（学習コンテンツ）
 
-個別の学習教材。動画・テキスト・スライド・演習の4タイプをサポートする。
+個別の学習教材。動画・テキスト・スライド・演習の4種別（`content_type`）をサポートする。`week_id` が親（`ON DELETE CASCADE`）。
 
-| カラム | 型 | NULL | デフォルト | 制約 | 説明 |
-|:--|:--|:--:|:--|:--|:--|
-| id | SERIAL | NO | auto increment | PK | コンテンツID |
-| week_id | INTEGER | NO | - | FK → learning_weeks(id) ON DELETE CASCADE | 所属週 |
-| title | VARCHAR(255) | NO | - | NOT NULL | タイトル |
-| content_type | VARCHAR(20) | NO | - | CHECK ('video', 'text', 'exercise', 'slide') | コンテンツ種別 |
-| video_url | TEXT | YES | NULL | - | YouTube URL（video時） |
-| description | TEXT | YES | NULL | - | 概要（Markdown、video / slide 時・任意入力）。未入力時は詳細ページの概要欄カードを表示しない |
-| text_content | TEXT | YES | NULL | - | Markdownテキスト（text時） |
-| exercise_instructions | TEXT | YES | NULL | - | 演習指示文（exercise時） |
-| reference_answer | TEXT | YES | NULL | - | 模範回答（exercise時・AIレビュー採点基準・非公開） |
-| hint | TEXT | YES | NULL | - | ヒント（exercise時・受講生に公開） |
-| pdf_url | TEXT | YES | NULL | - | スライドPDFの `slides` バケット内オブジェクトキー（slide時。例: `gas/slide-01.pdf`。URLではなくキーのみを保存し、配信時にサーバー側で署名付きURLを発行する。6.8参照） |
-| allowed_submission_types | VARCHAR(20) | NO | 'code' | CHECK ('code', 'url', 'both') | 許可する提出方法（exercise時） |
-| code_language | VARCHAR(20) | NO | 'javascript' | CHECK ('javascript', 'typescript', 'gas', 'html', 'css') | コードエディタの言語（exercise時） |
-| display_order | INTEGER | YES | 0 | - | 表示順（昇順） |
-| is_published | BOOLEAN | YES | false | - | 公開フラグ |
-| is_open_to_trial | BOOLEAN | NO | false | NOT NULL | お試し公開フラグ。true の場合、お試しユーザー（`status = 'trial'`）にも公開する |
-| is_deleted | BOOLEAN | YES | false | - | 論理削除フラグ |
-| created_at | TIMESTAMPTZ | YES | NOW() | - | 作成日時 |
-| updated_at | TIMESTAMPTZ | YES | NOW() | トリガーで自動更新 | 更新日時 |
+**種別ごとの利用カラム**（未使用カラムは NULL）:
 
-`is_open_to_trial` はお試しユーザー向けの公開範囲のみを制御する。お試しユーザーに実際に見えるのは `is_published = true AND is_open_to_trial = true AND is_deleted = false` の行に限られ、`is_published` による通常の公開制御が優先される（詳細は「6.1 学習コンテンツ系テーブル」参照）。
-
-**content_type別の利用カラム**:
-
-| content_type | video_url | description | text_content | exercise_instructions | reference_answer | hint | pdf_url | allowed_submission_types | code_language |
-|:--|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
-| video | 使用 | 使用（任意） | - | - | - | - | - | - | - |
-| text | - | - | 使用 | - | - | - | - | - | - |
-| exercise | - | - | - | 使用 | 使用 | 使用 | - | 使用 | 使用 |
-| slide | - | 使用（任意） | - | - | - | - | 使用 | - | - |
-
-**allowed_submission_types の値**:
-
-| 値 | 動作 |
+| content_type | 使用するカラム |
 |:--|:--|
-| `'code'` | コードのみ（提出方法の選択UI非表示） |
-| `'url'` | URLのみ（提出方法の選択UI非表示） |
-| `'both'` | コード・URL両方から選択可 |
+| video | `video_url`（YouTube URL）、`description`（任意） |
+| text | `text_content`（Markdown） |
+| exercise | `exercise_instructions`、`reference_answer`（AIレビューの採点基準・**受講生には非公開**）、`hint`（受講生に公開）、`allowed_submission_types`、`code_language` |
+| slide | `pdf_url`、`description`（任意） |
 
-**code_language の値**:
-
-| 値 | 言語 |
-|:--|:--|
-| `'javascript'` | JavaScript（デフォルト） |
-| `'typescript'` | TypeScript |
-| `'gas'` | GAS（Google Apps Script） |
-| `'html'` | HTML |
-| `'css'` | CSS |
-
----
+- `description`: 概要（Markdown・任意入力）。未入力（NULL）の場合、詳細ページの概要欄カードを表示しない
+- `pdf_url`: `slides` バケット内の**オブジェクトキーのみ**（例: `gas/slide-01.pdf`）。URL を保存せず、配信時にサーバー側で署名付きURLを発行する（6.8参照）
+- `allowed_submission_types`（`code` / `url` / `both`）: 演習で許可する提出方法。`code` / `url` は提出方法の選択UIを出さず、`both` のみ選択可（既定 `code`）
+- `code_language`: コードエディタの言語（既定 `javascript`）。許可値は CHECK 制約が正
+- `is_open_to_trial`: お試し公開フラグ。`is_open_to_trial` はお試しユーザー向けの公開範囲のみを制御し、お試しユーザーに実際に見えるのは `is_published = true AND is_open_to_trial = true AND is_deleted = false` の行に限られる（`is_published` が優先。「6.1 学習コンテンツ系テーブル」参照）
 
 ### 3.5 user_progress（学習進捗）
 
-受講生のコンテンツ完了状態を管理する。
-
-| カラム | 型 | NULL | デフォルト | 制約 | 説明 |
-|:--|:--|:--:|:--|:--|:--|
-| id | SERIAL | NO | auto increment | PK | 進捗ID |
-| user_id | INTEGER | NO | - | FK → users(id) ON DELETE CASCADE | ユーザーID |
-| content_id | INTEGER | NO | - | FK → learning_contents(id) ON DELETE CASCADE | コンテンツID |
-| is_completed | BOOLEAN | YES | false | - | 完了フラグ |
-| completed_at | TIMESTAMPTZ | YES | NULL | - | 完了日時 |
-| created_at | TIMESTAMPTZ | YES | NOW() | - | 作成日時 |
-
-**制約**:
-- `UNIQUE(user_id, content_id)` — 1ユーザー・1コンテンツにつき1レコード
-- upsert操作（`ON CONFLICT`）で完了/未完了をトグル
-
----
+受講生のコンテンツ完了状態。`UNIQUE(user_id, content_id)`（1ユーザー・1コンテンツにつき1レコード）で、進捗API は upsert（`ON CONFLICT`）で完了/未完了をトグルする（8.4参照）。
 
 ### 3.6 submissions（課題提出）
 
-演習課題に対する受講生の提出データを管理する。
+演習課題に対する提出データ。
 
-| カラム | 型 | NULL | デフォルト | 制約 | 説明 |
-|:--|:--|:--:|:--|:--|:--|
-| id | SERIAL | NO | auto increment | PK | 提出ID |
-| user_id | INTEGER | NO | - | FK → users(id) ON DELETE CASCADE | ユーザーID |
-| content_id | INTEGER | NO | - | FK → learning_contents(id) ON DELETE CASCADE | コンテンツID |
-| submission_type | VARCHAR(20) | NO | - | CHECK ('code', 'url') | 提出種別 |
-| code_content | TEXT | YES | NULL | - | コード内容（code・単一ファイル時） |
-| code_files | JSONB | YES | NULL | - | コード内容（code・複数ファイル時）。`[{filename, language, content}]` |
-| url | TEXT | YES | NULL | - | URL（url時） |
-| submitted_at | TIMESTAMPTZ | YES | NOW() | - | 提出日時 |
-| created_at | TIMESTAMPTZ | YES | NOW() | - | 作成日時 |
-
-**submission_type別の利用カラム**:
-
-| submission_type | code_content | code_files | url |
-|:--|:--:|:--:|:--:|
-| code（単一ファイル） | 使用 | - | - |
-| code（複数ファイル） | - | 使用 | - |
-| url | - | - | 使用 |
-
-**補足**:
-- 同一コンテンツに対する複数回提出が可能（ユニーク制約なし）。
-- コード提出は単一/複数ファイルに対応。単一ファイルは `code_content`、複数ファイル（例: `コード.gs` + `index.html`）は `code_files` に保存し、もう一方は `NULL`。既存の `code_content` のみの提出はそのまま有効（後方互換）。
-
----
+- 同一コンテンツへの複数回提出が可能（ユニーク制約なし）
+- コード提出は、単一ファイルなら `code_content`（TEXT）、複数ファイル（例: `コード.gs` + `index.html`）なら `code_files`（JSONB。`[{filename, language, content}]`）に保存し、**もう一方は NULL**。URL 提出は `url` のみ。`code_content` のみの既存提出もそのまま有効（後方互換）
 
 ### 3.7 ai_reviews（AIレビュー）
 
-演習課題の提出に対するGemini APIによる自動レビュー結果を管理する。
+提出に対する Gemini API の自動レビュー結果。`submission_id` は UNIQUE（1提出につき1レビュー。再実行時は既存レコードを upsert で更新）。
 
-| カラム | 型 | NULL | デフォルト | 制約 | 説明 |
-|:--|:--|:--:|:--|:--|:--|
-| id | SERIAL | NO | auto increment | PK | レビューID |
-| submission_id | INTEGER | NO | - | FK → submissions(id) ON DELETE CASCADE, UNIQUE | 紐づく提出ID |
-| status | VARCHAR(20) | NO | 'pending' | CHECK ('pending', 'processing', 'completed', 'failed') | レビューステータス |
-| review_content | TEXT | YES | NULL | - | レビュー本文 |
-| overall_score | INTEGER | YES | NULL | CHECK (0 ≤ value ≤ 100) | 総合スコア（0〜100） |
-| model_used | VARCHAR(100) | YES | NULL | - | 使用したGeminiモデル名 |
-| prompt_tokens | INTEGER | YES | NULL | - | プロンプトトークン数 |
-| completion_tokens | INTEGER | YES | NULL | - | 生成トークン数 |
-| error_message | TEXT | YES | NULL | - | エラー詳細（failed時） |
-| reviewed_at | TIMESTAMPTZ | YES | NULL | - | レビュー完了日時 |
-| created_at | TIMESTAMPTZ | NO | NOW() | - | 作成日時 |
-| updated_at | TIMESTAMPTZ | NO | NOW() | トリガーで自動更新 | 更新日時 |
-
-**ステータス遷移**: `pending` → `processing` → `completed` / `failed`
-
-**制約**:
-- `submission_id` に UNIQUE 制約（1提出につき1レビュー）
-- レビュー再実行時は既存レコードを upsert で更新
-
-**アクセス制御**:
-- 受講生: 自分の提出に紐づくレビューのみ閲覧可能（RLS）
-- admin / maintainer: 全レビューの閲覧・操作可能
-
----
+- ステータス遷移: `pending` → `processing` → `completed` / `failed`
+- 受講生は自分の提出に紐づくレビューのみ閲覧でき、admin / maintainer は全件閲覧できる（6.4参照）
 
 ### 3.8 users（ユーザー）
 
-本サービスの独自Supabaseプロジェクトで管理する。初回Googleログイン時にOAuthコールバックで自動作成される（`status=trial`, `role=member`, `membership_type=NULL`, `terms_accepted_at=登録時刻`）。`status=trial` は「お試し（trial）ユーザー」としてログインしてサービスを利用でき、お試し公開コンテンツ（`is_open_to_trial=true`）の閲覧・課題提出が可能。管理者が承認後、`status=active` に変更することで全コンテンツへのアクセスが可能になる。承認時には会員種別（`membership_type`）も同時に設定する。`terms_accepted_at` は新規登録時のみ記録し、既存ユーザーは `NULL` のまま利用継続できる（再同意は求めない）。
+本サービス独自の Supabase プロジェクトで管理する。初回 Google ログイン時に OAuth コールバックで自動作成される（`status=trial`, `role=member`, `membership_type=NULL`, `terms_accepted_at=登録時刻`）。管理者が承認すると `status=active` になり、承認時に会員種別（`membership_type`）も同時に設定する。
 
-| カラム | 型 | NULL | デフォルト | 説明 |
-|:--|:--|:--:|:--|:--|
-| id | SERIAL | NO | auto increment | ユーザーID |
-| auth_id | UUID | NO | - | Supabase Auth UUID（UNIQUE） |
-| email | VARCHAR(255) | NO | - | メールアドレス |
-| display_name | VARCHAR(255) | NO | - | 表示名 |
-| avatar_url | TEXT | YES | NULL | アバター画像URL |
-| role | VARCHAR(20) | NO | 'member' | `admin` / `maintainer` / `member`（CHECK制約） |
-| status | VARCHAR(20) | NO | 'trial' | `trial` / `active` / `rejected`（CHECK制約） |
-| membership_type | VARCHAR(20) | YES | NULL | 会員種別。`community`（コミュニティ会員）/ `general`（一般有料会員）（CHECK制約）。承認前・却下ユーザーは NULL |
-| terms_accepted_at | TIMESTAMPTZ | YES | NULL | 利用規約・プライバシーポリシーへの同意日時。初回登録時に記録し、既存ユーザーは NULL のまま |
-| onboarding_completed_at | TIMESTAMPTZ | YES | NULL | 初回利用ガイド（ウェルカムダイアログ）の完了日時。閉じたときに記録し、既存ユーザーは NULL のまま |
-| email_opt_out_at | TIMESTAMPTZ | YES | NULL | 案内メール（定期メール）の配信停止日時。NULL は配信対象。配信停止リンク（`/api/email/unsubscribe`）で記録し、再開は管理者が NULL に戻す。トランザクションメールには影響しない（[機能設計書](./specification.md)10.8節） |
-| bio | TEXT | YES | NULL | 自己紹介 |
-| is_deleted | BOOLEAN | YES | false | 論理削除フラグ |
-| created_at | TIMESTAMPTZ | YES | NOW() | 作成日時 |
-| updated_at | TIMESTAMPTZ | YES | NOW() | 更新日時（トリガーで自動更新） |
+- `role`: `admin` / `maintainer` / `member`。`status`: `trial` / `active` / `rejected`（いずれも CHECK 制約）。既定は `member` / `trial`
+- `membership_type`: `community`（コミュニティ会員）/ `general`（一般有料会員）。承認前・却下ユーザーは NULL
+- `terms_accepted_at`: 利用規約・プライバシーポリシーへの同意日時。新規登録時のみ記録し、既存ユーザーは NULL のまま利用継続できる（再同意は求めない）
+- `onboarding_completed_at`: 初回利用ガイド（ウェルカムダイアログ）の完了日時。閉じたときに記録し、既存ユーザーは NULL のまま
+- `email_opt_out_at`: 案内メール（定期メール）の配信停止日時。NULL は配信対象。配信停止リンク（`/api/email/unsubscribe`）で記録し、再開は管理者が NULL に戻す。トランザクションメールには影響しない（[機能設計書](./specification.md)10.8節）
+- `auth_id`: Supabase Auth UUID（UNIQUE）
 
 > CHECK制約は値の妥当性のみを検証する。「`status = 'active'` なら `membership_type` は NOT NULL」という不変条件はDBでは保証しておらず、承認・却下処理（`approveUser()` / `rejectUser()`）を通るアプリ層でのみ担保している。
 
----
-
 ### 3.9 stripe_subscriptions（Stripeサブスクリプション）
 
-ユーザーごとのStripe課金状態のミラー（1ユーザー1行）。アプリの認可判定は従来どおり `users.status` / `users.membership_type` が唯一の真実であり、このテーブルは課金状態の参照・管理画面表示用に徹する。加えて、`user_id` のUNIQUE制約をCheckout作成の排他制御（処理権のclaim）にも用いる（後述）。書き込みはWebhook（`/api/stripe/webhook`）・successページ（`/upgrade/success`）・Checkout作成API（`/api/stripe/checkout`、claim/releaseのみ）から service_role 経由でのみ行われ、通常クライアントからの書き込みポリシーは存在しない（6.6参照）。
+ユーザーごとのStripe課金状態のミラー（1ユーザー1行、`user_id` は UNIQUE）。アプリの認可判定は従来どおり `users.status` / `users.membership_type` が唯一の真実であり、このテーブルは課金状態の参照・管理画面表示用に徹する。加えて、`user_id` のUNIQUE制約をCheckout作成の排他制御（処理権のclaim）にも用いる（後述）。書き込みはWebhook（`/api/stripe/webhook`）・successページ（`/upgrade/success`）・Checkout作成API（`/api/stripe/checkout`、claim/releaseのみ）から service_role 経由でのみ行われ、通常クライアントからの書き込みポリシーは存在しない（6.6参照）。
 
-| カラム | 型 | NULL | デフォルト | 説明 |
-|:--|:--|:--:|:--|:--|
-| id | SERIAL | NO | auto increment | ID |
-| user_id | INTEGER | NO | - | `users.id`（UNIQUE, ON DELETE CASCADE）。1ユーザー1行 |
-| stripe_customer_id | TEXT | YES | NULL | Stripe Customer ID（`cus_...`、UNIQUE）。ユーザーごとに一意で、確保後は必ず再利用する。claim直後〜Customer作成前のみ NULL |
-| stripe_subscription_id | TEXT | YES | NULL | Stripe Subscription ID（`sub_...`、UNIQUE） |
-| status | VARCHAR(30) | NO | - | Stripeの `subscription.status` をそのままミラー（例: `active`, `past_due`, `canceled`, `unpaid`）。CHECK制約は設けず、Stripe側の値追加にそのまま追従する。例外として、Checkout作成の処理権を確保している間だけ番兵値 `checkout_pending`（Stripe側には存在しない値）が入る |
-| cancel_at_period_end | BOOLEAN | NO | false | 期間終了時に解約予定かどうか（Stripe の `subscription.cancel_at_period_end` のミラー） |
-| cancel_at | TIMESTAMPTZ | YES | NULL | 解約予定日時（Stripe の `subscription.cancel_at` のミラー）。未設定なら NULL |
-| current_period_end | TIMESTAMPTZ | YES | NULL | 現在の請求期間の終了日時 |
-| checkout_claimed_at | TIMESTAMPTZ | YES | NULL | Checkout作成の処理権を確保した日時。NULLは処理権なし（未確保・解放済み・契約記録済み） |
-| checkout_session_id | TEXT | YES | NULL | 処理権が確保しているCheckout Session（`cs_...`）。次のリクエストがStripeで有効性を確認するために保持する |
-| created_at | TIMESTAMPTZ | NO | now() | 作成日時 |
-| updated_at | TIMESTAMPTZ | NO | now() | 更新日時（トリガーで自動更新） |
+- `stripe_customer_id`（UNIQUE）: ユーザーごとに一意で、確保後は必ず再利用する。claim直後〜Customer作成前のみ NULL
+- `stripe_subscription_id`（UNIQUE）
+- `cancel_at_period_end` / `cancel_at`: Stripe の `subscription.cancel_at_period_end` / `cancel_at`（解約予定日時）をそのままミラーする（下記「解約予約の判定は2列で行う」）
+- `status`: Stripeの `subscription.status` をそのままミラーする。CHECK制約は設けず、Stripe側の値追加にそのまま追従する。例外として、Checkout作成の処理権を確保している間だけ番兵値 `checkout_pending`（Stripe側には存在しない値）が入る
+- `checkout_claimed_at`: Checkout作成の処理権を確保した日時。NULLは処理権なし（未確保・解放済み・契約記録済み）
+- `checkout_session_id`: 処理権が確保しているCheckout Session（`cs_...`）。次のリクエストがStripeで有効性を確認するために保持する
 
-> **解約予約の判定は2列で行う**: flexible billing mode（Stripe API 2025-09-30.clover 以降の新規サブスクの既定）では、Customer Portal での解約は `cancel_at` に終了日時が入り、`cancel_at_period_end` は false のままになる。このため「解約予約中」は `cancel_at_period_end = true` または `cancel_at IS NOT NULL`、利用期限は `cancel_at`（無ければ `current_period_end`）で判定する。判定は `isCancellationScheduled()` / `cancellationEndsAt()`（`app/lib/subscription-period.ts`）に集約し、`/upgrade` の表示と解約予約メールで共有する。両列とも Stripe の値をそのままミラーし、アプリ側で合成した値は書かない。
-
+> **解約予約の判定は2列で行う**: flexible billing mode（Stripe API 2025-09-30.clover 以降の新規サブスクの既定）では、Customer Portal での解約は `cancel_at` に終了日時が入り、`cancel_at_period_end` は false のままになる。このため「解約予約中」は `cancel_at_period_end = true` または `cancel_at IS NOT NULL`、利用期限は `cancel_at`（無ければ `current_period_end`）で判定する。判定は `isCancellationScheduled()` / `cancellationEndsAt()`（`app/lib/subscription-period.ts`）に集約し、`/upgrade` の表示と解約予約メールで共有する。両列ともStripeの値をそのままミラーし、アプリ側で合成した値は書かない。
+>
 > **行が解約後も残り続ける点に注意**: `DELETE` は行わず常に `user_id` を key に `upsert` するため、一度でも契約したユーザーの行は解約後（`status` が `canceled` / `unpaid` / `incomplete_expired` / `paused` などの終端状態）も残り続ける。Checkout手続きを中断したユーザーの行（`checkout_pending`）も同様に残る。「現在契約中かどうか」を判定する箇所（`/upgrade` の契約中表示・管理画面のバッジ表示など）は、行の有無だけでなく `status` が契約を表す値であることも確認する必要がある（アプリ側では `NON_CURRENT_SUBSCRIPTION_STATUSES` 定数＝終端状態＋`checkout_pending` を除外して判定）。
 >
 > **Checkout作成の排他（claim/release）**: `POST /api/stripe/checkout` は、Checkout Sessionを作る**前に** `status = 'checkout_pending'` の行をINSERTして処理権を確保する（`claimCheckoutSlot()`）。`user_id` のUNIQUE制約により、同一ユーザーの並行リクエストは片方だけがclaimに成功する（`stripe_events` のclaimと同じパターン）。既に行がある場合は「契約が記録されておらず（`NON_CURRENT_SUBSCRIPTION_STATUSES`）、かつ奪ってよいclaimの」行だけを条件付きUPDATEで奪う（条件評価と書き込みが1文で完結するためレースにならない）。claim時に契約の痕跡（`stripe_subscription_id`・`cancel_at_period_end`・`current_period_end`）は消さない。`paused` / `unpaid` はStripe側で復帰しうるため、`stripe_subscription_id` を消すと復帰時のWebhookを `syncSubscriptionStatus()` が照合できず取りこぼす。
 >
 > Checkoutを作れなかった場合は `checkout_claimed_at` をNULLに戻して解放し（`releaseCheckoutSlot()`。確保済みCustomerを失わないよう行自体は削除しない）、決済完了時は昇格処理のミラー更新が実ステータスと `checkout_claimed_at = NULL` を書き込むことで解除される。
 >
-> **有効なclaimが残っている場合の判断**: `checkout_session_id` のセッション状態をStripeへ問い合わせ、`open`（まだ決済できる）ならそのURLを再利用し（2つ目のセッションを作らず、手続きを中断したユーザーも即座にやり直せる）、`expired` なら参照した claim をそのまま奪い（claimの確保時刻をCASの条件にする）、`complete`（決済済みで反映待ち）なら奪わず、呼び出し元（`POST /api/stripe/checkout`）がそのセッションを反映してから claim をやり直す（Webhookとsuccessページの両方が失敗した場合の自己復旧。[機能設計書](./specification.md)2.11節）。`checkout_session_id` が記録されていない場合は、Customerに紐づく「claim確保以降に作られたセッション」を照会して同じ判定を行う（作成時刻の下限をclaim確保時刻に置き、過去の契約で完了したセッションを拾わない。照会で `complete` と `open` が並存する場合は `complete` を優先し、`open` を失効させてから反映する）。Stripeへ照会できない場合のみ、`CHECKOUT_CLAIM_TTL_MS`（`app/services/api/stripe-server.ts`）経過で再claim可能とする救済に委ねる。TTLはセッション有効期限（32分）＋猶予（10分）としてコードで導出し、「TTL経過時点で当該セッションは必ず失効している」という不等号を構造的に保証する。
+> **有効なclaimが残っている場合の判断**: `checkout_session_id` のセッション状態をStripeへ問い合わせ、`open`（まだ決済できる）ならそのURLを再利用し、`expired` なら参照した claim をそのまま奪い（claimの確保時刻をCASの条件にする）、`complete`（決済済みで反映待ち）なら奪わず、呼び出し元がそのセッションを反映してから claim をやり直す（挙動の詳細は[機能設計書](./specification.md)2.11節）。`checkout_session_id` が記録されていない場合は、Customerに紐づく「claim確保以降に作られたセッション」を照会して同じ判定を行う（作成時刻の下限をclaim確保時刻に置き、過去の契約で完了したセッションを拾わない。`complete` と `open` が並存する場合は `complete` を優先し、`open` を失効させてから反映する）。Stripeへ照会できない場合のみ、`CHECKOUT_CLAIM_TTL_MS`（`app/services/api/stripe-server.ts`）経過で再claim可能とする救済に委ねる。TTLはセッション有効期限（32分）＋猶予（10分）としてコードで導出し、「TTL経過時点で当該セッションは必ず失効している」という不等号を構造的に保証する。
 >
 > **処理権を解放してよい条件**: Checkout作成に失敗した場合でも、解放してよいのは「Stripe側に有効なセッションが残っていないと確定できる」ときだけ（Stripeが4xxで拒否した場合、またはセッションを失効させられた場合）。通信タイムアウト・5xxのように作成済みか判別できない場合は解放せず、次回claim時の照会かTTLに委ねる。セッションidを記録できなかった場合は、作成したセッションを失効させてから失敗させる（記録できないと、そのセッションと処理権を紐付けられず、リプレイで処理権が解除されたときに二重契約の窓が開くため）。
 >
@@ -441,21 +138,15 @@ erDiagram
 >
 > **Stripe Customerはユーザーごとに一意**: `stripe_customer_id` は最初のCheckout作成時に確保して保存し、以後は必ず再利用する（`ensureCheckoutCustomer()`）。Checkoutごとに新しいCustomerが作られると、ミラーに載らないCustomerの契約が生まれ、`/api/stripe/portal`（ミラーの `stripe_customer_id` しか見ない）から解約できなくなるため。
 >
-> **`users` への昇格反映は「現に有効」なときのみ**: `stripe_subscriptions` のミラー自体はStripeから取得したステータスをそのまま保存するが、`users.status`/`membership_type` を昇格させるのは `status` が `ACTIVATABLE_SUBSCRIPTION_STATUSES`（`active` / `trialing`）のときのみ（`app/services/api/stripe-server.ts`）。Checkout Sessionは決済後もStripe側に不変オブジェクトとして残るため、`payment_status` だけで判定すると解約後・未入金時にも昇格してしまう経路を防ぐための制御。
+> **`users` への昇格反映は「現に有効」なときのみ**: `stripe_subscriptions` のミラー自体はStripeから取得したステータスをそのまま保存するが、`users.status`/`membership_type` を昇格させるのは `status` が `ACTIVATABLE_SUBSCRIPTION_STATUSES`（`active` / `trialing`）のときのみ（`app/services/api/stripe-server.ts`）。Checkout Sessionは決済後もStripe側に不変オブジェクトとして残るため、`payment_status` だけで判定すると解約後・未入金時にも昇格してしまう経路を防ぐための制御（[機能設計書](./specification.md)2.11節）。
 
 ### 3.10 stripe_events（Webhookイベント記録）
 
-Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`）をPKにすることで、TTL（後述）以内の再送・重複配信を安全にスキップできる。
-
-| カラム | 型 | NULL | デフォルト | 説明 |
-|:--|:--|:--:|:--|:--|
-| id | TEXT | NO | - | Stripe event.id（`evt_...`、PK） |
-| type | TEXT | NO | - | イベント種別（例: `checkout.session.completed`） |
-| processed_at | TIMESTAMPTZ | NO | now() | claim（処理権確保）した日時 |
+Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`）をPKにすることで、TTL以内の再送・重複配信を安全にスキップできる。`type` はイベント種別、`processed_at` はclaim（処理権確保）した日時。
 
 > **claim/releaseによる原子的な冪等性**: `event.id` への素のINSERT（upsertではない）を「claim」として使う（`claimEvent()`）。同一event.idの並行配信はDBの一意制約により片方だけがclaimに成功するため、真に排他的。ハンドラが失敗した場合のみ行を削除して処理権を解放する（`releaseEventClaim()`）。先に成功扱いで記録し、ハンドラが後から失敗するような設計だと、Stripeの自動リトライ時に「処理済み」と誤判定され二度とハンドラに到達できなくなるため、claim（実行前）とrelease（失敗時のみ）を明確に分離している。`/api/stripe/webhook` はclaimに成功した場合のみハンドラを実行する。
 >
-> **TTLによる救済（既知の限界への対処）**: サーバーレス関数のタイムアウト・強制終了等でclaim後にrelease処理へ到達できなかった場合、claim行が残り続け以後の再送が永久にスキップされてしまう。これを防ぐため、一意制約違反（既にclaim済み）の場合は既存claimの`processed_at`が`EVENT_CLAIM_TTL_MINUTES`（10分、`app/services/api/stripe-webhook-server.ts`）を超えて放置されていないかを確認し、放置されていれば`processed_at`を更新して再claimする。ハンドラは冪等に設計されているため、まれに完了済みイベントを再claim・再実行しても実害は小さい（Slack通知の重複程度）。
+> **TTLによる救済**: サーバーレス関数のタイムアウト・強制終了等でclaim後にrelease処理へ到達できなかった場合、claim行が残り続け以後の再送が永久にスキップされてしまう。これを防ぐため、一意制約違反（既にclaim済み）の場合は既存claimの`processed_at`が`EVENT_CLAIM_TTL_MINUTES`（`app/services/api/stripe-webhook-server.ts`）を超えて放置されていないかを確認し、放置されていれば`processed_at`を更新して再claimする。ハンドラは冪等に設計されているため、まれに完了済みイベントを再claim・再実行しても実害は小さい（Slack通知の重複程度）。
 >
 > **Webhook以外の用途（通知の重複抑止）**: Checkout自動復旧不可通知（[機能設計書](./specification.md)2.11節）の重複抑止にも、同じclaimを流用する。キーは `checkout_recovery_notice:<users.id>:<Checkout Session id,...>`、`type` は `app.checkout_recovery_notice` で、Stripeの `event.id`（`evt_...`）とは衝突しない。TTLは60分（`claimEvent()` の `ttlMinutes` で指定）で、releaseはしない（60分経過後に再claimできた場合のみ再通知する）。
 >
@@ -463,89 +154,43 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 ### 3.11 email_logs（メール送信ログ）
 
-受講生向けメール（トランザクションメール・定期メール。[機能設計書](./specification.md)10章）の送信記録。送信前のINSERTを処理権（claim）として使い、同一事象の二重送信を防ぐ。
+受講生向けメール（トランザクションメール・定期メール。[機能設計書](./specification.md)10章）の送信記録。送信前のINSERTを処理権（claim）として使い、同一事象の二重送信を防ぐ。`UNIQUE (user_id, kind, reference_key)`。
 
-| カラム | 型 | NULL | デフォルト | 説明 |
-|:--|:--|:--:|:--|:--|
-| id | SERIAL | NO | - | PK |
-| user_id | INTEGER | NO | - | FK → users.id（ON DELETE CASCADE） |
-| kind | TEXT | NO | - | メール種別（`signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended`、定期メールの `weekly_digest` / `inactivity_reminder` / `trial_nurture`、お知らせの一斉送信 `announcement`、週次進捗の繰り越し予約 `weekly_digest_reserved`（送信しない記録用の行。`sent_at` / `error` は NULL のまま）。値はアプリの `EMAIL_KIND` で管理し、種別の追加に追従できるよう CHECK 制約は設けない） |
-| reference_key | TEXT | NO | - | 同一事象の識別子（`signup` は `users.id`、`approved` は承認時刻、Stripe 系は `stripe_subscription_id`、`weekly_digest` は週の開始日（月曜、`YYYY-MM-DD`）、`inactivity_reminder` / `trial_nurture` は `day7` など登録からの日数、`announcement` はお知らせの ID） |
-| sent_at | TIMESTAMPTZ | YES | - | 送信に成功した日時 |
-| provider_message_id | TEXT | YES | - | Resend のメッセージid |
-| error | TEXT | YES | - | 送信に失敗した場合のエラー内容（APIキー等の秘匿情報は含めない） |
-| created_at | TIMESTAMPTZ | NO | now() | claim した日時 |
+- `kind`: メール種別。値はアプリの `EMAIL_KIND` で管理し、種別の追加に追従できるよう CHECK 制約は設けない（種別とトリガーは[機能設計書](./specification.md)10.4・10.7・11.4節）。週次進捗の繰り越し予約 `weekly_digest_reserved` は送信しない記録用の行で、`sent_at` / `error` は NULL のまま
+- `reference_key`: 同一事象の識別子（種別ごとの値は機能設計書10.4・10.7節）
+- `sent_at`（送信成功日時）/ `provider_message_id`（Resend のメッセージid）/ `error`（失敗時の内容。APIキー等の秘匿情報は含めない）
 
-制約: `UNIQUE (user_id, kind, reference_key)`（`email_logs_user_kind_reference_key`）
-
-> **claimによる二重送信防止**: 送信前に `(user_id, kind, reference_key)` をINSERTし、一意制約違反（23505）なら送信しない（`stripe_events` のclaimと同じパターン。`deliverUserEmail()`）。Webhook と `/upgrade/success` の両経路・Webhookの再送・同時配信で同じ事象のメールを複数回送ろうとしても、INSERTに成功した1つだけが送信する。送信失敗時は行を削除せず `error` を記録する（再送はしない。例外として、お知らせの一斉送信は Resend が受け付けなかったことが確実な失敗の行を公開から3日以内に限り翌日以降に削除して送り直す。機能設計書11.4節）。claim後に処理が中断した行は `sent_at` / `error` が共に NULL のまま残り、以後その事象のメールは送られない（重複よりも欠落を許容する）。
-
+> **claimによる二重送信防止**: 送信前に `(user_id, kind, reference_key)` をINSERTし、一意制約違反（23505）なら送信しない（`stripe_events` のclaimと同じパターン。`deliverUserEmail()`）。Webhook と `/upgrade/success` の両経路・Webhookの再送・同時配信でも、INSERTに成功した1つだけが送信する。送信失敗時は行を削除せず `error` を記録する（再送はしない。例外として、お知らせの一斉送信は Resend が受け付けなかったことが確実な失敗の行を公開から3日以内に限り翌日以降に削除して送り直す。機能設計書11.4節）。claim後に処理が中断した行は `sent_at` / `error` が共に NULL のまま残り、以後その事象のメールは送られない（重複よりも欠落を許容する）。
 
 ### 3.12 cron_locks（Cron バッチの実行ロック）
 
-定期メールの日次バッチ（[機能設計書](./specification.md)10.7節）の並行実行を防ぐロック。`name` への INSERT を処理権（claim）とし、主キー違反なら別の実行が進行中として何もしない（`claimCheckoutSlot()` と同じパターン。`claimCronLock()`）。終了時に自分が取った行（`locked_at` が一致する行）を削除して解放する（`releaseCronLock()`）。関数のハードタイムアウト等で残った行は、アプリ側の TTL（`EMAIL_DIGEST_LOCK_TTL_MS`）を過ぎたら削除して取り直す。
-
-| カラム | 型 | NULL | デフォルト | 説明 |
-|:--|:--|:--:|:--|:--|
-| name | TEXT | NO | - | PK。ロック名（`email-digest`） |
-| locked_at | TIMESTAMPTZ | NO | - | ロックを取った日時 |
-
+定期メールの日次バッチ（[機能設計書](./specification.md)10.7節）の並行実行を防ぐロック（`name` が PK、`locked_at`）。`name` への INSERT を処理権（claim）とし、主キー違反なら別の実行が進行中として何もしない（`claimCheckoutSlot()` と同じパターン。`claimCronLock()`）。終了時に自分が取った行（`locked_at` が一致する行）を削除して解放する（`releaseCronLock()`）。関数のハードタイムアウト等で残った行は、アプリ側の TTL（`EMAIL_DIGEST_LOCK_TTL_MS`）を過ぎたら削除して取り直す。
 
 ### 3.13 announcements（お知らせ）
 
-運営（admin / maintainer）から受講生へのお知らせ（[機能設計書](./specification.md)11章）。`published_at` が NULL なら下書き。`send_email` なら Cron の日次バッチがメールでも一斉送信し、対象者全員に送り終えた日に `email_sent_at` を記録する。
+運営（admin / maintainer）から受講生へのお知らせ（[機能設計書](./specification.md)11章）。
 
-| カラム | 型 | NULL | デフォルト | 説明 |
-|:--|:--|:--:|:--|:--|
-| id | SERIAL | NO | auto increment | PK |
-| title | TEXT | NO | - | タイトル（CHECK: 空白のみ不可） |
-| body | TEXT | NO | - | 本文（Markdown） |
-| target_statuses | TEXT[] | NO | - | 対象ステータス（`active` / `trial` の1つ以上。CHECK） |
-| target_membership_types | TEXT[] | YES | NULL | 対象会員種別（`community` / `general` の1つ以上。CHECK）。NULL は全種別。指定するとお試しユーザー（会員種別 NULL）には見えない |
-| published_at | TIMESTAMPTZ | YES | NULL | 公開日時。NULL は下書き |
-| send_email | BOOLEAN | NO | false | メールでも一斉送信するか |
-| email_sent_at | TIMESTAMPTZ | YES | NULL | 一斉送信を対象者全員に送り終えた日時（対象を変更すると NULL に戻す） |
-| created_by | INTEGER | YES | NULL | 作成者（FK → users.id、ON DELETE SET NULL） |
-| is_deleted | BOOLEAN | NO | false | 論理削除フラグ |
-| created_at | TIMESTAMPTZ | NO | now() | 作成日時 |
-| updated_at | TIMESTAMPTZ | NO | now() | 更新日時（トリガーで自動更新） |
+- `published_at`: NULL なら下書き
+- `target_statuses`（`active` / `trial` の1つ以上。CHECK）/ `target_membership_types`（`community` / `general` の1つ以上。CHECK。NULL は全種別。指定するとお試しユーザー（会員種別 NULL）には見えない）
+- `send_email`: メールでも一斉送信するか。Cron の日次バッチが送り、対象者全員に送り終えた日に `email_sent_at` を記録する（対象を変更すると NULL に戻す）
+- `created_by`: 作成者（`users.id`、`ON DELETE SET NULL`）。`is_deleted` で論理削除
 
 ### 3.14 announcement_reads（お知らせの既読）
 
-本人が詳細を開いたときに記録する既読（1人1お知らせ1行）。
+本人が詳細を開いたときに記録する既読（1人1お知らせ1行、`PRIMARY KEY (announcement_id, user_id)`）。既読は取り消さない。
 
-| カラム | 型 | NULL | デフォルト | 説明 |
-|:--|:--|:--:|:--|:--|
-| announcement_id | INTEGER | NO | - | FK → announcements.id（ON DELETE CASCADE）。PK の一部 |
-| user_id | INTEGER | NO | - | FK → users.id（ON DELETE CASCADE）。PK の一部 |
-| read_at | TIMESTAMPTZ | NO | now() | 既読にした日時 |
-
-制約: `PRIMARY KEY (announcement_id, user_id)`
 ---
 
 ## 4. インデックス
 
-明示的に作成したインデックスに加え、UNIQUE 制約が暗黙に作るインデックスも併記する（クエリ計画・重複判定の参照用）。
+定義は `supabase/migrations/` が正（`20260911010345_add_query_pattern_indexes.sql` ほか）。設計上の意図のみ記す。
 
-| インデックス名 | テーブル | 対象カラム | 用途 |
-|:--|:--|:--|:--|
-| idx_learning_phases_theme_id | learning_phases | theme_id, display_order | テーマ内のフェーズ一覧（`ORDER BY display_order`） |
-| idx_learning_weeks_phase_id | learning_weeks | phase_id, display_order | フェーズ内の週一覧（`ORDER BY display_order`） |
-| idx_learning_contents_week_id | learning_contents | week_id, display_order | 週内のコンテンツ一覧（`ORDER BY display_order`） |
-| idx_learning_contents_pdf_url | learning_contents | pdf_url（部分: `pdf_url IS NOT NULL`） | slides Storage SELECT の EXISTS（`pdf_url = storage.objects.name`）向け。#216 |
-| user_progress_user_id_content_id_key | user_progress | user_id, content_id（UNIQUE） | ユーザー×コンテンツの一意制約。`user_id` 絞り込みや `ORDER BY content_id` も賄う |
-| idx_user_progress_user_id_completed | user_progress | user_id, completed_at（部分: `is_completed = true`） | RPC `get_students_progress_summary` の完了集計（`GROUP BY user_id` + `max(completed_at)`） |
-| idx_user_progress_content_id | user_progress | content_id | コンテンツ別の進捗検索 |
-| idx_submissions_user_id | submissions | user_id, submitted_at DESC, id DESC | ユーザー別の提出一覧（`ORDER BY submitted_at DESC, id DESC`） |
-| idx_submissions_submitted_at | submissions | submitted_at DESC, id DESC | 管理者向け提出一覧（`ORDER BY submitted_at DESC, id DESC`。offset ページネーション） |
-| idx_submissions_content_id | submissions | content_id | コンテンツ別の提出検索 |
-| idx_ai_reviews_status | ai_reviews | status | ステータス別のレビュー検索 |
-| ai_reviews_submission_id_key | ai_reviews | submission_id（UNIQUE） | 提出に紐づくレビュー取得（1提出1行） |
-| users_auth_id_key | users | auth_id（UNIQUE） | RLSヘルパー（`get_user_id` / `get_user_role` / `get_user_status`）の `auth_id` 検索 |
-| email_logs_user_kind_reference_key | email_logs | user_id, kind, reference_key（UNIQUE） | メールの二重送信防止（claim の一意制約） |
-| idx_announcements_published | announcements | published_at DESC（部分: `published_at IS NOT NULL AND is_deleted = false`） | 受講生向けのお知らせ一覧（新しい順）と、一斉送信の送信待ちの抽出 |
-| announcement_reads_pkey | announcement_reads | announcement_id, user_id（PK） | 既読の一意性 |
-| idx_announcement_reads_user_id | announcement_reads | user_id | 本人の既読一覧（未読件数の算出） |
+- 階層テーブルは親IDと `display_order` の複合インデックス（`ORDER BY display_order` の一覧取得向け）
+- `submissions` は `(submitted_at DESC, id DESC)` 系（提出一覧の offset ページネーション向け。ユーザー別は先頭に `user_id`）
+- `user_progress` の部分インデックス（`is_completed = true`）は、RPC `get_students_progress_summary` の完了集計向け
+- `learning_contents.pdf_url` の部分インデックス `idx_learning_contents_pdf_url`（`pdf_url IS NOT NULL`）は、slides の Storage SELECT ポリシーの `EXISTS`（`pdf_url = storage.objects.name`）向け（6.8参照）
+- `announcements` は公開済み・未削除に絞った `published_at DESC` の部分インデックス（受講生向け一覧と、一斉送信の送信待ち抽出向け）、`announcement_reads` は `user_id`（未読件数の算出向け）
+- UNIQUE 制約が暗黙に作るインデックス（`user_progress(user_id, content_id)`・`ai_reviews(submission_id)`・`users(auth_id)` 等）と重複する covering インデックスは追加しない。`users(auth_id)` は RLS ヘルパー（5.2）の検索を賄う
 
 ---
 
@@ -553,30 +198,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 ### 5.1 updated_at 自動更新トリガー
 
-`BEFORE UPDATE` トリガーにより、レコード更新時に `updated_at` を自動更新する。
-
-**トリガー関数**:
-```sql
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = NOW();
-  RETURN NEW;
-END;
-$$ language 'plpgsql';
-```
-
-**適用テーブル**:
-
-| トリガー名 | テーブル |
-|:--|:--|
-| update_learning_themes_updated_at | learning_themes |
-| update_learning_phases_updated_at | learning_phases |
-| update_learning_weeks_updated_at | learning_weeks |
-| update_learning_contents_updated_at | learning_contents |
-| update_ai_reviews_updated_at | ai_reviews |
-| update_users_updated_at | users |
-| update_announcements_updated_at | announcements |
+`updated_at` を持つテーブルに `BEFORE UPDATE` トリガー（関数 `update_updated_at_column()`）を設定し、更新時に自動で `updated_at` を更新する。定義は `20260412010000_create_tables.sql`。
 
 ### 5.2 RLSヘルパー関数
 
@@ -584,14 +206,12 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 
 | 関数 | 返り値 | 説明 |
 |:--|:--|:--|
-| `get_user_role()` | TEXT | 認証ユーザー（`auth.uid()`）の `role` を返す（`is_deleted = false` かつ `status <> 'rejected'` が対象。却下（`rejected`）ユーザーは NULL となり、admin/maintainer 向けポリシーのロールバイパスに一切乗らない。却下前に付与されていたロールを保持したまま Auth セッションが有効な間に認可を突破する事故を防ぐ（#104）。`trial` は対象外にしない（アプリ層は元々 rejected のみを弾く設計であり、`active` 限定にすると trial の admin/maintainer でアプリ層とRLSの認可判定が食い違うため）） |
+| `get_user_role()` | TEXT | 認証ユーザー（`auth.uid()`）の `role` を返す（`is_deleted = false` かつ `status <> 'rejected'` が対象）。却下（`rejected`）ユーザーは NULL となり、admin/maintainer 向けポリシーのロールバイパスに一切乗らない。却下前に付与されていたロールを保持したまま Auth セッションが有効な間に認可を突破する事故を防ぐ（#104）。`trial` は対象外にしない（アプリ層は元々 rejected のみを弾く設計であり、`active` 限定にすると trial の admin/maintainer でアプリ層とRLSの認可判定が食い違うため） |
 | `get_user_id()` | INTEGER | 認証ユーザーの `users.id` を返す（`is_deleted = false` が対象） |
-| `get_user_status()` | TEXT | 認証ユーザーの `status`（`trial` / `active` / `rejected`）を返す（`is_deleted = false` が対象）。お試しユーザーのコンテンツ制限に使用する |
-| `get_user_membership_type()` | TEXT | 認証ユーザーの `membership_type`（`community` / `general`、お試し・却下は NULL）を返す（`is_deleted = false` が対象）。お知らせの対象会員種別の判定に使用する（#254） |
+| `get_user_status()` | TEXT | 認証ユーザーの `status` を返す（`is_deleted = false` が対象）。お試しユーザーのコンテンツ制限に使用する |
+| `get_user_membership_type()` | TEXT | 認証ユーザーの `membership_type` を返す（`is_deleted = false` が対象。お試し・却下は NULL）。お知らせの対象会員種別の判定に使用する（#254） |
 
-いずれも `STABLE SECURITY DEFINER`・`SET search_path = public` で定義されている。
-
-EXECUTE 権限は `authenticated` / `service_role` にのみ付与しており、`anon`（未認証）からの REST RPC 経由の実行は許可しない（`PUBLIC` へのデフォルト付与も取り消し済み）。新たにヘルパー関数を追加する際も、同じパターン（`STABLE SECURITY DEFINER` + `SET search_path = public` + `PUBLIC, anon` からの REVOKE + `authenticated, service_role` への GRANT）を踏襲する。ヘルパーの GRANT/REVOKE や関数本体は認可ロジックの変更時以外いじらない。
+いずれも `STABLE SECURITY DEFINER`・`SET search_path = public` で定義し、EXECUTE 権限は `authenticated` / `service_role` にのみ付与する（`PUBLIC` へのデフォルト付与を取り消し、`anon`（未認証）からの REST RPC 経由の実行は許可しない）。新たにヘルパー関数を追加する際も同じパターン（`PUBLIC, anon` からの REVOKE + `authenticated, service_role` への GRANT）を踏襲する。ヘルパーの GRANT/REVOKE や関数本体は認可ロジックの変更時以外いじらない。
 
 **この `SECURITY DEFINER` の規約は、ポリシー内から呼ぶRLSヘルパーに限る。** アプリから直接叩くRPC（例: `get_students_progress_summary()`。6.2節参照）は逆に `SECURITY DEFINER` にしてはならない。`SECURITY DEFINER` にするとRLSを迂回するため、`authenticated` にGRANTしたままだと任意のmemberが他ユーザーの行まで取得できてしまう。呼び出し元の権限のままRLSに従わせる `SECURITY INVOKER`（デフォルト）を維持すること。
 
@@ -599,135 +219,84 @@ EXECUTE 権限は `authenticated` / `service_role` にのみ付与しており�
 
 ## 6. Row Level Security（RLS）
 
-全テーブルに対してRLSが有効化されている。ポリシーは `authenticated` ロール（Supabase Authで認証済みユーザー）に対して適用される。
+全テーブルに対してRLSが有効化されている。ポリシーは `authenticated` ロール（Supabase Authで認証済みユーザー）に対して適用される。ポリシーの正確な条件式は `supabase/migrations/` の `*_rls_policies.sql` 以降が正で、本節は各ポリシーの意図を記す。
 
 パフォーマンスのため、以下の方針でポリシーを定義している（Supabase Performance Advisor の `multiple_permissive_policies` / `auth_rls_initplan` 警告対応）。
 
 - 同一テーブル・同一操作に対する許可ポリシーは `OR` 条件で1つに統合する
 - ポリシー内の関数呼び出しは `(select get_user_role())` のように `(select ...)` で包み、行ごとの再評価を防いでクエリ実行時に1回だけ評価（InitPlan化）させる
-- 同一ヘルパーを1ポリシー内で複数回書くと、Postgres は別の InitPlan になり各1回評価される（共有されない）。`(select ...)` で InitPlan 化したうえで、分岐が必要なときは `CASE (select get_user_status()) ...` のように1本に折り畳む。節約されるのは1ステートメントあたり `users` の PK 探索1回（行ごとではない）（#197 PR2）
-- 外側の行と結びつく条件が書けるときは `EXISTS (SELECT 1 ...)` を用いる（無相関の `IN (SELECT ...)` は hashed SubPlan として既に1回評価されるが、相関 `EXISTS` にすると点検索で PK プローブも選べる）。ヘルパー呼び出しは引き続き `(select ...)` で包む（`ai_reviews` SELECT、#197 PR2）
+- 同一ヘルパーを1ポリシー内で複数回書くと、Postgres は別の InitPlan になり各1回評価される（共有されない）。分岐が必要なときは `CASE (select get_user_status()) ...` のように1本に折り畳む
+- 外側の行と結びつく条件が書けるときは `EXISTS (SELECT 1 ...)` を用いる（相関 `EXISTS` にすると点検索で PK プローブも選べる）。ヘルパー呼び出しは引き続き `(select ...)` で包む（`ai_reviews` SELECT）
+
+以降、ロール判定は `(select get_user_role()) IN ('admin', 'maintainer')`（5.2参照）、本人判定は `user_id = (select get_user_id())` を用いる。
 
 ### 6.1 学習コンテンツ系テーブル
 
 `learning_themes`、`learning_phases`、`learning_weeks`、`learning_contents` に共通のポリシーパターン。ただし SELECT のみ、`learning_contents` はお試しユーザー向けの制限が加わるため別パターンとなる（後述）。
 
-| ポリシー | 操作 | 対象 | 条件 |
-|:--|:--|:--|:--|
-| {Table} are viewable by users or content managers | SELECT | 認証済み全ユーザー（公開分）/ admin・maintainer（全件） | `(is_published = true AND is_deleted = false) OR (select get_user_role()) IN ('admin', 'maintainer')` |
-| Content managers can insert {table} | INSERT | admin・maintainer | `(select get_user_role()) IN ('admin', 'maintainer')` |
-| Content managers can update {table} | UPDATE | admin・maintainer | `(select get_user_role()) IN ('admin', 'maintainer')` |
-| Content managers can delete {table} | DELETE | admin・maintainer | `(select get_user_role()) IN ('admin', 'maintainer')` |
+| 操作 | 対象 | 条件 |
+|:--|:--|:--|
+| SELECT | 認証済み全ユーザー（公開分）/ admin・maintainer（全件） | `(is_published = true AND is_deleted = false)` または admin・maintainer |
+| INSERT / UPDATE / DELETE | admin・maintainer | ロールが admin・maintainer |
 
-`{Table}` / `{table}` にはテーブル名（themes / phases / weeks / contents）が入る。実際のポリシー名に合わせ、文頭に置かれる `{Table}` のみ先頭大文字（例: `Themes are viewable by users or content managers` / `Content managers can insert themes`）。
-
-admin と maintainer はいずれもコンテンツ系テーブルの全件参照・作成・更新・削除が可能（コンテンツ管理は両ロール共通）。
-
-**ロール判定ロジック**:
-
-ロールチェックは SECURITY DEFINER 関数 `get_user_role()` を用いる（「5.2 RLSヘルパー関数」参照）。
-
-```sql
-(select get_user_role()) IN ('admin', 'maintainer')   -- 例: コンテンツ管理者向けポリシー
-```
+コンテンツ管理は admin・maintainer 共通で、全件の参照・作成・更新・削除が可能。
 
 **learning_contents の SELECT（お試しユーザー制限）**:
 
-`learning_contents` の SELECT のみ、お試しユーザー（`status = 'trial'`）はお試し公開分に限定する。
+公開済み・未削除行のうち、`get_user_status()` が `active` なら全行、`trial` なら `is_open_to_trial = true` の行のみ、`rejected` / その他は不可（`CASE (select get_user_status()) WHEN 'active' THEN true WHEN 'trial' THEN is_open_to_trial ELSE false END`）。admin / maintainer は `get_user_role()` の OR 枝で未公開行も含め全件可視。却下時のロールバイパス抑止は `get_user_role()` の契約に従う（5.2参照）。
 
-| ポリシー | 操作 | 対象 | 条件 |
-|:--|:--|:--|:--|
-| Contents are viewable by users or content managers | SELECT | active（公開分）/ お試しユーザー（お試し公開分のみ）/ admin・maintainer（全件） / rejected は公開分も不可（ロールバイパスなし） | `(is_published = true AND is_deleted = false AND CASE (select get_user_status()) WHEN 'active' THEN true WHEN 'trial' THEN is_open_to_trial ELSE false END) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+親階層（`learning_themes` / `learning_phases` / `learning_weeks`）はステータスによる絞り込みを行わず、公開分を認証済み全ユーザーが参照できる。お試しユーザーにもコースツリーの骨格（テーマ・フェーズ・週）を見せてロック表示するための設計であり、これによりステータス判定の対象は `learning_contents` の1テーブルに閉じる。
 
-公開済み・未削除行についての許可（ロールバイパス無し）:
+この制限により、お試し非公開コンテンツはタイトルを含めて通常クライアント（`authenticated`）から取得できなくなる。ツリー表示のロック項目と、詳細ページ直リンク時のロック画面表示に必要な最小限の情報は、アプリ層が service_role クライアント + カラム許可リスト（本文カラムを含めない）で取得する（詳細は[機能設計書](./specification.md)の2.6を参照）。service_role は RLS を素通りするため、この経路のクエリでは `is_published = true AND is_deleted = false` をアプリ側で必ず指定し、通常の公開制御を再現する。条件を省くと未公開・論理削除済みコンテンツのタイトルが露出し、`active` ユーザーにすら見えないものがお試しユーザーに見える逆転が生じる。
 
-| `get_user_status()` | `is_open_to_trial` | 可視 |
-|:--|:--|:--|
-| `active` | true / false | 可 |
-| `trial` | true | 可 |
-| `trial` | false | 不可 |
-| `rejected` / その他 | true / false | 不可 |
-
-admin / maintainer は `get_user_role()` の OR 枝で未公開行も含め全件可視。却下時のロールバイパス抑止は `get_user_role()` の契約に従う（「5.2 RLSヘルパー関数」参照）。
-
-親階層（`learning_themes` / `learning_phases` / `learning_weeks`）はステータスによる絞り込みを行わず、従来どおり公開分を認証済み全ユーザーが参照できる。お試しユーザーにもコースツリーの骨格（テーマ・フェーズ・週）を見せてロック表示するための設計であり、これによりステータス判定の対象は `learning_contents` の1テーブルに閉じる。
-
-この制限により、お試し非公開コンテンツはタイトルを含めて通常クライアント（`authenticated`）から取得できなくなる。ツリー表示のロック項目と、詳細ページ直リンク時のロック画面表示に必要な最小限の情報は、アプリ層が service_role クライアント + カラム許可リスト（本文カラムを含めない）で取得する（詳細は[機能設計書](./specification.md)の2.6を参照）。
-
-service_role は RLS を素通りするため、この経路のクエリでは `is_published = true AND is_deleted = false` をアプリ側で必ず指定し、通常の公開制御を再現する。条件を省くと未公開・論理削除済みコンテンツのタイトルが露出し、`active` ユーザーにすら見えないものがお試しユーザーに見える逆転が生じる。
-
-**兄弟要素の display_order 一括更新**: 管理画面の挿入位置指定（#190 / #191）は、RPC `bulk_update_sibling_display_order(p_table, p_updates)`（#196）で変化した兄弟行の `display_order` を1回の `UPDATE … FROM` で更新する。upsert ではなく純粋な UPDATE のため INSERT 経路に乗らず、`updated_at` の BEFORE UPDATE トリガーも通常どおり発火する。`SECURITY INVOKER` で呼び出し元の UPDATE ポリシーに従う（許可テーブルは `learning_themes` / `learning_phases` / `learning_weeks` / `learning_contents` のみ）。
+**兄弟要素の display_order 一括更新**: 管理画面の挿入位置指定は、RPC `bulk_update_sibling_display_order(p_table, p_updates)` で変化した兄弟行の `display_order` を1回の `UPDATE … FROM` で更新する。upsert ではなく純粋な UPDATE のため INSERT 経路に乗らず、`updated_at` の BEFORE UPDATE トリガーも通常どおり発火する。`SECURITY INVOKER` で呼び出し元の UPDATE ポリシーに従う（許可テーブルは `learning_themes` / `learning_phases` / `learning_weeks` / `learning_contents` のみ）。
 
 ### 6.2 user_progress
 
-| ポリシー | 操作 | 対象 | 条件 |
-|:--|:--|:--|:--|
-| Users can view own progress, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `user_id = (select get_user_id()) OR (select get_user_role()) IN ('admin', 'maintainer')` |
-| Users can insert own progress | INSERT | 本人（かつ可視コンテンツのみ） | `user_id` が自身のユーザーIDと一致 **かつ** 対象 `content_id` が自身に可視であること（EXISTS 条件） |
-| Users can update own progress | UPDATE | 本人（かつ可視コンテンツのみ） | 同上 |
+| 操作 | 対象 | 条件 |
+|:--|:--|:--|
+| SELECT | 本人 / admin・maintainer（全件） | 本人または admin・maintainer |
+| INSERT / UPDATE | 本人（かつ可視コンテンツのみ） | `user_id` が自身のユーザーIDと一致 **かつ** 対象 `content_id` が自身に可視であること（EXISTS 条件） |
 
 maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進捗を参照するため、admin と同様に全件の SELECT を許可する。
 
-**受講生進捗一覧の集計**: `/manage/students` はユーザーごとの完了数・最終活動日時を、RPC `get_students_progress_summary()`（`GROUP BY user_id`、#83）から取得する。この関数は `SECURITY DEFINER` を使わないプレーンな SQL 関数（デフォルトの `SECURITY INVOKER`）で、呼び出し元の権限のまま上記SELECTポリシーに従う。そのため member が直接呼び出しても本人の1行しか返らず、admin/maintainer が呼び出したときだけ全件が返る（RPC側でのロールチェックは不要）。
+**受講生進捗一覧の集計**: `/manage/students` はユーザーごとの完了数・最終活動日時を、RPC `get_students_progress_summary()`（`GROUP BY user_id`）から取得する。この関数は `SECURITY DEFINER` を使わないプレーンな SQL 関数（デフォルトの `SECURITY INVOKER`）で、呼び出し元の権限のまま上記SELECTポリシーに従う。そのため member が直接呼び出しても本人の1行しか返らず、admin/maintainer が呼び出したときだけ全件が返る（RPC側でのロールチェックは不要）。
 
 **可視コンテンツ限定の EXISTS 条件**:
 
-お試しユーザーがお試し非公開コンテンツの進捗を書き込めないよう、INSERT / UPDATE に対象コンテンツが自身に可視であることの EXISTS 条件を課す。
+お試しユーザーがお試し非公開コンテンツの進捗を書き込めないよう、INSERT / UPDATE に `EXISTS (SELECT 1 FROM learning_contents WHERE id = content_id)` を課す。`learning_contents` の SELECT ポリシー（6.1）が適用されるため、この EXISTS はお試しユーザーではお試し公開分のみ真になる。**親階層（week / phase / theme）の公開・削除は見ない**ため、コンテンツ行が公開済みでも親が未公開・論理削除の場合に EXISTS だけでは防げない。進捗APIはアプリ層の `isContentVisible()` で親階層まで判定すること（Storage 側のみ方針Aで親階層を閉じ、こちらはアプリ層に残す。6.8参照）。
 
-```sql
-EXISTS (SELECT 1 FROM learning_contents WHERE id = content_id)
-```
-
-`learning_contents` の SELECT ポリシー（6.1）が適用されるため、この EXISTS はお試しユーザーではお試し公開分のみ真になる。**親階層（week / phase / theme）の公開・削除は見ない**ため、コンテンツ行が公開済みでも親が未公開・論理削除の場合に EXISTS だけでは防げない。進捗APIはアプリ層の `isContentVisible()` で親階層まで判定すること（#216。Storage 側のみ方針Aで親階層を閉じ、こちらはアプリ層に残す）。
-
-**`active` ユーザーへの影響**: この条件はステータスを問わず適用されるため、`active` ユーザーも不可視コンテンツ（未公開・存在しないID）への書き込みができなくなる。従来は未公開コンテンツへの書き込みが素通りし、存在しないIDはFK違反でエラーになっていたが、いずれもRLSで拒否される。通常のUI経路では不可視コンテンツに到達しないため、正常系への影響はない。
-
-**INSERT だけでなく UPDATE にも課す理由**: 進捗API（`/api/progress`）は upsert（`onConflict: user_id,content_id`）で、既存行がある場合は UPDATE 経路を通る。INSERT のみに条件を課すと2回目以降の更新がすり抜けるため、UPDATE にも同じ条件が必要。これにより、お試し公開フラグを後から `false` に戻したコンテンツの進捗も書き換えられなくなる。
-
-**本人判定ロジック**:
-
-本人チェックは SECURITY DEFINER 関数 `get_user_id()`（認証ユーザーの `users.id` を返す）を用いる。
-
-```sql
-user_id = (select get_user_id())
-```
+- **`active` ユーザーへの影響**: この条件はステータスを問わず適用されるため、`active` ユーザーも不可視コンテンツ（未公開・存在しないID）への書き込みができない（正常なUI経路では不可視コンテンツに到達しないため、正常系への影響はない）
+- **INSERT だけでなく UPDATE にも課す理由**: 進捗API（`/api/progress`）は upsert（`onConflict: user_id,content_id`）で、既存行がある場合は UPDATE 経路を通る。INSERT のみに条件を課すと2回目以降の更新がすり抜けるため、UPDATE にも同じ条件が必要。これにより、お試し公開フラグを後から `false` に戻したコンテンツの進捗も書き換えられなくなる
 
 ### 6.3 submissions
 
-| ポリシー | 操作 | 対象 | 条件 |
-|:--|:--|:--|:--|
-| Users can view own submissions, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `user_id = (select get_user_id()) OR (select get_user_role()) IN ('admin', 'maintainer')` |
-| Users can insert own submissions | INSERT | 本人（かつ可視コンテンツのみ） | `user_id` が自身のユーザーIDと一致 **かつ** 対象 `content_id` が自身に可視であること（EXISTS 条件、6.2 と同じパターン） |
+| 操作 | 対象 | 条件 |
+|:--|:--|:--|
+| SELECT | 本人 / admin・maintainer（全件） | 本人または admin・maintainer |
+| INSERT | 本人（かつ可視コンテンツのみ） | `user_id` が自身のユーザーIDと一致 **かつ** 対象 `content_id` が自身に可視であること（EXISTS 条件、6.2 と同じパターン） |
 
-提出物は作成後に受講生が更新・削除することはないため、UPDATE / DELETE のポリシーは定義していない。したがって EXISTS 条件は INSERT のみでよい（進捗のように upsert で UPDATE 経路を通ることがない）。EXISTS は `learning_contents` 行の可視性に委譲するだけで親階層は見ないため、提出APIもアプリ層の `isContentVisible()` で親階層まで判定すること（6.2 と同じ注意。#216）。
+提出物は作成後に受講生が更新・削除することはないため、UPDATE / DELETE のポリシーは定義していない。したがって EXISTS 条件は INSERT のみでよい（進捗のように upsert で UPDATE 経路を通ることがない）。EXISTS は親階層を見ないため、提出APIもアプリ層の `isContentVisible()` で親階層まで判定すること（6.2 と同じ注意）。
 
 ### 6.4 ai_reviews
 
-| ポリシー | 操作 | 対象 | 条件 |
-|:--|:--|:--|:--|
-| Users can view own ai reviews, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `EXISTS (SELECT 1 FROM submissions s WHERE s.id = ai_reviews.submission_id AND s.user_id = (select get_user_id())) OR (select get_user_role()) IN ('admin', 'maintainer')` |
-
-`ai_reviews` には INSERT / UPDATE のRLSポリシーは定義していない。レビューの作成・更新は AIレビューAPI（`/api/ai-review`）がサーバー側で Service Role キーを用いて行い、RLSをバイパスする。
+SELECT のみ: 自分の提出（`submissions.user_id` が自身）に紐づくレビュー、または admin・maintainer（全件）。INSERT / UPDATE のRLSポリシーは定義していない。レビューの作成・更新は AIレビューAPI（`/api/ai-review`）がサーバー側で Service Role キーを用いて行い、RLSをバイパスする。
 
 ### 6.5 users
 
-| ポリシー | 操作 | 対象 | 条件 |
-|:--|:--|:--|:--|
-| Users can view own record, managers can view all | SELECT | 本人 / admin・maintainer（全件） | `(auth_id = (select auth.uid()) AND is_deleted = false) OR (select get_user_role()) IN ('admin', 'maintainer')` |
-| Authenticated users can insert own record | INSERT | 本人 | `auth_id = (select auth.uid())` |
-| Admins can update users | UPDATE | admin | `(select get_user_role()) = 'admin'` |
+| 操作 | 対象 |
+|:--|:--|
+| SELECT | 本人（未削除のみ）/ admin・maintainer（全件） |
+| INSERT | 本人（`auth_id = auth.uid()`） |
+| UPDATE | admin のみ |
 
 初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer は受講生進捗（`/manage/students`）の閲覧で `users` を参照するため SELECT のみ許可し、UPDATE は付与しない（ユーザー管理は不可）。
 
-本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため。`#16`）。`email_opt_out_at` も同様に、配信停止ルート（`/api/email/unsubscribe`。署名付きリンクでログイン不要）が service_role 経由で記録する（`#253`）。
+本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため）。`email_opt_out_at` も同様に、配信停止ルート（`/api/email/unsubscribe`。署名付きリンクでログイン不要）が service_role 経由で記録する。
 
 ### 6.6 stripe_subscriptions
 
-| ポリシー | 操作 | 対象 | 条件 |
-|:--|:--|:--|:--|
-| Users can view own subscription, admins can view all | SELECT | 本人 / admin（全件） | `user_id = (select get_user_id()) OR (select get_user_role()) = 'admin'` |
-
-INSERT / UPDATE / DELETE のポリシーは定義していない。昇格・降格を伴う書き込みはアプリの認可判定と密結合しているため、Webhook（`/api/stripe/webhook`）・successページ（`/upgrade/success`）・Checkout作成API（`/api/stripe/checkout` の処理権claim/release）から service_role 経由でのみ行う。
+SELECT のみ: 本人 / admin（全件。maintainer は不可）。INSERT / UPDATE / DELETE のポリシーは定義していない。昇格・降格を伴う書き込みはアプリの認可判定と密結合しているため、Webhook（`/api/stripe/webhook`）・successページ（`/upgrade/success`）・Checkout作成API（`/api/stripe/checkout` の処理権claim/release）から service_role 経由でのみ行う。
 
 ### 6.7 stripe_events
 
@@ -735,99 +304,47 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 
 ### 6.8 storage.objects（thumbnails / slides バケット）
 
-テーマのサムネイルを保存する `thumbnails` は公開バケット（`public = true`）のため参照は制限しない。スライドPDFを保存する `slides` は**非公開バケット**（`public = false`、#89）で、参照はコンテンツの可視性に連動させる。書き込み系（INSERT / UPDATE / DELETE）は両バケットともコンテンツ管理者に限定し、操作ごとに1本のポリシーへ統合している（`multiple_permissive_policies` 対策。#89 で `thumbnails` 単独のポリシーを統合済み）。
+テーマのサムネイルを保存する `thumbnails` は公開バケット（`public = true`）のため参照は制限しない。スライドPDFを保存する `slides` は**非公開バケット**（`public = false`）で、参照はコンテンツの可視性に連動させる。書き込み系（INSERT / UPDATE / DELETE）は両バケットともコンテンツ管理者（admin / maintainer）に限定し、操作ごとに1本のポリシーへ統合している（`multiple_permissive_policies` 対策）。
 
-| ポリシー | 操作 | 対象 | 条件 |
-|:--|:--|:--|:--|
-| Slides are viewable via visible contents or by content managers | SELECT | authenticated | `bucket_id = 'slides' AND ((select get_user_role()) IN ('admin', 'maintainer') OR EXISTS (SELECT 1 FROM learning_contents lc JOIN learning_weeks lw ON lw.id = lc.week_id JOIN learning_phases lp ON lp.id = lw.phase_id JOIN learning_themes lt ON lt.id = lp.theme_id WHERE lc.pdf_url = storage.objects.name AND lc.is_published = true AND lc.is_deleted = false AND lw.is_published = true AND lw.is_deleted = false AND lp.is_published = true AND lp.is_deleted = false AND lt.is_published = true AND lt.is_deleted = false))`（#216。member / お試しは `isContentVisible()` と同じ4階層条件。admin / maintainer は無条件） |
-| Content managers can upload content assets | INSERT | admin / maintainer | `bucket_id IN ('thumbnails', 'slides') AND (select get_user_role()) IN ('admin', 'maintainer')` |
-| Content managers can update content assets | UPDATE | admin / maintainer | 同上（USING / WITH CHECK） |
-| Content managers can delete content assets | DELETE | admin / maintainer | 同上 |
+`slides` の SELECT ポリシーは、admin / maintainer はロールで無条件に許可（未公開プレビューのため。[機能設計書](./specification.md)2.12節）、それ以外は「`learning_contents.pdf_url = storage.objects.name` の行が存在し、その週・フェーズ・テーマを含む4階層すべてが `is_published = true AND is_deleted = false`」の場合のみ許可する（`learning_contents → learning_weeks → learning_phases → learning_themes` を JOIN）。
 
-SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの RLS が適用されるため、`learning_contents` の SELECT ポリシー（`is_published` / `is_deleted` / `status` / `is_open_to_trial`）がコンテンツ行の可視範囲として効く。加えて `#216` で week / phase / theme への JOIN と各階層の `is_published` / `is_deleted` を明示し、**member / お試しユーザー**に対してはアプリ層の `isContentVisible()` と同じ4階層条件にする（方針A: Storage 側のみ拡張。`learning_contents` の SELECT RLS 自体は親階層を見ないまま。方針Bを採らない理由は、お試しユーザー向けの階層骨格表示と `user_progress` / `submissions` の書き込み RLS まで波及するため）。admin / maintainer はプレビューのためロールで無条件許可する（仕様 2.12。`isContentVisible()` 自体はロール非依存のフェイルクローズなので、未公開階層・orphan ではポリシーと `isContentVisible()` の真理値は一致しない）。すなわち member / お試しでは「`pdf_url` がそのオブジェクトキーに一致し、4階層すべてが公開済み・未削除の可視コンテンツが存在する」場合だけ署名付きURLの発行（`createSignedUrl()`）やダウンロードが許可され、お試しユーザーがロック済みスライドのキーを推測しても取得できない。この等値比較のため、`pdf_url` にはオブジェクトキー以外（公開URL等）を保存してはならない。`EXISTS` の `pdf_url` 等値比較向けに部分インデックス `idx_learning_contents_pdf_url`（`WHERE pdf_url IS NOT NULL`）を置く。`anon` 向けのポリシーは無く、未認証のデモ画面はサーバー側で service_role によりお試し公開スライドのみ署名する（機能設計書 3.2）。
+- `EXISTS` サブクエリには呼び出しユーザーの RLS が適用されるため、`learning_contents` の SELECT ポリシー（`is_published` / `is_deleted` / `status` / `is_open_to_trial`）がコンテンツ行の可視範囲として効く。加えて week / phase / theme への JOIN で、**member / お試しユーザー**に対してはアプリ層の `isContentVisible()` と同じ4階層条件にする（#216 方針A: Storage 側のみ拡張し、`learning_contents` の SELECT RLS 自体は親階層を見ないまま。方針Bを採らない理由は、お試しユーザー向けの階層骨格表示と `user_progress` / `submissions` の書き込み RLS まで波及するため）。`isContentVisible()` 自体はロール非依存のフェイルクローズなので、admin / maintainer が未公開階層・orphan を見る場合はポリシーと `isContentVisible()` の真理値は一致しない
+- member / お試しでは、可視コンテンツが存在する場合だけ署名付きURLの発行（`createSignedUrl()`）やダウンロードが許可され、お試しユーザーがロック済みスライドのキーを推測しても取得できない。この等値比較のため、`pdf_url` にはオブジェクトキー以外（公開URL等）を保存してはならない
+- `anon` 向けのポリシーは無く、未認証のデモ画面はサーバー側で service_role によりお試し公開スライドのみ署名する（[機能設計書](./specification.md)3.2）
+- `learning_contents` の SELECT ポリシーは引き続きコンテンツ行自身の `is_published` / `is_deleted` しか見ない。進捗・提出・AIレビューAPIの可視性はアプリ層の `isContentVisible()` が親階層まで補う（6.2 / 6.3 の EXISTS もコンテンツ行の可視性に委譲するだけなので、親階層判定を省いてはならない）
+- アップロード・削除APIは `createAdminSupabaseClient()` を使うため、`SUPABASE_SERVICE_ROLE_KEY` が必須である（未設定時は throw。通常クライアントへの暗黙フォールバックはしない）。キー設定時は RLS をバイパスし、Storage の RLS ポリシーは、呼び出し側が通常クライアントを明示的に選んだ経路に対する防御層として機能する
 
-**補足**: `learning_contents` の SELECT ポリシーは引き続きコンテンツ行自身の `is_published` / `is_deleted` しか見ない。進捗・提出・AIレビューAPIの可視性はアプリ層の `isContentVisible()` が親階層まで補う（6.2 / 6.3 の EXISTS もコンテンツ行の可視性に委譲するだけなので、親階層判定を省いてはならない）。Storage の SELECT だけは `#216` で親階層条件をポリシー側に持たせ、受講生向けスライド配信経路の二層防御のズレを解消している。
+### 6.9 email_logs / 6.10 cron_locks
 
-アップロード・削除APIは `createAdminSupabaseClient()` を使うため、`SUPABASE_SERVICE_ROLE_KEY` が必須である（未設定時は throw。通常クライアントへの暗黙フォールバックはしない）。キー設定時は RLS をバイパスする。Storage の RLS ポリシーは、呼び出し側が通常クライアント（`createServerSupabaseClient()`）を明示的に選んだ経路に対する防御層として機能する。キー未設定は throw、キーが誤っている場合は PostgREST が 401 を返し RLS は評価されない。
-
-### 6.9 email_logs
-
-RLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`stripe_events` と同じ）。受講生・管理画面からは参照せず、`authenticated` ロールでは SELECT を含め一切のアクセスができない。
-
-### 6.10 cron_locks
-
-RLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`email_logs` と同じ）。Cron ルートからのみ読み書きする。
+いずれもRLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`stripe_events` と同じ）。受講生・管理画面からは参照せず、`authenticated` ロールでは SELECT を含め一切のアクセスができない。`cron_locks` は Cron ルートからのみ読み書きする。
 
 ### 6.11 announcements
 
-| ポリシー | 操作 | 対象 | 条件 |
-|:--|:--|:--|:--|
-| Announcements are viewable by targeted users or content managers | SELECT | 対象の受講生 / admin・maintainer（全件） | `(published_at IS NOT NULL AND is_deleted = false AND (select get_user_status()) = ANY (target_statuses) AND (target_membership_types IS NULL OR (select get_user_membership_type()) = ANY (target_membership_types))) OR (select get_user_role()) IN ('admin', 'maintainer')` |
-| Content managers can insert announcements | INSERT | admin / maintainer | `(select get_user_role()) IN ('admin', 'maintainer')` |
-| Content managers can update announcements | UPDATE | admin / maintainer | 同上（USING / WITH CHECK） |
-| Content managers can delete announcements | DELETE | admin / maintainer | 同上 |
+| 操作 | 対象 | 条件 |
+|:--|:--|:--|
+| SELECT | 対象の受講生 / admin・maintainer（全件） | 公開済み（`published_at IS NOT NULL`）・未削除で、`get_user_status()` が `target_statuses` に含まれ、`target_membership_types` が NULL または `get_user_membership_type()` が含まれる。または admin・maintainer |
+| INSERT / UPDATE / DELETE | admin・maintainer | ロールが admin・maintainer |
 
-却下ユーザーは `get_user_status()` が `rejected`（対象ステータスに含められない）で、`get_user_role()` が NULL のため、どのお知らせも見えない。admin / maintainer は管理画面のため全件を読めるので、受講生向け画面はアプリ層でも同じ条件で絞る（機能設計書 11.2 節の二層防御）。メールの一斉送信の抽出は Cron の service_role で行う。
+却下ユーザーは `get_user_status()` が `rejected`（対象ステータスに含められない）で、`get_user_role()` が NULL のため、どのお知らせも見えない。admin / maintainer は管理画面のため全件を読めるので、受講生向け画面はアプリ層でも同じ条件で絞る（[機能設計書](./specification.md)11.2節の二層防御）。メールの一斉送信の抽出は Cron の service_role で行う。
 
 ### 6.12 announcement_reads
 
-| ポリシー | 操作 | 対象 | 条件 |
-|:--|:--|:--|:--|
-| Users can view own announcement reads | SELECT | 本人 | `user_id = (select get_user_id())` |
-| Users can insert own reads of visible announcements | INSERT | 本人 | `user_id = (select get_user_id()) AND EXISTS (SELECT 1 FROM announcements a WHERE a.id = announcement_reads.announcement_id AND a.published_at IS NOT NULL AND a.is_deleted = false)`（EXISTS のサブクエリには announcements の SELECT ポリシーが適用され、自分に見えるお知らせに限られる） |
-
-UPDATE / DELETE のポリシーは定義していない（既読は取り消さない）。
+SELECT は本人のみ。INSERT は本人かつ、`announcements` の SELECT ポリシーが適用される `EXISTS` により自分に見える（公開済み・未削除の）お知らせに限る。UPDATE / DELETE のポリシーは定義していない（既読は取り消さない）。
 
 ---
 
 ## 7. マイグレーション管理
 
-マイグレーションファイルは `supabase/migrations/` 直下にフラットに配置する（サブディレクトリは作らない）。Supabase CLI の `migration list` / `db push` は `supabase/migrations/` 直下の `.sql` ファイルのみを走査し、サブディレクトリを再帰的にスキャンしないため（#149）。
+マイグレーションファイルは `supabase/migrations/` 直下にフラットに配置する（サブディレクトリは作らない）。Supabase CLI の `migration list` / `db push` は直下の `.sql` のみを走査し、サブディレクトリを再帰的にスキャンしないため（#149）。
 
-ファイル名は `<14桁タイムスタンプ>_<説明>.sql` とし、タイムスタンプがCLIの管理するバージョン識別子（適用順）になる。`supabase migration new <説明>` で生成される標準形式に合わせている。新規追加時は `date -u +%Y%m%d%H%M%S` 相当の現在時刻を使う（過去の番号と衝突しないことが自明なため）。区分はディレクトリではなく説明文（RLSは `_policies`、シードは `seed_<コーススラッグ>_` 接頭辞）で表現する。
+ファイル名は `<14桁タイムスタンプ>_<説明>.sql` とし、タイムスタンプがCLIの管理するバージョン識別子（適用順）になる（`supabase migration new <説明>` の標準形式）。新規追加時は `date -u +%Y%m%d%H%M%S` 相当の現在時刻を使う。区分はディレクトリではなく説明文（RLSは `_policies`、シードは `seed_<コーススラッグ>_` 接頭辞）で表現する。個々のファイルの内容は各ファイルのヘッダコメントとファイル名を参照する（一覧を本書に転記しない）。
 
-| ファイル | 内容 |
-|:--|:--|
-| `20260412010000_create_tables.sql` | 全テーブル・ヘルパー関数・トリガー・インデックスの作成 |
-| `20260412010001_rls_policies.sql` | 全テーブルのRLS有効化とポリシー定義（`get_user_role()` / `get_user_id()` でロール判定） |
-| `20260412010002_seed_gas_course_structure.sql` | GAS講座のテーマ・フェーズ・週・コンテンツ構造のシード（`WHERE name = 'GAS学習'` の get-or-create のため、リネーム後の環境で再実行するとテーマ・フェーズが重複作成される。適用済みマイグレーションを再実行しないこと） |
-| `20260412010003_seed_gas_exercises.sql` | GAS講座の演習コンテンツ（課題・模範回答）のシード |
-| `20260412010004_seed_gas_hints.sql` | GAS講座の全演習課題へのヒントデータ投入 |
-| `20260521000000_seed_gas_advanced_course_structure.sql` | GAS講座（応用編）のテーマ・フェーズ・週・video/slideコンテンツ構造のシード（#49）。タイムスタンプは演習seedよりフレッシュ環境での適用順を前にするため意図的に選定したもので、実際の適用日時ではない（適用済みの後続バージョンより小さい過去日付のため、素の `db push` は拒否され `--include-all` が必要になる） |
-| `20260524000000_seed_gas_advanced_exercises.sql` | GAS講座（応用編）の演習コンテンツ（課題・ヒント・模範回答）のシード |
-| `20260527000000_add_submission_code_files.sql` | submissions に複数ファイル提出用 `code_files`（JSONB）カラムを追加 |
-| `20260613000000_seed_gas_practical_theme.sql` | GAS講座（実践編）のテーマ行を作成（#166）。タイムスタンプは実践編のフェーズ・週シードよりフレッシュ環境での適用順を前にするため意図的に選定したもので、実際の適用日時ではない（適用済みの後続バージョンより小さい過去日付のため、素の `db push` は拒否され `--include-all` が必要になる） |
-| `20260614080707_seed_gas_practical_course_structure.sql` | GAS講座（実践編）のフェーズ・週・コンテンツ構造のシード（#149調査で復元）。Week「Geminiを使ったドキュメント自動要約」の所属フェーズ・display_orderを本番の実値に合わせて修正済み（#168。ただしこの修正はテーマ未投入のフレッシュ環境向けで、既に本ファイルを旧内容で適用済みの環境へは届かない。後者は`20260906090000_move_gas_practical_gemini_week.sql`が担う。リモートの `schema_migrations.statements` とは意図的に内容が異なるため、`migration fetch` 等で上書きしないこと） |
-| `20260715233228_consolidate_rls_policies.sql` | ロール別許可ポリシーのOR統合・initplan最適化・ヘルパー関数の anon EXECUTE 取り消し（#77） |
-| `20260801000001_add_is_open_to_trial.sql` | learning_contents にお試し公開フラグ `is_open_to_trial` を追加 |
-| `20260801000002_trial_user_policies.sql` | `get_user_status()` の追加と、お試しユーザー制限を含むポリシーへの差し替え（learning_contents の SELECT、user_progress / submissions の書き込み） |
-| `20260811000000_add_membership_type.sql` | users に会員種別 `membership_type` を追加し、既存の `active` ユーザーを `community` にバックフィル |
-| `20260812000000_add_stripe_tables.sql` | `stripe_subscriptions` / `stripe_events` テーブルを追加 |
-| `20260812000001_stripe_tables_policies.sql` | `stripe_subscriptions` / `stripe_events` のRLS有効化とポリシー定義（`stripe_subscriptions` はSELECTのみ本人/admin） |
-| `20260819000000_add_thumbnails_bucket.sql` | テーマサムネイル用の `thumbnails` 公開バケットを作成 |
-| `20260819000001_thumbnails_storage_policies.sql` | `thumbnails` バケットへの INSERT / UPDATE / DELETE を admin・maintainer に限定（後に `20260908000000` で `slides` と統合） |
-| `20260903000001_add_checkout_claim.sql` | `stripe_subscriptions` に `checkout_claimed_at` / `checkout_session_id` を追加し、`stripe_customer_id` をNULL許容へ変更（Checkout作成の排他制御用） |
-| `20260903000002_secure_get_user_role.sql` | `get_user_role()` に `status <> 'rejected'` 条件を追加し、却下ユーザーが admin/maintainer ロールを保持したまま認可を突破できないようにする（#104） |
-| `20260903000003_add_gas_code_language.sql` | `learning_contents.code_language` のCHECK制約に `gas` を追加（#56） |
-| `20260904000000_add_content_description.sql` | learning_contents に概要欄用の `description` カラムを追加（#66） |
-| `20260905000000_add_student_progress_summary_rpc.sql` | 受講生進捗集計をDB側集約するRPC `get_students_progress_summary()`（`GROUP BY user_id`）を追加（#83） |
-| `20260906000000_rename_gas_basic_theme.sql` | 基礎コースのテーマ名を `GAS学習` → `GAS学習（基礎編）` にリネーム（#166）。他マイグレーションとの適用順序の制約が無いため、意図的な過去日付を使わない通常のタイムスタンプ |
-| `20260906090000_move_gas_practical_gemini_week.sql` | GAS講座（実践編）の週「Geminiを使ったドキュメント自動要約」を、誤ったフェーズ（その他GAS活用）配下に存在する場合のみ正しいフェーズ（Googleドキュメント活用）へ移動する冪等なUPDATE（#168）。`20260614080707`のVALUES修正だけでは version 記録済みの環境に届かないため、独立ファイルとして新規タイムスタンプで追加 |
-| `20260907010000_rename_pending_status_to_trial.sql` | `users.status` の値を `'pending'` から `'trial'` へリネーム（#88）。`users_status_check` 制約のDROP→既存行のUPDATE→制約のADDと、`learning_contents` のSELECTポリシー（`20260801000002_trial_user_policies.sql` で追加）内の比較値の更新を同一トランザクションで適用し、DEFAULTも `'trial'` に変更。値のリネームとポリシー更新を分けると片方だけ適用された瞬間にお試しユーザーから見て `learning_contents` が0行になるため1ファイルにまとめている。アプリコードの `USER_STATUS.TRIAL` への切り替えと同時にリリースする必要がある |
-| `20260908000000_secure_slides_bucket.sql` | スライドPDFの署名付きURL配信（#89）: `slides` バケットを非公開化し、`learning_contents.pdf_url` を公開URLからオブジェクトキーへ一括正規化、`storage.objects` に `slides` の SELECT ポリシー（`learning_contents` の RLS に委譲）を追加し、INSERT / UPDATE / DELETE は `thumbnails` のポリシーと統合して両バケット対象の1本ずつにする。正規化後にキーとして解釈できない `pdf_url` が残っていれば例外で中断する。**アプリ側の署名付きURL配信と同時にリリースすること**（旧コードは pdf_url を公開URLとして組み立てるため） |
-| `20260910093449_add_bulk_update_sibling_display_order_rpc.sql` | 兄弟要素の `display_order` 一括更新 RPC `bulk_update_sibling_display_order(p_table, p_updates)`（#196）。挿入位置指定時の N 文 UPDATE を 1 回の UPDATE … FROM に置き換える。SECURITY INVOKER・許可テーブル限定・純粋な UPDATE のみ（upsert ではない）。**アプリ側の create/update（兄弟再採番）と同時にリリースすること**（未適用だと `PGRST202` で兄弟ありの作成・更新が失敗する） |
-| `20260911010345_add_query_pattern_indexes.sql` | クエリパターンに合わせたインデックス整備（#197 PR1）。階層一覧の `(parent_id, display_order)` 複合化、`submissions` の `(submitted_at DESC, id DESC)` 系、RPC向け `user_progress` 部分インデックス、`idx_users_auth_role` / 冗長な `idx_user_progress_user_id` の削除。UNIQUE 制約と重複する covering / `ai_reviews` 複合 / `users(status)` 部分は追加しない。認可（RLS）は変更しない |
-| `20260911061708_lighten_rls_policy_helper_calls.sql` | RLS ポリシーのヘルパー呼び出し軽量化（#197 PR2）。`learning_contents` SELECT の重複 InitPlan を `CASE (select get_user_status())` で1本に折り畳み、`ai_reviews` SELECT の無相関 `IN` を相関 `EXISTS` に変更（点検索で PK プローブも選択可能に）。許可・拒否の真理値とヘルパーの GRANT/REVOKE・関数本体は変更しない |
-| `20260916002654_slides_storage_select_parent_hierarchy.sql` | slides の `storage.objects` SELECT に week / phase / theme の公開・未削除判定を JOIN で追加（#216 方針A）。member / お試しは `isContentVisible()` と同じ4階層条件。admin / maintainer は無条件許可。`(select get_user_role())` / OR 1本の形は維持。`idx_learning_contents_pdf_url` 部分インデックスを追加。`learning_contents` の SELECT RLS は変更しない |
-| `20260917011152_validate_slide_pdf_url_object_keys.sql` | `learning_contents.pdf_url` のオブジェクトキー検証を `toSlideObjectKey()` と等価に強化（#217）。適用済み `20260908000000` は書き換えず、同規則で再正規化（旧公開URL・前後空白）したうえで、空セグメント・`.` / `..`・スキーム・`/` 始まりを含む不正値があれば例外で中断する |
-| `20260919000000_add_terms_accepted_at_to_users.sql` | `users` に利用規約の同意日時 `terms_accepted_at`（TIMESTAMPTZ, NULL許容）を追加（#226）。RLS変更なし |
-| `20260922000000_add_onboarding_completed_at_to_users.sql` | `users` に初回利用ガイドの完了日時 `onboarding_completed_at`（TIMESTAMPTZ, NULL許容）を追加（#16）。RLS変更なし |
-| `20260926000000_normalize_blank_slide_pdf_url.sql` | `learning_contents.pdf_url` の空文字・空白のみ（`btrim(pdf_url, E' \t\r\n') = ''`）を NULL に正規化（#243）。アプリ側は `SlidePdfUrlSchema` で空文字・空白のみを null に正規化して保存するため、以後は発生しない。適用済み `20260917011152` は書き換えない。カラム定義・RLS変更なし |
-| `20260928000000_add_email_logs.sql` | 受講生向けメールの送信ログ `email_logs` を追加（#252）。`UNIQUE (user_id, kind, reference_key)` で二重送信を防ぐ。RLSを有効化しポリシーは作らない（service_role専用） |
-| `20260929000000_add_cancel_at_to_stripe_subscriptions.sql` | `stripe_subscriptions` に解約予定日時 `cancel_at`（TIMESTAMPTZ, NULL許容）を追加。flexible billing mode の Portal 解約は `cancel_at` にだけ現れるため（3.9節）。RLS変更なし。**アプリより先に適用すること**（未適用のままだと、`cancel_at` を含むミラー書き込みが失敗し、Webhook・successページの反映が止まる） |
-| `20260930000000_add_email_opt_out_at_to_users.sql` | `users` に案内メールの配信停止日時 `email_opt_out_at`（TIMESTAMPTZ, NULL許容）を追加（#253）。RLS変更なし。**アプリより先に適用すること**（未適用のままだと、定期メールの対象抽出と配信停止ルートがカラム不在で失敗する） |
-| `20260930000001_add_cron_locks.sql` | Cron バッチの実行ロック `cron_locks`（`name` PK、`locked_at`）を追加（#253）。RLSを有効化しポリシーは作らない（service_role専用）。**アプリより先に適用すること**（未適用のままだと、定期メールのバッチがロックを取れず 500 で何も送らない） |
-| `20261001000000_add_announcements.sql` | お知らせ `announcements` と既読 `announcement_reads`、ヘルパー `get_user_membership_type()` を追加（#254）。RLS: 6.11・6.12節。**アプリより先に適用すること**（未適用のままだと、サイドナビの未読件数が 0 件表示になり、お知らせの画面・一斉送信が失敗する） |
+**既存ファイルに関する注意**:
+
+- `20260521000000_seed_gas_advanced_course_structure.sql` と `20260613000000_seed_gas_practical_theme.sql` のタイムスタンプは、後続シードよりフレッシュ環境での適用順を前にするため意図的に選んだ過去日付で、実際の適用日時ではない。適用済みの後続バージョンより小さいため、素の `db push` は拒否され `--include-all` が必要になる
+- `20260412010002_seed_gas_course_structure.sql` は `WHERE name = 'GAS学習'` の get-or-create のため、リネーム後の環境で再実行するとテーマ・フェーズが重複作成される。適用済みマイグレーションを再実行しない
+- `20260614080707_seed_gas_practical_course_structure.sql` はリモートの `schema_migrations.statements` と意図的に内容が異なる（フレッシュ環境向けの修正済み内容）。`migration fetch` 等で上書きしない。既に旧内容で適用済みの環境への修正は `20260906090000_move_gas_practical_gemini_week.sql` が担う
+- 適用済みファイルは書き換えず、修正は新規ファイルで行う（例: `pdf_url` の検証強化は `20260917011152`、空文字の正規化は `20260926000000` で追加）
 
 ### 7.1 マイグレーション追加後の運用
 
@@ -847,23 +364,16 @@ UPDATE / DELETE のポリシーは定義していない（既読は取り消さ�
 ## 8. 設計上の補足事項
 
 ### 8.1 論理削除
-- 全コンテンツ系テーブルは `is_deleted` フラグによる論理削除を採用
-- 物理削除は行わず、データの追跡性を維持する
+- コンテンツ系テーブル・`users` は `is_deleted` フラグによる論理削除を採用し、物理削除は行わずデータの追跡性を維持する
 - RLSポリシーおよびアプリ側のクエリで `is_deleted = false` をフィルタ条件に含める
 
 ### 8.2 公開制御
-- `is_published` フラグにより、コンテンツの公開/非公開を制御
-- 一般ユーザー（受講生）には公開済みコンテンツのみ表示される
-- 管理者は公開/非公開を問わず全コンテンツを閲覧可能
-- `learning_contents` はさらに `is_open_to_trial` フラグを持ち、お試しユーザー（`status = 'trial'`）に見えるのは `is_published = true AND is_open_to_trial = true` の行のみ。2つのフラグは AND で効き、`is_open_to_trial = true` でも `is_published = false` なら誰にも公開されない
+- `is_published` により公開/非公開を制御する。受講生には公開済みのみ表示され、管理者（admin / maintainer）は非公開を含め全件閲覧できる
+- `learning_contents` はさらに `is_open_to_trial` を持ち、2つのフラグは AND で効く（`is_open_to_trial = true` でも `is_published = false` なら誰にも公開されない）
 
 ### 8.3 カスケード削除
-- 外部キーに `ON DELETE CASCADE` を設定
-- 親テーブルのレコード削除時、子テーブルの関連レコードも自動削除される
-- 実運用では論理削除を使用するため、通常はカスケード物理削除は発生しない
+- 外部キーは `ON DELETE CASCADE`。実運用では論理削除を使用するため、通常はカスケード物理削除は発生しない
 
 ### 8.4 進捗管理のupsertパターン
-- `user_progress` は `(user_id, content_id)` のユニーク制約を利用
-- `ON CONFLICT` 句による upsert で完了/未完了のトグルを実現
-- 初回完了時は INSERT、再操作時は UPDATE として処理される
-- **RLSポリシー設計上の注意**: 上記のとおり2回目以降の操作は UPDATE 経路を通るため、書き込み制限を追加する際は INSERT だけでなく UPDATE ポリシーにも同じ条件を課す必要がある（6.2 参照）
+- `user_progress` は `(user_id, content_id)` の UNIQUE 制約と `ON CONFLICT` の upsert で完了/未完了をトグルする（初回は INSERT、再操作は UPDATE 経路）
+- 2回目以降が UPDATE 経路を通るため、書き込み制限を追加する際は INSERT だけでなく UPDATE ポリシーにも同じ条件を課す必要がある（6.2参照）

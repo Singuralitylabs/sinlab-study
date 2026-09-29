@@ -2,27 +2,6 @@
 
 > 本書は現在の仕様のみを記載する。変更履歴は git / PR 履歴で管理し、改訂履歴節は設けない（#185）。調査ログ・一時的な運用手順は本書に残さない。
 
-## 目次
-
-1. [概要](#1-概要)
-2. [テスト方針](#2-テスト方針)
-    - [2.1 テストピラミッドと優先度](#21-テストピラミッドと優先度)
-    - [2.2 実行タイミング（PR / リリース前）](#22-実行タイミングpr--リリース前)
-    - [2.3 テストデータ方針](#23-テストデータ方針)
-    - [2.4 可観測性](#24-可観測性)
-3. [テスト対象と観点](#3-テスト対象と観点)
-    - [3.1 サービス層ユニットテスト](#31-サービス層ユニットテスト)
-    - [3.2 セキュリティテスト](#32-セキュリティテスト)
-    - [3.3 型安全性テスト](#33-型安全性テスト)
-    - [3.4 ビルドテスト](#34-ビルドテスト)
-    - [3.5 コード品質テスト](#35-コード品質テスト)
-    - [3.6 E2Eテスト（未実装・リリース前のみ）](#36-e2eテスト未実装リリース前のみ)
-4. [CI / ツール構成](#4-ci--ツール構成)
-    - [4.1 GitHub Actions ワークフロー](#41-github-actions-ワークフロー)
-    - [4.2 導入済みツール / 導入予定ツール](#42-導入済みツール--導入予定ツール)
-    - [4.3 実行環境](#43-実行環境)
-5. [テスト規約](#5-テスト規約)
-
 ## 1. 概要
 
 本ドキュメントは「AIと学ぶ実践Web技術講座」スキルアップサービスのテスト方針、テスト対象と観点、CI/ツール構成を整理する。
@@ -42,12 +21,8 @@ Unit Tests (多数)
 
 ### 2.2 実行タイミング（PR / リリース前）
 
-PR では短時間で完了するチェックを必須とし、リリース前は範囲を絞った確認を追加する。
-
-- **PR（原則）**: 変更内容に応じて CI が自動実行される（型チェック、Lint、ビルド、ユニットテスト、デバッグ出力検知）。
+- **PR（原則）**: 変更内容に応じて CI が自動実行される（型チェック、Lint、ビルド、ユニットテスト、デバッグ出力検知。4.1参照）。
 - **リリース前**: 影響範囲が広い変更（例: 認証/認可、学習コンテンツ配信、進捗管理）に対して、主要フローの手動確認（または最小限のE2E）を追加する。
-
-CI のワークフロー一覧は [4.1 GitHub Actions ワークフロー](#41-github-actions-ワークフロー) に記載する。
 
 ### 2.3 テストデータ方針
 
@@ -56,36 +31,18 @@ CI のワークフロー一覧は [4.1 GitHub Actions ワークフロー](#41-gi
 
 ### 2.4 可観測性
 
-- **失敗時の調査容易性**: テストが失敗した際に原因を素早く特定できるよう、
-  確認観点ごとにチェックを分離し、テスト名やジョブ名から目的が読み取れる命名にする。
-- **ログの扱い**: 開発時のデバッグ出力（`console.log` 等）がコードに残った場合は
-  CIで検知してエラーにする。一方、障害調査に必要なログ（エラーログ等）は意図的に残す。
+- 確認観点ごとにチェックを分離し、テスト名やジョブ名から目的が読み取れる命名にする。
+- 開発時のデバッグ出力（`console.log` 等）の残存はCIで検知してエラーにする。障害調査に必要なログ（エラーログ等）は意図的に残す。
 
 ## 3. テスト対象と観点
 
 ### 3.1 サービス層ユニットテスト
 
-サービス層（ビジネスロジック）の正しさを、外部I/Oから切り離して確認する。
-
-- **観点**
-  - 代表的な正常系（CRUDの代表ケース）
-  - 入力のバリデーション（代表ケース）
-  - 戻り値の型・構造が想定どおりであること（代表レスポンス）
-  - 代表的な失敗（例: ネットワーク失敗、制約違反）時の扱い
-- **対象領域（最小範囲の例）**
-  - 認証・権限チェック（`app/services/auth/`）
-  - 学習コンテンツ取得（フェーズ・週・コンテンツ一覧/詳細）
-  - 進捗管理（進捗upsert）
-  - 提出物管理（作成）
-  - ユーザー管理（承認・却下）
+サービス層（ビジネスロジック）の正しさを、外部I/Oから切り離して確認する。観点は、代表的な正常系・入力バリデーション・戻り値の型と構造・代表的な失敗（ネットワーク失敗、制約違反）時の扱い。対象は `app/services/` 配下（認証・権限チェック、学習コンテンツ取得、進捗upsert、提出、ユーザー承認・却下など）。
 
 ### 3.2 セキュリティテスト
 
-認証・認可・承認ステータスの制御が、意図した振る舞いを満たすことを確認する。
-
-本プロジェクトのセキュリティテストは、**単体で確認できる部分はユニット**、**実際の認証フローに関わる部分は統合/ E2E**に分類する。
-
-- **観点**
+認証・認可・承認ステータスの制御が意図どおりであることを確認する。単体で確認できる部分はユニット、実際の認証フローに関わる部分は統合 / E2E（手動）に分類する。
 
 | 観点 | CI（自動） | 手動 |
 | --- | --- | --- |
@@ -94,113 +51,50 @@ CI のワークフロー一覧は [4.1 GitHub Actions ワークフロー](#41-gi
 | 承認ステータス制御 | ステータス判定ロジック（trial（お試し）/active/rejected） | 画面遷移の正当性、お試しユーザーへのロック表示 |
 | データアクセス | ―（ユニットでは検証困難） | RLSによるデータ分離。お試しユーザーのアクセストークンでPostgRESTに直接アクセスし、(a) `learning_contents` のSELECTでお試し非公開コンテンツが0行、(b) お試し非公開コンテンツに対する `user_progress` / `submissions` のINSERT・UPDATEが拒否されること、(c) お試し非公開スライドのオブジェクトキーに対する `POST /storage/v1/object/sign/slides/<キー>`（署名付きURLの発行）と `GET /storage/v1/object/authenticated/slides/<キー>` が拒否され、お試し公開スライドでは許可されること。(d) コンテンツ行は公開済みだが所属 week / phase / theme のいずれかが未公開または論理削除済みのスライドキーは、member / お試しの通常クライアントで署名発行が拒否されること（#216。admin / maintainer はプレビューのため許可） |
 
-### 3.3 型安全性テスト
+### 3.3 型安全性・ビルド・コード品質
 
-TypeScript と型生成の運用によって、型の破綻を早期に検知する。
+- **型**: 型チェック（`tsc --noEmit`）で型不整合を検知する。DB型は `bun run db:types` の型生成と差分確認でスキーマとの整合性を保つ。
+- **ビルド**: lockfile どおりの依存インストールと、本番相当のビルドの完走を確認する。
+- **デバッグ出力**: `console.log` / `console.info` / `debugger` の混入を検知して失敗させる。
+- **Biome**: `bun run check` でコードスタイル・静的解析を一括確認する。
 
-- **観点**
-  - **コンポーネント/ロジック型**: 型チェックにより型不整合を検知する
-  - **データベース型**: `bun run db:types` による型生成と差分確認により、スキーマと型定義の整合性を保つ
+### 3.4 E2Eテスト（未実装・リリース前のみ）
 
-### 3.4 ビルドテスト
+実ユーザー視点の主要ジャーニーを、単一ブラウザで1〜2本の少数ケースに絞って確認する（当面は手動。実施条件は2.2のリリース前と同じ）。対象フロー例:
 
-本番相当のビルドが成立することを確認する。
-
-- **観点**
-  - 本番相当のビルドが完走する
-  - 依存関係のインストールが lockfile どおりに成功する
-
-### 3.5 コード品質テスト
-
-デバッグ用出力の混入と Lint エラーを早期に検知する。
-
-- **観点**
-  - **デバッグ出力**: `console.log` / `console.info` / `debugger` の混入を検知して失敗させる
-  - **Biome Lint/Format**: `bun run check` によるコードスタイル・静的解析の一括確認
-
-### 3.6 E2Eテスト（未実装・リリース前のみ）
-
-実ユーザー視点の主要ジャーニーを、少数のケースで確認する（全網羅はしない）。
-
-- **実施条件**: リリース前、または影響範囲が大きい変更（認証/認可、学習コンテンツ配信、主要画面の動線）
-- **実施方法**: 単一ブラウザで、主要フローを1〜2本確認する（当面は手動）
-- **対象フロー例**
-  - Google ログイン → ダッシュボード表示 → コンテンツ閲覧 → ログアウト
-  - 進捗の記録 → ダッシュボードへの反映
-  - admin/maintainer による管理操作（フェーズ・週・コンテンツ管理）→ 一覧/詳細への反映
-  - rejected ユーザーが保護ページへアクセス → `/rejected` へ誘導。旧URL `/pending` へのアクセスも `/rejected` に落ち着く
-  - お試し（trial）ユーザーのログイン → ツリー全表示・お試し非公開コンテンツのロック表示・直リンク時のロック画面、お試し公開コンテンツの閲覧/完了/提出が成功、お試し非公開コンテンツへのAPI直叩きが403
-  - お試しユーザーが旧URL `/pending` へアクセス → `/`（ダッシュボード）へリダイレクトされ、承認待ちバナーが表示される
-  - 承認（trial → active）後に承認前の提出・進捗が引き継がれ、管理者のレビュー一覧に表示される
-  - 演習コンテンツへの提出物作成 → 提出履歴への反映
+- Google ログイン → ダッシュボード表示 → コンテンツ閲覧 → ログアウト
+- 進捗の記録 → ダッシュボードへの反映
+- admin/maintainer による管理操作（フェーズ・週・コンテンツ管理）→ 一覧/詳細への反映
+- rejected ユーザーが保護ページへアクセス → `/rejected` へ誘導される
+- お試し（trial）ユーザー: ツリー全表示・お試し非公開コンテンツのロック表示・直リンク時のロック画面、お試し公開コンテンツの閲覧/完了/提出が成功、お試し非公開コンテンツへのAPI直叩きが403、旧URL `/pending` が `/`（承認待ちバナー付き）へリダイレクトされる
+- 承認（trial → active）後に承認前の提出・進捗が引き継がれ、管理者のレビュー一覧に表示される
+- 演習コンテンツへの提出物作成 → 提出履歴への反映
 
 ## 4. CI / ツール構成
 
 ### 4.1 GitHub Actions ワークフロー
 
-GitHub Actions は CI/CD の実行基盤として利用する。詳細は各ワークフロー定義を参照する。
+定義は `.github/workflows/`（トリガー・実行内容はここが正）。
 
-| Workflow | 目的 | 主な実行内容 | トリガー |
-| --- | --- | --- | --- |
-| Build Test ([.github/workflows/build.yml](../.github/workflows/build.yml)) | 本番相当のビルド成立性を検証 | 依存関係インストール + ビルド | `push` / `pull_request`（`app/**`）、`workflow_dispatch`、`workflow_call` |
-| TypeScript Type Check ([.github/workflows/typecheck.yml](../.github/workflows/typecheck.yml)) | 型安全性の早期検出 | 型チェック（`tsc --noEmit`） | `push` / `pull_request`（`app/**`, `*.ts(x)` 等）、`workflow_dispatch`、`workflow_call` |
-| Vitest Unit Tests ([.github/workflows/test.yml](../.github/workflows/test.yml)) | ユニットテスト実行 | ユニットテスト（Vitest） | `push` / `pull_request`（`app/**`, `tests/**`, `vitest.config.ts`, `package.json`）、`workflow_dispatch`、`workflow_call` |
-| Biome Check ([.github/workflows/biome.yml](../.github/workflows/biome.yml)) | Lint/フォーマット違反を防止 | `bun run check`（Biome lint + format） | `push` / `pull_request`（`app/**`）、`workflow_dispatch`、`workflow_call` |
-| Check console.log and debugger ([.github/workflows/check_console_log.yml](../.github/workflows/check_console_log.yml)) | デバッグ用出力の混入を防止 | console/debugger 検査 | `push` / `pull_request`（`app/**`）、`workflow_dispatch`、`workflow_call` |
-| Release PR ([.github/workflows/release-pr.yml](../.github/workflows/release-pr.yml)) | main→release のリリース PR を作成 | 品質ゲート（既存5ワークフローの再利用）＋事前作業の検出（マイグレーション・新規環境変数・migration list）＋ PR 作成 | `workflow_dispatch`（バージョン番号・サマリーを入力） |
-| Create Release ([.github/workflows/create-release.yml](../.github/workflows/create-release.yml)) | 承認後にタグと GitHub Release を作成 | ガード条件チェック → 承認ゲート（Environment）→ タグ作成 → Release 公開 | release への PR マージ後、`workflow_dispatch` |
+| Workflow | 目的 |
+| --- | --- |
+| `build.yml` | 本番相当のビルド成立性 |
+| `typecheck.yml` | 型チェック（`tsc --noEmit`） |
+| `test.yml` | ユニットテスト（Vitest） |
+| `biome.yml` | Lint/フォーマット違反の防止（`bun run check`） |
+| `check_console_log.yml` | デバッグ用出力の混入防止 |
+| `release-pr.yml` | main→release のリリース PR 作成（上記の品質ゲートを再利用し、マイグレーション・新規環境変数・migration list などの事前作業を検出） |
+| `create-release.yml` | 承認後にタグと GitHub Release を作成 |
 
-### 4.2 導入済みツール / 導入予定ツール
-
-**導入済み**
-
-- **TypeScript**: 型チェック（`tsc --noEmit`）
-- **Biome**: Lint + フォーマット（`bun run check`）
-- **Vitest**: ユニットテスト実行基盤（Bun / Next.js との親和性が高い）
-- **Supabase CLI**: 型生成・スキーマ整合性確認（CI は準備中、現状は手動）
-
-**導入予定**
-
-- **カスタムスクリプト**: デバッグ出力検査（`lint:logs`）
-
-### 4.3 実行環境
+### 4.2 実行環境
 
 - **Bun**: パッケージマネージャー兼実行環境（CI でも bun を使用）
 - **Node.js 20.x**: bun が利用できない CI ステップの代替実行環境
-- **Next.js 16**: 本番ビルド互換の検証
+- **Supabase CLI**: 型生成・スキーマ整合性確認（CI は準備中、現状は手動）
 
 ## 5. テスト規約
 
-### テストファイルの配置
-
-- 原則としてテストコードは `tests/` 配下に配置する。
-- ディレクトリ構成は、対象コード（例: `app/` 配下）の構造に寄せて配置する。
-
-### ファイル名の命名
-
-- Vitest は `*.test.ts` / `*.spec.ts` をテストとして実行できるが、本プロジェクトでは `*.test.ts` に統一する。
-- テストファイル名は「対象 + 期待する振る舞い」が想像できる名前にする。
-
-例:
-
-- `tests/services/auth/permissions.test.ts`
-- `tests/services/auth/server-auth.test.ts`
-- `tests/services/api/learning-server.test.ts`
-
-### テストの検証対象
-
-- **検証する**: 関数の入力に対する出力（返り値）、副作用の結果（状態変化）、エラー時の振る舞い
-- **検証しない**: 内部実装の呼び出し手順（クエリメソッドをどの引数で呼んだか等）
-- モックは外部依存を切り離すために使用するが、モック呼び出し引数の逐次検証は原則行わない
-- 返り値を持たない関数は、副作用の結果（更新値・更新対象）が正しいことを検証する
-
-### 現在の実装済みテスト一覧
-
-| テストスクリプト | テスト対象スクリプト | 対象関数 | テスト内容の概要 |
-| --- | --- | --- | --- |
-| `tests/services/auth/permissions.test.ts` | `app/services/auth/permissions.ts` | `checkAdminPermissions`, `checkContentPermissions`, `checkInstructorPermissions` | ロール（admin/maintainer/member/unknown）ごとの権限判定（許可/拒否）を検証する。 |
-| `tests/services/auth/server-auth.test.ts` | `app/services/auth/server-auth.ts` | `getServerAuth` | 認証エラー、ユーザー情報取得失敗、ステータス別応答、例外時の戻り値とエラーハンドリングを検証する。 |
-| `tests/services/api/learning-server.test.ts` | `app/services/api/learning-server.ts` | 学習コンテンツ取得関数群 | フェーズ・週・コンテンツの取得正常系/異常系を検証する。 |
-| `tests/auth/callback.test.ts` | `app/auth/callback/route.ts` | `GET` | 初回ログインの INSERT 成功時は `/` へリダイレクトして Slack 通知を呼び出すこと、INSERT 失敗時と論理削除済み再ログインは `/login?error=registration_failed` へリダイレクトして通知・セッション Cookie を付けないこと、存在確認失敗と service_role 未設定は `error` なしの `/login` へフェイルクローズすることを検証する。 |
-| `tests/lib/content-filtering.test.ts` | `app/lib/content-filtering.ts` | `deriveFilterOptions`, `deriveWeekSelectOptions`, `filterContents` | コンテンツ一覧・週一覧のjoin結果からのフィルタ選択肢導出（重複排除、未分類・フェーズjoin欠落の扱い）と、タイトル検索による絞り込みを検証する。テーマ/フェーズ/週/種別は SQL 側（`fetchAllContents`）に寄せた。 |
-| `tests/lib/content-grouping.test.ts` | `app/lib/content-grouping.ts` | `sortContentsByHierarchy`, `sortWeeksByHierarchy`, `sortPhasesByHierarchy`, `groupContentsByWeek`, `groupWeeksByPhase`, `groupPhasesByTheme`, `resolveSiblingResequence`, `InvalidInsertAfterIdError` | コンテンツ・週・フェーズのテーマ→フェーズ→週階層順ソート（display_orderのNULL欠落を末尾扱い、idタイブレーク、非破壊）と、週単位・フェーズ単位・テーマ単位グルーピング（「未分類」グループの扱い）を検証する。加えて、新規作成フォームの挿入位置からの再採番（`resolveSiblingResequence`：先頭・中間・末尾への挿入、display_orderの重複・欠落からの再採番、非破壊）と、`insert_after_id`が兄弟一覧に存在しない場合に`InvalidInsertAfterIdError`を投げること（メッセージが利用者向け文言でinsertAfterIdの値を含まないことを含む）を検証する。 |
+- テストコードは `tests/` 配下に、対象コード（`app/` 配下）の構造に寄せて配置する。
+- ファイル名は `*.test.ts` に統一し、「対象 + 期待する振る舞い」が想像できる名前にする（例: `tests/services/auth/permissions.test.ts`）。実装済みテストの一覧は `tests/` を参照。
+- **検証する**: 関数の入力に対する出力（返り値）、副作用の結果（状態変化）、エラー時の振る舞い。返り値を持たない関数は副作用の結果（更新値・更新対象）を検証する。
+- **検証しない**: 内部実装の呼び出し手順（クエリメソッドをどの引数で呼んだか等）。モックは外部依存を切り離すために使い、モック呼び出し引数の逐次検証は原則行わない。
