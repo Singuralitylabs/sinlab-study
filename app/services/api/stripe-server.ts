@@ -5,6 +5,7 @@ import {
   BILLING_ANCHOR_DAY_OF_MONTH,
   BILLING_ANCHOR_HOUR_UTC,
   STRIPE_MINIMUM_CHARGE_AMOUNT_JPY,
+  type SubscriptionPrice,
 } from "@/app/constants/stripe";
 import {
   createAdminSupabaseClient,
@@ -512,7 +513,7 @@ async function getCachedPrice(): Promise<Stripe.Price> {
 /**
  * Priceが「1ヶ月間隔の定期課金」であるかを判定する。`BILLING_ANCHOR_DAY_OF_MONTH` を
  * 用いたアンカー計算・日割り額の概算は月次課金を前提としているため、年額プラン等の
- * 誤設定を検知して呼び出し側で安全側に倒すために使う（`fetchSubscriptionPrice()` と
+ * 誤設定を検知して呼び出し側で安全側に倒すために使う（`toSubscriptionPrice()` と
  * `isProrationBelowMinimum()` の双方で共有する）。
  */
 function isPlainMonthlyPrice(price: Stripe.Price): boolean {
@@ -520,22 +521,26 @@ function isPlainMonthlyPrice(price: Stripe.Price): boolean {
 }
 
 /**
- * 月額（1ヶ月間隔）サブスクリプションのPrice情報を取得する（/upgrade ページでの料金表示用）。
+ * Stripe の Price を、料金表示・Checkout 可否の判定に使う `SubscriptionPrice` へ変換する。
  * `unit_amount` はJPY（ゼロdecimal通貨）を前提にそのまま円額として扱う
  * （複数通貨対応はスコープ外。Slack支払い失敗通知の金額表示と同じ前提）。
- * 設定されたPriceが1ヶ月間隔でない場合は `amount: null` を返し、呼び出し側で
- * Checkout を拒否する（「/ 月」表示と実際の請求間隔の食い違いを避けるため）。
+ * 1ヶ月間隔でない場合は `amount: null` を返し、呼び出し側で Checkout の拒否・料金表示の
+ * 省略に使う（「/ 月」表示と実際の請求間隔の食い違いを避けるため）。
+ * `/upgrade` の料金（`fetchSubscriptionPrice()`）と有料会員化メールの料金で共有する。
  */
-export async function fetchSubscriptionPrice(): Promise<{
-  amount: number | null;
-  currency: string;
-}> {
-  const price = await getCachedPrice();
-
+export function toSubscriptionPrice(price: Stripe.Price): SubscriptionPrice {
   return {
     amount: isPlainMonthlyPrice(price) ? price.unit_amount : null,
     currency: price.currency,
   };
+}
+
+/**
+ * 月額（1ヶ月間隔）サブスクリプションのPrice情報を取得する（/upgrade ページでの料金表示用）。
+ * 変換規則は `toSubscriptionPrice()` を参照。
+ */
+export async function fetchSubscriptionPrice(): Promise<SubscriptionPrice> {
+  return toSubscriptionPrice(await getCachedPrice());
 }
 
 /** 指定した年・月（0始まり月インデックス）における請求アンカー時刻（UTC）を構築する */
@@ -598,6 +603,7 @@ export async function fetchStripeSubscriptionByUserId(userId: number): Promise<{
   data: {
     status: string;
     cancel_at_period_end: boolean;
+    cancel_at: string | null;
     current_period_end: string | null;
   } | null;
   error: PostgrestError | null;
@@ -606,7 +612,7 @@ export async function fetchStripeSubscriptionByUserId(userId: number): Promise<{
 
   const { data, error } = await supabase
     .from("stripe_subscriptions")
-    .select("status, cancel_at_period_end, current_period_end")
+    .select("status, cancel_at_period_end, cancel_at, current_period_end")
     .eq("user_id", userId)
     .maybeSingle();
 

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/admin-server");
+vi.mock("@/app/services/notifications/user-emails");
 
 import { PATCH } from "@/app/api/admin/users/route";
 import {
@@ -12,6 +13,7 @@ import {
   rejectUser,
 } from "@/app/services/api/admin-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
+import { scheduleApprovedEmail } from "@/app/services/notifications/user-emails";
 
 const adminAuth = {
   user: { id: "auth-uuid-admin" },
@@ -19,6 +21,8 @@ const adminAuth = {
   userStatus: "active",
   userRole: "admin",
 };
+
+const APPROVED_AT = "2026-09-28T00:00:00.000Z";
 
 const request = (body: unknown) =>
   new Request("http://localhost/api/admin/users", {
@@ -30,7 +34,11 @@ const request = (body: unknown) =>
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(adminAuth as never);
-  vi.mocked(approveUser).mockResolvedValue({ error: null, updated: true });
+  vi.mocked(approveUser).mockResolvedValue({
+    error: null,
+    updated: true,
+    approvedAt: APPROVED_AT,
+  });
   vi.mocked(rejectUser).mockResolvedValue({ error: null, updated: true });
   vi.mocked(changeUserRole).mockResolvedValue({ error: null, updated: true });
   vi.mocked(changeMembershipType).mockResolvedValue({ error: null, updated: true });
@@ -63,6 +71,12 @@ describe("PATCH /api/admin/users - approve", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ success: true, action: "approve" });
     expect(approveUser).toHaveBeenCalledWith(5, "general");
+    // 承認時刻を二重送信防止キーにして承認メールを予約する
+    expect(scheduleApprovedEmail).toHaveBeenCalledWith({
+      userId: 5,
+      membershipType: "general",
+      approvedAt: APPROVED_AT,
+    });
   });
 
   it("membershipType 未指定の場合は400で、承認処理を呼ばない", async () => {
@@ -80,22 +94,25 @@ describe("PATCH /api/admin/users - approve", () => {
   });
 
   it("更新対象が0行（既に承認済み・存在しない等）の場合は409を返す", async () => {
-    vi.mocked(approveUser).mockResolvedValue({ error: null, updated: false });
+    vi.mocked(approveUser).mockResolvedValue({ error: null, updated: false, approvedAt: null });
 
     const res = await PATCH(request({ userId: 5, action: "approve", membershipType: "community" }));
 
     expect(res.status).toBe(409);
+    expect(scheduleApprovedEmail).not.toHaveBeenCalled();
   });
 
   it("承認処理が失敗した場合は500を返す", async () => {
     vi.mocked(approveUser).mockResolvedValue({
       error: { message: "db error", code: "PGRST204" } as never,
       updated: false,
+      approvedAt: null,
     });
 
     const res = await PATCH(request({ userId: 5, action: "approve", membershipType: "community" }));
 
     expect(res.status).toBe(500);
+    expect(scheduleApprovedEmail).not.toHaveBeenCalled();
   });
 
   it("対象ユーザーがStripe契約中で membershipType が community の場合は409で、承認処理を呼ばない", async () => {

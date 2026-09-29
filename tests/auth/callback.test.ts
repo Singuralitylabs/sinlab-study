@@ -6,12 +6,14 @@ vi.mock("@supabase/ssr", () => ({
 }));
 vi.mock("@/app/services/api/supabase-server");
 vi.mock("@/app/services/notifications/slack");
+vi.mock("@/app/services/notifications/user-emails");
 
 import { createServerClient } from "@supabase/ssr";
 import { GET } from "@/app/auth/callback/route";
 import { TERMS_CONSENT_COOKIE_NAME, TERMS_CONSENT_COOKIE_VALUE } from "@/app/constants/auth";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { sendSlackNewUserNotification } from "@/app/services/notifications/slack";
+import { scheduleSignupEmail } from "@/app/services/notifications/user-emails";
 
 const AUTH_USER = {
   id: "auth-uuid-1",
@@ -115,6 +117,7 @@ describe("GET /auth/callback", () => {
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe("http://localhost/");
     expect(sendSlackNewUserNotification).toHaveBeenCalled();
+    expect(scheduleSignupEmail).toHaveBeenCalledWith({ authId: AUTH_USER.id });
     expect(setCookieHeader(res)).toContain("sb-access-token=token");
     // セッション Cookie を含む応答には ssr が渡した Cache-Control 等が転写される
     expect(res.headers.get("cache-control")).toBe(SESSION_RESPONSE_HEADERS["Cache-Control"]);
@@ -145,6 +148,7 @@ describe("GET /auth/callback", () => {
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe("http://localhost/login?error=registration_failed");
     expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+    expect(scheduleSignupEmail).not.toHaveBeenCalled();
     expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
     expectConsentCookieDeleted(res);
   });
@@ -160,6 +164,7 @@ describe("GET /auth/callback", () => {
     expect(res.headers.get("location")).toBe("http://localhost/login?error=terms_required");
     expect(sessionClient.insert).not.toHaveBeenCalled();
     expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+    expect(scheduleSignupEmail).not.toHaveBeenCalled();
     expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
     expectConsentCookieDeleted(res);
   });
@@ -181,6 +186,7 @@ describe("GET /auth/callback", () => {
       expect(res.headers.get("location")).toBe("http://localhost/");
       expect(sessionClient.insert).not.toHaveBeenCalled();
       expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+      expect(scheduleSignupEmail).not.toHaveBeenCalled();
       expectConsentCookieDeleted(res);
     }
   });
@@ -202,6 +208,7 @@ describe("GET /auth/callback", () => {
       expect(res.headers.get("location")).toBe("http://localhost/rejected");
       expect(sessionClient.insert).not.toHaveBeenCalled();
       expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+      expect(scheduleSignupEmail).not.toHaveBeenCalled();
       expectConsentCookieDeleted(res);
     }
   });
@@ -221,6 +228,7 @@ describe("GET /auth/callback", () => {
     expect(res.headers.get("location")).toBe("http://localhost/login?error=registration_failed");
     expect(sessionClient.insert).not.toHaveBeenCalled();
     expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+    expect(scheduleSignupEmail).not.toHaveBeenCalled();
     expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
     expectConsentCookieDeleted(res);
   });
@@ -238,6 +246,7 @@ describe("GET /auth/callback", () => {
     expect(res.headers.get("location")).toBe("http://localhost/login");
     expect(sessionClient.insert).not.toHaveBeenCalled();
     expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+    expect(scheduleSignupEmail).not.toHaveBeenCalled();
     expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
     expectConsentCookieDeleted(res);
   });
@@ -262,6 +271,7 @@ describe("GET /auth/callback", () => {
     expect(createAdminSupabaseClient).toHaveBeenCalled();
     expect(sessionClient.insert).not.toHaveBeenCalled();
     expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+    expect(scheduleSignupEmail).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalled();
   });
 
@@ -303,6 +313,7 @@ describe("GET /auth/callback", () => {
       expect(createAdminSupabaseClient).not.toHaveBeenCalled();
       expect(sessionClient.insert).not.toHaveBeenCalled();
       expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+      expect(scheduleSignupEmail).not.toHaveBeenCalled();
       expect(console.error).toHaveBeenCalled();
     }
   );

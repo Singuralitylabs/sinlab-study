@@ -366,6 +366,11 @@ describe("approveUser", () => {
       expect(builder.update).toHaveBeenCalledWith(
         expect.objectContaining({ status: "active", membership_type: membershipType })
       );
+      // 承認メールの二重送信防止キーとして、書き込んだ updated_at と同じ時刻を返す
+      expect(result.approvedAt).toEqual(expect.any(String));
+      expect(builder.update).toHaveBeenCalledWith(
+        expect.objectContaining({ updated_at: result.approvedAt })
+      );
       expect(builder.eq).toHaveBeenCalledWith("id", 1);
       // service_role はRLSを迂回するため is_deleted=false をクエリ自体に必須で課す
       expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
@@ -387,6 +392,7 @@ describe("approveUser", () => {
 
     expect(result.error).toBeNull();
     expect(result.updated).toBe(false);
+    expect(result.approvedAt).toBeNull();
   });
 
   it("更新に失敗した場合はエラーを返す", async () => {

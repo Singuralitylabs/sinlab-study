@@ -6,6 +6,7 @@ import {
   CreditCard,
   House,
   LogOut,
+  Megaphone,
   Menu,
   Settings,
   UserCog,
@@ -23,6 +24,8 @@ interface NavItem {
   title: string;
   href: string;
   icon: React.ReactNode;
+  /** 項目の右に表示する件数（0 なら表示しない） */
+  badgeCount?: number;
 }
 
 const DEFAULT_NAV_ITEMS: NavItem[] = [
@@ -42,6 +45,15 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     icon: <ClipboardList className="h-5 w-5" />,
   },
 ];
+
+function announcementsNavItem(unreadCount: number): NavItem {
+  return {
+    title: "お知らせ",
+    href: "/announcements",
+    icon: <Megaphone className="h-5 w-5" />,
+    badgeCount: unreadCount,
+  };
+}
 
 const UPGRADE_NAV_ITEM: NavItem = {
   title: "プラン・お支払い",
@@ -89,6 +101,12 @@ function SideNavLink({
     >
       {item.icon}
       {item.title}
+      {item.badgeCount ? (
+        <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">
+          <span aria-hidden="true">{item.badgeCount > 99 ? "99+" : item.badgeCount}</span>
+          <span className="sr-only">（未読 {item.badgeCount} 件）</span>
+        </span>
+      ) : null}
     </Link>
   );
 }
@@ -133,10 +151,12 @@ export function SideNav({
   isAdmin,
   isInstructor,
   stripeEnabled,
+  unreadAnnouncementCount,
 }: {
   isAdmin: boolean;
   isInstructor: boolean;
   stripeEnabled: boolean;
+  unreadAnnouncementCount: number;
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
@@ -144,12 +164,13 @@ export function SideNav({
   const navItems = useMemo<NavItem[]>(
     () => [
       ...DEFAULT_NAV_ITEMS,
+      announcementsNavItem(unreadAnnouncementCount),
       // 停止中は決済・お支払い管理の導線を持たないため非表示にする（詳細はAGENTS.md参照）
       ...(stripeEnabled ? [UPGRADE_NAV_ITEM] : []),
       ...(isInstructor ? [MANAGE_NAV_ITEM] : []),
       ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),
     ],
-    [isAdmin, isInstructor, stripeEnabled]
+    [isAdmin, isInstructor, stripeEnabled, unreadAnnouncementCount]
   );
 
   const handleSignOut = async () => {

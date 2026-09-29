@@ -323,7 +323,7 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 | 画面 | パス | 内容 |
 |:--|:--|:--|
-| アップグレード | `/upgrade` | お試しユーザー: 月額料金（Stripe PriceからTTLキャッシュ付きで取得。JPY・1ヶ月間隔で取得できた場合は「月額N円（税込）」を表示。取得失敗時は `DISPLAY_MONTHLY_PRICE_JPY` のフォールバックで法定表示を残す。取得成功だが非月額・非JPYの場合は月額を断定せず見出しを出さない）+ 法定表示5項目（自動更新・料金・支払日/更新日・解約方法と解約後の扱い・未成年者注意文言）+ アップグレードボタン。実請求額を確認できない場合はボタンを無効化する。契約中の一般有料会員: 「ご契約中です」（次回のお支払い日、または解約予定日を`current_period_end`から表示）+ お支払い情報の管理・解約ボタン（Stripe Customer Portalへ遷移）+ 解約後の扱い（日割り返金なし・当該請求期間の末日まで利用可能）。それ以外の `active` ユーザー（コミュニティ会員・手動承認済みの一般有料会員）: 本登録済みの案内のみ。契約状況の取得自体に失敗した場合はエラーメッセージを表示し、契約なし・契約ありのいずれとも誤判定しない（フェイルクローズ）。取得失敗時もお支払い情報の管理・解約ボタンは表示し続けるが、契約の有無が不明なため解約ポリシー文言は出さない（契約が無ければAPI側が404を返すためボタン自体は安全） |
+| アップグレード | `/upgrade` | お試しユーザー: 月額料金（Stripe PriceからTTLキャッシュ付きで取得。JPY・1ヶ月間隔で取得できた場合は「月額N円（税込）」を表示。取得失敗時は `DISPLAY_MONTHLY_PRICE_JPY` のフォールバックで法定表示を残す。取得成功だが非月額・非JPYの場合は月額を断定せず見出しを出さない）+ 法定表示5項目（自動更新・料金・支払日/更新日・解約方法と解約後の扱い・未成年者注意文言）+ アップグレードボタン。実請求額を確認できない場合はボタンを無効化する。契約中の一般有料会員: 「ご契約中です」（次回のお支払い日、または解約予定日を表示。解約予約中の判定は `cancel_at_period_end` と `cancel_at` の両方で行い、解約予定日は `cancel_at`、無ければ `current_period_end` から表示する。flexible billing mode の Portal 解約は `cancel_at` にだけ現れるため。`docs/database.md` 3.9節）+ お支払い情報の管理・解約ボタン（Stripe Customer Portalへ遷移）+ 解約後の扱い（日割り返金なし・当該請求期間の末日まで利用可能）。それ以外の `active` ユーザー（コミュニティ会員・手動承認済みの一般有料会員）: 本登録済みの案内のみ。契約状況の取得自体に失敗した場合はエラーメッセージを表示し、契約なし・契約ありのいずれとも誤判定しない（フェイルクローズ）。取得失敗時もお支払い情報の管理・解約ボタンは表示し続けるが、契約の有無が不明なため解約ポリシー文言は出さない（契約が無ければAPI側が404を返すためボタン自体は安全） |
 | アップグレード完了 | `/upgrade/success` | Checkoutから戻った直後のページ。`session_id` をStripe APIでretrieveし、決済完了・本人のセッションであることを確認した上で会員昇格を反映し、完了表示する。日割りで少額決済された直後であるため、`activateUserFromCheckoutSession()` が返す次回のお支払い予定日（＝満額請求日、DBの再読み込みなしで返す）も表示する（取得できなくても完了表示自体は行う） |
 
 トライアルバナー（`(authenticated)/layout.tsx`、2.6参照）に `/upgrade` へのCTAボタンを表示する。
@@ -364,6 +364,7 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 - Checkout作成が失敗したか判別できない場合: Stripeが4xxで拒否したときのみ「セッションは作られていない」と確定できるため処理権を解放する。通信タイムアウト・5xxでは解放せず、次回のclaim時にCustomerへ紐づく有効なセッションを照会して再利用するか、TTLの経過に委ねる（未記録の有効なセッションの上に2件目を作らないため）
 - Checkout手続き中に管理者が手動承認した場合: 決済完了時点で一般有料会員として上書きされる（許容）。降格側は `membership_type=general` ガードで巻き込みを防止する
 - Checkout手続き中に管理者が却下した場合: 決済完了時点でユーザーが `rejected` であれば昇格しない（却下判断を決済完了で上書きしない）
+- 受講生向けメール（10章）: 有料会員化・解約予約・有料会員終了のメールは、昇格・ミラー更新・降格が成功した後にのみ `after()` へ予約し、`email_logs` の UNIQUE で1通に抑える。送信の成否はWebhookの応答・claimの解放（再送判定）に影響しない
 - Webhookイベントの順序逆転・再送・同一event.idの並行配信: `stripe_events` へのINSERTをclaimとして使う原子的な排他制御と、Stripe APIから再取得したライブ状態のみを書き込むハンドラ設計で吸収する（イベントに埋め込まれたスナップショットは信用しない）
 - イベント本文の構造のAPIバージョン依存: Webhookのイベント本文（`event.data.object`）の構造はエンドポイントに設定したAPIバージョンで決まり、アプリがStripe APIを呼ぶ版（SDKが固定する `Stripe.API_VERSION`）とは独立している。このため本文から直接読んでよいのはID類（Checkout Sessionの `id` / `client_reference_id` / `metadata` / `customer` / `subscription`、Subscriptionの `id`）に限り、状態は常にStripe APIからのライブ取得を正とする。例外は `invoice.payment_failed` の運用者向けSlack通知で、本文の `customer_email` / `amount_due` / `hosted_invoice_url` を通知の表示にのみ使う（認可・会員状態の判定には使わない）。本文の他のフィールドを直接使う変更を入れる場合は、その時点でエンドポイントのAPIバージョンを `Stripe.API_VERSION` に合わせる（下記「Stripe Webhook 設定手順」）
 - claim後にサーバーレス関数がタイムアウト・強制終了しrelease処理へ到達できない場合: claimしたまま10分（`EVENT_CLAIM_TTL_MINUTES`）が経過すると再claim可能になる（ハンドラは冪等なため、まれに完了済みイベントを再実行しても実害は小さい）
@@ -897,7 +898,7 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 
 | パス | 画面名 | 表示内容 |
 |:--|:--|:--|
-| `/login` | ログイン画面 | サービス名、利用規約・プライバシーポリシーへの同意チェックボックス（未チェックの間は「Googleでログイン」ボタンを無効化）、「Googleでログイン」ボタン、サービス説明。`error=registration_failed` のときは登録失敗メッセージ、`error=terms_required` のときは同意要求メッセージを表示（未知の `error` 値は何も出さない）。中央寄せレイアウト、ダークモード対応 |
+| `/login` | ログイン画面 | サービス名、利用規約・プライバシーポリシーへの同意チェックボックス（未チェックの間は「Googleでログイン」ボタンを無効化）、「Googleでログイン」ボタン、サービス説明。`error=registration_failed` のときは登録失敗メッセージ、`error=terms_required` のときは同意要求メッセージを表示（未知の `error` 値は何も出さない）。LP の内容を引用したサービス紹介ブロック（キャッチコピー、サブコピー、料金1行、「デモを試す」（`/demo` への内部リンク）・「無料体験会に申込む」・「サービス紹介を見る」（LP）の3リンク、4つの仕組みの順）と、「実際の学習画面」（動画・スライド・課題提出・AIレビューの画面のスクリーンショット4枚。`public/images/login/`、動画画面は講師のワイプを除去、AIレビュー画面は模範回答のコードをぼかし済み）を表示する。料金1行は、決済機能が有効（`isStripeEnabled()`）なときだけ月額（`DISPLAY_MONTHLY_PRICE_JPY` から `formatMonthlyJpyPrice()` で導出）を含め、無効時は「まずは無料で始められます。」のみとする（登録後に `/upgrade` で申し込めない料金をうたわないため）。未認証画面から Stripe Price は取得せず、実請求額の確認と法定表示は `/upgrade` が担う。料金改定時は Stripe Price・定数・LP をそろえて更新する。紹介ブロックのリンクは枠線・文字リンクに留め、ログインを主導線とする。PC幅（`lg` 以上）は左に紹介・右にログインカードの2カラムで、学習画面はその下に横4列、スマホ・タブレット幅（`lg` 未満）はログインカード → 紹介 → 学習画面（スマホは縦1列、タブレットは2列）の縦積みで、ログインカードは `max-w-md`、紹介は `max-w-xl` に幅を制限する。配色・書体は LP に合わせ、`.login-theme`（`app/globals.css`）でこの画面だけセマンティックトークンを上書きする（他の画面の配色は変えない）。ダークモード対応 |
 | `/rejected` | 却下画面 | 却下メッセージ、問い合わせ案内、ログアウトボタン |
 
 承認待ち専用画面（`/pending`）は設けない。お試しユーザーはダッシュボードを含む通常画面にアクセスでき、承認待ちであることはアプリ内バナーで通知する（2.6参照）。`/pending` へのアクセスは `/` にリダイレクトする。
@@ -906,7 +907,7 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 
 | パス | 画面名 | 表示内容 |
 |:--|:--|:--|
-| `/` | ダッシュボード | 全体進捗率、Phase別進捗バー、学習への導線リンク、ウェルカムダイアログ・はじめかたチェックリスト（member のみ、3.4参照） |
+| `/` | ダッシュボード | 全体進捗率、Phase別進捗バー、学習への導線リンク、ウェルカムダイアログ・はじめかたチェックリスト（member のみ、3.4参照）、未読のお知らせ（最大3件、11章） |
 | `/learn` | Theme一覧 | 公開Themeのカード一覧（名前、説明、サムネイル） |
 | `/learn/[themeId]` | Phase一覧 | パンくずリスト、Phaseカード一覧（名前、説明） |
 | `/learn/[themeId]/[phaseId]` | Week・コンテンツ一覧 | パンくずリスト、Week一覧と各Week内のコンテンツリスト（タイトル、種別アイコン、完了チェック） |
@@ -914,6 +915,8 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 | `/submissions` | 提出履歴 | 提出一覧（提出日時、コンテンツ名、提出タイプ、内容プレビュー） |
 | `/upgrade` | アップグレード | ステータス別の出し分け（2.11参照）。サイドナビ「プラン・お支払い」から全認証ユーザーがアクセス可能 |
 | `/upgrade/success` | アップグレード完了 | Checkoutから戻った直後の決済確認・完了表示（2.11参照） |
+| `/announcements` | お知らせ一覧 | 自分が対象の公開済みお知らせ（新しい順、未読表示）。サイドナビ「お知らせ」に未読件数のバッジ（11章） |
+| `/announcements/[id]` | お知らせ詳細 | 本文（Markdown）。開くと既読を記録する（11章） |
 
 ### 7.3 管理・講師向け画面（`/manage`）
 
@@ -928,6 +931,7 @@ admin と maintainer が共通でアクセス可能。`/admin` および `/instr
 | `/manage/contents` | コンテンツ管理 | CRUD操作（一覧、新規作成、編集、論理削除）、PDFアップロード |
 | `/manage/students` | 受講生一覧 | テーブル形式（表示名、メール、進捗率、最終アクティビティ） |
 | `/manage/submissions` | 提出管理 | テーブル形式（受講生名、コンテンツ名、提出タイプ、提出日時） |
+| `/manage/announcements` | お知らせ管理 | 一覧（タイトル・対象・公開・メール送信の状況）、作成・編集（公開・非公開の切り替えを含む）、論理削除（11章） |
 
 ### 7.4 管理者専用画面
 
@@ -1156,3 +1160,171 @@ flowchart TD
 | Webhook POST が 4xx / 5xx | エラーログ（ステータスコード含む）を出力し握り潰す |
 | ユーザー INSERT 失敗 | 新規ユーザー通知は送信しない（中途半端な状態を通知しない）。`/login?error=registration_failed` へリダイレクトする |
 | 支払い失敗通知自体の送信エラー | `recordEventProcessed()` はそのまま実行され、`/api/stripe/webhook` は200を返す（通知の成否はStripeへのWebhook応答に影響しない） |
+
+---
+
+## 10. メール通知機能
+
+### 10.1 概要
+
+受講生の状態が変わったときに、本人へトランザクションメールを送る。加えて、毎朝のバッチ（Vercel Cron）で案内系の定期メールを送る（10.7節。要件は `docs/requirements.md` 3.8節）。運営向けの Slack 通知（9章）とは独立しており、Slack 通知はそのまま残す。送信プロバイダは Resend で、送信元は返信不可のアドレス（`EMAIL_FROM_ADDRESS`、`noreply@...`）とする。
+
+送信基盤は次の方針で作る（Slack 通知の `postSlackWebhook()` と同じ考え方）。
+
+- **未設定はスキップ**: `RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `NEXT_PUBLIC_APP_URL` のいずれかが未設定なら、warn ログを出して送信しない（送信ログも作らない）
+- **失敗は握りつぶす**: 送信失敗（非2xx）・タイムアウト（`EMAIL_SEND_TIMEOUT_MS`）・例外はログと `email_logs.error` に残し、呼び出し元の主処理（登録・承認・Stripe Webhook・`/upgrade/success`）のレスポンスや再送判定には一切影響させない
+- **レスポンス後に送る**: 各フックは Next.js の `after()`（`next/server`）に送信処理を予約するだけで、レスポンスを遅らせない。`after()` はサーバーレス関数の終了まで処理を延長するため、送信が途中で打ち切られない。リクエストスコープ外で `after()` が使えない場合は、その場で発火だけ行う
+- **二重送信の防止**: 送信前に `email_logs` へ `(user_id, kind, reference_key)` を INSERT して処理権（claim）とし、UNIQUE 制約違反なら送信しない（`stripe_events` の claim と同じパターン）。claim が他のDBエラーで失敗した場合も、重複を防げないため送信しない。送信失敗時は `error` を記録して行を残し、再送はしない
+- **秘匿情報**: `RESEND_API_KEY` はサーバー側の送信リクエストのヘッダにのみ載せ、レスポンス・ログ・`email_logs` には出さない（`NEXT_PUBLIC_` を付けないためクライアントバンドルにも含まれない）
+- **リンクは環境非依存**: 本文のリンクはすべて `NEXT_PUBLIC_APP_URL` を起点に生成する（リクエストの origin は使わない）
+
+### 10.2 実装構成
+
+| ファイル | 役割 |
+|:--|:--|
+| `app/services/notifications/email.ts` | Resend REST API への送信（`sendEmail()`）と送信設定の判定（`isEmailConfigured()`） |
+| `app/services/notifications/email-templates.ts` | 種別ごとに「件名 + テキスト本文 + HTML 本文」を返す純粋関数と、共通レイアウト（ヘッダー・本文・フッター）の `renderEmailLayout()`。フッターには送信元がサービスであることと返信不可である旨を入れる。`unsubscribeUrl` を渡したとき（案内系メール）だけ、フッターの配信停止リンクと `List-Unsubscribe` / `List-Unsubscribe-Post` ヘッダーを付ける |
+| `app/services/notifications/user-emails.ts` | `email_logs` の claim → 送信 → 結果記録（`deliverUserEmail()`）と、各フックから呼ぶ `schedule*Email()`（宛先の読み込み・テンプレート組み立て・`after()` への予約） |
+| `app/constants/notifications.ts` | `EMAIL_SEND_TIMEOUT_MS`・`EMAIL_FROM_NAME`・`EMAIL_SERVICE_NAME`・種別 `EMAIL_KIND`・案内系の種別 `PROMOTIONAL_EMAIL_KINDS`・定期メールの送信日（`INACTIVITY_REMINDER_DAYS` / `TRIAL_NURTURE_DAYS`）と1日の上限（`EMAIL_DIGEST_MAX_PER_DAY` ほか）・実行ロック（`EMAIL_DIGEST_LOCK_NAME` / `EMAIL_DIGEST_LOCK_TTL_MS`） |
+| `app/services/api/cron-lock-server.ts` | Cron バッチの実行ロック（`cron_locks` への claim と解放。`claimCronLock()` / `releaseCronLock()`） |
+| `app/lib/email-digest.ts` | 定期メールの対象判定の純粋関数（JST の暦日・週の開始日・登録から N 日目・次に学ぶコンテンツ） |
+| `app/services/notifications/email-digest-server.ts` | 定期メールの対象抽出（service_role）と送信（`runEmailDigest()`） |
+| `app/services/notifications/email-unsubscribe.ts` | 配信停止トークンの生成・検証と配信停止リンク |
+| `app/services/auth/cron-auth.ts` | Cron ルートの `CRON_SECRET` 検証（`isAuthorizedCronRequest()`） |
+| `app/api/cron/email-digest/route.ts` / `vercel.json` | 定期メールの日次バッチ（Vercel Cron が呼ぶ） |
+| `app/api/email/unsubscribe/route.ts` | 配信停止（ログイン不要） |
+
+### 10.3 環境変数
+
+| 変数名 | 説明 | 必須 |
+|:--|:--|:--:|
+| `RESEND_API_KEY` | Resend の API キー（サーバー側のみ） | 任意（未設定時は送信をスキップ） |
+| `EMAIL_FROM_ADDRESS` | 送信元アドレス（返信不可の `noreply@...`。Resend で認証済みのドメイン。開発時は `onboarding@resend.dev`） | 任意（未設定時は送信をスキップ） |
+| `NEXT_PUBLIC_APP_URL` | 本文のリンクの起点（Stripe と共通） | 任意（未設定時は送信をスキップ） |
+| `CRON_SECRET` | Cron ルートの認証（Vercel Cron が `Authorization: Bearer` で送る） | 任意（未設定時は Cron ルートが常に 401） |
+| `EMAIL_UNSUBSCRIBE_SECRET` | 配信停止トークンの HMAC 署名鍵。変更すると送信済みメールのリンクが無効になる | 任意（未設定時は定期メールを送らず、配信停止ルートも 400） |
+
+### 10.4 メールの種別とトリガー
+
+いずれも主処理が成功した後にのみ予約する。
+
+| kind | トリガー（フック位置） | reference_key | 内容 |
+|:--|:--|:--|:--|
+| `signup` | 初回登録の INSERT 成功後（`GET /auth/callback`。Slack 承認依頼と同じ箇所）。INSERT は通常クライアントで行い id を返さないため、送信時に `auth_id` で `users.id` を引き直す | `users.id` | ようこそ、お試しで閲覧・提出できること、最初の学習コンテンツ（`/learn`）へのリンク、本登録の案内（Stripe 有効時のみアップグレード `/upgrade` も案内） |
+| `approved` | `approveUser()` が更新したとき（`PATCH /api/admin/users` の `approve`） | 承認時刻（`approveUser()` が `updated_at` に書いた ISO 文字列） | 本登録の完了、全コンテンツが使えること、会員種別、ダッシュボードへのリンク |
+| `upgraded` | `activateUserFromCheckoutSession()` または `reactivateUserFromMirror()`（2.11節の不整合の解消）が、まだ一般有料会員でなかったユーザーを実際に昇格させたとき（successページの再訪・Webhook の再送など、既に昇格済みの場合は予約しない）。Webhook・`/upgrade/success`・Checkout API の自己復旧が並行しても、UNIQUE で1通に抑える | `stripe_subscription_id` | 一般有料会員になったこと、月額料金（Stripe から取り直したサブスクの Price の単価×数量。JPY の1ヶ月間隔で確認できない場合と、サブスク・アイテムに割引が付いていて実請求額と食い違う場合は料金の行を載せず、`DISPLAY_MONTHLY_PRICE_JPY` では代用しない。例外として、Customer に直接付けた割引（`customer.discount`）はサブスクの `discounts` に含まれないため検知できず、定価が載る。Checkout のプロモーションコードはサブスク側に付くため通常の導線では起きず、Dashboard・API で Customer にクーポンを付けた場合に限られる）、次回請求日、`/upgrade` のお支払い管理への案内 |
+| `cancel_scheduled` | `syncSubscriptionStatus()` で、Stripe から取り直したライブ状態が解約予約中（`cancel_at_period_end` が true、または `cancel_at` が設定済み）のとき（終端状態への遷移時を除く） | `stripe_subscription_id` | 解約を受け付けたこと、利用期限（`cancel_at`、無ければ `current_period_end`）まで全コンテンツを利用できること、期限までに Portal から取り消せること |
+| `subscription_ended` | `syncSubscriptionStatus()` が終端状態への遷移で `revertUserToTrial()` を呼び、実際に行を更新したとき（`membership_type = general` ガードで更新されなかった場合は送らない） | `stripe_subscription_id` | 有料会員が終了しお試しユーザーに戻ったこと、お試し公開コンテンツは引き続き利用できること、再開は `/upgrade` からできること |
+
+`cancel_scheduled` は、Stripe から取り直したライブ状態だけで判定する（2.11節の順序逆転対策と同じく、イベントのスナップショットは使わない）。
+
+- **両方のフラグを見る理由**: flexible billing mode（API 2025-09-30.clover 以降の新規サブスクの既定）では、Customer Portal で解約すると `cancel_at` に終了日時が入り、`cancel_at_period_end` は false のままになる
+- **ミラー行との比較（`false → true` の遷移）で判定しない理由**: ライブ状態をミラーへ書く経路は他にもある（successページ再訪・Checkout 自己復旧での反映、`reactivateUserFromMirror()`）。それらが Webhook より先に書くと遷移が消費され、メールが欠落する
+
+このためサブスク更新のイベントが届くたび、解約予約中であれば予約し、Webhook の再送・並行イベントの重複は UNIQUE で1通に抑える。同じ契約で解約予約を取り消して再度予約した場合も、reference_key が同じため2通目は送らない。
+
+対象外: 却下通知、支払い失敗のユーザー向け通知（Stripe の自動メールに任せる。運営向け Slack 通知は既存のまま）、AI レビュー完了通知。トランザクションメールは配信停止（10.8節）の対象外で、フッターに配信停止リンクを入れない。
+
+### 10.5 送信ログ（`email_logs`）
+
+テーブル定義は `docs/database.md` 3.11節（RLSは6.9節）。service_role からのみ読み書きし（RLS 有効・ポリシー無し）、受講生・管理画面からは参照しない。`sent_at` が入っていれば送信成功、`error` が入っていれば送信失敗、どちらも NULL なら claim 後に処理が中断したことを示す。
+
+### 10.6 Resend 設定手順（運用）
+
+1. Resend のアカウントを作成し、送信ドメイン（`future-tech-association.org` のサブドメイン）を追加する
+2. 表示される SPF / DKIM の DNS レコードを設定し、ドメインの認証を完了する
+3. API キー（Sending access）を発行し、`RESEND_API_KEY` に設定する。`EMAIL_FROM_ADDRESS` には認証済みドメインの `noreply@...` を設定する
+   - ローカル: `.env.local`（ドメイン認証前は `onboarding@resend.dev` を送信元にし、Resend アカウントのメールアドレス宛てで確認する）
+   - 本番: Vercel 環境変数（Production / Preview）
+
+### 10.7 定期メール（Cron）
+
+`vercel.json` の `crons` で毎日 UTC 23 時台（JST 8 時台）に `GET /api/cron/email-digest` を呼び、1本のジョブが「今日送るべき種別」をすべて判定して送る（`runEmailDigest()`）。
+
+| kind | 送信日 | 対象 | reference_key | 内容 |
+|:--|:--|:--|:--|:--|
+| `weekly_digest` | 毎週月曜（月曜に送れなかった分だけ、同じ週の翌日以降） | 前週の月曜（JST）以前に登録し（先週をまるごと利用できたユーザー。先週の途中に登録したユーザーへ「先週は学習の記録がありませんでした」と送らないため）、先週に完了または提出が1件以上ある、または閲覧できる未完了コンテンツが残っているユーザー | 週の開始日（月曜。`YYYY-MM-DD`） | 先週の完了数・提出数、次に学ぶコンテンツ（閲覧できる未完了の先頭）へのリンク、今週の目標の提案（先週の完了数+1、最低2本、残り本数まで） |
+| `inactivity_reminder` | 登録から7日目・14日目 | `user_progress` も `submissions` も0件のユーザー | `day7` / `day14` | まだ学習を始めていないこと、最初の1本（閲覧できる先頭のコンテンツ）へのリンク、困ったときの連絡先 |
+| `announcement` | 公開後の毎日（対象者全員に送り終えるまで） | ステータス・会員種別がお知らせの対象に一致するユーザー（11.4節） | お知らせの ID | お知らせのタイトルと本文、詳細ページへのリンク |
+| `trial_nurture` | 登録から2・5・7・14日目 | `status = trial` のユーザー | `day2` / `day5` / `day7` / `day14` | Day2: 演習の提出 / Day5: AI レビュー / Day7: 本登録で学べるテーマ + 本登録の案内（`isStripeEnabled()` が true のときだけ `/upgrade` へ誘導し、false のときは承認の案内のみ）/ Day14: 最後の案内 |
+
+- **共通の対象**: `role = member` かつ `status IN (active, trial)`、`is_deleted = false`、`email_opt_out_at IS NULL`。admin / maintainer は学習者ではないため送らない
+- **日付は JST の暦日で判定する**: 「登録から N 日目」は `users.created_at` を JST の暦日に丸め、登録日を0日目とする。週は月曜始まりで、「先週」は前週の月曜 0:00〜今週の月曜 0:00（JST）。日次実行が失敗した日の N 日目の分は翌日以降に拾わない（取りこぼしを許容する）
+- **1人1日1通**: `trial_nurture` と `inactivity_reminder` が同じ日に重なるお試しユーザーには `trial_nurture` だけを送る。N 日目の案内を送る日はお知らせ・週次進捗を送らず、お知らせと週次進捗が重なる日は下の「1日の上限」の並び順で先の方だけを送り、もう一方は翌日以降の実行に回す。今日（JST 0:00 以降）すでに案内系メールの `email_logs` を持つユーザーは、同じ日の再実行（手動実行・Cron の再起動）で対象から外す（朝の実行後に承認されて `status` が変わっても、別種別の2通目を送らない）
+- **お試しユーザーの範囲**: 次に学ぶコンテンツ・残り本数・最初の1本は、お試し公開（`is_open_to_trial = true`）のコンテンツだけで判定する（ダッシュボードの進捗の分母と同じ。4.2節）
+- **集計**: 抽出はユーザーセッションの無いバッチのため service_role クライアントで行う（`user_id` 単位の集計であり、受講生へコンテンツを返す配信経路ではない）。コンテンツは `fetchThemeProgressSummaries()` と同じネスト select で全階層を `is_published = true AND is_deleted = false` に絞り、本文を含まないカラム（`id, title, display_order, is_open_to_trial, week_id` と各階層の名前・表示順）だけを読む。学習順はコンテンツ詳細の前後ナビと同じ `buildThemeContentOrder()` で並べる。新しい集計 SQL（RPC）は追加しない
+- **並行実行の排除**: 実行の最初に実行ロック（`cron_locks` の `name = email-digest` への INSERT を claim とする。`claimCheckoutSlot()` と同じパターン）を取り、取れなければ何もせず `skipped` を返す。Cron の重複起動・手動実行が重なっても、処理するのは1つだけになる。終了時（失敗時も）に自分のロック（`locked_at` が一致する行）を削除する。関数のハードタイムアウトで解放されなかったロックは、`EMAIL_DIGEST_LOCK_TTL_MS`（5分）を過ぎたら次の実行が取り直す。ロックの取得自体が DB エラーなら 500
+- **二重送信の防止**: 1通ごとに `email_logs` の claim を通す（10.1節と同じ `deliverUserEmail()`）。同じ日の再実行でも UNIQUE 違反で送らない。送信失敗は `error` を記録して再送しない（お知らせの一斉送信だけは、Resend が受け付けなかったことが確実な失敗を翌日以降に送り直す。11.4節）
+- **1日の上限**: `EMAIL_DIGEST_MAX_PER_DAY`（80通。Resend 無料枠の日次100通に、同日のトランザクションメールの余裕を残す）は同じ日（JST）の実行の合計に効かせる。ロックを取った後に、今日すでに作られた案内系の `email_logs` の行数を差し引いた数を今回の上限とし、送信を試みた通数（成功・失敗）がそれに達するか、経過時間が `EMAIL_DIGEST_TIME_BUDGET_MS`（45秒。ルートの `maxDuration` は60秒）を超えたら新しい送信を始めない。送れなかった通数は warn ログに残す。キューは N 日目の案内を先頭に並べ、その後は週次進捗の対象を決める日（月曜。取り戻しの火曜を含む）はお知らせ（公開の古い順）→ 週次進捗、それ以外の日は週次進捗（予約の繰り越し分）→ お知らせの順に並べる。週次進捗の予約は同じ週の間しか有効でないため、繰り越しの期限が無いお知らせが上限を使い切って週次進捗を週末まで押し出し、失わせることがないようにする。上限に掛かるのは通常はお知らせ・週次進捗で、翌日以降の実行で送られる。N 日目の案内だけで上限を超えた場合の残りと、週の最終日（日曜）に送れなかった週次進捗は繰り越さない（warn ログで区別する）
+- **週次進捗の繰り越し**: 週次進捗の対象を決めるのは月曜の実行だけで、月曜の対象者を `email_logs` に繰り越し予約（`kind = weekly_digest_reserved`、reference_key = 週の開始日。メールは送らない）として記録する。予約は送信の前提とし、失敗したら1通も送らずに失敗（500）を返す（claim の前なので、再実行しても二重送信にはならず予約からやり直せる）。火〜日曜の実行は、予約を持ち、まだ今週の `weekly_digest` の行を持たないユーザー（月曜に上限・時間切れ・同日の N 日目の案内で送れなかった分）だけに送る。週の途中で新しく対象になったユーザー（新コンテンツの公開・配信再開・ステータス変更など）には、次の月曜まで送らない
+- **月曜の実行が完了しなかった週**: 今週の予約が1件も無い（月曜の実行が失敗・スキップ・起動漏れで対象決定まで到達しなかった）ときは、`WEEKLY_DIGEST_CATCH_UP_DAYS`（1日 = 火曜）までの実行が月曜の代わりに対象を決めて予約し、送る。それより後（水〜日曜）は送らず、warn ログと応答の `weeklyReservationMissing: true` で知らせる（週の途中で初めて Cron を動かした場合に、その週の残りの日に一斉に送らないため）
+- **ページング**: 抽出は `range` でページングし、返った件数だけ位置を進めて0件が返るまで取りに行く（PostgREST の `db-max-rows` が1000未満に設定されていても取りこぼさない）
+- **レート制限**: Resend API（既定 2 リクエスト/秒）を超えないよう、送信の開始間隔を `EMAIL_DIGEST_SEND_INTERVAL_MS`（500ms）以上空ける
+- **送信設定が無い環境**: `RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `NEXT_PUBLIC_APP_URL` / `EMAIL_UNSUBSCRIBE_SECRET` のいずれかが無ければ DB に触れずに終了する（配信停止リンクを作れない案内メールは送らない）
+
+**Cron ルートの認証**: `GET /api/cron/email-digest` はユーザーセッションの無い呼び出しのため `getServerAuth()` を使わず、`isAuthorizedCronRequest()` で `Authorization: Bearer <CRON_SECRET>` を検証する。`CRON_SECRET` が未設定・空、またはヘッダーが無い・不一致なら 401 を返し、何もしない（フェイルクローズ。比較は SHA-256 のダイジェスト同士の定数時間比較）。`/api` は proxy の対象外のため、この検証だけが防御になる。応答は送信件数の集計のみで、宛先・本文は含めない。抽出が DB エラーで失敗したら 500。
+
+### 10.8 配信停止
+
+- **対象**: 案内系メール（`PROMOTIONAL_EMAIL_KINDS` = 10.7節の定期メール3種とお知らせの一斉送信）だけ。トランザクションメール（10.4節）は `email_opt_out_at` を参照せず、配信停止後も届く
+- **リンク**: 案内系メールは必ず、共通レイアウトのフッターに本人用の配信停止リンク（`<NEXT_PUBLIC_APP_URL>/api/email/unsubscribe?token=...`）を入れ、`List-Unsubscribe` / `List-Unsubscribe-Post: List-Unsubscribe=One-Click` ヘッダー（RFC 8058）を付ける
+- **トークン**: `<users.id>.<署名>`。署名は `email-unsubscribe:v1:<users.id>` を `EMAIL_UNSUBSCRIBE_SECRET` で HMAC-SHA256 したもの（base64url）。有効期限は持たない（古いメールのリンクからも停止できる）。検証は定数時間比較
+- **`GET /api/email/unsubscribe?token=...`**（ログイン不要）: トークンを検証し、「配信を停止する」ボタン（同じ URL への `POST` フォーム）付きの確認画面を返す。**GET では停止を確定しない**。メールのセキュリティ製品（Outlook の Safe Links 等）はリンクを事前に GET するため、GET で確定すると本人が開く前に停止されてしまう
+- **`POST /api/email/unsubscribe?token=...`**（確認画面のボタンと、`List-Unsubscribe-Post` に対応するメールクライアントのワンクリック配信停止）: 検証に成功したら `users.email_opt_out_at` を `now()` で記録し（既に停止済みなら更新せず）、完了画面を返す
+- いずれも、形式不正・改ざん・シークレット未設定は理由を区別せず 400（フェイルクローズ）。DB エラーは 500。画面にユーザー情報は出さない
+- **再開**: 当面は管理者が `users.email_opt_out_at` を NULL に戻す（Supabase ダッシュボード。管理画面の UI は設けていない）
+
+### 10.9 定期メールの設定手順（運用）
+
+1. 利用規約の改定（案内メールの送信に関する条項）が完了していることを確認する（本番の Cron 有効化の前提）
+2. `CRON_SECRET` と `EMAIL_UNSUBSCRIBE_SECRET` にそれぞれランダムな長い文字列（例: `openssl rand -base64 32`）を設定する（ローカル: `.env.local`、本番: Vercel 環境変数の Production）。`EMAIL_UNSUBSCRIBE_SECRET` は一度決めたら変えない
+3. Production にデプロイし、Vercel ダッシュボードの Settings → Cron Jobs に `/api/cron/email-digest` が表示されることを確認する（Cron は Production デプロイでのみ動く）
+4. 手動実行での確認: `curl -H "Authorization: Bearer $CRON_SECRET" <URL>/api/cron/email-digest`。応答の `sent` / `failed` / `deferred` と、Vercel のログの `[定期メール]` を確認する
+
+---
+
+## 11. お知らせ機能
+
+運営（admin / maintainer）から受講生へのお知らせ（要件は `docs/requirements.md` 3.9節）。アプリ内に表示し、選んだものはメールでも一斉送信する。テーブル定義は `docs/database.md` 3.13・3.14節、RLS は 6.11・6.12節。
+
+### 11.1 実装構成
+
+| ファイル | 役割 |
+|:--|:--|
+| `app/services/api/announcements-server.ts` | 受講生向けの取得（閲覧者の組み立て・一覧・詳細・既読の記録・未読件数）と、管理向けの取得・作成・更新・論理削除。すべて通常クライアント（RLS 適用）で行う |
+| `app/lib/announcement-target.ts` | 対象判定 `isAnnouncementTarget()`（RLS の SELECT と同じ条件）。受講生向けの取得と、メールの一斉送信の宛先抽出で共有する |
+| `app/lib/markdown-email.ts` | 本文の Markdown をメール用のテキストと簡易 HTML に変換する |
+| `app/constants/announcements.ts` | 対象ステータスの許可値（`ANNOUNCEMENT_TARGET_STATUSES` = `ALLOWED_USER_STATUSES`）・表示名・件数の上限 |
+| `app/(authenticated)/announcements/` | 受講生向けの一覧・詳細（既読の記録はクライアントの `MarkAnnouncementRead`） |
+| `app/(authenticated)/manage/announcements/` | 管理画面（一覧・作成・編集・削除） |
+| `app/api/manage/announcements/` | 作成（`POST`）・更新（`PUT /[id]`）・論理削除（`DELETE /[id]`） |
+| `app/api/announcements/[id]/read/route.ts` | 既読の記録（`POST`） |
+
+### 11.2 対象の指定と表示条件
+
+- **対象ステータス** `target_statuses`: `active` / `trial` の1つ以上（却下ユーザーは対象にできない）
+- **対象会員種別** `target_membership_types`: NULL は全種別。指定すると、その会員種別のユーザーだけが対象（ステータスと会員種別の両方が一致したユーザーだけが対象）。お試しユーザーは会員種別を持たないため、会員種別を指定したお知らせはお試しユーザーには見えない。この組み合わせ（会員種別の指定 + お試しユーザー）は入力検証で拒否する
+- **受講生に見えるお知らせ**: 公開済み（`published_at IS NOT NULL`）・未削除で、自分のステータス・会員種別が対象に含まれるもの。タイトルを含め、それ以外は一覧・詳細・ダッシュボード・未読件数のいずれにも出さない（詳細は 404）
+
+**二層防御**: RLS の SELECT ポリシーで上の条件を課し、アプリ層（`announcements-server.ts`）でも同じ条件で絞る（PostgREST の絞り込みと `isAnnouncementTarget()` の両方）。admin / maintainer は管理画面のため RLS で全件を読めるので、アプリ層の絞り込みが無いと受講生向け画面に下書きや非対象のお知らせが出てしまう。受講生向けの取得に service_role は使わない（AGENTS.md の service_role 制限の2箇所は増やさない）。
+
+### 11.3 画面と API
+
+- **ダッシュボード**: 未読のお知らせを新しい順に最大3件（`DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT`）。未読が無ければ枠を出さない
+- **サイドナビ**: 「お知らせ」に未読件数のバッジ。件数は `getServerAuth()` のヘッダーには載せず、レイアウトで取得する（`React.cache()` でダッシュボードと同じリクエストの取得を共有。新しい順に最大100件（`UNREAD_ANNOUNCEMENT_SCAN_LIMIT`）を見て数える。取得に失敗したら0件表示）。既読は `announcements` に本人の `announcement_reads` を埋め込んで同じクエリで読む（会員種別の取得と合わせて2往復）
+- **一覧・詳細**: 一覧は `ANNOUNCEMENTS_PAGE_SIZE`（20件）ずつページングする（提出一覧と同じページャー。範囲外のページは最終ページへリダイレクト）。本文は既存の `MarkdownRenderer`（react-markdown。生 HTML を描画しない）で表示する
+- **既読**: 詳細を開いたときに、クライアントから `POST /api/announcements/[id]/read` を呼んで記録し、サイドナビのバッジを更新する（ページの描画中に記録しないのは、リンクの先読みで既読にならないようにするため）。API は通常クライアントで対象のお知らせが見えることを確かめてから INSERT する（見えなければ 404。既に既読なら成功扱い）。既読が読めないときは未読扱いにしない
+- **管理画面・管理 API**: `getServerAuth()` で認証し、`checkContentPermissions()`（admin / maintainer）で認可する（未認証 401、それ以外 403）。入力は `AnnouncementSchema`（zod）で検証し、全項目を送る。公開済みのまま更新するときは最初の公開日時を保ち、非公開にすると `published_at` を消す（アプリ内表示とメールの一斉送信が止まる。送信済みの分は `email_logs` に残るため、再公開しても同じ人には送らない）。対象ステータス・会員種別を変更したら（集合として比較）`email_sent_at` を消して一斉送信を未完了に戻し、まだ送っていない対象者にだけ次のバッチから送る。削除は論理削除
+
+### 11.4 メールの一斉送信
+
+「メールでも送る」（`send_email`）を選んだお知らせは、画面から同期送信せず、10.7節の Cron の日次バッチが送る（Resend の日次上限とサーバーレス関数のタイムアウトを避けるため）。
+
+- **送信待ち**: 公開済み・未削除・`send_email = true`・`email_sent_at IS NULL` のお知らせ（公開の古い順）
+- **宛先**: 定期メールと同じ候補（`role = member`、`status IN (active, trial)`、未削除、`email_opt_out_at IS NULL`）のうち、`isAnnouncementTarget()` でお知らせの対象に一致するユーザー。配信停止しているユーザーには送らない
+- **二重送信の防止**: kind = `announcement`、reference_key = お知らせの ID で `email_logs` を claim する。途中の再実行・分割送信でも同じ人に2通送らない
+- **分割送信**: 1日の上限・実行時間・1人1日1通（同じ日に別の案内を受け取るユーザーは翌日に回す）で送り切れない分は、`email_logs` に行が無いユーザーを翌日以降の実行で送る。週次進捗の対象を決める日（月曜）以外は、週次進捗の繰り越し分をお知らせより先に送る（10.7節「1日の上限」）ため、週の途中に公開したお知らせは週次進捗の繰り越しが残っている間は少し遅れることがある
+- **送信失敗の送り直し**: お知らせは翌週の同種メールで取り返せないため、Resend が受け付けなかったことが確実な失敗（`email_logs.error` が `status=429` / `5xx`。`RETRYABLE_EMAIL_ERROR`）に限り、公開日（JST）から `ANNOUNCEMENT_EMAIL_RETRY_DAYS`（3日）以内は送り直す。失敗した日の翌日以降の実行で失敗の行を削除してから claim し直す（同じ日には送り直さない。行を消すと今日の案内系メールの数＝1日の上限・1人1日1通の判定から外れるため）。タイムアウト等の送れたかどうか分からない失敗と、結果が記録されなかった行（送信中）は二重送信を避けるため送り直さない
+- **完了**: 送信ループの後に `email_logs` を引き直し、実行の開始時点で送信を終えていなかった対象者全員が送信を終えた（送信済み、または送り直さない失敗・送信中の行を持つ）ときに `email_sent_at` を記録する（claim 自体が DB エラーで失敗した宛先など行の無い対象者や、翌日以降に送り直す失敗が残っていれば完了にしない）。実行の途中で管理画面から編集された（`updated_at` が実行の開始時点と異なる）お知らせは完了にせず、翌日の実行が新しい対象で判定し直す（対象を広げた分を送らずに完了にしないため）。対象者がいないお知らせも完了にする。応答の `announcementsCompleted` に件数を返す
+- **本文**: タイトルと Markdown 本文を、テキスト版（見出し・リスト記号を読みやすく落とす）と簡易 HTML 版（全文をエスケープしてから段落・見出し・リスト・コード・太字・`http(s)` のリンクだけを変換する。`javascript:` 等はリンクにしない）で載せ、詳細ページ（`/announcements/<id>`）へのリンクと配信停止リンクを付ける。変換はお知らせ1件につき1回だけ行い、どんな入力でも行の長さにほぼ比例する時間で終わるようにする（正規表現の過剰なバックトラックで Cron を止めないため。見出しの閉じ `#` の除去は正規表現を使わず、インラインの装飾は1回の照合で読む文字数に上限を付ける）
+
