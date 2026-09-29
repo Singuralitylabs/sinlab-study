@@ -30,14 +30,47 @@ const IGNORED_KEYS = new Set([
   "innerComments",
 ]);
 
+// React drops whitespace-only lines and trims line edges in JSX text, so text that differs only in
+// such whitespace renders identically. Removing an own-line `{/* c */}` merges two text nodes.
+function cleanJsxText(text: string): string {
+  const lines = text.split(/\r\n|\n|\r/);
+  const kept: string[] = [];
+  lines.forEach((line, i) => {
+    let l = line.replace(/\t/g, " ");
+    if (i !== 0) l = l.replace(/^ +/, "");
+    if (i !== lines.length - 1) l = l.replace(/ +$/, "");
+    if (l) kept.push(l);
+  });
+  return kept.join(" ");
+}
+
+type AstNode = { type?: string; value?: string; [key: string]: unknown };
+
+function normalizeJsxChildren(items: AstNode[]): AstNode[] {
+  const out: AstNode[] = [];
+  for (const item of items) {
+    const prev = out[out.length - 1];
+    if (item?.type === "JSXText" && prev?.type === "JSXText") {
+      prev.value = `${prev.value}${item.value}`;
+    } else {
+      out.push(item?.type === "JSXText" ? { ...item } : item);
+    }
+  }
+  return out
+    .map((item) =>
+      item?.type === "JSXText" ? { ...item, value: cleanJsxText(item.value ?? "") } : item
+    )
+    .filter((item) => !(item?.type === "JSXText" && item.value === ""));
+}
+
 function strip(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value
-      .filter(
+    return normalizeJsxChildren(
+      value.filter(
         (v) =>
           !(v?.type === "JSXExpressionContainer" && v.expression?.type === "JSXEmptyExpression")
       )
-      .map(strip);
+    ).map(strip);
   }
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
