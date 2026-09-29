@@ -3,10 +3,14 @@ import {
   buildApprovedEmail,
   buildAppUrl,
   buildCancelScheduledEmail,
+  buildInactivityReminderEmail,
   buildSignupEmail,
   buildSubscriptionEndedEmail,
+  buildTrialNurtureEmail,
   buildUpgradedEmail,
+  buildWeeklyDigestEmail,
   renderEmailLayout,
+  suggestWeeklyGoal,
 } from "@/app/services/notifications/email-templates";
 
 const APP_URL = "https://study.example.com";
@@ -28,7 +32,6 @@ describe("renderEmailLayout", () => {
     greetingName: "山田<script>",
     paragraphs: ["本文1", "本文2"],
     links: [{ label: "開く", url: "https://study.example.com/?a=1&b=2" }],
-    extraFooterLines: ["配信停止はこちら"],
   });
 
   it("テキスト版に宛名・本文・リンク・フッター（送信元・返信不可）を含める", () => {
@@ -37,7 +40,12 @@ describe("renderEmailLayout", () => {
     expect(rendered.text).toContain("開く: https://study.example.com/?a=1&b=2");
     expect(rendered.text).toContain("自動送信");
     expect(rendered.text).toContain("返信いただいてもお答えできません");
-    expect(rendered.text).toContain("配信停止はこちら");
+  });
+
+  it("配信停止リンクを渡さない（トランザクションメール）ときは、配信停止の案内もヘッダーも付けない", () => {
+    expect(rendered.text).not.toContain("配信を停止");
+    expect(rendered.html).not.toContain("配信停止");
+    expect(rendered.headers).toBeUndefined();
   });
 
   it("HTML版は差し込み値をエスケープし、ヘッダー・本文・フッターで包む", () => {
@@ -46,7 +54,24 @@ describe("renderEmailLayout", () => {
     expect(rendered.html).toContain('href="https://study.example.com/?a=1&amp;b=2"');
     expect(rendered.html).toContain("AIと学ぶ実践Web技術講座");
     expect(rendered.html).toContain("返信いただいてもお答えできません");
-    expect(rendered.html).toContain("配信停止はこちら");
+  });
+
+  it("配信停止リンクを渡すと、フッターのリンクとワンクリック配信停止のヘッダーを付ける", () => {
+    const url = "https://study.example.com/api/email/unsubscribe?token=7.abc";
+    const withUnsubscribe = renderEmailLayout({
+      subject: "件名",
+      greetingName: "山田",
+      paragraphs: ["本文"],
+      links: [],
+      unsubscribeUrl: url,
+    });
+
+    expect(withUnsubscribe.text).toContain(`配信を停止できます: ${url}`);
+    expect(withUnsubscribe.html).toContain(`href="${url}"`);
+    expect(withUnsubscribe.headers).toEqual({
+      "List-Unsubscribe": `<${url}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    });
   });
 });
 
@@ -155,5 +180,139 @@ describe("buildSubscriptionEndedEmail", () => {
     expect(email.text).toContain("お試しユーザーに戻りました");
     expect(email.text).toContain("お試し公開の学習コンテンツは引き続き");
     expect(email.text).toContain(`アップグレードページを開く: ${APP_URL}/upgrade`);
+  });
+});
+
+const UNSUBSCRIBE_URL = `${APP_URL}/api/email/unsubscribe?token=7.sig`;
+
+describe("トランザクションメールには配信停止リンクを入れない", () => {
+  it.each([
+    buildSignupEmail({ displayName: "山田", appUrl: APP_URL, upgradeAvailable: true }),
+    buildApprovedEmail({ displayName: "山田", appUrl: APP_URL, membershipLabel: "一般有料会員" }),
+    buildSubscriptionEndedEmail({ displayName: "山田", appUrl: APP_URL }),
+  ])("%#", (email) => {
+    expect(email.text).not.toContain("/api/email/unsubscribe");
+    expect(email.headers).toBeUndefined();
+  });
+});
+
+describe("suggestWeeklyGoal", () => {
+  it("先週の実績より1本多く、最低2本を目安にし、残り本数を超えない", () => {
+    expect(suggestWeeklyGoal(0, 10)).toBe(2);
+    expect(suggestWeeklyGoal(3, 10)).toBe(4);
+    expect(suggestWeeklyGoal(3, 1)).toBe(1);
+  });
+});
+
+describe("buildWeeklyDigestEmail", () => {
+  it("先週の完了数・提出数、次に学ぶコンテンツへのリンク、今週の目標、配信停止リンクを含める", () => {
+    const email = buildWeeklyDigestEmail({
+      displayName: "山田",
+      appUrl: APP_URL,
+      unsubscribeUrl: UNSUBSCRIBE_URL,
+      completedLastWeek: 3,
+      submittedLastWeek: 1,
+      nextContent: { title: "変数と型", path: "/learn/1/2/3/4" },
+      remainingContents: 10,
+    });
+
+    expect(email.subject).toContain("今週の学習");
+    expect(email.text).toContain("コンテンツ完了 3 本 / 演習の提出 1 件");
+    expect(email.text).toContain("次に学ぶコンテンツ: 変数と型");
+    expect(email.text).toContain("4 本完了");
+    expect(email.text).toContain(`続きから学ぶ: ${APP_URL}/learn/1/2/3/4`);
+    expect(email.text).toContain(UNSUBSCRIBE_URL);
+    expect(email.headers?.["List-Unsubscribe"]).toBe(`<${UNSUBSCRIBE_URL}>`);
+  });
+
+  it("すべて完了しているときは次のコンテンツの代わりにダッシュボードへ誘導する", () => {
+    const email = buildWeeklyDigestEmail({
+      displayName: "山田",
+      appUrl: APP_URL,
+      unsubscribeUrl: UNSUBSCRIBE_URL,
+      completedLastWeek: 2,
+      submittedLastWeek: 0,
+      nextContent: null,
+      remainingContents: 0,
+    });
+
+    expect(email.text).toContain("すべて完了しています");
+    expect(email.text).toContain(`ダッシュボードを開く: ${APP_URL}/`);
+    expect(email.text).not.toContain("今週の目標");
+  });
+});
+
+describe("buildInactivityReminderEmail", () => {
+  it("最初の1本へのリンク・困ったときの連絡先・配信停止リンクを含める", () => {
+    const email = buildInactivityReminderEmail({
+      displayName: "山田",
+      appUrl: APP_URL,
+      unsubscribeUrl: UNSUBSCRIBE_URL,
+      firstContent: { title: "はじめての自動化", path: "/learn/1/1/1/1" },
+    });
+
+    expect(email.text).toContain("まだ学習を始められていない");
+    expect(email.text).toContain(`最初の1本を始める: ${APP_URL}/learn/1/1/1/1`);
+    expect(email.text).toContain("お問い合わせください");
+    expect(email.text).toContain(UNSUBSCRIBE_URL);
+  });
+
+  it("閲覧できるコンテンツが無いときは学習トップへ誘導する", () => {
+    const email = buildInactivityReminderEmail({
+      displayName: "山田",
+      appUrl: APP_URL,
+      unsubscribeUrl: UNSUBSCRIBE_URL,
+      firstContent: null,
+    });
+
+    expect(email.text).toContain(`学習を始める: ${APP_URL}/learn`);
+  });
+});
+
+describe("buildTrialNurtureEmail", () => {
+  const base = {
+    displayName: "山田",
+    appUrl: APP_URL,
+    unsubscribeUrl: UNSUBSCRIBE_URL,
+    lockedThemeNames: ["GAS実践", "Web制作"],
+  };
+
+  it.each([2, 5, 7, 14] as const)("Day%i も配信停止リンクを含める", (day) => {
+    const email = buildTrialNurtureEmail({ ...base, day, upgradeAvailable: true });
+    expect(email.text).toContain(UNSUBSCRIBE_URL);
+    expect(email.headers?.["List-Unsubscribe"]).toBe(`<${UNSUBSCRIBE_URL}>`);
+  });
+
+  it("Day2 は演習の提出、Day5 は AI レビューを案内する", () => {
+    expect(buildTrialNurtureEmail({ ...base, day: 2, upgradeAvailable: true }).subject).toContain(
+      "演習を出してみましょう"
+    );
+    expect(buildTrialNurtureEmail({ ...base, day: 5, upgradeAvailable: true }).text).toContain(
+      "AI があなたのコードをレビュー"
+    );
+  });
+
+  it("Day7 は鍵コンテンツで学べるテーマと、決済が有効ならアップグレードを案内する", () => {
+    const email = buildTrialNurtureEmail({ ...base, day: 7, upgradeAvailable: true });
+
+    expect(email.text).toContain("本登録で学べるテーマ: GAS実践、Web制作");
+    expect(email.text).toContain(`プランのアップグレード: ${APP_URL}/upgrade`);
+  });
+
+  it.each([7, 14] as const)(
+    "Day%i: isStripeEnabled() が false のときは /upgrade へ誘導せず承認だけを案内する",
+    (day) => {
+      const email = buildTrialNurtureEmail({ ...base, day, upgradeAvailable: false });
+
+      expect(email.text).not.toContain("/upgrade");
+      expect(email.html).not.toContain("/upgrade");
+      expect(email.text).not.toContain("アップグレード");
+      expect(email.text).toContain("管理者による承認");
+    }
+  );
+
+  it("Day14 は最後の案内であることを伝える", () => {
+    const email = buildTrialNurtureEmail({ ...base, day: 14, upgradeAvailable: true });
+    expect(email.text).toContain("これが最後です");
   });
 });

@@ -18,9 +18,9 @@ import {
 } from "@/app/services/notifications/email-templates";
 import type { MembershipType } from "@/app/types";
 
-type AdminClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>;
+export type AdminClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>;
 
-type Recipient = { userId: number; email: string; displayName: string };
+export type Recipient = { userId: number; email: string; displayName: string };
 
 type DeliverParams = {
   kind: EmailKind;
@@ -29,7 +29,7 @@ type DeliverParams = {
   content: EmailContent;
 };
 
-type DeliverResult = "sent" | "duplicate" | "skipped" | "failed";
+export type DeliverResult = "sent" | "duplicate" | "skipped" | "failed";
 
 function getAppUrl(): string | null {
   return process.env.NEXT_PUBLIC_APP_URL || null;
@@ -41,9 +41,10 @@ function getAppUrl(): string | null {
  * 送った（または送信中）」ことを意味するため、送信しない。claim 自体が他のDBエラーで失敗した
  * 場合も、二重送信を防げないため送信しない。
  *
- * 送信設定の有無は入口（`deliverToUser()`）で判定済みであることを前提とする。
+ * 送信設定の有無は入口（`deliverToUser()`、定期メールは `runEmailDigest()`）で判定済みで
+ * あることを前提とする。
  */
-async function deliverUserEmail(
+export async function deliverUserEmail(
   supabase: AdminClient,
   params: DeliverParams
 ): Promise<DeliverResult> {

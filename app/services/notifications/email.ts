@@ -9,6 +9,8 @@ export type EmailContent = {
   subject: string;
   text: string;
   html: string;
+  /** メール自体に付けるヘッダー（案内系メールの `List-Unsubscribe` など） */
+  headers?: Record<string, string>;
 };
 
 export type SendEmailResult =
@@ -59,6 +61,7 @@ export async function sendEmail(params: { to: string } & EmailContent): Promise<
         subject: params.subject,
         text: params.text,
         html: params.html,
+        ...(params.headers ? { headers: params.headers } : {}),
       }),
       signal: AbortSignal.timeout(EMAIL_SEND_TIMEOUT_MS),
     });
