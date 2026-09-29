@@ -57,6 +57,7 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 - **サーバー側のユーザー情報取得は `getServerAuth()`（`app/services/auth/server-auth.ts`）に一本化する。** layout・page・API Route のいずれからも他の手段を使わない（`React.cache()` でメモ化。proxy からのヘッダ経由による `users` 再照会省略経路は `docs/specification.md` 2.2 参照）。
 - **認可は二層防御。** `proxy.ts`（Next.js 16 における Middleware の後継）を第一の砦とし、`app/(authenticated)/layout.tsx` でも `userStatus` の許可リスト検証を行う。**クライアント側での認証ガードは行わない。**
 - **プロキシはフェイルクローズ。** 環境変数欠落・例外・ステータス取得不能（null）はすべて `/login` へリダイレクトする。
+- **Cron ルート（`app/api/cron/`）は `isAuthorizedCronRequest()`（`app/services/auth/cron-auth.ts`）による `CRON_SECRET` の検証を必ず通す**（未設定・不一致は 401）。`/api` は proxy の対象外のため、ルート側の検証だけが防御になる。
 - **ロール**: `admin`（全権限）/ `maintainer`（コンテンツ管理）/ `member`（受講生）。判定ロジックは `app/services/auth/` に集約する。
 - **ステータス**: `active`（承認済み）/ `trial`（お試し。アプリは使えるがお試し公開コンテンツのみ閲覧可）/ `rejected`（`/rejected` へ。APIでは403）。
 - **初回登録の INSERT は同意 Cookie 必須。** 同意なしでは `users` 行を作らず `/login?error=terms_required` へ戻す。`terms_accepted_at` は callback でのみ書き、既存ユーザーの分岐では参照も更新もしない。
@@ -112,6 +113,6 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 
 `.env.local` に設定する。**用途を含む正式な一覧は `README.md` を参照**（ここでは名前のみ）。
 
-`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_PROJECT_ID` / `GEMINI_API_KEY` / `GEMINI_API_KEY_TRIAL` / `SLACK_NOTIFICATION_WEBHOOK_URL` / `RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `STRIPE_ENABLED` / `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_ID` / `NEXT_PUBLIC_APP_URL`
+`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_PROJECT_ID` / `GEMINI_API_KEY` / `GEMINI_API_KEY_TRIAL` / `SLACK_NOTIFICATION_WEBHOOK_URL` / `RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `CRON_SECRET` / `EMAIL_UNSUBSCRIBE_SECRET` / `STRIPE_ENABLED` / `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_ID` / `NEXT_PUBLIC_APP_URL`
 
 **AIレビューのキー振り分け**: 選択ロジックは `resolveGeminiApiKey()`（`app/services/api/gemini.ts`）、モデル名・上限値・環境変数名は `app/constants/gemini.ts` に集約する。**キーはサーバー側でのみ扱い、レスポンス・ログへ出さない。** 仕様は `docs/specification.md` 6.1.2節を参照。
