@@ -817,8 +817,6 @@ async function sendDigest(
   }
 
   const counts: Record<DeliverResult, number> = { sent: 0, failed: 0, duplicate: 0, skipped: 0 };
-  /** 今回 `email_logs` に行が残った（送信・失敗・他の実行が送信済み）宛先。お知らせの完了判定用 */
-  const handled = new Set<string>();
   let lastApiCallAt: number | null = null;
   let index = 0;
 
@@ -859,19 +857,12 @@ async function sendDigest(
       result = "failed";
     }
     counts[result]++;
-    if (result !== "skipped") {
-      handled.add(handledKey(item.kind, item.referenceKey, item.user.userId));
-    }
     if (result === "sent" || result === "failed") {
       lastApiCallAt = callStartedAt;
     }
   }
 
-  const announcementsCompleted = await markCompletedAnnouncements(
-    supabase,
-    announcementBatches,
-    handled
-  );
+  const announcementsCompleted = await markCompletedAnnouncements(supabase, announcementBatches);
 
   const rest = queue.slice(index);
   if (rest.length > 0) {
@@ -892,28 +883,40 @@ async function sendDigest(
   };
 }
 
-function handledKey(kind: string, referenceKey: string, userId: number): string {
-  return `${kind}:${referenceKey}:${userId}`;
-}
-
 /**
- * 実行の開始時点で未送信だった対象者全員を、この実行で処理し終えた（`email_logs` に行が
- * 残った）お知らせに `email_sent_at` を記録する（一斉送信の完了）。今日すでに別の案内を
- * 受け取った・上限や時間切れで回らなかった対象者が残っていれば記録せず、翌日以降の実行が
- * 続きを送る。対象者がいないお知らせもここで完了にする。記録の失敗はログだけ残す
- * （翌日の実行で対象者が0人として完了にし直せる）。
+ * 実行の開始時点で未送信だった対象者全員の `email_logs` の行（送信済み・送信失敗・送信中）が
+ * そろったお知らせに `email_sent_at` を記録する（一斉送信の完了）。判定は送信ループの結果では
+ * なく `email_logs` を引き直して行うため、claim 自体が DB エラーで失敗した宛先や、例外で
+ * 送れなかった宛先（行が作られない）が残っていれば完了にしない。今日すでに別の案内を
+ * 受け取った・上限や時間切れで回らなかった対象者も同様に残り、翌日以降の実行が続きを送る。
+ * 対象者がいないお知らせもここで完了にする。引き直し・記録の失敗はログだけ残す
+ * （翌日の実行で判定し直せる）。
  */
 async function markCompletedAnnouncements(
   supabase: AdminClient,
-  batches: AnnouncementBatch[],
-  handled: ReadonlySet<string>
+  batches: AnnouncementBatch[]
 ): Promise<number> {
+  if (batches.length === 0) {
+    return 0;
+  }
+  let logged: Map<string, Set<number>>;
+  try {
+    logged = await fetchAnnouncementLoggedUserIds(
+      supabase,
+      batches.map((batch) => batch.referenceKey)
+    );
+  } catch (error) {
+    console.error(
+      "[定期メール] お知らせの送信状況の確認に失敗しました:",
+      error instanceof Error ? error.message : error
+    );
+    return 0;
+  }
+
   let completed = 0;
   for (const batch of batches) {
-    const done = batch.pendingUserIds.every((userId) =>
-      handled.has(handledKey(EMAIL_KIND.ANNOUNCEMENT, batch.referenceKey, userId))
-    );
-    if (!done) {
+    const done = logged.get(batch.referenceKey) ?? new Set<number>();
+    if (!batch.pendingUserIds.every((userId) => done.has(userId))) {
       continue;
     }
     const { error } = await supabase

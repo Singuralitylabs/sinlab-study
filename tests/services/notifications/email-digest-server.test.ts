@@ -31,6 +31,8 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
   const clock = { now: new Date() };
   /** `<table>:<op>` を入れると、その操作を DB エラーにする */
   const failures = new Set<string>();
+  /** INSERT ごとに DB エラーにするかを決める（特定の宛先の claim だけを失敗させる用） */
+  const insertFailures: { when: ((table: string, value: Row) => boolean) | null } = { when: null };
 
   function from(table: string) {
     let op: "select" | "insert" | "update" | "upsert" | "delete" = "select";
@@ -68,6 +70,9 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
         return { data: null, error: null };
       }
       if (op === "insert") {
+        if (insertFailures.when?.(table, payload)) {
+          return { data: null, error: { code: "08006", message: "connection failure" } };
+        }
         if (isDuplicate(rows, payload)) {
           return { data: null, error: { code: "23505", message: "duplicate key" } };
         }
@@ -180,7 +185,7 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
     return builder;
   }
 
-  return { db, clock, failures, client: { from: vi.fn(from) } };
+  return { db, clock, failures, insertFailures, client: { from: vi.fn(from) } };
 }
 
 const APP_URL = "https://study.example.com";
@@ -963,6 +968,28 @@ describe("お知らせのメール一斉送信（#254）", () => {
       expect.stringContaining("お知らせ"),
       expect.stringContaining("今週の学習"),
     ]);
+  });
+
+  it("claim が DB エラーで失敗した宛先が残っていれば完了にせず、翌日の実行で送ってから完了にする", async () => {
+    const { db, insertFailures } = setup({
+      users: [userRow(1), userRow(2), userRow(3)],
+      announcements: [announcementRow()],
+    });
+    insertFailures.when = (table, value) =>
+      table === "email_logs" && value.kind === "announcement" && value.user_id === 2;
+
+    const wednesday = await runDigest(WEDNESDAY);
+
+    expect(sentTo()).toEqual(["u1@example.com", "u3@example.com"]);
+    expect(wednesday).toMatchObject({ failed: 1, announcementsCompleted: 0 });
+    expect(db.announcements[0].email_sent_at).toBeNull();
+
+    insertFailures.when = null;
+    const thursday = await runDigest(THURSDAY);
+
+    expect(sentTo()).toEqual(["u1@example.com", "u3@example.com", "u2@example.com"]);
+    expect(thursday).toMatchObject({ sent: 1, announcementsCompleted: 1 });
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
   });
 
   it("対象者がいないお知らせは送らずに完了にする", async () => {
