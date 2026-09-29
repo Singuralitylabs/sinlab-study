@@ -22,8 +22,10 @@ type Block =
   | { type: "code"; lines: string[] };
 
 const HEADING_PREFIX = /^ {0,3}#{1,6}[ \t]+/;
-const UNORDERED_ITEM = /^\s*[-*+]\s+(.*)$/;
-const ORDERED_ITEM = /^\s*\d+[.)]\s+(.*)$/;
+// 行頭の記号だけを照合し、項目の本文は一致位置から行末までを slice で取る
+// （`\s+(.*)$` の形は空白が長く続く行で空白の数の2乗の時間がかかるため）
+const UNORDERED_PREFIX = /^[ \t]*[-*+][ \t]+/;
+const ORDERED_PREFIX = /^[ \t]*\d{1,9}[.)][ \t]+/;
 const FENCE = /^\s*```/;
 
 /**
@@ -90,16 +92,16 @@ function parseBlocks(markdown: string): Block[] {
       continue;
     }
 
-    const unordered = UNORDERED_ITEM.exec(line);
-    const ordered = unordered ? null : ORDERED_ITEM.exec(line);
-    const item = unordered ?? ordered;
-    if (item) {
+    const unordered = UNORDERED_PREFIX.exec(line);
+    const ordered = unordered ? null : ORDERED_PREFIX.exec(line);
+    const itemPrefix = unordered ?? ordered;
+    if (itemPrefix) {
       const isOrdered = ordered !== null;
       if (paragraph.length > 0 || (list && list.ordered !== isOrdered)) {
         flush();
       }
       list ??= { ordered: isOrdered, items: [] };
-      list.items.push(item[1]);
+      list.items.push(line.slice(itemPrefix[0].length));
       continue;
     }
 

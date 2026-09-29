@@ -82,6 +82,8 @@ describe("悪意のある・壊れた入力でも短時間で終わる（Cron �
     ["閉じの無い ** が大量に並ぶ", "**".repeat(10_000)],
     ["閉じの無い ` が大量に並ぶ", "`".repeat(20_000)],
     ["リンクの途中で終わる", `[a](https://${"x".repeat(20_000)}`],
+    ["箇条書きの記号の後に長い空白", `- ${" ".repeat(19_990)}x`],
+    ["番号付きリストの記号の後に長い空白", `1. ${" ".repeat(19_990)}x`],
   ])("%s", (_label, input) => {
     expect(within(() => markdownToEmailText(input), 500)).toBe(true);
     expect(within(() => markdownToEmailHtml(input), 500)).toBe(true);
