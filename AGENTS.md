@@ -58,6 +58,7 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 - **サーバー側のユーザー情報取得は `getServerAuth()`（`app/services/auth/server-auth.ts`）に一本化する。** layout・page・API Route のいずれからも他の手段を使わない（`React.cache()` でメモ化。proxy からのヘッダ経由による `users` 再照会省略経路は `docs/specification.md` 2.2 参照）。
 - **認可は二層防御。** `proxy.ts`（Next.js 16 における Middleware の後継）を第一の砦とし、`app/(authenticated)/layout.tsx` でも `userStatus` の許可リスト検証を行う。**クライアント側での認証ガードは行わない。**
 - **プロキシはフェイルクローズ。** 環境変数欠落・例外・ステータス取得不能（null）はすべて `/login` へリダイレクトする。
+- **Cron ルート（`app/api/cron/`）は `isAuthorizedCronRequest()`（`app/services/auth/cron-auth.ts`）による `CRON_SECRET` の検証を必ず通す**（未設定・不一致は 401）。`/api` は proxy の対象外のため、ルート側の検証だけが防御になる。
 - **ロール**: `admin`（全権限）/ `maintainer`（コンテンツ管理）/ `member`（受講生）。判定ロジックは `app/services/auth/` に集約する。
 - **ステータス**: `active`（承認済み）/ `trial`（お試し。アプリは使えるがお試し公開コンテンツのみ閲覧可）/ `rejected`（`/rejected` へ。APIでは403）。
 - **初回登録の INSERT は同意 Cookie 必須。** 同意なしでは `users` 行を作らず `/login?error=terms_required` へ戻す。`terms_accepted_at` は callback でのみ書き、既存ユーザーの分岐では参照も更新もしない。
@@ -68,7 +69,7 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 
 - **許可値の列挙は `MEMBERSHIP_TYPES`（`app/constants/user.ts`）に一本化する。** APIのバリデーションも承認UIの `<option>` 生成もここから導出し、`'community'` / `'general'` のリテラルをハードコードしない。
 - **`status=active` と `membership_type` の整合性はDBでは保証されない**（CHECK制約は値の妥当性のみ）。`approveUser()` / `rejectUser()` を迂回して `status` を書き換えないこと。
-- **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select する。0行なら404扱い。権限チェック済みの管理者向けクエリや `user_id` フィルタで担保している既存利用は対象外。admin / maintainer 向けの未公開プレビュー（`docs/specification.md` 2.12節）はこの2箇所を増やさず、通常クライアント（RLS適用）の別経路で取得する。未認証のデモ画面（`/demo`、`demo-learning-server.ts`）は受講生向け配信経路ではなく service_role 専用の別経路であり、スライドの署名付きURLは **`is_published = true AND is_open_to_trial = true` のコンテンツに限って**発行する。
+- **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select する。0行なら404扱い。権限チェック済みの管理者向けクエリや `user_id` フィルタで担保している既存利用は対象外。admin / maintainer 向けの未公開プレビュー（`docs/specification.md` 2.12節）はこの2箇所を増やさず、通常クライアント（RLS適用）の別経路で取得する。定期メールの抽出（`email-digest-server.ts`）も受講生向け配信経路ではない service_role の別経路で、同じ公開・未削除の絞り込みと本文を含まないカラムだけを守る（お知らせの一斉送信が `announcements.body` を読むのはメール本文そのもののため例外）。未認証のデモ画面（`/demo`、`demo-learning-server.ts`）は受講生向け配信経路ではなく service_role 専用の別経路であり、スライドの署名付きURLは **`is_published = true AND is_open_to_trial = true` のコンテンツに限って**発行する。
 - **`learning-server.ts` の取得関数は `userRole` を受け取り、admin / maintainer の場合のみ `is_published` 絞り込みを外す**（RLSは既に許可済み。詳細は `docs/specification.md` 2.12節）。member / お試しユーザーでは `is_published = true` の絞り込みを常に維持する。
 - **提出API・進捗APIの可視性チェックは通常クライアントの SELECT で行う。** `contentId` を `is_published = true` 付きで SELECT して0行なら403。RLSがステータスを織り込むため、アプリ層でステータス分岐を書かない（`is_published` の絞り込みのみ明示する。`isContentVisible()`（`learning-server.ts`）の絞り込み条件・意図は `docs/specification.md` 2.12節を参照）。
 
@@ -113,6 +114,6 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 
 `.env.local` に設定する。**用途を含む正式な一覧は `README.md` を参照**（ここでは名前のみ）。
 
-`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_PROJECT_ID` / `GEMINI_API_KEY` / `GEMINI_API_KEY_TRIAL` / `SLACK_NOTIFICATION_WEBHOOK_URL` / `STRIPE_ENABLED` / `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_ID` / `NEXT_PUBLIC_APP_URL`
+`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_PROJECT_ID` / `GEMINI_API_KEY` / `GEMINI_API_KEY_TRIAL` / `SLACK_NOTIFICATION_WEBHOOK_URL` / `RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `CRON_SECRET` / `EMAIL_UNSUBSCRIBE_SECRET` / `STRIPE_ENABLED` / `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_ID` / `NEXT_PUBLIC_APP_URL`
 
 **AIレビューのキー振り分け**: 選択ロジックは `resolveGeminiApiKey()`（`app/services/api/gemini.ts`）、モデル名・上限値・環境変数名は `app/constants/gemini.ts` に集約する。**キーはサーバー側でのみ扱い、レスポンス・ログへ出さない。** 仕様は `docs/specification.md` 6.1.2節を参照。

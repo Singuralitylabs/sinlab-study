@@ -1444,19 +1444,25 @@ export async function isUserCurrentlySubscribed(userId: number): Promise<{
  * open on SELECT errors, so the condition is folded into the UPDATE to make it atomic.
  * The service_role client bypasses RLS, so `is_deleted = false` must be explicit.
  * @returns updated: whether a row changed. false means already active, missing, or deleted.
+ *   approvedAt: the approval time written to `updated_at`, used as the dedup key of the approval
+ *   email.
  */
 export async function approveUser(
   userId: number,
   membershipType: MembershipType
-): Promise<{ error: PostgrestError | null; updated: boolean }> {
+): Promise<
+  | { error: PostgrestError | null; updated: false; approvedAt: null }
+  | { error: null; updated: true; approvedAt: string }
+> {
   const supabase = await createAdminSupabaseClient();
+  const approvedAt = new Date().toISOString();
 
   const { data, error } = await supabase
     .from("users")
     .update({
       status: USER_STATUS.ACTIVE,
       membership_type: membershipType,
-      updated_at: new Date().toISOString(),
+      updated_at: approvedAt,
     })
     .eq("id", userId)
     .eq("is_deleted", false)
@@ -1465,10 +1471,13 @@ export async function approveUser(
 
   if (error) {
     console.error("ユーザー承認エラー:", error.message);
-    return { error, updated: false };
+    return { error, updated: false, approvedAt: null };
   }
 
-  return { error: null, updated: (data?.length ?? 0) > 0 };
+  if ((data?.length ?? 0) === 0) {
+    return { error: null, updated: false, approvedAt: null };
+  }
+  return { error: null, updated: true, approvedAt };
 }
 
 /**

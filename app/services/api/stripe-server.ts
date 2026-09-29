@@ -5,6 +5,7 @@ import {
   BILLING_ANCHOR_DAY_OF_MONTH,
   BILLING_ANCHOR_HOUR_UTC,
   STRIPE_MINIMUM_CHARGE_AMOUNT_JPY,
+  type SubscriptionPrice,
 } from "@/app/constants/stripe";
 import {
   createAdminSupabaseClient,
@@ -450,28 +451,29 @@ async function getCachedPrice(): Promise<Stripe.Price> {
 
 /**
  * The anchor and proration math assume monthly billing; used to catch misconfigured Prices (e.g.
- * yearly) so callers fall back to the safe side.
+ * yearly) so callers fall back to the safe side (shared by toSubscriptionPrice() and
+ * isProrationBelowMinimum()).
  */
 function isPlainMonthlyPrice(price: Stripe.Price): boolean {
   return price.recurring?.interval === "month" && (price.recurring.interval_count ?? 1) === 1;
 }
 
 /**
- * unit_amount is treated as JPY yen (zero-decimal currency); multi-currency is out of scope (same
- * assumption as the Slack payment-failure notice).
- * Returns `amount: null` when the Price is not monthly so the caller rejects Checkout (avoids "/
- * month" display diverging from the real interval).
+ * Converts a Stripe Price into the `SubscriptionPrice` used for price display and the Checkout
+ * gate. unit_amount is treated as JPY yen (zero-decimal currency); multi-currency is out of scope
+ * (same assumption as the Slack payment-failure notice). A non-monthly Price yields `amount:
+ * null` so callers reject Checkout / omit the price (avoids "/ month" display diverging from the
+ * real interval). Shared by the /upgrade price and the upgrade email price.
  */
-export async function fetchSubscriptionPrice(): Promise<{
-  amount: number | null;
-  currency: string;
-}> {
-  const price = await getCachedPrice();
-
+export function toSubscriptionPrice(price: Stripe.Price): SubscriptionPrice {
   return {
     amount: isPlainMonthlyPrice(price) ? price.unit_amount : null,
     currency: price.currency,
   };
+}
+
+export async function fetchSubscriptionPrice(): Promise<SubscriptionPrice> {
+  return toSubscriptionPrice(await getCachedPrice());
 }
 
 function anchorAt(year: number, monthIndex: number): Date {
@@ -522,6 +524,7 @@ export async function fetchStripeSubscriptionByUserId(userId: number): Promise<{
   data: {
     status: string;
     cancel_at_period_end: boolean;
+    cancel_at: string | null;
     current_period_end: string | null;
   } | null;
   error: PostgrestError | null;
@@ -530,7 +533,7 @@ export async function fetchStripeSubscriptionByUserId(userId: number): Promise<{
 
   const { data, error } = await supabase
     .from("stripe_subscriptions")
-    .select("status, cancel_at_period_end, current_period_end")
+    .select("status, cancel_at_period_end, cancel_at, current_period_end")
     .eq("user_id", userId)
     .maybeSingle();
 

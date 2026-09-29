@@ -1,12 +1,20 @@
 import type Stripe from "stripe";
+import { isChargeableSubscriptionPrice } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP, USER_STATUS } from "@/app/constants/user";
+import { cancellationEndsAt, isCancellationScheduled } from "@/app/lib/subscription-period";
 import {
   ACTIVATABLE_SUBSCRIPTION_STATUSES,
   getStripeClient,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
   TERMINAL_SUBSCRIPTION_STATUSES,
+  toSubscriptionPrice,
 } from "@/app/services/api/stripe-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
+import {
+  scheduleCancelScheduledEmail,
+  scheduleSubscriptionEndedEmail,
+  scheduleUpgradedEmail,
+} from "@/app/services/notifications/user-emails";
 
 /** Exported because both the webhook and the success page use it to identify the session's user. */
 export function extractUserId(
@@ -26,6 +34,53 @@ function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
 }
 
 /**
+ * Monthly price (JPY, unit price x quantity) of the subscription re-fetched from Stripe. Returns
+ * null when it is not a monthly JPY price (no line in the upgrade email) or when the subscription
+ * / item carries a discount (coupon etc.), since it would differ from the real charge. A discount
+ * attached directly to the Customer (`customer.discount`) is not in `subscription.discounts` and
+ * is undetected, so list price shows (detecting needs an extra Customer fetch; Checkout promotion
+ * codes attach to the subscription, so this only happens with manual Dashboard/API grants and is
+ * accepted).
+ */
+function chargedMonthlyAmountJpy(subscription: Stripe.Subscription): number | null {
+  const item = subscription.items.data[0];
+  if (!item?.price) {
+    return null;
+  }
+  if ((subscription.discounts?.length ?? 0) > 0 || (item.discounts?.length ?? 0) > 0) {
+    return null;
+  }
+  const price = toSubscriptionPrice(item.price);
+  if (!isChargeableSubscriptionPrice(price)) {
+    return null;
+  }
+  return price.amount * (item.quantity ?? 1);
+}
+
+/**
+ * Schedules the upgrade email. Every promotion path (Checkout completion, re-promotion from the
+ * mirror) goes through this. reference_key is the subscription id, so multiple paths / retries
+ * returning a promotion still send one email. Exceptions (including price calculation) are
+ * swallowed so they never affect the promotion result (webhook response, success page).
+ */
+function scheduleUpgradedEmailFor(
+  userId: number,
+  subscription: Stripe.Subscription,
+  currentPeriodEnd: string | null
+): void {
+  try {
+    scheduleUpgradedEmail({
+      userId,
+      subscriptionId: subscription.id,
+      monthlyAmountJpy: chargedMonthlyAmountJpy(subscription),
+      currentPeriodEnd,
+    });
+  } catch (error) {
+    console.error("[メール通知] 有料会員化メールの予約に失敗しました:", error);
+  }
+}
+
+/**
  * Maps live subscription state re-fetched from Stripe onto mirror row columns. Every mirror write
  * path (Checkout completion, subscription update webhook, reactivation) uses it so paths do not
  * drift when a column is added.
@@ -34,6 +89,9 @@ function subscriptionMirrorFields(subscription: Stripe.Subscription) {
   return {
     status: subscription.status,
     cancel_at_period_end: subscription.cancel_at_period_end,
+    // With flexible billing mode a scheduled cancellation only shows up in cancel_at (see
+    // isCancellationScheduled()).
+    cancel_at: toIsoOrNull(subscription.cancel_at),
     current_period_end: toIsoOrNull(subscription.items.data[0]?.current_period_end),
     updated_at: new Date().toISOString(),
   };
@@ -42,9 +100,9 @@ function subscriptionMirrorFields(subscription: Stripe.Subscription) {
 /**
  * Idempotent promotion called from both the checkout.session.completed webhook and the success
  * page. Upserts stripe_subscriptions, then sets users to active/general only when the
- * subscription is currently valid (ACTIVATABLE_SUBSCRIPTION_STATUSES). Always overwrites on
- * promotion, including admin-approved users (accepted behavior). Rejected users are never
- * promoted.
+ * subscription is currently valid (ACTIVATABLE_SUBSCRIPTION_STATUSES). Overwrites on promotion,
+ * including admin-approved users (accepted; no update if already general). Rejected users are
+ * never promoted.
  * A completed Checkout Session stays immutable on Stripe, so promoting without checking
  * subscription state would let a cancelled user re-promote for free by revisiting the success URL
  * (session_id) (replay). The status check stops the promotion; the existing-row check below also
@@ -143,6 +201,11 @@ export async function activateUserFromCheckoutSession(
   if (promoted.error) {
     return { error: promoted.error, activated: false, currentPeriodEnd: null };
   }
+  if (promoted.changed) {
+    // The webhook and the success page can promote concurrently; the send-log UNIQUE
+    // (subscription id) keeps it to one email.
+    scheduleUpgradedEmailFor(userId, subscription, currentPeriodEnd);
+  }
   return {
     error: null,
     activated: promoted.activated,
@@ -154,11 +217,18 @@ export async function activateUserFromCheckoutSession(
  * Promotes to active / general; rejected users are never promoted. Callers must first confirm
  * from live state re-fetched from Stripe that the subscription is currently valid
  * (ACTIVATABLE_SUBSCRIPTION_STATUSES).
+ * The UPDATE targets only rows not yet general. When already promoted (success-page revisit,
+ * webhook retry) nothing is updated and only `activated` is returned from the current state.
+ * @returns activated: whether the user is general after the call (drives the success page).
+ *   changed: whether this call actually promoted. The upgrade email is scheduled only when true,
+ *   so revisits / retries of an already promoted user do not send emails at unrelated times; an
+ *   admin having manually approved the user as general also gives changed false, so it is not
+ *   sent as if already announced by the approval email.
  */
 async function promoteUserToGeneral(
   supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
   userId: number
-): Promise<{ error: string | null; activated: boolean }> {
+): Promise<{ error: string | null; activated: boolean; changed: boolean }> {
   const { data: updatedUsers, error: userError } = await supabase
     .from("users")
     .update({
@@ -168,13 +238,33 @@ async function promoteUserToGeneral(
     })
     .eq("id", userId)
     .neq("status", USER_STATUS.REJECTED)
+    .or(
+      `status.neq.${USER_STATUS.ACTIVE},membership_type.is.null,membership_type.neq.${USER_MEMBERSHIP.GENERAL}`
+    )
     .select("id");
 
   if (userError) {
     console.error("ユーザー昇格エラー:", userError.message);
-    return { error: userError.message, activated: false };
+    return { error: userError.message, activated: false, changed: false };
   }
-  return { error: null, activated: (updatedUsers?.length ?? 0) > 0 };
+  if ((updatedUsers?.length ?? 0) > 0) {
+    return { error: null, activated: true, changed: true };
+  }
+
+  // No update: already general, or rejected / missing.
+  const { data: current, error: fetchError } = await supabase
+    .from("users")
+    .select("id")
+    .eq("id", userId)
+    .eq("status", USER_STATUS.ACTIVE)
+    .eq("membership_type", USER_MEMBERSHIP.GENERAL)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error("ユーザー取得エラー:", fetchError.message);
+    return { error: fetchError.message, activated: false, changed: false };
+  }
+  return { error: null, activated: current !== null, changed: false };
 }
 
 /**
@@ -216,6 +306,7 @@ export async function reactivateUserFromMirror(
 
   const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve(row.stripe_subscription_id);
+  const mirrorFields = subscriptionMirrorFields(subscription);
 
   // Write live state only if the row is unchanged since the read (same subscription, same status,
   // no claim). Without the status condition, a concurrent cancellation webhook's `canceled`
@@ -223,7 +314,7 @@ export async function reactivateUserFromMirror(
   // user.
   const { data: updated, error: updateError } = await supabase
     .from("stripe_subscriptions")
-    .update(subscriptionMirrorFields(subscription))
+    .update(mirrorFields)
     .eq("user_id", userId)
     .eq("stripe_subscription_id", subscription.id)
     .eq("status", row.status)
@@ -241,7 +332,14 @@ export async function reactivateUserFromMirror(
     return { error: null, activated: false };
   }
 
-  return await promoteUserToGeneral(supabase, userId);
+  const promoted = await promoteUserToGeneral(supabase, userId);
+  if (promoted.changed) {
+    // A subscription not promoted by the first reflection (activateUserFromCheckoutSession) can
+    // become a paid member here for the first time. If already sent, the send-log UNIQUE
+    // (subscription id) suppresses it.
+    scheduleUpgradedEmailFor(userId, subscription, mirrorFields.current_period_end);
+  }
+  return { error: promoted.error, activated: promoted.activated };
 }
 
 /** Retry count for the mirror update: on conflict re-read and decide again. */
@@ -401,10 +499,11 @@ export async function syncSubscriptionStatus(
 
   const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve(subscriptionFromEvent.id);
+  const mirrorFields = subscriptionMirrorFields(subscription);
 
   const { error: updateError } = await supabase
     .from("stripe_subscriptions")
-    .update(subscriptionMirrorFields(subscription))
+    .update(mirrorFields)
     .eq("stripe_subscription_id", subscription.id);
 
   if (updateError) {
@@ -413,7 +512,26 @@ export async function syncSubscriptionStatus(
   }
 
   if (TERMINAL_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
-    return await revertUserToTrial(existing.user_id);
+    const reverted = await revertUserToTrial(existing.user_id);
+    if (reverted.error === null && reverted.reverted) {
+      scheduleSubscriptionEndedEmail({ userId: existing.user_id, subscriptionId: subscription.id });
+    }
+    return { error: reverted.error };
+  }
+
+  // Accepts a scheduled cancellation. Do not decide by comparing with the mirror (false -> true
+  // transition): other paths also write live state to the mirror (Checkout completion,
+  // re-promotion), and if they write first the transition is consumed and the email is lost.
+  // Schedule every time the live state re-fetched from Stripe shows a scheduled cancellation and
+  // let the send-log UNIQUE (subscription id) dedupe to one email (delayed / reordered event
+  // snapshots are not read, so a stale event arriving after the cancellation was withdrawn does
+  // not fire).
+  if (isCancellationScheduled(mirrorFields)) {
+    scheduleCancelScheduledEmail({
+      userId: existing.user_id,
+      subscriptionId: subscription.id,
+      periodEnd: cancellationEndsAt(mirrorFields),
+    });
   }
 
   return { error: null };
@@ -422,11 +540,15 @@ export async function syncSubscriptionStatus(
 /**
  * Reverts the user to trial. The guard (only when membership_type='general') is folded into the
  * UPDATE so community members and manually approved users are not caught by mistake.
+ * @returns reverted: whether a row was actually updated. false when the guard blocked it (already
+ *   demoted, not general); used to decide not to send the membership-ended email.
  */
-export async function revertUserToTrial(userId: number): Promise<{ error: string | null }> {
+export async function revertUserToTrial(
+  userId: number
+): Promise<{ error: string | null; reverted: boolean }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("users")
     .update({
       status: USER_STATUS.TRIAL,
@@ -434,14 +556,15 @@ export async function revertUserToTrial(userId: number): Promise<{ error: string
       updated_at: new Date().toISOString(),
     })
     .eq("id", userId)
-    .eq("membership_type", USER_MEMBERSHIP.GENERAL);
+    .eq("membership_type", USER_MEMBERSHIP.GENERAL)
+    .select("id");
 
   if (error) {
     console.error("ユーザー降格エラー:", error.message);
-    return { error: error.message };
+    return { error: error.message, reverted: false };
   }
 
-  return { error: null };
+  return { error: null, reverted: (data?.length ?? 0) > 0 };
 }
 
 /** After this many minutes an abandoned claim can be re-claimed. */

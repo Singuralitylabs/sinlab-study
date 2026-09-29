@@ -56,11 +56,15 @@ SUPABASE_PROJECT_ID=<Supabase プロジェクトID>
 GEMINI_API_KEY=<Gemini API Key（会員用・有料ティア。AIレビュー機能）>
 GEMINI_API_KEY_TRIAL=<任意。お試しユーザー用・無料ティア。未設定時は GEMINI_API_KEY にフォールバック>
 SLACK_NOTIFICATION_WEBHOOK_URL=<任意。初回ログイン承認依頼・Stripe支払い失敗のSlack通知。未設定時は通知をスキップ>
+RESEND_API_KEY=<任意。受講生向けメール通知（Resend）の API キー。未設定時はメール送信をスキップ>
+EMAIL_FROM_ADDRESS=<任意。メールの送信元（返信不可の noreply@...。開発時は onboarding@resend.dev）。未設定時はメール送信をスキップ>
+CRON_SECRET=<任意。定期メールの Cron ルートの認証（Vercel Cron が Bearer で送る）。未設定時は Cron ルートが常に 401>
+EMAIL_UNSUBSCRIBE_SECRET=<任意。案内メールの配信停止リンクの署名鍵。未設定時は定期メールを送らない。変更すると送信済みのリンクが無効になる>
 STRIPE_ENABLED=<Stripe決済機能の有効化フラグ。"true" 以外はフェイルクローズで無効>
 STRIPE_SECRET_KEY=<Stripe Secret Key>
 STRIPE_WEBHOOK_SECRET=<Stripe Webhook 署名シークレット>
 STRIPE_PRICE_ID=<月額サブスクリプションの Price ID>
-NEXT_PUBLIC_APP_URL=<Checkout/Portal のリダイレクト先URL生成に使用>
+NEXT_PUBLIC_APP_URL=<Checkout/Portal のリダイレクト先URL・メール本文のリンク生成に使用>
 ```
 
 本番リリース時の環境変数確認は Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順) Step 5 を参照（一覧の正本はこの節と `.env.local.example`）。
@@ -107,6 +111,10 @@ Claude Code で Supabase MCP サーバーを使う場合、**必ず read-only �
 詳細は [Supabase MCP Server](https://supabase.com/docs/guides/ai-tools/mcp) を参照。サーバーの登録名は任意（`.claude/settings.json` のフックはどの名前でも `execute_sql` に反応する）。
 
 `.claude/settings.json` の PreToolUse フック（`.claude/hooks/allow-readonly-sql.mjs`）は、`execute_sql` の `query` が読み取り専用（SELECT 等）と判定できたときだけ許可確認をスキップする**利便性のための仕組み**で、書き込み防止の実体ではない。SELECT 内で副作用のある関数を呼ぶクエリは通るため、read-only モードを省略しないこと。`execute_sql` 自体を `permissions.allow` に登録してはならない（`CLAUDE.md`「自動実行の許可」参照）。
+
+## 定期メール（Vercel Cron）の運用
+
+`vercel.json` の `crons` で、毎日 UTC 23 時台（JST 8 時台）に `GET /api/cron/email-digest` を呼び、週次進捗・未学習リマインド・お試しユーザー向け案内を送る（仕様は `docs/specification.md` 10.7〜10.9節）。Cron は Production デプロイでのみ動き、Preview・ローカルでは動かないため、動作確認は `curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/email-digest` で手動実行する。本番で有効にするのは、利用規約の改定（案内メールの送信に関する条項）後に Vercel へ `CRON_SECRET` / `EMAIL_UNSUBSCRIBE_SECRET` を設定してから。
 
 ## Dependabot PR のマージ運用
 
