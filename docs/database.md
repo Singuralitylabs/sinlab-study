@@ -34,9 +34,12 @@ erDiagram
     users ||--o{ submissions : "1:N"
     submissions ||--o| ai_reviews : "1:1"
     users ||--o| stripe_subscriptions : "1:1"
+    users ||--o{ email_logs : "1:N"
+    announcements ||--o{ announcement_reads : "1:N"
+    users ||--o{ announcement_reads : "1:N"
 ```
 
-`stripe_events` は他テーブルと関連を持たない独立テーブル。
+`stripe_events` / `cron_locks` は他テーブルと関連を持たない独立テーブル。
 
 ---
 
@@ -103,6 +106,7 @@ erDiagram
 - `membership_type`: `community`（コミュニティ会員）/ `general`（一般有料会員）。承認前・却下ユーザーは NULL
 - `terms_accepted_at`: 利用規約・プライバシーポリシーへの同意日時。新規登録時のみ記録し、既存ユーザーは NULL のまま利用継続できる（再同意は求めない）
 - `onboarding_completed_at`: 初回利用ガイド（ウェルカムダイアログ）の完了日時。閉じたときに記録し、既存ユーザーは NULL のまま
+- `email_opt_out_at`: 案内メール（定期メール）の配信停止日時。NULL は配信対象。配信停止リンク（`/api/email/unsubscribe`）で記録し、再開は管理者が NULL に戻す。トランザクションメールには影響しない（[機能設計書](./specification.md)10.8節）
 - `auth_id`: Supabase Auth UUID（UNIQUE）
 
 > CHECK制約は値の妥当性のみを検証する。「`status = 'active'` なら `membership_type` は NOT NULL」という不変条件はDBでは保証しておらず、承認・却下処理（`approveUser()` / `rejectUser()`）を通るアプリ層でのみ担保している。
@@ -113,10 +117,13 @@ erDiagram
 
 - `stripe_customer_id`（UNIQUE）: ユーザーごとに一意で、確保後は必ず再利用する。claim直後〜Customer作成前のみ NULL
 - `stripe_subscription_id`（UNIQUE）
+- `cancel_at_period_end` / `cancel_at`: Stripe の `subscription.cancel_at_period_end` / `cancel_at`（解約予定日時）をそのままミラーする（下記「解約予約の判定は2列で行う」）
 - `status`: Stripeの `subscription.status` をそのままミラーする。CHECK制約は設けず、Stripe側の値追加にそのまま追従する。例外として、Checkout作成の処理権を確保している間だけ番兵値 `checkout_pending`（Stripe側には存在しない値）が入る
 - `checkout_claimed_at`: Checkout作成の処理権を確保した日時。NULLは処理権なし（未確保・解放済み・契約記録済み）
 - `checkout_session_id`: 処理権が確保しているCheckout Session（`cs_...`）。次のリクエストがStripeで有効性を確認するために保持する
 
+> **解約予約の判定は2列で行う**: flexible billing mode（Stripe API 2025-09-30.clover 以降の新規サブスクの既定）では、Customer Portal での解約は `cancel_at` に終了日時が入り、`cancel_at_period_end` は false のままになる。このため「解約予約中」は `cancel_at_period_end = true` または `cancel_at IS NOT NULL`、利用期限は `cancel_at`（無ければ `current_period_end`）で判定する。判定は `isCancellationScheduled()` / `cancellationEndsAt()`（`app/lib/subscription-period.ts`）に集約し、`/upgrade` の表示と解約予約メールで共有する。両列ともStripeの値をそのままミラーし、アプリ側で合成した値は書かない。
+>
 > **行が解約後も残り続ける点に注意**: `DELETE` は行わず常に `user_id` を key に `upsert` するため、一度でも契約したユーザーの行は解約後（`status` が `canceled` / `unpaid` / `incomplete_expired` / `paused` などの終端状態）も残り続ける。Checkout手続きを中断したユーザーの行（`checkout_pending`）も同様に残る。「現在契約中かどうか」を判定する箇所（`/upgrade` の契約中表示・管理画面のバッジ表示など）は、行の有無だけでなく `status` が契約を表す値であることも確認する必要がある（アプリ側では `NON_CURRENT_SUBSCRIPTION_STATUSES` 定数＝終端状態＋`checkout_pending` を除外して判定）。
 >
 > **Checkout作成の排他（claim/release）**: `POST /api/stripe/checkout` は、Checkout Sessionを作る**前に** `status = 'checkout_pending'` の行をINSERTして処理権を確保する（`claimCheckoutSlot()`）。`user_id` のUNIQUE制約により、同一ユーザーの並行リクエストは片方だけがclaimに成功する（`stripe_events` のclaimと同じパターン）。既に行がある場合は「契約が記録されておらず（`NON_CURRENT_SUBSCRIPTION_STATUSES`）、かつ奪ってよいclaimの」行だけを条件付きUPDATEで奪う（条件評価と書き込みが1文で完結するためレースにならない）。claim時に契約の痕跡（`stripe_subscription_id`・`cancel_at_period_end`・`current_period_end`）は消さない。`paused` / `unpaid` はStripe側で復帰しうるため、`stripe_subscription_id` を消すと復帰時のWebhookを `syncSubscriptionStatus()` が照合できず取りこぼす。
@@ -145,6 +152,33 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 >
 > **releaseの3者競合対策**: `releaseEventClaim()` は `id` に加えて `claimEvent()` が返した `processed_at` の一致もDELETE条件に含める。TTL経過後に別プロセスが再claimした直後、旧claim保持者が遅れて解放処理に到達すると、`id` のみの無条件DELETEでは新しいclaimまで消してしまい3重処理の窓が開くため。
 
+### 3.11 email_logs（メール送信ログ）
+
+受講生向けメール（トランザクションメール・定期メール。[機能設計書](./specification.md)10章）の送信記録。送信前のINSERTを処理権（claim）として使い、同一事象の二重送信を防ぐ。`UNIQUE (user_id, kind, reference_key)`。
+
+- `kind`: メール種別。値はアプリの `EMAIL_KIND` で管理し、種別の追加に追従できるよう CHECK 制約は設けない（種別とトリガーは[機能設計書](./specification.md)10.4・10.7・11.4節）。週次進捗の繰り越し予約 `weekly_digest_reserved` は送信しない記録用の行で、`sent_at` / `error` は NULL のまま
+- `reference_key`: 同一事象の識別子（種別ごとの値は機能設計書10.4・10.7節）
+- `sent_at`（送信成功日時）/ `provider_message_id`（Resend のメッセージid）/ `error`（失敗時の内容。APIキー等の秘匿情報は含めない）
+
+> **claimによる二重送信防止**: 送信前に `(user_id, kind, reference_key)` をINSERTし、一意制約違反（23505）なら送信しない（`stripe_events` のclaimと同じパターン。`deliverUserEmail()`）。Webhook と `/upgrade/success` の両経路・Webhookの再送・同時配信でも、INSERTに成功した1つだけが送信する。送信失敗時は行を削除せず `error` を記録する（再送はしない。例外として、お知らせの一斉送信は Resend が受け付けなかったことが確実な失敗の行を公開から3日以内に限り翌日以降に削除して送り直す。機能設計書11.4節）。claim後に処理が中断した行は `sent_at` / `error` が共に NULL のまま残り、以後その事象のメールは送られない（重複よりも欠落を許容する）。
+
+### 3.12 cron_locks（Cron バッチの実行ロック）
+
+定期メールの日次バッチ（[機能設計書](./specification.md)10.7節）の並行実行を防ぐロック（`name` が PK、`locked_at`）。`name` への INSERT を処理権（claim）とし、主キー違反なら別の実行が進行中として何もしない（`claimCheckoutSlot()` と同じパターン。`claimCronLock()`）。終了時に自分が取った行（`locked_at` が一致する行）を削除して解放する（`releaseCronLock()`）。関数のハードタイムアウト等で残った行は、アプリ側の TTL（`EMAIL_DIGEST_LOCK_TTL_MS`）を過ぎたら削除して取り直す。
+
+### 3.13 announcements（お知らせ）
+
+運営（admin / maintainer）から受講生へのお知らせ（[機能設計書](./specification.md)11章）。
+
+- `published_at`: NULL なら下書き
+- `target_statuses`（`active` / `trial` の1つ以上。CHECK）/ `target_membership_types`（`community` / `general` の1つ以上。CHECK。NULL は全種別。指定するとお試しユーザー（会員種別 NULL）には見えない）
+- `send_email`: メールでも一斉送信するか。Cron の日次バッチが送り、対象者全員に送り終えた日に `email_sent_at` を記録する（対象を変更すると NULL に戻す）
+- `created_by`: 作成者（`users.id`、`ON DELETE SET NULL`）。`is_deleted` で論理削除
+
+### 3.14 announcement_reads（お知らせの既読）
+
+本人が詳細を開いたときに記録する既読（1人1お知らせ1行、`PRIMARY KEY (announcement_id, user_id)`）。既読は取り消さない。
+
 ---
 
 ## 4. インデックス
@@ -155,6 +189,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 - `submissions` は `(submitted_at DESC, id DESC)` 系（提出一覧の offset ページネーション向け。ユーザー別は先頭に `user_id`）
 - `user_progress` の部分インデックス（`is_completed = true`）は、RPC `get_students_progress_summary` の完了集計向け
 - `learning_contents.pdf_url` の部分インデックス `idx_learning_contents_pdf_url`（`pdf_url IS NOT NULL`）は、slides の Storage SELECT ポリシーの `EXISTS`（`pdf_url = storage.objects.name`）向け（6.8参照）
+- `announcements` は公開済み・未削除に絞った `published_at DESC` の部分インデックス（受講生向け一覧と、一斉送信の送信待ち抽出向け）、`announcement_reads` は `user_id`（未読件数の算出向け）
 - UNIQUE 制約が暗黙に作るインデックス（`user_progress(user_id, content_id)`・`ai_reviews(submission_id)`・`users(auth_id)` 等）と重複する covering インデックスは追加しない。`users(auth_id)` は RLS ヘルパー（5.2）の検索を賄う
 
 ---
@@ -174,6 +209,7 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 | `get_user_role()` | TEXT | 認証ユーザー（`auth.uid()`）の `role` を返す（`is_deleted = false` かつ `status <> 'rejected'` が対象）。却下（`rejected`）ユーザーは NULL となり、admin/maintainer 向けポリシーのロールバイパスに一切乗らない。却下前に付与されていたロールを保持したまま Auth セッションが有効な間に認可を突破する事故を防ぐ（#104）。`trial` は対象外にしない（アプリ層は元々 rejected のみを弾く設計であり、`active` 限定にすると trial の admin/maintainer でアプリ層とRLSの認可判定が食い違うため） |
 | `get_user_id()` | INTEGER | 認証ユーザーの `users.id` を返す（`is_deleted = false` が対象） |
 | `get_user_status()` | TEXT | 認証ユーザーの `status` を返す（`is_deleted = false` が対象）。お試しユーザーのコンテンツ制限に使用する |
+| `get_user_membership_type()` | TEXT | 認証ユーザーの `membership_type` を返す（`is_deleted = false` が対象。お試し・却下は NULL）。お知らせの対象会員種別の判定に使用する（#254） |
 
 いずれも `STABLE SECURITY DEFINER`・`SET search_path = public` で定義し、EXECUTE 権限は `authenticated` / `service_role` にのみ付与する（`PUBLIC` へのデフォルト付与を取り消し、`anon`（未認証）からの REST RPC 経由の実行は許可しない）。新たにヘルパー関数を追加する際も同じパターン（`PUBLIC, anon` からの REVOKE + `authenticated, service_role` への GRANT）を踏襲する。ヘルパーの GRANT/REVOKE や関数本体は認可ロジックの変更時以外いじらない。
 
@@ -256,7 +292,7 @@ SELECT のみ: 自分の提出（`submissions.user_id` が自身）に紐づく�
 
 初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer は受講生進捗（`/manage/students`）の閲覧で `users` を参照するため SELECT のみ許可し、UPDATE は付与しない（ユーザー管理は不可）。
 
-本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため）。
+本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため）。`email_opt_out_at` も同様に、配信停止ルート（`/api/email/unsubscribe`。署名付きリンクでログイン不要）が service_role 経由で記録する。
 
 ### 6.6 stripe_subscriptions
 
@@ -277,6 +313,23 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 - `anon` 向けのポリシーは無く、未認証のデモ画面はサーバー側で service_role によりお試し公開スライドのみ署名する（[機能設計書](./specification.md)3.2）
 - `learning_contents` の SELECT ポリシーは引き続きコンテンツ行自身の `is_published` / `is_deleted` しか見ない。進捗・提出・AIレビューAPIの可視性はアプリ層の `isContentVisible()` が親階層まで補う（6.2 / 6.3 の EXISTS もコンテンツ行の可視性に委譲するだけなので、親階層判定を省いてはならない）
 - アップロード・削除APIは `createAdminSupabaseClient()` を使うため、`SUPABASE_SERVICE_ROLE_KEY` が必須である（未設定時は throw。通常クライアントへの暗黙フォールバックはしない）。キー設定時は RLS をバイパスし、Storage の RLS ポリシーは、呼び出し側が通常クライアントを明示的に選んだ経路に対する防御層として機能する
+
+### 6.9 email_logs / 6.10 cron_locks
+
+いずれもRLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`stripe_events` と同じ）。受講生・管理画面からは参照せず、`authenticated` ロールでは SELECT を含め一切のアクセスができない。`cron_locks` は Cron ルートからのみ読み書きする。
+
+### 6.11 announcements
+
+| 操作 | 対象 | 条件 |
+|:--|:--|:--|
+| SELECT | 対象の受講生 / admin・maintainer（全件） | 公開済み（`published_at IS NOT NULL`）・未削除で、`get_user_status()` が `target_statuses` に含まれ、`target_membership_types` が NULL または `get_user_membership_type()` が含まれる。または admin・maintainer |
+| INSERT / UPDATE / DELETE | admin・maintainer | ロールが admin・maintainer |
+
+却下ユーザーは `get_user_status()` が `rejected`（対象ステータスに含められない）で、`get_user_role()` が NULL のため、どのお知らせも見えない。admin / maintainer は管理画面のため全件を読めるので、受講生向け画面はアプリ層でも同じ条件で絞る（[機能設計書](./specification.md)11.2節の二層防御）。メールの一斉送信の抽出は Cron の service_role で行う。
+
+### 6.12 announcement_reads
+
+SELECT は本人のみ。INSERT は本人かつ、`announcements` の SELECT ポリシーが適用される `EXISTS` により自分に見える（公開済み・未削除の）お知らせに限る。UPDATE / DELETE のポリシーは定義していない（既読は取り消さない）。
 
 ---
 

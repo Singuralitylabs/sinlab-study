@@ -9,6 +9,7 @@ import { MEMBERSHIP_TYPES, USER_MANAGEMENT_ACTIONS, USER_ROLES } from "@/app/con
 import {
   AdminUserActionSchema,
   AiReviewRequestSchema,
+  AnnouncementSchema,
   BulkContentUpdateSchema,
   ContentCreateSchema,
   ContentUpdateSchema,
@@ -528,5 +529,51 @@ describe("validateRequest", () => {
     expect(result.success).toBe(false);
     if (result.success) throw new Error("unreachable");
     expect(result.response.status).toBe(400);
+  });
+});
+
+describe("AnnouncementSchema（#254）", () => {
+  const valid = {
+    title: "  もくもく会のご案内  ",
+    body: "本文",
+    target_statuses: ["active", "trial"],
+    target_membership_types: null,
+    send_email: true,
+    is_published: false,
+  };
+
+  it("正しい入力を受け付け、タイトルの前後の空白を除く", () => {
+    const result = AnnouncementSchema.safeParse(valid);
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.title).toBe("もくもく会のご案内");
+  });
+
+  it.each([
+    ["タイトルが空白のみ", { title: "   " }],
+    ["本文が空白のみ", { body: " \n " }],
+    ["対象ステータスが空", { target_statuses: [] }],
+    ["却下ステータスを対象にする", { target_statuses: ["rejected"] }],
+    ["対象ステータスの重複", { target_statuses: ["active", "active"] }],
+    ["会員種別が空配列", { target_statuses: ["active"], target_membership_types: [] }],
+    ["未知の会員種別", { target_statuses: ["active"], target_membership_types: ["vip"] }],
+    ["send_email が無い", { send_email: undefined }],
+  ])("%s は拒否する", (_label, patch) => {
+    expect(AnnouncementSchema.safeParse({ ...valid, ...patch }).success).toBe(false);
+  });
+
+  it("会員種別を指定するときは、お試しユーザーを対象にできない", () => {
+    const result = AnnouncementSchema.safeParse({
+      ...valid,
+      target_statuses: ["active", "trial"],
+      target_membership_types: ["general"],
+    });
+    expect(result.success).toBe(false);
+    expect(
+      AnnouncementSchema.safeParse({
+        ...valid,
+        target_statuses: ["active"],
+        target_membership_types: ["general"],
+      }).success
+    ).toBe(true);
   });
 });

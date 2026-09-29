@@ -1501,20 +1501,25 @@ export async function isUserCurrentlySubscribed(userId: number): Promise<{
  * にもなるため、UPDATE自体に条件を折り込み原子的に判定する。
  * service_role クライアントはRLSを迂回するため `is_deleted = false` も明示的に必須。
  *
- * @returns updated: 更新が行われたか。false は既に承認済み・存在しない・削除済みのいずれか
+ * @returns updated: 更新が行われたか。false は既に承認済み・存在しない・削除済みのいずれか。
+ * approvedAt: 更新したときの承認時刻（`updated_at` に書いた値）。承認メールの二重送信防止キーに使う
  */
 export async function approveUser(
   userId: number,
   membershipType: MembershipType
-): Promise<{ error: PostgrestError | null; updated: boolean }> {
+): Promise<
+  | { error: PostgrestError | null; updated: false; approvedAt: null }
+  | { error: null; updated: true; approvedAt: string }
+> {
   const supabase = await createAdminSupabaseClient();
+  const approvedAt = new Date().toISOString();
 
   const { data, error } = await supabase
     .from("users")
     .update({
       status: USER_STATUS.ACTIVE,
       membership_type: membershipType,
-      updated_at: new Date().toISOString(),
+      updated_at: approvedAt,
     })
     .eq("id", userId)
     .eq("is_deleted", false)
@@ -1523,10 +1528,13 @@ export async function approveUser(
 
   if (error) {
     console.error("ユーザー承認エラー:", error.message);
-    return { error, updated: false };
+    return { error, updated: false, approvedAt: null };
   }
 
-  return { error: null, updated: (data?.length ?? 0) > 0 };
+  if ((data?.length ?? 0) === 0) {
+    return { error: null, updated: false, approvedAt: null };
+  }
+  return { error: null, updated: true, approvedAt };
 }
 
 /**

@@ -1,9 +1,12 @@
-import { BookOpen, CheckCircle, Clock, TrendingUp } from "lucide-react";
+import { BookOpen, CheckCircle, Clock, Megaphone, TrendingUp } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT } from "@/app/constants/announcements";
 import { getWelcomeStepsForStatus } from "@/app/constants/onboarding";
 import { isStripeEnabled } from "@/app/constants/stripe";
+import { formatDate } from "@/app/lib/format-date";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
+import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
 import {
   fetchGettingStartedProgress,
@@ -33,11 +36,16 @@ export default async function HomePage() {
 
   const isMember = !checkInstructorPermissions(userRole);
 
-  const [{ data: themeData }, onboardingResult, gettingStartedResult] = await Promise.all([
-    fetchThemeProgressSummaries(userId),
-    isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
-    isMember ? fetchGettingStartedProgress(userId) : Promise.resolve({ data: null, error: null }),
-  ]);
+  const [{ data: themeData }, onboardingResult, gettingStartedResult, announcementsResult] =
+    await Promise.all([
+      fetchThemeProgressSummaries(userId),
+      isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
+      isMember ? fetchGettingStartedProgress(userId) : Promise.resolve({ data: null, error: null }),
+      getViewerAnnouncements(),
+    ]);
+  const unreadAnnouncements = (announcementsResult.data ?? [])
+    .filter((announcement) => !announcement.isRead)
+    .slice(0, DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT);
   const themes = themeData ?? [];
   const totalContents = themes.reduce((sum, t) => sum + t.totalContents, 0);
   const completedContents = themes.reduce((sum, t) => sum + t.completedContents, 0);
@@ -63,6 +71,39 @@ export default async function HomePage() {
           steps={getWelcomeStepsForStatus(userStatus)}
           stripeEnabled={isStripeEnabled()}
         />
+      )}
+
+      {unreadAnnouncements.length > 0 && (
+        <Card className="mb-6">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Megaphone className="h-5 w-5 text-primary" />
+                未読のお知らせ
+              </h2>
+              <Link href="/announcements" className="text-sm text-primary hover:underline">
+                すべて見る
+              </Link>
+            </div>
+            <ul className="space-y-2">
+              {unreadAnnouncements.map((announcement) => (
+                <li key={announcement.id}>
+                  <Link
+                    href={`/announcements/${announcement.id}`}
+                    className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 hover:bg-accent"
+                  >
+                    <span className="truncate font-medium">{announcement.title}</span>
+                    {announcement.published_at && (
+                      <span className="shrink-0 text-sm text-muted-foreground">
+                        {formatDate(announcement.published_at)}
+                      </span>
+                    )}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
       )}
 
       {/* 全体進捗 */}

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
+import { fetchUnreadAnnouncementCount } from "@/app/services/api/announcements-server";
 import { checkAdminPermissions, checkInstructorPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -31,10 +32,17 @@ export default async function AuthLayout({
   const isAdmin = checkAdminPermissions(userRole);
   const isInstructor = checkInstructorPermissions(userRole);
   const stripeEnabled = isStripeEnabled();
+  // 未読件数は getServerAuth() のヘッダーには載せず、ここで取得する（取得失敗は 0 件表示）
+  const unreadAnnouncementCount = await fetchUnreadAnnouncementCount();
 
   return (
     <div className="sm:flex min-h-screen">
-      <SideNav isAdmin={isAdmin} isInstructor={isInstructor} stripeEnabled={stripeEnabled} />
+      <SideNav
+        isAdmin={isAdmin}
+        isInstructor={isInstructor}
+        stripeEnabled={stripeEnabled}
+        unreadAnnouncementCount={unreadAnnouncementCount}
+      />
       <main className="flex-1 sm:ml-64 p-6 pt-20 sm:pt-6">
         {userStatus === USER_STATUS.TRIAL && (
           <Alert className="mb-6">

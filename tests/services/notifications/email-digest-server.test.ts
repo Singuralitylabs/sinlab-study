@@ -1,0 +1,1137 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/server", () => ({ after: vi.fn() }));
+vi.mock("@/app/services/api/supabase-server");
+vi.mock("@/app/services/notifications/email", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/app/services/notifications/email")>()),
+  sendEmail: vi.fn(),
+}));
+
+import {
+  ANNOUNCEMENT_EMAIL_RETRY_DAYS,
+  EMAIL_DIGEST_MAX_PER_DAY,
+  EMAIL_DIGEST_SEND_INTERVAL_MS,
+} from "@/app/constants/notifications";
+import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
+import { sendEmail } from "@/app/services/notifications/email";
+import { runEmailDigest } from "@/app/services/notifications/email-digest-server";
+
+type Row = Record<string, unknown>;
+type Filter = (row: Row) => boolean;
+
+/**
+ * service_role クライアントの最小フェイク。テーブルを配列で持ち、eq / in / is / gte / lt /
+ * range を実際に適用する（ネスト select の `phases.xxx` などドット付きの絞り込みは無視し、
+ * 用意したツリーをそのまま返す）。`email_logs` の INSERT は UNIQUE (user_id, kind, reference_key)
+ * を再現し、違反なら 23505 を返す。
+ */
+function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number } = {}) {
+  const db: Record<string, Row[]> = { email_logs: [], ...tables };
+  let nextId = 1;
+  /** INSERT した行の created_at（DB の now()）。runDigest() が実行日時に合わせる */
+  const clock = { now: new Date() };
+  /** `<table>:<op>` を入れると、その操作を DB エラーにする */
+  const failures = new Set<string>();
+  /** INSERT ごとに DB エラーにするかを決める（特定の宛先の claim だけを失敗させる用） */
+  const insertFailures: { when: ((table: string, value: Row) => boolean) | null } = { when: null };
+
+  function from(table: string) {
+    let op: "select" | "insert" | "update" | "upsert" | "delete" = "select";
+    let payload: Row = {};
+    let upsertRows: Row[] = [];
+    const filters: Filter[] = [];
+    let range: [number, number] | null = null;
+    let limit: number | null = null;
+    const orders: { column: string; ascending: boolean }[] = [];
+
+    // UNIQUE (user_id, kind, reference_key) と cron_locks の主キー (name)
+    const isDuplicate = (rows: Row[], value: Row) =>
+      (table === "email_logs" &&
+        rows.some(
+          (row) =>
+            row.user_id === value.user_id &&
+            row.kind === value.kind &&
+            row.reference_key === value.reference_key
+        )) ||
+      (table === "cron_locks" && rows.some((row) => row.name === value.name));
+
+    const execute = (): { data: unknown; error: unknown } => {
+      if (failures.has(`${table}:${op}`)) {
+        return { data: null, error: { code: "XX000", message: "db down" } };
+      }
+      const rows = db[table] ?? [];
+      db[table] = rows;
+      if (op === "upsert") {
+        // ignoreDuplicates: true（ON CONFLICT DO NOTHING）
+        for (const value of upsertRows) {
+          if (!isDuplicate(rows, value)) {
+            rows.push({ id: nextId++, created_at: clock.now.toISOString(), ...value });
+          }
+        }
+        return { data: null, error: null };
+      }
+      if (op === "insert") {
+        if (insertFailures.when?.(table, payload)) {
+          return { data: null, error: { code: "08006", message: "connection failure" } };
+        }
+        if (isDuplicate(rows, payload)) {
+          return { data: null, error: { code: "23505", message: "duplicate key" } };
+        }
+        const inserted = {
+          id: nextId++,
+          sent_at: null,
+          error: null,
+          created_at: clock.now.toISOString(),
+          ...payload,
+        };
+        rows.push(inserted);
+        db[table] = rows;
+        return { data: [inserted], error: null };
+      }
+      const matched = rows.filter((row) => filters.every((f) => f(row)));
+      if (op === "update") {
+        for (const row of matched) {
+          Object.assign(row, payload);
+        }
+        return { data: matched, error: null };
+      }
+      if (op === "delete") {
+        db[table] = rows.filter((row) => !matched.includes(row));
+        return { data: null, error: null };
+      }
+      const sorted = [...matched].sort((a, b) => {
+        for (const { column, ascending } of orders) {
+          const x = a[column] as string | number | null | undefined;
+          const y = b[column] as string | number | null | undefined;
+          if (x === y) continue;
+          if (x == null) return 1;
+          if (y == null) return -1;
+          return (x < y ? -1 : 1) * (ascending ? 1 : -1);
+        }
+        return 0;
+      });
+      let result = range ? sorted.slice(range[0], range[1] + 1) : sorted;
+      if (limit !== null) result = result.slice(0, limit);
+      // PostgREST の db-max-rows（1回のレスポンスの最大行数）
+      if (options.maxRows !== undefined) result = result.slice(0, options.maxRows);
+      return { data: result, error: null };
+    };
+
+    const builder = {
+      select: () => builder,
+      insert: (value: Row) => {
+        op = "insert";
+        payload = value;
+        return builder;
+      },
+      upsert: (values: Row[]) => {
+        op = "upsert";
+        upsertRows = values;
+        return builder;
+      },
+      delete: () => {
+        op = "delete";
+        return builder;
+      },
+      update: (value: Row) => {
+        op = "update";
+        payload = value;
+        return builder;
+      },
+      eq: (column: string, value: unknown) => {
+        if (!column.includes(".")) filters.push((row) => row[column] === value);
+        return builder;
+      },
+      in: (column: string, values: unknown[]) => {
+        filters.push((row) => values.includes(row[column]));
+        return builder;
+      },
+      not: (column: string, operator: string, value: unknown) => {
+        if (operator !== "is") throw new Error(`未対応の not 演算子: ${operator}`);
+        filters.push((row) => (row[column] ?? null) !== value);
+        return builder;
+      },
+      is: (column: string, value: unknown) => {
+        filters.push((row) => (row[column] ?? null) === value);
+        return builder;
+      },
+      gte: (column: string, value: string) => {
+        filters.push((row) => String(row[column]) >= value);
+        return builder;
+      },
+      lt: (column: string, value: string) => {
+        filters.push((row) => String(row[column]) < value);
+        return builder;
+      },
+      order: (column: string, opts: { ascending?: boolean } = {}) => {
+        orders.push({ column, ascending: opts.ascending ?? true });
+        return builder;
+      },
+      limit: (count: number) => {
+        limit = count;
+        return builder;
+      },
+      range: (start: number, end: number) => {
+        range = [start, end];
+        return builder;
+      },
+      single: async () => {
+        const { data, error } = execute();
+        return { data: error ? null : (data as Row[])[0], error };
+      },
+      // biome-ignore lint/suspicious/noThenProperty: Supabase クエリビルダーの thenable を再現するため意図的に定義
+      then: (onfulfilled: (v: unknown) => unknown, onrejected?: (r: unknown) => unknown) =>
+        Promise.resolve(execute()).then(onfulfilled, onrejected),
+    };
+    return builder;
+  }
+
+  return { db, clock, failures, insertFailures, client: { from: vi.fn(from) } };
+}
+
+const APP_URL = "https://study.example.com";
+/** 2026-10-05（月）JST 8:00 */
+const MONDAY = new Date("2026-10-04T23:00:00Z");
+/** 2026-10-06（火）JST 8:00 */
+const TUESDAY = new Date("2026-10-05T23:00:00Z");
+
+/** JST の暦日 date の正午に登録したことにする */
+function createdOn(date: string): string {
+  return `${date}T03:00:00.000Z`;
+}
+
+function userRow(id: number, overrides: Row = {}): Row {
+  return {
+    id,
+    email: `u${id}@example.com`,
+    display_name: `ユーザー${id}`,
+    status: "active",
+    role: "member",
+    is_deleted: false,
+    email_opt_out_at: null,
+    created_at: createdOn("2026-08-01"),
+    ...overrides,
+  };
+}
+
+const themes: Row[] = [
+  // 未公開テーマは返さない（トップレベルの is_published 絞り込み）
+  { id: 3, name: "未公開", display_order: 0, is_published: false, is_deleted: false, phases: [] },
+  {
+    id: 2,
+    name: "Web制作",
+    display_order: 2,
+    is_published: true,
+    is_deleted: false,
+    phases: [
+      {
+        id: 20,
+        name: "P2",
+        display_order: 1,
+        weeks: [
+          {
+            id: 200,
+            name: "W2",
+            display_order: 1,
+            contents: [
+              {
+                id: 2000,
+                title: "HTML入門",
+                display_order: 1,
+                is_open_to_trial: true,
+                week_id: 200,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 1,
+    name: "GAS実践",
+    display_order: 1,
+    is_published: true,
+    is_deleted: false,
+    phases: [
+      {
+        id: 10,
+        name: "P1",
+        display_order: 1,
+        weeks: [
+          {
+            id: 100,
+            name: "W1",
+            display_order: 1,
+            contents: [
+              {
+                id: 1001,
+                title: "鍵付き",
+                display_order: 2,
+                is_open_to_trial: false,
+                week_id: 100,
+              },
+              {
+                id: 1000,
+                title: "はじめての自動化",
+                display_order: 1,
+                is_open_to_trial: true,
+                week_id: 100,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+];
+
+function setup(
+  tables: { users: Row[]; user_progress?: Row[]; submissions?: Row[]; announcements?: Row[] },
+  options: { maxRows?: number } = {}
+) {
+  const fake = createFakeDb(
+    {
+      learning_themes: themes,
+      user_progress: [],
+      submissions: [],
+      ...tables,
+    },
+    options
+  );
+  vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake.client as never);
+  fakeClock = fake.clock;
+  return fake;
+}
+
+const noWait = { sleep: vi.fn(async () => {}) };
+
+let fakeClock: { now: Date };
+
+/** 送信の claim 行（週次進捗の繰り越し予約を除く） */
+function sentLogs(db: Record<string, Row[]>): Row[] {
+  return db.email_logs.filter((row) => row.kind !== "weekly_digest_reserved");
+}
+
+/** 実行日時を DB の now()（email_logs.created_at）にも反映して定期メールを実行する */
+function runDigest(now: Date, options: Parameters<typeof runEmailDigest>[0] = {}) {
+  fakeClock.now = now;
+  return runEmailDigest({ now, ...noWait, ...options });
+}
+
+function sentTo(): string[] {
+  return vi.mocked(sendEmail).mock.calls.map(([params]) => params.to);
+}
+
+function sentEmailTo(to: string) {
+  const call = vi.mocked(sendEmail).mock.calls.find(([params]) => params.to === to);
+  if (!call) throw new Error(`${to} へは送信していません`);
+  return call[0];
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.stubEnv("RESEND_API_KEY", "re_test_key");
+  vi.stubEnv("EMAIL_FROM_ADDRESS", "noreply@mail.example.com");
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", APP_URL);
+  vi.stubEnv("EMAIL_UNSUBSCRIBE_SECRET", "unsubscribe-secret");
+  vi.stubEnv("STRIPE_ENABLED", "true");
+  vi.mocked(sendEmail).mockResolvedValue({ status: "sent", messageId: "msg" });
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("送信設定（フェイルクローズ）", () => {
+  it.each([
+    "RESEND_API_KEY",
+    "EMAIL_FROM_ADDRESS",
+    "NEXT_PUBLIC_APP_URL",
+    "EMAIL_UNSUBSCRIBE_SECRET",
+  ])("%s が未設定なら DB に触れず何も送らない", async (name) => {
+    vi.stubEnv(name, "");
+    const { client } = setup({ users: [userRow(1)] });
+
+    const result = await runDigest(MONDAY);
+
+    expect(result.status).toBe("skipped");
+    expect(client.from).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe("送信対象の抽出", () => {
+  it("配信停止・却下・論理削除・受講生以外のロールのユーザーには送らない", async () => {
+    setup({
+      users: [
+        userRow(1),
+        userRow(2, { email_opt_out_at: "2026-10-01T00:00:00Z" }),
+        userRow(3, { status: "rejected" }),
+        userRow(4, { is_deleted: true }),
+        userRow(5, { role: "admin" }),
+      ],
+    });
+
+    await runDigest(MONDAY);
+
+    expect(sentTo()).toEqual(["u1@example.com"]);
+  });
+
+  it("週次進捗: 先週（JST の月〜日）の完了数・提出数と、次に学ぶコンテンツを載せる", async () => {
+    setup({
+      users: [userRow(1)],
+      user_progress: [
+        // 先週の月曜 0:00 JST ちょうど（範囲内）
+        {
+          id: 1,
+          user_id: 1,
+          content_id: 1000,
+          is_completed: true,
+          completed_at: "2026-09-27T15:00:00.000Z",
+        },
+        // 先々週（範囲外）
+        {
+          id: 2,
+          user_id: 1,
+          content_id: 2000,
+          is_completed: true,
+          completed_at: "2026-09-27T14:59:59.000Z",
+        },
+      ],
+      submissions: [
+        { id: 1, user_id: 1, submitted_at: "2026-10-04T14:59:59.000Z" }, // 日曜 23:59 JST（範囲内）
+        { id: 2, user_id: 1, submitted_at: "2026-10-04T15:00:00.000Z" }, // 今週の月曜（範囲外）
+      ],
+    });
+
+    await runDigest(MONDAY);
+
+    const email = sentEmailTo("u1@example.com");
+    expect(email.subject).toContain("今週の学習");
+    expect(email.text).toContain("コンテンツ完了 1 本 / 演習の提出 1 件");
+    // テーマ→フェーズ→週→コンテンツの表示順で、未完了の先頭（1000・2000 は完了済み）
+    expect(email.text).toContain("次に学ぶコンテンツ: 鍵付き");
+    expect(email.text).toContain(`${APP_URL}/learn/1/10/100/1001`);
+  });
+
+  it("週次進捗: お試しユーザーはお試し公開コンテンツだけで次のコンテンツと残り数を判定する", async () => {
+    setup({
+      users: [userRow(1, { status: "trial" })],
+      user_progress: [
+        {
+          id: 1,
+          user_id: 1,
+          content_id: 1000,
+          is_completed: true,
+          completed_at: "2026-09-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    await runDigest(MONDAY);
+
+    const email = sentEmailTo("u1@example.com");
+    expect(email.text).toContain("次に学ぶコンテンツ: HTML入門");
+    expect(email.text).toContain("残り 1 本");
+  });
+
+  it("週次進捗: 活動が無く、未完了も残っていないユーザーには送らない", async () => {
+    setup({
+      users: [userRow(1)],
+      user_progress: [1000, 1001, 2000].map((contentId, i) => ({
+        id: i + 1,
+        user_id: 1,
+        content_id: contentId,
+        is_completed: true,
+        completed_at: "2026-09-01T00:00:00.000Z",
+      })),
+    });
+
+    await runDigest(MONDAY);
+
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("週次進捗: 先週をまるごと利用できた（前週の月曜以前に登録した）ユーザーだけに送る", async () => {
+    setup({
+      users: [
+        userRow(1, { created_at: createdOn("2026-09-28") }), // 前週の月曜
+        userRow(2, { created_at: createdOn("2026-09-29") }), // 前週の火曜
+        userRow(3, { created_at: createdOn("2026-10-04") }), // 前週の日曜（登録翌日が月曜）
+      ],
+      // u1 は 7 日目のため学習記録を付けて未学習リマインドの対象から外す
+      user_progress: [
+        {
+          id: 1,
+          user_id: 1,
+          content_id: 1000,
+          is_completed: true,
+          completed_at: "2026-09-30T00:00:00.000Z",
+        },
+      ],
+    });
+
+    await runDigest(MONDAY);
+
+    expect(sentTo()).toEqual(["u1@example.com"]);
+    expect(sentEmailTo("u1@example.com").subject).toContain("今週の学習");
+  });
+
+  it("週次進捗: 今週（月曜以降）に登録したユーザーには送らない", async () => {
+    setup({ users: [userRow(1, { created_at: "2026-10-04T15:30:00.000Z" })] }); // 月曜 0:30 JST
+
+    await runDigest(MONDAY);
+
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("未学習リマインド: 登録から7日目で進捗も提出も無い active ユーザーに、最初の1本を案内する", async () => {
+    setup({
+      users: [
+        userRow(1, { created_at: createdOn("2026-09-29") }), // 火曜 → 7日目（月曜なので週次とも重なる）
+        userRow(2, { created_at: createdOn("2026-09-29") }), // 進捗あり
+        userRow(3, { created_at: createdOn("2026-09-29") }), // 提出あり
+      ],
+      user_progress: [
+        { id: 1, user_id: 2, content_id: 1000, is_completed: false, completed_at: null },
+      ],
+      submissions: [{ id: 1, user_id: 3, submitted_at: "2026-10-01T00:00:00.000Z" }],
+    });
+
+    await runDigest(TUESDAY);
+
+    // 7日目は 10/6（火）。u1 だけが未学習リマインド。u2・u3 は学習済みのため送らない
+    // （先週の途中に登録したため、火曜の取り戻しでも週次進捗の対象にならない）
+    const reminder = sentEmailTo("u1@example.com");
+    expect(reminder.subject).toContain("最初の1本");
+    expect(reminder.text).toContain(`${APP_URL}/learn/1/10/100/1000`);
+    expect(sentTo()).toEqual(["u1@example.com"]);
+  });
+
+  it("お試しユーザーの7日目は trial_nurture だけを送り、未学習リマインド・週次進捗は同日に送らない", async () => {
+    const { db } = setup({
+      users: [userRow(1, { status: "trial", created_at: createdOn("2026-09-28") })],
+    });
+
+    await runDigest(MONDAY);
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(sentEmailTo("u1@example.com").subject).toContain("本登録で学べる内容");
+    expect(db.email_logs.map((row) => [row.kind, row.reference_key])).toEqual([
+      // 週次進捗は送らず、同じ週の翌日以降に繰り越す
+      ["weekly_digest_reserved", "2026-10-05"],
+      ["trial_nurture", "day7"],
+    ]);
+  });
+
+  it("isStripeEnabled() が false のとき、Day7 の案内は /upgrade へ誘導しない", async () => {
+    vi.stubEnv("STRIPE_ENABLED", "false");
+    setup({ users: [userRow(1, { status: "trial", created_at: createdOn("2026-09-28") })] });
+
+    await runDigest(MONDAY);
+
+    const email = sentEmailTo("u1@example.com");
+    expect(email.text).not.toContain("/upgrade");
+    expect(email.html).not.toContain("/upgrade");
+    expect(email.text).toContain("本登録で学べるテーマ: GAS実践");
+  });
+
+  it("すべての定期メールに、本人用の配信停止リンクと List-Unsubscribe ヘッダーを付ける", async () => {
+    setup({
+      users: [
+        userRow(1),
+        userRow(2, { status: "trial", created_at: createdOn("2026-10-03") }), // 2日目
+        userRow(3, { created_at: createdOn("2026-09-28") }), // 7日目・未学習
+      ],
+    });
+
+    await runDigest(MONDAY);
+
+    expect(sendEmail).toHaveBeenCalledTimes(3);
+    for (const [params] of vi.mocked(sendEmail).mock.calls) {
+      const userId = params.to.match(/^u(\d+)@/)?.[1];
+      expect(params.text).toContain(`${APP_URL}/api/email/unsubscribe?token=${userId}.`);
+      expect(params.headers?.["List-Unsubscribe-Post"]).toBe("List-Unsubscribe=One-Click");
+    }
+  });
+});
+
+describe("二重送信の防止（email_logs の claim）", () => {
+  it("同じ日に再実行しても、送信済みの分は送らない", async () => {
+    const { db } = setup({
+      users: [userRow(1), userRow(2, { status: "trial", created_at: createdOn("2026-10-03") })],
+    });
+
+    const first = await runDigest(MONDAY);
+    const second = await runDigest(MONDAY);
+
+    expect(first).toMatchObject({ status: "completed", sent: 2 });
+    expect(second).toMatchObject({ status: "completed", sent: 0 });
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+    expect(sentLogs(db)).toHaveLength(2);
+  });
+
+  it("Cron の重複起動が並行しても、実行ロックを取れた1つだけが送る", async () => {
+    const { db } = setup({ users: [userRow(1), userRow(2)] });
+
+    const results = await Promise.all([runDigest(MONDAY), runDigest(MONDAY)]);
+
+    expect(results.map((r) => r.status).sort()).toEqual(["completed", "skipped"]);
+    expect(sentTo().sort()).toEqual(["u1@example.com", "u2@example.com"]);
+    // 終了時にロックを解放する
+    expect(db.cron_locks).toEqual([]);
+  });
+
+  it("同じ日に案内系メールを受け取ったユーザーには、朝の実行後にステータスが変わっても2通目を送らない", async () => {
+    const { db } = setup({
+      users: [userRow(1, { status: "trial", created_at: createdOn("2026-09-28") })], // 7日目
+    });
+    await runDigest(MONDAY);
+    expect(sentEmailTo("u1@example.com").subject).toContain("本登録で学べる内容");
+
+    // 同じ日に管理者が承認（未学習のままなら inactivity_reminder の候補になる）→ 再実行
+    db.users[0].status = "active";
+    await runDigest(new Date("2026-10-05T01:00:00Z"));
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(sentLogs(db)).toHaveLength(1);
+  });
+
+  it("前日に案内系メールを受け取っていても、今日の分は送る", async () => {
+    setup({ users: [userRow(1, { status: "trial", created_at: createdOn("2026-09-21") })] });
+
+    await runDigest(new Date("2026-10-04T23:00:00Z")); // 10/5 = 14日目（trial_nurture）
+    await runDigest(new Date("2026-10-05T23:00:00Z")); // 10/6 = 週次進捗の繰り越し
+
+    expect(vi.mocked(sendEmail).mock.calls.map(([params]) => params.subject)).toEqual([
+      expect.stringContaining("お試し期間のご案内"),
+      expect.stringContaining("今週の学習"),
+    ]);
+  });
+
+  it("送信に失敗した分は error を記録して行を残し、再実行で再送しない", async () => {
+    vi.mocked(sendEmail).mockResolvedValue({ status: "failed", error: "status=500" });
+    const { db } = setup({ users: [userRow(1)] });
+
+    const first = await runDigest(MONDAY);
+    await runDigest(TUESDAY);
+
+    expect(first).toMatchObject({ failed: 1 });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(sentLogs(db)[0]).toMatchObject({
+      kind: "weekly_digest",
+      reference_key: "2026-10-05",
+      error: "status=500",
+    });
+  });
+});
+
+describe("1回あたりの上限と繰り越し", () => {
+  const manyUsers = (count: number) => Array.from({ length: count }, (_, i) => userRow(i + 1));
+
+  it(`送信は ${EMAIL_DIGEST_MAX_PER_DAY} 通で打ち切り、週次進捗の残りは同じ週の翌日に送る`, async () => {
+    const { db } = setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_DAY + 5) });
+
+    const monday = await runDigest(MONDAY);
+
+    expect(monday).toMatchObject({ sent: EMAIL_DIGEST_MAX_PER_DAY, deferred: 5 });
+    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_DAY);
+
+    const tuesday = await runDigest(TUESDAY);
+
+    expect(tuesday).toMatchObject({ sent: 5, deferred: 0 });
+    expect(new Set(sentTo()).size).toBe(EMAIL_DIGEST_MAX_PER_DAY + 5);
+    expect(sentLogs(db).every((row) => row.reference_key === "2026-10-05")).toBe(true);
+  });
+
+  it("上限に掛かるときは、翌日に拾えない「N日目」の案内を週次進捗より先に送る", async () => {
+    setup({
+      users: [
+        ...manyUsers(EMAIL_DIGEST_MAX_PER_DAY),
+        userRow(1000, { status: "trial", created_at: createdOn("2026-10-03") }), // 2日目
+      ],
+    });
+
+    await runDigest(MONDAY);
+
+    expect(sentTo()[0]).toBe("u1000@example.com");
+    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_DAY);
+  });
+
+  it("上限は1日（JST）の合計に効かせ、同じ日に再実行しても超えない", async () => {
+    setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_DAY + 5) });
+    await runDigest(MONDAY);
+
+    // 同じ月曜の 9 時台に手動で再実行
+    const rerun = await runDigest(new Date("2026-10-05T00:30:00Z"));
+
+    expect(rerun).toMatchObject({ sent: 0, deferred: 5 });
+    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_DAY);
+  });
+
+  it("Cron の重複起動が並行しても、合計の送信数は1日の上限を超えない", async () => {
+    setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_DAY + 20) });
+
+    await Promise.all([runDigest(MONDAY), runDigest(MONDAY)]);
+
+    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_DAY);
+    expect(new Set(sentTo()).size).toBe(EMAIL_DIGEST_MAX_PER_DAY);
+  });
+
+  it("週次進捗は月曜の対象者だけに送り、週の途中で新しく対象になったユーザーには送らない", async () => {
+    const { db } = setup({ users: [userRow(1)] });
+    await runDigest(MONDAY);
+    expect(sentTo()).toEqual(["u1@example.com"]);
+
+    // 火曜に新しい受講生（先週以前の登録）が対象条件を満たしても、月曜の予約が無いため送らない
+    db.users.push(userRow(2));
+    const tuesday = await runDigest(TUESDAY);
+
+    expect(tuesday).toMatchObject({ queued: 0 });
+    expect(sentTo()).toEqual(["u1@example.com"]);
+  });
+
+  it("Cron を週の途中（金曜）に初めて動かしても、週次進捗は次の月曜まで送らず、予約が無いことを返す", async () => {
+    setup({ users: [userRow(1), userRow(2)] });
+
+    const friday = await runDigest(new Date("2026-10-08T23:00:00Z")); // 10/9（金）
+
+    expect(friday).toMatchObject({ queued: 0, weeklyReservationMissing: true });
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("月曜の実行が完了しなかった（予約が1件も無い）週は、火曜の実行が月曜の代わりに対象を決めて送る", async () => {
+    const { db } = setup({ users: [userRow(1), userRow(2)] });
+
+    const tuesday = await runDigest(TUESDAY);
+
+    expect(tuesday).toMatchObject({ sent: 2, weeklyReservationMissing: false });
+    expect(sentEmailTo("u1@example.com").subject).toContain("今週の学習");
+    expect(
+      db.email_logs.filter((row) => row.kind === "weekly_digest_reserved").map((r) => r.user_id)
+    ).toEqual([1, 2]);
+
+    // 水曜は火曜の予約に沿って繰り越し分だけを判定する（送信済みなので送らない）
+    const wednesday = await runDigest(new Date("2026-10-06T23:00:00Z"));
+    expect(wednesday).toMatchObject({ queued: 0, weeklyReservationMissing: false });
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("月曜の実行が失敗して予約が無くても、火曜の実行で取り戻す", async () => {
+    const { failures } = setup({ users: [userRow(1)] });
+    failures.add("users:select");
+    expect(await runDigest(MONDAY)).toEqual({ status: "failed" });
+    failures.delete("users:select");
+
+    const tuesday = await runDigest(TUESDAY);
+
+    expect(tuesday).toMatchObject({ sent: 1 });
+    expect(sentEmailTo("u1@example.com").subject).toContain("今週の学習");
+  });
+
+  it("予約が無いまま水曜以降になったら週次進捗は送らず、予約が無いことを返す", async () => {
+    setup({ users: [userRow(1)] });
+
+    const wednesday = await runDigest(new Date("2026-10-06T23:00:00Z")); // 10/7（水）
+
+    expect(wednesday).toMatchObject({ queued: 0, weeklyReservationMissing: true });
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("月曜の繰り越し予約に失敗したら、1通も送らずに失敗を返す（再実行で予約からやり直せる）", async () => {
+    const { db, failures } = setup({ users: manyUsers(3) });
+    failures.add("email_logs:upsert");
+
+    const failed = await runDigest(MONDAY);
+
+    expect(failed).toEqual({ status: "failed" });
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(db.cron_locks).toEqual([]);
+
+    failures.delete("email_logs:upsert");
+    const retried = await runDigest(MONDAY);
+
+    expect(retried).toMatchObject({ status: "completed", sent: 3 });
+  });
+
+  it("実行時間の上限を超えたら新しい送信を始めない", async () => {
+    setup({ users: manyUsers(3) });
+    let now = 0;
+    vi.mocked(sendEmail).mockImplementation(async () => {
+      now += 30_000;
+      return { status: "sent", messageId: "msg" };
+    });
+
+    const result = await runDigest(MONDAY, { clock: () => now });
+
+    expect(result).toMatchObject({ sent: 2, deferred: 1 });
+  });
+
+  it(`送信の開始間隔を ${EMAIL_DIGEST_SEND_INTERVAL_MS}ms 以上空ける（Resend のレート制限）`, async () => {
+    setup({ users: manyUsers(3) });
+    const sleep = vi.fn(async () => {});
+
+    await runDigest(MONDAY, { clock: () => 0, sleep });
+
+    expect(sleep).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(EMAIL_DIGEST_SEND_INTERVAL_MS);
+  });
+});
+
+describe("実行ロック（cron_locks）", () => {
+  it("別の実行がロックを持っていれば、何もせずに skipped を返す", async () => {
+    const { db } = setup({ users: [userRow(1)] });
+    db.cron_locks = [{ name: "email-digest", locked_at: new Date().toISOString() }];
+
+    const result = await runDigest(MONDAY);
+
+    expect(result).toEqual({ status: "skipped", reason: "別の実行が進行中です" });
+    expect(sendEmail).not.toHaveBeenCalled();
+    // 他の実行のロックは消さない
+    expect(db.cron_locks).toHaveLength(1);
+  });
+
+  it("有効期限を過ぎたロック（ハードタイムアウト等で解放されなかったもの）は取り直して実行する", async () => {
+    const { db } = setup({ users: [userRow(1)] });
+    db.cron_locks = [
+      { name: "email-digest", locked_at: new Date(Date.now() - 10 * 60_000).toISOString() },
+    ];
+
+    const result = await runDigest(MONDAY);
+
+    expect(result).toMatchObject({ status: "completed", sent: 1 });
+    expect(db.cron_locks).toEqual([]);
+  });
+
+  it("抽出が失敗してもロックを解放する", async () => {
+    const { db, failures } = setup({ users: [userRow(1)] });
+    failures.add("users:select");
+
+    const result = await runDigest(MONDAY);
+
+    expect(result).toEqual({ status: "failed" });
+    expect(db.cron_locks).toEqual([]);
+  });
+
+  it("ロックを取れない DB エラーのときは失敗を返し、何も送らない", async () => {
+    const { failures } = setup({ users: [userRow(1)] });
+    failures.add("cron_locks:insert");
+
+    const result = await runDigest(MONDAY);
+
+    expect(result).toEqual({ status: "failed" });
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe("ページング", () => {
+  it("サーバーの最大行数（db-max-rows）が 1000 未満でも、全件を取りこぼさない", async () => {
+    // 1回のレスポンスが最大 2 行の環境で、5 人全員に週次進捗を送る
+    setup({ users: Array.from({ length: 5 }, (_, i) => userRow(i + 1)) }, { maxRows: 2 });
+
+    const result = await runDigest(MONDAY);
+
+    expect(result).toMatchObject({ sent: 5 });
+    expect(sentTo()).toHaveLength(5);
+  });
+});
+
+describe("お知らせのメール一斉送信（#254）", () => {
+  /** 2026-10-07（水）JST 8:00。週次進捗の予約が無い曜日で、お知らせだけを確かめる */
+  const WEDNESDAY = new Date("2026-10-06T23:00:00Z");
+  const THURSDAY = new Date("2026-10-07T23:00:00Z");
+
+  function announcementRow(overrides: Row = {}): Row {
+    return {
+      id: 501,
+      title: "もくもく会のご案内",
+      body: "# 日時\n- 10/20 **20:00**\n\n[参加する](https://example.com/join)",
+      target_statuses: ["active", "trial"],
+      target_membership_types: null,
+      published_at: "2026-10-06T01:00:00.000Z",
+      send_email: true,
+      email_sent_at: null,
+      is_deleted: false,
+      updated_at: "2026-10-06T01:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  const announcementLogs = (db: Record<string, Row[]>) =>
+    db.email_logs.filter((row) => row.kind === "announcement");
+
+  it("対象のステータス・会員種別に一致し、配信停止していない受講生にだけ送り、全員に送り終えたら email_sent_at を記録する", async () => {
+    const { db } = setup({
+      users: [
+        userRow(1, { membership_type: "general" }),
+        userRow(2, { membership_type: "community" }),
+        userRow(3, { status: "trial" }),
+        userRow(4, { membership_type: "general", email_opt_out_at: "2026-10-01T00:00:00Z" }),
+        userRow(5, { role: "maintainer", membership_type: "general" }),
+      ],
+      announcements: [
+        announcementRow({ target_statuses: ["active"], target_membership_types: ["general"] }),
+      ],
+    });
+
+    const result = await runDigest(WEDNESDAY);
+
+    expect(sentTo()).toEqual(["u1@example.com"]);
+    expect(result).toMatchObject({ sent: 1, announcementsCompleted: 1 });
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+    expect(announcementLogs(db).map((row) => [row.user_id, row.reference_key])).toEqual([
+      [1, "501"],
+    ]);
+  });
+
+  it("本文の Markdown をメールに載せ、詳細ページへのリンクと配信停止リンクを付ける", async () => {
+    setup({ users: [userRow(1)], announcements: [announcementRow()] });
+
+    await runDigest(WEDNESDAY);
+
+    const email = sentEmailTo("u1@example.com");
+    expect(email.subject).toContain("お知らせ: もくもく会のご案内");
+    expect(email.text).toContain("■ 日時");
+    expect(email.text).toContain("・ 10/20 20:00");
+    expect(email.html).toContain("<strong>20:00</strong>");
+    expect(email.html).toContain('<a href="https://example.com/join"');
+    expect(email.text).toContain(`お知らせを開く: ${APP_URL}/announcements/501`);
+    expect(email.text).toContain(`${APP_URL}/api/email/unsubscribe?token=1.`);
+    expect(email.headers?.["List-Unsubscribe-Post"]).toBe("List-Unsubscribe=One-Click");
+  });
+
+  it("下書き・メール送信なし・削除済み・送信完了済みのお知らせは送らない", async () => {
+    setup({
+      users: [userRow(1)],
+      announcements: [
+        announcementRow({ id: 1, published_at: null }),
+        announcementRow({ id: 2, send_email: false }),
+        announcementRow({ id: 3, is_deleted: true }),
+        announcementRow({ id: 4, email_sent_at: "2026-10-05T00:00:00Z" }),
+      ],
+    });
+
+    await runDigest(WEDNESDAY);
+
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("1日の上限を超える対象者は複数日に分けて送り、全員に送り終えた日に email_sent_at を記録する", async () => {
+    const { db } = setup({
+      users: Array.from({ length: EMAIL_DIGEST_MAX_PER_DAY + 5 }, (_, i) => userRow(i + 1)),
+      announcements: [announcementRow()],
+    });
+
+    const first = await runDigest(WEDNESDAY);
+    expect(first).toMatchObject({
+      sent: EMAIL_DIGEST_MAX_PER_DAY,
+      deferred: 5,
+      announcementsCompleted: 0,
+    });
+    expect(db.announcements[0].email_sent_at).toBeNull();
+
+    // 同じ日の再実行では1日の上限に達しているため送らない
+    const rerun = await runDigest(new Date("2026-10-07T01:00:00Z"));
+    expect(rerun).toMatchObject({ sent: 0, announcementsCompleted: 0 });
+
+    const second = await runDigest(THURSDAY);
+    expect(second).toMatchObject({ sent: 5, deferred: 0, announcementsCompleted: 1 });
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+    // 全員に1通ずつ（二重送信なし）
+    expect(new Set(sentTo()).size).toBe(EMAIL_DIGEST_MAX_PER_DAY + 5);
+    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_DAY + 5);
+  });
+
+  it("同じ日に登録からN日目の案内を受け取るユーザーには翌日に送り、それまで完了にしない", async () => {
+    const { db } = setup({
+      users: [userRow(1, { status: "trial", created_at: createdOn("2026-10-05") })], // 10/7 = 2日目
+      announcements: [announcementRow()],
+    });
+
+    const wednesday = await runDigest(WEDNESDAY);
+    expect(sentEmailTo("u1@example.com").subject).toContain("演習を出してみましょう");
+    expect(wednesday).toMatchObject({ sent: 1, announcementsCompleted: 0 });
+    expect(db.announcements[0].email_sent_at).toBeNull();
+
+    const thursday = await runDigest(THURSDAY);
+    expect(thursday).toMatchObject({ sent: 1, announcementsCompleted: 1 });
+    expect(vi.mocked(sendEmail).mock.calls[1][0].subject).toContain("お知らせ");
+  });
+
+  it("月曜は週次進捗よりお知らせを先に送り、週次進捗は翌日に繰り越す", async () => {
+    setup({ users: [userRow(1)], announcements: [announcementRow()] });
+
+    await runDigest(MONDAY);
+    await runDigest(TUESDAY);
+
+    expect(vi.mocked(sendEmail).mock.calls.map(([params]) => params.subject)).toEqual([
+      expect.stringContaining("お知らせ"),
+      expect.stringContaining("今週の学習"),
+    ]);
+  });
+
+  it("火曜以降は週次進捗の繰り越し分をお知らせより先に送り、大勢へのお知らせで週次進捗を押し出さない", async () => {
+    const count = EMAIL_DIGEST_MAX_PER_DAY + 5;
+    const { db } = setup({
+      users: Array.from({ length: count }, (_, i) => userRow(i + 1)),
+    });
+
+    // 月曜は上限まで週次進捗を送り、5通を繰り越す
+    expect(await runDigest(MONDAY)).toMatchObject({ sent: EMAIL_DIGEST_MAX_PER_DAY, deferred: 5 });
+
+    // 月曜の後に全員向けのお知らせを公開する
+    db.announcements = [announcementRow({ published_at: "2026-10-05T03:00:00.000Z" })];
+    vi.mocked(sendEmail).mockClear();
+    const tuesday = await runDigest(TUESDAY);
+
+    const subjects = vi.mocked(sendEmail).mock.calls.map(([params]) => params.subject);
+    expect(subjects.slice(0, 5)).toEqual(Array(5).fill(expect.stringContaining("今週の学習")));
+    expect(subjects.slice(5)).toEqual(
+      Array(EMAIL_DIGEST_MAX_PER_DAY - 5).fill(expect.stringContaining("お知らせ"))
+    );
+    expect(tuesday).toMatchObject({ sent: EMAIL_DIGEST_MAX_PER_DAY, announcementsCompleted: 0 });
+    expect(sentLogs(db).filter((row) => row.kind === "weekly_digest")).toHaveLength(count);
+  });
+
+  it("claim が DB エラーで失敗した宛先が残っていれば完了にせず、翌日の実行で送ってから完了にする", async () => {
+    const { db, insertFailures } = setup({
+      users: [userRow(1), userRow(2), userRow(3)],
+      announcements: [announcementRow()],
+    });
+    insertFailures.when = (table, value) =>
+      table === "email_logs" && value.kind === "announcement" && value.user_id === 2;
+
+    const wednesday = await runDigest(WEDNESDAY);
+
+    expect(sentTo()).toEqual(["u1@example.com", "u3@example.com"]);
+    expect(wednesday).toMatchObject({ failed: 1, announcementsCompleted: 0 });
+    expect(db.announcements[0].email_sent_at).toBeNull();
+
+    insertFailures.when = null;
+    const thursday = await runDigest(THURSDAY);
+
+    expect(sentTo()).toEqual(["u1@example.com", "u3@example.com", "u2@example.com"]);
+    expect(thursday).toMatchObject({ sent: 1, announcementsCompleted: 1 });
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+  });
+
+  it("Resend が受け付けなかった（429・5xx）宛先は完了にせず、翌日の実行で送り直してから完了にする", async () => {
+    const { db } = setup({ users: [userRow(1), userRow(2)], announcements: [announcementRow()] });
+    vi.mocked(sendEmail).mockImplementation(async ({ to }) =>
+      to === "u2@example.com" && vi.mocked(sendEmail).mock.calls.length <= 2
+        ? { status: "failed", error: "Resend API がエラーを返しました: status=429" }
+        : { status: "sent", messageId: "msg" }
+    );
+
+    const wednesday = await runDigest(WEDNESDAY);
+    expect(wednesday).toMatchObject({ sent: 1, failed: 1, announcementsCompleted: 0 });
+    expect(db.announcements[0].email_sent_at).toBeNull();
+
+    // 同じ日の再実行では送り直さない（今日の案内系メールの数から外さない）
+    const rerun = await runDigest(new Date("2026-10-07T01:00:00Z"));
+    expect(rerun).toMatchObject({ sent: 0, failed: 0, announcementsCompleted: 0 });
+
+    const thursday = await runDigest(THURSDAY);
+    expect(thursday).toMatchObject({ sent: 1, announcementsCompleted: 1 });
+    expect(sentTo()).toEqual(["u1@example.com", "u2@example.com", "u2@example.com"]);
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+    // 失敗の行は消してから claim し直す（1人1行）
+    expect(
+      announcementLogs(db).map((row) => [row.user_id, row.sent_at !== null, row.error])
+    ).toEqual([
+      [1, true, null],
+      [2, true, null],
+    ]);
+  });
+
+  it("送れたか分からない失敗（タイムアウト等）は送り直さずに完了にする", async () => {
+    const { db } = setup({ users: [userRow(1)], announcements: [announcementRow()] });
+    vi.mocked(sendEmail).mockResolvedValue({
+      status: "failed",
+      error: "TimeoutError: The operation was aborted due to timeout",
+    });
+
+    const result = await runDigest(WEDNESDAY);
+    await runDigest(THURSDAY);
+
+    expect(result).toMatchObject({ failed: 1, announcementsCompleted: 1 });
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it(`送り直すのは公開日から ${ANNOUNCEMENT_EMAIL_RETRY_DAYS} 日以内で、過ぎたら失敗のまま完了にする`, async () => {
+    // 10/5（月）JST 公開。10/7・10/8 は期間内、10/9 は期間外
+    const { db } = setup({
+      users: [userRow(1)],
+      announcements: [announcementRow({ published_at: "2026-10-05T01:00:00.000Z" })],
+    });
+    vi.mocked(sendEmail).mockResolvedValue({
+      status: "failed",
+      error: "Resend API がエラーを返しました: status=503",
+    });
+
+    const wednesday = await runDigest(WEDNESDAY);
+    expect(wednesday).toMatchObject({ failed: 1, announcementsCompleted: 0 });
+
+    const thursday = await runDigest(THURSDAY);
+    expect(thursday).toMatchObject({ failed: 1, announcementsCompleted: 1 });
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("送信中に対象を広げる編集が入ったら完了にせず、翌日の実行で広げた分に送ってから完了にする", async () => {
+    const { db } = setup({
+      users: [userRow(1), userRow(2, { status: "trial" })],
+      announcements: [announcementRow({ target_statuses: ["active"] })],
+    });
+    vi.mocked(sendEmail).mockImplementationOnce(async () => {
+      // 送信の途中で管理画面から対象にお試しユーザーを加える（updated_at はトリガーが更新）
+      Object.assign(db.announcements[0], {
+        target_statuses: ["active", "trial"],
+        updated_at: "2026-10-06T23:00:01.000Z",
+      });
+      return { status: "sent", messageId: "msg" };
+    });
+
+    const wednesday = await runDigest(WEDNESDAY);
+    expect(wednesday).toMatchObject({ sent: 1, announcementsCompleted: 0 });
+    expect(db.announcements[0].email_sent_at).toBeNull();
+
+    const thursday = await runDigest(THURSDAY);
+    expect(thursday).toMatchObject({ sent: 1, announcementsCompleted: 1 });
+    expect(sentTo()).toEqual(["u1@example.com", "u2@example.com"]);
+  });
+
+  it("対象者がいないお知らせは送らずに完了にする", async () => {
+    const { db } = setup({
+      users: [userRow(1, { status: "trial" })],
+      announcements: [announcementRow({ target_statuses: ["active"] })],
+    });
+
+    const result = await runDigest(WEDNESDAY);
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ announcementsCompleted: 1 });
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+  });
+
+  it("複数のお知らせは公開の古い順に1人1日1通ずつ送る", async () => {
+    setup({
+      users: [userRow(1)],
+      announcements: [
+        announcementRow({ id: 10, title: "新しい", published_at: "2026-10-06T02:00:00.000Z" }),
+        announcementRow({ id: 9, title: "古い", published_at: "2026-10-06T01:00:00.000Z" }),
+      ],
+    });
+
+    await runDigest(WEDNESDAY);
+    await runDigest(THURSDAY);
+
+    expect(vi.mocked(sendEmail).mock.calls.map(([params]) => params.subject)).toEqual([
+      expect.stringContaining("古い"),
+      expect.stringContaining("新しい"),
+    ]);
+  });
+});

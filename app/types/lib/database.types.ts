@@ -61,6 +61,148 @@ export type Database = {
           },
         ];
       };
+      announcement_reads: {
+        Row: {
+          announcement_id: number;
+          read_at: string;
+          user_id: number;
+        };
+        Insert: {
+          announcement_id: number;
+          read_at?: string;
+          user_id: number;
+        };
+        Update: {
+          announcement_id?: number;
+          read_at?: string;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "announcement_reads_announcement_id_fkey";
+            columns: ["announcement_id"];
+            isOneToOne: false;
+            referencedRelation: "announcements";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "announcement_reads_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      announcements: {
+        Row: {
+          body: string;
+          created_at: string;
+          created_by: number | null;
+          email_sent_at: string | null;
+          id: number;
+          is_deleted: boolean;
+          published_at: string | null;
+          send_email: boolean;
+          target_membership_types: string[] | null;
+          target_statuses: string[];
+          title: string;
+          updated_at: string;
+        };
+        Insert: {
+          body: string;
+          created_at?: string;
+          created_by?: number | null;
+          email_sent_at?: string | null;
+          id?: number;
+          is_deleted?: boolean;
+          published_at?: string | null;
+          send_email?: boolean;
+          target_membership_types?: string[] | null;
+          target_statuses: string[];
+          title: string;
+          updated_at?: string;
+        };
+        Update: {
+          body?: string;
+          created_at?: string;
+          created_by?: number | null;
+          email_sent_at?: string | null;
+          id?: number;
+          is_deleted?: boolean;
+          published_at?: string | null;
+          send_email?: boolean;
+          target_membership_types?: string[] | null;
+          target_statuses?: string[];
+          title?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "announcements_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      cron_locks: {
+        Row: {
+          locked_at: string;
+          name: string;
+        };
+        Insert: {
+          locked_at: string;
+          name: string;
+        };
+        Update: {
+          locked_at?: string;
+          name?: string;
+        };
+        Relationships: [];
+      };
+      email_logs: {
+        Row: {
+          created_at: string;
+          error: string | null;
+          id: number;
+          kind: string;
+          provider_message_id: string | null;
+          reference_key: string;
+          sent_at: string | null;
+          user_id: number;
+        };
+        Insert: {
+          created_at?: string;
+          error?: string | null;
+          id?: number;
+          kind: string;
+          provider_message_id?: string | null;
+          reference_key: string;
+          sent_at?: string | null;
+          user_id: number;
+        };
+        Update: {
+          created_at?: string;
+          error?: string | null;
+          id?: number;
+          kind?: string;
+          provider_message_id?: string | null;
+          reference_key?: string;
+          sent_at?: string | null;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "email_logs_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       learning_contents: {
         Row: {
           allowed_submission_types: string;
@@ -279,6 +421,7 @@ export type Database = {
       };
       stripe_subscriptions: {
         Row: {
+          cancel_at: string | null;
           cancel_at_period_end: boolean;
           checkout_claimed_at: string | null;
           checkout_session_id: string | null;
@@ -292,6 +435,7 @@ export type Database = {
           user_id: number;
         };
         Insert: {
+          cancel_at?: string | null;
           cancel_at_period_end?: boolean;
           checkout_claimed_at?: string | null;
           checkout_session_id?: string | null;
@@ -305,6 +449,7 @@ export type Database = {
           user_id: number;
         };
         Update: {
+          cancel_at?: string | null;
           cancel_at_period_end?: boolean;
           checkout_claimed_at?: string | null;
           checkout_session_id?: string | null;
@@ -428,6 +573,7 @@ export type Database = {
           created_at: string | null;
           display_name: string;
           email: string;
+          email_opt_out_at: string | null;
           id: number;
           is_deleted: boolean | null;
           membership_type: string | null;
@@ -444,6 +590,7 @@ export type Database = {
           created_at?: string | null;
           display_name: string;
           email: string;
+          email_opt_out_at?: string | null;
           id?: number;
           is_deleted?: boolean | null;
           membership_type?: string | null;
@@ -460,6 +607,7 @@ export type Database = {
           created_at?: string | null;
           display_name?: string;
           email?: string;
+          email_opt_out_at?: string | null;
           id?: number;
           is_deleted?: boolean | null;
           membership_type?: string | null;
@@ -489,6 +637,7 @@ export type Database = {
         }[];
       };
       get_user_id: { Args: never; Returns: number };
+      get_user_membership_type: { Args: never; Returns: string };
       get_user_role: { Args: never; Returns: string };
       get_user_status: { Args: never; Returns: string };
     };
