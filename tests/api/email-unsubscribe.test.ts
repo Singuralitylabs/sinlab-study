@@ -31,14 +31,45 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("GET /api/email/unsubscribe", () => {
-  it("正しいトークンなら email_opt_out_at を記録し、確認画面を返す", async () => {
+describe("GET /api/email/unsubscribe（確認画面）", () => {
+  it("正しいトークンなら確認画面（POST のボタン）を返し、GET では配信停止を確定しない", async () => {
     const client = mockAdmin();
+    const token = createUnsubscribeToken(42) as string;
 
-    const res = await GET(request(createUnsubscribeToken(42)));
+    const res = await GET(request(token));
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
+    const body = await res.text();
+    expect(body).toContain('<form method="post"');
+    expect(body).toContain(`action="?token=${encodeURIComponent(token)}"`);
+    expect(body).toContain("配信を停止する");
+    // メールのセキュリティ製品によるリンクの先読み（GET）で停止しない
+    expect(client.from).not.toHaveBeenCalled();
+  });
+
+  it("トークンの改ざん・欠落は 400 を返す", async () => {
+    const client = mockAdmin();
+    const token = createUnsubscribeToken(42) as string;
+
+    for (const bad of [null, "", `43.${token.split(".")[1]}`, "42.invalid"]) {
+      const res = await GET(request(bad));
+      expect(res.status).toBe(400);
+      const body = await res.text();
+      expect(body).toContain("リンクが無効です");
+      expect(body).not.toContain("<form");
+    }
+    expect(client.from).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/email/unsubscribe（確定。確認画面のボタンと RFC 8058 のワンクリック配信停止）", () => {
+  it("正しいトークンなら email_opt_out_at を記録し、完了画面を返す", async () => {
+    const client = mockAdmin();
+
+    const res = await POST(request(createUnsubscribeToken(42), "POST"));
+
+    expect(res.status).toBe(200);
     expect(await res.text()).toContain("配信を停止しました");
     const builder = client.from.mock.results[0].value;
     expect(client.from).toHaveBeenCalledWith("users");
@@ -53,7 +84,7 @@ describe("GET /api/email/unsubscribe", () => {
     const token = createUnsubscribeToken(42) as string;
 
     for (const bad of [null, "", `43.${token.split(".")[1]}`, "42.invalid"]) {
-      const res = await GET(request(bad));
+      const res = await POST(request(bad, "POST"));
       expect(res.status).toBe(400);
       const body = await res.text();
       expect(body).toContain("リンクが無効です");
@@ -67,7 +98,7 @@ describe("GET /api/email/unsubscribe", () => {
     vi.stubEnv("EMAIL_UNSUBSCRIBE_SECRET", "");
     const client = mockAdmin();
 
-    const res = await GET(request(token));
+    const res = await POST(request(token, "POST"));
 
     expect(res.status).toBe(400);
     expect(client.from).not.toHaveBeenCalled();
@@ -76,20 +107,9 @@ describe("GET /api/email/unsubscribe", () => {
   it("DB エラーは 500 を返す（内容は画面に出さない）", async () => {
     mockAdmin({ data: null, error: { message: "db down" } });
 
-    const res = await GET(request(createUnsubscribeToken(42)));
+    const res = await POST(request(createUnsubscribeToken(42), "POST"));
 
     expect(res.status).toBe(500);
     expect(await res.text()).not.toContain("db down");
-  });
-});
-
-describe("POST /api/email/unsubscribe（RFC 8058 のワンクリック配信停止）", () => {
-  it("GET と同じく配信停止を記録する", async () => {
-    const client = mockAdmin();
-
-    const res = await POST(request(createUnsubscribeToken(42), "POST"));
-
-    expect(res.status).toBe(200);
-    expect(client.from.mock.results[0].value.eq).toHaveBeenCalledWith("id", 42);
   });
 });

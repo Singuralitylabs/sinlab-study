@@ -1,5 +1,7 @@
 import {
-  EMAIL_DIGEST_MAX_PER_RUN,
+  EMAIL_DIGEST_LOCK_NAME,
+  EMAIL_DIGEST_LOCK_TTL_MS,
+  EMAIL_DIGEST_MAX_PER_DAY,
   EMAIL_DIGEST_SEND_INTERVAL_MS,
   EMAIL_DIGEST_TIME_BUDGET_MS,
   EMAIL_KIND,
@@ -13,6 +15,7 @@ import { compareGroupLevel } from "@/app/lib/content-grouping";
 import { buildThemeContentOrder, type NavigationWeek } from "@/app/lib/content-navigation";
 import {
   addDays,
+  coversPreviousWeek,
   type DigestContent,
   type DigestUser,
   isWeeklyDigestTarget,
@@ -24,6 +27,7 @@ import {
   visibleContentsFor,
   weekStartOf,
 } from "@/app/lib/email-digest";
+import { type CronLock, claimCronLock, releaseCronLock } from "@/app/services/api/cron-lock-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { type EmailContent, isEmailConfigured } from "@/app/services/notifications/email";
 import {
@@ -173,7 +177,6 @@ async function fetchOrderedContents(supabase: AdminClient): Promise<DigestConten
   return themes.flatMap((theme) => {
     const weeks: NavigationWeek[] = [];
     const contents: ContentRow[] = [];
-    const phaseIdByWeekId = new Map<number, number>();
     for (const phase of theme.phases ?? []) {
       for (const week of phase.weeks ?? []) {
         weeks.push({
@@ -182,7 +185,6 @@ async function fetchOrderedContents(supabase: AdminClient): Promise<DigestConten
           display_order: week.display_order,
           phase: { id: phase.id, name: phase.name, display_order: phase.display_order },
         });
-        phaseIdByWeekId.set(week.id, phase.id);
         contents.push(...(week.contents ?? []));
       }
     }
@@ -331,7 +333,8 @@ async function fetchTodayPromotionalLogs(
 
 /**
  * 月曜に週次進捗の対象になったユーザーを繰り越し予約として記録する（既にあれば何もしない）。
- * 失敗しても月曜の送信は続ける（その週の繰り越しが欠けるだけ）。
+ * 予約は送信の前提とし、失敗したら throw する（呼び出し元は1通も送らずに失敗を返す）。
+ * claim の前なので、再実行しても二重送信にはならず、予約からやり直せる。
  */
 async function reserveWeeklyDigest(
   supabase: AdminClient,
@@ -348,8 +351,7 @@ async function reserveWeeklyDigest(
       { onConflict: "user_id,kind,reference_key", ignoreDuplicates: true }
     );
     if (error) {
-      console.error("[定期メール] 週次進捗の繰り越し予約に失敗しました:", error.message);
-      return;
+      throw new Error(`週次進捗の繰り越し予約に失敗しました: ${error.message}`);
     }
   }
 }
@@ -458,10 +460,10 @@ async function buildQueue(
   // 週次進捗（reference_key は週の開始日）。対象を決めるのは月曜だけで、月曜の対象者を繰り越し
   // 予約として記録する。火〜日曜は、予約を持ちまだ送っていないユーザー（月曜に上限・時間切れ・
   // 同日の別の案内で送れなかった分）だけに送り、週の途中で新しく対象になったユーザーには送らない。
-  // 今週に入ってから登録したユーザーには「先週」が無いため送らない。
+  // 先週の途中以降に登録したユーザーには、まるごとの「先週」が無いため送らない。
   const weekStart = weekStartOf(today);
   const isWeekStart = today === weekStart;
-  let weeklyPool = users.filter((user) => toJstDateString(new Date(user.createdAt)) < weekStart);
+  let weeklyPool = users.filter((user) => coversPreviousWeek(user.createdAt, weekStart));
   const poolIds = () => weeklyPool.map((user) => user.userId);
   if (!isWeekStart) {
     const reserved = await fetchLoggedUserIds(
@@ -527,14 +529,15 @@ async function buildQueue(
 /**
  * 今日送るべき定期メールをすべて判定して送る。
  *
+ * - **並行実行の排除**: 実行ロック（`cron_locks`、`claimCronLock()`）を取れた実行だけが処理する。
+ *   Cron の重複起動・手動実行が重なっても、後から来た実行は何もせずに `skipped` を返す
  * - **二重送信の防止**: 1通ごとに `email_logs` へ `(user_id, kind, reference_key)` を claim してから
- *   送る（`deliverUserEmail()`）。同じ日の再実行・Cron の重複起動でも UNIQUE 違反で送らない
+ *   送る（`deliverUserEmail()`）。同じ日の再実行でも UNIQUE 違反で送らない
  * - **1人1日1通**: 今日すでに案内系メールを claim したユーザーは、同じ日の再実行で対象から外す
  *   （朝の実行後にステータスが変わっても、別種別の2通目を送らない）
- * - **1日の上限**: 今日すでに claim した案内系メールの数を `EMAIL_DIGEST_MAX_PER_RUN` から引いた数を
- *   今回の上限とし、処理した通数（成功・失敗・重複）が達するか、経過時間が
- *   `EMAIL_DIGEST_TIME_BUDGET_MS` を超えたら打ち切る。残りはログに残し、週次進捗は同じ週の
- *   翌日以降の実行で送る
+ * - **1日の上限**: 今日すでに claim した案内系メールの数を `EMAIL_DIGEST_MAX_PER_DAY` から引いた数を
+ *   今回の上限とし、送信を試みた通数が達するか、経過時間が `EMAIL_DIGEST_TIME_BUDGET_MS` を
+ *   超えたら打ち切る。残りはログに残し、週次進捗は同じ週の翌日以降の実行で送る
  * - **配信停止**: 抽出の段階で `email_opt_out_at IS NULL` に絞り、全通のフッターに配信停止リンクを入れる
  *
  * 送信設定（`RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `NEXT_PUBLIC_APP_URL`）か
@@ -559,20 +562,46 @@ export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<
   const today = toJstDateString(options.now ?? new Date());
 
   let supabase: AdminClient;
+  let lock: CronLock | null;
+  try {
+    supabase = await createAdminSupabaseClient();
+    lock = await claimCronLock(supabase, EMAIL_DIGEST_LOCK_NAME, EMAIL_DIGEST_LOCK_TTL_MS);
+  } catch (error) {
+    console.error(
+      "[定期メール] 実行ロックの取得でエラーが発生しました:",
+      error instanceof Error ? error.message : error
+    );
+    return { status: "failed" };
+  }
+  if (!lock) {
+    return skip("別の実行が進行中です");
+  }
+
+  try {
+    return await sendDigest(supabase, today, appUrl, { clock, sleep, startedAt });
+  } finally {
+    await releaseCronLock(supabase, lock);
+  }
+}
+
+/** 実行ロックを取った実行だけが呼ぶ、抽出から送信までの本体 */
+async function sendDigest(
+  supabase: AdminClient,
+  today: string,
+  appUrl: string,
+  timing: { clock: () => number; sleep: (ms: number) => Promise<void>; startedAt: number }
+): Promise<EmailDigestResult> {
+  const { clock, sleep, startedAt } = timing;
+
   let queue: QueuedEmail[];
   let limit: number;
   try {
-    supabase = await createAdminSupabaseClient();
     const todayLogs = await fetchTodayPromotionalLogs(supabase, today);
+    limit = Math.max(0, EMAIL_DIGEST_MAX_PER_DAY - todayLogs.count);
     const users = (await fetchDigestUsers(supabase)).filter(
       (user) => !todayLogs.userIds.has(user.userId)
     );
     queue = await buildQueue(supabase, users, today, appUrl);
-    // 上限の件数はキューを作った後に数え直す。並行する別の実行が抽出中に claim した分は
-    // キューから外れる（送信済みの判定で除かれる）ため、その分も上限から差し引かないと
-    // 合計が上限を超える
-    const claimedToday = (await fetchTodayPromotionalLogs(supabase, today)).count;
-    limit = Math.max(0, EMAIL_DIGEST_MAX_PER_RUN - claimedToday);
   } catch (error) {
     console.error(
       "[定期メール] 送信対象の抽出でエラーが発生しました:",
@@ -586,10 +615,8 @@ export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<
   let index = 0;
 
   for (; index < queue.length; index++) {
-    // 重複（他の実行が claim 済み）も数える。Cron の重複起動が並行しても、各実行は同じ順序の
-    // キューの先頭 limit 件までしか扱わないため、合計の送信数は limit を超えない
-    const processed = counts.sent + counts.failed + counts.duplicate;
-    if (processed >= limit || clock() - startedAt >= EMAIL_DIGEST_TIME_BUDGET_MS) {
+    const attempted = counts.sent + counts.failed;
+    if (attempted >= limit || clock() - startedAt >= EMAIL_DIGEST_TIME_BUDGET_MS) {
       break;
     }
     if (lastApiCallAt !== null) {
@@ -633,7 +660,7 @@ export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<
   if (rest.length > 0) {
     const carried = rest.filter((item) => item.carriesOver).length;
     console.warn(
-      `[定期メール] 1日の上限（${EMAIL_DIGEST_MAX_PER_RUN}通）または実行時間の上限に達したため、${rest.length}通を送りませんでした（週次進捗 ${carried}通は同じ週の翌日以降に繰り越し、登録からN日目の案内 ${rest.length - carried}通は繰り越しません）`
+      `[定期メール] 1日の上限（${EMAIL_DIGEST_MAX_PER_DAY}通）または実行時間の上限に達したため、${rest.length}通を送りませんでした（週次進捗 ${carried}通は同じ週の翌日以降に繰り越し、登録からN日目の案内 ${rest.length - carried}通は繰り越しません）`
     );
   }
 

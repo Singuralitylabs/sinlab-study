@@ -54,6 +54,15 @@ export function daysSinceSignup(createdAt: string, today: string): number {
   return daysBetween(toJstDateString(new Date(createdAt)), today);
 }
 
+/**
+ * 週次進捗の対象になれる登録日か。「先週」（前週の月曜〜日曜）をまるごと利用できたユーザー、
+ * つまり前週の月曜以前（JST）に登録したユーザーだけを対象にする。先週の途中に登録した
+ * ユーザーへ「先週は学習の記録がありませんでした」と送らないため。
+ */
+export function coversPreviousWeek(createdAt: string, weekStart: string): boolean {
+  return daysSinceSignup(createdAt, weekStart) >= 7;
+}
+
 /** 定期メールの送信候補（`member` かつ `active` / `trial`、配信停止していないユーザー） */
 export type DigestUser = {
   userId: number;

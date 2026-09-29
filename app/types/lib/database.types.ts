@@ -61,6 +61,21 @@ export type Database = {
           },
         ];
       };
+      cron_locks: {
+        Row: {
+          locked_at: string;
+          name: string;
+        };
+        Insert: {
+          locked_at: string;
+          name: string;
+        };
+        Update: {
+          locked_at?: string;
+          name?: string;
+        };
+        Relationships: [];
+      };
       email_logs: {
         Row: {
           created_at: string;

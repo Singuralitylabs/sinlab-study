@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addDays,
+  coversPreviousWeek,
   type DigestContent,
   type DigestUser,
   daysSinceSignup,
@@ -59,6 +60,21 @@ describe("daysSinceSignup", () => {
     const createdAt = "2026-09-28T15:30:00Z";
     expect(daysSinceSignup(createdAt, "2026-10-05")).toBe(6);
     expect(daysSinceSignup(createdAt, "2026-10-06")).toBe(7);
+  });
+});
+
+describe("coversPreviousWeek（週次進捗の対象になれる登録日）", () => {
+  it("前週の月曜（JST）以前に登録していれば対象、それより後なら対象外", () => {
+    expect(coversPreviousWeek("2026-09-28T03:00:00Z", "2026-10-05")).toBe(true); // 前週の月曜
+    expect(coversPreviousWeek("2026-09-20T03:00:00Z", "2026-10-05")).toBe(true);
+    expect(coversPreviousWeek("2026-09-29T03:00:00Z", "2026-10-05")).toBe(false); // 前週の火曜
+    expect(coversPreviousWeek("2026-10-04T03:00:00Z", "2026-10-05")).toBe(false); // 前週の日曜
+  });
+
+  it("前週の月曜 0:00 JST の境界を JST の暦日で判定する", () => {
+    expect(coversPreviousWeek("2026-09-27T15:00:00Z", "2026-10-05")).toBe(true); // 9/28 0:00 JST
+    expect(coversPreviousWeek("2026-09-28T14:59:59Z", "2026-10-05")).toBe(true); // 9/28 23:59 JST
+    expect(coversPreviousWeek("2026-09-28T15:00:00Z", "2026-10-05")).toBe(false); // 9/29 0:00 JST
   });
 });
 

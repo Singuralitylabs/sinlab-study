@@ -70,7 +70,17 @@ export type TrialNurtureDay = (typeof TRIAL_NURTURE_DAYS)[number];
  * Resend 無料枠の日次 100 通に、同日のトランザクションメール分の余裕を残す。
  * 超過分は週次進捗なら同じ週の翌日以降の実行に繰り越す（`docs/specification.md` 10.7）
  */
-export const EMAIL_DIGEST_MAX_PER_RUN = 80;
+export const EMAIL_DIGEST_MAX_PER_DAY = 80;
+
+/** 定期メールの日次バッチの実行ロック名（`cron_locks.name`） */
+export const EMAIL_DIGEST_LOCK_NAME = "email-digest";
+
+/**
+ * 実行ロックの有効期限（ms）。関数のハードタイムアウト（`maxDuration` 60秒）等で解放されなかった
+ * ロックは、これを過ぎたら次の実行が取り直す。実行時間より十分長くし、進行中の実行から
+ * ロックを奪わないようにする
+ */
+export const EMAIL_DIGEST_LOCK_TTL_MS = 5 * 60_000;
 
 /**
  * Cron の送信1通ごとの最小間隔（ms）。Resend API のレート制限（既定 2 リクエスト/秒）を

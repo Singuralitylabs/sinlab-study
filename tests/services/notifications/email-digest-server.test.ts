@@ -8,7 +8,7 @@ vi.mock("@/app/services/notifications/email", async (importOriginal) => ({
 }));
 
 import {
-  EMAIL_DIGEST_MAX_PER_RUN,
+  EMAIL_DIGEST_MAX_PER_DAY,
   EMAIL_DIGEST_SEND_INTERVAL_MS,
 } from "@/app/constants/notifications";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
@@ -29,24 +29,31 @@ function createFakeDb(tables: Record<string, Row[]>) {
   let nextId = 1;
   /** INSERT した行の created_at（DB の now()）。runDigest() が実行日時に合わせる */
   const clock = { now: new Date() };
+  /** `<table>:<op>` を入れると、その操作を DB エラーにする */
+  const failures = new Set<string>();
 
   function from(table: string) {
-    let op: "select" | "insert" | "update" | "upsert" = "select";
+    let op: "select" | "insert" | "update" | "upsert" | "delete" = "select";
     let payload: Row = {};
     let upsertRows: Row[] = [];
     const filters: Filter[] = [];
     let range: [number, number] | null = null;
 
+    // UNIQUE (user_id, kind, reference_key) と cron_locks の主キー (name)
     const isDuplicate = (rows: Row[], value: Row) =>
-      table === "email_logs" &&
-      rows.some(
-        (row) =>
-          row.user_id === value.user_id &&
-          row.kind === value.kind &&
-          row.reference_key === value.reference_key
-      );
+      (table === "email_logs" &&
+        rows.some(
+          (row) =>
+            row.user_id === value.user_id &&
+            row.kind === value.kind &&
+            row.reference_key === value.reference_key
+        )) ||
+      (table === "cron_locks" && rows.some((row) => row.name === value.name));
 
     const execute = (): { data: unknown; error: unknown } => {
+      if (failures.has(`${table}:${op}`)) {
+        return { data: null, error: { code: "XX000", message: "db down" } };
+      }
       const rows = db[table] ?? [];
       db[table] = rows;
       if (op === "upsert") {
@@ -80,6 +87,10 @@ function createFakeDb(tables: Record<string, Row[]>) {
         }
         return { data: matched, error: null };
       }
+      if (op === "delete") {
+        db[table] = rows.filter((row) => !matched.includes(row));
+        return { data: null, error: null };
+      }
       return { data: range ? matched.slice(range[0], range[1] + 1) : matched, error: null };
     };
 
@@ -93,6 +104,10 @@ function createFakeDb(tables: Record<string, Row[]>) {
       upsert: (values: Row[]) => {
         op = "upsert";
         upsertRows = values;
+        return builder;
+      },
+      delete: () => {
+        op = "delete";
         return builder;
       },
       update: (value: Row) => {
@@ -136,7 +151,7 @@ function createFakeDb(tables: Record<string, Row[]>) {
     return builder;
   }
 
-  return { db, clock, client: { from: vi.fn(from) } };
+  return { db, clock, failures, client: { from: vi.fn(from) } };
 }
 
 const APP_URL = "https://study.example.com";
@@ -398,6 +413,31 @@ describe("送信対象の抽出", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
+  it("週次進捗: 先週をまるごと利用できた（前週の月曜以前に登録した）ユーザーだけに送る", async () => {
+    setup({
+      users: [
+        userRow(1, { created_at: createdOn("2026-09-28") }), // 前週の月曜
+        userRow(2, { created_at: createdOn("2026-09-29") }), // 前週の火曜
+        userRow(3, { created_at: createdOn("2026-10-04") }), // 前週の日曜（登録翌日が月曜）
+      ],
+      // u1 は 7 日目のため学習記録を付けて未学習リマインドの対象から外す
+      user_progress: [
+        {
+          id: 1,
+          user_id: 1,
+          content_id: 1000,
+          is_completed: true,
+          completed_at: "2026-09-30T00:00:00.000Z",
+        },
+      ],
+    });
+
+    await runDigest(MONDAY);
+
+    expect(sentTo()).toEqual(["u1@example.com"]);
+    expect(sentEmailTo("u1@example.com").subject).toContain("今週の学習");
+  });
+
   it("週次進捗: 今週（月曜以降）に登録したユーザーには送らない", async () => {
     setup({ users: [userRow(1, { created_at: "2026-10-04T15:30:00.000Z" })] }); // 月曜 0:30 JST
 
@@ -492,12 +532,15 @@ describe("二重送信の防止（email_logs の claim）", () => {
     expect(sentLogs(db)).toHaveLength(2);
   });
 
-  it("Cron の重複起動が並行しても、1人に同じメールは1通だけ送る", async () => {
-    setup({ users: [userRow(1), userRow(2)] });
+  it("Cron の重複起動が並行しても、実行ロックを取れた1つだけが送る", async () => {
+    const { db } = setup({ users: [userRow(1), userRow(2)] });
 
-    await Promise.all([runDigest(MONDAY), runDigest(MONDAY)]);
+    const results = await Promise.all([runDigest(MONDAY), runDigest(MONDAY)]);
 
+    expect(results.map((r) => r.status).sort()).toEqual(["completed", "skipped"]);
     expect(sentTo().sort()).toEqual(["u1@example.com", "u2@example.com"]);
+    // 終了時にロックを解放する
+    expect(db.cron_locks).toEqual([]);
   });
 
   it("同じ日に案内系メールを受け取ったユーザーには、朝の実行後にステータスが変わっても2通目を送らない", async () => {
@@ -516,13 +559,13 @@ describe("二重送信の防止（email_logs の claim）", () => {
   });
 
   it("前日に案内系メールを受け取っていても、今日の分は送る", async () => {
-    setup({ users: [userRow(1, { status: "trial", created_at: createdOn("2026-10-03") })] });
+    setup({ users: [userRow(1, { status: "trial", created_at: createdOn("2026-09-21") })] });
 
-    await runDigest(new Date("2026-10-04T23:00:00Z")); // 10/5 = 2日目（trial_nurture）
+    await runDigest(new Date("2026-10-04T23:00:00Z")); // 10/5 = 14日目（trial_nurture）
     await runDigest(new Date("2026-10-05T23:00:00Z")); // 10/6 = 週次進捗の繰り越し
 
     expect(vi.mocked(sendEmail).mock.calls.map(([params]) => params.subject)).toEqual([
-      expect.stringContaining("演習を出してみましょう"),
+      expect.stringContaining("お試し期間のご案内"),
       expect.stringContaining("今週の学習"),
     ]);
   });
@@ -547,25 +590,25 @@ describe("二重送信の防止（email_logs の claim）", () => {
 describe("1回あたりの上限と繰り越し", () => {
   const manyUsers = (count: number) => Array.from({ length: count }, (_, i) => userRow(i + 1));
 
-  it(`送信は ${EMAIL_DIGEST_MAX_PER_RUN} 通で打ち切り、週次進捗の残りは同じ週の翌日に送る`, async () => {
-    const { db } = setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_RUN + 5) });
+  it(`送信は ${EMAIL_DIGEST_MAX_PER_DAY} 通で打ち切り、週次進捗の残りは同じ週の翌日に送る`, async () => {
+    const { db } = setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_DAY + 5) });
 
     const monday = await runDigest(MONDAY);
 
-    expect(monday).toMatchObject({ sent: EMAIL_DIGEST_MAX_PER_RUN, deferred: 5 });
-    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_RUN);
+    expect(monday).toMatchObject({ sent: EMAIL_DIGEST_MAX_PER_DAY, deferred: 5 });
+    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_DAY);
 
     const tuesday = await runDigest(TUESDAY);
 
     expect(tuesday).toMatchObject({ sent: 5, deferred: 0 });
-    expect(new Set(sentTo()).size).toBe(EMAIL_DIGEST_MAX_PER_RUN + 5);
+    expect(new Set(sentTo()).size).toBe(EMAIL_DIGEST_MAX_PER_DAY + 5);
     expect(sentLogs(db).every((row) => row.reference_key === "2026-10-05")).toBe(true);
   });
 
   it("上限に掛かるときは、翌日に拾えない「N日目」の案内を週次進捗より先に送る", async () => {
     setup({
       users: [
-        ...manyUsers(EMAIL_DIGEST_MAX_PER_RUN),
+        ...manyUsers(EMAIL_DIGEST_MAX_PER_DAY),
         userRow(1000, { status: "trial", created_at: createdOn("2026-10-03") }), // 2日目
       ],
     });
@@ -573,27 +616,27 @@ describe("1回あたりの上限と繰り越し", () => {
     await runDigest(MONDAY);
 
     expect(sentTo()[0]).toBe("u1000@example.com");
-    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_RUN);
+    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_DAY);
   });
 
   it("上限は1日（JST）の合計に効かせ、同じ日に再実行しても超えない", async () => {
-    setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_RUN + 5) });
+    setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_DAY + 5) });
     await runDigest(MONDAY);
 
     // 同じ月曜の 9 時台に手動で再実行
     const rerun = await runDigest(new Date("2026-10-05T00:30:00Z"));
 
     expect(rerun).toMatchObject({ sent: 0, deferred: 5 });
-    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_RUN);
+    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_DAY);
   });
 
   it("Cron の重複起動が並行しても、合計の送信数は1日の上限を超えない", async () => {
-    setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_RUN + 20) });
+    setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_DAY + 20) });
 
     await Promise.all([runDigest(MONDAY), runDigest(MONDAY)]);
 
-    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_RUN);
-    expect(new Set(sentTo()).size).toBe(EMAIL_DIGEST_MAX_PER_RUN);
+    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_DAY);
+    expect(new Set(sentTo()).size).toBe(EMAIL_DIGEST_MAX_PER_DAY);
   });
 
   it("週次進捗は月曜の対象者だけに送り、週の途中で新しく対象になったユーザーには送らない", async () => {
@@ -618,33 +661,20 @@ describe("1回あたりの上限と繰り越し", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  it("並行する別の実行が抽出中に送った分も、1日の上限から差し引く", async () => {
-    const fake = setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_RUN + 20) });
-    fakeClock.now = MONDAY;
-    const claim = (userId: number) =>
-      fake.db.email_logs.push({
-        id: 10_000 + userId,
-        user_id: userId,
-        kind: "weekly_digest",
-        reference_key: "2026-10-05",
-        sent_at: MONDAY.toISOString(),
-        created_at: MONDAY.toISOString(),
-      });
-    // 別の実行が u1〜u10 を送信済みの状態で起動し、抽出中（コンテンツ取得時）に u11〜u15 も送られる
-    for (let id = 1; id <= 10; id++) claim(id);
-    const from = fake.client.from.getMockImplementation();
-    if (!from) throw new Error("from() の実装がありません");
-    fake.client.from.mockImplementation((table: string) => {
-      if (table === "learning_themes") {
-        for (let id = 11; id <= 15; id++) claim(id);
-      }
-      return from(table);
-    });
+  it("月曜の繰り越し予約に失敗したら、1通も送らずに失敗を返す（再実行で予約からやり直せる）", async () => {
+    const { db, failures } = setup({ users: manyUsers(3) });
+    failures.add("email_logs:upsert");
 
-    const result = await runDigest(MONDAY);
+    const failed = await runDigest(MONDAY);
 
-    expect(result).toMatchObject({ sent: EMAIL_DIGEST_MAX_PER_RUN - 15 });
-    expect(sentLogs(fake.db)).toHaveLength(EMAIL_DIGEST_MAX_PER_RUN);
+    expect(failed).toEqual({ status: "failed" });
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(db.cron_locks).toEqual([]);
+
+    failures.delete("email_logs:upsert");
+    const retried = await runDigest(MONDAY);
+
+    expect(retried).toMatchObject({ status: "completed", sent: 3 });
   });
 
   it("実行時間の上限を超えたら新しい送信を始めない", async () => {
@@ -668,5 +698,51 @@ describe("1回あたりの上限と繰り越し", () => {
 
     expect(sleep).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledWith(EMAIL_DIGEST_SEND_INTERVAL_MS);
+  });
+});
+
+describe("実行ロック（cron_locks）", () => {
+  it("別の実行がロックを持っていれば、何もせずに skipped を返す", async () => {
+    const { db } = setup({ users: [userRow(1)] });
+    db.cron_locks = [{ name: "email-digest", locked_at: new Date().toISOString() }];
+
+    const result = await runDigest(MONDAY);
+
+    expect(result).toEqual({ status: "skipped", reason: "別の実行が進行中です" });
+    expect(sendEmail).not.toHaveBeenCalled();
+    // 他の実行のロックは消さない
+    expect(db.cron_locks).toHaveLength(1);
+  });
+
+  it("有効期限を過ぎたロック（ハードタイムアウト等で解放されなかったもの）は取り直して実行する", async () => {
+    const { db } = setup({ users: [userRow(1)] });
+    db.cron_locks = [
+      { name: "email-digest", locked_at: new Date(Date.now() - 10 * 60_000).toISOString() },
+    ];
+
+    const result = await runDigest(MONDAY);
+
+    expect(result).toMatchObject({ status: "completed", sent: 1 });
+    expect(db.cron_locks).toEqual([]);
+  });
+
+  it("抽出が失敗してもロックを解放する", async () => {
+    const { db, failures } = setup({ users: [userRow(1)] });
+    failures.add("users:select");
+
+    const result = await runDigest(MONDAY);
+
+    expect(result).toEqual({ status: "failed" });
+    expect(db.cron_locks).toEqual([]);
+  });
+
+  it("ロックを取れない DB エラーのときは失敗を返し、何も送らない", async () => {
+    const { failures } = setup({ users: [userRow(1)] });
+    failures.add("cron_locks:insert");
+
+    const result = await runDigest(MONDAY);
+
+    expect(result).toEqual({ status: "failed" });
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 });

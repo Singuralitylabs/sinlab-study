@@ -148,6 +148,10 @@ erDiagram
         text error
         timestamptz created_at
     }
+    cron_locks {
+        text name PK
+        timestamptz locked_at
+    }
 ```
 
 ---
@@ -457,6 +461,16 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 > **claimによる二重送信防止**: 送信前に `(user_id, kind, reference_key)` をINSERTし、一意制約違反（23505）なら送信しない（`stripe_events` のclaimと同じパターン。`deliverUserEmail()`）。Webhook と `/upgrade/success` の両経路・Webhookの再送・同時配信で同じ事象のメールを複数回送ろうとしても、INSERTに成功した1つだけが送信する。送信失敗時は行を削除せず `error` を記録する（再送はしない）。claim後に処理が中断した行は `sent_at` / `error` が共に NULL のまま残り、以後その事象のメールは送られない（重複よりも欠落を許容する）。
 
+
+### 3.12 cron_locks（Cron バッチの実行ロック）
+
+定期メールの日次バッチ（[機能設計書](./specification.md)10.7節）の並行実行を防ぐロック。`name` への INSERT を処理権（claim）とし、主キー違反なら別の実行が進行中として何もしない（`claimCheckoutSlot()` と同じパターン。`claimCronLock()`）。終了時に自分が取った行（`locked_at` が一致する行）を削除して解放する（`releaseCronLock()`）。関数のハードタイムアウト等で残った行は、アプリ側の TTL（`EMAIL_DIGEST_LOCK_TTL_MS`）を過ぎたら削除して取り直す。
+
+| カラム | 型 | NULL | デフォルト | 説明 |
+|:--|:--|:--:|:--|:--|
+| name | TEXT | NO | - | PK。ロック名（`email-digest`） |
+| locked_at | TIMESTAMPTZ | NO | - | ロックを取った日時 |
+
 ---
 
 ## 4. インデックス
@@ -685,6 +699,10 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 
 RLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`stripe_events` と同じ）。受講生・管理画面からは参照せず、`authenticated` ロールでは SELECT を含め一切のアクセスができない。
 
+### 6.10 cron_locks
+
+RLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`email_logs` と同じ）。Cron ルートからのみ読み書きする。
+
 ---
 
 ## 7. マイグレーション管理
@@ -733,6 +751,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | `20260928000000_add_email_logs.sql` | 受講生向けメールの送信ログ `email_logs` を追加（#252）。`UNIQUE (user_id, kind, reference_key)` で二重送信を防ぐ。RLSを有効化しポリシーは作らない（service_role専用） |
 | `20260929000000_add_cancel_at_to_stripe_subscriptions.sql` | `stripe_subscriptions` に解約予定日時 `cancel_at`（TIMESTAMPTZ, NULL許容）を追加。flexible billing mode の Portal 解約は `cancel_at` にだけ現れるため（3.9節）。RLS変更なし。**アプリより先に適用すること**（未適用のままだと、`cancel_at` を含むミラー書き込みが失敗し、Webhook・successページの反映が止まる） |
 | `20260930000000_add_email_opt_out_at_to_users.sql` | `users` に案内メールの配信停止日時 `email_opt_out_at`（TIMESTAMPTZ, NULL許容）を追加（#253）。RLS変更なし。**アプリより先に適用すること**（未適用のままだと、定期メールの対象抽出と配信停止ルートがカラム不在で失敗する） |
+| `20260930000001_add_cron_locks.sql` | Cron バッチの実行ロック `cron_locks`（`name` PK、`locked_at`）を追加（#253）。RLSを有効化しポリシーは作らない（service_role専用）。**アプリより先に適用すること**（未適用のままだと、定期メールのバッチがロックを取れず 500 で何も送らない） |
 
 ### 7.1 マイグレーション追加後の運用
 
