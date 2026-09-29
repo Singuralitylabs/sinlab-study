@@ -30,6 +30,7 @@ import {
   visibleContentsFor,
   weekStartOf,
 } from "@/app/lib/email-digest";
+import { type EmailMarkdown, renderEmailMarkdown } from "@/app/lib/markdown-email";
 import { type CronLock, claimCronLock, releaseCronLock } from "@/app/services/api/cron-lock-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { type EmailContent, isEmailConfigured } from "@/app/services/notifications/email";
@@ -511,6 +512,12 @@ async function appendAnnouncementEmails(
   return announcements.map((announcement) => {
     const referenceKey = String(announcement.id);
     const done = logged.get(referenceKey) ?? new Set<number>();
+    // 本文の変換はお知らせ1件につき1回だけ（宛先ごとの組み立てで使い回す）
+    let body: EmailMarkdown | null = null;
+    const renderedBody = () => {
+      body ??= renderEmailMarkdown(announcement.body);
+      return body;
+    };
     const pending = allUsers.filter(
       (user) =>
         !done.has(user.userId) &&
@@ -536,7 +543,7 @@ async function appendAnnouncementEmails(
             unsubscribeUrl,
             announcementId: announcement.id,
             title: announcement.title,
-            body: announcement.body,
+            body: renderedBody(),
           }),
       });
       queuedUserIds.add(user.userId);

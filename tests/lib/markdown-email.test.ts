@@ -67,3 +67,31 @@ describe("markdownToEmailHtml", () => {
     expect(quoted).toContain(">a&quot;b</a>");
   });
 });
+
+describe("悪意のある・壊れた入力でも短時間で終わる（Cron を止めない）", () => {
+  const within = (fn: () => void, ms: number) => {
+    const started = performance.now();
+    fn();
+    return performance.now() - started < ms;
+  };
+
+  it.each([
+    ["見出しの途中に長い空白（半角）", `# a${" ".repeat(5000)}b`],
+    ["見出しの途中に長い空白（全角）", `# a${"　".repeat(5000)}b`],
+    ["閉じの無い [ が大量に並ぶ", "[".repeat(20_000)],
+    ["閉じの無い ** が大量に並ぶ", "**".repeat(10_000)],
+    ["閉じの無い ` が大量に並ぶ", "`".repeat(20_000)],
+    ["リンクの途中で終わる", `[a](https://${"x".repeat(20_000)}`],
+  ])("%s", (_label, input) => {
+    expect(within(() => markdownToEmailText(input), 500)).toBe(true);
+    expect(within(() => markdownToEmailHtml(input), 500)).toBe(true);
+  });
+});
+
+describe("見出しの閉じ記号", () => {
+  it("末尾の閉じ # と空白を取り除き、語の一部の # は残す", () => {
+    expect(markdownToEmailText("## お知らせ ##  ")).toBe("■ お知らせ");
+    expect(markdownToEmailText("# C#")).toBe("■ C#");
+    expect(markdownToEmailText("#   ")).toBe("■ ");
+  });
+});

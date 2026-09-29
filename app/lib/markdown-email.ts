@@ -6,6 +6,11 @@
  * HTML は必ず先に全文をエスケープしてから変換するため、本文中の生 HTML は描画されない
  * （アプリ内表示の react-markdown が生 HTML を描画しないのと同じ方針）。リンクは
  * `http://` / `https://` の URL だけを `<a>` にし、それ以外（`javascript:` 等）は文字のまま残す。
+ *
+ * 本文は管理画面から入力され、Cron の送信処理の中で変換するため、どんな入力でも行の長さに
+ * ほぼ比例する時間で終わるようにする（正規表現の過剰なバックトラックで Cron を止めない）。
+ * 見出しの末尾の `#` の除去は正規表現を使わずに行い、インラインの装飾は1回の照合で読む
+ * 文字数に上限を付ける。
  */
 
 import { escapeHtml } from "@/app/lib/escape-html";
@@ -16,10 +21,32 @@ type Block =
   | { type: "list"; ordered: boolean; items: string[] }
   | { type: "code"; lines: string[] };
 
-const HEADING = /^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$/;
+const HEADING_PREFIX = /^ {0,3}#{1,6}[ \t]+/;
 const UNORDERED_ITEM = /^\s*[-*+]\s+(.*)$/;
 const ORDERED_ITEM = /^\s*\d+[.)]\s+(.*)$/;
 const FENCE = /^\s*```/;
+
+/**
+ * 見出し行なら見出しの文字列（末尾の閉じ `#` と空白を除く）を返す。見出しでなければ null。
+ * 末尾の処理は正規表現を使わずに行う（`(.*?)\s*#*\s*$` のような形は、空白が長く続く行で
+ * バックトラックが空白の数の3乗に比例して膨らむため）
+ */
+function parseHeading(line: string): string | null {
+  const prefix = HEADING_PREFIX.exec(line);
+  if (!prefix) {
+    return null;
+  }
+  const text = line.slice(prefix[0].length).trimEnd();
+  let end = text.length;
+  while (end > 0 && text[end - 1] === "#") {
+    end--;
+  }
+  // 閉じの `#` は、空白の後（または見出しが `#` だけ）のときだけ取り除く（`C#` などは残す）
+  if (end < text.length && (end === 0 || text[end - 1] === " " || text[end - 1] === "\t")) {
+    return text.slice(0, end).trimEnd();
+  }
+  return text;
+}
 
 function parseBlocks(markdown: string): Block[] {
   const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
@@ -56,10 +83,10 @@ function parseBlocks(markdown: string): Block[] {
       continue;
     }
 
-    const heading = HEADING.exec(line);
-    if (heading) {
+    const heading = parseHeading(line);
+    if (heading !== null) {
       flush();
-      blocks.push({ type: "heading", text: heading[1] });
+      blocks.push({ type: "heading", text: heading });
       continue;
     }
 
@@ -85,9 +112,11 @@ function parseBlocks(markdown: string): Block[] {
   return blocks;
 }
 
-const LINK = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
-const BOLD = /\*\*(.+?)\*\*/g;
-const INLINE_CODE = /`([^`]+)`/g;
+// 1回の照合で読む文字数に上限を付ける（閉じ記号の無い `[` / `**` / `` ` `` が大量に並ぶ行でも、
+// 各位置からの走査が上限で止まり、行の長さにほぼ比例する時間で終わる）
+const LINK = /\[([^\]\n]{1,300})\]\((https?:\/\/[^\s)]{1,2000})\)/g;
+const BOLD = /\*\*([^*\n]{1,300})\*\*/g;
+const INLINE_CODE = /`([^`\n]{1,300})`/g;
 
 function inlineToText(value: string): string {
   return value.replace(LINK, "$1（$2）").replace(BOLD, "$1").replace(INLINE_CODE, "$1");
@@ -145,4 +174,20 @@ export function markdownToEmailHtml(markdown: string): string {
       }
     })
     .join("");
+}
+
+/** メール用に変換済みの本文（`renderEmailMarkdown()` でだけ作れる。任意の HTML を渡させない） */
+export type EmailMarkdown = {
+  readonly text: string;
+  readonly html: string;
+  readonly __brand: "EmailMarkdown";
+};
+
+/** テキスト版と簡易 HTML 版をまとめて作る（一斉送信では1件のお知らせにつき1回だけ呼ぶ） */
+export function renderEmailMarkdown(markdown: string): EmailMarkdown {
+  return {
+    text: markdownToEmailText(markdown),
+    html: markdownToEmailHtml(markdown),
+    __brand: "EmailMarkdown",
+  };
 }

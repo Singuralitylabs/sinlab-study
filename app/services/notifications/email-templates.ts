@@ -1,6 +1,6 @@
 import { EMAIL_SERVICE_NAME, type TrialNurtureDay } from "@/app/constants/notifications";
 import { escapeHtml } from "@/app/lib/escape-html";
-import { markdownToEmailHtml, markdownToEmailText } from "@/app/lib/markdown-email";
+import type { EmailMarkdown } from "@/app/lib/markdown-email";
 import type { EmailContent } from "@/app/services/notifications/email";
 
 type EmailLink = { label: string; url: string };
@@ -10,10 +10,10 @@ type EmailLayoutParams = {
   greetingName: string;
   paragraphs: string[];
   /**
-   * 段落の後に置く Markdown 本文（お知らせ）。テキスト版・簡易 HTML 版への変換はレイアウトが
-   * 行う（HTML 版は全文をエスケープしてから変換するため、本文中の生 HTML は描画されない）
+   * 段落の後に置く本文（お知らせ）。`renderEmailMarkdown()` で変換済みのものだけを受け取る
+   * （HTML 版は全文をエスケープしてから変換してあり、本文中の生 HTML は描画されない）
    */
-  markdownBody?: string;
+  markdownBody?: EmailMarkdown;
   /** 本文の末尾に置く導線ボタン（テキスト版では「ラベル: URL」の行になる） */
   links: EmailLink[];
   /**
@@ -48,7 +48,7 @@ export function renderEmailLayout(params: EmailLayoutParams): EmailContent {
     greeting,
     "",
     ...params.paragraphs.flatMap((paragraph) => [paragraph, ""]),
-    ...(params.markdownBody ? [markdownToEmailText(params.markdownBody), ""] : []),
+    ...(params.markdownBody ? [params.markdownBody.text, ""] : []),
     ...params.links.map((link) => `${link.label}: ${link.url}`),
     "",
     "――――――――――",
@@ -76,7 +76,7 @@ export function renderEmailLayout(params: EmailLayoutParams): EmailContent {
     ...params.paragraphs.map(
       (paragraph) => `<p style="margin:0 0 16px;">${escapeHtml(paragraph)}</p>`
     ),
-    ...(params.markdownBody ? [markdownToEmailHtml(params.markdownBody)] : []),
+    ...(params.markdownBody ? [params.markdownBody.html] : []),
     linksHtml,
     "</div>",
     '<div style="padding:16px 0;font-size:12px;color:#71717a;line-height:1.6;">',
@@ -387,8 +387,8 @@ export function buildTrialNurtureEmail(params: TrialNurtureEmailParams): EmailCo
 export type AnnouncementEmailParams = PromotionalEmailParams & {
   announcementId: number;
   title: string;
-  /** お知らせの Markdown 本文 */
-  body: string;
+  /** お知らせの本文（`renderEmailMarkdown()` で変換済み。宛先ごとに変換し直さない） */
+  body: EmailMarkdown;
 };
 
 /** お知らせのメール一斉送信（案内系メール。配信停止リンクを必ず入れる） */
