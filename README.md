@@ -98,7 +98,7 @@ bun dev
 | `bun run check` | Biome によるリント + フォーマット |
 | `bun run db:types` | Supabase から TypeScript 型定義を生成（`.env.local` があれば読み込み、なければ環境変数 `SUPABASE_PROJECT_ID` を使用） |
 | `bun run test` | Vitest によるユニットテスト実行 |
-| `bun run check:comments [基準ref]` | 変更した TS/TSX がコメント・整形のみの差分か（AST同一か）を検証。差異があれば該当ファイルを列挙して非ゼロ終了（既定の基準は `origin/main`） |
+| `bun run check:comments [基準ref]` | 変更した TS/TSX がコメント・整形のみの差分か（AST同一・`@ts-*`/`biome-ignore` の増減なし）を検証。未追跡ファイルも対象。差異があれば該当ファイルを列挙して非ゼロ終了（既定の基準は `origin/main`） |
 | `bun run test:all` | build/db:types/lint/format/check/test を一括実行 |
 
 ### Claude Code から Supabase MCP を使う
