@@ -155,6 +155,6 @@ docs/                    # 設計ドキュメント
 | ドキュメント | 内容 |
 |:--|:--|
 | [要件定義書](./docs/requirements.md) | プロジェクト概要、機能要件、非機能要件、画面一覧 |
-| [データベース設計書](./docs/database.md) | テーブル定義、RLS ポリシー、インデックス、トリガー |
+| [データベース設計書](./docs/database.md) | DB・RLS の設計意図・不変条件（定義の正は `supabase/migrations/` と `app/types/lib/database.types.ts`） |
 | [機能設計書](./docs/specification.md) | アーキテクチャ、認証・認可、API 仕様、画面設計、コンポーネント設計 |
 | [テスト方針](./docs/testing.md) | テスト方針 |
