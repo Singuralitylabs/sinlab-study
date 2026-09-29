@@ -34,15 +34,9 @@
 
 ### Bun のインストール手順
 
-本リポジトリでは Bun のバージョンを **`1.3.8`** に固定している（`.bun-version` と `package.json` の `packageManager`。CI の `oven-sh/setup-bun` も `.bun-version` を参照する）。インストール方法は [公式ドキュメント](https://bun.sh/docs/installation) を参照し、`bun --version` が `1.3.8` を出力することを確認する。
+Bun は **`1.3.8`** に固定している（`.bun-version` と `package.json` の `packageManager`。CI も `.bun-version` を参照）。[公式ドキュメント](https://bun.sh/docs/installation) に従って導入し、`bun --version` で確認する。[mise](https://mise.jdx.dev/) なら `mise settings add idiomatic_version_file_enable_tools bun` を一度実行すると `mise install` で自動導入される。
 
-[mise](https://mise.jdx.dev/) を使う場合は、以下の設定を一度行っておくと `mise install` で `.bun-version` のバージョンが自動的に導入される。
-
-```bash
-mise settings add idiomatic_version_file_enable_tools bun
-```
-
-> **バージョンを上げるときのルール**: `.bun-version` / `package.json` の `packageManager` / この節の記載を**同時に**更新すること。CI は `.bun-version` を参照しているため、ファイル間で値がずれると CI とローカルの環境差異が再発する。
+> バージョンを上げるときは `.bun-version` / `package.json` の `packageManager` / この節を**同時に**更新する（ずれると CI とローカルの環境差異が再発する）。
 
 ### 環境変数
 
@@ -67,11 +61,11 @@ STRIPE_PRICE_ID=<月額サブスクリプションの Price ID>
 NEXT_PUBLIC_APP_URL=<Checkout/Portal のリダイレクト先URL・メール本文のリンク生成に使用>
 ```
 
-本番リリース時の環境変数確認は Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順) Step 5 を参照（一覧の正本はこの節と `.env.local.example`）。
+一覧の正本はこの節と `.env.local.example`。本番リリース時の確認は Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順) Step 5 を参照。
 
 ### インストール・起動
 
-`supabase/migrations/` はCLIの走査仕様に合わせてサブディレクトリを持たないフラット構成にしている（`<タイムスタンプ>_<説明>.sql` のファイル名で適用順を表現）。**既にマイグレーション適用履歴があるプロジェクトに接続する場合は、`db push` の前に `supabase migration list` でローカルとリモートの履歴が一致していることを確認すること**（未整合のまま push すると、リモートに既に存在するオブジェクトを作成しようとしてエラーになる場合がある。一致しない場合の対処は Issue #185 のコメントに退避した開発用履歴整合手順を参照。過去の履歴整合の経緯は git / Issue（#149・#218）、本番への適用手順は Wiki の[本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)を参照）。
+**既にマイグレーション適用履歴があるプロジェクトに接続する場合は、`db push` の前に `supabase migration list` でローカルとリモートの履歴が一致していることを確認すること**（未整合だと既存オブジェクトの作成でエラーになる。対処は Issue #185 のコメント、本番適用は Wiki の[本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)を参照）。マイグレーションの配置規約は `AGENTS.md` を参照。
 
 ```bash
 # 依存関係のインストール
@@ -110,7 +104,7 @@ Claude Code で Supabase MCP サーバーを使う場合、**必ず read-only �
 
 詳細は [Supabase MCP Server](https://supabase.com/docs/guides/ai-tools/mcp) を参照。サーバーの登録名は任意（`.claude/settings.json` のフックはどの名前でも `execute_sql` に反応する）。
 
-`.claude/settings.json` の PreToolUse フック（`.claude/hooks/allow-readonly-sql.mjs`）は、`execute_sql` の `query` が読み取り専用（SELECT 等）と判定できたときだけ許可確認をスキップする**利便性のための仕組み**で、書き込み防止の実体ではない。SELECT 内で副作用のある関数を呼ぶクエリは通るため、read-only モードを省略しないこと。`execute_sql` 自体を `permissions.allow` に登録してはならない（`CLAUDE.md`「自動実行の許可」参照）。
+`.claude/settings.json` の PreToolUse フック（`.claude/hooks/allow-readonly-sql.mjs`）は、読み取り専用（SELECT 等）と判定できた `execute_sql` の許可確認をスキップする**利便性のための仕組み**で、書き込み防止の実体ではない（副作用のある関数を呼ぶ SELECT は通る）。read-only モードを省略せず、`execute_sql` を `permissions.allow` に登録しないこと（`CLAUDE.md`「自動実行の許可」参照）。
 
 ## 定期メール（Vercel Cron）の運用
 
@@ -118,11 +112,10 @@ Claude Code で Supabase MCP サーバーを使う場合、**必ず read-only �
 
 ## Dependabot PR のマージ運用
 
-依存関係の更新は [Dependabot](./.github/dependabot.yml) が週次（Bun）・月次（GitHub Actions）で自動検出し、更新 PR を作成する。マイナー・パッチ更新は `@supabase/*`・`@codemirror/*` を含めグループごとに集約され、メジャー更新は個別 PR になる。
+[Dependabot](./.github/dependabot.yml) が週次（Bun）・月次（GitHub Actions）で更新 PR を作成する。マイナー・パッチはグループ集約、メジャーは個別 PR。担当は [@yamashin01](https://github.com/yamashin01)（週次確認）。
 
-- レビュー・マージ担当は [@yamashin01](https://github.com/yamashin01) が週次で確認する。
-- マイナー・パッチのグループ PR は、既存 CI（Biome / 型チェック / ユニットテスト / ビルド）が通過していればそのままマージしてよい。
-- メジャー更新の PR は Breaking Changes を確認したうえでマージする。特に `next` はリリースノートを確認すること。
+- マイナー・パッチのグループ PR は、CI（Biome / 型チェック / ユニットテスト / ビルド）が通れば そのままマージしてよい。
+- メジャー更新は Breaking Changes（特に `next` はリリースノート）を確認してからマージする。
 
 ## プロジェクト構成
 
@@ -159,11 +152,9 @@ docs/                    # 設計ドキュメント
 
 ## ドキュメント
 
-詳細な設計情報は `docs/` ディレクトリを参照。
-
 | ドキュメント | 内容 |
 |:--|:--|
 | [要件定義書](./docs/requirements.md) | プロジェクト概要、機能要件、非機能要件、画面一覧 |
-| [データベース設計書](./docs/database.md) | テーブル定義、RLS ポリシー、インデックス、トリガー |
+| [データベース設計書](./docs/database.md) | DB・RLS の設計意図・不変条件（定義の正は `supabase/migrations/` と `app/types/lib/database.types.ts`） |
 | [機能設計書](./docs/specification.md) | アーキテクチャ、認証・認可、API 仕様、画面設計、コンポーネント設計 |
-# web-skillup-service
+| [テスト設計書](./docs/testing.md) | テスト方針、テスト対象と観点、CI / ツール構成、テスト規約 |
