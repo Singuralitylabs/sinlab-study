@@ -7,6 +7,7 @@ import {
   EMAIL_KIND,
   PROMOTIONAL_EMAIL_KINDS,
   type PromotionalEmailKind,
+  WEEKLY_DIGEST_CATCH_UP_DAYS,
   WEEKLY_DIGEST_RESERVATION_KIND,
 } from "@/app/constants/notifications";
 import { isStripeEnabled } from "@/app/constants/stripe";
@@ -18,6 +19,7 @@ import {
   coversPreviousWeek,
   type DigestContent,
   type DigestUser,
+  daysBetween,
   isWeeklyDigestTarget,
   jstStartOfDayIso,
   lockedThemeNames,
@@ -61,20 +63,25 @@ const ID_CHUNK_SIZE = 100;
 
 type Page<T> = { data: T[] | null; error: { message: string } | null };
 
-/** PostgREST の最大行数（既定 1000 行）を超えても取りこぼさないよう range でページングする */
+/**
+ * PostgREST の最大行数（`db-max-rows`）を超えても取りこぼさないよう range でページングする。
+ * サーバーの最大行数が `PAGE_SIZE` より小さく設定されていても欠落しないよう、次の位置は
+ * 実際に返った件数だけ進め、0件が返るまで取りに行く（「PAGE_SIZE 未満なら最後」とは判定しない）。
+ */
 async function fetchAllPages<T>(
   fetchPage: (from: number, to: number) => PromiseLike<Page<T>>
 ): Promise<T[]> {
   const rows: T[] = [];
-  for (let offset = 0; ; offset += PAGE_SIZE) {
+  for (let offset = 0; ; ) {
     const { data, error } = await fetchPage(offset, offset + PAGE_SIZE - 1);
     if (error) {
       throw new Error(error.message);
     }
-    rows.push(...(data ?? []));
-    if (!data || data.length < PAGE_SIZE) {
+    if (!data || data.length === 0) {
       return rows;
     }
+    rows.push(...data);
+    offset += data.length;
   }
 }
 
@@ -331,6 +338,23 @@ async function fetchTodayPromotionalLogs(
   return { count: rows.length, userIds: new Set(rows.map((row) => row.user_id)) };
 }
 
+/** 今週の繰り越し予約が1件でもあるか（月曜の実行が対象決定まで到達したか） */
+async function hasWeeklyDigestReservation(
+  supabase: AdminClient,
+  weekStart: string
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("email_logs")
+    .select("user_id")
+    .eq("kind", WEEKLY_DIGEST_RESERVATION_KIND)
+    .eq("reference_key", weekStart)
+    .limit(1);
+  if (error) {
+    throw new Error(error.message);
+  }
+  return (data ?? []).length > 0;
+}
+
 /**
  * 月曜に週次進捗の対象になったユーザーを繰り越し予約として記録する（既にあれば何もしない）。
  * 予約は送信の前提とし、失敗したら throw する（呼び出し元は1通も送らずに失敗を返す）。
@@ -379,6 +403,11 @@ export type EmailDigestResult =
       skipped: number;
       /** 上限・時間切れで今回送らなかった通数（うち週次進捗は翌日以降に繰り越す） */
       deferred: number;
+      /**
+       * 今週の週次進捗の予約が無く、取り戻し期間も過ぎたため週次進捗を送らなかった
+       * （月曜・火曜の実行が完了しなかった）
+       */
+      weeklyReservationMissing: boolean;
     };
 
 export type EmailDigestOptions = {
@@ -402,9 +431,9 @@ async function buildQueue(
   users: DigestUser[],
   today: string,
   appUrl: string
-): Promise<QueuedEmail[]> {
+): Promise<{ queue: QueuedEmail[]; weeklyReservationMissing: boolean }> {
   if (users.length === 0) {
-    return [];
+    return { queue: [], weeklyReservationMissing: false };
   }
 
   const contents = await fetchOrderedContents(supabase);
@@ -460,12 +489,33 @@ async function buildQueue(
   // 週次進捗（reference_key は週の開始日）。対象を決めるのは月曜だけで、月曜の対象者を繰り越し
   // 予約として記録する。火〜日曜は、予約を持ちまだ送っていないユーザー（月曜に上限・時間切れ・
   // 同日の別の案内で送れなかった分）だけに送り、週の途中で新しく対象になったユーザーには送らない。
+  // ただし今週の予約が1件も無い（月曜の実行が対象決定まで到達しなかった）ときは、
+  // `WEEKLY_DIGEST_CATCH_UP_DAYS`（火曜）までの実行が月曜の代わりに対象を決める。
   // 先週の途中以降に登録したユーザーには、まるごとの「先週」が無いため送らない。
   const weekStart = weekStartOf(today);
-  const isWeekStart = today === weekStart;
+  const daysSinceWeekStart = daysBetween(weekStart, today);
+  let decidesTargets = daysSinceWeekStart === 0;
+  let weeklyReservationMissing = false;
+  if (!decidesTargets && !(await hasWeeklyDigestReservation(supabase, weekStart))) {
+    // 月曜の実行が対象決定まで到達しなかった（失敗・スキップ・起動漏れ）。火曜までは月曜の
+    // 代わりに対象を決め、それより後は送らずに気づけるようにする
+    if (daysSinceWeekStart <= WEEKLY_DIGEST_CATCH_UP_DAYS) {
+      decidesTargets = true;
+      console.warn(
+        `[定期メール] 今週（${weekStart}）の週次進捗の予約が無いため、今日の実行で対象を決めて送ります`
+      );
+    } else {
+      weeklyReservationMissing = true;
+      console.warn(
+        `[定期メール] 今週（${weekStart}）の週次進捗の予約が無いため、週次進捗は送りません（月曜・火曜の実行が完了しなかった可能性があります）`
+      );
+    }
+  }
   let weeklyPool = users.filter((user) => coversPreviousWeek(user.createdAt, weekStart));
   const poolIds = () => weeklyPool.map((user) => user.userId);
-  if (!isWeekStart) {
+  if (weeklyReservationMissing) {
+    weeklyPool = [];
+  } else if (!decidesTargets) {
     const reserved = await fetchLoggedUserIds(
       supabase,
       poolIds(),
@@ -513,7 +563,7 @@ async function buildQueue(
     });
   }
 
-  if (isWeekStart) {
+  if (decidesTargets) {
     await reserveWeeklyDigest(
       supabase,
       weeklyItems.map((item) => item.user.userId),
@@ -523,7 +573,7 @@ async function buildQueue(
   // 今日 N 日目の案内を送るユーザーには、週次進捗を翌日以降に回す（予約済みのため繰り越される）
   queue.push(...weeklyItems.filter((item) => !queuedUserIds.has(item.user.userId)));
 
-  return queue;
+  return { queue, weeklyReservationMissing };
 }
 
 /**
@@ -594,6 +644,7 @@ async function sendDigest(
   const { clock, sleep, startedAt } = timing;
 
   let queue: QueuedEmail[];
+  let weeklyReservationMissing: boolean;
   let limit: number;
   try {
     const todayLogs = await fetchTodayPromotionalLogs(supabase, today);
@@ -601,7 +652,7 @@ async function sendDigest(
     const users = (await fetchDigestUsers(supabase)).filter(
       (user) => !todayLogs.userIds.has(user.userId)
     );
-    queue = await buildQueue(supabase, users, today, appUrl);
+    ({ queue, weeklyReservationMissing } = await buildQueue(supabase, users, today, appUrl));
   } catch (error) {
     console.error(
       "[定期メール] 送信対象の抽出でエラーが発生しました:",
@@ -670,6 +721,7 @@ async function sendDigest(
     queued: queue.length,
     ...counts,
     deferred: rest.length,
+    weeklyReservationMissing,
   };
 }
 

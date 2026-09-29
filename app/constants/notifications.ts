@@ -56,6 +56,14 @@ export type PromotionalEmailKind = (typeof PROMOTIONAL_EMAIL_KINDS)[number];
  */
 export const WEEKLY_DIGEST_RESERVATION_KIND = "weekly_digest_reserved";
 
+/**
+ * 週次進捗の対象決定の取り戻し期間（週の開始日からの日数）。月曜の実行が失敗・スキップ・
+ * 起動漏れで今週の繰り越し予約が1件も無いとき、この日数までの実行は月曜の代わりに対象を
+ * 決めて予約する（火曜まで）。それより後は送らず警告だけ出す（週の途中で初めて Cron を
+ * 動かした場合に、その週の残りの日に一斉に送らないため）
+ */
+export const WEEKLY_DIGEST_CATCH_UP_DAYS = 1;
+
 /** 未学習リマインド（`inactivity_reminder`）を送る「登録から N 日目」 */
 export const INACTIVITY_REMINDER_DAYS = [7, 14] as const;
 

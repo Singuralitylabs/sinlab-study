@@ -23,6 +23,7 @@ beforeEach(() => {
     duplicate: 0,
     skipped: 0,
     deferred: 0,
+    weeklyReservationMissing: false,
   });
 });
 

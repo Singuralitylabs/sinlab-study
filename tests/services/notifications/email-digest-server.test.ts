@@ -24,7 +24,7 @@ type Filter = (row: Row) => boolean;
  * 用意したツリーをそのまま返す）。`email_logs` の INSERT は UNIQUE (user_id, kind, reference_key)
  * を再現し、違反なら 23505 を返す。
  */
-function createFakeDb(tables: Record<string, Row[]>) {
+function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number } = {}) {
   const db: Record<string, Row[]> = { email_logs: [], ...tables };
   let nextId = 1;
   /** INSERT した行の created_at（DB の now()）。runDigest() が実行日時に合わせる */
@@ -38,6 +38,7 @@ function createFakeDb(tables: Record<string, Row[]>) {
     let upsertRows: Row[] = [];
     const filters: Filter[] = [];
     let range: [number, number] | null = null;
+    let limit: number | null = null;
 
     // UNIQUE (user_id, kind, reference_key) と cron_locks の主キー (name)
     const isDuplicate = (rows: Row[], value: Row) =>
@@ -91,7 +92,11 @@ function createFakeDb(tables: Record<string, Row[]>) {
         db[table] = rows.filter((row) => !matched.includes(row));
         return { data: null, error: null };
       }
-      return { data: range ? matched.slice(range[0], range[1] + 1) : matched, error: null };
+      let result = range ? matched.slice(range[0], range[1] + 1) : matched;
+      if (limit !== null) result = result.slice(0, limit);
+      // PostgREST の db-max-rows（1回のレスポンスの最大行数）
+      if (options.maxRows !== undefined) result = result.slice(0, options.maxRows);
+      return { data: result, error: null };
     };
 
     const builder = {
@@ -136,6 +141,10 @@ function createFakeDb(tables: Record<string, Row[]>) {
         return builder;
       },
       order: () => builder,
+      limit: (count: number) => {
+        limit = count;
+        return builder;
+      },
       range: (start: number, end: number) => {
         range = [start, end];
         return builder;
@@ -251,13 +260,19 @@ const themes: Row[] = [
   },
 ];
 
-function setup(tables: { users: Row[]; user_progress?: Row[]; submissions?: Row[] }) {
-  const fake = createFakeDb({
-    learning_themes: themes,
-    user_progress: [],
-    submissions: [],
-    ...tables,
-  });
+function setup(
+  tables: { users: Row[]; user_progress?: Row[]; submissions?: Row[] },
+  options: { maxRows?: number } = {}
+) {
+  const fake = createFakeDb(
+    {
+      learning_themes: themes,
+      user_progress: [],
+      submissions: [],
+      ...tables,
+    },
+    options
+  );
   vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake.client as never);
   fakeClock = fake.clock;
   return fake;
@@ -462,7 +477,7 @@ describe("送信対象の抽出", () => {
     await runDigest(TUESDAY);
 
     // 7日目は 10/6（火）。u1 だけが未学習リマインド。u2・u3 は学習済みのため送らない
-    // （月曜の実行が無く週次進捗の繰り越し予約も無いため、火曜に週次進捗も送らない）
+    // （先週の途中に登録したため、火曜の取り戻しでも週次進捗の対象にならない）
     const reminder = sentEmailTo("u1@example.com");
     expect(reminder.subject).toContain("最初の1本");
     expect(reminder.text).toContain(`${APP_URL}/learn/1/10/100/1000`);
@@ -652,12 +667,50 @@ describe("1回あたりの上限と繰り越し", () => {
     expect(sentTo()).toEqual(["u1@example.com"]);
   });
 
-  it("Cron を週の途中（金曜）に初めて動かしても、週次進捗は次の月曜まで送らない", async () => {
+  it("Cron を週の途中（金曜）に初めて動かしても、週次進捗は次の月曜まで送らず、予約が無いことを返す", async () => {
     setup({ users: [userRow(1), userRow(2)] });
 
     const friday = await runDigest(new Date("2026-10-08T23:00:00Z")); // 10/9（金）
 
-    expect(friday).toMatchObject({ queued: 0 });
+    expect(friday).toMatchObject({ queued: 0, weeklyReservationMissing: true });
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("月曜の実行が完了しなかった（予約が1件も無い）週は、火曜の実行が月曜の代わりに対象を決めて送る", async () => {
+    const { db } = setup({ users: [userRow(1), userRow(2)] });
+
+    const tuesday = await runDigest(TUESDAY);
+
+    expect(tuesday).toMatchObject({ sent: 2, weeklyReservationMissing: false });
+    expect(sentEmailTo("u1@example.com").subject).toContain("今週の学習");
+    expect(
+      db.email_logs.filter((row) => row.kind === "weekly_digest_reserved").map((r) => r.user_id)
+    ).toEqual([1, 2]);
+
+    // 水曜は火曜の予約に沿って繰り越し分だけを判定する（送信済みなので送らない）
+    const wednesday = await runDigest(new Date("2026-10-06T23:00:00Z"));
+    expect(wednesday).toMatchObject({ queued: 0, weeklyReservationMissing: false });
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("月曜の実行が失敗して予約が無くても、火曜の実行で取り戻す", async () => {
+    const { failures } = setup({ users: [userRow(1)] });
+    failures.add("users:select");
+    expect(await runDigest(MONDAY)).toEqual({ status: "failed" });
+    failures.delete("users:select");
+
+    const tuesday = await runDigest(TUESDAY);
+
+    expect(tuesday).toMatchObject({ sent: 1 });
+    expect(sentEmailTo("u1@example.com").subject).toContain("今週の学習");
+  });
+
+  it("予約が無いまま水曜以降になったら週次進捗は送らず、予約が無いことを返す", async () => {
+    setup({ users: [userRow(1)] });
+
+    const wednesday = await runDigest(new Date("2026-10-06T23:00:00Z")); // 10/7（水）
+
+    expect(wednesday).toMatchObject({ queued: 0, weeklyReservationMissing: true });
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
@@ -744,5 +797,17 @@ describe("実行ロック（cron_locks）", () => {
 
     expect(result).toEqual({ status: "failed" });
     expect(sendEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe("ページング", () => {
+  it("サーバーの最大行数（db-max-rows）が 1000 未満でも、全件を取りこぼさない", async () => {
+    // 1回のレスポンスが最大 2 行の環境で、5 人全員に週次進捗を送る
+    setup({ users: Array.from({ length: 5 }, (_, i) => userRow(i + 1)) }, { maxRows: 2 });
+
+    const result = await runDigest(MONDAY);
+
+    expect(result).toMatchObject({ sent: 5 });
+    expect(sentTo()).toHaveLength(5);
   });
 });
