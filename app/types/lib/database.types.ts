@@ -472,6 +472,7 @@ export type Database = {
           created_at: string | null;
           display_name: string;
           email: string;
+          email_opt_out_at: string | null;
           id: number;
           is_deleted: boolean | null;
           membership_type: string | null;
@@ -488,6 +489,7 @@ export type Database = {
           created_at?: string | null;
           display_name: string;
           email: string;
+          email_opt_out_at?: string | null;
           id?: number;
           is_deleted?: boolean | null;
           membership_type?: string | null;
@@ -504,6 +506,7 @@ export type Database = {
           created_at?: string | null;
           display_name?: string;
           email?: string;
+          email_opt_out_at?: string | null;
           id?: number;
           is_deleted?: boolean | null;
           membership_type?: string | null;
