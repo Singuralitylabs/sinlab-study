@@ -78,8 +78,7 @@ describe("fetchStudentsProgress", () => {
   });
 
   // last_activity is non-null in the generated RPC type but can be null at runtime (completed_at is
-  // nullable;
-  // types are overridden via overrideTypes). Ensure null passes through.
+  // nullable; types are overridden via overrideTypes). Ensure null passes through.
   it("RPCが last_activity: null を返した場合、そのままnullとしてマッピングする", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
@@ -357,7 +356,6 @@ describe("approveUser", () => {
       expect(builder.update).toHaveBeenCalledWith(
         expect.objectContaining({ status: "active", membership_type: membershipType })
       );
-      // 承認メールの二重送信防止キーとして、書き込んだ updated_at と同じ時刻を返す
       expect(result.approvedAt).toEqual(expect.any(String));
       expect(builder.update).toHaveBeenCalledWith(
         expect.objectContaining({ updated_at: result.approvedAt })
@@ -741,8 +739,7 @@ describe("createTheme", () => {
     );
     expect(mockClient.from).toHaveBeenCalledTimes(1);
     // Also verify the is_deleted=false filter is actually applied; the absence of 999 in the mock
-    // data alone
-    // wouldn't catch a regression.
+    // data alone wouldn't catch a regression.
     const siblingsBuilder = mockClient.from.mock.results[0].value;
     expect(siblingsBuilder.eq).toHaveBeenCalledWith("is_deleted", false);
   });
@@ -796,8 +793,7 @@ describe("createPhase", () => {
 
   it("insertAfterIdが別テーマ配下のフェーズを指す場合、InvalidInsertAfterIdErrorを投げる", async () => {
     // The sibling fetch filters by theme_id and is_deleted; verify both are applied, since the mock
-    // returns its
-    // data regardless of filters.
+    // returns its data regardless of filters.
     const mockClient = createMockSupabaseClient({
       tableResults: { learning_phases: { data: [], error: null } },
     });
@@ -873,8 +869,7 @@ describe("createContent", () => {
 
   it("insertAfterIdが削除済みコンテンツを指す場合、InvalidInsertAfterIdErrorを投げる", async () => {
     // The mock builder ignores .eq() arguments and returns the configured data, so verify
-    // explicitly that
-    // is_deleted=false is applied; otherwise removing the filter would still pass.
+    // explicitly that is_deleted=false is applied; otherwise removing the filter would still pass.
     const mockClient = createMockSupabaseClient({
       tableResults: { learning_contents: { data: [{ id: 1, display_order: 1 }], error: null } },
     });
@@ -1019,10 +1014,8 @@ describe("updatePhase（編集時の再採番）", () => {
 
   it("theme_idを変更した場合、移動先の末尾に追加し（insertAfterId省略時）、本体UPDATE成功後に移動元に残った兄弟の欠番も再採番する", async () => {
     // Call order: current values -> destination siblings -> body UPDATE -> source siblings ->
-    // source bulk RPC.
-    // Updating the body before compacting the source keeps source siblings' order intact if a step
-    // fails
-    // (see resequenceDestinationForUpdate).
+    // source bulk RPC. Updating the body before compacting the source keeps source siblings' order
+    // intact if a step fails (see resequenceDestinationForUpdate).
     const mockClient = createMockSupabaseClient({
       tableResults: {
         learning_phases: [

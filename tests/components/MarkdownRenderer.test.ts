@@ -29,8 +29,8 @@ describe("MarkdownRenderer", () => {
     const html = renderToStaticMarkup(createElement(MarkdownRenderer, { content }));
 
     expect(html).not.toMatch(/<div class="a">/);
-    // ハイライトによりhljs-*のspanタグが挿入されるため、タグを除去した上で
-    // エスケープ済みの内容が欠落・順序入れ替えなく完全に一致することを確認する
+    // Highlighting inserts hljs-* span tags, so strip tags and check that the escaped content
+    // matches exactly, with nothing missing or reordered.
     expect(html.replace(/<[^>]+>/g, "")).toContain("&lt;div class=&quot;a&quot;&gt;hi&lt;/div&gt;");
   });
 
@@ -66,7 +66,7 @@ describe("MarkdownRenderer", () => {
 
     const html = renderToStaticMarkup(createElement(MarkdownRenderer, { content }));
 
-    // hljsクラスが一切付与されず、`<code class="language-ruby">`のプレーン表示のままであること
+    // No hljs class at all; it stays a plain `<code class="language-ruby">`.
     expect(html).not.toContain("hljs");
     expect(html).toContain('<code class="language-ruby">puts &quot;hi&quot;\n</code>');
   });

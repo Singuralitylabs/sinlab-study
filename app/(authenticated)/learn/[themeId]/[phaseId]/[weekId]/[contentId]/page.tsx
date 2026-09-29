@@ -61,8 +61,7 @@ export default async function ContentPage({ params }: PageProps) {
   ]);
 
   // 404 when the URL's themeId/phaseId don't match the week's actual phase/theme (keeps breadcrumbs
-  // and prev/next
-  // links from pointing at wrong URLs).
+  // and prev/next links from pointing at wrong URLs).
   if (!week || week.phase_id !== phaseIdNum || week.phase?.theme_id !== themeIdNum) {
     notFound();
   }
@@ -75,10 +74,9 @@ export default async function ContentPage({ params }: PageProps) {
   }
 
   // For members/trial users, 404 before the lock check if any parent (week/phase/theme) is
-  // unpublished or deleted.
-  // The summary goes through service_role and only sees the content row's is_published, so
-  // rendering the lock
-  // screen first would leak titles/breadcrumbs under an unpublished theme (#242).
+  // unpublished or deleted. The summary goes through service_role and only sees the content row's
+  // is_published, so rendering the lock screen first would leak titles/breadcrumbs under an
+  // unpublished theme (#242).
   if (!checkContentPermissions(userRole) && !isWeekHierarchyPublished(week)) {
     notFound();
   }
@@ -153,22 +151,17 @@ export default async function ContentPage({ params }: PageProps) {
   }
 
   // Even when the content row is published, an unpublished/deleted week/phase/theme makes it a
-  // preview (badge,
-  // completion button/submission form availability); members/trial users get 404 (#216). They are
-  // already rejected
-  // by the guard before the lock check (#242), so this re-verifies the same condition via the
-  // embedded content row
-  // as a second layer.
+  // preview (badge, completion button/submission form availability); members/trial users get 404
+  // (#216). They are already rejected by the guard before the lock check (#242), so this
+  // re-verifies the same condition via the embedded content row as a second layer.
   const isFullyPublished = isContentFullyPublished(content);
   if (!isFullyPublished && !checkContentPermissions(userRole)) {
     notFound();
   }
 
   // Issue the slide signed URL only after the lock check (isLocked) and the RLS-applied
-  // fetchContentById() pass;
-  // locked or unpublished content (except admin/maintainer preview) never gets here (#89). Runs in
-  // parallel with
-  // the progress fetches.
+  // fetchContentById() pass; locked or unpublished content (except admin/maintainer preview) never
+  // gets here (#89). Runs in parallel with the progress fetches.
   const [{ isCompleted }, { data: existingReview }, { data: latestSubmission }, slideSignedUrl] =
     await Promise.all([
       userId

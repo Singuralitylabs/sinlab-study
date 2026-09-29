@@ -106,7 +106,7 @@ describe("recoverCompletedCheckout", () => {
     await recoverCompletedCheckout(5, sessions, heldClaimedAt);
 
     expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledTimes(1);
-    // Webhookのイベントidと衝突しないキーで、1時間に1回に抑止する
+    // Key that can't collide with the webhook event id, limiting the notification to once per hour.
     expect(claimEvent).toHaveBeenCalledWith(
       "checkout_recovery_notice:5:cs_paid,cs_paid_2",
       "app.checkout_recovery_notice",

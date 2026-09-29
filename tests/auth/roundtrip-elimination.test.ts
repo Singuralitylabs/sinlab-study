@@ -2,8 +2,7 @@ import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // End-to-end check combining proxy and getServerAuth: one navigation runs the users SELECT once; an
-// API Route
-// drops spoofed headers and runs its own single lookup.
+// API Route drops spoofed headers and runs its own single lookup.
 
 vi.mock("@supabase/ssr", () => ({
   createServerClient: vi.fn(),

@@ -38,11 +38,9 @@ interface ContentsFilterValues {
 
 /**
  * Theme/phase/week/type render straight from useSearchParams() as the single source of truth:
- * mirroring them in
- * local state would miss URL changes from outside this component (the "clear filters" link, browser
- * back/forward) and leave a stale selection. Only the title search uses debounced local state, to
- * avoid a URL
- * update per keystroke.
+ * mirroring them in local state would miss URL changes from outside this component (the "clear
+ * filters" link, browser back/forward) and leave a stale selection. Only the title search uses
+ * debounced local state, to avoid a URL update per keystroke.
  */
 export function ContentsFilterBar({ themes, phases, weeks }: ContentsFilterBarProps) {
   const router = useRouter();
@@ -52,8 +50,7 @@ export function ContentsFilterBar({ themes, phases, weeks }: ContentsFilterBarPr
   const phase = searchParams.get("phase") ?? "";
   const week = searchParams.get("week") ?? "";
   // For an invalid type from a hand-typed URL the server ignores it and shows everything, so
-  // normalize the select
-  // to "all" to keep the UI consistent with the results.
+  // normalize the select to "all" to keep the UI consistent with the results.
   const rawType = searchParams.get("type") ?? "";
   const type = isContentType(rawType) ? rawType : "";
   const urlQ = searchParams.get("q") ?? "";
@@ -61,10 +58,9 @@ export function ContentsFilterBar({ themes, phases, weeks }: ContentsFilterBarPr
   const [q, setQ] = useState(urlQ);
 
   // Follow external changes to q in the URL (clear, back/forward) in the input. Don't overwrite
-  // when our own
-  // debounce commit (trailing-space trim) wrote back a semantically equal value; e.g. syncing
-  // q="hello" while
-  // typing "hello " would concatenate the next characters without the space.
+  // when our own debounce commit (trailing-space trim) wrote back a semantically equal value; e.g.
+  // syncing q="hello" while typing "hello " would concatenate the next characters without the
+  // space.
   useEffect(() => {
     setQ((prevQ) => (urlQ === prevQ.trim() ? prevQ : urlQ));
   }, [urlQ]);

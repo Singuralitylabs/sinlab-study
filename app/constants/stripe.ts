@@ -27,8 +27,7 @@ export type SubscriptionPrice = {
 
 /**
  * Allow Checkout only for monthly JPY prices; non-monthly (amount: null) and non-JPY prices are
- * rejected
- * because they would diverge from the legal display.
+ * rejected because they would diverge from the legal display.
  */
 export function isChargeableSubscriptionPrice(
   price: SubscriptionPrice
@@ -47,18 +46,15 @@ export function logDisplayPriceDrift(amount: number): void {
 
 /**
  * Stripe's minimum charge (JPY). Charges below it can fail at Checkout/payment, so this is used to
- * check whether
- * the first proration for a signup just before the anchor falls below it.
+ * check whether the first proration for a signup just before the anchor falls below it.
  */
 export const STRIPE_MINIMUM_CHARGE_AMOUNT_JPY = 50;
 
 /**
  * Master switch for Stripe (temporarily off for the Vercel Hobby terms, #115). Fail-closed:
- * anything but "true"
- * is disabled. Code is kept; re-enable via env after the Cloudflare Workers cutover (see
- * AGENTS.md).
- * Lives here, not in stripe-server.ts, so modules like (authenticated)/layout.tsx don't pull the
- * Stripe SDK in.
+ * anything but "true" is disabled. Code is kept; re-enable via env after the Cloudflare Workers
+ * cutover (see AGENTS.md). Lives here, not in stripe-server.ts, so modules like
+ * (authenticated)/layout.tsx don't pull the Stripe SDK in.
  */
 export function isStripeEnabled(): boolean {
   return process.env.STRIPE_ENABLED === "true";

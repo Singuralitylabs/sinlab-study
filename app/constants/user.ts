@@ -2,9 +2,8 @@ import type { MembershipType, UserRoleType, UserStatusType } from "../types";
 
 /**
  * User status. Annotating with Record<string, UserStatusType> would disable `as const`, letting key
- * typos pass
- * type checks and become undefined at runtime; validate only the values with `satisfies`, as
- * USER_MEMBERSHIP does.
+ * typos pass type checks and become undefined at runtime; validate only the values with
+ * `satisfies`, as USER_MEMBERSHIP does.
  */
 export const USER_STATUS = {
   TRIAL: "trial",

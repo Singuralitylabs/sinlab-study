@@ -35,9 +35,8 @@ export interface AdjacentContent extends NavigationContent {
 
 /**
  * Sort by phase then week via compareGroupLevel() (missing display_order last, id tiebreak). Empty
- * weeks/phases
- * contribute nothing; weeks with a null phase and contents whose week_id isn't in the week list are
- * excluded.
+ * weeks/phases contribute nothing; weeks with a null phase and contents whose week_id isn't in the
+ * week list are excluded.
  */
 export function buildThemeContentOrder(
   weeks: NavigationWeek[],
@@ -102,9 +101,8 @@ function toAdjacent(
 
 /**
  * Boundary kind comes only from comparing phaseId / weekId of the neighbours, never from URL
- * params.
- * Returns { prev: null, next: null } when the current content isn't in the sequence or the sequence
- * is empty.
+ * params. Returns { prev: null, next: null } when the current content isn't in the sequence or the
+ * sequence is empty.
  */
 export function resolveAdjacentContents(
   orderedContents: NavigationContent[],
@@ -127,10 +125,9 @@ export type NavigationEndFallback = "theme" | "phase";
 
 /**
  * Normal case: navigate within the theme sequence (the end goes back to the theme). Degraded case
- * (empty
- * sequence, or the current content isn't in it, e.g. a published week under an unpublished phase):
- * compute
- * from the current week's summary only, and the end goes back to the phase as before.
+ * (empty sequence, or the current content isn't in it, e.g. a published week under an unpublished
+ * phase): compute from the current week's summary only, and the end goes back to the phase as
+ * before.
  */
 export function resolveContentNavigation(
   orderedContents: NavigationContent[],

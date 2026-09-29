@@ -28,10 +28,8 @@ export default async function UpgradeSuccessPage({
 
   if (!isStripeEnabled()) {
     // While disabled, make no Stripe API calls or promotions. Hosted Checkout sessions stay valid
-    // up to 24h after
-    // creation, so revisiting the success page of a session started just before the flag went OFF
-    // must not
-    // unconditionally verify payment and promote.
+    // up to 24h after creation, so revisiting the success page of a session started just before the
+    // flag went OFF must not unconditionally verify payment and promote.
     errorMessage = STRIPE_DISABLED_MESSAGE;
   } else if (userId && sessionId) {
     try {
@@ -45,8 +43,7 @@ export default async function UpgradeSuccessPage({
         errorMessage = "決済情報を確認できませんでした";
       } else {
         // The redirect can land here before the webhook, so run the same idempotent promotion here
-        // too (safe even if it
-        // overlaps the webhook).
+        // too (safe even if it overlaps the webhook).
         const { error, activated, currentPeriodEnd } =
           await activateUserFromCheckoutSession(session);
         if (error) {
@@ -54,15 +51,13 @@ export default async function UpgradeSuccessPage({
           errorMessage = "会員登録の反映に失敗しました。時間をおいて再度お試しください";
         } else if (!activated) {
           // Cases where nothing was actually promoted, e.g. revisiting a canceled session's URL or
-          // an unpaid payment.
-          // Permissions are unchanged, so show no success.
+          // an unpaid payment. Permissions are unchanged, so show no success.
           errorMessage = "このお申し込みは現在有効ではありません";
         } else {
           succeeded = true;
           // Right after a small prorated charge, show the next full-charge date to reduce
-          // inquiries.
-          // activateUserFromCheckoutSession() already returns the value fetched from Stripe, so no
-          // DB re-read.
+          // inquiries. activateUserFromCheckoutSession() already returns the value fetched from
+          // Stripe, so no DB re-read.
           if (currentPeriodEnd) {
             nextBillingDateLabel = formatDate(currentPeriodEnd);
           }

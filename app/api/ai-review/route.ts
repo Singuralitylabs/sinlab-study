@@ -19,10 +19,9 @@ import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 // Next.js route segment config is statically analyzed as literals only, so this can't be a
-// constant.
-// generateReview() caps all attempts + retry waits at GEMINI_TOTAL_BUDGET_MS
-// (app/constants/gemini.ts), so Gemini
-// time never exceeds it; 60s (greater than the budget) leaves headroom for DB round trips.
+// constant. generateReview() caps all attempts + retry waits at GEMINI_TOTAL_BUDGET_MS
+// (app/constants/gemini.ts), so Gemini time never exceeds it; 60s (greater than the budget) leaves
+// headroom for DB round trips.
 export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
@@ -66,9 +65,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Visibility check: content that became non-trial/unpublished after submission gives 403. Check
-    // first because
-    // the nested select's content is null under RLS, which would otherwise yield the misleading
-    // "exercise not found" error.
+    // first because the nested select's content is null under RLS, which would otherwise yield the
+    // misleading "exercise not found" error.
     if (!(await isContentVisible(supabase, submission.content_id))) {
       return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
     }

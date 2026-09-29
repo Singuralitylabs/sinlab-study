@@ -66,7 +66,7 @@ export function PrevNextNav({
           </Link>
         </Button>
       ) : (
-        // 意図的なスペーサ。「次へ」を右端に保つために必要
+        // Intentional spacer: keeps "next" at the right edge.
         <div className="flex-1" />
       )}
 

@@ -28,10 +28,8 @@ const CHECKOUT_CONFLICT_MESSAGE = "既に決済手続き中、またはご契約
 
 /**
  * Destination when this request applied a paid-but-unapplied checkout and promoted the member. The
- * success page
- * re-runs the same idempotent apply and shows the completion screen (with the next billing date),
- * so recovery
- * reads as the normal path (no error prompting a reload).
+ * success page re-runs the same idempotent apply and shows the completion screen (with the next
+ * billing date), so recovery reads as the normal path (no error prompting a reload).
  */
 function checkoutSuccessPath(sessionId: string): string {
   return `/upgrade/success?session_id=${encodeURIComponent(sessionId)}`;
@@ -60,10 +58,8 @@ export async function POST() {
     }
 
     // UI disabled alone doesn't stop stale tabs or direct POSTs, so re-check the real price right
-    // before creation.
-    // Price retrieval (a cached read) creates no Checkout Session, so do it before acquiring the
-    // claim; a request
-    // that only can't confirm the price must not write to the DB.
+    // before creation. Price retrieval (a cached read) creates no Checkout Session, so do it before
+    // acquiring the claim; a request that only can't confirm the price must not write to the DB.
     let price: { amount: number | null; currency: string };
     try {
       price = await fetchSubscriptionPrice();
@@ -77,14 +73,11 @@ export async function POST() {
     logDisplayPriceDrift(price.amount);
 
     // Acquire the claim atomically before creating a Checkout Session. A plain SELECT existence
-    // check lets concurrent
-    // requests through while no mirror row exists until payment completes, creating two sessions
-    // (double contract
-    // and double billing; #103).
+    // check lets concurrent requests through while no mirror row exists until payment completes,
+    // creating two sessions (double contract and double billing; #103).
     let claim = await claimCheckoutSlot(auth.userId);
     // A claim left paid-but-unapplied never clears with time (not covered by the TTL). Apply it
-    // here to self-recover
-    // and retry the claim once (#250).
+    // here to self-recover and retry the claim once (#250).
     if (claim.outcome === "blocked") {
       const recovery = await recoverCompletedCheckout(
         auth.userId,
@@ -114,8 +107,7 @@ export async function POST() {
       return NextResponse.json({ error: CHECKOUT_CONFLICT_MESSAGE }, { status: 409 });
     }
     // Still blocked after the retry (e.g. another concurrent flow was paid): make the user wait
-    // instead of applying
-    // repeatedly, as before.
+    // instead of applying repeatedly, as before.
     if (claim.outcome === "blocked") {
       return NextResponse.json({ error: CHECKOUT_CONFLICT_MESSAGE }, { status: 409 });
     }
@@ -137,11 +129,9 @@ export async function POST() {
     } catch (error) {
       console.error("Checkoutセッション作成エラー:", error);
       // Release the claim only when it is certain no valid session remains on Stripe's side.
-      // Releasing while unsure
-      // whether one was created (e.g. a network timeout) would allow another on top of an
-      // unrecorded valid session
-      // (that claim is cleared by recovery at the next claim - reusing a valid session for the
-      // Customer - or by the TTL).
+      // Releasing while unsure whether one was created (e.g. a network timeout) would allow another
+      // on top of an unrecorded valid session (that claim is cleared by recovery at the next claim
+      // - reusing a valid session for the Customer - or by the TTL).
       const releasable = !(error instanceof CheckoutCreationError) || error.claimReleasable;
       if (releasable) {
         await releaseCheckoutSlot(auth.userId, claim.claimedAt);

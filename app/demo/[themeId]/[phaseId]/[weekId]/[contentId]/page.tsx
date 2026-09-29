@@ -66,10 +66,8 @@ export default async function DemoContentPage({ params }: PageProps) {
     { label: content.title },
   ];
 
-  // デモとしてアクセス可能かどうか（Phase1・Week1のみ）
   const isDemoAccessible = ctx !== null && content.week_id === ctx.week.id;
 
-  // ロック画面
   if (!isDemoAccessible) {
     return (
       <div className="max-w-4xl mx-auto">
@@ -95,9 +93,9 @@ export default async function DemoContentPage({ params }: PageProps) {
     );
   }
 
-  // デモアクセス可能なコンテンツ。スライドの署名付きURL（お試しユーザーと同じ範囲、
-  // つまり公開済み・お試し公開 is_open_to_trial = true のスライドに限る。判定は
-  // createDemoSlideSignedUrl() 自身が行う。issue #89）は週のコンテンツ一覧と並列に取得する
+  // Slide signed URL (same scope as trial users: only published, is_open_to_trial = true slides;
+  // decided by
+  // createDemoSlideSignedUrl() itself; #89) is fetched in parallel with the week's content list.
   const [{ data: weekContents }, slideSignedUrl] = await Promise.all([
     fetchDemoContentsByWeekId(weekIdNum),
     content.content_type === "slide" && content.is_open_to_trial

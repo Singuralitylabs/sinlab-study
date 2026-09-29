@@ -106,7 +106,6 @@ export default async function HomePage() {
         </Card>
       )}
 
-      {/* 全体進捗 */}
       <Card className="mb-6">
         <CardContent className="pt-6">
           <div className="flex items-center gap-4 mb-4">
@@ -127,7 +126,6 @@ export default async function HomePage() {
 
       {isMember && <GettingStartedChecklist items={gettingStartedItems} />}
 
-      {/* テーマ一覧 */}
       <div className="grid gap-4">
         <h2 className="text-lg font-semibold flex items-center gap-2">
           <BookOpen className="h-5 w-5" />
@@ -152,7 +150,6 @@ export default async function HomePage() {
                   className={`overflow-hidden transition-all hover:shadow-md hover:border-primary/20 ${isCompleted ? "border-l-4 border-l-success" : ""}`}
                 >
                   <div className="flex">
-                    {/* サムネイル */}
                     <div className="relative w-24 shrink-0 bg-linear-to-br from-primary/5 to-primary/15">
                       {theme.image_url ? (
                         <Image
@@ -202,7 +199,6 @@ export default async function HomePage() {
         )}
       </div>
 
-      {/* 学習を始めるボタン */}
       {themes.length > 0 && (
         <div className="mt-6 text-center">
           <Button asChild>

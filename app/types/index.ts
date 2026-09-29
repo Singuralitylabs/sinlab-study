@@ -49,10 +49,8 @@ export type AIReviewStatus = "pending" | "processing" | "completed" | "failed";
 
 /**
  * One file of a multi-file submission (submissions.code_files element). language/filename may be
- * empty for
- * compatibility with single-file submissions (code_content).
- * Defined as `type`, not `interface`: assigning to Supabase's Json type needs an implicit index
- * signature.
+ * empty for compatibility with single-file submissions (code_content). Defined as `type`, not
+ * `interface`: assigning to Supabase's Json type needs an implicit index signature.
  */
 export type CodeFile = {
   filename: string;

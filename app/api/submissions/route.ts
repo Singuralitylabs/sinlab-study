@@ -69,8 +69,7 @@ export async function POST(request: NextRequest) {
     const supabase = await createServerSupabaseClient();
 
     // Visibility check: 403 if contentId isn't visible to the user (trial-closed, unpublished and
-    // nonexistent IDs all
-    // give 0 rows via RLS).
+    // nonexistent IDs all give 0 rows via RLS).
     if (!(await isContentVisible(supabase, contentId))) {
       return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
     }

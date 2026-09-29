@@ -8,8 +8,7 @@ export interface QueryResult {
 
 /**
  * Supabase query builder mock. Implemented as a thenable (then/catch/finally) to support both list
- * queries
- * (awaited right after .order()) and single queries (.single() / .maybeSingle()).
+ * queries (awaited right after .order()) and single queries (.single() / .maybeSingle()).
  */
 export function createQueryBuilder(result: QueryResult) {
   const builder = {
@@ -45,8 +44,7 @@ export function createQueryBuilder(result: QueryResult) {
 
 /**
  * Pick the configured result by call order: arrays are consumed per call (the last element repeats
- * past the
- * end); an empty array counts as unspecified.
+ * past the end); an empty array counts as unspecified.
  */
 function pickConfiguredResult(
   configured: QueryResult | QueryResult[] | undefined,

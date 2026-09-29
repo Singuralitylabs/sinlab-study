@@ -1,12 +1,10 @@
 /**
  * Converts the content-management API's `storageRemoved` (Storage deletion result of the slide PDF)
- * into a screen
- * warning (#241). The API doesn't fail the DB operation on a Storage deletion failure; it returns
- * { success: true, storageRemoved: false } (spec 6.1). The DB operation succeeded, so the screen
- * stays in the
- * success state and warns that the slide PDF remains in Storage (same as ThemeForm's thumbnail
- * deletion).
- * No warning when storageRemoved is missing or true.
+ * into a screen warning (#241). The API doesn't fail the DB operation on a Storage deletion
+ * failure; it returns { success: true, storageRemoved: false } (spec 6.1). The DB operation
+ * succeeded, so the screen stays in the success state and warns that the slide PDF remains in
+ * Storage (same as ThemeForm's thumbnail deletion). No warning when storageRemoved is missing or
+ * true.
  */
 
 export type SlideStorageOperation = "delete" | "update" | "bulkDelete";

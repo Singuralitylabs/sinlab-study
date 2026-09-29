@@ -37,11 +37,11 @@ interface CodeFileInput {
   filename: string;
   language: CodeLanguage;
   content: string;
-  // ユーザーがファイル名を手動編集したか。false の間は言語変更にあわせて初期値を自動更新する
+  // Whether the user edited the filename by hand; while false, the default follows language
+  // changes.
   filenameEdited: boolean;
 }
 
-// デモ用のサンプルAIレビュー（実際のAPI呼び出しは行わない）
 const SAMPLE_REVIEW: AIReview = {
   id: 0,
   submission_id: 0,
@@ -101,12 +101,10 @@ export function DemoSubmissionForm({
     setCodeFiles((prev) => prev.map((file, i) => (i === index ? { ...file, ...patch } : file)));
   };
 
-  // ファイル名入力欄の変更。手動編集とみなし、以後は言語変更で初期値を上書きしない
   const handleFilenameChange = (index: number, filename: string) => {
     updateCodeFile(index, { filename, filenameEdited: true });
   };
 
-  // 言語変更。ファイル名が未編集なら、新しい言語のデフォルト名へ追従させる
   const handleLanguageChange = (index: number, language: CodeLanguage) => {
     setCodeFiles((prev) =>
       prev.map((file, i) => {
@@ -124,8 +122,9 @@ export function DemoSubmissionForm({
 
   const addCodeFile = () => {
     setCodeFiles((prev) => {
-      // 単一→複数ファイル化の初回は、ファイル名が空のファイルにデフォルト名を補完する
-      // （単一ファイル時はファイル名欄が非表示で未入力のため、複数化と同時に必須化される対策）
+      // On the first single -> multi-file switch, fill default names for empty filenames (the
+      // filename field is hidden and blank in single-file mode, so it would become required as soon
+      // as it switches to multi).
       const assigned: string[] = prev
         .map((f) => f.filename)
         .filter((name) => name.trim().length > 0);
@@ -158,7 +157,7 @@ export function DemoSubmissionForm({
     setIsReviewLoading(true);
     setAiReview(null);
 
-    // API呼び出しを行わず、サンプルレビューを表示する
+    // Demo: show the sample review instead of calling the API.
     await new Promise((resolve) => setTimeout(resolve, 1500));
 
     setIsLoading(false);

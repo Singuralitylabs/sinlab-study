@@ -6,8 +6,7 @@ import { ContentUpdateSchema } from "@/app/services/api/schemas";
 
 /**
  * Normalization expression of 20260917011152_validate_slide_pdf_url_object_keys.sql. The tests
- * below ensure the
- * UPDATE, the validation DO block and this constant all match.
+ * below ensure the UPDATE, the validation DO block and this constant all match.
  */
 const SLIDE_PDF_URL_SQL_NORMALIZE_EXPR = `regexp_replace(
       btrim(pdf_url, E' \\t\\r\\n'),
@@ -17,8 +16,7 @@ const SLIDE_PDF_URL_SQL_NORMALIZE_EXPR = `regexp_replace(
 
 /**
  * Invalid-value WHERE clause of the same migration; the tests ensure it matches this constant, so
- * changing
- * only one side fails (#217).
+ * changing only one side fails (#217).
  */
 const SLIDE_PDF_URL_SQL_INVALID_PREDICATE = `n.key = ''
     OR n.key ~ '^/'
@@ -45,8 +43,7 @@ function normalizeLikeMigration(pdfUrl: string): string {
 
 /**
  * Evaluates the SQL rejection condition in JS (regex and segment split mirror the SQL constant),
- * reproducing
- * the SQL rules without using toSlideObjectKey.
+ * reproducing the SQL rules without using toSlideObjectKey.
  */
 function isRejectedBySqlPredicate(pdfUrl: string): boolean {
   const key = normalizeLikeMigration(pdfUrl);
@@ -126,8 +123,7 @@ describe("slide pdf_url SQL 検証と toSlideObjectKey の一致 (#217)", () => 
 
 /**
  * Full executable statement of 20260926000000_normalize_blank_slide_pdf_url.sql (comments and blank
- * lines
- * removed; #243). Compared by exact match so added conditions (OR clauses) or SET changes are
+ * lines removed; #243). Compared by exact match so added conditions (OR clauses) or SET changes are
  * detected.
  */
 const BLANK_NORMALIZE_MIGRATION_STATEMENT = `UPDATE public.learning_contents
@@ -177,10 +173,8 @@ describe("pdf_url 空文字の正規化: SQL と管理APIスキーマの一致 (
 
   it("#217 の検証が拒否する空の値はすべて NULL 化の対象で、NULL 行は #217 の検証が対象にしない", () => {
     // 20260917011152 aborts on empty/blank-only values. This migration nulls all of them, and both
-    // the #217
-    // normalization UPDATE and the validation DO exclude NULL rows via `WHERE pdf_url IS NOT NULL`
-    // (as many
-    // filters as normalization expression occurrences).
+    // the #217 normalization UPDATE and the validation DO exclude NULL rows via `WHERE pdf_url IS
+    // NOT NULL` (as many filters as normalization expression occurrences).
     for (const value of ["", "   ", "\t\r\n"]) {
       expect(isRejectedBySqlPredicate(value)).toBe(true);
       expect(isNulledBySqlBlankPredicate(value)).toBe(true);

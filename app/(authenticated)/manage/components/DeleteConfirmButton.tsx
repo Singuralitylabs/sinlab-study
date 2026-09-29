@@ -16,7 +16,7 @@ export function DeleteConfirmButton({ deleteUrl, backUrl }: DeleteConfirmButtonP
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  // DB 側の削除は成功したが、スライドPDFが Storage に残った場合の警告（issue #241）
+  // Warning for when the DB deletion succeeded but the slide PDF remained in Storage (#241).
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
   const backToList = () => {
@@ -33,8 +33,8 @@ export function DeleteConfirmButton({ deleteUrl, backUrl }: DeleteConfirmButtonP
         const data: unknown = await response.json().catch(() => null);
         const warning = getSlideStorageWarning(data, "delete");
         if (warning) {
-          // 削除済みのため再実行はさせず、警告を読んでから一覧へ戻れるようにする
-          // （この画面を refresh すると削除済みの対象が見つからず 404 になるため refresh しない）
+          // Already deleted, so don't allow a retry; let the user read the warning before returning
+          // to the list. Don't refresh: the deleted target is gone and this screen would 404.
           setWarningMessage(warning);
           return;
         }

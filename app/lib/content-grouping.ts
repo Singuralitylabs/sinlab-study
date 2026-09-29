@@ -60,10 +60,8 @@ function compareOrder(orderA: number, orderB: number): number {
 
 /**
  * Ties on display_order fall back to the level's own id before descending. The create form's
- * default
- * display_order is 0, so equal values are common; without the tiebreak, children of different
- * parents
- * would interleave.
+ * default display_order is 0, so equal values are common; without the tiebreak, children of
+ * different parents would interleave.
  */
 export function compareGroupLevel(
   orderA: number | null | undefined,
@@ -252,8 +250,7 @@ export interface SiblingOrderRow {
 /**
  * Thrown when insert_after_id is not a live sibling under the same parent; callers map it to 400.
  * message is shown verbatim in the create form (the sibling list went stale after the form loaded),
- * so it
- * is user-facing and carries no internal ids. insertAfterId is kept for server logs.
+ * so it is user-facing and carries no internal ids. insertAfterId is kept for server logs.
  */
 export class InvalidInsertAfterIdError extends Error {
   readonly insertAfterId: number;
@@ -268,8 +265,8 @@ export class InvalidInsertAfterIdError extends Error {
 
 /**
  * Computes the new display_order and the sibling rows to renumber. Always renumbers from 1, which
- * also
- * heals pre-existing duplicates (the create form's default 0). Siblings need not be pre-sorted.
+ * also heals pre-existing duplicates (the create form's default 0). Siblings need not be
+ * pre-sorted.
  * @throws InvalidInsertAfterIdError when insertAfterId is not among siblings; callers must pass
  * siblings
  *   filtered by the same parent and is_deleted=false.

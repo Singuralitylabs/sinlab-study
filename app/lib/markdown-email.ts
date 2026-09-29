@@ -1,17 +1,13 @@
 /**
- * お知らせの Markdown 本文を、メール用のプレーンテキストと簡易 HTML に変換する。
- *
- * メールクライアントでの表示に必要な範囲（段落・改行・見出し・箇条書き・番号付きリスト・
- * コードブロック・太字・インラインコード・リンク）だけを扱う小さな変換で、依存を追加しない。
- * HTML 版では、装飾として照合した部分の中身も含めて本文の文字列をすべてエスケープしてから
- * 出力するため、本文中の生 HTML は描画されない（アプリ内表示の react-markdown が生 HTML を
- * 描画しないのと同じ方針）。リンクは
- * `http://` / `https://` の URL だけを `<a>` にし、それ以外（`javascript:` 等）は文字のまま残す。
- *
- * 本文は管理画面から入力され、Cron の送信処理の中で変換するため、どんな入力でも行の長さに
- * ほぼ比例する時間で終わるようにする（正規表現の過剰なバックトラックで Cron を止めない）。
- * 見出しの末尾の `#` の除去は正規表現を使わずに行い、インラインの装飾は1回の照合で読む
- * 文字数に上限を付ける。
+ * Converts an announcement's Markdown body to plain text and simple HTML for email. A small
+ * converter covering only what mail clients need (paragraphs, line breaks, headings,
+ * bullet/numbered lists, code blocks, bold, inline code, links) with no added dependency. The HTML
+ * version escapes all body text, including the inside of matched decorations, so raw HTML in the
+ * body isn't rendered (same policy as the in-app react-markdown). Only http:// and https:// URLs
+ * become <a>; others (javascript: etc.) stay as text. The body is entered in the admin screen and
+ * converted inside the cron send, so any input must finish in time roughly proportional to line
+ * length (excessive regex backtracking must not stall the cron). Trailing # of headings is stripped
+ * without regex, and inline decoration matching caps how many characters one match reads.
  */
 
 import { escapeHtml } from "@/app/lib/escape-html";
@@ -23,16 +19,17 @@ type Block =
   | { type: "code"; lines: string[] };
 
 const HEADING_PREFIX = /^ {0,3}#{1,6}[ \t]+/;
-// 行頭の記号だけを照合し、項目の本文は一致位置から行末までを slice で取る
-// （`\s+(.*)$` の形は空白が長く続く行で空白の数の2乗の時間がかかるため）
+// Match only the line-start marker and take the item text from the match position to end of line by
+// slice (a `\s+(.*)$` form takes quadratic time in the number of spaces on lines with long
+// whitespace runs).
 const UNORDERED_PREFIX = /^[ \t]*[-*+][ \t]+/;
 const ORDERED_PREFIX = /^[ \t]*(\d{1,9})[.)][ \t]+/;
 const FENCE = /^\s*```/;
 
 /**
- * 見出し行なら見出しの文字列（末尾の閉じ `#` と空白を除く）を返す。見出しでなければ null。
- * 末尾の処理は正規表現を使わずに行う（`(.*?)\s*#*\s*$` のような形は、空白が長く続く行で
- * バックトラックが空白の数の3乗に比例して膨らむため）
+ * Returns the heading text (closing # and whitespace removed) for a heading line, else null.
+ * Trailing handling avoids regex (a form like `(.*?)\s*#*\s*$` backtracks cubically in the number
+ * of spaces on lines with long whitespace runs).
  */
 function parseHeading(line: string): string | null {
   const prefix = HEADING_PREFIX.exec(line);
@@ -44,7 +41,8 @@ function parseHeading(line: string): string | null {
   while (end > 0 && text[end - 1] === "#") {
     end--;
   }
-  // 閉じの `#` は、空白の後（または見出しが `#` だけ）のときだけ取り除く（`C#` などは残す）
+  // Strip a closing # only after whitespace (or when the heading is only #), keeping things like
+  // `C#`.
   if (end < text.length && (end === 0 || text[end - 1] === " " || text[end - 1] === "\t")) {
     return text.slice(0, end).trimEnd();
   }
@@ -101,7 +99,7 @@ function parseBlocks(markdown: string): Block[] {
       if (paragraph.length > 0 || (list && list.ordered !== isOrdered)) {
         flush();
       }
-      // 番号付きリストは最初の項目の番号から数える（アプリ内の react-markdown と同じ）
+      // Numbered lists start from the first item's number (same as in-app react-markdown).
       list ??= { ordered: isOrdered, start: ordered ? Number(ordered[1]) : 1, items: [] };
       list.items.push(line.slice(itemPrefix[0].length));
       continue;
@@ -117,11 +115,11 @@ function parseBlocks(markdown: string): Block[] {
 }
 
 /**
- * インラインの装飾（インラインコード・リンク・太字）を1回の走査で同時に照合する。
- * 別々に順番に置換すると、先に作った `<a href="...">` の属性値やコードの中身にまで後段の
- * 置換がかかって HTML・URL が壊れるため、照合した範囲の中身には他の装飾を適用しない。
- * 1回の照合で読む文字数に上限を付ける（閉じ記号の無い `[` / `**` / `` ` `` が大量に並ぶ行でも、
- * 各位置からの走査が上限で止まり、行の長さにほぼ比例する時間で終わる）。
+ * Match inline decorations (inline code, links, bold) in a single scan. Substituting them one after
+ * another would apply later substitutions inside the attributes of an already-built `<a
+ * href="...">` or inside code, corrupting HTML/URLs, so no other decoration is applied inside a
+ * matched range. Cap the characters read per match (even lines full of unclosed `[` / `**` / `` `
+ * `` stop each scan at the cap, so time stays roughly proportional to line length).
  */
 const INLINE =
   /`([^`\n]{1,300})`|\[([^\]\n]{1,300})\]\((https?:\/\/[^\s)]{1,2000})\)|\*\*([^*\n]{1,300})\*\*/g;
@@ -151,7 +149,6 @@ function renderInline(raw: string, format: "text" | "html"): string {
   return output + plain(raw.slice(last));
 }
 
-/** プレーンテキスト版（Markdown の記号を読みやすい形に落とす） */
 export function markdownToEmailText(markdown: string): string {
   return parseBlocks(markdown)
     .map((block) => {
@@ -174,7 +171,6 @@ export function markdownToEmailText(markdown: string): string {
     .join("\n\n");
 }
 
-/** 簡易 HTML 版（照合しなかった部分・照合した中身はすべてエスケープする） */
 export function markdownToEmailHtml(markdown: string): string {
   return parseBlocks(markdown)
     .map((block) => {
@@ -198,14 +194,17 @@ export function markdownToEmailHtml(markdown: string): string {
     .join("");
 }
 
-/** メール用に変換済みの本文（`renderEmailMarkdown()` でだけ作れる。任意の HTML を渡させない） */
+/**
+ * Body already converted for email (only creatable via renderEmailMarkdown(), so arbitrary HTML
+ * can't be passed in).
+ */
 export type EmailMarkdown = {
   readonly text: string;
   readonly html: string;
   readonly __brand: "EmailMarkdown";
 };
 
-/** テキスト版と簡易 HTML 版をまとめて作る（一斉送信では1件のお知らせにつき1回だけ呼ぶ） */
+/** Builds text and simple HTML together (a broadcast calls it once per announcement). */
 export function renderEmailMarkdown(markdown: string): EmailMarkdown {
   return {
     text: markdownToEmailText(markdown),

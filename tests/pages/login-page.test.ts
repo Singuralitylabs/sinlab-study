@@ -2,12 +2,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// `/login` のサービス紹介ブロックと、error= ごとのメッセージ表示をページ単位で検証する（issue #264）。
-
 vi.mock("next/font/google", () => ({
   Noto_Sans_JP: () => ({ className: "font-noto-sans-jp", style: {} }),
 }));
-// 同意チェック・OAuth 開始を担うクライアントコンポーネントは挙動を変えないため、存在確認用の表示に差し替える
+// The client component handling consent and OAuth start is replaced with a presence-check stub; its
+// behavior is out of scope here.
 vi.mock("@/app/(auth)/login/components/google-login-button", () => ({
   GoogleLoginButton: () => createElement("div", { "data-testid": "google-login-button" }),
 }));
@@ -21,10 +20,8 @@ import { DISPLAY_MONTHLY_PRICE_JPY } from "@/app/constants/stripe";
 const render = async (error?: string) =>
   renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve({ error }) }));
 
-/** タグを除いたテキスト（強調の <span> 等をまたぐ文言の検証用） */
 const textOf = (html: string) => html.replace(/<[^>]+>/g, "");
 
-/** href で指定した <a> の開始タグ */
 const anchorTag = (html: string, href: string) => {
   const escaped = href.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return html.match(new RegExp(`<a[^>]*href="${escaped}"[^>]*>`))?.[0];

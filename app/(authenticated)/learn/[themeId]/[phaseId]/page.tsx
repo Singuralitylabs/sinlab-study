@@ -73,10 +73,9 @@ export default async function PhasePage({ params }: PageProps) {
     isContentLockedForUser(userStatus, content.is_open_to_trial);
 
   // The progress denominator counts only visible (unlocked) content whose content/week/phase/theme
-  // are all
-  // published (trial users see progress within their scope; spec 2.6). Unpublished content
-  // previewed by
-  // admin/maintainer and content under unpublished weeks can't be completed, so exclude it (#68).
+  // are all published (trial users see progress within their scope; spec 2.6). Unpublished content
+  // previewed by admin/maintainer and content under unpublished weeks can't be completed, so
+  // exclude it (#68).
   const ancestorsPublished = theme.is_published && phase.is_published;
   const isCountable = (content: ContentVisibilitySummary, week: { is_published: boolean }) =>
     !isLocked(content) && content.is_published && week.is_published && ancestorsPublished;

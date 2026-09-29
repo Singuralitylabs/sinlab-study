@@ -47,10 +47,8 @@ function redirectWithoutSession(url: URL) {
 
 export async function GET(request: NextRequest) {
   // Fail closed to /login instead of a 500 on unexpected exceptions such as missing env vars
-  // (including
-  // createAdminSupabaseClient() throwing), same policy as proxy.ts. Details are logged only. These
-  // don't show up
-  // as 5xx in monitoring, so detect them via the log tag.
+  // (including createAdminSupabaseClient() throwing), same policy as proxy.ts. Details are logged
+  // only. These don't show up as 5xx in monitoring, so detect them via the log tag.
   try {
     return await handleCallback(request);
   } catch (error) {
@@ -102,11 +100,10 @@ async function handleCallback(request: NextRequest) {
   const user = data.session.user;
 
   // SELECT RLS requires is_deleted=false even for one's own row, so the normal client can't see
-  // soft-deleted
-  // records, and a re-login INSERT would then hit the UNIQUE constraint. Check existence with
-  // service_role without
-  // filtering on is_deleted; the INSERT itself uses the normal client. A throw from a missing
-  // SUPABASE_SERVICE_ROLE_KEY is caught by GET's catch and fails closed to /login.
+  // soft-deleted records, and a re-login INSERT would then hit the UNIQUE constraint. Check
+  // existence with service_role without filtering on is_deleted; the INSERT itself uses the normal
+  // client. A throw from a missing SUPABASE_SERVICE_ROLE_KEY is caught by GET's catch and fails
+  // closed to /login.
   const adminSupabase = await createAdminSupabaseClient();
   const { data: existingUser, error: userError } = await adminSupabase
     .from("users")
@@ -128,8 +125,7 @@ async function handleCallback(request: NextRequest) {
 
   if (!existingUser) {
     // First login: don't create a users row without the consent cookie (prevents bypassing the
-    // consent step).
-    // Existing-user branches never read the cookie.
+    // consent step). Existing-user branches never read the cookie.
     const hasConsented =
       request.cookies.get(TERMS_CONSENT_COOKIE_NAME)?.value === TERMS_CONSENT_COOKIE_VALUE;
     if (!hasConsented) {

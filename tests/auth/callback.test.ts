@@ -61,7 +61,7 @@ function createAdminClient({
   };
 }
 
-// @supabase/ssr がセッション Cookie 書き込み時に setAll へ渡すヘッダー（CDN キャッシュ防止）
+// Headers @supabase/ssr passes to setAll when writing session cookies (CDN cache prevention).
 const SESSION_RESPONSE_HEADERS = {
   "Cache-Control": "private, no-cache, no-store, must-revalidate, max-age=0",
   Pragma: "no-cache",
@@ -85,7 +85,10 @@ function setCookieHeaders(res: Response) {
   return res.headers.getSetCookie();
 }
 
-/** 同意 Cookie の削除指示（Max-Age=0 または過去の Expires）が Set-Cookie に含まれること */
+/**
+ * Set-Cookie must include a deletion instruction for the consent cookie (Max-Age=0 or a past
+ * Expires).
+ */
 function expectConsentCookieDeleted(res: Response) {
   expect(setCookieHeaders(res).join("\n")).toMatch(
     new RegExp(`${TERMS_CONSENT_COOKIE_NAME}=;|${TERMS_CONSENT_COOKIE_NAME}=,`)
@@ -102,7 +105,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
-  // mockImplementationOnce の差し替えは clearAllMocks では消えないため、後続テストへ漏らさない
+  // mockImplementationOnce replacements survive clearAllMocks, so reset to keep them from leaking
+  // into later tests.
   vi.mocked(createAdminSupabaseClient).mockReset();
 });
 
@@ -119,7 +123,6 @@ describe("GET /auth/callback", () => {
     expect(sendSlackNewUserNotification).toHaveBeenCalled();
     expect(scheduleSignupEmail).toHaveBeenCalledWith({ authId: AUTH_USER.id });
     expect(setCookieHeader(res)).toContain("sb-access-token=token");
-    // セッション Cookie を含む応答には ssr が渡した Cache-Control 等が転写される
     expect(res.headers.get("cache-control")).toBe(SESSION_RESPONSE_HEADERS["Cache-Control"]);
     expect(res.headers.get("pragma")).toBe("no-cache");
     expectConsentCookieDeleted(res);
@@ -265,7 +268,7 @@ describe("GET /auth/callback", () => {
       expect(res.headers.get("location")).toBe("http://localhost/login");
       expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
       expectConsentCookieDeleted(res);
-      // 例外の内容（キー名など）をリダイレクト先に載せない
+      // Don't put the exception's content (key names etc.) in the redirect target.
       expect(res.headers.get("location")).not.toContain("SUPABASE_SERVICE_ROLE_KEY");
     }
     expect(createAdminSupabaseClient).toHaveBeenCalled();
@@ -308,7 +311,6 @@ describe("GET /auth/callback", () => {
       expect(res.headers.get("location")).toBe("http://localhost/login");
       expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
       expectConsentCookieDeleted(res);
-      // セッション交換・存在確認・登録には進まない
       expect(createServerClient).not.toHaveBeenCalled();
       expect(createAdminSupabaseClient).not.toHaveBeenCalled();
       expect(sessionClient.insert).not.toHaveBeenCalled();

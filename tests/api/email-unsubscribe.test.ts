@@ -44,7 +44,7 @@ describe("GET /api/email/unsubscribe（確認画面）", () => {
     expect(body).toContain('<form method="post"');
     expect(body).toContain(`action="?token=${encodeURIComponent(token)}"`);
     expect(body).toContain("配信を停止する");
-    // メールのセキュリティ製品によるリンクの先読み（GET）で停止しない
+    // Prefetching by email security products (GET) doesn't unsubscribe.
     expect(client.from).not.toHaveBeenCalled();
   });
 
@@ -75,7 +75,7 @@ describe("POST /api/email/unsubscribe（確定。確認画面のボタンと RFC
     expect(client.from).toHaveBeenCalledWith("users");
     expect(builder.update).toHaveBeenCalledWith({ email_opt_out_at: expect.any(String) });
     expect(builder.eq).toHaveBeenCalledWith("id", 42);
-    // 既に停止済みなら日時を上書きしない（更新0行でも成功扱い）
+    // Don't overwrite the timestamp when already unsubscribed (success even with 0 rows updated).
     expect(builder.is).toHaveBeenCalledWith("email_opt_out_at", null);
   });
 

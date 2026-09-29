@@ -30,10 +30,8 @@ export interface ContentFilterOptions {
 
 /**
  * Derives filter options from the contents join; no extra fetch. Run sortContentsByHierarchy first
- * so options
- * come in theme -> phase -> week order. The admin list uses deriveWeekSelectOptions (week list);
- * this one is
- * kept for tests and callers that build options from a contents join.
+ * so options come in theme -> phase -> week order. The admin list uses deriveWeekSelectOptions
+ * (week list); this one is kept for tests and callers that build options from a contents join.
  */
 export function deriveFilterOptions(contents: ManageContentListItem[]): ContentFilterOptions {
   const themes = new Map<number, ThemeFilterOption>();
@@ -68,8 +66,7 @@ export function deriveFilterOptions(contents: ManageContentListItem[]): ContentF
 /**
  * Derives the cascading theme -> phase -> week options from the week list; no extra fetch. Run
  * sortWeeksByHierarchy first for hierarchical order. learning_weeks.phase_id is NOT NULL, so weeks
- * are always
- * included (unlike deriveFilterOptions, there is no "no week" exclusion).
+ * are always included (unlike deriveFilterOptions, there is no "no week" exclusion).
  */
 export function deriveWeekSelectOptions(weeks: ManageWeekListItem[]): ContentFilterOptions {
   const themes = new Map<number, ThemeFilterOption>();

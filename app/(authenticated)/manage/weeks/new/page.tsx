@@ -10,10 +10,10 @@ export default async function NewWeekPage() {
     fetchAllWeeks(),
   ]);
 
-  // 兄弟候補（週一覧）の取得失敗を「兄弟なし」として扱うと、選択したフェーズ配下に
-  // 実際には既存週があるのに空一覧を表示してしまい、既定の先頭挿入のまま送信できてしまう。
-  // POST時（createWeek内の再採番）にDBが復旧していると、既存週全件が意図せず
-  // 後ろへ再採番されるため、取得失敗時はフォームを表示しない。
+  // Treating a failed sibling fetch as "no siblings" would show an empty list although weeks exist
+  // under the selected phase, and submit with the default head insert. If the DB recovers by POST
+  // time (renumbering inside createWeek), all existing weeks would be renumbered backward
+  // unintentionally, so don't show the form on failure.
   if (weeksError || !weeks) {
     return (
       <div className="max-w-3xl mx-auto">
@@ -30,8 +30,7 @@ export default async function NewWeekPage() {
     );
   }
 
-  // 挿入位置ピッカーの兄弟候補（フェーズ選択後にフォーム側で phase_id により絞り込む）。
-  // content-grouping.ts の階層順ソートと同じ比較関数（display_order昇順・idタイブレーク）で揃える
+  // Sort with the same comparator as content-grouping.ts (display_order ascending, id tiebreak).
   const siblingCandidates = [...weeks]
     .sort((a, b) => compareGroupLevel(a.display_order, b.display_order, a.id, b.id))
     .map((week) => ({

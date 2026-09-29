@@ -20,7 +20,7 @@ vi.mock("next/headers", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
-  // createAdminSupabaseClient のモジュールレベルキャッシュ（cachedAdminClient）をクリアする
+  // Clear createAdminSupabaseClient's module-level cache (cachedAdminClient).
   vi.resetModules();
 });
 
@@ -37,7 +37,6 @@ describe("createAdminSupabaseClient", () => {
 
     expect(client1).toBe(fakeClient);
     expect(client2).toBe(fakeClient);
-    // モジュールレベルキャッシュにより createClient の呼び出しは初回のみ
     expect(mockCreateClient).toHaveBeenCalledTimes(1);
     expect(mockCreateClient).toHaveBeenCalledWith(
       "https://example.supabase.co",

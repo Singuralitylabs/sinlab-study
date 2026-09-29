@@ -2,15 +2,11 @@ import { parsePositiveInteger } from "@/app/lib/positive-integer";
 
 /**
  * pdf_url stores only the object key inside the `slides` bucket (#89). Legacy public URLs were
- * normalized by
- * migration, but can still arrive right after release or as the admin form's initial value, so they
- * are
- * converted here by the same rules.
- * The Storage policy compares `pdf_url = storage.objects.name` for equality, so this normalization
- * must match
- * the migration (20260908000000_secure_slides_bucket.sql): regexp_replace(btrim(pdf_url, E'
- * \t\r\n'), ...),
- * i.e. trim space/tab/CR/LF, then strip the prefix.
+ * normalized by migration, but can still arrive right after release or as the admin form's initial
+ * value, so they are converted here by the same rules. The Storage policy compares `pdf_url =
+ * storage.objects.name` for equality, so this normalization must match the migration
+ * (20260908000000_secure_slides_bucket.sql): regexp_replace(btrim(pdf_url, E' \t\r\n'), ...), i.e.
+ * trim space/tab/CR/LF, then strip the prefix.
  */
 const LEGACY_PUBLIC_URL_PREFIX = /^(?:https?:\/\/[^/]+)?\/storage\/v1\/object\/public\/slides\//;
 
@@ -29,8 +25,7 @@ export function buildSlideObjectKey(folder: string, slideNumber: number): string
 
 /**
  * Trim exactly what the migration's btrim(pdf_url, E' \t\r\n') removes; String.prototype.trim also
- * strips
- * full-width spaces, so don't use it.
+ * strips full-width spaces, so don't use it.
  */
 function trimLikeMigration(value: string): string {
   return value.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "");
@@ -38,8 +33,7 @@ function trimLikeMigration(value: string): string {
 
 /**
  * The admin API normalizes blank to null so no empty-string rows exist (#243); same rule as the
- * migration
- * 20260926000000_normalize_blank_slide_pdf_url.sql (btrim(...) = '').
+ * migration 20260926000000_normalize_blank_slide_pdf_url.sql (btrim(...) = '').
  */
 export function isBlankSlidePdfUrl(pdfUrl: string): boolean {
   return trimLikeMigration(pdfUrl) === "";
@@ -47,8 +41,7 @@ export function isBlankSlidePdfUrl(pdfUrl: string): boolean {
 
 /**
  * Returns null for values not interpretable as an object in the slides bucket (external URLs,
- * empty, leading
- * '/', paths containing '..'); callers treat null as unsignable.
+ * empty, leading '/', paths containing '..'); callers treat null as unsignable.
  */
 export function toSlideObjectKey(pdfUrl: string | null | undefined): string | null {
   if (!pdfUrl) {
@@ -78,10 +71,8 @@ export function parseSlideObjectKey(
   }
 
   // Aligns with explicit-number parsing in upload-pdf (#144). No practical effect since the input
-  // is (\d+),
-  // but this was the last place off the parsePositiveInteger() baseline. The domain cap is an
-  // acceptance rule
-  // and is not applied to existing keys.
+  // is (\d+), but this was the last place off the parsePositiveInteger() baseline. The domain cap
+  // is an acceptance rule and is not applied to existing keys.
   const slideNumber = parsePositiveInteger(match[2]);
   if (slideNumber === null) {
     return null;

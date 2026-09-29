@@ -3,13 +3,12 @@
 import dynamic from "next/dynamic";
 import type { CodeEditorProps } from "@/app/components/CodeEditor";
 
-// CodeMirror一式（@uiw/react-codemirror + 各言語パッケージ）は数百KB規模のため、
-// 演習ページの初期ロードから切り離すために遅延読み込みする（PdfSlideViewerNoSSR と同方式）。
-// 読み込み中は value を入力する手段が無いため入力値は失われず、
-// 提出フォーム側の空文字チェック（isCodeValid）は通常どおり機能する。
-// 次のプレースホルダーの高さ（200px）は CodeEditor 側の固定高さと一致させている
-// （next/dynamic の loading はコンポーネント本体のpropsを受け取れないため、
-// 両者がズレないよう CodeEditor 側も 200px 固定にしている）。
+// The CodeMirror bundle (@uiw/react-codemirror + language packages) is hundreds of KB, so lazy-load
+// it to keep it out of the exercise page's initial load (same approach as PdfSlideViewerNoSSR).
+// There is no way to enter a value while loading, so no input is lost and the submit form's empty
+// check (isCodeValid) works as usual. The placeholder height (200px) must match CodeEditor's fixed
+// height (next/dynamic's loading can't receive the component's props, so CodeEditor is also fixed
+// at 200px).
 export const CodeEditorNoSSR = dynamic<CodeEditorProps>(
   () => import("@/app/components/CodeEditor").then((m) => m.CodeEditor),
   {

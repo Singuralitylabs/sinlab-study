@@ -47,11 +47,9 @@ const YouTubePlayerNoSSR = dynamic(
 
 /**
  * Facade like lite-youtube-embed: before click it shows only the thumbnail and contacts no
- * youtube.com / ytimg.com
- * resource other than hqdefault; after click it lazy-loads react-youtube and autoplays. hqdefault
- * (480x360 JPEG)
- * is fetched straight from i.ytimg.com, bypassing the Next Image Optimizer (avoids source-image
- * quota use and spec drift).
+ * youtube.com / ytimg.com resource other than hqdefault; after click it lazy-loads react-youtube
+ * and autoplays. hqdefault (480x360 JPEG) is fetched straight from i.ytimg.com, bypassing the Next
+ * Image Optimizer (avoids source-image quota use and spec drift).
  */
 export function YouTubeEmbed({ url, className }: YouTubeEmbedProps) {
   const videoId = extractVideoId(url);

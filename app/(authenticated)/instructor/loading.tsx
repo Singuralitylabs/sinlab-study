@@ -10,7 +10,6 @@ export default function InstructorDashboardLoading() {
         <Skeleton className="h-4 w-56" />
       </div>
 
-      {/* 統計カード */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
         <Card>
           <CardContent className="pt-6">
@@ -21,7 +20,6 @@ export default function InstructorDashboardLoading() {
         </Card>
       </div>
 
-      {/* 最近の提出 */}
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center justify-between mb-4">

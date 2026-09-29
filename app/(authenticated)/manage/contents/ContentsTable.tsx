@@ -78,9 +78,9 @@ export function ContentsTable({ groups }: ContentsTableProps) {
   const selectedCount = selectedIds.size;
   const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
 
-  // フィルタ変更等で表示中のコンテンツ（groups/allIds）が変わったら、選択状態を
-  // 現在表示中のIDとの積集合に絞る。絞らないと、非表示になった行の選択が
-  // Set に残ったまま一括操作（削除含む）の対象に含まれてしまう。
+  // When the displayed contents (groups/allIds) change (filters etc.), intersect the selection with
+  // the IDs now shown. Otherwise selections of rows that became hidden stay in the Set and get
+  // included in bulk operations (deletion included).
   useEffect(() => {
     setSelectedIds((prev) => {
       if (prev.size === 0) return prev;
@@ -136,12 +136,13 @@ export function ContentsTable({ groups }: ContentsTableProps) {
     setIsLoading(true);
     setErrorMessage(null);
     const ids = [...selectedIds];
-    // 一括削除で、いずれかのチャンクのスライドPDFが Storage に残ったか（issue #241）。
-    // 後続チャンクが失敗しても、先行チャンクの削除は成立済みのため警告を落とさない
+    // Whether any chunk left a slide PDF in Storage during bulk deletion (#241). Don't drop the
+    // warning when a later chunk fails, since earlier chunks' deletions already took effect.
     let storageWarning: string | null = null;
     const withStorageWarning = (message: string) =>
       storageWarning ? `${message}。${storageWarning}` : message;
-    // 成功したチャンクのID。後続チャンクが失敗しても、成立済みの分は選択から外して一覧を更新する
+    // IDs of successful chunks. Even if a later chunk fails, deselect the ones already processed
+    // and refresh the list.
     const processedIds: number[] = [];
     const settlePartialSuccess = () => {
       if (processedIds.length === 0) return;
@@ -154,7 +155,8 @@ export function ContentsTable({ groups }: ContentsTableProps) {
     };
     try {
       let totalUpdated = 0;
-      // ids が MAX_BULK_CONTENT_IDS を超える場合、APIの上限に収まるようチャンク分割して送信する
+      // Split into chunks so each request stays within the API limit when ids exceed
+      // MAX_BULK_CONTENT_IDS.
       for (let i = 0; i < ids.length; i += MAX_BULK_CONTENT_IDS) {
         const chunk = ids.slice(i, i + MAX_BULK_CONTENT_IDS);
         const response = await fetch("/api/manage/contents/bulk", {

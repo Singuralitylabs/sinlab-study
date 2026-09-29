@@ -37,8 +37,8 @@ type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 /**
  * Membership `<option>`s shared by the approve and change selects. With restrictToGeneral,
- * community is not
- * selectable, so Stripe-subscribed users can't be set to anything but general (see spec 2.7).
+ * community is not selectable, so Stripe-subscribed users can't be set to anything but general (see
+ * spec 2.7).
  */
 function MembershipOptions({ restrictToGeneral }: { restrictToGeneral: boolean }) {
   return (
@@ -272,9 +272,8 @@ export function UserManagementTable({
                             {user.status === USER_STATUS.ACTIVE ? (
                               <select
                                 // status=active / membership_type consistency isn't guaranteed by
-                                // the DB (see AGENTS.md), so show the select
-                                // regardless of membership_type so active users with NULL can be
-                                // repaired.
+                                // the DB (see AGENTS.md), so show the select regardless of
+                                // membership_type so active users with NULL can be repaired.
                                 value={
                                   user.membership_type ??
                                   (isSubscribed

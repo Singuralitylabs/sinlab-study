@@ -6,7 +6,6 @@ export default function DashboardLoading() {
     <div className="max-w-4xl mx-auto">
       <Skeleton className="h-9 w-48 mb-6" />
 
-      {/* 全体進捗カード */}
       <Card className="mb-6">
         <CardContent className="pt-6">
           <div className="flex items-center gap-4 mb-4">
@@ -23,7 +22,6 @@ export default function DashboardLoading() {
         </CardContent>
       </Card>
 
-      {/* テーマ一覧 */}
       <div className="grid gap-4">
         <Skeleton className="h-6 w-32" />
         {[1, 2, 3].map((i) => (

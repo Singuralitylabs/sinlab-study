@@ -18,10 +18,8 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     }
     // Rejected users are blocked even while their Auth session is valid. A former admin/maintainer
-    // keeps their
-    // role after rejection (it isn't cleared), so a role check alone doesn't stop them; same status
-    // gate as the
-    // other admin APIs.
+    // keeps their role after rejection (it isn't cleared), so a role check alone doesn't stop them;
+    // same status gate as the other admin APIs.
     if (auth.userStatus === USER_STATUS.REJECTED) {
       return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
     }
@@ -37,15 +35,12 @@ export async function PATCH(request: Request) {
     const { userId, action } = data;
 
     // Stripe-subscribed users can only be set to general so membership_type and billing don't
-    // diverge. Applies to
-    // both approve and change_membership (relaxing it on approve would let a subscribed user be
-    // approved as community
-    // and then be impossible to fix via change_membership).
-    // Failure handling is asymmetric: change_membership exists to protect Stripe consistency, so it
-    // fails closed when
-    // undecidable; approve is mainly for trial users, most of whom aren't subscribed, so a
-    // transient Stripe fetch
-    // failure must not stop approval (guard only when a subscription is confirmed).
+    // diverge. Applies to both approve and change_membership (relaxing it on approve would let a
+    // subscribed user be approved as community and then be impossible to fix via
+    // change_membership). Failure handling is asymmetric: change_membership exists to protect
+    // Stripe consistency, so it fails closed when undecidable; approve is mainly for trial users,
+    // most of whom aren't subscribed, so a transient Stripe fetch failure must not stop approval
+    // (guard only when a subscription is confirmed).
     if (data.action === "approve" || data.action === "change_membership") {
       const { data: isSubscribed, error: subscriptionError } =
         await isUserCurrentlySubscribed(userId);
@@ -114,8 +109,7 @@ export async function PATCH(request: Request) {
         return NextResponse.json({ error: "ステータス更新に失敗しました" }, { status: 500 });
       }
       // 0 rows updated: already approved (prevents accidentally overwriting membership type on
-      // re-approval; use
-      // change_membership for changes), or missing/deleted.
+      // re-approval; use change_membership for changes), or missing/deleted.
       if (!updated) {
         return NextResponse.json(
           {

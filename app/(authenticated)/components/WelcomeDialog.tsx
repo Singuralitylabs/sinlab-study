@@ -16,12 +16,9 @@ import {
 
 /**
  * Records onboarding completion fire-and-forget so it never blocks the user (on API failure the
- * dialog just shows
- * again next time; closing/navigation isn't stopped). keepalive: true keeps the request alive
- * during navigation
- * via in-dialog links. Failures log a warning so ops can notice persistent failures; success calls
- * a callback
- * to refresh the display side.
+ * dialog just shows again next time; closing/navigation isn't stopped). keepalive: true keeps the
+ * request alive during navigation via in-dialog links. Failures log a warning so ops can notice
+ * persistent failures; success calls a callback to refresh the display side.
  */
 export function requestOnboardingComplete(onCompleted?: () => void): void {
   fetch("/api/onboarding/complete", { method: "POST", keepalive: true })
@@ -39,8 +36,7 @@ export function requestOnboardingComplete(onCompleted?: () => void): void {
 
 /**
  * Steps are filtered by status on the server. Closing by any route sends the completion record and
- * closes the
- * dialog regardless of whether it succeeds.
+ * closes the dialog regardless of whether it succeeds.
  */
 export function WelcomeDialog({
   steps,

@@ -12,8 +12,7 @@ export type GettingStartedChecklistItem = {
 
 /**
  * Returns an empty array when progress is null (non-member etc.), which hides the list just like
- * the all-done
- * case. Keep the achievement logic here so callers don't fabricate dummy values.
+ * the all-done case. Keep the achievement logic here so callers don't fabricate dummy values.
  */
 export function buildGettingStartedItems(
   completedContents: number,

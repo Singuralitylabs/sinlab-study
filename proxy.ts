@@ -5,8 +5,7 @@ import { ALLOWED_USER_STATUSES, USER_STATUS } from "./app/constants/user";
 import type { UserStatusType } from "./app/types";
 
 // Extensions treated as static assets (suffix match only). Don't use "path contains .": crafted
-// URLs like
-// /learn/1/2/3/4. would bypass auth.
+// URLs like /learn/1/2/3/4. would bypass auth.
 const STATIC_FILE_EXTENSIONS =
   /\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest)$/i;
 
@@ -87,8 +86,8 @@ export async function proxy(request: NextRequest) {
             cookiesToSet.push(cookie);
           }
           // Responses that rewrite session cookies must not be cached by a CDN (@supabase/ssr
-          // passes
-          // Cache-Control: private, no-store etc.); omitting this could serve someone else's token.
+          // passes Cache-Control: private, no-store etc.); omitting this could serve someone else's
+          // token.
           Object.assign(responseHeadersToSet, newHeaders);
         },
       },
@@ -111,8 +110,7 @@ export async function proxy(request: NextRequest) {
       .maybeSingle();
 
     // Fail closed (to /login) when the status can't be determined, so a transient DB failure
-    // (userStatus null)
-    // never lets a request through.
+    // (userStatus null) never lets a request through.
     if (userError || !userData) {
       console.error("[proxy] User data fetch error:", userError);
       return applyResponseModifications(NextResponse.redirect(new URL("/login", request.url)));
@@ -121,8 +119,7 @@ export async function proxy(request: NextRequest) {
     const userStatus = userData.status as UserStatusType;
 
     // Allowlist: only active/trial pass; everything else redirects by status (an unexpected status
-    // value is never
-    // let through).
+    // value is never let through).
     if (ALLOWED_USER_STATUSES.includes(userStatus)) {
       // The retired /pending screen: redirect old URLs to /.
       if (pathname === "/pending") {

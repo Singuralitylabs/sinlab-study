@@ -2,14 +2,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// ダッシュボードの初回ガイド表示条件をページ単位で検証する（issue #16）。
-// データ取得はすべてモックし、ダイアログ・チェックリストの表示有無を確認する。
-
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/learning-server");
 vi.mock("@/app/services/api/onboarding-server");
 vi.mock("@/app/services/api/announcements-server");
-// クライアントのダイアログは props（絞り込み済みステップ）の検証に必要な最小表示に差し替える
+// Replace the client dialog with the minimal rendering needed to check props (filtered steps).
 vi.mock("@/app/(authenticated)/components/WelcomeDialog", () => ({
   WelcomeDialog: ({ steps }: { steps: { id: string }[] }) =>
     createElement(
@@ -25,7 +22,6 @@ vi.mock("@/app/(authenticated)/components/GettingStartedChecklist", async (impor
     >();
   return {
     ...actual,
-    // 実コンポーネントと同様、全達成のときは描画しない
     GettingStartedChecklist: ({ items }: { items: { completed: boolean }[] }) =>
       items.some((item) => !item.completed)
         ? createElement("div", { "data-testid": "getting-started" }, "steps")
@@ -88,7 +84,6 @@ const setup = ({
 
 const render = async () => renderToStaticMarkup(await HomePage());
 
-/** ダイアログの data-steps 属性値だけを取り出して検証する（ページ全体の部分一致は使わない） */
 const stepsOf = (html: string): string[] =>
   (html.match(/data-steps="([^"]*)"/)?.[1] ?? "").split(",");
 

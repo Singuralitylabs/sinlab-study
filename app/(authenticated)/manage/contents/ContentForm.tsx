@@ -51,8 +51,8 @@ interface ContentFormProps {
 
 /**
  * Reverse-lookup of theme/phase from a week id. If the week is missing from the options
- * (unclassified/deleted),
- * skip theme/phase preselection but keep the week value so it can be re-saved.
+ * (unclassified/deleted), skip theme/phase preselection but keep the week value so it can be
+ * re-saved.
  */
 function resolveWeekSelection(
   weekId: string,
@@ -73,8 +73,7 @@ function resolveWeekSelection(
 
 /**
  * Labels include the unfiltered parent names because a week can be picked without choosing
- * theme/phase;
- * this disambiguates same-named weeks.
+ * theme/phase; this disambiguates same-named weeks.
  */
 function buildWeekOptionLabel(
   week: WeekFilterOption,
@@ -139,10 +138,8 @@ export function ContentForm({
   const [title, setTitle] = useState(initialData?.title ?? "");
 
   // Edit mode keeps initialData.week_id even if it is not in the options so saving doesn't clobber
-  // it.
-  // Create mode adopts the query-derived selection only when theme, phase and week all exist;
-  // otherwise the
-  // form would look unselected yet be submittable.
+  // it. Create mode adopts the query-derived selection only when theme, phase and week all exist;
+  // otherwise the form would look unselected yet be submittable.
   const initialWeekIdValue =
     mode === "edit"
       ? (initialData?.week_id?.toString() ?? "")
@@ -155,8 +152,7 @@ export function ContentForm({
       ? (initialWeekSelection?.themeId ?? "")
       : "";
   // The phase must also belong to the adopted theme; a query like ?theme=1&phase=2 can be
-  // individually
-  // valid but inconsistent.
+  // individually valid but inconsistent.
   const initialPhaseIdFallback =
     mode === "create" &&
     phases.some(
@@ -183,8 +179,7 @@ export function ContentForm({
       : getDefaultInsertAfterId(allSiblingsForWeek)
   );
   // Omit insert_after_id from the PUT body when neither week nor position was touched (the server
-  // then
-  // leaves display order alone).
+  // then leaves display order alone).
   const initialInsertAfterId = useRef(insertAfterId);
 
   const [contentType, setContentType] = useState<ContentType>(initialData?.content_type ?? "video");
@@ -203,10 +198,8 @@ export function ContentForm({
     (initialData?.code_language as CodeLanguage) ?? "javascript"
   );
   // Only the object key is stored (#89). Legacy public URLs are normalized to a key; unnormalizable
-  // values
-  // become empty, but requiresSlidePdf (initialData.pdf_url truthy) blocks saving until re-upload,
-  // so values
-  // never vanish silently.
+  // values become empty, but requiresSlidePdf (initialData.pdf_url truthy) blocks saving until
+  // re-upload, so values never vanish silently.
   const initialPdfKey = toSlideObjectKey(initialData?.pdf_url);
   const initialSlide = parseSlideObjectKey(initialPdfKey);
   const [pdfUrl, setPdfUrl] = useState(initialPdfKey ?? "");
@@ -247,8 +240,7 @@ export function ContentForm({
     setWeekId(value);
     const newSiblingsForValue = siblingCandidates.filter((c) => String(c.parentId) === value);
     // Re-selecting the original week restores the current position; otherwise clearing the week via
-    // the
-    // theme/phase selects and picking it again would move the item to the tail.
+    // the theme/phase selects and picking it again would move the item to the tail.
     if (mode === "edit" && initialData && value === initialWeekId) {
       setInsertAfterId(getCurrentPositionInsertAfterId(initialData.id, newSiblingsForValue));
       return;
@@ -321,9 +313,8 @@ export function ContentForm({
   };
 
   // A slide PDF is required for create and for rows that already have one. Requiring it on every
-  // edit would
-  // block fixing the title or reverting the type of rows bulk-changed to slide with an empty
-  // pdf_url.
+  // edit would block fixing the title or reverting the type of rows bulk-changed to slide with an
+  // empty pdf_url.
   const requiresSlidePdf = mode === "create" || Boolean(initialData?.pdf_url);
   const isSlidePdfMissing = contentType === "slide" && requiresSlidePdf && !pdfUrl.trim();
 
@@ -331,8 +322,7 @@ export function ContentForm({
     e.preventDefault();
 
     // Saving with an unfinished/failed upload would store a pdf_url with no object. Guard here too,
-    // in case
-    // the submit button's disabled condition changes.
+    // in case the submit button's disabled condition changes.
     if (isUploading) {
       setMessage({ type: "error", text: "アップロードの完了をお待ちください" });
       return;

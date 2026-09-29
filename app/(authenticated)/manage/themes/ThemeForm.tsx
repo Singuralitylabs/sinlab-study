@@ -23,9 +23,8 @@ interface ThemeFormProps {
   initialData?: LearningTheme;
   /**
    * All themes for the insert-position picker (sorted). Create mode passes the targets themselves;
-   * edit mode passes
-   * a list including the edited theme itself (to find its current position; removed inside the form
-   * before display).
+   * edit mode passes a list including the edited theme itself (to find its current position;
+   * removed inside the form before display).
    */
   siblings?: SiblingOrderItem[];
   mode: "create" | "edit";
@@ -44,9 +43,8 @@ export function ThemeForm({ initialData, siblings = [], mode }: ThemeFormProps) 
       : getDefaultInsertAfterId(siblings)
   );
   // Omit insert_after_id from the PUT body when the position wasn't touched: the server leaves
-  // display order alone
-  // when it's omitted, which avoids unrelated saves failing or being reverted when the sibling list
-  // is stale.
+  // display order alone when it's omitted, which avoids unrelated saves failing or being reverted
+  // when the sibling list is stale.
   const initialInsertAfterId = useRef(insertAfterId);
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
@@ -57,8 +55,7 @@ export function ThemeForm({ initialData, siblings = [], mode }: ThemeFormProps) 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     // Reject submits during upload: they'd overwrite the upload result with the stale image_url the
-    // form holds
-    // (double protection with the button's disabled state).
+    // form holds (double protection with the button's disabled state).
     if (isUploading) return;
     setIsLoading(true);
     setMessage(null);

@@ -14,8 +14,7 @@ const STORAGE_URL_PLACEHOLDER = /\{\{SUPABASE_STORAGE_URL\}\}/g;
 
 /**
  * Replaces the {{SUPABASE_STORAGE_URL}} placeholder in Markdown with the public object URL prefix
- * so admin-authored
- * Markdown (text_content, description, etc.) can reference Storage images
+ * so admin-authored Markdown (text_content, description, etc.) can reference Storage images
  * environment-independently.
  */
 export function resolveMarkdownStorageUrls(content: string): string {

@@ -2,9 +2,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// スライドPDFの署名付きURLが「閲覧権限チェックの後にのみ」発行されることを、
-// ページ単位で検証する（issue #89）。データ取得・署名発行はすべてモックし、
-// 描画結果（HTML）と署名関数の呼び出し有無を確認する。
+// Invariant under test: the slide PDF signed URL is issued only after the view-permission check
+// (#89). Data fetching and signing are all mocked; the tests check the rendered HTML and whether
+// the signing function was called.
 
 vi.mock("next/navigation", () => ({
   notFound: () => {
@@ -25,7 +25,6 @@ vi.mock("@/app/services/api/learning-server", async (importOriginal) => {
     fetchUserProgressByContentId: vi.fn().mockResolvedValue({ isCompleted: false }),
   };
 });
-// クライアントコンポーネント（PDFビューア・提出フォーム等）は描画結果の検証に不要なため差し替える
 vi.mock("@/app/components/SlideContent", () => ({
   SlideContent: ({ signedUrl }: { signedUrl: string | null }) =>
     createElement("div", { "data-testid": "slide-content" }, signedUrl ?? "SLIDE_UNAVAILABLE"),
@@ -131,9 +130,7 @@ const setup = ({
     is_open_to_trial?: boolean;
     is_published?: boolean;
   }>;
-  /** fetchWeekById が返す週（theme 未公開など親階層のケース用） */
   weekOverride?: typeof week;
-  /** fetchContentById の week 埋め込み（isContentFullyPublished 判定用） */
   contentWeekOverride?: typeof week;
 }) => {
   vi.mocked(getServerAuth).mockResolvedValue({
@@ -234,7 +231,8 @@ describe("学習画面のスライド配信（署名付きURL）", () => {
   });
 
   it("member は theme だけ未公開のとき 404（署名を発行しない）", async () => {
-    // week.phase.theme_id は一致するが theme 埋め込みが未公開（RLS で null になるケースと同等）
+    // week.phase.theme_id matches but the embedded theme is unpublished (equivalent to null under
+    // RLS).
     const weekThemeUnpublished = {
       ...week,
       phase: {
@@ -289,7 +287,7 @@ describe("親階層が未公開のロック対象コンテンツ（issue #242）
   };
 
   it("お試しユーザーは theme だけ未公開のロック対象コンテンツで、ロック画面ではなく 404 になる", async () => {
-    // サマリー（service_role）はコンテンツ行の is_published しか見ないため見つかる
+    // The summary (service_role) only looks at the content row's is_published, so it is found.
     setup({
       userStatus: "trial",
       isOpenToTrial: false,

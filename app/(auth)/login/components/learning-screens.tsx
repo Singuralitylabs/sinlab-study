@@ -6,8 +6,8 @@ type Screen = {
   caption: string;
 };
 
-// 実際のアプリ画面のスクリーンショット（public/images/login/）。
-// 動画画面は講師のワイプ部分を塗りつぶし、AIレビュー画面は模範回答のコードをぼかし済み
+// Screenshots of the real app screens (public/images/login/). The video screen has the instructor's
+// wipe painted over, and the AI review screen has the model-answer code blurred.
 const SCREENS: Screen[] = [
   { src: "/images/login/video.webp", alt: "動画コンテンツの画面", caption: "動画で学ぶ" },
   {
@@ -23,7 +23,6 @@ const SCREENS: Screen[] = [
   },
 ];
 
-/** `/login` の「実際の学習画面」。スマホは縦1列、タブレットは2列、PC は横4列で並べる */
 export function LearningScreens() {
   return (
     <section aria-labelledby="learning-screens-heading" className="space-y-5 lg:space-y-6">
@@ -39,7 +38,7 @@ export function LearningScreens() {
         {SCREENS.map(({ src, alt, caption }) => (
           <li key={src}>
             <figure className="space-y-2.5">
-              {/* 画面の上部（タイトル・本文の冒頭）が見えるよう、4:3 の枠に上寄せで切り出す */}
+              {/* Crop to a 4:3 frame anchored to the top so the top of the screen (title, start of the body) is visible. */}
               <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-border bg-white shadow-[0_8px_24px_-16px_rgba(30,26,56,0.35)]">
                 <Image
                   src={src}

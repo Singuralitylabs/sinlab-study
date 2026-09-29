@@ -132,7 +132,8 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
     vi.mocked(createServerSupabaseClient).mockResolvedValue(
       createMockSupabaseClient({
         tableResults: {
-          // 1回目: 提出+コンテンツ取得（.single）、2回目: 同一コンテンツへの既存提出一覧（空 = 実行済みレビューなし）
+          // First call: submission + content (.single); second: existing submissions for the same
+          // content (empty = no completed review).
           submissions: [
             { data: submissionRow, error: null },
             { data: [], error: null },
@@ -168,9 +169,10 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
   });
 
   it("generateReviewが例外を投げた場合（タイムアウト等）はprocessingのまま残さずfailedへ遷移し502を返す", async () => {
-    // generateReview()内部でのタイムアウト検知・エラーメッセージ生成自体は
-    // tests/services/api/gemini.test.ts で検証済み。ここではroute側が
-    // generateReview()の失敗理由によらず一律にfailedへ遷移させることのみを確認する
+    // Timeout detection and error messages inside generateReview() are covered in
+    // tests/services/api/gemini.test.ts;
+    // here only check that the route always moves to failed regardless of why generateReview()
+    // failed.
     vi.mocked(generateReview).mockRejectedValue(new Error("boom"));
 
     const res = await POST(request() as never);

@@ -38,10 +38,10 @@ describe("JST の暦日", () => {
 
 describe("weekStartOf（週の開始日 = 月曜）", () => {
   it.each([
-    ["2026-10-05", "2026-10-05"], // 月曜
-    ["2026-10-06", "2026-10-05"], // 火曜
-    ["2026-10-11", "2026-10-05"], // 日曜
-    ["2026-10-12", "2026-10-12"], // 翌週の月曜
+    ["2026-10-05", "2026-10-05"],
+    ["2026-10-06", "2026-10-05"],
+    ["2026-10-11", "2026-10-05"],
+    ["2026-10-12", "2026-10-12"],
   ])("%s の週の開始日は %s", (date, expected) => {
     expect(weekStartOf(date)).toBe(expected);
   });
@@ -49,14 +49,14 @@ describe("weekStartOf（週の開始日 = 月曜）", () => {
 
 describe("daysSinceSignup", () => {
   it("created_at を JST の暦日に丸め、登録日を 0 日目とする", () => {
-    // 2026-09-28 23:30 JST に登録
+    // Signed up at 2026-09-28 23:30 JST.
     const createdAt = "2026-09-28T14:30:00Z";
     expect(daysSinceSignup(createdAt, "2026-09-28")).toBe(0);
     expect(daysSinceSignup(createdAt, "2026-10-05")).toBe(7);
   });
 
   it("UTC では前日でも JST で翌日になる登録は、JST の日付で数える", () => {
-    // 2026-09-29 00:30 JST（UTC では 9/28）に登録
+    // Signed up at 2026-09-29 00:30 JST (9/28 in UTC).
     const createdAt = "2026-09-28T15:30:00Z";
     expect(daysSinceSignup(createdAt, "2026-10-05")).toBe(6);
     expect(daysSinceSignup(createdAt, "2026-10-06")).toBe(7);
@@ -65,10 +65,10 @@ describe("daysSinceSignup", () => {
 
 describe("coversPreviousWeek（週次進捗の対象になれる登録日）", () => {
   it("前週の月曜（JST）以前に登録していれば対象、それより後なら対象外", () => {
-    expect(coversPreviousWeek("2026-09-28T03:00:00Z", "2026-10-05")).toBe(true); // 前週の月曜
+    expect(coversPreviousWeek("2026-09-28T03:00:00Z", "2026-10-05")).toBe(true);
     expect(coversPreviousWeek("2026-09-20T03:00:00Z", "2026-10-05")).toBe(true);
-    expect(coversPreviousWeek("2026-09-29T03:00:00Z", "2026-10-05")).toBe(false); // 前週の火曜
-    expect(coversPreviousWeek("2026-10-04T03:00:00Z", "2026-10-05")).toBe(false); // 前週の日曜
+    expect(coversPreviousWeek("2026-09-29T03:00:00Z", "2026-10-05")).toBe(false);
+    expect(coversPreviousWeek("2026-10-04T03:00:00Z", "2026-10-05")).toBe(false);
   });
 
   it("前週の月曜 0:00 JST の境界を JST の暦日で判定する", () => {
@@ -91,7 +91,7 @@ function user(userId: number, status: "active" | "trial", createdAt: string): Di
 
 describe("planMilestoneEmails", () => {
   const today = "2026-10-15";
-  // JST 正午に登録した日付から逆算（today - N 日）
+  // Back-calculated from a sign-up at noon JST (today - N days).
   const signedUp = (days: number) => `${addDays(today, -days)}T03:00:00Z`;
 
   it("お試しユーザーは登録から 2・5・7・14 日目に trial_nurture の対象になる", () => {

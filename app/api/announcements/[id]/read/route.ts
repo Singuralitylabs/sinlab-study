@@ -9,10 +9,11 @@ import {
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 /**
- * お知らせの既読を記録する（詳細画面を開いたときにクライアントから呼ぶ）。
- * 自分に見えないお知らせ（下書き・削除済み・非対象・存在しないID）は 404。
- * 既に既読でも成功扱い。ページの描画中に記録しないのは、リンクの先読みで既読に
- * ならないようにするため。
+ * Records the announcement as read (called from the client when the detail screen opens).
+ * Announcements the user
+ * can't see (draft, deleted, not targeted, unknown ID) give 404. Already-read counts as success.
+ * Not recorded
+ * during page rendering so link prefetching doesn't mark it read.
  */
 export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {

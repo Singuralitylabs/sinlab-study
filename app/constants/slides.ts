@@ -1,8 +1,6 @@
 /**
- * スライド番号のドメイン上限（issue #144）。
- *
- * `parsePositiveInteger()` は汎用ヘルパーのため上限を持たず、スライド番号としての
- * 妥当性はこの定数で判定する（`upload-thumbnail` の `themeId` 解釈には使わない）。
- * 既存シードの最大は20番台のため、3桁（999）に余裕を持たせた値とする。
+ * Domain maximum for slide numbers (#144). parsePositiveInteger() is generic with no upper bound,
+ * so slide-number validity is judged by this constant (not used for upload-thumbnail's themeId
+ * parsing). Existing seeds top out in the 20s, so 3 digits (999) leaves headroom.
  */
 export const SLIDE_NUMBER_MAX = 999;

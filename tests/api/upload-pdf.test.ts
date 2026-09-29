@@ -56,8 +56,7 @@ const mockStorage = (options: MockStorageOptions = {}) => {
   });
 
   // The upload API never issues delivery URLs (public/signed; #89); URL-generating methods are left
-  // out of the
-  // mock so a call fails the test.
+  // out of the mock so a call fails the test.
   const storage = { from: vi.fn().mockReturnValue({ list, upload, exists }) };
   vi.mocked(createAdminSupabaseClient).mockResolvedValue({ storage } as never);
   return { list, upload, exists };

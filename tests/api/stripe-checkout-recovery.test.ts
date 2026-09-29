@@ -3,8 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * Exercises self-recovery of a claim left paid-but-unapplied (#250) through the real Route Handler,
  * claimCheckoutSlot() and activateUserFromCheckoutSession(). The DB is a stateful in-memory fake
- * and the
- * Stripe SDK is mocked (no real calls). Each test starts from the state seen in production:
+ * and the Stripe SDK is mocked (no real calls). Each test starts from the state seen in production:
  * checkout_pending holding a complete session, with stripe_subscription_id NULL.
  */
 
@@ -63,8 +62,7 @@ type Filter = (row: Row) => boolean;
 
 /**
  * Stateful Supabase fake with only stripe_subscriptions (unique by user_id) and users. Conditional
- * UPDATEs
- * only touch matching rows, so the claim CAS and the mirror CAS run for real.
+ * UPDATEs only touch matching rows, so the claim CAS and the mirror CAS run for real.
  */
 function createFakeDatabase(initial: { subscription: Row; user: Row }) {
   const tables: Record<string, Row[]> = {
@@ -132,7 +130,10 @@ function createFakeDatabase(initial: { subscription: Row; user: Row }) {
           filters.push((row) => row[column] !== value);
           return builder;
         },
-        /** PostgREST の `or` のうち、このテストで使う `col.neq.value` / `col.is.null` だけを解釈する */
+        /**
+         * Interprets only `col.neq.value` / `col.is.null` of PostgREST's `or`, which this test
+         * uses.
+         */
         or(expression: string) {
           const conditions: Filter[] = expression.split(",").map((condition) => {
             const [column, operator, value] = condition.split(".");
@@ -140,7 +141,7 @@ function createFakeDatabase(initial: { subscription: Row; user: Row }) {
               return (row) => (row[column] ?? null) === null;
             }
             if (operator === "neq") {
-              // SQL と同じく NULL との比較は真にならない
+              // Like SQL, comparison with NULL is never true.
               return (row) => row[column] != null && row[column] !== value;
             }
             throw new Error(`未対応の or 条件: ${condition}`);
@@ -359,10 +360,8 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     const canceledPaid = { ...paidSession, id: "cs_paid_old", subscription: "sub_old" };
     mockSessionsList.mockResolvedValue({ data: [canceledPaid, paidSession] });
     // The first is canceled and fetching the second (active) fails transiently. Applying one at a
-    // time would
-    // release the claim on the first and then fail on the second, letting the next request create a
-    // new Checkout
-    // on top of an active contract.
+    // time would release the claim on the first and then fail on the second, letting the next
+    // request create a new Checkout on top of an active contract.
     mockSubscriptionsRetrieve.mockImplementation(async (id: string) => {
       if (id === "sub_old") {
         return { ...subscriptionWithStatus("canceled"), id: "sub_old" };

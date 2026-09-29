@@ -96,10 +96,8 @@ type FakeSubscriptionRow = {
 
 /**
  * In-memory Supabase mock holding a single stripe_subscriptions row. Claim/release exclusion relies
- * on the
- * user_id UNIQUE constraint (duplicate INSERT -> 23505) and on a conditional UPDATE matching zero
- * rows,
- * which a fixed-response mock can't verify; this reproduces both.
+ * on the user_id UNIQUE constraint (duplicate INSERT -> 23505) and on a conditional UPDATE matching
+ * zero rows, which a fixed-response mock can't verify; this reproduces both.
  * @param initialRow pre-existing row (re-subscription / active-contract cases)
  */
 function createRaceSupabaseClient(initialRow?: Partial<FakeSubscriptionRow>) {
@@ -214,8 +212,8 @@ function createRaceSupabaseClient(initialRow?: Partial<FakeSubscriptionRow>) {
 }
 
 // The module-scope price cache (5 min TTL) must not leak between tests, so advance the fake clock
-// 10 minutes
-// per test. Explicit `now` args (anchor computation) don't use Date.now() and are unaffected.
+// 10 minutes per test. Explicit `now` args (anchor computation) don't use Date.now() and are
+// unaffected.
 let fakeNowMs = new Date("2099-01-01T00:00:00.000Z").getTime();
 
 beforeEach(() => {
@@ -1137,8 +1135,7 @@ describe("isProrationBelowMinimum", () => {
     mockPrice();
 
     // Boundary: July cycle is 31 days = 2,678,400,000 ms; remainingMs = 49 * 892,800 = 43,747,200
-    // ms gives a
-    // proration of exactly 49 yen (Math.round(49) = 49 < 50).
+    // ms gives a proration of exactly 49 yen (Math.round(49) = 49 < 50).
     const result = await isProrationBelowMinimum(new Date("2026-08-26T11:50:52.800Z"));
 
     expect(result).toBe(true);

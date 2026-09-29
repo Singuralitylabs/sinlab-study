@@ -23,8 +23,7 @@ export interface SiblingCandidate extends SiblingOrderItem {
 
 /**
  * Default insert_after_id: the tail (after the last sibling); null (head) only when there are no
- * siblings.
- * Used on create and right after an edit changes the parent.
+ * siblings. Used on create and right after an edit changes the parent.
  */
 export function getDefaultInsertAfterId(siblings: SiblingOrderItem[]): number | null {
   return siblings.length > 0 ? siblings[siblings.length - 1].id : null;
@@ -32,10 +31,8 @@ export function getDefaultInsertAfterId(siblings: SiblingOrderItem[]): number | 
 
 /**
  * Default (= current position) when an edit doesn't change the parent. Pass a sorted list that
- * includes the
- * target itself. Returns null when it is first or missing from the list (an unclassified/deleted
- * week leaves
- * the sibling list empty) (#189).
+ * includes the target itself. Returns null when it is first or missing from the list (an
+ * unclassified/deleted week leaves the sibling list empty) (#189).
  */
 export function getCurrentPositionInsertAfterId(
   selfId: number,
@@ -58,11 +55,9 @@ interface SiblingOrderFieldProps {
 
 /**
  * Shared "insert position" field for the create/edit forms (#188, #189): shows siblings (including
- * unpublished;
- * excluding deleted and, in edit mode, itself) as a read-only list with a placeholder row at the
- * chosen position.
- * Sort order is decided by the caller (each new/edit page.tsx, per compareGroupLevel), so this
- * component doesn't sort.
+ * unpublished; excluding deleted and, in edit mode, itself) as a read-only list with a placeholder
+ * row at the chosen position. Sort order is decided by the caller (each new/edit page.tsx, per
+ * compareGroupLevel), so this component doesn't sort.
  */
 export function SiblingOrderField({
   siblings,

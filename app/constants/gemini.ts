@@ -14,8 +14,7 @@ export const GEMINI_MAX_OUTPUT_TOKENS = 4000;
 
 /**
  * Thinking can't be fully disabled on Gemini 3, so use the lowest level. The SDK enum value is
- * "LOW", but "low"
- * is what was verified over REST, so send that.
+ * "LOW", but "low" is what was verified over REST, so send that.
  */
 export const GEMINI_THINKING_LEVEL = "low" as ThinkingLevel;
 
@@ -27,17 +26,14 @@ export const GEMINI_RETRY_BASE_DELAY_MS = 5000;
 
 /**
  * Timeout per attempt (ms). The time an attempt actually gets is the shorter of this and the
- * remaining
- * GEMINI_TOTAL_BUDGET_MS (combined via AbortSignal.any).
+ * remaining GEMINI_TOTAL_BUDGET_MS (combined via AbortSignal.any).
  */
 export const GEMINI_REQUEST_TIMEOUT_MS = 25_000;
 
 /**
  * Cap for all of generateReview() (attempts + retry waits). Even when 429s take close to
- * GEMINI_REQUEST_TIMEOUT_MS
- * to return, this keeps the total within /api/ai-review's maxDuration (hardcoded in route.ts). Keep
- * it well below
- * maxDuration to leave room for DB round trips.
+ * GEMINI_REQUEST_TIMEOUT_MS to return, this keeps the total within /api/ai-review's maxDuration
+ * (hardcoded in route.ts). Keep it well below maxDuration to leave room for DB round trips.
  */
 export const GEMINI_TOTAL_BUDGET_MS = 45_000;
 

@@ -71,7 +71,7 @@ describe("PATCH /api/admin/users - approve", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ success: true, action: "approve" });
     expect(approveUser).toHaveBeenCalledWith(5, "general");
-    // 承認時刻を二重送信防止キーにして承認メールを予約する
+    // Reserve the approval email keyed on the approval time (double-send prevention).
     expect(scheduleApprovedEmail).toHaveBeenCalledWith({
       userId: 5,
       membershipType: "general",
@@ -322,7 +322,8 @@ describe("PATCH /api/admin/users - 認可", () => {
   });
 
   it("却下済み（rejected）の場合は role が admin のままでも403で、承認処理を呼ばない (#104)", async () => {
-    // 却下時に role はクリアされないため、Authセッションが有効な却下済み admin を想定
+    // Reject doesn't clear the role, so this assumes a rejected admin whose Auth session is still
+    // valid.
     vi.mocked(getServerAuth).mockResolvedValue({
       ...adminAuth,
       userStatus: "rejected",

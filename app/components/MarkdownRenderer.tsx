@@ -15,18 +15,14 @@ import { visit } from "unist-util-visit";
 import { cn } from "@/lib/utils";
 
 // Shared component without "use client": no hooks or Node-only APIs, so the same implementation
-// renders on the
-// server (learn/demo page.tsx) and on the client (AIReviewDisplay, bundled there).
+// renders on the server (learn/demo page.tsx) and on the client (AIReviewDisplay, bundled there).
 // react-markdown doesn't render raw HTML by default (no rehype-raw), so <script> etc. in Markdown
-// is always
-// escaped text; no extra sanitizing is done.
+// is always escaped text; no extra sanitizing is done.
 
 // Import only the languages this course uses, individually, to limit bundle size. rehype-highlight
-// always
-// imports lowlight's common set (37 languages), so the languages option wouldn't shrink the bundle;
-// use lowlight
-// directly with a minimal own rehype plugin so only registered languages are bundled.
-// GAS (Google Apps Script) is JavaScript-based, so alias it to javascript.
+// always imports lowlight's common set (37 languages), so the languages option wouldn't shrink the
+// bundle; use lowlight directly with a minimal own rehype plugin so only registered languages are
+// bundled. GAS (Google Apps Script) is JavaScript-based, so alias it to javascript.
 const lowlight = createLowlight({ html, css, javascript, typescript, python, json, bash });
 lowlight.registerAlias({
   html: ["xml"],
@@ -52,8 +48,7 @@ function getFenceLanguage(node: Element): string | undefined {
 }
 
 // Highlight only fenced code blocks (`pre > code`), not inline code. Blocks with no or an
-// unregistered language
-// stay plain.
+// unregistered language stay plain.
 function rehypeHighlightSubset() {
   return (tree: Root) => {
     visit(tree, "element", (node, _index, parent) => {
@@ -82,8 +77,7 @@ function rehypeHighlightSubset() {
         });
       } catch {
         // If highlight.js throws (e.g. an internal grammar bug), give up highlighting and render
-        // plain rather than
-        // crash the whole page.
+        // plain rather than crash the whole page.
         return;
       }
 
@@ -99,8 +93,7 @@ interface MarkdownRendererProps {
 }
 
 // Skip re-render/re-highlight unless content/className change (in AIReviewDisplay the parent
-// re-renders on
-// every other form state update).
+// re-renders on every other form state update).
 export const MarkdownRenderer = memo(function MarkdownRenderer({
   content,
   className,

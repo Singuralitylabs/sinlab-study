@@ -111,8 +111,7 @@ const week2 = makeWeek({ id: 2, phase_id: 1, name: "週2", display_order: 1, pha
 const week3 = makeWeek({ id: 3, phase_id: 2, name: "週3", display_order: 1, phase: phase2 });
 
 // display_order is number (non-null) in app types, but the DB column has no NOT NULL, so null can
-// occur at
-// runtime. Fixture with a deliberately forged type for that regression.
+// occur at runtime. Fixture with a deliberately forged type for that regression.
 const themeWithNullOrder = {
   id: 3,
   name: "テーマ(順序未設定)",
@@ -222,8 +221,7 @@ describe("sortContentsByHierarchy", () => {
     const sorted = sortContentsByHierarchy([contentY, contentX]);
 
     // themeX(id10) precedes themeY(id20) via the id tiebreak; comparing only by the week
-    // display_order
-    // (weekY:1 < weekX:5) would wrongly put contentY first.
+    // display_order (weekY:1 < weekX:5) would wrongly put contentY first.
     expect(sorted.map((c) => c.id)).toEqual([10, 20]);
   });
 });
@@ -282,8 +280,7 @@ describe("sortWeeksByHierarchy", () => {
     const sorted = sortWeeksByHierarchy([weekY, weekX]);
 
     // themeX(id10) precedes themeY(id20) via the id tiebreak; comparing only by the week's own
-    // display_order
-    // (weekY:1 < weekX:5) would wrongly put weekY first.
+    // display_order (weekY:1 < weekX:5) would wrongly put weekY first.
     expect(sorted.map((w) => w.id)).toEqual([10, 20]);
   });
 });
@@ -387,8 +384,7 @@ describe("sortPhasesByHierarchy", () => {
     const sorted = sortPhasesByHierarchy([phaseY, phaseX]);
 
     // themeX(id10) precedes themeY(id20) via the id tiebreak; comparing only by the phase's own
-    // display_order
-    // (phaseY:1 < phaseX:5) would wrongly put phaseY first.
+    // display_order (phaseY:1 < phaseX:5) would wrongly put phaseY first.
     expect(sorted.map((p) => p.id)).toEqual([100, 200]);
   });
 });
@@ -460,8 +456,7 @@ describe("groupPhasesByTheme", () => {
     const groups = groupPhasesByTheme([phaseWithBlankThemeName]);
 
     // The theme is set, so the group key stays the theme id (not merged into the unclassified
-    // group), but the
-    // label falls back to unclassified because the name is whitespace-only.
+    // group), but the label falls back to unclassified because the name is whitespace-only.
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({ key: "30", label: "未分類" });
   });
@@ -547,8 +542,7 @@ describe("resolveSiblingResequence", () => {
     const result = resolveSiblingResequence(siblings, null);
 
     // compareGroupLevel order: display_order ascending (0, 0, null=Infinity), ties by id, so
-    // id10(0) -> id30(0) ->
-    // id20(null). Inserting at the head shifts every sibling by one.
+    // id10(0) -> id30(0) -> id20(null). Inserting at the head shifts every sibling by one.
     expect(result.updates).toEqual(
       expect.arrayContaining([
         { id: 10, display_order: 2 },

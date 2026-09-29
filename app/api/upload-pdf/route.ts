@@ -30,14 +30,10 @@ function slideNumberExhaustedMessage(): string {
 
 /**
  * Verify the object exists right after upload: upload()'s return value doesn't guarantee it, and
- * this keeps
- * a pdf_url key with no object from being saved. Must throw when verification isn't possible
- * (callers must
- * not treat that as success).
- * The uploaded object is not deleted on failure, since a transient network error would remove a
- * good file.
- * A retry without a number picks the next number, leaving an orphan file and a numbering gap
- * instead of a 409.
+ * this keeps a pdf_url key with no object from being saved. Must throw when verification isn't
+ * possible (callers must not treat that as success). The uploaded object is not deleted on failure,
+ * since a transient network error would remove a good file. A retry without a number picks the next
+ * number, leaving an orphan file and a numbering gap instead of a 409.
  */
 async function verifyUploadedObject(
   supabase: AdminSupabaseClient,
@@ -50,8 +46,7 @@ async function verifyUploadedObject(
   }
 
   // data.path is just built from the argument path and proves nothing. Check the actual location
-  // via
-  // fullPath (from the server response, data.Key).
+  // via fullPath (from the server response, data.Key).
   const expectedFullPath = `${BUCKET_NAME}/${expectedPath}`;
   if (uploadData.fullPath !== expectedFullPath) {
     throw new Error(
@@ -60,9 +55,8 @@ async function verifyUploadedObject(
   }
 
   // exists() is a HEAD on the exact key: unlike list({ search }) it has no partial matching or
-  // result cap, so
-  // there is no window where an existing object isn't found. 400/404 give data:false; other
-  // failures throw.
+  // result cap, so there is no window where an existing object isn't found. 400/404 give
+  // data:false; other failures throw.
   const { data: exists } = await supabase.storage.from(BUCKET_NAME).exists(expectedPath);
   if (!exists) {
     throw new Error(`アップロードしたオブジェクトが見つかりません: ${expectedPath}`);
@@ -71,8 +65,7 @@ async function verifyUploadedObject(
 
 /**
  * Returns the max existing slide-NN number + 1 (1 if none). Throws if listing fails: a wrong
- * auto-number
- * could overwrite an existing file or misreport a 409.
+ * auto-number could overwrite an existing file or misreport a 409.
  */
 async function getNextSlideNumber(supabase: AdminSupabaseClient, folder: string): Promise<number> {
   const { data, error } = await supabase.storage.from(BUCKET_NAME).list(folder, { limit: 1000 });
@@ -96,9 +89,8 @@ async function getNextSlideNumber(supabase: AdminSupabaseClient, folder: string)
 
   const nextNumber = maxNumber + 1;
   // Past SLIDE_NUMBER_MAX the next scan would keep picking the same number and 409 forever, so
-  // detect
-  // exhaustion before incrementing. The max is far below the safe-integer limit, so this also
-  // covers that check.
+  // detect exhaustion before incrementing. The max is far below the safe-integer limit, so this
+  // also covers that check.
   if (nextNumber > SLIDE_NUMBER_MAX || !Number.isSafeInteger(nextNumber)) {
     throw new SlideNumberExhaustedError(slideNumberExhaustedMessage());
   }
@@ -171,8 +163,7 @@ export async function POST(request: NextRequest) {
       // Only an absent field triggers auto-numbering; an empty string is invalid.
       if (slideNumberValue !== null) {
         // Explicit number: overwrite the existing file. parsePositiveInteger() is generic with no
-        // upper bound;
-        // the domain cap (SLIDE_NUMBER_MAX) is checked on the slide-number side.
+        // upper bound; the domain cap (SLIDE_NUMBER_MAX) is checked on the slide-number side.
         const parsed = parsePositiveInteger(slideNumberValue);
         if (parsed === null || parsed > SLIDE_NUMBER_MAX) {
           return NextResponse.json({ error: invalidSlideNumberMessage() }, { status: 400 });
@@ -215,8 +206,7 @@ export async function POST(request: NextRequest) {
     if (uploadError) {
       console.error("PDFアップロードエラー:", uploadError);
       // storage-js derives statusCode from the response body's statusCode/code or the HTTP status
-      // string,
-      // so a duplicate shows up as "409", not "Duplicate".
+      // string, so a duplicate shows up as "409", not "Duplicate".
       const isDuplicate = uploadError.status === 409 || uploadError.statusCode === "409";
       const message = isDuplicate
         ? "同じ番号のスライドが既に存在します。番号を指定して上書きしてください"

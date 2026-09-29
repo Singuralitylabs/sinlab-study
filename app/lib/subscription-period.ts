@@ -1,9 +1,9 @@
 import { formatDate } from "@/app/lib/format-date";
 
 /**
- * 解約予約の判定・利用期限の算出に使う、サブスクの期間まわりの値。
- * `stripe_subscriptions` のミラー行（日時は ISO 文字列）と同じ形で、Stripe から取り直した
- * ライブ状態も `subscriptionMirrorFields()` でこの形に写してから判定する。
+ * Subscription period values used to decide cancellation-scheduled state and access end. Same shape
+ * as the stripe_subscriptions mirror row (ISO strings); live state re-fetched from Stripe is mapped
+ * into this shape via subscriptionMirrorFields() before judging.
  */
 export type SubscriptionPeriodFields = {
   cancel_at_period_end: boolean;
@@ -12,10 +12,10 @@ export type SubscriptionPeriodFields = {
 };
 
 /**
- * 解約が予約されているか（終了する予定か）。classic billing mode の解約は
- * `cancel_at_period_end`、flexible billing mode（Stripe API 2025-09-30.clover 以降の新規サブスクの
- * 既定）の Customer Portal での解約は `cancel_at` に終了日時が入り `cancel_at_period_end` は
- * false のままになるため、両方を見る。
+ * Whether a cancellation is scheduled. In classic billing mode it's cancel_at_period_end; in
+ * flexible billing mode (default for new subscriptions since Stripe API 2025-09-30.clover) a
+ * Customer Portal cancellation sets cancel_at while cancel_at_period_end stays false, so check
+ * both.
  */
 export function isCancellationScheduled(
   fields: Pick<SubscriptionPeriodFields, "cancel_at_period_end" | "cancel_at">
@@ -24,16 +24,17 @@ export function isCancellationScheduled(
 }
 
 /**
- * 解約予約中の契約を利用できる最終日時。`cancel_at` を優先し、無ければ（classic billing mode の
- * 期間末解約）`current_period_end`。どちらも無ければ null。
+ * Last moment a cancellation-scheduled contract can be used: cancel_at first, else
+ * current_period_end (classic
+ * period-end cancellation), else null.
  */
 export function cancellationEndsAt(fields: SubscriptionPeriodFields): string | null {
   return fields.cancel_at ?? fields.current_period_end;
 }
 
 /**
- * `/upgrade` の「ご契約中です（…）」に添える文言。解約予約中なら利用期限、そうでなければ
- * 次回のお支払い日を示す。日付が無い場合は null（文言を添えない）。
+ * Text appended to /upgrade's "contracted" message: the access end date if a cancellation is
+ * scheduled, otherwise the next payment date. null when there's no date (no text appended).
  */
 export function subscriptionPeriodLabel(fields: SubscriptionPeriodFields): string | null {
   if (isCancellationScheduled(fields)) {

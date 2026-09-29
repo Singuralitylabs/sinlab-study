@@ -86,9 +86,8 @@ export function SubmissionForm({
   const addCodeFile = () => {
     setCodeFiles((prev) => {
       // On the first single -> multi-file switch, fill default names for empty filenames (the
-      // filename field is hidden
-      // and blank in single-file mode, so it would become required as soon as it switches to
-      // multi).
+      // filename field is hidden and blank in single-file mode, so it would become required as soon
+      // as it switches to multi).
       const assigned: string[] = prev
         .map((f) => f.filename)
         .filter((name) => name.trim().length > 0);

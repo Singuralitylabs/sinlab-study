@@ -6,11 +6,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ContentForm } from "../ContentForm";
 
 interface NewContentPageProps {
-  // App RouterのsearchParamsは同名クエリの重複時に string[] にもなりうる
+  // App Router searchParams can be string[] when a query name is repeated.
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-/** 同名クエリが重複して string[] になった場合は先頭の値のみを使う */
+/** When a repeated query becomes string[], use only the first value. */
 function firstParam(value: string | string[] | undefined): string {
   return (Array.isArray(value) ? value[0] : value) ?? "";
 }
@@ -24,10 +24,10 @@ export default async function NewContentPage({ searchParams }: NewContentPagePro
   const sortedWeeks = weeks ? sortWeeksByHierarchy(weeks) : [];
   const filterOptions = deriveWeekSelectOptions(sortedWeeks);
 
-  // 兄弟候補（コンテンツ一覧）の取得失敗を「兄弟なし」として扱うと、選択した週配下に
-  // 実際には既存コンテンツがあるのに空一覧を表示してしまい、既定の先頭挿入のまま送信
-  // できてしまう。POST時（createContent内の再採番）にDBが復旧していると、既存
-  // コンテンツ全件が意図せず後ろへ再採番されるため、取得失敗時はフォームを表示しない。
+  // Treating a failed sibling fetch as "no siblings" would show an empty list although contents
+  // exist under the selected week, and submit with the default head insert. If the DB recovers by
+  // POST time (renumbering inside createContent), all existing contents would be renumbered
+  // backward unintentionally, so don't show the form on failure.
   if (contentsError || !contents) {
     return (
       <div className="max-w-3xl mx-auto">
@@ -47,8 +47,7 @@ export default async function NewContentPage({ searchParams }: NewContentPagePro
     );
   }
 
-  // 挿入位置ピッカーの兄弟候補（週選択後にフォーム側で week_id により絞り込む）。
-  // content-grouping.ts の階層順ソートと同じ比較関数（display_order昇順・idタイブレーク）で揃える
+  // Sort with the same comparator as content-grouping.ts (display_order ascending, id tiebreak).
   const siblingCandidates = [...contents]
     .sort((a, b) => compareGroupLevel(a.display_order, b.display_order, a.id, b.id))
     .map((content) => ({

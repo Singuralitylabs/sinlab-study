@@ -4,8 +4,8 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 /**
- * 詳細画面を開いたときに既読を記録し、サイドナビの未読バッジを更新する。
- * 未読のときだけ描画する（既読なら記録も再描画もしない）。失敗しても表示は止めない。
+ * Records the read on opening the detail screen and refreshes the side-nav unread badge. Renders
+ * only while unread (no recording or re-render once read). Failures don't block the display.
  */
 export function MarkAnnouncementRead({ announcementId }: { announcementId: number }) {
   const router = useRouter();

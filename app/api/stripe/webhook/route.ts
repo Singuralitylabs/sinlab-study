@@ -12,10 +12,9 @@ import { sendSlackPaymentFailedNotification } from "@/app/services/notifications
 
 /**
  * Calls releaseEventClaim() guarded against exceptions. It reports DB errors via {error} instead of
- * throwing,
- * but internals such as createAdminSupabaseClient() may throw unexpectedly; a release failure must
- * not break the
- * 500 response for a handler failure (an unreleased claim becomes claimable again after the TTL).
+ * throwing, but internals such as createAdminSupabaseClient() may throw unexpectedly; a release
+ * failure must not break the 500 response for a handler failure (an unreleased claim becomes
+ * claimable again after the TTL).
  */
 async function safeReleaseEventClaim(eventId: string, processedAt: string): Promise<void> {
   try {
@@ -27,8 +26,7 @@ async function safeReleaseEventClaim(eventId: string, processedAt: string): Prom
 
 export async function POST(request: NextRequest) {
   // While disabled, do no signature verification or event processing at all (fully stopped on the
-  // premise of
-  // zero existing live subscribers; see AGENTS.md).
+  // premise of zero existing live subscribers; see AGENTS.md).
   if (!isStripeEnabled()) {
     return NextResponse.json({ error: STRIPE_DISABLED_MESSAGE }, { status: 503 });
   }
@@ -55,10 +53,8 @@ export async function POST(request: NextRequest) {
 
   try {
     // Atomically acquire event.id via a plain INSERT: of concurrent deliveries of the same event.id
-    // only one wins
-    // on the unique constraint. If not claimed, another request already processed or is processing
-    // it, so skip
-    // the handler.
+    // only one wins on the unique constraint. If not claimed, another request already processed or
+    // is processing it, so skip the handler.
     const {
       claimed: didClaim,
       processedAt,
@@ -86,8 +82,7 @@ export async function POST(request: NextRequest) {
         break;
       }
       // By the time of deleted, subscription.status is already 'canceled', so the same sync as
-      // updated also completes
-      // the demotion.
+      // updated also completes the demotion.
       case "customer.subscription.updated":
       case "customer.subscription.deleted": {
         const { error } = await syncSubscriptionStatus(event.data.object as Stripe.Subscription);

@@ -30,8 +30,7 @@ export function calcTotalPages(count: number, pageSize: number = SUBMISSIONS_PAG
 
 /**
  * Whether to redirect to an out-of-range page: PostgREST range overflow (PGRST103), or no error but
- * page > 1
- * with zero rows. Other DB errors are shown by the caller.
+ * page > 1 with zero rows. Other DB errors are shown by the caller.
  */
 export function shouldRedirectOutOfRangePage({
   page,

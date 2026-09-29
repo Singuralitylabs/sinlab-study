@@ -2,8 +2,8 @@ import type { CodeFile, Json } from "@/app/types";
 
 /**
  * Normalizes a submission into a file array for display/AI review: code_files if present, else
- * code_content as
- * a one-element array, else []. Kept as a pure function since both client and server use it.
+ * code_content as a one-element array, else []. Kept as a pure function since both client and
+ * server use it.
  */
 export function getSubmissionCodeFiles(submission: {
   code_content: string | null;

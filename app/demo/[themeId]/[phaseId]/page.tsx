@@ -31,10 +31,8 @@ export default async function DemoPhasePage({ params }: PageProps) {
 
   if (!theme || !phase || phase.theme_id !== themeIdNum) notFound();
 
-  // デモでアクセス可能なWeekのID（フェーズが一致する場合のみ）
   const demoWeekId = ctx && ctx.phase.id === phaseIdNum ? ctx.week.id : null;
 
-  // プログレスバー用: デモWeekのコンテンツIDのみ
   const demoContentIds = weeks?.find((w) => w.id === demoWeekId)?.contents.map((c) => c.id) ?? [];
 
   return (

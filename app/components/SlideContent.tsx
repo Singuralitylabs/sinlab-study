@@ -1,15 +1,14 @@
 import { PdfSlideViewerNoSSR as PdfSlideViewer } from "@/app/components/PdfSlideViewerNoSSR";
 
 interface SlideContentProps {
-  /** サーバー側で発行した署名付きURL。発行できなかった場合は null */
   signedUrl: string | null;
 }
 
 /**
- * スライドPDFの本体表示。署名付きURLを発行できたときだけビューアを描画する。
- * 発行できない原因は Storage の一時障害と、キーとして解釈できない pdf_url（再読み込みでは
- * 解決しない）の両方があり得るため、文言は原因を断定しない中立なものにする。
- * 署名付きURLの発行そのものは各 page.tsx が閲覧権限チェックの後に行う（issue #89）。
+ * Renders the slide PDF only when a signed URL could be issued. Failure can be a transient Storage
+ * outage or a pdf_url that isn't interpretable as a key (a reload won't fix it), so the message
+ * stays neutral about the cause. Each page.tsx issues the signed URL after the view-permission
+ * check (#89).
  */
 export function SlideContent({ signedUrl }: SlideContentProps) {
   if (!signedUrl) {

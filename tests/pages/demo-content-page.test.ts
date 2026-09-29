@@ -2,8 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// 未認証のデモ画面では、お試し公開（is_open_to_trial = true）のスライドに限って
-// 署名付きURLを発行することをページ単位で検証する（issue #89）。
+// Invariant under test: the unauthenticated demo issues slide signed URLs only for is_open_to_trial
+// = true slides (#89).
 
 vi.mock("next/navigation", () => ({
   notFound: () => {

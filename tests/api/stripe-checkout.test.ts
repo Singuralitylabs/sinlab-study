@@ -317,8 +317,8 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
     const res = await POST();
 
     // Return the URL with 200 so it is handled as a normal redirect, not an error (the success page
-    // applies the same
-    // idempotent promotion and shows the completion screen with the next billing date).
+    // applies the same idempotent promotion and shows the completion screen with the next billing
+    // date).
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "/upgrade/success?session_id=cs_paid" });
     // No re-claim or new session while a live contract exists (prevents double contracts).

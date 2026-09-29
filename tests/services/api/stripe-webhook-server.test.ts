@@ -159,8 +159,7 @@ describe("activateUserFromCheckoutSession", () => {
 
   it("Checkout手続き中（claim済み）の行はリプレイ扱いせず、ミラーを更新して昇格する", async () => {
     // A claim row has no stripe_subscription_id and a sentinel status; misreading it as "another
-    // current contract
-    // recorded" would lose the promotion of the Checkout that just completed.
+    // current contract recorded" would lose the promotion of the Checkout that just completed.
     const mockClient = createMockSupabaseClient({
       tableResults: {
         stripe_subscriptions: [
@@ -362,12 +361,11 @@ describe("activateUserFromCheckoutSession", () => {
       expect(result.error).toBeNull();
       expect(result.activated).toBe(false);
       // When not promoted, currentPeriodEnd is null even if fetched from Stripe: entitlement is
-      // unchanged, so the
-      // success page must not show a real billing date.
+      // unchanged, so the success page must not show a real billing date.
       expect(result.currentPeriodEnd).toBeNull();
       // Only the existing-row check + upsert, no users update (prevents promotion via a revisited
-      // success URL after
-      // cancellation, or an unpaid checkout completion such as convenience-store payment).
+      // success URL after cancellation, or an unpaid checkout completion such as convenience-store
+      // payment).
       expect(mockClient.from).toHaveBeenCalledTimes(2);
     }
   );
@@ -488,8 +486,7 @@ describe("reactivateUserFromMirror", () => {
     expect(retrieve).toHaveBeenCalledWith("sub_123");
     const subBuilder = mockClient.from.mock.results[1].value;
     // Update only the row still on the same contract/state with no claim as read, so a stale
-    // snapshot doesn't
-    // overwrite a `canceled` written by a concurrent cancel webhook.
+    // snapshot doesn't overwrite a `canceled` written by a concurrent cancel webhook.
     expect(subBuilder.eq).toHaveBeenCalledWith("stripe_subscription_id", "sub_123");
     expect(subBuilder.eq).toHaveBeenCalledWith("status", "active");
     expect(subBuilder.is).toHaveBeenCalledWith("checkout_claimed_at", null);
@@ -608,8 +605,7 @@ describe("syncSubscriptionStatus", () => {
   });
 
   // Webhook delivery order isn't guaranteed, so use the live state re-fetched from Stripe, not the
-  // event
-  // snapshot. Tests set the re-fetched state via mockGetStripeClient.
+  // event snapshot. Tests set the re-fetched state via mockGetStripeClient.
   const mockGetStripeClient = (liveStatus: string) => {
     vi.mocked(getStripeClient).mockReturnValue({
       subscriptions: {
@@ -806,11 +802,9 @@ describe("revertUserToTrial", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// トランザクションメールのフック（#252）
-// 送信自体（after()・email_logs の claim・Resend）は user-emails 側で行うため、ここでは
-// 「主処理が成功したときだけ、正しい reference_key で予約する」ことを検証する
-// ----------------------------------------------------------------
+// Transactional mail hook (#252). Sending itself (after(), the email_logs claim, Resend) lives in
+// user-emails; here verify only that a reservation is made with the correct reference_key when the
+// main processing succeeds.
 describe("トランザクションメールのフック", () => {
   const baseSession = {
     id: "cs_123",
@@ -875,7 +869,8 @@ describe("トランザクションメールのフック", () => {
       const mockClient = createMockSupabaseClient({
         tableResults: {
           stripe_subscriptions: { data: null, error: null },
-          // 1回目: 「まだ一般有料会員でない」行だけを更新（0行）、2回目: 現在の状態
+          // First call: update only rows that are "not yet general paid members" (0 rows); second:
+          // current state.
           users: [
             { data: [], error: null },
             { data: { id: 1 }, error: null },
@@ -1079,7 +1074,7 @@ describe("トランザクションメールのフック", () => {
       const result = await syncSubscriptionStatus(liveSubscription() as never);
 
       expect(result.error).toBeNull();
-      // 判定はライブ状態だけで行い、ミラー行の値は見ない
+      // Judged from the live state only; the mirror row's values aren't consulted.
       expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith("user_id");
       expect(scheduleCancelScheduledEmail).toHaveBeenCalledWith({
         userId: 7,
@@ -1195,10 +1190,8 @@ describe("トランザクションメールのフック", () => {
 });
 
 // claimEvent uses a plain INSERT on event.id as the claim (not upsert), so of concurrent requests
-// with the same
-// event.id only one succeeds via the unique constraint. releaseEventClaim frees it only on handler
-// failure so a
-// Stripe retry can claim again.
+// with the same event.id only one succeeds via the unique constraint. releaseEventClaim frees it
+// only on handler failure so a Stripe retry can claim again.
 describe("claimEvent", () => {
   it("未処理のイベントの場合、claimに成功しclaimed=trueを返す", async () => {
     const mockClient = createMockSupabaseClient({

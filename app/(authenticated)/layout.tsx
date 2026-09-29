@@ -19,9 +19,9 @@ export default async function AuthLayout({
 }>) {
   const { userStatus, userRole } = await getServerAuth();
 
-  // 認可の第一の砦は proxy.ts だが、プロキシのスキップ経路や設定不備に備え、
-  // サーバー側でも active / trial（お試しユーザー）のみ許可する（許可リスト方式の二層防御）。
-  // getServerAuth() は React.cache() でメモ化済みのため追加のDBアクセスは発生しない
+  // proxy.ts is the first line of defense, but allow only active/trial here too in case of proxy
+  // skip paths or misconfiguration (allowlist two-layer defense). getServerAuth() is memoized with
+  // React.cache(), so this adds no DB access.
   if (userStatus !== USER_STATUS.ACTIVE && userStatus !== USER_STATUS.TRIAL) {
     if (userStatus === USER_STATUS.REJECTED) {
       redirect("/rejected");
@@ -32,7 +32,7 @@ export default async function AuthLayout({
   const isAdmin = checkAdminPermissions(userRole);
   const isInstructor = checkInstructorPermissions(userRole);
   const stripeEnabled = isStripeEnabled();
-  // 未読件数は getServerAuth() のヘッダーには載せず、ここで取得する（取得失敗は 0 件表示）
+  // The unread count isn't carried in getServerAuth()'s headers; fetch it here (a failure shows 0).
   const unreadAnnouncementCount = await fetchUnreadAnnouncementCount();
 
   return (

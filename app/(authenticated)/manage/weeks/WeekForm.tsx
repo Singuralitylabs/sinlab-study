@@ -21,9 +21,8 @@ interface WeekFormProps {
   initialData?: LearningWeek;
   /**
    * All week candidates for the insert-position picker. Create mode passes the targets themselves;
-   * edit mode
-   * includes the edited week (to find its current position; removed inside the form before
-   * display).
+   * edit mode includes the edited week (to find its current position; removed inside the form
+   * before display).
    */
   siblingCandidates?: SiblingCandidate[];
   mode: "create" | "edit";
@@ -43,8 +42,7 @@ export function WeekForm({ phases, initialData, siblingCandidates = [], mode }: 
       : getDefaultInsertAfterId(allSiblingsForPhase)
   );
   // Omit insert_after_id from the PUT body when neither parent nor position was touched (the server
-  // leaves
-  // display order alone).
+  // leaves display order alone).
   const initialInsertAfterId = useRef(insertAfterId);
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
@@ -54,8 +52,7 @@ export function WeekForm({ phases, initialData, siblingCandidates = [], mode }: 
     setPhaseId(value);
     const newSiblingsForValue = siblingCandidates.filter((c) => String(c.parentId) === value);
     // Re-selecting the original parent restores the current position; otherwise merely touching the
-    // parent select
-    // would move the item to the tail.
+    // parent select would move the item to the tail.
     if (mode === "edit" && initialData && value === initialPhaseId) {
       setInsertAfterId(getCurrentPositionInsertAfterId(initialData.id, newSiblingsForValue));
       return;
