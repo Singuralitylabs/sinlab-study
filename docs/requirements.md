@@ -42,7 +42,7 @@
 ### 1.5 関連設計書
 | ドキュメント | 内容 |
 |:--|:--|
-| [データベース設計書](./database.md) | テーブル定義、RLS、インデックス、トリガー |
+| [データベース設計書](./database.md) | テーブル・RLS・マイグレーション運用の設計意図と不変条件（定義そのものは `supabase/migrations/` と `app/types/lib/database.types.ts` が正） |
 | [機能設計書](./specification.md) | アーキテクチャ、機能詳細、認証・認可、API仕様、画面設計 |
 
 ---
