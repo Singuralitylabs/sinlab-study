@@ -61,6 +61,21 @@ export type Database = {
           },
         ];
       };
+      cron_locks: {
+        Row: {
+          locked_at: string;
+          name: string;
+        };
+        Insert: {
+          locked_at: string;
+          name: string;
+        };
+        Update: {
+          locked_at?: string;
+          name?: string;
+        };
+        Relationships: [];
+      };
       email_logs: {
         Row: {
           created_at: string;
@@ -472,6 +487,7 @@ export type Database = {
           created_at: string | null;
           display_name: string;
           email: string;
+          email_opt_out_at: string | null;
           id: number;
           is_deleted: boolean | null;
           membership_type: string | null;
@@ -488,6 +504,7 @@ export type Database = {
           created_at?: string | null;
           display_name: string;
           email: string;
+          email_opt_out_at?: string | null;
           id?: number;
           is_deleted?: boolean | null;
           membership_type?: string | null;
@@ -504,6 +521,7 @@ export type Database = {
           created_at?: string | null;
           display_name?: string;
           email?: string;
+          email_opt_out_at?: string | null;
           id?: number;
           is_deleted?: boolean | null;
           membership_type?: string | null;

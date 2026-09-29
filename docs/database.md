@@ -148,6 +148,10 @@ erDiagram
         text error
         timestamptz created_at
     }
+    cron_locks {
+        text name PK
+        timestamptz locked_at
+    }
 ```
 
 ---
@@ -373,6 +377,7 @@ erDiagram
 | membership_type | VARCHAR(20) | YES | NULL | 会員種別。`community`（コミュニティ会員）/ `general`（一般有料会員）（CHECK制約）。承認前・却下ユーザーは NULL |
 | terms_accepted_at | TIMESTAMPTZ | YES | NULL | 利用規約・プライバシーポリシーへの同意日時。初回登録時に記録し、既存ユーザーは NULL のまま |
 | onboarding_completed_at | TIMESTAMPTZ | YES | NULL | 初回利用ガイド（ウェルカムダイアログ）の完了日時。閉じたときに記録し、既存ユーザーは NULL のまま |
+| email_opt_out_at | TIMESTAMPTZ | YES | NULL | 案内メール（定期メール）の配信停止日時。NULL は配信対象。配信停止リンク（`/api/email/unsubscribe`）で記録し、再開は管理者が NULL に戻す。トランザクションメールには影響しない（[機能設計書](./specification.md)10.8節） |
 | bio | TEXT | YES | NULL | 自己紹介 |
 | is_deleted | BOOLEAN | YES | false | 論理削除フラグ |
 | created_at | TIMESTAMPTZ | YES | NOW() | 作成日時 |
@@ -439,14 +444,14 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 ### 3.11 email_logs（メール送信ログ）
 
-受講生向けトランザクションメール（[機能設計書](./specification.md)10章）の送信記録。送信前のINSERTを処理権（claim）として使い、同一事象の二重送信を防ぐ。
+受講生向けメール（トランザクションメール・定期メール。[機能設計書](./specification.md)10章）の送信記録。送信前のINSERTを処理権（claim）として使い、同一事象の二重送信を防ぐ。
 
 | カラム | 型 | NULL | デフォルト | 説明 |
 |:--|:--|:--:|:--|:--|
 | id | SERIAL | NO | - | PK |
 | user_id | INTEGER | NO | - | FK → users.id（ON DELETE CASCADE） |
-| kind | TEXT | NO | - | メール種別（`signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended`。値はアプリの `EMAIL_KIND` で管理し、種別の追加に追従できるよう CHECK 制約は設けない） |
-| reference_key | TEXT | NO | - | 同一事象の識別子（`signup` は `users.id`、`approved` は承認時刻、Stripe 系は `stripe_subscription_id`） |
+| kind | TEXT | NO | - | メール種別（`signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended`、定期メールの `weekly_digest` / `inactivity_reminder` / `trial_nurture`、週次進捗の繰り越し予約 `weekly_digest_reserved`（送信しない記録用の行。`sent_at` / `error` は NULL のまま）。値はアプリの `EMAIL_KIND` で管理し、種別の追加に追従できるよう CHECK 制約は設けない） |
+| reference_key | TEXT | NO | - | 同一事象の識別子（`signup` は `users.id`、`approved` は承認時刻、Stripe 系は `stripe_subscription_id`、`weekly_digest` は週の開始日（月曜、`YYYY-MM-DD`）、`inactivity_reminder` / `trial_nurture` は `day7` など登録からの日数） |
 | sent_at | TIMESTAMPTZ | YES | - | 送信に成功した日時 |
 | provider_message_id | TEXT | YES | - | Resend のメッセージid |
 | error | TEXT | YES | - | 送信に失敗した場合のエラー内容（APIキー等の秘匿情報は含めない） |
@@ -455,6 +460,16 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 制約: `UNIQUE (user_id, kind, reference_key)`（`email_logs_user_kind_reference_key`）
 
 > **claimによる二重送信防止**: 送信前に `(user_id, kind, reference_key)` をINSERTし、一意制約違反（23505）なら送信しない（`stripe_events` のclaimと同じパターン。`deliverUserEmail()`）。Webhook と `/upgrade/success` の両経路・Webhookの再送・同時配信で同じ事象のメールを複数回送ろうとしても、INSERTに成功した1つだけが送信する。送信失敗時は行を削除せず `error` を記録する（再送はしない）。claim後に処理が中断した行は `sent_at` / `error` が共に NULL のまま残り、以後その事象のメールは送られない（重複よりも欠落を許容する）。
+
+
+### 3.12 cron_locks（Cron バッチの実行ロック）
+
+定期メールの日次バッチ（[機能設計書](./specification.md)10.7節）の並行実行を防ぐロック。`name` への INSERT を処理権（claim）とし、主キー違反なら別の実行が進行中として何もしない（`claimCheckoutSlot()` と同じパターン。`claimCronLock()`）。終了時に自分が取った行（`locked_at` が一致する行）を削除して解放する（`releaseCronLock()`）。関数のハードタイムアウト等で残った行は、アプリ側の TTL（`EMAIL_DIGEST_LOCK_TTL_MS`）を過ぎたら削除して取り直す。
+
+| カラム | 型 | NULL | デフォルト | 説明 |
+|:--|:--|:--:|:--|:--|
+| name | TEXT | NO | - | PK。ロック名（`email-digest`） |
+| locked_at | TIMESTAMPTZ | NO | - | ロックを取った日時 |
 
 ---
 
@@ -649,7 +664,7 @@ user_id = (select get_user_id())
 
 初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer は受講生進捗（`/manage/students`）の閲覧で `users` を参照するため SELECT のみ許可し、UPDATE は付与しない（ユーザー管理は不可）。
 
-本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため。`#16`）。
+本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため。`#16`）。`email_opt_out_at` も同様に、配信停止ルート（`/api/email/unsubscribe`。署名付きリンクでログイン不要）が service_role 経由で記録する（`#253`）。
 
 ### 6.6 stripe_subscriptions
 
@@ -683,6 +698,10 @@ SELECT ポリシーの `EXISTS` サブクエリには呼び出しユーザーの
 ### 6.9 email_logs
 
 RLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`stripe_events` と同じ）。受講生・管理画面からは参照せず、`authenticated` ロールでは SELECT を含め一切のアクセスができない。
+
+### 6.10 cron_locks
+
+RLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`email_logs` と同じ）。Cron ルートからのみ読み書きする。
 
 ---
 
@@ -731,6 +750,8 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | `20260926000000_normalize_blank_slide_pdf_url.sql` | `learning_contents.pdf_url` の空文字・空白のみ（`btrim(pdf_url, E' \t\r\n') = ''`）を NULL に正規化（#243）。アプリ側は `SlidePdfUrlSchema` で空文字・空白のみを null に正規化して保存するため、以後は発生しない。適用済み `20260917011152` は書き換えない。カラム定義・RLS変更なし |
 | `20260928000000_add_email_logs.sql` | 受講生向けメールの送信ログ `email_logs` を追加（#252）。`UNIQUE (user_id, kind, reference_key)` で二重送信を防ぐ。RLSを有効化しポリシーは作らない（service_role専用） |
 | `20260929000000_add_cancel_at_to_stripe_subscriptions.sql` | `stripe_subscriptions` に解約予定日時 `cancel_at`（TIMESTAMPTZ, NULL許容）を追加。flexible billing mode の Portal 解約は `cancel_at` にだけ現れるため（3.9節）。RLS変更なし。**アプリより先に適用すること**（未適用のままだと、`cancel_at` を含むミラー書き込みが失敗し、Webhook・successページの反映が止まる） |
+| `20260930000000_add_email_opt_out_at_to_users.sql` | `users` に案内メールの配信停止日時 `email_opt_out_at`（TIMESTAMPTZ, NULL許容）を追加（#253）。RLS変更なし。**アプリより先に適用すること**（未適用のままだと、定期メールの対象抽出と配信停止ルートがカラム不在で失敗する） |
+| `20260930000001_add_cron_locks.sql` | Cron バッチの実行ロック `cron_locks`（`name` PK、`locked_at`）を追加（#253）。RLSを有効化しポリシーは作らない（service_role専用）。**アプリより先に適用すること**（未適用のままだと、定期メールのバッチがロックを取れず 500 で何も送らない） |
 
 ### 7.1 マイグレーション追加後の運用
 

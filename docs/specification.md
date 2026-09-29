@@ -1164,7 +1164,7 @@ flowchart TD
 
 ### 10.1 概要
 
-受講生の状態が変わったときに、本人へトランザクションメールを送る（要件は `docs/requirements.md` 3.8節）。運営向けの Slack 通知（9章）とは独立しており、Slack 通知はそのまま残す。送信プロバイダは Resend で、送信元は返信不可のアドレス（`EMAIL_FROM_ADDRESS`、`noreply@...`）とする。
+受講生の状態が変わったときに、本人へトランザクションメールを送る。加えて、毎朝のバッチ（Vercel Cron）で案内系の定期メールを送る（10.7節。要件は `docs/requirements.md` 3.8節）。運営向けの Slack 通知（9章）とは独立しており、Slack 通知はそのまま残す。送信プロバイダは Resend で、送信元は返信不可のアドレス（`EMAIL_FROM_ADDRESS`、`noreply@...`）とする。
 
 送信基盤は次の方針で作る（Slack 通知の `postSlackWebhook()` と同じ考え方）。
 
@@ -1180,9 +1180,16 @@ flowchart TD
 | ファイル | 役割 |
 |:--|:--|
 | `app/services/notifications/email.ts` | Resend REST API への送信（`sendEmail()`）と送信設定の判定（`isEmailConfigured()`） |
-| `app/services/notifications/email-templates.ts` | 種別ごとに「件名 + テキスト本文 + HTML 本文」を返す純粋関数と、共通レイアウト（ヘッダー・本文・フッター）の `renderEmailLayout()`。フッターには送信元がサービスであることと返信不可である旨を入れ、追加行（将来の配信停止リンク等）を差し込める |
+| `app/services/notifications/email-templates.ts` | 種別ごとに「件名 + テキスト本文 + HTML 本文」を返す純粋関数と、共通レイアウト（ヘッダー・本文・フッター）の `renderEmailLayout()`。フッターには送信元がサービスであることと返信不可である旨を入れる。`unsubscribeUrl` を渡したとき（案内系メール）だけ、フッターの配信停止リンクと `List-Unsubscribe` / `List-Unsubscribe-Post` ヘッダーを付ける |
 | `app/services/notifications/user-emails.ts` | `email_logs` の claim → 送信 → 結果記録（`deliverUserEmail()`）と、各フックから呼ぶ `schedule*Email()`（宛先の読み込み・テンプレート組み立て・`after()` への予約） |
-| `app/constants/notifications.ts` | `EMAIL_SEND_TIMEOUT_MS`・`EMAIL_FROM_NAME`・`EMAIL_SERVICE_NAME`・種別 `EMAIL_KIND` |
+| `app/constants/notifications.ts` | `EMAIL_SEND_TIMEOUT_MS`・`EMAIL_FROM_NAME`・`EMAIL_SERVICE_NAME`・種別 `EMAIL_KIND`・案内系の種別 `PROMOTIONAL_EMAIL_KINDS`・定期メールの送信日（`INACTIVITY_REMINDER_DAYS` / `TRIAL_NURTURE_DAYS`）と1日の上限（`EMAIL_DIGEST_MAX_PER_DAY` ほか）・実行ロック（`EMAIL_DIGEST_LOCK_NAME` / `EMAIL_DIGEST_LOCK_TTL_MS`） |
+| `app/services/api/cron-lock-server.ts` | Cron バッチの実行ロック（`cron_locks` への claim と解放。`claimCronLock()` / `releaseCronLock()`） |
+| `app/lib/email-digest.ts` | 定期メールの対象判定の純粋関数（JST の暦日・週の開始日・登録から N 日目・次に学ぶコンテンツ） |
+| `app/services/notifications/email-digest-server.ts` | 定期メールの対象抽出（service_role）と送信（`runEmailDigest()`） |
+| `app/services/notifications/email-unsubscribe.ts` | 配信停止トークンの生成・検証と配信停止リンク |
+| `app/services/auth/cron-auth.ts` | Cron ルートの `CRON_SECRET` 検証（`isAuthorizedCronRequest()`） |
+| `app/api/cron/email-digest/route.ts` / `vercel.json` | 定期メールの日次バッチ（Vercel Cron が呼ぶ） |
+| `app/api/email/unsubscribe/route.ts` | 配信停止（ログイン不要） |
 
 ### 10.3 環境変数
 
@@ -1191,6 +1198,8 @@ flowchart TD
 | `RESEND_API_KEY` | Resend の API キー（サーバー側のみ） | 任意（未設定時は送信をスキップ） |
 | `EMAIL_FROM_ADDRESS` | 送信元アドレス（返信不可の `noreply@...`。Resend で認証済みのドメイン。開発時は `onboarding@resend.dev`） | 任意（未設定時は送信をスキップ） |
 | `NEXT_PUBLIC_APP_URL` | 本文のリンクの起点（Stripe と共通） | 任意（未設定時は送信をスキップ） |
+| `CRON_SECRET` | Cron ルートの認証（Vercel Cron が `Authorization: Bearer` で送る） | 任意（未設定時は Cron ルートが常に 401） |
+| `EMAIL_UNSUBSCRIBE_SECRET` | 配信停止トークンの HMAC 署名鍵。変更すると送信済みメールのリンクが無効になる | 任意（未設定時は定期メールを送らず、配信停止ルートも 400） |
 
 ### 10.4 メールの種別とトリガー
 
@@ -1211,7 +1220,7 @@ flowchart TD
 
 このためサブスク更新のイベントが届くたび、解約予約中であれば予約し、Webhook の再送・並行イベントの重複は UNIQUE で1通に抑える。同じ契約で解約予約を取り消して再度予約した場合も、reference_key が同じため2通目は送らない。
 
-対象外: 却下通知、支払い失敗のユーザー向け通知（Stripe の自動メールに任せる。運営向け Slack 通知は既存のまま）、AI レビュー完了通知。定期メール・配信停止・お知らせ連動は本章の範囲外で、`sendEmail()`・共通レイアウト・`email_logs` を再利用して追加する。
+対象外: 却下通知、支払い失敗のユーザー向け通知（Stripe の自動メールに任せる。運営向け Slack 通知は既存のまま）、AI レビュー完了通知。トランザクションメールは配信停止（10.8節）の対象外で、フッターに配信停止リンクを入れない。
 
 ### 10.5 送信ログ（`email_logs`）
 
@@ -1224,3 +1233,46 @@ flowchart TD
 3. API キー（Sending access）を発行し、`RESEND_API_KEY` に設定する。`EMAIL_FROM_ADDRESS` には認証済みドメインの `noreply@...` を設定する
    - ローカル: `.env.local`（ドメイン認証前は `onboarding@resend.dev` を送信元にし、Resend アカウントのメールアドレス宛てで確認する）
    - 本番: Vercel 環境変数（Production / Preview）
+
+### 10.7 定期メール（Cron）
+
+`vercel.json` の `crons` で毎日 UTC 23 時台（JST 8 時台）に `GET /api/cron/email-digest` を呼び、1本のジョブが「今日送るべき種別」をすべて判定して送る（`runEmailDigest()`）。
+
+| kind | 送信日 | 対象 | reference_key | 内容 |
+|:--|:--|:--|:--|:--|
+| `weekly_digest` | 毎週月曜（月曜に送れなかった分だけ、同じ週の翌日以降） | 前週の月曜（JST）以前に登録し（先週をまるごと利用できたユーザー。先週の途中に登録したユーザーへ「先週は学習の記録がありませんでした」と送らないため）、先週に完了または提出が1件以上ある、または閲覧できる未完了コンテンツが残っているユーザー | 週の開始日（月曜。`YYYY-MM-DD`） | 先週の完了数・提出数、次に学ぶコンテンツ（閲覧できる未完了の先頭）へのリンク、今週の目標の提案（先週の完了数+1、最低2本、残り本数まで） |
+| `inactivity_reminder` | 登録から7日目・14日目 | `user_progress` も `submissions` も0件のユーザー | `day7` / `day14` | まだ学習を始めていないこと、最初の1本（閲覧できる先頭のコンテンツ）へのリンク、困ったときの連絡先 |
+| `trial_nurture` | 登録から2・5・7・14日目 | `status = trial` のユーザー | `day2` / `day5` / `day7` / `day14` | Day2: 演習の提出 / Day5: AI レビュー / Day7: 本登録で学べるテーマ + 本登録の案内（`isStripeEnabled()` が true のときだけ `/upgrade` へ誘導し、false のときは承認の案内のみ）/ Day14: 最後の案内 |
+
+- **共通の対象**: `role = member` かつ `status IN (active, trial)`、`is_deleted = false`、`email_opt_out_at IS NULL`。admin / maintainer は学習者ではないため送らない
+- **日付は JST の暦日で判定する**: 「登録から N 日目」は `users.created_at` を JST の暦日に丸め、登録日を0日目とする。週は月曜始まりで、「先週」は前週の月曜 0:00〜今週の月曜 0:00（JST）。日次実行が失敗した日の N 日目の分は翌日以降に拾わない（取りこぼしを許容する）
+- **1人1日1通**: `trial_nurture` と `inactivity_reminder` が同じ日に重なるお試しユーザーには `trial_nurture` だけを送る。N 日目の案内を送る日は週次進捗を送らず、翌日以降の実行に回す。今日（JST 0:00 以降）すでに案内系メールの `email_logs` を持つユーザーは、同じ日の再実行（手動実行・Cron の再起動）で対象から外す（朝の実行後に承認されて `status` が変わっても、別種別の2通目を送らない）
+- **お試しユーザーの範囲**: 次に学ぶコンテンツ・残り本数・最初の1本は、お試し公開（`is_open_to_trial = true`）のコンテンツだけで判定する（ダッシュボードの進捗の分母と同じ。4.2節）
+- **集計**: 抽出はユーザーセッションの無いバッチのため service_role クライアントで行う（`user_id` 単位の集計であり、受講生へコンテンツを返す配信経路ではない）。コンテンツは `fetchThemeProgressSummaries()` と同じネスト select で全階層を `is_published = true AND is_deleted = false` に絞り、本文を含まないカラム（`id, title, display_order, is_open_to_trial, week_id` と各階層の名前・表示順）だけを読む。学習順はコンテンツ詳細の前後ナビと同じ `buildThemeContentOrder()` で並べる。新しい集計 SQL（RPC）は追加しない
+- **並行実行の排除**: 実行の最初に実行ロック（`cron_locks` の `name = email-digest` への INSERT を claim とする。`claimCheckoutSlot()` と同じパターン）を取り、取れなければ何もせず `skipped` を返す。Cron の重複起動・手動実行が重なっても、処理するのは1つだけになる。終了時（失敗時も）に自分のロック（`locked_at` が一致する行）を削除する。関数のハードタイムアウトで解放されなかったロックは、`EMAIL_DIGEST_LOCK_TTL_MS`（5分）を過ぎたら次の実行が取り直す。ロックの取得自体が DB エラーなら 500
+- **二重送信の防止**: 1通ごとに `email_logs` の claim を通す（10.1節と同じ `deliverUserEmail()`）。同じ日の再実行でも UNIQUE 違反で送らない。送信失敗は `error` を記録して再送しない
+- **1日の上限**: `EMAIL_DIGEST_MAX_PER_DAY`（80通。Resend 無料枠の日次100通に、同日のトランザクションメールの余裕を残す）は同じ日（JST）の実行の合計に効かせる。ロックを取った後に、今日すでに作られた案内系の `email_logs` の行数を差し引いた数を今回の上限とし、送信を試みた通数（成功・失敗）がそれに達するか、経過時間が `EMAIL_DIGEST_TIME_BUDGET_MS`（45秒。ルートの `maxDuration` は60秒）を超えたら新しい送信を始めない。送れなかった通数は warn ログに残す。キューは N 日目の案内を先、週次進捗を後に並べるため、上限に掛かるのは通常は週次進捗で、同じ週の翌日以降の実行で送られる。N 日目の案内だけで上限を超えた場合の残りは繰り越さない
+- **週次進捗の繰り越し**: 週次進捗の対象を決めるのは月曜の実行だけで、月曜の対象者を `email_logs` に繰り越し予約（`kind = weekly_digest_reserved`、reference_key = 週の開始日。メールは送らない）として記録する。予約は送信の前提とし、失敗したら1通も送らずに失敗（500）を返す（claim の前なので、再実行しても二重送信にはならず予約からやり直せる）。火〜日曜の実行は、予約を持ち、まだ今週の `weekly_digest` の行を持たないユーザー（月曜に上限・時間切れ・同日の N 日目の案内で送れなかった分）だけに送る。週の途中で新しく対象になったユーザー（新コンテンツの公開・配信再開・ステータス変更など）には、次の月曜まで送らない
+- **月曜の実行が完了しなかった週**: 今週の予約が1件も無い（月曜の実行が失敗・スキップ・起動漏れで対象決定まで到達しなかった）ときは、`WEEKLY_DIGEST_CATCH_UP_DAYS`（1日 = 火曜）までの実行が月曜の代わりに対象を決めて予約し、送る。それより後（水〜日曜）は送らず、warn ログと応答の `weeklyReservationMissing: true` で知らせる（週の途中で初めて Cron を動かした場合に、その週の残りの日に一斉に送らないため）
+- **ページング**: 抽出は `range` でページングし、返った件数だけ位置を進めて0件が返るまで取りに行く（PostgREST の `db-max-rows` が1000未満に設定されていても取りこぼさない）
+- **レート制限**: Resend API（既定 2 リクエスト/秒）を超えないよう、送信の開始間隔を `EMAIL_DIGEST_SEND_INTERVAL_MS`（500ms）以上空ける
+- **送信設定が無い環境**: `RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `NEXT_PUBLIC_APP_URL` / `EMAIL_UNSUBSCRIBE_SECRET` のいずれかが無ければ DB に触れずに終了する（配信停止リンクを作れない案内メールは送らない）
+
+**Cron ルートの認証**: `GET /api/cron/email-digest` はユーザーセッションの無い呼び出しのため `getServerAuth()` を使わず、`isAuthorizedCronRequest()` で `Authorization: Bearer <CRON_SECRET>` を検証する。`CRON_SECRET` が未設定・空、またはヘッダーが無い・不一致なら 401 を返し、何もしない（フェイルクローズ。比較は SHA-256 のダイジェスト同士の定数時間比較）。`/api` は proxy の対象外のため、この検証だけが防御になる。応答は送信件数の集計のみで、宛先・本文は含めない。抽出が DB エラーで失敗したら 500。
+
+### 10.8 配信停止
+
+- **対象**: 案内系メール（`PROMOTIONAL_EMAIL_KINDS` = 10.7節の3種）だけ。トランザクションメール（10.4節）は `email_opt_out_at` を参照せず、配信停止後も届く
+- **リンク**: 案内系メールは必ず、共通レイアウトのフッターに本人用の配信停止リンク（`<NEXT_PUBLIC_APP_URL>/api/email/unsubscribe?token=...`）を入れ、`List-Unsubscribe` / `List-Unsubscribe-Post: List-Unsubscribe=One-Click` ヘッダー（RFC 8058）を付ける
+- **トークン**: `<users.id>.<署名>`。署名は `email-unsubscribe:v1:<users.id>` を `EMAIL_UNSUBSCRIBE_SECRET` で HMAC-SHA256 したもの（base64url）。有効期限は持たない（古いメールのリンクからも停止できる）。検証は定数時間比較
+- **`GET /api/email/unsubscribe?token=...`**（ログイン不要）: トークンを検証し、「配信を停止する」ボタン（同じ URL への `POST` フォーム）付きの確認画面を返す。**GET では停止を確定しない**。メールのセキュリティ製品（Outlook の Safe Links 等）はリンクを事前に GET するため、GET で確定すると本人が開く前に停止されてしまう
+- **`POST /api/email/unsubscribe?token=...`**（確認画面のボタンと、`List-Unsubscribe-Post` に対応するメールクライアントのワンクリック配信停止）: 検証に成功したら `users.email_opt_out_at` を `now()` で記録し（既に停止済みなら更新せず）、完了画面を返す
+- いずれも、形式不正・改ざん・シークレット未設定は理由を区別せず 400（フェイルクローズ）。DB エラーは 500。画面にユーザー情報は出さない
+- **再開**: 当面は管理者が `users.email_opt_out_at` を NULL に戻す（Supabase ダッシュボード。管理画面の UI は設けていない）
+
+### 10.9 定期メールの設定手順（運用）
+
+1. 利用規約の改定（案内メールの送信に関する条項）が完了していることを確認する（本番の Cron 有効化の前提）
+2. `CRON_SECRET` と `EMAIL_UNSUBSCRIBE_SECRET` にそれぞれランダムな長い文字列（例: `openssl rand -base64 32`）を設定する（ローカル: `.env.local`、本番: Vercel 環境変数の Production）。`EMAIL_UNSUBSCRIBE_SECRET` は一度決めたら変えない
+3. Production にデプロイし、Vercel ダッシュボードの Settings → Cron Jobs に `/api/cron/email-digest` が表示されることを確認する（Cron は Production デプロイでのみ動く）
+4. 手動実行での確認: `curl -H "Authorization: Bearer $CRON_SECRET" <URL>/api/cron/email-digest`。応答の `sent` / `failed` / `deferred` と、Vercel のログの `[定期メール]` を確認する
