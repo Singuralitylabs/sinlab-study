@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { EMAIL_SERVICE_NAME } from "@/app/constants/notifications";
+import { escapeHtml } from "@/app/lib/escape-html";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
-import { escapeHtml } from "@/app/services/notifications/email-templates";
 import { verifyUnsubscribeToken } from "@/app/services/notifications/email-unsubscribe";
 
 /**

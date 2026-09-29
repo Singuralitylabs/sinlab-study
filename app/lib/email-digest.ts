@@ -69,6 +69,8 @@ export type DigestUser = {
   email: string;
   displayName: string;
   status: UserStatusType;
+  /** 会員種別（お知らせの対象判定に使う）。お試しユーザーは null */
+  membershipType: string | null;
   createdAt: string;
 };
 

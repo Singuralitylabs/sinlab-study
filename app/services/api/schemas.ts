@@ -2,13 +2,23 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { CODE_LANGUAGES } from "@/app/components/code-editor-utils";
 import {
+  ANNOUNCEMENT_BODY_MAX_LENGTH,
+  ANNOUNCEMENT_TARGET_STATUSES,
+  ANNOUNCEMENT_TITLE_MAX_LENGTH,
+} from "@/app/constants/announcements";
+import {
   ALLOWED_SUBMISSION_TYPES,
   BULK_CONTENT_ACTIONS,
   CONTENT_TYPES,
   MAX_BULK_CONTENT_IDS,
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
-import { MEMBERSHIP_TYPES, USER_MANAGEMENT_ACTIONS, USER_ROLES } from "@/app/constants/user";
+import {
+  MEMBERSHIP_TYPES,
+  USER_MANAGEMENT_ACTIONS,
+  USER_ROLES,
+  USER_STATUS,
+} from "@/app/constants/user";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
 
 // ==================== 共通スキーマ ====================
@@ -224,6 +234,57 @@ export const BulkContentUpdateSchema = z.object({
   // （値そのものの妥当性は buildPatch() 側で isContentType() により検証されるため、ここでは受け取るだけ）
   contentType: z.unknown().optional(),
 });
+
+// ==================== /api/manage/announcements ====================
+
+const hasNoDuplicates = (values: readonly string[]) => new Set(values).size === values.length;
+
+/**
+ * お知らせの作成・更新（更新も全項目を送る）。対象の許可値は `ANNOUNCEMENT_TARGET_STATUSES` と
+ * `MEMBERSHIP_TYPES` から導出する。お試しユーザーは会員種別を持たないため、会員種別を指定した
+ * お知らせの対象にはできない（RLS・アプリ層の対象判定と同じ条件。指定しても誰にも届かない
+ * 組み合わせを保存させない）。
+ */
+export const AnnouncementSchema = z
+  .object({
+    title: z
+      .string({ message: "タイトルは文字列で指定してください" })
+      .trim()
+      .min(1, { message: "タイトルを入力してください" })
+      .max(ANNOUNCEMENT_TITLE_MAX_LENGTH, {
+        message: `タイトルは${ANNOUNCEMENT_TITLE_MAX_LENGTH}文字以内で入力してください`,
+      }),
+    body: z
+      .string({ message: "本文は文字列で指定してください" })
+      .refine((value) => value.trim().length > 0, { message: "本文を入力してください" })
+      .refine((value) => value.length <= ANNOUNCEMENT_BODY_MAX_LENGTH, {
+        message: `本文は${ANNOUNCEMENT_BODY_MAX_LENGTH}文字以内で入力してください`,
+      }),
+    target_statuses: z
+      .array(z.enum(ANNOUNCEMENT_TARGET_STATUSES), {
+        message: "対象ステータスを指定してください",
+      })
+      .min(1, { message: "対象ステータスを1つ以上選んでください" })
+      .refine(hasNoDuplicates, { message: "対象ステータスが重複しています" }),
+    target_membership_types: z
+      .array(MembershipTypeSchema)
+      .min(1, { message: "対象の会員種別を1つ以上選ぶか、全種別を指定してください" })
+      .refine(hasNoDuplicates, { message: "対象の会員種別が重複しています" })
+      .nullable(),
+    send_email: z.boolean({ message: "send_emailは真偽値で指定してください" }),
+    is_published: z.boolean({ message: "is_publishedは真偽値で指定してください" }),
+  })
+  .refine(
+    (value) =>
+      value.target_membership_types === null || !value.target_statuses.includes(USER_STATUS.TRIAL),
+    {
+      message:
+        "会員種別を指定する場合、お試しユーザーは対象にできません（お試しユーザーには会員種別がありません）",
+      path: ["target_membership_types"],
+    }
+  );
+
+export type AnnouncementInput = z.infer<typeof AnnouncementSchema>;
 
 // ==================== validateRequest ヘルパー ====================
 
