@@ -564,11 +564,15 @@ export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<
   try {
     supabase = await createAdminSupabaseClient();
     const todayLogs = await fetchTodayPromotionalLogs(supabase, today);
-    limit = Math.max(0, EMAIL_DIGEST_MAX_PER_RUN - todayLogs.count);
     const users = (await fetchDigestUsers(supabase)).filter(
       (user) => !todayLogs.userIds.has(user.userId)
     );
     queue = await buildQueue(supabase, users, today, appUrl);
+    // 上限の件数はキューを作った後に数え直す。並行する別の実行が抽出中に claim した分は
+    // キューから外れる（送信済みの判定で除かれる）ため、その分も上限から差し引かないと
+    // 合計が上限を超える
+    const claimedToday = (await fetchTodayPromotionalLogs(supabase, today)).count;
+    limit = Math.max(0, EMAIL_DIGEST_MAX_PER_RUN - claimedToday);
   } catch (error) {
     console.error(
       "[定期メール] 送信対象の抽出でエラーが発生しました:",

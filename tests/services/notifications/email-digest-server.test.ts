@@ -618,6 +618,35 @@ describe("1回あたりの上限と繰り越し", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
+  it("並行する別の実行が抽出中に送った分も、1日の上限から差し引く", async () => {
+    const fake = setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_RUN + 20) });
+    fakeClock.now = MONDAY;
+    const claim = (userId: number) =>
+      fake.db.email_logs.push({
+        id: 10_000 + userId,
+        user_id: userId,
+        kind: "weekly_digest",
+        reference_key: "2026-10-05",
+        sent_at: MONDAY.toISOString(),
+        created_at: MONDAY.toISOString(),
+      });
+    // 別の実行が u1〜u10 を送信済みの状態で起動し、抽出中（コンテンツ取得時）に u11〜u15 も送られる
+    for (let id = 1; id <= 10; id++) claim(id);
+    const from = fake.client.from.getMockImplementation();
+    if (!from) throw new Error("from() の実装がありません");
+    fake.client.from.mockImplementation((table: string) => {
+      if (table === "learning_themes") {
+        for (let id = 11; id <= 15; id++) claim(id);
+      }
+      return from(table);
+    });
+
+    const result = await runDigest(MONDAY);
+
+    expect(result).toMatchObject({ sent: EMAIL_DIGEST_MAX_PER_RUN - 15 });
+    expect(sentLogs(fake.db)).toHaveLength(EMAIL_DIGEST_MAX_PER_RUN);
+  });
+
   it("実行時間の上限を超えたら新しい送信を始めない", async () => {
     setup({ users: manyUsers(3) });
     let now = 0;
