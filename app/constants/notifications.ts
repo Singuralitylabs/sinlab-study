@@ -48,6 +48,14 @@ export const PROMOTIONAL_EMAIL_KINDS = [
 
 export type PromotionalEmailKind = (typeof PROMOTIONAL_EMAIL_KINDS)[number];
 
+/**
+ * 週次進捗の繰り越し予約（`email_logs.kind`。メールは送らない）。月曜の実行で週次進捗の対象に
+ * なったユーザーを reference_key = 週の開始日で記録し、火〜日曜の実行はこの予約を持ち、まだ
+ * `weekly_digest` を送っていないユーザーだけに送る（月曜に上限・時間切れ・同日の別の案内で
+ * 送れなかった分だけを繰り越し、週の途中で新しく対象になったユーザーには送らない）
+ */
+export const WEEKLY_DIGEST_RESERVATION_KIND = "weekly_digest_reserved";
+
 /** 未学習リマインド（`inactivity_reminder`）を送る「登録から N 日目」 */
 export const INACTIVITY_REMINDER_DAYS = [7, 14] as const;
 

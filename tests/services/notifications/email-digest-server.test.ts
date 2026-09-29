@@ -31,23 +31,35 @@ function createFakeDb(tables: Record<string, Row[]>) {
   const clock = { now: new Date() };
 
   function from(table: string) {
-    let op: "select" | "insert" | "update" = "select";
+    let op: "select" | "insert" | "update" | "upsert" = "select";
     let payload: Row = {};
+    let upsertRows: Row[] = [];
     const filters: Filter[] = [];
     let range: [number, number] | null = null;
 
+    const isDuplicate = (rows: Row[], value: Row) =>
+      table === "email_logs" &&
+      rows.some(
+        (row) =>
+          row.user_id === value.user_id &&
+          row.kind === value.kind &&
+          row.reference_key === value.reference_key
+      );
+
     const execute = (): { data: unknown; error: unknown } => {
       const rows = db[table] ?? [];
+      db[table] = rows;
+      if (op === "upsert") {
+        // ignoreDuplicates: true（ON CONFLICT DO NOTHING）
+        for (const value of upsertRows) {
+          if (!isDuplicate(rows, value)) {
+            rows.push({ id: nextId++, created_at: clock.now.toISOString(), ...value });
+          }
+        }
+        return { data: null, error: null };
+      }
       if (op === "insert") {
-        const duplicate =
-          table === "email_logs" &&
-          rows.some(
-            (row) =>
-              row.user_id === payload.user_id &&
-              row.kind === payload.kind &&
-              row.reference_key === payload.reference_key
-          );
-        if (duplicate) {
+        if (isDuplicate(rows, payload)) {
           return { data: null, error: { code: "23505", message: "duplicate key" } };
         }
         const inserted = {
@@ -76,6 +88,11 @@ function createFakeDb(tables: Record<string, Row[]>) {
       insert: (value: Row) => {
         op = "insert";
         payload = value;
+        return builder;
+      },
+      upsert: (values: Row[]) => {
+        op = "upsert";
+        upsertRows = values;
         return builder;
       },
       update: (value: Row) => {
@@ -234,6 +251,11 @@ function setup(tables: { users: Row[]; user_progress?: Row[]; submissions?: Row[
 const noWait = { sleep: vi.fn(async () => {}) };
 
 let fakeClock: { now: Date };
+
+/** 送信の claim 行（週次進捗の繰り越し予約を除く） */
+function sentLogs(db: Record<string, Row[]>): Row[] {
+  return db.email_logs.filter((row) => row.kind !== "weekly_digest_reserved");
+}
 
 /** 実行日時を DB の now()（email_logs.created_at）にも反映して定期メールを実行する */
 function runDigest(now: Date, options: Parameters<typeof runEmailDigest>[0] = {}) {
@@ -399,12 +421,12 @@ describe("送信対象の抽出", () => {
 
     await runDigest(TUESDAY);
 
-    // 7日目は 10/6（火）。u1 だけが未学習リマインド、u2・u3 は週次進捗（月曜に未送信の繰り越し）
+    // 7日目は 10/6（火）。u1 だけが未学習リマインド。u2・u3 は学習済みのため送らない
+    // （月曜の実行が無く週次進捗の繰り越し予約も無いため、火曜に週次進捗も送らない）
     const reminder = sentEmailTo("u1@example.com");
     expect(reminder.subject).toContain("最初の1本");
     expect(reminder.text).toContain(`${APP_URL}/learn/1/10/100/1000`);
-    expect(sentEmailTo("u2@example.com").subject).toContain("今週の学習");
-    expect(sentEmailTo("u3@example.com").subject).toContain("今週の学習");
+    expect(sentTo()).toEqual(["u1@example.com"]);
   });
 
   it("お試しユーザーの7日目は trial_nurture だけを送り、未学習リマインド・週次進捗は同日に送らない", async () => {
@@ -417,6 +439,8 @@ describe("送信対象の抽出", () => {
     expect(sendEmail).toHaveBeenCalledTimes(1);
     expect(sentEmailTo("u1@example.com").subject).toContain("本登録で学べる内容");
     expect(db.email_logs.map((row) => [row.kind, row.reference_key])).toEqual([
+      // 週次進捗は送らず、同じ週の翌日以降に繰り越す
+      ["weekly_digest_reserved", "2026-10-05"],
       ["trial_nurture", "day7"],
     ]);
   });
@@ -465,7 +489,7 @@ describe("二重送信の防止（email_logs の claim）", () => {
     expect(first).toMatchObject({ status: "completed", sent: 2 });
     expect(second).toMatchObject({ status: "completed", sent: 0 });
     expect(sendEmail).toHaveBeenCalledTimes(2);
-    expect(db.email_logs).toHaveLength(2);
+    expect(sentLogs(db)).toHaveLength(2);
   });
 
   it("Cron の重複起動が並行しても、1人に同じメールは1通だけ送る", async () => {
@@ -488,7 +512,7 @@ describe("二重送信の防止（email_logs の claim）", () => {
     await runDigest(new Date("2026-10-05T01:00:00Z"));
 
     expect(sendEmail).toHaveBeenCalledTimes(1);
-    expect(db.email_logs).toHaveLength(1);
+    expect(sentLogs(db)).toHaveLength(1);
   });
 
   it("前日に案内系メールを受け取っていても、今日の分は送る", async () => {
@@ -512,7 +536,7 @@ describe("二重送信の防止（email_logs の claim）", () => {
 
     expect(first).toMatchObject({ failed: 1 });
     expect(sendEmail).toHaveBeenCalledTimes(1);
-    expect(db.email_logs[0]).toMatchObject({
+    expect(sentLogs(db)[0]).toMatchObject({
       kind: "weekly_digest",
       reference_key: "2026-10-05",
       error: "status=500",
@@ -535,7 +559,7 @@ describe("1回あたりの上限と繰り越し", () => {
 
     expect(tuesday).toMatchObject({ sent: 5, deferred: 0 });
     expect(new Set(sentTo()).size).toBe(EMAIL_DIGEST_MAX_PER_RUN + 5);
-    expect(db.email_logs.every((row) => row.reference_key === "2026-10-05")).toBe(true);
+    expect(sentLogs(db).every((row) => row.reference_key === "2026-10-05")).toBe(true);
   });
 
   it("上限に掛かるときは、翌日に拾えない「N日目」の案内を週次進捗より先に送る", async () => {
@@ -570,6 +594,28 @@ describe("1回あたりの上限と繰り越し", () => {
 
     expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_RUN);
     expect(new Set(sentTo()).size).toBe(EMAIL_DIGEST_MAX_PER_RUN);
+  });
+
+  it("週次進捗は月曜の対象者だけに送り、週の途中で新しく対象になったユーザーには送らない", async () => {
+    const { db } = setup({ users: [userRow(1)] });
+    await runDigest(MONDAY);
+    expect(sentTo()).toEqual(["u1@example.com"]);
+
+    // 火曜に新しい受講生（先週以前の登録）が対象条件を満たしても、月曜の予約が無いため送らない
+    db.users.push(userRow(2));
+    const tuesday = await runDigest(TUESDAY);
+
+    expect(tuesday).toMatchObject({ queued: 0 });
+    expect(sentTo()).toEqual(["u1@example.com"]);
+  });
+
+  it("Cron を週の途中（金曜）に初めて動かしても、週次進捗は次の月曜まで送らない", async () => {
+    setup({ users: [userRow(1), userRow(2)] });
+
+    const friday = await runDigest(new Date("2026-10-08T23:00:00Z")); // 10/9（金）
+
+    expect(friday).toMatchObject({ queued: 0 });
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 
   it("実行時間の上限を超えたら新しい送信を始めない", async () => {

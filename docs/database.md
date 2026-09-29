@@ -446,7 +446,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 |:--|:--|:--:|:--|:--|
 | id | SERIAL | NO | - | PK |
 | user_id | INTEGER | NO | - | FK → users.id（ON DELETE CASCADE） |
-| kind | TEXT | NO | - | メール種別（`signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended`、定期メールの `weekly_digest` / `inactivity_reminder` / `trial_nurture`。値はアプリの `EMAIL_KIND` で管理し、種別の追加に追従できるよう CHECK 制約は設けない） |
+| kind | TEXT | NO | - | メール種別（`signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended`、定期メールの `weekly_digest` / `inactivity_reminder` / `trial_nurture`、週次進捗の繰り越し予約 `weekly_digest_reserved`（送信しない記録用の行。`sent_at` / `error` は NULL のまま）。値はアプリの `EMAIL_KIND` で管理し、種別の追加に追従できるよう CHECK 制約は設けない） |
 | reference_key | TEXT | NO | - | 同一事象の識別子（`signup` は `users.id`、`approved` は承認時刻、Stripe 系は `stripe_subscription_id`、`weekly_digest` は週の開始日（月曜、`YYYY-MM-DD`）、`inactivity_reminder` / `trial_nurture` は `day7` など登録からの日数） |
 | sent_at | TIMESTAMPTZ | YES | - | 送信に成功した日時 |
 | provider_message_id | TEXT | YES | - | Resend のメッセージid |

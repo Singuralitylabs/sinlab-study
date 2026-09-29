@@ -5,6 +5,7 @@ import {
   EMAIL_KIND,
   PROMOTIONAL_EMAIL_KINDS,
   type PromotionalEmailKind,
+  WEEKLY_DIGEST_RESERVATION_KIND,
 } from "@/app/constants/notifications";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
@@ -215,18 +216,22 @@ async function fetchUserIdsWithActivity(
   return new Set([...progress, ...submissions].map((row) => row.user_id));
 }
 
-/** 今週の週次進捗を送信済み（または送信中・送信失敗）のユーザーの ID */
-async function fetchWeeklyDigestLoggedUserIds(
+/**
+ * `email_logs` に (kind, reference_key) の行を持つユーザーの ID。今週の週次進捗を送信済み
+ * （または送信中・送信失敗）のユーザーと、今週の繰り越し予約を持つユーザーの判定に使う
+ */
+async function fetchLoggedUserIds(
   supabase: AdminClient,
   userIds: number[],
-  weekStart: string
+  kind: string,
+  referenceKey: string
 ): Promise<Set<number>> {
   const rows = await fetchForUserIds<{ user_id: number }>(userIds, (ids, from, to) =>
     supabase
       .from("email_logs")
       .select("user_id")
-      .eq("kind", EMAIL_KIND.WEEKLY_DIGEST)
-      .eq("reference_key", weekStart)
+      .eq("kind", kind)
+      .eq("reference_key", referenceKey)
       .in("user_id", ids)
       .order("id")
       .range(from, to)
@@ -322,6 +327,31 @@ async function fetchTodayPromotionalLogs(
       .range(from, to)
   );
   return { count: rows.length, userIds: new Set(rows.map((row) => row.user_id)) };
+}
+
+/**
+ * 月曜に週次進捗の対象になったユーザーを繰り越し予約として記録する（既にあれば何もしない）。
+ * 失敗しても月曜の送信は続ける（その週の繰り越しが欠けるだけ）。
+ */
+async function reserveWeeklyDigest(
+  supabase: AdminClient,
+  userIds: number[],
+  weekStart: string
+): Promise<void> {
+  for (let i = 0; i < userIds.length; i += ID_CHUNK_SIZE) {
+    const { error } = await supabase.from("email_logs").upsert(
+      userIds.slice(i, i + ID_CHUNK_SIZE).map((userId) => ({
+        user_id: userId,
+        kind: WEEKLY_DIGEST_RESERVATION_KIND,
+        reference_key: weekStart,
+      })),
+      { onConflict: "user_id,kind,reference_key", ignoreDuplicates: true }
+    );
+    if (error) {
+      console.error("[定期メール] 週次進捗の繰り越し予約に失敗しました:", error.message);
+      return;
+    }
+  }
 }
 
 /** 送信キューの1通。本文は送る直前に組み立てる */
@@ -425,19 +455,24 @@ async function buildQueue(
     queuedUserIds.add(user.userId);
   }
 
-  // 週次進捗: 今週（月曜始まり）分をまだ送っていないユーザー。月曜に上限・時間切れ・同日の
-  // 別の案内で送れなかった分は、同じ週の翌日以降の実行で送る（reference_key は週の開始日）。
+  // 週次進捗（reference_key は週の開始日）。対象を決めるのは月曜だけで、月曜の対象者を繰り越し
+  // 予約として記録する。火〜日曜は、予約を持ちまだ送っていないユーザー（月曜に上限・時間切れ・
+  // 同日の別の案内で送れなかった分）だけに送り、週の途中で新しく対象になったユーザーには送らない。
   // 今週に入ってから登録したユーザーには「先週」が無いため送らない。
   const weekStart = weekStartOf(today);
-  const weeklyPool = users.filter(
-    (user) =>
-      !queuedUserIds.has(user.userId) && toJstDateString(new Date(user.createdAt)) < weekStart
-  );
-  const logged = await fetchWeeklyDigestLoggedUserIds(
-    supabase,
-    weeklyPool.map((user) => user.userId),
-    weekStart
-  );
+  const isWeekStart = today === weekStart;
+  let weeklyPool = users.filter((user) => toJstDateString(new Date(user.createdAt)) < weekStart);
+  const poolIds = () => weeklyPool.map((user) => user.userId);
+  if (!isWeekStart) {
+    const reserved = await fetchLoggedUserIds(
+      supabase,
+      poolIds(),
+      WEEKLY_DIGEST_RESERVATION_KIND,
+      weekStart
+    );
+    weeklyPool = weeklyPool.filter((user) => reserved.has(user.userId));
+  }
+  const logged = await fetchLoggedUserIds(supabase, poolIds(), EMAIL_KIND.WEEKLY_DIGEST, weekStart);
   const weeklyUsers = weeklyPool.filter((user) => !logged.has(user.userId));
   const stats = await fetchWeeklyStats(
     supabase,
@@ -445,6 +480,7 @@ async function buildQueue(
     weekStart
   );
 
+  const weeklyItems: QueuedEmail[] = [];
   for (const user of weeklyUsers) {
     const completedLastWeek = stats.completedLastWeekByUser.get(user.userId) ?? 0;
     const submittedLastWeek = stats.submittedLastWeekByUser.get(user.userId) ?? 0;
@@ -457,7 +493,7 @@ async function buildQueue(
     ) {
       continue;
     }
-    queue.push({
+    weeklyItems.push({
       kind: EMAIL_KIND.WEEKLY_DIGEST,
       referenceKey: weekStart,
       user,
@@ -474,6 +510,16 @@ async function buildQueue(
         }),
     });
   }
+
+  if (isWeekStart) {
+    await reserveWeeklyDigest(
+      supabase,
+      weeklyItems.map((item) => item.user.userId),
+      weekStart
+    );
+  }
+  // 今日 N 日目の案内を送るユーザーには、週次進捗を翌日以降に回す（予約済みのため繰り越される）
+  queue.push(...weeklyItems.filter((item) => !queuedUserIds.has(item.user.userId)));
 
   return queue;
 }
