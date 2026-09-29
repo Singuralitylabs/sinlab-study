@@ -199,3 +199,5 @@ export interface WeekProgress {
   completedContents: number;
   progressPercent: number;
 }
+
+export type Announcement = Tables<"announcements">;

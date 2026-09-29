@@ -4,10 +4,16 @@ export const BILLING_ANCHOR_HOUR_UTC = 0;
 
 /**
  * Legal display price (JPY, tax included; #134). /upgrade shows the live Stripe Price; this is the
- * fallback so
- * the legal notice never disappears when the fetch fails.
+ * fallback so the legal notice never disappears when the fetch fails. The /login service intro also
+ * uses this constant when payments are enabled (unauthenticated screens don't call Stripe; no price
+ * text when disabled). When changing the price, update the Stripe Price, this constant and the LP
+ * together.
  */
 export const DISPLAY_MONTHLY_PRICE_JPY = 1500;
+
+export function formatMonthlyJpyPrice(amount: number): string {
+  return `月額${amount.toLocaleString("ja-JP")}円（税込）`;
+}
 
 export const MANAGE_SUBSCRIPTION_BUTTON_LABEL = "お支払い情報の管理・解約";
 

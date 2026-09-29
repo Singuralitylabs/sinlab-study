@@ -132,6 +132,22 @@ function createFakeDatabase(initial: { subscription: Row; user: Row }) {
           filters.push((row) => row[column] !== value);
           return builder;
         },
+        /** PostgREST の `or` のうち、このテストで使う `col.neq.value` / `col.is.null` だけを解釈する */
+        or(expression: string) {
+          const conditions: Filter[] = expression.split(",").map((condition) => {
+            const [column, operator, value] = condition.split(".");
+            if (operator === "is" && value === "null") {
+              return (row) => (row[column] ?? null) === null;
+            }
+            if (operator === "neq") {
+              // SQL と同じく NULL との比較は真にならない
+              return (row) => row[column] != null && row[column] !== value;
+            }
+            throw new Error(`未対応の or 条件: ${condition}`);
+          });
+          filters.push((row) => conditions.some((condition) => condition(row)));
+          return builder;
+        },
         in(column: string, values: unknown[]) {
           filters.push((row) => values.includes(row[column]));
           return builder;

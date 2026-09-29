@@ -3,6 +3,7 @@ import { PageTitle } from "@/app/components/PageTitle";
 import {
   BILLING_ANCHOR_DAY_OF_MONTH,
   DISPLAY_MONTHLY_PRICE_JPY,
+  formatMonthlyJpyPrice,
   isChargeableSubscriptionPrice,
   isStripeEnabled,
   logDisplayPriceDrift,
@@ -11,19 +12,18 @@ import {
 } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import {
+  type SubscriptionPeriodFields,
+  subscriptionPeriodLabel,
+} from "@/app/lib/subscription-period";
+import {
   fetchStripeSubscriptionByUserId,
   fetchSubscriptionPrice,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
 } from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
-import { formatDate } from "./format-date";
 import { ManageSubscriptionButton } from "./ManageSubscriptionButton";
 import { UpgradeCheckoutButton } from "./UpgradeCheckoutButton";
-
-function formatMonthlyJpyPrice(amount: number): string {
-  return `月額${amount.toLocaleString("ja-JP")}円（税込）`;
-}
 
 const FALLBACK_MONTHLY_PRICE_LABEL = formatMonthlyJpyPrice(DISPLAY_MONTHLY_PRICE_JPY);
 
@@ -42,11 +42,7 @@ export default async function UpgradePage() {
   const stripeEnabled = isStripeEnabled();
 
   let subscriptionFetchFailed = false;
-  let fetchedSubscription: {
-    status: string;
-    cancel_at_period_end: boolean;
-    current_period_end: string | null;
-  } | null = null;
+  let fetchedSubscription: ({ status: string } & SubscriptionPeriodFields) | null = null;
   if (stripeEnabled && userStatus === USER_STATUS.ACTIVE) {
     const { data, error } = await fetchStripeSubscriptionByUserId(userId);
     if (error) {
@@ -60,6 +56,7 @@ export default async function UpgradePage() {
     fetchedSubscription && !NON_CURRENT_SUBSCRIPTION_STATUSES.includes(fetchedSubscription.status)
       ? fetchedSubscription
       : null;
+  const periodLabel = subscription ? subscriptionPeriodLabel(subscription) : null;
 
   // 確認できた実額だけを正とする。未確認時に Checkout を有効化しない
   let confirmedPrice: { amount: number; currency: string } | null = null;
@@ -151,15 +148,7 @@ export default async function UpgradePage() {
               <>
                 <p className="text-sm">
                   ご契約中です
-                  {subscription.current_period_end && (
-                    <>
-                      （
-                      {subscription.cancel_at_period_end
-                        ? `${formatDate(subscription.current_period_end)}をもって解約予定です`
-                        : `次回のお支払い: ${formatDate(subscription.current_period_end)}`}
-                      ）
-                    </>
-                  )}
+                  {periodLabel && `（${periodLabel}）`}
                 </p>
                 <ManageSubscriptionButton />
                 <p className="text-sm text-muted-foreground">{CANCELLATION_POLICY_TEXT}</p>

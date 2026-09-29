@@ -8,6 +8,7 @@ import {
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { sendSlackNewUserNotification } from "@/app/services/notifications/slack";
+import { scheduleSignupEmail } from "@/app/services/notifications/user-emails";
 
 const REGISTRATION_FAILED_PATH = "/login?error=registration_failed";
 const TERMS_REQUIRED_PATH = `/login?error=${TERMS_REQUIRED_ERROR_CODE}`;
@@ -158,6 +159,7 @@ async function handleCallback(request: NextRequest) {
     }).catch((error) => {
       console.error("[Slack通知] 予期しないエラーが発生しました:", error);
     });
+    scheduleSignupEmail({ authId: user.id });
 
     redirectPath = "/";
   } else if (existingUser.status === USER_STATUS.REJECTED) {

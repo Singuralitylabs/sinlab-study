@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/learning-server");
 vi.mock("@/app/services/api/onboarding-server");
+vi.mock("@/app/services/api/announcements-server");
 // クライアントのダイアログは props（絞り込み済みステップ）の検証に必要な最小表示に差し替える
 vi.mock("@/app/(authenticated)/components/WelcomeDialog", () => ({
   WelcomeDialog: ({ steps }: { steps: { id: string }[] }) =>
@@ -33,6 +34,7 @@ vi.mock("@/app/(authenticated)/components/GettingStartedChecklist", async (impor
 });
 
 import HomePage from "@/app/(authenticated)/page";
+import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
 import {
   fetchGettingStartedProgress,
@@ -81,6 +83,7 @@ const setup = ({
     data: { hasSubmission, hasCompletedReview },
     error: null,
   } as never);
+  vi.mocked(getViewerAnnouncements).mockResolvedValue({ data: [], error: null });
 };
 
 const render = async () => renderToStaticMarkup(await HomePage());
@@ -142,5 +145,51 @@ describe("ダッシュボードの初回ガイド表示条件（issue #16）", (
     const html = await render();
 
     expect(html).not.toContain('data-testid="welcome-dialog"');
+  });
+});
+
+describe("ダッシュボードの未読のお知らせ（issue #254）", () => {
+  const announcement = (id: number, isRead: boolean) => ({
+    id,
+    title: `お知らせ${id}`,
+    published_at: "2026-10-01T00:00:00Z",
+    target_statuses: ["active"],
+    target_membership_types: null,
+    isRead,
+  });
+
+  it("未読のお知らせを最大3件表示し、既読は表示しない", async () => {
+    setup({ completedAt: "2026-09-01T00:00:00Z" });
+    vi.mocked(getViewerAnnouncements).mockResolvedValue({
+      data: [
+        announcement(1, false),
+        announcement(2, true),
+        announcement(3, false),
+        announcement(4, false),
+        announcement(5, false),
+      ],
+      error: null,
+    });
+
+    const html = await render();
+
+    expect(html).toContain("未読のお知らせ");
+    expect(html).toContain('href="/announcements/1"');
+    expect(html).toContain('href="/announcements/3"');
+    expect(html).toContain('href="/announcements/4"');
+    expect(html).not.toContain('href="/announcements/5"');
+    expect(html).not.toContain('href="/announcements/2"');
+  });
+
+  it("未読が無ければお知らせの枠を表示しない", async () => {
+    setup({ completedAt: "2026-09-01T00:00:00Z" });
+    vi.mocked(getViewerAnnouncements).mockResolvedValue({
+      data: [announcement(1, true)],
+      error: null,
+    });
+
+    const html = await render();
+
+    expect(html).not.toContain("未読のお知らせ");
   });
 });

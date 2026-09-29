@@ -7,6 +7,7 @@ vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/app/services/api/stripe-server")>()),
   getStripeClient: vi.fn(),
 }));
+vi.mock("@/app/services/notifications/user-emails");
 
 import { getStripeClient } from "@/app/services/api/stripe-server";
 import {
@@ -18,6 +19,11 @@ import {
   syncSubscriptionStatus,
 } from "@/app/services/api/stripe-webhook-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
+import {
+  scheduleCancelScheduledEmail,
+  scheduleSubscriptionEndedEmail,
+  scheduleUpgradedEmail,
+} from "@/app/services/notifications/user-emails";
 
 const dbError = { message: "db error", code: "PGRST001" };
 
@@ -657,6 +663,41 @@ describe("syncSubscriptionStatus", () => {
     }
   );
 
+  it.each([
+    [
+      "cancel_at が設定されていればISO文字列で",
+      1760886000,
+      new Date(1760886000 * 1000).toISOString(),
+    ],
+    ["cancel_at が未設定ならnullで", null, null],
+  ])(
+    "ミラーへ %s cancel_at を書き込む（flexible billing mode の解約予約）",
+    async (_label, cancelAt, expected) => {
+      vi.mocked(getStripeClient).mockReturnValue({
+        subscriptions: {
+          retrieve: vi
+            .fn()
+            .mockResolvedValue({ ...makeSubscription("active"), cancel_at: cancelAt }),
+        },
+      } as never);
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: [
+            { data: { user_id: 7 }, error: null },
+            { data: null, error: null },
+          ],
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+      await syncSubscriptionStatus(makeSubscription("active") as never);
+
+      expect(mockClient.from.mock.results[1].value.update).toHaveBeenCalledWith(
+        expect.objectContaining({ cancel_at_period_end: false, cancel_at: expected })
+      );
+    }
+  );
+
   it("past_dueの場合はミラー更新のみで降格しない", async () => {
     mockGetStripeClient("past_due");
     const mockClient = createMockSupabaseClient({
@@ -738,6 +779,418 @@ describe("revertUserToTrial", () => {
     const result = await revertUserToTrial(9);
 
     expect(result.error).toBe(dbError.message);
+    expect(result.reverted).toBe(false);
+  });
+
+  it("更新有無を判定するためselect('id')を付け、1行以上ならreverted=trueを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: [{ id: 9 }], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await revertUserToTrial(9);
+
+    expect(result).toEqual({ error: null, reverted: true });
+    expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith("id");
+  });
+
+  it("membership_type=generalガードで更新されなかった場合はreverted=falseを返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: [], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await revertUserToTrial(9);
+
+    expect(result).toEqual({ error: null, reverted: false });
+  });
+});
+
+// ----------------------------------------------------------------
+// トランザクションメールのフック（#252）
+// 送信自体（after()・email_logs の claim・Resend）は user-emails 側で行うため、ここでは
+// 「主処理が成功したときだけ、正しい reference_key で予約する」ことを検証する
+// ----------------------------------------------------------------
+describe("トランザクションメールのフック", () => {
+  const baseSession = {
+    id: "cs_123",
+    client_reference_id: "1",
+    metadata: { user_id: "1" },
+    customer: "cus_123",
+    subscription: "sub_123",
+  };
+  const periodEndUnix = 1750000000;
+  const periodEndIso = new Date(periodEndUnix * 1000).toISOString();
+  const liveSubscription = (overrides: Record<string, unknown> = {}) => ({
+    id: "sub_123",
+    status: "active",
+    cancel_at_period_end: false,
+    cancel_at: null,
+    discounts: [],
+    items: {
+      data: [
+        {
+          current_period_end: periodEndUnix,
+          quantity: 1,
+          price: {
+            unit_amount: 1500,
+            currency: "jpy",
+            recurring: { interval: "month", interval_count: 1 },
+          },
+        },
+      ],
+    },
+    ...overrides,
+  });
+  const mockRetrieve = (subscription: unknown) => {
+    vi.mocked(getStripeClient).mockReturnValue({
+      subscriptions: { retrieve: vi.fn().mockResolvedValue(subscription) },
+    } as never);
+  };
+
+  describe("upgraded（activateUserFromCheckoutSession）", () => {
+    it("昇格したときだけ、契約idをキーに実請求額・次回請求日つきで予約する", async () => {
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: { data: null, error: null },
+          users: { data: [{ id: 1 }], error: null },
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      mockRetrieve(liveSubscription());
+
+      const result = await activateUserFromCheckoutSession(baseSession as never);
+
+      expect(result.activated).toBe(true);
+      expect(scheduleUpgradedEmail).toHaveBeenCalledTimes(1);
+      expect(scheduleUpgradedEmail).toHaveBeenCalledWith({
+        userId: 1,
+        subscriptionId: "sub_123",
+        monthlyAmountJpy: 1500,
+        currentPeriodEnd: periodEndIso,
+      });
+    });
+
+    it("既に一般有料会員（successページの再訪・Webhookの再送）なら、昇格扱いのまま予約しない", async () => {
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: { data: null, error: null },
+          // 1回目: 「まだ一般有料会員でない」行だけを更新（0行）、2回目: 現在の状態
+          users: [
+            { data: [], error: null },
+            { data: { id: 1 }, error: null },
+          ],
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      mockRetrieve(liveSubscription());
+
+      const result = await activateUserFromCheckoutSession(baseSession as never);
+
+      expect(result.activated).toBe(true);
+      expect(result.currentPeriodEnd).toBe(periodEndIso);
+      const usersBuilders = mockClient.from.mock.calls
+        .map(([table], index) => ({ table, builder: mockClient.from.mock.results[index].value }))
+        .filter(({ table }) => table === "users")
+        .map(({ builder }) => builder);
+      expect(usersBuilders[0].or).toHaveBeenCalledWith(
+        "status.neq.active,membership_type.is.null,membership_type.neq.general"
+      );
+      expect(usersBuilders[1].eq).toHaveBeenCalledWith("membership_type", "general");
+      expect(scheduleUpgradedEmail).not.toHaveBeenCalled();
+    });
+
+    it("割引（クーポン等）が付いた契約では、実請求額と食い違うため料金をnullで渡す", async () => {
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: { data: null, error: null },
+          users: { data: [{ id: 1 }], error: null },
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      mockRetrieve(liveSubscription({ discounts: ["di_123"] }));
+
+      await activateUserFromCheckoutSession(baseSession as never);
+
+      expect(scheduleUpgradedEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ monthlyAmountJpy: null })
+      );
+    });
+
+    it("メールの予約が例外を投げても、昇格の結果には影響しない", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.mocked(scheduleUpgradedEmail).mockImplementationOnce(() => {
+        throw new Error("unexpected");
+      });
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: { data: null, error: null },
+          users: { data: [{ id: 1 }], error: null },
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      mockRetrieve(liveSubscription());
+
+      const result = await activateUserFromCheckoutSession(baseSession as never);
+
+      expect(result).toEqual({ error: null, activated: true, currentPeriodEnd: periodEndIso });
+    });
+
+    it.each([
+      ["JPY以外", { unit_amount: 1500, currency: "usd", recurring: { interval: "month" } }],
+      ["年額", { unit_amount: 15000, currency: "jpy", recurring: { interval: "year" } }],
+      ["金額なし", { unit_amount: null, currency: "jpy", recurring: { interval: "month" } }],
+    ])("実請求額を月額JPYで確認できない（%s）場合は料金をnullで渡す", async (_label, price) => {
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: { data: null, error: null },
+          users: { data: [{ id: 1 }], error: null },
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      mockRetrieve(
+        liveSubscription({
+          items: { data: [{ current_period_end: periodEndUnix, quantity: 1, price }] },
+        })
+      );
+
+      await activateUserFromCheckoutSession(baseSession as never);
+
+      expect(scheduleUpgradedEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ monthlyAmountJpy: null })
+      );
+    });
+
+    it.each([
+      [
+        "サブスクが有効でない",
+        { stripe_subscriptions: { data: null, error: null } },
+        { status: "incomplete" },
+      ],
+      [
+        "却下済み等でusersが更新されない",
+        {
+          stripe_subscriptions: { data: null, error: null },
+          users: [
+            { data: [], error: null },
+            { data: null, error: null },
+          ],
+        },
+        {},
+      ],
+      [
+        "users更新に失敗した",
+        {
+          stripe_subscriptions: { data: null, error: null },
+          users: { data: null, error: dbError },
+        },
+        {},
+      ],
+      [
+        "古いセッションのリプレイ",
+        {
+          stripe_subscriptions: {
+            data: { stripe_subscription_id: "sub_other", status: "active" },
+            error: null,
+          },
+        },
+        {},
+      ],
+    ])("昇格しなかった（%s）場合は予約しない", async (_label, tableResults, overrides) => {
+      const mockClient = createMockSupabaseClient({ tableResults });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      mockRetrieve(liveSubscription(overrides));
+
+      const result = await activateUserFromCheckoutSession(baseSession as never);
+
+      expect(result.activated).toBe(false);
+      expect(scheduleUpgradedEmail).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("upgraded（reactivateUserFromMirror）", () => {
+    const activeRow = {
+      stripe_subscription_id: "sub_123",
+      status: "incomplete",
+      checkout_claimed_at: null,
+    };
+
+    it("ミラーからの再昇格でも、契約idをキーに実請求額・次回請求日つきで予約する", async () => {
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: [
+            { data: activeRow, error: null },
+            { data: [{ id: 1 }], error: null },
+          ],
+          users: { data: [{ id: 1 }], error: null },
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      mockRetrieve(liveSubscription());
+
+      const result = await reactivateUserFromMirror(1);
+
+      expect(result.activated).toBe(true);
+      expect(scheduleUpgradedEmail).toHaveBeenCalledWith({
+        userId: 1,
+        subscriptionId: "sub_123",
+        monthlyAmountJpy: 1500,
+        currentPeriodEnd: periodEndIso,
+      });
+    });
+
+    it.each([
+      ["ライブ状態が有効でない", { data: [{ id: 1 }], error: null }, { status: "incomplete" }],
+      ["ミラー行が読み取り後に変わった", { data: [], error: null }, {}],
+    ])("昇格しなかった（%s）場合は予約しない", async (_label, updateResult, overrides) => {
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: [{ data: activeRow, error: null }, updateResult],
+          users: { data: [{ id: 1 }], error: null },
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      mockRetrieve(liveSubscription(overrides));
+
+      const result = await reactivateUserFromMirror(1);
+
+      expect(result.activated).toBe(false);
+      expect(scheduleUpgradedEmail).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("cancel_scheduled（syncSubscriptionStatus）", () => {
+    const setup = (
+      writeResult: { data: unknown; error: unknown } = { data: null, error: null }
+    ) => {
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: [{ data: { user_id: 7 }, error: null }, writeResult],
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      return mockClient;
+    };
+
+    it("取り直したライブ状態が解約予約中（cancel_at_period_end）なら、期間末の日付で予約する", async () => {
+      const mockClient = setup();
+      mockRetrieve(liveSubscription({ cancel_at_period_end: true }));
+
+      const result = await syncSubscriptionStatus(liveSubscription() as never);
+
+      expect(result.error).toBeNull();
+      // 判定はライブ状態だけで行い、ミラー行の値は見ない
+      expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith("user_id");
+      expect(scheduleCancelScheduledEmail).toHaveBeenCalledWith({
+        userId: 7,
+        subscriptionId: "sub_123",
+        periodEnd: periodEndIso,
+      });
+      expect(scheduleSubscriptionEndedEmail).not.toHaveBeenCalled();
+    });
+
+    it("flexible billing mode の解約（cancel_at のみ設定）でも、cancel_at の日付で予約する", async () => {
+      const cancelAtUnix = periodEndUnix - 86_400;
+      setup();
+      mockRetrieve(liveSubscription({ cancel_at_period_end: false, cancel_at: cancelAtUnix }));
+
+      await syncSubscriptionStatus(liveSubscription() as never);
+
+      expect(scheduleCancelScheduledEmail).toHaveBeenCalledWith({
+        userId: 7,
+        subscriptionId: "sub_123",
+        periodEnd: new Date(cancelAtUnix * 1000).toISOString(),
+      });
+    });
+
+    it("他の経路（successページ再訪・再昇格）が先にミラーへ解約予約を書いていても予約する（重複は送信ログで抑止）", async () => {
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: [
+            { data: { user_id: 7, cancel_at_period_end: true }, error: null },
+            { data: null, error: null },
+          ],
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      mockRetrieve(liveSubscription({ cancel_at_period_end: true }));
+
+      await syncSubscriptionStatus(liveSubscription() as never);
+
+      expect(scheduleCancelScheduledEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ["解約予約なし", liveSubscription()],
+      [
+        "イベントのスナップショットは解約予約中（順序逆転・取り消し後の遅延イベント）",
+        liveSubscription({ cancel_at_period_end: true }),
+      ],
+    ])("ライブ状態が解約予約中でなければ予約しない（%s）", async (_label, eventSubscription) => {
+      setup();
+      mockRetrieve(liveSubscription());
+
+      await syncSubscriptionStatus(eventSubscription as never);
+
+      expect(scheduleCancelScheduledEmail).not.toHaveBeenCalled();
+    });
+
+    it("ミラー更新に失敗した場合は予約せずエラーを返す", async () => {
+      setup({ data: null, error: dbError });
+      mockRetrieve(liveSubscription({ cancel_at_period_end: true }));
+
+      const result = await syncSubscriptionStatus(liveSubscription() as never);
+
+      expect(result.error).toBe(dbError.message);
+      expect(scheduleCancelScheduledEmail).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("subscription_ended（syncSubscriptionStatus → revertUserToTrial）", () => {
+    const setup = (usersResult: { data: unknown; error: unknown }) => {
+      const mockClient = createMockSupabaseClient({
+        tableResults: {
+          stripe_subscriptions: [
+            { data: { user_id: 7 }, error: null },
+            { data: null, error: null },
+          ],
+          users: usersResult,
+        },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      mockRetrieve(liveSubscription({ status: "canceled", cancel_at_period_end: false }));
+    };
+
+    it("実際に降格したときだけ、契約idをキーに予約する", async () => {
+      setup({ data: [{ id: 7 }], error: null });
+
+      const result = await syncSubscriptionStatus(liveSubscription() as never);
+
+      expect(result.error).toBeNull();
+      expect(scheduleSubscriptionEndedEmail).toHaveBeenCalledWith({
+        userId: 7,
+        subscriptionId: "sub_123",
+      });
+      expect(scheduleCancelScheduledEmail).not.toHaveBeenCalled();
+    });
+
+    it("membership_type=generalガードで更新されなかった場合（既に降格済み・コミュニティ会員）は予約しない", async () => {
+      setup({ data: [], error: null });
+
+      const result = await syncSubscriptionStatus(liveSubscription() as never);
+
+      expect(result.error).toBeNull();
+      expect(scheduleSubscriptionEndedEmail).not.toHaveBeenCalled();
+    });
+
+    it("降格に失敗した場合は予約せずエラーを返す（Webhookは500で再送に委ねる）", async () => {
+      setup({ data: null, error: dbError });
+
+      const result = await syncSubscriptionStatus(liveSubscription() as never);
+
+      expect(result.error).toBe(dbError.message);
+      expect(scheduleSubscriptionEndedEmail).not.toHaveBeenCalled();
+    });
   });
 });
 
