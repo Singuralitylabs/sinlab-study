@@ -72,18 +72,17 @@ describe("受講生向けの取得（二層防御のアプリ層）", () => {
     );
   });
 
-  it("DB が対象外の行を返しても（admin の RLS 等）アプリ層で除き、既読状態を付ける", async () => {
-    mockClient({
+  it("DB が対象外の行を返しても（admin の RLS 等）アプリ層で除き、埋め込みの既読から既読状態を付ける", async () => {
+    const client = mockClient({
       announcements: {
         data: [
-          row(1),
-          row(2, { target_statuses: ["active"] }),
-          row(3, { target_membership_types: ["general"] }),
-          row(4),
+          row(1, { announcement_reads: [] }),
+          row(2, { target_statuses: ["active"], announcement_reads: [] }),
+          row(3, { target_membership_types: ["general"], announcement_reads: [] }),
+          row(4, { announcement_reads: [{ announcement_id: 4 }] }),
         ],
         error: null,
       },
-      announcement_reads: { data: [{ announcement_id: 4 }], error: null },
     });
 
     const { data } = await fetchAnnouncementsWithReadState(trialViewer);
@@ -92,17 +91,28 @@ describe("受講生向けの取得（二層防御のアプリ層）", () => {
       [1, false],
       [4, true],
     ]);
+    expect(data?.[0]).not.toHaveProperty("announcement_reads");
+    // 既読は本人の行だけを埋め込み、別のクエリで読まない
+    const [query] = buildersOf(client, "announcements");
+    expect(query.eq).toHaveBeenCalledWith("announcement_reads.user_id", 7);
+    expect(buildersOf(client, "announcement_reads")).toHaveLength(0);
   });
 
-  it("既読が読めないときは未読扱いにしない（バッジを出し続けない）", async () => {
-    mockClient({
-      announcements: { data: [row(1)], error: null },
-      announcement_reads: { data: null, error: { message: "db down" } },
+  it("一覧はページ単位で取得し、総件数を返す", async () => {
+    const client = mockClient({
+      announcements: { data: [row(21, { announcement_reads: [] })], error: null, count: 21 },
     });
 
-    const { data } = await fetchAnnouncementsWithReadState(trialViewer);
+    const { data, count } = await fetchAnnouncementsWithReadState(trialViewer, {
+      page: 2,
+      pageSize: 20,
+    });
 
-    expect(data?.[0].isRead).toBe(true);
+    const [query] = buildersOf(client, "announcements");
+    expect(query.range).toHaveBeenCalledWith(20, 39);
+    expect(query.limit).not.toHaveBeenCalled();
+    expect(count).toBe(21);
+    expect(data).toHaveLength(1);
   });
 
   it("1件の取得でも対象外なら null（存在を明かさない）", async () => {
@@ -198,5 +208,61 @@ describe("updateAnnouncement の公開日時", () => {
   it("削除済み・存在しないお知らせは notFound", async () => {
     mockClient({ announcements: { data: null, error: null } });
     expect(await updateAnnouncement(1, input)).toEqual({ error: null, notFound: true });
+  });
+});
+
+describe("updateAnnouncement の対象変更とメールの一斉送信", () => {
+  const sent = {
+    id: 1,
+    published_at: "2026-10-01T00:00:00Z",
+    target_statuses: ["active", "trial"],
+    target_membership_types: null,
+    email_sent_at: "2026-10-02T00:00:00Z",
+  };
+  const input = {
+    title: "t",
+    body: "b",
+    target_statuses: ["trial" as const, "active" as const],
+    target_membership_types: null,
+    send_email: true,
+    is_published: true,
+  };
+
+  async function updateWith(
+    overrides: Partial<typeof input> | Record<string, unknown>,
+    current: Record<string, unknown> = sent
+  ) {
+    const client = mockClient({
+      announcements: [
+        { data: current, error: null },
+        { data: [{ id: 1 }], error: null },
+      ],
+    });
+    await updateAnnouncement(1, { ...input, ...overrides } as typeof input);
+    const [, update] = buildersOf(client, "announcements");
+    return update.update.mock.calls[0][0] as Record<string, unknown>;
+  }
+
+  it("対象が変わらなければ（並び順の違いだけなら）送信済みの記録を残す", async () => {
+    expect(await updateWith({ title: "題名だけ直す" })).not.toHaveProperty("email_sent_at");
+  });
+
+  it("対象ステータスを変えたら未完了に戻し、次のバッチで未送信の対象者に送る", async () => {
+    expect(await updateWith({ target_statuses: ["active"] })).toMatchObject({
+      email_sent_at: null,
+    });
+  });
+
+  it("会員種別の指定を変えたら未完了に戻す", async () => {
+    const current = { ...sent, target_statuses: ["active"], target_membership_types: ["general"] };
+    expect(
+      await updateWith(
+        { target_statuses: ["active"], target_membership_types: ["general", "community"] },
+        current
+      )
+    ).toMatchObject({ email_sent_at: null });
+    expect(
+      await updateWith({ target_statuses: ["active"], target_membership_types: null }, current)
+    ).toMatchObject({ email_sent_at: null });
   });
 });

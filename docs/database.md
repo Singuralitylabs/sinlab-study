@@ -478,7 +478,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 制約: `UNIQUE (user_id, kind, reference_key)`（`email_logs_user_kind_reference_key`）
 
-> **claimによる二重送信防止**: 送信前に `(user_id, kind, reference_key)` をINSERTし、一意制約違反（23505）なら送信しない（`stripe_events` のclaimと同じパターン。`deliverUserEmail()`）。Webhook と `/upgrade/success` の両経路・Webhookの再送・同時配信で同じ事象のメールを複数回送ろうとしても、INSERTに成功した1つだけが送信する。送信失敗時は行を削除せず `error` を記録する（再送はしない）。claim後に処理が中断した行は `sent_at` / `error` が共に NULL のまま残り、以後その事象のメールは送られない（重複よりも欠落を許容する）。
+> **claimによる二重送信防止**: 送信前に `(user_id, kind, reference_key)` をINSERTし、一意制約違反（23505）なら送信しない（`stripe_events` のclaimと同じパターン。`deliverUserEmail()`）。Webhook と `/upgrade/success` の両経路・Webhookの再送・同時配信で同じ事象のメールを複数回送ろうとしても、INSERTに成功した1つだけが送信する。送信失敗時は行を削除せず `error` を記録する（再送はしない。例外として、お知らせの一斉送信は Resend が受け付けなかったことが確実な失敗の行を公開から3日以内に限り翌日以降に削除して送り直す。機能設計書11.4節）。claim後に処理が中断した行は `sent_at` / `error` が共に NULL のまま残り、以後その事象のメールは送られない（重複よりも欠落を許容する）。
 
 
 ### 3.12 cron_locks（Cron バッチの実行ロック）
@@ -504,7 +504,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 | target_membership_types | TEXT[] | YES | NULL | 対象会員種別（`community` / `general` の1つ以上。CHECK）。NULL は全種別。指定するとお試しユーザー（会員種別 NULL）には見えない |
 | published_at | TIMESTAMPTZ | YES | NULL | 公開日時。NULL は下書き |
 | send_email | BOOLEAN | NO | false | メールでも一斉送信するか |
-| email_sent_at | TIMESTAMPTZ | YES | NULL | 一斉送信を対象者全員に送り終えた日時 |
+| email_sent_at | TIMESTAMPTZ | YES | NULL | 一斉送信を対象者全員に送り終えた日時（対象を変更すると NULL に戻す） |
 | created_by | INTEGER | YES | NULL | 作成者（FK → users.id、ON DELETE SET NULL） |
 | is_deleted | BOOLEAN | NO | false | 論理削除フラグ |
 | created_at | TIMESTAMPTZ | NO | now() | 作成日時 |

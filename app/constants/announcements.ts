@@ -28,3 +28,6 @@ export const UNREAD_ANNOUNCEMENT_SCAN_LIMIT = 100;
 /** お知らせのタイトル・本文の最大文字数（API の入力検証とフォームで共有） */
 export const ANNOUNCEMENT_TITLE_MAX_LENGTH = 200;
 export const ANNOUNCEMENT_BODY_MAX_LENGTH = 20_000;
+
+/** お知らせ一覧（`/announcements`）の1ページの件数 */
+export const ANNOUNCEMENTS_PAGE_SIZE = 20;

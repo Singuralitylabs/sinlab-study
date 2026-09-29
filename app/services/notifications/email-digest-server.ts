@@ -1,4 +1,5 @@
 import {
+  ANNOUNCEMENT_EMAIL_RETRY_DAYS,
   EMAIL_DIGEST_LOCK_NAME,
   EMAIL_DIGEST_LOCK_TTL_MS,
   EMAIL_DIGEST_MAX_PER_DAY,
@@ -7,6 +8,7 @@ import {
   EMAIL_KIND,
   PROMOTIONAL_EMAIL_KINDS,
   type PromotionalEmailKind,
+  RETRYABLE_EMAIL_ERROR,
   WEEKLY_DIGEST_CATCH_UP_DAYS,
   WEEKLY_DIGEST_RESERVATION_KIND,
 } from "@/app/constants/notifications";
@@ -387,17 +389,28 @@ async function reserveWeeklyDigest(
 
 type PendingAnnouncement = Pick<
   Announcement,
-  "id" | "title" | "body" | "target_statuses" | "target_membership_types"
+  | "id"
+  | "title"
+  | "body"
+  | "target_statuses"
+  | "target_membership_types"
+  | "published_at"
+  | "updated_at"
 >;
 
 /**
  * メールの一斉送信を待っているお知らせ（公開済み・未削除・`send_email`・まだ全員に送り終えて
- * いない）。公開の古い順
+ * いない）。公開の古い順。
+ *
+ * 定期メールの抽出は本文を含まないカラムだけを select する決まりだが（AGENTS.md「会員種別・
+ * お試しユーザー」）、お知らせの本文はメールの本文そのものであり、運営が受講生全員に届ける
+ * ために書いた文章のため例外として `body` を select する（学習コンテンツの本文は引き続き
+ * select しない）。
  */
 async function fetchPendingAnnouncements(supabase: AdminClient): Promise<PendingAnnouncement[]> {
   const { data, error } = await supabase
     .from("announcements")
-    .select("id, title, body, target_statuses, target_membership_types")
+    .select("id, title, body, target_statuses, target_membership_types, published_at, updated_at")
     .not("published_at", "is", null)
     .eq("is_deleted", false)
     .eq("send_email", true)
@@ -409,34 +422,79 @@ async function fetchPendingAnnouncements(supabase: AdminClient): Promise<Pending
   return (data ?? []) as PendingAnnouncement[];
 }
 
-/** お知らせごとの、`email_logs` に行を持つ（送信済み・送信中・送信失敗の）ユーザーの ID */
-async function fetchAnnouncementLoggedUserIds(
+type AnnouncementLog = {
+  id: number;
+  user_id: number;
+  reference_key: string;
+  sent_at: string | null;
+  error: string | null;
+  created_at: string;
+};
+
+/** お知らせの一斉送信の `email_logs` の行（送信済み・送信中・送信失敗） */
+async function fetchAnnouncementLogs(
   supabase: AdminClient,
   referenceKeys: string[]
-): Promise<Map<string, Set<number>>> {
-  const rows = await fetchAllPages<{ user_id: number; reference_key: string }>((from, to) =>
+): Promise<AnnouncementLog[]> {
+  return fetchAllPages<AnnouncementLog>((from, to) =>
     supabase
       .from("email_logs")
-      .select("user_id, reference_key")
+      .select("id, user_id, reference_key, sent_at, error, created_at")
       .eq("kind", EMAIL_KIND.ANNOUNCEMENT)
       .in("reference_key", referenceKeys)
       .order("id")
       .range(from, to)
   );
-  const logged = new Map<string, Set<number>>();
-  for (const row of rows) {
-    const ids = logged.get(row.reference_key) ?? new Set<number>();
-    ids.add(row.user_id);
-    logged.set(row.reference_key, ids);
+}
+
+/**
+ * 送り直す対象の送信失敗か（`day` の実行から見て）。Resend が受け付けなかったことが確実な
+ * 失敗（`status=429` / `5xx`）で、`day` が公開日（JST）から `ANNOUNCEMENT_EMAIL_RETRY_DAYS` 日
+ * 以内のもの。タイムアウト等の送れたかどうか分からない失敗と、送信中のまま結果が記録され
+ * なかった行は、二重送信を避けるため送り直さない。
+ */
+function isRetryableFailure(log: AnnouncementLog, publishedAt: string, day: string): boolean {
+  return (
+    log.sent_at === null &&
+    log.error !== null &&
+    RETRYABLE_EMAIL_ERROR.test(log.error) &&
+    daysBetween(toJstDateString(new Date(publishedAt)), day) <= ANNOUNCEMENT_EMAIL_RETRY_DAYS
+  );
+}
+
+/**
+ * お知らせごとの、送信を終えた（送信済み、または送り直さない失敗・送信中の行を持つ）
+ * ユーザーの ID と、送信を終えていない扱いにする失敗の行（`isRetryable` が true の行）
+ */
+function classifyAnnouncementLogs(
+  logs: AnnouncementLog[],
+  isRetryable: (log: AnnouncementLog) => boolean
+): { done: Map<string, Set<number>>; retryable: AnnouncementLog[] } {
+  const done = new Map<string, Set<number>>();
+  const retryable: AnnouncementLog[] = [];
+  for (const log of logs) {
+    if (isRetryable(log)) {
+      retryable.push(log);
+      continue;
+    }
+    const ids = done.get(log.reference_key) ?? new Set<number>();
+    ids.add(log.user_id);
+    done.set(log.reference_key, ids);
   }
-  return logged;
+  return { done, retryable };
 }
 
 /** 一斉送信の進み具合。今回の実行で全員を処理し終えたら `email_sent_at` を記録する */
 type AnnouncementBatch = {
   id: number;
   referenceKey: string;
-  /** 対象者のうち、今回の実行の開始時点でまだ `email_logs` に行が無いユーザー */
+  publishedAt: string;
+  /** 対象の判定に使ったお知らせの `updated_at`（送信中に編集されたら完了にしない） */
+  updatedAt: string;
+  /**
+   * 対象者のうち、今回の実行の開始時点でまだ送信を終えていない（`email_logs` に行が無い、
+   * または送り直す失敗の行しか無い）ユーザー
+   */
   pendingUserIds: number[];
 };
 
@@ -487,10 +545,12 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
  * お知らせの ID）。対象は配信停止していない受講生のうち、ステータス・会員種別がお知らせの
  * 対象に一致するユーザー（`isAnnouncementTarget()`。アプリ内表示と同じ条件）。
  *
- * 全員を1回で送り切れない（1日の上限・実行時間・1人1日1通）ときは、`email_logs` に行が
- * 無いユーザーを翌日以降の実行で送る（分割送信）。今日すでに案内系メールを受け取った
+ * 全員を1回で送り切れない（1日の上限・実行時間・1人1日1通）ときは、送信を終えていない
+ * ユーザーを翌日以降の実行で送る（分割送信）。今日すでに案内系メールを受け取った
  * ユーザー（`sendableUserIds` に無い）と、この実行で別の案内を送るユーザーは翌日に回す。
- * 完了の判定に使うため、対象者（`allUsers` から抽出）のうち未送信の全員を返す。
+ * 今日より前の送り直す失敗（`isRetryableFailure()`）の行は消してから送り直す（`email_logs` の
+ * UNIQUE 制約で claim し直せるようにする）。消せなかった宛先は今回は送らず、完了にもしない。
+ * 完了の判定に使うため、対象者（`allUsers` から抽出）のうち送信を終えていない全員を返す。
  */
 async function appendAnnouncementEmails(
   supabase: AdminClient,
@@ -498,20 +558,62 @@ async function appendAnnouncementEmails(
   sendableUserIds: ReadonlySet<number>,
   queuedUserIds: Set<number>,
   queue: QueuedEmail[],
-  appUrl: string
+  appUrl: string,
+  today: string
 ): Promise<AnnouncementBatch[]> {
   const announcements = await fetchPendingAnnouncements(supabase);
   if (announcements.length === 0) {
     return [];
   }
-  const logged = await fetchAnnouncementLoggedUserIds(
-    supabase,
-    announcements.map((announcement) => String(announcement.id))
+  const publishedAt = new Map(
+    announcements.map((announcement) => [
+      String(announcement.id),
+      announcement.published_at as string,
+    ])
   );
+  // 送り直す失敗は、今日より前の失敗だけを今日送り直す（今日の失敗の行を同じ日の再実行で
+  // 消すと、今日の案内系メールの数＝1日の上限・1人1日1通の判定から外れてしまうため）。
+  // 今日の失敗など翌日以降に送り直す失敗も、送信を終えていない扱いにして完了にしない
+  const startOfToday = jstStartOfDayIso(today);
+  const tomorrow = addDays(today, 1);
+  const retryNow = (log: AnnouncementLog) =>
+    log.created_at < startOfToday &&
+    isRetryableFailure(log, publishedAt.get(log.reference_key) as string, today);
+  const { done, retryable } = classifyAnnouncementLogs(
+    await fetchAnnouncementLogs(supabase, [...publishedAt.keys()]),
+    (log) =>
+      retryNow(log) ||
+      isRetryableFailure(log, publishedAt.get(log.reference_key) as string, tomorrow)
+  );
+  const retryNowLogs = retryable.filter(retryNow);
+
+  // 今日は送らない宛先: 翌日以降に送り直す失敗の宛先と、送り直す失敗の行を消せなかった宛先
+  // （claim が UNIQUE 違反になるため）。送信を終えていない扱いのまま残るので、完了にもならない
+  let notClaimable = retryable.filter((log) => !retryNow(log));
+  if (retryNowLogs.length > 0) {
+    const { error } = await supabase
+      .from("email_logs")
+      .delete()
+      .in(
+        "id",
+        retryNowLogs.map((log) => log.id)
+      );
+    if (error) {
+      console.error("[定期メール] お知らせの送信失敗の行を削除できませんでした:", error.message);
+      notClaimable = retryable;
+    }
+  }
+  const blocked = new Map<string, Set<number>>();
+  for (const log of notClaimable) {
+    const ids = blocked.get(log.reference_key) ?? new Set<number>();
+    ids.add(log.user_id);
+    blocked.set(log.reference_key, ids);
+  }
 
   return announcements.map((announcement) => {
     const referenceKey = String(announcement.id);
-    const done = logged.get(referenceKey) ?? new Set<number>();
+    const doneUserIds = done.get(referenceKey) ?? new Set<number>();
+    const blockedUserIds = blocked.get(referenceKey) ?? new Set<number>();
     // 本文の変換はお知らせ1件につき1回だけ（宛先ごとの組み立てで使い回す）
     let body: EmailMarkdown | null = null;
     const renderedBody = () => {
@@ -520,7 +622,7 @@ async function appendAnnouncementEmails(
     };
     const pending = allUsers.filter(
       (user) =>
-        !done.has(user.userId) &&
+        !doneUserIds.has(user.userId) &&
         isAnnouncementTarget(announcement, {
           status: user.status,
           membershipType: user.membershipType,
@@ -528,7 +630,11 @@ async function appendAnnouncementEmails(
     );
 
     for (const user of pending) {
-      if (!sendableUserIds.has(user.userId) || queuedUserIds.has(user.userId)) {
+      if (
+        !sendableUserIds.has(user.userId) ||
+        queuedUserIds.has(user.userId) ||
+        blockedUserIds.has(user.userId)
+      ) {
         continue;
       }
       queue.push({
@@ -549,7 +655,13 @@ async function appendAnnouncementEmails(
       queuedUserIds.add(user.userId);
     }
 
-    return { id: announcement.id, referenceKey, pendingUserIds: pending.map((u) => u.userId) };
+    return {
+      id: announcement.id,
+      referenceKey,
+      publishedAt: announcement.published_at as string,
+      updatedAt: announcement.updated_at,
+      pendingUserIds: pending.map((u) => u.userId),
+    };
   });
 }
 
@@ -580,7 +692,8 @@ async function buildQueue(
       new Set(),
       new Set(),
       [],
-      appUrl
+      appUrl,
+      today
     );
     return { queue: [], weeklyReservationMissing: false, announcementBatches };
   }
@@ -641,7 +754,8 @@ async function buildQueue(
     new Set(users.map((user) => user.userId)),
     queuedUserIds,
     queue,
-    appUrl
+    appUrl,
+    today
   );
 
   // 週次進捗（reference_key は週の開始日）。対象を決めるのは月曜だけで、月曜の対象者を繰り越し
@@ -869,7 +983,11 @@ async function sendDigest(
     }
   }
 
-  const announcementsCompleted = await markCompletedAnnouncements(supabase, announcementBatches);
+  const announcementsCompleted = await markCompletedAnnouncements(
+    supabase,
+    announcementBatches,
+    today
+  );
 
   const rest = queue.slice(index);
   if (rest.length > 0) {
@@ -891,27 +1009,36 @@ async function sendDigest(
 }
 
 /**
- * 実行の開始時点で未送信だった対象者全員の `email_logs` の行（送信済み・送信失敗・送信中）が
- * そろったお知らせに `email_sent_at` を記録する（一斉送信の完了）。判定は送信ループの結果では
- * なく `email_logs` を引き直して行うため、claim 自体が DB エラーで失敗した宛先や、例外で
- * 送れなかった宛先（行が作られない）が残っていれば完了にしない。今日すでに別の案内を
- * 受け取った・上限や時間切れで回らなかった対象者も同様に残り、翌日以降の実行が続きを送る。
- * 対象者がいないお知らせもここで完了にする。引き直し・記録の失敗はログだけ残す
+ * 実行の開始時点で送信を終えていなかった対象者全員が送信を終えた（`email_logs` に送信済み、
+ * または翌日以降に送り直さない失敗・送信中の行を持つ）お知らせに `email_sent_at` を記録する（一斉送信の
+ * 完了）。判定は送信ループの結果ではなく `email_logs` を引き直して行うため、claim 自体が
+ * DB エラーで失敗した宛先や、例外で送れなかった宛先（行が作られない）、送り直す期間内の
+ * 送信失敗が残っていれば完了にしない。今日すでに別の案内を受け取った・上限や時間切れで
+ * 回らなかった対象者も同様に残り、翌日以降の実行が続きを送る。対象者がいないお知らせも
+ * ここで完了にする。
+ *
+ * 実行の途中で管理画面から編集された（`updated_at` が変わった）お知らせは完了にしない。
+ * 対象を広げた編集の場合、実行の開始時点の対象だけで完了にすると広げた分が送られないため
+ * （翌日の実行が新しい対象で判定し直す）。引き直し・記録の失敗はログだけ残す
  * （翌日の実行で判定し直せる）。
  */
 async function markCompletedAnnouncements(
   supabase: AdminClient,
-  batches: AnnouncementBatch[]
+  batches: AnnouncementBatch[],
+  today: string
 ): Promise<number> {
   if (batches.length === 0) {
     return 0;
   }
-  let logged: Map<string, Set<number>>;
+  let done: Map<string, Set<number>>;
   try {
-    logged = await fetchAnnouncementLoggedUserIds(
-      supabase,
-      batches.map((batch) => batch.referenceKey)
-    );
+    // 翌日以降の実行で送り直す失敗（今日の失敗を含む）が残っていれば完了にしない
+    const publishedAt = new Map(batches.map((batch) => [batch.referenceKey, batch.publishedAt]));
+    const tomorrow = addDays(today, 1);
+    ({ done } = classifyAnnouncementLogs(
+      await fetchAnnouncementLogs(supabase, [...publishedAt.keys()]),
+      (log) => isRetryableFailure(log, publishedAt.get(log.reference_key) as string, tomorrow)
+    ));
   } catch (error) {
     console.error(
       "[定期メール] お知らせの送信状況の確認に失敗しました:",
@@ -922,19 +1049,27 @@ async function markCompletedAnnouncements(
 
   let completed = 0;
   for (const batch of batches) {
-    const done = logged.get(batch.referenceKey) ?? new Set<number>();
-    if (!batch.pendingUserIds.every((userId) => done.has(userId))) {
+    const doneUserIds = done.get(batch.referenceKey) ?? new Set<number>();
+    if (!batch.pendingUserIds.every((userId) => doneUserIds.has(userId))) {
       continue;
     }
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("announcements")
       .update({ email_sent_at: new Date().toISOString() })
       .eq("id", batch.id)
-      .is("email_sent_at", null);
+      .eq("updated_at", batch.updatedAt)
+      .is("email_sent_at", null)
+      .select("id");
     if (error) {
       console.error(
         `[定期メール] お知らせの送信完了の記録に失敗しました: id=${batch.id}`,
         error.message
+      );
+      continue;
+    }
+    if ((data ?? []).length === 0) {
+      console.warn(
+        `[定期メール] 送信中にお知らせが編集された（または完了済み）ため、送信完了を記録しませんでした（翌日の実行で判定し直します）: id=${batch.id}`
       );
       continue;
     }

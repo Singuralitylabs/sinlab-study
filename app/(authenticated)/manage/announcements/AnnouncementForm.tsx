@@ -197,6 +197,7 @@ export function AnnouncementForm({ initialData, mode }: AnnouncementFormProps) {
             <p className="text-sm text-muted-foreground">
               メールはこの画面からすぐには送らず、公開後の毎朝のバッチ（JST 8 時台）で送ります。
               対象者が多い日は数日に分けて送ります。配信停止しているユーザーには送りません。
+              送信を始めた後に対象を変更した場合は、まだ送っていない対象者にだけ次のバッチから送ります（送信済みの人には再送しません）。
               {initialData?.email_sent_at &&
                 `（送信済み: ${formatDate(initialData.email_sent_at)}）`}
             </p>

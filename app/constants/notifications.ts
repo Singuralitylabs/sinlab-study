@@ -104,3 +104,14 @@ export const EMAIL_DIGEST_SEND_INTERVAL_MS = 500;
  * `EMAIL_SEND_TIMEOUT_MS` と DB 往復の余裕を残す）
  */
 export const EMAIL_DIGEST_TIME_BUDGET_MS = 45_000;
+
+/**
+ * お知らせのメール一斉送信で、送信に失敗した宛先へ再送する期間（公開日（JST）からの日数）。
+ * Resend が受け付けなかったことが確実な失敗（`status=429` / `5xx`）だけを、失敗した日の翌日
+ * 以降の実行で送り直す（同じ日には送り直さない。1日の上限の数え方を崩さないため）。
+ * 期間を過ぎた失敗は送り直さず、一斉送信を完了にする（`docs/specification.md` 11.4）
+ */
+export const ANNOUNCEMENT_EMAIL_RETRY_DAYS = 3;
+
+/** 再送してよい送信失敗（`email_logs.error`）。`sendEmail()` が記録する Resend の応答コード */
+export const RETRYABLE_EMAIL_ERROR = /status=(429|5\d\d)$/;

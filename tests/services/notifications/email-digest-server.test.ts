@@ -8,6 +8,7 @@ vi.mock("@/app/services/notifications/email", async (importOriginal) => ({
 }));
 
 import {
+  ANNOUNCEMENT_EMAIL_RETRY_DAYS,
   EMAIL_DIGEST_MAX_PER_DAY,
   EMAIL_DIGEST_SEND_INTERVAL_MS,
 } from "@/app/constants/notifications";
@@ -853,6 +854,7 @@ describe("お知らせのメール一斉送信（#254）", () => {
       send_email: true,
       email_sent_at: null,
       is_deleted: false,
+      updated_at: "2026-10-06T01:00:00.000Z",
       ...overrides,
     };
   }
@@ -990,6 +992,93 @@ describe("お知らせのメール一斉送信（#254）", () => {
     expect(sentTo()).toEqual(["u1@example.com", "u3@example.com", "u2@example.com"]);
     expect(thursday).toMatchObject({ sent: 1, announcementsCompleted: 1 });
     expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+  });
+
+  it("Resend が受け付けなかった（429・5xx）宛先は完了にせず、翌日の実行で送り直してから完了にする", async () => {
+    const { db } = setup({ users: [userRow(1), userRow(2)], announcements: [announcementRow()] });
+    vi.mocked(sendEmail).mockImplementation(async ({ to }) =>
+      to === "u2@example.com" && vi.mocked(sendEmail).mock.calls.length <= 2
+        ? { status: "failed", error: "Resend API がエラーを返しました: status=429" }
+        : { status: "sent", messageId: "msg" }
+    );
+
+    const wednesday = await runDigest(WEDNESDAY);
+    expect(wednesday).toMatchObject({ sent: 1, failed: 1, announcementsCompleted: 0 });
+    expect(db.announcements[0].email_sent_at).toBeNull();
+
+    // 同じ日の再実行では送り直さない（今日の案内系メールの数から外さない）
+    const rerun = await runDigest(new Date("2026-10-07T01:00:00Z"));
+    expect(rerun).toMatchObject({ sent: 0, failed: 0, announcementsCompleted: 0 });
+
+    const thursday = await runDigest(THURSDAY);
+    expect(thursday).toMatchObject({ sent: 1, announcementsCompleted: 1 });
+    expect(sentTo()).toEqual(["u1@example.com", "u2@example.com", "u2@example.com"]);
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+    // 失敗の行は消してから claim し直す（1人1行）
+    expect(
+      announcementLogs(db).map((row) => [row.user_id, row.sent_at !== null, row.error])
+    ).toEqual([
+      [1, true, null],
+      [2, true, null],
+    ]);
+  });
+
+  it("送れたか分からない失敗（タイムアウト等）は送り直さずに完了にする", async () => {
+    const { db } = setup({ users: [userRow(1)], announcements: [announcementRow()] });
+    vi.mocked(sendEmail).mockResolvedValue({
+      status: "failed",
+      error: "TimeoutError: The operation was aborted due to timeout",
+    });
+
+    const result = await runDigest(WEDNESDAY);
+    await runDigest(THURSDAY);
+
+    expect(result).toMatchObject({ failed: 1, announcementsCompleted: 1 });
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it(`送り直すのは公開日から ${ANNOUNCEMENT_EMAIL_RETRY_DAYS} 日以内で、過ぎたら失敗のまま完了にする`, async () => {
+    // 10/5（月）JST 公開。10/7・10/8 は期間内、10/9 は期間外
+    const { db } = setup({
+      users: [userRow(1)],
+      announcements: [announcementRow({ published_at: "2026-10-05T01:00:00.000Z" })],
+    });
+    vi.mocked(sendEmail).mockResolvedValue({
+      status: "failed",
+      error: "Resend API がエラーを返しました: status=503",
+    });
+
+    const wednesday = await runDigest(WEDNESDAY);
+    expect(wednesday).toMatchObject({ failed: 1, announcementsCompleted: 0 });
+
+    const thursday = await runDigest(THURSDAY);
+    expect(thursday).toMatchObject({ failed: 1, announcementsCompleted: 1 });
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("送信中に対象を広げる編集が入ったら完了にせず、翌日の実行で広げた分に送ってから完了にする", async () => {
+    const { db } = setup({
+      users: [userRow(1), userRow(2, { status: "trial" })],
+      announcements: [announcementRow({ target_statuses: ["active"] })],
+    });
+    vi.mocked(sendEmail).mockImplementationOnce(async () => {
+      // 送信の途中で管理画面から対象にお試しユーザーを加える（updated_at はトリガーが更新）
+      Object.assign(db.announcements[0], {
+        target_statuses: ["active", "trial"],
+        updated_at: "2026-10-06T23:00:01.000Z",
+      });
+      return { status: "sent", messageId: "msg" };
+    });
+
+    const wednesday = await runDigest(WEDNESDAY);
+    expect(wednesday).toMatchObject({ sent: 1, announcementsCompleted: 0 });
+    expect(db.announcements[0].email_sent_at).toBeNull();
+
+    const thursday = await runDigest(THURSDAY);
+    expect(thursday).toMatchObject({ sent: 1, announcementsCompleted: 1 });
+    expect(sentTo()).toEqual(["u1@example.com", "u2@example.com"]);
   });
 
   it("対象者がいないお知らせは送らずに完了にする", async () => {

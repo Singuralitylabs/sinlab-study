@@ -104,40 +104,59 @@ async function fetchReadIds(
   return new Set((data ?? []).map((row: { announcement_id: number }) => row.announcement_id));
 }
 
+type SummaryWithReads = AnnouncementSummary & {
+  announcement_reads: { announcement_id: number }[] | null;
+};
+
 /**
- * 自分が対象の公開済みお知らせを新しい順に、既読状態付きで返す。既読が読めなければ
- * すべて未読扱いにせず既読扱い（`isRead: true`）に倒す（バッジ・ダッシュボードに誤って
- * 未読を出し続けないため）。
+ * 自分が対象の公開済みお知らせを新しい順に、既読状態付きで返す。既読は `announcement_reads` を
+ * 埋め込んで同じクエリで取る（本人の行だけ。RLS でも本人の行しか読めない）。
+ *
+ * - `{ limit }`: 新しい順に最大 `limit` 件（サイドナビの未読バッジ・ダッシュボード用）
+ * - `{ page, pageSize }`: お知らせ一覧のページ（総件数 `count` も返す）
  */
 export async function fetchAnnouncementsWithReadState(
   viewer: AnnouncementViewer,
-  limit = UNREAD_ANNOUNCEMENT_SCAN_LIMIT
-): Promise<{ data: AnnouncementWithReadState[] | null; error: PostgrestError | null }> {
+  range: { limit: number } | { page: number; pageSize: number } = {
+    limit: UNREAD_ANNOUNCEMENT_SCAN_LIMIT,
+  }
+): Promise<{
+  data: AnnouncementWithReadState[] | null;
+  count: number;
+  error: PostgrestError | null;
+}> {
   const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase
+  const query = supabase
     .from("announcements")
-    .select(SUMMARY_COLUMNS)
+    .select(
+      `${SUMMARY_COLUMNS}, announcement_reads(announcement_id)`,
+      "page" in range ? { count: "exact" } : undefined
+    )
     .not("published_at", "is", null)
     .eq("is_deleted", false)
     .contains("target_statuses", [viewer.status])
     .or(membershipFilter(viewer))
+    .eq("announcement_reads.user_id", viewer.userId)
     .order("published_at", { ascending: false })
-    .limit(limit);
+    .order("id", { ascending: false });
+  const { data, count, error } =
+    "page" in range
+      ? await query.range((range.page - 1) * range.pageSize, range.page * range.pageSize - 1)
+      : await query.limit(range.limit);
 
   if (error) {
     console.error("お知らせ一覧取得エラー:", error.message);
-    return { data: null, error };
+    return { data: null, count: 0, error };
   }
 
-  const rows = onlyTargets((data ?? []) as AnnouncementSummary[], viewer);
-  const readIds = await fetchReadIds(
-    supabase,
-    viewer.userId,
-    rows.map((row) => row.id)
-  );
+  const rows = onlyTargets((data ?? []) as SummaryWithReads[], viewer);
   return {
-    data: rows.map((row) => ({ ...row, isRead: readIds === null || readIds.has(row.id) })),
-    error: null,
+    data: rows.map(({ announcement_reads, ...row }) => ({
+      ...row,
+      isRead: (announcement_reads ?? []).length > 0,
+    })),
+    count: count ?? rows.length,
+    error,
   };
 }
 
@@ -160,11 +179,19 @@ export const getAnnouncementViewer = cache(async (): Promise<AnnouncementViewer 
   return resolveAnnouncementViewer({ userId, userStatus });
 });
 
-/** リクエスト中の閲覧者が対象のお知らせ（既読状態付き）。閲覧者が無ければ空 */
+/**
+ * リクエスト中の閲覧者が対象のお知らせ（既読状態付き、新しい順に最大
+ * `UNREAD_ANNOUNCEMENT_SCAN_LIMIT` 件）。サイドナビの未読バッジとダッシュボード用。閲覧者が
+ * 無ければ空。一覧画面はページングする `fetchAnnouncementsWithReadState()` を使う
+ */
 export const getViewerAnnouncements = cache(
   async (): Promise<{ data: AnnouncementWithReadState[] | null; error: PostgrestError | null }> => {
     const viewer = await getAnnouncementViewer();
-    return viewer ? fetchAnnouncementsWithReadState(viewer) : { data: [], error: null };
+    if (!viewer) {
+      return { data: [], error: null };
+    }
+    const { data, error } = await fetchAnnouncementsWithReadState(viewer);
+    return { data, error };
   }
 );
 
@@ -287,6 +314,16 @@ function toRow(input: AnnouncementInput) {
   };
 }
 
+/** 2つの配列が同じ要素の集合か（`null` は「指定なし」として `null` とだけ一致） */
+function sameMembers(a: readonly string[] | null, b: readonly string[] | null): boolean {
+  if (a === null || b === null) {
+    return a === b;
+  }
+  const setA = new Set(a);
+  const setB = new Set(b);
+  return setA.size === setB.size && [...setA].every((value) => setB.has(value));
+}
+
 /** 作成する。`is_published` なら作成と同時に公開する（`published_at` を記録） */
 export async function createAnnouncement(
   input: AnnouncementInput,
@@ -330,11 +367,21 @@ export async function updateAnnouncement(
   const publishedAt = input.is_published
     ? (current.published_at ?? new Date().toISOString())
     : null;
+  // 対象を変えたら一斉送信を未完了に戻す。Cron は `email_logs` に行の無い対象者にだけ送るため、
+  // 送り終えた人には再送せず、広げた分の対象者にだけ送る（送信中の変更は、Cron 側が
+  // `updated_at` の一致を完了の条件にしているため、実行の開始時点の対象だけで完了にならない）
+  const targetsChanged =
+    !sameMembers(current.target_statuses, input.target_statuses) ||
+    !sameMembers(current.target_membership_types, input.target_membership_types);
 
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from("announcements")
-    .update({ ...toRow(input), published_at: publishedAt })
+    .update({
+      ...toRow(input),
+      published_at: publishedAt,
+      ...(targetsChanged ? { email_sent_at: null } : {}),
+    })
     .eq("id", id)
     .eq("is_deleted", false)
     .select("id");

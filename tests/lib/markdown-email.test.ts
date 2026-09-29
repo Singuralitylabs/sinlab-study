@@ -61,6 +61,33 @@ describe("markdownToEmailHtml", () => {
     expect(unsafe).toContain("[押す](javascript:alert(1))");
   });
 
+  it("リンク先 URL の中の ` や ** には他の装飾をかけない（href を壊さない）", () => {
+    const backtick = markdownToEmailHtml("[docs](https://example.com/a`b`c)");
+    expect(backtick).toContain(
+      '<a href="https://example.com/a`b`c" style="color:#2563eb;">docs</a>'
+    );
+    expect(backtick).not.toContain("<code");
+
+    const stars = markdownToEmailHtml("[docs](https://example.com/**x**)");
+    expect(stars).toContain('<a href="https://example.com/**x**"');
+    expect(stars).not.toContain("<strong>");
+  });
+
+  it("インラインコードの中の ** やリンクは装飾しない", () => {
+    const html = markdownToEmailHtml("`[a](https://x.com) **b**` と **太字**");
+    expect(html).toContain(
+      '<code style="background:#f4f4f5;padding:0 4px;border-radius:4px;">[a](https://x.com) **b**</code>'
+    );
+    expect(html).toContain("<strong>太字</strong>");
+    expect(html.match(/<a /g)).toBeNull();
+  });
+
+  it("番号付きリストは最初の項目の番号から数える（アプリ内表示と同じ）", () => {
+    expect(markdownToEmailHtml("5. five\n6. six")).toMatch(/<ol start="5"[^>]*><li>five<\/li>/);
+    expect(markdownToEmailHtml("1. one")).toMatch(/<ol style=/);
+    expect(markdownToEmailText("5. five\n6. six")).toBe("5. five\n6. six");
+  });
+
   it("リンク文字列・URL に含まれる記号もエスケープされたまま属性に入る", () => {
     const quoted = markdownToEmailHtml('[a"b](https://example.com/?q="x")');
     expect(quoted).toContain('href="https://example.com/?q=&quot;x&quot;"');

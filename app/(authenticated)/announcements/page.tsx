@@ -1,14 +1,47 @@
 import { Megaphone } from "lucide-react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
+import { SubmissionsPager } from "@/app/components/SubmissionsPager";
+import { ANNOUNCEMENTS_PAGE_SIZE } from "@/app/constants/announcements";
 import { formatDate } from "@/app/lib/format-date";
-import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
+import {
+  calcTotalPages,
+  parsePageParam,
+  shouldRedirectOutOfRangePage,
+} from "@/app/lib/submissions-pagination";
+import {
+  fetchAnnouncementsWithReadState,
+  getAnnouncementViewer,
+} from "@/app/services/api/announcements-server";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 
-export default async function AnnouncementsPage() {
-  const { data: announcements, error } = await getViewerAnnouncements();
+export default async function AnnouncementsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const page = parsePageParam((await searchParams).page);
+  const viewer = await getAnnouncementViewer();
+  const {
+    data: announcements,
+    count,
+    error,
+  } = viewer
+    ? await fetchAnnouncementsWithReadState(viewer, { page, pageSize: ANNOUNCEMENTS_PAGE_SIZE })
+    : { data: [], count: 0, error: null };
+
+  if (
+    shouldRedirectOutOfRangePage({
+      page,
+      dataLength: announcements?.length ?? 0,
+      errorCode: error?.code,
+    })
+  ) {
+    redirect("/announcements");
+  }
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -56,6 +89,12 @@ export default async function AnnouncementsPage() {
           ))}
         </div>
       )}
+
+      <SubmissionsPager
+        basePath="/announcements"
+        page={page}
+        totalPages={calcTotalPages(count, ANNOUNCEMENTS_PAGE_SIZE)}
+      />
     </div>
   );
 }
