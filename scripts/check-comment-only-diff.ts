@@ -2,8 +2,12 @@
  * Verifies that a change only touches comments: for every changed TS/TSX file, the AST (comments and
  * positions excluded) must be identical before and after.
  *
+ * Comments that change tool behavior (`@ts-*`, `biome-ignore*`, `allow-console`) are not free-form:
+ * adding, removing or retargeting one counts as a change. Their reason text may be reworded.
+ *
  * Usage: bun scripts/check-comment-only-diff.ts [baseRef=origin/main]
- * Exits non-zero and lists the offending files if any file differs (added/deleted files included).
+ * Exits non-zero and lists the offending files if any file differs (added/deleted/untracked files
+ * included). Can be run from any directory inside the repository.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -82,32 +86,67 @@ function strip(value: unknown): unknown {
   return value;
 }
 
+// Only the directive itself (and the biome rule name) is compared, not the trailing reason.
+const PRAGMA =
+  /^[\s*]*(@ts-(?:ignore|expect-error|nocheck|check)|biome-ignore(?:-all|-start|-end)?\s+[\w/]+|allow-console)/;
+
+function parseSource(source: string) {
+  return parse(source, { sourceType: "module", plugins: ["typescript", "jsx"] });
+}
+
 export function normalize(source: string): string {
-  const ast = parse(source, { sourceType: "module", plugins: ["typescript", "jsx"] });
-  return JSON.stringify(strip(ast.program));
+  return JSON.stringify(strip(parseSource(source).program));
+}
+
+export function pragmas(source: string): string {
+  const found = (parseSource(source).comments ?? [])
+    .map((c) => PRAGMA.exec(c.value)?.[1].replace(/\s+/g, " "))
+    .filter((p): p is string => Boolean(p));
+  return JSON.stringify(found.sort());
+}
+
+function changedFiles(mergeBase: string): { status: string; file: string }[] {
+  // -z: paths with spaces or non-ASCII characters are otherwise quoted and silently skipped.
+  const tokens = git(["diff", "--name-status", "--no-renames", "-z", mergeBase])
+    .split("\0")
+    .filter(Boolean);
+  const files: { status: string; file: string }[] = [];
+  for (let i = 0; i + 1 < tokens.length; i += 2) {
+    files.push({ status: tokens[i], file: tokens[i + 1] });
+  }
+  // `git diff` ignores untracked files, so a not-yet-added new file would pass unnoticed.
+  for (const file of git(["ls-files", "--others", "--exclude-standard", "-z"])
+    .split("\0")
+    .filter(Boolean)) {
+    files.push({ status: "A", file });
+  }
+  return files.filter(({ file }) => CODE_FILE.test(file));
 }
 
 function main(): void {
+  // git prints repo-root-relative paths; make file reads independent of the caller's cwd.
+  process.chdir(git(["rev-parse", "--show-toplevel"]).trim());
   const base = process.argv[2] ?? "origin/main";
   const mergeBase = git(["merge-base", base, "HEAD"]).trim();
-  const changed = git(["diff", "--name-status", "--no-renames", mergeBase])
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      const [status, ...rest] = line.split("\t");
-      return { status, file: rest.join("\t") };
-    })
-    .filter(({ file }) => CODE_FILE.test(file));
+  const changed = changedFiles(mergeBase);
 
   const offenders: string[] = [];
   for (const { status, file } of changed) {
-    if (status !== "M") {
+    if (status === "A" || status === "D") {
       offenders.push(`${file} (${status === "A" ? "added" : "deleted"})`);
       continue;
     }
-    const before = normalize(git(["show", `${mergeBase}:${file}`]));
-    const after = normalize(readFileSync(file, "utf8"));
-    if (before !== after) offenders.push(`${file} (AST differs)`);
+    if (status !== "M") {
+      offenders.push(`${file} (status ${status})`);
+      continue;
+    }
+    const beforeSource = git(["show", `${mergeBase}:${file}`]);
+    const afterSource = readFileSync(file, "utf8");
+    if (normalize(beforeSource) !== normalize(afterSource)) {
+      offenders.push(`${file} (AST differs)`);
+    } else if (pragmas(beforeSource) !== pragmas(afterSource)) {
+      offenders.push(`${file} (tool pragma comments differ)`);
+    }
   }
 
   if (offenders.length > 0) {
