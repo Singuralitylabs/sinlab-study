@@ -12,6 +12,7 @@ import {
 } from "@/app/constants/notifications";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { isAnnouncementTarget } from "@/app/lib/announcement-target";
 import { compareGroupLevel } from "@/app/lib/content-grouping";
 import { buildThemeContentOrder, type NavigationWeek } from "@/app/lib/content-navigation";
 import {
@@ -33,6 +34,7 @@ import { type CronLock, claimCronLock, releaseCronLock } from "@/app/services/ap
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { type EmailContent, isEmailConfigured } from "@/app/services/notifications/email";
 import {
+  buildAnnouncementEmail,
   buildInactivityReminderEmail,
   buildTrialNurtureEmail,
   buildWeeklyDigestEmail,
@@ -46,7 +48,7 @@ import {
   type DeliverResult,
   deliverUserEmail,
 } from "@/app/services/notifications/user-emails";
-import type { UserStatusType } from "@/app/types";
+import type { Announcement, UserStatusType } from "@/app/types";
 
 /**
  * 定期メール（週次進捗・未学習リマインド・お試しユーザー向け案内）の対象抽出と送信。
@@ -104,11 +106,12 @@ async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
     email: string;
     display_name: string;
     status: string;
+    membership_type: string | null;
     created_at: string | null;
   }>((from, to) =>
     supabase
       .from("users")
-      .select("id, email, display_name, status, created_at")
+      .select("id, email, display_name, status, membership_type, created_at")
       .eq("is_deleted", false)
       .eq("role", USER_ROLE.MEMBER)
       .in("status", [USER_STATUS.ACTIVE, USER_STATUS.TRIAL])
@@ -124,6 +127,7 @@ async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
       email: row.email,
       displayName: row.display_name,
       status: row.status as UserStatusType,
+      membershipType: row.membership_type ?? null,
       createdAt: row.created_at as string,
     }));
 }
@@ -380,6 +384,61 @@ async function reserveWeeklyDigest(
   }
 }
 
+type PendingAnnouncement = Pick<
+  Announcement,
+  "id" | "title" | "body" | "target_statuses" | "target_membership_types"
+>;
+
+/**
+ * メールの一斉送信を待っているお知らせ（公開済み・未削除・`send_email`・まだ全員に送り終えて
+ * いない）。公開の古い順
+ */
+async function fetchPendingAnnouncements(supabase: AdminClient): Promise<PendingAnnouncement[]> {
+  const { data, error } = await supabase
+    .from("announcements")
+    .select("id, title, body, target_statuses, target_membership_types")
+    .not("published_at", "is", null)
+    .eq("is_deleted", false)
+    .eq("send_email", true)
+    .is("email_sent_at", null)
+    .order("published_at");
+  if (error) {
+    throw new Error(error.message);
+  }
+  return (data ?? []) as PendingAnnouncement[];
+}
+
+/** お知らせごとの、`email_logs` に行を持つ（送信済み・送信中・送信失敗の）ユーザーの ID */
+async function fetchAnnouncementLoggedUserIds(
+  supabase: AdminClient,
+  referenceKeys: string[]
+): Promise<Map<string, Set<number>>> {
+  const rows = await fetchAllPages<{ user_id: number; reference_key: string }>((from, to) =>
+    supabase
+      .from("email_logs")
+      .select("user_id, reference_key")
+      .eq("kind", EMAIL_KIND.ANNOUNCEMENT)
+      .in("reference_key", referenceKeys)
+      .order("id")
+      .range(from, to)
+  );
+  const logged = new Map<string, Set<number>>();
+  for (const row of rows) {
+    const ids = logged.get(row.reference_key) ?? new Set<number>();
+    ids.add(row.user_id);
+    logged.set(row.reference_key, ids);
+  }
+  return logged;
+}
+
+/** 一斉送信の進み具合。今回の実行で全員を処理し終えたら `email_sent_at` を記録する */
+type AnnouncementBatch = {
+  id: number;
+  referenceKey: string;
+  /** 対象者のうち、今回の実行の開始時点でまだ `email_logs` に行が無いユーザー */
+  pendingUserIds: number[];
+};
+
 /** 送信キューの1通。本文は送る直前に組み立てる */
 type QueuedEmail = {
   kind: PromotionalEmailKind;
@@ -408,6 +467,8 @@ export type EmailDigestResult =
        * （月曜・火曜の実行が完了しなかった）
        */
       weeklyReservationMissing: boolean;
+      /** この実行で対象者全員に送り終えた（`email_sent_at` を記録した）お知らせの件数 */
+      announcementsCompleted: number;
     };
 
 export type EmailDigestOptions = {
@@ -421,19 +482,100 @@ export type EmailDigestOptions = {
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
+ * お知らせのメール一斉送信を送信キューに加える（kind = `announcement`、reference_key =
+ * お知らせの ID）。対象は配信停止していない受講生のうち、ステータス・会員種別がお知らせの
+ * 対象に一致するユーザー（`isAnnouncementTarget()`。アプリ内表示と同じ条件）。
+ *
+ * 全員を1回で送り切れない（1日の上限・実行時間・1人1日1通）ときは、`email_logs` に行が
+ * 無いユーザーを翌日以降の実行で送る（分割送信）。今日すでに案内系メールを受け取った
+ * ユーザー（`sendableUserIds` に無い）と、この実行で別の案内を送るユーザーは翌日に回す。
+ * 完了の判定に使うため、対象者（`allUsers` から抽出）のうち未送信の全員を返す。
+ */
+async function appendAnnouncementEmails(
+  supabase: AdminClient,
+  allUsers: DigestUser[],
+  sendableUserIds: ReadonlySet<number>,
+  queuedUserIds: Set<number>,
+  queue: QueuedEmail[],
+  appUrl: string
+): Promise<AnnouncementBatch[]> {
+  const announcements = await fetchPendingAnnouncements(supabase);
+  if (announcements.length === 0) {
+    return [];
+  }
+  const logged = await fetchAnnouncementLoggedUserIds(
+    supabase,
+    announcements.map((announcement) => String(announcement.id))
+  );
+
+  return announcements.map((announcement) => {
+    const referenceKey = String(announcement.id);
+    const done = logged.get(referenceKey) ?? new Set<number>();
+    const pending = allUsers.filter(
+      (user) =>
+        !done.has(user.userId) &&
+        isAnnouncementTarget(announcement, {
+          status: user.status,
+          membershipType: user.membershipType,
+        })
+    );
+
+    for (const user of pending) {
+      if (!sendableUserIds.has(user.userId) || queuedUserIds.has(user.userId)) {
+        continue;
+      }
+      queue.push({
+        kind: EMAIL_KIND.ANNOUNCEMENT,
+        referenceKey,
+        user,
+        carriesOver: true,
+        build: (unsubscribeUrl) =>
+          buildAnnouncementEmail({
+            displayName: user.displayName,
+            appUrl,
+            unsubscribeUrl,
+            announcementId: announcement.id,
+            title: announcement.title,
+            body: announcement.body,
+          }),
+      });
+      queuedUserIds.add(user.userId);
+    }
+
+    return { id: announcement.id, referenceKey, pendingUserIds: pending.map((u) => u.userId) };
+  });
+}
+
+/**
  * 送信キューを作る。今日（JST）が登録から N 日目のユーザーの `trial_nurture` /
- * `inactivity_reminder` を先に、`weekly_digest` を後に並べる（N 日目の案内は翌日に拾わないため、
- * 上限に掛かったときは繰り越せる週次進捗の方を後回しにする）。1人に同じ日に送る案内系メールは1通まで
- * （今日すでに案内系メールを claim したユーザーは、呼び出し元が `users` から除いておく）。
+ * `inactivity_reminder` を先に、お知らせの一斉送信を次に、`weekly_digest` を最後に並べる
+ * （N 日目の案内は翌日に拾わないため、上限に掛かったときは繰り越せるお知らせ・週次進捗の方を
+ * 後回しにする）。1人に同じ日に送る案内系メールは1通まで（今日すでに案内系メールを claim した
+ * ユーザー `excludedToday` には送らない）。
  */
 async function buildQueue(
   supabase: AdminClient,
-  users: DigestUser[],
+  allUsers: DigestUser[],
+  excludedToday: ReadonlySet<number>,
   today: string,
   appUrl: string
-): Promise<{ queue: QueuedEmail[]; weeklyReservationMissing: boolean }> {
+): Promise<{
+  queue: QueuedEmail[];
+  weeklyReservationMissing: boolean;
+  announcementBatches: AnnouncementBatch[];
+}> {
+  const users = allUsers.filter((user) => !excludedToday.has(user.userId));
   if (users.length === 0) {
-    return { queue: [], weeklyReservationMissing: false };
+    // 送れる人がいなくても、対象者のいないお知らせを完了にできるよう一斉送信の状況は返す
+    const announcementBatches = await appendAnnouncementEmails(
+      supabase,
+      allUsers,
+      new Set(),
+      new Set(),
+      [],
+      appUrl
+    );
+    return { queue: [], weeklyReservationMissing: false, announcementBatches };
   }
 
   const contents = await fetchOrderedContents(supabase);
@@ -485,6 +627,15 @@ async function buildQueue(
     });
     queuedUserIds.add(user.userId);
   }
+
+  const announcementBatches = await appendAnnouncementEmails(
+    supabase,
+    allUsers,
+    new Set(users.map((user) => user.userId)),
+    queuedUserIds,
+    queue,
+    appUrl
+  );
 
   // 週次進捗（reference_key は週の開始日）。対象を決めるのは月曜だけで、月曜の対象者を繰り越し
   // 予約として記録する。火〜日曜は、予約を持ちまだ送っていないユーザー（月曜に上限・時間切れ・
@@ -573,7 +724,7 @@ async function buildQueue(
   // 今日 N 日目の案内を送るユーザーには、週次進捗を翌日以降に回す（予約済みのため繰り越される）
   queue.push(...weeklyItems.filter((item) => !queuedUserIds.has(item.user.userId)));
 
-  return { queue, weeklyReservationMissing };
+  return { queue, weeklyReservationMissing, announcementBatches };
 }
 
 /**
@@ -645,14 +796,18 @@ async function sendDigest(
 
   let queue: QueuedEmail[];
   let weeklyReservationMissing: boolean;
+  let announcementBatches: AnnouncementBatch[];
   let limit: number;
   try {
     const todayLogs = await fetchTodayPromotionalLogs(supabase, today);
     limit = Math.max(0, EMAIL_DIGEST_MAX_PER_DAY - todayLogs.count);
-    const users = (await fetchDigestUsers(supabase)).filter(
-      (user) => !todayLogs.userIds.has(user.userId)
-    );
-    ({ queue, weeklyReservationMissing } = await buildQueue(supabase, users, today, appUrl));
+    ({ queue, weeklyReservationMissing, announcementBatches } = await buildQueue(
+      supabase,
+      await fetchDigestUsers(supabase),
+      todayLogs.userIds,
+      today,
+      appUrl
+    ));
   } catch (error) {
     console.error(
       "[定期メール] 送信対象の抽出でエラーが発生しました:",
@@ -662,6 +817,8 @@ async function sendDigest(
   }
 
   const counts: Record<DeliverResult, number> = { sent: 0, failed: 0, duplicate: 0, skipped: 0 };
+  /** 今回 `email_logs` に行が残った（送信・失敗・他の実行が送信済み）宛先。お知らせの完了判定用 */
+  const handled = new Set<string>();
   let lastApiCallAt: number | null = null;
   let index = 0;
 
@@ -702,16 +859,25 @@ async function sendDigest(
       result = "failed";
     }
     counts[result]++;
+    if (result !== "skipped") {
+      handled.add(handledKey(item.kind, item.referenceKey, item.user.userId));
+    }
     if (result === "sent" || result === "failed") {
       lastApiCallAt = callStartedAt;
     }
   }
 
+  const announcementsCompleted = await markCompletedAnnouncements(
+    supabase,
+    announcementBatches,
+    handled
+  );
+
   const rest = queue.slice(index);
   if (rest.length > 0) {
     const carried = rest.filter((item) => item.carriesOver).length;
     console.warn(
-      `[定期メール] 1日の上限（${EMAIL_DIGEST_MAX_PER_DAY}通）または実行時間の上限に達したため、${rest.length}通を送りませんでした（週次進捗 ${carried}通は同じ週の翌日以降に繰り越し、登録からN日目の案内 ${rest.length - carried}通は繰り越しません）`
+      `[定期メール] 1日の上限（${EMAIL_DIGEST_MAX_PER_DAY}通）または実行時間の上限に達したため、${rest.length}通を送りませんでした（お知らせ・週次進捗 ${carried}通は翌日以降に繰り越し、登録からN日目の案内 ${rest.length - carried}通は繰り越しません）`
     );
   }
 
@@ -722,7 +888,49 @@ async function sendDigest(
     ...counts,
     deferred: rest.length,
     weeklyReservationMissing,
+    announcementsCompleted,
   };
+}
+
+function handledKey(kind: string, referenceKey: string, userId: number): string {
+  return `${kind}:${referenceKey}:${userId}`;
+}
+
+/**
+ * 実行の開始時点で未送信だった対象者全員を、この実行で処理し終えた（`email_logs` に行が
+ * 残った）お知らせに `email_sent_at` を記録する（一斉送信の完了）。今日すでに別の案内を
+ * 受け取った・上限や時間切れで回らなかった対象者が残っていれば記録せず、翌日以降の実行が
+ * 続きを送る。対象者がいないお知らせもここで完了にする。記録の失敗はログだけ残す
+ * （翌日の実行で対象者が0人として完了にし直せる）。
+ */
+async function markCompletedAnnouncements(
+  supabase: AdminClient,
+  batches: AnnouncementBatch[],
+  handled: ReadonlySet<string>
+): Promise<number> {
+  let completed = 0;
+  for (const batch of batches) {
+    const done = batch.pendingUserIds.every((userId) =>
+      handled.has(handledKey(EMAIL_KIND.ANNOUNCEMENT, batch.referenceKey, userId))
+    );
+    if (!done) {
+      continue;
+    }
+    const { error } = await supabase
+      .from("announcements")
+      .update({ email_sent_at: new Date().toISOString() })
+      .eq("id", batch.id)
+      .is("email_sent_at", null);
+    if (error) {
+      console.error(
+        `[定期メール] お知らせの送信完了の記録に失敗しました: id=${batch.id}`,
+        error.message
+      );
+      continue;
+    }
+    completed++;
+  }
+  return completed;
 }
 
 function skip(reason: string): EmailDigestResult {

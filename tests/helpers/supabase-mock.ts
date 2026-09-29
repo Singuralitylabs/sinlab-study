@@ -25,6 +25,7 @@ export function createQueryBuilder(result: QueryResult) {
     or: vi.fn().mockReturnThis(),
     lt: vi.fn().mockReturnThis(),
     gte: vi.fn().mockReturnThis(),
+    contains: vi.fn().mockReturnThis(),
     is: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
     not: vi.fn().mockReturnThis(),

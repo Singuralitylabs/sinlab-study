@@ -39,6 +39,7 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
     const filters: Filter[] = [];
     let range: [number, number] | null = null;
     let limit: number | null = null;
+    const orders: { column: string; ascending: boolean }[] = [];
 
     // UNIQUE (user_id, kind, reference_key) と cron_locks の主キー (name)
     const isDuplicate = (rows: Row[], value: Row) =>
@@ -92,7 +93,18 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
         db[table] = rows.filter((row) => !matched.includes(row));
         return { data: null, error: null };
       }
-      let result = range ? matched.slice(range[0], range[1] + 1) : matched;
+      const sorted = [...matched].sort((a, b) => {
+        for (const { column, ascending } of orders) {
+          const x = a[column] as string | number | null | undefined;
+          const y = b[column] as string | number | null | undefined;
+          if (x === y) continue;
+          if (x == null) return 1;
+          if (y == null) return -1;
+          return (x < y ? -1 : 1) * (ascending ? 1 : -1);
+        }
+        return 0;
+      });
+      let result = range ? sorted.slice(range[0], range[1] + 1) : sorted;
       if (limit !== null) result = result.slice(0, limit);
       // PostgREST の db-max-rows（1回のレスポンスの最大行数）
       if (options.maxRows !== undefined) result = result.slice(0, options.maxRows);
@@ -128,6 +140,11 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
         filters.push((row) => values.includes(row[column]));
         return builder;
       },
+      not: (column: string, operator: string, value: unknown) => {
+        if (operator !== "is") throw new Error(`未対応の not 演算子: ${operator}`);
+        filters.push((row) => (row[column] ?? null) !== value);
+        return builder;
+      },
       is: (column: string, value: unknown) => {
         filters.push((row) => (row[column] ?? null) === value);
         return builder;
@@ -140,7 +157,10 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
         filters.push((row) => String(row[column]) < value);
         return builder;
       },
-      order: () => builder,
+      order: (column: string, opts: { ascending?: boolean } = {}) => {
+        orders.push({ column, ascending: opts.ascending ?? true });
+        return builder;
+      },
       limit: (count: number) => {
         limit = count;
         return builder;
@@ -261,7 +281,7 @@ const themes: Row[] = [
 ];
 
 function setup(
-  tables: { users: Row[]; user_progress?: Row[]; submissions?: Row[] },
+  tables: { users: Row[]; user_progress?: Row[]; submissions?: Row[]; announcements?: Row[] },
   options: { maxRows?: number } = {}
 ) {
   const fake = createFakeDb(
@@ -809,5 +829,170 @@ describe("ページング", () => {
 
     expect(result).toMatchObject({ sent: 5 });
     expect(sentTo()).toHaveLength(5);
+  });
+});
+
+describe("お知らせのメール一斉送信（#254）", () => {
+  /** 2026-10-07（水）JST 8:00。週次進捗の予約が無い曜日で、お知らせだけを確かめる */
+  const WEDNESDAY = new Date("2026-10-06T23:00:00Z");
+  const THURSDAY = new Date("2026-10-07T23:00:00Z");
+
+  function announcementRow(overrides: Row = {}): Row {
+    return {
+      id: 501,
+      title: "もくもく会のご案内",
+      body: "# 日時\n- 10/20 **20:00**\n\n[参加する](https://example.com/join)",
+      target_statuses: ["active", "trial"],
+      target_membership_types: null,
+      published_at: "2026-10-06T01:00:00.000Z",
+      send_email: true,
+      email_sent_at: null,
+      is_deleted: false,
+      ...overrides,
+    };
+  }
+
+  const announcementLogs = (db: Record<string, Row[]>) =>
+    db.email_logs.filter((row) => row.kind === "announcement");
+
+  it("対象のステータス・会員種別に一致し、配信停止していない受講生にだけ送り、全員に送り終えたら email_sent_at を記録する", async () => {
+    const { db } = setup({
+      users: [
+        userRow(1, { membership_type: "general" }),
+        userRow(2, { membership_type: "community" }),
+        userRow(3, { status: "trial" }),
+        userRow(4, { membership_type: "general", email_opt_out_at: "2026-10-01T00:00:00Z" }),
+        userRow(5, { role: "maintainer", membership_type: "general" }),
+      ],
+      announcements: [
+        announcementRow({ target_statuses: ["active"], target_membership_types: ["general"] }),
+      ],
+    });
+
+    const result = await runDigest(WEDNESDAY);
+
+    expect(sentTo()).toEqual(["u1@example.com"]);
+    expect(result).toMatchObject({ sent: 1, announcementsCompleted: 1 });
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+    expect(announcementLogs(db).map((row) => [row.user_id, row.reference_key])).toEqual([
+      [1, "501"],
+    ]);
+  });
+
+  it("本文の Markdown をメールに載せ、詳細ページへのリンクと配信停止リンクを付ける", async () => {
+    setup({ users: [userRow(1)], announcements: [announcementRow()] });
+
+    await runDigest(WEDNESDAY);
+
+    const email = sentEmailTo("u1@example.com");
+    expect(email.subject).toContain("お知らせ: もくもく会のご案内");
+    expect(email.text).toContain("■ 日時");
+    expect(email.text).toContain("・ 10/20 20:00");
+    expect(email.html).toContain("<strong>20:00</strong>");
+    expect(email.html).toContain('<a href="https://example.com/join"');
+    expect(email.text).toContain(`お知らせを開く: ${APP_URL}/announcements/501`);
+    expect(email.text).toContain(`${APP_URL}/api/email/unsubscribe?token=1.`);
+    expect(email.headers?.["List-Unsubscribe-Post"]).toBe("List-Unsubscribe=One-Click");
+  });
+
+  it("下書き・メール送信なし・削除済み・送信完了済みのお知らせは送らない", async () => {
+    setup({
+      users: [userRow(1)],
+      announcements: [
+        announcementRow({ id: 1, published_at: null }),
+        announcementRow({ id: 2, send_email: false }),
+        announcementRow({ id: 3, is_deleted: true }),
+        announcementRow({ id: 4, email_sent_at: "2026-10-05T00:00:00Z" }),
+      ],
+    });
+
+    await runDigest(WEDNESDAY);
+
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("1日の上限を超える対象者は複数日に分けて送り、全員に送り終えた日に email_sent_at を記録する", async () => {
+    const { db } = setup({
+      users: Array.from({ length: EMAIL_DIGEST_MAX_PER_DAY + 5 }, (_, i) => userRow(i + 1)),
+      announcements: [announcementRow()],
+    });
+
+    const first = await runDigest(WEDNESDAY);
+    expect(first).toMatchObject({
+      sent: EMAIL_DIGEST_MAX_PER_DAY,
+      deferred: 5,
+      announcementsCompleted: 0,
+    });
+    expect(db.announcements[0].email_sent_at).toBeNull();
+
+    // 同じ日の再実行では1日の上限に達しているため送らない
+    const rerun = await runDigest(new Date("2026-10-07T01:00:00Z"));
+    expect(rerun).toMatchObject({ sent: 0, announcementsCompleted: 0 });
+
+    const second = await runDigest(THURSDAY);
+    expect(second).toMatchObject({ sent: 5, deferred: 0, announcementsCompleted: 1 });
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+    // 全員に1通ずつ（二重送信なし）
+    expect(new Set(sentTo()).size).toBe(EMAIL_DIGEST_MAX_PER_DAY + 5);
+    expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_DAY + 5);
+  });
+
+  it("同じ日に登録からN日目の案内を受け取るユーザーには翌日に送り、それまで完了にしない", async () => {
+    const { db } = setup({
+      users: [userRow(1, { status: "trial", created_at: createdOn("2026-10-05") })], // 10/7 = 2日目
+      announcements: [announcementRow()],
+    });
+
+    const wednesday = await runDigest(WEDNESDAY);
+    expect(sentEmailTo("u1@example.com").subject).toContain("演習を出してみましょう");
+    expect(wednesday).toMatchObject({ sent: 1, announcementsCompleted: 0 });
+    expect(db.announcements[0].email_sent_at).toBeNull();
+
+    const thursday = await runDigest(THURSDAY);
+    expect(thursday).toMatchObject({ sent: 1, announcementsCompleted: 1 });
+    expect(vi.mocked(sendEmail).mock.calls[1][0].subject).toContain("お知らせ");
+  });
+
+  it("月曜は週次進捗よりお知らせを先に送り、週次進捗は翌日に繰り越す", async () => {
+    setup({ users: [userRow(1)], announcements: [announcementRow()] });
+
+    await runDigest(MONDAY);
+    await runDigest(TUESDAY);
+
+    expect(vi.mocked(sendEmail).mock.calls.map(([params]) => params.subject)).toEqual([
+      expect.stringContaining("お知らせ"),
+      expect.stringContaining("今週の学習"),
+    ]);
+  });
+
+  it("対象者がいないお知らせは送らずに完了にする", async () => {
+    const { db } = setup({
+      users: [userRow(1, { status: "trial" })],
+      announcements: [announcementRow({ target_statuses: ["active"] })],
+    });
+
+    const result = await runDigest(WEDNESDAY);
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ announcementsCompleted: 1 });
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+  });
+
+  it("複数のお知らせは公開の古い順に1人1日1通ずつ送る", async () => {
+    setup({
+      users: [userRow(1)],
+      announcements: [
+        announcementRow({ id: 10, title: "新しい", published_at: "2026-10-06T02:00:00.000Z" }),
+        announcementRow({ id: 9, title: "古い", published_at: "2026-10-06T01:00:00.000Z" }),
+      ],
+    });
+
+    await runDigest(WEDNESDAY);
+    await runDigest(THURSDAY);
+
+    expect(vi.mocked(sendEmail).mock.calls.map(([params]) => params.subject)).toEqual([
+      expect.stringContaining("古い"),
+      expect.stringContaining("新しい"),
+    ]);
   });
 });

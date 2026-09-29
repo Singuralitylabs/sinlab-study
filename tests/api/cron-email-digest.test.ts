@@ -24,6 +24,7 @@ beforeEach(() => {
     skipped: 0,
     deferred: 0,
     weeklyReservationMissing: false,
+    announcementsCompleted: 0,
   });
 });
 

@@ -79,7 +79,14 @@ describe("coversPreviousWeek（週次進捗の対象になれる登録日）", (
 });
 
 function user(userId: number, status: "active" | "trial", createdAt: string): DigestUser {
-  return { userId, email: `u${userId}@example.com`, displayName: `u${userId}`, status, createdAt };
+  return {
+    userId,
+    email: `u${userId}@example.com`,
+    displayName: `u${userId}`,
+    status,
+    membershipType: null,
+    createdAt,
+  };
 }
 
 describe("planMilestoneEmails", () => {

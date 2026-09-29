@@ -32,18 +32,20 @@ export const EMAIL_KIND = {
   WEEKLY_DIGEST: "weekly_digest",
   INACTIVITY_REMINDER: "inactivity_reminder",
   TRIAL_NURTURE: "trial_nurture",
+  ANNOUNCEMENT: "announcement",
 } as const;
 
 export type EmailKind = (typeof EMAIL_KIND)[keyof typeof EMAIL_KIND];
 
 /**
- * 案内系メール（Cron が送る定期メール）の種別。配信停止（`users.email_opt_out_at`）の対象で、
+ * 案内系メール（Cron が送る定期メールとお知らせの一斉送信）の種別。配信停止（`users.email_opt_out_at`）の対象で、
  * 必ずフッターに配信停止リンクを入れる。トランザクションメール（上記以外）は対象外。
  */
 export const PROMOTIONAL_EMAIL_KINDS = [
   EMAIL_KIND.WEEKLY_DIGEST,
   EMAIL_KIND.INACTIVITY_REMINDER,
   EMAIL_KIND.TRIAL_NURTURE,
+  EMAIL_KIND.ANNOUNCEMENT,
 ] as const;
 
 export type PromotionalEmailKind = (typeof PROMOTIONAL_EMAIL_KINDS)[number];
