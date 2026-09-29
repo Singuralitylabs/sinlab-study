@@ -972,6 +972,29 @@ describe("お知らせのメール一斉送信（#254）", () => {
     ]);
   });
 
+  it("火曜以降は週次進捗の繰り越し分をお知らせより先に送り、大勢へのお知らせで週次進捗を押し出さない", async () => {
+    const count = EMAIL_DIGEST_MAX_PER_DAY + 5;
+    const { db } = setup({
+      users: Array.from({ length: count }, (_, i) => userRow(i + 1)),
+    });
+
+    // 月曜は上限まで週次進捗を送り、5通を繰り越す
+    expect(await runDigest(MONDAY)).toMatchObject({ sent: EMAIL_DIGEST_MAX_PER_DAY, deferred: 5 });
+
+    // 月曜の後に全員向けのお知らせを公開する
+    db.announcements = [announcementRow({ published_at: "2026-10-05T03:00:00.000Z" })];
+    vi.mocked(sendEmail).mockClear();
+    const tuesday = await runDigest(TUESDAY);
+
+    const subjects = vi.mocked(sendEmail).mock.calls.map(([params]) => params.subject);
+    expect(subjects.slice(0, 5)).toEqual(Array(5).fill(expect.stringContaining("今週の学習")));
+    expect(subjects.slice(5)).toEqual(
+      Array(EMAIL_DIGEST_MAX_PER_DAY - 5).fill(expect.stringContaining("お知らせ"))
+    );
+    expect(tuesday).toMatchObject({ sent: EMAIL_DIGEST_MAX_PER_DAY, announcementsCompleted: 0 });
+    expect(sentLogs(db).filter((row) => row.kind === "weekly_digest")).toHaveLength(count);
+  });
+
   it("claim が DB エラーで失敗した宛先が残っていれば完了にせず、翌日の実行で送ってから完了にする", async () => {
     const { db, insertFailures } = setup({
       users: [userRow(1), userRow(2), userRow(3)],

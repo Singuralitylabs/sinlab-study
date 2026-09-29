@@ -667,9 +667,10 @@ async function appendAnnouncementEmails(
 
 /**
  * 送信キューを作る。今日（JST）が登録から N 日目のユーザーの `trial_nurture` /
- * `inactivity_reminder` を先に、お知らせの一斉送信を次に、`weekly_digest` を最後に並べる
- * （N 日目の案内は翌日に拾わないため、上限に掛かったときは繰り越せるお知らせ・週次進捗の方を
- * 後回しにする）。1人に同じ日に送る案内系メールは1通まで（今日すでに案内系メールを claim した
+ * `inactivity_reminder` を先に並べる（N 日目の案内は翌日に拾わないため、上限に掛かったときは
+ * 繰り越せるお知らせ・週次進捗の方を後回しにする）。その後は、週次進捗の対象を決める日は
+ * お知らせの一斉送信 → `weekly_digest`、それ以外の日は予約の繰り越し分の `weekly_digest` →
+ * お知らせの順に並べる（週次進捗の予約は同じ週の間だけ有効なため）。1人に同じ日に送る案内系メールは1通まで（今日すでに案内系メールを claim した
  * ユーザー `excludedToday` には送らない）。
  */
 async function buildQueue(
@@ -748,16 +749,6 @@ async function buildQueue(
     queuedUserIds.add(user.userId);
   }
 
-  const announcementBatches = await appendAnnouncementEmails(
-    supabase,
-    allUsers,
-    new Set(users.map((user) => user.userId)),
-    queuedUserIds,
-    queue,
-    appUrl,
-    today
-  );
-
   // 週次進捗（reference_key は週の開始日）。対象を決めるのは月曜だけで、月曜の対象者を繰り越し
   // 予約として記録する。火〜日曜は、予約を持ちまだ送っていないユーザー（月曜に上限・時間切れ・
   // 同日の別の案内で送れなかった分）だけに送り、週の途中で新しく対象になったユーザーには送らない。
@@ -821,7 +812,8 @@ async function buildQueue(
       kind: EMAIL_KIND.WEEKLY_DIGEST,
       referenceKey: weekStart,
       user,
-      carriesOver: true,
+      // 予約は同じ週の間だけ有効なため、週の最終日（日曜）に送れなかった分は失われる
+      carriesOver: daysSinceWeekStart < 6,
       build: (unsubscribeUrl) =>
         buildWeeklyDigestEmail({
           displayName: user.displayName,
@@ -843,7 +835,37 @@ async function buildQueue(
     );
   }
   // 今日 N 日目の案内を送るユーザーには、週次進捗を翌日以降に回す（予約済みのため繰り越される）
-  queue.push(...weeklyItems.filter((item) => !queuedUserIds.has(item.user.userId)));
+  const pushWeekly = () => {
+    for (const item of weeklyItems) {
+      if (!queuedUserIds.has(item.user.userId)) {
+        queue.push(item);
+        queuedUserIds.add(item.user.userId);
+      }
+    }
+  };
+  const appendAnnouncements = () =>
+    appendAnnouncementEmails(
+      supabase,
+      allUsers,
+      new Set(users.map((user) => user.userId)),
+      queuedUserIds,
+      queue,
+      appUrl,
+      today
+    );
+
+  // 対象を決める日（月曜。取り戻しの火曜を含む）はお知らせを先に並べ、週次進捗は翌日以降に
+  // 繰り越す（予約があるため週の残りの日に送れる）。それ以外の日の週次進捗は予約の繰り越し分
+  // だけで、予約は同じ週の間しか有効でないため、繰り越しの期限が無いお知らせより先に並べる
+  // （大勢に送るお知らせが上限を使い切り、週次進捗を週末まで押し出して失わせないため）
+  let announcementBatches: AnnouncementBatch[];
+  if (decidesTargets) {
+    announcementBatches = await appendAnnouncements();
+    pushWeekly();
+  } else {
+    pushWeekly();
+    announcementBatches = await appendAnnouncements();
+  }
 
   return { queue, weeklyReservationMissing, announcementBatches };
 }
@@ -993,7 +1015,7 @@ async function sendDigest(
   if (rest.length > 0) {
     const carried = rest.filter((item) => item.carriesOver).length;
     console.warn(
-      `[定期メール] 1日の上限（${EMAIL_DIGEST_MAX_PER_DAY}通）または実行時間の上限に達したため、${rest.length}通を送りませんでした（お知らせ・週次進捗 ${carried}通は翌日以降に繰り越し、登録からN日目の案内 ${rest.length - carried}通は繰り越しません）`
+      `[定期メール] 1日の上限（${EMAIL_DIGEST_MAX_PER_DAY}通）または実行時間の上限に達したため、${rest.length}通を送りませんでした（お知らせ・週次進捗 ${carried}通は翌日以降に繰り越し、登録からN日目の案内と週の最終日の週次進捗 ${rest.length - carried}通は繰り越しません）`
     );
   }
 
