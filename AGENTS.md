@@ -45,6 +45,7 @@ PRを作成する際は必ず `.github/pull_request_template.md` のテンプレ
 - `useConst`、`useImportType`/`useExportType` はerrorレベルで強制
 - `noUnusedVariables`/`noUnusedImports` はwarnレベル
 - 型のみのインポートには `import type` を使用すること
+- コードのコメントは英語で「why」（理由・壊すと起きること）だけを書く。コードの言い換え（what）・変更履歴・ファイルヘッダ概要は書かない。コメントのみの変更は `bun run check:comments` でロジック不変を確認する。
 
 ## 実装時に必ず守ること
 
