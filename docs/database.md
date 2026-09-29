@@ -36,6 +36,8 @@ erDiagram
     users ||--o{ submissions : "1:N"
     submissions ||--o| ai_reviews : "1:1"
     users ||--o| stripe_subscriptions : "1:1"
+    announcements ||--o{ announcement_reads : "1:N"
+    users ||--o{ announcement_reads : "1:N"
 
     learning_themes {
         serial id PK
@@ -151,6 +153,23 @@ erDiagram
     cron_locks {
         text name PK
         timestamptz locked_at
+    }
+    announcements {
+        serial id PK
+        text title
+        text body
+        text_array target_statuses
+        text_array target_membership_types
+        timestamptz published_at
+        bool send_email
+        timestamptz email_sent_at
+        int created_by FK
+        bool is_deleted
+    }
+    announcement_reads {
+        int announcement_id PK
+        int user_id PK
+        timestamptz read_at
     }
 ```
 
@@ -450,8 +469,8 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 |:--|:--|:--:|:--|:--|
 | id | SERIAL | NO | - | PK |
 | user_id | INTEGER | NO | - | FK → users.id（ON DELETE CASCADE） |
-| kind | TEXT | NO | - | メール種別（`signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended`、定期メールの `weekly_digest` / `inactivity_reminder` / `trial_nurture`、週次進捗の繰り越し予約 `weekly_digest_reserved`（送信しない記録用の行。`sent_at` / `error` は NULL のまま）。値はアプリの `EMAIL_KIND` で管理し、種別の追加に追従できるよう CHECK 制約は設けない） |
-| reference_key | TEXT | NO | - | 同一事象の識別子（`signup` は `users.id`、`approved` は承認時刻、Stripe 系は `stripe_subscription_id`、`weekly_digest` は週の開始日（月曜、`YYYY-MM-DD`）、`inactivity_reminder` / `trial_nurture` は `day7` など登録からの日数） |
+| kind | TEXT | NO | - | メール種別（`signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended`、定期メールの `weekly_digest` / `inactivity_reminder` / `trial_nurture`、お知らせの一斉送信 `announcement`、週次進捗の繰り越し予約 `weekly_digest_reserved`（送信しない記録用の行。`sent_at` / `error` は NULL のまま）。値はアプリの `EMAIL_KIND` で管理し、種別の追加に追従できるよう CHECK 制約は設けない） |
+| reference_key | TEXT | NO | - | 同一事象の識別子（`signup` は `users.id`、`approved` は承認時刻、Stripe 系は `stripe_subscription_id`、`weekly_digest` は週の開始日（月曜、`YYYY-MM-DD`）、`inactivity_reminder` / `trial_nurture` は `day7` など登録からの日数、`announcement` はお知らせの ID） |
 | sent_at | TIMESTAMPTZ | YES | - | 送信に成功した日時 |
 | provider_message_id | TEXT | YES | - | Resend のメッセージid |
 | error | TEXT | YES | - | 送信に失敗した場合のエラー内容（APIキー等の秘匿情報は含めない） |
@@ -471,6 +490,37 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 | name | TEXT | NO | - | PK。ロック名（`email-digest`） |
 | locked_at | TIMESTAMPTZ | NO | - | ロックを取った日時 |
 
+
+### 3.13 announcements（お知らせ）
+
+運営（admin / maintainer）から受講生へのお知らせ（[機能設計書](./specification.md)11章）。`published_at` が NULL なら下書き。`send_email` なら Cron の日次バッチがメールでも一斉送信し、対象者全員に送り終えた日に `email_sent_at` を記録する。
+
+| カラム | 型 | NULL | デフォルト | 説明 |
+|:--|:--|:--:|:--|:--|
+| id | SERIAL | NO | auto increment | PK |
+| title | TEXT | NO | - | タイトル（CHECK: 空白のみ不可） |
+| body | TEXT | NO | - | 本文（Markdown） |
+| target_statuses | TEXT[] | NO | - | 対象ステータス（`active` / `trial` の1つ以上。CHECK） |
+| target_membership_types | TEXT[] | YES | NULL | 対象会員種別（`community` / `general` の1つ以上。CHECK）。NULL は全種別。指定するとお試しユーザー（会員種別 NULL）には見えない |
+| published_at | TIMESTAMPTZ | YES | NULL | 公開日時。NULL は下書き |
+| send_email | BOOLEAN | NO | false | メールでも一斉送信するか |
+| email_sent_at | TIMESTAMPTZ | YES | NULL | 一斉送信を対象者全員に送り終えた日時 |
+| created_by | INTEGER | YES | NULL | 作成者（FK → users.id、ON DELETE SET NULL） |
+| is_deleted | BOOLEAN | NO | false | 論理削除フラグ |
+| created_at | TIMESTAMPTZ | NO | now() | 作成日時 |
+| updated_at | TIMESTAMPTZ | NO | now() | 更新日時（トリガーで自動更新） |
+
+### 3.14 announcement_reads（お知らせの既読）
+
+本人が詳細を開いたときに記録する既読（1人1お知らせ1行）。
+
+| カラム | 型 | NULL | デフォルト | 説明 |
+|:--|:--|:--:|:--|:--|
+| announcement_id | INTEGER | NO | - | FK → announcements.id（ON DELETE CASCADE）。PK の一部 |
+| user_id | INTEGER | NO | - | FK → users.id（ON DELETE CASCADE）。PK の一部 |
+| read_at | TIMESTAMPTZ | NO | now() | 既読にした日時 |
+
+制約: `PRIMARY KEY (announcement_id, user_id)`
 ---
 
 ## 4. インデックス
@@ -493,6 +543,9 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 | ai_reviews_submission_id_key | ai_reviews | submission_id（UNIQUE） | 提出に紐づくレビュー取得（1提出1行） |
 | users_auth_id_key | users | auth_id（UNIQUE） | RLSヘルパー（`get_user_id` / `get_user_role` / `get_user_status`）の `auth_id` 検索 |
 | email_logs_user_kind_reference_key | email_logs | user_id, kind, reference_key（UNIQUE） | メールの二重送信防止（claim の一意制約） |
+| idx_announcements_published | announcements | published_at DESC（部分: `published_at IS NOT NULL AND is_deleted = false`） | 受講生向けのお知らせ一覧（新しい順）と、一斉送信の送信待ちの抽出 |
+| announcement_reads_pkey | announcement_reads | announcement_id, user_id（PK） | 既読の一意性 |
+| idx_announcement_reads_user_id | announcement_reads | user_id | 本人の既読一覧（未読件数の算出） |
 
 ---
 
@@ -523,6 +576,7 @@ $$ language 'plpgsql';
 | update_learning_contents_updated_at | learning_contents |
 | update_ai_reviews_updated_at | ai_reviews |
 | update_users_updated_at | users |
+| update_announcements_updated_at | announcements |
 
 ### 5.2 RLSヘルパー関数
 
@@ -533,6 +587,7 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 | `get_user_role()` | TEXT | 認証ユーザー（`auth.uid()`）の `role` を返す（`is_deleted = false` かつ `status <> 'rejected'` が対象。却下（`rejected`）ユーザーは NULL となり、admin/maintainer 向けポリシーのロールバイパスに一切乗らない。却下前に付与されていたロールを保持したまま Auth セッションが有効な間に認可を突破する事故を防ぐ（#104）。`trial` は対象外にしない（アプリ層は元々 rejected のみを弾く設計であり、`active` 限定にすると trial の admin/maintainer でアプリ層とRLSの認可判定が食い違うため）） |
 | `get_user_id()` | INTEGER | 認証ユーザーの `users.id` を返す（`is_deleted = false` が対象） |
 | `get_user_status()` | TEXT | 認証ユーザーの `status`（`trial` / `active` / `rejected`）を返す（`is_deleted = false` が対象）。お試しユーザーのコンテンツ制限に使用する |
+| `get_user_membership_type()` | TEXT | 認証ユーザーの `membership_type`（`community` / `general`、お試し・却下は NULL）を返す（`is_deleted = false` が対象）。お知らせの対象会員種別の判定に使用する（#254） |
 
 いずれも `STABLE SECURITY DEFINER`・`SET search_path = public` で定義されている。
 
@@ -703,6 +758,26 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 
 RLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`email_logs` と同じ）。Cron ルートからのみ読み書きする。
 
+### 6.11 announcements
+
+| ポリシー | 操作 | 対象 | 条件 |
+|:--|:--|:--|:--|
+| Announcements are viewable by targeted users or content managers | SELECT | 対象の受講生 / admin・maintainer（全件） | `(published_at IS NOT NULL AND is_deleted = false AND (select get_user_status()) = ANY (target_statuses) AND (target_membership_types IS NULL OR (select get_user_membership_type()) = ANY (target_membership_types))) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+| Content managers can insert announcements | INSERT | admin / maintainer | `(select get_user_role()) IN ('admin', 'maintainer')` |
+| Content managers can update announcements | UPDATE | admin / maintainer | 同上（USING / WITH CHECK） |
+| Content managers can delete announcements | DELETE | admin / maintainer | 同上 |
+
+却下ユーザーは `get_user_status()` が `rejected`（対象ステータスに含められない）で、`get_user_role()` が NULL のため、どのお知らせも見えない。admin / maintainer は管理画面のため全件を読めるので、受講生向け画面はアプリ層でも同じ条件で絞る（機能設計書 11.2 節の二層防御）。メールの一斉送信の抽出は Cron の service_role で行う。
+
+### 6.12 announcement_reads
+
+| ポリシー | 操作 | 対象 | 条件 |
+|:--|:--|:--|:--|
+| Users can view own announcement reads | SELECT | 本人 | `user_id = (select get_user_id())` |
+| Users can insert own reads of visible announcements | INSERT | 本人 | `user_id = (select get_user_id()) AND EXISTS (SELECT 1 FROM announcements a WHERE a.id = announcement_reads.announcement_id AND a.published_at IS NOT NULL AND a.is_deleted = false)`（EXISTS のサブクエリには announcements の SELECT ポリシーが適用され、自分に見えるお知らせに限られる） |
+
+UPDATE / DELETE のポリシーは定義していない（既読は取り消さない）。
+
 ---
 
 ## 7. マイグレーション管理
@@ -752,6 +827,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | `20260929000000_add_cancel_at_to_stripe_subscriptions.sql` | `stripe_subscriptions` に解約予定日時 `cancel_at`（TIMESTAMPTZ, NULL許容）を追加。flexible billing mode の Portal 解約は `cancel_at` にだけ現れるため（3.9節）。RLS変更なし。**アプリより先に適用すること**（未適用のままだと、`cancel_at` を含むミラー書き込みが失敗し、Webhook・successページの反映が止まる） |
 | `20260930000000_add_email_opt_out_at_to_users.sql` | `users` に案内メールの配信停止日時 `email_opt_out_at`（TIMESTAMPTZ, NULL許容）を追加（#253）。RLS変更なし。**アプリより先に適用すること**（未適用のままだと、定期メールの対象抽出と配信停止ルートがカラム不在で失敗する） |
 | `20260930000001_add_cron_locks.sql` | Cron バッチの実行ロック `cron_locks`（`name` PK、`locked_at`）を追加（#253）。RLSを有効化しポリシーは作らない（service_role専用）。**アプリより先に適用すること**（未適用のままだと、定期メールのバッチがロックを取れず 500 で何も送らない） |
+| `20261001000000_add_announcements.sql` | お知らせ `announcements` と既読 `announcement_reads`、ヘルパー `get_user_membership_type()` を追加（#254）。RLS: 6.11・6.12節。**アプリより先に適用すること**（未適用のままだと、サイドナビの未読件数が 0 件表示になり、お知らせの画面・一斉送信が失敗する） |
 
 ### 7.1 マイグレーション追加後の運用
 
