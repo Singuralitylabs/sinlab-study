@@ -35,11 +35,13 @@ erDiagram
     submissions ||--o| ai_reviews : "1:1"
     users ||--o| stripe_subscriptions : "1:1"
     users ||--o{ email_logs : "1:N"
+    users ||--o{ email_kind_settings : "updated_by"
+    users ||--o{ email_settings : "updated_by"
     announcements ||--o{ announcement_reads : "1:N"
     users ||--o{ announcement_reads : "1:N"
 ```
 
-`stripe_events` / `cron_locks` は他テーブルと関連を持たない独立テーブル。
+`stripe_events` / `cron_locks` は他テーブルと関連を持たない独立テーブル。`email_kind_settings` / `email_settings` は更新者（`updated_by`）でのみ `users` を参照する。
 
 ---
 
@@ -106,7 +108,7 @@ erDiagram
 - `membership_type`: `community`（コミュニティ会員）/ `general`（一般有料会員）。承認前・却下ユーザーは NULL
 - `terms_accepted_at`: 利用規約・プライバシーポリシーへの同意日時。新規登録時のみ記録し、既存ユーザーは NULL のまま利用継続できる（再同意は求めない）
 - `onboarding_completed_at`: 初回利用ガイド（ウェルカムダイアログ）の完了日時。閉じたときに記録し、既存ユーザーは NULL のまま
-- `email_opt_out_at`: 案内メール（定期メール）の配信停止日時。NULL は配信対象。配信停止リンク（`/api/email/unsubscribe`）で記録し、再開は管理者が NULL に戻す。トランザクションメールには影響しない（[機能設計書](./specification.md)10.8節）
+- `email_opt_out_at`: 案内メール（定期メール）の配信停止日時。NULL は配信対象。配信停止リンク（`/api/email/unsubscribe`）で記録し、停止・再開は管理者もユーザー管理画面（`PATCH /api/admin/users` の `opt_out_email` / `resume_email`）から行える。トランザクションメールには影響しない（[機能設計書](./specification.md)10.8節）
 - `auth_id`: Supabase Auth UUID（UNIQUE）
 
 > CHECK制約は値の妥当性のみを検証する。「`status = 'active'` なら `membership_type` は NOT NULL」という不変条件はDBでは保証しておらず、承認・却下処理（`approveUser()` / `rejectUser()`）を通るアプリ層でのみ担保している。
@@ -178,6 +180,22 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 ### 3.14 announcement_reads（お知らせの既読）
 
 本人が詳細を開いたときに記録する既読（1人1お知らせ1行、`PRIMARY KEY (announcement_id, user_id)`）。既読は取り消さない。
+
+### 3.15 email_kind_settings（メール種別ごとの設定）
+
+メール種別（`EMAIL_KIND`）ごとの有効・無効と送信タイミング（[機能設計書](./specification.md)10.10節）。1種別1行で、マイグレーションが初期値を投入する。繰り越し予約 `weekly_digest_reserved` は送信種別ではないため行を持たない。
+
+- `kind`（PK）: `EMAIL_KIND` と同じ値。CHECK 制約は設けない（`email_logs.kind` と同じく、種別の追加に追従できるようにするため。行の欠落は案内系の送信側でフェイルクローズ扱いになる）
+- `enabled`: 有効・無効（既定 true）
+- `send_days`: 「登録から N 日目」の配列。`inactivity_reminder` / `trial_nurture` のみ使用（それ以外は NULL）。CHECK は要素数1〜10。値の範囲（1〜60）・重複・昇順は API の zod で保証する
+- `send_weekday`: 週次進捗の送信曜日（0 = 日曜〜6 = 土曜。CHECK）。`weekly_digest` のみ使用
+- `updated_at` / `updated_by`（`users.id`、`ON DELETE SET NULL`）
+
+初期値: 全種別が有効、`inactivity_reminder` は 7・14 日目、`trial_nurture` は 2・5・7・14 日目、`weekly_digest` は月曜（1）。#253 時点の定数と一致する（テストで確認している）。
+
+### 3.16 email_settings（メール通知の共通設定）
+
+案内系メールの1日の上限（`digest_daily_limit`）を持つ、1行だけのテーブル（`id = 1` の CHECK 制約）。`digest_daily_limit` は CHECK で1〜95（Resend 無料枠の日次100通未満）。初期値は 80。`updated_at` / `updated_by` は `email_kind_settings` と同じ。
 
 ---
 
@@ -317,6 +335,15 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 ### 6.9 email_logs / 6.10 cron_locks
 
 いずれもRLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`stripe_events` と同じ）。受講生・管理画面からは参照せず、`authenticated` ロールでは SELECT を含め一切のアクセスができない。`cron_locks` は Cron ルートからのみ読み書きする。
+
+### 6.13 email_kind_settings / email_settings
+
+| 操作 | 対象 | 条件 |
+|:--|:--|:--|
+| SELECT | admin | `(select get_user_role()) = 'admin'` |
+| UPDATE | admin | 同上（USING / WITH CHECK とも） |
+
+同一操作のポリシーは1本にまとめ、`get_user_role()` は `(select ...)` で包む。INSERT / DELETE のポリシーは定義しない（行はマイグレーションで投入し、消さない）。maintainer には開放しない。Cron（`runEmailDigest()`）とメール送信（`deliverToUser()`）は service_role で読む（RLS をバイパスする）。
 
 ### 6.11 announcements
 

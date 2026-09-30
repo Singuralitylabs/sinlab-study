@@ -1,30 +1,22 @@
 import { NextResponse } from "next/server";
-import { USER_MEMBERSHIP, USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { USER_MEMBERSHIP } from "@/app/constants/user";
 import {
   approveUser,
   changeMembershipType,
   changeUserRole,
   isUserCurrentlySubscribed,
   rejectUser,
+  setUserEmailOptOut,
 } from "@/app/services/api/admin-server";
 import { AdminUserActionSchema, validateRequest } from "@/app/services/api/schemas";
-import { getServerAuth } from "@/app/services/auth/server-auth";
+import { requireAdminApi } from "@/app/services/auth/admin-guard";
 import { scheduleApprovedEmail } from "@/app/services/notifications/user-emails";
 
 export async function PATCH(request: Request) {
   try {
-    const auth = await getServerAuth();
-    if (!auth.user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-    }
-    // Rejected users are blocked even while their Auth session is valid. A former admin/maintainer
-    // keeps their role after rejection (it isn't cleared), so a role check alone doesn't stop them;
-    // same status gate as the other admin APIs.
-    if (auth.userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
-    if (auth.userRole !== USER_ROLE.ADMIN) {
-      return NextResponse.json({ error: "権限がありません" }, { status: 403 });
+    const admin = await requireAdminApi();
+    if (admin.response) {
+      return admin.response;
     }
 
     const validation = await validateRequest(request, AdminUserActionSchema);
@@ -98,6 +90,26 @@ export async function PATCH(request: Request) {
               "ロールを変更できません（管理者ユーザーか、active以外のユーザーか、存在しません）",
           },
           { status: 403 }
+        );
+      }
+      return NextResponse.json({ success: true, action });
+    }
+
+    if (data.action === "resume_email" || data.action === "opt_out_email") {
+      const optOut = data.action === "opt_out_email";
+      const { error, updated } = await setUserEmailOptOut(userId, optOut);
+      if (error) {
+        return NextResponse.json({ error: "配信停止状態の更新に失敗しました" }, { status: 500 });
+      }
+      // 0 rows updated: already in the requested state, missing or deleted.
+      if (!updated) {
+        return NextResponse.json(
+          {
+            error: optOut
+              ? "すでに配信停止中か、ユーザーが存在しません。画面を更新して最新の状態を確認してください"
+              : "配信停止中ではないか、ユーザーが存在しません。画面を更新して最新の状態を確認してください",
+          },
+          { status: 409 }
         );
       }
       return NextResponse.json({ success: true, action });

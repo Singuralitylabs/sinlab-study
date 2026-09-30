@@ -277,32 +277,47 @@ describe("buildTrialNurtureEmail", () => {
     lockedThemeNames: ["GAS実践", "Web制作"],
   };
 
-  it.each([2, 5, 7, 14] as const)("Day%i も配信停止リンクを含める", (day) => {
-    const email = buildTrialNurtureEmail({ ...base, day, upgradeAvailable: true });
+  it.each([2, 5, 7, 14])("Day%i も配信停止リンクを含める", (day) => {
+    const email = buildTrialNurtureEmail({
+      ...base,
+      day,
+      isFinal: day === 14,
+      upgradeAvailable: true,
+    });
     expect(email.text).toContain(UNSUBSCRIBE_URL);
     expect(email.headers?.["List-Unsubscribe"]).toBe(`<${UNSUBSCRIBE_URL}>`);
   });
 
   it("Day2 は演習の提出、Day5 は AI レビューを案内する", () => {
-    expect(buildTrialNurtureEmail({ ...base, day: 2, upgradeAvailable: true }).subject).toContain(
-      "演習を出してみましょう"
-    );
-    expect(buildTrialNurtureEmail({ ...base, day: 5, upgradeAvailable: true }).text).toContain(
-      "AI があなたのコードをレビュー"
-    );
+    expect(
+      buildTrialNurtureEmail({ ...base, day: 2, isFinal: false, upgradeAvailable: true }).subject
+    ).toContain("演習を出してみましょう");
+    expect(
+      buildTrialNurtureEmail({ ...base, day: 5, isFinal: false, upgradeAvailable: true }).text
+    ).toContain("AI があなたのコードをレビュー");
   });
 
   it("Day7 は鍵コンテンツで学べるテーマと、決済が有効ならアップグレードを案内する", () => {
-    const email = buildTrialNurtureEmail({ ...base, day: 7, upgradeAvailable: true });
+    const email = buildTrialNurtureEmail({
+      ...base,
+      day: 7,
+      isFinal: false,
+      upgradeAvailable: true,
+    });
 
     expect(email.text).toContain("本登録で学べるテーマ: GAS実践、Web制作");
     expect(email.text).toContain(`プランのアップグレード: ${APP_URL}/upgrade`);
   });
 
-  it.each([7, 14] as const)(
+  it.each([7, 14])(
     "Day%i: isStripeEnabled() が false のときは /upgrade へ誘導せず承認だけを案内する",
     (day) => {
-      const email = buildTrialNurtureEmail({ ...base, day, upgradeAvailable: false });
+      const email = buildTrialNurtureEmail({
+        ...base,
+        day,
+        isFinal: day === 14,
+        upgradeAvailable: false,
+      });
 
       expect(email.text).not.toContain("/upgrade");
       expect(email.html).not.toContain("/upgrade");
@@ -312,7 +327,46 @@ describe("buildTrialNurtureEmail", () => {
   );
 
   it("Day14 は最後の案内であることを伝える", () => {
-    const email = buildTrialNurtureEmail({ ...base, day: 14, upgradeAvailable: true });
+    const email = buildTrialNurtureEmail({
+      ...base,
+      day: 14,
+      isFinal: true,
+      upgradeAvailable: true,
+    });
     expect(email.text).toContain("これが最後です");
+  });
+
+  it("最後の設定日でなければ、最後の案内とは伝えない", () => {
+    const email = buildTrialNurtureEmail({
+      ...base,
+      day: 14,
+      isFinal: false,
+      upgradeAvailable: true,
+    });
+    expect(email.text).not.toContain("これが最後です");
+  });
+
+  it.each([
+    [1, "演習を出してみましょう"],
+    [3, "演習を出してみましょう"],
+    [6, "AI レビューを受けてみましょう"],
+    [10, "本登録で学べる内容のご案内"],
+    [30, "お試し期間のご案内"],
+  ])("設定した日数 %i 日目は、直近の段階（2・5・7・14）の案内になる", (day, subject) => {
+    const email = buildTrialNurtureEmail({
+      ...base,
+      day,
+      isFinal: true,
+      upgradeAvailable: true,
+    });
+    expect(email.subject).toContain(subject);
+  });
+
+  it("経過日数の表記は 7 の倍数なら週、それ以外は日で書く", () => {
+    const text = (day: number) =>
+      buildTrialNurtureEmail({ ...base, day, isFinal: true, upgradeAvailable: true }).text;
+    expect(text(7)).toContain("ご登録から1週間が経ちました");
+    expect(text(14)).toContain("ご登録から2週間が経ちました");
+    expect(text(10)).toContain("ご登録から10日が経ちました");
   });
 });

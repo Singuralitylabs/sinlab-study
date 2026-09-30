@@ -208,7 +208,7 @@ const MANAGE_WEEK_LIST_SELECT = `
 const CONTENT_SIBLING_CANDIDATE_SELECT = "id, title, display_order, is_published, week_id";
 
 const MANAGE_USER_LIST_SELECT =
-  "id, display_name, email, role, status, membership_type, created_at";
+  "id, display_name, email, role, status, membership_type, created_at, email_opt_out_at";
 
 /** Structural filters for /manage/contents. The title search `q` is not included (done in JS). */
 export interface FetchContentsFilters {
@@ -1564,6 +1564,37 @@ export async function changeMembershipType(
 
   if (error) {
     console.error("ユーザー会員種別変更エラー:", error.message);
+    return { error, updated: false };
+  }
+
+  return { error: null, updated: (data?.length ?? 0) > 0 };
+}
+
+/**
+ * Promotional-mail unsubscribe state, set by an admin on the user's behalf (`opt_out_email`, e.g.
+ * on the user's request) or reverted (`resume_email`). Guarded in the UPDATE so a stale screen
+ * cannot overwrite the original unsubscribe time or resume someone who is not unsubscribed;
+ * `updated: false` means the target was already in that state, missing or deleted. Transactional
+ * mail never reads this column. Not tied to the user's status, so it works for any user.
+ */
+export async function setUserEmailOptOut(
+  userId: number,
+  optOut: boolean
+): Promise<{ error: PostgrestError | null; updated: boolean }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const query = supabase
+    .from("users")
+    .update({ email_opt_out_at: optOut ? new Date().toISOString() : null })
+    .eq("id", userId)
+    .eq("is_deleted", false);
+  const { data, error } = await (optOut
+    ? query.is("email_opt_out_at", null)
+    : query.not("email_opt_out_at", "is", null)
+  ).select("id");
+
+  if (error) {
+    console.error("メール配信停止状態の更新エラー:", error.message);
     return { error, updated: false };
   }
 

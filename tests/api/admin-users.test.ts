@@ -11,6 +11,7 @@ import {
   changeUserRole,
   isUserCurrentlySubscribed,
   rejectUser,
+  setUserEmailOptOut,
 } from "@/app/services/api/admin-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { scheduleApprovedEmail } from "@/app/services/notifications/user-emails";
@@ -43,6 +44,7 @@ beforeEach(() => {
   vi.mocked(changeUserRole).mockResolvedValue({ error: null, updated: true });
   vi.mocked(changeMembershipType).mockResolvedValue({ error: null, updated: true });
   vi.mocked(isUserCurrentlySubscribed).mockResolvedValue({ data: false, error: null });
+  vi.mocked(setUserEmailOptOut).mockResolvedValue({ error: null, updated: true });
 });
 
 describe("PATCH /api/admin/users - userId 検証", () => {
@@ -333,5 +335,68 @@ describe("PATCH /api/admin/users - 認可", () => {
 
     expect(res.status).toBe(403);
     expect(approveUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("PATCH /api/admin/users - 配信停止の管理（#272）", () => {
+  it("opt_out_email は配信停止を記録する（Stripe契約の確認はしない）", async () => {
+    const res = await PATCH(request({ userId: 5, action: "opt_out_email" }));
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true, action: "opt_out_email" });
+    expect(setUserEmailOptOut).toHaveBeenCalledWith(5, true);
+    expect(isUserCurrentlySubscribed).not.toHaveBeenCalled();
+  });
+
+  it("resume_email は配信停止を解除する", async () => {
+    const res = await PATCH(request({ userId: 5, action: "resume_email" }));
+
+    expect(res.status).toBe(200);
+    expect(setUserEmailOptOut).toHaveBeenCalledWith(5, false);
+  });
+
+  it.each(["opt_out_email", "resume_email"])(
+    "%s は admin 以外に403を返し、何も更新しない",
+    async (action) => {
+      vi.mocked(getServerAuth).mockResolvedValue({ ...adminAuth, userRole: "maintainer" } as never);
+
+      const res = await PATCH(request({ userId: 5, action }));
+
+      expect(res.status).toBe(403);
+      expect(setUserEmailOptOut).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["opt_out_email", "resume_email"])("%s は未認証に401を返す", async (action) => {
+    vi.mocked(getServerAuth).mockResolvedValue({
+      user: null,
+      userId: null,
+      userStatus: null,
+      userRole: null,
+    } as never);
+
+    const res = await PATCH(request({ userId: 5, action }));
+
+    expect(res.status).toBe(401);
+    expect(setUserEmailOptOut).not.toHaveBeenCalled();
+  });
+
+  it("すでに目的の状態（0行更新）なら409を返す", async () => {
+    vi.mocked(setUserEmailOptOut).mockResolvedValue({ error: null, updated: false });
+
+    const res = await PATCH(request({ userId: 5, action: "resume_email" }));
+
+    expect(res.status).toBe(409);
+  });
+
+  it("更新に失敗したら500を返す", async () => {
+    vi.mocked(setUserEmailOptOut).mockResolvedValue({
+      error: { message: "db error", code: "PGRST204" } as never,
+      updated: false,
+    });
+
+    const res = await PATCH(request({ userId: 5, action: "opt_out_email" }));
+
+    expect(res.status).toBe(500);
   });
 });

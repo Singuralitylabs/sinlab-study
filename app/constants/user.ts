@@ -50,5 +50,7 @@ export const USER_MANAGEMENT_ACTIONS = [
   "reject",
   "change_role",
   "change_membership",
+  "resume_email",
+  "opt_out_email",
 ] as const;
 export type UserManagementAction = (typeof USER_MANAGEMENT_ACTIONS)[number];

@@ -214,6 +214,7 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 - ユーザーの却下（`trial` → `rejected`）
 - ステータス変更のリカバリ（`rejected` → `active`）
 - ユーザーのロール変更（`member` / `maintainer` / `admin` を画面上のセレクトボックスで切り替え）
+- 案内メールの配信停止状態の表示（停止中なら停止日時）と、管理者による停止・再開（`opt_out_email` / `resume_email`。10.8節）。ステータスに関係なく操作でき、トランザクションメールには影響しない
 
 **ロール変更の制約**:
 - 管理者（`admin`）のロールは変更不可（セルフロック防止）
@@ -756,6 +757,14 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 
 `role` に指定可能な値: `member` / `maintainer` / `admin`
 
+**リクエストボディ（案内メールの配信停止・再開）**:
+```json
+{ "userId": 1, "action": "opt_out_email" }
+{ "userId": 1, "action": "resume_email" }
+```
+
+`opt_out_email` は本人の依頼で管理者が停止する操作で、`users.email_opt_out_at` に `now()` を記録する（すでに停止中なら409。元の停止日時を上書きしない）。`resume_email` は `email_opt_out_at` を NULL に戻す（停止中でなければ409）。どちらも Stripe 契約の確認は行わない。
+
 **リクエストボディ（会員種別変更）**:
 ```json
 { "userId": 1, "action": "change_membership", "membershipType": "general" }
@@ -778,7 +787,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 | 200 | 正常（`{ success: true, action }` を返却） |
 | 400 | バリデーションエラー（`userId` 不正含む） |
 | 403 | 管理者権限なし、または admin ユーザーへのロール変更 |
-| 409 | `approve` の重複承認、`change_membership` の対象不正、Stripe契約中ユーザーへの `general` 以外の指定 |
+| 409 | `approve` の重複承認、`change_membership` の対象不正、Stripe契約中ユーザーへの `general` 以外の指定、`opt_out_email` / `resume_email` がすでに目的の状態（または対象が存在しない） |
 | 500 | DB 更新失敗 / サーバーエラー |
 | 503 | `change_membership` でStripe契約状況を取得できない |
 
@@ -875,7 +884,8 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 
 ### 7.4 管理者専用画面
 
-`/admin/users`（ユーザー管理。2.7・6.1.3）。
+- `/admin/users`（ユーザー管理。2.7・6.1.3）
+- `/admin/emails`（メール通知。10.10節）: 今日の送信状況、種別ごとの設定（有効・無効のトグル、送る日、週次進捗の曜日、最終更新日時と更新者）、案内系メールの1日の上限、送信履歴（新しい順・ページング・種別と状態で絞り込み）。トランザクションメールを無効にするときは確認ダイアログで影響を示す。即時送信・手動実行のボタンは設けない
 
 ### 7.5 共通UIコンポーネント
 
@@ -1071,7 +1081,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 - **集計**: 抽出はユーザーセッションの無いバッチのため service_role クライアントで行う（`user_id` 単位の集計であり、受講生へコンテンツを返す配信経路ではない）。コンテンツは `fetchThemeProgressSummaries()` と同じネスト select で全階層を `is_published = true AND is_deleted = false` に絞り、本文を含まないカラム（`id, title, display_order, is_open_to_trial, week_id` と各階層の名前・表示順）だけを読む。学習順はコンテンツ詳細の前後ナビと同じ `buildThemeContentOrder()` で並べる。新しい集計 SQL（RPC）は追加しない
 - **並行実行の排除**: 実行の最初に実行ロック（`cron_locks`。[データベース設計書](./database.md)3.12）を取り、取れなければ何もせず `skipped` を返す。Cron の重複起動・手動実行が重なっても処理するのは1つだけになる。ロックの取得自体が DB エラーなら 500
 - **二重送信の防止**: 1通ごとに `email_logs` の claim を通す（10.1節）。同じ日の再実行でも UNIQUE 違反で送らない。送信失敗は `error` を記録して再送しない（お知らせの一斉送信だけは、Resend が受け付けなかったことが確実な失敗を翌日以降に送り直す。11.4節）
-- **1日の上限**: `EMAIL_DIGEST_MAX_PER_DAY`（80通。Resend 無料枠の日次100通に、同日のトランザクションメールの余裕を残す）は同じ日（JST）の実行の合計に効かせる。ロックを取った後に、今日すでに作られた案内系の `email_logs` の行数を差し引いた数を今回の上限とし、送信を試みた通数（成功・失敗）がそれに達するか、経過時間が `EMAIL_DIGEST_TIME_BUDGET_MS`（45秒。ルートの `maxDuration` は60秒）を超えたら新しい送信を始めない。送れなかった通数は warn ログに残す。キューは N 日目の案内を先頭に並べ、その後は週次進捗の対象を決める日（月曜。取り戻しの火曜を含む）はお知らせ（公開の古い順）→ 週次進捗、それ以外の日は週次進捗（予約の繰り越し分）→ お知らせの順に並べる。週次進捗の予約は同じ週の間しか有効でないため、繰り越しの期限が無いお知らせが上限を使い切って週次進捗を週末まで押し出し、失わせることがないようにする。上限に掛かるのは通常はお知らせ・週次進捗で、翌日以降の実行で送られる。N 日目の案内だけで上限を超えた場合の残りと、週の最終日（日曜）に送れなかった週次進捗は繰り越さない（warn ログで区別する）
+- **1日の上限**: `email_settings.digest_daily_limit`（初期値80通。Resend 無料枠の日次100通に、同日のトランザクションメールの余裕を残す。10.10節）は同じ日（JST）の実行の合計に効かせる。ロックを取った後に、今日すでに作られた案内系の `email_logs` の行数を差し引いた数を今回の上限とし、送信を試みた通数（成功・失敗）がそれに達するか、経過時間が `EMAIL_DIGEST_TIME_BUDGET_MS`（45秒。ルートの `maxDuration` は60秒）を超えたら新しい送信を始めない。送れなかった通数は warn ログに残す。キューは N 日目の案内を先頭に並べ、その後は週次進捗の対象を決める日（月曜。取り戻しの火曜を含む）はお知らせ（公開の古い順）→ 週次進捗、それ以外の日は週次進捗（予約の繰り越し分）→ お知らせの順に並べる。週次進捗の予約は同じ週の間しか有効でないため、繰り越しの期限が無いお知らせが上限を使い切って週次進捗を週末まで押し出し、失わせることがないようにする。上限に掛かるのは通常はお知らせ・週次進捗で、翌日以降の実行で送られる。N 日目の案内だけで上限を超えた場合の残りと、週の最終日（日曜）に送れなかった週次進捗は繰り越さない（warn ログで区別する）
 - **週次進捗の繰り越し**: 週次進捗の対象を決めるのは月曜の実行だけで、月曜の対象者を `email_logs` に繰り越し予約（`kind = weekly_digest_reserved`、reference_key = 週の開始日。メールは送らない）として記録する。予約は送信の前提とし、失敗したら1通も送らずに失敗（500）を返す（claim の前なので、再実行しても二重送信にはならず予約からやり直せる）。火〜日曜の実行は、予約を持ち、まだ今週の `weekly_digest` の行を持たないユーザー（月曜に上限・時間切れ・同日の N 日目の案内で送れなかった分）だけに送る。週の途中で新しく対象になったユーザー（新コンテンツの公開・配信再開・ステータス変更など）には、次の月曜まで送らない
 - **月曜の実行が完了しなかった週**: 今週の予約が1件も無い（月曜の実行が失敗・スキップ・起動漏れで対象決定まで到達しなかった）ときは、`WEEKLY_DIGEST_CATCH_UP_DAYS`（1日 = 火曜）までの実行が月曜の代わりに対象を決めて予約し、送る。それより後（水〜日曜）は送らず、warn ログと応答の `weeklyReservationMissing: true` で知らせる（週の途中で初めて Cron を動かした場合に、その週の残りの日に一斉に送らないため）
 - **ページング**: 抽出は `range` でページングし、返った件数だけ位置を進めて0件が返るまで取りに行く（PostgREST の `db-max-rows` が1000未満に設定されていても取りこぼさない）
@@ -1088,11 +1098,38 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 - **`GET /api/email/unsubscribe?token=...`**（ログイン不要）: トークンを検証し、「配信を停止する」ボタン（同じ URL への `POST` フォーム）付きの確認画面を返す。**GET では停止を確定しない**。メールのセキュリティ製品（Outlook の Safe Links 等）はリンクを事前に GET するため、GET で確定すると本人が開く前に停止されてしまう
 - **`POST /api/email/unsubscribe?token=...`**（確認画面のボタンと、`List-Unsubscribe-Post` に対応するメールクライアントのワンクリック配信停止）: 検証に成功したら `users.email_opt_out_at` を `now()` で記録し（既に停止済みなら更新せず）、完了画面を返す
 - いずれも、形式不正・改ざん・シークレット未設定は理由を区別せず 400（フェイルクローズ）。DB エラーは 500。画面にユーザー情報は出さない
-- **再開**: 当面は管理者が `users.email_opt_out_at` を NULL に戻す（Supabase ダッシュボード。管理画面の UI は設けていない）
+- **再開・停止（管理者）**: `/admin/users` で配信停止の状態を確認し、`resume_email`（`email_opt_out_at` を NULL に戻す）・`opt_out_email`（本人の依頼で停止。`now()` を記録）を実行する（2.7・6.1.3節）
 
 ### 10.9 定期メールの設定手順（運用）
 
 本番の Cron を有効化する前に、利用規約の改定（案内メールの送信に関する条項）が完了していることを確認する。`CRON_SECRET` と `EMAIL_UNSUBSCRIBE_SECRET` にランダムな長い文字列（例: `openssl rand -base64 32`）を設定し（ローカルは `.env.local`、本番は Vercel 環境変数の Production）、`EMAIL_UNSUBSCRIBE_SECRET` は一度決めたら変えない。Production にデプロイし（Cron は Production デプロイでのみ動く）、Vercel ダッシュボードの Settings → Cron Jobs に `/api/cron/email-digest` が表示されることと、`curl -H "Authorization: Bearer $CRON_SECRET" <URL>/api/cron/email-digest` の応答（`sent` / `failed` / `deferred`）と Vercel ログの `[定期メール]` を確認する。
+
+### 10.10 メール通知の管理（管理画面）
+
+**設定の保存先**: `email_kind_settings`（種別ごとの `enabled`・`send_days`・`send_weekday`）と `email_settings`（案内系の1日の上限 `digest_daily_limit`。1行のみ）（`docs/database.md` 3.15・3.16節）。**これらのテーブルを唯一の真実とし、送る日・曜日・上限の定数をロジックにハードコードしない**。`INACTIVITY_REMINDER_DAYS` / `TRIAL_NURTURE_DAYS` / `WEEKLY_DIGEST_WEEKDAY` / `EMAIL_DIGEST_MAX_PER_DAY` は、マイグレーションの初期値と同じであることを確認するテスト用の定数として残し（送信の判定には使わない。読めないときの代替値にもしない）、入力検証の範囲は `EMAIL_SEND_DAY_MIN/MAX` などで別に定義する。対象の種別は `EMAIL_KIND` の全値（繰り越し予約 `weekly_digest_reserved` は送信種別ではないので含めない）。
+
+**設定の反映と失敗時の方針**（実行のたびに読み、実行をまたいでキャッシュしない）:
+
+| 種別 | 有効・無効 | 設定を読めないとき |
+|:--|:--|:--|
+| 案内系（`weekly_digest` / `inactivity_reminder` / `trial_nurture` / `announcement`） | 無効な種別は対象にしない。無効なお知らせは送信も完了記録もしない（有効に戻すと続きを送る。ただし送信失敗の再送期限 `ANNOUNCEMENT_EMAIL_RETRY_DAYS` は無効の間も進むため、期限を過ぎた失敗は再送されず、再有効化後は失敗のまま完了になる） | **フェイルクローズ**: DB エラー・行の欠落・値の不正（範囲外の `send_days` など）のとき、`runEmailDigest()` は1通も送らず `failed`（Cron は500）を返す |
+| トランザクション（`signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended`） | `deliverToUser()` が宛先を読む前に `enabled` を確認し、無効なら warn ログを出して送らない | **フェイルセーフ**: 既定値（有効）として送る。登録・決済の通知を欠落させないため。主処理（登録・承認・Stripe Webhook）の結果には、無効化・設定の読み取り失敗のどちらも影響させない |
+
+- **送る日**: `send_days`（1〜60の整数、重複不可、最大10個、保存時は昇順）が、`inactivity_reminder` と `trial_nurture` の「登録から N 日目」の判定に使われる。`trial_nurture` の本文は、設定した日数以下で最も近い段階（2・5・7・14日目の案内）のものを使い、最後の設定日のときだけ「これが最後です」と伝える。経過日数の表記は7の倍数なら週、それ以外は日
+- **週次進捗の曜日**: `send_weekday`（0 = 日曜〜6 = 土曜。初期値は月曜）。「先週」は送信曜日の前日までの7日間（JST）、`reference_key` は今回の送信曜日の日付、繰り越し予約（`weekly_digest_reserved`）も送信曜日の日付を基準にする。送信曜日を変えた週に2通送らないよう（送信日の予約が無いまま取り戻し期間を過ぎても、`weekly_digest` の設定の `updated_at` が今サイクルの開始日（JST）以降なら、曜日変更・再有効化の週とみなして障害の警告を出さず、その旨のログだけ残して次の送信日から再開する。過去のログ行の有無では判定しない）、送信済みの判定は同じ `reference_key` ではなく、今回の送信日を末尾とする7日間に `weekly_digest` の行があるかで行う（変更後の送信日がその7日以内に来る回は送らず、次の週から通常どおり送る）
+- **1日の上限**: `digest_daily_limit`（1〜95。Resend 無料枠の日次100通未満）から、今日すでに作られた案内系の `email_logs` の行数を引いた数が各実行の上限になる。上限を下げても、その日に送った分を超えて送ることはない
+
+**API**（admin のみ。`getServerAuth()` で判定し、未認証は401、admin 以外・却下ユーザーは403）:
+
+| エンドポイント | 内容 |
+|:--|:--|
+| `GET /api/admin/email-settings` | 種別ごとの設定・1日の上限・更新者の表示名を返す |
+| `PUT /api/admin/email-settings` | 種別の設定（`{ "kind", "enabled"?, "send_days"?, "send_weekday"? }`）または1日の上限（`{ "digest_daily_limit" }`）を更新する。両方の同時更新・更新項目なし・未知のフィールド・範囲外の値は400（zod。`EmailSettingsUpdateSchema`）。`send_days` は `inactivity_reminder` / `trial_nurture`、`send_weekday` は `weekly_digest` にのみ指定できる。更新者（`users.id`）と更新日時を記録し、対象が0行なら404 |
+| `GET /api/admin/email-logs?kind=&status=&page=` | 送信履歴（新しい順。1ページ50件）。`status` は `sent` / `failed` / `pending`（`sent_at` があれば送信済み、`error` があれば失敗、どちらも無ければ未完了）。不正な絞り込みは400 |
+
+- 設定の読み書きは管理者のセッション（通常クライアント）で行い、RLS（admin のみ）を二層目の防御にする。Cron とメール送信は service_role で読む
+- 送信履歴は `email_logs` を service_role で読み（RLS のポリシーが無いため）、繰り越し予約（`weekly_digest_reserved`）の行は除く。選ぶのは表示する列と宛先ユーザーの表示名・メールアドレスだけで、本文（保存していない）・`provider_message_id` は出さない
+- 送信は Cron のバッチに任せる。画面からの即時送信・手動実行は設けない。送信時刻（Cron の起動時刻）・本文テンプレートの編集・送信予定件数の表示は対象外
 
 ---
 

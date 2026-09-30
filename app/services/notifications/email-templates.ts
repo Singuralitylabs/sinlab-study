@@ -1,4 +1,4 @@
-import { EMAIL_SERVICE_NAME, type TrialNurtureDay } from "@/app/constants/notifications";
+import { EMAIL_SERVICE_NAME } from "@/app/constants/notifications";
 import { escapeHtml } from "@/app/lib/escape-html";
 import type { EmailMarkdown } from "@/app/lib/markdown-email";
 import type { EmailContent } from "@/app/services/notifications/email";
@@ -313,7 +313,13 @@ export function buildInactivityReminderEmail(params: InactivityReminderEmailPara
 }
 
 export type TrialNurtureEmailParams = PromotionalEmailParams & {
-  day: TrialNurtureDay;
+  /**
+   * Days since sign-up (configurable). The body is picked by the nearest guide stage at or below
+   * the day (2 / 5 / 7 / 14), so the four stages cover any configured day.
+   */
+  day: number;
+  /** Whether this is the last configured guide (only then does the body say it is the last). */
+  isFinal: boolean;
   /** Guide to upgrade (`/upgrade`) only when Stripe payments are enabled (`isStripeEnabled()`). */
   upgradeAvailable: boolean;
   /**
@@ -335,10 +341,21 @@ function registrationLinks(appUrl: string, upgradeAvailable: boolean): EmailLink
     : [{ label: "ダッシュボードを開く", url: buildAppUrl(appUrl, "/") }];
 }
 
+const TRIAL_NURTURE_STAGES = [14, 7, 5, 2] as const;
+
+function trialNurtureStage(day: number): number {
+  return TRIAL_NURTURE_STAGES.find((stage) => day >= stage) ?? TRIAL_NURTURE_STAGES[3];
+}
+
+/** "7" -> "1週間", "14" -> "2週間", other days -> "N日". */
+function elapsedLabel(day: number): string {
+  return day % 7 === 0 ? `${day / 7}週間` : `${day}日`;
+}
+
 export function buildTrialNurtureEmail(params: TrialNurtureEmailParams): EmailContent {
   const learnLink = { label: "学習コンテンツを開く", url: buildAppUrl(params.appUrl, "/learn") };
 
-  switch (params.day) {
+  switch (trialNurtureStage(params.day)) {
     case 2:
       return renderEmailLayout({
         subject: subjectOf("演習を出してみましょう"),
@@ -367,7 +384,7 @@ export function buildTrialNurtureEmail(params: TrialNurtureEmailParams): EmailCo
         subject: subjectOf("本登録で学べる内容のご案内"),
         greetingName: params.displayName,
         paragraphs: [
-          "ご登録から1週間が経ちました。学習一覧で鍵のマークが付いているコンテンツは、本登録後にご利用いただけます。",
+          `ご登録から${elapsedLabel(params.day)}が経ちました。学習一覧で鍵のマークが付いているコンテンツは、本登録後にご利用いただけます。`,
           ...(themes.length > 0 ? [`本登録で学べるテーマ: ${themes.join("、")}`] : []),
           registrationSentence(params.upgradeAvailable),
         ],
@@ -375,12 +392,14 @@ export function buildTrialNurtureEmail(params: TrialNurtureEmailParams): EmailCo
         unsubscribeUrl: params.unsubscribeUrl,
       });
     }
-    case 14:
+    default:
       return renderEmailLayout({
         subject: subjectOf("お試し期間のご案内"),
         greetingName: params.displayName,
         paragraphs: [
-          "ご登録から2週間が経ちました。お試しユーザーへのご案内メールはこれが最後です。",
+          params.isFinal
+            ? `ご登録から${elapsedLabel(params.day)}が経ちました。お試しユーザーへのご案内メールはこれが最後です。`
+            : `ご登録から${elapsedLabel(params.day)}が経ちました。`,
           "お試し公開のコンテンツは引き続きご利用いただけます。",
           registrationSentence(params.upgradeAvailable),
         ],

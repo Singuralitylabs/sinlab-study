@@ -14,6 +14,17 @@ import {
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
 import {
+  EMAIL_DIGEST_DAILY_LIMIT_MAX,
+  EMAIL_DIGEST_DAILY_LIMIT_MIN,
+  EMAIL_KIND_WITH_SEND_WEEKDAY,
+  EMAIL_KINDS,
+  EMAIL_KINDS_WITH_SEND_DAYS,
+  EMAIL_SEND_DAY_MAX,
+  EMAIL_SEND_DAY_MIN,
+  EMAIL_SEND_DAYS_MAX_COUNT,
+  type EmailKind,
+} from "@/app/constants/notifications";
+import {
   MEMBERSHIP_TYPES,
   USER_MANAGEMENT_ACTIONS,
   USER_ROLES,
@@ -128,6 +139,8 @@ const ADMIN_USER_ACTION_SCHEMAS = {
     action: z.literal("change_membership"),
     membershipType: z.enum(MEMBERSHIP_TYPES),
   }),
+  resume_email: AdminUserBaseSchema.extend({ action: z.literal("resume_email") }),
+  opt_out_email: AdminUserBaseSchema.extend({ action: z.literal("opt_out_email") }),
 } as const satisfies Record<(typeof USER_MANAGEMENT_ACTIONS)[number], z.ZodType>;
 
 export const AdminUserActionSchema = z.discriminatedUnion(
@@ -138,6 +151,83 @@ export const AdminUserActionSchema = z.discriminatedUnion(
   ],
   { message: `action は ${USER_MANAGEMENT_ACTIONS.join(" / ")} を指定してください` }
 );
+
+const EmailSendDaysSchema = z
+  .array(
+    z
+      .number({ message: "送る日は数値で指定してください" })
+      .int({ message: "送る日は整数で指定してください" })
+      .min(EMAIL_SEND_DAY_MIN, { message: `送る日は ${EMAIL_SEND_DAY_MIN} 以上にしてください` })
+      .max(EMAIL_SEND_DAY_MAX, { message: `送る日は ${EMAIL_SEND_DAY_MAX} 以下にしてください` }),
+    { message: "送る日は配列で指定してください" }
+  )
+  .min(1, { message: "送る日を1つ以上指定してください" })
+  .max(EMAIL_SEND_DAYS_MAX_COUNT, {
+    message: `送る日は ${EMAIL_SEND_DAYS_MAX_COUNT} 個までです`,
+  })
+  .refine((days) => new Set(days).size === days.length, { message: "送る日が重複しています" })
+  .transform((days) => [...days].sort((a, b) => a - b));
+
+/**
+ * PUT /api/admin/email-settings. Either one kind's settings (`kind` plus at least one of
+ * enabled / send_days / send_weekday) or the shared daily limit (`digest_daily_limit` alone).
+ * send_days and send_weekday are only accepted for the kinds that use them, so a value that the
+ * sender would ignore is never stored.
+ */
+export const EmailSettingsUpdateSchema = z
+  .object({
+    kind: z.enum(EMAIL_KINDS as [EmailKind, ...EmailKind[]]).optional(),
+    enabled: z.boolean({ message: "enabled は真偽値で指定してください" }).optional(),
+    send_days: EmailSendDaysSchema.optional(),
+    send_weekday: z
+      .number({ message: "曜日は数値で指定してください" })
+      .int({ message: "曜日は整数で指定してください" })
+      .min(0, { message: "曜日は 0（日曜）〜6（土曜）で指定してください" })
+      .max(6, { message: "曜日は 0（日曜）〜6（土曜）で指定してください" })
+      .optional(),
+    digest_daily_limit: z
+      .number({ message: "1日の上限は数値で指定してください" })
+      .int({ message: "1日の上限は整数で指定してください" })
+      .min(EMAIL_DIGEST_DAILY_LIMIT_MIN, {
+        message: `1日の上限は ${EMAIL_DIGEST_DAILY_LIMIT_MIN} 以上にしてください`,
+      })
+      .max(EMAIL_DIGEST_DAILY_LIMIT_MAX, {
+        message: `1日の上限は ${EMAIL_DIGEST_DAILY_LIMIT_MAX} 以下にしてください`,
+      })
+      .optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const fail = (message: string) => ctx.addIssue({ code: "custom", message });
+    if (value.kind === undefined) {
+      if (value.digest_daily_limit === undefined) {
+        fail("kind または digest_daily_limit を指定してください");
+      } else if (
+        value.enabled !== undefined ||
+        value.send_days !== undefined ||
+        value.send_weekday !== undefined
+      ) {
+        fail("種別の設定と1日の上限は別々に更新してください");
+      }
+      return;
+    }
+    if (value.digest_daily_limit !== undefined) {
+      fail("種別の設定と1日の上限は別々に更新してください");
+    }
+    if (
+      value.enabled === undefined &&
+      value.send_days === undefined &&
+      value.send_weekday === undefined
+    ) {
+      fail("更新する項目を指定してください");
+    }
+    if (value.send_days !== undefined && !EMAIL_KINDS_WITH_SEND_DAYS.includes(value.kind)) {
+      fail("この種別には送る日を設定できません");
+    }
+    if (value.send_weekday !== undefined && value.kind !== EMAIL_KIND_WITH_SEND_WEEKDAY) {
+      fail("この種別には曜日を設定できません");
+    }
+  });
 
 // Both POST (create) and PUT (update) take the insert position (insert_after_id). Update only
 // makes every Create field optional, so it derives from `XxxCreateSchema.partial()`
