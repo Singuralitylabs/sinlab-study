@@ -306,7 +306,7 @@ export function validateEmailTemplateText(
   const subjectNames = placeholderNames(text.subject);
   const bodyNames = placeholderNames(text.body);
   const unknown = [...new Set([...subjectNames, ...bodyNames])]
-    .filter((name) => !(name in definition.placeholders))
+    .filter((name) => !Object.hasOwn(definition.placeholders, name))
     .sort();
   const invalidRequired = definition.required.filter(
     (name) => bodyNames.filter((n) => n === name).length !== 1
@@ -351,7 +351,7 @@ export type EmailTemplateValues = Record<string, string>;
 function substitutePlain(text: string, values: EmailTemplateValues): string {
   return text.replace(PLACEHOLDER, (whole, raw: string) => {
     const name = raw.trim();
-    return name in values ? sanitizeEmailValue(values[name]) : whole;
+    return Object.hasOwn(values, name) ? sanitizeEmailValue(values[name]) : whole;
   });
 }
 
@@ -370,7 +370,7 @@ function dropEmptyLines(body: string, values: EmailTemplateValues): string {
   return body
     .split(/\r\n|\r|\n/)
     .filter((line) => {
-      const names = placeholderNames(line).filter((name) => name in values);
+      const names = placeholderNames(line).filter((name) => Object.hasOwn(values, name));
       return names.length === 0 || names.some((name) => sanitizeEmailValue(values[name]) !== "");
     })
     .join("\n");
@@ -382,7 +382,7 @@ function renderBodyPart(part: string, values: EmailTemplateValues): EmailMarkdow
     PLACEHOLDER,
     (whole, raw: string) => {
       const name = raw.trim();
-      if (!(name in values)) {
+      if (!Object.hasOwn(values, name)) {
         return whole;
       }
       slots.push(sanitizeEmailValue(values[name]));

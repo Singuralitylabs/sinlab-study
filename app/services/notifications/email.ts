@@ -20,10 +20,10 @@ export type SendEmailResult =
 
 /**
  * Display name for the From header. Control characters (header injection) and the characters that
- * end a display name (`<`, `>`, `"`) are dropped; an empty result falls back to the default.
+ * end or need quoting in a display name (`<`, `>`, `"`, `,`, `;`, `:`, `\`, `@`) are dropped; an empty result falls back to the default.
  */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control characters is the point
-const UNSAFE_FROM_NAME_CHARS = /[\u0000-\u001f\u007f<>"]+/g;
+const UNSAFE_FROM_NAME_CHARS = /[\u0000-\u001f\u007f<>",;:\\@]+/g;
 
 function resolveFromName(name: string | undefined): string {
   return name?.replace(UNSAFE_FROM_NAME_CHARS, " ").trim() || EMAIL_FROM_NAME;

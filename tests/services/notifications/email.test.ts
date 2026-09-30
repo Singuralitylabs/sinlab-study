@@ -133,7 +133,7 @@ describe("sendEmail の差出人名（#286）", () => {
       subject: "件名",
       text: "本文",
       html: "<p>本文</p>",
-      fromName: 'A\r\nBcc: evil@example.com <x> "y"',
+      fromName: 'A\r\nBcc: evil@example.com <x> "y", z;',
     });
     await sendEmail({
       to: "user@example.com",
@@ -153,6 +153,7 @@ describe("sendEmail の差出人名（#286）", () => {
     const froms = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body).from as string);
     expect(froms[0]).not.toMatch(/[\r\n"]/);
     expect(froms[0].match(/[<>]/g)).toHaveLength(2);
+    expect(froms[0].split(" <noreply")[0]).not.toMatch(/[,;:@\\]/);
     expect(froms[0].endsWith(" <noreply@mail.example.com>")).toBe(true);
     expect(froms[0].split("<").length).toBe(2);
     expect(froms[1]).toBe("新サービス <noreply@mail.example.com>");

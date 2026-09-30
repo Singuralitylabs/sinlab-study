@@ -83,6 +83,35 @@ describe("validateEmailTemplateText（許可リスト）", () => {
   });
 });
 
+describe("Object のプロトタイプのキーは許可リストに入らない", () => {
+  it.each(["constructor", "toString", "__proto__", "hasOwnProperty"])(
+    "{{%s}} は許可リスト外として拒否する",
+    (name) => {
+      const result = validateEmailTemplateText("signup", {
+        subject: `x {{${name}}}`,
+        body: `hi {{${name}}}`,
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.unknown).toEqual([name]);
+    }
+  );
+
+  it("DB に入ってしまった行でも、描画は例外にならず既定値で送る", () => {
+    const texts = {
+      ...DEFAULT_EMAIL_TEXTS,
+      templates: { signup: { subject: "x", body: "hi {{constructor}}" } },
+    };
+
+    expect(resolveEmailTemplateText("signup", texts).body).toBe(
+      EMAIL_TEMPLATE_DEFINITIONS.signup.body
+    );
+    expect(renderEmailBody("{{constructor}} {{toString}}", {}).text).toBe(
+      "{{constructor}} {{toString}}"
+    );
+  });
+});
+
 describe("resolveEmailTemplateText（DB → 既定値）", () => {
   it("行が無いキーは既定値を返す", () => {
     expect(resolveEmailTemplateText("approved", DEFAULT_EMAIL_TEXTS)).toEqual({
