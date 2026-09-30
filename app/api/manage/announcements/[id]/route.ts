@@ -23,7 +23,6 @@ async function authorize(): Promise<NextResponse | null> {
   return null;
 }
 
-/** お知らせの更新（admin / maintainer。公開・非公開の切り替えを含む） */
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const denied = await authorize();
@@ -54,7 +53,6 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   }
 }
 
-/** お知らせの論理削除（admin / maintainer） */
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

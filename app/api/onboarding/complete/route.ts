@@ -16,7 +16,8 @@ export async function POST() {
       return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
     }
 
-    // role が member 以外でも成功扱いにする（呼ばれない前提だが拒否する理由は無い）
+    // Succeed even for non-member roles (not expected to be called, but there's no reason to
+    // reject).
     const { error } = await markOnboardingCompleted(userId);
     if (error) {
       return NextResponse.json(

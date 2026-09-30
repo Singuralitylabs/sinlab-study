@@ -3,16 +3,16 @@ import { isAuthorizedCronRequest } from "@/app/services/auth/cron-auth";
 import { runEmailDigest } from "@/app/services/notifications/email-digest-server";
 
 /**
- * 送信は `EMAIL_DIGEST_TIME_BUDGET_MS`（45秒）で新規送信を打ち切るため、DB 往復と送信1通の
- * タイムアウト分の余裕を見て 60 秒とする（Vercel Hobby の上限内）
+ * Sending stops new sends at EMAIL_DIGEST_TIME_BUDGET_MS (45s); 60s leaves room for DB round trips
+ * and one send's timeout (within Vercel Hobby's limit).
  */
 export const maxDuration = 60;
 
 /**
- * 定期メール（週次進捗・未学習リマインド・お試しユーザー向け案内）の日次バッチ。
- * Vercel Cron（`vercel.json`、毎日 UTC 23 時 = JST 8 時）が
- * `Authorization: Bearer <CRON_SECRET>` を付けて呼ぶ。ユーザーセッションの無い呼び出しのため
- * `getServerAuth()` は使わず、`CRON_SECRET` の検証を必ず通す（未設定・不一致は 401）。
+ * Daily batch for periodic emails (weekly progress, unstudied reminders, trial guidance). Vercel
+ * Cron (vercel.json, daily 23:00 UTC = 08:00 JST) calls it with `Authorization: Bearer
+ * <CRON_SECRET>`. There is no user session, so getServerAuth() isn't used; the CRON_SECRET check is
+ * mandatory (unset/mismatch -> 401).
  */
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCronRequest(request.headers.get("authorization"))) {

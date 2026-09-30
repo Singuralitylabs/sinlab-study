@@ -7,10 +7,10 @@ import { ThemeForm } from "../ThemeForm";
 export default async function NewThemePage() {
   const { data: themes, error } = await fetchAllThemes();
 
-  // 取得失敗を「兄弟なし」（空配列）として扱うと、既存テーマが実際には存在するのに
-  // 挿入位置ピッカーが空一覧を表示してしまい、既定の先頭挿入のまま送信できてしまう。
-  // POST時（createTheme内の再採番）にDBが復旧していると、利用者が把握していない
-  // 既存テーマ全件が意図せず後ろへ再採番されるため、取得失敗時はフォームを表示しない。
+  // Treating a failed fetch as "no siblings" (empty array) would show an empty picker although
+  // themes exist, and submit with the default head insert. If the DB recovers by POST time
+  // (renumbering inside createTheme), themes the user never saw would be renumbered backward
+  // unintentionally, so don't show the form on failure.
   if (error || !themes) {
     return (
       <div className="max-w-3xl mx-auto">
@@ -27,8 +27,8 @@ export default async function NewThemePage() {
     );
   }
 
-  // テーマは親を持たないため常に全テーマが挿入位置ピッカーの兄弟一覧になる。
-  // content-grouping.ts の階層順ソートと同じ比較関数（display_order昇順・idタイブレーク）で揃える
+  // Themes have no parent, so all themes are always the siblings. Sort with the same comparator as
+  // content-grouping.ts (display_order ascending, id tiebreak).
   const siblings = [...themes]
     .sort((a, b) => compareGroupLevel(a.display_order, b.display_order, a.id, b.id))
     .map((theme) => ({ id: theme.id, label: theme.name, isPublished: theme.is_published }));

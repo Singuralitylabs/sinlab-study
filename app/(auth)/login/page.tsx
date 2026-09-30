@@ -7,16 +7,15 @@ import { GoogleLoginButton } from "./components/google-login-button";
 import { LearningScreens } from "./components/learning-screens";
 import { ServiceIntro } from "./components/service-intro";
 
-// LP と同じ書体。ログイン画面だけで使うため、ルートレイアウトではなくここで読み込む。
-// CJK フォントは unicode-range で数十ファイルに分割されるため preload せず、LP と同じ swap で表示する。
-// 自動生成のフォールバック（Arial + size-adjust）で抑えられるのはラテン文字のずれだけで、日本語は
-// 読み込み完了まで OS 標準の CJK フォントで表示される
+// Same typeface as the LP. Loaded here rather than in the root layout since only the login screen
+// uses it. CJK fonts are split into dozens of files by unicode-range, so don't preload; use the
+// same swap as the LP. The auto-generated fallback (Arial + size-adjust) only fixes Latin metric
+// shifts; Japanese shows in the OS CJK font until loading completes.
 const notoSansJp = Noto_Sans_JP({
   display: "swap",
   preload: false,
 });
 
-/** `/login?error=` で表示するメッセージ。未知の値は何も出さない */
 const LOGIN_ERROR_MESSAGES = {
   registration_failed:
     "アカウント登録に失敗しました。時間をおいて再度お試しください。問題が続く場合は管理者にお問い合わせください。",
@@ -41,11 +40,12 @@ export default async function LoginPage({
   const { error } = await searchParams;
   const errorMessage = loginErrorMessage(error);
 
-  // スマホ・タブレット幅は ブランド → ログインカード → 紹介 → 学習画面 の縦積み（DOM 順）。紹介と
-  // 学習画面の帯は画面端まで・画面下端まで1枚につなげて伸ばすため、グリッド自体には lg 未満の
-  // 左右・下のパディングと行間を付けない。lg 以上は左列に ブランド／紹介、右列にログインカードを
-  // 置く2カラムで、学習画面はその下に全幅で並べる。
-  // word-break: auto-phrase は日本語を文節単位で折り返す（非対応ブラウザは通常の折り返し）
+  // Below lg the DOM order is brand -> login card -> intro -> learning screens, stacked. The intro
+  // and learning-screen bands extend edge to edge (and to the bottom of the screen) as one piece,
+  // so the grid itself has no horizontal/bottom padding or row gap below lg. From lg up it is two
+  // columns (brand/intro on the left, login card on the right) with the learning screens full-width
+  // below. word-break: auto-phrase wraps Japanese by phrase (normal wrapping in unsupported
+  // browsers).
   return (
     <div
       className={`login-theme ${notoSansJp.className} min-h-screen bg-background text-foreground [word-break:auto-phrase]`}

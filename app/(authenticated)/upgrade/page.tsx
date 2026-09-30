@@ -51,14 +51,15 @@ export default async function UpgradePage() {
       fetchedSubscription = data;
     }
   }
-  // 解約済み（終端状態）・Checkout手続き中の行が残っているだけの場合は「契約中」として扱わない
+  // Rows that are only terminal (canceled) or Checkout-in-progress remnants don't count as a
+  // current contract.
   const subscription =
     fetchedSubscription && !NON_CURRENT_SUBSCRIPTION_STATUSES.includes(fetchedSubscription.status)
       ? fetchedSubscription
       : null;
   const periodLabel = subscription ? subscriptionPeriodLabel(subscription) : null;
 
-  // 確認できた実額だけを正とする。未確認時に Checkout を有効化しない
+  // Only a confirmed actual price counts; don't enable Checkout when it is unconfirmed.
   let confirmedPrice: { amount: number; currency: string } | null = null;
   let priceFetchFailed = false;
   if (stripeEnabled && userStatus === USER_STATUS.TRIAL) {
@@ -75,7 +76,8 @@ export default async function UpgradePage() {
   }
 
   const checkoutDisabled = confirmedPrice === null;
-  // 取得失敗時のみフォールバックで法定表示を残す。非月額・非JPYは月額を断定しない
+  // Fall back to the legal display only on fetch failure. Non-monthly/non-JPY prices don't assert a
+  // monthly amount.
   const monthlyPriceLabel = confirmedPrice
     ? formatMonthlyJpyPrice(confirmedPrice.amount)
     : priceFetchFailed
@@ -140,8 +142,7 @@ export default async function UpgradePage() {
                 <p className="text-sm text-destructive">
                   ご契約状況の取得に失敗しました。時間をおいてページを再読み込みしてください。
                 </p>
-                {/* 契約状況が不明な間もお支払い管理・解約の導線は残す（/api/stripe/portal は
-                    契約が無ければ404を返すため、契約が無いユーザーが押しても安全） */}
+                {/* Keep the billing-management/cancel entry even while contract status is unknown (/api/stripe/portal returns 404 without a contract, so pressing it is safe). */}
                 <ManageSubscriptionButton />
               </>
             ) : subscription ? (

@@ -29,18 +29,16 @@ const ROLE_LABELS: Record<UserRoleType, string> = {
   member: "受講生",
 };
 
-// ロール変更・会員種別の両セレクトで共通のスタイル（幅のみ呼び出し側で追加する）
 const SELECT_CLASS =
   "h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring";
 
-/** ステータスフィルターの選択肢。APIのステータス値（`USER_STATUS`）から導出する */
 const STATUS_FILTERS = ["all", ...Object.values(USER_STATUS)] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 /**
- * 会員種別セレクトの `<option>` 一覧。承認時・変更時の両セレクトで共有する。
- * `restrictToGeneral` が true の場合、コミュニティ会員は選択不可にする
- * （Stripe契約中ユーザーを一般有料会員以外に設定させないため。2.7節参照）。
+ * Membership `<option>`s shared by the approve and change selects. With restrictToGeneral,
+ * community is not selectable, so Stripe-subscribed users can't be set to anything but general (see
+ * spec 2.7).
  */
 function MembershipOptions({ restrictToGeneral }: { restrictToGeneral: boolean }) {
   return (
@@ -70,8 +68,8 @@ export function UserManagementTable({
   const router = useRouter();
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [loadingUserIds, setLoadingUserIds] = useState<Set<number>>(new Set());
-  // 承認時に選択する会員種別（ユーザーIDごと。未選択はコミュニティ会員を既定とする。
-  // ただしStripe契約中のユーザーはコミュニティ会員を選べないため一般有料会員を既定にする）
+  // Membership chosen on approval, per user id. Default is community, but general for
+  // Stripe-subscribed users since they can't pick community.
   const [membershipByUserId, setMembershipByUserId] = useState<Record<number, MembershipType>>({});
   const subscribedUserIdSet = useMemo(() => new Set(subscribedUserIds), [subscribedUserIds]);
 
@@ -97,7 +95,6 @@ export function UserManagementTable({
     membershipByUserId[userId] ??
     (subscribedUserIdSet.has(userId) ? USER_MEMBERSHIP.GENERAL : USER_MEMBERSHIP.COMMUNITY);
 
-  /** PATCH /api/admin/users への共通リクエスト処理（ローディング状態・エラー表示・一覧更新をまとめる） */
   const patchUser = async (
     userId: number,
     body: Record<string, unknown>,
@@ -134,20 +131,21 @@ export function UserManagementTable({
           body: { action, membershipType },
         };
       }
-      // 却下すると会員種別は NULL に戻るため、設定済みの場合は解除される旨を明示する
+      // Rejecting resets membership_type to NULL, so state that an existing one is cleared.
       const currentMembership = users.find((u) => u.id === userId)?.membership_type;
       const messages = [
         currentMembership
           ? `このユーザーを却下しますか？\n現在の会員種別（${USER_MEMBERSHIP_LABELS[currentMembership]}）の設定は解除されます。`
           : "このユーザーを却下しますか？",
       ];
-      // Stripeサブスクの自動キャンセル連携はスコープ外のため、却下してもサブスクは残り続ける
+      // Automatic subscription cancellation on reject is out of scope; the subscription remains.
       if (subscribedUserIdSet.has(userId)) {
         messages.push(
           "このユーザーはStripeサブスク契約中です。却下してもサブスクは自動解約されないため、Stripeダッシュボードでの手動キャンセルが別途必要です。"
         );
       } else if (subscriptionDataUnavailable) {
-        // 契約状況が取得できていないため、契約の有無を判定できない（フェイルクローズ）
+        // Fail closed: the subscription status couldn't be fetched, so whether a contract exists is
+        // unknown.
         messages.push(
           "Stripe契約状況を取得できなかったため、このユーザーが契約中かどうか判定できません。却下する前にStripeダッシュボードで契約の有無をご確認ください。"
         );
@@ -176,7 +174,6 @@ export function UserManagementTable({
 
   return (
     <div className="space-y-4">
-      {/* フィルター */}
       <div className="flex gap-2 flex-wrap">
         {STATUS_FILTERS.map((status) => (
           <Button
@@ -195,7 +192,6 @@ export function UserManagementTable({
         ))}
       </div>
 
-      {/* テーブル */}
       <div className="border rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -232,7 +228,6 @@ export function UserManagementTable({
                 const statusInfo = STATUS_LABELS[user.status];
                 const isLoading = loadingUserIds.has(user.id);
                 const isAdmin = user.role === USER_ROLE.ADMIN;
-                // Stripe契約中と確定しているか（バッジ表示にも使う一覧が根拠なので確度は高い）
                 const isSubscribed = subscribedUserIdSet.has(user.id);
 
                 return (
@@ -275,9 +270,9 @@ export function UserManagementTable({
                           <div className="flex flex-wrap items-center gap-1">
                             {user.status === USER_STATUS.ACTIVE ? (
                               <select
-                                // status=active と membership_type の整合性はDBでは保証されないため
-                                // (AGENTS.md参照)、未設定（NULL）の active ユーザーも復旧できるよう
-                                // membership_type の有無に関わらずセレクトを表示する
+                                // status=active / membership_type consistency isn't guaranteed by
+                                // the DB (see AGENTS.md), so show the select regardless of
+                                // membership_type so active users with NULL can be repaired.
                                 value={
                                   user.membership_type ??
                                   (isSubscribed

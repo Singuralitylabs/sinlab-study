@@ -92,7 +92,7 @@ describe("受講生向けの取得（二層防御のアプリ層）", () => {
       [4, true],
     ]);
     expect(data?.[0]).not.toHaveProperty("announcement_reads");
-    // 既読は本人の行だけを埋め込み、別のクエリで読まない
+    // Read status embeds only the user's own row, not a separate query.
     const [query] = buildersOf(client, "announcements");
     expect(query.eq).toHaveBeenCalledWith("announcement_reads.user_id", 7);
     expect(buildersOf(client, "announcement_reads")).toHaveLength(0);

@@ -352,8 +352,8 @@ describe("generateReview", () => {
   it("429が即座に返らず全体予算を使い切った場合は、リトライ回数が残っていても待機せず打ち切る", async () => {
     vi.useFakeTimers();
     const rateLimitError = new ApiError({ message: "Too Many Requests", status: 429 });
-    // 1回目の試行がGEMINI_TOTAL_BUDGET_MS近くまでかかったことを模擬する
-    // （「429はサーバー側から即時に返る」という前提が崩れたケース）
+    // Simulates the first attempt taking close to GEMINI_TOTAL_BUDGET_MS (breaking the premise that
+    // 429 returns immediately from the server).
     generateContentMock.mockImplementationOnce(
       () =>
         new Promise((_resolve, reject) => {
@@ -368,14 +368,14 @@ describe("generateReview", () => {
     await vi.runAllTimersAsync();
     await assertion;
 
-    // 残り予算(1秒)よりリトライ待機(GEMINI_RETRY_BASE_DELAY_MS=5秒)の方が長いため、
-    // リトライ上限に達していなくても2回目の試行は行われない
+    // The retry wait (GEMINI_RETRY_BASE_DELAY_MS = 5s) exceeds the remaining budget (1s), so no
+    // second attempt is made even though the retry limit isn't reached.
     expect(generateContentMock).toHaveBeenCalledTimes(1);
   });
 
   it("応答がタイムアウトした場合は日本語のタイムアウトメッセージを投げ、リトライしない", async () => {
-    // SDK内部のAbortControllerがreasonなしでabortするため、実際に投げられるのは
-    // DOMException "AbortError"（"TimeoutError"ではない）
+    // The SDK's internal AbortController aborts without a reason, so what is actually thrown is
+    // DOMException "AbortError" (not "TimeoutError").
     const timeoutError = new DOMException("The operation was aborted.", "AbortError");
     generateContentMock.mockRejectedValue(timeoutError);
 

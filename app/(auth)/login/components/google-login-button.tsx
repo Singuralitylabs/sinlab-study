@@ -24,11 +24,11 @@ export function GoogleLoginButton() {
     setLoading(true);
     setError(null);
 
-    // 初回登録の同意チェックをサーバー側で検証できるよう、OAuth 開始直前に
-    // 短寿命の同意 Cookie をセットする（SameSite=Lax のため OAuth の往復を跨いで届く）。
-    // Cookie Store API は非同期のため、OAuth 開始直前の同期的セットには document.cookie を使う。
+    // Set a short-lived consent cookie right before OAuth starts so the server can verify the
+    // first-sign-up consent (SameSite=Lax lets it survive the OAuth round trip). The Cookie Store
+    // API is async, so use document.cookie for a synchronous set right before OAuth.
     const secure = window.location.protocol === "https:" ? "; Secure" : "";
-    // biome-ignore lint/suspicious/noDocumentCookie: 上記の理由により Cookie Store API は使えない
+    // biome-ignore lint/suspicious/noDocumentCookie: the Cookie Store API can't be used (see above)
     document.cookie = `${TERMS_CONSENT_COOKIE_NAME}=${TERMS_CONSENT_COOKIE_VALUE}; Max-Age=${TERMS_CONSENT_COOKIE_MAX_AGE}; Path=/; SameSite=Lax${secure}`;
 
     const supabase = createClientSupabaseClient();

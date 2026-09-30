@@ -1,47 +1,42 @@
 import type { ThinkingLevel } from "@google/genai";
 
-/** Gemini モデル名。キーのティアが違っても同一モデルを使う */
+/** Same model regardless of key tier. */
 export const GEMINI_MODEL_NAME = "gemini-3.6-flash";
 
-/** 提出コードの入力上限（文字数）。プロンプト構築と API バリデーションで共有する */
+/** Max code length (chars); shared by prompt building and API validation. */
 export const GEMINI_MAX_CODE_LENGTH = 8000;
 
 /**
- * レビュー生成の最大出力トークン数。
- * Gemini 3系では思考トークンもこの枠と出力課金を消費するため、本文用に余裕を持たせる。
+ * Gemini 3 spends thinking tokens (and output billing) from this budget, so leave headroom for the
+ * body.
  */
 export const GEMINI_MAX_OUTPUT_TOKENS = 4000;
 
 /**
- * Gemini 3系の思考レベル。思考を完全には無効化できないため最小レベルを指定する。
- * SDK の enum 値は `"LOW"` だが、REST では `"low"` の疎通が確認済みのためその値を送る。
+ * Thinking can't be fully disabled on Gemini 3, so use the lowest level. The SDK enum value is
+ * "LOW", but "low" is what was verified over REST, so send that.
  */
 export const GEMINI_THINKING_LEVEL = "low" as ThinkingLevel;
 
-/** 429 時のリトライ回数（初回を除く）。合計試行は GEMINI_MAX_RETRIES + 1 */
+/** Retries on 429 (excluding the first attempt); total attempts = GEMINI_MAX_RETRIES + 1. */
 export const GEMINI_MAX_RETRIES = 2;
 
-/** 429 リトライの初回待機（ms）。以降は 2^attempt で指数バックオフ */
+/** Initial 429 retry wait (ms); exponential backoff (2^attempt) after that. */
 export const GEMINI_RETRY_BASE_DELAY_MS = 5000;
 
 /**
- * Gemini 呼び出し1回（1試行）あたりのタイムアウト（ms）。
- * 実際に1試行へ許される時間は、これと GEMINI_TOTAL_BUDGET_MS の残り時間の
- * 短い方（AbortSignal.any で合成）になる。
+ * Timeout per attempt (ms). The time an attempt actually gets is the shorter of this and the
+ * remaining GEMINI_TOTAL_BUDGET_MS (combined via AbortSignal.any).
  */
 export const GEMINI_REQUEST_TIMEOUT_MS = 25_000;
 
 /**
- * generateReview() 全体（全試行+リトライ待機の合計）に許すタイムアウト（ms）。
- * 429が即座に返らず GEMINI_REQUEST_TIMEOUT_MS 近くまで待たされるケースでも、
- * 全試行の合計時間をここで頭打ちにすることで `/api/ai-review` の `maxDuration`
- * （route.ts に定数として直書き）内に収まることを保証する。
- * DB往復等のオーバーヘッド分の余裕を残すため、maxDuration より十分小さい値にすること。
+ * Cap for all of generateReview() (attempts + retry waits). Even when 429s take close to
+ * GEMINI_REQUEST_TIMEOUT_MS to return, this keeps the total within /api/ai-review's maxDuration
+ * (hardcoded in route.ts). Keep it well below maxDuration to leave room for DB round trips.
  */
 export const GEMINI_TOTAL_BUDGET_MS = 45_000;
 
-/** 会員（status=active）向け API キーの環境変数名 */
 export const GEMINI_API_KEY_ENV = "GEMINI_API_KEY";
 
-/** お試しユーザー（status=trial）向け API キーの環境変数名 */
 export const GEMINI_API_KEY_TRIAL_ENV = "GEMINI_API_KEY_TRIAL";

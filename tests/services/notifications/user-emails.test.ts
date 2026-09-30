@@ -23,7 +23,7 @@ const APP_URL = "https://study.example.com";
 const recipientRow = { id: 7, email: "user@example.com", display_name: "山田" };
 const duplicate = { data: null, error: { code: "23505", message: "duplicate key" } };
 
-/** after() に渡されたコールバックを保持し、テストから明示的に実行する */
+/** Keep callbacks passed to after() and run them explicitly from tests. */
 let scheduled: Array<() => Promise<unknown>> = [];
 async function runScheduled() {
   const tasks = scheduled;
@@ -62,7 +62,6 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-/** 1通分の送信（宛先の読み込み → claim → 送信 → 記録）を予約して実行する */
 async function deliverOnce() {
   scheduleSubscriptionEndedEmail({ userId: 7, subscriptionId: "sub_123" });
   await runScheduled();
@@ -100,7 +99,6 @@ describe("送信ログ（email_logs）の claim → 送信 → 記録", () => {
     await deliverOnce();
 
     expect(sendEmail).not.toHaveBeenCalled();
-    // claim の INSERT のみで、記録の UPDATE は行わない
     expect(emailLogBuilders(client)).toHaveLength(1);
   });
 

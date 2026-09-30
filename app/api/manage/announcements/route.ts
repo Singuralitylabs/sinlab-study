@@ -5,10 +5,7 @@ import { AnnouncementSchema, validateRequest } from "@/app/services/api/schemas"
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
-/**
- * お知らせの作成（admin / maintainer）。`is_published` なら作成と同時に公開する。
- * `send_email` のメールは画面から同期送信せず、Cron の日次バッチが送る。
- */
+/** send_email is not sent synchronously from the screen; the daily cron batch sends it. */
 export async function POST(request: NextRequest) {
   try {
     const { user, userId, userStatus, userRole } = await getServerAuth();

@@ -149,7 +149,6 @@ describe("getServerAuth", () => {
         userStatus: "active",
         userRole: "maintainer",
       });
-      // users テーブルへの照会が行われていないこと（二重ラウンドトリップ解消）
       expect(mockClient.from).not.toHaveBeenCalled();
     });
 
@@ -335,8 +334,8 @@ describe("getServerAuth", () => {
     });
 
     it("digest を持つ Next.js 制御エラーは握り潰さずそのまま再スローする", async () => {
-      // force-dynamic が外れた際の静的プリレンダー事故を防ぐため、
-      // DYNAMIC_SERVER_USAGE 等の Next.js 制御エラーは catch で飲み込まない
+      // Don't swallow Next.js control errors like DYNAMIC_SERVER_USAGE in a catch, to avoid static
+      // prerender accidents if force-dynamic is removed.
       const controlError = Object.assign(new Error("Dynamic server usage"), {
         digest: "DYNAMIC_SERVER_USAGE",
       });

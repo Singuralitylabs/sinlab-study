@@ -158,8 +158,9 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "テーマから画像を削除できませんでした" }, { status: 500 });
     }
 
-    // DB参照は既に外しているため削除失敗でも500にはしない（リトライしても image_url は
-    // NULL 済みで対象を特定できない）。呼び出し側が部分失敗を検知できるよう結果を返す
+    // The DB reference is already removed, so a deletion failure doesn't return 500 (retrying can't
+    // identify the target since image_url is already NULL). Return the result so callers can detect
+    // a partial failure.
     const previousPath = getThumbnailPath(theme.image_url, themeId);
     let storageRemoved = true;
     if (previousPath) {

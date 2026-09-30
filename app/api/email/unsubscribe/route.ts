@@ -5,8 +5,8 @@ import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { verifyUnsubscribeToken } from "@/app/services/notifications/email-unsubscribe";
 
 /**
- * 画面の HTML。ユーザー情報は埋め込まない。`formAction` を渡すと、配信停止を確定する
- * POST フォーム（ボタン）を付ける（トークンは検証済みの値だけを URL に載せる）。
+ * Page HTML. No user info embedded. With formAction it adds a POST form (button) that confirms the
+ * unsubscribe (only the verified token goes into the URL).
  */
 function renderPage(status: number, title: string, message: string, formAction?: string): Response {
   const html = [
@@ -56,10 +56,10 @@ function readToken(request: NextRequest): { token: string; userId: number } | nu
 }
 
 /**
- * 配信停止の確認画面（ログイン不要）。GET では停止を確定しない。メールのセキュリティ製品
- * （Outlook の Safe Links 等）はリンクを事前に GET するため、GET で確定すると本人が開く前に
- * 停止されてしまう。確定は画面のボタン（POST）か、メールクライアントのワンクリック配信停止
- * （RFC 8058 の POST）で行う。トークン不正・シークレット未設定は理由を明かさず 400。
+ * Unsubscribe confirmation screen (no login). GET must not confirm: email security products
+ * (Outlook Safe Links etc.) prefetch links with GET, which would unsubscribe the user before they
+ * open it. Confirmation is by the on-screen button (POST) or the mail client's one-click
+ * unsubscribe (RFC 8058 POST). Invalid token / unset secret gives 400 without revealing why.
  */
 export async function GET(request: NextRequest) {
   const verified = readToken(request);
@@ -75,11 +75,11 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * 配信停止の確定（確認画面のボタンと、`List-Unsubscribe-Post` に対応するメールクライアントの
- * ワンクリック配信停止）。トークンは `users.id` の HMAC 署名で、検証に成功したら
- * `users.email_opt_out_at` を記録する（既に停止済みなら更新せず成功扱い）。
- * トークン不正・シークレット未設定は理由を明かさず 400（フェイルクローズ）。
- * トランザクションメールはこのカラムを見ないため影響しない。
+ * Confirms the unsubscribe (confirmation button, and one-click unsubscribe by mail clients
+ * supporting List-Unsubscribe-Post). The token is an HMAC signature of users.id; on success record
+ * users.email_opt_out_at (already unsubscribed counts as success without updating). Invalid token /
+ * unset secret gives 400 without revealing why (fail closed). Transactional emails don't read this
+ * column and are unaffected.
  */
 export async function POST(request: NextRequest) {
   const verified = readToken(request);

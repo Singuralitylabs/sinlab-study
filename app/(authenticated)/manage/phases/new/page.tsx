@@ -10,10 +10,10 @@ export default async function NewPhasePage() {
     fetchAllPhases(),
   ]);
 
-  // 兄弟候補（フェーズ一覧）の取得失敗を「兄弟なし」として扱うと、選択したテーマ配下に
-  // 実際には既存フェーズがあるのに空一覧を表示してしまい、既定の先頭挿入のまま送信できて
-  // しまう。POST時（createPhase内の再採番）にDBが復旧していると、既存フェーズ全件が
-  // 意図せず後ろへ再採番されるため、取得失敗時はフォームを表示しない。
+  // Treating a failed sibling fetch as "no siblings" would show an empty list although phases exist
+  // under the selected theme, and submit with the default head insert. If the DB recovers by POST
+  // time (renumbering inside createPhase), all existing phases would be renumbered backward
+  // unintentionally, so don't show the form on failure.
   if (phasesError || !phases) {
     return (
       <div className="max-w-3xl mx-auto">
@@ -30,8 +30,7 @@ export default async function NewPhasePage() {
     );
   }
 
-  // 挿入位置ピッカーの兄弟候補（テーマ選択後にフォーム側で theme_id により絞り込む）。
-  // content-grouping.ts の階層順ソートと同じ比較関数（display_order昇順・idタイブレーク）で揃える
+  // Sort with the same comparator as content-grouping.ts (display_order ascending, id tiebreak).
   const siblingCandidates = [...phases]
     .sort((a, b) => compareGroupLevel(a.display_order, b.display_order, a.id, b.id))
     .map((phase) => ({

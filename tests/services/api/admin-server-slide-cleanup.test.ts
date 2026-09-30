@@ -124,7 +124,7 @@ describe("bulkUpdateContents の slides 削除（issue #145）", () => {
     expect(result.error).toBeNull();
     expect(result.updated).toBe(2);
     expect(result.storageRemoved).toBe(true);
-    // 参照確認・削除ともキー数に依らず1回にまとめる（issue #246）
+    // Reference check and deletion are batched into one call regardless of key count (#246).
     expect(remove).toHaveBeenCalledTimes(1);
     expect(remove).toHaveBeenCalledWith(["gas/slide-01.pdf", "gas/slide-02.pdf"]);
   });
@@ -410,7 +410,6 @@ describe("レビュー指摘の回帰テスト", () => {
 
     expect(result).toEqual({ error: null, storageRemoved: false });
     expect(remove).not.toHaveBeenCalled();
-    // 事前取得＋本体UPDATEの2回のみで、参照確認には進まない
     expect(mockClient.from).toHaveBeenCalledTimes(2);
   });
 });
@@ -436,7 +435,6 @@ describe("スライド孤児削除の往復削減（issue #246）", () => {
 
     await bulkUpdateContents([1, 2, 3], { is_deleted: true });
 
-    // pdf_url 取得・一括UPDATE・参照確認の3回のみ
     expect(mockClient.from).toHaveBeenCalledTimes(3);
     const referenceQuery = mockClient.from.mock.results[2].value;
     expect(referenceQuery.select).toHaveBeenCalledWith("pdf_url");
@@ -537,7 +535,6 @@ describe("updateContent の現在値取得の一本化（issue #246）", () => {
 
     expect(result).toEqual({ error: null, storageRemoved: true });
     expect(remove).not.toHaveBeenCalled();
-    // 現在値取得＋本体UPDATEの2回のみ
     expect(mockClient.from).toHaveBeenCalledTimes(2);
     expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith("week_id, pdf_url");
   });
@@ -635,7 +632,6 @@ describe("スライド孤児削除のチャンク分割（PR #260 レビュー�
     const result = await bulkUpdateContents(ids, { is_deleted: true });
 
     expect(result.storageRemoved).toBe(true);
-    // pdf_url 取得・一括UPDATE・参照確認2チャンク
     expect(mockClient.from).toHaveBeenCalledTimes(4);
     expect(mockClient.from.mock.results[2].value.in).toHaveBeenCalledWith(
       "pdf_url",
@@ -665,7 +661,7 @@ describe("スライド孤児削除のチャンク分割（PR #260 レビュー�
     const result = await bulkUpdateContents(ids, { is_deleted: true });
 
     expect(result.storageRemoved).toBe(false);
-    // 失敗したチャンク（先頭100件）は削除せず、残りのチャンクだけ削除する
+    // The failed chunk (first 100) isn't deleted; only the remaining chunks are.
     expect(remove).toHaveBeenCalledTimes(1);
     expect(remove).toHaveBeenCalledWith(keys.slice(100));
   });

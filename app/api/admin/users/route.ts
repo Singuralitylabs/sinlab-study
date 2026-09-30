@@ -17,13 +17,12 @@ export async function PATCH(request: Request) {
     if (!auth.user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     }
-    // 却下済みユーザーはAuthセッションが有効な間もアクセス不可とする
-    // （却下前に admin/maintainer だった場合、role 自体は却下時にクリアされないため
-    // ロールチェックだけでは弾けない。他の管理系APIと同じステータスゲート）
+    // Rejected users are blocked even while their Auth session is valid. A former admin/maintainer
+    // keeps their role after rejection (it isn't cleared), so a role check alone doesn't stop them;
+    // same status gate as the other admin APIs.
     if (auth.userStatus === USER_STATUS.REJECTED) {
       return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
     }
-    // 管理者権限チェック
     if (auth.userRole !== USER_ROLE.ADMIN) {
       return NextResponse.json({ error: "権限がありません" }, { status: 403 });
     }
@@ -35,16 +34,13 @@ export async function PATCH(request: Request) {
     const { data } = validation;
     const { userId, action } = data;
 
-    // Stripe契約中ユーザーは、membership_typeと課金状態が食い違わないよう一般有料会員以外への
-    // 設定を拒否する（着手前提の決定）。承認・会員種別変更の両アクションに共通のルールとする
-    // （承認時にだけガードを外すと、契約中ユーザーをコミュニティ会員として承認した後に
-    // change_membership でも一般有料会員へ直せない、という詰みを生むため）。
-    //
-    // 取得失敗時の扱いはアクションごとに非対称:
-    // - change_membership はStripe整合性の保護そのものが目的のため、判定できない場合は
-    //   フェイルクローズで拒否する
-    // - approve は主目的がお試しユーザーの承認であり対象の大半はStripe非契約のため、
-    //   Stripe側の一時的な取得失敗で承認フロー全体を止めない（契約中と判定できた場合のみガードする）
+    // Stripe-subscribed users can only be set to general so membership_type and billing don't
+    // diverge. Applies to both approve and change_membership (relaxing it on approve would let a
+    // subscribed user be approved as community and then be impossible to fix via
+    // change_membership). Failure handling is asymmetric: change_membership exists to protect
+    // Stripe consistency, so it fails closed when undecidable; approve is mainly for trial users,
+    // most of whom aren't subscribed, so a transient Stripe fetch failure must not stop approval
+    // (guard only when a subscription is confirmed).
     if (data.action === "approve" || data.action === "change_membership") {
       const { data: isSubscribed, error: subscriptionError } =
         await isUserCurrentlySubscribed(userId);
@@ -75,7 +71,7 @@ export async function PATCH(request: Request) {
       if (error) {
         return NextResponse.json({ error: "会員種別更新に失敗しました" }, { status: 500 });
       }
-      // 0行更新 = 対象が active以外・存在しない・削除済みのいずれか
+      // 0 rows updated: target is not active, missing or deleted.
       if (!updated) {
         return NextResponse.json(
           {
@@ -93,7 +89,8 @@ export async function PATCH(request: Request) {
       if (error) {
         return NextResponse.json({ error: "ロール更新に失敗しました" }, { status: 500 });
       }
-      // 0行更新 = 対象が admin（降格・誤操作防止のため変更不可）・active以外・存在しない・削除済みのいずれか
+      // 0 rows updated: target is admin (immutable, prevents demotion mistakes), not active,
+      // missing or deleted.
       if (!updated) {
         return NextResponse.json(
           {
@@ -111,8 +108,8 @@ export async function PATCH(request: Request) {
       if (error) {
         return NextResponse.json({ error: "ステータス更新に失敗しました" }, { status: 500 });
       }
-      // 0行更新 = 既に承認済み（再承認による会員種別の意図しない上書きを防止。種別変更は change_membership で行う）、
-      // または存在しない・削除済みユーザー
+      // 0 rows updated: already approved (prevents accidentally overwriting membership type on
+      // re-approval; use change_membership for changes), or missing/deleted.
       if (!updated) {
         return NextResponse.json(
           {
@@ -130,7 +127,7 @@ export async function PATCH(request: Request) {
     if (error) {
       return NextResponse.json({ error: "ステータス更新に失敗しました" }, { status: 500 });
     }
-    // 0行更新 = 対象が admin（change_role と同様の保護のため却下不可）、または存在しない・削除済みユーザー
+    // 0 rows updated: target is admin (same protection as change_role), or missing/deleted.
     if (!updated) {
       return NextResponse.json(
         { error: "却下できません（管理者ユーザーか、存在しません）" },

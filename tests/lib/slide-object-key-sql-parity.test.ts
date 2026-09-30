@@ -5,8 +5,8 @@ import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key
 import { ContentUpdateSchema } from "@/app/services/api/schemas";
 
 /**
- * `20260917011152_validate_slide_pdf_url_object_keys.sql` の正規化式。
- * UPDATE / 検証 DO の両方、およびこの定数が一致していることを下のテストで担保する。
+ * Normalization expression of 20260917011152_validate_slide_pdf_url_object_keys.sql. The tests
+ * below ensure the UPDATE, the validation DO block and this constant all match.
  */
 const SLIDE_PDF_URL_SQL_NORMALIZE_EXPR = `regexp_replace(
       btrim(pdf_url, E' \\t\\r\\n'),
@@ -15,9 +15,8 @@ const SLIDE_PDF_URL_SQL_NORMALIZE_EXPR = `regexp_replace(
     )`;
 
 /**
- * 同マイグレーションの不正判定 WHERE 句。
- * マイグレーション側とこの定数が一致していることを下のテストで担保する。
- * どちらか片方だけを変えると落ちる（#217）。
+ * Invalid-value WHERE clause of the same migration; the tests ensure it matches this constant, so
+ * changing only one side fails (#217).
  */
 const SLIDE_PDF_URL_SQL_INVALID_PREDICATE = `n.key = ''
     OR n.key ~ '^/'
@@ -33,7 +32,9 @@ const MIGRATION_FILE = resolve(
   "../../supabase/migrations/20260917011152_validate_slide_pdf_url_object_keys.sql"
 );
 
-/** マイグレーションと同じ正規化（btrim 相当 → 旧公開URL接頭辞除去） */
+/**
+ * Same normalization as the migration (btrim equivalent, then strip the legacy public URL prefix).
+ */
 const LEGACY_PUBLIC_URL_PREFIX = /^(?:https?:\/\/[^/]+)?\/storage\/v1\/object\/public\/slides\//;
 
 function normalizeLikeMigration(pdfUrl: string): string {
@@ -41,8 +42,8 @@ function normalizeLikeMigration(pdfUrl: string): string {
 }
 
 /**
- * SQL 側の拒否条件を JS で評価する（正規表現・セグメント分割は SQL 定数と対応）。
- * `toSlideObjectKey` の実装を参照せず、SQL 規則だけを再現する。
+ * Evaluates the SQL rejection condition in JS (regex and segment split mirror the SQL constant),
+ * reproducing the SQL rules without using toSlideObjectKey.
  */
 function isRejectedBySqlPredicate(pdfUrl: string): boolean {
   const key = normalizeLikeMigration(pdfUrl);
@@ -58,7 +59,6 @@ function isRejectedBySqlPredicate(pdfUrl: string): boolean {
   return key.split("/").some((segment) => segment === "" || segment === "." || segment === "..");
 }
 
-/** 突き合わせ用の入力集合（受け入れ・拒否の両方） */
 const PARITY_CASES: Array<[string, string]> = [
   ["正常なキー", "gas/slide-01.pdf"],
   ["応用編の正常なキー", "gas-advanced/slide-100.pdf"],
@@ -90,7 +90,8 @@ describe("slide pdf_url SQL 検証と toSlideObjectKey の一致 (#217)", () => 
     const migrationSql = readFileSync(MIGRATION_FILE, "utf8");
     expect(migrationSql).toContain(SLIDE_PDF_URL_SQL_NORMALIZE_EXPR);
     expect(migrationSql).toContain(SLIDE_PDF_URL_SQL_INVALID_PREDICATE);
-    // UPDATE と検証 DO の両方で同じ正規化式を使う（片方だけ変える事故を防ぐ）
+    // The UPDATE and the validation DO must use the same expression (guards against changing only
+    // one).
     const normalizeOccurrences = migrationSql.split(SLIDE_PDF_URL_SQL_NORMALIZE_EXPR).length - 1;
     expect(normalizeOccurrences).toBe(2);
   });
@@ -121,15 +122,16 @@ describe("slide pdf_url SQL 検証と toSlideObjectKey の一致 (#217)", () => 
 });
 
 /**
- * `20260926000000_normalize_blank_slide_pdf_url.sql` の実行文（コメント・空行を除いた全文。#243）。
- * 部分一致ではなく完全一致で比較するため、条件の追加（OR 句など）や SET 句の変更も検出する。
+ * Full executable statement of 20260926000000_normalize_blank_slide_pdf_url.sql (comments and blank
+ * lines removed; #243). Compared by exact match so added conditions (OR clauses) or SET changes are
+ * detected.
  */
 const BLANK_NORMALIZE_MIGRATION_STATEMENT = `UPDATE public.learning_contents
 SET pdf_url = NULL
 WHERE pdf_url IS NOT NULL
   AND btrim(pdf_url, E' \\t\\r\\n') = '';`;
 
-/** SQL から行コメント（--）と空行を除く（本マイグレーションはブロックコメントを使わない） */
+/** Strips -- line comments and blank lines (this migration uses no block comments). */
 function stripSqlLineComments(sql: string): string {
   return sql
     .split("\n")
@@ -142,7 +144,6 @@ const BLANK_NORMALIZE_MIGRATION_FILE = resolve(
   "../../supabase/migrations/20260926000000_normalize_blank_slide_pdf_url.sql"
 );
 
-/** NULL 化条件を JS で評価する（btrim(pdf_url, E' \t\r\n') = ''） */
 function isNulledBySqlBlankPredicate(pdfUrl: string): boolean {
   return pdfUrl.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "") === "";
 }
@@ -163,16 +164,17 @@ describe("pdf_url 空文字の正規化: SQL と管理APIスキーマの一致 (
         expect(parsed.success).toBe(true);
         expect(parsed.data?.pdf_url).toBeNull();
       } else {
-        // 空でない値はキーへ正規化して受理するか、解釈できなければ拒否する（null にはしない）
+        // Non-empty values are either normalized to a key and accepted, or rejected if not
+        // interpretable; never nulled.
         expect(parsed.success ? parsed.data?.pdf_url : "rejected").not.toBeNull();
       }
     }
   );
 
   it("#217 の検証が拒否する空の値はすべて NULL 化の対象で、NULL 行は #217 の検証が対象にしない", () => {
-    // 20260917011152 は空文字・空白のみを不正値として中断する。本マイグレーションはそれらを
-    // 漏れなく NULL にし、#217 の正規化 UPDATE・検証 DO はどちらも `WHERE pdf_url IS NOT NULL`
-    // で NULL 行を対象外にする（正規化式の出現2回と同じ回数だけ絞り込みがあること）
+    // 20260917011152 aborts on empty/blank-only values. This migration nulls all of them, and both
+    // the #217 normalization UPDATE and the validation DO exclude NULL rows via `WHERE pdf_url IS
+    // NOT NULL` (as many filters as normalization expression occurrences).
     for (const value of ["", "   ", "\t\r\n"]) {
       expect(isRejectedBySqlPredicate(value)).toBe(true);
       expect(isNulledBySqlBlankPredicate(value)).toBe(true);

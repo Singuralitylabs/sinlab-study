@@ -1,21 +1,18 @@
 import { USER_STATUS } from "@/app/constants/user";
 import type { UserStatusType } from "@/app/types";
 
-/** ウェルカムダイアログの1ステップ定義 */
 export type WelcomeDialogStep = {
   id: string;
   title: string;
   body: string;
-  /** true のとき trial ユーザーにのみ表示する */
   trialOnly: boolean;
-  /** true のとき Stripe 有効時のみ /upgrade へのリンクを案内する */
+  /** When true, mention the /upgrade link only if Stripe is enabled. */
   showsUpgradeLink: boolean;
 };
 
-/** はじめかたチェックリストの項目キー（`page.tsx` 側のリテラル重複を防ぐため型で共有する） */
+/** Checklist item key; shared as a type to avoid duplicating literals in page.tsx. */
 export type GettingStartedStepKey = "complete-content" | "submit-exercise" | "receive-ai-review";
 
-/** はじめかたチェックリストの1項目定義 */
 export type GettingStartedStep = {
   key: GettingStartedStepKey;
   label: string;
@@ -53,10 +50,6 @@ export const WELCOME_DIALOG_STEPS: readonly WelcomeDialogStep[] = [
   },
 ];
 
-/**
- * ステータスに応じて表示するダイアログステップを絞り込む。
- * trial のときのみ trialOnly のステップ（プランについて）を含める。
- */
 export function getWelcomeStepsForStatus(status: UserStatusType | null): WelcomeDialogStep[] {
   if (status === USER_STATUS.TRIAL) {
     return [...WELCOME_DIALOG_STEPS];

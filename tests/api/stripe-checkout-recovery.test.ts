@@ -1,13 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * 決済済みのまま反映されなかった処理権の自己復旧（#250）を、実物の Route Handler・
- * `claimCheckoutSlot()`・`activateUserFromCheckoutSession()` を通しで動かして検証する。
- * DB（`stripe_subscriptions` / `users`）は状態を持つインメモリのフェイク、Stripe SDK はモックで
- * 置き換える（Stripe API は実呼び出ししない）。
- *
- * 各テストは本番で確認した固定状態（`checkout_pending` のまま `complete` なセッションを保持し、
- * `stripe_subscription_id` が NULL）から始める。
+ * Exercises self-recovery of a claim left paid-but-unapplied (#250) through the real Route Handler,
+ * claimCheckoutSlot() and activateUserFromCheckoutSession(). The DB is a stateful in-memory fake
+ * and the Stripe SDK is mocked (no real calls). Each test starts from the state seen in production:
+ * checkout_pending holding a complete session, with stripe_subscription_id NULL.
  */
 
 const {
@@ -64,9 +61,8 @@ type Row = Record<string, unknown>;
 type Filter = (row: Row) => boolean;
 
 /**
- * `stripe_subscriptions`（user_id でユニーク）と `users` だけを持つ、状態付きの Supabase フェイク。
- * 条件付き UPDATE が「条件に合致する行だけを更新する」ことを再現し、claim の CAS・
- * ミラー更新の CAS をそのまま通す。
+ * Stateful Supabase fake with only stripe_subscriptions (unique by user_id) and users. Conditional
+ * UPDATEs only touch matching rows, so the claim CAS and the mirror CAS run for real.
  */
 function createFakeDatabase(initial: { subscription: Row; user: Row }) {
   const tables: Record<string, Row[]> = {
@@ -74,7 +70,7 @@ function createFakeDatabase(initial: { subscription: Row; user: Row }) {
     users: [{ ...initial.user }],
     stripe_events: [],
   };
-  /** 次の1回だけDBエラーにするテーブル（UPDATE）。反映の途中失敗を再現する */
+  /** Tables whose next UPDATE fails once (simulates a mid-way failure). */
   const failNextUpdate = new Set<string>();
 
   return {
@@ -134,7 +130,10 @@ function createFakeDatabase(initial: { subscription: Row; user: Row }) {
           filters.push((row) => row[column] !== value);
           return builder;
         },
-        /** PostgREST の `or` のうち、このテストで使う `col.neq.value` / `col.is.null` だけを解釈する */
+        /**
+         * Interprets only `col.neq.value` / `col.is.null` of PostgREST's `or`, which this test
+         * uses.
+         */
         or(expression: string) {
           const conditions: Filter[] = expression.split(",").map((condition) => {
             const [column, operator, value] = condition.split(".");
@@ -142,7 +141,7 @@ function createFakeDatabase(initial: { subscription: Row; user: Row }) {
               return (row) => (row[column] ?? null) === null;
             }
             if (operator === "neq") {
-              // SQL と同じく NULL との比較は真にならない
+              // Like SQL, comparison with NULL is never true.
               return (row) => row[column] != null && row[column] !== value;
             }
             throw new Error(`未対応の or 条件: ${condition}`);
@@ -163,7 +162,7 @@ function createFakeDatabase(initial: { subscription: Row; user: Row }) {
           return builder;
         },
         maybeSingle: () => Promise.resolve(run()),
-        // biome-ignore lint/suspicious/noThenProperty: Supabase クエリビルダーの thenable を再現するため意図的に定義
+        // biome-ignore lint/suspicious/noThenProperty: mimics the Supabase builder thenable
         then: (onfulfilled: (v: ReturnType<typeof run>) => unknown) =>
           Promise.resolve(run()).then(onfulfilled),
       };
@@ -175,7 +174,6 @@ function createFakeDatabase(initial: { subscription: Row; user: Row }) {
 const USER_ID = 19;
 const HELD_CLAIMED_AT = "2026-09-20T00:00:00.000Z";
 
-/** 決済は完了しているが、Webhook・successページのどちらでも反映されなかったセッション */
 const paidSession = {
   id: "cs_live_paid",
   status: "complete",
@@ -195,7 +193,6 @@ function subscriptionWithStatus(status: string) {
   };
 }
 
-/** 本番で確認した固定状態 */
 function stuckDatabase() {
   return createFakeDatabase({
     subscription: {
@@ -217,7 +214,7 @@ let fakeNowMs = new Date("2099-01-01T00:00:00.000Z").getTime();
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Priceのモジュールスコープキャッシュ（5分TTL）がテスト間で残らないよう時刻を進める
+  // Advance time so the module-scope Price cache (5 min TTL) doesn't leak between tests.
   vi.useFakeTimers({ toFake: ["Date"] });
   fakeNowMs += 10 * 60 * 1000;
   vi.setSystemTime(fakeNowMs);
@@ -261,13 +258,11 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/cs_new" });
     expect(mockSubscriptionsRetrieve).toHaveBeenCalledWith("sub_19");
-    // 保存済みCustomerを再利用し、新しいCustomerを作らない
     expect(mockCustomersCreate).not.toHaveBeenCalled();
     expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
     expect(mockSessionsCreate).toHaveBeenCalledWith(
       expect.objectContaining({ customer: "cus_19" })
     );
-    // 新しい処理権が新しいセッションを保持し、解約済み契約の痕跡は残る
     expect(db.subscription()).toMatchObject({
       status: "checkout_pending",
       checkout_session_id: "cs_new",
@@ -275,10 +270,8 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
       stripe_subscription_id: "sub_19",
     });
     expect(db.subscription().checkout_claimed_at).not.toBe(HELD_CLAIMED_AT);
-    // 解約済みのため昇格はしない
     expect(db.user()).toMatchObject({ status: "trial", membership_type: null });
 
-    // 以後は通常の「手続き中」経路に戻る（同じURLを再利用し、2つ目のセッションを作らない）
     const again = await POST();
     expect(again.status).toBe(200);
     await expect(again.json()).resolves.toEqual({ url: "https://checkout.stripe.com/cs_new" });
@@ -366,8 +359,9 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
     const canceledPaid = { ...paidSession, id: "cs_paid_old", subscription: "sub_old" };
     mockSessionsList.mockResolvedValue({ data: [canceledPaid, paidSession] });
-    // 1件目は解約済み、2件目（有効）の取得は一時エラー。1件ずつ反映すると、1件目で処理権が
-    // 解けた後に2件目で失敗し、次のリクエストが有効な契約の上に新しいCheckoutを作れてしまう
+    // The first is canceled and fetching the second (active) fails transiently. Applying one at a
+    // time would release the claim on the first and then fail on the second, letting the next
+    // request create a new Checkout on top of an active contract.
     mockSubscriptionsRetrieve.mockImplementation(async (id: string) => {
       if (id === "sub_old") {
         return { ...subscriptionWithStatus("canceled"), id: "sub_old" };
@@ -463,14 +457,12 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
 
     const failed = await POST();
 
-    // ミラー行（処理権の解除を含む）は書けたが、ユーザーはお試しのまま
     expect(failed.status).toBe(500);
     expect(db.subscription()).toMatchObject({ status: "active", checkout_claimed_at: null });
     expect(db.user()).toMatchObject({ status: "trial" });
 
     const retried = await POST();
 
-    // 契約中として409を返し続けるのではなく、Stripeのライブ状態を確かめて昇格させる
     expect(retried.status).toBe(200);
     await expect(retried.json()).resolves.toEqual({ url: "/upgrade" });
     expect(db.user()).toMatchObject({ status: "active", membership_type: "general" });

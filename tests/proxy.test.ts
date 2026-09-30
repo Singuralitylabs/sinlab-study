@@ -203,7 +203,6 @@ describe("proxy", () => {
       const res = await proxy(req);
 
       expect(res.status).toBe(200);
-      // 下流リクエストに渡されるヘッダーを検証
       const downstreamAuthId = res.headers.get("x-middleware-request-x-sinlab-auth-id");
       const downstreamUserId = res.headers.get("x-middleware-request-x-sinlab-user-id");
       const downstreamStatus = res.headers.get("x-middleware-request-x-sinlab-user-status");
@@ -277,7 +276,7 @@ describe("proxy", () => {
         return {
           auth: {
             getUser: vi.fn().mockImplementation(async () => {
-              // @supabase/ssr がトークン更新を検知して setAll を呼ぶ挙動を再現
+              // Reproduces @supabase/ssr detecting a token refresh and calling setAll.
               options.cookies?.setAll?.(
                 [{ name: "sb-token", value: "new-token-value", options: { path: "/" } }],
                 { "cache-control": "private, no-store" }
@@ -301,7 +300,6 @@ describe("proxy", () => {
       expect(res.status).toBe(200);
       expect(res.cookies.get("sb-token")?.value).toBe("new-token-value");
       expect(res.headers.get("cache-control")).toBe("private, no-store");
-      // 下流リクエストヘッダーに更新後 Cookie が含まれること
       const downstreamCookie = res.headers.get("x-middleware-request-cookie");
       expect(downstreamCookie).toContain("sb-token=new-token-value");
     });
@@ -314,12 +312,10 @@ describe("proxy", () => {
 
     it("matcher の除外パターンが STATIC_FILE_EXTENSIONS と揃っていること", () => {
       const matcherRegex = new RegExp(config.matcher[0]);
-      // 保護対象ページはマッチする（proxy が走る）
       expect(matcherRegex.test("/learn/1")).toBe(true);
       expect(matcherRegex.test("/dashboard")).toBe(true);
       expect(matcherRegex.test("/admin/users")).toBe(true);
 
-      // 除外されるべき静的アセットパスはマッチしない
       expect(matcherRegex.test("/sample.pdf")).toBe(false);
       expect(matcherRegex.test("/sample.txt")).toBe(false);
       expect(matcherRegex.test("/sample.xml")).toBe(false);

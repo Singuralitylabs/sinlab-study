@@ -62,7 +62,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     expect(res.status).toBe(200);
     expect(activateUserFromCheckoutSession).toHaveBeenCalledWith(session);
     expect(syncSubscriptionStatus).not.toHaveBeenCalled();
-    // 事前にclaimしたうえでハンドラが実行される
+    // Claim first, then run the handler.
     expect(claimEvent).toHaveBeenCalledWith("evt_1", "checkout.session.completed");
     expect(releaseEventClaim).not.toHaveBeenCalled();
   });

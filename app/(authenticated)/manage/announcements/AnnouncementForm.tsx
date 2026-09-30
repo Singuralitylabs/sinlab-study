@@ -52,8 +52,8 @@ export function AnnouncementForm({ initialData, mode }: AnnouncementFormProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // 会員種別はお試しユーザーには無いため、種別を絞るときはお試しユーザーを対象にできない
-  // （API の入力検証と同じ条件。フォームで先に分かるようにする）
+  // Trial users have no membership type, so narrowing by type can't target trial users (same
+  // condition as the API input validation; surfaced early in the form).
   const membershipConflictsWithTrial =
     !allMembershipTypes && targetStatuses.includes(USER_STATUS.TRIAL);
 

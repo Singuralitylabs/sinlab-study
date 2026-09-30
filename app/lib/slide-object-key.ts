@@ -1,61 +1,46 @@
 import { parsePositiveInteger } from "@/app/lib/positive-integer";
 
 /**
- * `learning_contents.pdf_url` に保存する値は `slides` バケット内のオブジェクトキー
- * （例: `gas/slide-01.pdf`）のみとする（issue #89）。
- *
- * 旧形式（公開URL `.../storage/v1/object/public/slides/<キー>` の完全URL・相対パス）は
- * マイグレーションで一括正規化済みだが、リリース直後の窓や管理画面の編集フォームの
- * 初期値として旧形式が流れてきても壊れないよう、ここで同じ規則でキーへ変換する。
- * Storage ポリシーは `pdf_url = storage.objects.name` の等値比較のため、
- * この正規化はマイグレーション（`20260908000000_secure_slides_bucket.sql`）の
- * `regexp_replace(btrim(pdf_url, E' \t\r\n'), ...)` と同じ規則（前後の空白・タブ・CR・LF の除去 →
- * 接頭辞除去）でなければならない。
+ * pdf_url stores only the object key inside the `slides` bucket (#89). Legacy public URLs were
+ * normalized by migration, but can still arrive right after release or as the admin form's initial
+ * value, so they are converted here by the same rules. The Storage policy compares `pdf_url =
+ * storage.objects.name` for equality, so this normalization must match the migration
+ * (20260908000000_secure_slides_bucket.sql): regexp_replace(btrim(pdf_url, E' \t\r\n'), ...), i.e.
+ * trim space/tab/CR/LF, then strip the prefix.
  */
 const LEGACY_PUBLIC_URL_PREFIX = /^(?:https?:\/\/[^/]+)?\/storage\/v1\/object\/public\/slides\//;
 
 /**
- * 命名規約 `<コーススラッグ>/slide-NN.pdf`（NN は最低2桁のゼロ埋め）の構成要素。
- * アップロードAPI（キーの組み立て・自動採番の走査）と管理画面（キーの解釈）の両方が
- * ここを参照する。規約を変えるときはこのファイルだけを変更する。
+ * Single source of the naming convention <course-slug>/slide-NN.pdf (NN zero-padded to 2+ digits);
+ * the upload API and the admin UI both use it. Change the convention only here.
  */
-/** コーススラッグ（フォルダ名）は英小文字・数字・ハイフンのみ */
 export const SLIDE_FOLDER_PATTERN = /^[a-z0-9-]+$/;
-/** フォルダ内のファイル名 `slide-NN.pdf`（番号部分をキャプチャ） */
 export const SLIDE_FILE_NAME_PATTERN = /^slide-(\d+)\.pdf$/;
-/** オブジェクトキー全体 `<slug>/slide-NN.pdf`（スラッグと番号をキャプチャ） */
 const SLIDE_OBJECT_KEY_PATTERN = /^([a-z0-9-]+)\/slide-(\d+)\.pdf$/;
 
-/**
- * コーススラッグとスライド番号から命名規約どおりのオブジェクトキーを組み立てる。
- * 番号は最低2桁のゼロ埋め（1〜99 は `01`〜`99`、100 以上はそのまま桁が増える）。
- */
 export function buildSlideObjectKey(folder: string, slideNumber: number): string {
   return `${folder}/slide-${String(slideNumber).padStart(2, "0")}.pdf`;
 }
 
 /**
- * マイグレーションの btrim(pdf_url, E' \t\r\n') と除去対象を厳密に揃えた前後空白の除去
- * （String.prototype.trim は全角スペース等も除去するため使わない）
+ * Trim exactly what the migration's btrim(pdf_url, E' \t\r\n') removes; String.prototype.trim also
+ * strips full-width spaces, so don't use it.
  */
 function trimLikeMigration(value: string): string {
   return value.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "");
 }
 
 /**
- * pdf_url の入力値が「未設定」（空文字・空白のみ）かどうか。
- * 管理APIはこれを null に正規化して保存し、空文字の行を作らない（issue #243）。
- * マイグレーション `20260926000000_normalize_blank_slide_pdf_url.sql` の
- * `btrim(pdf_url, E' \t\r\n') = ''`（既存行の NULL 化条件）と同じ規則。
+ * The admin API normalizes blank to null so no empty-string rows exist (#243); same rule as the
+ * migration 20260926000000_normalize_blank_slide_pdf_url.sql (btrim(...) = '').
  */
 export function isBlankSlidePdfUrl(pdfUrl: string): boolean {
   return trimLikeMigration(pdfUrl) === "";
 }
 
 /**
- * pdf_url（新形式のキー、または旧形式の公開URL）をオブジェクトキーへ正規化する。
- * `slides` バケットのオブジェクトとして解釈できない値（外部URL・空文字・`/` 始まり・
- * `..` を含むパス）は null を返す。呼び出し側は null を「署名できない」として扱う。
+ * Returns null for values not interpretable as an object in the slides bucket (external URLs,
+ * empty, leading '/', paths containing '..'); callers treat null as unsignable.
  */
 export function toSlideObjectKey(pdfUrl: string | null | undefined): string | null {
   if (!pdfUrl) {
@@ -75,10 +60,6 @@ export function toSlideObjectKey(pdfUrl: string | null | undefined): string | nu
   return key;
 }
 
-/**
- * オブジェクトキーから命名規約上のコーススラッグとスライド番号を取り出す。
- * 規約に沿わないキー（旧タイムスタンプ形式など）は null を返す。
- */
 export function parseSlideObjectKey(
   pdfUrl: string | null | undefined
 ): { folder: string; slideNumber: number } | null {
@@ -88,10 +69,9 @@ export function parseSlideObjectKey(
     return null;
   }
 
-  // 番号指定時（upload-pdf）と同じ解釈基準に寄せる（issue #144）。
-  // 入力は正規表現の `(\d+)` のため現状の実害はないが、#105 で一本化した
-  // `parsePositiveInteger()` の基準から外れている唯一の残りのため。
-  // ドメイン上限（SLIDE_NUMBER_MAX）は受理規則であり既存キーの解釈には課さない。
+  // Aligns with explicit-number parsing in upload-pdf (#144). No practical effect since the input
+  // is (\d+), but this was the last place off the parsePositiveInteger() baseline. The domain cap
+  // is an acceptance rule and is not applied to existing keys.
   const slideNumber = parsePositiveInteger(match[2]);
   if (slideNumber === null) {
     return null;

@@ -13,47 +13,40 @@ import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const BUCKET_NAME = SLIDES_BUCKET;
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 
 type AdminSupabaseClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>;
 
-/** 自動採番できる番号がドメイン上限を超えたことを示す（一覧取得の失敗と区別する） */
+/** Auto-numbering exceeded the domain maximum; distinct from a listing failure. */
 class SlideNumberExhaustedError extends Error {}
 
-/** スライド番号の受理規則のエラーメッセージ（上限値は定数から導出する） */
 function invalidSlideNumberMessage(): string {
   return `スライド番号は1以上${SLIDE_NUMBER_MAX}以下の整数を指定してください`;
 }
 
-/** 自動採番の枯渇時のエラーメッセージ（上限値は定数から導出する） */
 function slideNumberExhaustedMessage(): string {
   return `自動採番できる番号の上限（${SLIDE_NUMBER_MAX}）に達しました。スライド番号を指定してください`;
 }
 
 /**
- * アップロード直後に対象オブジェクトの実体を照合する。
- *
- * upload() の戻り値だけでは実体を保証できないため、
- * 「成功したのに実体が無い」キーが learning_contents.pdf_url に保存されるのを防ぐ防波堤。
- * 照合できない場合は必ず例外を投げる（呼び出し側は成功として扱ってはならない）。
- *
- * 照合に失敗してもアップロード済みオブジェクトの削除は行わない
- * （失敗原因が一時的な通信エラーだった場合、正常なファイルを消してしまうため）。
- * 番号未指定で再アップロードすると残ったファイルの次の番号が採番されるため、
- * 409にはならず「どこからも参照されない孤児ファイルと欠番」が残る。
+ * Verify the object exists right after upload: upload()'s return value doesn't guarantee it, and
+ * this keeps a pdf_url key with no object from being saved. Must throw when verification isn't
+ * possible (callers must not treat that as success). The uploaded object is not deleted on failure,
+ * since a transient network error would remove a good file. A retry without a number picks the next
+ * number, leaving an orphan file and a numbering gap instead of a 409.
  */
 async function verifyUploadedObject(
   supabase: AdminSupabaseClient,
   uploadData: { path: string; fullPath: string } | null,
   expectedPath: string
 ): Promise<void> {
-  // storage-js はエラー無しでも data を null にし得る
+  // storage-js can return null data without an error.
   if (!uploadData) {
     throw new Error("アップロード結果が空です");
   }
 
-  // data.path は storage-js が引数のパスから組み立てて返すだけで検証の役に立たない。
-  // サーバー応答（data.Key）由来の fullPath で、実際の保存先を確かめる
+  // data.path is just built from the argument path and proves nothing. Check the actual location
+  // via fullPath (from the server response, data.Key).
   const expectedFullPath = `${BUCKET_NAME}/${expectedPath}`;
   if (uploadData.fullPath !== expectedFullPath) {
     throw new Error(
@@ -61,8 +54,9 @@ async function verifyUploadedObject(
     );
   }
 
-  // exists() は対象キーへのHEAD。list({ search }) と違い部分一致も件数上限も無いため、
-  // 存在するのに見つけられない窓が無い。400/404 は data:false、それ以外の失敗は例外になる
+  // exists() is a HEAD on the exact key: unlike list({ search }) it has no partial matching or
+  // result cap, so there is no window where an existing object isn't found. 400/404 give
+  // data:false; other failures throw.
   const { data: exists } = await supabase.storage.from(BUCKET_NAME).exists(expectedPath);
   if (!exists) {
     throw new Error(`アップロードしたオブジェクトが見つかりません: ${expectedPath}`);
@@ -70,10 +64,8 @@ async function verifyUploadedObject(
 }
 
 /**
- * 指定フォルダ内の既存 slide-NN.pdf を走査し、次に使う連番（最大値+1）を返す。
- * 既存が無ければ 1 を返す。
- * 一覧取得に失敗した場合は走査失敗を区別できないため例外を投げる
- * （誤った自動採番で既存ファイルを上書き／409誤判定するのを防ぐ）。
+ * Returns the max existing slide-NN number + 1 (1 if none). Throws if listing fails: a wrong
+ * auto-number could overwrite an existing file or misreport a 409.
  */
 async function getNextSlideNumber(supabase: AdminSupabaseClient, folder: string): Promise<number> {
   const { data, error } = await supabase.storage.from(BUCKET_NAME).list(folder, { limit: 1000 });
@@ -88,7 +80,7 @@ async function getNextSlideNumber(supabase: AdminSupabaseClient, folder: string)
     if (!match) {
       continue;
     }
-    // 番号指定時と同じ基準で解釈する（上限超過・桁あふれしたファイル名は採番の基準にしない）
+    // Same parsing as explicit numbers (ignore over-limit/overflowing file names).
     const existingNumber = parsePositiveInteger(match[1]);
     if (existingNumber !== null && existingNumber <= SLIDE_NUMBER_MAX) {
       maxNumber = Math.max(maxNumber, existingNumber);
@@ -96,9 +88,9 @@ async function getNextSlideNumber(supabase: AdminSupabaseClient, folder: string)
   }
 
   const nextNumber = maxNumber + 1;
-  // ドメイン上限（SLIDE_NUMBER_MAX）を超えると、次回の走査でそのファイルを基準に
-  // 同じ番号を採番し続けて永久に409になるため、増やす前に枯渇を検出する。
-  // 上限は安全な整数より十分小さいため、安全な整数の確認も兼ねる
+  // Past SLIDE_NUMBER_MAX the next scan would keep picking the same number and 409 forever, so
+  // detect exhaustion before incrementing. The max is far below the safe-integer limit, so this
+  // also covers that check.
   if (nextNumber > SLIDE_NUMBER_MAX || !Number.isSafeInteger(nextNumber)) {
     throw new SlideNumberExhaustedError(slideNumberExhaustedMessage());
   }
@@ -119,7 +111,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
     }
 
-    // admin または maintainer（講師）のみアップロード可能
     if (!checkContentPermissions(userRole)) {
       return NextResponse.json({ error: "アップロード権限がありません" }, { status: 403 });
     }
@@ -144,8 +135,7 @@ export async function POST(request: NextRequest) {
 
     const supabase = await createAdminSupabaseClient();
 
-    // 保存先フォルダ（コーススラッグ）とスライド番号を取得
-    // FormData には File が入り得るため、文字列以外は不正入力として扱う
+    // FormData may contain a File, so non-string values are invalid input.
     const folderValue = formData.get("folder");
     if (folderValue !== null && typeof folderValue !== "string") {
       return NextResponse.json(
@@ -154,11 +144,10 @@ export async function POST(request: NextRequest) {
       );
     }
     const folderRaw = folderValue?.trim() ?? "";
-    // スライド番号は前後の空白も不正入力として扱うため trim しない
+    // Do not trim: surrounding whitespace is invalid input.
     const slideNumberValue = formData.get("slideNumber");
 
     let filePath: string;
-    // フォルダ指定時は命名規約 slides/<folder>/slide-NN.pdf に沿って保存
     let allowOverwrite = false;
 
     if (folderRaw) {
@@ -171,11 +160,10 @@ export async function POST(request: NextRequest) {
       }
 
       let slideNumber: number;
-      // 未指定（フィールド自体が無い）だけを自動採番の対象とし、空文字は不正入力として扱う
+      // Only an absent field triggers auto-numbering; an empty string is invalid.
       if (slideNumberValue !== null) {
-        // 番号指定時：その番号で保存（既存ファイルは上書き）。
-        // parsePositiveInteger() は汎用ヘルパーのため上限を持たず、
-        // ドメイン上限（SLIDE_NUMBER_MAX）はスライド番号側で判定する
+        // Explicit number: overwrite the existing file. parsePositiveInteger() is generic with no
+        // upper bound; the domain cap (SLIDE_NUMBER_MAX) is checked on the slide-number side.
         const parsed = parsePositiveInteger(slideNumberValue);
         if (parsed === null || parsed > SLIDE_NUMBER_MAX) {
           return NextResponse.json({ error: invalidSlideNumberMessage() }, { status: 400 });
@@ -183,7 +171,6 @@ export async function POST(request: NextRequest) {
         slideNumber = parsed;
         allowOverwrite = true;
       } else {
-        // 番号未指定時：同フォルダ内の既存連番から自動採番
         try {
           slideNumber = await getNextSlideNumber(supabase, folder);
         } catch (listError) {
@@ -200,7 +187,7 @@ export async function POST(request: NextRequest) {
 
       filePath = buildSlideObjectKey(folder, slideNumber);
     } else {
-      // フォルダ未指定時は従来のタイムスタンプ付きファイル名（後方互換）
+      // No folder: legacy timestamped file name (backward compatibility).
       const timestamp = Date.now();
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       filePath = `${timestamp}_${safeName}`;
@@ -218,9 +205,8 @@ export async function POST(request: NextRequest) {
 
     if (uploadError) {
       console.error("PDFアップロードエラー:", uploadError);
-      // 自動採番中に同名ファイルが存在した場合（409 Conflict）はその旨を明示。
-      // storage-js は statusCode をレスポンスボディの statusCode / code、無ければ
-      // HTTPステータス文字列から組み立てるため、"Duplicate" ではなく "409" になる
+      // storage-js derives statusCode from the response body's statusCode/code or the HTTP status
+      // string, so a duplicate shows up as "409", not "Duplicate".
       const isDuplicate = uploadError.status === 409 || uploadError.statusCode === "409";
       const message = isDuplicate
         ? "同じ番号のスライドが既に存在します。番号を指定して上書きしてください"
@@ -228,12 +214,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: message }, { status: 500 });
     }
 
-    // 実体を確認できるまでキーを返さない（不正な pdf_url がコンテンツに保存されるのを防ぐ）
+    // Don't return the key until the object is confirmed, so an invalid pdf_url can't be saved.
     try {
       await verifyUploadedObject(supabase, uploadData, filePath);
     } catch (verificationError) {
       console.error("PDFアップロードの存在確認エラー:", verificationError);
-      // 消費したキーを伝える（自動採番ではこの番号が孤児として残り、再試行では次の番号になる）
+      // Report the consumed key (with auto-numbering that number stays orphaned; a retry gets the
+      // next one).
       return NextResponse.json(
         {
           error: `アップロードの完了を確認できませんでした（${filePath}）。時間をおいて再度お試しください`,
@@ -243,8 +230,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 保存値はオブジェクトキーのみ（issue #89）。配信URLは閲覧時にサーバー側で署名して発行する
-    // ため、ここでは公開URLも署名付きURLも返さない
+    // Only the object key is stored (#89); signed URLs are issued server-side at view time, so no
+    // URL is returned.
     return NextResponse.json({ path: filePath });
   } catch (error) {
     console.error("API エラー:", error);

@@ -1,9 +1,9 @@
 import type { MembershipType, UserRoleType, UserStatusType } from "../types";
 
 /**
- * ユーザーステータス。`Record<string, UserStatusType>` の型注釈を付けると `as const` が
- * 無効化され、キーのtypoが型チェックを通り実行時 undefined になるため、
- * `USER_MEMBERSHIP` と同様に `satisfies` で値だけを検証する。
+ * User status. Annotating with Record<string, UserStatusType> would disable `as const`, letting key
+ * typos pass type checks and become undefined at runtime; validate only the values with
+ * `satisfies`, as USER_MEMBERSHIP does.
  */
 export const USER_STATUS = {
   TRIAL: "trial",
@@ -11,7 +11,7 @@ export const USER_STATUS = {
   REJECTED: "rejected",
 } as const satisfies Record<string, UserStatusType>;
 
-/** 認証・認可を通過できるステータスの許可値（proxy / layout / server-auth 共通） */
+/** Statuses allowed through auth (shared by proxy / layout / server-auth). */
 export const ALLOWED_USER_STATUSES: readonly UserStatusType[] = [
   USER_STATUS.ACTIVE,
   USER_STATUS.TRIAL,
@@ -23,15 +23,13 @@ export const USER_ROLE = {
   MEMBER: "member",
 } as const satisfies Record<string, UserRoleType>;
 
-/** ロールの許可値。APIのバリデーション等はこの1箇所から導出する */
+/** Single source for allowed roles; API validation derives from it. */
 export const USER_ROLES: readonly UserRoleType[] = Object.values(USER_ROLE);
 
 /**
- * 会員種別。承認時に管理者が選択する（承認前・却下ユーザーは null）。
- *
- * `Record<string, MembershipType>` の型注釈を付けると `as const` が無効化され、
- * キーのtypo（`USER_MEMBERSHIP.COMUNITY` 等）が型チェックを通り実行時 undefined に
- * なるため、`satisfies` で値だけを検証する。
+ * Membership type, chosen by the admin on approval (null before approval and for rejected users).
+ * Same `satisfies` rationale as USER_STATUS: a Record annotation would disable `as const`, so typos
+ * like USER_MEMBERSHIP.COMUNITY would pass type checks and be undefined at runtime.
  */
 export const USER_MEMBERSHIP = {
   COMMUNITY: "community",
@@ -43,10 +41,10 @@ export const USER_MEMBERSHIP_LABELS: Record<MembershipType, string> = {
   general: "一般有料会員",
 } as const;
 
-/** 会員種別の許可値。APIのバリデーションと承認UIの選択肢はこの1箇所から導出する */
+/** Single source for allowed values; API validation and the approval UI options derive from it. */
 export const MEMBERSHIP_TYPES: readonly MembershipType[] = Object.values(USER_MEMBERSHIP);
 
-/** `PATCH /api/admin/users` の許可action。バリデーションはこの1箇所から導出する */
+/** Allowed PATCH /api/admin/users actions; validation derives from here. */
 export const USER_MANAGEMENT_ACTIONS = [
   "approve",
   "reject",

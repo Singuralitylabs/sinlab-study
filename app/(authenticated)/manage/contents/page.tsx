@@ -25,11 +25,11 @@ import { ContentsFilterBar } from "./ContentsFilterBar";
 import { ContentsTable } from "./ContentsTable";
 
 interface AdminContentsPageProps {
-  // App RouterのsearchParamsは同名クエリの重複時に string[] にもなりうる
+  // App Router searchParams can be string[] when a query name is repeated.
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-/** 同名クエリが重複して string[] になった場合は先頭の値のみを使う */
+/** When a repeated query becomes string[], use only the first value. */
 function firstParam(value: string | string[] | undefined): string {
   return (Array.isArray(value) ? value[0] : value) ?? "";
 }
@@ -41,12 +41,12 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
     phase: firstParam(params.phase),
     week: firstParam(params.week),
     type: firstParam(params.type),
-    // 空白のみのqは絞り込みなし扱い（filterContents側のtrimと判定を揃える）
+    // Whitespace-only q means no filter (same decision as the trim in filterContents).
     q: firstParam(params.q).trim(),
   };
 
-  // テーマ/フェーズ/週/種別は SQL 側で絞り、タイトル検索だけ JS に残す（#196）。
-  // フィルタ選択肢は週一覧（軽量）から導出し、構造フィルタ時に全件を二重取得しない。
+  // Theme/phase/week/type are filtered in SQL; only the title search stays in JS (#196). Filter
+  // options derive from the (light) week list so structural filters don't fetch everything twice.
   const structuralFilters = {
     themeId: filters.theme || undefined,
     phaseId: filters.phase || undefined,
@@ -88,7 +88,6 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
   const groups = groupContentsByWeek(filteredContents);
   const tableGroups = toContentTableGroups(groups);
 
-  // 一覧の階層フィルタ（テーマ/フェーズ/週）を新規作成フォームの初期選択に引き継ぐ
   const newContentQuery = new URLSearchParams();
   if (filters.theme) newContentQuery.set("theme", filters.theme);
   if (filters.phase) newContentQuery.set("phase", filters.phase);

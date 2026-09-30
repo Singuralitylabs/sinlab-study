@@ -30,7 +30,8 @@ export default async function AnnouncementDetailPage({
     fetchVisibleAnnouncement(viewer, announcementId),
     isAnnouncementRead(viewer, announcementId),
   ]);
-  // 下書き・削除済み・自分が対象でないお知らせは、存在も明かさず 404
+  // Drafts, deleted announcements and ones not targeting the user return 404 without revealing they
+  // exist.
   if (!announcement) {
     notFound();
   }

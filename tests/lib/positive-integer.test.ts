@@ -12,7 +12,8 @@ describe("parsePositiveInteger", () => {
     expect(parsePositiveInteger(value)).toBe(expected);
   });
 
-  // Number.parseInt() の部分解釈で通ってしまう値を含めて、全体一致であることを担保する
+  // Includes values that partial parsing by Number.parseInt() would let through, to ensure
+  // whole-string matching.
   it.each([
     ["1abc"],
     ["1.5"],

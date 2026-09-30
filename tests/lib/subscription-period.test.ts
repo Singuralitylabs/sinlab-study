@@ -5,7 +5,7 @@ import {
   subscriptionPeriodLabel,
 } from "@/app/lib/subscription-period";
 
-// 2026-10-26T15:00:00Z は JST で 2026/10/27
+// 2026-10-26T15:00:00Z is 2026/10/27 in JST.
 const PERIOD_END = "2026-10-26T15:00:00.000Z";
 const CANCEL_AT = "2026-10-19T15:00:00.000Z";
 

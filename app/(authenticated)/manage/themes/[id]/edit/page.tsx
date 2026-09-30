@@ -26,10 +26,10 @@ export default async function EditThemePage({ params }: PageProps) {
     notFound();
   }
 
-  // 兄弟一覧（全テーマ、自分自身を含む）の取得失敗を「兄弟なし」として扱うと、現在位置が
-  // 不明なまま挿入位置ピッカーの既定値が先頭になってしまう。PUT時（updateTheme内の再採番）
-  // にDBが復旧していると、意図せず既存テーマ全件が後ろへ再採番されるため、
-  // 取得失敗時はフォームを表示しない（new/page.tsxと同じ方針）。
+  // Treating a failed sibling fetch (all themes, including itself) as "no siblings" would leave the
+  // current position unknown and default the insert picker to the head. If the DB recovers by PUT
+  // time (renumbering inside updateTheme), all existing themes would be renumbered backward
+  // unintentionally, so don't show the form on failure (same policy as new/page.tsx).
   if (themesError || !themes) {
     return (
       <div className="max-w-3xl mx-auto">
@@ -46,7 +46,7 @@ export default async function EditThemePage({ params }: PageProps) {
     );
   }
 
-  // content-grouping.ts の階層順ソートと同じ比較関数（display_order昇順・idタイブレーク）で揃える
+  // Sort with the same comparator as content-grouping.ts (display_order ascending, id tiebreak).
   const siblings = [...themes]
     .sort((a, b) => compareGroupLevel(a.display_order, b.display_order, a.id, b.id))
     .map((t) => ({ id: t.id, label: t.name, isPublished: t.is_published }));

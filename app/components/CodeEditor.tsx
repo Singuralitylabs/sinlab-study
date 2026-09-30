@@ -17,7 +17,7 @@ export interface CodeEditorProps {
 function getExtensions(language: CodeLanguage) {
   switch (language) {
     case "javascript":
-    // GAS（Google Apps Script）はJavaScriptベースのため同じシンタックスを使用する
+    // GAS (Google Apps Script) is JavaScript-based, so it uses the same syntax.
     case "gas":
       return [javascript()];
     case "typescript":
@@ -45,10 +45,10 @@ function getDarkClassServerSnapshot() {
 }
 
 export function CodeEditor({ value, onChange, language, placeholder }: CodeEditorProps) {
-  // layout.tsx のインラインスクリプトが起動時に1回付ける dark クラスを初期値に使う。
-  // prefers-color-scheme の useEffect 遅延だとダークモード利用者が一度ライトでマウントされる。
-  // dark クラスは起動時のみ付与されアプリ内で変更されないため、表示中の OS テーマ切替には
-  // 追従しない（Tailwind の dark: バリアントと同じ。再読み込みで反映）。
+  // Use the dark class that layout.tsx's inline script sets once at startup as the initial value.
+  // Deferring to a prefers-color-scheme useEffect would mount dark-mode users in light first. The
+  // dark class is only set at startup and never changes in-app, so OS theme changes while the page
+  // is open aren't followed (same as Tailwind's dark: variant; reload to apply).
   const isDark = useSyncExternalStore(
     subscribeDarkClass,
     getDarkClassSnapshot,

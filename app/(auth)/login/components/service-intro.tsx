@@ -8,15 +8,14 @@ import { Button } from "@/components/ui/button";
 type Feature = {
   id: string;
   icon: LucideIcon;
-  /** 見出しの強調部分（LP と同じくアクセント色で表示）。無い見出しは `lead` のみ */
   lead: string;
   emphasis?: string;
   trail?: string;
   description: string;
 };
 
-// 文言は LP（SERVICE_LP_URL）の「4つの仕組み」からの引用（issue #264）。
-// アプリの階層数（テーマ → フェーズ → 週 → コンテンツ）と LP の記載が異なるため、階層数には触れない
+// Copy is quoted from the LP's (SERVICE_LP_URL) "four mechanisms" (#264). The app's hierarchy depth
+// (theme -> phase -> week -> content) differs from the LP's wording, so don't mention the depth.
 const FEATURES: Feature[] = [
   {
     id: "roadmap",
@@ -50,12 +49,14 @@ const FEATURES: Feature[] = [
   },
 ];
 
-// 枠線は「Googleでログイン」（同じ outline バリアント）と同じ強さに留め、ログインより目立たせない
+// Keep the border as strong as "Sign in with Google" (same outline variant) so links don't stand
+// out more than login.
 const PILL_LINK_CLASS = "h-12 w-full rounded-full px-5 font-bold has-[>svg]:px-5 sm:h-11 sm:w-auto";
 
 /**
- * `/login` のサービス紹介（表示専用）。ログインの導線を優先するため、リンクは枠線・文字リンクに留める。
- * `showMonthlyPrice` が false（決済機能の無効時）は、申し込めない月額料金をうたわないよう料金の文言を省く
+ * Display-only service intro for /login. Links stay border/text links to keep the login path
+ * primary. When showMonthlyPrice is false (payments disabled), omit price text so we don't
+ * advertise a monthly fee that can't be applied for.
  */
 export function ServiceIntro({ showMonthlyPrice }: { showMonthlyPrice: boolean }) {
   return (

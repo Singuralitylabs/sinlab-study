@@ -2,9 +2,6 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// /upgrade の契約中表示（次回のお支払い日・解約予定日）をページ単位で検証する。
-// データ取得はモックし、クライアントのボタンは最小表示に差し替える。
-
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
@@ -23,7 +20,7 @@ import UpgradePage from "@/app/(authenticated)/upgrade/page";
 import { fetchStripeSubscriptionByUserId } from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
-// 2026-10-26T15:00:00Z は JST で 2026/10/27
+// 2026-10-26T15:00:00Z is 2026/10/27 in JST.
 const PERIOD_END = "2026-10-26T15:00:00.000Z";
 
 const renderWithSubscription = async (

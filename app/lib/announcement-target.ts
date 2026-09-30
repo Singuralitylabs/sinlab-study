@@ -3,12 +3,11 @@ import type { Announcement } from "@/app/types";
 type AnnouncementTarget = Pick<Announcement, "target_statuses" | "target_membership_types">;
 
 /**
- * お知らせの対象ユーザーか（RLS の SELECT ポリシーと同じ条件をアプリ層で判定する）。
- * ステータスが `target_statuses` に含まれ、かつ `target_membership_types` が NULL（全種別）
- * または会員種別が含まれるユーザーだけが対象。お試しユーザー（会員種別 NULL）は、
- * 種別を指定したお知らせの対象にならない。
- *
- * 受講生向けの取得（二層防御のアプリ層）と、Cron の一斉送信の宛先抽出で共有する。
+ * Whether the user is a target of the announcement (same condition as the RLS SELECT policy,
+ * evaluated at the app layer). Status must be in target_statuses, and target_membership_types must
+ * be NULL (all types) or include the user's type. Trial users (membership type NULL) are never
+ * targeted by announcements that specify types. Shared by the student-facing fetch (app-layer half
+ * of the two-layer defense) and recipient selection for cron broadcasts.
  */
 export function isAnnouncementTarget(
   announcement: AnnouncementTarget,
@@ -26,7 +25,6 @@ export function isAnnouncementTarget(
   );
 }
 
-/** 対象の表示（例: 「本登録ユーザー（一般有料会員）/ お試しユーザー」）。管理画面の一覧で使う */
 export function describeAnnouncementTargets(
   announcement: AnnouncementTarget,
   labels: { status: Record<string, string>; membership: Record<string, string> }

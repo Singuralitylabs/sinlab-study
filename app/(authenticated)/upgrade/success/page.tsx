@@ -27,9 +27,9 @@ export default async function UpgradeSuccessPage({
   let nextBillingDateLabel: string | null = null;
 
   if (!isStripeEnabled()) {
-    // 停止中はStripe API呼び出し・会員昇格処理を一切行わない。Stripeのホスト型Checkout
-    // セッションは作成から最大24時間有効なため、フラグOFF直前に開始されたセッションの
-    // successページ再訪でも、無条件に決済確認・昇格が走らないようにする
+    // While disabled, make no Stripe API calls or promotions. Hosted Checkout sessions stay valid
+    // up to 24h after creation, so revisiting the success page of a session started just before the
+    // flag went OFF must not unconditionally verify payment and promote.
     errorMessage = STRIPE_DISABLED_MESSAGE;
   } else if (userId && sessionId) {
     try {
@@ -42,22 +42,22 @@ export default async function UpgradeSuccessPage({
       ) {
         errorMessage = "決済情報を確認できませんでした";
       } else {
-        // Webhookより先にここへ遷移してくる場合があるため、successページ側でも
-        // 同じ冪等な昇格処理を呼ぶ（Webhookと重複実行しても安全）
+        // The redirect can land here before the webhook, so run the same idempotent promotion here
+        // too (safe even if it overlaps the webhook).
         const { error, activated, currentPeriodEnd } =
           await activateUserFromCheckoutSession(session);
         if (error) {
           console.error("会員昇格エラー:", error);
           errorMessage = "会員登録の反映に失敗しました。時間をおいて再度お試しください";
         } else if (!activated) {
-          // 解約済み等のセッションURL再訪・未入金など、実際には昇格しなかったケース。
-          // 権限は変わっていないため、成功表示は出さない
+          // Cases where nothing was actually promoted, e.g. revisiting a canceled session's URL or
+          // an unpaid payment. Permissions are unchanged, so show no success.
           errorMessage = "このお申し込みは現在有効ではありません";
         } else {
           succeeded = true;
-          // 日割りで少額決済された直後のため、次に満額が請求される日を示して
-          // 問い合わせを減らす。activateUserFromCheckoutSession()が既にStripeから
-          // 取得済みの値を返すため、DBを読み直さない
+          // Right after a small prorated charge, show the next full-charge date to reduce
+          // inquiries. activateUserFromCheckoutSession() already returns the value fetched from
+          // Stripe, so no DB re-read.
           if (currentPeriodEnd) {
             nextBillingDateLabel = formatDate(currentPeriodEnd);
           }

@@ -20,19 +20,22 @@ type Row = Record<string, unknown>;
 type Filter = (row: Row) => boolean;
 
 /**
- * service_role クライアントの最小フェイク。テーブルを配列で持ち、eq / in / is / gte / lt /
- * range を実際に適用する（ネスト select の `phases.xxx` などドット付きの絞り込みは無視し、
- * 用意したツリーをそのまま返す）。`email_logs` の INSERT は UNIQUE (user_id, kind, reference_key)
- * を再現し、違反なら 23505 を返す。
+ * Minimal fake of the service_role client. Holds tables as arrays and actually applies eq / in / is
+ * / gte / lt / range (dotted filters like nested select's `phases.xxx` are ignored and the prepared
+ * tree is returned as is). INSERT into email_logs reproduces UNIQUE (user_id, kind, reference_key)
+ * and returns 23505 on violation.
  */
 function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number } = {}) {
   const db: Record<string, Row[]> = { email_logs: [], ...tables };
   let nextId = 1;
-  /** INSERT した行の created_at（DB の now()）。runDigest() が実行日時に合わせる */
+  /** created_at (DB now()) of inserted rows; runDigest() aligns it with the run time. */
   const clock = { now: new Date() };
-  /** `<table>:<op>` を入れると、その操作を DB エラーにする */
+  /** Adding `<table>:<op>` makes that operation a DB error. */
   const failures = new Set<string>();
-  /** INSERT ごとに DB エラーにするかを決める（特定の宛先の claim だけを失敗させる用） */
+  /**
+   * Decides per INSERT whether to fail with a DB error (to fail the claim of one specific recipient
+   * only).
+   */
   const insertFailures: { when: ((table: string, value: Row) => boolean) | null } = { when: null };
 
   function from(table: string) {
@@ -44,7 +47,6 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
     let limit: number | null = null;
     const orders: { column: string; ascending: boolean }[] = [];
 
-    // UNIQUE (user_id, kind, reference_key) と cron_locks の主キー (name)
     const isDuplicate = (rows: Row[], value: Row) =>
       (table === "email_logs" &&
         rows.some(
@@ -62,7 +64,6 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
       const rows = db[table] ?? [];
       db[table] = rows;
       if (op === "upsert") {
-        // ignoreDuplicates: true（ON CONFLICT DO NOTHING）
         for (const value of upsertRows) {
           if (!isDuplicate(rows, value)) {
             rows.push({ id: nextId++, created_at: clock.now.toISOString(), ...value });
@@ -112,7 +113,7 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
       });
       let result = range ? sorted.slice(range[0], range[1] + 1) : sorted;
       if (limit !== null) result = result.slice(0, limit);
-      // PostgREST の db-max-rows（1回のレスポンスの最大行数）
+      // PostgREST db-max-rows (max rows per response).
       if (options.maxRows !== undefined) result = result.slice(0, options.maxRows);
       return { data: result, error: null };
     };
@@ -179,7 +180,7 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
         const { data, error } = execute();
         return { data: error ? null : (data as Row[])[0], error };
       },
-      // biome-ignore lint/suspicious/noThenProperty: Supabase クエリビルダーの thenable を再現するため意図的に定義
+      // biome-ignore lint/suspicious/noThenProperty: mimics the Supabase query builder thenable
       then: (onfulfilled: (v: unknown) => unknown, onrejected?: (r: unknown) => unknown) =>
         Promise.resolve(execute()).then(onfulfilled, onrejected),
     };
@@ -190,12 +191,12 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
 }
 
 const APP_URL = "https://study.example.com";
-/** 2026-10-05（月）JST 8:00 */
+/** Monday 2026-10-05, 08:00 JST. */
 const MONDAY = new Date("2026-10-04T23:00:00Z");
-/** 2026-10-06（火）JST 8:00 */
+/** Tuesday 2026-10-06, 08:00 JST. */
 const TUESDAY = new Date("2026-10-05T23:00:00Z");
 
-/** JST の暦日 date の正午に登録したことにする */
+/** Pretend the user signed up at noon JST on the given JST calendar date. */
 function createdOn(date: string): string {
   return `${date}T03:00:00.000Z`;
 }
@@ -215,7 +216,7 @@ function userRow(id: number, overrides: Row = {}): Row {
 }
 
 const themes: Row[] = [
-  // 未公開テーマは返さない（トップレベルの is_published 絞り込み）
+  // Unpublished themes are excluded (top-level is_published filter).
   { id: 3, name: "未公開", display_order: 0, is_published: false, is_deleted: false, phases: [] },
   {
     id: 2,
@@ -308,12 +309,11 @@ const noWait = { sleep: vi.fn(async () => {}) };
 
 let fakeClock: { now: Date };
 
-/** 送信の claim 行（週次進捗の繰り越し予約を除く） */
 function sentLogs(db: Record<string, Row[]>): Row[] {
   return db.email_logs.filter((row) => row.kind !== "weekly_digest_reserved");
 }
 
-/** 実行日時を DB の now()（email_logs.created_at）にも反映して定期メールを実行する */
+/** Runs the digest with the run time also applied to the DB's now() (email_logs.created_at). */
 function runDigest(now: Date, options: Parameters<typeof runEmailDigest>[0] = {}) {
   fakeClock.now = now;
   return runEmailDigest({ now, ...noWait, ...options });
@@ -383,7 +383,7 @@ describe("送信対象の抽出", () => {
     setup({
       users: [userRow(1)],
       user_progress: [
-        // 先週の月曜 0:00 JST ちょうど（範囲内）
+        // Exactly last Monday 0:00 JST (in range).
         {
           id: 1,
           user_id: 1,
@@ -391,7 +391,7 @@ describe("送信対象の抽出", () => {
           is_completed: true,
           completed_at: "2026-09-27T15:00:00.000Z",
         },
-        // 先々週（範囲外）
+        // Week before last (out of range).
         {
           id: 2,
           user_id: 1,
@@ -401,8 +401,8 @@ describe("送信対象の抽出", () => {
         },
       ],
       submissions: [
-        { id: 1, user_id: 1, submitted_at: "2026-10-04T14:59:59.000Z" }, // 日曜 23:59 JST（範囲内）
-        { id: 2, user_id: 1, submitted_at: "2026-10-04T15:00:00.000Z" }, // 今週の月曜（範囲外）
+        { id: 1, user_id: 1, submitted_at: "2026-10-04T14:59:59.000Z" }, // Sunday 23:59 JST (in range)
+        { id: 2, user_id: 1, submitted_at: "2026-10-04T15:00:00.000Z" }, // This week's Monday (out of range)
       ],
     });
 
@@ -411,7 +411,6 @@ describe("送信対象の抽出", () => {
     const email = sentEmailTo("u1@example.com");
     expect(email.subject).toContain("今週の学習");
     expect(email.text).toContain("コンテンツ完了 1 本 / 演習の提出 1 件");
-    // テーマ→フェーズ→週→コンテンツの表示順で、未完了の先頭（1000・2000 は完了済み）
     expect(email.text).toContain("次に学ぶコンテンツ: 鍵付き");
     expect(email.text).toContain(`${APP_URL}/learn/1/10/100/1001`);
   });
@@ -457,11 +456,11 @@ describe("送信対象の抽出", () => {
   it("週次進捗: 先週をまるごと利用できた（前週の月曜以前に登録した）ユーザーだけに送る", async () => {
     setup({
       users: [
-        userRow(1, { created_at: createdOn("2026-09-28") }), // 前週の月曜
-        userRow(2, { created_at: createdOn("2026-09-29") }), // 前週の火曜
-        userRow(3, { created_at: createdOn("2026-10-04") }), // 前週の日曜（登録翌日が月曜）
+        userRow(1, { created_at: createdOn("2026-09-28") }), // Monday of last week
+        userRow(2, { created_at: createdOn("2026-09-29") }), // Tuesday of last week
+        userRow(3, { created_at: createdOn("2026-10-04") }), // Sunday of last week (the day before this Monday)
       ],
-      // u1 は 7 日目のため学習記録を付けて未学習リマインドの対象から外す
+      // u1 is day 7, so add learning records to exclude them from the unstudied reminder.
       user_progress: [
         {
           id: 1,
@@ -480,7 +479,7 @@ describe("送信対象の抽出", () => {
   });
 
   it("週次進捗: 今週（月曜以降）に登録したユーザーには送らない", async () => {
-    setup({ users: [userRow(1, { created_at: "2026-10-04T15:30:00.000Z" })] }); // 月曜 0:30 JST
+    setup({ users: [userRow(1, { created_at: "2026-10-04T15:30:00.000Z" })] });
 
     await runDigest(MONDAY);
 
@@ -490,9 +489,9 @@ describe("送信対象の抽出", () => {
   it("未学習リマインド: 登録から7日目で進捗も提出も無い active ユーザーに、最初の1本を案内する", async () => {
     setup({
       users: [
-        userRow(1, { created_at: createdOn("2026-09-29") }), // 火曜 → 7日目（月曜なので週次とも重なる）
-        userRow(2, { created_at: createdOn("2026-09-29") }), // 進捗あり
-        userRow(3, { created_at: createdOn("2026-09-29") }), // 提出あり
+        userRow(1, { created_at: createdOn("2026-09-29") }), // no activity
+        userRow(2, { created_at: createdOn("2026-09-29") }), // has progress
+        userRow(3, { created_at: createdOn("2026-09-29") }), // has a submission
       ],
       user_progress: [
         { id: 1, user_id: 2, content_id: 1000, is_completed: false, completed_at: null },
@@ -502,8 +501,8 @@ describe("送信対象の抽出", () => {
 
     await runDigest(TUESDAY);
 
-    // 7日目は 10/6（火）。u1 だけが未学習リマインド。u2・u3 は学習済みのため送らない
-    // （先週の途中に登録したため、火曜の取り戻しでも週次進捗の対象にならない）
+    // Day 7 is 10/6 (Tue). Only u1 gets the unstudied reminder; u2/u3 have studied. (They signed up
+    // mid last week, so the Tuesday catch-up doesn't make them weekly digest targets either.)
     const reminder = sentEmailTo("u1@example.com");
     expect(reminder.subject).toContain("最初の1本");
     expect(reminder.text).toContain(`${APP_URL}/learn/1/10/100/1000`);
@@ -520,7 +519,7 @@ describe("送信対象の抽出", () => {
     expect(sendEmail).toHaveBeenCalledTimes(1);
     expect(sentEmailTo("u1@example.com").subject).toContain("本登録で学べる内容");
     expect(db.email_logs.map((row) => [row.kind, row.reference_key])).toEqual([
-      // 週次進捗は送らず、同じ週の翌日以降に繰り越す
+      // No weekly digest; carried over to later days in the same week.
       ["weekly_digest_reserved", "2026-10-05"],
       ["trial_nurture", "day7"],
     ]);
@@ -542,8 +541,8 @@ describe("送信対象の抽出", () => {
     setup({
       users: [
         userRow(1),
-        userRow(2, { status: "trial", created_at: createdOn("2026-10-03") }), // 2日目
-        userRow(3, { created_at: createdOn("2026-09-28") }), // 7日目・未学習
+        userRow(2, { status: "trial", created_at: createdOn("2026-10-03") }), // day 2
+        userRow(3, { created_at: createdOn("2026-09-28") }), // day 7, no activity
       ],
     });
 
@@ -580,18 +579,18 @@ describe("二重送信の防止（email_logs の claim）", () => {
 
     expect(results.map((r) => r.status).sort()).toEqual(["completed", "skipped"]);
     expect(sentTo().sort()).toEqual(["u1@example.com", "u2@example.com"]);
-    // 終了時にロックを解放する
     expect(db.cron_locks).toEqual([]);
   });
 
   it("同じ日に案内系メールを受け取ったユーザーには、朝の実行後にステータスが変わっても2通目を送らない", async () => {
     const { db } = setup({
-      users: [userRow(1, { status: "trial", created_at: createdOn("2026-09-28") })], // 7日目
+      users: [userRow(1, { status: "trial", created_at: createdOn("2026-09-28") })], // day 7
     });
     await runDigest(MONDAY);
     expect(sentEmailTo("u1@example.com").subject).toContain("本登録で学べる内容");
 
-    // 同じ日に管理者が承認（未学習のままなら inactivity_reminder の候補になる）→ 再実行
+    // Admin approves the same day (would be an inactivity_reminder candidate if still unstudied),
+    // then rerun.
     db.users[0].status = "active";
     await runDigest(new Date("2026-10-05T01:00:00Z"));
 
@@ -602,8 +601,8 @@ describe("二重送信の防止（email_logs の claim）", () => {
   it("前日に案内系メールを受け取っていても、今日の分は送る", async () => {
     setup({ users: [userRow(1, { status: "trial", created_at: createdOn("2026-09-21") })] });
 
-    await runDigest(new Date("2026-10-04T23:00:00Z")); // 10/5 = 14日目（trial_nurture）
-    await runDigest(new Date("2026-10-05T23:00:00Z")); // 10/6 = 週次進捗の繰り越し
+    await runDigest(new Date("2026-10-04T23:00:00Z")); // 10/5 = day 14 (trial_nurture)
+    await runDigest(new Date("2026-10-05T23:00:00Z")); // 10/6 = weekly digest carry-over
 
     expect(vi.mocked(sendEmail).mock.calls.map(([params]) => params.subject)).toEqual([
       expect.stringContaining("お試し期間のご案内"),
@@ -650,7 +649,7 @@ describe("1回あたりの上限と繰り越し", () => {
     setup({
       users: [
         ...manyUsers(EMAIL_DIGEST_MAX_PER_DAY),
-        userRow(1000, { status: "trial", created_at: createdOn("2026-10-03") }), // 2日目
+        userRow(1000, { status: "trial", created_at: createdOn("2026-10-03") }), // day 2
       ],
     });
 
@@ -664,7 +663,6 @@ describe("1回あたりの上限と繰り越し", () => {
     setup({ users: manyUsers(EMAIL_DIGEST_MAX_PER_DAY + 5) });
     await runDigest(MONDAY);
 
-    // 同じ月曜の 9 時台に手動で再実行
     const rerun = await runDigest(new Date("2026-10-05T00:30:00Z"));
 
     expect(rerun).toMatchObject({ sent: 0, deferred: 5 });
@@ -685,7 +683,8 @@ describe("1回あたりの上限と繰り越し", () => {
     await runDigest(MONDAY);
     expect(sentTo()).toEqual(["u1@example.com"]);
 
-    // 火曜に新しい受講生（先週以前の登録）が対象条件を満たしても、月曜の予約が無いため送らない
+    // A new student (signed up before last week) meeting the criteria on Tuesday isn't sent, since
+    // there is no Monday reservation.
     db.users.push(userRow(2));
     const tuesday = await runDigest(TUESDAY);
 
@@ -696,7 +695,7 @@ describe("1回あたりの上限と繰り越し", () => {
   it("Cron を週の途中（金曜）に初めて動かしても、週次進捗は次の月曜まで送らず、予約が無いことを返す", async () => {
     setup({ users: [userRow(1), userRow(2)] });
 
-    const friday = await runDigest(new Date("2026-10-08T23:00:00Z")); // 10/9（金）
+    const friday = await runDigest(new Date("2026-10-08T23:00:00Z")); // Friday 10/9 JST
 
     expect(friday).toMatchObject({ queued: 0, weeklyReservationMissing: true });
     expect(sendEmail).not.toHaveBeenCalled();
@@ -713,7 +712,8 @@ describe("1回あたりの上限と繰り越し", () => {
       db.email_logs.filter((row) => row.kind === "weekly_digest_reserved").map((r) => r.user_id)
     ).toEqual([1, 2]);
 
-    // 水曜は火曜の予約に沿って繰り越し分だけを判定する（送信済みなので送らない）
+    // Wednesday only judges carry-over per Tuesday's reservation (already sent, so nothing to
+    // send).
     const wednesday = await runDigest(new Date("2026-10-06T23:00:00Z"));
     expect(wednesday).toMatchObject({ queued: 0, weeklyReservationMissing: false });
     expect(sendEmail).toHaveBeenCalledTimes(2);
@@ -734,7 +734,7 @@ describe("1回あたりの上限と繰り越し", () => {
   it("予約が無いまま水曜以降になったら週次進捗は送らず、予約が無いことを返す", async () => {
     setup({ users: [userRow(1)] });
 
-    const wednesday = await runDigest(new Date("2026-10-06T23:00:00Z")); // 10/7（水）
+    const wednesday = await runDigest(new Date("2026-10-06T23:00:00Z")); // Wednesday 10/7 JST
 
     expect(wednesday).toMatchObject({ queued: 0, weeklyReservationMissing: true });
     expect(sendEmail).not.toHaveBeenCalled();
@@ -789,7 +789,7 @@ describe("実行ロック（cron_locks）", () => {
 
     expect(result).toEqual({ status: "skipped", reason: "別の実行が進行中です" });
     expect(sendEmail).not.toHaveBeenCalled();
-    // 他の実行のロックは消さない
+    // Don't delete another run's lock.
     expect(db.cron_locks).toHaveLength(1);
   });
 
@@ -828,7 +828,8 @@ describe("実行ロック（cron_locks）", () => {
 
 describe("ページング", () => {
   it("サーバーの最大行数（db-max-rows）が 1000 未満でも、全件を取りこぼさない", async () => {
-    // 1回のレスポンスが最大 2 行の環境で、5 人全員に週次進捗を送る
+    // In an environment where a response holds at most 2 rows, send the weekly digest to all 5
+    // users.
     setup({ users: Array.from({ length: 5 }, (_, i) => userRow(i + 1)) }, { maxRows: 2 });
 
     const result = await runDigest(MONDAY);
@@ -839,7 +840,10 @@ describe("ページング", () => {
 });
 
 describe("お知らせのメール一斉送信（#254）", () => {
-  /** 2026-10-07（水）JST 8:00。週次進捗の予約が無い曜日で、お知らせだけを確かめる */
+  /**
+   * 2026-10-07 (Wed) 08:00 JST: a weekday without a weekly digest reservation, to check
+   * announcements alone.
+   */
   const WEDNESDAY = new Date("2026-10-06T23:00:00Z");
   const THURSDAY = new Date("2026-10-07T23:00:00Z");
 
@@ -932,21 +936,20 @@ describe("お知らせのメール一斉送信（#254）", () => {
     });
     expect(db.announcements[0].email_sent_at).toBeNull();
 
-    // 同じ日の再実行では1日の上限に達しているため送らない
+    // A rerun the same day sends nothing since the daily cap is reached.
     const rerun = await runDigest(new Date("2026-10-07T01:00:00Z"));
     expect(rerun).toMatchObject({ sent: 0, announcementsCompleted: 0 });
 
     const second = await runDigest(THURSDAY);
     expect(second).toMatchObject({ sent: 5, deferred: 0, announcementsCompleted: 1 });
     expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
-    // 全員に1通ずつ（二重送信なし）
     expect(new Set(sentTo()).size).toBe(EMAIL_DIGEST_MAX_PER_DAY + 5);
     expect(sendEmail).toHaveBeenCalledTimes(EMAIL_DIGEST_MAX_PER_DAY + 5);
   });
 
   it("同じ日に登録からN日目の案内を受け取るユーザーには翌日に送り、それまで完了にしない", async () => {
     const { db } = setup({
-      users: [userRow(1, { status: "trial", created_at: createdOn("2026-10-05") })], // 10/7 = 2日目
+      users: [userRow(1, { status: "trial", created_at: createdOn("2026-10-05") })], // day 2 on 10/7
       announcements: [announcementRow()],
     });
 
@@ -978,10 +981,8 @@ describe("お知らせのメール一斉送信（#254）", () => {
       users: Array.from({ length: count }, (_, i) => userRow(i + 1)),
     });
 
-    // 月曜は上限まで週次進捗を送り、5通を繰り越す
     expect(await runDigest(MONDAY)).toMatchObject({ sent: EMAIL_DIGEST_MAX_PER_DAY, deferred: 5 });
 
-    // 月曜の後に全員向けのお知らせを公開する
     db.announcements = [announcementRow({ published_at: "2026-10-05T03:00:00.000Z" })];
     vi.mocked(sendEmail).mockClear();
     const tuesday = await runDigest(TUESDAY);
@@ -1029,7 +1030,8 @@ describe("お知らせのメール一斉送信（#254）", () => {
     expect(wednesday).toMatchObject({ sent: 1, failed: 1, announcementsCompleted: 0 });
     expect(db.announcements[0].email_sent_at).toBeNull();
 
-    // 同じ日の再実行では送り直さない（今日の案内系メールの数から外さない）
+    // A rerun the same day doesn't resend (failures aren't removed from today's promotional mail
+    // count).
     const rerun = await runDigest(new Date("2026-10-07T01:00:00Z"));
     expect(rerun).toMatchObject({ sent: 0, failed: 0, announcementsCompleted: 0 });
 
@@ -1037,7 +1039,7 @@ describe("お知らせのメール一斉送信（#254）", () => {
     expect(thursday).toMatchObject({ sent: 1, announcementsCompleted: 1 });
     expect(sentTo()).toEqual(["u1@example.com", "u2@example.com", "u2@example.com"]);
     expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
-    // 失敗の行は消してから claim し直す（1人1行）
+    // Delete the failed row before re-claiming (one row per user).
     expect(
       announcementLogs(db).map((row) => [row.user_id, row.sent_at !== null, row.error])
     ).toEqual([
@@ -1062,7 +1064,7 @@ describe("お知らせのメール一斉送信（#254）", () => {
   });
 
   it(`送り直すのは公開日から ${ANNOUNCEMENT_EMAIL_RETRY_DAYS} 日以内で、過ぎたら失敗のまま完了にする`, async () => {
-    // 10/5（月）JST 公開。10/7・10/8 は期間内、10/9 は期間外
+    // Published 10/5 (Mon) JST. 10/7 and 10/8 are in the window, 10/9 is outside.
     const { db } = setup({
       users: [userRow(1)],
       announcements: [announcementRow({ published_at: "2026-10-05T01:00:00.000Z" })],
@@ -1087,7 +1089,8 @@ describe("お知らせのメール一斉送信（#254）", () => {
       announcements: [announcementRow({ target_statuses: ["active"] })],
     });
     vi.mocked(sendEmail).mockImplementationOnce(async () => {
-      // 送信の途中で管理画面から対象にお試しユーザーを加える（updated_at はトリガーが更新）
+      // Add trial users to the targets from the admin screen mid-send (updated_at is set by a
+      // trigger).
       Object.assign(db.announcements[0], {
         target_statuses: ["active", "trial"],
         updated_at: "2026-10-06T23:00:01.000Z",

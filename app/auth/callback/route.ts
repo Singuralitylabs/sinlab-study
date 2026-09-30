@@ -28,16 +28,17 @@ function redirectWithSessionCookies(
   for (const { name, value, options } of cookies) {
     redirectResponse.cookies.set(name, value, options);
   }
-  // 同意 Cookie は使い捨てのため、セッション付きの応答でも確実に削除する
+  // The consent cookie is single-use; delete it reliably even on session-carrying responses.
   redirectResponse.cookies.delete(TERMS_CONSENT_COOKIE_NAME);
-  // セッション Cookie を含む応答は CDN にキャッシュさせない（@supabase/ssr が渡す Cache-Control 等）
+  // Responses carrying session cookies must not be CDN-cached (Cache-Control etc. from
+  // @supabase/ssr).
   for (const [key, value] of Object.entries(headers)) {
     redirectResponse.headers.set(key, value);
   }
   return redirectResponse;
 }
 
-/** セッション Cookie を付けないエラー導線のリダイレクト。同意 Cookie の削除のみ行う */
+/** Error redirect without session cookies; only deletes the consent cookie. */
 function redirectWithoutSession(url: URL) {
   const redirectResponse = NextResponse.redirect(url);
   redirectResponse.cookies.delete(TERMS_CONSENT_COOKIE_NAME);
@@ -45,9 +46,9 @@ function redirectWithoutSession(url: URL) {
 }
 
 export async function GET(request: NextRequest) {
-  // 環境変数の欠落（createAdminSupabaseClient() の throw を含む）などの予期しない例外で
-  // 500 にせず /login へフェイルクローズする（proxy.ts と同じ方針。例外の内容はログのみ）。
-  // 監視上は 5xx として現れないため、ログのタグで検知する
+  // Fail closed to /login instead of a 500 on unexpected exceptions such as missing env vars
+  // (including createAdminSupabaseClient() throwing), same policy as proxy.ts. Details are logged
+  // only. These don't show up as 5xx in monitoring, so detect them via the log tag.
   try {
     return await handleCallback(request);
   } catch (error) {
@@ -64,13 +65,12 @@ async function handleCallback(request: NextRequest) {
     return redirectWithoutSession(new URL("/login", origin));
   }
 
-  // cookieを蓄積するための配列
   const cookiesToReturn: CookieToSet[] = [];
   const headersToReturn: Record<string, string> = {};
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  // 環境変数欠落時は 500 にせず /login へフェイルクローズする（値はレスポンス・ログに出さない）
+  // Fail closed to /login on missing env vars (values never go to the response or logs).
   if (!supabaseUrl || !supabaseKey) {
     console.error(
       "Supabase環境変数が設定されていません: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
@@ -84,7 +84,6 @@ async function handleCallback(request: NextRequest) {
         return request.cookies.getAll();
       },
       setAll(cookiesToSet: CookieToSet[], headers: Record<string, string>) {
-        // cookie と付随ヘッダーを蓄積（後でリダイレクトレスポンスに設定する）
         cookiesToReturn.push(...cookiesToSet);
         Object.assign(headersToReturn, headers);
       },
@@ -100,10 +99,11 @@ async function handleCallback(request: NextRequest) {
 
   const user = data.session.user;
 
-  // SELECT RLS は本人行でも is_deleted=false を要求するため、通常クライアントでは
-  // 論理削除済みレコードが見えない。再ログインで INSERT すると UNIQUE 違反になるので、
-  // 存在確認だけ service_role で行い is_deleted では絞らない。INSERT 自体は通常クライアント。
-  // SUPABASE_SERVICE_ROLE_KEY 欠落時の throw は GET の catch で /login へフェイルクローズする。
+  // SELECT RLS requires is_deleted=false even for one's own row, so the normal client can't see
+  // soft-deleted records, and a re-login INSERT would then hit the UNIQUE constraint. Check
+  // existence with service_role without filtering on is_deleted; the INSERT itself uses the normal
+  // client. A throw from a missing SUPABASE_SERVICE_ROLE_KEY is caught by GET's catch and fails
+  // closed to /login.
   const adminSupabase = await createAdminSupabaseClient();
   const { data: existingUser, error: userError } = await adminSupabase
     .from("users")
@@ -121,19 +121,17 @@ async function handleCallback(request: NextRequest) {
     return redirectWithoutSession(new URL(REGISTRATION_FAILED_PATH, origin));
   }
 
-  // リダイレクト先を決定
   let redirectPath = "/";
 
   if (!existingUser) {
-    // 初回ログイン: 同意 Cookie なしには users 行を作らない（同意操作の迂回防止）。
-    // 既存ユーザーの分岐では Cookie を参照しない。
+    // First login: don't create a users row without the consent cookie (prevents bypassing the
+    // consent step). Existing-user branches never read the cookie.
     const hasConsented =
       request.cookies.get(TERMS_CONSENT_COOKIE_NAME)?.value === TERMS_CONSENT_COOKIE_VALUE;
     if (!hasConsented) {
       return redirectWithoutSession(new URL(TERMS_REQUIRED_PATH, origin));
     }
 
-    // 初回ログイン: ユーザーを自動登録（同意日時を記録）
     const { error: insertError } = await supabase.from("users").insert({
       auth_id: user.id,
       email: user.email || "",
@@ -159,7 +157,6 @@ async function handleCallback(request: NextRequest) {
     });
     scheduleSignupEmail({ authId: user.id });
 
-    // お試しユーザーとしてそのままダッシュボードへ（承認待ちはアプリ内バナーで通知）
     redirectPath = "/";
   } else if (existingUser.status === USER_STATUS.REJECTED) {
     redirectPath = "/rejected";

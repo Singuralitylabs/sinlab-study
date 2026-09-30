@@ -1,6 +1,5 @@
 /**
- * DBに保存するSupabase Storageの相対パスを、画面表示用の完全URLへ解決する。
- * 既存の外部URL・public配下の相対パスは後方互換のためそのまま返す。
+ * Existing external URLs and public-relative paths pass through unchanged (backward compatibility).
  */
 export function resolveStorageUrl(url: string): string {
   if (!url.startsWith("/storage/")) {
@@ -14,9 +13,9 @@ export function resolveStorageUrl(url: string): string {
 const STORAGE_URL_PLACEHOLDER = /\{\{SUPABASE_STORAGE_URL\}\}/g;
 
 /**
- * Markdown本文中の {{SUPABASE_STORAGE_URL}} プレースホルダを、Supabase Storageの
- * 公開オブジェクトURLプレフィックスへ置換する。管理画面で入力するMarkdown
- * （text_content・description等）から、環境非依存でStorage内の画像等を参照できるようにする。
+ * Replaces the {{SUPABASE_STORAGE_URL}} placeholder in Markdown with the public object URL prefix
+ * so admin-authored Markdown (text_content, description, etc.) can reference Storage images
+ * environment-independently.
  */
 export function resolveMarkdownStorageUrls(content: string): string {
   return content.replace(STORAGE_URL_PLACEHOLDER, resolveStorageUrl("/storage/v1/object/public"));

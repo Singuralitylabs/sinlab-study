@@ -69,14 +69,13 @@ export default async function PhasePage({ params }: PageProps) {
     notFound();
   }
 
-  // お試しユーザー（status='trial'）にはお試し非公開コンテンツをロック表示する
   const isLocked = (content: ContentVisibilitySummary) =>
     isContentLockedForUser(userStatus, content.is_open_to_trial);
 
-  // 進捗の分母は可視（ロックされていない）かつ、コンテンツ・週・フェーズ・テーマの
-  // 全階層が公開済みのもののみとする（お試しユーザーは体験範囲内の進捗を示す。機能設計書 2.6
-  // 参照。admin / maintainer がプレビュー中の未公開コンテンツ・未公開の週配下のコンテンツは
-  // 完了不能なため分母から除く。issue #68）
+  // The progress denominator counts only visible (unlocked) content whose content/week/phase/theme
+  // are all published (trial users see progress within their scope; spec 2.6). Unpublished content
+  // previewed by admin/maintainer and content under unpublished weeks can't be completed, so
+  // exclude it (#68).
   const ancestorsPublished = theme.is_published && phase.is_published;
   const isCountable = (content: ContentVisibilitySummary, week: { is_published: boolean }) =>
     !isLocked(content) && content.is_published && week.is_published && ancestorsPublished;
@@ -114,7 +113,6 @@ export default async function PhasePage({ params }: PageProps) {
         badge={<UnpublishedBadge isPublished={phase.is_published} />}
       />
 
-      {/* 進捗サマリー */}
       {totalCount > 0 && (
         <Card className="mb-6">
           <CardContent className="pt-6">
@@ -148,7 +146,6 @@ export default async function PhasePage({ params }: PageProps) {
 
             return (
               <div key={week.id}>
-                {/* 週ヘッダー */}
                 <div className="flex items-center gap-3 mb-3">
                   <div
                     className={`p-2 rounded-full ${
@@ -177,7 +174,6 @@ export default async function PhasePage({ params }: PageProps) {
                   )}
                 </div>
 
-                {/* コンテンツ一覧 */}
                 {week.contents.length === 0 ? (
                   <p className="text-sm text-muted-foreground ml-12">
                     コンテンツはまだ登録されていません。
