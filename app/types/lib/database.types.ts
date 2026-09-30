@@ -271,6 +271,13 @@ export type Database = {
         };
         Relationships: [
           {
+            foreignKeyName: "email_settings_service_updated_by_fkey";
+            columns: ["service_updated_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+          {
             foreignKeyName: "email_settings_updated_by_fkey";
             columns: ["updated_by"];
             isOneToOne: false;
