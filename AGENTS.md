@@ -10,13 +10,13 @@ AIコーディングエージェント向けのガイダンス（[agents.md](htt
 - 設計判断の結論と理由は `docs/` に、経緯・調査ログ・一時的な手順は git / PR / Issue 履歴に置く（#185）。
 - **特定の関数・分岐の落とし穴は、まずコード内コメントに書く。** `docs/` と同じ内容を二重に持たず、あるなら参照へ置き換える。
 - 節を増やさず既存の節に一行足せないか先に検討する。停止中・未使用の機能は「無効であること」と参照先だけ残す。
-- **`AGENTS.md` と `CLAUDE.md` の合計で 200行 / 12,000文字以内。** 超えたら `docs/` へ移す。
+- **`AGENTS.md` と `CLAUDE.md` の合計で 200行 / 12,000文字以内。** 超えたら `docs/` へ移す。ツール固有の設定は `CLAUDE.md` 等へ。
 
-詳細は `docs/`（`requirements.md` 要件 / `specification.md` 機能設計 / `database.md` DB・RLS / `testing.md` テスト）と `README.md`（セットアップ・環境変数・構成）にある。要約を書かない。
+詳細は `docs/requirements.md`（要件）/ `docs/specification.md`（機能設計）/ `docs/database.md`（DB・RLS設計）/ `docs/testing.md`（テスト）/ `README.md`（セットアップ・環境変数・構成）にある。要約を書かない。
 
 ## コマンド・運用
 
-Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（npm/yarn/pnpm 不可）。
+Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（npm/yarn/pnpm 不可）。スクリプトは README。
 
 - **push 前・作業完了前には必ず `bun run test:all` を通す。**
 - DBスキーマ変更後は `bun run db:types` を実行し、生成物もコミットする。
@@ -25,7 +25,8 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 ## コードスタイル (Biome)
 
-- 書式は Biome（`biome.json`）に従う。型のみのインポートは `import type`（`useImportType` は error）
+- ダブルクォート、セミコロン必須、ES5トレイリングカンマ、2スペース、行幅100文字（詳細は `biome.json`）
+- `useConst`・`useImportType`/`useExportType` は error。型のみのインポートは `import type`
 - コードのコメントは英語で「why」（理由・壊すと起きること）だけ。言い換え（what）・変更履歴・ファイルヘッダ概要は書かない。コメントのみの変更は `bun run check:comments` でロジック不変を確認する。
 
 ## 実装時に必ず守ること
@@ -41,7 +42,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 - **プロキシはフェイルクローズ。** 環境変数欠落・例外・status null はすべて `/login` へ。
 - **Cron ルート（`app/api/cron/`）は `isAuthorizedCronRequest()`（`app/services/auth/cron-auth.ts`）による `CRON_SECRET` の検証を必ず通す**（未設定・不一致は 401）。`/api` は proxy の対象外のため、ルート側の検証だけが防御になる。
 - **定期メールの送る日・曜日・上限は `email_kind_settings` / `email_settings` が唯一の真実。定数をハードコードしない**（`docs/specification.md` 10.10）。
-- **メール文面は `email_templates` → 既定値の順で解決し、差し込む値は変換後に入れ HTML ではエスケープする**（`docs/specification.md` 10.11）。
+- **メール文面は `email_templates` → コードの既定値の順で解決し、差し込む値は Markdown 変換の後に入れ HTML ではエスケープする。** 配信停止リンクと `List-Unsubscribe` はテンプレートに含めずコードが必ず付ける（`docs/specification.md` 10.11）。
 - ロール判定ロジックは `app/services/auth/` に集約する。
 - **初回登録の INSERT は同意 Cookie 必須。** 同意なしでは `users` 行を作らず `/login?error=terms_required` へ戻す。`terms_accepted_at` は callback でのみ書き、既存ユーザー分岐では触らない。
 

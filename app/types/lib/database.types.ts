@@ -758,13 +758,13 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      claim_email_test_send: {
-        Args: { p_day_start: string; p_limit: number; p_user_id: number };
-        Returns: number;
-      };
       bulk_update_sibling_display_order: {
         Args: { p_table: string; p_updates: Json };
         Returns: undefined;
+      };
+      claim_email_test_send: {
+        Args: { p_day_start: string; p_limit: number; p_user_id: number };
+        Returns: number;
       };
       get_students_progress_summary: {
         Args: never;
