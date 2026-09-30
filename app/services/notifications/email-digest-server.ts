@@ -394,28 +394,6 @@ async function hasWeeklyDigestReservation(
 }
 
 /**
- * Whether any weekly digest or reservation row exists within the 7 days up to `today`. Used to tell
- * a send-weekday change mid-week (a digest was already handled under the old weekday, so the new
- * cycle has no reservation by design) from a cycle whose deciding run never completed.
- */
-async function hasRecentWeeklyDigestActivity(
-  supabase: AdminClient,
-  today: string
-): Promise<boolean> {
-  const { data, error } = await supabase
-    .from("email_logs")
-    .select("user_id")
-    .in("kind", [EMAIL_KIND.WEEKLY_DIGEST, WEEKLY_DIGEST_RESERVATION_KIND])
-    .gte("reference_key", addDays(today, -6))
-    .lte("reference_key", today)
-    .limit(1);
-  if (error) {
-    throw new Error(error.message);
-  }
-  return (data ?? []).length > 0;
-}
-
-/**
  * Records users selected for Monday's weekly digest as carry-over reservations (no-op if
  * present). The reservation is a precondition for sending: throw on failure (the caller returns
  * failure without sending anything). It happens before the claim, so rerunning cannot double send
@@ -843,15 +821,20 @@ async function buildQueue(
   ) {
     // The deciding run of this cycle did not reach target selection (failure, skip, missed start).
     // Within the catch-up window today's run decides targets in its place; after that nothing is
-    // sent so it gets noticed. Exception: if a digest or reservation of the last 7 days exists,
-    // the send weekday was changed mid-week, which is not a failure (sends resume next cycle).
+    // sent so it gets noticed. Exception: if the setting itself changed during this cycle (send
+    // weekday moved, or the kind re-enabled), the cycle never had a scheduled deciding day, so
+    // sends resume next cycle. Judged by updated_at rather than by past log rows, which would also
+    // hide a genuine failure of the new cycle's deciding runs.
     if (daysSinceWeekStart <= WEEKLY_DIGEST_CATCH_UP_DAYS) {
       decidesTargets = true;
       console.warn(
         `[定期メール] 今週（${weekStart}）の週次進捗の予約が無いため、今日の実行で対象を決めて送ります`
       );
-    } else if (await hasRecentWeeklyDigestActivity(supabase, today)) {
+    } else if (weeklySetting.updatedAt >= jstStartOfDayIso(weekStart)) {
       weeklySkipped = true;
+      console.warn(
+        `[定期メール] 週次進捗の設定が今サイクル（${weekStart}〜）の途中で変更されたため、今回は週次進捗を送りません（次の送信日から再開します）`
+      );
     } else {
       weeklyReservationMissing = true;
       console.warn(

@@ -1465,6 +1465,7 @@ describe("メール通知の管理設定（#272）", () => {
       // Tuesday: moved to Wednesday. The new cycle started last Wednesday and has no reservation.
       const weekly = db.email_kind_settings.find((row) => row.kind === "weekly_digest") as Row;
       weekly.send_weekday = 3;
+      weekly.updated_at = "2026-10-05T03:00:00.000Z"; // Tuesday 12:00 JST
       const tuesday = await runDigest(TUESDAY);
 
       expect(tuesday).toMatchObject({ sent: 0, weeklyReservationMissing: false });
@@ -1476,6 +1477,49 @@ describe("メール通知の管理設定（#272）", () => {
         weeklyReservationMissing: false,
       });
       expect(sendEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it("曜日を変えた後の新サイクルで決定日と取り戻し日の実行が失敗したら、警告して送らない（変更前の送信行に隠さない）", async () => {
+      const { db } = setup({ users: [userRow(1)] });
+      expect(await runDigest(MONDAY)).toMatchObject({ sent: 1 });
+      const weekly = db.email_kind_settings.find((row) => row.kind === "weekly_digest") as Row;
+      weekly.send_weekday = 3;
+      weekly.updated_at = "2026-10-05T03:00:00.000Z"; // Tuesday 12:00 JST, before the new cycle
+
+      // Wed 10/7 and Thu 10/8 never ran. Friday 10/9 is past the catch-up window.
+      const friday = await runDigest(new Date("2026-10-08T23:00:00Z"));
+
+      expect(friday).toMatchObject({ sent: 0, weeklyReservationMissing: true });
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("予約が無い"));
+    });
+
+    it("最後の送信より先の曜日へ変更した設定変更の週は、警告せずに送らない（変更日が今サイクルの内）", async () => {
+      const { db } = setup({ users: [userRow(1)] });
+      const weekly = db.email_kind_settings.find((row) => row.kind === "weekly_digest") as Row;
+      weekly.send_weekday = 3;
+      weekly.updated_at = "2026-10-02T03:00:00.000Z"; // Fri 10/2, inside cycle 9/30..
+
+      const monday = await runDigest(MONDAY); // cycleStart 9/30, 5 days in
+
+      expect(monday).toMatchObject({ sent: 0, weeklyReservationMissing: false });
+      expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining("予約が無い"));
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("設定が今サイクル"));
+    });
+
+    it("無効から再有効化した週は、警告せずに次の送信日から再開する", async () => {
+      const { db } = setup({
+        users: [userRow(1)],
+        email_kind_settings: kindRows({ weekly_digest: { enabled: false } }),
+      });
+      const weekly = db.email_kind_settings.find((row) => row.kind === "weekly_digest") as Row;
+      weekly.enabled = true;
+      weekly.updated_at = "2026-10-06T23:00:00.000Z"; // Wed 10/7 08:00 JST
+
+      const wednesday = await runDigest(WEDNESDAY);
+      expect(wednesday).toMatchObject({ sent: 0, weeklyReservationMissing: false });
+      expect(sendEmail).not.toHaveBeenCalled();
+
+      expect(await runDigest(new Date("2026-10-11T23:00:00Z"))).toMatchObject({ sent: 1 });
     });
 
     it("直近7日に送信も予約も無いまま送信日から2日以上過ぎたら、従来どおり予約なしを警告する", async () => {
