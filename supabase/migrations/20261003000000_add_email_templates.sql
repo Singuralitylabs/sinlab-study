@@ -29,7 +29,13 @@ COMMENT ON COLUMN public.email_templates.body IS '本文（Markdown。{{placehol
 
 ALTER TABLE public.email_settings
   ADD COLUMN IF NOT EXISTS service_name TEXT NOT NULL DEFAULT 'Sinlab Study',
-  ADD COLUMN IF NOT EXISTS service_subtitle TEXT DEFAULT 'AIと学ぶ実践Web技術講座';
+  ADD COLUMN IF NOT EXISTS service_subtitle TEXT DEFAULT 'AIと学ぶ実践Web技術講座',
+  ADD COLUMN IF NOT EXISTS service_updated_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS service_updated_by INTEGER REFERENCES public.users(id) ON DELETE SET NULL;
+
+COMMENT ON COLUMN public.email_settings.service_updated_at IS
+  'サービス名・補足の最終更新日時。NULL は未編集。updated_at（1日の上限の最終更新）とは別に持つ';
+COMMENT ON COLUMN public.email_settings.service_updated_by IS 'サービス名・補足を最後に更新した users.id';
 
 COMMENT ON COLUMN public.email_settings.service_name IS
   'メールの差出人名・件名の接頭辞・本文の見出し・フッターのサービス名';

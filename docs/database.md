@@ -203,6 +203,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 - `service_name`: TEXT NOT NULL、既定 `'Sinlab Study'`（コードの `EMAIL_SERVICE_NAME` と同じ。テストで一致を確認している）。長さ・改行の検証は API の zod（1〜50文字、改行不可）
 - `service_subtitle`: TEXT、既定 `'AIと学ぶ実践Web技術講座'`（`EMAIL_SERVICE_SUBTITLE`）。NULL は「補足なし」。API の zod は0〜100文字・改行不可
+- `service_updated_at` / `service_updated_by`（`users.id`、`ON DELETE SET NULL`）: サービス名・補足の最終更新。NULL は未編集。`updated_at` / `updated_by` は1日の上限の最終更新なので共用しない
 
 ### 3.17 email_templates（メール文面の上書き）
 

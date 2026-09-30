@@ -244,6 +244,8 @@ export type Database = {
           id: number;
           service_name: string;
           service_subtitle: string | null;
+          service_updated_at: string | null;
+          service_updated_by: number | null;
           updated_at: string;
           updated_by: number | null;
         };
@@ -252,6 +254,8 @@ export type Database = {
           id?: number;
           service_name?: string;
           service_subtitle?: string | null;
+          service_updated_at?: string | null;
+          service_updated_by?: number | null;
           updated_at?: string;
           updated_by?: number | null;
         };
@@ -260,6 +264,8 @@ export type Database = {
           id?: number;
           service_name?: string;
           service_subtitle?: string | null;
+          service_updated_at?: string | null;
+          service_updated_by?: number | null;
           updated_at?: string;
           updated_by?: number | null;
         };

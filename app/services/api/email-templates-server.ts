@@ -93,7 +93,7 @@ export async function fetchEmailTemplatesForAdmin(): Promise<{
     const [settings, rows] = await Promise.all([
       supabase
         .from("email_settings")
-        .select("service_name, service_subtitle, updated_at, updated_by")
+        .select("service_name, service_subtitle, service_updated_at, service_updated_by")
         .eq("id", 1)
         .maybeSingle(),
       supabase
@@ -129,7 +129,7 @@ export async function fetchEmailTemplatesForAdmin(): Promise<{
       ...new Set(
         [
           ...templates.map((t) => t.stored?.updatedBy ?? null),
-          settings.data?.updated_by ?? null,
+          settings.data?.service_updated_by ?? null,
         ].filter((id): id is number => id !== null)
       ),
     ];
@@ -144,8 +144,8 @@ export async function fetchEmailTemplatesForAdmin(): Promise<{
       data: {
         branding: {
           ...toBranding(settings.data),
-          updatedAt: settings.data?.updated_at ?? null,
-          updatedBy: settings.data?.updated_by ?? null,
+          updatedAt: settings.data?.service_updated_at ?? null,
+          updatedBy: settings.data?.service_updated_by ?? null,
         },
         templates,
         editorNames,
@@ -207,8 +207,9 @@ export async function updateEmailBranding(
     .update({
       service_name: branding.serviceName,
       service_subtitle: branding.serviceSubtitle,
-      updated_at: new Date().toISOString(),
-      updated_by: updatedBy,
+      // Own columns: updated_at / updated_by belong to the daily limit (shown on /admin/emails).
+      service_updated_at: new Date().toISOString(),
+      service_updated_by: updatedBy,
     })
     .eq("id", 1)
     .select("id");

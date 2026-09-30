@@ -8,6 +8,7 @@ import {
   claimTestSend,
   loadEmailTexts,
   loadEmailTextsWithDraft,
+  updateEmailBranding,
   upsertEmailTemplate,
 } from "@/app/services/api/email-templates-server";
 import {
@@ -247,5 +248,27 @@ describe("upsertEmailTemplate（admin の通常クライアント = RLS 適用�
       }),
       { onConflict: "template_key" }
     );
+  });
+});
+
+describe("updateEmailBranding（1日の上限の最終更新と分ける）", () => {
+  it("サービス名専用の列だけを更新し、上限の updated_at / updated_by には触れない", async () => {
+    const server = createMockSupabaseClient({
+      tableResults: { email_settings: { data: [{ id: 1 }], error: null } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(server as never);
+
+    const result = await updateEmailBranding({ serviceName: "名前", serviceSubtitle: null }, 3);
+
+    expect(result).toEqual({ error: null, updated: true });
+    const payload = builder(server, "email_settings").update.mock.calls[0][0];
+    expect(payload).toEqual({
+      service_name: "名前",
+      service_subtitle: null,
+      service_updated_at: expect.any(String),
+      service_updated_by: 3,
+    });
+    expect(payload).not.toHaveProperty("updated_at");
+    expect(payload).not.toHaveProperty("updated_by");
   });
 });
