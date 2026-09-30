@@ -37,11 +37,13 @@ erDiagram
     users ||--o{ email_logs : "1:N"
     users ||--o{ email_kind_settings : "updated_by"
     users ||--o{ email_settings : "updated_by"
+    users ||--o{ email_templates : "updated_by"
+    users ||--o{ email_test_sends : "user_id"
     announcements ||--o{ announcement_reads : "1:N"
     users ||--o{ announcement_reads : "1:N"
 ```
 
-`stripe_events` / `cron_locks` は他テーブルと関連を持たない独立テーブル。`email_kind_settings` / `email_settings` は更新者（`updated_by`）でのみ `users` を参照する。
+`stripe_events` / `cron_locks` は他テーブルと関連を持たない独立テーブル。`email_kind_settings` / `email_settings` / `email_templates` は更新者（`updated_by`）でのみ `users` を参照する。
 
 ---
 
@@ -196,6 +198,24 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 ### 3.16 email_settings（メール通知の共通設定）
 
 案内系メールの1日の上限（`digest_daily_limit`）を持つ、1行だけのテーブル（`id = 1` の CHECK 制約）。`digest_daily_limit` は CHECK で1〜95（Resend 無料枠の日次100通未満）。初期値は 80。`updated_at` / `updated_by` は `email_kind_settings` と同じ。
+
+メールの差出人名・件名の先頭・見出し・フッターに使うサービス名も、この行に持つ（#286。[機能設計書](./specification.md)10.11節）。
+
+- `service_name`: TEXT NOT NULL、既定 `'Sinlab Study'`（コードの `EMAIL_SERVICE_NAME` と同じ。テストで一致を確認している）。長さ・改行の検証は API の zod（1〜50文字、改行不可）
+- `service_subtitle`: TEXT、既定 `'AIと学ぶ実践Web技術講座'`（`EMAIL_SERVICE_SUBTITLE`）。NULL は「補足なし」。API の zod は0〜100文字・改行不可
+- `service_updated_at` / `service_updated_by`（`users.id`、`ON DELETE SET NULL`）: サービス名・補足の最終更新。NULL は未編集。`updated_at` / `updated_by` は1日の上限の最終更新なので共用しない
+
+### 3.17 email_templates（メール文面の上書き）
+
+テンプレートキーごとの件名・本文（Markdown）の上書き。**行が無いキーはコードの既定値で送る**（既定値はアプリ側の `EMAIL_TEMPLATE_DEFINITIONS`）。「既定に戻す」は行の削除。
+
+- `template_key`（PK）: `EMAIL_TEMPLATE_KEYS` と同じ値（`signup` / `trial_nurture.day2` など）。CHECK 制約は設けない（キーの追加に追従できるようにするため。許可キーとプレースホルダーの検証はアプリ側の zod と送信側の `validateEmailTemplateText()`）
+- `subject` / `body`: TEXT NOT NULL。本文は Markdown で `{{placeholder}}` を書ける。長さの上限は API の zod（件名100・本文5,000）
+- `updated_at` / `updated_by`（`users.id`、`ON DELETE SET NULL`）。変更履歴（版管理）は持たない
+
+### 3.18 email_test_sends（テスト送信の記録）
+
+管理画面のテスト送信（[機能設計書](./specification.md)10.11節）の1日の回数を数えるための記録（`id` / `user_id`（`ON DELETE SET NULL`）/ `created_at`）。`email_logs` とは別にし、案内系メールの1日の上限の集計に影響させない。本文・宛先は保存しない。枠の確保は関数 `claim_email_test_send(p_user_id, p_day_start, p_limit)` が `pg_advisory_xact_lock` の中で「数える → 上限未満なら INSERT」を行う（上限なら NULL。`authenticated` / `anon` には実行権限を与えず、service_role のみ）。
 
 ---
 
@@ -357,6 +377,10 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 ### 6.12 announcement_reads
 
 SELECT は本人のみ。INSERT は本人かつ、`announcements` の SELECT ポリシーが適用される `EXISTS` により自分に見える（公開済み・未削除の）お知らせに限る。UPDATE / DELETE のポリシーは定義していない（既読は取り消さない）。
+
+### 6.14 email_templates / email_test_sends
+
+`email_templates` は SELECT / INSERT / UPDATE / DELETE とも admin のみ（条件は `(select get_user_role()) = 'admin'`。INSERT は WITH CHECK、UPDATE は USING / WITH CHECK）。同一操作のポリシーは1本にまとめる。maintainer には開放しない。メール送信（`deliverToUser()`・`runEmailDigest()`）は service_role で読む（RLS をバイパスする）。`email_test_sends` は RLS を有効にしポリシーを定義しない（service_role 専用。`email_logs` と同じ）。
 
 ---
 

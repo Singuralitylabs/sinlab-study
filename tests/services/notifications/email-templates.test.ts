@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_EMAIL_TEXTS,
+  EMAIL_TEMPLATE_KEYS,
+  type EmailTexts,
+} from "@/app/lib/email-template";
+import { renderEmailMarkdown } from "@/app/lib/markdown-email";
+import {
+  buildAnnouncementEmail,
   buildApprovedEmail,
   buildAppUrl,
   buildCancelScheduledEmail,
@@ -368,5 +375,188 @@ describe("buildTrialNurtureEmail", () => {
     expect(text(7)).toContain("ご登録から1週間が経ちました");
     expect(text(14)).toContain("ご登録から2週間が経ちました");
     expect(text(10)).toContain("ご登録から10日が経ちました");
+  });
+});
+
+describe("編集できる文面（#286）", () => {
+  const unsubscribeUrl = "https://study.example.com/api/email/unsubscribe?token=7.abc";
+  const promotional = { displayName: "山田", appUrl: APP_URL, unsubscribeUrl };
+
+  it("サービス名の既定値は Sinlab Study で、講座名は補足・フッターに出る", () => {
+    const email = buildSignupEmail({
+      displayName: "山田",
+      appUrl: APP_URL,
+      upgradeAvailable: false,
+    });
+
+    expect(email.subject).toBe("【Sinlab Study】ご登録ありがとうございます");
+    expect(email.fromName).toBe("Sinlab Study");
+    expect(email.text).toContain("「Sinlab Study」にご登録いただきありがとうございます。");
+    expect(email.text).toContain(
+      "「Sinlab Study（AIと学ぶ実践Web技術講座）」から自動送信しています。"
+    );
+    expect(email.html).toContain("AIと学ぶ実践Web技術講座");
+  });
+
+  it("サービス名・補足を変えると、差出人名・件名・見出し・フッターに反映され、補足を空にすると出ない", () => {
+    const email = buildApprovedEmail(
+      { displayName: "山田", appUrl: APP_URL, membershipLabel: "一般" },
+      { ...DEFAULT_EMAIL_TEXTS, branding: { serviceName: "新サービス", serviceSubtitle: null } }
+    );
+
+    expect(email.subject).toBe("【新サービス】本登録が完了しました");
+    expect(email.fromName).toBe("新サービス");
+    expect(email.text).toContain("「新サービス」から自動送信しています。");
+    expect(email.html).toContain(">新サービス</div>");
+    expect(email.html).not.toContain("AIと学ぶ実践Web技術講座");
+  });
+
+  it("保存された件名・本文で送り、差し込み値は HTML でエスケープされ Markdown として解釈されない", () => {
+    const email = buildApprovedEmail(
+      {
+        displayName: "<script>",
+        appUrl: APP_URL,
+        membershipLabel: "[x](https://evil.example.com)",
+      },
+      {
+        ...DEFAULT_EMAIL_TEXTS,
+        templates: {
+          approved: {
+            subject: "承認: {{display_name}}",
+            body: "**{{display_name}}** さん\n\n会員種別: {{membership_label}}",
+          },
+        },
+      }
+    );
+
+    expect(email.subject).toBe("【Sinlab Study】承認: <script>");
+    expect(email.html).toContain("<strong>&lt;script&gt;</strong>");
+    expect(email.html).not.toContain("<script>");
+    expect(email.html).not.toContain('href="https://evil.example.com"');
+    expect(email.text).toContain("会員種別: [x](https://evil.example.com)");
+  });
+
+  it("件名に改行を含む値を差し込んでも、件名は1行になる", () => {
+    const email = buildAnnouncementEmail({
+      ...promotional,
+      announcementId: 1,
+      title: "件名\r\nBcc: evil@example.com",
+      body: renderEmailMarkdown("本文"),
+    });
+
+    expect(email.subject).not.toMatch(/[\r\n]/);
+  });
+
+  it("値が無い行は出さない（料金・日付を取得できないとき）", () => {
+    const email = buildUpgradedEmail({
+      displayName: "山田",
+      appUrl: APP_URL,
+      monthlyPriceLabel: null,
+      nextBillingDateLabel: null,
+    });
+
+    expect(email.text).not.toContain("料金:");
+    expect(email.text).not.toContain("次回のお支払い予定日");
+    expect(email.html).not.toContain("料金:");
+  });
+
+  it.each([
+    [
+      "週次進捗",
+      (texts: EmailTexts) =>
+        buildWeeklyDigestEmail(
+          {
+            ...promotional,
+            completedLastWeek: 0,
+            submittedLastWeek: 0,
+            nextContent: null,
+            remainingContents: 0,
+          },
+          texts
+        ),
+    ],
+    [
+      "未学習リマインド",
+      (texts: EmailTexts) =>
+        buildInactivityReminderEmail({ ...promotional, firstContent: null }, texts),
+    ],
+    [
+      "お試し 7日目",
+      (texts: EmailTexts) =>
+        buildTrialNurtureEmail(
+          { ...promotional, day: 7, isFinal: false, upgradeAvailable: true, lockedThemeNames: [] },
+          texts
+        ),
+    ],
+    [
+      "お知らせ",
+      (texts: EmailTexts) =>
+        buildAnnouncementEmail(
+          { ...promotional, announcementId: 1, title: "t", body: renderEmailMarkdown("本文") },
+          texts
+        ),
+    ],
+  ])(
+    "案内系（%s）は、本文を短い文面に書き換えても配信停止リンクと List-Unsubscribe を必ず付ける",
+    (_name, build) => {
+      const minimal = (body: string): EmailTexts => ({
+        ...DEFAULT_EMAIL_TEXTS,
+        templates: Object.fromEntries(
+          EMAIL_TEMPLATE_KEYS.map((k) => [
+            k,
+            { subject: "件名", body: k === "announcement" ? "{{announcement_body}}" : body },
+          ])
+        ) as EmailTexts["templates"],
+      });
+      const email = build(minimal("短い本文"));
+
+      expect(email.text).toContain(`配信を停止できます: ${unsubscribeUrl}`);
+      expect(email.html).toContain(`href="${unsubscribeUrl}"`);
+      expect(email.headers).toEqual({
+        "List-Unsubscribe": `<${unsubscribeUrl}>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      });
+      expect(email.text).toContain("自動送信しています");
+      expect(email.text).toContain("返信いただいてもお答えできません");
+    }
+  );
+
+  it("トランザクションメールは、どの文面でも配信停止リンクを付けない", () => {
+    const email = buildSubscriptionEndedEmail(
+      { displayName: "山田", appUrl: APP_URL },
+      {
+        ...DEFAULT_EMAIL_TEXTS,
+        templates: { subscription_ended: { subject: "件名", body: "配信を停止できます" } },
+      }
+    );
+
+    expect(email.headers).toBeUndefined();
+    expect(email.text).not.toContain("api/email/unsubscribe");
+  });
+
+  it("お試し 14日目: 最後の案内のときだけ「これが最後です」が入り、経過日数の表記はコードが決める", () => {
+    const base = { ...promotional, upgradeAvailable: true, lockedThemeNames: [] };
+    const final = buildTrialNurtureEmail({ ...base, day: 14, isFinal: true });
+    const notFinal = buildTrialNurtureEmail({ ...base, day: 20, isFinal: false });
+
+    expect(final.text).toContain(
+      "ご登録から2週間が経ちました。お試しユーザーへのご案内メールはこれが最後です。"
+    );
+    expect(notFinal.text).toContain("ご登録から20日が経ちました。");
+    expect(notFinal.text).not.toContain("これが最後です");
+  });
+
+  it("お知らせ: 前後の定型文の間にお知らせ本文が入り、本文中のリンクは http(s) のみ", () => {
+    const email = buildAnnouncementEmail({
+      ...promotional,
+      announcementId: 5,
+      title: "タイトル",
+      body: renderEmailMarkdown("[a](https://example.com) [b](javascript:alert(1))"),
+    });
+
+    expect(email.subject).toBe("【Sinlab Study】お知らせ: タイトル");
+    expect(email.text).toContain("運営からのお知らせです。\n\n■ タイトル\n\n");
+    expect(email.html).toContain('href="https://example.com"');
+    expect(email.html).not.toContain('href="javascript:');
   });
 });

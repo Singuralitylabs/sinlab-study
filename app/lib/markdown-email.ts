@@ -212,3 +212,16 @@ export function renderEmailMarkdown(markdown: string): EmailMarkdown {
     __brand: "EmailMarkdown",
   };
 }
+
+/**
+ * Joins already-converted parts into one body (blank line between non-empty parts). Only accepts
+ * `EmailMarkdown`, so no unconverted text can enter.
+ */
+export function joinEmailMarkdown(parts: readonly EmailMarkdown[]): EmailMarkdown {
+  const present = parts.filter((part) => part.text !== "" || part.html !== "");
+  return {
+    text: present.map((part) => part.text).join("\n\n"),
+    html: present.map((part) => part.html).join(""),
+    __brand: "EmailMarkdown",
+  };
+}

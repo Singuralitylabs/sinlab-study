@@ -886,6 +886,7 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 
 - `/admin/users`（ユーザー管理。2.7・6.1.3）
 - `/admin/emails`（メール通知。10.10節）: 今日の送信状況、種別ごとの設定（有効・無効のトグル、送る日、週次進捗の曜日、最終更新日時と更新者）、案内系メールの1日の上限、送信履歴（新しい順・ページング・種別と状態で絞り込み）。トランザクションメールを無効にするときは確認ダイアログで影響を示す。即時送信・手動実行のボタンは設けない
+- `/admin/emails/templates`（メール文面の編集。10.11節）: サービス名（`service_name` / `service_subtitle`）の編集、テンプレート一覧（種別名・件名・編集済みか既定値か・最終更新日時と更新者）。各行から編集画面 `/admin/emails/templates/[templateKey]` へ進み、件名・本文（Markdown）の入力、使えるプレースホルダーの一覧（説明つき）、プレビュー（テキスト版・HTML版、条件の切り替えつき）、「既定に戻す」、自分宛のテスト送信ができる
 
 ### 7.5 共通UIコンポーネント
 
@@ -1028,7 +1029,7 @@ Slack App の **Incoming Webhooks** を有効化し、通知先チャンネル�
 
 ### 10.2 実装構成
 
-実装は `app/services/notifications/`（送信 `email.ts`・テンプレート `email-templates.ts`・claim と予約 `user-emails.ts`・定期メール `email-digest-server.ts`・配信停止トークン `email-unsubscribe.ts`）、`app/services/api/cron-lock-server.ts`、`app/services/auth/cron-auth.ts`、`app/api/cron/email-digest/route.ts` と `vercel.json`、`app/api/email/unsubscribe/route.ts`。定数（種別 `EMAIL_KIND`・案内系の種別 `PROMOTIONAL_EMAIL_KINDS`・送信日・1日の上限・実行ロックの TTL）は `app/constants/notifications.ts`。共通レイアウトのフッターには送信元がサービスで返信不可である旨を入れ、`unsubscribeUrl` を渡したとき（案内系メール）だけ配信停止リンクと `List-Unsubscribe` / `List-Unsubscribe-Post` ヘッダーを付ける。
+実装は `app/services/notifications/`（送信 `email.ts`・テンプレート `email-templates.ts`・claim と予約 `user-emails.ts`・定期メール `email-digest-server.ts`・配信停止トークン `email-unsubscribe.ts`）、`app/services/api/cron-lock-server.ts`、`app/services/auth/cron-auth.ts`、`app/api/cron/email-digest/route.ts` と `vercel.json`、`app/api/email/unsubscribe/route.ts`。定数（種別 `EMAIL_KIND`・案内系の種別 `PROMOTIONAL_EMAIL_KINDS`・送信日・1日の上限・実行ロックの TTL）は `app/constants/notifications.ts`。共通レイアウトのフッターには送信元がサービスで返信不可である旨を入れ（サービス名・件名・本文は管理画面で編集でき、解決とエスケープの方針は10.11節）、`unsubscribeUrl` を渡したとき（案内系メール）だけ配信停止リンクと `List-Unsubscribe` / `List-Unsubscribe-Post` ヘッダーを付ける。
 
 ### 10.3 環境変数
 
@@ -1129,7 +1130,68 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 
 - 設定の読み書きは管理者のセッション（通常クライアント）で行い、RLS（admin のみ）を二層目の防御にする。Cron とメール送信は service_role で読む
 - 送信履歴は `email_logs` を service_role で読み（RLS のポリシーが無いため）、繰り越し予約（`weekly_digest_reserved`）の行は除く。選ぶのは表示する列と宛先ユーザーの表示名・メールアドレスだけで、本文（保存していない）・`provider_message_id` は出さない
-- 送信は Cron のバッチに任せる。画面からの即時送信・手動実行は設けない。送信時刻（Cron の起動時刻）・本文テンプレートの編集・送信予定件数の表示は対象外
+- 送信は Cron のバッチに任せる。画面からの即時送信・手動実行は設けない。送信時刻（Cron の起動時刻）・送信予定件数の表示は対象外（文面の編集は10.11節）
+
+### 10.11 メール文面の編集（管理画面）
+
+**保存先**: `email_templates`（テンプレートキーごとの件名・本文の上書き。行が無いキーはコードの既定値）と、`email_settings` の `service_name` / `service_subtitle`（`docs/database.md` 3.16・3.17節）。管理画面は `/admin/emails/templates`（admin のみ。`maintainer` には開放しない）。
+
+**編集できる範囲とできない範囲**
+
+| 区分 | 対象 | 理由 |
+|:--|:--|:--|
+| 編集できる | サービス名（差出人名・件名の先頭 `【サービス名】`・見出し・フッターの名前）、補足（見出しの補足・フッター。空にできる）、各テンプレートの件名と本文（Markdown） | 運営が文面を調整したい部分 |
+| コードで固定 | 宛名（「〇〇 様」）、ボタンのリンク先と表示条件、自動送信・返信不可の定型文、配信停止リンクと `List-Unsubscribe` ヘッダー、送信の条件・タイミング | 法令上の必須表示（特定電子メール法）や送信ロジックに関わる。**テンプレートの内容によらず、`renderEmailLayout()` が必ず付ける** |
+
+**テンプレートキー**（`EMAIL_TEMPLATE_KEYS`。`app/lib/email-template.ts`）: `signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended` / `weekly_digest` / `inactivity_reminder` / `trial_nurture.day2` / `trial_nurture.day5` / `trial_nurture.day7` / `trial_nurture.day14` / `announcement`。お試しユーザー向け案内は段階ごとにキーを分ける（どの段階を使うかは、送る日の設定に対し従来どおりコードが決める）。`announcement` は件名の形式（`お知らせ: {{title}}`）と、お知らせ本文の前後の定型文だけを持ち、本文に `{{announcement_body}}` を**ちょうど1つ**含める（お知らせごとの本文がそこに入る。件名には使えない）。
+
+**プレースホルダー**: 本文・件名に `{{名前}}` で書く。テンプレートごとの許可リスト（`EMAIL_TEMPLATE_DEFINITIONS[key].placeholders`）にないもの（typo を含む）は保存時に400で拒否し、使えない名前を返す。全テンプレート共通で `{{display_name}}` と `{{service_name}}` が使える。
+
+| テンプレート | 追加で使えるもの |
+|:--|:--|
+| `signup` | `registration_guide`（本登録の案内文。Stripe 有効・無効で文面が変わる） |
+| `approved` | `membership_label` |
+| `upgraded` | `monthly_price` / `next_billing_date`（取得できないときは空） |
+| `cancel_scheduled` | `access_until`（「2026年10月31日 まで」または「現在のお支払い期間の終了まで」） |
+| `subscription_ended` | なし |
+| `weekly_digest` | `completed_last_week` / `submitted_last_week` / `weekly_cheer` / `next_content_title` / `suggested_goal` / `remaining_contents` / `all_completed_message` |
+| `inactivity_reminder` | `first_content_title` / `no_content_guide` |
+| `trial_nurture.day2` / `day5` | なし |
+| `trial_nurture.day7` | `elapsed_label` / `locked_themes` / `registration_guide` |
+| `trial_nurture.day14` | `elapsed_label` / `final_notice`（設定した最後の案内のときだけ「これが最後です」） / `registration_guide` |
+| `announcement` | `title` / `announcement_body` |
+
+経過日数の表記（`elapsed_label`）と「これが最後です」の判定は、送る日の設定（10.10節）に追従するためコードが行い、プレースホルダーで差し込む。
+
+**値が無いときの規則（行単位）**: 本文を行ごとに見て、**プレースホルダーを含み、そのすべての値が空（空白のみを含む）の行は、行ごと出さない**。プレースホルダーの無い行は常に出す。1行に複数あるときは、1つでも値があれば行を出し、空の値は空文字になる。段落を分けたい行は空行で区切る（隣り合う行は1つの段落になる）。例: 料金を取得できないとき、`料金: {{monthly_price}}` の行は出ない。
+
+**既定値とフェイルセーフ**
+
+- **解決順**: `email_templates` の行 → コードの既定値（`EMAIL_TEMPLATE_DEFINITIONS`）。既定値は移行前の文面と同じ（サービス名の既定値だけ「Sinlab Study」。補足・フッターの講座名は「AIと学ぶ実践Web技術講座」）。「既定に戻す」は行の削除
+- **読み出し**: `loadEmailTexts()`（service_role）が `email_templates` 全行と `email_settings` のサービス名を読む。**読み出しの DB エラー・例外・行の欠落・許可リスト外を含む行（DB の直接書き換え）は、その分だけ既定値にして送る**。登録・承認・決済の通知や定期メールを止めず、主処理（登録・承認・Stripe Webhook）の結果・レスポンスにも影響させない（10.1節の方針は変えない）
+- **読む回数**: トランザクションメールは `deliverToUser()` が1送信につき1回、定期メール・お知らせは `runEmailDigest()` が**実行ごとに1回**（宛先ごとには読まない）。設定の読み出し（10.10節）が失敗したときのフェイルクローズは変えない
+- **テンプレート関数**（`email-templates.ts`）は純粋関数のまま、文面（`EmailTexts`）を引数で受け取る（省略時は既定値）
+
+**差し込みとエスケープ**（XSS・ヘッダーインジェクション対策）
+
+- 本文は、プレースホルダーを不透明な目印に置き換えた状態で `markdown-email.ts` の変換（HTML 版は全文をエスケープしてから変換。リンクは `http(s)` のみ）にかけ、**変換の後に値を差し込む**。HTML 版ではエスケープして差し込み、テキスト版では値をそのまま入れる。値（表示名・コンテンツ名など、受講生や運営が入力した文字列を含む）は Markdown としても HTML としても解釈されない
+- 値は1行の文字列にする（制御文字・改行・行区切りは空白にし、目印に使う私用領域の文字も除く）。件名は差し込み後も改行を含まず、サービス名（差出人名）からも改行・`<` `>` `"` を除く
+- お知らせ本文は従来どおり `renderEmailMarkdown()` で1回だけ変換したものを、`{{announcement_body}}` の位置に入れる
+
+**API**（admin のみ。`requireAdminApi()` = `getServerAuth()` で判定し、未認証は401、admin 以外・却下ユーザーは403。JSON ボディは zod で検証する）
+
+| エンドポイント | 内容 |
+|:--|:--|
+| `GET /api/admin/email-templates` | テンプレート一覧（編集済みの内容・更新日時・更新者）とサービス名 |
+| `PUT /api/admin/email-templates` | `{ template_key, subject, body }` を保存（upsert）。`template_key` は既定値の定義にあるキーのみ、`subject` は1〜100文字・改行不可、`body` は1〜5,000文字、プレースホルダーは許可リストのみ（`EmailTemplatePreviewSchema` / `EmailTemplateUpdateSchema`）。未知のフィールドは400 |
+| `DELETE /api/admin/email-templates?template_key=` | 「既定に戻す」（行を削除） |
+| `PUT /api/admin/email-templates/branding` | `{ service_name, service_subtitle }`（1〜50文字・0〜100文字、いずれも改行不可。補足が空なら NULL） |
+| `POST /api/admin/email-templates/preview` | 保存前の入力内容（`variant` でサンプルの条件を選ぶ）で、件名・テキスト版・HTML版を返す。何も送らず保存しない |
+| `POST /api/admin/email-templates/test-send` | 同じ入力で、**ログイン中の admin 本人のメールアドレス**にだけ送る（宛先はリクエストから受け取らない）。件名に「【テスト】」を付け、`email_logs` には記録しない |
+
+- 書き込みは管理者のセッション（通常クライアント）で行い、RLS（admin のみ）を二層目の防御にする。読み出しはメール送信側が service_role で行う
+- **プレビュー**は実際のテンプレート関数にサンプルの値を渡して作るので、送られるメールと一致する。条件の切り替え（料金の有無、Stripe の有効・無効、最初のコンテンツの有無、最後の案内かどうかなど）を `variant` で選べる。配信停止リンクは署名の無いサンプルの URL で、誰の配信も停止できない
+- **テスト送信の上限**: 1日（JST）`EMAIL_TEST_SEND_DAILY_LIMIT` 通（全 admin の合計。既定10）。DB 関数 `claim_email_test_send()`（service_role のみ実行可）が、ロックの中で今日の `email_test_sends` を数え、上限未満なら1行 INSERT して id を返す（上限なら NULL で429）。同時リクエストでも上限を超えず、空いている枠を取りこぼさない。数えられないとき（DB エラー）は送らない。送信に失敗したときは記録を消す。`email_logs` を使わないため、案内系メールの1日の上限（10.10節）の数え方には影響しない
 
 ---
 

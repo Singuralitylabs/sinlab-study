@@ -32,9 +32,11 @@ import {
   visibleContentsFor,
 } from "@/app/lib/email-digest";
 import type { EmailSettingsSnapshot } from "@/app/lib/email-settings";
+import type { EmailTexts } from "@/app/lib/email-template";
 import { type EmailMarkdown, renderEmailMarkdown } from "@/app/lib/markdown-email";
 import { type CronLock, claimCronLock, releaseCronLock } from "@/app/services/api/cron-lock-server";
 import { fetchEmailSettings } from "@/app/services/api/email-settings-server";
+import { loadEmailTexts } from "@/app/services/api/email-templates-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { type EmailContent, isEmailConfigured } from "@/app/services/notifications/email";
 import {
@@ -603,7 +605,8 @@ async function appendAnnouncementEmails(
   queuedUserIds: Set<number>,
   queue: QueuedEmail[],
   appUrl: string,
-  today: string
+  today: string,
+  texts: EmailTexts
 ): Promise<AnnouncementBatch[]> {
   const announcements = await fetchPendingAnnouncements(supabase);
   if (announcements.length === 0) {
@@ -689,14 +692,17 @@ async function appendAnnouncementEmails(
         user,
         carriesOver: true,
         build: (unsubscribeUrl) =>
-          buildAnnouncementEmail({
-            displayName: user.displayName,
-            appUrl,
-            unsubscribeUrl,
-            announcementId: announcement.id,
-            title: announcement.title,
-            body: renderedBody(),
-          }),
+          buildAnnouncementEmail(
+            {
+              displayName: user.displayName,
+              appUrl,
+              unsubscribeUrl,
+              announcementId: announcement.id,
+              title: announcement.title,
+              body: renderedBody(),
+            },
+            texts
+          ),
       });
       queuedUserIds.add(user.userId);
     }
@@ -726,7 +732,8 @@ async function buildQueue(
   excludedToday: ReadonlySet<number>,
   today: string,
   appUrl: string,
-  settings: EmailSettingsSnapshot
+  settings: EmailSettingsSnapshot,
+  texts: EmailTexts
 ): Promise<{
   queue: QueuedEmail[];
   weeklyReservationMissing: boolean;
@@ -741,7 +748,16 @@ async function buildQueue(
     // Return the bulk send state even with no sendable users, so announcements with no targets
     // can be completed.
     const announcementBatches = announcementEnabled
-      ? await appendAnnouncementEmails(supabase, allUsers, new Set(), new Set(), [], appUrl, today)
+      ? await appendAnnouncementEmails(
+          supabase,
+          allUsers,
+          new Set(),
+          new Set(),
+          [],
+          appUrl,
+          today,
+          texts
+        )
       : [];
     return { queue: [], weeklyReservationMissing: false, announcementBatches };
   }
@@ -763,15 +779,18 @@ async function buildQueue(
       user,
       carriesOver: false,
       build: (unsubscribeUrl) =>
-        buildTrialNurtureEmail({
-          displayName: user.displayName,
-          appUrl,
-          unsubscribeUrl,
-          day,
-          isFinal: day === finalNurtureDay,
-          upgradeAvailable,
-          lockedThemeNames: lockedThemeNames(contents),
-        }),
+        buildTrialNurtureEmail(
+          {
+            displayName: user.displayName,
+            appUrl,
+            unsubscribeUrl,
+            day,
+            isFinal: day === finalNurtureDay,
+            upgradeAvailable,
+            lockedThemeNames: lockedThemeNames(contents),
+          },
+          texts
+        ),
     });
     queuedUserIds.add(user.userId);
   }
@@ -791,12 +810,15 @@ async function buildQueue(
       user,
       carriesOver: false,
       build: (unsubscribeUrl) =>
-        buildInactivityReminderEmail({
-          displayName: user.displayName,
-          appUrl,
-          unsubscribeUrl,
-          firstContent: first ? { title: first.title, path: first.path } : null,
-        }),
+        buildInactivityReminderEmail(
+          {
+            displayName: user.displayName,
+            appUrl,
+            unsubscribeUrl,
+            firstContent: first ? { title: first.title, path: first.path } : null,
+          },
+          texts
+        ),
     });
     queuedUserIds.add(user.userId);
   }
@@ -886,15 +908,18 @@ async function buildQueue(
       // (Sunday) is lost.
       carriesOver: daysSinceWeekStart < 6,
       build: (unsubscribeUrl) =>
-        buildWeeklyDigestEmail({
-          displayName: user.displayName,
-          appUrl,
-          unsubscribeUrl,
-          completedLastWeek,
-          submittedLastWeek,
-          nextContent: next ? { title: next.title, path: next.path } : null,
-          remainingContents: remaining,
-        }),
+        buildWeeklyDigestEmail(
+          {
+            displayName: user.displayName,
+            appUrl,
+            unsubscribeUrl,
+            completedLastWeek,
+            submittedLastWeek,
+            nextContent: next ? { title: next.title, path: next.path } : null,
+            remainingContents: remaining,
+          },
+          texts
+        ),
     });
   }
 
@@ -924,7 +949,8 @@ async function buildQueue(
           queuedUserIds,
           queue,
           appUrl,
-          today
+          today,
+          texts
         )
       : [];
 
@@ -1024,6 +1050,9 @@ async function sendDigest(
     // Read on every run and fail closed: if the settings cannot be read, nothing is sent.
     const settings = await fetchEmailSettings(supabase);
     dailyLimit = settings.digestDailyLimit;
+    // Read the email text once per run (never per recipient). It never throws: an unreadable text
+    // falls back to the code defaults instead of stopping the run.
+    const texts = await loadEmailTexts(supabase);
     const todayLogs = await fetchTodayPromotionalLogs(supabase, today);
     limit = Math.max(0, dailyLimit - todayLogs.count);
     ({ queue, weeklyReservationMissing, announcementBatches } = await buildQueue(
@@ -1032,7 +1061,8 @@ async function sendDigest(
       todayLogs.userIds,
       today,
       appUrl,
-      settings
+      settings,
+      texts
     ));
   } catch (error) {
     console.error(

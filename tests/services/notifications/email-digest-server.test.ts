@@ -352,6 +352,7 @@ function setup(
     announcements?: Row[];
     email_kind_settings?: Row[];
     email_settings?: Row[];
+    email_templates?: Row[];
   },
   options: { maxRows?: number } = {}
 ) {
@@ -1601,5 +1602,96 @@ describe("メール通知の管理設定（#272）", () => {
       weekly.enabled = true;
       expect(await runDigest(MONDAY)).toMatchObject({ sent: 1 });
     });
+  });
+});
+
+describe("編集できるメール文面（#286）", () => {
+  const WEDNESDAY = new Date("2026-10-06T23:00:00Z");
+  // Built per test: the fake DB mutates rows in place (email_sent_at on completion).
+  const announcementRow = () => ({
+    id: 501,
+    title: "案内",
+    body: "本文",
+    target_statuses: ["active", "trial"],
+    target_membership_types: null,
+    published_at: "2026-10-06T01:00:00.000Z",
+    send_email: true,
+    email_sent_at: null,
+    is_deleted: false,
+    updated_at: "2026-10-06T01:00:00.000Z",
+  });
+  const tableReads = (client: { from: { mock: { calls: unknown[][] } } }, table: string) =>
+    client.from.mock.calls.filter(([name]) => name === table).length;
+
+  it("保存された文面とサービス名で送り、文面とサービス名は実行ごとに1回だけ読む（宛先ごとに読まない）", async () => {
+    const { client } = setup({
+      users: [userRow(1), userRow(2), userRow(3)],
+      announcements: [announcementRow()],
+      email_settings: [
+        {
+          id: 1,
+          digest_daily_limit: EMAIL_DIGEST_MAX_PER_DAY,
+          updated_at: "2026-10-01T00:00:00.000Z",
+          updated_by: null,
+          service_name: "新サービス",
+          service_subtitle: null,
+        },
+      ],
+      email_templates: [
+        {
+          template_key: "announcement",
+          subject: "重要: {{title}}",
+          body: "編集済み前置き\n\n{{announcement_body}}",
+        },
+      ],
+    });
+
+    const result = await runDigest(WEDNESDAY);
+
+    expect(result).toMatchObject({ sent: 3 });
+    for (const to of ["u1@example.com", "u2@example.com", "u3@example.com"]) {
+      const email = sentEmailTo(to);
+      expect(email.subject).toBe("【新サービス】重要: 案内");
+      expect(email.text).toContain("編集済み前置き");
+      expect(email.fromName).toBe("新サービス");
+      expect(email.headers?.["List-Unsubscribe"]).toContain("/api/email/unsubscribe?token=");
+    }
+    expect(tableReads(client, "email_templates")).toBe(1);
+  });
+
+  it("文面の行が無ければ既定の文面で送る", async () => {
+    setup({ users: [userRow(1)], announcements: [announcementRow()] });
+
+    await runDigest(WEDNESDAY);
+
+    const email = sentEmailTo("u1@example.com");
+    expect(email.subject).toBe("【Sinlab Study】お知らせ: 案内");
+    expect(email.text).toContain("運営からのお知らせです。");
+  });
+
+  it("文面の読み出しに失敗しても送信を止めず、既定の文面で送る", async () => {
+    const { failures } = setup({ users: [userRow(1)], announcements: [announcementRow()] });
+    failures.add("email_templates:select");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await runDigest(WEDNESDAY);
+
+    expect(result).toMatchObject({ sent: 1 });
+    expect(sentEmailTo("u1@example.com").subject).toBe("【Sinlab Study】お知らせ: 案内");
+  });
+
+  it("許可リスト外を含む行（DB の直接書き換え）は、その種別だけ既定の文面で送る", async () => {
+    setup({
+      users: [userRow(1)],
+      announcements: [announcementRow()],
+      email_templates: [
+        { template_key: "announcement", subject: "{{nope}}", body: "{{announcement_body}}" },
+      ],
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await runDigest(WEDNESDAY);
+
+    expect(sentEmailTo("u1@example.com").subject).toBe("【Sinlab Study】お知らせ: 案内");
   });
 });

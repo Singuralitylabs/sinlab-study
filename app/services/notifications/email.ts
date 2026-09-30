@@ -8,6 +8,8 @@ export type EmailContent = {
   subject: string;
   text: string;
   html: string;
+  /** Sender display name; the code default is used when absent or unusable. */
+  fromName?: string;
   /** Headers attached to the email itself (e.g. `List-Unsubscribe` for promotional emails). */
   headers?: Record<string, string>;
 };
@@ -15,6 +17,17 @@ export type EmailContent = {
 export type SendEmailResult =
   | { status: "sent"; messageId: string | null }
   | { status: "failed"; error: string };
+
+/**
+ * Display name for the From header. Control characters (header injection) and the characters that
+ * end or need quoting in a display name (`<`, `>`, `"`, `,`, `;`, `:`, `\`, `@`) are dropped; an empty result falls back to the default.
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control characters is the point
+const UNSAFE_FROM_NAME_CHARS = /[\u0000-\u001f\u007f<>",;:\\@]+/g;
+
+function resolveFromName(name: string | undefined): string {
+  return name?.replace(UNSAFE_FROM_NAME_CHARS, " ").trim() || EMAIL_FROM_NAME;
+}
 
 function getEmailConfig(): { apiKey: string; fromAddress: string } | null {
   const apiKey = process.env.RESEND_API_KEY;
@@ -54,7 +67,7 @@ export async function sendEmail(params: { to: string } & EmailContent): Promise<
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: `${EMAIL_FROM_NAME} <${fromAddress}>`,
+        from: `${resolveFromName(params.fromName)} <${fromAddress}>`,
         to: [params.to],
         subject: params.subject,
         text: params.text,
