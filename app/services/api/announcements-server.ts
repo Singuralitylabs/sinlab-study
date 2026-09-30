@@ -9,18 +9,18 @@ import type { Announcement, UserStatusType } from "@/app/types";
 import { createServerSupabaseClient } from "./supabase-server";
 
 /**
- * お知らせ（#254）の取得・更新。受講生向け・管理向けとも通常クライアント（RLS 適用）で行い、
- * service_role は使わない（メールの一斉送信の抽出だけが Cron の service_role 経路。
- * `email-digest-server.ts`）。
- *
- * 受講生向けは二層防御: RLS の SELECT ポリシーに加えて、アプリ層でも公開済み・未削除・
- * 対象ステータス・対象会員種別で絞る（admin / maintainer は RLS で全件見えるため、アプリ層の
- * 絞り込みが無いと受講生向け画面に下書きや非対象のお知らせが出てしまう）。
+ * Announcements (#254): reads and writes use the normal client (RLS) for both students and
+ * managers; service_role is never used here (only the bulk email extraction uses the Cron
+ * service_role path, in email-digest-server.ts).
+ * Student-facing reads have two layers of defense: the RLS SELECT policy plus app-layer filters
+ * (published, not deleted, target status, target membership type). admin / maintainer see
+ * everything via RLS, so without the app-layer filter drafts and non-target announcements would
+ * appear on student screens.
  */
 
 type ServerClient = Awaited<ReturnType<typeof createServerSupabaseClient>>;
 
-/** 受講生向け画面で表示するお知らせ（一覧・ダッシュボードは本文を使わない） */
+/** Announcement shown on student screens (list and dashboard do not use the body). */
 export type AnnouncementSummary = Pick<
   Announcement,
   "id" | "title" | "published_at" | "target_statuses" | "target_membership_types"
@@ -28,7 +28,7 @@ export type AnnouncementSummary = Pick<
 export type AnnouncementDetail = AnnouncementSummary & Pick<Announcement, "body">;
 export type AnnouncementWithReadState = AnnouncementSummary & { isRead: boolean };
 
-/** お知らせを閲覧するユーザー（`getServerAuth()` の値と、本人の会員種別） */
+/** Viewer of announcements: values from getServerAuth() plus the user's own membership type. */
 export type AnnouncementViewer = {
   userId: number;
   status: UserStatusType;
@@ -39,9 +39,10 @@ const SUMMARY_COLUMNS = "id, title, published_at, target_statuses, target_member
 const DETAIL_COLUMNS = `${SUMMARY_COLUMNS}, body`;
 
 /**
- * 閲覧者を組み立てる。お知らせを見られるのは active / trial のユーザーだけで、それ以外
- * （却下・不明）は null。会員種別は `getServerAuth()` が持たないため本人の行から読む
- * （RLS で本人の行は読める）。読めなければ null（種別指定のお知らせは見えない側に倒す）。
+ * Builds the viewer. Only active / trial users can view announcements; others (rejected, unknown)
+ * get null. getServerAuth() has no membership type, so it is read from the user's own row
+ * (readable via RLS); if unreadable return null (announcements targeted by type stay hidden, the
+ * safe side).
  */
 export async function resolveAnnouncementViewer(auth: {
   userId: number | null;
@@ -67,10 +68,10 @@ export async function resolveAnnouncementViewer(auth: {
 }
 
 /**
- * 受講生向けのアプリ層の絞り込み（公開済み・未削除・対象ステータス・対象会員種別）を
- * PostgREST の会員種別条件にする。RLS と同じ条件で、admin / maintainer が受講生向け画面を
- * 開いたときも自分が対象のお知らせだけを返すようにする。会員種別が無い（お試しユーザー等）
- * ときは「全種別」のお知らせだけが対象。
+ * Turns the app-layer filter (published, not deleted, target status, target membership type) into
+ * a PostgREST membership condition. Same conditions as RLS, so an admin / maintainer opening a
+ * student screen only gets announcements targeting themselves. A viewer without a membership type
+ * (e.g. trial) only matches announcements for all types.
  */
 function membershipFilter(viewer: AnnouncementViewer): string {
   return viewer.membershipType
@@ -109,11 +110,11 @@ type SummaryWithReads = AnnouncementSummary & {
 };
 
 /**
- * 自分が対象の公開済みお知らせを新しい順に、既読状態付きで返す。既読は `announcement_reads` を
- * 埋め込んで同じクエリで取る（本人の行だけ。RLS でも本人の行しか読めない）。
- *
- * - `{ limit }`: 新しい順に最大 `limit` 件（サイドナビの未読バッジ・ダッシュボード用）
- * - `{ page, pageSize }`: お知らせ一覧のページ（総件数 `count` も返す）
+ * Returns published announcements targeting the user, newest first, with read state. Reads come
+ * from an embedded `announcement_reads` in the same query (own rows only; RLS also only allows
+ * own rows).
+ * - `{ limit }`: up to `limit` newest (side-nav unread badge, dashboard)
+ * - `{ page, pageSize }`: a page of the list (also returns total `count`)
  */
 export async function fetchAnnouncementsWithReadState(
   viewer: AnnouncementViewer,
@@ -160,7 +161,7 @@ export async function fetchAnnouncementsWithReadState(
   };
 }
 
-/** 既読か（読めなければ既読扱いにして、詳細画面で既読の記録をやり直さない） */
+/** If it cannot be read, treat as read so the detail screen does not re-record a read. */
 export async function isAnnouncementRead(
   viewer: AnnouncementViewer,
   announcementId: number
@@ -171,8 +172,8 @@ export async function isAnnouncementRead(
 }
 
 /**
- * リクエスト中の閲覧者（`getServerAuth()` から組み立てる）。レイアウト（サイドナビの未読
- * バッジ）・ダッシュボード・一覧で共有し、同じリクエストでの再取得を避ける（`React.cache()`）
+ * Viewer for the current request, shared by layout (unread badge), dashboard and list to avoid
+ * refetching (`React.cache()`).
  */
 export const getAnnouncementViewer = cache(async (): Promise<AnnouncementViewer | null> => {
   const { userId, userStatus } = await getServerAuth();
@@ -180,9 +181,9 @@ export const getAnnouncementViewer = cache(async (): Promise<AnnouncementViewer 
 });
 
 /**
- * リクエスト中の閲覧者が対象のお知らせ（既読状態付き、新しい順に最大
- * `UNREAD_ANNOUNCEMENT_SCAN_LIMIT` 件）。サイドナビの未読バッジとダッシュボード用。閲覧者が
- * 無ければ空。一覧画面はページングする `fetchAnnouncementsWithReadState()` を使う
+ * Announcements targeting the current viewer with read state (newest first, up to
+ * UNREAD_ANNOUNCEMENT_SCAN_LIMIT), for the badge and dashboard. Empty without a viewer. The list
+ * screen pages with fetchAnnouncementsWithReadState().
  */
 export const getViewerAnnouncements = cache(
   async (): Promise<{ data: AnnouncementWithReadState[] | null; error: PostgrestError | null }> => {
@@ -195,7 +196,7 @@ export const getViewerAnnouncements = cache(
   }
 );
 
-/** サイドナビのバッジ用の未読件数。取得に失敗したら 0（レイアウトの表示を止めない） */
+/** Unread count for the badge; 0 on failure so the layout still renders. */
 export async function fetchUnreadAnnouncementCount(): Promise<number> {
   try {
     const { data } = await getViewerAnnouncements();
@@ -206,7 +207,10 @@ export async function fetchUnreadAnnouncementCount(): Promise<number> {
   }
 }
 
-/** 自分が対象の公開済みお知らせを1件返す（非対象・下書き・削除済み・存在しないIDは null） */
+/**
+ * One published announcement targeting the user (null for non-target, draft, deleted, or missing
+ * ID).
+ */
 export async function fetchVisibleAnnouncement(
   viewer: AnnouncementViewer,
   id: number
@@ -231,8 +235,8 @@ export async function fetchVisibleAnnouncement(
 }
 
 /**
- * 既読を記録する。INSERT は RLS（本人の行・自分に見える公開済みお知らせのみ）を通る。
- * 既に既読なら主キー違反（23505）になるが成功扱い。
+ * Records a read. The INSERT goes through RLS (own row, visible published announcements only). An
+ * existing read raises a PK violation (23505) that is treated as success.
  */
 export async function markAnnouncementRead(
   userId: number,
@@ -249,9 +253,7 @@ export async function markAnnouncementRead(
   return { error: null };
 }
 
-// ==================== 管理向け（admin / maintainer） ====================
-
-/** 管理画面の一覧に表示するお知らせ（本文を除く） */
+/** Announcement shown in the management list (no body). */
 export type ManageAnnouncementListItem = Pick<
   Announcement,
   | "id"
@@ -268,7 +270,7 @@ export type ManageAnnouncementListItem = Pick<
 const MANAGE_LIST_COLUMNS =
   "id, title, target_statuses, target_membership_types, published_at, send_email, email_sent_at, created_at, updated_at";
 
-/** 管理画面の一覧（下書きを含む、論理削除済みを除く。新しく作った順） */
+/** Management list: includes drafts, excludes soft-deleted, newest created first. */
 export async function fetchManageAnnouncements(): Promise<{
   data: ManageAnnouncementListItem[] | null;
   error: PostgrestError | null;
@@ -314,7 +316,7 @@ function toRow(input: AnnouncementInput) {
   };
 }
 
-/** 2つの配列が同じ要素の集合か（`null` は「指定なし」として `null` とだけ一致） */
+/** Whether two arrays hold the same members (`null` means "unspecified" and matches only `null`). */
 function sameMembers(a: readonly string[] | null, b: readonly string[] | null): boolean {
   if (a === null || b === null) {
     return a === b;
@@ -324,7 +326,7 @@ function sameMembers(a: readonly string[] | null, b: readonly string[] | null): 
   return setA.size === setB.size && [...setA].every((value) => setB.has(value));
 }
 
-/** 作成する。`is_published` なら作成と同時に公開する（`published_at` を記録） */
+/** Creates it; with `is_published` it is published immediately (records `published_at`). */
 export async function createAnnouncement(
   input: AnnouncementInput,
   createdBy: number
@@ -347,10 +349,10 @@ export async function createAnnouncement(
 }
 
 /**
- * 更新する。公開済みのまま更新するときは最初の公開日時を保つ（一覧の並び順と、メール送信の
- * 対象判定を変えない）。非公開にすると `published_at` を消し、アプリ内表示とメールの一斉送信を
- * 止める（送信済みの分は `email_logs` に残り、再公開しても同じ人には送らない）。
- * 対象が存在しない（削除済み・存在しないID）ときは `notFound: true`。
+ * When updating while staying published, keep the first publish time (so list order and email
+ * target decision do not change). Unpublishing clears `published_at` and stops in-app display and
+ * bulk email (sent ones stay in `email_logs`, so republishing does not resend to them). Returns
+ * `notFound: true` for deleted or missing targets.
  */
 export async function updateAnnouncement(
   id: number,
@@ -367,9 +369,10 @@ export async function updateAnnouncement(
   const publishedAt = input.is_published
     ? (current.published_at ?? new Date().toISOString())
     : null;
-  // 対象を変えたら一斉送信を未完了に戻す。Cron は `email_logs` に行の無い対象者にだけ送るため、
-  // 送り終えた人には再送せず、広げた分の対象者にだけ送る（送信中の変更は、Cron 側が
-  // `updated_at` の一致を完了の条件にしているため、実行の開始時点の対象だけで完了にならない）
+  // Changing targets resets the bulk send to incomplete. Cron only sends to targets with no
+  // `email_logs` row, so people already sent are not resent and only the widened targets receive
+  // it. An edit during a send cannot complete the run for the old targets, because Cron requires
+  // a matching `updated_at` to mark completion.
   const targetsChanged =
     !sameMembers(current.target_statuses, input.target_statuses) ||
     !sameMembers(current.target_membership_types, input.target_membership_types);
@@ -392,7 +395,7 @@ export async function updateAnnouncement(
   return { error: null, notFound: (data ?? []).length === 0 };
 }
 
-/** 論理削除する（アプリ内表示とメールの一斉送信の対象から外れる） */
+/** Soft delete (removes it from in-app display and bulk email targets). */
 export async function deleteAnnouncement(
   id: number
 ): Promise<{ error: PostgrestError | null; notFound: boolean }> {

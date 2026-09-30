@@ -10,20 +10,21 @@ type EmailLayoutParams = {
   greetingName: string;
   paragraphs: string[];
   /**
-   * 段落の後に置く本文（お知らせ）。`renderEmailMarkdown()` で変換済みのものだけを受け取る
-   * （HTML 版は全文をエスケープしてから変換してあり、本文中の生 HTML は描画されない）
+   * Body placed after the paragraphs (announcement). Only accepts values already converted with
+   * `renderEmailMarkdown()` (the HTML version escapes the whole text before converting, so raw
+   * HTML in the body is not rendered).
    */
   markdownBody?: EmailMarkdown;
-  /** 本文の末尾に置く導線ボタン（テキスト版では「ラベル: URL」の行になる） */
+  /** Call-to-action buttons at the end (text version renders "label: URL" lines). */
   links: EmailLink[];
   /**
-   * 配信停止リンク。案内系メール（`PROMOTIONAL_EMAIL_KINDS`）では必ず渡し、トランザクション
-   * メールでは渡さない。渡すとフッターにリンクを入れ、`List-Unsubscribe` ヘッダーも付ける
+   * Unsubscribe link. Always pass it for promotional emails (`PROMOTIONAL_EMAIL_KINDS`), never
+   * for transactional ones. When passed it adds a footer link and the `List-Unsubscribe` header.
    */
   unsubscribeUrl?: string;
 };
 
-/** `NEXT_PUBLIC_APP_URL` の末尾スラッシュ有無に関係なく、アプリ内パスの絶対URLを作る */
+/** Builds an absolute in-app URL regardless of a trailing slash in `NEXT_PUBLIC_APP_URL`. */
 export function buildAppUrl(appUrl: string, path: string): string {
   return `${appUrl.replace(/\/+$/, "")}${path}`;
 }
@@ -38,7 +39,6 @@ function footerLines(): string[] {
 const UNSUBSCRIBE_LEAD =
   "学習状況のお知らせなどの案内メールが不要な場合は、こちらから配信を停止できます";
 
-/** ヘッダー・本文・フッターの共通レイアウトで、テキスト版と HTML 版を同じ内容から組み立てる */
 export function renderEmailLayout(params: EmailLayoutParams): EmailContent {
   const greeting = `${params.greetingName} 様`;
   const footer = footerLines();
@@ -93,7 +93,7 @@ export function renderEmailLayout(params: EmailLayoutParams): EmailContent {
   if (!unsubscribeUrl) {
     return { subject: params.subject, text, html };
   }
-  // RFC 8058 のワンクリック配信停止（対応クライアントは同じ URL へ POST する）
+  // RFC 8058 one-click unsubscribe (supporting clients POST to the same URL).
   return {
     subject: params.subject,
     text,
@@ -112,7 +112,10 @@ function subjectOf(title: string): string {
 export type SignupEmailParams = {
   displayName: string;
   appUrl: string;
-  /** Stripe 決済が有効なとき、本登録の手段としてアップグレード（`/upgrade`）も案内する */
+  /**
+   * When Stripe payments are enabled, also point to upgrade (`/upgrade`) as a way to fully
+   * register.
+   */
   upgradeAvailable: boolean;
 };
 
@@ -159,9 +162,9 @@ export function buildApprovedEmail(params: ApprovedEmailParams): EmailContent {
 export type UpgradedEmailParams = {
   displayName: string;
   appUrl: string;
-  /** Stripe から取得した実請求額（JPY）。取得できなければ null（料金の行を載せない） */
+  /** Actual charged amount (JPY) from Stripe; null if unavailable (price line omitted). */
   monthlyPriceLabel: string | null;
-  /** 次回請求日の表示文字列。取得できなければ null */
+  /** Display string of the next billing date; null if unavailable. */
   nextBillingDateLabel: string | null;
 };
 
@@ -187,7 +190,7 @@ export function buildUpgradedEmail(params: UpgradedEmailParams): EmailContent {
 export type CancelScheduledEmailParams = {
   displayName: string;
   appUrl: string;
-  /** 利用期限（`current_period_end`）の表示文字列。取得できなければ null */
+  /** Display string of the access end date (`current_period_end`); null if unavailable. */
   periodEndDateLabel: string | null;
 };
 
@@ -226,23 +229,23 @@ export function buildSubscriptionEndedEmail(params: SubscriptionEndedEmailParams
   });
 }
 
-/** 案内系メール本文に載せる学習コンテンツ（パスはアプリ内の絶対パス `/learn/...`） */
+/** Learning content in promotional email bodies (path is the in-app absolute path `/learn/...`). */
 export type EmailContentLink = { title: string; path: string };
 
 type PromotionalEmailParams = {
   displayName: string;
   appUrl: string;
-  /** 配信停止リンク（案内系メールでは必須） */
+  /** Unsubscribe link (required for promotional emails). */
   unsubscribeUrl: string;
 };
 
-/** 困ったときの連絡先（送信元は返信不可のため、問い合わせ先を本文で案内する） */
+/** Contact guide (the sender is no-reply, so support is pointed to in the body). */
 const SUPPORT_GUIDE =
   "学習の進め方で困ったときは、ダッシュボードの「はじめかた」を確認するか、講座の運営（管理者）までお問い合わせください。";
 
 /**
- * 今週の目標の提案（完了するコンテンツ数）。先週の実績より1本多く、最低2本を目安にし、
- * 残りのコンテンツ数を超えない
+ * Suggested weekly goal (number of contents): one more than last week's result, at least 2,
+ * capped at the remaining contents.
  */
 export function suggestWeeklyGoal(completedLastWeek: number, remainingContents: number): number {
   return Math.min(remainingContents, Math.max(2, completedLastWeek + 1));
@@ -251,9 +254,9 @@ export function suggestWeeklyGoal(completedLastWeek: number, remainingContents: 
 export type WeeklyDigestEmailParams = PromotionalEmailParams & {
   completedLastWeek: number;
   submittedLastWeek: number;
-  /** 次に学ぶコンテンツ（未完了の先頭）。すべて完了していれば null */
+  /** Next content to learn (first incomplete); null if all are complete. */
   nextContent: EmailContentLink | null;
-  /** 閲覧できる未完了コンテンツの数 */
+  /** Number of viewable incomplete contents. */
   remainingContents: number;
 };
 
@@ -285,7 +288,7 @@ export function buildWeeklyDigestEmail(params: WeeklyDigestEmailParams): EmailCo
 }
 
 export type InactivityReminderEmailParams = PromotionalEmailParams & {
-  /** 最初に学ぶコンテンツ（閲覧できる先頭）。無ければ学習トップへ誘導する */
+  /** First content to learn (first viewable); without one, guide to the learning top. */
   firstContent: EmailContentLink | null;
 };
 
@@ -311,9 +314,12 @@ export function buildInactivityReminderEmail(params: InactivityReminderEmailPara
 
 export type TrialNurtureEmailParams = PromotionalEmailParams & {
   day: TrialNurtureDay;
-  /** Stripe 決済が有効なとき（`isStripeEnabled()`）だけアップグレード（`/upgrade`）へ誘導する */
+  /** Guide to upgrade (`/upgrade`) only when Stripe payments are enabled (`isStripeEnabled()`). */
   upgradeAvailable: boolean;
-  /** 本登録で閲覧できるようになるコンテンツを含むテーマ名（Day7 の案内に使う） */
+  /**
+   * Theme names including contents that become viewable after full registration (used for the Day
+   * 7 guide).
+   */
   lockedThemeNames: string[];
 };
 
@@ -387,11 +393,11 @@ export function buildTrialNurtureEmail(params: TrialNurtureEmailParams): EmailCo
 export type AnnouncementEmailParams = PromotionalEmailParams & {
   announcementId: number;
   title: string;
-  /** お知らせの本文（`renderEmailMarkdown()` で変換済み。宛先ごとに変換し直さない） */
+  /** Announcement body converted with `renderEmailMarkdown()` (converted once, not per recipient). */
   body: EmailMarkdown;
 };
 
-/** お知らせのメール一斉送信（案内系メール。配信停止リンクを必ず入れる） */
+/** Bulk announcement email (promotional; always includes the unsubscribe link). */
 export function buildAnnouncementEmail(params: AnnouncementEmailParams): EmailContent {
   return renderEmailLayout({
     subject: subjectOf(`お知らせ: ${params.title}`),

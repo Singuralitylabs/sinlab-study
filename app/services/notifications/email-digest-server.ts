@@ -54,24 +54,24 @@ import {
 import type { Announcement, UserStatusType } from "@/app/types";
 
 /**
- * 定期メール（週次進捗・未学習リマインド・お試しユーザー向け案内）の対象抽出と送信。
- * `GET /api/cron/email-digest`（Vercel Cron、毎日 JST 8 時台）から呼ぶ。
- *
- * ユーザーセッションの無いバッチのため、抽出は service_role クライアントで行う（`user_id` 単位の
- * 集計であり、受講生へコンテンツを返す配信経路ではない）。学習コンテンツの読み取りは
- * `is_published = true AND is_deleted = false` を全階層で絞り、本文を含まないカラムだけを select する。
+ * Extraction and sending for periodic emails (weekly progress, inactivity reminder, guides for
+ * trial users). Called from `GET /api/cron/email-digest` (Vercel Cron, daily around 8 AM JST).
+ * It is a batch with no user session, so extraction uses the service_role client (per-`user_id`
+ * aggregation; not a delivery path that returns contents to students). Learning content reads
+ * filter `is_published = true AND is_deleted = false` at every level and select only columns
+ * without bodies.
  */
 
 const PAGE_SIZE = 1000;
-/** `.in("user_id", ...)` に一度に渡す ID 数（クエリ文字列の長さを抑える） */
+/** IDs passed to one `.in("user_id", ...)` (keeps the query string short). */
 const ID_CHUNK_SIZE = 100;
 
 type Page<T> = { data: T[] | null; error: { message: string } | null };
 
 /**
- * PostgREST の最大行数（`db-max-rows`）を超えても取りこぼさないよう range でページングする。
- * サーバーの最大行数が `PAGE_SIZE` より小さく設定されていても欠落しないよう、次の位置は
- * 実際に返った件数だけ進め、0件が返るまで取りに行く（「PAGE_SIZE 未満なら最後」とは判定しない）。
+ * Pages with range so PostgREST's max rows (`db-max-rows`) does not drop rows. Even if the server
+ * max is set below PAGE_SIZE nothing is lost: advance by the number of rows actually returned and
+ * keep fetching until 0 rows (never assume "fewer than PAGE_SIZE means last").
  */
 async function fetchAllPages<T>(
   fetchPage: (from: number, to: number) => PromiseLike<Page<T>>
@@ -102,7 +102,7 @@ async function fetchForUserIds<T>(
   return rows;
 }
 
-/** 送信候補: 受講生（member）の active / trial で、配信停止していないユーザー */
+/** Send candidates: member active / trial users who have not unsubscribed. */
 async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
   const rows = await fetchAllPages<{
     id: number;
@@ -160,9 +160,10 @@ type ThemeRow = {
 };
 
 /**
- * 配信中のコンテンツを学習順（テーマ→フェーズ→週→コンテンツの表示順）に並べて返す。
- * ネスト select と全階層の公開・未削除の絞り込みは `fetchThemeProgressSummaries()` と同じ形で、
- * 並び順はコンテンツ詳細の前後ナビと同じ `buildThemeContentOrder()` に委ねる。
+ * Returns the contents in circulation in learning order (theme -> phase -> week -> content
+ * display order). The nested select and the all-levels published/not-deleted filters have the
+ * same shape as fetchThemeProgressSummaries(); ordering is delegated to buildThemeContentOrder(),
+ * the same as prev/next navigation on the detail page.
  */
 async function fetchOrderedContents(supabase: AdminClient): Promise<DigestContent[]> {
   const { data, error } = await supabase
@@ -214,7 +215,7 @@ async function fetchOrderedContents(supabase: AdminClient): Promise<DigestConten
   });
 }
 
-/** 学習の記録（進捗行・提出）が1件でもあるユーザーの ID */
+/** IDs of users with at least one learning record (progress row or submission). */
 async function fetchUserIdsWithActivity(
   supabase: AdminClient,
   userIds: number[]
@@ -233,8 +234,9 @@ async function fetchUserIdsWithActivity(
 }
 
 /**
- * `email_logs` に (kind, reference_key) の行を持つユーザーの ID。今週の週次進捗を送信済み
- * （または送信中・送信失敗）のユーザーと、今週の繰り越し予約を持つユーザーの判定に使う
+ * IDs of users with an `email_logs` row for (kind, reference_key). Used to detect users already
+ * sent (or sending / failed) this week's weekly digest and users with this week's carry-over
+ * reservation.
  */
 async function fetchLoggedUserIds(
   supabase: AdminClient,
@@ -262,8 +264,8 @@ type WeeklyStats = {
 };
 
 /**
- * 週次進捗の集計。完了済みコンテンツ（次に学ぶコンテンツの判定用）と、先週
- * （[lastWeekStart, weekStart) の JST 暦日）の完了数・提出数をユーザー単位で数える。
+ * Weekly aggregation: per user, completed contents (to decide the next content) and last week's
+ * completed and submission counts (JST calendar days [lastWeekStart, weekStart)).
  */
 async function fetchWeeklyStats(
   supabase: AdminClient,
@@ -326,8 +328,8 @@ async function fetchWeeklyStats(
 }
 
 /**
- * 今日（JST 0:00 以降）に claim された案内系メールの送信ログ。1日の上限と「1人1日1通」を
- * 実行をまたいで守るために使う（同じ日の再実行・Cron の重複起動・手動 curl を含む）。
+ * Send logs of promotional emails claimed today (from JST 0:00). Used to keep the daily cap and
+ * "one per user per day" across runs (same-day reruns, duplicate Cron starts, manual curl).
  */
 async function fetchTodayPromotionalLogs(
   supabase: AdminClient,
@@ -345,7 +347,10 @@ async function fetchTodayPromotionalLogs(
   return { count: rows.length, userIds: new Set(rows.map((row) => row.user_id)) };
 }
 
-/** 今週の繰り越し予約が1件でもあるか（月曜の実行が対象決定まで到達したか） */
+/**
+ * Whether any carry-over reservation exists for this week (i.e. Monday's run reached target
+ * selection).
+ */
 async function hasWeeklyDigestReservation(
   supabase: AdminClient,
   weekStart: string
@@ -363,9 +368,10 @@ async function hasWeeklyDigestReservation(
 }
 
 /**
- * 月曜に週次進捗の対象になったユーザーを繰り越し予約として記録する（既にあれば何もしない）。
- * 予約は送信の前提とし、失敗したら throw する（呼び出し元は1通も送らずに失敗を返す）。
- * claim の前なので、再実行しても二重送信にはならず、予約からやり直せる。
+ * Records users selected for Monday's weekly digest as carry-over reservations (no-op if
+ * present). The reservation is a precondition for sending: throw on failure (the caller returns
+ * failure without sending anything). It happens before the claim, so rerunning cannot double send
+ * and can restart from the reservation.
  */
 async function reserveWeeklyDigest(
   supabase: AdminClient,
@@ -399,13 +405,12 @@ type PendingAnnouncement = Pick<
 >;
 
 /**
- * メールの一斉送信を待っているお知らせ（公開済み・未削除・`send_email`・まだ全員に送り終えて
- * いない）。公開の古い順。
- *
- * 定期メールの抽出は本文を含まないカラムだけを select する決まりだが（AGENTS.md「会員種別・
- * お試しユーザー」）、お知らせの本文はメールの本文そのものであり、運営が受講生全員に届ける
- * ために書いた文章のため例外として `body` を select する（学習コンテンツの本文は引き続き
- * select しない）。
+ * Announcements waiting for bulk email (published, not deleted, `send_email`, not yet sent to
+ * everyone), oldest published first.
+ * Periodic-email extraction is supposed to select only columns without bodies (AGENTS.md
+ * "membership types / trial users"), but an announcement body is the email body itself, written
+ * by staff to reach all students, so `body` is selected as an exception (learning content bodies
+ * are still never selected).
  */
 async function fetchPendingAnnouncements(supabase: AdminClient): Promise<PendingAnnouncement[]> {
   const { data, error } = await supabase
@@ -431,7 +436,7 @@ type AnnouncementLog = {
   created_at: string;
 };
 
-/** お知らせの一斉送信の `email_logs` の行（送信済み・送信中・送信失敗） */
+/** `email_logs` rows of the announcement bulk send (sent, sending, failed). */
 async function fetchAnnouncementLogs(
   supabase: AdminClient,
   referenceKeys: string[]
@@ -448,10 +453,10 @@ async function fetchAnnouncementLogs(
 }
 
 /**
- * 送り直す対象の送信失敗か（`day` の実行から見て）。Resend が受け付けなかったことが確実な
- * 失敗（`status=429` / `5xx`）で、`day` が公開日（JST）から `ANNOUNCEMENT_EMAIL_RETRY_DAYS` 日
- * 以内のもの。タイムアウト等の送れたかどうか分からない失敗と、送信中のまま結果が記録され
- * なかった行は、二重送信を避けるため送り直さない。
+ * Whether a failure should be resent (as of run day `day`): failures certain to have been
+ * rejected by Resend (`status=429` / `5xx`) within `ANNOUNCEMENT_EMAIL_RETRY_DAYS` of the publish
+ * date (JST). Failures where it is unknown whether it was sent (e.g. timeout) and rows left in
+ * "sending" without a recorded result are not resent, to avoid double sending.
  */
 function isRetryableFailure(log: AnnouncementLog, publishedAt: string, day: string): boolean {
   return (
@@ -463,8 +468,9 @@ function isRetryableFailure(log: AnnouncementLog, publishedAt: string, day: stri
 }
 
 /**
- * お知らせごとの、送信を終えた（送信済み、または送り直さない失敗・送信中の行を持つ）
- * ユーザーの ID と、送信を終えていない扱いにする失敗の行（`isRetryable` が true の行）
+ * Per announcement: IDs of users whose send is finished (sent, or a failure that will not be
+ * resent, or a sending row) and the failure rows treated as not finished (rows where
+ * `isRetryable` is true).
  */
 function classifyAnnouncementLogs(
   logs: AnnouncementLog[],
@@ -484,27 +490,33 @@ function classifyAnnouncementLogs(
   return { done, retryable };
 }
 
-/** 一斉送信の進み具合。今回の実行で全員を処理し終えたら `email_sent_at` を記録する */
+/** Bulk send progress; `email_sent_at` is recorded once this run has processed everyone. */
 type AnnouncementBatch = {
   id: number;
   referenceKey: string;
   publishedAt: string;
-  /** 対象の判定に使ったお知らせの `updated_at`（送信中に編集されたら完了にしない） */
+  /**
+   * `updated_at` of the announcement used for the target decision (not completed if edited during
+   * the send).
+   */
   updatedAt: string;
   /**
-   * 対象者のうち、今回の実行の開始時点でまだ送信を終えていない（`email_logs` に行が無い、
-   * または送り直す失敗の行しか無い）ユーザー
+   * Targets not yet finished at the start of this run (no `email_logs` row, or only failure rows
+   * to resend).
    */
   pendingUserIds: number[];
 };
 
-/** 送信キューの1通。本文は送る直前に組み立てる */
+/** One queued email; the body is built right before sending. */
 type QueuedEmail = {
   kind: PromotionalEmailKind;
   referenceKey: string;
   user: DigestUser;
   build: (unsubscribeUrl: string) => EmailContent;
-  /** 上限・時間切れで送れなかったとき、同じ週の翌日以降の実行に繰り越されるか */
+  /**
+   * Whether it carries over to the following days' runs of the same week when not sent due to the
+   * cap / time limit.
+   */
   carriesOver: boolean;
 };
 
@@ -519,38 +531,44 @@ export type EmailDigestResult =
       failed: number;
       duplicate: number;
       skipped: number;
-      /** 上限・時間切れで今回送らなかった通数（うち週次進捗は翌日以降に繰り越す） */
+      /**
+       * Number not sent this run because of the cap / time limit (weekly digests among them carry
+       * over to the following days).
+       */
       deferred: number;
       /**
-       * 今週の週次進捗の予約が無く、取り戻し期間も過ぎたため週次進捗を送らなかった
-       * （月曜・火曜の実行が完了しなかった）
+       * Weekly digest was skipped because this week has no reservation and the catch-up window
+       * passed (Monday and Tuesday runs did not complete).
        */
       weeklyReservationMissing: boolean;
-      /** この実行で対象者全員に送り終えた（`email_sent_at` を記録した）お知らせの件数 */
+      /**
+       * Number of announcements whose targets were all sent in this run (`email_sent_at`
+       * recorded).
+       */
       announcementsCompleted: number;
     };
 
 export type EmailDigestOptions = {
   now?: Date;
-  /** 経過時間の計測（テスト用に差し替え可能） */
+  /** Time measurement (replaceable in tests). */
   clock?: () => number;
-  /** 送信間隔の待機（テスト用に差し替え可能） */
+  /** Send interval wait (replaceable in tests). */
   sleep?: (ms: number) => Promise<void>;
 };
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * お知らせのメール一斉送信を送信キューに加える（kind = `announcement`、reference_key =
- * お知らせの ID）。対象は配信停止していない受講生のうち、ステータス・会員種別がお知らせの
- * 対象に一致するユーザー（`isAnnouncementTarget()`。アプリ内表示と同じ条件）。
- *
- * 全員を1回で送り切れない（1日の上限・実行時間・1人1日1通）ときは、送信を終えていない
- * ユーザーを翌日以降の実行で送る（分割送信）。今日すでに案内系メールを受け取った
- * ユーザー（`sendableUserIds` に無い）と、この実行で別の案内を送るユーザーは翌日に回す。
- * 今日より前の送り直す失敗（`isRetryableFailure()`）の行は消してから送り直す（`email_logs` の
- * UNIQUE 制約で claim し直せるようにする）。消せなかった宛先は今回は送らず、完了にもしない。
- * 完了の判定に使うため、対象者（`allUsers` から抽出）のうち送信を終えていない全員を返す。
+ * Adds the announcement bulk email to the send queue (kind = `announcement`, reference_key =
+ * announcement ID). Targets are non-unsubscribed students whose status / membership type match
+ * the announcement target (`isAnnouncementTarget()`, same condition as in-app display).
+ * When everyone cannot be sent in one run (daily cap, run time, one per user per day), unfinished
+ * users are sent in following days (split sending). Users who already received a promotional
+ * email today (not in `sendableUserIds`) and users receiving another guide in this run are
+ * deferred to the next day. Failures to resend from before today (`isRetryableFailure()`) have
+ * their rows deleted first so the `email_logs` UNIQUE constraint lets them be claimed again;
+ * recipients whose row could not be deleted are not sent this run and do not complete it.
+ * Returns every unfinished target (from `allUsers`) for the completion decision.
  */
 async function appendAnnouncementEmails(
   supabase: AdminClient,
@@ -571,9 +589,10 @@ async function appendAnnouncementEmails(
       announcement.published_at as string,
     ])
   );
-  // 送り直す失敗は、今日より前の失敗だけを今日送り直す（今日の失敗の行を同じ日の再実行で
-  // 消すと、今日の案内系メールの数＝1日の上限・1人1日1通の判定から外れてしまうため）。
-  // 今日の失敗など翌日以降に送り直す失敗も、送信を終えていない扱いにして完了にしない
+  // Only failures from before today are resent today. Deleting a failed row from today on a
+  // same-day rerun would drop it from today's promotional count (daily cap, one per user per
+  // day). Failures to resend on following days (including today's) are treated as unfinished and
+  // keep the announcement incomplete.
   const startOfToday = jstStartOfDayIso(today);
   const tomorrow = addDays(today, 1);
   const retryNow = (log: AnnouncementLog) =>
@@ -587,8 +606,9 @@ async function appendAnnouncementEmails(
   );
   const retryNowLogs = retryable.filter(retryNow);
 
-  // 今日は送らない宛先: 翌日以降に送り直す失敗の宛先と、送り直す失敗の行を消せなかった宛先
-  // （claim が UNIQUE 違反になるため）。送信を終えていない扱いのまま残るので、完了にもならない
+  // Recipients not sent today: those with failures to resend on following days and those whose
+  // failure row could not be deleted (the claim would hit the UNIQUE violation). They stay
+  // unfinished, so completion is not recorded either.
   let notClaimable = retryable.filter((log) => !retryNow(log));
   if (retryNowLogs.length > 0) {
     const { error } = await supabase
@@ -614,7 +634,7 @@ async function appendAnnouncementEmails(
     const referenceKey = String(announcement.id);
     const doneUserIds = done.get(referenceKey) ?? new Set<number>();
     const blockedUserIds = blocked.get(referenceKey) ?? new Set<number>();
-    // 本文の変換はお知らせ1件につき1回だけ（宛先ごとの組み立てで使い回す）
+    // Convert the body once per announcement (reused across recipients).
     let body: EmailMarkdown | null = null;
     const renderedBody = () => {
       body ??= renderEmailMarkdown(announcement.body);
@@ -666,12 +686,13 @@ async function appendAnnouncementEmails(
 }
 
 /**
- * 送信キューを作る。今日（JST）が登録から N 日目のユーザーの `trial_nurture` /
- * `inactivity_reminder` を先に並べる（N 日目の案内は翌日に拾わないため、上限に掛かったときは
- * 繰り越せるお知らせ・週次進捗の方を後回しにする）。その後は、週次進捗の対象を決める日は
- * お知らせの一斉送信 → `weekly_digest`、それ以外の日は予約の繰り越し分の `weekly_digest` →
- * お知らせの順に並べる（週次進捗の予約は同じ週の間だけ有効なため）。1人に同じ日に送る案内系メールは1通まで（今日すでに案内系メールを claim した
- * ユーザー `excludedToday` には送らない）。
+ * Builds the send queue. First, `trial_nurture` / `inactivity_reminder` for users on their Nth
+ * day since registration today (JST), since the Nth-day guide is not picked up the next day; when
+ * the cap is hit, carry-over-capable announcements / weekly digests are pushed back. After that,
+ * on days that decide weekly targets: announcement bulk send -> `weekly_digest`; otherwise
+ * carry-over `weekly_digest` -> announcements (a weekly reservation is valid only within its
+ * week). At most one promotional email per user per day (users who already claimed one today,
+ * `excludedToday`, are skipped).
  */
 async function buildQueue(
   supabase: AdminClient,
@@ -686,7 +707,8 @@ async function buildQueue(
 }> {
   const users = allUsers.filter((user) => !excludedToday.has(user.userId));
   if (users.length === 0) {
-    // 送れる人がいなくても、対象者のいないお知らせを完了にできるよう一斉送信の状況は返す
+    // Return the bulk send state even with no sendable users, so announcements with no targets
+    // can be completed.
     const announcementBatches = await appendAnnouncementEmails(
       supabase,
       allUsers,
@@ -749,19 +771,20 @@ async function buildQueue(
     queuedUserIds.add(user.userId);
   }
 
-  // 週次進捗（reference_key は週の開始日）。対象を決めるのは月曜だけで、月曜の対象者を繰り越し
-  // 予約として記録する。火〜日曜は、予約を持ちまだ送っていないユーザー（月曜に上限・時間切れ・
-  // 同日の別の案内で送れなかった分）だけに送り、週の途中で新しく対象になったユーザーには送らない。
-  // ただし今週の予約が1件も無い（月曜の実行が対象決定まで到達しなかった）ときは、
-  // `WEEKLY_DIGEST_CATCH_UP_DAYS`（火曜）までの実行が月曜の代わりに対象を決める。
-  // 先週の途中以降に登録したユーザーには、まるごとの「先週」が無いため送らない。
+  // Weekly digest (reference_key is the week start date). Only Monday decides targets and records
+  // them as carry-over reservations. Tuesday to Sunday send only to users who hold a reservation
+  // but were not sent (missed on Monday due to cap / time limit / another guide that day); users
+  // who became eligible mid-week are not sent. If this week has no reservation at all (Monday's
+  // run never reached target selection), runs up to `WEEKLY_DIGEST_CATCH_UP_DAYS` (Tuesday)
+  // decide targets in Monday's place. Users who registered partway through last week have no
+  // complete "last week" and are skipped.
   const weekStart = weekStartOf(today);
   const daysSinceWeekStart = daysBetween(weekStart, today);
   let decidesTargets = daysSinceWeekStart === 0;
   let weeklyReservationMissing = false;
   if (!decidesTargets && !(await hasWeeklyDigestReservation(supabase, weekStart))) {
-    // 月曜の実行が対象決定まで到達しなかった（失敗・スキップ・起動漏れ）。火曜までは月曜の
-    // 代わりに対象を決め、それより後は送らずに気づけるようにする
+    // Monday's run did not reach target selection (failure, skip, missed start). Up to Tuesday
+    // decide targets in Monday's place; after that nothing is sent so it gets noticed.
     if (daysSinceWeekStart <= WEEKLY_DIGEST_CATCH_UP_DAYS) {
       decidesTargets = true;
       console.warn(
@@ -812,7 +835,8 @@ async function buildQueue(
       kind: EMAIL_KIND.WEEKLY_DIGEST,
       referenceKey: weekStart,
       user,
-      // 予約は同じ週の間だけ有効なため、週の最終日（日曜）に送れなかった分は失われる
+      // A reservation is valid only within the week, so what could not be sent by the last day
+      // (Sunday) is lost.
       carriesOver: daysSinceWeekStart < 6,
       build: (unsubscribeUrl) =>
         buildWeeklyDigestEmail({
@@ -834,7 +858,8 @@ async function buildQueue(
       weekStart
     );
   }
-  // 今日 N 日目の案内を送るユーザーには、週次進捗を翌日以降に回す（予約済みのため繰り越される）
+  // For users receiving a Nth-day guide today, push the weekly digest to following days (it
+  // carries over because it is reserved).
   const pushWeekly = () => {
     for (const item of weeklyItems) {
       if (!queuedUserIds.has(item.user.userId)) {
@@ -854,10 +879,12 @@ async function buildQueue(
       today
     );
 
-  // 対象を決める日（月曜。取り戻しの火曜を含む）はお知らせを先に並べ、週次進捗は翌日以降に
-  // 繰り越す（予約があるため週の残りの日に送れる）。それ以外の日の週次進捗は予約の繰り越し分
-  // だけで、予約は同じ週の間しか有効でないため、繰り越しの期限が無いお知らせより先に並べる
-  // （大勢に送るお知らせが上限を使い切り、週次進捗を週末まで押し出して失わせないため）
+  // On days deciding targets (Monday, including catch-up Tuesday) put announcements first and
+  // carry the weekly digest to following days (the reservation lets it go out on the rest of the
+  // week). On other days the weekly digest is only the reserved carry-over and a reservation is
+  // valid only within its week, so it goes before announcements, which have no carry-over
+  // deadline (so a large announcement using up the cap cannot push the weekly digest to the
+  // weekend and lose it).
   let announcementBatches: AnnouncementBatch[];
   if (decidesTargets) {
     announcementBatches = await appendAnnouncements();
@@ -871,21 +898,23 @@ async function buildQueue(
 }
 
 /**
- * 今日送るべき定期メールをすべて判定して送る。
- *
- * - **並行実行の排除**: 実行ロック（`cron_locks`、`claimCronLock()`）を取れた実行だけが処理する。
- *   Cron の重複起動・手動実行が重なっても、後から来た実行は何もせずに `skipped` を返す
- * - **二重送信の防止**: 1通ごとに `email_logs` へ `(user_id, kind, reference_key)` を claim してから
- *   送る（`deliverUserEmail()`）。同じ日の再実行でも UNIQUE 違反で送らない
- * - **1人1日1通**: 今日すでに案内系メールを claim したユーザーは、同じ日の再実行で対象から外す
- *   （朝の実行後にステータスが変わっても、別種別の2通目を送らない）
- * - **1日の上限**: 今日すでに claim した案内系メールの数を `EMAIL_DIGEST_MAX_PER_DAY` から引いた数を
- *   今回の上限とし、送信を試みた通数が達するか、経過時間が `EMAIL_DIGEST_TIME_BUDGET_MS` を
- *   超えたら打ち切る。残りはログに残し、週次進捗は同じ週の翌日以降の実行で送る
- * - **配信停止**: 抽出の段階で `email_opt_out_at IS NULL` に絞り、全通のフッターに配信停止リンクを入れる
- *
- * 送信設定（`RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `NEXT_PUBLIC_APP_URL`）か
- * `EMAIL_UNSUBSCRIBE_SECRET` が無い環境では何もしない（配信停止リンクを作れない案内メールは送らない）。
+ * Decides and sends every periodic email due today.
+ * - Exclusive runs: only the run that took the run lock (`cron_locks`, claimCronLock()) proceeds.
+ *   Duplicate Cron starts / manual runs later return `skipped` without doing anything.
+ * - No double sending: each email claims `(user_id, kind, reference_key)` in `email_logs` before
+ *   sending (deliverUserEmail()); a same-day rerun hits the UNIQUE violation and sends nothing.
+ * - One per user per day: users who already claimed a promotional email today are excluded on
+ *   same-day reruns (no second email of another kind even if status changed after the morning
+ *   run).
+ * - Daily cap: `EMAIL_DIGEST_MAX_PER_DAY` minus promotional emails already claimed today is this
+ *   run's limit; stop when attempted sends reach it or elapsed time exceeds
+ *   `EMAIL_DIGEST_TIME_BUDGET_MS`. The remainder is logged, and weekly digests are sent in
+ *   following days of the same week.
+ * - Unsubscribe: extraction filters `email_opt_out_at IS NULL` and every email footer has an
+ *   unsubscribe link.
+ * Does nothing when sending settings (`RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` /
+ * `NEXT_PUBLIC_APP_URL`) or `EMAIL_UNSUBSCRIBE_SECRET` are missing (promotional emails without an
+ * unsubscribe link are never sent).
  */
 export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<EmailDigestResult> {
   const clock = options.clock ?? Date.now;
@@ -928,7 +957,7 @@ export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<
   }
 }
 
-/** 実行ロックを取った実行だけが呼ぶ、抽出から送信までの本体 */
+/** Body from extraction to sending; called only by the run that took the lock. */
 async function sendDigest(
   supabase: AdminClient,
   today: string,
@@ -1031,18 +1060,18 @@ async function sendDigest(
 }
 
 /**
- * 実行の開始時点で送信を終えていなかった対象者全員が送信を終えた（`email_logs` に送信済み、
- * または翌日以降に送り直さない失敗・送信中の行を持つ）お知らせに `email_sent_at` を記録する（一斉送信の
- * 完了）。判定は送信ループの結果ではなく `email_logs` を引き直して行うため、claim 自体が
- * DB エラーで失敗した宛先や、例外で送れなかった宛先（行が作られない）、送り直す期間内の
- * 送信失敗が残っていれば完了にしない。今日すでに別の案内を受け取った・上限や時間切れで
- * 回らなかった対象者も同様に残り、翌日以降の実行が続きを送る。対象者がいないお知らせも
- * ここで完了にする。
- *
- * 実行の途中で管理画面から編集された（`updated_at` が変わった）お知らせは完了にしない。
- * 対象を広げた編集の場合、実行の開始時点の対象だけで完了にすると広げた分が送られないため
- * （翌日の実行が新しい対象で判定し直す）。引き直し・記録の失敗はログだけ残す
- * （翌日の実行で判定し直せる）。
+ * Records `email_sent_at` on announcements whose targets unfinished at the start of the run are
+ * now all finished (sent, or hold a failure that will not be resent, or a sending row in
+ * `email_logs`), i.e. completes the bulk send. It re-queries `email_logs` instead of trusting the
+ * send loop result, so it does not complete when a target remains: a claim that failed with a DB
+ * error, a send that threw (no row created), or a failure still in the resend window. Targets who
+ * already got another guide today or were not reached because of the cap / time limit likewise
+ * remain, and following days' runs continue. Announcements with no targets are also completed
+ * here.
+ * An announcement edited from the admin screen during the run (`updated_at` changed) is not
+ * completed: if the edit widened the targets, completing on the start-of-run targets would skip
+ * the widened ones (the next day's run re-decides with the new targets). Re-query / record
+ * failures are only logged (the next day's run can re-decide).
  */
 async function markCompletedAnnouncements(
   supabase: AdminClient,
@@ -1054,7 +1083,7 @@ async function markCompletedAnnouncements(
   }
   let done: Map<string, Set<number>>;
   try {
-    // 翌日以降の実行で送り直す失敗（今日の失敗を含む）が残っていれば完了にしない
+    // Do not complete while failures to resend on following days (including today's) remain.
     const publishedAt = new Map(batches.map((batch) => [batch.referenceKey, batch.publishedAt]));
     const tomorrow = addDays(today, 1);
     ({ done } = classifyAnnouncementLogs(

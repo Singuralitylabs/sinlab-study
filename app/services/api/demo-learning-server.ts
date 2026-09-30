@@ -17,9 +17,6 @@ export interface DemoContext {
   week: LearningWeek;
 }
 
-/**
- * デモ用: 公開テーマ一覧を取得
- */
 export async function fetchDemoPublishedThemes(): Promise<{
   data: LearningTheme[] | null;
   error: PostgrestError | null;
@@ -38,9 +35,6 @@ export async function fetchDemoPublishedThemes(): Promise<{
   return { data: data as LearningTheme[], error: null };
 }
 
-/**
- * デモ用: テーマをIDで取得
- */
 export async function fetchDemoThemeById(themeId: number): Promise<{
   data: LearningTheme | null;
   error: PostgrestError | null;
@@ -60,9 +54,6 @@ export async function fetchDemoThemeById(themeId: number): Promise<{
   return { data: data as LearningTheme, error: null };
 }
 
-/**
- * デモ用: テーマに属する公開フェーズ一覧を取得
- */
 export async function fetchDemoPhasesByThemeId(themeId: number): Promise<{
   data: LearningPhase[] | null;
   error: PostgrestError | null;
@@ -82,9 +73,6 @@ export async function fetchDemoPhasesByThemeId(themeId: number): Promise<{
   return { data: data as LearningPhase[], error: null };
 }
 
-/**
- * デモ用: フェーズをIDで取得
- */
 export async function fetchDemoPhaseById(phaseId: number): Promise<{
   data: LearningPhase | null;
   error: PostgrestError | null;
@@ -105,9 +93,8 @@ export async function fetchDemoPhaseById(phaseId: number): Promise<{
 }
 
 /**
- * デモ用コンテキストを取得する
- * 最初の公開テーマ → 最初の公開フェーズ → 最初の公開週 を順番にクエリして返す。
- * すべてのデモページのロック基準となる。
+ * Demo context: first published theme -> first published phase -> first published week, queried
+ * in order. It is the lock baseline for every demo page.
  */
 export async function fetchDemoContext(): Promise<{
   data: DemoContext | null;
@@ -166,9 +153,6 @@ export async function fetchDemoContext(): Promise<{
   };
 }
 
-/**
- * デモ用: 週に属するコンテンツ一覧を取得（本文等の重いカラムは除外）
- */
 export async function fetchDemoContentsByWeekId(weekId: number): Promise<{
   data: LearningContentListItem[] | null;
   error: PostgrestError | null;
@@ -191,9 +175,6 @@ export async function fetchDemoContentsByWeekId(weekId: number): Promise<{
   return { data: data as LearningContentListItem[], error: null };
 }
 
-/**
- * デモ用: フェーズに属する公開週一覧をコンテンツ付きで取得（本文等の重いカラムは除外）
- */
 export async function fetchDemoWeeksWithContentsByPhaseId(phaseId: number): Promise<{
   data: (LearningWeek & { contents: LearningContentListItem[] })[] | null;
   error: PostgrestError | null;
@@ -219,9 +200,6 @@ export async function fetchDemoWeeksWithContentsByPhaseId(phaseId: number): Prom
   return { data: data as (LearningWeek & { contents: LearningContentListItem[] })[], error: null };
 }
 
-/**
- * デモ用: コンテンツ詳細を取得（週・フェーズ・テーマ情報付き）
- */
 export async function fetchDemoContentById(contentId: number): Promise<{
   data: LearningContentWithBreadcrumb | null;
   error: PostgrestError | null;
@@ -245,13 +223,11 @@ export async function fetchDemoContentById(contentId: number): Promise<{
 }
 
 /**
- * デモ用: お試し公開スライドの署名付きURLを発行
- *
- * デモ画面は未認証のためユーザー権限のクライアントが無く、他のデモ取得関数と同じく
- * service_role で署名する。service_role は RLS を素通りするため、「公開済み・未削除・
- * お試し公開（is_open_to_trial = true）のスライド」という条件（お試しユーザーと同じ範囲。
- * AGENTS.md の不変条件、issue #89）はこの関数自身が判定し、満たさなければ Storage を
- * 呼ばず null を返す。呼び出し側の分岐に依存しない。
+ * Issues a signed URL for a trial-open slide. The demo is unauthenticated (no user-scoped
+ * client), so it signs with service_role like the other demo fetchers. service_role bypasses RLS,
+ * so this function itself enforces "published, not deleted, is_open_to_trial = true" (same scope
+ * as trial users; AGENTS.md invariant, issue #89) and returns null without touching Storage
+ * otherwise, independent of caller branching.
  */
 export async function createDemoSlideSignedUrl(
   content: Pick<

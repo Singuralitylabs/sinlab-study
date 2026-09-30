@@ -5,12 +5,11 @@ function sha256(value: string): Buffer {
 }
 
 /**
- * Cron ルート（`/api/cron/*`）の呼び出し元を検証する。Vercel Cron は
- * `Authorization: Bearer <CRON_SECRET>` を付けて呼ぶ。ユーザーセッションの無い呼び出しの
- * ため `getServerAuth()` は使わず、この判定を必ず通す。
- *
- * フェイルクローズ: `CRON_SECRET` が未設定・空なら常に false（ヘッダーの有無に関係なく拒否）。
- * 比較は長さに依存しないよう SHA-256 のダイジェスト同士を定数時間で比較する。
+ * Verifies the caller of Cron routes (`/api/cron/*`); Vercel Cron sends `Authorization: Bearer
+ * <CRON_SECRET>`. There is no user session, so getServerAuth() is not used and every cron route
+ * must pass this check.
+ * Fail-closed: an unset or empty CRON_SECRET always returns false regardless of the header.
+ * Compares SHA-256 digests in constant time so the comparison does not depend on length.
  */
 export function isAuthorizedCronRequest(authorizationHeader: string | null): boolean {
   const secret = process.env.CRON_SECRET;

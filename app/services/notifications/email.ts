@@ -4,12 +4,11 @@ import {
   RESEND_API_URL,
 } from "@/app/constants/notifications";
 
-/** テンプレート関数が返すメール1通分の内容 */
 export type EmailContent = {
   subject: string;
   text: string;
   html: string;
-  /** メール自体に付けるヘッダー（案内系メールの `List-Unsubscribe` など） */
+  /** Headers attached to the email itself (e.g. `List-Unsubscribe` for promotional emails). */
   headers?: Record<string, string>;
 };
 
@@ -24,22 +23,21 @@ function getEmailConfig(): { apiKey: string; fromAddress: string } | null {
 }
 
 /**
- * メール送信に必要な環境変数（`RESEND_API_KEY` / `EMAIL_FROM_ADDRESS`）がそろっているか。
- * 未設定時のスキップ（warn ログ）は送信の入口（`user-emails.ts` の `deliverToUser()`）の
- * 1箇所で判定し、宛先の読み込み・送信ログの claim より前に打ち切る（未設定の環境で
- * 送信ログだけが積み上がらないようにする）。
+ * Whether the env vars needed for sending (`RESEND_API_KEY` / `EMAIL_FROM_ADDRESS`) are set. The
+ * skip-when-unset (warn log) decision is made in one place, the send entry (`deliverToUser()` in
+ * user-emails.ts), and stops before recipient loading and the send-log claim so unconfigured
+ * environments do not accumulate send logs.
  */
 export function isEmailConfigured(): boolean {
   return getEmailConfig() !== null;
 }
 
 /**
- * Resend の REST API でメールを1通送る。Slack 通知（`postSlackWebhook()`）と同じ方針で、
- * 送信失敗（非2xx・タイムアウト・例外）はログに残して `failed` を返し、例外は一切 throw しない
- * （呼び出し元の主処理へ伝播させない）。送信設定の有無は呼び出し元が `isEmailConfigured()` で
- * 判定済みであることを前提とし、未設定で呼ばれた場合も `failed` を返す。
- *
- * `RESEND_API_KEY` はリクエストヘッダにのみ載せ、戻り値・ログには含めない。
+ * Sends one email via the Resend REST API. Like Slack notifications (`postSlackWebhook()`),
+ * failures (non-2xx, timeout, exception) are logged and return `failed`; it never throws (nothing
+ * propagates to the caller's main work). Callers are assumed to have checked isEmailConfigured();
+ * it also returns `failed` if called while unconfigured.
+ * `RESEND_API_KEY` goes only in the request header and never in return values or logs.
  */
 export async function sendEmail(params: { to: string } & EmailContent): Promise<SendEmailResult> {
   const config = getEmailConfig();

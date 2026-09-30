@@ -1,10 +1,13 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { buildAppUrl } from "@/app/services/notifications/email-templates";
 
-/** 署名対象に含める用途・版の接頭辞（他用途の HMAC と取り違えないため） */
+/**
+ * Purpose/version prefix included in the signature so it is not confused with HMACs for other
+ * purposes.
+ */
 const TOKEN_PURPOSE = "email-unsubscribe:v1";
 
-/** 配信停止ルートのパス（案内系メールのフッターのリンク先） */
+/** Unsubscribe route path (link target in the footer of promotional emails). */
 export const EMAIL_UNSUBSCRIBE_PATH = "/api/email/unsubscribe";
 
 function getSecret(): string | null {
@@ -15,15 +18,15 @@ function sign(secret: string, userId: number): string {
   return createHmac("sha256", secret).update(`${TOKEN_PURPOSE}:${userId}`).digest("base64url");
 }
 
-/** 配信停止リンクを作れるか（`EMAIL_UNSUBSCRIBE_SECRET` が設定済みか） */
+/** Whether unsubscribe links can be built (`EMAIL_UNSUBSCRIBE_SECRET` set). */
 export function isUnsubscribeConfigured(): boolean {
   return getSecret() !== null;
 }
 
 /**
- * `users.id` を `EMAIL_UNSUBSCRIBE_SECRET` で HMAC-SHA256 署名した配信停止トークン
- * （`<userId>.<署名>`）。有効期限は持たない（古いメールのリンクからも停止できるようにする）。
- * シークレット未設定なら null（呼び出し元は案内系メールを送らない）。
+ * Unsubscribe token: `users.id` signed with HMAC-SHA256 using `EMAIL_UNSUBSCRIBE_SECRET`
+ * (`<userId>.<signature>`). No expiry, so links in old emails still work. Returns null when the
+ * secret is unset (callers then do not send promotional emails).
  */
 export function createUnsubscribeToken(userId: number): string | null {
   const secret = getSecret();
@@ -33,7 +36,7 @@ export function createUnsubscribeToken(userId: number): string | null {
   return `${userId}.${sign(secret, userId)}`;
 }
 
-/** 案内系メールのフッターに入れる配信停止リンク。シークレット未設定なら null */
+/** Unsubscribe link for promotional email footers; null when the secret is unset. */
 export function buildUnsubscribeUrl(appUrl: string, userId: number): string | null {
   const token = createUnsubscribeToken(userId);
   return token
@@ -42,8 +45,9 @@ export function buildUnsubscribeUrl(appUrl: string, userId: number): string | nu
 }
 
 /**
- * 配信停止トークンを検証し、署名が正しければ `users.id` を返す。形式不正・改ざん・
- * シークレット未設定はいずれも null（フェイルクローズ。呼び出し元は理由を区別せず 400 にする）。
+ * Verifies the token and returns `users.id` if the signature is valid. Malformed, tampered, or
+ * secret unset all return null (fail-closed; callers answer 400 without distinguishing the
+ * reason).
  */
 export function verifyUnsubscribeToken(token: string | null): number | null {
   const secret = getSecret();

@@ -1,20 +1,19 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
-/** ウェルカムダイアログの表示済み状態 */
 export type OnboardingStatus = {
   completedAt: string | null;
 };
 
-/** はじめかたチェックリストの達成状態（ステップ2・3のみ。ステップ1はテーマ進捗サマリーを再利用する） */
+/** Steps 2 and 3 only; step 1 reuses the theme progress summary. */
 export type GettingStartedProgress = {
   hasSubmission: boolean;
   hasCompletedReview: boolean;
 };
 
 /**
- * 自分の onboarding_completed_at を取得する（通常クライアント。本人 SELECT は既存 RLS で許可済み）。
- * getServerAuth() と proxy.ts のヘッダーには載せない（/ でしか使わないため）。
+ * Normal client (own-row SELECT already allowed by RLS). Deliberately not put in getServerAuth()
+ * or the proxy.ts headers since only / uses it.
  */
 export async function fetchOnboardingStatus(userId: number): Promise<{
   data: OnboardingStatus | null;
@@ -40,9 +39,8 @@ export async function fetchOnboardingStatus(userId: number): Promise<{
 }
 
 /**
- * チェックリストのステップ2・3（提出・AIレビュー完了）を判定する。
- * 存在確認のみのため limit(1) で取得し、全件取得しない。2つの照会は独立しているため
- * 並列に実行する。クエリ失敗時は未達成扱いで継続する（ダッシュボード表示をブロックしない）。
+ * Existence checks only, so limit(1). The two queries are independent and run in parallel. On
+ * query failure treat the step as not achieved and continue (never block the dashboard).
  */
 export async function fetchGettingStartedProgress(userId: number): Promise<{
   data: GettingStartedProgress;
@@ -68,7 +66,7 @@ export async function fetchGettingStartedProgress(userId: number): Promise<{
     console.error("はじめかた進捗のAIレビュー取得エラー:", reviewResult.error.message);
   }
 
-  // 2つの照会は独立に評価する（片方の失敗で他方の結果を捨てない）
+  // Evaluate independently so one failure does not discard the other result.
   return {
     data: {
       hasSubmission: !submissionResult.error && !!submissionResult.data,
@@ -79,9 +77,9 @@ export async function fetchGettingStartedProgress(userId: number): Promise<{
 }
 
 /**
- * onboarding_completed_at を現在時刻で記録する（冪等。上書きのみ）。
- * 本人 UPDATE の RLS ポリシーは追加せず、user_id フィルタで担保する service_role 利用
- * （submissions-server.ts と同じパターン）で onboarding_completed_at の1列のみ更新する。
+ * Idempotent (overwrite only). No RLS UPDATE policy is added for self; uses service_role scoped
+ * by the user_id filter (same pattern as submissions-server.ts) and updates only the
+ * onboarding_completed_at column.
  */
 export async function markOnboardingCompleted(userId: number): Promise<{
   error: PostgrestError | null;

@@ -36,13 +36,12 @@ function getAppUrl(): string | null {
 }
 
 /**
- * `email_logs` への INSERT を処理権（claim）として確保してから1通送り、結果を同じ行に記録する。
- * UNIQUE (user_id, kind, reference_key) の違反（23505）は「同一事象を別の経路・再送が既に
- * 送った（または送信中）」ことを意味するため、送信しない。claim 自体が他のDBエラーで失敗した
- * 場合も、二重送信を防げないため送信しない。
- *
- * 送信設定の有無は入口（`deliverToUser()`、定期メールは `runEmailDigest()`）で判定済みで
- * あることを前提とする。
+ * Claims by INSERTing into `email_logs`, then sends one email and records the result on the same
+ * row. A UNIQUE (user_id, kind, reference_key) violation (23505) means another path / retry
+ * already sent (or is sending) the same event, so do not send. If the claim fails with another DB
+ * error, also do not send since double sending cannot be prevented.
+ * Assumes the caller (the entry point `deliverToUser()`; `runEmailDigest()` for periodic mail)
+ * already checked that sending is configured.
  */
 export async function deliverUserEmail(
   supabase: AdminClient,
@@ -115,10 +114,10 @@ async function fetchRecipient(
 }
 
 /**
- * メール送信をレスポンス返却後に回す。`after()` はサーバーレス関数の終了まで処理を延長するため、
- * 送信がレスポンスを遅らせず、かつ途中で打ち切られない。リクエストスコープ外（`after()` が
- * throw する経路）では、その場で発火だけ行う。いずれも例外は握りつぶし、呼び出し元の主処理
- * （登録・承認・Stripe Webhook・/upgrade/success）の結果・レスポンスには一切影響させない。
+ * Defers email sending until after the response. `after()` extends the serverless function until
+ * it finishes, so sending neither delays the response nor is cut off. Outside request scope
+ * (where `after()` throws) it just fires immediately. Exceptions are always swallowed so the
+ * caller's main work (signup, approval, Stripe webhook, /upgrade/success) is never affected.
  */
 function scheduleEmail(label: EmailKind, task: () => Promise<unknown>): void {
   const run = async () => {
@@ -137,9 +136,10 @@ function scheduleEmail(label: EmailKind, task: () => Promise<unknown>): void {
 }
 
 /**
- * 宛先を読み込み、テンプレートを組み立てて送る共通手順（送信の入口）。送信設定・アプリURLが
- * 無い環境では宛先の読み込みより前にスキップする（本文のリンクは `NEXT_PUBLIC_APP_URL` 起点で
- * のみ作る）。宛先の読み込みと送信ログの claim・記録は、同じ admin クライアントで行う。
+ * Shared entry: load the recipient, build the template, send. Skips before loading the recipient
+ * when sending or the app URL is not configured (links are built only from
+ * `NEXT_PUBLIC_APP_URL`). Recipient loading and the send-log claim/record use the same admin
+ * client.
  */
 async function deliverToUser(
   kind: EmailKind,
@@ -177,8 +177,9 @@ async function deliverToUser(
 }
 
 /**
- * 初回登録（`users` の INSERT 成功後）のようこそメール。reference_key は `users.id`。
- * callback の INSERT は通常クライアント（RLS適用）で行い id を返さないため、`auth_id` で引き直す
+ * Welcome email after the initial signup INSERT into `users`; reference_key is `users.id`. The
+ * callback INSERT uses the normal client (RLS) and does not return the id, so re-query by
+ * `auth_id`.
  */
 export function scheduleSignupEmail(params: { authId: string }): void {
   scheduleEmail(EMAIL_KIND.SIGNUP, () =>
@@ -196,7 +197,7 @@ export function scheduleSignupEmail(params: { authId: string }): void {
   );
 }
 
-/** 管理者の承認（`approveUser()` が更新したとき）。reference_key は承認時刻（ISO文字列） */
+/** Admin approval (when approveUser() updated). reference_key is the approval time (ISO string). */
 export function scheduleApprovedEmail(params: {
   userId: number;
   membershipType: MembershipType;
@@ -218,11 +219,11 @@ export function scheduleApprovedEmail(params: {
 }
 
 /**
- * 一般有料会員化（`activateUserFromCheckoutSession()` が昇格したとき）。Webhook と
- * /upgrade/success の両方から呼ばれるため、reference_key の `stripe_subscription_id` で1通に抑える。
- *
- * @param monthlyAmountJpy Stripe から取り直したサブスクの実請求額。JPY の月額で確認できない
- *   場合は null を渡し、料金の行を載せない（`DISPLAY_MONTHLY_PRICE_JPY` では代用しない）
+ * Paid membership (when activateUserFromCheckoutSession() promoted). Called from both the webhook
+ * and /upgrade/success, so reference_key `stripe_subscription_id` limits it to one email.
+ * @param monthlyAmountJpy actual charged amount of the subscription re-fetched from Stripe. Pass
+ *   null when it cannot be confirmed as a JPY monthly amount and the price line is omitted (never
+ *   substitute DISPLAY_MONTHLY_PRICE_JPY).
  */
 export function scheduleUpgradedEmail(params: {
   userId: number;
@@ -252,10 +253,9 @@ export function scheduleUpgradedEmail(params: {
 }
 
 /**
- * 解約予約（Stripeから取り直したライブ状態が解約予約中のとき。判定は `syncSubscriptionStatus()`）。
- * reference_key は `stripe_subscription_id`
- *
- * @param periodEnd 利用できる最終日時（`cancel_at`、無ければ `current_period_end`）
+ * Scheduled cancellation (when the live state re-fetched from Stripe shows one; decided in
+ * syncSubscriptionStatus()). reference_key is `stripe_subscription_id`.
+ * @param periodEnd last date/time of access (`cancel_at`, else `current_period_end`)
  */
 export function scheduleCancelScheduledEmail(params: {
   userId: number;
@@ -277,7 +277,10 @@ export function scheduleCancelScheduledEmail(params: {
   );
 }
 
-/** 有料会員の終了（`revertUserToTrial()` が実際に降格したとき）。reference_key は `stripe_subscription_id` */
+/**
+ * Paid membership ended (when revertUserToTrial() actually demoted). reference_key is
+ * `stripe_subscription_id`.
+ */
 export function scheduleSubscriptionEndedEmail(params: {
   userId: number;
   subscriptionId: string;

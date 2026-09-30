@@ -16,11 +16,11 @@ async function insertLock(
 }
 
 /**
- * Cron バッチの実行ロックを取る（`cron_locks` の主キー `name` への INSERT を処理権の claim に
- * する。`claimCheckoutSlot()` と同じパターン）。別の実行が持っていれば null を返し、呼び出し元は
- * 何もせずに終了する。関数のハードタイムアウト等で解放されなかったロックは、`ttlMs` を過ぎて
- * いれば削除して1回だけ取り直す（削除後の INSERT も主キーで排他されるため、取り直しが並行
- * しても1つだけが成功する）。DB エラーは throw する。
+ * Takes a Cron batch run lock: an INSERT into the `cron_locks` primary key `name` is the claim
+ * (same pattern as claimCheckoutSlot()). Returns null if another run holds it and the caller
+ * exits without doing anything. A lock not released (e.g. hard function timeout) is deleted once
+ * past `ttlMs` and re-acquired once; the INSERT after deletion is also PK-exclusive, so
+ * concurrent re-acquisitions still let only one win. Throws on DB errors.
  */
 export async function claimCronLock(
   supabase: SupabaseClient,
@@ -55,8 +55,8 @@ export async function claimCronLock(
 }
 
 /**
- * 自分が取ったロックを解放する（`locked_at` が一致する行だけを消し、TTL 経過後に別の実行が
- * 取り直したロックは消さない）。失敗してもログだけ残す（TTL で解ける）。
+ * Releases our own lock: deletes only the row whose `locked_at` matches, so a lock another run
+ * re-acquired after the TTL is not removed. Failures are only logged (the TTL frees it).
  */
 export async function releaseCronLock(supabase: SupabaseClient, lock: CronLock): Promise<void> {
   try {
