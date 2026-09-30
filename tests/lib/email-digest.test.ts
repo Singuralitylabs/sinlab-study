@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addDays,
   coversPreviousWeek,
+  cycleStartOf,
   type DigestContent,
   type DigestUser,
   daysSinceSignup,
@@ -12,7 +13,6 @@ import {
   resolveNextContent,
   toJstDateString,
   visibleContentsFor,
-  weekStartOf,
 } from "@/app/lib/email-digest";
 
 describe("JST の暦日", () => {
@@ -36,14 +36,20 @@ describe("JST の暦日", () => {
   });
 });
 
-describe("weekStartOf（週の開始日 = 月曜）", () => {
+describe("cycleStartOf（送信曜日を起点とする週の開始日）", () => {
   it.each([
-    ["2026-10-05", "2026-10-05"],
-    ["2026-10-06", "2026-10-05"],
-    ["2026-10-11", "2026-10-05"],
-    ["2026-10-12", "2026-10-12"],
-  ])("%s の週の開始日は %s", (date, expected) => {
-    expect(weekStartOf(date)).toBe(expected);
+    ["2026-10-05", 1, "2026-10-05"],
+    ["2026-10-06", 1, "2026-10-05"],
+    ["2026-10-11", 1, "2026-10-05"],
+    ["2026-10-12", 1, "2026-10-12"],
+    ["2026-10-05", 3, "2026-09-30"],
+    ["2026-10-07", 3, "2026-10-07"],
+    ["2026-10-08", 3, "2026-10-07"],
+    ["2026-10-11", 0, "2026-10-11"],
+    ["2026-10-10", 0, "2026-10-04"],
+    ["2026-10-10", 6, "2026-10-10"],
+  ])("%s を含む、曜日 %i の送信日は %s", (date, weekday, expected) => {
+    expect(cycleStartOf(date, weekday)).toBe(expected);
   });
 });
 
@@ -91,13 +97,14 @@ function user(userId: number, status: "active" | "trial", createdAt: string): Di
 
 describe("planMilestoneEmails", () => {
   const today = "2026-10-15";
+  const DEFAULT_DAYS = { trialNurture: [2, 5, 7, 14], inactivityReminder: [7, 14] };
   // Back-calculated from a sign-up at noon JST (today - N days).
   const signedUp = (days: number) => `${addDays(today, -days)}T03:00:00Z`;
 
   it("お試しユーザーは登録から 2・5・7・14 日目に trial_nurture の対象になる", () => {
     const users = [2, 3, 5, 7, 14, 15].map((d) => user(d, "trial", signedUp(d)));
 
-    const { trialNurture } = planMilestoneEmails(users, today);
+    const { trialNurture } = planMilestoneEmails(users, today, DEFAULT_DAYS);
 
     expect(trialNurture.map(({ user, day }) => [user.userId, day])).toEqual([
       [2, 2],
@@ -110,7 +117,7 @@ describe("planMilestoneEmails", () => {
   it("未学習リマインドの候補は登録から 7・14 日目のユーザー", () => {
     const users = [6, 7, 8, 14].map((d) => user(d, "active", signedUp(d)));
 
-    const { inactivityCandidates } = planMilestoneEmails(users, today);
+    const { inactivityCandidates } = planMilestoneEmails(users, today, DEFAULT_DAYS);
 
     expect(inactivityCandidates.map(({ user, day }) => [user.userId, day])).toEqual([
       [7, 7],
@@ -121,24 +128,54 @@ describe("planMilestoneEmails", () => {
   it("trial_nurture と同日に重なるお試しユーザーは、inactivity_reminder の候補にしない", () => {
     const users = [user(1, "trial", signedUp(7)), user(2, "trial", signedUp(14))];
 
-    const { trialNurture, inactivityCandidates } = planMilestoneEmails(users, today);
+    const { trialNurture, inactivityCandidates } = planMilestoneEmails(users, today, DEFAULT_DAYS);
 
     expect(trialNurture).toHaveLength(2);
     expect(inactivityCandidates).toHaveLength(0);
   });
 
   it("active ユーザーには trial_nurture を送らない", () => {
-    const { trialNurture } = planMilestoneEmails([user(1, "active", signedUp(2))], today);
+    const { trialNurture } = planMilestoneEmails(
+      [user(1, "active", signedUp(2))],
+      today,
+      DEFAULT_DAYS
+    );
     expect(trialNurture).toHaveLength(0);
   });
 
   it("N 日目を過ぎた日には拾わない（前日の実行が失敗しても翌日に送らない）", () => {
     const users = [user(1, "trial", signedUp(3)), user(2, "active", signedUp(8))];
 
-    const { trialNurture, inactivityCandidates } = planMilestoneEmails(users, today);
+    const { trialNurture, inactivityCandidates } = planMilestoneEmails(users, today, DEFAULT_DAYS);
 
     expect(trialNurture).toHaveLength(0);
     expect(inactivityCandidates).toHaveLength(0);
+  });
+
+  it("設定した N 日目が使われる（既定の日は対象外になる）", () => {
+    const users = [3, 7, 20].map((d) => user(d, "trial", signedUp(d)));
+
+    const { trialNurture, inactivityCandidates } = planMilestoneEmails(users, today, {
+      trialNurture: [3, 20],
+      inactivityReminder: [7],
+    });
+
+    expect(trialNurture.map(({ user, day }) => [user.userId, day])).toEqual([
+      [3, 3],
+      [20, 20],
+    ]);
+    expect(inactivityCandidates.map(({ user }) => user.userId)).toEqual([7]);
+  });
+
+  it("null（無効な種別）は対象にしない", () => {
+    const users = [user(1, "trial", signedUp(2)), user(2, "active", signedUp(7))];
+
+    expect(
+      planMilestoneEmails(users, today, { trialNurture: null, inactivityReminder: [7] })
+    ).toMatchObject({ trialNurture: [], inactivityCandidates: [{ day: 7 }] });
+    expect(
+      planMilestoneEmails(users, today, { trialNurture: [2], inactivityReminder: null })
+    ).toMatchObject({ trialNurture: [{ day: 2 }], inactivityCandidates: [] });
   });
 });
 

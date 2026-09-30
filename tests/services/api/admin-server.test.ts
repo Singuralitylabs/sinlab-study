@@ -19,6 +19,7 @@ import {
   isUserCurrentlySubscribed,
   parseStrictFilterId,
   rejectUser,
+  setUserEmailOptOut,
   updateContent,
   updatePhase,
   updateTheme,
@@ -1204,5 +1205,46 @@ describe("updateContent（編集時の再採番）", () => {
       p_table: "learning_contents",
       p_updates: [{ id: 3, display_order: 1 }],
     });
+  });
+});
+
+describe("setUserEmailOptOut", () => {
+  const clientReturning = (data: unknown, error: unknown = null) => {
+    const mockClient = createMockSupabaseClient({ tableResults: { users: { data, error } } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    return mockClient;
+  };
+
+  it("停止: 現在時刻を記録し、未停止の行だけを更新する（元の停止日時を上書きしない）", async () => {
+    const mockClient = clientReturning([{ id: 3 }]);
+
+    const result = await setUserEmailOptOut(3, true);
+
+    expect(result).toEqual({ error: null, updated: true });
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.update).toHaveBeenCalledWith({ email_opt_out_at: expect.any(String) });
+    expect(builder.eq).toHaveBeenCalledWith("id", 3);
+    expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
+    expect(builder.is).toHaveBeenCalledWith("email_opt_out_at", null);
+  });
+
+  it("再開: NULL に戻し、停止中の行だけを更新する", async () => {
+    const mockClient = clientReturning([{ id: 3 }]);
+
+    const result = await setUserEmailOptOut(3, false);
+
+    expect(result.updated).toBe(true);
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.update).toHaveBeenCalledWith({ email_opt_out_at: null });
+    expect(builder.not).toHaveBeenCalledWith("email_opt_out_at", "is", null);
+  });
+
+  it("対象が0行なら updated: false、DBエラーなら error を返す", async () => {
+    clientReturning([]);
+    expect(await setUserEmailOptOut(3, true)).toEqual({ error: null, updated: false });
+
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    clientReturning(null, dbError);
+    expect(await setUserEmailOptOut(3, false)).toEqual({ error: dbError, updated: false });
   });
 });

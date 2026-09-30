@@ -6,6 +6,7 @@ import {
   changeUserRole,
   isUserCurrentlySubscribed,
   rejectUser,
+  setUserEmailOptOut,
 } from "@/app/services/api/admin-server";
 import { AdminUserActionSchema, validateRequest } from "@/app/services/api/schemas";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -98,6 +99,26 @@ export async function PATCH(request: Request) {
               "ロールを変更できません（管理者ユーザーか、active以外のユーザーか、存在しません）",
           },
           { status: 403 }
+        );
+      }
+      return NextResponse.json({ success: true, action });
+    }
+
+    if (data.action === "resume_email" || data.action === "opt_out_email") {
+      const optOut = data.action === "opt_out_email";
+      const { error, updated } = await setUserEmailOptOut(userId, optOut);
+      if (error) {
+        return NextResponse.json({ error: "配信停止状態の更新に失敗しました" }, { status: 500 });
+      }
+      // 0 rows updated: already in the requested state, missing or deleted.
+      if (!updated) {
+        return NextResponse.json(
+          {
+            error: optOut
+              ? "すでに配信停止中か、ユーザーが存在しません。画面を更新して最新の状態を確認してください"
+              : "配信停止中ではないか、ユーザーが存在しません。画面を更新して最新の状態を確認してください",
+          },
+          { status: 409 }
         );
       }
       return NextResponse.json({ success: true, action });

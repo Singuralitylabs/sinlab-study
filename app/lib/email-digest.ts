@@ -1,8 +1,3 @@
-import {
-  INACTIVITY_REMINDER_DAYS,
-  TRIAL_NURTURE_DAYS,
-  type TrialNurtureDay,
-} from "@/app/constants/notifications";
 import { USER_STATUS } from "@/app/constants/user";
 import type { UserStatusType } from "@/app/types";
 
@@ -32,12 +27,13 @@ export function daysBetween(from: string, to: string): number {
 }
 
 /**
- * Monday of the week containing the date (the weekly digest's reference_key; weeks start on
- * Monday).
+ * Most recent send day (on or before the date) for the configured send weekday (0 = Sunday ...
+ * 6 = Saturday). It is the weekly digest's reference_key; the "last week" it reports is the 7 days
+ * ending the day before it.
  */
-export function weekStartOf(date: string): string {
+export function cycleStartOf(date: string, sendWeekday: number): string {
   const dayOfWeek = new Date(dateStringToUtcMs(date)).getUTCDay();
-  return addDays(date, -((dayOfWeek + 6) % 7));
+  return addDays(date, -((dayOfWeek - sendWeekday + 7) % 7));
 }
 
 export function jstStartOfDayIso(date: string): string {
@@ -70,33 +66,33 @@ export type DigestUser = {
   createdAt: string;
 };
 
-export type MilestoneEmail<Day extends number> = { user: DigestUser; day: Day };
+export type MilestoneEmail = { user: DigestUser; day: number };
 
 /**
  * Decides targets for the two "N days since sign-up" mails. trial_nurture: status = trial and today
- * is day 2/5/7/14. inactivity_reminder: today is day 7/14 (the caller checks for activity via
- * user_progress / submissions); users who get trial_nurture the same day are excluded. Days missed
- * because the daily run failed or hit the cap aren't picked up later (only exactly day N is
- * checked).
+ * is one of `trialNurtureDays`. inactivity_reminder: today is one of `inactivityReminderDays` (the
+ * caller checks for activity via user_progress / submissions); users who get trial_nurture the same
+ * day are excluded. A disabled kind is passed as null and never targeted. Days missed because the
+ * daily run failed or hit the cap aren't picked up later (only exactly day N is checked).
  */
 export function planMilestoneEmails(
   users: DigestUser[],
-  today: string
+  today: string,
+  days: { trialNurture: readonly number[] | null; inactivityReminder: readonly number[] | null }
 ): {
-  trialNurture: MilestoneEmail<TrialNurtureDay>[];
-  inactivityCandidates: MilestoneEmail<number>[];
+  trialNurture: MilestoneEmail[];
+  inactivityCandidates: MilestoneEmail[];
 } {
-  const trialNurture: MilestoneEmail<TrialNurtureDay>[] = [];
-  const inactivityCandidates: MilestoneEmail<number>[] = [];
+  const trialNurture: MilestoneEmail[] = [];
+  const inactivityCandidates: MilestoneEmail[] = [];
 
   for (const user of users) {
     const day = daysSinceSignup(user.createdAt, today);
-    const nurtureDay = TRIAL_NURTURE_DAYS.find((d) => d === day);
-    if (user.status === USER_STATUS.TRIAL && nurtureDay !== undefined) {
-      trialNurture.push({ user, day: nurtureDay });
+    if (user.status === USER_STATUS.TRIAL && days.trialNurture?.includes(day)) {
+      trialNurture.push({ user, day });
       continue;
     }
-    if ((INACTIVITY_REMINDER_DAYS as readonly number[]).includes(day)) {
+    if (days.inactivityReminder?.includes(day)) {
       inactivityCandidates.push({ user, day });
     }
   }

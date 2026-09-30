@@ -2,7 +2,6 @@ import {
   ANNOUNCEMENT_EMAIL_RETRY_DAYS,
   EMAIL_DIGEST_LOCK_NAME,
   EMAIL_DIGEST_LOCK_TTL_MS,
-  EMAIL_DIGEST_MAX_PER_DAY,
   EMAIL_DIGEST_SEND_INTERVAL_MS,
   EMAIL_DIGEST_TIME_BUDGET_MS,
   EMAIL_KIND,
@@ -20,6 +19,7 @@ import { buildThemeContentOrder, type NavigationWeek } from "@/app/lib/content-n
 import {
   addDays,
   coversPreviousWeek,
+  cycleStartOf,
   type DigestContent,
   type DigestUser,
   daysBetween,
@@ -30,10 +30,11 @@ import {
   resolveNextContent,
   toJstDateString,
   visibleContentsFor,
-  weekStartOf,
 } from "@/app/lib/email-digest";
+import type { EmailSettingsSnapshot } from "@/app/lib/email-settings";
 import { type EmailMarkdown, renderEmailMarkdown } from "@/app/lib/markdown-email";
 import { type CronLock, claimCronLock, releaseCronLock } from "@/app/services/api/cron-lock-server";
+import { fetchEmailSettings } from "@/app/services/api/email-settings-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { type EmailContent, isEmailConfigured } from "@/app/services/notifications/email";
 import {
@@ -250,6 +251,31 @@ async function fetchLoggedUserIds(
       .select("user_id")
       .eq("kind", kind)
       .eq("reference_key", referenceKey)
+      .in("user_id", ids)
+      .order("id")
+      .range(from, to)
+  );
+  return new Set(rows.map((row) => row.user_id));
+}
+
+/**
+ * IDs of users who already have a `weekly_digest` row for the 7 days ending at `cycleStart`
+ * (reference_key is a date, so a range compare works). Changing the send weekday mid-week shifts
+ * the reference_key, so an exact-key check would send a second digest for the same week; any row
+ * within the window counts as this cycle's digest.
+ */
+async function fetchWeeklyDigestLoggedUserIds(
+  supabase: AdminClient,
+  userIds: number[],
+  cycleStart: string
+): Promise<Set<number>> {
+  const rows = await fetchForUserIds<{ user_id: number }>(userIds, (ids, from, to) =>
+    supabase
+      .from("email_logs")
+      .select("user_id")
+      .eq("kind", EMAIL_KIND.WEEKLY_DIGEST)
+      .gte("reference_key", addDays(cycleStart, -6))
+      .lte("reference_key", cycleStart)
       .in("user_id", ids)
       .order("id")
       .range(from, to)
@@ -699,25 +725,24 @@ async function buildQueue(
   allUsers: DigestUser[],
   excludedToday: ReadonlySet<number>,
   today: string,
-  appUrl: string
+  appUrl: string,
+  settings: EmailSettingsSnapshot
 ): Promise<{
   queue: QueuedEmail[];
   weeklyReservationMissing: boolean;
   announcementBatches: AnnouncementBatch[];
 }> {
   const users = allUsers.filter((user) => !excludedToday.has(user.userId));
+  const trialNurtureSetting = settings.kinds.trial_nurture;
+  const inactivitySetting = settings.kinds.inactivity_reminder;
+  const weeklySetting = settings.kinds.weekly_digest;
+  const announcementEnabled = settings.kinds.announcement.enabled;
   if (users.length === 0) {
     // Return the bulk send state even with no sendable users, so announcements with no targets
     // can be completed.
-    const announcementBatches = await appendAnnouncementEmails(
-      supabase,
-      allUsers,
-      new Set(),
-      new Set(),
-      [],
-      appUrl,
-      today
-    );
+    const announcementBatches = announcementEnabled
+      ? await appendAnnouncementEmails(supabase, allUsers, new Set(), new Set(), [], appUrl, today)
+      : [];
     return { queue: [], weeklyReservationMissing: false, announcementBatches };
   }
 
@@ -726,7 +751,11 @@ async function buildQueue(
   const queue: QueuedEmail[] = [];
   const queuedUserIds = new Set<number>();
 
-  const { trialNurture, inactivityCandidates } = planMilestoneEmails(users, today);
+  const { trialNurture, inactivityCandidates } = planMilestoneEmails(users, today, {
+    trialNurture: trialNurtureSetting.enabled ? trialNurtureSetting.sendDays : null,
+    inactivityReminder: inactivitySetting.enabled ? inactivitySetting.sendDays : null,
+  });
+  const finalNurtureDay = Math.max(...(trialNurtureSetting.sendDays ?? [0]));
   for (const { user, day } of trialNurture) {
     queue.push({
       kind: EMAIL_KIND.TRIAL_NURTURE,
@@ -739,6 +768,7 @@ async function buildQueue(
           appUrl,
           unsubscribeUrl,
           day,
+          isFinal: day === finalNurtureDay,
           upgradeAvailable,
           lockedThemeNames: lockedThemeNames(contents),
         }),
@@ -778,11 +808,16 @@ async function buildQueue(
   // run never reached target selection), runs up to `WEEKLY_DIGEST_CATCH_UP_DAYS` (Tuesday)
   // decide targets in Monday's place. Users who registered partway through last week have no
   // complete "last week" and are skipped.
-  const weekStart = weekStartOf(today);
+  const weekStart = cycleStartOf(today, weeklySetting.sendWeekday as number);
   const daysSinceWeekStart = daysBetween(weekStart, today);
-  let decidesTargets = daysSinceWeekStart === 0;
+  const weeklyEnabled = weeklySetting.enabled;
+  let decidesTargets = weeklyEnabled && daysSinceWeekStart === 0;
   let weeklyReservationMissing = false;
-  if (!decidesTargets && !(await hasWeeklyDigestReservation(supabase, weekStart))) {
+  if (
+    weeklyEnabled &&
+    !decidesTargets &&
+    !(await hasWeeklyDigestReservation(supabase, weekStart))
+  ) {
     // Monday's run did not reach target selection (failure, skip, missed start). Up to Tuesday
     // decide targets in Monday's place; after that nothing is sent so it gets noticed.
     if (daysSinceWeekStart <= WEEKLY_DIGEST_CATCH_UP_DAYS) {
@@ -797,7 +832,9 @@ async function buildQueue(
       );
     }
   }
-  let weeklyPool = users.filter((user) => coversPreviousWeek(user.createdAt, weekStart));
+  let weeklyPool = weeklyEnabled
+    ? users.filter((user) => coversPreviousWeek(user.createdAt, weekStart))
+    : [];
   const poolIds = () => weeklyPool.map((user) => user.userId);
   if (weeklyReservationMissing) {
     weeklyPool = [];
@@ -810,7 +847,7 @@ async function buildQueue(
     );
     weeklyPool = weeklyPool.filter((user) => reserved.has(user.userId));
   }
-  const logged = await fetchLoggedUserIds(supabase, poolIds(), EMAIL_KIND.WEEKLY_DIGEST, weekStart);
+  const logged = await fetchWeeklyDigestLoggedUserIds(supabase, poolIds(), weekStart);
   const weeklyUsers = weeklyPool.filter((user) => !logged.has(user.userId));
   const stats = await fetchWeeklyStats(
     supabase,
@@ -868,16 +905,18 @@ async function buildQueue(
       }
     }
   };
-  const appendAnnouncements = () =>
-    appendAnnouncementEmails(
-      supabase,
-      allUsers,
-      new Set(users.map((user) => user.userId)),
-      queuedUserIds,
-      queue,
-      appUrl,
-      today
-    );
+  const appendAnnouncements = async (): Promise<AnnouncementBatch[]> =>
+    announcementEnabled
+      ? appendAnnouncementEmails(
+          supabase,
+          allUsers,
+          new Set(users.map((user) => user.userId)),
+          queuedUserIds,
+          queue,
+          appUrl,
+          today
+        )
+      : [];
 
   // On days deciding targets (Monday, including catch-up Tuesday) put announcements first and
   // carry the weekly digest to following days (the reservation lets it go out on the rest of the
@@ -906,7 +945,7 @@ async function buildQueue(
  * - One per user per day: users who already claimed a promotional email today are excluded on
  *   same-day reruns (no second email of another kind even if status changed after the morning
  *   run).
- * - Daily cap: `EMAIL_DIGEST_MAX_PER_DAY` minus promotional emails already claimed today is this
+ * - Daily cap: `email_settings.digest_daily_limit` minus promotional emails already claimed today is this
  *   run's limit; stop when attempted sends reach it or elapsed time exceeds
  *   `EMAIL_DIGEST_TIME_BUDGET_MS`. The remainder is logged, and weekly digests are sent in
  *   following days of the same week.
@@ -970,15 +1009,20 @@ async function sendDigest(
   let weeklyReservationMissing: boolean;
   let announcementBatches: AnnouncementBatch[];
   let limit: number;
+  let dailyLimit: number;
   try {
+    // Read on every run and fail closed: if the settings cannot be read, nothing is sent.
+    const settings = await fetchEmailSettings(supabase);
+    dailyLimit = settings.digestDailyLimit;
     const todayLogs = await fetchTodayPromotionalLogs(supabase, today);
-    limit = Math.max(0, EMAIL_DIGEST_MAX_PER_DAY - todayLogs.count);
+    limit = Math.max(0, dailyLimit - todayLogs.count);
     ({ queue, weeklyReservationMissing, announcementBatches } = await buildQueue(
       supabase,
       await fetchDigestUsers(supabase),
       todayLogs.userIds,
       today,
-      appUrl
+      appUrl,
+      settings
     ));
   } catch (error) {
     console.error(
@@ -1044,7 +1088,7 @@ async function sendDigest(
   if (rest.length > 0) {
     const carried = rest.filter((item) => item.carriesOver).length;
     console.warn(
-      `[定期メール] 1日の上限（${EMAIL_DIGEST_MAX_PER_DAY}通）または実行時間の上限に達したため、${rest.length}通を送りませんでした（お知らせ・週次進捗 ${carried}通は翌日以降に繰り越し、登録からN日目の案内と週の最終日の週次進捗 ${rest.length - carried}通は繰り越しません）`
+      `[定期メール] 1日の上限（${dailyLimit}通）または実行時間の上限に達したため、${rest.length}通を送りませんでした（お知らせ・週次進捗 ${carried}通は翌日以降に繰り越し、登録からN日目の案内と週の最終日の週次進捗 ${rest.length - carried}通は繰り越しません）`
     );
   }
 

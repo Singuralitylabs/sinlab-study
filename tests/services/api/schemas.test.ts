@@ -104,6 +104,16 @@ describe("AiReviewRequestSchema", () => {
   });
 });
 
+describe("AdminUserActionSchema - 配信停止の管理（#272）", () => {
+  it.each(["resume_email", "opt_out_email"])(
+    "%s は userId だけで通り、userId が無ければ検証エラー",
+    (action) => {
+      expect(AdminUserActionSchema.safeParse({ userId: 1, action }).success).toBe(true);
+      expect(AdminUserActionSchema.safeParse({ action }).success).toBe(false);
+    }
+  );
+});
+
 describe("AdminUserActionSchema", () => {
   it("approveはmembershipTypeが必須", () => {
     expect(AdminUserActionSchema.safeParse({ userId: 1, action: "approve" }).success).toBe(false);
@@ -169,6 +179,8 @@ describe("AdminUserActionSchema", () => {
         action: "change_membership",
         membershipType: MEMBERSHIP_TYPES[0],
       },
+      resume_email: { userId: 1, action: "resume_email" },
+      opt_out_email: { userId: 1, action: "opt_out_email" },
     };
 
     for (const action of USER_MANAGEMENT_ACTIONS) {

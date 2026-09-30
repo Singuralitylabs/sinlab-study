@@ -129,7 +129,14 @@ export type ContentSiblingCandidateRow = Pick<
 
 export type ManageUserListItem = Pick<
   UserType,
-  "id" | "display_name" | "email" | "role" | "status" | "membership_type" | "created_at"
+  | "id"
+  | "display_name"
+  | "email"
+  | "role"
+  | "status"
+  | "membership_type"
+  | "created_at"
+  | "email_opt_out_at"
 >;
 
 export type BreadcrumbTheme = Pick<LearningTheme, "id" | "name" | "is_published" | "is_deleted">;

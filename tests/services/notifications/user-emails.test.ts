@@ -37,6 +37,13 @@ function mockAdmin(tableResults: Record<string, QueryResult | QueryResult[]>) {
   return client;
 }
 
+function tableBuilders(client: ReturnType<typeof mockAdmin>, table: string) {
+  return client.from.mock.calls
+    .map(([name], index) => ({ name, builder: client.from.mock.results[index].value }))
+    .filter(({ name }) => name === table)
+    .map(({ builder }) => builder);
+}
+
 function emailLogBuilders(client: ReturnType<typeof mockAdmin>) {
   return client.from.mock.calls
     .map(([table], index) => ({ table, builder: client.from.mock.results[index].value }))
@@ -211,7 +218,7 @@ describe("schedule*Email（after() による予約）", () => {
     scheduleSubscriptionEndedEmail({ userId: 7, subscriptionId: "sub_123" });
     await runScheduled();
 
-    const builder = client.from.mock.results[0].value;
+    const [builder] = tableBuilders(client, "users");
     expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
     expect(emailLogBuilders(client)).toHaveLength(0);
     expect(sendEmail).not.toHaveBeenCalled();
@@ -229,7 +236,7 @@ describe("schedule*Email（after() による予約）", () => {
     scheduleSignupEmail({ authId: "auth-uuid-1" });
     await runScheduled();
 
-    expect(client.from.mock.results[0].value.eq).toHaveBeenCalledWith("auth_id", "auth-uuid-1");
+    expect(tableBuilders(client, "users")[0].eq).toHaveBeenCalledWith("auth_id", "auth-uuid-1");
     const [claim] = emailLogBuilders(client);
     expect(claim.insert).toHaveBeenCalledWith({
       user_id: 7,
@@ -342,5 +349,117 @@ describe("schedule*Email（after() による予約）", () => {
       { user_id: 7, kind: "subscription_ended", reference_key: "sub_123" },
     ]);
     expect(vi.mocked(sendEmail).mock.calls[0][0].text).toContain("2026/10/27 まで");
+  });
+});
+
+describe("管理設定による有効・無効（#272）", () => {
+  const okLogs = [
+    { data: { id: 11 }, error: null },
+    { data: null, error: null },
+  ];
+
+  it("種別が無効なら、宛先も読まず claim もせずに送らない（warn を出す）", async () => {
+    const client = mockAdmin({
+      email_kind_settings: { data: { enabled: false }, error: null },
+      users: { data: recipientRow, error: null },
+      email_logs: okLogs,
+    });
+
+    await deliverOnce();
+
+    expect(tableBuilders(client, "email_kind_settings")[0].eq).toHaveBeenCalledWith(
+      "kind",
+      "subscription_ended"
+    );
+    expect(tableBuilders(client, "users")).toHaveLength(0);
+    expect(emailLogBuilders(client)).toHaveLength(0);
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("無効"));
+  });
+
+  it("種別が有効なら送る", async () => {
+    mockAdmin({
+      email_kind_settings: { data: { enabled: true }, error: null },
+      users: { data: recipientRow, error: null },
+      email_logs: okLogs,
+    });
+
+    await deliverOnce();
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["設定の取得が DB エラー", { data: null, error: { message: "db down" } }],
+    ["設定の行が無い", { data: null, error: null }],
+  ])("%sのときは既定値（有効）として送る", async (_label, settingsResult) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mockAdmin({
+      email_kind_settings: settingsResult,
+      users: { data: recipientRow, error: null },
+      email_logs: okLogs,
+    });
+
+    await deliverOnce();
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("設定の取得が例外を投げても送信を続け、主処理へ例外を伝播しない", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const client = mockAdmin({
+      users: { data: recipientRow, error: null },
+      email_logs: okLogs,
+    });
+    const from = client.from.getMockImplementation() as (table: string) => unknown;
+    client.from.mockImplementation((table: string) => {
+      if (table === "email_kind_settings") {
+        throw new Error("boom");
+      }
+      return from(table);
+    });
+
+    scheduleSubscriptionEndedEmail({ userId: 7, subscriptionId: "sub_123" });
+    await expect(runScheduled()).resolves.toBeUndefined();
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["signup", () => scheduleSignupEmail({ authId: "auth-uuid-1" })],
+    [
+      "approved",
+      () => scheduleApprovedEmail({ userId: 7, membershipType: "community", approvedAt: "t" }),
+    ],
+    [
+      "upgraded",
+      () =>
+        scheduleUpgradedEmail({
+          userId: 7,
+          subscriptionId: "sub_1",
+          monthlyAmountJpy: 1000,
+          currentPeriodEnd: null,
+        }),
+    ],
+    [
+      "cancel_scheduled",
+      () => scheduleCancelScheduledEmail({ userId: 7, subscriptionId: "sub_1", periodEnd: null }),
+    ],
+    [
+      "subscription_ended",
+      () => scheduleSubscriptionEndedEmail({ userId: 7, subscriptionId: "s" }),
+    ],
+  ])("%s も種別設定を確認し、無効なら送らない", async (kind, schedule) => {
+    const client = mockAdmin({
+      email_kind_settings: { data: { enabled: false }, error: null },
+      users: { data: recipientRow, error: null },
+      email_logs: okLogs,
+    });
+
+    schedule();
+    await runScheduled();
+
+    expect(tableBuilders(client, "email_kind_settings")[0].eq).toHaveBeenCalledWith("kind", kind);
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 });

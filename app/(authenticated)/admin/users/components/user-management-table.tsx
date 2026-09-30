@@ -162,6 +162,15 @@ export function UserManagementTable({
     await patchUser(userId, body, "操作に失敗しました");
   };
 
+  const handleEmailOptOut = async (userId: number, action: "resume_email" | "opt_out_email") => {
+    const message =
+      action === "opt_out_email"
+        ? "このユーザーへの案内メール（週次進捗・リマインド・お知らせ）の配信を停止しますか？\n登録・承認・お支払いなどのお手続きに関するメールは引き続き送信されます。"
+        : "このユーザーへの案内メールの配信を再開しますか？";
+    if (!confirm(message)) return;
+    await patchUser(userId, { action }, "配信停止状態の変更に失敗しました");
+  };
+
   const handleRoleChange = (userId: number, role: UserRoleType) =>
     patchUser(userId, { action: "change_role", role }, "ロール変更に失敗しました");
 
@@ -209,6 +218,9 @@ export function UserManagementTable({
                 会員種別
               </th>
               <th scope="col" className="text-left px-4 py-3 font-medium">
+                案内メール
+              </th>
+              <th scope="col" className="text-left px-4 py-3 font-medium">
                 登録日
               </th>
               <th scope="col" className="text-left px-4 py-3 font-medium">
@@ -219,7 +231,7 @@ export function UserManagementTable({
           <tbody>
             {filteredUsers.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
                   該当するユーザーがいません
                 </td>
               </tr>
@@ -312,6 +324,36 @@ export function UserManagementTable({
                                 </span>
                               )
                             ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {isLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <div className="flex flex-col gap-1 items-start">
+                          {user.email_opt_out_at ? (
+                            <>
+                              <Badge variant="destructive">配信停止中</Badge>
+                              <span className="text-xs text-muted-foreground">
+                                {new Date(user.email_opt_out_at).toLocaleString("ja-JP")}
+                              </span>
+                            </>
+                          ) : (
+                            <Badge variant="outline">受信中</Badge>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              handleEmailOptOut(
+                                user.id,
+                                user.email_opt_out_at ? "resume_email" : "opt_out_email"
+                              )
+                            }
+                          >
+                            {user.email_opt_out_at ? "再開する" : "停止する"}
+                          </Button>
                         </div>
                       )}
                     </td>

@@ -122,7 +122,7 @@ Claude Code で Supabase MCP サーバーを使う場合、**必ず read-only �
 ```
 app/
 ├── (authenticated)/     # 認証必須のページ群
-│   ├── admin/           #   管理者専用画面（/admin/users のみ。他は /manage にリダイレクト）
+│   ├── admin/           #   管理者専用画面（/admin/users・/admin/emails のみ。他は /manage にリダイレクト）
 │   ├── manage/          #   コンテンツ管理画面（admin + maintainer 共通）
 │   ├── instructor/      #   講師向け画面（/manage にリダイレクト）
 │   ├── learn/           #   学習コンテンツ画面（Theme > Phase > Week > Content の4階層）
@@ -130,7 +130,9 @@ app/
 │   ├── components/      #   認証済みレイアウト用コンポーネント
 │   └── page.tsx         #   ダッシュボード
 ├── api/                 # API Routes
-│   ├── admin/users/     #   ユーザー承認・却下・ロール変更
+│   ├── admin/users/     #   ユーザー承認・却下・ロール変更・配信停止の管理
+│   ├── admin/email-settings/ #   メール通知の設定（admin のみ）
+│   ├── admin/email-logs/ #   メール送信履歴（admin のみ）
 │   ├── ai-review/       #   AIレビュー（Gemini API）
 │   ├── manage/          #   コンテンツ管理（phases/weeks/contents/themes）
 │   ├── onboarding/      #   初回利用ガイドの完了記録

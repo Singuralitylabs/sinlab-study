@@ -3,6 +3,7 @@ import { EMAIL_KIND, type EmailKind } from "@/app/constants/notifications";
 import { formatMonthlyJpyPrice, isStripeEnabled } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP_LABELS } from "@/app/constants/user";
 import { formatDate } from "@/app/lib/format-date";
+import { isTransactionalEmailEnabled } from "@/app/services/api/email-settings-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import {
   type EmailContent,
@@ -137,7 +138,7 @@ function scheduleEmail(label: EmailKind, task: () => Promise<unknown>): void {
 
 /**
  * Shared entry: load the recipient, build the template, send. Skips before loading the recipient
- * when sending or the app URL is not configured (links are built only from
+ * when the kind is disabled in email_kind_settings, or when sending or the app URL is not configured (links are built only from
  * `NEXT_PUBLIC_APP_URL`). Recipient loading and the send-log claim/record use the same admin
  * client.
  */
@@ -162,6 +163,11 @@ async function deliverToUser(
   }
 
   const supabase = await createAdminSupabaseClient();
+  // Fail-safe: an unreadable setting counts as enabled so signup / payment notices are not lost.
+  if (!(await isTransactionalEmailEnabled(supabase, kind))) {
+    console.warn(`[メール通知] 管理設定で無効のため送信をスキップしました: kind=${kind}`);
+    return "skipped";
+  }
   const recipient = await fetchRecipient(supabase, recipientLookup);
   if (!recipient) {
     console.warn(`[メール通知] 宛先ユーザーが見つからないため送信をスキップしました: kind=${kind}`);

@@ -41,6 +41,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 - **認可は二層防御。** `proxy.ts`（Middleware の後継）が第一の砦、`app/(authenticated)/layout.tsx` でも `userStatus` の許可リスト検証を行う。**クライアント側の認証ガードは行わない。**
 - **プロキシはフェイルクローズ。** 環境変数欠落・例外・status null はすべて `/login` へ。
 - **Cron ルート（`app/api/cron/`）は `isAuthorizedCronRequest()`（`app/services/auth/cron-auth.ts`）による `CRON_SECRET` の検証を必ず通す**（未設定・不一致は 401）。`/api` は proxy の対象外のため、ルート側の検証だけが防御になる。
+- **定期メールの設定は `email_kind_settings` / `email_settings` を唯一の真実とし、送る日・曜日・上限の定数をロジックにハードコードしない。** 案内系は設定を読めなければ送らず（フェイルクローズ）、トランザクションメールは読めなければ送る（`docs/specification.md` 10.10）。
 - ロール判定ロジックは `app/services/auth/` に集約する。
 - **初回登録の INSERT は同意 Cookie 必須。** 同意なしでは `users` 行を作らず `/login?error=terms_required` へ戻す。`terms_accepted_at` は callback でのみ書き、既存ユーザー分岐では触らない。
 

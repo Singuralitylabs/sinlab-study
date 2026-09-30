@@ -11,6 +11,8 @@ import {
   ANNOUNCEMENT_EMAIL_RETRY_DAYS,
   EMAIL_DIGEST_MAX_PER_DAY,
   EMAIL_DIGEST_SEND_INTERVAL_MS,
+  INACTIVITY_REMINDER_DAYS,
+  TRIAL_NURTURE_DAYS,
 } from "@/app/constants/notifications";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { sendEmail } from "@/app/services/notifications/email";
@@ -114,7 +116,14 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
       let result = range ? sorted.slice(range[0], range[1] + 1) : sorted;
       if (limit !== null) result = result.slice(0, limit);
       // PostgREST db-max-rows (max rows per response).
-      if (options.maxRows !== undefined) result = result.slice(0, options.maxRows);
+      // The settings tables hold about 10 rows, far below any realistic max-rows setting.
+      if (
+        options.maxRows !== undefined &&
+        !table.startsWith("email_kind_") &&
+        table !== "email_settings"
+      ) {
+        result = result.slice(0, options.maxRows);
+      }
       return { data: result, error: null };
     };
 
@@ -164,6 +173,10 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
         filters.push((row) => String(row[column]) < value);
         return builder;
       },
+      lte: (column: string, value: string) => {
+        filters.push((row) => String(row[column]) <= value);
+        return builder;
+      },
       order: (column: string, opts: { ascending?: boolean } = {}) => {
         orders.push({ column, ascending: opts.ascending ?? true });
         return builder;
@@ -175,6 +188,10 @@ function createFakeDb(tables: Record<string, Row[]>, options: { maxRows?: number
       range: (start: number, end: number) => {
         range = [start, end];
         return builder;
+      },
+      maybeSingle: async () => {
+        const { data, error } = execute();
+        return { data: error ? null : ((data as Row[])[0] ?? null), error };
       },
       single: async () => {
         const { data, error } = execute();
@@ -287,8 +304,55 @@ const themes: Row[] = [
   },
 ];
 
+/** Rows equal to the migration's seed (behavior right after applying it is unchanged). */
+function defaultKindRows(): Row[] {
+  const row = (kind: string, extra: Row = {}): Row => ({
+    kind,
+    enabled: true,
+    send_days: null,
+    send_weekday: null,
+    updated_at: "2026-10-01T00:00:00.000Z",
+    updated_by: null,
+    ...extra,
+  });
+  return [
+    row("signup"),
+    row("approved"),
+    row("upgraded"),
+    row("cancel_scheduled"),
+    row("subscription_ended"),
+    row("weekly_digest", { send_weekday: 1 }),
+    row("inactivity_reminder", { send_days: [...INACTIVITY_REMINDER_DAYS] }),
+    row("trial_nurture", { send_days: [...TRIAL_NURTURE_DAYS] }),
+    row("announcement"),
+  ];
+}
+
+function defaultSettingsRows(): Row[] {
+  return [
+    {
+      id: 1,
+      digest_daily_limit: EMAIL_DIGEST_MAX_PER_DAY,
+      updated_at: "2026-10-01T00:00:00.000Z",
+      updated_by: null,
+    },
+  ];
+}
+
+/** Default kind rows with per-kind overrides. */
+function kindRows(overrides: Record<string, Row> = {}): Row[] {
+  return defaultKindRows().map((row) => ({ ...row, ...overrides[row.kind as string] }));
+}
+
 function setup(
-  tables: { users: Row[]; user_progress?: Row[]; submissions?: Row[]; announcements?: Row[] },
+  tables: {
+    users: Row[];
+    user_progress?: Row[];
+    submissions?: Row[];
+    announcements?: Row[];
+    email_kind_settings?: Row[];
+    email_settings?: Row[];
+  },
   options: { maxRows?: number } = {}
 ) {
   const fake = createFakeDb(
@@ -296,6 +360,8 @@ function setup(
       learning_themes: themes,
       user_progress: [],
       submissions: [],
+      email_kind_settings: defaultKindRows(),
+      email_settings: defaultSettingsRows(),
       ...tables,
     },
     options
@@ -1136,5 +1202,331 @@ describe("お知らせのメール一斉送信（#254）", () => {
       expect.stringContaining("古い"),
       expect.stringContaining("新しい"),
     ]);
+  });
+});
+
+describe("メール通知の管理設定（#272）", () => {
+  const WEDNESDAY = new Date("2026-10-06T23:00:00Z");
+  const weeklyLogs = (db: Record<string, Row[]>) =>
+    db.email_logs.filter((row) => row.kind === "weekly_digest");
+
+  describe("設定を読めないとき（フェイルクローズ）", () => {
+    it("種別設定の取得が DB エラーなら、案内系メールを1通も送らずに失敗を返す", async () => {
+      const { failures, db } = setup({ users: [userRow(1)] });
+      failures.add("email_kind_settings:select");
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const result = await runDigest(MONDAY);
+
+      expect(result).toEqual({ status: "failed" });
+      expect(sendEmail).not.toHaveBeenCalled();
+      expect(db.email_logs).toHaveLength(0);
+    });
+
+    it("1日の上限の行が無ければ送らない", async () => {
+      setup({ users: [userRow(1)], email_settings: [] });
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      expect(await runDigest(MONDAY)).toEqual({ status: "failed" });
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
+    it("種別の行が欠けていれば（他の種別が有効でも）送らない", async () => {
+      setup({
+        users: [userRow(1)],
+        email_kind_settings: defaultKindRows().filter((row) => row.kind !== "trial_nurture"),
+      });
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      expect(await runDigest(MONDAY)).toEqual({ status: "failed" });
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
+    it("必要な値（send_days / send_weekday）が空の行があれば送らない", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      setup({
+        users: [userRow(1)],
+        email_kind_settings: kindRows({ trial_nurture: { send_days: null } }),
+      });
+      expect(await runDigest(MONDAY)).toEqual({ status: "failed" });
+
+      setup({
+        users: [userRow(1)],
+        email_kind_settings: kindRows({ weekly_digest: { send_weekday: null } }),
+      });
+      expect(await runDigest(MONDAY)).toEqual({ status: "failed" });
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
+    it("失敗してもロックを解放し、設定が読めるようになった次の実行で送る", async () => {
+      const { failures } = setup({ users: [userRow(1)] });
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      failures.add("email_kind_settings:select");
+      expect(await runDigest(MONDAY)).toEqual({ status: "failed" });
+
+      failures.delete("email_kind_settings:select");
+      expect(await runDigest(MONDAY)).toMatchObject({ status: "completed", sent: 1 });
+    });
+  });
+
+  describe("無効な種別は対象にしない", () => {
+    it("weekly_digest が無効なら、週次進捗を送らず繰り越し予約も作らない", async () => {
+      const { db } = setup({
+        users: [userRow(1)],
+        email_kind_settings: kindRows({ weekly_digest: { enabled: false } }),
+      });
+
+      const result = await runDigest(MONDAY);
+
+      expect(result).toMatchObject({ status: "completed", queued: 0 });
+      expect(sendEmail).not.toHaveBeenCalled();
+      expect(db.email_logs).toHaveLength(0);
+    });
+
+    it("weekly_digest を無効にしても、週の途中の実行で「予約が無い」警告扱いにしない", async () => {
+      setup({
+        users: [userRow(1)],
+        email_kind_settings: kindRows({ weekly_digest: { enabled: false } }),
+      });
+
+      expect(await runDigest(WEDNESDAY)).toMatchObject({ weeklyReservationMissing: false });
+    });
+
+    it("trial_nurture が無効ならお試し案内を送らない（他の種別は送る）", async () => {
+      setup({
+        users: [
+          userRow(1, { status: "trial", created_at: createdOn("2026-10-03") }), // day 2
+          userRow(2, { created_at: createdOn("2026-08-01") }),
+        ],
+        email_kind_settings: kindRows({ trial_nurture: { enabled: false } }),
+      });
+
+      await runDigest(MONDAY);
+
+      expect(sentTo()).toEqual(["u2@example.com"]);
+    });
+
+    it("inactivity_reminder が無効なら未学習リマインドを送らない", async () => {
+      setup({
+        users: [userRow(1, { created_at: createdOn("2026-09-28") })], // day 7, no activity
+        email_kind_settings: kindRows({
+          inactivity_reminder: { enabled: false },
+          weekly_digest: { enabled: false },
+        }),
+      });
+
+      expect(await runDigest(MONDAY)).toMatchObject({ queued: 0 });
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
+    it("announcement が無効ならお知らせを送らず、送信完了も記録しない（有効に戻したら送る）", async () => {
+      const announcement = {
+        id: 501,
+        title: "お知らせ",
+        body: "本文",
+        target_statuses: ["active", "trial"],
+        target_membership_types: null,
+        published_at: "2026-10-06T01:00:00.000Z",
+        send_email: true,
+        email_sent_at: null,
+        is_deleted: false,
+        updated_at: "2026-10-06T01:00:00.000Z",
+      };
+      const { db } = setup({
+        users: [userRow(1)],
+        announcements: [announcement],
+        email_kind_settings: kindRows({ announcement: { enabled: false } }),
+      });
+
+      expect(await runDigest(WEDNESDAY)).toMatchObject({ queued: 0, announcementsCompleted: 0 });
+      expect(sendEmail).not.toHaveBeenCalled();
+      expect(db.announcements[0].email_sent_at).toBeNull();
+
+      const announcementRow = db.email_kind_settings.find((row) => row.kind === "announcement");
+      (announcementRow as Row).enabled = true;
+      expect(await runDigest(WEDNESDAY)).toMatchObject({ sent: 1, announcementsCompleted: 1 });
+    });
+  });
+
+  describe("送る日・曜日・上限の反映", () => {
+    it("trial_nurture の send_days の日だけに送る（既定の日には送らない）", async () => {
+      setup({
+        users: [
+          userRow(1, { status: "trial", created_at: createdOn("2026-10-02") }), // day 3
+          userRow(2, { status: "trial", created_at: createdOn("2026-10-03") }), // day 2
+        ],
+        email_kind_settings: kindRows({
+          trial_nurture: { send_days: [3, 20] },
+          weekly_digest: { enabled: false },
+        }),
+      });
+
+      await runDigest(MONDAY);
+
+      expect(sentTo()).toEqual(["u1@example.com"]);
+    });
+
+    it("設定した日数に応じて、案内の本文は直近の段階のものになる", async () => {
+      setup({
+        users: [userRow(1, { status: "trial", created_at: createdOn("2026-10-02") })], // day 3
+        email_kind_settings: kindRows({
+          trial_nurture: { send_days: [3] },
+          weekly_digest: { enabled: false },
+        }),
+      });
+
+      await runDigest(MONDAY);
+
+      expect(sentEmailTo("u1@example.com").subject).toContain("演習を出してみましょう");
+    });
+
+    it("inactivity_reminder の send_days の日に、進捗の無いユーザーへ送る", async () => {
+      setup({
+        users: [userRow(1, { created_at: createdOn("2026-10-01") })], // day 4
+        email_kind_settings: kindRows({
+          inactivity_reminder: { send_days: [4] },
+          weekly_digest: { enabled: false },
+        }),
+      });
+
+      await runDigest(MONDAY);
+
+      expect(sentEmailTo("u1@example.com").subject).toContain("最初の1本");
+    });
+
+    it("send_weekday を水曜にすると、水曜に送り、reference_key はその水曜の日付になる", async () => {
+      const { db } = setup({
+        users: [userRow(1)],
+        email_kind_settings: kindRows({ weekly_digest: { send_weekday: 3 } }),
+      });
+
+      const monday = await runDigest(MONDAY);
+      expect(monday).toMatchObject({ queued: 0 });
+
+      const wednesday = await runDigest(WEDNESDAY);
+      expect(wednesday).toMatchObject({ sent: 1 });
+      expect(weeklyLogs(db).map((row) => row.reference_key)).toEqual(["2026-10-07"]);
+      expect(
+        db.email_logs
+          .filter((row) => row.kind === "weekly_digest_reserved")
+          .map((row) => row.reference_key)
+      ).toEqual(["2026-10-07"]);
+    });
+
+    it("「先週」は送信曜日の前日までの7日間で数える", async () => {
+      setup({
+        users: [userRow(1)],
+        user_progress: [
+          // 2026-09-30 00:00 JST (in the 7 days before Wed 10/7).
+          {
+            id: 1,
+            user_id: 1,
+            content_id: 1000,
+            is_completed: true,
+            completed_at: "2026-09-29T15:00:00.000Z",
+          },
+          // 2026-09-29 23:59 JST (out of range).
+          {
+            id: 2,
+            user_id: 1,
+            content_id: 2000,
+            is_completed: true,
+            completed_at: "2026-09-29T14:59:59.000Z",
+          },
+        ],
+        email_kind_settings: kindRows({ weekly_digest: { send_weekday: 3 } }),
+      });
+
+      await runDigest(WEDNESDAY);
+
+      expect(sentEmailTo("u1@example.com").text).toContain("コンテンツ完了 1 本");
+    });
+
+    it("送信曜日を週の途中に変えても、同じ週に週次進捗を2通送らない", async () => {
+      const { db } = setup({ users: [userRow(1), userRow(2)] });
+
+      // Sent Monday as usual.
+      expect(await runDigest(MONDAY)).toMatchObject({ sent: 2 });
+
+      // The admin then moves the send day to Wednesday of the same week.
+      const weekly = db.email_kind_settings.find((row) => row.kind === "weekly_digest") as Row;
+      weekly.send_weekday = 3;
+      const wednesday = await runDigest(WEDNESDAY);
+
+      expect(wednesday).toMatchObject({ sent: 0 });
+      expect(weeklyLogs(db)).toHaveLength(2);
+      expect(sendEmail).toHaveBeenCalledTimes(2);
+    });
+
+    it("送信曜日を前に戻して7日以内に次の送信日が来ても、その回は送らず、次の週から通常どおり送る", async () => {
+      const { db } = setup({
+        users: [userRow(1)],
+        email_kind_settings: kindRows({ weekly_digest: { send_weekday: 3 } }),
+      });
+      expect(await runDigest(WEDNESDAY)).toMatchObject({ sent: 1 });
+
+      // Moved back to Monday: 10/12 is within 7 days of the 10/7 digest, so it is skipped.
+      const weekly = db.email_kind_settings.find((row) => row.kind === "weekly_digest") as Row;
+      weekly.send_weekday = 1;
+      expect(await runDigest(new Date("2026-10-11T23:00:00Z"))).toMatchObject({ sent: 0 });
+      // The following Monday (10/19) is a normal new cycle.
+      expect(await runDigest(new Date("2026-10-18T23:00:00Z"))).toMatchObject({ sent: 1 });
+      expect(weeklyLogs(db).map((row) => row.reference_key)).toEqual(["2026-10-07", "2026-10-19"]);
+    });
+
+    it("digest_daily_limit を超えて送らず、残りは週次進捗なら翌日に繰り越す", async () => {
+      setup({
+        users: [1, 2, 3, 4, 5].map((id) => userRow(id)),
+        email_settings: [
+          { id: 1, digest_daily_limit: 3, updated_at: "2026-10-01T00:00:00Z", updated_by: null },
+        ],
+      });
+
+      const monday = await runDigest(MONDAY);
+      expect(monday).toMatchObject({ sent: 3, deferred: 2 });
+
+      const tuesday = await runDigest(TUESDAY);
+      expect(tuesday).toMatchObject({ sent: 2 });
+      expect(new Set(sentTo()).size).toBe(5);
+    });
+
+    it("実行の途中で上限を下げても、その日にすでに送った数を超えては送らない", async () => {
+      const { db } = setup({ users: [1, 2, 3, 4].map((id) => userRow(id)) });
+      // 2 already claimed today.
+      db.email_settings[0].digest_daily_limit = 2;
+      db.email_logs.push(
+        {
+          id: 901,
+          user_id: 1,
+          kind: "weekly_digest",
+          reference_key: "2026-10-05",
+          created_at: "2026-10-04T23:00:00.000Z",
+          sent_at: "2026-10-04T23:00:01.000Z",
+          error: null,
+        },
+        {
+          id: 902,
+          user_id: 2,
+          kind: "weekly_digest",
+          reference_key: "2026-10-05",
+          created_at: "2026-10-04T23:00:00.000Z",
+          sent_at: "2026-10-04T23:00:01.000Z",
+          error: null,
+        }
+      );
+
+      expect(await runDigest(MONDAY)).toMatchObject({ sent: 0 });
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
+    it("設定は実行ごとに読み直す（キャッシュしない）", async () => {
+      const { db } = setup({ users: [userRow(1)] });
+      const weekly = db.email_kind_settings.find((row) => row.kind === "weekly_digest") as Row;
+      weekly.enabled = false;
+      expect(await runDigest(MONDAY)).toMatchObject({ queued: 0 });
+
+      weekly.enabled = true;
+      expect(await runDigest(MONDAY)).toMatchObject({ sent: 1 });
+    });
   });
 });

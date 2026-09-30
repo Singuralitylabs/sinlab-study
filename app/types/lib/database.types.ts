@@ -162,6 +162,41 @@ export type Database = {
         };
         Relationships: [];
       };
+      email_kind_settings: {
+        Row: {
+          enabled: boolean;
+          kind: string;
+          send_days: number[] | null;
+          send_weekday: number | null;
+          updated_at: string;
+          updated_by: number | null;
+        };
+        Insert: {
+          enabled?: boolean;
+          kind: string;
+          send_days?: number[] | null;
+          send_weekday?: number | null;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Update: {
+          enabled?: boolean;
+          kind?: string;
+          send_days?: number[] | null;
+          send_weekday?: number | null;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "email_kind_settings_updated_by_fkey";
+            columns: ["updated_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       email_logs: {
         Row: {
           created_at: string;
@@ -197,6 +232,35 @@ export type Database = {
           {
             foreignKeyName: "email_logs_user_id_fkey";
             columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      email_settings: {
+        Row: {
+          digest_daily_limit: number;
+          id: number;
+          updated_at: string;
+          updated_by: number | null;
+        };
+        Insert: {
+          digest_daily_limit: number;
+          id?: number;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Update: {
+          digest_daily_limit?: number;
+          id?: number;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "email_settings_updated_by_fkey";
+            columns: ["updated_by"];
             isOneToOne: false;
             referencedRelation: "users";
             referencedColumns: ["id"];
