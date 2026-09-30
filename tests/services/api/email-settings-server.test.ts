@@ -155,22 +155,29 @@ describe("isTransactionalEmailEnabled", () => {
 });
 
 describe("updateEmailKindSettings / updateDigestDailyLimit", () => {
-  const serverClient = (result: { data: unknown; error: unknown }) => {
+  const current = { enabled: true, send_days: [2, 5], send_weekday: null };
+  const serverClient = (
+    kindResults: { data: unknown; error: unknown }[],
+    settingsResult: { data: unknown; error: unknown } = { data: [], error: null }
+  ) => {
     const client = createMockSupabaseClient({
-      tableResults: { email_kind_settings: result, email_settings: result },
+      tableResults: { email_kind_settings: kindResults, email_settings: settingsResult },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
     return client;
   };
 
   it("管理者のセッション（RLS適用のクライアント）で更新し、更新者と更新日時を記録する", async () => {
-    const client = serverClient({ data: [{ kind: "signup" }], error: null });
+    const client = serverClient([
+      { data: current, error: null },
+      { data: [{ kind: "signup" }], error: null },
+    ]);
 
     const result = await updateEmailKindSettings("signup", { enabled: false }, 9);
 
     expect(result).toEqual({ error: null, updated: true });
     expect(createAdminSupabaseClient).not.toHaveBeenCalled();
-    const builder = client.from.mock.results[0].value;
+    const builder = client.from.mock.results[1].value;
     expect(builder.update).toHaveBeenCalledWith({
       enabled: false,
       updated_at: expect.any(String),
@@ -179,19 +186,61 @@ describe("updateEmailKindSettings / updateDigestDailyLimit", () => {
     expect(builder.eq).toHaveBeenCalledWith("kind", "signup");
   });
 
+  it("値を変えない保存では updated_at を更新しない（送信日の障害検知を隠さない）", async () => {
+    const client = serverClient([{ data: current, error: null }]);
+
+    const result = await updateEmailKindSettings(
+      "trial_nurture",
+      { enabled: true, send_days: [5, 2].sort((a, b) => a - b) },
+      9
+    );
+
+    expect(result).toEqual({ error: null, updated: true });
+    expect(client.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("send_days が変わるなら更新する", async () => {
+    const client = serverClient([
+      { data: current, error: null },
+      { data: [{ kind: "trial_nurture" }], error: null },
+    ]);
+
+    await updateEmailKindSettings("trial_nurture", { send_days: [2, 5, 7] }, 9);
+
+    expect(client.from).toHaveBeenCalledTimes(2);
+  });
+
   it("0行（RLSで拒否・行が無い）は updated: false、DBエラーは error を返す", async () => {
-    serverClient({ data: [], error: null });
+    serverClient([
+      { data: null, error: null },
+      { data: [], error: null },
+    ]);
     expect(await updateEmailKindSettings("signup", { enabled: false }, 9)).toEqual({
       error: null,
       updated: false,
     });
 
-    serverClient({ data: null, error: dbError });
+    serverClient([
+      { data: current, error: null },
+      { data: null, error: dbError },
+    ]);
+    expect(await updateEmailKindSettings("signup", { enabled: false }, 9)).toEqual({
+      error: dbError,
+      updated: false,
+    });
+
+    serverClient([{ data: null, error: dbError }]);
+    expect(await updateEmailKindSettings("signup", { enabled: false }, 9)).toEqual({
+      error: dbError,
+      updated: false,
+    });
+
+    serverClient([], { data: null, error: dbError });
     expect(await updateDigestDailyLimit(50, 9)).toEqual({ error: dbError, updated: false });
   });
 
   it("1日の上限は id = 1 の行を更新する", async () => {
-    const client = serverClient({ data: [{ id: 1 }], error: null });
+    const client = serverClient([], { data: [{ id: 1 }], error: null });
 
     expect(await updateDigestDailyLimit(50, 9)).toEqual({ error: null, updated: true });
     const builder = client.from.mock.results[0].value;

@@ -120,6 +120,28 @@ export async function updateEmailKindSettings(
   updatedBy: number
 ): Promise<{ error: PostgrestError | null; updated: boolean }> {
   const supabase = await createServerSupabaseClient();
+
+  // Saving unchanged values must not bump updated_at: the cron treats a recent updated_at as "the
+  // setting changed this cycle" and would then hide a genuine failure of the cycle's deciding runs.
+  const { data: current, error: readError } = await supabase
+    .from("email_kind_settings")
+    .select("enabled, send_days, send_weekday")
+    .eq("kind", kind)
+    .maybeSingle();
+  if (readError) {
+    console.error("メール種別設定取得エラー:", readError.message);
+    return { error: readError, updated: false };
+  }
+  if (
+    current &&
+    (patch.enabled === undefined || patch.enabled === current.enabled) &&
+    (patch.send_weekday === undefined || patch.send_weekday === current.send_weekday) &&
+    (patch.send_days === undefined ||
+      [...(current.send_days ?? [])].sort((x, y) => x - y).join(",") === patch.send_days.join(","))
+  ) {
+    return { error: null, updated: true };
+  }
+
   const { data, error } = await supabase
     .from("email_kind_settings")
     .update({ ...patch, updated_at: new Date().toISOString(), updated_by: updatedBy })
