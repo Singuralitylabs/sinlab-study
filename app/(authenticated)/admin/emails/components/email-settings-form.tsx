@@ -12,6 +12,7 @@ import {
   type EmailKind,
   PROMOTIONAL_EMAIL_KINDS,
   TRANSACTIONAL_DISABLE_IMPACT,
+  WEEKLY_DIGEST_WEEKDAY,
 } from "@/app/constants/notifications";
 import type { EmailKindSetting } from "@/app/lib/email-settings";
 import { Badge } from "@/components/ui/badge";
@@ -73,13 +74,14 @@ function KindRow({
 
   const [enabled, setEnabled] = useState(setting.enabled);
   const [daysText, setDaysText] = useState((setting.sendDays ?? []).join(", "));
-  const [weekday, setWeekday] = useState(setting.sendWeekday ?? 1);
+  const [weekday, setWeekday] = useState(setting.sendWeekday ?? WEEKLY_DIGEST_WEEKDAY);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
   const save = async () => {
     const body: Record<string, unknown> = { kind, enabled };
-    if (hasDays) {
+    // Sent only when edited, so a kind can be disabled even while the days field is blank.
+    if (hasDays && daysText !== (setting.sendDays ?? []).join(", ")) {
       const tokens = daysText
         .split(/[,\s、]+/)
         .map((t) => t.trim())
@@ -231,7 +233,7 @@ export function EmailSettingsForm({
           <tbody>
             {settings.kinds.map((setting) => (
               <KindRow
-                key={`${setting.kind}-${setting.updatedAt}`}
+                key={setting.kind}
                 setting={setting}
                 editorNames={settings.editorNames}
                 onSaved={() => router.refresh()}

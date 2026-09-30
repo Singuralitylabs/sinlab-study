@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { EMAIL_KINDS, type EmailKind } from "@/app/constants/notifications";
-import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import { EMAIL_LOG_STATUSES, fetchEmailLogs } from "@/app/services/api/email-settings-server";
-import { getServerAuth } from "@/app/services/auth/server-auth";
+import { requireAdminApi } from "@/app/services/auth/admin-guard";
 
 const QuerySchema = z.object({
   kind: z.enum(EMAIL_KINDS as [EmailKind, ...EmailKind[]]).optional(),
@@ -14,15 +13,9 @@ const QuerySchema = z.object({
 /** Send history (admin only). Reservation rows and bodies are never returned. */
 export async function GET(request: Request) {
   try {
-    const auth = await getServerAuth();
-    if (!auth.user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-    }
-    if (auth.userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
-    if (auth.userRole !== USER_ROLE.ADMIN) {
-      return NextResponse.json({ error: "権限がありません" }, { status: 403 });
+    const admin = await requireAdminApi();
+    if (admin.response) {
+      return admin.response;
     }
 
     const params = new URL(request.url).searchParams;

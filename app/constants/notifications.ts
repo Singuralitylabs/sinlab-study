@@ -72,10 +72,6 @@ export const WEEKLY_DIGEST_CATCH_UP_DAYS = 1;
  */
 export const EMAIL_KINDS: readonly EmailKind[] = Object.values(EMAIL_KIND);
 
-export const TRANSACTIONAL_EMAIL_KINDS: readonly EmailKind[] = EMAIL_KINDS.filter(
-  (kind) => !(PROMOTIONAL_EMAIL_KINDS as readonly EmailKind[]).includes(kind)
-);
-
 /** Kinds that use email_kind_settings.send_days ("Nth day since sign-up"). */
 export const EMAIL_KINDS_WITH_SEND_DAYS: readonly EmailKind[] = [
   EMAIL_KIND.INACTIVITY_REMINDER,
@@ -106,7 +102,11 @@ export const WEEKLY_DIGEST_WEEKDAY = 1;
  */
 export const EMAIL_DIGEST_MAX_PER_DAY = 80;
 
-/** Input ranges for the settings (mirrored by CHECK constraints in the migration). */
+/**
+ * Input ranges for the settings, enforced by zod. The migration's CHECK constraints only cover
+ * the array length, the weekday and the daily limit, so a direct write can still store a day
+ * outside 1..60 or a duplicate (the cron then fails closed on it).
+ */
 export const EMAIL_SEND_DAY_MIN = 1;
 export const EMAIL_SEND_DAY_MAX = 60;
 export const EMAIL_SEND_DAYS_MAX_COUNT = 10;

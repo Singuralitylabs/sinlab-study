@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import {
   type EmailKindSettingsPatch,
   fetchEmailSettingsForAdmin,
@@ -7,33 +6,11 @@ import {
   updateEmailKindSettings,
 } from "@/app/services/api/email-settings-server";
 import { EmailSettingsUpdateSchema, validateRequest } from "@/app/services/api/schemas";
-import { getServerAuth } from "@/app/services/auth/server-auth";
-
-/**
- * admin only, like /api/admin/users: settings decide what is mailed to every student. Rejected
- * users keep their role, so the status is checked as well.
- */
-async function requireAdmin(): Promise<
-  { response: NextResponse } | { response: null; userId: number }
-> {
-  const auth = await getServerAuth();
-  if (!auth.user) {
-    return { response: NextResponse.json({ error: "認証が必要です" }, { status: 401 }) };
-  }
-  if (auth.userStatus === USER_STATUS.REJECTED) {
-    return {
-      response: NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 }),
-    };
-  }
-  if (auth.userRole !== USER_ROLE.ADMIN || auth.userId === null) {
-    return { response: NextResponse.json({ error: "権限がありません" }, { status: 403 }) };
-  }
-  return { response: null, userId: auth.userId };
-}
+import { requireAdminApi } from "@/app/services/auth/admin-guard";
 
 export async function GET() {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireAdminApi();
     if (admin.response) {
       return admin.response;
     }
@@ -53,9 +30,13 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireAdminApi();
     if (admin.response) {
       return admin.response;
+    }
+    const adminUserId = admin.auth.userId;
+    if (adminUserId === null) {
+      return NextResponse.json({ error: "権限がありません" }, { status: 403 });
     }
 
     const validation = await validateRequest(request, EmailSettingsUpdateSchema);
@@ -66,8 +47,8 @@ export async function PUT(request: Request) {
 
     const result =
       kind === undefined
-        ? await updateDigestDailyLimit(digest_daily_limit as number, admin.userId)
-        : await updateEmailKindSettings(kind, rest as EmailKindSettingsPatch, admin.userId);
+        ? await updateDigestDailyLimit(digest_daily_limit as number, adminUserId)
+        : await updateEmailKindSettings(kind, rest as EmailKindSettingsPatch, adminUserId);
 
     if (result.error) {
       return NextResponse.json({ error: "メール設定の更新に失敗しました" }, { status: 500 });

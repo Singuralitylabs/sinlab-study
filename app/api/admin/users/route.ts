@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { USER_MEMBERSHIP, USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { USER_MEMBERSHIP } from "@/app/constants/user";
 import {
   approveUser,
   changeMembershipType,
@@ -9,23 +9,14 @@ import {
   setUserEmailOptOut,
 } from "@/app/services/api/admin-server";
 import { AdminUserActionSchema, validateRequest } from "@/app/services/api/schemas";
-import { getServerAuth } from "@/app/services/auth/server-auth";
+import { requireAdminApi } from "@/app/services/auth/admin-guard";
 import { scheduleApprovedEmail } from "@/app/services/notifications/user-emails";
 
 export async function PATCH(request: Request) {
   try {
-    const auth = await getServerAuth();
-    if (!auth.user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-    }
-    // Rejected users are blocked even while their Auth session is valid. A former admin/maintainer
-    // keeps their role after rejection (it isn't cleared), so a role check alone doesn't stop them;
-    // same status gate as the other admin APIs.
-    if (auth.userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
-    if (auth.userRole !== USER_ROLE.ADMIN) {
-      return NextResponse.json({ error: "権限がありません" }, { status: 403 });
+    const admin = await requireAdminApi();
+    if (admin.response) {
+      return admin.response;
     }
 
     const validation = await validateRequest(request, AdminUserActionSchema);

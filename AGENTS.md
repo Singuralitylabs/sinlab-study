@@ -7,7 +7,7 @@ AIコーディングエージェント向けのガイダンス（[agents.md](htt
 **本ファイルは毎リクエスト全文が読み込まれる。** 追記前に確認：
 
 - **載せるのは「知らないと壊すこと」だけ**（コマンド・運用・コードスタイル・**不変条件**）。構成・責務・仕様は `README.md` / `docs/` の担当。
-- 設計判断の結論と理由は `docs/` に、時系列の経緯・調査ログ・一時的な手順は git / PR / Issue 履歴に置く（#185）。
+- 設計判断の結論と理由は `docs/` に、経緯・調査ログ・一時的な手順は git / PR / Issue 履歴に置く（#185）。
 - **特定の関数・分岐の落とし穴は、まずコード内コメントに書く。** `docs/` と同じ内容を二重に持たず、あるなら参照へ置き換える。
 - 節を増やさず既存の節に一行足せないか先に検討する。停止中・未使用の機能は「無効であること」と参照先だけ残す。
 - **`AGENTS.md` と `CLAUDE.md` の合計で 200行 / 12,000文字以内。** 超えたら `docs/` へ移す。ツール固有の設定は `CLAUDE.md` 等へ。
@@ -21,7 +21,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 - **push 前・作業完了前には必ず `bun run test:all` を通す。**
 - DBスキーマ変更後は `bun run db:types` を実行し、生成物もコミットする。
 - **`main` へ直接コミット・push せず、作業ブランチ（`feature/` `bug/` `docs/` `refactor/` `env/` 等）を切り PR 経由でマージする。**
-- PR は `.github/pull_request_template.md` に従う（`gh pr create --body` にも全セクションを含める）。
+- PR は `.github/pull_request_template.md` に従う。
 
 ## コードスタイル (Biome)
 
@@ -41,7 +41,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 - **認可は二層防御。** `proxy.ts`（Middleware の後継）が第一の砦、`app/(authenticated)/layout.tsx` でも `userStatus` の許可リスト検証を行う。**クライアント側の認証ガードは行わない。**
 - **プロキシはフェイルクローズ。** 環境変数欠落・例外・status null はすべて `/login` へ。
 - **Cron ルート（`app/api/cron/`）は `isAuthorizedCronRequest()`（`app/services/auth/cron-auth.ts`）による `CRON_SECRET` の検証を必ず通す**（未設定・不一致は 401）。`/api` は proxy の対象外のため、ルート側の検証だけが防御になる。
-- **定期メールの設定は `email_kind_settings` / `email_settings` を唯一の真実とし、送る日・曜日・上限の定数をロジックにハードコードしない。** 案内系は設定を読めなければ送らず（フェイルクローズ）、トランザクションメールは読めなければ送る（`docs/specification.md` 10.10）。
+- **定期メールの送る日・曜日・上限は `email_kind_settings` / `email_settings` が唯一の真実。定数をハードコードしない**（`docs/specification.md` 10.10）。
 - ロール判定ロジックは `app/services/auth/` に集約する。
 - **初回登録の INSERT は同意 Cookie 必須。** 同意なしでは `users` 行を作らず `/login?error=terms_required` へ戻す。`terms_accepted_at` は callback でのみ書き、既存ユーザー分岐では触らない。
 
@@ -51,9 +51,9 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 - **許可値の列挙は `MEMBERSHIP_TYPES`（`app/constants/user.ts`）に一本化する。** APIのバリデーションも承認UIも、`'community'` / `'general'` をハードコードしない。
 - **`status=active` と `membership_type` の整合性はDBでは保証されない。** `approveUser()` / `rejectUser()` を迂回して `status` を書き換えない。
-- **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select し、0行なら404。権限チェック済みの管理者向けクエリ等の既存利用は対象外。admin / maintainer 向け未公開プレビュー（2.12節）はこの2箇所を増やさず、通常クライアント（RLS適用）の別経路で取得する。定期メールの抽出（`email-digest-server.ts`）も service_role の別経路で、同じ絞り込みと本文を含まないカラムだけを守る（お知らせ一斉送信の `announcements.body` 読取は例外）。未認証の `/demo`（`demo-learning-server.ts`）は service_role 専用の別経路で、スライドの署名付きURLは **`is_published = true AND is_open_to_trial = true` に限って**発行する。
+- **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select し、0行なら404。権限チェック済みの管理者向けクエリ等は対象外。admin / maintainer 向け未公開プレビュー（2.12節）はこの2箇所を増やさず、通常クライアント（RLS適用）で取得する。定期メールの抽出（`email-digest-server.ts`）も service_role の別経路で、同じ絞り込みと本文を含まないカラムだけを守る（お知らせ一斉送信の `announcements.body` 読取は例外）。未認証の `/demo`（`demo-learning-server.ts`）は service_role 専用の別経路で、スライドの署名付きURLは **`is_published = true AND is_open_to_trial = true` に限って**発行する。
 - **`learning-server.ts` の取得関数は `userRole` を受け取り、admin / maintainer のみ `is_published` 絞り込みを外す**（2.12節）。member / お試しでは常に維持する。
-- **提出API・進捗APIの可視性チェックは通常クライアントの SELECT で行う。** `contentId` を `is_published = true` 付きで SELECT して0行なら403。ステータス分岐はRLSが担うためアプリ層に書かない（2.12節）。
+- **提出API・進捗APIの可視性チェックは通常クライアントの SELECT で行う。** `contentId` を `is_published = true` 付きで SELECT し0行なら403。ステータス分岐はRLSが担う（2.12節）。
 
 ### Stripeサブスク決済（月額課金）
 
@@ -84,4 +84,4 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 ### 環境変数・AIレビュー
 
-`.env.local` に設定する。**名前・用途の正式な一覧は `README.md`（`CRON_SECRET` 等のメール関連を含む）。** キー振り分けは `resolveGeminiApiKey()`（`app/services/api/gemini.ts`）、モデル名・上限値等は `app/constants/gemini.ts` に集約する。**キーはサーバー側でのみ扱い、レスポンス・ログへ出さない**（`docs/specification.md` 6.1.2節）。
+`.env.local` に設定する。**名前・用途の正式な一覧は `README.md`。** キー振り分けは `resolveGeminiApiKey()`（`app/services/api/gemini.ts`）、モデル名・上限値等は `app/constants/gemini.ts` に集約する。**キーはサーバー側でのみ扱い、レスポンス・ログへ出さない**（`docs/specification.md` 6.1.2節）。

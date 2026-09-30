@@ -1458,6 +1458,35 @@ describe("メール通知の管理設定（#272）", () => {
       expect(sendEmail).toHaveBeenCalledTimes(2);
     });
 
+    it("週の途中で曜日を変えても、障害の警告（予約なし）を出さずに次の送信日まで送らない", async () => {
+      const { db } = setup({ users: [userRow(1)] });
+      expect(await runDigest(MONDAY)).toMatchObject({ sent: 1 });
+
+      // Tuesday: moved to Wednesday. The new cycle started last Wednesday and has no reservation.
+      const weekly = db.email_kind_settings.find((row) => row.kind === "weekly_digest") as Row;
+      weekly.send_weekday = 3;
+      const tuesday = await runDigest(TUESDAY);
+
+      expect(tuesday).toMatchObject({ sent: 0, weeklyReservationMissing: false });
+      expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining("予約が無い"));
+
+      // Wednesday is a new cycle; the 10/5 digest is within 7 days, so no second mail either.
+      expect(await runDigest(WEDNESDAY)).toMatchObject({
+        sent: 0,
+        weeklyReservationMissing: false,
+      });
+      expect(sendEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it("直近7日に送信も予約も無いまま送信日から2日以上過ぎたら、従来どおり予約なしを警告する", async () => {
+      setup({ users: [userRow(1)] });
+
+      expect(await runDigest(new Date("2026-10-07T23:00:00Z"))).toMatchObject({
+        weeklyReservationMissing: true,
+      });
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("予約が無い"));
+    });
+
     it("送信曜日を前に戻して7日以内に次の送信日が来ても、その回は送らず、次の週から通常どおり送る", async () => {
       const { db } = setup({
         users: [userRow(1)],

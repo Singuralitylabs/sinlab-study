@@ -394,6 +394,28 @@ async function hasWeeklyDigestReservation(
 }
 
 /**
+ * Whether any weekly digest or reservation row exists within the 7 days up to `today`. Used to tell
+ * a send-weekday change mid-week (a digest was already handled under the old weekday, so the new
+ * cycle has no reservation by design) from a cycle whose deciding run never completed.
+ */
+async function hasRecentWeeklyDigestActivity(
+  supabase: AdminClient,
+  today: string
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("email_logs")
+    .select("user_id")
+    .in("kind", [EMAIL_KIND.WEEKLY_DIGEST, WEEKLY_DIGEST_RESERVATION_KIND])
+    .gte("reference_key", addDays(today, -6))
+    .lte("reference_key", today)
+    .limit(1);
+  if (error) {
+    throw new Error(error.message);
+  }
+  return (data ?? []).length > 0;
+}
+
+/**
  * Records users selected for Monday's weekly digest as carry-over reservations (no-op if
  * present). The reservation is a precondition for sending: throw on failure (the caller returns
  * failure without sending anything). It happens before the claim, so rerunning cannot double send
@@ -813,22 +835,27 @@ async function buildQueue(
   const weeklyEnabled = weeklySetting.enabled;
   let decidesTargets = weeklyEnabled && daysSinceWeekStart === 0;
   let weeklyReservationMissing = false;
+  let weeklySkipped = false;
   if (
     weeklyEnabled &&
     !decidesTargets &&
     !(await hasWeeklyDigestReservation(supabase, weekStart))
   ) {
-    // Monday's run did not reach target selection (failure, skip, missed start). Up to Tuesday
-    // decide targets in Monday's place; after that nothing is sent so it gets noticed.
+    // The deciding run of this cycle did not reach target selection (failure, skip, missed start).
+    // Within the catch-up window today's run decides targets in its place; after that nothing is
+    // sent so it gets noticed. Exception: if a digest or reservation of the last 7 days exists,
+    // the send weekday was changed mid-week, which is not a failure (sends resume next cycle).
     if (daysSinceWeekStart <= WEEKLY_DIGEST_CATCH_UP_DAYS) {
       decidesTargets = true;
       console.warn(
         `[定期メール] 今週（${weekStart}）の週次進捗の予約が無いため、今日の実行で対象を決めて送ります`
       );
+    } else if (await hasRecentWeeklyDigestActivity(supabase, today)) {
+      weeklySkipped = true;
     } else {
       weeklyReservationMissing = true;
       console.warn(
-        `[定期メール] 今週（${weekStart}）の週次進捗の予約が無いため、週次進捗は送りません（月曜・火曜の実行が完了しなかった可能性があります）`
+        `[定期メール] 今週（${weekStart}）の週次進捗の予約が無いため、週次進捗は送りません（送信曜日の当日と翌日の実行が完了しなかった可能性があります）`
       );
     }
   }
@@ -836,7 +863,7 @@ async function buildQueue(
     ? users.filter((user) => coversPreviousWeek(user.createdAt, weekStart))
     : [];
   const poolIds = () => weeklyPool.map((user) => user.userId);
-  if (weeklyReservationMissing) {
+  if (weeklyReservationMissing || weeklySkipped) {
     weeklyPool = [];
   } else if (!decidesTargets) {
     const reserved = await fetchLoggedUserIds(
