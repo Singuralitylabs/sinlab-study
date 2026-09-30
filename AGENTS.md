@@ -1,6 +1,6 @@
 # AGENTS.md
 
-AIコーディングエージェント向けのガイダンス（[agents.md](https://agents.md/) 規約）。Claude Code 固有の設定は `CLAUDE.md`（本ファイルを `@AGENTS.md` でインポート）に置く。
+AIコーディングエージェント向けのガイダンス（[agents.md](https://agents.md/) 規約）。Claude Code 固有の設定は `CLAUDE.md` に置く。
 
 ## このファイルの編集方針
 
@@ -42,6 +42,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 - **プロキシはフェイルクローズ。** 環境変数欠落・例外・status null はすべて `/login` へ。
 - **Cron ルート（`app/api/cron/`）は `isAuthorizedCronRequest()`（`app/services/auth/cron-auth.ts`）による `CRON_SECRET` の検証を必ず通す**（未設定・不一致は 401）。`/api` は proxy の対象外のため、ルート側の検証だけが防御になる。
 - **定期メールの送る日・曜日・上限は `email_kind_settings` / `email_settings` が唯一の真実。定数をハードコードしない**（`docs/specification.md` 10.10）。
+- **メール文面は `email_templates` → コードの既定値の順で解決し、差し込む値は Markdown 変換の後に入れ HTML ではエスケープする**（`docs/specification.md` 10.11）。
 - ロール判定ロジックは `app/services/auth/` に集約する。
 - **初回登録の INSERT は同意 Cookie 必須。** 同意なしでは `users` 行を作らず `/login?error=terms_required` へ戻す。`terms_accepted_at` は callback でのみ書き、既存ユーザー分岐では触らない。
 
@@ -51,7 +52,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 - **許可値の列挙は `MEMBERSHIP_TYPES`（`app/constants/user.ts`）に一本化する。** APIのバリデーションも承認UIも、`'community'` / `'general'` をハードコードしない。
 - **`status=active` と `membership_type` の整合性はDBでは保証されない。** `approveUser()` / `rejectUser()` を迂回して `status` を書き換えない。
-- **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select し、0行なら404。権限チェック済みの管理者向けクエリ等は対象外。admin / maintainer 向け未公開プレビュー（2.12節）はこの2箇所を増やさず、通常クライアント（RLS適用）で取得する。定期メールの抽出（`email-digest-server.ts`）も service_role の別経路で、同じ絞り込みと本文を含まないカラムだけを守る（お知らせ一斉送信の `announcements.body` 読取は例外）。未認証の `/demo`（`demo-learning-server.ts`）は service_role 専用の別経路で、スライドの署名付きURLは **`is_published = true AND is_open_to_trial = true` に限って**発行する。
+- **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select し、0行なら404。管理者向けクエリ等は対象外。admin / maintainer 向け未公開プレビュー（2.12節）はこの2箇所を増やさず、通常クライアント（RLS適用）で取得する。定期メールの抽出（`email-digest-server.ts`）も service_role の別経路で、同じ絞り込みと本文を含まないカラムだけを守る（お知らせ一斉送信の `announcements.body` 読取は例外）。未認証の `/demo`（`demo-learning-server.ts`）は service_role 専用の別経路で、スライドの署名付きURLは **`is_published = true AND is_open_to_trial = true` に限って**発行する。
 - **`learning-server.ts` の取得関数は `userRole` を受け取り、admin / maintainer のみ `is_published` 絞り込みを外す**（2.12節）。member / お試しでは常に維持する。
 - **提出API・進捗APIの可視性チェックは通常クライアントの SELECT で行う。** `contentId` を `is_published = true` 付きで SELECT し0行なら403。ステータス分岐はRLSが担う（2.12節）。
 
@@ -78,10 +79,20 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 ### データベースマイグレーション
 
-`supabase/migrations/` **直下にフラットな SQL で管理する（サブディレクトリ禁止。CLI が再帰走査しないため #149）**。ファイル名は `<14桁タイムスタンプ>_<説明>.sql`。**タイムスタンプはリモート適用履歴と比較されるため、既存ファイルのリネームは必ず `supabase migration list` で対応を確認してから行う**（本番も未適用分を確認してから `db push`）。RLSは参照先カラム・関数を追加した migration より後にする。
+`supabase/migrations/` **直下にフラットな SQL で管理する（サブディレクトリ禁止。CLI が再帰走査しないため #149）**。ファイル名は `<14桁タイムスタンプ>_<説明>.sql`。**タイムスタンプはリモート適用履歴と比較されるため、既存ファイルのリネームは必ず `supabase migration list` で対応を確認してから行う**。RLSは参照先カラム・関数を追加した migration より後にする。
 
-追加後の確認は `docs/database.md` 7.1節。**破壊的変更（カラム削除・リネーム・型変更、既存行を書き換えるデータ移行、Storageバケット・ポリシーの変更）は、本番反映前に Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)に従う。** 適用済み SQL 内の `CLAUDE.md` 参照は本ファイルを指す。
+追加後の確認は `docs/database.md` 7.1節。**破壊的変更（カラム削除・リネーム・型変更、既存行を書き換えるデータ移行、Storageバケット・ポリシーの変更）は、本番反映前に Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)に従う。**
 
 ### 環境変数・AIレビュー
 
 `.env.local` に設定する。**名前・用途の正式な一覧は `README.md`。** キー振り分けは `resolveGeminiApiKey()`（`app/services/api/gemini.ts`）、モデル名・上限値等は `app/constants/gemini.ts` に集約する。**キーはサーバー側でのみ扱い、レスポンス・ログへ出さない**（`docs/specification.md` 6.1.2節）。
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

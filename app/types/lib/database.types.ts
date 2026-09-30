@@ -242,18 +242,24 @@ export type Database = {
         Row: {
           digest_daily_limit: number;
           id: number;
+          service_name: string;
+          service_subtitle: string | null;
           updated_at: string;
           updated_by: number | null;
         };
         Insert: {
           digest_daily_limit: number;
           id?: number;
+          service_name?: string;
+          service_subtitle?: string | null;
           updated_at?: string;
           updated_by?: number | null;
         };
         Update: {
           digest_daily_limit?: number;
           id?: number;
+          service_name?: string;
+          service_subtitle?: string | null;
           updated_at?: string;
           updated_by?: number | null;
         };
@@ -261,6 +267,64 @@ export type Database = {
           {
             foreignKeyName: "email_settings_updated_by_fkey";
             columns: ["updated_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      email_templates: {
+        Row: {
+          body: string;
+          subject: string;
+          template_key: string;
+          updated_at: string;
+          updated_by: number | null;
+        };
+        Insert: {
+          body: string;
+          subject: string;
+          template_key: string;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Update: {
+          body?: string;
+          subject?: string;
+          template_key?: string;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "email_templates_updated_by_fkey";
+            columns: ["updated_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      email_test_sends: {
+        Row: {
+          created_at: string;
+          id: number;
+          user_id: number | null;
+        };
+        Insert: {
+          created_at?: string;
+          id?: never;
+          user_id?: number | null;
+        };
+        Update: {
+          created_at?: string;
+          id?: never;
+          user_id?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "email_test_sends_user_id_fkey";
+            columns: ["user_id"];
             isOneToOne: false;
             referencedRelation: "users";
             referencedColumns: ["id"];

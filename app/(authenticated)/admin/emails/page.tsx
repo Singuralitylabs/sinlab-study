@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { PageTitle } from "@/app/components/PageTitle";
 import { EMAIL_DIGEST_DAILY_LIMIT_MAX, EMAIL_KINDS } from "@/app/constants/notifications";
 import {
@@ -28,6 +29,12 @@ export default async function AdminEmailsPage({ searchParams }: PageProps) {
   return (
     <div className="space-y-8">
       <PageTitle title="メール通知" />
+
+      <p className="text-sm">
+        <Link href="/admin/emails/templates" className="text-primary underline underline-offset-2">
+          メール文面（件名・本文・サービス名）を編集する
+        </Link>
+      </p>
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">今日の送信状況</h2>

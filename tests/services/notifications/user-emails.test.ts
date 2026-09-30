@@ -463,3 +463,101 @@ describe("管理設定による有効・無効（#272）", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 });
+
+describe("編集できるメール文面（#286）", () => {
+  const sentContent = () => vi.mocked(sendEmail).mock.calls[0][0];
+  const logs = [
+    { data: { id: 11 }, error: null },
+    { data: null, error: null },
+  ];
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("文面の行もサービス名の行も無いときは、既定の文面で送る", async () => {
+    mockAdmin({ users: { data: recipientRow, error: null }, email_logs: logs });
+
+    await deliverOnce();
+
+    expect(sentContent().subject).toBe("【Sinlab Study】一般有料会員の期間が終了しました");
+    expect(sentContent().text).toContain("お試しユーザーに戻りました");
+    expect(sentContent().fromName).toBe("Sinlab Study");
+  });
+
+  it("保存された文面とサービス名で送る", async () => {
+    mockAdmin({
+      users: { data: recipientRow, error: null },
+      email_logs: logs,
+      email_templates: {
+        data: [
+          {
+            template_key: "subscription_ended",
+            subject: "終了のご連絡",
+            body: "{{display_name}} さん、ご利用ありがとうございました。",
+          },
+        ],
+        error: null,
+      },
+      email_settings: {
+        data: { service_name: "新サービス", service_subtitle: null },
+        error: null,
+      },
+    });
+
+    await deliverOnce();
+
+    expect(sentContent().subject).toBe("【新サービス】終了のご連絡");
+    expect(sentContent().text).toContain("山田 さん、ご利用ありがとうございました。");
+    expect(sentContent().fromName).toBe("新サービス");
+  });
+
+  it("文面の読み出しが DB エラーでも、通知を止めず既定の文面で送る", async () => {
+    mockAdmin({
+      users: { data: recipientRow, error: null },
+      email_logs: logs,
+      email_templates: { data: null, error: { message: "db down" } },
+      email_settings: { data: null, error: { message: "db down" } },
+    });
+
+    await deliverOnce();
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(sentContent().subject).toBe("【Sinlab Study】一般有料会員の期間が終了しました");
+  });
+
+  it("文面の読み出しが例外を投げても、通知を止めず、主処理へ例外を伝播しない", async () => {
+    const client = mockAdmin({
+      users: { data: recipientRow, error: null },
+      email_logs: logs,
+    });
+    const original = client.from.getMockImplementation() as (table: string) => unknown;
+    client.from.mockImplementation((table: string) => {
+      if (table === "email_templates" || table === "email_settings") {
+        throw new Error("connection lost");
+      }
+      return original(table);
+    });
+
+    scheduleSubscriptionEndedEmail({ userId: 7, subscriptionId: "sub_123" });
+    await expect(runScheduled()).resolves.toBeUndefined();
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(sentContent().subject).toBe("【Sinlab Study】一般有料会員の期間が終了しました");
+  });
+
+  it("許可リスト外を含む行は使わず、既定の文面で送る", async () => {
+    mockAdmin({
+      users: { data: recipientRow, error: null },
+      email_logs: logs,
+      email_templates: {
+        data: [{ template_key: "subscription_ended", subject: "{{oops}}", body: "本文" }],
+        error: null,
+      },
+    });
+
+    await deliverOnce();
+
+    expect(sentContent().subject).toBe("【Sinlab Study】一般有料会員の期間が終了しました");
+  });
+});

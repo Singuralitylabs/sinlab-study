@@ -42,7 +42,7 @@ describe("sendEmail", () => {
     expect(url).toBe(RESEND_API_URL);
     expect(init.headers.Authorization).toBe(`Bearer ${API_KEY}`);
     expect(JSON.parse(init.body)).toEqual({
-      from: "AIと学ぶ実践Web技術講座 <noreply@mail.example.com>",
+      from: "Sinlab Study <noreply@mail.example.com>",
       to: ["user@example.com"],
       subject: "件名",
       text: "本文",
@@ -118,5 +118,46 @@ describe("sendEmail", () => {
     );
 
     await expect(sendEmail(content)).resolves.toEqual({ status: "sent", messageId: null });
+  });
+});
+
+describe("sendEmail の差出人名（#286）", () => {
+  it("渡された差出人名を使い、ヘッダーを壊す文字（改行・<>・引用符）は落とす", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test_key");
+    vi.stubEnv("EMAIL_FROM_ADDRESS", "noreply@mail.example.com");
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendEmail({
+      to: "user@example.com",
+      subject: "件名",
+      text: "本文",
+      html: "<p>本文</p>",
+      fromName: 'A\r\nBcc: evil@example.com <x> "y"',
+    });
+    await sendEmail({
+      to: "user@example.com",
+      subject: "件名",
+      text: "本文",
+      html: "<p>本文</p>",
+      fromName: "新サービス",
+    });
+    await sendEmail({
+      to: "user@example.com",
+      subject: "件名",
+      text: "本文",
+      html: "<p>本文</p>",
+      fromName: "<>",
+    });
+
+    const froms = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body).from as string);
+    expect(froms[0]).not.toMatch(/[\r\n"]/);
+    expect(froms[0].match(/[<>]/g)).toHaveLength(2);
+    expect(froms[0].endsWith(" <noreply@mail.example.com>")).toBe(true);
+    expect(froms[0].split("<").length).toBe(2);
+    expect(froms[1]).toBe("新サービス <noreply@mail.example.com>");
+    expect(froms[2]).toBe("Sinlab Study <noreply@mail.example.com>");
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 });

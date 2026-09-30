@@ -2,8 +2,10 @@ import { after } from "next/server";
 import { EMAIL_KIND, type EmailKind } from "@/app/constants/notifications";
 import { formatMonthlyJpyPrice, isStripeEnabled } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP_LABELS } from "@/app/constants/user";
+import type { EmailTexts } from "@/app/lib/email-template";
 import { formatDate } from "@/app/lib/format-date";
 import { isTransactionalEmailEnabled } from "@/app/services/api/email-settings-server";
+import { loadEmailTexts } from "@/app/services/api/email-templates-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import {
   type EmailContent,
@@ -146,7 +148,7 @@ async function deliverToUser(
   kind: EmailKind,
   referenceKey: string | ((recipient: Recipient) => string),
   recipientLookup: RecipientLookup,
-  build: (recipient: Recipient, appUrl: string) => EmailContent
+  build: (recipient: Recipient, appUrl: string, texts: EmailTexts) => EmailContent
 ): Promise<DeliverResult> {
   if (!isEmailConfigured()) {
     console.warn(
@@ -174,11 +176,15 @@ async function deliverToUser(
     return "skipped";
   }
 
+  // Fail-safe: loadEmailTexts() never throws and falls back to the code defaults, so an unreadable
+  // text or branding row cannot stop the notice or affect the caller's main work.
+  const texts = await loadEmailTexts(supabase);
+
   return await deliverUserEmail(supabase, {
     kind,
     referenceKey: typeof referenceKey === "string" ? referenceKey : referenceKey(recipient),
     recipient,
-    content: build(recipient, appUrl),
+    content: build(recipient, appUrl, texts),
   });
 }
 
@@ -193,12 +199,15 @@ export function scheduleSignupEmail(params: { authId: string }): void {
       EMAIL_KIND.SIGNUP,
       (recipient) => String(recipient.userId),
       { column: "auth_id", value: params.authId },
-      (recipient, appUrl) =>
-        buildSignupEmail({
-          displayName: recipient.displayName,
-          appUrl,
-          upgradeAvailable: isStripeEnabled(),
-        })
+      (recipient, appUrl, texts) =>
+        buildSignupEmail(
+          {
+            displayName: recipient.displayName,
+            appUrl,
+            upgradeAvailable: isStripeEnabled(),
+          },
+          texts
+        )
     )
   );
 }
@@ -214,12 +223,15 @@ export function scheduleApprovedEmail(params: {
       EMAIL_KIND.APPROVED,
       params.approvedAt,
       { column: "id", value: params.userId },
-      (recipient, appUrl) =>
-        buildApprovedEmail({
-          displayName: recipient.displayName,
-          appUrl,
-          membershipLabel: USER_MEMBERSHIP_LABELS[params.membershipType],
-        })
+      (recipient, appUrl, texts) =>
+        buildApprovedEmail(
+          {
+            displayName: recipient.displayName,
+            appUrl,
+            membershipLabel: USER_MEMBERSHIP_LABELS[params.membershipType],
+          },
+          texts
+        )
     )
   );
 }
@@ -242,18 +254,21 @@ export function scheduleUpgradedEmail(params: {
       EMAIL_KIND.UPGRADED,
       params.subscriptionId,
       { column: "id", value: params.userId },
-      (recipient, appUrl) =>
-        buildUpgradedEmail({
-          displayName: recipient.displayName,
-          appUrl,
-          monthlyPriceLabel:
-            params.monthlyAmountJpy !== null
-              ? formatMonthlyJpyPrice(params.monthlyAmountJpy)
+      (recipient, appUrl, texts) =>
+        buildUpgradedEmail(
+          {
+            displayName: recipient.displayName,
+            appUrl,
+            monthlyPriceLabel:
+              params.monthlyAmountJpy !== null
+                ? formatMonthlyJpyPrice(params.monthlyAmountJpy)
+                : null,
+            nextBillingDateLabel: params.currentPeriodEnd
+              ? formatDate(params.currentPeriodEnd)
               : null,
-          nextBillingDateLabel: params.currentPeriodEnd
-            ? formatDate(params.currentPeriodEnd)
-            : null,
-        })
+          },
+          texts
+        )
     )
   );
 }
@@ -273,12 +288,15 @@ export function scheduleCancelScheduledEmail(params: {
       EMAIL_KIND.CANCEL_SCHEDULED,
       params.subscriptionId,
       { column: "id", value: params.userId },
-      (recipient, appUrl) =>
-        buildCancelScheduledEmail({
-          displayName: recipient.displayName,
-          appUrl,
-          periodEndDateLabel: params.periodEnd ? formatDate(params.periodEnd) : null,
-        })
+      (recipient, appUrl, texts) =>
+        buildCancelScheduledEmail(
+          {
+            displayName: recipient.displayName,
+            appUrl,
+            periodEndDateLabel: params.periodEnd ? formatDate(params.periodEnd) : null,
+          },
+          texts
+        )
     )
   );
 }
@@ -296,8 +314,8 @@ export function scheduleSubscriptionEndedEmail(params: {
       EMAIL_KIND.SUBSCRIPTION_ENDED,
       params.subscriptionId,
       { column: "id", value: params.userId },
-      (recipient, appUrl) =>
-        buildSubscriptionEndedEmail({ displayName: recipient.displayName, appUrl })
+      (recipient, appUrl, texts) =>
+        buildSubscriptionEndedEmail({ displayName: recipient.displayName, appUrl }, texts)
     )
   );
 }

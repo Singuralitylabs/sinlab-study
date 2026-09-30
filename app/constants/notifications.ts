@@ -12,10 +12,35 @@ export const EMAIL_SEND_TIMEOUT_MS = 5_000;
 
 export const RESEND_API_URL = "https://api.resend.com/emails";
 
-export const EMAIL_SERVICE_NAME = "AIと学ぶ実践Web技術講座";
+/**
+ * Defaults for the sender name / subject prefix / header (`EMAIL_SERVICE_NAME`) and the header
+ * supplement / footer (`EMAIL_SERVICE_SUBTITLE`). `email_settings.service_name` /
+ * `service_subtitle` override them at runtime; these apply when the row cannot be read.
+ */
+export const EMAIL_SERVICE_NAME = "Sinlab Study";
+
+export const EMAIL_SERVICE_SUBTITLE = "AIと学ぶ実践Web技術講座";
 
 /** Display name only; the address comes from the EMAIL_FROM_ADDRESS env var. */
 export const EMAIL_FROM_NAME = EMAIL_SERVICE_NAME;
+
+/**
+ * Input limits for the editable email text (enforced by zod). Kept small so a subject stays
+ * readable in clients and a body cannot bloat every broadcast.
+ */
+export const EMAIL_TEMPLATE_SUBJECT_MAX = 100;
+export const EMAIL_TEMPLATE_BODY_MAX = 5000;
+export const EMAIL_SERVICE_NAME_MAX = 50;
+export const EMAIL_SERVICE_SUBTITLE_MAX = 100;
+
+/**
+ * Cap on test sends per day (JST, all admins together). Test sends are not recorded in
+ * `email_logs`, so they never count toward the promotional daily limit; this keeps them from
+ * eating Resend's free tier of 100/day.
+ */
+export const EMAIL_TEST_SEND_DAILY_LIMIT = 10;
+
+export const EMAIL_TEST_SUBJECT_PREFIX = "【テスト】";
 
 /**
  * Kinds of send log (email_logs.kind). Part of the UNIQUE (user_id, kind, reference_key) that

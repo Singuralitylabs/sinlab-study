@@ -22,6 +22,10 @@ import {
   EMAIL_SEND_DAY_MAX,
   EMAIL_SEND_DAY_MIN,
   EMAIL_SEND_DAYS_MAX_COUNT,
+  EMAIL_SERVICE_NAME_MAX,
+  EMAIL_SERVICE_SUBTITLE_MAX,
+  EMAIL_TEMPLATE_BODY_MAX,
+  EMAIL_TEMPLATE_SUBJECT_MAX,
   type EmailKind,
 } from "@/app/constants/notifications";
 import {
@@ -30,6 +34,11 @@ import {
   USER_ROLES,
   USER_STATUS,
 } from "@/app/constants/user";
+import {
+  EMAIL_TEMPLATE_KEYS,
+  type EmailTemplateKey,
+  validateEmailTemplateText,
+} from "@/app/lib/email-template";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
 
 export const PositiveIntSchema = z
@@ -361,6 +370,96 @@ export type ValidationResult<T> =
  * unified `{ error: string }` shape. Callers check `success` and just return `response` on
  * failure.
  */
+// Line breaks (incl. Unicode separators) would let a subject or sender name split a mail header.
+const LINE_BREAK = /[\r\n\u2028\u2029]/;
+
+const singleLine = (label: string, max: number, min: number) =>
+  z
+    .string({ message: `${label}は文字列で指定してください` })
+    .refine((value) => !LINE_BREAK.test(value), { message: `${label}に改行は使えません` })
+    .pipe(
+      z
+        .string()
+        .trim()
+        .min(min, { message: `${label}は${min}文字以上で入力してください` })
+        .max(max, { message: `${label}は${max}文字以内で入力してください` })
+    );
+
+const EmailTemplateKeySchema = z.enum(EMAIL_TEMPLATE_KEYS, {
+  message: "template_key が不正です",
+});
+
+const EmailTemplateBodyFieldSchema = z
+  .string({ message: "本文は文字列で指定してください" })
+  .min(1, { message: "本文を入力してください" })
+  .max(EMAIL_TEMPLATE_BODY_MAX, {
+    message: `本文は${EMAIL_TEMPLATE_BODY_MAX}文字以内で入力してください`,
+  })
+  .refine((value) => value.trim() !== "", { message: "本文を入力してください" });
+
+/**
+ * Rejects placeholders outside the template's allow-list (and a missing / repeated required one),
+ * naming which ones failed so the admin can fix them.
+ */
+function refineTemplatePlaceholders(
+  value: { template_key: EmailTemplateKey; subject: string; body: string },
+  ctx: z.RefinementCtx
+) {
+  const check = validateEmailTemplateText(value.template_key, {
+    subject: value.subject,
+    body: value.body,
+  });
+  const fail = (message: string) => ctx.addIssue({ code: "custom", message });
+  if (check.unknown.length > 0) {
+    fail(
+      `このテンプレートでは使えないプレースホルダーがあります: ${check.unknown.map((n) => `{{${n}}}`).join(", ")}`
+    );
+  }
+  if (check.bodyOnlyInSubject.length > 0) {
+    fail(
+      `件名には使えないプレースホルダーです: ${check.bodyOnlyInSubject.map((n) => `{{${n}}}`).join(", ")}`
+    );
+  }
+  if (check.invalidRequired.length > 0) {
+    fail(
+      `本文に ${check.invalidRequired.map((n) => `{{${n}}}`).join(", ")} を1つだけ入れてください`
+    );
+  }
+}
+
+const EmailTemplateDraftShape = {
+  template_key: EmailTemplateKeySchema,
+  subject: singleLine("件名", EMAIL_TEMPLATE_SUBJECT_MAX, 1),
+  body: EmailTemplateBodyFieldSchema,
+};
+
+export const EmailTemplateUpdateSchema = z
+  .object(EmailTemplateDraftShape)
+  .strict()
+  .superRefine(refineTemplatePlaceholders);
+
+export const EmailBrandingSchema = z
+  .object({
+    service_name: singleLine("サービス名", EMAIL_SERVICE_NAME_MAX, 1),
+    service_subtitle: singleLine("補足（講座名）", EMAIL_SERVICE_SUBTITLE_MAX, 0),
+  })
+  .strict();
+
+const EmailPreviewShape = {
+  ...EmailTemplateDraftShape,
+  variant: z.string().max(40).optional(),
+  service_name: EmailBrandingSchema.shape.service_name.optional(),
+  service_subtitle: EmailBrandingSchema.shape.service_subtitle.optional(),
+};
+
+/** Preview / test send: an unsaved draft plus which sample condition to show. */
+export const EmailTemplatePreviewSchema = z
+  .object(EmailPreviewShape)
+  .strict()
+  .superRefine(refineTemplatePlaceholders);
+
+export const EmailTemplateResetSchema = z.object({ template_key: EmailTemplateKeySchema }).strict();
+
 export async function validateRequest<T extends z.ZodType>(
   request: Request,
   schema: T
