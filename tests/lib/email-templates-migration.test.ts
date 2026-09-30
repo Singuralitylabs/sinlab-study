@@ -34,4 +34,14 @@ describe("email_templates マイグレーション（#286）", () => {
     expect(migration).toContain("ALTER TABLE public.email_test_sends ENABLE ROW LEVEL SECURITY");
     expect(migration).not.toMatch(/CREATE POLICY[^;]*email_test_sends/);
   });
+
+  it("テスト送信の枠の確保はロック内で数えて INSERT する関数で行い、service_role だけが実行できる", () => {
+    expect(migration).toContain("pg_advisory_xact_lock");
+    expect(migration).toMatch(
+      /REVOKE EXECUTE ON FUNCTION public\.claim_email_test_send[\s\S]*?FROM PUBLIC, anon, authenticated;/
+    );
+    expect(migration).toMatch(
+      /GRANT EXECUTE ON FUNCTION public\.claim_email_test_send[\s\S]*?TO service_role;/
+    );
+  });
 });

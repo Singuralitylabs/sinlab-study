@@ -150,43 +150,40 @@ describe("loadEmailTextsWithDraft（プレビュー用）", () => {
 });
 
 describe("claimTestSend（テスト送信の1日の上限）", () => {
-  it("上限内なら許可し、email_logs には一切触れない", async () => {
-    const client = admin({
-      email_test_sends: [
-        { data: { id: 5 }, error: null },
-        { data: null, error: null, count: EMAIL_TEST_SEND_DAILY_LIMIT },
-      ],
+  function adminWithRpc(
+    rpcResult: QueryResult,
+    tableResults: Record<string, QueryResult | QueryResult[]> = {}
+  ) {
+    const client = createMockSupabaseClient({
+      tableResults,
+      rpcResults: { claim_email_test_send: rpcResult },
     });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+    return client;
+  }
 
-    const claim = await claimTestSend(1);
+  it("枠を確保できたら許可する。上限・日の開始・本人の id を渡し、email_logs には一切触れない", async () => {
+    const client = adminWithRpc({ data: 5, error: null });
+
+    const claim = await claimTestSend(1, new Date("2026-10-05T03:00:00Z"));
 
     expect(claim.allowed).toBe(true);
-    expect(tables(client)).not.toContain("email_logs");
-    expect(new Set(tables(client))).toEqual(new Set(["email_test_sends"]));
-    expect(builder(client, "email_test_sends").insert).toHaveBeenCalledWith({ user_id: 1 });
-  });
-
-  it("上限を超える（自分の分を含めて上限+1通目）と拒否し、記録した行を消す", async () => {
-    const client = admin({
-      email_test_sends: [
-        { data: { id: 5 }, error: null },
-        { data: null, error: null, count: EMAIL_TEST_SEND_DAILY_LIMIT + 1 },
-        { data: null, error: null },
-      ],
+    expect(client.rpc).toHaveBeenCalledWith("claim_email_test_send", {
+      p_user_id: 1,
+      p_day_start: "2026-10-04T15:00:00.000Z",
+      p_limit: EMAIL_TEST_SEND_DAILY_LIMIT,
     });
-
-    const claim = await claimTestSend(1);
-
-    expect(claim).toEqual({ allowed: false, error: null });
-    const deletes = client.from.mock.results
-      .map((r) => r.value)
-      .filter((b) => b.delete.mock.calls.length > 0);
-    expect(deletes).toHaveLength(1);
-    expect(deletes[0].eq).toHaveBeenCalledWith("id", 5);
+    expect(tables(client)).not.toContain("email_logs");
   });
 
-  it("記録に失敗したら（上限を数えられないので）拒否する", async () => {
-    admin({ email_test_sends: { data: null, error: { message: "down" } } });
+  it("枠が無い（関数が NULL を返す）と、エラー無しで拒否する", async () => {
+    adminWithRpc({ data: null, error: null });
+
+    expect(await claimTestSend(1)).toEqual({ allowed: false, error: null });
+  });
+
+  it("関数の呼び出しに失敗したら（上限を数えられないので）拒否する", async () => {
+    adminWithRpc({ data: null, error: { message: "down" } });
 
     const claim = await claimTestSend(1);
 
@@ -194,37 +191,24 @@ describe("claimTestSend（テスト送信の1日の上限）", () => {
     expect(claim).toMatchObject({ error: expect.any(String) });
   });
 
-  it("回数を数えられなかったら拒否し、記録を消す", async () => {
-    admin({
-      email_test_sends: [
-        { data: { id: 5 }, error: null },
-        { data: null, error: { message: "down" }, count: null },
-        { data: null, error: null },
-      ],
-    });
+  it("例外が出ても拒否し、伝播しない", async () => {
+    vi.mocked(createAdminSupabaseClient).mockRejectedValue(new Error("no env"));
 
-    const claim = await claimTestSend(1);
-
-    expect(claim.allowed).toBe(false);
+    expect((await claimTestSend(1)).allowed).toBe(false);
   });
 
-  it("送信に失敗したときの release は、記録した行だけを消す", async () => {
-    const client = admin({
-      email_test_sends: [
-        { data: { id: 9 }, error: null },
-        { data: null, error: null, count: 1 },
-        { data: null, error: null },
-      ],
-    });
+  it("送信に失敗したときの release は、確保した行だけを消す", async () => {
+    const client = adminWithRpc(
+      { data: 9, error: null },
+      { email_test_sends: { data: null, error: null } }
+    );
 
     const claim = await claimTestSend(1);
     if (!claim.allowed) throw new Error("allowed のはず");
     await claim.release();
 
-    const deleteBuilder = client.from.mock.results
-      .map((r) => r.value)
-      .find((b) => b.delete.mock.calls.length > 0);
-    expect(deleteBuilder.eq).toHaveBeenCalledWith("id", 9);
+    expect(builder(client, "email_test_sends").delete).toHaveBeenCalled();
+    expect(builder(client, "email_test_sends").eq).toHaveBeenCalledWith("id", 9);
   });
 });
 

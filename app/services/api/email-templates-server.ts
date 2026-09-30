@@ -238,10 +238,11 @@ export type TestSendClaim =
   | { allowed: false; error: string | null };
 
 /**
- * Claims one of today's test sends (JST, all admins together): inserts a row, then counts today's
- * rows; over the cap the row is removed again. Insert-then-count keeps two simultaneous requests
- * from both slipping under the cap. A DB error refuses the send (fail closed), so a broken
- * counter can never turn into unlimited sends. Test sends are not written to `email_logs`.
+ * Claims one of today's test sends (JST, all admins together) through `claim_email_test_send()`,
+ * which counts and inserts under a lock: simultaneous requests never exceed the cap and never
+ * lose a slot that is still free. No slot left returns `allowed: false` with `error: null`. A DB
+ * error refuses the send (fail closed), so a broken counter can never turn into unlimited sends.
+ * Test sends are not written to `email_logs`.
  */
 export async function claimTestSend(
   userId: number,
@@ -249,34 +250,27 @@ export async function claimTestSend(
 ): Promise<TestSendClaim> {
   try {
     const supabase = await createAdminSupabaseClient();
-    const { data: claimed, error: insertError } = await supabase
-      .from("email_test_sends")
-      .insert({ user_id: userId })
-      .select("id")
-      .single();
-    if (insertError || !claimed) {
-      console.error("テスト送信の記録エラー:", insertError?.message);
+    const { data: claimedId, error } = await supabase.rpc("claim_email_test_send", {
+      p_user_id: userId,
+      p_day_start: jstStartOfDayIso(toJstDateString(now)),
+      p_limit: EMAIL_TEST_SEND_DAILY_LIMIT,
+    });
+    if (error) {
+      console.error("テスト送信の枠の確保エラー:", error.message);
       return { allowed: false, error: "テスト送信の準備に失敗しました" };
     }
-    const release = async () => {
-      const { error } = await supabase.from("email_test_sends").delete().eq("id", claimed.id);
-      if (error) {
-        console.error("テスト送信の記録の削除エラー:", error.message);
-      }
-    };
-    const { count, error: countError } = await supabase
-      .from("email_test_sends")
-      .select("id", { count: "exact", head: true })
-      .gte("created_at", jstStartOfDayIso(toJstDateString(now)));
-    if (countError || count === null) {
-      console.error("テスト送信の回数取得エラー:", countError?.message);
-      await release();
-      return { allowed: false, error: "テスト送信の準備に失敗しました" };
-    }
-    if (count > EMAIL_TEST_SEND_DAILY_LIMIT) {
-      await release();
+    if (claimedId === null || claimedId === undefined) {
       return { allowed: false, error: null };
     }
+    const release = async () => {
+      const { error: deleteError } = await supabase
+        .from("email_test_sends")
+        .delete()
+        .eq("id", claimedId);
+      if (deleteError) {
+        console.error("テスト送信の記録の削除エラー:", deleteError.message);
+      }
+    };
     return { allowed: true, release };
   } catch (error) {
     console.error("テスト送信の準備エラー:", error);

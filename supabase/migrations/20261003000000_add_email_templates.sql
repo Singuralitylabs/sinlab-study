@@ -8,6 +8,7 @@
 --   既定値はコードの EMAIL_SERVICE_NAME / EMAIL_SERVICE_SUBTITLE と同じ。
 -- email_test_sends: 管理画面のテスト送信の記録（1日の回数上限の集計用）。
 --   email_logs には記録しないため、案内系メールの1日の上限の集計に影響しない。
+--   枠の確保は claim_email_test_send()（service_role のみ実行可）でロックの中で行う。
 --
 -- RLS: email_templates は SELECT / INSERT / UPDATE / DELETE とも admin のみ（同一操作は1本）。
 --   email_test_sends はポリシーを作らない（service_role のみ）。
@@ -55,6 +56,34 @@ CREATE INDEX IF NOT EXISTS email_test_sends_created_at_idx
   ON public.email_test_sends (created_at);
 CREATE INDEX IF NOT EXISTS email_test_sends_user_id_idx
   ON public.email_test_sends (user_id);
+
+-- テスト送信の1日の上限を、ロックの中で「数える → 上限未満なら INSERT」して守る。
+-- 同時リクエストでも上限を超えず、上限内の枠を取りこぼさない。上限に達していれば NULL を返す。
+CREATE OR REPLACE FUNCTION public.claim_email_test_send(
+  p_user_id INTEGER,
+  p_day_start TIMESTAMPTZ,
+  p_limit INTEGER
+)
+RETURNS BIGINT
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+  v_id BIGINT;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('email_test_sends'));
+  IF (SELECT count(*) FROM public.email_test_sends WHERE created_at >= p_day_start) >= p_limit THEN
+    RETURN NULL;
+  END IF;
+  INSERT INTO public.email_test_sends (user_id) VALUES (p_user_id) RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.claim_email_test_send(INTEGER, TIMESTAMPTZ, INTEGER)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_email_test_send(INTEGER, TIMESTAMPTZ, INTEGER)
+  TO service_role;
 
 ALTER TABLE public.email_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.email_test_sends ENABLE ROW LEVEL SECURITY;

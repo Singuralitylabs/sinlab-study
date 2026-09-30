@@ -1,6 +1,6 @@
 # AGENTS.md
 
-AIコーディングエージェント向けのガイダンス（[agents.md](https://agents.md/) 規約）。Claude Code 固有の設定は `CLAUDE.md` に置く。
+AIコーディングエージェント向けのガイダンス（[agents.md](https://agents.md/) 規約）。Claude Code 固有の設定は `CLAUDE.md`（本ファイルを `@AGENTS.md` でインポート）に置く。
 
 ## このファイルの編集方針
 
@@ -10,13 +10,13 @@ AIコーディングエージェント向けのガイダンス（[agents.md](htt
 - 設計判断の結論と理由は `docs/` に、経緯・調査ログ・一時的な手順は git / PR / Issue 履歴に置く（#185）。
 - **特定の関数・分岐の落とし穴は、まずコード内コメントに書く。** `docs/` と同じ内容を二重に持たず、あるなら参照へ置き換える。
 - 節を増やさず既存の節に一行足せないか先に検討する。停止中・未使用の機能は「無効であること」と参照先だけ残す。
-- **`AGENTS.md` と `CLAUDE.md` の合計で 200行 / 12,000文字以内。** 超えたら `docs/` へ移す。ツール固有の設定は `CLAUDE.md` 等へ。
+- **`AGENTS.md` と `CLAUDE.md` の合計で 200行 / 12,000文字以内。** 超えたら `docs/` へ移す。
 
-詳細は `docs/requirements.md`（要件）/ `docs/specification.md`（機能設計）/ `docs/database.md`（DB・RLS設計）/ `docs/testing.md`（テスト）/ `README.md`（セットアップ・環境変数・構成）にある。要約を書かない。
+詳細は `docs/`（`requirements.md` 要件 / `specification.md` 機能設計 / `database.md` DB・RLS / `testing.md` テスト）と `README.md`（セットアップ・環境変数・構成）にある。要約を書かない。
 
 ## コマンド・運用
 
-Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（npm/yarn/pnpm 不可）。スクリプトは README。
+Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（npm/yarn/pnpm 不可）。
 
 - **push 前・作業完了前には必ず `bun run test:all` を通す。**
 - DBスキーマ変更後は `bun run db:types` を実行し、生成物もコミットする。
@@ -25,8 +25,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 ## コードスタイル (Biome)
 
-- ダブルクォート、セミコロン必須、ES5トレイリングカンマ、2スペース、行幅100文字（詳細は `biome.json`）
-- `useConst`・`useImportType`/`useExportType` は error。型のみのインポートは `import type`
+- 書式は Biome（`biome.json`）に従う。型のみのインポートは `import type`（`useImportType` は error）
 - コードのコメントは英語で「why」（理由・壊すと起きること）だけ。言い換え（what）・変更履歴・ファイルヘッダ概要は書かない。コメントのみの変更は `bun run check:comments` でロジック不変を確認する。
 
 ## 実装時に必ず守ること
@@ -42,7 +41,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 - **プロキシはフェイルクローズ。** 環境変数欠落・例外・status null はすべて `/login` へ。
 - **Cron ルート（`app/api/cron/`）は `isAuthorizedCronRequest()`（`app/services/auth/cron-auth.ts`）による `CRON_SECRET` の検証を必ず通す**（未設定・不一致は 401）。`/api` は proxy の対象外のため、ルート側の検証だけが防御になる。
 - **定期メールの送る日・曜日・上限は `email_kind_settings` / `email_settings` が唯一の真実。定数をハードコードしない**（`docs/specification.md` 10.10）。
-- **メール文面は `email_templates` → コードの既定値の順で解決し、差し込む値は Markdown 変換の後に入れ HTML ではエスケープする**（`docs/specification.md` 10.11）。
+- **メール文面は `email_templates` → 既定値の順で解決し、差し込む値は変換後に入れ HTML ではエスケープする**（`docs/specification.md` 10.11）。
 - ロール判定ロジックは `app/services/auth/` に集約する。
 - **初回登録の INSERT は同意 Cookie 必須。** 同意なしでは `users` 行を作らず `/login?error=terms_required` へ戻す。`terms_accepted_at` は callback でのみ書き、既存ユーザー分岐では触らない。
 
@@ -52,7 +51,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 - **許可値の列挙は `MEMBERSHIP_TYPES`（`app/constants/user.ts`）に一本化する。** APIのバリデーションも承認UIも、`'community'` / `'general'` をハードコードしない。
 - **`status=active` と `membership_type` の整合性はDBでは保証されない。** `approveUser()` / `rejectUser()` を迂回して `status` を書き換えない。
-- **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select し、0行なら404。管理者向けクエリ等は対象外。admin / maintainer 向け未公開プレビュー（2.12節）はこの2箇所を増やさず、通常クライアント（RLS適用）で取得する。定期メールの抽出（`email-digest-server.ts`）も service_role の別経路で、同じ絞り込みと本文を含まないカラムだけを守る（お知らせ一斉送信の `announcements.body` 読取は例外）。未認証の `/demo`（`demo-learning-server.ts`）は service_role 専用の別経路で、スライドの署名付きURLは **`is_published = true AND is_open_to_trial = true` に限って**発行する。
+- **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select し、0行なら404。権限チェック済みの管理者向けクエリ等は対象外。admin / maintainer 向け未公開プレビュー（2.12節）はこの2箇所を増やさず、通常クライアント（RLS適用）で取得する。定期メールの抽出（`email-digest-server.ts`）も service_role の別経路で、同じ絞り込みと本文を含まないカラムだけを守る（お知らせ一斉送信の `announcements.body` 読取は例外）。未認証の `/demo`（`demo-learning-server.ts`）は service_role 専用の別経路で、スライドの署名付きURLは **`is_published = true AND is_open_to_trial = true` に限って**発行する。
 - **`learning-server.ts` の取得関数は `userRole` を受け取り、admin / maintainer のみ `is_published` 絞り込みを外す**（2.12節）。member / お試しでは常に維持する。
 - **提出API・進捗APIの可視性チェックは通常クライアントの SELECT で行う。** `contentId` を `is_published = true` 付きで SELECT し0行なら403。ステータス分岐はRLSが担う（2.12節）。
 
@@ -79,9 +78,9 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 ### データベースマイグレーション
 
-`supabase/migrations/` **直下にフラットな SQL で管理する（サブディレクトリ禁止。CLI が再帰走査しないため #149）**。ファイル名は `<14桁タイムスタンプ>_<説明>.sql`。**タイムスタンプはリモート適用履歴と比較されるため、既存ファイルのリネームは必ず `supabase migration list` で対応を確認してから行う**。RLSは参照先カラム・関数を追加した migration より後にする。
+`supabase/migrations/` **直下にフラットな SQL で管理する（サブディレクトリ禁止。CLI が再帰走査しないため #149）**。ファイル名は `<14桁タイムスタンプ>_<説明>.sql`。**タイムスタンプはリモート適用履歴と比較されるため、既存ファイルのリネームは必ず `supabase migration list` で対応を確認してから行う**（本番も未適用分を確認してから `db push`）。RLSは参照先カラム・関数を追加した migration より後にする。
 
-追加後の確認は `docs/database.md` 7.1節。**破壊的変更（カラム削除・リネーム・型変更、既存行を書き換えるデータ移行、Storageバケット・ポリシーの変更）は、本番反映前に Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)に従う。**
+追加後の確認は `docs/database.md` 7.1節。**破壊的変更（カラム削除・リネーム・型変更、既存行を書き換えるデータ移行、Storageバケット・ポリシーの変更）は、本番反映前に Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)に従う。** 適用済み SQL 内の `CLAUDE.md` 参照は本ファイルを指す。
 
 ### 環境変数・AIレビュー
 
