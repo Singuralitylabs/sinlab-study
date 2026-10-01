@@ -188,7 +188,7 @@ export default async function PhasePage({ params }: PageProps) {
                     コンテンツはまだ登録されていません。
                   </p>
                 ) : (
-                  <div className="grid gap-2 ml-5 border-l-2 border-border pl-5">
+                  <div className="grid grid-cols-1 gap-2 ml-5 border-l-2 border-border pl-5">
                     {week.contents.map((content) => {
                       const locked = isLocked(content);
                       const isCompleted = !locked && (progressMap.get(content.id) || false);
@@ -205,7 +205,7 @@ export default async function PhasePage({ params }: PageProps) {
                             } ${locked ? "opacity-60" : ""}`}
                           >
                             <CardContent className="py-3 px-4">
-                              <div className="flex items-center gap-3">
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                                 <div
                                   className={`p-1.5 rounded-full shrink-0 ${
                                     isCompleted
@@ -221,8 +221,8 @@ export default async function PhasePage({ params }: PageProps) {
                                     <Clock className="h-4 w-4" />
                                   )}
                                 </div>
-                                <div className="flex-1 min-w-0">
-                                  <h3 className="text-sm font-medium group-hover:text-primary transition-colors truncate">
+                                <div className="flex-1 min-w-40">
+                                  <h3 className="text-sm font-medium group-hover:text-primary transition-colors sm:truncate">
                                     {content.title}
                                   </h3>
                                 </div>
