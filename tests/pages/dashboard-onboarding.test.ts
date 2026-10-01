@@ -1,11 +1,14 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/learning-server");
 vi.mock("@/app/services/api/onboarding-server");
 vi.mock("@/app/services/api/announcements-server");
+vi.mock("@/app/services/api/upgrade-price-server", () => ({
+  fetchUpgradePriceLabel: vi.fn().mockResolvedValue("月額1,500円（税込）"),
+}));
 // Replace the client dialog with the minimal rendering needed to check props (filtered steps).
 vi.mock("@/app/(authenticated)/components/WelcomeDialog", () => ({
   WelcomeDialog: ({ steps }: { steps: { id: string }[] }) =>
@@ -186,5 +189,48 @@ describe("ダッシュボードの未読のお知らせ（issue #254）", () => 
     const html = await render();
 
     expect(html).not.toContain("未読のお知らせ");
+  });
+});
+
+describe("ダッシュボードの「次のステップ」カード（issue #288）", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("全完了の trial member には Stripe 有効で CTA 付きのカードを表示する", async () => {
+    vi.stubEnv("STRIPE_ENABLED", "true");
+    setup({ userStatus: "trial", completedContents: 2 });
+
+    const html = await render();
+
+    expect(html).toContain("お試しコンテンツをすべて完了しました");
+    expect(html).toContain('href="/upgrade"');
+    expect(html.indexOf("次のステップ")).toBeLessThan(
+      html.indexOf('data-testid="getting-started"') === -1
+        ? Number.POSITIVE_INFINITY
+        : html.indexOf('data-testid="getting-started"')
+    );
+  });
+
+  it("Stripe 無効時は承認の案内のみで /upgrade への導線を出さない", async () => {
+    vi.stubEnv("STRIPE_ENABLED", "false");
+    setup({ userStatus: "trial", completedContents: 2 });
+
+    const html = await render();
+
+    expect(html).toContain("本登録は運営の承認で行います");
+    expect(html).not.toContain('href="/upgrade"');
+  });
+
+  it.each([
+    ["未完了", { userStatus: "trial", completedContents: 1 }],
+    ["active", { userStatus: "active", completedContents: 2 }],
+    ["admin", { userStatus: "trial", userRole: "admin", completedContents: 2 }],
+  ] as const)("%s には表示しない", async (_label, options) => {
+    setup(options);
+
+    const html = await render();
+
+    expect(html).not.toContain("お試しコンテンツをすべて完了しました");
   });
 });

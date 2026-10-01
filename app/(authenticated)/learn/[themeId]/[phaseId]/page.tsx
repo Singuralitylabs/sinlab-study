@@ -2,7 +2,10 @@ import { Bot, Calendar, CheckCircle, Clock, FileText, Lock, PenLine, Play } from
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
+import { UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
+import { isStripeEnabled } from "@/app/constants/stripe";
+import { USER_STATUS } from "@/app/constants/user";
 import { fetchCompletedAIReviewContentIds } from "@/app/services/api/ai-review-server";
 import {
   type ContentVisibilitySummary,
@@ -12,6 +15,7 @@ import {
   fetchWeeksWithContentsByPhaseId,
   isContentLockedForUser,
 } from "@/app/services/api/learning-server";
+import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import type { ContentType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
@@ -99,6 +103,11 @@ export default async function PhasePage({ params }: PageProps) {
   const completedCount = visibleContentIds.filter((id) => progressMap.get(id)).length;
   const totalCount = visibleContentIds.length;
   const progressValue = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+  const hasLockedContent = weeks?.some((w) => w.contents.some((c) => isLocked(c))) ?? false;
+  const showUpgradeCta = userStatus === USER_STATUS.TRIAL && hasLockedContent;
+  const stripeEnabled = isStripeEnabled();
+  const priceLabel = showUpgradeCta && stripeEnabled ? await fetchUpgradePriceLabel() : null;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -224,7 +233,7 @@ export default async function PhasePage({ params }: PageProps) {
                                 {locked && (
                                   <Badge variant="outline" className="gap-1 shrink-0 text-xs">
                                     <Lock className="h-3 w-3" />
-                                    お試し非公開
+                                    有料会員向け
                                   </Badge>
                                 )}
                                 <UnpublishedBadge isPublished={content.is_published} />
@@ -250,6 +259,18 @@ export default async function PhasePage({ params }: PageProps) {
               </div>
             );
           })}
+
+          {showUpgradeCta && (
+            <Card>
+              <CardContent className="py-4 space-y-2">
+                <p className="text-sm">
+                  鍵付きのコンテンツは有料会員になると閲覧できます
+                  {stripeEnabled && " →"}
+                </p>
+                <UpgradeCta stripeEnabled={stripeEnabled} priceLabel={priceLabel} />
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
     </div>

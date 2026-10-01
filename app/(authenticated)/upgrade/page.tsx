@@ -9,6 +9,7 @@ import {
   logDisplayPriceDrift,
   MANAGE_SUBSCRIPTION_BUTTON_LABEL,
   SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
+  UPGRADE_BENEFITS,
 } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import {
@@ -98,7 +99,9 @@ export default async function UpgradePage() {
               <>
                 {monthlyPriceLabel && <p className="text-2xl font-bold">{monthlyPriceLabel}</p>}
                 <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                  <li>すべての学習コンテンツ（動画・テキスト・演習）を閲覧・提出できます</li>
+                  {UPGRADE_BENEFITS.map((benefit) => (
+                    <li key={benefit}>{benefit}</li>
+                  ))}
                   <li>お手続き完了後、すぐにご利用いただけます</li>
                   <li>
                     月額サブスクリプション（自動更新）です。解約手続きをしない限り、毎月自動で更新・請求されます

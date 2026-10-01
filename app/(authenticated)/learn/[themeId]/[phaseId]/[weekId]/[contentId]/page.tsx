@@ -6,14 +6,18 @@ import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
 import { SlideContent } from "@/app/components/SlideContent";
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
+import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
+import { isStripeEnabled } from "@/app/constants/stripe";
 import { buildThemeContentOrder, resolveContentNavigation } from "@/app/lib/content-navigation";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
+import { getLockedContentFallbackOverview } from "@/app/lib/trial-upgrade";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
 import {
   fetchContentById,
+  fetchContentDescriptionById,
   fetchThemeNavigationIndex,
   fetchUserProgressByContentId,
   fetchWeekById,
@@ -23,6 +27,7 @@ import {
 } from "@/app/services/api/learning-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
+import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
@@ -110,6 +115,16 @@ export default async function ContentPage({ params }: PageProps) {
   const isLocked = isContentLockedForUser(userStatus, summary.is_open_to_trial);
 
   if (isLocked) {
+    const stripeEnabled = isStripeEnabled();
+    // Description goes through the RLS client (0 rows for trial-locked content); the counts reuse
+    // the navigation summaries, so no new service_role call is added.
+    const [{ data: lockedDescription }, priceLabel] = await Promise.all([
+      fetchContentDescriptionById(contentIdNum),
+      stripeEnabled ? fetchUpgradePriceLabel() : Promise.resolve(null),
+    ]);
+    const paidOnlyCount = navigation?.paidOnlyCount ?? 0;
+    const paidOnlyExerciseCount = navigation?.paidOnlyExerciseCount ?? 0;
+
     return (
       <div className="max-w-4xl mx-auto">
         <PageTitle
@@ -127,13 +142,39 @@ export default async function ContentPage({ params }: PageProps) {
         />
 
         <Card className="mb-6">
-          <CardContent className="py-12 text-center">
-            <Lock className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">
-              このコンテンツは無料プランでは閲覧できません。
-              <br />
-              本登録後に閲覧・提出できるようになります。
-            </p>
+          <CardContent className="py-8 space-y-6">
+            <div className="text-center">
+              <Lock className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <p className="text-muted-foreground">
+                このコンテンツは無料プランでは閲覧できません。
+                <br />
+                本登録後に閲覧・提出できるようになります。
+              </p>
+            </div>
+
+            <div>
+              <h2 className="text-sm font-semibold text-muted-foreground mb-2">概要</h2>
+              {lockedDescription ? (
+                <MarkdownRenderer content={resolveMarkdownStorageUrls(lockedDescription)} />
+              ) : (
+                <p className="text-sm">{getLockedContentFallbackOverview(summary.content_type)}</p>
+              )}
+            </div>
+
+            {paidOnlyCount > 0 && (
+              <p className="text-sm">
+                このテーマには有料会員向けのコンテンツが{paidOnlyCount}件（うち演習
+                {paidOnlyExerciseCount}件）あります
+              </p>
+            )}
+
+            <div className="space-y-3">
+              <h2 className="text-sm font-semibold text-muted-foreground">
+                有料会員になると使えるもの
+              </h2>
+              <UpgradeBenefitsList />
+              <UpgradeCta stripeEnabled={stripeEnabled} priceLabel={priceLabel} />
+            </div>
           </CardContent>
         </Card>
 

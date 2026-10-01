@@ -13,6 +13,9 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/slides-server");
+vi.mock("@/app/services/api/upgrade-price-server", () => ({
+  fetchUpgradePriceLabel: vi.fn().mockResolvedValue("月額1,500円（税込）"),
+}));
 vi.mock("@/app/services/api/ai-review-server");
 vi.mock("@/app/services/api/submissions-server");
 vi.mock("@/app/services/api/learning-server", async (importOriginal) => {
@@ -22,6 +25,7 @@ vi.mock("@/app/services/api/learning-server", async (importOriginal) => {
     fetchWeekById: vi.fn(),
     fetchThemeNavigationIndex: vi.fn(),
     fetchContentById: vi.fn(),
+    fetchContentDescriptionById: vi.fn().mockResolvedValue({ data: null, error: null }),
     fetchUserProgressByContentId: vi.fn().mockResolvedValue({ isCompleted: false }),
   };
 });
@@ -46,10 +50,12 @@ import ContentPage from "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId
 import type { NavigationContent } from "@/app/lib/content-navigation";
 import {
   fetchContentById,
+  fetchContentDescriptionById,
   fetchThemeNavigationIndex,
   fetchWeekById,
 } from "@/app/services/api/learning-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
+import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const SIGNED_URL =
@@ -146,6 +152,8 @@ const setup = ({
   vi.mocked(fetchThemeNavigationIndex).mockResolvedValue({
     data: {
       orderedContents: orderedContents ?? [currentNav],
+      paidOnlyCount: 3,
+      paidOnlyExerciseCount: 1,
       currentWeekContents: [
         currentSummary(isOpenToTrial, isPublished),
         ...extraWeekContents.map((content) => ({
@@ -176,6 +184,9 @@ const render = async () => renderToStaticMarkup(await ContentPage({ params }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
+  vi.mocked(fetchContentDescriptionById).mockResolvedValue({ data: null, error: null });
+  vi.mocked(fetchUpgradePriceLabel).mockResolvedValue("月額1,500円（税込）");
 });
 
 describe("学習画面のスライド配信（署名付きURL）", () => {
@@ -588,5 +599,59 @@ describe("概要欄カードの表示位置（issue #221）", () => {
     expect(html).toContain('data-testid="slide-content"');
     expect(html).not.toContain("概要テスト本文");
     expect(html).not.toContain(">概要</h2>");
+  });
+});
+
+describe("お試し → 有料の転換導線（ロック画面, #288）", () => {
+  it("Stripe有効: 概要・規模・実額・/upgrade への CTA を表示する", async () => {
+    vi.stubEnv("STRIPE_ENABLED", "true");
+    setup({ userStatus: "trial", isOpenToTrial: false });
+    vi.mocked(fetchContentDescriptionById).mockResolvedValue({
+      data: "この動画ではGASの基礎を学びます",
+      error: null,
+    });
+    vi.mocked(fetchUpgradePriceLabel).mockResolvedValue("月額2,000円（税込）");
+
+    const html = await render();
+
+    expect(html).toContain("この動画ではGASの基礎を学びます");
+    expect(html).toContain("有料会員向けのコンテンツが3件（うち演習1件）");
+    expect(html).toContain("月額2,000円（税込）で全コンテンツが使えます");
+    expect(html).toContain('href="/upgrade"');
+    expect(html).toContain("もくもく会への参加");
+  });
+
+  it("概要が取れないときは種別に応じた定型文を表示する", async () => {
+    vi.stubEnv("STRIPE_ENABLED", "true");
+    setup({ userStatus: "trial", isOpenToTrial: false });
+
+    const html = await render();
+
+    expect(html).toContain("このコンテンツではスライドで学びます");
+  });
+
+  it("Stripe無効: /upgrade への導線を出さず承認の案内のみ表示する", async () => {
+    vi.stubEnv("STRIPE_ENABLED", "false");
+    setup({ userStatus: "trial", isOpenToTrial: false });
+
+    const html = await render();
+
+    expect(html).not.toContain('href="/upgrade"');
+    expect(fetchUpgradePriceLabel).not.toHaveBeenCalled();
+    expect(html).toContain("本登録は運営の承認で行います");
+  });
+
+  it.each([
+    ["active", "member"],
+    ["active", "admin"],
+  ] as const)("%s / %s にはロック画面も CTA も出ない", async (userStatus, userRole) => {
+    vi.stubEnv("STRIPE_ENABLED", "true");
+    setup({ userStatus, userRole, isOpenToTrial: false });
+
+    const html = await render();
+
+    expect(html).not.toContain("有料会員になると使えるもの");
+    expect(html).not.toContain('href="/upgrade"');
+    expect(fetchContentDescriptionById).not.toHaveBeenCalled();
   });
 });

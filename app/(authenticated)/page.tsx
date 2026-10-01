@@ -1,17 +1,20 @@
 import { BookOpen, CheckCircle, Clock, Megaphone, TrendingUp } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT } from "@/app/constants/announcements";
 import { getWelcomeStepsForStatus } from "@/app/constants/onboarding";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { formatDate } from "@/app/lib/format-date";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
+import { shouldShowTrialNextStep } from "@/app/lib/trial-upgrade";
 import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
 import {
   fetchGettingStartedProgress,
   fetchOnboardingStatus,
 } from "@/app/services/api/onboarding-server";
+import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { checkInstructorPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Button } from "@/components/ui/button";
@@ -61,6 +64,10 @@ export default async function HomePage() {
     isMember ? gettingStartedResult.data : null,
     firstThemeHref
   );
+
+  const showTrialNextStep = shouldShowTrialNextStep(userStatus, userRole, themes);
+  const stripeEnabled = isStripeEnabled();
+  const priceLabel = showTrialNextStep && stripeEnabled ? await fetchUpgradePriceLabel() : null;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -123,6 +130,17 @@ export default async function HomePage() {
           <p className="text-right text-sm text-muted-foreground mt-2">{overallProgress}%</p>
         </CardContent>
       </Card>
+
+      {showTrialNextStep && (
+        <Card className="mb-6">
+          <CardContent className="pt-6 space-y-3">
+            <h2 className="text-lg font-semibold">次のステップ</h2>
+            <p className="text-sm">お試しコンテンツをすべて完了しました。続きは有料会員で</p>
+            <UpgradeBenefitsList />
+            <UpgradeCta stripeEnabled={stripeEnabled} priceLabel={priceLabel} />
+          </CardContent>
+        </Card>
+      )}
 
       {isMember && <GettingStartedChecklist items={gettingStartedItems} />}
 
