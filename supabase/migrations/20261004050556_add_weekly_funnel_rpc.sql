@@ -19,7 +19,8 @@
 -- 列:
 --   signups     users.created_at がその週、is_deleted = false
 --   activated   その週の signups のうち、submitted_at が登録以上かつ
---               登録+7日以内の submissions が1件以上（コホート。直近週は未確定）
+--               登録+7日以内の submissions が1件以上（コホート。週末登録の
+--               7日が残る今週と前週は画面で未確定）
 --   upgraded    発生基準。became_active_at（status が初めて active になった時刻）
 --               がその週。Checkout の処理権は checkout_pending の INSERT で、
 --               created_at はその時刻ではない。後から past_due / 終端になっても、
@@ -27,9 +28,12 @@
 --               active を一度も通っていない行（trialing のまま paused など）と
 --               手動承認の general は含めない。1ユーザー1行なので2回目の active は
 --               新しい発生として数えない。
---   ended       発生基準。became_terminal_at（status が初めて終端になった時刻）
---               がその週。終端は canceled / unpaid / incomplete_expired / paused
---               （TERMINAL_SUBSCRIPTION_STATUSES）。後続のミラー更新で updated_at
+--   ended       発生基準。became_active_at がある行の became_terminal_at
+--               （active を経由したあと、status が初めて終端になった時刻）がその週。
+--               終端は canceled / unpaid / incomplete_expired / paused
+--               （TERMINAL_SUBSCRIPTION_STATUSES）。trialing → paused や
+--               incomplete → incomplete_expired など、一度も active になっていない
+--               行は有料化に無いので解約にも入れない。後続のミラー更新で updated_at
 --               が動いても、再契約で status が戻っても週は動かない。2回目以降の
 --               終端は同じ行では数えない。
 --   paid_total  週末時点の general かつ active の近似（途中の空白期間は履歴が無い）:
@@ -44,9 +48,11 @@
 -- 既存行の埋め戻し: トリガー導入前は遷移時刻を持たない。現在 status = active で
 -- subscription id がある行だけ became_active_at = created_at（処理権の週に寄る
 -- ことがある）。past_due は trialing のまま支払い失敗でもなり得るので active の
--- 証拠ではなく、埋めない。現在終端の行は became_terminal_at = updated_at（終端後の
--- 更新でずれていることがある）。導入後に active へ遷移したときだけトリガーが now()
--- で became_active_at を固定する。
+-- 証拠ではなく、埋めない。終端行は active を経由したか分からないので
+-- became_active_at を埋めず、became_terminal_at の埋め戻しも対象外にする
+-- （未課金の解約週を付けない。初回適用では終端行の解約週は空のまま）。
+-- 導入後は active の初回だけトリガーが now() で became_active_at を固定し、
+-- 終端の初回は became_active_at があるときだけ残す。
 -- weeks は 1..104 に丸める（authenticated に GRANT するため巨大な generate_series を防ぐ）。
 -- =====================================================
 
@@ -57,7 +63,7 @@ ALTER TABLE public.stripe_subscriptions
 COMMENT ON COLUMN public.stripe_subscriptions.became_active_at IS
   'status が初めて active になった時刻。後続の更新や再契約では動かさない（週次ファネルの有料化）';
 COMMENT ON COLUMN public.stripe_subscriptions.became_terminal_at IS
-  'status が初めて終端（canceled/unpaid/incomplete_expired/paused）になった時刻。後続の更新や再契約では動かさない（週次ファネルの解約）';
+  'active を経由した行が初めて終端（canceled/unpaid/incomplete_expired/paused）になった時刻。後続の更新や再契約では動かさない（週次ファネルの解約）';
 
 -- トリガーより先に埋める。updated_at トリガーを止める（埋め戻しで全行の updated_at を
 -- マイグレーション時刻にしない。became_terminal_at は埋め戻し前の updated_at を使う）。
@@ -72,6 +78,7 @@ WHERE became_active_at IS NULL
 UPDATE public.stripe_subscriptions
 SET became_terminal_at = updated_at
 WHERE became_terminal_at IS NULL
+  AND became_active_at IS NOT NULL
   AND status IN ('canceled', 'unpaid', 'incomplete_expired', 'paused');
 
 ALTER TABLE public.stripe_subscriptions ENABLE TRIGGER update_stripe_subscriptions_updated_at;
@@ -86,8 +93,10 @@ BEGIN
   IF NEW.status = 'active' AND NEW.became_active_at IS NULL THEN
     NEW.became_active_at := now();
   END IF;
-  -- updated_at は毎回動く。終端の初回だけ残し、再契約の UPDATE では消さない。
+  -- updated_at は毎回動く。有料化済みの終端初回だけ残す。未課金の paused /
+  -- incomplete_expired を先に刻むと、後の本解約が週を動かせない。
   IF NEW.status IN ('canceled', 'unpaid', 'incomplete_expired', 'paused')
+     AND NEW.became_active_at IS NOT NULL
      AND NEW.became_terminal_at IS NULL THEN
     NEW.became_terminal_at := now();
   END IF;
@@ -161,7 +170,8 @@ AS $$
     (
       SELECT count(*)
       FROM public.stripe_subscriptions ss
-      WHERE ss.became_terminal_at >= (w.week_start::timestamp AT TIME ZONE 'Asia/Tokyo')
+      WHERE ss.became_active_at IS NOT NULL
+        AND ss.became_terminal_at >= (w.week_start::timestamp AT TIME ZONE 'Asia/Tokyo')
         AND ss.became_terminal_at < (w.week_end::timestamp AT TIME ZONE 'Asia/Tokyo')
     ) AS ended,
     (
