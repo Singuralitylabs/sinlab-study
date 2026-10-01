@@ -744,32 +744,6 @@ export async function fetchContentById(
   return { data: data as LearningContentWithBreadcrumb | null, error: null };
 }
 
-/**
- * Overview text for the trial lock screen. Uses the normal client (RLS) on purpose: trial-locked
- * rows return 0 rows, so the overview shows only when RLS lets the viewer see it. Never switch
- * this to service_role (the summary allow-list excludes body columns).
- */
-export async function fetchContentDescriptionById(
-  contentId: number
-): Promise<{ data: string | null; error: PostgrestError | null }> {
-  const supabase = await createServerSupabaseClient();
-
-  const { data, error } = await supabase
-    .from("learning_contents")
-    .select("description")
-    .eq("id", contentId)
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .maybeSingle();
-
-  if (error) {
-    console.error("コンテンツ概要取得エラー:", error.message);
-    return { data: null, error };
-  }
-
-  return { data: data?.description ?? null, error: null };
-}
-
 export async function fetchUserProgressByContentIds(
   userId: number,
   contentIds: number[]

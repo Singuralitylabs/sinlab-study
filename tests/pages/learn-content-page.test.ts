@@ -25,7 +25,6 @@ vi.mock("@/app/services/api/learning-server", async (importOriginal) => {
     fetchWeekById: vi.fn(),
     fetchThemeNavigationIndex: vi.fn(),
     fetchContentById: vi.fn(),
-    fetchContentDescriptionById: vi.fn().mockResolvedValue({ data: null, error: null }),
     fetchUserProgressByContentId: vi.fn().mockResolvedValue({ isCompleted: false }),
   };
 });
@@ -50,7 +49,6 @@ import ContentPage from "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId
 import type { NavigationContent } from "@/app/lib/content-navigation";
 import {
   fetchContentById,
-  fetchContentDescriptionById,
   fetchThemeNavigationIndex,
   fetchWeekById,
 } from "@/app/services/api/learning-server";
@@ -185,7 +183,6 @@ const render = async () => renderToStaticMarkup(await ContentPage({ params }));
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
-  vi.mocked(fetchContentDescriptionById).mockResolvedValue({ data: null, error: null });
   vi.mocked(fetchUpgradePriceLabel).mockResolvedValue("月額1,500円（税込）");
 });
 
@@ -603,31 +600,18 @@ describe("概要欄カードの表示位置（issue #221）", () => {
 });
 
 describe("お試し → 有料の転換導線（ロック画面, #288）", () => {
-  it("Stripe有効: 概要・規模・実額・/upgrade への CTA を表示する", async () => {
+  it("Stripe有効: 定型の概要・規模・実額・/upgrade への CTA を表示する", async () => {
     vi.stubEnv("STRIPE_ENABLED", "true");
     setup({ userStatus: "trial", isOpenToTrial: false });
-    vi.mocked(fetchContentDescriptionById).mockResolvedValue({
-      data: "この動画ではGASの基礎を学びます",
-      error: null,
-    });
     vi.mocked(fetchUpgradePriceLabel).mockResolvedValue("月額2,000円（税込）");
 
     const html = await render();
 
-    expect(html).toContain("この動画ではGASの基礎を学びます");
+    expect(html).toContain("このコンテンツではスライドで学びます");
     expect(html).toContain("有料会員向けのコンテンツが3件（うち演習1件）");
     expect(html).toContain("月額2,000円（税込）で全コンテンツが使えます");
     expect(html).toContain('href="/upgrade"');
     expect(html).toContain("もくもく会への参加");
-  });
-
-  it("概要が取れないときは種別に応じた定型文を表示する", async () => {
-    vi.stubEnv("STRIPE_ENABLED", "true");
-    setup({ userStatus: "trial", isOpenToTrial: false });
-
-    const html = await render();
-
-    expect(html).toContain("このコンテンツではスライドで学びます");
   });
 
   it("Stripe無効: /upgrade への導線を出さず承認の案内のみ表示する", async () => {
@@ -652,6 +636,5 @@ describe("お試し → 有料の転換導線（ロック画面, #288）", () =>
 
     expect(html).not.toContain("有料会員になると使えるもの");
     expect(html).not.toContain('href="/upgrade"');
-    expect(fetchContentDescriptionById).not.toHaveBeenCalled();
   });
 });

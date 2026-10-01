@@ -17,7 +17,6 @@ import { getLockedContentFallbackOverview } from "@/app/lib/trial-upgrade";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
 import {
   fetchContentById,
-  fetchContentDescriptionById,
   fetchThemeNavigationIndex,
   fetchUserProgressByContentId,
   fetchWeekById,
@@ -116,12 +115,10 @@ export default async function ContentPage({ params }: PageProps) {
 
   if (isLocked) {
     const stripeEnabled = isStripeEnabled();
-    // Description goes through the RLS client (0 rows for trial-locked content); the counts reuse
-    // the navigation summaries, so no new service_role call is added.
-    const [{ data: lockedDescription }, priceLabel] = await Promise.all([
-      fetchContentDescriptionById(contentIdNum),
-      stripeEnabled ? fetchUpgradePriceLabel() : Promise.resolve(null),
-    ]);
+    // No description lookup on purpose: RLS returns 0 rows for trial-locked content, so it could
+    // never show, and widening the service_role allow-list would break the AGENTS.md invariant.
+    // The counts reuse the navigation summaries, so no new service_role call is added.
+    const priceLabel = stripeEnabled ? await fetchUpgradePriceLabel() : null;
     const paidOnlyCount = navigation?.paidOnlyCount ?? 0;
     const paidOnlyExerciseCount = navigation?.paidOnlyExerciseCount ?? 0;
 
@@ -154,11 +151,7 @@ export default async function ContentPage({ params }: PageProps) {
 
             <div>
               <h2 className="text-sm font-semibold text-muted-foreground mb-2">概要</h2>
-              {lockedDescription ? (
-                <MarkdownRenderer content={resolveMarkdownStorageUrls(lockedDescription)} />
-              ) : (
-                <p className="text-sm">{getLockedContentFallbackOverview(summary.content_type)}</p>
-              )}
+              <p className="text-sm">{getLockedContentFallbackOverview(summary.content_type)}</p>
             </div>
 
             {paidOnlyCount > 0 && (

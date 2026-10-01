@@ -163,7 +163,7 @@ INSERT 失敗・同意 Cookie なし・論理削除済み・存在確認失敗�
 | コースツリー（テーマ / フェーズ / 週 / コンテンツ一覧） | 全件表示する（何が学べるかを見せるため） |
 | お試し非公開のコンテンツ | 鍵アイコンでロックし、中身（本文・動画・スライド）は表示しない |
 | ロック済みコンテンツへの直リンク | ロック画面を表示する（404にはしない） |
-| ロック画面の構成（#288） | ①概要: `description` を通常クライアント（RLS適用）の別クエリ `fetchContentDescriptionById()` で取得し、RLSで0行なら種別ごとの定型文に切り替える（service_role のカラム許可リストは増やさない）。②規模: 「有料会員向けのコンテンツがN件（うち演習M件）」をツリー側の取得結果（`fetchThemeNavigationIndex()` の `paidOnlyCount` / `paidOnlyExerciseCount`）から算出し、service_role クエリは増やさない。③価値3点（`UPGRADE_BENEFITS`、`/upgrade` と共有）。④料金とCTA: `isStripeEnabled()` が true なら `fetchSubscriptionPrice()` の実額（取得失敗時のみ `DISPLAY_MONTHLY_PRICE_JPY`）で「月額N円（税込）で全コンテンツが使えます」と `/upgrade` へのボタン、false なら「本登録は運営の承認で行います。承認後に閲覧できます」の案内のみ（`/upgrade` への導線を出さない）。`active` / admin にはロック画面自体が出ない |
+| ロック画面の構成（#288） | ①概要: 種別ごとの定型文（`getLockedContentFallbackOverview()`）。trial はお試し非公開コンテンツを RLS で読めず（0行）、service_role のカラム許可リストを増やすのは不変条件に反するため、`description` は取得しない。②規模: 「有料会員向けのコンテンツがN件（うち演習M件）」をツリー側の取得結果（`fetchThemeNavigationIndex()` の `paidOnlyCount` / `paidOnlyExerciseCount`）から算出し、service_role クエリは増やさない。③価値3点（`UPGRADE_BENEFITS`、`/upgrade` と共有）。④料金とCTA: `isStripeEnabled()` が true なら `fetchSubscriptionPrice()` の実額（取得失敗時のみ `DISPLAY_MONTHLY_PRICE_JPY`）で「月額N円（税込）で全コンテンツが使えます」と `/upgrade` へのボタン、false なら「本登録は運営の承認で行います。承認後に閲覧できます」の案内のみ（`/upgrade` への導線を出さない）。`active` / admin にはロック画面自体が出ない |
 | フェーズ一覧の鍵付き項目（#288） | タイトル横に「有料会員向け」バッジを付け、リスト末尾（お試しユーザーのみ・鍵付き項目があるとき）に1回だけCTAを置く（Stripe無効時は承認の案内） |
 | 承認待ちの通知 | アプリ内バナーで通知（`/pending` 承認待ち専用画面は設けない） |
 
