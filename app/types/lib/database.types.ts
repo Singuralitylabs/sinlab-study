@@ -785,6 +785,17 @@ export type Database = {
       get_user_membership_type: { Args: never; Returns: string };
       get_user_role: { Args: never; Returns: string };
       get_user_status: { Args: never; Returns: string };
+      get_weekly_funnel: {
+        Args: { weeks?: number };
+        Returns: {
+          activated: number;
+          ended: number;
+          paid_total: number;
+          signups: number;
+          upgraded: number;
+          week_start: string;
+        }[];
+      };
     };
     Enums: {
       [_ in never]: never;

@@ -205,6 +205,7 @@ describe("ダッシュボードの「次のステップ」カード（issue #288
 
     expect(html).toContain("お試しコンテンツをすべて完了しました");
     expect(html).toContain('href="/upgrade"');
+    expect(html).toContain('data-analytics-source="dashboard_card"');
     expect(html.indexOf("次のステップ")).toBeLessThan(
       html.indexOf('data-testid="getting-started"') === -1
         ? Number.POSITIVE_INFINITY

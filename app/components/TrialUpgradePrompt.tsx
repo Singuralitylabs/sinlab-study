@@ -1,6 +1,6 @@
-import Link from "next/link";
+import { UpgradeCtaLink } from "@/app/components/UpgradeCtaLink";
+import type { UpgradeCtaSource } from "@/app/constants/analytics";
 import { UPGRADE_APPROVAL_NOTICE, UPGRADE_BENEFITS } from "@/app/constants/stripe";
-import { Button } from "@/components/ui/button";
 
 export function UpgradeBenefitsList() {
   return (
@@ -19,9 +19,11 @@ export function UpgradeBenefitsList() {
 export function UpgradeCta({
   stripeEnabled,
   priceLabel,
+  source,
 }: {
   stripeEnabled: boolean;
   priceLabel: string | null;
+  source: UpgradeCtaSource;
 }) {
   if (!stripeEnabled) {
     return <p className="text-sm text-muted-foreground">{UPGRADE_APPROVAL_NOTICE}</p>;
@@ -29,9 +31,7 @@ export function UpgradeCta({
   return (
     <div className="space-y-3">
       {priceLabel && <p className="text-sm font-medium">{priceLabel}で全コンテンツが使えます</p>}
-      <Button asChild>
-        <Link href="/upgrade">アップグレード</Link>
-      </Button>
+      <UpgradeCtaLink source={source}>アップグレード</UpgradeCtaLink>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import {
   isChargeableSubscriptionPrice,
   logDisplayPriceDrift,
@@ -6,6 +7,8 @@ import {
   SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
 } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
+import { isExternalCheckoutUrl } from "@/app/lib/analytics-funnel";
+import { trackServerEvent } from "@/app/services/analytics/track-server";
 import {
   reactivatePaidTrialUser,
   recoverCompletedCheckout,
@@ -36,6 +39,13 @@ function checkoutSuccessPath(sessionId: string): string {
 }
 
 const REACTIVATED_PATH = "/upgrade";
+
+function jsonCheckoutDestination(url: string) {
+  if (isExternalCheckoutUrl(url)) {
+    trackServerEvent(ANALYTICS_EVENT.CHECKOUT_STARTED);
+  }
+  return NextResponse.json({ url });
+}
 
 export async function POST() {
   if (!isStripeEnabled()) {
@@ -114,7 +124,7 @@ export async function POST() {
     // If the in-progress session is still valid, send the user to the same URL instead of creating
     // a second one.
     if (claim.outcome === "reusable") {
-      return NextResponse.json({ url: claim.url });
+      return jsonCheckoutDestination(claim.url);
     }
 
     try {
@@ -125,7 +135,7 @@ export async function POST() {
         claim.stripeCustomerId,
         claim.claimedAt
       );
-      return NextResponse.json({ url });
+      return jsonCheckoutDestination(url);
     } catch (error) {
       console.error("Checkoutセッション作成エラー:", error);
       // Release the claim only when it is certain no valid session remains on Stripe's side.

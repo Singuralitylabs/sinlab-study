@@ -855,11 +855,25 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 
 ### 6.3 管理ダッシュボード
 
-**パス**: `/admin`
+**パス**: `/manage`（`/admin` はここへリダイレクト。7.3節）
 
-**表示統計**: フェーズ数、週数、コンテンツ数、受講生数、提出数、最近の提出5件
+**表示統計**: テーマ数、フェーズ数、週数、コンテンツ数、受講生数、提出数、最近の提出5件、週次ファネル
 
-**アクセス権限**: `admin` ロールのみ
+**アクセス権限**: `admin` / `maintainer`（`checkContentPermissions()`）
+
+**週次ファネル**（グラフは出さない。目標値の 50% / 10% / 8% も出さない）:
+
+RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を渡す。引数は 1〜104 に丸める）。1行は JST の月曜 0:00 から翌月曜 0:00 まで。境界は `timezone('Asia/Tokyo', timestamptz)` を `date_trunc('week', ...)` した日付（PostgreSQL の週は月曜始まり）。`fetchManageCounts()` と `Promise.all` で並列に取る。取得に失敗しても他の統計は出す。
+
+| 列 | 算出 |
+|:--|:--|
+| 登録 `signups` | `users.created_at` がその週、`is_deleted = false` |
+| 有効化 `activated` | その週の登録者のうち、`submissions.submitted_at` が登録時刻以上かつ登録から7日以内の提出が1件以上ある人数（コホート）。直近の週は7日未経過のため画面に未確定と出す |
+| 有料化 `upgraded` | 発生基準。`stripe_subscriptions.stripe_subscription_id` があり、`status` が `active` / `past_due` / 終端（`canceled` / `unpaid` / `paused`）の行を `created_at` の週に数える。後から解約してもその週の件数から消えない。`trialing` / `incomplete` / `incomplete_expired` / `checkout_pending` は `active` になっていないので含めない。手動承認の `general` は行を作らないので含めない |
+| 解約 `ended` | 発生基準。`status` が終端（`TERMINAL_SUBSCRIPTION_STATUSES`: `canceled` / `unpaid` / `incomplete_expired` / `paused`）の行を `updated_at` の週に数える。終端後の別更新で `updated_at` が動くと週がずれる（履歴列は持たない） |
+| 有料会員数 `paid_total` | 週末時点の `membership_type = general` かつ `status = active` の近似（状態履歴が無い）。現在その状態で未削除、かつ Stripe 行が契約中で `created_at` が週末より前、または Stripe 行が無く `updated_at` が週末より前（手動承認。承認後の別更新で過去週から外れることがある）。いまお試しに戻っていても、終端（`incomplete_expired` を除く）の `updated_at` が週末以後かつ `created_at` が週末より前なら週末時点では有料だったとみなす。論理削除に `deleted_at` が無いので削除済みは全週から除く |
+
+呼び出しは `fetchWeeklyFunnel()`（`admin-server.ts`）だけ。`checkContentPermissions()` で admin / maintainer を確認してから service_role で RPC する。`stripe_subscriptions` の SELECT は本人か admin だけなので、maintainer の JWT のままでは有料化・解約が過少になる。SELECT ポリシーは広げない（集計以外の顧客 ID を maintainer に見せない）。関数自体は `SECURITY INVOKER` で、member が直接呼んでも RLS の見える行だけが対象。
 
 ---
 
@@ -1236,4 +1250,35 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 - **送信失敗の送り直し**: お知らせは翌週の同種メールで取り返せないため、Resend が受け付けなかったことが確実な失敗（`email_logs.error` が `status=429` / `5xx`。`RETRYABLE_EMAIL_ERROR`）に限り、公開日（JST）から `ANNOUNCEMENT_EMAIL_RETRY_DAYS`（3日）以内は送り直す。失敗した日の翌日以降の実行で失敗の行を削除してから claim し直す（同じ日には送り直さない。行を消すと今日の案内系メールの数＝1日の上限・1人1日1通の判定から外れるため）。タイムアウト等の送れたかどうか分からない失敗と、結果が記録されなかった行（送信中）は二重送信を避けるため送り直さない
 - **完了**: 送信ループの後に `email_logs` を引き直し、実行の開始時点で送信を終えていなかった対象者全員が送信を終えた（送信済み、または送り直さない失敗・送信中の行を持つ）ときに `email_sent_at` を記録する（claim 自体が DB エラーで失敗した宛先など行の無い対象者や、翌日以降に送り直す失敗が残っていれば完了にしない）。実行の途中で管理画面から編集された（`updated_at` が実行の開始時点と異なる）お知らせは完了にせず、翌日の実行が新しい対象で判定し直す（対象を広げた分を送らずに完了にしないため）。対象者がいないお知らせも完了にする。応答の `announcementsCompleted` に件数を返す
 - **本文**: タイトルと Markdown 本文を、テキスト版（見出し・リスト記号を読みやすく落とす）と簡易 HTML 版（全文をエスケープしてから段落・見出し・リスト・コード・太字・`http(s)` のリンクだけを変換する。`javascript:` 等はリンクにしない）で載せ、詳細ページ（`/announcements/<id>`）へのリンクと配信停止リンクを付ける。変換はお知らせ1件につき1回だけ行い、どんな入力でも行の長さにほぼ比例する時間で終わるようにする（正規表現の過剰なバックトラックで Cron を止めないため。見出しの閉じ `#` の除去は正規表現を使わず、インラインの装飾は1回の照合で読む文字数に上限を付ける）
+
+---
+
+## 12. 計測
+
+アクセス解析は Vercel Web Analytics（`@vercel/analytics`）。Cookie も端末識別子も保存しない。GA4 は使わない。Preview / 開発環境ではパッケージが既定で送信しない（`debug` は設定しない）。本番で記録するには Vercel のプロジェクト設定で Analytics を ON にする（環境変数は増やさない）。ルートレイアウトの `<Analytics />` は `/demo` と `/login` を含む全ページに置く。
+
+登録・有効化・有料化・解約の実数はアクセス解析ではなく DB の週次ファネル（6.3節）で見る。
+
+### 12.1 イベント
+
+名前と `source` は `app/constants/analytics.ts` に集約する。クライアントは `track()`（`@vercel/analytics`）、サーバーは `track()`（`@vercel/analytics/server`）を `trackServerEvent()` 経由で呼ぶ。失敗は握りつぶし、登録・進捗・提出・Checkout・Webhook のレスポンスを変えない（Slack / メールと同じ。`void track(...).catch(...)`）。
+
+| イベント | 発火 | プロパティ |
+|:--|:--|:--|
+| `signup` | 初回登録の INSERT 成功後（`app/auth/callback/route.ts`） | なし |
+| `first_content_completed` | `POST /api/progress` で、そのユーザーの完了済み `user_progress` が初めてできたとき（書き込み前の完了行数で判定） | `status` |
+| `first_submission` | 提出 API で、そのユーザーの提出が初めてできたとき（書き込み前の件数で判定） | `status` |
+| `locked_content_viewed` | ロック画面を描画したとき（Server Component） | `content_type` |
+| `upgrade_cta_clicked` | `/upgrade` への CTA クリック | `source`: `lock_screen` / `phase_list` / `dashboard_card` / `banner` |
+| `checkout_started` | `POST /api/stripe/checkout` が Stripe の Checkout URL を返したとき（再利用の URL を含む。`/upgrade` や `/upgrade/success` への遷移は含まない） | なし |
+| `checkout_completed` | `activateUserFromCheckoutSession()` がユーザーを実際に昇格したとき（`activated` は再訪でも true のままなので、行を更新した初回だけ。有料化メールと同じゲート） | なし |
+| `subscription_ended` | `revertUserToTrial()` が行を更新したとき | なし |
+
+`upgrade_cta_clicked` の配置は、ロック画面・フェーズ一覧の鍵付き案内・ダッシュボードの「次のステップ」・認証レイアウトのトライアルバナー。サイドナビの「プラン・お支払い」やウェルカムダイアログは対象にしない。
+
+### 12.2 個人情報を入れない
+
+プロパティに載せてよいキーは `status` / `content_type` / `source` だけ。メールアドレス・表示名・ユーザー ID は送らない。送信直前に `sanitizeAnalyticsProperties()` が許可リスト外のキーと `@` を含む値を捨てる。
+
+クライアントに足すのは `@vercel/analytics` の `<Analytics />` と、CTA リンクが呼ぶ `track()` だけ。週次ファネルの表は Server Component で、グラフ用の依存は入れない。
 

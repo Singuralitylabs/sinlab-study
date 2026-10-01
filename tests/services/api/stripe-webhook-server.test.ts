@@ -8,7 +8,11 @@ vi.mock("@/app/services/api/stripe-server", async (importOriginal) => ({
   getStripeClient: vi.fn(),
 }));
 vi.mock("@/app/services/notifications/user-emails");
+vi.mock("@vercel/analytics/server", () => ({
+  track: vi.fn().mockResolvedValue(undefined),
+}));
 
+import { track } from "@vercel/analytics/server";
 import { getStripeClient } from "@/app/services/api/stripe-server";
 import {
   activateUserFromCheckoutSession,
@@ -799,6 +803,80 @@ describe("revertUserToTrial", () => {
     const result = await revertUserToTrial(9);
 
     expect(result).toEqual({ error: null, reverted: false });
+    expect(track).not.toHaveBeenCalled();
+  });
+
+  it("行を更新したときだけ subscription_ended を送り、失敗しても reverted は変わらない", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { users: { data: [{ id: 9 }], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(track).mockRejectedValueOnce(new Error("analytics down"));
+
+    const result = await revertUserToTrial(9);
+
+    expect(result).toEqual({ error: null, reverted: true });
+    expect(track).toHaveBeenCalledWith("subscription_ended");
+    expect(JSON.stringify(vi.mocked(track).mock.calls)).not.toContain("email");
+  });
+});
+
+describe("checkout_completed", () => {
+  const baseSession = {
+    id: "cs_123",
+    client_reference_id: "1",
+    metadata: { user_id: "1", auth_id: "auth-uuid" },
+    customer: "cus_123",
+    subscription: "sub_123",
+  };
+  const subscription = {
+    id: "sub_123",
+    status: "active",
+    cancel_at_period_end: false,
+    items: { data: [{ current_period_end: 1750000000 }] },
+  };
+
+  function mockStripe() {
+    vi.mocked(getStripeClient).mockReturnValue({
+      subscriptions: { retrieve: vi.fn().mockResolvedValue(subscription) },
+    } as never);
+  }
+
+  it("行を昇格した初回だけ送り、プロパティは付けない", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: { data: null, error: null },
+        users: { data: [{ id: 1 }], error: null },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    mockStripe();
+    vi.mocked(track).mockRejectedValueOnce(new Error("analytics down"));
+
+    const result = await activateUserFromCheckoutSession(baseSession as never);
+
+    expect(result).toMatchObject({ error: null, activated: true });
+    expect(track).toHaveBeenCalledTimes(1);
+    expect(track).toHaveBeenCalledWith("checkout_completed");
+  });
+
+  it("すでに general の再訪（activated は true、行は変わらない）では送らない", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: { data: null, error: null },
+        users: [
+          { data: [], error: null },
+          { data: { id: 1 }, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    mockStripe();
+
+    const result = await activateUserFromCheckoutSession(baseSession as never);
+
+    expect(result.activated).toBe(true);
+    expect(track).not.toHaveBeenCalled();
   });
 });
 

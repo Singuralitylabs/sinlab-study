@@ -1,5 +1,6 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
+import { WEEKLY_FUNNEL_WEEKS } from "@/app/constants/analytics";
 import { SLIDES_BUCKET } from "@/app/constants/storage";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import {
@@ -9,10 +10,13 @@ import {
   type SiblingOrderRow,
 } from "@/app/lib/content-grouping";
 import { toSlideObjectKey } from "@/app/lib/slide-object-key";
+import { WEEKLY_FUNNEL_FETCH_ERROR, type WeeklyFunnelRow } from "@/app/lib/weekly-funnel";
 import {
   fetchStripeSubscriptionByUserId,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
 } from "@/app/services/api/stripe-server";
+import { checkContentPermissions } from "@/app/services/auth/permissions";
+import { getServerAuth } from "@/app/services/auth/server-auth";
 import type {
   ContentSiblingCandidateRow,
   ContentType,
@@ -1775,4 +1779,65 @@ export async function fetchManageCounts(): Promise<{
     },
     error: firstError,
   };
+}
+
+function toFunnelCount(value: number | string | null | undefined): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+// createAdminSupabaseClient is SupabaseClient without the Database generic (schema becomes
+// never otherwise). rpc() is then any, and noImplicitAny rejects the map callback.
+interface WeeklyFunnelRpcRow {
+  week_start: string;
+  signups: number | string;
+  activated: number | string;
+  upgraded: number | string;
+  ended: number | string;
+  paid_total: number | string;
+}
+
+/**
+ * Weekly funnel for /manage. The RPC is SECURITY INVOKER, but stripe_subscriptions
+ * SELECT is self-or-admin, so a maintainer JWT would undercount upgraded/ended.
+ * Check admin/maintainer first, then call with service_role. Do not widen that SELECT
+ * policy: maintainers should see aggregates, not every Stripe customer id.
+ * A failure returns an empty list so the rest of the dashboard still renders.
+ */
+export async function fetchWeeklyFunnel(): Promise<{
+  data: WeeklyFunnelRow[];
+  error: string | null;
+}> {
+  try {
+    const { userRole } = await getServerAuth();
+    if (!checkContentPermissions(userRole)) {
+      return { data: [], error: null };
+    }
+
+    const supabase = await createAdminSupabaseClient();
+    const { data, error } = (await supabase.rpc("get_weekly_funnel", {
+      weeks: WEEKLY_FUNNEL_WEEKS,
+    })) as unknown as {
+      data: WeeklyFunnelRpcRow[] | null;
+      error: PostgrestError | null;
+    };
+    if (error) {
+      console.error("週次ファネル取得エラー:", error.message);
+      return { data: [], error: WEEKLY_FUNNEL_FETCH_ERROR };
+    }
+
+    const rows = (data ?? []).map((row) => ({
+      weekStart: row.week_start,
+      signups: toFunnelCount(row.signups),
+      activated: toFunnelCount(row.activated),
+      upgraded: toFunnelCount(row.upgraded),
+      ended: toFunnelCount(row.ended),
+      paidTotal: toFunnelCount(row.paid_total),
+    }));
+    rows.sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error("週次ファネル取得エラー:", error);
+    return { data: [], error: WEEKLY_FUNNEL_FETCH_ERROR };
+  }
 }

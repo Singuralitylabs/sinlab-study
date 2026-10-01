@@ -1,7 +1,10 @@
 import type Stripe from "stripe";
+import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { isChargeableSubscriptionPrice } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP, USER_STATUS } from "@/app/constants/user";
+import { shouldTrackCheckoutCompleted } from "@/app/lib/analytics-funnel";
 import { cancellationEndsAt, isCancellationScheduled } from "@/app/lib/subscription-period";
+import { trackServerEvent } from "@/app/services/analytics/track-server";
 import {
   ACTIVATABLE_SUBSCRIPTION_STATUSES,
   getStripeClient,
@@ -203,8 +206,12 @@ export async function activateUserFromCheckoutSession(
   }
   if (promoted.changed) {
     // The webhook and the success page can promote concurrently; the send-log UNIQUE
-    // (subscription id) keeps it to one email.
+    // (subscription id) keeps it to one email. checkout_completed uses the same gate:
+    // activated stays true on a replay, so only the call that changed the row emits it.
     scheduleUpgradedEmailFor(userId, subscription, currentPeriodEnd);
+    if (shouldTrackCheckoutCompleted(promoted.activated, promoted.changed)) {
+      trackServerEvent(ANALYTICS_EVENT.CHECKOUT_COMPLETED);
+    }
   }
   return {
     error: null,
@@ -564,7 +571,11 @@ export async function revertUserToTrial(
     return { error: error.message, reverted: false };
   }
 
-  return { error: null, reverted: (data?.length ?? 0) > 0 };
+  const reverted = (data?.length ?? 0) > 0;
+  if (reverted) {
+    trackServerEvent(ANALYTICS_EVENT.SUBSCRIPTION_ENDED);
+  }
+  return { error: null, reverted };
 }
 
 /** After this many minutes an abandoned claim can be re-claimed. */

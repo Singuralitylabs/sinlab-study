@@ -7,8 +7,12 @@ vi.mock("@supabase/ssr", () => ({
 vi.mock("@/app/services/api/supabase-server");
 vi.mock("@/app/services/notifications/slack");
 vi.mock("@/app/services/notifications/user-emails");
+vi.mock("@vercel/analytics/server", () => ({
+  track: vi.fn().mockResolvedValue(undefined),
+}));
 
 import { createServerClient } from "@supabase/ssr";
+import { track } from "@vercel/analytics/server";
 import { GET } from "@/app/auth/callback/route";
 import { TERMS_CONSENT_COOKIE_NAME, TERMS_CONSENT_COOKIE_VALUE } from "@/app/constants/auth";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
@@ -122,6 +126,10 @@ describe("GET /auth/callback", () => {
     expect(res.headers.get("location")).toBe("http://localhost/");
     expect(sendSlackNewUserNotification).toHaveBeenCalled();
     expect(scheduleSignupEmail).toHaveBeenCalledWith({ authId: AUTH_USER.id });
+    expect(track).toHaveBeenCalledTimes(1);
+    expect(track).toHaveBeenCalledWith("signup");
+    expect(JSON.stringify(vi.mocked(track).mock.calls)).not.toContain(AUTH_USER.email);
+    expect(JSON.stringify(vi.mocked(track).mock.calls)).not.toContain("新規ユーザー");
     expect(setCookieHeader(res)).toContain("sb-access-token=token");
     expect(res.headers.get("cache-control")).toBe(SESSION_RESPONSE_HEADERS["Cache-Control"]);
     expect(res.headers.get("pragma")).toBe("no-cache");
@@ -152,6 +160,7 @@ describe("GET /auth/callback", () => {
     expect(res.headers.get("location")).toBe("http://localhost/login?error=registration_failed");
     expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
     expect(scheduleSignupEmail).not.toHaveBeenCalled();
+    expect(track).not.toHaveBeenCalled();
     expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
     expectConsentCookieDeleted(res);
   });
@@ -190,6 +199,7 @@ describe("GET /auth/callback", () => {
       expect(sessionClient.insert).not.toHaveBeenCalled();
       expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
       expect(scheduleSignupEmail).not.toHaveBeenCalled();
+      expect(track).not.toHaveBeenCalled();
       expectConsentCookieDeleted(res);
     }
   });

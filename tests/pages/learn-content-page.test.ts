@@ -6,6 +6,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // (#89). Data fetching and signing are all mocked; the tests check the rendered HTML and whether
 // the signing function was called.
 
+vi.mock("@vercel/analytics/server", () => ({
+  track: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("next/navigation", () => ({
   notFound: () => {
     throw new Error("NEXT_NOT_FOUND");
@@ -45,6 +48,7 @@ vi.mock(
   () => ({ SubmissionForm: () => null })
 );
 
+import { track } from "@vercel/analytics/server";
 import ContentPage from "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/page";
 import type { NavigationContent } from "@/app/lib/content-navigation";
 import {
@@ -215,6 +219,8 @@ describe("学習画面のスライド配信（署名付きURL）", () => {
     expect(html).not.toContain(SIGNED_URL);
     expect(html).not.toContain(PDF_KEY);
     expect(html).toContain("このコンテンツは無料プランでは閲覧できません");
+    expect(track).toHaveBeenCalledWith("locked_content_viewed", { content_type: "slide" });
+    expect(JSON.stringify(vi.mocked(track).mock.calls)).not.toContain("@");
   });
 
   it.each(["admin", "maintainer"] as const)(
@@ -611,6 +617,7 @@ describe("お試し → 有料の転換導線（ロック画面, #288）", () =>
     expect(html).toContain("有料会員向けのコンテンツが3件（うち演習1件）");
     expect(html).toContain("月額2,000円（税込）で全コンテンツが使えます");
     expect(html).toContain('href="/upgrade"');
+    expect(html).toContain('data-analytics-source="lock_screen"');
     expect(html).toContain("もくもく会への参加");
   });
 

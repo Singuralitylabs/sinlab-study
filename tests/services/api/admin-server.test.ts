@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
+vi.mock("@/app/services/auth/server-auth");
 
 import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
+import { WEEKLY_FUNNEL_FETCH_ERROR } from "@/app/lib/weekly-funnel";
 import {
   approveUser,
   changeMembershipType,
@@ -16,6 +18,7 @@ import {
   fetchManageCounts,
   fetchStudentsProgress,
   fetchUserIdsWithStripeSubscription,
+  fetchWeeklyFunnel,
   isUserCurrentlySubscribed,
   parseStrictFilterId,
   rejectUser,
@@ -29,6 +32,7 @@ import {
   createAdminSupabaseClient,
   createServerSupabaseClient,
 } from "@/app/services/api/supabase-server";
+import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const dbError = { message: "db error", code: "PGRST001" };
 
@@ -337,6 +341,78 @@ describe("fetchManageCounts", () => {
 
     expect(result.error).toEqual(dbError);
     expect(result.data).toEqual({ themes: 2, phases: 0, weeks: 4, contents: 5, students: 6 });
+  });
+});
+
+describe("fetchWeeklyFunnel", () => {
+  const rpcRow = {
+    week_start: "2026-09-21",
+    signups: 2,
+    activated: 1,
+    upgraded: 1,
+    ended: 0,
+    paid_total: 4,
+  };
+
+  it.each([
+    ["member", "member"],
+    ["未認証", null],
+  ] as const)("%s では RPC を呼ばない", async (_label, userRole) => {
+    vi.mocked(getServerAuth).mockResolvedValue({ userRole } as never);
+
+    const result = await fetchWeeklyFunnel();
+
+    expect(result).toEqual({ data: [], error: null });
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it.each(["admin", "maintainer"] as const)(
+    "%s は権限確認のあと get_weekly_funnel を呼ぶ",
+    async (userRole) => {
+      vi.mocked(getServerAuth).mockResolvedValue({ userRole } as never);
+      const mockClient = createMockSupabaseClient({
+        rpcResults: { get_weekly_funnel: { data: [rpcRow], error: null } },
+      });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+      const result = await fetchWeeklyFunnel();
+
+      expect(mockClient.rpc).toHaveBeenCalledWith("get_weekly_funnel", { weeks: 8 });
+      expect(result.error).toBeNull();
+      expect(result.data).toEqual([
+        {
+          weekStart: "2026-09-21",
+          signups: 2,
+          activated: 1,
+          upgraded: 1,
+          ended: 0,
+          paidTotal: 4,
+        },
+      ]);
+    }
+  );
+
+  it("RPC が失敗しても DB のメッセージは返さず、ダッシュボード用の文言だけを返す", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({ userRole: "admin" } as never);
+    const mockClient = createMockSupabaseClient({
+      rpcResults: { get_weekly_funnel: { data: null, error: dbError } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchWeeklyFunnel();
+
+    expect(result.data).toEqual([]);
+    expect(result.error).toBe(WEEKLY_FUNNEL_FETCH_ERROR);
+    expect(result.error).not.toContain(dbError.message);
+  });
+
+  it("service_role クライアントの作成に失敗しても例外を出さない", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({ userRole: "maintainer" } as never);
+    vi.mocked(createAdminSupabaseClient).mockRejectedValue(new Error("missing key"));
+
+    const result = await fetchWeeklyFunnel();
+
+    expect(result).toEqual({ data: [], error: WEEKLY_FUNNEL_FETCH_ERROR });
   });
 });
 

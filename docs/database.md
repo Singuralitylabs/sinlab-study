@@ -382,6 +382,12 @@ SELECT は本人のみ。INSERT は本人かつ、`announcements` の SELECT ポ
 
 `email_templates` は SELECT / INSERT / UPDATE / DELETE とも admin のみ（条件は `(select get_user_role()) = 'admin'`。INSERT は WITH CHECK、UPDATE は USING / WITH CHECK）。同一操作のポリシーは1本にまとめる。maintainer には開放しない。メール送信（`deliverToUser()`・`runEmailDigest()`）は service_role で読む（RLS をバイパスする）。`email_test_sends` は RLS を有効にしポリシーを定義しない（service_role 専用。`email_logs` と同じ）。
 
+### 6.15 get_weekly_funnel
+
+`/manage` の週次ファネル（[機能設計書](./specification.md)6.3節・12章）。`get_weekly_funnel(weeks integer DEFAULT 8)` は `SECURITY INVOKER` のプレーン SQL 関数（`SECURITY DEFINER` にしない）。`REVOKE EXECUTE FROM PUBLIC, anon` / `GRANT TO authenticated, service_role`。週境界は JST の月曜始まり（`timezone('Asia/Tokyo', timestamptz)` の後に `date_trunc('week')`）。列の定義（コホートの `activated`、発生基準の `upgraded` / `ended`、週末時点の `paid_total` の近似）は機能設計書 6.3節とマイグレーションのヘッダが同じ内容。`weeks` は 1〜104 に丸める。
+
+アプリの呼び出しは `fetchWeeklyFunnel()` に限る。admin / maintainer（`checkContentPermissions()`）を確認したあと service_role で実行する。`stripe_subscriptions` の SELECT は本人か admin だけなので、maintainer のセッションのまま INVOKER で呼ぶと有料化・解約が過少になる。ポリシーは広げず、集計だけ service_role に寄せる。member が REST で直接呼んだ場合は RLS のとおり自分の行しか見えない。
+
 ---
 
 ## 7. マイグレーション管理
