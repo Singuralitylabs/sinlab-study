@@ -163,6 +163,8 @@ INSERT 失敗・同意 Cookie なし・論理削除済み・存在確認失敗�
 | コースツリー（テーマ / フェーズ / 週 / コンテンツ一覧） | 全件表示する（何が学べるかを見せるため） |
 | お試し非公開のコンテンツ | 鍵アイコンでロックし、中身（本文・動画・スライド）は表示しない |
 | ロック済みコンテンツへの直リンク | ロック画面を表示する（404にはしない） |
+| ロック画面の構成（#288） | ①概要: 種別ごとの定型文（`getLockedContentFallbackOverview()`）。trial はお試し非公開コンテンツを RLS で読めず（0行）、service_role のカラム許可リストを増やすのは不変条件に反するため、`description` は取得しない。②規模: 「有料会員向けのコンテンツがN件（うち演習M件）」をツリー側の取得結果（`fetchThemeNavigationIndex()` の `paidOnlyCount` / `paidOnlyExerciseCount`）から算出し、service_role クエリは増やさない。③価値3点（`UPGRADE_BENEFITS`。お試し向けの導線専用で、契約画面 `/upgrade` の説明文には使わない）。④料金とCTA: `isStripeEnabled()` が true なら `fetchSubscriptionPrice()` の実額（主要画面を止めないよう2秒でタイムアウトし、取得失敗・タイムアウト時のみ `DISPLAY_MONTHLY_PRICE_JPY`）で「月額N円（税込）で全コンテンツが使えます」と `/upgrade` へのボタン、false なら「本登録は運営の承認で行います。承認後に閲覧できます」の案内のみ（`/upgrade` への導線を出さない）。`active` / admin にはロック画面自体が出ない |
+| フェーズ一覧の鍵付き項目（#288） | タイトル横に「有料会員向け」バッジを付け、リスト末尾（お試しユーザーのみ・鍵付き項目があるとき）に1回だけCTAを置く（Stripe無効時は承認の案内） |
 | 承認待ちの通知 | アプリ内バナーで通知（`/pending` 承認待ち専用画面は設けない） |
 
 **承認待ちバナー**: `(authenticated)/layout.tsx` で `userStatus` が `trial` の場合に表示する（認証必須ページ全体で共通。ページごとの実装は不要）。
@@ -469,6 +471,10 @@ flowchart TD
   4. 困ったときは: 不明点は管理者に問い合わせる旨
 - 閉じたとき（「はじめる」・×・オーバーレイクリック・ダイアログ内リンク）は `POST /api/onboarding/complete` を呼び、成功可否に関わらず閉じる・遷移する（API失敗時は次回表示時に再度出るだけで、ユーザー操作をブロックしない）。送信は `keepalive: true` 付きで遷移中の打ち切りを防ぎ、失敗時は警告ログを残し、成功時はダッシュボードのサーバー表示を再取得する
 - モバイル幅でも崩れないこと
+
+**「次のステップ」カード**（#288。`app/(authenticated)/page.tsx`、「はじめかたチェックリスト」の直上に `Card` で表示）
+- 表示条件（`shouldShowTrialNextStep()`）: `status = trial` かつ `role = member` かつ、`fetchThemeProgressSummaries()` の分母（trial ではお試し公開コンテンツ）が合計1件以上で、全テーマの完了率が100%
+- 内容: 「お試しコンテンツをすべて完了しました。続きは有料会員で」＋価値3点（`UPGRADE_BENEFITS`）＋CTA（`isStripeEnabled()` が false のときは承認の案内のみ）。閉じる操作は設けず、全完了状態が続く限り表示する（永続化不要）。チェックリストと同時に出る場合はこちらを上に置く
 
 **はじめかたチェックリスト**（`app/(authenticated)/components/GettingStartedChecklist.tsx`、`/` の「学習進捗」カード直下・「学習テーマ」一覧の上に `Card` で表示）
 - 表示条件: `role = member` かつ未達成のステップがあるとき。全達成で非表示（永続化不要）

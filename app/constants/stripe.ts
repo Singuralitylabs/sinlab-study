@@ -15,6 +15,19 @@ export function formatMonthlyJpyPrice(amount: number): string {
   return `月額${amount.toLocaleString("ja-JP")}円（税込）`;
 }
 
+/**
+ * Value copy for the trial-to-paid prompts only. Not used on /upgrade: that page sits next to the
+ * legal notice right before Checkout, so its description of what is provided must stay exact.
+ */
+export const UPGRADE_BENEFITS = [
+  "すべての学習コンテンツ",
+  "演習のAIレビュー",
+  "もくもく会への参加",
+] as const;
+
+/** Shown instead of a CTA when payments are disabled (same branching as the trial banner). */
+export const UPGRADE_APPROVAL_NOTICE = "本登録は運営の承認で行います。承認後に閲覧できます";
+
 export const MANAGE_SUBSCRIPTION_BUTTON_LABEL = "お支払い情報の管理・解約";
 
 export const SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE =

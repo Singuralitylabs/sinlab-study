@@ -2,7 +2,10 @@ import { Bot, Calendar, CheckCircle, Clock, FileText, Lock, PenLine, Play } from
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
+import { UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
+import { isStripeEnabled } from "@/app/constants/stripe";
+import { USER_STATUS } from "@/app/constants/user";
 import { fetchCompletedAIReviewContentIds } from "@/app/services/api/ai-review-server";
 import {
   type ContentVisibilitySummary,
@@ -12,6 +15,7 @@ import {
   fetchWeeksWithContentsByPhaseId,
   isContentLockedForUser,
 } from "@/app/services/api/learning-server";
+import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import type { ContentType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
@@ -100,6 +104,11 @@ export default async function PhasePage({ params }: PageProps) {
   const totalCount = visibleContentIds.length;
   const progressValue = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
+  const hasLockedContent = weeks?.some((w) => w.contents.some((c) => isLocked(c))) ?? false;
+  const showUpgradeCta = userStatus === USER_STATUS.TRIAL && hasLockedContent;
+  const stripeEnabled = isStripeEnabled();
+  const priceLabel = showUpgradeCta && stripeEnabled ? await fetchUpgradePriceLabel() : null;
+
   return (
     <div className="max-w-4xl mx-auto">
       <PageTitle
@@ -179,7 +188,7 @@ export default async function PhasePage({ params }: PageProps) {
                     コンテンツはまだ登録されていません。
                   </p>
                 ) : (
-                  <div className="grid gap-2 ml-5 border-l-2 border-border pl-5">
+                  <div className="grid grid-cols-1 gap-2 ml-5 border-l-2 border-border pl-5">
                     {week.contents.map((content) => {
                       const locked = isLocked(content);
                       const isCompleted = !locked && (progressMap.get(content.id) || false);
@@ -196,7 +205,7 @@ export default async function PhasePage({ params }: PageProps) {
                             } ${locked ? "opacity-60" : ""}`}
                           >
                             <CardContent className="py-3 px-4">
-                              <div className="flex items-center gap-3">
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                                 <div
                                   className={`p-1.5 rounded-full shrink-0 ${
                                     isCompleted
@@ -212,8 +221,8 @@ export default async function PhasePage({ params }: PageProps) {
                                     <Clock className="h-4 w-4" />
                                   )}
                                 </div>
-                                <div className="flex-1 min-w-0">
-                                  <h3 className="text-sm font-medium group-hover:text-primary transition-colors truncate">
+                                <div className="flex-1 min-w-40">
+                                  <h3 className="text-sm font-medium group-hover:text-primary transition-colors sm:truncate">
                                     {content.title}
                                   </h3>
                                 </div>
@@ -224,7 +233,7 @@ export default async function PhasePage({ params }: PageProps) {
                                 {locked && (
                                   <Badge variant="outline" className="gap-1 shrink-0 text-xs">
                                     <Lock className="h-3 w-3" />
-                                    お試し非公開
+                                    有料会員向け
                                   </Badge>
                                 )}
                                 <UnpublishedBadge isPublished={content.is_published} />
@@ -250,6 +259,18 @@ export default async function PhasePage({ params }: PageProps) {
               </div>
             );
           })}
+
+          {showUpgradeCta && (
+            <Card>
+              <CardContent className="py-4 space-y-2">
+                <p className="text-sm">
+                  鍵付きのコンテンツは有料会員になると閲覧できます
+                  {stripeEnabled && " →"}
+                </p>
+                <UpgradeCta stripeEnabled={stripeEnabled} priceLabel={priceLabel} />
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
     </div>

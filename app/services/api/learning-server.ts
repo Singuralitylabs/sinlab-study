@@ -480,6 +480,9 @@ const THEME_NAVIGATION_WEEK_COLUMNS =
 export interface ThemeNavigationIndex {
   orderedContents: NavigationContent[];
   currentWeekContents: ContentVisibilitySummary[];
+  /** Published contents of the theme that are not open to trial (and how many are exercises). */
+  paidOnlyCount: number;
+  paidOnlyExerciseCount: number;
 }
 
 /**
@@ -563,10 +566,20 @@ export async function fetchThemeNavigationIndex(
   }
 
   const summaries = contents ?? [];
+  const orderedContents = buildThemeContentOrder(weeks, summaries);
+  // Reuse the summaries already fetched for navigation so the lock screen adds no service_role
+  // call; restrict to the ordered list so the current-week union doesn't count foreign weeks.
+  const orderedIds = new Set(orderedContents.map((content) => content.id));
+  const paidOnly = summaries.filter(
+    (content) => orderedIds.has(content.id) && !content.is_open_to_trial
+  );
   return {
     data: {
-      orderedContents: buildThemeContentOrder(weeks, summaries),
+      orderedContents,
       currentWeekContents: summaries.filter((content) => content.week_id === currentWeekId),
+      paidOnlyCount: paidOnly.length,
+      paidOnlyExerciseCount: paidOnly.filter((content) => content.content_type === "exercise")
+        .length,
     },
     error: null,
   };
