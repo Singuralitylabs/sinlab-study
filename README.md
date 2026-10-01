@@ -110,6 +110,10 @@ Claude Code で Supabase MCP サーバーを使う場合、**必ず read-only �
 
 `vercel.json` の `crons` で、毎日 UTC 23 時台（JST 8 時台）に `GET /api/cron/email-digest` を呼び、週次進捗・未学習リマインド・お試しユーザー向け案内を送る（仕様は `docs/specification.md` 10.7〜10.9節）。Cron は Production デプロイでのみ動き、Preview・ローカルでは動かないため、動作確認は `curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/email-digest` で手動実行する。本番で有効にするのは、利用規約の改定（案内メールの送信に関する条項）後に Vercel へ `CRON_SECRET` / `EMAIL_UNSUBSCRIBE_SECRET` を設定してから。
 
+## Vercel Web Analytics
+
+本番のページビューとカスタムイベントは、Vercel のプロジェクト設定で Analytics を ON にすると記録される（環境変数の追加は無い。Preview と開発環境では `@vercel/analytics` が既定で送信しない）。
+
 ## Dependabot PR のマージ運用
 
 [Dependabot](./.github/dependabot.yml) が週次（Bun）・月次（GitHub Actions）で更新 PR を作成する。マイナー・パッチはグループ集約、メジャーは個別 PR。担当は [@yamashin01](https://github.com/yamashin01)（週次確認）。

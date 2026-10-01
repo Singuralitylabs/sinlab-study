@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
 import { UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
+import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import { fetchCompletedAIReviewContentIds } from "@/app/services/api/ai-review-server";
@@ -267,7 +268,11 @@ export default async function PhasePage({ params }: PageProps) {
                   鍵付きのコンテンツは有料会員になると閲覧できます
                   {stripeEnabled && " →"}
                 </p>
-                <UpgradeCta stripeEnabled={stripeEnabled} priceLabel={priceLabel} />
+                <UpgradeCta
+                  stripeEnabled={stripeEnabled}
+                  priceLabel={priceLabel}
+                  source={UPGRADE_CTA_SOURCE.PHASE_LIST}
+                />
               </CardContent>
             </Card>
           )}

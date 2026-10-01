@@ -9,11 +9,13 @@ import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
+import { ANALYTICS_EVENT, UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { buildThemeContentOrder, resolveContentNavigation } from "@/app/lib/content-navigation";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import { getLockedContentFallbackOverview } from "@/app/lib/trial-upgrade";
+import { trackServerEvent } from "@/app/services/analytics/track-server";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
 import {
   fetchContentById,
@@ -122,6 +124,10 @@ export default async function ContentPage({ params }: PageProps) {
     const paidOnlyCount = navigation?.paidOnlyCount ?? 0;
     const paidOnlyExerciseCount = navigation?.paidOnlyExerciseCount ?? 0;
 
+    trackServerEvent(ANALYTICS_EVENT.LOCKED_CONTENT_VIEWED, {
+      content_type: summary.content_type,
+    });
+
     return (
       <div className="max-w-4xl mx-auto">
         <PageTitle
@@ -166,7 +172,11 @@ export default async function ContentPage({ params }: PageProps) {
                 有料会員になると使えるもの
               </h2>
               <UpgradeBenefitsList />
-              <UpgradeCta stripeEnabled={stripeEnabled} priceLabel={priceLabel} />
+              <UpgradeCta
+                stripeEnabled={stripeEnabled}
+                priceLabel={priceLabel}
+                source={UPGRADE_CTA_SOURCE.LOCK_SCREEN}
+              />
             </div>
           </CardContent>
         </Card>

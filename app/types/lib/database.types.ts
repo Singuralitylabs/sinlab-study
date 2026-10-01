@@ -562,6 +562,8 @@ export type Database = {
       };
       stripe_subscriptions: {
         Row: {
+          became_active_at: string | null;
+          became_terminal_at: string | null;
           cancel_at: string | null;
           cancel_at_period_end: boolean;
           checkout_claimed_at: string | null;
@@ -576,6 +578,8 @@ export type Database = {
           user_id: number;
         };
         Insert: {
+          became_active_at?: string | null;
+          became_terminal_at?: string | null;
           cancel_at?: string | null;
           cancel_at_period_end?: boolean;
           checkout_claimed_at?: string | null;
@@ -590,6 +594,8 @@ export type Database = {
           user_id: number;
         };
         Update: {
+          became_active_at?: string | null;
+          became_terminal_at?: string | null;
           cancel_at?: string | null;
           cancel_at_period_end?: boolean;
           checkout_claimed_at?: string | null;
@@ -669,6 +675,7 @@ export type Database = {
           completed_at: string | null;
           content_id: number;
           created_at: string | null;
+          ever_completed: boolean;
           id: number;
           is_completed: boolean | null;
           user_id: number;
@@ -677,6 +684,7 @@ export type Database = {
           completed_at?: string | null;
           content_id: number;
           created_at?: string | null;
+          ever_completed?: boolean;
           id?: number;
           is_completed?: boolean | null;
           user_id: number;
@@ -685,6 +693,7 @@ export type Database = {
           completed_at?: string | null;
           content_id?: number;
           created_at?: string | null;
+          ever_completed?: boolean;
           id?: number;
           is_completed?: boolean | null;
           user_id?: number;
@@ -785,6 +794,17 @@ export type Database = {
       get_user_membership_type: { Args: never; Returns: string };
       get_user_role: { Args: never; Returns: string };
       get_user_status: { Args: never; Returns: string };
+      get_weekly_funnel: {
+        Args: { weeks?: number };
+        Returns: {
+          activated: number;
+          ended: number;
+          paid_total: number;
+          signups: number;
+          upgraded: number;
+          week_start: string;
+        }[];
+      };
     };
     Enums: {
       [_ in never]: never;

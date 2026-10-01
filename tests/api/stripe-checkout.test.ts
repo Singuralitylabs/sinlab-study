@@ -18,7 +18,11 @@ vi.mock("@/app/services/api/stripe-webhook-server", async (importOriginal) => ({
   reactivateUserFromMirror: vi.fn(),
 }));
 vi.mock("@/app/services/notifications/slack");
+vi.mock("@vercel/analytics/server", () => ({
+  track: vi.fn().mockResolvedValue(undefined),
+}));
 
+import { track } from "@vercel/analytics/server";
 import { POST } from "@/app/api/stripe/checkout/route";
 import { SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE } from "@/app/constants/stripe";
 import {
@@ -477,5 +481,49 @@ describe("POST /api/stripe/checkout（契約済みなのにお試しのままの
     await POST();
 
     expect(reactivateUserFromMirror).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/stripe/checkout - checkout_started", () => {
+  it("新規の Checkout URL を返すときだけ送り、メールアドレスは含めない", async () => {
+    const res = await POST();
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/xxx" });
+    expect(track).toHaveBeenCalledTimes(1);
+    expect(track).toHaveBeenCalledWith("checkout_started");
+    expect(JSON.stringify(vi.mocked(track).mock.calls)).not.toContain("trial@example.com");
+  });
+
+  it("再利用の Checkout URL でも送る", async () => {
+    vi.mocked(claimCheckoutSlot).mockResolvedValue({
+      outcome: "reusable",
+      url: "https://checkout.stripe.com/live",
+    });
+
+    const res = await POST();
+
+    expect(res.status).toBe(200);
+    expect(track).toHaveBeenCalledWith("checkout_started");
+  });
+
+  it("アプリ内の /upgrade へ戻すときは送らない", async () => {
+    vi.mocked(claimCheckoutSlot).mockResolvedValue({ outcome: "conflict" });
+    vi.mocked(reactivateUserFromMirror).mockResolvedValue({ error: null, activated: true });
+
+    const res = await POST();
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ url: "/upgrade" });
+    expect(track).not.toHaveBeenCalled();
+  });
+
+  it("track が拒否しても Checkout URL のレスポンスは変わらない", async () => {
+    vi.mocked(track).mockRejectedValueOnce(new Error("analytics down"));
+
+    const res = await POST();
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/xxx" });
   });
 });

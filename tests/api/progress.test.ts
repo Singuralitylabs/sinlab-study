@@ -4,7 +4,11 @@ import { createMockSupabaseClient, createQueryBuilder } from "@/tests/helpers/su
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/learning-server");
 vi.mock("@/app/services/api/supabase-server");
+vi.mock("@vercel/analytics/server", () => ({
+  track: vi.fn().mockResolvedValue(undefined),
+}));
 
+import { track } from "@vercel/analytics/server";
 import { POST } from "@/app/api/progress/route";
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
@@ -117,5 +121,100 @@ describe("POST /api/progress - 認証ユーザーIDでの書き込み", () => {
       expect.objectContaining({ user_id: memberAuth.userId, content_id: 1 }),
       expect.anything()
     );
+  });
+});
+
+describe("POST /api/progress - first_content_completed", () => {
+  it("完了行が無いときだけ status を付けて送る", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: {
+        user_progress: [
+          { data: null, error: null, count: 0 },
+          { data: null, error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(200);
+    const countBuilder = client.from.mock.results[0]?.value as {
+      eq: { mock: { calls: unknown[][] } };
+    };
+    expect(countBuilder.eq.mock.calls).toContainEqual(["ever_completed", true]);
+    const writeBuilder = client.from.mock.results[1]?.value as {
+      upsert: { mock: { calls: unknown[][] } };
+    };
+    expect(writeBuilder.upsert.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ ever_completed: true, is_completed: true })
+    );
+    expect(track).toHaveBeenCalledTimes(1);
+    expect(track).toHaveBeenCalledWith("first_content_completed", { status: "active" });
+    expect(JSON.stringify(vi.mocked(track).mock.calls)).not.toContain("email");
+    expect(JSON.stringify(vi.mocked(track).mock.calls)).not.toContain("user_id");
+  });
+
+  it("既に完了行があるときは送らない", async () => {
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(
+      createMockSupabaseClient({
+        tableResults: {
+          user_progress: [
+            { data: null, error: null, count: 2 },
+            { data: null, error: null },
+          ],
+        },
+      }) as never
+    );
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(200);
+    expect(track).not.toHaveBeenCalled();
+  });
+
+  it("未完了への更新では送らず、ever_completed は消さない", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: { user_progress: { data: null, error: null } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+
+    const res = await POST(request({ contentId: 1, isCompleted: false }) as never);
+
+    expect(res.status).toBe(200);
+    expect(track).not.toHaveBeenCalled();
+    const writeBuilder = client.from.mock.results[0]?.value as {
+      upsert: { mock: { calls: unknown[][] } };
+    };
+    const payload = writeBuilder.upsert.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("ever_completed");
+    expect(payload.completed_at).toBeNull();
+  });
+
+  it("件数取得に失敗しても進捗更新は成功し、イベントは送らない", async () => {
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(
+      createMockSupabaseClient({
+        tableResults: {
+          user_progress: [
+            { data: null, error: { message: "count failed" }, count: null },
+            { data: null, error: null },
+          ],
+        },
+      }) as never
+    );
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(200);
+    expect(track).not.toHaveBeenCalled();
+  });
+
+  it("track が拒否してもレスポンスは変わらない", async () => {
+    vi.mocked(track).mockRejectedValueOnce(new Error("analytics down"));
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true, isCompleted: true });
   });
 });

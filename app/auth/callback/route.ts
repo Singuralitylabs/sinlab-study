@@ -1,11 +1,13 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
+import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import {
   TERMS_CONSENT_COOKIE_NAME,
   TERMS_CONSENT_COOKIE_VALUE,
   TERMS_REQUIRED_ERROR_CODE,
 } from "@/app/constants/auth";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { trackServerEvent } from "@/app/services/analytics/track-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { sendSlackNewUserNotification } from "@/app/services/notifications/slack";
 import { scheduleSignupEmail } from "@/app/services/notifications/user-emails";
@@ -146,6 +148,8 @@ async function handleCallback(request: NextRequest) {
       console.error("ユーザー自動登録エラー:", insertError);
       return redirectWithoutSession(new URL(REGISTRATION_FAILED_PATH, origin));
     }
+
+    trackServerEvent(ANALYTICS_EVENT.SIGNUP);
 
     const adminUsersUrl = `${origin}/admin/users`;
     void sendSlackNewUserNotification({

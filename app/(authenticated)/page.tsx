@@ -2,6 +2,7 @@ import { BookOpen, CheckCircle, Clock, Megaphone, TrendingUp } from "lucide-reac
 import Image from "next/image";
 import Link from "next/link";
 import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
+import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT } from "@/app/constants/announcements";
 import { getWelcomeStepsForStatus } from "@/app/constants/onboarding";
 import { isStripeEnabled } from "@/app/constants/stripe";
@@ -137,7 +138,11 @@ export default async function HomePage() {
             <h2 className="text-lg font-semibold">次のステップ</h2>
             <p className="text-sm">お試しコンテンツをすべて完了しました。続きは有料会員で</p>
             <UpgradeBenefitsList />
-            <UpgradeCta stripeEnabled={stripeEnabled} priceLabel={priceLabel} />
+            <UpgradeCta
+              stripeEnabled={stripeEnabled}
+              priceLabel={priceLabel}
+              source={UPGRADE_CTA_SOURCE.DASHBOARD_CARD}
+            />
           </CardContent>
         </Card>
       )}

@@ -1,5 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { USER_STATUS } from "@/app/constants/user";
+import { shouldTrackFirstSubmission } from "@/app/lib/analytics-funnel";
+import { trackServerEvent } from "@/app/services/analytics/track-server";
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { SubmissionCreateSchema, validateRequest } from "@/app/services/api/schemas";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
@@ -74,6 +77,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
     }
 
+    // Count before insert so the new row is not treated as a pre-existing submission.
+    const { count: existingSubmissionCount, error: countError } = await supabase
+      .from("submissions")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId);
+    if (countError) {
+      console.error("提出件数の取得エラー:", countError.message);
+    }
+
     const { data: submission, error: insertError } = await supabase
       .from("submissions")
       .insert({
@@ -91,6 +103,10 @@ export async function POST(request: NextRequest) {
     if (insertError) {
       console.error("提出作成エラー:", insertError);
       return NextResponse.json({ error: "提出の作成に失敗しました" }, { status: 500 });
+    }
+
+    if (!countError && shouldTrackFirstSubmission(existingSubmissionCount ?? 0) && userStatus) {
+      trackServerEvent(ANALYTICS_EVENT.FIRST_SUBMISSION, { status: userStatus });
     }
 
     return NextResponse.json({ success: true, submission });
