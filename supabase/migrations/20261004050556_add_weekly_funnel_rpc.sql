@@ -38,17 +38,21 @@
 --               終端は同じ行では数えない。
 --   paid_total  週末時点の general かつ active の近似（途中の空白期間は履歴が無い）:
 --               現在 general+active+未削除で、became_active_at が週末より前かつ
---               いま終端でも checkout_pending でもない、または Stripe 行が無く
---               updated_at が週末より前（手動承認。承認後の別更新で過去週から外れる）。
+--               いま終端でも checkout_pending でもない、または Stripe 行が無い /
+--               終端 / checkout_pending で updated_at が週末より前（手動承認。
+--               解約後や手続き中断後に承認した行も拾う。承認後の別更新で
+--               updated_at が動くと過去週から外れる）。
 --               いま終端でも、became_active_at が週末より前かつ became_terminal_at が
 --               週末以後なら、その週末までは有料だったとみなす。再契約で現在 active
 --               の行は、最初の became_active_at 以降の空白週も有料に見える。
 --               論理削除に deleted_at が無いので、削除済みは全週から除く。
 --
--- 既存行の埋め戻し: トリガー導入前は遷移時刻を持たない。現在 status = active で
--- subscription id がある行だけ became_active_at = created_at（処理権の週に寄る
--- ことがある）。past_due は trialing のまま支払い失敗でもなり得るので active の
--- 証拠ではなく、埋めない。終端行は active を経由したか分からないので
+-- 既存行の埋め戻し: トリガー導入前は遷移時刻を持たない。subscription id があり
+-- status = active、または status = past_due かつ users が general の行は
+-- became_active_at = created_at（処理権の週に寄ることがある）。past_due を
+-- 空のままだと、支払い回復で active に戻った週が新しい有料化になる。general
+-- でない past_due は昇格していないので埋めない。終端行は active を経由したか
+-- 分からないので
 -- became_active_at を埋めず、became_terminal_at の埋め戻しも対象外にする
 -- （未課金の解約週を付けない。初回適用では終端行の解約週は空のまま）。
 -- 導入後は active の初回だけトリガーが now() で became_active_at を固定し、
@@ -69,11 +73,20 @@ COMMENT ON COLUMN public.stripe_subscriptions.became_terminal_at IS
 -- マイグレーション時刻にしない。became_terminal_at は埋め戻し前の updated_at を使う）。
 ALTER TABLE public.stripe_subscriptions DISABLE TRIGGER update_stripe_subscriptions_updated_at;
 
-UPDATE public.stripe_subscriptions
-SET became_active_at = created_at
-WHERE became_active_at IS NULL
-  AND stripe_subscription_id IS NOT NULL
-  AND status = 'active';
+UPDATE public.stripe_subscriptions AS ss
+SET became_active_at = ss.created_at
+FROM public.users AS u
+WHERE ss.user_id = u.id
+  AND ss.became_active_at IS NULL
+  AND ss.stripe_subscription_id IS NOT NULL
+  AND (
+    ss.status = 'active'
+    OR (
+      ss.status = 'past_due'
+      AND u.membership_type = 'general'
+      AND u.is_deleted = false
+    )
+  );
 
 UPDATE public.stripe_subscriptions
 SET became_terminal_at = updated_at
@@ -196,7 +209,16 @@ AS $$
                 )
               )
               OR (
-                ss.id IS NULL
+                (
+                  ss.id IS NULL
+                  OR ss.status IN (
+                    'canceled',
+                    'unpaid',
+                    'incomplete_expired',
+                    'paused',
+                    'checkout_pending'
+                  )
+                )
                 AND u.updated_at < (w.week_end::timestamp AT TIME ZONE 'Asia/Tokyo')
               )
             )

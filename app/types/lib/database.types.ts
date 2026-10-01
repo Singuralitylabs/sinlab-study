@@ -675,6 +675,7 @@ export type Database = {
           completed_at: string | null;
           content_id: number;
           created_at: string | null;
+          ever_completed: boolean;
           id: number;
           is_completed: boolean | null;
           user_id: number;
@@ -683,6 +684,7 @@ export type Database = {
           completed_at?: string | null;
           content_id: number;
           created_at?: string | null;
+          ever_completed?: boolean;
           id?: number;
           is_completed?: boolean | null;
           user_id: number;
@@ -691,6 +693,7 @@ export type Database = {
           completed_at?: string | null;
           content_id?: number;
           created_at?: string | null;
+          ever_completed?: boolean;
           id?: number;
           is_completed?: boolean | null;
           user_id?: number;

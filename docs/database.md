@@ -294,8 +294,10 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 
 | 操作 | 対象 | 条件 |
 |:--|:--|:--|
-| SELECT | 本人 / admin・maintainer（全件） | 本人または admin・maintainer |
+| SELECT | 本人 / admin・maintainer（全件） | 本人または admin・maintainer。コンテンツの公開状態では絞らない |
 | INSERT / UPDATE | 本人（かつ可視コンテンツのみ） | `user_id` が自身のユーザーIDと一致 **かつ** 対象 `content_id` が自身に可視であること（EXISTS 条件） |
+
+`ever_completed` は一度完了したら true のまま残す（完了解除は `is_completed` と `completed_at` だけを戻す）。`first_content_completed` の初回判定は、解除や再完了で件数が 0 に戻らないようにこの列を数える。SELECT は公開状態で隠れないので、非公開になったコンテンツの完了も本人の件数に残る。コンテンツ行の物理削除は `ON DELETE CASCADE` で進捗行ごと消える。
 
 maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進捗を参照するため、admin と同様に全件の SELECT を許可する。
 

@@ -3,7 +3,7 @@
  * can be tested without the route or Stripe client.
  */
 
-/** True when this completion creates the user's first completed progress row. */
+/** True when this completion is the user's first ever (ever_completed count is still 0). */
 export function shouldTrackFirstCompletion(
   isCompleted: boolean,
   existingCompletedCount: number

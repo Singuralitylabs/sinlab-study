@@ -126,20 +126,29 @@ describe("POST /api/progress - 認証ユーザーIDでの書き込み", () => {
 
 describe("POST /api/progress - first_content_completed", () => {
   it("完了行が無いときだけ status を付けて送る", async () => {
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(
-      createMockSupabaseClient({
-        tableResults: {
-          user_progress: [
-            { data: null, error: null, count: 0 },
-            { data: null, error: null },
-          ],
-        },
-      }) as never
-    );
+    const client = createMockSupabaseClient({
+      tableResults: {
+        user_progress: [
+          { data: null, error: null, count: 0 },
+          { data: null, error: null },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
 
     const res = await POST(request() as never);
 
     expect(res.status).toBe(200);
+    const countBuilder = client.from.mock.results[0]?.value as {
+      eq: { mock: { calls: unknown[][] } };
+    };
+    expect(countBuilder.eq.mock.calls).toContainEqual(["ever_completed", true]);
+    const writeBuilder = client.from.mock.results[1]?.value as {
+      upsert: { mock: { calls: unknown[][] } };
+    };
+    expect(writeBuilder.upsert.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ ever_completed: true, is_completed: true })
+    );
     expect(track).toHaveBeenCalledTimes(1);
     expect(track).toHaveBeenCalledWith("first_content_completed", { status: "active" });
     expect(JSON.stringify(vi.mocked(track).mock.calls)).not.toContain("email");
@@ -164,11 +173,22 @@ describe("POST /api/progress - first_content_completed", () => {
     expect(track).not.toHaveBeenCalled();
   });
 
-  it("未完了への更新では送らない", async () => {
+  it("未完了への更新では送らず、ever_completed は消さない", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: { user_progress: { data: null, error: null } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+
     const res = await POST(request({ contentId: 1, isCompleted: false }) as never);
 
     expect(res.status).toBe(200);
     expect(track).not.toHaveBeenCalled();
+    const writeBuilder = client.from.mock.results[0]?.value as {
+      upsert: { mock: { calls: unknown[][] } };
+    };
+    const payload = writeBuilder.upsert.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("ever_completed");
+    expect(payload.completed_at).toBeNull();
   });
 
   it("件数取得に失敗しても進捗更新は成功し、イベントは送らない", async () => {
