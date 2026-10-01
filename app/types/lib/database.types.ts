@@ -562,6 +562,8 @@ export type Database = {
       };
       stripe_subscriptions: {
         Row: {
+          became_active_at: string | null;
+          became_terminal_at: string | null;
           cancel_at: string | null;
           cancel_at_period_end: boolean;
           checkout_claimed_at: string | null;
@@ -576,6 +578,8 @@ export type Database = {
           user_id: number;
         };
         Insert: {
+          became_active_at?: string | null;
+          became_terminal_at?: string | null;
           cancel_at?: string | null;
           cancel_at_period_end?: boolean;
           checkout_claimed_at?: string | null;
@@ -590,6 +594,8 @@ export type Database = {
           user_id: number;
         };
         Update: {
+          became_active_at?: string | null;
+          became_terminal_at?: string | null;
           cancel_at?: string | null;
           cancel_at_period_end?: boolean;
           checkout_claimed_at?: string | null;

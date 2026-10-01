@@ -20,26 +20,87 @@
 --   signups     users.created_at がその週、is_deleted = false
 --   activated   その週の signups のうち、submitted_at が登録以上かつ
 --               登録+7日以内の submissions が1件以上（コホート。直近週は未確定）
---   upgraded    発生基準。stripe_subscription_id があり、status が active /
---               past_due / 終端（canceled, unpaid, paused）の行を created_at の週
---               に数える。後から解約してもその週の件数から消えない。
---               trialing / incomplete / incomplete_expired / checkout_pending は
---               active になっていないので含めない。手動承認の general は
---               この行を作らないので含まれない。
---               終端状態の定数は app/services/api/stripe-server.ts の
---               TERMINAL_SUBSCRIPTION_STATUSES と揃える（paused を含む）。
---   ended       発生基準。status が終端の行を updated_at の週に数える。
---               終端後に別の更新が updated_at を動かすと週がずれる（履歴列が無い）。
---   paid_total  週末時点の general かつ active の近似（状態履歴が無い）:
---               現在 general+active+未削除で、Stripe 行が契約中かつ created_at が
---               週末より前、または Stripe 行が無く updated_at が週末より前（手動承認。
---               承認後の別更新で updated_at が動くと過去週から外れる）。
---               いまはお試しに戻っていても、終端（incomplete_expired を除く）の
---               updated_at が週末以後かつ created_at が週末より前なら、週末時点では
---               有料だったとみなす。論理削除に deleted_at が無いので、削除済みは
---               全週から除く。
+--   upgraded    発生基準。became_active_at（status が初めて active になった時刻）
+--               がその週。Checkout の処理権は checkout_pending の INSERT で、
+--               created_at はその時刻ではない。後から past_due / 終端になっても、
+--               再契約で同じ行を checkout_pending に戻しても週は動かない。
+--               active を一度も通っていない行（trialing のまま paused など）と
+--               手動承認の general は含めない。1ユーザー1行なので2回目の active は
+--               新しい発生として数えない。
+--   ended       発生基準。became_terminal_at（status が初めて終端になった時刻）
+--               がその週。終端は canceled / unpaid / incomplete_expired / paused
+--               （TERMINAL_SUBSCRIPTION_STATUSES）。後続のミラー更新で updated_at
+--               が動いても、再契約で status が戻っても週は動かない。2回目以降の
+--               終端は同じ行では数えない。
+--   paid_total  週末時点の general かつ active の近似（途中の空白期間は履歴が無い）:
+--               現在 general+active+未削除で、became_active_at が週末より前かつ
+--               いま終端でも checkout_pending でもない、または Stripe 行が無く
+--               updated_at が週末より前（手動承認。承認後の別更新で過去週から外れる）。
+--               いま終端でも、became_active_at が週末より前かつ became_terminal_at が
+--               週末以後なら、その週末までは有料だったとみなす。再契約で現在 active
+--               の行は、最初の became_active_at 以降の空白週も有料に見える。
+--               論理削除に deleted_at が無いので、削除済みは全週から除く。
+--
+-- 既存行の埋め戻し: トリガー導入前は遷移時刻を持たない。現在 active / past_due で
+-- subscription id がある行だけ became_active_at = created_at（処理権の週に寄る
+-- ことがある）。現在終端の行は became_terminal_at = updated_at（終端後の更新で
+-- ずれていることがある）。canceled 等は active を経由したか分からないので
+-- became_active_at は埋めない。導入後の遷移はトリガーが now() で固定する。
 -- weeks は 1..104 に丸める（authenticated に GRANT するため巨大な generate_series を防ぐ）。
 -- =====================================================
+
+ALTER TABLE public.stripe_subscriptions
+  ADD COLUMN IF NOT EXISTS became_active_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS became_terminal_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN public.stripe_subscriptions.became_active_at IS
+  'status が初めて active になった時刻。後続の更新や再契約では動かさない（週次ファネルの有料化）';
+COMMENT ON COLUMN public.stripe_subscriptions.became_terminal_at IS
+  'status が初めて終端（canceled/unpaid/incomplete_expired/paused）になった時刻。後続の更新や再契約では動かさない（週次ファネルの解約）';
+
+-- トリガーより先に埋める。updated_at トリガーを止める（埋め戻しで全行の updated_at を
+-- マイグレーション時刻にしない。became_terminal_at は埋め戻し前の updated_at を使う）。
+ALTER TABLE public.stripe_subscriptions DISABLE TRIGGER update_stripe_subscriptions_updated_at;
+
+UPDATE public.stripe_subscriptions
+SET became_active_at = created_at
+WHERE became_active_at IS NULL
+  AND stripe_subscription_id IS NOT NULL
+  AND status IN ('active', 'past_due');
+
+UPDATE public.stripe_subscriptions
+SET became_terminal_at = updated_at
+WHERE became_terminal_at IS NULL
+  AND status IN ('canceled', 'unpaid', 'incomplete_expired', 'paused');
+
+ALTER TABLE public.stripe_subscriptions ENABLE TRIGGER update_stripe_subscriptions_updated_at;
+
+CREATE OR REPLACE FUNCTION public.stamp_stripe_subscription_funnel_times()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  -- created_at は checkout_pending の INSERT 時刻なので、active への遷移で別列に残す。
+  IF NEW.status = 'active' AND NEW.became_active_at IS NULL THEN
+    NEW.became_active_at := now();
+  END IF;
+  -- updated_at は毎回動く。終端の初回だけ残し、再契約の UPDATE では消さない。
+  IF NEW.status IN ('canceled', 'unpaid', 'incomplete_expired', 'paused')
+     AND NEW.became_terminal_at IS NULL THEN
+    NEW.became_terminal_at := now();
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS stamp_stripe_subscription_funnel_times ON public.stripe_subscriptions;
+CREATE TRIGGER stamp_stripe_subscription_funnel_times
+  BEFORE INSERT OR UPDATE ON public.stripe_subscriptions
+  FOR EACH ROW
+  EXECUTE FUNCTION public.stamp_stripe_subscription_funnel_times();
+
+REVOKE ALL ON FUNCTION public.stamp_stripe_subscription_funnel_times() FROM PUBLIC, anon;
 
 CREATE OR REPLACE FUNCTION public.get_weekly_funnel(weeks integer DEFAULT 8)
 RETURNS TABLE (
@@ -93,17 +154,14 @@ AS $$
     (
       SELECT count(*)
       FROM public.stripe_subscriptions ss
-      WHERE ss.stripe_subscription_id IS NOT NULL
-        AND ss.status IN ('active', 'past_due', 'canceled', 'unpaid', 'paused')
-        AND ss.created_at >= (w.week_start::timestamp AT TIME ZONE 'Asia/Tokyo')
-        AND ss.created_at < (w.week_end::timestamp AT TIME ZONE 'Asia/Tokyo')
+      WHERE ss.became_active_at >= (w.week_start::timestamp AT TIME ZONE 'Asia/Tokyo')
+        AND ss.became_active_at < (w.week_end::timestamp AT TIME ZONE 'Asia/Tokyo')
     ) AS upgraded,
     (
       SELECT count(*)
       FROM public.stripe_subscriptions ss
-      WHERE ss.status IN ('canceled', 'unpaid', 'incomplete_expired', 'paused')
-        AND ss.updated_at >= (w.week_start::timestamp AT TIME ZONE 'Asia/Tokyo')
-        AND ss.updated_at < (w.week_end::timestamp AT TIME ZONE 'Asia/Tokyo')
+      WHERE ss.became_terminal_at >= (w.week_start::timestamp AT TIME ZONE 'Asia/Tokyo')
+        AND ss.became_terminal_at < (w.week_end::timestamp AT TIME ZONE 'Asia/Tokyo')
     ) AS ended,
     (
       SELECT count(DISTINCT u.id)
@@ -116,7 +174,8 @@ AS $$
             AND u.membership_type = 'general'
             AND (
               (
-                ss.id IS NOT NULL
+                ss.became_active_at IS NOT NULL
+                AND ss.became_active_at < (w.week_end::timestamp AT TIME ZONE 'Asia/Tokyo')
                 AND ss.status NOT IN (
                   'canceled',
                   'unpaid',
@@ -124,7 +183,6 @@ AS $$
                   'paused',
                   'checkout_pending'
                 )
-                AND ss.created_at < (w.week_end::timestamp AT TIME ZONE 'Asia/Tokyo')
               )
               OR (
                 ss.id IS NULL
@@ -133,10 +191,9 @@ AS $$
             )
           )
           OR (
-            ss.stripe_subscription_id IS NOT NULL
-            AND ss.status IN ('canceled', 'unpaid', 'paused')
-            AND ss.created_at < (w.week_end::timestamp AT TIME ZONE 'Asia/Tokyo')
-            AND ss.updated_at >= (w.week_end::timestamp AT TIME ZONE 'Asia/Tokyo')
+            ss.became_active_at IS NOT NULL
+            AND ss.became_active_at < (w.week_end::timestamp AT TIME ZONE 'Asia/Tokyo')
+            AND ss.became_terminal_at >= (w.week_end::timestamp AT TIME ZONE 'Asia/Tokyo')
           )
         )
     ) AS paid_total

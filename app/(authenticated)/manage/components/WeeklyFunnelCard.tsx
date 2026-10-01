@@ -36,7 +36,8 @@ export function WeeklyFunnelCard({
         <h2 className="text-lg font-semibold mb-1">週次ファネル</h2>
         <p className="text-sm text-muted-foreground mb-4">
           週は月曜始まり（JST）です。有効化は、その週に登録したユーザーのうち登録から7日以内に提出が1件以上ある人数です。直近の週は7日が経過していないため未確定です。有料化は
-          Stripe で契約が有効になった件数で、手動承認は含みません。
+          Stripe
+          の契約が初めて有効になった週の件数で、その後解約しても消えません。手動承認は含みません。
         </p>
 
         {errorMessage ? (

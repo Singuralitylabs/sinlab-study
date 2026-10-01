@@ -869,9 +869,9 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 |:--|:--|
 | 登録 `signups` | `users.created_at` がその週、`is_deleted = false` |
 | 有効化 `activated` | その週の登録者のうち、`submissions.submitted_at` が登録時刻以上かつ登録から7日以内の提出が1件以上ある人数（コホート）。直近の週は7日未経過のため画面に未確定と出す |
-| 有料化 `upgraded` | 発生基準。`stripe_subscriptions.stripe_subscription_id` があり、`status` が `active` / `past_due` / 終端（`canceled` / `unpaid` / `paused`）の行を `created_at` の週に数える。後から解約してもその週の件数から消えない。`trialing` / `incomplete` / `incomplete_expired` / `checkout_pending` は `active` になっていないので含めない。手動承認の `general` は行を作らないので含めない |
-| 解約 `ended` | 発生基準。`status` が終端（`TERMINAL_SUBSCRIPTION_STATUSES`: `canceled` / `unpaid` / `incomplete_expired` / `paused`）の行を `updated_at` の週に数える。終端後の別更新で `updated_at` が動くと週がずれる（履歴列は持たない） |
-| 有料会員数 `paid_total` | 週末時点の `membership_type = general` かつ `status = active` の近似（状態履歴が無い）。現在その状態で未削除、かつ Stripe 行が契約中で `created_at` が週末より前、または Stripe 行が無く `updated_at` が週末より前（手動承認。承認後の別更新で過去週から外れることがある）。いまお試しに戻っていても、終端（`incomplete_expired` を除く）の `updated_at` が週末以後かつ `created_at` が週末より前なら週末時点では有料だったとみなす。論理削除に `deleted_at` が無いので削除済みは全週から除く |
+| 有料化 `upgraded` | 発生基準。`stripe_subscriptions.became_active_at`（`status` が初めて `active` になった時刻）がその週。Checkout の処理権（`checkout_pending` の INSERT）の `created_at` は使わない。後から `past_due` や終端になっても、再契約で同じ行を `checkout_pending` に戻しても週は動かない。`active` を一度も通っていない行と、手動承認の `general` は含めない。1ユーザー1行なので2回目の `active` は新しい発生にしない |
+| 解約 `ended` | 発生基準。`became_terminal_at`（`status` が初めて終端 `canceled` / `unpaid` / `incomplete_expired` / `paused` になった時刻）がその週。後続のミラー更新で `updated_at` が動いても、再契約で `status` が戻っても週は動かない。2回目以降の終端は同じ行では数えない |
+| 有料会員数 `paid_total` | 週末時点の `membership_type = general` かつ `status = active` の近似（途中の空白期間の履歴は無い）。現在その状態で未削除、かつ `became_active_at` が週末より前でいま終端でも `checkout_pending` でもない、または Stripe 行が無く `updated_at` が週末より前（手動承認。承認後の別更新で過去週から外れることがある）。いま終端でも、`became_active_at` が週末より前かつ `became_terminal_at` が週末以後ならその週末までは有料だったとみなす。再契約で現在有効な行は、最初の `became_active_at` 以降の空白週も有料に見える。論理削除に `deleted_at` が無いので削除済みは全週から除く |
 
 呼び出しは `fetchWeeklyFunnel()`（`admin-server.ts`）だけ。`checkContentPermissions()` で admin / maintainer を確認してから service_role で RPC する。`stripe_subscriptions` の SELECT は本人か admin だけなので、maintainer の JWT のままでは有料化・解約が過少になる。SELECT ポリシーは広げない（集計以外の顧客 ID を maintainer に見せない）。関数自体は `SECURITY INVOKER` で、member が直接呼んでも RLS の見える行だけが対象。
 
