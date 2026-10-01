@@ -15,7 +15,10 @@ export function formatMonthlyJpyPrice(amount: number): string {
   return `月額${amount.toLocaleString("ja-JP")}円（税込）`;
 }
 
-/** Shared by /upgrade and the trial-to-paid prompts so the value copy is managed in one place. */
+/**
+ * Value copy for the trial-to-paid prompts only. Not used on /upgrade: that page sits next to the
+ * legal notice right before Checkout, so its description of what is provided must stay exact.
+ */
 export const UPGRADE_BENEFITS = [
   "すべての学習コンテンツ",
   "演習のAIレビュー",
