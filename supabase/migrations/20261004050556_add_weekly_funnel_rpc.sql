@@ -41,11 +41,12 @@
 --               の行は、最初の became_active_at 以降の空白週も有料に見える。
 --               論理削除に deleted_at が無いので、削除済みは全週から除く。
 --
--- 既存行の埋め戻し: トリガー導入前は遷移時刻を持たない。現在 active / past_due で
+-- 既存行の埋め戻し: トリガー導入前は遷移時刻を持たない。現在 status = active で
 -- subscription id がある行だけ became_active_at = created_at（処理権の週に寄る
--- ことがある）。現在終端の行は became_terminal_at = updated_at（終端後の更新で
--- ずれていることがある）。canceled 等は active を経由したか分からないので
--- became_active_at は埋めない。導入後の遷移はトリガーが now() で固定する。
+-- ことがある）。past_due は trialing のまま支払い失敗でもなり得るので active の
+-- 証拠ではなく、埋めない。現在終端の行は became_terminal_at = updated_at（終端後の
+-- 更新でずれていることがある）。導入後に active へ遷移したときだけトリガーが now()
+-- で became_active_at を固定する。
 -- weeks は 1..104 に丸める（authenticated に GRANT するため巨大な generate_series を防ぐ）。
 -- =====================================================
 
@@ -66,7 +67,7 @@ UPDATE public.stripe_subscriptions
 SET became_active_at = created_at
 WHERE became_active_at IS NULL
   AND stripe_subscription_id IS NOT NULL
-  AND status IN ('active', 'past_due');
+  AND status = 'active';
 
 UPDATE public.stripe_subscriptions
 SET became_terminal_at = updated_at
