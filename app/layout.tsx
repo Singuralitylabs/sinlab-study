@@ -1,6 +1,8 @@
 import { Analytics } from "@vercel/analytics/next";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { ColorSchemeSync } from "./components/ColorSchemeSync";
+import { buildColorSchemeInitScript } from "./lib/color-scheme";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -28,12 +30,13 @@ export default function RootLayout({
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{if(window.matchMedia("(prefers-color-scheme: dark)").matches)document.documentElement.classList.add("dark")}catch(e){}`,
+            __html: buildColorSchemeInitScript(),
           }}
         />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <div className="min-h-screen">{children}</div>
+        <ColorSchemeSync />
         <Analytics />
       </body>
     </html>

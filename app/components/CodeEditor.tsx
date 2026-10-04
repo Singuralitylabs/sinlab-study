@@ -45,10 +45,9 @@ function getDarkClassServerSnapshot() {
 }
 
 export function CodeEditor({ value, onChange, language, placeholder }: CodeEditorProps) {
-  // Use the dark class that layout.tsx's inline script sets once at startup as the initial value.
-  // Deferring to a prefers-color-scheme useEffect would mount dark-mode users in light first. The
-  // dark class is only set at startup and never changes in-app, so OS theme changes while the page
-  // is open aren't followed (same as Tailwind's dark: variant; reload to apply).
+  // Initial value comes from the .dark class that layout.tsx's head script sets before first paint
+  // (deferring to a useEffect would mount dark-mode users in light first). ColorSchemeSync toggles it
+  // on client navigation and subscribeDarkClass follows; OS theme changes while open are not followed.
   const isDark = useSyncExternalStore(
     subscribeDarkClass,
     getDarkClassSnapshot,
