@@ -605,7 +605,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 **エディタ機能**:
 - シンタックスハイライト
 - 自動インデント・ブラケット補完
-- ライト / ダークモード対応（未認証画面 `/login`・`/demo`（配下すべて）・`/rejected` は例外で、OS設定にかかわらず常にライト表示。`LIGHT_ONLY_PATH_PREFIXES`（`app/lib/color-scheme.ts`）が対象パスの唯一の定義で、`layout.tsx` のインラインスクリプトと `ColorSchemeSync`（クライアント遷移時に `<html>` の `dark` クラスを付け外し）が共有する。`layout.tsx` が起動時に付与する `dark` クラス連動。`useSyncExternalStore` で初期値を取得し、マウント直後のライト→ダークちらつきを防ぐ。表示中の OS テーマ切替には追従せず再読み込みで反映——Tailwind の `dark:` と同じ）
+- ライト / ダークモード対応（未認証画面 `/login`・`/demo`（配下すべて）・`/rejected` は例外で、OS設定にかかわらず常にライト表示。`LIGHT_ONLY_PATH_PREFIXES`（`app/lib/color-scheme.ts`）が対象パスの唯一の定義で、`layout.tsx` のインラインスクリプトと `ColorSchemeSync`（クライアント遷移時に `<html>` の `dark` クラスを付け外し）が共有する。`<html>` の `dark` クラスに連動し、`layout.tsx` の head スクリプトが初回描画前に付与する。`useSyncExternalStore` で初期値を取得し、マウント直後のライト→ダークちらつきを防ぐ。表示中の OS テーマ切替には追従せず再読み込みで反映——Tailwind の `dark:` と同じ）
 
 CodeMirror本体は数百KB規模のため遅延読み込みする（クライアント読み込み方針は5.4.6）。
 

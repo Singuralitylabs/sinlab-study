@@ -90,6 +90,7 @@
  * primary は #BF3F16（白 5.33:1・#FFF8F0 5.06:1・#FFEFE0 4.74:1）、accent-foreground は
  * #A8390F（#FFE4CB 5.28:1）まで濃くしている。
  */
+/* Keep scrollbars, form controls and overscroll light on light-only screens even under OS dark / browser force-dark. */
 :root:not(.dark) {
   color-scheme: light;
 }
