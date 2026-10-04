@@ -111,27 +111,6 @@
   --login-card-shadow: 0 24px 60px -20px rgba(30, 26, 56, 0.22);
 }
 
-:is(.dark .login-theme, :root.dark:has(.login-theme)) {
-  --background: #16132a;
-  --foreground: #f4f1ec;
-  --card: #1f1b38;
-  --card-foreground: #f4f1ec;
-  --popover: #1f1b38;
-  --popover-foreground: #f4f1ec;
-  --primary: #ff8a63;
-  --primary-foreground: #1e1a38;
-  --secondary: #221e3d;
-  --secondary-foreground: #f4f1ec;
-  --muted: #221e3d;
-  --muted-foreground: #b4b0c9;
-  --accent: rgba(255, 107, 61, 0.16);
-  --accent-foreground: #ff8a63;
-  --border: rgba(255, 255, 255, 0.1);
-  --input: rgba(255, 255, 255, 0.24);
-  --ring: #ff8a63;
-  --login-card-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.6);
-}
-
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
