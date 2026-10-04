@@ -80,6 +80,14 @@
 }
 
 /*
+ * Keep scrollbars, form controls and overscroll light on light-only screens even under OS dark
+ * or browser force-dark.
+ */
+:root:not(.dark) {
+  color-scheme: light;
+}
+
+/*
  * ログイン画面（`/login`）専用の配色。LP（SERVICE_LP_URL）の配色に合わせ、
  * `.login-theme` 配下だけセマンティックトークンを上書きする（他の画面は上の :root / .dark のまま）。
  * オーバースクロール時に body の地色が見えないよう、`.login-theme` を含むページでは
@@ -90,11 +98,6 @@
  * primary は #BF3F16（白 5.33:1・#FFF8F0 5.06:1・#FFEFE0 4.74:1）、accent-foreground は
  * #A8390F（#FFE4CB 5.28:1）まで濃くしている。
  */
-/* Keep scrollbars, form controls and overscroll light on light-only screens even under OS dark / browser force-dark. */
-:root:not(.dark) {
-  color-scheme: light;
-}
-
 :is(.login-theme, :root:has(.login-theme)) {
   --background: #fff8f0;
   --foreground: #1e1a38;
