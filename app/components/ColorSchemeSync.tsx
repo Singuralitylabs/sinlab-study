@@ -4,8 +4,7 @@ import { usePathname } from "next/navigation";
 import { useLayoutEffect } from "react";
 import { LIGHT_ONLY_PATH_PREFIXES, shouldUseOsColorScheme } from "@/app/lib/color-scheme";
 
-// The head script only runs on full loads; client navigations (<Link>) between light-only and
-// OS-following screens need the .dark class re-evaluated, or one side stays stuck on the other's theme.
+// The head script only runs on full loads; <Link> navigations need .dark re-evaluated.
 export function ColorSchemeSync() {
   const pathname = usePathname();
 

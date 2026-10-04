@@ -80,14 +80,6 @@
 }
 
 /*
- * Keep scrollbars, form controls and overscroll light on light-only screens even under OS dark
- * or browser force-dark.
- */
-:root:not(.dark) {
-  color-scheme: light;
-}
-
-/*
  * ログイン画面（`/login`）専用の配色。LP（SERVICE_LP_URL）の配色に合わせ、
  * `.login-theme` 配下だけセマンティックトークンを上書きする（他の画面は上の :root / .dark のまま）。
  * オーバースクロール時に body の地色が見えないよう、`.login-theme` を含むページでは
