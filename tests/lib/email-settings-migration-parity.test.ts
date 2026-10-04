@@ -15,10 +15,18 @@ const migration = readFileSync(
   "utf8"
 );
 
+const certificatesMigration = readFileSync(
+  join(process.cwd(), "supabase/migrations/20261005000000_add_certificates.sql"),
+  "utf8"
+);
+
 /** Parses the seed rows `('kind', enabled, send_days, send_weekday)` of email_kind_settings. */
 function seededKinds() {
   const rows = [
-    ...migration.matchAll(/\('([a-z_]+)', (true|false), (NULL|ARRAY\[[\d, ]+\]), (NULL|\d)\)/g),
+    // Later migrations add kinds (certificate_issued, #291) to the same table.
+    ...`${migration}\n${certificatesMigration}`.matchAll(
+      /\('([a-z_]+)', (true|false), (NULL|ARRAY\[[\d, ]+\]), (NULL|\d)\)/g
+    ),
   ];
   return new Map(
     rows.map(([, kind, enabled, days, weekday]) => [

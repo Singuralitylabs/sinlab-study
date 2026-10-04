@@ -1,6 +1,7 @@
 import { Users } from "lucide-react";
 import { PageTitle } from "@/app/components/PageTitle";
 import { fetchStudentsProgress } from "@/app/services/api/admin-server";
+import { fetchCertificateCountsByUser } from "@/app/services/api/certificates-server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -22,7 +23,10 @@ function formatDate(dateString: string | null) {
 }
 
 export default async function ManageStudentsPage() {
-  const { data: students } = await fetchStudentsProgress();
+  const [{ data: students }, certificateCounts] = await Promise.all([
+    fetchStudentsProgress(),
+    fetchCertificateCountsByUser(),
+  ]);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -37,12 +41,13 @@ export default async function ManageStudentsPage() {
         </Card>
       ) : (
         <Card className="overflow-x-auto">
-          <Table className="min-w-[700px]">
+          <Table className="min-w-[760px]">
             <TableHeader>
               <TableRow>
                 <TableHead>名前</TableHead>
                 <TableHead>メール</TableHead>
                 <TableHead className="text-center">進捗</TableHead>
+                <TableHead className="text-center">修了証</TableHead>
                 <TableHead className="text-right">最終アクティビティ</TableHead>
               </TableRow>
             </TableHeader>
@@ -66,6 +71,9 @@ export default async function ManageStudentsPage() {
                           {student.completedContents}/{student.totalContents}
                         </span>
                       </div>
+                    </TableCell>
+                    <TableCell className="text-sm text-center">
+                      {certificateCounts.get(student.user.id) ?? 0}枚
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground text-right">
                       {formatDate(student.lastActivity)}

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Award,
   BookOpen,
   ClipboardList,
   CreditCard,
@@ -44,6 +45,12 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     icon: <ClipboardList className="h-5 w-5" />,
   },
 ];
+
+const CERTIFICATES_NAV_ITEM: NavItem = {
+  title: "修了証",
+  href: "/certificates",
+  icon: <Award className="h-5 w-5" />,
+};
 
 function announcementsNavItem(unreadCount: number): NavItem {
   return {
@@ -150,11 +157,13 @@ export function SideNav({
   isAdmin,
   isInstructor,
   stripeEnabled,
+  showCertificates,
   unreadAnnouncementCount,
 }: {
   isAdmin: boolean;
   isInstructor: boolean;
   stripeEnabled: boolean;
+  showCertificates: boolean;
   unreadAnnouncementCount: number;
 }) {
   const [open, setOpen] = useState(false);
@@ -163,13 +172,14 @@ export function SideNav({
   const navItems = useMemo<NavItem[]>(
     () => [
       ...DEFAULT_NAV_ITEMS,
+      ...(showCertificates ? [CERTIFICATES_NAV_ITEM] : []),
       announcementsNavItem(unreadAnnouncementCount),
       // No payment/billing-management entry while disabled (see AGENTS.md).
       ...(stripeEnabled ? [UPGRADE_NAV_ITEM] : []),
       ...(isInstructor ? [MANAGE_NAV_ITEM] : []),
       ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),
     ],
-    [isAdmin, isInstructor, stripeEnabled, unreadAnnouncementCount]
+    [isAdmin, isInstructor, stripeEnabled, showCertificates, unreadAnnouncementCount]
   );
 
   const handleSignOut = async () => {
@@ -184,7 +194,7 @@ export function SideNav({
         variant="outline"
         size="icon"
         onClick={() => setOpen(true)}
-        className="sm:hidden fixed top-4 left-4 z-50"
+        className="sm:hidden fixed top-4 left-4 z-50 print:hidden"
         aria-label="メニューを開く"
       >
         <Menu className="h-5 w-5" />
@@ -215,7 +225,7 @@ export function SideNav({
         </SheetContent>
       </Sheet>
 
-      <div className="hidden sm:flex h-screen w-64 flex-col fixed left-0 top-0 border-r border-sidebar-border bg-sidebar">
+      <div className="hidden sm:flex print:hidden! h-screen w-64 flex-col fixed left-0 top-0 border-r border-sidebar-border bg-sidebar">
         <div className="px-6 py-5 border-b border-sidebar-border">
           <Link href="/" className="text-xl font-bold flex items-center gap-2">
             <Image src="/icon.png" alt="Sinlab Study" width={28} height={28} />
