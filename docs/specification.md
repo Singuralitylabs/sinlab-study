@@ -606,7 +606,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 - シンタックスハイライト
 - 自動インデント・ブラケット補完
 - ライト / ダークモード対応（OS設定連動）
-  - `<html>` の `dark` クラスで制御する。`layout.tsx` の head スクリプトが初回描画前に付与し、`useSyncExternalStore` で初期値を取得してマウント直後のライト→ダークちらつきを防ぐ。表示中の OS テーマ切替には追従せず再読み込みで反映する（Tailwind の `dark:` と同じ）。
+  - `<html>` の `dark` クラスで制御する。`layout.tsx` の head スクリプトが初回描画前に付与し、`useSyncExternalStore` で初期値を取得してマウント直後のライト→ダークちらつきを防ぐ。表示中の OS テーマ切替には即時には追従せず、次のページ遷移（`ColorSchemeSync` が再評価する）または再読み込みで反映する。
   - 例外: 未認証画面 `/login`・`/demo`（配下すべて）・`/rejected` は OS 設定にかかわらず常にライト表示。
   - 対象パスは `LIGHT_ONLY_PATH_PREFIXES`（`app/lib/color-scheme.ts`）が唯一の定義で、head スクリプトと `ColorSchemeSync`（クライアント遷移時に `dark` クラスを付け外し）が共有する。
 
