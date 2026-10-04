@@ -47,7 +47,9 @@ function getDarkClassServerSnapshot() {
 export function CodeEditor({ value, onChange, language, placeholder }: CodeEditorProps) {
   // Initial value comes from the .dark class that layout.tsx's head script sets before first paint
   // (deferring to a useEffect would mount dark-mode users in light first). ColorSchemeSync toggles it
-  // on client navigation and subscribeDarkClass follows; OS theme changes while open are not followed.
+  // on client navigation and subscribeDarkClass follows (the one-render lag after a navigation is
+  // corrected by the MutationObserver in a microtask, before paint); OS theme changes while open are
+  // not followed.
   const isDark = useSyncExternalStore(
     subscribeDarkClass,
     getDarkClassSnapshot,
