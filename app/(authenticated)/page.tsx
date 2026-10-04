@@ -1,4 +1,4 @@
-import { BookOpen, CheckCircle, Clock, Megaphone, TrendingUp } from "lucide-react";
+import { Award, BookOpen, CheckCircle, Clock, Megaphone, TrendingUp } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
@@ -6,10 +6,12 @@ import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT } from "@/app/constants/announcements";
 import { getWelcomeStepsForStatus } from "@/app/constants/onboarding";
 import { isStripeEnabled } from "@/app/constants/stripe";
+import { isCertificateEligible } from "@/app/lib/certificate";
 import { formatDate } from "@/app/lib/format-date";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
 import { shouldShowTrialNextStep } from "@/app/lib/trial-upgrade";
 import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
+import { fetchRecentCertificate } from "@/app/services/api/certificates-server";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
 import {
   fetchGettingStartedProgress,
@@ -40,13 +42,21 @@ export default async function HomePage() {
 
   const isMember = !checkInstructorPermissions(userRole);
 
-  const [{ data: themeData }, onboardingResult, gettingStartedResult, announcementsResult] =
-    await Promise.all([
-      fetchThemeProgressSummaries(userId),
-      isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
-      isMember ? fetchGettingStartedProgress(userId) : Promise.resolve({ data: null, error: null }),
-      getViewerAnnouncements(),
-    ]);
+  const [
+    { data: themeData },
+    onboardingResult,
+    gettingStartedResult,
+    announcementsResult,
+    recentCertificate,
+  ] = await Promise.all([
+    fetchThemeProgressSummaries(userId),
+    isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
+    isMember ? fetchGettingStartedProgress(userId) : Promise.resolve({ data: null, error: null }),
+    getViewerAnnouncements(),
+    isCertificateEligible(userStatus, userRole)
+      ? fetchRecentCertificate(userId)
+      : Promise.resolve(null),
+  ]);
   const unreadAnnouncements = (announcementsResult.data ?? [])
     .filter((announcement) => !announcement.isRead)
     .slice(0, DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT);
@@ -79,6 +89,25 @@ export default async function HomePage() {
           steps={getWelcomeStepsForStatus(userStatus)}
           stripeEnabled={isStripeEnabled()}
         />
+      )}
+
+      {recentCertificate && (
+        <Card className="mb-6 border-l-4 border-l-success">
+          <CardContent className="pt-6">
+            <Link
+              href={`/certificates/${recentCertificate.id}`}
+              className="flex items-center gap-3 hover:text-primary"
+            >
+              <Award className="h-6 w-6 text-success shrink-0" />
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold">修了証が発行されました</h2>
+                <p className="text-sm text-muted-foreground truncate">
+                  {recentCertificate.theme_name}
+                </p>
+              </div>
+            </Link>
+          </CardContent>
+        </Card>
       )}
 
       {unreadAnnouncements.length > 0 && (

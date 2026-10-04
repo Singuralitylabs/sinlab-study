@@ -15,6 +15,7 @@ import {
 import {
   buildApprovedEmail,
   buildCancelScheduledEmail,
+  buildCertificateIssuedEmail,
   buildSignupEmail,
   buildSubscriptionEndedEmail,
   buildUpgradedEmail,
@@ -316,6 +317,36 @@ export function scheduleSubscriptionEndedEmail(params: {
       { column: "id", value: params.userId },
       (recipient, appUrl, texts) =>
         buildSubscriptionEndedEmail({ displayName: recipient.displayName, appUrl }, texts)
+    )
+  );
+}
+
+/**
+ * Certificate issued (when issueCertificateIfEligible() inserted the row). reference_key is
+ * `certificates.id`, so a retry or a second path never mails the same certificate twice.
+ */
+export function scheduleCertificateIssuedEmail(params: {
+  userId: number;
+  certificateId: number;
+  themeName: string;
+  certificateNo: string;
+}): void {
+  scheduleEmail(EMAIL_KIND.CERTIFICATE_ISSUED, () =>
+    deliverToUser(
+      EMAIL_KIND.CERTIFICATE_ISSUED,
+      String(params.certificateId),
+      { column: "id", value: params.userId },
+      (recipient, appUrl, texts) =>
+        buildCertificateIssuedEmail(
+          {
+            displayName: recipient.displayName,
+            appUrl,
+            certificateId: params.certificateId,
+            themeName: params.themeName,
+            certificateNo: params.certificateNo,
+          },
+          texts
+        )
     )
   );
 }

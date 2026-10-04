@@ -14,6 +14,7 @@ import { sendEmail } from "@/app/services/notifications/email";
 import {
   scheduleApprovedEmail,
   scheduleCancelScheduledEmail,
+  scheduleCertificateIssuedEmail,
   scheduleSignupEmail,
   scheduleSubscriptionEndedEmail,
   scheduleUpgradedEmail,
@@ -149,6 +150,68 @@ describe("送信ログ（email_logs）の claim → 送信 → 記録", () => {
     await runScheduled();
 
     expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("scheduleCertificateIssuedEmail（#291）", () => {
+  const certificate = {
+    userId: 7,
+    certificateId: 31,
+    themeName: "GAS 学習（基礎編）",
+    certificateNo: "SS-202610-ABC123",
+  };
+
+  it("reference_key は certificates.id で claim し、修了証ページへのリンクを送る", async () => {
+    const client = mockAdmin({
+      users: { data: recipientRow, error: null },
+      email_kind_settings: { data: { enabled: true }, error: null },
+      email_logs: [
+        { data: { id: 11 }, error: null },
+        { data: null, error: null },
+      ],
+    });
+
+    scheduleCertificateIssuedEmail(certificate);
+    await runScheduled();
+
+    const [claim] = emailLogBuilders(client);
+    expect(claim.insert).toHaveBeenCalledWith({
+      user_id: 7,
+      kind: "certificate_issued",
+      reference_key: "31",
+    });
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "user@example.com",
+        text: expect.stringContaining(`${APP_URL}/certificates/31`),
+      })
+    );
+  });
+
+  it("管理画面で無効にされている（email_kind_settings.enabled = false）と送らない", async () => {
+    const client = mockAdmin({
+      users: { data: recipientRow, error: null },
+      email_kind_settings: { data: { enabled: false }, error: null },
+    });
+
+    scheduleCertificateIssuedEmail(certificate);
+    await runScheduled();
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(emailLogBuilders(client)).toHaveLength(0);
+  });
+
+  it("同じ修了証のメールは二重に送らない（UNIQUE 違反）", async () => {
+    mockAdmin({
+      users: { data: recipientRow, error: null },
+      email_kind_settings: { data: { enabled: true }, error: null },
+      email_logs: duplicate,
+    });
+
+    scheduleCertificateIssuedEmail(certificate);
+    await runScheduled();
+
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 });
 

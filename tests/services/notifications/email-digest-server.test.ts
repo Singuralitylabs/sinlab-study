@@ -325,6 +325,7 @@ function defaultKindRows(): Row[] {
     row("inactivity_reminder", { send_days: [...INACTIVITY_REMINDER_DAYS] }),
     row("trial_nurture", { send_days: [...TRIAL_NURTURE_DAYS] }),
     row("announcement"),
+    row("certificate_issued"),
   ];
 }
 

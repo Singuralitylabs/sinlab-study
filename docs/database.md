@@ -39,6 +39,8 @@ erDiagram
     users ||--o{ email_settings : "updated_by"
     users ||--o{ email_templates : "updated_by"
     users ||--o{ email_test_sends : "user_id"
+    users ||--o{ certificates : "1:N"
+    learning_themes ||--o{ certificates : "1:N"
     announcements ||--o{ announcement_reads : "1:N"
     users ||--o{ announcement_reads : "1:N"
 ```
@@ -194,6 +196,8 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 - `send_weekday`: 週次進捗の送信曜日（0 = 日曜〜6 = 土曜。CHECK）。`weekly_digest` のみ使用
 - `updated_at` / `updated_by`（`users.id`、`ON DELETE SET NULL`）
 
+`certificate_issued`（修了証の発行メール。13章）は #291 のマイグレーション（`20261005000000_add_certificates.sql`）が追加する。
+
 初期値: 全種別が有効、`inactivity_reminder` は 7・14 日目、`trial_nurture` は 2・5・7・14 日目、`weekly_digest` は月曜（1）。#253 時点の定数と一致する（テストで確認している）。
 
 ### 3.16 email_settings（メール通知の共通設定）
@@ -217,6 +221,16 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 ### 3.18 email_test_sends（テスト送信の記録）
 
 管理画面のテスト送信（[機能設計書](./specification.md)10.11節）の1日の回数を数えるための記録（`id` / `user_id`（`ON DELETE SET NULL`）/ `created_at`）。`email_logs` とは別にし、案内系メールの1日の上限の集計に影響させない。本文・宛先は保存しない。枠の確保は関数 `claim_email_test_send(p_user_id, p_day_start, p_limit)` が `pg_advisory_xact_lock` の中で「数える → 上限未満なら INSERT」を行う（上限なら NULL。`authenticated` / `anon` には実行権限を与えず、service_role のみ）。
+
+### 3.19 certificates（修了証）
+
+テーマ修了時に自動発行する修了証（[機能設計書](./specification.md)13章）。
+
+- **`UNIQUE (user_id, theme_id)`**: 1テーマ1枚。発行処理はこの違反を「発行済み」として扱い、冪等にする（二重発行・二重メールを防ぐ）
+- **`certificate_no`**: `SS-YYYYMM-XXXXXX`。一意（`UNIQUE`）で、形式は CHECK で縛る。将来の公開検証ページ用
+- **`recipient_name` / `theme_name`**: 発行時点の `users.display_name` / `learning_themes.name` の**スナップショット**。後から名前やテーマ名を変えても、発行済みの修了証は変わらない。受講者名を `users.display_name` の参照にしないのは、将来「修了証に載せる氏名」をプロフィールで設定できる余地を残すため
+- `user_id` / `theme_id` はどちらも `ON DELETE CASCADE`
+- 書き込みは service_role のみ（`POST /api/progress` の完了直後。`user_id` は認証済みの本人に固定）。受講生・管理画面からの INSERT / UPDATE / DELETE の経路は無い
 
 ---
 
@@ -384,6 +398,14 @@ SELECT は本人のみ。INSERT は本人かつ、`announcements` の SELECT ポ
 ### 6.14 email_templates / email_test_sends
 
 `email_templates` は SELECT / INSERT / UPDATE / DELETE とも admin のみ（条件は `(select get_user_role()) = 'admin'`。INSERT は WITH CHECK、UPDATE は USING / WITH CHECK）。同一操作のポリシーは1本にまとめる。maintainer には開放しない。メール送信（`deliverToUser()`・`runEmailDigest()`）は service_role で読む（RLS をバイパスする）。`email_test_sends` は RLS を有効にしポリシーを定義しない（service_role 専用。`email_logs` と同じ）。
+
+### 6.16 certificates
+
+| 操作 | 対象 | 条件 |
+|:--|:--|:--|
+| SELECT | 本人 / admin・maintainer | `user_id = (select get_user_id())` または `(select get_user_role()) IN ('admin', 'maintainer')`（OR で1本） |
+
+INSERT / UPDATE / DELETE のポリシーは定義しない（受講生・管理者のセッションからは書き込めない。発行は service_role のみ）。`get_user_xxx()` は `(select ...)` で包み、同一操作のポリシーは1本にまとめる。却下ユーザーは `get_user_id()` / `get_user_role()` が NULL のため読めない。`/certificates/[id]` は RLS に加えてアプリ層で `user_id` を本人に絞り、admin / maintainer でも他人の修了証ページは開けない（[機能設計書](./specification.md)13.3節）。
 
 ### 6.15 get_weekly_funnel
 

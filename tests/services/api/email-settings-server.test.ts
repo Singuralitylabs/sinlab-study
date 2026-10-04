@@ -37,6 +37,7 @@ const allKindRows = [
   kindRow("inactivity_reminder", { send_days: [14, 7], updated_by: 5 }),
   kindRow("trial_nurture", { send_days: [2, 5, 7, 14] }),
   kindRow("announcement"),
+  kindRow("certificate_issued"),
 ];
 const settingsRow = { digest_daily_limit: 80, updated_at: "2026-10-01T00:00:00Z", updated_by: 5 };
 

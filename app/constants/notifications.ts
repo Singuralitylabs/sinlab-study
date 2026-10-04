@@ -56,6 +56,7 @@ export const EMAIL_KIND = {
   INACTIVITY_REMINDER: "inactivity_reminder",
   TRIAL_NURTURE: "trial_nurture",
   ANNOUNCEMENT: "announcement",
+  CERTIFICATE_ISSUED: "certificate_issued",
 } as const;
 
 export type EmailKind = (typeof EMAIL_KIND)[keyof typeof EMAIL_KIND];
@@ -149,6 +150,7 @@ export const EMAIL_KIND_LABELS: Record<EmailKind, string> = {
   inactivity_reminder: "未学習リマインド",
   trial_nurture: "お試しユーザー向け案内",
   announcement: "お知らせ一斉送信",
+  certificate_issued: "修了証の発行",
 };
 
 /** Consequence shown in the confirmation dialog when a transactional kind is disabled. */
@@ -158,6 +160,7 @@ export const TRANSACTIONAL_DISABLE_IMPACT: Partial<Record<EmailKind, string>> = 
   upgraded: "有料会員になったことのメールが本人に届かなくなります。",
   cancel_scheduled: "解約予約のメールが本人に届かなくなります。",
   subscription_ended: "有料会員の終了がメールで伝わらなくなります。",
+  certificate_issued: "修了証が発行されたことのメールが本人に届かなくなります。",
 };
 
 export const EMAIL_LOG_PAGE_SIZE = 50;

@@ -206,3 +206,4 @@ export interface WeekProgress {
 }
 
 export type Announcement = Tables<"announcements">;
+export type Certificate = Tables<"certificates">;

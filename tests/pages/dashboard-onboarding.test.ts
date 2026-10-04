@@ -6,6 +6,7 @@ vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/learning-server");
 vi.mock("@/app/services/api/onboarding-server");
 vi.mock("@/app/services/api/announcements-server");
+vi.mock("@/app/services/api/certificates-server");
 vi.mock("@/app/services/api/upgrade-price-server", () => ({
   fetchUpgradePriceLabel: vi.fn().mockResolvedValue("月額1,500円（税込）"),
 }));
@@ -34,6 +35,7 @@ vi.mock("@/app/(authenticated)/components/GettingStartedChecklist", async (impor
 
 import HomePage from "@/app/(authenticated)/page";
 import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
+import { fetchRecentCertificate } from "@/app/services/api/certificates-server";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
 import {
   fetchGettingStartedProgress,
@@ -83,6 +85,7 @@ const setup = ({
     error: null,
   } as never);
   vi.mocked(getViewerAnnouncements).mockResolvedValue({ data: [], error: null });
+  vi.mocked(fetchRecentCertificate).mockResolvedValue(null);
 };
 
 const render = async () => renderToStaticMarkup(await HomePage());
@@ -233,5 +236,47 @@ describe("ダッシュボードの「次のステップ」カード（issue #288
     const html = await render();
 
     expect(html).not.toContain("お試しコンテンツをすべて完了しました");
+  });
+});
+
+describe("ダッシュボードの修了証カード（issue #291）", () => {
+  const certificate = {
+    id: 7,
+    user_id: 2,
+    theme_id: 1,
+    certificate_no: "SS-202610-ABC123",
+    recipient_name: "山田 太郎",
+    theme_name: "GAS学習",
+    issued_at: "2026-10-04T00:00:00Z",
+    created_at: "2026-10-04T00:00:00Z",
+  };
+
+  it("直近に発行された修了証があれば、リンク付きのカードを表示する", async () => {
+    setup({ completedAt: "2026-09-01T00:00:00Z" });
+    vi.mocked(fetchRecentCertificate).mockResolvedValue(certificate);
+
+    const html = await render();
+
+    expect(html).toContain("修了証が発行されました");
+    expect(html).toContain('href="/certificates/7"');
+  });
+
+  it("修了証が無ければ表示しない", async () => {
+    setup({ completedAt: "2026-09-01T00:00:00Z" });
+
+    const html = await render();
+
+    expect(html).not.toContain("修了証が発行されました");
+  });
+
+  it.each([
+    ["trial", "member", "trial"],
+    ["admin", "admin", "active"],
+  ] as const)("%s には修了証を取得しない（発行対象外）", async (_label, userRole, userStatus) => {
+    setup({ userRole, userStatus, completedAt: "2026-09-01T00:00:00Z" });
+
+    await render();
+
+    expect(fetchRecentCertificate).not.toHaveBeenCalled();
   });
 });
