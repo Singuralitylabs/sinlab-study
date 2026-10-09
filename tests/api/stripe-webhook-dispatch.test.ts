@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/api/stripe-server");
-vi.mock("@/app/services/api/stripe-webhook-server");
+// Keep the real extractUserId: the route uses it to tell this app's sessions from foreign ones.
+vi.mock("@/app/services/api/stripe-webhook-server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/app/services/api/stripe-webhook-server")>()),
+  activateUserFromCheckoutSession: vi.fn(),
+  claimEvent: vi.fn(),
+  releaseEventClaim: vi.fn(),
+  syncSubscriptionStatus: vi.fn(),
+}));
 vi.mock("@/app/services/notifications/slack");
 
 import { POST } from "@/app/api/stripe/webhook/route";
@@ -22,6 +29,9 @@ const request = (body: string) =>
   });
 
 const mockConstructEvent = vi.fn();
+
+// A session created by this app's createCheckoutSession() (user id + subscription mode).
+const ownSession = { id: "cs_1", client_reference_id: "19", metadata: {}, mode: "subscription" };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -50,17 +60,16 @@ afterEach(() => {
 
 describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
   it("checkout.session.completed はactivateUserFromCheckoutSessionを呼ぶ", async () => {
-    const session = { id: "cs_1" };
     mockConstructEvent.mockReturnValue({
       id: "evt_1",
       type: "checkout.session.completed",
-      data: { object: session },
+      data: { object: ownSession },
     });
 
     const res = await POST(request("{}") as never);
 
     expect(res.status).toBe(200);
-    expect(activateUserFromCheckoutSession).toHaveBeenCalledWith(session);
+    expect(activateUserFromCheckoutSession).toHaveBeenCalledWith(ownSession);
     expect(syncSubscriptionStatus).not.toHaveBeenCalled();
     // Claim first, then run the handler.
     expect(claimEvent).toHaveBeenCalledWith("evt_1", "checkout.session.completed");
@@ -120,6 +129,61 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     expect(sendSlackPaymentFailedNotification).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      label: "ユーザーを特定できない（Payment Link 等の他用途の決済）",
+      session: { id: "cs_plink", client_reference_id: null, metadata: {}, mode: "payment" },
+    },
+    {
+      label: "ユーザーidはあるが mode が subscription ではない",
+      session: { id: "cs_pay", client_reference_id: "19", metadata: {}, mode: "payment" },
+    },
+    {
+      label: "mode は subscription だがユーザーidが無い",
+      session: { id: "cs_nouser", client_reference_id: null, metadata: null, mode: "subscription" },
+    },
+  ])(
+    "checkout.session.completed: $label は昇格処理を呼ばず200でスキップし、claimを残す",
+    async ({ session }) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockConstructEvent.mockReturnValue({
+        id: "evt_foreign",
+        type: "checkout.session.completed",
+        data: { object: session },
+      });
+
+      const res = await POST(request("{}") as never);
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({ received: true, skipped: true });
+      expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
+      // The claim stays so a redelivery is answered 200 without reaching the handler.
+      expect(claimEvent).toHaveBeenCalledWith("evt_foreign", "checkout.session.completed");
+      expect(releaseEventClaim).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledTimes(1);
+      warn.mockRestore();
+    }
+  );
+
+  it("checkout.session.completed: metadata.user_id だけのセッションも自アプリのものとして昇格処理を呼ぶ", async () => {
+    const session = {
+      id: "cs_meta",
+      client_reference_id: null,
+      metadata: { user_id: "19" },
+      mode: "subscription",
+    };
+    mockConstructEvent.mockReturnValue({
+      id: "evt_meta",
+      type: "checkout.session.completed",
+      data: { object: session },
+    });
+
+    const res = await POST(request("{}") as never);
+
+    expect(res.status).toBe(200);
+    expect(activateUserFromCheckoutSession).toHaveBeenCalledWith(session);
+  });
+
   it("claimがDBエラーを返した場合は500を返し、ハンドラを呼ばない", async () => {
     vi.mocked(claimEvent).mockResolvedValue({
       claimed: false,
@@ -129,7 +193,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     mockConstructEvent.mockReturnValue({
       id: "evt_claim_error",
       type: "checkout.session.completed",
-      data: { object: {} },
+      data: { object: ownSession },
     });
 
     const res = await POST(request("{}") as never);
@@ -143,7 +207,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     mockConstructEvent.mockReturnValue({
       id: "evt_5",
       type: "checkout.session.completed",
-      data: { object: {} },
+      data: { object: ownSession },
     });
 
     const res = await POST(request("{}") as never);
@@ -162,7 +226,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     mockConstructEvent.mockReturnValue({
       id: "evt_6",
       type: "checkout.session.completed",
-      data: { object: {} },
+      data: { object: ownSession },
     });
 
     const res = await POST(request("{}") as never);
@@ -176,7 +240,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     mockConstructEvent.mockReturnValue({
       id: "evt_7",
       type: "checkout.session.completed",
-      data: { object: {} },
+      data: { object: ownSession },
     });
 
     const res = await POST(request("{}") as never);

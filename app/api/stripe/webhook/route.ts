@@ -5,10 +5,25 @@ import { getStripeClient, isStripeEnabled } from "@/app/services/api/stripe-serv
 import {
   activateUserFromCheckoutSession,
   claimEvent,
+  extractUserId,
   releaseEventClaim,
   syncSubscriptionStatus,
 } from "@/app/services/api/stripe-webhook-server";
 import { sendSlackPaymentFailedNotification } from "@/app/services/notifications/slack";
+
+/**
+ * True for a Checkout Session this app did not create. The Stripe account is shared with other
+ * sales (Payment Links etc.), whose checkout.session.completed events reach this endpoint too.
+ * Those sessions carry no user id and are not subscriptions; promoting them can never succeed, so
+ * answering 500 only makes Stripe retry and eventually disable the endpoint (#302). `mode` exists
+ * in every webhook API version, so reading it from the event body is safe.
+ */
+function isForeignCheckoutSession(session: Stripe.Checkout.Session): boolean {
+  return (
+    extractUserId(session.client_reference_id, session.metadata) === null ||
+    session.mode !== "subscription"
+  );
+}
 
 /**
  * Calls releaseEventClaim() guarded against exceptions. It reports DB errors via {error} instead of
@@ -71,9 +86,15 @@ export async function POST(request: NextRequest) {
 
     switch (event.type) {
       case "checkout.session.completed": {
-        const { error } = await activateUserFromCheckoutSession(
-          event.data.object as Stripe.Checkout.Session
-        );
+        const session = event.data.object as Stripe.Checkout.Session;
+        // Keep the claim so a redelivery of the same event is also answered 200 without work.
+        if (isForeignCheckoutSession(session)) {
+          console.warn(
+            `対象外のCheckout Sessionをスキップしました: id=${session.id} mode=${session.mode} payment_link=${session.payment_link ? "あり" : "なし"}`
+          );
+          return NextResponse.json({ received: true, skipped: true });
+        }
+        const { error } = await activateUserFromCheckoutSession(session);
         if (error) {
           console.error("会員昇格エラー:", error);
           await safeReleaseEventClaim(event.id, processedAt);
