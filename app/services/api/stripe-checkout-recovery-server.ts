@@ -1,9 +1,9 @@
 import Stripe from "stripe";
 import {
   activateUserFromCheckoutSession,
+  CHECKOUT_SESSION_REJECTION_MESSAGES,
   claimEvent,
   extractUserId,
-  isForeignCheckoutSession,
   reactivateUserFromMirror,
 } from "@/app/services/api/stripe-webhook-server";
 import { sendSlackCheckoutRecoveryNotification } from "@/app/services/notifications/slack";
@@ -44,8 +44,9 @@ export type CheckoutRecovery =
  * - multiple paid sessions (normally impossible with one claim): if the first reflection releases
  *   the claim and the second fails, a next Checkout could be created while the second valid
  *   subscription remains (double subscription)
- * - session was not created by this app (see isForeignCheckoutSession())
  * - session user does not match the caller: it would write someone else's subscription
+ * - activateUserFromCheckoutSession() rejected the session (CheckoutSessionRejection: not this
+ *   app's, or its auth_id does not match the user)
  * - session has no customer / subscription: reflection always fails
  * - Stripe returned a permanent error (4xx such as subscription missing)
  * @param heldClaimedAt claim time used for the decision, so this reflection cannot release a
@@ -70,11 +71,6 @@ export async function recoverCompletedCheckout(
     return await unrecoverable("決済済みのセッションが複数あります");
   }
   const [session] = sessions;
-  // Normally impossible on our own Customer, but activateUserFromCheckoutSession() would reject
-  // it on every request, so report it once instead of answering 500 forever.
-  if (isForeignCheckoutSession(session)) {
-    return await unrecoverable("このアプリで作成したCheckoutセッションではありません");
-  }
   // Customers are unique per user, so normally these match.
   if (extractUserId(session.client_reference_id, session.metadata) !== userId) {
     return await unrecoverable("セッションのユーザーが一致しません");
@@ -90,6 +86,11 @@ export async function recoverCompletedCheckout(
     if (result.error) {
       console.error("決済済みCheckoutセッションの反映エラー:", result.error);
       return { kind: "error" };
+    }
+    // Normally impossible on our own Customer, but the answer never changes, so holding the claim
+    // as a transient error would lock the user out of Checkout with no one told.
+    if (result.rejection) {
+      return await unrecoverable(CHECKOUT_SESSION_REJECTION_MESSAGES[result.rejection]);
     }
     return result.activated ? { kind: "activated", sessionId: session.id } : { kind: "applied" };
   } catch (error) {

@@ -9,7 +9,6 @@ import {
 import {
   activateUserFromCheckoutSession,
   extractUserId,
-  isForeignCheckoutSession,
 } from "@/app/services/api/stripe-webhook-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Button } from "@/components/ui/button";
@@ -37,20 +36,20 @@ export default async function UpgradeSuccessPage({
       const session = await retrieveCheckoutSession(sessionId);
       const sessionUserId = extractUserId(session.client_reference_id, session.metadata);
 
-      // activateUserFromCheckoutSession() rejects foreign sessions too; checking here as well shows
-      // "could not verify" instead of a retry prompt that can never succeed.
       if (
         !PAID_CHECKOUT_PAYMENT_STATUSES.includes(session.payment_status) ||
-        isForeignCheckoutSession(session) ||
         sessionUserId !== userId
       ) {
         errorMessage = "決済情報を確認できませんでした";
       } else {
         // The redirect can land here before the webhook, so run the same idempotent promotion here
         // too (safe even if it overlaps the webhook).
-        const { error, activated, currentPeriodEnd } =
+        const { error, rejection, activated, currentPeriodEnd } =
           await activateUserFromCheckoutSession(session);
-        if (error) {
+        if (rejection) {
+          // Reloading cannot change the answer, so no retry prompt.
+          errorMessage = "決済情報を確認できませんでした";
+        } else if (error) {
           console.error("会員昇格エラー:", error);
           errorMessage = "会員登録の反映に失敗しました。時間をおいて再度お試しください";
         } else if (!activated) {

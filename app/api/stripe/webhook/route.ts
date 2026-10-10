@@ -4,6 +4,7 @@ import { STRIPE_DISABLED_MESSAGE } from "@/app/constants/stripe";
 import { getStripeClient, isStripeEnabled } from "@/app/services/api/stripe-server";
 import {
   activateUserFromCheckoutSession,
+  CHECKOUT_SESSION_REJECTION_MESSAGES,
   claimEvent,
   isForeignCheckoutSession,
   isMirroredStripeObject,
@@ -30,6 +31,8 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object;
+      // activateUserFromCheckoutSession() makes the same check, but only after the claim; doing it
+      // here too keeps the shared account's Payment Link sales out of stripe_events.
       if (isForeignCheckoutSession(session)) {
         return {
           kind: "skip",
@@ -39,11 +42,19 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
       return {
         kind: "handle",
         run: async () => {
-          const { error } = await activateUserFromCheckoutSession(session);
+          const { error, rejection } = await activateUserFromCheckoutSession(session);
           if (error) {
             console.error("会員昇格エラー:", error);
+            return error;
           }
-          return error;
+          // Accepted with 200 and the claim kept: a completed session never changes, so a 500
+          // would only be redelivered until Stripe disables the endpoint.
+          if (rejection) {
+            console.error(
+              `Checkout Sessionを昇格できないため受領のみ行いました（要確認）: id=${session.id} ${CHECKOUT_SESSION_REJECTION_MESSAGES[rejection]}`
+            );
+          }
+          return null;
         },
       };
     }
@@ -52,20 +63,20 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
     case "customer.subscription.updated":
     case "customer.subscription.deleted": {
       const subscription = event.data.object;
-      const { error, mirrored } = await isMirroredStripeObject(
+      const { error, userId } = await isMirroredStripeObject(
         "stripe_subscription_id",
         subscription.id
       );
       if (error) {
         return { kind: "error" };
       }
-      if (!mirrored) {
+      if (userId === null) {
         return { kind: "skip", reason: `Subscription id=${subscription.id}` };
       }
       return {
         kind: "handle",
         run: async () => {
-          const { error: syncError } = await syncSubscriptionStatus(subscription);
+          const { error: syncError } = await syncSubscriptionStatus(subscription, userId);
           if (syncError) {
             console.error("サブスク状態同期エラー:", syncError);
           }
@@ -82,11 +93,11 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
       if (!customerId) {
         return { kind: "skip", reason: `Invoice id=${invoice.id}` };
       }
-      const { error, mirrored } = await isMirroredStripeObject("stripe_customer_id", customerId);
+      const { error, userId } = await isMirroredStripeObject("stripe_customer_id", customerId);
       if (error) {
         return { kind: "error" };
       }
-      if (!mirrored) {
+      if (userId === null) {
         return { kind: "skip", reason: `Invoice id=${invoice.id}` };
       }
       return {
@@ -102,8 +113,10 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
         },
       };
     }
+    // Nothing to do, so not claimed either: claiming would only add stripe_events rows for event
+    // types the endpoint happens to receive.
     default:
-      return { kind: "handle", run: async () => null };
+      return { kind: "skip", reason: "処理対象外の種別" };
   }
 }
 
@@ -150,10 +163,11 @@ export async function POST(request: NextRequest) {
   try {
     plan = await planEvent(event);
   } catch (error) {
-    console.error("Webhook対象判定エラー:", error);
+    console.error(`Webhook対象判定エラー: id=${event.id} type=${event.type}`, error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
   }
   if (plan.kind === "error") {
+    console.error(`Webhook対象判定エラー: id=${event.id} type=${event.type}`);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
   }
   if (plan.kind === "skip") {

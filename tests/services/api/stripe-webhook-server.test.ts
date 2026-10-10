@@ -110,9 +110,9 @@ describe("isForeignCheckoutSession", () => {
 
 describe("isMirroredStripeObject", () => {
   it.each([
-    ["行があれば mirrored=true", { id: 1 }, true],
-    ["行が無ければ mirrored=false", null, false],
-  ])("%s", async (_label, row, mirrored) => {
+    ["行があれば所有者のユーザーidを返す", { id: 1 }, 1],
+    ["行が無ければ null を返す", null, null],
+  ])("%s", async (_label, row, userId) => {
     const mockClient = createMockSupabaseClient({
       tableResults: { stripe_subscriptions: { data: row ? { user_id: 1 } : null, error: null } },
     });
@@ -120,7 +120,7 @@ describe("isMirroredStripeObject", () => {
 
     const result = await isMirroredStripeObject("stripe_customer_id", "cus_1");
 
-    expect(result).toEqual({ error: null, mirrored });
+    expect(result).toEqual({ error: null, userId });
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.eq).toHaveBeenCalledWith("stripe_customer_id", "cus_1");
   });
@@ -134,7 +134,7 @@ describe("isMirroredStripeObject", () => {
 
     await expect(isMirroredStripeObject("stripe_subscription_id", "sub_1")).resolves.toEqual({
       error: dbError.message,
-      mirrored: false,
+      userId: null,
     });
   });
 });
@@ -393,17 +393,22 @@ describe("activateUserFromCheckoutSession", () => {
     expect(result.error).toBeNull();
   });
 
-  it("ユーザーIDを特定できない場合はエラーを返し、DBを更新しない", async () => {
+  it("ユーザーIDを特定できない場合は恒久的な拒否（user_unidentified）を返し、DBを更新しない", async () => {
     const mockClient = mockActivateClient();
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
     const result = await activateUserFromCheckoutSession({
       ...baseSession,
+      metadata: { auth_id: "auth-1" },
       client_reference_id: null,
-      metadata: null,
     } as never);
 
-    expect(result.error).not.toBeNull();
+    expect(result).toEqual({
+      error: null,
+      rejection: "user_unidentified",
+      activated: false,
+      currentPeriodEnd: null,
+    });
     expect(mockClient.from).not.toHaveBeenCalled();
   });
 
@@ -415,7 +420,7 @@ describe("activateUserFromCheckoutSession", () => {
     ["metadata.auth_id の無いセッション", { metadata: { user_id: "1" } }],
     ["mode が subscription でないセッション", { mode: "payment" }],
   ])(
-    "自アプリ以外の Checkout Session（%s）はエラーを返し、DBもStripeも触らない",
+    "自アプリ以外の Checkout Session（%s）は恒久的な拒否（foreign）を返し、DBもStripeも触らない",
     async (_label, overrides) => {
       const mockClient = mockActivateClient();
       vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
@@ -426,7 +431,8 @@ describe("activateUserFromCheckoutSession", () => {
       } as never);
 
       expect(result).toEqual({
-        error: "このアプリで作成したCheckoutセッションではありません",
+        error: null,
+        rejection: "foreign",
         activated: false,
         currentPeriodEnd: null,
       });
@@ -435,7 +441,7 @@ describe("activateUserFromCheckoutSession", () => {
     }
   );
 
-  it("client_reference_id と metadata.user_id が食い違う場合はユーザーを特定できずエラーを返す", async () => {
+  it("client_reference_id と metadata.user_id が食い違う場合はユーザーを特定できない", async () => {
     const mockClient = mockActivateClient();
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
@@ -444,33 +450,37 @@ describe("activateUserFromCheckoutSession", () => {
       client_reference_id: "42",
     } as never);
 
-    expect(result.error).toBe("Checkoutセッションからユーザーを特定できませんでした");
+    expect(result.rejection).toBe("user_unidentified");
     expect(mockClient.from).not.toHaveBeenCalled();
   });
 
   it.each([
     ["metadata.auth_id が別人", { data: { auth_id: "auth-other" }, error: null }],
     ["ユーザーが存在しない", { data: null, error: null }],
-  ])("%s の場合はエラーを返し、ミラーも users も書かない", async (_label, owner) => {
-    const mockClient = createMockSupabaseClient({ tableResults: { users: owner } });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
-    const retrieve = vi.fn();
-    vi.mocked(getStripeClient).mockReturnValue({ subscriptions: { retrieve } } as never);
+  ])(
+    "%s の場合は恒久的な拒否（owner_mismatch）を返し、ミラーも users も書かない",
+    async (_label, owner) => {
+      const mockClient = createMockSupabaseClient({ tableResults: { users: owner } });
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+      const retrieve = vi.fn();
+      vi.mocked(getStripeClient).mockReturnValue({ subscriptions: { retrieve } } as never);
 
-    const result = await activateUserFromCheckoutSession(baseSession as never);
+      const result = await activateUserFromCheckoutSession(baseSession as never);
 
-    expect(result).toEqual({
-      error: "Checkoutセッションのユーザーが一致しません",
-      activated: false,
-      currentPeriodEnd: null,
-    });
-    expect(mockClient.from).toHaveBeenCalledTimes(1);
-    const ownerQuery = mockClient.from.mock.results[0].value;
-    expect(ownerQuery.select).toHaveBeenCalledWith("auth_id");
-    expect(ownerQuery.eq).toHaveBeenCalledWith("id", 1);
-    expect(ownerQuery.update).not.toHaveBeenCalled();
-    expect(retrieve).not.toHaveBeenCalled();
-  });
+      expect(result).toEqual({
+        error: null,
+        rejection: "owner_mismatch",
+        activated: false,
+        currentPeriodEnd: null,
+      });
+      expect(mockClient.from).toHaveBeenCalledTimes(1);
+      const ownerQuery = mockClient.from.mock.results[0].value;
+      expect(ownerQuery.select).toHaveBeenCalledWith("auth_id");
+      expect(ownerQuery.eq).toHaveBeenCalledWith("id", 1);
+      expect(ownerQuery.update).not.toHaveBeenCalled();
+      expect(retrieve).not.toHaveBeenCalled();
+    }
+  );
 
   it("セッションのユーザーの取得に失敗した場合はエラーを返し、ミラーを書かない", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -823,6 +833,26 @@ describe("syncSubscriptionStatus", () => {
       expect.objectContaining({ status: "trial", membership_type: null })
     );
     expect(userBuilder.eq).toHaveBeenNthCalledWith(2, "membership_type", "general");
+  });
+
+  it("呼び出し元が解決済みのミラー行の所有者を渡した場合はミラー行を引き直さない", async () => {
+    mockGetStripeClient("canceled");
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: { data: null, error: null },
+        users: { data: null, error: null },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await syncSubscriptionStatus(makeSubscription("canceled") as never, 7);
+
+    expect(result.error).toBeNull();
+    const mirrorBuilder = mockClient.from.mock.results[0].value;
+    expect(mirrorBuilder.select).not.toHaveBeenCalled();
+    expect(mirrorBuilder.update).toHaveBeenCalled();
+    const userBuilder = mockClient.from.mock.results[1].value;
+    expect(userBuilder.eq).toHaveBeenNthCalledWith(1, "id", 7);
   });
 
   it.each(["unpaid", "incomplete_expired"])(

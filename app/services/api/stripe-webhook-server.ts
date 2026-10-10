@@ -61,16 +61,30 @@ export function extractUserId(
  * sales (Payment Links etc.). client_reference_id alone is no proof of origin, since a buyer can
  * append `?client_reference_id=42` to a Payment Link URL and would promote user 42 with an
  * unrelated purchase; metadata.auth_id is the marker because createCheckoutSession() sets it and
- * buyers cannot set metadata. The user id is deliberately not checked here: the webhook must keep
- * answering 500 for our own session without a usable one so Stripe redelivers it instead of the
- * payment being dropped. payment_link and mode are read from the event body; see
- * docs/specification.md 2.11 for why that is safe across webhook API versions.
+ * buyers cannot set metadata. Another app on the account may use the same key, so this is only a
+ * cheap pre-filter: activateUserFromCheckoutSession() still matches auth_id against the user the
+ * session names. payment_link and mode are read from the event body; see docs/specification.md
+ * 2.11 for why that is safe across webhook API versions.
  */
 export function isForeignCheckoutSession(session: Stripe.Checkout.Session): boolean {
   return (
     session.payment_link != null || !session.metadata?.auth_id || session.mode !== "subscription"
   );
 }
+
+/**
+ * Why activateUserFromCheckoutSession() refused a session for good. A completed session never
+ * changes, so retrying gives the same answer: callers must not treat these as transient errors
+ * (the webhook would be redelivered until Stripe disables the endpoint, and the Checkout claim
+ * would be held forever).
+ */
+export type CheckoutSessionRejection = "foreign" | "user_unidentified" | "owner_mismatch";
+
+export const CHECKOUT_SESSION_REJECTION_MESSAGES: Record<CheckoutSessionRejection, string> = {
+  foreign: "このアプリで作成したCheckoutセッションではありません",
+  user_unidentified: "Checkoutセッションからユーザーを特定できませんでした",
+  owner_mismatch: "Checkoutセッションのユーザーが一致しません",
+};
 
 /**
  * Whether the mirror knows this subscription / customer, i.e. it belongs to this app. Lets the
@@ -83,7 +97,7 @@ export function isForeignCheckoutSession(session: Stripe.Checkout.Session): bool
 export async function isMirroredStripeObject(
   column: "stripe_subscription_id" | "stripe_customer_id",
   id: string
-): Promise<{ error: string | null; mirrored: boolean }> {
+): Promise<{ error: string | null; userId: number | null }> {
   const supabase = await createAdminSupabaseClient();
   const { data, error } = await supabase
     .from("stripe_subscriptions")
@@ -92,9 +106,9 @@ export async function isMirroredStripeObject(
     .maybeSingle();
   if (error) {
     console.error("stripe_subscriptions取得エラー:", error.message);
-    return { error: error.message, mirrored: false };
+    return { error: error.message, userId: null };
   }
-  return { error: null, mirrored: data !== null };
+  return { error: null, userId: data?.user_id ?? null };
 }
 
 function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
@@ -197,26 +211,26 @@ export async function activateUserFromCheckoutSession(
   options: { expectedClaimedAt?: string } = {}
 ): Promise<{
   error: string | null;
+  rejection?: CheckoutSessionRejection;
   activated: boolean;
   currentPeriodEnd: string | null;
 }> {
+  const reject = (rejection: CheckoutSessionRejection) => ({
+    error: null,
+    rejection,
+    activated: false,
+    currentPeriodEnd: null,
+  });
+
   // Checked here rather than in each caller: this is the only way into a promotion, and a caller
   // forgetting the check would let a foreign purchase promote whoever client_reference_id names.
   if (isForeignCheckoutSession(session)) {
-    return {
-      error: "このアプリで作成したCheckoutセッションではありません",
-      activated: false,
-      currentPeriodEnd: null,
-    };
+    return reject("foreign");
   }
 
   const userId = extractUserId(session.client_reference_id, session.metadata);
   if (userId === null) {
-    return {
-      error: "Checkoutセッションからユーザーを特定できませんでした",
-      activated: false,
-      currentPeriodEnd: null,
-    };
+    return reject("user_unidentified");
   }
 
   const customerId =
@@ -249,11 +263,7 @@ export async function activateUserFromCheckoutSession(
     return { error: ownerError.message, activated: false, currentPeriodEnd: null };
   }
   if (!owner || owner.auth_id !== session.metadata?.auth_id) {
-    return {
-      error: "Checkoutセッションのユーザーが一致しません",
-      activated: false,
-      currentPeriodEnd: null,
-    };
+    return reject("owner_mismatch");
   }
 
   // "Check existing row -> update mirror" spans several statements, so another request may
@@ -579,24 +589,33 @@ async function writeCheckoutMirror(
  * later checkout.session.completed upserts the latest state). This existence check comes BEFORE
  * the Stripe re-fetch: hitting the Stripe API for every event of subscriptions unrelated to this
  * service would waste calls and cause needless 500s / retries during Stripe outages.
+ * @param mirroredUserId owner of the mirror row when the caller already looked it up (the webhook
+ *   does so before claiming), skipping the second read.
  */
 export async function syncSubscriptionStatus(
-  subscriptionFromEvent: Stripe.Subscription
+  subscriptionFromEvent: Stripe.Subscription,
+  mirroredUserId?: number
 ): Promise<{ error: string | null }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { data: existing, error: fetchError } = await supabase
-    .from("stripe_subscriptions")
-    .select("user_id")
-    .eq("stripe_subscription_id", subscriptionFromEvent.id)
-    .maybeSingle();
+  let userId: number;
+  if (mirroredUserId !== undefined) {
+    userId = mirroredUserId;
+  } else {
+    const { data: existing, error: fetchError } = await supabase
+      .from("stripe_subscriptions")
+      .select("user_id")
+      .eq("stripe_subscription_id", subscriptionFromEvent.id)
+      .maybeSingle();
 
-  if (fetchError) {
-    console.error("stripe_subscriptions取得エラー:", fetchError.message);
-    return { error: fetchError.message };
-  }
-  if (!existing) {
-    return { error: null };
+    if (fetchError) {
+      console.error("stripe_subscriptions取得エラー:", fetchError.message);
+      return { error: fetchError.message };
+    }
+    if (!existing) {
+      return { error: null };
+    }
+    userId = existing.user_id;
   }
 
   const stripe = getStripeClient();
@@ -614,9 +633,9 @@ export async function syncSubscriptionStatus(
   }
 
   if (TERMINAL_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
-    const reverted = await revertUserToTrial(existing.user_id);
+    const reverted = await revertUserToTrial(userId);
     if (reverted.error === null && reverted.reverted) {
-      scheduleSubscriptionEndedEmail({ userId: existing.user_id, subscriptionId: subscription.id });
+      scheduleSubscriptionEndedEmail({ userId, subscriptionId: subscription.id });
     }
     return { error: reverted.error };
   }
@@ -630,7 +649,7 @@ export async function syncSubscriptionStatus(
   // not fire).
   if (isCancellationScheduled(mirrorFields)) {
     scheduleCancelScheduledEmail({
-      userId: existing.user_id,
+      userId,
       subscriptionId: subscription.id,
       periodEnd: cancellationEndsAt(mirrorFields),
     });

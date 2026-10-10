@@ -2,16 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/api/stripe-server");
 // Keep the real ownership verdict so the tests exercise what the route actually skips.
-vi.mock("@/app/services/api/stripe-webhook-server", async (importOriginal) => ({
-  activateUserFromCheckoutSession: vi.fn(),
-  claimEvent: vi.fn(),
-  isMirroredStripeObject: vi.fn(),
-  releaseEventClaim: vi.fn(),
-  syncSubscriptionStatus: vi.fn(),
-  isForeignCheckoutSession: (
-    await importOriginal<typeof import("@/app/services/api/stripe-webhook-server")>()
-  ).isForeignCheckoutSession,
-}));
+vi.mock("@/app/services/api/stripe-webhook-server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/app/services/api/stripe-webhook-server")>();
+  return {
+    activateUserFromCheckoutSession: vi.fn(),
+    claimEvent: vi.fn(),
+    isMirroredStripeObject: vi.fn(),
+    releaseEventClaim: vi.fn(),
+    syncSubscriptionStatus: vi.fn(),
+    isForeignCheckoutSession: actual.isForeignCheckoutSession,
+    CHECKOUT_SESSION_REJECTION_MESSAGES: actual.CHECKOUT_SESSION_REJECTION_MESSAGES,
+  };
+});
 vi.mock("@/app/services/notifications/slack");
 
 import { POST } from "@/app/api/stripe/webhook/route";
@@ -62,7 +64,7 @@ beforeEach(() => {
     currentPeriodEnd: null,
   });
   vi.mocked(syncSubscriptionStatus).mockResolvedValue({ error: null });
-  vi.mocked(isMirroredStripeObject).mockResolvedValue({ error: null, mirrored: true });
+  vi.mocked(isMirroredStripeObject).mockResolvedValue({ error: null, userId: 19 });
 });
 
 afterEach(() => {
@@ -98,7 +100,8 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
 
       expect(res.status).toBe(200);
       expect(isMirroredStripeObject).toHaveBeenCalledWith("stripe_subscription_id", "sub_1");
-      expect(syncSubscriptionStatus).toHaveBeenCalledWith(subscription);
+      // The owner resolved before the claim is passed on, so the mirror is not read twice.
+      expect(syncSubscriptionStatus).toHaveBeenCalledWith(subscription, 19);
       expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
     }
   );
@@ -107,7 +110,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     "ミラーに無い（他用途の）サブスクの %s はclaimも同期も行わず200でスキップする",
     async (type) => {
       vi.spyOn(console, "warn").mockImplementation(() => {});
-      vi.mocked(isMirroredStripeObject).mockResolvedValue({ error: null, mirrored: false });
+      vi.mocked(isMirroredStripeObject).mockResolvedValue({ error: null, userId: null });
       mockConstructEvent.mockReturnValue({
         id: "evt_sub",
         type,
@@ -151,14 +154,14 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
   });
 
   it.each([
-    { label: "ミラーに無いCustomer", customer: "cus_other", mirrored: false },
-    { label: "展開済みでもミラーに無いCustomer", customer: { id: "cus_other" }, mirrored: false },
-    { label: "Customerの無い", customer: null, mirrored: true },
+    { label: "ミラーに無いCustomer", customer: "cus_other", userId: null },
+    { label: "展開済みでもミラーに無いCustomer", customer: { id: "cus_other" }, userId: null },
+    { label: "Customerの無い", customer: null, userId: 19 },
   ])(
     "invoice.payment_failed: $label の請求は他用途としてclaimもSlack通知も行わず200でスキップする",
-    async ({ customer, mirrored }) => {
+    async ({ customer, userId }) => {
       vi.spyOn(console, "warn").mockImplementation(() => {});
-      vi.mocked(isMirroredStripeObject).mockResolvedValue({ error: null, mirrored });
+      vi.mocked(isMirroredStripeObject).mockResolvedValue({ error: null, userId });
       mockConstructEvent.mockReturnValue({
         id: "evt_inv",
         type: "invoice.payment_failed",
@@ -196,19 +199,24 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
   ])(
     "$type: ミラーの照合がDBエラーなら500を返し、claimしない（再送に委ねる）",
     async ({ type, object }) => {
-      vi.mocked(isMirroredStripeObject).mockResolvedValue({ error: "db error", mirrored: false });
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.mocked(isMirroredStripeObject).mockResolvedValue({ error: "db error", userId: null });
       mockConstructEvent.mockReturnValue({ id: "evt_mirror_error", type, data: { object } });
 
       const res = await POST(request("{}") as never);
 
       expect(res.status).toBe(500);
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining(`id=evt_mirror_error type=${type}`)
+      );
       expect(claimEvent).not.toHaveBeenCalled();
       expect(syncSubscriptionStatus).not.toHaveBeenCalled();
       expect(sendSlackPaymentFailedNotification).not.toHaveBeenCalled();
     }
   );
 
-  it("未対応のイベントtypeは何もせず200を返す", async () => {
+  it("未対応のイベントtypeはclaimもせず200でスキップする", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     mockConstructEvent.mockReturnValue({
       id: "evt_4",
       type: "customer.created",
@@ -218,6 +226,9 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     const res = await POST(request("{}") as never);
 
     expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ received: true, skipped: true });
+    // No stripe_events row for event types the endpoint merely happens to receive.
+    expect(claimEvent).not.toHaveBeenCalled();
     expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
     expect(syncSubscriptionStatus).not.toHaveBeenCalled();
     expect(sendSlackPaymentFailedNotification).not.toHaveBeenCalled();
@@ -324,10 +335,10 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
       ids: { client_reference_id: "0x2a", metadata: { user_id: "0x2a", auth_id: "a" } },
     },
   ])(
-    "checkout.session.completed: 自アプリ由来だが$label 場合はスキップせず500を返し、claimを解放する",
+    "checkout.session.completed: 自アプリの印はあるが$label 場合は再送しても変わらないため200で受領し、claimを解放しない",
     async ({ ids }) => {
-      vi.spyOn(console, "error").mockImplementation(() => {});
-      // The real function returns its "user not identified" error before touching the DB.
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      // The real function returns its "user not identified" rejection before touching the DB.
       const actual = await vi.importActual<
         typeof import("@/app/services/api/stripe-webhook-server")
       >("@/app/services/api/stripe-webhook-server");
@@ -342,11 +353,37 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
 
       const res = await POST(request("{}") as never);
 
-      expect(res.status).toBe(500);
+      expect(res.status).toBe(200);
       expect(claimEvent).toHaveBeenCalledWith("evt_own_nouser", "checkout.session.completed");
-      expect(releaseEventClaim).toHaveBeenCalledWith("evt_own_nouser", "2026-01-01T00:00:00.000Z");
+      expect(releaseEventClaim).not.toHaveBeenCalled();
+      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("id=cs_own_nouser"));
     }
   );
+
+  it("checkout.session.completed: auth_id がユーザーと一致しない場合は再送しても変わらないため200で受領し、claimを解放しない", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({
+      error: null,
+      rejection: "owner_mismatch",
+      activated: false,
+      currentPeriodEnd: null,
+    });
+    mockConstructEvent.mockReturnValue({
+      id: "evt_owner_mismatch",
+      type: "checkout.session.completed",
+      data: { object: ownSession },
+    });
+
+    const res = await POST(request("{}") as never);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ received: true });
+    expect(claimEvent).toHaveBeenCalledWith("evt_owner_mismatch", "checkout.session.completed");
+    expect(releaseEventClaim).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("Checkoutセッションのユーザーが一致しません")
+    );
+  });
 
   it("claimがDBエラーを返した場合は500を返し、ハンドラを呼ばない", async () => {
     vi.mocked(claimEvent).mockResolvedValue({

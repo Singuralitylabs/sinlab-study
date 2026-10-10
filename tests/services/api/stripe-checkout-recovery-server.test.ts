@@ -65,19 +65,29 @@ describe("recoverCompletedCheckout", () => {
     });
   });
 
-  it("自アプリ以外のセッションは反映せず unrecoverable とし、運用者へ通知する", async () => {
-    const foreign = { ...(paidSession as object), payment_link: "plink_x" } as never;
+  it.each([
+    ["foreign", "このアプリで作成したCheckoutセッションではありません"],
+    ["owner_mismatch", "Checkoutセッションのユーザーが一致しません"],
+  ] as const)(
+    "昇格処理が恒久的に拒否した（%s）場合は処理権を保持する一時エラーにせず unrecoverable とし、運用者へ通知する",
+    async (rejection, reason) => {
+      vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({
+        error: null,
+        rejection,
+        activated: false,
+        currentPeriodEnd: null,
+      });
 
-    const result = await recoverCompletedCheckout(5, [foreign], heldClaimedAt);
+      const result = await recoverCompletedCheckout(5, [paidSession], heldClaimedAt);
 
-    expect(result).toEqual({ kind: "unrecoverable" });
-    expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
-    expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledWith({
-      userId: 5,
-      reason: "このアプリで作成したCheckoutセッションではありません",
-      sessionIds: ["cs_paid"],
-    });
-  });
+      expect(result).toEqual({ kind: "unrecoverable" });
+      expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledWith({
+        userId: 5,
+        reason,
+        sessionIds: ["cs_paid"],
+      });
+    }
+  );
 
   it.each([404, 400, 403])(
     "Stripeが恒久的なエラー（%i）を返した場合は unrecoverable とし、運用者へ通知する",

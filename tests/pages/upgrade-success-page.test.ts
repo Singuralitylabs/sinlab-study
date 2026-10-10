@@ -77,12 +77,11 @@ describe("/upgrade/success の自己昇格防止", () => {
     expect(getStripeClient).not.toHaveBeenCalled();
   });
 
-  it("metadata.auth_id がセッションのユーザーと一致しなければ、ミラーも users も書かない", async () => {
+  it("metadata.auth_id がセッションのユーザーと一致しなければ、ミラーも users も書かず再試行も促さない", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: { users: { data: { auth_id: "auth-42" }, error: null } },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
-    vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(retrieveCheckoutSession).mockResolvedValue({
       ...ownSession,
       metadata: { user_id: String(TRIAL_USER_ID), auth_id: "auth-someone-else" },
@@ -90,6 +89,9 @@ describe("/upgrade/success の自己昇格防止", () => {
 
     const html = await render();
 
+    // Reloading cannot change the answer, so a "try again later" prompt would mislead.
+    expect(html).toContain("決済情報を確認できませんでした");
+    expect(html).not.toContain("時間をおいて再度お試しください");
     expect(html).not.toContain("ご登録が完了しました");
     expect(mockClient.from).toHaveBeenCalledTimes(1);
     expect(mockClient.from).toHaveBeenCalledWith("users");
