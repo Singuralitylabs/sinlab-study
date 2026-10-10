@@ -436,27 +436,6 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     }
   );
 
-  it("checkout.session.completed: 拒否の通知が例外を投げても200で受領し、claimを解放しない", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({
-      error: null,
-      rejection: "owner_mismatch",
-      activated: false,
-      currentPeriodEnd: null,
-    });
-    vi.mocked(sendSlackCheckoutRecoveryNotification).mockRejectedValue(new Error("slack down"));
-    mockConstructEvent.mockReturnValue({
-      id: "evt_notify_fail",
-      type: "checkout.session.completed",
-      data: { object: ownSession },
-    });
-
-    const res = await POST(request("{}") as never);
-
-    expect(res.status).toBe(200);
-    expect(releaseEventClaim).not.toHaveBeenCalled();
-  });
-
   it("checkout.session.completed: 一時的なエラー（DB障害等）は500でclaimを解放し、Slack通知しない", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({

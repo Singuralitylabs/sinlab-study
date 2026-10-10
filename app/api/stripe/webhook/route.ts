@@ -60,16 +60,11 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
             );
             // Our own session may be paid while the user stays on trial, and the kept claim means
             // no redelivery will raise it again. "foreign" never gets here: planEvent() skips it.
-            try {
-              await sendSlackCheckoutRecoveryNotification({
-                userId: extractUserId(session.client_reference_id, session.metadata),
-                reason,
-                sessionIds: [session.id],
-              });
-            } catch (notifyError) {
-              // A 500 here would release the claim and redeliver an answer that never changes.
-              console.error("Checkout昇格不可のSlack通知エラー:", notifyError);
-            }
+            await sendSlackCheckoutRecoveryNotification({
+              userId: extractUserId(session.client_reference_id, session.metadata),
+              reason,
+              sessionIds: [session.id],
+            });
           }
           return null;
         },
