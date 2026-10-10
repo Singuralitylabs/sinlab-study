@@ -4,6 +4,7 @@ import {
   type QuizQuestionForLearner,
   type QuizQuestionResult,
 } from "@/app/lib/quiz";
+import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import { createServerSupabaseClient } from "./supabase-server";
 
 type ServerSupabaseClient = Awaited<ReturnType<typeof createServerSupabaseClient>>;
@@ -51,8 +52,9 @@ export async function fetchQuizQuestions(
             {
               id: row.id,
               question_type: row.question_type,
-              question: row.question,
-              choices: row.choices ?? [],
+              // Same {{SUPABASE_STORAGE_URL}} handling as text_content / description.
+              question: resolveMarkdownStorageUrls(row.question),
+              choices: (row.choices ?? []).map(resolveMarkdownStorageUrls),
               hint: row.hint ?? null,
             },
           ]
@@ -95,8 +97,8 @@ export async function gradeQuizAnswers(
               questionType: row.question_type,
               isCorrect: row.is_correct ?? null,
               correctChoices: row.correct_choices ?? [],
-              modelAnswer: row.model_answer ?? null,
-              explanation: row.explanation ?? null,
+              modelAnswer: row.model_answer ? resolveMarkdownStorageUrls(row.model_answer) : null,
+              explanation: row.explanation ? resolveMarkdownStorageUrls(row.explanation) : null,
             },
           ]
         : []

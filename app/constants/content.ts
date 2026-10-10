@@ -13,6 +13,14 @@ export const SUBMISSION_TYPES: readonly SubmissionType[] = ["code", "url"];
 export type AllowedSubmissionType = "code" | "url" | "both";
 export const ALLOWED_SUBMISSION_TYPES: readonly AllowedSubmissionType[] = ["code", "url", "both"];
 
+/**
+ * Types the bulk set_type action may assign. A quiz needs its questions, which only the
+ * create/edit form and the bulk create API send, so it is excluded.
+ */
+export const BULK_SETTABLE_CONTENT_TYPES: readonly ContentType[] = CONTENT_TYPES.filter(
+  (type) => type !== "quiz"
+);
+
 export const CONTENT_TYPE_LABELS: Record<ContentType, string> = {
   video: "動画",
   text: "テキスト",

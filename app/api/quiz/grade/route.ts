@@ -39,7 +39,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "採点に失敗しました" }, { status: 500 });
     }
     if (results.length === 0) {
-      return NextResponse.json({ error: "すべての設問に回答してください" }, { status: 400 });
+      // The form only submits when every question is answered, so an empty result there usually
+      // means the questions were edited (ids renumbered) after the page loaded.
+      return NextResponse.json(
+        {
+          error:
+            "すべての設問に回答してください。設問が更新された場合は、ページを再読み込みしてください",
+        },
+        { status: 400 }
+      );
     }
 
     return NextResponse.json({ results });

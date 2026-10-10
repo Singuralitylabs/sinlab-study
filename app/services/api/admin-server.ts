@@ -1294,7 +1294,13 @@ async function replaceQuizQuestions(
 export async function fetchQuizQuestionsForAdmin(
   contentId: number
 ): Promise<{ data: QuizQuestionData[] | null; error: PostgrestError | null }> {
-  const supabase = await createAdminSupabaseClient();
+  return selectQuizQuestions(await createAdminSupabaseClient(), contentId);
+}
+
+async function selectQuizQuestions(
+  supabase: AdminSupabaseClient,
+  contentId: number
+): Promise<{ data: QuizQuestionData[] | null; error: PostgrestError | null }> {
   const { data, error } = await supabase
     .from("quiz_questions")
     .select("question_type, question, choices, correct_choices, model_answer, explanation, hint")
@@ -1333,14 +1339,66 @@ export async function updateContent(
   const supabase = await createAdminSupabaseClient();
   const { insertAfterId, quizQuestions, ...patch } = content;
 
-  // Questions first: if they fail, the row is not switched to a quiz with stale or no questions.
-  if (patch.content_type === "quiz" && quizQuestions) {
-    const quizError = await replaceQuizQuestions(supabase, id, quizQuestions);
-    if (quizError) {
-      return { error: quizError, storageRemoved: true };
-    }
+  if (patch.content_type !== "quiz" || !quizQuestions) {
+    return updateContentRow(supabase, id, patch, insertAfterId);
   }
 
+  const { data: previous, error: previousError } = await selectQuizQuestions(supabase, id);
+  if (previousError || !previous) {
+    return { error: previousError, storageRemoved: true };
+  }
+  // The edit form always sends the questions. Replacing unchanged ones would renumber their ids,
+  // and a learner answering at that moment would be graded against ids that no longer exist.
+  if (sameQuizQuestions(previous, quizQuestions)) {
+    return updateContentRow(supabase, id, patch, insertAfterId);
+  }
+
+  // Questions go first so a failure here never leaves a quiz row with stale or no questions; if
+  // the row update then fails, the previous questions are put back so neither side changes.
+  const quizError = await replaceQuizQuestions(supabase, id, quizQuestions);
+  if (quizError) {
+    return { error: quizError, storageRemoved: true };
+  }
+  const restorePrevious = async () => {
+    const restoreError = await replaceQuizQuestions(supabase, id, previous);
+    if (restoreError) {
+      console.error("コンテンツ更新エラー（設問の復元）:", restoreError.message);
+    }
+  };
+  try {
+    const result = await updateContentRow(supabase, id, patch, insertAfterId);
+    if (result.error) {
+      await restorePrevious();
+    }
+    return result;
+  } catch (thrown) {
+    await restorePrevious();
+    throw thrown;
+  }
+}
+
+function sameQuizQuestions(a: QuizQuestionData[], b: QuizQuestionData[]): boolean {
+  const normalize = (questions: QuizQuestionData[]) =>
+    JSON.stringify(
+      questions.map((q) => [
+        q.question_type,
+        q.question,
+        q.choices,
+        q.correct_choices,
+        q.model_answer ?? null,
+        q.explanation ?? null,
+        q.hint ?? null,
+      ])
+    );
+  return normalize(a) === normalize(b);
+}
+
+async function updateContentRow(
+  supabase: AdminSupabaseClient,
+  id: number,
+  patch: Partial<LearningContent>,
+  insertAfterId: number | null | undefined
+): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
   let destinationFilter: SiblingParentFilter = null;
   let sourceFilter: SiblingParentFilter = null;
   let parentChanged = false;

@@ -11,6 +11,7 @@ import {
   Presentation,
 } from "lucide-react";
 import Link from "next/link";
+import { CONTENT_TYPE_LABELS } from "@/app/constants/content";
 import type { LearningContentListItem } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -36,23 +37,6 @@ function getContentIcon(type: string) {
       return <ListChecks className="h-4 w-4" />;
     default:
       return <FileText className="h-4 w-4" />;
-  }
-}
-
-function getContentTypeLabel(type: string) {
-  switch (type) {
-    case "video":
-      return "動画";
-    case "text":
-      return "テキスト";
-    case "exercise":
-      return "演習";
-    case "slide":
-      return "スライド";
-    case "quiz":
-      return "クイズ";
-    default:
-      return type;
   }
 }
 
@@ -113,7 +97,7 @@ export function DemoContentList({
                   </div>
                   <Badge variant="secondary" className="gap-1 shrink-0 text-xs">
                     {getContentIcon(content.content_type)}
-                    {getContentTypeLabel(content.content_type)}
+                    {CONTENT_TYPE_LABELS[content.content_type]}
                   </Badge>
                 </div>
               </CardContent>

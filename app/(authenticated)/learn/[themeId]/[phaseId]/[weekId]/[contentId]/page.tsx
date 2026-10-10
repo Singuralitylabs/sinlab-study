@@ -215,7 +215,7 @@ export default async function ContentPage({ params }: PageProps) {
     { data: existingReview },
     { data: latestSubmission },
     slideSignedUrl,
-    { data: quizQuestions },
+    { data: quizQuestions, error: quizError },
   ] = await Promise.all([
     userId
       ? fetchUserProgressByContentId(userId, contentIdNum)
@@ -231,7 +231,7 @@ export default async function ContentPage({ params }: PageProps) {
       : Promise.resolve(null),
     content.content_type === "quiz"
       ? fetchQuizQuestions(contentIdNum)
-      : Promise.resolve({ data: [] }),
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   return (
@@ -274,12 +274,18 @@ export default async function ContentPage({ params }: PageProps) {
               {content.description && (
                 <MarkdownRenderer content={resolveMarkdownStorageUrls(content.description)} />
               )}
-              <QuizForm
-                contentId={contentIdNum}
-                questions={quizQuestions}
-                canRecordProgress={Boolean(userId) && isFullyPublished}
-                initialCompleted={isCompleted}
-              />
+              {quizError ? (
+                <p className="text-sm text-muted-foreground">
+                  クイズの設問を読み込めませんでした。時間をおいて再度お試しください。
+                </p>
+              ) : (
+                <QuizForm
+                  contentId={contentIdNum}
+                  questions={quizQuestions}
+                  canRecordProgress={Boolean(userId) && isFullyPublished}
+                  initialCompleted={isCompleted}
+                />
+              )}
             </div>
           )}
 

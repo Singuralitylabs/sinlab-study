@@ -17,7 +17,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { BulkContentAction } from "@/app/constants/content";
-import { CONTENT_TYPE_LABELS, CONTENT_TYPES, MAX_BULK_CONTENT_IDS } from "@/app/constants/content";
+import {
+  BULK_SETTABLE_CONTENT_TYPES,
+  CONTENT_TYPE_LABELS,
+  MAX_BULK_CONTENT_IDS,
+} from "@/app/constants/content";
 import type { ContentTableGroup, ContentTableRow } from "@/app/lib/content-grouping";
 import { getSlideStorageWarning } from "@/app/lib/slide-storage-warning";
 import type { ContentType } from "@/app/types";
@@ -451,7 +455,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
             onChange={(e) => setNewContentType(e.target.value as ContentType)}
             className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
           >
-            {CONTENT_TYPES.map((type) => (
+            {BULK_SETTABLE_CONTENT_TYPES.map((type) => (
               <option key={type} value={type}>
                 {CONTENT_TYPE_LABELS[type]}
               </option>

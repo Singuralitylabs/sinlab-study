@@ -166,6 +166,18 @@ describe("PATCH /api/manage/contents/bulk - バリデーション", () => {
   });
 });
 
+describe("PATCH /api/manage/contents/bulk - set_type で quiz は不可（#306）", () => {
+  it("設問のないクイズを作らないよう、set_type で quiz を指定したら400", async () => {
+    const res = await PATCH(request({ ids: [1], action: "set_type", contentType: "quiz" }));
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: "クイズへの変更は編集画面で設問と一緒に行ってください",
+    });
+    expect(bulkUpdateContents).not.toHaveBeenCalled();
+  });
+});
+
 describe("PATCH /api/manage/contents/bulk - action→patchマッピング", () => {
   it.each([
     ["publish", { is_published: true }],

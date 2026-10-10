@@ -109,7 +109,10 @@ describe("POST /api/quiz/grade", () => {
     const res = await POST(request() as never);
 
     expect(res.status).toBe(400);
-    await expect(res.json()).resolves.toEqual({ error: "すべての設問に回答してください" });
+    await expect(res.json()).resolves.toEqual({
+      error:
+        "すべての設問に回答してください。設問が更新された場合は、ページを再読み込みしてください",
+    });
   });
 
   it("RPC エラーは500", async () => {

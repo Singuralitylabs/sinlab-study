@@ -15,6 +15,7 @@ import { PageTitle } from "@/app/components/PageTitle";
 import { UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
+import { CONTENT_TYPE_LABELS } from "@/app/constants/content";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import { fetchCompletedAIReviewContentIds } from "@/app/services/api/ai-review-server";
@@ -49,21 +50,6 @@ function getContentIcon(type: ContentType) {
       return <ListChecks className="h-4 w-4" />;
     default:
       return <FileText className="h-4 w-4" />;
-  }
-}
-
-function getContentTypeLabel(type: ContentType) {
-  switch (type) {
-    case "video":
-      return "動画";
-    case "text":
-      return "テキスト";
-    case "exercise":
-      return "演習";
-    case "quiz":
-      return "クイズ";
-    default:
-      return type;
   }
 }
 
@@ -243,7 +229,7 @@ export default async function PhasePage({ params }: PageProps) {
                                 </div>
                                 <Badge variant="secondary" className="gap-1 shrink-0 text-xs">
                                   {getContentIcon(content.content_type)}
-                                  {getContentTypeLabel(content.content_type)}
+                                  {CONTENT_TYPE_LABELS[content.content_type]}
                                 </Badge>
                                 {locked && (
                                   <Badge variant="outline" className="gap-1 shrink-0 text-xs">

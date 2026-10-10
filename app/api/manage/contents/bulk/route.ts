@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import type { BulkContentAction } from "@/app/constants/content";
+import { BULK_SETTABLE_CONTENT_TYPES, type BulkContentAction } from "@/app/constants/content";
 import { USER_STATUS } from "@/app/constants/user";
 import { isContentType } from "@/app/lib/content-filtering";
 import { bulkUpdateContents, createContentsAtTail } from "@/app/services/api/admin-server";
@@ -34,6 +34,10 @@ function buildPatch(
     case "set_type":
       if (typeof contentType !== "string" || !isContentType(contentType)) {
         return { error: "有効なコンテンツ種別を指定してください" };
+      }
+      // Setting quiz here would publish a quiz with no questions (POST/PUT require them).
+      if (!BULK_SETTABLE_CONTENT_TYPES.includes(contentType)) {
+        return { error: "クイズへの変更は編集画面で設問と一緒に行ってください" };
       }
       return { content_type: contentType };
   }

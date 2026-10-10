@@ -40,7 +40,12 @@ import {
   type EmailTemplateKey,
   validateEmailTemplateText,
 } from "@/app/lib/email-template";
-import { QUIZ_TEXT_ANSWER_MAX_LENGTH, QuizQuestionsSchema } from "@/app/lib/quiz";
+import {
+  QUIZ_MAX_CHOICES,
+  QUIZ_MAX_QUESTIONS,
+  QUIZ_TEXT_ANSWER_MAX_LENGTH,
+  QuizQuestionsSchema,
+} from "@/app/lib/quiz";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
 
 export const PositiveIntSchema = z
@@ -344,7 +349,7 @@ export const QuizGradeRequestSchema = z.object({
     .array(
       z.object({
         questionId: PositiveIntSchema,
-        choices: z.array(z.number().int().min(0)).max(20).optional(),
+        choices: z.array(z.number().int().min(0)).max(QUIZ_MAX_CHOICES).optional(),
         text: z
           .string()
           .max(QUIZ_TEXT_ANSWER_MAX_LENGTH, {
@@ -355,7 +360,7 @@ export const QuizGradeRequestSchema = z.object({
       { message: "answersは配列で指定してください" }
     )
     .min(1, { message: "回答を入力してください" })
-    .max(20),
+    .max(QUIZ_MAX_QUESTIONS),
 });
 
 const BULK_CONTENT_IDS_MESSAGE = `idsは1〜${MAX_BULK_CONTENT_IDS}件の正の整数で指定してください`;
