@@ -1,7 +1,7 @@
 import { Share2 } from "lucide-react";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
-import { CERTIFICATE_ISSUER_NAME, CERTIFICATE_SERVICE_NAME } from "@/app/constants/certificate";
+import { CERTIFICATE_SERVICE_NAME, getCertificateIssuerName } from "@/app/constants/certificate";
 import { buildCertificateShareUrl } from "@/app/lib/certificate";
 import { formatDate } from "@/app/lib/format-date";
 import { parsePositiveInteger } from "@/app/lib/positive-integer";
@@ -42,6 +42,7 @@ export default async function CertificateDetailPage({
     notFound();
   }
 
+  const issuerName = getCertificateIssuerName();
   const shareUrl = buildCertificateShareUrl(
     certificate.theme_name,
     process.env.NEXT_PUBLIC_APP_URL || null
@@ -103,7 +104,7 @@ export default async function CertificateDetailPage({
               <p className="mt-[1.6cqw] text-[2.2cqw] font-bold text-indigo-950">
                 {CERTIFICATE_SERVICE_NAME}
               </p>
-              <p className="text-[1.6cqw]">{CERTIFICATE_ISSUER_NAME}</p>
+              {issuerName && <p className="text-[1.6cqw]">{issuerName}</p>}
             </div>
           </div>
         </div>

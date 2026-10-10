@@ -18,10 +18,13 @@ export const CERTIFICATE_NO_MAX_ATTEMPTS = 5;
 export const CERTIFICATE_SERVICE_NAME = EMAIL_FROM_NAME;
 
 /**
- * Issuing organization printed on the certificate. Placeholder until the final wording is
- * confirmed (#291 human task); change it here only.
+ * Issuing organization printed on the certificate, from the CERTIFICATE_ISSUER_NAME env var. Unset
+ * or blank returns null and the line is omitted: a printed certificate cannot be corrected, so the
+ * name is never guessed. Set it only once the final wording is confirmed.
  */
-export const CERTIFICATE_ISSUER_NAME = "一般社団法人 未来技術協会";
+export function getCertificateIssuerName(): string | null {
+  return process.env.CERTIFICATE_ISSUER_NAME?.trim() || null;
+}
 
 /** The dashboard card shows a certificate only for this many days after it was issued. */
 export const CERTIFICATE_DASHBOARD_DISPLAY_DAYS = 14;

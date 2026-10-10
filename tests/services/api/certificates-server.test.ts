@@ -12,6 +12,7 @@ import {
   fetchMyCertificateById,
   fetchRecentCertificate,
   issueCertificateIfEligible,
+  issueMissingCertificates,
 } from "@/app/services/api/certificates-server";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
 import {
@@ -212,6 +213,84 @@ describe("issueCertificateIfEligible - 冪等性・失敗時", () => {
 
     expect(await issueCertificateIfEligible(params)).toBeNull();
     expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+});
+
+describe("issueMissingCertificates（既に完了済みのテーマの遡及発行）", () => {
+  const eligible = { userId: 2, userStatus: "active" as const, userRole: "member" as const };
+  const done = (id: number) => ({ ...summary(3, 3), theme: { id, name: `テーマ${id}` } });
+
+  it("完了済みで未発行のテーマだけに発行する（発行済み・未完了は対象外）", async () => {
+    const admin = mockAdminClient({ certificates: inserted });
+
+    const result = await issueMissingCertificates({
+      ...eligible,
+      summaries: [done(1), done(2), summary(3, 1) as never] as never,
+      issuedThemeIds: new Set([1]),
+    });
+
+    expect(result).toEqual([inserted.data]);
+    const builders = certificateInserts(admin);
+    expect(builders).toHaveLength(1);
+    expect(builders[0].insert.mock.calls[0][0]).toMatchObject({
+      user_id: 2,
+      theme_id: 2,
+      theme_name: "テーマ2",
+    });
+    expect(scheduleCertificateIssuedEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("未発行の完了テーマが無ければ admin クライアントを取得しない", async () => {
+    const result = await issueMissingCertificates({
+      ...eligible,
+      summaries: [done(1)] as never,
+      issuedThemeIds: new Set([1]),
+    });
+
+    expect(result).toEqual([]);
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["trial", "member"],
+    ["active", "admin"],
+  ] as const)("status=%s role=%s には発行しない", async (userStatus, userRole) => {
+    const result = await issueMissingCertificates({
+      userId: 2,
+      userStatus,
+      userRole,
+      summaries: [done(1)] as never,
+      issuedThemeIds: new Set(),
+    });
+
+    expect(result).toEqual([]);
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it("競合で既に発行済み（UNIQUE 違反）なら何も返さず、メールも送らない。失敗しても例外にしない", async () => {
+    mockAdminClient({
+      certificates: {
+        data: null,
+        error: { code: "23505", message: 'violates "certificates_user_theme_unique"' },
+      },
+    });
+    expect(
+      await issueMissingCertificates({
+        ...eligible,
+        summaries: [done(1)] as never,
+        issuedThemeIds: new Set(),
+      })
+    ).toEqual([]);
+    expect(scheduleCertificateIssuedEmail).not.toHaveBeenCalled();
+
+    vi.mocked(createAdminSupabaseClient).mockRejectedValue(new Error("no key"));
+    await expect(
+      issueMissingCertificates({
+        ...eligible,
+        summaries: [done(1)] as never,
+        issuedThemeIds: new Set(),
+      })
+    ).resolves.toEqual([]);
   });
 });
 

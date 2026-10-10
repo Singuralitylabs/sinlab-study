@@ -4,7 +4,10 @@ import { redirect } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
 import { isCertificateEligible } from "@/app/lib/certificate";
 import { formatDate } from "@/app/lib/format-date";
-import { fetchMyCertificates } from "@/app/services/api/certificates-server";
+import {
+  fetchMyCertificates,
+  issueMissingCertificates,
+} from "@/app/services/api/certificates-server";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,10 +21,27 @@ export default async function CertificatesPage() {
     redirect("/");
   }
 
-  const [{ data: certificates }, { data: summaries }] = await Promise.all([
+  const [{ data: initialCertificates }, { data: summaries }] = await Promise.all([
     fetchMyCertificates(userId),
     fetchThemeProgressSummaries(userId),
   ]);
+
+  // Themes already 100% complete without a certificate (finished before release, or while trial)
+  // never hit the progress trigger, so issue them here. Idempotent, so repeat visits are safe.
+  // Skipped when the certificates could not be read: every theme would look unissued.
+  const issuedNow = initialCertificates
+    ? await issueMissingCertificates({
+        userId,
+        userStatus,
+        userRole,
+        summaries: summaries ?? [],
+        issuedThemeIds: new Set(initialCertificates.map((c) => c.theme_id)),
+      })
+    : [];
+  const certificates =
+    issuedNow.length > 0
+      ? ((await fetchMyCertificates(userId)).data ?? initialCertificates)
+      : initialCertificates;
 
   const issuedThemeIds = new Set((certificates ?? []).map((c) => c.theme_id));
   const pendingThemes = (summaries ?? []).filter(

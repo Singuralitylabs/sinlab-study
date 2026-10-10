@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/certificates-server");
@@ -37,7 +37,19 @@ beforeEach(() => {
   vi.mocked(fetchMyCertificateById).mockResolvedValue({ data: certificate, error: null });
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("/certificates/[id]", () => {
+  it("運営団体名は環境変数があるときだけ表示し、未設定・空なら行を出さない", async () => {
+    vi.stubEnv("CERTIFICATE_ISSUER_NAME", "");
+    expect(await render("31")).not.toContain("運営団体テスト");
+
+    vi.stubEnv("CERTIFICATE_ISSUER_NAME", "  運営団体テスト  ");
+    expect(await render("31")).toContain(">運営団体テスト<");
+  });
+
   it("本人の修了証には受講者名・テーマ名・証明番号・印刷ボタン・X 共有リンクを表示する", async () => {
     const html = await render("31");
 

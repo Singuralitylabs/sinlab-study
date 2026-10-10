@@ -6,7 +6,10 @@ import {
   isCertificateEligible,
   isThemeCompleted,
 } from "@/app/lib/certificate";
-import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
+import {
+  fetchThemeProgressSummaries,
+  type ThemeProgressSummary,
+} from "@/app/services/api/learning-server";
 import {
   createAdminSupabaseClient,
   createServerSupabaseClient,
@@ -36,14 +39,80 @@ async function fetchThemeIdOfContent(contentId: number): Promise<number | null> 
 export type IssuedCertificate = Pick<Certificate, "id" | "certificate_no" | "theme_name">;
 
 /**
+ * Inserts one certificate per completed theme summary (service_role; `user_id` fixed to the
+ * caller) and schedules the email for each new row. The only service_role use of issuance, shared
+ * by the progress trigger and the backfill so the insert / idempotency rules live in one place.
+ * UNIQUE (user_id, theme_id) violations (23505) mean already issued and are skipped.
+ */
+async function insertCertificates(
+  userId: number,
+  summaries: ThemeProgressSummary[]
+): Promise<IssuedCertificate[]> {
+  if (summaries.length === 0) {
+    return [];
+  }
+
+  const admin = await createAdminSupabaseClient();
+  const { data: user, error: userError } = await admin
+    .from("users")
+    .select("display_name")
+    .eq("id", userId)
+    .eq("is_deleted", false)
+    .maybeSingle();
+  if (userError || !user) {
+    console.error("[修了証] 受講者名の取得エラー:", userError?.message ?? "user not found");
+    return [];
+  }
+
+  const issued: IssuedCertificate[] = [];
+  for (const summary of summaries) {
+    for (let attempt = 0; attempt < CERTIFICATE_NO_MAX_ATTEMPTS; attempt++) {
+      const { data: inserted, error: insertError } = await admin
+        .from("certificates")
+        .insert({
+          user_id: userId,
+          theme_id: summary.theme.id,
+          certificate_no: generateCertificateNo(new Date()),
+          recipient_name: user.display_name,
+          theme_name: summary.theme.name,
+        })
+        .select("id, certificate_no, theme_name")
+        .single();
+
+      if (!insertError) {
+        issued.push(inserted);
+        scheduleCertificateIssuedEmail({
+          userId,
+          certificateId: inserted.id,
+          themeName: inserted.theme_name,
+          certificateNo: inserted.certificate_no,
+        });
+        break;
+      }
+      if (insertError.code !== UNIQUE_VIOLATION) {
+        console.error("[修了証] 発行エラー:", insertError.message);
+        break;
+      }
+      // Both UNIQUE (user_id, theme_id) and UNIQUE (certificate_no) raise 23505. Only a number
+      // collision is worth retrying; a duplicate (user, theme) means it is already issued.
+      if (!insertError.message.includes("certificate_no")) {
+        break;
+      }
+      if (attempt === CERTIFICATE_NO_MAX_ATTEMPTS - 1) {
+        console.error("[修了証] 証明番号が重複し続けたため発行を見送りました");
+      }
+    }
+  }
+  return issued;
+}
+
+/**
  * Issues the certificate of the theme `contentId` belongs to, when the user just finished every
  * published content of it. Called after POST /api/progress marks a content complete.
  *
  * - Eligibility: active member only (trial users and admin / maintainer never receive one).
  * - Completion reuses fetchThemeProgressSummaries() so the denominator (published contents under
  *   published parents) is the one the dashboard shows. It runs with the user's own session (RLS).
- * - The INSERT is the only service_role use here; `user_id` is fixed to the caller. UNIQUE
- *   (user_id, theme_id) makes it idempotent: an existing certificate (23505) is not an error.
  * - Never throws and never returns an error to the caller: a failure here must not change the
  *   progress response (the user's completion is already saved).
  *
@@ -70,61 +139,44 @@ export async function issueCertificateIfEligible(params: {
     if (error || !summaries) {
       return null;
     }
-    const summary = summaries.find((s) => s.theme.id === themeId);
-    if (!summary || !isThemeCompleted(summary)) {
-      return null;
-    }
+    const completed = summaries.filter((s) => s.theme.id === themeId && isThemeCompleted(s));
 
-    const admin = await createAdminSupabaseClient();
-
-    const { data: user, error: userError } = await admin
-      .from("users")
-      .select("display_name")
-      .eq("id", params.userId)
-      .eq("is_deleted", false)
-      .maybeSingle();
-    if (userError || !user) {
-      console.error("[修了証] 受講者名の取得エラー:", userError?.message ?? "user not found");
-      return null;
-    }
-
-    for (let attempt = 0; attempt < CERTIFICATE_NO_MAX_ATTEMPTS; attempt++) {
-      const { data: inserted, error: insertError } = await admin
-        .from("certificates")
-        .insert({
-          user_id: params.userId,
-          theme_id: themeId,
-          certificate_no: generateCertificateNo(new Date()),
-          recipient_name: user.display_name,
-          theme_name: summary.theme.name,
-        })
-        .select("id, certificate_no, theme_name")
-        .single();
-
-      if (!insertError) {
-        scheduleCertificateIssuedEmail({
-          userId: params.userId,
-          certificateId: inserted.id,
-          themeName: inserted.theme_name,
-          certificateNo: inserted.certificate_no,
-        });
-        return inserted;
-      }
-      if (insertError.code !== UNIQUE_VIOLATION) {
-        console.error("[修了証] 発行エラー:", insertError.message);
-        return null;
-      }
-      // Both UNIQUE (user_id, theme_id) and UNIQUE (certificate_no) raise 23505. Only a number
-      // collision is worth retrying; a duplicate (user, theme) means it is already issued.
-      if (!insertError.message.includes("certificate_no")) {
-        return null;
-      }
-    }
-    console.error("[修了証] 証明番号が重複し続けたため発行を見送りました");
-    return null;
+    const [issued] = await insertCertificates(params.userId, completed);
+    return issued ?? null;
   } catch (error) {
     console.error("[修了証] 予期しないエラー:", error);
     return null;
+  }
+}
+
+/**
+ * Issues certificates for themes that are already 100% complete but have none: themes finished
+ * before this feature shipped, or finished while trial (open-to-trial contents only) and approved
+ * later. The progress trigger never fires for them. Called when the user opens `/certificates`;
+ * the insert is idempotent, so repeated visits and races are safe.
+ *
+ * @param summaries already-fetched fetchThemeProgressSummaries() result (avoids a second query)
+ * @param issuedThemeIds themes that already have a certificate (skipped without an INSERT attempt)
+ * @returns the newly issued certificates; never throws (a failure just leaves them for next time)
+ */
+export async function issueMissingCertificates(params: {
+  userId: number;
+  userStatus: UserStatusType | null;
+  userRole: UserRoleType | null;
+  summaries: ThemeProgressSummary[];
+  issuedThemeIds: ReadonlySet<number>;
+}): Promise<IssuedCertificate[]> {
+  try {
+    if (!isCertificateEligible(params.userStatus, params.userRole)) {
+      return [];
+    }
+    const missing = params.summaries.filter(
+      (s) => isThemeCompleted(s) && !params.issuedThemeIds.has(s.theme.id)
+    );
+    return await insertCertificates(params.userId, missing);
+  } catch (error) {
+    console.error("[修了証] 予期しないエラー:", error);
+    return [];
   }
 }
 

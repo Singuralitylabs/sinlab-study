@@ -1295,13 +1295,14 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 - **対象**: `status = active` かつ `role = member`（`isCertificateEligible()`）。コミュニティ会員・一般有料会員とも対象。お試しユーザー（`trial`）、admin / maintainer には発行しない
 - **条件**: そのテーマ配下の**公開中コンテンツ（`is_published = true AND is_deleted = false`、親のフェーズ・週・テーマも公開）すべて**について `user_progress.is_completed` が true。演習も「完了」ボタンの完了で判定し、提出の有無は問わない（URL 提出のみの演習で判定が複雑になるため）。公開コンテンツが0件のテーマは修了にならない（`isThemeCompleted()`）
 - **分母は進捗集計と同じ**: 判定は `fetchThemeProgressSummaries()`（4.2節）を再利用し、ダッシュボードの進捗と必ず一致させる（集計ロジックを二重に持たない）。ユーザーのセッション（RLS）で実行する
+- **既に完了済みのテーマ（遡及発行）**: `POST /api/progress` の完了が契機なので、機能の導入前に完了していたテーマや、お試し中にお試し公開分だけで完了して後から本登録になったテーマには、その契機が来ない。そのため `/certificates` を開いたとき、完了済みで未発行のテーマに `issueMissingCertificates()` が同じ INSERT 経路で発行する（冪等。メールも発行時に1通送る）。ダッシュボードのカードとサイドナビの「修了証」は、`/certificates` を開いて発行されたあとに表示される
 - 発行後に管理者がコンテンツを追加・公開しても、発行済みの修了証は取り消さない（スナップショットのため）。管理者による発行・取り消しの操作は設けない
 
 ### 13.2 判定タイミングと発行処理
 
 `POST /api/progress` が完了（`isCompleted = true`）に更新した**直後**に、`issueCertificateIfEligible()`（`app/services/api/certificates-server.ts`）を呼ぶ。完了の取り消しや保存失敗のときは呼ばない。
 
-1. 対象かを確認（対象外なら何もしない）
+1. 対象かを確認（対象外なら何もしない）。INSERT は `insertCertificates()` に集約し、遡及発行（13.1節）と共用する
 2. コンテンツ → 週 → フェーズからテーマ ID を求め（通常クライアント）、`fetchThemeProgressSummaries()` でそのテーマが修了かを判定
 3. 修了なら、service_role で `certificates` に INSERT する。**`user_id` は認証済みの本人に固定**し、`recipient_name`（`users.display_name`）と `theme_name` は発行時点のスナップショットとして書く
 4. INSERT 成功後にメール `certificate_issued`（10.4節）を `after()` に予約する
@@ -1314,7 +1315,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 ### 13.3 画面
 
 - **`/certificates`**: 自分の修了証（テーマ名・発行日・証明番号。新しい順）と、未発行のテーマ（「修了すると発行されます」と進捗率）。`active` の member 以外は `/` へリダイレクトする
-- **`/certificates/[id]`**: 修了証の表示（受講者名・テーマ名・発行日（JST）・証明番号・サービス名（`EMAIL_FROM_NAME` と同じ定数）・運営団体名（`CERTIFICATE_ISSUER_NAME`））。**本人のみ閲覧可**で、他人の ID・存在しない ID・不正な ID はすべて404（RLS は admin / maintainer にも SELECT を許すが、このページは `user_id` を本人に絞る）。公開 URL は作らない
+- **`/certificates/[id]`**: 修了証の表示（受講者名・テーマ名・発行日（JST）・証明番号・サービス名（`EMAIL_FROM_NAME` と同じ定数）・運営団体名（環境変数 `CERTIFICATE_ISSUER_NAME`。未設定・空なら行ごと出さない。印刷済みの修了証は訂正できないため、文言が確定してから設定する））。**本人のみ閲覧可**で、他人の ID・存在しない ID・不正な ID はすべて404（RLS は admin / maintainer にも SELECT を許すが、このページは `user_id` を本人に絞る）。公開 URL は作らない
 - **ダッシュボード**: 発行から14日以内（`CERTIFICATE_DASHBOARD_DISPLAY_DAYS`）の最新1件を「修了証が発行されました」のカードで表示（`/certificates/[id]` へのリンク。永続化はしない）
 - **サイドナビ**: 「修了証」を `active` の member にだけ表示する
 
