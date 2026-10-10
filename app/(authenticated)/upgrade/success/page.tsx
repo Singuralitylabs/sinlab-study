@@ -44,9 +44,16 @@ export default async function UpgradeSuccessPage({
       } else {
         // The redirect can land here before the webhook, so run the same idempotent promotion here
         // too (safe even if it overlaps the webhook).
-        const { error, activated, currentPeriodEnd } =
+        const { error, rejection, activated, currentPeriodEnd } =
           await activateUserFromCheckoutSession(session);
-        if (error) {
+        if (rejection) {
+          // The user paid for a session we refused, so leave a trace to match their inquiry.
+          console.error(
+            `Checkoutセッションを昇格できませんでした（要確認）: id=${session.id} rejection=${rejection}`
+          );
+          // Reloading cannot change the answer, so no retry prompt.
+          errorMessage = "決済情報を確認できませんでした";
+        } else if (error) {
           console.error("会員昇格エラー:", error);
           errorMessage = "会員登録の反映に失敗しました。時間をおいて再度お試しください";
         } else if (!activated) {
