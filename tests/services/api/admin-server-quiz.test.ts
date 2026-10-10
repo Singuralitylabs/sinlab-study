@@ -4,7 +4,7 @@ import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 vi.mock("@/app/services/api/supabase-server");
 
 import type { QuizQuestionData } from "@/app/lib/quiz";
-import { updateContent } from "@/app/services/api/admin-server";
+import { createContent, updateContent } from "@/app/services/api/admin-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 
 const stored: QuizQuestionData[] = [
@@ -91,5 +91,38 @@ describe("updateContent のクイズ設問（#306 レビュー対応）", () => 
       "replace_quiz_questions",
       { p_content_id: 1, p_questions: stored },
     ]);
+  });
+});
+
+describe("createContent の設問保存失敗時の取り消し（#306 レビュー対応）", () => {
+  it("設問の保存に失敗したら作成した行を物理削除し、エラーを返す", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          { data: [], error: null },
+          { data: { id: 77, title: "クイズ" }, error: null },
+          { data: null, error: null },
+          { data: [], error: null },
+        ],
+      },
+      rpcResults: { replace_quiz_questions: { data: null, error: dbError } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const result = await createContent({
+      title: "クイズ",
+      week_id: 3,
+      content_type: "quiz",
+      insertAfterId: null,
+      quizQuestions: edited,
+    });
+
+    expect(result).toEqual({ data: null, error: dbError });
+    const builders = vi.mocked(client.from).mock.results.map((r) => r.value);
+    expect(builders.some((b) => vi.mocked(b.delete).mock.calls.length > 0)).toBe(true);
+    const updates = builders.flatMap((b) =>
+      vi.mocked(b.update).mock.calls.map((call: unknown[]) => call[0])
+    );
+    expect(updates).not.toContainEqual(expect.objectContaining({ is_deleted: true }));
   });
 });

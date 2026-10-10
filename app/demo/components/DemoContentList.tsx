@@ -1,16 +1,8 @@
 "use client";
 
-import {
-  CheckCircle,
-  Clock,
-  FileText,
-  ListChecks,
-  Lock,
-  PenLine,
-  Play,
-  Presentation,
-} from "lucide-react";
+import { CheckCircle, Clock, Lock } from "lucide-react";
 import Link from "next/link";
+import { ContentTypeIcon } from "@/app/components/ContentTypeIcon";
 import { CONTENT_TYPE_LABELS } from "@/app/constants/content";
 import type { LearningContentListItem } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
@@ -23,21 +15,6 @@ interface DemoContentListProps {
   phaseId: number;
   weekId: number;
   locked?: boolean;
-}
-
-function getContentIcon(type: string) {
-  switch (type) {
-    case "video":
-      return <Play className="h-4 w-4" />;
-    case "exercise":
-      return <PenLine className="h-4 w-4" />;
-    case "slide":
-      return <Presentation className="h-4 w-4" />;
-    case "quiz":
-      return <ListChecks className="h-4 w-4" />;
-    default:
-      return <FileText className="h-4 w-4" />;
-  }
 }
 
 export function DemoContentList({
@@ -96,7 +73,7 @@ export function DemoContentList({
                     </h3>
                   </div>
                   <Badge variant="secondary" className="gap-1 shrink-0 text-xs">
-                    {getContentIcon(content.content_type)}
+                    <ContentTypeIcon type={content.content_type} className="h-4 w-4" />
                     {CONTENT_TYPE_LABELS[content.content_type]}
                   </Badge>
                 </div>

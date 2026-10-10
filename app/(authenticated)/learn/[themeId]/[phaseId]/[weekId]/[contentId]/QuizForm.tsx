@@ -9,7 +9,7 @@ import {
   QUIZ_TEXT_ANSWER_MAX_LENGTH,
   type QuizQuestionForLearner,
   type QuizQuestionResult,
-} from "@/app/lib/quiz";
+} from "@/app/constants/quiz";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -182,9 +182,19 @@ export function QuizForm({
                   const checked = answer?.choices.includes(index) ?? false;
                   const isCorrectChoice = result?.correctChoices.includes(index) ?? false;
                   return (
-                    <label
+                    // A <div>, not a <label>: MarkdownRenderer emits block elements (invalid
+                    // inside a label), and a link in a choice must open without toggling it.
+                    // Keyboard users operate the input itself, so the row click is a shortcut.
+                    // biome-ignore lint/a11y/useKeyWithClickEvents: the input is the keyboard target
+                    // biome-ignore lint/a11y/noStaticElementInteractions: same as above
+                    <div
                       // biome-ignore lint/suspicious/noArrayIndexKey: choices are fixed per question and may repeat
                       key={index}
+                      onClick={(e) => {
+                        const target = e.target as HTMLElement;
+                        if (results || target.closest("a") || target.tagName === "INPUT") return;
+                        toggleChoice(question, index);
+                      }}
                       className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 ${
                         result && isCorrectChoice
                           ? "border-success bg-success/10"
@@ -198,10 +208,13 @@ export function QuizForm({
                         name={`question-${question.id}`}
                         checked={checked}
                         onChange={() => toggleChoice(question, index)}
+                        aria-labelledby={`question-${question.id}-choice-${index}`}
                         className="mt-1.5 h-4 w-4"
                       />
-                      <MarkdownRenderer content={choice} className="flex-1 [&>*]:my-0" />
-                    </label>
+                      <div id={`question-${question.id}-choice-${index}`} className="flex-1">
+                        <MarkdownRenderer content={choice} className="[&>*]:my-0" />
+                      </div>
+                    </div>
                   );
                 })}
               </div>

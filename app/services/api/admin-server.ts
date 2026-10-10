@@ -1,6 +1,7 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { WEEKLY_FUNNEL_WEEKS } from "@/app/constants/analytics";
+import { isQuizQuestionType } from "@/app/constants/quiz";
 import { SLIDES_BUCKET } from "@/app/constants/storage";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import {
@@ -9,7 +10,7 @@ import {
   resolveSiblingResequence,
   type SiblingOrderRow,
 } from "@/app/lib/content-grouping";
-import { isQuizQuestionType, type QuizQuestionData } from "@/app/lib/quiz";
+import type { QuizQuestionData } from "@/app/lib/quiz";
 import { toSlideObjectKey } from "@/app/lib/slide-object-key";
 import { WEEKLY_FUNNEL_FETCH_ERROR, type WeeklyFunnelRow } from "@/app/lib/weekly-funnel";
 import {
@@ -275,7 +276,7 @@ async function resequenceSiblingsForInsert(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
   table: SiblingTable,
   parentFilter: SiblingParentFilter,
-  insertAfterId: number | null
+  insertAfterId: number | null | "tail"
 ): Promise<{ displayOrder: number; error: null } | { displayOrder: null; error: PostgrestError }> {
   const { data: siblings, error: siblingsError } = await fetchSiblings(
     supabase,
@@ -286,7 +287,11 @@ async function resequenceSiblingsForInsert(
     return { displayOrder: null, error: siblingsError };
   }
 
-  const { displayOrder, updates } = resolveSiblingResequence(siblings ?? [], insertAfterId);
+  // "tail" resolves against the siblings just fetched, so bulk creation needs no second fetch.
+  const { displayOrder, updates } = resolveSiblingResequence(
+    siblings ?? [],
+    insertAfterId === "tail" ? getSiblingTailId(siblings ?? []) : insertAfterId
+  );
 
   const updateError = await applySiblingUpdates(supabase, table, updates);
   if (updateError) {
@@ -1140,7 +1145,7 @@ export async function fetchContentByIdForAdmin(
  * createContent already used service_role. The AGENTS.md service_role restriction covers
  * student-facing delivery paths, not this admin-only create path.
  */
-export async function createContent(content: {
+type CreateContentInput = {
   week_id: number;
   title: string;
   content_type: ContentType;
@@ -1157,9 +1162,18 @@ export async function createContent(content: {
   is_published?: boolean;
   is_open_to_trial?: boolean;
   quizQuestions?: QuizQuestionData[];
-}): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
-  const supabase = await createAdminSupabaseClient();
+};
 
+export async function createContent(
+  content: CreateContentInput
+): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
+  return createContentWith(await createAdminSupabaseClient(), content);
+}
+
+async function createContentWith(
+  supabase: AdminSupabaseClient,
+  content: Omit<CreateContentInput, "insertAfterId"> & { insertAfterId: number | null | "tail" }
+): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
   const resequenced = await resequenceSiblingsForInsert(
     supabase,
     "learning_contents",
@@ -1202,13 +1216,25 @@ export async function createContent(content: {
   if (content.content_type === "quiz" && content.quizQuestions) {
     const quizError = await replaceQuizQuestions(supabase, data.id, content.quizQuestions);
     if (quizError) {
-      // Leaving the row would publish a quiz with no questions; soft-delete it like the delete API.
+      // Leaving the row would publish a quiz with no questions. Nothing can reference a row created
+      // a moment ago, so remove it outright (a soft-deleted half-made row would linger in lists)
+      // and close the display_order gap the insert opened.
       const { error: rollbackError } = await supabase
         .from("learning_contents")
-        .update({ is_deleted: true })
+        .delete()
         .eq("id", data.id);
       if (rollbackError) {
         console.error("コンテンツ作成エラー（設問保存失敗後の取り消し）:", rollbackError.message);
+      } else {
+        const renumberError = await renumberSourceSiblingsAfterMove(
+          supabase,
+          "learning_contents",
+          data.id,
+          { column: "week_id", value: content.week_id }
+        );
+        if (renumberError) {
+          console.error("コンテンツ作成エラー（取り消し後の再採番）:", renumberError.message);
+        }
       }
       return { data: null, error: quizError };
     }
@@ -1223,9 +1249,7 @@ export async function createContent(content: {
  * can tell the admin which items to retry.
  */
 export async function createContentsAtTail(
-  items: (Omit<Parameters<typeof createContent>[0], "insertAfterId" | "quizQuestions"> & {
-    quizQuestions?: QuizQuestionData[];
-  })[]
+  items: Omit<CreateContentInput, "insertAfterId">[]
 ): Promise<{
   created: { id: number; title: string }[];
   error: PostgrestError | null;
@@ -1235,21 +1259,11 @@ export async function createContentsAtTail(
   const created: { id: number; title: string }[] = [];
 
   for (const [index, item] of items.entries()) {
-    const { data: siblings, error: siblingsError } = await fetchSiblings(
-      supabase,
-      "learning_contents",
-      { column: "week_id", value: item.week_id }
-    );
-    if (siblingsError) {
-      console.error("コンテンツ一括作成エラー（兄弟取得）:", siblingsError.message);
-      return { created, error: siblingsError, failedIndex: index };
-    }
-    let result: Awaited<ReturnType<typeof createContent>>;
+    let result: Awaited<ReturnType<typeof createContentWith>>;
     try {
-      result = await createContent({ ...item, insertAfterId: getSiblingTailId(siblings ?? []) });
+      result = await createContentWith(supabase, { ...item, insertAfterId: "tail" });
     } catch (thrown) {
-      // InvalidInsertAfterIdError when the tail sibling is deleted concurrently. Report it like
-      // any other failure so the already-created items are not lost from the response.
+      // Report like any other failure so the already-created items are not lost from the response.
       console.error("コンテンツ一括作成エラー:", thrown);
       return {
         created,
@@ -1353,8 +1367,10 @@ export async function updateContent(
     return updateContentRow(supabase, id, patch, insertAfterId);
   }
 
-  // Questions go first so a failure here never leaves a quiz row with stale or no questions; if
-  // the row update then fails, the previous questions are put back so neither side changes.
+  // Questions go first so a failure here never leaves a quiz row with stale or no questions. If
+  // the row update then fails, the previous questions are written back (best effort: the restore
+  // can itself fail, which is only logged). replace_quiz_questions updates rows in place by
+  // position, so neither the replace nor the restore renumbers the question ids.
   const quizError = await replaceQuizQuestions(supabase, id, quizQuestions);
   if (quizError) {
     return { error: quizError, storageRemoved: true };

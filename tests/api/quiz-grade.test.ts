@@ -128,6 +128,16 @@ describe("POST /api/quiz/grade", () => {
     ["answers 空", { ...body, answers: [] }],
     ["選択肢が負の数", { ...body, answers: [{ questionId: 1, choices: [-1] }] }],
     ["回答が長すぎる", { ...body, answers: [{ questionId: 2, text: "a".repeat(2001) }] }],
+    [
+      "同じ設問への回答が重複",
+      {
+        ...body,
+        answers: [
+          { questionId: 1, choices: [] },
+          { questionId: 1, choices: [1] },
+        ],
+      },
+    ],
   ])("%sは400で、採点しない", async (_label, payload) => {
     const res = await POST(request(payload) as never);
 

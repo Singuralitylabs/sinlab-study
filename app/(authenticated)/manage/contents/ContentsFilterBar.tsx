@@ -2,23 +2,15 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { CONTENT_TYPE_FORM_OPTIONS } from "@/app/constants/content";
 import {
   isContentType,
   type PhaseFilterOption,
   type ThemeFilterOption,
   type WeekFilterOption,
 } from "@/app/lib/content-filtering";
-import type { ContentType } from "@/app/types";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
-const CONTENT_TYPE_FILTER_OPTIONS: { value: ContentType; label: string }[] = [
-  { value: "video", label: "動画" },
-  { value: "text", label: "テキスト" },
-  { value: "exercise", label: "演習" },
-  { value: "slide", label: "スライド（PDF）" },
-  { value: "quiz", label: "クイズ" },
-];
 
 const SELECT_CLASS_NAME =
   "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs";
@@ -175,7 +167,7 @@ export function ContentsFilterBar({ themes, phases, weeks }: ContentsFilterBarPr
           className={SELECT_CLASS_NAME}
         >
           <option value="">すべて</option>
-          {CONTENT_TYPE_FILTER_OPTIONS.map((opt) => (
+          {CONTENT_TYPE_FORM_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>

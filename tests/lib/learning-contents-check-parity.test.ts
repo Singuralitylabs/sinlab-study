@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CODE_LANGUAGES } from "@/app/components/code-editor-utils";
 import { CONTENT_TYPES } from "@/app/constants/content";
-import { QUIZ_MAX_CHOICES, QUIZ_MIN_CHOICES, QUIZ_QUESTION_TYPES } from "@/app/lib/quiz";
+import { QUIZ_MAX_CHOICES, QUIZ_MIN_CHOICES, QUIZ_QUESTION_TYPES } from "@/app/constants/quiz";
 
 const migrationsDir = join(process.cwd(), "supabase/migrations");
 

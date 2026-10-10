@@ -3,7 +3,7 @@ import {
   isQuizQuestionType,
   type QuizQuestionForLearner,
   type QuizQuestionResult,
-} from "@/app/lib/quiz";
+} from "@/app/constants/quiz";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import { createServerSupabaseClient } from "./supabase-server";
 

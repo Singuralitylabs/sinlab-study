@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  QUIZ_MAX_CHOICES,
-  QUIZ_MAX_QUESTIONS,
-  QuizQuestionSchema,
-  QuizQuestionsSchema,
-} from "@/app/lib/quiz";
+import { QUIZ_MAX_CHOICES, QUIZ_MAX_QUESTIONS } from "@/app/constants/quiz";
+import { QuizQuestionSchema, QuizQuestionsSchema } from "@/app/lib/quiz";
 
 const single = {
   question_type: "single",

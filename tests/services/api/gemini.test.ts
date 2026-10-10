@@ -208,6 +208,15 @@ describe("buildUserPrompt", () => {
     expect(prompt).toContain("## 提出コード\n```sql\nSELECT 1;\n```");
   });
 
+  it("単一ファイルの言語が既知の値でなければコードフェンスに付けない（フェンスを壊さない）", () => {
+    const prompt = buildUserPrompt("課題", {
+      type: "code",
+      files: [{ filename: "", language: "sql\n```", content: "SELECT 1;" }],
+    });
+
+    expect(prompt).toContain("## 提出コード\n```\nSELECT 1;\n```");
+  });
+
   it("単一ファイル（ファイル名なし）は上限を超えた分を省略する", () => {
     const content = "a".repeat(GEMINI_MAX_CODE_LENGTH + 12);
     const prompt = buildUserPrompt("課題", {

@@ -29,6 +29,16 @@ export const CONTENT_TYPE_LABELS: Record<ContentType, string> = {
   quiz: "クイズ",
 };
 
+/** Labels for the admin type pickers, which name the slide format explicitly. */
+export const CONTENT_TYPE_FORM_LABELS: Record<ContentType, string> = {
+  ...CONTENT_TYPE_LABELS,
+  slide: "スライド（PDF）",
+};
+
+export const CONTENT_TYPE_FORM_OPTIONS: { value: ContentType; label: string }[] = CONTENT_TYPES.map(
+  (value) => ({ value, label: CONTENT_TYPE_FORM_LABELS[value] })
+);
+
 /** Max contents per bulk create request (POST /api/manage/contents/bulk). */
 export const MAX_BULK_CREATE_CONTENTS = 50;
 

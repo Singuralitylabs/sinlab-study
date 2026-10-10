@@ -8,9 +8,9 @@ import {
   QUIZ_MIN_QUESTIONS,
   QUIZ_QUESTION_TYPE_LABELS,
   QUIZ_QUESTION_TYPES,
-  type QuizQuestionData,
   type QuizQuestionType,
-} from "@/app/lib/quiz";
+} from "@/app/constants/quiz";
+import type { QuizQuestionData } from "@/app/lib/quiz";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

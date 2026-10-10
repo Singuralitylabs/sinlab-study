@@ -301,6 +301,19 @@ describe("POST /api/manage/contents/bulk - 一括登録（#306）", () => {
     });
   });
 
+  it("存在しない週（FK違反）など入力起因の失敗は400で、作成済みの件を返す", async () => {
+    vi.mocked(createContentsAtTail).mockResolvedValue({
+      created: [],
+      error: { message: "fk", code: "23503" } as never,
+      failedIndex: 0,
+    });
+
+    const res = await POST(post({ contents: [quiz] }));
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ created: [] });
+  });
+
   it("コンテンツ管理権限がなければ403で、作成しない", async () => {
     vi.mocked(getServerAuth).mockResolvedValue({ ...maintainerAuth, userRole: "member" } as never);
 

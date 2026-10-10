@@ -1,16 +1,7 @@
-import {
-  Bot,
-  Calendar,
-  CheckCircle,
-  Clock,
-  FileText,
-  ListChecks,
-  Lock,
-  PenLine,
-  Play,
-} from "lucide-react";
+import { Bot, Calendar, CheckCircle, Clock, Lock } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ContentTypeIcon } from "@/app/components/ContentTypeIcon";
 import { PageTitle } from "@/app/components/PageTitle";
 import { UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
@@ -29,28 +20,12 @@ import {
 } from "@/app/services/api/learning-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
-import type { ContentType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 
 interface PageProps {
   params: Promise<{ themeId: string; phaseId: string }>;
-}
-
-function getContentIcon(type: ContentType) {
-  switch (type) {
-    case "video":
-      return <Play className="h-4 w-4" />;
-    case "text":
-      return <FileText className="h-4 w-4" />;
-    case "exercise":
-      return <PenLine className="h-4 w-4" />;
-    case "quiz":
-      return <ListChecks className="h-4 w-4" />;
-    default:
-      return <FileText className="h-4 w-4" />;
-  }
 }
 
 export default async function PhasePage({ params }: PageProps) {
@@ -228,7 +203,10 @@ export default async function PhasePage({ params }: PageProps) {
                                   </h3>
                                 </div>
                                 <Badge variant="secondary" className="gap-1 shrink-0 text-xs">
-                                  {getContentIcon(content.content_type)}
+                                  <ContentTypeIcon
+                                    type={content.content_type}
+                                    className="h-4 w-4"
+                                  />
                                   {CONTENT_TYPE_LABELS[content.content_type]}
                                 </Badge>
                                 {locked && (

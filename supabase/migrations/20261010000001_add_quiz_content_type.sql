@@ -32,10 +32,27 @@ ALTER TABLE public.learning_contents
   CHECK (content_type IN ('video', 'text', 'exercise', 'slide', 'quiz'));
 
 -- ---------- quiz_questions ----------
+-- 正解の添字が choices の範囲内で重複しないこと。CHECK にサブクエリは書けないため関数にする。
+CREATE OR REPLACE FUNCTION public.quiz_correct_choices_valid(p_choices TEXT[], p_correct INTEGER[])
+RETURNS BOOLEAN
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public
+AS $$
+  SELECT NOT EXISTS (
+    SELECT 1 FROM unnest(p_correct) x WHERE x IS NULL OR x < 0 OR x >= cardinality(p_choices)
+  )
+  AND cardinality(p_correct) = (SELECT count(DISTINCT x) FROM unnest(p_correct) x);
+$$;
+
+REVOKE ALL ON FUNCTION public.quiz_correct_choices_valid(TEXT[], INTEGER[]) FROM PUBLIC, anon;
+
 CREATE TABLE IF NOT EXISTS public.quiz_questions (
   id SERIAL PRIMARY KEY,
   content_id INTEGER NOT NULL REFERENCES public.learning_contents(id) ON DELETE CASCADE,
-  display_order INTEGER NOT NULL,
+  -- 1〜3。UNIQUE (content_id, display_order) と合わせて 1 コンテンツ 3 問までを保証する
+  -- （QUIZ_MAX_QUESTIONS。採点 API も 3 問までしか受け付けない）。
+  display_order INTEGER NOT NULL CHECK (display_order BETWEEN 1 AND 3),
   question_type VARCHAR(20) NOT NULL CHECK (question_type IN ('single', 'multiple', 'text')),
   question TEXT NOT NULL CHECK (btrim(question) <> ''),
   choices TEXT[] NOT NULL DEFAULT '{}',
@@ -61,6 +78,9 @@ CREATE TABLE IF NOT EXISTS public.quiz_questions (
         cardinality(choices) BETWEEN 2 AND 6
         AND cardinality(correct_choices) BETWEEN 1 AND cardinality(choices)
     END
+  ),
+  CONSTRAINT quiz_questions_correct_choices_check CHECK (
+    quiz_correct_choices_valid(choices, correct_choices)
   )
 );
 
@@ -159,8 +179,10 @@ GRANT EXECUTE ON FUNCTION public.get_quiz_questions(INTEGER) TO authenticated, s
 
 -- ---------- 採点 ----------
 -- p_answers: [{"question_id": 1, "choices": [0, 2]}, {"question_id": 2, "text": "..."}]
--- 1 問でも未回答（選択式で選択なし・入力式で空文字）なら何も返さない
--- （正解だけを先に引き出させない）。選択肢の重複・範囲外の添字は不正解として扱う。
+-- 1 問でも未回答（選択式で選択なし・入力式で空文字）か、同じ question_id が重複していれば
+-- 何も返さない。これは「回答を送る前に正解を見せない」ための形式上の条件で、ダミーの回答を
+-- 送れば正解・解説は得られる（回答内容は保存しないため、それ以上は守らない）。
+-- 選択肢の重複・範囲外の添字は不正解として扱う。
 CREATE OR REPLACE FUNCTION public.grade_quiz_answers(p_content_id INTEGER, p_answers JSONB)
 RETURNS TABLE (
   question_id INTEGER,
@@ -181,6 +203,17 @@ BEGIN
   END IF;
 
   IF jsonb_typeof(p_answers) IS DISTINCT FROM 'array' THEN
+    RETURN;
+  END IF;
+
+  -- Without this, the per-question lookup below would pick one of the duplicates arbitrarily.
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(p_answers) a
+    WHERE jsonb_typeof(a) = 'object'
+    GROUP BY a ->> 'question_id'
+    HAVING count(*) > 1
+  ) THEN
     RETURN;
   END IF;
 
@@ -248,6 +281,8 @@ GRANT EXECUTE ON FUNCTION public.grade_quiz_answers(INTEGER, JSONB) TO authentic
 -- p_questions: [{"question_type": "single", "question": "...", "choices": ["a","b"],
 --               "correct_choices": [0], "model_answer": null, "explanation": "...", "hint": null}]
 -- 並び順は配列の順。service_role 専用（admin-server.ts が権限確認後に呼ぶ）。
+-- 同じ位置（display_order）の行は UPDATE して id を保つ（回答中の受講者の question_id を
+-- 無効にしないため）。増えた分は INSERT、減った分は DELETE。
 CREATE OR REPLACE FUNCTION public.replace_quiz_questions(p_content_id INTEGER, p_questions JSONB)
 RETURNS VOID
 LANGUAGE plpgsql
@@ -258,7 +293,8 @@ BEGIN
     RAISE EXCEPTION 'p_questions must be a JSON array' USING ERRCODE = '22023';
   END IF;
 
-  DELETE FROM quiz_questions WHERE content_id = p_content_id;
+  DELETE FROM quiz_questions
+  WHERE content_id = p_content_id AND display_order > jsonb_array_length(p_questions);
 
   INSERT INTO quiz_questions (
     content_id, display_order, question_type, question, choices, correct_choices,
@@ -277,7 +313,15 @@ BEGIN
     t.q ->> 'model_answer',
     t.q ->> 'explanation',
     t.q ->> 'hint'
-  FROM jsonb_array_elements(p_questions) WITH ORDINALITY AS t(q, ord);
+  FROM jsonb_array_elements(p_questions) WITH ORDINALITY AS t(q, ord)
+  ON CONFLICT (content_id, display_order) DO UPDATE SET
+    question_type = EXCLUDED.question_type,
+    question = EXCLUDED.question,
+    choices = EXCLUDED.choices,
+    correct_choices = EXCLUDED.correct_choices,
+    model_answer = EXCLUDED.model_answer,
+    explanation = EXCLUDED.explanation,
+    hint = EXCLUDED.hint;
 END;
 $$;
 

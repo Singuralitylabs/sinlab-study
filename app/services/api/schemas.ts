@@ -30,6 +30,11 @@ import {
   type EmailKind,
 } from "@/app/constants/notifications";
 import {
+  QUIZ_MAX_CHOICES,
+  QUIZ_MAX_QUESTIONS,
+  QUIZ_TEXT_ANSWER_MAX_LENGTH,
+} from "@/app/constants/quiz";
+import {
   MEMBERSHIP_TYPES,
   USER_MANAGEMENT_ACTIONS,
   USER_ROLES,
@@ -40,12 +45,7 @@ import {
   type EmailTemplateKey,
   validateEmailTemplateText,
 } from "@/app/lib/email-template";
-import {
-  QUIZ_MAX_CHOICES,
-  QUIZ_MAX_QUESTIONS,
-  QUIZ_TEXT_ANSWER_MAX_LENGTH,
-  QuizQuestionsSchema,
-} from "@/app/lib/quiz";
+import { QuizQuestionsSchema } from "@/app/lib/quiz";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
 
 export const PositiveIntSchema = z
@@ -360,7 +360,10 @@ export const QuizGradeRequestSchema = z.object({
       { message: "answersは配列で指定してください" }
     )
     .min(1, { message: "回答を入力してください" })
-    .max(QUIZ_MAX_QUESTIONS),
+    .max(QUIZ_MAX_QUESTIONS)
+    .refine((answers) => new Set(answers.map((a) => a.questionId)).size === answers.length, {
+      message: "同じ設問への回答が重複しています",
+    }),
 });
 
 const BULK_CONTENT_IDS_MESSAGE = `idsは1〜${MAX_BULK_CONTENT_IDS}件の正の整数で指定してください`;

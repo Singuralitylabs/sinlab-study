@@ -225,7 +225,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 - `question_type`: `single`（単一選択）/ `multiple`（複数選択）/ `text`（入力式）
 - `question`（設問・Markdown）、`choices`（選択肢・TEXT[]・各 Markdown）、`correct_choices`（正解・`choices` の0始まりの添字・INTEGER[]）、`model_answer`（入力式の模範解答・Markdown）、`explanation`（解説・Markdown）、`hint`（ヒント・プレーンテキスト）。項目名は原稿の「設問 / 形式 / 選択肢 / 正解 / 解説 / ヒント」に対応する
-- CHECK `quiz_questions_shape_check`: 選択式は選択肢2〜6個・`single` は正解1つ・`multiple` は正解1つ以上、入力式は選択肢・正解なしで `model_answer` 必須。アプリ側（`QuizQuestionSchema`。`app/lib/quiz.ts`）も同じ条件で検証する
+- CHECK `quiz_questions_shape_check`: 選択式は選択肢2〜6個・`single` は正解1つ・`multiple` は正解1つ以上、入力式は選択肢・正解なしで `model_answer` 必須。`quiz_questions_correct_choices_check`（関数 `quiz_correct_choices_valid()`）: 正解の添字が `choices` の範囲内で重複しない。`display_order` は 1〜3 で、`UNIQUE(content_id, display_order)` と合わせて 1 コンテンツ 3 問まで。アプリ側（`QuizQuestionSchema`。`app/lib/quiz.ts`）も同じ条件で検証し、REST で直接書いても採点できない設問は作れない
 - **正解を含むため受講者には SELECT させない**（6.16）。learning_contents の JSONB 列にしなかったのは、learning_contents は受講者が REST で SELECT できるため（列に正解を入れると回答前に読めてしまう）
 - 入力式は自動採点しない（回答後に模範解答と解説を表示）。回答内容は保存せず、回答を送ると `user_progress` を完了にする（進捗 API 経由）
 
@@ -412,9 +412,9 @@ SELECT は本人のみ。INSERT は本人かつ、`announcements` の SELECT ポ
 | 関数 | 権限 | 内容 |
 |:--|:--|:--|
 | `get_quiz_questions(p_content_id)` | `authenticated` / `service_role` | 出題用の列（`id, display_order, question_type, question, choices, hint`）。正解・模範解答・解説は返さない |
-| `grade_quiz_answers(p_content_id, p_answers)` | `authenticated` / `service_role` | 全設問に回答している（選択式は1つ以上選択、入力式は空白以外）ときだけ、設問ごとの `is_correct`（入力式は NULL）・`correct_choices`・`model_answer`・`explanation` を返す。1問でも未回答なら0行（正解だけを先に引き出させない）。選択の重複・範囲外は不正解 |
+| `grade_quiz_answers(p_content_id, p_answers)` | `authenticated` / `service_role` | 全設問に回答している（選択式は1つ以上選択、入力式は空白以外）ときだけ、設問ごとの `is_correct`（入力式は NULL）・`correct_choices`・`model_answer`・`explanation` を返す。1問でも未回答、または同じ `question_id` が重複していれば0行。これは「回答を送る前に正解を表示しない」ための形式上の条件で、ダミーの回答を送れば正解・解説は得られる（回答内容を保存しないため、それ以上は守らない）。選択の重複・範囲外は不正解 |
 | `quiz_content_visible_to_caller(p_content_id)` | なし（上の2関数の内部用） | `content_type = 'quiz'` かつ未削除で、admin・maintainer（未公開プレビュー。[機能設計書](./specification.md)2.12）か、4階層すべて公開・未削除で `active`、またはお試しで `is_open_to_trial = true`。`learning_contents` の SELECT RLS と `isContentVisible()` を合わせた条件 |
-| `replace_quiz_questions(p_content_id, p_questions)` | `service_role` のみ | 管理画面の保存。削除と挿入を1トランザクションで行い、配列の順を `display_order` にする |
+| `replace_quiz_questions(p_content_id, p_questions)` | `service_role` のみ | 管理画面の保存。1トランザクションで、配列の順を `display_order` にして同じ位置の行は UPDATE（id を保つ。回答中の受講者の `question_id` を無効にしない）、増えた分を INSERT、減った分を DELETE する |
 
 前の3つは `SECURITY DEFINER`・`SET search_path = public`（5.2の例外）。未認証の `/demo` は service_role で読むが、`quiz_questions` は読まない（クイズはログイン後に解答する旨だけを表示する）。
 

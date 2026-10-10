@@ -4,6 +4,7 @@ import { Loader2, Save, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { CODE_LANGUAGE_OPTIONS, type CodeLanguage } from "@/app/components/code-editor-utils";
+import { CONTENT_TYPE_FORM_OPTIONS } from "@/app/constants/content";
 import { SLIDE_NUMBER_MAX } from "@/app/constants/slides";
 import type {
   PhaseFilterOption,
@@ -101,14 +102,6 @@ function buildWeekOptionLabel(
   const prefix = [theme?.name, phase?.name].filter(Boolean).join(" / ");
   return prefix ? `${prefix} / ${week.name}` : week.name;
 }
-
-const CONTENT_TYPE_OPTIONS: { value: ContentType; label: string }[] = [
-  { value: "video", label: "動画" },
-  { value: "text", label: "テキスト" },
-  { value: "slide", label: "スライド（PDF）" },
-  { value: "exercise", label: "演習" },
-  { value: "quiz", label: "クイズ" },
-];
 
 type AllowedSubmissionTypes = "code" | "url" | "both";
 
@@ -502,7 +495,7 @@ export function ContentForm({
           <div className="space-y-2">
             <Label>コンテンツ種別</Label>
             <div className="flex gap-2">
-              {CONTENT_TYPE_OPTIONS.map((opt) => (
+              {CONTENT_TYPE_FORM_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
                   type="button"

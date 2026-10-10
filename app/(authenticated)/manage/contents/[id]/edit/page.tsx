@@ -34,11 +34,12 @@ export default async function EditContentPage({ params }: PageProps) {
     notFound();
   }
 
-  // Only quizzes depend on quiz_questions, so a failure there must not block editing other types.
-  const { data: quizQuestions, error: quizError } =
-    content.content_type === "quiz"
-      ? await fetchQuizQuestionsForAdmin(contentId)
-      : { data: [], error: null };
+  // Stored questions are loaded for every type: a quiz switched to another type keeps its rows,
+  // and switching it back in this form must start from them, or saving would overwrite them with
+  // an empty question. Only a quiz is blocked on a failed fetch, so other types stay editable.
+  const quizFetch = await fetchQuizQuestionsForAdmin(contentId);
+  const quizError = content.content_type === "quiz" ? quizFetch.error : null;
+  const quizQuestions = quizFetch.data ?? [];
 
   const sortedWeeks = weeks ? sortWeeksByHierarchy(weeks) : [];
   const filterOptions = deriveWeekSelectOptions(sortedWeeks);
@@ -49,7 +50,7 @@ export default async function EditContentPage({ params }: PageProps) {
   // unintentionally, so don't show the form on failure (same policy as new/page.tsx).
   // A failed question fetch would open the editor empty, and saving would wipe the stored
   // questions (the save replaces them all), so don't show the form.
-  if (contentsError || !contents || quizError || !quizQuestions) {
+  if (contentsError || !contents || quizError) {
     return (
       <div className="max-w-3xl mx-auto">
         <PageTitle

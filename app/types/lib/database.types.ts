@@ -881,6 +881,10 @@ export type Database = {
         }[];
       };
       quiz_content_visible_to_caller: { Args: { p_content_id: number }; Returns: boolean };
+      quiz_correct_choices_valid: {
+        Args: { p_choices: string[]; p_correct: number[] };
+        Returns: boolean;
+      };
       replace_quiz_questions: {
         Args: { p_content_id: number; p_questions: Json };
         Returns: undefined;
