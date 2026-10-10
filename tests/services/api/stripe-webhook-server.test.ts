@@ -17,6 +17,7 @@ import { getStripeClient } from "@/app/services/api/stripe-server";
 import {
   activateUserFromCheckoutSession,
   claimEvent,
+  extractUserId,
   reactivateUserFromMirror,
   releaseEventClaim,
   revertUserToTrial,
@@ -33,6 +34,29 @@ const dbError = { message: "db error", code: "PGRST001" };
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("extractUserId", () => {
+  it("10進の正の整数の client_reference_id を返す", () => {
+    expect(extractUserId("42", null)).toBe(42);
+  });
+
+  it("client_reference_id が無ければ metadata.user_id を使う", () => {
+    expect(extractUserId(null, { user_id: "19" })).toBe(19);
+  });
+
+  it.each(["0x2a", "4.2e1", " ", " 42", "42 ", "+42", "-1", "0", "4.2", "abc", ""])(
+    "%j はユーザーidとして受け付けない",
+    (raw) => {
+      expect(extractUserId(raw, null)).toBeNull();
+      expect(extractUserId(null, { user_id: raw })).toBeNull();
+    }
+  );
+
+  it("どちらも無ければ null を返す", () => {
+    expect(extractUserId(null, null)).toBeNull();
+    expect(extractUserId(null, {})).toBeNull();
+  });
 });
 
 describe("activateUserFromCheckoutSession", () => {

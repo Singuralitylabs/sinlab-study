@@ -5,7 +5,6 @@ import { getStripeClient, isStripeEnabled } from "@/app/services/api/stripe-serv
 import {
   activateUserFromCheckoutSession,
   claimEvent,
-  extractUserId,
   releaseEventClaim,
   syncSubscriptionStatus,
 } from "@/app/services/api/stripe-webhook-server";
@@ -13,15 +12,19 @@ import { sendSlackPaymentFailedNotification } from "@/app/services/notifications
 
 /**
  * True for a Checkout Session this app did not create. The Stripe account is shared with other
- * sales (Payment Links etc.), whose checkout.session.completed events reach this endpoint too.
- * Those sessions carry no user id and are not subscriptions; promoting them can never succeed, so
- * answering 500 only makes Stripe retry and eventually disable the endpoint (#302). `mode` exists
- * in every webhook API version, so reading it from the event body is safe.
+ * sales (Payment Links etc.), whose checkout.session.completed events reach this endpoint too;
+ * answering 500 for them only makes Stripe retry and eventually disable the endpoint (#302).
+ * client_reference_id alone is no proof of origin: a buyer can append `?client_reference_id=42` to
+ * a Payment Link URL and would promote user 42 with an unrelated purchase. metadata.auth_id is
+ * the marker, because createCheckoutSession() has always set it and buyers cannot set metadata.
+ * The user id is deliberately not checked here: our own session without a usable one must stay a
+ * 500 (claim released) so Stripe keeps redelivering it instead of the payment being dropped.
+ * payment_link and mode are read from the event body; see docs/specification.md 2.11 for why
+ * that is safe across webhook API versions.
  */
 function isForeignCheckoutSession(session: Stripe.Checkout.Session): boolean {
   return (
-    extractUserId(session.client_reference_id, session.metadata) === null ||
-    session.mode !== "subscription"
+    session.payment_link != null || !session.metadata?.auth_id || session.mode !== "subscription"
   );
 }
 
@@ -64,6 +67,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "署名検証に失敗しました" }, { status: 400 });
   }
 
+  // Decided from the event body alone, so it runs before the claim: foreign sales would otherwise
+  // pile up rows in stripe_events and turn a claim DB error into a pointless 500 and redelivery.
+  // A redelivery reaches the same verdict, so no claim is needed to answer it 200.
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object;
+    if (isForeignCheckoutSession(session)) {
+      console.warn(
+        `対象外のCheckout Sessionをスキップしました: id=${session.id} mode=${session.mode} payment_link=${session.payment_link ? "あり" : "なし"}`
+      );
+      return NextResponse.json({ received: true, skipped: true });
+    }
+  }
+
   let claimedProcessedAt: string | null = null;
 
   try {
@@ -86,15 +102,9 @@ export async function POST(request: NextRequest) {
 
     switch (event.type) {
       case "checkout.session.completed": {
-        const session = event.data.object as Stripe.Checkout.Session;
-        // Keep the claim so a redelivery of the same event is also answered 200 without work.
-        if (isForeignCheckoutSession(session)) {
-          console.warn(
-            `対象外のCheckout Sessionをスキップしました: id=${session.id} mode=${session.mode} payment_link=${session.payment_link ? "あり" : "なし"}`
-          );
-          return NextResponse.json({ received: true, skipped: true });
-        }
-        const { error } = await activateUserFromCheckoutSession(session);
+        const { error } = await activateUserFromCheckoutSession(
+          event.data.object as Stripe.Checkout.Session
+        );
         if (error) {
           console.error("会員昇格エラー:", error);
           await safeReleaseEventClaim(event.id, processedAt);

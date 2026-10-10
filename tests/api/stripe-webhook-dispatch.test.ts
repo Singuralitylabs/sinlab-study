@@ -1,14 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/api/stripe-server");
-// Keep the real extractUserId: the route uses it to tell this app's sessions from foreign ones.
-vi.mock("@/app/services/api/stripe-webhook-server", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/app/services/api/stripe-webhook-server")>()),
-  activateUserFromCheckoutSession: vi.fn(),
-  claimEvent: vi.fn(),
-  releaseEventClaim: vi.fn(),
-  syncSubscriptionStatus: vi.fn(),
-}));
+vi.mock("@/app/services/api/stripe-webhook-server");
 vi.mock("@/app/services/notifications/slack");
 
 import { POST } from "@/app/api/stripe/webhook/route";
@@ -30,8 +23,14 @@ const request = (body: string) =>
 
 const mockConstructEvent = vi.fn();
 
-// A session created by this app's createCheckoutSession() (user id + subscription mode).
-const ownSession = { id: "cs_1", client_reference_id: "19", metadata: {}, mode: "subscription" };
+// Shaped like a session from this app's createCheckoutSession().
+const ownSession = {
+  id: "cs_1",
+  client_reference_id: "19",
+  metadata: { user_id: "19", auth_id: "auth-19" },
+  mode: "subscription",
+  payment_link: null,
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -56,6 +55,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
@@ -131,19 +131,43 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
 
   it.each([
     {
-      label: "ユーザーを特定できない（Payment Link 等の他用途の決済）",
+      label: "自アプリの印（metadata.auth_id）が無い Payment Link 等の他用途の決済",
       session: { id: "cs_plink", client_reference_id: null, metadata: {}, mode: "payment" },
     },
     {
-      label: "ユーザーidはあるが mode が subscription ではない",
-      session: { id: "cs_pay", client_reference_id: "19", metadata: {}, mode: "payment" },
+      // A buyer can append ?client_reference_id=42 to a shared subscription Payment Link URL.
+      label: "client_reference_id 付きの subscription モードの Payment Link",
+      session: {
+        id: "cs_plink_sub",
+        client_reference_id: "42",
+        metadata: {},
+        mode: "subscription",
+        payment_link: "plink_x",
+      },
     },
     {
-      label: "mode は subscription だがユーザーidが無い",
-      session: { id: "cs_nouser", client_reference_id: null, metadata: null, mode: "subscription" },
+      label: "metadata.auth_id があっても payment_link 付き",
+      session: { ...ownSession, id: "cs_plink_meta", payment_link: "plink_x" },
+    },
+    {
+      label: "client_reference_id はあるが metadata.auth_id が無い",
+      session: { id: "cs_noauth", client_reference_id: "19", metadata: null, mode: "subscription" },
+    },
+    {
+      label: "client_reference_id が数値でない",
+      session: {
+        id: "cs_nan",
+        client_reference_id: "order-abc",
+        metadata: {},
+        mode: "subscription",
+      },
+    },
+    {
+      label: "自アプリの印はあるが mode が subscription ではない",
+      session: { ...ownSession, id: "cs_pay", mode: "payment" },
     },
   ])(
-    "checkout.session.completed: $label は昇格処理を呼ばず200でスキップし、claimを残す",
+    "checkout.session.completed: $label はclaimも昇格処理も行わず200でスキップする",
     async ({ session }) => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       mockConstructEvent.mockReturnValue({
@@ -156,22 +180,37 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
 
       expect(res.status).toBe(200);
       await expect(res.json()).resolves.toEqual({ received: true, skipped: true });
+      // Judged before the claim, so no stripe_events row is written for foreign sales.
+      expect(claimEvent).not.toHaveBeenCalled();
       expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
-      // The claim stays so a redelivery is answered 200 without reaching the handler.
-      expect(claimEvent).toHaveBeenCalledWith("evt_foreign", "checkout.session.completed");
       expect(releaseEventClaim).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledTimes(1);
-      warn.mockRestore();
     }
   );
 
+  it("checkout.session.completed: 他用途の決済はclaimがDBエラーになる状況でも200でスキップする", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(claimEvent).mockResolvedValue({
+      claimed: false,
+      processedAt: null,
+      error: "db error",
+    });
+    mockConstructEvent.mockReturnValue({
+      id: "evt_foreign_claim_error",
+      type: "checkout.session.completed",
+      data: {
+        object: { id: "cs_plink", client_reference_id: null, metadata: {}, mode: "payment" },
+      },
+    });
+
+    const res = await POST(request("{}") as never);
+
+    expect(res.status).toBe(200);
+    expect(claimEvent).not.toHaveBeenCalled();
+  });
+
   it("checkout.session.completed: metadata.user_id だけのセッションも自アプリのものとして昇格処理を呼ぶ", async () => {
-    const session = {
-      id: "cs_meta",
-      client_reference_id: null,
-      metadata: { user_id: "19" },
-      mode: "subscription",
-    };
+    const session = { ...ownSession, id: "cs_meta", client_reference_id: null };
     mockConstructEvent.mockReturnValue({
       id: "evt_meta",
       type: "checkout.session.completed",
@@ -183,6 +222,37 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     expect(res.status).toBe(200);
     expect(activateUserFromCheckoutSession).toHaveBeenCalledWith(session);
   });
+
+  it.each([
+    { label: "ユーザーidが無い", ids: { client_reference_id: null, metadata: { auth_id: "a" } } },
+    {
+      label: "ユーザーidが10進の正の整数でない",
+      ids: { client_reference_id: "0x2a", metadata: { user_id: "0x2a", auth_id: "a" } },
+    },
+  ])(
+    "checkout.session.completed: 自アプリ由来だが$label 場合はスキップせず500を返し、claimを解放する",
+    async ({ ids }) => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      // The real function returns its "user not identified" error before touching the DB.
+      const actual = await vi.importActual<
+        typeof import("@/app/services/api/stripe-webhook-server")
+      >("@/app/services/api/stripe-webhook-server");
+      vi.mocked(activateUserFromCheckoutSession).mockImplementation(
+        actual.activateUserFromCheckoutSession
+      );
+      mockConstructEvent.mockReturnValue({
+        id: "evt_own_nouser",
+        type: "checkout.session.completed",
+        data: { object: { ...ownSession, id: "cs_own_nouser", ...ids } },
+      });
+
+      const res = await POST(request("{}") as never);
+
+      expect(res.status).toBe(500);
+      expect(claimEvent).toHaveBeenCalledWith("evt_own_nouser", "checkout.session.completed");
+      expect(releaseEventClaim).toHaveBeenCalledWith("evt_own_nouser", "2026-01-01T00:00:00.000Z");
+    }
+  );
 
   it("claimがDBエラーを返した場合は500を返し、ハンドラを呼ばない", async () => {
     vi.mocked(claimEvent).mockResolvedValue({

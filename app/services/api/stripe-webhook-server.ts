@@ -3,6 +3,7 @@ import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { isChargeableSubscriptionPrice } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP, USER_STATUS } from "@/app/constants/user";
 import { shouldTrackCheckoutCompleted } from "@/app/lib/analytics-funnel";
+import { parsePositiveInteger } from "@/app/lib/positive-integer";
 import { cancellationEndsAt, isCancellationScheduled } from "@/app/lib/subscription-period";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
 import {
@@ -24,12 +25,8 @@ export function extractUserId(
   clientReferenceId: string | null,
   metadata: Stripe.Metadata | null | undefined
 ): number | null {
-  const raw = clientReferenceId ?? metadata?.user_id ?? null;
-  if (!raw) {
-    return null;
-  }
-  const userId = Number(raw);
-  return Number.isInteger(userId) ? userId : null;
+  // Number() alone would accept "0x2a", "4.2e1" or " " (as 0) and promote the wrong user.
+  return parsePositiveInteger(clientReferenceId ?? metadata?.user_id ?? null);
 }
 
 function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
