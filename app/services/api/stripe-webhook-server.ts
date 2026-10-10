@@ -3,7 +3,6 @@ import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { isChargeableSubscriptionPrice } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP, USER_STATUS } from "@/app/constants/user";
 import { shouldTrackCheckoutCompleted } from "@/app/lib/analytics-funnel";
-import { parsePositiveInteger } from "@/app/lib/positive-integer";
 import { cancellationEndsAt, isCancellationScheduled } from "@/app/lib/subscription-period";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
 import {
@@ -20,13 +19,82 @@ import {
   scheduleUpgradedEmail,
 } from "@/app/services/notifications/user-emails";
 
-/** Exported because both the webhook and the success page use it to identify the session's user. */
+/**
+ * Kept separate from the form-value parser so a future loosening there cannot change who a Stripe
+ * session promotes. Leading zeros are rejected too: createCheckoutSession() writes String(userId),
+ * so "042" never comes from this app.
+ */
+const STRIPE_USER_ID_PATTERN = /^[1-9]\d*$/;
+
+function parseStripeUserId(value: string): number | null {
+  if (!STRIPE_USER_ID_PATTERN.test(value)) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+/**
+ * Exported because the webhook, the success page and the Checkout self-recovery all identify the
+ * session's user with it. createCheckoutSession() writes the same id to both fields, so
+ * disagreement means one was set by someone else (client_reference_id can be appended to a
+ * Payment Link URL) and neither can be trusted.
+ */
 export function extractUserId(
   clientReferenceId: string | null,
   metadata: Stripe.Metadata | null | undefined
 ): number | null {
-  // Number() alone would accept "0x2a", "4.2e1" or " " (as 0) and promote the wrong user.
-  return parsePositiveInteger(clientReferenceId ?? metadata?.user_id ?? null);
+  const metadataUserId = metadata?.user_id ?? null;
+  if (
+    clientReferenceId !== null &&
+    metadataUserId !== null &&
+    clientReferenceId !== metadataUserId
+  ) {
+    return null;
+  }
+  const raw = clientReferenceId ?? metadataUserId;
+  return raw === null ? null : parseStripeUserId(raw);
+}
+
+/**
+ * True for a Checkout Session this app did not create. The Stripe account is shared with other
+ * sales (Payment Links etc.). client_reference_id alone is no proof of origin, since a buyer can
+ * append `?client_reference_id=42` to a Payment Link URL and would promote user 42 with an
+ * unrelated purchase; metadata.auth_id is the marker because createCheckoutSession() sets it and
+ * buyers cannot set metadata. The user id is deliberately not checked here: the webhook must keep
+ * answering 500 for our own session without a usable one so Stripe redelivers it instead of the
+ * payment being dropped. payment_link and mode are read from the event body; see
+ * docs/specification.md 2.11 for why that is safe across webhook API versions.
+ */
+export function isForeignCheckoutSession(session: Stripe.Checkout.Session): boolean {
+  return (
+    session.payment_link != null || !session.metadata?.auth_id || session.mode !== "subscription"
+  );
+}
+
+/**
+ * Whether the mirror knows this subscription / customer, i.e. it belongs to this app. Lets the
+ * webhook drop events of the shared account's other sales before claiming them, so they neither
+ * pile up in stripe_events nor page operators with another team's customers. Every subscription
+ * and customer of this app gets a mirror row before or at checkout completion
+ * (ensureCheckoutCustomer() / activateUserFromCheckoutSession()), and syncSubscriptionStatus()
+ * ignores unmirrored subscriptions anyway, so nothing of ours is dropped.
+ */
+export async function isMirroredStripeObject(
+  column: "stripe_subscription_id" | "stripe_customer_id",
+  id: string
+): Promise<{ error: string | null; mirrored: boolean }> {
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase
+    .from("stripe_subscriptions")
+    .select("user_id")
+    .eq(column, id)
+    .maybeSingle();
+  if (error) {
+    console.error("stripe_subscriptions取得エラー:", error.message);
+    return { error: error.message, mirrored: false };
+  }
+  return { error: null, mirrored: data !== null };
 }
 
 function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
@@ -132,6 +200,16 @@ export async function activateUserFromCheckoutSession(
   activated: boolean;
   currentPeriodEnd: string | null;
 }> {
+  // Checked here rather than in each caller: this is the only way into a promotion, and a caller
+  // forgetting the check would let a foreign purchase promote whoever client_reference_id names.
+  if (isForeignCheckoutSession(session)) {
+    return {
+      error: "このアプリで作成したCheckoutセッションではありません",
+      activated: false,
+      currentPeriodEnd: null,
+    };
+  }
+
   const userId = extractUserId(session.client_reference_id, session.metadata);
   if (userId === null) {
     return {
@@ -157,6 +235,26 @@ export async function activateUserFromCheckoutSession(
   }
 
   const supabase = await createAdminSupabaseClient();
+
+  // The id fields alone are not bound to a person; auth_id ties the session to the account that
+  // started it, so a session whose ids point at someone else must not write their mirror row or
+  // promote them.
+  const { data: owner, error: ownerError } = await supabase
+    .from("users")
+    .select("auth_id")
+    .eq("id", userId)
+    .maybeSingle();
+  if (ownerError) {
+    console.error("ユーザー取得エラー:", ownerError.message);
+    return { error: ownerError.message, activated: false, currentPeriodEnd: null };
+  }
+  if (!owner || owner.auth_id !== session.metadata?.auth_id) {
+    return {
+      error: "Checkoutセッションのユーザーが一致しません",
+      activated: false,
+      currentPeriodEnd: null,
+    };
+  }
 
   // "Check existing row -> update mirror" spans several statements, so another request may
   // acquire the claim in between (an old success-page URL clearing a newer valid claim). The

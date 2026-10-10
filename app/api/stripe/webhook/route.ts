@@ -5,27 +5,106 @@ import { getStripeClient, isStripeEnabled } from "@/app/services/api/stripe-serv
 import {
   activateUserFromCheckoutSession,
   claimEvent,
+  isForeignCheckoutSession,
+  isMirroredStripeObject,
   releaseEventClaim,
   syncSubscriptionStatus,
 } from "@/app/services/api/stripe-webhook-server";
 import { sendSlackPaymentFailedNotification } from "@/app/services/notifications/slack";
 
+type EventPlan =
+  | { kind: "skip"; reason: string }
+  | { kind: "error" }
+  | { kind: "handle"; run: () => Promise<string | null> };
+
 /**
- * True for a Checkout Session this app did not create. The Stripe account is shared with other
- * sales (Payment Links etc.), whose checkout.session.completed events reach this endpoint too;
- * answering 500 for them only makes Stripe retry and eventually disable the endpoint (#302).
- * client_reference_id alone is no proof of origin: a buyer can append `?client_reference_id=42` to
- * a Payment Link URL and would promote user 42 with an unrelated purchase. metadata.auth_id is
- * the marker, because createCheckoutSession() has always set it and buyers cannot set metadata.
- * The user id is deliberately not checked here: our own session without a usable one must stay a
- * 500 (claim released) so Stripe keeps redelivering it instead of the payment being dropped.
- * payment_link and mode are read from the event body; see docs/specification.md 2.11 for why
- * that is safe across webhook API versions.
+ * Decides, per event type, whether the event is this app's and what to run for it, so the
+ * ownership check and the handler for one type cannot drift apart. The verdict needs only the
+ * event body and the mirror, so it runs before the claim: the shared Stripe account's other sales
+ * would otherwise pile up rows in stripe_events, and answering them 500 only makes Stripe retry
+ * and eventually disable the endpoint, stopping cancellations and payment-failure alerts. A
+ * redelivery reaches the same verdict, so no claim is needed to answer it 200.
+ * @returns run resolves to an error message (500 with the claim released) or null.
  */
-function isForeignCheckoutSession(session: Stripe.Checkout.Session): boolean {
-  return (
-    session.payment_link != null || !session.metadata?.auth_id || session.mode !== "subscription"
-  );
+async function planEvent(event: Stripe.Event): Promise<EventPlan> {
+  switch (event.type) {
+    case "checkout.session.completed": {
+      const session = event.data.object;
+      if (isForeignCheckoutSession(session)) {
+        return {
+          kind: "skip",
+          reason: `Checkout Session id=${session.id} mode=${session.mode} payment_link=${session.payment_link ? "あり" : "なし"}`,
+        };
+      }
+      return {
+        kind: "handle",
+        run: async () => {
+          const { error } = await activateUserFromCheckoutSession(session);
+          if (error) {
+            console.error("会員昇格エラー:", error);
+          }
+          return error;
+        },
+      };
+    }
+    // By the time of deleted, subscription.status is already 'canceled', so the same sync as
+    // updated also completes the demotion.
+    case "customer.subscription.updated":
+    case "customer.subscription.deleted": {
+      const subscription = event.data.object;
+      const { error, mirrored } = await isMirroredStripeObject(
+        "stripe_subscription_id",
+        subscription.id
+      );
+      if (error) {
+        return { kind: "error" };
+      }
+      if (!mirrored) {
+        return { kind: "skip", reason: `Subscription id=${subscription.id}` };
+      }
+      return {
+        kind: "handle",
+        run: async () => {
+          const { error: syncError } = await syncSubscriptionStatus(subscription);
+          if (syncError) {
+            console.error("サブスク状態同期エラー:", syncError);
+          }
+          return syncError;
+        },
+      };
+    }
+    case "invoice.payment_failed": {
+      const invoice = event.data.object;
+      // Matched by customer because where an invoice names its subscription differs across
+      // webhook API versions, while the customer id does not.
+      const customerId =
+        typeof invoice.customer === "string" ? invoice.customer : (invoice.customer?.id ?? null);
+      if (!customerId) {
+        return { kind: "skip", reason: `Invoice id=${invoice.id}` };
+      }
+      const { error, mirrored } = await isMirroredStripeObject("stripe_customer_id", customerId);
+      if (error) {
+        return { kind: "error" };
+      }
+      if (!mirrored) {
+        return { kind: "skip", reason: `Invoice id=${invoice.id}` };
+      }
+      return {
+        kind: "handle",
+        run: async () => {
+          // Don't demote on the first failure; leave it to Smart Retries and only notify operators.
+          await sendSlackPaymentFailedNotification({
+            customerEmail: invoice.customer_email,
+            amountDue: invoice.amount_due,
+            hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+          });
+          return null;
+        },
+      };
+    }
+    default:
+      return { kind: "handle", run: async () => null };
+  }
 }
 
 /**
@@ -67,17 +146,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "署名検証に失敗しました" }, { status: 400 });
   }
 
-  // Decided from the event body alone, so it runs before the claim: foreign sales would otherwise
-  // pile up rows in stripe_events and turn a claim DB error into a pointless 500 and redelivery.
-  // A redelivery reaches the same verdict, so no claim is needed to answer it 200.
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object;
-    if (isForeignCheckoutSession(session)) {
-      console.warn(
-        `対象外のCheckout Sessionをスキップしました: id=${session.id} mode=${session.mode} payment_link=${session.payment_link ? "あり" : "なし"}`
-      );
-      return NextResponse.json({ received: true, skipped: true });
-    }
+  let plan: EventPlan;
+  try {
+    plan = await planEvent(event);
+  } catch (error) {
+    console.error("Webhook対象判定エラー:", error);
+    return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
+  }
+  if (plan.kind === "error") {
+    return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
+  }
+  if (plan.kind === "skip") {
+    console.warn(`対象外のイベントをスキップしました: type=${event.type} ${plan.reason}`);
+    return NextResponse.json({ received: true, skipped: true });
   }
 
   let claimedProcessedAt: string | null = null;
@@ -100,42 +181,10 @@ export async function POST(request: NextRequest) {
     }
     claimedProcessedAt = processedAt;
 
-    switch (event.type) {
-      case "checkout.session.completed": {
-        const { error } = await activateUserFromCheckoutSession(
-          event.data.object as Stripe.Checkout.Session
-        );
-        if (error) {
-          console.error("会員昇格エラー:", error);
-          await safeReleaseEventClaim(event.id, processedAt);
-          return NextResponse.json({ error }, { status: 500 });
-        }
-        break;
-      }
-      // By the time of deleted, subscription.status is already 'canceled', so the same sync as
-      // updated also completes the demotion.
-      case "customer.subscription.updated":
-      case "customer.subscription.deleted": {
-        const { error } = await syncSubscriptionStatus(event.data.object as Stripe.Subscription);
-        if (error) {
-          console.error("サブスク状態同期エラー:", error);
-          await safeReleaseEventClaim(event.id, processedAt);
-          return NextResponse.json({ error }, { status: 500 });
-        }
-        break;
-      }
-      case "invoice.payment_failed": {
-        // Don't demote on the first failure; leave it to Smart Retries and only notify operators.
-        const invoice = event.data.object as Stripe.Invoice;
-        await sendSlackPaymentFailedNotification({
-          customerEmail: invoice.customer_email,
-          amountDue: invoice.amount_due,
-          hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
-        });
-        break;
-      }
-      default:
-        break;
+    const handlerError = await plan.run();
+    if (handlerError) {
+      await safeReleaseEventClaim(event.id, processedAt);
+      return NextResponse.json({ error: handlerError }, { status: 500 });
     }
 
     return NextResponse.json({ received: true });

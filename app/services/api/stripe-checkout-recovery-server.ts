@@ -3,6 +3,7 @@ import {
   activateUserFromCheckoutSession,
   claimEvent,
   extractUserId,
+  isForeignCheckoutSession,
   reactivateUserFromMirror,
 } from "@/app/services/api/stripe-webhook-server";
 import { sendSlackCheckoutRecoveryNotification } from "@/app/services/notifications/slack";
@@ -43,6 +44,7 @@ export type CheckoutRecovery =
  * - multiple paid sessions (normally impossible with one claim): if the first reflection releases
  *   the claim and the second fails, a next Checkout could be created while the second valid
  *   subscription remains (double subscription)
+ * - session was not created by this app (see isForeignCheckoutSession())
  * - session user does not match the caller: it would write someone else's subscription
  * - session has no customer / subscription: reflection always fails
  * - Stripe returned a permanent error (4xx such as subscription missing)
@@ -68,6 +70,11 @@ export async function recoverCompletedCheckout(
     return await unrecoverable("決済済みのセッションが複数あります");
   }
   const [session] = sessions;
+  // Normally impossible on our own Customer, but activateUserFromCheckoutSession() would reject
+  // it on every request, so report it once instead of answering 500 forever.
+  if (isForeignCheckoutSession(session)) {
+    return await unrecoverable("このアプリで作成したCheckoutセッションではありません");
+  }
   // Customers are unique per user, so normally these match.
   if (extractUserId(session.client_reference_id, session.metadata) !== userId) {
     return await unrecoverable("セッションのユーザーが一致しません");

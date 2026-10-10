@@ -24,8 +24,10 @@ const heldClaimedAt = "2026-09-20T00:00:00+00:00";
 const paidSession = {
   id: "cs_paid",
   status: "complete",
+  mode: "subscription",
+  payment_link: null,
   client_reference_id: "5",
-  metadata: { user_id: "5" },
+  metadata: { user_id: "5", auth_id: "auth-5" },
   customer: "cus_1",
   subscription: "sub_1",
 } as never;
@@ -60,6 +62,20 @@ describe("recoverCompletedCheckout", () => {
     expect(result).toEqual({ kind: "activated", sessionId: "cs_paid" });
     expect(activateUserFromCheckoutSession).toHaveBeenCalledWith(paidSession, {
       expectedClaimedAt: heldClaimedAt,
+    });
+  });
+
+  it("自アプリ以外のセッションは反映せず unrecoverable とし、運用者へ通知する", async () => {
+    const foreign = { ...(paidSession as object), payment_link: "plink_x" } as never;
+
+    const result = await recoverCompletedCheckout(5, [foreign], heldClaimedAt);
+
+    expect(result).toEqual({ kind: "unrecoverable" });
+    expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
+    expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledWith({
+      userId: 5,
+      reason: "このアプリで作成したCheckoutセッションではありません",
+      sessionIds: ["cs_paid"],
     });
   });
 

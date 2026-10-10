@@ -178,6 +178,8 @@ const paidSession = {
   id: "cs_live_paid",
   status: "complete",
   url: null,
+  mode: "subscription",
+  payment_link: null,
   client_reference_id: String(USER_ID),
   metadata: { user_id: String(USER_ID), auth_id: "auth-uuid" },
   customer: "cus_19",
@@ -206,7 +208,7 @@ function stuckDatabase() {
       cancel_at_period_end: false,
       current_period_end: null,
     },
-    user: { id: USER_ID, status: "trial", membership_type: null },
+    user: { id: USER_ID, auth_id: "auth-uuid", status: "trial", membership_type: null },
   });
 }
 

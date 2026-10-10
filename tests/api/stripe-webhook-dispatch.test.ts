@@ -1,7 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/api/stripe-server");
-vi.mock("@/app/services/api/stripe-webhook-server");
+// Keep the real ownership verdict so the tests exercise what the route actually skips.
+vi.mock("@/app/services/api/stripe-webhook-server", async (importOriginal) => ({
+  activateUserFromCheckoutSession: vi.fn(),
+  claimEvent: vi.fn(),
+  isMirroredStripeObject: vi.fn(),
+  releaseEventClaim: vi.fn(),
+  syncSubscriptionStatus: vi.fn(),
+  isForeignCheckoutSession: (
+    await importOriginal<typeof import("@/app/services/api/stripe-webhook-server")>()
+  ).isForeignCheckoutSession,
+}));
 vi.mock("@/app/services/notifications/slack");
 
 import { POST } from "@/app/api/stripe/webhook/route";
@@ -9,6 +19,7 @@ import { getStripeClient, isStripeEnabled } from "@/app/services/api/stripe-serv
 import {
   activateUserFromCheckoutSession,
   claimEvent,
+  isMirroredStripeObject,
   releaseEventClaim,
   syncSubscriptionStatus,
 } from "@/app/services/api/stripe-webhook-server";
@@ -51,6 +62,7 @@ beforeEach(() => {
     currentPeriodEnd: null,
   });
   vi.mocked(syncSubscriptionStatus).mockResolvedValue({ error: null });
+  vi.mocked(isMirroredStripeObject).mockResolvedValue({ error: null, mirrored: true });
 });
 
 afterEach(() => {
@@ -85,13 +97,36 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
       const res = await POST(request("{}") as never);
 
       expect(res.status).toBe(200);
+      expect(isMirroredStripeObject).toHaveBeenCalledWith("stripe_subscription_id", "sub_1");
       expect(syncSubscriptionStatus).toHaveBeenCalledWith(subscription);
       expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
     }
   );
 
+  it.each(["customer.subscription.updated", "customer.subscription.deleted"])(
+    "ミラーに無い（他用途の）サブスクの %s はclaimも同期も行わず200でスキップする",
+    async (type) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.mocked(isMirroredStripeObject).mockResolvedValue({ error: null, mirrored: false });
+      mockConstructEvent.mockReturnValue({
+        id: "evt_sub",
+        type,
+        data: { object: { id: "sub_x" } },
+      });
+
+      const res = await POST(request("{}") as never);
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({ received: true, skipped: true });
+      expect(claimEvent).not.toHaveBeenCalled();
+      expect(syncSubscriptionStatus).not.toHaveBeenCalled();
+    }
+  );
+
   it("invoice.payment_failed は降格せずSlack通知のみ行う", async () => {
     const invoice = {
+      id: "in_1",
+      customer: "cus_1",
       customer_email: "user@example.com",
       amount_due: 1000,
       hosted_invoice_url: "https://invoice.stripe.com/xxx",
@@ -105,6 +140,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     const res = await POST(request("{}") as never);
 
     expect(res.status).toBe(200);
+    expect(isMirroredStripeObject).toHaveBeenCalledWith("stripe_customer_id", "cus_1");
     expect(sendSlackPaymentFailedNotification).toHaveBeenCalledWith({
       customerEmail: "user@example.com",
       amountDue: 1000,
@@ -113,6 +149,64 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
     expect(syncSubscriptionStatus).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { label: "ミラーに無いCustomer", customer: "cus_other", mirrored: false },
+    { label: "展開済みでもミラーに無いCustomer", customer: { id: "cus_other" }, mirrored: false },
+    { label: "Customerの無い", customer: null, mirrored: true },
+  ])(
+    "invoice.payment_failed: $label の請求は他用途としてclaimもSlack通知も行わず200でスキップする",
+    async ({ customer, mirrored }) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.mocked(isMirroredStripeObject).mockResolvedValue({ error: null, mirrored });
+      mockConstructEvent.mockReturnValue({
+        id: "evt_inv",
+        type: "invoice.payment_failed",
+        data: {
+          object: { id: "in_x", customer, customer_email: "other@example.com", amount_due: 5000 },
+        },
+      });
+
+      const res = await POST(request("{}") as never);
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({ received: true, skipped: true });
+      expect(claimEvent).not.toHaveBeenCalled();
+      expect(sendSlackPaymentFailedNotification).not.toHaveBeenCalled();
+    }
+  );
+
+  it("invoice.payment_failed: 展開済みのCustomerでもidでミラーと照合する", async () => {
+    mockConstructEvent.mockReturnValue({
+      id: "evt_inv_expanded",
+      type: "invoice.payment_failed",
+      data: { object: { id: "in_1", customer: { id: "cus_1" }, amount_due: 1000 } },
+    });
+
+    const res = await POST(request("{}") as never);
+
+    expect(res.status).toBe(200);
+    expect(isMirroredStripeObject).toHaveBeenCalledWith("stripe_customer_id", "cus_1");
+    expect(sendSlackPaymentFailedNotification).toHaveBeenCalled();
+  });
+
+  it.each([
+    { type: "customer.subscription.updated", object: { id: "sub_1" } },
+    { type: "invoice.payment_failed", object: { id: "in_1", customer: "cus_1" } },
+  ])(
+    "$type: ミラーの照合がDBエラーなら500を返し、claimしない（再送に委ねる）",
+    async ({ type, object }) => {
+      vi.mocked(isMirroredStripeObject).mockResolvedValue({ error: "db error", mirrored: false });
+      mockConstructEvent.mockReturnValue({ id: "evt_mirror_error", type, data: { object } });
+
+      const res = await POST(request("{}") as never);
+
+      expect(res.status).toBe(500);
+      expect(claimEvent).not.toHaveBeenCalled();
+      expect(syncSubscriptionStatus).not.toHaveBeenCalled();
+      expect(sendSlackPaymentFailedNotification).not.toHaveBeenCalled();
+    }
+  );
 
   it("未対応のイベントtypeは何もせず200を返す", async () => {
     mockConstructEvent.mockReturnValue({

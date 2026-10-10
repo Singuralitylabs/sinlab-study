@@ -9,6 +9,7 @@ import {
 import {
   activateUserFromCheckoutSession,
   extractUserId,
+  isForeignCheckoutSession,
 } from "@/app/services/api/stripe-webhook-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Button } from "@/components/ui/button";
@@ -36,8 +37,11 @@ export default async function UpgradeSuccessPage({
       const session = await retrieveCheckoutSession(sessionId);
       const sessionUserId = extractUserId(session.client_reference_id, session.metadata);
 
+      // activateUserFromCheckoutSession() rejects foreign sessions too; checking here as well shows
+      // "could not verify" instead of a retry prompt that can never succeed.
       if (
         !PAID_CHECKOUT_PAYMENT_STATUSES.includes(session.payment_status) ||
+        isForeignCheckoutSession(session) ||
         sessionUserId !== userId
       ) {
         errorMessage = "決済情報を確認できませんでした";
