@@ -1047,6 +1047,7 @@ Slack App の **Incoming Webhooks** を有効化し、通知先チャンネル�
 送信基盤は次の方針で作る（Slack 通知の `postSlackWebhook()` と同じ考え方）。
 
 - **未設定はスキップ**: `RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `NEXT_PUBLIC_APP_URL` のいずれかが未設定なら、warn ログを出して送信しない（送信ログも作らない）
+- **全体の送信スイッチ**: 受講生向けの送信はすべて `email_settings.sending_enabled`（既定 `false`。管理画面で切り替える。10.10節）を入口で確認し、`true` でなければ送らない。**読めないとき（DB エラー・行の欠落・真偽値でない値）も送らない**（フェイルクローズ）。環境変数が揃っていても、利用規約の改定が終わるまで本番で一通も送らないための仕組みで、種別ごとの有効・無効より先に効く。管理者本人へのテスト送信（10.11節）だけは対象外で、有効化の前に送信設定を確認できる
 - **失敗は握りつぶす**: 送信失敗（非2xx）・タイムアウト（`EMAIL_SEND_TIMEOUT_MS`）・例外はログと `email_logs.error` に残し、呼び出し元の主処理（登録・承認・Stripe Webhook・`/upgrade/success`）のレスポンスや再送判定には一切影響させない
 - **レスポンス後に送る**: 各フックは Next.js の `after()`（`next/server`）に送信処理を予約するだけで、レスポンスを遅らせない。`after()` はサーバーレス関数の終了まで処理を延長するため、送信が途中で打ち切られない。リクエストスコープ外で `after()` が使えない場合は、その場で発火だけ行う
 - **二重送信の防止**: 送信前に `email_logs` の claim（`UNIQUE (user_id, kind, reference_key)` への INSERT。仕組みは `docs/database.md` 3.11節）を取り、取れなければ送信しない。claim が他のDBエラーで失敗した場合も、重複を防げないため送信しない
@@ -1129,19 +1130,23 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 
 ### 10.9 定期メールの設定手順（運用）
 
-本番の Cron を有効化する前に、利用規約の改定（案内メールの送信に関する条項）が完了していることを確認する。`CRON_SECRET` と `EMAIL_UNSUBSCRIBE_SECRET` にランダムな長い文字列（例: `openssl rand -base64 32`）を設定し（ローカルは `.env.local`、本番は Vercel 環境変数の Production）、`EMAIL_UNSUBSCRIBE_SECRET` は一度決めたら変えない。Production にデプロイし（Cron は Production デプロイでのみ動く）、Vercel ダッシュボードの Settings → Cron Jobs に `/api/cron/email-digest` が表示されることと、`curl -H "Authorization: Bearer $CRON_SECRET" <URL>/api/cron/email-digest` の応答（`sent` / `failed` / `deferred`）と Vercel ログの `[定期メール]` を確認する。
+環境変数の設定とデプロイは、利用規約の改定前に済ませてよい（全体の送信スイッチが既定で無効のため、送られない）。`CRON_SECRET` と `EMAIL_UNSUBSCRIBE_SECRET` にランダムな長い文字列（例: `openssl rand -base64 32`）を設定し（ローカルは `.env.local`、本番は Vercel 環境変数の Production）、`EMAIL_UNSUBSCRIBE_SECRET` は一度決めたら変えない。Production にデプロイし（Cron は Production デプロイでのみ動く）、Vercel ダッシュボードの Settings → Cron Jobs に `/api/cron/email-digest` が表示されることと、`curl -H "Authorization: Bearer $CRON_SECRET" <URL>/api/cron/email-digest` の応答（スイッチが無効の間は `skipped`）と Vercel ログの `[定期メール]` を確認する。
+
+受講生向けの送信を始めるのは、利用規約の改定（案内メールの送信に関する条項）が完了してから。管理者本人へのテスト送信（10.11節）で送信設定を確認したうえで、`/admin/emails` の全体の送信スイッチを有効にする（10.10節。有効化後の Cron の応答は `sent` / `failed` / `deferred`）。停止するときも同じスイッチを無効にする（環境変数は消さない）。
 
 ### 10.10 メール通知の管理（管理画面）
 
-**設定の保存先**: `email_kind_settings`（種別ごとの `enabled`・`send_days`・`send_weekday`）と `email_settings`（案内系の1日の上限 `digest_daily_limit`。1行のみ）（`docs/database.md` 3.15・3.16節）。**これらのテーブルを唯一の真実とし、送る日・曜日・上限の定数をロジックにハードコードしない**。`INACTIVITY_REMINDER_DAYS` / `TRIAL_NURTURE_DAYS` / `WEEKLY_DIGEST_WEEKDAY` / `EMAIL_DIGEST_MAX_PER_DAY` は、マイグレーションの初期値と同じであることを確認するテスト用の定数として残し（送信の判定には使わない。読めないときの代替値にもしない）、入力検証の範囲は `EMAIL_SEND_DAY_MIN/MAX` などで別に定義する。対象の種別は `EMAIL_KIND` の全値（繰り越し予約 `weekly_digest_reserved` は送信種別ではないので含めない）。
+**設定の保存先**: `email_kind_settings`（種別ごとの `enabled`・`send_days`・`send_weekday`）と `email_settings`（全体の送信スイッチ `sending_enabled` と案内系の1日の上限 `digest_daily_limit`。1行のみ）（`docs/database.md` 3.15・3.16節）。**これらのテーブルを唯一の真実とし、送る日・曜日・上限の定数をロジックにハードコードしない**。`INACTIVITY_REMINDER_DAYS` / `TRIAL_NURTURE_DAYS` / `WEEKLY_DIGEST_WEEKDAY` / `EMAIL_DIGEST_MAX_PER_DAY` は、マイグレーションの初期値と同じであることを確認するテスト用の定数として残し（送信の判定には使わない。読めないときの代替値にもしない）、入力検証の範囲は `EMAIL_SEND_DAY_MIN/MAX` などで別に定義する。対象の種別は `EMAIL_KIND` の全値（繰り越し予約 `weekly_digest_reserved` は送信種別ではないので含めない）。
 
 **設定の反映と失敗時の方針**（実行のたびに読み、実行をまたいでキャッシュしない）:
 
 | 種別 | 有効・無効 | 設定を読めないとき |
 |:--|:--|:--|
+| 全体の送信スイッチ（`email_settings.sending_enabled`。全種別に先立って確認） | `true` でなければ受講生向けメールを一通も送らない。トランザクション系は `deliverToUser()` が宛先・種別設定を読む前に warn ログを出して終了し、定期メールは `runEmailDigest()` が1通も送らず `skipped` を返す（繰り越し予約も作らない） | **フェイルクローズ**: DB エラー・行の欠落・真偽値でない値のいずれでも送らない（定期メールは他の設定と同じく `failed`）。種別ごとの方針（下記）は変えない |
 | 案内系（`weekly_digest` / `inactivity_reminder` / `trial_nurture` / `announcement`） | 無効な種別は対象にしない。無効なお知らせは送信も完了記録もしない（有効に戻すと続きを送る。ただし送信失敗の再送期限 `ANNOUNCEMENT_EMAIL_RETRY_DAYS` は無効の間も進むため、期限を過ぎた失敗は再送されず、再有効化後は失敗のまま完了になる） | **フェイルクローズ**: DB エラー・行の欠落・値の不正（範囲外の `send_days` など）のとき、`runEmailDigest()` は1通も送らず `failed`（Cron は500）を返す |
 | トランザクション（`signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended`） | `deliverToUser()` が宛先を読む前に `enabled` を確認し、無効なら warn ログを出して送らない | **フェイルセーフ**: 既定値（有効）として送る。登録・決済の通知を欠落させないため。主処理（登録・承認・Stripe Webhook）の結果には、無効化・設定の読み取り失敗のどちらも影響させない |
 
+- **全体の送信スイッチ**: `sending_enabled`（既定 `false`）。有効にするときは規約改定の確認ダイアログを出す。切り替えの記録は `sending_updated_at` / `sending_updated_by`（1日の上限の `updated_at` とは別。未操作なら NULL）
 - **送る日**: `send_days`（1〜60の整数、重複不可、最大10個、保存時は昇順）が、`inactivity_reminder` と `trial_nurture` の「登録から N 日目」の判定に使われる。`trial_nurture` の本文は、設定した日数以下で最も近い段階（2・5・7・14日目の案内）のものを使い、最後の設定日のときだけ「これが最後です」と伝える。経過日数の表記は7の倍数なら週、それ以外は日
 - **週次進捗の曜日**: `send_weekday`（0 = 日曜〜6 = 土曜。初期値は月曜）。「先週」は送信曜日の前日までの7日間（JST）、`reference_key` は今回の送信曜日の日付、繰り越し予約（`weekly_digest_reserved`）も送信曜日の日付を基準にする。送信曜日を変えた週に2通送らないよう（送信日の予約が無いまま取り戻し期間を過ぎても、`weekly_digest` の設定の `updated_at` が今サイクルの開始日（JST）以降なら、曜日変更・再有効化の週とみなして障害の警告を出さず、その旨のログだけ残して次の送信日から再開する。過去のログ行の有無では判定しない）、送信済みの判定は同じ `reference_key` ではなく、今回の送信日を末尾とする7日間に `weekly_digest` の行があるかで行う（変更後の送信日がその7日以内に来る回は送らず、次の週から通常どおり送る）
 - **1日の上限**: `digest_daily_limit`（1〜95。Resend 無料枠の日次100通未満）から、今日すでに作られた案内系の `email_logs` の行数を引いた数が各実行の上限になる。上限を下げても、その日に送った分を超えて送ることはない
@@ -1150,8 +1155,8 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 
 | エンドポイント | 内容 |
 |:--|:--|
-| `GET /api/admin/email-settings` | 種別ごとの設定・1日の上限・更新者の表示名を返す |
-| `PUT /api/admin/email-settings` | 種別の設定（`{ "kind", "enabled"?, "send_days"?, "send_weekday"? }`）または1日の上限（`{ "digest_daily_limit" }`）を更新する。両方の同時更新・更新項目なし・未知のフィールド・範囲外の値は400（zod。`EmailSettingsUpdateSchema`）。`send_days` は `inactivity_reminder` / `trial_nurture`、`send_weekday` は `weekly_digest` にのみ指定できる。更新者（`users.id`）と更新日時を記録し、対象が0行なら404 |
+| `GET /api/admin/email-settings` | 全体の送信スイッチ・種別ごとの設定・1日の上限・更新者の表示名を返す |
+| `PUT /api/admin/email-settings` | 種別の設定（`{ "kind", "enabled"?, "send_days"?, "send_weekday"? }`）、1日の上限（`{ "digest_daily_limit" }`）、全体の送信スイッチ（`{ "sending_enabled" }`）のいずれか1つを更新する。複数の同時更新・更新項目なし・未知のフィールド・範囲外の値は400（zod。`EmailSettingsUpdateSchema`）。`send_days` は `inactivity_reminder` / `trial_nurture`、`send_weekday` は `weekly_digest` にのみ指定できる。更新者（`users.id`）と更新日時を記録し、対象が0行なら404 |
 | `GET /api/admin/email-logs?kind=&status=&page=` | 送信履歴（新しい順。1ページ50件）。`status` は `sent` / `failed` / `pending`（`sent_at` があれば送信済み、`error` があれば失敗、どちらも無ければ未完了）。不正な絞り込みは400 |
 
 - 設定の読み書きは管理者のセッション（通常クライアント）で行い、RLS（admin のみ）を二層目の防御にする。Cron とメール送信は service_role で読む

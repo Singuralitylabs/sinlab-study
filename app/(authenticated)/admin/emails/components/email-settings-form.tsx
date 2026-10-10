@@ -41,6 +41,9 @@ function formatUpdated(
   return `${new Date(updatedAt).toLocaleString("ja-JP")}（${who}）`;
 }
 
+const SENDING_ENABLE_CONFIRM =
+  "受講生向けメールの送信を有効にしますか？\n\n利用規約の改定（案内メールの送信に関する条項）が完了していることを確認してください。有効にすると、種別ごとの設定に従って登録・承認・お支払いの通知と毎朝の定期メールが送られます。";
+
 async function putSettings(body: Record<string, unknown>): Promise<string | null> {
   try {
     const res = await fetch("/api/admin/email-settings", {
@@ -184,6 +187,86 @@ function KindRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+/**
+ * The global switch (`email_settings.sending_enabled`, #315). Its state is shown with the stored
+ * value, not an optimistic one, so the page never claims mail is off while the save failed.
+ */
+export function EmailSendingSwitch({
+  enabled,
+  updatedAt,
+  updatedBy,
+  editorNames,
+}: {
+  enabled: boolean;
+  updatedAt: string | null;
+  updatedBy: number | null;
+  editorNames: Record<number, string>;
+}) {
+  const router = useRouter();
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
+  const toggle = async () => {
+    const next = !enabled;
+    if (next && !confirm(SENDING_ENABLE_CONFIRM)) {
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    const error = await putSettings({ sending_enabled: next });
+    setSaving(false);
+    if (error) {
+      setMessage({ text: error, isError: true });
+      return;
+    }
+    setMessage({ text: "保存しました", isError: false });
+    router.refresh();
+  };
+
+  return (
+    <div className="border rounded-lg p-4 space-y-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <Badge variant={enabled ? "default" : "secondary"}>{enabled ? "送信中" : "停止中"}</Badge>
+        <p className="text-sm">
+          {enabled
+            ? "種別ごとの設定に従って受講生向けメールを送ります"
+            : "受講生向けメールは一通も送りません（種別の設定・環境変数に関わらず。管理者本人へのテスト送信は除く）"}
+        </p>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        最終更新:{" "}
+        {updatedAt === null
+          ? "未操作（既定の停止中）"
+          : formatUpdated(updatedAt, updatedBy, editorNames)}
+      </p>
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant={enabled ? "outline" : "default"}
+          onClick={toggle}
+          disabled={saving}
+          aria-label={
+            enabled ? "受講生向けメールの送信を停止する" : "受講生向けメールの送信を有効にする"
+          }
+        >
+          {saving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : enabled ? (
+            "送信を停止する"
+          ) : (
+            "送信を有効にする"
+          )}
+        </Button>
+        {message && (
+          <span className={`text-xs ${message.isError ? "text-destructive" : "text-green-600"}`}>
+            {message.text}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 

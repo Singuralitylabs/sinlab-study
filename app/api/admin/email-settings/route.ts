@@ -4,6 +4,7 @@ import {
   fetchEmailSettingsForAdmin,
   updateDigestDailyLimit,
   updateEmailKindSettings,
+  updateEmailSendingEnabled,
 } from "@/app/services/api/email-settings-server";
 import { EmailSettingsUpdateSchema, validateRequest } from "@/app/services/api/schemas";
 import { requireAdminApi } from "@/app/services/auth/admin-guard";
@@ -43,12 +44,15 @@ export async function PUT(request: Request) {
     if (!validation.success) {
       return validation.response;
     }
-    const { kind, digest_daily_limit, ...rest } = validation.data;
+    const { kind, digest_daily_limit, sending_enabled, ...rest } = validation.data;
 
+    // The schema guarantees exactly one target: a kind row, the daily limit, or the global switch.
     const result =
-      kind === undefined
-        ? await updateDigestDailyLimit(digest_daily_limit as number, adminUserId)
-        : await updateEmailKindSettings(kind, rest as EmailKindSettingsPatch, adminUserId);
+      kind !== undefined
+        ? await updateEmailKindSettings(kind, rest as EmailKindSettingsPatch, adminUserId)
+        : sending_enabled !== undefined
+          ? await updateEmailSendingEnabled(sending_enabled, adminUserId)
+          : await updateDigestDailyLimit(digest_daily_limit as number, adminUserId);
 
     if (result.error) {
       return NextResponse.json({ error: "メール設定の更新に失敗しました" }, { status: 500 });

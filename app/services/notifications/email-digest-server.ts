@@ -989,7 +989,8 @@ async function buildQueue(
  *   unsubscribe link.
  * Does nothing when sending settings (`RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` /
  * `NEXT_PUBLIC_APP_URL`) or `EMAIL_UNSUBSCRIBE_SECRET` are missing (promotional emails without an
- * unsubscribe link are never sent).
+ * unsubscribe link are never sent), or when the global switch (`email_settings.sending_enabled`)
+ * is off; an unreadable switch fails the run like any other unreadable setting.
  */
 export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<EmailDigestResult> {
   const clock = options.clock ?? Date.now;
@@ -1049,6 +1050,9 @@ async function sendDigest(
   try {
     // Read on every run and fail closed: if the settings cannot be read, nothing is sent.
     const settings = await fetchEmailSettings(supabase);
+    if (!settings.sendingEnabled) {
+      return skip("全体スイッチが無効です");
+    }
     dailyLimit = settings.digestDailyLimit;
     // Read the email text once per run (never per recipient). It never throws: an unreadable text
     // falls back to the code defaults instead of stopping the run.

@@ -332,6 +332,9 @@ function defaultSettingsRows(): Row[] {
   return [
     {
       id: 1,
+      sending_enabled: true,
+      sending_updated_at: null,
+      sending_updated_by: null,
       digest_daily_limit: EMAIL_DIGEST_MAX_PER_DAY,
       updated_at: "2026-10-01T00:00:00.000Z",
       updated_by: null,
@@ -1211,6 +1214,43 @@ describe("メール通知の管理設定（#272）", () => {
   const weeklyLogs = (db: Record<string, Row[]>) =>
     db.email_logs.filter((row) => row.kind === "weekly_digest");
 
+  describe("全体の送信スイッチ（#315）", () => {
+    const settingsRow = (overrides: Row): Row[] => [{ ...defaultSettingsRows()[0], ...overrides }];
+
+    it("無効なら、種別が有効でも1通も送らず、繰り越し予約も作らずにスキップを返す", async () => {
+      const { db } = setup({
+        users: [userRow(1)],
+        email_settings: settingsRow({ sending_enabled: false }),
+      });
+
+      const result = await runDigest(MONDAY);
+
+      expect(result).toEqual({ status: "skipped", reason: "全体スイッチが無効です" });
+      expect(sendEmail).not.toHaveBeenCalled();
+      expect(db.email_logs).toHaveLength(0);
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("全体スイッチ"));
+    });
+
+    it("値が真偽値でなければ（列が無い等）読めない扱いで失敗を返し、送らない", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      setup({ users: [userRow(1)], email_settings: settingsRow({ sending_enabled: undefined }) });
+
+      expect(await runDigest(MONDAY)).toEqual({ status: "failed" });
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
+    it("スキップしてもロックを解放し、有効にした次の実行で送る", async () => {
+      const { db } = setup({
+        users: [userRow(1)],
+        email_settings: settingsRow({ sending_enabled: false }),
+      });
+      expect(await runDigest(MONDAY)).toMatchObject({ status: "skipped" });
+
+      db.email_settings[0].sending_enabled = true;
+      expect(await runDigest(MONDAY)).toMatchObject({ status: "completed", sent: 1 });
+    });
+  });
+
   describe("設定を読めないとき（フェイルクローズ）", () => {
     it("種別設定の取得が DB エラーなら、案内系メールを1通も送らずに失敗を返す", async () => {
       const { failures, db } = setup({ users: [userRow(1)] });
@@ -1551,9 +1591,7 @@ describe("メール通知の管理設定（#272）", () => {
     it("digest_daily_limit を超えて送らず、残りは週次進捗なら翌日に繰り越す", async () => {
       setup({
         users: [1, 2, 3, 4, 5].map((id) => userRow(id)),
-        email_settings: [
-          { id: 1, digest_daily_limit: 3, updated_at: "2026-10-01T00:00:00Z", updated_by: null },
-        ],
+        email_settings: [{ ...defaultSettingsRows()[0], digest_daily_limit: 3 }],
       });
 
       const monday = await runDigest(MONDAY);
@@ -1628,14 +1666,7 @@ describe("編集できるメール文面（#286）", () => {
       users: [userRow(1), userRow(2), userRow(3)],
       announcements: [announcementRow()],
       email_settings: [
-        {
-          id: 1,
-          digest_daily_limit: EMAIL_DIGEST_MAX_PER_DAY,
-          updated_at: "2026-10-01T00:00:00.000Z",
-          updated_by: null,
-          service_name: "新サービス",
-          service_subtitle: null,
-        },
+        { ...defaultSettingsRows()[0], service_name: "新サービス", service_subtitle: null },
       ],
       email_templates: [
         {

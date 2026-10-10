@@ -31,8 +31,14 @@ async function runScheduled() {
   await Promise.all(tasks.map((task) => task()));
 }
 
+/** The global switch (#315) is on unless a test overrides `email_settings`. */
 function mockAdmin(tableResults: Record<string, QueryResult | QueryResult[]>) {
-  const client = createMockSupabaseClient({ tableResults });
+  const client = createMockSupabaseClient({
+    tableResults: {
+      email_settings: { data: { sending_enabled: true }, error: null },
+      ...tableResults,
+    },
+  });
   vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
   return client;
 }
@@ -352,6 +358,113 @@ describe("schedule*Email（after() による予約）", () => {
   });
 });
 
+describe("全体の送信スイッチ（#315・フェイルクローズ）", () => {
+  const okLogs = [
+    { data: { id: 11 }, error: null },
+    { data: null, error: null },
+  ];
+
+  it.each([
+    ["無効（false）", { data: { sending_enabled: false }, error: null }],
+    ["真偽値でない", { data: { sending_enabled: "true" }, error: null }],
+    ["取得が DB エラー", { data: null, error: { message: "db down" } }],
+    ["行が無い", { data: null, error: null }],
+  ])(
+    "全体スイッチが%sなら、種別の設定・宛先を読まず claim もせずに送らない（warn を出す）",
+    async (_label, settingsResult) => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const client = mockAdmin({
+        email_settings: settingsResult,
+        email_kind_settings: { data: { enabled: true }, error: null },
+        users: { data: recipientRow, error: null },
+        email_logs: okLogs,
+      });
+
+      await deliverOnce();
+
+      expect(tableBuilders(client, "email_settings")[0].eq).toHaveBeenCalledWith("id", 1);
+      expect(tableBuilders(client, "email_kind_settings")).toHaveLength(0);
+      expect(tableBuilders(client, "users")).toHaveLength(0);
+      expect(emailLogBuilders(client)).toHaveLength(0);
+      expect(sendEmail).not.toHaveBeenCalled();
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("全体スイッチ"));
+    }
+  );
+
+  it("全体スイッチの取得が例外を投げても送らず、主処理へ例外を伝播しない", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const client = mockAdmin({
+      users: { data: recipientRow, error: null },
+      email_logs: okLogs,
+    });
+    const from = client.from.getMockImplementation() as (table: string) => unknown;
+    client.from.mockImplementation((table: string) => {
+      if (table === "email_settings") {
+        throw new Error("boom");
+      }
+      return from(table);
+    });
+
+    scheduleSubscriptionEndedEmail({ userId: 7, subscriptionId: "sub_123" });
+    await expect(runScheduled()).resolves.toBeUndefined();
+
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("全体スイッチが有効なら、種別の設定に従って送る", async () => {
+    const client = mockAdmin({
+      email_settings: { data: { sending_enabled: true }, error: null },
+      email_kind_settings: { data: { enabled: true }, error: null },
+      users: { data: recipientRow, error: null },
+      email_logs: okLogs,
+    });
+
+    await deliverOnce();
+
+    expect(tableBuilders(client, "email_kind_settings")).toHaveLength(1);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["signup", () => scheduleSignupEmail({ authId: "auth-uuid-1" })],
+    [
+      "approved",
+      () => scheduleApprovedEmail({ userId: 7, membershipType: "community", approvedAt: "t" }),
+    ],
+    [
+      "upgraded",
+      () =>
+        scheduleUpgradedEmail({
+          userId: 7,
+          subscriptionId: "sub_1",
+          monthlyAmountJpy: 1000,
+          currentPeriodEnd: null,
+        }),
+    ],
+    [
+      "cancel_scheduled",
+      () => scheduleCancelScheduledEmail({ userId: 7, subscriptionId: "sub_1", periodEnd: null }),
+    ],
+    [
+      "subscription_ended",
+      () => scheduleSubscriptionEndedEmail({ userId: 7, subscriptionId: "s" }),
+    ],
+  ])("%s も全体スイッチを確認し、無効なら送らない", async (_kind, schedule) => {
+    const client = mockAdmin({
+      email_settings: { data: { sending_enabled: false }, error: null },
+      email_kind_settings: { data: { enabled: true }, error: null },
+      users: { data: recipientRow, error: null },
+      email_logs: okLogs,
+    });
+
+    schedule();
+    await runScheduled();
+
+    expect(tableBuilders(client, "email_settings")).toHaveLength(1);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+});
+
 describe("管理設定による有効・無効（#272）", () => {
   const okLogs = [
     { data: { id: 11 }, error: null },
@@ -499,10 +612,11 @@ describe("編集できるメール文面（#286）", () => {
         ],
         error: null,
       },
-      email_settings: {
-        data: { service_name: "新サービス", service_subtitle: null },
-        error: null,
-      },
+      // email_settings is read twice per delivery: the global switch first, then the branding.
+      email_settings: [
+        { data: { sending_enabled: true }, error: null },
+        { data: { service_name: "新サービス", service_subtitle: null }, error: null },
+      ],
     });
 
     await deliverOnce();
@@ -517,7 +631,10 @@ describe("編集できるメール文面（#286）", () => {
       users: { data: recipientRow, error: null },
       email_logs: logs,
       email_templates: { data: null, error: { message: "db down" } },
-      email_settings: { data: null, error: { message: "db down" } },
+      email_settings: [
+        { data: { sending_enabled: true }, error: null },
+        { data: null, error: { message: "db down" } },
+      ],
     });
 
     await deliverOnce();
@@ -532,8 +649,11 @@ describe("編集できるメール文面（#286）", () => {
       email_logs: logs,
     });
     const original = client.from.getMockImplementation() as (table: string) => unknown;
+    let settingsReads = 0;
     client.from.mockImplementation((table: string) => {
-      if (table === "email_templates" || table === "email_settings") {
+      // The first email_settings read is the global switch (fail-closed, tested above); only the
+      // branding read that follows must survive an exception.
+      if (table === "email_templates" || (table === "email_settings" && ++settingsReads > 1)) {
         throw new Error("connection lost");
       }
       return original(table);

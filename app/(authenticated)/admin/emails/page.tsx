@@ -8,7 +8,7 @@ import {
   fetchTodayPromotionalCount,
 } from "@/app/services/api/email-settings-server";
 import { EmailLogsSection } from "./components/email-logs-section";
-import { EmailSettingsForm } from "./components/email-settings-form";
+import { EmailSendingSwitch, EmailSettingsForm } from "./components/email-settings-form";
 
 type PageProps = {
   searchParams: Promise<{ kind?: string; status?: string; page?: string }>;
@@ -53,6 +53,20 @@ export default async function AdminEmailsPage({ searchParams }: PageProps) {
               送信は毎朝の定期実行で行われます（画面からの即時送信はできません）
             </span>
           </p>
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">全体の送信スイッチ</h2>
+        {settings.error || !settings.data ? (
+          <p className="text-destructive text-sm">{settings.error}</p>
+        ) : (
+          <EmailSendingSwitch
+            enabled={settings.data.sendingEnabled}
+            updatedAt={settings.data.sendingUpdatedAt}
+            updatedBy={settings.data.sendingUpdatedBy}
+            editorNames={settings.data.editorNames}
+          />
         )}
       </section>
 
