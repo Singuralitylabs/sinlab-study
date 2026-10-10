@@ -141,6 +141,8 @@ erDiagram
 >
 > **ミラー更新のCAS**: 「既存行の確認 → ミラー更新」は複数ステートメントに分かれるため、`activateUserFromCheckoutSession()` の書き込みは、確認した時点の `checkout_claimed_at` / `stripe_subscription_id` が変わっていないことを条件にした条件付きUPDATE（行が無い場合はINSERT）で行う。0行更新なら読み直して判断からやり直す。これが無いと、古い成功ページURLの処理が、確認後に発生した新しい処理権を後から消してしまう。
 >
+> **行が消えるのは `users` の物理削除時のみ**: `user_id` は `ON DELETE CASCADE` のため、`users` を物理削除するとミラー行も消える。Webhookはミラー行に無いサブスク・Customerのイベント（解約・支払い失敗）を他用途としてスキップするため（[機能設計書](./specification.md)2.11節）、課金中のユーザーの行が消えると解約の反映も支払い失敗通知も止まる。`users` は論理削除のみで物理削除しない（8章）。手作業で物理削除する場合は、先にStripe側のサブスクを解約しておく。
+>
 > **Stripe Customerはユーザーごとに一意**: `stripe_customer_id` は最初のCheckout作成時に確保して保存し、以後は必ず再利用する（`ensureCheckoutCustomer()`）。Checkoutごとに新しいCustomerが作られると、ミラーに載らないCustomerの契約が生まれ、`/api/stripe/portal`（ミラーの `stripe_customer_id` しか見ない）から解約できなくなるため。
 >
 > **`users` への昇格反映は「現に有効」なときのみ**: `stripe_subscriptions` のミラー自体はStripeから取得したステータスをそのまま保存するが、`users.status`/`membership_type` を昇格させるのは `status` が `ACTIVATABLE_SUBSCRIPTION_STATUSES`（`active` / `trialing`）のときのみ（`app/services/api/stripe-server.ts`）。Checkout Sessionは決済後もStripe側に不変オブジェクトとして残るため、`payment_status` だけで判定すると解約後・未入金時にも昇格してしまう経路を防ぐための制御（[機能設計書](./specification.md)2.11節）。
@@ -149,7 +151,7 @@ erDiagram
 
 Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`）をPKにすることで、TTL以内の再送・重複配信を安全にスキップできる。`type` はイベント種別、`processed_at` はclaim（処理権確保）した日時。
 
-> **claim/releaseによる原子的な冪等性**: `event.id` への素のINSERT（upsertではない）を「claim」として使う（`claimEvent()`）。同一event.idの並行配信はDBの一意制約により片方だけがclaimに成功するため、真に排他的。ハンドラが失敗した場合のみ行を削除して処理権を解放する（`releaseEventClaim()`）。先に成功扱いで記録し、ハンドラが後から失敗するような設計だと、Stripeの自動リトライ時に「処理済み」と誤判定され二度とハンドラに到達できなくなるため、claim（実行前）とrelease（失敗時のみ）を明確に分離している。`/api/stripe/webhook` はclaimに成功した場合のみハンドラを実行する。
+> **claim/releaseによる原子的な冪等性**: `event.id` への素のINSERT（upsertではない）を「claim」として使う（`claimEvent()`）。同一event.idの並行配信はDBの一意制約により片方だけがclaimに成功するため、真に排他的。ハンドラが失敗した場合のみ行を削除して処理権を解放する（`releaseEventClaim()`）。先に成功扱いで記録し、ハンドラが後から失敗するような設計だと、Stripeの自動リトライ時に「処理済み」と誤判定され二度とハンドラに到達できなくなるため、claim（実行前）とrelease（失敗時のみ）を明確に分離している。`/api/stripe/webhook` はclaimに成功した場合のみハンドラを実行する。共用Stripeアカウントの他用途の決済のイベントと、処理対象外の種別のイベントはclaimより前にスキップするため、行を作らない（[機能設計書](./specification.md)2.11節）。
 >
 > **TTLによる救済**: サーバーレス関数のタイムアウト・強制終了等でclaim後にrelease処理へ到達できなかった場合、claim行が残り続け以後の再送が永久にスキップされてしまう。これを防ぐため、一意制約違反（既にclaim済み）の場合は既存claimの`processed_at`が`EVENT_CLAIM_TTL_MINUTES`（`app/services/api/stripe-webhook-server.ts`）を超えて放置されていないかを確認し、放置されていれば`processed_at`を更新して再claimする。ハンドラは冪等に設計されているため、まれに完了済みイベントを再claim・再実行しても実害は小さい（Slack通知の重複程度）。
 >

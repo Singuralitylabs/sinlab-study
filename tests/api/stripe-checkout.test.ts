@@ -248,8 +248,10 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
   const paidSession = {
     id: "cs_paid",
     status: "complete",
+    mode: "subscription",
+    payment_link: null,
     client_reference_id: "5",
-    metadata: { user_id: "5" },
+    metadata: { user_id: "5", auth_id: "auth-5" },
     customer: "cus_1",
     subscription: "sub_1",
   };
@@ -383,11 +385,13 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
     },
     {
       reason: "セッションのユーザーが一致しません",
-      sessions: [{ ...paidSession, client_reference_id: "99", metadata: { user_id: "99" } }],
-    },
-    {
-      reason: "セッションにcustomer/subscription情報がありません",
-      sessions: [{ ...paidSession, subscription: null }],
+      sessions: [
+        {
+          ...paidSession,
+          client_reference_id: "99",
+          metadata: { user_id: "99", auth_id: "auth-99" },
+        },
+      ],
     },
   ])(
     "再試行しても結果が変わらない状態（$reason）は反映せず409を返し、運用者へ通知する",

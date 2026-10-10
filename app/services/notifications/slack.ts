@@ -186,15 +186,16 @@ export async function sendSlackPaymentFailedNotification(
 }
 
 type CheckoutRecoveryNotificationParams = {
-  userId: number;
+  userId: number | null;
   reason: string;
   sessionIds: string[];
 };
 
 /**
- * Notice for when the Checkout API could not auto-recover a paid but unreflected Checkout (#250).
- * The user keeps getting 409 on every upgrade attempt, so tell operators for manual handling, not
- * just the log.
+ * Notice for a Checkout of this app that cannot be reflected automatically: the Checkout API's
+ * self-recovery gave up (the user keeps getting 409), or the webhook permanently refused a
+ * completed session (the user may have paid yet stays on trial). Either needs manual handling, so
+ * tell operators, not just the log.
  */
 export async function sendSlackCheckoutRecoveryNotification(
   params: CheckoutRecoveryNotificationParams
@@ -213,7 +214,7 @@ export async function sendSlackCheckoutRecoveryNotification(
         type: "section",
         fields: [
           { type: "mrkdwn", text: "*ユーザーID*" },
-          { type: "plain_text", text: String(params.userId) },
+          { type: "plain_text", text: params.userId === null ? "不明" : String(params.userId) },
           { type: "mrkdwn", text: "*理由*" },
           { type: "plain_text", text: params.reason },
           { type: "mrkdwn", text: "*Checkoutセッション*" },

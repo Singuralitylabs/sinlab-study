@@ -24,8 +24,10 @@ const heldClaimedAt = "2026-09-20T00:00:00+00:00";
 const paidSession = {
   id: "cs_paid",
   status: "complete",
+  mode: "subscription",
+  payment_link: null,
   client_reference_id: "5",
-  metadata: { user_id: "5" },
+  metadata: { user_id: "5", auth_id: "auth-5" },
   customer: "cus_1",
   subscription: "sub_1",
 } as never;
@@ -62,6 +64,31 @@ describe("recoverCompletedCheckout", () => {
       expectedClaimedAt: heldClaimedAt,
     });
   });
+
+  it.each([
+    ["foreign", "このアプリで作成したCheckoutセッションではありません"],
+    ["owner_mismatch", "Checkoutセッションのユーザーが一致しません"],
+    ["missing_stripe_ids", "Checkoutセッションにcustomer/subscription情報がありません"],
+  ] as const)(
+    "昇格処理が恒久的に拒否した（%s）場合は処理権を保持する一時エラーにせず unrecoverable とし、運用者へ通知する",
+    async (rejection, reason) => {
+      vi.mocked(activateUserFromCheckoutSession).mockResolvedValue({
+        error: null,
+        rejection,
+        activated: false,
+        currentPeriodEnd: null,
+      });
+
+      const result = await recoverCompletedCheckout(5, [paidSession], heldClaimedAt);
+
+      expect(result).toEqual({ kind: "unrecoverable" });
+      expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledWith({
+        userId: 5,
+        reason,
+        sessionIds: ["cs_paid"],
+      });
+    }
+  );
 
   it.each([404, 400, 403])(
     "Stripeが恒久的なエラー（%i）を返した場合は unrecoverable とし、運用者へ通知する",
@@ -120,11 +147,8 @@ describe("recoverCompletedCheckout", () => {
   ])("重複の判定に失敗した場合（%s）は、取りこぼさないよう通知する", async (_label, impl) => {
     vi.mocked(claimEvent).mockImplementation(impl as never);
 
-    const result = await recoverCompletedCheckout(
-      5,
-      [{ ...(paidSession as object), subscription: null } as never],
-      heldClaimedAt
-    );
+    // User mismatch: rejected before the reflection, so only the notice path runs.
+    const result = await recoverCompletedCheckout(6, [paidSession], heldClaimedAt);
 
     expect(result).toEqual({ kind: "unrecoverable" });
     expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledTimes(1);

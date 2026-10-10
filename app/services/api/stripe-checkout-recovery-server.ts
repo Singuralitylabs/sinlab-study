@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import {
   activateUserFromCheckoutSession,
+  CHECKOUT_SESSION_REJECTION_MESSAGES,
   claimEvent,
   extractUserId,
   reactivateUserFromMirror,
@@ -44,7 +45,8 @@ export type CheckoutRecovery =
  *   the claim and the second fails, a next Checkout could be created while the second valid
  *   subscription remains (double subscription)
  * - session user does not match the caller: it would write someone else's subscription
- * - session has no customer / subscription: reflection always fails
+ * - activateUserFromCheckoutSession() rejected the session (CheckoutSessionRejection: not this
+ *   app's, no customer / subscription, or its auth_id does not match the user)
  * - Stripe returned a permanent error (4xx such as subscription missing)
  * @param heldClaimedAt claim time used for the decision, so this reflection cannot release a
  *   claim re-acquired by a concurrent request (see activateUserFromCheckoutSession()).
@@ -72,9 +74,6 @@ export async function recoverCompletedCheckout(
   if (extractUserId(session.client_reference_id, session.metadata) !== userId) {
     return await unrecoverable("セッションのユーザーが一致しません");
   }
-  if (!session.customer || !session.subscription) {
-    return await unrecoverable("セッションにcustomer/subscription情報がありません");
-  }
 
   try {
     const result = await activateUserFromCheckoutSession(session, {
@@ -83,6 +82,11 @@ export async function recoverCompletedCheckout(
     if (result.error) {
       console.error("決済済みCheckoutセッションの反映エラー:", result.error);
       return { kind: "error" };
+    }
+    // Normally impossible on our own Customer, but the answer never changes, so holding the claim
+    // as a transient error would lock the user out of Checkout with no one told.
+    if (result.rejection) {
+      return await unrecoverable(CHECKOUT_SESSION_REJECTION_MESSAGES[result.rejection]);
     }
     return result.activated ? { kind: "activated", sessionId: session.id } : { kind: "applied" };
   } catch (error) {
