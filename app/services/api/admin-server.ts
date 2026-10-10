@@ -1218,6 +1218,60 @@ export async function createContent(content: {
 }
 
 /**
+ * Creates contents one by one in array order, each at the end of its week (bulk registration).
+ * Not atomic: on the first failure it stops and reports what was already created, so the caller
+ * can tell the admin which items to retry.
+ */
+export async function createContentsAtTail(
+  items: (Omit<Parameters<typeof createContent>[0], "insertAfterId" | "quizQuestions"> & {
+    quizQuestions?: QuizQuestionData[];
+  })[]
+): Promise<{
+  created: { id: number; title: string }[];
+  error: PostgrestError | null;
+  failedIndex: number | null;
+}> {
+  const supabase = await createAdminSupabaseClient();
+  const created: { id: number; title: string }[] = [];
+
+  for (const [index, item] of items.entries()) {
+    const { data: siblings, error: siblingsError } = await fetchSiblings(
+      supabase,
+      "learning_contents",
+      { column: "week_id", value: item.week_id }
+    );
+    if (siblingsError) {
+      console.error("コンテンツ一括作成エラー（兄弟取得）:", siblingsError.message);
+      return { created, error: siblingsError, failedIndex: index };
+    }
+    let result: Awaited<ReturnType<typeof createContent>>;
+    try {
+      result = await createContent({ ...item, insertAfterId: getSiblingTailId(siblings ?? []) });
+    } catch (thrown) {
+      // InvalidInsertAfterIdError when the tail sibling is deleted concurrently. Report it like
+      // any other failure so the already-created items are not lost from the response.
+      console.error("コンテンツ一括作成エラー:", thrown);
+      return {
+        created,
+        error: { message: String(thrown) } as PostgrestError,
+        failedIndex: index,
+      };
+    }
+    const { data, error } = result;
+    if (error || !data) {
+      return {
+        created,
+        error: error ?? ({ message: "no row returned" } as PostgrestError),
+        failedIndex: index,
+      };
+    }
+    created.push({ id: data.id, title: data.title });
+  }
+
+  return { created, error: null, failedIndex: null };
+}
+
+/**
  * Replaces all questions of a quiz in one transaction (replace_quiz_questions RPC), so a failure
  * never leaves a partial set. Order follows the array.
  */

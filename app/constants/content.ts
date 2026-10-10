@@ -21,6 +21,9 @@ export const CONTENT_TYPE_LABELS: Record<ContentType, string> = {
   quiz: "クイズ",
 };
 
+/** Max contents per bulk create request (POST /api/manage/contents/bulk). */
+export const MAX_BULK_CREATE_CONTENTS = 50;
+
 /** Max IDs per bulk API request; client-side chunked sending uses the same value. */
 export const MAX_BULK_CONTENT_IDS = 100;
 

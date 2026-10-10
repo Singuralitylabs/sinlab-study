@@ -23,21 +23,22 @@ export default async function EditContentPage({ params }: PageProps) {
     notFound();
   }
 
-  const [
-    { data: content },
-    { data: weeks },
-    { data: contents, error: contentsError },
-    { data: quizQuestions, error: quizError },
-  ] = await Promise.all([
-    fetchContentByIdForAdmin(contentId),
-    fetchAllWeeks(),
-    fetchContentSiblingCandidates(),
-    fetchQuizQuestionsForAdmin(contentId),
-  ]);
+  const [{ data: content }, { data: weeks }, { data: contents, error: contentsError }] =
+    await Promise.all([
+      fetchContentByIdForAdmin(contentId),
+      fetchAllWeeks(),
+      fetchContentSiblingCandidates(),
+    ]);
 
   if (!content) {
     notFound();
   }
+
+  // Only quizzes depend on quiz_questions, so a failure there must not block editing other types.
+  const { data: quizQuestions, error: quizError } =
+    content.content_type === "quiz"
+      ? await fetchQuizQuestionsForAdmin(contentId)
+      : { data: [], error: null };
 
   const sortedWeeks = weeks ? sortWeeksByHierarchy(weeks) : [];
   const filterOptions = deriveWeekSelectOptions(sortedWeeks);

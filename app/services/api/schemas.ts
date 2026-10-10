@@ -11,6 +11,7 @@ import {
   BULK_CONTENT_ACTIONS,
   CONTENT_TYPES,
   MAX_BULK_CONTENT_IDS,
+  MAX_BULK_CREATE_CONTENTS,
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
 import {
@@ -317,6 +318,21 @@ const ContentCreateObjectSchema = ContentBaseSchema.extend({
 export const ContentCreateSchema = ContentCreateObjectSchema.superRefine(requireQuizQuestions);
 export const ContentUpdateSchema =
   ContentCreateObjectSchema.partial().superRefine(requireQuizQuestions);
+
+const BULK_CREATE_MESSAGE = `contentsは1〜${MAX_BULK_CREATE_CONTENTS}件の配列で指定してください`;
+
+/**
+ * POST /api/manage/contents/bulk: registers many contents (e.g. a course's quizzes from the
+ * manuscript) in one request. Each is appended to the end of its week in array order, so there is
+ * no insert_after_id.
+ */
+export const BulkContentCreateSchema = z.object({
+  contents: z
+    .array(ContentBaseSchema.superRefine(requireQuizQuestions), { message: BULK_CREATE_MESSAGE })
+    .min(1, { message: BULK_CREATE_MESSAGE })
+    .max(MAX_BULK_CREATE_CONTENTS, { message: BULK_CREATE_MESSAGE }),
+});
+export type BulkContentCreateItem = z.infer<typeof BulkContentCreateSchema>["contents"][number];
 
 /**
  * POST /api/quiz/grade. Whether every question is answered is checked by grade_quiz_answers()
