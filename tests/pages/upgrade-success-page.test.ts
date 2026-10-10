@@ -78,6 +78,7 @@ describe("/upgrade/success の自己昇格防止", () => {
   });
 
   it("metadata.auth_id がセッションのユーザーと一致しなければ、ミラーも users も書かず再試行も促さない", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const mockClient = createMockSupabaseClient({
       tableResults: { users: { data: { auth_id: "auth-42" }, error: null } },
     });
@@ -98,5 +99,31 @@ describe("/upgrade/success の自己昇格防止", () => {
     const ownerQuery = mockClient.from.mock.results[0].value;
     expect(ownerQuery.update).not.toHaveBeenCalled();
     expect(getStripeClient).not.toHaveBeenCalled();
+    // Traceable for an inquiry, without the session's personal data.
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("id=cs_own rejection=owner_mismatch")
+    );
+    expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining("auth-"));
+    consoleError.mockRestore();
+  });
+
+  it("customer/subscription の無い完了済みセッションは恒久的な拒否として扱い、再試行を促さない", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mockClient = createMockSupabaseClient();
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(retrieveCheckoutSession).mockResolvedValue({
+      ...ownSession,
+      subscription: null,
+    } as never);
+
+    const html = await render();
+
+    expect(html).toContain("決済情報を確認できませんでした");
+    expect(html).not.toContain("時間をおいて再度お試しください");
+    expect(mockClient.from).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("id=cs_own rejection=missing_stripe_ids")
+    );
+    consoleError.mockRestore();
   });
 });

@@ -18,8 +18,8 @@ import {
   activateUserFromCheckoutSession,
   claimEvent,
   extractUserId,
+  findMirrorOwner,
   isForeignCheckoutSession,
-  isMirroredStripeObject,
   reactivateUserFromMirror,
   releaseEventClaim,
   revertUserToTrial,
@@ -108,7 +108,7 @@ describe("isForeignCheckoutSession", () => {
   });
 });
 
-describe("isMirroredStripeObject", () => {
+describe("findMirrorOwner", () => {
   it.each([
     ["行があれば所有者のユーザーidを返す", { id: 1 }, 1],
     ["行が無ければ null を返す", null, null],
@@ -118,7 +118,7 @@ describe("isMirroredStripeObject", () => {
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await isMirroredStripeObject("stripe_customer_id", "cus_1");
+    const result = await findMirrorOwner("stripe_customer_id", "cus_1");
 
     expect(result).toEqual({ error: null, userId });
     const builder = mockClient.from.mock.results[0].value;
@@ -132,7 +132,7 @@ describe("isMirroredStripeObject", () => {
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    await expect(isMirroredStripeObject("stripe_subscription_id", "sub_1")).resolves.toEqual({
+    await expect(findMirrorOwner("stripe_subscription_id", "sub_1")).resolves.toEqual({
       error: dbError.message,
       userId: null,
     });
@@ -495,18 +495,30 @@ describe("activateUserFromCheckoutSession", () => {
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
 
-  it("customer/subscription情報が無い場合はエラーを返す", async () => {
-    const mockClient = mockActivateClient();
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+  it.each([
+    ["subscription", { subscription: null }],
+    ["customer", { customer: null }],
+  ])(
+    "%s が無い完了済みセッションは恒久的な拒否（missing_stripe_ids）を返し、DBを触らない",
+    async (_label, missing) => {
+      const mockClient = mockActivateClient();
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await activateUserFromCheckoutSession({
-      ...baseSession,
-      subscription: null,
-    } as never);
+      const result = await activateUserFromCheckoutSession({
+        ...baseSession,
+        ...missing,
+      } as never);
 
-    expect(result.error).not.toBeNull();
-    expect(mockClient.from).not.toHaveBeenCalled();
-  });
+      // Retrying cannot add the ids, so this must not look like a transient error.
+      expect(result).toEqual({
+        error: null,
+        rejection: "missing_stripe_ids",
+        activated: false,
+        currentPeriodEnd: null,
+      });
+      expect(mockClient.from).not.toHaveBeenCalled();
+    }
+  );
 
   it("既存行チェックに失敗した場合はエラーを返す", async () => {
     const mockClient = mockActivateClient({
@@ -816,26 +828,23 @@ describe("syncSubscriptionStatus", () => {
     mockGetStripeClient("canceled");
     const mockClient = createMockSupabaseClient({
       tableResults: {
-        stripe_subscriptions: [
-          { data: { user_id: 7 }, error: null },
-          { data: null, error: null },
-        ],
+        stripe_subscriptions: { data: null, error: null },
         users: { data: null, error: null },
       },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await syncSubscriptionStatus(makeSubscription("canceled") as never);
+    const result = await syncSubscriptionStatus(makeSubscription("canceled") as never, 7);
 
     expect(result.error).toBeNull();
-    const userBuilder = mockClient.from.mock.results[2].value;
+    const userBuilder = mockClient.from.mock.results[1].value;
     expect(userBuilder.update).toHaveBeenCalledWith(
       expect.objectContaining({ status: "trial", membership_type: null })
     );
     expect(userBuilder.eq).toHaveBeenNthCalledWith(2, "membership_type", "general");
   });
 
-  it("呼び出し元が解決済みのミラー行の所有者を渡した場合はミラー行を引き直さない", async () => {
+  it("呼び出し元が解決済みのミラー行の所有者を使い、ミラー行を引き直さない", async () => {
     mockGetStripeClient("canceled");
     const mockClient = createMockSupabaseClient({
       tableResults: {
@@ -861,16 +870,13 @@ describe("syncSubscriptionStatus", () => {
       mockGetStripeClient(status);
       const mockClient = createMockSupabaseClient({
         tableResults: {
-          stripe_subscriptions: [
-            { data: { user_id: 7 }, error: null },
-            { data: null, error: null },
-          ],
+          stripe_subscriptions: { data: null, error: null },
           users: { data: null, error: null },
         },
       });
       vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-      await syncSubscriptionStatus(makeSubscription(status) as never);
+      await syncSubscriptionStatus(makeSubscription(status) as never, 7);
 
       const usersCalls = mockClient.from.mock.calls.filter(([table]) => table === "users");
       expect(usersCalls).toHaveLength(1);
@@ -896,17 +902,14 @@ describe("syncSubscriptionStatus", () => {
       } as never);
       const mockClient = createMockSupabaseClient({
         tableResults: {
-          stripe_subscriptions: [
-            { data: { user_id: 7 }, error: null },
-            { data: null, error: null },
-          ],
+          stripe_subscriptions: { data: null, error: null },
         },
       });
       vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-      await syncSubscriptionStatus(makeSubscription("active") as never);
+      await syncSubscriptionStatus(makeSubscription("active") as never, 7);
 
-      expect(mockClient.from.mock.results[1].value.update).toHaveBeenCalledWith(
+      expect(mockClient.from.mock.results[0].value.update).toHaveBeenCalledWith(
         expect.objectContaining({ cancel_at_period_end: false, cancel_at: expected })
       );
     }
@@ -916,15 +919,12 @@ describe("syncSubscriptionStatus", () => {
     mockGetStripeClient("past_due");
     const mockClient = createMockSupabaseClient({
       tableResults: {
-        stripe_subscriptions: [
-          { data: { user_id: 7 }, error: null },
-          { data: null, error: null },
-        ],
+        stripe_subscriptions: { data: null, error: null },
       },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await syncSubscriptionStatus(makeSubscription("past_due") as never);
+    const result = await syncSubscriptionStatus(makeSubscription("past_due") as never, 7);
 
     expect(result.error).toBeNull();
     const usersCalls = mockClient.from.mock.calls.filter(([table]) => table === "users");
@@ -935,34 +935,18 @@ describe("syncSubscriptionStatus", () => {
     mockGetStripeClient("canceled");
     const mockClient = createMockSupabaseClient({
       tableResults: {
-        stripe_subscriptions: [
-          { data: { user_id: 7 }, error: null },
-          { data: null, error: null },
-        ],
+        stripe_subscriptions: { data: null, error: null },
         users: { data: null, error: null },
       },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    await syncSubscriptionStatus(makeSubscription("active") as never);
+    await syncSubscriptionStatus(makeSubscription("active") as never, 7);
 
-    const subBuilder = mockClient.from.mock.results[1].value;
+    const subBuilder = mockClient.from.mock.results[0].value;
     expect(subBuilder.update).toHaveBeenCalledWith(expect.objectContaining({ status: "canceled" }));
     const usersCalls = mockClient.from.mock.calls.filter(([table]) => table === "users");
     expect(usersCalls).toHaveLength(1);
-  });
-
-  it("該当するstripe_subscriptions行が無い場合は何もしない（イベント順序逆転対策）", async () => {
-    mockGetStripeClient("active");
-    const mockClient = createMockSupabaseClient({
-      tableResults: { stripe_subscriptions: { data: null, error: null } },
-    });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
-
-    const result = await syncSubscriptionStatus(makeSubscription("active") as never);
-
-    expect(result.error).toBeNull();
-    expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1356,7 +1340,7 @@ describe("トランザクションメールのフック", () => {
     ) => {
       const mockClient = createMockSupabaseClient({
         tableResults: {
-          stripe_subscriptions: [{ data: { user_id: 7 }, error: null }, writeResult],
+          stripe_subscriptions: writeResult,
         },
       });
       vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
@@ -1367,11 +1351,11 @@ describe("トランザクションメールのフック", () => {
       const mockClient = setup();
       mockRetrieve(liveSubscription({ cancel_at_period_end: true }));
 
-      const result = await syncSubscriptionStatus(liveSubscription() as never);
+      const result = await syncSubscriptionStatus(liveSubscription() as never, 7);
 
       expect(result.error).toBeNull();
       // Judged from the live state only; the mirror row's values aren't consulted.
-      expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith("user_id");
+      expect(mockClient.from.mock.results[0].value.select).not.toHaveBeenCalled();
       expect(scheduleCancelScheduledEmail).toHaveBeenCalledWith({
         userId: 7,
         subscriptionId: "sub_123",
@@ -1385,7 +1369,7 @@ describe("トランザクションメールのフック", () => {
       setup();
       mockRetrieve(liveSubscription({ cancel_at_period_end: false, cancel_at: cancelAtUnix }));
 
-      await syncSubscriptionStatus(liveSubscription() as never);
+      await syncSubscriptionStatus(liveSubscription() as never, 7);
 
       expect(scheduleCancelScheduledEmail).toHaveBeenCalledWith({
         userId: 7,
@@ -1397,16 +1381,13 @@ describe("トランザクションメールのフック", () => {
     it("他の経路（successページ再訪・再昇格）が先にミラーへ解約予約を書いていても予約する（重複は送信ログで抑止）", async () => {
       const mockClient = createMockSupabaseClient({
         tableResults: {
-          stripe_subscriptions: [
-            { data: { user_id: 7, cancel_at_period_end: true }, error: null },
-            { data: null, error: null },
-          ],
+          stripe_subscriptions: { data: null, error: null },
         },
       });
       vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
       mockRetrieve(liveSubscription({ cancel_at_period_end: true }));
 
-      await syncSubscriptionStatus(liveSubscription() as never);
+      await syncSubscriptionStatus(liveSubscription() as never, 7);
 
       expect(scheduleCancelScheduledEmail).toHaveBeenCalledTimes(1);
     });
@@ -1421,7 +1402,7 @@ describe("トランザクションメールのフック", () => {
       setup();
       mockRetrieve(liveSubscription());
 
-      await syncSubscriptionStatus(eventSubscription as never);
+      await syncSubscriptionStatus(eventSubscription as never, 7);
 
       expect(scheduleCancelScheduledEmail).not.toHaveBeenCalled();
     });
@@ -1430,7 +1411,7 @@ describe("トランザクションメールのフック", () => {
       setup({ data: null, error: dbError });
       mockRetrieve(liveSubscription({ cancel_at_period_end: true }));
 
-      const result = await syncSubscriptionStatus(liveSubscription() as never);
+      const result = await syncSubscriptionStatus(liveSubscription() as never, 7);
 
       expect(result.error).toBe(dbError.message);
       expect(scheduleCancelScheduledEmail).not.toHaveBeenCalled();
@@ -1441,10 +1422,7 @@ describe("トランザクションメールのフック", () => {
     const setup = (usersResult: { data: unknown; error: unknown }) => {
       const mockClient = createMockSupabaseClient({
         tableResults: {
-          stripe_subscriptions: [
-            { data: { user_id: 7 }, error: null },
-            { data: null, error: null },
-          ],
+          stripe_subscriptions: { data: null, error: null },
           users: usersResult,
         },
       });
@@ -1455,7 +1433,7 @@ describe("トランザクションメールのフック", () => {
     it("実際に降格したときだけ、契約idをキーに予約する", async () => {
       setup({ data: [{ id: 7 }], error: null });
 
-      const result = await syncSubscriptionStatus(liveSubscription() as never);
+      const result = await syncSubscriptionStatus(liveSubscription() as never, 7);
 
       expect(result.error).toBeNull();
       expect(scheduleSubscriptionEndedEmail).toHaveBeenCalledWith({
@@ -1468,7 +1446,7 @@ describe("トランザクションメールのフック", () => {
     it("membership_type=generalガードで更新されなかった場合（既に降格済み・コミュニティ会員）は予約しない", async () => {
       setup({ data: [], error: null });
 
-      const result = await syncSubscriptionStatus(liveSubscription() as never);
+      const result = await syncSubscriptionStatus(liveSubscription() as never, 7);
 
       expect(result.error).toBeNull();
       expect(scheduleSubscriptionEndedEmail).not.toHaveBeenCalled();
@@ -1477,7 +1455,7 @@ describe("トランザクションメールのフック", () => {
     it("降格に失敗した場合は予約せずエラーを返す（Webhookは500で再送に委ねる）", async () => {
       setup({ data: null, error: dbError });
 
-      const result = await syncSubscriptionStatus(liveSubscription() as never);
+      const result = await syncSubscriptionStatus(liveSubscription() as never, 7);
 
       expect(result.error).toBe(dbError.message);
       expect(scheduleSubscriptionEndedEmail).not.toHaveBeenCalled();

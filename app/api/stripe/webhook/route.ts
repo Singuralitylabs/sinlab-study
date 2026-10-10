@@ -6,12 +6,16 @@ import {
   activateUserFromCheckoutSession,
   CHECKOUT_SESSION_REJECTION_MESSAGES,
   claimEvent,
+  extractUserId,
+  findMirrorOwner,
   isForeignCheckoutSession,
-  isMirroredStripeObject,
   releaseEventClaim,
   syncSubscriptionStatus,
 } from "@/app/services/api/stripe-webhook-server";
-import { sendSlackPaymentFailedNotification } from "@/app/services/notifications/slack";
+import {
+  sendSlackCheckoutRecoveryNotification,
+  sendSlackPaymentFailedNotification,
+} from "@/app/services/notifications/slack";
 
 type EventPlan =
   | { kind: "skip"; reason: string }
@@ -50,9 +54,24 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
           // Accepted with 200 and the claim kept: a completed session never changes, so a 500
           // would only be redelivered until Stripe disables the endpoint.
           if (rejection) {
+            const reason = CHECKOUT_SESSION_REJECTION_MESSAGES[rejection];
             console.error(
-              `Checkout Sessionを昇格できないため受領のみ行いました（要確認）: id=${session.id} ${CHECKOUT_SESSION_REJECTION_MESSAGES[rejection]}`
+              `Checkout Sessionを昇格できないため受領のみ行いました（要確認）: id=${session.id} ${reason}`
             );
+            // Our own session may be paid while the user stays on trial, and the kept claim means
+            // no redelivery will raise it again. A foreign one is another team's sale.
+            if (rejection !== "foreign") {
+              try {
+                await sendSlackCheckoutRecoveryNotification({
+                  userId: extractUserId(session.client_reference_id, session.metadata),
+                  reason,
+                  sessionIds: [session.id],
+                });
+              } catch (notifyError) {
+                // A 500 here would release the claim and redeliver an answer that never changes.
+                console.error("Checkout昇格不可のSlack通知エラー:", notifyError);
+              }
+            }
           }
           return null;
         },
@@ -63,10 +82,7 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
     case "customer.subscription.updated":
     case "customer.subscription.deleted": {
       const subscription = event.data.object;
-      const { error, userId } = await isMirroredStripeObject(
-        "stripe_subscription_id",
-        subscription.id
-      );
+      const { error, userId } = await findMirrorOwner("stripe_subscription_id", subscription.id);
       if (error) {
         return { kind: "error" };
       }
@@ -93,7 +109,10 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
       if (!customerId) {
         return { kind: "skip", reason: `Invoice id=${invoice.id}` };
       }
-      const { error, userId } = await isMirroredStripeObject("stripe_customer_id", customerId);
+      // Customer metadata (auth_id) is not in the invoice body, and the subscription metadata's
+      // place in it differs across webhook API versions, so the mirror is the only check that
+      // needs no Stripe call; see findMirrorOwner() for when a row of ours can be missing.
+      const { error, userId } = await findMirrorOwner("stripe_customer_id", customerId);
       if (error) {
         return { kind: "error" };
       }

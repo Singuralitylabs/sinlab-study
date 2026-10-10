@@ -78,23 +78,30 @@ export function isForeignCheckoutSession(session: Stripe.Checkout.Session): bool
  * (the webhook would be redelivered until Stripe disables the endpoint, and the Checkout claim
  * would be held forever).
  */
-export type CheckoutSessionRejection = "foreign" | "user_unidentified" | "owner_mismatch";
+export type CheckoutSessionRejection =
+  | "foreign"
+  | "user_unidentified"
+  | "missing_stripe_ids"
+  | "owner_mismatch";
 
 export const CHECKOUT_SESSION_REJECTION_MESSAGES: Record<CheckoutSessionRejection, string> = {
   foreign: "このアプリで作成したCheckoutセッションではありません",
   user_unidentified: "Checkoutセッションからユーザーを特定できませんでした",
+  missing_stripe_ids: "Checkoutセッションにcustomer/subscription情報がありません",
   owner_mismatch: "Checkoutセッションのユーザーが一致しません",
 };
 
 /**
- * Whether the mirror knows this subscription / customer, i.e. it belongs to this app. Lets the
- * webhook drop events of the shared account's other sales before claiming them, so they neither
- * pile up in stripe_events nor page operators with another team's customers. Every subscription
- * and customer of this app gets a mirror row before or at checkout completion
- * (ensureCheckoutCustomer() / activateUserFromCheckoutSession()), and syncSubscriptionStatus()
- * ignores unmirrored subscriptions anyway, so nothing of ours is dropped.
+ * Owner (users.id) of the mirror row for this subscription / customer, or null when the mirror
+ * does not know it, i.e. it is not this app's. Lets the webhook drop events of the shared
+ * account's other sales before claiming them, so they neither pile up in stripe_events nor page
+ * operators with another team's customers. Every subscription and customer of this app gets a
+ * mirror row before or at checkout completion (ensureCheckoutCustomer() /
+ * activateUserFromCheckoutSession()), so nothing of ours is dropped. Rows vanish only with a
+ * physical users delete (ON DELETE CASCADE), which the app never does (users are soft-deleted);
+ * deleting a paying user by hand would silently drop their cancellations and payment failures.
  */
-export async function isMirroredStripeObject(
+export async function findMirrorOwner(
   column: "stripe_subscription_id" | "stripe_customer_id",
   id: string
 ): Promise<{ error: string | null; userId: number | null }> {
@@ -241,11 +248,7 @@ export async function activateUserFromCheckoutSession(
       : (session.subscription?.id ?? null);
 
   if (!customerId || !subscriptionId) {
-    return {
-      error: "Checkoutセッションにcustomer/subscription情報がありません",
-      activated: false,
-      currentPeriodEnd: null,
-    };
+    return reject("missing_stripe_ids");
   }
 
   const supabase = await createAdminSupabaseClient();
@@ -584,39 +587,19 @@ async function writeCheckoutMirror(
  * the event: re-fetch the latest state from the Stripe API before writing. E.g. a delayed stale
  * active/past_due event after canceled handling still writes the live state (canceled), so the
  * mirror is not rolled back.
- * The row is located by stripe_subscription_id. If updated/deleted arrives before
- * checkout.session.completed is processed (reordering) there is no row and nothing happens (a
- * later checkout.session.completed upserts the latest state). This existence check comes BEFORE
+ * Call only for a subscription the mirror knows (findMirrorOwner()). If updated/deleted arrives
+ * before checkout.session.completed is processed (reordering) there is no row yet and the caller
+ * skips it (a later checkout.session.completed upserts the latest state). The check comes BEFORE
  * the Stripe re-fetch: hitting the Stripe API for every event of subscriptions unrelated to this
  * service would waste calls and cause needless 500s / retries during Stripe outages.
- * @param mirroredUserId owner of the mirror row when the caller already looked it up (the webhook
- *   does so before claiming), skipping the second read.
+ * @param userId owner of the mirror row, looked up by the caller with findMirrorOwner() (the
+ *   webhook does so before claiming to skip other sales).
  */
 export async function syncSubscriptionStatus(
   subscriptionFromEvent: Stripe.Subscription,
-  mirroredUserId?: number
+  userId: number
 ): Promise<{ error: string | null }> {
   const supabase = await createAdminSupabaseClient();
-
-  let userId: number;
-  if (mirroredUserId !== undefined) {
-    userId = mirroredUserId;
-  } else {
-    const { data: existing, error: fetchError } = await supabase
-      .from("stripe_subscriptions")
-      .select("user_id")
-      .eq("stripe_subscription_id", subscriptionFromEvent.id)
-      .maybeSingle();
-
-    if (fetchError) {
-      console.error("stripe_subscriptions取得エラー:", fetchError.message);
-      return { error: fetchError.message };
-    }
-    if (!existing) {
-      return { error: null };
-    }
-    userId = existing.user_id;
-  }
 
   const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve(subscriptionFromEvent.id);

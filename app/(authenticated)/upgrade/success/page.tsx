@@ -47,6 +47,10 @@ export default async function UpgradeSuccessPage({
         const { error, rejection, activated, currentPeriodEnd } =
           await activateUserFromCheckoutSession(session);
         if (rejection) {
+          // The user paid for a session we refused, so leave a trace to match their inquiry.
+          console.error(
+            `Checkoutセッションを昇格できませんでした（要確認）: id=${session.id} rejection=${rejection}`
+          );
           // Reloading cannot change the answer, so no retry prompt.
           errorMessage = "決済情報を確認できませんでした";
         } else if (error) {
