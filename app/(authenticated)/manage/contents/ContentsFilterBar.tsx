@@ -17,6 +17,7 @@ const CONTENT_TYPE_FILTER_OPTIONS: { value: ContentType; label: string }[] = [
   { value: "text", label: "テキスト" },
   { value: "exercise", label: "演習" },
   { value: "slide", label: "スライド（PDF）" },
+  { value: "quiz", label: "クイズ" },
 ];
 
 const SELECT_CLASS_NAME =

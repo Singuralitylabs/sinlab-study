@@ -9,6 +9,7 @@ import {
   resolveSiblingResequence,
   type SiblingOrderRow,
 } from "@/app/lib/content-grouping";
+import { isQuizQuestionType, type QuizQuestionData } from "@/app/lib/quiz";
 import { toSlideObjectKey } from "@/app/lib/slide-object-key";
 import { WEEKLY_FUNNEL_FETCH_ERROR, type WeeklyFunnelRow } from "@/app/lib/weekly-funnel";
 import {
@@ -1142,7 +1143,7 @@ export async function fetchContentByIdForAdmin(
 export async function createContent(content: {
   week_id: number;
   title: string;
-  content_type: "video" | "text" | "exercise" | "slide";
+  content_type: ContentType;
   video_url?: string | null;
   text_content?: string | null;
   description?: string | null;
@@ -1155,6 +1156,7 @@ export async function createContent(content: {
   insertAfterId: number | null;
   is_published?: boolean;
   is_open_to_trial?: boolean;
+  quizQuestions?: QuizQuestionData[];
 }): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
 
@@ -1197,7 +1199,68 @@ export async function createContent(content: {
     return { data: null, error };
   }
 
+  if (content.content_type === "quiz" && content.quizQuestions) {
+    const quizError = await replaceQuizQuestions(supabase, data.id, content.quizQuestions);
+    if (quizError) {
+      // Leaving the row would publish a quiz with no questions; soft-delete it like the delete API.
+      const { error: rollbackError } = await supabase
+        .from("learning_contents")
+        .update({ is_deleted: true })
+        .eq("id", data.id);
+      if (rollbackError) {
+        console.error("コンテンツ作成エラー（設問保存失敗後の取り消し）:", rollbackError.message);
+      }
+      return { data: null, error: quizError };
+    }
+  }
+
   return { data, error: null };
+}
+
+/**
+ * Replaces all questions of a quiz in one transaction (replace_quiz_questions RPC), so a failure
+ * never leaves a partial set. Order follows the array.
+ */
+async function replaceQuizQuestions(
+  supabase: AdminSupabaseClient,
+  contentId: number,
+  questions: QuizQuestionData[]
+): Promise<PostgrestError | null> {
+  const { error } = await supabase.rpc("replace_quiz_questions", {
+    p_content_id: contentId,
+    p_questions: questions,
+  });
+  if (error) {
+    console.error("クイズ設問の保存エラー:", error.message);
+  }
+  return error;
+}
+
+/** Questions including answers, for the admin edit form only (service_role). */
+export async function fetchQuizQuestionsForAdmin(
+  contentId: number
+): Promise<{ data: QuizQuestionData[] | null; error: PostgrestError | null }> {
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase
+    .from("quiz_questions")
+    .select("question_type, question, choices, correct_choices, model_answer, explanation, hint")
+    .eq("content_id", contentId)
+    .order("display_order", { ascending: true });
+
+  if (error) {
+    console.error("クイズ設問の取得エラー:", error.message);
+    return { data: null, error };
+  }
+
+  return {
+    data: data
+      .filter((row) => isQuizQuestionType(row.question_type))
+      .map((row) => ({
+        ...row,
+        question_type: row.question_type as QuizQuestionData["question_type"],
+      })),
+    error: null,
+  };
 }
 
 /**
@@ -1208,10 +1271,21 @@ export async function createContent(content: {
  */
 export async function updateContent(
   id: number,
-  content: Partial<LearningContent> & { insertAfterId?: number | null }
+  content: Partial<LearningContent> & {
+    insertAfterId?: number | null;
+    quizQuestions?: QuizQuestionData[];
+  }
 ): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
   const supabase = await createAdminSupabaseClient();
-  const { insertAfterId, ...patch } = content;
+  const { insertAfterId, quizQuestions, ...patch } = content;
+
+  // Questions first: if they fail, the row is not switched to a quiz with stale or no questions.
+  if (patch.content_type === "quiz" && quizQuestions) {
+    const quizError = await replaceQuizQuestions(supabase, id, quizQuestions);
+    if (quizError) {
+      return { error: quizError, storageRemoved: true };
+    }
+  }
 
   let destinationFilter: SiblingParentFilter = null;
   let sourceFilter: SiblingParentFilter = null;

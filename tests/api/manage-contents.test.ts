@@ -45,7 +45,7 @@ describe("POST /api/manage/contents - バリデーション", () => {
 
   it("content_typeが許可値以外の場合は400（従来はDBのCHECK制約違反で500になっていた）", async () => {
     const res = await POST(
-      request({ title: "コンテンツ1", week_id: 1, content_type: "quiz" }) as never
+      request({ title: "コンテンツ1", week_id: 1, content_type: "poll" }) as never
     );
 
     expect(res.status).toBe(400);
@@ -101,7 +101,7 @@ describe("PUT /api/manage/contents/[id] - バリデーション", () => {
   });
 
   it("content_typeを指定する場合は許可値以外を受け付けず400", async () => {
-    const res = await PUT(request({ content_type: "quiz" }) as never, { params });
+    const res = await PUT(request({ content_type: "poll" }) as never, { params });
 
     expect(res.status).toBe(400);
     expect(updateContent).not.toHaveBeenCalled();
@@ -127,5 +127,88 @@ describe("PUT /api/manage/contents/[id] - バリデーション", () => {
     const res = await PUT(request({ insert_after_id: 999 }) as never, { params });
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe("POST / PUT /api/manage/contents - クイズの設問（#306）", () => {
+  const quizQuestions = [
+    {
+      question_type: "multiple",
+      question: "正しいものを選べ",
+      choices: ["a", "b", "c"],
+      correct_choices: [2, 0],
+      explanation: "解説",
+    },
+    { question_type: "text", question: "説明せよ", model_answer: "模範解答" },
+  ];
+
+  it("作成時は検証・正規化した設問を quizQuestions として渡す", async () => {
+    const res = await POST(
+      request({
+        title: "クイズ",
+        week_id: 1,
+        content_type: "quiz",
+        insert_after_id: null,
+        quiz_questions: quizQuestions,
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+    expect(createContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content_type: "quiz",
+        quizQuestions: [
+          expect.objectContaining({ correct_choices: [0, 2], model_answer: null, hint: null }),
+          expect.objectContaining({ choices: [], correct_choices: [], model_answer: "模範解答" }),
+        ],
+      })
+    );
+  });
+
+  it("正解の指定が不正な設問は400で、作成処理を呼ばない", async () => {
+    const res = await POST(
+      request({
+        title: "クイズ",
+        week_id: 1,
+        content_type: "quiz",
+        insert_after_id: null,
+        quiz_questions: [{ ...quizQuestions[0], question_type: "single" }],
+      }) as never
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: "単一選択の設問は正解を1つ選んでください",
+    });
+    expect(createContent).not.toHaveBeenCalled();
+  });
+
+  it("更新時も設問を quizQuestions として渡す", async () => {
+    const res = await PUT(
+      request({ content_type: "quiz", quiz_questions: quizQuestions }) as never,
+      { params: Promise.resolve({ id: "1" }) }
+    );
+
+    expect(res.status).toBe(200);
+    expect(updateContent).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ quizQuestions: expect.any(Array) })
+    );
+  });
+
+  it("作成処理が失敗した場合（設問の保存失敗を含む）は500", async () => {
+    vi.mocked(createContent).mockResolvedValue({ data: null, error: { message: "x" } as never });
+
+    const res = await POST(
+      request({
+        title: "クイズ",
+        week_id: 1,
+        content_type: "quiz",
+        insert_after_id: null,
+        quiz_questions: quizQuestions,
+      }) as never
+    );
+
+    expect(res.status).toBe(500);
   });
 });

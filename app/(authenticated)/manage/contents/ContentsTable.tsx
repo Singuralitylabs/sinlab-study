@@ -5,6 +5,7 @@ import {
   Eye,
   EyeOff,
   FileText,
+  ListChecks,
   Loader2,
   PenLine,
   Play,
@@ -52,6 +53,8 @@ function getContentIcon(type: ContentType) {
       return <PenLine className="h-3 w-3" />;
     case "slide":
       return <Presentation className="h-3 w-3" />;
+    case "quiz":
+      return <ListChecks className="h-3 w-3" />;
     default:
       return <FileText className="h-3 w-3" />;
   }

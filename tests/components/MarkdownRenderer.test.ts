@@ -71,6 +71,23 @@ describe("MarkdownRenderer", () => {
     expect(html).toContain('<code class="language-ruby">puts &quot;hi&quot;\n</code>');
   });
 
+  it.each([
+    ["sql", "SELECT id FROM users;"],
+    ["bash", "echo $HOME"],
+    ["markdown", "# 見出し"],
+    ["python", "def main():\n    pass"],
+    ["json", '{"a": 1}'],
+    ["jsx", "const a = <div />;"],
+    ["tsx", "const a: number = 1;"],
+  ])("演習の提出言語 %s のコードフェンスがハイライトされる", (language, code) => {
+    const content = `\`\`\`${language}\n${code}\n\`\`\``;
+
+    const html = renderToStaticMarkup(createElement(MarkdownRenderer, { content }));
+
+    expect(html).toContain(`class="hljs language-${language}"`);
+    expect(html).toMatch(/hljs-[a-z]/);
+  });
+
   it("xmlはhtmlの別名としてハイライトされる", () => {
     const content = '```xml\n<a href="x">y</a>\n```';
 

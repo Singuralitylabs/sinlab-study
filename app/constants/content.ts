@@ -1,7 +1,7 @@
 import type { ContentType, SubmissionType } from "@/app/types";
 
 /** Single source for allowed content types; validation, labels and options derive from it. */
-export const CONTENT_TYPES: readonly ContentType[] = ["video", "text", "exercise", "slide"];
+export const CONTENT_TYPES: readonly ContentType[] = ["video", "text", "exercise", "slide", "quiz"];
 
 /** Single source for allowed submission types; validation derives from it. */
 export const SUBMISSION_TYPES: readonly SubmissionType[] = ["code", "url"];
@@ -18,6 +18,7 @@ export const CONTENT_TYPE_LABELS: Record<ContentType, string> = {
   text: "テキスト",
   exercise: "演習",
   slide: "スライド",
+  quiz: "クイズ",
 };
 
 /** Max IDs per bulk API request; client-side chunked sending uses the same value. */

@@ -1,6 +1,15 @@
 "use client";
 
-import { CheckCircle, Clock, FileText, Lock, PenLine, Play, Presentation } from "lucide-react";
+import {
+  CheckCircle,
+  Clock,
+  FileText,
+  ListChecks,
+  Lock,
+  PenLine,
+  Play,
+  Presentation,
+} from "lucide-react";
 import Link from "next/link";
 import type { LearningContentListItem } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +32,8 @@ function getContentIcon(type: string) {
       return <PenLine className="h-4 w-4" />;
     case "slide":
       return <Presentation className="h-4 w-4" />;
+    case "quiz":
+      return <ListChecks className="h-4 w-4" />;
     default:
       return <FileText className="h-4 w-4" />;
   }
@@ -38,6 +49,8 @@ function getContentTypeLabel(type: string) {
       return "演習";
     case "slide":
       return "スライド";
+    case "quiz":
+      return "クイズ";
     default:
       return type;
   }

@@ -42,6 +42,7 @@ export async function POST(request: NextRequest) {
       insert_after_id,
       is_published,
       is_open_to_trial,
+      quiz_questions,
     } = validation.data;
 
     const { data, error } = await createContent({
@@ -60,6 +61,7 @@ export async function POST(request: NextRequest) {
       insertAfterId: insert_after_id,
       is_published,
       is_open_to_trial,
+      quizQuestions: quiz_questions,
     });
 
     if (error) {

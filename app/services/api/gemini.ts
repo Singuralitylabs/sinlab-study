@@ -75,7 +75,7 @@ function buildCodeSection(files: CodeFile[]): string {
       content.length > GEMINI_MAX_CODE_LENGTH
         ? `${content.substring(0, GEMINI_MAX_CODE_LENGTH)}\n\n... (${content.length - GEMINI_MAX_CODE_LENGTH}文字省略)`
         : content;
-    return `\`\`\`\n${truncated}\n\`\`\``;
+    return `\`\`\`${files[0].language}\n${truncated}\n\`\`\``;
   }
 
   return files

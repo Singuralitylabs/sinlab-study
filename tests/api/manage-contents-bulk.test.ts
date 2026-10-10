@@ -159,7 +159,7 @@ describe("PATCH /api/manage/contents/bulk - バリデーション", () => {
   });
 
   it("set_typeでcontentTypeが不正な値の場合は400", async () => {
-    const res = await PATCH(request({ ids: [1], action: "set_type", contentType: "quiz" }));
+    const res = await PATCH(request({ ids: [1], action: "set_type", contentType: "poll" }));
 
     expect(res.status).toBe(400);
     expect(bulkUpdateContents).not.toHaveBeenCalled();

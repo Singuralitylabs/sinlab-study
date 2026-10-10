@@ -1,4 +1,14 @@
-import { Bot, Calendar, CheckCircle, Clock, FileText, Lock, PenLine, Play } from "lucide-react";
+import {
+  Bot,
+  Calendar,
+  CheckCircle,
+  Clock,
+  FileText,
+  ListChecks,
+  Lock,
+  PenLine,
+  Play,
+} from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
@@ -35,6 +45,8 @@ function getContentIcon(type: ContentType) {
       return <FileText className="h-4 w-4" />;
     case "exercise":
       return <PenLine className="h-4 w-4" />;
+    case "quiz":
+      return <ListChecks className="h-4 w-4" />;
     default:
       return <FileText className="h-4 w-4" />;
   }
@@ -48,6 +60,8 @@ function getContentTypeLabel(type: ContentType) {
       return "テキスト";
     case "exercise":
       return "演習";
+    case "quiz":
+      return "クイズ";
     default:
       return type;
   }

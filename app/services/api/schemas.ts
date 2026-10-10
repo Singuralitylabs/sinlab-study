@@ -39,6 +39,7 @@ import {
   type EmailTemplateKey,
   validateEmailTemplateText,
 } from "@/app/lib/email-template";
+import { QUIZ_TEXT_ANSWER_MAX_LENGTH, QuizQuestionsSchema } from "@/app/lib/quiz";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
 
 export const PositiveIntSchema = z
@@ -291,11 +292,55 @@ const ContentBaseSchema = z.object({
   pdf_url: SlidePdfUrlSchema,
   is_published: OptionalBoolean,
   is_open_to_trial: OptionalBoolean,
+  // Only read when content_type is "quiz"; saved to quiz_questions, not learning_contents.
+  quiz_questions: QuizQuestionsSchema.optional(),
 });
-export const ContentCreateSchema = ContentBaseSchema.extend({
+
+// A quiz without questions would show learners an empty quiz, so content_type "quiz" in the body
+// requires the questions. A PUT that omits content_type (partial update) leaves them untouched.
+function requireQuizQuestions(
+  value: { content_type?: string; quiz_questions?: unknown },
+  ctx: z.RefinementCtx
+) {
+  if (value.content_type === "quiz" && value.quiz_questions === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "クイズには設問を登録してください",
+      path: ["quiz_questions"],
+    });
+  }
+}
+
+const ContentCreateObjectSchema = ContentBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
-export const ContentUpdateSchema = ContentCreateSchema.partial();
+export const ContentCreateSchema = ContentCreateObjectSchema.superRefine(requireQuizQuestions);
+export const ContentUpdateSchema =
+  ContentCreateObjectSchema.partial().superRefine(requireQuizQuestions);
+
+/**
+ * POST /api/quiz/grade. Whether every question is answered is checked by grade_quiz_answers()
+ * (the API cannot read the questions), so here only the shape is validated.
+ */
+export const QuizGradeRequestSchema = z.object({
+  contentId: ContentIdSchema,
+  answers: z
+    .array(
+      z.object({
+        questionId: PositiveIntSchema,
+        choices: z.array(z.number().int().min(0)).max(20).optional(),
+        text: z
+          .string()
+          .max(QUIZ_TEXT_ANSWER_MAX_LENGTH, {
+            message: `回答は${QUIZ_TEXT_ANSWER_MAX_LENGTH}文字以内で入力してください`,
+          })
+          .optional(),
+      }),
+      { message: "answersは配列で指定してください" }
+    )
+    .min(1, { message: "回答を入力してください" })
+    .max(20),
+});
 
 const BULK_CONTENT_IDS_MESSAGE = `idsは1〜${MAX_BULK_CONTENT_IDS}件の正の整数で指定してください`;
 
