@@ -393,10 +393,6 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
         },
       ],
     },
-    {
-      reason: "セッションにcustomer/subscription情報がありません",
-      sessions: [{ ...paidSession, subscription: null }],
-    },
   ])(
     "再試行しても結果が変わらない状態（$reason）は反映せず409を返し、運用者へ通知する",
     async ({ reason, sessions }) => {

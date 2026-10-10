@@ -59,18 +59,16 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
               `Checkout Sessionを昇格できないため受領のみ行いました（要確認）: id=${session.id} ${reason}`
             );
             // Our own session may be paid while the user stays on trial, and the kept claim means
-            // no redelivery will raise it again. A foreign one is another team's sale.
-            if (rejection !== "foreign") {
-              try {
-                await sendSlackCheckoutRecoveryNotification({
-                  userId: extractUserId(session.client_reference_id, session.metadata),
-                  reason,
-                  sessionIds: [session.id],
-                });
-              } catch (notifyError) {
-                // A 500 here would release the claim and redeliver an answer that never changes.
-                console.error("Checkout昇格不可のSlack通知エラー:", notifyError);
-              }
+            // no redelivery will raise it again. "foreign" never gets here: planEvent() skips it.
+            try {
+              await sendSlackCheckoutRecoveryNotification({
+                userId: extractUserId(session.client_reference_id, session.metadata),
+                reason,
+                sessionIds: [session.id],
+              });
+            } catch (notifyError) {
+              // A 500 here would release the claim and redeliver an answer that never changes.
+              console.error("Checkout昇格不可のSlack通知エラー:", notifyError);
             }
           }
           return null;

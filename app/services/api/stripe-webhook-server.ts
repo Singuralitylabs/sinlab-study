@@ -67,8 +67,12 @@ export function extractUserId(
  * 2.11 for why that is safe across webhook API versions.
  */
 export function isForeignCheckoutSession(session: Stripe.Checkout.Session): boolean {
+  // A missing mode is not taken as foreign: if some webhook API version left it out, every session
+  // of ours would be skipped and promotion would stop. The owner check still rejects foreign ones.
   return (
-    session.payment_link != null || !session.metadata?.auth_id || session.mode !== "subscription"
+    session.payment_link != null ||
+    !session.metadata?.auth_id ||
+    (session.mode != null && session.mode !== "subscription")
   );
 }
 
@@ -605,14 +609,20 @@ export async function syncSubscriptionStatus(
   const subscription = await stripe.subscriptions.retrieve(subscriptionFromEvent.id);
   const mirrorFields = subscriptionMirrorFields(subscription);
 
-  const { error: updateError } = await supabase
+  const { data: updated, error: updateError } = await supabase
     .from("stripe_subscriptions")
     .update(mirrorFields)
-    .eq("stripe_subscription_id", subscription.id);
+    .eq("stripe_subscription_id", subscription.id)
+    .select("id");
 
   if (updateError) {
     console.error("stripe_subscriptions更新エラー:", updateError.message);
     return { error: updateError.message };
+  }
+  // userId was looked up before the claim. A new Checkout may have replaced this subscription on
+  // the row since then; demoting or mailing userId would then hit a member paying for the new one.
+  if ((updated?.length ?? 0) === 0) {
+    return { error: null };
   }
 
   if (TERMINAL_SUBSCRIPTION_STATUSES.includes(subscription.status)) {

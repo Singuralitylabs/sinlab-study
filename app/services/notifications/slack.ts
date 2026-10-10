@@ -193,7 +193,7 @@ type CheckoutRecoveryNotificationParams = {
 
 /**
  * Notice for a Checkout of this app that cannot be reflected automatically: the Checkout API's
- * self-recovery gave up (#250; the user keeps getting 409), or the webhook permanently refused a
+ * self-recovery gave up (the user keeps getting 409), or the webhook permanently refused a
  * completed session (the user may have paid yet stays on trial). Either needs manual handling, so
  * tell operators, not just the log.
  */

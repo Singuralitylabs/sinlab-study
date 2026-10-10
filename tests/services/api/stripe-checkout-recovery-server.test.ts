@@ -68,6 +68,7 @@ describe("recoverCompletedCheckout", () => {
   it.each([
     ["foreign", "このアプリで作成したCheckoutセッションではありません"],
     ["owner_mismatch", "Checkoutセッションのユーザーが一致しません"],
+    ["missing_stripe_ids", "Checkoutセッションにcustomer/subscription情報がありません"],
   ] as const)(
     "昇格処理が恒久的に拒否した（%s）場合は処理権を保持する一時エラーにせず unrecoverable とし、運用者へ通知する",
     async (rejection, reason) => {
@@ -146,11 +147,8 @@ describe("recoverCompletedCheckout", () => {
   ])("重複の判定に失敗した場合（%s）は、取りこぼさないよう通知する", async (_label, impl) => {
     vi.mocked(claimEvent).mockImplementation(impl as never);
 
-    const result = await recoverCompletedCheckout(
-      5,
-      [{ ...(paidSession as object), subscription: null } as never],
-      heldClaimedAt
-    );
+    // User mismatch: rejected before the reflection, so only the notice path runs.
+    const result = await recoverCompletedCheckout(6, [paidSession], heldClaimedAt);
 
     expect(result).toEqual({ kind: "unrecoverable" });
     expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledTimes(1);

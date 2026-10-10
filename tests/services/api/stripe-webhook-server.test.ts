@@ -34,6 +34,9 @@ import {
 
 const dbError = { message: "db error", code: "PGRST001" };
 
+/** syncSubscriptionStatus() acts only when its mirror UPDATE matched the subscription's row. */
+const MIRROR_UPDATED = { data: [{ id: 1 }], error: null };
+
 type MockClientOptions = NonNullable<Parameters<typeof createMockSupabaseClient>[0]>;
 type TableResult = NonNullable<MockClientOptions["tableResults"]>[string];
 
@@ -105,6 +108,13 @@ describe("isForeignCheckoutSession", () => {
     ["mode が payment", { ...own, mode: "payment" }],
   ])("%s は他用途のセッション", (_label, session) => {
     expect(isForeignCheckoutSession(session as never)).toBe(true);
+  });
+
+  it.each([
+    ["mode 欠落", { ...own, mode: undefined }],
+    ["mode が null", { ...own, mode: null }],
+  ])("%s は他用途とみなさない（本文に無い版でも自アプリの昇格を止めない）", (_label, session) => {
+    expect(isForeignCheckoutSession(session as never)).toBe(false);
   });
 });
 
@@ -828,7 +838,7 @@ describe("syncSubscriptionStatus", () => {
     mockGetStripeClient("canceled");
     const mockClient = createMockSupabaseClient({
       tableResults: {
-        stripe_subscriptions: { data: null, error: null },
+        stripe_subscriptions: MIRROR_UPDATED,
         users: { data: null, error: null },
       },
     });
@@ -848,7 +858,7 @@ describe("syncSubscriptionStatus", () => {
     mockGetStripeClient("canceled");
     const mockClient = createMockSupabaseClient({
       tableResults: {
-        stripe_subscriptions: { data: null, error: null },
+        stripe_subscriptions: MIRROR_UPDATED,
         users: { data: null, error: null },
       },
     });
@@ -858,7 +868,7 @@ describe("syncSubscriptionStatus", () => {
 
     expect(result.error).toBeNull();
     const mirrorBuilder = mockClient.from.mock.results[0].value;
-    expect(mirrorBuilder.select).not.toHaveBeenCalled();
+    expect(mirrorBuilder.select.mock.calls).toEqual([["id"]]);
     expect(mirrorBuilder.update).toHaveBeenCalled();
     const userBuilder = mockClient.from.mock.results[1].value;
     expect(userBuilder.eq).toHaveBeenNthCalledWith(1, "id", 7);
@@ -870,7 +880,7 @@ describe("syncSubscriptionStatus", () => {
       mockGetStripeClient(status);
       const mockClient = createMockSupabaseClient({
         tableResults: {
-          stripe_subscriptions: { data: null, error: null },
+          stripe_subscriptions: MIRROR_UPDATED,
           users: { data: null, error: null },
         },
       });
@@ -902,7 +912,7 @@ describe("syncSubscriptionStatus", () => {
       } as never);
       const mockClient = createMockSupabaseClient({
         tableResults: {
-          stripe_subscriptions: { data: null, error: null },
+          stripe_subscriptions: MIRROR_UPDATED,
         },
       });
       vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
@@ -915,11 +925,33 @@ describe("syncSubscriptionStatus", () => {
     }
   );
 
+  it("ミラー行の契約が別の契約に置き換わっていた（更新0行）場合は、降格もメールもしない", async () => {
+    // A new Checkout may replace the row's subscription after the owner was looked up; demoting
+    // that owner would hit a member paying for the new subscription.
+    mockGetStripeClient("canceled");
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        stripe_subscriptions: { data: [], error: null },
+        users: { data: [{ id: 7 }], error: null },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await syncSubscriptionStatus(makeSubscription("canceled") as never, 7);
+
+    expect(result.error).toBeNull();
+    expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith("id");
+    const usersCalls = mockClient.from.mock.calls.filter(([table]) => table === "users");
+    expect(usersCalls).toHaveLength(0);
+    expect(scheduleSubscriptionEndedEmail).not.toHaveBeenCalled();
+    expect(scheduleCancelScheduledEmail).not.toHaveBeenCalled();
+  });
+
   it("past_dueの場合はミラー更新のみで降格しない", async () => {
     mockGetStripeClient("past_due");
     const mockClient = createMockSupabaseClient({
       tableResults: {
-        stripe_subscriptions: { data: null, error: null },
+        stripe_subscriptions: MIRROR_UPDATED,
       },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
@@ -935,7 +967,7 @@ describe("syncSubscriptionStatus", () => {
     mockGetStripeClient("canceled");
     const mockClient = createMockSupabaseClient({
       tableResults: {
-        stripe_subscriptions: { data: null, error: null },
+        stripe_subscriptions: MIRROR_UPDATED,
         users: { data: null, error: null },
       },
     });
@@ -1335,9 +1367,7 @@ describe("トランザクションメールのフック", () => {
   });
 
   describe("cancel_scheduled（syncSubscriptionStatus）", () => {
-    const setup = (
-      writeResult: { data: unknown; error: unknown } = { data: null, error: null }
-    ) => {
+    const setup = (writeResult: { data: unknown; error: unknown } = MIRROR_UPDATED) => {
       const mockClient = createMockSupabaseClient({
         tableResults: {
           stripe_subscriptions: writeResult,
@@ -1355,7 +1385,7 @@ describe("トランザクションメールのフック", () => {
 
       expect(result.error).toBeNull();
       // Judged from the live state only; the mirror row's values aren't consulted.
-      expect(mockClient.from.mock.results[0].value.select).not.toHaveBeenCalled();
+      expect(mockClient.from.mock.results[0].value.select.mock.calls).toEqual([["id"]]);
       expect(scheduleCancelScheduledEmail).toHaveBeenCalledWith({
         userId: 7,
         subscriptionId: "sub_123",
@@ -1381,7 +1411,7 @@ describe("トランザクションメールのフック", () => {
     it("他の経路（successページ再訪・再昇格）が先にミラーへ解約予約を書いていても予約する（重複は送信ログで抑止）", async () => {
       const mockClient = createMockSupabaseClient({
         tableResults: {
-          stripe_subscriptions: { data: null, error: null },
+          stripe_subscriptions: MIRROR_UPDATED,
         },
       });
       vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
@@ -1422,7 +1452,7 @@ describe("トランザクションメールのフック", () => {
     const setup = (usersResult: { data: unknown; error: unknown }) => {
       const mockClient = createMockSupabaseClient({
         tableResults: {
-          stripe_subscriptions: { data: null, error: null },
+          stripe_subscriptions: MIRROR_UPDATED,
           users: usersResult,
         },
       });

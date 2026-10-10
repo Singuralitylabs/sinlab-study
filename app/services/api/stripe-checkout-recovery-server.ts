@@ -46,8 +46,7 @@ export type CheckoutRecovery =
  *   subscription remains (double subscription)
  * - session user does not match the caller: it would write someone else's subscription
  * - activateUserFromCheckoutSession() rejected the session (CheckoutSessionRejection: not this
- *   app's, or its auth_id does not match the user)
- * - session has no customer / subscription: reflection always fails
+ *   app's, no customer / subscription, or its auth_id does not match the user)
  * - Stripe returned a permanent error (4xx such as subscription missing)
  * @param heldClaimedAt claim time used for the decision, so this reflection cannot release a
  *   claim re-acquired by a concurrent request (see activateUserFromCheckoutSession()).
@@ -74,9 +73,6 @@ export async function recoverCompletedCheckout(
   // Customers are unique per user, so normally these match.
   if (extractUserId(session.client_reference_id, session.metadata) !== userId) {
     return await unrecoverable("セッションのユーザーが一致しません");
-  }
-  if (!session.customer || !session.subscription) {
-    return await unrecoverable("セッションにcustomer/subscription情報がありません");
   }
 
   try {
