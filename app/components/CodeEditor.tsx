@@ -3,6 +3,12 @@
 import { css } from "@codemirror/lang-css";
 import { html } from "@codemirror/lang-html";
 import { javascript } from "@codemirror/lang-javascript";
+import { json } from "@codemirror/lang-json";
+import { markdown } from "@codemirror/lang-markdown";
+import { python } from "@codemirror/lang-python";
+import { PostgreSQL, sql } from "@codemirror/lang-sql";
+import { StreamLanguage } from "@codemirror/language";
+import { shell } from "@codemirror/legacy-modes/mode/shell";
 import CodeMirror from "@uiw/react-codemirror";
 import { useSyncExternalStore } from "react";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
@@ -13,6 +19,8 @@ export interface CodeEditorProps {
   language: CodeLanguage;
   placeholder?: string;
 }
+
+const shellLanguage = StreamLanguage.define(shell);
 
 function getExtensions(language: CodeLanguage) {
   switch (language) {
@@ -26,6 +34,17 @@ function getExtensions(language: CodeLanguage) {
       return [html()];
     case "css":
       return [css()];
+    // The course's SQL lessons target Supabase, so use the PostgreSQL dialect.
+    case "sql":
+      return [sql({ dialect: PostgreSQL })];
+    case "bash":
+      return [shellLanguage];
+    case "markdown":
+      return [markdown()];
+    case "python":
+      return [python()];
+    case "json":
+      return [json()];
   }
 }
 

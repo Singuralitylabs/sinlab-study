@@ -1,7 +1,7 @@
 import type { ContentType, SubmissionType } from "@/app/types";
 
 /** Single source for allowed content types; validation, labels and options derive from it. */
-export const CONTENT_TYPES: readonly ContentType[] = ["video", "text", "exercise", "slide"];
+export const CONTENT_TYPES: readonly ContentType[] = ["video", "text", "exercise", "slide", "quiz"];
 
 /** Single source for allowed submission types; validation derives from it. */
 export const SUBMISSION_TYPES: readonly SubmissionType[] = ["code", "url"];
@@ -13,12 +13,34 @@ export const SUBMISSION_TYPES: readonly SubmissionType[] = ["code", "url"];
 export type AllowedSubmissionType = "code" | "url" | "both";
 export const ALLOWED_SUBMISSION_TYPES: readonly AllowedSubmissionType[] = ["code", "url", "both"];
 
+/**
+ * Types the bulk set_type action may assign. A quiz needs its questions, which only the
+ * create/edit form and the bulk create API send, so it is excluded.
+ */
+export const BULK_SETTABLE_CONTENT_TYPES: readonly ContentType[] = CONTENT_TYPES.filter(
+  (type) => type !== "quiz"
+);
+
 export const CONTENT_TYPE_LABELS: Record<ContentType, string> = {
   video: "動画",
   text: "テキスト",
   exercise: "演習",
   slide: "スライド",
+  quiz: "クイズ",
 };
+
+/** Labels for the admin type pickers, which name the slide format explicitly. */
+export const CONTENT_TYPE_FORM_LABELS: Record<ContentType, string> = {
+  ...CONTENT_TYPE_LABELS,
+  slide: "スライド（PDF）",
+};
+
+export const CONTENT_TYPE_FORM_OPTIONS: { value: ContentType; label: string }[] = CONTENT_TYPES.map(
+  (value) => ({ value, label: CONTENT_TYPE_FORM_LABELS[value] })
+);
+
+/** Max contents per bulk create request (POST /api/manage/contents/bulk). */
+export const MAX_BULK_CREATE_CONTENTS = 50;
 
 /** Max IDs per bulk API request; client-side chunked sending uses the same value. */
 export const MAX_BULK_CONTENT_IDS = 100;

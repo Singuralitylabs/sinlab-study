@@ -4,7 +4,9 @@ import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
 import javascript from "highlight.js/lib/languages/javascript";
 import json from "highlight.js/lib/languages/json";
+import markdown from "highlight.js/lib/languages/markdown";
 import python from "highlight.js/lib/languages/python";
+import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
 import html from "highlight.js/lib/languages/xml";
 import { createLowlight } from "lowlight";
@@ -23,7 +25,17 @@ import { cn } from "@/lib/utils";
 // always imports lowlight's common set (37 languages), so the languages option wouldn't shrink the
 // bundle; use lowlight directly with a minimal own rehype plugin so only registered languages are
 // bundled. GAS (Google Apps Script) is JavaScript-based, so alias it to javascript.
-const lowlight = createLowlight({ html, css, javascript, typescript, python, json, bash });
+const lowlight = createLowlight({
+  html,
+  css,
+  javascript,
+  typescript,
+  python,
+  json,
+  bash,
+  sql,
+  markdown,
+});
 lowlight.registerAlias({
   html: ["xml"],
   javascript: ["js", "gas"],

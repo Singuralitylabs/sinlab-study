@@ -54,6 +54,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 - **`status=active` と `membership_type` の整合性はDBでは保証されない。** `approveUser()` / `rejectUser()` を迂回して `status` を書き換えない。
 - **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select し、0行なら404。権限チェック済みの管理者向けクエリ等は対象外。admin / maintainer 向け未公開プレビュー（2.12節）はこの2箇所を増やさず、通常クライアント（RLS適用）で取得する。定期メールの抽出（`email-digest-server.ts`）も service_role の別経路で、同じ絞り込みと本文を含まないカラムだけを守る（お知らせ一斉送信の `announcements.body` 読取は例外）。未認証の `/demo`（`demo-learning-server.ts`）は service_role 専用の別経路で、スライドの署名付きURLは **`is_published = true AND is_open_to_trial = true` に限って**発行する。
 - **`learning-server.ts` の取得関数は `userRole` を受け取り、admin / maintainer のみ `is_published` 絞り込みを外す**（2.12節）。member / お試しでは常に維持する。
+- **クイズの正解は `quiz_questions` にだけ置き、受講者・service_role・`/demo` から読まない**（`docs/database.md` 6.16）。
 - **提出API・進捗APIの可視性チェックは通常クライアントの SELECT で行う。** `contentId` を `is_published = true` 付きで SELECT し0行なら403。ステータス分岐はRLSが担う（2.12節）。
 
 ### Stripeサブスク決済（月額課金）

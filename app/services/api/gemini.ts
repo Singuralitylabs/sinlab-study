@@ -1,4 +1,5 @@
 import { ApiError, GoogleGenAI } from "@google/genai";
+import { CODE_LANGUAGES, type CodeLanguage } from "@/app/components/code-editor-utils";
 import {
   GEMINI_API_KEY_ENV,
   GEMINI_API_KEY_TRIAL_ENV,
@@ -75,7 +76,12 @@ function buildCodeSection(files: CodeFile[]): string {
       content.length > GEMINI_MAX_CODE_LENGTH
         ? `${content.substring(0, GEMINI_MAX_CODE_LENGTH)}\n\n... (${content.length - GEMINI_MAX_CODE_LENGTH}文字省略)`
         : content;
-    return `\`\`\`\n${truncated}\n\`\`\``;
+    // language comes from the submission body unchecked; anything outside the known list could
+    // carry spaces, newlines or backticks and break the fence, so it is dropped.
+    const fenceLanguage = CODE_LANGUAGES.includes(files[0].language as CodeLanguage)
+      ? files[0].language
+      : "";
+    return `\`\`\`${fenceLanguage}\n${truncated}\n\`\`\``;
   }
 
   return files

@@ -138,6 +138,14 @@ export default async function DemoContentPage({ params }: PageProps) {
               </p>
             ))}
 
+          {/* The demo reads via service_role, which must never reach quiz_questions (it holds the
+              answers); questions are served only to logged-in users through get_quiz_questions. */}
+          {content.content_type === "quiz" && (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              クイズはログイン後に解答できます。
+            </p>
+          )}
+
           {content.content_type === "exercise" && content.exercise_instructions && (
             <div>
               <MarkdownRenderer content={content.exercise_instructions} />

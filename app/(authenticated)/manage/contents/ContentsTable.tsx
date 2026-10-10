@@ -1,22 +1,16 @@
 "use client";
 
-import {
-  Edit,
-  Eye,
-  EyeOff,
-  FileText,
-  Loader2,
-  PenLine,
-  Play,
-  Presentation,
-  Sparkles,
-  Trash2,
-} from "lucide-react";
+import { Edit, Eye, EyeOff, Loader2, Sparkles, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { ContentTypeIcon } from "@/app/components/ContentTypeIcon";
 import type { BulkContentAction } from "@/app/constants/content";
-import { CONTENT_TYPE_LABELS, CONTENT_TYPES, MAX_BULK_CONTENT_IDS } from "@/app/constants/content";
+import {
+  BULK_SETTABLE_CONTENT_TYPES,
+  CONTENT_TYPE_LABELS,
+  MAX_BULK_CONTENT_IDS,
+} from "@/app/constants/content";
 import type { ContentTableGroup, ContentTableRow } from "@/app/lib/content-grouping";
 import { getSlideStorageWarning } from "@/app/lib/slide-storage-warning";
 import type { ContentType } from "@/app/types";
@@ -41,21 +35,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-
-function getContentIcon(type: ContentType) {
-  switch (type) {
-    case "video":
-      return <Play className="h-3 w-3" />;
-    case "text":
-      return <FileText className="h-3 w-3" />;
-    case "exercise":
-      return <PenLine className="h-3 w-3" />;
-    case "slide":
-      return <Presentation className="h-3 w-3" />;
-    default:
-      return <FileText className="h-3 w-3" />;
-  }
-}
 
 interface ContentsTableProps {
   groups: ContentTableGroup[];
@@ -335,7 +314,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
                       </TableCell>
                       <TableCell>
                         <Badge variant="secondary" className="gap-1">
-                          {getContentIcon(content.content_type)}
+                          <ContentTypeIcon type={content.content_type} className="h-3 w-3" />
                           {CONTENT_TYPE_LABELS[content.content_type]}
                         </Badge>
                       </TableCell>
@@ -448,7 +427,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
             onChange={(e) => setNewContentType(e.target.value as ContentType)}
             className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
           >
-            {CONTENT_TYPES.map((type) => (
+            {BULK_SETTABLE_CONTENT_TYPES.map((type) => (
               <option key={type} value={type}>
                 {CONTENT_TYPE_LABELS[type]}
               </option>

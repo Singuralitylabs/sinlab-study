@@ -48,6 +48,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       insert_after_id,
       is_published,
       is_open_to_trial,
+      quiz_questions,
     } = validation.data;
 
     const { error, storageRemoved } = await updateContent(contentId, {
@@ -66,6 +67,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       insertAfterId: insert_after_id,
       is_published,
       is_open_to_trial,
+      quizQuestions: quiz_questions,
     });
 
     if (error) {

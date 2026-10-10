@@ -94,7 +94,13 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      reviewSubmission = { type: "code", files };
+      // A single-file submission is stored in code_content, which has no language; fall back to
+      // the exercise's language so the model knows how to read e.g. SQL or Bash.
+      const reviewFiles =
+        files.length === 1 && !files[0].language && content.code_language
+          ? [{ ...files[0], language: content.code_language }]
+          : files;
+      reviewSubmission = { type: "code", files: reviewFiles };
     } else {
       if (!submission.url) {
         return NextResponse.json({ error: "提出内容が空です" }, { status: 400 });

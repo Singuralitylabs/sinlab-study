@@ -6,6 +6,7 @@ import {
   fetchAllWeeks,
   fetchContentByIdForAdmin,
   fetchContentSiblingCandidates,
+  fetchQuizQuestionsForAdmin,
 } from "@/app/services/api/admin-server";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ContentForm } from "../../ContentForm";
@@ -33,6 +34,13 @@ export default async function EditContentPage({ params }: PageProps) {
     notFound();
   }
 
+  // Stored questions are loaded for every type: a quiz switched to another type keeps its rows,
+  // and switching it back in this form must start from them, or saving would overwrite them with
+  // an empty question. Only a quiz is blocked on a failed fetch, so other types stay editable.
+  const quizFetch = await fetchQuizQuestionsForAdmin(contentId);
+  const quizError = content.content_type === "quiz" ? quizFetch.error : null;
+  const quizQuestions = quizFetch.data ?? [];
+
   const sortedWeeks = weeks ? sortWeeksByHierarchy(weeks) : [];
   const filterOptions = deriveWeekSelectOptions(sortedWeeks);
 
@@ -40,7 +48,9 @@ export default async function EditContentPage({ params }: PageProps) {
   // the current position unknown and default the insert picker to the head. If the DB recovers by
   // PUT time (renumbering inside updateContent), all existing contents would be renumbered backward
   // unintentionally, so don't show the form on failure (same policy as new/page.tsx).
-  if (contentsError || !contents) {
+  // A failed question fetch would open the editor empty, and saving would wipe the stored
+  // questions (the save replaces them all), so don't show the form.
+  if (contentsError || !contents || quizError) {
     return (
       <div className="max-w-3xl mx-auto">
         <PageTitle
@@ -52,7 +62,9 @@ export default async function EditContentPage({ params }: PageProps) {
         />
         <Alert variant="destructive">
           <AlertDescription>
-            既存コンテンツの一覧取得に失敗しました。時間をおいて再度お試しください。
+            {quizError
+              ? "クイズの設問の取得に失敗しました。時間をおいて再度お試しください。"
+              : "既存コンテンツの一覧取得に失敗しました。時間をおいて再度お試しください。"}
           </AlertDescription>
         </Alert>
       </div>
@@ -83,6 +95,7 @@ export default async function EditContentPage({ params }: PageProps) {
         phases={filterOptions.phases}
         weeks={filterOptions.weeks}
         initialData={content}
+        initialQuizQuestions={quizQuestions}
         siblingCandidates={siblingCandidates}
         mode="edit"
       />

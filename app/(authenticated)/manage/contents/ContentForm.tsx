@@ -3,13 +3,15 @@
 import { Loader2, Save, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import type { CodeLanguage } from "@/app/components/code-editor-utils";
+import { CODE_LANGUAGE_OPTIONS, type CodeLanguage } from "@/app/components/code-editor-utils";
+import { CONTENT_TYPE_FORM_OPTIONS } from "@/app/constants/content";
 import { SLIDE_NUMBER_MAX } from "@/app/constants/slides";
 import type {
   PhaseFilterOption,
   ThemeFilterOption,
   WeekFilterOption,
 } from "@/app/lib/content-filtering";
+import { type QuizQuestionData, QuizQuestionsSchema } from "@/app/lib/quiz";
 import { parseSlideObjectKey, toSlideObjectKey } from "@/app/lib/slide-object-key";
 import { getSlideStorageWarning } from "@/app/lib/slide-storage-warning";
 import type { ContentType, LearningContent } from "@/app/types";
@@ -25,6 +27,13 @@ import {
   type SiblingCandidate,
   SiblingOrderField,
 } from "../components/SiblingOrderField";
+import {
+  createEmptyQuizQuestion,
+  type QuizQuestionDraft,
+  QuizQuestionsEditor,
+  toQuizQuestionDrafts,
+  toQuizQuestionPayload,
+} from "./QuizQuestionsEditor";
 
 const SELECT_CLASS_NAME =
   "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs";
@@ -40,6 +49,8 @@ interface ContentFormProps {
   phases: PhaseFilterOption[];
   weeks: WeekFilterOption[];
   initialData?: LearningContent;
+  /** Stored questions (with answers) for a quiz in edit mode. */
+  initialQuizQuestions?: QuizQuestionData[];
   initialWeekSelection?: InitialWeekSelection;
   /**
    * Includes the target itself in edit mode so its current position can be found; filtered out in
@@ -92,22 +103,7 @@ function buildWeekOptionLabel(
   return prefix ? `${prefix} / ${week.name}` : week.name;
 }
 
-const CONTENT_TYPE_OPTIONS: { value: ContentType; label: string }[] = [
-  { value: "video", label: "動画" },
-  { value: "text", label: "テキスト" },
-  { value: "slide", label: "スライド（PDF）" },
-  { value: "exercise", label: "演習" },
-];
-
 type AllowedSubmissionTypes = "code" | "url" | "both";
-
-const CODE_LANGUAGE_OPTIONS: { value: CodeLanguage; label: string }[] = [
-  { value: "javascript", label: "JavaScript" },
-  { value: "typescript", label: "TypeScript" },
-  { value: "gas", label: "GAS" },
-  { value: "html", label: "HTML" },
-  { value: "css", label: "CSS" },
-];
 
 const SUBMISSION_TYPE_OPTIONS: {
   value: AllowedSubmissionTypes;
@@ -128,6 +124,7 @@ export function ContentForm({
   phases,
   weeks,
   initialData,
+  initialQuizQuestions = [],
   initialWeekSelection,
   siblingCandidates = [],
   mode,
@@ -206,6 +203,11 @@ export function ContentForm({
   const [pdfFolder, setPdfFolder] = useState(initialSlide?.folder ?? "");
   const [slideNumber, setSlideNumber] = useState(
     initialSlide ? String(initialSlide.slideNumber) : ""
+  );
+  const [quizQuestions, setQuizQuestions] = useState<QuizQuestionDraft[]>(() =>
+    initialQuizQuestions.length > 0
+      ? toQuizQuestionDrafts(initialQuizQuestions)
+      : [createEmptyQuizQuestion()]
   );
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isOpenToTrial, setIsOpenToTrial] = useState(initialData?.is_open_to_trial ?? false);
@@ -332,6 +334,26 @@ export function ContentForm({
       return;
     }
 
+    // Validate with the same schema as the API so choice counts and correct answers are reported
+    // per question before sending.
+    let validatedQuizQuestions: QuizQuestionData[] | undefined;
+    if (contentType === "quiz") {
+      const parsed = QuizQuestionsSchema.safeParse(toQuizQuestionPayload(quizQuestions));
+      if (!parsed.success) {
+        const text = parsed.error.issues
+          .map((issue) => {
+            const questionIndex = issue.path[0];
+            return typeof questionIndex === "number"
+              ? `設問${questionIndex + 1}: ${issue.message}`
+              : issue.message;
+          })
+          .join(" / ");
+        setMessage({ type: "error", text });
+        return;
+      }
+      validatedQuizQuestions = parsed.data;
+    }
+
     setIsLoading(true);
     setMessage(null);
 
@@ -346,7 +368,9 @@ export function ContentForm({
       is_open_to_trial: isOpenToTrial,
       video_url: contentType === "video" ? videoUrl.trim() || null : null,
       description:
-        contentType === "video" || contentType === "slide" ? description.trim() || null : null,
+        contentType === "video" || contentType === "slide" || contentType === "quiz"
+          ? description.trim() || null
+          : null,
       text_content: contentType === "text" ? textContent.trim() || null : null,
       exercise_instructions:
         contentType === "exercise" ? exerciseInstructions.trim() || null : null,
@@ -355,6 +379,7 @@ export function ContentForm({
       allowed_submission_types: contentType === "exercise" ? allowedSubmissionTypes : "code",
       code_language: contentType === "exercise" ? codeLanguage : "javascript",
       pdf_url: contentType === "slide" ? pdfUrl.trim() || null : null,
+      quiz_questions: validatedQuizQuestions,
     };
 
     try {
@@ -470,7 +495,7 @@ export function ContentForm({
           <div className="space-y-2">
             <Label>コンテンツ種別</Label>
             <div className="flex gap-2">
-              {CONTENT_TYPE_OPTIONS.map((opt) => (
+              {CONTENT_TYPE_FORM_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
                   type="button"
@@ -493,9 +518,11 @@ export function ContentForm({
             )}
           </div>
 
-          {(contentType === "video" || contentType === "slide") && (
+          {(contentType === "video" || contentType === "slide" || contentType === "quiz") && (
             <div className="space-y-2">
-              <Label htmlFor="description">概要（Markdown・任意）</Label>
+              <Label htmlFor="description">
+                {contentType === "quiz" ? "導入文（Markdown・任意）" : "概要（Markdown・任意）"}
+              </Label>
               <Textarea
                 id="description"
                 value={description}
@@ -607,6 +634,10 @@ export function ContentForm({
               </div>
               {pdfUrl && <p className="text-xs text-muted-foreground break-all">{pdfUrl}</p>}
             </div>
+          )}
+
+          {contentType === "quiz" && (
+            <QuizQuestionsEditor questions={quizQuestions} onChange={setQuizQuestions} />
           )}
 
           {contentType === "exercise" && (
