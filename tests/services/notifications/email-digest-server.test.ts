@@ -1239,6 +1239,24 @@ describe("メール通知の管理設定（#272）", () => {
       expect(sendEmail).not.toHaveBeenCalled();
     });
 
+    it("送信曜日に無効でスキップし、週の途中で有効にした週は、警告せずに次の送信日から再開する", async () => {
+      const { db } = setup({
+        users: [userRow(1)],
+        email_settings: settingsRow({ sending_enabled: false }),
+      });
+      expect(await runDigest(MONDAY)).toMatchObject({ status: "skipped" });
+
+      db.email_settings[0].sending_enabled = true;
+      db.email_settings[0].sending_updated_at = "2026-10-06T23:00:00.000Z"; // Wed 10/7 08:00 JST
+
+      const wednesday = await runDigest(WEDNESDAY);
+      expect(wednesday).toMatchObject({ sent: 0, weeklyReservationMissing: false });
+      expect(sendEmail).not.toHaveBeenCalled();
+      expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining("完了しなかった"));
+
+      expect(await runDigest(new Date("2026-10-11T23:00:00Z"))).toMatchObject({ sent: 1 });
+    });
+
     it("スキップしてもロックを解放し、有効にした次の実行で送る", async () => {
       const { db } = setup({
         users: [userRow(1)],

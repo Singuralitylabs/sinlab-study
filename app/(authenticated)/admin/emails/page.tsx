@@ -5,6 +5,7 @@ import {
   EMAIL_LOG_STATUSES,
   fetchEmailLogs,
   fetchEmailSettingsForAdmin,
+  fetchPendingAnnouncementEmailCount,
   fetchTodayPromotionalCount,
 } from "@/app/services/api/email-settings-server";
 import { EmailLogsSection } from "./components/email-logs-section";
@@ -20,10 +21,11 @@ export default async function AdminEmailsPage({ searchParams }: PageProps) {
   const status = EMAIL_LOG_STATUSES.find((s) => s === params.status);
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
 
-  const [settings, today, logs] = await Promise.all([
+  const [settings, today, logs, pendingAnnouncements] = await Promise.all([
     fetchEmailSettingsForAdmin(),
     fetchTodayPromotionalCount(),
     fetchEmailLogs({ kind, status, page }),
+    fetchPendingAnnouncementEmailCount(),
   ]);
 
   return (
@@ -56,37 +58,39 @@ export default async function AdminEmailsPage({ searchParams }: PageProps) {
         )}
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">全体の送信スイッチ</h2>
-        {settings.error || !settings.data ? (
+      {settings.error || !settings.data ? (
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">設定</h2>
           <p className="text-destructive text-sm">{settings.error}</p>
-        ) : (
-          <EmailSendingSwitch
-            enabled={settings.data.sendingEnabled}
-            updatedAt={settings.data.sendingUpdatedAt}
-            updatedBy={settings.data.sendingUpdatedBy}
-            editorNames={settings.data.editorNames}
-          />
-        )}
-      </section>
+        </section>
+      ) : (
+        <>
+          <section className="space-y-3">
+            <h2 className="text-lg font-semibold">全体の送信スイッチ</h2>
+            <EmailSendingSwitch
+              enabled={settings.data.sendingEnabled}
+              updatedAt={settings.data.sendingUpdatedAt}
+              updatedBy={settings.data.sendingUpdatedBy}
+              editorNames={settings.data.editorNames}
+              pendingAnnouncementCount={pendingAnnouncements.count}
+            />
+          </section>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">種別ごとの設定</h2>
-        {settings.error || !settings.data ? (
-          <p className="text-destructive text-sm">{settings.error}</p>
-        ) : (
-          <EmailSettingsForm
-            settings={{
-              kinds: Object.values(settings.data.kinds),
-              digestDailyLimit: settings.data.digestDailyLimit,
-              digestUpdatedAt: settings.data.digestUpdatedAt,
-              digestUpdatedBy: settings.data.digestUpdatedBy,
-              editorNames: settings.data.editorNames,
-            }}
-            digestDailyLimitMax={EMAIL_DIGEST_DAILY_LIMIT_MAX}
-          />
-        )}
-      </section>
+          <section className="space-y-3">
+            <h2 className="text-lg font-semibold">種別ごとの設定</h2>
+            <EmailSettingsForm
+              settings={{
+                kinds: Object.values(settings.data.kinds),
+                digestDailyLimit: settings.data.digestDailyLimit,
+                digestUpdatedAt: settings.data.digestUpdatedAt,
+                digestUpdatedBy: settings.data.digestUpdatedBy,
+                editorNames: settings.data.editorNames,
+              }}
+              digestDailyLimitMax={EMAIL_DIGEST_DAILY_LIMIT_MAX}
+            />
+          </section>
+        </>
+      )}
 
       <EmailLogsSection
         logs={logs.data}

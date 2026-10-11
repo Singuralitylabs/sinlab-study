@@ -2,7 +2,7 @@
 
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import {
   EMAIL_KIND_LABELS,
   EMAIL_KIND_WITH_SEND_WEEKDAY,
@@ -32,17 +32,36 @@ type Settings = {
   editorNames: Record<number, string>;
 };
 
+/** `noEditorLabel`: what a NULL updated_by means for this row (seeded value, or a deleted user). */
 function formatUpdated(
   updatedAt: string,
   updatedBy: number | null,
-  editorNames: Record<number, string>
+  editorNames: Record<number, string>,
+  noEditorLabel = "初期値"
 ) {
-  const who = updatedBy !== null ? (editorNames[updatedBy] ?? "不明") : "初期値";
+  const who = updatedBy !== null ? (editorNames[updatedBy] ?? "不明") : noEditorLabel;
   return `${new Date(updatedAt).toLocaleString("ja-JP")}（${who}）`;
 }
 
-const SENDING_ENABLE_CONFIRM =
-  "受講生向けメールの送信を有効にしますか？\n\n利用規約の改定（案内メールの送信に関する条項）が完了していることを確認してください。有効にすると、種別ごとの設定に従って登録・承認・お支払いの通知と毎朝の定期メールが送られます。";
+function sendingEnableConfirm(pendingAnnouncementCount: number | null) {
+  const lines = [
+    "受講生向けメールの送信を有効にしますか？",
+    "",
+    "利用規約の改定（案内メールの送信に関する条項）が完了していることを確認してください。有効にすると、種別ごとの設定に従って登録・承認・お支払いの通知と毎朝の定期メールが送られます。",
+  ];
+  if (pendingAnnouncementCount === null) {
+    lines.push(
+      "",
+      "停止中に公開された未送信のお知らせの件数を確認できませんでした。「メールでも送る」が付いたお知らせは有効化後の定期実行で送られます。"
+    );
+  } else if (pendingAnnouncementCount > 0) {
+    lines.push(
+      "",
+      `停止中に公開された未送信のお知らせが ${pendingAnnouncementCount} 件あり、有効化後の定期実行で送られます。送らないお知らせは、先に「メールでも送る」を外してください。`
+    );
+  }
+  return lines.join("\n");
+}
 
 async function putSettings(body: Record<string, unknown>): Promise<string | null> {
   try {
@@ -192,26 +211,31 @@ function KindRow({
 
 /**
  * The global switch (`email_settings.sending_enabled`, #315). Its state is shown with the stored
- * value, not an optimistic one, so the page never claims mail is off while the save failed.
+ * value, not an optimistic one, so the page never claims mail is off while the save failed; the
+ * button stays disabled until the refreshed value arrives, so a second click cannot resend the
+ * old value.
  */
 export function EmailSendingSwitch({
   enabled,
   updatedAt,
   updatedBy,
   editorNames,
+  pendingAnnouncementCount,
 }: {
   enabled: boolean;
   updatedAt: string | null;
   updatedBy: number | null;
   editorNames: Record<number, string>;
+  pendingAnnouncementCount: number | null;
 }) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
+  const [refreshing, startRefresh] = useTransition();
   const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
   const toggle = async () => {
     const next = !enabled;
-    if (next && !confirm(SENDING_ENABLE_CONFIRM)) {
+    if (next && !confirm(sendingEnableConfirm(pendingAnnouncementCount))) {
       return;
     }
     setSaving(true);
@@ -223,8 +247,9 @@ export function EmailSendingSwitch({
       return;
     }
     setMessage({ text: "保存しました", isError: false });
-    router.refresh();
+    startRefresh(() => router.refresh());
   };
+  const busy = saving || refreshing;
 
   return (
     <div className="border rounded-lg p-4 space-y-2">
@@ -236,23 +261,29 @@ export function EmailSendingSwitch({
             : "受講生向けメールは一通も送りません（種別の設定・環境変数に関わらず。管理者本人へのテスト送信は除く）"}
         </p>
       </div>
+      {!enabled && pendingAnnouncementCount !== null && pendingAnnouncementCount > 0 && (
+        <p className="text-xs text-muted-foreground">
+          停止中に公開された未送信のお知らせ: {pendingAnnouncementCount}{" "}
+          件（有効化後の定期実行で送られます）
+        </p>
+      )}
       <p className="text-xs text-muted-foreground">
         最終更新:{" "}
         {updatedAt === null
           ? "未操作（既定の停止中）"
-          : formatUpdated(updatedAt, updatedBy, editorNames)}
+          : formatUpdated(updatedAt, updatedBy, editorNames, "削除済みユーザー")}
       </p>
       <div className="flex items-center gap-2">
         <Button
           size="sm"
           variant={enabled ? "outline" : "default"}
           onClick={toggle}
-          disabled={saving}
+          disabled={busy}
           aria-label={
             enabled ? "受講生向けメールの送信を停止する" : "受講生向けメールの送信を有効にする"
           }
         >
-          {saving ? (
+          {busy ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : enabled ? (
             "送信を停止する"

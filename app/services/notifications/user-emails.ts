@@ -169,13 +169,18 @@ async function deliverToUser(
   }
 
   const supabase = await createAdminSupabaseClient();
-  // Fail-closed: the global switch keeps every mail unsent until the terms allow it (#315).
-  if (!(await isEmailSendingEnabled(supabase))) {
+  // The two reads are independent, so they go out together; the global switch is still judged
+  // first. Fail-closed: it keeps every mail unsent until the terms allow it (#315).
+  const [sendingEnabled, kindEnabled] = await Promise.all([
+    isEmailSendingEnabled(supabase),
+    isTransactionalEmailEnabled(supabase, kind),
+  ]);
+  if (!sendingEnabled) {
     console.warn(`[メール通知] 全体スイッチが無効のため送信をスキップしました: kind=${kind}`);
     return "skipped";
   }
   // Fail-safe: an unreadable setting counts as enabled so signup / payment notices are not lost.
-  if (!(await isTransactionalEmailEnabled(supabase, kind))) {
+  if (!kindEnabled) {
     console.warn(`[メール通知] 管理設定で無効のため送信をスキップしました: kind=${kind}`);
     return "skipped";
   }

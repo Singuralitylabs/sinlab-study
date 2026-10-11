@@ -370,7 +370,7 @@ describe("全体の送信スイッチ（#315・フェイルクローズ）", () 
     ["取得が DB エラー", { data: null, error: { message: "db down" } }],
     ["行が無い", { data: null, error: null }],
   ])(
-    "全体スイッチが%sなら、種別の設定・宛先を読まず claim もせずに送らない（warn を出す）",
+    "全体スイッチが%sなら、種別が有効でも宛先を読まず claim もせずに送らない（warn を出す）",
     async (_label, settingsResult) => {
       vi.spyOn(console, "error").mockImplementation(() => {});
       const client = mockAdmin({
@@ -383,7 +383,6 @@ describe("全体の送信スイッチ（#315・フェイルクローズ）", () 
       await deliverOnce();
 
       expect(tableBuilders(client, "email_settings")[0].eq).toHaveBeenCalledWith("id", 1);
-      expect(tableBuilders(client, "email_kind_settings")).toHaveLength(0);
       expect(tableBuilders(client, "users")).toHaveLength(0);
       expect(emailLogBuilders(client)).toHaveLength(0);
       expect(sendEmail).not.toHaveBeenCalled();

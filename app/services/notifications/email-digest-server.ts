@@ -844,18 +844,23 @@ async function buildQueue(
     // The deciding run of this cycle did not reach target selection (failure, skip, missed start).
     // Within the catch-up window today's run decides targets in its place; after that nothing is
     // sent so it gets noticed. Exception: if the setting itself changed during this cycle (send
-    // weekday moved, or the kind re-enabled), the cycle never had a scheduled deciding day, so
-    // sends resume next cycle. Judged by updated_at rather than by past log rows, which would also
-    // hide a genuine failure of the new cycle's deciding runs.
+    // weekday moved, the kind re-enabled, or the global switch turned on), the cycle never had a
+    // scheduled deciding day, so sends resume next cycle. Judged by the update timestamps rather
+    // than by past log rows, which would also hide a genuine failure of the new cycle's deciding
+    // runs; both timestamps move only on a real change (same-value saves are not written).
+    const cycleStart = jstStartOfDayIso(weekStart);
     if (daysSinceWeekStart <= WEEKLY_DIGEST_CATCH_UP_DAYS) {
       decidesTargets = true;
       console.warn(
         `[定期メール] 今週（${weekStart}）の週次進捗の予約が無いため、今日の実行で対象を決めて送ります`
       );
-    } else if (weeklySetting.updatedAt >= jstStartOfDayIso(weekStart)) {
+    } else if (
+      weeklySetting.updatedAt >= cycleStart ||
+      (settings.sendingUpdatedAt !== null && settings.sendingUpdatedAt >= cycleStart)
+    ) {
       weeklySkipped = true;
       console.warn(
-        `[定期メール] 週次進捗の設定が今サイクル（${weekStart}〜）の途中で変更されたため、今回は週次進捗を送りません（次の送信日から再開します）`
+        `[定期メール] 週次進捗の設定が今サイクル（${weekStart}〜）の途中で変更された（または全体スイッチが切り替えられた）ため、今回は週次進捗を送りません（次の送信日から再開します）`
       );
     } else {
       weeklyReservationMissing = true;

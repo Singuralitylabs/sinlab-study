@@ -186,6 +186,23 @@ export async function updateEmailSendingEnabled(
   updatedBy: number
 ): Promise<{ error: PostgrestError | null; updated: boolean }> {
   const supabase = await createServerSupabaseClient();
+
+  // Same-value saves (a stale page, a double click) must not rewrite sending_updated_at / _by: the
+  // record names who really switched it, and the cron reads a recent sending_updated_at as "the
+  // switch changed this cycle", which would hide a genuine failure of the cycle's deciding runs.
+  const { data: current, error: readError } = await supabase
+    .from("email_settings")
+    .select("sending_enabled")
+    .eq("id", 1)
+    .maybeSingle();
+  if (readError) {
+    console.error("メール送信の全体スイッチ取得エラー:", readError.message);
+    return { error: readError, updated: false };
+  }
+  if (current && current.sending_enabled === enabled) {
+    return { error: null, updated: true };
+  }
+
   const { data, error } = await supabase
     .from("email_settings")
     .update({
@@ -201,6 +218,35 @@ export async function updateEmailSendingEnabled(
     return { error, updated: false };
   }
   return { error: null, updated: (data?.length ?? 0) > 0 };
+}
+
+/**
+ * Announcements that would be emailed by the next runs once the global switch is on: published,
+ * `send_email`, not yet sent. Shown before enabling the switch, because the digest keeps them
+ * pending while the switch is off and sends all of them afterwards. Read with the admin's session.
+ */
+export async function fetchPendingAnnouncementEmailCount(): Promise<{
+  count: number | null;
+  error: string | null;
+}> {
+  try {
+    const supabase = await createServerSupabaseClient();
+    const { count, error } = await supabase
+      .from("announcements")
+      .select("id", { count: "exact", head: true })
+      .not("published_at", "is", null)
+      .eq("is_deleted", false)
+      .eq("send_email", true)
+      .is("email_sent_at", null);
+    if (error) {
+      console.error("未送信のお知らせ件数取得エラー:", error.message);
+      return { count: null, error: "未送信のお知らせ件数の取得に失敗しました" };
+    }
+    return { count: count ?? 0, error: null };
+  } catch (error) {
+    console.error("未送信のお知らせ件数取得エラー:", error);
+    return { count: null, error: "未送信のお知らせ件数の取得に失敗しました" };
+  }
 }
 
 export async function updateDigestDailyLimit(
