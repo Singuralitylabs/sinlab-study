@@ -202,6 +202,8 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 案内系メールの1日の上限（`digest_daily_limit`）を持つ、1行だけのテーブル（`id = 1` の CHECK 制約）。`digest_daily_limit` は CHECK で1〜95（Resend 無料枠の日次100通未満）。初期値は 80。`updated_at` / `updated_by` は `email_kind_settings` と同じ。
 
+受講生向けメール送信の全体スイッチ `sending_enabled`（`NOT NULL DEFAULT false`。#315）も、この行に持つ。既定が無効なので、マイグレーションの適用と送信用の環境変数の設定をどの順に行っても、管理者が管理画面で有効にするまで一通も送られない。送信側（`deliverToUser()` / `runEmailDigest()`）は service_role で読み、`true` 以外・読めないときは送らない（[機能設計書](./specification.md)10.1・10.10節）。切り替えの記録は `sending_updated_at` / `sending_updated_by`（未操作なら NULL。同じ値の保存では更新しない）で、1日の上限の `updated_at` / `updated_by` とは別に持つ。定期メールは `sending_updated_at` を「全体スイッチが今サイクルの途中で切り替わった」判定にも使う（10.10節）。
+
 メールの差出人名・件名の先頭・見出し・フッターに使うサービス名も、この行に持つ（#286。[機能設計書](./specification.md)10.11節）。
 
 - `service_name`: TEXT NOT NULL、既定 `'Sinlab Study'`（コードの `EMAIL_SERVICE_NAME` と同じ。テストで一致を確認している）。長さ・改行の検証は API の zod（1〜50文字、改行不可）

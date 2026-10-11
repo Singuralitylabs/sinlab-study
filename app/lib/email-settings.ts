@@ -21,6 +21,9 @@ export type EmailKindSetting = {
 
 export type EmailSettingsSnapshot = {
   kinds: Record<EmailKind, EmailKindSetting>;
+  sendingEnabled: boolean;
+  sendingUpdatedAt: string | null;
+  sendingUpdatedBy: number | null;
   digestDailyLimit: number;
   digestUpdatedAt: string;
   digestUpdatedBy: number | null;
@@ -36,6 +39,9 @@ export type EmailKindSettingRow = {
 };
 
 export type EmailSettingsRow = {
+  sending_enabled: boolean;
+  sending_updated_at: string | null;
+  sending_updated_by: number | null;
   digest_daily_limit: number;
   updated_at: string;
   updated_by: number | null;
@@ -64,6 +70,11 @@ export function parseEmailSettings(
 ): EmailSettingsSnapshot {
   if (!settingsRow) {
     throw new Error("email_settings の行がありません");
+  }
+  // The global switch is the "do not send before the terms revision" gate: anything but a real
+  // boolean (a column missing after a partial migration, a hand edit) must stop the run.
+  if (typeof settingsRow.sending_enabled !== "boolean") {
+    throw new Error("email_settings.sending_enabled が真偽値ではありません");
   }
   if (
     !Number.isInteger(settingsRow.digest_daily_limit) ||
@@ -112,6 +123,9 @@ export function parseEmailSettings(
 
   return {
     kinds,
+    sendingEnabled: settingsRow.sending_enabled,
+    sendingUpdatedAt: settingsRow.sending_updated_at,
+    sendingUpdatedBy: settingsRow.sending_updated_by,
     digestDailyLimit: settingsRow.digest_daily_limit,
     digestUpdatedAt: settingsRow.updated_at,
     digestUpdatedBy: settingsRow.updated_by,

@@ -69,6 +69,30 @@ describe("email_kind_settings の初期値（マイグレーションと定数�
   });
 });
 
+describe("全体の送信スイッチ（#315）のマイグレーション", () => {
+  const switchMigration = readFileSync(
+    join(process.cwd(), "supabase/migrations/20261010000000_add_email_sending_enabled.sql"),
+    "utf8"
+  );
+
+  it("sending_enabled は NOT NULL DEFAULT false（適用した時点では一通も送らない）", () => {
+    expect(switchMigration).toMatch(
+      /ADD COLUMN IF NOT EXISTS sending_enabled BOOLEAN NOT NULL DEFAULT false/
+    );
+  });
+
+  it("切り替えの記録は別の列に持ち、操作者の削除で NULL にする", () => {
+    expect(switchMigration).toContain("ADD COLUMN IF NOT EXISTS sending_updated_at TIMESTAMPTZ");
+    expect(switchMigration).toMatch(
+      /ADD COLUMN IF NOT EXISTS sending_updated_by INTEGER REFERENCES public\.users\(id\) ON DELETE SET NULL/
+    );
+  });
+
+  it("既存の RLS に乗るため、ポリシーは追加・変更しない", () => {
+    expect(switchMigration).not.toMatch(/CREATE POLICY|DROP POLICY/);
+  });
+});
+
 describe("RLS（admin のみ・同一操作は1本）", () => {
   const policies = [...migration.matchAll(/CREATE POLICY "([^"]+)"\s+ON public\.(\w+) FOR (\w+)/g)];
 
