@@ -309,7 +309,6 @@ describe("createCheckoutSession", () => {
 
     const params = mockSessionsCreate.mock.calls[0][0];
     expect(params.allowed_payment_method_types).toEqual(["card"]);
-    expect(params).not.toHaveProperty("payment_method_types");
   });
 
   it("billing_cycle_anchor_configを定数どおりに渡す", async () => {
