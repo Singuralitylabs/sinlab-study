@@ -1,14 +1,15 @@
 export const dynamic = "force-dynamic";
 
 import { Clock } from "lucide-react";
-import Link from "next/link";
 import { redirect } from "next/navigation";
+import { UpgradeCtaLink } from "@/app/components/UpgradeCtaLink";
+import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
+import { fetchUnreadAnnouncementCount } from "@/app/services/api/announcements-server";
 import { checkAdminPermissions, checkInstructorPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { SideNav } from "./components/SideNav";
 
 export default async function AuthLayout({
@@ -18,9 +19,9 @@ export default async function AuthLayout({
 }>) {
   const { userStatus, userRole } = await getServerAuth();
 
-  // 認可の第一の砦は proxy.ts だが、プロキシのスキップ経路や設定不備に備え、
-  // サーバー側でも active / trial（お試しユーザー）のみ許可する（許可リスト方式の二層防御）。
-  // getServerAuth() は React.cache() でメモ化済みのため追加のDBアクセスは発生しない
+  // proxy.ts is the first line of defense, but allow only active/trial here too in case of proxy
+  // skip paths or misconfiguration (allowlist two-layer defense). getServerAuth() is memoized with
+  // React.cache(), so this adds no DB access.
   if (userStatus !== USER_STATUS.ACTIVE && userStatus !== USER_STATUS.TRIAL) {
     if (userStatus === USER_STATUS.REJECTED) {
       redirect("/rejected");
@@ -31,10 +32,17 @@ export default async function AuthLayout({
   const isAdmin = checkAdminPermissions(userRole);
   const isInstructor = checkInstructorPermissions(userRole);
   const stripeEnabled = isStripeEnabled();
+  // The unread count isn't carried in getServerAuth()'s headers; fetch it here (a failure shows 0).
+  const unreadAnnouncementCount = await fetchUnreadAnnouncementCount();
 
   return (
     <div className="sm:flex min-h-screen">
-      <SideNav isAdmin={isAdmin} isInstructor={isInstructor} stripeEnabled={stripeEnabled} />
+      <SideNav
+        isAdmin={isAdmin}
+        isInstructor={isInstructor}
+        stripeEnabled={stripeEnabled}
+        unreadAnnouncementCount={unreadAnnouncementCount}
+      />
       <main className="flex-1 sm:ml-64 p-6 pt-20 sm:pt-6">
         {userStatus === USER_STATUS.TRIAL && (
           <Alert className="mb-6">
@@ -47,9 +55,9 @@ export default async function AuthLayout({
                   : "すべての学習コンテンツを利用するには、管理者による本登録が必要です。"}
               </span>
               {stripeEnabled && (
-                <Button asChild size="sm">
-                  <Link href="/upgrade">アップグレード</Link>
-                </Button>
+                <UpgradeCtaLink source={UPGRADE_CTA_SOURCE.BANNER} size="sm">
+                  アップグレード
+                </UpgradeCtaLink>
               )}
             </AlertDescription>
           </Alert>

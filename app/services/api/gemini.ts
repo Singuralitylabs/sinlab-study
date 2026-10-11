@@ -41,11 +41,6 @@ interface ReviewResult {
   completionTokens: number | null;
 }
 
-/**
- * AIレビュー対象の提出内容。
- * - url: URL提出（1件）
- * - code: コード提出（単一/複数ファイル）
- */
 export type ReviewSubmission =
   | { type: "url"; content: string }
   | { type: "code"; files: CodeFile[] };
@@ -58,10 +53,9 @@ export interface GenerateReviewParams {
 }
 
 /**
- * userStatus に応じて Gemini API キーを返す。
- * - active: 会員用（`GEMINI_API_KEY`）。未設定なら undefined
- * - trial: お試し用（`GEMINI_API_KEY_TRIAL`）。未設定なら会員用へフォールバック
- * - それ以外（rejected / null 等）: undefined（呼び出し側で 403 等を返す）
+ * Picks the key by userStatus: active uses GEMINI_API_KEY; trial uses GEMINI_API_KEY_TRIAL,
+ * falling back to the member key; anything else (rejected / null) yields undefined (caller
+ * returns 403).
  */
 export function resolveGeminiApiKey(userStatus: UserStatusType | null): string | undefined {
   const memberKey = process.env[GEMINI_API_KEY_ENV];
@@ -74,11 +68,6 @@ export function resolveGeminiApiKey(userStatus: UserStatusType | null): string |
   return undefined;
 }
 
-/**
- * コードファイル群をプロンプト用のコードセクションに整形する。
- * - 単一ファイル（ファイル名なし）: 従来どおりコードフェンスのみ
- * - 複数ファイル: ファイル名・言語のヘッダー付きで各ファイルをフェンス表示
- */
 function buildCodeSection(files: CodeFile[]): string {
   if (files.length === 1 && !files[0].filename) {
     const content = files[0].content;
@@ -132,18 +121,13 @@ export function isRateLimitError(error: unknown): boolean {
 }
 
 /**
- * config.abortSignal（AbortSignal.timeout()/AbortSignal.any()）による中断かどうかを判定する。
- *
- * SDK内部は呼び出し元のシグナルを直接fetchへ渡さず、独自のAbortControllerでラップして
- * `controller.abort()`（reasonなし）を呼ぶため、実際に観測されるのは通常
- * DOMException "AbortError"（"TimeoutError"ではない）。本関数呼び出し元では
- * config.abortSignal にタイムアウト用シグナル以外を渡さないため、
- * AbortError = タイムアウトとして扱ってよい。
- *
- * SDKバージョン更新等で reason 付きの abort（"TimeoutError"）が素通りするようになっても
- * 誤ってタイムアウトメッセージを出し損なわないよう、両方の名前を許容する。
- * ただし判定自体は @google/genai のSDK内部実装（非公開）に依存しているため、
- * SDKバージョンを上げた際はこの関数が引き続き想定どおり動作するか要再確認。
+ * Whether the error came from config.abortSignal (AbortSignal.timeout()/any()).
+ * The SDK wraps the caller's signal in its own AbortController and calls `controller.abort()`
+ * without a reason, so the observed error is normally DOMException "AbortError" (not
+ * "TimeoutError"). Callers pass only the timeout signal, so AbortError can be treated as a
+ * timeout. Both names are accepted in case a future SDK lets reasoned aborts ("TimeoutError")
+ * through.
+ * This relies on private @google/genai internals: re-verify after SDK upgrades.
  */
 export function isTimeoutError(error: unknown): boolean {
   return (
@@ -188,8 +172,8 @@ export async function generateReview({
 
   let lastError: unknown;
 
-  // 個々の試行が429で即座に失敗せずGEMINI_REQUEST_TIMEOUT_MS近くまで待たされても、
-  // 全試行+リトライ待機の合計をGEMINI_TOTAL_BUDGET_MSで頭打ちにする（maxDuration対策）
+  // Cap the total of all attempts plus retry waits at GEMINI_TOTAL_BUDGET_MS even if each attempt
+  // waits close to GEMINI_REQUEST_TIMEOUT_MS instead of failing fast on 429 (maxDuration guard).
   const deadlineAt = Date.now() + GEMINI_TOTAL_BUDGET_MS;
   const overallSignal = AbortSignal.timeout(GEMINI_TOTAL_BUDGET_MS);
 

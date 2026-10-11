@@ -37,7 +37,7 @@ const createMockSupabase = ({
     eq: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn().mockResolvedValue({ data: theme, error: themeError }),
-    // biome-ignore lint/suspicious/noThenProperty: Supabaseクエリビルダーのthenableを再現するため
+    // biome-ignore lint/suspicious/noThenProperty: mimics the Supabase query builder thenable
     then: (resolve: (value: unknown) => unknown) =>
       Promise.resolve({ data: null, error: updateError }).then(resolve),
   };
@@ -65,7 +65,7 @@ const request = (file: File | null, themeId = "12") => {
   return new Request("http://localhost/api/upload-thumbnail", { method: "POST", body: formData });
 };
 
-// tests/setup.ts が張る console.error のスパイまで戻さないよう、Date.now のスパイのみ局所的に復元する
+// Restore only the Date.now spy, not the console.error spy installed by tests/setup.ts.
 let nowSpy: ReturnType<typeof vi.spyOn> | undefined;
 
 const freezeNow = (value: number) => {
@@ -73,7 +73,7 @@ const freezeNow = (value: number) => {
 };
 
 beforeEach(() => {
-  // createAdminSupabaseClient の呼び出し回数を検証するケースがあるため履歴はクリアする
+  // Clear history because some cases verify createAdminSupabaseClient call counts.
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(maintainerAuth as never);
   vi.mocked(createAdminSupabaseClient).mockResolvedValue(createMockSupabase().client as never);

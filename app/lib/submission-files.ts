@@ -1,14 +1,9 @@
 import type { CodeFile, Json } from "@/app/types";
 
 /**
- * 提出データを表示・AIレビュー用のファイル配列に正規化する。
- *
- * 後方互換性:
- *   - code_files（複数ファイル）があればそれを返す
- *   - なければ code_content（単一ファイル）を1要素の配列として返す
- *   - どちらも空なら空配列を返す
- *
- * クライアント/サーバー双方から利用するため、副作用のない純粋関数として実装する。
+ * Normalizes a submission into a file array for display/AI review: code_files if present, else
+ * code_content as a one-element array, else []. Kept as a pure function since both client and
+ * server use it.
  */
 export function getSubmissionCodeFiles(submission: {
   code_content: string | null;

@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "app/**"
+      - "scripts/**"
       - "biome.json"
       - "package.json"
       - "bun.lock"
@@ -11,6 +12,7 @@ on:
   pull_request:
     paths:
       - "app/**"
+      - "scripts/**"
       - "biome.json"
       - "package.json"
       - "bun.lock"

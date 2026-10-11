@@ -3,9 +3,9 @@
 import dynamic from "next/dynamic";
 import { Skeleton } from "@/components/ui/skeleton";
 
-// pdfjs-dist は Node.js 環境で DOMMatrix 等のブラウザAPIを使うため SSR 不可
-// "use client" ファイル内で ssr: false を指定してクライアント専用にする
-// loading の高さ（h-64）は PdfSlideViewer の isLoading 表示と揃えてレイアウトシフトを防ぐ
+// pdfjs-dist uses browser APIs such as DOMMatrix in Node.js, so SSR is impossible: set ssr: false
+// in a "use client" file to make it client-only. The loading height (h-64) matches PdfSlideViewer's
+// isLoading display to prevent layout shift.
 export const PdfSlideViewerNoSSR = dynamic(
   () => import("@/app/components/PdfSlideViewer").then((m) => m.PdfSlideViewer),
   {

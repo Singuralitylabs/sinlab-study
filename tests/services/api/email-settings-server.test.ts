@@ -1,0 +1,533 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
+
+vi.mock("@/app/services/api/supabase-server");
+
+import {
+  fetchEmailLogs,
+  fetchEmailSettings,
+  fetchEmailSettingsForAdmin,
+  fetchPendingAnnouncementEmailCount,
+  fetchTodayPromotionalCount,
+  isEmailSendingEnabled,
+  isTransactionalEmailEnabled,
+  updateDigestDailyLimit,
+  updateEmailKindSettings,
+  updateEmailSendingEnabled,
+} from "@/app/services/api/email-settings-server";
+import {
+  createAdminSupabaseClient,
+  createServerSupabaseClient,
+} from "@/app/services/api/supabase-server";
+
+const kindRow = (kind: string, extra: Record<string, unknown> = {}) => ({
+  kind,
+  enabled: true,
+  send_days: null,
+  send_weekday: null,
+  updated_at: "2026-10-01T00:00:00Z",
+  updated_by: null,
+  ...extra,
+});
+
+const allKindRows = [
+  kindRow("signup"),
+  kindRow("approved"),
+  kindRow("upgraded"),
+  kindRow("cancel_scheduled"),
+  kindRow("subscription_ended"),
+  kindRow("weekly_digest", { send_weekday: 1 }),
+  kindRow("inactivity_reminder", { send_days: [14, 7], updated_by: 5 }),
+  kindRow("trial_nurture", { send_days: [2, 5, 7, 14] }),
+  kindRow("announcement"),
+];
+const settingsRow = {
+  sending_enabled: true,
+  sending_updated_at: null,
+  sending_updated_by: null,
+  digest_daily_limit: 80,
+  updated_at: "2026-10-01T00:00:00Z",
+  updated_by: 5,
+};
+
+const dbError = { message: "db error" };
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.spyOn(console, "error").mockImplementation(() => {});
+});
+
+describe("fetchEmailSettings", () => {
+  it("種別ごとの設定と1日の上限を返す（send_days は昇順）", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: {
+        email_kind_settings: { data: allKindRows, error: null },
+        email_settings: { data: settingsRow, error: null },
+      },
+    });
+
+    const settings = await fetchEmailSettings(client as never);
+
+    expect(settings.digestDailyLimit).toBe(80);
+    expect(settings.sendingEnabled).toBe(true);
+    expect(settings.sendingUpdatedAt).toBeNull();
+    expect(settings.kinds.inactivity_reminder.sendDays).toEqual([7, 14]);
+    expect(settings.kinds.weekly_digest.sendWeekday).toBe(1);
+    expect(settings.kinds.signup.enabled).toBe(true);
+  });
+
+  it.each([
+    ["種別の取得がエラー", { email_kind_settings: { data: null, error: dbError } }, "db error"],
+    ["上限の取得がエラー", { email_settings: { data: null, error: dbError } }, "db error"],
+    ["上限の行が無い", { email_settings: { data: null, error: null } }, "email_settings"],
+    [
+      "全体スイッチが真偽値でない（列が無い等）",
+      { email_settings: { data: { ...settingsRow, sending_enabled: undefined }, error: null } },
+      "sending_enabled",
+    ],
+    [
+      "種別の行が欠けている",
+      { email_kind_settings: { data: allKindRows.slice(1), error: null } },
+      "signup",
+    ],
+  ])(
+    "読めないとき（%s）は throw する（呼び出し側がフェイルクローズする）",
+    async (_l, override, message) => {
+      const client = createMockSupabaseClient({
+        tableResults: {
+          email_kind_settings: { data: allKindRows, error: null },
+          email_settings: { data: settingsRow, error: null },
+          ...override,
+        },
+      });
+
+      await expect(fetchEmailSettings(client as never)).rejects.toThrow(message);
+    }
+  );
+
+  it.each([
+    ["digest_daily_limit が範囲外", { ...settingsRow, digest_daily_limit: 200 }],
+    ["digest_daily_limit が 0", { ...settingsRow, digest_daily_limit: 0 }],
+  ])("値が不正（%s）なら throw する", async (_l, row) => {
+    const client = createMockSupabaseClient({
+      tableResults: {
+        email_kind_settings: { data: allKindRows, error: null },
+        email_settings: { data: row, error: null },
+      },
+    });
+
+    await expect(fetchEmailSettings(client as never)).rejects.toThrow();
+  });
+
+  it("send_days が範囲外・重複・空の行は throw する", async () => {
+    for (const sendDays of [[0, 3], [61], [3, 3], []]) {
+      const rows = allKindRows.map((row) =>
+        row.kind === "trial_nurture" ? { ...row, send_days: sendDays } : row
+      );
+      const client = createMockSupabaseClient({
+        tableResults: {
+          email_kind_settings: { data: rows, error: null },
+          email_settings: { data: settingsRow, error: null },
+        },
+      });
+
+      await expect(fetchEmailSettings(client as never)).rejects.toThrow("send_days");
+    }
+  });
+});
+
+describe("isTransactionalEmailEnabled", () => {
+  const clientWith = (result: { data: unknown; error: unknown }) => {
+    const client = createMockSupabaseClient({ tableResults: { email_kind_settings: result } });
+    return client;
+  };
+
+  it("enabled = false のときだけ false", async () => {
+    expect(
+      await isTransactionalEmailEnabled(
+        clientWith({ data: { enabled: false }, error: null }) as never,
+        "approved"
+      )
+    ).toBe(false);
+    expect(
+      await isTransactionalEmailEnabled(
+        clientWith({ data: { enabled: true }, error: null }) as never,
+        "approved"
+      )
+    ).toBe(true);
+  });
+
+  it.each([
+    ["DB エラー", { data: null, error: dbError }],
+    ["行が無い", { data: null, error: null }],
+  ])("読めない（%s）ときは true（登録・決済の通知を欠落させない）", async (_l, result) => {
+    expect(await isTransactionalEmailEnabled(clientWith(result) as never, "signup")).toBe(true);
+  });
+
+  it("例外が出ても true", async () => {
+    const client = { from: vi.fn(() => Promise.reject(new Error("boom"))) };
+
+    expect(await isTransactionalEmailEnabled(client as never, "signup")).toBe(true);
+  });
+});
+
+describe("isEmailSendingEnabled（全体スイッチ・フェイルクローズ）", () => {
+  const clientWith = (result: { data: unknown; error: unknown }) =>
+    createMockSupabaseClient({ tableResults: { email_settings: result } });
+
+  it("sending_enabled = true のときだけ true（id = 1 の行を読む）", async () => {
+    const client = clientWith({ data: { sending_enabled: true }, error: null });
+
+    expect(await isEmailSendingEnabled(client as never)).toBe(true);
+    const builder = client.from.mock.results[0].value;
+    expect(client.from).toHaveBeenCalledWith("email_settings");
+    expect(builder.eq).toHaveBeenCalledWith("id", 1);
+  });
+
+  it.each([
+    ["false", { data: { sending_enabled: false }, error: null }],
+    ["真偽値でない", { data: { sending_enabled: "true" }, error: null }],
+    ["DB エラー", { data: null, error: dbError }],
+    ["行が無い", { data: null, error: null }],
+  ])("%s のときは false（規約改定前に送らない）", async (_l, result) => {
+    expect(await isEmailSendingEnabled(clientWith(result) as never)).toBe(false);
+  });
+
+  it("例外が出ても false", async () => {
+    const client = { from: vi.fn(() => Promise.reject(new Error("boom"))) };
+
+    expect(await isEmailSendingEnabled(client as never)).toBe(false);
+  });
+});
+
+describe("updateEmailKindSettings / updateDigestDailyLimit", () => {
+  const current = { enabled: true, send_days: [2, 5], send_weekday: null };
+  const serverClient = (
+    kindResults: { data: unknown; error: unknown }[],
+    settingsResult: { data: unknown; error: unknown } | { data: unknown; error: unknown }[] = {
+      data: [],
+      error: null,
+    }
+  ) => {
+    const client = createMockSupabaseClient({
+      tableResults: { email_kind_settings: kindResults, email_settings: settingsResult },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+    return client;
+  };
+
+  it("管理者のセッション（RLS適用のクライアント）で更新し、更新者と更新日時を記録する", async () => {
+    const client = serverClient([
+      { data: current, error: null },
+      { data: [{ kind: "signup" }], error: null },
+    ]);
+
+    const result = await updateEmailKindSettings("signup", { enabled: false }, 9);
+
+    expect(result).toEqual({ error: null, updated: true });
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+    const builder = client.from.mock.results[1].value;
+    expect(builder.update).toHaveBeenCalledWith({
+      enabled: false,
+      updated_at: expect.any(String),
+      updated_by: 9,
+    });
+    expect(builder.eq).toHaveBeenCalledWith("kind", "signup");
+  });
+
+  it("値を変えない保存では updated_at を更新しない（送信日の障害検知を隠さない）", async () => {
+    const client = serverClient([{ data: current, error: null }]);
+
+    const result = await updateEmailKindSettings(
+      "trial_nurture",
+      { enabled: true, send_days: [5, 2].sort((a, b) => a - b) },
+      9
+    );
+
+    expect(result).toEqual({ error: null, updated: true });
+    expect(client.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("send_days が変わるなら更新する", async () => {
+    const client = serverClient([
+      { data: current, error: null },
+      { data: [{ kind: "trial_nurture" }], error: null },
+    ]);
+
+    await updateEmailKindSettings("trial_nurture", { send_days: [2, 5, 7] }, 9);
+
+    expect(client.from).toHaveBeenCalledTimes(2);
+  });
+
+  it("0行（RLSで拒否・行が無い）は updated: false、DBエラーは error を返す", async () => {
+    serverClient([
+      { data: null, error: null },
+      { data: [], error: null },
+    ]);
+    expect(await updateEmailKindSettings("signup", { enabled: false }, 9)).toEqual({
+      error: null,
+      updated: false,
+    });
+
+    serverClient([
+      { data: current, error: null },
+      { data: null, error: dbError },
+    ]);
+    expect(await updateEmailKindSettings("signup", { enabled: false }, 9)).toEqual({
+      error: dbError,
+      updated: false,
+    });
+
+    serverClient([{ data: null, error: dbError }]);
+    expect(await updateEmailKindSettings("signup", { enabled: false }, 9)).toEqual({
+      error: dbError,
+      updated: false,
+    });
+
+    serverClient([], { data: null, error: dbError });
+    expect(await updateDigestDailyLimit(50, 9)).toEqual({ error: dbError, updated: false });
+  });
+
+  it("1日の上限は id = 1 の行を更新する", async () => {
+    const client = serverClient([], { data: [{ id: 1 }], error: null });
+
+    expect(await updateDigestDailyLimit(50, 9)).toEqual({ error: null, updated: true });
+    const builder = client.from.mock.results[0].value;
+    expect(builder.update).toHaveBeenCalledWith({
+      digest_daily_limit: 50,
+      updated_at: expect.any(String),
+      updated_by: 9,
+    });
+    expect(builder.eq).toHaveBeenCalledWith("id", 1);
+  });
+
+  const currentlyOff = { data: { sending_enabled: false }, error: null };
+
+  it("全体スイッチは id = 1 の行を更新し、記録は上限の updated_at とは別の列に持つ", async () => {
+    const client = serverClient([], [currentlyOff, { data: [{ id: 1 }], error: null }]);
+
+    expect(await updateEmailSendingEnabled(true, 9)).toEqual({ error: null, updated: true });
+    const builder = client.from.mock.results[1].value;
+    expect(builder.update).toHaveBeenCalledWith({
+      sending_enabled: true,
+      sending_updated_at: expect.any(String),
+      sending_updated_by: 9,
+    });
+    expect(builder.eq).toHaveBeenCalledWith("id", 1);
+  });
+
+  it("同じ値の保存では書かず（切り替えの記録を上書きしない）、updated: true を返す", async () => {
+    const client = serverClient([], [{ data: { sending_enabled: true }, error: null }]);
+
+    expect(await updateEmailSendingEnabled(true, 9)).toEqual({ error: null, updated: true });
+    expect(client.from).toHaveBeenCalledTimes(1);
+    expect(client.from.mock.results[0].value.update).not.toHaveBeenCalled();
+  });
+
+  it("全体スイッチの更新が0行なら updated: false、DBエラー（現在値の読み取りを含む）は error を返す", async () => {
+    serverClient([], [currentlyOff, { data: [], error: null }]);
+    expect(await updateEmailSendingEnabled(true, 9)).toEqual({ error: null, updated: false });
+
+    serverClient([], [currentlyOff, { data: null, error: dbError }]);
+    expect(await updateEmailSendingEnabled(true, 9)).toEqual({ error: dbError, updated: false });
+
+    serverClient([], [{ data: null, error: dbError }]);
+    expect(await updateEmailSendingEnabled(true, 9)).toEqual({ error: dbError, updated: false });
+  });
+});
+
+describe("fetchEmailSettingsForAdmin", () => {
+  it("更新者の表示名を付けて返す", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: {
+        email_kind_settings: { data: allKindRows, error: null },
+        email_settings: { data: settingsRow, error: null },
+        users: { data: [{ id: 5, display_name: "管理者A" }], error: null },
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+
+    const { data, error } = await fetchEmailSettingsForAdmin();
+
+    expect(error).toBeNull();
+    expect(data?.editorNames).toEqual({ 5: "管理者A" });
+  });
+
+  it("全体スイッチを切り替えた人も更新者の表示名に含める", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: {
+        email_kind_settings: { data: allKindRows, error: null },
+        email_settings: {
+          data: {
+            ...settingsRow,
+            sending_updated_at: "2026-10-10T00:00:00Z",
+            sending_updated_by: 8,
+          },
+          error: null,
+        },
+        users: {
+          data: [
+            { id: 5, display_name: "管理者A" },
+            { id: 8, display_name: "管理者B" },
+          ],
+          error: null,
+        },
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+
+    const { data } = await fetchEmailSettingsForAdmin();
+
+    const usersBuilder = client.from.mock.results[client.from.mock.calls.length - 1].value;
+    expect(usersBuilder.in).toHaveBeenCalledWith("id", expect.arrayContaining([5, 8]));
+    expect(data?.sendingUpdatedBy).toBe(8);
+    expect(data?.editorNames).toEqual({ 5: "管理者A", 8: "管理者B" });
+  });
+
+  it("読めなければエラーメッセージを返す", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: { email_kind_settings: { data: null, error: dbError } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+
+    expect(await fetchEmailSettingsForAdmin()).toEqual({
+      data: null,
+      error: "メール設定の取得に失敗しました",
+    });
+  });
+});
+
+describe("fetchEmailLogs", () => {
+  const logRow = (id: number, extra: Record<string, unknown> = {}) => ({
+    id,
+    created_at: "2026-10-05T00:00:00Z",
+    kind: "weekly_digest",
+    reference_key: "2026-10-05",
+    sent_at: null,
+    error: null,
+    user: { display_name: "山田", email: "y@example.com" },
+    ...extra,
+  });
+
+  const adminClient = (data: unknown, error: unknown = null) => {
+    const client = createMockSupabaseClient({ tableResults: { email_logs: { data, error } } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+    return client.from.mock.results;
+  };
+
+  it("繰り越し予約の行を除き、種別・状態で絞り、新しい順に並べ、本文・メッセージIDを選ばない", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: { email_logs: { data: [], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    await fetchEmailLogs({ kind: "announcement", status: "failed" });
+
+    const builder = client.from.mock.results[0].value;
+    expect(builder.neq).toHaveBeenCalledWith("kind", "weekly_digest_reserved");
+    expect(builder.eq).toHaveBeenCalledWith("kind", "announcement");
+    expect(builder.is).toHaveBeenCalledWith("sent_at", null);
+    expect(builder.not).toHaveBeenCalledWith("error", "is", null);
+    expect(builder.order).toHaveBeenNthCalledWith(1, "created_at", { ascending: false });
+    const selected = builder.select.mock.calls[0][0] as string;
+    expect(selected).not.toContain("provider_message_id");
+    expect(selected).not.toContain("body");
+  });
+
+  it.each([
+    ["sent", "not", ["sent_at", "is", null]],
+    ["pending", "is", ["error", null]],
+  ] as const)("状態 %s の条件", async (status, method, args) => {
+    const client = createMockSupabaseClient({
+      tableResults: { email_logs: { data: [], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    await fetchEmailLogs({ status });
+
+    const builder = client.from.mock.results[0].value;
+    expect(builder[method]).toHaveBeenCalledWith(...args);
+  });
+
+  it("状態（送信済み・失敗・未完了）を行から判定する", async () => {
+    adminClient([
+      logRow(1, { sent_at: "2026-10-05T00:00:01Z" }),
+      logRow(2, { error: "status=500" }),
+      logRow(3),
+    ]);
+
+    const { data } = await fetchEmailLogs();
+
+    expect(data?.map((row) => row.status)).toEqual(["sent", "failed", "pending"]);
+  });
+
+  it("ページングは1件多く取って次のページの有無を判定する", async () => {
+    const rows = Array.from({ length: 51 }, (_, i) => logRow(i + 1));
+    const client = createMockSupabaseClient({
+      tableResults: { email_logs: { data: rows, error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const { data, hasNext } = await fetchEmailLogs({ page: 3 });
+
+    expect(data).toHaveLength(50);
+    expect(hasNext).toBe(true);
+    expect(client.from.mock.results[0].value.range).toHaveBeenCalledWith(100, 150);
+  });
+
+  it("DBエラーならエラーメッセージを返す", async () => {
+    adminClient(null, dbError);
+
+    expect(await fetchEmailLogs()).toEqual({
+      data: null,
+      hasNext: false,
+      error: "送信履歴の取得に失敗しました",
+    });
+  });
+});
+
+describe("fetchPendingAnnouncementEmailCount", () => {
+  it("公開済み・未削除・メール送信あり・未送信のお知らせを管理者のセッションで数える", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: { announcements: { data: null, count: 3, error: null } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+
+    expect(await fetchPendingAnnouncementEmailCount()).toEqual({ count: 3, error: null });
+    const builder = client.from.mock.results[0].value;
+    expect(client.from).toHaveBeenCalledWith("announcements");
+    expect(builder.not).toHaveBeenCalledWith("published_at", "is", null);
+    expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
+    expect(builder.eq).toHaveBeenCalledWith("send_email", true);
+    expect(builder.is).toHaveBeenCalledWith("email_sent_at", null);
+  });
+
+  it("DBエラーなら件数 null とエラーメッセージを返す", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: { announcements: { data: null, error: dbError } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+
+    expect(await fetchPendingAnnouncementEmailCount()).toEqual({
+      count: null,
+      error: "未送信のお知らせ件数の取得に失敗しました",
+    });
+  });
+});
+
+describe("fetchTodayPromotionalCount", () => {
+  it("今日（JST）の案内系メールの件数を返す", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: { email_logs: { data: null, error: null, count: 12 } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const result = await fetchTodayPromotionalCount(new Date("2026-10-04T23:00:00Z"));
+
+    expect(result).toEqual({ count: 12, error: null });
+    const builder = client.from.mock.results[0].value;
+    expect(builder.gte).toHaveBeenCalledWith("created_at", "2026-10-04T15:00:00.000Z");
+    expect(builder.in).toHaveBeenCalledWith("kind", expect.arrayContaining(["weekly_digest"]));
+    expect(builder.in.mock.calls[0][1]).not.toContain("signup");
+  });
+});

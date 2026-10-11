@@ -2,10 +2,13 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// スライドPDFの署名付きURLが「閲覧権限チェックの後にのみ」発行されることを、
-// ページ単位で検証する（issue #89）。データ取得・署名発行はすべてモックし、
-// 描画結果（HTML）と署名関数の呼び出し有無を確認する。
+// Invariant under test: the slide PDF signed URL is issued only after the view-permission check
+// (#89). Data fetching and signing are all mocked; the tests check the rendered HTML and whether
+// the signing function was called.
 
+vi.mock("@vercel/analytics/server", () => ({
+  track: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("next/navigation", () => ({
   notFound: () => {
     throw new Error("NEXT_NOT_FOUND");
@@ -13,6 +16,9 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/slides-server");
+vi.mock("@/app/services/api/upgrade-price-server", () => ({
+  fetchUpgradePriceLabel: vi.fn().mockResolvedValue("月額1,500円（税込）"),
+}));
 vi.mock("@/app/services/api/ai-review-server");
 vi.mock("@/app/services/api/submissions-server");
 vi.mock("@/app/services/api/learning-server", async (importOriginal) => {
@@ -25,7 +31,6 @@ vi.mock("@/app/services/api/learning-server", async (importOriginal) => {
     fetchUserProgressByContentId: vi.fn().mockResolvedValue({ isCompleted: false }),
   };
 });
-// クライアントコンポーネント（PDFビューア・提出フォーム等）は描画結果の検証に不要なため差し替える
 vi.mock("@/app/components/SlideContent", () => ({
   SlideContent: ({ signedUrl }: { signedUrl: string | null }) =>
     createElement("div", { "data-testid": "slide-content" }, signedUrl ?? "SLIDE_UNAVAILABLE"),
@@ -43,6 +48,7 @@ vi.mock(
   () => ({ SubmissionForm: () => null })
 );
 
+import { track } from "@vercel/analytics/server";
 import ContentPage from "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/page";
 import type { NavigationContent } from "@/app/lib/content-navigation";
 import {
@@ -51,6 +57,7 @@ import {
   fetchWeekById,
 } from "@/app/services/api/learning-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
+import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const SIGNED_URL =
@@ -131,9 +138,7 @@ const setup = ({
     is_open_to_trial?: boolean;
     is_published?: boolean;
   }>;
-  /** fetchWeekById が返す週（theme 未公開など親階層のケース用） */
   weekOverride?: typeof week;
-  /** fetchContentById の week 埋め込み（isContentFullyPublished 判定用） */
   contentWeekOverride?: typeof week;
 }) => {
   vi.mocked(getServerAuth).mockResolvedValue({
@@ -149,6 +154,8 @@ const setup = ({
   vi.mocked(fetchThemeNavigationIndex).mockResolvedValue({
     data: {
       orderedContents: orderedContents ?? [currentNav],
+      paidOnlyCount: 3,
+      paidOnlyExerciseCount: 1,
       currentWeekContents: [
         currentSummary(isOpenToTrial, isPublished),
         ...extraWeekContents.map((content) => ({
@@ -179,6 +186,8 @@ const render = async () => renderToStaticMarkup(await ContentPage({ params }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
+  vi.mocked(fetchUpgradePriceLabel).mockResolvedValue("月額1,500円（税込）");
 });
 
 describe("学習画面のスライド配信（署名付きURL）", () => {
@@ -210,6 +219,8 @@ describe("学習画面のスライド配信（署名付きURL）", () => {
     expect(html).not.toContain(SIGNED_URL);
     expect(html).not.toContain(PDF_KEY);
     expect(html).toContain("このコンテンツは無料プランでは閲覧できません");
+    expect(track).toHaveBeenCalledWith("locked_content_viewed", { content_type: "slide" });
+    expect(JSON.stringify(vi.mocked(track).mock.calls)).not.toContain("@");
   });
 
   it.each(["admin", "maintainer"] as const)(
@@ -234,7 +245,8 @@ describe("学習画面のスライド配信（署名付きURL）", () => {
   });
 
   it("member は theme だけ未公開のとき 404（署名を発行しない）", async () => {
-    // week.phase.theme_id は一致するが theme 埋め込みが未公開（RLS で null になるケースと同等）
+    // week.phase.theme_id matches but the embedded theme is unpublished (equivalent to null under
+    // RLS).
     const weekThemeUnpublished = {
       ...week,
       phase: {
@@ -277,6 +289,74 @@ describe("学習画面のスライド配信（署名付きURL）", () => {
       expect(html).toContain(SIGNED_URL);
     }
   );
+});
+
+describe("親階層が未公開のロック対象コンテンツ（issue #242）", () => {
+  const themeUnpublishedWeek = {
+    ...week,
+    phase: {
+      ...week.phase,
+      theme: { id: 1, name: "非公開テーマ", is_published: false, is_deleted: false },
+    },
+  };
+
+  it("お試しユーザーは theme だけ未公開のロック対象コンテンツで、ロック画面ではなく 404 になる", async () => {
+    // The summary (service_role) only looks at the content row's is_published, so it is found.
+    setup({
+      userStatus: "trial",
+      isOpenToTrial: false,
+      weekOverride: themeUnpublishedWeek,
+      contentWeekOverride: themeUnpublishedWeek,
+    });
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(createSlideSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("お試しユーザーは RLS で theme 埋め込みが null のときも 404 になる", async () => {
+    const themeHiddenWeek = { ...week, phase: { ...week.phase, theme: null } };
+    setup({
+      userStatus: "trial",
+      isOpenToTrial: false,
+      weekOverride: themeHiddenWeek as unknown as typeof week,
+      contentWeekOverride: themeHiddenWeek as unknown as typeof week,
+    });
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+
+  it("お試しユーザーは phase が論理削除済みのロック対象コンテンツでも 404 になる", async () => {
+    const phaseDeletedWeek = { ...week, phase: { ...week.phase, is_deleted: true } };
+    setup({
+      userStatus: "trial",
+      isOpenToTrial: false,
+      weekOverride: phaseDeletedWeek,
+      contentWeekOverride: phaseDeletedWeek,
+    });
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+
+  it("お試しユーザーは theme だけ未公開のお試し公開コンテンツでも 404 になる", async () => {
+    setup({
+      userStatus: "trial",
+      isOpenToTrial: true,
+      weekOverride: themeUnpublishedWeek,
+      contentWeekOverride: themeUnpublishedWeek,
+    });
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(createSlideSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("全階層が公開済みならロック画面は従来どおり表示される", async () => {
+    setup({ userStatus: "trial", isOpenToTrial: false });
+
+    const html = await render();
+
+    expect(html).toContain("このコンテンツは無料プランでは閲覧できません");
+    expect(html).toContain("基礎文法（スライド）");
+  });
 });
 
 describe("コンテンツ詳細の前後ナビゲーション（issue #208）", () => {
@@ -522,5 +602,46 @@ describe("概要欄カードの表示位置（issue #221）", () => {
     expect(html).toContain('data-testid="slide-content"');
     expect(html).not.toContain("概要テスト本文");
     expect(html).not.toContain(">概要</h2>");
+  });
+});
+
+describe("お試し → 有料の転換導線（ロック画面, #288）", () => {
+  it("Stripe有効: 定型の概要・規模・実額・/upgrade への CTA を表示する", async () => {
+    vi.stubEnv("STRIPE_ENABLED", "true");
+    setup({ userStatus: "trial", isOpenToTrial: false });
+    vi.mocked(fetchUpgradePriceLabel).mockResolvedValue("月額2,000円（税込）");
+
+    const html = await render();
+
+    expect(html).toContain("このコンテンツではスライドで学びます");
+    expect(html).toContain("有料会員向けのコンテンツが3件（うち演習1件）");
+    expect(html).toContain("月額2,000円（税込）で全コンテンツが使えます");
+    expect(html).toContain('href="/upgrade"');
+    expect(html).toContain('data-analytics-source="lock_screen"');
+    expect(html).toContain("もくもく会への参加");
+  });
+
+  it("Stripe無効: /upgrade への導線を出さず承認の案内のみ表示する", async () => {
+    vi.stubEnv("STRIPE_ENABLED", "false");
+    setup({ userStatus: "trial", isOpenToTrial: false });
+
+    const html = await render();
+
+    expect(html).not.toContain('href="/upgrade"');
+    expect(fetchUpgradePriceLabel).not.toHaveBeenCalled();
+    expect(html).toContain("本登録は運営の承認で行います");
+  });
+
+  it.each([
+    ["active", "member"],
+    ["active", "admin"],
+  ] as const)("%s / %s にはロック画面も CTA も出ない", async (userStatus, userRole) => {
+    vi.stubEnv("STRIPE_ENABLED", "true");
+    setup({ userStatus, userRole, isOpenToTrial: false });
+
+    const html = await render();
+
+    expect(html).not.toContain("有料会員になると使えるもの");
+    expect(html).not.toContain('href="/upgrade"');
   });
 });

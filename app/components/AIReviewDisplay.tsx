@@ -22,7 +22,6 @@ export function AIReviewDisplay({
 }: AIReviewDisplayProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
-  // ローディング中
   if (isLoading) {
     return (
       <div className="mt-4 p-4 border rounded-lg bg-muted/50">
@@ -34,12 +33,10 @@ export function AIReviewDisplay({
     );
   }
 
-  // レビューなし
   if (!review) {
     return null;
   }
 
-  // 失敗
   if (review.status === "failed") {
     return (
       <div className="mt-4 p-4 border border-destructive/50 rounded-lg bg-destructive/5">

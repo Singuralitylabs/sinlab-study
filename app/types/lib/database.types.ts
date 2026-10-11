@@ -61,6 +61,305 @@ export type Database = {
           },
         ];
       };
+      announcement_reads: {
+        Row: {
+          announcement_id: number;
+          read_at: string;
+          user_id: number;
+        };
+        Insert: {
+          announcement_id: number;
+          read_at?: string;
+          user_id: number;
+        };
+        Update: {
+          announcement_id?: number;
+          read_at?: string;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "announcement_reads_announcement_id_fkey";
+            columns: ["announcement_id"];
+            isOneToOne: false;
+            referencedRelation: "announcements";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "announcement_reads_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      announcements: {
+        Row: {
+          body: string;
+          created_at: string;
+          created_by: number | null;
+          email_sent_at: string | null;
+          id: number;
+          is_deleted: boolean;
+          published_at: string | null;
+          send_email: boolean;
+          target_membership_types: string[] | null;
+          target_statuses: string[];
+          title: string;
+          updated_at: string;
+        };
+        Insert: {
+          body: string;
+          created_at?: string;
+          created_by?: number | null;
+          email_sent_at?: string | null;
+          id?: number;
+          is_deleted?: boolean;
+          published_at?: string | null;
+          send_email?: boolean;
+          target_membership_types?: string[] | null;
+          target_statuses: string[];
+          title: string;
+          updated_at?: string;
+        };
+        Update: {
+          body?: string;
+          created_at?: string;
+          created_by?: number | null;
+          email_sent_at?: string | null;
+          id?: number;
+          is_deleted?: boolean;
+          published_at?: string | null;
+          send_email?: boolean;
+          target_membership_types?: string[] | null;
+          target_statuses?: string[];
+          title?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "announcements_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      cron_locks: {
+        Row: {
+          locked_at: string;
+          name: string;
+        };
+        Insert: {
+          locked_at: string;
+          name: string;
+        };
+        Update: {
+          locked_at?: string;
+          name?: string;
+        };
+        Relationships: [];
+      };
+      email_kind_settings: {
+        Row: {
+          enabled: boolean;
+          kind: string;
+          send_days: number[] | null;
+          send_weekday: number | null;
+          updated_at: string;
+          updated_by: number | null;
+        };
+        Insert: {
+          enabled?: boolean;
+          kind: string;
+          send_days?: number[] | null;
+          send_weekday?: number | null;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Update: {
+          enabled?: boolean;
+          kind?: string;
+          send_days?: number[] | null;
+          send_weekday?: number | null;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "email_kind_settings_updated_by_fkey";
+            columns: ["updated_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      email_logs: {
+        Row: {
+          created_at: string;
+          error: string | null;
+          id: number;
+          kind: string;
+          provider_message_id: string | null;
+          reference_key: string;
+          sent_at: string | null;
+          user_id: number;
+        };
+        Insert: {
+          created_at?: string;
+          error?: string | null;
+          id?: number;
+          kind: string;
+          provider_message_id?: string | null;
+          reference_key: string;
+          sent_at?: string | null;
+          user_id: number;
+        };
+        Update: {
+          created_at?: string;
+          error?: string | null;
+          id?: number;
+          kind?: string;
+          provider_message_id?: string | null;
+          reference_key?: string;
+          sent_at?: string | null;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "email_logs_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      email_settings: {
+        Row: {
+          digest_daily_limit: number;
+          id: number;
+          sending_enabled: boolean;
+          sending_updated_at: string | null;
+          sending_updated_by: number | null;
+          service_name: string;
+          service_subtitle: string | null;
+          service_updated_at: string | null;
+          service_updated_by: number | null;
+          updated_at: string;
+          updated_by: number | null;
+        };
+        Insert: {
+          digest_daily_limit: number;
+          id?: number;
+          sending_enabled?: boolean;
+          sending_updated_at?: string | null;
+          sending_updated_by?: number | null;
+          service_name?: string;
+          service_subtitle?: string | null;
+          service_updated_at?: string | null;
+          service_updated_by?: number | null;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Update: {
+          digest_daily_limit?: number;
+          id?: number;
+          sending_enabled?: boolean;
+          sending_updated_at?: string | null;
+          sending_updated_by?: number | null;
+          service_name?: string;
+          service_subtitle?: string | null;
+          service_updated_at?: string | null;
+          service_updated_by?: number | null;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "email_settings_sending_updated_by_fkey";
+            columns: ["sending_updated_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "email_settings_service_updated_by_fkey";
+            columns: ["service_updated_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "email_settings_updated_by_fkey";
+            columns: ["updated_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      email_templates: {
+        Row: {
+          body: string;
+          subject: string;
+          template_key: string;
+          updated_at: string;
+          updated_by: number | null;
+        };
+        Insert: {
+          body: string;
+          subject: string;
+          template_key: string;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Update: {
+          body?: string;
+          subject?: string;
+          template_key?: string;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "email_templates_updated_by_fkey";
+            columns: ["updated_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      email_test_sends: {
+        Row: {
+          created_at: string;
+          id: number;
+          user_id: number | null;
+        };
+        Insert: {
+          created_at?: string;
+          id?: never;
+          user_id?: number | null;
+        };
+        Update: {
+          created_at?: string;
+          id?: never;
+          user_id?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "email_test_sends_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       learning_contents: {
         Row: {
           allowed_submission_types: string;
@@ -279,6 +578,9 @@ export type Database = {
       };
       stripe_subscriptions: {
         Row: {
+          became_active_at: string | null;
+          became_terminal_at: string | null;
+          cancel_at: string | null;
           cancel_at_period_end: boolean;
           checkout_claimed_at: string | null;
           checkout_session_id: string | null;
@@ -292,6 +594,9 @@ export type Database = {
           user_id: number;
         };
         Insert: {
+          became_active_at?: string | null;
+          became_terminal_at?: string | null;
+          cancel_at?: string | null;
           cancel_at_period_end?: boolean;
           checkout_claimed_at?: string | null;
           checkout_session_id?: string | null;
@@ -305,6 +610,9 @@ export type Database = {
           user_id: number;
         };
         Update: {
+          became_active_at?: string | null;
+          became_terminal_at?: string | null;
+          cancel_at?: string | null;
           cancel_at_period_end?: boolean;
           checkout_claimed_at?: string | null;
           checkout_session_id?: string | null;
@@ -383,6 +691,7 @@ export type Database = {
           completed_at: string | null;
           content_id: number;
           created_at: string | null;
+          ever_completed: boolean;
           id: number;
           is_completed: boolean | null;
           user_id: number;
@@ -391,6 +700,7 @@ export type Database = {
           completed_at?: string | null;
           content_id: number;
           created_at?: string | null;
+          ever_completed?: boolean;
           id?: number;
           is_completed?: boolean | null;
           user_id: number;
@@ -399,6 +709,7 @@ export type Database = {
           completed_at?: string | null;
           content_id?: number;
           created_at?: string | null;
+          ever_completed?: boolean;
           id?: number;
           is_completed?: boolean | null;
           user_id?: number;
@@ -428,6 +739,7 @@ export type Database = {
           created_at: string | null;
           display_name: string;
           email: string;
+          email_opt_out_at: string | null;
           id: number;
           is_deleted: boolean | null;
           membership_type: string | null;
@@ -444,6 +756,7 @@ export type Database = {
           created_at?: string | null;
           display_name: string;
           email: string;
+          email_opt_out_at?: string | null;
           id?: number;
           is_deleted?: boolean | null;
           membership_type?: string | null;
@@ -460,6 +773,7 @@ export type Database = {
           created_at?: string | null;
           display_name?: string;
           email?: string;
+          email_opt_out_at?: string | null;
           id?: number;
           is_deleted?: boolean | null;
           membership_type?: string | null;
@@ -480,6 +794,10 @@ export type Database = {
         Args: { p_table: string; p_updates: Json };
         Returns: undefined;
       };
+      claim_email_test_send: {
+        Args: { p_day_start: string; p_limit: number; p_user_id: number };
+        Returns: number;
+      };
       get_students_progress_summary: {
         Args: never;
         Returns: {
@@ -489,8 +807,20 @@ export type Database = {
         }[];
       };
       get_user_id: { Args: never; Returns: number };
+      get_user_membership_type: { Args: never; Returns: string };
       get_user_role: { Args: never; Returns: string };
       get_user_status: { Args: never; Returns: string };
+      get_weekly_funnel: {
+        Args: { weeks?: number };
+        Returns: {
+          activated: number;
+          ended: number;
+          paid_total: number;
+          signups: number;
+          upgraded: number;
+          week_start: string;
+        }[];
+      };
     };
     Enums: {
       [_ in never]: never;

@@ -1,9 +1,9 @@
 import { SLACK_WEBHOOK_TIMEOUT_MS } from "@/app/constants/notifications";
 
 /**
- * Slack Webhookへのブロック送信を共通化する。
- * URL未設定時はスキップ、送信失敗（非2xx・例外）は握りつぶし、
- * 呼び出し元（承認依頼・Stripe Webhook等の主処理）には一切伝播させない。
+ * Shared Slack webhook block sender. Skips when the URL is unset; failures (non-2xx, exceptions)
+ * are swallowed and never propagate to the caller's main processing (approval request, Stripe
+ * webhook, etc.).
  */
 async function postSlackWebhook(
   body: { blocks: unknown[] },
@@ -122,8 +122,8 @@ type PaymentFailedNotificationParams = {
 };
 
 /**
- * Stripeの支払い失敗（invoice.payment_failed）通知。初回失敗ではユーザーを降格せず
- * Smart Retriesに任せるため、運用者への通知のみを行う。
+ * Notifies operators only: the first payment failure does not demote the user and is left to
+ * Smart Retries.
  */
 export async function sendSlackPaymentFailedNotification(
   params: PaymentFailedNotificationParams
@@ -155,7 +155,8 @@ export async function sendSlackPaymentFailedNotification(
           },
           {
             type: "plain_text",
-            // JPYはStripeのゼロ decimal通貨のため amount_due がそのまま円単位（複数通貨対応はスコープ外）
+            // JPY is a zero-decimal currency in Stripe, so amount_due is already yen
+            // (multi-currency out of scope).
             text: `${params.amountDue.toLocaleString("ja-JP")}円`,
           },
         ],
@@ -178,6 +179,48 @@ export async function sendSlackPaymentFailedNotification(
             },
           ]
         : []),
+    ],
+  };
+
+  await postSlackWebhook(body);
+}
+
+type CheckoutRecoveryNotificationParams = {
+  userId: number | null;
+  reason: string;
+  sessionIds: string[];
+};
+
+/**
+ * Notice for a Checkout of this app that cannot be reflected automatically: the Checkout API's
+ * self-recovery gave up (the user keeps getting 409), or the webhook permanently refused a
+ * completed session (the user may have paid yet stays on trial). Either needs manual handling, so
+ * tell operators, not just the log.
+ */
+export async function sendSlackCheckoutRecoveryNotification(
+  params: CheckoutRecoveryNotificationParams
+): Promise<void> {
+  const body = {
+    blocks: [
+      {
+        type: "header",
+        text: {
+          type: "plain_text",
+          text: "⚠️ 決済済みのCheckoutを自動で反映できませんでした",
+          emoji: true,
+        },
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: "*ユーザーID*" },
+          { type: "plain_text", text: params.userId === null ? "不明" : String(params.userId) },
+          { type: "mrkdwn", text: "*理由*" },
+          { type: "plain_text", text: params.reason },
+          { type: "mrkdwn", text: "*Checkoutセッション*" },
+          { type: "plain_text", text: params.sessionIds.join(", ") || "-" },
+        ],
+      },
     ],
   };
 

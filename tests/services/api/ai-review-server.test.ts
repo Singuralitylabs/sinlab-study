@@ -20,9 +20,6 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-// ----------------------------------------------------------------
-// fetchAllSubmissionsWithReviews
-// ----------------------------------------------------------------
 describe("fetchAllSubmissionsWithReviews", () => {
   it("指定ページの提出一覧と総数を返す（2ページ目は range(20, 39)）", async () => {
     const rows = [{ id: 21 }, { id: 22 }];
@@ -82,9 +79,6 @@ describe("fetchAllSubmissionsWithReviews", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// fetchCompletedAIReviewByContentId
-// ----------------------------------------------------------------
 describe("fetchCompletedAIReviewByContentId", () => {
   it("完了済みAIレビューを持つ提出がある場合、そのAIレビューを返す（1クエリ）", async () => {
     const reviewData = { id: 10, status: "completed", submission_id: 1 };
@@ -135,9 +129,6 @@ describe("fetchCompletedAIReviewByContentId", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// fetchCompletedAIReviewContentIds
-// ----------------------------------------------------------------
 describe("fetchCompletedAIReviewContentIds", () => {
   it("contentIdsが空配列ならDB照会せず空Setを返す", async () => {
     const mockClient = createMockSupabaseClient();
@@ -188,9 +179,6 @@ describe("fetchCompletedAIReviewContentIds", () => {
   });
 });
 
-// ----------------------------------------------------------------
-// fetchSubmissionsWithReviewsByUserId
-// ----------------------------------------------------------------
 describe("fetchSubmissionsWithReviewsByUserId", () => {
   const listSelect =
     "*, content:learning_contents(id, title), ai_review:ai_reviews(id, status, overall_score, review_content, reviewed_at, error_message)";

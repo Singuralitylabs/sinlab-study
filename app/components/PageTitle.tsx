@@ -11,7 +11,6 @@ interface PageTitleProps {
   title: string;
   breadcrumbs?: BreadcrumbItem[];
   description?: string;
-  /** タイトル横に表示する補助バッジ（未公開バッジ等） */
   badge?: ReactNode;
 }
 

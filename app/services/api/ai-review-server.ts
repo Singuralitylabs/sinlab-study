@@ -8,17 +8,12 @@ import type {
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
-/** 提出一覧表示に必要な ai_reviews カラム（token 等のメタは取得しない） */
 const AI_REVIEW_LIST_SELECT =
   "ai_review:ai_reviews(id, status, overall_score, review_content, reviewed_at, error_message)";
 
-/** 提出一覧の content はタイトル表示用の最小カラムのみ */
 const LIST_CONTENT_SELECT = "id, title";
 
-/**
- * ユーザーの提出+AIレビュー一覧をページネーション付きで取得（RLS経由）
- * content / ai_reviews は一覧表示に必要なカラムのみ select する。
- */
+/** Select only the columns the list needs (content and ai_reviews); no heavy text. */
 export async function fetchSubmissionsWithReviewsByUserId(
   userId: number,
   {
@@ -59,9 +54,9 @@ export async function fetchSubmissionsWithReviewsByUserId(
 }
 
 /**
- * 提出+AIレビュー一覧をページネーション付きで取得（管理者・講師用、Service Role）
- * コード本文込みの重い行を全件ロードしないよう range で指定ページ分のみ取得し、総数を count で返す。
- * content は一覧表示に使うカラムのみ select する（text_content 等の本文は取得しない）。
+ * Admin / instructor list (service_role). Fetch only the requested page via range and return the
+ * total via count, so heavy rows with code bodies are never loaded in full. content selects only
+ * list columns (no text_content etc.).
  */
 export async function fetchAllSubmissionsWithReviews({
   page = 1,
@@ -96,10 +91,7 @@ export async function fetchAllSubmissionsWithReviews({
   return { data, count: count ?? 0, error: null };
 }
 
-/**
- * ユーザーが特定コンテンツで取得した完了済みAIレビューを取得（コンテンツページ表示用）
- * RLS依存を避けるためadminクライアントを使用し、userId フィルタで安全性を担保
- */
+/** Uses the admin client to avoid depending on RLS; safety comes from the userId filter. */
 export async function fetchCompletedAIReviewByContentId(
   userId: number,
   contentId: number
@@ -126,15 +118,12 @@ export async function fetchCompletedAIReviewByContentId(
     return { data: null, error: null };
   }
 
-  // ai_reviews.submission_id は UNIQUE のため PostgREST は to-one（単一オブジェクト）を返す。
-  // 生成型は to-many も許容するため unknown 経由でキャストする。
+  // ai_reviews.submission_id is UNIQUE so PostgREST returns a to-one object; generated types also
+  // allow to-many, hence the cast via unknown.
   return { data: submission.ai_review as unknown as AIReview, error: null };
 }
 
-/**
- * 複数コンテンツIDに対して完了済みAIレビューが存在するIDのSetを返す（フェーズページ一覧用）
- * RLS依存を避けるためadminクライアントを使用し、userId フィルタで安全性を担保
- */
+/** Uses the admin client to avoid depending on RLS; safety comes from the userId filter. */
 export async function fetchCompletedAIReviewContentIds(
   userId: number,
   contentIds: number[]
@@ -162,9 +151,6 @@ export async function fetchCompletedAIReviewContentIds(
   return { data: reviewedContentIds, error: null };
 }
 
-/**
- * AIレビューレコードをUPSERT（pending状態で作成、既存があれば更新）
- */
 export async function upsertPendingAIReview(submissionId: number): Promise<{ id: number } | null> {
   const supabase = await createAdminSupabaseClient();
 
@@ -192,9 +178,6 @@ export async function upsertPendingAIReview(submissionId: number): Promise<{ id:
   return data;
 }
 
-/**
- * AIレビューをprocessing状態に更新
- */
 export async function updateAIReviewProcessing(reviewId: number): Promise<boolean> {
   const supabase = await createAdminSupabaseClient();
 
@@ -211,9 +194,6 @@ export async function updateAIReviewProcessing(reviewId: number): Promise<boolea
   return true;
 }
 
-/**
- * AIレビューをcompleted状態に更新（結果保存）
- */
 export async function updateAIReviewCompleted(
   reviewId: number,
   params: {
@@ -247,9 +227,6 @@ export async function updateAIReviewCompleted(
   return true;
 }
 
-/**
- * AIレビューをfailed状態に更新
- */
 export async function updateAIReviewFailed(
   reviewId: number,
   errorMessage: string

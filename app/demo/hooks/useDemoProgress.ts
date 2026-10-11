@@ -20,12 +20,12 @@ function writeToStorage(progress: ProgressMap): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
   } catch {
-    // localStorage が使えない環境では無視
+    // Ignore when localStorage is unavailable.
   }
 }
 
 export function useDemoProgress() {
-  // SSR とクライアント初回描画を一致させるため、初期値は空。localStorage は effect で読む。
+  // Start empty so SSR and the first client render match; read localStorage in an effect.
   const [progress, setProgress] = useState<ProgressMap>({});
   const [hydrated, setHydrated] = useState(false);
 

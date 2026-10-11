@@ -29,12 +29,9 @@ export interface ContentFilterOptions {
 }
 
 /**
- * コンテンツ一覧（join結果）からフィルタセレクトの選択肢を導出する。追加フェッチは行わない。
- * 呼び出し前に sortContentsByHierarchy を通しておくことで、選択肢もテーマ→フェーズ→週の
- * 階層順になる。
- *
- * 管理画面一覧は `deriveWeekSelectOptions`（週一覧）を使う。本関数はテストと、
- * コンテンツ join 結果から選択肢を作りたい呼び出し向けに残す。
+ * Derives filter options from the contents join; no extra fetch. Run sortContentsByHierarchy first
+ * so options come in theme -> phase -> week order. The admin list uses deriveWeekSelectOptions
+ * (week list); this one is kept for tests and callers that build options from a contents join.
  */
 export function deriveFilterOptions(contents: ManageContentListItem[]): ContentFilterOptions {
   const themes = new Map<number, ThemeFilterOption>();
@@ -67,10 +64,9 @@ export function deriveFilterOptions(contents: ManageContentListItem[]): ContentF
 }
 
 /**
- * 週一覧（join結果）からテーマ→フェーズ→週の連動セレクトの選択肢を導出する。追加フェッチは行わない。
- * 呼び出し前に sortWeeksByHierarchy を通しておくことで、選択肢もテーマ→フェーズ→週の
- * 階層順になる。`learning_weeks.phase_id` は NOT NULL のため、週は常に選択肢に含める
- * （`deriveFilterOptions` と異なり「週未設定」の除外は発生しない）。
+ * Derives the cascading theme -> phase -> week options from the week list; no extra fetch. Run
+ * sortWeeksByHierarchy first for hierarchical order. learning_weeks.phase_id is NOT NULL, so weeks
+ * are always included (unlike deriveFilterOptions, there is no "no week" exclusion).
  */
 export function deriveWeekSelectOptions(weeks: ManageWeekListItem[]): ContentFilterOptions {
   const themes = new Map<number, ThemeFilterOption>();
@@ -100,8 +96,7 @@ export interface ContentFilterParams {
 }
 
 /**
- * タイトル検索でコンテンツを絞り込む。
- * テーマ / フェーズ / 週 / 種別は `fetchAllContents` 側の SQL フィルタに寄せた（#196）。
+ * Title search only; theme/phase/week/type filtering moved to fetchAllContents' SQL filters (#196).
  */
 export function filterContents(
   contents: ManageContentListItem[],

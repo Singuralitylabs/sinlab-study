@@ -18,10 +18,10 @@ import { AiReviewRequestSchema, validateRequest } from "@/app/services/api/schem
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
-// Next.jsのroute segment configはリテラル値のみ静的解析されるため定数化できない。
-// generateReview()内で全試行+リトライ待機の合計を GEMINI_TOTAL_BUDGET_MS（app/constants/gemini.ts）
-// で頭打ちにしているため、Gemini呼び出しにかかる時間はこの値を超えない。
-// DB往復等のオーバーヘッド分の余裕を残して、GEMINI_TOTAL_BUDGET_MS より大きい60秒に設定している。
+// Next.js route segment config is statically analyzed as literals only, so this can't be a
+// constant. generateReview() caps all attempts + retry waits at GEMINI_TOTAL_BUDGET_MS
+// (app/constants/gemini.ts), so Gemini time never exceeds it; 60s (greater than the budget) leaves
+// headroom for DB round trips.
 export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
@@ -32,7 +32,6 @@ export async function POST(request: NextRequest) {
     }
     const { submissionId } = validation.data;
 
-    // 認証チェック
     const { user, userId, userStatus } = await getServerAuth();
     if (!user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
@@ -51,7 +50,6 @@ export async function POST(request: NextRequest) {
 
     const supabase = await createServerSupabaseClient();
 
-    // 提出データ + コンテンツ取得
     const { data: submission, error: submissionError } = await supabase
       .from("submissions")
       .select("*, content:learning_contents(*)")
@@ -62,19 +60,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "提出データが見つかりません" }, { status: 404 });
     }
 
-    // 本人の提出か検証
     if (submission.user_id !== userId) {
       return NextResponse.json({ error: "権限がありません" }, { status: 403 });
     }
 
-    // コンテンツ可視性チェック: 提出後にお試し非公開化・非公開化されたコンテンツは403
-    // （nested select の content は RLS により null になるため、先に判定して
-    // 「演習課題が見つかりません」という紛らわしいエラーを避ける）
+    // Visibility check: content that became non-trial/unpublished after submission gives 403. Check
+    // first because the nested select's content is null under RLS, which would otherwise yield the
+    // misleading "exercise not found" error.
     if (!(await isContentVisible(supabase, submission.content_id))) {
       return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
     }
 
-    // 演習コンテンツの確認
     const content = submission.content;
     if (!content?.exercise_instructions) {
       return NextResponse.json(
@@ -83,7 +79,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 提出内容の取得（コードは単一/複数ファイルを正規化して扱う）
     let reviewSubmission: ReviewSubmission;
     if (submission.submission_type === "code") {
       const files = getSubmissionCodeFiles(submission);
@@ -91,7 +86,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "提出内容が空です" }, { status: 400 });
       }
 
-      // 全ファイル合計のコード長チェック
       const totalLength = files.reduce((sum, file) => sum + file.content.length, 0);
       if (totalLength > GEMINI_MAX_CODE_LENGTH) {
         return NextResponse.json(
@@ -108,7 +102,7 @@ export async function POST(request: NextRequest) {
       reviewSubmission = { type: "url", content: submission.url };
     }
 
-    // 同一ユーザー・同一コンテンツでのAIレビュー利用済みチェック（1課題につき1回制限）
+    // One AI review per user and content.
     const contentId = submission.content_id;
     const { data: userSubmissionsForContent } = await supabase
       .from("submissions")
@@ -144,13 +138,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // AIレビューレコードをUPSERT（pending）
     const reviewRecord = await upsertPendingAIReview(submissionId);
     if (!reviewRecord) {
       return NextResponse.json({ error: "AIレビューの初期化に失敗しました" }, { status: 500 });
     }
 
-    // processing に更新
     const processingResult = await updateAIReviewProcessing(reviewRecord.id);
     if (!processingResult) {
       return NextResponse.json(
@@ -159,7 +151,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Gemini API 呼び出し
     try {
       const result = await generateReview({
         exerciseInstructions: content.exercise_instructions,
@@ -168,7 +159,6 @@ export async function POST(request: NextRequest) {
         apiKey,
       });
 
-      // completed 状態で保存
       await updateAIReviewCompleted(reviewRecord.id, {
         reviewContent: result.reviewContent,
         overallScore: result.overallScore,

@@ -1,9 +1,7 @@
 import { compareGroupLevel } from "@/app/lib/content-grouping";
 
-/** 前後ナビの境界種別。URLパラメータではなく隣接要素の所属比較で決める */
 export type NavigationBoundary = "same-week" | "week" | "phase";
 
-/** テーマ内通し順の構築に使う週（フェーズ埋め込み付き） */
 export interface NavigationWeek {
   id: number;
   name: string;
@@ -15,7 +13,6 @@ export interface NavigationWeek {
   } | null;
 }
 
-/** 通し順の構築に使うコンテンツの最小フィールド */
 export interface NavigationContentInput {
   id: number;
   title: string;
@@ -23,7 +20,6 @@ export interface NavigationContentInput {
   display_order: number | null;
 }
 
-/** テーマ内通し列の1件 */
 export interface NavigationContent {
   id: number;
   title: string;
@@ -33,18 +29,14 @@ export interface NavigationContent {
   phaseName: string;
 }
 
-/** 前後ナビの遷移先（所属階層と境界種別付き） */
 export interface AdjacentContent extends NavigationContent {
   boundary: NavigationBoundary;
 }
 
 /**
- * 週をフェーズ→週の階層順に並べ、各週のコンテンツを `display_order` 順に
- * つなぎ合わせてテーマ内の通し列を作る。
- *
- * 並び替えは `compareGroupLevel()` に委譲する（display_order 欠落は末尾、
- * 同値は id でタイブレーク）。空の週・空のフェーズは1件も寄与しない。
- * `phase` が null の週、および週リストに存在しない `week_id` のコンテンツは除外する。
+ * Sort by phase then week via compareGroupLevel() (missing display_order last, id tiebreak). Empty
+ * weeks/phases contribute nothing; weeks with a null phase and contents whose week_id isn't in the
+ * week list are excluded.
  */
 export function buildThemeContentOrder(
   weeks: NavigationWeek[],
@@ -108,11 +100,9 @@ function toAdjacent(
 }
 
 /**
- * 通し列上の前後コンテンツを返す。境界種別は隣接要素との phaseId / weekId
- * の比較だけで決め、URLパラメータには依存しない。
- *
- * `currentContentId` が列に無い場合、および通し列が空の場合は
- * `{ prev: null, next: null }`。
+ * Boundary kind comes only from comparing phaseId / weekId of the neighbours, never from URL
+ * params. Returns { prev: null, next: null } when the current content isn't in the sequence or the
+ * sequence is empty.
  */
 export function resolveAdjacentContents(
   orderedContents: NavigationContent[],
@@ -130,15 +120,14 @@ export function resolveAdjacentContents(
   };
 }
 
-/** 末尾ボタンの行き先。通し列上のテーマ末尾は theme、ナビ縮退時は phase */
+/** End-button target: "theme" at the end of the theme sequence, "phase" in the degraded mode. */
 export type NavigationEndFallback = "theme" | "phase";
 
 /**
- * コンテンツ詳細の前後ナビを解決する。
- *
- * 現在のコンテンツがテーマ通し列にあるときはテーマ内遷移（末尾は「テーマに戻る」）。
- * 通し列が空、または現在のコンテンツが列に無い縮退時（未公開フェーズ配下の公開週など）は
- * 現在の週のサマリーだけで前後を算出し、末尾は従来どおり「フェーズに戻る」。
+ * Normal case: navigate within the theme sequence (the end goes back to the theme). Degraded case
+ * (empty sequence, or the current content isn't in it, e.g. a published week under an unpublished
+ * phase): compute from the current week's summary only, and the end goes back to the phase as
+ * before.
  */
 export function resolveContentNavigation(
   orderedContents: NavigationContent[],

@@ -2,15 +2,10 @@ import type { PostgrestError } from "@supabase/supabase-js";
 import type { LearningContent, Submission, SubmissionWithContent, UserType } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
-/**
- * 提出履歴一覧用: content は一覧表示に必要な最小カラムのみ（本文等の重いテキストは取得しない）
- */
+/** Minimal content columns for the history list (no heavy text such as bodies). */
 export const SUBMISSION_CONTENT_COLUMNS =
   "id, title, content_type, is_published, is_open_to_trial, week_id";
 
-/**
- * ユーザーの提出履歴を取得（content の本文系カラムは除外）
- */
 export async function fetchSubmissionsByUserId(userId: number): Promise<{
   data: SubmissionWithContent[] | null;
   error: PostgrestError | null;
@@ -32,10 +27,7 @@ export async function fetchSubmissionsByUserId(userId: number): Promise<{
   return { data: data as SubmissionWithContent[], error: null };
 }
 
-/**
- * ユーザーの特定コンテンツへの最新提出を1件取得（コンテンツページ表示用）
- * RLS依存を避けるためadminクライアントを使用し、userIdフィルタで安全性を担保
- */
+/** Uses the admin client to avoid depending on RLS; safety comes from the userId filter. */
 export async function fetchLatestSubmissionByContentId(
   userId: number,
   contentId: number
@@ -68,9 +60,8 @@ interface RecentSubmission {
 }
 
 /**
- * 直近の提出と提出総数を取得（管理ダッシュボード用。コード本文などの重いカラムは取得しない）
- * count: "exact" を併用し、直近N件と総数を1クエリで取得する。
- * Service Roleクライアントを使用（呼び出し元で権限チェック済み前提）
+ * Service role client (caller has already checked permission). count: "exact" fetches the latest
+ * N and the total in one query.
  */
 export async function fetchRecentSubmissions(limit: number): Promise<{
   data: RecentSubmission[] | null;

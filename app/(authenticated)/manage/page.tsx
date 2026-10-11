@@ -1,15 +1,20 @@
 import { BookOpen, Calendar, ClipboardList, FileText, FolderOpen, Users } from "lucide-react";
 import Link from "next/link";
 import { PageTitle } from "@/app/components/PageTitle";
-import { fetchManageCounts } from "@/app/services/api/admin-server";
+import { fetchManageCounts, fetchWeeklyFunnel } from "@/app/services/api/admin-server";
 import { fetchRecentSubmissions } from "@/app/services/api/submissions-server";
 import { Card, CardContent } from "@/components/ui/card";
+import { WeeklyFunnelCard } from "./components/WeeklyFunnelCard";
 
 const RECENT_SUBMISSIONS_LIMIT = 5;
 
 export default async function ManageDashboardPage() {
-  const [{ data: counts }, { data: recentSubmissions, count: submissionsCount }] =
-    await Promise.all([fetchManageCounts(), fetchRecentSubmissions(RECENT_SUBMISSIONS_LIMIT)]);
+  const [{ data: counts }, { data: recentSubmissions, count: submissionsCount }, funnel] =
+    await Promise.all([
+      fetchManageCounts(),
+      fetchRecentSubmissions(RECENT_SUBMISSIONS_LIMIT),
+      fetchWeeklyFunnel(),
+    ]);
 
   const stats = [
     {
@@ -75,6 +80,8 @@ export default async function ManageDashboardPage() {
           </Link>
         ))}
       </div>
+
+      <WeeklyFunnelCard rows={funnel.data} errorMessage={funnel.error} />
 
       <Card>
         <CardContent className="pt-6">

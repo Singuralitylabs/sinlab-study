@@ -20,7 +20,6 @@ export default async function InstructorLayout({ children }: { children: React.R
 
   return (
     <div>
-      {/* 講師画面ナビゲーション */}
       <nav className="mb-6 overflow-x-auto">
         <div className="flex gap-1 pb-2">
           {INSTRUCTOR_NAV_ITEMS.map((item) => (

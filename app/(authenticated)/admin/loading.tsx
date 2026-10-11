@@ -10,7 +10,6 @@ export default function AdminDashboardLoading() {
         <Skeleton className="h-4 w-56" />
       </div>
 
-      {/* 統計カード */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         {[1, 2, 3, 4, 5, 6].map((i) => (
           <Card key={i}>
@@ -23,7 +22,6 @@ export default function AdminDashboardLoading() {
         ))}
       </div>
 
-      {/* 最近の提出 */}
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center justify-between mb-4">

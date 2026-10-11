@@ -1,14 +1,21 @@
-import { BookOpen, CheckCircle, Clock, TrendingUp } from "lucide-react";
+import { BookOpen, CheckCircle, Clock, Megaphone, TrendingUp } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
+import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
+import { DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT } from "@/app/constants/announcements";
 import { getWelcomeStepsForStatus } from "@/app/constants/onboarding";
 import { isStripeEnabled } from "@/app/constants/stripe";
+import { formatDate } from "@/app/lib/format-date";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
+import { shouldShowTrialNextStep } from "@/app/lib/trial-upgrade";
+import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
 import {
   fetchGettingStartedProgress,
   fetchOnboardingStatus,
 } from "@/app/services/api/onboarding-server";
+import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { checkInstructorPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Button } from "@/components/ui/button";
@@ -33,11 +40,16 @@ export default async function HomePage() {
 
   const isMember = !checkInstructorPermissions(userRole);
 
-  const [{ data: themeData }, onboardingResult, gettingStartedResult] = await Promise.all([
-    fetchThemeProgressSummaries(userId),
-    isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
-    isMember ? fetchGettingStartedProgress(userId) : Promise.resolve({ data: null, error: null }),
-  ]);
+  const [{ data: themeData }, onboardingResult, gettingStartedResult, announcementsResult] =
+    await Promise.all([
+      fetchThemeProgressSummaries(userId),
+      isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
+      isMember ? fetchGettingStartedProgress(userId) : Promise.resolve({ data: null, error: null }),
+      getViewerAnnouncements(),
+    ]);
+  const unreadAnnouncements = (announcementsResult.data ?? [])
+    .filter((announcement) => !announcement.isRead)
+    .slice(0, DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT);
   const themes = themeData ?? [];
   const totalContents = themes.reduce((sum, t) => sum + t.totalContents, 0);
   const completedContents = themes.reduce((sum, t) => sum + t.completedContents, 0);
@@ -54,6 +66,10 @@ export default async function HomePage() {
     firstThemeHref
   );
 
+  const showTrialNextStep = shouldShowTrialNextStep(userStatus, userRole, themes);
+  const stripeEnabled = isStripeEnabled();
+  const priceLabel = showTrialNextStep && stripeEnabled ? await fetchUpgradePriceLabel() : null;
+
   return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-3xl font-bold tracking-tight mb-6">ダッシュボード</h1>
@@ -65,7 +81,39 @@ export default async function HomePage() {
         />
       )}
 
-      {/* 全体進捗 */}
+      {unreadAnnouncements.length > 0 && (
+        <Card className="mb-6">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Megaphone className="h-5 w-5 text-primary" />
+                未読のお知らせ
+              </h2>
+              <Link href="/announcements" className="text-sm text-primary hover:underline">
+                すべて見る
+              </Link>
+            </div>
+            <ul className="space-y-2">
+              {unreadAnnouncements.map((announcement) => (
+                <li key={announcement.id}>
+                  <Link
+                    href={`/announcements/${announcement.id}`}
+                    className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 hover:bg-accent"
+                  >
+                    <span className="truncate font-medium">{announcement.title}</span>
+                    {announcement.published_at && (
+                      <span className="shrink-0 text-sm text-muted-foreground">
+                        {formatDate(announcement.published_at)}
+                      </span>
+                    )}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
       <Card className="mb-6">
         <CardContent className="pt-6">
           <div className="flex items-center gap-4 mb-4">
@@ -84,9 +132,23 @@ export default async function HomePage() {
         </CardContent>
       </Card>
 
+      {showTrialNextStep && (
+        <Card className="mb-6">
+          <CardContent className="pt-6 space-y-3">
+            <h2 className="text-lg font-semibold">次のステップ</h2>
+            <p className="text-sm">お試しコンテンツをすべて完了しました。続きは有料会員で</p>
+            <UpgradeBenefitsList />
+            <UpgradeCta
+              stripeEnabled={stripeEnabled}
+              priceLabel={priceLabel}
+              source={UPGRADE_CTA_SOURCE.DASHBOARD_CARD}
+            />
+          </CardContent>
+        </Card>
+      )}
+
       {isMember && <GettingStartedChecklist items={gettingStartedItems} />}
 
-      {/* テーマ一覧 */}
       <div className="grid gap-4">
         <h2 className="text-lg font-semibold flex items-center gap-2">
           <BookOpen className="h-5 w-5" />
@@ -111,7 +173,6 @@ export default async function HomePage() {
                   className={`overflow-hidden transition-all hover:shadow-md hover:border-primary/20 ${isCompleted ? "border-l-4 border-l-success" : ""}`}
                 >
                   <div className="flex">
-                    {/* サムネイル */}
                     <div className="relative w-24 shrink-0 bg-linear-to-br from-primary/5 to-primary/15">
                       {theme.image_url ? (
                         <Image
@@ -161,7 +222,6 @@ export default async function HomePage() {
         )}
       </div>
 
-      {/* 学習を始めるボタン */}
       {themes.length > 0 && (
         <div className="mt-6 text-center">
           <Button asChild>

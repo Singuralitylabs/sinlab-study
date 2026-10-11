@@ -2,7 +2,11 @@ import { Bot, Calendar, CheckCircle, Clock, FileText, Lock, PenLine, Play } from
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
+import { UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
+import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
+import { isStripeEnabled } from "@/app/constants/stripe";
+import { USER_STATUS } from "@/app/constants/user";
 import { fetchCompletedAIReviewContentIds } from "@/app/services/api/ai-review-server";
 import {
   type ContentVisibilitySummary,
@@ -12,6 +16,7 @@ import {
   fetchWeeksWithContentsByPhaseId,
   isContentLockedForUser,
 } from "@/app/services/api/learning-server";
+import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import type { ContentType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
@@ -69,14 +74,13 @@ export default async function PhasePage({ params }: PageProps) {
     notFound();
   }
 
-  // お試しユーザー（status='trial'）にはお試し非公開コンテンツをロック表示する
   const isLocked = (content: ContentVisibilitySummary) =>
     isContentLockedForUser(userStatus, content.is_open_to_trial);
 
-  // 進捗の分母は可視（ロックされていない）かつ、コンテンツ・週・フェーズ・テーマの
-  // 全階層が公開済みのもののみとする（お試しユーザーは体験範囲内の進捗を示す。機能設計書 2.6
-  // 参照。admin / maintainer がプレビュー中の未公開コンテンツ・未公開の週配下のコンテンツは
-  // 完了不能なため分母から除く。issue #68）
+  // The progress denominator counts only visible (unlocked) content whose content/week/phase/theme
+  // are all published (trial users see progress within their scope; spec 2.6). Unpublished content
+  // previewed by admin/maintainer and content under unpublished weeks can't be completed, so
+  // exclude it (#68).
   const ancestorsPublished = theme.is_published && phase.is_published;
   const isCountable = (content: ContentVisibilitySummary, week: { is_published: boolean }) =>
     !isLocked(content) && content.is_published && week.is_published && ancestorsPublished;
@@ -101,6 +105,11 @@ export default async function PhasePage({ params }: PageProps) {
   const totalCount = visibleContentIds.length;
   const progressValue = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
+  const hasLockedContent = weeks?.some((w) => w.contents.some((c) => isLocked(c))) ?? false;
+  const showUpgradeCta = userStatus === USER_STATUS.TRIAL && hasLockedContent;
+  const stripeEnabled = isStripeEnabled();
+  const priceLabel = showUpgradeCta && stripeEnabled ? await fetchUpgradePriceLabel() : null;
+
   return (
     <div className="max-w-4xl mx-auto">
       <PageTitle
@@ -114,7 +123,6 @@ export default async function PhasePage({ params }: PageProps) {
         badge={<UnpublishedBadge isPublished={phase.is_published} />}
       />
 
-      {/* 進捗サマリー */}
       {totalCount > 0 && (
         <Card className="mb-6">
           <CardContent className="pt-6">
@@ -148,7 +156,6 @@ export default async function PhasePage({ params }: PageProps) {
 
             return (
               <div key={week.id}>
-                {/* 週ヘッダー */}
                 <div className="flex items-center gap-3 mb-3">
                   <div
                     className={`p-2 rounded-full ${
@@ -177,13 +184,12 @@ export default async function PhasePage({ params }: PageProps) {
                   )}
                 </div>
 
-                {/* コンテンツ一覧 */}
                 {week.contents.length === 0 ? (
                   <p className="text-sm text-muted-foreground ml-12">
                     コンテンツはまだ登録されていません。
                   </p>
                 ) : (
-                  <div className="grid gap-2 ml-5 border-l-2 border-border pl-5">
+                  <div className="grid grid-cols-1 gap-2 ml-5 border-l-2 border-border pl-5">
                     {week.contents.map((content) => {
                       const locked = isLocked(content);
                       const isCompleted = !locked && (progressMap.get(content.id) || false);
@@ -200,7 +206,7 @@ export default async function PhasePage({ params }: PageProps) {
                             } ${locked ? "opacity-60" : ""}`}
                           >
                             <CardContent className="py-3 px-4">
-                              <div className="flex items-center gap-3">
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                                 <div
                                   className={`p-1.5 rounded-full shrink-0 ${
                                     isCompleted
@@ -216,8 +222,8 @@ export default async function PhasePage({ params }: PageProps) {
                                     <Clock className="h-4 w-4" />
                                   )}
                                 </div>
-                                <div className="flex-1 min-w-0">
-                                  <h3 className="text-sm font-medium group-hover:text-primary transition-colors truncate">
+                                <div className="flex-1 min-w-40">
+                                  <h3 className="text-sm font-medium group-hover:text-primary transition-colors sm:truncate">
                                     {content.title}
                                   </h3>
                                 </div>
@@ -228,7 +234,7 @@ export default async function PhasePage({ params }: PageProps) {
                                 {locked && (
                                   <Badge variant="outline" className="gap-1 shrink-0 text-xs">
                                     <Lock className="h-3 w-3" />
-                                    お試し非公開
+                                    有料会員向け
                                   </Badge>
                                 )}
                                 <UnpublishedBadge isPublished={content.is_published} />
@@ -254,6 +260,22 @@ export default async function PhasePage({ params }: PageProps) {
               </div>
             );
           })}
+
+          {showUpgradeCta && (
+            <Card>
+              <CardContent className="py-4 space-y-2">
+                <p className="text-sm">
+                  鍵付きのコンテンツは有料会員になると閲覧できます
+                  {stripeEnabled && " →"}
+                </p>
+                <UpgradeCta
+                  stripeEnabled={stripeEnabled}
+                  priceLabel={priceLabel}
+                  source={UPGRADE_CTA_SOURCE.PHASE_LIST}
+                />
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
     </div>

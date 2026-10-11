@@ -29,7 +29,8 @@ interface CodeFileInput {
   filename: string;
   language: CodeLanguage;
   content: string;
-  // ユーザーがファイル名を手動編集したか。false の間は言語変更にあわせて初期値を自動更新する
+  // Whether the user edited the filename by hand; while false, the default follows language
+  // changes.
   filenameEdited: boolean;
 }
 
@@ -63,12 +64,10 @@ export function SubmissionForm({
     setCodeFiles((prev) => prev.map((file, i) => (i === index ? { ...file, ...patch } : file)));
   };
 
-  // ファイル名入力欄の変更。手動編集とみなし、以後は言語変更で初期値を上書きしない
   const handleFilenameChange = (index: number, filename: string) => {
     updateCodeFile(index, { filename, filenameEdited: true });
   };
 
-  // 言語変更。ファイル名が未編集なら、新しい言語のデフォルト名へ追従させる
   const handleLanguageChange = (index: number, language: CodeLanguage) => {
     setCodeFiles((prev) =>
       prev.map((file, i) => {
@@ -86,8 +85,9 @@ export function SubmissionForm({
 
   const addCodeFile = () => {
     setCodeFiles((prev) => {
-      // 単一→複数ファイル化の初回は、ファイル名が空のファイルにデフォルト名を補完する
-      // （単一ファイル時はファイル名欄が非表示で未入力のため、複数化と同時に必須化される対策）
+      // On the first single -> multi-file switch, fill default names for empty filenames (the
+      // filename field is hidden and blank in single-file mode, so it would become required as soon
+      // as it switches to multi).
       const assigned: string[] = prev
         .map((f) => f.filename)
         .filter((name) => name.trim().length > 0);
@@ -245,7 +245,6 @@ export function SubmissionForm({
     }
   };
 
-  // コード提出: 全ファイルにコードがあり、複数ファイル時はファイル名も必須
   const isCodeValid =
     codeFiles.length > 0 &&
     codeFiles.every(
@@ -259,7 +258,6 @@ export function SubmissionForm({
   return (
     <div className="space-y-4">
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* 提出タイプ選択（both のときのみ表示） */}
         {allowedSubmissionTypes === "both" && (
           <div className="flex gap-4">
             <button
@@ -289,7 +287,6 @@ export function SubmissionForm({
           </div>
         )}
 
-        {/* 入力フィールド */}
         {submissionType === "code" ? (
           <div className="space-y-3">
             {codeFiles.map((file, index) => (
@@ -370,7 +367,6 @@ export function SubmissionForm({
           </div>
         )}
 
-        {/* メッセージ */}
         {message && (
           <Alert variant={message.type === "error" ? "destructive" : "default"}>
             <AlertDescription className={message.type === "success" ? "text-success" : ""}>
@@ -379,7 +375,6 @@ export function SubmissionForm({
           </Alert>
         )}
 
-        {/* 提出ボタン */}
         <Button type="submit" disabled={!isValid || isLoading} className="w-full">
           {isLoading ? (
             <Loader2 className="h-5 w-5 animate-spin" />
@@ -392,7 +387,6 @@ export function SubmissionForm({
         </Button>
       </form>
 
-      {/* AIレビュー表示（NoSSR 側でレビュー／ローディング時のみチャンクをマウント） */}
       <AIReviewDisplayNoSSR
         review={aiReview}
         isLoading={isReviewLoading}

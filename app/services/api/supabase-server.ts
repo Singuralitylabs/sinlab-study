@@ -2,7 +2,6 @@ import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
-// サーバーサイド用Supabaseクライアント（認証付き）
 export async function createServerSupabaseClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -18,28 +17,31 @@ export async function createServerSupabaseClient() {
       getAll() {
         return cookieStore.getAll();
       },
-      // 第2引数 headers（Cache-Control 等）は next/headers 経由ではレスポンスに設定できないため受け取らない。
-      // トークン更新は通常 proxy.ts で先に行われ、そちらでヘッダーを付与している
+      // The second argument (headers such as Cache-Control) is not accepted: it cannot be set on
+      // the response via next/headers. Token refresh normally happens first in proxy.ts, which
+      // sets those headers.
       setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
         try {
           for (const { name, value, options } of cookiesToSet) {
             cookieStore.set(name, value, options);
           }
         } catch {
-          // サーバーコンポーネントで呼び出された場合のエラーハンドリング
+          // Expected when called from a Server Component (cookies cannot be set).
         }
       },
     },
   });
 }
 
-// サーバーサイド用Supabaseクライアント（Service Role: RLSバイパス）
-// 管理者・講師向けの権限チェック済みクエリ、および通常クライアントでは RLS で
-// 見えない行を読むサーバー処理（OAuthコールバックの users 存在確認）に使用。
-// SUPABASE_SERVICE_ROLE_KEY 未設定時は throw する（通常クライアントへの暗黙フォールバックはしない）。
-// RLS 適用の通常クライアントが必要な経路は、呼び出し側が createServerSupabaseClient() を明示的に選ぶ。
-// ReturnType<typeof createClient> はジェネリック制約側に解決されスキーマが never になるため SupabaseClient を使う。
-// async は呼び出し側互換のため残す（内部に await は無い）。
+// Service role client (bypasses RLS) for permission-checked admin / instructor queries and server
+// work reading rows hidden by RLS from the normal client (users existence check in the OAuth
+// callback).
+// Throws when SUPABASE_SERVICE_ROLE_KEY is unset: there is no implicit fallback to the normal
+// client. Paths that need the RLS-applied client must explicitly choose
+// createServerSupabaseClient().
+// SupabaseClient is used because ReturnType<typeof createClient> resolves to the generic
+// constraint and makes the schema `never`. `async` is kept for caller compatibility (no await
+// inside).
 let cachedAdminClient: SupabaseClient | null = null;
 
 export async function createAdminSupabaseClient() {

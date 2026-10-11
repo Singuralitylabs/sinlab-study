@@ -6,12 +6,18 @@ vi.mock("@supabase/ssr", () => ({
 }));
 vi.mock("@/app/services/api/supabase-server");
 vi.mock("@/app/services/notifications/slack");
+vi.mock("@/app/services/notifications/user-emails");
+vi.mock("@vercel/analytics/server", () => ({
+  track: vi.fn().mockResolvedValue(undefined),
+}));
 
 import { createServerClient } from "@supabase/ssr";
+import { track } from "@vercel/analytics/server";
 import { GET } from "@/app/auth/callback/route";
 import { TERMS_CONSENT_COOKIE_NAME, TERMS_CONSENT_COOKIE_VALUE } from "@/app/constants/auth";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { sendSlackNewUserNotification } from "@/app/services/notifications/slack";
+import { scheduleSignupEmail } from "@/app/services/notifications/user-emails";
 
 const AUTH_USER = {
   id: "auth-uuid-1",
@@ -59,7 +65,7 @@ function createAdminClient({
   };
 }
 
-// @supabase/ssr がセッション Cookie 書き込み時に setAll へ渡すヘッダー（CDN キャッシュ防止）
+// Headers @supabase/ssr passes to setAll when writing session cookies (CDN cache prevention).
 const SESSION_RESPONSE_HEADERS = {
   "Cache-Control": "private, no-cache, no-store, must-revalidate, max-age=0",
   Pragma: "no-cache",
@@ -83,7 +89,10 @@ function setCookieHeaders(res: Response) {
   return res.headers.getSetCookie();
 }
 
-/** 同意 Cookie の削除指示（Max-Age=0 または過去の Expires）が Set-Cookie に含まれること */
+/**
+ * Set-Cookie must include a deletion instruction for the consent cookie (Max-Age=0 or a past
+ * Expires).
+ */
 function expectConsentCookieDeleted(res: Response) {
   expect(setCookieHeaders(res).join("\n")).toMatch(
     new RegExp(`${TERMS_CONSENT_COOKIE_NAME}=;|${TERMS_CONSENT_COOKIE_NAME}=,`)
@@ -100,6 +109,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  // mockImplementationOnce replacements survive clearAllMocks, so reset to keep them from leaking
+  // into later tests.
+  vi.mocked(createAdminSupabaseClient).mockReset();
 });
 
 describe("GET /auth/callback", () => {
@@ -113,8 +125,12 @@ describe("GET /auth/callback", () => {
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe("http://localhost/");
     expect(sendSlackNewUserNotification).toHaveBeenCalled();
+    expect(scheduleSignupEmail).toHaveBeenCalledWith({ authId: AUTH_USER.id });
+    expect(track).toHaveBeenCalledTimes(1);
+    expect(track).toHaveBeenCalledWith("signup");
+    expect(JSON.stringify(vi.mocked(track).mock.calls)).not.toContain(AUTH_USER.email);
+    expect(JSON.stringify(vi.mocked(track).mock.calls)).not.toContain("新規ユーザー");
     expect(setCookieHeader(res)).toContain("sb-access-token=token");
-    // セッション Cookie を含む応答には ssr が渡した Cache-Control 等が転写される
     expect(res.headers.get("cache-control")).toBe(SESSION_RESPONSE_HEADERS["Cache-Control"]);
     expect(res.headers.get("pragma")).toBe("no-cache");
     expectConsentCookieDeleted(res);
@@ -143,6 +159,8 @@ describe("GET /auth/callback", () => {
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe("http://localhost/login?error=registration_failed");
     expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+    expect(scheduleSignupEmail).not.toHaveBeenCalled();
+    expect(track).not.toHaveBeenCalled();
     expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
     expectConsentCookieDeleted(res);
   });
@@ -158,6 +176,7 @@ describe("GET /auth/callback", () => {
     expect(res.headers.get("location")).toBe("http://localhost/login?error=terms_required");
     expect(sessionClient.insert).not.toHaveBeenCalled();
     expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+    expect(scheduleSignupEmail).not.toHaveBeenCalled();
     expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
     expectConsentCookieDeleted(res);
   });
@@ -179,6 +198,8 @@ describe("GET /auth/callback", () => {
       expect(res.headers.get("location")).toBe("http://localhost/");
       expect(sessionClient.insert).not.toHaveBeenCalled();
       expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+      expect(scheduleSignupEmail).not.toHaveBeenCalled();
+      expect(track).not.toHaveBeenCalled();
       expectConsentCookieDeleted(res);
     }
   });
@@ -200,6 +221,7 @@ describe("GET /auth/callback", () => {
       expect(res.headers.get("location")).toBe("http://localhost/rejected");
       expect(sessionClient.insert).not.toHaveBeenCalled();
       expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+      expect(scheduleSignupEmail).not.toHaveBeenCalled();
       expectConsentCookieDeleted(res);
     }
   });
@@ -219,6 +241,7 @@ describe("GET /auth/callback", () => {
     expect(res.headers.get("location")).toBe("http://localhost/login?error=registration_failed");
     expect(sessionClient.insert).not.toHaveBeenCalled();
     expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+    expect(scheduleSignupEmail).not.toHaveBeenCalled();
     expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
     expectConsentCookieDeleted(res);
   });
@@ -236,21 +259,74 @@ describe("GET /auth/callback", () => {
     expect(res.headers.get("location")).toBe("http://localhost/login");
     expect(sessionClient.insert).not.toHaveBeenCalled();
     expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+    expect(scheduleSignupEmail).not.toHaveBeenCalled();
     expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
     expectConsentCookieDeleted(res);
   });
 
-  it("createAdminSupabaseClient が throw した場合は存在確認も insert もせず、レスポンス（Cookie含む）を返さない", async () => {
+  it("createAdminSupabaseClient が throw した場合（キー未設定）は insert せず、error なしの /login へフェイルクローズする", async () => {
     const sessionClient = createSessionClient();
     mockSessionClient(sessionClient);
     vi.mocked(createAdminSupabaseClient).mockRejectedValue(
       new Error("SUPABASE_SERVICE_ROLE_KEY が設定されていません")
     );
 
-    await expect(GET(callbackRequest())).rejects.toThrow(/SUPABASE_SERVICE_ROLE_KEY/);
+    for (const request of [callbackRequest(), callbackRequestWithConsent()]) {
+      const res = await GET(request);
+
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe("http://localhost/login");
+      expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
+      expectConsentCookieDeleted(res);
+      // Don't put the exception's content (key names etc.) in the redirect target.
+      expect(res.headers.get("location")).not.toContain("SUPABASE_SERVICE_ROLE_KEY");
+    }
     expect(createAdminSupabaseClient).toHaveBeenCalled();
     expect(sessionClient.insert).not.toHaveBeenCalled();
     expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
-    // throw により Response が返らないため、セッション Cookie も発行されない
+    expect(scheduleSignupEmail).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalled();
   });
+
+  it("SUPABASE_SERVICE_ROLE_KEY 未設定時は 500 にせず /login へフェイルクローズする", async () => {
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
+    const actual = await vi.importActual<typeof import("@/app/services/api/supabase-server")>(
+      "@/app/services/api/supabase-server"
+    );
+    vi.mocked(createAdminSupabaseClient).mockImplementationOnce(actual.createAdminSupabaseClient);
+    const sessionClient = createSessionClient();
+    mockSessionClient(sessionClient);
+
+    const res = await GET(callbackRequestWithConsent());
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("http://localhost/login");
+    expect(sessionClient.insert).not.toHaveBeenCalled();
+    expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
+    expectConsentCookieDeleted(res);
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it.each(["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"])(
+    "%s 未設定時は 500 にせず error なしの /login へフェイルクローズする",
+    async (envName) => {
+      vi.stubEnv(envName, "");
+      const sessionClient = createSessionClient();
+      mockSessionClient(sessionClient);
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(createAdminClient() as never);
+
+      const res = await GET(callbackRequestWithConsent());
+
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe("http://localhost/login");
+      expect(setCookieHeader(res)).not.toContain("sb-access-token=token");
+      expectConsentCookieDeleted(res);
+      expect(createServerClient).not.toHaveBeenCalled();
+      expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+      expect(sessionClient.insert).not.toHaveBeenCalled();
+      expect(sendSlackNewUserNotification).not.toHaveBeenCalled();
+      expect(scheduleSignupEmail).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalled();
+    }
+  );
 });

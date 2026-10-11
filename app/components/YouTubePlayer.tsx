@@ -6,7 +6,7 @@ interface YouTubePlayerProps {
   videoId: string;
 }
 
-/** facade クリック後にのみ読み込む react-youtube ラッパー（autoplay 付き）。 */
+/** react-youtube wrapper loaded only after the facade click (with autoplay). */
 export function YouTubePlayer({ videoId }: YouTubePlayerProps) {
   const opts: YouTubeProps["opts"] = {
     width: "100%",

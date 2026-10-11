@@ -22,9 +22,9 @@ import {
 interface ThemeFormProps {
   initialData?: LearningTheme;
   /**
-   * 挿入位置ピッカーに表示する全テーマ（並び順ソート済み）。作成モードは対象そのもの、
-   * 編集モードは編集対象自身を含む一覧を渡す（自分自身の現在位置を求めるため。
-   * 表示直前にフォーム内で自分自身を除く）。
+   * All themes for the insert-position picker (sorted). Create mode passes the targets themselves;
+   * edit mode passes a list including the edited theme itself (to find its current position;
+   * removed inside the form before display).
    */
   siblings?: SiblingOrderItem[];
   mode: "create" | "edit";
@@ -42,9 +42,9 @@ export function ThemeForm({ initialData, siblings = [], mode }: ThemeFormProps) 
       ? getCurrentPositionInsertAfterId(initialData.id, siblings)
       : getDefaultInsertAfterId(siblings)
   );
-  // 編集時、位置を一切操作していない場合に送信ボディから insert_after_id を省略するための
-  // 初期値。PUT側は insert_after_id 省略時に表示順を変更しないため、これにより
-  // 「兄弟一覧が古くなっている」ケースでの無関係な保存の失敗・巻き戻しを避ける
+  // Omit insert_after_id from the PUT body when the position wasn't touched: the server leaves
+  // display order alone when it's omitted, which avoids unrelated saves failing or being reverted
+  // when the sibling list is stale.
   const initialInsertAfterId = useRef(insertAfterId);
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
@@ -54,8 +54,8 @@ export function ThemeForm({ initialData, siblings = [], mode }: ThemeFormProps) 
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
-    // アップロード中の送信は、フォームが保持する古い image_url でアップロード結果を
-    // 上書きしてしまうため受け付けない（送信ボタンの disabled と二重の防御）
+    // Reject submits during upload: they'd overwrite the upload result with the stale image_url the
+    // form holds (double protection with the button's disabled state).
     if (isUploading) return;
     setIsLoading(true);
     setMessage(null);

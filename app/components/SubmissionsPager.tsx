@@ -29,15 +29,11 @@ function PagerLink({
 }
 
 interface SubmissionsPagerProps {
-  /** ページャリンクのベースパス（例: `/submissions` / `/manage/submissions`） */
   basePath: string;
   page: number;
   totalPages: number;
 }
 
-/**
- * 提出一覧用ページャ（受講生・管理者で共通）
- */
 export function SubmissionsPager({ basePath, page, totalPages }: SubmissionsPagerProps) {
   if (totalPages <= 1) {
     return null;

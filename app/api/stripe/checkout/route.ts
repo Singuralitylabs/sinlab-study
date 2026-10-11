@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import {
   isChargeableSubscriptionPrice,
   logDisplayPriceDrift,
@@ -6,6 +7,12 @@ import {
   SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
 } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
+import { isExternalCheckoutUrl } from "@/app/lib/analytics-funnel";
+import { trackServerEvent } from "@/app/services/analytics/track-server";
+import {
+  reactivatePaidTrialUser,
+  recoverCompletedCheckout,
+} from "@/app/services/api/stripe-checkout-recovery-server";
 import {
   CheckoutCreationError,
   claimCheckoutSlot,
@@ -16,8 +23,29 @@ import {
 } from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
-/** 契約中・決済確認中のいずれでも同じ案内を返す（契約状態を推測させないため） */
+/**
+ * Same message for an active contract and a payment in progress, so the contract state can't be
+ * inferred.
+ */
 const CHECKOUT_CONFLICT_MESSAGE = "既に決済手続き中、またはご契約済みです";
+
+/**
+ * Destination when this request applied a paid-but-unapplied checkout and promoted the member. The
+ * success page re-runs the same idempotent apply and shows the completion screen (with the next
+ * billing date), so recovery reads as the normal path (no error prompting a reload).
+ */
+function checkoutSuccessPath(sessionId: string): string {
+  return `/upgrade/success?session_id=${encodeURIComponent(sessionId)}`;
+}
+
+const REACTIVATED_PATH = "/upgrade";
+
+function jsonCheckoutDestination(url: string) {
+  if (isExternalCheckoutUrl(url)) {
+    trackServerEvent(ANALYTICS_EVENT.CHECKOUT_STARTED);
+  }
+  return NextResponse.json({ url });
+}
 
 export async function POST() {
   if (!isStripeEnabled()) {
@@ -39,9 +67,9 @@ export async function POST() {
       );
     }
 
-    // UIの disabled だけでは古いタブ・直接POSTを防げないため、作成直前にも実額を確認する。
-    // Priceの取得（キャッシュ付きの読み取り）はCheckout Sessionを作らないため、処理権を
-    // 確保する前に行い、料金を確認できないだけのリクエストでDBを書かないようにする
+    // UI disabled alone doesn't stop stale tabs or direct POSTs, so re-check the real price right
+    // before creation. Price retrieval (a cached read) creates no Checkout Session, so do it before
+    // acquiring the claim; a request that only can't confirm the price must not write to the DB.
     let price: { amount: number | null; currency: string };
     try {
       price = await fetchSubscriptionPrice();
@@ -54,20 +82,49 @@ export async function POST() {
     }
     logDisplayPriceDrift(price.amount);
 
-    // Checkout Sessionを作る前に処理権を原子的に確保する。素のSELECTによる存在チェック
-    // だけでは、決済完了までミラー行が存在しない時間帯に並行リクエストがすり抜け、2つの
-    // Checkout Sessionが作られて二重契約・二重課金になる（#103）
-    const claim = await claimCheckoutSlot(auth.userId);
+    // Acquire the claim atomically before creating a Checkout Session. A plain SELECT existence
+    // check lets concurrent requests through while no mirror row exists until payment completes,
+    // creating two sessions (double contract and double billing; #103).
+    let claim = await claimCheckoutSlot(auth.userId);
+    // A claim left paid-but-unapplied never clears with time (not covered by the TTL). Apply it
+    // here to self-recover and retry the claim once (#250).
+    if (claim.outcome === "blocked") {
+      const recovery = await recoverCompletedCheckout(
+        auth.userId,
+        claim.completedSessions,
+        claim.heldClaimedAt
+      );
+      if (recovery.kind === "error") {
+        return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
+      }
+      if (recovery.kind === "unrecoverable") {
+        return NextResponse.json({ error: CHECKOUT_CONFLICT_MESSAGE }, { status: 409 });
+      }
+      if (recovery.kind === "activated") {
+        return NextResponse.json({ url: checkoutSuccessPath(recovery.sessionId) });
+      }
+      claim = await claimCheckoutSlot(auth.userId);
+    }
     if (claim.outcome === "error") {
       return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
     }
     if (claim.outcome === "conflict") {
+      // A live contract in the mirror row while the user is still trial is inconsistent: re-promote
+      // and redirect.
+      if (await reactivatePaidTrialUser(auth.userId)) {
+        return NextResponse.json({ url: REACTIVATED_PATH });
+      }
       return NextResponse.json({ error: CHECKOUT_CONFLICT_MESSAGE }, { status: 409 });
     }
-    // 手続き中のセッションがまだ有効な場合は、新しく作らず同じURLへ案内する
-    // （2つ目のセッションを作らないまま、中断・再操作をやり直せるようにする）
+    // Still blocked after the retry (e.g. another concurrent flow was paid): make the user wait
+    // instead of applying repeatedly, as before.
+    if (claim.outcome === "blocked") {
+      return NextResponse.json({ error: CHECKOUT_CONFLICT_MESSAGE }, { status: 409 });
+    }
+    // If the in-progress session is still valid, send the user to the same URL instead of creating
+    // a second one.
     if (claim.outcome === "reusable") {
-      return NextResponse.json({ url: claim.url });
+      return jsonCheckoutDestination(claim.url);
     }
 
     try {
@@ -78,13 +135,13 @@ export async function POST() {
         claim.stripeCustomerId,
         claim.claimedAt
       );
-      return NextResponse.json({ url });
+      return jsonCheckoutDestination(url);
     } catch (error) {
       console.error("Checkoutセッション作成エラー:", error);
-      // 処理権を返してよいのは「Stripe側に有効なセッションが残っていない」と確定できる
-      // 場合だけ。通信タイムアウト等で作成済みかどうか不明なまま解放すると、記録されて
-      // いない有効なセッションの上にもう1件作れてしまう（その場合の処理権は、次回の
-      // claim時の復旧（Customerに紐づく有効セッションの再利用）またはTTLで解ける）
+      // Release the claim only when it is certain no valid session remains on Stripe's side.
+      // Releasing while unsure whether one was created (e.g. a network timeout) would allow another
+      // on top of an unrecorded valid session (that claim is cleared by recovery at the next claim
+      // - reusing a valid session for the Customer - or by the TTL).
       const releasable = !(error instanceof CheckoutCreationError) || error.claimReleasable;
       if (releasable) {
         await releaseCheckoutSlot(auth.userId, claim.claimedAt);

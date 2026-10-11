@@ -1,9 +1,8 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// proxy と getServerAuth を組み合わせたエンドツーエンドのフロー検証
-// 1回のナビゲーションで users SELECT が 1 回のみ実行されること、
-// および API Route では偽装ヘッダーが削除され自前で 1 回実行されることを検証する
+// End-to-end check combining proxy and getServerAuth: one navigation runs the users SELECT once; an
+// API Route drops spoofed headers and runs its own single lookup.
 
 vi.mock("@supabase/ssr", () => ({
   createServerClient: vi.fn(),
@@ -55,7 +54,6 @@ const testUserData = {
   role: "member",
 };
 
-/** proxy が下流に渡す request.headers を抽出して downstreamHeaders にセット */
 function extractDownstreamHeaders(proxyResponseHeaders: Headers): Headers {
   const passedHeaders = new Headers();
   const authId = proxyResponseHeaders.get("x-middleware-request-x-sinlab-auth-id");
@@ -72,7 +70,6 @@ function extractDownstreamHeaders(proxyResponseHeaders: Headers): Headers {
 
 describe("認証チェックの二重ラウンドトリップ解消フロー統合検証", () => {
   it("認証済みページ 1 回のナビゲーションで users SELECT が proxy 側の 1 回のみ実行され、getServerAuth 側では実行されないこと", async () => {
-    // 1. proxy のモック設定
     let proxyUsersQueryCount = 0;
     const mockProxyClient = createMockSupabaseClient({
       authResult: { data: { user: testAuthUser }, error: null },
@@ -89,17 +86,14 @@ describe("認証チェックの二重ラウンドトリップ解消フロー統�
     const { createServerClient } = await import("@supabase/ssr");
     vi.mocked(createServerClient).mockReturnValue(mockProxyClient as never);
 
-    // 2. proxy 実行
     const initialRequest = new NextRequest("http://localhost/dashboard");
     const proxyResponse = await proxy(initialRequest);
 
     expect(proxyResponse.status).toBe(200);
     expect(proxyUsersQueryCount).toBe(1);
 
-    // proxyResponse から下流リクエストヘッダーを反映
     downstreamHeaders = extractDownstreamHeaders(proxyResponse.headers);
 
-    // 3. 直後の RSC で getServerAuth 実行
     let rscUsersQueryCount = 0;
     const mockRscClient = createMockSupabaseClient({
       authResult: { data: { user: testAuthUser }, error: null },
@@ -116,24 +110,18 @@ describe("認証チェックの二重ラウンドトリップ解消フロー統�
 
     const authResult = await getServerAuth();
 
-    // 4. 検証:
-    // - ユーザー情報が正しく取得できていること
     expect(authResult).toEqual({
       user: testAuthUser,
       userId: 100,
       userStatus: "active",
       userRole: "member",
     });
-    // - proxy 側で 1 回実行
     expect(proxyUsersQueryCount).toBe(1);
-    // - RSC（getServerAuth）側では users SELECT が 0 回（省略）
     expect(rscUsersQueryCount).toBe(0);
-    // - 合計で 1 回になっていること
     expect(proxyUsersQueryCount + rscUsersQueryCount).toBe(1);
   });
 
   it("API Route など proxy をスキップする経路に偽装ヘッダーが送られても proxy で削除され、getServerAuth 側で DB から正しく自前取得すること", async () => {
-    // クライアントが悪意を持って admin ロールを偽装したヘッダーを送信
     const maliciousHeaders = new Headers();
     maliciousHeaders.set(AUTH_HEADERS.AUTH_ID, testAuthUser.id);
     maliciousHeaders.set(AUTH_HEADERS.USER_ID, "999");
@@ -146,17 +134,15 @@ describe("認証チェックの二重ラウンドトリップ解消フロー統�
     const proxyResponse = await proxy(apiRequest);
 
     expect(proxyResponse.status).toBe(200);
-    // proxy を通過したリクエストヘッダーから偽装ヘッダーが削除されていること
     expect(proxyResponse.headers.get("x-middleware-request-x-sinlab-auth-id")).toBeNull();
     expect(proxyResponse.headers.get("x-middleware-request-x-sinlab-user-role")).toBeNull();
 
-    // Route Handler（/api/*）に届いたヘッダー（偽装ヘッダー削除済み）
     downstreamHeaders = extractDownstreamHeaders(proxyResponse.headers);
 
     let apiUsersQueryCount = 0;
     const mockApiClient = createMockSupabaseClient({
       authResult: { data: { user: testAuthUser }, error: null },
-      queryResult: { data: testUserData, error: null }, // DB には member として登録されている
+      queryResult: { data: testUserData, error: null },
     });
     const originalApiFrom = mockApiClient.from;
     mockApiClient.from = vi.fn().mockImplementation((table: string) => {
@@ -169,7 +155,6 @@ describe("認証チェックの二重ラウンドトリップ解消フロー統�
 
     const authResult = await getServerAuth();
 
-    // 偽装された admin ではなく、DB から取得された正規の member であること
     expect(authResult).toEqual({
       user: testAuthUser,
       userId: 100,

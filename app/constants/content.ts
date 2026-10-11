@@ -1,14 +1,14 @@
 import type { ContentType, SubmissionType } from "@/app/types";
 
-/** コンテンツ種別の許可値。バリデーション・ラベル表示・選択肢はこの1箇所から導出する */
+/** Single source for allowed content types; validation, labels and options derive from it. */
 export const CONTENT_TYPES: readonly ContentType[] = ["video", "text", "exercise", "slide"];
 
-/** 提出種別（submissions.submission_type）の許可値。バリデーションはこの1箇所から導出する */
+/** Single source for allowed submission types; validation derives from it. */
 export const SUBMISSION_TYPES: readonly SubmissionType[] = ["code", "url"];
 
 /**
- * 演習コンテンツが受け付ける提出方法（learning_contents.allowed_submission_types）。
- * 提出物そのものの種別（SubmissionType）とは異なり、両方許可する "both" を含む。
+ * Submission methods an exercise accepts (learning_contents.allowed_submission_types). Unlike
+ * SubmissionType (the type of the submission itself), it includes "both".
  */
 export type AllowedSubmissionType = "code" | "url" | "both";
 export const ALLOWED_SUBMISSION_TYPES: readonly AllowedSubmissionType[] = ["code", "url", "both"];
@@ -20,10 +20,13 @@ export const CONTENT_TYPE_LABELS: Record<ContentType, string> = {
   slide: "スライド",
 };
 
-/** 一括操作APIへ一度に送るIDの上限。クライアント側の分割送信もこの値でチャンク化する */
+/** Max IDs per bulk API request; client-side chunked sending uses the same value. */
 export const MAX_BULK_CONTENT_IDS = 100;
 
-/** 一括操作APIの許可action。クライアントの送信可能アクションとAPIの受理範囲をこの1箇所から揃える */
+/**
+ * Single source for allowed bulk actions, aligning what the client can send with what the API
+ * accepts.
+ */
 export const BULK_CONTENT_ACTIONS = [
   "publish",
   "unpublish",

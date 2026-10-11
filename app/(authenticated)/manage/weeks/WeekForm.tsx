@@ -20,9 +20,9 @@ interface WeekFormProps {
   phases: ManagePhaseListItem[];
   initialData?: LearningWeek;
   /**
-   * 挿入位置ピッカーに表示する全週候補。作成モードは対象そのもの、編集モードは編集対象
-   * 自身を含む一覧を渡す（自分自身の現在位置を求めるため。表示直前にフォーム内で
-   * 自分自身を除く）。
+   * All week candidates for the insert-position picker. Create mode passes the targets themselves;
+   * edit mode includes the edited week (to find its current position; removed inside the form
+   * before display).
    */
   siblingCandidates?: SiblingCandidate[];
   mode: "create" | "edit";
@@ -41,8 +41,8 @@ export function WeekForm({ phases, initialData, siblingCandidates = [], mode }: 
       ? getCurrentPositionInsertAfterId(initialData.id, allSiblingsForPhase)
       : getDefaultInsertAfterId(allSiblingsForPhase)
   );
-  // 編集時、親・位置のいずれも操作していない場合に送信ボディから insert_after_id を
-  // 省略するための初期値（PUT側は省略時に表示順を変更しない）
+  // Omit insert_after_id from the PUT body when neither parent nor position was touched (the server
+  // leaves display order alone).
   const initialInsertAfterId = useRef(insertAfterId);
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isLoading, setIsLoading] = useState(false);
@@ -51,8 +51,8 @@ export function WeekForm({ phases, initialData, siblingCandidates = [], mode }: 
   function handlePhaseChange(value: string) {
     setPhaseId(value);
     const newSiblingsForValue = siblingCandidates.filter((c) => String(c.parentId) === value);
-    // 元の親に選び直した場合は現在位置に戻す（末尾リセットのままだと、親セレクトを
-    // 触っただけで意図せず末尾へ移動してしまう）
+    // Re-selecting the original parent restores the current position; otherwise merely touching the
+    // parent select would move the item to the tail.
     if (mode === "edit" && initialData && value === initialPhaseId) {
       setInsertAfterId(getCurrentPositionInsertAfterId(initialData.id, newSiblingsForValue));
       return;

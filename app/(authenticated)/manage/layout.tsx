@@ -5,6 +5,7 @@ import {
   FileText,
   FolderOpen,
   LayoutDashboard,
+  Megaphone,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -21,6 +22,7 @@ const MANAGE_NAV_ITEMS = [
   { title: "コンテンツ管理", href: "/manage/contents", icon: FileText },
   { title: "受講生進捗", href: "/manage/students", icon: Users },
   { title: "提出一覧", href: "/manage/submissions", icon: ClipboardList },
+  { title: "お知らせ管理", href: "/manage/announcements", icon: Megaphone },
 ];
 
 export default async function ManageLayout({ children }: { children: React.ReactNode }) {

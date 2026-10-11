@@ -8,7 +8,10 @@ import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import type { LearningContent } from "@/app/types";
 
-/** BulkContentAction は BULK_CONTENT_ACTIONS 全件を網羅しており、呼び出し前にスキーマで検証済みのため到達不能分岐は設けない */
+/**
+ * BulkContentAction covers all of BULK_CONTENT_ACTIONS and is schema-validated before this call, so
+ * no unreachable branch is provided.
+ */
 function buildPatch(
   action: BulkContentAction,
   contentType: unknown

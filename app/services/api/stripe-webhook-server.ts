@@ -1,27 +1,125 @@
 import type Stripe from "stripe";
+import { ANALYTICS_EVENT } from "@/app/constants/analytics";
+import { isChargeableSubscriptionPrice } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP, USER_STATUS } from "@/app/constants/user";
+import { shouldTrackCheckoutCompleted } from "@/app/lib/analytics-funnel";
+import { cancellationEndsAt, isCancellationScheduled } from "@/app/lib/subscription-period";
+import { trackServerEvent } from "@/app/services/analytics/track-server";
 import {
   ACTIVATABLE_SUBSCRIPTION_STATUSES,
   getStripeClient,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
   TERMINAL_SUBSCRIPTION_STATUSES,
+  toSubscriptionPrice,
 } from "@/app/services/api/stripe-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
+import {
+  scheduleCancelScheduledEmail,
+  scheduleSubscriptionEndedEmail,
+  scheduleUpgradedEmail,
+} from "@/app/services/notifications/user-emails";
 
 /**
- * CheckoutセッションからユーザーIDを特定する。Webhookとsuccessページの両方から
- * session特定に使うため公開している。
+ * Kept separate from the form-value parser so a future loosening there cannot change who a Stripe
+ * session promotes. Leading zeros are rejected too: createCheckoutSession() writes String(userId),
+ * so "042" never comes from this app.
+ */
+const STRIPE_USER_ID_PATTERN = /^[1-9]\d*$/;
+
+function parseStripeUserId(value: string): number | null {
+  if (!STRIPE_USER_ID_PATTERN.test(value)) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+/**
+ * Exported because the webhook, the success page and the Checkout self-recovery all identify the
+ * session's user with it. createCheckoutSession() writes the same id to both fields, so
+ * disagreement means one was set by someone else (client_reference_id can be appended to a
+ * Payment Link URL) and neither can be trusted.
  */
 export function extractUserId(
   clientReferenceId: string | null,
   metadata: Stripe.Metadata | null | undefined
 ): number | null {
-  const raw = clientReferenceId ?? metadata?.user_id ?? null;
-  if (!raw) {
+  const metadataUserId = metadata?.user_id ?? null;
+  if (
+    clientReferenceId !== null &&
+    metadataUserId !== null &&
+    clientReferenceId !== metadataUserId
+  ) {
     return null;
   }
-  const userId = Number(raw);
-  return Number.isInteger(userId) ? userId : null;
+  const raw = clientReferenceId ?? metadataUserId;
+  return raw === null ? null : parseStripeUserId(raw);
+}
+
+/**
+ * True for a Checkout Session this app did not create. The Stripe account is shared with other
+ * sales (Payment Links etc.). client_reference_id alone is no proof of origin, since a buyer can
+ * append `?client_reference_id=42` to a Payment Link URL and would promote user 42 with an
+ * unrelated purchase; metadata.auth_id is the marker because createCheckoutSession() sets it and
+ * buyers cannot set metadata. Another app on the account may use the same key, so this is only a
+ * cheap pre-filter: activateUserFromCheckoutSession() still matches auth_id against the user the
+ * session names. payment_link and mode are read from the event body; see docs/specification.md
+ * 2.11 for why that is safe across webhook API versions.
+ */
+export function isForeignCheckoutSession(session: Stripe.Checkout.Session): boolean {
+  // A missing mode is not taken as foreign: if some webhook API version left it out, every session
+  // of ours would be skipped and promotion would stop. The owner check still rejects foreign ones.
+  return (
+    session.payment_link != null ||
+    !session.metadata?.auth_id ||
+    (session.mode != null && session.mode !== "subscription")
+  );
+}
+
+/**
+ * Why activateUserFromCheckoutSession() refused a session for good. A completed session never
+ * changes, so retrying gives the same answer: callers must not treat these as transient errors
+ * (the webhook would be redelivered until Stripe disables the endpoint, and the Checkout claim
+ * would be held forever).
+ */
+export type CheckoutSessionRejection =
+  | "foreign"
+  | "user_unidentified"
+  | "missing_stripe_ids"
+  | "owner_mismatch";
+
+export const CHECKOUT_SESSION_REJECTION_MESSAGES: Record<CheckoutSessionRejection, string> = {
+  foreign: "このアプリで作成したCheckoutセッションではありません",
+  user_unidentified: "Checkoutセッションからユーザーを特定できませんでした",
+  missing_stripe_ids: "Checkoutセッションにcustomer/subscription情報がありません",
+  owner_mismatch: "Checkoutセッションのユーザーが一致しません",
+};
+
+/**
+ * Owner (users.id) of the mirror row for this subscription / customer, or null when the mirror
+ * does not know it, i.e. it is not this app's. Lets the webhook drop events of the shared
+ * account's other sales before claiming them, so they neither pile up in stripe_events nor page
+ * operators with another team's customers. Every subscription and customer of this app gets a
+ * mirror row before or at checkout completion (ensureCheckoutCustomer() /
+ * activateUserFromCheckoutSession()), so nothing of ours is dropped. Rows vanish only with a
+ * physical users delete (ON DELETE CASCADE), which the app never does (users are soft-deleted);
+ * deleting a paying user by hand would silently drop their cancellations and payment failures.
+ */
+export async function findMirrorOwner(
+  column: "stripe_subscription_id" | "stripe_customer_id",
+  id: string
+): Promise<{ error: string | null; userId: number | null }> {
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase
+    .from("stripe_subscriptions")
+    .select("user_id")
+    .eq(column, id)
+    .maybeSingle();
+  if (error) {
+    console.error("stripe_subscriptions取得エラー:", error.message);
+    return { error: error.message, userId: null };
+  }
+  return { error: null, userId: data?.user_id ?? null };
 }
 
 function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
@@ -29,41 +127,121 @@ function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
 }
 
 /**
- * checkout.session.completed のWebhook、および successページの両方から呼ばれる冪等な昇格処理。
- * stripe_subscriptions を upsert したうえで、サブスクが現に有効（ACTIVATABLE_SUBSCRIPTION_STATUSES）
- * な場合のみ users を active/general に更新する。管理者が承認前に手動承認していた場合を含め、
- * 昇格時は常に上書きする（許容仕様）。却下（rejected）済みユーザーは昇格しない。
- *
- * サブスクの状態を見ずに常に昇格させると、Checkout Sessionが決済後もStripe側に不変オブジェクトとして
- * 残ることを利用して、解約後にsuccessページのURL（`session_id`）を再訪しただけで無償のまま
- * 再昇格できてしまう（リプレイ）。`ACTIVATABLE_SUBSCRIPTION_STATUSES` の判定で昇格自体は防げるが、
- * 加えて「別の（現行の）契約が既にある状態で、古いセッションのリプレイがミラー行を上書きしてしまう」
- * ことも防ぐ（下記の既存行チェック）。上書きを許すと、以後 syncSubscriptionStatus() が
- * `stripe_subscription_id` で現行契約を照合できなくなり、解約イベントを取りこぼす。
- *
- * Stripe APIからのライブ状態取得（`stripe.subscriptions.retrieve()`）は、ミラーupsertの
- * 直前（既存行チェックの後）に1回だけ行い、その結果をミラーupsertとusers更新の両方に使う。
- * こうすることで、取得時点から書き込み時点までの間隔（TOCTOUウィンドウ）を最小化する。
- * それでもミラーupsert〜users更新の間に解約Webhookが並行実行される競合は理論上残るが
- * （完全な排他制御にはDBトランザクション/RPCが必要でスコープ外）、取得を書き込み直前の
- * 1箇所に集約することで、古いスナップショットのままミラーだけ巻き戻る事態は避けられる。
- *
- * @returns activated: 実際に users を昇格したか。successページ側の表示分岐に使う。
- * currentPeriodEnd: 昇格時に確定した次回請求日（ISO文字列）。successページが
- * `stripe_subscriptions` を読み直さずに表示できるよう、ここで返す
+ * Monthly price (JPY, unit price x quantity) of the subscription re-fetched from Stripe. Returns
+ * null when it is not a monthly JPY price (no line in the upgrade email) or when the subscription
+ * / item carries a discount (coupon etc.), since it would differ from the real charge. A discount
+ * attached directly to the Customer (`customer.discount`) is not in `subscription.discounts` and
+ * is undetected, so list price shows (detecting needs an extra Customer fetch; Checkout promotion
+ * codes attach to the subscription, so this only happens with manual Dashboard/API grants and is
+ * accepted).
  */
-export async function activateUserFromCheckoutSession(session: Stripe.Checkout.Session): Promise<{
+function chargedMonthlyAmountJpy(subscription: Stripe.Subscription): number | null {
+  const item = subscription.items.data[0];
+  if (!item?.price) {
+    return null;
+  }
+  if ((subscription.discounts?.length ?? 0) > 0 || (item.discounts?.length ?? 0) > 0) {
+    return null;
+  }
+  const price = toSubscriptionPrice(item.price);
+  if (!isChargeableSubscriptionPrice(price)) {
+    return null;
+  }
+  return price.amount * (item.quantity ?? 1);
+}
+
+/**
+ * Schedules the upgrade email. Every promotion path (Checkout completion, re-promotion from the
+ * mirror) goes through this. reference_key is the subscription id, so multiple paths / retries
+ * returning a promotion still send one email. Exceptions (including price calculation) are
+ * swallowed so they never affect the promotion result (webhook response, success page).
+ */
+function scheduleUpgradedEmailFor(
+  userId: number,
+  subscription: Stripe.Subscription,
+  currentPeriodEnd: string | null
+): void {
+  try {
+    scheduleUpgradedEmail({
+      userId,
+      subscriptionId: subscription.id,
+      monthlyAmountJpy: chargedMonthlyAmountJpy(subscription),
+      currentPeriodEnd,
+    });
+  } catch (error) {
+    console.error("[メール通知] 有料会員化メールの予約に失敗しました:", error);
+  }
+}
+
+/**
+ * Maps live subscription state re-fetched from Stripe onto mirror row columns. Every mirror write
+ * path (Checkout completion, subscription update webhook, reactivation) uses it so paths do not
+ * drift when a column is added.
+ */
+function subscriptionMirrorFields(subscription: Stripe.Subscription) {
+  return {
+    status: subscription.status,
+    cancel_at_period_end: subscription.cancel_at_period_end,
+    // With flexible billing mode a scheduled cancellation only shows up in cancel_at (see
+    // isCancellationScheduled()).
+    cancel_at: toIsoOrNull(subscription.cancel_at),
+    current_period_end: toIsoOrNull(subscription.items.data[0]?.current_period_end),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Idempotent promotion called from both the checkout.session.completed webhook and the success
+ * page. Upserts stripe_subscriptions, then sets users to active/general only when the
+ * subscription is currently valid (ACTIVATABLE_SUBSCRIPTION_STATUSES). Overwrites on promotion,
+ * including admin-approved users (accepted; no update if already general). Rejected users are
+ * never promoted.
+ * A completed Checkout Session stays immutable on Stripe, so promoting without checking
+ * subscription state would let a cancelled user re-promote for free by revisiting the success URL
+ * (session_id) (replay). The status check stops the promotion; the existing-row check below also
+ * stops a replay of an old session from overwriting the mirror of a different, current
+ * subscription, which would make syncSubscriptionStatus() unable to match the current
+ * subscription by stripe_subscription_id and miss its cancellation.
+ * The live state fetch (stripe.subscriptions.retrieve()) happens once, right before the mirror
+ * upsert (after the existing-row check), and feeds both the upsert and the users update. This
+ * minimizes the TOCTOU window. A cancellation webhook racing between the mirror upsert and the
+ * users update remains theoretically possible (full exclusion needs a DB transaction/RPC, out of
+ * scope), but a single fetch just before writing avoids rolling the mirror back from a stale
+ * snapshot.
+ * @param options.expectedClaimedAt claim time observed by the caller. If given, write only while
+ *   the mirror row's `checkout_claimed_at` still equals it (otherwise do nothing, like
+ *   `skipped`). This keeps the Checkout API's self-recovery (#250) from releasing a claim just
+ *   re-acquired by a concurrent request (before the session id is recorded, so the guard below
+ *   does not apply). Webhook and success page omit it.
+ * @returns activated: whether users was actually promoted (drives the success page branch).
+ *   currentPeriodEnd: next billing date (ISO string) settled at promotion so the success page
+ *   need not re-read stripe_subscriptions.
+ */
+export async function activateUserFromCheckoutSession(
+  session: Stripe.Checkout.Session,
+  options: { expectedClaimedAt?: string } = {}
+): Promise<{
   error: string | null;
+  rejection?: CheckoutSessionRejection;
   activated: boolean;
   currentPeriodEnd: string | null;
 }> {
+  const reject = (rejection: CheckoutSessionRejection) => ({
+    error: null,
+    rejection,
+    activated: false,
+    currentPeriodEnd: null,
+  });
+
+  // Checked here rather than in each caller: this is the only way into a promotion, and a caller
+  // forgetting the check would let a foreign purchase promote whoever client_reference_id names.
+  if (isForeignCheckoutSession(session)) {
+    return reject("foreign");
+  }
+
   const userId = extractUserId(session.client_reference_id, session.metadata);
   if (userId === null) {
-    return {
-      error: "Checkoutセッションからユーザーを特定できませんでした",
-      activated: false,
-      currentPeriodEnd: null,
-    };
+    return reject("user_unidentified");
   }
 
   const customerId =
@@ -74,22 +252,41 @@ export async function activateUserFromCheckoutSession(session: Stripe.Checkout.S
       : (session.subscription?.id ?? null);
 
   if (!customerId || !subscriptionId) {
-    return {
-      error: "Checkoutセッションにcustomer/subscription情報がありません",
-      activated: false,
-      currentPeriodEnd: null,
-    };
+    return reject("missing_stripe_ids");
   }
 
   const supabase = await createAdminSupabaseClient();
 
-  // 「既存行の確認 → ミラー更新」は複数ステートメントに分かれるため、確認から書き込みまでの
-  // 間に別リクエストが処理権を確保しうる（古い成功ページURLの処理が、後発の有効な処理権を
-  // 消してしまう競合）。書き込み条件に「確認した時点の所有状態」を載せ（CAS）、変わって
-  // いた場合は読み直して判断からやり直す
+  // The id fields alone are not bound to a person; auth_id ties the session to the account that
+  // started it, so a session whose ids point at someone else must not write their mirror row or
+  // promote them.
+  const { data: owner, error: ownerError } = await supabase
+    .from("users")
+    .select("auth_id")
+    .eq("id", userId)
+    .maybeSingle();
+  if (ownerError) {
+    console.error("ユーザー取得エラー:", ownerError.message);
+    return { error: ownerError.message, activated: false, currentPeriodEnd: null };
+  }
+  if (!owner || owner.auth_id !== session.metadata?.auth_id) {
+    return reject("owner_mismatch");
+  }
+
+  // "Check existing row -> update mirror" spans several statements, so another request may
+  // acquire the claim in between (an old success-page URL clearing a newer valid claim). The
+  // write is conditioned on the ownership state observed at check time (CAS); if it changed,
+  // re-read and decide again.
   let mirrored: MirrorWriteResult = { kind: "conflict" };
   for (let attempt = 0; attempt < MIRROR_WRITE_MAX_ATTEMPTS; attempt++) {
-    mirrored = await writeCheckoutMirror(supabase, userId, session, customerId, subscriptionId);
+    mirrored = await writeCheckoutMirror(
+      supabase,
+      userId,
+      session,
+      customerId,
+      subscriptionId,
+      options.expectedClaimedAt
+    );
     if (mirrored.kind !== "conflict") {
       break;
     }
@@ -102,7 +299,8 @@ export async function activateUserFromCheckoutSession(session: Stripe.Checkout.S
     return { error: null, activated: false, currentPeriodEnd: null };
   }
   if (mirrored.kind === "conflict") {
-    // 競合が解消しなかった。Webhookは500を返して再送に委ね、successページはエラー表示にする
+    // Conflict never resolved. The webhook returns 500 so Stripe retries; the success page shows
+    // an error.
     const message = "他の処理と競合したためミラー行を更新できませんでした";
     console.error("stripe_subscriptions更新エラー:", message);
     return { error: message, activated: false, currentPeriodEnd: null };
@@ -114,6 +312,42 @@ export async function activateUserFromCheckoutSession(session: Stripe.Checkout.S
     return { error: null, activated: false, currentPeriodEnd: null };
   }
 
+  const promoted = await promoteUserToGeneral(supabase, userId);
+  if (promoted.error) {
+    return { error: promoted.error, activated: false, currentPeriodEnd: null };
+  }
+  if (promoted.changed) {
+    // The webhook and the success page can promote concurrently; the send-log UNIQUE
+    // (subscription id) keeps it to one email. checkout_completed uses the same gate:
+    // activated stays true on a replay, so only the call that changed the row emits it.
+    scheduleUpgradedEmailFor(userId, subscription, currentPeriodEnd);
+    if (shouldTrackCheckoutCompleted(promoted.activated, promoted.changed)) {
+      trackServerEvent(ANALYTICS_EVENT.CHECKOUT_COMPLETED);
+    }
+  }
+  return {
+    error: null,
+    activated: promoted.activated,
+    currentPeriodEnd: promoted.activated ? currentPeriodEnd : null,
+  };
+}
+
+/**
+ * Promotes to active / general; rejected users are never promoted. Callers must first confirm
+ * from live state re-fetched from Stripe that the subscription is currently valid
+ * (ACTIVATABLE_SUBSCRIPTION_STATUSES).
+ * The UPDATE targets only rows not yet general. When already promoted (success-page revisit,
+ * webhook retry) nothing is updated and only `activated` is returned from the current state.
+ * @returns activated: whether the user is general after the call (drives the success page).
+ *   changed: whether this call actually promoted. The upgrade email is scheduled only when true,
+ *   so revisits / retries of an already promoted user do not send emails at unrelated times; an
+ *   admin having manually approved the user as general also gives changed false, so it is not
+ *   sent as if already announced by the approval email.
+ */
+async function promoteUserToGeneral(
+  supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
+  userId: number
+): Promise<{ error: string | null; activated: boolean; changed: boolean }> {
   const { data: updatedUsers, error: userError } = await supabase
     .from("users")
     .update({
@@ -123,39 +357,132 @@ export async function activateUserFromCheckoutSession(session: Stripe.Checkout.S
     })
     .eq("id", userId)
     .neq("status", USER_STATUS.REJECTED)
+    .or(
+      `status.neq.${USER_STATUS.ACTIVE},membership_type.is.null,membership_type.neq.${USER_MEMBERSHIP.GENERAL}`
+    )
     .select("id");
 
   if (userError) {
     console.error("ユーザー昇格エラー:", userError.message);
-    return { error: userError.message, activated: false, currentPeriodEnd: null };
+    return { error: userError.message, activated: false, changed: false };
+  }
+  if ((updatedUsers?.length ?? 0) > 0) {
+    return { error: null, activated: true, changed: true };
   }
 
-  const activated = (updatedUsers?.length ?? 0) > 0;
-  return { error: null, activated, currentPeriodEnd: activated ? currentPeriodEnd : null };
+  // No update: already general, or rejected / missing.
+  const { data: current, error: fetchError } = await supabase
+    .from("users")
+    .select("id")
+    .eq("id", userId)
+    .eq("status", USER_STATUS.ACTIVE)
+    .eq("membership_type", USER_MEMBERSHIP.GENERAL)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error("ユーザー取得エラー:", fetchError.message);
+    return { error: fetchError.message, activated: false, changed: false };
+  }
+  return { error: null, activated: current !== null, changed: false };
 }
 
-/** ミラー更新の再試行回数。1回目で競合した場合に、読み直して判断からやり直す */
+/**
+ * Repairs (#250) a mirror row that records a subscription while the user is not promoted. It
+ * arises when the mirror write (including claim release) succeeded but the users update failed,
+ * or when the subscription became active on Stripe after being reflected as e.g. `incomplete` and
+ * the webhook never arrived; with no success-page URL at hand, the Checkout API would keep
+ * answering 409 as subscribed.
+ * Call only when the Checkout API from a trial user hits conflict (the admin UI cannot move a
+ * paid member back to trial, and trial demotion only follows a terminal state, so this
+ * combination is only an inconsistency). Never trust the mirror values: promote only if the live
+ * state re-fetched from Stripe is valid. Rows holding a claim (in progress) are excluded.
+ */
+export async function reactivateUserFromMirror(
+  userId: number
+): Promise<{ error: string | null; activated: boolean }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { data: row, error: fetchError } = await supabase
+    .from("stripe_subscriptions")
+    .select("stripe_subscription_id, status, checkout_claimed_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error("stripe_subscriptions取得エラー:", fetchError.message);
+    return { error: fetchError.message, activated: false };
+  }
+  // Target rows record a subscription (neither terminal nor pending). Do not trust the mirror
+  // status itself: with a lost webhook it may stay `incomplete` / `past_due` while Stripe says
+  // paid `active`.
+  if (
+    !row?.stripe_subscription_id ||
+    row.checkout_claimed_at !== null ||
+    NON_CURRENT_SUBSCRIPTION_STATUSES.includes(row.status)
+  ) {
+    return { error: null, activated: false };
+  }
+
+  const stripe = getStripeClient();
+  const subscription = await stripe.subscriptions.retrieve(row.stripe_subscription_id);
+  const mirrorFields = subscriptionMirrorFields(subscription);
+
+  // Write live state only if the row is unchanged since the read (same subscription, same status,
+  // no claim). Without the status condition, a concurrent cancellation webhook's `canceled`
+  // written after our fetch would be overwritten by a stale `active` snapshot and promote the
+  // user.
+  const { data: updated, error: updateError } = await supabase
+    .from("stripe_subscriptions")
+    .update(mirrorFields)
+    .eq("user_id", userId)
+    .eq("stripe_subscription_id", subscription.id)
+    .eq("status", row.status)
+    .is("checkout_claimed_at", null)
+    .select("id");
+
+  if (updateError) {
+    console.error("stripe_subscriptions更新エラー:", updateError.message);
+    return { error: updateError.message, activated: false };
+  }
+  if ((updated?.length ?? 0) === 0) {
+    return { error: null, activated: false };
+  }
+  if (!ACTIVATABLE_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
+    return { error: null, activated: false };
+  }
+
+  const promoted = await promoteUserToGeneral(supabase, userId);
+  if (promoted.changed) {
+    // A subscription not promoted by the first reflection (activateUserFromCheckoutSession) can
+    // become a paid member here for the first time. If already sent, the send-log UNIQUE
+    // (subscription id) suppresses it.
+    scheduleUpgradedEmailFor(userId, subscription, mirrorFields.current_period_end);
+  }
+  return { error: promoted.error, activated: promoted.activated };
+}
+
+/** Retry count for the mirror update: on conflict re-read and decide again. */
 const MIRROR_WRITE_MAX_ATTEMPTS = 3;
 
 type MirrorWriteResult =
   | { kind: "written"; subscription: Stripe.Subscription; currentPeriodEnd: string | null }
-  | { kind: "skipped" } // 書いてはいけない状況（進行中の別セッション・古いリプレイ）
-  | { kind: "conflict" } // 確認から書き込みまでの間に行が変わった（読み直して再試行）
+  | { kind: "skipped" } // a situation where writing is forbidden (another session in progress, stale replay)
+  | { kind: "conflict" } // row changed between check and write (re-read and retry)
   | { kind: "error"; message: string };
 
 /**
- * 既存行を確認し、書いてよい場合に限りミラー行を更新する（1回分の試行）。
- *
- * 書き込みは「確認した時点の所有状態（`checkout_claimed_at` / `stripe_subscription_id`）が
- * そのまま残っていること」を条件にした条件付きUPDATE（行が無い場合はINSERT）で行う。
- * 条件に合致しなければ0行更新となり `conflict` を返す。
+ * One attempt: check the existing row and update the mirror only if allowed.
+ * The write is a conditional UPDATE (INSERT if no row) that requires the ownership state observed
+ * at check time (`checkout_claimed_at` / `stripe_subscription_id`) to be unchanged. If not, 0
+ * rows update and `conflict` is returned.
  */
 async function writeCheckoutMirror(
   supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
   userId: number,
   session: Stripe.Checkout.Session,
   customerId: string,
-  subscriptionId: string
+  subscriptionId: string,
+  expectedClaimedAt: string | undefined
 ): Promise<MirrorWriteResult> {
   const { data: existingRow, error: existingFetchError } = await supabase
     .from("stripe_subscriptions")
@@ -168,21 +495,34 @@ async function writeCheckoutMirror(
     return { kind: "error", message: existingFetchError.message };
   }
 
-  // 進行中のCheckout（有効な処理権）が、**別の**セッションの処理で壊されないようにする。
-  // このガードが無いと、処理権を保持したまま古い成功ページURLを再訪しただけで
-  // `checkout_claimed_at` が解除され、まだ決済可能なセッションを残したまま次のCheckoutを
-  // 作れてしまう（#103の再発）。セッションidは、URLを返す前に必ず記録している
+  // Do not write if the claim the caller observed has already been replaced (another request
+  // re-claimed). The CAS below conditions on the checkout_claimed_at read here, so a change after
+  // the read yields conflict and a re-read returns to this check. expectedClaimedAt is the
+  // caller's raw DB value of the same column, so string comparison suffices (no formatting
+  // variance).
+  if (
+    expectedClaimedAt !== undefined &&
+    (existingRow?.checkout_claimed_at ?? null) !== expectedClaimedAt
+  ) {
+    return { kind: "skipped" };
+  }
+
+  // Protect an in-progress Checkout (live claim) from being broken by processing of a different
+  // session. Without this guard, revisiting an old success URL while holding a claim would clear
+  // `checkout_claimed_at` and let a next Checkout be created while a payable session remains
+  // (regression of #103). The session id is always recorded before the URL is returned.
   const heldSessionId =
     existingRow?.checkout_claimed_at != null ? existingRow.checkout_session_id : null;
   if (heldSessionId !== null && heldSessionId !== session.id) {
     return { kind: "skipped" };
   }
 
-  // 既に別の契約が現行（終端状態でも手続き中でもない）として記録されている場合、古いセッションの
-  // リプレイでミラー行を上書きしない（現行契約のWebhook照合が壊れるため）。
-  // subscriptionId（session由来の生の文字列）で比較するため、Stripe APIの呼び出しは不要。
-  // Checkout作成の処理権を確保しただけの行（CHECKOUT_PENDING_STATUS）はまだ契約を表さないため
-  // 対象外とする（対象にすると、今まさに完了したCheckoutの昇格自体がスキップされてしまう）
+  // If a different subscription is already current (neither terminal nor pending), an old
+  // session's replay must not overwrite the mirror row (it would break webhook matching for the
+  // current subscription). Compared via subscriptionId (raw string from the session), so no
+  // Stripe API call is needed. A row that only holds a Checkout claim (CHECKOUT_PENDING_STATUS)
+  // does not represent a subscription yet and is excluded (including it would skip the promotion
+  // of the Checkout that just completed).
   const isStaleReplay =
     existingRow != null &&
     existingRow.stripe_subscription_id !== subscriptionId &&
@@ -193,17 +533,16 @@ async function writeCheckoutMirror(
 
   const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-  const currentPeriodEnd = toIsoOrNull(subscription.items.data[0]?.current_period_end);
+  const liveFields = subscriptionMirrorFields(subscription);
+  const currentPeriodEnd = liveFields.current_period_end;
   const mirror = {
     stripe_customer_id: customerId,
     stripe_subscription_id: subscription.id,
-    status: subscription.status,
-    cancel_at_period_end: subscription.cancel_at_period_end,
-    current_period_end: currentPeriodEnd,
-    // 実ステータスを書けた時点でCheckout作成の処理権は役目を終える（正常な解除）
+    ...liveFields,
+    // Once the real status is written, the Checkout claim has served its purpose (normal
+    // release).
     checkout_claimed_at: null,
     checkout_session_id: null,
-    updated_at: new Date().toISOString(),
   };
 
   if (!existingRow) {
@@ -213,7 +552,8 @@ async function writeCheckoutMirror(
     if (!insertError) {
       return { kind: "written", subscription, currentPeriodEnd };
     }
-    // 一意制約違反＝確認後に行が作られた（処理権の確保など）。読み直して判断し直す
+    // Unique violation: a row was created after the check (e.g. a claim). Re-read and decide
+    // again.
     if (insertError.code === "23505") {
       return { kind: "conflict" };
     }
@@ -244,75 +584,85 @@ async function writeCheckoutMirror(
 }
 
 /**
- * customer.subscription.updated / customer.subscription.deleted で呼ばれる、
- * stripe_subscriptions のミラー更新。終端状態（TERMINAL_SUBSCRIPTION_STATUSES:
- * canceled/unpaid/incomplete_expired/paused）へ遷移した場合のみ降格する
- * （past_due は猶予期間のため降格しない）。
- *
- * Webhookイベントは到着順が保証されないため、イベントに埋め込まれたsubscriptionの
- * スナップショットをそのまま信用せず、Stripe APIから最新状態を取り直してから書き込む。
- * 例えば canceled 処理後に古い active/past_due のイベントが遅延して届いても、
- * 再取得した時点のライブ状態（canceled）を書くため、ミラーが古い状態へ巻き戻らない。
- *
- * stripe_subscription_id で該当行を特定する。checkout.session.completed 未処理のうちに
- * updated/deleted が届いた場合（順序逆転）は対象行が無いため何もしない
- * （後続で checkout.session.completed が処理されれば最新状態で upsert される）。
- * この存在チェックはStripe APIの再取得より先に行う。当サービスと無関係な
- * サブスクのイベントでも毎回Stripe APIを叩くと、無駄な呼び出しやAPI障害時の
- * 不要な500・再送を招くため。
+ * Mirror update for customer.subscription.updated / .deleted. Demotes only on a transition to a
+ * terminal status (TERMINAL_SUBSCRIPTION_STATUSES: canceled/unpaid/incomplete_expired/paused);
+ * past_due is a grace period and does not demote.
+ * Webhook delivery order is not guaranteed, so do not trust the subscription snapshot embedded in
+ * the event: re-fetch the latest state from the Stripe API before writing. E.g. a delayed stale
+ * active/past_due event after canceled handling still writes the live state (canceled), so the
+ * mirror is not rolled back.
+ * Call only for a subscription the mirror knows (findMirrorOwner()). If updated/deleted arrives
+ * before checkout.session.completed is processed (reordering) there is no row yet and the caller
+ * skips it (a later checkout.session.completed upserts the latest state). The check comes BEFORE
+ * the Stripe re-fetch: hitting the Stripe API for every event of subscriptions unrelated to this
+ * service would waste calls and cause needless 500s / retries during Stripe outages.
+ * @param userId owner of the mirror row, looked up by the caller with findMirrorOwner() (the
+ *   webhook does so before claiming to skip other sales).
  */
 export async function syncSubscriptionStatus(
-  subscriptionFromEvent: Stripe.Subscription
+  subscriptionFromEvent: Stripe.Subscription,
+  userId: number
 ): Promise<{ error: string | null }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { data: existing, error: fetchError } = await supabase
-    .from("stripe_subscriptions")
-    .select("user_id")
-    .eq("stripe_subscription_id", subscriptionFromEvent.id)
-    .maybeSingle();
-
-  if (fetchError) {
-    console.error("stripe_subscriptions取得エラー:", fetchError.message);
-    return { error: fetchError.message };
-  }
-  if (!existing) {
-    return { error: null };
-  }
-
   const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve(subscriptionFromEvent.id);
+  const mirrorFields = subscriptionMirrorFields(subscription);
 
-  const { error: updateError } = await supabase
+  const { data: updated, error: updateError } = await supabase
     .from("stripe_subscriptions")
-    .update({
-      status: subscription.status,
-      cancel_at_period_end: subscription.cancel_at_period_end,
-      current_period_end: toIsoOrNull(subscription.items.data[0]?.current_period_end),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("stripe_subscription_id", subscription.id);
+    .update(mirrorFields)
+    .eq("stripe_subscription_id", subscription.id)
+    .select("id");
 
   if (updateError) {
     console.error("stripe_subscriptions更新エラー:", updateError.message);
     return { error: updateError.message };
   }
+  // userId was looked up before the claim. A new Checkout may have replaced this subscription on
+  // the row since then; demoting or mailing userId would then hit a member paying for the new one.
+  if ((updated?.length ?? 0) === 0) {
+    return { error: null };
+  }
 
   if (TERMINAL_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
-    return await revertUserToTrial(existing.user_id);
+    const reverted = await revertUserToTrial(userId);
+    if (reverted.error === null && reverted.reverted) {
+      scheduleSubscriptionEndedEmail({ userId, subscriptionId: subscription.id });
+    }
+    return { error: reverted.error };
+  }
+
+  // Accepts a scheduled cancellation. Do not decide by comparing with the mirror (false -> true
+  // transition): other paths also write live state to the mirror (Checkout completion,
+  // re-promotion), and if they write first the transition is consumed and the email is lost.
+  // Schedule every time the live state re-fetched from Stripe shows a scheduled cancellation and
+  // let the send-log UNIQUE (subscription id) dedupe to one email (delayed / reordered event
+  // snapshots are not read, so a stale event arriving after the cancellation was withdrawn does
+  // not fire).
+  if (isCancellationScheduled(mirrorFields)) {
+    scheduleCancelScheduledEmail({
+      userId,
+      subscriptionId: subscription.id,
+      periodEnd: cancellationEndsAt(mirrorFields),
+    });
   }
 
   return { error: null };
 }
 
 /**
- * ユーザーをお試しユーザーに戻す。membership_type='general' の場合のみ実行するガードを
- * UPDATE自体に折り込む（コミュニティ会員・手動承認済みユーザーを誤って巻き込まない）。
+ * Reverts the user to trial. The guard (only when membership_type='general') is folded into the
+ * UPDATE so community members and manually approved users are not caught by mistake.
+ * @returns reverted: whether a row was actually updated. false when the guard blocked it (already
+ *   demoted, not general); used to decide not to send the membership-ended email.
  */
-export async function revertUserToTrial(userId: number): Promise<{ error: string | null }> {
+export async function revertUserToTrial(
+  userId: number
+): Promise<{ error: string | null; reverted: boolean }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("users")
     .update({
       status: USER_STATUS.TRIAL,
@@ -320,43 +670,46 @@ export async function revertUserToTrial(userId: number): Promise<{ error: string
       updated_at: new Date().toISOString(),
     })
     .eq("id", userId)
-    .eq("membership_type", USER_MEMBERSHIP.GENERAL);
+    .eq("membership_type", USER_MEMBERSHIP.GENERAL)
+    .select("id");
 
   if (error) {
     console.error("ユーザー降格エラー:", error.message);
-    return { error: error.message };
+    return { error: error.message, reverted: false };
   }
 
-  return { error: null };
+  const reverted = (data?.length ?? 0) > 0;
+  if (reverted) {
+    trackServerEvent(ANALYTICS_EVENT.SUBSCRIPTION_ENDED);
+  }
+  return { error: null, reverted };
 }
 
-/** claimが放置されたとみなすまでの時間（分）。この時間を超えたclaimは再claim可能にする */
+/** After this many minutes an abandoned claim can be re-claimed. */
 const EVENT_CLAIM_TTL_MINUTES = 10;
 
 /**
- * Webhookイベントの処理権を原子的に確保する。`stripe_events.id`（PK）への素のINSERTを
- * 「claim」として使う（upsertではなく通常のINSERTのため、同一event.idの並行リクエストは
- * DBの一意制約により片方だけが成功する＝真に排他的）。
- *
- * ハンドラ実行**前**に呼ぶ。claim できた場合のみハンドラを実行し、失敗時は
- * releaseEventClaim() でclaimを解放してStripeの自動リトライが再度ハンドラへ
- * 到達できるようにする（claimを解放しないまま成功扱いにすると、リトライが
- * 「処理済み」と誤判定され永久にスキップされる）。
- *
- * **TTLによる救済**: サーバーレス関数のタイムアウト・強制終了等でclaim後に
- * releaseEventClaim() へ到達できなかった場合、claim行が残り続けて以後の再送が
- * 永久にスキップされてしまう。これを防ぐため、一意制約違反時は既存claimが
- * `EVENT_CLAIM_TTL_MINUTES` を超えて放置されていないかを確認し、放置されていれば
- * claimを奪い直す（`processed_at` を更新できた場合のみ claimed: true）。
- * ハンドラは冪等（upsert/条件付きUPDATE）に設計されているため、まれに完了済みの
- * イベントを再claim・再実行しても実害は小さい（Slack通知の重複程度）。
- *
- * @returns processedAt: このclaimで設定した`processed_at`。releaseEventClaim()に
- * そのまま渡すことで、自分が確保したclaimだけを解放する（後述）
+ * Atomically acquires the processing right for a webhook event. A plain INSERT into
+ * stripe_events.id (PK) is the claim: it is an INSERT, not an upsert, so of concurrent requests
+ * for the same event.id the DB unique constraint lets only one succeed (truly exclusive).
+ * Call BEFORE running the handler. Run the handler only if claimed; on failure call
+ * releaseEventClaim() so Stripe's automatic retry can reach the handler again (returning success
+ * without releasing would make the retry look "already processed" and skip it forever).
+ * TTL recovery: if a serverless timeout or kill prevents reaching releaseEventClaim(), the claim
+ * row would remain and skip all retries forever. On unique violation, check whether the existing
+ * claim was abandoned beyond EVENT_CLAIM_TTL_MINUTES and take it over if so (claimed: true only
+ * when `processed_at` could be updated). Handlers are idempotent (upsert / conditional UPDATE),
+ * so re-running an already completed event is low impact (at worst a duplicate Slack notice).
+ * @param ttlMinutes time before re-claim is allowed. For non-webhook uses (deduplicating the
+ *   "Checkout cannot auto-recover" notice) where something should run once per period (default is
+ *   the webhook TTL).
+ * @returns processedAt: the `processed_at` set by this claim; pass it as-is to
+ *   releaseEventClaim() so only your own claim is released.
  */
 export async function claimEvent(
   eventId: string,
-  type: string
+  type: string,
+  ttlMinutes: number = EVENT_CLAIM_TTL_MINUTES
 ): Promise<{ claimed: boolean; processedAt: string | null; error: string | null }> {
   const supabase = await createAdminSupabaseClient();
 
@@ -369,14 +722,14 @@ export async function claimEvent(
     return { claimed: true, processedAt, error: null };
   }
 
-  // 一意制約違反（PostgreSQLエラーコード23505）以外はDBエラーとして呼び出し元に伝播する
+  // Anything other than a unique violation (23505) is a real DB error.
   if (error.code !== "23505") {
     console.error("stripe_events claim エラー:", error.message);
     return { claimed: false, processedAt: null, error: error.message };
   }
 
-  // 既にclaim済み。TTLを超えて放置されている場合のみ再claimを許可する
-  const staleBefore = new Date(Date.now() - EVENT_CLAIM_TTL_MINUTES * 60 * 1000).toISOString();
+  // Already claimed. Allow re-claim only if abandoned beyond the TTL.
+  const staleBefore = new Date(Date.now() - ttlMinutes * 60 * 1000).toISOString();
   const reclaimedAt = new Date().toISOString();
   const { data: reclaimed, error: reclaimError } = await supabase
     .from("stripe_events")
@@ -395,13 +748,11 @@ export async function claimEvent(
 }
 
 /**
- * claimEvent() で確保したイベントの処理権を解放する。ハンドラが失敗した場合にのみ呼ぶこと。
- * 行を削除することで、Stripeの自動リトライ時に claimEvent() が再度成功できるようにする。
- *
- * DELETEの条件に `processed_at` の一致を含めるのは、TTL経過後に自分のclaimが既に
- * 別プロセスによって再claimされている場合に、その新しいclaimまで誤って削除して
- * しまうのを防ぐため（無条件DELETEだと、旧claim保持者が遅れて解放処理に到達した際に
- * 新しいclaimを消してしまい、3つ目のリクエストが再claimできてしまう理論上の競合が生じる）。
+ * Releases the claim from claimEvent(); call only when the handler failed. Deleting the row lets
+ * claimEvent() succeed on Stripe's automatic retry.
+ * The DELETE matches `processed_at` so it cannot delete a newer claim if ours was already
+ * re-claimed by another process after the TTL (an unconditional DELETE by a late old holder would
+ * remove the new claim and let a third request re-claim).
  */
 export async function releaseEventClaim(
   eventId: string,

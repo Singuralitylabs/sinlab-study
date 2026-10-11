@@ -4,7 +4,11 @@ import { createMockSupabaseClient, createQueryBuilder } from "@/tests/helpers/su
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/learning-server");
 vi.mock("@/app/services/api/supabase-server");
+vi.mock("@vercel/analytics/server", () => ({
+  track: vi.fn().mockResolvedValue(undefined),
+}));
 
+import { track } from "@vercel/analytics/server";
 import { POST } from "@/app/api/submissions/route";
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
@@ -115,5 +119,57 @@ describe("POST /api/submissions - 認証ユーザーIDでの書き込み", () =>
     expect(insert).toHaveBeenCalledWith(
       expect.objectContaining({ user_id: memberAuth.userId, content_id: 1 })
     );
+  });
+});
+
+describe("POST /api/submissions - first_submission", () => {
+  it("提出が無いときだけ status を付けて送る", async () => {
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(
+      createMockSupabaseClient({
+        tableResults: {
+          submissions: [
+            { data: null, error: null, count: 0 },
+            { data: { id: 1 }, error: null },
+          ],
+        },
+      }) as never
+    );
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(200);
+    expect(track).toHaveBeenCalledTimes(1);
+    expect(track).toHaveBeenCalledWith("first_submission", { status: "active" });
+    expect(JSON.stringify(vi.mocked(track).mock.calls)).not.toContain("@");
+    expect(JSON.stringify(vi.mocked(track).mock.calls)).not.toContain("user_id");
+  });
+
+  it("既に提出があるときは送らない", async () => {
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(
+      createMockSupabaseClient({
+        tableResults: {
+          submissions: [
+            { data: null, error: null, count: 3 },
+            { data: { id: 2 }, error: null },
+          ],
+        },
+      }) as never
+    );
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(200);
+    expect(track).not.toHaveBeenCalled();
+  });
+
+  it("track が拒否しても提出レスポンスは変わらない", async () => {
+    vi.mocked(track).mockRejectedValueOnce(new Error("analytics down"));
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.submission).toEqual({ id: 1 });
   });
 });

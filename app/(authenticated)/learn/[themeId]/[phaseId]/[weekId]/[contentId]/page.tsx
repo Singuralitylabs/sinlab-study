@@ -6,11 +6,16 @@ import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
 import { SlideContent } from "@/app/components/SlideContent";
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
+import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
+import { ANALYTICS_EVENT, UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
+import { isStripeEnabled } from "@/app/constants/stripe";
 import { buildThemeContentOrder, resolveContentNavigation } from "@/app/lib/content-navigation";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
+import { getLockedContentFallbackOverview } from "@/app/lib/trial-upgrade";
+import { trackServerEvent } from "@/app/services/analytics/track-server";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
 import {
   fetchContentById,
@@ -19,9 +24,11 @@ import {
   fetchWeekById,
   isContentFullyPublished,
   isContentLockedForUser,
+  isWeekHierarchyPublished,
 } from "@/app/services/api/learning-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
+import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
@@ -53,16 +60,16 @@ export default async function ContentPage({ params }: PageProps) {
 
   const { userId, userStatus, userRole } = await getServerAuth();
 
-  // 存在チェック + ロック判定用のサマリーおよびコンテンツ詳細を取得
-  // （member / お試しユーザーはサマリーを service_role、admin / maintainer は通常クライアントで未公開分も取得）
+  // Members/trial users fetch the summary via service_role; admin/maintainer use the normal client so
+  // unpublished content is included.
   const [{ data: week }, { data: navigation }, { data: content }] = await Promise.all([
     fetchWeekById(weekIdNum, userRole),
     fetchThemeNavigationIndex(themeIdNum, weekIdNum, userRole),
     fetchContentById(contentIdNum, userRole),
   ]);
 
-  // URLの themeId/phaseId が実際の週の所属フェーズ・テーマと一致しない場合は404
-  // （パンくず・前後リンクが誤ったURLになるのを防ぐ）
+  // 404 when the URL's themeId/phaseId don't match the week's actual phase/theme (keeps breadcrumbs
+  // and prev/next links from pointing at wrong URLs).
   if (!week || week.phase_id !== phaseIdNum || week.phase?.theme_id !== themeIdNum) {
     notFound();
   }
@@ -70,8 +77,15 @@ export default async function ContentPage({ params }: PageProps) {
   const weekContentSummaries = navigation?.currentWeekContents;
   const summary = weekContentSummaries?.find((c) => c.id === contentIdNum);
 
-  // 公開コンテンツとして存在しない（未公開・論理削除済み・他の週所属を含む）場合は404
   if (!summary) {
+    notFound();
+  }
+
+  // For members/trial users, 404 before the lock check if any parent (week/phase/theme) is
+  // unpublished or deleted. The summary goes through service_role and only sees the content row's
+  // is_published, so rendering the lock screen first would leak titles/breadcrumbs under an
+  // unpublished theme (#242).
+  if (!checkContentPermissions(userRole) && !isWeekHierarchyPublished(week)) {
     notFound();
   }
 
@@ -102,6 +116,18 @@ export default async function ContentPage({ params }: PageProps) {
   const isLocked = isContentLockedForUser(userStatus, summary.is_open_to_trial);
 
   if (isLocked) {
+    const stripeEnabled = isStripeEnabled();
+    // No description lookup on purpose: RLS returns 0 rows for trial-locked content, so it could
+    // never show, and widening the service_role allow-list would break the AGENTS.md invariant.
+    // The counts reuse the navigation summaries, so no new service_role call is added.
+    const priceLabel = stripeEnabled ? await fetchUpgradePriceLabel() : null;
+    const paidOnlyCount = navigation?.paidOnlyCount ?? 0;
+    const paidOnlyExerciseCount = navigation?.paidOnlyExerciseCount ?? 0;
+
+    trackServerEvent(ANALYTICS_EVENT.LOCKED_CONTENT_VIEWED, {
+      content_type: summary.content_type,
+    });
+
     return (
       <div className="max-w-4xl mx-auto">
         <PageTitle
@@ -119,13 +145,39 @@ export default async function ContentPage({ params }: PageProps) {
         />
 
         <Card className="mb-6">
-          <CardContent className="py-12 text-center">
-            <Lock className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">
-              このコンテンツは無料プランでは閲覧できません。
-              <br />
-              本登録後に閲覧・提出できるようになります。
-            </p>
+          <CardContent className="py-8 space-y-6">
+            <div className="text-center">
+              <Lock className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <p className="text-muted-foreground">
+                このコンテンツは無料プランでは閲覧できません。
+                <br />
+                本登録後に閲覧・提出できるようになります。
+              </p>
+            </div>
+
+            <div>
+              <h2 className="text-sm font-semibold text-muted-foreground mb-2">概要</h2>
+              <p className="text-sm">{getLockedContentFallbackOverview(summary.content_type)}</p>
+            </div>
+
+            {paidOnlyCount > 0 && (
+              <p className="text-sm">
+                このテーマには有料会員向けのコンテンツが{paidOnlyCount}件（うち演習
+                {paidOnlyExerciseCount}件）あります
+              </p>
+            )}
+
+            <div className="space-y-3">
+              <h2 className="text-sm font-semibold text-muted-foreground">
+                有料会員になると使えるもの
+              </h2>
+              <UpgradeBenefitsList />
+              <UpgradeCta
+                stripeEnabled={stripeEnabled}
+                priceLabel={priceLabel}
+                source={UPGRADE_CTA_SOURCE.LOCK_SCREEN}
+              />
+            </div>
           </CardContent>
         </Card>
 
@@ -144,17 +196,18 @@ export default async function ContentPage({ params }: PageProps) {
     notFound();
   }
 
-  // コンテンツ行自体が公開済みでも、所属する週・フェーズ・テーマのいずれかが未公開・論理削除
-  // ならプレビュー扱い（バッジ・完了ボタン/提出フォームの可否）。member / お試しユーザーには
-  // 404 とする（theme だけ未公開だと week/phase ガードをすり抜けて到達しうるため。#216）。
+  // Even when the content row is published, an unpublished/deleted week/phase/theme makes it a
+  // preview (badge, completion button/submission form availability); members/trial users get 404
+  // (#216). They are already rejected by the guard before the lock check (#242), so this
+  // re-verifies the same condition via the embedded content row as a second layer.
   const isFullyPublished = isContentFullyPublished(content);
   if (!isFullyPublished && !checkContentPermissions(userRole)) {
     notFound();
   }
 
-  // スライドの署名付きURLは、ロック判定（isLocked）と RLS 適用の fetchContentById() を
-  // 通過した後にのみ発行する。ロック済み・未公開（admin / maintainer のプレビューを除く）の
-  // コンテンツではここに到達しない（issue #89）。進捗等の取得と並列に実行する
+  // Issue the slide signed URL only after the lock check (isLocked) and the RLS-applied
+  // fetchContentById() pass; locked or unpublished content (except admin/maintainer preview) never
+  // gets here (#89). Runs in parallel with the progress fetches.
   const [{ isCompleted }, { data: existingReview }, { data: latestSubmission }, slideSignedUrl] =
     await Promise.all([
       userId
@@ -190,7 +243,6 @@ export default async function ContentPage({ params }: PageProps) {
         badge={<UnpublishedBadge isPublished={isFullyPublished} />}
       />
 
-      {/* コンテンツ本体 */}
       <Card className="mb-6">
         <CardContent className="pt-6">
           {content.content_type === "video" && content.video_url && (
@@ -227,7 +279,6 @@ export default async function ContentPage({ params }: PageProps) {
                 <div className="mt-8">
                   <Separator className="mb-6" />
 
-                  {/* 提出済み: 提出内容・模範回答・AIレビュー結果 */}
                   {latestSubmission && (
                     <>
                       <div className="mb-6">
@@ -301,7 +352,6 @@ export default async function ContentPage({ params }: PageProps) {
         </CardContent>
       </Card>
 
-      {/* 概要欄（video / slide かつ概要が入力されている場合のみ表示。本体の下に表示する） */}
       {(content.content_type === "video" || content.content_type === "slide") &&
         content.description && (
           <Card className="mb-6">
@@ -312,14 +362,13 @@ export default async function ContentPage({ params }: PageProps) {
           </Card>
         )}
 
-      {/* 完了ボタン（未公開コンテンツのプレビュー中は進捗登録できないため非表示） */}
+      {/* Hidden while previewing unpublished content since progress can't be recorded. */}
       {userId && isFullyPublished && (
         <div className="mb-6">
           <CompleteButton contentId={contentIdNum} initialCompleted={isCompleted} />
         </div>
       )}
 
-      {/* 前後ナビゲーション */}
       <PrevNextNav
         themeId={themeIdNum}
         phaseId={phaseIdNum}

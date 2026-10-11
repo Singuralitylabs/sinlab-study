@@ -9,6 +9,7 @@ import { MEMBERSHIP_TYPES, USER_MANAGEMENT_ACTIONS, USER_ROLES } from "@/app/con
 import {
   AdminUserActionSchema,
   AiReviewRequestSchema,
+  AnnouncementSchema,
   BulkContentUpdateSchema,
   ContentCreateSchema,
   ContentUpdateSchema,
@@ -103,6 +104,16 @@ describe("AiReviewRequestSchema", () => {
   });
 });
 
+describe("AdminUserActionSchema - 配信停止の管理（#272）", () => {
+  it.each(["resume_email", "opt_out_email"])(
+    "%s は userId だけで通り、userId が無ければ検証エラー",
+    (action) => {
+      expect(AdminUserActionSchema.safeParse({ userId: 1, action }).success).toBe(true);
+      expect(AdminUserActionSchema.safeParse({ action }).success).toBe(false);
+    }
+  );
+});
+
 describe("AdminUserActionSchema", () => {
   it("approveはmembershipTypeが必須", () => {
     expect(AdminUserActionSchema.safeParse({ userId: 1, action: "approve" }).success).toBe(false);
@@ -168,6 +179,8 @@ describe("AdminUserActionSchema", () => {
         action: "change_membership",
         membershipType: MEMBERSHIP_TYPES[0],
       },
+      resume_email: { userId: 1, action: "resume_email" },
+      opt_out_email: { userId: 1, action: "opt_out_email" },
     };
 
     for (const action of USER_MANAGEMENT_ACTIONS) {
@@ -315,12 +328,29 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
 
     it.each([
       ["null", null],
-      ["空文字", ""],
       ["未指定", undefined],
     ])("未設定（%s）はそのまま受理する", (_label, pdf_url) => {
       const result = ContentCreateSchema.safeParse({ ...base, pdf_url });
       expect(result.success).toBe(true);
       expect(result.data?.pdf_url).toBe(pdf_url);
+    });
+
+    it.each([
+      ["空文字", ""],
+      ["空白のみ", "   "],
+      ["タブ・改行のみ", "\t\r\n"],
+    ])("%s は null に正規化して受理する（空文字の行を作らない。issue #243）", (_label, pdf_url) => {
+      const created = ContentCreateSchema.safeParse({ ...base, pdf_url });
+      expect(created.success).toBe(true);
+      expect(created.data?.pdf_url).toBeNull();
+      const updated = ContentUpdateSchema.safeParse({ pdf_url });
+      expect(updated.success).toBe(true);
+      expect(updated.data?.pdf_url).toBeNull();
+    });
+
+    it("全角スペースはマイグレーションの btrim 対象外のため、空扱い（null 化）しない", () => {
+      const result = ContentUpdateSchema.safeParse({ pdf_url: "\u3000" });
+      expect(result.success ? result.data?.pdf_url : "rejected").not.toBeNull();
     });
 
     it.each([
@@ -511,5 +541,51 @@ describe("validateRequest", () => {
     expect(result.success).toBe(false);
     if (result.success) throw new Error("unreachable");
     expect(result.response.status).toBe(400);
+  });
+});
+
+describe("AnnouncementSchema（#254）", () => {
+  const valid = {
+    title: "  もくもく会のご案内  ",
+    body: "本文",
+    target_statuses: ["active", "trial"],
+    target_membership_types: null,
+    send_email: true,
+    is_published: false,
+  };
+
+  it("正しい入力を受け付け、タイトルの前後の空白を除く", () => {
+    const result = AnnouncementSchema.safeParse(valid);
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.title).toBe("もくもく会のご案内");
+  });
+
+  it.each([
+    ["タイトルが空白のみ", { title: "   " }],
+    ["本文が空白のみ", { body: " \n " }],
+    ["対象ステータスが空", { target_statuses: [] }],
+    ["却下ステータスを対象にする", { target_statuses: ["rejected"] }],
+    ["対象ステータスの重複", { target_statuses: ["active", "active"] }],
+    ["会員種別が空配列", { target_statuses: ["active"], target_membership_types: [] }],
+    ["未知の会員種別", { target_statuses: ["active"], target_membership_types: ["vip"] }],
+    ["send_email が無い", { send_email: undefined }],
+  ])("%s は拒否する", (_label, patch) => {
+    expect(AnnouncementSchema.safeParse({ ...valid, ...patch }).success).toBe(false);
+  });
+
+  it("会員種別を指定するときは、お試しユーザーを対象にできない", () => {
+    const result = AnnouncementSchema.safeParse({
+      ...valid,
+      target_statuses: ["active", "trial"],
+      target_membership_types: ["general"],
+    });
+    expect(result.success).toBe(false);
+    expect(
+      AnnouncementSchema.safeParse({
+        ...valid,
+        target_statuses: ["active"],
+        target_membership_types: ["general"],
+      }).success
+    ).toBe(true);
   });
 });

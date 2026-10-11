@@ -1,5 +1,6 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
+import { WEEKLY_FUNNEL_WEEKS } from "@/app/constants/analytics";
 import { SLIDES_BUCKET } from "@/app/constants/storage";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import {
@@ -9,10 +10,13 @@ import {
   type SiblingOrderRow,
 } from "@/app/lib/content-grouping";
 import { toSlideObjectKey } from "@/app/lib/slide-object-key";
+import { WEEKLY_FUNNEL_FETCH_ERROR, type WeeklyFunnelRow } from "@/app/lib/weekly-funnel";
 import {
   fetchStripeSubscriptionByUserId,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
 } from "@/app/services/api/stripe-server";
+import { checkContentPermissions } from "@/app/services/auth/permissions";
+import { getServerAuth } from "@/app/services/auth/server-auth";
 import type {
   ContentSiblingCandidateRow,
   ContentType,
@@ -35,16 +39,22 @@ type SiblingParentFilter = { column: "theme_id" | "phase_id" | "week_id"; value:
 
 type AdminSupabaseClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>;
 
+const SLIDE_CLEANUP_CHUNK_SIZE = 100;
+
 /**
- * `slides` バケットの孤児PDF削除（issue #145）。
- *
- * `learning_contents` の行は論理削除のまま維持し、Storage オブジェクトのみ物理削除する
- * （行を物理削除すると `user_progress` / `submissions` / `ai_reviews` の履歴が連鎖削除されるため）。
- * オブジェクトキー（`<フォルダ>/slide-NN.pdf`）はコンテンツIDに依存せず、
- * 複数コンテンツが同じ `pdf_url` を参照し得るため、削除前に生きた参照
- * （`is_deleted = false`）が残っていないか必ず確認する。
- * Storage の削除失敗ではDB操作全体を失敗させず、結果を `storageRemoved` で返す
- * （サムネイル DELETE の `storageRemoved` と同じ前例）。
+ * Deletes orphaned PDFs from the `slides` bucket (issue #145).
+ * learning_contents rows stay soft-deleted and only Storage objects are removed: hard-deleting
+ * rows would cascade-delete user_progress / submissions / ai_reviews history.
+ * Object keys (`<folder>/slide-NN.pdf`) are independent of content ID and several contents may
+ * share one pdf_url, so always confirm no live reference (`is_deleted = false`) remains before
+ * deleting.
+ * A Storage failure does not fail the whole DB operation; it is reported via `storageRemoved`
+ * (same precedent as thumbnail DELETE).
+ * At most 2 round trips per SLIDE_CLEANUP_CHUNK_SIZE chunk (bulk-fetch live references, then
+ * bulk-delete unreferenced keys; issue #246). Chunking keeps the PostgREST `in.(...)` query
+ * string short for themes with many slides and localizes failures. A chunk whose reference lookup
+ * fails is not deleted (to avoid removing a referenced key) and makes the overall result false;
+ * other chunks continue.
  */
 async function removeUnreferencedSlideObjects(
   supabase: AdminSupabaseClient,
@@ -55,42 +65,55 @@ async function removeUnreferencedSlideObjects(
       pdfUrls.map((url) => toSlideObjectKey(url)).filter((key): key is string => key !== null)
     ),
   ];
-  if (keys.length === 0) {
-    return true;
-  }
   let storageRemoved = true;
-  for (const key of keys) {
-    try {
-      const { data, error } = await supabase
-        .from("learning_contents")
-        .select("id")
-        .eq("pdf_url", key)
-        .eq("is_deleted", false)
-        .limit(1);
-      if (error) {
-        console.error("スライド参照確認エラー:", error.message);
-        storageRemoved = false;
-        continue;
-      }
-      const rows = data as unknown[] | null;
-      // 他の生きたコンテンツが参照している場合は削除しない
-      if (rows && rows.length > 0) {
-        continue;
-      }
-      const { error: removeError } = await supabase.storage.from(SLIDES_BUCKET).remove([key]);
-      if (removeError) {
-        console.error("スライド削除エラー:", removeError.message);
-        storageRemoved = false;
-      }
-    } catch (cleanupError) {
-      console.error("スライド削除エラー:", cleanupError);
-      storageRemoved = false;
-    }
+  for (let i = 0; i < keys.length; i += SLIDE_CLEANUP_CHUNK_SIZE) {
+    const removed = await removeUnreferencedSlideObjectChunk(
+      supabase,
+      keys.slice(i, i + SLIDE_CLEANUP_CHUNK_SIZE)
+    );
+    storageRemoved &&= removed;
   }
   return storageRemoved;
 }
 
-/** 指定コンテンツID群の `pdf_url`（生死を問わない）を取得する。取得失敗時は null を返す */
+/** One chunk of the orphan cleanup (`keys` are normalized and de-duplicated). */
+async function removeUnreferencedSlideObjectChunk(
+  supabase: AdminSupabaseClient,
+  keys: string[]
+): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from("learning_contents")
+      .select("pdf_url")
+      .in("pdf_url", keys)
+      .eq("is_deleted", false);
+    if (error) {
+      console.error("スライド参照確認エラー:", error.message);
+      return false;
+    }
+    // Keep keys still referenced by other live contents.
+    const referencedKeys = new Set(
+      ((data ?? []) as { pdf_url: string | null }[]).map((row) => row.pdf_url)
+    );
+    const unreferencedKeys = keys.filter((key) => !referencedKeys.has(key));
+    if (unreferencedKeys.length === 0) {
+      return true;
+    }
+    const { error: removeError } = await supabase.storage
+      .from(SLIDES_BUCKET)
+      .remove(unreferencedKeys);
+    if (removeError) {
+      console.error("スライド削除エラー:", removeError.message);
+      return false;
+    }
+    return true;
+  } catch (cleanupError) {
+    console.error("スライド削除エラー:", cleanupError);
+    return false;
+  }
+}
+
+/** Includes soft-deleted rows. Returns null on fetch failure. */
 async function fetchPdfUrlsByContentIds(
   supabase: AdminSupabaseClient,
   ids: number[]
@@ -107,7 +130,7 @@ async function fetchPdfUrlsByContentIds(
   return rows.map((row) => row.pdf_url).filter((url): url is string => url !== null);
 }
 
-/** 指定週配下の生きたコンテンツの `pdf_url` を取得する。取得失敗時は null を返す */
+/** Live contents only. Returns null on fetch failure. */
 async function fetchPdfUrlsByWeekIds(
   supabase: AdminSupabaseClient,
   weekIds: number[]
@@ -129,9 +152,9 @@ async function fetchPdfUrlsByWeekIds(
 }
 
 /**
- * 管理画面コンテンツ一覧の select（ネストは一覧・階層ソートに必要な最小セット）。
- * テーマ/フェーズ絞り込み時はネストを `!inner` にして未分類（week なし）を除外する。
- * PostgREST の埋め込みフィルタは inner join でないと親行を落とさないため。
+ * Nested select is the minimum needed for the list and hierarchy sort. With a theme/phase filter
+ * the nesting must be `!inner`: PostgREST embedded filters only drop parent rows with an inner
+ * join, which excludes unclassified contents (no week).
  */
 function manageContentListSelect(innerJoin: boolean): string {
   const weekRel = innerJoin ? "week:learning_weeks!inner" : "week:learning_weeks";
@@ -152,9 +175,9 @@ function manageContentListSelect(innerJoin: boolean): string {
 }
 
 /**
- * URL クエリの ID を厳密な整数として解釈する。
- * `Number("abc")`→NaN や `Number("01")`→1 / `Number("2.0")`→2 のような
- * 従来の JS 文字列比較と食い違う変換を避け、不正値は undefined を返す。
+ * Parses a URL query ID strictly as an integer. Avoids conversions like Number("01") -> 1 or
+ * Number("2.0") -> 2 that disagree with the old JS string comparison; invalid values yield
+ * undefined.
  */
 export function parseStrictFilterId(value: string | undefined): number | undefined {
   if (value === undefined || value === "") {
@@ -189,9 +212,9 @@ const MANAGE_WEEK_LIST_SELECT = `
 const CONTENT_SIBLING_CANDIDATE_SELECT = "id, title, display_order, is_published, week_id";
 
 const MANAGE_USER_LIST_SELECT =
-  "id, display_name, email, role, status, membership_type, created_at";
+  "id, display_name, email, role, status, membership_type, created_at, email_opt_out_at";
 
-/** `/manage/contents` の構造フィルタ（タイトル検索 `q` は含めない。JS側で行う） */
+/** Structural filters for /manage/contents. The title search `q` is not included (done in JS). */
 export interface FetchContentsFilters {
   themeId?: string;
   phaseId?: string;
@@ -200,8 +223,8 @@ export interface FetchContentsFilters {
 }
 
 /**
- * 兄弟一覧（同じ親配下・未削除、`excludeId` があれば自分自身を除く）を取得する。
- * `createXxx` / `updateXxx` の再採番処理の共通の起点。
+ * Siblings under the same parent, not deleted (excluding `excludeId` when given). Common starting
+ * point for the createXxx / updateXxx resequencing.
  */
 async function fetchSiblings(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
@@ -220,9 +243,9 @@ async function fetchSiblings(
 }
 
 /**
- * `updates`（display_order が変わる行のみ）を RPC で一括 UPDATEする。0件なら何もしない。
- * 個別 `.update().eq("id")` の N 往復を避け、兄弟数によらず定数回（1 RPC）にする（#196）。
- * upsert ではなく UPDATE 専用 RPC のため、INSERT 扱いにならず `updated_at` トリガーも通常どおり発火する。
+ * Bulk-UPDATEs only rows whose display_order changed through an RPC (no-op when empty): one RPC
+ * regardless of sibling count instead of N round trips (#196). It is an UPDATE-only RPC rather
+ * than upsert, so it is not treated as an INSERT and the `updated_at` trigger fires normally.
  */
 async function applySiblingUpdates(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
@@ -240,12 +263,12 @@ async function applySiblingUpdates(
 }
 
 /**
- * `createTheme` / `createPhase` / `createWeek` / `createContent` に共通する、挿入位置からの
- * 再採番処理（兄弟をSELECT → `resolveSiblingResequence` → 変化した行だけUPDATE）を1本化した
- * ヘルパー。`parentFilter` はテーマのみ null（親を持たないため全件が対象）。
- * 呼び出し元は返り値の `error` が null であることを確認したうえで `displayOrder` をINSERTに使う。
- * `insertAfterId` が同じ親配下・未削除の要素として存在しない場合は
- * `resolveSiblingResequence` が投げる `InvalidInsertAfterIdError` がそのまま伝播する。
+ * Shared insert-position resequencing for createTheme / createPhase / createWeek / createContent
+ * (SELECT siblings, resolveSiblingResequence, UPDATE changed rows). `parentFilter` is null only
+ * for themes (no parent).
+ * Callers must check the returned `error` is null before using `displayOrder` in the INSERT.
+ * InvalidInsertAfterIdError from resolveSiblingResequence propagates when `insertAfterId` is not
+ * a live sibling under the same parent.
  */
 async function resequenceSiblingsForInsert(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
@@ -273,23 +296,18 @@ async function resequenceSiblingsForInsert(
 }
 
 /**
- * `updateTheme` / `updatePhase` / `updateWeek` / `updateContent` に共通する、編集時の
- * 挿入位置からの再採番処理（issue #189）。移動先（destinationParentFilter）配下のみを
- * 対象にする。移動元の詰め直しはこの関数の責務ではなく、呼び出し側が本体のUPDATE
- * （親の付け替え）に成功した**後**に `renumberSourceSiblingsAfterMove` を呼ぶこと
- * （先に移動元を詰めると、本体UPDATEが失敗した場合に、まだ移動元に残っている自分自身と
- * 詰め直し後の兄弟の `display_order` が重複し、既存の兄弟同士の表示順が入れ替わりうる。
- * 詰め直しを本体UPDATEの後に行えば、失敗時に生じるのは欠番のみで、既存要素間の順序は
- * 保たれる）。
- *
- * - `insertAfterId` が省略され、かつ親が変わっていない場合（`parentChanged: false`）は
- *   何もせず `displayOrder: undefined` を返す（呼び出し側は display_order を更新しない）。
- * - それ以外は、移動先の兄弟（自分自身を除く。`resequenceSiblingsForInsert` と同じ
- *   `resolveSiblingResequence` を、兄弟一覧から自分自身を除いたうえで呼び出すことで共用する。
- *   `insertAfterId` に自分自身のIDを指定した場合も一覧に存在しないため
- *   `InvalidInsertAfterIdError` になる）に対して再採番する。
- *   `insertAfterId` が省略され親が変わった場合は、移動先の末尾（`getSiblingTailId`）を
- *   既定値にする。
+ * Shared resequencing for updateTheme / updatePhase / updateWeek / updateContent (issue #189);
+ * covers only the destination parent.
+ * The caller must call renumberSourceSiblingsAfterMove AFTER the main UPDATE (parent change)
+ * succeeds. Compacting the source first would, if the main UPDATE then fails, leave the item
+ * itself and the compacted siblings with duplicate display_order and reorder existing siblings.
+ * Compacting afterwards leaves only gaps on failure and preserves order.
+ * - `insertAfterId` omitted and parent unchanged (`parentChanged: false`): no-op, returns
+ *   `displayOrder: undefined` (caller must not update display_order).
+ * - Otherwise resequence the destination siblings excluding the item itself (same
+ *   resolveSiblingResequence as inserts; passing the item's own ID as `insertAfterId` therefore
+ *   raises InvalidInsertAfterIdError). If `insertAfterId` is omitted and the parent changed,
+ *   default to the destination tail (getSiblingTailId).
  */
 async function resequenceDestinationForUpdate(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
@@ -329,9 +347,9 @@ async function resequenceDestinationForUpdate(
 }
 
 /**
- * 親を変更した編集で、移動元に残った兄弟（自分自身は既にそちらから抜けている前提）の
- * 欠番を1からの連番に詰め直す。本体UPDATE（親の付け替え）が成功した**後**に呼ぶこと
- * （`resequenceDestinationForUpdate` のコメント参照）。
+ * After a parent change, compacts gaps among the siblings left in the source parent into 1..N
+ * (the item itself has already left). Call only AFTER the main UPDATE succeeds (see
+ * resequenceDestinationForUpdate).
  */
 async function renumberSourceSiblingsAfterMove(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
@@ -350,10 +368,6 @@ async function renumberSourceSiblingsAfterMove(
   }
   return applySiblingUpdates(supabase, table, resolveSiblingRenumber(sourceSiblings ?? []));
 }
-
-// =====================================================
-// テーマ管理
-// =====================================================
 
 export async function fetchAllThemes(): Promise<{
   data: ManageThemeListItem[] | null;
@@ -394,11 +408,10 @@ export async function fetchThemeById(id: number): Promise<{
 }
 
 /**
- * テーマを作成する。`insertAfterId`（null=先頭、数値=そのテーマIDの直後）から
- * `display_order` をサーバー側で決定し、対象範囲（テーマは親を持たないため全テーマ）の
- * 兄弟を1からの連番に再採番してからINSERTする（`resolveSiblingResequence` 参照）。
- * `insertAfterId` が未削除テーマとして存在しない場合は `InvalidInsertAfterIdError` を投げる
- * （呼び出し側のAPIルートで400に変換すること）。
+ * `insertAfterId` (null = first, number = right after that theme) determines display_order
+ * server-side; all themes (no parent) are renumbered from 1 before the INSERT (see
+ * resolveSiblingResequence). Throws InvalidInsertAfterIdError if it is not a live theme (the API
+ * route must map it to 400).
  */
 export async function createTheme(theme: {
   name: string;
@@ -442,9 +455,9 @@ export async function createTheme(theme: {
 }
 
 /**
- * テーマを更新する。`insertAfterId` が省略された場合は表示順を変更しない。指定された場合は
- * 全テーマ（自分自身を除く）を対象に `resequenceDestinationForUpdate` で再採番する
- * （テーマは親を持たないため親変更の分岐は発生しない）。
+ * `insertAfterId` omitted means display order is unchanged. When given, all other themes are
+ * renumbered via resequenceDestinationForUpdate (themes have no parent, so no parent-change
+ * branch).
  */
 export async function updateTheme(
   id: number,
@@ -486,11 +499,10 @@ export async function deleteTheme(
 ): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
   const supabase = await createAdminSupabaseClient();
   let storageRemoved = true;
-  // テーマ配下の全コンテンツの pdf_url（Storage 削除対象）。取得失敗時は null のまま残し、
-  // 最後の Storage 削除を試みず storageRemoved: false で報告する
+  // pdf_urls of all contents under the theme (Storage cleanup targets). Stays null on fetch
+  // failure so the final Storage cleanup is skipped and storageRemoved: false is reported.
   let targetPdfUrls: string[] | null = null;
 
-  // 配下フェーズIDを取得
   const { data: phases, error: phaseFetchError } = await supabase
     .from("learning_phases")
     .select("id")
@@ -504,7 +516,6 @@ export async function deleteTheme(
   const phaseIds = phases?.map((p) => p.id) ?? [];
 
   if (phaseIds.length > 0) {
-    // 配下週IDを取得
     const { data: weeks, error: weekFetchError } = await supabase
       .from("learning_weeks")
       .select("id")
@@ -517,16 +528,14 @@ export async function deleteTheme(
 
     const weekIds = weeks?.map((w) => w.id) ?? [];
 
-    // Storage 削除のため、論理削除前に配下の pdf_url を取得する。
-    // 取得失敗時は削除対象が特定できないため、後段の Storage 削除を試みず
-    // storageRemoved: false で報告する（成功扱いにしない）
+    // Fetch pdf_urls before the soft delete. On failure the targets are unknown, so skip Storage
+    // cleanup and report storageRemoved: false (never treat as success).
     targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, weekIds);
     if (targetPdfUrls === null) {
       storageRemoved = false;
     }
 
     if (weekIds.length > 0) {
-      // 配下コンテンツを論理削除
       const { error: contentError } = await supabase
         .from("learning_contents")
         .update({ is_deleted: true })
@@ -538,7 +547,6 @@ export async function deleteTheme(
       }
     }
 
-    // 配下週を論理削除
     const { error: weekError } = await supabase
       .from("learning_weeks")
       .update({ is_deleted: true })
@@ -549,7 +557,6 @@ export async function deleteTheme(
       return { error: weekError, storageRemoved };
     }
 
-    // 配下フェーズを論理削除
     const { error: phaseError } = await supabase
       .from("learning_phases")
       .update({ is_deleted: true })
@@ -561,7 +568,6 @@ export async function deleteTheme(
     }
   }
 
-  // テーマを論理削除
   const { error } = await supabase
     .from("learning_themes")
     .update({ is_deleted: true })
@@ -571,9 +577,8 @@ export async function deleteTheme(
     return { error, storageRemoved };
   }
 
-  // すべてのDB書き込みが成功した後に、他から参照されていない
-  // Storage オブジェクトのみ物理削除する（後段の失敗で「DBは失敗・PDFだけ消えた」
-  // 状態を作らないため）。行は論理削除のまま残す
+  // Remove unreferenced Storage objects only after every DB write succeeded, so a later failure
+  // cannot leave "DB failed but PDF gone". Rows stay soft-deleted.
   if (targetPdfUrls !== null && targetPdfUrls.length > 0) {
     storageRemoved = await removeUnreferencedSlideObjects(supabase, targetPdfUrls);
   }
@@ -581,14 +586,9 @@ export async function deleteTheme(
   return { error: null, storageRemoved };
 }
 
-// =====================================================
-// フェーズ管理
-// =====================================================
-
 /**
- * フェーズ一覧を取得する。`display_order`（フェーズ自身の表示順）でソートして返すが、
- * テーマ→フェーズの階層順が必要な呼び出し元（`/manage/phases` 一覧）は、
- * 呼び出し側で `sortPhasesByHierarchy` を通すこと。
+ * Sorted by the phase's own display_order. Callers needing theme -> phase hierarchy order
+ * (/manage/phases) must pass the result through sortPhasesByHierarchy.
  */
 export async function fetchAllPhases(): Promise<{
   data: ManagePhaseListItem[] | null;
@@ -629,9 +629,8 @@ export async function fetchPhaseById(id: number): Promise<{
 }
 
 /**
- * フェーズを作成する。`insertAfterId` から `display_order` をサーバー側で決定し、
- * 同じ `theme_id` 配下の兄弟を1からの連番に再採番してからINSERTする
- * （`createTheme` と同じ方針。詳細は `resolveSiblingResequence` 参照）。
+ * Same approach as createTheme, renumbering siblings under the same theme_id (see
+ * resolveSiblingResequence).
  */
 export async function createPhase(phase: {
   theme_id: number;
@@ -675,10 +674,10 @@ export async function createPhase(phase: {
 }
 
 /**
- * フェーズを更新する。`insertAfterId` が省略され、かつ `theme_id` が変わっていない場合は
- * 表示順を変更しない。それ以外は移動先（`theme_id` 変更後の親）配下を再採番してから本体を
- * UPDATEし、親が変わった場合は本体UPDATE成功後に移動元の親配下も再採番する
- * （順序の理由は `resequenceDestinationForUpdate` のコメント参照）。
+ * If `insertAfterId` is omitted and theme_id is unchanged, display order is untouched. Otherwise
+ * renumber the destination (new theme_id) first, run the main UPDATE, and after it succeeds
+ * renumber the source parent if the parent changed (order rationale:
+ * resequenceDestinationForUpdate).
  */
 export async function updatePhase(
   id: number,
@@ -753,9 +752,7 @@ export async function deletePhase(
   id: number
 ): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
   const supabase = await createAdminSupabaseClient();
-  let storageRemoved = true;
 
-  // 配下週IDを取得
   const { data: weeks, error: weekFetchError } = await supabase
     .from("learning_weeks")
     .select("id")
@@ -763,20 +760,17 @@ export async function deletePhase(
     .eq("is_deleted", false);
   if (weekFetchError) {
     console.error("週取得エラー:", weekFetchError.message);
-    return { error: weekFetchError, storageRemoved };
+    return { error: weekFetchError, storageRemoved: true };
   }
 
   const weekIds = weeks?.map((w) => w.id) ?? [];
 
-  // Storage 削除のため、論理削除前に配下の pdf_url を取得する。
-  // 取得失敗時は storageRemoved: false で報告する（成功扱いにしない）
+  // Fetch pdf_urls before the soft delete; on failure report storageRemoved: false (never treat
+  // as success).
   const targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, weekIds);
-  if (targetPdfUrls === null) {
-    storageRemoved = false;
-  }
+  let storageRemoved = targetPdfUrls !== null;
 
   if (weekIds.length > 0) {
-    // 配下コンテンツを論理削除
     const { error: contentError } = await supabase
       .from("learning_contents")
       .update({ is_deleted: true })
@@ -787,7 +781,6 @@ export async function deletePhase(
       return { error: contentError, storageRemoved };
     }
 
-    // 配下週を論理削除
     const { error: weekError } = await supabase
       .from("learning_weeks")
       .update({ is_deleted: true })
@@ -799,7 +792,6 @@ export async function deletePhase(
     }
   }
 
-  // フェーズを論理削除
   const { error } = await supabase
     .from("learning_phases")
     .update({ is_deleted: true })
@@ -809,8 +801,7 @@ export async function deletePhase(
     return { error, storageRemoved };
   }
 
-  // すべてのDB書き込みが成功した後に、他から参照されていない
-  // Storage オブジェクトのみ物理削除する
+  // Remove unreferenced Storage objects only after all DB writes succeed.
   if (targetPdfUrls !== null && targetPdfUrls.length > 0) {
     storageRemoved = await removeUnreferencedSlideObjects(supabase, targetPdfUrls);
   }
@@ -818,14 +809,9 @@ export async function deletePhase(
   return { error: null, storageRemoved };
 }
 
-// =====================================================
-// 週管理
-// =====================================================
-
 /**
- * 週一覧を取得する。`display_order`（週自身の表示順）でソートして返すが、
- * テーマ→フェーズ→週の階層順が必要な呼び出し元（`/manage/weeks` 一覧・`ContentForm`
- * 用の選択肢導出）は、いずれも呼び出し側で `sortWeeksByHierarchy` を通すこと。
+ * Sorted by the week's own display_order. Callers needing theme -> phase -> week hierarchy order
+ * (/manage/weeks list, ContentForm options) must pass the result through sortWeeksByHierarchy.
  */
 export async function fetchAllWeeks(): Promise<{
   data: ManageWeekListItem[] | null;
@@ -866,9 +852,8 @@ export async function fetchWeekById(id: number): Promise<{
 }
 
 /**
- * 週を作成する。`insertAfterId` から `display_order` をサーバー側で決定し、
- * 同じ `phase_id` 配下の兄弟を1からの連番に再採番してからINSERTする
- * （`createTheme` と同じ方針。詳細は `resolveSiblingResequence` 参照）。
+ * Same approach as createTheme, renumbering siblings under the same phase_id (see
+ * resolveSiblingResequence).
  */
 export async function createWeek(week: {
   phase_id: number;
@@ -912,10 +897,9 @@ export async function createWeek(week: {
 }
 
 /**
- * 週を更新する。`insertAfterId` が省略され、かつ `phase_id` が変わっていない場合は
- * 表示順を変更しない。それ以外は移動先（`phase_id` 変更後の親）配下を再採番してから本体を
- * UPDATEし、親が変わった場合は本体UPDATE成功後に移動元の親配下も再採番する
- * （`updatePhase` と同じ方針。順序の理由は `resequenceDestinationForUpdate` のコメント参照）。
+ * Same approach as updatePhase: display order is untouched if `insertAfterId` is omitted and
+ * phase_id is unchanged; otherwise renumber the destination first and the source only after the
+ * main UPDATE succeeds (see resequenceDestinationForUpdate).
  */
 export async function updateWeek(
   id: number,
@@ -990,16 +974,12 @@ export async function deleteWeek(
   id: number
 ): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
   const supabase = await createAdminSupabaseClient();
-  let storageRemoved = true;
 
-  // Storage 削除のため、論理削除前に配下の pdf_url を取得する。
-  // 取得失敗時は storageRemoved: false で報告する（成功扱いにしない）
+  // Fetch pdf_urls before the soft delete; on failure report storageRemoved: false (never treat
+  // as success).
   const targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, [id]);
-  if (targetPdfUrls === null) {
-    storageRemoved = false;
-  }
+  let storageRemoved = targetPdfUrls !== null;
 
-  // 配下コンテンツを論理削除
   const { error: contentError } = await supabase
     .from("learning_contents")
     .update({ is_deleted: true })
@@ -1010,15 +990,13 @@ export async function deleteWeek(
     return { error: contentError, storageRemoved };
   }
 
-  // 週を論理削除
   const { error } = await supabase.from("learning_weeks").update({ is_deleted: true }).eq("id", id);
   if (error) {
     console.error("週削除エラー:", error.message);
     return { error, storageRemoved };
   }
 
-  // すべてのDB書き込みが成功した後に、他から参照されていない
-  // Storage オブジェクトのみ物理削除する
+  // Remove unreferenced Storage objects only after all DB writes succeed.
   if (targetPdfUrls !== null && targetPdfUrls.length > 0) {
     storageRemoved = await removeUnreferencedSlideObjects(supabase, targetPdfUrls);
   }
@@ -1026,13 +1004,9 @@ export async function deleteWeek(
   return { error: null, storageRemoved };
 }
 
-// =====================================================
-// コンテンツ管理
-// =====================================================
-
 /**
- * コンテンツ管理一覧を取得する（#196）。本文系カラムは含めない。
- * テーマ/フェーズ/週/種別は SQL 側で絞り、タイトル検索は呼び出し側の JS に残す。
+ * Management list (#196); body columns are excluded. Theme/phase/week/type filters run in SQL;
+ * the title search stays in the caller's JS.
  */
 export async function fetchAllContents(filters: FetchContentsFilters = {}): Promise<{
   data: ManageContentListItem[] | null;
@@ -1042,8 +1016,8 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
   const phaseId = parseStrictFilterId(filters.phaseId);
   const weekId = parseStrictFilterId(filters.weekId);
 
-  // クエリ文字列が整数として不正な場合は PostgREST 400 を起こさず「該当なし」とする
-  // （従来の JS 文字列比較でも一致しなかった入力と同じ扱い）。
+  // An integer-invalid query string yields "no match" instead of a PostgREST 400 (same as the old
+  // JS string comparison, which never matched such input).
   if (
     (filters.themeId && themeId === undefined) ||
     (filters.phaseId && phaseId === undefined) ||
@@ -1080,15 +1054,15 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
     return { data: null, error };
   }
 
-  // このキャストは select が theme まで辿れるネスト形状（week.phase.theme）で
-  // 返すことに依存する。select を変更する場合は content-grouping.ts の
-  // 階層順ソートが参照する week.phase.theme まで含まれることを確認すること
+  // This cast depends on the select returning the nested shape down to the theme
+  // (week.phase.theme). If you change the select, keep week.phase.theme, which the hierarchy sort
+  // in content-grouping.ts reads.
   return { data: data as unknown as ManageContentListItem[], error: null };
 }
 
 /**
- * 管理画面に未削除コンテンツが1件でもあるか（head count）。
- * フィルタ選択肢は週一覧から取るため、空状態判定だけに使う（#196 レビュー指摘）。
+ * Whether at least one non-deleted content exists (head count). Filter options come from the week
+ * list, so this is only for the empty-state check (#196 review).
  */
 export async function hasAnyManageContents(): Promise<{
   data: boolean | null;
@@ -1109,9 +1083,9 @@ export async function hasAnyManageContents(): Promise<{
 }
 
 /**
- * コンテンツ新規作成/編集フォームの挿入位置ピッカー用の兄弟候補（#196）。
- * 一覧用の本文・4階層ネストを持たず、`week_id` で任意に絞り込める。
- * `weekId` を省略した場合は全週分を返し、フォーム側で週切替時に絞り込む。
+ * Sibling candidates for the insert-position picker in the content form (#196). No body or
+ * 4-level nesting; filterable by `week_id`. Without `weekId` all weeks are returned and the form
+ * filters when the week changes.
  */
 export async function fetchContentSiblingCandidates(weekId?: number): Promise<{
   data: ContentSiblingCandidateRow[] | null;
@@ -1159,12 +1133,11 @@ export async function fetchContentByIdForAdmin(
 }
 
 /**
- * コンテンツを作成する。`insertAfterId` から `display_order` をサーバー側で決定し、
- * 同じ `week_id` 配下の兄弟を1からの連番に再採番してからINSERTする
- * （`createTheme` と同じ方針。詳細は `resolveSiblingResequence` 参照）。
- * 兄弟の取得・再採番は他の3関数と異なり `createAdminSupabaseClient()` を使う
- * （createContent 自体が従来から service_role を使っているため。CLAUDE.mdの
- * service_role制限対象は「受講生向け配信経路」であり、この管理者専用の作成経路は対象外）。
+ * Same approach as createTheme, renumbering siblings under the same week_id (see
+ * resolveSiblingResequence).
+ * Unlike the other three, sibling fetch/renumber uses createAdminSupabaseClient() because
+ * createContent already used service_role. The AGENTS.md service_role restriction covers
+ * student-facing delivery paths, not this admin-only create path.
  */
 export async function createContent(content: {
   week_id: number;
@@ -1228,12 +1201,10 @@ export async function createContent(content: {
 }
 
 /**
- * コンテンツを更新する。`insertAfterId` が省略され、かつ `week_id` が変わっていない場合は
- * 表示順を変更しない。それ以外は移動先（`week_id` 変更後の親）配下を再採番してから本体を
- * UPDATEし、親が変わった場合は本体UPDATE成功後に移動元の親配下も再採番する
- * （`updatePhase` と同じ方針。順序の理由は `resequenceDestinationForUpdate` のコメント参照）。
- * 兄弟の取得・再採番は他の3関数と異なり `createAdminSupabaseClient()` を使う
- * （`createContent` と同じ理由。同関数のコメント参照）。
+ * Same approach as updatePhase: display order is untouched if `insertAfterId` is omitted and
+ * week_id is unchanged; otherwise renumber the destination first and the source only after the
+ * main UPDATE succeeds (see resequenceDestinationForUpdate). Uses createAdminSupabaseClient() for
+ * sibling work for the same reason as createContent.
  */
 export async function updateContent(
   id: number,
@@ -1246,42 +1217,36 @@ export async function updateContent(
   let sourceFilter: SiblingParentFilter = null;
   let parentChanged = false;
 
-  // pdf_url 差し替え時の旧オブジェクト削除用に、更新前の値を保持する。
-  // 取得失敗時は更新全体を中断せず、旧キー不明のまま続行して storageRemoved: false で
-  // 報告する（deleteContent 等と同じ扱い。削除済み行への更新試行もここでは弾かない）
+  // The pre-update values needed for the move decision (week_id) and for deleting the old object
+  // when pdf_url changes are fetched in one SELECT (issue #246). If it was fetched only for
+  // pdf_url, a failure does not abort the update: continue with the old key unknown and report
+  // storageRemoved: false (same as deleteContent).
+  const needsCurrentWeek = insertAfterId !== undefined || patch.week_id !== undefined;
+  const needsCurrentPdf = patch.pdf_url !== undefined;
   let previousPdfUrl: string | null = null;
   let pdfFetchFailed = false;
-  const pdfUrlChanged = patch.pdf_url !== undefined;
-  if (pdfUrlChanged) {
-    const { data: previous, error: previousError } = await supabase
-      .from("learning_contents")
-      .select("pdf_url")
-      .eq("id", id)
-      .eq("is_deleted", false)
-      .single();
-    if (previousError) {
-      console.error("コンテンツ更新エラー（現在値取得）:", previousError.message);
-      pdfFetchFailed = true;
-    } else {
-      previousPdfUrl = (previous as { pdf_url: string | null } | null)?.pdf_url ?? null;
-    }
-  }
-
-  if (insertAfterId !== undefined || patch.week_id !== undefined) {
+  if (needsCurrentWeek || needsCurrentPdf) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
-      .select("week_id")
+      .select("week_id, pdf_url")
       .eq("id", id)
       .eq("is_deleted", false)
       .single();
     if (currentError) {
       console.error("コンテンツ更新エラー（現在値取得）:", currentError.message);
-      return { error: currentError, storageRemoved: true };
+      if (needsCurrentWeek) {
+        return { error: currentError, storageRemoved: true };
+      }
+      pdfFetchFailed = true;
+    } else {
+      previousPdfUrl = current.pdf_url;
+      if (needsCurrentWeek) {
+        const destinationWeekId = patch.week_id ?? current.week_id;
+        parentChanged = destinationWeekId !== current.week_id;
+        destinationFilter = { column: "week_id", value: destinationWeekId };
+        sourceFilter = { column: "week_id", value: current.week_id };
+      }
     }
-    const destinationWeekId = patch.week_id ?? current.week_id;
-    parentChanged = destinationWeekId !== current.week_id;
-    destinationFilter = { column: "week_id", value: destinationWeekId };
-    sourceFilter = { column: "week_id", value: current.week_id };
   }
 
   const resequenced = await resequenceDestinationForUpdate(
@@ -1322,11 +1287,12 @@ export async function updateContent(
     }
   }
 
-  // pdf_url が差し替わった場合、旧オブジェクトが他から参照されていなければ物理削除する。
-  // 同一フォルダ・同一番号の上書き（upsert）はキーが変わらないため削除対象にならない。
-  // 事前取得に失敗していた場合は旧キーが不明のため削除を試みず false で報告する
+  // Delete the old object (if unreferenced elsewhere) only when the normalized pdf_url key
+  // actually changed. PUT always sends pdf_url (null for non-slides), so updates that keep the
+  // same key (title edits, overwriting the same folder/number) must not delete anything. If the
+  // pre-fetch failed the old key is unknown, so skip deletion and report false.
   let storageRemoved = true;
-  if (pdfUrlChanged) {
+  if (needsCurrentPdf) {
     if (pdfFetchFailed) {
       storageRemoved = false;
     } else {
@@ -1342,10 +1308,10 @@ export async function updateContent(
 }
 
 /**
- * 複数コンテンツへ同一の更新を一括適用する。`.eq("is_deleted", false)` により
- * 削除済み行への再操作を防ぐ。
- * `is_deleted: true` の一括削除時は、行の論理削除後に他から参照されていない
- * Storage オブジェクトのみ物理削除する（issue #145）。
+ * Applies one update to many contents. `.eq("is_deleted", false)` prevents re-operating on
+ * deleted rows.
+ * For bulk `is_deleted: true`, unreferenced Storage objects are removed after the rows are
+ * soft-deleted (issue #145).
  */
 export async function bulkUpdateContents(
   ids: number[],
@@ -1354,9 +1320,9 @@ export async function bulkUpdateContents(
   const supabase = await createAdminSupabaseClient();
 
   const isBulkDelete = patch.is_deleted === true;
-  // 取得失敗時（null）は削除対象が特定できないため storageRemoved: false で報告する
+  // On fetch failure (null) the targets are unknown, so report storageRemoved: false.
   const targetPdfUrls = isBulkDelete ? await fetchPdfUrlsByContentIds(supabase, ids) : [];
-  let storageRemoved = targetPdfUrls === null ? false : true;
+  let storageRemoved = targetPdfUrls !== null;
 
   const { data, error } = await supabase
     .from("learning_contents")
@@ -1383,9 +1349,9 @@ export async function deleteContent(
 ): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
   const supabase = await createAdminSupabaseClient();
 
-  // 取得失敗時（null）は削除対象が特定できないため storageRemoved: false で報告する
+  // On fetch failure (null) the targets are unknown, so report storageRemoved: false.
   const targetPdfUrls = await fetchPdfUrlsByContentIds(supabase, [id]);
-  let storageRemoved = targetPdfUrls === null ? false : true;
+  let storageRemoved = targetPdfUrls !== null;
 
   const { error } = await supabase
     .from("learning_contents")
@@ -1403,10 +1369,6 @@ export async function deleteContent(
 
   return { error: null, storageRemoved };
 }
-
-// =====================================================
-// ユーザー管理（承認・却下・ロール変更）
-// =====================================================
 
 export async function fetchAllUsers(): Promise<{
   data: ManageUserListItem[] | null;
@@ -1429,12 +1391,10 @@ export async function fetchAllUsers(): Promise<{
 }
 
 /**
- * 現在契約中とみなせるStripeサブスクリプション行を持つユーザーIDの一覧を取得する
- * （/admin/users でのサブスク会員バッジ表示用）。
- *
- * `stripe_subscriptions` は1ユーザー1行固定で解約後も行が残り続けるため、
- * 契約が記録されていない行（NON_CURRENT_SUBSCRIPTION_STATUSES: 終端状態およびCheckout
- * 手続き中）は「現在は契約していない」として除外する。
+ * User IDs with a current Stripe subscription row (for the badge in /admin/users).
+ * stripe_subscriptions has one row per user that survives cancellation, so rows with no recorded
+ * subscription (NON_CURRENT_SUBSCRIPTION_STATUSES: terminal states and Checkout in progress) are
+ * excluded.
  */
 export async function fetchUserIdsWithStripeSubscription(): Promise<{
   data: number[] | null;
@@ -1459,11 +1419,10 @@ export async function fetchUserIdsWithStripeSubscription(): Promise<{
 }
 
 /**
- * 指定ユーザーが現在Stripeサブスクを契約中とみなせるか判定する（承認・会員種別変更時の
- * Stripeロックに使う単一ユーザー版）。`fetchUserIdsWithStripeSubscription()` と同じ
- * `NON_CURRENT_SUBSCRIPTION_STATUSES` 基準で判定するが、対象1名のみの照会で済ませるため
- * `fetchStripeSubscriptionByUserId()`（`stripe-server.ts`）を用いる。admin は RLS で
- * 他ユーザーの行も参照できる（`stripe_subscriptions` のSELECTポリシー参照）。
+ * Single-user version of the subscription check used to lock approval / membership-type changes.
+ * Same NON_CURRENT_SUBSCRIPTION_STATUSES rule as fetchUserIdsWithStripeSubscription(), using
+ * fetchStripeSubscriptionByUserId() (stripe-server.ts) to query one user. Admin can read other
+ * users' rows via RLS (stripe_subscriptions SELECT policy).
  */
 export async function isUserCurrentlySubscribed(userId: number): Promise<{
   data: boolean | null;
@@ -1482,28 +1441,32 @@ export async function isUserCurrentlySubscribed(userId: number): Promise<{
 }
 
 /**
- * ユーザーを承認する。承認と同時に会員種別（コミュニティ会員 / 一般有料会員）を設定する。
- *
- * 承認済み（active）ユーザーの再承認は不可。会員種別も上書きするため、古い画面からの
- * 再承認で設定済みの種別が既定値に書き換わる事故を防ぐ（種別変更は `changeMembershipType()` で行う）。
- * 事前SELECTによるチェックでは同時リクエスト間で競合し、SELECT失敗時にフェイルオープン
- * にもなるため、UPDATE自体に条件を折り込み原子的に判定する。
- * service_role クライアントはRLSを迂回するため `is_deleted = false` も明示的に必須。
- *
- * @returns updated: 更新が行われたか。false は既に承認済み・存在しない・削除済みのいずれか
+ * Approves the user and sets the membership type (community / general).
+ * Re-approving an already active user is rejected: it also overwrites the membership type, so a
+ * stale screen would reset a configured type to the default (change it via
+ * changeMembershipType()). A pre-SELECT check would race between concurrent requests and fail
+ * open on SELECT errors, so the condition is folded into the UPDATE to make it atomic.
+ * The service_role client bypasses RLS, so `is_deleted = false` must be explicit.
+ * @returns updated: whether a row changed. false means already active, missing, or deleted.
+ *   approvedAt: the approval time written to `updated_at`, used as the dedup key of the approval
+ *   email.
  */
 export async function approveUser(
   userId: number,
   membershipType: MembershipType
-): Promise<{ error: PostgrestError | null; updated: boolean }> {
+): Promise<
+  | { error: PostgrestError | null; updated: false; approvedAt: null }
+  | { error: null; updated: true; approvedAt: string }
+> {
   const supabase = await createAdminSupabaseClient();
+  const approvedAt = new Date().toISOString();
 
   const { data, error } = await supabase
     .from("users")
     .update({
       status: USER_STATUS.ACTIVE,
       membership_type: membershipType,
-      updated_at: new Date().toISOString(),
+      updated_at: approvedAt,
     })
     .eq("id", userId)
     .eq("is_deleted", false)
@@ -1512,20 +1475,22 @@ export async function approveUser(
 
   if (error) {
     console.error("ユーザー承認エラー:", error.message);
-    return { error, updated: false };
+    return { error, updated: false, approvedAt: null };
   }
 
-  return { error: null, updated: (data?.length ?? 0) > 0 };
+  if ((data?.length ?? 0) === 0) {
+    return { error: null, updated: false, approvedAt: null };
+  }
+  return { error: null, updated: true, approvedAt };
 }
 
 /**
- * ユーザーを却下する。却下ユーザーは会員種別を持たないため NULL に戻す。
- *
- * 対象が admin の場合は却下不可（`change_role` と同様の管理者保護）。事前SELECTでの
- * チェックだと判定と更新の間に競合の余地があり、SELECT失敗時にフェイルオープンにも
- * なるため、UPDATE自体に条件を折り込み原子的に判定する（`approveUser()` と同じ方針）。
- * service_role クライアントはRLSを迂回するため `is_deleted = false` も明示的に必須。
- * 対象が admin・存在しない・削除済みのいずれの場合も updated: false を返す。
+ * Rejects the user; rejected users have no membership type, so it is reset to NULL.
+ * Admins cannot be rejected (same admin protection as change_role). A pre-SELECT would race and
+ * fail open on SELECT errors, so the condition is folded into the UPDATE (same approach as
+ * approveUser()).
+ * The service_role client bypasses RLS, so `is_deleted = false` must be explicit. Returns
+ * updated: false if the target is an admin, missing, or deleted.
  */
 export async function rejectUser(
   userId: number
@@ -1553,9 +1518,9 @@ export async function rejectUser(
 }
 
 /**
- * ユーザーのロールを変更する。対象が admin の場合は変更不可（降格・誤操作防止）。
- * 却下と同じ理由でUPDATEに条件を折り込み原子的に判定する（`rejectUser()` 参照）。
- * ロール変更は active ユーザーのみが対象（`docs/specification.md` 2.7）。
+ * Changes the role; admins cannot be changed (prevents demotion/mistakes). The condition is
+ * folded into the UPDATE for atomicity, for the same reason as rejectUser(). Only active users
+ * are eligible (docs/specification.md 2.7).
  */
 export async function changeUserRole(
   userId: number,
@@ -1581,11 +1546,11 @@ export async function changeUserRole(
 }
 
 /**
- * 承認済み（active）ユーザーの会員種別を変更する。`status` は書き換えない
- * （却下からの再承認で種別を選び直させないための `approveUser()` の設計とは独立）。
- * ロール変更と同じ理由でUPDATEに条件を折り込み原子的に判定する（`changeUserRole()` 参照）。
- * 対象は active ユーザーのみ（`docs/specification.md` 2.7）。Stripe契約中ユーザーの
- * 変更可否は呼び出し側（APIルート）で判定する。
+ * Changes the membership type of an active user; `status` is not touched (independent of
+ * approveUser(), whose design makes re-approval after rejection re-pick the type). The condition
+ * is folded into the UPDATE for atomicity (see changeUserRole()). Only active users are eligible
+ * (docs/specification.md 2.7). Whether a Stripe-subscribed user may be changed is decided by the
+ * caller (API route).
  */
 export async function changeMembershipType(
   userId: number,
@@ -1609,9 +1574,36 @@ export async function changeMembershipType(
   return { error: null, updated: (data?.length ?? 0) > 0 };
 }
 
-// =====================================================
-// 受講生管理
-// =====================================================
+/**
+ * Promotional-mail unsubscribe state, set by an admin on the user's behalf (`opt_out_email`, e.g.
+ * on the user's request) or reverted (`resume_email`). Guarded in the UPDATE so a stale screen
+ * cannot overwrite the original unsubscribe time or resume someone who is not unsubscribed;
+ * `updated: false` means the target was already in that state, missing or deleted. Transactional
+ * mail never reads this column. Not tied to the user's status, so it works for any user.
+ */
+export async function setUserEmailOptOut(
+  userId: number,
+  optOut: boolean
+): Promise<{ error: PostgrestError | null; updated: boolean }> {
+  const supabase = await createAdminSupabaseClient();
+
+  const query = supabase
+    .from("users")
+    .update({ email_opt_out_at: optOut ? new Date().toISOString() : null })
+    .eq("id", userId)
+    .eq("is_deleted", false);
+  const { data, error } = await (optOut
+    ? query.is("email_opt_out_at", null)
+    : query.not("email_opt_out_at", "is", null)
+  ).select("id");
+
+  if (error) {
+    console.error("メール配信停止状態の更新エラー:", error.message);
+    return { error, updated: false };
+  }
+
+  return { error: null, updated: (data?.length ?? 0) > 0 };
+}
 
 interface StudentProgress {
   user: Pick<UserType, "id" | "display_name" | "email">;
@@ -1621,9 +1613,9 @@ interface StudentProgress {
 }
 
 /**
- * RPC `get_students_progress_summary()` の返り値の型。生成型（database.types.ts）は
- * `last_activity` を非null扱いにしているが、`completed_at` がnullableな以上、
- * 実際には全行が未完了時刻無しの場合などにnullになりうるため、ここで明示的に上書きする。
+ * Return row type of RPC get_students_progress_summary(). Generated types mark `last_activity`
+ * non-null, but completed_at is nullable so it can actually be null (e.g. every row has no
+ * completion time); overridden explicitly here.
  */
 interface StudentProgressSummaryRow {
   user_id: number;
@@ -1637,7 +1629,6 @@ export async function fetchStudentsProgress(): Promise<{
 }> {
   const supabase = await createServerSupabaseClient();
 
-  // アクティブなユーザー一覧と公開コンテンツの総数は独立しているため並列で取得する
   const [usersResult, contentsCountResult] = await Promise.all([
     supabase
       .from("users")
@@ -1660,27 +1651,28 @@ export async function fetchStudentsProgress(): Promise<{
     return { data: null, error: usersError };
   }
 
-  // 総数が取れなくても受講生一覧の表示は維持するため、エラーはログのみ（totalContents は0扱い）
+  // Keep the student list even if the total cannot be fetched: log only (totalContents treated as
+  // 0).
   if (contentsCountError) {
     console.error("公開コンテンツ総数取得エラー:", contentsCountError.message);
   }
 
-  // ユーザー単位の完了数・最終活動日時はRPC `get_students_progress_summary`
-  // （GROUP BY user_id でDB側集約。マイグレーション参照）に問い合わせる（#83）。
-  // 進捗の取得に失敗した場合はエラーにせず完了数0で返し、受講生一覧の表示を維持する。
-  // RPCの返り値もPostgRESTのdb-max-rows（既定1000行）の対象になるため、
-  // user_progress の旧実装と同様に range でページングする
-  // （RPC側の ORDER BY user_id と .order() により安定した順序で進める）。
+  // Per-user completion counts and last activity come from RPC get_students_progress_summary
+  // (GROUP BY user_id in the DB; see migrations) (#83). On failure return completedCount 0 and
+  // keep the student list.
+  // RPC results are also subject to PostgREST db-max-rows (default 1000), so page with range like
+  // the old user_progress implementation (stable order via the RPC's ORDER BY user_id and
+  // .order()).
   const progressByUser = new Map<number, { completedCount: number; lastActivity: string | null }>();
   if ((users ?? []).length > 0) {
     const pageSize = 1000;
     let offset = 0;
     let hasMore = true;
     while (hasMore) {
-      // completed_at はnullableで max() は全NULLならNULLを返すため、
-      // last_activity は実際には null になりうる（生成型は非null）。
-      // .overrideTypes() はこの関数内の他の .from().select() 呼び出しと同居すると
-      // postgrest-js側の型推論がずれてビルドできないため、awaitの戻り値を直接castする。
+      // completed_at is nullable and max() returns NULL when all are NULL, so last_activity can
+      // be null (generated types say non-null). .overrideTypes() breaks postgrest-js type
+      // inference when used alongside other .from().select() calls in this function and fails the
+      // build, so cast the awaited result directly.
       const { data: progressSummary, error: progressError } = (await supabase
         .rpc("get_students_progress_summary")
         .order("user_id")
@@ -1703,12 +1695,12 @@ export async function fetchStudentsProgress(): Promise<{
         });
       }
 
-      // 終了条件（#196 + レビュー指摘）:
-      // - 空ページなら終了（最終ページの次を取りに行かないのが主目的）
-      // - pageSize 満杯なら続行（1000行超の取りこぼし防止）
-      // - 短ページでも progressByUser.size < users.length なら続行
-      //   （db-max-rows が pageSize 未満に下がっている場合の取りこぼし防止。
-      //    進捗0の受講生はRPCに出ないため、その場合だけ空ページ1回が発生しうる）
+      // Stop conditions (#196 + review):
+      // - empty page: stop (mainly to avoid fetching past the last page)
+      // - full pageSize: continue (avoid missing rows beyond 1000)
+      // - short page but progressByUser.size < users.length: continue (guards db-max-rows lowered
+      //   below pageSize; students with zero progress are absent from the RPC, so only then one
+      //   empty page can occur)
       offset += rows.length;
       const activeUserCount = (users ?? []).length;
       hasMore =
@@ -1729,10 +1721,6 @@ export async function fetchStudentsProgress(): Promise<{
   return { data: studentsProgress, error: null };
 }
 
-// =====================================================
-// 管理ダッシュボード
-// =====================================================
-
 interface ManageCounts {
   themes: number;
   phases: number;
@@ -1742,8 +1730,8 @@ interface ManageCounts {
 }
 
 /**
- * 管理ダッシュボードの各件数を取得（head + count のみでレコード本体は取得しない）
- * 一部の件数取得に失敗しても 0 として返し、ダッシュボードの表示を維持する。
+ * Counts use head + count only (no record bodies). A failed count is returned as 0 so the
+ * dashboard still renders.
  */
 export async function fetchManageCounts(): Promise<{
   data: ManageCounts;
@@ -1791,4 +1779,65 @@ export async function fetchManageCounts(): Promise<{
     },
     error: firstError,
   };
+}
+
+function toFunnelCount(value: number | string | null | undefined): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+// createAdminSupabaseClient is SupabaseClient without the Database generic (schema becomes
+// never otherwise). rpc() is then any, and noImplicitAny rejects the map callback.
+interface WeeklyFunnelRpcRow {
+  week_start: string;
+  signups: number | string;
+  activated: number | string;
+  upgraded: number | string;
+  ended: number | string;
+  paid_total: number | string;
+}
+
+/**
+ * Weekly funnel for /manage. The RPC is SECURITY INVOKER, but stripe_subscriptions
+ * SELECT is self-or-admin, so a maintainer JWT would undercount upgraded/ended.
+ * Check admin/maintainer first, then call with service_role. Do not widen that SELECT
+ * policy: maintainers should see aggregates, not every Stripe customer id.
+ * A failure returns an empty list so the rest of the dashboard still renders.
+ */
+export async function fetchWeeklyFunnel(): Promise<{
+  data: WeeklyFunnelRow[];
+  error: string | null;
+}> {
+  try {
+    const { userRole } = await getServerAuth();
+    if (!checkContentPermissions(userRole)) {
+      return { data: [], error: null };
+    }
+
+    const supabase = await createAdminSupabaseClient();
+    const { data, error } = (await supabase.rpc("get_weekly_funnel", {
+      weeks: WEEKLY_FUNNEL_WEEKS,
+    })) as unknown as {
+      data: WeeklyFunnelRpcRow[] | null;
+      error: PostgrestError | null;
+    };
+    if (error) {
+      console.error("週次ファネル取得エラー:", error.message);
+      return { data: [], error: WEEKLY_FUNNEL_FETCH_ERROR };
+    }
+
+    const rows = (data ?? []).map((row) => ({
+      weekStart: row.week_start,
+      signups: toFunnelCount(row.signups),
+      activated: toFunnelCount(row.activated),
+      upgraded: toFunnelCount(row.upgraded),
+      ended: toFunnelCount(row.ended),
+      paidTotal: toFunnelCount(row.paid_total),
+    }));
+    rows.sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+    return { data: rows, error: null };
+  } catch (error) {
+    console.error("週次ファネル取得エラー:", error);
+    return { data: [], error: WEEKLY_FUNNEL_FETCH_ERROR };
+  }
 }

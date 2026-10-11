@@ -10,10 +10,8 @@ export default function ContentLoading() {
         <Skeleton className="h-8 w-64 mb-2" />
       </div>
 
-      {/* コンテンツ本体 */}
       <Card className="mb-6">
         <CardContent className="pt-6">
-          {/* 動画/コンテンツエリア */}
           <Skeleton className="aspect-video w-full mb-6" />
           <div className="space-y-3">
             <Skeleton className="h-4 w-full" />
@@ -25,10 +23,8 @@ export default function ContentLoading() {
         </CardContent>
       </Card>
 
-      {/* 完了ボタン */}
       <Skeleton className="h-10 w-full mb-6" />
 
-      {/* 前後ナビゲーション */}
       <div className="flex items-center justify-between gap-4">
         <Skeleton className="h-10 flex-1" />
         <Skeleton className="h-10 flex-1" />

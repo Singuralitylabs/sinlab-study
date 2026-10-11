@@ -18,6 +18,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import type { BulkContentAction } from "@/app/constants/content";
 import { CONTENT_TYPE_LABELS, CONTENT_TYPES, MAX_BULK_CONTENT_IDS } from "@/app/constants/content";
 import type { ContentTableGroup, ContentTableRow } from "@/app/lib/content-grouping";
+import { getSlideStorageWarning } from "@/app/lib/slide-storage-warning";
 import type { ContentType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -77,9 +78,9 @@ export function ContentsTable({ groups }: ContentsTableProps) {
   const selectedCount = selectedIds.size;
   const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
 
-  // フィルタ変更等で表示中のコンテンツ（groups/allIds）が変わったら、選択状態を
-  // 現在表示中のIDとの積集合に絞る。絞らないと、非表示になった行の選択が
-  // Set に残ったまま一括操作（削除含む）の対象に含まれてしまう。
+  // When the displayed contents (groups/allIds) change (filters etc.), intersect the selection with
+  // the IDs now shown. Otherwise selections of rows that became hidden stay in the Set and get
+  // included in bulk operations (deletion included).
   useEffect(() => {
     setSelectedIds((prev) => {
       if (prev.size === 0) return prev;
@@ -135,9 +136,27 @@ export function ContentsTable({ groups }: ContentsTableProps) {
     setIsLoading(true);
     setErrorMessage(null);
     const ids = [...selectedIds];
+    // Whether any chunk left a slide PDF in Storage during bulk deletion (#241). Don't drop the
+    // warning when a later chunk fails, since earlier chunks' deletions already took effect.
+    let storageWarning: string | null = null;
+    const withStorageWarning = (message: string) =>
+      storageWarning ? `${message}。${storageWarning}` : message;
+    // IDs of successful chunks. Even if a later chunk fails, deselect the ones already processed
+    // and refresh the list.
+    const processedIds: number[] = [];
+    const settlePartialSuccess = () => {
+      if (processedIds.length === 0) return;
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of processedIds) next.delete(id);
+        return next;
+      });
+      router.refresh();
+    };
     try {
       let totalUpdated = 0;
-      // ids が MAX_BULK_CONTENT_IDS を超える場合、APIの上限に収まるようチャンク分割して送信する
+      // Split into chunks so each request stays within the API limit when ids exceed
+      // MAX_BULK_CONTENT_IDS.
       for (let i = 0; i < ids.length; i += MAX_BULK_CONTENT_IDS) {
         const chunk = ids.slice(i, i + MAX_BULK_CONTENT_IDS);
         const response = await fetch("/api/manage/contents/bulk", {
@@ -151,11 +170,16 @@ export function ContentsTable({ groups }: ContentsTableProps) {
         });
         if (!response.ok) {
           const data = await response.json();
-          setErrorMessage(data.error || "一括操作に失敗しました");
+          setErrorMessage(withStorageWarning(data.error || "一括操作に失敗しました"));
+          settlePartialSuccess();
           return;
         }
         const data = await response.json();
         totalUpdated += typeof data.updated === "number" ? data.updated : 0;
+        processedIds.push(...chunk);
+        if (action === "delete") {
+          storageWarning ??= getSlideStorageWarning(data, "bulkDelete");
+        }
       }
 
       setSelectedIds(new Set());
@@ -163,13 +187,18 @@ export function ContentsTable({ groups }: ContentsTableProps) {
       setTypeDialogOpen(false);
       router.refresh();
 
-      if (totalUpdated < ids.length) {
-        setErrorMessage(
-          `${ids.length}件中${ids.length - totalUpdated}件は更新できませんでした（他の操作により既に削除されている可能性があります）`
-        );
+      const warnings = [
+        totalUpdated < ids.length
+          ? `${ids.length}件中${ids.length - totalUpdated}件は更新できませんでした（他の操作により既に削除されている可能性があります）`
+          : null,
+        storageWarning,
+      ].filter((warning): warning is string => warning !== null);
+      if (warnings.length > 0) {
+        setErrorMessage(warnings.join("。"));
       }
     } catch {
-      setErrorMessage("一括操作中にエラーが発生しました");
+      setErrorMessage(withStorageWarning("一括操作中にエラーが発生しました"));
+      settlePartialSuccess();
     } finally {
       setIsLoading(false);
     }

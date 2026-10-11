@@ -26,7 +26,6 @@ export default async function LearnPage() {
           {themes.map((theme) => (
             <Link key={theme.id} href={`/learn/${theme.id}`} className="block group">
               <Card className="overflow-hidden transition-all hover:shadow-lg hover:border-primary/30 h-full">
-                {/* イラスト画像エリア */}
                 <div className="relative aspect-video bg-linear-to-br from-primary/5 to-primary/15">
                   {theme.image_url ? (
                     <Image
@@ -43,7 +42,6 @@ export default async function LearnPage() {
                   )}
                 </div>
 
-                {/* テキストエリア */}
                 <div className="p-5">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2 min-w-0">
