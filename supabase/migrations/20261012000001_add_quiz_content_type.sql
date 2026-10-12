@@ -96,9 +96,6 @@ COMMENT ON COLUMN public.quiz_questions.correct_choices IS
 COMMENT ON COLUMN public.quiz_questions.model_answer IS
   'text 形式の模範解答（回答後に表示）。選択式では未使用';
 
-CREATE INDEX IF NOT EXISTS idx_quiz_questions_content_id
-  ON public.quiz_questions (content_id, display_order);
-
 DROP TRIGGER IF EXISTS update_quiz_questions_updated_at ON public.quiz_questions;
 CREATE TRIGGER update_quiz_questions_updated_at
   BEFORE UPDATE ON public.quiz_questions
@@ -151,6 +148,24 @@ $$;
 REVOKE ALL ON FUNCTION public.quiz_content_visible_to_caller(INTEGER)
   FROM PUBLIC, anon, authenticated;
 
+-- 受講者に見せた設問の版（形式・設問文・選択肢のハッシュ）。replace_quiz_questions は同じ位置の
+-- 行を UPDATE して id を保つため、id だけでは「回答中に設問の中身が差し替わった」ことを検出できず、
+-- 古い設問への答えを新しい設問の正解と比べてしまう。採点時にこの値を照合し、違えば採点しない。
+-- 正解・解説だけの修正では変わらない（表示中の設問はそのまま有効）。
+CREATE OR REPLACE FUNCTION public.quiz_question_revision(
+  p_question_type TEXT, p_question TEXT, p_choices TEXT[]
+)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public
+AS $$
+  SELECT md5(jsonb_build_array(p_question_type, p_question, to_jsonb(p_choices))::text);
+$$;
+
+REVOKE ALL ON FUNCTION public.quiz_question_revision(TEXT, TEXT, TEXT[])
+  FROM PUBLIC, anon, authenticated;
+
 -- ---------- 出題 ----------
 CREATE OR REPLACE FUNCTION public.get_quiz_questions(p_content_id INTEGER)
 RETURNS TABLE (
@@ -159,7 +174,8 @@ RETURNS TABLE (
   question_type TEXT,
   question TEXT,
   choices TEXT[],
-  hint TEXT
+  hint TEXT,
+  revision TEXT
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -172,7 +188,9 @@ BEGIN
   END IF;
 
   RETURN QUERY
-    SELECT q.id, q.display_order, q.question_type::text, q.question, q.choices, q.hint
+    SELECT
+      q.id, q.display_order, q.question_type::text, q.question, q.choices, q.hint,
+      quiz_question_revision(q.question_type::text, q.question, q.choices)
     FROM quiz_questions q
     WHERE q.content_id = p_content_id
     ORDER BY q.display_order, q.id;
@@ -183,8 +201,10 @@ REVOKE EXECUTE ON FUNCTION public.get_quiz_questions(INTEGER) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_quiz_questions(INTEGER) TO authenticated, service_role;
 
 -- ---------- 採点 ----------
--- p_answers: [{"question_id": 1, "choices": [0, 2]}, {"question_id": 2, "text": "..."}]
--- 1 問でも未回答（選択式で選択なし・入力式で空文字）か、同じ question_id が重複していれば
+-- p_answers: [{"question_id": 1, "revision": "...", "choices": [0, 2]},
+--             {"question_id": 2, "revision": "...", "text": "..."}]
+-- 1 問でも未回答（選択式で選択なし・入力式で空文字）か、revision が get_quiz_questions の返した
+-- 値と違う（ページを開いた後に設問が差し替わった）か、同じ question_id が重複していれば
 -- 何も返さない。これは「回答を送る前に正解を見せない」ための形式上の条件で、ダミーの回答を
 -- 送れば正解・解説は得られる（回答内容は保存しないため、それ以上は守らない）。
 -- 選択肢の重複・範囲外の添字は不正解として扱う。
@@ -231,6 +251,7 @@ BEGIN
         FROM jsonb_array_elements(p_answers) a
         WHERE jsonb_typeof(a) = 'object'
           AND a ->> 'question_id' = q.id::text
+          AND a ->> 'revision' = quiz_question_revision(q.question_type::text, q.question, q.choices)
           AND CASE
             WHEN q.question_type = 'text' THEN
               jsonb_typeof(a -> 'text') = 'string' AND btrim(a ->> 'text') <> ''

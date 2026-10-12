@@ -21,8 +21,8 @@ const memberAuth = {
 const body = {
   contentId: 5,
   answers: [
-    { questionId: 1, choices: [1] },
-    { questionId: 2, text: "回答" },
+    { questionId: 1, revision: "r1", choices: [1] },
+    { questionId: 2, revision: "r2", text: "回答" },
   ],
 };
 
@@ -57,7 +57,7 @@ describe("POST /api/quiz/grade", () => {
     const res = await POST(
       request({
         contentId: 5,
-        answers: [1, 2, 3, 4].map((questionId) => ({ questionId, text: "a" })),
+        answers: [1, 2, 3, 4].map((questionId) => ({ questionId, revision: "r", text: "a" })),
       }) as never
     );
 
@@ -140,18 +140,22 @@ describe("POST /api/quiz/grade", () => {
   it.each([
     ["contentId 不正", { ...body, contentId: "5" }],
     ["answers 空", { ...body, answers: [] }],
-    ["選択肢が負の数", { ...body, answers: [{ questionId: 1, choices: [-1] }] }],
-    ["回答が長すぎる", { ...body, answers: [{ questionId: 2, text: "a".repeat(2001) }] }],
+    ["選択肢が負の数", { ...body, answers: [{ questionId: 1, revision: "r1", choices: [-1] }] }],
+    [
+      "回答が長すぎる",
+      { ...body, answers: [{ questionId: 2, revision: "r2", text: "a".repeat(2001) }] },
+    ],
     [
       "同じ設問への回答が重複",
       {
         ...body,
         answers: [
-          { questionId: 1, choices: [] },
-          { questionId: 1, choices: [1] },
+          { questionId: 1, revision: "r1", choices: [] },
+          { questionId: 1, revision: "r1", choices: [1] },
         ],
       },
     ],
+    ["設問の版（revision）なし", { ...body, answers: [{ questionId: 1, choices: [1] }] }],
   ])("%sは400で、採点しない", async (_label, payload) => {
     const res = await POST(request(payload) as never);
 

@@ -860,6 +860,7 @@ export type Database = {
           id: number;
           question: string;
           question_type: string;
+          revision: string;
         }[];
       };
       get_students_progress_summary: {
@@ -900,6 +901,10 @@ export type Database = {
       quiz_correct_choices_valid: {
         Args: { p_choices: string[]; p_correct: number[] };
         Returns: boolean;
+      };
+      quiz_question_revision: {
+        Args: { p_choices: string[]; p_question: string; p_question_type: string };
+        Returns: string;
       };
       replace_quiz_questions: {
         Args: { p_content_id: number; p_questions: Json };

@@ -77,10 +77,10 @@ function buildCodeSection(files: CodeFile[]): string {
         ? `${content.substring(0, GEMINI_MAX_CODE_LENGTH)}\n\n... (${content.length - GEMINI_MAX_CODE_LENGTH}文字省略)`
         : content;
     // language comes from the submission body unchecked; anything outside the known list could
-    // carry spaces, newlines or backticks and break the fence, so it is dropped.
-    const fenceLanguage = CODE_LANGUAGES.includes(files[0].language as CodeLanguage)
-      ? files[0].language
-      : "";
+    // carry spaces, newlines or backticks and break the fence, so it is dropped. "gas" is not a
+    // Markdown fence language, so it is sent as the JavaScript it is.
+    const language = files[0].language === "gas" ? "javascript" : files[0].language;
+    const fenceLanguage = CODE_LANGUAGES.includes(language as CodeLanguage) ? language : "";
     return `\`\`\`${fenceLanguage}\n${truncated}\n\`\`\``;
   }
 

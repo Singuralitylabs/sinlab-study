@@ -69,6 +69,17 @@ export async function POST(request: Request) {
       }))
     );
 
+    // A quiz whose publish step failed is created as a draft; name them (on success and on a later
+    // failure alike) so the admin publishes them instead of re-sending, which would duplicate them.
+    const requestedPublished = validation.data.contents.map((c) => c.is_published === true);
+    const unpublished = created.filter((c, i) => requestedPublished[i] && !c.isPublished);
+    const warning =
+      unpublished.length > 0
+        ? `公開に失敗したため非公開で作成したコンテンツがあります: ${unpublished
+            .map((c) => c.title)
+            .join("、")}`
+        : undefined;
+
     if (error) {
       // A missing week_id (FK) or a value the DB CHECK rejects is the caller's input, not a
       // server fault, so report it as 400 to tell it apart from a DB outage.
@@ -77,26 +88,13 @@ export async function POST(request: Request) {
         {
           error: `${(failedIndex ?? 0) + 1}件目のコンテンツの作成に失敗しました（それより前の${created.length}件は作成済み）${isInputError ? "。存在しない週や許可されていない値が含まれています" : ""}`,
           created,
+          ...(warning ? { warning } : {}),
         },
         { status: isInputError ? 400 : 500 }
       );
     }
 
-    // A quiz whose publish step failed is created as a draft; name them so the admin publishes
-    // them instead of re-sending (which would create duplicates).
-    const requestedPublished = validation.data.contents.map((c) => c.is_published === true);
-    const unpublished = created.filter((c, i) => requestedPublished[i] && !c.isPublished);
-    return NextResponse.json({
-      success: true,
-      created,
-      ...(unpublished.length > 0
-        ? {
-            warning: `公開に失敗したため非公開で作成したコンテンツがあります: ${unpublished
-              .map((c) => c.title)
-              .join("、")}`,
-          }
-        : {}),
-    });
+    return NextResponse.json({ success: true, created, ...(warning ? { warning } : {}) });
   } catch (error) {
     console.error("API エラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });

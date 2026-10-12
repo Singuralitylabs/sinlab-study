@@ -334,6 +334,21 @@ describe("POST /api/manage/contents/bulk - 一括登録（#306）", () => {
     });
   });
 
+  it("途中で失敗した場合も、公開できずに作成済みの件を warning で返す", async () => {
+    vi.mocked(createContentsAtTail).mockResolvedValue({
+      created: [{ id: 10, title: "クイズ1", isPublished: false }],
+      error: { message: "x" } as never,
+      failedIndex: 1,
+    });
+
+    const res = await POST(post({ contents: [{ ...quiz, is_published: true }, quiz] }));
+
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toMatchObject({
+      warning: "公開に失敗したため非公開で作成したコンテンツがあります: クイズ1",
+    });
+  });
+
   it("存在しない週（FK違反）など入力起因の失敗は400で、作成済みの件を返す", async () => {
     vi.mocked(createContentsAtTail).mockResolvedValue({
       created: [],

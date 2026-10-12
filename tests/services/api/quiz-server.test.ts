@@ -20,7 +20,14 @@ describe("quiz-server の Storage URL 置換", () => {
       rpcResults: {
         get_quiz_questions: {
           data: [
-            { id: 1, question_type: "single", question: IMG, choices: [IMG, "b"], hint: null },
+            {
+              id: 1,
+              question_type: "single",
+              question: IMG,
+              choices: [IMG, "b"],
+              hint: null,
+              revision: "abc",
+            },
           ],
           error: null,
         },
@@ -31,7 +38,14 @@ describe("quiz-server の Storage URL 置換", () => {
 
     expect(error).toBeNull();
     expect(data).toEqual([
-      { id: 1, question_type: "single", question: RESOLVED, choices: [RESOLVED, "b"], hint: null },
+      {
+        id: 1,
+        question_type: "single",
+        question: RESOLVED,
+        choices: [RESOLVED, "b"],
+        hint: null,
+        revision: "abc",
+      },
     ]);
   });
 
@@ -54,7 +68,15 @@ describe("quiz-server の Storage URL 置換", () => {
       },
     });
 
-    const { data } = await gradeQuizAnswers(client as never, 5, [{ questionId: 2, text: "x" }]);
+    const { data } = await gradeQuizAnswers(client as never, 5, [
+      { questionId: 2, revision: "abc", text: "x" },
+    ]);
+
+    // The revision is forwarded so the RPC can reject answers to a question replaced since load.
+    expect(client.rpc).toHaveBeenCalledWith("grade_quiz_answers", {
+      p_content_id: 5,
+      p_answers: [{ question_id: 2, revision: "abc", text: "x" }],
+    });
 
     expect(data[0]).toMatchObject({
       modelAnswer: RESOLVED,

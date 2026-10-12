@@ -208,6 +208,15 @@ describe("buildUserPrompt", () => {
     expect(prompt).toContain("## 提出コード\n```sql\nSELECT 1;\n```");
   });
 
+  it("単一ファイルの gas は Markdown で通じる javascript としてフェンスに付ける", () => {
+    const prompt = buildUserPrompt("課題", {
+      type: "code",
+      files: [{ filename: "", language: "gas", content: "function main() {}" }],
+    });
+
+    expect(prompt).toContain("## 提出コード\n```javascript\nfunction main() {}\n```");
+  });
+
   it("単一ファイルの言語が既知の値でなければコードフェンスに付けない（フェンスを壊さない）", () => {
     const prompt = buildUserPrompt("課題", {
       type: "code",

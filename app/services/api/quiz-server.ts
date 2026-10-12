@@ -17,6 +17,7 @@ type QuizQuestionRpcRow = {
   question: string;
   choices: string[] | null;
   hint: string | null;
+  revision: string;
 };
 type QuizGradeRpcRow = {
   question_id: number;
@@ -56,6 +57,7 @@ export async function fetchQuizQuestions(
               question: resolveMarkdownStorageUrls(row.question),
               choices: (row.choices ?? []).map(resolveMarkdownStorageUrls),
               hint: row.hint ?? null,
+              revision: row.revision,
             },
           ]
         : []
@@ -72,12 +74,13 @@ export async function fetchQuizQuestions(
 export async function gradeQuizAnswers(
   supabase: ServerSupabaseClient,
   contentId: number,
-  answers: { questionId: number; choices?: number[]; text?: string }[]
+  answers: { questionId: number; revision: string; choices?: number[]; text?: string }[]
 ): Promise<{ data: QuizQuestionResult[]; error: PostgrestError | null }> {
   const { data, error } = (await supabase.rpc("grade_quiz_answers", {
     p_content_id: contentId,
     p_answers: answers.map((answer) => ({
       question_id: answer.questionId,
+      revision: answer.revision,
       ...(answer.choices !== undefined ? { choices: answer.choices } : {}),
       ...(answer.text !== undefined ? { text: answer.text } : {}),
     })),

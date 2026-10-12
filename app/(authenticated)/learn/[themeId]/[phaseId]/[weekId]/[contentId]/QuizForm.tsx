@@ -1,9 +1,9 @@
 "use client";
 
 import { CheckCircle2, Loader2, RotateCcw, Send, XCircle } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
+import { type ReactNode, useState } from "react";
 import {
   QUIZ_QUESTION_TYPE_LABELS,
   QUIZ_TEXT_ANSWER_MAX_LENGTH,
@@ -13,11 +13,28 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+
+// The model answer / explanation only exist after grading, so their Markdown pipeline
+// (react-markdown + lowlight) is loaded on demand instead of in the quiz page's First Load JS.
+const ResultMarkdown = dynamic(
+  () => import("@/app/components/MarkdownRenderer").then((m) => m.MarkdownRenderer),
+  { ssr: false, loading: () => <Skeleton className="h-5 w-full" /> }
+);
+
+/**
+ * Question and choices arrive already rendered by the server page (MarkdownRenderer there), which
+ * keeps the Markdown pipeline out of this client component's bundle.
+ */
+export type QuizFormQuestion = Omit<QuizQuestionForLearner, "question" | "choices"> & {
+  question: ReactNode;
+  choices: ReactNode[];
+};
 
 interface QuizFormProps {
   contentId: number;
-  questions: QuizQuestionForLearner[];
+  questions: QuizFormQuestion[];
   /** false while previewing unpublished content: grading works but progress is not recorded. */
   canRecordProgress: boolean;
   initialCompleted: boolean;
@@ -25,7 +42,7 @@ interface QuizFormProps {
 
 type Answer = { choices: number[]; text: string };
 
-function isAnswered(question: QuizQuestionForLearner, answer: Answer | undefined): boolean {
+function isAnswered(question: QuizFormQuestion, answer: Answer | undefined): boolean {
   if (!answer) return false;
   return question.question_type === "text"
     ? answer.text.trim().length > 0
@@ -56,7 +73,7 @@ export function QuizForm({
     }));
   }
 
-  function toggleChoice(question: QuizQuestionForLearner, index: number) {
+  function toggleChoice(question: QuizFormQuestion, index: number) {
     updateAnswer(question.id, (prev) => {
       if (question.question_type === "single") {
         return { ...prev, choices: [index] };
@@ -103,8 +120,8 @@ export function QuizForm({
           contentId,
           answers: questions.map((q) =>
             q.question_type === "text"
-              ? { questionId: q.id, text: answers[q.id]?.text ?? "" }
-              : { questionId: q.id, choices: answers[q.id]?.choices ?? [] }
+              ? { questionId: q.id, revision: q.revision, text: answers[q.id]?.text ?? "" }
+              : { questionId: q.id, revision: q.revision, choices: answers[q.id]?.choices ?? [] }
           ),
         }),
       });
@@ -163,7 +180,7 @@ export function QuizForm({
               )}
             </legend>
 
-            <MarkdownRenderer content={question.question} />
+            {question.question}
 
             {question.question_type === "text" ? (
               <Textarea
@@ -212,7 +229,7 @@ export function QuizForm({
                         className="mt-1.5 h-4 w-4"
                       />
                       <div id={`question-${question.id}-choice-${index}`} className="flex-1">
-                        <MarkdownRenderer content={choice} className="[&>*]:my-0" />
+                        {choice}
                       </div>
                     </div>
                   );
@@ -236,13 +253,13 @@ export function QuizForm({
                 {result.modelAnswer && (
                   <div>
                     <h4 className="mb-1 text-sm font-semibold">模範解答</h4>
-                    <MarkdownRenderer content={result.modelAnswer} />
+                    <ResultMarkdown content={result.modelAnswer} />
                   </div>
                 )}
                 {result.explanation && (
                   <div>
                     <h4 className="mb-1 text-sm font-semibold">解説</h4>
-                    <MarkdownRenderer content={result.explanation} />
+                    <ResultMarkdown content={result.explanation} />
                   </div>
                 )}
               </div>

@@ -282,7 +282,14 @@ export default async function ContentPage({ params }: PageProps) {
               ) : (
                 <QuizForm
                   contentId={contentIdNum}
-                  questions={quizQuestions}
+                  questions={quizQuestions.map((question) => ({
+                    ...question,
+                    question: <MarkdownRenderer content={question.question} />,
+                    choices: question.choices.map((choice, index) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: choices are fixed per question and may repeat
+                      <MarkdownRenderer key={index} content={choice} className="[&>*]:my-0" />
+                    )),
+                  }))}
                   canRecordProgress={Boolean(userId) && isFullyPublished}
                   initialCompleted={isCompleted}
                 />
@@ -401,6 +408,7 @@ export default async function ContentPage({ params }: PageProps) {
             key={String(isCompleted)}
             contentId={contentIdNum}
             initialCompleted={isCompleted}
+            refreshOnToggle={content.content_type === "quiz"}
           />
         </div>
       )}

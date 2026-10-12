@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     }
     if (results.length === 0) {
       // The form only submits when every question is answered, so an empty result there usually
-      // means the questions were edited (ids renumbered) after the page loaded.
+      // means a question was replaced or removed after the page loaded (revision / id mismatch).
       return NextResponse.json(
         {
           error:

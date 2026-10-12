@@ -26,6 +26,8 @@ export type QuizQuestionForLearner = {
   question: string;
   choices: string[];
   hint: string | null;
+  /** Sent back when grading so answers to a question replaced after page load are rejected. */
+  revision: string;
 };
 
 /** Per-question result returned after answering (grade_quiz_answers). */

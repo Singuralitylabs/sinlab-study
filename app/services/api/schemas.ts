@@ -365,6 +365,9 @@ export const QuizGradeRequestSchema = z.object({
     .array(
       z.object({
         questionId: PositiveIntSchema,
+        revision: z
+          .string({ message: "設問の版を指定してください。ページを再読み込みしてください" })
+          .max(64, { message: "設問の版が不正です" }),
         choices: z
           .array(
             z
