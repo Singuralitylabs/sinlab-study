@@ -366,7 +366,13 @@ export const QuizGradeRequestSchema = z.object({
       z.object({
         questionId: PositiveIntSchema,
         choices: z
-          .array(z.number().int().min(0), { message: "選択肢は番号の配列で指定してください" })
+          .array(
+            z
+              .number({ message: "選択肢は番号で指定してください" })
+              .int({ message: "選択肢は整数の番号で指定してください" })
+              .min(0, { message: "選択肢の番号は0以上で指定してください" }),
+            { message: "選択肢は番号の配列で指定してください" }
+          )
           .max(QUIZ_MAX_CHOICES, { message: `選択肢は${QUIZ_MAX_CHOICES}個までです` })
           .optional(),
         text: z

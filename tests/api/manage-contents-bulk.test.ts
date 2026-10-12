@@ -233,7 +233,7 @@ describe("POST /api/manage/contents/bulk - 一括登録（#306）", () => {
 
   beforeEach(() => {
     vi.mocked(createContentsAtTail).mockResolvedValue({
-      created: [{ id: 10, title: "クイズ1" }],
+      created: [{ id: 10, title: "クイズ1", isPublished: false }],
       error: null,
       failedIndex: null,
     });
@@ -247,7 +247,7 @@ describe("POST /api/manage/contents/bulk - 一括登録（#306）", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({
       success: true,
-      created: [{ id: 10, title: "クイズ1" }],
+      created: [{ id: 10, title: "クイズ1", isPublished: false }],
     });
     expect(createContentsAtTail).toHaveBeenCalledWith([
       expect.objectContaining({
@@ -256,6 +256,39 @@ describe("POST /api/manage/contents/bulk - 一括登録（#306）", () => {
       }),
       expect.objectContaining({ content_type: "video", quizQuestions: undefined }),
     ]);
+  });
+
+  it("公開指定なのに公開できなかった件は200のまま warning で名前を返す", async () => {
+    vi.mocked(createContentsAtTail).mockResolvedValue({
+      created: [
+        { id: 10, title: "クイズ1", isPublished: false },
+        { id: 11, title: "クイズ2", isPublished: true },
+      ],
+      error: null,
+      failedIndex: null,
+    });
+
+    const res = await POST(
+      post({
+        contents: [
+          { ...quiz, is_published: true },
+          { ...quiz, title: "クイズ2", is_published: true },
+        ],
+      })
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      success: true,
+      warning: "公開に失敗したため非公開で作成したコンテンツがあります: クイズ1",
+    });
+  });
+
+  it("非公開指定の件は公開されていなくても warning を返さない", async () => {
+    const res = await POST(post({ contents: [quiz] }));
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.not.toHaveProperty("warning");
   });
 
   it("1件でも不正な設問があれば400で、1件も作成しない", async () => {
@@ -287,7 +320,7 @@ describe("POST /api/manage/contents/bulk - 一括登録（#306）", () => {
 
   it("途中で失敗したら500で、作成済みの件を返す", async () => {
     vi.mocked(createContentsAtTail).mockResolvedValue({
-      created: [{ id: 10, title: "クイズ1" }],
+      created: [{ id: 10, title: "クイズ1", isPublished: false }],
       error: { message: "x" } as never,
       failedIndex: 1,
     });
@@ -297,7 +330,7 @@ describe("POST /api/manage/contents/bulk - 一括登録（#306）", () => {
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({
       error: "2件目のコンテンツの作成に失敗しました（それより前の1件は作成済み）",
-      created: [{ id: 10, title: "クイズ1" }],
+      created: [{ id: 10, title: "クイズ1", isPublished: false }],
     });
   });
 

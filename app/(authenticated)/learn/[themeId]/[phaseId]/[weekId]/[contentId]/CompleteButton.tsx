@@ -1,6 +1,7 @@
 "use client";
 
 import { CheckCircle, Circle, Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -10,6 +11,7 @@ interface CompleteButtonProps {
 }
 
 export function CompleteButton({ contentId, initialCompleted }: CompleteButtonProps) {
+  const router = useRouter();
   const [isCompleted, setIsCompleted] = useState(initialCompleted);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -30,6 +32,9 @@ export function CompleteButton({ contentId, initialCompleted }: CompleteButtonPr
 
       if (response.ok) {
         setIsCompleted(!isCompleted);
+        // Re-render the server page so other parts reading the saved progress (the quiz decides
+        // whether to record completion after a re-answer from it) see the new value.
+        router.refresh();
       } else {
         console.error("進捗更新エラー");
       }

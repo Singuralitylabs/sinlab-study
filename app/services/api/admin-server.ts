@@ -1164,16 +1164,25 @@ type CreateContentInput = {
   quizQuestions?: QuizQuestionData[];
 };
 
-export async function createContent(
-  content: CreateContentInput
-): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
+/**
+ * `publishFailed`: the content (and its quiz questions) was created but could not be switched to
+ * published afterwards, so it exists as a draft. Callers report it as created-but-unpublished, not
+ * as a failure, or a retry would create a duplicate.
+ */
+type CreateContentResult = {
+  data: LearningContent | null;
+  error: PostgrestError | null;
+  publishFailed?: boolean;
+};
+
+export async function createContent(content: CreateContentInput): Promise<CreateContentResult> {
   return createContentWith(await createAdminSupabaseClient(), content);
 }
 
 async function createContentWith(
   supabase: AdminSupabaseClient,
   content: Omit<CreateContentInput, "insertAfterId"> & { insertAfterId: number | null | "tail" }
-): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
+): Promise<CreateContentResult> {
   const resequenced = await resequenceSiblingsForInsert(
     supabase,
     "learning_contents",
@@ -1189,7 +1198,7 @@ async function createContentWith(
   // A quiz is inserted unpublished and published only after its questions are saved: if the
   // questions fail and the rollback below also fails, what remains is a hidden draft rather than
   // a published quiz with no questions.
-  const withQuestions = content.content_type === "quiz" && content.quizQuestions !== undefined;
+  const quizQuestions = content.content_type === "quiz" ? content.quizQuestions : undefined;
 
   const { data, error } = await supabase
     .from("learning_contents")
@@ -1206,7 +1215,7 @@ async function createContentWith(
       allowed_submission_types: content.allowed_submission_types,
       code_language: content.code_language,
       pdf_url: content.pdf_url,
-      is_published: withQuestions ? false : content.is_published,
+      is_published: quizQuestions ? false : content.is_published,
       is_open_to_trial: content.is_open_to_trial,
       display_order: displayOrder,
     })
@@ -1218,8 +1227,8 @@ async function createContentWith(
     return { data: null, error };
   }
 
-  if (withQuestions && content.quizQuestions) {
-    const quizError = await replaceQuizQuestions(supabase, data.id, content.quizQuestions);
+  if (quizQuestions) {
+    const quizError = await replaceQuizQuestions(supabase, data.id, quizQuestions);
     if (quizError) {
       // Leaving the row would publish a quiz with no questions. Nothing can reference a row created
       // a moment ago, so remove it outright (a soft-deleted half-made row would linger in lists)
@@ -1252,9 +1261,10 @@ async function createContentWith(
         .select()
         .single();
       if (publishError) {
-        // The quiz and its questions exist but stay unpublished; the admin can publish it later.
+        // The quiz and its questions exist; only publishing failed. Return the draft so the caller
+        // reports it as created, otherwise a retry would add a second copy.
         console.error("コンテンツ作成エラー（設問保存後の公開）:", publishError.message);
-        return { data: null, error: publishError };
+        return { data, error: null, publishFailed: true };
       }
       return { data: published, error: null };
     }
@@ -1271,12 +1281,12 @@ async function createContentWith(
 export async function createContentsAtTail(
   items: Omit<CreateContentInput, "insertAfterId">[]
 ): Promise<{
-  created: { id: number; title: string }[];
+  created: { id: number; title: string; isPublished: boolean }[];
   error: PostgrestError | null;
   failedIndex: number | null;
 }> {
   const supabase = await createAdminSupabaseClient();
-  const created: { id: number; title: string }[] = [];
+  const created: { id: number; title: string; isPublished: boolean }[] = [];
 
   for (const [index, item] of items.entries()) {
     let result: Awaited<ReturnType<typeof createContentWith>>;
@@ -1299,7 +1309,7 @@ export async function createContentsAtTail(
         failedIndex: index,
       };
     }
-    created.push({ id: data.id, title: data.title });
+    created.push({ id: data.id, title: data.title, isPublished: Boolean(data.is_published) });
   }
 
   return { created, error: null, failedIndex: null };

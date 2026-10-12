@@ -1,6 +1,7 @@
 "use client";
 
 import { Loader2, Save, Upload, X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { CODE_LANGUAGE_OPTIONS, type CodeLanguage } from "@/app/components/code-editor-utils";
@@ -215,6 +216,9 @@ export function ContentForm({
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  // Set when a create succeeded but publishing failed: the draft exists, so the form must not be
+  // submitted again (that would create a second copy); the admin publishes it from its edit page.
+  const [createdDraftId, setCreatedDraftId] = useState<number | null>(null);
   const [pdfFileName, setPdfFileName] = useState<string | null>(initialPdfKey);
 
   const visiblePhases = phases.filter((p) => !themeId || String(p.themeId) === themeId);
@@ -395,6 +399,17 @@ export function ContentForm({
 
       if (response.ok) {
         const data: unknown = await response.json().catch(() => null);
+        const createWarning =
+          mode === "create" && data && typeof data === "object" && "warning" in data
+            ? String((data as { warning: unknown }).warning)
+            : null;
+        if (createWarning) {
+          const createdId = (data as { content?: { id?: unknown } }).content?.id;
+          setMessage({ type: "error", text: createWarning });
+          setCreatedDraftId(typeof createdId === "number" ? createdId : null);
+          router.refresh();
+          return;
+        }
         const warning = mode === "edit" ? getSlideStorageWarning(data, "update") : null;
         if (warning) {
           // The update itself succeeded; stay on this screen to warn that the old slide PDF
@@ -752,6 +767,14 @@ export function ContentForm({
             <Alert variant={message.type === "error" ? "destructive" : "default"}>
               <AlertDescription className={message.type === "success" ? "text-success" : ""}>
                 {message.text}
+                {createdDraftId !== null && (
+                  <>
+                    {" "}
+                    <Link href={`/manage/contents/${createdDraftId}/edit`} className="underline">
+                      編集画面を開く
+                    </Link>
+                  </>
+                )}
               </AlertDescription>
             </Alert>
           )}
@@ -759,7 +782,14 @@ export function ContentForm({
           <div className="flex gap-3">
             <Button
               type="submit"
-              disabled={isLoading || isUploading || !title || !weekId || isSlidePdfMissing}
+              disabled={
+                isLoading ||
+                isUploading ||
+                !title ||
+                !weekId ||
+                isSlidePdfMissing ||
+                createdDraftId !== null
+              }
             >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

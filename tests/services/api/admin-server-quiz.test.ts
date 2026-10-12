@@ -161,4 +161,35 @@ describe("createContent はクイズを非公開で作り、設問の保存後�
     );
     expect(updates).toContainEqual({ is_published: true });
   });
+
+  it("公開への更新だけが失敗したら、作成済みの非公開の行を publishFailed 付きで返す", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          { data: [], error: null },
+          { data: { id: 79, title: "クイズ", is_published: false }, error: null },
+          { data: null, error: dbError },
+        ],
+      },
+      rpcResults: { replace_quiz_questions: { data: null, error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const result = await createContent({
+      title: "クイズ",
+      week_id: 3,
+      content_type: "quiz",
+      insertAfterId: null,
+      is_published: true,
+      quizQuestions: edited,
+    });
+
+    expect(result).toEqual({
+      data: { id: 79, title: "クイズ", is_published: false },
+      error: null,
+      publishFailed: true,
+    });
+    const builders = vi.mocked(client.from).mock.results.map((r) => r.value);
+    expect(builders.some((b) => vi.mocked(b.delete).mock.calls.length > 0)).toBe(false);
+  });
 });

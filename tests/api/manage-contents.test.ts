@@ -196,6 +196,32 @@ describe("POST / PUT /api/manage/contents - クイズの設問（#306）", () =>
     );
   });
 
+  it("作成後の公開だけが失敗した場合は200で、warning を付けて作成済みの行を返す", async () => {
+    vi.mocked(createContent).mockResolvedValue({
+      data: { id: 5 } as never,
+      error: null,
+      publishFailed: true,
+    });
+
+    const res = await POST(
+      request({
+        title: "クイズ",
+        week_id: 1,
+        content_type: "quiz",
+        insert_after_id: null,
+        is_published: true,
+        quiz_questions: quizQuestions,
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      success: true,
+      content: { id: 5 },
+      warning: expect.stringContaining("公開に失敗"),
+    });
+  });
+
   it("作成処理が失敗した場合（設問の保存失敗を含む）は500", async () => {
     vi.mocked(createContent).mockResolvedValue({ data: null, error: { message: "x" } as never });
 

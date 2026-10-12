@@ -82,7 +82,21 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ success: true, created });
+    // A quiz whose publish step failed is created as a draft; name them so the admin publishes
+    // them instead of re-sending (which would create duplicates).
+    const requestedPublished = validation.data.contents.map((c) => c.is_published === true);
+    const unpublished = created.filter((c, i) => requestedPublished[i] && !c.isPublished);
+    return NextResponse.json({
+      success: true,
+      created,
+      ...(unpublished.length > 0
+        ? {
+            warning: `公開に失敗したため非公開で作成したコンテンツがあります: ${unpublished
+              .map((c) => c.title)
+              .join("、")}`,
+          }
+        : {}),
+    });
   } catch (error) {
     console.error("API エラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });

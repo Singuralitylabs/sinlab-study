@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
       quiz_questions,
     } = validation.data;
 
-    const { data, error } = await createContent({
+    const { data, error, publishFailed } = await createContent({
       title,
       week_id,
       content_type,
@@ -68,7 +68,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "コンテンツの作成に失敗しました" }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, content: data });
+    return NextResponse.json({
+      success: true,
+      content: data,
+      ...(publishFailed
+        ? {
+            warning:
+              "コンテンツは作成しましたが、公開に失敗したため非公開のままです。編集画面から公開してください",
+          }
+        : {}),
+    });
   } catch (error) {
     if (error instanceof InvalidInsertAfterIdError) {
       console.error("コンテンツ作成エラー（insert_after_id不正）:", error.insertAfterId);
