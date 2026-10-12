@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .claude/hooks/allow-readonly-sql.mjs"
+            "command": "bun \"$(git rev-parse --show-toplevel)\"/.claude/hooks/allow-readonly-sql.mjs"
           }
         ]
       }

@@ -50,4 +50,4 @@ CLAUDE.local.md
 .claude/worktrees/
 
 # Google サービスアカウントの秘密鍵（誤コミット防止）
-google-service-account.json
+*service-account*.json

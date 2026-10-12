@@ -60,6 +60,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 **仕様は `docs/specification.md` 2.11節。決済まわりを触る前に必ず読むこと。**
 
+- `.agents/skills/stripe-*` の一般論（`payment_method_types` を使わない、API バージョンや SDK の書き方、`npm` の使用など）より、本節と `docs/specification.md` 2.11 を優先する。カード限定（`allowed_payment_method_types`）、SDK の pin、`new Stripe(key)`、bun 運用は意図した設計。
 - 有効・無効は `STRIPE_ENABLED`。判定は `isStripeEnabled()` に集約し、`"true"` 以外はフェイルクローズで無効。決済系の追加時は無効時の経路も用意する。
 - 認可は `users.status` / `membership_type` が唯一の真実。`users` にStripe関連カラムは足さず、課金状態は `stripe_subscriptions` のミラーで持つ。
 - **Checkout は「処理権の確保 → Customer の確保 → Stripe 呼び出し」の順を崩さない。** `claimCheckoutSlot()` / `releaseCheckoutSlot()` と `ensureCheckoutCustomer()` の迂回は二重契約・二重課金と解約不能な契約を招く。契約の有無は `NON_CURRENT_SUBSCRIPTION_STATUSES` で判定する（`database.md` 3.9）。
