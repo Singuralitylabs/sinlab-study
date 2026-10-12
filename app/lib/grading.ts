@@ -236,7 +236,9 @@ export function nextRequirementKey(existingKeys: readonly string[], issuedMax = 
 /**
  * Keys the client invented that were already issued and then removed. The editor skips these,
  * but the API accepts any unique key, so the server has to reject them or a deleted r3 can name
- * a different requirement while old reviews still point at r3.
+ * a different requirement while old reviews still point at r3. Only `r{n}` keys are issued
+ * numbers; anything else is a new key (uniqueness is checked separately) and must not be
+ * rejected just because `requirementKeyNumber` maps it to 0.
  */
 export function reusedRequirementKeys(
   current: { requirements: readonly { key: string }[]; max_key_number?: number },
@@ -248,6 +250,6 @@ export function reusedRequirementKeys(
     maxRequirementKeyNumber(current.requirements.map((requirement) => requirement.key))
   );
   return incomingKeys.filter(
-    (key) => !currentKeys.has(key) && requirementKeyNumber(key) <= highWater
+    (key) => !currentKeys.has(key) && /^r\d+$/.test(key) && requirementKeyNumber(key) <= highWater
   );
 }

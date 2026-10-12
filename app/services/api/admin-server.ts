@@ -1039,7 +1039,9 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
     return { data: [], error: null };
   }
 
-  const supabase = await createServerSupabaseClient();
+  // The list reads grading_rubric->version. That column is absent from the anon/authenticated
+  // grant, and staff share the authenticated role, so the user client cannot select it.
+  const supabase = await createAdminSupabaseClient();
   const needsInnerJoin = themeId !== undefined || phaseId !== undefined;
 
   let query = supabase
@@ -1473,10 +1475,8 @@ async function updateContentRow(
   const patch: Partial<LearningContent> = { ...basePatch };
   const movesAwayFromExercise =
     patch.content_type !== undefined && patch.content_type !== "exercise";
-  if (movesAwayFromExercise || gradingRubric === null) {
-    patch.grading_rubric = null;
-  }
-  const needsCurrentRubric = !movesAwayFromExercise && Boolean(gradingRubric);
+  // null clears, an object saves, and leaving exercise drops the rubric. undefined leaves it.
+  const touchesRubric = movesAwayFromExercise || gradingRubric !== undefined;
 
   let destinationFilter: SiblingParentFilter = null;
   let sourceFilter: SiblingParentFilter = null;
@@ -1490,33 +1490,39 @@ async function updateContentRow(
   const needsCurrentPdf = patch.pdf_url !== undefined;
   let previousPdfUrl: string | null = null;
   let pdfFetchFailed = false;
-  // Set only when this write derives a new rubric from the row we just read. The UPDATE then
-  // matches that version (or NULL), so a stale form cannot publish the same version twice or
-  // lower max_key_number.
+  // Set whenever this write changes grading_rubric, including a clear. The UPDATE matches that
+  // version (or NULL) so a stale form cannot overwrite a newer rubric or republish an old key.
   let expectedRubricVersion: number | null | undefined;
-  if (needsCurrentWeek || needsCurrentPdf || needsCurrentRubric) {
+  if (needsCurrentWeek || needsCurrentPdf || touchesRubric) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
       .select("week_id, pdf_url, grading_rubric, content_type")
       .eq("id", id)
       .eq("is_deleted", false)
       .single();
-    if (currentError) {
-      console.error("コンテンツ更新エラー（現在値取得）:", currentError.message);
+    if (currentError || !current) {
+      console.error("コンテンツ更新エラー（現在値取得）:", currentError?.message ?? "no row");
       // The rubric version can't be derived without the stored rubric, so fail rather than guess.
-      if (needsCurrentWeek || needsCurrentRubric) {
-        return { error: currentError, storageRemoved: true };
+      if (needsCurrentWeek || touchesRubric) {
+        return {
+          error: currentError ?? {
+            message: "コンテンツの現在値を取得できませんでした",
+            details: "",
+            hint: "",
+            code: "PGRST116",
+          },
+          storageRemoved: true,
+        };
       }
       pdfFetchFailed = true;
     } else {
       previousPdfUrl = current.pdf_url;
-      if (needsCurrentRubric && gradingRubric) {
+      if (touchesRubric) {
         // A rubric belongs to exercises only: judge the type the row will have after this update,
         // so switching a stored video to exercise keeps the rubric sent with it.
         const stored = parseGradingRubric(current.grading_rubric);
-        if ((patch.content_type ?? current.content_type) !== "exercise") {
-          patch.grading_rubric = null;
-        } else {
+        const resultingType = patch.content_type ?? current.content_type;
+        if (gradingRubric && resultingType === "exercise") {
           const reused = stored
             ? reusedRequirementKeys(
                 stored,
@@ -1527,8 +1533,10 @@ async function updateContentRow(
             return { error: null, storageRemoved: true, keyReuse: reused };
           }
           patch.grading_rubric = nextGradingRubric(stored, gradingRubric);
-          expectedRubricVersion = stored?.version ?? null;
+        } else {
+          patch.grading_rubric = null;
         }
+        expectedRubricVersion = stored?.version ?? null;
       }
       if (needsCurrentWeek) {
         const destinationWeekId = patch.week_id ?? current.week_id;
@@ -1537,6 +1545,38 @@ async function updateContentRow(
         sourceFilter = { column: "week_id", value: current.week_id };
       }
     }
+  }
+
+  // Version check before sibling display_order writes. A lost race must not leave duplicate
+  // orders, and content_type moves with the rubric so the exercise-only CHECK still holds
+  // (a rubric written onto a video row, or a type change that leaves a rubric behind, fails).
+  if (expectedRubricVersion !== undefined) {
+    const rubricPayload: Partial<LearningContent> = {
+      grading_rubric: patch.grading_rubric ?? null,
+    };
+    if (patch.content_type !== undefined) {
+      rubricPayload.content_type = patch.content_type;
+    }
+    let rubricUpdate = supabase
+      .from("learning_contents")
+      .update(rubricPayload)
+      .eq("id", id)
+      .eq("is_deleted", false);
+    if (expectedRubricVersion === null) {
+      rubricUpdate = rubricUpdate.is("grading_rubric", null);
+    } else {
+      rubricUpdate = rubricUpdate.eq("grading_rubric->>version", String(expectedRubricVersion));
+    }
+    const { data: rubricRows, error: rubricError } = await rubricUpdate.select("id");
+    if (rubricError) {
+      console.error("コンテンツ更新エラー:", rubricError.message);
+      return { error: rubricError, storageRemoved: true };
+    }
+    if (Array.isArray(rubricRows) && rubricRows.length === 0) {
+      return { error: null, storageRemoved: true, conflict: true };
+    }
+    delete patch.grading_rubric;
+    delete patch.content_type;
   }
 
   const resequenced = await resequenceDestinationForUpdate(
@@ -1557,20 +1597,14 @@ async function updateContentRow(
       ? { ...patch, display_order: resequenced.displayOrder }
       : patch;
 
-  let update = supabase.from("learning_contents").update(updatePayload).eq("id", id);
-  if (expectedRubricVersion === null) {
-    update = update.is("grading_rubric", null);
-  } else if (expectedRubricVersion !== undefined) {
-    update = update.eq("grading_rubric->>version", String(expectedRubricVersion));
-  }
-  const { data: updated, error } = await update.select("id");
-
-  if (error) {
-    console.error("コンテンツ更新エラー:", error.message);
-    return { error, storageRemoved: true };
-  }
-  if (expectedRubricVersion !== undefined && Array.isArray(updated) && updated.length === 0) {
-    return { error: null, storageRemoved: true, conflict: true };
+  // The rubric (and content_type, when this save changes it) was already written under the
+  // version predicate. Filtering this update on the old version would match 0 rows.
+  if (Object.keys(updatePayload).length > 0) {
+    const { error } = await supabase.from("learning_contents").update(updatePayload).eq("id", id);
+    if (error) {
+      console.error("コンテンツ更新エラー:", error.message);
+      return { error, storageRemoved: true };
+    }
   }
 
   if (parentChanged) {

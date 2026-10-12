@@ -224,6 +224,7 @@ describe("getGradingRubricVersion / toRubricFormRows / nextRequirementKey / getR
     expect(reusedRequirementKeys(current, ["r1", "r3"])).toEqual(["r3"]);
     expect(reusedRequirementKeys(current, ["r1", "r2"])).toEqual([]);
     expect(reusedRequirementKeys(current, ["r1", "r4"])).toEqual([]);
+    expect(reusedRequirementKeys(current, ["r1", "custom"])).toEqual([]);
   });
 
   it("削除済みの最大番号を issuedMax で覚え、その key を新しい要件に再利用しない", () => {
