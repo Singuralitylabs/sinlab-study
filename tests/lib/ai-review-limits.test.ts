@@ -12,6 +12,9 @@ import {
 const NOW = new Date("2026-10-12T05:00:00Z");
 const TODAY = "2026-10-12T01:00:00Z";
 const YESTERDAY = "2026-10-11T14:59:59Z";
+// Seconds before NOW: an in-flight row this young is still running, an older one is dead.
+const RUNNING = "2026-10-12T04:59:30Z";
+const DEAD = "2026-10-12T04:00:00Z";
 
 let nextId = 1;
 function row(
@@ -131,27 +134,44 @@ describe("evaluateReviewRequest - active", () => {
       kind: "limited",
       reason: "submission_reviewed",
       remaining: 1,
+      resetsAt: null,
     });
   });
 
-  it("rejects re-review of a pending submission", () => {
-    expect(evaluate([row(1, { status: "pending" })], 1)).toMatchObject({
+  it("answers submission_reviewed (no resetsAt) before the daily limits for a reviewed submission", () => {
+    const decision = evaluate([row(1), row(2)], 1);
+    expect(decision).toMatchObject({
       kind: "limited",
       reason: "submission_reviewed",
+      remaining: 0,
+      resetsAt: null,
     });
   });
 
-  it("returns processing for a same-submission request while it is generating", () => {
-    const processing = row(1, { status: "processing" });
-    expect(evaluate([processing], 1)).toEqual({ kind: "processing", reviewId: processing.id });
-  });
+  it.each(["pending", "processing"])(
+    "returns processing for a same-submission request while it is %s",
+    (status) => {
+      const inFlight = row(1, { status, created_at: RUNNING });
+      expect(evaluate([inFlight], 1)).toEqual({ kind: "processing", reviewId: inFlight.id });
+    }
+  );
 
-  it("treats processing on a different submission as a counted review", () => {
-    expect(evaluate([row(1, { status: "processing" })], 2)).toEqual({
+  it("treats a running review on a different submission as a counted review", () => {
+    expect(evaluate([row(1, { status: "processing", created_at: RUNNING })], 2)).toEqual({
       kind: "allowed",
       remaining: 1,
     });
   });
+
+  it.each(["pending", "processing"])(
+    "ignores a dead %s row (killed run): it neither blocks a retry nor uses up the allowance",
+    (status) => {
+      expect(evaluate([row(1, { status, created_at: DEAD })], 1, 0)).toEqual({
+        kind: "allowed",
+        remaining: 2,
+      });
+    }
+  );
 
   it("allows the 10th review of the day across contents", () => {
     expect(evaluate([], 1, AI_REVIEW_LIMITS.active.perDay - 1)).toMatchObject({
@@ -195,6 +215,7 @@ describe("evaluateReviewRequest - trial", () => {
       kind: "limited",
       reason: "trial_lifetime",
       remaining: 0,
+      resetsAt: null,
       message: trialLimitMessage(),
     });
     expect(trialLimitMessage()).toBe(
@@ -214,8 +235,15 @@ describe("evaluateReviewRequest - trial", () => {
   });
 
   it("returns processing for the same submission", () => {
-    const processing = row(1, { status: "processing" });
+    const processing = row(1, { status: "processing", created_at: RUNNING });
     expect(evaluate([processing], 1)).toEqual({ kind: "processing", reviewId: processing.id });
+  });
+
+  it("does not let a dead processing row lock the lifetime review", () => {
+    expect(evaluate([row(1, { status: "processing", created_at: DEAD })], 1)).toEqual({
+      kind: "allowed",
+      remaining: 1,
+    });
   });
 
   it("ignores the daily total", () => {

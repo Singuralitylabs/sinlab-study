@@ -754,20 +754,20 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 3. 本人の提出であることを確認し、コンテンツの可視性（`is_published = true` 付き SELECT で 0 行なら 403）を確認
 4. 回数制限を判定（下記「回数制限」）
 5. Gemini API にコード・演習指示・模範回答・採点基準を送信し、構造化 JSON でレビューを生成（下記「構造化採点」。単一ファイルの提出は `code_content` に言語を持たないため、演習の `code_language` を言語として渡す。コードを囲むフェンスはコード中のバッククォートの連続より長くし、Markdown 提出のコードブロック等でフェンスが途中で閉じないようにする。`GEMINI_MAX_CODE_LENGTH` を超えた分の省略は複数ファイルの提出でもファイルごとに行う）
-6. `ai_reviews` テーブルに結果を upsert（`pending` → `processing` → `completed` / `failed`）。再利用された行は `created_at` も現在時刻に更新する（当日の件数集計から漏れないようにするため）。トークン列は更新せず累計を保つ
+6. `claimPendingAIReview()` でその提出のレビュー枠を原子的に確保する（新規は `ignoreDuplicates` の INSERT、既存行は `failed` または死んだ in-flight だけを条件付き UPDATE で再利用）。確保できなければ 409 で Gemini を呼ばない。続けて結果を保存する（`pending` → `processing` → `completed` / `failed`）。再利用した行は `created_at` も現在時刻に更新する（当日の件数集計から漏れないようにするため）。トークン列は更新せず累計を保つ
 
 **回数制限（#304）**: 制限値は `app/constants/gemini.ts` の `AI_REVIEW_LIMITS` が唯一の定義で、API・画面文言・本節はここから導出する。判定は純粋関数 `evaluateReviewRequest()`（`app/lib/ai-review-limits.ts`）、集計クエリは `fetchAIReviewUsage()`（`app/services/api/ai-review-usage-server.ts`）が担う。日付の境界は **JST**（`app/lib/email-digest.ts` の `toJstDateString()` / `jstStartOfDayIso()` と同じ基準）で、UTC では数えない。集計は常に `user_id` で本人の提出に絞る（admin / maintainer は RLS で全件読めるため、RLS だけに頼らない）。
 
 | 対象 | 制限 |
 |:--|:--|
-| 共通 | **1 提出につきレビューは 1 回**。対象の `submission_id` に `failed` 以外のレビュー行があれば 429（再レビューは新しい提出に対してのみ） |
+| 共通 | **1 提出につきレビューは 1 回**。対象の `submission_id` に数える対象のレビュー行があれば 429（再レビューは新しい提出に対してのみ）。日次の上限より先に判定し、この 429 に `resetsAt` は付けない（翌日になっても解除されないため） |
 | `active` | 同一コンテンツで JST 当日に作成された `failed` 以外のレビューが `perContentPerDay`（2）件以上なら 429。加えて当日の総件数（全コンテンツ）が `perDay`（10）件以上なら 429 |
 | `trial` | 同一コンテンツへの本人の提出に紐づく `failed` 以外のレビューが `perContentLifetime`（1）件以上なら 429（従来どおり生涯 1 回）。日次の総件数は適用しない |
 
-- **`failed` は回数に数えない**（Gemini 側の失敗で受講生の回数を消費させない）。`processing` 中の同一提出への再要求は 202 を返す
-- 429 の応答は `{ error, remaining, resetsAt }`。`remaining` は当日の残り回数（trial は 0。同一提出の再要求は新しい提出で使える残り回数）、`resetsAt` は JST 翌 0 時の ISO 文字列。`error` はステータス別のメッセージ（active: 「本日のこの課題の AI レビュー回数（N 回）を使い切りました。明日また提出できます」、trial: 「お試しプランでは AI レビューは 1 課題につき 1 回です。有料会員は 1 日 2 回まで再レビューできます」）。200 の応答にもこのレビュー後の `remaining` を含める
+- **`failed` は回数に数えない**（Gemini 側の失敗で受講生の回数を消費させない）。関数が途中で終了して `pending` / `processing` のまま残った行も、`AI_REVIEW_STALE_AFTER_MS`（90 秒。`maxDuration` より長い）を過ぎたら死んだものとして数えず、その提出の再実行も許す。それより新しい `pending` / `processing` の同一提出への再要求は 202 を返す（画面は「生成中」と案内し、レビュー結果は表示しない）
+- 429 の応答は `{ error, remaining, resetsAt }`。`remaining` は当日の残り回数（trial は 0。同一提出の再要求は新しい提出で使える残り回数）、`resetsAt` は JST 翌 0 時の ISO 文字列（日付が変わっても解除されない `trial` の生涯 1 回と「1 提出 1 回」の 429 では `null`）。`error` はステータス別のメッセージ（active: 「本日のこの課題の AI レビュー回数（N 回）を使い切りました。明日また提出できます」、trial: 「お試しプランでは AI レビューは 1 課題につき 1 回です。有料会員は 1 日 2 回まで再レビューできます」）。200 の応答にもこのレビュー後の `remaining` を含める
 - 回数の集計に失敗したときは 500 を返し、レビューを開始しない（フェイルクローズ）
-- 並行リクエスト: 1 提出 1 回は `ai_reviews.submission_id` の UNIQUE（`upsertPendingAIReview()`）で担保する。日次件数の判定は素の SELECT のため並行時に 1 回超過しうるが、金銭影響が数円のため許容する（`stripe_events` 型の claim は設けない）
+- 並行リクエスト: 1 提出 1 回は `claimPendingAIReview()`（`ai_reviews.submission_id` の UNIQUE と条件付き UPDATE）で担保し、同じ提出への同時要求が 2 回 Gemini を呼んだり、完了済みの行を `pending` に戻したりしない。一方、ユーザー単位の日次件数の判定は素の SELECT のため並行時に 1 回超過しうるが、金銭影響が数円のため許容する（Issue #304 の方針。`stripe_events` 型の claim や RPC は設けない）
 - 画面: コンテンツ詳細の「課題提出」見出しに、active は「本日の残り回数: N 回」（この課題の残りと1日全体の残りの小さい方。ページ描画時にサーバー側で算出。クライアントでは数えない）、trial は上記メッセージと `isStripeEnabled()` に従うアップグレード導線（`UpgradeCta`）を表示する。429 時はフォームが API の `error` をそのまま表示する
 
 **構造化採点（#305）**: 採点のぶれを抑えるため、AI には判定ラベルだけを返させ、点数と合否はコードが決める（`app/lib/grading.ts`。AI の出した数値は点数にも合否にも使わない）。重み・合格点は `app/constants/grading.ts`、キー・モデル・温度（`GEMINI_TEMPERATURE` = 0）は `app/constants/gemini.ts`。
@@ -793,11 +793,12 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 | ステータス | 条件 |
 |:--|:--|
 | 200 | 正常（`{ review: { id, status, review_content, overall_score, review_json, score_kind, rubric_version, passed, model_used }, remaining: number }` を返却。トークン数は含めない） |
-| 202 | 同一提出のレビューが生成中（`processing`） |
+| 202 | 同一提出のレビューが生成中（`pending` / `processing`。`{ message, review: { id, status } }`。レビュー本文は含まない） |
 | 400 | submissionId 未指定・不正（正の整数以外） |
 | 403 | 他人の提出 / コンテンツが閲覧不可 |
 | 404 | 提出データなし |
-| 429 | 回数制限（`{ error, remaining, resetsAt }`） |
+| 409 | 同時リクエストでその提出のレビュー枠を取れなかった（別リクエストが処理中、または実行済み） |
+| 429 | 回数制限（`{ error, remaining, resetsAt }`。`resetsAt` は `null` のことがある） |
 | 500 | 回数集計の失敗 / サーバーエラー |
 | 503 | 使用するキー（会員用 / お試し用）が未設定 |
 | 502 | Gemini API エラー / 応答の検証失敗（再生成後も不正） / タイムアウト |

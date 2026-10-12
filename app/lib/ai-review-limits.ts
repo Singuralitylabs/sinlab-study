@@ -1,9 +1,10 @@
-import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
+import { AI_REVIEW_LIMITS, AI_REVIEW_STALE_AFTER_MS } from "@/app/constants/gemini";
 import { USER_STATUS } from "@/app/constants/user";
 import type { UserStatusType } from "@/app/types";
 import { addDays, jstStartOfDayIso, toJstDateString } from "./email-digest";
 
 export interface ReviewUsageRow {
+  id: number;
   submission_id: number;
   status: string;
   created_at: string;
@@ -22,7 +23,8 @@ export type ReviewLimitDecision =
       kind: "limited";
       reason: ReviewLimitReason;
       remaining: number;
-      resetsAt: string;
+      /** null when the limit doesn't lift on its own (it never resets at midnight). */
+      resetsAt: string | null;
       message: string;
     };
 
@@ -34,9 +36,27 @@ export function getJstDayWindow(now: Date): { startIso: string; resetsAt: string
   };
 }
 
-/** Rows must already be limited to the user's own submissions for the content. */
-function countableRows<T extends { status: string }>(rows: readonly T[]): T[] {
-  return rows.filter((row) => row.status !== "failed");
+/** Oldest created_at at which a pending / processing row still counts as in flight. */
+export function staleReviewCutoff(now: Date): Date {
+  return new Date(now.getTime() - AI_REVIEW_STALE_AFTER_MS);
+}
+
+/**
+ * Rows must already be limited to the user's own submissions for the content. `failed` rows and
+ * dead pending / processing rows (see AI_REVIEW_STALE_AFTER_MS) don't count.
+ */
+function countableRows<T extends { status: string; created_at: string }>(
+  rows: readonly T[],
+  now: Date
+): T[] {
+  const cutoffMs = staleReviewCutoff(now).getTime();
+  return rows.filter((row) => {
+    if (row.status === "failed") {
+      return false;
+    }
+    const inFlight = row.status === "pending" || row.status === "processing";
+    return !(inFlight && Date.parse(row.created_at) < cutoffMs);
+  });
 }
 
 function countCreatedSince(rows: readonly ReviewUsageRow[], startIso: string): number {
@@ -55,7 +75,7 @@ export function computeRemainingReviews({
   todayTotal: number;
   now: Date;
 }): number {
-  const countable = countableRows(contentReviews);
+  const countable = countableRows(contentReviews, now);
 
   if (userStatus === USER_STATUS.ACTIVE) {
     const { startIso } = getJstDayWindow(now);
@@ -94,7 +114,8 @@ function submissionReviewedMessage(): string {
 
 /**
  * Decides one review request. `contentReviews` are the user's own reviews for the content (all
- * statuses; `failed` is ignored here so a Gemini failure never uses up the allowance).
+ * statuses; `failed` and dead in-flight rows are ignored here so a Gemini failure or a killed run
+ * never uses up the allowance).
  * `todayTotal` is the user's non-failed reviews created today (JST) across all contents; it is
  * only consulted for active users.
  */
@@ -107,16 +128,16 @@ export function evaluateReviewRequest({
 }: {
   userStatus: UserStatusType | null;
   submissionId: number;
-  contentReviews: readonly (ReviewUsageRow & { id?: number })[];
+  contentReviews: readonly ReviewUsageRow[];
   todayTotal: number;
   now: Date;
 }): ReviewLimitDecision {
-  const countable = countableRows(contentReviews);
+  const countable = countableRows(contentReviews, now);
   const { startIso, resetsAt } = getJstDayWindow(now);
 
   const sameSubmission = countable.find((row) => row.submission_id === submissionId);
-  if (sameSubmission?.status === "processing") {
-    return { kind: "processing", reviewId: sameSubmission.id ?? 0 };
+  if (sameSubmission?.status === "processing" || sameSubmission?.status === "pending") {
+    return { kind: "processing", reviewId: sameSubmission.id };
   }
 
   const remaining = computeRemainingReviews({ userStatus, contentReviews, todayTotal, now });
@@ -127,11 +148,23 @@ export function evaluateReviewRequest({
         kind: "limited",
         reason: "trial_lifetime",
         remaining: 0,
-        resetsAt,
+        resetsAt: null,
         message: trialLimitMessage(),
       };
     }
     return { kind: "allowed", remaining };
+  }
+
+  // Checked before the daily limits: an already-reviewed submission can't be retried tomorrow
+  // either, so it must not be told to "come back tomorrow".
+  if (sameSubmission) {
+    return {
+      kind: "limited",
+      reason: "submission_reviewed",
+      remaining,
+      resetsAt: null,
+      message: submissionReviewedMessage(),
+    };
   }
 
   const contentToday = countCreatedSince(countable, startIso);
@@ -151,15 +184,6 @@ export function evaluateReviewRequest({
       remaining: 0,
       resetsAt,
       message: userDailyMessage(),
-    };
-  }
-  if (sameSubmission) {
-    return {
-      kind: "limited",
-      reason: "submission_reviewed",
-      remaining,
-      resetsAt,
-      message: submissionReviewedMessage(),
     };
   }
 

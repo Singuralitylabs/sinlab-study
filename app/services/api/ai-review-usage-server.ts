@@ -1,10 +1,14 @@
-import { getJstDayWindow, type ReviewUsageRow } from "@/app/lib/ai-review-limits";
+import {
+  getJstDayWindow,
+  type ReviewUsageRow,
+  staleReviewCutoff,
+} from "@/app/lib/ai-review-limits";
 import type { createServerSupabaseClient } from "./supabase-server";
 
 type ServerSupabaseClient = Awaited<ReturnType<typeof createServerSupabaseClient>>;
 
 export interface AIReviewUsage {
-  contentReviews: (ReviewUsageRow & { id: number })[];
+  contentReviews: ReviewUsageRow[];
   todayTotal: number;
 }
 
@@ -24,33 +28,25 @@ export async function fetchAIReviewUsage(
   }: { userId: number; contentId: number; includeDailyTotal: boolean; now?: Date }
 ): Promise<AIReviewUsage | null> {
   const fetchContentReviews = async (): Promise<AIReviewUsage["contentReviews"] | null> => {
-    const { data: submissions, error: submissionsError } = await supabase
-      .from("submissions")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("content_id", contentId);
-
-    if (submissionsError) {
-      console.error("AIレビュー回数集計エラー (submissions):", submissionsError.message);
-      return null;
-    }
-
-    const submissionIds = (submissions ?? []).map((s) => s.id);
-    if (submissionIds.length === 0) {
-      return [];
-    }
-
     const { data, error } = await supabase
       .from("ai_reviews")
-      .select("id, submission_id, status, created_at")
-      .in("submission_id", submissionIds)
+      .select(
+        "id, submission_id, status, created_at, submission:submissions!inner(user_id, content_id)"
+      )
+      .eq("submission.user_id", userId)
+      .eq("submission.content_id", contentId)
       .neq("status", "failed");
 
     if (error) {
       console.error("AIレビュー回数集計エラー (ai_reviews):", error.message);
       return null;
     }
-    return data ?? [];
+    return (data ?? []).map(({ id, submission_id, status, created_at }) => ({
+      id,
+      submission_id,
+      status,
+      created_at,
+    }));
   };
 
   // Independent of the per-content lookup, so it runs alongside it instead of after it.
@@ -64,6 +60,9 @@ export async function fetchAIReviewUsage(
       .select("id, submission:submissions!inner(user_id)", { count: "exact", head: true })
       .eq("submission.user_id", userId)
       .neq("status", "failed")
+      // A dead pending / processing row (killed run) must not count, same as in the per-content
+      // lookup (countableRows).
+      .or(`status.eq.completed,created_at.gt.${staleReviewCutoff(now).toISOString()}`)
       .gte("created_at", startIso);
 
     if (error) {

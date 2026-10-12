@@ -20,10 +20,10 @@ vi.mock("@/app/services/api/gemini", async (importOriginal) => {
 
 import { maxDuration, POST } from "@/app/api/ai-review/route";
 import {
+  claimPendingAIReview,
   updateAIReviewCompleted,
   updateAIReviewFailed,
   updateAIReviewProcessing,
-  upsertPendingAIReview,
 } from "@/app/services/api/ai-review-server";
 import {
   generateReview,
@@ -164,7 +164,7 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
         },
       }) as never
     );
-    vi.mocked(upsertPendingAIReview).mockResolvedValue({ id: 10 });
+    vi.mocked(claimPendingAIReview).mockResolvedValue({ id: 10 });
     vi.mocked(updateAIReviewProcessing).mockResolvedValue(true);
     vi.mocked(updateAIReviewCompleted).mockResolvedValue(true);
     vi.mocked(updateAIReviewFailed).mockResolvedValue(true);
@@ -275,6 +275,9 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
   const NOW = new Date("2026-10-12T05:00:00Z");
   const TODAY = "2026-10-12T01:00:00Z";
   const YESTERDAY = "2026-10-11T14:59:59Z";
+  // Seconds before NOW: still running (a dead run is older than the 90s stale cutoff).
+  const RUNNING = "2026-10-12T04:59:30Z";
+  const DEAD = "2026-10-12T04:00:00Z";
 
   const submissionRow = (userId: number, submissionId = 1) => ({
     id: submissionId,
@@ -296,29 +299,23 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
   const setup = ({
     auth,
     submissionId = 1,
-    ownSubmissionIds = [1],
     reviews = [],
     todayTotal = 0,
   }: {
     auth: typeof memberAuth;
     submissionId?: number;
-    ownSubmissionIds?: number[];
     reviews?: ReturnType<typeof review>[];
     todayTotal?: number;
   }) => {
     const client = createMockSupabaseClient({
       tableResults: {
-        submissions: [
-          { data: submissionRow(auth.userId, submissionId), error: null },
-          { data: ownSubmissionIds.map((id) => ({ id })), error: null },
-        ],
-        // The daily total (active only) is issued before the per-content lookup: they run in
-        // parallel and the total doesn't wait for the own-submissions query.
+        submissions: { data: submissionRow(auth.userId, submissionId), error: null },
+        // Per-content lookup first, then the daily total (active only); they run in parallel.
         ai_reviews:
           auth.userStatus === "active"
             ? [
-                { data: null, error: null, count: todayTotal },
                 { data: reviews, error: null },
+                { data: null, error: null, count: todayTotal },
               ]
             : [{ data: reviews, error: null }],
       },
@@ -334,7 +331,7 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
     vi.stubEnv(GEMINI_API_KEY_ENV, "member-key");
     vi.stubEnv(GEMINI_API_KEY_TRIAL_ENV, "trial-key");
     vi.mocked(isContentVisible).mockResolvedValue(true);
-    vi.mocked(upsertPendingAIReview).mockResolvedValue({ id: 10 });
+    vi.mocked(claimPendingAIReview).mockResolvedValue({ id: 10 });
     vi.mocked(updateAIReviewProcessing).mockResolvedValue(true);
     vi.mocked(updateAIReviewCompleted).mockResolvedValue(true);
     vi.mocked(updateAIReviewFailed).mockResolvedValue(true);
@@ -359,7 +356,6 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
     setup({
       auth: memberAuth,
       submissionId: 2,
-      ownSubmissionIds: [1, 2],
       reviews: [review(1, 1)],
       todayTotal: 1,
     });
@@ -374,7 +370,6 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
     setup({
       auth: memberAuth,
       submissionId: 3,
-      ownSubmissionIds: [1, 2, 3],
       reviews: [review(1, 1), review(2, 2)],
       todayTotal: 2,
     });
@@ -387,7 +382,7 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
       remaining: 0,
       resetsAt: "2026-10-12T15:00:00.000Z",
     });
-    expect(upsertPendingAIReview).not.toHaveBeenCalled();
+    expect(claimPendingAIReview).not.toHaveBeenCalled();
     expect(generateReview).not.toHaveBeenCalled();
   });
 
@@ -395,7 +390,6 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
     setup({
       auth: memberAuth,
       submissionId: 3,
-      ownSubmissionIds: [1, 2, 3],
       reviews: [review(1, 1, { created_at: YESTERDAY }), review(2, 2)],
       todayTotal: 1,
     });
@@ -437,6 +431,7 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
       error:
         "この提出の AI レビューは実行済みです。コードを直して新しく提出すると再レビューできます",
       remaining: 1,
+      resetsAt: null,
     });
     expect(generateReview).not.toHaveBeenCalled();
   });
@@ -453,7 +448,7 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
   it("同じ提出が processing 中なら202を返し、新規にレビューを開始しない", async () => {
     setup({
       auth: memberAuth,
-      reviews: [review(7, 1, { status: "processing" })],
+      reviews: [review(7, 1, { status: "processing", created_at: RUNNING })],
       todayTotal: 1,
     });
 
@@ -464,7 +459,31 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
       message: "AIレビューは現在生成中です",
       review: { id: 7, status: "processing" },
     });
-    expect(upsertPendingAIReview).not.toHaveBeenCalled();
+    expect(claimPendingAIReview).not.toHaveBeenCalled();
+  });
+
+  it("processing のまま止まった行（関数が途中で終了）は回数に数えず、同じ提出を再実行できる", async () => {
+    setup({
+      auth: memberAuth,
+      reviews: [review(7, 1, { status: "processing", created_at: DEAD })],
+      todayTotal: 0,
+    });
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(200);
+    expect(claimPendingAIReview).toHaveBeenCalledWith(1, "2026-10-12T04:58:30.000Z");
+  });
+
+  it("同時リクエストで枠を取れなかったとき（busy）は409を返し、Gemini を呼ばない", async () => {
+    setup({ auth: memberAuth });
+    vi.mocked(claimPendingAIReview).mockResolvedValue("busy");
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(409);
+    expect(generateReview).not.toHaveBeenCalled();
+    expect(updateAIReviewProcessing).not.toHaveBeenCalled();
   });
 
   it("trial: 1回目は許可する（お試し用キー経路のまま）", async () => {
@@ -480,7 +499,6 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
     setup({
       auth: trialAuth,
       submissionId: 2,
-      ownSubmissionIds: [1, 2],
       reviews: [review(1, 1, { created_at: "2026-09-01T00:00:00Z" })],
     });
 
@@ -491,7 +509,7 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
       error:
         "お試しプランでは AI レビューは 1 課題につき 1 回です。有料会員は 1 日 2 回まで再レビューできます",
       remaining: 0,
-      resetsAt: "2026-10-12T15:00:00.000Z",
+      resetsAt: null,
     });
     expect(generateReview).not.toHaveBeenCalled();
   });
@@ -501,11 +519,7 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
 
     await POST(request() as never);
 
-    expect(client.from.mock.calls.map(([table]) => table)).toEqual([
-      "submissions",
-      "submissions",
-      "ai_reviews",
-    ]);
+    expect(client.from.mock.calls.map(([table]) => table)).toEqual(["submissions", "ai_reviews"]);
   });
 
   it("本人の提出に絞った集計をする（user_id 条件）", async () => {
@@ -513,8 +527,9 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
 
     await POST(request() as never);
 
-    const ownSubmissionsBuilder = client.from.mock.results[1].value;
-    expect(ownSubmissionsBuilder.eq).toHaveBeenCalledWith("user_id", memberAuth.userId);
+    const contentBuilder = client.from.mock.results[1].value;
+    expect(contentBuilder.eq).toHaveBeenCalledWith("submission.user_id", memberAuth.userId);
+    expect(contentBuilder.eq).toHaveBeenCalledWith("submission.content_id", 5);
     const totalBuilder = client.from.mock.results[2].value;
     expect(totalBuilder.eq).toHaveBeenCalledWith("submission.user_id", memberAuth.userId);
   });
@@ -549,10 +564,8 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
   it("回数の集計に失敗したら500を返し、レビューを開始しない（fail-closed）", async () => {
     const client = createMockSupabaseClient({
       tableResults: {
-        submissions: [
-          { data: submissionRow(memberAuth.userId), error: null },
-          { data: null, error: { message: "db error" } },
-        ],
+        submissions: { data: submissionRow(memberAuth.userId), error: null },
+        ai_reviews: { data: null, error: { message: "db error" } },
       },
     });
     vi.mocked(getServerAuth).mockResolvedValue(memberAuth as never);
@@ -583,7 +596,6 @@ describe("POST /api/ai-review - 単一ファイル提出の言語", () => {
               },
               error: null,
             },
-            { data: [], error: null },
           ],
         },
       }) as never
@@ -594,7 +606,7 @@ describe("POST /api/ai-review - 単一ファイル提出の言語", () => {
     vi.stubEnv(GEMINI_API_KEY_ENV, "member-key");
     vi.mocked(getServerAuth).mockResolvedValue(memberAuth as never);
     vi.mocked(isContentVisible).mockResolvedValue(true);
-    vi.mocked(upsertPendingAIReview).mockResolvedValue({ id: 10 });
+    vi.mocked(claimPendingAIReview).mockResolvedValue({ id: 10 });
     vi.mocked(updateAIReviewProcessing).mockResolvedValue(true);
     vi.mocked(updateAIReviewCompleted).mockResolvedValue(true);
     vi.mocked(generateReview).mockResolvedValue(reviewResult({ overallScore: 80 }));

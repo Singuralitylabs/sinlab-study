@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { GEMINI_API_KEY_ENV } from "@/app/constants/gemini";
-import { generateGradingRubricDraft } from "@/app/services/api/gemini";
+import { USER_STATUS } from "@/app/constants/user";
+import { generateGradingRubricDraft, resolveGeminiApiKey } from "@/app/services/api/gemini";
 import { GradingRubricDraftRequestSchema, validateRequest } from "@/app/services/api/schemas";
 import { requireContentManagerApi } from "@/app/services/auth/admin-guard";
 
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Drafting is an instructor action, so it always uses the member key (not the trial key).
-    const apiKey = process.env[GEMINI_API_KEY_ENV];
+    const apiKey = resolveGeminiApiKey(USER_STATUS.ACTIVE);
     if (!apiKey) {
       return NextResponse.json({ error: "AIレビュー機能が設定されていません" }, { status: 503 });
     }

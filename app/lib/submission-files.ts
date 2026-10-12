@@ -32,3 +32,18 @@ export function getSubmissionCodeFiles(submission: {
 
   return [];
 }
+
+/**
+ * A single-file submission is stored in code_content, which has no language; the exercise's
+ * language fills in so the model knows how to read e.g. SQL or Bash. Shared by the review route and
+ * the grading dry run so both build the same prompt.
+ */
+export function withFallbackLanguage(
+  files: readonly CodeFile[],
+  fallbackLanguage: string | null | undefined
+): CodeFile[] {
+  if (files.length === 1 && !files[0].language && fallbackLanguage) {
+    return [{ ...files[0], language: fallbackLanguage }];
+  }
+  return [...files];
+}

@@ -62,7 +62,10 @@ export function SubmissionForm({
   ]);
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [message, setMessage] = useState<{
+    type: "success" | "error" | "info";
+    text: string;
+  } | null>(null);
   const [aiReview, setAiReview] = useState<AIReviewListItem | null>(null);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
@@ -131,7 +134,17 @@ export function SubmissionForm({
         body: JSON.stringify({ submissionId }),
       });
 
-      if (response.ok) {
+      if (response.status === 202) {
+        // Another request is already generating this review; there is no review body to show yet.
+        const data = await response.json().catch(() => null);
+        setMessage({
+          type: "info",
+          text:
+            data?.message ??
+            "AIレビューは現在生成中です。しばらくしてからページを再読み込みしてください",
+        });
+        router.refresh();
+      } else if (response.ok) {
         const data = await response.json();
         setAiReview({
           id: data.review.id,
@@ -147,7 +160,7 @@ export function SubmissionForm({
         });
         setMessage({ type: "success", text: "提出が完了しました。AIレビューが生成されました。" });
         router.refresh();
-      } else if (response.status === 429) {
+      } else if (response.status === 429 || response.status === 409) {
         const errorData = await response.json().catch(() => null);
         setMessage({
           type: "error",

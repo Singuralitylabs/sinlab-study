@@ -1,14 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { GEMINI_MAX_CODE_LENGTH } from "@/app/constants/gemini";
 import { USER_STATUS } from "@/app/constants/user";
-import { evaluateReviewRequest } from "@/app/lib/ai-review-limits";
+import { evaluateReviewRequest, staleReviewCutoff } from "@/app/lib/ai-review-limits";
 import { parseGradingRubric } from "@/app/lib/grading-schema";
-import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
+import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import {
+  claimPendingAIReview,
   updateAIReviewCompleted,
   updateAIReviewFailed,
   updateAIReviewProcessing,
-  upsertPendingAIReview,
 } from "@/app/services/api/ai-review-server";
 import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
@@ -93,13 +93,10 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // A single-file submission is stored in code_content, which has no language; fall back to
-      // the exercise's language so the model knows how to read e.g. SQL or Bash.
-      const reviewFiles =
-        files.length === 1 && !files[0].language && content.code_language
-          ? [{ ...files[0], language: content.code_language }]
-          : files;
-      reviewSubmission = { type: "code", files: reviewFiles };
+      reviewSubmission = {
+        type: "code",
+        files: withFallbackLanguage(files, content.code_language),
+      };
     } else {
       if (!submission.url) {
         return NextResponse.json({ error: "提出内容が空です" }, { status: 400 });
@@ -145,9 +142,18 @@ export async function POST(request: NextRequest) {
     }
     const remainingAfterReview = Math.max(0, decision.remaining - 1);
 
-    const reviewRecord = await upsertPendingAIReview(submissionId);
+    const reviewRecord = await claimPendingAIReview(
+      submissionId,
+      staleReviewCutoff(new Date()).toISOString()
+    );
     if (!reviewRecord) {
       return NextResponse.json({ error: "AIレビューの初期化に失敗しました" }, { status: 500 });
+    }
+    if (reviewRecord === "busy") {
+      return NextResponse.json(
+        { error: "この提出のAIレビューは別のリクエストで処理中、または実行済みです" },
+        { status: 409 }
+      );
     }
 
     const processingResult = await updateAIReviewProcessing(reviewRecord.id);

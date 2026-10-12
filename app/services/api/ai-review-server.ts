@@ -159,39 +159,64 @@ export async function fetchCompletedAIReviewContentIds(
   return { data: reviewedContentIds, error: null };
 }
 
-export async function upsertPendingAIReview(submissionId: number): Promise<{ id: number } | null> {
-  const supabase = await createAdminSupabaseClient();
+export type ClaimedAIReview = { id: number } | "busy" | null;
 
-  const { data, error } = await supabase
+/**
+ * Takes the single review slot of a submission atomically: a new row is inserted, or a reusable
+ * one (failed, or pending / processing that died past `staleBeforeIso`) is reset by a conditional
+ * UPDATE. "busy" means another request holds or already finished it, so two concurrent requests
+ * can't both call Gemini on the same submission or reset a completed review to pending. null is a
+ * DB error. (The per-user count limits stay a plain SELECT; #304 accepts that overrun.)
+ */
+export async function claimPendingAIReview(
+  submissionId: number,
+  staleBeforeIso: string
+): Promise<ClaimedAIReview> {
+  const supabase = await createAdminSupabaseClient();
+  const now = new Date().toISOString();
+
+  const { data: inserted, error: insertError } = await supabase
     .from("ai_reviews")
     .upsert(
-      {
-        submission_id: submissionId,
-        status: "pending",
-        review_content: null,
-        overall_score: null,
-        error_message: null,
-        reviewed_at: null,
-        review_json: null,
-        rubric_version: null,
-        passed: null,
-        // created_at is reset because a reused failed row would otherwise keep its original day
-        // and escape the per-day count.
-        created_at: new Date().toISOString(),
-        // Token columns are deliberately absent: a reused failed row keeps the tokens already
-        // billed so the completed/failed update adds to them instead of losing earlier attempts.
-      },
-      { onConflict: "submission_id" }
+      { submission_id: submissionId, status: "pending", created_at: now },
+      { onConflict: "submission_id", ignoreDuplicates: true }
     )
-    .select("id")
-    .single();
+    .select("id");
 
-  if (error) {
-    console.error("AIレビュー作成エラー:", error.message);
+  if (insertError) {
+    console.error("AIレビュー作成エラー:", insertError.message);
     return null;
   }
+  if (inserted && inserted.length > 0) {
+    return { id: inserted[0].id };
+  }
 
-  return data;
+  const { data: reused, error: reuseError } = await supabase
+    .from("ai_reviews")
+    .update({
+      status: "pending",
+      review_content: null,
+      overall_score: null,
+      error_message: null,
+      reviewed_at: null,
+      review_json: null,
+      rubric_version: null,
+      passed: null,
+      // created_at is reset because a reused failed row would otherwise keep its original day
+      // and escape the per-day count; the reset also keeps a second stale-row claimer out.
+      created_at: now,
+      // Token columns are deliberately absent: the row keeps the tokens already billed so the
+      // completed/failed update adds to them instead of losing earlier attempts.
+    })
+    .eq("submission_id", submissionId)
+    .or(`status.eq.failed,and(status.in.(pending,processing),created_at.lt.${staleBeforeIso})`)
+    .select("id");
+
+  if (reuseError) {
+    console.error("AIレビュー再利用エラー:", reuseError.message);
+    return null;
+  }
+  return reused && reused.length > 0 ? { id: reused[0].id } : "busy";
 }
 
 export async function updateAIReviewProcessing(reviewId: number): Promise<boolean> {
@@ -225,10 +250,10 @@ function addTokens(previous: number | null, current: number | null): number | nu
 
 /**
  * Token columns are cumulative over every attempt on the same submission (a failed row is reused
- * on retry), because failed attempts are billed too. Read-then-write is best effort: the route's
- * processing check keeps concurrent attempts rare but doesn't make them impossible. When the read
- * fails the columns are left untouched, since writing only this attempt's tokens would overwrite
- * the earlier total with a smaller one.
+ * on retry), because failed attempts are billed too. A plain read-then-write is enough because
+ * claimPendingAIReview() lets only one attempt hold a row at a time. When the read fails the
+ * columns are left untouched, since writing only this attempt's tokens would overwrite the
+ * earlier total with a smaller one.
  */
 async function accumulateTokens(
   supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,

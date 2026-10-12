@@ -4,13 +4,13 @@ import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 vi.mock("@/app/services/api/supabase-server");
 
 import {
+  claimPendingAIReview,
   fetchAllSubmissionsWithReviews,
   fetchCompletedAIReviewByContentId,
   fetchCompletedAIReviewContentIds,
   fetchSubmissionsWithReviewsByUserId,
   updateAIReviewCompleted,
   updateAIReviewFailed,
-  upsertPendingAIReview,
 } from "@/app/services/api/ai-review-server";
 import {
   createAdminSupabaseClient,
@@ -419,31 +419,87 @@ describe("updateAIReviewFailed / updateAIReviewCompleted", () => {
   });
 });
 
-describe("upsertPendingAIReview", () => {
-  it("リセット時に created_at を更新し、再利用された failed 行が当日の回数集計から漏れないようにする", async () => {
+describe("claimPendingAIReview", () => {
+  const STALE_BEFORE = "2026-10-12T04:58:30.000Z";
+
+  it("新規提出は ignoreDuplicates の INSERT で確保し、既存行を上書きしない", async () => {
     const mockClient = createMockSupabaseClient({
-      queryResult: { data: { id: 10 }, error: null },
+      tableResults: { ai_reviews: { data: [{ id: 10 }], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await claimPendingAIReview(7, STALE_BEFORE);
+
+    expect(result).toEqual({ id: 10 });
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+    const [payload, options] = mockClient.from.mock.results[0].value.upsert.mock.calls[0];
+    expect(options).toEqual({ onConflict: "submission_id", ignoreDuplicates: true });
+    expect(payload).toMatchObject({ submission_id: 7, status: "pending" });
+  });
+
+  it("既存行は failed か死んだ in-flight だけを条件付き UPDATE で再利用し、created_at とトークン以外を初期化する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        ai_reviews: [
+          { data: [], error: null },
+          { data: [{ id: 10 }], error: null },
+        ],
+      },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
     const before = Date.now();
-    const result = await upsertPendingAIReview(7);
+    const result = await claimPendingAIReview(7, STALE_BEFORE);
 
     expect(result).toEqual({ id: 10 });
-    const builder = mockClient.from.mock.results[0].value;
-    const [payload, options] = builder.upsert.mock.calls[0];
-    expect(options).toEqual({ onConflict: "submission_id" });
+    const builder = mockClient.from.mock.results[1].value;
+    const payload = builder.update.mock.calls[0][0];
     expect(payload).toMatchObject({
-      submission_id: 7,
       status: "pending",
       reviewed_at: null,
       review_json: null,
       rubric_version: null,
       passed: null,
+      error_message: null,
     });
     expect(payload).not.toHaveProperty("prompt_tokens");
     expect(payload).not.toHaveProperty("completion_tokens");
     expect(payload).not.toHaveProperty("thoughts_tokens");
     expect(Date.parse(payload.created_at)).toBeGreaterThanOrEqual(before);
+    expect(builder.eq).toHaveBeenCalledWith("submission_id", 7);
+    expect(builder.or).toHaveBeenCalledWith(
+      `status.eq.failed,and(status.in.(pending,processing),created_at.lt.${STALE_BEFORE})`
+    );
+  });
+
+  it("他のリクエストが確保中、または完了済みなら busy を返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        ai_reviews: [
+          { data: [], error: null },
+          { data: [], error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await expect(claimPendingAIReview(7, STALE_BEFORE)).resolves.toBe("busy");
+  });
+
+  it.each([
+    ["INSERT", [{ data: null, error: dbError }]],
+    [
+      "UPDATE",
+      [
+        { data: [], error: null },
+        { data: null, error: dbError },
+      ],
+    ],
+  ])("%s の DB エラーでは null を返す", async (_label, aiReviews) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const mockClient = createMockSupabaseClient({ tableResults: { ai_reviews: aiReviews } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await expect(claimPendingAIReview(7, STALE_BEFORE)).resolves.toBeNull();
   });
 });
