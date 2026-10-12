@@ -288,8 +288,15 @@ describe("fetchSubmissionsWithReviewsByUserId", () => {
 });
 
 describe("updateAIReviewFailed / updateAIReviewCompleted", () => {
-  it("failed 行に消費トークンを記録する（失敗でも課金されるため）", async () => {
-    const mockClient = createMockSupabaseClient({ queryResult: { data: null, error: null } });
+  const priorTokens = {
+    data: { prompt_tokens: 100, completion_tokens: 20, thoughts_tokens: null },
+    error: null,
+  };
+
+  it("failed 行に消費トークンを前回までの分へ加算して記録する（失敗でも課金されるため）", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { ai_reviews: [priorTokens, { data: null, error: null }] },
+    });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
     await updateAIReviewFailed(4, "bad", {
@@ -298,12 +305,12 @@ describe("updateAIReviewFailed / updateAIReviewCompleted", () => {
       thoughtsTokens: null,
     });
 
-    const builder = mockClient.from.mock.results[0].value;
-    expect(builder.update).toHaveBeenCalledWith({
+    const update = mockClient.from.mock.results[1].value;
+    expect(update.update).toHaveBeenCalledWith({
       status: "failed",
       error_message: "bad",
-      prompt_tokens: 10,
-      completion_tokens: 2,
+      prompt_tokens: 110,
+      completion_tokens: 22,
       thoughts_tokens: null,
     });
   });
@@ -314,12 +321,15 @@ describe("updateAIReviewFailed / updateAIReviewCompleted", () => {
 
     await updateAIReviewFailed(4, "bad");
 
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.update).toHaveBeenCalledWith({ status: "failed", error_message: "bad" });
   });
 
-  it("completed 行に構造化結果・score_kind・rubric_version・passed・トークンを保存する", async () => {
-    const mockClient = createMockSupabaseClient({ queryResult: { data: null, error: null } });
+  it("completed 行に構造化結果・score_kind・rubric_version・passed・累計トークンを保存する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { ai_reviews: [priorTokens, { data: null, error: null }] },
+    });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
     const reviewJson = {
       requirements: [],
@@ -341,17 +351,49 @@ describe("updateAIReviewFailed / updateAIReviewCompleted", () => {
       thoughtsTokens: 3,
     });
 
-    const builder = mockClient.from.mock.results[0].value;
-    expect(builder.update).toHaveBeenCalledWith(
+    const update = mockClient.from.mock.results[1].value;
+    expect(update.update).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "completed",
         review_json: reviewJson,
         score_kind: "rubric",
         rubric_version: 2,
         passed: null,
+        prompt_tokens: 101,
+        completion_tokens: 22,
         thoughts_tokens: 3,
       })
     );
+  });
+
+  it("前回の記録がなければ今回の値だけを保存し、双方 NULL の項目は NULL のままにする", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        ai_reviews: [
+          {
+            data: { prompt_tokens: null, completion_tokens: null, thoughts_tokens: null },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await updateAIReviewFailed(4, "bad", {
+      promptTokens: 5,
+      completionTokens: null,
+      thoughtsTokens: null,
+    });
+
+    const update = mockClient.from.mock.results[1].value;
+    expect(update.update).toHaveBeenCalledWith({
+      status: "failed",
+      error_message: "bad",
+      prompt_tokens: 5,
+      completion_tokens: null,
+      thoughts_tokens: null,
+    });
   });
 });
 
@@ -376,10 +418,10 @@ describe("upsertPendingAIReview", () => {
       review_json: null,
       rubric_version: null,
       passed: null,
-      prompt_tokens: null,
-      completion_tokens: null,
-      thoughts_tokens: null,
     });
+    expect(payload).not.toHaveProperty("prompt_tokens");
+    expect(payload).not.toHaveProperty("completion_tokens");
+    expect(payload).not.toHaveProperty("thoughts_tokens");
     expect(Date.parse(payload.created_at)).toBeGreaterThanOrEqual(before);
   });
 });

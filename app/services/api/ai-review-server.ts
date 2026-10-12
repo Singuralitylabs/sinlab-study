@@ -175,10 +175,8 @@ export async function upsertPendingAIReview(submissionId: number): Promise<{ id:
         review_json: null,
         rubric_version: null,
         passed: null,
-        // A reused failed row must not show the previous run's billed tokens.
-        prompt_tokens: null,
-        completion_tokens: null,
-        thoughts_tokens: null,
+        // Token columns are deliberately absent: a reused failed row keeps the tokens already
+        // billed so the completed/failed update adds to them instead of losing earlier attempts.
         // Reused failed rows would otherwise keep their original day and escape the per-day count.
         created_at: new Date().toISOString(),
       },
@@ -217,6 +215,40 @@ export interface AIReviewTokenUsage {
   thoughtsTokens: number | null;
 }
 
+function addTokens(previous: number | null, current: number | null): number | null {
+  if (previous === null && current === null) {
+    return null;
+  }
+  return (previous ?? 0) + (current ?? 0);
+}
+
+/**
+ * Token columns are cumulative over every attempt on the same submission (a failed row is reused
+ * on retry), because failed attempts are billed too. Read-then-write is enough: a submission's
+ * attempts are serialised by the processing check in the API route.
+ */
+async function accumulateTokens(
+  supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
+  reviewId: number,
+  usage: AIReviewTokenUsage
+) {
+  const { data, error } = await supabase
+    .from("ai_reviews")
+    .select("prompt_tokens, completion_tokens, thoughts_tokens")
+    .eq("id", reviewId)
+    .single();
+
+  if (error) {
+    console.error("AIレビュー トークン取得エラー:", error.message);
+  }
+
+  return {
+    prompt_tokens: addTokens(data?.prompt_tokens ?? null, usage.promptTokens),
+    completion_tokens: addTokens(data?.completion_tokens ?? null, usage.completionTokens),
+    thoughts_tokens: addTokens(data?.thoughts_tokens ?? null, usage.thoughtsTokens),
+  };
+}
+
 export async function updateAIReviewCompleted(
   reviewId: number,
   params: AIReviewTokenUsage & {
@@ -230,6 +262,7 @@ export async function updateAIReviewCompleted(
   }
 ): Promise<boolean> {
   const supabase = await createAdminSupabaseClient();
+  const tokens = await accumulateTokens(supabase, reviewId, params);
 
   const { error } = await supabase
     .from("ai_reviews")
@@ -242,9 +275,7 @@ export async function updateAIReviewCompleted(
       rubric_version: params.rubricVersion,
       passed: params.passed,
       model_used: params.modelUsed,
-      prompt_tokens: params.promptTokens,
-      completion_tokens: params.completionTokens,
-      thoughts_tokens: params.thoughtsTokens,
+      ...tokens,
       reviewed_at: new Date().toISOString(),
     })
     .eq("id", reviewId);
@@ -257,24 +288,21 @@ export async function updateAIReviewCompleted(
   return true;
 }
 
-/** `usage` is the tokens already consumed before the failure (billed even though it failed). */
+/** `usage` is the tokens consumed before the failure (billed even though it failed). */
 export async function updateAIReviewFailed(
   reviewId: number,
   errorMessage: string,
   usage?: AIReviewTokenUsage
 ): Promise<boolean> {
   const supabase = await createAdminSupabaseClient();
+  const tokens = usage ? await accumulateTokens(supabase, reviewId, usage) : null;
 
   const { error } = await supabase
     .from("ai_reviews")
     .update({
       status: "failed",
       error_message: errorMessage,
-      ...(usage && {
-        prompt_tokens: usage.promptTokens,
-        completion_tokens: usage.completionTokens,
-        thoughts_tokens: usage.thoughtsTokens,
-      }),
+      ...tokens,
     })
     .eq("id", reviewId);
 
