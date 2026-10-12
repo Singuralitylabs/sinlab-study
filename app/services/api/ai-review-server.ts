@@ -3,13 +3,21 @@ import { SUBMISSIONS_PAGE_SIZE } from "@/app/constants/submissions";
 import { resolvePageRange } from "@/app/lib/submissions-pagination";
 import type {
   AdminSubmissionWithReview,
-  AIReview,
+  AIReviewListItem,
+  ReviewJson,
+  ScoreKind,
   SubmissionWithContentAndReview,
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
-const AI_REVIEW_LIST_SELECT =
-  "ai_review:ai_reviews(id, status, overall_score, review_content, reviewed_at, error_message)";
+const AI_REVIEW_STUDENT_COLUMNS =
+  "id, status, overall_score, review_content, reviewed_at, error_message, review_json, score_kind, rubric_version, passed";
+
+/** Token counts are billing data for admin / maintainer only; students never select them. */
+const AI_REVIEW_ADMIN_COLUMNS = `${AI_REVIEW_STUDENT_COLUMNS}, prompt_tokens, completion_tokens, thoughts_tokens`;
+
+const AI_REVIEW_LIST_SELECT = `ai_review:ai_reviews(${AI_REVIEW_STUDENT_COLUMNS})`;
+const AI_REVIEW_ADMIN_LIST_SELECT = `ai_review:ai_reviews(${AI_REVIEW_ADMIN_COLUMNS})`;
 
 const LIST_CONTENT_SELECT = "id, title";
 
@@ -75,7 +83,7 @@ export async function fetchAllSubmissionsWithReviews({
   const { data, count, error } = await supabase
     .from("submissions")
     .select(
-      `*, user:users(id, display_name, email), content:learning_contents(${LIST_CONTENT_SELECT}), ${AI_REVIEW_LIST_SELECT}`,
+      `*, user:users(id, display_name, email), content:learning_contents(${LIST_CONTENT_SELECT}), ${AI_REVIEW_ADMIN_LIST_SELECT}`,
       { count: "exact" }
     )
     .order("submitted_at", { ascending: false })
@@ -95,12 +103,12 @@ export async function fetchAllSubmissionsWithReviews({
 export async function fetchCompletedAIReviewByContentId(
   userId: number,
   contentId: number
-): Promise<{ data: AIReview | null; error: PostgrestError | null }> {
+): Promise<{ data: AIReviewListItem | null; error: PostgrestError | null }> {
   const supabase = await createAdminSupabaseClient();
 
   const { data: submission, error } = await supabase
     .from("submissions")
-    .select("id, content_id, ai_review:ai_reviews!inner(*)")
+    .select(`id, content_id, ai_review:ai_reviews!inner(${AI_REVIEW_STUDENT_COLUMNS})`)
     .eq("user_id", userId)
     .eq("content_id", contentId)
     .eq("ai_review.status", "completed")
@@ -120,7 +128,7 @@ export async function fetchCompletedAIReviewByContentId(
 
   // ai_reviews.submission_id is UNIQUE so PostgREST returns a to-one object; generated types also
   // allow to-many, hence the cast via unknown.
-  return { data: submission.ai_review as unknown as AIReview, error: null };
+  return { data: submission.ai_review as unknown as AIReviewListItem, error: null };
 }
 
 /** Uses the admin client to avoid depending on RLS; safety comes from the userId filter. */
@@ -164,6 +172,13 @@ export async function upsertPendingAIReview(submissionId: number): Promise<{ id:
         overall_score: null,
         error_message: null,
         reviewed_at: null,
+        review_json: null,
+        rubric_version: null,
+        passed: null,
+        // A reused failed row must not show the previous run's billed tokens.
+        prompt_tokens: null,
+        completion_tokens: null,
+        thoughts_tokens: null,
         // Reused failed rows would otherwise keep their original day and escape the per-day count.
         created_at: new Date().toISOString(),
       },
@@ -196,14 +211,22 @@ export async function updateAIReviewProcessing(reviewId: number): Promise<boolea
   return true;
 }
 
+export interface AIReviewTokenUsage {
+  promptTokens: number | null;
+  completionTokens: number | null;
+  thoughtsTokens: number | null;
+}
+
 export async function updateAIReviewCompleted(
   reviewId: number,
-  params: {
+  params: AIReviewTokenUsage & {
     reviewContent: string;
     overallScore: number | null;
+    reviewJson: ReviewJson;
+    scoreKind: ScoreKind;
+    rubricVersion: number | null;
+    passed: boolean | null;
     modelUsed: string;
-    promptTokens: number | null;
-    completionTokens: number | null;
   }
 ): Promise<boolean> {
   const supabase = await createAdminSupabaseClient();
@@ -214,9 +237,14 @@ export async function updateAIReviewCompleted(
       status: "completed",
       review_content: params.reviewContent,
       overall_score: params.overallScore,
+      review_json: params.reviewJson,
+      score_kind: params.scoreKind,
+      rubric_version: params.rubricVersion,
+      passed: params.passed,
       model_used: params.modelUsed,
       prompt_tokens: params.promptTokens,
       completion_tokens: params.completionTokens,
+      thoughts_tokens: params.thoughtsTokens,
       reviewed_at: new Date().toISOString(),
     })
     .eq("id", reviewId);
@@ -229,9 +257,11 @@ export async function updateAIReviewCompleted(
   return true;
 }
 
+/** `usage` is the tokens already consumed before the failure (billed even though it failed). */
 export async function updateAIReviewFailed(
   reviewId: number,
-  errorMessage: string
+  errorMessage: string,
+  usage?: AIReviewTokenUsage
 ): Promise<boolean> {
   const supabase = await createAdminSupabaseClient();
 
@@ -240,6 +270,11 @@ export async function updateAIReviewFailed(
     .update({
       status: "failed",
       error_message: errorMessage,
+      ...(usage && {
+        prompt_tokens: usage.promptTokens,
+        completion_tokens: usage.completionTokens,
+        thoughts_tokens: usage.thoughtsTokens,
+      }),
     })
     .eq("id", reviewId);
 

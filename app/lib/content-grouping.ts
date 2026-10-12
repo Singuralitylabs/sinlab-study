@@ -1,3 +1,4 @@
+import { getGradingRubricVersion } from "@/app/lib/grading";
 import type {
   ContentType,
   ManageContentListItem,
@@ -19,6 +20,8 @@ export interface ContentTableRow {
   content_type: ContentType;
   is_published: boolean;
   is_open_to_trial: boolean;
+  /** Rubric version; null when the content has no (usable) grading rubric. */
+  grading_rubric_version: number | null;
 }
 
 export interface ContentTableGroup {
@@ -238,6 +241,7 @@ export function toContentTableGroups(groups: ContentGroup[]): ContentTableGroup[
       content_type: content.content_type,
       is_published: content.is_published,
       is_open_to_trial: content.is_open_to_trial,
+      grading_rubric_version: getGradingRubricVersion(content.grading_rubric),
     })),
   }));
 }

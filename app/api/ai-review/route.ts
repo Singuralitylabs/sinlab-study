@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { GEMINI_MAX_CODE_LENGTH } from "@/app/constants/gemini";
 import { USER_STATUS } from "@/app/constants/user";
 import { evaluateReviewRequest } from "@/app/lib/ai-review-limits";
+import { parseGradingRubric } from "@/app/lib/grading-schema";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import {
   updateAIReviewCompleted,
@@ -12,6 +13,7 @@ import {
 import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   generateReview,
+  ReviewGenerationError,
   type ReviewSubmission,
   resolveGeminiApiKey,
 } from "@/app/services/api/gemini";
@@ -160,15 +162,21 @@ export async function POST(request: NextRequest) {
         exerciseInstructions: content.exercise_instructions,
         submission: reviewSubmission,
         referenceAnswer: content.reference_answer,
+        gradingRubric: parseGradingRubric(content.grading_rubric),
         apiKey,
       });
 
       await updateAIReviewCompleted(reviewRecord.id, {
         reviewContent: result.reviewContent,
         overallScore: result.overallScore,
+        reviewJson: result.reviewJson,
+        scoreKind: result.scoreKind,
+        rubricVersion: result.rubricVersion,
+        passed: result.passed,
         modelUsed: result.modelUsed,
         promptTokens: result.promptTokens,
         completionTokens: result.completionTokens,
+        thoughtsTokens: result.thoughtsTokens,
       });
 
       return NextResponse.json({
@@ -178,6 +186,10 @@ export async function POST(request: NextRequest) {
           status: "completed",
           review_content: result.reviewContent,
           overall_score: result.overallScore,
+          review_json: result.reviewJson,
+          score_kind: result.scoreKind,
+          rubric_version: result.rubricVersion,
+          passed: result.passed,
           model_used: result.modelUsed,
         },
         remaining: remainingAfterReview,
@@ -187,7 +199,11 @@ export async function POST(request: NextRequest) {
         geminiError instanceof Error ? geminiError.message : "AI レビュー生成に失敗しました";
       console.error("Gemini APIエラー:", errorMessage);
 
-      await updateAIReviewFailed(reviewRecord.id, errorMessage);
+      await updateAIReviewFailed(
+        reviewRecord.id,
+        errorMessage,
+        geminiError instanceof ReviewGenerationError ? geminiError.usage : undefined
+      );
 
       return NextResponse.json({ error: errorMessage }, { status: 502 });
     }

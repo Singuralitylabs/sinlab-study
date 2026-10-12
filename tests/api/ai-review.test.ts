@@ -25,10 +25,33 @@ import {
   updateAIReviewProcessing,
   upsertPendingAIReview,
 } from "@/app/services/api/ai-review-server";
-import { generateReview } from "@/app/services/api/gemini";
+import {
+  generateReview,
+  ReviewGenerationError,
+  type ReviewResult,
+} from "@/app/services/api/gemini";
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
+
+const reviewResult = (overrides: Partial<ReviewResult> = {}): ReviewResult => ({
+  reviewJson: {
+    requirements: [{ key: "r1", name: "要件", status: "met", comment: "ok" }],
+    code_quality: { level: "good", comment: "ok" },
+    suggestions: [],
+    advice: "next",
+  },
+  scoreKind: "rubric",
+  rubricVersion: 2,
+  reviewContent: "良いです。",
+  overallScore: 100,
+  passed: null,
+  modelUsed: "gemini-3.6-flash",
+  promptTokens: 10,
+  completionTokens: 20,
+  thoughtsTokens: 30,
+  ...overrides,
+});
 
 const memberAuth = {
   user: { id: "auth-uuid-member" },
@@ -148,13 +171,7 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
   });
 
   it("正常系: completed に更新し200を返す", async () => {
-    vi.mocked(generateReview).mockResolvedValue({
-      reviewContent: "良いです。\n総合スコア: 90/100",
-      overallScore: 90,
-      modelUsed: "gemini-3.6-flash",
-      promptTokens: 10,
-      completionTokens: 20,
-    });
+    vi.mocked(generateReview).mockResolvedValue(reviewResult({ overallScore: 90 }));
 
     const res = await POST(request() as never);
 
@@ -163,9 +180,64 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
       10,
       expect.objectContaining({
         overallScore: 90,
+        scoreKind: "rubric",
+        rubricVersion: 2,
+        passed: null,
+        reviewJson: expect.objectContaining({ advice: "next" }),
+        promptTokens: 10,
+        completionTokens: 20,
+        thoughtsTokens: 30,
       })
     );
     expect(updateAIReviewFailed).not.toHaveBeenCalled();
+  });
+
+  it("レスポンスには構造化結果を含めるがトークン数は含めない", async () => {
+    vi.mocked(generateReview).mockResolvedValue(reviewResult());
+
+    const res = await POST(request() as never);
+    const body = await res.json();
+
+    expect(body.review).toMatchObject({
+      score_kind: "rubric",
+      rubric_version: 2,
+      passed: null,
+      review_json: expect.objectContaining({ advice: "next" }),
+    });
+    expect(JSON.stringify(body)).not.toMatch(/tokens/i);
+  });
+
+  it("コンテンツの採点基準を検証して generateReview に渡す（不正な値は null 扱い）", async () => {
+    vi.mocked(generateReview).mockResolvedValue(reviewResult());
+    const rubric = {
+      version: 2,
+      requirements: [{ key: "r1", name: "要件", description: "" }],
+    };
+    const withRubric = (grading_rubric: unknown) =>
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(
+        createMockSupabaseClient({
+          tableResults: {
+            submissions: [
+              {
+                data: {
+                  ...submissionRow,
+                  content: { ...submissionRow.content, grading_rubric },
+                },
+                error: null,
+              },
+              { data: [], error: null },
+            ],
+          },
+        }) as never
+      );
+
+    withRubric(rubric);
+    await POST(request() as never);
+    expect(vi.mocked(generateReview).mock.calls[0][0].gradingRubric).toEqual(rubric);
+
+    withRubric({ requirements: "broken" });
+    await POST(request() as never);
+    expect(vi.mocked(generateReview).mock.calls[1][0].gradingRubric).toBeNull();
   });
 
   it("generateReviewが例外を投げた場合（タイムアウト等）はprocessingのまま残さずfailedへ遷移し502を返す", async () => {
@@ -177,8 +249,24 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
     const res = await POST(request() as never);
 
     expect(res.status).toBe(502);
-    expect(updateAIReviewFailed).toHaveBeenCalledWith(10, "boom");
+    expect(updateAIReviewFailed).toHaveBeenCalledWith(10, "boom", undefined);
     expect(updateAIReviewCompleted).not.toHaveBeenCalled();
+  });
+
+  it("検証失敗で ReviewGenerationError になった場合は消費トークンを failed 行に記録する", async () => {
+    const usage = { promptTokens: 200, completionTokens: 20, thoughtsTokens: 100 };
+    vi.mocked(generateReview).mockRejectedValue(
+      new ReviewGenerationError("AIレビューの結果の形式が不正でした", usage)
+    );
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(502);
+    expect(updateAIReviewFailed).toHaveBeenCalledWith(
+      10,
+      "AIレビューの結果の形式が不正でした",
+      usage
+    );
   });
 });
 
@@ -245,13 +333,7 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
     vi.mocked(updateAIReviewProcessing).mockResolvedValue(true);
     vi.mocked(updateAIReviewCompleted).mockResolvedValue(true);
     vi.mocked(updateAIReviewFailed).mockResolvedValue(true);
-    vi.mocked(generateReview).mockResolvedValue({
-      reviewContent: "ok",
-      overallScore: 80,
-      modelUsed: "gemini-3.6-flash",
-      promptTokens: 1,
-      completionTokens: 1,
-    });
+    vi.mocked(generateReview).mockResolvedValue(reviewResult({ overallScore: 80 }));
   });
 
   afterEach(() => {

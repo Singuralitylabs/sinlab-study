@@ -25,6 +25,10 @@ function isValidUrl(url: string): boolean {
   }
 }
 
+function formatTokenCount(count: number | null): string {
+  return count === null ? "-" : count.toLocaleString("ja-JP");
+}
+
 function formatDate(dateString: string | null) {
   if (!dateString) return "-";
   return new Date(dateString).toLocaleString("ja-JP", {
@@ -138,6 +142,14 @@ export default async function ManageSubmissionsPage({ searchParams }: PageProps)
                   ) : (
                     <span className="text-sm text-muted-foreground">{submission.url}</span>
                   ))}
+
+                {submission.ai_review && (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    トークン数 — 入力: {formatTokenCount(submission.ai_review.prompt_tokens)} /
+                    回答: {formatTokenCount(submission.ai_review.completion_tokens)} / 思考:{" "}
+                    {formatTokenCount(submission.ai_review.thoughts_tokens)}
+                  </p>
+                )}
 
                 {submission.ai_review && <AIReviewDisplayClient review={submission.ai_review} />}
               </CardContent>

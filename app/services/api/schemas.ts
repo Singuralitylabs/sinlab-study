@@ -13,6 +13,7 @@ import {
   MAX_BULK_CONTENT_IDS,
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
+import { GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH } from "@/app/constants/grading";
 import {
   EMAIL_DIGEST_DAILY_LIMIT_MAX,
   EMAIL_DIGEST_DAILY_LIMIT_MIN,
@@ -39,6 +40,7 @@ import {
   type EmailTemplateKey,
   validateEmailTemplateText,
 } from "@/app/lib/email-template";
+import { GradingRubricInputSchema } from "@/app/lib/grading-schema";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
 
 export const PositiveIntSchema = z
@@ -296,6 +298,9 @@ const ContentBaseSchema = z.object({
   allowed_submission_types: AllowedSubmissionTypeSchema.optional(),
   code_language: CodeLanguageSchema.optional(),
   pdf_url: SlidePdfUrlSchema,
+  // null clears the rubric. The version is derived server-side (nextGradingRubric), never trusted
+  // from the client.
+  grading_rubric: GradingRubricInputSchema.nullable().optional(),
   is_published: OptionalBoolean,
   is_open_to_trial: OptionalBoolean,
 });
@@ -303,6 +308,19 @@ export const ContentCreateSchema = ContentBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
 export const ContentUpdateSchema = ContentCreateSchema.partial();
+
+export const GradingRubricDraftRequestSchema = z.object({
+  exercise_instructions: z
+    .string()
+    .trim()
+    .min(1, { message: "演習指示を入力してください" })
+    .max(GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH, { message: "演習指示が長すぎます" }),
+  reference_answer: z
+    .string()
+    .trim()
+    .max(GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH, { message: "模範回答が長すぎます" })
+    .nullish(),
+});
 
 const BULK_CONTENT_IDS_MESSAGE = `idsは1〜${MAX_BULK_CONTENT_IDS}件の正の整数で指定してください`;
 

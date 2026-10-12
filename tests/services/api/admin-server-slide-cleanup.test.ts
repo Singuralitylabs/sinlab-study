@@ -536,7 +536,9 @@ describe("updateContent の現在値取得の一本化（issue #246）", () => {
     expect(result).toEqual({ error: null, storageRemoved: true });
     expect(remove).not.toHaveBeenCalled();
     expect(mockClient.from).toHaveBeenCalledTimes(2);
-    expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith("week_id, pdf_url");
+    expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith(
+      "week_id, pdf_url, grading_rubric"
+    );
   });
 
   it("非スライド（pdf_url: null）のタイトル修正でも現在値の取得は1回で Storage に触れない", async () => {

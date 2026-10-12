@@ -31,7 +31,10 @@ function buildPatch(
       if (typeof contentType !== "string" || !isContentType(contentType)) {
         return { error: "有効なコンテンツ種別を指定してください" };
       }
-      return { content_type: contentType };
+      // A rubric only makes sense for exercises; drop it when the type moves away.
+      return contentType === "exercise"
+        ? { content_type: contentType }
+        : { content_type: contentType, grading_rubric: null };
   }
 }
 

@@ -8,6 +8,8 @@ import {
   fetchCompletedAIReviewByContentId,
   fetchCompletedAIReviewContentIds,
   fetchSubmissionsWithReviewsByUserId,
+  updateAIReviewCompleted,
+  updateAIReviewFailed,
   upsertPendingAIReview,
 } from "@/app/services/api/ai-review-server";
 import {
@@ -38,6 +40,20 @@ describe("fetchAllSubmissionsWithReviews", () => {
     expect(builder.range).toHaveBeenCalledWith(20, 39);
     expect(builder.order).toHaveBeenCalledWith("submitted_at", { ascending: false });
     expect(builder.order).toHaveBeenCalledWith("id", { ascending: false });
+  });
+
+  it("管理画面向けにだけトークン数のカラムを select する", async () => {
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: [], error: null, count: 0 },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await fetchAllSubmissionsWithReviews();
+
+    const builder = mockClient.from.mock.results[0]?.value;
+    expect(builder.select.mock.calls[0][0]).toContain(
+      "prompt_tokens, completion_tokens, thoughts_tokens"
+    );
   });
 
   it("引数省略時は1ページ目を range(0, 19) で取得する", async () => {
@@ -98,7 +114,10 @@ describe("fetchCompletedAIReviewByContentId", () => {
     expect(mockClient.from).toHaveBeenCalledTimes(1);
     expect(mockClient.from).toHaveBeenCalledWith("submissions");
     const builder = mockClient.from.mock.results[0].value;
-    expect(builder.select).toHaveBeenCalledWith("id, content_id, ai_review:ai_reviews!inner(*)");
+    const [selectArg] = builder.select.mock.calls[0];
+    expect(selectArg).toContain("review_json, score_kind, rubric_version, passed");
+    expect(selectArg).not.toContain("*");
+    expect(selectArg).not.toContain("tokens");
     expect(builder.eq).toHaveBeenCalledWith("user_id", 2);
     expect(builder.eq).toHaveBeenCalledWith("content_id", 5);
     expect(builder.eq).toHaveBeenCalledWith("ai_review.status", "completed");
@@ -182,7 +201,7 @@ describe("fetchCompletedAIReviewContentIds", () => {
 
 describe("fetchSubmissionsWithReviewsByUserId", () => {
   const listSelect =
-    "*, content:learning_contents(id, title), ai_review:ai_reviews(id, status, overall_score, review_content, reviewed_at, error_message)";
+    "*, content:learning_contents(id, title), ai_review:ai_reviews(id, status, overall_score, review_content, reviewed_at, error_message, review_json, score_kind, rubric_version, passed)";
 
   it("指定ページの提出一覧と総数を返す（2ページ目は range(20, 39)）", async () => {
     const rows = [{ id: 21 }, { id: 22 }];
@@ -198,6 +217,7 @@ describe("fetchSubmissionsWithReviewsByUserId", () => {
     expect(result.error).toBeNull();
     const builder = mockClient.from.mock.results[0]?.value;
     expect(builder.select).toHaveBeenCalledWith(listSelect, { count: "exact" });
+    expect(listSelect).not.toContain("tokens");
     expect(builder.eq).toHaveBeenCalledWith("user_id", 10);
     expect(builder.range).toHaveBeenCalledWith(20, 39);
     expect(builder.order).toHaveBeenCalledWith("submitted_at", { ascending: false });
@@ -267,6 +287,74 @@ describe("fetchSubmissionsWithReviewsByUserId", () => {
   });
 });
 
+describe("updateAIReviewFailed / updateAIReviewCompleted", () => {
+  it("failed 行に消費トークンを記録する（失敗でも課金されるため）", async () => {
+    const mockClient = createMockSupabaseClient({ queryResult: { data: null, error: null } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await updateAIReviewFailed(4, "bad", {
+      promptTokens: 10,
+      completionTokens: 2,
+      thoughtsTokens: null,
+    });
+
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.update).toHaveBeenCalledWith({
+      status: "failed",
+      error_message: "bad",
+      prompt_tokens: 10,
+      completion_tokens: 2,
+      thoughts_tokens: null,
+    });
+  });
+
+  it("トークン情報がない失敗ではトークン列に触れない", async () => {
+    const mockClient = createMockSupabaseClient({ queryResult: { data: null, error: null } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await updateAIReviewFailed(4, "bad");
+
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.update).toHaveBeenCalledWith({ status: "failed", error_message: "bad" });
+  });
+
+  it("completed 行に構造化結果・score_kind・rubric_version・passed・トークンを保存する", async () => {
+    const mockClient = createMockSupabaseClient({ queryResult: { data: null, error: null } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    const reviewJson = {
+      requirements: [],
+      code_quality: { level: "fair" as const, comment: "c" },
+      suggestions: [],
+      advice: "a",
+    };
+
+    await updateAIReviewCompleted(4, {
+      reviewContent: "md",
+      overallScore: 50,
+      reviewJson,
+      scoreKind: "rubric",
+      rubricVersion: 2,
+      passed: null,
+      modelUsed: "m",
+      promptTokens: 1,
+      completionTokens: 2,
+      thoughtsTokens: 3,
+    });
+
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "completed",
+        review_json: reviewJson,
+        score_kind: "rubric",
+        rubric_version: 2,
+        passed: null,
+        thoughts_tokens: 3,
+      })
+    );
+  });
+});
+
 describe("upsertPendingAIReview", () => {
   it("リセット時に created_at を更新し、再利用された failed 行が当日の回数集計から漏れないようにする", async () => {
     const mockClient = createMockSupabaseClient({
@@ -281,7 +369,17 @@ describe("upsertPendingAIReview", () => {
     const builder = mockClient.from.mock.results[0].value;
     const [payload, options] = builder.upsert.mock.calls[0];
     expect(options).toEqual({ onConflict: "submission_id" });
-    expect(payload).toMatchObject({ submission_id: 7, status: "pending", reviewed_at: null });
+    expect(payload).toMatchObject({
+      submission_id: 7,
+      status: "pending",
+      reviewed_at: null,
+      review_json: null,
+      rubric_version: null,
+      passed: null,
+      prompt_tokens: null,
+      completion_tokens: null,
+      thoughts_tokens: null,
+    });
     expect(Date.parse(payload.created_at)).toBeGreaterThanOrEqual(before);
   });
 });

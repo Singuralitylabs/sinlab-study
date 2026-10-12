@@ -18,7 +18,7 @@ import {
   type CodeLanguage,
   DEFAULT_FILENAME_BY_LANGUAGE,
 } from "@/app/components/code-editor-utils";
-import type { AIReview, SubmissionType } from "@/app/types";
+import type { AIReviewListItem, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,9 +42,8 @@ interface CodeFileInput {
   filenameEdited: boolean;
 }
 
-const SAMPLE_REVIEW: AIReview = {
+const SAMPLE_REVIEW: AIReviewListItem = {
   id: 0,
-  submission_id: 0,
   status: "completed",
   review_content: `## 総評
 
@@ -66,13 +65,12 @@ const SAMPLE_REVIEW: AIReview = {
 
 基礎的な実装はできています。本番環境では提出されたコードの内容に基づいた詳細なフィードバックをお届けします。`,
   overall_score: 75,
-  model_used: "sample",
-  prompt_tokens: null,
-  completion_tokens: null,
+  review_json: null,
+  score_kind: "legacy",
+  rubric_version: null,
+  passed: null,
   error_message: null,
   reviewed_at: new Date().toISOString(),
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
 };
 
 interface DemoSubmissionFormProps {
@@ -92,7 +90,7 @@ export function DemoSubmissionForm({
   ]);
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [aiReview, setAiReview] = useState<AIReview | null>(null);
+  const [aiReview, setAiReview] = useState<AIReviewListItem | null>(null);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
   const isMultiFile = codeFiles.length > 1;

@@ -18,6 +18,9 @@ export const GEMINI_MAX_OUTPUT_TOKENS = 4000;
  */
 export const GEMINI_THINKING_LEVEL = "low" as ThinkingLevel;
 
+/** Deterministic judging: the same submission should get the same labels as far as possible. */
+export const GEMINI_TEMPERATURE = 0;
+
 /** Retries on 429 (excluding the first attempt); total attempts = GEMINI_MAX_RETRIES + 1. */
 export const GEMINI_MAX_RETRIES = 2;
 

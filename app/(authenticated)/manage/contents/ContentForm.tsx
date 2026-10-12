@@ -10,9 +10,10 @@ import type {
   ThemeFilterOption,
   WeekFilterOption,
 } from "@/app/lib/content-filtering";
+import { getGradingRubricVersion, toRubricFormRows } from "@/app/lib/grading";
 import { parseSlideObjectKey, toSlideObjectKey } from "@/app/lib/slide-object-key";
 import { getSlideStorageWarning } from "@/app/lib/slide-storage-warning";
-import type { ContentType, LearningContent } from "@/app/types";
+import type { ContentType, GradingRequirement, LearningContent } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,6 +26,7 @@ import {
   type SiblingCandidate,
   SiblingOrderField,
 } from "../components/SiblingOrderField";
+import { GradingRubricEditor } from "./GradingRubricEditor";
 
 const SELECT_CLASS_NAME =
   "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs";
@@ -191,6 +193,9 @@ export function ContentForm({
   );
   const [hint, setHint] = useState(initialData?.hint ?? "");
   const [referenceAnswer, setReferenceAnswer] = useState(initialData?.reference_answer ?? "");
+  const [rubricRows, setRubricRows] = useState<GradingRequirement[]>(() =>
+    toRubricFormRows(initialData?.grading_rubric)
+  );
   const [allowedSubmissionTypes, setAllowedSubmissionTypes] = useState<AllowedSubmissionTypes>(
     (initialData?.allowed_submission_types as AllowedSubmissionTypes) ?? "code"
   );
@@ -331,6 +336,13 @@ export function ContentForm({
       setMessage({ type: "error", text: "スライドPDFをアップロードしてください" });
       return;
     }
+    if (contentType === "exercise" && rubricRows.some((row) => !row.name.trim())) {
+      setMessage({
+        type: "error",
+        text: "採点基準の要件名を入力するか、空の要件を削除してください",
+      });
+      return;
+    }
 
     setIsLoading(true);
     setMessage(null);
@@ -355,6 +367,10 @@ export function ContentForm({
       allowed_submission_types: contentType === "exercise" ? allowedSubmissionTypes : "code",
       code_language: contentType === "exercise" ? codeLanguage : "javascript",
       pdf_url: contentType === "slide" ? pdfUrl.trim() || null : null,
+      // No rows clears the rubric. The server derives the version and bumps it only when the
+      // requirements actually changed.
+      grading_rubric:
+        contentType === "exercise" && rubricRows.length > 0 ? { requirements: rubricRows } : null,
     };
 
     try {
@@ -641,6 +657,13 @@ export function ContentForm({
                   className="min-h-[200px] font-mono"
                 />
               </div>
+              <GradingRubricEditor
+                rows={rubricRows}
+                onChange={setRubricRows}
+                currentVersion={getGradingRubricVersion(initialData?.grading_rubric)}
+                exerciseInstructions={exerciseInstructions}
+                referenceAnswer={referenceAnswer}
+              />
               <div className="space-y-2">
                 <Label>コード言語</Label>
                 <div className="flex gap-2">

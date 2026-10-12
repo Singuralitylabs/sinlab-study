@@ -1,0 +1,205 @@
+import {
+  CERTIFICATE_PASS_SCORE,
+  QUALITY_POINTS,
+  QUALITY_WEIGHT,
+  REQUIREMENT_WEIGHT,
+  STATUS_POINTS,
+} from "@/app/constants/grading";
+import type { GradingRequirement, ReviewJson, ScoreKind } from "@/app/types";
+
+/**
+ * Scores and pass/fail are computed here from the AI's labels only. Never feed a number the AI
+ * wrote into a score or a pass decision: its numbers drift between runs, the labels barely do.
+ */
+
+/** 0-100 integer, or null when there are no requirements to average (URL submissions). */
+export function computeReviewScore(reviewJson: ReviewJson): number | null {
+  const { requirements, code_quality: codeQuality } = reviewJson;
+  if (requirements.length === 0) {
+    return null;
+  }
+
+  const requirementAverage =
+    requirements.reduce((sum, requirement) => sum + STATUS_POINTS[requirement.status], 0) /
+    requirements.length;
+  const raw =
+    requirementAverage * REQUIREMENT_WEIGHT + QUALITY_POINTS[codeQuality.level] * QUALITY_WEIGHT;
+
+  return Math.round(raw);
+}
+
+/**
+ * Only call for score_kind = rubric. Returns null while the pass score is 0 (disabled), so a
+ * threshold-less environment never records a pass/fail verdict.
+ */
+export function isReviewPassed(
+  reviewJson: ReviewJson,
+  score: number | null,
+  passScore: number = CERTIFICATE_PASS_SCORE
+): boolean | null {
+  if (passScore <= 0 || score === null) {
+    return null;
+  }
+  const hasUnmet = reviewJson.requirements.some((requirement) => requirement.status === "unmet");
+  return !hasUnmet && score >= passScore;
+}
+
+const REQUIREMENT_STATUSES = ["met", "partial", "unmet"];
+const QUALITY_LEVELS = ["good", "fair", "poor"];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Narrows a stored review_json (Json from the DB). Returns null for anything unrecognisable so
+ * display can fall back to review_content instead of crashing on a malformed row.
+ */
+export function asReviewJson(value: unknown): ReviewJson | null {
+  if (!isRecord(value) || !Array.isArray(value.requirements) || !isRecord(value.code_quality)) {
+    return null;
+  }
+  const { code_quality: codeQuality, suggestions, advice } = value;
+  if (
+    typeof codeQuality.level !== "string" ||
+    !QUALITY_LEVELS.includes(codeQuality.level) ||
+    typeof codeQuality.comment !== "string" ||
+    !Array.isArray(suggestions) ||
+    !suggestions.every((item) => typeof item === "string") ||
+    typeof advice !== "string"
+  ) {
+    return null;
+  }
+  const requirementsValid = value.requirements.every(
+    (item) =>
+      isRecord(item) &&
+      typeof item.key === "string" &&
+      typeof item.status === "string" &&
+      REQUIREMENT_STATUSES.includes(item.status) &&
+      typeof item.comment === "string" &&
+      (item.name === undefined || typeof item.name === "string")
+  );
+  return requirementsValid ? (value as ReviewJson) : null;
+}
+
+const STATUS_LABELS: Record<ReviewJson["requirements"][number]["status"], string> = {
+  met: "達成",
+  partial: "部分的",
+  unmet: "未達成",
+};
+
+const QUALITY_LABELS: Record<ReviewJson["code_quality"]["level"], string> = {
+  good: "良好",
+  fair: "標準",
+  poor: "要改善",
+};
+
+export function getRequirementStatusLabel(status: keyof typeof STATUS_LABELS): string {
+  return STATUS_LABELS[status];
+}
+
+export function getQualityLevelLabel(level: keyof typeof QUALITY_LABELS): string {
+  return QUALITY_LABELS[level];
+}
+
+/** Markdown saved to ai_reviews.review_content so the existing display components keep working. */
+export function renderReviewMarkdown(
+  reviewJson: ReviewJson,
+  score: number | null,
+  scoreKind: ScoreKind
+): string {
+  const sections: string[] = [];
+
+  if (scoreKind === "estimated") {
+    sections.push(
+      "> 参考採点（採点基準未設定）: この点数は AI が要件を推測したもので、修了判定には使われません。"
+    );
+  } else if (scoreKind === "none") {
+    sections.push("> URL 提出のため採点対象外です。");
+  }
+
+  if (reviewJson.requirements.length > 0) {
+    const lines = reviewJson.requirements.map((requirement) => {
+      const name = requirement.name ?? requirement.key;
+      return `- **${name}**: ${STATUS_LABELS[requirement.status]} — ${requirement.comment}`;
+    });
+    sections.push(`## 1. 要件達成度\n${lines.join("\n")}`);
+  }
+
+  sections.push(
+    `## 2. コード品質・可読性\n**${QUALITY_LABELS[reviewJson.code_quality.level]}** — ${reviewJson.code_quality.comment}`
+  );
+
+  if (reviewJson.suggestions.length > 0) {
+    const lines = reviewJson.suggestions.map((suggestion, index) => `${index + 1}. ${suggestion}`);
+    sections.push(`## 3. 改善提案\n${lines.join("\n")}`);
+  }
+
+  sections.push(`## 4. 学習アドバイス\n${reviewJson.advice}`);
+
+  if (score !== null) {
+    sections.push(`## 5. スコア\n**${score}/100**`);
+  }
+
+  return sections.join("\n\n");
+}
+
+export type PassDisplay = "passed" | "retry";
+
+/**
+ * Pass/retry badge shown only for rubric grading with the pass score enabled. Estimated, none and
+ * legacy reviews never show a verdict because they are not used for the completion decision.
+ */
+export function resolvePassDisplay(
+  review: { score_kind: ScoreKind; passed: boolean | null },
+  passScore: number = CERTIFICATE_PASS_SCORE
+): PassDisplay | null {
+  if (review.score_kind !== "rubric" || passScore <= 0 || review.passed === null) {
+    return null;
+  }
+  return review.passed ? "passed" : "retry";
+}
+
+export const SCORE_KIND_BADGE_LABELS: Partial<Record<ScoreKind, string>> = {
+  estimated: "参考",
+  none: "採点対象外",
+};
+
+/** Version of a stored rubric, or null when unset or unrecognisable (no zod: client-safe). */
+export function getGradingRubricVersion(value: unknown): number | null {
+  if (!isRecord(value) || !Array.isArray(value.requirements) || value.requirements.length === 0) {
+    return null;
+  }
+  const { version } = value;
+  return typeof version === "number" && Number.isInteger(version) && version > 0 ? version : null;
+}
+
+/** Rows for the rubric editor from a stored value; empty when unset or unrecognisable. */
+export function toRubricFormRows(value: unknown): GradingRequirement[] {
+  if (!isRecord(value) || !Array.isArray(value.requirements)) {
+    return [];
+  }
+  return value.requirements.flatMap((item) =>
+    isRecord(item) && typeof item.key === "string" && typeof item.name === "string"
+      ? [
+          {
+            key: item.key,
+            name: item.name,
+            description: typeof item.description === "string" ? item.description : "",
+          },
+        ]
+      : []
+  );
+}
+
+/**
+ * Next unused `r{n}` key. Keys are never reused for another requirement within a rubric, so a
+ * review's key keeps pointing at the same requirement after reordering or deleting rows.
+ */
+export function nextRequirementKey(existingKeys: readonly string[]): string {
+  const max = existingKeys.reduce((highest, key) => {
+    const match = /^r(\d+)$/.exec(key);
+    return match ? Math.max(highest, Number(match[1])) : highest;
+  }, 0);
+  return `r${max + 1}`;
+}

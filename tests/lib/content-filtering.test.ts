@@ -41,6 +41,7 @@ function makeContent(
     exercise_instructions: null,
     hint: null,
     reference_answer: null,
+    grading_rubric: null,
     allowed_submission_types: "code",
     code_language: "javascript",
     pdf_url: null,

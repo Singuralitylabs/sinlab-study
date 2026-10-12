@@ -9,6 +9,7 @@ import {
   GEMINI_MODEL_NAME,
   GEMINI_REQUEST_TIMEOUT_MS,
   GEMINI_RETRY_BASE_DELAY_MS,
+  GEMINI_TEMPERATURE,
   GEMINI_THINKING_LEVEL,
   GEMINI_TOTAL_BUDGET_MS,
 } from "@/app/constants/gemini";
@@ -31,11 +32,15 @@ vi.mock("@google/genai", async (importOriginal) => {
 });
 
 import {
+  buildRubricDraftPrompt,
   buildUserPrompt,
-  extractOverallScore,
+  generateGradingRubricDraft,
   generateReview,
   isRateLimitError,
   isTimeoutError,
+  parseReviewResponse,
+  ReviewGenerationError,
+  RUBRIC_DRAFT_SYSTEM_PROMPT,
   redactApiKey,
   resolveGeminiApiKey,
   SYSTEM_PROMPT,
@@ -111,24 +116,6 @@ describe("resolveGeminiApiKey", () => {
 
     expect(resolveGeminiApiKey(USER_STATUS.REJECTED)).toBeUndefined();
     expect(resolveGeminiApiKey(null)).toBeUndefined();
-  });
-});
-
-describe("extractOverallScore", () => {
-  it("総合スコア: XX/100 を抽出する", () => {
-    expect(extractOverallScore("総合スコア: 85/100")).toBe(85);
-  });
-
-  it("空白や強調記法があっても抽出する", () => {
-    expect(extractOverallScore("**総合スコア: 70 / 100**")).toBe(70);
-  });
-
-  it("0点も抽出する", () => {
-    expect(extractOverallScore("総合スコア: 0/100")).toBe(0);
-  });
-
-  it("該当行がなければ null", () => {
-    expect(extractOverallScore("スコアはありません")).toBeNull();
   });
 });
 
@@ -235,18 +222,177 @@ describe("redactApiKey", () => {
   });
 });
 
+const RUBRIC = {
+  version: 3,
+  requirements: [
+    { key: "r1", name: "フォームがある", description: "入力欄と送信ボタン" },
+    { key: "r2", name: "検証する", description: "" },
+  ],
+};
+
+const CODE_SUBMISSION = {
+  type: "code" as const,
+  files: [{ filename: "", language: "", content: "const x = 1;" }],
+};
+
+function rubricResponse(overrides: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    requirements: [
+      { key: "r1", status: "met", comment: "ok" },
+      { key: "r2", status: "partial", comment: "一部" },
+    ],
+    code_quality: { level: "good", comment: "読みやすい" },
+    suggestions: ["a"],
+    advice: "次へ",
+    ...overrides,
+  });
+}
+
+describe("buildUserPrompt (採点基準)", () => {
+  it("採点基準がある場合は key と名前を列挙し、AI に key の変更を禁じる", () => {
+    const prompt = buildUserPrompt("課題", CODE_SUBMISSION, null, RUBRIC);
+
+    expect(prompt).toContain("## 採点基準（要件）");
+    expect(prompt).toContain("key: r1 / 名前: フォームがある / 説明: 入力欄と送信ボタン");
+    expect(prompt).toContain("key: r2 / 名前: 検証する");
+    expect(prompt).not.toContain("名前: 検証する / 説明");
+    expect(prompt).toContain("key を追加・変更・省略しないでください");
+  });
+
+  it("採点基準がないコード提出は要件の推測を指示する", () => {
+    const prompt = buildUserPrompt("課題", CODE_SUBMISSION);
+
+    expect(prompt).toContain("採点基準は未設定です");
+    expect(prompt).not.toContain("## 採点基準（要件）");
+  });
+
+  it("URL 提出には採点基準セクションを入れない", () => {
+    const prompt = buildUserPrompt("課題", { type: "url", content: "https://e.com" }, null, RUBRIC);
+
+    expect(prompt).not.toContain("採点基準");
+  });
+});
+
+describe("parseReviewResponse", () => {
+  it("rubric: 名前は採点基準から補い、基準の並び順に揃える", () => {
+    const text = rubricResponse({
+      requirements: [
+        { key: "r2", status: "unmet", comment: "x" },
+        { key: "r1", status: "met", comment: "y" },
+      ],
+    });
+
+    const result = parseReviewResponse(text, "rubric", RUBRIC);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.reviewJson.requirements.map((r) => [r.key, r.name, r.status])).toEqual([
+        ["r1", "フォームがある", "met"],
+        ["r2", "検証する", "unmet"],
+      ]);
+    }
+  });
+
+  it("JSON として不正なら失敗", () => {
+    expect(parseReviewResponse("not json", "rubric", RUBRIC)).toMatchObject({ ok: false });
+  });
+
+  it.each([undefined, "", "  "])("本文が空（%j）なら失敗", (text) => {
+    expect(parseReviewResponse(text, "rubric", RUBRIC)).toMatchObject({ ok: false });
+  });
+
+  it("採点基準にない key は失敗", () => {
+    const text = rubricResponse({
+      requirements: [
+        { key: "r1", status: "met", comment: "a" },
+        { key: "r9", status: "met", comment: "b" },
+      ],
+    });
+    expect(parseReviewResponse(text, "rubric", RUBRIC)).toMatchObject({ ok: false });
+  });
+
+  it("要件が不足・過剰・重複していたら失敗", () => {
+    const one = rubricResponse({ requirements: [{ key: "r1", status: "met", comment: "a" }] });
+    const three = rubricResponse({
+      requirements: [
+        { key: "r1", status: "met", comment: "a" },
+        { key: "r2", status: "met", comment: "a" },
+        { key: "r2", status: "met", comment: "a" },
+      ],
+    });
+    const dup = rubricResponse({
+      requirements: [
+        { key: "r1", status: "met", comment: "a" },
+        { key: "r1", status: "met", comment: "a" },
+      ],
+    });
+    expect(parseReviewResponse(one, "rubric", RUBRIC).ok).toBe(false);
+    expect(parseReviewResponse(three, "rubric", RUBRIC).ok).toBe(false);
+    expect(parseReviewResponse(dup, "rubric", RUBRIC).ok).toBe(false);
+  });
+
+  it("改善提案が上限を超えたら失敗", () => {
+    expect(
+      parseReviewResponse(rubricResponse({ suggestions: ["a", "b", "c"] }), "rubric", RUBRIC).ok
+    ).toBe(false);
+  });
+
+  it("status が列挙外なら失敗", () => {
+    const text = rubricResponse({
+      requirements: [
+        { key: "r1", status: "great", comment: "a" },
+        { key: "r2", status: "met", comment: "a" },
+      ],
+    });
+    expect(parseReviewResponse(text, "rubric", RUBRIC).ok).toBe(false);
+  });
+
+  it("estimated: AI が付けた key と name を使う", () => {
+    const text = JSON.stringify({
+      requirements: [{ key: "r1", name: "要件A", status: "met", comment: "c" }],
+      code_quality: { level: "fair", comment: "c" },
+      suggestions: [],
+      advice: "a",
+    });
+
+    const result = parseReviewResponse(text, "estimated", null);
+
+    expect(result.ok && result.reviewJson.requirements[0].name).toBe("要件A");
+  });
+
+  it("none: 品質レベルは fair に固定し、要件は空にする", () => {
+    const text = JSON.stringify({
+      code_quality: { comment: "URL形式は妥当" },
+      suggestions: ["x"],
+      advice: "a",
+      // Extra number written by the AI must never leak into the result.
+      score: 99,
+    });
+
+    const result = parseReviewResponse(text, "none", null);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.reviewJson.requirements).toEqual([]);
+      expect(result.reviewJson.code_quality.level).toBe("fair");
+      expect(JSON.stringify(result.reviewJson)).not.toContain("99");
+    }
+  });
+});
+
 describe("generateReview", () => {
   const baseParams = {
     exerciseInstructions: "ログイン画面を作る",
-    submission: { type: "url" as const, content: "https://example.com/login" },
+    submission: CODE_SUBMISSION,
     referenceAnswer: null,
+    gradingRubric: RUBRIC,
     apiKey: MEMBER_KEY,
   };
 
-  it("渡したキーで SDK を初期化し、モデル設定とトークン数・スコアを返す", async () => {
+  it("構造化JSON設定で呼び、点数はコードが計算して返す（rubric）", async () => {
     generateContentMock.mockResolvedValue({
-      text: "良いです。\n総合スコア: 88/100",
-      usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 40 },
+      text: rubricResponse(),
+      usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 40, thoughtsTokenCount: 300 },
     });
 
     const result = await generateReview(baseParams);
@@ -254,35 +400,161 @@ describe("generateReview", () => {
     expect(GoogleGenAIMock).toHaveBeenCalledWith({ apiKey: MEMBER_KEY });
     expect(generateContentMock).toHaveBeenCalledWith({
       model: GEMINI_MODEL_NAME,
-      contents: buildUserPrompt(
-        baseParams.exerciseInstructions,
-        baseParams.submission,
-        baseParams.referenceAnswer
-      ),
+      contents: buildUserPrompt("ログイン画面を作る", CODE_SUBMISSION, null, RUBRIC),
       config: {
         systemInstruction: SYSTEM_PROMPT,
         maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
+        temperature: GEMINI_TEMPERATURE,
+        responseMimeType: "application/json",
+        responseSchema: expect.objectContaining({ type: "OBJECT" }),
         thinkingConfig: { thinkingLevel: GEMINI_THINKING_LEVEL },
         abortSignal: expect.any(AbortSignal),
       },
     });
-    expect(result).toEqual({
-      reviewContent: "良いです。\n総合スコア: 88/100",
-      overallScore: 88,
+    expect(GEMINI_TEMPERATURE).toBe(0);
+    // (1 + 0.5) / 2 * 80 + good(1) * 20 = 80
+    expect(result).toMatchObject({
+      scoreKind: "rubric",
+      rubricVersion: 3,
+      overallScore: 80,
+      passed: null,
       modelUsed: GEMINI_MODEL_NAME,
       promptTokens: 120,
       completionTokens: 40,
+      thoughtsTokens: 300,
     });
+    expect(result.reviewContent).toContain("**80/100**");
     expect(JSON.stringify(result)).not.toContain(MEMBER_KEY);
   });
 
-  it("usageMetadata が無い場合はトークン数を null にする", async () => {
-    generateContentMock.mockResolvedValue({ text: "総合スコア: 10/100" });
+  it("responseSchema は採点基準の key を enum で縛り、件数を固定する", async () => {
+    generateContentMock.mockResolvedValue({ text: rubricResponse() });
+
+    await generateReview(baseParams);
+
+    const schema = generateContentMock.mock.calls[0][0].config.responseSchema;
+    expect(schema.properties.requirements.minItems).toBe("2");
+    expect(schema.properties.requirements.maxItems).toBe("2");
+    expect(schema.properties.requirements.items.properties.key.enum).toEqual(["r1", "r2"]);
+    expect(schema.properties.suggestions.maxItems).toBe("2");
+  });
+
+  it("採点基準なしのコード提出は estimated（rubric_version なし）", async () => {
+    generateContentMock.mockResolvedValue({
+      text: JSON.stringify({
+        requirements: [{ key: "r1", name: "要件A", status: "unmet", comment: "c" }],
+        code_quality: { level: "poor", comment: "c" },
+        suggestions: [],
+        advice: "a",
+      }),
+    });
+
+    const result = await generateReview({ ...baseParams, gradingRubric: null });
+
+    expect(result).toMatchObject({
+      scoreKind: "estimated",
+      rubricVersion: null,
+      overallScore: 0,
+      passed: null,
+    });
+    expect(result.reviewContent).toContain("参考採点");
+  });
+
+  it("URL 提出は none（点数なし）", async () => {
+    generateContentMock.mockResolvedValue({
+      text: JSON.stringify({ code_quality: { comment: "ok" }, suggestions: [], advice: "a" }),
+    });
+
+    const result = await generateReview({
+      ...baseParams,
+      submission: { type: "url", content: "https://example.com" },
+    });
+
+    expect(result).toMatchObject({
+      scoreKind: "none",
+      rubricVersion: null,
+      overallScore: null,
+      passed: null,
+    });
+    const schema = generateContentMock.mock.calls[0][0].config.responseSchema;
+    expect(schema.properties.requirements).toBeUndefined();
+  });
+
+  it("usageMetadata が無い、または thoughtsTokenCount が無い場合は該当トークンを null にする", async () => {
+    generateContentMock.mockResolvedValueOnce({ text: rubricResponse() });
+    const none = await generateReview(baseParams);
+    expect(none.promptTokens).toBeNull();
+    expect(none.completionTokens).toBeNull();
+    expect(none.thoughtsTokens).toBeNull();
+
+    generateContentMock.mockResolvedValueOnce({
+      text: rubricResponse(),
+      usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 6 },
+    });
+    const noThoughts = await generateReview(baseParams);
+    expect(noThoughts.promptTokens).toBe(5);
+    expect(noThoughts.thoughtsTokens).toBeNull();
+  });
+
+  it("検証に失敗したら1回だけ再生成し、両方のトークンを合算する", async () => {
+    generateContentMock
+      .mockResolvedValueOnce({
+        text: "not json",
+        usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 10, thoughtsTokenCount: 50 },
+      })
+      .mockResolvedValueOnce({
+        text: rubricResponse(),
+        usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 30, thoughtsTokenCount: 70 },
+      });
 
     const result = await generateReview(baseParams);
 
-    expect(result.promptTokens).toBeNull();
-    expect(result.completionTokens).toBeNull();
+    expect(generateContentMock).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      promptTokens: 200,
+      completionTokens: 40,
+      thoughtsTokens: 120,
+    });
+  });
+
+  it("再生成でも検証に失敗したら ReviewGenerationError を投げ、消費トークンを持たせる", async () => {
+    generateContentMock.mockResolvedValue({
+      text: JSON.stringify({ requirements: [] }),
+      usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 10, thoughtsTokenCount: 50 },
+    });
+
+    const error = await generateReview(baseParams).catch((e: unknown) => e);
+
+    expect(generateContentMock).toHaveBeenCalledTimes(2);
+    expect(error).toBeInstanceOf(ReviewGenerationError);
+    expect((error as ReviewGenerationError).usage).toEqual({
+      promptTokens: 200,
+      completionTokens: 20,
+      thoughtsTokens: 100,
+    });
+  });
+
+  it.each([undefined, "", "   "])("本文が空（%j）でも1回再生成し、なお空なら例外", async (text) => {
+    generateContentMock.mockResolvedValue({ text });
+
+    await expect(generateReview(baseParams)).rejects.toThrow(
+      "Gemini APIからレビュー結果を取得できませんでした"
+    );
+    expect(generateContentMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("再生成の後半が失敗した場合も最初の応答の消費トークンを引き継ぐ", async () => {
+    generateContentMock
+      .mockResolvedValueOnce({
+        text: "bad",
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 1 },
+      })
+      .mockRejectedValueOnce(new Error("boom"));
+
+    const error = await generateReview(baseParams).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ReviewGenerationError);
+    expect((error as ReviewGenerationError).usage.promptTokens).toBe(10);
   });
 
   it("429 は指数バックオフで最大2回リトライする", async () => {
@@ -293,7 +565,7 @@ describe("generateReview", () => {
       .mockRejectedValueOnce(rateLimitError)
       .mockRejectedValueOnce(rateLimitError)
       .mockResolvedValueOnce({
-        text: "総合スコア: 60/100",
+        text: rubricResponse(),
         usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 2 },
       });
 
@@ -307,13 +579,14 @@ describe("generateReview", () => {
       expect.any(Function),
       GEMINI_RETRY_BASE_DELAY_MS * 2
     );
-    expect(result.overallScore).toBe(60);
+    expect(result.overallScore).toBe(80);
   });
 
   it("429 がリトライ上限を超えたら日本語の上限メッセージを投げる", async () => {
     vi.useFakeTimers();
-    const rateLimitError = new ApiError({ message: "Too Many Requests", status: 429 });
-    generateContentMock.mockRejectedValue(rateLimitError);
+    generateContentMock.mockRejectedValue(
+      new ApiError({ message: "Too Many Requests", status: 429 })
+    );
 
     const resultPromise = generateReview(baseParams);
     const assertion = expect(resultPromise).rejects.toThrow(
@@ -333,7 +606,7 @@ describe("generateReview", () => {
 
   it("GEMINI_REQUEST_TIMEOUT_MS でリクエストごとのタイムアウトを設定する", async () => {
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-    generateContentMock.mockResolvedValue({ text: "総合スコア: 50/100" });
+    generateContentMock.mockResolvedValue({ text: rubricResponse() });
 
     await generateReview(baseParams);
 
@@ -342,7 +615,7 @@ describe("generateReview", () => {
 
   it("個々の試行タイムアウトと、全試行共有のGEMINI_TOTAL_BUDGET_MSをAbortSignal.anyで合成する", async () => {
     const anySpy = vi.spyOn(AbortSignal, "any");
-    generateContentMock.mockResolvedValue({ text: "総合スコア: 50/100" });
+    generateContentMock.mockResolvedValue({ text: rubricResponse() });
 
     await generateReview(baseParams);
 
@@ -352,8 +625,6 @@ describe("generateReview", () => {
   it("429が即座に返らず全体予算を使い切った場合は、リトライ回数が残っていても待機せず打ち切る", async () => {
     vi.useFakeTimers();
     const rateLimitError = new ApiError({ message: "Too Many Requests", status: 429 });
-    // Simulates the first attempt taking close to GEMINI_TOTAL_BUDGET_MS (breaking the premise that
-    // 429 returns immediately from the server).
     generateContentMock.mockImplementationOnce(
       () =>
         new Promise((_resolve, reject) => {
@@ -368,16 +639,13 @@ describe("generateReview", () => {
     await vi.runAllTimersAsync();
     await assertion;
 
-    // The retry wait (GEMINI_RETRY_BASE_DELAY_MS = 5s) exceeds the remaining budget (1s), so no
-    // second attempt is made even though the retry limit isn't reached.
     expect(generateContentMock).toHaveBeenCalledTimes(1);
   });
 
   it("応答がタイムアウトした場合は日本語のタイムアウトメッセージを投げ、リトライしない", async () => {
-    // The SDK's internal AbortController aborts without a reason, so what is actually thrown is
-    // DOMException "AbortError" (not "TimeoutError").
-    const timeoutError = new DOMException("The operation was aborted.", "AbortError");
-    generateContentMock.mockRejectedValue(timeoutError);
+    generateContentMock.mockRejectedValue(
+      new DOMException("The operation was aborted.", "AbortError")
+    );
 
     await expect(generateReview(baseParams)).rejects.toThrow(
       "Gemini APIの応答がタイムアウトしました。しばらく時間を置いてから再試行してください。"
@@ -391,16 +659,48 @@ describe("generateReview", () => {
     );
     expect(GoogleGenAIMock).not.toHaveBeenCalled();
   });
+});
 
-  it.each([undefined, "", "   "])(
-    "本文が空（%j）なら例外を投げ、completed にしない",
-    async (text) => {
-      generateContentMock.mockResolvedValue({ text });
+describe("generateGradingRubricDraft", () => {
+  const draft = {
+    requirements: [
+      { name: "A", description: "a" },
+      { name: "B", description: "b" },
+      { name: "C", description: "c" },
+    ],
+  };
 
-      await expect(generateReview(baseParams)).rejects.toThrow(
-        "Gemini APIからレビュー結果を取得できませんでした"
-      );
-      expect(generateContentMock).toHaveBeenCalledTimes(1);
-    }
-  );
+  it("下書きを返し、構造化JSON設定で呼ぶ", async () => {
+    generateContentMock.mockResolvedValue({ text: JSON.stringify(draft) });
+
+    const result = await generateGradingRubricDraft({
+      exerciseInstructions: "課題",
+      referenceAnswer: "模範",
+      apiKey: MEMBER_KEY,
+    });
+
+    expect(result).toEqual(draft.requirements);
+    expect(generateContentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contents: buildRubricDraftPrompt("課題", "模範"),
+        config: expect.objectContaining({
+          systemInstruction: RUBRIC_DRAFT_SYSTEM_PROMPT,
+          temperature: GEMINI_TEMPERATURE,
+          responseMimeType: "application/json",
+        }),
+      })
+    );
+    expect(buildRubricDraftPrompt("課題", "模範")).toContain("## 模範回答\n模範");
+  });
+
+  it("件数が範囲外なら1回再生成し、なお不正なら例外", async () => {
+    generateContentMock.mockResolvedValue({
+      text: JSON.stringify({ requirements: [{ name: "A", description: "a" }] }),
+    });
+
+    await expect(
+      generateGradingRubricDraft({ exerciseInstructions: "課題", apiKey: MEMBER_KEY })
+    ).rejects.toBeInstanceOf(ReviewGenerationError);
+    expect(generateContentMock).toHaveBeenCalledTimes(2);
+  });
 });

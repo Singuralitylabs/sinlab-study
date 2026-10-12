@@ -9,6 +9,11 @@ import {
   resolveSiblingResequence,
   type SiblingOrderRow,
 } from "@/app/lib/content-grouping";
+import {
+  type GradingRubricInput,
+  nextGradingRubric,
+  parseGradingRubric,
+} from "@/app/lib/grading-schema";
 import { toSlideObjectKey } from "@/app/lib/slide-object-key";
 import { WEEKLY_FUNNEL_FETCH_ERROR, type WeeklyFunnelRow } from "@/app/lib/weekly-funnel";
 import {
@@ -161,7 +166,7 @@ function manageContentListSelect(innerJoin: boolean): string {
   const phaseRel = innerJoin ? "phase:learning_phases!inner" : "phase:learning_phases";
   const themeRel = innerJoin ? "theme:learning_themes!inner" : "theme:learning_themes";
   return `
-    id, title, content_type, display_order, is_published, is_open_to_trial, week_id,
+    id, title, content_type, display_order, is_published, is_open_to_trial, week_id, grading_rubric,
     ${weekRel}(
       id, name, display_order, phase_id,
       ${phaseRel}(
@@ -1152,6 +1157,7 @@ export async function createContent(content: {
   allowed_submission_types?: "code" | "url" | "both";
   code_language?: CodeLanguage;
   pdf_url?: string | null;
+  gradingRubric?: GradingRubricInput | null;
   insertAfterId: number | null;
   is_published?: boolean;
   is_open_to_trial?: boolean;
@@ -1185,6 +1191,11 @@ export async function createContent(content: {
       allowed_submission_types: content.allowed_submission_types,
       code_language: content.code_language,
       pdf_url: content.pdf_url,
+      // Rubrics belong to exercises only; version always starts at 1 for a new content row.
+      grading_rubric:
+        content.content_type === "exercise" && content.gradingRubric
+          ? nextGradingRubric(null, content.gradingRubric)
+          : null,
       is_published: content.is_published,
       is_open_to_trial: content.is_open_to_trial,
       display_order: displayOrder,
@@ -1208,10 +1219,21 @@ export async function createContent(content: {
  */
 export async function updateContent(
   id: number,
-  content: Partial<LearningContent> & { insertAfterId?: number | null }
+  content: Omit<Partial<LearningContent>, "grading_rubric"> & {
+    insertAfterId?: number | null;
+    /** undefined = leave as is, null = clear, object = save (version derived here). */
+    gradingRubric?: GradingRubricInput | null;
+  }
 ): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
   const supabase = await createAdminSupabaseClient();
-  const { insertAfterId, ...patch } = content;
+  const { insertAfterId, gradingRubric, ...basePatch } = content;
+  const patch: Partial<LearningContent> = basePatch;
+  const movesAwayFromExercise =
+    patch.content_type !== undefined && patch.content_type !== "exercise";
+  if (movesAwayFromExercise || gradingRubric === null) {
+    patch.grading_rubric = null;
+  }
+  const needsCurrentRubric = !movesAwayFromExercise && Boolean(gradingRubric);
 
   let destinationFilter: SiblingParentFilter = null;
   let sourceFilter: SiblingParentFilter = null;
@@ -1225,21 +1247,28 @@ export async function updateContent(
   const needsCurrentPdf = patch.pdf_url !== undefined;
   let previousPdfUrl: string | null = null;
   let pdfFetchFailed = false;
-  if (needsCurrentWeek || needsCurrentPdf) {
+  if (needsCurrentWeek || needsCurrentPdf || needsCurrentRubric) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
-      .select("week_id, pdf_url")
+      .select("week_id, pdf_url, grading_rubric")
       .eq("id", id)
       .eq("is_deleted", false)
       .single();
     if (currentError) {
       console.error("コンテンツ更新エラー（現在値取得）:", currentError.message);
-      if (needsCurrentWeek) {
+      // The rubric version can't be derived without the stored rubric, so fail rather than guess.
+      if (needsCurrentWeek || needsCurrentRubric) {
         return { error: currentError, storageRemoved: true };
       }
       pdfFetchFailed = true;
     } else {
       previousPdfUrl = current.pdf_url;
+      if (needsCurrentRubric && gradingRubric) {
+        patch.grading_rubric = nextGradingRubric(
+          parseGradingRubric(current.grading_rubric),
+          gradingRubric
+        );
+      }
       if (needsCurrentWeek) {
         const destinationWeekId = patch.week_id ?? current.week_id;
         parentChanged = destinationWeekId !== current.week_id;
