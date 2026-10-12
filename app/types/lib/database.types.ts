@@ -147,6 +147,54 @@ export type Database = {
           },
         ];
       };
+      certificates: {
+        Row: {
+          certificate_no: string;
+          created_at: string;
+          id: number;
+          issued_at: string;
+          recipient_name: string;
+          theme_id: number;
+          theme_name: string;
+          user_id: number;
+        };
+        Insert: {
+          certificate_no: string;
+          created_at?: string;
+          id?: number;
+          issued_at?: string;
+          recipient_name: string;
+          theme_id: number;
+          theme_name: string;
+          user_id: number;
+        };
+        Update: {
+          certificate_no?: string;
+          created_at?: string;
+          id?: number;
+          issued_at?: string;
+          recipient_name?: string;
+          theme_id?: number;
+          theme_name?: string;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "certificates_theme_id_fkey";
+            columns: ["theme_id"];
+            isOneToOne: false;
+            referencedRelation: "learning_themes";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "certificates_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       cron_locks: {
         Row: {
           locked_at: string;

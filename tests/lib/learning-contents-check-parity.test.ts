@@ -51,7 +51,7 @@ describe("learning_contents の CHECK 制約とアプリの許可値の一致", 
 
 describe("quiz_questions の CHECK 制約とアプリの許可値の一致", () => {
   const quizMigration = readFileSync(
-    join(migrationsDir, "20261012000001_add_quiz_content_type.sql"),
+    join(migrationsDir, "20261012035532_add_quiz_content_type.sql"),
     "utf8"
   );
 
