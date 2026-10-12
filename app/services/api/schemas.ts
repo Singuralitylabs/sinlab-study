@@ -303,7 +303,9 @@ const ContentBaseSchema = z.object({
 });
 
 // A quiz without questions would show learners an empty quiz, so content_type "quiz" in the body
-// requires the questions. A PUT that omits content_type (partial update) leaves them untouched.
+// requires the questions. The reverse holds too: questions are only saved together with
+// content_type "quiz", so sending them without it (or with another type) is rejected instead of
+// being validated and then silently dropped. A PUT with neither leaves stored questions untouched.
 function requireQuizQuestions(
   value: { content_type?: string; quiz_questions?: unknown },
   ctx: z.RefinementCtx
@@ -313,6 +315,13 @@ function requireQuizQuestions(
       code: "custom",
       message: "クイズには設問を登録してください",
       path: ["quiz_questions"],
+    });
+  }
+  if (value.quiz_questions !== undefined && value.content_type !== "quiz") {
+    ctx.addIssue({
+      code: "custom",
+      message: "設問を保存するときは content_type に quiz を指定してください",
+      path: ["content_type"],
     });
   }
 }

@@ -6,6 +6,7 @@ import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
 import { SlideContent } from "@/app/components/SlideContent";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
+import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import {
   createDemoSlideSignedUrl,
   fetchDemoContentById,
@@ -141,9 +142,14 @@ export default async function DemoContentPage({ params }: PageProps) {
           {/* The demo reads via service_role, which must never reach quiz_questions (it holds the
               answers); questions are served only to logged-in users through get_quiz_questions. */}
           {content.content_type === "quiz" && (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              クイズはログイン後に解答できます。
-            </p>
+            <div className="space-y-6">
+              {content.description && (
+                <MarkdownRenderer content={resolveMarkdownStorageUrls(content.description)} />
+              )}
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                クイズはログイン後に解答できます。
+              </p>
+            </div>
           )}
 
           {content.content_type === "exercise" && content.exercise_instructions && (

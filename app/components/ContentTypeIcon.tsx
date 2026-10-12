@@ -11,6 +11,6 @@ const ICONS: Record<ContentType, typeof FileText> = {
 };
 
 export function ContentTypeIcon({ type, className }: { type: ContentType; className?: string }) {
-  const Icon = ICONS[type] ?? FileText;
+  const Icon = ICONS[type];
   return <Icon className={className} />;
 }

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { BULK_SETTABLE_CONTENT_TYPES, type BulkContentAction } from "@/app/constants/content";
-import { USER_STATUS } from "@/app/constants/user";
 import { isContentType } from "@/app/lib/content-filtering";
 import { bulkUpdateContents, createContentsAtTail } from "@/app/services/api/admin-server";
 import {
@@ -8,9 +7,13 @@ import {
   BulkContentUpdateSchema,
   validateRequest,
 } from "@/app/services/api/schemas";
-import { checkContentPermissions } from "@/app/services/auth/permissions";
-import { getServerAuth } from "@/app/services/auth/server-auth";
+import { requireContentManagerApi } from "@/app/services/auth/admin-guard";
 import type { LearningContent } from "@/app/types";
+
+// Bulk creation runs up to MAX_BULK_CREATE_CONTENTS items sequentially (several DB round trips
+// each). If the platform default timeout cut it off, the response listing what was already
+// created would never reach the admin.
+export const maxDuration = 60;
 
 /**
  * BulkContentAction covers all of BULK_CONTENT_ACTIONS and is schema-validated before this call, so
@@ -43,30 +46,13 @@ function buildPatch(
   }
 }
 
-async function authorizeContentManager(): Promise<NextResponse | null> {
-  const { user, userId, userStatus, userRole } = await getServerAuth();
-  if (!user) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
-  if (!userId) {
-    return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-  }
-  if (userStatus === USER_STATUS.REJECTED) {
-    return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-  }
-  if (!checkContentPermissions(userRole)) {
-    return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
-  }
-  return null;
-}
-
 /**
  * Bulk registration (e.g. a course's quizzes with their questions). Every item is validated
  * before anything is written; creation then runs in order and stops at the first failure.
  */
 export async function POST(request: Request) {
   try {
-    const denied = await authorizeContentManager();
+    const { response: denied } = await requireContentManagerApi();
     if (denied) {
       return denied;
     }
@@ -105,7 +91,7 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const denied = await authorizeContentManager();
+    const { response: denied } = await requireContentManagerApi();
     if (denied) {
       return denied;
     }

@@ -400,6 +400,19 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(ContentUpdateSchema.safeParse({ title: "改題" }).success).toBe(true);
   });
 
+  it("設問だけを送る（content_type なし・別の種別）場合は検証エラー（黙って捨てない）", () => {
+    const quiz_questions = [
+      { question_type: "single", question: "Q", choices: ["a", "b"], correct_choices: [0] },
+    ];
+    expect(ContentUpdateSchema.safeParse({ quiz_questions }).success).toBe(false);
+    expect(ContentUpdateSchema.safeParse({ content_type: "video", quiz_questions }).success).toBe(
+      false
+    );
+    expect(ContentUpdateSchema.safeParse({ content_type: "quiz", quiz_questions }).success).toBe(
+      true
+    );
+  });
+
   it("content_typeが許可値以外の場合は検証エラー（DBのCHECK制約違反による500を未然に防ぐ）", () => {
     expect(
       ContentCreateSchema.safeParse({
