@@ -187,8 +187,13 @@ export async function POST(request: NextRequest) {
       });
 
       if (!saved) {
-        // The row stays `processing` and stops counting after AI_REVIEW_STALE_AFTER_MS, so
-        // reporting success here would hide a Gemini call that left no stored review.
+        // Best effort: a row left `processing` would block a retry with a misleading 202 for
+        // AI_REVIEW_STALE_AFTER_MS and the already-billed tokens would go unrecorded.
+        await updateAIReviewFailed(reviewRecord.id, "AIレビューの保存に失敗しました", {
+          promptTokens: result.promptTokens,
+          completionTokens: result.completionTokens,
+          thoughtsTokens: result.thoughtsTokens,
+        });
         return NextResponse.json({ error: "AIレビューの保存に失敗しました" }, { status: 500 });
       }
 

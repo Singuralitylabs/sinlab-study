@@ -201,7 +201,11 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
 
     expect(res.status).toBe(500);
     expect((await res.json()).error).toContain("保存に失敗");
-    expect(updateAIReviewFailed).not.toHaveBeenCalled();
+    expect(updateAIReviewFailed).toHaveBeenCalledWith(
+      10,
+      expect.stringContaining("保存に失敗"),
+      expect.objectContaining({ promptTokens: 10, completionTokens: 20, thoughtsTokens: 30 })
+    );
   });
 
   it("レスポンスには構造化結果を含めるがトークン数は含めない", async () => {
