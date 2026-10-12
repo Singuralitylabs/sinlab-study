@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/admin-server");
 
-import { PUT } from "@/app/api/manage/contents/[id]/route";
+import { DELETE, PUT } from "@/app/api/manage/contents/[id]/route";
 import { POST } from "@/app/api/manage/contents/route";
 import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
-import { createContent, updateContent } from "@/app/services/api/admin-server";
+import { createContent, deleteContent, updateContent } from "@/app/services/api/admin-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const maintainerAuth = {
@@ -236,5 +236,36 @@ describe("POST / PUT /api/manage/contents - クイズの設問（#306）", () =>
     );
 
     expect(res.status).toBe(500);
+  });
+});
+
+describe("POST / PUT / DELETE /api/manage/contents - 権限ガード（requireContentManagerApi）", () => {
+  const params = { params: Promise.resolve({ id: "1" }) };
+
+  beforeEach(() => {
+    vi.mocked(getServerAuth).mockResolvedValue({ ...maintainerAuth, userRole: "member" } as never);
+  });
+
+  it("member の作成は403で、作成処理を呼ばない", async () => {
+    const res = await POST(
+      request({ title: "t", week_id: 1, content_type: "video", insert_after_id: null }) as never
+    );
+
+    expect(res.status).toBe(403);
+    expect(createContent).not.toHaveBeenCalled();
+  });
+
+  it("member の更新は403で、更新処理を呼ばない", async () => {
+    const res = await PUT(request({ title: "t" }) as never, params);
+
+    expect(res.status).toBe(403);
+    expect(updateContent).not.toHaveBeenCalled();
+  });
+
+  it("member の削除は403で、削除処理を呼ばない", async () => {
+    const res = await DELETE(request({}) as never, params);
+
+    expect(res.status).toBe(403);
+    expect(deleteContent).not.toHaveBeenCalled();
   });
 });

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  isStaleQuizGrade,
   quizQuestionsUpdatedNotice,
   quizQuestionVersion,
+  valueForVersion,
 } from "@/app/lib/quiz-form";
 
 describe("quizQuestionVersion", () => {
@@ -26,21 +26,33 @@ describe("quizQuestionVersion", () => {
 });
 
 describe("quizQuestionsUpdatedNotice", () => {
-  it("設問が残っていればやり直しを促す", () => {
-    expect(quizQuestionsUpdatedNotice(2)).toBe("設問が更新されたため、回答をやり直してください");
+  it("回答・結果を破棄したときはやり直しを促す", () => {
+    expect(quizQuestionsUpdatedNotice(2, true)).toBe(
+      "設問が更新されたため、回答をやり直してください"
+    );
+  });
+
+  it("破棄したものがなければ出さない（回答前の再描画でやり直す回答はない）", () => {
+    expect(quizQuestionsUpdatedNotice(2, false)).toBeNull();
   });
 
   it("設問が0件になったら出さない（「設問が登録されていません」だけを表示する）", () => {
-    expect(quizQuestionsUpdatedNotice(0)).toBeNull();
+    expect(quizQuestionsUpdatedNotice(0, true)).toBeNull();
   });
 });
 
-describe("isStaleQuizGrade", () => {
-  it("送信時と同じ版なら結果を使う", () => {
-    expect(isStaleQuizGrade("1:a", "1:a")).toBe(false);
+describe("valueForVersion", () => {
+  const entry = { version: "1:a", value: "結果" };
+
+  it("作られた版が現在の版なら値を返す", () => {
+    expect(valueForVersion(entry, "1:a")).toBe("結果");
   });
 
-  it("応答待ちの間に版が変わったら結果を捨てる", () => {
-    expect(isStaleQuizGrade("1:a", "1:a2")).toBe(true);
+  it("応答待ちの間に版が変わったら（届く順序に関係なく）表示しない", () => {
+    expect(valueForVersion(entry, "1:a2")).toBeNull();
+  });
+
+  it("値がなければ null", () => {
+    expect(valueForVersion(null, "1:a")).toBeNull();
   });
 });

@@ -11,9 +11,10 @@ import {
   type QuizQuestionResult,
 } from "@/app/constants/quiz";
 import {
-  isStaleQuizGrade,
   quizQuestionsUpdatedNotice,
   quizQuestionVersion,
+  type VersionedValue,
+  valueForVersion,
 } from "@/app/lib/quiz-form";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -62,28 +63,45 @@ export function QuizForm({
 }: QuizFormProps) {
   const router = useRouter();
   const [answers, setAnswers] = useState<Record<number, Answer>>({});
-  const [results, setResults] = useState<Map<number, QuizQuestionResult> | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [progressWarning, setProgressWarning] = useState<string | null>(null);
+  const [updatedNotice, setUpdatedNotice] = useState<string | null>(null);
 
   // router.refresh() (after grading, or from the completion button) can bring a question set an
-  // admin changed meanwhile. Drop answers and results then, so old choices are never sent with a
-  // new revision or shown under new text, and say why instead of silently clearing the form.
+  // admin changed meanwhile, even while a grade request is in flight. Results and errors are kept
+  // with the version they were produced for and shown only while it is still current, so a late
+  // response can never put old results under new text (ids are kept across edits).
   const questionVersion = quizQuestionVersion(questions);
+  const [gradeResult, setGradeResult] = useState<VersionedValue<
+    Map<number, QuizQuestionResult>
+  > | null>(null);
+  const [errorState, setErrorState] = useState<VersionedValue<string> | null>(null);
+  const results = valueForVersion(gradeResult, questionVersion);
+  const error = valueForVersion(errorState, questionVersion);
+
+  // Drop the answers too (they are keyed by id and would be sent with the new revision), and say
+  // why only when something was actually discarded.
   const [seenQuestionVersion, setSeenQuestionVersion] = useState(questionVersion);
   if (seenQuestionVersion !== questionVersion) {
     setSeenQuestionVersion(questionVersion);
+    const discarded = Object.keys(answers).length > 0 || gradeResult !== null || isSubmitting;
     setAnswers({});
-    setResults(null);
+    setGradeResult(null);
     setProgressWarning(null);
-    setError(quizQuestionsUpdatedNotice(questions.length));
+    setUpdatedNotice(quizQuestionsUpdatedNotice(questions.length, discarded));
   }
-  // Read when a grade response arrives: the set may have been replaced while it was in flight.
-  const latestQuestionVersion = useRef(questionVersion);
+
+  // Completion is recorded from the committed state, so a result that is no longer current (the
+  // set changed before it arrived) is never recorded.
+  const recordedResult = useRef<VersionedValue<Map<number, QuizQuestionResult>> | null>(null);
   useEffect(() => {
-    latestQuestionVersion.current = questionVersion;
-  }, [questionVersion]);
+    if (!gradeResult || gradeResult.version !== questionVersion) return;
+    if (recordedResult.current === gradeResult) return;
+    recordedResult.current = gradeResult;
+    if (canRecordProgress && !initialCompleted) {
+      void markCompleted();
+    }
+  });
 
   const allAnswered = questions.every((q) => isAnswered(q, answers[q.id]));
   const autoGraded = results ? [...results.values()].filter((r) => r.isCorrect !== null) : [];
@@ -127,15 +145,16 @@ export function QuizForm({
 
   async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
+    const sentVersion = questionVersion;
     if (!allAnswered) {
-      setError("すべての設問に回答してください");
+      setErrorState({ version: sentVersion, value: "すべての設問に回答してください" });
       return;
     }
 
     setIsSubmitting(true);
-    setError(null);
+    setErrorState(null);
+    setUpdatedNotice(null);
     setProgressWarning(null);
-    const sentVersion = questionVersion;
     try {
       const response = await fetch("/api/quiz/grade", {
         method: "POST",
@@ -150,22 +169,17 @@ export function QuizForm({
         }),
       });
       const data = await response.json().catch(() => null);
-      // The reset above already told the learner to answer again; old results would otherwise
-      // appear under the new questions (ids are kept across edits).
-      if (isStaleQuizGrade(sentVersion, latestQuestionVersion.current)) {
-        return;
-      }
       if (!response.ok) {
-        setError(data?.error ?? "採点に失敗しました");
+        setErrorState({ version: sentVersion, value: data?.error ?? "採点に失敗しました" });
         return;
       }
       const graded: QuizQuestionResult[] = data?.results ?? [];
-      setResults(new Map(graded.map((r) => [r.questionId, r])));
-      if (canRecordProgress && !initialCompleted) {
-        await markCompleted();
-      }
+      setGradeResult({
+        version: sentVersion,
+        value: new Map(graded.map((r) => [r.questionId, r])),
+      });
     } catch {
-      setError("採点中にエラーが発生しました");
+      setErrorState({ version: sentVersion, value: "採点中にエラーが発生しました" });
     } finally {
       setIsSubmitting(false);
     }
@@ -173,8 +187,9 @@ export function QuizForm({
 
   function handleRetry() {
     setAnswers({});
-    setResults(null);
-    setError(null);
+    setGradeResult(null);
+    setErrorState(null);
+    setUpdatedNotice(null);
     setProgressWarning(null);
   }
 
@@ -297,9 +312,9 @@ export function QuizForm({
         );
       })}
 
-      {error && (
+      {(updatedNotice || error) && (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{updatedNotice ?? error}</AlertDescription>
         </Alert>
       )}
 
