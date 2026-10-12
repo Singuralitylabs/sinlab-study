@@ -158,12 +158,12 @@ export function SubmissionForm({
         const errorData = await response.json().catch(() => null);
         const errorMsg = errorData?.error || "AIレビューの生成に失敗しました";
         setMessage({ type: "error", text: errorMsg });
-        setAiReview(buildFailedReview(submissionId, errorMsg));
+        setAiReview(buildFailedReview(0, errorMsg));
       }
     } catch {
       const errorMsg = "ネットワークエラーが発生しました。再試行してください。";
       setMessage({ type: "error", text: errorMsg });
-      setAiReview(buildFailedReview(submissionId, errorMsg));
+      setAiReview(buildFailedReview(0, errorMsg));
     } finally {
       setIsReviewLoading(false);
     }

@@ -1,10 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { GEMINI_API_KEY_ENV } from "@/app/constants/gemini";
-import { USER_STATUS } from "@/app/constants/user";
 import { generateGradingRubricDraft } from "@/app/services/api/gemini";
 import { GradingRubricDraftRequestSchema, validateRequest } from "@/app/services/api/schemas";
-import { checkContentPermissions } from "@/app/services/auth/permissions";
-import { getServerAuth } from "@/app/services/auth/server-auth";
+import { requireContentManagerApi } from "@/app/services/auth/admin-guard";
 
 // See app/api/ai-review/route.ts: the route segment config must be a literal. The Gemini call is
 // bounded by GEMINI_TOTAL_BUDGET_MS, which is below this.
@@ -13,18 +11,9 @@ export const maxDuration = 60;
 /** Returns an AI draft of a grading rubric. Nothing is saved; an instructor reviews and saves. */
 export async function POST(request: NextRequest) {
   try {
-    const { user, userId, userStatus, userRole } = await getServerAuth();
-    if (!user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-    }
-    if (!userId) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-    if (userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
-    if (!checkContentPermissions(userRole)) {
-      return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
+    const gate = await requireContentManagerApi();
+    if (gate.response) {
+      return gate.response;
     }
 
     const validation = await validateRequest(request, GradingRubricDraftRequestSchema);
