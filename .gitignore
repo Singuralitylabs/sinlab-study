@@ -48,3 +48,6 @@ supabase/.temp/
 .claude/settings.local.json
 CLAUDE.local.md
 .claude/worktrees/
+
+# Google サービスアカウントの秘密鍵（誤コミット防止）
+*service-account*.json
