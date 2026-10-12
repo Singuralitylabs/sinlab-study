@@ -175,11 +175,11 @@ export async function upsertPendingAIReview(submissionId: number): Promise<{ id:
         review_json: null,
         rubric_version: null,
         passed: null,
+        // created_at is reset because a reused failed row would otherwise keep its original day
+        // and escape the per-day count.
+        created_at: new Date().toISOString(),
         // Token columns are deliberately absent: a reused failed row keeps the tokens already
         // billed so the completed/failed update adds to them instead of losing earlier attempts.
-        //
-        // Reused failed rows would otherwise keep their original day and escape the per-day count.
-        created_at: new Date().toISOString(),
       },
       { onConflict: "submission_id" }
     )

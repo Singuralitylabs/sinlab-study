@@ -9,7 +9,7 @@ import {
   GRADING_RUBRIC_DRAFT_MIN_REQUIREMENTS,
   GRADING_RUBRIC_MAX_REQUIREMENTS,
 } from "@/app/constants/grading";
-import { maxRequirementKeyNumber } from "@/app/lib/grading";
+import { maxRequirementKeyNumber, nextRequirementKey } from "@/app/lib/grading";
 import type { GradingRequirement } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -41,9 +41,12 @@ export function GradingRubricEditor({
   const issuedMaxRef = useRef(issuedMaxKeyNumber);
 
   function allocateKey(): string {
-    issuedMaxRef.current =
-      Math.max(issuedMaxRef.current, maxRequirementKeyNumber(rows.map((row) => row.key))) + 1;
-    return `r${issuedMaxRef.current}`;
+    const key = nextRequirementKey(
+      rows.map((row) => row.key),
+      issuedMaxRef.current
+    );
+    issuedMaxRef.current = maxRequirementKeyNumber([key]);
+    return key;
   }
 
   const [isDrafting, setIsDrafting] = useState(false);
