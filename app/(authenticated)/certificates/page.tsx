@@ -36,20 +36,20 @@ export default async function CertificatesPage() {
         issuedThemeIds: new Set(initialCertificates.map((c) => c.theme_id)),
       })
     : { issued: [], blockedByMissingName: false };
-  const certificates =
-    issuedNow.length > 0
-      ? ((await fetchMyCertificates(userId)).data ?? initialCertificates)
-      : initialCertificates;
+  // The list itself is whatever the last read returned: a failed re-read after issuing shows the
+  // error card, never a stale (possibly empty) list.
+  const { data: certificates } =
+    issuedNow.length > 0 ? await fetchMyCertificates(userId) : { data: initialCertificates };
 
-  // Just-issued themes count as issued even if re-reading the list failed (the row exists and the
-  // email goes out), so they are never reported as "could not be issued".
+  // "Unissued" depends only on the first read plus what was just issued, so a failed re-read cannot
+  // flip a just-issued theme (the row exists and the email goes out) to "could not be issued".
   const issuedThemeIds = new Set([
-    ...(certificates ?? []).map((c) => c.theme_id),
+    ...(initialCertificates ?? []).map((c) => c.theme_id),
     ...issuedNow.map((c) => c.theme_id),
   ]);
-  // Without the certificate list "unissued" cannot be computed (every theme would look unissued and
-  // no backfill ran), so the section is omitted and only the list error above is shown.
-  const pendingThemes = certificates
+  // Without the first read "unissued" cannot be computed (every theme would look unissued and no
+  // backfill ran), so the section is omitted and only the list error is shown.
+  const pendingThemes = initialCertificates
     ? (summaries ?? []).filter((s) => s.totalContents > 0 && !issuedThemeIds.has(s.theme.id))
     : [];
 

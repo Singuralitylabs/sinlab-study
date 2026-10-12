@@ -142,8 +142,11 @@ describe("/certificates の遡及発行", () => {
     const html = await render();
 
     expect(fetchMyCertificates).toHaveBeenCalledTimes(2);
-    // テーマ1（2/2）は発行済み扱いで未発行に出ない。テーマ2（1/2）だけが未発行
+    // Theme 1 (2/2) was just issued, so only theme 2 (1/2) may remain unissued.
     expect(html).not.toContain("修了証を発行できませんでした");
+    // The failed re-read shows the error card, not a stale empty list.
+    expect(html).toContain("修了証の取得に失敗しました");
+    expect(html).not.toContain("まだ修了証はありません");
     expect(html).not.toContain("修了すると発行されます（2 / 2）");
     expect(html).toContain("修了すると発行されます（1 / 2）");
   });
