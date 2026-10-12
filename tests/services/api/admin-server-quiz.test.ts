@@ -126,3 +126,39 @@ describe("createContent の設問保存失敗時の取り消し（#306 レビュ
     expect(updates).not.toContainEqual(expect.objectContaining({ is_deleted: true }));
   });
 });
+
+describe("createContent はクイズを非公開で作り、設問の保存後に公開する（#306 レビュー対応）", () => {
+  it("is_published: true のクイズは非公開で INSERT し、設問保存の後で公開に更新する", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          { data: [], error: null },
+          { data: { id: 78, title: "クイズ", is_published: false }, error: null },
+          { data: { id: 78, title: "クイズ", is_published: true }, error: null },
+        ],
+      },
+      rpcResults: { replace_quiz_questions: { data: null, error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const result = await createContent({
+      title: "クイズ",
+      week_id: 3,
+      content_type: "quiz",
+      insertAfterId: null,
+      is_published: true,
+      quizQuestions: edited,
+    });
+
+    expect(result).toEqual({ data: { id: 78, title: "クイズ", is_published: true }, error: null });
+    const builders = vi.mocked(client.from).mock.results.map((r) => r.value);
+    const inserts = builders.flatMap((b) =>
+      vi.mocked(b.insert).mock.calls.map((call: unknown[]) => call[0])
+    );
+    expect(inserts).toContainEqual(expect.objectContaining({ is_published: false }));
+    const updates = builders.flatMap((b) =>
+      vi.mocked(b.update).mock.calls.map((call: unknown[]) => call[0])
+    );
+    expect(updates).toContainEqual({ is_published: true });
+  });
+});

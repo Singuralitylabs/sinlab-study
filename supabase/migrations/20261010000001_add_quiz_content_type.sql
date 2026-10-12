@@ -19,7 +19,8 @@
 -- text 形式は自動採点しない（is_correct は NULL）。回答後に模範解答と解説を表示する。
 --
 -- 管理画面からの保存は service_role（admin-server.ts）で replace_quiz_questions() を呼び、
--- 削除と挿入を 1 トランザクションで行う（途中失敗で設問が欠けた状態を残さない）。
+-- 1 トランザクションで同じ位置の行は UPDATE（設問 id を保つ）、増えた分を INSERT、減った分を
+-- DELETE する（途中失敗で設問が欠けた状態を残さない）。
 -- =====================================================
 
 -- ---------- content_type に 'quiz' を追加 ----------
@@ -46,6 +47,10 @@ AS $$
 $$;
 
 REVOKE ALL ON FUNCTION public.quiz_correct_choices_valid(TEXT[], INTEGER[]) FROM PUBLIC, anon;
+-- CHECK 制約の中で、INSERT / UPDATE したロールの権限で評価される。既定権限に頼らず明示する
+-- （付与がないと設問の保存が permission denied になり、原因が CHECK の中で追いにくい）。
+GRANT EXECUTE ON FUNCTION public.quiz_correct_choices_valid(TEXT[], INTEGER[])
+  TO authenticated, service_role;
 
 CREATE TABLE IF NOT EXISTS public.quiz_questions (
   id SERIAL PRIMARY KEY,

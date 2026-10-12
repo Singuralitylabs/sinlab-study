@@ -3,7 +3,13 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CODE_LANGUAGES } from "@/app/components/code-editor-utils";
 import { CONTENT_TYPES } from "@/app/constants/content";
-import { QUIZ_MAX_CHOICES, QUIZ_MIN_CHOICES, QUIZ_QUESTION_TYPES } from "@/app/constants/quiz";
+import {
+  QUIZ_MAX_CHOICES,
+  QUIZ_MAX_QUESTIONS,
+  QUIZ_MIN_CHOICES,
+  QUIZ_MIN_QUESTIONS,
+  QUIZ_QUESTION_TYPES,
+} from "@/app/constants/quiz";
 
 const migrationsDir = join(process.cwd(), "supabase/migrations");
 
@@ -61,5 +67,16 @@ describe("quiz_questions の CHECK 制約とアプリの許可値の一致", () 
     for (const [, min, max] of ranges) {
       expect([Number(min), Number(max)]).toEqual([QUIZ_MIN_CHOICES, QUIZ_MAX_CHOICES]);
     }
+  });
+
+  it("設問数の上限（display_order の範囲）が QUIZ_MIN_QUESTIONS / QUIZ_MAX_QUESTIONS と一致する", () => {
+    const match = quizMigration.match(
+      /display_order INTEGER NOT NULL CHECK \(display_order BETWEEN (\d+) AND (\d+)\)/
+    );
+    expect(match).not.toBeNull();
+    expect([Number(match?.[1]), Number(match?.[2])]).toEqual([
+      QUIZ_MIN_QUESTIONS,
+      QUIZ_MAX_QUESTIONS,
+    ]);
   });
 });

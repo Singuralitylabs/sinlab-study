@@ -5,7 +5,7 @@ import {
   type QuizQuestionResult,
 } from "@/app/constants/quiz";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
-import { createServerSupabaseClient } from "./supabase-server";
+import type { createServerSupabaseClient } from "./supabase-server";
 
 type ServerSupabaseClient = Awaited<ReturnType<typeof createServerSupabaseClient>>;
 
@@ -33,9 +33,9 @@ type QuizGradeRpcRow = {
  * swap this for a service_role read.
  */
 export async function fetchQuizQuestions(
+  supabase: ServerSupabaseClient,
   contentId: number
 ): Promise<{ data: QuizQuestionForLearner[]; error: PostgrestError | null }> {
-  const supabase = await createServerSupabaseClient();
   const { data, error } = (await supabase.rpc("get_quiz_questions", {
     p_content_id: contentId,
   })) as unknown as { data: QuizQuestionRpcRow[] | null; error: PostgrestError | null };

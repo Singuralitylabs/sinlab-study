@@ -53,6 +53,20 @@ beforeEach(() => {
 });
 
 describe("POST /api/quiz/grade", () => {
+  it("回答数の上限超過は日本語のメッセージで400", async () => {
+    const res = await POST(
+      request({
+        contentId: 5,
+        answers: [1, 2, 3, 4].map((questionId) => ({ questionId, text: "a" })),
+      }) as never
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: "回答の数が設問の数を超えています。ページを再読み込みしてください",
+    });
+  });
+
   it("未認証は401で、採点しない", async () => {
     vi.mocked(getServerAuth).mockResolvedValue({
       user: null,

@@ -29,6 +29,7 @@ import {
 import { fetchQuizQuestions } from "@/app/services/api/quiz-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
+import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -230,7 +231,7 @@ export default async function ContentPage({ params }: PageProps) {
       ? createSlideSignedUrl(content.pdf_url)
       : Promise.resolve(null),
     content.content_type === "quiz"
-      ? fetchQuizQuestions(contentIdNum)
+      ? createServerSupabaseClient().then((client) => fetchQuizQuestions(client, contentIdNum))
       : Promise.resolve({ data: [], error: null }),
   ]);
 

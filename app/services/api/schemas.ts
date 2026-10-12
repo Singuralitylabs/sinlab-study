@@ -358,7 +358,10 @@ export const QuizGradeRequestSchema = z.object({
     .array(
       z.object({
         questionId: PositiveIntSchema,
-        choices: z.array(z.number().int().min(0)).max(QUIZ_MAX_CHOICES).optional(),
+        choices: z
+          .array(z.number().int().min(0), { message: "選択肢は番号の配列で指定してください" })
+          .max(QUIZ_MAX_CHOICES, { message: `選択肢は${QUIZ_MAX_CHOICES}個までです` })
+          .optional(),
         text: z
           .string()
           .max(QUIZ_TEXT_ANSWER_MAX_LENGTH, {
@@ -369,7 +372,9 @@ export const QuizGradeRequestSchema = z.object({
       { message: "answersは配列で指定してください" }
     )
     .min(1, { message: "回答を入力してください" })
-    .max(QUIZ_MAX_QUESTIONS)
+    .max(QUIZ_MAX_QUESTIONS, {
+      message: "回答の数が設問の数を超えています。ページを再読み込みしてください",
+    })
     .refine((answers) => new Set(answers.map((a) => a.questionId)).size === answers.length, {
       message: "同じ設問への回答が重複しています",
     }),

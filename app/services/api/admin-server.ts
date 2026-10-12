@@ -1186,6 +1186,11 @@ async function createContentWith(
   }
   const { displayOrder } = resequenced;
 
+  // A quiz is inserted unpublished and published only after its questions are saved: if the
+  // questions fail and the rollback below also fails, what remains is a hidden draft rather than
+  // a published quiz with no questions.
+  const withQuestions = content.content_type === "quiz" && content.quizQuestions !== undefined;
+
   const { data, error } = await supabase
     .from("learning_contents")
     .insert({
@@ -1201,7 +1206,7 @@ async function createContentWith(
       allowed_submission_types: content.allowed_submission_types,
       code_language: content.code_language,
       pdf_url: content.pdf_url,
-      is_published: content.is_published,
+      is_published: withQuestions ? false : content.is_published,
       is_open_to_trial: content.is_open_to_trial,
       display_order: displayOrder,
     })
@@ -1213,7 +1218,7 @@ async function createContentWith(
     return { data: null, error };
   }
 
-  if (content.content_type === "quiz" && content.quizQuestions) {
+  if (withQuestions && content.quizQuestions) {
     const quizError = await replaceQuizQuestions(supabase, data.id, content.quizQuestions);
     if (quizError) {
       // Leaving the row would publish a quiz with no questions. Nothing can reference a row created
@@ -1237,6 +1242,21 @@ async function createContentWith(
         }
       }
       return { data: null, error: quizError };
+    }
+
+    if (content.is_published) {
+      const { data: published, error: publishError } = await supabase
+        .from("learning_contents")
+        .update({ is_published: true })
+        .eq("id", data.id)
+        .select()
+        .single();
+      if (publishError) {
+        // The quiz and its questions exist but stay unpublished; the admin can publish it later.
+        console.error("コンテンツ作成エラー（設問保存後の公開）:", publishError.message);
+        return { data: null, error: publishError };
+      }
+      return { data: published, error: null };
     }
   }
 
