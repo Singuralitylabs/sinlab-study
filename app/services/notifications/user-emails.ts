@@ -1,7 +1,7 @@
-import { after } from "next/server";
 import { EMAIL_KIND, type EmailKind } from "@/app/constants/notifications";
 import { formatMonthlyJpyPrice, isStripeEnabled } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP_LABELS } from "@/app/constants/user";
+import { runAfterResponse } from "@/app/lib/after-response";
 import type { EmailTexts } from "@/app/lib/email-template";
 import { formatDate } from "@/app/lib/format-date";
 import {
@@ -135,11 +135,7 @@ function scheduleEmail(label: EmailKind, task: () => Promise<unknown>): void {
     }
   };
 
-  try {
-    after(run);
-  } catch {
-    void run();
-  }
+  void runAfterResponse(run);
 }
 
 /**

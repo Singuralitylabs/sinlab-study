@@ -54,6 +54,17 @@ async function hasCertificate(userId: number, themeId: number): Promise<boolean>
 
 export type IssuedCertificate = Pick<Certificate, "id" | "certificate_no" | "theme_name">;
 
+export type IssueResult = {
+  issued: IssuedCertificate[];
+  /**
+   * True when issuance was skipped because the user's display_name is blank. The user cannot fix
+   * it themselves (no profile editing), so the page tells them to contact the operators.
+   */
+  blockedByMissingName: boolean;
+};
+
+const NOTHING_ISSUED: IssueResult = { issued: [], blockedByMissingName: false };
+
 /**
  * Inserts one certificate per completed theme summary (service_role; `user_id` fixed to the
  * caller) and schedules the email for each new row. The only service_role use of issuance, shared
@@ -63,9 +74,9 @@ export type IssuedCertificate = Pick<Certificate, "id" | "certificate_no" | "the
 async function insertCertificates(
   userId: number,
   summaries: ThemeProgressSummary[]
-): Promise<IssuedCertificate[]> {
+): Promise<IssueResult> {
   if (summaries.length === 0) {
-    return [];
+    return NOTHING_ISSUED;
   }
 
   const admin = await createAdminSupabaseClient();
@@ -77,14 +88,14 @@ async function insertCertificates(
     .maybeSingle();
   if (userError || !user) {
     console.error("[修了証] 受講者名の取得エラー:", userError?.message ?? "user not found");
-    return [];
+    return NOTHING_ISSUED;
   }
 
   // The name is snapshotted and cannot be fixed afterwards, and a blank display_name (the signup
   // fallback when Google gives neither name nor email) would print a nameless certificate.
   if (!user.display_name?.trim()) {
     console.warn("[修了証] 受講者名が空のため発行を見送りました");
-    return [];
+    return { issued: [], blockedByMissingName: true };
   }
 
   const issued: IssuedCertificate[] = [];
@@ -126,7 +137,7 @@ async function insertCertificates(
       }
     }
   }
-  return issued;
+  return { issued, blockedByMissingName: false };
 }
 
 /**
@@ -171,8 +182,8 @@ export async function issueCertificateIfEligible(params: {
     }
     const completed = summaries.filter((s) => s.theme.id === themeId && isThemeCompleted(s));
 
-    const [issued] = await insertCertificates(params.userId, completed);
-    return issued ?? null;
+    const { issued } = await insertCertificates(params.userId, completed);
+    return issued[0] ?? null;
   } catch (error) {
     console.error("[修了証] 予期しないエラー:", error);
     return null;
@@ -187,7 +198,8 @@ export async function issueCertificateIfEligible(params: {
  *
  * @param summaries already-fetched fetchThemeProgressSummaries() result (avoids a second query)
  * @param issuedThemeIds themes that already have a certificate (skipped without an INSERT attempt)
- * @returns the newly issued certificates; never throws (a failure just leaves them for next time)
+ * @returns the newly issued certificates and whether a blank name blocked issuance; never throws
+ *   (a failure just leaves them for next time)
  */
 export async function issueMissingCertificates(params: {
   userId: number;
@@ -195,10 +207,10 @@ export async function issueMissingCertificates(params: {
   userRole: UserRoleType | null;
   summaries: ThemeProgressSummary[];
   issuedThemeIds: ReadonlySet<number>;
-}): Promise<IssuedCertificate[]> {
+}): Promise<IssueResult> {
   try {
     if (!isCertificateEligible(params.userStatus, params.userRole)) {
-      return [];
+      return NOTHING_ISSUED;
     }
     const missing = params.summaries.filter(
       (s) => isThemeCompleted(s) && !params.issuedThemeIds.has(s.theme.id)
@@ -206,7 +218,7 @@ export async function issueMissingCertificates(params: {
     return await insertCertificates(params.userId, missing);
   } catch (error) {
     console.error("[修了証] 予期しないエラー:", error);
-    return [];
+    return NOTHING_ISSUED;
   }
 }
 

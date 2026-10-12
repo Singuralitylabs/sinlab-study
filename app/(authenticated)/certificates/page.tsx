@@ -21,15 +21,13 @@ export default async function CertificatesPage() {
     redirect("/");
   }
 
-  const [{ data: initialCertificates }, { data: summaries }] = await Promise.all([
-    fetchMyCertificates(userId),
-    fetchThemeProgressSummaries(userId),
-  ]);
+  const [{ data: initialCertificates }, { data: summaries, error: summariesError }] =
+    await Promise.all([fetchMyCertificates(userId), fetchThemeProgressSummaries(userId)]);
 
   // Themes already 100% complete without a certificate (finished before release, or while trial)
   // never hit the progress trigger, so issue them here. Idempotent, so repeat visits are safe.
   // Skipped when the certificates could not be read: every theme would look unissued.
-  const issuedNow = initialCertificates
+  const { issued: issuedNow, blockedByMissingName } = initialCertificates
     ? await issueMissingCertificates({
         userId,
         userStatus,
@@ -37,7 +35,7 @@ export default async function CertificatesPage() {
         summaries: summaries ?? [],
         issuedThemeIds: new Set(initialCertificates.map((c) => c.theme_id)),
       })
-    : [];
+    : { issued: [], blockedByMissingName: false };
   const certificates =
     issuedNow.length > 0
       ? ((await fetchMyCertificates(userId)).data ?? initialCertificates)
@@ -92,31 +90,44 @@ export default async function CertificatesPage() {
         )}
       </section>
 
-      {pendingThemes.length > 0 && (
+      {summariesError ? (
         <section>
           <h2 className="text-lg font-semibold mb-3">未発行のテーマ</h2>
-          <div className="grid gap-3">
-            {pendingThemes.map(({ theme, totalContents, completedContents }) => {
-              const progress = Math.round((completedContents / totalContents) * 100);
-              return (
-                <Card key={theme.id}>
-                  <CardContent className="pt-4 pb-4">
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <Link href={`/learn/${theme.id}`} className="font-medium hover:underline">
-                        {theme.name}
-                      </Link>
-                      <span className="text-sm text-muted-foreground shrink-0">{progress}%</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground mb-2">
-                      修了すると発行されます（{completedContents} / {totalContents}）
-                    </p>
-                    <Progress value={progress} className="h-2" />
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
+          <Card>
+            <CardContent className="py-8 text-center text-destructive">
+              学習の進捗の取得に失敗しました。時間をおいて再読み込みしてください。
+            </CardContent>
+          </Card>
         </section>
+      ) : (
+        pendingThemes.length > 0 && (
+          <section>
+            <h2 className="text-lg font-semibold mb-3">未発行のテーマ</h2>
+            <div className="grid gap-3">
+              {pendingThemes.map(({ theme, totalContents, completedContents }) => {
+                const progress = Math.round((completedContents / totalContents) * 100);
+                return (
+                  <Card key={theme.id}>
+                    <CardContent className="pt-4 pb-4">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <Link href={`/learn/${theme.id}`} className="font-medium hover:underline">
+                          {theme.name}
+                        </Link>
+                        <span className="text-sm text-muted-foreground shrink-0">{progress}%</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-2">
+                        {blockedByMissingName && completedContents >= totalContents
+                          ? "氏名が未設定のため発行できません。運営へお問い合わせください。"
+                          : `修了すると発行されます（${completedContents} / ${totalContents}）`}
+                      </p>
+                      <Progress value={progress} className="h-2" />
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </section>
+        )
       )}
     </div>
   );

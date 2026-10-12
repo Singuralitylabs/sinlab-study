@@ -5,11 +5,14 @@ vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/learning-server");
 vi.mock("@/app/services/api/certificates-server");
 vi.mock("@/app/services/api/supabase-server");
-vi.mock("next/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("next/server")>();
-  // Keeps the real behavior (throws outside a request scope, so the route runs the task inline).
-  return { ...actual, after: vi.fn(actual.after) };
-});
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  // Explicit rather than the real after(), so these tests do not depend on how Next.js behaves
+  // outside a request scope: the default throws, and the route runs the task inline.
+  after: vi.fn(() => {
+    throw new Error("outside request scope");
+  }),
+}));
 vi.mock("@vercel/analytics/server", () => ({
   track: vi.fn().mockResolvedValue(undefined),
 }));

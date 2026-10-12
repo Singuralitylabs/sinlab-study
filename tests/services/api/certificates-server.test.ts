@@ -256,7 +256,7 @@ describe("issueMissingCertificates（既に完了済みのテーマの遡及発�
       issuedThemeIds: new Set([1]),
     });
 
-    expect(result).toEqual([inserted.data]);
+    expect(result).toEqual({ issued: [inserted.data], blockedByMissingName: false });
     const builders = certificateInserts(admin);
     expect(builders).toHaveLength(1);
     expect(builders[0].insert.mock.calls[0][0]).toMatchObject({
@@ -274,8 +274,25 @@ describe("issueMissingCertificates（既に完了済みのテーマの遡及発�
       issuedThemeIds: new Set([1]),
     });
 
-    expect(result).toEqual([]);
+    expect(result).toEqual({ issued: [], blockedByMissingName: false });
     expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it("受講者名が空なら発行せず、blockedByMissingName で知らせる", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const admin = mockAdminClient({
+      certificates: inserted,
+      users: { data: { display_name: "" }, error: null },
+    });
+
+    const result = await issueMissingCertificates({
+      ...eligible,
+      summaries: [done(1)] as never,
+      issuedThemeIds: new Set(),
+    });
+
+    expect(result).toEqual({ issued: [], blockedByMissingName: true });
+    expect(certificateInserts(admin)).toHaveLength(0);
   });
 
   it.each([
@@ -290,7 +307,7 @@ describe("issueMissingCertificates（既に完了済みのテーマの遡及発�
       issuedThemeIds: new Set(),
     });
 
-    expect(result).toEqual([]);
+    expect(result).toEqual({ issued: [], blockedByMissingName: false });
     expect(createAdminSupabaseClient).not.toHaveBeenCalled();
   });
 
@@ -307,7 +324,7 @@ describe("issueMissingCertificates（既に完了済みのテーマの遡及発�
         summaries: [done(1)] as never,
         issuedThemeIds: new Set(),
       })
-    ).toEqual([]);
+    ).toEqual({ issued: [], blockedByMissingName: false });
     expect(scheduleCertificateIssuedEmail).not.toHaveBeenCalled();
 
     vi.mocked(createAdminSupabaseClient).mockRejectedValue(new Error("no key"));
@@ -317,7 +334,7 @@ describe("issueMissingCertificates（既に完了済みのテーマの遡及発�
         summaries: [done(1)] as never,
         issuedThemeIds: new Set(),
       })
-    ).resolves.toEqual([]);
+    ).resolves.toEqual({ issued: [], blockedByMissingName: false });
   });
 });
 

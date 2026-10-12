@@ -1,6 +1,7 @@
-import { after, type NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { USER_STATUS } from "@/app/constants/user";
+import { runAfterResponse } from "@/app/lib/after-response";
 import { shouldTrackFirstCompletion } from "@/app/lib/analytics-funnel";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
 import { issueCertificateIfEligible } from "@/app/services/api/certificates-server";
@@ -86,12 +87,9 @@ export async function POST(request: NextRequest) {
     // throws) it just runs inline. The helper never throws and its result is not used: a failure
     // (or the email) must not change this response.
     if (isCompleted) {
-      const issue = () => issueCertificateIfEligible({ userId, userStatus, userRole, contentId });
-      try {
-        after(issue);
-      } catch {
-        await issue();
-      }
+      await runAfterResponse(() =>
+        issueCertificateIfEligible({ userId, userStatus, userRole, contentId })
+      );
     }
 
     return NextResponse.json({ success: true, isCompleted });
