@@ -21,6 +21,10 @@ vi.mock("@/app/services/api/upgrade-price-server", () => ({
 }));
 vi.mock("@/app/services/api/ai-review-server");
 vi.mock("@/app/services/api/submissions-server");
+vi.mock("@/app/services/api/ai-review-usage-server");
+vi.mock("@/app/services/api/supabase-server", () => ({
+  createServerSupabaseClient: vi.fn().mockResolvedValue({}),
+}));
 vi.mock("@/app/services/api/learning-server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/app/services/api/learning-server")>();
   return {
@@ -51,12 +55,15 @@ vi.mock(
 import { track } from "@vercel/analytics/server";
 import ContentPage from "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/page";
 import type { NavigationContent } from "@/app/lib/content-navigation";
+import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
+import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   fetchContentById,
   fetchThemeNavigationIndex,
   fetchWeekById,
 } from "@/app/services/api/learning-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
+import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -643,5 +650,87 @@ describe("お試し → 有料の転換導線（ロック画面, #288）", () =>
 
     expect(html).not.toContain("有料会員になると使えるもの");
     expect(html).not.toContain('href="/upgrade"');
+  });
+});
+
+describe("演習ページのAIレビュー残り回数（#304）", () => {
+  const setupExercise = ({
+    userStatus,
+    isPublished = true,
+    usage = { contentReviews: [], todayTotal: 0 },
+  }: {
+    userStatus: "active" | "trial";
+    isPublished?: boolean;
+    usage?: Awaited<ReturnType<typeof fetchAIReviewUsage>>;
+  }) => {
+    setup({ userStatus, userRole: "member", isOpenToTrial: true, isPublished });
+    vi.mocked(fetchContentById).mockResolvedValue({
+      data: slideContent({
+        content_type: "exercise",
+        pdf_url: null,
+        exercise_instructions: "課題文",
+        allowed_submission_types: "code",
+        is_open_to_trial: true,
+        is_published: isPublished,
+      }),
+      error: null,
+    } as never);
+    vi.mocked(fetchCompletedAIReviewByContentId).mockResolvedValue({ data: null } as never);
+    vi.mocked(fetchLatestSubmissionByContentId).mockResolvedValue({ data: null } as never);
+    vi.mocked(fetchAIReviewUsage).mockResolvedValue(usage);
+  };
+
+  it("active: 日次合計も数え、この課題と1日全体の小さい方を残り回数として表示する", async () => {
+    setupExercise({
+      userStatus: "active",
+      usage: {
+        contentReviews: [
+          { id: 1, submission_id: 1, status: "completed", created_at: new Date().toISOString() },
+        ],
+        todayTotal: 1,
+      },
+    });
+
+    const html = await render();
+
+    expect(fetchAIReviewUsage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ userId: 7, contentId: 10, includeDailyTotal: true })
+    );
+    expect(html).toContain("本日の残り回数: 1回");
+  });
+
+  it("trial: 日次合計は数えない（日次上限を適用しない）", async () => {
+    setupExercise({ userStatus: "trial" });
+
+    await render();
+
+    expect(fetchAIReviewUsage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ includeDailyTotal: false })
+    );
+  });
+
+  it("集計に失敗しても案内は表示し、残り回数だけを隠す", async () => {
+    setupExercise({ userStatus: "active", usage: null });
+
+    const html = await render();
+
+    expect(html).toContain("AIレビューは新しい提出に対して1日");
+    expect(html).not.toContain("本日の残り回数");
+  });
+
+  it("未公開（プレビュー）の演習では集計しない", async () => {
+    setupExercise({ userStatus: "active", isPublished: false });
+    vi.mocked(getServerAuth).mockResolvedValue({
+      user: { id: "auth-uuid" },
+      userId: 7,
+      userStatus: "active",
+      userRole: "admin",
+    } as never);
+
+    await render();
+
+    expect(fetchAIReviewUsage).not.toHaveBeenCalled();
   });
 });
