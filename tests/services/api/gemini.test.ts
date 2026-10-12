@@ -226,6 +226,25 @@ describe("buildUserPrompt", () => {
     expect(prompt).toContain("## 提出コード\n```\nSELECT 1;\n```");
   });
 
+  it("コード中のバッククォートより長いフェンスで囲み、提出内容でフェンスが閉じないようにする", () => {
+    const readme = "# 手順\n```bash\nnpm install\n```\n以降の文";
+    const single = buildUserPrompt("課題", {
+      type: "code",
+      files: [{ filename: "", language: "markdown", content: readme }],
+    });
+    expect(single).toContain(`## 提出コード\n\`\`\`\`markdown\n${readme}\n\`\`\`\``);
+
+    const multi = buildUserPrompt("課題", {
+      type: "code",
+      files: [
+        { filename: "README.md", language: "markdown", content: "````js\nx\n````" },
+        { filename: "main.js", language: "javascript", content: "const a = 1;" },
+      ],
+    });
+    expect(multi).toContain("### README.md (markdown)\n`````\n````js\nx\n````\n`````");
+    expect(multi).toContain("### main.js (javascript)\n```\nconst a = 1;\n```");
+  });
+
   it("単一ファイル（ファイル名なし）は上限を超えた分を省略する", () => {
     const content = "a".repeat(GEMINI_MAX_CODE_LENGTH + 12);
     const prompt = buildUserPrompt("課題", {

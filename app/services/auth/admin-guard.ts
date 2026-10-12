@@ -55,3 +55,28 @@ export async function requireContentManagerApi(): Promise<
   }
   return { response: null, auth };
 }
+
+/**
+ * Learner gate for routes any signed-in, non-rejected user may call (same checks and messages as
+ * the progress / submission routes): 401 unauthenticated, 403 no users row, 403 rejected.
+ * Content visibility is the route's job.
+ */
+export async function requireLearnerApi(): Promise<
+  { response: NextResponse } | { response: null; auth: ServerAuth & { userId: number } }
+> {
+  const auth = await getServerAuth();
+  if (!auth.user) {
+    return { response: NextResponse.json({ error: "認証が必要です" }, { status: 401 }) };
+  }
+  if (auth.userId == null) {
+    return {
+      response: NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 }),
+    };
+  }
+  if (auth.userStatus === USER_STATUS.REJECTED) {
+    return {
+      response: NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 }),
+    };
+  }
+  return { response: null, auth: { ...auth, userId: auth.userId } };
+}

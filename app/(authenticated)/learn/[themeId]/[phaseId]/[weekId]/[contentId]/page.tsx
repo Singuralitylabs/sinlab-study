@@ -281,6 +281,9 @@ export default async function ContentPage({ params }: PageProps) {
                 </p>
               ) : (
                 <QuizForm
+                  // Remount (dropping answers and results) when router.refresh() brings a changed
+                  // question set, so the form never sends old choices with a new revision.
+                  key={quizQuestions.map((q) => `${q.id}:${q.revision}`).join(",")}
                   contentId={contentIdNum}
                   questions={quizQuestions.map((question) => ({
                     ...question,

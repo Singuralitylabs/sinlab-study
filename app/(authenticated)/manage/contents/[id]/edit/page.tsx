@@ -37,8 +37,9 @@ export default async function EditContentPage({ params }: PageProps) {
 
   // Stored questions are loaded for every type: a quiz switched to another type keeps its rows,
   // and switching it back in this form must start from them, or saving would overwrite them with
-  // an empty question. So a failed fetch blocks the form for every type, not only a quiz.
-  const quizError = quizFetch.error;
+  // an empty question. On a failed fetch a quiz is not editable at all; other types stay editable
+  // but cannot be switched to quiz (quizQuestionsUnavailable).
+  const quizError = content.content_type === "quiz" ? quizFetch.error : null;
   const quizQuestions = quizFetch.data ?? [];
 
   const sortedWeeks = weeks ? sortWeeksByHierarchy(weeks) : [];
@@ -96,6 +97,7 @@ export default async function EditContentPage({ params }: PageProps) {
         weeks={filterOptions.weeks}
         initialData={content}
         initialQuizQuestions={quizQuestions}
+        quizQuestionsUnavailable={Boolean(quizFetch.error)}
         siblingCandidates={siblingCandidates}
         mode="edit"
       />

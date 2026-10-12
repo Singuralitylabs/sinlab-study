@@ -203,6 +203,7 @@ GRANT EXECUTE ON FUNCTION public.get_quiz_questions(INTEGER) TO authenticated, s
 -- ---------- 採点 ----------
 -- p_answers: [{"question_id": 1, "revision": "...", "choices": [0, 2]},
 --             {"question_id": 2, "revision": "...", "text": "..."}]
+-- 回答の数が設問の数と違う（ページを開いた後に設問が削除・追加された）か、
 -- 1 問でも未回答（選択式で選択なし・入力式で空文字）か、revision が get_quiz_questions の返した
 -- 値と違う（ページを開いた後に設問が差し替わった）か、同じ question_id が重複していれば
 -- 何も返さない。これは「回答を送る前に正解を見せない」ための形式上の条件で、ダミーの回答を
@@ -228,6 +229,16 @@ BEGIN
   END IF;
 
   IF jsonb_typeof(p_answers) IS DISTINCT FROM 'array' THEN
+    RETURN;
+  END IF;
+
+  -- An answer for a question that no longer exists (deleted after the page loaded) would otherwise
+  -- be dropped silently and the rest graded as if the quiz were complete. With no duplicates
+  -- (below) and every current question answered (further below), equal counts mean every answer
+  -- matches a current question.
+  IF jsonb_array_length(p_answers) <> (
+    SELECT count(*) FROM quiz_questions q WHERE q.content_id = p_content_id
+  ) THEN
     RETURN;
   END IF;
 

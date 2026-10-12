@@ -52,6 +52,11 @@ interface ContentFormProps {
   initialData?: LearningContent;
   /** Stored questions (with answers) for a quiz in edit mode. */
   initialQuizQuestions?: QuizQuestionData[];
+  /**
+   * The stored questions could not be read (edit mode, non-quiz content). Switching to quiz is
+   * disabled: the editor would start empty and saving would replace the stored questions.
+   */
+  quizQuestionsUnavailable?: boolean;
   initialWeekSelection?: InitialWeekSelection;
   /**
    * Includes the target itself in edit mode so its current position can be found; filtered out in
@@ -126,6 +131,7 @@ export function ContentForm({
   weeks,
   initialData,
   initialQuizQuestions = [],
+  quizQuestionsUnavailable = false,
   initialWeekSelection,
   siblingCandidates = [],
   mode,
@@ -515,7 +521,8 @@ export function ContentForm({
                   key={opt.value}
                   type="button"
                   onClick={() => setContentType(opt.value)}
-                  className={`flex-1 rounded-lg border-2 px-3 py-2 text-sm transition-colors ${
+                  disabled={opt.value === "quiz" && quizQuestionsUnavailable}
+                  className={`flex-1 rounded-lg border-2 px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     contentType === opt.value
                       ? "border-primary bg-primary/5 font-medium"
                       : "border-border hover:border-muted-foreground"
@@ -525,6 +532,11 @@ export function ContentForm({
                 </button>
               ))}
             </div>
+            {quizQuestionsUnavailable && (
+              <p className="text-xs text-muted-foreground">
+                保存済みのクイズの設問を読み込めなかったため、クイズへの種別変更はできません。時間をおいて再度お試しください。
+              </p>
+            )}
             {/* Changing a row that has a PDF to another type deletes the PDF from Storage (avoids orphans; not restored on revert). Bulk-changed rows keep pdf_url, so decide by pdf_url presence, not the initial type. */}
             {mode === "edit" && Boolean(initialData?.pdf_url) && contentType !== "slide" && (
               <p className="text-xs text-destructive">

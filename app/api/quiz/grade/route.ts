@@ -1,11 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { USER_STATUS } from "@/app/constants/user";
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { gradeQuizAnswers } from "@/app/services/api/quiz-server";
 import { QuizGradeRequestSchema, validateRequest } from "@/app/services/api/schemas";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
+import { requireLearnerApi } from "@/app/services/auth/admin-guard";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
-import { getServerAuth } from "@/app/services/auth/server-auth";
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,16 +14,11 @@ export async function POST(request: NextRequest) {
     }
     const { contentId, answers } = validation.data;
 
-    const { user, userId, userStatus, userRole } = await getServerAuth();
-    if (!user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    const guard = await requireLearnerApi();
+    if (guard.response) {
+      return guard.response;
     }
-    if (userId == null) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-    if (userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
+    const { userRole } = guard.auth;
 
     const supabase = await createServerSupabaseClient();
 

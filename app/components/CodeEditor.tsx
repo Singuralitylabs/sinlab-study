@@ -1,16 +1,7 @@
 "use client";
 
-import { css } from "@codemirror/lang-css";
-import { html } from "@codemirror/lang-html";
-import { javascript } from "@codemirror/lang-javascript";
-import { json } from "@codemirror/lang-json";
-import { markdown } from "@codemirror/lang-markdown";
-import { python } from "@codemirror/lang-python";
-import { PostgreSQL, sql } from "@codemirror/lang-sql";
-import { StreamLanguage } from "@codemirror/language";
-import { shell } from "@codemirror/legacy-modes/mode/shell";
-import CodeMirror from "@uiw/react-codemirror";
-import { useSyncExternalStore } from "react";
+import CodeMirror, { type Extension } from "@uiw/react-codemirror";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 
 export interface CodeEditorProps {
@@ -20,33 +11,29 @@ export interface CodeEditorProps {
   placeholder?: string;
 }
 
-const shellLanguage = StreamLanguage.define(shell);
+// One dynamic import per language: a static import of every package would put all of them (SQL
+// dialects, Markdown pulling in HTML/CSS/JS, Python...) into the editor chunk of every exercise.
+const LANGUAGE_LOADERS: Record<CodeLanguage, () => Promise<Extension[]>> = {
+  javascript: () => import("@codemirror/lang-javascript").then((m) => [m.javascript()]),
+  // GAS (Google Apps Script) is JavaScript-based, so it uses the same syntax.
+  gas: () => import("@codemirror/lang-javascript").then((m) => [m.javascript()]),
+  typescript: () =>
+    import("@codemirror/lang-javascript").then((m) => [m.javascript({ typescript: true })]),
+  html: () => import("@codemirror/lang-html").then((m) => [m.html()]),
+  css: () => import("@codemirror/lang-css").then((m) => [m.css()]),
+  // The course's SQL lessons target Supabase, so use the PostgreSQL dialect.
+  sql: () => import("@codemirror/lang-sql").then((m) => [m.sql({ dialect: m.PostgreSQL })]),
+  bash: () =>
+    Promise.all([
+      import("@codemirror/language"),
+      import("@codemirror/legacy-modes/mode/shell"),
+    ]).then(([{ StreamLanguage }, { shell }]) => [StreamLanguage.define(shell)]),
+  markdown: () => import("@codemirror/lang-markdown").then((m) => [m.markdown()]),
+  python: () => import("@codemirror/lang-python").then((m) => [m.python()]),
+  json: () => import("@codemirror/lang-json").then((m) => [m.json()]),
+};
 
-function getExtensions(language: CodeLanguage) {
-  switch (language) {
-    case "javascript":
-    // GAS (Google Apps Script) is JavaScript-based, so it uses the same syntax.
-    case "gas":
-      return [javascript()];
-    case "typescript":
-      return [javascript({ typescript: true })];
-    case "html":
-      return [html()];
-    case "css":
-      return [css()];
-    // The course's SQL lessons target Supabase, so use the PostgreSQL dialect.
-    case "sql":
-      return [sql({ dialect: PostgreSQL })];
-    case "bash":
-      return [shellLanguage];
-    case "markdown":
-      return [markdown()];
-    case "python":
-      return [python()];
-    case "json":
-      return [json()];
-  }
-}
+const NO_EXTENSIONS: Extension[] = [];
 
 function subscribeDarkClass(onStoreChange: () => void) {
   const root = document.documentElement;
@@ -71,11 +58,30 @@ export function CodeEditor({ value, onChange, language, placeholder }: CodeEdito
     getDarkClassServerSnapshot
   );
 
+  // The editor mounts at once without highlighting and gains it when the language chunk arrives,
+  // so typing is never blocked on the download.
+  const [loaded, setLoaded] = useState<{ language: CodeLanguage; extensions: Extension[] } | null>(
+    null
+  );
+  useEffect(() => {
+    let cancelled = false;
+    LANGUAGE_LOADERS[language]()
+      .then((extensions) => {
+        // Ignore a slower chunk for a language the user already switched away from.
+        if (!cancelled) setLoaded({ language, extensions });
+      })
+      .catch((error) => console.error("エディタの言語の読み込みに失敗しました:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, [language]);
+  const extensions = loaded?.language === language ? loaded.extensions : NO_EXTENSIONS;
+
   return (
     <CodeMirror
       value={value}
       onChange={onChange}
-      extensions={getExtensions(language)}
+      extensions={extensions}
       theme={isDark ? "dark" : "light"}
       placeholder={placeholder}
       basicSetup={{

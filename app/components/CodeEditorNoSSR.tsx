@@ -3,9 +3,9 @@
 import dynamic from "next/dynamic";
 import type { CodeEditorProps } from "@/app/components/CodeEditor";
 
-// The CodeMirror bundle (@uiw/react-codemirror + language packages) is hundreds of KB, so lazy-load
-// it to keep it out of the exercise page's initial load (same approach as PdfSlideViewerNoSSR).
-// There is no way to enter a value while loading, so no input is lost and the submit form's empty
+// The CodeMirror bundle (@uiw/react-codemirror; language packages load per language inside it) is
+// hundreds of KB, so lazy-load it to keep it out of the exercise page's initial load (same approach
+// as PdfSlideViewerNoSSR). There is no way to enter a value while loading, so no input is lost and the submit form's empty
 // check (isCodeValid) works as usual. The placeholder height (200px) must match CodeEditor's fixed
 // height (next/dynamic's loading can't receive the component's props, so CodeEditor is also fixed
 // at 200px).
