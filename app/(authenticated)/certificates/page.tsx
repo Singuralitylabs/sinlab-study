@@ -2,7 +2,7 @@ import { Award } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
-import { isCertificateEligible } from "@/app/lib/certificate";
+import { isCertificateEligible, isThemeCompleted } from "@/app/lib/certificate";
 import { formatDate } from "@/app/lib/format-date";
 import {
   fetchMyCertificates,
@@ -116,8 +116,12 @@ export default async function CertificatesPage() {
                         <span className="text-sm text-muted-foreground shrink-0">{progress}%</span>
                       </div>
                       <p className="text-sm text-muted-foreground mb-2">
-                        {blockedByMissingName && completedContents >= totalContents
-                          ? "氏名が未設定のため発行できません。運営へお問い合わせください。"
+                        {isThemeCompleted({ totalContents, completedContents })
+                          ? // Completed but still unissued: a blank name or any other failure (logged
+                            // server-side) left it. Never say "when you complete" for a done theme.
+                            blockedByMissingName
+                            ? "氏名が未設定のため発行できません。運営へお問い合わせください。"
+                            : "修了証を発行できませんでした。時間をおいて再読み込みしてください。"
                           : `修了すると発行されます（${completedContents} / ${totalContents}）`}
                       </p>
                       <Progress value={progress} className="h-2" />

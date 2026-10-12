@@ -119,6 +119,14 @@ describe("/certificates の遡及発行", () => {
     expect(html).not.toContain("修了すると発行されます（2 / 2）");
   });
 
+  it("氏名以外の理由で発行できなかった完了済みのテーマも、「修了すると」とは案内しない", async () => {
+    const html = await render();
+
+    expect(html).toContain("修了証を発行できませんでした");
+    expect(html).not.toContain("修了すると発行されます（2 / 2）");
+    expect(html).toContain("修了すると発行されます（1 / 2）");
+  });
+
   it("進捗の集計に失敗したときは、未発行のテーマが消えたように見せずエラーを表示する", async () => {
     vi.mocked(fetchThemeProgressSummaries).mockResolvedValue({
       data: null,

@@ -55,7 +55,7 @@ async function hasCertificate(userId: number, themeId: number): Promise<boolean>
 export type IssuedCertificate = Pick<Certificate, "id" | "certificate_no" | "theme_name">;
 
 export type IssueResult = {
-  issued: IssuedCertificate[];
+  issued: readonly IssuedCertificate[];
   /**
    * True when issuance was skipped because the user's display_name is blank. The user cannot fix
    * it themselves (no profile editing), so the page tells them to contact the operators.
@@ -63,7 +63,11 @@ export type IssueResult = {
   blockedByMissingName: boolean;
 };
 
-const NOTHING_ISSUED: IssueResult = { issued: [], blockedByMissingName: false };
+// Frozen: one instance is returned to every caller, so a stray push() must not leak across requests.
+const NOTHING_ISSUED: IssueResult = Object.freeze({
+  issued: Object.freeze([] as IssuedCertificate[]),
+  blockedByMissingName: false,
+});
 
 /**
  * Inserts one certificate per completed theme summary (service_role; `user_id` fixed to the
