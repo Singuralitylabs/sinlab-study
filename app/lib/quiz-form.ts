@@ -30,3 +30,35 @@ export type VersionedValue<T> = { version: string; value: T };
 export function valueForVersion<T>(entry: VersionedValue<T> | null, version: string): T | null {
   return entry && entry.version === version ? entry.value : null;
 }
+
+/** The part of the quiz form state tied to a question set. */
+export type QuizFormVersionedState<A, R> = {
+  answers: Record<number, A>;
+  gradeResult: VersionedValue<R> | null;
+  errorState: VersionedValue<string> | null;
+};
+
+/**
+ * State after the question set changed from `previousVersion`. Everything tied to the old set is
+ * cleared, errors included: revisions are content hashes, so an admin's edit-and-revert brings the
+ * old version back and a kept error would reappear under an empty form. The notice counts only
+ * what the learner could see (answers, shown results / error, a pending submission), not values
+ * already hidden by a version mismatch.
+ */
+export function resetForNewQuizVersion<A, R>(
+  state: QuizFormVersionedState<A, R>,
+  previousVersion: string,
+  { questionCount, isSubmitting }: { questionCount: number; isSubmitting: boolean }
+): QuizFormVersionedState<A, R> & { notice: string | null } {
+  const discarded =
+    Object.keys(state.answers).length > 0 ||
+    valueForVersion(state.gradeResult, previousVersion) !== null ||
+    valueForVersion(state.errorState, previousVersion) !== null ||
+    isSubmitting;
+  return {
+    answers: {},
+    gradeResult: null,
+    errorState: null,
+    notice: quizQuestionsUpdatedNotice(questionCount, discarded),
+  };
+}

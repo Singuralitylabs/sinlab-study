@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   quizQuestionsUpdatedNotice,
   quizQuestionVersion,
+  resetForNewQuizVersion,
   valueForVersion,
 } from "@/app/lib/quiz-form";
 
@@ -54,5 +55,65 @@ describe("valueForVersion", () => {
 
   it("値がなければ null", () => {
     expect(valueForVersion(null, "1:a")).toBeNull();
+  });
+});
+
+describe("resetForNewQuizVersion", () => {
+  const empty = { answers: {}, gradeResult: null, errorState: null };
+  const opts = { questionCount: 2, isSubmitting: false };
+
+  it("回答・結果・エラーをすべて消す", () => {
+    const next = resetForNewQuizVersion(
+      {
+        answers: { 1: "a" },
+        gradeResult: { version: "v1", value: "結果" },
+        errorState: { version: "v1", value: "エラー" },
+      },
+      "v1",
+      opts
+    );
+
+    expect(next).toMatchObject({ answers: {}, gradeResult: null, errorState: null });
+  });
+
+  it("版が v1 → v2 → v1 と往復しても、v1 のときのエラーは再表示されない", () => {
+    // v1 で送信 → v2 にリセット → 失敗応答が v1 のエラーとして届く（非表示）→ v1 に戻る
+    const afterLateError = {
+      ...empty,
+      errorState: { version: "v1", value: "採点できませんでした" },
+    };
+    expect(valueForVersion(afterLateError.errorState, "v2")).toBeNull();
+
+    const next = resetForNewQuizVersion(afterLateError, "v2", opts);
+
+    expect(valueForVersion(next.errorState, "v1")).toBeNull();
+  });
+
+  it("表示されていた回答・結果・エラー・送信中があれば注記を出す", () => {
+    const notice = "設問が更新されたため、回答をやり直してください";
+    expect(resetForNewQuizVersion({ ...empty, answers: { 1: "a" } }, "v1", opts).notice).toBe(
+      notice
+    );
+    expect(
+      resetForNewQuizVersion({ ...empty, gradeResult: { version: "v1", value: 1 } }, "v1", opts)
+        .notice
+    ).toBe(notice);
+    expect(
+      resetForNewQuizVersion({ ...empty, errorState: { version: "v1", value: "e" } }, "v1", opts)
+        .notice
+    ).toBe(notice);
+    expect(resetForNewQuizVersion(empty, "v1", { ...opts, isSubmitting: true }).notice).toBe(
+      notice
+    );
+  });
+
+  it("版違いで非表示だった古い結果は「破棄したもの」に数えない", () => {
+    const hiddenOldResult = { ...empty, gradeResult: { version: "v1", value: 1 } };
+
+    expect(resetForNewQuizVersion(hiddenOldResult, "v2", opts).notice).toBeNull();
+  });
+
+  it("何も表示されていなければ注記を出さない", () => {
+    expect(resetForNewQuizVersion(empty, "v1", opts).notice).toBeNull();
   });
 });

@@ -3,7 +3,7 @@
 import { CheckCircle2, Loader2, RotateCcw, Send, XCircle } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
   QUIZ_QUESTION_TYPE_LABELS,
   QUIZ_TEXT_ANSWER_MAX_LENGTH,
@@ -11,8 +11,8 @@ import {
   type QuizQuestionResult,
 } from "@/app/constants/quiz";
 import {
-  quizQuestionsUpdatedNotice,
   quizQuestionVersion,
+  resetForNewQuizVersion,
   type VersionedValue,
   valueForVersion,
 } from "@/app/lib/quiz-form";
@@ -79,17 +79,37 @@ export function QuizForm({
   const results = valueForVersion(gradeResult, questionVersion);
   const error = valueForVersion(errorState, questionVersion);
 
-  // Drop the answers too (they are keyed by id and would be sent with the new revision), and say
-  // why only when something was actually discarded.
+  // Drop the answers too (they are keyed by id and would be sent with the new revision). The
+  // progress warning is kept: it is about the completion record, not the question set.
   const [seenQuestionVersion, setSeenQuestionVersion] = useState(questionVersion);
   if (seenQuestionVersion !== questionVersion) {
     setSeenQuestionVersion(questionVersion);
-    const discarded = Object.keys(answers).length > 0 || gradeResult !== null || isSubmitting;
-    setAnswers({});
-    setGradeResult(null);
-    setProgressWarning(null);
-    setUpdatedNotice(quizQuestionsUpdatedNotice(questions.length, discarded));
+    const next = resetForNewQuizVersion({ answers, gradeResult, errorState }, seenQuestionVersion, {
+      questionCount: questions.length,
+      isSubmitting,
+    });
+    setAnswers(next.answers);
+    setGradeResult(next.gradeResult);
+    setErrorState(next.errorState);
+    setUpdatedNotice(next.notice);
   }
+
+  const markCompleted = useCallback(async () => {
+    try {
+      const response = await fetch("/api/progress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contentId, isCompleted: true }),
+      });
+      if (!response.ok) {
+        throw new Error(String(response.status));
+      }
+      // Re-render the server page so the completion button reflects the new progress.
+      router.refresh();
+    } catch {
+      setProgressWarning("完了状態を記録できませんでした。下のボタンから完了にしてください。");
+    }
+  }, [contentId, router]);
 
   // Completion is recorded from the committed state, so a result that is no longer current (the
   // set changed before it arrived) is never recorded.
@@ -101,7 +121,7 @@ export function QuizForm({
     if (canRecordProgress && !initialCompleted) {
       void markCompleted();
     }
-  });
+  }, [gradeResult, questionVersion, canRecordProgress, initialCompleted, markCompleted]);
 
   const allAnswered = questions.every((q) => isAnswered(q, answers[q.id]));
   const autoGraded = results ? [...results.values()].filter((r) => r.isCorrect !== null) : [];
@@ -124,23 +144,6 @@ export function QuizForm({
         : [...prev.choices, index];
       return { ...prev, choices };
     });
-  }
-
-  async function markCompleted() {
-    try {
-      const response = await fetch("/api/progress", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contentId, isCompleted: true }),
-      });
-      if (!response.ok) {
-        throw new Error(String(response.status));
-      }
-      // Re-render the server page so the completion button reflects the new progress.
-      router.refresh();
-    } catch {
-      setProgressWarning("完了状態を記録できませんでした。下のボタンから完了にしてください。");
-    }
   }
 
   async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
@@ -318,17 +321,20 @@ export function QuizForm({
         </Alert>
       )}
 
+      {/* Outside the results block: the record can fail after the set changed and the results
+          were cleared, and the learner still needs to know to use the completion button. */}
+      {progressWarning && (
+        <Alert variant="destructive">
+          <AlertDescription>{progressWarning}</AlertDescription>
+        </Alert>
+      )}
+
       {results ? (
         <div className="space-y-3">
           {autoGraded.length > 0 && (
             <p className="text-sm font-medium">
               選択式 {autoGraded.length} 問中 {correctCount} 問正解
             </p>
-          )}
-          {progressWarning && (
-            <Alert variant="destructive">
-              <AlertDescription>{progressWarning}</AlertDescription>
-            </Alert>
           )}
           {!canRecordProgress && (
             <p className="text-sm text-muted-foreground">
