@@ -40,6 +40,7 @@ const FALLBACK_OVERVIEW_BY_TYPE: Record<ContentType, string> = {
   text: "このコンテンツではテキストで学びます",
   slide: "このコンテンツではスライドで学びます",
   exercise: "このコンテンツでは演習に取り組みます",
+  quiz: "このコンテンツではクイズに答えて理解を確かめます",
 };
 
 export function getLockedContentFallbackOverview(contentType: ContentType): string {

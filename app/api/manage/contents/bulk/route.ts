@@ -1,12 +1,19 @@
 import { NextResponse } from "next/server";
-import type { BulkContentAction } from "@/app/constants/content";
-import { USER_STATUS } from "@/app/constants/user";
+import { BULK_SETTABLE_CONTENT_TYPES, type BulkContentAction } from "@/app/constants/content";
 import { isContentType } from "@/app/lib/content-filtering";
-import { bulkUpdateContents } from "@/app/services/api/admin-server";
-import { BulkContentUpdateSchema, validateRequest } from "@/app/services/api/schemas";
-import { checkContentPermissions } from "@/app/services/auth/permissions";
-import { getServerAuth } from "@/app/services/auth/server-auth";
+import { bulkUpdateContents, createContentsAtTail } from "@/app/services/api/admin-server";
+import {
+  BulkContentCreateSchema,
+  BulkContentUpdateSchema,
+  validateRequest,
+} from "@/app/services/api/schemas";
+import { requireContentManagerApi } from "@/app/services/auth/admin-guard";
 import type { LearningContent } from "@/app/types";
+
+// Bulk creation runs up to MAX_BULK_CREATE_CONTENTS items sequentially (several DB round trips
+// each). If the platform default timeout cut it off, the response listing what was already
+// created would never reach the admin.
+export const maxDuration = 60;
 
 /**
  * BulkContentAction covers all of BULK_CONTENT_ACTIONS and is schema-validated before this call, so
@@ -31,6 +38,10 @@ function buildPatch(
       if (typeof contentType !== "string" || !isContentType(contentType)) {
         return { error: "有効なコンテンツ種別を指定してください" };
       }
+      // Setting quiz here would publish a quiz with no questions (POST/PUT require them).
+      if (!BULK_SETTABLE_CONTENT_TYPES.includes(contentType)) {
+        return { error: "クイズへの変更は編集画面で設問と一緒に行ってください" };
+      }
       // A rubric only makes sense for exercises; drop it when the type moves away.
       return contentType === "exercise"
         ? { content_type: contentType }
@@ -38,20 +49,66 @@ function buildPatch(
   }
 }
 
+/**
+ * Bulk registration (e.g. a course's quizzes with their questions). Every item is validated
+ * before anything is written; creation then runs in order and stops at the first failure.
+ */
+export async function POST(request: Request) {
+  try {
+    const { response: denied } = await requireContentManagerApi();
+    if (denied) {
+      return denied;
+    }
+
+    const validation = await validateRequest(request, BulkContentCreateSchema);
+    if (!validation.success) {
+      return validation.response;
+    }
+
+    const { created, error, failedIndex } = await createContentsAtTail(
+      validation.data.contents.map(({ quiz_questions, ...content }) => ({
+        ...content,
+        quizQuestions: quiz_questions,
+      }))
+    );
+
+    // A quiz whose publish step failed is created as a draft; name them (on success and on a later
+    // failure alike) so the admin publishes them instead of re-sending, which would duplicate them.
+    const requestedPublished = validation.data.contents.map((c) => c.is_published === true);
+    const unpublished = created.filter((c, i) => requestedPublished[i] && !c.isPublished);
+    const warning =
+      unpublished.length > 0
+        ? `公開に失敗したため非公開で作成したコンテンツがあります: ${unpublished
+            .map((c) => c.title)
+            .join("、")}`
+        : undefined;
+
+    if (error) {
+      // A missing week_id (FK) or a value the DB CHECK rejects is the caller's input, not a
+      // server fault, so report it as 400 to tell it apart from a DB outage.
+      const isInputError = error.code === "23503" || error.code === "23514";
+      return NextResponse.json(
+        {
+          error: `${(failedIndex ?? 0) + 1}件目のコンテンツの作成に失敗しました（それより前の${created.length}件は作成済み）${isInputError ? "。存在しない週や許可されていない値が含まれています" : ""}`,
+          created,
+          ...(warning ? { warning } : {}),
+        },
+        { status: isInputError ? 400 : 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true, created, ...(warning ? { warning } : {}) });
+  } catch (error) {
+    console.error("API エラー:", error);
+    return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
+  }
+}
+
 export async function PATCH(request: Request) {
   try {
-    const { user, userId, userStatus, userRole } = await getServerAuth();
-    if (!user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-    }
-    if (!userId) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-    if (userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
-    if (!checkContentPermissions(userRole)) {
-      return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
+    const { response: denied } = await requireContentManagerApi();
+    if (denied) {
+      return denied;
     }
 
     const validation = await validateRequest(request, BulkContentUpdateSchema);

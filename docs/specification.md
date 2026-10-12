@@ -314,7 +314,7 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 `/upgrade/success` の決済確認は `payment_status==='paid'` に加えて `no_payment_required` も許容する。Price側にトライアル期間が設定されている場合、Checkout時点では決済が発生せず `no_payment_required` になるため、`paid` のみを条件にするとWebhook側（`trialing` を昇格対象に含める）と非対称になり、実際には昇格済みなのにsuccessページで「決済情報を確認できませんでした」という誤ったエラー表示になってしまう。
 
-Checkoutの決済手段はカードのみに限定する（コンビニ払い等の遅延通知系決済手段は使わない）。これらの決済手段では `checkout.session.completed` 発火時点でも未入金（`incomplete`）のままになり得るため、「Checkoutから戻った瞬間に必ず利用開始できる」という設計上の前提を成立させるための制約である。
+Checkoutの決済手段はカードのみに限定する（コンビニ払い等の遅延通知系決済手段は使わない）。これらの決済手段では `checkout.session.completed` 発火時点でも未入金（`incomplete`）のままになり得るため、「Checkoutから戻った瞬間に必ず利用開始できる」という設計上の前提を成立させるための制約である。指定は `allowed_payment_method_types: ["card"]` で行う。これはアカウントで有効な決済手段に対する絞り込みなので、Stripe ダッシュボードでカード決済を無効にしてはならない（カードが候補から外れると Checkout Session を作成できず、利用者には汎用エラーだけが表示される）。
 
 `stripe_subscriptions` のミラー更新は、既に**別の**現行契約（終端状態でも手続き中でもない行）が記録済みの場合はスキップする。古い成功ページURLのリプレイで現行契約のミラー行が上書きされると、以後の解約Webhookが `stripe_subscription_id` で照合できなくなり、解約しても降格されなくなる事故につながるため。Checkout作成の処理権を確保しただけの行（`checkout_pending`）はまだ契約を表さないため、この判定の対象外とする（対象にすると、いま完了したCheckoutの昇格自体がスキップされてしまう）。ミラー更新時には `checkout_claimed_at` / `checkout_session_id` をNULLに戻し、処理権を正常に解除する。ただし解除するのは、claimが保持しているセッション自身の処理（またはセッションを特定できない場合）に限る。
 
@@ -418,6 +418,7 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 | テキスト（text） | Markdown形式で記述・表示（GFM対応） |
 | スライド（slide） | 非公開バケット `slides` のPDFを、閲覧権限チェック後にサーバー側で発行した署名付きURLで react-pdf によりブラウザ内表示（後述） |
 | 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携 |
+| クイズ（quiz） | 導入文（`description`・任意）と設問（1〜3問）を表示し、回答後に正誤・解説を表示（後述） |
 
 動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア下部に概要欄カードを表示する（テキスト・演習と同じ `MarkdownRenderer`）。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）は `"use client"` を持たない共有コンポーネントで、Server Component からはサーバーで、Client Component（`AIReviewDisplay`）からはクライアントで同じ実装のまま描画される。コンテンツ本文の Markdown 描画経路（Server Component）は client 化しない。
 
@@ -433,6 +434,16 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 4. 発行に失敗した場合（Storage障害・キーとして解釈できない値・親階層未公開によるポリシー拒否）は `SlideContent`（`app/components/SlideContent.tsx`）が「現在表示できない」旨の中立なメッセージを表示し、ページ全体は落とさない（原因が一時障害か不正な保存値かを利用者側で区別できないため、再読み込みを促す文言にはしない）。学習画面のコンテンツ詳細では、member / お試しユーザーが親階層未公開のコンテンツに到達した場合は署名発行前に `notFound()` する（theme だけ未公開だと week/phase ガードをすり抜けうるため。#216）
 
 未認証のデモ画面（`/demo`）のルート一覧（`app/demo/page.tsx`）は ISR（`revalidate = 3600`）でキャッシュする（ビルド時に service_role が無い環境では CI が placeholder キーを渡し、誤ったキーでは取得失敗して空表示になる）。ユーザー権限のクライアントが無いため、`createDemoSlideSignedUrl()`（`demo-learning-server.ts`）が他のデモ取得関数と同じく service_role で署名する。対象は**公開済み・未削除かつ `is_open_to_trial = true` のスライドのみ**（お試しユーザーと同じ範囲を未認証に見せる）で、この条件は呼び出し側ではなく同関数自身がコンテンツ行を受け取って判定する（満たさなければ Storage を呼ばず null）。それ以外のスライドはお試し公開の対象外である旨を表示する。
+
+**クイズ（#306）**
+
+設問は `quiz_questions` に持ち、受講者は `quiz_questions` を直接読めない（[データベース設計書](./database.md)3.20・6.17）。
+
+1. コンテンツ詳細ページは `fetchQuizQuestions()`（`app/services/api/quiz-server.ts`）で RPC `get_quiz_questions` を**通常クライアント**で呼び、正解を含まない設問を `QuizForm` に渡す。service_role では読まない。取得に失敗したら「設問を読み込めませんでした」と表示する（設問ゼロの表示と区別する）。設問・選択肢・解説・模範解答の `{{SUPABASE_STORAGE_URL}}` は本文と同じく `resolveMarkdownStorageUrls()` で置換する
+2. 回答は `POST /api/quiz/grade`（`{ contentId, answers: [{ questionId, revision, choices? , text? }] }`。`revision` は出題時に受け取った設問の版で、置換で id が保たれても中身が差し替わった設問への回答を採点しないため）。認証・rejected の403のあと、member / お試しは提出 API と同じ `isContentVisible()` で403を判定する（admin / maintainer は未公開プレビューで試せるよう通さない。RPC 側も可視性を再確認する）。RPC `grade_quiz_answers` が全設問に回答し、各 `revision` が現在の設問と一致し、回答の数が設問の数と同じ（削除された設問への回答を含まない）ときだけ結果を返し、空なら400「採点できませんでした。すべての設問に回答し、設問が更新された場合はページを再読み込みしてください」（クイズ以外の `contentId` でも RPC は空を返す。画面は全問回答しないと送信できないため、画面から空になるのはページ表示後に設問の形式・設問文・選択肢が編集・削除された場合。正解・解説だけの修正では空にならない）。正解・解説がレスポンスに含まれるのはこの採点後だけ
+3. 画面は設問ごとに正解・不正解と解説を表示する。入力式は自動採点せず、模範解答と解説を表示する（AIレビューは流用しない。1コンテンツ1回の上限や Gemini の費用が設問単位の確認に見合わないため）。「もう一度解く」で回答をやり直せる。再描画で設問（id・`revision`）が変わったときは回答・結果・エラーを破棄し（`revision` は内容のハッシュで、編集を戻すと版も戻るため、古いエラーも残さない）、表示されていたものを破棄したときだけ「設問が更新されたため、回答をやり直してください」と表示する（古い選択を新しい版の設問として送らないため。設問が0件になったときは「設問が登録されていません」だけを出す）。採点結果とエラーは送信時の設問の版と組で持ち、現在の版と一致するときだけ表示・完了記録する（応答待ちの間に版が変わると、id が保たれるため古い版の結果が新しい設問の下に出てしまう。届く順序に依らず防ぐため）。完了記録に失敗した警告は結果の表示とは独立に出し、完了ボタン等で完了済みになったら消す。記録の送信後、再描画で完了済みが反映される前に解き直しても、もう一度は記録しない
+4. 採点に成功したら、未完了なら進捗 API（`POST /api/progress`）で完了にし、画面を再描画して完了ボタンに反映する。クイズのページでは完了ボタンの切り替え後も再描画し、`QuizForm` の完了状態を揃える（他の種別では再描画しない。スライドは署名付きURLが再発行され PDF を読み直すため）。未公開プレビュー中は記録しない。回答内容は保存しない
+5. 設問・選択肢・解説・模範解答の描画は本文と同じ `MarkdownRenderer`。設問・選択肢はページ（Server Component）で描画して `QuizForm` に渡し、採点後に出る解説・模範解答だけを `next/dynamic` で遅延読み込みする（Markdown の描画一式を初期 JS に含めないため）。ヒントは演習のヒントと同じくプレーンテキスト
 
 `pdf_url` の旧形式（公開URL）は `20260908000000_secure_slides_bucket.sql` でキーへ正規化済み。アプリ側の `toSlideObjectKey()`（`app/lib/slide-object-key.ts`）も同じ規則で正規化するため、旧形式が管理画面やコンテンツ管理APIに流れてきてもキーとして保存され、外部URLなどキーとして解釈できない値は400で拒否する。空文字・空白のみは「未設定」として `null` に正規化して保存し、空文字の `pdf_url` を作らない（アプリは空文字を「スライド無し」として扱う一方、マイグレーションの `pdf_url` 検証は不正値として中断するため。#243）。親階層の公開判定は Storage ポリシー側にある（[データベース設計書](./database.md)6.8）。
 
@@ -606,14 +617,14 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 
 演習のコード提出フォームには、シンタックスハイライトと自動インデントを備えたコードエディタ（CodeMirror 6）を使用する。
 
-**対応言語**: `code_language` カラムで演習ごとに設定する（`javascript`（既定）/ `typescript` / `gas` / `html` / `css`。許可値は DB の CHECK 制約が正）。
+**対応言語**: `code_language` カラムで演習ごとに設定する（`javascript`（既定）/ `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`。#307）。許可値・既定ファイル名・表示名は `app/components/code-editor-utils.ts`（`CODE_LANGUAGES` / `DEFAULT_FILENAME_BY_LANGUAGE` / `CODE_LANGUAGE_LABELS`）に集約し、管理画面と提出フォームの言語セレクトも同じ一覧から作る。DB の CHECK 制約との一致はテストで検査する。SQL は PostgreSQL 方言、Bash は `@codemirror/legacy-modes` の shell モードで色分けする。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（エディタの言語モードは変えない）。Markdown のコードフェンスは `sql` / `bash` / `markdown` / `python` / `json` と `jsx` / `tsx` も色分けする（`MarkdownRenderer`）。
 
 **エディタ機能**:
 - シンタックスハイライト
 - 自動インデント・ブラケット補完
 - ライト / ダークモード対応（`<html>` の `dark` クラスに連動。未認証画面 `/login`・`/demo`（配下すべて）・`/rejected` は OS 設定にかかわらず常にライト。対象パスは `LIGHT_ONLY_PATH_PREFIXES`（`app/lib/color-scheme.ts`）が唯一の定義で、head スクリプトと `ColorSchemeSync`（遷移時の付け外し）が共有する。`useSyncExternalStore` で初期値を取得し、マウント直後のライト→ダークちらつきを防ぐ。表示中の OS テーマ切替は次の遷移か再読み込みで反映）
 
-CodeMirror本体は数百KB規模のため遅延読み込みする（クライアント読み込み方針は5.4.6）。
+CodeMirror本体は数百KB規模のため遅延読み込みする（クライアント読み込み方針は5.4.6）。言語パッケージも言語ごとに動的 import し、演習の言語の分だけを読み込む（読み込みまではハイライトなしで入力できる）。
 
 #### 5.4.6 クライアント読み込み方針
 
@@ -672,7 +683,9 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 
 **お試し公開の設定**: コンテンツ作成・編集フォーム（`/manage/contents`）にチェックボックス「お試しユーザーにも公開する」を設け、`is_open_to_trial` を設定する。デフォルトは未チェック（`false`）で、種別を問わず全コンテンツで設定可能（2.6参照）。
 
-**概要欄の設定**: コンテンツ種別が動画・スライドの場合のみ、コンテンツ作成・編集フォームに概要入力欄（Markdown・任意）を表示し、`description` として保存する（`exercise_instructions` / `hint` と同じ、未入力なら `null` で保存するパターン）。テキスト・演習では表示せず、`description` は常に `null` として送信する。
+**概要欄の設定**: コンテンツ種別が動画・スライド・クイズの場合のみ、コンテンツ作成・編集フォームに概要入力欄（Markdown・任意。クイズでは「導入文」）を表示し、`description` として保存する（`exercise_instructions` / `hint` と同じ、未入力なら `null` で保存するパターン）。テキスト・演習では表示せず、`description` は常に `null` として送信する。
+
+**クイズの設問の登録（#306）**: 種別がクイズのとき、フォームに設問エディタ（`QuizQuestionsEditor`）を表示する。設問ごとに形式・設問・選択肢と正解（選択式）または模範解答（入力式）・解説・ヒントを入力し、1〜3問・選択肢2〜6個まで追加・削除できる。送信前に API と同じ zod スキーマ（`QuizQuestionsSchema`。`app/lib/quiz.ts`）で検証し、エラーは設問番号付きで表示する。`POST` / `PUT /api/manage/contents` は `quiz_questions` を受け取り、`content_type` が `quiz` のときは必須（PUT で `content_type` を送らない部分更新では不要）。逆に `quiz_questions` は `content_type: "quiz"` と一緒にしか受け付けない（種別なし・別の種別では400。検証だけして黙って捨てないため）。保存は `replace_quiz_questions` RPC で全設問を置き換える。更新時は保存済みの設問と同じなら置き換えない。置き換える場合も同じ位置の設問は id を保つ（id が変わると、回答中の受講者の送信が旧 id で採点できなくなるため）。作成時、クイズは非公開で行を作ってから設問を保存し、成功したあとで指定どおり公開にする（取り消しまで失敗しても、公開中の設問ゼロのクイズを残さないため）。設問の保存が失敗したら作成した行を物理削除し（作成直後で参照する行はない）、週内の並び順を詰め直して500。設問の保存後に公開への更新だけが失敗した場合は、作成済みの非公開コンテンツとして200で返し `warning` を付ける（失敗扱いにすると再送で重複が作られるため）。フォームは警告と編集画面へのリンクを表示し、再送できないよう送信ボタンを無効にする。更新時は設問を先に保存し、失敗したら行を更新せず、その後の行の更新が失敗したら元の設問に戻す（復元自体の失敗はログのみ）。編集画面は種別に関係なく保存済みの設問を読み込む（クイズ以外へ変えた後に戻したとき、空の設問で上書きしないため。取得に失敗したとき、クイズはフォームを出さず、それ以外の種別はクイズへの種別変更だけを無効にして編集できる）。種別の選択肢・アイコンは `CONTENT_TYPE_FORM_OPTIONS` / `ContentTypeIcon` で全画面共通。まとめて登録する場合は `POST /api/manage/contents/bulk`（`{ contents: [...] }`、1〜50件）を使う。各要素は作成 API と同じ項目（`insert_after_id` を除く）で、クイズは `quiz_questions` 必須。全件を先に検証し（1件でも不正なら400で何も作らない）、配列の順に各週の末尾へ作成する。ルートは `maxDuration = 60` で、直列の作成がプラットフォーム既定のタイムアウトで打ち切られて結果が返らないことを防ぐ。途中で失敗したらそこで止め、作成済みの `created`（`{ id, title, isPublished }[]`）を返す（アトミックではない）。公開を指定したのに公開できなかった件があれば、成功・途中失敗いずれのレスポンスでも `warning` にその件名を列挙する。存在しない週（FK 違反 `23503`）や DB の CHECK 違反（`23514`）は入力の誤りとして400、それ以外は500。一括操作の種別変更（`PATCH` の `set_type`）ではクイズを指定できない（400。設問の無いクイズを公開しないため。許可する種別は `BULK_SETTABLE_CONTENT_TYPES`）。種別をクイズ以外へ変えても設問の行は残るが、受講者 RPC は `content_type = 'quiz'` のときだけ返し、再びクイズにするには編集画面で設問を送る（保存時に置き換わる）ため、古い設問が黙って復活することはない。
 
 **所属週の選択（テーマ→フェーズ→週の連動セレクト）**: コンテンツ作成・編集フォームの所属週選択は、コンテンツ一覧（`/manage/contents`）の階層フィルタ（`ContentsFilterBar`）と同じ導出ロジックの3段セレクトにする。親を変更すると子の選択はリセットされ、必須は週セレクトのみ（テーマ・フェーズは絞り込み用）。編集画面では所属週から所属フェーズ・テーマを逆引きして初期選択する。送信するリクエストボディは `week_id` のみで、API・DBは変わらない。一覧のフィルタ指定は「新規作成」の初期選択に引き継ぐ。`/manage/weeks`・`/manage/phases` 一覧は階層順ソート（`sortWeeksByHierarchy` / `sortPhasesByHierarchy`）をフェーズ単位・テーマ単位にグルーピングして表示し、親階層未設定の行は末尾の「未分類」グループにまとめる（`/manage/contents` の週単位グルーピングと同形式）。
 
@@ -740,7 +753,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 2. 提出データと関連コンテンツを取得
 3. 本人の提出であることを確認し、コンテンツの可視性（`is_published = true` 付き SELECT で 0 行なら 403）を確認
 4. 回数制限を判定（下記「回数制限」）
-5. Gemini API にコード・演習指示・模範回答・採点基準を送信し、構造化 JSON でレビューを生成（下記「構造化採点」）
+5. Gemini API にコード・演習指示・模範回答・採点基準を送信し、構造化 JSON でレビューを生成（下記「構造化採点」。単一ファイルの提出は `code_content` に言語を持たないため、演習の `code_language` を言語として渡す。コードを囲むフェンスはコード中のバッククォートの連続より長くし、Markdown 提出のコードブロック等でフェンスが途中で閉じないようにする。`GEMINI_MAX_CODE_LENGTH` を超えた分の省略は複数ファイルの提出でもファイルごとに行う）
 6. `ai_reviews` テーブルに結果を upsert（`pending` → `processing` → `completed` / `failed`）。再利用された行は `created_at` も現在時刻に更新する（当日の件数集計から漏れないようにするため）
 
 **回数制限（#304）**: 制限値は `app/constants/gemini.ts` の `AI_REVIEW_LIMITS` が唯一の定義で、API・画面文言・本節はここから導出する。判定は純粋関数 `evaluateReviewRequest()`（`app/lib/ai-review-limits.ts`）、集計クエリは `fetchAIReviewUsage()`（`app/services/api/ai-review-usage-server.ts`）が担う。日付の境界は **JST**（`app/lib/email-digest.ts` の `toJstDateString()` / `jstStartOfDayIso()` と同じ基準）で、UTC では数えない。集計は常に `user_id` で本人の提出に絞る（admin / maintainer は RLS で全件読めるため、RLS だけに頼らない）。
@@ -896,7 +909,7 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 
 アクティブな受講生の一覧と進捗状況を表示する。
 
-**表示項目**: 表示名、メール、進捗率（完了数/総数）、最終アクティビティ日時
+**表示項目**: 表示名、メール、進捗率（完了数/総数）、修了証の枚数（13章）、最終アクティビティ日時
 
 **アクセス権限**: `admin` ロールのみ
 
@@ -943,6 +956,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 - `/learn/[themeId]/[phaseId]/[weekId]/[contentId]`: 前後ナビゲーションはテーマ内を通しで遷移（3.3）
 - `/upgrade`: ステータス別の出し分け。サイドナビ「プラン・お支払い」から全認証ユーザーがアクセス可能（2.11）
 - `/upgrade/success`: Checkoutから戻った直後の決済確認・完了表示（2.11）
+- `/certificates` / `/certificates/[id]`: 修了証の一覧と表示（本登録の member のみ。13章）
 - `/announcements` / `/announcements/[id]`: お知らせの一覧（未読表示。サイドナビ「お知らせ」に未読件数のバッジ）・詳細（開くと既読を記録）（11章）
 
 ### 7.3 管理・講師向け画面（`/manage`）
@@ -1113,6 +1127,7 @@ Slack App の **Incoming Webhooks** を有効化し、通知先チャンネル�
 | `approved` | `approveUser()` が更新したとき（`PATCH /api/admin/users` の `approve`） | 承認時刻（`approveUser()` が `updated_at` に書いた ISO 文字列） | 本登録の完了、全コンテンツが使えること、会員種別、ダッシュボードへのリンク |
 | `upgraded` | `activateUserFromCheckoutSession()` または `reactivateUserFromMirror()`（2.11節の不整合の解消）が、まだ一般有料会員でなかったユーザーを実際に昇格させたとき（successページの再訪・Webhook の再送など、既に昇格済みの場合は予約しない）。Webhook・`/upgrade/success`・Checkout API の自己復旧が並行しても、UNIQUE で1通に抑える | `stripe_subscription_id` | 一般有料会員になったこと、月額料金（Stripe から取り直したサブスクの Price の単価×数量。JPY の1ヶ月間隔で確認できない場合と、サブスク・アイテムに割引が付いていて実請求額と食い違う場合は料金の行を載せず、`DISPLAY_MONTHLY_PRICE_JPY` では代用しない。例外として、Customer に直接付けた割引（`customer.discount`）はサブスクの `discounts` に含まれないため検知できず、定価が載る。Checkout のプロモーションコードはサブスク側に付くため通常の導線では起きず、Dashboard・API で Customer にクーポンを付けた場合に限られる）、次回請求日、`/upgrade` のお支払い管理への案内 |
 | `cancel_scheduled` | `syncSubscriptionStatus()` で、Stripe から取り直したライブ状態が解約予約中（`cancel_at_period_end` が true、または `cancel_at` が設定済み）のとき（終端状態への遷移時を除く） | `stripe_subscription_id` | 解約を受け付けたこと、利用期限（`cancel_at`、無ければ `current_period_end`）まで全コンテンツを利用できること、期限までに Portal から取り消せること |
+| `certificate_issued` | `issueCertificateIfEligible()` が修了証を INSERT したとき（`POST /api/progress`。13章）。既に発行済みの場合は予約しない | `certificates.id` | 修了のお祝い、テーマ名・証明番号、修了証ページ（`/certificates/[id]`）へのリンク |
 | `subscription_ended` | `syncSubscriptionStatus()` が終端状態への遷移で `revertUserToTrial()` を呼び、実際に行を更新したとき（`membership_type = general` ガードで更新されなかった場合は送らない） | `stripe_subscription_id` | 有料会員が終了しお試しユーザーに戻ったこと、お試し公開コンテンツは引き続き利用できること、再開は `/upgrade` からできること |
 
 `cancel_scheduled` は、Stripe から取り直したライブ状態だけで判定する（2.11節の順序逆転対策と同じく、イベントのスナップショットは使わない）。
@@ -1185,7 +1200,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 |:--|:--|:--|
 | 全体の送信スイッチ（`email_settings.sending_enabled`。全種別に先立って確認） | `true` でなければ受講生向けメールを一通も送らない。トランザクション系は `deliverToUser()` が宛先を読む前に warn ログを出して終了し（種別の設定は同時に読むが、判定は全体スイッチが先）、定期メールは `runEmailDigest()` が1通も送らず `skipped` を返す（繰り越し予約も作らない） | **フェイルクローズ**: DB エラー・行の欠落・真偽値でない値のいずれでも送らない（定期メールは他の設定と同じく `failed`）。種別ごとの方針（下記）は変えない |
 | 案内系（`weekly_digest` / `inactivity_reminder` / `trial_nurture` / `announcement`） | 無効な種別は対象にしない。無効なお知らせは送信も完了記録もしない（有効に戻すと続きを送る。ただし送信失敗の再送期限 `ANNOUNCEMENT_EMAIL_RETRY_DAYS` は無効の間も進むため、期限を過ぎた失敗は再送されず、再有効化後は失敗のまま完了になる） | **フェイルクローズ**: DB エラー・行の欠落・値の不正（範囲外の `send_days` など）のとき、`runEmailDigest()` は1通も送らず `failed`（Cron は500）を返す |
-| トランザクション（`signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended`） | `deliverToUser()` が宛先を読む前に `enabled` を確認し、無効なら warn ログを出して送らない | **フェイルセーフ**: 既定値（有効）として送る。登録・決済の通知を欠落させないため。主処理（登録・承認・Stripe Webhook）の結果には、無効化・設定の読み取り失敗のどちらも影響させない |
+| トランザクション（`signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended` / `certificate_issued`） | `deliverToUser()` が宛先を読む前に `enabled` を確認し、無効なら warn ログを出して送らない | **フェイルセーフ**: 既定値（有効）として送る。登録・決済の通知を欠落させないため。主処理（登録・承認・Stripe Webhook）の結果には、無効化・設定の読み取り失敗のどちらも影響させない |
 
 - **全体の送信スイッチ**: `sending_enabled`（既定 `false`）。有効にするときは規約改定の確認ダイアログを出す。切り替えの記録は `sending_updated_at` / `sending_updated_by`（1日の上限の `updated_at` とは別。未操作なら NULL。同じ値の保存では更新しない。操作者の `users` 行が消えた場合は「削除済みユーザー」と表示する）。**無効の間に公開した「メールでも送る」付きのお知らせは未送信のまま残り、有効化後の定期実行で（1日の上限の範囲で）送られる**。画面と確認ダイアログにその件数を出すので、送らないお知らせは有効化の前に「メールでも送る」を外す。全体スイッチを今サイクルの途中で切り替えた週の週次進捗は、曜日変更・再有効化の週と同じ扱い（下記）
 - **送る日**: `send_days`（1〜60の整数、重複不可、最大10個、保存時は昇順）が、`inactivity_reminder` と `trial_nurture` の「登録から N 日目」の判定に使われる。`trial_nurture` の本文は、設定した日数以下で最も近い段階（2・5・7・14日目の案内）のものを使い、最後の設定日のときだけ「これが最後です」と伝える。経過日数の表記は7の倍数なら週、それ以外は日
@@ -1334,3 +1349,53 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 
 クライアントに足すのは `@vercel/analytics` の `<Analytics />` と、CTA リンクが呼ぶ `track()` だけ。週次ファネルの表は Server Component で、グラフ用の依存は入れない。
 
+---
+
+## 13. 修了証
+
+要件は `docs/requirements.md` 3.10節、テーブルは `docs/database.md` 3.19・6.16節。
+
+### 13.1 発行条件
+
+- **対象**: `status = active` かつ `role = member`（`isCertificateEligible()`）。コミュニティ会員・一般有料会員とも対象。お試しユーザー（`trial`）、admin / maintainer には発行しない
+- **条件**: そのテーマ配下の**公開中コンテンツ（`is_published = true AND is_deleted = false`、親のフェーズ・週・テーマも公開）すべて**について `user_progress.is_completed` が true。演習も「完了」ボタンの完了で判定し、提出の有無は問わない（URL 提出のみの演習で判定が複雑になるため）。公開コンテンツが0件のテーマは修了にならない（`isThemeCompleted()`）
+- **分母は進捗集計と同じ**: 判定は `fetchThemeProgressSummaries()`（4.2節）を再利用し、ダッシュボードの進捗と必ず一致させる（集計ロジックを二重に持たない）。ユーザーのセッション（RLS）で実行する
+- **既に完了済みのテーマ（遡及発行）**: `POST /api/progress` の完了が契機なので、機能の導入前に完了していたテーマや、お試し中にお試し公開分だけで完了して後から本登録になったテーマには、その契機が来ない。そのため `/certificates` を開いたとき、完了済みで未発行のテーマに `issueMissingCertificates()` が同じ INSERT 経路で発行する（冪等。メールも発行時に1通送る）。ダッシュボードのカードとサイドナビの「修了証」は、`/certificates` を開いて発行されたあとに表示される
+- 発行後に管理者がコンテンツを追加・公開しても、発行済みの修了証は取り消さない（スナップショットのため）。管理者による発行・取り消しの操作は設けない
+
+### 13.2 判定タイミングと発行処理
+
+`POST /api/progress` が完了（`isCompleted = true`）に更新した**直後**に、`issueCertificateIfEligible()`（`app/services/api/certificates-server.ts`）を `after()` で予約する（集計クエリでレスポンスを遅らせない。`after()` が使えない場面ではその場で実行する）。完了の取り消しや保存失敗のときは呼ばない。
+
+1. 対象かを確認（対象外なら何もしない）。INSERT は `insertCertificates()` に集約し、遡及発行（13.1節）と共用する
+2. コンテンツ → 週 → フェーズからテーマ ID を求め（通常クライアント）、そのテーマが発行済みなら終了（集計も INSERT もしない）。未発行なら `fetchThemeProgressSummaries()` でそのテーマが修了かを判定
+3. 修了なら、service_role で `certificates` に INSERT する。**`user_id` は認証済みの本人に固定**し、`recipient_name`（`users.display_name`）と `theme_name` は発行時点のスナップショットとして書く
+4. INSERT 成功後にメール `certificate_issued`（10.4節）を `after()` に予約する
+
+- **service_role の使用はこの INSERT（と宛先の `display_name` の読み取り）に限る**。受講生向け配信経路の service_role（AGENTS.md の2箇所）は増やさない
+- **冪等**: `UNIQUE (user_id, theme_id)` の違反（23505）は発行済みとして無視する（メールも送らない）。`UNIQUE (certificate_no)` の違反だけは番号を作り直して再試行する（最大 `CERTIFICATE_NO_MAX_ATTEMPTS` 回）
+- **失敗は進捗 API のレスポンスを変えない**: 関数は例外を投げず、失敗はログだけ残して `null` を返す。メール送信の失敗も同様（10.1節）。完了の保存はすでに済んでいる
+- **証明番号**: `SS-YYYYMM-XXXXXX`（`YYYYMM` は発行月（JST）、`XXXXXX` は紛らわしい `I` / `O` を除いた英数字6文字。乱数は `crypto.randomInt` で、推測できない）。一意で、将来の公開検証ページに使える。衝突の判定は制約名・`details` で行い、エラー文言には頼らない
+- **受講者名が空のときは発行しない**: 登録時の `display_name` は名前もメールも無いと空文字になり得る。スナップショットは後から直せないため、空（空白のみ）なら warn ログを出して発行を見送る。`/certificates` では完了済みのテーマに「氏名が未設定のため発行できません。運営へお問い合わせください」と案内する（本人がプロフィールを編集する経路は無く、管理画面にも `display_name` の編集は無いため、運営が DB で直す）
+
+### 13.3 画面
+
+- **`/certificates`**: 自分の修了証（テーマ名・発行日・証明番号。新しい順）と、未発行のテーマ（「修了すると発行されます」と進捗率）。`active` の member 以外は `/` へリダイレクトする
+- **`/certificates/[id]`**: 修了証の表示（受講者名・テーマ名・発行日（JST）・証明番号・サービス名（`EMAIL_FROM_NAME` と同じ定数）・運営団体名（環境変数 `CERTIFICATE_ISSUER_NAME`。未設定・空なら行ごと出さない。印刷済みの修了証は訂正できないため、文言が確定してから設定する））。**本人のみ閲覧可**で、他人の ID・存在しない ID・不正な ID はすべて404（RLS は admin / maintainer にも SELECT を許すが、このページは `user_id` を本人に絞る）。公開 URL は作らない
+- **取得に失敗したときの表示**: 修了証の一覧・進捗の集計のどちらも、失敗した側はエラー表示にし、空表示にはしない（「まだ修了証はありません」「未発行のテーマが0件」と読めてしまうため。`?? []` に戻さない）。遡及発行は修了証を読めたときだけ行う（読めないと全テーマが未発行に見える）。完了済みで未発行のテーマは、氏名未設定なら問い合わせの案内、それ以外の失敗なら「発行できませんでした。時間をおいて再読み込みしてください」と表示する（「修了すると発行されます」とは案内しない）。修了証の一覧を読めないときは「未発行のテーマ」のセクション自体を出さない（発行済みの集合が分からないため）。発行直後の一覧の再取得に失敗したときは、一覧はエラー表示にし、いま発行したテーマは発行済み扱いにする（「発行できませんでした」とは案内しない）
+- **ダッシュボード**: 発行から14日以内（`CERTIFICATE_DASHBOARD_DISPLAY_DAYS`）の最新1件を「修了証が発行されました」のカードで表示（`/certificates/[id]` へのリンク。永続化はしない）
+- **サイドナビ**: 「修了証」を `active` の member にだけ表示する
+
+### 13.4 印刷レイアウト
+
+- 「印刷 / PDF で保存」ボタンは `window.print()` を呼ぶだけ（PDF 生成ライブラリは使わない）
+- 修了証のページだけが `@page { size: A4 landscape; margin: 0 }` を持つ（ページ内の `<style>`）。印刷時はサイドナビ・パンくず・ボタンを隠し（`print:hidden`）、シートを 297mm × 209mm に固定して A4 横1枚に収める
+- シートはテーマ（ライト・ダーク）に依存しない固定配色（白地・濃色の文字）で、文字サイズはシート幅の `cqw` 単位にして、画面と印刷で同じ比率にする。スマホ幅ではシートの最小幅（640px）を保って横スクロールにする（文字が潰れないように）。背景色も印刷する（`print-color-adjust: exact`）
+
+### 13.5 共有
+
+X 向けの共有リンク（`https://twitter.com/intent/tweet?text=...&url=...`）を出す。本文は「『{テーマ名}』を修了しました #SinlabStudy」、`url` はログインページ（`NEXT_PUBLIC_APP_URL` + `/login`。未設定なら `url` を付けない）。**修了証ページへのリンクは載せない**（本人のみ閲覧可のため）。公開検証ページはスコープ外（法人向けチームプランで必要になった時点で別イシュー）。
+
+### 13.6 管理画面
+
+`/manage/students` の受講生一覧に修了証の枚数を表示する。既存の進捗 RPC には列を足さず、`certificates` の `user_id` を別クエリで取得して集計・結合する（管理者のセッションで読む。RLS は admin / maintainer に SELECT を許す）。取得に失敗しても一覧は表示する（枚数は0）。

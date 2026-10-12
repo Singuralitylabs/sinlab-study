@@ -186,6 +186,52 @@ describe("buildUserPrompt", () => {
     expect(prompt).toContain("## 提出コード\n```\nconst x = 1;\n```");
   });
 
+  it("単一ファイル（ファイル名なし）に言語があればコードフェンスに付ける", () => {
+    const prompt = buildUserPrompt("課題", {
+      type: "code",
+      files: [{ filename: "", language: "sql", content: "SELECT 1;" }],
+    });
+
+    expect(prompt).toContain("## 提出コード\n```sql\nSELECT 1;\n```");
+  });
+
+  it("単一ファイルの gas は Markdown で通じる javascript としてフェンスに付ける", () => {
+    const prompt = buildUserPrompt("課題", {
+      type: "code",
+      files: [{ filename: "", language: "gas", content: "function main() {}" }],
+    });
+
+    expect(prompt).toContain("## 提出コード\n```javascript\nfunction main() {}\n```");
+  });
+
+  it("単一ファイルの言語が既知の値でなければコードフェンスに付けない（フェンスを壊さない）", () => {
+    const prompt = buildUserPrompt("課題", {
+      type: "code",
+      files: [{ filename: "", language: "sql\n```", content: "SELECT 1;" }],
+    });
+
+    expect(prompt).toContain("## 提出コード\n```\nSELECT 1;\n```");
+  });
+
+  it("コード中のバッククォートより長いフェンスで囲み、提出内容でフェンスが閉じないようにする", () => {
+    const readme = "# 手順\n```bash\nnpm install\n```\n以降の文";
+    const single = buildUserPrompt("課題", {
+      type: "code",
+      files: [{ filename: "", language: "markdown", content: readme }],
+    });
+    expect(single).toContain(`## 提出コード\n\`\`\`\`markdown\n${readme}\n\`\`\`\``);
+
+    const multi = buildUserPrompt("課題", {
+      type: "code",
+      files: [
+        { filename: "README.md", language: "markdown", content: "````js\nx\n````" },
+        { filename: "main.js", language: "javascript", content: "const a = 1;" },
+      ],
+    });
+    expect(multi).toContain("### README.md (markdown)\n`````\n````js\nx\n````\n`````");
+    expect(multi).toContain("### main.js (javascript)\n```\nconst a = 1;\n```");
+  });
+
   it("単一ファイル（ファイル名なし）は上限を超えた分を省略する", () => {
     const content = "a".repeat(GEMINI_MAX_CODE_LENGTH + 12);
     const prompt = buildUserPrompt("課題", {
@@ -196,6 +242,21 @@ describe("buildUserPrompt", () => {
     expect(prompt).toContain("a".repeat(GEMINI_MAX_CODE_LENGTH));
     expect(prompt).toContain(`... (12文字省略)`);
     expect(prompt).not.toContain(content);
+  });
+
+  it("複数ファイルもファイルごとに上限を超えた分を省略する", () => {
+    const long = "b".repeat(GEMINI_MAX_CODE_LENGTH + 5);
+    const prompt = buildUserPrompt("課題", {
+      type: "code",
+      files: [
+        { filename: "README.md", language: "markdown", content: long },
+        { filename: "main.js", language: "javascript", content: "const a = 1;" },
+      ],
+    });
+
+    expect(prompt).toContain(`${"b".repeat(GEMINI_MAX_CODE_LENGTH)}\n\n... (5文字省略)`);
+    expect(prompt).not.toContain(long);
+    expect(prompt).toContain("### main.js (javascript)\n```\nconst a = 1;\n```");
   });
 
   it("複数ファイルはファイル名・言語付きで並べる", () => {

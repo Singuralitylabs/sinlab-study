@@ -1,15 +1,27 @@
 "use client";
 
 import { CheckCircle, Circle, Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
 interface CompleteButtonProps {
   contentId: number;
   initialCompleted: boolean;
+  /**
+   * Only the quiz page needs this (QuizForm decides from the saved progress whether to record
+   * completion after a re-answer). Elsewhere a refresh is costly: a slide page re-issues its
+   * signed URL, which makes the PDF viewer reload the document.
+   */
+  refreshOnToggle?: boolean;
 }
 
-export function CompleteButton({ contentId, initialCompleted }: CompleteButtonProps) {
+export function CompleteButton({
+  contentId,
+  initialCompleted,
+  refreshOnToggle = false,
+}: CompleteButtonProps) {
+  const router = useRouter();
   const [isCompleted, setIsCompleted] = useState(initialCompleted);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -30,6 +42,9 @@ export function CompleteButton({ contentId, initialCompleted }: CompleteButtonPr
 
       if (response.ok) {
         setIsCompleted(!isCompleted);
+        if (refreshOnToggle) {
+          router.refresh();
+        }
       } else {
         console.error("進捗更新エラー");
       }

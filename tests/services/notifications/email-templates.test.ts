@@ -10,6 +10,7 @@ import {
   buildApprovedEmail,
   buildAppUrl,
   buildCancelScheduledEmail,
+  buildCertificateIssuedEmail,
   buildInactivityReminderEmail,
   buildSignupEmail,
   buildSubscriptionEndedEmail,
@@ -187,6 +188,42 @@ describe("buildSubscriptionEndedEmail", () => {
     expect(email.text).toContain("お試しユーザーに戻りました");
     expect(email.text).toContain("お試し公開の学習コンテンツは引き続き");
     expect(email.text).toContain(`アップグレードページを開く: ${APP_URL}/upgrade`);
+  });
+});
+
+describe("buildCertificateIssuedEmail（#291）", () => {
+  const email = buildCertificateIssuedEmail({
+    displayName: "山田",
+    appUrl: APP_URL,
+    certificateId: 31,
+    themeName: "GAS 学習（基礎編）",
+    certificateNo: "SS-202610-ABC123",
+  });
+
+  it("おめでとう・テーマ名・証明番号と、修了証ページへのリンクを含める", () => {
+    expect(email.subject).toContain("修了証が発行されました");
+    expect(email.text).toContain("修了おめでとうございます");
+    expect(email.text).toContain("「GAS 学習（基礎編）」");
+    expect(email.text).toContain("SS-202610-ABC123");
+    expect(email.text).toContain(`修了証を表示する: ${APP_URL}/certificates/31`);
+  });
+
+  it("トランザクションメールなので配信停止リンクは入れない", () => {
+    expect(email.text).not.toContain("/api/email/unsubscribe");
+    expect(email.headers).toBeUndefined();
+  });
+
+  it("テーマ名の HTML は差し込み時にエスケープする", () => {
+    const html = buildCertificateIssuedEmail({
+      displayName: "山田",
+      appUrl: APP_URL,
+      certificateId: 1,
+      themeName: "<script>alert(1)</script>",
+      certificateNo: "SS-202610-ABC123",
+    }).html;
+
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;");
   });
 });
 

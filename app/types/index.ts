@@ -45,7 +45,7 @@ export type UserStatusType = "trial" | "active" | "rejected";
 export type UserRoleType = "admin" | "maintainer" | "member";
 /** null for unapproved and rejected users. */
 export type MembershipType = "community" | "general";
-export type ContentType = "video" | "text" | "exercise" | "slide";
+export type ContentType = "video" | "text" | "exercise" | "slide" | "quiz";
 export type SubmissionType = "code" | "url";
 export type AIReviewStatus = "pending" | "processing" | "completed" | "failed";
 
@@ -264,3 +264,4 @@ export interface WeekProgress {
 }
 
 export type Announcement = Tables<"announcements">;
+export type Certificate = Tables<"certificates">;

@@ -31,6 +31,7 @@
 
 - [Bun](https://bun.sh/) がインストール済みであること（バージョンは下記「Bun のインストール手順」を参照）
 - Supabase プロジェクトが作成済みであること
+- 本番（Vercel）の Node.js は `package.json` の `engines.node` で決まる（Vercel はプロジェクト設定より `engines` を優先し、範囲内の最新メジャーを選ぶ）。上限を付けているのは、新しいメジャーが出たときに無確認で切り替わらないようにするため。上げるときは `engines` と Vercel のプロジェクト設定を揃えて更新する
 
 ### Bun のインストール手順
 
@@ -58,6 +59,7 @@ STRIPE_ENABLED=<Stripe決済機能の有効化フラグ。"true" 以外はフェ
 STRIPE_SECRET_KEY=<Stripe Secret Key>
 STRIPE_WEBHOOK_SECRET=<Stripe Webhook 署名シークレット>
 STRIPE_PRICE_ID=<月額サブスクリプションの Price ID>
+CERTIFICATE_ISSUER_NAME=<任意。修了証に印刷する運営団体名。未設定・空なら団体名の行を出さない（印刷済みの修了証は訂正できないため、文言が確定してから設定する）>
 NEXT_PUBLIC_APP_URL=<Checkout/Portal のリダイレクト先URL・メール本文のリンク生成に使用>
 ```
 

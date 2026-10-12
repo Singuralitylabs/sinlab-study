@@ -5,6 +5,7 @@ import {
   buildAnnouncementEmail,
   buildApprovedEmail,
   buildCancelScheduledEmail,
+  buildCertificateIssuedEmail,
   buildInactivityReminderEmail,
   buildSignupEmail,
   buildSubscriptionEndedEmail,
@@ -112,6 +113,17 @@ const PREVIEW_VARIANTS: Record<EmailTemplateKey, VariantDefinition[]> = {
     },
   ],
   subscription_ended: single((c) => buildSubscriptionEndedEmail(base(c), c.texts)),
+  certificate_issued: single((c) =>
+    buildCertificateIssuedEmail(
+      {
+        ...base(c),
+        certificateId: 1,
+        themeName: "GAS 学習（基礎編）",
+        certificateNo: "SS-202610-ABC123",
+      },
+      c.texts
+    )
+  ),
   weekly_digest: [
     {
       id: "active",

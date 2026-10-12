@@ -1,12 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { ANALYTICS_EVENT } from "@/app/constants/analytics";
-import { USER_STATUS } from "@/app/constants/user";
 import { shouldTrackFirstSubmission } from "@/app/lib/analytics-funnel";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { SubmissionCreateSchema, validateRequest } from "@/app/services/api/schemas";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
-import { getServerAuth } from "@/app/services/auth/server-auth";
+import { requireLearnerApi } from "@/app/services/auth/admin-guard";
 import type { CodeFile } from "@/app/types";
 
 function sanitizeCodeFiles(input: unknown): CodeFile[] {
@@ -57,17 +56,11 @@ export async function POST(request: NextRequest) {
       storedUrl = trimmedUrl;
     }
 
-    const { user, userId, userStatus } = await getServerAuth();
-    if (!user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    const guard = await requireLearnerApi();
+    if (guard.response) {
+      return guard.response;
     }
-    if (userId == null) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-
-    if (userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
+    const { userId, userStatus } = guard.auth;
 
     const supabase = await createServerSupabaseClient();
 

@@ -6,6 +6,7 @@ import {
   type Schema,
   Type,
 } from "@google/genai";
+import { CODE_LANGUAGES, type CodeLanguage } from "@/app/components/code-editor-utils";
 import {
   GEMINI_API_KEY_ENV,
   GEMINI_API_KEY_TRIAL_ENV,
@@ -103,21 +104,47 @@ export function resolveGeminiApiKey(userStatus: UserStatusType | null): string |
   return undefined;
 }
 
+/**
+ * A fence longer than any backtick run in the content, so submitted code (a Markdown README with
+ * its own ``` blocks, a template literal containing them) cannot close it early and turn the rest
+ * into prompt text at the same level as the instructions.
+ */
+function fenceFor(content: string): string {
+  // reduce, not Math.max(...runs): a long submission can have more runs than the argument limit.
+  const longestRun = (content.match(/`+/g) ?? []).reduce(
+    (max, run) => Math.max(max, run.length),
+    0
+  );
+  return "`".repeat(Math.max(3, longestRun + 1));
+}
+
+// Applied per file in the multi-file branch too: codeFiles has no length limit at the API, and a
+// long README or data file would otherwise go into the prompt whole.
+function truncateCode(content: string): string {
+  return content.length > GEMINI_MAX_CODE_LENGTH
+    ? `${content.substring(0, GEMINI_MAX_CODE_LENGTH)}\n\n... (${content.length - GEMINI_MAX_CODE_LENGTH}文字省略)`
+    : content;
+}
+
 function buildCodeSection(files: CodeFile[]): string {
   if (files.length === 1 && !files[0].filename) {
-    const content = files[0].content;
-    const truncated =
-      content.length > GEMINI_MAX_CODE_LENGTH
-        ? `${content.substring(0, GEMINI_MAX_CODE_LENGTH)}\n\n... (${content.length - GEMINI_MAX_CODE_LENGTH}文字省略)`
-        : content;
-    return `\`\`\`\n${truncated}\n\`\`\``;
+    const truncated = truncateCode(files[0].content);
+    // language comes from the submission body unchecked; anything outside the known list could
+    // carry spaces, newlines or backticks and break the fence, so it is dropped. "gas" is not a
+    // Markdown fence language, so it is sent as the JavaScript it is.
+    const language = files[0].language === "gas" ? "javascript" : files[0].language;
+    const fenceLanguage = CODE_LANGUAGES.includes(language as CodeLanguage) ? language : "";
+    const fence = fenceFor(truncated);
+    return `${fence}${fenceLanguage}\n${truncated}\n${fence}`;
   }
 
   return files
     .map((file, index) => {
       const name = file.filename || `ファイル${index + 1}`;
       const header = file.language ? `${name} (${file.language})` : name;
-      return `### ${header}\n\`\`\`\n${file.content}\n\`\`\``;
+      const content = truncateCode(file.content);
+      const fence = fenceFor(content);
+      return `### ${header}\n${fence}\n${content}\n${fence}`;
     })
     .join("\n\n");
 }

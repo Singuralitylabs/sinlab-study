@@ -39,6 +39,8 @@ erDiagram
     users ||--o{ email_settings : "updated_by"
     users ||--o{ email_templates : "updated_by"
     users ||--o{ email_test_sends : "user_id"
+    users ||--o{ certificates : "1:N"
+    learning_themes ||--o{ certificates : "1:N"
     announcements ||--o{ announcement_reads : "1:N"
     users ||--o{ announcement_reads : "1:N"
 ```
@@ -67,7 +69,7 @@ erDiagram
 
 ### 3.4 learning_contents（学習コンテンツ）
 
-個別の学習教材。動画・テキスト・スライド・演習の4種別（`content_type`）をサポートする。`week_id` が親（`ON DELETE CASCADE`）。
+個別の学習教材。動画・テキスト・スライド・演習・クイズの5種別（`content_type`）をサポートする。`week_id` が親（`ON DELETE CASCADE`）。
 
 **種別ごとの利用カラム**（未使用カラムは NULL）:
 
@@ -77,12 +79,13 @@ erDiagram
 | text | `text_content`（Markdown） |
 | exercise | `exercise_instructions`、`reference_answer`（AIレビューの参照用の模範回答・**受講生には非公開**）、`grading_rubric`（採点基準 JSONB。下記）、`hint`（受講生に公開）、`allowed_submission_types`、`code_language` |
 | slide | `pdf_url`、`description`（任意） |
+| quiz | `description`（導入文・任意）。設問は `quiz_questions`（3.20）に持つ |
 
 - `grading_rubric`（演習のみ・NULL 可）: AIレビューの採点基準。`{ "version": 1, "requirements": [{ "key": "r1", "name": "...", "description": "..." }] }`。NULL は未設定で、AI が要件を推測する参考採点（`ai_reviews.score_kind = 'estimated'`）になり修了判定に使わない。CHECK 制約は形（object・version は正の整数・requirements は1件以上の配列）のみ検証し、件数上限・key 重複・名前の長さは API（`GradingRubricInputSchema`）が検証する。`version` は**クライアントを信用せず**サーバーが保存済みの値から導出し、要件の内容が実際に変わった保存のときだけ +1 する（`nextGradingRubric()`）。`key` は基準内で再利用しない（並べ替え・削除後も過去レビューの `key` が同じ要件を指すため）。種別を演習以外へ変更すると NULL に戻す
 - `description`: 概要（Markdown・任意入力）。未入力（NULL）の場合、詳細ページの概要欄カードを表示しない
 - `pdf_url`: `slides` バケット内の**オブジェクトキーのみ**（例: `gas/slide-01.pdf`）。URL を保存せず、配信時にサーバー側で署名付きURLを発行する（6.8参照）
 - `allowed_submission_types`（`code` / `url` / `both`）: 演習で許可する提出方法。`code` / `url` は提出方法の選択UIを出さず、`both` のみ選択可（既定 `code`）
-- `code_language`: コードエディタの言語（既定 `javascript`）。許可値は CHECK 制約が正
+- `code_language`: コードエディタの言語（既定 `javascript`）。許可値は `javascript` / `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`（#307）。CHECK 制約とアプリの `CODE_LANGUAGES` は `tests/lib/learning-contents-check-parity.test.ts` で一致を検査する。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（別の値は設けない）
 - `is_open_to_trial`: お試し公開フラグ。`is_open_to_trial` はお試しユーザー向けの公開範囲のみを制御し、お試しユーザーに実際に見えるのは `is_published = true AND is_open_to_trial = true AND is_deleted = false` の行に限られる（`is_published` が優先。「6.1 学習コンテンツ系テーブル」参照）
 
 ### 3.5 user_progress（学習進捗）
@@ -203,6 +206,8 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 - `send_weekday`: 週次進捗の送信曜日（0 = 日曜〜6 = 土曜。CHECK）。`weekly_digest` のみ使用
 - `updated_at` / `updated_by`（`users.id`、`ON DELETE SET NULL`）
 
+`certificate_issued`（修了証の発行メール。13章）は #291 のマイグレーション（`20261012000000_add_certificates.sql`）が追加する。
+
 初期値: 全種別が有効、`inactivity_reminder` は 7・14 日目、`trial_nurture` は 2・5・7・14 日目、`weekly_digest` は月曜（1）。#253 時点の定数と一致する（テストで確認している）。
 
 ### 3.16 email_settings（メール通知の共通設定）
@@ -229,6 +234,26 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 管理画面のテスト送信（[機能設計書](./specification.md)10.11節）の1日の回数を数えるための記録（`id` / `user_id`（`ON DELETE SET NULL`）/ `created_at`）。`email_logs` とは別にし、案内系メールの1日の上限の集計に影響させない。本文・宛先は保存しない。枠の確保は関数 `claim_email_test_send(p_user_id, p_day_start, p_limit)` が `pg_advisory_xact_lock` の中で「数える → 上限未満なら INSERT」を行う（上限なら NULL。`authenticated` / `anon` には実行権限を与えず、service_role のみ）。
 
+### 3.19 certificates（修了証）
+
+テーマ修了時に自動発行する修了証（[機能設計書](./specification.md)13章）。
+
+- **`UNIQUE (user_id, theme_id)`**: 1テーマ1枚。発行処理はこの違反を「発行済み」として扱い、冪等にする（二重発行・二重メールを防ぐ）
+- **`certificate_no`**: `SS-YYYYMM-XXXXXX`。一意（`UNIQUE`）で、形式は CHECK で縛る。将来の公開検証ページ用
+- **`recipient_name` / `theme_name`**: 発行時点の `users.display_name` / `learning_themes.name` の**スナップショット**。後から名前やテーマ名を変えても、発行済みの修了証は変わらない。受講者名を `users.display_name` の参照にしないのは、将来「修了証に載せる氏名」をプロフィールで設定できる余地を残すため
+- `user_id` は `ON DELETE CASCADE`、`theme_id` は `ON DELETE RESTRICT`（テーマの物理削除で、印刷済みの証明番号ごと修了証が消えないようにする。テーマは論理削除が基本）
+- 書き込みは service_role のみ（`POST /api/progress` の完了直後。`user_id` は認証済みの本人に固定）。受講生・管理画面からの INSERT / UPDATE / DELETE の経路は無い
+
+### 3.20 quiz_questions（クイズの設問）
+
+`content_type = 'quiz'` のコンテンツの設問（1コンテンツにつき1〜3問。#306）。`content_id` が親（`ON DELETE CASCADE`）、`UNIQUE(content_id, display_order)`。
+
+- `question_type`: `single`（単一選択）/ `multiple`（複数選択）/ `text`（入力式）
+- `question`（設問・Markdown）、`choices`（選択肢・TEXT[]・各 Markdown）、`correct_choices`（正解・`choices` の0始まりの添字・INTEGER[]）、`model_answer`（入力式の模範解答・Markdown）、`explanation`（解説・Markdown）、`hint`（ヒント・プレーンテキスト）。項目名は原稿の「設問 / 形式 / 選択肢 / 正解 / 解説 / ヒント」に対応する
+- CHECK `quiz_questions_shape_check`: 選択式は選択肢2〜6個・`single` は正解1つ・`multiple` は正解1つ以上、入力式は選択肢・正解なしで `model_answer` 必須。`quiz_questions_correct_choices_check`（関数 `quiz_correct_choices_valid()`）: 正解の添字が `choices` の範囲内で重複しない。`display_order` は 1〜3 で、`UNIQUE(content_id, display_order)` と合わせて 1 コンテンツ 3 問まで。アプリ側（`QuizQuestionSchema`。`app/lib/quiz.ts`）も同じ条件で検証し、REST で直接書いても採点できない設問は作れない
+- **正解を含むため受講者には SELECT させない**（6.17）。learning_contents の JSONB 列にしなかったのは、learning_contents は受講者が REST で SELECT できるため（列に正解を入れると回答前に読めてしまう）
+- 入力式は自動採点しない（回答後に模範解答と解説を表示）。回答内容は保存せず、回答を送ると `user_progress` を完了にする（進捗 API 経由）
+
 ---
 
 ## 4. インデックス
@@ -240,7 +265,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 - `user_progress` の部分インデックス（`is_completed = true`）は、RPC `get_students_progress_summary` の完了集計向け
 - `learning_contents.pdf_url` の部分インデックス `idx_learning_contents_pdf_url`（`pdf_url IS NOT NULL`）は、slides の Storage SELECT ポリシーの `EXISTS`（`pdf_url = storage.objects.name`）向け（6.8参照）
 - `announcements` は公開済み・未削除に絞った `published_at DESC` の部分インデックス（受講生向け一覧と、一斉送信の送信待ち抽出向け）、`announcement_reads` は `user_id`（未読件数の算出向け）
-- UNIQUE 制約が暗黙に作るインデックス（`user_progress(user_id, content_id)`・`ai_reviews(submission_id)`・`users(auth_id)` 等）と重複する covering インデックスは追加しない。`users(auth_id)` は RLS ヘルパー（5.2）の検索を賄う
+- UNIQUE 制約が暗黙に作るインデックス（`user_progress(user_id, content_id)`・`ai_reviews(submission_id)`・`users(auth_id)`・`quiz_questions(content_id, display_order)` 等）と重複する covering インデックスは追加しない。`users(auth_id)` は RLS ヘルパー（5.2）の検索を賄う
 
 ---
 
@@ -264,6 +289,8 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 いずれも `STABLE SECURITY DEFINER`・`SET search_path = public` で定義し、EXECUTE 権限は `authenticated` / `service_role` にのみ付与する（`PUBLIC` へのデフォルト付与を取り消し、`anon`（未認証）からの REST RPC 経由の実行は許可しない）。新たにヘルパー関数を追加する際も同じパターン（`PUBLIC, anon` からの REVOKE + `authenticated, service_role` への GRANT）を踏襲する。ヘルパーの GRANT/REVOKE や関数本体は認可ロジックの変更時以外いじらない。
 
 **この `SECURITY DEFINER` の規約は、ポリシー内から呼ぶRLSヘルパーに限る。** アプリから直接叩くRPC（例: `get_students_progress_summary()`。6.2節参照）は逆に `SECURITY DEFINER` にしてはならない。`SECURITY DEFINER` にするとRLSを迂回するため、`authenticated` にGRANTしたままだと任意のmemberが他ユーザーの行まで取得できてしまう。呼び出し元の権限のままRLSに従わせる `SECURITY INVOKER`（デフォルト）を維持すること。
+
+唯一の例外はクイズの `get_quiz_questions()` / `grade_quiz_answers()`（6.17）。呼び出し元に正解列を読ませないことが目的なので INVOKER では成り立たない。代わりに関数の先頭で `quiz_content_visible_to_caller()` により呼び出し元の可視性を自前で確認し、返す列も限定する。この形以外で DEFINER の RPC を増やさない。
 
 ---
 
@@ -396,11 +423,33 @@ SELECT は本人のみ。INSERT は本人かつ、`announcements` の SELECT ポ
 
 `email_templates` は SELECT / INSERT / UPDATE / DELETE とも admin のみ（条件は `(select get_user_role()) = 'admin'`。INSERT は WITH CHECK、UPDATE は USING / WITH CHECK）。同一操作のポリシーは1本にまとめる。maintainer には開放しない。メール送信（`deliverToUser()`・`runEmailDigest()`）は service_role で読む（RLS をバイパスする）。`email_test_sends` は RLS を有効にしポリシーを定義しない（service_role 専用。`email_logs` と同じ）。
 
+### 6.16 certificates
+
+| 操作 | 対象 | 条件 |
+|:--|:--|:--|
+| SELECT | 本人 / admin・maintainer | `user_id = (select get_user_id())` または `(select get_user_role()) IN ('admin', 'maintainer')`（OR で1本） |
+
+INSERT / UPDATE / DELETE のポリシーは定義しない（受講生・管理者のセッションからは書き込めない。発行は service_role のみ）。`get_user_xxx()` は `(select ...)` で包み、同一操作のポリシーは1本にまとめる。却下ユーザーは `get_user_id()` / `get_user_role()` が NULL のため読めない。`/certificates/[id]` は RLS に加えてアプリ層で `user_id` を本人に絞り、admin / maintainer でも他人の修了証ページは開けない（[機能設計書](./specification.md)13.3節）。
+
 ### 6.15 get_weekly_funnel
 
 `/manage` の週次ファネル（[機能設計書](./specification.md)6.3節・12章）。`get_weekly_funnel(weeks integer DEFAULT 8)` は `SECURITY INVOKER` のプレーン SQL 関数（`SECURITY DEFINER` にしない）。`REVOKE EXECUTE FROM PUBLIC, anon` / `GRANT TO authenticated, service_role`。週境界は JST の月曜始まり（`timezone('Asia/Tokyo', timestamptz)` の後に `date_trunc('week')`）。`upgraded` は `became_active_at`（初めて `active` になった時刻。`created_at` は `checkout_pending` の処理権なので使わない。`past_due` は `active` の証拠ではないので埋めない）、`ended` は `became_active_at` がある行の `became_terminal_at`（有料化のあと初めて終端になった時刻。後続の `updated_at` では動かさない。未課金の終端は含めない）。どちらも再契約の UPDATE で消さない。列の定義は機能設計書 6.3節とマイグレーションのヘッダが同じ内容。`weeks` は 1〜104 に丸める。トリガー関数 `stamp_stripe_subscription_funnel_times()` は `BEFORE INSERT OR UPDATE` でこの2列の初回だけを埋め、`PUBLIC` / `anon` から EXECUTE できない。
 
 アプリの呼び出しは `fetchWeeklyFunnel()` に限る。admin / maintainer（`checkContentPermissions()`）を確認したあと service_role で実行する。`stripe_subscriptions` の SELECT は本人か admin だけなので、maintainer のセッションのまま INVOKER で呼ぶと有料化・解約が過少になる。ポリシーは広げず、集計だけ service_role に寄せる。member が REST で直接呼んだ場合は RLS のとおり自分の行しか見えない。
+
+### 6.17 quiz_questions とクイズ RPC
+
+`quiz_questions` は RLS を有効にし、ポリシーは admin・maintainer の全操作（`FOR ALL`。`(select get_user_role()) IN ('admin', 'maintainer')`）の1本だけ。member / お試しユーザーは直接 SELECT できない（正解・模範解答・解説を回答前に読ませない）。受講者には次の RPC だけを通す。
+
+| 関数 | 権限 | 内容 |
+|:--|:--|:--|
+| `get_quiz_questions(p_content_id)` | `authenticated` / `service_role` | 出題用の列（`id, display_order, question_type, question, choices, hint, revision`）。正解・模範解答・解説は返さない。`revision` は形式・設問文・選択肢のハッシュ（`quiz_question_revision()`） |
+| `grade_quiz_answers(p_content_id, p_answers)` | `authenticated` / `service_role` | 全設問に回答している（選択式は1つ以上選択、入力式は空白以外）ときだけ、設問ごとの `is_correct`（入力式は NULL）・`correct_choices`・`model_answer`・`explanation` を返す。1問でも未回答、回答の数が設問の数と違う（削除された設問への回答を黙って捨てて部分採点しないため）、各回答の `revision` が現在の設問と違う（ページを開いた後に設問の中身が差し替わった。id を保つ置換では id だけで検出できず、古い設問への答えを新しい設問の正解と比べてしまうため）、または同じ `question_id` が重複していれば0行。これは「回答を送る前に正解を表示しない」ための形式上の条件で、ダミーの回答を送れば正解・解説は得られる（回答内容を保存しないため、それ以上は守らない）。選択の重複・範囲外は不正解 |
+| `quiz_content_visible_to_caller(p_content_id)` | なし（上の2関数の内部用） | `content_type = 'quiz'` かつ未削除で、admin・maintainer（未公開プレビュー。[機能設計書](./specification.md)2.12）か、4階層すべて公開・未削除で `active`、またはお試しで `is_open_to_trial = true`。`learning_contents` の SELECT RLS と `isContentVisible()` を合わせた条件 |
+| `quiz_question_revision(p_question_type, p_question, p_choices)` | なし（内部用） | 上記の `revision` を計算する。正解・解説だけの修正では変わらない |
+| `replace_quiz_questions(p_content_id, p_questions)` | `service_role` のみ | 管理画面の保存。1トランザクションで、配列の順を `display_order` にして同じ位置の行は UPDATE（id を保つ。回答中の受講者の `question_id` を無効にしない）、増えた分を INSERT、減った分を DELETE する |
+
+前の3つは `SECURITY DEFINER`・`SET search_path = public`（5.2の例外）。未認証の `/demo` は service_role で読むが、`quiz_questions` は読まない（クイズはログイン後に解答する旨だけを表示する）。
 
 ---
 

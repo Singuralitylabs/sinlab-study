@@ -493,3 +493,30 @@ export function buildAnnouncementEmail(
     unsubscribeUrl: params.unsubscribeUrl,
   });
 }
+
+export type CertificateIssuedEmailParams = {
+  displayName: string;
+  appUrl: string;
+  certificateId: number;
+  themeName: string;
+  certificateNo: string;
+};
+
+/** Certificate issued (transactional). The link opens the owner-only certificate page. */
+export function buildCertificateIssuedEmail(
+  params: CertificateIssuedEmailParams,
+  texts: EmailTexts = DEFAULT_EMAIL_TEXTS
+): EmailContent {
+  return renderTemplatedEmail({
+    key: "certificate_issued",
+    texts,
+    displayName: params.displayName,
+    values: { theme_name: params.themeName, certificate_no: params.certificateNo },
+    links: [
+      {
+        label: "修了証を表示する",
+        url: buildAppUrl(params.appUrl, `/certificates/${params.certificateId}`),
+      },
+    ],
+  });
+}

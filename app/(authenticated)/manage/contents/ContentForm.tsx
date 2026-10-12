@@ -1,9 +1,11 @@
 "use client";
 
 import { Loader2, Save, Upload, X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import type { CodeLanguage } from "@/app/components/code-editor-utils";
+import { CODE_LANGUAGE_OPTIONS, type CodeLanguage } from "@/app/components/code-editor-utils";
+import { CONTENT_TYPE_FORM_OPTIONS } from "@/app/constants/content";
 import { SLIDE_NUMBER_MAX } from "@/app/constants/slides";
 import type {
   PhaseFilterOption,
@@ -11,6 +13,7 @@ import type {
   WeekFilterOption,
 } from "@/app/lib/content-filtering";
 import { getGradingRubricVersion, toRubricFormRows } from "@/app/lib/grading";
+import { type QuizQuestionData, QuizQuestionsSchema } from "@/app/lib/quiz";
 import { parseSlideObjectKey, toSlideObjectKey } from "@/app/lib/slide-object-key";
 import { getSlideStorageWarning } from "@/app/lib/slide-storage-warning";
 import type { ContentType, GradingRequirement, LearningContent } from "@/app/types";
@@ -27,6 +30,13 @@ import {
   SiblingOrderField,
 } from "../components/SiblingOrderField";
 import { GradingRubricEditor } from "./GradingRubricEditor";
+import {
+  createEmptyQuizQuestion,
+  type QuizQuestionDraft,
+  QuizQuestionsEditor,
+  toQuizQuestionDrafts,
+  toQuizQuestionPayload,
+} from "./QuizQuestionsEditor";
 
 const SELECT_CLASS_NAME =
   "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs";
@@ -42,6 +52,13 @@ interface ContentFormProps {
   phases: PhaseFilterOption[];
   weeks: WeekFilterOption[];
   initialData?: LearningContent;
+  /** Stored questions (with answers) for a quiz in edit mode. */
+  initialQuizQuestions?: QuizQuestionData[];
+  /**
+   * The stored questions could not be read (edit mode, non-quiz content). Switching to quiz is
+   * disabled: the editor would start empty and saving would replace the stored questions.
+   */
+  quizQuestionsUnavailable?: boolean;
   initialWeekSelection?: InitialWeekSelection;
   /**
    * Includes the target itself in edit mode so its current position can be found; filtered out in
@@ -94,22 +111,7 @@ function buildWeekOptionLabel(
   return prefix ? `${prefix} / ${week.name}` : week.name;
 }
 
-const CONTENT_TYPE_OPTIONS: { value: ContentType; label: string }[] = [
-  { value: "video", label: "動画" },
-  { value: "text", label: "テキスト" },
-  { value: "slide", label: "スライド（PDF）" },
-  { value: "exercise", label: "演習" },
-];
-
 type AllowedSubmissionTypes = "code" | "url" | "both";
-
-const CODE_LANGUAGE_OPTIONS: { value: CodeLanguage; label: string }[] = [
-  { value: "javascript", label: "JavaScript" },
-  { value: "typescript", label: "TypeScript" },
-  { value: "gas", label: "GAS" },
-  { value: "html", label: "HTML" },
-  { value: "css", label: "CSS" },
-];
 
 const SUBMISSION_TYPE_OPTIONS: {
   value: AllowedSubmissionTypes;
@@ -130,6 +132,8 @@ export function ContentForm({
   phases,
   weeks,
   initialData,
+  initialQuizQuestions = [],
+  quizQuestionsUnavailable = false,
   initialWeekSelection,
   siblingCandidates = [],
   mode,
@@ -212,12 +216,20 @@ export function ContentForm({
   const [slideNumber, setSlideNumber] = useState(
     initialSlide ? String(initialSlide.slideNumber) : ""
   );
+  const [quizQuestions, setQuizQuestions] = useState<QuizQuestionDraft[]>(() =>
+    initialQuizQuestions.length > 0
+      ? toQuizQuestionDrafts(initialQuizQuestions)
+      : [createEmptyQuizQuestion()]
+  );
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
   const [isOpenToTrial, setIsOpenToTrial] = useState(initialData?.is_open_to_trial ?? false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  // Set when a create succeeded but publishing failed: the draft exists, so the form must not be
+  // submitted again (that would create a second copy); the admin publishes it from its edit page.
+  const [createdDraftId, setCreatedDraftId] = useState<number | null>(null);
   const [pdfFileName, setPdfFileName] = useState<string | null>(initialPdfKey);
 
   const visiblePhases = phases.filter((p) => !themeId || String(p.themeId) === themeId);
@@ -344,6 +356,26 @@ export function ContentForm({
       return;
     }
 
+    // Validate with the same schema as the API so choice counts and correct answers are reported
+    // per question before sending.
+    let validatedQuizQuestions: QuizQuestionData[] | undefined;
+    if (contentType === "quiz") {
+      const parsed = QuizQuestionsSchema.safeParse(toQuizQuestionPayload(quizQuestions));
+      if (!parsed.success) {
+        const text = parsed.error.issues
+          .map((issue) => {
+            const questionIndex = issue.path[0];
+            return typeof questionIndex === "number"
+              ? `設問${questionIndex + 1}: ${issue.message}`
+              : issue.message;
+          })
+          .join(" / ");
+        setMessage({ type: "error", text });
+        return;
+      }
+      validatedQuizQuestions = parsed.data;
+    }
+
     setIsLoading(true);
     setMessage(null);
 
@@ -358,7 +390,9 @@ export function ContentForm({
       is_open_to_trial: isOpenToTrial,
       video_url: contentType === "video" ? videoUrl.trim() || null : null,
       description:
-        contentType === "video" || contentType === "slide" ? description.trim() || null : null,
+        contentType === "video" || contentType === "slide" || contentType === "quiz"
+          ? description.trim() || null
+          : null,
       text_content: contentType === "text" ? textContent.trim() || null : null,
       exercise_instructions:
         contentType === "exercise" ? exerciseInstructions.trim() || null : null,
@@ -371,6 +405,7 @@ export function ContentForm({
       // requirements actually changed.
       grading_rubric:
         contentType === "exercise" && rubricRows.length > 0 ? { requirements: rubricRows } : null,
+      quiz_questions: validatedQuizQuestions,
     };
 
     try {
@@ -386,6 +421,17 @@ export function ContentForm({
 
       if (response.ok) {
         const data: unknown = await response.json().catch(() => null);
+        const createWarning =
+          mode === "create" && data && typeof data === "object" && "warning" in data
+            ? String((data as { warning: unknown }).warning)
+            : null;
+        if (createWarning) {
+          const createdId = (data as { content?: { id?: unknown } }).content?.id;
+          setMessage({ type: "error", text: createWarning });
+          setCreatedDraftId(typeof createdId === "number" ? createdId : null);
+          router.refresh();
+          return;
+        }
         const warning = mode === "edit" ? getSlideStorageWarning(data, "update") : null;
         if (warning) {
           // The update itself succeeded; stay on this screen to warn that the old slide PDF
@@ -486,12 +532,13 @@ export function ContentForm({
           <div className="space-y-2">
             <Label>コンテンツ種別</Label>
             <div className="flex gap-2">
-              {CONTENT_TYPE_OPTIONS.map((opt) => (
+              {CONTENT_TYPE_FORM_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
                   type="button"
                   onClick={() => setContentType(opt.value)}
-                  className={`flex-1 rounded-lg border-2 px-3 py-2 text-sm transition-colors ${
+                  disabled={opt.value === "quiz" && quizQuestionsUnavailable}
+                  className={`flex-1 rounded-lg border-2 px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     contentType === opt.value
                       ? "border-primary bg-primary/5 font-medium"
                       : "border-border hover:border-muted-foreground"
@@ -501,6 +548,11 @@ export function ContentForm({
                 </button>
               ))}
             </div>
+            {quizQuestionsUnavailable && (
+              <p className="text-xs text-muted-foreground">
+                保存済みのクイズの設問を読み込めなかったため、クイズへの種別変更はできません。時間をおいて再度お試しください。
+              </p>
+            )}
             {/* Changing a row that has a PDF to another type deletes the PDF from Storage (avoids orphans; not restored on revert). Bulk-changed rows keep pdf_url, so decide by pdf_url presence, not the initial type. */}
             {mode === "edit" && Boolean(initialData?.pdf_url) && contentType !== "slide" && (
               <p className="text-xs text-destructive">
@@ -509,9 +561,11 @@ export function ContentForm({
             )}
           </div>
 
-          {(contentType === "video" || contentType === "slide") && (
+          {(contentType === "video" || contentType === "slide" || contentType === "quiz") && (
             <div className="space-y-2">
-              <Label htmlFor="description">概要（Markdown・任意）</Label>
+              <Label htmlFor="description">
+                {contentType === "quiz" ? "導入文（Markdown・任意）" : "概要（Markdown・任意）"}
+              </Label>
               <Textarea
                 id="description"
                 value={description}
@@ -623,6 +677,10 @@ export function ContentForm({
               </div>
               {pdfUrl && <p className="text-xs text-muted-foreground break-all">{pdfUrl}</p>}
             </div>
+          )}
+
+          {contentType === "quiz" && (
+            <QuizQuestionsEditor questions={quizQuestions} onChange={setQuizQuestions} />
           )}
 
           {contentType === "exercise" && (
@@ -744,6 +802,14 @@ export function ContentForm({
             <Alert variant={message.type === "error" ? "destructive" : "default"}>
               <AlertDescription className={message.type === "success" ? "text-success" : ""}>
                 {message.text}
+                {createdDraftId !== null && (
+                  <>
+                    {" "}
+                    <Link href={`/manage/contents/${createdDraftId}/edit`} className="underline">
+                      編集画面を開く
+                    </Link>
+                  </>
+                )}
               </AlertDescription>
             </Alert>
           )}
@@ -751,7 +817,14 @@ export function ContentForm({
           <div className="flex gap-3">
             <Button
               type="submit"
-              disabled={isLoading || isUploading || !title || !weekId || isSlidePdfMissing}
+              disabled={
+                isLoading ||
+                isUploading ||
+                !title ||
+                !weekId ||
+                isSlidePdfMissing ||
+                createdDraftId !== null
+              }
             >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

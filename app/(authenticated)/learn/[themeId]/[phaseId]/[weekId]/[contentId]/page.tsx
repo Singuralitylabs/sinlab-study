@@ -29,6 +29,7 @@ import {
   isContentLockedForUser,
   isWeekHierarchyPublished,
 } from "@/app/services/api/learning-server";
+import { fetchQuizQuestions } from "@/app/services/api/quiz-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
@@ -41,6 +42,7 @@ import { Separator } from "@/components/ui/separator";
 import { AIReviewLimitNotice } from "./AIReviewLimitNotice";
 import { CompleteButton } from "./CompleteButton";
 import { PrevNextNav } from "./PrevNextNav";
+import { QuizForm } from "./QuizForm";
 import { SubmissionForm } from "./SubmissionForm";
 
 interface PageProps {
@@ -213,21 +215,29 @@ export default async function ContentPage({ params }: PageProps) {
   // Issue the slide signed URL only after the lock check (isLocked) and the RLS-applied
   // fetchContentById() pass; locked or unpublished content (except admin/maintainer preview) never
   // gets here (#89). Runs in parallel with the progress fetches.
-  const [{ isCompleted }, { data: existingReview }, { data: latestSubmission }, slideSignedUrl] =
-    await Promise.all([
-      userId
-        ? fetchUserProgressByContentId(userId, contentIdNum)
-        : Promise.resolve({ isCompleted: false }),
-      userId && content.content_type === "exercise"
-        ? fetchCompletedAIReviewByContentId(userId, contentIdNum)
-        : Promise.resolve({ data: null }),
-      userId && content.content_type === "exercise"
-        ? fetchLatestSubmissionByContentId(userId, contentIdNum)
-        : Promise.resolve({ data: null }),
-      content.content_type === "slide" && content.pdf_url
-        ? createSlideSignedUrl(content.pdf_url)
-        : Promise.resolve(null),
-    ]);
+  const [
+    { isCompleted },
+    { data: existingReview },
+    { data: latestSubmission },
+    slideSignedUrl,
+    { data: quizQuestions, error: quizError },
+  ] = await Promise.all([
+    userId
+      ? fetchUserProgressByContentId(userId, contentIdNum)
+      : Promise.resolve({ isCompleted: false }),
+    userId && content.content_type === "exercise"
+      ? fetchCompletedAIReviewByContentId(userId, contentIdNum)
+      : Promise.resolve({ data: null }),
+    userId && content.content_type === "exercise"
+      ? fetchLatestSubmissionByContentId(userId, contentIdNum)
+      : Promise.resolve({ data: null }),
+    content.content_type === "slide" && content.pdf_url
+      ? createSlideSignedUrl(content.pdf_url)
+      : Promise.resolve(null),
+    content.content_type === "quiz"
+      ? fetchQuizQuestions(contentIdNum)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
 
   // Counted on the server at render time (the client never counts); a failed lookup hides only the
   // remaining count, not the notice.
@@ -283,6 +293,33 @@ export default async function ContentPage({ params }: PageProps) {
 
           {content.content_type === "slide" && content.pdf_url && (
             <SlideContent signedUrl={slideSignedUrl} />
+          )}
+
+          {content.content_type === "quiz" && (
+            <div className="space-y-6">
+              {content.description && (
+                <MarkdownRenderer content={resolveMarkdownStorageUrls(content.description)} />
+              )}
+              {quizError ? (
+                <p className="text-sm text-muted-foreground">
+                  クイズの設問を読み込めませんでした。時間をおいて再度お試しください。
+                </p>
+              ) : (
+                <QuizForm
+                  contentId={contentIdNum}
+                  questions={quizQuestions.map((question) => ({
+                    ...question,
+                    question: <MarkdownRenderer content={question.question} />,
+                    choices: question.choices.map((choice, index) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: choices are fixed per question and may repeat
+                      <MarkdownRenderer key={index} content={choice} className="[&>*]:my-0" />
+                    )),
+                  }))}
+                  canRecordProgress={Boolean(userId) && isFullyPublished}
+                  initialCompleted={isCompleted}
+                />
+              )}
+            </div>
           )}
 
           {content.content_type === "exercise" && content.exercise_instructions && (
@@ -393,7 +430,13 @@ export default async function ContentPage({ params }: PageProps) {
       {/* Hidden while previewing unpublished content since progress can't be recorded. */}
       {userId && isFullyPublished && (
         <div className="mb-6">
-          <CompleteButton contentId={contentIdNum} initialCompleted={isCompleted} />
+          {/* Keyed by the saved state so router.refresh() after a quiz answer remounts it. */}
+          <CompleteButton
+            key={String(isCompleted)}
+            contentId={contentIdNum}
+            initialCompleted={isCompleted}
+            refreshOnToggle={content.content_type === "quiz"}
+          />
         </div>
       )}
 
