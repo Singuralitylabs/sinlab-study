@@ -196,7 +196,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 - `send_weekday`: 週次進捗の送信曜日（0 = 日曜〜6 = 土曜。CHECK）。`weekly_digest` のみ使用
 - `updated_at` / `updated_by`（`users.id`、`ON DELETE SET NULL`）
 
-`certificate_issued`（修了証の発行メール。13章）は #291 のマイグレーション（`20261005000000_add_certificates.sql`）が追加する。
+`certificate_issued`（修了証の発行メール。13章）は #291 のマイグレーション（`20261012000000_add_certificates.sql`）が追加する。
 
 初期値: 全種別が有効、`inactivity_reminder` は 7・14 日目、`trial_nurture` は 2・5・7・14 日目、`weekly_digest` は月曜（1）。#253 時点の定数と一致する（テストで確認している）。
 

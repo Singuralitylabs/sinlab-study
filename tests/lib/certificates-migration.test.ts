@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { CERTIFICATE_NO_UNIQUE_CONSTRAINT } from "@/app/constants/certificate";
 
 const migration = readFileSync(
-  join(process.cwd(), "supabase/migrations/20261005000000_add_certificates.sql"),
+  join(process.cwd(), "supabase/migrations/20261012000000_add_certificates.sql"),
   "utf8"
 );
 

@@ -16,7 +16,7 @@ const migration = readFileSync(
 );
 
 const certificatesMigration = readFileSync(
-  join(process.cwd(), "supabase/migrations/20261005000000_add_certificates.sql"),
+  join(process.cwd(), "supabase/migrations/20261012000000_add_certificates.sql"),
   "utf8"
 );
 
