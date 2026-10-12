@@ -6,6 +6,11 @@
 -- The 1..104 clamp inside get_weekly_funnel stays. It bounded generate_series
 -- because authenticated could call the function; a service_role key can still
 -- pass weeks, so the clamp remains that bound.
+--
+-- Supabase default privileges grant EXECUTE on new public functions to anon,
+-- authenticated, and service_role. CREATE OR REPLACE keeps this ACL, but
+-- DROP FUNCTION + CREATE does not. Recreating get_weekly_funnel must repeat
+-- this REVOKE, or authenticated can call it again.
 
 REVOKE EXECUTE ON FUNCTION public.get_weekly_funnel(integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_weekly_funnel(integer) TO service_role;

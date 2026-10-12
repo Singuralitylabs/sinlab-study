@@ -882,7 +882,7 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 
 **週次ファネル**（グラフは出さない。目標値の 50% / 10% / 8% も出さない）:
 
-RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を渡す。引数は 1〜104 に丸める）。1行は JST の月曜 0:00 から翌月曜 0:00 まで。境界は `timezone('Asia/Tokyo', timestamptz)` を `date_trunc('week', ...)` した日付（PostgreSQL の週は月曜始まり）。`fetchManageCounts()` と `Promise.all` で並列に取る。取得に失敗しても他の統計は出す。
+RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を渡す。引数は 1〜104 に丸める。EXECUTE は service_role のみ）。1行は JST の月曜 0:00 から翌月曜 0:00 まで。境界は `timezone('Asia/Tokyo', timestamptz)` を `date_trunc('week', ...)` した日付（PostgreSQL の週は月曜始まり）。`fetchManageCounts()` と `Promise.all` で並列に取る。取得に失敗しても他の統計は出す。
 
 | 列 | 算出 |
 |:--|:--|
@@ -892,7 +892,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 | 解約 `ended` | 発生基準。`became_active_at` がある行の `became_terminal_at`（`active` を経由したあと、`status` が初めて終端 `canceled` / `unpaid` / `incomplete_expired` / `paused` になった時刻）がその週。`trialing` → `paused` や `incomplete` → `incomplete_expired` など、一度も `active` になっていない行は含めない。後続のミラー更新で `updated_at` が動いても、再契約で `status` が戻っても週は動かない。2回目以降の終端は同じ行では数えない |
 | 有料会員数 `paid_total` | 週末時点の `membership_type = general` かつ `status = active` の近似（途中の空白期間の履歴は無い）。現在その状態で未削除、かつ `became_active_at` が週末より前でいま終端でも `checkout_pending` でもない、または Stripe 行が無い / 終端 / `checkout_pending` で `updated_at` が週末より前（手動承認。解約後や Checkout 中断後の行も拾う。承認後の別更新で過去週から外れることがある）。いま終端でも、`became_active_at` が週末より前かつ `became_terminal_at` が週末以後ならその週末までは有料だったとみなす。再契約で現在有効な行は、最初の `became_active_at` 以降の空白週も有料に見える。論理削除に `deleted_at` が無いので削除済みは全週から除く |
 
-呼び出しは `fetchWeeklyFunnel()`（`admin-server.ts`）だけ。`checkContentPermissions()` で admin / maintainer を確認してから service_role で RPC する。`stripe_subscriptions` の SELECT は本人か admin だけなので、maintainer の JWT のままでは有料化・解約が過少になる。SELECT ポリシーは広げない（集計以外の顧客 ID を maintainer に見せない）。関数自体は `SECURITY INVOKER` で、member が直接呼んでも RLS の見える行だけが対象。
+呼び出しは `fetchWeeklyFunnel()`（`admin-server.ts`）だけ。`checkContentPermissions()` で admin / maintainer を確認してから service_role で RPC する。`stripe_subscriptions` の SELECT は本人か admin だけなので、maintainer の JWT のままでは有料化・解約が過少になる。SELECT ポリシーは広げない（集計以外の顧客 ID を maintainer に見せない）。関数自体は `SECURITY INVOKER`。EXECUTE は service_role のみなので、member の REST 直呼びは権限エラーになる。
 
 ---
 
