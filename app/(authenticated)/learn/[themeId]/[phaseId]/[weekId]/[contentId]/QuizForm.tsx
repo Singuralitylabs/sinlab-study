@@ -3,13 +3,18 @@
 import { CheckCircle2, Loader2, RotateCcw, Send, XCircle } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   QUIZ_QUESTION_TYPE_LABELS,
   QUIZ_TEXT_ANSWER_MAX_LENGTH,
   type QuizQuestionForLearner,
   type QuizQuestionResult,
 } from "@/app/constants/quiz";
+import {
+  isStaleQuizGrade,
+  quizQuestionsUpdatedNotice,
+  quizQuestionVersion,
+} from "@/app/lib/quiz-form";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,15 +70,20 @@ export function QuizForm({
   // router.refresh() (after grading, or from the completion button) can bring a question set an
   // admin changed meanwhile. Drop answers and results then, so old choices are never sent with a
   // new revision or shown under new text, and say why instead of silently clearing the form.
-  const questionVersion = questions.map((q) => `${q.id}:${q.revision}`).join(",");
+  const questionVersion = quizQuestionVersion(questions);
   const [seenQuestionVersion, setSeenQuestionVersion] = useState(questionVersion);
   if (seenQuestionVersion !== questionVersion) {
     setSeenQuestionVersion(questionVersion);
     setAnswers({});
     setResults(null);
     setProgressWarning(null);
-    setError("設問が更新されたため、回答をやり直してください");
+    setError(quizQuestionsUpdatedNotice(questions.length));
   }
+  // Read when a grade response arrives: the set may have been replaced while it was in flight.
+  const latestQuestionVersion = useRef(questionVersion);
+  useEffect(() => {
+    latestQuestionVersion.current = questionVersion;
+  }, [questionVersion]);
 
   const allAnswered = questions.every((q) => isAnswered(q, answers[q.id]));
   const autoGraded = results ? [...results.values()].filter((r) => r.isCorrect !== null) : [];
@@ -125,6 +135,7 @@ export function QuizForm({
     setIsSubmitting(true);
     setError(null);
     setProgressWarning(null);
+    const sentVersion = questionVersion;
     try {
       const response = await fetch("/api/quiz/grade", {
         method: "POST",
@@ -139,6 +150,11 @@ export function QuizForm({
         }),
       });
       const data = await response.json().catch(() => null);
+      // The reset above already told the learner to answer again; old results would otherwise
+      // appear under the new questions (ids are kept across edits).
+      if (isStaleQuizGrade(sentVersion, latestQuestionVersion.current)) {
+        return;
+      }
       if (!response.ok) {
         setError(data?.error ?? "採点に失敗しました");
         return;

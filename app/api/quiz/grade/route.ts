@@ -35,10 +35,11 @@ export async function POST(request: NextRequest) {
     if (results.length === 0) {
       // The form only submits when every question is answered, so an empty result there usually
       // means a question was replaced or removed after the page loaded (revision / id mismatch).
+      // The RPC also returns nothing for a non-quiz contentId, hence the wording beyond "answer".
       return NextResponse.json(
         {
           error:
-            "すべての設問に回答してください。設問が更新された場合は、ページを再読み込みしてください",
+            "採点できませんでした。すべての設問に回答し、設問が更新された場合はページを再読み込みしてください",
         },
         { status: 400 }
       );

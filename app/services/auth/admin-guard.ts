@@ -29,7 +29,7 @@ export async function requireAdminApi(): Promise<
 
 /**
  * Content-manager gate (admin or maintainer): the learner checks (401 / 403 no users row / 403
- * rejected) and then 403 without content permission, as the /manage content routes expect.
+ * rejected) and then 403 without content permission. Shared by the /manage content routes.
  */
 export async function requireContentManagerApi(): Promise<
   { response: NextResponse } | { response: null; auth: ServerAuth & { userId: number } }

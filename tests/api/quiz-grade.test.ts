@@ -125,7 +125,7 @@ describe("POST /api/quiz/grade", () => {
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toEqual({
       error:
-        "すべての設問に回答してください。設問が更新された場合は、ページを再読み込みしてください",
+        "採点できませんでした。すべての設問に回答し、設問が更新された場合はページを再読み込みしてください",
     });
   });
 
