@@ -472,7 +472,7 @@ flowchart TD
 - 表示条件: `/` ダッシュボードで `role = member` かつ `users.onboarding_completed_at IS NULL` のとき、ページ表示時に開いた状態で1回表示する。他のページでは表示しない
 - ステップ定義は `app/constants/onboarding.ts` に集約し、サーバー側で `status` に応じて絞り込んだものを props で渡す
   1. ようこそ: サービス概要とテーマ → フェーズ → 週 → コンテンツの4階層構成
-  2. 学習の進め方: 「完了」ボタンによる進捗記録、演習の提出とAIレビュー（1コンテンツにつき1回）
+  2. 学習の進め方: 「完了」ボタンによる進捗記録、演習の提出とAIレビュー（お試しは1回、有料会員は1日2回まで。文言は `AI_REVIEW_LIMITS` から導出）
   3. プランについて（`status = trial` のときのみ）: お試し公開コンテンツのみ閲覧・提出可、鍵アイコンは本登録後に閲覧可。本登録は管理者による承認、またはプランのアップグレード（`isStripeEnabled()` が true のときは `/upgrade` へのリンクも案内）
   4. 困ったときは: 不明点は管理者に問い合わせる旨
 - 閉じたとき（「はじめる」・×・オーバーレイクリック・ダイアログ内リンク）は `POST /api/onboarding/complete` を呼び、成功可否に関わらず閉じる・遷移する（API失敗時は次回表示時に再度出るだけで、ユーザー操作をブロックしない）。送信は `keepalive: true` 付きで遷移中の打ち切りを防ぎ、失敗時は警告ログを残し、成功時はダッシュボードのサーバー表示を再取得する
@@ -734,19 +734,36 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 **処理フロー**:
 1. 認証チェック
 2. 提出データと関連コンテンツを取得
-3. 本人の提出であることを確認
-4. Gemini API にコード・演習指示・模範回答を送信してレビュー生成
-5. `ai_reviews` テーブルに結果を upsert（`pending` → `processing` → `completed` / `failed`）
+3. 本人の提出であることを確認し、コンテンツの可視性（`is_published = true` 付き SELECT で 0 行なら 403）を確認
+4. 回数制限を判定（下記「回数制限」）
+5. Gemini API にコード・演習指示・模範回答を送信してレビュー生成
+6. `ai_reviews` テーブルに結果を upsert（`pending` → `processing` → `completed` / `failed`）。再利用された行は `created_at` も現在時刻に更新する（当日の件数集計から漏れないようにするため）
+
+**回数制限（#304）**: 制限値は `app/constants/gemini.ts` の `AI_REVIEW_LIMITS` が唯一の定義で、API・画面文言・本節はここから導出する。判定は純粋関数 `evaluateReviewRequest()`（`app/lib/ai-review-limits.ts`）、集計クエリは `fetchAIReviewUsage()`（`app/services/api/ai-review-usage-server.ts`）が担う。日付の境界は **JST**（`app/lib/email-digest.ts` の `toJstDateString()` / `jstStartOfDayIso()` と同じ基準）で、UTC では数えない。集計は常に `user_id` で本人の提出に絞る（admin / maintainer は RLS で全件読めるため、RLS だけに頼らない）。
+
+| 対象 | 制限 |
+|:--|:--|
+| 共通 | **1 提出につきレビューは 1 回**。対象の `submission_id` に `failed` 以外のレビュー行があれば 429（再レビューは新しい提出に対してのみ） |
+| `active` | 同一コンテンツで JST 当日に作成された `failed` 以外のレビューが `perContentPerDay`（2）件以上なら 429。加えて当日の総件数（全コンテンツ）が `perDay`（10）件以上なら 429 |
+| `trial` | 同一コンテンツへの本人の提出に紐づく `failed` 以外のレビューが `perContentLifetime`（1）件以上なら 429（従来どおり生涯 1 回）。日次の総件数は適用しない |
+
+- **`failed` は回数に数えない**（Gemini 側の失敗で受講生の回数を消費させない）。`processing` 中の同一提出への再要求は 202 を返す
+- 429 の応答は `{ error, remaining, resetsAt }`。`remaining` は当日の残り回数（trial は 0。同一提出の再要求は新しい提出で使える残り回数）、`resetsAt` は JST 翌 0 時の ISO 文字列。`error` はステータス別のメッセージ（active: 「本日のこの課題の AI レビュー回数（N 回）を使い切りました。明日また提出できます」、trial: 「お試しプランでは AI レビューは 1 課題につき 1 回です。有料会員は 1 日 2 回まで再レビューできます」）。200 の応答にもこのレビュー後の `remaining` を含める
+- 回数の集計に失敗したときは 500 を返し、レビューを開始しない（フェイルクローズ）
+- 並行リクエスト: 1 提出 1 回は `ai_reviews.submission_id` の UNIQUE（`upsertPendingAIReview()`）で担保する。日次件数の判定は素の SELECT のため並行時に 1 回超過しうるが、金銭影響が数円のため許容する（`stripe_events` 型の claim は設けない）
+- 画面: コンテンツ詳細の「課題提出」見出しに、active は「本日の残り回数: N 回（この課題）」（ページ描画時にサーバー側で算出。クライアントでは数えない）、trial は上記メッセージと `isStripeEnabled()` に従うアップグレード導線（`UpgradeCta`）を表示する。429 時はフォームが API の `error` をそのまま表示する
 
 **レスポンス**:
 
 | ステータス | 条件 |
 |:--|:--|
-| 200 | 正常（`{ review: AIReview }` を返却） |
+| 200 | 正常（`{ review: AIReview, remaining: number }` を返却） |
+| 202 | 同一提出のレビューが生成中（`processing`） |
 | 400 | submissionId 未指定・不正（正の整数以外） |
-| 403 | 他人の提出 |
+| 403 | 他人の提出 / コンテンツが閲覧不可 |
 | 404 | 提出データなし |
-| 500 | Gemini API エラー / サーバーエラー |
+| 429 | 回数制限（`{ error, remaining, resetsAt }`） |
+| 500 | Gemini API エラー / 回数集計の失敗 / サーバーエラー |
 
 ### 6.1.3 ユーザー管理 API
 

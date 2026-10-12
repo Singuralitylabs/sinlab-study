@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { GEMINI_MAX_CODE_LENGTH } from "@/app/constants/gemini";
 import { USER_STATUS } from "@/app/constants/user";
+import { evaluateReviewRequest } from "@/app/lib/ai-review-limits";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import {
   updateAIReviewCompleted,
@@ -8,6 +9,7 @@ import {
   updateAIReviewProcessing,
   upsertPendingAIReview,
 } from "@/app/services/api/ai-review-server";
+import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   generateReview,
   type ReviewSubmission,
@@ -102,41 +104,43 @@ export async function POST(request: NextRequest) {
       reviewSubmission = { type: "url", content: submission.url };
     }
 
-    // One AI review per user and content.
-    const contentId = submission.content_id;
-    const { data: userSubmissionsForContent } = await supabase
-      .from("submissions")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("content_id", contentId);
-
-    const allSubmissionIdsForContent = (userSubmissionsForContent ?? []).map((s) => s.id);
-
-    if (allSubmissionIdsForContent.length > 0) {
-      const { data: activeReview } = await supabase
-        .from("ai_reviews")
-        .select("id, status, submission_id")
-        .in("submission_id", allSubmissionIdsForContent)
-        .in("status", ["completed", "processing", "pending"])
-        .limit(1)
-        .maybeSingle();
-
-      if (activeReview) {
-        if (activeReview.status === "processing" && activeReview.submission_id === submissionId) {
-          return NextResponse.json(
-            {
-              message: "AIレビューは現在生成中です",
-              review: { id: activeReview.id, status: "processing" },
-            },
-            { status: 202 }
-          );
-        }
-        return NextResponse.json(
-          { error: "この課題のAIレビューは1回のみ利用できます" },
-          { status: 429 }
-        );
-      }
+    const usage = await fetchAIReviewUsage(supabase, {
+      userId,
+      contentId: submission.content_id,
+      includeDailyTotal: userStatus === USER_STATUS.ACTIVE,
+    });
+    if (!usage) {
+      return NextResponse.json({ error: "AIレビュー回数の確認に失敗しました" }, { status: 500 });
     }
+
+    const decision = evaluateReviewRequest({
+      userStatus,
+      submissionId,
+      contentReviews: usage.contentReviews,
+      todayTotal: usage.todayTotal,
+      now: new Date(),
+    });
+
+    if (decision.kind === "processing") {
+      return NextResponse.json(
+        {
+          message: "AIレビューは現在生成中です",
+          review: { id: decision.reviewId, status: "processing" },
+        },
+        { status: 202 }
+      );
+    }
+    if (decision.kind === "limited") {
+      return NextResponse.json(
+        {
+          error: decision.message,
+          remaining: decision.remaining,
+          resetsAt: decision.resetsAt,
+        },
+        { status: 429 }
+      );
+    }
+    const remainingAfterReview = Math.max(0, decision.remaining - 1);
 
     const reviewRecord = await upsertPendingAIReview(submissionId);
     if (!reviewRecord) {
@@ -176,6 +180,7 @@ export async function POST(request: NextRequest) {
           overall_score: result.overallScore,
           model_used: result.modelUsed,
         },
+        remaining: remainingAfterReview,
       });
     } catch (geminiError) {
       const errorMessage =

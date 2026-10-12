@@ -8,6 +8,7 @@ import {
   fetchCompletedAIReviewByContentId,
   fetchCompletedAIReviewContentIds,
   fetchSubmissionsWithReviewsByUserId,
+  upsertPendingAIReview,
 } from "@/app/services/api/ai-review-server";
 import {
   createAdminSupabaseClient,
@@ -263,5 +264,24 @@ describe("fetchSubmissionsWithReviewsByUserId", () => {
     expect(result.data).toBeNull();
     expect(result.count).toBe(0);
     expect(result.error).toEqual(dbError);
+  });
+});
+
+describe("upsertPendingAIReview", () => {
+  it("リセット時に created_at を更新し、再利用された failed 行が当日の回数集計から漏れないようにする", async () => {
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: { id: 10 }, error: null },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const before = Date.now();
+    const result = await upsertPendingAIReview(7);
+
+    expect(result).toEqual({ id: 10 });
+    const builder = mockClient.from.mock.results[0].value;
+    const [payload, options] = builder.upsert.mock.calls[0];
+    expect(options).toEqual({ onConflict: "submission_id" });
+    expect(payload).toMatchObject({ submission_id: 7, status: "pending", reviewed_at: null });
+    expect(Date.parse(payload.created_at)).toBeGreaterThanOrEqual(before);
   });
 });

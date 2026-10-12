@@ -164,6 +164,8 @@ export async function upsertPendingAIReview(submissionId: number): Promise<{ id:
         overall_score: null,
         error_message: null,
         reviewed_at: null,
+        // Reused failed rows would otherwise keep their original day and escape the per-day count.
+        created_at: new Date().toISOString(),
       },
       { onConflict: "submission_id" }
     )

@@ -140,11 +140,13 @@ export function SubmissionForm({
           updated_at: new Date().toISOString(),
         });
         setMessage({ type: "success", text: "提出が完了しました。AIレビューが生成されました。" });
+        router.refresh();
       } else if (response.status === 429) {
         const errorData = await response.json().catch(() => null);
         setMessage({
           type: "error",
-          text: errorData?.error ?? "この課題のAIレビューは利用済みです",
+          text:
+            errorData?.error ?? "AIレビューの回数上限に達しました。時間をおいて再度お試しください",
         });
       } else {
         const errorData = await response.json().catch(() => null);

@@ -11,12 +11,15 @@ import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
 import { ANALYTICS_EVENT, UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { isStripeEnabled } from "@/app/constants/stripe";
+import { USER_STATUS } from "@/app/constants/user";
+import { computeRemainingReviews } from "@/app/lib/ai-review-limits";
 import { buildThemeContentOrder, resolveContentNavigation } from "@/app/lib/content-navigation";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import { getLockedContentFallbackOverview } from "@/app/lib/trial-upgrade";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
+import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   fetchContentById,
   fetchThemeNavigationIndex,
@@ -28,12 +31,14 @@ import {
 } from "@/app/services/api/learning-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
+import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { AIReviewLimitNotice } from "./AIReviewLimitNotice";
 import { CompleteButton } from "./CompleteButton";
 import { PrevNextNav } from "./PrevNextNav";
 import { SubmissionForm } from "./SubmissionForm";
@@ -224,6 +229,27 @@ export default async function ContentPage({ params }: PageProps) {
         : Promise.resolve(null),
     ]);
 
+  // Counted on the server at render time (the client never counts); a failed lookup hides only the
+  // remaining count, not the notice.
+  let aiReviewRemaining: number | null = null;
+  const showsAIReviewLimit =
+    userId && content.content_type === "exercise" && isFullyPublished && userStatus;
+  if (showsAIReviewLimit) {
+    const usage = await fetchAIReviewUsage(await createServerSupabaseClient(), {
+      userId,
+      contentId: contentIdNum,
+      includeDailyTotal: userStatus === USER_STATUS.ACTIVE,
+    });
+    if (usage) {
+      aiReviewRemaining = computeRemainingReviews({
+        userStatus,
+        contentReviews: usage.contentReviews,
+        todayTotal: usage.todayTotal,
+        now: new Date(),
+      });
+    }
+  }
+
   return (
     <div className="max-w-4xl mx-auto">
       <PageTitle
@@ -326,11 +352,13 @@ export default async function ContentPage({ params }: PageProps) {
 
                   {isFullyPublished ? (
                     <>
-                      <div className="flex items-center justify-between mb-4">
+                      <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
                         <h3 className="text-lg font-semibold">課題提出</h3>
-                        <span className="text-xs text-muted-foreground">
-                          ※ AIレビューは1コンテンツにつき1回のみ利用可能です
-                        </span>
+                        <AIReviewLimitNotice
+                          userStatus={userStatus}
+                          remaining={aiReviewRemaining}
+                          stripeEnabled={isStripeEnabled()}
+                        />
                       </div>
                       <SubmissionForm
                         contentId={contentIdNum}

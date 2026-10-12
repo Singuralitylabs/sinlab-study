@@ -40,3 +40,21 @@ export const GEMINI_TOTAL_BUDGET_MS = 45_000;
 export const GEMINI_API_KEY_ENV = "GEMINI_API_KEY";
 
 export const GEMINI_API_KEY_TRIAL_ENV = "GEMINI_API_KEY_TRIAL";
+
+/**
+ * AI review count limits (#304). API, UI copy and docs all derive from here. The day boundary is
+ * JST (same basis as the email cron). Every review row except `failed` counts: a Gemini-side
+ * failure must not consume a learner's allowance.
+ */
+export const AI_REVIEW_LIMITS = {
+  active: {
+    /** Reviews per content per JST day, for new submissions only (one review per submission). */
+    perContentPerDay: 2,
+    /** Reviews per user per JST day across all contents; caps key abuse and cost spikes. */
+    perDay: 10,
+  },
+  trial: {
+    /** Lifetime reviews per content; the daily total does not apply to trial users. */
+    perContentLifetime: 1,
+  },
+} as const;
