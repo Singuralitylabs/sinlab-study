@@ -3,8 +3,6 @@ import { USER_STATUS } from "@/app/constants/user";
 import type { UserStatusType } from "@/app/types";
 import { addDays, jstStartOfDayIso, toJstDateString } from "./email-digest";
 
-/** Pure functions deciding whether a user may request an AI review (#304); no DB dependency. */
-
 export interface ReviewUsageRow {
   submission_id: number;
   status: string;

@@ -1,14 +1,6 @@
 /**
- * Re-grades existing code submissions of rubric exercises with the current grading logic WITHOUT
- * writing anything (no ai_reviews rows), to read the score distribution, pass rate and token usage
- * before choosing CERTIFICATE_PASS_SCORE (app/constants/grading.ts).
- *
- * Usage (dev Supabase project only; it calls Gemini and bills tokens):
- *   bun scripts/grading-dry-run.ts --confirm-dev [--content-id N]... [--limit 5] [--repeat 1]
- *
- * Needs NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and GEMINI_API_KEY (read from
- * .env.local when present). Never point it at production: it reads every learner's submissions with
- * the service role key.
+ * Must stay write-free and dev-only: it reads every learner's submissions with the service role
+ * key and bills Gemini tokens, so pointing it at production would leak data and cost money.
  */
 import { existsSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
