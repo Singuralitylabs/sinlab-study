@@ -660,6 +660,10 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 
 Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可能。削除は論理削除（`is_deleted = true`）。行は物理削除せず、`user_progress` / `submissions` / `ai_reviews` の履歴を保持する。コンテンツ種別 `slide` では、PDF ファイルを Supabase Storage（`slides` バケット）にアップロードして `pdf_url` に保存する。テーマのサムネイル画像は Supabase Storage（`thumbnails` バケット）にアップロードして `image_url` に保存する。オブジェクトキーがテーマIDに依存するため、新規作成フォームではアップロードできず、テーマ作成後の編集画面から設定する。
 
+**採点基準の設定（#305）**: 種別が演習のとき、コンテンツ作成・編集フォームに「採点基準」エディタ（`GradingRubricEditor`）を表示し、要件（名前・説明。最大10件）を追加・並べ替え・削除して `grading_rubric` として保存する。リクエストの `grading_rubric` は `{ requirements: [{ key, name, description }] }`（`version` は受け取らない）で、`null` を送ると基準を削除（未設定に戻す）、省略すると変更しない。`version` は `updateContent()` が保存済みの値と比較して決め（初回 1、内容が変わった保存のみ +1、変更なしは据え置き）、現在値を取得できなければ更新しない。種別を演習以外へ変える更新・一括種別変更では基準を `NULL` にする。一覧（`/manage/contents`）には採点基準の有無とバージョンを表示する。
+
+**採点基準の AI 下書き**: `POST /api/manage/contents/grading-rubric/draft`（admin / maintainer のみ。未認証 401・権限なし 403・入力不正 400・`GEMINI_API_KEY` 未設定 503・生成失敗 502）。ボディ `{ exercise_instructions, reference_answer? }` から要件 3〜7 件（`name`・`description`）を返す。**何も保存しない**（フォームに展開し、講師が確認・編集して保存する）。講師の操作なので会員用キー（`GEMINI_API_KEY`）のみ使い、お試し用キーは使わない。
+
 **スライドPDFの削除方針**: コンテンツの単体・一括削除、週・フェーズ・テーマの削除（配下コンテンツの連鎖的な論理削除を含む）、および編集での `pdf_url` 差し替え（種別を `slide` 以外へ変更して `pdf_url` が `null` になる場合を含む。編集画面に警告を表示する）では、行の論理削除とあわせて、他から参照されていない `slides` オブジェクトのみ物理削除する。オブジェクトキーはコンテンツIDに依存せず複数コンテンツが同じ `pdf_url` を参照し得るため、削除前に生きた参照（`is_deleted = false`）が残っていないか必ず確認し、残る場合は Storage を削除しない（確認は対象キーを100件ごとのチャンクにまとめて行い、確認に失敗したチャンクは削除を試みない）。すべてのDB書き込みが成功した後に Storage 削除を行い、DB失敗時に「DBは失敗・PDFだけ消えた」状態を作らない。Storage の削除失敗・削除対象の `pdf_url` 取得失敗ではDBの論理削除全体を失敗させず、結果を `storageRemoved`（失敗時 false）で返す（サムネイル DELETE と同じ前例）。論理削除したコンテンツを復元してもPDFは戻らない（即時削除）。編集時は表示順判定と同じ現在値取得で旧 `pdf_url` も取得し、正規化後のキーが実際に変わった場合のみ削除処理へ進む（#246）。管理画面（削除確認画面・コンテンツ編集フォーム・一覧の一括削除）は `storageRemoved: false` を受け取ったら、DB 側の操作は成功扱いのまま「スライドPDFがストレージに残っている可能性がある」旨を警告表示する（`app/lib/slide-storage-warning.ts`。削除確認画面・編集フォームは一覧へ自動遷移せずに留まる。#241）。
 
 **アクセス権限**: `admin` または `maintainer` ロール
@@ -736,7 +740,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 2. 提出データと関連コンテンツを取得
 3. 本人の提出であることを確認し、コンテンツの可視性（`is_published = true` 付き SELECT で 0 行なら 403）を確認
 4. 回数制限を判定（下記「回数制限」）
-5. Gemini API にコード・演習指示・模範回答を送信してレビュー生成
+5. Gemini API にコード・演習指示・模範回答・採点基準を送信し、構造化 JSON でレビューを生成（下記「構造化採点」）
 6. `ai_reviews` テーブルに結果を upsert（`pending` → `processing` → `completed` / `failed`）。再利用された行は `created_at` も現在時刻に更新する（当日の件数集計から漏れないようにするため）
 
 **回数制限（#304）**: 制限値は `app/constants/gemini.ts` の `AI_REVIEW_LIMITS` が唯一の定義で、API・画面文言・本節はここから導出する。判定は純粋関数 `evaluateReviewRequest()`（`app/lib/ai-review-limits.ts`）、集計クエリは `fetchAIReviewUsage()`（`app/services/api/ai-review-usage-server.ts`）が担う。日付の境界は **JST**（`app/lib/email-digest.ts` の `toJstDateString()` / `jstStartOfDayIso()` と同じ基準）で、UTC では数えない。集計は常に `user_id` で本人の提出に絞る（admin / maintainer は RLS で全件読めるため、RLS だけに頼らない）。
@@ -753,17 +757,37 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 - 並行リクエスト: 1 提出 1 回は `ai_reviews.submission_id` の UNIQUE（`upsertPendingAIReview()`）で担保する。日次件数の判定は素の SELECT のため並行時に 1 回超過しうるが、金銭影響が数円のため許容する（`stripe_events` 型の claim は設けない）
 - 画面: コンテンツ詳細の「課題提出」見出しに、active は「本日の残り回数: N 回（この課題）」（ページ描画時にサーバー側で算出。クライアントでは数えない）、trial は上記メッセージと `isStripeEnabled()` に従うアップグレード導線（`UpgradeCta`）を表示する。429 時はフォームが API の `error` をそのまま表示する
 
+**構造化採点（#305）**: 採点のぶれを抑えるため、AI には判定ラベルだけを返させ、点数と合否はコードが決める（`app/lib/grading.ts`。AI の出した数値は点数にも合否にも使わない）。重み・合格点は `app/constants/grading.ts`、キー・モデル・温度（`GEMINI_TEMPERATURE` = 0）は `app/constants/gemini.ts`。
+
+- **出力形式**: `responseMimeType: "application/json"` と `responseSchema` を指定し、返答を zod（`app/lib/grading-schema.ts`）で検証する。要件は `{ key, status: met|partial|unmet, comment }`、品質は `{ level: good|fair|poor, comment }`、`suggestions`（最大2件）、`advice`。採点基準があるときは `key` を enum で縛り、件数を基準と一致させる（過不足・重複・未知の key は検証失敗）。要件名は基準から補う
+- **`score_kind` と点数**:
+
+| `score_kind` | 条件 | 点数 |
+|:--|:--|:--|
+| `rubric` | コード提出 + 採点基準あり | `round(要件の平均 × 80 + 品質 × 20)`（met=1 / partial=0.5 / unmet=0、good=1 / fair=0.5 / poor=0） |
+| `estimated` | コード提出 + 基準未設定 | 同じ式。AI が要件を 1〜10 件推測する。「参考採点」と明示し、修了判定には使わない |
+| `none` | URL 提出 | なし（NULL）。品質は `fair` に固定し、要件の判定は行わない |
+| `legacy` | 過去分 | 既存の値のまま（再採点しない） |
+
+- **合否**: `rubric` のときだけ `passed` を記録する。合格は「未達成の要件が 1 つもない かつ 点数 ≥ `CERTIFICATE_PASS_SCORE`」。**`CERTIFICATE_PASS_SCORE` が 0（既定）の間は無効で、`passed` は NULL のまま**・画面にも合否を出さない。値を決めるときは `scripts/grading-dry-run.ts` の分布を見たうえで定数を変える PR を出す
+- **検証失敗時の再生成**: JSON として不正・スキーマ違反の応答は **1 回だけ**再生成する。2 回とも失敗したら `failed`（受講生の回数に数えない）。再生成を含む全試行と 429 のリトライ待機は `GEMINI_TOTAL_BUDGET_MS` を共有する（`maxDuration` を超えない）
+- **URL の扱い**: URL 提出は URL の中身を AI が確認できないため要件判定をしない（`none`）。URL 形式の妥当性と課題への適合性の所見のみ返す
+- **トークン記録**: `prompt_tokens`（入力）・`completion_tokens`（回答）・`thoughts_tokens`（思考。`usageMetadata.thoughtsTokenCount`）を保存する。再生成した場合は両方の応答を合算し、失敗時も消費分を `failed` 行に記録する（`ReviewGenerationError.usage`）。取得できなかった項目は NULL。管理画面（`/manage/submissions`）の admin / maintainer にのみ表示し、受講生向けの SELECT 列には含めない
+- **表示**: `review_json` から `StructuredReview` で描画する。`legacy` と、`review_json` が不正な行は従来どおり `review_content`（Markdown）を表示する。`estimated` は「参考」、`none` は「採点対象外」のバッジを付ける。`passed = false`（有効時）のときは再提出の案内を出す
+
 **レスポンス**:
 
 | ステータス | 条件 |
 |:--|:--|
-| 200 | 正常（`{ review: AIReview, remaining: number }` を返却） |
+| 200 | 正常（`{ review: { id, status, review_content, overall_score, review_json, score_kind, rubric_version, passed, model_used }, remaining: number }` を返却。トークン数は含めない） |
 | 202 | 同一提出のレビューが生成中（`processing`） |
 | 400 | submissionId 未指定・不正（正の整数以外） |
 | 403 | 他人の提出 / コンテンツが閲覧不可 |
 | 404 | 提出データなし |
 | 429 | 回数制限（`{ error, remaining, resetsAt }`） |
-| 500 | Gemini API エラー / 回数集計の失敗 / サーバーエラー |
+| 500 | 回数集計の失敗 / サーバーエラー |
+| 503 | 使用するキー（会員用 / お試し用）が未設定 |
+| 502 | Gemini API エラー / 応答の検証失敗（再生成後も不正） / タイムアウト |
 
 ### 6.1.3 ユーザー管理 API
 

@@ -181,6 +181,16 @@ describe("PATCH /api/manage/contents/bulk - action→patchマッピング", () =
     await expect(res.json()).resolves.toEqual({ success: true, updated: 3, storageRemoved: true });
   });
 
+  it("set_type で exercise 以外に変えると採点基準を空にする", async () => {
+    const res = await PATCH(request({ ids: [1], action: "set_type", contentType: "video" }));
+
+    expect(res.status).toBe(200);
+    expect(bulkUpdateContents).toHaveBeenCalledWith([1], {
+      content_type: "video",
+      grading_rubric: null,
+    });
+  });
+
   it("set_typeはcontentTypeをcontent_typeとして渡す", async () => {
     const res = await PATCH(request({ ids: [1, 2], action: "set_type", contentType: "exercise" }));
 

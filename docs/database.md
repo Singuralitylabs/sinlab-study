@@ -75,9 +75,10 @@ erDiagram
 |:--|:--|
 | video | `video_url`（YouTube URL）、`description`（任意） |
 | text | `text_content`（Markdown） |
-| exercise | `exercise_instructions`、`reference_answer`（AIレビューの採点基準・**受講生には非公開**）、`hint`（受講生に公開）、`allowed_submission_types`、`code_language` |
+| exercise | `exercise_instructions`、`reference_answer`（AIレビューの参照用の模範回答・**受講生には非公開**）、`grading_rubric`（採点基準 JSONB。下記）、`hint`（受講生に公開）、`allowed_submission_types`、`code_language` |
 | slide | `pdf_url`、`description`（任意） |
 
+- `grading_rubric`（演習のみ・NULL 可）: AIレビューの採点基準。`{ "version": 1, "requirements": [{ "key": "r1", "name": "...", "description": "..." }] }`。NULL は未設定で、AI が要件を推測する参考採点（`ai_reviews.score_kind = 'estimated'`）になり修了判定に使わない。CHECK 制約は形（object・version は正の整数・requirements は1件以上の配列）のみ検証し、件数上限・key 重複・名前の長さは API（`GradingRubricInputSchema`）が検証する。`version` は**クライアントを信用せず**サーバーが保存済みの値から導出し、要件の内容が実際に変わった保存のときだけ +1 する（`nextGradingRubric()`）。`key` は基準内で再利用しない（並べ替え・削除後も過去レビューの `key` が同じ要件を指すため）。種別を演習以外へ変更すると NULL に戻す
 - `description`: 概要（Markdown・任意入力）。未入力（NULL）の場合、詳細ページの概要欄カードを表示しない
 - `pdf_url`: `slides` バケット内の**オブジェクトキーのみ**（例: `gas/slide-01.pdf`）。URL を保存せず、配信時にサーバー側で署名付きURLを発行する（6.8参照）
 - `allowed_submission_types`（`code` / `url` / `both`）: 演習で許可する提出方法。`code` / `url` は提出方法の選択UIを出さず、`both` のみ選択可（既定 `code`）
@@ -101,6 +102,12 @@ erDiagram
 
 - ステータス遷移: `pending` → `processing` → `completed` / `failed`
 - 受講生は自分の提出に紐づくレビューのみ閲覧でき、admin / maintainer は全件閲覧できる（6.4参照）
+- `review_json`（JSONB）: 構造化結果 `{ requirements: [{ key, name, status, comment }], code_quality: { level, comment }, suggestions, advice }`。`review_content` には同じ内容を Markdown に描画した文字列を保存し、旧来の表示との互換を保つ
+- `score_kind`（NOT NULL・既定 `legacy`・CHECK）: `rubric` = 採点基準に基づく採点 / `estimated` = 基準未設定の参考採点 / `none` = URL 提出で採点対象外 / `legacy` = 構造化採点以前の自由文レビュー。既存行は `legacy` のまま残し再採点しない
+- `overall_score`: コードが判定ラベルから計算した 0〜100（AI の出した数値ではない）。`none` は NULL
+- `rubric_version`: `score_kind = 'rubric'` のとき、採点に使った `grading_rubric.version`
+- `passed`: `score_kind = 'rubric'` かつ合格点（`app/constants/grading.ts` の `CERTIFICATE_PASS_SCORE`）が有効なときだけ値を持つ。無効（0）の間・それ以外は NULL
+- `prompt_tokens` / `completion_tokens` / `thoughts_tokens`: Gemini の使用量。`completion_tokens` は回答本文のみで、思考トークンは `thoughts_tokens` に分ける（過去分は NULL）。検証失敗による再生成では両方の応答を合算し、`failed` 行にも消費分を記録する。管理画面（admin / maintainer）専用で、受講生向けの SELECT 列には含めない（RLS は行単位のため、列の出し分けはアプリ層で担保する）
 
 ### 3.8 users（ユーザー）
 

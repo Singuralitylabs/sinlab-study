@@ -129,3 +129,65 @@ describe("PUT /api/manage/contents/[id] - バリデーション", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("コンテンツ作成・更新の採点基準（#305）", () => {
+  const rubric = {
+    requirements: [{ key: "r1", name: "フォームがある", description: "入力欄と送信ボタン" }],
+  };
+
+  it("POST: grading_rubric を gradingRubric として渡す（version はクライアントから受け取らない）", async () => {
+    const res = await POST(
+      request({
+        title: "課題",
+        week_id: 1,
+        content_type: "exercise",
+        grading_rubric: { ...rubric, version: 99 },
+        insert_after_id: null,
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+    const arg = vi.mocked(createContent).mock.calls[0][0];
+    expect(arg.gradingRubric).toEqual(rubric);
+  });
+
+  it("PUT: 採点基準を渡す / null でクリアする / 未指定なら undefined", async () => {
+    const put = (body: unknown) =>
+      PUT(
+        new Request("http://localhost/api/manage/contents/1", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }) as never,
+        { params: Promise.resolve({ id: "1" }) }
+      );
+
+    await put({ grading_rubric: rubric });
+    await put({ grading_rubric: null });
+    await put({ title: "改題" });
+
+    const calls = vi.mocked(updateContent).mock.calls;
+    expect(calls[0][1].gradingRubric).toEqual(rubric);
+    expect(calls[1][1].gradingRubric).toBeNull();
+    expect(calls[2][1].gradingRubric).toBeUndefined();
+  });
+
+  it.each([
+    ["要件が0件", { requirements: [] }],
+    ["key 重複", { requirements: [rubric.requirements[0], rubric.requirements[0]] }],
+    ["名前が空", { requirements: [{ key: "r1", name: "", description: "" }] }],
+  ])("POST: 不正な採点基準（%s）は400", async (_label, grading_rubric) => {
+    const res = await POST(
+      request({
+        title: "課題",
+        week_id: 1,
+        content_type: "exercise",
+        grading_rubric,
+        insert_after_id: null,
+      }) as never
+    );
+
+    expect(res.status).toBe(400);
+    expect(createContent).not.toHaveBeenCalled();
+  });
+});

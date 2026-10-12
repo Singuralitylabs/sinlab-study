@@ -85,4 +85,4 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 ### 環境変数・AIレビュー
 
-`.env.local` に設定する。**名前・用途の正式な一覧は `README.md`。** キー振り分けは `resolveGeminiApiKey()`、モデル名・上限値等は `app/constants/gemini.ts` に集約する。**キーはサーバー側でのみ扱い、レスポンス・ログへ出さない**（`docs/specification.md` 6.1.2節）。
+`.env.local` に設定する。**名前・用途の正式な一覧は `README.md`。** キー振り分けは `resolveGeminiApiKey()`、モデル名・上限値等は `app/constants/gemini.ts` に集約する。**点数・合否は `app/lib/grading.ts` がコードで計算する（AI の出した数値を直接使わない）。閾値・重みは `app/constants/grading.ts`。** **キーはサーバー側でのみ扱い、レスポンス・ログへ出さない**（`docs/specification.md` 6.1.2節）。
