@@ -4,6 +4,7 @@ import {
   getQualityLevelLabel,
   getRequirementStatusLabel,
   type PassDisplay,
+  SCORE_KIND_NOTES,
 } from "@/app/lib/grading";
 import type { RequirementStatus, ReviewJson, ScoreKind } from "@/app/types";
 
@@ -32,15 +33,9 @@ interface StructuredReviewProps {
 export function StructuredReview({ reviewJson, scoreKind, passDisplay }: StructuredReviewProps) {
   return (
     <div className="space-y-4 text-sm">
-      {scoreKind === "estimated" && (
+      {SCORE_KIND_NOTES[scoreKind] && (
         <p className="rounded-md bg-muted px-3 py-2 text-muted-foreground">
-          参考採点（採点基準未設定）: この点数は AI
-          が要件を推測したもので、修了判定には使われません。
-        </p>
-      )}
-      {scoreKind === "none" && (
-        <p className="rounded-md bg-muted px-3 py-2 text-muted-foreground">
-          URL 提出のため採点対象外です。
+          {SCORE_KIND_NOTES[scoreKind]}
         </p>
       )}
 
@@ -84,8 +79,9 @@ export function StructuredReview({ reviewJson, scoreKind, passDisplay }: Structu
         <section>
           <h4 className="mb-2 font-semibold">改善提案</h4>
           <ol className="list-decimal space-y-1 pl-5">
-            {reviewJson.suggestions.map((suggestion) => (
-              <li key={suggestion}>{suggestion}</li>
+            {reviewJson.suggestions.map((suggestion, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: the list is never reordered and the AI may repeat a sentence, so the text isn't a unique key
+              <li key={index}>{suggestion}</li>
             ))}
           </ol>
         </section>

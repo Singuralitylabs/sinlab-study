@@ -49,8 +49,9 @@ export type ContentType = "video" | "text" | "exercise" | "slide" | "quiz";
 export type SubmissionType = "code" | "url";
 export type AIReviewStatus = "pending" | "processing" | "completed" | "failed";
 
-export type RequirementStatus = "met" | "partial" | "unmet";
-export type QualityLevel = "good" | "fair" | "poor";
+export type { QualityLevel, RequirementStatus } from "@/app/constants/grading";
+
+import type { QualityLevel, RequirementStatus } from "@/app/constants/grading";
 /**
  * rubric = graded against the exercise's grading rubric; estimated = no rubric, the AI guessed the
  * requirements (reference only); none = URL submission (not graded); legacy = free-text review
@@ -166,8 +167,9 @@ export type ManageContentListItem = Pick<
   | "is_published"
   | "is_open_to_trial"
   | "week_id"
-  | "grading_rubric"
 > & {
+  /** Only the rubric's version is selected, not the whole JSONB (the list never shows the text). */
+  grading_rubric_version: number | null;
   week: ManageWeekListItem | null;
 };
 

@@ -168,7 +168,8 @@ function manageContentListSelect(innerJoin: boolean): string {
   const phaseRel = innerJoin ? "phase:learning_phases!inner" : "phase:learning_phases";
   const themeRel = innerJoin ? "theme:learning_themes!inner" : "theme:learning_themes";
   return `
-    id, title, content_type, display_order, is_published, is_open_to_trial, week_id, grading_rubric,
+    id, title, content_type, display_order, is_published, is_open_to_trial, week_id,
+    grading_rubric_version:grading_rubric->version,
     ${weekRel}(
       id, name, display_order, phase_id,
       ${phaseRel}(

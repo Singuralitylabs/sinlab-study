@@ -1,4 +1,13 @@
-import type { QualityLevel, RequirementStatus } from "@/app/types";
+/**
+ * Single source of the review labels: the types, point tables, zod schemas, the Gemini response
+ * schema and the stored-row narrowing all derive from these, so adding a label can't be missed in
+ * one place.
+ */
+export const REQUIREMENT_STATUSES = ["met", "partial", "unmet"] as const;
+export const QUALITY_LEVELS = ["good", "fair", "poor"] as const;
+
+export type RequirementStatus = (typeof REQUIREMENT_STATUSES)[number];
+export type QualityLevel = (typeof QUALITY_LEVELS)[number];
 
 /** Points out of 100 contributed by requirement achievement and by code quality. */
 export const REQUIREMENT_WEIGHT = 80;

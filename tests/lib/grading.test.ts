@@ -13,6 +13,7 @@ import {
   nextRequirementKey,
   renderReviewMarkdown,
   resolvePassDisplay,
+  SCORE_KIND_NOTES,
   toRubricFormRows,
 } from "@/app/lib/grading";
 import type { ReviewJson } from "@/app/types";
@@ -130,6 +131,13 @@ describe("renderReviewMarkdown", () => {
     expect(md).toContain("アドバイス");
     expect(md).toContain("**60/100**");
     expect(md).not.toContain("参考採点");
+  });
+
+  it("注記は構造化表示と共有する SCORE_KIND_NOTES と同じ文面を引用で入れる", () => {
+    expect(renderReviewMarkdown(review(["met"]), 90, "estimated")).toContain(
+      `> ${SCORE_KIND_NOTES.estimated}`
+    );
+    expect(renderReviewMarkdown(review([]), null, "none")).toContain(`> ${SCORE_KIND_NOTES.none}`);
   });
 
   it("estimated: 参考採点であり修了判定に使われない旨を明記する", () => {

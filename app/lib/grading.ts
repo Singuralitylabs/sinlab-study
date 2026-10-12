@@ -1,7 +1,9 @@
 import {
   CERTIFICATE_PASS_SCORE,
+  QUALITY_LEVELS,
   QUALITY_POINTS,
   QUALITY_WEIGHT,
+  REQUIREMENT_STATUSES,
   REQUIREMENT_WEIGHT,
   STATUS_POINTS,
 } from "@/app/constants/grading";
@@ -43,9 +45,6 @@ export function isReviewPassed(
   return !hasUnmet && score >= passScore;
 }
 
-const REQUIREMENT_STATUSES = ["met", "partial", "unmet"];
-const QUALITY_LEVELS = ["good", "fair", "poor"];
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -61,7 +60,7 @@ export function asReviewJson(value: unknown): ReviewJson | null {
   const { code_quality: codeQuality, suggestions, advice } = value;
   if (
     typeof codeQuality.level !== "string" ||
-    !QUALITY_LEVELS.includes(codeQuality.level) ||
+    !(QUALITY_LEVELS as readonly string[]).includes(codeQuality.level) ||
     typeof codeQuality.comment !== "string" ||
     !Array.isArray(suggestions) ||
     !suggestions.every((item) => typeof item === "string") ||
@@ -74,7 +73,7 @@ export function asReviewJson(value: unknown): ReviewJson | null {
       isRecord(item) &&
       typeof item.key === "string" &&
       typeof item.status === "string" &&
-      REQUIREMENT_STATUSES.includes(item.status) &&
+      (REQUIREMENT_STATUSES as readonly string[]).includes(item.status) &&
       typeof item.comment === "string" &&
       (item.name === undefined || typeof item.name === "string")
   );
@@ -101,6 +100,13 @@ export function getQualityLevelLabel(level: keyof typeof QUALITY_LABELS): string
   return QUALITY_LABELS[level];
 }
 
+/** Notes shown with a non-rubric score; shared by the structured view and the saved Markdown. */
+export const SCORE_KIND_NOTES: Partial<Record<ScoreKind, string>> = {
+  estimated:
+    "参考採点（採点基準未設定）: この点数は AI が要件を推測したもので、修了判定には使われません。",
+  none: "URL 提出のため採点対象外です。",
+};
+
 /** Markdown saved to ai_reviews.review_content so the existing display components keep working. */
 export function renderReviewMarkdown(
   reviewJson: ReviewJson,
@@ -109,12 +115,9 @@ export function renderReviewMarkdown(
 ): string {
   const sections: string[] = [];
 
-  if (scoreKind === "estimated") {
-    sections.push(
-      "> 参考採点（採点基準未設定）: この点数は AI が要件を推測したもので、修了判定には使われません。"
-    );
-  } else if (scoreKind === "none") {
-    sections.push("> URL 提出のため採点対象外です。");
+  const note = SCORE_KIND_NOTES[scoreKind];
+  if (note) {
+    sections.push(`> ${note}`);
   }
 
   if (reviewJson.requirements.length > 0) {

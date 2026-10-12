@@ -7,13 +7,15 @@ import {
   GRADING_RUBRIC_DRAFT_MIN_REQUIREMENTS,
   GRADING_RUBRIC_MAX_REQUIREMENTS,
   GRADING_RUBRIC_MIN_REQUIREMENTS,
+  QUALITY_LEVELS,
+  REQUIREMENT_STATUSES,
   REVIEW_MAX_SUGGESTIONS,
 } from "@/app/constants/grading";
 import type { GradingRequirement, GradingRubric } from "@/app/types";
 import { maxRequirementKeyNumber } from "./grading";
 
-const RequirementStatusSchema = z.enum(["met", "partial", "unmet"]);
-const QualityLevelSchema = z.enum(["good", "fair", "poor"]);
+const RequirementStatusSchema = z.enum(REQUIREMENT_STATUSES);
+const QualityLevelSchema = z.enum(QUALITY_LEVELS);
 
 const RequirementKeySchema = z.string().trim().min(1).max(40);
 

@@ -21,6 +21,12 @@ export const GEMINI_THINKING_LEVEL = "low" as ThinkingLevel;
 /** Deterministic judging: the same submission should get the same labels as far as possible. */
 export const GEMINI_TEMPERATURE = 0;
 
+/**
+ * Gemini calls per review when the response fails validation (the first try plus one regeneration).
+ * Each attempt is billed, so this caps the cost of a malformed response.
+ */
+export const GEMINI_VALIDATION_ATTEMPTS = 2;
+
 /** Retries on 429 (excluding the first attempt); total attempts = GEMINI_MAX_RETRIES + 1. */
 export const GEMINI_MAX_RETRIES = 2;
 
@@ -39,6 +45,13 @@ export const GEMINI_REQUEST_TIMEOUT_MS = 25_000;
  * (hardcoded in route.ts). Keep it well below maxDuration to leave room for DB round trips.
  */
 export const GEMINI_TOTAL_BUDGET_MS = 45_000;
+
+/**
+ * A pending / processing review older than this is treated as dead (its function was killed) and
+ * stops counting toward the limits, so a crashed run can neither burn an allowance nor lock the
+ * submission. Must exceed /api/ai-review's maxDuration (60s, hardcoded in route.ts).
+ */
+export const AI_REVIEW_STALE_AFTER_MS = 90_000;
 
 export const GEMINI_API_KEY_ENV = "GEMINI_API_KEY";
 

@@ -25,7 +25,7 @@ function makeWeek(
 
 function makeContent(
   overrides: Partial<LearningContentWithWeek> & { id: number; week_id: number }
-): LearningContentWithWeek {
+): LearningContentWithWeek & { grading_rubric_version: number | null } {
   return {
     id: overrides.id,
     week_id: overrides.week_id,
@@ -42,6 +42,7 @@ function makeContent(
     hint: null,
     reference_answer: null,
     grading_rubric: null,
+    grading_rubric_version: null,
     allowed_submission_types: "code",
     code_language: "javascript",
     pdf_url: null,

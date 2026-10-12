@@ -55,6 +55,20 @@ describe("StructuredReview", () => {
     expect(renderReview("estimated")).toContain("参考採点（採点基準未設定）");
   });
 
+  it("同じ文面の改善提案が複数あっても key の重複警告を出さずすべて表示する", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const html = renderToStaticMarkup(
+      createElement(StructuredReview, {
+        reviewJson: { ...reviewJson, suggestions: ["関数を分ける", "関数を分ける"] },
+        scoreKind: "rubric",
+        passDisplay: null,
+      })
+    );
+    expect(html.match(/関数を分ける/g)).toHaveLength(2);
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
   it("none は採点対象外の注記を表示する", () => {
     expect(renderReview("none")).toContain("URL 提出のため採点対象外です");
   });

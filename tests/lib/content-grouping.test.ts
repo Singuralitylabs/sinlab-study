@@ -11,6 +11,7 @@ import {
   sortContentsByHierarchy,
   sortPhasesByHierarchy,
   sortWeeksByHierarchy,
+  toContentTableGroups,
 } from "@/app/lib/content-grouping";
 import type { LearningContentWithWeek, LearningWeekWithPhase } from "@/app/types";
 
@@ -33,7 +34,7 @@ function makeWeek(
 
 function makeContent(
   overrides: Partial<LearningContentWithWeek> & { id: number; week_id: number }
-): LearningContentWithWeek {
+): LearningContentWithWeek & { grading_rubric_version: number | null } {
   return {
     id: overrides.id,
     week_id: overrides.week_id,
@@ -50,6 +51,7 @@ function makeContent(
     hint: null,
     reference_answer: null,
     grading_rubric: null,
+    grading_rubric_version: null,
     allowed_submission_types: "code",
     code_language: "javascript",
     pdf_url: null,
@@ -626,5 +628,17 @@ describe("getSiblingTailId", () => {
     const siblings = [row(10, 1), row(30, 1)];
 
     expect(getSiblingTailId(siblings)).toBe(30);
+  });
+});
+
+describe("toContentTableGroups", () => {
+  it("一覧には採点基準の本文ではなくバージョンだけを渡す", () => {
+    const content = makeContent({ id: 1, week_id: 1 });
+    const [group] = toContentTableGroups([
+      { key: "k", label: "l", contents: [{ ...content, grading_rubric_version: 3 }] },
+    ] as never);
+
+    expect(group.contents[0].grading_rubric_version).toBe(3);
+    expect(group.contents[0]).not.toHaveProperty("grading_rubric");
   });
 });

@@ -19,10 +19,13 @@ import {
   GEMINI_TEMPERATURE,
   GEMINI_THINKING_LEVEL,
   GEMINI_TOTAL_BUDGET_MS,
+  GEMINI_VALIDATION_ATTEMPTS,
 } from "@/app/constants/gemini";
 import {
   GRADING_RUBRIC_DRAFT_MAX_REQUIREMENTS,
   GRADING_RUBRIC_DRAFT_MIN_REQUIREMENTS,
+  QUALITY_LEVELS,
+  REQUIREMENT_STATUSES,
   REVIEW_MAX_SUGGESTIONS,
 } from "@/app/constants/grading";
 import { USER_STATUS } from "@/app/constants/user";
@@ -204,7 +207,7 @@ function buildReviewResponseSchema(mode: ScoreKind, gradingRubric: GradingRubric
   };
   const qualityLevel: Schema = {
     type: Type.STRING,
-    enum: ["good", "fair", "poor"],
+    enum: [...QUALITY_LEVELS],
   };
 
   if (mode === "none") {
@@ -227,7 +230,7 @@ function buildReviewResponseSchema(mode: ScoreKind, gradingRubric: GradingRubric
       mode === "rubric" && gradingRubric
         ? { type: Type.STRING, enum: gradingRubric.requirements.map((r) => r.key) }
         : REVIEW_TEXT_SCHEMA,
-    status: { type: Type.STRING, enum: ["met", "partial", "unmet"] },
+    status: { type: Type.STRING, enum: [...REQUIREMENT_STATUSES] },
     comment: REVIEW_TEXT_SCHEMA,
   };
   const requirementRequired = ["key", "status", "comment"];
@@ -387,8 +390,6 @@ function toSafeError(error: unknown, apiKey: string): Error {
   );
 }
 
-const VALIDATION_ATTEMPTS = 2;
-
 function addUsage(
   total: TokenUsage,
   usageMetadata: GenerateContentResponseUsageMetadata | undefined
@@ -436,7 +437,11 @@ async function generateValidatedJson<T>({
   const deadlineAt = Date.now() + GEMINI_TOTAL_BUDGET_MS;
   const overallSignal = AbortSignal.timeout(GEMINI_TOTAL_BUDGET_MS);
 
-  for (let validationAttempt = 0; validationAttempt < VALIDATION_ATTEMPTS; validationAttempt++) {
+  for (
+    let validationAttempt = 0;
+    validationAttempt < GEMINI_VALIDATION_ATTEMPTS;
+    validationAttempt++
+  ) {
     let lastError: unknown;
     let response: GenerateContentResponse | undefined;
 
@@ -505,7 +510,7 @@ async function generateValidatedJson<T>({
     }
     lastReason = parsed.reason;
     console.warn(
-      `Gemini応答の検証に失敗 (試行 ${validationAttempt + 1}/${VALIDATION_ATTEMPTS}): ${parsed.reason}`
+      `Gemini応答の検証に失敗 (試行 ${validationAttempt + 1}/${GEMINI_VALIDATION_ATTEMPTS}): ${parsed.reason}`
     );
   }
 
