@@ -702,6 +702,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     expect(updatePayload(mockClient).grading_rubric).toEqual({
       version: 3,
       requirements: input.requirements,
+      max_key_number: 1,
     });
   });
 
@@ -723,6 +724,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     expect(updatePayload(mockClient).grading_rubric).toEqual({
       version: 1,
       requirements: input.requirements,
+      max_key_number: 1,
     });
   });
 

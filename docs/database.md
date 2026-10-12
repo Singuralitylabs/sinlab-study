@@ -81,7 +81,7 @@ erDiagram
 | slide | `pdf_url`、`description`（任意） |
 | quiz | `description`（導入文・任意）。設問は `quiz_questions`（3.20）に持つ |
 
-- `grading_rubric`（演習のみ・NULL 可）: AIレビューの採点基準。`{ "version": 1, "requirements": [{ "key": "r1", "name": "...", "description": "..." }] }`。NULL は未設定で、AI が要件を推測する参考採点（`ai_reviews.score_kind = 'estimated'`）になり修了判定に使わない。CHECK 制約は形（object・version は正の整数・requirements は1件以上の配列）のみ検証し、件数上限・key 重複・名前の長さは API（`GradingRubricInputSchema`）が検証する。`version` は**クライアントを信用せず**サーバーが保存済みの値から導出し、要件の内容が実際に変わった保存のときだけ +1 する（`nextGradingRubric()`）。`key` は基準内で再利用しない（並べ替え・削除後も過去レビューの `key` が同じ要件を指すため）。種別を演習以外へ変更すると NULL に戻す
+- `grading_rubric`（演習のみ・NULL 可）: AIレビューの採点基準。`{ "version": 1, "max_key_number": 1, "requirements": [{ "key": "r1", "name": "...", "description": "..." }] }`。NULL は未設定で、AI が要件を推測する参考採点（`ai_reviews.score_kind = 'estimated'`）になり修了判定に使わない。CHECK 制約は形（object・version は正の整数・requirements は1件以上の配列）のみ検証し、件数上限・key 重複・名前の長さは API（`GradingRubricInputSchema`）が検証する。`version` は**クライアントを信用せず**サーバーが保存済みの値から導出し、要件の内容が実際に変わった保存のときだけ +1 する（`nextGradingRubric()`）。`key` は基準内で再利用しない（並べ替え・削除後も過去レビューの `key` が同じ要件を指すため）。削除した番号を覚えるため、発行済みの最大番号を `max_key_number` に保存し（これもサーバーが導出し下がらない。無い旧データは現存する key の最大値で補う）、編集画面はそれより大きい番号で採番する。種別を演習以外へ変更すると NULL に戻す
 - `description`: 概要（Markdown・任意入力）。未入力（NULL）の場合、詳細ページの概要欄カードを表示しない
 - `pdf_url`: `slides` バケット内の**オブジェクトキーのみ**（例: `gas/slide-01.pdf`）。URL を保存せず、配信時にサーバー側で署名付きURLを発行する（6.8参照）
 - `allowed_submission_types`（`code` / `url` / `both`）: 演習で許可する提出方法。`code` / `url` は提出方法の選択UIを出さず、`both` のみ選択可（既定 `code`）
@@ -110,7 +110,7 @@ erDiagram
 - `overall_score`: コードが判定ラベルから計算した 0〜100（AI の出した数値ではない）。`none` は NULL
 - `rubric_version`: `score_kind = 'rubric'` のとき、採点に使った `grading_rubric.version`
 - `passed`: `score_kind = 'rubric'` かつ合格点（`app/constants/grading.ts` の `CERTIFICATE_PASS_SCORE`）が有効なときだけ値を持つ。無効（0）の間・それ以外は NULL
-- `prompt_tokens` / `completion_tokens` / `thoughts_tokens`: Gemini の使用量。`completion_tokens` は回答本文のみで、思考トークンは `thoughts_tokens` に分ける（過去分は NULL）。検証失敗による再生成では両方の応答を合算し、`failed` 行にも消費分を記録する。管理画面（admin / maintainer）専用で、受講生向けの SELECT 列には含めない（RLS は行単位のため、列の出し分けはアプリ層で担保する）
+- `prompt_tokens` / `completion_tokens` / `thoughts_tokens`: Gemini の使用量。`completion_tokens` は回答本文のみで、思考トークンは `thoughts_tokens` に分ける（過去分は NULL）。検証失敗による再生成では両方の応答を合算し、`failed` 行にも消費分を記録する。同じ提出の再試行は `failed` 行を再利用するので、3列は試行をまたいだ累計（再試行で NULL に戻さず加算する）。管理画面（admin / maintainer）専用で、受講生向けの SELECT 列には含めない（RLS は行単位のため、列の出し分けはアプリ層で担保する）
 
 ### 3.8 users（ユーザー）
 

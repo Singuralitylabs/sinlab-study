@@ -10,6 +10,7 @@ import {
   REVIEW_MAX_SUGGESTIONS,
 } from "@/app/constants/grading";
 import type { GradingRequirement, GradingRubric } from "@/app/types";
+import { maxRequirementKeyNumber } from "./grading";
 
 const RequirementStatusSchema = z.enum(["met", "partial", "unmet"]);
 const QualityLevelSchema = z.enum(["good", "fair", "poor"]);
@@ -42,6 +43,7 @@ export type GradingRubricInput = z.infer<typeof GradingRubricInputSchema>;
 /** Stored rubric (learning_contents.grading_rubric). */
 export const GradingRubricSchema = GradingRubricInputSchema.extend({
   version: z.number().int().positive(),
+  max_key_number: z.number().int().nonnegative().optional(),
 });
 
 /** Unusable stored values count as "no rubric" so a bad row degrades to estimated grading. */
@@ -60,19 +62,31 @@ function normalizeRequirements(requirements: readonly GradingRequirement[]): Gra
 
 /**
  * Version bumps only when the requirement list actually changes, so re-saving an unchanged form
- * keeps `rubric_version` on past reviews pointing at the same criteria.
+ * keeps `rubric_version` on past reviews pointing at the same criteria. The key high-water mark is
+ * derived here (never taken from the client) and only ever grows, so deleting the newest
+ * requirement and adding another can't hand its key out again.
  */
 export function nextGradingRubric(
   current: GradingRubric | null,
   input: GradingRubricInput
 ): GradingRubric {
   const requirements = normalizeRequirements(input.requirements);
+  const requirementKeys = requirements.map((requirement) => requirement.key);
   if (!current) {
-    return { version: 1, requirements };
+    return { version: 1, requirements, max_key_number: maxRequirementKeyNumber(requirementKeys) };
   }
   const unchanged =
     JSON.stringify(normalizeRequirements(current.requirements)) === JSON.stringify(requirements);
-  return { version: unchanged ? current.version : current.version + 1, requirements };
+  const maxKeyNumber = Math.max(
+    current.max_key_number ?? 0,
+    maxRequirementKeyNumber(current.requirements.map((requirement) => requirement.key)),
+    maxRequirementKeyNumber(requirementKeys)
+  );
+  return {
+    version: unchanged ? current.version : current.version + 1,
+    requirements,
+    max_key_number: maxKeyNumber,
+  };
 }
 
 const ReviewTextSchema = z.string().trim().min(1);

@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowDown, ArrowUp, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   GRADING_REQUIREMENT_DESCRIPTION_MAX_LENGTH,
   GRADING_REQUIREMENT_NAME_MAX_LENGTH,
@@ -9,7 +9,7 @@ import {
   GRADING_RUBRIC_DRAFT_MIN_REQUIREMENTS,
   GRADING_RUBRIC_MAX_REQUIREMENTS,
 } from "@/app/constants/grading";
-import { nextRequirementKey } from "@/app/lib/grading";
+import { maxRequirementKeyNumber } from "@/app/lib/grading";
 import type { GradingRequirement } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,8 @@ interface GradingRubricEditorProps {
   onChange: (rows: GradingRequirement[]) => void;
   /** Stored version in edit mode; null when the rubric is unset or the content is new. */
   currentVersion: number | null;
+  /** Highest `r{n}` number already issued for the stored rubric; 0 for a new rubric. */
+  issuedMaxKeyNumber: number;
   exerciseInstructions: string;
   referenceAnswer: string;
 }
@@ -30,9 +32,20 @@ export function GradingRubricEditor({
   rows,
   onChange,
   currentVersion,
+  issuedMaxKeyNumber,
   exerciseInstructions,
   referenceAnswer,
 }: GradingRubricEditorProps) {
+  // A ref, not derived from `rows`: deleting or replacing rows during this edit must not free
+  // their numbers for new requirements.
+  const issuedMaxRef = useRef(issuedMaxKeyNumber);
+
+  function allocateKey(): string {
+    issuedMaxRef.current =
+      Math.max(issuedMaxRef.current, maxRequirementKeyNumber(rows.map((row) => row.key))) + 1;
+    return `r${issuedMaxRef.current}`;
+  }
+
   const [isDrafting, setIsDrafting] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
 
@@ -53,10 +66,7 @@ export function GradingRubricEditor({
   }
 
   function addRow() {
-    onChange([
-      ...rows,
-      { key: nextRequirementKey(rows.map((row) => row.key)), name: "", description: "" },
-    ]);
+    onChange([...rows, { key: allocateKey(), name: "", description: "" }]);
   }
 
   async function requestDraft() {
@@ -86,12 +96,9 @@ export function GradingRubricEditor({
 
       // Fresh keys: reusing r1.. from the replaced rows would make an old review's key point at a
       // different requirement.
-      const keys = rows.map((row) => row.key);
-      const drafted: GradingRequirement[] = [];
-      for (const item of data.requirements as { name: string; description: string }[]) {
-        const key = nextRequirementKey([...keys, ...drafted.map((row) => row.key)]);
-        drafted.push({ key, name: item.name, description: item.description });
-      }
+      const drafted: GradingRequirement[] = (
+        data.requirements as { name: string; description: string }[]
+      ).map((item) => ({ key: allocateKey(), name: item.name, description: item.description }));
       onChange(drafted);
     } catch {
       setDraftError("下書きの生成中にエラーが発生しました");

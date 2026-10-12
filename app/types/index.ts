@@ -68,6 +68,12 @@ export type GradingRequirement = {
 export type GradingRubric = {
   version: number;
   requirements: GradingRequirement[];
+  /**
+   * Highest `r{n}` number ever issued for this rubric. Kept apart from `requirements` because a
+   * deleted requirement's number must not be handed to a new one. Absent on rubrics saved before
+   * it existed; readers fall back to the highest key still present.
+   */
+  max_key_number?: number;
 };
 
 /**

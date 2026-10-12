@@ -8,6 +8,7 @@ import {
   asReviewJson,
   computeReviewScore,
   getGradingRubricVersion,
+  getRubricMaxKeyNumber,
   isReviewPassed,
   nextRequirementKey,
   renderReviewMarkdown,
@@ -174,7 +175,7 @@ describe("asReviewJson", () => {
   });
 });
 
-describe("getGradingRubricVersion / toRubricFormRows / nextRequirementKey", () => {
+describe("getGradingRubricVersion / toRubricFormRows / nextRequirementKey / getRubricMaxKeyNumber", () => {
   const rubric = {
     version: 4,
     requirements: [
@@ -201,5 +202,18 @@ describe("getGradingRubricVersion / toRubricFormRows / nextRequirementKey", () =
     expect(nextRequirementKey([])).toBe("r1");
     expect(nextRequirementKey(["r1", "r3"])).toBe("r4");
     expect(nextRequirementKey(["custom", "r2"])).toBe("r3");
+  });
+
+  it("削除済みの最大番号を issuedMax で覚え、その key を新しい要件に再利用しない", () => {
+    expect(nextRequirementKey(["r1", "r2"], 3)).toBe("r4");
+    expect(nextRequirementKey(["r1", "r5"], 3)).toBe("r6");
+  });
+
+  it("発行済みの最大番号は保存値と現存 key の大きい方。未設定・不正は 0", () => {
+    expect(getRubricMaxKeyNumber({ ...rubric, max_key_number: 7 })).toBe(7);
+    expect(getRubricMaxKeyNumber({ ...rubric, max_key_number: 2 })).toBe(3);
+    expect(getRubricMaxKeyNumber(rubric)).toBe(3);
+    expect(getRubricMaxKeyNumber({ ...rubric, max_key_number: "9" })).toBe(3);
+    expect(getRubricMaxKeyNumber(null)).toBe(0);
   });
 });

@@ -50,6 +50,7 @@ describe("nextGradingRubric", () => {
     expect(nextGradingRubric(null, { requirements: [req("r1")] })).toEqual({
       version: 1,
       requirements: [req("r1")],
+      max_key_number: 1,
     });
   });
 
@@ -73,5 +74,25 @@ describe("nextGradingRubric", () => {
     expect(
       nextGradingRubric(current, { requirements: [req("r2", "B"), req("r1", "A")] }).version
     ).toBe(4);
+  });
+
+  it("末尾の要件を削除して保存しても、発行済みの最大番号は下がらない", () => {
+    const v1 = nextGradingRubric(null, {
+      requirements: [req("r1"), req("r2"), req("r3")],
+    });
+    const v2 = nextGradingRubric(v1, { requirements: [req("r1"), req("r2")] });
+    expect(v2.max_key_number).toBe(3);
+    const v3 = nextGradingRubric(v2, { requirements: [req("r1"), req("r2"), req("r4")] });
+    expect(v3.max_key_number).toBe(4);
+  });
+
+  it("最大番号を持たない既存の基準は、現存する key から補って保存する", () => {
+    const legacy = { version: 2, requirements: [req("r1"), req("r5")] };
+    expect(nextGradingRubric(legacy, { requirements: [req("r1")] }).max_key_number).toBe(5);
+  });
+
+  it("クライアントが送った max_key_number は採用しない", () => {
+    const parsed = GradingRubricInputSchema.parse({ max_key_number: 0, requirements: [req("r1")] });
+    expect("max_key_number" in parsed).toBe(false);
   });
 });

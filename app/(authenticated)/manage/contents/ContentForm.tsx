@@ -12,7 +12,11 @@ import type {
   ThemeFilterOption,
   WeekFilterOption,
 } from "@/app/lib/content-filtering";
-import { getGradingRubricVersion, toRubricFormRows } from "@/app/lib/grading";
+import {
+  getGradingRubricVersion,
+  getRubricMaxKeyNumber,
+  toRubricFormRows,
+} from "@/app/lib/grading";
 import { type QuizQuestionData, QuizQuestionsSchema } from "@/app/lib/quiz";
 import { parseSlideObjectKey, toSlideObjectKey } from "@/app/lib/slide-object-key";
 import { getSlideStorageWarning } from "@/app/lib/slide-storage-warning";
@@ -719,6 +723,7 @@ export function ContentForm({
                 rows={rubricRows}
                 onChange={setRubricRows}
                 currentVersion={getGradingRubricVersion(initialData?.grading_rubric)}
+                issuedMaxKeyNumber={getRubricMaxKeyNumber(initialData?.grading_rubric)}
                 exerciseInstructions={exerciseInstructions}
                 referenceAnswer={referenceAnswer}
               />

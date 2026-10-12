@@ -441,7 +441,7 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 
 1. コンテンツ詳細ページは `fetchQuizQuestions()`（`app/services/api/quiz-server.ts`）で RPC `get_quiz_questions` を**通常クライアント**で呼び、正解を含まない設問を `QuizForm` に渡す。service_role では読まない。取得に失敗したら「設問を読み込めませんでした」と表示する（設問ゼロの表示と区別する）。設問・選択肢・解説・模範解答の `{{SUPABASE_STORAGE_URL}}` は本文と同じく `resolveMarkdownStorageUrls()` で置換する
 2. 回答は `POST /api/quiz/grade`（`{ contentId, answers: [{ questionId, revision, choices? , text? }] }`。`revision` は出題時に受け取った設問の版で、置換で id が保たれても中身が差し替わった設問への回答を採点しないため）。認証・rejected の403のあと、member / お試しは提出 API と同じ `isContentVisible()` で403を判定する（admin / maintainer は未公開プレビューで試せるよう通さない。RPC 側も可視性を再確認する）。RPC `grade_quiz_answers` が全設問に回答し、各 `revision` が現在の設問と一致し、回答の数が設問の数と同じ（削除された設問への回答を含まない）ときだけ結果を返し、空なら400「採点できませんでした。すべての設問に回答し、設問が更新された場合はページを再読み込みしてください」（クイズ以外の `contentId` でも RPC は空を返す。画面は全問回答しないと送信できないため、画面から空になるのはページ表示後に設問の形式・設問文・選択肢が編集・削除された場合。正解・解説だけの修正では空にならない）。正解・解説がレスポンスに含まれるのはこの採点後だけ
-3. 画面は設問ごとに正解・不正解と解説を表示する。入力式は自動採点せず、模範解答と解説を表示する（AIレビューは流用しない。1コンテンツ1回の上限や Gemini の費用が設問単位の確認に見合わないため）。「もう一度解く」で回答をやり直せる。再描画で設問（id・`revision`）が変わったときは回答・結果・エラーを破棄し（`revision` は内容のハッシュで、編集を戻すと版も戻るため、古いエラーも残さない）、表示されていたものを破棄したときだけ「設問が更新されたため、回答をやり直してください」と表示する（古い選択を新しい版の設問として送らないため。設問が0件になったときは「設問が登録されていません」だけを出す）。採点結果とエラーは送信時の設問の版と組で持ち、現在の版と一致するときだけ表示・完了記録する（応答待ちの間に版が変わると、id が保たれるため古い版の結果が新しい設問の下に出てしまう。届く順序に依らず防ぐため）。完了記録に失敗した警告は結果の表示とは独立に出し、完了ボタン等で完了済みになったら消す。記録の送信後、再描画で完了済みが反映される前に解き直しても、もう一度は記録しない
+3. 画面は設問ごとに正解・不正解と解説を表示する。入力式は自動採点せず、模範解答と解説を表示する（AIレビューは流用しない。AIレビューの回数上限や Gemini の費用が設問単位の確認に見合わないため）。「もう一度解く」で回答をやり直せる。再描画で設問（id・`revision`）が変わったときは回答・結果・エラーを破棄し（`revision` は内容のハッシュで、編集を戻すと版も戻るため、古いエラーも残さない）、表示されていたものを破棄したときだけ「設問が更新されたため、回答をやり直してください」と表示する（古い選択を新しい版の設問として送らないため。設問が0件になったときは「設問が登録されていません」だけを出す）。採点結果とエラーは送信時の設問の版と組で持ち、現在の版と一致するときだけ表示・完了記録する（応答待ちの間に版が変わると、id が保たれるため古い版の結果が新しい設問の下に出てしまう。届く順序に依らず防ぐため）。完了記録に失敗した警告は結果の表示とは独立に出し、完了ボタン等で完了済みになったら消す。記録の送信後、再描画で完了済みが反映される前に解き直しても、もう一度は記録しない
 4. 採点に成功したら、未完了なら進捗 API（`POST /api/progress`）で完了にし、画面を再描画して完了ボタンに反映する。クイズのページでは完了ボタンの切り替え後も再描画し、`QuizForm` の完了状態を揃える（他の種別では再描画しない。スライドは署名付きURLが再発行され PDF を読み直すため）。未公開プレビュー中は記録しない。回答内容は保存しない
 5. 設問・選択肢・解説・模範解答の描画は本文と同じ `MarkdownRenderer`。設問・選択肢はページ（Server Component）で描画して `QuizForm` に渡し、採点後に出る解説・模範解答だけを `next/dynamic` で遅延読み込みする（Markdown の描画一式を初期 JS に含めないため）。ヒントは演習のヒントと同じくプレーンテキスト
 
@@ -671,7 +671,7 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 
 Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可能。削除は論理削除（`is_deleted = true`）。行は物理削除せず、`user_progress` / `submissions` / `ai_reviews` の履歴を保持する。コンテンツ種別 `slide` では、PDF ファイルを Supabase Storage（`slides` バケット）にアップロードして `pdf_url` に保存する。テーマのサムネイル画像は Supabase Storage（`thumbnails` バケット）にアップロードして `image_url` に保存する。オブジェクトキーがテーマIDに依存するため、新規作成フォームではアップロードできず、テーマ作成後の編集画面から設定する。
 
-**採点基準の設定（#305）**: 種別が演習のとき、コンテンツ作成・編集フォームに「採点基準」エディタ（`GradingRubricEditor`）を表示し、要件（名前・説明。最大10件）を追加・並べ替え・削除して `grading_rubric` として保存する。リクエストの `grading_rubric` は `{ requirements: [{ key, name, description }] }`（`version` は受け取らない）で、`null` を送ると基準を削除（未設定に戻す）、省略すると変更しない。`version` は `updateContent()` が保存済みの値と比較して決め（初回 1、内容が変わった保存のみ +1、変更なしは据え置き）、現在値を取得できなければ更新しない。種別を演習以外へ変える更新・一括種別変更では基準を `NULL` にする。一覧（`/manage/contents`）には採点基準の有無とバージョンを表示する。
+**採点基準の設定（#305）**: 種別が演習のとき、コンテンツ作成・編集フォームに「採点基準」エディタ（`GradingRubricEditor`）を表示し、要件（名前・説明。最大10件）を追加・並べ替え・削除して `grading_rubric` として保存する。リクエストの `grading_rubric` は `{ requirements: [{ key, name, description }] }`（`version` は受け取らない）で、`null` を送ると基準を削除（未設定に戻す）、省略すると変更しない。`version` は `updateContent()` が保存済みの値と比較して決め（初回 1、内容が変わった保存のみ +1、変更なしは据え置き）、現在値を取得できなければ更新しない。要件の `key`（`r{n}`）は基準内で再利用しない: 発行済みの最大番号 `max_key_number` も `updateContent()` が導出して保存し（クライアントは送らず、下がらない）、エディタは削除・置換した行の番号も飛ばして採番する。種別を演習以外へ変える更新・一括種別変更では基準を `NULL` にする。一覧（`/manage/contents`）には採点基準の有無とバージョンを表示する。
 
 **採点基準の AI 下書き**: `POST /api/manage/contents/grading-rubric/draft`（admin / maintainer のみ。未認証 401・権限なし 403・入力不正 400・`GEMINI_API_KEY` 未設定 503・生成失敗 502）。ボディ `{ exercise_instructions, reference_answer? }` から要件 3〜7 件（`name`・`description`）を返す。**何も保存しない**（フォームに展開し、講師が確認・編集して保存する）。講師の操作なので会員用キー（`GEMINI_API_KEY`）のみ使い、お試し用キーは使わない。
 
@@ -754,7 +754,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 3. 本人の提出であることを確認し、コンテンツの可視性（`is_published = true` 付き SELECT で 0 行なら 403）を確認
 4. 回数制限を判定（下記「回数制限」）
 5. Gemini API にコード・演習指示・模範回答・採点基準を送信し、構造化 JSON でレビューを生成（下記「構造化採点」。単一ファイルの提出は `code_content` に言語を持たないため、演習の `code_language` を言語として渡す。コードを囲むフェンスはコード中のバッククォートの連続より長くし、Markdown 提出のコードブロック等でフェンスが途中で閉じないようにする。`GEMINI_MAX_CODE_LENGTH` を超えた分の省略は複数ファイルの提出でもファイルごとに行う）
-6. `ai_reviews` テーブルに結果を upsert（`pending` → `processing` → `completed` / `failed`）。再利用された行は `created_at` も現在時刻に更新する（当日の件数集計から漏れないようにするため）
+6. `ai_reviews` テーブルに結果を upsert（`pending` → `processing` → `completed` / `failed`）。再利用された行は `created_at` も現在時刻に更新する（当日の件数集計から漏れないようにするため）。トークン列は更新せず累計を保つ
 
 **回数制限（#304）**: 制限値は `app/constants/gemini.ts` の `AI_REVIEW_LIMITS` が唯一の定義で、API・画面文言・本節はここから導出する。判定は純粋関数 `evaluateReviewRequest()`（`app/lib/ai-review-limits.ts`）、集計クエリは `fetchAIReviewUsage()`（`app/services/api/ai-review-usage-server.ts`）が担う。日付の境界は **JST**（`app/lib/email-digest.ts` の `toJstDateString()` / `jstStartOfDayIso()` と同じ基準）で、UTC では数えない。集計は常に `user_id` で本人の提出に絞る（admin / maintainer は RLS で全件読めるため、RLS だけに頼らない）。
 
@@ -768,7 +768,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 - 429 の応答は `{ error, remaining, resetsAt }`。`remaining` は当日の残り回数（trial は 0。同一提出の再要求は新しい提出で使える残り回数）、`resetsAt` は JST 翌 0 時の ISO 文字列。`error` はステータス別のメッセージ（active: 「本日のこの課題の AI レビュー回数（N 回）を使い切りました。明日また提出できます」、trial: 「お試しプランでは AI レビューは 1 課題につき 1 回です。有料会員は 1 日 2 回まで再レビューできます」）。200 の応答にもこのレビュー後の `remaining` を含める
 - 回数の集計に失敗したときは 500 を返し、レビューを開始しない（フェイルクローズ）
 - 並行リクエスト: 1 提出 1 回は `ai_reviews.submission_id` の UNIQUE（`upsertPendingAIReview()`）で担保する。日次件数の判定は素の SELECT のため並行時に 1 回超過しうるが、金銭影響が数円のため許容する（`stripe_events` 型の claim は設けない）
-- 画面: コンテンツ詳細の「課題提出」見出しに、active は「本日の残り回数: N 回（この課題）」（ページ描画時にサーバー側で算出。クライアントでは数えない）、trial は上記メッセージと `isStripeEnabled()` に従うアップグレード導線（`UpgradeCta`）を表示する。429 時はフォームが API の `error` をそのまま表示する
+- 画面: コンテンツ詳細の「課題提出」見出しに、active は「本日の残り回数: N 回」（この課題の残りと1日全体の残りの小さい方。ページ描画時にサーバー側で算出。クライアントでは数えない）、trial は上記メッセージと `isStripeEnabled()` に従うアップグレード導線（`UpgradeCta`）を表示する。429 時はフォームが API の `error` をそのまま表示する
 
 **構造化採点（#305）**: 採点のぶれを抑えるため、AI には判定ラベルだけを返させ、点数と合否はコードが決める（`app/lib/grading.ts`。AI の出した数値は点数にも合否にも使わない）。重み・合格点は `app/constants/grading.ts`、キー・モデル・温度（`GEMINI_TEMPERATURE` = 0）は `app/constants/gemini.ts`。
 
@@ -785,7 +785,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 - **合否**: `rubric` のときだけ `passed` を記録する。合格は「未達成の要件が 1 つもない かつ 点数 ≥ `CERTIFICATE_PASS_SCORE`」。**`CERTIFICATE_PASS_SCORE` が 0（既定）の間は無効で、`passed` は NULL のまま**・画面にも合否を出さない。値を決めるときは `scripts/grading-dry-run.ts` の分布を見たうえで定数を変える PR を出す
 - **検証失敗時の再生成**: JSON として不正・スキーマ違反の応答は **1 回だけ**再生成する。2 回とも失敗したら `failed`（受講生の回数に数えない）。再生成を含む全試行と 429 のリトライ待機は `GEMINI_TOTAL_BUDGET_MS` を共有する（`maxDuration` を超えない）
 - **URL の扱い**: URL 提出は URL の中身を AI が確認できないため要件判定をしない（`none`）。URL 形式の妥当性と課題への適合性の所見のみ返す
-- **トークン記録**: `prompt_tokens`（入力）・`completion_tokens`（回答）・`thoughts_tokens`（思考。`usageMetadata.thoughtsTokenCount`）を保存する。再生成した場合は両方の応答を合算し、失敗時も消費分を `failed` 行に記録する（`ReviewGenerationError.usage`）。取得できなかった項目は NULL。管理画面（`/manage/submissions`）の admin / maintainer にのみ表示し、受講生向けの SELECT 列には含めない
+- **トークン記録**: `prompt_tokens`（入力）・`completion_tokens`（回答）・`thoughts_tokens`（思考。`usageMetadata.thoughtsTokenCount`）を保存する。再生成した場合は両方の応答を合算し、失敗時も消費分を `failed` 行に記録する（`ReviewGenerationError.usage`）。同じ提出の再試行では `failed` 行を再利用するため、各列は試行をまたいだ累計になる（再試行で消さず加算する）。取得できなかった項目は NULL。管理画面（`/manage/submissions`）の admin / maintainer にのみ表示し、受講生向けの SELECT 列には含めない
 - **表示**: `review_json` から `StructuredReview` で描画する。`legacy` と、`review_json` が不正な行は従来どおり `review_content`（Markdown）を表示する。`estimated` は「参考」、`none` は「採点対象外」のバッジを付ける。`passed = false`（有効時）のときは再提出の案内を出す
 
 **レスポンス**:

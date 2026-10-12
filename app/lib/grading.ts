@@ -192,14 +192,37 @@ export function toRubricFormRows(value: unknown): GradingRequirement[] {
   );
 }
 
+function requirementKeyNumber(key: string): number {
+  const match = /^r(\d+)$/.exec(key);
+  return match ? Number(match[1]) : 0;
+}
+
+/** Highest `r{n}` number among the keys; 0 when none match. */
+export function maxRequirementKeyNumber(keys: readonly string[]): number {
+  return keys.reduce((highest, key) => Math.max(highest, requirementKeyNumber(key)), 0);
+}
+
 /**
- * Next unused `r{n}` key. Keys are never reused for another requirement within a rubric, so a
- * review's key keeps pointing at the same requirement after reordering or deleting rows.
+ * Highest key number ever issued for a stored rubric: the persisted high-water mark, or the keys
+ * still present for rubrics saved before the mark existed. 0 when unset or unrecognisable.
  */
-export function nextRequirementKey(existingKeys: readonly string[]): string {
-  const max = existingKeys.reduce((highest, key) => {
-    const match = /^r(\d+)$/.exec(key);
-    return match ? Math.max(highest, Number(match[1])) : highest;
-  }, 0);
-  return `r${max + 1}`;
+export function getRubricMaxKeyNumber(value: unknown): number {
+  if (!isRecord(value)) {
+    return 0;
+  }
+  const stored =
+    typeof value.max_key_number === "number" && Number.isInteger(value.max_key_number)
+      ? Math.max(0, value.max_key_number)
+      : 0;
+  return Math.max(stored, maxRequirementKeyNumber(toRubricFormRows(value).map((row) => row.key)));
+}
+
+/**
+ * Next `r{n}` key above both the keys in use and `issuedMax` (the highest number ever issued).
+ * Keys are never reused for another requirement within a rubric, so a review's key keeps pointing
+ * at the same requirement after reordering or deleting rows; `issuedMax` is what remembers the
+ * deleted ones.
+ */
+export function nextRequirementKey(existingKeys: readonly string[], issuedMax = 0): string {
+  return `r${Math.max(issuedMax, maxRequirementKeyNumber(existingKeys)) + 1}`;
 }
