@@ -145,7 +145,7 @@ export default async function ManageSubmissionsPage({ searchParams }: PageProps)
 
                 {submission.ai_review && (
                   <p className="mt-3 text-xs text-muted-foreground">
-                    トークン数 — 入力: {formatTokenCount(submission.ai_review.prompt_tokens)} /
+                    累計トークン数 — 入力: {formatTokenCount(submission.ai_review.prompt_tokens)} /
                     回答: {formatTokenCount(submission.ai_review.completion_tokens)} / 思考:{" "}
                     {formatTokenCount(submission.ai_review.thoughts_tokens)}
                   </p>

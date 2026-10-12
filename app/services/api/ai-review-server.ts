@@ -177,6 +177,7 @@ export async function upsertPendingAIReview(submissionId: number): Promise<{ id:
         passed: null,
         // Token columns are deliberately absent: a reused failed row keeps the tokens already
         // billed so the completed/failed update adds to them instead of losing earlier attempts.
+        //
         // Reused failed rows would otherwise keep their original day and escape the per-day count.
         created_at: new Date().toISOString(),
       },
@@ -224,8 +225,10 @@ function addTokens(previous: number | null, current: number | null): number | nu
 
 /**
  * Token columns are cumulative over every attempt on the same submission (a failed row is reused
- * on retry), because failed attempts are billed too. Read-then-write is enough: a submission's
- * attempts are serialised by the processing check in the API route.
+ * on retry), because failed attempts are billed too. Read-then-write is best effort: the route's
+ * processing check keeps concurrent attempts rare but doesn't make them impossible. When the read
+ * fails the columns are left untouched, since writing only this attempt's tokens would overwrite
+ * the earlier total with a smaller one.
  */
 async function accumulateTokens(
   supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
@@ -239,7 +242,8 @@ async function accumulateTokens(
     .single();
 
   if (error) {
-    console.error("AIレビュー トークン取得エラー:", error.message);
+    console.error("AIレビュー トークン取得エラー:", error.message, { reviewId, ...usage });
+    return null;
   }
 
   return {

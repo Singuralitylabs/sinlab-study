@@ -366,6 +366,28 @@ describe("updateAIReviewFailed / updateAIReviewCompleted", () => {
     );
   });
 
+  it("累計の読み取りに失敗したときは、前回までの記録を小さい値で上書きしないようトークン列に触れない", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        ai_reviews: [
+          { data: null, error: dbError },
+          { data: null, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await updateAIReviewFailed(4, "bad", {
+      promptTokens: 5,
+      completionTokens: 1,
+      thoughtsTokens: null,
+    });
+
+    const update = mockClient.from.mock.results[1].value;
+    expect(update.update).toHaveBeenCalledWith({ status: "failed", error_message: "bad" });
+  });
+
   it("前回の記録がなければ今回の値だけを保存し、双方 NULL の項目は NULL のままにする", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
