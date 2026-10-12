@@ -29,7 +29,6 @@ import {
 import { fetchQuizQuestions } from "@/app/services/api/quiz-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
-import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -231,7 +230,7 @@ export default async function ContentPage({ params }: PageProps) {
       ? createSlideSignedUrl(content.pdf_url)
       : Promise.resolve(null),
     content.content_type === "quiz"
-      ? createServerSupabaseClient().then((client) => fetchQuizQuestions(client, contentIdNum))
+      ? fetchQuizQuestions(contentIdNum)
       : Promise.resolve({ data: [], error: null }),
   ]);
 
@@ -281,9 +280,6 @@ export default async function ContentPage({ params }: PageProps) {
                 </p>
               ) : (
                 <QuizForm
-                  // Remount (dropping answers and results) when router.refresh() brings a changed
-                  // question set, so the form never sends old choices with a new revision.
-                  key={quizQuestions.map((q) => `${q.id}:${q.revision}`).join(",")}
                   contentId={contentIdNum}
                   questions={quizQuestions.map((question) => ({
                     ...question,

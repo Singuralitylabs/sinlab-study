@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/app/services/api/supabase-server");
+
 import { fetchQuizQuestions, gradeQuizAnswers } from "@/app/services/api/quiz-server";
+import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 const IMG = "![図]({{SUPABASE_STORAGE_URL}}/thumbnails/a.png)";
@@ -34,7 +38,7 @@ describe("quiz-server の Storage URL 置換", () => {
       },
     });
 
-    const { data, error } = await fetchQuizQuestions(client as never, 5);
+    const { data, error } = await fetchQuizQuestions(5, client as never);
 
     expect(error).toBeNull();
     expect(data).toEqual([
@@ -90,9 +94,23 @@ describe("quiz-server の Storage URL 置換", () => {
       rpcResults: { get_quiz_questions: { data: null, error: { message: "boom" } } },
     });
 
-    const { data, error } = await fetchQuizQuestions(client as never, 5);
+    const { data, error } = await fetchQuizQuestions(5, client as never);
 
     expect(data).toEqual([]);
     expect(error).toEqual({ message: "boom" });
+  });
+});
+
+describe("fetchQuizQuestions のクライアント", () => {
+  it("クライアントを渡さなければ呼び出し元の JWT のクライアント（RLS 適用）で RPC を呼ぶ", async () => {
+    const client = createMockSupabaseClient({
+      rpcResults: { get_quiz_questions: { data: [], error: null } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+
+    await fetchQuizQuestions(7);
+
+    expect(createServerSupabaseClient).toHaveBeenCalled();
+    expect(client.rpc).toHaveBeenCalledWith("get_quiz_questions", { p_content_id: 7 });
   });
 });

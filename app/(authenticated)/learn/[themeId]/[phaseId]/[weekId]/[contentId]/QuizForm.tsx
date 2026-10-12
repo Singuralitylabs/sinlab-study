@@ -62,6 +62,19 @@ export function QuizForm({
   const [error, setError] = useState<string | null>(null);
   const [progressWarning, setProgressWarning] = useState<string | null>(null);
 
+  // router.refresh() (after grading, or from the completion button) can bring a question set an
+  // admin changed meanwhile. Drop answers and results then, so old choices are never sent with a
+  // new revision or shown under new text, and say why instead of silently clearing the form.
+  const questionVersion = questions.map((q) => `${q.id}:${q.revision}`).join(",");
+  const [seenQuestionVersion, setSeenQuestionVersion] = useState(questionVersion);
+  if (seenQuestionVersion !== questionVersion) {
+    setSeenQuestionVersion(questionVersion);
+    setAnswers({});
+    setResults(null);
+    setProgressWarning(null);
+    setError("設問が更新されたため、回答をやり直してください");
+  }
+
   const allAnswered = questions.every((q) => isAnswered(q, answers[q.id]));
   const autoGraded = results ? [...results.values()].filter((r) => r.isCorrect !== null) : [];
   const correctCount = autoGraded.filter((r) => r.isCorrect).length;

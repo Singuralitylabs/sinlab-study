@@ -257,6 +257,21 @@ describe("buildUserPrompt", () => {
     expect(prompt).not.toContain(content);
   });
 
+  it("複数ファイルもファイルごとに上限を超えた分を省略する", () => {
+    const long = "b".repeat(GEMINI_MAX_CODE_LENGTH + 5);
+    const prompt = buildUserPrompt("課題", {
+      type: "code",
+      files: [
+        { filename: "README.md", language: "markdown", content: long },
+        { filename: "main.js", language: "javascript", content: "const a = 1;" },
+      ],
+    });
+
+    expect(prompt).toContain(`${"b".repeat(GEMINI_MAX_CODE_LENGTH)}\n\n... (5文字省略)`);
+    expect(prompt).not.toContain(long);
+    expect(prompt).toContain("### main.js (javascript)\n```\nconst a = 1;\n```");
+  });
+
   it("複数ファイルはファイル名・言語付きで並べる", () => {
     const prompt = buildUserPrompt("課題", {
       type: "code",

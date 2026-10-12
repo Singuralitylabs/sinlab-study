@@ -65,7 +65,10 @@ export function CodeEditor({ value, onChange, language, placeholder }: CodeEdito
   );
   useEffect(() => {
     let cancelled = false;
-    LANGUAGE_LOADERS[language]()
+    // code_language comes from the DB as-is; a value outside the map (DB CHECK and CODE_LANGUAGES
+    // out of sync) must leave a plain editor, not throw here and take the exercise page down.
+    const load = LANGUAGE_LOADERS[language] ?? (() => Promise.resolve(NO_EXTENSIONS));
+    load()
       .then((extensions) => {
         // Ignore a slower chunk for a language the user already switched away from.
         if (!cancelled) setLoaded({ language, extensions });

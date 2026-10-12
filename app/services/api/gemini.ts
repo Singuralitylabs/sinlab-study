@@ -83,13 +83,17 @@ function fenceFor(content: string): string {
   return "`".repeat(Math.max(3, longestRun + 1));
 }
 
+// Applied per file in the multi-file branch too: codeFiles has no length limit at the API, and a
+// long README or data file would otherwise go into the prompt whole.
+function truncateCode(content: string): string {
+  return content.length > GEMINI_MAX_CODE_LENGTH
+    ? `${content.substring(0, GEMINI_MAX_CODE_LENGTH)}\n\n... (${content.length - GEMINI_MAX_CODE_LENGTH}文字省略)`
+    : content;
+}
+
 function buildCodeSection(files: CodeFile[]): string {
   if (files.length === 1 && !files[0].filename) {
-    const content = files[0].content;
-    const truncated =
-      content.length > GEMINI_MAX_CODE_LENGTH
-        ? `${content.substring(0, GEMINI_MAX_CODE_LENGTH)}\n\n... (${content.length - GEMINI_MAX_CODE_LENGTH}文字省略)`
-        : content;
+    const truncated = truncateCode(files[0].content);
     // language comes from the submission body unchecked; anything outside the known list could
     // carry spaces, newlines or backticks and break the fence, so it is dropped. "gas" is not a
     // Markdown fence language, so it is sent as the JavaScript it is.
@@ -103,8 +107,9 @@ function buildCodeSection(files: CodeFile[]): string {
     .map((file, index) => {
       const name = file.filename || `ファイル${index + 1}`;
       const header = file.language ? `${name} (${file.language})` : name;
-      const fence = fenceFor(file.content);
-      return `### ${header}\n${fence}\n${file.content}\n${fence}`;
+      const content = truncateCode(file.content);
+      const fence = fenceFor(content);
+      return `### ${header}\n${fence}\n${content}\n${fence}`;
     })
     .join("\n\n");
 }

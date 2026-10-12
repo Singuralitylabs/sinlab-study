@@ -28,32 +28,22 @@ export async function requireAdminApi(): Promise<
 }
 
 /**
- * Content-manager gate (admin or maintainer) with the same checks and messages the /manage
- * content routes use: 401 unauthenticated, 403 no users row, 403 rejected, 403 no permission.
+ * Content-manager gate (admin or maintainer): the learner checks (401 / 403 no users row / 403
+ * rejected) and then 403 without content permission, as the /manage content routes expect.
  */
 export async function requireContentManagerApi(): Promise<
-  { response: NextResponse } | { response: null; auth: ServerAuth }
+  { response: NextResponse } | { response: null; auth: ServerAuth & { userId: number } }
 > {
-  const auth = await getServerAuth();
-  if (!auth.user) {
-    return { response: NextResponse.json({ error: "認証が必要です" }, { status: 401 }) };
+  const gate = await requireLearnerApi();
+  if (gate.response) {
+    return gate;
   }
-  if (!auth.userId) {
-    return {
-      response: NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 }),
-    };
-  }
-  if (auth.userStatus === USER_STATUS.REJECTED) {
-    return {
-      response: NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 }),
-    };
-  }
-  if (!checkContentPermissions(auth.userRole)) {
+  if (!checkContentPermissions(gate.auth.userRole)) {
     return {
       response: NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 }),
     };
   }
-  return { response: null, auth };
+  return gate;
 }
 
 /**

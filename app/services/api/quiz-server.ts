@@ -5,7 +5,7 @@ import {
   type QuizQuestionResult,
 } from "@/app/constants/quiz";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
-import type { createServerSupabaseClient } from "./supabase-server";
+import { createServerSupabaseClient } from "./supabase-server";
 
 type ServerSupabaseClient = Awaited<ReturnType<typeof createServerSupabaseClient>>;
 
@@ -31,13 +31,14 @@ type QuizGradeRpcRow = {
 /**
  * Questions without answers, via the get_quiz_questions RPC with the caller's JWT. Learners have
  * no SELECT on quiz_questions (it holds the answers), and the RPC re-checks visibility, so never
- * swap this for a service_role read.
+ * swap this for a service_role read (the default client is the caller's, RLS applied).
  */
 export async function fetchQuizQuestions(
-  supabase: ServerSupabaseClient,
-  contentId: number
+  contentId: number,
+  supabase?: ServerSupabaseClient
 ): Promise<{ data: QuizQuestionForLearner[]; error: PostgrestError | null }> {
-  const { data, error } = (await supabase.rpc("get_quiz_questions", {
+  const client = supabase ?? (await createServerSupabaseClient());
+  const { data, error } = (await client.rpc("get_quiz_questions", {
     p_content_id: contentId,
   })) as unknown as { data: QuizQuestionRpcRow[] | null; error: PostgrestError | null };
 
