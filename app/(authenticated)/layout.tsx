@@ -6,6 +6,7 @@ import { UpgradeCtaLink } from "@/app/components/UpgradeCtaLink";
 import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
+import { isCertificateEligible } from "@/app/lib/certificate";
 import { fetchUnreadAnnouncementCount } from "@/app/services/api/announcements-server";
 import { checkAdminPermissions, checkInstructorPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -41,9 +42,10 @@ export default async function AuthLayout({
         isAdmin={isAdmin}
         isInstructor={isInstructor}
         stripeEnabled={stripeEnabled}
+        showCertificates={isCertificateEligible(userStatus, userRole)}
         unreadAnnouncementCount={unreadAnnouncementCount}
       />
-      <main className="flex-1 sm:ml-64 p-6 pt-20 sm:pt-6">
+      <main className="flex-1 sm:ml-64 p-6 pt-20 sm:pt-6 print:ml-0 print:p-0">
         {userStatus === USER_STATUS.TRIAL && (
           <Alert className="mb-6">
             <Clock />

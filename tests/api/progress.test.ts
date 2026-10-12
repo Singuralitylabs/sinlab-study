@@ -3,13 +3,24 @@ import { createMockSupabaseClient, createQueryBuilder } from "@/tests/helpers/su
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/learning-server");
+vi.mock("@/app/services/api/certificates-server");
 vi.mock("@/app/services/api/supabase-server");
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  // Explicit rather than the real after(), so these tests do not depend on how Next.js behaves
+  // outside a request scope: the default throws, and the route runs the task inline.
+  after: vi.fn(() => {
+    throw new Error("outside request scope");
+  }),
+}));
 vi.mock("@vercel/analytics/server", () => ({
   track: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { track } from "@vercel/analytics/server";
+import { after } from "next/server";
 import { POST } from "@/app/api/progress/route";
+import { issueCertificateIfEligible } from "@/app/services/api/certificates-server";
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -32,6 +43,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(memberAuth as never);
   vi.mocked(isContentVisible).mockResolvedValue(true);
+  vi.mocked(issueCertificateIfEligible).mockResolvedValue(null);
   vi.mocked(createServerSupabaseClient).mockResolvedValue(
     createMockSupabaseClient({
       tableResults: { user_progress: { data: null, error: null } },
@@ -216,5 +228,72 @@ describe("POST /api/progress - first_content_completed", () => {
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ success: true, isCompleted: true });
+  });
+});
+
+describe("POST /api/progress - 修了証の発行（#291）", () => {
+  it("完了に更新した直後に、認証ユーザーの ID・status・role と contentId で発行判定を呼ぶ", async () => {
+    const res = await POST(request({ contentId: 1, isCompleted: true }) as never);
+
+    expect(res.status).toBe(200);
+    expect(issueCertificateIfEligible).toHaveBeenCalledWith({
+      userId: memberAuth.userId,
+      userStatus: memberAuth.userStatus,
+      userRole: memberAuth.userRole,
+      contentId: 1,
+    });
+  });
+
+  it("after() が使える場合はレスポンス後に回し、使えない場合はその場で実行する", async () => {
+    const scheduled: Array<() => unknown> = [];
+    vi.mocked(after).mockImplementationOnce(((task: () => unknown) => {
+      scheduled.push(task);
+    }) as never);
+
+    await POST(request() as never);
+    expect(issueCertificateIfEligible).not.toHaveBeenCalled();
+    await scheduled[0]();
+    expect(issueCertificateIfEligible).toHaveBeenCalledTimes(1);
+
+    vi.mocked(after).mockImplementationOnce((() => {
+      throw new Error("outside request scope");
+    }) as never);
+    await POST(request() as never);
+    expect(issueCertificateIfEligible).toHaveBeenCalledTimes(2);
+  });
+
+  it("完了の取り消しでは発行判定を呼ばない", async () => {
+    await POST(request({ contentId: 1, isCompleted: false }) as never);
+
+    expect(issueCertificateIfEligible).not.toHaveBeenCalled();
+  });
+
+  it("進捗の保存に失敗したら発行判定を呼ばない", async () => {
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(
+      createMockSupabaseClient({
+        tableResults: { user_progress: { data: null, error: { message: "db error" } } },
+      }) as never
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(500);
+    expect(issueCertificateIfEligible).not.toHaveBeenCalled();
+  });
+
+  it("発行した場合も、発行しなかった場合も、レスポンスは同じ", async () => {
+    const without = await (await POST(request() as never)).json();
+
+    vi.mocked(issueCertificateIfEligible).mockResolvedValue({
+      id: 1,
+      theme_id: 1,
+      certificate_no: "SS-202610-ABC123",
+      theme_name: "テーマ",
+    });
+    const withCertificate = await (await POST(request() as never)).json();
+
+    expect(withCertificate).toEqual(without);
+    expect(withCertificate).toEqual({ success: true, isCompleted: true });
   });
 });

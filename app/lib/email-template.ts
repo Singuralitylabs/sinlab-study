@@ -35,6 +35,7 @@ export const EMAIL_TEMPLATE_KEYS = [
   "trial_nurture.day7",
   "trial_nurture.day14",
   "announcement",
+  "certificate_issued",
 ] as const;
 
 export type EmailTemplateKey = (typeof EMAIL_TEMPLATE_KEYS)[number];
@@ -272,6 +273,21 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
         "お知らせ本文（お知らせ管理で書いたMarkdownがここに入る。本文中に1回だけ必要）",
     },
     required: [ANNOUNCEMENT_BODY_PLACEHOLDER],
+  }),
+  certificate_issued: defs({
+    key: "certificate_issued",
+    kind: EMAIL_KIND.CERTIFICATE_ISSUED,
+    label: "修了証の発行",
+    subject: "修了証が発行されました",
+    body: [
+      "「{{theme_name}}」の修了おめでとうございます。修了証を発行しました。",
+      "証明番号: {{certificate_no}}",
+      "修了証は下のボタンから表示できます。ブラウザの印刷機能で PDF として保存することもできます。",
+    ].join("\n\n"),
+    placeholders: {
+      theme_name: "修了したテーマ名",
+      certificate_no: "修了証の証明番号（例: SS-202610-ABC123）",
+    },
   }),
 };
 
