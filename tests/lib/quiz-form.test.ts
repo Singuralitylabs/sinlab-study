@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  quizCompletionAction,
   quizQuestionsUpdatedNotice,
   quizQuestionVersion,
   resetForNewQuizVersion,
@@ -59,21 +60,18 @@ describe("valueForVersion", () => {
 });
 
 describe("resetForNewQuizVersion", () => {
-  const empty = { answers: {}, gradeResult: null, errorState: null };
-  const opts = { questionCount: 2, isSubmitting: false };
+  const empty = { gradeResult: null, errorState: null };
+  const opts = { questionCount: 2, hasAnswer: false, isSubmitting: false };
+  const notice = "設問が更新されたため、回答をやり直してください";
 
-  it("回答・結果・エラーをすべて消す", () => {
+  it("結果・エラーをすべて消す", () => {
     const next = resetForNewQuizVersion(
-      {
-        answers: { 1: "a" },
-        gradeResult: { version: "v1", value: "結果" },
-        errorState: { version: "v1", value: "エラー" },
-      },
+      { gradeResult: { version: "v1", value: "結果" }, errorState: { version: "v1", value: "e" } },
       "v1",
       opts
     );
 
-    expect(next).toMatchObject({ answers: {}, gradeResult: null, errorState: null });
+    expect(next).toMatchObject({ gradeResult: null, errorState: null });
   });
 
   it("版が v1 → v2 → v1 と往復しても、v1 のときのエラーは再表示されない", () => {
@@ -89,11 +87,8 @@ describe("resetForNewQuizVersion", () => {
     expect(valueForVersion(next.errorState, "v1")).toBeNull();
   });
 
-  it("表示されていた回答・結果・エラー・送信中があれば注記を出す", () => {
-    const notice = "設問が更新されたため、回答をやり直してください";
-    expect(resetForNewQuizVersion({ ...empty, answers: { 1: "a" } }, "v1", opts).notice).toBe(
-      notice
-    );
+  it("回答・表示されていた結果・エラー・送信中のいずれかがあれば注記を出す", () => {
+    expect(resetForNewQuizVersion(empty, "v1", { ...opts, hasAnswer: true }).notice).toBe(notice);
     expect(
       resetForNewQuizVersion({ ...empty, gradeResult: { version: "v1", value: 1 } }, "v1", opts)
         .notice
@@ -113,7 +108,38 @@ describe("resetForNewQuizVersion", () => {
     expect(resetForNewQuizVersion(hiddenOldResult, "v2", opts).notice).toBeNull();
   });
 
-  it("何も表示されていなければ注記を出さない", () => {
+  it("空にした回答（hasAnswer: false）だけなら注記を出さない", () => {
     expect(resetForNewQuizVersion(empty, "v1", opts).notice).toBeNull();
+  });
+});
+
+describe("quizCompletionAction", () => {
+  const base = {
+    resultVersion: "v1",
+    questionVersion: "v1",
+    handled: false,
+    completionPending: false,
+    canRecordProgress: true,
+    initialCompleted: false,
+  };
+
+  it("現在の版の未処理の結果は記録する", () => {
+    expect(quizCompletionAction(base)).toBe("record");
+  });
+
+  it.each([
+    ["結果がない", { resultVersion: null }],
+    ["古い版の結果（応答待ちの間に設問が変わった）", { resultVersion: "v0" }],
+    ["処理済みの結果（同じ結果での再実行）", { handled: true }],
+  ])("%sなら何もしない", (_label, override) => {
+    expect(quizCompletionAction({ ...base, ...override })).toBe("skip");
+  });
+
+  it.each([
+    ["プレビュー中", { canRecordProgress: false }],
+    ["完了済み", { initialCompleted: true }],
+    ["記録の送信後で再描画がまだ（すぐに解き直した）", { completionPending: true }],
+  ])("%sなら記録せず処理済みにする", (_label, override) => {
+    expect(quizCompletionAction({ ...base, ...override })).toBe("mark-handled");
   });
 });

@@ -11,6 +11,7 @@ import {
   type QuizQuestionResult,
 } from "@/app/constants/quiz";
 import {
+  quizCompletionAction,
   quizQuestionVersion,
   resetForNewQuizVersion,
   type VersionedValue,
@@ -84,17 +85,29 @@ export function QuizForm({
   const [seenQuestionVersion, setSeenQuestionVersion] = useState(questionVersion);
   if (seenQuestionVersion !== questionVersion) {
     setSeenQuestionVersion(questionVersion);
-    const next = resetForNewQuizVersion({ answers, gradeResult, errorState }, seenQuestionVersion, {
+    const next = resetForNewQuizVersion({ gradeResult, errorState }, seenQuestionVersion, {
       questionCount: questions.length,
+      // An entry left empty (a choice ticked and unticked, text typed and cleared) is no answer.
+      hasAnswer: Object.values(answers).some((a) => a.choices.length > 0 || a.text.trim() !== ""),
       isSubmitting,
     });
-    setAnswers(next.answers);
+    setAnswers({});
     setGradeResult(next.gradeResult);
     setErrorState(next.errorState);
     setUpdatedNotice(next.notice);
   }
 
+  // Set while a completion record is in flight or sent but the refresh that turns
+  // initialCompleted true has not landed yet, so a quick re-answer does not post a second time.
+  const completionPending = useRef(false);
+  useEffect(() => {
+    // Once the saved progress says completed it guards by itself; clearing the flag lets a later
+    // un-complete (completion button) followed by a re-answer record again.
+    if (initialCompleted) completionPending.current = false;
+  }, [initialCompleted]);
+
   const markCompleted = useCallback(async () => {
+    completionPending.current = true;
     try {
       const response = await fetch("/api/progress", {
         method: "POST",
@@ -107,6 +120,7 @@ export function QuizForm({
       // Re-render the server page so the completion button reflects the new progress.
       router.refresh();
     } catch {
+      completionPending.current = false;
       setProgressWarning("完了状態を記録できませんでした。下のボタンから完了にしてください。");
     }
   }, [contentId, router]);
@@ -115,10 +129,17 @@ export function QuizForm({
   // set changed before it arrived) is never recorded.
   const recordedResult = useRef<VersionedValue<Map<number, QuizQuestionResult>> | null>(null);
   useEffect(() => {
-    if (!gradeResult || gradeResult.version !== questionVersion) return;
-    if (recordedResult.current === gradeResult) return;
+    const action = quizCompletionAction({
+      resultVersion: gradeResult?.version ?? null,
+      questionVersion,
+      handled: recordedResult.current === gradeResult,
+      completionPending: completionPending.current,
+      canRecordProgress,
+      initialCompleted,
+    });
+    if (action === "skip") return;
     recordedResult.current = gradeResult;
-    if (canRecordProgress && !initialCompleted) {
+    if (action === "record") {
       void markCompleted();
     }
   }, [gradeResult, questionVersion, canRecordProgress, initialCompleted, markCompleted]);
@@ -323,7 +344,9 @@ export function QuizForm({
 
       {/* Outside the results block: the record can fail after the set changed and the results
           were cleared, and the learner still needs to know to use the completion button. */}
-      {progressWarning && (
+      {/* Hidden once the saved progress is completed (e.g. via the completion button), which is
+          what the warning asks for. */}
+      {progressWarning && !initialCompleted && (
         <Alert variant="destructive">
           <AlertDescription>{progressWarning}</AlertDescription>
         </Alert>

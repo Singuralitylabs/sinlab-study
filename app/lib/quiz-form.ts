@@ -31,9 +31,8 @@ export function valueForVersion<T>(entry: VersionedValue<T> | null, version: str
   return entry && entry.version === version ? entry.value : null;
 }
 
-/** The part of the quiz form state tied to a question set. */
-export type QuizFormVersionedState<A, R> = {
-  answers: Record<number, A>;
+/** The part of the quiz form state tied to a question set (besides the answers themselves). */
+export type QuizFormVersionedState<R> = {
   gradeResult: VersionedValue<R> | null;
   errorState: VersionedValue<string> | null;
 };
@@ -42,23 +41,54 @@ export type QuizFormVersionedState<A, R> = {
  * State after the question set changed from `previousVersion`. Everything tied to the old set is
  * cleared, errors included: revisions are content hashes, so an admin's edit-and-revert brings the
  * old version back and a kept error would reappear under an empty form. The notice counts only
- * what the learner could see (answers, shown results / error, a pending submission), not values
- * already hidden by a version mismatch.
+ * what the learner could see: a real answer (`hasAnswer`, not an emptied entry), shown results or
+ * error, a pending submission. Values already hidden by a version mismatch do not count.
  */
-export function resetForNewQuizVersion<A, R>(
-  state: QuizFormVersionedState<A, R>,
+export function resetForNewQuizVersion<R>(
+  state: QuizFormVersionedState<R>,
   previousVersion: string,
-  { questionCount, isSubmitting }: { questionCount: number; isSubmitting: boolean }
-): QuizFormVersionedState<A, R> & { notice: string | null } {
+  {
+    questionCount,
+    hasAnswer,
+    isSubmitting,
+  }: { questionCount: number; hasAnswer: boolean; isSubmitting: boolean }
+): { gradeResult: null; errorState: null; notice: string | null } {
   const discarded =
-    Object.keys(state.answers).length > 0 ||
+    hasAnswer ||
     valueForVersion(state.gradeResult, previousVersion) !== null ||
     valueForVersion(state.errorState, previousVersion) !== null ||
     isSubmitting;
   return {
-    answers: {},
     gradeResult: null,
     errorState: null,
     notice: quizQuestionsUpdatedNotice(questionCount, discarded),
   };
+}
+
+/**
+ * What to do with a committed grade result for the completion record.
+ * - "skip": nothing to handle (no result, a result for an older set, or one already handled)
+ * - "mark-handled": current, but must not be recorded (preview, already completed, or a record
+ *   already sent whose refresh has not landed yet: re-answering then must not post again and
+ *   re-run the certificate / first-completion checks)
+ * - "record": post the completion
+ */
+export function quizCompletionAction({
+  resultVersion,
+  questionVersion,
+  handled,
+  completionPending,
+  canRecordProgress,
+  initialCompleted,
+}: {
+  resultVersion: string | null;
+  questionVersion: string;
+  handled: boolean;
+  completionPending: boolean;
+  canRecordProgress: boolean;
+  initialCompleted: boolean;
+}): "skip" | "mark-handled" | "record" {
+  if (resultVersion === null || resultVersion !== questionVersion || handled) return "skip";
+  if (!canRecordProgress || initialCompleted || completionPending) return "mark-handled";
+  return "record";
 }
