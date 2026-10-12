@@ -537,7 +537,7 @@ describe("updateContent の現在値取得の一本化（issue #246）", () => {
     expect(remove).not.toHaveBeenCalled();
     expect(mockClient.from).toHaveBeenCalledTimes(2);
     expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith(
-      "week_id, pdf_url, grading_rubric"
+      "week_id, pdf_url, grading_rubric, content_type"
     );
   });
 
@@ -683,6 +683,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
             data: {
               week_id: 3,
               pdf_url: null,
+              content_type: "exercise",
               grading_rubric: {
                 version: 2,
                 requirements: [{ key: "r1", name: "旧名", description: "a" }],
@@ -709,7 +710,12 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       tableResults: {
         learning_contents: [
           {
-            data: { week_id: 3, pdf_url: null, grading_rubric: { version: 2, ...input } },
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: { version: 2, ...input },
+            },
             error: null,
           },
           { data: null, error: null },
@@ -726,7 +732,10 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     const { mockClient } = mockAdminWithStorage({
       tableResults: {
         learning_contents: [
-          { data: { week_id: 3, pdf_url: null, grading_rubric: null }, error: null },
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: null },
+            error: null,
+          },
           { data: null, error: null },
         ],
       },
@@ -735,6 +744,24 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     await updateContent(1, { gradingRubric: input });
 
     expect(updatePayload(mockClient).grading_rubric.version).toBe(1);
+  });
+
+  it("保存済みの種別が演習以外なら、種別を変えない更新でも採点基準は付けない", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "video", grading_rubric: null },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+
+    await updateContent(1, { gradingRubric: input });
+
+    expect(updatePayload(mockClient).grading_rubric).toBeNull();
   });
 
   it("現在値を取得できなければ version を決められないので更新しない", async () => {

@@ -28,12 +28,15 @@ ALTER TABLE public.learning_contents
 ALTER TABLE public.learning_contents
   ADD CONSTRAINT learning_contents_grading_rubric_check CHECK (
     grading_rubric IS NULL
-    OR (
+    OR coalesce(
+      -- A missing key makes the terms below NULL, and a CHECK treats NULL as passing, so the
+      -- whole expression is coalesced to false.
       jsonb_typeof(grading_rubric) = 'object'
       AND jsonb_typeof(grading_rubric -> 'version') = 'number'
       AND (grading_rubric ->> 'version') ~ '^[1-9][0-9]*$'
       AND jsonb_typeof(grading_rubric -> 'requirements') = 'array'
-      AND jsonb_array_length(grading_rubric -> 'requirements') >= 1
+      AND jsonb_array_length(grading_rubric -> 'requirements') >= 1,
+      false
     )
   );
 

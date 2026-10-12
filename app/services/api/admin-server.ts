@@ -1482,7 +1482,7 @@ async function updateContentRow(
   if (needsCurrentWeek || needsCurrentPdf || needsCurrentRubric) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
-      .select("week_id, pdf_url, grading_rubric")
+      .select("week_id, pdf_url, grading_rubric, content_type")
       .eq("id", id)
       .eq("is_deleted", false)
       .single();
@@ -1496,10 +1496,12 @@ async function updateContentRow(
     } else {
       previousPdfUrl = current.pdf_url;
       if (needsCurrentRubric && gradingRubric) {
-        patch.grading_rubric = nextGradingRubric(
-          parseGradingRubric(current.grading_rubric),
-          gradingRubric
-        );
+        // A rubric belongs to exercises only, so a request that doesn't change the type can't
+        // attach one to a stored non-exercise row.
+        patch.grading_rubric =
+          current.content_type === "exercise"
+            ? nextGradingRubric(parseGradingRubric(current.grading_rubric), gradingRubric)
+            : null;
       }
       if (needsCurrentWeek) {
         const destinationWeekId = patch.week_id ?? current.week_id;

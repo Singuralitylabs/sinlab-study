@@ -66,9 +66,10 @@ export async function POST(request: Request) {
     }
 
     const { created, error, failedIndex } = await createContentsAtTail(
-      validation.data.contents.map(({ quiz_questions, ...content }) => ({
+      validation.data.contents.map(({ quiz_questions, grading_rubric, ...content }) => ({
         ...content,
         quizQuestions: quiz_questions,
+        gradingRubric: grading_rubric,
       }))
     );
 
