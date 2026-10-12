@@ -41,10 +41,17 @@ export default async function CertificatesPage() {
       ? ((await fetchMyCertificates(userId)).data ?? initialCertificates)
       : initialCertificates;
 
-  const issuedThemeIds = new Set((certificates ?? []).map((c) => c.theme_id));
-  const pendingThemes = (summaries ?? []).filter(
-    (s) => s.totalContents > 0 && !issuedThemeIds.has(s.theme.id)
-  );
+  // Just-issued themes count as issued even if re-reading the list failed (the row exists and the
+  // email goes out), so they are never reported as "could not be issued".
+  const issuedThemeIds = new Set([
+    ...(certificates ?? []).map((c) => c.theme_id),
+    ...issuedNow.map((c) => c.theme_id),
+  ]);
+  // Without the certificate list "unissued" cannot be computed (every theme would look unissued and
+  // no backfill ran), so the section is omitted and only the list error above is shown.
+  const pendingThemes = certificates
+    ? (summaries ?? []).filter((s) => s.totalContents > 0 && !issuedThemeIds.has(s.theme.id))
+    : [];
 
   return (
     <div className="max-w-4xl mx-auto">

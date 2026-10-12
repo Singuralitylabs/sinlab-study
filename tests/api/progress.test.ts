@@ -287,6 +287,7 @@ describe("POST /api/progress - 修了証の発行（#291）", () => {
 
     vi.mocked(issueCertificateIfEligible).mockResolvedValue({
       id: 1,
+      theme_id: 1,
       certificate_no: "SS-202610-ABC123",
       theme_name: "テーマ",
     });

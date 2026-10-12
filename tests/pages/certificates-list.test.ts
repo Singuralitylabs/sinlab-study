@@ -69,7 +69,7 @@ describe("/certificates の遡及発行", () => {
       .mockResolvedValueOnce({ data: [], error: null })
       .mockResolvedValueOnce({ data: [certificate(1)], error: null });
     vi.mocked(issueMissingCertificates).mockResolvedValue({
-      issued: [{ id: 11, certificate_no: "SS-202610-ABC123", theme_name: "テーマ1" }],
+      issued: [{ id: 11, theme_id: 1, certificate_no: "SS-202610-ABC123", theme_name: "テーマ1" }],
       blockedByMissingName: false,
     });
 
@@ -103,6 +103,9 @@ describe("/certificates の遡及発行", () => {
 
     expect(html).toContain("修了証の取得に失敗しました");
     expect(html).not.toContain("まだ修了証はありません");
+    // Nothing was attempted, so no theme may be reported as "could not be issued".
+    expect(html).not.toContain("修了証を発行できませんでした");
+    expect(html).not.toContain("未発行のテーマ");
   });
 
   it("氏名未設定で発行できないときは、完了済みのテーマに「修了すると」ではなく問い合わせを案内する", async () => {
@@ -123,6 +126,24 @@ describe("/certificates の遡及発行", () => {
     const html = await render();
 
     expect(html).toContain("修了証を発行できませんでした");
+    expect(html).not.toContain("修了すると発行されます（2 / 2）");
+    expect(html).toContain("修了すると発行されます（1 / 2）");
+  });
+
+  it("発行後の再取得に失敗しても、いま発行したテーマを「発行できませんでした」にしない", async () => {
+    vi.mocked(fetchMyCertificates)
+      .mockResolvedValueOnce({ data: [], error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: "x" } as never });
+    vi.mocked(issueMissingCertificates).mockResolvedValue({
+      issued: [{ id: 11, theme_id: 1, certificate_no: "SS-202610-ABC123", theme_name: "テーマ1" }],
+      blockedByMissingName: false,
+    });
+
+    const html = await render();
+
+    expect(fetchMyCertificates).toHaveBeenCalledTimes(2);
+    // テーマ1（2/2）は発行済み扱いで未発行に出ない。テーマ2（1/2）だけが未発行
+    expect(html).not.toContain("修了証を発行できませんでした");
     expect(html).not.toContain("修了すると発行されます（2 / 2）");
     expect(html).toContain("修了すると発行されます（1 / 2）");
   });

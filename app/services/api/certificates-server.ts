@@ -52,7 +52,10 @@ async function hasCertificate(userId: number, themeId: number): Promise<boolean>
   return data !== null;
 }
 
-export type IssuedCertificate = Pick<Certificate, "id" | "certificate_no" | "theme_name">;
+export type IssuedCertificate = Pick<
+  Certificate,
+  "id" | "theme_id" | "certificate_no" | "theme_name"
+>;
 
 export type IssueResult = {
   issued: readonly IssuedCertificate[];
@@ -114,7 +117,7 @@ async function insertCertificates(
           recipient_name: user.display_name,
           theme_name: summary.theme.name,
         })
-        .select("id, certificate_no, theme_name")
+        .select("id, theme_id, certificate_no, theme_name")
         .single();
 
       if (!insertError) {
