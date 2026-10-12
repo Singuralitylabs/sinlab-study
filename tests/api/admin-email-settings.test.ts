@@ -8,6 +8,7 @@ import {
   fetchEmailSettingsForAdmin,
   updateDigestDailyLimit,
   updateEmailKindSettings,
+  updateEmailSendingEnabled,
 } from "@/app/services/api/email-settings-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -34,6 +35,7 @@ beforeEach(() => {
   authAs();
   vi.mocked(updateEmailKindSettings).mockResolvedValue({ error: null, updated: true });
   vi.mocked(updateDigestDailyLimit).mockResolvedValue({ error: null, updated: true });
+  vi.mocked(updateEmailSendingEnabled).mockResolvedValue({ error: null, updated: true });
   vi.mocked(fetchEmailSettingsForAdmin).mockResolvedValue({
     data: { kinds: {}, editorNames: {} } as never,
     error: null,
@@ -112,7 +114,20 @@ describe("PUT /api/admin/email-settings", () => {
     expect(res.status).toBe(200);
     expect(updateDigestDailyLimit).toHaveBeenCalledWith(95, 1);
     expect(updateEmailKindSettings).not.toHaveBeenCalled();
+    expect(updateEmailSendingEnabled).not.toHaveBeenCalled();
   });
+
+  it.each([true, false])(
+    "全体スイッチを %s に更新し、更新者（users.id）を渡す",
+    async (enabled) => {
+      const res = await put({ sending_enabled: enabled });
+
+      expect(res.status).toBe(200);
+      expect(updateEmailSendingEnabled).toHaveBeenCalledWith(enabled, 1);
+      expect(updateEmailKindSettings).not.toHaveBeenCalled();
+      expect(updateDigestDailyLimit).not.toHaveBeenCalled();
+    }
+  );
 
   it.each([
     ["digest_daily_limit が 0", { digest_daily_limit: 0 }],
@@ -133,6 +148,10 @@ describe("PUT /api/admin/email-settings", () => {
     ["更新項目が無い", { kind: "signup" }],
     ["kind も上限も無い", { enabled: true }],
     ["種別と上限の同時更新", { kind: "signup", enabled: true, digest_daily_limit: 10 }],
+    ["種別と全体スイッチの同時更新", { kind: "signup", enabled: true, sending_enabled: true }],
+    ["上限と全体スイッチの同時更新", { digest_daily_limit: 10, sending_enabled: true }],
+    ["全体スイッチと種別の項目の同時更新", { sending_enabled: true, enabled: true }],
+    ["sending_enabled が真偽値以外", { sending_enabled: "true" }],
     ["未知のフィールド", { kind: "signup", enabled: true, updated_by: 99 }],
     ["enabled が真偽値以外", { kind: "signup", enabled: "false" }],
   ])("範囲外・不正な値は400で、何も保存しない: %s", async (_label, body) => {
@@ -141,6 +160,7 @@ describe("PUT /api/admin/email-settings", () => {
     expect(res.status).toBe(400);
     expect(updateEmailKindSettings).not.toHaveBeenCalled();
     expect(updateDigestDailyLimit).not.toHaveBeenCalled();
+    expect(updateEmailSendingEnabled).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -152,6 +172,7 @@ describe("PUT /api/admin/email-settings", () => {
     [{ kind: "weekly_digest", send_weekday: 0 }],
     [{ kind: "weekly_digest", send_weekday: 6 }],
     [{ kind: "announcement", enabled: false }],
+    [{ sending_enabled: false }],
   ])("境界値は受け付ける: %j", async (body) => {
     expect((await put(body)).status).toBe(200);
   });

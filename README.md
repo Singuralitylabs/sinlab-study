@@ -31,6 +31,7 @@
 
 - [Bun](https://bun.sh/) がインストール済みであること（バージョンは下記「Bun のインストール手順」を参照）
 - Supabase プロジェクトが作成済みであること
+- 本番（Vercel）の Node.js は `package.json` の `engines.node` で決まる（Vercel はプロジェクト設定より `engines` を優先し、範囲内の最新メジャーを選ぶ）。上限を付けているのは、新しいメジャーが出たときに無確認で切り替わらないようにするため。上げるときは `engines` と Vercel のプロジェクト設定を揃えて更新する
 
 ### Bun のインストール手順
 
@@ -109,7 +110,7 @@ Claude Code で Supabase MCP サーバーを使う場合、**必ず read-only �
 
 ## 定期メール（Vercel Cron）の運用
 
-`vercel.json` の `crons` で、毎日 UTC 23 時台（JST 8 時台）に `GET /api/cron/email-digest` を呼び、週次進捗・未学習リマインド・お試しユーザー向け案内を送る（仕様は `docs/specification.md` 10.7〜10.9節）。Cron は Production デプロイでのみ動き、Preview・ローカルでは動かないため、動作確認は `curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/email-digest` で手動実行する。本番で有効にするのは、利用規約の改定（案内メールの送信に関する条項）後に Vercel へ `CRON_SECRET` / `EMAIL_UNSUBSCRIBE_SECRET` を設定してから。
+`vercel.json` の `crons` で、毎日 UTC 23 時台（JST 8 時台）に `GET /api/cron/email-digest` を呼び、週次進捗・未学習リマインド・お試しユーザー向け案内を送る（仕様は `docs/specification.md` 10.7〜10.9節）。Cron は Production デプロイでのみ動き、Preview・ローカルでは動かないため、動作確認は `curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/email-digest` で手動実行する。環境変数（`RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `CRON_SECRET` / `EMAIL_UNSUBSCRIBE_SECRET`）を設定しても、受講生向けメールは `/admin/emails` の全体の送信スイッチ（`email_settings.sending_enabled`。既定は無効）を有効にするまで一通も送られない。本番で有効にするのは、利用規約の改定（案内メールの送信に関する条項）後（手順は `docs/specification.md` 10.9節）。
 
 ## Vercel Web Analytics
 

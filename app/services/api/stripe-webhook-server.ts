@@ -19,17 +19,107 @@ import {
   scheduleUpgradedEmail,
 } from "@/app/services/notifications/user-emails";
 
-/** Exported because both the webhook and the success page use it to identify the session's user. */
+/**
+ * Kept separate from the form-value parser so a future loosening there cannot change who a Stripe
+ * session promotes. Leading zeros are rejected too: createCheckoutSession() writes String(userId),
+ * so "042" never comes from this app.
+ */
+const STRIPE_USER_ID_PATTERN = /^[1-9]\d*$/;
+
+function parseStripeUserId(value: string): number | null {
+  if (!STRIPE_USER_ID_PATTERN.test(value)) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+/**
+ * Exported because the webhook, the success page and the Checkout self-recovery all identify the
+ * session's user with it. createCheckoutSession() writes the same id to both fields, so
+ * disagreement means one was set by someone else (client_reference_id can be appended to a
+ * Payment Link URL) and neither can be trusted.
+ */
 export function extractUserId(
   clientReferenceId: string | null,
   metadata: Stripe.Metadata | null | undefined
 ): number | null {
-  const raw = clientReferenceId ?? metadata?.user_id ?? null;
-  if (!raw) {
+  const metadataUserId = metadata?.user_id ?? null;
+  if (
+    clientReferenceId !== null &&
+    metadataUserId !== null &&
+    clientReferenceId !== metadataUserId
+  ) {
     return null;
   }
-  const userId = Number(raw);
-  return Number.isInteger(userId) ? userId : null;
+  const raw = clientReferenceId ?? metadataUserId;
+  return raw === null ? null : parseStripeUserId(raw);
+}
+
+/**
+ * True for a Checkout Session this app did not create. The Stripe account is shared with other
+ * sales (Payment Links etc.). client_reference_id alone is no proof of origin, since a buyer can
+ * append `?client_reference_id=42` to a Payment Link URL and would promote user 42 with an
+ * unrelated purchase; metadata.auth_id is the marker because createCheckoutSession() sets it and
+ * buyers cannot set metadata. Another app on the account may use the same key, so this is only a
+ * cheap pre-filter: activateUserFromCheckoutSession() still matches auth_id against the user the
+ * session names. payment_link and mode are read from the event body; see docs/specification.md
+ * 2.11 for why that is safe across webhook API versions.
+ */
+export function isForeignCheckoutSession(session: Stripe.Checkout.Session): boolean {
+  // A missing mode is not taken as foreign: if some webhook API version left it out, every session
+  // of ours would be skipped and promotion would stop. The owner check still rejects foreign ones.
+  return (
+    session.payment_link != null ||
+    !session.metadata?.auth_id ||
+    (session.mode != null && session.mode !== "subscription")
+  );
+}
+
+/**
+ * Why activateUserFromCheckoutSession() refused a session for good. A completed session never
+ * changes, so retrying gives the same answer: callers must not treat these as transient errors
+ * (the webhook would be redelivered until Stripe disables the endpoint, and the Checkout claim
+ * would be held forever).
+ */
+export type CheckoutSessionRejection =
+  | "foreign"
+  | "user_unidentified"
+  | "missing_stripe_ids"
+  | "owner_mismatch";
+
+export const CHECKOUT_SESSION_REJECTION_MESSAGES: Record<CheckoutSessionRejection, string> = {
+  foreign: "このアプリで作成したCheckoutセッションではありません",
+  user_unidentified: "Checkoutセッションからユーザーを特定できませんでした",
+  missing_stripe_ids: "Checkoutセッションにcustomer/subscription情報がありません",
+  owner_mismatch: "Checkoutセッションのユーザーが一致しません",
+};
+
+/**
+ * Owner (users.id) of the mirror row for this subscription / customer, or null when the mirror
+ * does not know it, i.e. it is not this app's. Lets the webhook drop events of the shared
+ * account's other sales before claiming them, so they neither pile up in stripe_events nor page
+ * operators with another team's customers. Every subscription and customer of this app gets a
+ * mirror row before or at checkout completion (ensureCheckoutCustomer() /
+ * activateUserFromCheckoutSession()), so nothing of ours is dropped. Rows vanish only with a
+ * physical users delete (ON DELETE CASCADE), which the app never does (users are soft-deleted);
+ * deleting a paying user by hand would silently drop their cancellations and payment failures.
+ */
+export async function findMirrorOwner(
+  column: "stripe_subscription_id" | "stripe_customer_id",
+  id: string
+): Promise<{ error: string | null; userId: number | null }> {
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase
+    .from("stripe_subscriptions")
+    .select("user_id")
+    .eq(column, id)
+    .maybeSingle();
+  if (error) {
+    console.error("stripe_subscriptions取得エラー:", error.message);
+    return { error: error.message, userId: null };
+  }
+  return { error: null, userId: data?.user_id ?? null };
 }
 
 function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
@@ -132,16 +222,26 @@ export async function activateUserFromCheckoutSession(
   options: { expectedClaimedAt?: string } = {}
 ): Promise<{
   error: string | null;
+  rejection?: CheckoutSessionRejection;
   activated: boolean;
   currentPeriodEnd: string | null;
 }> {
+  const reject = (rejection: CheckoutSessionRejection) => ({
+    error: null,
+    rejection,
+    activated: false,
+    currentPeriodEnd: null,
+  });
+
+  // Checked here rather than in each caller: this is the only way into a promotion, and a caller
+  // forgetting the check would let a foreign purchase promote whoever client_reference_id names.
+  if (isForeignCheckoutSession(session)) {
+    return reject("foreign");
+  }
+
   const userId = extractUserId(session.client_reference_id, session.metadata);
   if (userId === null) {
-    return {
-      error: "Checkoutセッションからユーザーを特定できませんでした",
-      activated: false,
-      currentPeriodEnd: null,
-    };
+    return reject("user_unidentified");
   }
 
   const customerId =
@@ -152,14 +252,26 @@ export async function activateUserFromCheckoutSession(
       : (session.subscription?.id ?? null);
 
   if (!customerId || !subscriptionId) {
-    return {
-      error: "Checkoutセッションにcustomer/subscription情報がありません",
-      activated: false,
-      currentPeriodEnd: null,
-    };
+    return reject("missing_stripe_ids");
   }
 
   const supabase = await createAdminSupabaseClient();
+
+  // The id fields alone are not bound to a person; auth_id ties the session to the account that
+  // started it, so a session whose ids point at someone else must not write their mirror row or
+  // promote them.
+  const { data: owner, error: ownerError } = await supabase
+    .from("users")
+    .select("auth_id")
+    .eq("id", userId)
+    .maybeSingle();
+  if (ownerError) {
+    console.error("ユーザー取得エラー:", ownerError.message);
+    return { error: ownerError.message, activated: false, currentPeriodEnd: null };
+  }
+  if (!owner || owner.auth_id !== session.metadata?.auth_id) {
+    return reject("owner_mismatch");
+  }
 
   // "Check existing row -> update mirror" spans several statements, so another request may
   // acquire the claim in between (an old success-page URL clearing a newer valid claim). The
@@ -479,49 +591,44 @@ async function writeCheckoutMirror(
  * the event: re-fetch the latest state from the Stripe API before writing. E.g. a delayed stale
  * active/past_due event after canceled handling still writes the live state (canceled), so the
  * mirror is not rolled back.
- * The row is located by stripe_subscription_id. If updated/deleted arrives before
- * checkout.session.completed is processed (reordering) there is no row and nothing happens (a
- * later checkout.session.completed upserts the latest state). This existence check comes BEFORE
+ * Call only for a subscription the mirror knows (findMirrorOwner()). If updated/deleted arrives
+ * before checkout.session.completed is processed (reordering) there is no row yet and the caller
+ * skips it (a later checkout.session.completed upserts the latest state). The check comes BEFORE
  * the Stripe re-fetch: hitting the Stripe API for every event of subscriptions unrelated to this
  * service would waste calls and cause needless 500s / retries during Stripe outages.
+ * @param userId owner of the mirror row, looked up by the caller with findMirrorOwner() (the
+ *   webhook does so before claiming to skip other sales).
  */
 export async function syncSubscriptionStatus(
-  subscriptionFromEvent: Stripe.Subscription
+  subscriptionFromEvent: Stripe.Subscription,
+  userId: number
 ): Promise<{ error: string | null }> {
   const supabase = await createAdminSupabaseClient();
-
-  const { data: existing, error: fetchError } = await supabase
-    .from("stripe_subscriptions")
-    .select("user_id")
-    .eq("stripe_subscription_id", subscriptionFromEvent.id)
-    .maybeSingle();
-
-  if (fetchError) {
-    console.error("stripe_subscriptions取得エラー:", fetchError.message);
-    return { error: fetchError.message };
-  }
-  if (!existing) {
-    return { error: null };
-  }
 
   const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve(subscriptionFromEvent.id);
   const mirrorFields = subscriptionMirrorFields(subscription);
 
-  const { error: updateError } = await supabase
+  const { data: updated, error: updateError } = await supabase
     .from("stripe_subscriptions")
     .update(mirrorFields)
-    .eq("stripe_subscription_id", subscription.id);
+    .eq("stripe_subscription_id", subscription.id)
+    .select("id");
 
   if (updateError) {
     console.error("stripe_subscriptions更新エラー:", updateError.message);
     return { error: updateError.message };
   }
+  // userId was looked up before the claim. A new Checkout may have replaced this subscription on
+  // the row since then; demoting or mailing userId would then hit a member paying for the new one.
+  if ((updated?.length ?? 0) === 0) {
+    return { error: null };
+  }
 
   if (TERMINAL_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
-    const reverted = await revertUserToTrial(existing.user_id);
+    const reverted = await revertUserToTrial(userId);
     if (reverted.error === null && reverted.reverted) {
-      scheduleSubscriptionEndedEmail({ userId: existing.user_id, subscriptionId: subscription.id });
+      scheduleSubscriptionEndedEmail({ userId, subscriptionId: subscription.id });
     }
     return { error: reverted.error };
   }
@@ -535,7 +642,7 @@ export async function syncSubscriptionStatus(
   // not fire).
   if (isCancellationScheduled(mirrorFields)) {
     scheduleCancelScheduledEmail({
-      userId: existing.user_id,
+      userId,
       subscriptionId: subscription.id,
       periodEnd: cancellationEndsAt(mirrorFields),
     });

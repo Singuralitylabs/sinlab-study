@@ -314,7 +314,7 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 `/upgrade/success` の決済確認は `payment_status==='paid'` に加えて `no_payment_required` も許容する。Price側にトライアル期間が設定されている場合、Checkout時点では決済が発生せず `no_payment_required` になるため、`paid` のみを条件にするとWebhook側（`trialing` を昇格対象に含める）と非対称になり、実際には昇格済みなのにsuccessページで「決済情報を確認できませんでした」という誤ったエラー表示になってしまう。
 
-Checkoutの決済手段はカードのみに限定する（コンビニ払い等の遅延通知系決済手段は使わない）。これらの決済手段では `checkout.session.completed` 発火時点でも未入金（`incomplete`）のままになり得るため、「Checkoutから戻った瞬間に必ず利用開始できる」という設計上の前提を成立させるための制約である。
+Checkoutの決済手段はカードのみに限定する（コンビニ払い等の遅延通知系決済手段は使わない）。これらの決済手段では `checkout.session.completed` 発火時点でも未入金（`incomplete`）のままになり得るため、「Checkoutから戻った瞬間に必ず利用開始できる」という設計上の前提を成立させるための制約である。指定は `allowed_payment_method_types: ["card"]` で行う。これはアカウントで有効な決済手段に対する絞り込みなので、Stripe ダッシュボードでカード決済を無効にしてはならない（カードが候補から外れると Checkout Session を作成できず、利用者には汎用エラーだけが表示される）。
 
 `stripe_subscriptions` のミラー更新は、既に**別の**現行契約（終端状態でも手続き中でもない行）が記録済みの場合はスキップする。古い成功ページURLのリプレイで現行契約のミラー行が上書きされると、以後の解約Webhookが `stripe_subscription_id` で照合できなくなり、解約しても降格されなくなる事故につながるため。Checkout作成の処理権を確保しただけの行（`checkout_pending`）はまだ契約を表さないため、この判定の対象外とする（対象にすると、いま完了したCheckoutの昇格自体がスキップされてしまう）。ミラー更新時には `checkout_claimed_at` / `checkout_session_id` をNULLに戻し、処理権を正常に解除する。ただし解除するのは、claimが保持しているセッション自身の処理（またはセッションを特定できない場合）に限る。
 
@@ -329,7 +329,7 @@ Stripe APIからのライブ状態取得は、ミラー更新の直前（上記�
 | エンドポイント | 内容 |
 |:--|:--|
 | `POST /api/stripe/checkout` | Checkoutセッションを作成しURLを返す。お試しユーザー以外は403。実額の確認（`fetchSubscriptionPrice()`）を処理権の確保より前に行い、取得失敗・非月額・非JPYのいずれでも503を返す（`/upgrade` の disabled だけでは古いタブや直接POSTを防げないため。Priceの取得はセッションを作らないため、claimの前でも二重作成の防止に影響しない）。その後、Checkoutセッションを作る前に処理権（claim）を原子的に確保し、確保できない場合（契約中・他の手続きが進行中）は409を返す（解約済みの行が残っているだけの場合は再契約を許可する）。claimが決済済みセッションを保持している場合・手続き中のセッションがまだ有効な場合・契約済みなのにお試しのままの場合の扱いは下記エッジケースのとおり。Stripe Customerはユーザーごとに一意に確保して再利用する。保存済みCustomerがStripe側に存在しない場合（ダッシュボードでの削除等）は、作り直して保存したうえで1度だけ再試行する（そうしないと当該ユーザーが恒久的にCheckoutへ進めなくなるため）。処理権を確保した後にCheckoutを作れなかった場合は、必ず解放してから応答する |
-| `POST /api/stripe/webhook` | Stripeからのイベントを受信。生ボディで署名検証し、`event.id` のclaim（原子的な処理権確保）に成功した場合のみイベント種別ごとに処理する |
+| `POST /api/stripe/webhook` | Stripeからのイベントを受信。生ボディで署名検証し、イベント種別ごとに自アプリの対象かを判定したうえで（対象外は200でスキップ。下記エッジケース「共用Stripeアカウントの他用途の決済」）、`event.id` のclaim（原子的な処理権確保）に成功した場合のみ処理する。判定と処理は種別ごとに1か所（`planEvent()`）にまとめ、両者の対応がずれないようにする |
 | `POST /api/stripe/portal` | Customer Portalセッションを作成しURLを返す。自身の `stripe_subscriptions` 行がない、またはCustomer未確保（Checkout手続き中に離脱した行のみ）のユーザーは404 |
 
 portal は自分の行を読むSELECTのみだが、checkout は処理権のclaim/releaseで `stripe_subscriptions` を書き込む。DB書き込みを行う関数はいずれも `createAdminSupabaseClient()`（`SUPABASE_SERVICE_ROLE_KEY` 未設定時は throw。通常クライアントへの暗黙フォールバックなし）経由で service_role クライアントを取得する。二重の事前チェックは置かず、Customer作成前に admin client を確保することで孤児Customerを防ぐ。
@@ -338,15 +338,21 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 - 二重Checkout: 処理権のclaim（`stripe_subscriptions` の `checkout_pending` 行のINSERTと `user_id` のUNIQUE制約による排他）により、決済完了までミラー行が存在しない時間帯を突く並行リクエストも片方だけがセッションを作成できる。仕組みと解放条件は[データベース設計書](./database.md)3.9
 - Stripe Customerの一意性: ユーザーごとに1つだけ確保・再利用する理由は[データベース設計書](./database.md)3.9。作成にはユーザー単位で固定したidempotency keyを用い、保存前にリトライが起きても同じCustomerが返るようにする
 - 手続き中に離脱した場合: `checkout_pending` の行は残るが「契約中」とは扱わない（`/upgrade` の契約中表示・管理画面の契約中バッジ・Portalの404判定はいずれも `NON_CURRENT_SUBSCRIPTION_STATUSES` で除外する）。再度アップグレードを押した場合は、claimが保持するセッション（`checkout_session_id`）の状態で分岐する（`open` なら同じURLへ案内、`expired` なら処理権を奪って新規作成、`complete` なら次項。セッションを特定できない場合のみTTLを待つ。判断の詳細は[データベース設計書](./database.md)3.9）
-- 決済済みのまま反映されなかった場合（Webhookとsuccessページの両方が失敗した場合。#250）: Checkout Sessionの `complete` は不変でTTLの救済も働かないため、放置すると409が永久に続く。そこで `POST /api/stripe/checkout` は、`claimCheckoutSlot()` が `blocked`（保持している決済済みセッションと、判定に使った処理権の確保時刻を伴う）を返した場合に、そのセッションを `activateUserFromCheckoutSession()` で反映する。反映はStripeから取り直したサブスクのライブ状態をミラー行に書き、処理権を解除する（既存のガード・CASはそのまま通る）。反映時は観測した処理権の確保時刻（`expectedClaimedAt`）を渡し、処理権がその値のままのときだけ書く。並行する別リクエストが先に反映・再claimした直後（セッションid記録前で既存のガードが効かない）に、その新しい処理権を解除させないためである。サブスクが有効（`active` / `trialing`）なら会員へ昇格し、新しいセッションは作らず `/upgrade/success?session_id=...` を200で返す（successページが同じ冪等な反映を行い、次回請求日つきの完了画面を出す）。それ以外は処理権の確保を1度だけやり直し、ミラー行の実状態に従って分岐する（終端状態なら新しいCheckoutを作成、`incomplete` / `past_due` など契約が残っていれば409）。反映がミラー行の書き込み前に失敗した場合（Stripe API・DBの一時的な障害）は処理権を残したまま500を返し、次のリクエストで再試行される。セッションidが未記録の照会経路で決済済みのセッションとまだ決済できる（`open`）セッションが並存する場合は、決済済みの側を優先し、`open` のセッションを失効させてから反映する（`open` へ案内すると二重払いになる。失効できなければ何もせず409）。照会経路は時計のずれの余裕（`CLAIM_LOOKUP_SKEW_SEC`）の分だけ処理権の確保より前に作られたセッションも拾うため、ミラー行に記録済みの契約（`stripe_subscription_id` が一致する）のセッションは反映済みとして決済済みに数えない。次の場合は再試行しても結果が変わらないため自動では反映せず、409を返してSlack（`sendSlackCheckoutRecoveryNotification()`）で運用者へ通知する: 決済済みのセッションが複数ある（1件目の反映で処理権が解けた後に2件目の反映が失敗すると、有効な契約を残したまま次のCheckoutを作れてしまうため）、セッションのユーザー（`client_reference_id` / `metadata.user_id`）が本人と一致しない、セッションに `customer` / `subscription` が無い、Stripeが恒久的なエラー（409・429を除く4xx。サブスクが存在しない等）を返した。同じユーザー・セッションの通知は60分に1回に抑止する（押すたびに同じ判定になるため。重複判定は `stripe_events` の一意制約によるclaimを流用し、判定に失敗した場合は通知する側に倒す）。これらの復旧処理は `app/services/api/stripe-checkout-recovery-server.ts` に置く（反映処理のある `stripe-webhook-server.ts` が `stripe-server.ts` を import しているため、両方を使う処理を独立したモジュールにして循環 import を作らない）
+- 決済済みのまま反映されなかった場合（Webhookとsuccessページの両方が失敗した場合。#250）: Checkout Sessionの `complete` は不変でTTLの救済も働かないため、放置すると409が永久に続く。そこで `POST /api/stripe/checkout` は、`claimCheckoutSlot()` が `blocked`（保持している決済済みセッションと、判定に使った処理権の確保時刻を伴う）を返した場合に、そのセッションを `activateUserFromCheckoutSession()` で反映する。反映はStripeから取り直したサブスクのライブ状態をミラー行に書き、処理権を解除する（既存のガード・CASはそのまま通る）。反映時は観測した処理権の確保時刻（`expectedClaimedAt`）を渡し、処理権がその値のままのときだけ書く。並行する別リクエストが先に反映・再claimした直後（セッションid記録前で既存のガードが効かない）に、その新しい処理権を解除させないためである。サブスクが有効（`active` / `trialing`）なら会員へ昇格し、新しいセッションは作らず `/upgrade/success?session_id=...` を200で返す（successページが同じ冪等な反映を行い、次回請求日つきの完了画面を出す）。それ以外は処理権の確保を1度だけやり直し、ミラー行の実状態に従って分岐する（終端状態なら新しいCheckoutを作成、`incomplete` / `past_due` など契約が残っていれば409）。反映がミラー行の書き込み前に失敗した場合（Stripe API・DBの一時的な障害）は処理権を残したまま500を返し、次のリクエストで再試行される。セッションidが未記録の照会経路で決済済みのセッションとまだ決済できる（`open`）セッションが並存する場合は、決済済みの側を優先し、`open` のセッションを失効させてから反映する（`open` へ案内すると二重払いになる。失効できなければ何もせず409）。照会経路は時計のずれの余裕（`CLAIM_LOOKUP_SKEW_SEC`）の分だけ処理権の確保より前に作られたセッションも拾うため、ミラー行に記録済みの契約（`stripe_subscription_id` が一致する）のセッションは反映済みとして決済済みに数えない。次の場合は再試行しても結果が変わらないため自動では反映せず、409を返してSlack（`sendSlackCheckoutRecoveryNotification()`）で運用者へ通知する: 決済済みのセッションが複数ある（1件目の反映で処理権が解けた後に2件目の反映が失敗すると、有効な契約を残したまま次のCheckoutを作れてしまうため）、自アプリ以外のセッションである（下記「共用Stripeアカウントの他用途の決済」）、セッションのユーザー（`client_reference_id` / `metadata.user_id`）が本人と一致しない、セッションに `customer` / `subscription` が無い、Stripeが恒久的なエラー（409・429を除く4xx。サブスクが存在しない等）を返した。同じユーザー・セッションの通知は60分に1回に抑止する（押すたびに同じ判定になるため。重複判定は `stripe_events` の一意制約によるclaimを流用し、判定に失敗した場合は通知する側に倒す）。これらの復旧処理は `app/services/api/stripe-checkout-recovery-server.ts` に置く（反映処理のある `stripe-webhook-server.ts` が `stripe-server.ts` を import しているため、両方を使う処理を独立したモジュールにして循環 import を作らない）
 - 契約済みなのにお試しのままの不整合（#250）: 反映でミラー行の書き込み（処理権の解除を含む）までは成功し、会員昇格の更新だけが失敗すると、ミラー行は有効な契約を示すのにユーザーはお試しのまま残る。Webhookが届かない環境ではsuccessページのURLも手元に無いため、`POST /api/stripe/checkout` は処理権の確保が conflict になったとき、`reactivateUserFromMirror()` でこの不整合を解消する。ミラー行に契約が記録されていて（`stripe_subscription_id` があり、終端状態でも手続き中でもない）処理権を保持していない場合に、Stripeから取り直したライブ状態が有効なら昇格させ、`/upgrade` を200で返す（契約中の表示になる）。ミラーの status 自体は信用しない（未入金 `incomplete` で反映した後にStripe上で入金済みになり、Webhookが届かないまま残っている場合も救うため）。ミラーへの書き込みは、読んだ時点の契約・status・処理権なしを条件にした条件付きUPDATEで行う（取得後に並行する解約Webhookが書いた `canceled` を、古いスナップショットの `active` で上書きして昇格させないため）。管理画面には有料会員をお試しへ戻す操作が無く、お試しへの降格は終端状態への遷移時に限られるため、この組み合わせは不整合としてのみ生じる
 - 進行中のCheckoutと古い成功ページURLのリプレイ: 有効なclaimが**別の**セッションを保持している場合、`activateUserFromCheckoutSession()` はミラー更新も処理権の解除も行わない（行うと、まだ決済可能なセッションを残したまま次のCheckoutを作れてしまう）。書き込みのCASは[データベース設計書](./database.md)3.9
 - Checkout作成が失敗したか判別できない場合: Stripeが4xxで拒否したときなど「セッションは作られていない」と確定できるときのみ処理権を解放する。判別できない場合の扱いは[データベース設計書](./database.md)3.9
 - Checkout手続き中に管理者が手動承認した場合: 決済完了時点で一般有料会員として上書きされる（許容）。降格側は `membership_type=general` ガードで巻き込みを防止する
 - Checkout手続き中に管理者が却下した場合: 決済完了時点でユーザーが `rejected` であれば昇格しない（却下判断を決済完了で上書きしない）
 - 受講生向けメール（10章）: 有料会員化・解約予約・有料会員終了のメールは、昇格・ミラー更新・降格が成功した後にのみ `after()` へ予約し、`email_logs` の UNIQUE で1通に抑える。送信の成否はWebhookの応答・claimの解放（再送判定）に影響しない
+- 共用Stripeアカウントの他用途の決済（#302）: Stripeアカウントは Payment Link 等の他用途の決済と共用されており、それらのイベントも同じエンドポイントに届く。Webhookはclaim（`stripe_events` への INSERT）より前に種別ごとに自アプリの対象かを判定し、対象外は警告ログを出して200でスキップする（再送も同じ判定になるためclaimは不要。500で再送させても結果は変わらず、失敗が続くとStripeがエンドポイントを無効化して解約の反映・支払い失敗通知が止まる）。判定のためのDB照会が失敗した場合はイベントのidと種別をログに出して500を返す（claim前のため解放は不要で、再送で判定し直す）。処理対象の4種別以外のイベントも、claimせず200でスキップする
+  - `checkout.session.completed`: `payment_link` が付いている・`metadata.auth_id` が無い・`mode` が `subscription` 以外の値である、のいずれかに当たるセッションは自アプリ以外（`isForeignCheckoutSession()`）。自アプリ由来の印を `metadata.auth_id` とするのは、`createCheckoutSession()` が常に付け、購入者が設定できないため（`client_reference_id` は Payment Link のURLに `?client_reference_id=` を付ければ購入者が任意に設定でき、それだけで判定すると別商品の決済で他人が昇格する）。この判定は唯一の昇格入口である `activateUserFromCheckoutSession()` の先頭でも行い、Webhook・successページ・Checkout自己復旧のどの経路でも自アプリ以外のセッションでは昇格しない。Webhookがclaim前にも同じ判定をするのは、Payment Link 等の決済で `stripe_events` に行を作らないためである。`metadata.auth_id` は汎用的なキー名で共用アカウントの他アプリが付ける可能性もあるが、専用の印は追加していない。印を持たない既存の未完了セッション（自己復旧・遅延Webhook）のために `auth_id` 照合による受け入れを残す必要があり、印を足しても受け入れる範囲は狭まらないうえ、他アプリのセッションは下記の照合で恒久的な拒否となり200で受領されるため、残る影響は `stripe_events` の1行とログ、運用者へのSlack通知にとどまるからである（自アプリの課金済みセッションを取りこぼさないため、他アプリ由来の可能性がある拒否も通知する）
+  - 昇格対象ユーザーの照合: `client_reference_id` と `metadata.user_id` が両方あって食い違う場合はユーザーを特定できないものとして扱う（`createCheckoutSession()` は両方に同じidを書くため）。ユーザーidは `/^[1-9]\d*$/` かつ安全な整数の範囲に限り（フォーム値用の `parsePositiveInteger()` とは独立に判定する）、さらに `activateUserFromCheckoutSession()` は特定したユーザーの `auth_id` を `users` から読み、`metadata.auth_id` と一致しない（ユーザーが存在しない場合を含む）ときはミラー行も `users` も書かない
+  - 恒久的な拒否: `activateUserFromCheckoutSession()` は、自アプリ以外（`foreign`）・ユーザーを特定できない（`user_unidentified`）・`customer` / `subscription` が無い（`missing_stripe_ids`）・`auth_id` が一致しない（`owner_mismatch`）の4つをエラーではなく型付きの拒否理由（`CheckoutSessionRejection`）で返し、呼び出し元はこれで分岐する。完了したCheckout Sessionは不変で再試行しても結果が変わらないため、一時的な失敗として扱わない（DB障害などの一時的な失敗は従来どおりエラーで返し、Webhookは500でclaimを解放して再送に委ねる）。Webhookは要確認のエラーログを出して200で受領し、claimを保持する（500で再送させるとStripeがエンドポイントを無効化しうる）。`foreign` 以外の拒否は、課金済みなのにお試しのまま残りうるうえ、claimを保持するため再送でも二度と表に出ないので、自動復旧不可通知と同じSlack通知（`sendSlackCheckoutRecoveryNotification()`。ユーザーを特定できなければ「不明」）で運用者へ知らせる（通知の失敗は捕捉してログのみとし、200応答を変えない）。`foreign` は他用途の決済のため通知しない。successページはセッションidと拒否理由（個人情報は含めない）をエラーログに出し、「決済情報を確認できませんでした」を表示する（再試行は促さない）。Checkout自己復旧は自動復旧不可として運用者に通知し、409を返す（処理権を保持する一時エラーにすると、完了済みセッションはTTLで失効しないため、誰にも知らされないままCheckoutから締め出される）
+  - `customer.subscription.updated` / `.deleted`: ミラー行（`stripe_subscriptions.stripe_subscription_id`）に無いサブスクは対象外。`syncSubscriptionStatus()` はもともとミラーに無いサブスクを何もせず無視するため、処理結果は変わらず、他用途のサブスクで `stripe_events` に行を作らなくなる。`checkout.session.completed` より先に届いた自アプリのイベント（順序逆転）も従来どおり何もしない（後から届く `checkout.session.completed` が最新状態を反映する）。所有者はclaim前に引くため、処理中に新しいCheckoutで行の契約が別のサブスクへ置き換わった場合は、ミラー更新が0行となり降格・メール予約をしない（新しい契約で有料の会員を降格させないため）
+  - `invoice.payment_failed`: 請求の `customer` がミラー行（`stripe_subscriptions.stripe_customer_id`）に無い、または `customer` が無い請求は対象外とし、Slackの支払い失敗通知（他用途の顧客のメールアドレス・金額を含む）を送らない。自アプリのCustomerは `ensureCheckoutCustomer()` がCheckout作成前にミラー行へ保存するため、自アプリの請求は必ず一致する。サブスクではなくCustomerで照合するのは、請求がどのサブスクのものかを示すフィールドの位置がWebhookのAPIバージョンで異なるため。同じ理由で本文のサブスクmetadata（`auth_id`）では判定せず、Customerのmetadataは本文に無いため請求ごとのStripe照会になるので使わない。ミラー行は `users` の物理削除（`ON DELETE CASCADE`）でのみ消えるが、`users` は論理削除のみで物理削除しない（[データベース設計書](./database.md)3.9）
 - Webhookイベントの順序逆転・再送・同一event.idの並行配信: `stripe_events` へのINSERTをclaimとして使う原子的な排他制御と、Stripe APIから再取得したライブ状態のみを書き込むハンドラ設計で吸収する（イベントに埋め込まれたスナップショットは信用しない）
-- イベント本文の構造のAPIバージョン依存: Webhookのイベント本文（`event.data.object`）の構造はエンドポイントに設定したAPIバージョンで決まり、アプリがStripe APIを呼ぶ版（SDKが固定する `Stripe.API_VERSION`）とは独立している。このため本文から直接読んでよいのはID類（Checkout Sessionの `id` / `client_reference_id` / `metadata` / `customer` / `subscription`、Subscriptionの `id`）に限り、状態は常にStripe APIからのライブ取得を正とする。例外は `invoice.payment_failed` の運用者向けSlack通知で、本文の `customer_email` / `amount_due` / `hosted_invoice_url` を通知の表示にのみ使う（認可・会員状態の判定には使わない）。本文の他のフィールドを直接使う変更を入れる場合は、その時点でエンドポイントのAPIバージョンを `Stripe.API_VERSION` に合わせる（下記「Stripe Webhook 設定手順」）
+- イベント本文の構造のAPIバージョン依存: Webhookのイベント本文（`event.data.object`）の構造はエンドポイントに設定したAPIバージョンで決まり、アプリがStripe APIを呼ぶ版（SDKが固定する `Stripe.API_VERSION`）とは独立している。このため本文から直接読んでよいのはID類（Checkout Sessionの `id` / `client_reference_id` / `metadata` / `customer` / `subscription`、Subscriptionの `id`、Invoiceの `id` / `customer`）と、上記の対象外判定のみに使うCheckout Sessionの `mode` / `payment_link` に限り（`mode` が本文に無い版があっても自アプリのセッションを取りこぼさないよう、欠落時は他用途とみなさない。その場合も他用途の決済は `metadata.auth_id` の検査とユーザーとの照合で拒否される。`payment_link` は Payment Links 提供時に後方互換な追加として入ったフィールドで、APIバージョンで出し分けられない。仮に本文に無くても `metadata.auth_id` の検査で他用途の決済は対象外になるため、判定が緩むことはない）、状態は常にStripe APIからのライブ取得を正とする。例外は `invoice.payment_failed` の運用者向けSlack通知で、本文の `customer_email` / `amount_due` / `hosted_invoice_url` を通知の表示にのみ使う（認可・会員状態の判定には使わない）。本文の他のフィールドを直接使う変更を入れる場合は、その時点でエンドポイントのAPIバージョンを `Stripe.API_VERSION` に合わせる（下記「Stripe Webhook 設定手順」）
 - Stripe契約状況の取得エラー（`/upgrade`・`/admin/users`）: 「契約なし」に誤ってフォールバックせず、専用のエラーメッセージを表示する（フェイルクローズ）。特に管理画面での却下操作は、契約状況を判定できない場合も却下確認ダイアログに警告を表示する（却下操作自体は禁止せず、警告表示に留める意図的な判断）。会員種別変更（2.7節）は却下と異なり操作自体を無効化するフェイルクローズとする
 
 **Stripe APIバージョン**: `getStripeClient()` は `apiVersion` を明示せず、SDKが固定する版（`Stripe.API_VERSION`）を使う。stripe-node はマイナー版ごと（ほぼ毎月）に同じリリース名（例: `.dahlia`）内の後方互換な版へ固定版を上げ、破壊的変更を含むリリース名の変更はメジャー版でのみ行う。明示すると型（`Stripe.LatestApiVersion`）により毎月のマイナー更新で型チェックが失敗し、Dependabot のグループ更新全体を止めるため明示しない。リリース名が変わるメジャー更新は Dependabot でもグループ外の個別PRになるため、そこで下記手順4に従いWebhookエンドポイント側も合わせる。
@@ -985,13 +991,13 @@ JSONボディを受け取る API Route の入力検証は [zod](https://zod.dev/
 
 - **新規ユーザー承認依頼通知**: 初回ログイン時にユーザーが自動登録（`status=trial`）されると送信する
 - **Stripe支払い失敗通知**（2.11節）: サブスクの請求が失敗（`invoice.payment_failed`）した際に送信する。初回失敗ではユーザーを降格せずStripe Smart Retriesに任せるため、運用者への通知のみを行う
-- **Checkout自動復旧不可通知**（2.11節、#250）: 決済済みのまま反映されなかったCheckoutを、`POST /api/stripe/checkout` が自動では反映できなかった（決済済みセッションが複数・ユーザー不一致・customer/subscription欠落・Stripeの恒久的なエラー）際に送信する。該当ユーザーはアップグレードのたびに409を受け続けるため、手動対応につなげる
+- **Checkout自動復旧不可通知**（2.11節、#250）: 決済済みのまま反映されなかったCheckoutを、`POST /api/stripe/checkout` が自動では反映できなかった（決済済みセッションが複数・ユーザー不一致・自アプリ以外または `auth_id` 不一致のセッション・customer/subscription欠落・Stripeの恒久的なエラー）際に送信する。該当ユーザーはアップグレードのたびに409を受け続けるため、手動対応につなげる。Webhookが自アプリのCheckout Sessionを恒久的に拒否した（`foreign` 以外の `CheckoutSessionRejection`）際にも同じ通知を送る
 
 **通知失敗時もメインフローは継続**: いずれもSlack通知の失敗は本体のフロー（ユーザー登録・リダイレクト、Webhookの200応答）に影響しない。エラーはサーバーログにのみ出力する。ただし呼び出し方は異なり、新規ユーザー通知は `await` せず発火するだけの非同期・非ブロッキング呼び出しであるのに対し、支払い失敗通知・自動復旧不可通知は `await` して待ち合わせる（関数内部で例外・HTTPエラーを捕捉して握り潰すため、待ち合わせても本体のフローを失敗させることはない）。詳細は9.5参照。
 
 ### 9.2 実装構成
 
-実装は `app/services/notifications/slack.ts`（`sendSlackNewUserNotification()` / `sendSlackPaymentFailedNotification()` / `sendSlackCheckoutRecoveryNotification()`）。呼び出し元は `app/auth/callback/route.ts`（新規ユーザー）、`app/api/stripe/webhook/route.ts`（支払い失敗）、`app/services/api/stripe-checkout-recovery-server.ts`（自動復旧不可。重複抑止つき）。
+実装は `app/services/notifications/slack.ts`（`sendSlackNewUserNotification()` / `sendSlackPaymentFailedNotification()` / `sendSlackCheckoutRecoveryNotification()`）。呼び出し元は `app/auth/callback/route.ts`（新規ユーザー）、`app/api/stripe/webhook/route.ts`（支払い失敗・Checkout Sessionの恒久的な拒否）、`app/services/api/stripe-checkout-recovery-server.ts`（自動復旧不可。重複抑止つき）。Webhookの拒否通知はclaimを保持して再送を受けないため、重複抑止を持たない。
 
 ### 9.3 環境変数
 
@@ -1003,7 +1009,7 @@ JSONボディを受け取る API Route の入力検証は [zod](https://zod.dev/
 
 - **新規ユーザー承認依頼**: 表示名（`user.user_metadata.full_name`）、メール（`user.email`）、登録日時（サーバー現在時刻を JST（`Asia/Tokyo`）で表示）、`/admin/users` への絶対URL（`NEXT_PUBLIC_APP_URL` または `request.url` の origin）
 - **Stripe支払い失敗**: メール（`invoice.customer_email`。無ければ「不明」）、請求額（`invoice.amount_due` をそのまま円表示。JPYはStripeのゼロdecimal通貨のため100で割らない。複数通貨対応はスコープ外）、請求書リンク（`invoice.hosted_invoice_url`。取得できた場合のみ）
-- **Checkout自動復旧不可**: `users.id`・理由・Checkoutセッションidのみを載せる。メールアドレス等の個人情報は載せず、運用者はこのidから状況を確認する
+- **Checkout自動復旧不可**: `users.id`（特定できなければ「不明」）・理由・Checkoutセッションidのみを載せる。メールアドレス等の個人情報は載せず、運用者はこのidから状況を確認する
 
 ### 9.5 処理フロー
 
@@ -1015,7 +1021,7 @@ INSERT 成功後はお試しユーザーとしてダッシュボードへ遷移�
 
 #### 9.5.2 Stripe支払い失敗通知
 
-`POST /api/stripe/webhook` が署名検証とイベントのclaim（[データベース設計書](./database.md)3.10）に成功した後、`invoice.payment_failed` のハンドラが `sendSlackPaymentFailedNotification()` を呼ぶ。他のイベント種別のハンドラと同じく `await` して待ち合わせるが、関数内部で例外・HTTPエラーを捕捉して握り潰すため、Slack通知が失敗してもWebhookの200応答自体は失敗しない（9.5.1の新規ユーザー通知のような「発火して待たない」呼び出しではない）。降格は行わず、通知のみでStripe Smart Retriesに任せる。
+`POST /api/stripe/webhook` が署名検証・自アプリの請求かの判定（請求の `customer` がミラー行にあること。2.11節）・イベントのclaim（[データベース設計書](./database.md)3.10）に成功した後、`invoice.payment_failed` のハンドラが `sendSlackPaymentFailedNotification()` を呼ぶ。他のイベント種別のハンドラと同じく `await` して待ち合わせるが、関数内部で例外・HTTPエラーを捕捉して握り潰すため、Slack通知が失敗してもWebhookの200応答自体は失敗しない（9.5.1の新規ユーザー通知のような「発火して待たない」呼び出しではない）。降格は行わず、通知のみでStripe Smart Retriesに任せる。
 
 ### 9.6 Slack Incoming Webhook 設定手順（運用）
 
@@ -1042,6 +1048,7 @@ Slack App の **Incoming Webhooks** を有効化し、通知先チャンネル�
 送信基盤は次の方針で作る（Slack 通知の `postSlackWebhook()` と同じ考え方）。
 
 - **未設定はスキップ**: `RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `NEXT_PUBLIC_APP_URL` のいずれかが未設定なら、warn ログを出して送信しない（送信ログも作らない）
+- **全体の送信スイッチ**: 受講生向けの送信はすべて `email_settings.sending_enabled`（既定 `false`。管理画面で切り替える。10.10節）を入口で確認し、`true` でなければ送らない。**読めないとき（DB エラー・行の欠落・真偽値でない値）も送らない**（フェイルクローズ）。環境変数が揃っていても、利用規約の改定が終わるまで本番で一通も送らないための仕組みで、種別ごとの有効・無効より先に効く。管理者本人へのテスト送信（10.11節）だけは対象外で、有効化の前に送信設定を確認できる
 - **失敗は握りつぶす**: 送信失敗（非2xx）・タイムアウト（`EMAIL_SEND_TIMEOUT_MS`）・例外はログと `email_logs.error` に残し、呼び出し元の主処理（登録・承認・Stripe Webhook・`/upgrade/success`）のレスポンスや再送判定には一切影響させない
 - **レスポンス後に送る**: 各フックは Next.js の `after()`（`next/server`）に送信処理を予約するだけで、レスポンスを遅らせない。`after()` はサーバーレス関数の終了まで処理を延長するため、送信が途中で打ち切られない。リクエストスコープ外で `after()` が使えない場合は、その場で発火だけ行う
 - **二重送信の防止**: 送信前に `email_logs` の claim（`UNIQUE (user_id, kind, reference_key)` への INSERT。仕組みは `docs/database.md` 3.11節）を取り、取れなければ送信しない。claim が他のDBエラーで失敗した場合も、重複を防げないため送信しない
@@ -1125,29 +1132,33 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 
 ### 10.9 定期メールの設定手順（運用）
 
-本番の Cron を有効化する前に、利用規約の改定（案内メールの送信に関する条項）が完了していることを確認する。`CRON_SECRET` と `EMAIL_UNSUBSCRIBE_SECRET` にランダムな長い文字列（例: `openssl rand -base64 32`）を設定し（ローカルは `.env.local`、本番は Vercel 環境変数の Production）、`EMAIL_UNSUBSCRIBE_SECRET` は一度決めたら変えない。Production にデプロイし（Cron は Production デプロイでのみ動く）、Vercel ダッシュボードの Settings → Cron Jobs に `/api/cron/email-digest` が表示されることと、`curl -H "Authorization: Bearer $CRON_SECRET" <URL>/api/cron/email-digest` の応答（`sent` / `failed` / `deferred`）と Vercel ログの `[定期メール]` を確認する。
+環境変数の設定とデプロイは、利用規約の改定前に済ませてよい（全体の送信スイッチが既定で無効のため、送られない）。`CRON_SECRET` と `EMAIL_UNSUBSCRIBE_SECRET` にランダムな長い文字列（例: `openssl rand -base64 32`）を設定し（ローカルは `.env.local`、本番は Vercel 環境変数の Production）、`EMAIL_UNSUBSCRIBE_SECRET` は一度決めたら変えない。Production にデプロイし（Cron は Production デプロイでのみ動く）、Vercel ダッシュボードの Settings → Cron Jobs に `/api/cron/email-digest` が表示されることと、`curl -H "Authorization: Bearer $CRON_SECRET" <URL>/api/cron/email-digest` の応答（スイッチが無効の間は `skipped`）と Vercel ログの `[定期メール]` を確認する。
+
+受講生向けの送信を始めるのは、利用規約の改定（案内メールの送信に関する条項）が完了してから。管理者本人へのテスト送信（10.11節）で送信設定を確認し、停止中に公開した「メールでも送る」付きのお知らせのうち送らないものは「メールでも送る」を外してから、`/admin/emails` の全体の送信スイッチを有効にする（10.10節。有効化後の Cron の応答は `sent` / `failed` / `deferred`）。停止するときも同じスイッチを無効にする（環境変数は消さない）。
 
 ### 10.10 メール通知の管理（管理画面）
 
-**設定の保存先**: `email_kind_settings`（種別ごとの `enabled`・`send_days`・`send_weekday`）と `email_settings`（案内系の1日の上限 `digest_daily_limit`。1行のみ）（`docs/database.md` 3.15・3.16節）。**これらのテーブルを唯一の真実とし、送る日・曜日・上限の定数をロジックにハードコードしない**。`INACTIVITY_REMINDER_DAYS` / `TRIAL_NURTURE_DAYS` / `WEEKLY_DIGEST_WEEKDAY` / `EMAIL_DIGEST_MAX_PER_DAY` は、マイグレーションの初期値と同じであることを確認するテスト用の定数として残し（送信の判定には使わない。読めないときの代替値にもしない）、入力検証の範囲は `EMAIL_SEND_DAY_MIN/MAX` などで別に定義する。対象の種別は `EMAIL_KIND` の全値（繰り越し予約 `weekly_digest_reserved` は送信種別ではないので含めない）。
+**設定の保存先**: `email_kind_settings`（種別ごとの `enabled`・`send_days`・`send_weekday`）と `email_settings`（全体の送信スイッチ `sending_enabled` と案内系の1日の上限 `digest_daily_limit`。1行のみ）（`docs/database.md` 3.15・3.16節）。**これらのテーブルを唯一の真実とし、送る日・曜日・上限の定数をロジックにハードコードしない**。`INACTIVITY_REMINDER_DAYS` / `TRIAL_NURTURE_DAYS` / `WEEKLY_DIGEST_WEEKDAY` / `EMAIL_DIGEST_MAX_PER_DAY` は、マイグレーションの初期値と同じであることを確認するテスト用の定数として残し（送信の判定には使わない。読めないときの代替値にもしない）、入力検証の範囲は `EMAIL_SEND_DAY_MIN/MAX` などで別に定義する。対象の種別は `EMAIL_KIND` の全値（繰り越し予約 `weekly_digest_reserved` は送信種別ではないので含めない）。
 
 **設定の反映と失敗時の方針**（実行のたびに読み、実行をまたいでキャッシュしない）:
 
 | 種別 | 有効・無効 | 設定を読めないとき |
 |:--|:--|:--|
+| 全体の送信スイッチ（`email_settings.sending_enabled`。全種別に先立って確認） | `true` でなければ受講生向けメールを一通も送らない。トランザクション系は `deliverToUser()` が宛先を読む前に warn ログを出して終了し（種別の設定は同時に読むが、判定は全体スイッチが先）、定期メールは `runEmailDigest()` が1通も送らず `skipped` を返す（繰り越し予約も作らない） | **フェイルクローズ**: DB エラー・行の欠落・真偽値でない値のいずれでも送らない（定期メールは他の設定と同じく `failed`）。種別ごとの方針（下記）は変えない |
 | 案内系（`weekly_digest` / `inactivity_reminder` / `trial_nurture` / `announcement`） | 無効な種別は対象にしない。無効なお知らせは送信も完了記録もしない（有効に戻すと続きを送る。ただし送信失敗の再送期限 `ANNOUNCEMENT_EMAIL_RETRY_DAYS` は無効の間も進むため、期限を過ぎた失敗は再送されず、再有効化後は失敗のまま完了になる） | **フェイルクローズ**: DB エラー・行の欠落・値の不正（範囲外の `send_days` など）のとき、`runEmailDigest()` は1通も送らず `failed`（Cron は500）を返す |
 | トランザクション（`signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended` / `certificate_issued`） | `deliverToUser()` が宛先を読む前に `enabled` を確認し、無効なら warn ログを出して送らない | **フェイルセーフ**: 既定値（有効）として送る。登録・決済の通知を欠落させないため。主処理（登録・承認・Stripe Webhook）の結果には、無効化・設定の読み取り失敗のどちらも影響させない |
 
+- **全体の送信スイッチ**: `sending_enabled`（既定 `false`）。有効にするときは規約改定の確認ダイアログを出す。切り替えの記録は `sending_updated_at` / `sending_updated_by`（1日の上限の `updated_at` とは別。未操作なら NULL。同じ値の保存では更新しない。操作者の `users` 行が消えた場合は「削除済みユーザー」と表示する）。**無効の間に公開した「メールでも送る」付きのお知らせは未送信のまま残り、有効化後の定期実行で（1日の上限の範囲で）送られる**。画面と確認ダイアログにその件数を出すので、送らないお知らせは有効化の前に「メールでも送る」を外す。全体スイッチを今サイクルの途中で切り替えた週の週次進捗は、曜日変更・再有効化の週と同じ扱い（下記）
 - **送る日**: `send_days`（1〜60の整数、重複不可、最大10個、保存時は昇順）が、`inactivity_reminder` と `trial_nurture` の「登録から N 日目」の判定に使われる。`trial_nurture` の本文は、設定した日数以下で最も近い段階（2・5・7・14日目の案内）のものを使い、最後の設定日のときだけ「これが最後です」と伝える。経過日数の表記は7の倍数なら週、それ以外は日
-- **週次進捗の曜日**: `send_weekday`（0 = 日曜〜6 = 土曜。初期値は月曜）。「先週」は送信曜日の前日までの7日間（JST）、`reference_key` は今回の送信曜日の日付、繰り越し予約（`weekly_digest_reserved`）も送信曜日の日付を基準にする。送信曜日を変えた週に2通送らないよう（送信日の予約が無いまま取り戻し期間を過ぎても、`weekly_digest` の設定の `updated_at` が今サイクルの開始日（JST）以降なら、曜日変更・再有効化の週とみなして障害の警告を出さず、その旨のログだけ残して次の送信日から再開する。過去のログ行の有無では判定しない）、送信済みの判定は同じ `reference_key` ではなく、今回の送信日を末尾とする7日間に `weekly_digest` の行があるかで行う（変更後の送信日がその7日以内に来る回は送らず、次の週から通常どおり送る）
+- **週次進捗の曜日**: `send_weekday`（0 = 日曜〜6 = 土曜。初期値は月曜）。「先週」は送信曜日の前日までの7日間（JST）、`reference_key` は今回の送信曜日の日付、繰り越し予約（`weekly_digest_reserved`）も送信曜日の日付を基準にする。送信曜日を変えた週に2通送らないよう（送信日の予約が無いまま取り戻し期間を過ぎても、`weekly_digest` の設定の `updated_at` または全体スイッチの `sending_updated_at` が今サイクルの開始日（JST）以降なら、曜日変更・再有効化・全体スイッチの切り替えの週とみなして障害の警告を出さず、その旨のログだけ残して次の送信日から再開する。過去のログ行の有無では判定しない）、送信済みの判定は同じ `reference_key` ではなく、今回の送信日を末尾とする7日間に `weekly_digest` の行があるかで行う（変更後の送信日がその7日以内に来る回は送らず、次の週から通常どおり送る）
 - **1日の上限**: `digest_daily_limit`（1〜95。Resend 無料枠の日次100通未満）から、今日すでに作られた案内系の `email_logs` の行数を引いた数が各実行の上限になる。上限を下げても、その日に送った分を超えて送ることはない
 
 **API**（admin のみ。`getServerAuth()` で判定し、未認証は401、admin 以外・却下ユーザーは403）:
 
 | エンドポイント | 内容 |
 |:--|:--|
-| `GET /api/admin/email-settings` | 種別ごとの設定・1日の上限・更新者の表示名を返す |
-| `PUT /api/admin/email-settings` | 種別の設定（`{ "kind", "enabled"?, "send_days"?, "send_weekday"? }`）または1日の上限（`{ "digest_daily_limit" }`）を更新する。両方の同時更新・更新項目なし・未知のフィールド・範囲外の値は400（zod。`EmailSettingsUpdateSchema`）。`send_days` は `inactivity_reminder` / `trial_nurture`、`send_weekday` は `weekly_digest` にのみ指定できる。更新者（`users.id`）と更新日時を記録し、対象が0行なら404 |
+| `GET /api/admin/email-settings` | 全体の送信スイッチ・種別ごとの設定・1日の上限・更新者の表示名を返す |
+| `PUT /api/admin/email-settings` | 種別の設定（`{ "kind", "enabled"?, "send_days"?, "send_weekday"? }`）、1日の上限（`{ "digest_daily_limit" }`）、全体の送信スイッチ（`{ "sending_enabled" }`）のいずれか1つを更新する。複数の同時更新・更新項目なし・未知のフィールド・範囲外の値は400（zod。`EmailSettingsUpdateSchema`）。`send_days` は `inactivity_reminder` / `trial_nurture`、`send_weekday` は `weekly_digest` にのみ指定できる。更新者（`users.id`）と更新日時を記録し、対象が0行なら404 |
 | `GET /api/admin/email-logs?kind=&status=&page=` | 送信履歴（新しい順。1ページ50件）。`status` は `sent` / `failed` / `pending`（`sent_at` があれば送信済み、`error` があれば失敗、どちらも無ければ未完了）。不正な絞り込みは400 |
 
 - 設定の読み書きは管理者のセッション（通常クライアント）で行い、RLS（admin のみ）を二層目の防御にする。Cron とメール送信は service_role で読む

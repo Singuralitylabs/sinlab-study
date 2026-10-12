@@ -302,6 +302,15 @@ describe("createCheckoutSession", () => {
     expect(params).not.toHaveProperty("customer_email");
   });
 
+  it("決済手段をカードのみに限定する（遅延通知系の決済手段を許可しない）", async () => {
+    mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
+
+    await createCheckoutSession(5, "auth-uuid", "cus_existing", midMonth);
+
+    const params = mockSessionsCreate.mock.calls[0][0];
+    expect(params.allowed_payment_method_types).toEqual(["card"]);
+  });
+
   it("billing_cycle_anchor_configを定数どおりに渡す", async () => {
     mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
 

@@ -7,10 +7,13 @@ import {
   fetchEmailLogs,
   fetchEmailSettings,
   fetchEmailSettingsForAdmin,
+  fetchPendingAnnouncementEmailCount,
   fetchTodayPromotionalCount,
+  isEmailSendingEnabled,
   isTransactionalEmailEnabled,
   updateDigestDailyLimit,
   updateEmailKindSettings,
+  updateEmailSendingEnabled,
 } from "@/app/services/api/email-settings-server";
 import {
   createAdminSupabaseClient,
@@ -39,7 +42,14 @@ const allKindRows = [
   kindRow("announcement"),
   kindRow("certificate_issued"),
 ];
-const settingsRow = { digest_daily_limit: 80, updated_at: "2026-10-01T00:00:00Z", updated_by: 5 };
+const settingsRow = {
+  sending_enabled: true,
+  sending_updated_at: null,
+  sending_updated_by: null,
+  digest_daily_limit: 80,
+  updated_at: "2026-10-01T00:00:00Z",
+  updated_by: 5,
+};
 
 const dbError = { message: "db error" };
 
@@ -60,6 +70,8 @@ describe("fetchEmailSettings", () => {
     const settings = await fetchEmailSettings(client as never);
 
     expect(settings.digestDailyLimit).toBe(80);
+    expect(settings.sendingEnabled).toBe(true);
+    expect(settings.sendingUpdatedAt).toBeNull();
     expect(settings.kinds.inactivity_reminder.sendDays).toEqual([7, 14]);
     expect(settings.kinds.weekly_digest.sendWeekday).toBe(1);
     expect(settings.kinds.signup.enabled).toBe(true);
@@ -69,6 +81,11 @@ describe("fetchEmailSettings", () => {
     ["種別の取得がエラー", { email_kind_settings: { data: null, error: dbError } }, "db error"],
     ["上限の取得がエラー", { email_settings: { data: null, error: dbError } }, "db error"],
     ["上限の行が無い", { email_settings: { data: null, error: null } }, "email_settings"],
+    [
+      "全体スイッチが真偽値でない（列が無い等）",
+      { email_settings: { data: { ...settingsRow, sending_enabled: undefined }, error: null } },
+      "sending_enabled",
+    ],
     [
       "種別の行が欠けている",
       { email_kind_settings: { data: allKindRows.slice(1), error: null } },
@@ -155,11 +172,43 @@ describe("isTransactionalEmailEnabled", () => {
   });
 });
 
+describe("isEmailSendingEnabled（全体スイッチ・フェイルクローズ）", () => {
+  const clientWith = (result: { data: unknown; error: unknown }) =>
+    createMockSupabaseClient({ tableResults: { email_settings: result } });
+
+  it("sending_enabled = true のときだけ true（id = 1 の行を読む）", async () => {
+    const client = clientWith({ data: { sending_enabled: true }, error: null });
+
+    expect(await isEmailSendingEnabled(client as never)).toBe(true);
+    const builder = client.from.mock.results[0].value;
+    expect(client.from).toHaveBeenCalledWith("email_settings");
+    expect(builder.eq).toHaveBeenCalledWith("id", 1);
+  });
+
+  it.each([
+    ["false", { data: { sending_enabled: false }, error: null }],
+    ["真偽値でない", { data: { sending_enabled: "true" }, error: null }],
+    ["DB エラー", { data: null, error: dbError }],
+    ["行が無い", { data: null, error: null }],
+  ])("%s のときは false（規約改定前に送らない）", async (_l, result) => {
+    expect(await isEmailSendingEnabled(clientWith(result) as never)).toBe(false);
+  });
+
+  it("例外が出ても false", async () => {
+    const client = { from: vi.fn(() => Promise.reject(new Error("boom"))) };
+
+    expect(await isEmailSendingEnabled(client as never)).toBe(false);
+  });
+});
+
 describe("updateEmailKindSettings / updateDigestDailyLimit", () => {
   const current = { enabled: true, send_days: [2, 5], send_weekday: null };
   const serverClient = (
     kindResults: { data: unknown; error: unknown }[],
-    settingsResult: { data: unknown; error: unknown } = { data: [], error: null }
+    settingsResult: { data: unknown; error: unknown } | { data: unknown; error: unknown }[] = {
+      data: [],
+      error: null,
+    }
   ) => {
     const client = createMockSupabaseClient({
       tableResults: { email_kind_settings: kindResults, email_settings: settingsResult },
@@ -252,6 +301,40 @@ describe("updateEmailKindSettings / updateDigestDailyLimit", () => {
     });
     expect(builder.eq).toHaveBeenCalledWith("id", 1);
   });
+
+  const currentlyOff = { data: { sending_enabled: false }, error: null };
+
+  it("全体スイッチは id = 1 の行を更新し、記録は上限の updated_at とは別の列に持つ", async () => {
+    const client = serverClient([], [currentlyOff, { data: [{ id: 1 }], error: null }]);
+
+    expect(await updateEmailSendingEnabled(true, 9)).toEqual({ error: null, updated: true });
+    const builder = client.from.mock.results[1].value;
+    expect(builder.update).toHaveBeenCalledWith({
+      sending_enabled: true,
+      sending_updated_at: expect.any(String),
+      sending_updated_by: 9,
+    });
+    expect(builder.eq).toHaveBeenCalledWith("id", 1);
+  });
+
+  it("同じ値の保存では書かず（切り替えの記録を上書きしない）、updated: true を返す", async () => {
+    const client = serverClient([], [{ data: { sending_enabled: true }, error: null }]);
+
+    expect(await updateEmailSendingEnabled(true, 9)).toEqual({ error: null, updated: true });
+    expect(client.from).toHaveBeenCalledTimes(1);
+    expect(client.from.mock.results[0].value.update).not.toHaveBeenCalled();
+  });
+
+  it("全体スイッチの更新が0行なら updated: false、DBエラー（現在値の読み取りを含む）は error を返す", async () => {
+    serverClient([], [currentlyOff, { data: [], error: null }]);
+    expect(await updateEmailSendingEnabled(true, 9)).toEqual({ error: null, updated: false });
+
+    serverClient([], [currentlyOff, { data: null, error: dbError }]);
+    expect(await updateEmailSendingEnabled(true, 9)).toEqual({ error: dbError, updated: false });
+
+    serverClient([], [{ data: null, error: dbError }]);
+    expect(await updateEmailSendingEnabled(true, 9)).toEqual({ error: dbError, updated: false });
+  });
 });
 
 describe("fetchEmailSettingsForAdmin", () => {
@@ -269,6 +352,37 @@ describe("fetchEmailSettingsForAdmin", () => {
 
     expect(error).toBeNull();
     expect(data?.editorNames).toEqual({ 5: "管理者A" });
+  });
+
+  it("全体スイッチを切り替えた人も更新者の表示名に含める", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: {
+        email_kind_settings: { data: allKindRows, error: null },
+        email_settings: {
+          data: {
+            ...settingsRow,
+            sending_updated_at: "2026-10-10T00:00:00Z",
+            sending_updated_by: 8,
+          },
+          error: null,
+        },
+        users: {
+          data: [
+            { id: 5, display_name: "管理者A" },
+            { id: 8, display_name: "管理者B" },
+          ],
+          error: null,
+        },
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+
+    const { data } = await fetchEmailSettingsForAdmin();
+
+    const usersBuilder = client.from.mock.results[client.from.mock.calls.length - 1].value;
+    expect(usersBuilder.in).toHaveBeenCalledWith("id", expect.arrayContaining([5, 8]));
+    expect(data?.sendingUpdatedBy).toBe(8);
+    expect(data?.editorNames).toEqual({ 5: "管理者A", 8: "管理者B" });
   });
 
   it("読めなければエラーメッセージを返す", async () => {
@@ -369,6 +483,35 @@ describe("fetchEmailLogs", () => {
       data: null,
       hasNext: false,
       error: "送信履歴の取得に失敗しました",
+    });
+  });
+});
+
+describe("fetchPendingAnnouncementEmailCount", () => {
+  it("公開済み・未削除・メール送信あり・未送信のお知らせを管理者のセッションで数える", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: { announcements: { data: null, count: 3, error: null } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+
+    expect(await fetchPendingAnnouncementEmailCount()).toEqual({ count: 3, error: null });
+    const builder = client.from.mock.results[0].value;
+    expect(client.from).toHaveBeenCalledWith("announcements");
+    expect(builder.not).toHaveBeenCalledWith("published_at", "is", null);
+    expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
+    expect(builder.eq).toHaveBeenCalledWith("send_email", true);
+    expect(builder.is).toHaveBeenCalledWith("email_sent_at", null);
+  });
+
+  it("DBエラーなら件数 null とエラーメッセージを返す", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: { announcements: { data: null, error: dbError } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+
+    expect(await fetchPendingAnnouncementEmailCount()).toEqual({
+      count: null,
+      error: "未送信のお知らせ件数の取得に失敗しました",
     });
   });
 });

@@ -4,7 +4,10 @@ import { formatMonthlyJpyPrice, isStripeEnabled } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP_LABELS } from "@/app/constants/user";
 import type { EmailTexts } from "@/app/lib/email-template";
 import { formatDate } from "@/app/lib/format-date";
-import { isTransactionalEmailEnabled } from "@/app/services/api/email-settings-server";
+import {
+  isEmailSendingEnabled,
+  isTransactionalEmailEnabled,
+} from "@/app/services/api/email-settings-server";
 import { loadEmailTexts } from "@/app/services/api/email-templates-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import {
@@ -141,9 +144,10 @@ function scheduleEmail(label: EmailKind, task: () => Promise<unknown>): void {
 
 /**
  * Shared entry: load the recipient, build the template, send. Skips before loading the recipient
- * when the kind is disabled in email_kind_settings, or when sending or the app URL is not configured (links are built only from
- * `NEXT_PUBLIC_APP_URL`). Recipient loading and the send-log claim/record use the same admin
- * client.
+ * when the global switch (`email_settings.sending_enabled`) is off or unreadable, when the kind is
+ * disabled in email_kind_settings, or when sending or the app URL is not configured (links are
+ * built only from `NEXT_PUBLIC_APP_URL`). Recipient loading and the send-log claim/record use the
+ * same admin client.
  */
 async function deliverToUser(
   kind: EmailKind,
@@ -166,8 +170,18 @@ async function deliverToUser(
   }
 
   const supabase = await createAdminSupabaseClient();
+  // The two reads are independent, so they go out together; the global switch is still judged
+  // first. Fail-closed: it keeps every mail unsent until the terms allow it (#315).
+  const [sendingEnabled, kindEnabled] = await Promise.all([
+    isEmailSendingEnabled(supabase),
+    isTransactionalEmailEnabled(supabase, kind),
+  ]);
+  if (!sendingEnabled) {
+    console.warn(`[メール通知] 全体スイッチが無効のため送信をスキップしました: kind=${kind}`);
+    return "skipped";
+  }
   // Fail-safe: an unreadable setting counts as enabled so signup / payment notices are not lost.
-  if (!(await isTransactionalEmailEnabled(supabase, kind))) {
+  if (!kindEnabled) {
     console.warn(`[メール通知] 管理設定で無効のため送信をスキップしました: kind=${kind}`);
     return "skipped";
   }
