@@ -8,11 +8,10 @@ import {
 import type { GradingRequirement, ReviewJson, ScoreKind } from "@/app/types";
 
 /**
- * Scores and pass/fail are computed here from the AI's labels only. Never feed a number the AI
- * wrote into a score or a pass decision: its numbers drift between runs, the labels barely do.
+ * 0-100 integer, or null when there are no requirements to average (URL submissions). Scores and
+ * pass/fail come from the AI's labels only: never feed a number the AI wrote into a score or a
+ * pass decision, because its numbers drift between runs while the labels barely do.
  */
-
-/** 0-100 integer, or null when there are no requirements to average (URL submissions). */
 export function computeReviewScore(reviewJson: ReviewJson): number | null {
   const { requirements, code_quality: codeQuality } = reviewJson;
   if (requirements.length === 0) {

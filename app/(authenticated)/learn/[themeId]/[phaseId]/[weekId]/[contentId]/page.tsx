@@ -212,13 +212,14 @@ export default async function ContentPage({ params }: PageProps) {
     notFound();
   }
 
-  // Issue the slide signed URL only after the lock check (isLocked) and the RLS-applied
-  // fetchContentById() pass; locked or unpublished content (except admin/maintainer preview) never
-  // gets here (#89). Runs in parallel with the progress fetches.
-  // The remaining-review count is computed on the server at render time (the client never counts)
-  // and joins the same Promise.all, since it depends on none of the other fetches.
   const showsAIReviewLimit =
     userId && content.content_type === "exercise" && isFullyPublished && userStatus;
+
+  // Issue the slide signed URL only after the lock check (isLocked) and the RLS-applied
+  // fetchContentById() pass; locked or unpublished content (except admin/maintainer preview) never
+  // gets here (#89). Runs in parallel with the progress fetches. The remaining-review count is
+  // computed here on the server (the client never counts) and joins the same Promise.all because
+  // it depends on none of the other fetches.
   const [
     { isCompleted },
     { data: existingReview },
