@@ -173,7 +173,7 @@ export async function POST(request: NextRequest) {
         apiKey,
       });
 
-      await updateAIReviewCompleted(reviewRecord.id, {
+      const saved = await updateAIReviewCompleted(reviewRecord.id, {
         reviewContent: result.reviewContent,
         overallScore: result.overallScore,
         reviewJson: result.reviewJson,
@@ -185,6 +185,12 @@ export async function POST(request: NextRequest) {
         completionTokens: result.completionTokens,
         thoughtsTokens: result.thoughtsTokens,
       });
+
+      if (!saved) {
+        // The row stays `processing` and stops counting after AI_REVIEW_STALE_AFTER_MS, so
+        // reporting success here would hide a Gemini call that left no stored review.
+        return NextResponse.json({ error: "AIレビューの保存に失敗しました" }, { status: 500 });
+      }
 
       return NextResponse.json({
         success: true,

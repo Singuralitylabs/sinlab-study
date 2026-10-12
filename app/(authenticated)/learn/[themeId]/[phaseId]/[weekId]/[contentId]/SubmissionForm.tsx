@@ -11,6 +11,7 @@ import {
   type CodeLanguage,
   DEFAULT_FILENAME_BY_LANGUAGE,
 } from "@/app/components/code-editor-utils";
+import { buildReviewNotice } from "@/app/lib/ai-review-response";
 import type { AIReviewListItem, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -134,16 +135,15 @@ export function SubmissionForm({
         body: JSON.stringify({ submissionId }),
       });
 
-      if (response.status === 202) {
-        // Another request is already generating this review; there is no review body to show yet.
-        const data = await response.json().catch(() => null);
-        setMessage({
-          type: "info",
-          text:
-            data?.message ??
-            "AIレビューは現在生成中です。しばらくしてからページを再読み込みしてください",
-        });
-        router.refresh();
+      const isNoticeStatus = [202, 409, 429].includes(response.status);
+      const notice = isNoticeStatus
+        ? buildReviewNotice(response.status, await response.json().catch(() => null))
+        : null;
+      if (notice) {
+        setMessage(notice);
+        if (response.status === 202) {
+          router.refresh();
+        }
       } else if (response.ok) {
         const data = await response.json();
         setAiReview({
@@ -160,13 +160,6 @@ export function SubmissionForm({
         });
         setMessage({ type: "success", text: "提出が完了しました。AIレビューが生成されました。" });
         router.refresh();
-      } else if (response.status === 429 || response.status === 409) {
-        const errorData = await response.json().catch(() => null);
-        setMessage({
-          type: "error",
-          text:
-            errorData?.error ?? "AIレビューの回数上限に達しました。時間をおいて再度お試しください",
-        });
       } else {
         const errorData = await response.json().catch(() => null);
         const errorMsg = errorData?.error || "AIレビューの生成に失敗しました";

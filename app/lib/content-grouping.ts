@@ -19,7 +19,7 @@ export interface ContentTableRow {
   content_type: ContentType;
   is_published: boolean;
   is_open_to_trial: boolean;
-  /** Rubric version; null when the content has no (usable) grading rubric. */
+  /** Stored rubric version; null when the content has no grading rubric saved. */
   grading_rubric_version: number | null;
 }
 

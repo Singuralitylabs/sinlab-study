@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  AI_REVIEW_STALE_AFTER_MS,
   GEMINI_API_KEY_ENV,
   GEMINI_API_KEY_TRIAL_ENV,
   GEMINI_TOTAL_BUDGET_MS,
@@ -189,6 +190,17 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
         thoughtsTokens: 30,
       })
     );
+    expect(updateAIReviewFailed).not.toHaveBeenCalled();
+  });
+
+  it("完了の保存に失敗したら成功を返さず500にする", async () => {
+    vi.mocked(generateReview).mockResolvedValue(reviewResult());
+    vi.mocked(updateAIReviewCompleted).mockResolvedValue(false);
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toContain("保存に失敗");
     expect(updateAIReviewFailed).not.toHaveBeenCalled();
   });
 
@@ -656,5 +668,9 @@ describe("maxDurationとGEMINI_TOTAL_BUDGET_MSの整合性", () => {
   it("GEMINI_TOTAL_BUDGET_MSはDB往復等のオーバーヘッド分の余裕を残してmaxDuration未満である", () => {
     const marginMs = 5_000;
     expect(GEMINI_TOTAL_BUDGET_MS + marginMs).toBeLessThanOrEqual(maxDuration * 1000);
+  });
+
+  it("AI_REVIEW_STALE_AFTER_MSは実行中の行を死んだ扱いにしないようmaxDurationより長い", () => {
+    expect(AI_REVIEW_STALE_AFTER_MS).toBeGreaterThan(maxDuration * 1000);
   });
 });
