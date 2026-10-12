@@ -97,11 +97,6 @@ export function AIReviewDisplay({
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           )}
         </button>
-        {onRetry && (
-          <Button variant="ghost" size="sm" onClick={onRetry}>
-            <RefreshCw className="h-4 w-4" />
-          </Button>
-        )}
       </div>
       {isExpanded && reviewJson && (
         <div className="p-4 border-t">

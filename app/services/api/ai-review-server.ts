@@ -1,6 +1,7 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import { SUBMISSIONS_PAGE_SIZE } from "@/app/constants/submissions";
 import { resolvePageRange } from "@/app/lib/submissions-pagination";
+import { addTokenCount, type TokenUsage } from "@/app/lib/token-usage";
 import type {
   AdminSubmissionWithReview,
   AIReviewListItem,
@@ -235,19 +236,6 @@ export async function updateAIReviewProcessing(reviewId: number): Promise<boolea
   return true;
 }
 
-export interface AIReviewTokenUsage {
-  promptTokens: number | null;
-  completionTokens: number | null;
-  thoughtsTokens: number | null;
-}
-
-function addTokens(previous: number | null, current: number | null): number | null {
-  if (previous === null && current === null) {
-    return null;
-  }
-  return (previous ?? 0) + (current ?? 0);
-}
-
 /**
  * Token columns are cumulative over every attempt on the same submission (a failed row is reused
  * on retry), because failed attempts are billed too. A plain read-then-write is enough because
@@ -258,7 +246,7 @@ function addTokens(previous: number | null, current: number | null): number | nu
 async function accumulateTokens(
   supabase: Awaited<ReturnType<typeof createAdminSupabaseClient>>,
   reviewId: number,
-  usage: AIReviewTokenUsage
+  usage: TokenUsage
 ) {
   const { data, error } = await supabase
     .from("ai_reviews")
@@ -272,15 +260,15 @@ async function accumulateTokens(
   }
 
   return {
-    prompt_tokens: addTokens(data?.prompt_tokens ?? null, usage.promptTokens),
-    completion_tokens: addTokens(data?.completion_tokens ?? null, usage.completionTokens),
-    thoughts_tokens: addTokens(data?.thoughts_tokens ?? null, usage.thoughtsTokens),
+    prompt_tokens: addTokenCount(data?.prompt_tokens ?? null, usage.promptTokens),
+    completion_tokens: addTokenCount(data?.completion_tokens ?? null, usage.completionTokens),
+    thoughts_tokens: addTokenCount(data?.thoughts_tokens ?? null, usage.thoughtsTokens),
   };
 }
 
 export async function updateAIReviewCompleted(
   reviewId: number,
-  params: AIReviewTokenUsage & {
+  params: TokenUsage & {
     reviewContent: string;
     overallScore: number | null;
     reviewJson: ReviewJson;
@@ -321,7 +309,7 @@ export async function updateAIReviewCompleted(
 export async function updateAIReviewFailed(
   reviewId: number,
   errorMessage: string,
-  usage?: AIReviewTokenUsage
+  usage?: TokenUsage
 ): Promise<boolean> {
   const supabase = await createAdminSupabaseClient();
   const tokens = usage ? await accumulateTokens(supabase, reviewId, usage) : null;

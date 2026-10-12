@@ -213,7 +213,12 @@ export default async function ContentPage({ params }: PageProps) {
   }
 
   const showsAIReviewLimit =
-    userId && content.content_type === "exercise" && isFullyPublished && userStatus;
+    Boolean(userId) &&
+    content.content_type === "exercise" &&
+    isFullyPublished &&
+    (userStatus === USER_STATUS.ACTIVE || userStatus === USER_STATUS.TRIAL);
+  // Trial notice is a fixed message and does not read `remaining`, so the usage query is wasted.
+  const countsAIReviewUsage = showsAIReviewLimit && userStatus === USER_STATUS.ACTIVE;
 
   // Issue the slide signed URL only after the lock check (isLocked) and the RLS-applied
   // fetchContentById() pass; locked or unpublished content (except admin/maintainer preview) never
@@ -243,12 +248,12 @@ export default async function ContentPage({ params }: PageProps) {
     content.content_type === "quiz"
       ? fetchQuizQuestions(contentIdNum)
       : Promise.resolve({ data: [], error: null }),
-    showsAIReviewLimit
+    countsAIReviewUsage && userId !== null
       ? createServerSupabaseClient().then((supabase) =>
           fetchAIReviewUsage(supabase, {
             userId,
             contentId: contentIdNum,
-            includeDailyTotal: userStatus === USER_STATUS.ACTIVE,
+            includeDailyTotal: true,
           })
         )
       : Promise.resolve(null),

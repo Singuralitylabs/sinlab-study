@@ -28,6 +28,12 @@ describe("buildReviewNotice", () => {
     expect(notice?.text).toContain("回数上限");
   });
 
+  it("再試行では提出が保存されたとは言わない", () => {
+    expect(
+      buildReviewNotice(429, { error: "本日の上限に達しました" }, { submissionJustSaved: false })
+    ).toEqual({ type: "error", text: "本日の上限に達しました" });
+  });
+
   it("その他のステータスは扱わない", () => {
     expect(buildReviewNotice(500, { error: "x" })).toBeNull();
     expect(buildReviewNotice(200, {})).toBeNull();

@@ -126,7 +126,10 @@ export function SubmissionForm({
     setCodeFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const requestAIReview = async (submissionId: number) => {
+  const requestAIReview = async (
+    submissionId: number,
+    options: { submissionJustSaved: boolean }
+  ) => {
     setIsReviewLoading(true);
     try {
       const response = await fetch("/api/ai-review", {
@@ -137,7 +140,7 @@ export function SubmissionForm({
 
       const isNoticeStatus = [202, 409, 429].includes(response.status);
       const notice = isNoticeStatus
-        ? buildReviewNotice(response.status, await response.json().catch(() => null))
+        ? buildReviewNotice(response.status, await response.json().catch(() => null), options)
         : null;
       if (notice) {
         setMessage(notice);
@@ -220,7 +223,7 @@ export function SubmissionForm({
 
         const submissionId = data.submission.id;
         setLastSubmissionId(submissionId);
-        requestAIReview(submissionId);
+        requestAIReview(submissionId, { submissionJustSaved: true });
         router.refresh();
       } else {
         const data = await response.json();
@@ -381,10 +384,9 @@ export function SubmissionForm({
         isLoading={isReviewLoading}
         defaultExpanded={true}
         onRetry={
-          lastSubmissionId
+          lastSubmissionId && aiReview?.status === "failed"
             ? () => {
-                setAiReview(null);
-                requestAIReview(lastSubmissionId);
+                requestAIReview(lastSubmissionId, { submissionJustSaved: false });
               }
             : undefined
         }

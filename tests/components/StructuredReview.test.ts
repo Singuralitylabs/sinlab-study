@@ -105,6 +105,28 @@ describe("AIReviewDisplay", () => {
     );
   });
 
+  it("完了済みには再試行ボタンを出さない（同じ提出の再レビューは必ず 429 になる）", () => {
+    const html = renderToStaticMarkup(
+      createElement(AIReviewDisplay, {
+        review: listItem(),
+        onRetry: () => undefined,
+        defaultExpanded: false,
+      })
+    );
+    expect(html).not.toContain("再試行");
+  });
+
+  it("失敗したレビューだけ再試行できる", () => {
+    const html = renderToStaticMarkup(
+      createElement(AIReviewDisplay, {
+        review: listItem({ status: "failed", error_message: "timeout" }),
+        onRetry: () => undefined,
+        defaultExpanded: false,
+      })
+    );
+    expect(html).toContain("再試行");
+  });
+
   it("受講生向けの表示にトークン数は出ない", () => {
     const html = renderDisplay(
       listItem({ prompt_tokens: 111, completion_tokens: 222, thoughts_tokens: 333 } as never)

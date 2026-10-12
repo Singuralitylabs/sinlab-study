@@ -700,15 +700,13 @@ describe("演習ページのAIレビュー残り回数（#304）", () => {
     expect(html).toContain("本日の残り回数: 1回");
   });
 
-  it("trial: 日次合計は数えない（日次上限を適用しない）", async () => {
+  it("trial: 残り回数を表示しないので回数集計を呼ばない", async () => {
     setupExercise({ userStatus: "trial" });
 
-    await render();
+    const html = await render();
 
-    expect(fetchAIReviewUsage).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ includeDailyTotal: false })
-    );
+    expect(fetchAIReviewUsage).not.toHaveBeenCalled();
+    expect(html).toContain("お試しプランでは AI レビューは 1 課題につき");
   });
 
   it("集計に失敗しても案内は表示し、残り回数だけを隠す", async () => {

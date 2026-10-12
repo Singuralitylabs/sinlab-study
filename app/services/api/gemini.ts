@@ -6,6 +6,7 @@ import {
   type Schema,
   Type,
 } from "@google/genai";
+import type { ZodType } from "zod";
 import { CODE_LANGUAGES, type CodeLanguage } from "@/app/components/code-editor-utils";
 import {
   GEMINI_API_KEY_ENV,
@@ -36,6 +37,7 @@ import {
   GradingRubricDraftSchema,
   UrlReviewSchema,
 } from "@/app/lib/grading-schema";
+import { addTokenCount, type TokenUsage } from "@/app/lib/token-usage";
 import type { CodeFile, GradingRubric, ReviewJson, ScoreKind, UserStatusType } from "@/app/types";
 
 export const SYSTEM_PROMPT = `Web技術講座のAI採点アシスタントです。提出物を評価し、指定されたJSON形式のみで返してください（日本語・初学者向け・建設的に）。
@@ -46,11 +48,7 @@ export const SYSTEM_PROMPT = `Web技術講座のAI採点アシスタントです
 - advice は次のステップを1〜2文で書く
 - 点数・合否・パーセンテージは出力しない（点数はシステムが判定ラベルから計算する）`;
 
-export interface TokenUsage {
-  promptTokens: number | null;
-  completionTokens: number | null;
-  thoughtsTokens: number | null;
-}
+export type { TokenUsage };
 
 export interface ReviewResult extends TokenUsage {
   reviewJson: ReviewJson;
@@ -270,6 +268,7 @@ function buildReviewResponseSchema(mode: ScoreKind, gradingRubric: GradingRubric
 type ParsedReview = { ok: true; reviewJson: ReviewJson } | { ok: false; reason: string };
 
 const EMPTY_RESPONSE_MESSAGE = "Gemini APIからレビュー結果を取得できませんでした";
+const INVALID_REVIEW_JSON_MESSAGE = "AIレビューの結果をJSONとして解釈できませんでした";
 
 function describeValidationFailure(error: {
   issues: readonly { path: readonly PropertyKey[]; message: string }[];
@@ -277,6 +276,27 @@ function describeValidationFailure(error: {
   const issue = error.issues[0];
   const where = issue.path.length > 0 ? `${issue.path.map(String).join(".")}: ` : "";
   return `AIレビューの結果の形式が不正でした（${where}${issue.message}）`.slice(0, 200);
+}
+
+/** Shared by review parsing and rubric-draft parsing so a new check is not added in only one. */
+function parseModelJson<T>(
+  text: string | undefined,
+  schema: ZodType<T>,
+  invalidJsonMessage: string
+): { ok: true; data: T } | { ok: false; reason: string } {
+  if (!text?.trim()) {
+    return { ok: false, reason: EMPTY_RESPONSE_MESSAGE };
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return { ok: false, reason: invalidJsonMessage };
+  }
+  const parsed = schema.safeParse(raw);
+  return parsed.success
+    ? { ok: true, data: parsed.data }
+    : { ok: false, reason: describeValidationFailure(parsed.error) };
 }
 
 /**
@@ -288,21 +308,10 @@ export function parseReviewResponse(
   mode: ScoreKind,
   gradingRubric: GradingRubric | null
 ): ParsedReview {
-  if (!text?.trim()) {
-    return { ok: false, reason: EMPTY_RESPONSE_MESSAGE };
-  }
-
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return { ok: false, reason: "AIレビューの結果をJSONとして解釈できませんでした" };
-  }
-
   if (mode === "none") {
-    const parsed = UrlReviewSchema.safeParse(raw);
-    if (!parsed.success) {
-      return { ok: false, reason: describeValidationFailure(parsed.error) };
+    const parsed = parseModelJson(text, UrlReviewSchema, INVALID_REVIEW_JSON_MESSAGE);
+    if (!parsed.ok) {
+      return parsed;
     }
     return {
       ok: true,
@@ -316,9 +325,13 @@ export function parseReviewResponse(
   }
 
   if (mode === "rubric" && gradingRubric) {
-    const parsed = buildRubricReviewSchema(gradingRubric).safeParse(raw);
-    if (!parsed.success) {
-      return { ok: false, reason: describeValidationFailure(parsed.error) };
+    const parsed = parseModelJson(
+      text,
+      buildRubricReviewSchema(gradingRubric),
+      INVALID_REVIEW_JSON_MESSAGE
+    );
+    if (!parsed.ok) {
+      return parsed;
     }
     const byKey = new Map(parsed.data.requirements.map((item) => [item.key, item]));
     return {
@@ -342,9 +355,9 @@ export function parseReviewResponse(
     };
   }
 
-  const parsed = EstimatedReviewSchema.safeParse(raw);
-  if (!parsed.success) {
-    return { ok: false, reason: describeValidationFailure(parsed.error) };
+  const parsed = parseModelJson(text, EstimatedReviewSchema, INVALID_REVIEW_JSON_MESSAGE);
+  if (!parsed.ok) {
+    return parsed;
   }
   return { ok: true, reviewJson: parsed.data };
 }
@@ -393,13 +406,14 @@ function toSafeError(error: unknown, apiKey: string): Error {
 function addUsage(
   total: TokenUsage,
   usageMetadata: GenerateContentResponseUsageMetadata | undefined
-) {
-  const add = (sum: number | null, value: number | undefined) =>
-    value === undefined ? sum : (sum ?? 0) + value;
+): TokenUsage {
   return {
-    promptTokens: add(total.promptTokens, usageMetadata?.promptTokenCount),
-    completionTokens: add(total.completionTokens, usageMetadata?.candidatesTokenCount),
-    thoughtsTokens: add(total.thoughtsTokens, usageMetadata?.thoughtsTokenCount),
+    promptTokens: addTokenCount(total.promptTokens, usageMetadata?.promptTokenCount ?? null),
+    completionTokens: addTokenCount(
+      total.completionTokens,
+      usageMetadata?.candidatesTokenCount ?? null
+    ),
+    thoughtsTokens: addTokenCount(total.thoughtsTokens, usageMetadata?.thoughtsTokenCount ?? null),
   };
 }
 
@@ -616,19 +630,14 @@ export async function generateGradingRubricDraft({
     contents: buildRubricDraftPrompt(exerciseInstructions, referenceAnswer),
     responseSchema: RUBRIC_DRAFT_RESPONSE_SCHEMA,
     parse: (text) => {
-      if (!text?.trim()) {
-        return { ok: false, reason: EMPTY_RESPONSE_MESSAGE };
-      }
-      let raw: unknown;
-      try {
-        raw = JSON.parse(text);
-      } catch {
-        return { ok: false, reason: "採点基準の下書きをJSONとして解釈できませんでした" };
-      }
-      const parsed = GradingRubricDraftSchema.safeParse(raw);
-      return parsed.success
+      const parsed = parseModelJson(
+        text,
+        GradingRubricDraftSchema,
+        "採点基準の下書きをJSONとして解釈できませんでした"
+      );
+      return parsed.ok
         ? { ok: true, value: parsed.data.requirements }
-        : { ok: false, reason: describeValidationFailure(parsed.error) };
+        : { ok: false, reason: parsed.reason };
     },
   });
   return value;
