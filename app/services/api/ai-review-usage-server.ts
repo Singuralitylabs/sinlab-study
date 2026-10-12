@@ -23,21 +23,23 @@ export async function fetchAIReviewUsage(
     now = new Date(),
   }: { userId: number; contentId: number; includeDailyTotal: boolean; now?: Date }
 ): Promise<AIReviewUsage | null> {
-  const { data: submissions, error: submissionsError } = await supabase
-    .from("submissions")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("content_id", contentId);
+  const fetchContentReviews = async (): Promise<AIReviewUsage["contentReviews"] | null> => {
+    const { data: submissions, error: submissionsError } = await supabase
+      .from("submissions")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("content_id", contentId);
 
-  if (submissionsError) {
-    console.error("AIレビュー回数集計エラー (submissions):", submissionsError.message);
-    return null;
-  }
+    if (submissionsError) {
+      console.error("AIレビュー回数集計エラー (submissions):", submissionsError.message);
+      return null;
+    }
 
-  const submissionIds = (submissions ?? []).map((s) => s.id);
+    const submissionIds = (submissions ?? []).map((s) => s.id);
+    if (submissionIds.length === 0) {
+      return [];
+    }
 
-  let contentReviews: AIReviewUsage["contentReviews"] = [];
-  if (submissionIds.length > 0) {
     const { data, error } = await supabase
       .from("ai_reviews")
       .select("id, submission_id, status, created_at")
@@ -48,11 +50,14 @@ export async function fetchAIReviewUsage(
       console.error("AIレビュー回数集計エラー (ai_reviews):", error.message);
       return null;
     }
-    contentReviews = data ?? [];
-  }
+    return data ?? [];
+  };
 
-  let todayTotal = 0;
-  if (includeDailyTotal) {
+  // Independent of the per-content lookup, so it runs alongside it instead of after it.
+  const fetchTodayTotal = async (): Promise<number | null> => {
+    if (!includeDailyTotal) {
+      return 0;
+    }
     const { startIso } = getJstDayWindow(now);
     const { count, error } = await supabase
       .from("ai_reviews")
@@ -65,7 +70,15 @@ export async function fetchAIReviewUsage(
       console.error("AIレビュー回数集計エラー (daily total):", error.message);
       return null;
     }
-    todayTotal = count ?? 0;
+    return count ?? 0;
+  };
+
+  const [contentReviews, todayTotal] = await Promise.all([
+    fetchContentReviews(),
+    fetchTodayTotal(),
+  ]);
+  if (contentReviews === null || todayTotal === null) {
+    return null;
   }
 
   return { contentReviews, todayTotal };

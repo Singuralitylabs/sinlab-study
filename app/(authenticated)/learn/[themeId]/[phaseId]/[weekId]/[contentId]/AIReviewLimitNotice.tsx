@@ -24,7 +24,7 @@ export function AIReviewLimitNotice({
           ※ AIレビューは新しい提出に対して1日{AI_REVIEW_LIMITS.active.perContentPerDay}
           回までです
         </p>
-        {remaining !== null && <p>本日の残り回数: {remaining}回（この課題）</p>}
+        {remaining !== null && <p>本日の残り回数: {remaining}回</p>}
       </div>
     );
   }

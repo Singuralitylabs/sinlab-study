@@ -13,7 +13,7 @@ const render = (props: Parameters<typeof AIReviewLimitNotice>[0]) =>
 describe("AIReviewLimitNotice", () => {
   it("active: サーバーで算出した残り回数を表示する", () => {
     const html = render({ userStatus: "active", remaining: 1, stripeEnabled: true });
-    expect(html).toContain("本日の残り回数: 1回（この課題）");
+    expect(html).toContain("本日の残り回数: 1回");
     expect(html).not.toContain("/upgrade");
   });
 

@@ -64,7 +64,7 @@ describe("evaluateReviewRequest - active", () => {
       now: NOW,
     });
 
-  it("allows the 1st review of the day with 1 remaining after it would be used", () => {
+  it("allows the 1st review of the day and counts it toward remaining", () => {
     expect(evaluate([], 1, 0)).toEqual({ kind: "allowed", remaining: 2 });
   });
 

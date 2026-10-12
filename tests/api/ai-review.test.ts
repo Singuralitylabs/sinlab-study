@@ -312,10 +312,15 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
           { data: submissionRow(auth.userId, submissionId), error: null },
           { data: ownSubmissionIds.map((id) => ({ id })), error: null },
         ],
-        ai_reviews: [
-          { data: reviews, error: null },
-          { data: null, error: null, count: todayTotal },
-        ],
+        // The daily total (active only) is issued before the per-content lookup: they run in
+        // parallel and the total doesn't wait for the own-submissions query.
+        ai_reviews:
+          auth.userStatus === "active"
+            ? [
+                { data: null, error: null, count: todayTotal },
+                { data: reviews, error: null },
+              ]
+            : [{ data: reviews, error: null }],
       },
     });
     vi.mocked(getServerAuth).mockResolvedValue(auth as never);
@@ -510,7 +515,7 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
 
     const ownSubmissionsBuilder = client.from.mock.results[1].value;
     expect(ownSubmissionsBuilder.eq).toHaveBeenCalledWith("user_id", memberAuth.userId);
-    const totalBuilder = client.from.mock.results[3].value;
+    const totalBuilder = client.from.mock.results[2].value;
     expect(totalBuilder.eq).toHaveBeenCalledWith("submission.user_id", memberAuth.userId);
   });
 

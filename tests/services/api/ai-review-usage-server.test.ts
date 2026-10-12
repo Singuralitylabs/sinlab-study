@@ -17,9 +17,10 @@ describe("fetchAIReviewUsage", () => {
     const client = createMockSupabaseClient({
       tableResults: {
         submissions: { data: [{ id: 11 }, { id: 12 }], error: null },
+        // The daily total is issued first: it runs in parallel with the submissions lookup.
         ai_reviews: [
-          { data: reviews, error: null },
           { data: null, error: null, count: 4 },
+          { data: reviews, error: null },
         ],
       },
     });
@@ -37,11 +38,11 @@ describe("fetchAIReviewUsage", () => {
     expect(submissionsBuilder.eq).toHaveBeenCalledWith("user_id", 2);
     expect(submissionsBuilder.eq).toHaveBeenCalledWith("content_id", 5);
 
-    const contentBuilder = client.from.mock.results[1].value;
+    const contentBuilder = client.from.mock.results[2].value;
     expect(contentBuilder.in).toHaveBeenCalledWith("submission_id", [11, 12]);
     expect(contentBuilder.neq).toHaveBeenCalledWith("status", "failed");
 
-    const totalBuilder = client.from.mock.results[2].value;
+    const totalBuilder = client.from.mock.results[1].value;
     expect(totalBuilder.eq).toHaveBeenCalledWith("submission.user_id", 2);
     expect(totalBuilder.neq).toHaveBeenCalledWith("status", "failed");
     // JST day start (not the UTC day start).

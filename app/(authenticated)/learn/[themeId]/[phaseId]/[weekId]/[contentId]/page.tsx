@@ -215,12 +215,17 @@ export default async function ContentPage({ params }: PageProps) {
   // Issue the slide signed URL only after the lock check (isLocked) and the RLS-applied
   // fetchContentById() pass; locked or unpublished content (except admin/maintainer preview) never
   // gets here (#89). Runs in parallel with the progress fetches.
+  // The remaining-review count is computed on the server at render time (the client never counts)
+  // and joins the same Promise.all, since it depends on none of the other fetches.
+  const showsAIReviewLimit =
+    userId && content.content_type === "exercise" && isFullyPublished && userStatus;
   const [
     { isCompleted },
     { data: existingReview },
     { data: latestSubmission },
     slideSignedUrl,
     { data: quizQuestions, error: quizError },
+    aiReviewUsage,
   ] = await Promise.all([
     userId
       ? fetchUserProgressByContentId(userId, contentIdNum)
@@ -237,28 +242,27 @@ export default async function ContentPage({ params }: PageProps) {
     content.content_type === "quiz"
       ? fetchQuizQuestions(contentIdNum)
       : Promise.resolve({ data: [], error: null }),
+    showsAIReviewLimit
+      ? createServerSupabaseClient().then((supabase) =>
+          fetchAIReviewUsage(supabase, {
+            userId,
+            contentId: contentIdNum,
+            includeDailyTotal: userStatus === USER_STATUS.ACTIVE,
+          })
+        )
+      : Promise.resolve(null),
   ]);
 
-  // Counted on the server at render time (the client never counts); a failed lookup hides only the
-  // remaining count, not the notice.
-  let aiReviewRemaining: number | null = null;
-  const showsAIReviewLimit =
-    userId && content.content_type === "exercise" && isFullyPublished && userStatus;
-  if (showsAIReviewLimit) {
-    const usage = await fetchAIReviewUsage(await createServerSupabaseClient(), {
-      userId,
-      contentId: contentIdNum,
-      includeDailyTotal: userStatus === USER_STATUS.ACTIVE,
-    });
-    if (usage) {
-      aiReviewRemaining = computeRemainingReviews({
-        userStatus,
-        contentReviews: usage.contentReviews,
-        todayTotal: usage.todayTotal,
-        now: new Date(),
-      });
-    }
-  }
+  // A failed lookup hides only the remaining count, not the notice.
+  const aiReviewRemaining =
+    showsAIReviewLimit && aiReviewUsage
+      ? computeRemainingReviews({
+          userStatus,
+          contentReviews: aiReviewUsage.contentReviews,
+          todayTotal: aiReviewUsage.todayTotal,
+          now: new Date(),
+        })
+      : null;
 
   return (
     <div className="max-w-4xl mx-auto">
