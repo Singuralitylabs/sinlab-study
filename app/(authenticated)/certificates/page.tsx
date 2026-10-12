@@ -57,7 +57,13 @@ export default async function CertificatesPage() {
           <Award className="h-5 w-5 text-primary" />
           発行済みの修了証
         </h2>
-        {!certificates || certificates.length === 0 ? (
+        {!certificates ? (
+          <Card>
+            <CardContent className="py-8 text-center text-destructive">
+              修了証の取得に失敗しました。時間をおいて再読み込みしてください。
+            </CardContent>
+          </Card>
+        ) : certificates.length === 0 ? (
           <Card>
             <CardContent className="py-8 text-center text-muted-foreground">
               まだ修了証はありません。

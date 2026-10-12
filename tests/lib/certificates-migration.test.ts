@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { CERTIFICATE_NO_UNIQUE_CONSTRAINT } from "@/app/constants/certificate";
 
 const migration = readFileSync(
   join(process.cwd(), "supabase/migrations/20261005000000_add_certificates.sql"),
@@ -11,6 +12,16 @@ describe("certificates マイグレーション（#291）", () => {
   it("1テーマ1枚（UNIQUE (user_id, theme_id)）で、証明番号も一意", () => {
     expect(migration).toMatch(/UNIQUE \(user_id, theme_id\)/);
     expect(migration).toMatch(/UNIQUE \(certificate_no\)/);
+  });
+
+  it("テーマの物理削除で修了証が消えない（theme_id は RESTRICT）", () => {
+    expect(migration).toMatch(
+      /theme_id INTEGER NOT NULL REFERENCES public\.learning_themes\(id\) ON DELETE RESTRICT/
+    );
+  });
+
+  it("制約名は証明番号の衝突判定（アプリ側の定数）と一致する", () => {
+    expect(migration).toContain(`CONSTRAINT ${CERTIFICATE_NO_UNIQUE_CONSTRAINT} UNIQUE`);
   });
 
   it("受講者名・テーマ名のスナップショット列を持つ", () => {

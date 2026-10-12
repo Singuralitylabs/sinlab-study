@@ -4,7 +4,7 @@ import {
   dashboardCertificateCutoff,
   generateCertificateNo,
   isCertificateEligible,
-  isRecentlyIssued,
+  isCertificateNoCollision,
   isThemeCompleted,
 } from "@/app/lib/certificate";
 
@@ -63,17 +63,33 @@ describe("generateCertificateNo", () => {
 describe("ダッシュボード表示期間（14日）", () => {
   const now = new Date("2026-10-20T00:00:00Z");
 
-  it("発行から14日以内は表示、超えたら表示しない", () => {
-    expect(isRecentlyIssued("2026-10-06T00:00:00Z", now)).toBe(true);
-    expect(isRecentlyIssued("2026-10-05T23:59:59Z", now)).toBe(false);
-  });
-
-  it("不正な日時は表示しない", () => {
-    expect(isRecentlyIssued("invalid", now)).toBe(false);
-  });
-
   it("DB 絞り込み用の下限は14日前", () => {
     expect(dashboardCertificateCutoff(now)).toBe("2026-10-06T00:00:00.000Z");
+  });
+});
+
+describe("isCertificateNoCollision", () => {
+  it("証明番号の衝突（details または制約名）だけを true にする", () => {
+    expect(
+      isCertificateNoCollision({
+        details: "Key (certificate_no)=(SS-202610-ABC123) already exists.",
+      })
+    ).toBe(true);
+    expect(
+      isCertificateNoCollision({
+        message:
+          'duplicate key value violates unique constraint "certificates_certificate_no_unique"',
+      })
+    ).toBe(true);
+  });
+
+  it("(user_id, theme_id) の重複は false（制約名に文言が含まれても判定が反転しない）", () => {
+    expect(
+      isCertificateNoCollision({
+        message: 'duplicate key value violates unique constraint "certificates_user_theme_unique"',
+        details: "Key (user_id, theme_id)=(2, 5) already exists.",
+      })
+    ).toBe(false);
   });
 });
 

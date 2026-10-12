@@ -1300,17 +1300,18 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 
 ### 13.2 判定タイミングと発行処理
 
-`POST /api/progress` が完了（`isCompleted = true`）に更新した**直後**に、`issueCertificateIfEligible()`（`app/services/api/certificates-server.ts`）を呼ぶ。完了の取り消しや保存失敗のときは呼ばない。
+`POST /api/progress` が完了（`isCompleted = true`）に更新した**直後**に、`issueCertificateIfEligible()`（`app/services/api/certificates-server.ts`）を `after()` で予約する（集計クエリでレスポンスを遅らせない。`after()` が使えない場面ではその場で実行する）。完了の取り消しや保存失敗のときは呼ばない。
 
 1. 対象かを確認（対象外なら何もしない）。INSERT は `insertCertificates()` に集約し、遡及発行（13.1節）と共用する
-2. コンテンツ → 週 → フェーズからテーマ ID を求め（通常クライアント）、`fetchThemeProgressSummaries()` でそのテーマが修了かを判定
+2. コンテンツ → 週 → フェーズからテーマ ID を求め（通常クライアント）、そのテーマが発行済みなら終了（集計も INSERT もしない）。未発行なら `fetchThemeProgressSummaries()` でそのテーマが修了かを判定
 3. 修了なら、service_role で `certificates` に INSERT する。**`user_id` は認証済みの本人に固定**し、`recipient_name`（`users.display_name`）と `theme_name` は発行時点のスナップショットとして書く
 4. INSERT 成功後にメール `certificate_issued`（10.4節）を `after()` に予約する
 
 - **service_role の使用はこの INSERT（と宛先の `display_name` の読み取り）に限る**。受講生向け配信経路の service_role（AGENTS.md の2箇所）は増やさない
 - **冪等**: `UNIQUE (user_id, theme_id)` の違反（23505）は発行済みとして無視する（メールも送らない）。`UNIQUE (certificate_no)` の違反だけは番号を作り直して再試行する（最大 `CERTIFICATE_NO_MAX_ATTEMPTS` 回）
 - **失敗は進捗 API のレスポンスを変えない**: 関数は例外を投げず、失敗はログだけ残して `null` を返す。メール送信の失敗も同様（10.1節）。完了の保存はすでに済んでいる
-- **証明番号**: `SS-YYYYMM-XXXXXX`（`YYYYMM` は発行月（JST）、`XXXXXX` は紛らわしい `I` / `O` を除いた英数字6文字）。一意で、将来の公開検証ページに使える
+- **証明番号**: `SS-YYYYMM-XXXXXX`（`YYYYMM` は発行月（JST）、`XXXXXX` は紛らわしい `I` / `O` を除いた英数字6文字。乱数は `crypto.randomInt` で、推測できない）。一意で、将来の公開検証ページに使える。衝突の判定は制約名・`details` で行い、エラー文言には頼らない
+- **受講者名が空のときは発行しない**: 登録時の `display_name` は名前もメールも無いと空文字になり得る。スナップショットは後から直せないため、空（空白のみ）なら warn ログを出して発行を見送る
 
 ### 13.3 画面
 

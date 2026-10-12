@@ -8,6 +8,9 @@ export const CERTIFICATE_NO_CHARS = "0123456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
 export const CERTIFICATE_NO_RANDOM_LENGTH = 6;
 
+/** Constraint name from the certificates migration (UNIQUE (certificate_no)). */
+export const CERTIFICATE_NO_UNIQUE_CONSTRAINT = "certificates_certificate_no_unique";
+
 /**
  * Retries when a generated certificate_no collides (UNIQUE). 34^6 combinations per month make a
  * collision rare, so a few attempts are plenty.

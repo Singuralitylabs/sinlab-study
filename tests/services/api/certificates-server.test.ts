@@ -103,6 +103,33 @@ describe("issueCertificateIfEligible - 発行条件", () => {
     });
   });
 
+  it("そのテーマが発行済みなら、集計も INSERT もせず早期に終える", async () => {
+    mockUserClient({ certificates: { data: { id: 31 }, error: null } });
+
+    expect(await issueCertificateIfEligible(params)).toBeNull();
+    expect(fetchThemeProgressSummaries).not.toHaveBeenCalled();
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it("発行済みの確認に失敗しても発行判定は続ける（UNIQUE が冪等性を守る）", async () => {
+    mockUserClient({ certificates: { data: null, error: { message: "read failed" } } });
+    mockAdminClient({ certificates: inserted });
+
+    expect(await issueCertificateIfEligible(params)).toEqual(inserted.data);
+  });
+
+  it("受講者名が空（空白のみ）なら、名前なしの修了証を作らず発行を見送る", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const admin = mockAdminClient({
+      certificates: inserted,
+      users: { data: { display_name: "  " }, error: null },
+    });
+
+    expect(await issueCertificateIfEligible(params)).toBeNull();
+    expect(certificateInserts(admin)).toHaveLength(0);
+    expect(scheduleCertificateIssuedEmail).not.toHaveBeenCalled();
+  });
+
   it("未完了が1件でもあれば発行しない（admin クライアントも取得しない）", async () => {
     mockSummaries([summary(3, 2)]);
     mockAdminClient({ certificates: inserted });

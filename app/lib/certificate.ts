@@ -1,8 +1,10 @@
+import { randomInt } from "node:crypto";
 import {
   CERTIFICATE_DASHBOARD_DISPLAY_DAYS,
   CERTIFICATE_NO_CHARS,
   CERTIFICATE_NO_PREFIX,
   CERTIFICATE_NO_RANDOM_LENGTH,
+  CERTIFICATE_NO_UNIQUE_CONSTRAINT,
   CERTIFICATE_SHARE_HASHTAG,
   CERTIFICATE_SHARE_URL,
 } from "@/app/constants/certificate";
@@ -37,22 +39,32 @@ function formatYearMonthJst(date: Date): string {
   return `${jst.getUTCFullYear()}${month}`;
 }
 
-/** `SS-YYYYMM-XXXXXX`. `random` returns [0, 1) and is injectable for tests. */
-export function generateCertificateNo(date: Date, random: () => number = Math.random): string {
+/**
+ * `SS-YYYYMM-XXXXXX`. The random part uses a CSPRNG (the number is meant to be verifiable later, so
+ * it must not be guessable). `randomIndex(max)` returns an integer in [0, max) and is injectable
+ * for tests.
+ */
+export function generateCertificateNo(
+  date: Date,
+  randomIndex: (max: number) => number = randomInt
+): string {
   let suffix = "";
   for (let i = 0; i < CERTIFICATE_NO_RANDOM_LENGTH; i++) {
-    suffix += CERTIFICATE_NO_CHARS[Math.floor(random() * CERTIFICATE_NO_CHARS.length)];
+    suffix += CERTIFICATE_NO_CHARS[randomIndex(CERTIFICATE_NO_CHARS.length)];
   }
   return `${CERTIFICATE_NO_PREFIX}-${formatYearMonthJst(date)}-${suffix}`;
 }
 
-/** Whether a certificate is recent enough for the dashboard card (issued within N days). */
-export function isRecentlyIssued(issuedAt: string, now: Date): boolean {
-  const issued = new Date(issuedAt).getTime();
-  if (Number.isNaN(issued)) {
-    return false;
-  }
-  return now.getTime() - issued <= CERTIFICATE_DASHBOARD_DISPLAY_DAYS * DAY_MS;
+/**
+ * Whether a unique-violation error is the certificate_no collision (worth retrying with a new
+ * number) rather than the (user_id, theme_id) duplicate (already issued). Matches the constraint
+ * name or the `Key (certificate_no)=...` detail, never the free-form message wording alone.
+ */
+export function isCertificateNoCollision(error: { message?: string; details?: string }): boolean {
+  return (
+    (error.details ?? "").includes("(certificate_no)") ||
+    (error.message ?? "").includes(CERTIFICATE_NO_UNIQUE_CONSTRAINT)
+  );
 }
 
 /** ISO timestamp of the oldest `issued_at` the dashboard card may show. */

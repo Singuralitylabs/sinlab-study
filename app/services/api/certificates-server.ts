@@ -4,6 +4,7 @@ import {
   dashboardCertificateCutoff,
   generateCertificateNo,
   isCertificateEligible,
+  isCertificateNoCollision,
   isThemeCompleted,
 } from "@/app/lib/certificate";
 import {
@@ -36,6 +37,21 @@ async function fetchThemeIdOfContent(contentId: number): Promise<number | null> 
   return week?.phase?.theme_id ?? null;
 }
 
+async function hasCertificate(userId: number, themeId: number): Promise<boolean> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("certificates")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("theme_id", themeId)
+    .maybeSingle();
+  if (error) {
+    console.error("[修了証] 発行済みの確認エラー:", error.message);
+    return false;
+  }
+  return data !== null;
+}
+
 export type IssuedCertificate = Pick<Certificate, "id" | "certificate_no" | "theme_name">;
 
 /**
@@ -61,6 +77,13 @@ async function insertCertificates(
     .maybeSingle();
   if (userError || !user) {
     console.error("[修了証] 受講者名の取得エラー:", userError?.message ?? "user not found");
+    return [];
+  }
+
+  // The name is snapshotted and cannot be fixed afterwards, and a blank display_name (the signup
+  // fallback when Google gives neither name nor email) would print a nameless certificate.
+  if (!user.display_name?.trim()) {
+    console.warn("[修了証] 受講者名が空のため発行を見送りました");
     return [];
   }
 
@@ -95,7 +118,7 @@ async function insertCertificates(
       }
       // Both UNIQUE (user_id, theme_id) and UNIQUE (certificate_no) raise 23505. Only a number
       // collision is worth retrying; a duplicate (user, theme) means it is already issued.
-      if (!insertError.message.includes("certificate_no")) {
+      if (!isCertificateNoCollision(insertError)) {
         break;
       }
       if (attempt === CERTIFICATE_NO_MAX_ATTEMPTS - 1) {
@@ -132,6 +155,13 @@ export async function issueCertificateIfEligible(params: {
 
     const themeId = await fetchThemeIdOfContent(params.contentId);
     if (themeId === null) {
+      return null;
+    }
+
+    // Cheap early exit: completing contents of an already-certified theme is the common case, so
+    // skip the full progress aggregation and the doomed INSERT. A read error falls through (the
+    // UNIQUE constraint still keeps the INSERT idempotent).
+    if (await hasCertificate(params.userId, themeId)) {
       return null;
     }
 

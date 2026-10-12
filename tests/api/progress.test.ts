@@ -5,11 +5,17 @@ vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/learning-server");
 vi.mock("@/app/services/api/certificates-server");
 vi.mock("@/app/services/api/supabase-server");
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  // Keeps the real behavior (throws outside a request scope, so the route runs the task inline).
+  return { ...actual, after: vi.fn(actual.after) };
+});
 vi.mock("@vercel/analytics/server", () => ({
   track: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { track } from "@vercel/analytics/server";
+import { after } from "next/server";
 import { POST } from "@/app/api/progress/route";
 import { issueCertificateIfEligible } from "@/app/services/api/certificates-server";
 import { isContentVisible } from "@/app/services/api/learning-server";
@@ -233,6 +239,24 @@ describe("POST /api/progress - 修了証の発行（#291）", () => {
       userRole: memberAuth.userRole,
       contentId: 1,
     });
+  });
+
+  it("after() が使える場合はレスポンス後に回し、使えない場合はその場で実行する", async () => {
+    const scheduled: Array<() => unknown> = [];
+    vi.mocked(after).mockImplementationOnce(((task: () => unknown) => {
+      scheduled.push(task);
+    }) as never);
+
+    await POST(request() as never);
+    expect(issueCertificateIfEligible).not.toHaveBeenCalled();
+    await scheduled[0]();
+    expect(issueCertificateIfEligible).toHaveBeenCalledTimes(1);
+
+    vi.mocked(after).mockImplementationOnce((() => {
+      throw new Error("outside request scope");
+    }) as never);
+    await POST(request() as never);
+    expect(issueCertificateIfEligible).toHaveBeenCalledTimes(2);
   });
 
   it("完了の取り消しでは発行判定を呼ばない", async () => {

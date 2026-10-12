@@ -4,6 +4,8 @@
 -- certificates: テーマ修了時に自動発行する修了証。1テーマ1枚（UNIQUE (user_id, theme_id)）。
 --   recipient_name / theme_name は発行時点のスナップショット（後から名前やテーマ名を変えても、
 --   発行済みの修了証は変わらない）。certificate_no は将来の公開検証ページに使えるよう一意にする。
+--   theme_id は ON DELETE RESTRICT（テーマの物理削除で、印刷済みの証明番号ごと修了証が消えないようにする。
+--   テーマは論理削除が基本）。
 --   発行は service_role 経路（POST /api/progress の完了直後）のみ。user_id は本人に固定する。
 -- email_kind_settings: 種別 certificate_issued（修了証の発行メール）を追加する。
 --
@@ -14,7 +16,7 @@
 CREATE TABLE IF NOT EXISTS public.certificates (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-  theme_id INTEGER NOT NULL REFERENCES public.learning_themes(id) ON DELETE CASCADE,
+  theme_id INTEGER NOT NULL REFERENCES public.learning_themes(id) ON DELETE RESTRICT,
   certificate_no TEXT NOT NULL,
   recipient_name TEXT NOT NULL,
   theme_name TEXT NOT NULL,

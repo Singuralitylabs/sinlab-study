@@ -90,6 +90,18 @@ describe("/certificates の遡及発行", () => {
     expect(issueMissingCertificates).not.toHaveBeenCalled();
   });
 
+  it("一覧の取得に失敗したときは「まだ修了証はありません」ではなくエラーを表示する", async () => {
+    vi.mocked(fetchMyCertificates).mockResolvedValue({
+      data: null,
+      error: { message: "x" } as never,
+    });
+
+    const html = await render();
+
+    expect(html).toContain("修了証の取得に失敗しました");
+    expect(html).not.toContain("まだ修了証はありません");
+  });
+
   it("対象外（trial）は / へリダイレクトし、何も発行しない", async () => {
     vi.mocked(getServerAuth).mockResolvedValue({
       user: { id: "a" },

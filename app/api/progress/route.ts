@@ -1,4 +1,4 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { after, type NextRequest, NextResponse } from "next/server";
 import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { USER_STATUS } from "@/app/constants/user";
 import { shouldTrackFirstCompletion } from "@/app/lib/analytics-funnel";
@@ -81,10 +81,17 @@ export async function POST(request: NextRequest) {
       trackServerEvent(ANALYTICS_EVENT.FIRST_CONTENT_COMPLETED, { status: userStatus });
     }
 
-    // Issue the theme certificate when this completion finished the theme. The helper never throws
-    // and its result is not used: a failure (or the email) must not change this response.
+    // Issue the theme certificate when this completion finished the theme. Deferred with after()
+    // so the aggregation queries do not delay the response; outside request scope (where after()
+    // throws) it just runs inline. The helper never throws and its result is not used: a failure
+    // (or the email) must not change this response.
     if (isCompleted) {
-      await issueCertificateIfEligible({ userId, userStatus, userRole, contentId });
+      const issue = () => issueCertificateIfEligible({ userId, userStatus, userRole, contentId });
+      try {
+        after(issue);
+      } catch {
+        await issue();
+      }
     }
 
     return NextResponse.json({ success: true, isCompleted });
