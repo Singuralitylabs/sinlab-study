@@ -32,7 +32,15 @@ export const BREADCRUMB_WEEK_COLUMNS = `id, phase_id, name, is_published, is_del
 
 export const LEARNING_WEEK_DETAIL_COLUMNS = `*, phase:learning_phases(${BREADCRUMB_PHASE_COLUMNS})`;
 
-export const LEARNING_CONTENT_DETAIL_COLUMNS = `*, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
+/**
+ * Every learner-facing column except grading_rubric. `*` would pull the hidden marking guide
+ * into this query; authenticated also has no SELECT on that column, so a browser query cannot
+ * read it either. reference_answer stays because the page shows it after a submission.
+ * Typed as `*` so the nested week embed does not blow the type checker's instantiation depth.
+ */
+const LEARNING_CONTENT_DETAIL_COLUMN_LIST = `id, week_id, title, content_type, video_url, pdf_url, text_content, description, exercise_instructions, reference_answer, hint, allowed_submission_types, code_language, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
+export const LEARNING_CONTENT_DETAIL_COLUMNS =
+  LEARNING_CONTENT_DETAIL_COLUMN_LIST as unknown as "*";
 
 /**
  * Unless admin / maintainer, restrict to is_published = true (issue #68 preview). Insert after

@@ -32,7 +32,10 @@ import {
   type ReviewResult,
 } from "@/app/services/api/gemini";
 import { isContentVisible } from "@/app/services/api/learning-server";
-import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
+import {
+  createAdminSupabaseClient,
+  createServerSupabaseClient,
+} from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const reviewResult = (overrides: Partial<ReviewResult> = {}): ReviewResult => ({
@@ -158,10 +161,7 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
         tableResults: {
           // First call: submission + content (.single); second: existing submissions for the same
           // content (empty = no completed review).
-          submissions: [
-            { data: submissionRow, error: null },
-            { data: [], error: null },
-          ],
+          submissions: { data: submissionRow, error: null },
         },
       }) as never
     );
@@ -169,6 +169,13 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
     vi.mocked(updateAIReviewProcessing).mockResolvedValue(true);
     vi.mocked(updateAIReviewCompleted).mockResolvedValue(true);
     vi.mocked(updateAIReviewFailed).mockResolvedValue(true);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(
+      createMockSupabaseClient({
+        tableResults: {
+          learning_contents: { data: { grading_rubric: null }, error: null },
+        },
+      }) as never
+    );
   });
 
   it("正常系: completed に更新し200を返す", async () => {
@@ -240,19 +247,10 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
       requirements: [{ key: "r1", name: "要件", description: "" }],
     };
     const withRubric = (grading_rubric: unknown) =>
-      vi.mocked(createServerSupabaseClient).mockResolvedValue(
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(
         createMockSupabaseClient({
           tableResults: {
-            submissions: [
-              {
-                data: {
-                  ...submissionRow,
-                  content: { ...submissionRow.content, grading_rubric },
-                },
-                error: null,
-              },
-              { data: [], error: null },
-            ],
+            learning_contents: { data: { grading_rubric }, error: null },
           },
         }) as never
       );
@@ -362,6 +360,13 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
     vi.mocked(updateAIReviewCompleted).mockResolvedValue(true);
     vi.mocked(updateAIReviewFailed).mockResolvedValue(true);
     vi.mocked(generateReview).mockResolvedValue(reviewResult({ overallScore: 80 }));
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(
+      createMockSupabaseClient({
+        tableResults: {
+          learning_contents: { data: { grading_rubric: null }, error: null },
+        },
+      }) as never
+    );
   });
 
   afterEach(() => {
@@ -405,6 +410,7 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
     expect(res.status).toBe(429);
     await expect(res.json()).resolves.toEqual({
       error: "本日のこの課題の AI レビュー回数（2 回）を使い切りました。明日また提出できます",
+      reason: "content_daily",
       remaining: 0,
       resetsAt: "2026-10-12T15:00:00.000Z",
     });
@@ -456,6 +462,7 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
     await expect(res.json()).resolves.toMatchObject({
       error:
         "この提出の AI レビューは実行済みです。コードを直して新しく提出すると再レビューできます",
+      reason: "submission_reviewed",
       remaining: 1,
       resetsAt: null,
     });
@@ -534,6 +541,7 @@ describe("POST /api/ai-review - 回数制限（#304）", () => {
     await expect(res.json()).resolves.toEqual({
       error:
         "お試しプランでは AI レビューは 1 課題につき 1 回です。有料会員は 1 日 2 回まで再レビューできます",
+      reason: "trial_lifetime",
       remaining: 0,
       resetsAt: null,
     });
@@ -636,6 +644,13 @@ describe("POST /api/ai-review - 単一ファイル提出の言語", () => {
     vi.mocked(updateAIReviewProcessing).mockResolvedValue(true);
     vi.mocked(updateAIReviewCompleted).mockResolvedValue(true);
     vi.mocked(generateReview).mockResolvedValue(reviewResult({ overallScore: 80 }));
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(
+      createMockSupabaseClient({
+        tableResults: {
+          learning_contents: { data: { grading_rubric: null }, error: null },
+        },
+      }) as never
+    );
   });
 
   it("code_content の提出には課題の code_language を言語として渡す", async () => {

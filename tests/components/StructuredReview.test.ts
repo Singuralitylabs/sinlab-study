@@ -69,8 +69,12 @@ describe("StructuredReview", () => {
     errorSpy.mockRestore();
   });
 
-  it("none は採点対象外の注記を表示する", () => {
-    expect(renderReview("none")).toContain("URL 提出のため採点対象外です");
+  it("none は採点対象外の注記を表示し、仮置きの品質ラベルは出さない", () => {
+    const html = renderReview("none");
+    expect(html).toContain("URL 提出のため採点対象外です");
+    expect(html).toContain("補足");
+    expect(html).toContain("標準的");
+    expect(html).not.toContain("コード品質");
   });
 
   it("retry のときだけ再提出の案内を表示する", () => {

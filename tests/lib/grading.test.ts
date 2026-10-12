@@ -13,6 +13,7 @@ import {
   nextRequirementKey,
   renderReviewMarkdown,
   resolvePassDisplay,
+  reusedRequirementKeys,
   SCORE_KIND_NOTES,
   toRubricFormRows,
 } from "@/app/lib/grading";
@@ -146,11 +147,14 @@ describe("renderReviewMarkdown", () => {
     expect(md).toContain("修了判定には使われません");
   });
 
-  it("none: 採点対象外と明記し、スコア行を出さない", () => {
+  it("none: 採点対象外と明記し、スコア行と品質ラベルを出さない", () => {
     const md = renderReviewMarkdown(review([]), null, "none");
     expect(md).toContain("URL 提出のため採点対象外です");
+    expect(md).toContain("## 2. 補足");
     expect(md).not.toContain("スコア");
     expect(md).not.toContain("要件達成度");
+    expect(md).not.toContain("**良好**");
+    expect(md).not.toContain("コード品質");
   });
 
   it("改善提案が空なら節を出さない", () => {
@@ -210,6 +214,16 @@ describe("getGradingRubricVersion / toRubricFormRows / nextRequirementKey / getR
     expect(nextRequirementKey([])).toBe("r1");
     expect(nextRequirementKey(["r1", "r3"])).toBe("r4");
     expect(nextRequirementKey(["custom", "r2"])).toBe("r3");
+  });
+
+  it("発行済み以下の新しい key は再利用として弾く。現存 key と、より大きい番号は通す", () => {
+    const current = {
+      requirements: [{ key: "r1" }, { key: "r2" }],
+      max_key_number: 3,
+    };
+    expect(reusedRequirementKeys(current, ["r1", "r3"])).toEqual(["r3"]);
+    expect(reusedRequirementKeys(current, ["r1", "r2"])).toEqual([]);
+    expect(reusedRequirementKeys(current, ["r1", "r4"])).toEqual([]);
   });
 
   it("削除済みの最大番号を issuedMax で覚え、その key を新しい要件に再利用しない", () => {

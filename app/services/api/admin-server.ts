@@ -10,6 +10,7 @@ import {
   resolveSiblingResequence,
   type SiblingOrderRow,
 } from "@/app/lib/content-grouping";
+import { reusedRequirementKeys } from "@/app/lib/grading";
 import {
   type GradingRubricInput,
   nextGradingRubric,
@@ -1385,6 +1386,15 @@ async function selectQuizQuestions(
  * main UPDATE succeeds (see resequenceDestinationForUpdate). Uses createAdminSupabaseClient() for
  * sibling work for the same reason as createContent.
  */
+type ContentUpdateResult = {
+  error: PostgrestError | null;
+  storageRemoved: boolean;
+  /** Another save changed the rubric between the read and this write. */
+  conflict?: boolean;
+  /** Incoming keys reuse a number this rubric already issued. */
+  keyReuse?: string[];
+};
+
 export async function updateContent(
   id: number,
   content: Omit<Partial<LearningContent>, "grading_rubric"> & {
@@ -1393,7 +1403,7 @@ export async function updateContent(
     /** undefined = leave as is, null = clear, object = save (version derived here). */
     gradingRubric?: GradingRubricInput | null;
   }
-): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
+): Promise<ContentUpdateResult> {
   const supabase = await createAdminSupabaseClient();
   const { insertAfterId, quizQuestions, gradingRubric, ...patch } = content;
 
@@ -1459,7 +1469,7 @@ async function updateContentRow(
   basePatch: Omit<Partial<LearningContent>, "grading_rubric">,
   insertAfterId: number | null | undefined,
   gradingRubric: GradingRubricInput | null | undefined
-): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
+): Promise<ContentUpdateResult> {
   const patch: Partial<LearningContent> = { ...basePatch };
   const movesAwayFromExercise =
     patch.content_type !== undefined && patch.content_type !== "exercise";
@@ -1480,6 +1490,10 @@ async function updateContentRow(
   const needsCurrentPdf = patch.pdf_url !== undefined;
   let previousPdfUrl: string | null = null;
   let pdfFetchFailed = false;
+  // Set only when this write derives a new rubric from the row we just read. The UPDATE then
+  // matches that version (or NULL), so a stale form cannot publish the same version twice or
+  // lower max_key_number.
+  let expectedRubricVersion: number | null | undefined;
   if (needsCurrentWeek || needsCurrentPdf || needsCurrentRubric) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
@@ -1499,10 +1513,22 @@ async function updateContentRow(
       if (needsCurrentRubric && gradingRubric) {
         // A rubric belongs to exercises only: judge the type the row will have after this update,
         // so switching a stored video to exercise keeps the rubric sent with it.
-        patch.grading_rubric =
-          (patch.content_type ?? current.content_type) === "exercise"
-            ? nextGradingRubric(parseGradingRubric(current.grading_rubric), gradingRubric)
-            : null;
+        const stored = parseGradingRubric(current.grading_rubric);
+        if ((patch.content_type ?? current.content_type) !== "exercise") {
+          patch.grading_rubric = null;
+        } else {
+          const reused = stored
+            ? reusedRequirementKeys(
+                stored,
+                gradingRubric.requirements.map((requirement) => requirement.key)
+              )
+            : [];
+          if (reused.length > 0) {
+            return { error: null, storageRemoved: true, keyReuse: reused };
+          }
+          patch.grading_rubric = nextGradingRubric(stored, gradingRubric);
+          expectedRubricVersion = stored?.version ?? null;
+        }
       }
       if (needsCurrentWeek) {
         const destinationWeekId = patch.week_id ?? current.week_id;
@@ -1531,11 +1557,20 @@ async function updateContentRow(
       ? { ...patch, display_order: resequenced.displayOrder }
       : patch;
 
-  const { error } = await supabase.from("learning_contents").update(updatePayload).eq("id", id);
+  let update = supabase.from("learning_contents").update(updatePayload).eq("id", id);
+  if (expectedRubricVersion === null) {
+    update = update.is("grading_rubric", null);
+  } else if (expectedRubricVersion !== undefined) {
+    update = update.eq("grading_rubric->>version", String(expectedRubricVersion));
+  }
+  const { data: updated, error } = await update.select("id");
 
   if (error) {
     console.error("コンテンツ更新エラー:", error.message);
     return { error, storageRemoved: true };
+  }
+  if (expectedRubricVersion !== undefined && Array.isArray(updated) && updated.length === 0) {
+    return { error: null, storageRemoved: true, conflict: true };
   }
 
   if (parentChanged) {

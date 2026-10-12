@@ -128,8 +128,12 @@ export function renderReviewMarkdown(
     sections.push(`## 1. 要件達成度\n${lines.join("\n")}`);
   }
 
+  // URL reviews pin the level to "fair" because the model never saw the code. Showing that
+  // label would be a verdict nobody made; the comment is the only part the model actually wrote.
   sections.push(
-    `## 2. コード品質・可読性\n**${QUALITY_LABELS[reviewJson.code_quality.level]}** — ${reviewJson.code_quality.comment}`
+    scoreKind === "none"
+      ? `## 2. 補足\n${reviewJson.code_quality.comment}`
+      : `## 2. コード品質・可読性\n**${QUALITY_LABELS[reviewJson.code_quality.level]}** — ${reviewJson.code_quality.comment}`
   );
 
   if (reviewJson.suggestions.length > 0) {
@@ -227,4 +231,23 @@ export function getRubricMaxKeyNumber(value: unknown): number {
  */
 export function nextRequirementKey(existingKeys: readonly string[], issuedMax = 0): string {
   return `r${Math.max(issuedMax, maxRequirementKeyNumber(existingKeys)) + 1}`;
+}
+
+/**
+ * Keys the client invented that were already issued and then removed. The editor skips these,
+ * but the API accepts any unique key, so the server has to reject them or a deleted r3 can name
+ * a different requirement while old reviews still point at r3.
+ */
+export function reusedRequirementKeys(
+  current: { requirements: readonly { key: string }[]; max_key_number?: number },
+  incomingKeys: readonly string[]
+): string[] {
+  const currentKeys = new Set(current.requirements.map((requirement) => requirement.key));
+  const highWater = Math.max(
+    current.max_key_number ?? 0,
+    maxRequirementKeyNumber(current.requirements.map((requirement) => requirement.key))
+  );
+  return incomingKeys.filter(
+    (key) => !currentKeys.has(key) && requirementKeyNumber(key) <= highWater
+  );
 }

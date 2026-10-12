@@ -19,7 +19,10 @@ import {
 } from "@/app/services/api/gemini";
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { AiReviewRequestSchema, validateRequest } from "@/app/services/api/schemas";
-import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
+import {
+  createAdminSupabaseClient,
+  createServerSupabaseClient,
+} from "@/app/services/api/supabase-server";
 import { requireLearnerApi } from "@/app/services/auth/admin-guard";
 
 // Next.js route segment config is statically analyzed as literals only, so this can't be a
@@ -51,7 +54,9 @@ export async function POST(request: NextRequest) {
 
     const { data: submission, error: submissionError } = await supabase
       .from("submissions")
-      .select("*, content:learning_contents(*)")
+      .select(
+        "*, content:learning_contents(id, exercise_instructions, reference_answer, code_language)"
+      )
       .eq("id", submissionId)
       .single();
 
@@ -134,6 +139,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: decision.message,
+          reason: decision.reason,
           remaining: decision.remaining,
           resetsAt: decision.resetsAt,
         },
@@ -166,12 +172,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Learners cannot select grading_rubric. Read it with service_role after the claim so a
+    // failed lookup can mark the row failed instead of leaving it processing.
+    const admin = await createAdminSupabaseClient();
+    const { data: rubricRow, error: rubricError } = await admin
+      .from("learning_contents")
+      .select("grading_rubric")
+      .eq("id", content.id)
+      .maybeSingle();
+    if (rubricError) {
+      console.error("採点基準の取得エラー:", rubricError.message);
+      await updateAIReviewFailed(reviewRecord.id, "採点基準の取得に失敗しました");
+      return NextResponse.json({ error: "採点基準の取得に失敗しました" }, { status: 500 });
+    }
+
     try {
       const result = await generateReview({
         exerciseInstructions: content.exercise_instructions,
         submission: reviewSubmission,
         referenceAnswer: content.reference_answer,
-        gradingRubric: parseGradingRubric(content.grading_rubric),
+        gradingRubric: parseGradingRubric(rubricRow?.grading_rubric),
         apiKey,
       });
 

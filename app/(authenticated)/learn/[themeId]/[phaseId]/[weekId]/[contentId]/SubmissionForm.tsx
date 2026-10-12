@@ -34,9 +34,9 @@ interface SubmissionFormProps {
   codeLanguage: CodeLanguage;
 }
 
-function buildFailedReview(reviewId: number, errorMessage: string): AIReviewListItem {
+function buildFailedReview(errorMessage: string): AIReviewListItem {
   return {
-    id: reviewId,
+    id: 0,
     status: "failed",
     review_content: null,
     overall_score: null,
@@ -138,17 +138,21 @@ export function SubmissionForm({
         body: JSON.stringify({ submissionId }),
       });
 
+      const data = await response.json().catch(() => null);
       const isNoticeStatus = [202, 409, 429].includes(response.status);
-      const notice = isNoticeStatus
-        ? buildReviewNotice(response.status, await response.json().catch(() => null), options)
-        : null;
+      const notice = isNoticeStatus ? buildReviewNotice(response.status, data, options) : null;
       if (notice) {
         setMessage(notice);
-        if (response.status === 202) {
+        const reason = (data as { reason?: unknown } | null)?.reason;
+        // A failed card left on screen hides a review the server already finished.
+        const finishedElsewhere = response.status === 409 || reason === "submission_reviewed";
+        if (finishedElsewhere) {
+          setAiReview(null);
+        }
+        if (response.status === 202 || finishedElsewhere) {
           router.refresh();
         }
-      } else if (response.ok) {
-        const data = await response.json();
+      } else if (response.ok && data?.review) {
         setAiReview({
           id: data.review.id,
           status: data.review.status,
@@ -164,15 +168,14 @@ export function SubmissionForm({
         setMessage({ type: "success", text: "提出が完了しました。AIレビューが生成されました。" });
         router.refresh();
       } else {
-        const errorData = await response.json().catch(() => null);
-        const errorMsg = errorData?.error || "AIレビューの生成に失敗しました";
+        const errorMsg = data?.error || "AIレビューの生成に失敗しました";
         setMessage({ type: "error", text: errorMsg });
-        setAiReview(buildFailedReview(0, errorMsg));
+        setAiReview(buildFailedReview(errorMsg));
       }
     } catch {
       const errorMsg = "ネットワークエラーが発生しました。再試行してください。";
       setMessage({ type: "error", text: errorMsg });
-      setAiReview(buildFailedReview(0, errorMsg));
+      setAiReview(buildFailedReview(errorMsg));
     } finally {
       setIsReviewLoading(false);
     }

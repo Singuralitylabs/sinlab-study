@@ -67,13 +67,22 @@ export function StructuredReview({ reviewJson, scoreKind, passDisplay }: Structu
         </section>
       )}
 
-      <section>
-        <h4 className="mb-2 font-semibold">コード品質・可読性</h4>
-        <p>
-          <span className="font-medium">{getQualityLevelLabel(reviewJson.code_quality.level)}</span>
-          <span className="text-muted-foreground"> — {reviewJson.code_quality.comment}</span>
-        </p>
-      </section>
+      {scoreKind === "none" ? (
+        <section>
+          <h4 className="mb-2 font-semibold">補足</h4>
+          <p className="text-muted-foreground">{reviewJson.code_quality.comment}</p>
+        </section>
+      ) : (
+        <section>
+          <h4 className="mb-2 font-semibold">コード品質・可読性</h4>
+          <p>
+            <span className="font-medium">
+              {getQualityLevelLabel(reviewJson.code_quality.level)}
+            </span>
+            <span className="text-muted-foreground"> — {reviewJson.code_quality.comment}</span>
+          </p>
+        </section>
+      )}
 
       {reviewJson.suggestions.length > 0 && (
         <section>

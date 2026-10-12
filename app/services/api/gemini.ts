@@ -456,6 +456,11 @@ async function generateValidatedJson<T>({
     validationAttempt < GEMINI_VALIDATION_ATTEMPTS;
     validationAttempt++
   ) {
+    // A retry that would be aborted almost immediately is reported as a timeout and still billed.
+    // Keep the schema-violation reason from the first response instead.
+    if (validationAttempt > 0 && Date.now() + GEMINI_REQUEST_TIMEOUT_MS > deadlineAt) {
+      break;
+    }
     let lastError: unknown;
     let response: GenerateContentResponse | undefined;
 
@@ -501,6 +506,9 @@ async function generateValidatedJson<T>({
     }
 
     if (!response) {
+      if (validationAttempt > 0) {
+        break;
+      }
       if (isRateLimitError(lastError)) {
         throw new ReviewGenerationError(
           "Gemini APIの利用上限に達しました。しばらく時間を置いてから再試行してください。",
@@ -554,12 +562,7 @@ export async function generateReview({
   const { value: reviewJson, usage } = await generateValidatedJson<ReviewJson>({
     apiKey,
     systemInstruction: SYSTEM_PROMPT,
-    contents: buildUserPrompt(
-      exerciseInstructions,
-      submission,
-      referenceAnswer,
-      scoreKind === "rubric" ? rubric : null
-    ),
+    contents: buildUserPrompt(exerciseInstructions, submission, referenceAnswer, rubric),
     responseSchema: buildReviewResponseSchema(scoreKind, rubric),
     parse: (text) => {
       const parsed = parseReviewResponse(text, scoreKind, rubric);

@@ -41,7 +41,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       quiz_questions,
     } = validation.data;
 
-    const { error, storageRemoved } = await updateContent(contentId, {
+    const { error, storageRemoved, conflict, keyReuse } = await updateContent(contentId, {
       title,
       week_id,
       content_type,
@@ -61,6 +61,20 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       quizQuestions: quiz_questions,
     });
 
+    if (keyReuse) {
+      return NextResponse.json(
+        {
+          error: `要件キー（${keyReuse.join(", ")}）は過去のレビューで使った番号なので再利用できません`,
+        },
+        { status: 400 }
+      );
+    }
+    if (conflict) {
+      return NextResponse.json(
+        { error: "採点基準が別の保存で更新されています。画面を読み込み直してください" },
+        { status: 409 }
+      );
+    }
     if (error) {
       return NextResponse.json({ error: "コンテンツの更新に失敗しました" }, { status: 500 });
     }
