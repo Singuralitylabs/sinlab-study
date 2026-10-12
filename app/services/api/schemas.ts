@@ -193,6 +193,9 @@ const EmailSendDaysSchema = z
 export const EmailSettingsUpdateSchema = z
   .object({
     kind: z.enum(EMAIL_KINDS as [EmailKind, ...EmailKind[]]).optional(),
+    sending_enabled: z
+      .boolean({ message: "sending_enabled は真偽値で指定してください" })
+      .optional(),
     enabled: z.boolean({ message: "enabled は真偽値で指定してください" }).optional(),
     send_days: EmailSendDaysSchema.optional(),
     send_weekday: z
@@ -216,19 +219,23 @@ export const EmailSettingsUpdateSchema = z
   .superRefine((value, ctx) => {
     const fail = (message: string) => ctx.addIssue({ code: "custom", message });
     if (value.kind === undefined) {
-      if (value.digest_daily_limit === undefined) {
-        fail("kind または digest_daily_limit を指定してください");
+      const targets = [value.digest_daily_limit, value.sending_enabled].filter(
+        (v) => v !== undefined
+      ).length;
+      if (targets === 0) {
+        fail("kind、digest_daily_limit、sending_enabled のいずれかを指定してください");
       } else if (
+        targets > 1 ||
         value.enabled !== undefined ||
         value.send_days !== undefined ||
         value.send_weekday !== undefined
       ) {
-        fail("種別の設定と1日の上限は別々に更新してください");
+        fail("種別の設定・1日の上限・全体スイッチは別々に更新してください");
       }
       return;
     }
-    if (value.digest_daily_limit !== undefined) {
-      fail("種別の設定と1日の上限は別々に更新してください");
+    if (value.digest_daily_limit !== undefined || value.sending_enabled !== undefined) {
+      fail("種別の設定・1日の上限・全体スイッチは別々に更新してください");
     }
     if (
       value.enabled === undefined &&

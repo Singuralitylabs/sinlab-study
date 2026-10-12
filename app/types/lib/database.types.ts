@@ -242,6 +242,9 @@ export type Database = {
         Row: {
           digest_daily_limit: number;
           id: number;
+          sending_enabled: boolean;
+          sending_updated_at: string | null;
+          sending_updated_by: number | null;
           service_name: string;
           service_subtitle: string | null;
           service_updated_at: string | null;
@@ -252,6 +255,9 @@ export type Database = {
         Insert: {
           digest_daily_limit: number;
           id?: number;
+          sending_enabled?: boolean;
+          sending_updated_at?: string | null;
+          sending_updated_by?: number | null;
           service_name?: string;
           service_subtitle?: string | null;
           service_updated_at?: string | null;
@@ -262,6 +268,9 @@ export type Database = {
         Update: {
           digest_daily_limit?: number;
           id?: number;
+          sending_enabled?: boolean;
+          sending_updated_at?: string | null;
+          sending_updated_by?: number | null;
           service_name?: string;
           service_subtitle?: string | null;
           service_updated_at?: string | null;
@@ -270,6 +279,13 @@ export type Database = {
           updated_by?: number | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "email_settings_sending_updated_by_fkey";
+            columns: ["sending_updated_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "email_settings_service_updated_by_fkey";
             columns: ["service_updated_by"];

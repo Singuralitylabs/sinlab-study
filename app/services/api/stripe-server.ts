@@ -174,7 +174,7 @@ export async function createCheckoutSession(
     // Card only: delayed-notification methods (convenience store, bank transfer) can leave
     // subscription.status `incomplete` when checkout.session.completed fires, breaking the
     // assumption that membership starts on return from Checkout.
-    payment_method_types: ["card"],
+    allowed_payment_method_types: ["card"],
     line_items: [{ price: priceId, quantity: 1 }],
     client_reference_id: String(userId),
     customer: customerId,
