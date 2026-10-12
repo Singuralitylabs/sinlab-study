@@ -193,6 +193,16 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
     expect(updateAIReviewFailed).not.toHaveBeenCalled();
   });
 
+  it("processing への更新に失敗したら failed にして500を返し、Gemini は呼ばない", async () => {
+    vi.mocked(updateAIReviewProcessing).mockResolvedValue(false);
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(500);
+    expect(generateReview).not.toHaveBeenCalled();
+    expect(updateAIReviewFailed).toHaveBeenCalledWith(10, expect.stringContaining("更新に失敗"));
+  });
+
   it("完了の保存に失敗したら成功を返さず500にする", async () => {
     vi.mocked(generateReview).mockResolvedValue(reviewResult());
     vi.mocked(updateAIReviewCompleted).mockResolvedValue(false);

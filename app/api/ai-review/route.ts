@@ -158,6 +158,8 @@ export async function POST(request: NextRequest) {
 
     const processingResult = await updateAIReviewProcessing(reviewRecord.id);
     if (!processingResult) {
+      // The claim already made the row `pending`; without this a retry would get a 202 until stale.
+      await updateAIReviewFailed(reviewRecord.id, "AIレビューのステータス更新に失敗しました");
       return NextResponse.json(
         { error: "AIレビューのステータス更新に失敗しました" },
         { status: 500 }
