@@ -705,6 +705,27 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     });
   });
 
+  it("非演習から演習へ種別を変える更新では、同じリクエストの採点基準を version 1 で保存する", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "video", grading_rubric: null },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+
+    await updateContent(1, { content_type: "exercise", gradingRubric: input });
+
+    expect(updatePayload(mockClient).grading_rubric).toEqual({
+      version: 1,
+      requirements: input.requirements,
+    });
+  });
+
   it("内容が同じなら version を据え置く", async () => {
     const { mockClient } = mockAdminWithStorage({
       tableResults: {

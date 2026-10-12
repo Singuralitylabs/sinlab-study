@@ -1496,10 +1496,10 @@ async function updateContentRow(
     } else {
       previousPdfUrl = current.pdf_url;
       if (needsCurrentRubric && gradingRubric) {
-        // A rubric belongs to exercises only, so a request that doesn't change the type can't
-        // attach one to a stored non-exercise row.
+        // A rubric belongs to exercises only: judge the type the row will have after this update,
+        // so switching a stored video to exercise keeps the rubric sent with it.
         patch.grading_rubric =
-          current.content_type === "exercise"
+          (patch.content_type ?? current.content_type) === "exercise"
             ? nextGradingRubric(parseGradingRubric(current.grading_rubric), gradingRubric)
             : null;
       }
