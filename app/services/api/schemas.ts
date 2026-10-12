@@ -11,6 +11,7 @@ import {
   BULK_CONTENT_ACTIONS,
   CONTENT_TYPES,
   MAX_BULK_CONTENT_IDS,
+  MAX_BULK_CREATE_CONTENTS,
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
 import {
@@ -29,6 +30,11 @@ import {
   type EmailKind,
 } from "@/app/constants/notifications";
 import {
+  QUIZ_MAX_CHOICES,
+  QUIZ_MAX_QUESTIONS,
+  QUIZ_TEXT_ANSWER_MAX_LENGTH,
+} from "@/app/constants/quiz";
+import {
   MEMBERSHIP_TYPES,
   USER_MANAGEMENT_ACTIONS,
   USER_ROLES,
@@ -39,6 +45,7 @@ import {
   type EmailTemplateKey,
   validateEmailTemplateText,
 } from "@/app/lib/email-template";
+import { QuizQuestionsSchema } from "@/app/lib/quiz";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
 
 export const PositiveIntSchema = z
@@ -298,11 +305,96 @@ const ContentBaseSchema = z.object({
   pdf_url: SlidePdfUrlSchema,
   is_published: OptionalBoolean,
   is_open_to_trial: OptionalBoolean,
+  // Only read when content_type is "quiz"; saved to quiz_questions, not learning_contents.
+  quiz_questions: QuizQuestionsSchema.optional(),
 });
-export const ContentCreateSchema = ContentBaseSchema.extend({
+
+// A quiz without questions would show learners an empty quiz, so content_type "quiz" in the body
+// requires the questions. The reverse holds too: questions are only saved together with
+// content_type "quiz", so sending them without it (or with another type) is rejected instead of
+// being validated and then silently dropped. A PUT with neither leaves stored questions untouched.
+function requireQuizQuestions(
+  value: { content_type?: string; quiz_questions?: unknown },
+  ctx: z.RefinementCtx
+) {
+  if (value.content_type === "quiz" && value.quiz_questions === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "クイズには設問を登録してください",
+      path: ["quiz_questions"],
+    });
+  }
+  if (value.quiz_questions !== undefined && value.content_type !== "quiz") {
+    ctx.addIssue({
+      code: "custom",
+      message: "設問を保存するときは content_type に quiz を指定してください",
+      path: ["content_type"],
+    });
+  }
+}
+
+const ContentCreateObjectSchema = ContentBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
-export const ContentUpdateSchema = ContentCreateSchema.partial();
+export const ContentCreateSchema = ContentCreateObjectSchema.superRefine(requireQuizQuestions);
+export const ContentUpdateSchema =
+  ContentCreateObjectSchema.partial().superRefine(requireQuizQuestions);
+
+const BULK_CREATE_MESSAGE = `contentsは1〜${MAX_BULK_CREATE_CONTENTS}件の配列で指定してください`;
+
+/**
+ * POST /api/manage/contents/bulk: registers many contents (e.g. a course's quizzes from the
+ * manuscript) in one request. Each is appended to the end of its week in array order, so there is
+ * no insert_after_id.
+ */
+export const BulkContentCreateSchema = z.object({
+  contents: z
+    .array(ContentBaseSchema.superRefine(requireQuizQuestions), { message: BULK_CREATE_MESSAGE })
+    .min(1, { message: BULK_CREATE_MESSAGE })
+    .max(MAX_BULK_CREATE_CONTENTS, { message: BULK_CREATE_MESSAGE }),
+});
+export type BulkContentCreateItem = z.infer<typeof BulkContentCreateSchema>["contents"][number];
+
+/**
+ * POST /api/quiz/grade. Whether every question is answered is checked by grade_quiz_answers()
+ * (the API cannot read the questions), so here only the shape is validated.
+ */
+export const QuizGradeRequestSchema = z.object({
+  contentId: ContentIdSchema,
+  answers: z
+    .array(
+      z.object({
+        questionId: PositiveIntSchema,
+        revision: z
+          .string({ message: "設問の版を指定してください。ページを再読み込みしてください" })
+          .max(64, { message: "設問の版が不正です" }),
+        choices: z
+          .array(
+            z
+              .number({ message: "選択肢は番号で指定してください" })
+              .int({ message: "選択肢は整数の番号で指定してください" })
+              .min(0, { message: "選択肢の番号は0以上で指定してください" }),
+            { message: "選択肢は番号の配列で指定してください" }
+          )
+          .max(QUIZ_MAX_CHOICES, { message: `選択肢は${QUIZ_MAX_CHOICES}個までです` })
+          .optional(),
+        text: z
+          .string()
+          .max(QUIZ_TEXT_ANSWER_MAX_LENGTH, {
+            message: `回答は${QUIZ_TEXT_ANSWER_MAX_LENGTH}文字以内で入力してください`,
+          })
+          .optional(),
+      }),
+      { message: "answersは配列で指定してください" }
+    )
+    .min(1, { message: "回答を入力してください" })
+    .max(QUIZ_MAX_QUESTIONS, {
+      message: "回答の数が設問の数を超えています。ページを再読み込みしてください",
+    })
+    .refine((answers) => new Set(answers.map((a) => a.questionId)).size === answers.length, {
+      message: "同じ設問への回答が重複しています",
+    }),
+});
 
 const BULK_CONTENT_IDS_MESSAGE = `idsは1〜${MAX_BULK_CONTENT_IDS}件の正の整数で指定してください`;
 

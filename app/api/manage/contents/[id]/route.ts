@@ -1,25 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { USER_STATUS } from "@/app/constants/user";
 import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
 import { deleteContent, updateContent } from "@/app/services/api/admin-server";
 import { ContentUpdateSchema, validateRequest } from "@/app/services/api/schemas";
-import { checkContentPermissions } from "@/app/services/auth/permissions";
-import { getServerAuth } from "@/app/services/auth/server-auth";
+import { requireContentManagerApi } from "@/app/services/auth/admin-guard";
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { user, userId, userStatus, userRole } = await getServerAuth();
-    if (!user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-    }
-    if (!userId) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-    if (userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
-    if (!checkContentPermissions(userRole)) {
-      return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
+    const { response: denied } = await requireContentManagerApi();
+    if (denied) {
+      return denied;
     }
 
     const { id } = await params;
@@ -48,6 +37,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       insert_after_id,
       is_published,
       is_open_to_trial,
+      quiz_questions,
     } = validation.data;
 
     const { error, storageRemoved } = await updateContent(contentId, {
@@ -66,6 +56,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       insertAfterId: insert_after_id,
       is_published,
       is_open_to_trial,
+      quizQuestions: quiz_questions,
     });
 
     if (error) {
@@ -88,18 +79,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { user, userId, userStatus, userRole } = await getServerAuth();
-    if (!user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-    }
-    if (!userId) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-    if (userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
-    if (!checkContentPermissions(userRole)) {
-      return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
+    const { response: denied } = await requireContentManagerApi();
+    if (denied) {
+      return denied;
     }
     const { id } = await params;
     const contentId = Number.parseInt(id, 10);

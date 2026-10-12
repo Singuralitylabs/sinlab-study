@@ -370,8 +370,47 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
         week_id: 1,
         content_type,
         insert_after_id: null,
+        ...(content_type === "quiz"
+          ? {
+              quiz_questions: [
+                {
+                  question_type: "single",
+                  question: "Q",
+                  choices: ["a", "b"],
+                  correct_choices: [0],
+                },
+              ],
+            }
+          : {}),
       }).success
     ).toBe(true);
+  });
+
+  it("content_typeがquizで設問がない場合は検証エラー（作成・更新とも）", () => {
+    expect(
+      ContentCreateSchema.safeParse({
+        title: "クイズ",
+        week_id: 1,
+        content_type: "quiz",
+        insert_after_id: null,
+      }).success
+    ).toBe(false);
+    expect(ContentUpdateSchema.safeParse({ content_type: "quiz" }).success).toBe(false);
+    // A partial update that does not touch content_type leaves the questions alone.
+    expect(ContentUpdateSchema.safeParse({ title: "改題" }).success).toBe(true);
+  });
+
+  it("設問だけを送る（content_type なし・別の種別）場合は検証エラー（黙って捨てない）", () => {
+    const quiz_questions = [
+      { question_type: "single", question: "Q", choices: ["a", "b"], correct_choices: [0] },
+    ];
+    expect(ContentUpdateSchema.safeParse({ quiz_questions }).success).toBe(false);
+    expect(ContentUpdateSchema.safeParse({ content_type: "video", quiz_questions }).success).toBe(
+      false
+    );
+    expect(ContentUpdateSchema.safeParse({ content_type: "quiz", quiz_questions }).success).toBe(
+      true
+    );
   });
 
   it("content_typeが許可値以外の場合は検証エラー（DBのCHECK制約違反による500を未然に防ぐ）", () => {
@@ -379,7 +418,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
         week_id: 1,
-        content_type: "quiz",
+        content_type: "poll",
         insert_after_id: null,
       }).success
     ).toBe(false);

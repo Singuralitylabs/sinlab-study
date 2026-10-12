@@ -606,6 +606,59 @@ export type Database = {
           },
         ];
       };
+      quiz_questions: {
+        Row: {
+          choices: string[];
+          content_id: number;
+          correct_choices: number[];
+          created_at: string;
+          display_order: number;
+          explanation: string | null;
+          hint: string | null;
+          id: number;
+          model_answer: string | null;
+          question: string;
+          question_type: string;
+          updated_at: string;
+        };
+        Insert: {
+          choices?: string[];
+          content_id: number;
+          correct_choices?: number[];
+          created_at?: string;
+          display_order: number;
+          explanation?: string | null;
+          hint?: string | null;
+          id?: number;
+          model_answer?: string | null;
+          question: string;
+          question_type: string;
+          updated_at?: string;
+        };
+        Update: {
+          choices?: string[];
+          content_id?: number;
+          correct_choices?: number[];
+          created_at?: string;
+          display_order?: number;
+          explanation?: string | null;
+          hint?: string | null;
+          id?: number;
+          model_answer?: string | null;
+          question?: string;
+          question_type?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "quiz_questions_content_id_fkey";
+            columns: ["content_id"];
+            isOneToOne: false;
+            referencedRelation: "learning_contents";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       stripe_events: {
         Row: {
           id: string;
@@ -846,6 +899,18 @@ export type Database = {
         Args: { p_day_start: string; p_limit: number; p_user_id: number };
         Returns: number;
       };
+      get_quiz_questions: {
+        Args: { p_content_id: number };
+        Returns: {
+          choices: string[];
+          display_order: number;
+          hint: string;
+          id: number;
+          question: string;
+          question_type: string;
+          revision: string;
+        }[];
+      };
       get_students_progress_summary: {
         Args: never;
         Returns: {
@@ -868,6 +933,30 @@ export type Database = {
           upgraded: number;
           week_start: string;
         }[];
+      };
+      grade_quiz_answers: {
+        Args: { p_answers: Json; p_content_id: number };
+        Returns: {
+          correct_choices: number[];
+          explanation: string;
+          is_correct: boolean;
+          model_answer: string;
+          question_id: number;
+          question_type: string;
+        }[];
+      };
+      quiz_content_visible_to_caller: { Args: { p_content_id: number }; Returns: boolean };
+      quiz_correct_choices_valid: {
+        Args: { p_choices: string[]; p_correct: number[] };
+        Returns: boolean;
+      };
+      quiz_question_revision: {
+        Args: { p_choices: string[]; p_question: string; p_question_type: string };
+        Returns: string;
+      };
+      replace_quiz_questions: {
+        Args: { p_content_id: number; p_questions: Json };
+        Returns: undefined;
       };
     };
     Enums: {

@@ -1,6 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { GEMINI_MAX_CODE_LENGTH } from "@/app/constants/gemini";
-import { USER_STATUS } from "@/app/constants/user";
 import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
 import {
   updateAIReviewCompleted,
@@ -16,7 +15,7 @@ import {
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { AiReviewRequestSchema, validateRequest } from "@/app/services/api/schemas";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
-import { getServerAuth } from "@/app/services/auth/server-auth";
+import { requireLearnerApi } from "@/app/services/auth/admin-guard";
 
 // Next.js route segment config is statically analyzed as literals only, so this can't be a
 // constant. generateReview() caps all attempts + retry waits at GEMINI_TOTAL_BUDGET_MS
@@ -32,16 +31,11 @@ export async function POST(request: NextRequest) {
     }
     const { submissionId } = validation.data;
 
-    const { user, userId, userStatus } = await getServerAuth();
-    if (!user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    const guard = await requireLearnerApi();
+    if (guard.response) {
+      return guard.response;
     }
-    if (!userId) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-    if (userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
+    const { userId, userStatus } = guard.auth;
 
     const apiKey = resolveGeminiApiKey(userStatus);
     if (!apiKey) {
@@ -94,7 +88,13 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      reviewSubmission = { type: "code", files };
+      // A single-file submission is stored in code_content, which has no language; fall back to
+      // the exercise's language so the model knows how to read e.g. SQL or Bash.
+      const reviewFiles =
+        files.length === 1 && !files[0].language && content.code_language
+          ? [{ ...files[0], language: content.code_language }]
+          : files;
+      reviewSubmission = { type: "code", files: reviewFiles };
     } else {
       if (!submission.url) {
         return NextResponse.json({ error: "提出内容が空です" }, { status: 400 });

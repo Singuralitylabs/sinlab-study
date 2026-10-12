@@ -182,6 +182,86 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
   });
 });
 
+describe("POST /api/ai-review - 単一ファイル提出の言語", () => {
+  const mockSubmission = (submission: Record<string, unknown>) => {
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(
+      createMockSupabaseClient({
+        tableResults: {
+          submissions: [
+            {
+              data: {
+                id: 1,
+                user_id: memberAuth.userId,
+                content_id: 5,
+                submission_type: "code",
+                url: null,
+                ...submission,
+              },
+              error: null,
+            },
+            { data: [], error: null },
+          ],
+        },
+      }) as never
+    );
+  };
+
+  beforeEach(() => {
+    vi.stubEnv(GEMINI_API_KEY_ENV, "member-key");
+    vi.mocked(getServerAuth).mockResolvedValue(memberAuth as never);
+    vi.mocked(isContentVisible).mockResolvedValue(true);
+    vi.mocked(upsertPendingAIReview).mockResolvedValue({ id: 10 });
+    vi.mocked(updateAIReviewProcessing).mockResolvedValue(true);
+    vi.mocked(updateAIReviewCompleted).mockResolvedValue(true);
+    vi.mocked(generateReview).mockResolvedValue({
+      reviewContent: "総合スコア: 80/100",
+      overallScore: 80,
+      modelUsed: "gemini",
+      promptTokens: 1,
+      completionTokens: 1,
+    });
+  });
+
+  it("code_content の提出には課題の code_language を言語として渡す", async () => {
+    mockSubmission({
+      code_content: "SELECT 1;",
+      code_files: null,
+      content: { id: 5, exercise_instructions: "SQLを書く", code_language: "sql" },
+    });
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(200);
+    expect(generateReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        submission: {
+          type: "code",
+          files: [{ filename: "", language: "sql", content: "SELECT 1;" }],
+        },
+      })
+    );
+  });
+
+  it("複数ファイル提出は各ファイルの言語をそのまま渡す", async () => {
+    const files = [
+      { filename: "a.sh", language: "bash", content: "echo a" },
+      { filename: "b.json", language: "json", content: "{}" },
+    ];
+    mockSubmission({
+      code_content: null,
+      code_files: files,
+      content: { id: 5, exercise_instructions: "課題", code_language: "javascript" },
+    });
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(200);
+    expect(generateReview).toHaveBeenCalledWith(
+      expect.objectContaining({ submission: { type: "code", files } })
+    );
+  });
+});
+
 describe("maxDurationとGEMINI_TOTAL_BUDGET_MSの整合性", () => {
   it("GEMINI_TOTAL_BUDGET_MSはDB往復等のオーバーヘッド分の余裕を残してmaxDuration未満である", () => {
     const marginMs = 5_000;

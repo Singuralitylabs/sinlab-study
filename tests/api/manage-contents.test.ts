@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/admin-server");
 
-import { PUT } from "@/app/api/manage/contents/[id]/route";
+import { DELETE, PUT } from "@/app/api/manage/contents/[id]/route";
 import { POST } from "@/app/api/manage/contents/route";
 import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
-import { createContent, updateContent } from "@/app/services/api/admin-server";
+import { createContent, deleteContent, updateContent } from "@/app/services/api/admin-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const maintainerAuth = {
@@ -45,7 +45,7 @@ describe("POST /api/manage/contents - バリデーション", () => {
 
   it("content_typeが許可値以外の場合は400（従来はDBのCHECK制約違反で500になっていた）", async () => {
     const res = await POST(
-      request({ title: "コンテンツ1", week_id: 1, content_type: "quiz" }) as never
+      request({ title: "コンテンツ1", week_id: 1, content_type: "poll" }) as never
     );
 
     expect(res.status).toBe(400);
@@ -101,7 +101,7 @@ describe("PUT /api/manage/contents/[id] - バリデーション", () => {
   });
 
   it("content_typeを指定する場合は許可値以外を受け付けず400", async () => {
-    const res = await PUT(request({ content_type: "quiz" }) as never, { params });
+    const res = await PUT(request({ content_type: "poll" }) as never, { params });
 
     expect(res.status).toBe(400);
     expect(updateContent).not.toHaveBeenCalled();
@@ -127,5 +127,145 @@ describe("PUT /api/manage/contents/[id] - バリデーション", () => {
     const res = await PUT(request({ insert_after_id: 999 }) as never, { params });
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe("POST / PUT /api/manage/contents - クイズの設問（#306）", () => {
+  const quizQuestions = [
+    {
+      question_type: "multiple",
+      question: "正しいものを選べ",
+      choices: ["a", "b", "c"],
+      correct_choices: [2, 0],
+      explanation: "解説",
+    },
+    { question_type: "text", question: "説明せよ", model_answer: "模範解答" },
+  ];
+
+  it("作成時は検証・正規化した設問を quizQuestions として渡す", async () => {
+    const res = await POST(
+      request({
+        title: "クイズ",
+        week_id: 1,
+        content_type: "quiz",
+        insert_after_id: null,
+        quiz_questions: quizQuestions,
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+    expect(createContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content_type: "quiz",
+        quizQuestions: [
+          expect.objectContaining({ correct_choices: [0, 2], model_answer: null, hint: null }),
+          expect.objectContaining({ choices: [], correct_choices: [], model_answer: "模範解答" }),
+        ],
+      })
+    );
+  });
+
+  it("正解の指定が不正な設問は400で、作成処理を呼ばない", async () => {
+    const res = await POST(
+      request({
+        title: "クイズ",
+        week_id: 1,
+        content_type: "quiz",
+        insert_after_id: null,
+        quiz_questions: [{ ...quizQuestions[0], question_type: "single" }],
+      }) as never
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: "単一選択の設問は正解を1つ選んでください",
+    });
+    expect(createContent).not.toHaveBeenCalled();
+  });
+
+  it("更新時も設問を quizQuestions として渡す", async () => {
+    const res = await PUT(
+      request({ content_type: "quiz", quiz_questions: quizQuestions }) as never,
+      { params: Promise.resolve({ id: "1" }) }
+    );
+
+    expect(res.status).toBe(200);
+    expect(updateContent).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ quizQuestions: expect.any(Array) })
+    );
+  });
+
+  it("作成後の公開だけが失敗した場合は200で、warning を付けて作成済みの行を返す", async () => {
+    vi.mocked(createContent).mockResolvedValue({
+      data: { id: 5 } as never,
+      error: null,
+      publishFailed: true,
+    });
+
+    const res = await POST(
+      request({
+        title: "クイズ",
+        week_id: 1,
+        content_type: "quiz",
+        insert_after_id: null,
+        is_published: true,
+        quiz_questions: quizQuestions,
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      success: true,
+      content: { id: 5 },
+      warning: expect.stringContaining("公開に失敗"),
+    });
+  });
+
+  it("作成処理が失敗した場合（設問の保存失敗を含む）は500", async () => {
+    vi.mocked(createContent).mockResolvedValue({ data: null, error: { message: "x" } as never });
+
+    const res = await POST(
+      request({
+        title: "クイズ",
+        week_id: 1,
+        content_type: "quiz",
+        insert_after_id: null,
+        quiz_questions: quizQuestions,
+      }) as never
+    );
+
+    expect(res.status).toBe(500);
+  });
+});
+
+describe("POST / PUT / DELETE /api/manage/contents - 権限ガード（requireContentManagerApi）", () => {
+  const params = { params: Promise.resolve({ id: "1" }) };
+
+  beforeEach(() => {
+    vi.mocked(getServerAuth).mockResolvedValue({ ...maintainerAuth, userRole: "member" } as never);
+  });
+
+  it("member の作成は403で、作成処理を呼ばない", async () => {
+    const res = await POST(
+      request({ title: "t", week_id: 1, content_type: "video", insert_after_id: null }) as never
+    );
+
+    expect(res.status).toBe(403);
+    expect(createContent).not.toHaveBeenCalled();
+  });
+
+  it("member の更新は403で、更新処理を呼ばない", async () => {
+    const res = await PUT(request({ title: "t" }) as never, params);
+
+    expect(res.status).toBe(403);
+    expect(updateContent).not.toHaveBeenCalled();
+  });
+
+  it("member の削除は403で、削除処理を呼ばない", async () => {
+    const res = await DELETE(request({}) as never, params);
+
+    expect(res.status).toBe(403);
+    expect(deleteContent).not.toHaveBeenCalled();
   });
 });

@@ -7,6 +7,7 @@ import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import { CodeEditorNoSSR as CodeEditor } from "@/app/components/CodeEditorNoSSR";
 import {
   buildDefaultFilename,
+  CODE_LANGUAGE_OPTIONS,
   type CodeLanguage,
   DEFAULT_FILENAME_BY_LANGUAGE,
 } from "@/app/components/code-editor-utils";
@@ -15,14 +16,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
-const CODE_LANGUAGE_OPTIONS: { value: CodeLanguage; label: string }[] = [
-  { value: "javascript", label: "JavaScript" },
-  { value: "typescript", label: "TypeScript" },
-  { value: "gas", label: "GAS" },
-  { value: "html", label: "HTML" },
-  { value: "css", label: "CSS" },
-];
 
 interface CodeFileInput {
   id: string;
