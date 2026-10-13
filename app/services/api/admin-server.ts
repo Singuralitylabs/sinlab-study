@@ -1405,6 +1405,11 @@ type ContentUpdateResult = {
   conflict?: boolean;
   /** Incoming keys reuse a number this rubric already issued. */
   keyReuse?: string[];
+  /**
+   * Version stored by this save. Present only after the rubric write commits, so the editor can
+   * keep locking the rows still on screen. null means the rubric was cleared.
+   */
+  gradingRubricVersion?: number | null;
 };
 
 export async function updateContent(
@@ -1525,6 +1530,7 @@ async function updateContentRow(
     content_type: LearningContent["content_type"];
   } | null = null;
   let rubricWriteCommitted = false;
+  let committedRubricVersion: number | null | undefined;
   if (needsCurrentWeek || needsCurrentPdf || touchesRubric) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
@@ -1641,6 +1647,9 @@ async function updateContentRow(
       return { error: null, storageRemoved: true, conflict: true };
     }
     rubricWriteCommitted = true;
+    // The editor's next save has to lock this write, not a version a later refresh might load
+    // for different rows.
+    committedRubricVersion = getGradingRubricVersion(rubricPayload.grading_rubric);
     delete patch.grading_rubric;
     delete patch.content_type;
   }
@@ -1722,7 +1731,13 @@ async function updateContentRow(
       }
     }
 
-    return { error: null, storageRemoved };
+    return {
+      error: null,
+      storageRemoved,
+      ...(committedRubricVersion !== undefined
+        ? { gradingRubricVersion: committedRubricVersion }
+        : {}),
+    };
   } catch (thrown) {
     await restoreRubricWrite();
     throw thrown;

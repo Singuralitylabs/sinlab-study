@@ -42,26 +42,29 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       quiz_questions,
     } = validation.data;
 
-    const { error, storageRemoved, conflict, keyReuse } = await updateContent(contentId, {
-      title,
-      week_id,
-      content_type,
-      video_url,
-      text_content,
-      description,
-      exercise_instructions,
-      hint,
-      reference_answer,
-      allowed_submission_types,
-      code_language,
-      pdf_url,
-      gradingRubric: grading_rubric,
-      loadedRubricVersion: grading_rubric_version,
-      insertAfterId: insert_after_id,
-      is_published,
-      is_open_to_trial,
-      quizQuestions: quiz_questions,
-    });
+    const { error, storageRemoved, conflict, keyReuse, gradingRubricVersion } = await updateContent(
+      contentId,
+      {
+        title,
+        week_id,
+        content_type,
+        video_url,
+        text_content,
+        description,
+        exercise_instructions,
+        hint,
+        reference_answer,
+        allowed_submission_types,
+        code_language,
+        pdf_url,
+        gradingRubric: grading_rubric,
+        loadedRubricVersion: grading_rubric_version,
+        insertAfterId: insert_after_id,
+        is_published,
+        is_open_to_trial,
+        quizQuestions: quiz_questions,
+      }
+    );
 
     if (keyReuse) {
       return NextResponse.json(
@@ -81,7 +84,15 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: "コンテンツの更新に失敗しました" }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, storageRemoved });
+    return NextResponse.json({
+      success: true,
+      storageRemoved,
+      // Only after a rubric write. The form adopts this instead of a refreshed prop, whose rows
+      // it has not loaded.
+      ...(gradingRubricVersion !== undefined
+        ? { grading_rubric_version: gradingRubricVersion }
+        : {}),
+    });
   } catch (error) {
     if (error instanceof InvalidInsertAfterIdError) {
       console.error("コンテンツ更新エラー（insert_after_id不正）:", error.insertAfterId);

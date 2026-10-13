@@ -757,6 +757,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     const result = await updateContent(1, { gradingRubric: input, loadedRubricVersion: 2 });
 
     expect(result.error).toBeNull();
+    expect(result.gradingRubricVersion).toBe(3);
     expect(updatePayload(mockClient).grading_rubric.version).toBe(3);
   });
 
@@ -870,7 +871,8 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       },
     });
 
-    await updateContent(1, { gradingRubric: null });
+    const result = await updateContent(1, { gradingRubric: null });
+    expect(result.gradingRubricVersion).toBeNull();
 
     expect(mockClient.from).toHaveBeenCalledTimes(2);
     const rubricUpdate = mockClient.from.mock.results[1]?.value;

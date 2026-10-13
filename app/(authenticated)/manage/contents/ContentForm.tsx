@@ -34,6 +34,26 @@ import {
   SiblingOrderField,
 } from "../components/SiblingOrderField";
 import { GradingRubricEditor } from "./GradingRubricEditor";
+
+/** The version just stored, for the rows still on screen. Ignores anything else in the body. */
+export function adoptSavedRubricVersion(
+  data: unknown,
+  versionRef: { current: number | null },
+  setVersion: (version: number | null) => void
+) {
+  if (!data || typeof data !== "object" || !("grading_rubric_version" in data)) {
+    return;
+  }
+  const version = (data as { grading_rubric_version: unknown }).grading_rubric_version;
+  if (
+    version === null ||
+    (typeof version === "number" && Number.isInteger(version) && version > 0)
+  ) {
+    versionRef.current = version;
+    setVersion(version);
+  }
+}
+
 import {
   createEmptyQuizQuestion,
   type QuizQuestionDraft,
@@ -204,6 +224,14 @@ export function ContentForm({
   const [rubricRows, setRubricRows] = useState<GradingRequirement[]>(() =>
     toRubricFormRows(initialData?.grading_rubric)
   );
+  // The version that belongs to rubricRows. A refresh can replace initialData with a newer rubric
+  // while these rows stay, so reading the prop at submit time would lock the old rows with the
+  // newer version and overwrite that save.
+  const [loadedRubricVersion, setLoadedRubricVersion] = useState<number | null>(() =>
+    mode === "edit" ? getGradingRubricVersion(initialData?.grading_rubric) : null
+  );
+  const loadedRubricVersionRef = useRef(loadedRubricVersion);
+  const [issuedMaxKeyNumber] = useState(() => getRubricMaxKeyNumber(initialData?.grading_rubric));
   const [allowedSubmissionTypes, setAllowedSubmissionTypes] = useState<AllowedSubmissionTypes>(
     (initialData?.allowed_submission_types as AllowedSubmissionTypes) ?? "code"
   );
@@ -411,8 +439,7 @@ export function ContentForm({
         contentType === "exercise" && rubricRows.length > 0 ? { requirements: rubricRows } : null,
       // The version this form loaded, not the version to store. A save opened on an older
       // version is rejected instead of being written on top of a newer rubric.
-      grading_rubric_version:
-        mode === "edit" ? getGradingRubricVersion(initialData?.grading_rubric) : undefined,
+      grading_rubric_version: mode === "edit" ? loadedRubricVersionRef.current : undefined,
       quiz_questions: validatedQuizQuestions,
     };
 
@@ -429,6 +456,9 @@ export function ContentForm({
 
       if (response.ok) {
         const data: unknown = await response.json().catch(() => null);
+        if (mode === "edit") {
+          adoptSavedRubricVersion(data, loadedRubricVersionRef, setLoadedRubricVersion);
+        }
         const createWarning =
           mode === "create" && data && typeof data === "object" && "warning" in data
             ? String((data as { warning: unknown }).warning)
@@ -726,8 +756,8 @@ export function ContentForm({
               <GradingRubricEditor
                 rows={rubricRows}
                 onChange={setRubricRows}
-                currentVersion={getGradingRubricVersion(initialData?.grading_rubric)}
-                issuedMaxKeyNumber={getRubricMaxKeyNumber(initialData?.grading_rubric)}
+                currentVersion={loadedRubricVersion}
+                issuedMaxKeyNumber={issuedMaxKeyNumber}
                 exerciseInstructions={exerciseInstructions}
                 referenceAnswer={referenceAnswer}
               />
