@@ -20,6 +20,7 @@ vi.mock("@/app/services/api/stripe-webhook-server", async (importOriginal) => {
 vi.mock("@/app/services/notifications/slack");
 
 import { POST } from "@/app/api/stripe/webhook/route";
+import { MIRROR_PENDING_RETRY_WINDOW_MS } from "@/app/constants/stripe";
 import { getStripeClient, isStripeEnabled } from "@/app/services/api/stripe-server";
 import {
   activateUserFromCheckoutSession,
@@ -43,6 +44,7 @@ const request = (body: string) =>
   });
 
 const mockConstructEvent = vi.fn();
+const nowSec = () => Math.floor(Date.now() / 1000);
 
 // Shaped like a session from this app's createCheckoutSession().
 const ownSession = {
@@ -198,6 +200,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
       const metadata = { user_id: "19", auth_id: "auth-19" };
       mockConstructEvent.mockReturnValue({
         id: "evt_early",
+        created: nowSec(),
         type,
         data: { object: { id: "sub_early", metadata } },
       });
@@ -217,6 +220,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     vi.mocked(isPendingOwnObject).mockResolvedValue({ error: "db error", pending: false });
     mockConstructEvent.mockReturnValue({
       id: "evt_owner_err",
+      created: nowSec(),
       type: "customer.subscription.updated",
       data: { object: { id: "sub_x", metadata: { user_id: "19", auth_id: "auth-19" } } },
     });
@@ -233,6 +237,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     vi.mocked(isPendingOwnCustomer).mockResolvedValue({ error: null, pending: true });
     mockConstructEvent.mockReturnValue({
       id: "evt_inv_early",
+      created: nowSec(),
       type: "invoice.payment_failed",
       data: { object: { id: "in_early", customer: "cus_early", amount_due: 5000 } },
     });
@@ -245,19 +250,65 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     expect(sendSlackPaymentFailedNotification).not.toHaveBeenCalled();
   });
 
-  it("invoice.payment_failed: Customerの取得に失敗したら500（再送に委ねる）", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+  it("invoice.payment_failed: Customerを確認できなくても500にせず200でスキップする（他用途の請求を失敗させない）", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.mocked(findMirrorOwner).mockResolvedValue({ error: null, userId: null });
     vi.mocked(isPendingOwnCustomer).mockResolvedValue({ error: "stripe down", pending: false });
     mockConstructEvent.mockReturnValue({
       id: "evt_inv_err",
+      created: nowSec(),
       type: "invoice.payment_failed",
       data: { object: { id: "in_err", customer: "cus_err" } },
     });
 
     const res = await POST(request("{}") as never);
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ received: true, skipped: true });
+    expect(claimEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { type: "customer.subscription.updated", object: { id: "sub_old", metadata: {} } },
+    { type: "invoice.payment_failed", object: { id: "in_old", customer: "cus_old" } },
+  ])(
+    "$type: ミラー未作成でも再送期間（作成から1時間）を過ぎた自アプリのイベントは200でスキップする",
+    async ({ type, object }) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.mocked(findMirrorOwner).mockResolvedValue({ error: null, userId: null });
+      vi.mocked(isPendingOwnObject).mockResolvedValue({ error: null, pending: true });
+      vi.mocked(isPendingOwnCustomer).mockResolvedValue({ error: null, pending: true });
+      mockConstructEvent.mockReturnValue({
+        id: "evt_stale",
+        created: nowSec() - MIRROR_PENDING_RETRY_WINDOW_MS / 1000 - 60,
+        type,
+        data: { object },
+      });
+
+      const res = await POST(request("{}") as never);
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({ received: true, skipped: true });
+      expect(claimEvent).not.toHaveBeenCalled();
+    }
+  );
+
+  it("customer.subscription.updated: ミラー未作成で自アプリと判別できなければ200でスキップする", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(findMirrorOwner).mockResolvedValue({ error: null, userId: null });
+    vi.mocked(isPendingOwnObject).mockResolvedValue({ error: null, pending: false });
+    mockConstructEvent.mockReturnValue({
+      id: "evt_foreign_sub",
+      created: nowSec(),
+      type: "customer.subscription.updated",
+      data: { object: { id: "sub_foreign", metadata: {} } },
+    });
+
+    const res = await POST(request("{}") as never);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ received: true, skipped: true });
+    expect(isPendingOwnObject).toHaveBeenCalled();
     expect(claimEvent).not.toHaveBeenCalled();
   });
 

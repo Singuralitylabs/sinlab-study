@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { STRIPE_DISABLED_MESSAGE } from "@/app/constants/stripe";
+import { MIRROR_PENDING_RETRY_WINDOW_MS, STRIPE_DISABLED_MESSAGE } from "@/app/constants/stripe";
 import { getStripeClient, isStripeEnabled } from "@/app/services/api/stripe-server";
 import {
   activateUserFromCheckoutSession,
@@ -24,6 +24,14 @@ type EventPlan =
   | { kind: "error" }
   | { kind: "retry"; reason: string }
   | { kind: "handle"; run: () => Promise<string | null> };
+
+/**
+ * An own object whose mirror row is missing is retried only while the event is young; later it is
+ * a row that will not appear, and a 503 would be redelivered until Stripe disables the endpoint.
+ */
+function isWithinRetryWindow(event: Stripe.Event): boolean {
+  return Date.now() - event.created * 1000 <= MIRROR_PENDING_RETRY_WINDOW_MS;
+}
 
 /**
  * Decides, per event type, whether the event is this app's and what to run for it, so the
@@ -86,6 +94,9 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
       if (userId === null) {
         // Own subscription whose mirror row is not there yet (the event overtook
         // checkout.session.completed): answer 503 so Stripe redelivers it, instead of losing it.
+        if (!isWithinRetryWindow(event)) {
+          return { kind: "skip", reason: `Subscription id=${subscription.id}（再送期間外）` };
+        }
         const { error: ownerError, pending } = await isPendingOwnObject(subscription.metadata);
         if (ownerError) {
           return { kind: "error" };
@@ -123,9 +134,15 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
         return { kind: "error" };
       }
       if (userId === null) {
+        if (!isWithinRetryWindow(event)) {
+          return { kind: "skip", reason: `Invoice id=${invoice.id}（再送期間外）` };
+        }
         const { error: ownerError, pending } = await isPendingOwnCustomer(customerId);
+        // An unreadable Customer is skipped, not 500: this runs for every invoice of the shared
+        // account's other sales, and a Stripe outage must not turn them into the failures that
+        // get the endpoint disabled (#302).
         if (ownerError) {
-          return { kind: "error" };
+          return { kind: "skip", reason: `Invoice id=${invoice.id}（Customer確認不可）` };
         }
         if (pending) {
           return { kind: "retry", reason: `Invoice id=${invoice.id}` };
