@@ -1,16 +1,15 @@
--- fetchWeeklyFunnel() is the only caller, and it uses service_role after an
--- admin/maintainer check. EXECUTE for authenticated let any member POST the
--- RPC (five correlated subqueries per week, up to 104). Match
--- claim_email_test_send: service_role only.
---
--- The 1..104 clamp inside get_weekly_funnel stays. It bounded generate_series
--- because authenticated could call the function; a service_role key can still
--- pass weeks, so the clamp remains that bound.
+-- Only fetchWeeklyFunnel() calls this, with service_role after an admin/maintainer
+-- check. Any other EXECUTE lets a member POST the RPC.
+-- Keep the 1..104 clamp: weeks is still caller-supplied, so generate_series stays bounded.
 --
 -- Supabase default privileges grant EXECUTE on new public functions to anon,
--- authenticated, and service_role. CREATE OR REPLACE keeps this ACL, but
--- DROP FUNCTION + CREATE does not. Recreating get_weekly_funnel must repeat
--- this REVOKE, or authenticated can call it again.
+-- authenticated, and service_role. CREATE OR REPLACE keeps the ACL, but
+-- DROP FUNCTION + CREATE does not. Recreating get_weekly_funnel without repeating
+-- this REVOKE lets authenticated call it again.
 
 REVOKE EXECUTE ON FUNCTION public.get_weekly_funnel(integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_weekly_funnel(integer) TO service_role;
+
+-- RETURNS trigger, so PostgREST does not expose it, but default privileges still
+-- leave EXECUTE for authenticated. Revoke that too so the ACL matches the docs.
+REVOKE ALL ON FUNCTION public.stamp_stripe_subscription_funnel_times() FROM authenticated;
