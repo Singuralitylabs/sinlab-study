@@ -272,7 +272,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     { type: "customer.subscription.updated", object: { id: "sub_old", metadata: {} } },
     { type: "invoice.payment_failed", object: { id: "in_old", customer: "cus_old" } },
   ])(
-    "$type: ミラー未作成でも再送期間（作成から1時間）を過ぎた自アプリのイベントは200でスキップする",
+    "$type: ミラー未作成でも再送期間（作成から24時間）を過ぎた自アプリのイベントは200でスキップする",
     async ({ type, object }) => {
       vi.spyOn(console, "warn").mockImplementation(() => {});
       vi.mocked(findMirrorOwner).mockResolvedValue({ error: null, userId: null });
