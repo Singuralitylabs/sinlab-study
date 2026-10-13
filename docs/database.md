@@ -250,7 +250,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 - `question_type`: `single`（単一選択）/ `multiple`（複数選択）/ `text`（入力式）
 - `question`（設問・Markdown）、`choices`（選択肢・TEXT[]・各 Markdown）、`correct_choices`（正解・`choices` の0始まりの添字・INTEGER[]）、`model_answer`（入力式の模範解答・Markdown）、`explanation`（解説・Markdown）、`hint`（ヒント・プレーンテキスト）。項目名は原稿の「設問 / 形式 / 選択肢 / 正解 / 解説 / ヒント」に対応する
-- CHECK `quiz_questions_shape_check`: 選択式は選択肢2〜6個・`single` は正解1つ・`multiple` は正解1つ以上、入力式は選択肢・正解なしで `model_answer` 必須。`quiz_questions_correct_choices_check`（関数 `quiz_correct_choices_valid()`）: 正解の添字が `choices` の範囲内で重複しない。`display_order` は 1〜3 で、`UNIQUE(content_id, display_order)` と合わせて 1 コンテンツ 3 問まで。アプリ側（`QuizQuestionSchema`。`app/lib/quiz.ts`）も同じ条件で検証し、REST で直接書いても採点できない設問は作れない
+- CHECK `quiz_questions_shape_check`: 選択式は選択肢2〜6個・`single` は正解1つ・`multiple` は正解1つ以上、入力式は選択肢・正解なしで `model_answer` 必須。`quiz_questions_correct_choices_check`（関数 `quiz_correct_choices_valid()`。CHECK は書き込んだロールの権限で評価されるため EXECUTE は `authenticated` / `service_role` のみ、`PUBLIC, anon` は REVOKE）: 正解の添字が `choices` の範囲内で重複しない。`display_order` は 1〜3 で、`UNIQUE(content_id, display_order)` と合わせて 1 コンテンツ 3 問まで。アプリ側（`QuizQuestionSchema`。`app/lib/quiz.ts`）も同じ条件で検証し、REST で直接書いても採点できない設問は作れない
 - **正解を含むため受講者には SELECT させない**（6.17）。learning_contents の JSONB 列にしなかったのは、learning_contents は受講者が REST で SELECT できるため（列に正解を入れると回答前に読めてしまう）
 - 入力式は自動採点しない（回答後に模範解答と解説を表示）。回答内容は保存せず、回答を送ると `user_progress` を完了にする（進捗 API 経由）
 
@@ -326,7 +326,7 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 
 この制限により、お試し非公開コンテンツはタイトルを含めて通常クライアント（`authenticated`）から取得できなくなる。ツリー表示のロック項目と、詳細ページ直リンク時のロック画面表示に必要な最小限の情報は、アプリ層が service_role クライアント + カラム許可リスト（本文カラムを含めない）で取得する（詳細は[機能設計書](./specification.md)の2.6を参照）。service_role は RLS を素通りするため、この経路のクエリでは `is_published = true AND is_deleted = false` をアプリ側で必ず指定し、通常の公開制御を再現する。条件を省くと未公開・論理削除済みコンテンツのタイトルが露出し、`active` ユーザーにすら見えないものがお試しユーザーに見える逆転が生じる。
 
-**兄弟要素の display_order 一括更新**: 管理画面の挿入位置指定は、RPC `bulk_update_sibling_display_order(p_table, p_updates)` で変化した兄弟行の `display_order` を1回の `UPDATE … FROM` で更新する。upsert ではなく純粋な UPDATE のため INSERT 経路に乗らず、`updated_at` の BEFORE UPDATE トリガーも通常どおり発火する。`SECURITY INVOKER` で呼び出し元の UPDATE ポリシーに従う（許可テーブルは `learning_themes` / `learning_phases` / `learning_weeks` / `learning_contents` のみ）。
+**兄弟要素の display_order 一括更新**: 管理画面の挿入位置指定は、RPC `bulk_update_sibling_display_order(p_table, p_updates)` で変化した兄弟行の `display_order` を1回の `UPDATE … FROM` で更新する。upsert ではなく純粋な UPDATE のため INSERT 経路に乗らず、`updated_at` の BEFORE UPDATE トリガーも通常どおり発火する。`SECURITY INVOKER` で呼び出し元の UPDATE ポリシーに従う（許可テーブルは `learning_themes` / `learning_phases` / `learning_weeks` / `learning_contents` のみ）。EXECUTE は `authenticated` / `service_role` のみ（`PUBLIC, anon` を REVOKE）。
 
 ### 6.2 user_progress
 
@@ -339,7 +339,7 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 
 maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進捗を参照するため、admin と同様に全件の SELECT を許可する。
 
-**受講生進捗一覧の集計**: `/manage/students` はユーザーごとの完了数・最終活動日時を、RPC `get_students_progress_summary()`（`GROUP BY user_id`）から取得する。この関数は `SECURITY DEFINER` を使わないプレーンな SQL 関数（デフォルトの `SECURITY INVOKER`）で、呼び出し元の権限のまま上記SELECTポリシーに従う。そのため member が直接呼び出しても本人の1行しか返らず、admin/maintainer が呼び出したときだけ全件が返る（RPC側でのロールチェックは不要）。
+**受講生進捗一覧の集計**: `/manage/students` はユーザーごとの完了数・最終活動日時を、RPC `get_students_progress_summary()`（`GROUP BY user_id`）から取得する。この関数は `SECURITY DEFINER` を使わないプレーンな SQL 関数（デフォルトの `SECURITY INVOKER`）で、呼び出し元の権限のまま上記SELECTポリシーに従う。そのため member が直接呼び出しても本人の1行しか返らず、admin/maintainer が呼び出したときだけ全件が返る（RPC側でのロールチェックは不要）。EXECUTE は `authenticated` / `service_role` のみ（`PUBLIC, anon` を REVOKE）。
 
 **可視コンテンツ限定の EXISTS 条件**:
 

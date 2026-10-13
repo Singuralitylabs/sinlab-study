@@ -32,6 +32,7 @@ jobs:
         with:
           bun-version-file: ".bun-version"
 
+      # Only bun packages are cached; the Supabase Docker images are pulled on every run (~2 min total).
       - name: Cache bun packages
         uses: actions/cache@v4
         with:
