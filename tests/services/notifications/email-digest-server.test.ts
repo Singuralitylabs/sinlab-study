@@ -354,6 +354,7 @@ function setup(
     user_progress?: Row[];
     submissions?: Row[];
     announcements?: Row[];
+    email_logs?: Row[];
     email_kind_settings?: Row[];
     email_settings?: Row[];
     email_templates?: Row[];
@@ -1119,6 +1120,39 @@ describe("お知らせのメール一斉送信（#254）", () => {
     ]);
   });
 
+  it("当日送れない宛先（別の販促メール受信済み）の前日の失敗行は消さず、完了にもしない", async () => {
+    const { db } = setup({
+      users: [userRow(1)],
+      announcements: [announcementRow()],
+      email_logs: [
+        {
+          id: 9001,
+          user_id: 1,
+          kind: "announcement",
+          reference_key: "501",
+          sent_at: null,
+          error: "Resend API がエラーを返しました: status=500",
+          created_at: "2026-10-06T10:00:00.000Z",
+        },
+        {
+          id: 9002,
+          user_id: 1,
+          kind: "inactivity_reminder",
+          reference_key: "2026-10-07",
+          sent_at: "2026-10-06T23:00:00.000Z",
+          error: null,
+          created_at: "2026-10-06T23:00:00.000Z",
+        },
+      ],
+    });
+
+    const wednesday = await runDigest(WEDNESDAY);
+
+    expect(wednesday).toMatchObject({ sent: 0, announcementsCompleted: 0 });
+    expect(announcementLogs(db).map((row) => row.id)).toEqual([9001]);
+    expect(db.announcements[0].email_sent_at).toBeNull();
+  });
+
   it("送れたか分からない失敗（タイムアウト等）は送り直さずに完了にする", async () => {
     const { db } = setup({ users: [userRow(1)], announcements: [announcementRow()] });
     vi.mocked(sendEmail).mockResolvedValue({
@@ -1564,6 +1598,24 @@ describe("メール通知の管理設定（#272）", () => {
       expect(monday).toMatchObject({ sent: 0, weeklyReservationMissing: false });
       expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining("予約が無い"));
       expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("設定が今サイクル"));
+    });
+
+    it("設定の更新時刻が PostgREST 形式（+00:00）で今サイクルの開始と同一秒でも、変更ありとして扱う", async () => {
+      for (const updatedAt of [
+        "2026-10-04T15:00:00+00:00",
+        "2026-10-04T15:00:00.000+00:00",
+        "2026-10-04T15:00:00.000000+00:00",
+      ]) {
+        vi.clearAllMocks();
+        const { db } = setup({ users: [userRow(1)] });
+        const weekly = db.email_kind_settings.find((row) => row.kind === "weekly_digest") as Row;
+        weekly.updated_at = updatedAt; // Mon 10/5 00:00 JST sharp = cycleStart
+
+        const result = await runDigest(new Date("2026-10-07T23:00:00Z")); // Thu, past catch-up
+
+        expect(result).toMatchObject({ sent: 0, weeklyReservationMissing: false });
+        expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("設定が今サイクル"));
+      }
     });
 
     it("無効から再有効化した週は、警告せずに次の送信日から再開する", async () => {

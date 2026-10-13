@@ -41,6 +41,18 @@ export function jstStartOfDayIso(date: string): string {
 }
 
 /**
+ * Compare timestamps as instants. PostgREST returns `+00:00` with variable fractional digits while
+ * `toISOString()` returns `.000Z`, so string comparison flips at the same second (`+` < `.`).
+ */
+export function isBefore(a: string, b: string): boolean {
+  return Date.parse(a) < Date.parse(b);
+}
+
+export function isSameOrAfter(a: string, b: string): boolean {
+  return Date.parse(a) >= Date.parse(b);
+}
+
+/**
  * Days since sign-up: users.created_at rounded to the JST calendar date, with the sign-up date as
  * day 0 (e.g. a user who signs up 10/1 23:30 JST has day 7 on 10/8).
  */
