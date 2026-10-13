@@ -244,12 +244,19 @@ export function reusedRequirementKeys(
   current: { requirements: readonly { key: string }[]; max_key_number?: number },
   incomingKeys: readonly string[]
 ): string[] {
-  const currentKeys = new Set(current.requirements.map((requirement) => requirement.key));
+  // The API trims submitted keys. A stored key that only differs by surrounding spaces is
+  // still that requirement; comparing the raw string would reject the editor's trimmed key.
+  const currentKeys = new Set(current.requirements.map((requirement) => requirement.key.trim()));
   const highWater = Math.max(
     current.max_key_number ?? 0,
-    maxRequirementKeyNumber(current.requirements.map((requirement) => requirement.key))
+    maxRequirementKeyNumber(current.requirements.map((requirement) => requirement.key.trim()))
   );
-  return incomingKeys.filter(
-    (key) => !currentKeys.has(key) && /^r\d+$/.test(key) && requirementKeyNumber(key) <= highWater
-  );
+  return incomingKeys.filter((key) => {
+    const normalized = key.trim();
+    return (
+      !currentKeys.has(normalized) &&
+      /^r\d+$/.test(normalized) &&
+      requirementKeyNumber(normalized) <= highWater
+    );
+  });
 }

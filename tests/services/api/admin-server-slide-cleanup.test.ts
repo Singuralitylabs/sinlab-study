@@ -988,6 +988,69 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
 
+  it("zod で読めない投影と送信が一致しても version を上げる", async () => {
+    const broken = {
+      version: 2,
+      max_key_number: 1,
+      requirements: [{ key: "r1", name: "A" }],
+    };
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
+            error: null,
+          },
+          { data: [{ id: 1, updated_at: "2026-10-13T00:00:00.000Z" }], error: null },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, {
+      gradingRubric: { requirements: [{ key: "r1", name: "A", description: "" }] },
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.keyReuse).toBeUndefined();
+    expect(result.gradingRubricVersion).toBe(3);
+    const rubricUpdate = mockClient.from.mock.results[1]?.value;
+    expect(rubricUpdate.update.mock.calls[0][0].grading_rubric.version).toBe(3);
+  });
+
+  it("空白だけ違う発行済み key は再利用にしない", async () => {
+    const broken = {
+      version: 2,
+      max_key_number: 1,
+      requirements: [
+        { key: "r1 ", name: "A", description: "a" },
+        { key: "r1 ", name: "B", description: "b" },
+      ],
+    };
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
+            error: null,
+          },
+          { data: [{ id: 1, updated_at: "2026-10-13T00:00:00.000Z" }], error: null },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, {
+      gradingRubric: { requirements: [{ key: "r1", name: "A", description: "a" }] },
+    });
+
+    expect(result.keyReuse).toBeUndefined();
+    expect(result.error).toBeNull();
+    expect(result.gradingRubricVersion).toBe(3);
+    const rubricUpdate = mockClient.from.mock.results[1]?.value;
+    expect(rubricUpdate.update.mock.calls[0][0].grading_rubric.requirements).toEqual([
+      { key: "r1", name: "A", description: "a" },
+    ]);
+  });
+
   it("採点基準を書いたあと再採番が失敗したら種別と基準を戻す", async () => {
     const storedRubric = { version: 2, ...input, max_key_number: 1 };
     const { mockClient } = mockAdminWithStorage({

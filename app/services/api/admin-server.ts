@@ -1598,15 +1598,18 @@ async function updateContentRow(
         const resultingType = patch.content_type ?? current.content_type;
         // zod can reject a CHECK-valid row. Reuse still has to see those keys, or a removed
         // r{n} can name a different requirement while old reviews still point at it.
-        const basis =
-          stored ??
-          (lockVersion != null
+        // The form projection drops non-string keys and turns a non-string description into "".
+        // Using it as the "unchanged" baseline would keep the old version while replacing the
+        // criteria that past reviews stored under that version.
+        const unparsedBasis =
+          stored == null && lockVersion != null
             ? {
                 version: lockVersion,
                 requirements: toRubricFormRows(current.grading_rubric),
                 max_key_number: getRubricMaxKeyNumber(current.grading_rubric),
               }
-            : null);
+            : null;
+        const basis = stored ?? unparsedBasis;
         if (gradingRubric && resultingType === "exercise") {
           const reused = basis
             ? reusedRequirementKeys(
@@ -1617,7 +1620,11 @@ async function updateContentRow(
           if (reused.length > 0) {
             return { error: null, storageRemoved: true, keyReuse: reused };
           }
-          patch.grading_rubric = nextGradingRubric(basis, gradingRubric);
+          const drafted = nextGradingRubric(basis, gradingRubric);
+          patch.grading_rubric =
+            unparsedBasis != null && lockVersion != null
+              ? { ...drafted, version: Math.max(drafted.version, lockVersion + 1) }
+              : drafted;
         } else {
           patch.grading_rubric = null;
         }
