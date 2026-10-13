@@ -13,6 +13,9 @@ type ExecuteAcl = {
 };
 
 const migrationsDir = join(process.cwd(), "supabase/migrations");
+const parkedOf = new WeakMap<Map<string, ExecuteAcl>, Map<string, ExecuteAcl>>();
+const grantedToOf = new WeakMap<Map<string, ExecuteAcl>, Map<string, Set<string>>>();
+const holdersOf = new WeakMap<ExecuteAcl, Set<string>>();
 
 function defaultAcl(): ExecuteAcl {
   return { anon: true, authenticated: true, public: true, serviceRole: true };
@@ -98,22 +101,10 @@ function splitSql(sql: string): string[] {
       i = end;
       continue;
     }
-    if (sql[i] === "'") {
-      current += "'";
-      i += 1;
-      while (i < sql.length) {
-        if (sql[i] === "'" && sql[i + 1] === "'") {
-          current += "''";
-          i += 2;
-          continue;
-        }
-        current += sql[i];
-        if (sql[i] === "'") {
-          i += 1;
-          break;
-        }
-        i += 1;
-      }
+    if (sql[i] === "'" || /^E'/i.test(sql.slice(i)) || /^U&'/i.test(sql.slice(i))) {
+      const end = consumeString(sql, i);
+      current += sql.slice(i, end);
+      i = end;
       continue;
     }
     if (sql[i] === ";") {
@@ -150,15 +141,19 @@ function functionPattern(name: string): string {
 function createdSignature(
   statement: string,
   name: string
-): { args: string; replace: boolean } | null {
+): { args: string; replace: boolean; schema: string } | null {
   const match = statement.match(
     new RegExp(
-      `^CREATE\\s+(OR\\s+REPLACE\\s+)?FUNCTION\\s+${functionPattern(name)}\\s*\\(([^)]*)\\)`,
+      `^CREATE\\s+(OR\\s+REPLACE\\s+)?FUNCTION\\s+(?:("?[A-Za-z_]\\w*"?)\\.)?"?${name}"?(?![A-Za-z0-9_])\\s*\\(([^)]*)\\)`,
       "i"
     )
   );
   if (!match) return null;
-  return { replace: Boolean(match[1]), args: normalizeArgs(match[2] ?? "") };
+  return {
+    replace: Boolean(match[1]),
+    schema: (match[2] ?? "public").replace(/"/g, "").toLowerCase(),
+    args: normalizeArgs(match[3] ?? ""),
+  };
 }
 
 function droppedArgs(statement: string, name: string): string[] | "bare" | null {
@@ -216,26 +211,107 @@ function splitCommaList(raw: string): string[] {
   return parts.map((part) => part.trim()).filter((part) => part.length > 0);
 }
 
+function roleNames(clause: string): string[] {
+  return clause
+    .replace(/\bWITH\s+GRANT\s+OPTION\b/gi, "")
+    .split(",")
+    .map((role) => role.trim().replace(/"/g, "").split(/\s+/)[0] ?? "")
+    .filter((role) => role.length > 0);
+}
+
 function applyRoles(acl: ExecuteAcl, roles: string, turnOn: boolean) {
   if (clauseHas(roles, "PUBLIC")) acl.public = turnOn;
   if (clauseHas(roles, "anon")) acl.anon = turnOn;
   if (clauseHas(roles, "authenticated")) acl.authenticated = turnOn;
   if (clauseHas(roles, "service_role")) acl.serviceRole = turnOn;
+  const holders = holdersOf.get(acl) ?? new Set<string>();
+  for (const role of roleNames(roles)) {
+    const key = role.toLowerCase();
+    if (key === "public" || key === "anon" || key === "authenticated" || key === "service_role") {
+      continue;
+    }
+    if (turnOn) holders.add(key);
+    else holders.delete(key);
+  }
+  holdersOf.set(acl, holders);
+}
+
+function consumeString(sql: string, start: number): number {
+  let i = start;
+  let extended = false;
+  if (/^E'/i.test(sql.slice(i))) {
+    extended = true;
+    i += 2;
+  } else if (/^U&'/i.test(sql.slice(i))) {
+    i += 3;
+  } else if (sql[i] === "'") {
+    i += 1;
+  } else {
+    return start;
+  }
+  while (i < sql.length) {
+    if (extended && sql[i] === "\\") {
+      i += 2;
+      continue;
+    }
+    if (sql[i] === "'" && sql[i + 1] === "'") {
+      i += 2;
+      continue;
+    }
+    if (sql[i] === "'") return i + 1;
+    i += 1;
+  }
+  return i;
+}
+
+function readStringValue(sql: string): { value: string; rest: string } | null {
+  if (!sql.startsWith("'") && !/^E'/i.test(sql) && !/^U&'/i.test(sql)) return null;
+  const end = consumeString(sql, 0);
+  if (end <= 0) return null;
+  let raw = sql.slice(0, end);
+  const extended = /^E'/i.test(raw);
+  raw = raw.replace(/^(?:E|U&)?'/i, "").replace(/'$/, "");
+  let value = "";
+  let i = 0;
+  while (i < raw.length) {
+    if (extended && raw[i] === "\\") {
+      value += raw[i + 1] ?? "";
+      i += 2;
+      continue;
+    }
+    if (raw[i] === "'" && raw[i + 1] === "'") {
+      value += "'";
+      i += 2;
+      continue;
+    }
+    value += raw[i];
+    i += 1;
+  }
+  return { value, rest: sql.slice(end) };
 }
 
 function doBody(statement: string): string | null {
   const head = statement.match(/^DO\b(?:\s+LANGUAGE\s+[A-Za-z_][A-Za-z0-9_]*)?/i);
   if (!head) return null;
-  const rest = statement.slice(head[0].length).trim();
-  if (rest.startsWith("'")) {
-    const quoted = /^'((?:''|[^'])*)'/.exec(rest);
-    return quoted?.[1]?.replace(/''/g, "'") ?? null;
+  let rest = statement.slice(head[0].length).trim();
+  if (/^\$[A-Za-z0-9_]*\$/.test(rest)) {
+    const dollar = /^(\$[A-Za-z0-9_]*\$)/.exec(rest);
+    if (!dollar?.[1]) return null;
+    const end = rest.indexOf(dollar[1], dollar[1].length);
+    if (end === -1) return null;
+    return rest.slice(dollar[1].length, end);
   }
-  const dollar = /^(\$[A-Za-z0-9_]*\$)/.exec(rest);
-  if (!dollar?.[1]) return null;
-  const end = rest.indexOf(dollar[1], dollar[1].length);
-  if (end === -1) return null;
-  return rest.slice(dollar[1].length, end);
+  const first = readStringValue(rest);
+  if (!first) return null;
+  let value = first.value;
+  rest = first.rest.trim();
+  while (rest.startsWith("'") || /^E'/i.test(rest) || /^U&'/i.test(rest)) {
+    const more = readStringValue(rest);
+    if (!more) break;
+    value += more.value;
+    rest = more.rest.trim();
+  }
+  return value;
 }
 
 function keywordTail(statement: string): string | null {
@@ -257,19 +333,12 @@ function keywordTail(statement: string): string | null {
       i += dollar.length;
       continue;
     }
-    if (statement[i] === "'") {
-      i += 1;
-      while (i < statement.length) {
-        if (statement[i] === "'" && statement[i + 1] === "'") {
-          i += 2;
-          continue;
-        }
-        if (statement[i] === "'") {
-          i += 1;
-          break;
-        }
-        i += 1;
-      }
+    if (
+      statement[i] === "'" ||
+      /^E'/i.test(statement.slice(i)) ||
+      /^U&'/i.test(statement.slice(i))
+    ) {
+      i = consumeString(statement, i);
       continue;
     }
     if (/^(CREATE|DROP|GRANT|REVOKE|ALTER)\b/i.test(statement.slice(i))) {
@@ -291,11 +360,25 @@ function applyStatement(statement: string, name: string, byArgs: Map<string, Exe
     }
     return;
   }
+  if (/^UPDATE\s+pg_proc\b/i.test(collapsed) && /\bproacl\s*=\s*NULL\b/i.test(collapsed)) {
+    if (new RegExp(`\\b${name}\\b`, "i").test(collapsed)) {
+      for (const key of [...byArgs.keys()]) byArgs.set(key, defaultAcl());
+    }
+    return;
+  }
+  if (applyRoleGrant(collapsed, byArgs)) return;
   if (applyAlter(collapsed, name, byArgs)) return;
   const created = createdSignature(collapsed, name);
   if (created) {
-    const existing = byArgs.get(created.args);
-    if (!(created.replace && existing)) byArgs.set(created.args, defaultAcl());
+    const parked = parkedOf.get(byArgs);
+    if (created.schema === "public" || !parked) {
+      const existing = byArgs.get(created.args);
+      if (!(created.replace && existing)) byArgs.set(created.args, defaultAcl());
+    } else {
+      const key = `${created.schema}:${created.args}`;
+      const existing = parked.get(key);
+      if (!(created.replace && existing)) parked.set(key, defaultAcl());
+    }
     return;
   }
   const dropped = droppedArgs(collapsed, name);
@@ -336,31 +419,94 @@ function removeSignature(byArgs: Map<string, ExecuteAcl>, args: string | null) {
   byArgs.delete(args);
 }
 
+function applyRoleGrant(statement: string, byArgs: Map<string, ExecuteAcl>): boolean {
+  if (!/^(GRANT|REVOKE)\b/i.test(statement) || /\bON\b/i.test(statement)) return false;
+  const grantedTo = grantedToOf.get(byArgs);
+  if (!grantedTo) return true;
+  const grant = statement.match(/^GRANT\s+(.+?)\s+TO\s+(.+)$/i);
+  const revoke = statement.match(/^REVOKE\s+(.+?)\s+FROM\s+(.+)$/i);
+  const parsed = grant ?? revoke;
+  if (!parsed?.[1] || !parsed[2]) return true;
+  for (const role of roleNames(parsed[1])) {
+    const key = role.toLowerCase();
+    const grantees = grantedTo.get(key) ?? new Set<string>();
+    for (const grantee of roleNames(parsed[2])) {
+      if (grant) grantees.add(grantee.toLowerCase());
+      else grantees.delete(grantee.toLowerCase());
+    }
+    grantedTo.set(key, grantees);
+  }
+  return true;
+}
+
+function reachesMember(
+  role: string,
+  grantedTo: Map<string, Set<string>>,
+  seen = new Set<string>()
+): boolean {
+  const key = role.toLowerCase();
+  if (key === "public" || key === "anon" || key === "authenticated") return true;
+  if (seen.has(key)) return false;
+  seen.add(key);
+  for (const grantee of grantedTo.get(key) ?? []) {
+    if (reachesMember(grantee, grantedTo, seen)) return true;
+  }
+  return false;
+}
+
 function applyAlter(statement: string, name: string, byArgs: Map<string, ExecuteAcl>): boolean {
   if (!/^ALTER\s+(?:FUNCTION|ROUTINE)\b/i.test(statement)) return false;
-  const match = statement.match(new RegExp(`${functionPattern(name)}\\s*(\\(([^)]*)\\))?`, "i"));
-  if (!match) return true;
-  const args = match[1] ? normalizeArgs(match[2] ?? "") : null;
-  const rename = statement.match(/\bRENAME\s+TO\s+("?[A-Za-z_][A-Za-z0-9_]*"?)/i);
-  if (rename?.[1] && rename[1].replace(/"/g, "").toLowerCase() !== name.toLowerCase()) {
-    removeSignature(byArgs, args);
+  const parked = parkedOf.get(byArgs) ?? new Map<string, ExecuteAcl>();
+  const source = statement.match(
+    new RegExp(
+      `^ALTER\\s+(?:FUNCTION|ROUTINE)\\s+(?:("?[A-Za-z_]\\w*"?)\\.)?"?${name}"?(?![A-Za-z0-9_])\\s*(\\(([^)]*)\\))?\\s+(?:RENAME\\s+TO\\s+("?[A-Za-z_]\\w*"?)|SET\\s+SCHEMA\\s+("?[A-Za-z_]\\w*"?))`,
+      "i"
+    )
+  );
+  if (source) {
+    const schema = (source[1] ?? "public").replace(/"/g, "").toLowerCase();
+    const args = source[2] ? normalizeArgs(source[3] ?? "") : null;
+    const renameTo = source[4]?.replace(/"/g, "").toLowerCase();
+    const nextSchema = source[5]?.replace(/"/g, "").toLowerCase();
+    if (renameTo && renameTo !== name.toLowerCase() && schema === "public") {
+      removeSignature(byArgs, args);
+    }
+    if (nextSchema && schema === "public" && nextSchema !== "public" && args !== null) {
+      const current = byArgs.get(args);
+      if (current) parked.set(`${nextSchema}:${args}`, current);
+      byArgs.delete(args);
+    }
+    if (nextSchema === "public" && schema !== "public" && args !== null) {
+      byArgs.set(args, parked.get(`${schema}:${args}`) ?? defaultAcl());
+      parked.delete(`${schema}:${args}`);
+    }
+    return true;
   }
-  const schema = statement.match(/\bSET\s+SCHEMA\s+("?[A-Za-z_][A-Za-z0-9_]*"?)/i);
-  if (schema?.[1] && schema[1].replace(/"/g, "").toLowerCase() !== "public") {
-    removeSignature(byArgs, args);
-  }
+  const onto = statement.match(
+    new RegExp(
+      `^ALTER\\s+(?:FUNCTION|ROUTINE)\\s+(?:(?:"?[A-Za-z_]\\w*"?)\\.)?"?[A-Za-z_]\\w*"?\\s*(?:\\(([^)]*)\\))?\\s+RENAME\\s+TO\\s+"?${name}"?(?![A-Za-z0-9_])`,
+      "i"
+    )
+  );
+  if (onto) byArgs.set(onto[1] ? normalizeArgs(onto[1]) : "", defaultAcl());
   return true;
 }
 
 function replayExecuteAcl(sql: string, name: string): Map<string, ExecuteAcl> {
   const byArgs = new Map<string, ExecuteAcl>();
+  parkedOf.set(byArgs, new Map());
+  grantedToOf.set(byArgs, new Map());
   for (const statement of splitSql(sql)) applyStatement(statement, name, byArgs);
   return byArgs;
 }
 
 function memberCanExecute(byArgs: Map<string, ExecuteAcl>): boolean {
+  const grantedTo = grantedToOf.get(byArgs) ?? new Map<string, Set<string>>();
   for (const acl of byArgs.values()) {
     if (acl.anon || acl.authenticated || acl.public) return true;
+    for (const holder of holdersOf.get(acl) ?? []) {
+      if (reachesMember(holder, grantedTo)) return true;
+    }
   }
   return false;
 }
@@ -491,5 +637,36 @@ CREATE OR REPLACE FUNCTION public.get_weekly_funnel(weeks integer) RETURNS void 
     const outReplace = `${base}
 CREATE OR REPLACE FUNCTION public.get_weekly_funnel(weeks integer, OUT week_start date) RETURNS void LANGUAGE sql AS $$ SELECT 1 $$;`;
     expect(memberCanExecute(replayExecuteAcl(outReplace, "get_weekly_funnel"))).toBe(false);
+    const renameOnto = `${base}
+ALTER FUNCTION public.get_weekly_funnel(integer) RENAME TO get_weekly_funnel_old;
+CREATE FUNCTION public.get_weekly_funnel_next(weeks integer) RETURNS integer LANGUAGE sql AS $$ SELECT weeks $$;
+ALTER FUNCTION public.get_weekly_funnel_next(integer) RENAME TO get_weekly_funnel;`;
+    expect(memberCanExecute(replayExecuteAcl(renameOnto, "get_weekly_funnel"))).toBe(true);
+    const moveIn = `${base}
+CREATE SCHEMA IF NOT EXISTS private;
+DROP FUNCTION public.get_weekly_funnel(integer);
+CREATE FUNCTION private.get_weekly_funnel(weeks integer) RETURNS integer LANGUAGE sql AS $$ SELECT weeks $$;
+ALTER FUNCTION private.get_weekly_funnel(integer) SET SCHEMA public;`;
+    expect(memberCanExecute(replayExecuteAcl(moveIn, "get_weekly_funnel"))).toBe(true);
+    const extendedDo = `${base}
+DO E'BEGIN GRANT EXECUTE ON FUNCTION public.get_weekly_funnel(integer) TO authenticated; END';`;
+    expect(memberCanExecute(replayExecuteAcl(extendedDo, "get_weekly_funnel"))).toBe(true);
+    const adjacent = `${base}
+DO 'BEGIN '
+'GRANT EXECUTE ON FUNCTION public.get_weekly_funnel(integer) TO authenticated; '
+'END';`;
+    expect(memberCanExecute(replayExecuteAcl(adjacent, "get_weekly_funnel"))).toBe(true);
+    const escaped = `${base}
+SELECT E'O\\'Brien';
+GRANT EXECUTE ON FUNCTION public.get_weekly_funnel(integer) TO authenticated;`;
+    expect(memberCanExecute(replayExecuteAcl(escaped, "get_weekly_funnel"))).toBe(true);
+    const inherited = `${base}
+CREATE ROLE funnel_reader NOLOGIN;
+GRANT EXECUTE ON FUNCTION public.get_weekly_funnel(integer) TO funnel_reader;
+GRANT funnel_reader TO authenticated;`;
+    expect(memberCanExecute(replayExecuteAcl(inherited, "get_weekly_funnel"))).toBe(true);
+    const clearedAcl = `${base}
+UPDATE pg_proc SET proacl = NULL WHERE proname = 'get_weekly_funnel' AND pronamespace = 'public'::regnamespace;`;
+    expect(memberCanExecute(replayExecuteAcl(clearedAcl, "get_weekly_funnel"))).toBe(true);
   });
 });
