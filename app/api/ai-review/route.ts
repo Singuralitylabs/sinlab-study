@@ -173,15 +173,18 @@ export async function POST(request: NextRequest) {
     }
 
     // Learners cannot select grading_rubric. Read it with service_role after the claim so a
-    // failed lookup can mark the row failed instead of leaving it processing.
+    // failed lookup can mark the row failed instead of leaving it processing. Published and
+    // not deleted, or a reordered visibility check would grade a hidden rubric.
     const admin = await createAdminSupabaseClient();
     const { data: rubricRow, error: rubricError } = await admin
       .from("learning_contents")
       .select("grading_rubric")
       .eq("id", content.id)
+      .eq("is_published", true)
+      .eq("is_deleted", false)
       .maybeSingle();
-    if (rubricError) {
-      console.error("採点基準の取得エラー:", rubricError.message);
+    if (rubricError || !rubricRow) {
+      console.error("採点基準の取得エラー:", rubricError?.message ?? "no row");
       await updateAIReviewFailed(reviewRecord.id, "採点基準の取得に失敗しました");
       return NextResponse.json({ error: "採点基準の取得に失敗しました" }, { status: 500 });
     }

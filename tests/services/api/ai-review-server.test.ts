@@ -434,7 +434,11 @@ describe("claimPendingAIReview", () => {
     expect(mockClient.from).toHaveBeenCalledTimes(1);
     const [payload, options] = mockClient.from.mock.results[0].value.upsert.mock.calls[0];
     expect(options).toEqual({ onConflict: "submission_id", ignoreDuplicates: true });
-    expect(payload).toMatchObject({ submission_id: 7, status: "pending" });
+    expect(payload).toMatchObject({
+      submission_id: 7,
+      status: "pending",
+      score_kind: "incomplete",
+    });
   });
 
   it("既存行は failed か死んだ in-flight だけを条件付き UPDATE で再利用し、created_at とトークン以外を初期化する", async () => {
@@ -461,6 +465,7 @@ describe("claimPendingAIReview", () => {
       rubric_version: null,
       passed: null,
       error_message: null,
+      score_kind: "incomplete",
     });
     expect(payload).not.toHaveProperty("prompt_tokens");
     expect(payload).not.toHaveProperty("completion_tokens");

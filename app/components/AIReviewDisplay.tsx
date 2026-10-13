@@ -75,7 +75,10 @@ export function AIReviewDisplay({
 
   // completed. legacy rows (and any row whose review_json is unrecognisable) keep rendering
   // review_content as before.
-  const reviewJson = review.score_kind === "legacy" ? null : asReviewJson(review.review_json);
+  const reviewJson =
+    review.score_kind === "legacy" || review.score_kind === "incomplete"
+      ? null
+      : asReviewJson(review.review_json);
   const passDisplay = resolvePassDisplay(review);
 
   return (

@@ -873,6 +873,63 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     expect(updatePayload(mockClient).content_type).toBe("video");
   });
 
+  it("zod で読めない採点基準でも version で一致させ、NULL とは扱わない", async () => {
+    const broken = {
+      version: 2,
+      requirements: [
+        { key: "r1", name: "A", description: "a" },
+        { key: "r1", name: "B", description: "b" },
+      ],
+    };
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { gradingRubric: input });
+
+    expect(result.error).toBeNull();
+    expect(result.conflict).toBeUndefined();
+    const rubricUpdate = mockClient.from.mock.results[1]?.value;
+    expect(rubricUpdate.eq).toHaveBeenCalledWith("grading_rubric->>version", "2");
+    expect(rubricUpdate.is).not.toHaveBeenCalledWith("grading_rubric", null);
+    expect(rubricUpdate.update.mock.calls[0][0].grading_rubric.version).toBe(3);
+  });
+
+  it("採点基準を書いたあと再採番が失敗したら種別と基準を戻す", async () => {
+    const storedRubric = { version: 2, ...input, max_key_number: 1 };
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: storedRubric,
+            },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+          { data: null, error: dbError },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { gradingRubric: input, insertAfterId: 9 });
+
+    expect(result.error).toEqual(dbError);
+    const restore = mockClient.from.mock.results.at(-1)?.value.update.mock.calls[0][0];
+    expect(restore).toEqual({ grading_rubric: storedRubric, content_type: "exercise" });
+  });
+
   it("gradingRubric 未指定なら採点基準の列に触れない", async () => {
     const { mockClient } = mockAdminWithStorage({
       tableResults: { learning_contents: [{ data: null, error: null }] },

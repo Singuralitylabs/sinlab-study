@@ -57,7 +57,7 @@ import type { QualityLevel, RequirementStatus } from "@/app/constants/grading";
  * requirements (reference only); none = URL submission (not graded); legacy = free-text review
  * from before structured grading.
  */
-export type ScoreKind = "rubric" | "estimated" | "none" | "legacy";
+export type ScoreKind = "rubric" | "estimated" | "none" | "legacy" | "incomplete";
 
 /** Defined as `type` (not `interface`) so it is assignable to Supabase's Json. */
 export type GradingRequirement = {

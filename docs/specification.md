@@ -781,6 +781,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 | `estimated` | コード提出 + 基準未設定 | 同じ式。AI が要件を 1〜10 件推測する。「参考採点」と明示し、修了判定には使わない |
 | `none` | URL 提出 | なし（NULL）。品質は `fair` に固定し、要件の判定は行わない |
 | `legacy` | 過去分 | 既存の値のまま（再採点しない） |
+| `incomplete` | 採点完了前（`pending` / `processing` / `failed`） | なし。確保時に書き、完了時に上の3つのいずれかへ置き換わる。既定の `legacy` は使わない |
 
 - **合否**: `rubric` のときだけ `passed` を記録する。合格は「未達成の要件が 1 つもない かつ 点数 ≥ `CERTIFICATE_PASS_SCORE`」。**`CERTIFICATE_PASS_SCORE` が 0（既定）の間は無効で、`passed` は NULL のまま**・画面にも合否を出さない。値を決めるときは `scripts/grading-dry-run.ts` の分布を見たうえで定数を変える PR を出す
 - **検証失敗時の再生成**: JSON として不正・スキーマ違反の応答は **1 回だけ**再生成する。2 回とも失敗したら `failed`（受講生の回数に数えない）。再生成を含む全試行と 429 のリトライ待機は `GEMINI_TOTAL_BUDGET_MS` を共有する（`maxDuration` を超えない）

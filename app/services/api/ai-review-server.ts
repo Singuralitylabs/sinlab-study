@@ -179,7 +179,14 @@ export async function claimPendingAIReview(
   const { data: inserted, error: insertError } = await supabase
     .from("ai_reviews")
     .upsert(
-      { submission_id: submissionId, status: "pending", created_at: now },
+      {
+        submission_id: submissionId,
+        status: "pending",
+        created_at: now,
+        // The column default is legacy, which means a pre-migration free-text review. A row this
+        // code creates has not been graded yet, so a later failure must not be counted as one.
+        score_kind: "incomplete",
+      },
       { onConflict: "submission_id", ignoreDuplicates: true }
     )
     .select("id");
@@ -203,6 +210,7 @@ export async function claimPendingAIReview(
       review_json: null,
       rubric_version: null,
       passed: null,
+      score_kind: "incomplete",
       // created_at is reset because a reused failed row would otherwise keep its original day
       // and escape the per-day count; the reset also keeps a second stale-row claimer out.
       created_at: now,

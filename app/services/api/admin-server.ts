@@ -10,7 +10,11 @@ import {
   resolveSiblingResequence,
   type SiblingOrderRow,
 } from "@/app/lib/content-grouping";
-import { reusedRequirementKeys } from "@/app/lib/grading";
+import {
+  getGradingRubricVersion,
+  getRubricMaxKeyNumber,
+  reusedRequirementKeys,
+} from "@/app/lib/grading";
 import {
   type GradingRubricInput,
   nextGradingRubric,
@@ -1439,7 +1443,9 @@ export async function updateContent(
   };
   try {
     const result = await updateContentRow(supabase, id, patch, insertAfterId, gradingRubric);
-    if (result.error) {
+    // conflict and keyReuse leave the row unchanged but carry error: null. The questions were
+    // already replaced, so those outcomes have to restore them too or the quiz and the row diverge.
+    if (result.error || result.conflict || result.keyReuse) {
       await restorePrevious();
     }
     return result;
@@ -1493,6 +1499,13 @@ async function updateContentRow(
   // Set whenever this write changes grading_rubric, including a clear. The UPDATE matches that
   // version (or NULL) so a stale form cannot overwrite a newer rubric or republish an old key.
   let expectedRubricVersion: number | null | undefined;
+  // The versioned write commits before resequence. If a later step fails, put these back;
+  // otherwise a quiz keeps the new type and a wiped rubric while its questions are restored.
+  let rubricSnapshot: {
+    grading_rubric: LearningContent["grading_rubric"];
+    content_type: LearningContent["content_type"];
+  } | null = null;
+  let rubricWriteCommitted = false;
   if (needsCurrentWeek || needsCurrentPdf || touchesRubric) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
@@ -1521,6 +1534,21 @@ async function updateContentRow(
         // A rubric belongs to exercises only: judge the type the row will have after this update,
         // so switching a stored video to exercise keeps the rubric sent with it.
         const stored = parseGradingRubric(current.grading_rubric);
+        // zod can reject a row the CHECK allows (too many requirements, a duplicate key). The
+        // version is still in the JSON; treating that as NULL makes `IS NULL` match nothing and
+        // every later save 409s.
+        const lockVersion = getGradingRubricVersion(current.grading_rubric);
+        if (current.grading_rubric != null && lockVersion == null) {
+          return {
+            error: {
+              message: "保存済みの採点基準を読み取れませんでした",
+              details: "",
+              hint: "",
+              code: "PGRST116",
+            } as PostgrestError,
+            storageRemoved: true,
+          };
+        }
         const resultingType = patch.content_type ?? current.content_type;
         if (gradingRubric && resultingType === "exercise") {
           const reused = stored
@@ -1532,11 +1560,24 @@ async function updateContentRow(
           if (reused.length > 0) {
             return { error: null, storageRemoved: true, keyReuse: reused };
           }
-          patch.grading_rubric = nextGradingRubric(stored, gradingRubric);
+          const basis =
+            stored ??
+            (lockVersion != null
+              ? {
+                  version: lockVersion,
+                  requirements: [{ key: "__unparsed__", name: "unparsed", description: "" }],
+                  max_key_number: getRubricMaxKeyNumber(current.grading_rubric),
+                }
+              : null);
+          patch.grading_rubric = nextGradingRubric(basis, gradingRubric);
         } else {
           patch.grading_rubric = null;
         }
-        expectedRubricVersion = stored?.version ?? null;
+        rubricSnapshot = {
+          grading_rubric: current.grading_rubric,
+          content_type: current.content_type,
+        };
+        expectedRubricVersion = lockVersion;
       }
       if (needsCurrentWeek) {
         const destinationWeekId = patch.week_id ?? current.week_id;
@@ -1575,9 +1616,23 @@ async function updateContentRow(
     if (Array.isArray(rubricRows) && rubricRows.length === 0) {
       return { error: null, storageRemoved: true, conflict: true };
     }
+    rubricWriteCommitted = true;
     delete patch.grading_rubric;
     delete patch.content_type;
   }
+
+  const restoreRubricWrite = async () => {
+    if (!rubricWriteCommitted || !rubricSnapshot) {
+      return;
+    }
+    const { error: restoreError } = await supabase
+      .from("learning_contents")
+      .update(rubricSnapshot)
+      .eq("id", id);
+    if (restoreError) {
+      console.error("コンテンツ更新エラー（採点基準の復元）:", restoreError.message);
+    }
+  };
 
   const resequenced = await resequenceDestinationForUpdate(
     supabase,
@@ -1589,6 +1644,7 @@ async function updateContentRow(
   );
   if (resequenced.error) {
     console.error("コンテンツ更新エラー（再採番）:", resequenced.error.message);
+    await restoreRubricWrite();
     return { error: resequenced.error, storageRemoved: true };
   }
 
@@ -1603,6 +1659,7 @@ async function updateContentRow(
     const { error } = await supabase.from("learning_contents").update(updatePayload).eq("id", id);
     if (error) {
       console.error("コンテンツ更新エラー:", error.message);
+      await restoreRubricWrite();
       return { error, storageRemoved: true };
     }
   }
