@@ -147,7 +147,10 @@ function droppedArgs(statement: string, name: string): string[] | "all" | null {
 }
 
 function grantTarget(statement: string, name: string): string | "public-all" | null {
-  if (/\bON\s+ALL\s+FUNCTIONS\s+IN\s+SCHEMA\s+[\w\s,]*\bpublic\b/i.test(statement)) {
+  const allInSchema = statement.match(
+    /\bON\s+ALL\s+(?:FUNCTIONS|ROUTINES)\s+IN\s+SCHEMA\s+([\s\S]*)$/i
+  );
+  if (allInSchema && /(?:^|[\s,])"?public"?\b/i.test(allInSchema[1] ?? "")) {
     return "public-all";
   }
   const match = statement.match(
@@ -164,43 +167,103 @@ function applyRoles(acl: ExecuteAcl, roles: string, turnOn: boolean) {
   if (clauseHas(roles, "service_role")) acl.serviceRole = turnOn;
 }
 
+function dollarBody(statement: string): string | null {
+  const tag = /^[\s\S]*?(\$[A-Za-z0-9_]*\$)/.exec(statement);
+  if (!tag?.[1]) return null;
+  const start = tag.index + tag[0].length;
+  const end = statement.indexOf(tag[1], start);
+  if (end === -1) return null;
+  return statement.slice(start, end);
+}
+
+function privilegeTail(statement: string): string | null {
+  let i = 0;
+  let dollar: string | null = null;
+  while (i < statement.length) {
+    if (dollar) {
+      if (statement.startsWith(dollar, i)) {
+        i += dollar.length;
+        dollar = null;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+    const tag = /^\$[A-Za-z0-9_]*\$/.exec(statement.slice(i));
+    if (tag) {
+      dollar = tag[0];
+      i += dollar.length;
+      continue;
+    }
+    if (statement[i] === "'") {
+      i += 1;
+      while (i < statement.length) {
+        if (statement[i] === "'" && statement[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        if (statement[i] === "'") {
+          i += 1;
+          break;
+        }
+        i += 1;
+      }
+      continue;
+    }
+    if (/^(GRANT|REVOKE)\b/i.test(statement.slice(i))) return statement.slice(i);
+    i += 1;
+  }
+  return null;
+}
+
+function applyStatement(statement: string, name: string, byArgs: Map<string, ExecuteAcl>) {
+  const collapsed = statement.replace(/\s+/g, " ").trim();
+  if (/^DO\b/i.test(collapsed)) {
+    const inner = dollarBody(statement);
+    if (!inner) return;
+    for (const part of splitSql(inner)) {
+      const privilege = privilegeTail(part);
+      if (privilege) applyStatement(privilege, name, byArgs);
+    }
+    return;
+  }
+  const created = createdSignature(collapsed, name);
+  if (created) {
+    const existing = byArgs.get(created.args);
+    if (!(created.replace && existing)) byArgs.set(created.args, defaultAcl());
+    return;
+  }
+  const dropped = droppedArgs(collapsed, name);
+  if (dropped === "all") {
+    byArgs.clear();
+    return;
+  }
+  if (dropped) {
+    for (const args of dropped) byArgs.delete(args);
+    return;
+  }
+  if (/^REVOKE\s+GRANT\s+OPTION\s+FOR\b/i.test(collapsed)) return;
+  if (!/^GRANT\b/i.test(collapsed) && !/^REVOKE\b/i.test(collapsed)) return;
+  const target = grantTarget(collapsed, name);
+  if (target === null) return;
+  const roles = roleClause(collapsed);
+  if (!roles) return;
+  const keys = target === "public-all" ? [...byArgs.keys()] : [target];
+  for (const key of keys) {
+    const acl = byArgs.get(key) ?? {
+      anon: false,
+      authenticated: false,
+      public: false,
+      serviceRole: false,
+    };
+    applyRoles(acl, roles, /^GRANT\b/i.test(collapsed));
+    byArgs.set(key, acl);
+  }
+}
+
 function replayExecuteAcl(sql: string, name: string): Map<string, ExecuteAcl> {
   const byArgs = new Map<string, ExecuteAcl>();
-  for (const statement of splitSql(sql)) {
-    const collapsed = statement.replace(/\s+/g, " ").trim();
-    const created = createdSignature(collapsed, name);
-    if (created) {
-      const existing = byArgs.get(created.args);
-      if (!(created.replace && existing)) byArgs.set(created.args, defaultAcl());
-      continue;
-    }
-    const dropped = droppedArgs(collapsed, name);
-    if (dropped === "all") {
-      byArgs.clear();
-      continue;
-    }
-    if (dropped) {
-      for (const args of dropped) byArgs.delete(args);
-      continue;
-    }
-    if (/^REVOKE\s+GRANT\s+OPTION\s+FOR\b/i.test(collapsed)) continue;
-    if (!/^GRANT\b/i.test(collapsed) && !/^REVOKE\b/i.test(collapsed)) continue;
-    const target = grantTarget(collapsed, name);
-    if (target === null) continue;
-    const roles = roleClause(collapsed);
-    if (!roles) continue;
-    const keys = target === "public-all" ? [...byArgs.keys()] : [target];
-    for (const key of keys) {
-      const acl = byArgs.get(key) ?? {
-        anon: false,
-        authenticated: false,
-        public: false,
-        serviceRole: false,
-      };
-      applyRoles(acl, roles, /^GRANT\b/i.test(collapsed));
-      byArgs.set(key, acl);
-    }
-  }
+  for (const statement of splitSql(sql)) applyStatement(statement, name, byArgs);
   return byArgs;
 }
 
@@ -253,6 +316,7 @@ describe("get_weekly_funnel の EXECUTE 取り消し（#319）", () => {
       "GRANT EXECUTE ON FUNCTION public.get_weekly_funnel(integer) TO service_role, authenticated;",
       "GRANT ALL ON FUNCTION public.get_weekly_funnel(integer) TO authenticated;",
       "GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO authenticated;",
+      "GRANT EXECUTE ON ALL ROUTINES IN SCHEMA public TO authenticated;",
     ];
     for (const statement of regrants) {
       expect(memberCanExecute(replayExecuteAcl(`${base}\n${statement}`, "get_weekly_funnel"))).toBe(
@@ -281,5 +345,17 @@ CREATE FUNCTION public.funnel_wrapper() RETURNS void LANGUAGE sql AS $$ SELECT *
     const dropped = `${base}
 DROP FUNCTION public.get_weekly_funnel(integer);`;
     expect(replayExecuteAcl(dropped, "get_weekly_funnel").size).toBe(0);
+    const doBlock = `${base}
+DO $$
+BEGIN
+  GRANT EXECUTE ON FUNCTION public.get_weekly_funnel(integer) TO authenticated;
+END $$;`;
+    expect(memberCanExecute(replayExecuteAcl(doBlock, "get_weekly_funnel"))).toBe(true);
+    const grantInBody = `${base}
+CREATE FUNCTION public.funnel_wrapper() RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  GRANT EXECUTE ON FUNCTION public.get_weekly_funnel(integer) TO authenticated;
+END $$;`;
+    expect(memberCanExecute(replayExecuteAcl(grantInBody, "get_weekly_funnel"))).toBe(false);
   });
 });
