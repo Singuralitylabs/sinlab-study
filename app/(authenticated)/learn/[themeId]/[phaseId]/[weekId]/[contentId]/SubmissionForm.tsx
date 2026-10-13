@@ -32,6 +32,8 @@ interface SubmissionFormProps {
   contentId: number;
   allowedSubmissionTypes: "code" | "url" | "both";
   codeLanguage: CodeLanguage;
+  /** Id of the completed review the page already renders for this submission. */
+  persistedReviewId: number | null;
 }
 
 function buildFailedReview(errorMessage: string): AIReviewListItem {
@@ -53,6 +55,7 @@ export function SubmissionForm({
   contentId,
   allowedSubmissionTypes,
   codeLanguage,
+  persistedReviewId,
 }: SubmissionFormProps) {
   const router = useRouter();
   const [submissionType, setSubmissionType] = useState<SubmissionType>(
@@ -182,6 +185,11 @@ export function SubmissionForm({
   };
 
   const [lastSubmissionId, setLastSubmissionId] = useState<number | null>(null);
+  // refresh keeps this card, so the page and the form would show the same completed row.
+  const pageShowsThisReview =
+    aiReview?.status === "completed" &&
+    persistedReviewId != null &&
+    aiReview.id === persistedReviewId;
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -382,18 +390,20 @@ export function SubmissionForm({
         </Button>
       </form>
 
-      <AIReviewDisplayNoSSR
-        review={aiReview}
-        isLoading={isReviewLoading}
-        defaultExpanded={true}
-        onRetry={
-          lastSubmissionId && aiReview?.status === "failed"
-            ? () => {
-                requestAIReview(lastSubmissionId, { submissionJustSaved: false });
-              }
-            : undefined
-        }
-      />
+      {!pageShowsThisReview && (
+        <AIReviewDisplayNoSSR
+          review={aiReview}
+          isLoading={isReviewLoading}
+          defaultExpanded={true}
+          onRetry={
+            lastSubmissionId && aiReview?.status === "failed"
+              ? () => {
+                  requestAIReview(lastSubmissionId, { submissionJustSaved: false });
+                }
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 }

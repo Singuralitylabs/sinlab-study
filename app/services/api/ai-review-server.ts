@@ -100,11 +100,19 @@ export async function fetchAllSubmissionsWithReviews({
   return { data, count: count ?? 0, error: null };
 }
 
-/** Uses the admin client to avoid depending on RLS; safety comes from the userId filter. */
+/**
+ * Uses the admin client to avoid depending on RLS; safety comes from the userId filter.
+ * `submissionId` is the submission this completed review belongs to. The inner join keeps the
+ * latest submission that has a completed review, which can be older than the latest submission.
+ */
 export async function fetchCompletedAIReviewByContentId(
   userId: number,
   contentId: number
-): Promise<{ data: AIReviewListItem | null; error: PostgrestError | null }> {
+): Promise<{
+  data: AIReviewListItem | null;
+  submissionId: number | null;
+  error: PostgrestError | null;
+}> {
   const supabase = await createAdminSupabaseClient();
 
   const { data: submission, error } = await supabase
@@ -120,16 +128,20 @@ export async function fetchCompletedAIReviewByContentId(
 
   if (error) {
     console.error("AIレビュー取得エラー (fetchCompletedAIReviewByContentId):", error.message);
-    return { data: null, error };
+    return { data: null, submissionId: null, error };
   }
 
   if (!submission?.ai_review) {
-    return { data: null, error: null };
+    return { data: null, submissionId: null, error: null };
   }
 
   // ai_reviews.submission_id is UNIQUE so PostgREST returns a to-one object; generated types also
   // allow to-many, hence the cast via unknown.
-  return { data: submission.ai_review as unknown as AIReviewListItem, error: null };
+  return {
+    data: submission.ai_review as unknown as AIReviewListItem,
+    submissionId: submission.id,
+    error: null,
+  };
 }
 
 /** Uses the admin client to avoid depending on RLS; safety comes from the userId filter. */

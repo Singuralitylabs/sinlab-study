@@ -7,7 +7,11 @@ import { createClient } from "@supabase/supabase-js";
 import { USER_STATUS } from "@/app/constants/user";
 import { parseGradingRubric } from "@/app/lib/grading-schema";
 import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
-import { generateReview, resolveGeminiApiKey } from "@/app/services/api/gemini";
+import {
+  generateReview,
+  ReviewGenerationError,
+  resolveGeminiApiKey,
+} from "@/app/services/api/gemini";
 import type { Database } from "@/app/types/lib/database.types";
 import { type DryRunSample, formatSummary, summarizeByContent } from "./grading-dry-run-stats";
 
@@ -116,6 +120,17 @@ async function main() {
             `content ${content.id} submission ${submission.id} run ${run}: score ${result.overallScore}`
           );
         } catch (error) {
+          // Failed and regenerated calls are still billed. Omit them and the cost average is low.
+          if (error instanceof ReviewGenerationError) {
+            samples.push({
+              contentId: content.id,
+              score: null,
+              hasUnmet: false,
+              promptTokens: error.usage.promptTokens,
+              completionTokens: error.usage.completionTokens,
+              thoughtsTokens: error.usage.thoughtsTokens,
+            });
+          }
           console.warn(
             `content ${content.id} submission ${submission.id} run ${run}: failed (${
               error instanceof Error ? error.message : "unknown"

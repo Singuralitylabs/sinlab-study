@@ -110,6 +110,7 @@ describe("fetchCompletedAIReviewByContentId", () => {
     const result = await fetchCompletedAIReviewByContentId(2, 5);
 
     expect(result.data).toEqual(reviewData);
+    expect(result.submissionId).toBe(1);
     expect(result.error).toBeNull();
     expect(mockClient.from).toHaveBeenCalledTimes(1);
     expect(mockClient.from).toHaveBeenCalledWith("submissions");
@@ -132,6 +133,7 @@ describe("fetchCompletedAIReviewByContentId", () => {
     const result = await fetchCompletedAIReviewByContentId(2, 5);
 
     expect(result.data).toBeNull();
+    expect(result.submissionId).toBeNull();
     expect(result.error).toBeNull();
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
@@ -145,6 +147,7 @@ describe("fetchCompletedAIReviewByContentId", () => {
     const result = await fetchCompletedAIReviewByContentId(2, 5);
 
     expect(result.data).toBeNull();
+    expect(result.submissionId).toBeNull();
     expect(result.error).toEqual(dbError);
   });
 });

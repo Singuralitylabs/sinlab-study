@@ -227,7 +227,7 @@ export default async function ContentPage({ params }: PageProps) {
   // it depends on none of the other fetches.
   const [
     { isCompleted },
-    { data: existingReview },
+    { data: existingReview, submissionId: reviewedSubmissionId },
     { data: latestSubmission },
     slideSignedUrl,
     { data: quizQuestions, error: quizError },
@@ -238,7 +238,7 @@ export default async function ContentPage({ params }: PageProps) {
       : Promise.resolve({ isCompleted: false }),
     userId && content.content_type === "exercise"
       ? fetchCompletedAIReviewByContentId(userId, contentIdNum)
-      : Promise.resolve({ data: null }),
+      : Promise.resolve({ data: null, submissionId: null }),
     userId && content.content_type === "exercise"
       ? fetchLatestSubmissionByContentId(userId, contentIdNum)
       : Promise.resolve({ data: null }),
@@ -268,6 +268,13 @@ export default async function ContentPage({ params }: PageProps) {
           todayTotal: aiReviewUsage.todayTotal,
           now: new Date(),
         })
+      : null;
+
+  // The completed-review query is the newest submission that has one, which can be older than
+  // the latest submission. Showing it under the newer code would present the old score as this one.
+  const reviewForLatestSubmission =
+    existingReview && latestSubmission && reviewedSubmissionId === latestSubmission.id
+      ? existingReview
       : null;
 
   return (
@@ -377,7 +384,7 @@ export default async function ContentPage({ params }: PageProps) {
                         </div>
                       )}
 
-                      {existingReview && (
+                      {reviewForLatestSubmission && (
                         <div className="mb-6">
                           <div className="flex items-center gap-2 mb-2">
                             <h3 className="text-lg font-semibold">AIレビュー結果</h3>
@@ -389,7 +396,10 @@ export default async function ContentPage({ params }: PageProps) {
                               AIレビュー済み
                             </Badge>
                           </div>
-                          <AIReviewDisplayNoSSR review={existingReview} defaultExpanded={false} />
+                          <AIReviewDisplayNoSSR
+                            review={reviewForLatestSubmission}
+                            defaultExpanded={false}
+                          />
                         </div>
                       )}
 
@@ -413,6 +423,7 @@ export default async function ContentPage({ params }: PageProps) {
                           (content.allowed_submission_types as "code" | "url" | "both") ?? "code"
                         }
                         codeLanguage={(content.code_language as CodeLanguage) ?? "javascript"}
+                        persistedReviewId={reviewForLatestSubmission?.id ?? null}
                       />
                     </>
                   ) : (

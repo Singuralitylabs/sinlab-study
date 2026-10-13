@@ -62,6 +62,17 @@ describe("summarizeByContent", () => {
     expect(summary.samples).toBe(2);
   });
 
+  it("失敗サンプルのトークンは平均に残る", () => {
+    const [summary] = summarizeByContent([
+      sample({ score: null, promptTokens: 50, completionTokens: 10, thoughtsTokens: 20 }),
+      sample({ score: 40, promptTokens: 150, completionTokens: 30, thoughtsTokens: 40 }),
+    ]);
+    expect(summary.mean).toBe(40);
+    expect(summary.avgPromptTokens).toBe(100);
+    expect(summary.avgCompletionTokens).toBe(20);
+    expect(summary.avgThoughtsTokens).toBe(30);
+  });
+
   it("全サンプルが null のとき平均は null、合格率は 0", () => {
     const [summary] = summarizeByContent([sample({ score: null })]);
     expect(summary.mean).toBeNull();
