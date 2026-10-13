@@ -3,8 +3,8 @@ import { isAuthorizedCronRequest } from "@/app/services/auth/cron-auth";
 import { runEmailDigest } from "@/app/services/notifications/email-digest-server";
 
 /**
- * Sending stops new sends at EMAIL_DIGEST_TIME_BUDGET_MS (30s); 60s leaves room for one send's
- * EMAIL_SEND_TIMEOUT_MS (20s) and DB round trips (within Vercel Hobby's limit).
+ * Sending stops new sends at EMAIL_DIGEST_TIME_BUDGET_MS (40s); 60s leaves room for one send's
+ * EMAIL_SEND_TIMEOUT_MS (15s) and DB round trips (within Vercel Hobby's limit).
  */
 export const maxDuration = 60;
 

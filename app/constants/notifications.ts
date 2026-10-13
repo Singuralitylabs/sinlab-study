@@ -12,7 +12,7 @@ export const SLACK_WEBHOOK_TIMEOUT_MS = 5_000;
  * the cron route's maxDuration (60s). A TimeoutError means "delivery unknown" and is never retried
  * (see RETRYABLE_EMAIL_ERROR).
  */
-export const EMAIL_SEND_TIMEOUT_MS = 20_000;
+export const EMAIL_SEND_TIMEOUT_MS = 15_000;
 
 export const RESEND_API_URL = "https://api.resend.com/emails";
 
@@ -187,11 +187,12 @@ export const EMAIL_DIGEST_SEND_INTERVAL_MS = 500;
 /**
  * Elapsed-time cap (ms) after which cron may not start new sends. Stop before the route's
  * maxDuration (60s) cuts it off and carry the rest over like cap overflow. Worst case is a send
- * started just under the cap that runs to EMAIL_SEND_TIMEOUT_MS: 30s + 20s = 50s, leaving ~10s for
- * DB round trips and the lock release. Normal sends take well under 1s, so the budget is bounded by
- * EMAIL_DIGEST_SEND_INTERVAL_MS (~60 sends per run); the rest carries over to later runs.
+ * started just under the cap that runs to EMAIL_SEND_TIMEOUT_MS: 40s + 15s = 55s, leaving ~5s for
+ * DB round trips and the lock release. Sends start at least EMAIL_DIGEST_SEND_INTERVAL_MS apart,
+ * so 40s fits 80 starts, enough to reach the default daily cap (EMAIL_DIGEST_MAX_PER_DAY = 80) in
+ * one run. Keep (budget / interval) >= that cap when changing either value.
  */
-export const EMAIL_DIGEST_TIME_BUDGET_MS = 30_000;
+export const EMAIL_DIGEST_TIME_BUDGET_MS = 40_000;
 
 /**
  * Retry window (days from the publish date, JST) for announcement email recipients whose send

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  EMAIL_DIGEST_MAX_PER_DAY,
+  EMAIL_DIGEST_SEND_INTERVAL_MS,
   EMAIL_DIGEST_TIME_BUDGET_MS,
   EMAIL_SEND_TIMEOUT_MS,
   RESEND_API_URL,
@@ -55,9 +57,16 @@ describe("sendEmail", () => {
     });
   });
 
-  it("タイムアウト値は20秒で、定期メールの予算と合わせてcronのmaxDuration(60秒)に収まる", () => {
-    expect(EMAIL_SEND_TIMEOUT_MS).toBe(20_000);
-    expect(EMAIL_DIGEST_TIME_BUDGET_MS + EMAIL_SEND_TIMEOUT_MS).toBeLessThanOrEqual(55_000);
+  it("最悪ケース（予算ぎりぎりで始めた1通がタイムアウトまで掛かる）がcronのmaxDuration(60秒)にDB余裕を残して収まり、予算で日次上限まで送れる", () => {
+    const MAX_DURATION_MS = 60_000;
+    const DB_MARGIN_MS = 5_000;
+    expect(EMAIL_SEND_TIMEOUT_MS).toBe(15_000);
+    expect(EMAIL_DIGEST_TIME_BUDGET_MS + EMAIL_SEND_TIMEOUT_MS).toBeLessThanOrEqual(
+      MAX_DURATION_MS - DB_MARGIN_MS
+    );
+    expect(EMAIL_DIGEST_TIME_BUDGET_MS / EMAIL_DIGEST_SEND_INTERVAL_MS).toBeGreaterThanOrEqual(
+      EMAIL_DIGEST_MAX_PER_DAY
+    );
   });
 
   it("TimeoutError・ネットワーク断は送達不明として再送対象にせず、429/5xxだけ再送対象にする", () => {
