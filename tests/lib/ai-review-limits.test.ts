@@ -4,6 +4,7 @@ import {
   computeRemainingReviews,
   evaluateReviewRequest,
   getJstDayWindow,
+  limitedDecision,
   type ReviewUsageRow,
   trialLimitMessage,
 } from "@/app/lib/ai-review-limits";
@@ -50,6 +51,24 @@ describe("getJstDayWindow", () => {
     expect(getJstDayWindow(new Date("2026-10-12T14:59:59.999Z")).startIso).toBe(
       "2026-10-11T15:00:00.000Z"
     );
+  });
+});
+
+describe("limitedDecision", () => {
+  it("日次の理由には JST 翌0時の resetsAt を付け、解除されない理由には付けない", () => {
+    expect(limitedDecision("content_daily", 0, NOW)).toMatchObject({
+      remaining: 0,
+      resetsAt: "2026-10-12T15:00:00.000Z",
+    });
+    expect(limitedDecision("user_daily", 0, NOW).resetsAt).toBe("2026-10-12T15:00:00.000Z");
+    expect(limitedDecision("trial_lifetime", 0, NOW)).toMatchObject({
+      resetsAt: null,
+      message: trialLimitMessage(),
+    });
+    expect(limitedDecision("submission_reviewed", 1, NOW)).toMatchObject({
+      remaining: 1,
+      resetsAt: null,
+    });
   });
 });
 

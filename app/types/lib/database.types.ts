@@ -913,6 +913,20 @@ export type Database = {
         Args: { p_table: string; p_updates: Json };
         Returns: undefined;
       };
+      claim_ai_review: {
+        Args: {
+          p_active_per_content_per_day: number;
+          p_active_per_day: number;
+          p_content_id: number;
+          p_day_start: string;
+          p_stale_before: string;
+          p_submission_id: number;
+          p_trial_per_content_lifetime: number;
+          p_user_id: number;
+          p_user_status: string;
+        };
+        Returns: Json;
+      };
       claim_email_test_send: {
         Args: { p_day_start: string; p_limit: number; p_user_id: number };
         Returns: number;

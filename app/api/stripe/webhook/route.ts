@@ -9,6 +9,8 @@ import {
   extractUserId,
   findMirrorOwner,
   isForeignCheckoutSession,
+  isPendingOwnCustomer,
+  isPendingOwnObject,
   releaseEventClaim,
   syncSubscriptionStatus,
 } from "@/app/services/api/stripe-webhook-server";
@@ -20,6 +22,7 @@ import {
 type EventPlan =
   | { kind: "skip"; reason: string }
   | { kind: "error" }
+  | { kind: "retry"; reason: string }
   | { kind: "handle"; run: () => Promise<string | null> };
 
 /**
@@ -29,6 +32,7 @@ type EventPlan =
  * would otherwise pile up rows in stripe_events, and answering them 500 only makes Stripe retry
  * and eventually disable the endpoint, stopping cancellations and payment-failure alerts. A
  * redelivery reaches the same verdict, so no claim is needed to answer it 200.
+ * A mirror miss is split in two: an own object (metadata marker) is `retry`, anything else `skip`.
  * @returns run resolves to an error message (500 with the claim released) or null.
  */
 async function planEvent(event: Stripe.Event): Promise<EventPlan> {
@@ -80,6 +84,15 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
         return { kind: "error" };
       }
       if (userId === null) {
+        // Own subscription whose mirror row is not there yet (the event overtook
+        // checkout.session.completed): answer 503 so Stripe redelivers it, instead of losing it.
+        const { error: ownerError, pending } = await isPendingOwnObject(subscription.metadata);
+        if (ownerError) {
+          return { kind: "error" };
+        }
+        if (pending) {
+          return { kind: "retry", reason: `Subscription id=${subscription.id}` };
+        }
         return { kind: "skip", reason: `Subscription id=${subscription.id}` };
       }
       return {
@@ -110,6 +123,13 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
         return { kind: "error" };
       }
       if (userId === null) {
+        const { error: ownerError, pending } = await isPendingOwnCustomer(customerId);
+        if (ownerError) {
+          return { kind: "error" };
+        }
+        if (pending) {
+          return { kind: "retry", reason: `Invoice id=${invoice.id}` };
+        }
         return { kind: "skip", reason: `Invoice id=${invoice.id}` };
       }
       return {
@@ -181,6 +201,14 @@ export async function POST(request: NextRequest) {
   if (plan.kind === "error") {
     console.error(`Webhook対象判定エラー: id=${event.id} type=${event.type}`);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
+  }
+  if (plan.kind === "retry") {
+    // Not claimed: nothing was processed, so the redelivery must be free to claim. Kept to own
+    // objects (isPendingOwnObject()) so the shared account's sales never reach here (#302).
+    console.warn(
+      `ミラー行が未作成の自アプリのイベントのため再送を要求しました: type=${event.type} ${plan.reason}`
+    );
+    return NextResponse.json({ error: "ミラー行が未作成です。再送してください" }, { status: 503 });
   }
   if (plan.kind === "skip") {
     console.warn(`対象外のイベントをスキップしました: type=${event.type} ${plan.reason}`);

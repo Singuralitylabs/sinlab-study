@@ -20,6 +20,8 @@ import {
   extractUserId,
   findMirrorOwner,
   isForeignCheckoutSession,
+  isPendingOwnCustomer,
+  isPendingOwnObject,
   reactivateUserFromMirror,
   releaseEventClaim,
   revertUserToTrial,
@@ -145,6 +147,85 @@ describe("findMirrorOwner", () => {
     await expect(findMirrorOwner("stripe_subscription_id", "sub_1")).resolves.toEqual({
       error: dbError.message,
       userId: null,
+    });
+  });
+});
+
+describe("isPendingOwnObject", () => {
+  const own = { user_id: "19", auth_id: "auth-19" };
+  const mockUsers = (result: { data: unknown; error: unknown }) =>
+    vi
+      .mocked(createAdminSupabaseClient)
+      .mockResolvedValue(createMockSupabaseClient({ tableResults: { users: result } }) as never);
+
+  it("user_id と auth_id が users 行と一致すれば自アプリ（ミラー未作成）とみなす", async () => {
+    mockUsers({ data: { auth_id: "auth-19" }, error: null });
+    await expect(isPendingOwnObject(own)).resolves.toEqual({ error: null, pending: true });
+  });
+
+  it.each([
+    ["metadata が無い", undefined],
+    ["auth_id が無い", { user_id: "19" }],
+    ["user_id が無い", { auth_id: "auth-19" }],
+    ["user_id が不正", { user_id: "042", auth_id: "auth-19" }],
+  ])("%s ときはDBを引かず他用途とみなす", async (_label, metadata) => {
+    await expect(isPendingOwnObject(metadata as never)).resolves.toEqual({
+      error: null,
+      pending: false,
+    });
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["users 行が無い", null],
+    ["auth_id が食い違う", { auth_id: "auth-other" }],
+  ])("%s ときは再送しても行ができないため他用途とみなす", async (_label, row) => {
+    mockUsers({ data: row, error: null });
+    await expect(isPendingOwnObject(own)).resolves.toEqual({ error: null, pending: false });
+  });
+
+  it("DBエラーはエラーを返す", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mockUsers({ data: null, error: dbError });
+    await expect(isPendingOwnObject(own)).resolves.toEqual({
+      error: dbError.message,
+      pending: false,
+    });
+  });
+});
+
+describe("isPendingOwnCustomer", () => {
+  it("Customer の metadata で判定する", async () => {
+    const retrieve = vi.fn().mockResolvedValue({
+      id: "cus_1",
+      metadata: { user_id: "19", auth_id: "auth-19" },
+    });
+    vi.mocked(getStripeClient).mockReturnValue({ customers: { retrieve } } as never);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(
+      createMockSupabaseClient({
+        tableResults: { users: { data: { auth_id: "auth-19" }, error: null } },
+      }) as never
+    );
+
+    await expect(isPendingOwnCustomer("cus_1")).resolves.toEqual({ error: null, pending: true });
+    expect(retrieve).toHaveBeenCalledWith("cus_1");
+  });
+
+  it("削除済みの Customer は他用途とみなす", async () => {
+    const retrieve = vi.fn().mockResolvedValue({ id: "cus_1", deleted: true });
+    vi.mocked(getStripeClient).mockReturnValue({ customers: { retrieve } } as never);
+
+    await expect(isPendingOwnCustomer("cus_1")).resolves.toEqual({ error: null, pending: false });
+  });
+
+  it("Stripe の取得に失敗したらエラーを返す", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const retrieve = vi.fn().mockRejectedValue(new Error("stripe down"));
+    vi.mocked(getStripeClient).mockReturnValue({ customers: { retrieve } } as never);
+
+    await expect(isPendingOwnCustomer("cus_1")).resolves.toEqual({
+      error: "stripe down",
+      pending: false,
     });
   });
 });

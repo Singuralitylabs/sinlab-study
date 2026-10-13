@@ -122,6 +122,62 @@ export async function findMirrorOwner(
   return { error: null, userId: data?.user_id ?? null };
 }
 
+/**
+ * True when the Stripe object's metadata names a user of this app (user_id + auth_id as written by
+ * createCheckoutSession() / ensureCheckoutCustomer()) whose users row still matches. Used only
+ * when the mirror has no row yet: that is an own object whose events overtook
+ * checkout.session.completed (to be redelivered), as opposed to the shared account's other sales
+ * (to be answered 200). The users lookup bounds the redelivery to objects that can still get a
+ * mirror row; a stale marker for a user that no longer exists would otherwise be retried until
+ * Stripe disables the endpoint. Buyers cannot set metadata, so the marker is not forgeable.
+ */
+export async function isPendingOwnObject(
+  metadata: Stripe.Metadata | null | undefined
+): Promise<{ error: string | null; pending: boolean }> {
+  const authId = metadata?.auth_id;
+  const rawUserId = metadata?.user_id;
+  if (!authId || !rawUserId) {
+    return { error: null, pending: false };
+  }
+  const userId = parseStripeUserId(rawUserId);
+  if (userId === null) {
+    return { error: null, pending: false };
+  }
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase
+    .from("users")
+    .select("auth_id")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) {
+    console.error("ユーザー取得エラー:", error.message);
+    return { error: error.message, pending: false };
+  }
+  return { error: null, pending: data?.auth_id === authId };
+}
+
+/**
+ * Same verdict as isPendingOwnObject() for an invoice's Customer. The invoice body carries no
+ * Customer metadata and the place of the subscription metadata differs across webhook API
+ * versions, so the Customer is fetched; this runs only for invoices the mirror does not know.
+ */
+export async function isPendingOwnCustomer(
+  customerId: string
+): Promise<{ error: string | null; pending: boolean }> {
+  let customer: Stripe.Customer | Stripe.DeletedCustomer;
+  try {
+    customer = await getStripeClient().customers.retrieve(customerId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Customer取得に失敗しました";
+    console.error("Customer取得エラー:", message);
+    return { error: message, pending: false };
+  }
+  if (customer.deleted) {
+    return { error: null, pending: false };
+  }
+  return isPendingOwnObject(customer.metadata);
+}
+
 function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
   return typeof unixSeconds === "number" ? new Date(unixSeconds * 1000).toISOString() : null;
 }
