@@ -25,7 +25,14 @@ function normalizeArgs(raw: string): string {
   const parts: string[] = [];
   let current = "";
   let depth = 0;
-  for (const ch of raw) {
+  for (let i = 0; i < raw.length; i += 1) {
+    const next = skipLiteral(raw, i);
+    if (next !== i) {
+      current += raw.slice(i, next);
+      i = next - 1;
+      continue;
+    }
+    const ch = raw[i] ?? "";
     if (ch === "(") depth += 1;
     if (ch === ")" && depth > 0) depth -= 1;
     if (ch === "," && depth === 0) {
@@ -135,13 +142,29 @@ function clauseHas(clause: string, role: string): boolean {
 }
 
 function functionPattern(name: string): string {
-  return `(?:(?:"public"|public)\\.)?"?${name}"?(?![A-Za-z0-9_])`;
+  return `(?:(?:"public"|public)\\s*\\.\\s*)?"?${name}"?(?![A-Za-z0-9_])`;
+}
+
+function skipLiteral(text: string, index: number): number {
+  if (text[index] === "'" || /^E'/i.test(text.slice(index)) || /^U&'/i.test(text.slice(index))) {
+    return consumeString(text, index);
+  }
+  const dollar = /^\$[A-Za-z0-9_]*\$/.exec(text.slice(index));
+  if (!dollar) return index;
+  const close = text.indexOf(dollar[0], index + dollar[0].length);
+  if (close === -1) return index;
+  return close + dollar[0].length;
 }
 
 function balancedParens(text: string): { inner: string; rest: string } | null {
   if (!text.startsWith("(")) return null;
   let depth = 0;
   for (let i = 0; i < text.length; i += 1) {
+    const next = skipLiteral(text, i);
+    if (next !== i) {
+      i = next - 1;
+      continue;
+    }
     if (text[i] === "(") depth += 1;
     else if (text[i] === ")") {
       depth -= 1;
@@ -165,7 +188,7 @@ function createdSignature(
 ): { args: string; replace: boolean; schema: string } | null {
   const match = statement.match(
     new RegExp(
-      `^CREATE\\s+(OR\\s+REPLACE\\s+)?FUNCTION\\s+(?:("?[A-Za-z_]\\w*"?)\\.)?"?${name}"?(?![A-Za-z0-9_])\\s*`,
+      `^CREATE\\s+(OR\\s+REPLACE\\s+)?FUNCTION\\s+(?:("?[A-Za-z_]\\w*"?)\\s*\\.\\s*)?"?${name}"?(?![A-Za-z0-9_])\\s*`,
       "i"
     )
   );
@@ -484,7 +507,7 @@ function applyAlter(statement: string, name: string, byArgs: Map<string, Execute
   const parked = parkedOf.get(byArgs) ?? new Map<string, ExecuteAcl>();
   const source = statement.match(
     new RegExp(
-      `^ALTER\\s+(?:FUNCTION|ROUTINE)\\s+(?:("?[A-Za-z_]\\w*"?)\\.)?"?${name}"?(?![A-Za-z0-9_])\\s*`,
+      `^ALTER\\s+(?:FUNCTION|ROUTINE)\\s+(?:("?[A-Za-z_]\\w*"?)\\s*\\.\\s*)?"?${name}"?(?![A-Za-z0-9_])\\s*`,
       "i"
     )
   );
@@ -520,7 +543,7 @@ function applyAlter(statement: string, name: string, byArgs: Map<string, Execute
     return true;
   }
   const onto = statement.match(
-    /^ALTER\s+(?:FUNCTION|ROUTINE)\s+(?:(?:"?[A-Za-z_]\w*"?)\.)?"?([A-Za-z_]\w*)"?\s*/i
+    /^ALTER\s+(?:FUNCTION|ROUTINE)\s+(?:(?:"?[A-Za-z_]\w*"?)\s*\.\s*)?"?([A-Za-z_]\w*)"?\s*/i
   );
   if (onto?.[1] && onto[1].toLowerCase() !== name.toLowerCase()) {
     const parsed = argsOf(statement.slice(onto[0].length));
@@ -723,5 +746,11 @@ CREATE OR REPLACE FUNCTION public.get_weekly_funnel(weeks integer DEFAULT (8), t
     const nestedGrant = `${base}
 GRANT EXECUTE ON FUNCTION public.get_weekly_funnel(weeks integer, OUT label varchar(20)) TO authenticated;`;
     expect(memberCanExecute(replayExecuteAcl(nestedGrant, "get_weekly_funnel"))).toBe(true);
+    const spacedSchema = `${base}
+GRANT EXECUTE ON FUNCTION public . get_weekly_funnel(integer) TO authenticated;`;
+    expect(memberCanExecute(replayExecuteAcl(spacedSchema, "get_weekly_funnel"))).toBe(true);
+    const parenInString = `${base}
+CREATE OR REPLACE FUNCTION public.get_weekly_funnel(weeks integer DEFAULT length(')'), tz text) RETURNS void LANGUAGE sql AS $$ SELECT 1 $$;`;
+    expect(memberCanExecute(replayExecuteAcl(parenInString, "get_weekly_funnel"))).toBe(true);
   });
 });
