@@ -1494,6 +1494,18 @@ function sameQuizQuestions(a: QuizQuestionData[], b: QuizQuestionData[]): boolea
   return normalize(a) === normalize(b);
 }
 
+function writtenRowUpdatedAt(data: unknown): string | null {
+  if (!Array.isArray(data) || data.length === 0) {
+    return null;
+  }
+  const row = data[0];
+  if (!row || typeof row !== "object" || !("updated_at" in row)) {
+    return null;
+  }
+  const updatedAt = (row as { updated_at: unknown }).updated_at;
+  return typeof updatedAt === "string" && updatedAt.length > 0 ? updatedAt : null;
+}
+
 async function updateContentRow(
   supabase: AdminSupabaseClient,
   id: number,
@@ -1531,6 +1543,9 @@ async function updateContentRow(
   } | null = null;
   let rubricWriteCommitted = false;
   let committedRubricVersion: number | null | undefined;
+  // The rubric UPDATE's updated_at. A later save moves it, including one that also leaves the
+  // rubric NULL, so a clear is not identified by IS NULL alone.
+  let committedRubricUpdatedAt: string | null = null;
   if (needsCurrentWeek || needsCurrentPdf || touchesRubric) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
@@ -1638,7 +1653,7 @@ async function updateContentRow(
     } else {
       rubricUpdate = rubricUpdate.eq("grading_rubric->>version", String(expectedRubricVersion));
     }
-    const { data: rubricRows, error: rubricError } = await rubricUpdate.select("id");
+    const { data: rubricRows, error: rubricError } = await rubricUpdate.select("id, updated_at");
     if (rubricError) {
       console.error("コンテンツ更新エラー:", rubricError.message);
       return { error: rubricError, storageRemoved: true };
@@ -1650,12 +1665,19 @@ async function updateContentRow(
     // The editor's next save has to lock this write, not a version a later refresh might load
     // for different rows.
     committedRubricVersion = getGradingRubricVersion(rubricPayload.grading_rubric);
+    committedRubricUpdatedAt = writtenRowUpdatedAt(rubricRows);
     delete patch.grading_rubric;
     delete patch.content_type;
   }
 
   const restoreRubricWrite = async () => {
     if (!rubricWriteCommitted || !rubricSnapshot || committedRubricVersion === undefined) {
+      return;
+    }
+    // A clear has no version. IS NULL also matches a later save that left the rubric empty,
+    // and the snapshot would put the previous rubric back. updated_at moves on that UPDATE.
+    if (committedRubricVersion === null && !committedRubricUpdatedAt) {
+      console.error("コンテンツ更新エラー（採点基準の復元）: 削除の時刻が取れないため戻さない");
       return;
     }
     // Match the version this save wrote. Another save can commit a newer rubric before
@@ -1669,6 +1691,9 @@ async function updateContentRow(
       restore = restore.is("grading_rubric", null);
     } else {
       restore = restore.eq("grading_rubric->>version", String(committedRubricVersion));
+    }
+    if (committedRubricUpdatedAt) {
+      restore = restore.eq("updated_at", committedRubricUpdatedAt);
     }
     const { data: restoredRows, error: restoreError } = await restore.select("id");
     if (restoreError) {
@@ -1708,11 +1733,20 @@ async function updateContentRow(
     // The rubric (and content_type, when this save changes it) was already written under the
     // version predicate. Filtering this update on the old version would match 0 rows.
     if (Object.keys(updatePayload).length > 0) {
-      const { error } = await supabase.from("learning_contents").update(updatePayload).eq("id", id);
+      const { data: updatedRows, error } = await supabase
+        .from("learning_contents")
+        .update(updatePayload)
+        .eq("id", id)
+        .select("updated_at");
       if (error) {
         console.error("コンテンツ更新エラー:", error.message);
         await restoreRubricWrite();
         return { error, storageRemoved: true };
+      }
+      // A throw after this UPDATE still has to match the row this save last wrote.
+      const stamped = writtenRowUpdatedAt(updatedRows);
+      if (stamped) {
+        committedRubricUpdatedAt = stamped;
       }
     }
 

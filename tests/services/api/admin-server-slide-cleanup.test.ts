@@ -1039,7 +1039,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
             },
             error: null,
           },
-          { data: [{ id: 1 }], error: null },
+          { data: [{ id: 1, updated_at: "2026-10-13T00:00:00.000Z" }], error: null },
           { data: null, error: dbError },
         ],
       },
@@ -1058,10 +1058,51 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       content_type: "exercise",
     });
     expect(restoreBuilder.is).toHaveBeenCalledWith("grading_rubric", null);
+    expect(restoreBuilder.eq).toHaveBeenCalledWith("updated_at", "2026-10-13T00:00:00.000Z");
     expect(restoreBuilder.eq).not.toHaveBeenCalledWith(
       "grading_rubric->>version",
       expect.anything()
     );
+  });
+
+  it("削除の updated_at が取れなければ空の基準を戻さない", async () => {
+    const storedRubric = { version: 2, ...input, max_key_number: 1 };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: storedRubric,
+            },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+          { data: null, error: dbError },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, {
+      content_type: "video",
+      gradingRubric: null,
+      insertAfterId: 9,
+    });
+
+    expect(result.error).toEqual(dbError);
+    const restoreCalls = mockClient.from.mock.results
+      .map((result) => result.value.update.mock.calls[0]?.[0])
+      .filter(
+        (payload) => payload && "grading_rubric" in payload && payload.grading_rubric !== null
+      );
+    expect(restoreCalls).toEqual([]);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "コンテンツ更新エラー（採点基準の復元）: 削除の時刻が取れないため戻さない"
+    );
+    errorSpy.mockRestore();
   });
 
   it("復元が0件ならより新しい保存をエラーにしない", async () => {
