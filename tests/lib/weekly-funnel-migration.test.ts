@@ -476,9 +476,17 @@ function applyAlter(statement: string, name: string, byArgs: Map<string, Execute
       if (current) parked.set(`${nextSchema}:${args}`, current);
       byArgs.delete(args);
     }
-    if (nextSchema === "public" && schema !== "public" && args !== null) {
-      byArgs.set(args, parked.get(`${schema}:${args}`) ?? defaultAcl());
-      parked.delete(`${schema}:${args}`);
+    if (nextSchema === "public" && schema !== "public") {
+      const parkedKeys =
+        args !== null
+          ? [`${schema}:${args}`]
+          : [...parked.keys()].filter((key) => key.startsWith(`${schema}:`));
+      if (args !== null || parkedKeys.length === 1) {
+        for (const key of parkedKeys) {
+          byArgs.set(key.slice(schema.length + 1), parked.get(key) ?? defaultAcl());
+          parked.delete(key);
+        }
+      }
     }
     return true;
   }
@@ -504,6 +512,7 @@ function memberCanExecute(byArgs: Map<string, ExecuteAcl>): boolean {
   const grantedTo = grantedToOf.get(byArgs) ?? new Map<string, Set<string>>();
   for (const acl of byArgs.values()) {
     if (acl.anon || acl.authenticated || acl.public) return true;
+    if (acl.serviceRole && reachesMember("service_role", grantedTo)) return true;
     for (const holder of holdersOf.get(acl) ?? []) {
       if (reachesMember(holder, grantedTo)) return true;
     }
@@ -668,5 +677,13 @@ GRANT funnel_reader TO authenticated;`;
     const clearedAcl = `${base}
 UPDATE pg_proc SET proacl = NULL WHERE proname = 'get_weekly_funnel' AND pronamespace = 'public'::regnamespace;`;
     expect(memberCanExecute(replayExecuteAcl(clearedAcl, "get_weekly_funnel"))).toBe(true);
+    const inheritService = `${base}
+GRANT service_role TO authenticated;`;
+    expect(memberCanExecute(replayExecuteAcl(inheritService, "get_weekly_funnel"))).toBe(true);
+    const bareMove = `${base}
+DROP FUNCTION public.get_weekly_funnel(integer);
+CREATE FUNCTION private.get_weekly_funnel(weeks integer) RETURNS integer LANGUAGE sql AS $$ SELECT weeks $$;
+ALTER FUNCTION private.get_weekly_funnel SET SCHEMA public;`;
+    expect(memberCanExecute(replayExecuteAcl(bareMove, "get_weekly_funnel"))).toBe(true);
   });
 });
