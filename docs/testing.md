@@ -81,6 +81,7 @@ Unit Tests (多数)
 | `build.yml` | 本番相当のビルド成立性 |
 | `typecheck.yml` | 型チェック（`tsc --noEmit`） |
 | `test.yml` | ユニットテスト（Vitest） |
+| `db-privileges.yml` | ローカル Supabase（Docker）に全 migration を空のDBから適用し、関数の EXECUTE 権限を `has_function_privilege()` で検証（pgTAP。`supabase/tests/database/`。4.3参照） |
 | `biome.yml` | Lint/フォーマット違反の防止（`bun run check`） |
 | `check_console_log.yml` | デバッグ用出力の混入防止 |
 | `release-pr.yml` | main→release のリリース PR 作成（上記の品質ゲートを再利用し、マイグレーション・新規環境変数・migration list などの事前作業を検出） |
@@ -90,7 +91,16 @@ Unit Tests (多数)
 
 - **Bun**: パッケージマネージャー兼実行環境（CI でも bun を使用）
 - **Node.js 20.x**: bun が利用できない CI ステップの代替実行環境
-- **Supabase CLI**: 型生成・スキーマ整合性確認（CI は準備中、現状は手動）
+- **Supabase CLI**: 型生成（CI は準備中、現状は手動）と、`db-privileges.yml` でのローカルスタック起動・pgTAP 実行（バージョンは `bun.lock` で固定）
+
+### 4.3 DB 権限テスト（pgTAP）
+
+`supabase/tests/database/function_privileges.test.sql` が、`public` の関数ごとに `anon` / `authenticated` / `service_role` の EXECUTE を実DBの ACL で確かめる。期待値は `docs/database.md`（3.18・5.2・6.2・6.15・6.17）と一致させる。migration の SQL を文字列解析して権限を推定しない（`OWNER TO`・動的SQL・`RENAME` などを自前で解釈し続けることになるため）。
+
+- **関数を追加・権限を変更したとき**: 同ファイルの期待値の表と、末尾の「`public` の全関数一覧」を更新する。一覧と実DBが食い違うと失敗するので、新しい関数の ACL を人が確認する機会になる。
+- **service_role の期待値**: docs が service_role を名指ししている関数だけ検証する。内部用の関数は Supabase の既定権限で service_role に付くため、契約に含めない。
+- **ローカル実行**: Docker を起動して `bunx supabase start`（必要なら `-x` で不要なサービスを省く）→ `bunx supabase test db`。本番の project-ref や DB URL は渡さない。
+- **検出力の確認**: 対象関数に `GRANT EXECUTE ... TO authenticated` する migration を一時的に足すと、`supabase test db` が失敗する（確認後に migration は削除する）。
 
 ## 5. テスト規約
 

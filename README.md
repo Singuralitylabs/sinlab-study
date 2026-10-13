@@ -155,7 +155,8 @@ app/
 │   └── auth/            #   認証・権限チェック
 └── types/               # TypeScript 型定義
 supabase/
-└── migrations/          # DBマイグレーションSQL
+├── migrations/          # DBマイグレーションSQL
+└── tests/database/      # pgTAP（関数の EXECUTE 権限。docs/testing.md 4.3）
 proxy.ts                 # 認証プロキシ（Next.js 16 の Middleware 後継）
 docs/                    # 設計ドキュメント
 ```
