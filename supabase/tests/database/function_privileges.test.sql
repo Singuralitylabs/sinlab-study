@@ -66,9 +66,8 @@ from (
     ('public.get_user_membership_type()', 'service_role', true)
 ) as t(signature, role_name, expected);
 
--- update_updated_at_column() and keep_user_progress_ever_completed() are trigger functions.
--- Nothing in docs/database.md names their EXECUTE roles, so only the REVOKE ... FROM anon that
--- migrations apply to keep_user_progress_ever_completed() is asserted above.
+-- update_updated_at_column() is a trigger function whose EXECUTE roles docs/database.md does not
+-- name, so it is only inventoried. keep_user_progress_ever_completed() is asserted for anon above.
 --
 -- Catches a new public function that this file does not cover, so its ACL gets a human look.
 select is(
