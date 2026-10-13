@@ -959,6 +959,35 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     expect(rubricUpdate.update.mock.calls[0][0].grading_rubric.version).toBe(3);
   });
 
+  it("zod で読めない採点基準でも発行済みキーの再利用を拒否する", async () => {
+    const broken = {
+      version: 2,
+      max_key_number: 3,
+      requirements: [
+        { key: "r1", name: "A", description: "a" },
+        { key: "r1", name: "B", description: "b" },
+      ],
+    };
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
+            error: null,
+          },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, {
+      gradingRubric: { requirements: [{ key: "r3", name: "C", description: "c" }] },
+    });
+
+    expect(result.keyReuse).toEqual(["r3"]);
+    expect(result.error).toBeNull();
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+  });
+
   it("採点基準を書いたあと再採番が失敗したら種別と基準を戻す", async () => {
     const storedRubric = { version: 2, ...input, max_key_number: 1 };
     const { mockClient } = mockAdminWithStorage({

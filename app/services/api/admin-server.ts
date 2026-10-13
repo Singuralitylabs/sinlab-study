@@ -14,6 +14,7 @@ import {
   getGradingRubricVersion,
   getRubricMaxKeyNumber,
   reusedRequirementKeys,
+  toRubricFormRows,
 } from "@/app/lib/grading";
 import {
   type GradingRubricInput,
@@ -1595,25 +1596,27 @@ async function updateContentRow(
           return { error: null, storageRemoved: true, conflict: true };
         }
         const resultingType = patch.content_type ?? current.content_type;
+        // zod can reject a CHECK-valid row. Reuse still has to see those keys, or a removed
+        // r{n} can name a different requirement while old reviews still point at it.
+        const basis =
+          stored ??
+          (lockVersion != null
+            ? {
+                version: lockVersion,
+                requirements: toRubricFormRows(current.grading_rubric),
+                max_key_number: getRubricMaxKeyNumber(current.grading_rubric),
+              }
+            : null);
         if (gradingRubric && resultingType === "exercise") {
-          const reused = stored
+          const reused = basis
             ? reusedRequirementKeys(
-                stored,
+                basis,
                 gradingRubric.requirements.map((requirement) => requirement.key)
               )
             : [];
           if (reused.length > 0) {
             return { error: null, storageRemoved: true, keyReuse: reused };
           }
-          const basis =
-            stored ??
-            (lockVersion != null
-              ? {
-                  version: lockVersion,
-                  requirements: [{ key: "__unparsed__", name: "unparsed", description: "" }],
-                  max_key_number: getRubricMaxKeyNumber(current.grading_rubric),
-                }
-              : null);
           patch.grading_rubric = nextGradingRubric(basis, gradingRubric);
         } else {
           patch.grading_rubric = null;
