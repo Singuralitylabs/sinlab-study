@@ -650,6 +650,18 @@ describe("お試し → 有料の転換導線（ロック画面, #288）", () =>
 
     expect(html).not.toContain("有料会員になると使えるもの");
     expect(html).not.toContain('href="/upgrade"');
+    expect(fetchUpgradePriceLabel).not.toHaveBeenCalled();
+  });
+
+  it("お試しでも公開コンテンツでは料金ラベルを表示に使わない", async () => {
+    vi.stubEnv("STRIPE_ENABLED", "true");
+    setup({ userStatus: "trial", isOpenToTrial: true });
+    vi.mocked(fetchUpgradePriceLabel).mockResolvedValue("月額2,000円（税込）");
+
+    const html = await render();
+
+    expect(html).not.toContain("月額2,000円（税込）");
+    expect(html).not.toContain('data-analytics-source="lock_screen"');
   });
 });
 
