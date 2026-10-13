@@ -34,15 +34,28 @@ function normalizeArgs(raw: string): string {
   }
   parts.push(current);
   return parts
-    .map((part) => {
-      let arg = part.replace(/\bDEFAULT\b[\s\S]*$/i, "").trim();
-      arg = arg.replace(/^(IN|OUT|INOUT|VARIADIC)\s+/i, "").replace(/\s+/g, " ");
-      const named = arg.match(/^[A-Za-z_][A-Za-z0-9_]*\s+(.+)$/);
-      if (named) arg = named[1];
-      return canonicalType(arg.toLowerCase().replace(/\s+/g, ""));
-    })
-    .filter((arg) => arg.length > 0)
+    .map((part) => normalizeOneArg(part))
+    .filter((arg): arg is string => arg !== null && arg.length > 0)
     .join(",");
+}
+
+function normalizeOneArg(part: string): string | null {
+  let arg = part
+    .replace(/\bDEFAULT\b[\s\S]*$/i, "")
+    .trim()
+    .replace(/\s+/g, " ");
+  const leading = arg.match(/^(IN|OUT|INOUT|VARIADIC)\s+/i);
+  if (leading?.[1]?.toUpperCase() === "OUT") return null;
+  if (leading) arg = arg.slice(leading[0].length).trim();
+  const namedMode = arg.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+(IN|OUT|INOUT|VARIADIC)\s+(.+)$/i);
+  if (namedMode) {
+    if (namedMode[2]?.toUpperCase() === "OUT") return null;
+    arg = namedMode[3] ?? "";
+  } else {
+    const named = arg.match(/^[A-Za-z_][A-Za-z0-9_]*\s+(.+)$/);
+    if (named) arg = named[1] ?? "";
+  }
+  return canonicalType(arg.toLowerCase().replace(/\s+/g, ""));
 }
 
 function canonicalType(typeName: string): string {
@@ -131,7 +144,7 @@ function clauseHas(clause: string, role: string): boolean {
 }
 
 function functionPattern(name: string): string {
-  return `(?:(?:"public"|public)\\.)?"?${name}"?`;
+  return `(?:(?:"public"|public)\\.)?"?${name}"?(?![A-Za-z0-9_])`;
 }
 
 function createdSignature(
@@ -169,7 +182,7 @@ function grantTargets(
   bare: boolean;
 } {
   const allInSchema = statement.match(
-    /\bON\s+ALL\s+(?:FUNCTIONS|ROUTINES)\s+IN\s+SCHEMA\s+([\s\S]*)$/i
+    /\bON\s+ALL\s+(?:FUNCTIONS|ROUTINES)\s+IN\s+SCHEMA\s+(.+?)\s+\b(?:TO|FROM)\b/i
   );
   const allPublic = Boolean(allInSchema && /(?:^|[\s,])"?public"?\b/i.test(allInSchema[1] ?? ""));
   const list = statement.match(/\bON\s+(?:FUNCTION|ROUTINE)\s+([\s\S]*?)\s+\b(?:TO|FROM)\b/i);
@@ -211,15 +224,18 @@ function applyRoles(acl: ExecuteAcl, roles: string, turnOn: boolean) {
 }
 
 function doBody(statement: string): string | null {
-  const dollar = /^[\s\S]*?(\$[A-Za-z0-9_]*\$)/.exec(statement);
-  if (dollar?.[1]) {
-    const start = (dollar.index ?? 0) + dollar[0].length;
-    const end = statement.indexOf(dollar[1], start);
-    if (end !== -1) return statement.slice(start, end);
+  const head = statement.match(/^DO\b(?:\s+LANGUAGE\s+[A-Za-z_][A-Za-z0-9_]*)?/i);
+  if (!head) return null;
+  const rest = statement.slice(head[0].length).trim();
+  if (rest.startsWith("'")) {
+    const quoted = /^'((?:''|[^'])*)'/.exec(rest);
+    return quoted?.[1]?.replace(/''/g, "'") ?? null;
   }
-  const quoted = statement.match(/\bDO\s+(?:E)?'((?:''|[^'])*)'/i);
-  if (!quoted?.[1]) return null;
-  return quoted[1].replace(/''/g, "'");
+  const dollar = /^(\$[A-Za-z0-9_]*\$)/.exec(rest);
+  if (!dollar?.[1]) return null;
+  const end = rest.indexOf(dollar[1], dollar[1].length);
+  if (end === -1) return null;
+  return rest.slice(dollar[1].length, end);
 }
 
 function keywordTail(statement: string): string | null {
@@ -275,6 +291,7 @@ function applyStatement(statement: string, name: string, byArgs: Map<string, Exe
     }
     return;
   }
+  if (applyAlter(collapsed, name, byArgs)) return;
   const created = createdSignature(collapsed, name);
   if (created) {
     const existing = byArgs.get(created.args);
@@ -309,6 +326,30 @@ function applyStatement(statement: string, name: string, byArgs: Map<string, Exe
     applyRoles(acl, roles, /^GRANT\b/i.test(collapsed));
     byArgs.set(key, acl);
   }
+}
+
+function removeSignature(byArgs: Map<string, ExecuteAcl>, args: string | null) {
+  if (args === null) {
+    if (byArgs.size === 1) byArgs.clear();
+    return;
+  }
+  byArgs.delete(args);
+}
+
+function applyAlter(statement: string, name: string, byArgs: Map<string, ExecuteAcl>): boolean {
+  if (!/^ALTER\s+(?:FUNCTION|ROUTINE)\b/i.test(statement)) return false;
+  const match = statement.match(new RegExp(`${functionPattern(name)}\\s*(\\(([^)]*)\\))?`, "i"));
+  if (!match) return true;
+  const args = match[1] ? normalizeArgs(match[2] ?? "") : null;
+  const rename = statement.match(/\bRENAME\s+TO\s+("?[A-Za-z_][A-Za-z0-9_]*"?)/i);
+  if (rename?.[1] && rename[1].replace(/"/g, "").toLowerCase() !== name.toLowerCase()) {
+    removeSignature(byArgs, args);
+  }
+  const schema = statement.match(/\bSET\s+SCHEMA\s+("?[A-Za-z_][A-Za-z0-9_]*"?)/i);
+  if (schema?.[1] && schema[1].replace(/"/g, "").toLowerCase() !== "public") {
+    removeSignature(byArgs, args);
+  }
+  return true;
 }
 
 function replayExecuteAcl(sql: string, name: string): Map<string, ExecuteAcl> {
@@ -433,5 +474,22 @@ DO 'BEGIN GRANT EXECUTE ON FUNCTION public.get_weekly_funnel(integer) TO authent
     const procedures = `${base}
 GRANT EXECUTE ON ALL PROCEDURES IN SCHEMA public TO authenticated;`;
     expect(memberCanExecute(replayExecuteAcl(procedures, "get_weekly_funnel"))).toBe(false);
+    const doStringWithDollar = `${base}
+DO 'BEGIN
+  DROP FUNCTION public.get_weekly_funnel(integer);
+  CREATE FUNCTION public.get_weekly_funnel(weeks integer) RETURNS void LANGUAGE sql AS $$ SELECT 1 $$;
+END';`;
+    expect(memberCanExecute(replayExecuteAcl(doStringWithDollar, "get_weekly_funnel"))).toBe(true);
+    const renamed = `${base}
+ALTER FUNCTION public.get_weekly_funnel(integer) RENAME TO get_weekly_funnel_old;
+CREATE OR REPLACE FUNCTION public.get_weekly_funnel(weeks integer) RETURNS void LANGUAGE sql AS $$ SELECT 1 $$;`;
+    expect(memberCanExecute(replayExecuteAcl(renamed, "get_weekly_funnel"))).toBe(true);
+    const outArg = `${base}
+DROP FUNCTION public.get_weekly_funnel(weeks integer, OUT week_start date);
+CREATE OR REPLACE FUNCTION public.get_weekly_funnel(weeks integer) RETURNS void LANGUAGE sql AS $$ SELECT 1 $$;`;
+    expect(memberCanExecute(replayExecuteAcl(outArg, "get_weekly_funnel"))).toBe(true);
+    const outReplace = `${base}
+CREATE OR REPLACE FUNCTION public.get_weekly_funnel(weeks integer, OUT week_start date) RETURNS void LANGUAGE sql AS $$ SELECT 1 $$;`;
+    expect(memberCanExecute(replayExecuteAcl(outReplace, "get_weekly_funnel"))).toBe(false);
   });
 });
