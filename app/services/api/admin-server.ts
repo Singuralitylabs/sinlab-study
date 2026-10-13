@@ -1655,15 +1655,30 @@ async function updateContentRow(
   }
 
   const restoreRubricWrite = async () => {
-    if (!rubricWriteCommitted || !rubricSnapshot) {
+    if (!rubricWriteCommitted || !rubricSnapshot || committedRubricVersion === undefined) {
       return;
     }
-    const { error: restoreError } = await supabase
+    // Match the version this save wrote. Another save can commit a newer rubric before
+    // resequence or the remaining UPDATE fails; an unconditional snapshot write replaces it.
+    let restore = supabase
       .from("learning_contents")
       .update(rubricSnapshot)
-      .eq("id", id);
+      .eq("id", id)
+      .eq("is_deleted", false);
+    if (committedRubricVersion === null) {
+      restore = restore.is("grading_rubric", null);
+    } else {
+      restore = restore.eq("grading_rubric->>version", String(committedRubricVersion));
+    }
+    const { data: restoredRows, error: restoreError } = await restore.select("id");
     if (restoreError) {
       console.error("コンテンツ更新エラー（採点基準の復元）:", restoreError.message);
+      return;
+    }
+    if (Array.isArray(restoredRows) && restoredRows.length === 0) {
+      console.error(
+        "コンテンツ更新エラー（採点基準の復元）: より新しい保存が先に入ったため戻さない"
+      );
     }
   };
 

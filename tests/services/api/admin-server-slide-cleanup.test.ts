@@ -982,8 +982,12 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     const result = await updateContent(1, { gradingRubric: input, insertAfterId: 9 });
 
     expect(result.error).toEqual(dbError);
-    const restore = mockClient.from.mock.results.at(-1)?.value.update.mock.calls[0][0];
-    expect(restore).toEqual({ grading_rubric: storedRubric, content_type: "exercise" });
+    const restoreBuilder = mockClient.from.mock.results.at(-1)?.value;
+    expect(restoreBuilder.update.mock.calls[0][0]).toEqual({
+      grading_rubric: storedRubric,
+      content_type: "exercise",
+    });
+    expect(restoreBuilder.eq).toHaveBeenCalledWith("grading_rubric->>version", "2");
   });
 
   it("挿入位置が不正なら書いた採点基準を戻してから例外を伝える", async () => {
@@ -1013,8 +1017,82 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       })
     ).rejects.toThrow();
 
-    const restore = mockClient.from.mock.results.at(-1)?.value.update.mock.calls[0][0];
-    expect(restore).toEqual({ grading_rubric: storedRubric, content_type: "exercise" });
+    const restoreBuilder = mockClient.from.mock.results.at(-1)?.value;
+    expect(restoreBuilder.update.mock.calls[0][0]).toEqual({
+      grading_rubric: storedRubric,
+      content_type: "exercise",
+    });
+    expect(restoreBuilder.eq).toHaveBeenCalledWith("grading_rubric->>version", "3");
+  });
+
+  it("消した採点基準を戻すときは NULL の行だけを対象にする", async () => {
+    const storedRubric = { version: 2, ...input, max_key_number: 1 };
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: storedRubric,
+            },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+          { data: null, error: dbError },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, {
+      content_type: "video",
+      gradingRubric: null,
+      insertAfterId: 9,
+    });
+
+    expect(result.error).toEqual(dbError);
+    const restoreBuilder = mockClient.from.mock.results.at(-1)?.value;
+    expect(restoreBuilder.update.mock.calls[0][0]).toEqual({
+      grading_rubric: storedRubric,
+      content_type: "exercise",
+    });
+    expect(restoreBuilder.is).toHaveBeenCalledWith("grading_rubric", null);
+    expect(restoreBuilder.eq).not.toHaveBeenCalledWith(
+      "grading_rubric->>version",
+      expect.anything()
+    );
+  });
+
+  it("復元が0件ならより新しい保存をエラーにしない", async () => {
+    const storedRubric = { version: 2, ...input, max_key_number: 1 };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: storedRubric,
+            },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+          { data: null, error: dbError },
+          { data: [], error: null },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { gradingRubric: input, insertAfterId: 9 });
+
+    expect(result.error).toEqual(dbError);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "コンテンツ更新エラー（採点基準の復元）: より新しい保存が先に入ったため戻さない"
+    );
+    errorSpy.mockRestore();
   });
 
   it("gradingRubric 未指定なら採点基準の列に触れない", async () => {
