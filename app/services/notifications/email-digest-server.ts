@@ -639,6 +639,9 @@ async function appendAnnouncementEmails(
   // sent today (already mailed, or queued for another guide) would erase the failure record from
   // /admin/emails without any resend. A user is claimed by one announcement per run (the first
   // in order), so rows of the user's other announcements stay too.
+  const heldKeys = new Set(
+    retryable.filter((log) => !retryNow(log)).map((log) => `${log.reference_key}:${log.user_id}`)
+  );
   const claimedKeys = new Set<string>();
   const claimedUserIds = new Set<number>();
   for (const announcement of announcements) {
@@ -650,6 +653,7 @@ async function appendAnnouncementEmails(
         !queuedUserIds.has(user.userId) &&
         !claimedUserIds.has(user.userId) &&
         !doneUserIds?.has(user.userId) &&
+        !heldKeys.has(`${referenceKey}:${user.userId}`) &&
         isAnnouncementTarget(announcement, {
           status: user.status,
           membershipType: user.membershipType,
