@@ -9,6 +9,11 @@ import { requireAdminApi } from "@/app/services/auth/admin-guard";
 import { isEmailConfigured, sendEmail } from "@/app/services/notifications/email";
 import { buildPreviewEmail } from "@/app/services/notifications/email-template-preview";
 
+// Mail is sent in after() and the platform caps that at this route's maxDuration; the default
+// (10s without Fluid Compute) would kill the function before EMAIL_SEND_TIMEOUT_MS (15s) aborts,
+// leaving the email_logs claim row neither sent nor failed.
+export const maxDuration = 30;
+
 /**
  * Sends the sample email to the signed-in admin's own address, and only there: the recipient comes
  * from the session, never from the request body (the schema is strict). Nothing is written to

@@ -9,7 +9,7 @@ export const SLACK_WEBHOOK_TIMEOUT_MS = 5_000;
  * user-facing response waits on it; a short value would only abort requests Resend has already
  * accepted (cold start / slow response), leaving a delivered mail logged as failed. Long enough to
  * ride out that latency, short enough that one send plus EMAIL_DIGEST_TIME_BUDGET_MS still fits in
- * the cron route's maxDuration (60s). A TimeoutError means "delivery unknown" and is never retried
+ * the cron route's maxDuration (60s). Every other route that sends mail from after() declares maxDuration = 30 so the abort fires before the platform kills the function. A TimeoutError means "delivery unknown" and is never retried
  * (see RETRYABLE_EMAIL_ERROR).
  */
 export const EMAIL_SEND_TIMEOUT_MS = 15_000;
