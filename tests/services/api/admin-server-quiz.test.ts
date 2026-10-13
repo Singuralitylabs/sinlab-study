@@ -125,6 +125,35 @@ describe("updateContent のクイズ設問（#306 レビュー対応）", () => 
       ["replace_quiz_questions", { p_content_id: 1, p_questions: stored }],
     ]);
   });
+
+  it("開いた版が違う競合でも、先に置き換えた設問を戻す", async () => {
+    const client = mockAdmin([
+      {
+        data: {
+          week_id: 3,
+          pdf_url: null,
+          content_type: "exercise",
+          grading_rubric: {
+            version: 2,
+            requirements: [{ key: "r1", name: "A", description: "a" }],
+          },
+        },
+        error: null,
+      },
+    ]);
+
+    const result = await updateContent(1, {
+      content_type: "quiz",
+      quizQuestions: edited,
+      loadedRubricVersion: 1,
+    });
+
+    expect(result.conflict).toBe(true);
+    expect(replaceCalls(client)).toEqual([
+      ["replace_quiz_questions", { p_content_id: 1, p_questions: edited }],
+      ["replace_quiz_questions", { p_content_id: 1, p_questions: stored }],
+    ]);
+  });
 });
 
 describe("createContent の設問保存失敗時の取り消し（#306 レビュー対応）", () => {

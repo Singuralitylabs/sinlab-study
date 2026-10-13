@@ -739,6 +739,15 @@ describe("fetchAllContents（不正なフィルタID）", () => {
     expect(result).toEqual({ data: [], error: null });
     expect(mockClient.from).not.toHaveBeenCalled();
   });
+
+  it("member では service_role を使わず空配列を返す", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({ userRole: "member" } as never);
+
+    const result = await fetchAllContents({});
+
+    expect(result).toEqual({ data: [], error: null });
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
 });
 
 describe("createTheme", () => {

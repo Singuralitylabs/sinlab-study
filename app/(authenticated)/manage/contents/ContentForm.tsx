@@ -409,6 +409,10 @@ export function ContentForm({
       // requirements actually changed.
       grading_rubric:
         contentType === "exercise" && rubricRows.length > 0 ? { requirements: rubricRows } : null,
+      // The version this form loaded, not the version to store. A save opened on an older
+      // version is rejected instead of being written on top of a newer rubric.
+      grading_rubric_version:
+        mode === "edit" ? getGradingRubricVersion(initialData?.grading_rubric) : undefined,
       quiz_questions: validatedQuizQuestions,
     };
 

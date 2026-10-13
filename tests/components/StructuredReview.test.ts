@@ -77,6 +77,21 @@ describe("StructuredReview", () => {
     expect(html).not.toContain("コード品質");
   });
 
+  it("改善提案のインラインコードを描画し、生の HTML はテキストのままにする", () => {
+    const html = renderToStaticMarkup(
+      createElement(StructuredReview, {
+        reviewJson: {
+          ...reviewJson,
+          suggestions: ["`split` を使う", "<script>alert(1)</script>"],
+        },
+        scoreKind: "rubric",
+        passDisplay: null,
+      })
+    );
+    expect(html).toContain("<code>split</code>");
+    expect(html).not.toContain("<script>");
+  });
+
   it("retry のときだけ再提出の案内を表示する", () => {
     expect(renderReview("rubric", "retry")).toContain("再レビューできます");
     expect(renderReview("rubric", "passed")).not.toContain("再レビューできます");

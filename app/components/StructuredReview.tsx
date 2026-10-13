@@ -1,4 +1,5 @@
 import { CircleCheck, CircleMinus, CircleX } from "lucide-react";
+import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
 import {
   getQualityLevelLabel,
@@ -58,7 +59,10 @@ export function StructuredReview({ reviewJson, scoreKind, passDisplay }: Structu
                         {getRequirementStatusLabel(requirement.status)}
                       </span>
                     </p>
-                    <p className="text-muted-foreground">{requirement.comment}</p>
+                    <MarkdownRenderer
+                      content={requirement.comment}
+                      className="prose-sm text-muted-foreground"
+                    />
                   </div>
                 </li>
               );
@@ -70,17 +74,16 @@ export function StructuredReview({ reviewJson, scoreKind, passDisplay }: Structu
       {scoreKind === "none" ? (
         <section>
           <h4 className="mb-2 font-semibold">補足</h4>
-          <p className="text-muted-foreground">{reviewJson.code_quality.comment}</p>
+          <MarkdownRenderer
+            content={reviewJson.code_quality.comment}
+            className="prose-sm text-muted-foreground"
+          />
         </section>
       ) : (
         <section>
           <h4 className="mb-2 font-semibold">コード品質・可読性</h4>
-          <p>
-            <span className="font-medium">
-              {getQualityLevelLabel(reviewJson.code_quality.level)}
-            </span>
-            <span className="text-muted-foreground"> — {reviewJson.code_quality.comment}</span>
-          </p>
+          <p className="font-medium">{getQualityLevelLabel(reviewJson.code_quality.level)}</p>
+          <MarkdownRenderer content={reviewJson.code_quality.comment} className="prose-sm" />
         </section>
       )}
 
@@ -90,7 +93,9 @@ export function StructuredReview({ reviewJson, scoreKind, passDisplay }: Structu
           <ol className="list-decimal space-y-1 pl-5">
             {reviewJson.suggestions.map((suggestion, index) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: the list is never reordered and the AI may repeat a sentence, so the text isn't a unique key
-              <li key={index}>{suggestion}</li>
+              <li key={index}>
+                <MarkdownRenderer content={suggestion} className="prose-sm" />
+              </li>
             ))}
           </ol>
         </section>
@@ -98,7 +103,7 @@ export function StructuredReview({ reviewJson, scoreKind, passDisplay }: Structu
 
       <section>
         <h4 className="mb-2 font-semibold">学習アドバイス</h4>
-        <p>{reviewJson.advice}</p>
+        <MarkdownRenderer content={reviewJson.advice} className="prose-sm" />
       </section>
 
       {passDisplay === "retry" && (

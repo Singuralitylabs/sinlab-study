@@ -1045,6 +1045,12 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
 
   // The list reads grading_rubric->version. That column is absent from the anon/authenticated
   // grant, and staff share the authenticated role, so the user client cannot select it.
+  // service_role bypasses RLS, so the role check has to live here: a member caller would
+  // otherwise see every unpublished row.
+  const { userRole } = await getServerAuth();
+  if (!checkContentPermissions(userRole)) {
+    return { data: [], error: null };
+  }
   const supabase = await createAdminSupabaseClient();
   const needsInnerJoin = themeId !== undefined || phaseId !== undefined;
 
@@ -1408,13 +1414,18 @@ export async function updateContent(
     quizQuestions?: QuizQuestionData[];
     /** undefined = leave as is, null = clear, object = save (version derived here). */
     gradingRubric?: GradingRubricInput | null;
+    /**
+     * Version the editor loaded. undefined = the caller has no form (lock against the row just
+     * read). null or a number = that loaded version, so a stale form cannot overwrite a newer one.
+     */
+    loadedRubricVersion?: number | null;
   }
 ): Promise<ContentUpdateResult> {
   const supabase = await createAdminSupabaseClient();
-  const { insertAfterId, quizQuestions, gradingRubric, ...patch } = content;
+  const { insertAfterId, quizQuestions, gradingRubric, loadedRubricVersion, ...patch } = content;
 
   if (patch.content_type !== "quiz" || !quizQuestions) {
-    return updateContentRow(supabase, id, patch, insertAfterId, gradingRubric);
+    return updateContentRow(supabase, id, patch, insertAfterId, gradingRubric, loadedRubricVersion);
   }
 
   const { data: previous, error: previousError } = await selectQuizQuestions(supabase, id);
@@ -1424,7 +1435,7 @@ export async function updateContent(
   // The edit form always sends the questions. Replacing unchanged ones would renumber their ids,
   // and a learner answering at that moment would be graded against ids that no longer exist.
   if (sameQuizQuestions(previous, quizQuestions)) {
-    return updateContentRow(supabase, id, patch, insertAfterId, gradingRubric);
+    return updateContentRow(supabase, id, patch, insertAfterId, gradingRubric, loadedRubricVersion);
   }
 
   // Questions go first so a failure here never leaves a quiz row with stale or no questions. If
@@ -1442,7 +1453,14 @@ export async function updateContent(
     }
   };
   try {
-    const result = await updateContentRow(supabase, id, patch, insertAfterId, gradingRubric);
+    const result = await updateContentRow(
+      supabase,
+      id,
+      patch,
+      insertAfterId,
+      gradingRubric,
+      loadedRubricVersion
+    );
     // conflict and keyReuse leave the row unchanged but carry error: null. The questions were
     // already replaced, so those outcomes have to restore them too or the quiz and the row diverge.
     if (result.error || result.conflict || result.keyReuse) {
@@ -1476,7 +1494,8 @@ async function updateContentRow(
   id: number,
   basePatch: Omit<Partial<LearningContent>, "grading_rubric">,
   insertAfterId: number | null | undefined,
-  gradingRubric: GradingRubricInput | null | undefined
+  gradingRubric: GradingRubricInput | null | undefined,
+  loadedRubricVersion: number | null | undefined
 ): Promise<ContentUpdateResult> {
   const patch: Partial<LearningContent> = { ...basePatch };
   const movesAwayFromExercise =
@@ -1548,6 +1567,11 @@ async function updateContentRow(
             } as PostgrestError,
             storageRemoved: true,
           };
+        }
+        // The version just read only closes the gap until this UPDATE. A form opened on an older
+        // version would otherwise be applied on top of the newer row.
+        if (loadedRubricVersion !== undefined && loadedRubricVersion !== lockVersion) {
+          return { error: null, storageRemoved: true, conflict: true };
         }
         const resultingType = patch.content_type ?? current.content_type;
         if (gradingRubric && resultingType === "exercise") {

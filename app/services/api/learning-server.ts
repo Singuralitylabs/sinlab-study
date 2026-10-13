@@ -324,9 +324,12 @@ export async function isContentVisible(
  * issue #68).
  * fetchContentById() does not filter parents' is_deleted (`.eq("is_deleted", false)` applies only
  * to the content), so check here explicitly. Otherwise the UI shows the complete button while
- * isContentVisible() always returns 403.
+ * isContentVisible() always returns 403. The argument is only the published flags: learner detail
+ * does not select grading_rubric, so requiring the full row would claim that column is present.
  */
-export function isContentFullyPublished(content: LearningContentWithBreadcrumb): boolean {
+export function isContentFullyPublished(
+  content: Pick<LearningContentWithBreadcrumb, "is_published" | "week">
+): boolean {
   return content.is_published && isWeekHierarchyPublished(content.week);
 }
 
@@ -722,12 +725,15 @@ export async function fetchContentsByWeekId(weekId: number): Promise<{
   return { data: data as LearningContentListItem[] | null, error: null };
 }
 
+/** Learner detail row. grading_rubric is not selected, so the type must not claim it is present. */
+export type LearnerContentDetail = Omit<LearningContentWithBreadcrumb, "grading_rubric">;
+
 /** admin / maintainer also get unpublished contents as preview (issue #68). */
 export async function fetchContentById(
   contentId: number,
   userRole: UserRoleType | null = null
 ): Promise<{
-  data: LearningContentWithBreadcrumb | null;
+  data: LearnerContentDetail | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
@@ -750,7 +756,7 @@ export async function fetchContentById(
     return { data: null, error };
   }
 
-  return { data: data as LearningContentWithBreadcrumb | null, error: null };
+  return { data: data as LearnerContentDetail | null, error: null };
 }
 
 export async function fetchUserProgressByContentIds(

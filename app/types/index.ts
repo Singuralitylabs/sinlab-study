@@ -49,15 +49,9 @@ export type ContentType = "video" | "text" | "exercise" | "slide" | "quiz";
 export type SubmissionType = "code" | "url";
 export type AIReviewStatus = "pending" | "processing" | "completed" | "failed";
 
-export type { QualityLevel, RequirementStatus } from "@/app/constants/grading";
+export type { QualityLevel, RequirementStatus, ScoreKind } from "@/app/constants/grading";
 
-import type { QualityLevel, RequirementStatus } from "@/app/constants/grading";
-/**
- * rubric = graded against the exercise's grading rubric; estimated = no rubric, the AI guessed the
- * requirements (reference only); none = URL submission (not graded); legacy = free-text review
- * from before structured grading.
- */
-export type ScoreKind = "rubric" | "estimated" | "none" | "legacy" | "incomplete";
+import type { QualityLevel, RequirementStatus, ScoreKind } from "@/app/constants/grading";
 
 /** Defined as `type` (not `interface`) so it is assignable to Supabase's Json. */
 export type GradingRequirement = {

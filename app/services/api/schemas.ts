@@ -305,9 +305,11 @@ const ContentBaseSchema = z.object({
   allowed_submission_types: AllowedSubmissionTypeSchema.optional(),
   code_language: CodeLanguageSchema.optional(),
   pdf_url: SlidePdfUrlSchema,
-  // null clears the rubric. The version is derived server-side (nextGradingRubric), never trusted
-  // from the client.
+  // null clears the rubric. The stored version is derived server-side (nextGradingRubric), never
+  // taken from the client. grading_rubric_version is only the version the editor loaded, so a
+  // stale form cannot overwrite a newer save.
   grading_rubric: GradingRubricInputSchema.nullable().optional(),
+  grading_rubric_version: z.number().int().positive().nullable().optional(),
   is_published: OptionalBoolean,
   is_open_to_trial: OptionalBoolean,
   // Only read when content_type is "quiz"; saved to quiz_questions, not learning_contents.
@@ -342,8 +344,30 @@ const ContentCreateObjectSchema = ContentBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
 export const ContentCreateSchema = ContentCreateObjectSchema.superRefine(requireQuizQuestions);
-export const ContentUpdateSchema =
-  ContentCreateObjectSchema.partial().superRefine(requireQuizQuestions);
+function requireLoadedRubricVersion(
+  value: {
+    content_type?: string;
+    grading_rubric?: unknown;
+    grading_rubric_version?: number | null;
+  },
+  ctx: z.RefinementCtx
+) {
+  const clearsByType = value.content_type !== undefined && value.content_type !== "exercise";
+  if (
+    (value.grading_rubric !== undefined || clearsByType) &&
+    value.grading_rubric_version === undefined
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message: "画面を開いたときの採点基準の版を指定してください",
+      path: ["grading_rubric_version"],
+    });
+  }
+}
+
+export const ContentUpdateSchema = ContentCreateObjectSchema.partial()
+  .superRefine(requireQuizQuestions)
+  .superRefine(requireLoadedRubricVersion);
 
 const BULK_CREATE_MESSAGE = `contentsは1〜${MAX_BULK_CREATE_CONTENTS}件の配列で指定してください`;
 

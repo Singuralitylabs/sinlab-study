@@ -671,7 +671,7 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 
 Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可能。削除は論理削除（`is_deleted = true`）。行は物理削除せず、`user_progress` / `submissions` / `ai_reviews` の履歴を保持する。コンテンツ種別 `slide` では、PDF ファイルを Supabase Storage（`slides` バケット）にアップロードして `pdf_url` に保存する。テーマのサムネイル画像は Supabase Storage（`thumbnails` バケット）にアップロードして `image_url` に保存する。オブジェクトキーがテーマIDに依存するため、新規作成フォームではアップロードできず、テーマ作成後の編集画面から設定する。
 
-**採点基準の設定（#305）**: 種別が演習のとき、コンテンツ作成・編集フォームに「採点基準」エディタ（`GradingRubricEditor`）を表示し、要件（名前・説明。最大10件）を追加・並べ替え・削除して `grading_rubric` として保存する。リクエストの `grading_rubric` は `{ requirements: [{ key, name, description }] }`（`version` は受け取らない）で、`null` を送ると基準を削除（未設定に戻す）、省略すると変更しない。`version` は `updateContent()` が保存済みの値と比較して決め（初回 1、内容が変わった保存のみ +1、変更なしは据え置き）、現在値を取得できなければ更新しない。要件の `key`（`r{n}`）は基準内で再利用しない: 発行済みの最大番号 `max_key_number` も `updateContent()` / `createContent()` が導出して保存し（クライアントは送らず、下がらない）、エディタは削除・置換した行の番号も飛ばして採番する（基準そのものを削除して未設定に戻す、または演習以外へ種別変更すると `version` と採番は初期化され、再設定後は v1・`r1` から始まる）。種別を演習以外へ変える更新・一括種別変更では基準を `NULL` にする。一覧（`/manage/contents`）には採点基準の有無とバージョンを表示する。
+**採点基準の設定（#305）**: 種別が演習のとき、コンテンツ作成・編集フォームに「採点基準」エディタ（`GradingRubricEditor`）を表示し、要件（名前・説明。最大10件）を追加・並べ替え・削除して `grading_rubric` として保存する。リクエストの `grading_rubric` は `{ requirements: [{ key, name, description }] }`（`version` は受け取らない）で、`null` を送ると基準を削除（未設定に戻す）、省略すると変更しない。`version` は `updateContent()` が保存済みの値と比較して決め（初回 1、内容が変わった保存のみ +1、変更なしは据え置き）、現在値を取得できなければ更新しない。編集の PUT は、採点基準を送るとき（`null` で削除するときを含む）と演習以外へ種別を変えるときに、画面を開いたときの版 `grading_rubric_version`（未設定なら `null`）を必須にする。保存直前に読んだ版と違えば書き込む前に 409 を返す。項目を省略した内部呼び出しは、読んだ版だけでロックする。要件の `key`（`r{n}`）は基準内で再利用しない: 発行済みの最大番号 `max_key_number` も `updateContent()` / `createContent()` が導出して保存し（クライアントは送らず、下がらない）、エディタは削除・置換した行の番号も飛ばして採番する（基準そのものを削除して未設定に戻す、または演習以外へ種別変更すると `version` と採番は初期化され、再設定後は v1・`r1` から始まる）。種別を演習以外へ変える更新・一括種別変更では基準を `NULL` にする。一覧（`/manage/contents`）には採点基準の有無とバージョンを表示する。
 
 **採点基準の AI 下書き**: `POST /api/manage/contents/grading-rubric/draft`（admin / maintainer のみ。未認証 401・権限なし 403・入力不正 400・`GEMINI_API_KEY` 未設定 503・生成失敗 502）。ボディ `{ exercise_instructions, reference_answer? }` から要件 3〜7 件（`name`・`description`）を返す。**何も保存しない**（フォームに展開し、講師が確認・編集して保存する）。講師の操作なので会員用キー（`GEMINI_API_KEY`）のみ使い、お試し用キーは使わない。
 
@@ -787,7 +787,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 - **検証失敗時の再生成**: JSON として不正・スキーマ違反の応答は **1 回だけ**再生成する。2 回とも失敗したら `failed`（受講生の回数に数えない）。再生成を含む全試行と 429 のリトライ待機は `GEMINI_TOTAL_BUDGET_MS` を共有する（`maxDuration` を超えない）
 - **URL の扱い**: URL 提出は URL の中身を AI が確認できないため要件判定をしない（`none`）。URL 形式の妥当性と課題への適合性の所見のみ返す
 - **トークン記録**: `prompt_tokens`（入力）・`completion_tokens`（回答）・`thoughts_tokens`（思考。`usageMetadata.thoughtsTokenCount`）を保存する。再生成した場合は両方の応答を合算し、失敗時も消費分を `failed` 行に記録する（`ReviewGenerationError.usage`）。同じ提出の再試行では `failed` 行を再利用するため、各列は試行をまたいだ累計になる（再試行で消さず加算する）。取得できなかった項目は NULL。管理画面（`/manage/submissions`）の admin / maintainer にのみ表示し、受講生向けの SELECT 列には含めない
-- **表示**: `review_json` から `StructuredReview` で描画する。`legacy` と、`review_json` が不正な行は従来どおり `review_content`（Markdown）を表示する。`estimated` は「参考」、`none` は「採点対象外」のバッジを付ける。`passed = false`（有効時）のときは再提出の案内を出す
+- **表示**: `review_json` から `StructuredReview` で描画する。要件のコメント・品質のコメント・改善提案・学習アドバイスは `MarkdownRenderer` で描画する（生 HTML は描画しない）。`legacy` と、`review_json` が不正な行は従来どおり `review_content`（Markdown）を表示する。`estimated` は「参考」、`none` は「採点対象外」のバッジを付ける。`passed = false`（有効時）のときは再提出の案内を出す
 
 **レスポンス**:
 

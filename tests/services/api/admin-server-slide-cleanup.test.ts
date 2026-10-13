@@ -706,6 +706,60 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     });
   });
 
+  it("画面を開いた版が保存済みと違うときは SELECT だけで競合にし、書き込まない", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: {
+                version: 2,
+                requirements: [{ key: "r1", name: "旧名", description: "a" }],
+              },
+            },
+            error: null,
+          },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { gradingRubric: input, loadedRubricVersion: 1 });
+
+    expect(result).toEqual({ error: null, storageRemoved: true, conflict: true });
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+    expect(mockClient.from.mock.results[0].value.update).not.toHaveBeenCalled();
+  });
+
+  it("画面を開いた版が保存済みと一致すれば書き込む", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: {
+                version: 2,
+                requirements: [{ key: "r1", name: "旧名", description: "a" }],
+              },
+            },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { gradingRubric: input, loadedRubricVersion: 2 });
+
+    expect(result.error).toBeNull();
+    expect(updatePayload(mockClient).grading_rubric.version).toBe(3);
+  });
+
   it("非演習から演習へ種別を変える更新では、同じリクエストの採点基準を version 1 で保存する", async () => {
     const { mockClient } = mockAdminWithStorage({
       tableResults: {

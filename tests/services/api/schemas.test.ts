@@ -408,9 +408,28 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(ContentUpdateSchema.safeParse({ content_type: "video", quiz_questions }).success).toBe(
       false
     );
-    expect(ContentUpdateSchema.safeParse({ content_type: "quiz", quiz_questions }).success).toBe(
-      true
-    );
+    expect(
+      ContentUpdateSchema.safeParse({
+        content_type: "quiz",
+        quiz_questions,
+        grading_rubric_version: null,
+      }).success
+    ).toBe(true);
+  });
+
+  it("採点基準を変える更新と演習以外への種別変更は、開いたときの版が必須", () => {
+    const rubric = { requirements: [{ key: "r1", name: "A", description: "" }] };
+    expect(ContentUpdateSchema.safeParse({ grading_rubric: rubric }).success).toBe(false);
+    expect(ContentUpdateSchema.safeParse({ grading_rubric: null }).success).toBe(false);
+    expect(ContentUpdateSchema.safeParse({ content_type: "video" }).success).toBe(false);
+    expect(
+      ContentUpdateSchema.safeParse({ grading_rubric: rubric, grading_rubric_version: 2 }).success
+    ).toBe(true);
+    expect(
+      ContentUpdateSchema.safeParse({ content_type: "video", grading_rubric_version: null }).success
+    ).toBe(true);
+    expect(ContentUpdateSchema.safeParse({ content_type: "exercise" }).success).toBe(true);
+    expect(ContentUpdateSchema.safeParse({ title: "改題" }).success).toBe(true);
   });
 
   it("content_typeが許可値以外の場合は検証エラー（DBのCHECK制約違反による500を未然に防ぐ）", () => {

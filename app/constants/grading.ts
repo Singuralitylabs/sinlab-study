@@ -46,7 +46,9 @@ export const GRADING_RUBRIC_DRAFT_MAX_REQUIREMENTS = 7;
 
 export const REVIEW_MAX_SUGGESTIONS = 2;
 
-export const SCORE_KINDS = ["rubric", "estimated", "none", "legacy"] as const;
+export const SCORE_KINDS = ["rubric", "estimated", "none", "legacy", "incomplete"] as const;
+
+export type ScoreKind = (typeof SCORE_KINDS)[number];
 
 /** Estimated grading has no rubric to bound it, so cap what the AI may invent. */
 export const ESTIMATED_MAX_REQUIREMENTS = GRADING_RUBRIC_MAX_REQUIREMENTS;

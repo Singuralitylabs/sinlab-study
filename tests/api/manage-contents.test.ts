@@ -185,7 +185,11 @@ describe("POST / PUT /api/manage/contents - クイズの設問（#306）", () =>
 
   it("更新時も設問を quizQuestions として渡す", async () => {
     const res = await PUT(
-      request({ content_type: "quiz", quiz_questions: quizQuestions }) as never,
+      request({
+        content_type: "quiz",
+        quiz_questions: quizQuestions,
+        grading_rubric_version: null,
+      }) as never,
       { params: Promise.resolve({ id: "1" }) }
     );
 
@@ -302,14 +306,33 @@ describe("コンテンツ作成・更新の採点基準（#305）", () => {
         { params: Promise.resolve({ id: "1" }) }
       );
 
-    await put({ grading_rubric: rubric });
-    await put({ grading_rubric: null });
+    await put({ grading_rubric: rubric, grading_rubric_version: 2 });
+    await put({ grading_rubric: null, grading_rubric_version: null });
     await put({ title: "改題" });
 
     const calls = vi.mocked(updateContent).mock.calls;
     expect(calls[0][1].gradingRubric).toEqual(rubric);
+    expect(calls[0][1].loadedRubricVersion).toBe(2);
     expect(calls[1][1].gradingRubric).toBeNull();
+    expect(calls[1][1].loadedRubricVersion).toBeNull();
     expect(calls[2][1].gradingRubric).toBeUndefined();
+    expect(calls[2][1].loadedRubricVersion).toBeUndefined();
+  });
+
+  it("PUT: 採点基準や演習以外への種別変更に、開いたときの版が無いと400", async () => {
+    const put = (body: unknown) =>
+      PUT(
+        new Request("http://localhost/api/manage/contents/1", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }) as never,
+        { params: Promise.resolve({ id: "1" }) }
+      );
+
+    expect((await put({ grading_rubric: rubric })).status).toBe(400);
+    expect((await put({ content_type: "video" })).status).toBe(400);
+    expect(updateContent).not.toHaveBeenCalled();
   });
 
   it.each([
