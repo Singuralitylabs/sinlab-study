@@ -99,6 +99,7 @@ Unit Tests (多数)
 
 - **関数を追加・権限を変更したとき**: 同ファイルの期待値の表と、末尾の「`public` の全関数一覧」を更新する。一覧と実DBが食い違うと失敗するので、新しい関数の ACL を人が確認する機会になる。
 - **service_role の期待値**: docs が service_role を名指ししている関数だけ検証する。内部用の関数は Supabase の既定権限で service_role に付くため、契約に含めない。
+- **Postgres のバージョン**: `supabase/config.toml` の `[db] major_version` は本番の Supabase プロジェクトの Postgres メジャーバージョンと揃える（本番を変えたら同時に更新する）。
 - **ローカル実行**: Docker を起動して `bunx supabase start`（必要なら `-x` で不要なサービスを省く）→ `bunx supabase test db`。本番の project-ref や DB URL は渡さない。
 - **検出力の確認**: 対象関数に `GRANT EXECUTE ... TO authenticated` する migration を一時的に足すと、`supabase test db` が失敗する（確認後に migration は削除する）。
 

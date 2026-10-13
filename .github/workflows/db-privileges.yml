@@ -32,6 +32,13 @@ jobs:
         with:
           bun-version-file: ".bun-version"
 
+      - name: Cache bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
       # The CLI version is pinned by bun.lock (devDependency "supabase").
       - name: Install dependencies
         run: bun install --frozen-lockfile

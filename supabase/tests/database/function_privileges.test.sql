@@ -49,6 +49,8 @@ from (
     ('public.quiz_correct_choices_valid(text[], integer[])', 'anon', false),
     ('public.quiz_correct_choices_valid(text[], integer[])', 'authenticated', true),
     ('public.quiz_correct_choices_valid(text[], integer[])', 'service_role', true),
+    -- Trigger function: REVOKE ALL FROM PUBLIC, anon (authenticated is not documented)
+    ('public.keep_user_progress_ever_completed()', 'anon', false),
     -- RLS helpers
     ('public.get_user_role()', 'anon', false),
     ('public.get_user_role()', 'authenticated', true),
