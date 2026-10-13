@@ -536,7 +536,9 @@ describe("updateContent の現在値取得の一本化（issue #246）", () => {
     expect(result).toEqual({ error: null, storageRemoved: true });
     expect(remove).not.toHaveBeenCalled();
     expect(mockClient.from).toHaveBeenCalledTimes(2);
-    expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith("week_id, pdf_url");
+    expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith(
+      "week_id, pdf_url, grading_rubric, content_type"
+    );
   });
 
   it("非スライド（pdf_url: null）のタイトル修正でも現在値の取得は1回で Storage に触れない", async () => {
@@ -664,5 +666,575 @@ describe("スライド孤児削除のチャンク分割（PR #260 レビュー�
     // The failed chunk (first 100) isn't deleted; only the remaining chunks are.
     expect(remove).toHaveBeenCalledTimes(1);
     expect(remove).toHaveBeenCalledWith(keys.slice(100));
+  });
+});
+
+describe("updateContent / createContent の採点基準（#305）", () => {
+  const input = { requirements: [{ key: "r1", name: "A", description: "a" }] };
+
+  const updatePayload = (mockClient: ReturnType<typeof mockAdminWithStorage>["mockClient"]) =>
+    mockClient.from.mock.results.at(-1)?.value.update.mock.calls[0][0];
+
+  it("保存済みの採点基準と比べて version を決める（変更があれば +1）", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: {
+                version: 2,
+                requirements: [{ key: "r1", name: "旧名", description: "a" }],
+              },
+            },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { gradingRubric: input });
+
+    expect(result.error).toBeNull();
+    expect(updatePayload(mockClient).grading_rubric).toEqual({
+      version: 3,
+      requirements: input.requirements,
+      max_key_number: 1,
+    });
+  });
+
+  it("画面を開いた版が保存済みと違うときは SELECT だけで競合にし、書き込まない", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: {
+                version: 2,
+                requirements: [{ key: "r1", name: "旧名", description: "a" }],
+              },
+            },
+            error: null,
+          },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { gradingRubric: input, loadedRubricVersion: 1 });
+
+    expect(result).toEqual({ error: null, storageRemoved: true, conflict: true });
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+    expect(mockClient.from.mock.results[0].value.update).not.toHaveBeenCalled();
+  });
+
+  it("画面を開いた版が保存済みと一致すれば書き込む", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: {
+                version: 2,
+                requirements: [{ key: "r1", name: "旧名", description: "a" }],
+              },
+            },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { gradingRubric: input, loadedRubricVersion: 2 });
+
+    expect(result.error).toBeNull();
+    expect(result.gradingRubricVersion).toBe(3);
+    expect(updatePayload(mockClient).grading_rubric.version).toBe(3);
+  });
+
+  it("非演習から演習へ種別を変える更新では、同じリクエストの採点基準を version 1 で保存する", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "video", grading_rubric: null },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+
+    await updateContent(1, { content_type: "exercise", gradingRubric: input });
+
+    expect(updatePayload(mockClient).grading_rubric).toEqual({
+      version: 1,
+      requirements: input.requirements,
+      max_key_number: 1,
+    });
+  });
+
+  it("内容が同じなら version を据え置く", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: { version: 2, ...input },
+            },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+
+    await updateContent(1, { gradingRubric: input });
+
+    expect(updatePayload(mockClient).grading_rubric.version).toBe(2);
+  });
+
+  it("未設定のコンテンツには version 1 で保存する", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: null },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+
+    await updateContent(1, { gradingRubric: input });
+
+    expect(updatePayload(mockClient).grading_rubric.version).toBe(1);
+  });
+
+  it("保存済みの種別が演習以外なら、種別を変えない更新でも採点基準は付けない", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "video", grading_rubric: null },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+
+    await updateContent(1, { gradingRubric: input });
+
+    expect(updatePayload(mockClient).grading_rubric).toBeNull();
+  });
+
+  it("現在値を取得できなければ version を決められないので更新しない", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: { learning_contents: [{ data: null, error: dbError }] },
+    });
+
+    const result = await updateContent(1, { gradingRubric: input });
+
+    expect(result.error).toEqual(dbError);
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("gradingRubric: null は読んだ version に一致する行だけ採点基準を消す", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: { version: 4, ...input },
+            },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { gradingRubric: null });
+    expect(result.gradingRubricVersion).toBeNull();
+
+    expect(mockClient.from).toHaveBeenCalledTimes(2);
+    const rubricUpdate = mockClient.from.mock.results[1]?.value;
+    expect(rubricUpdate.update.mock.calls[0][0].grading_rubric).toBeNull();
+    expect(rubricUpdate.eq).toHaveBeenCalledWith("grading_rubric->>version", "4");
+  });
+
+  it("採点基準の更新が0行なら表示順を動かさず競合を返す", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: { version: 2, ...input },
+            },
+            error: null,
+          },
+          { data: [], error: null },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { gradingRubric: input, insertAfterId: 9 });
+
+    expect(result.conflict).toBe(true);
+    expect(result.error).toBeNull();
+    expect(mockClient.from).toHaveBeenCalledTimes(2);
+  });
+
+  it("exercise 以外へ種別変更すると採点基準を破棄する", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: { version: 2, ...input },
+            },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+        ],
+      },
+    });
+
+    await updateContent(1, { content_type: "video", gradingRubric: input });
+
+    expect(updatePayload(mockClient).grading_rubric).toBeNull();
+    expect(updatePayload(mockClient).content_type).toBe("video");
+  });
+
+  it("zod で読めない採点基準でも version で一致させ、NULL とは扱わない", async () => {
+    const broken = {
+      version: 2,
+      requirements: [
+        { key: "r1", name: "A", description: "a" },
+        { key: "r1", name: "B", description: "b" },
+      ],
+    };
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { gradingRubric: input });
+
+    expect(result.error).toBeNull();
+    expect(result.conflict).toBeUndefined();
+    const rubricUpdate = mockClient.from.mock.results[1]?.value;
+    expect(rubricUpdate.eq).toHaveBeenCalledWith("grading_rubric->>version", "2");
+    expect(rubricUpdate.is).not.toHaveBeenCalledWith("grading_rubric", null);
+    expect(rubricUpdate.update.mock.calls[0][0].grading_rubric.version).toBe(3);
+  });
+
+  it("zod で読めない採点基準でも発行済みキーの再利用を拒否する", async () => {
+    const broken = {
+      version: 2,
+      max_key_number: 3,
+      requirements: [
+        { key: "r1", name: "A", description: "a" },
+        { key: "r1", name: "B", description: "b" },
+      ],
+    };
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
+            error: null,
+          },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, {
+      gradingRubric: { requirements: [{ key: "r3", name: "C", description: "c" }] },
+    });
+
+    expect(result.keyReuse).toEqual(["r3"]);
+    expect(result.error).toBeNull();
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("zod で読めない投影と送信が一致しても version を上げる", async () => {
+    const broken = {
+      version: 2,
+      max_key_number: 1,
+      requirements: [{ key: "r1", name: "A" }],
+    };
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
+            error: null,
+          },
+          { data: [{ id: 1, updated_at: "2026-10-13T00:00:00.000Z" }], error: null },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, {
+      gradingRubric: { requirements: [{ key: "r1", name: "A", description: "" }] },
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.keyReuse).toBeUndefined();
+    expect(result.gradingRubricVersion).toBe(3);
+    const rubricUpdate = mockClient.from.mock.results[1]?.value;
+    expect(rubricUpdate.update.mock.calls[0][0].grading_rubric.version).toBe(3);
+  });
+
+  it("空白だけ違う発行済み key は再利用にしない", async () => {
+    const broken = {
+      version: 2,
+      max_key_number: 1,
+      requirements: [
+        { key: "r1 ", name: "A", description: "a" },
+        { key: "r1 ", name: "B", description: "b" },
+      ],
+    };
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
+            error: null,
+          },
+          { data: [{ id: 1, updated_at: "2026-10-13T00:00:00.000Z" }], error: null },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, {
+      gradingRubric: { requirements: [{ key: "r1", name: "A", description: "a" }] },
+    });
+
+    expect(result.keyReuse).toBeUndefined();
+    expect(result.error).toBeNull();
+    expect(result.gradingRubricVersion).toBe(3);
+    const rubricUpdate = mockClient.from.mock.results[1]?.value;
+    expect(rubricUpdate.update.mock.calls[0][0].grading_rubric.requirements).toEqual([
+      { key: "r1", name: "A", description: "a" },
+    ]);
+  });
+
+  it("採点基準を書いたあと再採番が失敗したら種別と基準を戻す", async () => {
+    const storedRubric = { version: 2, ...input, max_key_number: 1 };
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: storedRubric,
+            },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+          { data: null, error: dbError },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { gradingRubric: input, insertAfterId: 9 });
+
+    expect(result.error).toEqual(dbError);
+    const restoreBuilder = mockClient.from.mock.results.at(-1)?.value;
+    expect(restoreBuilder.update.mock.calls[0][0]).toEqual({
+      grading_rubric: storedRubric,
+      content_type: "exercise",
+    });
+    expect(restoreBuilder.eq).toHaveBeenCalledWith("grading_rubric->>version", "2");
+  });
+
+  it("挿入位置が不正なら書いた採点基準を戻してから例外を伝える", async () => {
+    const storedRubric = { version: 2, ...input, max_key_number: 1 };
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: storedRubric,
+            },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+          { data: [], error: null },
+        ],
+      },
+    });
+
+    await expect(
+      updateContent(1, {
+        gradingRubric: { requirements: [{ key: "r2", name: "B", description: "b" }] },
+        insertAfterId: 999,
+      })
+    ).rejects.toThrow();
+
+    const restoreBuilder = mockClient.from.mock.results.at(-1)?.value;
+    expect(restoreBuilder.update.mock.calls[0][0]).toEqual({
+      grading_rubric: storedRubric,
+      content_type: "exercise",
+    });
+    expect(restoreBuilder.eq).toHaveBeenCalledWith("grading_rubric->>version", "3");
+  });
+
+  it("消した採点基準を戻すときは NULL の行だけを対象にする", async () => {
+    const storedRubric = { version: 2, ...input, max_key_number: 1 };
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: storedRubric,
+            },
+            error: null,
+          },
+          { data: [{ id: 1, updated_at: "2026-10-13T00:00:00.000Z" }], error: null },
+          { data: null, error: dbError },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, {
+      content_type: "video",
+      gradingRubric: null,
+      insertAfterId: 9,
+    });
+
+    expect(result.error).toEqual(dbError);
+    const restoreBuilder = mockClient.from.mock.results.at(-1)?.value;
+    expect(restoreBuilder.update.mock.calls[0][0]).toEqual({
+      grading_rubric: storedRubric,
+      content_type: "exercise",
+    });
+    expect(restoreBuilder.is).toHaveBeenCalledWith("grading_rubric", null);
+    expect(restoreBuilder.eq).toHaveBeenCalledWith("updated_at", "2026-10-13T00:00:00.000Z");
+    expect(restoreBuilder.eq).not.toHaveBeenCalledWith(
+      "grading_rubric->>version",
+      expect.anything()
+    );
+  });
+
+  it("削除の updated_at が取れなければ空の基準を戻さない", async () => {
+    const storedRubric = { version: 2, ...input, max_key_number: 1 };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: storedRubric,
+            },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+          { data: null, error: dbError },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, {
+      content_type: "video",
+      gradingRubric: null,
+      insertAfterId: 9,
+    });
+
+    expect(result.error).toEqual(dbError);
+    const restoreCalls = mockClient.from.mock.results
+      .map((result) => result.value.update.mock.calls[0]?.[0])
+      .filter(
+        (payload) => payload && "grading_rubric" in payload && payload.grading_rubric !== null
+      );
+    expect(restoreCalls).toEqual([]);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "コンテンツ更新エラー（採点基準の復元）: 削除の時刻が取れないため戻さない"
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("復元が0件ならより新しい保存をエラーにしない", async () => {
+    const storedRubric = { version: 2, ...input, max_key_number: 1 };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: storedRubric,
+            },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+          { data: null, error: dbError },
+          { data: [], error: null },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { gradingRubric: input, insertAfterId: 9 });
+
+    expect(result.error).toEqual(dbError);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "コンテンツ更新エラー（採点基準の復元）: より新しい保存が先に入ったため戻さない"
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("gradingRubric 未指定なら採点基準の列に触れない", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: { learning_contents: [{ data: null, error: null }] },
+    });
+
+    await updateContent(1, { title: "改題" });
+
+    expect("grading_rubric" in updatePayload(mockClient)).toBe(false);
   });
 });

@@ -40,9 +40,15 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+const quizRow = {
+  data: { week_id: 3, pdf_url: null, content_type: "quiz", grading_rubric: null },
+  error: null,
+};
+
 describe("updateContent のクイズ設問（#306 レビュー対応）", () => {
   it("設問が変わっていなければ置き換えない（設問の id を振り直さない）", async () => {
-    const client = mockAdmin([{ data: null, error: null }]);
+    // Leaving exercise clears grading_rubric only when the read version still matches.
+    const client = mockAdmin([quizRow, { data: [{ id: 1 }], error: null }]);
 
     const result = await updateContent(1, {
       title: "タイトルだけ修正",
@@ -55,7 +61,7 @@ describe("updateContent のクイズ設問（#306 レビュー対応）", () => 
   });
 
   it("設問が変わっていれば置き換える", async () => {
-    const client = mockAdmin([{ data: null, error: null }]);
+    const client = mockAdmin([quizRow, { data: [{ id: 1 }], error: null }]);
 
     const result = await updateContent(1, { content_type: "quiz", quizQuestions: edited });
 
@@ -66,7 +72,7 @@ describe("updateContent のクイズ設問（#306 レビュー対応）", () => 
   });
 
   it("行の更新が失敗したら、置き換えた設問を元に戻す", async () => {
-    const client = mockAdmin([{ data: null, error: dbError }]);
+    const client = mockAdmin([quizRow, { data: null, error: dbError }]);
 
     const result = await updateContent(1, { content_type: "quiz", quizQuestions: edited });
 
@@ -80,7 +86,8 @@ describe("updateContent のクイズ設問（#306 レビュー対応）", () => 
   it("挿入位置が不正（例外）でも設問を元に戻してから例外を伝える", async () => {
     // Siblings fetch returns none, so insert_after_id 999 is not a live sibling.
     const client = mockAdmin([
-      { data: { week_id: 3, pdf_url: null }, error: null },
+      quizRow,
+      { data: [{ id: 1 }], error: null },
       { data: [], error: null },
     ]);
 
@@ -90,6 +97,61 @@ describe("updateContent のクイズ設問（#306 レビュー対応）", () => 
     expect(replaceCalls(client).at(-1)).toEqual([
       "replace_quiz_questions",
       { p_content_id: 1, p_questions: stored },
+    ]);
+  });
+
+  it("採点基準の競合では置き換えた設問を戻す", async () => {
+    const client = mockAdmin([
+      {
+        data: {
+          week_id: 3,
+          pdf_url: null,
+          content_type: "exercise",
+          grading_rubric: {
+            version: 1,
+            requirements: [{ key: "r1", name: "A", description: "a" }],
+          },
+        },
+        error: null,
+      },
+      { data: [], error: null },
+    ]);
+
+    const result = await updateContent(1, { content_type: "quiz", quizQuestions: edited });
+
+    expect(result.conflict).toBe(true);
+    expect(replaceCalls(client)).toEqual([
+      ["replace_quiz_questions", { p_content_id: 1, p_questions: edited }],
+      ["replace_quiz_questions", { p_content_id: 1, p_questions: stored }],
+    ]);
+  });
+
+  it("開いた版が違う競合でも、先に置き換えた設問を戻す", async () => {
+    const client = mockAdmin([
+      {
+        data: {
+          week_id: 3,
+          pdf_url: null,
+          content_type: "exercise",
+          grading_rubric: {
+            version: 2,
+            requirements: [{ key: "r1", name: "A", description: "a" }],
+          },
+        },
+        error: null,
+      },
+    ]);
+
+    const result = await updateContent(1, {
+      content_type: "quiz",
+      quizQuestions: edited,
+      loadedRubricVersion: 1,
+    });
+
+    expect(result.conflict).toBe(true);
+    expect(replaceCalls(client)).toEqual([
+      ["replace_quiz_questions", { p_content_id: 1, p_questions: edited }],
+      ["replace_quiz_questions", { p_content_id: 1, p_questions: stored }],
     ]);
   });
 });

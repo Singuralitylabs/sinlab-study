@@ -272,6 +272,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
               <TableHead>タイトル</TableHead>
               <TableHead className="w-24">種類</TableHead>
               <TableHead className="w-40">状態</TableHead>
+              <TableHead className="w-28">採点基準</TableHead>
               <TableHead className="text-right w-24">操作</TableHead>
             </TableRow>
           </TableHeader>
@@ -291,7 +292,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
                         aria-label={`${group.label}を全選択`}
                       />
                     </TableCell>
-                    <TableCell colSpan={5} className="text-sm font-medium">
+                    <TableCell colSpan={6} className="text-sm font-medium">
                       {group.label}
                       <span className="ml-2 font-normal text-muted-foreground">
                         （{group.contents.length}件）
@@ -338,6 +339,17 @@ export function ContentsTable({ groups }: ContentsTableProps) {
                             </Badge>
                           )}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        {content.content_type !== "exercise" ? (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        ) : content.grading_rubric_version !== null ? (
+                          <Badge variant="secondary" className="bg-success/10 text-success">
+                            設定済み（v{content.grading_rubric_version}）
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline">未設定</Badge>
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center justify-end gap-1">

@@ -42,7 +42,10 @@ function buildPatch(
       if (!BULK_SETTABLE_CONTENT_TYPES.includes(contentType)) {
         return { error: "クイズへの変更は編集画面で設問と一緒に行ってください" };
       }
-      return { content_type: contentType };
+      // A rubric only makes sense for exercises; drop it when the type moves away.
+      return contentType === "exercise"
+        ? { content_type: contentType }
+        : { content_type: contentType, grading_rubric: null };
   }
 }
 
@@ -63,9 +66,10 @@ export async function POST(request: Request) {
     }
 
     const { created, error, failedIndex } = await createContentsAtTail(
-      validation.data.contents.map(({ quiz_questions, ...content }) => ({
+      validation.data.contents.map(({ quiz_questions, grading_rubric, ...content }) => ({
         ...content,
         quizQuestions: quiz_questions,
+        gradingRubric: grading_rubric,
       }))
     );
 

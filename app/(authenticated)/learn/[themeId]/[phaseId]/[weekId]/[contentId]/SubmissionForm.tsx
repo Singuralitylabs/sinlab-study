@@ -11,7 +11,8 @@ import {
   type CodeLanguage,
   DEFAULT_FILENAME_BY_LANGUAGE,
 } from "@/app/components/code-editor-utils";
-import type { AIReview, SubmissionType } from "@/app/types";
+import { buildReviewNotice } from "@/app/lib/ai-review-response";
+import type { AIReviewListItem, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,12 +32,30 @@ interface SubmissionFormProps {
   contentId: number;
   allowedSubmissionTypes: "code" | "url" | "both";
   codeLanguage: CodeLanguage;
+  /** Id of the completed review the page already renders for this submission. */
+  persistedReviewId: number | null;
+}
+
+function buildFailedReview(errorMessage: string): AIReviewListItem {
+  return {
+    id: 0,
+    status: "failed",
+    review_content: null,
+    overall_score: null,
+    review_json: null,
+    score_kind: "legacy",
+    rubric_version: null,
+    passed: null,
+    error_message: errorMessage,
+    reviewed_at: null,
+  };
 }
 
 export function SubmissionForm({
   contentId,
   allowedSubmissionTypes,
   codeLanguage,
+  persistedReviewId,
 }: SubmissionFormProps) {
   const router = useRouter();
   const [submissionType, setSubmissionType] = useState<SubmissionType>(
@@ -47,8 +66,11 @@ export function SubmissionForm({
   ]);
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [aiReview, setAiReview] = useState<AIReview | null>(null);
+  const [message, setMessage] = useState<{
+    type: "success" | "error" | "info";
+    text: string;
+  } | null>(null);
+  const [aiReview, setAiReview] = useState<AIReviewListItem | null>(null);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
   const isMultiFile = codeFiles.length > 1;
@@ -107,7 +129,10 @@ export function SubmissionForm({
     setCodeFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const requestAIReview = async (submissionId: number) => {
+  const requestAIReview = async (
+    submissionId: number,
+    options: { submissionJustSaved: boolean }
+  ) => {
     setIsReviewLoading(true);
     try {
       const response = await fetch("/api/ai-review", {
@@ -116,70 +141,55 @@ export function SubmissionForm({
         body: JSON.stringify({ submissionId }),
       });
 
-      if (response.ok) {
-        const data = await response.json();
+      const data = await response.json().catch(() => null);
+      const isNoticeStatus = [202, 409, 429].includes(response.status);
+      const notice = isNoticeStatus ? buildReviewNotice(response.status, data, options) : null;
+      if (notice) {
+        setMessage(notice);
+        const reason = (data as { reason?: unknown } | null)?.reason;
+        // A failed card left on screen hides a review the server already finished.
+        const finishedElsewhere = response.status === 409 || reason === "submission_reviewed";
+        if (finishedElsewhere) {
+          setAiReview(null);
+        }
+        if (response.status === 202 || finishedElsewhere) {
+          router.refresh();
+        }
+      } else if (response.ok && data?.review) {
         setAiReview({
           id: data.review.id,
-          submission_id: submissionId,
           status: data.review.status,
           review_content: data.review.review_content,
           overall_score: data.review.overall_score,
-          model_used: data.review.model_used,
-          prompt_tokens: null,
-          completion_tokens: null,
+          review_json: data.review.review_json ?? null,
+          score_kind: data.review.score_kind ?? "legacy",
+          rubric_version: data.review.rubric_version ?? null,
+          passed: data.review.passed ?? null,
           error_message: null,
           reviewed_at: new Date().toISOString(),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
         });
         setMessage({ type: "success", text: "提出が完了しました。AIレビューが生成されました。" });
-      } else if (response.status === 429) {
-        const errorData = await response.json().catch(() => null);
-        setMessage({
-          type: "error",
-          text: errorData?.error ?? "この課題のAIレビューは利用済みです",
-        });
+        router.refresh();
       } else {
-        const errorData = await response.json().catch(() => null);
-        const errorMsg = errorData?.error || "AIレビューの生成に失敗しました";
+        const errorMsg = data?.error || "AIレビューの生成に失敗しました";
         setMessage({ type: "error", text: errorMsg });
-        setAiReview({
-          id: 0,
-          submission_id: submissionId,
-          status: "failed",
-          review_content: null,
-          overall_score: null,
-          model_used: null,
-          prompt_tokens: null,
-          completion_tokens: null,
-          error_message: errorMsg,
-          reviewed_at: null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
+        setAiReview(buildFailedReview(errorMsg));
       }
     } catch {
-      setMessage({ type: "error", text: "ネットワークエラーが発生しました。再試行してください。" });
-      setAiReview({
-        id: 0,
-        submission_id: submissionId,
-        status: "failed",
-        review_content: null,
-        overall_score: null,
-        model_used: null,
-        prompt_tokens: null,
-        completion_tokens: null,
-        error_message: "ネットワークエラーが発生しました。再試行してください。",
-        reviewed_at: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+      const errorMsg = "ネットワークエラーが発生しました。再試行してください。";
+      setMessage({ type: "error", text: errorMsg });
+      setAiReview(buildFailedReview(errorMsg));
     } finally {
       setIsReviewLoading(false);
     }
   };
 
   const [lastSubmissionId, setLastSubmissionId] = useState<number | null>(null);
+  // refresh keeps this card, so the page and the form would show the same completed row.
+  const pageShowsThisReview =
+    aiReview?.status === "completed" &&
+    persistedReviewId != null &&
+    aiReview.id === persistedReviewId;
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -224,7 +234,7 @@ export function SubmissionForm({
 
         const submissionId = data.submission.id;
         setLastSubmissionId(submissionId);
-        requestAIReview(submissionId);
+        requestAIReview(submissionId, { submissionJustSaved: true });
         router.refresh();
       } else {
         const data = await response.json();
@@ -380,19 +390,20 @@ export function SubmissionForm({
         </Button>
       </form>
 
-      <AIReviewDisplayNoSSR
-        review={aiReview}
-        isLoading={isReviewLoading}
-        defaultExpanded={true}
-        onRetry={
-          lastSubmissionId
-            ? () => {
-                setAiReview(null);
-                requestAIReview(lastSubmissionId);
-              }
-            : undefined
-        }
-      />
+      {!pageShowsThisReview && (
+        <AIReviewDisplayNoSSR
+          review={aiReview}
+          isLoading={isReviewLoading}
+          defaultExpanded={true}
+          onRetry={
+            lastSubmissionId && aiReview?.status === "failed"
+              ? () => {
+                  requestAIReview(lastSubmissionId, { submissionJustSaved: false });
+                }
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 }

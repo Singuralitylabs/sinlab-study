@@ -32,7 +32,16 @@ export const BREADCRUMB_WEEK_COLUMNS = `id, phase_id, name, is_published, is_del
 
 export const LEARNING_WEEK_DETAIL_COLUMNS = `*, phase:learning_phases(${BREADCRUMB_PHASE_COLUMNS})`;
 
-export const LEARNING_CONTENT_DETAIL_COLUMNS = `*, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
+/**
+ * Every learner-facing column except grading_rubric. `*` fails for anon/authenticated after
+ * table SELECT is replaced by a column grant that omits this column: a column-level REVOKE
+ * does not hide it while table SELECT remains. reference_answer stays because the page shows
+ * it after a submission. Typed as `*` so the nested week embed does not blow the type
+ * checker's instantiation depth.
+ */
+export const LEARNING_CONTENT_DETAIL_COLUMN_LIST = `id, week_id, title, content_type, video_url, pdf_url, text_content, description, exercise_instructions, reference_answer, hint, allowed_submission_types, code_language, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
+export const LEARNING_CONTENT_DETAIL_COLUMNS =
+  LEARNING_CONTENT_DETAIL_COLUMN_LIST as unknown as "*";
 
 /**
  * Unless admin / maintainer, restrict to is_published = true (issue #68 preview). Insert after
@@ -315,9 +324,12 @@ export async function isContentVisible(
  * issue #68).
  * fetchContentById() does not filter parents' is_deleted (`.eq("is_deleted", false)` applies only
  * to the content), so check here explicitly. Otherwise the UI shows the complete button while
- * isContentVisible() always returns 403.
+ * isContentVisible() always returns 403. The argument is only the published flags: learner detail
+ * does not select grading_rubric, so requiring the full row would claim that column is present.
  */
-export function isContentFullyPublished(content: LearningContentWithBreadcrumb): boolean {
+export function isContentFullyPublished(
+  content: Pick<LearningContentWithBreadcrumb, "is_published" | "week">
+): boolean {
   return content.is_published && isWeekHierarchyPublished(content.week);
 }
 
@@ -713,12 +725,15 @@ export async function fetchContentsByWeekId(weekId: number): Promise<{
   return { data: data as LearningContentListItem[] | null, error: null };
 }
 
+/** Learner detail row. grading_rubric is not selected, so the type must not claim it is present. */
+export type LearnerContentDetail = Omit<LearningContentWithBreadcrumb, "grading_rubric">;
+
 /** admin / maintainer also get unpublished contents as preview (issue #68). */
 export async function fetchContentById(
   contentId: number,
   userRole: UserRoleType | null = null
 ): Promise<{
-  data: LearningContentWithBreadcrumb | null;
+  data: LearnerContentDetail | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
@@ -741,7 +756,7 @@ export async function fetchContentById(
     return { data: null, error };
   }
 
-  return { data: data as LearningContentWithBreadcrumb | null, error: null };
+  return { data: data as LearnerContentDetail | null, error: null };
 }
 
 export async function fetchUserProgressByContentIds(

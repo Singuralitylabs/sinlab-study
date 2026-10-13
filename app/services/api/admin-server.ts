@@ -10,6 +10,17 @@ import {
   resolveSiblingResequence,
   type SiblingOrderRow,
 } from "@/app/lib/content-grouping";
+import {
+  getGradingRubricVersion,
+  getRubricMaxKeyNumber,
+  reusedRequirementKeys,
+  toRubricFormRows,
+} from "@/app/lib/grading";
+import {
+  type GradingRubricInput,
+  nextGradingRubric,
+  parseGradingRubric,
+} from "@/app/lib/grading-schema";
 import type { QuizQuestionData } from "@/app/lib/quiz";
 import { toSlideObjectKey } from "@/app/lib/slide-object-key";
 import { WEEKLY_FUNNEL_FETCH_ERROR, type WeeklyFunnelRow } from "@/app/lib/weekly-funnel";
@@ -164,6 +175,7 @@ function manageContentListSelect(innerJoin: boolean): string {
   const themeRel = innerJoin ? "theme:learning_themes!inner" : "theme:learning_themes";
   return `
     id, title, content_type, display_order, is_published, is_open_to_trial, week_id,
+    grading_rubric_version:grading_rubric->version,
     ${weekRel}(
       id, name, display_order, phase_id,
       ${phaseRel}(
@@ -1032,7 +1044,15 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
     return { data: [], error: null };
   }
 
-  const supabase = await createServerSupabaseClient();
+  // The list reads grading_rubric->version. That column is absent from the anon/authenticated
+  // grant, and staff share the authenticated role, so the user client cannot select it.
+  // service_role bypasses RLS, so the role check has to live here: a member caller would
+  // otherwise see every unpublished row.
+  const { userRole } = await getServerAuth();
+  if (!checkContentPermissions(userRole)) {
+    return { data: [], error: null };
+  }
+  const supabase = await createAdminSupabaseClient();
   const needsInnerJoin = themeId !== undefined || phaseId !== undefined;
 
   let query = supabase
@@ -1158,6 +1178,7 @@ type CreateContentInput = {
   allowed_submission_types?: "code" | "url" | "both";
   code_language?: CodeLanguage;
   pdf_url?: string | null;
+  gradingRubric?: GradingRubricInput | null;
   insertAfterId: number | null;
   is_published?: boolean;
   is_open_to_trial?: boolean;
@@ -1215,6 +1236,11 @@ async function createContentWith(
       allowed_submission_types: content.allowed_submission_types,
       code_language: content.code_language,
       pdf_url: content.pdf_url,
+      // Rubrics belong to exercises only; version always starts at 1 for a new content row.
+      grading_rubric:
+        content.content_type === "exercise" && content.gradingRubric
+          ? nextGradingRubric(null, content.gradingRubric)
+          : null,
       is_published: quizQuestions ? false : content.is_published,
       is_open_to_trial: content.is_open_to_trial,
       display_order: displayOrder,
@@ -1373,18 +1399,39 @@ async function selectQuizQuestions(
  * main UPDATE succeeds (see resequenceDestinationForUpdate). Uses createAdminSupabaseClient() for
  * sibling work for the same reason as createContent.
  */
+type ContentUpdateResult = {
+  error: PostgrestError | null;
+  storageRemoved: boolean;
+  /** Another save changed the rubric between the read and this write. */
+  conflict?: boolean;
+  /** Incoming keys reuse a number this rubric already issued. */
+  keyReuse?: string[];
+  /**
+   * Version stored by this save. Present only after the rubric write commits, so the editor can
+   * keep locking the rows still on screen. null means the rubric was cleared.
+   */
+  gradingRubricVersion?: number | null;
+};
+
 export async function updateContent(
   id: number,
-  content: Partial<LearningContent> & {
+  content: Omit<Partial<LearningContent>, "grading_rubric"> & {
     insertAfterId?: number | null;
     quizQuestions?: QuizQuestionData[];
+    /** undefined = leave as is, null = clear, object = save (version derived here). */
+    gradingRubric?: GradingRubricInput | null;
+    /**
+     * Version the editor loaded. undefined = the caller has no form (lock against the row just
+     * read). null or a number = that loaded version, so a stale form cannot overwrite a newer one.
+     */
+    loadedRubricVersion?: number | null;
   }
-): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
+): Promise<ContentUpdateResult> {
   const supabase = await createAdminSupabaseClient();
-  const { insertAfterId, quizQuestions, ...patch } = content;
+  const { insertAfterId, quizQuestions, gradingRubric, loadedRubricVersion, ...patch } = content;
 
   if (patch.content_type !== "quiz" || !quizQuestions) {
-    return updateContentRow(supabase, id, patch, insertAfterId);
+    return updateContentRow(supabase, id, patch, insertAfterId, gradingRubric, loadedRubricVersion);
   }
 
   const { data: previous, error: previousError } = await selectQuizQuestions(supabase, id);
@@ -1394,7 +1441,7 @@ export async function updateContent(
   // The edit form always sends the questions. Replacing unchanged ones would renumber their ids,
   // and a learner answering at that moment would be graded against ids that no longer exist.
   if (sameQuizQuestions(previous, quizQuestions)) {
-    return updateContentRow(supabase, id, patch, insertAfterId);
+    return updateContentRow(supabase, id, patch, insertAfterId, gradingRubric, loadedRubricVersion);
   }
 
   // Questions go first so a failure here never leaves a quiz row with stale or no questions. If
@@ -1412,8 +1459,17 @@ export async function updateContent(
     }
   };
   try {
-    const result = await updateContentRow(supabase, id, patch, insertAfterId);
-    if (result.error) {
+    const result = await updateContentRow(
+      supabase,
+      id,
+      patch,
+      insertAfterId,
+      gradingRubric,
+      loadedRubricVersion
+    );
+    // conflict and keyReuse leave the row unchanged but carry error: null. The questions were
+    // already replaced, so those outcomes have to restore them too or the quiz and the row diverge.
+    if (result.error || result.conflict || result.keyReuse) {
       await restorePrevious();
     }
     return result;
@@ -1439,12 +1495,32 @@ function sameQuizQuestions(a: QuizQuestionData[], b: QuizQuestionData[]): boolea
   return normalize(a) === normalize(b);
 }
 
+function writtenRowUpdatedAt(data: unknown): string | null {
+  if (!Array.isArray(data) || data.length === 0) {
+    return null;
+  }
+  const row = data[0];
+  if (!row || typeof row !== "object" || !("updated_at" in row)) {
+    return null;
+  }
+  const updatedAt = (row as { updated_at: unknown }).updated_at;
+  return typeof updatedAt === "string" && updatedAt.length > 0 ? updatedAt : null;
+}
+
 async function updateContentRow(
   supabase: AdminSupabaseClient,
   id: number,
-  patch: Partial<LearningContent>,
-  insertAfterId: number | null | undefined
-): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
+  basePatch: Omit<Partial<LearningContent>, "grading_rubric">,
+  insertAfterId: number | null | undefined,
+  gradingRubric: GradingRubricInput | null | undefined,
+  loadedRubricVersion: number | null | undefined
+): Promise<ContentUpdateResult> {
+  const patch: Partial<LearningContent> = { ...basePatch };
+  const movesAwayFromExercise =
+    patch.content_type !== undefined && patch.content_type !== "exercise";
+  // null clears, an object saves, and leaving exercise drops the rubric. undefined leaves it.
+  const touchesRubric = movesAwayFromExercise || gradingRubric !== undefined;
+
   let destinationFilter: SiblingParentFilter = null;
   let sourceFilter: SiblingParentFilter = null;
   let parentChanged = false;
@@ -1457,21 +1533,107 @@ async function updateContentRow(
   const needsCurrentPdf = patch.pdf_url !== undefined;
   let previousPdfUrl: string | null = null;
   let pdfFetchFailed = false;
-  if (needsCurrentWeek || needsCurrentPdf) {
+  // Set whenever this write changes grading_rubric, including a clear. The UPDATE matches that
+  // version (or NULL) so a stale form cannot overwrite a newer rubric or republish an old key.
+  let expectedRubricVersion: number | null | undefined;
+  // The versioned write commits before resequence. If a later step fails, put these back;
+  // otherwise a quiz keeps the new type and a wiped rubric while its questions are restored.
+  let rubricSnapshot: {
+    grading_rubric: LearningContent["grading_rubric"];
+    content_type: LearningContent["content_type"];
+  } | null = null;
+  let rubricWriteCommitted = false;
+  let committedRubricVersion: number | null | undefined;
+  // The rubric UPDATE's updated_at. A later save moves it, including one that also leaves the
+  // rubric NULL, so a clear is not identified by IS NULL alone.
+  let committedRubricUpdatedAt: string | null = null;
+  if (needsCurrentWeek || needsCurrentPdf || touchesRubric) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
-      .select("week_id, pdf_url")
+      .select("week_id, pdf_url, grading_rubric, content_type")
       .eq("id", id)
       .eq("is_deleted", false)
       .single();
-    if (currentError) {
-      console.error("コンテンツ更新エラー（現在値取得）:", currentError.message);
-      if (needsCurrentWeek) {
-        return { error: currentError, storageRemoved: true };
+    if (currentError || !current) {
+      console.error("コンテンツ更新エラー（現在値取得）:", currentError?.message ?? "no row");
+      // The rubric version can't be derived without the stored rubric, so fail rather than guess.
+      if (needsCurrentWeek || touchesRubric) {
+        return {
+          error: currentError ?? {
+            message: "コンテンツの現在値を取得できませんでした",
+            details: "",
+            hint: "",
+            code: "PGRST116",
+          },
+          storageRemoved: true,
+        };
       }
       pdfFetchFailed = true;
     } else {
       previousPdfUrl = current.pdf_url;
+      if (touchesRubric) {
+        // A rubric belongs to exercises only: judge the type the row will have after this update,
+        // so switching a stored video to exercise keeps the rubric sent with it.
+        const stored = parseGradingRubric(current.grading_rubric);
+        // zod can reject a row the CHECK allows (too many requirements, a duplicate key). The
+        // version is still in the JSON; treating that as NULL makes `IS NULL` match nothing and
+        // every later save 409s.
+        const lockVersion = getGradingRubricVersion(current.grading_rubric);
+        if (current.grading_rubric != null && lockVersion == null) {
+          return {
+            error: {
+              message: "保存済みの採点基準を読み取れませんでした",
+              details: "",
+              hint: "",
+              code: "PGRST116",
+            } as PostgrestError,
+            storageRemoved: true,
+          };
+        }
+        // The version just read only closes the gap until this UPDATE. A form opened on an older
+        // version would otherwise be applied on top of the newer row.
+        if (loadedRubricVersion !== undefined && loadedRubricVersion !== lockVersion) {
+          return { error: null, storageRemoved: true, conflict: true };
+        }
+        const resultingType = patch.content_type ?? current.content_type;
+        // zod can reject a CHECK-valid row. Reuse still has to see those keys, or a removed
+        // r{n} can name a different requirement while old reviews still point at it.
+        // The form projection drops non-string keys and turns a non-string description into "".
+        // Using it as the "unchanged" baseline would keep the old version while replacing the
+        // criteria that past reviews stored under that version.
+        const unparsedBasis =
+          stored == null && lockVersion != null
+            ? {
+                version: lockVersion,
+                requirements: toRubricFormRows(current.grading_rubric),
+                max_key_number: getRubricMaxKeyNumber(current.grading_rubric),
+              }
+            : null;
+        const basis = stored ?? unparsedBasis;
+        if (gradingRubric && resultingType === "exercise") {
+          const reused = basis
+            ? reusedRequirementKeys(
+                basis,
+                gradingRubric.requirements.map((requirement) => requirement.key)
+              )
+            : [];
+          if (reused.length > 0) {
+            return { error: null, storageRemoved: true, keyReuse: reused };
+          }
+          const drafted = nextGradingRubric(basis, gradingRubric);
+          patch.grading_rubric =
+            unparsedBasis != null && lockVersion != null
+              ? { ...drafted, version: Math.max(drafted.version, lockVersion + 1) }
+              : drafted;
+        } else {
+          patch.grading_rubric = null;
+        }
+        rubricSnapshot = {
+          grading_rubric: current.grading_rubric,
+          content_type: current.content_type,
+        };
+        expectedRubricVersion = lockVersion;
+      }
       if (needsCurrentWeek) {
         const destinationWeekId = patch.week_id ?? current.week_id;
         parentChanged = destinationWeekId !== current.week_id;
@@ -1481,62 +1643,164 @@ async function updateContentRow(
     }
   }
 
-  const resequenced = await resequenceDestinationForUpdate(
-    supabase,
-    "learning_contents",
-    id,
-    destinationFilter,
-    parentChanged,
-    insertAfterId
-  );
-  if (resequenced.error) {
-    console.error("コンテンツ更新エラー（再採番）:", resequenced.error.message);
-    return { error: resequenced.error, storageRemoved: true };
+  // Version check before sibling display_order writes. A lost race must not leave duplicate
+  // orders, and content_type moves with the rubric so the exercise-only CHECK still holds
+  // (a rubric written onto a video row, or a type change that leaves a rubric behind, fails).
+  if (expectedRubricVersion !== undefined) {
+    const rubricPayload: Partial<LearningContent> = {
+      grading_rubric: patch.grading_rubric ?? null,
+    };
+    if (patch.content_type !== undefined) {
+      rubricPayload.content_type = patch.content_type;
+    }
+    let rubricUpdate = supabase
+      .from("learning_contents")
+      .update(rubricPayload)
+      .eq("id", id)
+      .eq("is_deleted", false);
+    if (expectedRubricVersion === null) {
+      rubricUpdate = rubricUpdate.is("grading_rubric", null);
+    } else {
+      rubricUpdate = rubricUpdate.eq("grading_rubric->>version", String(expectedRubricVersion));
+    }
+    const { data: rubricRows, error: rubricError } = await rubricUpdate.select("id, updated_at");
+    if (rubricError) {
+      console.error("コンテンツ更新エラー:", rubricError.message);
+      return { error: rubricError, storageRemoved: true };
+    }
+    if (Array.isArray(rubricRows) && rubricRows.length === 0) {
+      return { error: null, storageRemoved: true, conflict: true };
+    }
+    rubricWriteCommitted = true;
+    // The editor's next save has to lock this write, not a version a later refresh might load
+    // for different rows.
+    committedRubricVersion = getGradingRubricVersion(rubricPayload.grading_rubric);
+    committedRubricUpdatedAt = writtenRowUpdatedAt(rubricRows);
+    delete patch.grading_rubric;
+    delete patch.content_type;
   }
 
-  const updatePayload =
-    resequenced.displayOrder !== undefined
-      ? { ...patch, display_order: resequenced.displayOrder }
-      : patch;
+  const restoreRubricWrite = async () => {
+    if (!rubricWriteCommitted || !rubricSnapshot || committedRubricVersion === undefined) {
+      return;
+    }
+    // A clear has no version. IS NULL also matches a later save that left the rubric empty,
+    // and the snapshot would put the previous rubric back. updated_at moves on that UPDATE.
+    if (committedRubricVersion === null && !committedRubricUpdatedAt) {
+      console.error("コンテンツ更新エラー（採点基準の復元）: 削除の時刻が取れないため戻さない");
+      return;
+    }
+    // Match the version this save wrote. Another save can commit a newer rubric before
+    // resequence or the remaining UPDATE fails; an unconditional snapshot write replaces it.
+    let restore = supabase
+      .from("learning_contents")
+      .update(rubricSnapshot)
+      .eq("id", id)
+      .eq("is_deleted", false);
+    if (committedRubricVersion === null) {
+      restore = restore.is("grading_rubric", null);
+    } else {
+      restore = restore.eq("grading_rubric->>version", String(committedRubricVersion));
+    }
+    if (committedRubricUpdatedAt) {
+      restore = restore.eq("updated_at", committedRubricUpdatedAt);
+    }
+    const { data: restoredRows, error: restoreError } = await restore.select("id");
+    if (restoreError) {
+      console.error("コンテンツ更新エラー（採点基準の復元）:", restoreError.message);
+      return;
+    }
+    if (Array.isArray(restoredRows) && restoredRows.length === 0) {
+      console.error(
+        "コンテンツ更新エラー（採点基準の復元）: より新しい保存が先に入ったため戻さない"
+      );
+    }
+  };
 
-  const { error } = await supabase.from("learning_contents").update(updatePayload).eq("id", id);
-
-  if (error) {
-    console.error("コンテンツ更新エラー:", error.message);
-    return { error, storageRemoved: true };
-  }
-
-  if (parentChanged) {
-    const sourceError = await renumberSourceSiblingsAfterMove(
+  // InvalidInsertAfterIdError is thrown, not returned, and it happens after the rubric
+  // write has committed. A returned error restores above; a throw has to restore here too,
+  // or the quiz catch puts the old questions back onto the new type and a wiped rubric.
+  try {
+    const resequenced = await resequenceDestinationForUpdate(
       supabase,
       "learning_contents",
       id,
-      sourceFilter
+      destinationFilter,
+      parentChanged,
+      insertAfterId
     );
-    if (sourceError) {
-      console.error("コンテンツ更新エラー（移動元の再採番）:", sourceError.message);
-      return { error: sourceError, storageRemoved: true };
+    if (resequenced.error) {
+      console.error("コンテンツ更新エラー（再採番）:", resequenced.error.message);
+      await restoreRubricWrite();
+      return { error: resequenced.error, storageRemoved: true };
     }
-  }
 
-  // Delete the old object (if unreferenced elsewhere) only when the normalized pdf_url key
-  // actually changed. PUT always sends pdf_url (null for non-slides), so updates that keep the
-  // same key (title edits, overwriting the same folder/number) must not delete anything. If the
-  // pre-fetch failed the old key is unknown, so skip deletion and report false.
-  let storageRemoved = true;
-  if (needsCurrentPdf) {
-    if (pdfFetchFailed) {
-      storageRemoved = false;
-    } else {
-      const previousKey = toSlideObjectKey(previousPdfUrl);
-      const nextKey = toSlideObjectKey(patch.pdf_url ?? null);
-      if (previousKey !== null && previousKey !== nextKey) {
-        storageRemoved = await removeUnreferencedSlideObjects(supabase, [previousKey]);
+    const updatePayload =
+      resequenced.displayOrder !== undefined
+        ? { ...patch, display_order: resequenced.displayOrder }
+        : patch;
+
+    // The rubric (and content_type, when this save changes it) was already written under the
+    // version predicate. Filtering this update on the old version would match 0 rows.
+    if (Object.keys(updatePayload).length > 0) {
+      const { data: updatedRows, error } = await supabase
+        .from("learning_contents")
+        .update(updatePayload)
+        .eq("id", id)
+        .select("updated_at");
+      if (error) {
+        console.error("コンテンツ更新エラー:", error.message);
+        await restoreRubricWrite();
+        return { error, storageRemoved: true };
+      }
+      // A throw after this UPDATE still has to match the row this save last wrote.
+      const stamped = writtenRowUpdatedAt(updatedRows);
+      if (stamped) {
+        committedRubricUpdatedAt = stamped;
       }
     }
-  }
 
-  return { error: null, storageRemoved };
+    if (parentChanged) {
+      const sourceError = await renumberSourceSiblingsAfterMove(
+        supabase,
+        "learning_contents",
+        id,
+        sourceFilter
+      );
+      if (sourceError) {
+        console.error("コンテンツ更新エラー（移動元の再採番）:", sourceError.message);
+        return { error: sourceError, storageRemoved: true };
+      }
+    }
+
+    // Delete the old object (if unreferenced elsewhere) only when the normalized pdf_url key
+    // actually changed. PUT always sends pdf_url (null for non-slides), so updates that keep the
+    // same key (title edits, overwriting the same folder/number) must not delete anything. If the
+    // pre-fetch failed the old key is unknown, so skip deletion and report false.
+    let storageRemoved = true;
+    if (needsCurrentPdf) {
+      if (pdfFetchFailed) {
+        storageRemoved = false;
+      } else {
+        const previousKey = toSlideObjectKey(previousPdfUrl);
+        const nextKey = toSlideObjectKey(patch.pdf_url ?? null);
+        if (previousKey !== null && previousKey !== nextKey) {
+          storageRemoved = await removeUnreferencedSlideObjects(supabase, [previousKey]);
+        }
+      }
+    }
+
+    return {
+      error: null,
+      storageRemoved,
+      ...(committedRubricVersion !== undefined
+        ? { gradingRubricVersion: committedRubricVersion }
+        : {}),
+    };
+  } catch (thrown) {
+    await restoreRubricWrite();
+    throw thrown;
+  }
 }
 
 /**

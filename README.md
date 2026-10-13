@@ -95,6 +95,7 @@ bun dev
 | `bun run db:types` | Supabase から TypeScript 型定義を生成（`.env.local` があれば読み込み、なければ環境変数 `SUPABASE_PROJECT_ID` を使用） |
 | `bun run test` | Vitest によるユニットテスト実行 |
 | `bun run check:comments [基準ref]` | 変更した TS/JS がコメント・整形のみの差分か（AST同一・`@ts-*`/`biome-ignore` の増減なし）を検証。未追跡ファイルも対象、コード以外の変更ファイルは「未検証」として一覧表示。差異・パース失敗があれば該当ファイルを列挙して非ゼロ終了（既定の基準は `origin/main`） |
+| `bun scripts/grading-dry-run.ts --confirm-dev [--content-id N] [--limit 5] [--repeat 1]` | 採点基準付きの演習の既存コード提出を現行ロジックで再採点し、点数分布・合格率・平均トークンを表示する（**DB へは書き込まない**。Gemini を呼び課金される。`SUPABASE_SERVICE_ROLE_KEY` と `GEMINI_API_KEY` が必要で、**本番には向けない**。合格点 `CERTIFICATE_PASS_SCORE` を決める材料にする） |
 | `bun run test:all` | build/db:types/lint/format/check/test を一括実行 |
 
 ### Claude Code から Supabase MCP を使う

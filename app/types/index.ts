@@ -35,8 +35,10 @@ export type UserProgress = Tables<"user_progress"> & {
 export type Submission = Tables<"submissions"> & {
   submission_type: SubmissionType;
 };
-export type AIReview = Tables<"ai_reviews"> & {
+export type AIReview = Omit<Tables<"ai_reviews">, "review_json" | "score_kind"> & {
   status: AIReviewStatus;
+  review_json: ReviewJson | null;
+  score_kind: ScoreKind;
 };
 
 export type UserStatusType = "trial" | "active" | "rejected";
@@ -46,6 +48,47 @@ export type MembershipType = "community" | "general";
 export type ContentType = "video" | "text" | "exercise" | "slide" | "quiz";
 export type SubmissionType = "code" | "url";
 export type AIReviewStatus = "pending" | "processing" | "completed" | "failed";
+
+export type { QualityLevel, RequirementStatus, ScoreKind } from "@/app/constants/grading";
+
+import type { QualityLevel, RequirementStatus, ScoreKind } from "@/app/constants/grading";
+
+/** Defined as `type` (not `interface`) so it is assignable to Supabase's Json. */
+export type GradingRequirement = {
+  key: string;
+  name: string;
+  description: string;
+};
+
+export type GradingRubric = {
+  version: number;
+  requirements: GradingRequirement[];
+  /**
+   * Highest `r{n}` number ever issued for this rubric. Kept apart from `requirements` because a
+   * deleted requirement's number must not be handed to a new one. Absent on rubrics saved before
+   * it existed; readers fall back to the highest key still present.
+   */
+  max_key_number?: number;
+};
+
+/**
+ * `name` is stored beside `key` so a review stays readable after the rubric is edited (the rubric
+ * can change version afterwards). The AI only ever returns `key` for rubric grading; the code
+ * fills `name` from the rubric.
+ */
+export type ReviewRequirementResult = {
+  key: string;
+  name?: string;
+  status: RequirementStatus;
+  comment: string;
+};
+
+export type ReviewJson = {
+  requirements: ReviewRequirementResult[];
+  code_quality: { level: QualityLevel; comment: string };
+  suggestions: string[];
+  advice: string;
+};
 
 /**
  * One file of a multi-file submission (submissions.code_files element). language/filename may be
@@ -119,6 +162,8 @@ export type ManageContentListItem = Pick<
   | "is_open_to_trial"
   | "week_id"
 > & {
+  /** Only the rubric's version is selected, not the whole JSONB (the list never shows the text). */
+  grading_rubric_version: number | null;
   week: ManageWeekListItem | null;
 };
 
@@ -170,18 +215,33 @@ export interface SubmissionWithContent extends Submission {
   > | null;
 }
 
+/** Columns students may read. Token counts are admin-only (AdminAIReviewListItem). */
 export type AIReviewListItem = Pick<
   AIReview,
-  "id" | "status" | "overall_score" | "review_content" | "reviewed_at" | "error_message"
+  | "id"
+  | "status"
+  | "overall_score"
+  | "review_content"
+  | "reviewed_at"
+  | "error_message"
+  | "review_json"
+  | "score_kind"
+  | "rubric_version"
+  | "passed"
 >;
+
+export type AdminAIReviewListItem = AIReviewListItem &
+  Pick<AIReview, "prompt_tokens" | "completion_tokens" | "thoughts_tokens">;
 
 export interface SubmissionWithContentAndReview extends Submission {
   content: Pick<LearningContent, "id" | "title"> | null;
   ai_review: AIReviewListItem | null;
 }
 
-export interface AdminSubmissionWithReview extends SubmissionWithContentAndReview {
+export interface AdminSubmissionWithReview
+  extends Omit<SubmissionWithContentAndReview, "ai_review"> {
   user: Pick<UserType, "id" | "display_name" | "email"> | null;
+  ai_review: AdminAIReviewListItem | null;
 }
 
 export interface ThemeProgress {

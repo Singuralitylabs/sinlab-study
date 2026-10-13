@@ -23,6 +23,7 @@ export const UPGRADE_CTA_SOURCE = {
   PHASE_LIST: "phase_list",
   DASHBOARD_CARD: "dashboard_card",
   BANNER: "banner",
+  AI_REVIEW_LIMIT: "ai_review_limit",
 } as const;
 
 export type UpgradeCtaSource = (typeof UPGRADE_CTA_SOURCE)[keyof typeof UPGRADE_CTA_SOURCE];

@@ -193,6 +193,16 @@ describe("PATCH /api/manage/contents/bulk - action→patchマッピング", () =
     await expect(res.json()).resolves.toEqual({ success: true, updated: 3, storageRemoved: true });
   });
 
+  it("set_type で exercise 以外に変えると採点基準を空にする", async () => {
+    const res = await PATCH(request({ ids: [1], action: "set_type", contentType: "video" }));
+
+    expect(res.status).toBe(200);
+    expect(bulkUpdateContents).toHaveBeenCalledWith([1], {
+      content_type: "video",
+      grading_rubric: null,
+    });
+  });
+
   it("set_typeはcontentTypeをcontent_typeとして渡す", async () => {
     const res = await PATCH(request({ ids: [1, 2], action: "set_type", contentType: "exercise" }));
 
@@ -255,6 +265,25 @@ describe("POST /api/manage/contents/bulk - 一括登録（#306）", () => {
         quizQuestions: [expect.objectContaining({ correct_choices: [1] })],
       }),
       expect.objectContaining({ content_type: "video", quizQuestions: undefined }),
+    ]);
+  });
+
+  it("演習の採点基準は gradingRubric として渡す（捨てない）", async () => {
+    const grading_rubric = { requirements: [{ key: "r1", name: "要件", description: "" }] };
+
+    const res = await POST(
+      post({
+        contents: [
+          { title: "演習", week_id: 3, content_type: "exercise", grading_rubric },
+          { title: "動画", week_id: 3, content_type: "video" },
+        ],
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(createContentsAtTail).toHaveBeenCalledWith([
+      expect.objectContaining({ gradingRubric: grading_rubric }),
+      expect.objectContaining({ gradingRubric: undefined }),
     ]);
   });
 

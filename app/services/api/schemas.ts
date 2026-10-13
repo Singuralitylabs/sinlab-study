@@ -14,6 +14,7 @@ import {
   MAX_BULK_CREATE_CONTENTS,
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
+import { GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH } from "@/app/constants/grading";
 import {
   EMAIL_DIGEST_DAILY_LIMIT_MAX,
   EMAIL_DIGEST_DAILY_LIMIT_MIN,
@@ -45,6 +46,7 @@ import {
   type EmailTemplateKey,
   validateEmailTemplateText,
 } from "@/app/lib/email-template";
+import { GradingRubricInputSchema } from "@/app/lib/grading-schema";
 import { QuizQuestionsSchema } from "@/app/lib/quiz";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
 
@@ -303,6 +305,11 @@ const ContentBaseSchema = z.object({
   allowed_submission_types: AllowedSubmissionTypeSchema.optional(),
   code_language: CodeLanguageSchema.optional(),
   pdf_url: SlidePdfUrlSchema,
+  // null clears the rubric. The stored version is derived server-side (nextGradingRubric), never
+  // taken from the client. grading_rubric_version is only the version the editor loaded, so a
+  // stale form cannot overwrite a newer save.
+  grading_rubric: GradingRubricInputSchema.nullable().optional(),
+  grading_rubric_version: z.number().int().positive().nullable().optional(),
   is_published: OptionalBoolean,
   is_open_to_trial: OptionalBoolean,
   // Only read when content_type is "quiz"; saved to quiz_questions, not learning_contents.
@@ -337,8 +344,30 @@ const ContentCreateObjectSchema = ContentBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
 export const ContentCreateSchema = ContentCreateObjectSchema.superRefine(requireQuizQuestions);
-export const ContentUpdateSchema =
-  ContentCreateObjectSchema.partial().superRefine(requireQuizQuestions);
+function requireLoadedRubricVersion(
+  value: {
+    content_type?: string;
+    grading_rubric?: unknown;
+    grading_rubric_version?: number | null;
+  },
+  ctx: z.RefinementCtx
+) {
+  const clearsByType = value.content_type !== undefined && value.content_type !== "exercise";
+  if (
+    (value.grading_rubric !== undefined || clearsByType) &&
+    value.grading_rubric_version === undefined
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message: "画面を開いたときの採点基準の版を指定してください",
+      path: ["grading_rubric_version"],
+    });
+  }
+}
+
+export const ContentUpdateSchema = ContentCreateObjectSchema.partial()
+  .superRefine(requireQuizQuestions)
+  .superRefine(requireLoadedRubricVersion);
 
 const BULK_CREATE_MESSAGE = `contentsは1〜${MAX_BULK_CREATE_CONTENTS}件の配列で指定してください`;
 
@@ -394,6 +423,19 @@ export const QuizGradeRequestSchema = z.object({
     .refine((answers) => new Set(answers.map((a) => a.questionId)).size === answers.length, {
       message: "同じ設問への回答が重複しています",
     }),
+});
+
+export const GradingRubricDraftRequestSchema = z.object({
+  exercise_instructions: z
+    .string()
+    .trim()
+    .min(1, { message: "演習指示を入力してください" })
+    .max(GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH, { message: "演習指示が長すぎます" }),
+  reference_answer: z
+    .string()
+    .trim()
+    .max(GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH, { message: "模範回答が長すぎます" })
+    .nullish(),
 });
 
 const BULK_CONTENT_IDS_MESSAGE = `idsは1〜${MAX_BULK_CONTENT_IDS}件の正の整数で指定してください`;

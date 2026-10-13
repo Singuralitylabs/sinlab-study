@@ -16,11 +16,16 @@ export type Database = {
           id: number;
           model_used: string | null;
           overall_score: number | null;
+          passed: boolean | null;
           prompt_tokens: number | null;
           review_content: string | null;
+          review_json: Json | null;
           reviewed_at: string | null;
+          rubric_version: number | null;
+          score_kind: string;
           status: string;
           submission_id: number;
+          thoughts_tokens: number | null;
           updated_at: string;
         };
         Insert: {
@@ -30,11 +35,16 @@ export type Database = {
           id?: number;
           model_used?: string | null;
           overall_score?: number | null;
+          passed?: boolean | null;
           prompt_tokens?: number | null;
           review_content?: string | null;
+          review_json?: Json | null;
           reviewed_at?: string | null;
+          rubric_version?: number | null;
+          score_kind?: string;
           status?: string;
           submission_id: number;
+          thoughts_tokens?: number | null;
           updated_at?: string;
         };
         Update: {
@@ -44,11 +54,16 @@ export type Database = {
           id?: number;
           model_used?: string | null;
           overall_score?: number | null;
+          passed?: boolean | null;
           prompt_tokens?: number | null;
           review_content?: string | null;
+          review_json?: Json | null;
           reviewed_at?: string | null;
+          rubric_version?: number | null;
+          score_kind?: string;
           status?: string;
           submission_id?: number;
+          thoughts_tokens?: number | null;
           updated_at?: string;
         };
         Relationships: [
@@ -417,6 +432,7 @@ export type Database = {
           description: string | null;
           display_order: number | null;
           exercise_instructions: string | null;
+          grading_rubric: Json | null;
           hint: string | null;
           id: number;
           is_deleted: boolean | null;
@@ -438,6 +454,7 @@ export type Database = {
           description?: string | null;
           display_order?: number | null;
           exercise_instructions?: string | null;
+          grading_rubric?: Json | null;
           hint?: string | null;
           id?: number;
           is_deleted?: boolean | null;
@@ -459,6 +476,7 @@ export type Database = {
           description?: string | null;
           display_order?: number | null;
           exercise_instructions?: string | null;
+          grading_rubric?: Json | null;
           hint?: string | null;
           id?: number;
           is_deleted?: boolean | null;

@@ -1,20 +1,28 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { GEMINI_MAX_CODE_LENGTH } from "@/app/constants/gemini";
-import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
+import { USER_STATUS } from "@/app/constants/user";
+import { evaluateReviewRequest, staleReviewCutoff } from "@/app/lib/ai-review-limits";
+import { parseGradingRubric } from "@/app/lib/grading-schema";
+import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import {
+  claimPendingAIReview,
   updateAIReviewCompleted,
   updateAIReviewFailed,
   updateAIReviewProcessing,
-  upsertPendingAIReview,
 } from "@/app/services/api/ai-review-server";
+import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   generateReview,
+  ReviewGenerationError,
   type ReviewSubmission,
   resolveGeminiApiKey,
 } from "@/app/services/api/gemini";
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { AiReviewRequestSchema, validateRequest } from "@/app/services/api/schemas";
-import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
+import {
+  createAdminSupabaseClient,
+  createServerSupabaseClient,
+} from "@/app/services/api/supabase-server";
 import { requireLearnerApi } from "@/app/services/auth/admin-guard";
 
 // Next.js route segment config is statically analyzed as literals only, so this can't be a
@@ -46,7 +54,9 @@ export async function POST(request: NextRequest) {
 
     const { data: submission, error: submissionError } = await supabase
       .from("submissions")
-      .select("*, content:learning_contents(*)")
+      .select(
+        "*, content:learning_contents(id, exercise_instructions, reference_answer, code_language)"
+      )
       .eq("id", submissionId)
       .single();
 
@@ -88,13 +98,10 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // A single-file submission is stored in code_content, which has no language; fall back to
-      // the exercise's language so the model knows how to read e.g. SQL or Bash.
-      const reviewFiles =
-        files.length === 1 && !files[0].language && content.code_language
-          ? [{ ...files[0], language: content.code_language }]
-          : files;
-      reviewSubmission = { type: "code", files: reviewFiles };
+      reviewSubmission = {
+        type: "code",
+        files: withFallbackLanguage(files, content.code_language),
+      };
     } else {
       if (!submission.url) {
         return NextResponse.json({ error: "提出内容が空です" }, { status: 400 });
@@ -102,53 +109,84 @@ export async function POST(request: NextRequest) {
       reviewSubmission = { type: "url", content: submission.url };
     }
 
-    // One AI review per user and content.
-    const contentId = submission.content_id;
-    const { data: userSubmissionsForContent } = await supabase
-      .from("submissions")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("content_id", contentId);
-
-    const allSubmissionIdsForContent = (userSubmissionsForContent ?? []).map((s) => s.id);
-
-    if (allSubmissionIdsForContent.length > 0) {
-      const { data: activeReview } = await supabase
-        .from("ai_reviews")
-        .select("id, status, submission_id")
-        .in("submission_id", allSubmissionIdsForContent)
-        .in("status", ["completed", "processing", "pending"])
-        .limit(1)
-        .maybeSingle();
-
-      if (activeReview) {
-        if (activeReview.status === "processing" && activeReview.submission_id === submissionId) {
-          return NextResponse.json(
-            {
-              message: "AIレビューは現在生成中です",
-              review: { id: activeReview.id, status: "processing" },
-            },
-            { status: 202 }
-          );
-        }
-        return NextResponse.json(
-          { error: "この課題のAIレビューは1回のみ利用できます" },
-          { status: 429 }
-        );
-      }
+    const usage = await fetchAIReviewUsage(supabase, {
+      userId,
+      contentId: submission.content_id,
+      includeDailyTotal: userStatus === USER_STATUS.ACTIVE,
+    });
+    if (!usage) {
+      return NextResponse.json({ error: "AIレビュー回数の確認に失敗しました" }, { status: 500 });
     }
 
-    const reviewRecord = await upsertPendingAIReview(submissionId);
+    const decision = evaluateReviewRequest({
+      userStatus,
+      submissionId,
+      contentReviews: usage.contentReviews,
+      todayTotal: usage.todayTotal,
+      now: new Date(),
+    });
+
+    if (decision.kind === "processing") {
+      return NextResponse.json(
+        {
+          message: "AIレビューは現在生成中です",
+          review: { id: decision.reviewId, status: "processing" },
+        },
+        { status: 202 }
+      );
+    }
+    if (decision.kind === "limited") {
+      return NextResponse.json(
+        {
+          error: decision.message,
+          reason: decision.reason,
+          remaining: decision.remaining,
+          resetsAt: decision.resetsAt,
+        },
+        { status: 429 }
+      );
+    }
+    const remainingAfterReview = Math.max(0, decision.remaining - 1);
+
+    const reviewRecord = await claimPendingAIReview(
+      submissionId,
+      staleReviewCutoff(new Date()).toISOString()
+    );
     if (!reviewRecord) {
       return NextResponse.json({ error: "AIレビューの初期化に失敗しました" }, { status: 500 });
+    }
+    if (reviewRecord === "busy") {
+      return NextResponse.json(
+        { error: "この提出のAIレビューは別のリクエストで処理中、または実行済みです" },
+        { status: 409 }
+      );
     }
 
     const processingResult = await updateAIReviewProcessing(reviewRecord.id);
     if (!processingResult) {
+      // The claim already made the row `pending`; without this a retry would get a 202 until stale.
+      await updateAIReviewFailed(reviewRecord.id, "AIレビューのステータス更新に失敗しました");
       return NextResponse.json(
         { error: "AIレビューのステータス更新に失敗しました" },
         { status: 500 }
       );
+    }
+
+    // Learners cannot select grading_rubric. Read it with service_role after the claim so a
+    // failed lookup can mark the row failed instead of leaving it processing. Published and
+    // not deleted, or a reordered visibility check would grade a hidden rubric.
+    const admin = await createAdminSupabaseClient();
+    const { data: rubricRow, error: rubricError } = await admin
+      .from("learning_contents")
+      .select("grading_rubric")
+      .eq("id", content.id)
+      .eq("is_published", true)
+      .eq("is_deleted", false)
+      .maybeSingle();
+    if (rubricError || !rubricRow) {
+      console.error("採点基準の取得エラー:", rubricError?.message ?? "no row");
+      await updateAIReviewFailed(reviewRecord.id, "採点基準の取得に失敗しました");
+      return NextResponse.json({ error: "採点基準の取得に失敗しました" }, { status: 500 });
     }
 
     try {
@@ -156,16 +194,33 @@ export async function POST(request: NextRequest) {
         exerciseInstructions: content.exercise_instructions,
         submission: reviewSubmission,
         referenceAnswer: content.reference_answer,
+        gradingRubric: parseGradingRubric(rubricRow?.grading_rubric),
         apiKey,
       });
 
-      await updateAIReviewCompleted(reviewRecord.id, {
+      const saved = await updateAIReviewCompleted(reviewRecord.id, {
         reviewContent: result.reviewContent,
         overallScore: result.overallScore,
+        reviewJson: result.reviewJson,
+        scoreKind: result.scoreKind,
+        rubricVersion: result.rubricVersion,
+        passed: result.passed,
         modelUsed: result.modelUsed,
         promptTokens: result.promptTokens,
         completionTokens: result.completionTokens,
+        thoughtsTokens: result.thoughtsTokens,
       });
+
+      if (!saved) {
+        // Best effort: a row left `processing` would block a retry with a misleading 202 for
+        // AI_REVIEW_STALE_AFTER_MS and the already-billed tokens would go unrecorded.
+        await updateAIReviewFailed(reviewRecord.id, "AIレビューの保存に失敗しました", {
+          promptTokens: result.promptTokens,
+          completionTokens: result.completionTokens,
+          thoughtsTokens: result.thoughtsTokens,
+        });
+        return NextResponse.json({ error: "AIレビューの保存に失敗しました" }, { status: 500 });
+      }
 
       return NextResponse.json({
         success: true,
@@ -174,15 +229,24 @@ export async function POST(request: NextRequest) {
           status: "completed",
           review_content: result.reviewContent,
           overall_score: result.overallScore,
+          review_json: result.reviewJson,
+          score_kind: result.scoreKind,
+          rubric_version: result.rubricVersion,
+          passed: result.passed,
           model_used: result.modelUsed,
         },
+        remaining: remainingAfterReview,
       });
     } catch (geminiError) {
       const errorMessage =
         geminiError instanceof Error ? geminiError.message : "AI レビュー生成に失敗しました";
       console.error("Gemini APIエラー:", errorMessage);
 
-      await updateAIReviewFailed(reviewRecord.id, errorMessage);
+      await updateAIReviewFailed(
+        reviewRecord.id,
+        errorMessage,
+        geminiError instanceof ReviewGenerationError ? geminiError.usage : undefined
+      );
 
       return NextResponse.json({ error: errorMessage }, { status: 502 });
     }

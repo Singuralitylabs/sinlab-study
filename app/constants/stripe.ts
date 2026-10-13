@@ -1,3 +1,5 @@
+import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
+
 export const BILLING_ANCHOR_DAY_OF_MONTH = 27;
 /** UTC hour; 0 = 09:00 JST. */
 export const BILLING_ANCHOR_HOUR_UTC = 0;
@@ -21,7 +23,7 @@ export function formatMonthlyJpyPrice(amount: number): string {
  */
 export const UPGRADE_BENEFITS = [
   "すべての学習コンテンツ",
-  "演習のAIレビュー",
+  `演習のAIレビュー（1日${AI_REVIEW_LIMITS.active.perContentPerDay}回まで再レビュー）`,
   "もくもく会への参加",
 ] as const;
 

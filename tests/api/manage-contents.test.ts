@@ -185,7 +185,11 @@ describe("POST / PUT /api/manage/contents - クイズの設問（#306）", () =>
 
   it("更新時も設問を quizQuestions として渡す", async () => {
     const res = await PUT(
-      request({ content_type: "quiz", quiz_questions: quizQuestions }) as never,
+      request({
+        content_type: "quiz",
+        quiz_questions: quizQuestions,
+        grading_rubric_version: null,
+      }) as never,
       { params: Promise.resolve({ id: "1" }) }
     );
 
@@ -267,5 +271,86 @@ describe("POST / PUT / DELETE /api/manage/contents - 権限ガード（requireCo
 
     expect(res.status).toBe(403);
     expect(deleteContent).not.toHaveBeenCalled();
+  });
+});
+
+describe("コンテンツ作成・更新の採点基準（#305）", () => {
+  const rubric = {
+    requirements: [{ key: "r1", name: "フォームがある", description: "入力欄と送信ボタン" }],
+  };
+
+  it("POST: grading_rubric を gradingRubric として渡す（version はクライアントから受け取らない）", async () => {
+    const res = await POST(
+      request({
+        title: "課題",
+        week_id: 1,
+        content_type: "exercise",
+        grading_rubric: { ...rubric, version: 99 },
+        insert_after_id: null,
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+    const arg = vi.mocked(createContent).mock.calls[0][0];
+    expect(arg.gradingRubric).toEqual(rubric);
+  });
+
+  it("PUT: 採点基準を渡す / null でクリアする / 未指定なら undefined", async () => {
+    const put = (body: unknown) =>
+      PUT(
+        new Request("http://localhost/api/manage/contents/1", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }) as never,
+        { params: Promise.resolve({ id: "1" }) }
+      );
+
+    await put({ grading_rubric: rubric, grading_rubric_version: 2 });
+    await put({ grading_rubric: null, grading_rubric_version: null });
+    await put({ title: "改題" });
+
+    const calls = vi.mocked(updateContent).mock.calls;
+    expect(calls[0][1].gradingRubric).toEqual(rubric);
+    expect(calls[0][1].loadedRubricVersion).toBe(2);
+    expect(calls[1][1].gradingRubric).toBeNull();
+    expect(calls[1][1].loadedRubricVersion).toBeNull();
+    expect(calls[2][1].gradingRubric).toBeUndefined();
+    expect(calls[2][1].loadedRubricVersion).toBeUndefined();
+  });
+
+  it("PUT: 採点基準や演習以外への種別変更に、開いたときの版が無いと400", async () => {
+    const put = (body: unknown) =>
+      PUT(
+        new Request("http://localhost/api/manage/contents/1", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }) as never,
+        { params: Promise.resolve({ id: "1" }) }
+      );
+
+    expect((await put({ grading_rubric: rubric })).status).toBe(400);
+    expect((await put({ content_type: "video" })).status).toBe(400);
+    expect(updateContent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["要件が0件", { requirements: [] }],
+    ["key 重複", { requirements: [rubric.requirements[0], rubric.requirements[0]] }],
+    ["名前が空", { requirements: [{ key: "r1", name: "", description: "" }] }],
+  ])("POST: 不正な採点基準（%s）は400", async (_label, grading_rubric) => {
+    const res = await POST(
+      request({
+        title: "課題",
+        week_id: 1,
+        content_type: "exercise",
+        grading_rubric,
+        insert_after_id: null,
+      }) as never
+    );
+
+    expect(res.status).toBe(400);
+    expect(createContent).not.toHaveBeenCalled();
   });
 });

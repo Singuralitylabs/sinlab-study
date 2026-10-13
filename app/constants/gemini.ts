@@ -18,6 +18,15 @@ export const GEMINI_MAX_OUTPUT_TOKENS = 4000;
  */
 export const GEMINI_THINKING_LEVEL = "low" as ThinkingLevel;
 
+/** Deterministic judging: the same submission should get the same labels as far as possible. */
+export const GEMINI_TEMPERATURE = 0;
+
+/**
+ * Gemini calls per review when the response fails validation (the first try plus one regeneration).
+ * Each attempt is billed, so this caps the cost of a malformed response.
+ */
+export const GEMINI_VALIDATION_ATTEMPTS = 2;
+
 /** Retries on 429 (excluding the first attempt); total attempts = GEMINI_MAX_RETRIES + 1. */
 export const GEMINI_MAX_RETRIES = 2;
 
@@ -37,6 +46,31 @@ export const GEMINI_REQUEST_TIMEOUT_MS = 25_000;
  */
 export const GEMINI_TOTAL_BUDGET_MS = 45_000;
 
+/**
+ * A pending / processing review older than this is treated as dead (its function was killed) and
+ * stops counting toward the limits, so a crashed run can neither burn an allowance nor lock the
+ * submission. Must exceed /api/ai-review's maxDuration (60s, hardcoded in route.ts).
+ */
+export const AI_REVIEW_STALE_AFTER_MS = 90_000;
+
 export const GEMINI_API_KEY_ENV = "GEMINI_API_KEY";
 
 export const GEMINI_API_KEY_TRIAL_ENV = "GEMINI_API_KEY_TRIAL";
+
+/**
+ * AI review count limits (#304). API, UI copy and docs all derive from here. The day boundary is
+ * JST (same basis as the email cron). Every review row except `failed` counts: a Gemini-side
+ * failure must not consume a learner's allowance.
+ */
+export const AI_REVIEW_LIMITS = {
+  active: {
+    /** Reviews per content per JST day, for new submissions only (one review per submission). */
+    perContentPerDay: 2,
+    /** Reviews per user per JST day across all contents; caps key abuse and cost spikes. */
+    perDay: 10,
+  },
+  trial: {
+    /** Lifetime reviews per content; the daily total does not apply to trial users. */
+    perContentLifetime: 1,
+  },
+} as const;

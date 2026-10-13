@@ -34,36 +34,65 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       allowed_submission_types,
       code_language,
       pdf_url,
+      grading_rubric,
+      grading_rubric_version,
       insert_after_id,
       is_published,
       is_open_to_trial,
       quiz_questions,
     } = validation.data;
 
-    const { error, storageRemoved } = await updateContent(contentId, {
-      title,
-      week_id,
-      content_type,
-      video_url,
-      text_content,
-      description,
-      exercise_instructions,
-      hint,
-      reference_answer,
-      allowed_submission_types,
-      code_language,
-      pdf_url,
-      insertAfterId: insert_after_id,
-      is_published,
-      is_open_to_trial,
-      quizQuestions: quiz_questions,
-    });
+    const { error, storageRemoved, conflict, keyReuse, gradingRubricVersion } = await updateContent(
+      contentId,
+      {
+        title,
+        week_id,
+        content_type,
+        video_url,
+        text_content,
+        description,
+        exercise_instructions,
+        hint,
+        reference_answer,
+        allowed_submission_types,
+        code_language,
+        pdf_url,
+        gradingRubric: grading_rubric,
+        loadedRubricVersion: grading_rubric_version,
+        insertAfterId: insert_after_id,
+        is_published,
+        is_open_to_trial,
+        quizQuestions: quiz_questions,
+      }
+    );
 
+    if (keyReuse) {
+      return NextResponse.json(
+        {
+          error: `要件キー（${keyReuse.join(", ")}）は過去のレビューで使った番号なので再利用できません`,
+        },
+        { status: 400 }
+      );
+    }
+    if (conflict) {
+      return NextResponse.json(
+        { error: "採点基準が別の保存で更新されています。画面を読み込み直してください" },
+        { status: 409 }
+      );
+    }
     if (error) {
       return NextResponse.json({ error: "コンテンツの更新に失敗しました" }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, storageRemoved });
+    return NextResponse.json({
+      success: true,
+      storageRemoved,
+      // Only after a rubric write. The form adopts this instead of a refreshed prop, whose rows
+      // it has not loaded.
+      ...(gradingRubricVersion !== undefined
+        ? { grading_rubric_version: gradingRubricVersion }
+        : {}),
+    });
   } catch (error) {
     if (error instanceof InvalidInsertAfterIdError) {
       console.error("コンテンツ更新エラー（insert_after_id不正）:", error.insertAfterId);
