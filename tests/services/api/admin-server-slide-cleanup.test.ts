@@ -930,6 +930,37 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     expect(restore).toEqual({ grading_rubric: storedRubric, content_type: "exercise" });
   });
 
+  it("挿入位置が不正なら書いた採点基準を戻してから例外を伝える", async () => {
+    const storedRubric = { version: 2, ...input, max_key_number: 1 };
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: storedRubric,
+            },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+          { data: [], error: null },
+        ],
+      },
+    });
+
+    await expect(
+      updateContent(1, {
+        gradingRubric: { requirements: [{ key: "r2", name: "B", description: "b" }] },
+        insertAfterId: 999,
+      })
+    ).rejects.toThrow();
+
+    const restore = mockClient.from.mock.results.at(-1)?.value.update.mock.calls[0][0];
+    expect(restore).toEqual({ grading_rubric: storedRubric, content_type: "exercise" });
+  });
+
   it("gradingRubric 未指定なら採点基準の列に触れない", async () => {
     const { mockClient } = mockAdminWithStorage({
       tableResults: { learning_contents: [{ data: null, error: null }] },

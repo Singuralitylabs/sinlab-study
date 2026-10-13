@@ -1634,67 +1634,75 @@ async function updateContentRow(
     }
   };
 
-  const resequenced = await resequenceDestinationForUpdate(
-    supabase,
-    "learning_contents",
-    id,
-    destinationFilter,
-    parentChanged,
-    insertAfterId
-  );
-  if (resequenced.error) {
-    console.error("コンテンツ更新エラー（再採番）:", resequenced.error.message);
-    await restoreRubricWrite();
-    return { error: resequenced.error, storageRemoved: true };
-  }
-
-  const updatePayload =
-    resequenced.displayOrder !== undefined
-      ? { ...patch, display_order: resequenced.displayOrder }
-      : patch;
-
-  // The rubric (and content_type, when this save changes it) was already written under the
-  // version predicate. Filtering this update on the old version would match 0 rows.
-  if (Object.keys(updatePayload).length > 0) {
-    const { error } = await supabase.from("learning_contents").update(updatePayload).eq("id", id);
-    if (error) {
-      console.error("コンテンツ更新エラー:", error.message);
-      await restoreRubricWrite();
-      return { error, storageRemoved: true };
-    }
-  }
-
-  if (parentChanged) {
-    const sourceError = await renumberSourceSiblingsAfterMove(
+  // InvalidInsertAfterIdError is thrown, not returned, and it happens after the rubric
+  // write has committed. A returned error restores above; a throw has to restore here too,
+  // or the quiz catch puts the old questions back onto the new type and a wiped rubric.
+  try {
+    const resequenced = await resequenceDestinationForUpdate(
       supabase,
       "learning_contents",
       id,
-      sourceFilter
+      destinationFilter,
+      parentChanged,
+      insertAfterId
     );
-    if (sourceError) {
-      console.error("コンテンツ更新エラー（移動元の再採番）:", sourceError.message);
-      return { error: sourceError, storageRemoved: true };
+    if (resequenced.error) {
+      console.error("コンテンツ更新エラー（再採番）:", resequenced.error.message);
+      await restoreRubricWrite();
+      return { error: resequenced.error, storageRemoved: true };
     }
-  }
 
-  // Delete the old object (if unreferenced elsewhere) only when the normalized pdf_url key
-  // actually changed. PUT always sends pdf_url (null for non-slides), so updates that keep the
-  // same key (title edits, overwriting the same folder/number) must not delete anything. If the
-  // pre-fetch failed the old key is unknown, so skip deletion and report false.
-  let storageRemoved = true;
-  if (needsCurrentPdf) {
-    if (pdfFetchFailed) {
-      storageRemoved = false;
-    } else {
-      const previousKey = toSlideObjectKey(previousPdfUrl);
-      const nextKey = toSlideObjectKey(patch.pdf_url ?? null);
-      if (previousKey !== null && previousKey !== nextKey) {
-        storageRemoved = await removeUnreferencedSlideObjects(supabase, [previousKey]);
+    const updatePayload =
+      resequenced.displayOrder !== undefined
+        ? { ...patch, display_order: resequenced.displayOrder }
+        : patch;
+
+    // The rubric (and content_type, when this save changes it) was already written under the
+    // version predicate. Filtering this update on the old version would match 0 rows.
+    if (Object.keys(updatePayload).length > 0) {
+      const { error } = await supabase.from("learning_contents").update(updatePayload).eq("id", id);
+      if (error) {
+        console.error("コンテンツ更新エラー:", error.message);
+        await restoreRubricWrite();
+        return { error, storageRemoved: true };
       }
     }
-  }
 
-  return { error: null, storageRemoved };
+    if (parentChanged) {
+      const sourceError = await renumberSourceSiblingsAfterMove(
+        supabase,
+        "learning_contents",
+        id,
+        sourceFilter
+      );
+      if (sourceError) {
+        console.error("コンテンツ更新エラー（移動元の再採番）:", sourceError.message);
+        return { error: sourceError, storageRemoved: true };
+      }
+    }
+
+    // Delete the old object (if unreferenced elsewhere) only when the normalized pdf_url key
+    // actually changed. PUT always sends pdf_url (null for non-slides), so updates that keep the
+    // same key (title edits, overwriting the same folder/number) must not delete anything. If the
+    // pre-fetch failed the old key is unknown, so skip deletion and report false.
+    let storageRemoved = true;
+    if (needsCurrentPdf) {
+      if (pdfFetchFailed) {
+        storageRemoved = false;
+      } else {
+        const previousKey = toSlideObjectKey(previousPdfUrl);
+        const nextKey = toSlideObjectKey(patch.pdf_url ?? null);
+        if (previousKey !== null && previousKey !== nextKey) {
+          storageRemoved = await removeUnreferencedSlideObjects(supabase, [previousKey]);
+        }
+      }
+    }
+
+    return { error: null, storageRemoved };
+  } catch (thrown) {
+    await restoreRubricWrite();
+    throw thrown;
+  }
 }
 
 /**
