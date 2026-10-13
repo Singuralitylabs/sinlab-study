@@ -630,7 +630,7 @@ REVOKE EXECUTE ON FUNCTION public.get_weekly_funnel(integer) FROM PUBLIC, anon, 
     expect(memberCanExecute(replayExecuteAcl(overload, "get_weekly_funnel"))).toBe(true);
     const otherSchema = `${base}
 GRANT EXECUTE ON FUNCTION public.get_weekly_funnel(integer) TO authenticated;
-REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA private FROM authenticated;`;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA private FROM public, authenticated;`;
     expect(memberCanExecute(replayExecuteAcl(otherSchema, "get_weekly_funnel"))).toBe(true);
     const quotedComment = `${base}
 INSERT INTO t VALUES ('a--b');
