@@ -189,8 +189,10 @@ export const EMAIL_DIGEST_SEND_INTERVAL_MS = 500;
  * maxDuration (60s) cuts it off and carry the rest over like cap overflow. Worst case is a send
  * started just under the cap that runs to EMAIL_SEND_TIMEOUT_MS: 40s + 15s = 55s, leaving ~5s for
  * DB round trips and the lock release. Sends start at least EMAIL_DIGEST_SEND_INTERVAL_MS apart,
- * so 40s fits 80 starts, enough to reach the default daily cap (EMAIL_DIGEST_MAX_PER_DAY = 80) in
- * one run. Keep (budget / interval) >= that cap when changing either value.
+ * so 40s allows at most 80 starts. The clock also covers the lock, extraction and per-send DB
+ * calls, so a run reaches a few sends under the default daily cap (EMAIL_DIGEST_MAX_PER_DAY = 80);
+ * the shortfall carries over like cap overflow. Keep (budget / interval) >= that cap as the upper
+ * bound when changing either value.
  */
 export const EMAIL_DIGEST_TIME_BUDGET_MS = 40_000;
 

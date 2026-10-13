@@ -57,7 +57,7 @@ describe("sendEmail", () => {
     });
   });
 
-  it("最悪ケース（予算ぎりぎりで始めた1通がタイムアウトまで掛かる）がcronのmaxDuration(60秒)にDB余裕を残して収まり、予算で日次上限まで送れる", () => {
+  it("最悪ケース（予算ぎりぎりで始めた1通がタイムアウトまで掛かる）がcronのmaxDuration(60秒)にDB余裕を残して収まり、予算が日次上限分の送信開始を許す上限を持つ", () => {
     const MAX_DURATION_MS = 60_000;
     const DB_MARGIN_MS = 5_000;
     expect(EMAIL_SEND_TIMEOUT_MS).toBe(15_000);
