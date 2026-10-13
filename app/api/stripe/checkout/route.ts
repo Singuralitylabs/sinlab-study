@@ -23,6 +23,11 @@ import {
 } from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
+// Mail is sent in after() and the platform caps that at this route's maxDuration; the default
+// (10s without Fluid Compute) would kill the function before EMAIL_SEND_TIMEOUT_MS (15s) aborts,
+// leaving the email_logs claim row neither sent nor failed.
+export const maxDuration = 30;
+
 /**
  * Same message for an active contract and a payment in progress, so the contract state can't be
  * inferred.

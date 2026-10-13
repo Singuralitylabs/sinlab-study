@@ -9,9 +9,9 @@ import { requireAdminApi } from "@/app/services/auth/admin-guard";
 import { isEmailConfigured, sendEmail } from "@/app/services/notifications/email";
 import { buildPreviewEmail } from "@/app/services/notifications/email-template-preview";
 
-// Mail is sent in after() and the platform caps that at this route's maxDuration; the default
-// (10s without Fluid Compute) would kill the function before EMAIL_SEND_TIMEOUT_MS (15s) aborts,
-// leaving the email_logs claim row neither sent nor failed.
+// This request awaits the send inline, so the platform's maxDuration must exceed
+// EMAIL_SEND_TIMEOUT_MS (15s); the default (10s without Fluid Compute) would kill the function
+// before the abort fires.
 export const maxDuration = 30;
 
 /**
