@@ -637,10 +637,32 @@ async function appendAnnouncementEmails(
   );
   // Delete only rows of recipients claimed in this run. Deleting the row of a user who cannot be
   // sent today (already mailed, or queued for another guide) would erase the failure record from
-  // /admin/emails without any resend.
-  const claimable = (log: AnnouncementLog) =>
-    sendableUserIds.has(log.user_id) && !queuedUserIds.has(log.user_id);
-  const retryNowLogs = retryable.filter((log) => retryNow(log) && claimable(log));
+  // /admin/emails without any resend. A user is claimed by one announcement per run (the first
+  // in order), so rows of the user's other announcements stay too.
+  const claimedKeys = new Set<string>();
+  const claimedUserIds = new Set<number>();
+  for (const announcement of announcements) {
+    const referenceKey = String(announcement.id);
+    const doneUserIds = done.get(referenceKey);
+    for (const user of allUsers) {
+      if (
+        sendableUserIds.has(user.userId) &&
+        !queuedUserIds.has(user.userId) &&
+        !claimedUserIds.has(user.userId) &&
+        !doneUserIds?.has(user.userId) &&
+        isAnnouncementTarget(announcement, {
+          status: user.status,
+          membershipType: user.membershipType,
+        })
+      ) {
+        claimedUserIds.add(user.userId);
+        claimedKeys.add(`${referenceKey}:${user.userId}`);
+      }
+    }
+  }
+  const retryNowLogs = retryable.filter(
+    (log) => retryNow(log) && claimedKeys.has(`${log.reference_key}:${log.user_id}`)
+  );
 
   // Recipients not sent today: those with failures to resend on following days, those who cannot
   // be claimed today, and those whose failure row could not be deleted (the claim would hit the

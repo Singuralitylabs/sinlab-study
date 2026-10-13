@@ -1153,6 +1153,31 @@ describe("お知らせのメール一斉送信（#254）", () => {
     expect(db.announcements[0].email_sent_at).toBeNull();
   });
 
+  it("同じ宛先に複数のお知らせの前日の失敗行があるとき、この実行で送る1件だけ消し、残りは残す", async () => {
+    const failedRow = (id: number, referenceKey: string): Row => ({
+      id,
+      user_id: 1,
+      kind: "announcement",
+      reference_key: referenceKey,
+      sent_at: null,
+      error: "Resend API がエラーを返しました: status=500",
+      created_at: "2026-10-06T10:00:00.000Z",
+    });
+    const { db } = setup({
+      users: [userRow(1)],
+      announcements: [announcementRow({ id: 501 }), announcementRow({ id: 502 })],
+      email_logs: [failedRow(9001, "501"), failedRow(9002, "502")],
+    });
+
+    const wednesday = await runDigest(WEDNESDAY);
+
+    expect(wednesday).toMatchObject({ sent: 1, announcementsCompleted: 1 });
+    expect(announcementLogs(db).map((row) => [row.id, row.reference_key])).toEqual([
+      [9002, "502"],
+      [expect.any(Number), "501"],
+    ]);
+  });
+
   it("送れたか分からない失敗（タイムアウト等）は送り直さずに完了にする", async () => {
     const { db } = setup({ users: [userRow(1)], announcements: [announcementRow()] });
     vi.mocked(sendEmail).mockResolvedValue({
