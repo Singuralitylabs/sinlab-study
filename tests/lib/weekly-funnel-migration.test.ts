@@ -138,30 +138,54 @@ function functionPattern(name: string): string {
   return `(?:(?:"public"|public)\\.)?"?${name}"?(?![A-Za-z0-9_])`;
 }
 
+function balancedParens(text: string): { inner: string; rest: string } | null {
+  if (!text.startsWith("(")) return null;
+  let depth = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === "(") depth += 1;
+    else if (text[i] === ")") {
+      depth -= 1;
+      if (depth === 0) return { inner: text.slice(1, i), rest: text.slice(i + 1) };
+    }
+  }
+  return null;
+}
+
+function argsOf(text: string): { present: boolean; args: string; rest: string } {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith("(")) return { present: false, args: "", rest: text };
+  const parsed = balancedParens(trimmed);
+  if (!parsed) return { present: false, args: "", rest: text };
+  return { present: true, args: normalizeArgs(parsed.inner), rest: parsed.rest };
+}
+
 function createdSignature(
   statement: string,
   name: string
 ): { args: string; replace: boolean; schema: string } | null {
   const match = statement.match(
     new RegExp(
-      `^CREATE\\s+(OR\\s+REPLACE\\s+)?FUNCTION\\s+(?:("?[A-Za-z_]\\w*"?)\\.)?"?${name}"?(?![A-Za-z0-9_])\\s*\\(([^)]*)\\)`,
+      `^CREATE\\s+(OR\\s+REPLACE\\s+)?FUNCTION\\s+(?:("?[A-Za-z_]\\w*"?)\\.)?"?${name}"?(?![A-Za-z0-9_])\\s*`,
       "i"
     )
   );
   if (!match) return null;
+  const parsed = argsOf(statement.slice(match[0].length));
+  if (!parsed.present) return null;
   return {
     replace: Boolean(match[1]),
     schema: (match[2] ?? "public").replace(/"/g, "").toLowerCase(),
-    args: normalizeArgs(match[3] ?? ""),
+    args: parsed.args,
   };
 }
 
 function droppedArgs(statement: string, name: string): string[] | "bare" | null {
   if (!/^DROP\s+(?:FUNCTION|ROUTINE)\b/i.test(statement)) return null;
-  const re = new RegExp(`${functionPattern(name)}\\s*(\\(([^)]*)\\))?`, "gi");
+  const re = new RegExp(functionPattern(name), "gi");
   const found: Array<string | null> = [];
   for (const match of statement.matchAll(re)) {
-    found.push(match[1] ? normalizeArgs(match[2] ?? "") : null);
+    const parsed = argsOf(statement.slice((match.index ?? 0) + match[0].length));
+    found.push(parsed.present ? parsed.args : null);
   }
   if (found.length === 0) return null;
   if (found.some((args) => args === null)) return "bare";
@@ -183,12 +207,13 @@ function grantTargets(
   const list = statement.match(/\bON\s+(?:FUNCTION|ROUTINE)\s+([\s\S]*?)\s+\b(?:TO|FROM)\b/i);
   const args: string[] = [];
   let bare = false;
-  const itemPattern = new RegExp(`^${functionPattern(name)}\\s*(\\(([^)]*)\\))?\\s*$`, "i");
+  const itemHead = new RegExp(`^${functionPattern(name)}\\s*`, "i");
   for (const item of splitCommaList(list?.[1] ?? "")) {
-    const match = item.match(itemPattern);
+    const match = item.match(itemHead);
     if (!match) continue;
-    if (match[1]) args.push(normalizeArgs(match[2] ?? ""));
-    else bare = true;
+    const parsed = argsOf(item.slice(match[0].length));
+    if (parsed.present && parsed.rest.trim() === "") args.push(parsed.args);
+    else if (!parsed.present && item.slice(match[0].length).trim() === "") bare = true;
   }
   return { allPublic, args, bare };
 }
@@ -459,15 +484,19 @@ function applyAlter(statement: string, name: string, byArgs: Map<string, Execute
   const parked = parkedOf.get(byArgs) ?? new Map<string, ExecuteAcl>();
   const source = statement.match(
     new RegExp(
-      `^ALTER\\s+(?:FUNCTION|ROUTINE)\\s+(?:("?[A-Za-z_]\\w*"?)\\.)?"?${name}"?(?![A-Za-z0-9_])\\s*(\\(([^)]*)\\))?\\s+(?:RENAME\\s+TO\\s+("?[A-Za-z_]\\w*"?)|SET\\s+SCHEMA\\s+("?[A-Za-z_]\\w*"?))`,
+      `^ALTER\\s+(?:FUNCTION|ROUTINE)\\s+(?:("?[A-Za-z_]\\w*"?)\\.)?"?${name}"?(?![A-Za-z0-9_])\\s*`,
       "i"
     )
   );
   if (source) {
     const schema = (source[1] ?? "public").replace(/"/g, "").toLowerCase();
-    const args = source[2] ? normalizeArgs(source[3] ?? "") : null;
-    const renameTo = source[4]?.replace(/"/g, "").toLowerCase();
-    const nextSchema = source[5]?.replace(/"/g, "").toLowerCase();
+    const parsed = argsOf(statement.slice(source[0].length));
+    const action = parsed.rest.match(
+      /^\s*(?:RENAME\s+TO\s+("?[A-Za-z_]\w*"?)|SET\s+SCHEMA\s+("?[A-Za-z_]\w*"?))/i
+    );
+    const args = parsed.present ? parsed.args : null;
+    const renameTo = action?.[1]?.replace(/"/g, "").toLowerCase();
+    const nextSchema = action?.[2]?.replace(/"/g, "").toLowerCase();
     if (renameTo && renameTo !== name.toLowerCase() && schema === "public") {
       removeSignature(byArgs, args);
     }
@@ -491,12 +520,15 @@ function applyAlter(statement: string, name: string, byArgs: Map<string, Execute
     return true;
   }
   const onto = statement.match(
-    new RegExp(
-      `^ALTER\\s+(?:FUNCTION|ROUTINE)\\s+(?:(?:"?[A-Za-z_]\\w*"?)\\.)?"?[A-Za-z_]\\w*"?\\s*(?:\\(([^)]*)\\))?\\s+RENAME\\s+TO\\s+"?${name}"?(?![A-Za-z0-9_])`,
-      "i"
-    )
+    /^ALTER\s+(?:FUNCTION|ROUTINE)\s+(?:(?:"?[A-Za-z_]\w*"?)\.)?"?([A-Za-z_]\w*)"?\s*/i
   );
-  if (onto) byArgs.set(onto[1] ? normalizeArgs(onto[1]) : "", defaultAcl());
+  if (onto?.[1] && onto[1].toLowerCase() !== name.toLowerCase()) {
+    const parsed = argsOf(statement.slice(onto[0].length));
+    const rename = parsed.rest.match(
+      new RegExp(`^\\s*RENAME\\s+TO\\s+"?${name}"?(?![A-Za-z0-9_])`, "i")
+    );
+    if (rename) byArgs.set(parsed.present ? parsed.args : "", defaultAcl());
+  }
   return true;
 }
 
@@ -685,5 +717,11 @@ DROP FUNCTION public.get_weekly_funnel(integer);
 CREATE FUNCTION private.get_weekly_funnel(weeks integer) RETURNS integer LANGUAGE sql AS $$ SELECT weeks $$;
 ALTER FUNCTION private.get_weekly_funnel SET SCHEMA public;`;
     expect(memberCanExecute(replayExecuteAcl(bareMove, "get_weekly_funnel"))).toBe(true);
+    const nestedDefault = `${base}
+CREATE OR REPLACE FUNCTION public.get_weekly_funnel(weeks integer DEFAULT (8), tz text DEFAULT 'Asia/Tokyo') RETURNS void LANGUAGE sql AS $$ SELECT 1 $$;`;
+    expect(memberCanExecute(replayExecuteAcl(nestedDefault, "get_weekly_funnel"))).toBe(true);
+    const nestedGrant = `${base}
+GRANT EXECUTE ON FUNCTION public.get_weekly_funnel(weeks integer, OUT label varchar(20)) TO authenticated;`;
+    expect(memberCanExecute(replayExecuteAcl(nestedGrant, "get_weekly_funnel"))).toBe(true);
   });
 });
