@@ -1,4 +1,5 @@
 import { SLACK_WEBHOOK_TIMEOUT_MS } from "@/app/constants/notifications";
+import { formatDateTimeMinute } from "@/app/lib/format-date";
 
 /**
  * Shared Slack webhook block sender. Skips when the URL is unset; failures (non-2xx, exceptions)
@@ -44,14 +45,7 @@ type NewUserNotificationParams = {
 export async function sendSlackNewUserNotification(
   params: NewUserNotificationParams
 ): Promise<void> {
-  const registeredAt = new Date().toLocaleString("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const registeredAt = formatDateTimeMinute(new Date());
 
   const body = {
     blocks: [

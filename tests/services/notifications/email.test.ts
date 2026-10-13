@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EMAIL_SEND_TIMEOUT_MS, RESEND_API_URL } from "@/app/constants/notifications";
+import {
+  EMAIL_DIGEST_TIME_BUDGET_MS,
+  EMAIL_SEND_TIMEOUT_MS,
+  RESEND_API_URL,
+  RETRYABLE_EMAIL_ERROR,
+} from "@/app/constants/notifications";
 import { isEmailConfigured, sendEmail } from "@/app/services/notifications/email";
 
 const API_KEY = "re_test_secret_key";
@@ -48,6 +53,19 @@ describe("sendEmail", () => {
       text: "本文",
       html: "<p>本文</p>",
     });
+  });
+
+  it("タイムアウト値は20秒で、定期メールの予算と合わせてcronのmaxDuration(60秒)に収まる", () => {
+    expect(EMAIL_SEND_TIMEOUT_MS).toBe(20_000);
+    expect(EMAIL_DIGEST_TIME_BUDGET_MS + EMAIL_SEND_TIMEOUT_MS).toBeLessThanOrEqual(55_000);
+  });
+
+  it("TimeoutError・ネットワーク断は送達不明として再送対象にせず、429/5xxだけ再送対象にする", () => {
+    expect(RETRYABLE_EMAIL_ERROR.test("TimeoutError: The operation was aborted")).toBe(false);
+    expect(RETRYABLE_EMAIL_ERROR.test("TypeError: fetch failed")).toBe(false);
+    expect(RETRYABLE_EMAIL_ERROR.test("Resend API がエラーを返しました: status=422")).toBe(false);
+    expect(RETRYABLE_EMAIL_ERROR.test("Resend API がエラーを返しました: status=429")).toBe(true);
+    expect(RETRYABLE_EMAIL_ERROR.test("Resend API がエラーを返しました: status=503")).toBe(true);
   });
 
   it("fetchにEMAIL_SEND_TIMEOUT_MSのAbortSignalタイムアウトを付与する", async () => {

@@ -1,5 +1,6 @@
 import { Users } from "lucide-react";
 import { PageTitle } from "@/app/components/PageTitle";
+import { formatDatePadded } from "@/app/lib/format-date";
 import { fetchStudentsProgress } from "@/app/services/api/admin-server";
 import { fetchCertificateCountsByUser } from "@/app/services/api/certificates-server";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,11 +16,7 @@ import {
 
 function formatDate(dateString: string | null) {
   if (!dateString) return "-";
-  return new Date(dateString).toLocaleDateString("ja-JP", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
+  return formatDatePadded(dateString);
 }
 
 export default async function ManageStudentsPage() {
