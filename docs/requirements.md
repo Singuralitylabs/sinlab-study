@@ -138,6 +138,7 @@ Theme（例：GAS学習）
 - **URL提出**: スプレッドシート / GASプロジェクト / デプロイ済みアプリのURL共有
 - 提出方法は演習コンテンツごとに設定可能（コードのみ / URLのみ / 両方から選択）
 - 提出履歴を一覧で確認可能
+- HTML / CSS / JavaScript の演習・提出は、ブラウザ内の sandbox 付き iframe でライブプレビューできる（サーバー側ではコードを実行しない。詳細は[機能設計書](./specification.md) 5.4.7）
 - 課題提出そのものに点数・合否判定は行わない（AIレビューの点数・合否は 3.5 の方針に従い、提出の受理には影響しない）
 - 提出期限は目安のみ（強制なし）
 
@@ -289,6 +290,7 @@ admin と maintainer（講師）が共通でアクセス可能。`/admin` 配下
 - プロキシ（`proxy.ts`）によるページ単位のアクセス制御
 - Row Level Security（RLS）によるデータベースレベルのアクセス制御（お試しユーザーへのコンテンツ制限はアプリ層とRLSの二層で担保）
 - Markdown表示は react-markdown のデフォルト動作（生HTMLタグを描画しない）によりXSSを防止
+- 受講生コードのプレビューは `sandbox="allow-scripts"` の iframe（`allow-same-origin` なし）で描画し、親オリジンの Cookie・認証付き API に到達させない。react-markdown が生HTMLを描画しない方針とは別経路で、Markdown 本文には適用しない
 - 認証セッションからユーザーIDを導出（API操作時、クライアント送信値では認可しない）
 - 独立認証基盤: 本アプリ独自のGoogle OAuth + ユーザー承認フロー（詳細は[機能設計書](./specification.md)のセクション2を参照）
 

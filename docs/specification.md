@@ -633,6 +633,7 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 | 対象 | 方式 | 備考 |
 |:--|:--|:--|
 | CodeMirror | `CodeEditorNoSSR`（`ssr: false` + loading） | 演習フォームのみ |
+| ライブプレビュー | `HtmlPreviewNoSSR`（`ssr: false` + loading） | 対象言語（5.4.7）の提出フォーム・提出履歴のみ |
 | pdf.js / react-pdf | `PdfSlideViewerNoSSR`（`ssr: false` + loading） | スライドのみ |
 | AIレビュー（Markdown + lowlight） | `AIReviewDisplayNoSSR`（`ssr: false`） | レビュー／ローディング時のみマウント。本文 Markdown の RSC 経路は維持 |
 | react-youtube | facade + `YouTubePlayer` の dynamic | クリック前は youtube.com 非通信。サムネイルは `<img>` で `i.ytimg.com` を直接参照 |
@@ -647,6 +648,15 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 | 401 | 未認証 |
 | 403 | `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
 | 500 | サーバーエラー |
+
+#### 5.4.7 ライブプレビュー（HTML / CSS / JavaScript）
+
+提出ファイルがすべて `html` / `css` / `javascript`（`PREVIEW_LANGUAGES`。`app/lib/html-preview.ts`）のときだけ、提出フォーム（`SubmissionForm`）と提出履歴（`/submissions`・`/manage/submissions` の `SubmissionCodeBlock`）に「プレビュー」を表示する。他の言語を含む提出では UI を出さない。サーバーではコードを実行せず、ブラウザ内の iframe で描画する（GAS / Python / SQL の実行は対象外）。
+
+- **文書の組み立て**: `buildPreviewDocument()`（純粋関数）が `index.html`（無ければ最初の html ファイル）を土台にし、`<link rel="stylesheet" href="style.css">` / `<script src="main.js">` のように同名ファイルを指す相対参照を `<style>` / `<script>` にインライン展開する。外部 URL・ルートパス・該当ファイルが無い参照は触らない。html が無ければ css / js のみの空ページにする。インライン化する内容中の `</style` / `</script` はエスケープし、要素が途中で閉じないようにする。
+- **サンドボックス**: `<iframe sandbox="allow-scripts" srcDoc referrerPolicy="no-referrer">`。**`allow-same-origin` は付けない**（iframe 内のスクリプトが親オリジンの Cookie・Supabase セッション・`/api` に到達できないよう、opaque origin にするため）。`allow-forms` / `allow-popups` / `allow-top-navigation` / `allow-modals` も付けない。メールテンプレートのプレビュー（`sandbox=""`）より緩いのは、受講生のスクリプト実行を見せるため。親子間の `postMessage` は使わない。管理者が受講生のコードを描画する場合も同じ条件。
+- **再描画**: 入力の変更は 300ms デバウンスして反映し、固まったときは「再読み込み」で `key` を振り直して iframe を作り直す。提出履歴は多数並ぶため、既定で折りたたみ（開いたときだけ描画・実行）。
+- アプリ全体への CSP / `X-Frame-Options` の付与は本機能の対象外。
 
 ### 5.5 ヒント表示
 
