@@ -589,6 +589,46 @@ export type EmailDigestOptions = {
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Decides which user is claimed by which announcement in this run: a sendable user not yet queued
+ * is claimed by the first announcement (in order) that targets them, has not finished for them and
+ * has no failure row blocking the `<referenceKey>:<userId>` pair.
+ */
+function assignAnnouncementClaims(
+  announcements: PendingAnnouncement[],
+  allUsers: DigestUser[],
+  sendableUserIds: ReadonlySet<number>,
+  queuedUserIds: ReadonlySet<number>,
+  done: ReadonlyMap<string, ReadonlySet<number>>,
+  blockedKeys: ReadonlySet<string>
+): Map<string, Set<number>> {
+  const claims = new Map<string, Set<number>>();
+  const claimed = new Set<number>();
+  for (const announcement of announcements) {
+    const referenceKey = String(announcement.id);
+    const doneUserIds = done.get(referenceKey);
+    const ids = new Set<number>();
+    for (const user of allUsers) {
+      if (
+        sendableUserIds.has(user.userId) &&
+        !queuedUserIds.has(user.userId) &&
+        !claimed.has(user.userId) &&
+        !doneUserIds?.has(user.userId) &&
+        !blockedKeys.has(`${referenceKey}:${user.userId}`) &&
+        isAnnouncementTarget(announcement, {
+          status: user.status,
+          membershipType: user.membershipType,
+        })
+      ) {
+        claimed.add(user.userId);
+        ids.add(user.userId);
+      }
+    }
+    claims.set(referenceKey, ids);
+  }
+  return claims;
+}
+
+/**
  * Adds the announcement bulk email to the send queue (kind = `announcement`, reference_key =
  * announcement ID). Targets are non-unsubscribed students whose status / membership type match
  * the announcement target (`isAnnouncementTarget()`, same condition as in-app display).
@@ -637,56 +677,39 @@ async function appendAnnouncementEmails(
   );
   // Delete only rows of recipients claimed in this run. Deleting the row of a user who cannot be
   // sent today (already mailed, or queued for another guide) would erase the failure record from
-  // /admin/emails without any resend. A user is claimed by one announcement per run (the first
-  // in order), so rows of the user's other announcements stay too.
-  const heldKeys = new Set(
-    retryable.filter((log) => !retryNow(log)).map((log) => `${log.reference_key}:${log.user_id}`)
-  );
-  const claimedKeys = new Set<string>();
-  const claimedUserIds = new Set<number>();
-  for (const announcement of announcements) {
-    const referenceKey = String(announcement.id);
-    const doneUserIds = done.get(referenceKey);
-    for (const user of allUsers) {
-      if (
-        sendableUserIds.has(user.userId) &&
-        !queuedUserIds.has(user.userId) &&
-        !claimedUserIds.has(user.userId) &&
-        !doneUserIds?.has(user.userId) &&
-        !heldKeys.has(`${referenceKey}:${user.userId}`) &&
-        isAnnouncementTarget(announcement, {
-          status: user.status,
-          membershipType: user.membershipType,
-        })
-      ) {
-        claimedUserIds.add(user.userId);
-        claimedKeys.add(`${referenceKey}:${user.userId}`);
-      }
-    }
-  }
-  const retryNowLogs = retryable.filter(
-    (log) => retryNow(log) && claimedKeys.has(`${log.reference_key}:${log.user_id}`)
-  );
-
+  // /admin/emails without any resend. The claim assignment is computed once and consumed by the
+  // queuing below, so the deletion and the sending cannot disagree.
+  const keyOf = (log: AnnouncementLog) => `${log.reference_key}:${log.user_id}`;
+  const assign = (blockedKeys: ReadonlySet<string>) =>
+    assignAnnouncementClaims(
+      announcements,
+      allUsers,
+      sendableUserIds,
+      queuedUserIds,
+      done,
+      blockedKeys
+    );
   // Recipients not sent today: those with failures to resend on following days, those who cannot
   // be claimed today, and those whose failure row could not be deleted (the claim would hit the
   // UNIQUE violation). They stay unfinished, so completion is not recorded either.
-  let notClaimable = retryable.filter((log) => !retryNowLogs.includes(log));
-  if (retryNowLogs.length > 0) {
-    const { error } = await supabase
-      .from("email_logs")
-      .delete()
-      .in(
-        "id",
-        retryNowLogs.map((log) => log.id)
-      );
+  let claims = assign(new Set(retryable.filter((log) => !retryNow(log)).map(keyOf)));
+  const deletableIds = retryable
+    .filter((log) => retryNow(log) && claims.get(log.reference_key)?.has(log.user_id))
+    .map((log) => log.id);
+  const deletedIds = new Set<number>(deletableIds);
+  if (deletableIds.length > 0) {
+    const { error } = await supabase.from("email_logs").delete().in("id", deletableIds);
     if (error) {
       console.error("[定期メール] お知らせの送信失敗の行を削除できませんでした:", error.message);
-      notClaimable = retryable;
+      deletedIds.clear();
+      claims = assign(new Set(retryable.map(keyOf)));
     }
   }
   const blocked = new Map<string, Set<number>>();
-  for (const log of notClaimable) {
+  for (const log of retryable) {
+    if (deletedIds.has(log.id)) {
+      continue;
+    }
     const ids = blocked.get(log.reference_key) ?? new Set<number>();
     ids.add(log.user_id);
     blocked.set(log.reference_key, ids);
@@ -711,12 +734,9 @@ async function appendAnnouncementEmails(
         })
     );
 
+    const claimedUserIds = claims.get(referenceKey);
     for (const user of pending) {
-      if (
-        !sendableUserIds.has(user.userId) ||
-        queuedUserIds.has(user.userId) ||
-        blockedUserIds.has(user.userId)
-      ) {
+      if (!claimedUserIds?.has(user.userId) || blockedUserIds.has(user.userId)) {
         continue;
       }
       queue.push({
