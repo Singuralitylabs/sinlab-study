@@ -17,14 +17,20 @@ const DEBOUNCE_MS = 300;
 export function HtmlPreview({ files, collapsible = false }: HtmlPreviewProps) {
   const [open, setOpen] = useState(!collapsible);
   const [reloadKey, setReloadKey] = useState(0);
-  const [debouncedFiles, setDebouncedFiles] = useState(files);
+  // Callers pass a fresh array every render; keying on the serialized content keeps the debounce
+  // from restarting (and the document from being rebuilt) when nothing changed.
+  const signature = JSON.stringify(files);
+  const [debouncedSignature, setDebouncedSignature] = useState(signature);
 
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedFiles(files), DEBOUNCE_MS);
+    const timer = setTimeout(() => setDebouncedSignature(signature), DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [files]);
+  }, [signature]);
 
-  const srcDoc = useMemo(() => buildPreviewDocument(debouncedFiles), [debouncedFiles]);
+  const srcDoc = useMemo(
+    () => buildPreviewDocument(JSON.parse(debouncedSignature) as CodeFile[]),
+    [debouncedSignature]
+  );
 
   return (
     <div className="space-y-2">

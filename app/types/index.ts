@@ -234,7 +234,7 @@ export type AdminAIReviewListItem = AIReviewListItem &
   Pick<AIReview, "prompt_tokens" | "completion_tokens" | "thoughts_tokens">;
 
 export interface SubmissionWithContentAndReview extends Submission {
-  content: Pick<LearningContent, "id" | "title"> | null;
+  content: Pick<LearningContent, "id" | "title" | "code_language"> | null;
   ai_review: AIReviewListItem | null;
 }
 

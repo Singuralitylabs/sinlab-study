@@ -7,7 +7,7 @@ import { PageTitle } from "@/app/components/PageTitle";
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { SubmissionsPager } from "@/app/components/SubmissionsPager";
 import { SUBMISSIONS_PAGE_SIZE } from "@/app/constants/submissions";
-import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
+import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import {
   calcTotalPages,
   parsePageParam,
@@ -124,7 +124,10 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
                     {submission.submission_type === "code" && (
                       <div className="mt-3">
                         <SubmissionCodeBlock
-                          files={getSubmissionCodeFiles(submission)}
+                          files={withFallbackLanguage(
+                            getSubmissionCodeFiles(submission),
+                            submission.content?.code_language
+                          )}
                           preClassName="p-3 bg-muted rounded-lg text-sm overflow-x-auto max-h-40"
                         />
                       </div>

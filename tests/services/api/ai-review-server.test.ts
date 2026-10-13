@@ -204,7 +204,7 @@ describe("fetchCompletedAIReviewContentIds", () => {
 
 describe("fetchSubmissionsWithReviewsByUserId", () => {
   const listSelect =
-    "*, content:learning_contents(id, title), ai_review:ai_reviews(id, status, overall_score, review_content, reviewed_at, error_message, review_json, score_kind, rubric_version, passed)";
+    "*, content:learning_contents(id, title, code_language), ai_review:ai_reviews(id, status, overall_score, review_content, reviewed_at, error_message, review_json, score_kind, rubric_version, passed)";
 
   it("指定ページの提出一覧と総数を返す（2ページ目は range(20, 39)）", async () => {
     const rows = [{ id: 21 }, { id: 22 }];

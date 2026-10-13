@@ -20,7 +20,8 @@ const AI_REVIEW_ADMIN_COLUMNS = `${AI_REVIEW_STUDENT_COLUMNS}, prompt_tokens, co
 const AI_REVIEW_LIST_SELECT = `ai_review:ai_reviews(${AI_REVIEW_STUDENT_COLUMNS})`;
 const AI_REVIEW_ADMIN_LIST_SELECT = `ai_review:ai_reviews(${AI_REVIEW_ADMIN_COLUMNS})`;
 
-const LIST_CONTENT_SELECT = "id, title";
+// code_language fills in the language of single-file submissions, which store none (history preview).
+const LIST_CONTENT_SELECT = "id, title, code_language";
 
 /** Select only the columns the list needs (content and ai_reviews); no heavy text. */
 export async function fetchSubmissionsWithReviewsByUserId(

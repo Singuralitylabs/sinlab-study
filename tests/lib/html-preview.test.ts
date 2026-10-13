@@ -81,4 +81,38 @@ describe("buildPreviewDocument", () => {
     expect(doc).toContain("$&");
     expect(doc).toContain("$`");
   });
+
+  it("keeps type=module and moves defer scripts to the end of the body", () => {
+    const doc = buildPreviewDocument([
+      f(
+        "index.html",
+        "html",
+        '<head><script src="m.js" type="module"></script><script src="d.js" defer></script></head><body><p>x</p></body>'
+      ),
+      f("m.js", "javascript", "import x from 'y'"),
+      f("d.js", "javascript", "run()"),
+    ]);
+    expect(doc).toContain("<script type=\"module\">import x from 'y'</script>");
+    expect(doc).toBe(
+      "<head><script type=\"module\">import x from 'y'</script></head><body><p>x</p><script>run()</script></body>"
+    );
+  });
+
+  it("appends defer scripts when there is no body", () => {
+    const doc = buildPreviewDocument([
+      f("index.html", "html", '<script src="d.js" defer></script><p>x</p>'),
+      f("d.js", "javascript", "run()"),
+    ]);
+    expect(doc).toBe("<p>x</p><script>run()</script>");
+  });
+
+  it("escapes <!-- in script content only", () => {
+    const doc = buildPreviewDocument([
+      f("index.html", "html", '<link rel="stylesheet" href="s.css"><script src="m.js"></script>'),
+      f("s.css", "css", "/* <!-- */"),
+      f("m.js", "javascript", 'var a = "<!--<script>";'),
+    ]);
+    expect(doc).toContain("/* <!-- */");
+    expect(doc).toContain('"<\\!--<script>"');
+  });
 });

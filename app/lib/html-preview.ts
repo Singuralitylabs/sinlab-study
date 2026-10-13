@@ -33,7 +33,10 @@ export function canPreviewFiles(files: readonly CodeFile[]): boolean {
 // Content is inlined into <style>/<script>; a literal closing tag would end the element early and
 // let the remainder render as markup.
 function escapeClosingTag(content: string, tag: "style" | "script"): string {
-  return content.replace(new RegExp(`</(${tag})`, "gi"), "<\\/$1");
+  const escaped = content.replace(new RegExp(`</(${tag})`, "gi"), "<\\/$1");
+  // "<!--" followed by "<script" puts the HTML parser in the "double escaped" state, where the
+  // closing tag no longer ends the element.
+  return tag === "script" ? escaped.replace(/<!--/g, "<\\!--") : escaped;
 }
 
 function normalizeRef(ref: string): string {
@@ -83,12 +86,37 @@ export function buildPreviewDocument(files: readonly CodeFile[]): string {
     return file ? `<style>${escapeClosingTag(file.content, "style")}</style>` : tag;
   });
 
-  return withStyles.replace(/<script\b([^>]*)>\s*<\/script\s*>/gi, (element, attrs: string) => {
-    const src = getAttribute(`<script${attrs}>`, "src");
-    if (src === null || !isRelativeRef(src)) {
-      return element;
+  // Inlining drops src, so defer would be lost and the script would run before the DOM exists;
+  // deferred scripts are moved to the end of the document instead (module scripts defer natively).
+  const deferred: string[] = [];
+  const withScripts = withStyles.replace(
+    /<script\b([^>]*)>\s*<\/script\s*>/gi,
+    (element, attrs: string) => {
+      const tag = `<script${attrs}>`;
+      const src = getAttribute(tag, "src");
+      if (src === null || !isRelativeRef(src)) {
+        return element;
+      }
+      const file = findFile(files, src);
+      if (!file) {
+        return element;
+      }
+      const isModule = getAttribute(tag, "type")?.toLowerCase() === "module";
+      const inlined = `<script${isModule ? ' type="module"' : ""}>${escapeClosingTag(file.content, "script")}</script>`;
+      if (!isModule && /\sdefer(\s|=|>|\/)/i.test(tag)) {
+        deferred.push(inlined);
+        return "";
+      }
+      return inlined;
     }
-    const file = findFile(files, src);
-    return file ? `<script>${escapeClosingTag(file.content, "script")}</script>` : element;
-  });
+  );
+
+  if (deferred.length === 0) {
+    return withScripts;
+  }
+  const tail = deferred.join("");
+  const bodyEnd = withScripts.search(/<\/body\s*>/i);
+  return bodyEnd === -1
+    ? withScripts + tail
+    : withScripts.slice(0, bodyEnd) + tail + withScripts.slice(bodyEnd);
 }

@@ -653,7 +653,7 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 
 提出ファイルがすべて `html` / `css` / `javascript`（`PREVIEW_LANGUAGES`。`app/lib/html-preview.ts`）のときだけ、提出フォーム（`SubmissionForm`）と提出履歴（`/submissions`・`/manage/submissions` の `SubmissionCodeBlock`）に「プレビュー」を表示する。他の言語を含む提出では UI を出さない。サーバーではコードを実行せず、ブラウザ内の iframe で描画する（GAS / Python / SQL の実行は対象外）。
 
-- **文書の組み立て**: `buildPreviewDocument()`（純粋関数）が `index.html`（無ければ最初の html ファイル）を土台にし、`<link rel="stylesheet" href="style.css">` / `<script src="main.js">` のように同名ファイルを指す相対参照を `<style>` / `<script>` にインライン展開する。外部 URL・ルートパス・該当ファイルが無い参照は触らない。html が無ければ css / js のみの空ページにする。インライン化する内容中の `</style` / `</script` はエスケープし、要素が途中で閉じないようにする。
+- **文書の組み立て**: `buildPreviewDocument()`（純粋関数）が `index.html`（無ければ最初の html ファイル）を土台にし、`<link rel="stylesheet" href="style.css">` / `<script src="main.js">` のように同名ファイルを指す相対参照を `<style>` / `<script>` にインライン展開する。外部 URL・ルートパス・該当ファイルが無い参照は触らない。html が無ければ css / js のみの空ページにする。インライン化する内容中の `</style` / `</script`（スクリプトは `<!--` も）はエスケープし、要素が途中で閉じないようにする。`type="module"` は引き継ぎ、`defer` 付きの通常スクリプトは `src` を失って DOM 生成前に走らないよう `</body>` の直前（無ければ末尾）へ移す。単一ファイル提出は `code_content` に言語が残らないため、提出履歴では演習の `code_language` で補う。
 - **サンドボックス**: `<iframe sandbox="allow-scripts" srcDoc referrerPolicy="no-referrer">`。**`allow-same-origin` は付けない**（iframe 内のスクリプトが親オリジンの Cookie・Supabase セッション・`/api` に到達できないよう、opaque origin にするため）。`allow-forms` / `allow-popups` / `allow-top-navigation` / `allow-modals` も付けない。メールテンプレートのプレビュー（`sandbox=""`）より緩いのは、受講生のスクリプト実行を見せるため。親子間の `postMessage` は使わない。管理者が受講生のコードを描画する場合も同じ条件。
 - **再描画**: 入力の変更は 300ms デバウンスして反映し、固まったときは「再読み込み」で `key` を振り直して iframe を作り直す。提出履歴は多数並ぶため、既定で折りたたみ（開いたときだけ描画・実行）。
 - アプリ全体への CSP / `X-Frame-Options` の付与は本機能の対象外。
