@@ -20,6 +20,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 - **push 前・作業完了前には必ず `bun run test:all` を通す。**
 - DBスキーマ変更後は `bun run db:types` を実行し、生成物もコミットする。
+- AIレビューの強度・回数上限は `docs/testing.md` 6章に従う。
 - **`main` へ直接コミット・push せず、作業ブランチ（`feature/` `bug/` `docs/` `refactor/` `env/` 等）を切り PR 経由でマージする。**
 - PR は `.github/pull_request_template.md` に従う。
 
