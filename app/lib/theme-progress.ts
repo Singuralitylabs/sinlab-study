@@ -5,15 +5,16 @@
  * denominator (trial sees only trial-open contents), so nothing here special-cases status.
  */
 
+import { isThemeCompleted } from "@/app/lib/certificate";
+
 export type ThemeCounts = { totalContents: number; completedContents: number };
 
-/** Started: at least one completion. A fully completed theme is also "active" here; see split. */
+/**
+ * In progress: at least one completion and not finished. "Finished" is the certificate rule
+ * (isThemeCompleted), so the dashboard's "completed" and certificate eligibility cannot drift.
+ */
 export function isActiveTheme(summary: ThemeCounts): boolean {
-  return summary.completedContents >= 1;
-}
-
-export function isCompletedTheme(summary: ThemeCounts): boolean {
-  return summary.totalContents > 0 && summary.completedContents >= summary.totalContents;
+  return summary.completedContents >= 1 && !isThemeCompleted(summary);
 }
 
 function completionRate(summary: ThemeCounts): number {
@@ -34,7 +35,7 @@ export function splitThemesByActivity<T extends ThemeCounts>(
   const notStarted: T[] = [];
 
   for (const summary of summaries) {
-    if (isCompletedTheme(summary)) {
+    if (isThemeCompleted(summary)) {
       completed.push(summary);
     } else if (isActiveTheme(summary)) {
       active.push(summary);

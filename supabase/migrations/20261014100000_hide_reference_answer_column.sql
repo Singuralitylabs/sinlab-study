@@ -25,6 +25,56 @@ GRANT SELECT (
   week_id
 ) ON TABLE public.learning_contents TO anon, authenticated;
 
+-- Visibility rule shared by the learner RPCs that read protected content columns (quiz
+-- questions, model answers), so a change to the RLS visibility conditions is made in one place.
+-- Internal: not callable by API roles; the SECURITY DEFINER RPCs below run as the owner.
+CREATE OR REPLACE FUNCTION public.content_visible_to_caller(p_content_id INTEGER, p_content_type TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM learning_contents lc
+    INNER JOIN learning_weeks lw ON lw.id = lc.week_id
+    INNER JOIN learning_phases lp ON lp.id = lw.phase_id
+    INNER JOIN learning_themes lt ON lt.id = lp.theme_id
+    WHERE lc.id = p_content_id
+      AND lc.content_type = p_content_type
+      AND lc.is_deleted = false
+      AND (
+        get_user_role() IN ('admin', 'maintainer')
+        OR (
+          lc.is_published = true
+          AND lw.is_published = true AND lw.is_deleted = false
+          AND lp.is_published = true AND lp.is_deleted = false
+          AND lt.is_published = true AND lt.is_deleted = false
+          AND CASE get_user_status()
+            WHEN 'active' THEN true
+            WHEN 'trial' THEN lc.is_open_to_trial
+            ELSE false
+          END
+        )
+      )
+  );
+$$;
+
+REVOKE ALL ON FUNCTION public.content_visible_to_caller(INTEGER, TEXT)
+  FROM PUBLIC, anon, authenticated;
+
+-- Same signature and ACL as before (CREATE OR REPLACE keeps the revoked grants).
+CREATE OR REPLACE FUNCTION public.quiz_content_visible_to_caller(p_content_id INTEGER)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT content_visible_to_caller(p_content_id, 'quiz');
+$$;
+
 -- Returns the model answer only when the content is visible to the caller and, for learners, the
 -- caller has at least one submission for it. admin / maintainer preview unpublished content, so
 -- they need no submission. Any other case returns zero rows.
@@ -37,29 +87,14 @@ STABLE
 AS $$
   SELECT lc.reference_answer
   FROM learning_contents lc
-  INNER JOIN learning_weeks lw ON lw.id = lc.week_id
-  INNER JOIN learning_phases lp ON lp.id = lw.phase_id
-  INNER JOIN learning_themes lt ON lt.id = lp.theme_id
   WHERE lc.id = p_content_id
-    AND lc.content_type = 'exercise'
-    AND lc.is_deleted = false
     AND lc.reference_answer IS NOT NULL
+    AND content_visible_to_caller(lc.id, 'exercise')
     AND (
       get_user_role() IN ('admin', 'maintainer')
-      OR (
-        lc.is_published = true
-        AND lw.is_published = true AND lw.is_deleted = false
-        AND lp.is_published = true AND lp.is_deleted = false
-        AND lt.is_published = true AND lt.is_deleted = false
-        AND CASE get_user_status()
-          WHEN 'active' THEN true
-          WHEN 'trial' THEN lc.is_open_to_trial
-          ELSE false
-        END
-        AND EXISTS (
-          SELECT 1 FROM submissions s
-          WHERE s.content_id = lc.id AND s.user_id = get_user_id()
-        )
+      OR EXISTS (
+        SELECT 1 FROM submissions s
+        WHERE s.content_id = lc.id AND s.user_id = get_user_id()
       )
     );
 $$;

@@ -139,10 +139,10 @@ export type ActiveThemeLine = {
 
 /**
  * The next content and the themes the learner is in the middle of. The next content is the first
- * incomplete one (learning order) of the active theme with the most recent completion; when that
- * theme has nothing left it moves to the next most recent active theme, and a learner with no
- * active theme gets the first incomplete overall. Theme state comes from splitThemesByActivity()
- * over the visible contents, so a trial learner is judged on the trial-open denominator.
+ * incomplete one (learning order) of the active theme with the most recent completion; a learner
+ * with no active theme gets the first incomplete overall. Theme state comes from
+ * splitThemesByActivity() over the visible contents, so a trial learner is judged on the
+ * trial-open denominator.
  * `completedAtByContentId` is epoch ms; a missing time ranks oldest.
  */
 export function resolveNextContent(
@@ -187,7 +187,8 @@ export function resolveNextContent(
   );
 
   return {
-    next: active.find((theme) => theme.firstIncomplete)?.firstIncomplete ?? incomplete[0] ?? null,
+    // An active theme is started and unfinished, so it always has an incomplete content.
+    next: active[0]?.firstIncomplete ?? incomplete[0] ?? null,
     remaining: incomplete.length,
     activeThemes: active.map(({ themeName, completedContents, totalContents }) => ({
       themeName,

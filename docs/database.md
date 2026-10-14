@@ -446,7 +446,7 @@ INSERT / UPDATE / DELETE のポリシーは定義しない（受講生・管理�
 |:--|:--|:--|
 | `get_quiz_questions(p_content_id)` | `authenticated` / `service_role` | 出題用の列（`id, display_order, question_type, question, choices, hint, revision`）。正解・模範解答・解説は返さない。`revision` は形式・設問文・選択肢のハッシュ（`quiz_question_revision()`） |
 | `grade_quiz_answers(p_content_id, p_answers)` | `authenticated` / `service_role` | 全設問に回答している（選択式は1つ以上選択、入力式は空白以外）ときだけ、設問ごとの `is_correct`（入力式は NULL）・`correct_choices`・`model_answer`・`explanation` を返す。1問でも未回答、回答の数が設問の数と違う（削除された設問への回答を黙って捨てて部分採点しないため）、各回答の `revision` が現在の設問と違う（ページを開いた後に設問の中身が差し替わった。id を保つ置換では id だけで検出できず、古い設問への答えを新しい設問の正解と比べてしまうため）、または同じ `question_id` が重複していれば0行。これは「回答を送る前に正解を表示しない」ための形式上の条件で、ダミーの回答を送れば正解・解説は得られる（回答内容を保存しないため、それ以上は守らない）。選択の重複・範囲外は不正解 |
-| `quiz_content_visible_to_caller(p_content_id)` | なし（上の2関数の内部用） | `content_type = 'quiz'` かつ未削除で、admin・maintainer（未公開プレビュー。[機能設計書](./specification.md)2.12）か、4階層すべて公開・未削除で `active`、またはお試しで `is_open_to_trial = true`。`learning_contents` の SELECT RLS と `isContentVisible()` を合わせた条件 |
+| `quiz_content_visible_to_caller(p_content_id)` | なし（上の2関数の内部用。`content_visible_to_caller(p_content_id, 'quiz')` を呼ぶだけの薄い関数） | `content_type = 'quiz'` かつ未削除で、admin・maintainer（未公開プレビュー。[機能設計書](./specification.md)2.12）か、4階層すべて公開・未削除で `active`、またはお試しで `is_open_to_trial = true`。`learning_contents` の SELECT RLS と `isContentVisible()` を合わせた条件 |
 | `quiz_question_revision(p_question_type, p_question, p_choices)` | なし（内部用） | 上記の `revision` を計算する。正解・解説だけの修正では変わらない |
 | `replace_quiz_questions(p_content_id, p_questions)` | `service_role` のみ | 管理画面の保存。1トランザクションで、配列の順を `display_order` にして同じ位置の行は UPDATE（id を保つ。回答中の受講者の `question_id` を無効にしない）、増えた分を INSERT、減った分を DELETE する |
 
@@ -460,7 +460,7 @@ INSERT / UPDATE / DELETE のポリシーは定義しない（受講生・管理�
 |:--|:--|:--|
 | `get_exercise_reference_answer(p_content_id)` | `authenticated` / `service_role` | `content_type = 'exercise'` かつ未削除で、admin・maintainer（未公開プレビュー。提出は不要）か、4階層すべて公開・未削除で `active`、またはお試し公開（`is_open_to_trial`）の `trial` が、そのコンテンツに1件以上提出しているときだけ模範回答を1行返す。それ以外（提出なし・未公開・論理削除・お試し非公開・模範回答が NULL）は0行 |
 
-`SECURITY DEFINER`・`SET search_path = public`（5.2の例外）。`CREATE OR REPLACE` は ACL を保つが、DROP して作り直すと EXECUTE が `PUBLIC` に戻る点は6.17と同じ。`anon` / `PUBLIC` は REVOKE する。
+可視性の判定は、クイズと共通の内部関数 `content_visible_to_caller(p_content_id, p_content_type)`（API ロールには EXECUTE を与えない）に一本化している。RLS の可視条件を変えるときはこの1か所を直す。`SECURITY DEFINER`・`SET search_path = public`（5.2の例外）。`CREATE OR REPLACE` は ACL を保つが、DROP して作り直すと EXECUTE が `PUBLIC` に戻る点は6.17と同じ。`anon` / `PUBLIC` は REVOKE する。
 
 ---
 

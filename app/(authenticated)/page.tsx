@@ -150,7 +150,7 @@ export default async function HomePage() {
 
       <ActiveThemeProgressCard
         active={active}
-        firstNotStarted={notStarted[0] ?? null}
+        firstNotStarted={notStarted.find((summary) => summary.totalContents > 0) ?? null}
         hasCompleted={completed.length > 0}
       />
 

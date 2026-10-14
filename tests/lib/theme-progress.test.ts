@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isActiveTheme, isCompletedTheme, splitThemesByActivity } from "@/app/lib/theme-progress";
+import { isThemeCompleted } from "@/app/lib/certificate";
+import { isActiveTheme, splitThemesByActivity } from "@/app/lib/theme-progress";
 
 const t = (name: string, completedContents: number, totalContents: number) => ({
   name,
@@ -7,16 +8,17 @@ const t = (name: string, completedContents: number, totalContents: number) => ({
   totalContents,
 });
 
-describe("isActiveTheme / isCompletedTheme", () => {
-  it("完了0件は学習中ではなく、1件以上で学習中", () => {
+describe("isActiveTheme", () => {
+  it("完了0件は学習中ではなく、1件以上で全て完了までは学習中", () => {
     expect(isActiveTheme(t("a", 0, 5))).toBe(false);
     expect(isActiveTheme(t("a", 1, 5))).toBe(true);
+    expect(isActiveTheme(t("a", 4, 5))).toBe(true);
   });
 
-  it("全て完了で修了。コンテンツが0件のテーマは修了にしない", () => {
-    expect(isCompletedTheme(t("a", 5, 5))).toBe(true);
-    expect(isCompletedTheme(t("a", 4, 5))).toBe(false);
-    expect(isCompletedTheme(t("a", 0, 0))).toBe(false);
+  it("修了（100%）したテーマは学習中ではない。修了の定義は修了証と同じ", () => {
+    expect(isActiveTheme(t("a", 5, 5))).toBe(false);
+    expect(isThemeCompleted(t("a", 5, 5))).toBe(true);
+    expect(isActiveTheme(t("a", 0, 0))).toBe(false);
   });
 });
 

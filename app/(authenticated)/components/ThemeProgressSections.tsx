@@ -62,7 +62,7 @@ export function ActiveThemeProgressCard({
               href={`/learn/${firstNotStarted.theme.id}`}
               className="text-primary hover:underline"
             >
-              最初のテーマを始めましょう
+              {hasCompleted ? "次のテーマを始めましょう" : "最初のテーマを始めましょう"}
             </Link>
             （{firstNotStarted.theme.name}）
           </p>

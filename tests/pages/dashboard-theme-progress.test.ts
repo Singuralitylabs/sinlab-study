@@ -147,6 +147,26 @@ describe("ダッシュボードのテーマ別進捗（#308）", () => {
     expect(await render()).toContain("次のステップ");
   });
 
+  it("コンテンツが0件のテーマには誘導せず、次の未着手テーマを案内する", async () => {
+    setup([summary(1, "空のテーマ", 0, 0), WEB(0)]);
+
+    const html = await render();
+
+    expect(html).toContain("最初のテーマを始めましょう");
+    expect(html).toContain('href="/learn/2"');
+    expect(html).toContain("（Web開発）");
+    expect(html).not.toContain("（空のテーマ）");
+  });
+
+  it("修了済みのテーマがあるときは「次のテーマ」と案内する", async () => {
+    setup([GAS(4), WEB(0)]);
+
+    const html = await render();
+
+    expect(html).toContain("次のテーマを始めましょう");
+    expect(html).not.toContain("最初のテーマを始めましょう");
+  });
+
   it("テーマが無いときは未登録の案内を出す", async () => {
     setup([]);
 

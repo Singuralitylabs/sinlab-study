@@ -31,7 +31,9 @@ from (
     -- Trigger function: never callable through REST
     ('public.stamp_stripe_subscription_funnel_times()', 'anon', false),
     ('public.stamp_stripe_subscription_funnel_times()', 'authenticated', false),
-    -- Internal helpers behind the quiz RPCs
+    -- Internal helpers behind the quiz and model-answer RPCs
+    ('public.content_visible_to_caller(integer, text)', 'anon', false),
+    ('public.content_visible_to_caller(integer, text)', 'authenticated', false),
     ('public.quiz_content_visible_to_caller(integer)', 'anon', false),
     ('public.quiz_content_visible_to_caller(integer)', 'authenticated', false),
     ('public.quiz_question_revision(text, text, text[])', 'anon', false),
@@ -90,6 +92,7 @@ select is(
     'bulk_update_sibling_display_order(text,jsonb)',
     'claim_ai_review(integer,integer,integer,text,timestamp with time zone,timestamp with time zone,integer,integer,integer)',
     'claim_email_test_send(integer,timestamp with time zone,integer)',
+    'content_visible_to_caller(integer,text)',
     'get_exercise_reference_answer(integer)',
     'get_quiz_questions(integer)',
     'get_students_progress_summary()',
