@@ -104,6 +104,15 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
   // it and is awaited only when the tree has contents. It never rejects (a failure falls back to
   // an empty set so the theme list still renders), so leaving it unawaited is safe.
   const progressPromise = (async () => {
+    try {
+      return await fetchCompletedContentIds();
+    } catch (error) {
+      console.error("テーマ進捗サマリーの進捗取得エラー:", error);
+      return new Set<number>();
+    }
+  })();
+
+  async function fetchCompletedContentIds(): Promise<Set<number>> {
     const completedIds = new Set<number>();
     const pageSize = 1000;
     for (let offset = 0; ; offset += pageSize) {
@@ -127,7 +136,7 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
         return completedIds;
       }
     }
-  })();
+  }
 
   const { data: themes, error: themesError } = await supabase
     .from("learning_themes")
