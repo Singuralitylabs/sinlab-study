@@ -15,6 +15,7 @@ import type {
 import {
   getGradingRubricVersion,
   getRubricMaxKeyNumber,
+  hasGradingRequirements,
   toRubricFormRows,
 } from "@/app/lib/grading";
 import { type QuizQuestionData, QuizQuestionsSchema } from "@/app/lib/quiz";
@@ -231,6 +232,11 @@ export function ContentForm({
     mode === "edit" ? getGradingRubricVersion(initialData?.grading_rubric) : null
   );
   const loadedRubricVersionRef = useRef(loadedRubricVersion);
+  // A deleted rubric (#344) has a version for the optimistic lock, but it is not a rubric: the
+  // editor shows a version only for a live one.
+  const [rubricIsLive, setRubricIsLive] = useState(() =>
+    hasGradingRequirements(initialData?.grading_rubric)
+  );
   const [issuedMaxKeyNumber] = useState(() => getRubricMaxKeyNumber(initialData?.grading_rubric));
   const [allowedSubmissionTypes, setAllowedSubmissionTypes] = useState<AllowedSubmissionTypes>(
     (initialData?.allowed_submission_types as AllowedSubmissionTypes) ?? "code"
@@ -458,6 +464,7 @@ export function ContentForm({
         const data: unknown = await response.json().catch(() => null);
         if (mode === "edit") {
           adoptSavedRubricVersion(data, loadedRubricVersionRef, setLoadedRubricVersion);
+          setRubricIsLive(contentType === "exercise" && rubricRows.length > 0);
         }
         const createWarning =
           mode === "create" && data && typeof data === "object" && "warning" in data
@@ -756,7 +763,7 @@ export function ContentForm({
               <GradingRubricEditor
                 rows={rubricRows}
                 onChange={setRubricRows}
-                currentVersion={loadedRubricVersion}
+                currentVersion={rubricIsLive ? loadedRubricVersion : null}
                 issuedMaxKeyNumber={issuedMaxKeyNumber}
                 exerciseInstructions={exerciseInstructions}
                 referenceAnswer={referenceAnswer}

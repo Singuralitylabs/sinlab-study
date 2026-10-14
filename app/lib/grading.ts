@@ -208,7 +208,9 @@ export function toRubricFormRows(value: unknown): GradingRequirement[] {
 }
 
 function requirementKeyNumber(key: string): number {
-  const match = /^r(\d+)$/.exec(key);
+  // 9 digits at most, like the keep_grading_rubric_tombstone() trigger, so both compute the same
+  // key high-water mark.
+  const match = /^r(\d{1,9})$/.exec(key);
   return match ? Number(match[1]) : 0;
 }
 

@@ -1163,6 +1163,32 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     expect(restoreBuilder.is).not.toHaveBeenCalled();
   });
 
+  it("初めて保存した基準を巻き戻すときは、トリガーが作る墓石と同じ値を明示して書く", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: null },
+            error: null,
+          },
+          { data: [{ id: 1, updated_at: "2026-10-13T00:00:00.000Z" }], error: null },
+          { data: null, error: dbError },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, { gradingRubric: input, insertAfterId: 9 });
+
+    expect(result.error).toEqual(dbError);
+    const restoreBuilder = mockClient.from.mock.results.at(-1)?.value;
+    expect(restoreBuilder.update.mock.calls[0][0].grading_rubric).toEqual({
+      version: 2,
+      requirements: [],
+      max_key_number: 1,
+    });
+    expect(restoreBuilder.eq).toHaveBeenCalledWith("grading_rubric->>version", "1");
+  });
+
   it("もともと基準が無い行の削除は NULL のまま（墓石を作らない）", async () => {
     const { mockClient } = mockAdminWithStorage({
       tableResults: {

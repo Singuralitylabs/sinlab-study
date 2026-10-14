@@ -13,7 +13,6 @@ import {
 import {
   getGradingRubricVersion,
   getRubricMaxKeyNumber,
-  hasGradingRequirements,
   reusedRequirementKeys,
   toRubricFormRows,
 } from "@/app/lib/grading";
@@ -178,7 +177,7 @@ function manageContentListSelect(innerJoin: boolean): string {
   return `
     id, title, content_type, display_order, is_published, is_open_to_trial, week_id,
     grading_rubric_version:grading_rubric->version,
-    grading_rubric_requirements:grading_rubric->requirements,
+    grading_rubric_first_requirement:grading_rubric->requirements->0,
     ${weekRel}(
       id, name, display_order, phase_id,
       ${phaseRel}(
@@ -1088,12 +1087,11 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
   // in content-grouping.ts reads.
   // A deleted rubric (empty requirements, #344) keeps its version but is shown as "not set".
   const rows = (
-    data as unknown as Array<ManageContentListItem & { grading_rubric_requirements: unknown }>
-  ).map(({ grading_rubric_requirements, ...row }) => ({
+    data as unknown as Array<ManageContentListItem & { grading_rubric_first_requirement: unknown }>
+  ).map(({ grading_rubric_first_requirement, ...row }) => ({
     ...row,
-    grading_rubric_version: hasGradingRequirements(grading_rubric_requirements)
-      ? row.grading_rubric_version
-      : null,
+    grading_rubric_version:
+      grading_rubric_first_requirement != null ? row.grading_rubric_version : null,
   }));
   return { data: rows as ManageContentListItem[], error: null };
 }
@@ -1556,6 +1554,7 @@ async function updateContentRow(
   } | null = null;
   let rubricWriteCommitted = false;
   let committedRubricVersion: number | null | undefined;
+  let committedRubricValue: LearningContent["grading_rubric"] = null;
   // The rubric UPDATE's updated_at. A later save moves it, including one that also leaves the
   // rubric NULL, so a clear is not identified by IS NULL alone.
   let committedRubricUpdatedAt: string | null = null;
@@ -1689,6 +1688,7 @@ async function updateContentRow(
     // The editor's next save has to lock this write, not a version a later refresh might load
     // for different rows.
     committedRubricVersion = getGradingRubricVersion(rubricPayload.grading_rubric);
+    committedRubricValue = rubricPayload.grading_rubric ?? null;
     committedRubricUpdatedAt = writtenRowUpdatedAt(rubricRows);
     delete patch.grading_rubric;
     delete patch.content_type;
@@ -1706,9 +1706,16 @@ async function updateContentRow(
     }
     // Match the version this save wrote. Another save can commit a newer rubric before
     // resequence or the remaining UPDATE fails; an unconditional snapshot write replaces it.
+    // The row had no rubric before this save, but writing NULL over the rubric it holds now would
+    // be turned into a tombstone by the DB trigger anyway. Write that tombstone explicitly so
+    // the stored value is what we expect (the version moves on; the form must reload).
+    const restoreValue =
+      rubricSnapshot.grading_rubric == null && committedRubricValue != null
+        ? clearedGradingRubric(parseStoredGradingRubric(committedRubricValue))
+        : rubricSnapshot.grading_rubric;
     let restore = supabase
       .from("learning_contents")
-      .update(rubricSnapshot)
+      .update({ ...rubricSnapshot, grading_rubric: restoreValue })
       .eq("id", id)
       .eq("is_deleted", false);
     if (committedRubricVersion === null) {
