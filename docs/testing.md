@@ -95,7 +95,7 @@ Unit Tests (多数)
 
 ### 4.3 DB 権限テスト（pgTAP）
 
-`supabase/tests/database/function_privileges.test.sql` が、`public` の関数ごとに `anon` / `authenticated` / `service_role` の EXECUTE を実DBの ACL で確かめる。期待値は `docs/database.md`（3.18・5.2・6.2・6.15・6.17）と一致させる。migration の SQL を文字列解析して権限を推定しない（`OWNER TO`・動的SQL・`RENAME` などを自前で解釈し続けることになるため）。
+`supabase/tests/database/function_privileges.test.sql` が、`public` の関数ごとに `anon` / `authenticated` / `service_role` の EXECUTE を実DBの ACL で確かめる。期待値は `docs/database.md`（3.7・3.18・5.2・6.2・6.15・6.17）と一致させる。migration の SQL を文字列解析して権限を推定しない（`OWNER TO`・動的SQL・`RENAME` などを自前で解釈し続けることになるため）。
 
 - **関数を追加・権限を変更したとき**: 同ファイルの期待値の表と、末尾の「`public` の全関数一覧」を更新する。一覧と実DBが食い違うと失敗するので、新しい関数の ACL を人が確認する機会になる。
 - **トリガー関数**: `update_updated_at_column()` は docs が EXECUTE を名指ししていないため一覧に載せるだけにする。`keep_user_progress_ever_completed()` は docs（6.x `user_progress`）が名指しする `anon` の REVOKE だけを検証する。
