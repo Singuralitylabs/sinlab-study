@@ -1,0 +1,154 @@
+import { describe, expect, it } from "vitest";
+import { buildPreviewDocument, canPreviewFiles, isPreviewLanguage } from "@/app/lib/html-preview";
+
+const f = (filename: string, language: string, content: string) => ({
+  filename,
+  language,
+  content,
+});
+
+describe("isPreviewLanguage / canPreviewFiles", () => {
+  it("accepts only html, css and javascript", () => {
+    expect(["html", "css", "javascript"].every(isPreviewLanguage)).toBe(true);
+    for (const l of ["gas", "python", "sql", "typescript", "", null, undefined]) {
+      expect(isPreviewLanguage(l)).toBe(false);
+    }
+  });
+
+  it("rejects empty and mixed submissions", () => {
+    expect(canPreviewFiles([])).toBe(false);
+    expect(canPreviewFiles([f("a.sql", "sql", "x")])).toBe(false);
+    expect(canPreviewFiles([f("index.html", "html", "x"), f("a.sql", "sql", "x")])).toBe(false);
+    expect(canPreviewFiles([f("index.html", "html", "x"), f("m.js", "javascript", "x")])).toBe(
+      true
+    );
+  });
+
+  it("falls back to the extension when no language is stored", () => {
+    expect(canPreviewFiles([f("index.html", "", "x")])).toBe(true);
+    expect(canPreviewFiles([f("", "", "x")])).toBe(false);
+  });
+});
+
+describe("buildPreviewDocument", () => {
+  it("inlines same-name stylesheet and script references", () => {
+    const doc = buildPreviewDocument([
+      f(
+        "index.html",
+        "html",
+        '<head><link rel="stylesheet" href="style.css"></head><body><script src="./main.js"></script></body>'
+      ),
+      f("style.css", "css", "body{color:red}"),
+      f("main.js", "javascript", "console.log(1)"),
+    ]);
+    expect(doc).toContain("<style>body{color:red}</style>");
+    expect(doc).toContain("<script>console.log(1)</script>");
+    expect(doc).not.toContain("href=");
+    expect(doc).not.toContain("src=");
+  });
+
+  it("leaves external and unmatched references untouched", () => {
+    const html =
+      '<link rel="stylesheet" href="https://cdn.example.com/a.css"><link rel="stylesheet" href="/abs.css"><link rel="stylesheet" href="missing.css"><script src="//x.test/a.js"></script><link rel="icon" href="style.css">';
+    const doc = buildPreviewDocument([f("index.html", "html", html), f("style.css", "css", "a{}")]);
+    expect(doc).toBe(html);
+  });
+
+  it("prefers index.html, else the first html file", () => {
+    expect(buildPreviewDocument([f("a.html", "html", "A"), f("index.html", "html", "INDEX")])).toBe(
+      "INDEX"
+    );
+    expect(buildPreviewDocument([f("a.html", "html", "A"), f("b.html", "html", "B")])).toBe("A");
+  });
+
+  it("wraps css-only and javascript-only submissions in an empty page", () => {
+    const css = buildPreviewDocument([f("style.css", "css", "p{}")]);
+    expect(css).toContain("<style>p{}</style>");
+    expect(css).not.toContain("<script");
+    const js = buildPreviewDocument([f("main.js", "javascript", "run()")]);
+    expect(js).toContain("<script>run()</script>");
+    expect(js).not.toContain("<style");
+  });
+
+  it("does not let content close the inlined element early or expand $ patterns", () => {
+    const doc = buildPreviewDocument([
+      f("index.html", "html", '<link rel="stylesheet" href="s.css"><script src="m.js"></script>'),
+      f("s.css", "css", "/* </style><b>x</b> */ a{content:'$&'}"),
+      f("m.js", "javascript", 'document.write("</script><i>x</i>"); var a="$`";'),
+    ]);
+    expect(doc.match(/<\/style>/g)).toHaveLength(1);
+    expect(doc.match(/<\/script>/g)).toHaveLength(1);
+    expect(doc).toContain("$&");
+    expect(doc).toContain("$`");
+  });
+
+  it("keeps type=module and moves defer scripts to the end of the body", () => {
+    const doc = buildPreviewDocument([
+      f(
+        "index.html",
+        "html",
+        '<head><script src="m.js" type="module"></script><script src="d.js" defer></script></head><body><p>x</p></body>'
+      ),
+      f("m.js", "javascript", "import x from 'y'"),
+      f("d.js", "javascript", "run()"),
+    ]);
+    expect(doc).toContain("<script type=\"module\">import x from 'y'</script>");
+    expect(doc).toBe(
+      "<head><script type=\"module\">import x from 'y'</script></head><body><p>x</p><script>run()</script></body>"
+    );
+  });
+
+  it("appends defer scripts when there is no body", () => {
+    const doc = buildPreviewDocument([
+      f("index.html", "html", '<script src="d.js" defer></script><p>x</p>'),
+      f("d.js", "javascript", "run()"),
+    ]);
+    expect(doc).toBe("<p>x</p><script>run()</script>");
+  });
+
+  it("escapes <!-- in script content only", () => {
+    const doc = buildPreviewDocument([
+      f("index.html", "html", '<link rel="stylesheet" href="s.css"><script src="m.js"></script>'),
+      f("s.css", "css", "/* <!-- */"),
+      f("m.js", "javascript", 'var a = "<!--<script>";'),
+    ]);
+    expect(doc).toContain("/* <!-- */");
+    expect(doc).toContain('"<\\!--<script>"');
+  });
+
+  it("does not expand tags inside HTML comments", () => {
+    const html =
+      '<!-- <link rel="stylesheet" href="style.css"> --><!-- <script src="m.js"></script> --><p>x</p>';
+    const doc = buildPreviewDocument([
+      f("index.html", "html", html),
+      f("style.css", "css", "a{}"),
+      f("m.js", "javascript", "run()"),
+    ]);
+    expect(doc).toBe(html);
+  });
+
+  it("does not expand tag-shaped text inside inline scripts and styles", () => {
+    const html =
+      '<style>/* <link rel="stylesheet" href="style.css"> */</style><script>el.innerHTML = \'<link rel="stylesheet" href="style.css">\';</script>';
+    const doc = buildPreviewDocument([
+      f("index.html", "html", html),
+      f("style.css", "css", "a{}\nb{}"),
+    ]);
+    expect(doc).toBe(html);
+  });
+
+  it("expands real references that follow a comment", () => {
+    const doc = buildPreviewDocument([
+      f("index.html", "html", '<!-- note --><link rel="stylesheet" href="style.css">'),
+      f("style.css", "css", "a{}"),
+    ]);
+    expect(doc).toBe("<!-- note --><style>a{}</style>");
+  });
+
+  it("leaves a script that has both src and inline code untouched", () => {
+    const html = '<script src="m.js">inline()</script>';
+    expect(
+      buildPreviewDocument([f("index.html", "html", html), f("m.js", "javascript", "run()")])
+    ).toBe(html);
+  });
+});

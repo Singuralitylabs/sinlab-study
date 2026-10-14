@@ -11,7 +11,9 @@ import {
   type CodeLanguage,
   DEFAULT_FILENAME_BY_LANGUAGE,
 } from "@/app/components/code-editor-utils";
+import { HtmlPreviewNoSSR } from "@/app/components/HtmlPreviewNoSSR";
 import { buildReviewNotice } from "@/app/lib/ai-review-response";
+import { canPreviewFiles } from "@/app/lib/html-preview";
 import type { AIReviewListItem, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -74,6 +76,8 @@ export function SubmissionForm({
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
   const isMultiFile = codeFiles.length > 1;
+  // Judged by the files' own languages so the UI never appears for non-web exercises.
+  const showPreview = submissionType === "code" && canPreviewFiles(codeFiles);
 
   const updateCodeFile = (index: number, patch: Partial<CodeFileInput>) => {
     setCodeFiles((prev) => prev.map((file, i) => (i === index ? { ...file, ...patch } : file)));
@@ -356,6 +360,15 @@ export function SubmissionForm({
               <Plus className="h-4 w-4" />
               ファイルを追加
             </Button>
+            {showPreview && (
+              <HtmlPreviewNoSSR
+                files={codeFiles.map(({ filename, language, content }) => ({
+                  filename,
+                  language,
+                  content,
+                }))}
+              />
+            )}
           </div>
         ) : (
           <div className="space-y-2">

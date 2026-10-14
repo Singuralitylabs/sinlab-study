@@ -15,7 +15,7 @@ import { USER_STATUS } from "@/app/constants/user";
 import { computeRemainingReviews } from "@/app/lib/ai-review-limits";
 import { buildThemeContentOrder, resolveContentNavigation } from "@/app/lib/content-navigation";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
-import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
+import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import { getLockedContentFallbackOverview } from "@/app/lib/trial-upgrade";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
@@ -372,7 +372,10 @@ export default async function ContentPage({ params }: PageProps) {
                         <h3 className="text-lg font-semibold mb-3">提出内容</h3>
                         {latestSubmission.submission_type === "code" ? (
                           <SubmissionCodeBlock
-                            files={getSubmissionCodeFiles(latestSubmission)}
+                            files={withFallbackLanguage(
+                              getSubmissionCodeFiles(latestSubmission),
+                              content.code_language
+                            )}
                             preClassName="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre-wrap"
                           />
                         ) : (

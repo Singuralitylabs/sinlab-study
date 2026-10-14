@@ -633,6 +633,7 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 | 対象 | 方式 | 備考 |
 |:--|:--|:--|
 | CodeMirror | `CodeEditorNoSSR`（`ssr: false` + loading） | 演習フォームのみ |
+| ライブプレビュー | `HtmlPreviewNoSSR`（`ssr: false` + loading） | 対象言語（5.4.7）の提出フォーム・提出履歴のみ |
 | pdf.js / react-pdf | `PdfSlideViewerNoSSR`（`ssr: false` + loading） | スライドのみ |
 | AIレビュー（Markdown + lowlight） | `AIReviewDisplayNoSSR`（`ssr: false`） | レビュー／ローディング時のみマウント。本文 Markdown の RSC 経路は維持 |
 | react-youtube | facade + `YouTubePlayer` の dynamic | クリック前は youtube.com 非通信。サムネイルは `<img>` で `i.ytimg.com` を直接参照 |
@@ -647,6 +648,16 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 | 401 | 未認証 |
 | 403 | `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
 | 500 | サーバーエラー |
+
+#### 5.4.7 ライブプレビュー（HTML / CSS / JavaScript）
+
+提出ファイルがすべて `html` / `css` / `javascript`（`PREVIEW_LANGUAGES`。`app/lib/html-preview.ts`）のときだけ、提出フォーム（`SubmissionForm`）と、`SubmissionCodeBlock` を使う 3 か所（提出履歴 `/submissions`・`/manage/submissions` とコンテンツ詳細の「提出内容」）に「プレビュー」を表示する。他の言語を含む提出では UI を出さない。サーバーではコードを実行せず、ブラウザ内の iframe で描画する（GAS / Python / SQL の実行は対象外）。
+
+- **文書の組み立て**: `buildPreviewDocument()`（純粋関数）が `index.html`（無ければ最初の html ファイル）を土台にし、`<link rel="stylesheet" href="style.css">` / `<script src="main.js">` のように同名ファイルを指す相対参照を `<style>` / `<script>` にインライン展開する。コメント（`<!-- -->`）とインラインの `<script>` / `<style>` の中は文脈を見て触らない（コメントアウトした `<link>` は展開しない）。ファイル名は大文字小文字を区別して照合する（ブラウザの挙動に合わせる）。外部 URL・ルートパス・該当ファイルが無い参照は触らない。html が無ければ css / js のみの空ページにする。インライン化する内容中の `</style` / `</script`（スクリプトは `<!--` も）はエスケープし、要素が途中で閉じないようにする。`type="module"` は引き継ぎ、`defer` 付きの通常スクリプトは `src` を失って DOM 生成前に走らないよう `</body>` の直前（無ければ末尾）へ移す。単一ファイル提出は `code_content` に言語が残らないため、提出履歴では演習の `code_language` で補う。
+- **サンドボックス**: `<iframe sandbox="allow-scripts" srcDoc referrerPolicy="no-referrer">`。**`allow-same-origin` は付けない**（iframe 内のスクリプトが親オリジンの Cookie・Supabase セッション・`/api` に到達できないよう、opaque origin にするため）。`allow-forms` / `allow-popups` / `allow-top-navigation` / `allow-modals` も付けない。**認証 Cookie が付かない直接の理由は `SameSite=Lax`（`@supabase/ssr` の既定。リポジトリ内に上書きは無い）で、opaque origin は iframe からのリクエストを cross-site にして、応答と親 DOM を読めなくする。`srcdoc` 文書の base URL は親と同じなので、`fetch("/api/...")` 自体はアプリのオリジンへ届く。認証 Cookie を `SameSite=None` にする変更を入れるときは、この前提が崩れる（応答は読めなくても副作用のある POST が発火しうる）ため、先にここを見直すこと。**メールテンプレートのプレビュー（`sandbox=""`）より緩いのは、受講生のスクリプト実行を見せるため。親子間の `postMessage` は使わない。管理者が受講生のコードを描画する場合も同じ条件。
+- **再描画**: 入力の変更は 300ms デバウンスして反映し、固まったときは「再読み込み」で `key` を振り直して iframe を作り直す。提出履歴は多数並ぶため、既定で折りたたみ（開いたときだけ描画・実行）。
+- **既知の制約**: iframe は親と同じプロセスで動くため、受講生のコードに無限ループがあると、開いた閲覧者（管理者を含む）のタブが応答しなくなりうる（「再読み込み」も押せない）。履歴を既定で折りたたむのはこの影響を、開いた提出に限るため。また `<!--` のエスケープにより、文字列の外に `<!--` を置く旧式の JS コメントは構文エラーになる。
+- アプリ全体への CSP / `X-Frame-Options` の付与は本機能の対象外。ただし `srcdoc` の iframe は親文書の CSP を継承するため、CSP を導入するときは `script-src` / `style-src` にインライン展開したコードを許す設定（`'unsafe-inline'`、または nonce / hash）が必要で、無いとプレビューが静かに壊れる。そのイシューの受け入れ条件に「プレビューが動くこと」を含める。
 
 ### 5.5 ヒント表示
 

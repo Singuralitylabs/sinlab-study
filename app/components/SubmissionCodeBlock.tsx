@@ -1,3 +1,5 @@
+import { HtmlPreviewNoSSR } from "@/app/components/HtmlPreviewNoSSR";
+import { canPreviewFiles } from "@/app/lib/html-preview";
 import type { CodeFile } from "@/app/types";
 
 interface SubmissionCodeBlockProps {
@@ -10,7 +12,7 @@ export function SubmissionCodeBlock({ files, preClassName }: SubmissionCodeBlock
     return null;
   }
 
-  if (files.length === 1 && !files[0].filename) {
+  if (files.length === 1 && !files[0].filename && !canPreviewFiles(files)) {
     return <pre className={preClassName}>{files[0].content}</pre>;
   }
 
@@ -30,6 +32,7 @@ export function SubmissionCodeBlock({ files, preClassName }: SubmissionCodeBlock
           <pre className={preClassName}>{file.content}</pre>
         </div>
       ))}
+      {canPreviewFiles(files) && <HtmlPreviewNoSSR files={files} collapsible />}
     </div>
   );
 }
