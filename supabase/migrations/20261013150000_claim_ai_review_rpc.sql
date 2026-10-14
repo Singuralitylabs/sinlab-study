@@ -34,8 +34,16 @@ DECLARE
   v_remaining INTEGER;
   v_review_id INTEGER;
 BEGIN
-  IF p_user_status NOT IN ('active', 'trial') THEN
+  -- NULL must be refused too: NULL NOT IN (...) is NULL, and a NULL boundary would make every
+  -- count 0 and let the claim through.
+  IF p_user_status IS NULL OR p_user_status NOT IN ('active', 'trial') THEN
     RAISE EXCEPTION 'claim_ai_review: unsupported user status %', p_user_status;
+  END IF;
+  IF p_user_id IS NULL OR p_submission_id IS NULL OR p_content_id IS NULL
+    OR p_stale_before IS NULL OR p_day_start IS NULL
+    OR p_active_per_content_per_day IS NULL OR p_active_per_day IS NULL
+    OR p_trial_per_content_lifetime IS NULL THEN
+    RAISE EXCEPTION 'claim_ai_review: arguments must not be NULL';
   END IF;
 
   -- Serializes every claim of one user, so concurrent submissions cannot read the same counts.
