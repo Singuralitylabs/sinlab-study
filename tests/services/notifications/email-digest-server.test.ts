@@ -436,20 +436,48 @@ describe("送信設定（フェイルクローズ）", () => {
 });
 
 describe("送信対象の抽出", () => {
-  it("配信停止・却下・論理削除・受講生以外のロールのユーザーには送らない", async () => {
+  it("配信停止・却下・論理削除のユーザーには送らない", async () => {
     setup({
       users: [
         userRow(1),
         userRow(2, { email_opt_out_at: "2026-10-01T00:00:00Z" }),
         userRow(3, { status: "rejected" }),
         userRow(4, { is_deleted: true }),
-        userRow(5, { role: "admin" }),
       ],
     });
 
     await runDigest(MONDAY);
 
     expect(sentTo()).toEqual(["u1@example.com"]);
+  });
+
+  it("学習系の定期メール（週次進捗・未学習リマインド・お試し向け案内）は admin / maintainer に送らない", async () => {
+    const { db } = setup({
+      users: [
+        // Weekly digest targets (registered long ago).
+        userRow(1),
+        userRow(2, { role: "admin" }),
+        userRow(3, { role: "maintainer" }),
+        // Day 7 on 10/5: trial_nurture for trial, inactivity_reminder for active.
+        userRow(4, { status: "trial", created_at: createdOn("2026-09-28") }),
+        userRow(5, { role: "maintainer", status: "trial", created_at: createdOn("2026-09-28") }),
+        userRow(6, { created_at: createdOn("2026-09-28") }),
+        userRow(7, { role: "admin", created_at: createdOn("2026-09-28") }),
+      ],
+    });
+
+    await runDigest(MONDAY);
+
+    const sentKinds = db.email_logs
+      .filter((row) => row.kind !== "weekly_digest_reserved")
+      .map((row) => [row.user_id, row.kind])
+      .sort((a, b) => Number(a[0]) - Number(b[0]));
+    expect(sentKinds).toEqual([
+      [1, "weekly_digest"],
+      [4, "trial_nurture"],
+      [6, "inactivity_reminder"],
+    ]);
+    expect(sentTo().sort()).toEqual(["u1@example.com", "u4@example.com", "u6@example.com"]);
   });
 
   it("週次進捗: 先週（JST の月〜日）の完了数・提出数と、次に学ぶコンテンツを載せる", async () => {
@@ -939,14 +967,14 @@ describe("お知らせのメール一斉送信（#254）", () => {
   const announcementLogs = (db: Record<string, Row[]>) =>
     db.email_logs.filter((row) => row.kind === "announcement");
 
-  it("対象のステータス・会員種別に一致し、配信停止していない受講生にだけ送り、全員に送り終えたら email_sent_at を記録する", async () => {
+  it("対象のステータス・会員種別に一致し、配信停止していないユーザーにだけ送り、全員に送り終えたら email_sent_at を記録する", async () => {
     const { db } = setup({
       users: [
         userRow(1, { membership_type: "general" }),
         userRow(2, { membership_type: "community" }),
         userRow(3, { status: "trial" }),
         userRow(4, { membership_type: "general", email_opt_out_at: "2026-10-01T00:00:00Z" }),
-        userRow(5, { role: "maintainer", membership_type: "general" }),
+        userRow(5, { role: "maintainer", membership_type: "community" }),
       ],
       announcements: [
         announcementRow({ target_statuses: ["active"], target_membership_types: ["general"] }),
@@ -961,6 +989,51 @@ describe("お知らせのメール一斉送信（#254）", () => {
     expect(announcementLogs(db).map((row) => [row.user_id, row.reference_key])).toEqual([
       [1, "501"],
     ]);
+  });
+
+  it("アプリ内の表示対象と同じくロールは見ず、対象に一致する maintainer / admin にも送ってから email_sent_at を記録する（#322）", async () => {
+    const { db } = setup({
+      users: [
+        userRow(1, { membership_type: "general" }),
+        userRow(2, { role: "maintainer", membership_type: "general" }),
+        userRow(3, { role: "admin", membership_type: null }),
+        userRow(4, { role: "maintainer", status: "trial" }),
+        userRow(5, {
+          role: "admin",
+          membership_type: "general",
+          email_opt_out_at: "2026-10-01T00:00:00Z",
+        }),
+      ],
+      announcements: [
+        announcementRow({ target_statuses: ["active"], target_membership_types: null }),
+      ],
+    });
+
+    const result = await runDigest(WEDNESDAY);
+
+    expect(sentTo().sort()).toEqual(["u1@example.com", "u2@example.com", "u3@example.com"]);
+    expect(result).toMatchObject({ sent: 3, announcementsCompleted: 1 });
+    expect(
+      announcementLogs(db)
+        .map((row) => row.user_id)
+        .sort()
+    ).toEqual([1, 2, 3]);
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+  });
+
+  it("受講生（member）が居なくても、対象の maintainer にはお知らせを送る", async () => {
+    const { db } = setup({
+      users: [userRow(2, { role: "maintainer", membership_type: "general" })],
+      announcements: [
+        announcementRow({ target_statuses: ["active"], target_membership_types: null }),
+      ],
+    });
+
+    const result = await runDigest(WEDNESDAY);
+
+    expect(sentTo()).toEqual(["u2@example.com"]);
+    expect(result).toMatchObject({ announcementsCompleted: 1 });
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
   });
 
   it("本文の Markdown をメールに載せ、詳細ページへのリンクと配信停止リンクを付ける", async () => {

@@ -229,7 +229,8 @@ export async function POST(request: NextRequest) {
     } catch (geminiError) {
       const errorMessage =
         geminiError instanceof Error ? geminiError.message : "AI レビュー生成に失敗しました";
-      console.error("Gemini APIエラー:", errorMessage);
+      // gemini.ts already logged the raw cause; this records what the learner was shown.
+      console.error("AIレビューの生成に失敗:", errorMessage);
 
       await updateAIReviewFailed(
         reviewRecord.id,

@@ -12,7 +12,7 @@ import {
   WEEKLY_DIGEST_RESERVATION_KIND,
 } from "@/app/constants/notifications";
 import { isStripeEnabled } from "@/app/constants/stripe";
-import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { USER_STATUS } from "@/app/constants/user";
 import { isAnnouncementTarget } from "@/app/lib/announcement-target";
 import { compareGroupLevel } from "@/app/lib/content-grouping";
 import { buildThemeContentOrder, type NavigationWeek } from "@/app/lib/content-navigation";
@@ -40,6 +40,7 @@ import { type CronLock, claimCronLock, releaseCronLock } from "@/app/services/ap
 import { fetchEmailSettings } from "@/app/services/api/email-settings-server";
 import { loadEmailTexts } from "@/app/services/api/email-templates-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
+import { isLearnerRole } from "@/app/services/auth/permissions";
 import { type EmailContent, isEmailConfigured } from "@/app/services/notifications/email";
 import {
   buildAnnouncementEmail,
@@ -56,7 +57,7 @@ import {
   type DeliverResult,
   deliverUserEmail,
 } from "@/app/services/notifications/user-emails";
-import type { Announcement, UserStatusType } from "@/app/types";
+import type { Announcement, UserRoleType, UserStatusType } from "@/app/types";
 
 /**
  * Extraction and sending for periodic emails (weekly progress, inactivity reminder, guides for
@@ -107,7 +108,11 @@ async function fetchForUserIds<T>(
   return rows;
 }
 
-/** Send candidates: member active / trial users who have not unsubscribed. */
+/**
+ * Send candidates: active / trial users of any role who have not unsubscribed. Announcements
+ * follow the in-app display target, which ignores the role (#322), so an active maintainer who sees
+ * an announcement also gets its email; the learning emails narrow to members in buildQueue().
+ */
 async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
   const rows = await fetchAllPages<{
     id: number;
@@ -115,13 +120,13 @@ async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
     display_name: string;
     status: string;
     membership_type: string | null;
+    role: UserRoleType;
     created_at: string | null;
   }>((from, to) =>
     supabase
       .from("users")
-      .select("id, email, display_name, status, membership_type, created_at")
+      .select("id, email, display_name, status, membership_type, role, created_at")
       .eq("is_deleted", false)
-      .eq("role", USER_ROLE.MEMBER)
       .in("status", [USER_STATUS.ACTIVE, USER_STATUS.TRIAL])
       .is("email_opt_out_at", null)
       .order("id")
@@ -136,6 +141,7 @@ async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
       displayName: row.display_name,
       status: row.status as UserStatusType,
       membershipType: row.membership_type ?? null,
+      role: row.role,
       createdAt: row.created_at as string,
     }));
 }
@@ -630,8 +636,8 @@ function assignAnnouncementClaims(
 
 /**
  * Adds the announcement bulk email to the send queue (kind = `announcement`, reference_key =
- * announcement ID). Targets are non-unsubscribed students whose status / membership type match
- * the announcement target (`isAnnouncementTarget()`, same condition as in-app display).
+ * announcement ID). Targets are non-unsubscribed users of any role whose status / membership type
+ * match the announcement target (`isAnnouncementTarget()`, same condition as in-app display).
  * When everyone cannot be sent in one run (daily cap, run time, one per user per day), unfinished
  * users are sent in following days (split sending). Users who already received a promotional
  * email today (not in `sendableUserIds`) and users receiving another guide in this run are
@@ -793,6 +799,9 @@ async function buildQueue(
   announcementBatches: AnnouncementBatch[];
 }> {
   const users = allUsers.filter((user) => !excludedToday.has(user.userId));
+  // Staff review the courses rather than take them; progress nudges and trial guides would be
+  // noise to them, so only announcements reach them.
+  const learners = users.filter((user) => isLearnerRole(user.role));
   const trialNurtureSetting = settings.kinds.trial_nurture;
   const inactivitySetting = settings.kinds.inactivity_reminder;
   const weeklySetting = settings.kinds.weekly_digest;
@@ -820,7 +829,7 @@ async function buildQueue(
   const queue: QueuedEmail[] = [];
   const queuedUserIds = new Set<number>();
 
-  const { trialNurture, inactivityCandidates } = planMilestoneEmails(users, today, {
+  const { trialNurture, inactivityCandidates } = planMilestoneEmails(learners, today, {
     trialNurture: trialNurtureSetting.enabled ? trialNurtureSetting.sendDays : null,
     inactivityReminder: inactivitySetting.enabled ? inactivitySetting.sendDays : null,
   });
@@ -923,7 +932,7 @@ async function buildQueue(
     }
   }
   let weeklyPool = weeklyEnabled
-    ? users.filter((user) => coversPreviousWeek(user.createdAt, weekStart))
+    ? learners.filter((user) => coversPreviousWeek(user.createdAt, weekStart))
     : [];
   const poolIds = () => weeklyPool.map((user) => user.userId);
   if (weeklyReservationMissing || weeklySkipped) {

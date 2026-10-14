@@ -80,7 +80,7 @@ Unit Tests (多数)
 | --- | --- |
 | `build.yml` | 本番相当のビルド成立性 |
 | `typecheck.yml` | 型チェック（`tsc --noEmit`） |
-| `test.yml` | ユニットテスト（Vitest） |
+| `test.yml` | ユニットテスト（Vitest）。加えて `tests/lib/html-preview.test.ts` と `tests/lib/preview-console.test.ts`（iframe 内で動く中継スクリプト）を `bun test`（JavaScriptCore）でも実行する（`bun run test:jsc`。Safari と V8 で正規表現の失敗の仕方が違うため） |
 | `db-privileges.yml` | ローカル Supabase（Docker）に全 migration を空のDBから適用し、関数の EXECUTE 権限を `has_function_privilege()` で検証（pgTAP。`supabase/tests/database/`。4.3参照） |
 | `biome.yml` | Lint/フォーマット違反の防止（`bun run check`） |
 | `check_console_log.yml` | デバッグ用出力の混入防止 |
@@ -95,7 +95,7 @@ Unit Tests (多数)
 
 ### 4.3 DB 権限テスト（pgTAP）
 
-`supabase/tests/database/function_privileges.test.sql` が、`public` の関数ごとに `anon` / `authenticated` / `service_role` の EXECUTE を実DBの ACL で確かめる。期待値は `docs/database.md`（3.18・5.2・6.2・6.15・6.17）と一致させる。migration の SQL を文字列解析して権限を推定しない（`OWNER TO`・動的SQL・`RENAME` などを自前で解釈し続けることになるため）。
+`supabase/tests/database/function_privileges.test.sql` が、`public` の関数ごとに `anon` / `authenticated` / `service_role` の EXECUTE を実DBの ACL で確かめる。期待値は `docs/database.md`（3.7・3.18・5.2・6.2・6.15・6.17）と一致させる。migration の SQL を文字列解析して権限を推定しない（`OWNER TO`・動的SQL・`RENAME` などを自前で解釈し続けることになるため）。
 
 - **関数を追加・権限を変更したとき**: 同ファイルの期待値の表と、末尾の「`public` の全関数一覧」を更新する。一覧と実DBが食い違うと失敗するので、新しい関数の ACL を人が確認する機会になる。
 - **トリガー関数**: `update_updated_at_column()` は docs が EXECUTE を名指ししていないため一覧に載せるだけにする。`keep_user_progress_ever_completed()` は docs（6.x `user_progress`）が名指しする `anon` の REVOKE だけを検証する。
@@ -107,6 +107,7 @@ Unit Tests (多数)
 ## 5. テスト規約
 
 - テストコードは `tests/` 配下に、対象コード（`app/` 配下）の構造に寄せて配置する。
+- Vitest の既定環境は `node`。DOM での状態遷移（イベント受信・再マウント）を確かめるコンポーネントテストだけ、ファイル先頭の `// @vitest-environment happy-dom` で `happy-dom` に切り替え、`react-dom/client` と `act()` で描画する（例: `tests/components/HtmlPreview.state.test.ts`）。静的な出力だけを見るものは `renderToStaticMarkup` のまま `node` で書く。
 - ファイル名は `*.test.ts` に統一し、「対象 + 期待する振る舞い」が想像できる名前にする（例: `tests/services/auth/permissions.test.ts`）。実装済みテストの一覧は `tests/` を参照。
 - **検証する**: 関数の入力に対する出力（返り値）、副作用の結果（状態変化）、エラー時の振る舞い。返り値を持たない関数は副作用の結果（更新値・更新対象）を検証する。
 - **検証しない**: 内部実装の呼び出し手順（クエリメソッドをどの引数で呼んだか等）。モックは外部依存を切り離すために使い、モック呼び出し引数の逐次検証は原則行わない。
