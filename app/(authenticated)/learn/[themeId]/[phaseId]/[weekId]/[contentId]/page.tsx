@@ -76,20 +76,15 @@ export default async function ContentPage({ params }: PageProps) {
       : Promise.resolve(null);
 
   // Members/trial users fetch the summary via service_role; admin/maintainer use the normal client so
-  // unpublished content is included. Progress and the latest submission need only the IDs, so they
-  // run in this first wave instead of waiting for content_type (the submission is used only for
-  // exercises; its result is ignored otherwise).
-  const [{ data: navigation }, { data: content }, { isCompleted }, { data: latestSubmission }] =
-    await Promise.all([
-      fetchThemeNavigationIndex(themeIdNum, weekIdNum, userRole),
-      fetchContentById(contentIdNum, userRole),
-      userId
-        ? fetchUserProgressByContentId(userId, contentIdNum)
-        : Promise.resolve({ isCompleted: false }),
-      userId
-        ? fetchLatestSubmissionByContentId(userId, contentIdNum)
-        : Promise.resolve({ data: null }),
-    ]);
+  // unpublished content is included. Progress needs only the IDs (RLS-scoped client), so it runs
+  // in this first wave instead of waiting for content_type.
+  const [{ data: navigation }, { data: content }, { isCompleted }] = await Promise.all([
+    fetchThemeNavigationIndex(themeIdNum, weekIdNum, userRole),
+    fetchContentById(contentIdNum, userRole),
+    userId
+      ? fetchUserProgressByContentId(userId, contentIdNum)
+      : Promise.resolve({ isCompleted: false }),
+  ]);
 
   // The breadcrumb hierarchy comes from the content's embedded week -> phase -> theme. Locked
   // trial content is hidden from the content query by RLS (content is null), so only then is the
