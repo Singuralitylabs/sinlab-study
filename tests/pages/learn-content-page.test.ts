@@ -32,6 +32,7 @@ vi.mock("@/app/services/api/learning-server", async (importOriginal) => {
     fetchWeekById: vi.fn(),
     fetchThemeNavigationIndex: vi.fn(),
     fetchContentById: vi.fn(),
+    fetchExerciseReferenceAnswer: vi.fn().mockResolvedValue({ data: null, error: null }),
     fetchUserProgressByContentId: vi.fn().mockResolvedValue({ isCompleted: false }),
   };
 });
@@ -59,6 +60,7 @@ import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-
 import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   fetchContentById,
+  fetchExerciseReferenceAnswer,
   fetchThemeNavigationIndex,
   fetchWeekById,
 } from "@/app/services/api/learning-server";
@@ -194,6 +196,7 @@ const render = async () => renderToStaticMarkup(await ContentPage({ params }));
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  vi.mocked(fetchExerciseReferenceAnswer).mockResolvedValue({ data: null, error: null });
   vi.mocked(fetchUpgradePriceLabel).mockResolvedValue("月額1,500円（税込）");
 });
 
@@ -728,6 +731,24 @@ describe("演習ページのAIレビュー残り回数（#304）", () => {
 
     expect(html).toContain("AIレビューは新しい提出に対して1日");
     expect(html).not.toContain("本日の残り回数");
+  });
+
+  it("模範回答は RPC が返したときだけ表示する（提出前は返らない）", async () => {
+    setupExercise({ userStatus: "active" });
+    vi.mocked(fetchLatestSubmissionByContentId).mockResolvedValue({
+      data: { id: 1, submission_type: "url", url: "https://example.com/work" },
+    } as never);
+
+    expect(await render()).not.toContain("模範回答");
+
+    vi.mocked(fetchExerciseReferenceAnswer).mockResolvedValue({
+      data: "const answer = 1;",
+      error: null,
+    });
+    const html = await render();
+    expect(html).toContain("模範回答");
+    expect(html).toContain("const answer = 1;");
+    expect(fetchExerciseReferenceAnswer).toHaveBeenCalledWith(expect.any(Number));
   });
 
   it("未公開（プレビュー）の演習では集計しない", async () => {

@@ -22,6 +22,7 @@ import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-
 import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   fetchContentById,
+  fetchExerciseReferenceAnswer,
   fetchThemeNavigationIndex,
   fetchUserProgressByContentId,
   fetchWeekById,
@@ -236,6 +237,7 @@ export default async function ContentPage({ params }: PageProps) {
     { isCompleted },
     { data: existingReview, submissionId: reviewedSubmissionId },
     { data: latestSubmission },
+    { data: referenceAnswer },
     slideSignedUrl,
     { data: quizQuestions, error: quizError },
     aiReviewUsage,
@@ -248,6 +250,11 @@ export default async function ContentPage({ params }: PageProps) {
       : Promise.resolve({ data: null, submissionId: null }),
     userId && content.content_type === "exercise"
       ? fetchLatestSubmissionByContentId(userId, contentIdNum)
+      : Promise.resolve({ data: null }),
+    // The RPC returns the answer only to a caller who has submitted (or admin / maintainer), so
+    // it is safe to ask without waiting for the submission lookup.
+    userId && content.content_type === "exercise"
+      ? fetchExerciseReferenceAnswer(contentIdNum)
       : Promise.resolve({ data: null }),
     content.content_type === "slide" && content.pdf_url
       ? createSlideSignedUrl(content.pdf_url)
@@ -385,11 +392,11 @@ export default async function ContentPage({ params }: PageProps) {
                         )}
                       </div>
 
-                      {content.reference_answer && (
+                      {referenceAnswer && (
                         <div className="mb-6">
                           <h3 className="text-lg font-semibold mb-3">模範回答</h3>
                           <pre className="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre-wrap">
-                            {content.reference_answer}
+                            {referenceAnswer}
                           </pre>
                         </div>
                       )}

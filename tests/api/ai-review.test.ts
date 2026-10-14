@@ -148,7 +148,6 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
     content: {
       id: 5,
       exercise_instructions: "フォームを作る",
-      reference_answer: null,
     },
   };
 
@@ -172,7 +171,10 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(
       createMockSupabaseClient({
         tableResults: {
-          learning_contents: { data: { grading_rubric: null }, error: null },
+          learning_contents: {
+            data: { grading_rubric: null, reference_answer: null },
+            error: null,
+          },
         },
       }) as never
     );
@@ -250,7 +252,10 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
       vi.mocked(createAdminSupabaseClient).mockResolvedValue(
         createMockSupabaseClient({
           tableResults: {
-            learning_contents: { data: { grading_rubric }, error: null },
+            learning_contents: {
+              data: { grading_rubric, reference_answer: null },
+              error: null,
+            },
           },
         }) as never
       );
@@ -304,7 +309,7 @@ describe("POST /api/ai-review - 回数制限と枠の確保（#304 / #343）", (
     content_id: 5,
     submission_type: "url",
     url: "https://example.com/work",
-    content: { id: 5, exercise_instructions: "フォームを作る", reference_answer: null },
+    content: { id: 5, exercise_instructions: "フォームを作る" },
   });
 
   const setup = ({
@@ -338,7 +343,10 @@ describe("POST /api/ai-review - 回数制限と枠の確保（#304 / #343）", (
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(
       createMockSupabaseClient({
         tableResults: {
-          learning_contents: { data: { grading_rubric: null }, error: null },
+          learning_contents: {
+            data: { grading_rubric: null, reference_answer: null },
+            error: null,
+          },
         },
       }) as never
     );
@@ -552,7 +560,10 @@ describe("POST /api/ai-review - 単一ファイル提出の言語", () => {
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(
       createMockSupabaseClient({
         tableResults: {
-          learning_contents: { data: { grading_rubric: null }, error: null },
+          learning_contents: {
+            data: { grading_rubric: null, reference_answer: null },
+            error: null,
+          },
         },
       }) as never
     );

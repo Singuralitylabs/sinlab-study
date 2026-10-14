@@ -50,21 +50,25 @@ describe("learning_contents の受講生向け列権限", () => {
   const granted = latestLearnerSelectColumns();
   const rowColumns = learningContentRowColumns();
 
-  it("付与列は grading_rubric を除く全列と一致する", () => {
-    expect(granted.sort()).toEqual(
-      rowColumns.filter((column) => column !== "grading_rubric").sort()
-    );
-    expect(granted).not.toContain("grading_rubric");
+  const hidden = ["grading_rubric", "reference_answer"];
+
+  it("付与列は grading_rubric と reference_answer を除く全列と一致する", () => {
+    expect(granted.sort()).toEqual(rowColumns.filter((column) => !hidden.includes(column)).sort());
+    for (const column of hidden) {
+      expect(granted).not.toContain(column);
+    }
   });
 
-  it("受講生の select は付与列の部分集合で、採点基準を含まない", () => {
+  it("受講生の select は付与列の部分集合で、採点基準と模範回答を含まない", () => {
     for (const column of ownColumns(LEARNING_CONTENT_DETAIL_COLUMN_LIST)) {
       expect(granted).toContain(column);
     }
     for (const column of ownColumns(LEARNING_CONTENT_LIST_COLUMNS)) {
       expect(granted).toContain(column);
     }
-    expect(LEARNING_CONTENT_DETAIL_COLUMN_LIST).not.toContain("grading_rubric");
-    expect(LEARNING_CONTENT_LIST_COLUMNS).not.toContain("grading_rubric");
+    for (const column of hidden) {
+      expect(LEARNING_CONTENT_DETAIL_COLUMN_LIST).not.toContain(column);
+      expect(LEARNING_CONTENT_LIST_COLUMNS).not.toContain(column);
+    }
   });
 });

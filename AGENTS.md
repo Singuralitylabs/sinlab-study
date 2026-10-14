@@ -53,7 +53,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 - **許可値の列挙は `MEMBERSHIP_TYPES` に一本化する。** APIのバリデーションも承認UIも、`'community'` / `'general'` をハードコードしない。
 - **`status=active` と `membership_type` の整合性はDBでは保証されない。** `approveUser()` / `rejectUser()` を迂回して `status` を書き換えない。
-- **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select し、0行なら404。未公開プレビュー（2.12節。通常クライアントで取得し、この2箇所を増やさない）・定期メールの抽出（10.7節。同じ絞り込みと本文を含まないカラムだけ。お知らせ本文は例外）・未認証の `/demo`（3.2節。署名付きURLは **`is_published = true AND is_open_to_trial = true` のみ**）は service_role の別経路（条件は各節が正）。AIレビューの採点基準読みは配信の2箇所とは別で、`grading_rubric` だけを **`is_published = true AND is_deleted = false`** で読む（0行なら失敗）。
+- **受講生向け配信経路で service_role を使ってよいのは2箇所だけ**（ツリー表示の一覧サマリー取得と、コンテンツ詳細の存在チェック）。いずれも **`is_published = true AND is_deleted = false` で必ず絞り**、カラム許可リスト（`id, title, content_type, display_order, is_open_to_trial, week_id`）のみを select し、0行なら404。未公開プレビュー（2.12節。通常クライアントで取得し、この2箇所を増やさない）・定期メールの抽出（10.7節。同じ絞り込みと本文を含まないカラムだけ。お知らせ本文は例外）・未認証の `/demo`（3.2節。署名付きURLは **`is_published = true AND is_open_to_trial = true` のみ**）は service_role の別経路（条件は各節が正）。AIレビューの採点基準読みは配信の2箇所とは別で、`grading_rubric` と `reference_answer` だけを **`is_published = true AND is_deleted = false`** で読む（0行なら失敗）。
 - **`learning-server.ts` の取得関数は `userRole` を受け取り、admin / maintainer のみ `is_published` 絞り込みを外す**（2.12節）。member / お試しでは常に維持する。
 - **クイズの正解は `quiz_questions` にだけ置き、受講者・service_role・`/demo` から読まない**（`docs/database.md` 6.17）。
 - **提出API・進捗APIの可視性チェックは通常クライアントの SELECT で行う。** `contentId` を `is_published = true` 付きで SELECT し0行なら403。ステータス分岐はRLSが担う（2.12節）。

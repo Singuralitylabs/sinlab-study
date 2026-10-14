@@ -33,13 +33,13 @@ export const BREADCRUMB_WEEK_COLUMNS = `id, phase_id, name, is_published, is_del
 export const LEARNING_WEEK_DETAIL_COLUMNS = `*, phase:learning_phases(${BREADCRUMB_PHASE_COLUMNS})`;
 
 /**
- * Every learner-facing column except grading_rubric. `*` fails for anon/authenticated after
+ * Every learner-facing column except grading_rubric and reference_answer. `*` fails for anon/authenticated after
  * table SELECT is replaced by a column grant that omits this column: a column-level REVOKE
- * does not hide it while table SELECT remains. reference_answer stays because the page shows
- * it after a submission. Typed as `*` so the nested week embed does not blow the type
+ * does not hide it while table SELECT remains. reference_answer is read after a submission through
+ * fetchExerciseReferenceAnswer(). Typed as `*` so the nested week embed does not blow the type
  * checker's instantiation depth.
  */
-export const LEARNING_CONTENT_DETAIL_COLUMN_LIST = `id, week_id, title, content_type, video_url, pdf_url, text_content, description, exercise_instructions, reference_answer, hint, allowed_submission_types, code_language, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
+export const LEARNING_CONTENT_DETAIL_COLUMN_LIST = `id, week_id, title, content_type, video_url, pdf_url, text_content, description, exercise_instructions, hint, allowed_submission_types, code_language, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
 export const LEARNING_CONTENT_DETAIL_COLUMNS =
   LEARNING_CONTENT_DETAIL_COLUMN_LIST as unknown as "*";
 
@@ -725,8 +725,32 @@ export async function fetchContentsByWeekId(weekId: number): Promise<{
   return { data: data as LearningContentListItem[] | null, error: null };
 }
 
-/** Learner detail row. grading_rubric is not selected, so the type must not claim it is present. */
-export type LearnerContentDetail = Omit<LearningContentWithBreadcrumb, "grading_rubric">;
+/** Learner detail row. grading_rubric and reference_answer are not selected, so the type must not claim they are present. */
+export type LearnerContentDetail = Omit<
+  LearningContentWithBreadcrumb,
+  "grading_rubric" | "reference_answer"
+>;
+
+/**
+ * Model answer via the get_exercise_reference_answer RPC with the caller's JWT. Learners have no
+ * column grant on reference_answer; the RPC returns it only after the caller has submitted, so
+ * never swap this for a service_role read.
+ */
+export async function fetchExerciseReferenceAnswer(
+  contentId: number
+): Promise<{ data: string | null; error: PostgrestError | null }> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase.rpc("get_exercise_reference_answer", {
+    p_content_id: contentId,
+  });
+
+  if (error) {
+    console.error("模範回答の取得エラー:", error.message);
+    return { data: null, error };
+  }
+
+  return { data: data?.[0]?.reference_answer ?? null, error: null };
+}
 
 /** admin / maintainer also get unpublished contents as preview (issue #68). */
 export async function fetchContentById(
