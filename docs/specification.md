@@ -417,7 +417,7 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 | 動画（video） | YouTube facade（サムネイル + 再生ボタン）。クリックで `react-youtube` を遅延読み込みして autoplay 再生（URLから Video ID を自動抽出、レスポンシブ対応） |
 | テキスト（text） | Markdown形式で記述・表示（GFM対応） |
 | スライド（slide） | 非公開バケット `slides` のPDFを、閲覧権限チェック後にサーバー側で発行した署名付きURLで react-pdf によりブラウザ内表示（後述） |
-| 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携。模範回答は提出が1件以上あるときだけ、RPC `get_exercise_reference_answer()`（`docs/database.md` 6.18）で取得して表示する（列権限では読めない） |
+| 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携。模範回答は提出が1件以上あるとき（admin・maintainer は提出不要）だけ、RPC `get_exercise_reference_answer()`（`docs/database.md` 6.18）で取得して表示する（列権限では読めない） |
 | クイズ（quiz） | 導入文（`description`・任意）と設問（1〜3問）を表示し、回答後に正誤・解説を表示（後述） |
 
 動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア下部に概要欄カードを表示する（テキスト・演習と同じ `MarkdownRenderer`）。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）は `"use client"` を持たない共有コンポーネントで、Server Component からはサーバーで、Client Component（`AIReviewDisplay`）からはクライアントで同じ実装のまま描画される。コンテンツ本文の Markdown 描画経路（Server Component）は client 化しない。

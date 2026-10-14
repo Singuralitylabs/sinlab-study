@@ -291,7 +291,7 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 
 **この `SECURITY DEFINER` の規約は、ポリシー内から呼ぶRLSヘルパーに限る。** アプリから直接叩くRPC（例: `get_students_progress_summary()`。6.2節参照）は逆に `SECURITY DEFINER` にしてはならない。`SECURITY DEFINER` にするとRLSを迂回するため、`authenticated` にGRANTしたままだと任意のmemberが他ユーザーの行まで取得できてしまう。呼び出し元の権限のままRLSに従わせる `SECURITY INVOKER`（デフォルト）を維持すること。
 
-唯一の例外はクイズの `get_quiz_questions()` / `grade_quiz_answers()`（6.17）。呼び出し元に正解列を読ませないことが目的なので INVOKER では成り立たない。代わりに関数の先頭で `quiz_content_visible_to_caller()` により呼び出し元の可視性を自前で確認し、返す列も限定する。この形以外で DEFINER の RPC を増やさない。
+例外はクイズの `get_quiz_questions()` / `grade_quiz_answers()`（6.17）と、演習の `get_exercise_reference_answer()`（6.18）。いずれも呼び出し元に権限の無い列（正解・模範回答）を提出・回答の後にだけ読ませることが目的なので INVOKER では成り立たない。代わりに関数の中で呼び出し元の可視性（クイズは `quiz_content_visible_to_caller()`、模範回答は同等の条件と本人の提出）を自前で確認し、返す列も限定する。この形以外で DEFINER の RPC を増やさない。
 
 ---
 
