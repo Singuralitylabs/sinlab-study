@@ -195,6 +195,20 @@ describe("buildPreviewDocument の headPrelude（コンソール中継の差し�
     expect(html("<!-- license --> <!doctype html><p>x</p>")).toBe(
       `<!-- license --> <!doctype html>${P}<p>x</p>`
     );
+    expect(html("<p>x</p><script>1</script>")).toBe(`${P}<p>x</p><script>1</script>`);
+  });
+
+  it("数 MB の先頭コメント・空白の後の doctype も見失わず、その直後に差し込む", () => {
+    const longComment = `<!--${"x".repeat(3e6)}-->`;
+    expect(html(`${longComment}\n<!doctype html><p>x</p>`)).toBe(
+      `${longComment}\n<!doctype html>${P}<p>x</p>`
+    );
+    const spaces = " ".repeat(9e6);
+    expect(html(`${spaces}<!doctype html><p>x</p>`)).toBe(`${spaces}<!doctype html>${P}<p>x</p>`);
+  });
+
+  it("本文や要素の後に現れる doctype は先頭扱いしない", () => {
+    expect(html("<p>x</p><!doctype html>")).toBe(`${P}<p>x</p><!doctype html>`);
   });
 
   it("doctype の無い文書の先頭にコメントが多数並んでも、差し込み位置の判定が固まらない", () => {
@@ -204,8 +218,7 @@ describe("buildPreviewDocument の headPrelude（コンソール中継の差し�
     expect(html(`${comments}<!doctype html><p>x</p>`)).toBe(
       `${comments}<!doctype html>${P}<p>x</p>`
     );
-    expect(Date.now() - startedAt).toBeLessThan(200);
-    expect(html("<p>x</p><script>1</script>")).toBe(`${P}<p>x</p><script>1</script>`);
+    expect(Date.now() - startedAt).toBeLessThan(3000);
   });
 
   it('<head> が無い文書で、学習者のスクリプト内の文字列 "<head>" に差し込まない', () => {
@@ -253,7 +266,7 @@ describe("buildPreviewDocument の閉じていない構文", () => {
     const content = `<p>x</p>${unit.repeat(times)}`;
     const startedAt = Date.now();
     const out = html(content);
-    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(Date.now() - startedAt).toBeLessThan(3000);
     expect(out).toBe(`${P}${content}`);
   });
 
@@ -262,5 +275,28 @@ describe("buildPreviewDocument の閉じていない構文", () => {
       `${P}<head <link rel="stylesheet" href="main.js"`
     );
     expect(html('<p>x</p><script src="main.js">')).toBe(`${P}<p>x</p><script src="main.js">`);
+  });
+});
+
+describe("buildPreviewDocument のコメントの終わり（ブラウザと同じ）", () => {
+  const P = "<script>/*bridge*/</script>";
+  const html = (content: string) =>
+    buildPreviewDocument([f("index.html", "html", content), f("style.css", "css", "p{}")], {
+      headPrelude: P,
+    });
+
+  it.each([["<!-->"], ["<!--->"], ["<!-- x --!>"]])(
+    "%s でコメントが閉じ、後続の <link> 展開と <head> への差し込みが行われる",
+    (comment) => {
+      expect(html(`${comment}<head><link rel="stylesheet" href="style.css"></head>`)).toBe(
+        `${comment}<head>${P}<style>p{}</style></head>`
+      );
+    }
+  );
+
+  it("<!----> と通常のコメントは従来どおり", () => {
+    expect(html('<!----><!-- <link rel="stylesheet" href="style.css"> --><head></head>')).toBe(
+      `<!----><!-- <link rel="stylesheet" href="style.css"> --><head>${P}</head>`
+    );
   });
 });

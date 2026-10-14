@@ -94,6 +94,8 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
       var name = proto && proto.constructor && proto.constructor.name;
       if (name) label = name + " ";
     }
+    // A class name or Symbol.toStringTag can be as long as any string.
+    label = clip(label);
     if (depth > 2) {
       if (isArray) return "Array(" + value.length + ")";
       return label ? label.slice(0, -1) : "{…}";
@@ -165,7 +167,7 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
       return text;
     } catch (e) {
       var fallback;
-      try { fallback = toTag(value); } catch (e2) { fallback = "[unprintable]"; }
+      try { fallback = clip(toTag(value)); } catch (e2) { fallback = "[unprintable]"; }
       // Charged too, or a spread of throwing values would build every fallback before the cut.
       ctx.left -= fallback.length + 1;
       return fallback;

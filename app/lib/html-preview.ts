@@ -93,64 +93,107 @@ export function buildPreviewDocument(
   const deferred: string[] = [];
   let preludePlaced = headPrelude === "";
   let preludeSearchOpen = true;
+  // A leading doctype (after only whitespace and comments) is found in this same pass, not by a
+  // second regex over the preamble: that one needed a backtracking frame per character and, on a
+  // few MB of leading comments, lost the doctype in Safari and threw RangeError in Chrome.
+  let inPreamble = true;
+  let lastEnd = 0;
+  let outputShift = 0;
+  let afterDoctype = -1;
+  const transform = (
+    match: string,
+    scriptAttrs: string | undefined,
+    scriptBody: string | undefined,
+    element: string | undefined
+  ): string => {
+    if (match.startsWith("<!--") || /^<style/i.test(match)) {
+      return match;
+    }
+
+    if (/^<!doctype/i.test(match)) {
+      return match;
+    }
+
+    if (element !== undefined) {
+      const isHead = element.toLowerCase() === "head" && match.endsWith(">");
+      if (preludeSearchOpen && !preludePlaced && isHead) {
+        preludePlaced = true;
+        return match + headPrelude;
+      }
+      preludeSearchOpen = false;
+      return match;
+    }
+
+    if (scriptAttrs !== undefined) {
+      preludeSearchOpen = false;
+      const tag = `<script${scriptAttrs}>`;
+      const src = getAttribute(tag, "src");
+      const closed = /<\/script\s*>$/i.test(match);
+      if (!closed || src === null || scriptBody?.trim() !== "" || !isRelativeRef(src)) {
+        return match;
+      }
+      const file = findFile(files, src);
+      if (!file) {
+        return match;
+      }
+      const isModule = getAttribute(tag, "type")?.toLowerCase() === "module";
+      const inlined = `<script${isModule ? ' type="module"' : ""}>${escapeClosingTag(file.content, "script")}</script>`;
+      if (!isModule && /\sdefer(\s|=|>|\/)/i.test(tag)) {
+        deferred.push(inlined);
+        return "";
+      }
+      return inlined;
+    }
+
+    const rel = getAttribute(match, "rel");
+    const href = getAttribute(match, "href");
+    if (
+      !match.endsWith(">") ||
+      rel?.toLowerCase() !== "stylesheet" ||
+      href === null ||
+      !isRelativeRef(href)
+    ) {
+      return match;
+    }
+    const file = findFile(files, href);
+    return file ? `<style>${escapeClosingTag(file.content, "style")}</style>` : match;
+  };
   // Every branch may also end at the end of the document (an unclosed comment, tag or element, as
   // the browser reads it). Otherwise each unclosed "<head" / "<link" / "<!--" would rescan to the
   // end before failing: quadratic in the length, freezing whoever opens the submission.
   // Unclosed matches are returned unchanged below.
+  // Comments end where the browser ends them, including the abrupt "<!-->" / "<!--->" and the
+  // incorrectly closed "--!>", so a typo there does not swallow the rest of the document.
   const expanded = base.content.replace(
-    /<!--[\s\S]*?(?:-->|$)|<style\b[^>]*(?:>[\s\S]*?(?:<\/style\s*>|$)|$)|<script\b([^>]*)(?:>([\s\S]*?)(?:<\/script\s*>|$)|$)|<link\b[^>]*(?:>|$)|<(head|body)\b[^>]*(?:>|$)/gi,
-    (match: string, scriptAttrs?: string, scriptBody?: string, element?: string) => {
-      if (match.startsWith("<!--") || /^<style/i.test(match)) {
-        return match;
+    /<!--(?:>|->|[\s\S]*?(?:--!?>|$))|<!doctype\b[^>]*(?:>|$)|<style\b[^>]*(?:>[\s\S]*?(?:<\/style\s*>|$)|$)|<script\b([^>]*)(?:>([\s\S]*?)(?:<\/script\s*>|$)|$)|<link\b[^>]*(?:>|$)|<(head|body)\b[^>]*(?:>|$)/gi,
+    (
+      match: string,
+      scriptAttrs: string | undefined,
+      scriptBody: string | undefined,
+      element: string | undefined,
+      offset: number
+    ) => {
+      if (inPreamble && !/^\s*$/.test(base.content.slice(lastEnd, offset))) {
+        inPreamble = false;
       }
-
-      if (element !== undefined) {
-        const isHead = element.toLowerCase() === "head" && match.endsWith(">");
-        if (preludeSearchOpen && !preludePlaced && isHead) {
-          preludePlaced = true;
-          return match + headPrelude;
-        }
-        preludeSearchOpen = false;
-        return match;
+      const isComment = match.startsWith("<!--");
+      if (inPreamble && afterDoctype === -1 && /^<!doctype[^>]*>$/i.test(match)) {
+        afterDoctype = offset + outputShift + match.length;
       }
-
-      if (scriptAttrs !== undefined) {
-        preludeSearchOpen = false;
-        const tag = `<script${scriptAttrs}>`;
-        const src = getAttribute(tag, "src");
-        const closed = /<\/script\s*>$/i.test(match);
-        if (!closed || src === null || scriptBody?.trim() !== "" || !isRelativeRef(src)) {
-          return match;
-        }
-        const file = findFile(files, src);
-        if (!file) {
-          return match;
-        }
-        const isModule = getAttribute(tag, "type")?.toLowerCase() === "module";
-        const inlined = `<script${isModule ? ' type="module"' : ""}>${escapeClosingTag(file.content, "script")}</script>`;
-        if (!isModule && /\sdefer(\s|=|>|\/)/i.test(tag)) {
-          deferred.push(inlined);
-          return "";
-        }
-        return inlined;
+      if (inPreamble && !isComment) {
+        inPreamble = false;
       }
-
-      const rel = getAttribute(match, "rel");
-      const href = getAttribute(match, "href");
-      if (
-        !match.endsWith(">") ||
-        rel?.toLowerCase() !== "stylesheet" ||
-        href === null ||
-        !isRelativeRef(href)
-      ) {
-        return match;
-      }
-      const file = findFile(files, href);
-      return file ? `<style>${escapeClosingTag(file.content, "style")}</style>` : match;
+      lastEnd = offset + match.length;
+      const out = transform(match, scriptAttrs, scriptBody, element);
+      outputShift += out.length - match.length;
+      return out;
     }
   );
 
-  const withPrelude = preludePlaced ? expanded : insertAfterDoctype(expanded, headPrelude);
+  const at = afterDoctype === -1 ? 0 : afterDoctype;
+  const withPrelude = preludePlaced
+    ? expanded
+    : expanded.slice(0, at) + headPrelude + expanded.slice(at);
   if (deferred.length === 0) {
     return withPrelude;
   }
@@ -159,14 +202,4 @@ export function buildPreviewDocument(
   return bodyEnd === -1
     ? withPrelude + tail
     : withPrelude.slice(0, bodyEnd) + tail + withPrelude.slice(bodyEnd);
-}
-
-function insertAfterDoctype(html: string, content: string): string {
-  // Comments may precede the doctype (license headers); the prelude still has to follow it. A
-  // comment body may not contain "-->": with a lazy [\s\S]*? the regex could close each comment
-  // at any later "-->" and, when no doctype follows, try every combination (exponential in the
-  // number of comments) and freeze the tab of whoever opens the submission.
-  const doctype = /^(?:\s|<!--(?:(?!-->)[\s\S])*-->)*<!doctype[^>]*>/i.exec(html);
-  const at = doctype ? doctype[0].length : 0;
-  return html.slice(0, at) + content + html.slice(at);
 }
