@@ -252,6 +252,7 @@ export default async function ContentPage({ params }: PageProps) {
   // it depends on none of the other fetches.
   const [
     { data: existingReview, submissionId: reviewedSubmissionId },
+    { data: latestSubmission },
     slideSignedUrl,
     { data: quizQuestions, error: quizError },
     aiReviewUsage,
@@ -259,6 +260,10 @@ export default async function ContentPage({ params }: PageProps) {
     userId && content.content_type === "exercise"
       ? fetchCompletedAIReviewByContentId(userId, contentIdNum)
       : Promise.resolve({ data: null, submissionId: null }),
+    // service_role read: only after the lock / publish checks above, and only for exercises.
+    userId && content.content_type === "exercise"
+      ? fetchLatestSubmissionByContentId(userId, contentIdNum)
+      : Promise.resolve({ data: null }),
     content.content_type === "slide" && content.pdf_url
       ? createSlideSignedUrl(content.pdf_url)
       : Promise.resolve(null),
