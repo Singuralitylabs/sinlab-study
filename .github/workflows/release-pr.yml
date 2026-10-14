@@ -96,6 +96,11 @@ jobs:
     needs: validate-input
     uses: ./.github/workflows/check_console_log.yml
 
+  quality-db-privileges:
+    name: 品質ゲート DB Privileges
+    needs: validate-input
+    uses: ./.github/workflows/db-privileges.yml
+
   # 事前作業の検出とリリース PR 作成。
   create-pr:
     name: リリース PR 作成
@@ -107,6 +112,7 @@ jobs:
       - quality-test
       - quality-typecheck
       - quality-check-logs
+      - quality-db-privileges
     # 本番DBの読み取り専用接続文字列は Environment スコープの Secret で受け取る。
     # リポジトリ Secret にすると任意のワークフローから参照可能になるため、
     # 到達範囲をこのワークフローに絞る目的で Environment を使う（保護ルールは設定しない）。
