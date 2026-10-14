@@ -82,8 +82,8 @@ const ATTRS = "[^>]*";
 // An end tag ends at whitespace, "/" or ">" after its name ("</script foo>" closes the script).
 const endTag = (name: string) => String.raw`<\/${name}(?:[\t\n\f\r /][^>]*)?(?:>|$)`;
 
-// Branch order matters: comment, doctype and bogus comment ("<?xml ...?>", "<![CDATA[") all start
-// with "<!" or "<?" and the first two must win; the catch-all tag branch comes last.
+// Branch order matters: comment, doctype and bogus comment ("<?xml ...?>", "<![CDATA[", "</ x")
+// overlap and the first two must win; the catch-all tag branch comes last.
 // Every branch may also end at the end of the document (an unclosed comment, tag or element, as
 // the browser reads it). Otherwise each unclosed "<head" / "<link" / "<!--" would rescan to the
 // end before failing: quadratic in the length, freezing whoever opens the submission.
@@ -93,7 +93,7 @@ const SCAN = new RegExp(
   [
     String.raw`<!--(?:>|->|[\s\S]*?(?:--!?>|$))`,
     String.raw`<!doctype[^>]*(?:>|$)`,
-    String.raw`<[!?][^>]*(?:>|$)`,
+    String.raw`<(?:[!?]|\/(?![a-z>]))[^>]*(?:>|$)`,
     String.raw`<plaintext${NAME_END}[\s\S]*`,
     String.raw`<(?<raw>${RAW_TEXT})${NAME_END}${ATTRS}(?:>[\s\S]*?(?:${endTag(String.raw`\k<raw>`)}|$)|$)`,
     String.raw`<script${NAME_END}(?<scriptAttrs>${ATTRS})(?:>(?<scriptBody>[\s\S]*?)(?:${endTag("script")}|$)|$)`,
@@ -248,9 +248,9 @@ export function buildPreviewDocument(
     if (inPreamble && afterDoctype === -1 && /^<!doctype[^>]*>$/i.test(match)) {
       afterDoctype = expanded.length + match.length;
     }
-    // The tree builder ignores comments (bogus ones such as "<?xml ...?>" included) before the
-    // doctype, so they keep the preamble open.
-    if (inPreamble && !/^<(?:\?|!(?!doctype))/i.test(match)) {
+    // The tree builder ignores comments (bogus ones such as "<?xml ...?>" or "</ x>" included)
+    // before the doctype, so they keep the preamble open.
+    if (inPreamble && !/^<(?:\?|!(?!doctype)|\/(?![a-z>]))/i.test(match)) {
       inPreamble = false;
     }
     const groups: ScanGroups = m.groups ?? {};

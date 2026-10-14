@@ -134,10 +134,16 @@ describe("buildPreviewDocument", () => {
       '<p class="x"',
       "</body",
       "<plaintext>x</plaintext>",
+      "</ x",
+      "</1",
+      "</ <template <head",
     ]) {
       expect(build(`<p>x</p>${D}${tail}`)).toBe(`<p>x</p><script>run()</script>${tail}`);
     }
     expect(build(`<p>x</p>${D}<!-- memo -->`)).toBe("<p>x</p><!-- memo --><script>run()</script>");
+    expect(build(`<p>x</p>${D}</ <template> >`)).toBe(
+      "<p>x</p></ <template> ><script>run()</script>"
+    );
   });
 
   it("does not take a </body> in an attribute value or raw text element for the element", () => {
@@ -343,6 +349,7 @@ describe("buildPreviewDocument の headPrelude（コンソール中継の差し�
       `<![CDATA[x]]><!doctype html>${P}<p>x</p>`
     );
     expect(html("<!doctypehtml><p>x</p>")).toBe(`<!doctypehtml>${P}<p>x</p>`);
+    expect(html("</ x><!doctype html><p>x</p>")).toBe(`</ x><!doctype html>${P}<p>x</p>`);
   });
 
   it("<title> / <textarea> の中の <head> は要素として扱わない", () => {
