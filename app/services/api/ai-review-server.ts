@@ -1,5 +1,11 @@
 import type { PostgrestError } from "@supabase/supabase-js";
+import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
 import { SUBMISSIONS_PAGE_SIZE } from "@/app/constants/submissions";
+import {
+  getJstDayWindow,
+  type ReviewLimitReason,
+  staleReviewCutoff,
+} from "@/app/lib/ai-review-limits";
 import { resolvePageRange } from "@/app/lib/submissions-pagination";
 import { addTokenCount, type TokenUsage } from "@/app/lib/token-usage";
 import type {
@@ -8,6 +14,7 @@ import type {
   ReviewJson,
   ScoreKind,
   SubmissionWithContentAndReview,
+  UserStatusType,
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
@@ -173,72 +180,88 @@ export async function fetchCompletedAIReviewContentIds(
   return { data: reviewedContentIds, error: null };
 }
 
-export type ClaimedAIReview = { id: number } | "busy" | null;
+export type AIReviewClaim =
+  | { kind: "claimed"; reviewId: number; remaining: number }
+  | { kind: "processing"; reviewId: number }
+  | { kind: "limited"; reason: ReviewLimitReason; remaining: number }
+  | { kind: "busy" };
+
+const LIMIT_REASONS: readonly ReviewLimitReason[] = [
+  "trial_lifetime",
+  "submission_reviewed",
+  "content_daily",
+  "user_daily",
+];
 
 /**
- * Takes the single review slot of a submission atomically: a new row is inserted, or a reusable
- * one (failed, or pending / processing that died past `staleBeforeIso`) is reset by a conditional
- * UPDATE. "busy" means another request holds or already finished it, so two concurrent requests
- * can't both call Gemini on the same submission or reset a completed review to pending. null is a
- * DB error. (The per-user count limits stay a plain SELECT; #304 accepts that overrun.)
+ * Checks the count limits and takes the submission's single review slot in one transaction
+ * (claim_ai_review(), serialized per user by an advisory lock), so concurrent requests of one user
+ * cannot all read the same counts and pass (#343). A new row is inserted, or a reusable one
+ * (failed, or pending / processing that died past `staleBefore`) is reset. "busy" means another
+ * request holds the row, so two concurrent requests can't both call Gemini on one submission or
+ * reset a completed review to pending. null is a DB error (fail closed: no review starts).
  */
-export async function claimPendingAIReview(
-  submissionId: number,
-  staleBeforeIso: string
-): Promise<ClaimedAIReview> {
+export async function claimAIReview({
+  userId,
+  submissionId,
+  contentId,
+  userStatus,
+  now,
+}: {
+  userId: number;
+  submissionId: number;
+  contentId: number;
+  userStatus: UserStatusType | null;
+  now: Date;
+}): Promise<AIReviewClaim | null> {
   const supabase = await createAdminSupabaseClient();
-  const now = new Date().toISOString();
+  const { data, error } = await supabase.rpc("claim_ai_review", {
+    p_user_id: userId,
+    p_submission_id: submissionId,
+    p_content_id: contentId,
+    // null (not a learner) is rejected by the RPC, which fails closed.
+    p_user_status: userStatus ?? "",
+    p_stale_before: staleReviewCutoff(now).toISOString(),
+    p_day_start: getJstDayWindow(now).startIso,
+    p_active_per_content_per_day: AI_REVIEW_LIMITS.active.perContentPerDay,
+    p_active_per_day: AI_REVIEW_LIMITS.active.perDay,
+    p_trial_per_content_lifetime: AI_REVIEW_LIMITS.trial.perContentLifetime,
+  });
 
-  const { data: inserted, error: insertError } = await supabase
-    .from("ai_reviews")
-    .upsert(
-      {
-        submission_id: submissionId,
-        status: "pending",
-        created_at: now,
-        // The column default is legacy, which means a pre-migration free-text review. A row this
-        // code creates has not been graded yet, so a later failure must not be counted as one.
-        score_kind: "incomplete",
-      },
-      { onConflict: "submission_id", ignoreDuplicates: true }
-    )
-    .select("id");
-
-  if (insertError) {
-    console.error("AIレビュー作成エラー:", insertError.message);
+  if (error) {
+    console.error("AIレビュー枠確保エラー:", error.message);
     return null;
   }
-  if (inserted && inserted.length > 0) {
-    return { id: inserted[0].id };
-  }
 
-  const { data: reused, error: reuseError } = await supabase
-    .from("ai_reviews")
-    .update({
-      status: "pending",
-      review_content: null,
-      overall_score: null,
-      error_message: null,
-      reviewed_at: null,
-      review_json: null,
-      rubric_version: null,
-      passed: null,
-      score_kind: "incomplete",
-      // created_at is reset because a reused failed row would otherwise keep its original day
-      // and escape the per-day count; the reset also keeps a second stale-row claimer out.
-      created_at: now,
-      // Token columns are deliberately absent: the row keeps the tokens already billed so the
-      // completed/failed update adds to them instead of losing earlier attempts.
-    })
-    .eq("submission_id", submissionId)
-    .or(`status.eq.failed,and(status.in.(pending,processing),created_at.lt.${staleBeforeIso})`)
-    .select("id");
-
-  if (reuseError) {
-    console.error("AIレビュー再利用エラー:", reuseError.message);
-    return null;
+  const result = data as {
+    outcome?: string;
+    review_id?: number;
+    reason?: string;
+    remaining?: number;
+  } | null;
+  switch (result?.outcome) {
+    case "claimed":
+      if (typeof result.review_id === "number") {
+        return { kind: "claimed", reviewId: result.review_id, remaining: result.remaining ?? 0 };
+      }
+      break;
+    case "processing":
+      if (typeof result.review_id === "number") {
+        return { kind: "processing", reviewId: result.review_id };
+      }
+      break;
+    case "limited": {
+      const reason = LIMIT_REASONS.find((r) => r === result.reason);
+      if (reason) {
+        return { kind: "limited", reason, remaining: result.remaining ?? 0 };
+      }
+      break;
+    }
+    case "busy":
+      return { kind: "busy" };
   }
-  return reused && reused.length > 0 ? { id: reused[0].id } : "busy";
+  console.error("AIレビュー枠確保の応答が不正です:", JSON.stringify(data));
+  return null;
 }
 
 export async function updateAIReviewProcessing(reviewId: number): Promise<boolean> {
@@ -260,7 +283,7 @@ export async function updateAIReviewProcessing(reviewId: number): Promise<boolea
 /**
  * Token columns are cumulative over every attempt on the same submission (a failed row is reused
  * on retry), because failed attempts are billed too. A plain read-then-write is enough because
- * claimPendingAIReview() lets only one attempt hold a row at a time. When the read fails the
+ * claim_ai_review() lets only one attempt hold a row at a time. When the read fails the
  * columns are left untouched, since writing only this attempt's tokens would overwrite the
  * earlier total with a smaller one.
  */

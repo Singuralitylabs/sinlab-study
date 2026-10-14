@@ -113,7 +113,44 @@ function submissionReviewedMessage(): string {
 }
 
 /**
- * Decides one review request. `contentReviews` are the user's own reviews for the content (all
+ * Builds the 429 decision for a refusal reason. Shared by evaluateReviewRequest() and by the
+ * route, which receives the reason from the claim_ai_review() RPC (#343) so both phrase and
+ * time it the same.
+ */
+export function limitedDecision(
+  reason: ReviewLimitReason,
+  remaining: number,
+  now: Date
+): Extract<ReviewLimitDecision, { kind: "limited" }> {
+  const { resetsAt } = getJstDayWindow(now);
+  switch (reason) {
+    case "trial_lifetime":
+      return {
+        kind: "limited",
+        reason,
+        remaining: 0,
+        resetsAt: null,
+        message: trialLimitMessage(),
+      };
+    case "submission_reviewed":
+      return {
+        kind: "limited",
+        reason,
+        remaining,
+        resetsAt: null,
+        message: submissionReviewedMessage(),
+      };
+    case "content_daily":
+      return { kind: "limited", reason, remaining: 0, resetsAt, message: contentDailyMessage() };
+    case "user_daily":
+      return { kind: "limited", reason, remaining: 0, resetsAt, message: userDailyMessage() };
+  }
+}
+
+/**
+ * Decides one review request. The route claims through claim_ai_review() instead, which makes the
+ * same decision in SQL inside a lock; this stays as the readable definition of the rules, kept in
+ * step with it by the tests. `contentReviews` are the user's own reviews for the content (all
  * statuses; `failed` and dead in-flight rows are ignored here so a Gemini failure or a killed run
  * never uses up the allowance).
  * `todayTotal` is the user's non-failed reviews created today (JST) across all contents; it is
@@ -133,7 +170,7 @@ export function evaluateReviewRequest({
   now: Date;
 }): ReviewLimitDecision {
   const countable = countableRows(contentReviews, now);
-  const { startIso, resetsAt } = getJstDayWindow(now);
+  const { startIso } = getJstDayWindow(now);
 
   const sameSubmission = countable.find((row) => row.submission_id === submissionId);
   if (sameSubmission?.status === "processing" || sameSubmission?.status === "pending") {
@@ -144,13 +181,7 @@ export function evaluateReviewRequest({
 
   if (userStatus === USER_STATUS.TRIAL) {
     if (countable.length >= AI_REVIEW_LIMITS.trial.perContentLifetime) {
-      return {
-        kind: "limited",
-        reason: "trial_lifetime",
-        remaining: 0,
-        resetsAt: null,
-        message: trialLimitMessage(),
-      };
+      return limitedDecision("trial_lifetime", 0, now);
     }
     return { kind: "allowed", remaining };
   }
@@ -158,33 +189,15 @@ export function evaluateReviewRequest({
   // Checked before the daily limits: an already-reviewed submission can't be retried tomorrow
   // either, so it must not be told to "come back tomorrow".
   if (sameSubmission) {
-    return {
-      kind: "limited",
-      reason: "submission_reviewed",
-      remaining,
-      resetsAt: null,
-      message: submissionReviewedMessage(),
-    };
+    return limitedDecision("submission_reviewed", remaining, now);
   }
 
   const contentToday = countCreatedSince(countable, startIso);
   if (contentToday >= AI_REVIEW_LIMITS.active.perContentPerDay) {
-    return {
-      kind: "limited",
-      reason: "content_daily",
-      remaining: 0,
-      resetsAt,
-      message: contentDailyMessage(),
-    };
+    return limitedDecision("content_daily", 0, now);
   }
   if (todayTotal >= AI_REVIEW_LIMITS.active.perDay) {
-    return {
-      kind: "limited",
-      reason: "user_daily",
-      remaining: 0,
-      resetsAt,
-      message: userDailyMessage(),
-    };
+    return limitedDecision("user_daily", 0, now);
   }
 
   return { kind: "allowed", remaining };

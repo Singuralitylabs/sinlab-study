@@ -1,16 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { GEMINI_MAX_CODE_LENGTH } from "@/app/constants/gemini";
-import { USER_STATUS } from "@/app/constants/user";
-import { evaluateReviewRequest, staleReviewCutoff } from "@/app/lib/ai-review-limits";
+import { limitedDecision } from "@/app/lib/ai-review-limits";
 import { parseGradingRubric } from "@/app/lib/grading-schema";
 import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import {
-  claimPendingAIReview,
+  claimAIReview,
   updateAIReviewCompleted,
   updateAIReviewFailed,
   updateAIReviewProcessing,
 } from "@/app/services/api/ai-review-server";
-import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   generateReview,
   ReviewGenerationError,
@@ -109,33 +107,31 @@ export async function POST(request: NextRequest) {
       reviewSubmission = { type: "url", content: submission.url };
     }
 
-    const usage = await fetchAIReviewUsage(supabase, {
+    // One transaction checks the count limits and takes the review slot, so concurrent requests
+    // cannot all pass on the same counts (#343).
+    const now = new Date();
+    const claim = await claimAIReview({
       userId,
+      submissionId,
       contentId: submission.content_id,
-      includeDailyTotal: userStatus === USER_STATUS.ACTIVE,
+      userStatus,
+      now,
     });
-    if (!usage) {
+    if (!claim) {
       return NextResponse.json({ error: "AIレビュー回数の確認に失敗しました" }, { status: 500 });
     }
 
-    const decision = evaluateReviewRequest({
-      userStatus,
-      submissionId,
-      contentReviews: usage.contentReviews,
-      todayTotal: usage.todayTotal,
-      now: new Date(),
-    });
-
-    if (decision.kind === "processing") {
+    if (claim.kind === "processing") {
       return NextResponse.json(
         {
           message: "AIレビューは現在生成中です",
-          review: { id: decision.reviewId, status: "processing" },
+          review: { id: claim.reviewId, status: "processing" },
         },
         { status: 202 }
       );
     }
-    if (decision.kind === "limited") {
+    if (claim.kind === "limited") {
+      const decision = limitedDecision(claim.reason, claim.remaining, now);
       return NextResponse.json(
         {
           error: decision.message,
@@ -146,21 +142,14 @@ export async function POST(request: NextRequest) {
         { status: 429 }
       );
     }
-    const remainingAfterReview = Math.max(0, decision.remaining - 1);
-
-    const reviewRecord = await claimPendingAIReview(
-      submissionId,
-      staleReviewCutoff(new Date()).toISOString()
-    );
-    if (!reviewRecord) {
-      return NextResponse.json({ error: "AIレビューの初期化に失敗しました" }, { status: 500 });
-    }
-    if (reviewRecord === "busy") {
+    if (claim.kind === "busy") {
       return NextResponse.json(
         { error: "この提出のAIレビューは別のリクエストで処理中、または実行済みです" },
         { status: 409 }
       );
     }
+    const reviewRecord = { id: claim.reviewId };
+    const remainingAfterReview = claim.remaining;
 
     const processingResult = await updateAIReviewProcessing(reviewRecord.id);
     if (!processingResult) {
