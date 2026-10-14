@@ -75,6 +75,8 @@ export type DigestUser = {
   displayName: string;
   status: UserStatusType;
   membershipType: string | null;
+  /** Only announcements go to admin / maintainer; the learning emails are for members (10.7). */
+  role: string;
   createdAt: string;
 };
 

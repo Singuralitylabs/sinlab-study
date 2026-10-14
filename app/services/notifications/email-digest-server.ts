@@ -107,7 +107,11 @@ async function fetchForUserIds<T>(
   return rows;
 }
 
-/** Send candidates: member active / trial users who have not unsubscribed. */
+/**
+ * Send candidates: active / trial users of any role who have not unsubscribed. Announcements
+ * follow the in-app display target, which ignores the role (#322), so an active maintainer who sees
+ * an announcement also gets its email; the learning emails narrow to members in buildQueue().
+ */
 async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
   const rows = await fetchAllPages<{
     id: number;
@@ -115,13 +119,13 @@ async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
     display_name: string;
     status: string;
     membership_type: string | null;
+    role: string;
     created_at: string | null;
   }>((from, to) =>
     supabase
       .from("users")
-      .select("id, email, display_name, status, membership_type, created_at")
+      .select("id, email, display_name, status, membership_type, role, created_at")
       .eq("is_deleted", false)
-      .eq("role", USER_ROLE.MEMBER)
       .in("status", [USER_STATUS.ACTIVE, USER_STATUS.TRIAL])
       .is("email_opt_out_at", null)
       .order("id")
@@ -136,6 +140,7 @@ async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
       displayName: row.display_name,
       status: row.status as UserStatusType,
       membershipType: row.membership_type ?? null,
+      role: row.role,
       createdAt: row.created_at as string,
     }));
 }
@@ -793,6 +798,9 @@ async function buildQueue(
   announcementBatches: AnnouncementBatch[];
 }> {
   const users = allUsers.filter((user) => !excludedToday.has(user.userId));
+  // Staff (admin / maintainer) review the courses rather than take them; progress nudges and
+  // trial guides would be noise to them, so only announcements reach them.
+  const learners = users.filter((user) => user.role === USER_ROLE.MEMBER);
   const trialNurtureSetting = settings.kinds.trial_nurture;
   const inactivitySetting = settings.kinds.inactivity_reminder;
   const weeklySetting = settings.kinds.weekly_digest;
@@ -820,7 +828,7 @@ async function buildQueue(
   const queue: QueuedEmail[] = [];
   const queuedUserIds = new Set<number>();
 
-  const { trialNurture, inactivityCandidates } = planMilestoneEmails(users, today, {
+  const { trialNurture, inactivityCandidates } = planMilestoneEmails(learners, today, {
     trialNurture: trialNurtureSetting.enabled ? trialNurtureSetting.sendDays : null,
     inactivityReminder: inactivitySetting.enabled ? inactivitySetting.sendDays : null,
   });
@@ -923,7 +931,7 @@ async function buildQueue(
     }
   }
   let weeklyPool = weeklyEnabled
-    ? users.filter((user) => coversPreviousWeek(user.createdAt, weekStart))
+    ? learners.filter((user) => coversPreviousWeek(user.createdAt, weekStart))
     : [];
   const poolIds = () => weeklyPool.map((user) => user.userId);
   if (weeklyReservationMissing || weeklySkipped) {

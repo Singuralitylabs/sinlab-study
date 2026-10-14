@@ -93,6 +93,7 @@ function user(userId: number, status: "active" | "trial", createdAt: string): Di
     displayName: `u${userId}`,
     status,
     membershipType: null,
+    role: "member",
     createdAt,
   };
 }
