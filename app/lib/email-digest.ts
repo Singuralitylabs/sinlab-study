@@ -1,5 +1,5 @@
 import { USER_STATUS } from "@/app/constants/user";
-import type { UserStatusType } from "@/app/types";
+import type { UserRoleType, UserStatusType } from "@/app/types";
 
 /**
  * Pure functions deciding periodic mail (GET /api/cron/email-digest) targets; no DB or sending
@@ -75,6 +75,8 @@ export type DigestUser = {
   displayName: string;
   status: UserStatusType;
   membershipType: string | null;
+  /** Only announcements go to admin / maintainer; the learning emails are for members (10.7). */
+  role: UserRoleType;
   createdAt: string;
 };
 

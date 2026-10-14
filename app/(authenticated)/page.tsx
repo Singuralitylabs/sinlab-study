@@ -6,6 +6,7 @@ import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT } from "@/app/constants/announcements";
 import { getWelcomeStepsForStatus } from "@/app/constants/onboarding";
 import { isStripeEnabled } from "@/app/constants/stripe";
+import { USER_STATUS } from "@/app/constants/user";
 import { isCertificateEligible } from "@/app/lib/certificate";
 import { formatDate } from "@/app/lib/format-date";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
@@ -42,6 +43,14 @@ export default async function HomePage() {
 
   const isMember = !checkInstructorPermissions(userRole);
 
+  // Started before the other fetches so a slow Stripe call overlaps them instead of adding to them.
+  // Never rejects (falls back internally), so an unawaited promise is safe.
+  const stripeEnabled = isStripeEnabled();
+  const priceLabelPromise =
+    stripeEnabled && userStatus === USER_STATUS.TRIAL
+      ? fetchUpgradePriceLabel()
+      : Promise.resolve(null);
+
   const [
     { data: themeData },
     onboardingResult,
@@ -77,8 +86,7 @@ export default async function HomePage() {
   );
 
   const showTrialNextStep = shouldShowTrialNextStep(userStatus, userRole, themes);
-  const stripeEnabled = isStripeEnabled();
-  const priceLabel = showTrialNextStep && stripeEnabled ? await fetchUpgradePriceLabel() : null;
+  const priceLabel = showTrialNextStep ? await priceLabelPromise : null;
 
   return (
     <div className="max-w-4xl mx-auto">

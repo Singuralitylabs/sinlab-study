@@ -5,10 +5,15 @@
 export const SLACK_WEBHOOK_TIMEOUT_MS = 5_000;
 
 /**
- * Resend API fetch timeout (ms). Sending happens in after() once the response is returned; keep it
- * short like Slack so serverless execution time isn't needlessly extended.
+ * Resend API fetch timeout (ms). Sending happens in after() once the response is returned, so no
+ * user-facing response waits on it; a short value would only abort requests Resend has already
+ * accepted (cold start / slow response), leaving a delivered mail logged as failed. Long enough to
+ * ride out that latency, short enough that one send plus EMAIL_DIGEST_TIME_BUDGET_MS still fits in
+ * the cron route's maxDuration (60s). Every other route or page that sends mail declares
+ * maxDuration = 30 so the abort fires before the platform kills the function. A TimeoutError means
+ * "delivery unknown" and is never retried (see RETRYABLE_EMAIL_ERROR).
  */
-export const EMAIL_SEND_TIMEOUT_MS = 5_000;
+export const EMAIL_SEND_TIMEOUT_MS = 15_000;
 
 export const RESEND_API_URL = "https://api.resend.com/emails";
 
@@ -182,10 +187,15 @@ export const EMAIL_DIGEST_SEND_INTERVAL_MS = 500;
 
 /**
  * Elapsed-time cap (ms) after which cron may not start new sends. Stop before the route's
- * maxDuration (60s) cuts it off and carry the rest over like cap overflow (leaving room for a
- * single send's EMAIL_SEND_TIMEOUT_MS and DB round trips).
+ * maxDuration (60s) cuts it off and carry the rest over like cap overflow. Worst case is a send
+ * started just under the cap that runs to EMAIL_SEND_TIMEOUT_MS: 40s + 15s = 55s, leaving ~5s for
+ * DB round trips and the lock release. Sends start at least EMAIL_DIGEST_SEND_INTERVAL_MS apart,
+ * so 40s allows at most 80 starts. The clock also covers the lock, extraction and per-send DB
+ * calls, so a run reaches a few sends under the default daily cap (EMAIL_DIGEST_MAX_PER_DAY = 80);
+ * the shortfall carries over like cap overflow. Keep (budget / interval) >= that cap as the upper
+ * bound when changing either value.
  */
-export const EMAIL_DIGEST_TIME_BUDGET_MS = 45_000;
+export const EMAIL_DIGEST_TIME_BUDGET_MS = 40_000;
 
 /**
  * Retry window (days from the publish date, JST) for announcement email recipients whose send
@@ -196,5 +206,9 @@ export const EMAIL_DIGEST_TIME_BUDGET_MS = 45_000;
  */
 export const ANNOUNCEMENT_EMAIL_RETRY_DAYS = 3;
 
-/** Retryable send failures (email_logs.error): the Resend response code recorded by sendEmail(). */
+/**
+ * Retryable send failures (email_logs.error): the Resend response code recorded by sendEmail().
+ * Timeouts and network errors are deliberately excluded: Resend may have accepted the mail, and a
+ * resend would double-send (the email_logs claim row is what prevents that).
+ */
 export const RETRYABLE_EMAIL_ERROR = /status=(429|5\d\d)$/;

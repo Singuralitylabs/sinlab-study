@@ -15,6 +15,7 @@ import {
   WEEKLY_DIGEST_WEEKDAY,
 } from "@/app/constants/notifications";
 import type { EmailKindSetting } from "@/app/lib/email-settings";
+import { formatUpdatedWithEditor } from "@/app/lib/format-date";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,17 +32,6 @@ type Settings = {
   digestUpdatedBy: number | null;
   editorNames: Record<number, string>;
 };
-
-/** `noEditorLabel`: what a NULL updated_by means for this row (seeded value, or a deleted user). */
-function formatUpdated(
-  updatedAt: string,
-  updatedBy: number | null,
-  editorNames: Record<number, string>,
-  noEditorLabel = "初期値"
-) {
-  const who = updatedBy !== null ? (editorNames[updatedBy] ?? "不明") : noEditorLabel;
-  return `${new Date(updatedAt).toLocaleString("ja-JP")}（${who}）`;
-}
 
 function sendingEnableConfirm(pendingAnnouncementCount: number | null) {
   const lines = [
@@ -191,7 +181,7 @@ function KindRow({
         {!hasDays && !hasWeekday && <span className="text-muted-foreground">-</span>}
       </td>
       <td className="px-4 py-3 text-xs text-muted-foreground">
-        {formatUpdated(setting.updatedAt, setting.updatedBy, editorNames)}
+        {formatUpdatedWithEditor(setting.updatedAt, setting.updatedBy, editorNames, "初期値")}
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-col gap-1 items-start">
@@ -271,7 +261,7 @@ export function EmailSendingSwitch({
         最終更新:{" "}
         {updatedAt === null
           ? "未操作（既定の停止中）"
-          : formatUpdated(updatedAt, updatedBy, editorNames, "削除済みユーザー")}
+          : formatUpdatedWithEditor(updatedAt, updatedBy, editorNames, "削除済みユーザー")}
       </p>
       <div className="flex items-center gap-2">
         <Button
@@ -362,7 +352,12 @@ export function EmailSettingsForm({
         <p className="text-xs text-muted-foreground">
           1〜{digestDailyLimitMax} 通（Resend 無料枠の1日100通に、手続き通知の余裕を残すため）。
           最終更新:{" "}
-          {formatUpdated(settings.digestUpdatedAt, settings.digestUpdatedBy, settings.editorNames)}
+          {formatUpdatedWithEditor(
+            settings.digestUpdatedAt,
+            settings.digestUpdatedBy,
+            settings.editorNames,
+            "初期値"
+          )}
         </p>
         <div className="flex items-center gap-2">
           <Input

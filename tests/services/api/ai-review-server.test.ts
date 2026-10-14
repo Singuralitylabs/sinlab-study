@@ -4,7 +4,7 @@ import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 vi.mock("@/app/services/api/supabase-server");
 
 import {
-  claimPendingAIReview,
+  claimAIReview,
   fetchAllSubmissionsWithReviews,
   fetchCompletedAIReviewByContentId,
   fetchCompletedAIReviewContentIds,
@@ -204,7 +204,7 @@ describe("fetchCompletedAIReviewContentIds", () => {
 
 describe("fetchSubmissionsWithReviewsByUserId", () => {
   const listSelect =
-    "*, content:learning_contents(id, title), ai_review:ai_reviews(id, status, overall_score, review_content, reviewed_at, error_message, review_json, score_kind, rubric_version, passed)";
+    "*, content:learning_contents(id, title, code_language), ai_review:ai_reviews(id, status, overall_score, review_content, reviewed_at, error_message, review_json, score_kind, rubric_version, passed)";
 
   it("指定ページの提出一覧と総数を返す（2ページ目は range(20, 39)）", async () => {
     const rows = [{ id: 21 }, { id: 22 }];
@@ -422,92 +422,85 @@ describe("updateAIReviewFailed / updateAIReviewCompleted", () => {
   });
 });
 
-describe("claimPendingAIReview", () => {
-  const STALE_BEFORE = "2026-10-12T04:58:30.000Z";
+describe("claimAIReview", () => {
+  const NOW = new Date("2026-10-12T05:00:00Z");
+  const params = {
+    userId: 2,
+    submissionId: 7,
+    contentId: 5,
+    userStatus: "active" as const,
+    now: NOW,
+  };
 
-  it("新規提出は ignoreDuplicates の INSERT で確保し、既存行を上書きしない", async () => {
-    const mockClient = createMockSupabaseClient({
-      tableResults: { ai_reviews: { data: [{ id: 10 }], error: null } },
-    });
+  const mockRpc = (result: { data: unknown; error: unknown }) => {
+    const mockClient = createMockSupabaseClient();
+    mockClient.rpc.mockResolvedValue(result);
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    return mockClient;
+  };
 
-    const result = await claimPendingAIReview(7, STALE_BEFORE);
-
-    expect(result).toEqual({ id: 10 });
-    expect(mockClient.from).toHaveBeenCalledTimes(1);
-    const [payload, options] = mockClient.from.mock.results[0].value.upsert.mock.calls[0];
-    expect(options).toEqual({ onConflict: "submission_id", ignoreDuplicates: true });
-    expect(payload).toMatchObject({
-      submission_id: 7,
-      status: "pending",
-      score_kind: "incomplete",
+  it("上限値・JST当日の開始・死んだ行の境界を引数にして claim_ai_review を1回だけ呼ぶ", async () => {
+    const mockClient = mockRpc({
+      data: { outcome: "claimed", review_id: 10, remaining: 1 },
+      error: null,
     });
-  });
 
-  it("既存行は failed か死んだ in-flight だけを条件付き UPDATE で再利用し、created_at とトークン以外を初期化する", async () => {
-    const mockClient = createMockSupabaseClient({
-      tableResults: {
-        ai_reviews: [
-          { data: [], error: null },
-          { data: [{ id: 10 }], error: null },
-        ],
-      },
+    const result = await claimAIReview(params);
+
+    expect(result).toEqual({ kind: "claimed", reviewId: 10, remaining: 1 });
+    expect(mockClient.rpc).toHaveBeenCalledTimes(1);
+    expect(mockClient.rpc).toHaveBeenCalledWith("claim_ai_review", {
+      p_user_id: 2,
+      p_submission_id: 7,
+      p_content_id: 5,
+      p_user_status: "active",
+      p_stale_before: "2026-10-12T04:58:30.000Z",
+      p_day_start: "2026-10-11T15:00:00.000Z",
+      p_active_per_content_per_day: 2,
+      p_active_per_day: 10,
+      p_trial_per_content_lifetime: 1,
     });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
-
-    const before = Date.now();
-    const result = await claimPendingAIReview(7, STALE_BEFORE);
-
-    expect(result).toEqual({ id: 10 });
-    const builder = mockClient.from.mock.results[1].value;
-    const payload = builder.update.mock.calls[0][0];
-    expect(payload).toMatchObject({
-      status: "pending",
-      reviewed_at: null,
-      review_json: null,
-      rubric_version: null,
-      passed: null,
-      error_message: null,
-      score_kind: "incomplete",
-    });
-    expect(payload).not.toHaveProperty("prompt_tokens");
-    expect(payload).not.toHaveProperty("completion_tokens");
-    expect(payload).not.toHaveProperty("thoughts_tokens");
-    expect(Date.parse(payload.created_at)).toBeGreaterThanOrEqual(before);
-    expect(builder.eq).toHaveBeenCalledWith("submission_id", 7);
-    expect(builder.or).toHaveBeenCalledWith(
-      `status.eq.failed,and(status.in.(pending,processing),created_at.lt.${STALE_BEFORE})`
-    );
-  });
-
-  it("他のリクエストが確保中、または完了済みなら busy を返す", async () => {
-    const mockClient = createMockSupabaseClient({
-      tableResults: {
-        ai_reviews: [
-          { data: [], error: null },
-          { data: [], error: null },
-        ],
-      },
-    });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
-
-    await expect(claimPendingAIReview(7, STALE_BEFORE)).resolves.toBe("busy");
   });
 
   it.each([
-    ["INSERT", [{ data: null, error: dbError }]],
     [
-      "UPDATE",
-      [
-        { data: [], error: null },
-        { data: null, error: dbError },
-      ],
+      { outcome: "processing", review_id: 3 },
+      { kind: "processing", reviewId: 3 },
     ],
-  ])("%s の DB エラーでは null を返す", async (_label, aiReviews) => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    const mockClient = createMockSupabaseClient({ tableResults: { ai_reviews: aiReviews } });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    [
+      { outcome: "limited", reason: "content_daily", remaining: 0 },
+      { kind: "limited", reason: "content_daily", remaining: 0 },
+    ],
+    [
+      { outcome: "limited", reason: "submission_reviewed", remaining: 1 },
+      { kind: "limited", reason: "submission_reviewed", remaining: 1 },
+    ],
+    [{ outcome: "busy" }, { kind: "busy" }],
+  ])("応答 %j を分類して返す", async (data, expected) => {
+    mockRpc({ data, error: null });
 
-    await expect(claimPendingAIReview(7, STALE_BEFORE)).resolves.toBeNull();
+    await expect(claimAIReview(params)).resolves.toEqual(expected);
+  });
+
+  it.each([
+    ["RPC のエラー", { data: null, error: dbError }],
+    ["想定外の outcome", { data: { outcome: "unknown" }, error: null }],
+    ["review_id の無い claimed", { data: { outcome: "claimed" }, error: null }],
+    ["未知の理由の limited", { data: { outcome: "limited", reason: "x" }, error: null }],
+    ["空の応答", { data: null, error: null }],
+  ])("%s では null を返す（枠を確保したことにしない）", async (_label, result) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mockRpc(result);
+
+    await expect(claimAIReview(params)).resolves.toBeNull();
+  });
+
+  it("learner 以外の状態（null）は空文字で渡し、RPC 側の拒否に委ねる", async () => {
+    const mockClient = mockRpc({ data: null, error: dbError });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await claimAIReview({ ...params, userStatus: null });
+
+    expect(mockClient.rpc.mock.calls[0][1]).toMatchObject({ p_user_status: "" });
   });
 });

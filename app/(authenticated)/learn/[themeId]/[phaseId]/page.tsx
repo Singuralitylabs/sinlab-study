@@ -39,6 +39,14 @@ export default async function PhasePage({ params }: PageProps) {
 
   const { userId, userStatus, userRole } = await getServerAuth();
 
+  // Started before the other fetches so a slow Stripe call overlaps them instead of adding to them.
+  // Never rejects (falls back internally), so an unawaited promise is safe.
+  const stripeEnabled = isStripeEnabled();
+  const priceLabelPromise =
+    stripeEnabled && userStatus === USER_STATUS.TRIAL
+      ? fetchUpgradePriceLabel()
+      : Promise.resolve(null);
+
   const [{ data: theme }, { data: phase }, { data: weeks }] = await Promise.all([
     fetchThemeById(themeIdNum, userRole),
     fetchPhaseById(phaseIdNum, userRole),
@@ -82,8 +90,7 @@ export default async function PhasePage({ params }: PageProps) {
 
   const hasLockedContent = weeks?.some((w) => w.contents.some((c) => isLocked(c))) ?? false;
   const showUpgradeCta = userStatus === USER_STATUS.TRIAL && hasLockedContent;
-  const stripeEnabled = isStripeEnabled();
-  const priceLabel = showUpgradeCta && stripeEnabled ? await fetchUpgradePriceLabel() : null;
+  const priceLabel = showUpgradeCta ? await priceLabelPromise : null;
 
   return (
     <div className="max-w-4xl mx-auto">

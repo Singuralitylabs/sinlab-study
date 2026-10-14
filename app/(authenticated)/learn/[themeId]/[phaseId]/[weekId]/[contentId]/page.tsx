@@ -15,7 +15,7 @@ import { USER_STATUS } from "@/app/constants/user";
 import { computeRemainingReviews } from "@/app/lib/ai-review-limits";
 import { buildThemeContentOrder, resolveContentNavigation } from "@/app/lib/content-navigation";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
-import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
+import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import { getLockedContentFallbackOverview } from "@/app/lib/trial-upgrade";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
@@ -66,6 +66,14 @@ export default async function ContentPage({ params }: PageProps) {
   }
 
   const { userId, userStatus, userRole } = await getServerAuth();
+
+  // Started before the other fetches so a slow Stripe call overlaps them instead of adding to them.
+  // Never rejects (falls back internally), so an unawaited promise is safe.
+  const stripeEnabled = isStripeEnabled();
+  const priceLabelPromise =
+    stripeEnabled && userStatus === USER_STATUS.TRIAL
+      ? fetchUpgradePriceLabel()
+      : Promise.resolve(null);
 
   // Members/trial users fetch the summary via service_role; admin/maintainer use the normal client so
   // unpublished content is included.
@@ -123,11 +131,10 @@ export default async function ContentPage({ params }: PageProps) {
   const isLocked = isContentLockedForUser(userStatus, summary.is_open_to_trial);
 
   if (isLocked) {
-    const stripeEnabled = isStripeEnabled();
     // No description lookup on purpose: RLS returns 0 rows for trial-locked content, so it could
     // never show, and widening the service_role allow-list would break the AGENTS.md invariant.
     // The counts reuse the navigation summaries, so no new service_role call is added.
-    const priceLabel = stripeEnabled ? await fetchUpgradePriceLabel() : null;
+    const priceLabel = await priceLabelPromise;
     const paidOnlyCount = navigation?.paidOnlyCount ?? 0;
     const paidOnlyExerciseCount = navigation?.paidOnlyExerciseCount ?? 0;
 
@@ -365,7 +372,10 @@ export default async function ContentPage({ params }: PageProps) {
                         <h3 className="text-lg font-semibold mb-3">提出内容</h3>
                         {latestSubmission.submission_type === "code" ? (
                           <SubmissionCodeBlock
-                            files={getSubmissionCodeFiles(latestSubmission)}
+                            files={withFallbackLanguage(
+                              getSubmissionCodeFiles(latestSubmission),
+                              content.code_language
+                            )}
                             preClassName="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre-wrap"
                           />
                         ) : (

@@ -76,3 +76,13 @@ export function isStripeEnabled(): boolean {
 }
 
 export const STRIPE_DISABLED_MESSAGE = "現在準備中です";
+
+/**
+ * How long after its creation an event for an own object with no mirror row yet is still answered
+ * with a retry request (#321). Out-of-order delivery normally resolves within seconds, but a
+ * checkout.session.completed that itself failed and waits in Stripe's backoff (hours apart) keeps
+ * the mirror row missing for longer, so the window is a day. A mirror row that never appears
+ * (a subscription replaced by a newer contract, a permanently rejected Checkout) would otherwise
+ * be redelivered until Stripe disables the endpoint.
+ */
+export const MIRROR_PENDING_RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;

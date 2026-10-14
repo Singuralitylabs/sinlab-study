@@ -17,7 +17,8 @@
     "test": "vitest run",
     "check:comments": "bun scripts/check-comment-only-diff.ts",
     "test:watch": "vitest",
-    "test:all": "bun run build && bun run db:types && bun run lint && bun run format && bun run check && bun run test"
+    "test:jsc": "bun test tests/lib/html-preview.test.ts tests/lib/preview-console.test.ts",
+    "test:all": "bun run build && bun run db:types && bun run lint && bun run format && bun run check && bun run test && bun run test:jsc"
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",
@@ -63,6 +64,7 @@
     "@types/node": "^26",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "happy-dom": "^21.0.1",
     "supabase": "^2.120.0",
     "tailwindcss": "^4",
     "typescript": "^7",

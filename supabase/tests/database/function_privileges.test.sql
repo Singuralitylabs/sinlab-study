@@ -1,6 +1,6 @@
 -- Asserts EXECUTE privileges of public functions against the real ACLs that
 -- supabase/migrations/ produce. Expected values mirror docs/database.md
--- (3.18, 5.2, 6.2, 6.15, 6.17). Run with `supabase test db`.
+-- (3.7, 3.18, 5.2, 6.2, 6.15, 6.17). Run with `supabase test db`.
 --
 -- service_role is asserted only where the docs name it. Functions documented as
 -- "internal" keep Supabase's default grant to service_role, which is not part of the contract.
@@ -22,6 +22,9 @@ from (
     ('public.claim_email_test_send(integer, timestamp with time zone, integer)', 'anon', false),
     ('public.claim_email_test_send(integer, timestamp with time zone, integer)', 'authenticated', false),
     ('public.claim_email_test_send(integer, timestamp with time zone, integer)', 'service_role', true),
+    ('public.claim_ai_review(integer, integer, integer, text, timestamp with time zone, timestamp with time zone, integer, integer, integer)', 'anon', false),
+    ('public.claim_ai_review(integer, integer, integer, text, timestamp with time zone, timestamp with time zone, integer, integer, integer)', 'authenticated', false),
+    ('public.claim_ai_review(integer, integer, integer, text, timestamp with time zone, timestamp with time zone, integer, integer, integer)', 'service_role', true),
     ('public.replace_quiz_questions(integer, jsonb)', 'anon', false),
     ('public.replace_quiz_questions(integer, jsonb)', 'authenticated', false),
     ('public.replace_quiz_questions(integer, jsonb)', 'service_role', true),
@@ -84,6 +87,7 @@ select is(
   ),
   array[
     'bulk_update_sibling_display_order(text,jsonb)',
+    'claim_ai_review(integer,integer,integer,text,timestamp with time zone,timestamp with time zone,integer,integer,integer)',
     'claim_email_test_send(integer,timestamp with time zone,integer)',
     'get_quiz_questions(integer)',
     'get_students_progress_summary()',
