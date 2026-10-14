@@ -217,6 +217,30 @@ describe("buildPreviewDocument", () => {
     }
   });
 
+  it("reads an old-style <!--<script> block in a script as the browser does", () => {
+    const build = (content: string) =>
+      buildPreviewDocument([
+        f("index.html", "html", content),
+        f("d.js", "javascript", "run()"),
+        f("s.css", "css", "p{}"),
+      ]);
+    const legacy =
+      '<script><!--\nvar s = "<script></script>"; document.write(\'<link rel="stylesheet" href="s.css"></body>\');\n//--></script>';
+    expect(build(`<body>${legacy}<script defer src="d.js"></script></body>`)).toBe(
+      `<body>${legacy}<script>run()</script></body>`
+    );
+    // Without a "<script" after "<!--", the first "</script>" still ends it.
+    expect(build('<script><!-- a </script><link rel="stylesheet" href="s.css">')).toBe(
+      "<script><!-- a </script><style>p{}</style>"
+    );
+    expect(build('<script><!--><script></script><link rel="stylesheet" href="s.css">')).toBe(
+      "<script><!--><script></script><style>p{}</style>"
+    );
+    expect(build('<p>x</p><script defer src="d.js"></script><script><!--<script></script>')).toBe(
+      "<p>x</p><script>run()</script><script><!--<script></script>"
+    );
+  });
+
   it("ends a script at </script followed by whitespace or /, as the browser does", () => {
     const doc = buildPreviewDocument([
       f(

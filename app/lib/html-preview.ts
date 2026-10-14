@@ -96,7 +96,8 @@ const SCAN = new RegExp(
     String.raw`<(?:[!?]|\/(?![a-z>]))[^>]*(?:>|$)`,
     String.raw`<plaintext${NAME_END}[\s\S]*`,
     String.raw`<(?<raw>${RAW_TEXT})${NAME_END}${ATTRS}(?:>[\s\S]*?(?:${endTag(String.raw`\k<raw>`)}|$)|$)`,
-    String.raw`<script${NAME_END}(?<scriptAttrs>${ATTRS})(?:>(?<scriptBody>[\s\S]*?)(?:${endTag("script")}|$)|$)`,
+    // Only the start tag: the body is found by findScriptEnd(), which a regex cannot follow.
+    String.raw`<script${NAME_END}(?<scriptAttrs>${ATTRS})(?:>|$)`,
     String.raw`<(?<link>link)${NAME_END}${ATTRS}(?:>|$)`,
     String.raw`<(?<bodyClose>\/body)${NAME_END}${ATTRS}(?:>|$)`,
     String.raw`<(?<element>head|body)${NAME_END}${ATTRS}(?:>|$)`,
@@ -106,7 +107,58 @@ const SCAN = new RegExp(
   "gi"
 );
 
-const RAW_START = new RegExp(String.raw`^<(script|plaintext|${RAW_TEXT})${NAME_END}`, "i");
+const RAW_START = new RegExp(String.raw`^<(plaintext|${RAW_TEXT})${NAME_END}`, "i");
+
+const SCRIPT_TOKENS = /<!--|-->|<(\/?)script(?=[\t\n\f\r />])/gi;
+const DASHES_THEN_GT = /-*>/y;
+const END_TAG_REST = /[^>]*(?:>|$)/y;
+
+/**
+ * Finds where an inline script's body ends, following the tokenizer's script data states: after
+ * "<!--", a "<script" makes the next "</script" part of the text ("double escaped"), so old-style
+ * `<!-- document.write("<script></script>") -->` code does not end there. Matching on the first
+ * "</script" instead would read the rest of the learner's JavaScript as markup and inline or
+ * insert scripts into it. Steps from token to token, so it is linear and needs no regex
+ * backtracking (which JavaScriptCore cannot afford on long inputs).
+ */
+function findScriptEnd(
+  source: string,
+  from: number
+): { bodyEnd: number; end: number; closed: boolean } {
+  let state: "data" | "escaped" | "double" = "data";
+  SCRIPT_TOKENS.lastIndex = from;
+  for (let t = SCRIPT_TOKENS.exec(source); t; t = SCRIPT_TOKENS.exec(source)) {
+    const after = t.index + t[0].length;
+    if (t[0] === "<!--") {
+      if (state === "data") {
+        // "<!-->" and "<!--->" open and close at once.
+        DASHES_THEN_GT.lastIndex = after;
+        if (DASHES_THEN_GT.test(source)) {
+          SCRIPT_TOKENS.lastIndex = DASHES_THEN_GT.lastIndex;
+        } else {
+          state = "escaped";
+        }
+      } else {
+        // Outside the data state "<!" is plain text; its dashes may still start a "-->".
+        SCRIPT_TOKENS.lastIndex = t.index + 2;
+      }
+    } else if (t[0] === "-->") {
+      state = "data";
+    } else if (t[1] === "/") {
+      if (state === "double") {
+        state = "escaped";
+      } else {
+        END_TAG_REST.lastIndex = after;
+        END_TAG_REST.test(source);
+        const end = END_TAG_REST.lastIndex;
+        return { bodyEnd: t.index, end, closed: source[end - 1] === ">" };
+      }
+    } else if (state === "escaped") {
+      state = "double";
+    }
+  }
+  return { bodyEnd: source.length, end: source.length, closed: false };
+}
 
 /** False for a scan match that ran to the end of the document without its terminator. */
 function isClosed(match: string): boolean {
@@ -167,7 +219,7 @@ export function buildPreviewDocument(
   const deferred: string[] = [];
   let preludePlaced = headPrelude === "";
   let preludeSearchOpen = true;
-  const transform = (match: string, groups: ScanGroups): string => {
+  const transform = (match: string, groups: ScanGroups, closed: boolean): string => {
     if (groups.bodyClose !== undefined) {
       preludeSearchOpen = false;
       return match;
@@ -187,12 +239,7 @@ export function buildPreviewDocument(
       preludeSearchOpen = false;
       const tag = `<script${groups.scriptAttrs}>`;
       const src = getAttribute(tag, "src");
-      if (
-        !isClosed(match) ||
-        src === null ||
-        groups.scriptBody?.trim() !== "" ||
-        !isRelativeRef(src)
-      ) {
+      if (!closed || src === null || groups.scriptBody?.trim() !== "" || !isRelativeRef(src)) {
         return match;
       }
       const file = findFile(files, src);
@@ -238,8 +285,20 @@ export function buildPreviewDocument(
   let templateAt = -1;
   let expanded = "";
   let lastEnd = 0;
-  for (const m of source.matchAll(SCAN)) {
-    const match = m[0];
+  const scan = new RegExp(SCAN);
+  for (let m = scan.exec(source); m; m = scan.exec(source)) {
+    let match = m[0];
+    const groups: ScanGroups = { ...m.groups };
+    let closed: boolean;
+    if (groups.scriptAttrs !== undefined && match.endsWith(">")) {
+      const body = findScriptEnd(source, m.index + match.length);
+      groups.scriptBody = source.slice(m.index + match.length, body.bodyEnd);
+      match = source.slice(m.index, body.end);
+      scan.lastIndex = body.end;
+      closed = body.closed;
+    } else {
+      closed = isClosed(match);
+    }
     const gap = source.slice(lastEnd, m.index);
     // The tokenizer drops "</>" without emitting anything, so it keeps the preamble open too.
     if (inPreamble && !/^\s*$/.test(gap.replaceAll("</>", ""))) {
@@ -254,7 +313,6 @@ export function buildPreviewDocument(
     if (inPreamble && !/^<(?:\?|!(?!doctype)|\/(?![a-z>]))/i.test(match)) {
       inPreamble = false;
     }
-    const groups: ScanGroups = m.groups ?? {};
     const inTemplate = templateDepth > 0;
     if (groups.template !== undefined && match.endsWith(">")) {
       if (!groups.template.startsWith("/")) {
@@ -270,10 +328,10 @@ export function buildPreviewDocument(
     lastEnd = m.index + match.length;
     // Anything appended after an unclosed construct would become its text (or attributes) and
     // never run, so deferred scripts go in front of it.
-    if (lastEnd === source.length && !isClosed(match)) {
+    if (lastEnd === source.length && !closed) {
       unclosedTail = expanded.length;
     }
-    expanded += inTemplate ? match : transform(match, groups);
+    expanded += inTemplate ? match : transform(match, groups, closed);
   }
   expanded += source.slice(lastEnd);
 
