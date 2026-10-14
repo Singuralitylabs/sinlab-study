@@ -67,8 +67,8 @@ BEGIN
   NEW.grading_rubric := jsonb_build_object(
     'version',
     CASE
-      WHEN jsonb_array_length(old_requirements) = 0 THEN (OLD.grading_rubric ->> 'version')::integer
-      ELSE (OLD.grading_rubric ->> 'version')::integer + 1
+      WHEN jsonb_array_length(old_requirements) = 0 THEN (OLD.grading_rubric ->> 'version')::bigint
+      ELSE (OLD.grading_rubric ->> 'version')::bigint + 1
     END,
     'max_key_number', issued_max,
     'requirements', '[]'::jsonb
