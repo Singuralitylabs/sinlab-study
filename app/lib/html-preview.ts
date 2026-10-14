@@ -62,8 +62,14 @@ function findFile(files: readonly CodeFile[], ref: string): CodeFile | undefined
  * Builds one HTML document from a submission's files. Same-name references (`<link
  * rel="stylesheet" href="style.css">`, `<script src="main.js">`) are inlined because the sandboxed
  * srcDoc iframe has no URL to resolve relative paths against; other references stay untouched.
+ * `headPrelude` (the console bridge) must run before any of the learner's scripts: it goes right
+ * after a <head> that precedes every <script> and <body>, else after the doctype (a script before
+ * the doctype would switch the page into quirks mode), else at the very start.
  */
-export function buildPreviewDocument(files: readonly CodeFile[]): string {
+export function buildPreviewDocument(
+  files: readonly CodeFile[],
+  { headPrelude = "" }: { headPrelude?: string } = {}
+): string {
   const base =
     files.find((f) => f.filename.trim().toLowerCase() === "index.html") ??
     files.find((f) => resolveFileLanguage(f) === "html");
@@ -73,7 +79,7 @@ export function buildPreviewDocument(files: readonly CodeFile[]): string {
     const js = files.filter((f) => resolveFileLanguage(f) === "javascript");
     const styles = css.map((f) => `<style>${escapeClosingTag(f.content, "style")}</style>`);
     const scripts = js.map((f) => `<script>${escapeClosingTag(f.content, "script")}</script>`);
-    return `<!doctype html><html><head><meta charset="utf-8">${styles.join("")}</head><body>${scripts.join("")}</body></html>`;
+    return `<!doctype html><html><head><meta charset="utf-8">${headPrelude}${styles.join("")}</head><body>${scripts.join("")}</body></html>`;
   }
 
   // One left-to-right pass so context is respected: comments and inline <script>/<style> bodies are
@@ -81,15 +87,29 @@ export function buildPreviewDocument(files: readonly CodeFile[]): string {
   // string is not expanded (the browser would not load it either).
   // Inlining drops src, so defer would be lost and the script would run before the DOM exists;
   // deferred scripts are moved to the end of the document instead (module scripts defer natively).
+  // The same pass places headPrelude, so a "<head>" inside a comment, a style or a script string is
+  // never taken for the element (the prelude's </script> would end the learner's script early).
   const deferred: string[] = [];
+  let preludePlaced = headPrelude === "";
+  let preludeSearchOpen = true;
   const expanded = base.content.replace(
-    /<!--[\s\S]*?-->|<style\b[^>]*>[\s\S]*?<\/style\s*>|<script\b([^>]*)>([\s\S]*?)<\/script\s*>|<link\b[^>]*>/gi,
-    (match: string, scriptAttrs?: string, scriptBody?: string) => {
+    /<!--[\s\S]*?-->|<style\b[^>]*>[\s\S]*?<\/style\s*>|<script\b([^>]*)>([\s\S]*?)<\/script\s*>|<link\b[^>]*>|<(head|body)\b[^>]*>/gi,
+    (match: string, scriptAttrs?: string, scriptBody?: string, element?: string) => {
       if (match.startsWith("<!--") || /^<style/i.test(match)) {
         return match;
       }
 
+      if (element !== undefined) {
+        if (preludeSearchOpen && !preludePlaced && element.toLowerCase() === "head") {
+          preludePlaced = true;
+          return match + headPrelude;
+        }
+        preludeSearchOpen = false;
+        return match;
+      }
+
       if (scriptAttrs !== undefined) {
+        preludeSearchOpen = false;
         const tag = `<script${scriptAttrs}>`;
         const src = getAttribute(tag, "src");
         if (src === null || scriptBody?.trim() !== "" || !isRelativeRef(src)) {
@@ -118,12 +138,19 @@ export function buildPreviewDocument(files: readonly CodeFile[]): string {
     }
   );
 
+  const withPrelude = preludePlaced ? expanded : insertAfterDoctype(expanded, headPrelude);
   if (deferred.length === 0) {
-    return expanded;
+    return withPrelude;
   }
   const tail = deferred.join("");
-  const bodyEnd = expanded.search(/<\/body\s*>/i);
+  const bodyEnd = withPrelude.search(/<\/body\s*>/i);
   return bodyEnd === -1
-    ? expanded + tail
-    : expanded.slice(0, bodyEnd) + tail + expanded.slice(bodyEnd);
+    ? withPrelude + tail
+    : withPrelude.slice(0, bodyEnd) + tail + withPrelude.slice(bodyEnd);
+}
+
+function insertAfterDoctype(html: string, content: string): string {
+  const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
+  const at = doctype ? doctype[0].length : 0;
+  return html.slice(0, at) + content + html.slice(at);
 }

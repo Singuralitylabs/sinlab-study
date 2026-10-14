@@ -152,3 +152,72 @@ describe("buildPreviewDocument", () => {
     ).toBe(html);
   });
 });
+
+describe("buildPreviewDocument の headPrelude（コンソール中継の差し込み位置）", () => {
+  const P = "<script>/*bridge*/</script>";
+  const html = (content: string) =>
+    buildPreviewDocument([f("index.html", "html", content)], {
+      headPrelude: P,
+    });
+
+  it("<head> の直後（受講生のスクリプトより前）に入れ、インライン展開したスクリプトより前に来る", () => {
+    const out = buildPreviewDocument(
+      [
+        f(
+          "index.html",
+          "html",
+          '<!doctype html><html><head><script src="main.js"></script></head><body></body></html>'
+        ),
+        f("main.js", "javascript", "run()"),
+      ],
+      { headPrelude: P }
+    );
+    expect(out).toBe(
+      `<!doctype html><html><head>${P}<script>run()</script></head><body></body></html>`
+    );
+  });
+
+  it("html が無い提出（JavaScript 単独）では組み立てた <head> に入れる", () => {
+    const out = buildPreviewDocument([f("main.js", "javascript", "run()")], { headPrelude: P });
+    expect(out).toBe(
+      `<!doctype html><html><head><meta charset="utf-8">${P}</head><body><script>run()</script></body></html>`
+    );
+  });
+
+  it("<header> を <head> と取り違えない", () => {
+    expect(html("<!DOCTYPE html><body><header>h</header></body>")).toBe(
+      `<!DOCTYPE html>${P}<body><header>h</header></body>`
+    );
+  });
+
+  it("<head> が無ければ doctype の直後、doctype も無ければ先頭に入れる", () => {
+    expect(html("<!doctype html><p>x</p>")).toBe(`<!doctype html>${P}<p>x</p>`);
+    expect(html("<p>x</p><script>1</script>")).toBe(`${P}<p>x</p><script>1</script>`);
+  });
+
+  it('<head> が無い文書で、学習者のスクリプト内の文字列 "<head>" に差し込まない', () => {
+    const content = '<body><script>const s = "<head>";</script></body>';
+    expect(html(content)).toBe(`${P}${content}`);
+  });
+
+  it("コメント・<style> の中の <head> は読み飛ばし、本物の <head> の直後に入れる", () => {
+    expect(
+      html(
+        "<!doctype html><!-- <head> --><style>/* <head> */</style><html><head><title>t</title></head></html>"
+      )
+    ).toBe(
+      `<!doctype html><!-- <head> --><style>/* <head> */</style><html><head>${P}<title>t</title></head></html>`
+    );
+  });
+
+  it("<body> より後に現れる <head> は使わない", () => {
+    expect(html("<!doctype html><body><p>x</p><head></head></body>")).toBe(
+      `<!doctype html>${P}<body><p>x</p><head></head></body>`
+    );
+  });
+
+  it("headPrelude を渡さなければ従来と同じ文書を返す", () => {
+    const content = "<!doctype html><html><head></head><body></body></html>";
+    expect(buildPreviewDocument([f("index.html", "html", content)])).toBe(content);
+  });
+});

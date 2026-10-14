@@ -12,7 +12,7 @@ import {
   WEEKLY_DIGEST_RESERVATION_KIND,
 } from "@/app/constants/notifications";
 import { isStripeEnabled } from "@/app/constants/stripe";
-import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { USER_STATUS } from "@/app/constants/user";
 import { isAnnouncementTarget } from "@/app/lib/announcement-target";
 import { compareGroupLevel } from "@/app/lib/content-grouping";
 import { buildThemeContentOrder, type NavigationWeek } from "@/app/lib/content-navigation";
@@ -40,6 +40,7 @@ import { type CronLock, claimCronLock, releaseCronLock } from "@/app/services/ap
 import { fetchEmailSettings } from "@/app/services/api/email-settings-server";
 import { loadEmailTexts } from "@/app/services/api/email-templates-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
+import { isLearnerRole } from "@/app/services/auth/permissions";
 import { type EmailContent, isEmailConfigured } from "@/app/services/notifications/email";
 import {
   buildAnnouncementEmail,
@@ -56,7 +57,7 @@ import {
   type DeliverResult,
   deliverUserEmail,
 } from "@/app/services/notifications/user-emails";
-import type { Announcement, UserStatusType } from "@/app/types";
+import type { Announcement, UserRoleType, UserStatusType } from "@/app/types";
 
 /**
  * Extraction and sending for periodic emails (weekly progress, inactivity reminder, guides for
@@ -119,7 +120,7 @@ async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
     display_name: string;
     status: string;
     membership_type: string | null;
-    role: string;
+    role: UserRoleType;
     created_at: string | null;
   }>((from, to) =>
     supabase
@@ -798,9 +799,9 @@ async function buildQueue(
   announcementBatches: AnnouncementBatch[];
 }> {
   const users = allUsers.filter((user) => !excludedToday.has(user.userId));
-  // Staff (admin / maintainer) review the courses rather than take them; progress nudges and
-  // trial guides would be noise to them, so only announcements reach them.
-  const learners = users.filter((user) => user.role === USER_ROLE.MEMBER);
+  // Staff review the courses rather than take them; progress nudges and trial guides would be
+  // noise to them, so only announcements reach them.
+  const learners = users.filter((user) => isLearnerRole(user.role));
   const trialNurtureSetting = settings.kinds.trial_nurture;
   const inactivitySetting = settings.kinds.inactivity_reminder;
   const weeklySetting = settings.kinds.weekly_digest;

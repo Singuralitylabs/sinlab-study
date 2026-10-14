@@ -22,35 +22,79 @@ export interface PreviewConsoleEntry {
  * It only ever sends: the parent never posts into the frame, so nothing secret crosses with the
  * "*" target origin the opaque-origin frame forces on us. The learner's code can replace any of
  * this, which is harmless: the parent trusts a message only by its event.source.
- * The error formatting uses a tag check rather than instanceof, which misses errors created in
- * another realm; the fallbacks cover circular objects, BigInt inside objects and a throwing
- * toString.
+ * Formatting uses tag checks rather than instanceof, which misses values created in another
+ * realm. JSON is used only for plain objects and arrays: DOM nodes, Map / Set and class instances
+ * have no own enumerable data and would all print as a misleading "{}". %s / %d / %c follow
+ * DevTools so lesson code prints the same here. The fallbacks cover circular objects, BigInt
+ * inside objects and a throwing toString.
  */
 const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLength) {
   var sent = 0;
   var toTag = function (value) { return Object.prototype.toString.call(value); };
+  var json = function (value) {
+    var text = JSON.stringify(value);
+    return typeof text === "string" ? text : String(value);
+  };
+  var collect = function (iterable, isMap) {
+    var items = [];
+    iterable.forEach(function (v, k) { items.push(isMap ? [k, v] : v); });
+    return items;
+  };
   var format = function (value) {
     try {
       if (typeof value === "string") return value;
+      if (typeof value === "function") return "ƒ " + (value.name || "anonymous") + "()";
+      if (typeof value !== "object" || value === null) return String(value);
       var tag = toTag(value);
       if (tag === "[object Error]" || tag === "[object DOMException]") {
         return String(value.name) + ": " + String(value.message);
       }
-      if (typeof value === "object" && value !== null) {
-        var json = JSON.stringify(value);
-        return typeof json === "string" ? json : String(value);
+      if (typeof value.nodeType === "number" && typeof value.nodeName === "string") {
+        if (value.nodeType === 1) {
+          var el = "<" + String(value.tagName).toLowerCase();
+          if (value.id) el += ' id="' + value.id + '"';
+          if (typeof value.className === "string" && value.className) {
+            el += ' class="' + value.className + '"';
+          }
+          return el + ">";
+        }
+        if (value.nodeType === 3) return '#text "' + value.data + '"';
+        return value.nodeName;
       }
-      return String(value);
+      if (tag === "[object Map]" || tag === "[object Set]") {
+        return tag.slice(8, -1) + "(" + value.size + ") " + json(collect(value, tag === "[object Map]"));
+      }
+      if (tag === "[object Date]" || tag === "[object RegExp]") return String(value);
+      var proto = Object.getPrototypeOf(value);
+      if (Array.isArray(value) || proto === Object.prototype || proto === null) return json(value);
+      var name = proto && proto.constructor && proto.constructor.name;
+      return (name ? name + " " : "") + json(value);
     } catch (e) {
       try { return toTag(value); } catch (e2) { return "[unprintable]"; }
     }
   };
+  var render = function (values) {
+    var rest = values.slice();
+    var head = "";
+    if (typeof rest[0] === "string" && rest[0].indexOf("%") !== -1) {
+      head = rest.shift().replace(/%[sdifoOc%]/g, function (spec) {
+        if (spec === "%%") return "%";
+        if (rest.length === 0) return spec;
+        var arg = rest.shift();
+        if (spec === "%c") return "";
+        if (spec === "%d" || spec === "%i") return String(parseInt(arg, 10));
+        if (spec === "%f") return String(parseFloat(arg));
+        return format(arg);
+      });
+    }
+    var parts = head === "" ? [] : [head];
+    for (var i = 0; i < rest.length; i++) parts.push(format(rest[i]));
+    return parts.join(" ");
+  };
   var send = function (level, values) {
     if (sent >= maxEntries) return;
     sent++;
-    var parts = [];
-    for (var i = 0; i < values.length; i++) parts.push(format(values[i]));
-    var text = parts.join(" ");
+    var text = render(values);
     if (text.length > maxTextLength) text = text.slice(0, maxTextLength - 1) + "…";
     try {
       win.parent.postMessage({ type: messageType, level: level, text: text }, "*");
@@ -82,43 +126,6 @@ export function buildPreviewConsoleBridgeScript(): string {
   return `<script>(${BRIDGE_SOURCE})(window,console,${JSON.stringify(
     PREVIEW_CONSOLE_MESSAGE_TYPE
   )},${PREVIEW_CONSOLE_MAX_ENTRIES + 1},${PREVIEW_CONSOLE_MAX_TEXT_LENGTH});</script>`;
-}
-
-// Comments and <style> bodies are skipped whole; scanning stops at the first <body> or <script>,
-// because the bridge has to precede every script anyway and a "<head>" inside a script string must
-// not be taken for the element (the bridge's </script> would end the learner's script early).
-const HEAD_SCAN =
-  /<!--[\s\S]*?-->|<style\b[^>]*>[\s\S]*?<\/style\s*>|<(head|body|script)\b[^>]*>/gi;
-
-function findHeadEnd(html: string): number | null {
-  for (const match of html.matchAll(HEAD_SCAN)) {
-    const tag = match[1]?.toLowerCase();
-    if (tag === "head") {
-      return (match.index ?? 0) + match[0].length;
-    }
-    if (tag === "body" || tag === "script") {
-      return null;
-    }
-  }
-  return null;
-}
-
-/**
- * Puts the bridge before any of the learner's scripts: right after <head>, else after the doctype
- * (a script before the doctype would switch the page into quirks mode), else at the very start.
- */
-export function injectPreviewConsoleBridge(html: string): string {
-  const bridge = buildPreviewConsoleBridgeScript();
-  const headEnd = findHeadEnd(html);
-  if (headEnd !== null) {
-    return html.slice(0, headEnd) + bridge + html.slice(headEnd);
-  }
-  const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
-  if (doctype) {
-    const at = doctype[0].length;
-    return html.slice(0, at) + bridge + html.slice(at);
-  }
-  return bridge + html;
 }
 
 /** Shape check for a message already known to come from our frame; anything else is dropped. */

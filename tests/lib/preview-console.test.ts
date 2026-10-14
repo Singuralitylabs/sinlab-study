@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   acceptPreviewConsoleMessage,
   buildPreviewConsoleBridgeScript,
-  injectPreviewConsoleBridge,
   PREVIEW_CONSOLE_MAX_ENTRIES,
   PREVIEW_CONSOLE_MAX_TEXT_LENGTH,
   PREVIEW_CONSOLE_MESSAGE_TYPE,
@@ -24,17 +23,21 @@ function runBridge() {
   };
   const script = buildPreviewConsoleBridgeScript();
   const body = script.replace(/^<script>/, "").replace(/<\/script>$/, "");
-  vm.runInNewContext(body, { window: fakeWindow, console: fakeConsole });
+  const context = vm.createContext({ window: fakeWindow, console: fakeConsole });
+  vm.runInContext(body, context);
   const call = (method: string, ...args: unknown[]) =>
     (fakeConsole[method] as (...a: unknown[]) => void)(...args);
+  // Values made inside the context share its realm, as the learner's values share the iframe's.
+  const run = (code: string) => vm.runInContext(code, context);
   const sent = () => postMessage.mock.calls.map(([message]) => message);
-  return { postMessage, listeners, original, call, sent };
+  const texts = () => sent().map((message) => message.text);
+  return { postMessage, listeners, original, call, run, sent, texts };
 }
 
 describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
   it("console.log / warn / error を整形して親へ送り、元の console も呼ぶ", () => {
-    const { postMessage, original, call, sent } = runBridge();
-    call("log", "合計", 42, { a: 1 }, [1, 2], null, undefined);
+    const { postMessage, original, call, run, sent } = runBridge();
+    run('console.log("合計", 42, { a: 1 }, [1, 2], null, undefined)');
     call("info", "info");
     call("warn", "注意");
     call("error", new TypeError("x is not a function"));
@@ -54,16 +57,60 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
       },
     ]);
     expect(postMessage.mock.calls.every(([, targetOrigin]) => targetOrigin === "*")).toBe(true);
-    expect(original.log).toHaveBeenCalledWith("合計", 42, { a: 1 }, [1, 2], null, undefined);
+    expect(original.log).toHaveBeenCalledWith(
+      "合計",
+      42,
+      expect.anything(),
+      expect.anything(),
+      null,
+      undefined
+    );
     expect(original.warn).toHaveBeenCalledWith("注意");
   });
 
   it("循環参照のオブジェクトでも例外にせず送る", () => {
-    const { call, sent } = runBridge();
-    const circular: Record<string, unknown> = {};
-    circular.self = circular;
-    expect(() => call("log", circular)).not.toThrow();
+    const { run, sent } = runBridge();
+    expect(() => run("const c = {}; c.self = c; console.log(c)")).not.toThrow();
     expect(sent()[0].text).toBe("[object Object]");
+  });
+
+  it("DOM 要素・Map / Set・クラスのインスタンス・関数を {} ではなく要約で送る", () => {
+    const { run, texts } = runBridge();
+    run(`
+      console.log({ nodeType: 1, nodeName: "DIV", tagName: "DIV", id: "x", className: "box" });
+      console.log({ nodeType: 3, nodeName: "#text", data: "hi" });
+      console.log(new Map([["a", 1]]), new Set([1, 2]));
+      class Point { constructor() { this.x = 1; } }
+      console.log(new Point(), new (class Empty {})());
+      console.log(function greet() {}, () => {});
+      console.log(/a+/g, new Date(0));
+    `);
+    expect(texts()).toEqual([
+      '<div id="x" class="box">',
+      '#text "hi"',
+      'Map(1) [["a",1]] Set(2) [1,2]',
+      'Point {"x":1} Empty {}',
+      "ƒ greet() ƒ anonymous()",
+      `/a+/g ${run("String(new Date(0))")}`,
+    ]);
+  });
+
+  it("%s / %d / %i / %f / %o / %c / %% を DevTools と同じように置き換える", () => {
+    const { run, texts } = runBridge();
+    run(`
+      console.log("合計: %d 件", 5);
+      console.log("%s さん %i 歳 %f", "山田", "20.9", "1.5");
+      console.log("%c赤%c と %o", "color:red", "", { a: 1 });
+      console.log("100%% 完了", "extra");
+      console.log("%d と %d", 1);
+    `);
+    expect(texts()).toEqual([
+      "合計: 5 件",
+      "山田 さん 20 歳 1.5",
+      '赤 と {"a":1}',
+      "100% 完了 extra",
+      "1 と %d",
+    ]);
   });
 
   it("未捕捉のエラーと Promise の拒否をエラーとして送る", () => {
@@ -105,52 +152,9 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
   });
 });
 
-describe("injectPreviewConsoleBridge", () => {
-  const bridge = buildPreviewConsoleBridgeScript();
-
-  it("<head> の直後（受講生のスクリプトより前）に入れる", () => {
-    const html =
-      '<!doctype html><html><head><script src="a.js"></script></head><body></body></html>';
-    const out = injectPreviewConsoleBridge(html);
-    expect(out.startsWith(`<!doctype html><html><head>${bridge}<script`)).toBe(true);
-  });
-
-  it("<header> を <head> と取り違えない", () => {
-    const out = injectPreviewConsoleBridge("<!DOCTYPE html><body><header>h</header></body>");
-    expect(out).toBe(`<!DOCTYPE html>${bridge}<body><header>h</header></body>`);
-  });
-
-  it("<head> が無ければ doctype の直後、doctype も無ければ先頭に入れる", () => {
-    expect(injectPreviewConsoleBridge("<!doctype html><p>x</p>")).toBe(
-      `<!doctype html>${bridge}<p>x</p>`
-    );
-    expect(injectPreviewConsoleBridge("<p>x</p><script>1</script>")).toBe(
-      `${bridge}<p>x</p><script>1</script>`
-    );
-  });
-
-  it('<head> が無い文書で、学習者のスクリプト内の文字列 "<head>" に差し込まない', () => {
-    const html = '<body><script>const s = "<head>";</script></body>';
-    expect(injectPreviewConsoleBridge(html)).toBe(`${bridge}${html}`);
-  });
-
-  it("コメント・<style> の中の <head> は読み飛ばし、本物の <head> の直後に入れる", () => {
-    const html =
-      "<!doctype html><!-- <head> --><style>/* <head> */</style><html><head><title>t</title></head></html>";
-    expect(injectPreviewConsoleBridge(html)).toBe(
-      `<!doctype html><!-- <head> --><style>/* <head> */</style><html><head>${bridge}<title>t</title></head></html>`
-    );
-  });
-
-  it("<body> より後に現れる <head> は使わない", () => {
-    const html = "<!doctype html><body><p>&lt;head&gt;</p><head></head></body>";
-    expect(injectPreviewConsoleBridge(html)).toBe(
-      `<!doctype html>${bridge}<body><p>&lt;head&gt;</p><head></head></body>`
-    );
-  });
-
+describe("buildPreviewConsoleBridgeScript", () => {
   it("差し込むスクリプトは途中で閉じタグを含まない", () => {
-    expect(bridge.match(/<\/script/gi)).toHaveLength(1);
+    expect(buildPreviewConsoleBridgeScript().match(/<\/script/gi)).toHaveLength(1);
   });
 });
 

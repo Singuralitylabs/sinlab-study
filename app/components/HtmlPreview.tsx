@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { buildPreviewDocument } from "@/app/lib/html-preview";
 import {
   acceptPreviewConsoleMessage,
-  injectPreviewConsoleBridge,
+  buildPreviewConsoleBridgeScript,
   PREVIEW_CONSOLE_MAX_ENTRIES,
   type PreviewConsoleEntry,
 } from "@/app/lib/preview-console";
@@ -20,6 +20,8 @@ interface HtmlPreviewProps {
 }
 
 const DEBOUNCE_MS = 300;
+
+const CONSOLE_BRIDGE = buildPreviewConsoleBridgeScript();
 
 const LEVEL_CLASS: Record<PreviewConsoleEntry["level"], string> = {
   log: "text-foreground",
@@ -42,9 +44,9 @@ export function HtmlPreview({ files, collapsible = false }: HtmlPreviewProps) {
 
   const srcDoc = useMemo(
     () =>
-      injectPreviewConsoleBridge(
-        buildPreviewDocument(JSON.parse(debouncedSignature) as CodeFile[])
-      ),
+      buildPreviewDocument(JSON.parse(debouncedSignature) as CodeFile[], {
+        headPrelude: CONSOLE_BRIDGE,
+      }),
     [debouncedSignature]
   );
 
@@ -97,26 +99,39 @@ export function HtmlPreview({ files, collapsible = false }: HtmlPreviewProps) {
 
 function PreviewRun({ srcDoc, showConsole }: { srcDoc: string; showConsole: boolean }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  // Holds up to MAX + 1 lines; the extra one only signals that output was cut off.
   const [entries, setEntries] = useState<PreviewConsoleEntry[]>([]);
-  const [truncated, setTruncated] = useState(false);
-  const received = useRef(0);
 
   useEffect(() => {
+    // Each postMessage arrives as its own task, so a logging loop would re-render the list once per
+    // line; lines are batched and flushed once per animation frame instead.
+    let pending: PreviewConsoleEntry[] = [];
+    let kept = 0;
+    let frame: number | null = null;
+    const flush = () => {
+      frame = null;
+      const batch = pending;
+      pending = [];
+      setEntries((prev) => [...prev, ...batch]);
+    };
     const onMessage = (event: MessageEvent) => {
       const entry = acceptPreviewConsoleMessage(event, iframeRef.current?.contentWindow);
-      if (!entry) {
+      if (!entry || kept > PREVIEW_CONSOLE_MAX_ENTRIES) {
         return;
       }
-      if (received.current >= PREVIEW_CONSOLE_MAX_ENTRIES) {
-        setTruncated(true);
-        return;
-      }
-      received.current++;
-      setEntries((prev) => [...prev, entry]);
+      kept++;
+      pending.push(entry);
+      frame ??= requestAnimationFrame(flush);
     };
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+      }
+    };
   }, []);
+  const truncated = entries.length > PREVIEW_CONSOLE_MAX_ENTRIES;
 
   return (
     <>
@@ -144,7 +159,7 @@ function PreviewRun({ srcDoc, showConsole }: { srcDoc: string; showConsole: bool
           ) : (
             // Rendered as React text (textContent), never as HTML: the lines are the learner's.
             <ol className="max-h-60 overflow-y-auto px-3 py-2 font-mono text-xs">
-              {entries.map((entry, index) => (
+              {entries.slice(0, PREVIEW_CONSOLE_MAX_ENTRIES).map((entry, index) => (
                 <li
                   // biome-ignore lint/suspicious/noArrayIndexKey: an append-only log; identical lines are common.
                   key={index}
