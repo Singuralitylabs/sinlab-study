@@ -165,7 +165,8 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
     }
     var parts = head === "" ? [] : [head];
     for (var i = 0; i < rest.length; i++) {
-      // console.log(...hugeArray) passes every element as an argument; stop at the budget.
+      // Spreading a huge array into one console call passes every element as an argument; stop at
+      // the budget.
       if (ctx.left <= 0) {
         parts.push("\u2026");
         break;
