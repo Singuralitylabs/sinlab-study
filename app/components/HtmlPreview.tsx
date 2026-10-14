@@ -1,7 +1,7 @@
 "use client";
 
 import { Eye, EyeOff, RefreshCw, Terminal } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { buildPreviewDocument } from "@/app/lib/html-preview";
 import {
   acceptPreviewConsoleMessage,
@@ -102,7 +102,9 @@ function PreviewRun({ srcDoc, showConsole }: { srcDoc: string; showConsole: bool
   // Holds up to MAX + 1 lines; the extra one only signals that output was cut off.
   const [entries, setEntries] = useState<PreviewConsoleEntry[]>([]);
 
-  useEffect(() => {
+  // A layout effect registers in the same commit that inserts the iframe, so the bridge's first
+  // lines cannot arrive before the listener exists (a passive effect runs a task later).
+  useLayoutEffect(() => {
     // Each postMessage arrives as its own task, so a logging loop would re-render the list once per
     // line; lines are batched and flushed once per animation frame instead.
     let pending: PreviewConsoleEntry[] = [];

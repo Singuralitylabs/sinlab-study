@@ -107,6 +107,7 @@ Unit Tests (多数)
 ## 5. テスト規約
 
 - テストコードは `tests/` 配下に、対象コード（`app/` 配下）の構造に寄せて配置する。
+- Vitest の既定環境は `node`。DOM での状態遷移（イベント受信・再マウント）を確かめるコンポーネントテストだけ、ファイル先頭の `// @vitest-environment happy-dom` で `happy-dom` に切り替え、`react-dom/client` と `act()` で描画する（例: `tests/components/HtmlPreview.state.test.ts`）。静的な出力だけを見るものは `renderToStaticMarkup` のまま `node` で書く。
 - ファイル名は `*.test.ts` に統一し、「対象 + 期待する振る舞い」が想像できる名前にする（例: `tests/services/auth/permissions.test.ts`）。実装済みテストの一覧は `tests/` を参照。
 - **検証する**: 関数の入力に対する出力（返り値）、副作用の結果（状態変化）、エラー時の振る舞い。返り値を持たない関数は副作用の結果（更新値・更新対象）を検証する。
 - **検証しない**: 内部実装の呼び出し手順（クエリメソッドをどの引数で呼んだか等）。モックは外部依存を切り離すために使い、モック呼び出し引数の逐次検証は原則行わない。

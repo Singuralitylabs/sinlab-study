@@ -63,8 +63,8 @@ function findFile(files: readonly CodeFile[], ref: string): CodeFile | undefined
  * rel="stylesheet" href="style.css">`, `<script src="main.js">`) are inlined because the sandboxed
  * srcDoc iframe has no URL to resolve relative paths against; other references stay untouched.
  * `headPrelude` (the console bridge) must run before any of the learner's scripts: it goes right
- * after a <head> that precedes every <script> and <body>, else after the doctype (a script before
- * the doctype would switch the page into quirks mode), else at the very start.
+ * after a <head> that precedes every <script> and <body>, else at the very start. Putting it ahead
+ * of a doctype is safe here: an iframe srcdoc document is never in quirks mode.
  */
 export function buildPreviewDocument(
   files: readonly CodeFile[],
@@ -138,7 +138,7 @@ export function buildPreviewDocument(
     }
   );
 
-  const withPrelude = preludePlaced ? expanded : insertAfterDoctype(expanded, headPrelude);
+  const withPrelude = preludePlaced ? expanded : headPrelude + expanded;
   if (deferred.length === 0) {
     return withPrelude;
   }
@@ -147,10 +147,4 @@ export function buildPreviewDocument(
   return bodyEnd === -1
     ? withPrelude + tail
     : withPrelude.slice(0, bodyEnd) + tail + withPrelude.slice(bodyEnd);
-}
-
-function insertAfterDoctype(html: string, content: string): string {
-  const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
-  const at = doctype ? doctype[0].length : 0;
-  return html.slice(0, at) + content + html.slice(at);
 }

@@ -531,7 +531,9 @@ async function generateValidatedJson<T>({
         });
         break;
       } catch (error) {
-        lastError = error;
+        // A retry started late can be cut off by the overall deadline; reporting that abort as a
+        // timeout would hide the 503 that caused the retry, so the retried error is kept instead.
+        lastError = isTimeoutError(error) && isRetryableError(lastError) ? lastError : error;
 
         const delay = GEMINI_RETRY_BASE_DELAY_MS * 2 ** attempt;
         if (

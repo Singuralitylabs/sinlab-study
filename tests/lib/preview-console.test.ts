@@ -95,6 +95,41 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
     ]);
   });
 
+  it("配列・オブジェクト・Map・NodeList の中の DOM 要素やエラーも {} にせず要約する", () => {
+    const { run, texts } = runBridge();
+    run(`
+      const li = (id) => ({ nodeType: 1, nodeName: "LI", tagName: "LI", id: id, className: "" });
+      class NodeList { constructor() { this[0] = li("a"); this[1] = li("b"); } }
+      console.log(new NodeList());
+      console.log([li("a")], { el: li("b"), err: new Error("x"), fn() {} });
+      console.log(new Map([["k", li("c")]]));
+    `);
+    expect(texts()).toEqual([
+      'NodeList {"0":"<li id=\\"a\\">","1":"<li id=\\"b\\">"}',
+      '["<li id=\\"a\\">"] {"el":"<li id=\\"b\\">","err":"Error: x","fn":"ƒ fn()"}',
+      'Map(1) [["k","<li id=\\"c\\">"]]',
+    ]);
+  });
+
+  it("互いを参照するインスタンスでも再帰が止まる", () => {
+    const { run, texts } = runBridge();
+    expect(() =>
+      run(`
+        class A {} class B {}
+        const a = new A(); const b = new B(); a.b = b; b.a = a;
+        console.log(a);
+      `)
+    ).not.toThrow();
+    expect(texts()[0]).toMatch(/^A /);
+  });
+
+  it("引数が1つだけなら書式指定子を置き換えない（DevTools と同じ）", () => {
+    const { run, texts, listeners } = runBridge();
+    run('console.log("進捗 100%% 完了 %s")');
+    listeners.error({ message: "Uncaught Error: 100%% done" });
+    expect(texts()).toEqual(["進捗 100%% 完了 %s", "Uncaught Error: 100%% done"]);
+  });
+
   it("%d に Symbol や null プロトタイプのオブジェクトを渡しても受講生の console.log を止めない", () => {
     const { run, texts, original } = runBridge();
     expect(() =>
@@ -105,7 +140,7 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
         console.log("続き");
       `)
     ).not.toThrow();
-    expect(texts()).toEqual(["NaN", "NaN", "{}", "続き"]);
+    expect(texts()).toEqual(["NaN", "NaN", '{"toString":"ƒ toString()"}', "続き"]);
     expect(original.log).toHaveBeenCalledTimes(4);
   });
 

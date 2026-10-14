@@ -23,16 +23,32 @@ export interface PreviewConsoleEntry {
  * "*" target origin the opaque-origin frame forces on us. The learner's code can replace any of
  * this, which is harmless: the parent trusts a message only by its event.source.
  * Formatting uses tag checks rather than instanceof, which misses values created in another
- * realm. JSON is used only for plain objects and arrays: DOM nodes, Map / Set and class instances
- * have no own enumerable data and would all print as a misleading "{}". %s / %d / %c follow
- * DevTools so lesson code prints the same here. The fallbacks cover circular objects, BigInt
- * inside objects and a throwing toString.
+ * realm. JSON is used only for plain objects and arrays, and the replacer summarises any other
+ * object nested inside them: DOM nodes, errors, Map / Set and class instances have no own
+ * enumerable data and would all print as a misleading "{}" (a NodeList of <li> included). The
+ * depth cap keeps instances that point at each other from recursing without end. Format
+ * specifiers apply only with more than one argument, as in DevTools (a lone "100%%" stays as is).
+ * The fallbacks cover circular objects, BigInt inside objects and a throwing toString.
  */
 const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLength) {
   var sent = 0;
   var toTag = function (value) { return Object.prototype.toString.call(value); };
-  var json = function (value) {
-    var text = JSON.stringify(value);
+  var isNode = function (value) {
+    return typeof value.nodeType === "number" && typeof value.nodeName === "string";
+  };
+  var isPlain = function (value) {
+    var proto = Object.getPrototypeOf(value);
+    return Array.isArray(value) || proto === Object.prototype || proto === null;
+  };
+  var json = function (value, depth) {
+    var text = JSON.stringify(value, function (key, v) {
+      if (key === "") return v;
+      var nested = typeof v === "object" && v !== null && (isNode(v) || !isPlain(v));
+      if (typeof v === "function" || nested) {
+        return format(v, depth + 1);
+      }
+      return v;
+    });
     return typeof text === "string" ? text : String(value);
   };
   var collect = function (iterable, isMap) {
@@ -40,7 +56,8 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
     iterable.forEach(function (v, k) { items.push(isMap ? [k, v] : v); });
     return items;
   };
-  var format = function (value) {
+  var format = function (value, depth) {
+    depth = depth || 0;
     try {
       if (typeof value === "string") return value;
       if (typeof value === "function") return "ƒ " + (value.name || "anonymous") + "()";
@@ -49,7 +66,7 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
       if (tag === "[object Error]" || tag === "[object DOMException]") {
         return String(value.name) + ": " + String(value.message);
       }
-      if (typeof value.nodeType === "number" && typeof value.nodeName === "string") {
+      if (isNode(value)) {
         if (value.nodeType === 1) {
           var el = "<" + String(value.tagName).toLowerCase();
           if (value.id) el += ' id="' + value.id + '"';
@@ -61,14 +78,16 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
         if (value.nodeType === 3) return '#text "' + value.data + '"';
         return value.nodeName;
       }
-      if (tag === "[object Map]" || tag === "[object Set]") {
-        return tag.slice(8, -1) + "(" + value.size + ") " + json(collect(value, tag === "[object Map]"));
-      }
       if (tag === "[object Date]" || tag === "[object RegExp]") return String(value);
+      if (depth > 2) return tag;
+      if (tag === "[object Map]" || tag === "[object Set]") {
+        var items = collect(value, tag === "[object Map]");
+        return tag.slice(8, -1) + "(" + value.size + ") " + json(items, depth);
+      }
+      if (isPlain(value)) return json(value, depth);
       var proto = Object.getPrototypeOf(value);
-      if (Array.isArray(value) || proto === Object.prototype || proto === null) return json(value);
       var name = proto && proto.constructor && proto.constructor.name;
-      return (name ? name + " " : "") + json(value);
+      return (name ? name + " " : "") + json(value, depth);
     } catch (e) {
       try { return toTag(value); } catch (e2) { return "[unprintable]"; }
     }
@@ -76,7 +95,7 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
   var render = function (values) {
     var rest = values.slice();
     var head = "";
-    if (typeof rest[0] === "string" && rest[0].indexOf("%") !== -1) {
+    if (rest.length > 1 && typeof rest[0] === "string" && rest[0].indexOf("%") !== -1) {
       head = rest.shift().replace(/%[sdifoOc%]/g, function (spec) {
         if (spec === "%%") return "%";
         if (rest.length === 0) return spec;

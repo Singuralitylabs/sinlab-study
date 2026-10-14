@@ -869,6 +869,27 @@ describe("generateReview", () => {
     expect(generateContentMock).toHaveBeenCalledTimes(1);
   });
 
+  it("503 のリトライが全体の期限で打ち切られたら、タイムアウトではなく混雑として報告し status をログに残す", async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    generateContentMock
+      .mockRejectedValueOnce(new ApiError({ message: "overloaded", status: 503 }))
+      .mockRejectedValueOnce(new DOMException("The operation was aborted.", "AbortError"));
+
+    const settled = generateReview(baseParams).catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+    const error = await settled;
+
+    expect((error as Error).message).toBe(
+      "AIが混み合っています。しばらく時間を置いてから再試行してください。"
+    );
+    expect(generateContentMock).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("status=503"),
+      expect.any(String)
+    );
+  });
+
   it("応答がタイムアウトした場合は日本語のタイムアウトメッセージを投げ、リトライしない", async () => {
     generateContentMock.mockRejectedValue(
       new DOMException("The operation was aborted.", "AbortError")
