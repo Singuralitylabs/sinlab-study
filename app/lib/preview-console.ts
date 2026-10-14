@@ -74,7 +74,7 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
       return clip(value.name) + ": " + clip(value.message);
     }
     if (isNode(value)) return describeNode(value);
-    if (tag === "[object Date]" || tag === "[object RegExp]") return String(value);
+    if (tag === "[object Date]" || tag === "[object RegExp]") return clip(String(value));
     if (tag === "[object Window]" || value.window === value) return "Window";
     if (ctx.seen.indexOf(value) !== -1) return "[Circular]";
     var proto = Object.getPrototypeOf(value);

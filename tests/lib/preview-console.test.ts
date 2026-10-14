@@ -275,7 +275,7 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
     }
   });
 
-  it("巨大な Error の message・関数名・キー・Symbol の説明も先に切り、短時間で返す", () => {
+  it("巨大な Error の message・関数名・キー・Symbol の説明・Date / RegExp の文字列も先に切り、短時間で返す", () => {
     const { run, texts } = runBridge();
     run(`
       var s = "y".repeat(5e7);
@@ -283,9 +283,12 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
       var f = function () {}; Object.defineProperty(f, "name", { value: s });
       var o = {}; o[s] = 1;
       var sym = Symbol(s);
+      var r = { [Symbol.toStringTag]: "RegExp", toString() { return s; } };
+      var d = new Date(0); d.toString = function () { return s; };
     `);
     const startedAt = Date.now();
     run("console.log([e, e]); console.log([f, f]); console.log([o, o]); console.log([sym, sym]);");
+    run("console.log([r, r]); console.log([d, d]);");
     expect(Date.now() - startedAt).toBeLessThan(3000);
     for (const text of texts()) {
       expect(text.length).toBeLessThanOrEqual(PREVIEW_CONSOLE_MAX_TEXT_LENGTH);

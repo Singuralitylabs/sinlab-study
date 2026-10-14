@@ -58,6 +58,36 @@ function findFile(files: readonly CodeFile[], ref: string): CodeFile | undefined
   return files.find((file) => file.filename.trim() === name);
 }
 
+interface ScanGroups {
+  raw?: string;
+  scriptAttrs?: string;
+  scriptBody?: string;
+  element?: string;
+}
+
+// Branch order matters: comment, doctype and bogus comment ("<?xml ...?>", "<![CDATA[") all start
+// with "<!" or "<?" and the first two must win. <title> / <textarea> are raw text like <style>, so
+// a "<head>" inside them is not the element.
+// Every branch may also end at the end of the document (an unclosed comment, tag or element, as
+// the browser reads it). Otherwise each unclosed "<head" / "<link" / "<!--" would rescan to the
+// end before failing: quadratic in the length, freezing whoever opens the submission.
+// Comments end where the browser ends them, including the abrupt "<!-->" / "<!--->" and the
+// incorrectly closed "--!>", so a typo there does not swallow the rest of the document.
+const SCAN =
+  /<!--(?:>|->|[\s\S]*?(?:--!?>|$))|<!doctype[^>]*(?:>|$)|<[!?][^>]*(?:>|$)|<(?<raw>style|title|textarea)\b[^>]*(?:>[\s\S]*?(?:<\/\k<raw>\s*>|$)|$)|<script\b(?<scriptAttrs>[^>]*)(?:>(?<scriptBody>[\s\S]*?)(?:<\/script\s*>|$)|$)|<link\b[^>]*(?:>|$)|<\/body\s*>|<(?<element>head|body)\b[^>]*(?:>|$)/gi;
+
+/** False for a scan match that ran to the end of the document without its terminator. */
+function isClosed(match: string): boolean {
+  if (match.startsWith("<!--")) {
+    return match.endsWith("-->") || match.endsWith("--!>");
+  }
+  const raw = /^<(script|style|title|textarea)\b/i.exec(match);
+  if (raw) {
+    return new RegExp(`</${raw[1]}\\s*>$`, "i").test(match);
+  }
+  return match.endsWith(">");
+}
+
 /**
  * Builds one HTML document from a submission's files. Same-name references (`<link
  * rel="stylesheet" href="style.css">`, `<script src="main.js">`) are inlined because the sandboxed
@@ -88,34 +118,24 @@ export function buildPreviewDocument(
   // string is not expanded (the browser would not load it either).
   // Inlining drops src, so defer would be lost and the script would run before the DOM exists;
   // deferred scripts are moved to the end of the document instead (module scripts defer natively).
-  // The same pass places headPrelude, so a "<head>" inside a comment, a style or a script string is
-  // never taken for the element (the prelude's </script> would end the learner's script early).
+  // The same pass places headPrelude and finds </body>, so a "<head>" or "</body>" inside a comment,
+  // a style or a script string is never taken for the element (an inserted </script> would end the
+  // learner's script early, and a script inserted into a comment never runs).
+  const source = base.content;
   const deferred: string[] = [];
   let preludePlaced = headPrelude === "";
   let preludeSearchOpen = true;
-  // A leading doctype (after only whitespace and comments) is found in this same pass, not by a
-  // second regex over the preamble: that one needed a backtracking frame per character and, on a
-  // few MB of leading comments, lost the doctype in Safari and threw RangeError in Chrome.
-  let inPreamble = true;
-  let lastEnd = 0;
-  let outputShift = 0;
-  let afterDoctype = -1;
-  const transform = (
-    match: string,
-    scriptAttrs: string | undefined,
-    scriptBody: string | undefined,
-    element: string | undefined
-  ): string => {
-    if (match.startsWith("<!--") || /^<style/i.test(match)) {
+  const transform = (match: string, groups: ScanGroups): string => {
+    if (match.startsWith("</")) {
+      preludeSearchOpen = false;
+      return match;
+    }
+    if (match.startsWith("<!") || match.startsWith("<?") || groups.raw !== undefined) {
       return match;
     }
 
-    if (/^<!doctype/i.test(match)) {
-      return match;
-    }
-
-    if (element !== undefined) {
-      const isHead = element.toLowerCase() === "head" && match.endsWith(">");
+    if (groups.element !== undefined) {
+      const isHead = groups.element.toLowerCase() === "head" && match.endsWith(">");
       if (preludeSearchOpen && !preludePlaced && isHead) {
         preludePlaced = true;
         return match + headPrelude;
@@ -124,12 +144,16 @@ export function buildPreviewDocument(
       return match;
     }
 
-    if (scriptAttrs !== undefined) {
+    if (groups.scriptAttrs !== undefined) {
       preludeSearchOpen = false;
-      const tag = `<script${scriptAttrs}>`;
+      const tag = `<script${groups.scriptAttrs}>`;
       const src = getAttribute(tag, "src");
-      const closed = /<\/script\s*>$/i.test(match);
-      if (!closed || src === null || scriptBody?.trim() !== "" || !isRelativeRef(src)) {
+      if (
+        !isClosed(match) ||
+        src === null ||
+        groups.scriptBody?.trim() !== "" ||
+        !isRelativeRef(src)
+      ) {
         return match;
       }
       const file = findFile(files, src);
@@ -158,48 +182,55 @@ export function buildPreviewDocument(
     const file = findFile(files, href);
     return file ? `<style>${escapeClosingTag(file.content, "style")}</style>` : match;
   };
-  // Every branch may also end at the end of the document (an unclosed comment, tag or element, as
-  // the browser reads it). Otherwise each unclosed "<head" / "<link" / "<!--" would rescan to the
-  // end before failing: quadratic in the length, freezing whoever opens the submission.
-  // Unclosed matches are returned unchanged below.
-  // Comments end where the browser ends them, including the abrupt "<!-->" / "<!--->" and the
-  // incorrectly closed "--!>", so a typo there does not swallow the rest of the document.
-  const expanded = base.content.replace(
-    /<!--(?:>|->|[\s\S]*?(?:--!?>|$))|<!doctype\b[^>]*(?:>|$)|<style\b[^>]*(?:>[\s\S]*?(?:<\/style\s*>|$)|$)|<script\b([^>]*)(?:>([\s\S]*?)(?:<\/script\s*>|$)|$)|<link\b[^>]*(?:>|$)|<(head|body)\b[^>]*(?:>|$)/gi,
-    (
-      match: string,
-      scriptAttrs: string | undefined,
-      scriptBody: string | undefined,
-      element: string | undefined,
-      offset: number
-    ) => {
-      if (inPreamble && !/^\s*$/.test(base.content.slice(lastEnd, offset))) {
-        inPreamble = false;
-      }
-      const isComment = match.startsWith("<!--");
-      if (inPreamble && afterDoctype === -1 && /^<!doctype[^>]*>$/i.test(match)) {
-        afterDoctype = offset + outputShift + match.length;
-      }
-      if (inPreamble && !isComment) {
-        inPreamble = false;
-      }
-      lastEnd = offset + match.length;
-      const out = transform(match, scriptAttrs, scriptBody, element);
-      outputShift += out.length - match.length;
-      return out;
-    }
-  );
 
-  const at = afterDoctype === -1 ? 0 : afterDoctype;
-  const withPrelude = preludePlaced
-    ? expanded
-    : expanded.slice(0, at) + headPrelude + expanded.slice(at);
+  // A leading doctype (after only whitespace and comments) is found in this same pass, not by a
+  // second regex over the preamble: that one needed a backtracking frame per character and, on a
+  // few MB of leading comments, lost the doctype in Safari and threw RangeError in Chrome.
+  let inPreamble = true;
+  let afterDoctype = -1;
+  let bodyEnd = -1;
+  let unclosedTail = -1;
+  let expanded = "";
+  let lastEnd = 0;
+  for (const m of source.matchAll(SCAN)) {
+    const match = m[0];
+    const gap = source.slice(lastEnd, m.index);
+    if (inPreamble && !/^\s*$/.test(gap)) {
+      inPreamble = false;
+    }
+    expanded += gap;
+    if (inPreamble && afterDoctype === -1 && /^<!doctype[^>]*>$/i.test(match)) {
+      afterDoctype = expanded.length + match.length;
+    }
+    // The tree builder ignores comments (bogus ones such as "<?xml ...?>" included) before the
+    // doctype, so they keep the preamble open.
+    if (inPreamble && !/^<(?:\?|!(?!doctype))/i.test(match)) {
+      inPreamble = false;
+    }
+    if (bodyEnd === -1 && match.startsWith("</")) {
+      bodyEnd = expanded.length;
+    }
+    lastEnd = m.index + match.length;
+    // Anything appended after an unclosed construct would become its text (or attributes) and
+    // never run, so deferred scripts go in front of it.
+    if (lastEnd === source.length && !isClosed(match)) {
+      unclosedTail = expanded.length;
+    }
+    expanded += transform(match, m.groups ?? {});
+  }
+  expanded += source.slice(lastEnd);
+
+  const preludeAt = preludePlaced ? -1 : afterDoctype === -1 ? 0 : afterDoctype;
+  const withPrelude =
+    preludeAt === -1
+      ? expanded
+      : expanded.slice(0, preludeAt) + headPrelude + expanded.slice(preludeAt);
   if (deferred.length === 0) {
     return withPrelude;
   }
-  const tail = deferred.join("");
-  const bodyEnd = withPrelude.search(/<\/body\s*>/i);
-  return bodyEnd === -1
-    ? withPrelude + tail
-    : withPrelude.slice(0, bodyEnd) + tail + withPrelude.slice(bodyEnd);
+  let deferAt = bodyEnd !== -1 ? bodyEnd : unclosedTail !== -1 ? unclosedTail : expanded.length;
+  if (preludeAt !== -1 && deferAt >= preludeAt) {
+    deferAt += headPrelude.length;
+  }
+  return withPrelude.slice(0, deferAt) + deferred.join("") + withPrelude.slice(deferAt);
 }

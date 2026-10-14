@@ -106,6 +106,48 @@ describe("buildPreviewDocument", () => {
     expect(doc).toBe("<p>x</p><script>run()</script>");
   });
 
+  it("moves defer scripts before the real </body>, not one inside a string, comment or style", () => {
+    const build = (content: string) =>
+      buildPreviewDocument([f("index.html", "html", content), f("d.js", "javascript", "run()")]);
+    const D = '<script src="d.js" defer></script>';
+    expect(build(`<head>${D}</head><body><script>var s = "</body>";</script><p>x</p></body>`)).toBe(
+      '<head></head><body><script>var s = "</body>";</script><p>x</p><script>run()</script></body>'
+    );
+    expect(build(`<body>${D}<!-- old: </body> --><p>x</p></body>`)).toBe(
+      "<body><!-- old: </body> --><p>x</p><script>run()</script></body>"
+    );
+    expect(build(`<head><style>/* </body> */</style></head><body>${D}<p>x</p></body>`)).toBe(
+      "<head><style>/* </body> */</style></head><body><p>x</p><script>run()</script></body>"
+    );
+  });
+
+  it("puts defer scripts in front of an unclosed construct at the end, where they would not run", () => {
+    const build = (content: string) =>
+      buildPreviewDocument([f("index.html", "html", content), f("d.js", "javascript", "run()")]);
+    const D = '<script src="d.js" defer></script>';
+    for (const tail of [
+      "<!-- memo",
+      "<style>p{color:red}",
+      "<script>x()",
+      '<link rel="stylesheet" href="s.css" ',
+      "<title>t",
+    ]) {
+      expect(build(`<p>x</p>${D}${tail}`)).toBe(`<p>x</p><script>run()</script>${tail}`);
+    }
+    expect(build(`<p>x</p>${D}<!-- memo -->`)).toBe("<p>x</p><!-- memo --><script>run()</script>");
+  });
+
+  it("keeps the prelude ahead of defer scripts that share its position", () => {
+    const doc = buildPreviewDocument(
+      [
+        f("index.html", "html", '<!doctype html><script src="d.js" defer></script></body>'),
+        f("d.js", "javascript", "run()"),
+      ],
+      { headPrelude: "<script>/*bridge*/</script>" }
+    );
+    expect(doc).toBe("<!doctype html><script>/*bridge*/</script><script>run()</script></body>");
+  });
+
   it("escapes <!-- in script content only", () => {
     const doc = buildPreviewDocument([
       f("index.html", "html", '<link rel="stylesheet" href="s.css"><script src="m.js"></script>'),
@@ -205,6 +247,25 @@ describe("buildPreviewDocument の headPrelude（コンソール中継の差し�
     );
     const spaces = " ".repeat(9e6);
     expect(html(`${spaces}<!doctype html><p>x</p>`)).toBe(`${spaces}<!doctype html>${P}<p>x</p>`);
+  });
+
+  it("先頭の bogus comment（<?xml ?> 等）の後や、空白の無い <!doctypehtml> も doctype として扱う", () => {
+    expect(html('<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html><p>x</p>')).toBe(
+      `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>${P}<p>x</p>`
+    );
+    expect(html("<![CDATA[x]]><!doctype html><p>x</p>")).toBe(
+      `<![CDATA[x]]><!doctype html>${P}<p>x</p>`
+    );
+    expect(html("<!doctypehtml><p>x</p>")).toBe(`<!doctypehtml>${P}<p>x</p>`);
+  });
+
+  it("<title> / <textarea> の中の <head> は要素として扱わない", () => {
+    expect(html("<!doctype html><title>a<head>b</title><p>x</p><script>1</script>")).toBe(
+      `<!doctype html>${P}<title>a<head>b</title><p>x</p><script>1</script>`
+    );
+    expect(html("<textarea><head></textarea><script>1</script>")).toBe(
+      `${P}<textarea><head></textarea><script>1</script>`
+    );
   });
 
   it("本文や要素の後に現れる doctype は先頭扱いしない", () => {
