@@ -599,8 +599,6 @@ export const EmailTemplatePreviewSchema = z
   .strict()
   .superRefine(refineTemplatePlaceholders);
 
-export const EmailTemplateResetSchema = z.object({ template_key: EmailTemplateKeySchema }).strict();
-
 export async function validateRequest<T extends z.ZodType>(
   request: Request,
   schema: T

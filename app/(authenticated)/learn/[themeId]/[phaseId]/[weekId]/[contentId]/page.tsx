@@ -67,6 +67,14 @@ export default async function ContentPage({ params }: PageProps) {
 
   const { userId, userStatus, userRole } = await getServerAuth();
 
+  // Started before the other fetches so a slow Stripe call overlaps them instead of adding to them.
+  // Never rejects (falls back internally), so an unawaited promise is safe.
+  const stripeEnabled = isStripeEnabled();
+  const priceLabelPromise =
+    stripeEnabled && userStatus === USER_STATUS.TRIAL
+      ? fetchUpgradePriceLabel()
+      : Promise.resolve(null);
+
   // Members/trial users fetch the summary via service_role; admin/maintainer use the normal client so
   // unpublished content is included.
   const [{ data: week }, { data: navigation }, { data: content }] = await Promise.all([
@@ -123,11 +131,10 @@ export default async function ContentPage({ params }: PageProps) {
   const isLocked = isContentLockedForUser(userStatus, summary.is_open_to_trial);
 
   if (isLocked) {
-    const stripeEnabled = isStripeEnabled();
     // No description lookup on purpose: RLS returns 0 rows for trial-locked content, so it could
     // never show, and widening the service_role allow-list would break the AGENTS.md invariant.
     // The counts reuse the navigation summaries, so no new service_role call is added.
-    const priceLabel = stripeEnabled ? await fetchUpgradePriceLabel() : null;
+    const priceLabel = await priceLabelPromise;
     const paidOnlyCount = navigation?.paidOnlyCount ?? 0;
     const paidOnlyExerciseCount = navigation?.paidOnlyExerciseCount ?? 0;
 

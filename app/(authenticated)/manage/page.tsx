@@ -1,6 +1,7 @@
 import { BookOpen, Calendar, ClipboardList, FileText, FolderOpen, Users } from "lucide-react";
 import Link from "next/link";
 import { PageTitle } from "@/app/components/PageTitle";
+import { formatDate } from "@/app/lib/format-date";
 import { fetchManageCounts, fetchWeeklyFunnel } from "@/app/services/api/admin-server";
 import { fetchRecentSubmissions } from "@/app/services/api/submissions-server";
 import { Card, CardContent } from "@/components/ui/card";
@@ -106,9 +107,7 @@ export default async function ManageDashboardPage() {
                     <p className="text-sm text-muted-foreground">{submission.content?.title}</p>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {submission.submitted_at
-                      ? new Date(submission.submitted_at).toLocaleDateString("ja-JP")
-                      : "-"}
+                    {submission.submitted_at ? formatDate(submission.submitted_at) : "-"}
                   </p>
                 </div>
               ))}

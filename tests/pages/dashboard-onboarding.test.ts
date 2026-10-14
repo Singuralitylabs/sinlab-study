@@ -41,6 +41,7 @@ import {
   fetchGettingStartedProgress,
   fetchOnboardingStatus,
 } from "@/app/services/api/onboarding-server";
+import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const themeSummary = (completedContents: number) => ({
@@ -209,6 +210,7 @@ describe("ダッシュボードの「次のステップ」カード（issue #288
     expect(html).toContain("お試しコンテンツをすべて完了しました");
     expect(html).toContain('href="/upgrade"');
     expect(html).toContain('data-analytics-source="dashboard_card"');
+    expect(html).toContain("月額1,500円（税込）");
     expect(html.indexOf("次のステップ")).toBeLessThan(
       html.indexOf('data-testid="getting-started"') === -1
         ? Number.POSITIVE_INFINITY
@@ -224,6 +226,7 @@ describe("ダッシュボードの「次のステップ」カード（issue #288
 
     expect(html).toContain("本登録は運営の承認で行います");
     expect(html).not.toContain('href="/upgrade"');
+    expect(fetchUpgradePriceLabel).not.toHaveBeenCalled();
   });
 
   it.each([

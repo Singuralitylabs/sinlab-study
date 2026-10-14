@@ -10,6 +10,7 @@ import {
   USER_ROLE,
   USER_STATUS,
 } from "@/app/constants/user";
+import { formatDate, formatDateTime } from "@/app/lib/format-date";
 import type { ManageUserListItem, MembershipType, UserRoleType, UserStatusType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -336,7 +337,7 @@ export function UserManagementTable({
                             <>
                               <Badge variant="destructive">配信停止中</Badge>
                               <span className="text-xs text-muted-foreground">
-                                {new Date(user.email_opt_out_at).toLocaleString("ja-JP")}
+                                {formatDateTime(user.email_opt_out_at)}
                               </span>
                             </>
                           ) : (
@@ -358,9 +359,7 @@ export function UserManagementTable({
                       )}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {user.created_at
-                        ? new Date(user.created_at).toLocaleDateString("ja-JP")
-                        : "-"}
+                      {user.created_at ? formatDate(user.created_at) : "-"}
                     </td>
                     <td className="px-4 py-3">
                       {isLoading ? (

@@ -11,6 +11,7 @@ import {
   ANNOUNCEMENT_EMAIL_RETRY_DAYS,
   EMAIL_DIGEST_MAX_PER_DAY,
   EMAIL_DIGEST_SEND_INTERVAL_MS,
+  EMAIL_DIGEST_TIME_BUDGET_MS,
   INACTIVITY_REMINDER_DAYS,
   TRIAL_NURTURE_DAYS,
 } from "@/app/constants/notifications";
@@ -354,6 +355,7 @@ function setup(
     user_progress?: Row[];
     submissions?: Row[];
     announcements?: Row[];
+    email_logs?: Row[];
     email_kind_settings?: Row[];
     email_settings?: Row[];
     email_templates?: Row[];
@@ -831,7 +833,7 @@ describe("1回あたりの上限と繰り越し", () => {
     setup({ users: manyUsers(3) });
     let now = 0;
     vi.mocked(sendEmail).mockImplementation(async () => {
-      now += 30_000;
+      now += EMAIL_DIGEST_TIME_BUDGET_MS * 0.6;
       return { status: "sent", messageId: "msg" };
     });
 
@@ -1116,6 +1118,64 @@ describe("お知らせのメール一斉送信（#254）", () => {
     ).toEqual([
       [1, true, null],
       [2, true, null],
+    ]);
+  });
+
+  it("当日送れない宛先（別の販促メール受信済み）の前日の失敗行は消さず、完了にもしない", async () => {
+    const { db } = setup({
+      users: [userRow(1)],
+      announcements: [announcementRow()],
+      email_logs: [
+        {
+          id: 9001,
+          user_id: 1,
+          kind: "announcement",
+          reference_key: "501",
+          sent_at: null,
+          error: "Resend API がエラーを返しました: status=500",
+          created_at: "2026-10-06T10:00:00.000Z",
+        },
+        {
+          id: 9002,
+          user_id: 1,
+          kind: "inactivity_reminder",
+          reference_key: "2026-10-07",
+          sent_at: "2026-10-06T23:00:00.000Z",
+          error: null,
+          created_at: "2026-10-06T23:00:00.000Z",
+        },
+      ],
+    });
+
+    const wednesday = await runDigest(WEDNESDAY);
+
+    expect(wednesday).toMatchObject({ sent: 0, announcementsCompleted: 0 });
+    expect(announcementLogs(db).map((row) => row.id)).toEqual([9001]);
+    expect(db.announcements[0].email_sent_at).toBeNull();
+  });
+
+  it("同じ宛先に複数のお知らせの前日の失敗行があるとき、この実行で送る1件だけ消し、残りは残す", async () => {
+    const failedRow = (id: number, referenceKey: string): Row => ({
+      id,
+      user_id: 1,
+      kind: "announcement",
+      reference_key: referenceKey,
+      sent_at: null,
+      error: "Resend API がエラーを返しました: status=500",
+      created_at: "2026-10-06T10:00:00.000Z",
+    });
+    const { db } = setup({
+      users: [userRow(1)],
+      announcements: [announcementRow({ id: 501 }), announcementRow({ id: 502 })],
+      email_logs: [failedRow(9001, "501"), failedRow(9002, "502")],
+    });
+
+    const wednesday = await runDigest(WEDNESDAY);
+
+    expect(wednesday).toMatchObject({ sent: 1, announcementsCompleted: 1 });
+    expect(announcementLogs(db).map((row) => [row.id, row.reference_key])).toEqual([
+      [9002, "502"],
+      [expect.any(Number), "501"],
     ]);
   });
 
@@ -1564,6 +1624,24 @@ describe("メール通知の管理設定（#272）", () => {
       expect(monday).toMatchObject({ sent: 0, weeklyReservationMissing: false });
       expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining("予約が無い"));
       expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("設定が今サイクル"));
+    });
+
+    it("設定の更新時刻が PostgREST 形式（+00:00）で今サイクルの開始と同一秒でも、変更ありとして扱う", async () => {
+      for (const updatedAt of [
+        "2026-10-04T15:00:00+00:00",
+        "2026-10-04T15:00:00.000+00:00",
+        "2026-10-04T15:00:00.000000+00:00",
+      ]) {
+        vi.clearAllMocks();
+        const { db } = setup({ users: [userRow(1)] });
+        const weekly = db.email_kind_settings.find((row) => row.kind === "weekly_digest") as Row;
+        weekly.updated_at = updatedAt; // Mon 10/5 00:00 JST sharp = cycleStart
+
+        const result = await runDigest(new Date("2026-10-07T23:00:00Z")); // Thu, past catch-up
+
+        expect(result).toMatchObject({ sent: 0, weeklyReservationMissing: false });
+        expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("設定が今サイクル"));
+      }
     });
 
     it("無効から再有効化した週は、警告せずに次の送信日から再開する", async () => {
