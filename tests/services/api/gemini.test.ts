@@ -37,6 +37,7 @@ import {
   generateGradingRubricDraft,
   generateReview,
   isRateLimitError,
+  isRetryableError,
   isTimeoutError,
   parseReviewResponse,
   ReviewGenerationError,
@@ -44,6 +45,7 @@ import {
   redactApiKey,
   resolveGeminiApiKey,
   SYSTEM_PROMPT,
+  toUserFacingErrorMessage,
 } from "@/app/services/api/gemini";
 
 const MEMBER_KEY = "member-api-key";
@@ -135,6 +137,51 @@ describe("isRateLimitError", () => {
   it("Error 以外は false", () => {
     expect(isRateLimitError({ status: 429 })).toBe(false);
     expect(isRateLimitError(null)).toBe(false);
+  });
+});
+
+describe("isRetryableError", () => {
+  it.each([429, 500, 503])("ApiError の status が %i なら true（一時的なエラー）", (status) => {
+    expect(isRetryableError(new ApiError({ message: "transient", status }))).toBe(true);
+  });
+
+  it.each([400, 401, 403, 404, 504])("ApiError でも %i は false（恒久的なエラー）", (status) => {
+    expect(isRetryableError(new ApiError({ message: "permanent", status }))).toBe(false);
+  });
+
+  it("ApiError 以外は false（型ベース判定）", () => {
+    expect(isRetryableError(new Error("503 Service Unavailable"))).toBe(false);
+    expect(isRetryableError({ status: 503 })).toBe(false);
+    expect(isRetryableError(null)).toBe(false);
+  });
+});
+
+describe("toUserFacingErrorMessage", () => {
+  const rawBody = JSON.stringify({
+    error: {
+      code: 503,
+      message: "This model is currently experiencing high demand.",
+      status: "UNAVAILABLE",
+    },
+  });
+
+  it("503 / 500 は混雑の案内にし、API応答の生JSONを含めない", () => {
+    for (const status of [500, 503]) {
+      const message = toUserFacingErrorMessage(new ApiError({ message: rawBody, status }), "k");
+      expect(message).toBe("AIが混み合っています。しばらく時間を置いてから再試行してください。");
+      expect(message).not.toContain("{");
+    }
+  });
+
+  it("400 などの ApiError もステータスコードのみを示し、生JSON・キーを含めない", () => {
+    const message = toUserFacingErrorMessage(
+      new ApiError({
+        message: `{"error":{"code":400,"message":"bad ${MEMBER_KEY}"}}`,
+        status: 400,
+      }),
+      MEMBER_KEY
+    );
+    expect(message).toBe("AIレビューの生成中にエラーが発生しました（コード: 400）。");
   });
 });
 
@@ -656,6 +703,83 @@ describe("generateReview", () => {
     await vi.runAllTimersAsync();
     await assertion;
     expect(generateContentMock).toHaveBeenCalledTimes(GEMINI_MAX_RETRIES + 1);
+  });
+
+  it("503 は指数バックオフでリトライし、成功応答があればレビューを生成する", async () => {
+    vi.useFakeTimers();
+    const setTimeoutSpy = vi.spyOn(global, "setTimeout");
+    const overloadedError = new ApiError({ message: '{"error":{"code":503}}', status: 503 });
+    generateContentMock
+      .mockRejectedValueOnce(overloadedError)
+      .mockRejectedValueOnce(overloadedError)
+      .mockResolvedValueOnce({ text: rubricResponse() });
+
+    const resultPromise = generateReview(baseParams);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(generateContentMock).toHaveBeenCalledTimes(GEMINI_MAX_RETRIES + 1);
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), GEMINI_RETRY_BASE_DELAY_MS);
+    expect(setTimeoutSpy).toHaveBeenCalledWith(
+      expect.any(Function),
+      GEMINI_RETRY_BASE_DELAY_MS * 2
+    );
+    expect(result.overallScore).toBe(80);
+  });
+
+  it("503 が続いてリトライが尽きたら日本語の混雑メッセージを投げ、生JSONを含めない", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const rawBody =
+      '{"error":{"code":503,"message":"This model is currently experiencing high demand.","status":"UNAVAILABLE"}}';
+    generateContentMock.mockRejectedValue(new ApiError({ message: rawBody, status: 503 }));
+
+    const resultPromise = generateReview(baseParams);
+    const settled = resultPromise.catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+    const error = await settled;
+
+    expect(error).toBeInstanceOf(ReviewGenerationError);
+    expect((error as Error).message).toBe(
+      "AIが混み合っています。しばらく時間を置いてから再試行してください。"
+    );
+    expect((error as Error).message).not.toContain("UNAVAILABLE");
+    expect(generateContentMock).toHaveBeenCalledTimes(GEMINI_MAX_RETRIES + 1);
+  });
+
+  it("503 が即座に返らず全体予算を使い切った場合は、リトライ回数が残っていても待機せず打ち切る", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const overloadedError = new ApiError({ message: "overloaded", status: 503 });
+    generateContentMock.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          setTimeout(() => reject(overloadedError), GEMINI_TOTAL_BUDGET_MS - 1000);
+        })
+    );
+
+    const startedAt = Date.now();
+    const resultPromise = generateReview(baseParams);
+    const assertion = expect(resultPromise).rejects.toThrow(
+      "AIが混み合っています。しばらく時間を置いてから再試行してください。"
+    );
+    await vi.runAllTimersAsync();
+    await assertion;
+
+    expect(generateContentMock).toHaveBeenCalledTimes(1);
+    expect(Date.now() - startedAt).toBeLessThanOrEqual(GEMINI_TOTAL_BUDGET_MS);
+  });
+
+  it("400 の ApiError はリトライせず、生JSONの代わりにステータスコードだけを示す", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    generateContentMock.mockRejectedValue(
+      new ApiError({ message: `{"error":{"code":400,"message":"key ${MEMBER_KEY}"}}`, status: 400 })
+    );
+
+    await expect(generateReview(baseParams)).rejects.toThrow(
+      "AIレビューの生成中にエラーが発生しました（コード: 400）。"
+    );
+    expect(generateContentMock).toHaveBeenCalledTimes(1);
   });
 
   it("429 以外のエラーはリトライせず、メッセージからキーを除去して投げる", async () => {

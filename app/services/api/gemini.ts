@@ -17,6 +17,7 @@ import {
   GEMINI_MODEL_NAME,
   GEMINI_REQUEST_TIMEOUT_MS,
   GEMINI_RETRY_BASE_DELAY_MS,
+  GEMINI_RETRYABLE_STATUSES,
   GEMINI_TEMPERATURE,
   GEMINI_THINKING_LEVEL,
   GEMINI_TOTAL_BUDGET_MS,
@@ -366,6 +367,11 @@ export function isRateLimitError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 429;
 }
 
+/** Transient errors worth a backoff retry; see GEMINI_RETRYABLE_STATUSES for the choice. */
+export function isRetryableError(error: unknown): error is ApiError {
+  return error instanceof ApiError && GEMINI_RETRYABLE_STATUSES.includes(error.status);
+}
+
 /**
  * Whether the error came from config.abortSignal (AbortSignal.timeout()/any()).
  * The SDK wraps the caller's signal in its own AbortController and calls `controller.abort()`
@@ -390,6 +396,33 @@ export function redactApiKey(text: string, apiKey: string): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const RATE_LIMIT_MESSAGE =
+  "Gemini APIの利用上限に達しました。しばらく時間を置いてから再試行してください。";
+const OVERLOADED_MESSAGE = "AIが混み合っています。しばらく時間を置いてから再試行してください。";
+const TIMEOUT_MESSAGE =
+  "Gemini APIの応答がタイムアウトしました。しばらく時間を置いてから再試行してください。";
+
+/**
+ * The message stored in ai_reviews.error_message and shown to the learner as is. An ApiError's
+ * message is the raw English JSON body of the response, so it never goes there; the status code
+ * alone is enough for an operator, who gets the full (redacted) body from the server log.
+ */
+export function toUserFacingErrorMessage(error: unknown, apiKey: string): string {
+  if (isRateLimitError(error)) {
+    return RATE_LIMIT_MESSAGE;
+  }
+  if (isRetryableError(error)) {
+    return OVERLOADED_MESSAGE;
+  }
+  if (isTimeoutError(error)) {
+    return TIMEOUT_MESSAGE;
+  }
+  if (error instanceof ApiError) {
+    return `AIレビューの生成中にエラーが発生しました（コード: ${error.status}）。`;
+  }
+  return toSafeError(error, apiKey).message;
 }
 
 function toSafeError(error: unknown, apiKey: string): Error {
@@ -427,7 +460,7 @@ interface StructuredRequest<T> {
 
 /**
  * Calls Gemini for validated JSON. A response that fails validation is regenerated once; both
- * generations (and any 429 waits) share one GEMINI_TOTAL_BUDGET_MS deadline so the route's
+ * generations (and any retry waits) share one GEMINI_TOTAL_BUDGET_MS deadline so the route's
  * maxDuration still holds. Tokens of every response are summed, including the failed first one,
  * because Gemini bills them.
  */
@@ -447,7 +480,8 @@ async function generateValidatedJson<T>({
   let lastReason = EMPTY_RESPONSE_MESSAGE;
 
   // Cap the total of all attempts plus retry waits at GEMINI_TOTAL_BUDGET_MS even if each attempt
-  // waits close to GEMINI_REQUEST_TIMEOUT_MS instead of failing fast on 429 (maxDuration guard).
+  // waits close to GEMINI_REQUEST_TIMEOUT_MS instead of failing fast on a retried status
+  // (maxDuration guard).
   const deadlineAt = Date.now() + GEMINI_TOTAL_BUDGET_MS;
   const overallSignal = AbortSignal.timeout(GEMINI_TOTAL_BUDGET_MS);
 
@@ -490,12 +524,12 @@ async function generateValidatedJson<T>({
 
         const delay = GEMINI_RETRY_BASE_DELAY_MS * 2 ** attempt;
         if (
-          isRateLimitError(error) &&
+          isRetryableError(error) &&
           attempt < GEMINI_MAX_RETRIES &&
           Date.now() + delay < deadlineAt
         ) {
           console.warn(
-            `Gemini APIレート制限 (試行 ${attempt + 1}/${GEMINI_MAX_RETRIES + 1})、${delay}ms後にリトライ`
+            `Gemini API一時エラー status=${error.status} (試行 ${attempt + 1}/${GEMINI_MAX_RETRIES + 1})、${delay}ms後にリトライ`
           );
           await sleep(delay);
           continue;
@@ -509,19 +543,13 @@ async function generateValidatedJson<T>({
       if (validationAttempt > 0) {
         break;
       }
-      if (isRateLimitError(lastError)) {
-        throw new ReviewGenerationError(
-          "Gemini APIの利用上限に達しました。しばらく時間を置いてから再試行してください。",
-          usage
+      if (lastError instanceof ApiError) {
+        console.error(
+          `Gemini APIエラー status=${lastError.status}:`,
+          toSafeError(lastError, apiKey).message
         );
       }
-      if (isTimeoutError(lastError)) {
-        throw new ReviewGenerationError(
-          "Gemini APIの応答がタイムアウトしました。しばらく時間を置いてから再試行してください。",
-          usage
-        );
-      }
-      throw new ReviewGenerationError(toSafeError(lastError, apiKey).message, usage);
+      throw new ReviewGenerationError(toUserFacingErrorMessage(lastError, apiKey), usage);
     }
 
     usage = addUsage(usage, response.usageMetadata);

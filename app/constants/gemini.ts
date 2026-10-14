@@ -27,10 +27,21 @@ export const GEMINI_TEMPERATURE = 0;
  */
 export const GEMINI_VALIDATION_ATTEMPTS = 2;
 
-/** Retries on 429 (excluding the first attempt); total attempts = GEMINI_MAX_RETRIES + 1. */
+/**
+ * Retries on a transient error (excluding the first attempt); total attempts =
+ * GEMINI_MAX_RETRIES + 1.
+ */
 export const GEMINI_MAX_RETRIES = 2;
 
-/** Initial 429 retry wait (ms); exponential backoff (2^attempt) after that. */
+/**
+ * HTTP statuses retried with backoff: 429 (rate limit), 503 (model overloaded) and 500 (Google
+ * documents INTERNAL as transient and retryable). 504 is left out: Google returns it when the
+ * request itself is too large to finish in time, so resending the same prompt only burns the
+ * budget. 4xx other than 429 are permanent (bad request, key, permission) and never retried.
+ */
+export const GEMINI_RETRYABLE_STATUSES: readonly number[] = [429, 500, 503];
+
+/** Initial retry wait (ms); exponential backoff (2^attempt) after that. */
 export const GEMINI_RETRY_BASE_DELAY_MS = 5000;
 
 /**
@@ -40,7 +51,7 @@ export const GEMINI_RETRY_BASE_DELAY_MS = 5000;
 export const GEMINI_REQUEST_TIMEOUT_MS = 25_000;
 
 /**
- * Cap for all of generateReview() (attempts + retry waits). Even when 429s take close to
+ * Cap for all of generateReview() (attempts + retry waits). Even when retried errors take close to
  * GEMINI_REQUEST_TIMEOUT_MS to return, this keeps the total within /api/ai-review's maxDuration
  * (hardcoded in route.ts). Keep it well below maxDuration to leave room for DB round trips.
  */

@@ -794,7 +794,9 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 | `incomplete` | 採点完了前（`pending` / `processing` / `failed`） | なし。確保時に書き、完了時に上の3つのいずれかへ置き換わる。既定の `legacy` は使わない |
 
 - **合否**: `rubric` のときだけ `passed` を記録する。合格は「未達成の要件が 1 つもない かつ 点数 ≥ `CERTIFICATE_PASS_SCORE`」。**`CERTIFICATE_PASS_SCORE` が 0（既定）の間は無効で、`passed` は NULL のまま**・画面にも合否を出さない。値を決めるときは `scripts/grading-dry-run.ts` の分布を見たうえで定数を変える PR を出す
-- **検証失敗時の再生成**: JSON として不正・スキーマ違反の応答は **1 回だけ**再生成する。2 回とも失敗したら `failed`（受講生の回数に数えない）。再生成を含む全試行と 429 のリトライ待機は `GEMINI_TOTAL_BUDGET_MS` を共有する（`maxDuration` を超えない）
+- **検証失敗時の再生成**: JSON として不正・スキーマ違反の応答は **1 回だけ**再生成する。2 回とも失敗したら `failed`（受講生の回数に数えない）。再生成を含む全試行と 一時エラーのリトライ待機は `GEMINI_TOTAL_BUDGET_MS` を共有する（`maxDuration` を超えない）
+- **一時エラーのリトライ（#354）**: Gemini API が `GEMINI_RETRYABLE_STATUSES`（429・500・503）を返したときは指数バックオフ（`GEMINI_RETRY_BASE_DELAY_MS` × 2^n、最大 `GEMINI_MAX_RETRIES` 回）でリトライする。待機後に `GEMINI_TOTAL_BUDGET_MS` を超える場合はリトライせず打ち切る。それ以外の 4xx（400・401・403 等）は恒久的なエラーとしてリトライしない。504 はリクエスト自体が大きすぎるときに返るため、同じ内容の再送で予算を使い切らないよう対象外とする
+- **失敗メッセージ**: `ai_reviews.error_message` は受講生の画面にそのまま出るため、API 応答の本文（英語の生 JSON）は入れない。429 は「利用上限」、500・503 は「AIが混み合っています。しばらく時間を置いてから再試行してください。」、タイムアウトは「応答がタイムアウト」の案内、その他の API エラーは「AIレビューの生成中にエラーが発生しました（コード: N）。」とする（`toUserFacingErrorMessage()`）。応答本文はキーを伏せてサーバーログにのみ出す
 - **URL の扱い**: URL 提出は URL の中身を AI が確認できないため要件判定をしない（`none`）。URL 形式の妥当性と課題への適合性の所見のみ返す
 - **トークン記録**: `prompt_tokens`（入力）・`completion_tokens`（回答）・`thoughts_tokens`（思考。`usageMetadata.thoughtsTokenCount`）を保存する。再生成した場合は両方の応答を合算し、失敗時も消費分を `failed` 行に記録する（`ReviewGenerationError.usage`）。同じ提出の再試行では `failed` 行を再利用するため、各列は試行をまたいだ累計になる（再試行で消さず加算する）。取得できなかった項目は NULL。管理画面（`/manage/submissions`）の admin / maintainer にのみ表示し、受講生向けの SELECT 列には含めない
 - **表示**: `review_json` から `StructuredReview` で描画する。要件のコメント・品質のコメント・改善提案・学習アドバイスは `MarkdownRenderer` で描画する（生 HTML は描画しない）。`legacy` と、`review_json` が不正な行は従来どおり `review_content`（Markdown）を表示する。`estimated` は「参考」、`none` は「採点対象外」のバッジを付ける。`passed = false`（有効時）のときは再提出の案内を出す
