@@ -636,8 +636,8 @@ function assignAnnouncementClaims(
 
 /**
  * Adds the announcement bulk email to the send queue (kind = `announcement`, reference_key =
- * announcement ID). Targets are non-unsubscribed students whose status / membership type match
- * the announcement target (`isAnnouncementTarget()`, same condition as in-app display).
+ * announcement ID). Targets are non-unsubscribed users of any role whose status / membership type
+ * match the announcement target (`isAnnouncementTarget()`, same condition as in-app display).
  * When everyone cannot be sent in one run (daily cap, run time, one per user per day), unfinished
  * users are sent in following days (split sending). Users who already received a promotional
  * email today (not in `sendableUserIds`) and users receiving another guide in this run are

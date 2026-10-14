@@ -241,7 +241,8 @@ export function buildPreviewDocument(
   for (const m of source.matchAll(SCAN)) {
     const match = m[0];
     const gap = source.slice(lastEnd, m.index);
-    if (inPreamble && !/^\s*$/.test(gap)) {
+    // The tokenizer drops "</>" without emitting anything, so it keeps the preamble open too.
+    if (inPreamble && !/^\s*$/.test(gap.replaceAll("</>", ""))) {
       inPreamble = false;
     }
     expanded += gap;

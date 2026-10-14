@@ -350,6 +350,7 @@ describe("buildPreviewDocument の headPrelude（コンソール中継の差し�
     );
     expect(html("<!doctypehtml><p>x</p>")).toBe(`<!doctypehtml>${P}<p>x</p>`);
     expect(html("</ x><!doctype html><p>x</p>")).toBe(`</ x><!doctype html>${P}<p>x</p>`);
+    expect(html("</><!doctype html><p>x</p>")).toBe(`</><!doctype html>${P}<p>x</p>`);
   });
 
   it("<title> / <textarea> の中の <head> は要素として扱わない", () => {
