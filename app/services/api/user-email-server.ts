@@ -3,10 +3,11 @@ import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabas
 
 /**
  * Promotional-mail unsubscribe state. Shared by the admin API (`opt_out_email` / `resume_email`)
- * and the self-service `PATCH /api/settings/email`, each passing its own target `userId`. Guarded in the UPDATE so a stale screen
- * cannot overwrite the original unsubscribe time or resume someone who is not unsubscribed;
- * `updated: false` means the target was already in that state, missing or deleted. Transactional
- * mail never reads this column. Not tied to the user's status, so it works for any user.
+ * and the self-service `PATCH /api/settings/email`, each passing its own target `userId`.
+ * Guarded in the UPDATE so a stale screen cannot overwrite the original unsubscribe time or
+ * resume someone who is not unsubscribed; `updated: false` means the target was already in that
+ * state, missing or deleted. Transactional mail never reads this column. Not tied to the user's
+ * status, so it works for any user.
  */
 export async function setUserEmailOptOut(
   userId: number,

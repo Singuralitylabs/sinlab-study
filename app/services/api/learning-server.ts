@@ -36,8 +36,8 @@ export const LEARNING_WEEK_DETAIL_COLUMNS = `*, phase:learning_phases(${BREADCRU
  * Every learner-facing column except grading_rubric and reference_answer. `*` fails for
  * anon/authenticated after table SELECT is replaced by a column grant that omits these columns:
  * a column-level REVOKE does not hide them while table SELECT remains. reference_answer is read
- * after a submission through fetchExerciseReferenceAnswer(). Typed as `*` so the nested week embed does not blow the type
- * checker's instantiation depth.
+ * after a submission through fetchExerciseReferenceAnswer(). Typed as `*` so the nested week
+ * embed does not blow the type checker's instantiation depth.
  */
 export const LEARNING_CONTENT_DETAIL_COLUMN_LIST = `id, week_id, title, content_type, video_url, pdf_url, text_content, description, exercise_instructions, hint, allowed_submission_types, code_language, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
 export const LEARNING_CONTENT_DETAIL_COLUMNS =
@@ -725,7 +725,10 @@ export async function fetchContentsByWeekId(weekId: number): Promise<{
   return { data: data as LearningContentListItem[] | null, error: null };
 }
 
-/** Learner detail row. grading_rubric and reference_answer are not selected, so the type must not claim they are present. */
+/**
+ * Learner detail row. grading_rubric and reference_answer are not selected, so the type must not
+ * claim they are present.
+ */
 export type LearnerContentDetail = Omit<
   LearningContentWithBreadcrumb,
   "grading_rubric" | "reference_answer"
