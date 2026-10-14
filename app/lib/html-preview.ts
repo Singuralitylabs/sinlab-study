@@ -151,7 +151,8 @@ export function buildPreviewDocument(
 }
 
 function insertAfterDoctype(html: string, content: string): string {
-  const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
+  // Comments may precede the doctype (license headers); the prelude still has to follow it.
+  const doctype = /^(?:\s|<!--[\s\S]*?-->)*<!doctype[^>]*>/i.exec(html);
   const at = doctype ? doctype[0].length : 0;
   return html.slice(0, at) + content + html.slice(at);
 }

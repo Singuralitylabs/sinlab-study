@@ -36,24 +36,30 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
   var isNode = function (value) {
     return typeof value.nodeType === "number" && typeof value.nodeName === "string";
   };
+  // Strings are cut to the line length before quoting or joining, so one 50MB string costs the
+  // budget rather than a copy of itself at every level.
+  var clip = function (text) {
+    text = String(text);
+    return text.length > maxTextLength ? text.slice(0, maxTextLength) : text;
+  };
   var describeNode = function (value) {
     if (value.nodeType === 1) {
-      var el = "<" + String(value.tagName).toLowerCase();
-      if (value.id) el += ' id="' + value.id + '"';
+      var el = "<" + clip(value.tagName).toLowerCase();
+      if (value.id) el += ' id="' + clip(value.id) + '"';
       if (typeof value.className === "string" && value.className) {
-        el += ' class="' + value.className + '"';
+        el += ' class="' + clip(value.className) + '"';
       }
       return el + ">";
     }
-    if (value.nodeType === 3) return '#text "' + value.data + '"';
-    return value.nodeName;
+    if (value.nodeType === 3) return '#text "' + clip(value.data) + '"';
+    return clip(value.nodeName);
   };
   var keyLabel = function (key) {
     return /^([A-Za-z_$][A-Za-z0-9_$]*|[0-9]+)$/.test(key) ? key : JSON.stringify(key);
   };
   var inspect = function (value, depth, ctx) {
     var nested = depth > 0;
-    if (typeof value === "string") return nested ? JSON.stringify(value) : value;
+    if (typeof value === "string") return nested ? JSON.stringify(clip(value)) : clip(value);
     if (typeof value === "bigint") return String(value) + "n";
     if (typeof value === "function") return "ƒ " + (value.name || "anonymous") + "()";
     if (typeof value !== "object" || value === null) return String(value);
@@ -90,8 +96,13 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
     var more = false;
     var add = function (print) {
       if (ctx.left <= 0) { more = true; return false; }
-      var text = print();
-      ctx.left -= text.length + 2;
+      var before = ctx.left;
+      var text;
+      // A throwing getter or Proxy trap spoils only its own entry, not the whole value.
+      try { text = print(); } catch (e) { text = "[unprintable]"; }
+      // Children already paid for their own characters; charge only what this level adds, so a
+      // deep value is not billed once per level and cut long before the line limit.
+      ctx.left -= Math.max(0, text.length - (before - ctx.left)) + 2;
       parts.push(text);
       return true;
     };
@@ -106,7 +117,9 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
         // forEach cannot break; throwing a private marker stops a huge Map / Set at the budget.
         var stop = {};
         try {
-          value.forEach(function (v, k) {
+          // The built-in forEach, not the value's own: an override that swallows exceptions
+          // would ignore the stop marker and walk every element.
+          (isMap ? Map : Set).prototype.forEach.call(value, function (v, k) {
             if (!add(function () { return isMap ? child(k) + " => " + child(v) : child(v); })) {
               throw stop;
             }
@@ -116,8 +129,15 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
         }
       } else {
         var keys = Object.keys(value);
+        var entry = function (key) {
+          // Accessors are shown as (...) and not called, as in DevTools: a getter with side
+          // effects would otherwise run on every log, and twice for an object logged twice.
+          var desc = Object.getOwnPropertyDescriptor(value, key);
+          var shown = desc && desc.get ? "(...)" : child(desc ? desc.value : value[key]);
+          return keyLabel(key) + ": " + shown;
+        };
         for (var j = 0; j < keys.length; j++) {
-          if (!add(function () { return keyLabel(keys[j]) + ": " + child(value[keys[j]]); })) break;
+          if (!add(function () { return entry(keys[j]); })) break;
         }
       }
     } finally {
@@ -132,11 +152,10 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
   // ctx is the line's budget, shared by every argument of one console call.
   var format = function (value, ctx) {
     ctx = ctx || newBudget();
+    var before = ctx.left;
     try {
       var text = inspect(value, 0, ctx);
-      // Containers already charged their children; charging the whole text again only makes the
-      // next arguments stop sooner, which keeps one line bounded either way.
-      ctx.left -= text.length + 1;
+      ctx.left -= Math.max(0, text.length - (before - ctx.left)) + 1;
       return text;
     } catch (e) {
       try { return toTag(value); } catch (e2) { return "[unprintable]"; }
@@ -147,7 +166,8 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
     var rest = values.slice();
     var head = "";
     if (rest.length > 1 && typeof rest[0] === "string" && rest[0].indexOf("%") !== -1) {
-      head = rest.shift().replace(/%[sdifoOc%]/g, function (spec) {
+      var beforeHead = ctx.left;
+      head = clip(rest.shift()).replace(/%[sdifoOc%]/g, function (spec) {
         if (spec === "%%") return "%";
         if (rest.length === 0) return spec;
         var arg = rest.shift();
@@ -161,7 +181,7 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
         }
         return format(arg, ctx);
       });
-      ctx.left -= head.length;
+      ctx.left -= Math.max(0, head.length - (beforeHead - ctx.left));
     }
     var parts = head === "" ? [] : [head];
     for (var i = 0; i < rest.length; i++) {
@@ -190,7 +210,11 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
     con[method] = function () {
       var values = Array.prototype.slice.call(arguments);
       try { send(level, values); } catch (e) {}
-      if (typeof original === "function") original.apply(con, values);
+      // Re-spreading thousands of arguments can overflow the stack here even where the learner's
+      // own call fit; the learner's code must not stop because of the bridge.
+      try {
+        if (typeof original === "function") original.apply(con, values);
+      } catch (e) {}
     };
   };
   wrap("log", "log");

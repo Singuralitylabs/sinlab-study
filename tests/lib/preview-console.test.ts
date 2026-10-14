@@ -153,7 +153,7 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
     expect(Date.now() - startedAt).toBeLessThan(500);
     const [graph, tree] = texts();
     expect(graph).toMatch(/^G \{nodes: \[Nd \{g: \[Circular\], i: 0, peers: \[Circular\]\}, /);
-    expect(graph.endsWith("…]}")).toBe(true);
+    expect(graph.endsWith("…")).toBe(true);
     expect(tree).toMatch(/^T \{k: \[T \{k: Array\(30\)\}, /);
     for (const text of [graph, tree]) {
       expect(text.length).toBeLessThanOrEqual(PREVIEW_CONSOLE_MAX_TEXT_LENGTH);
@@ -198,6 +198,74 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
       expect(text.length).toBeLessThanOrEqual(PREVIEW_CONSOLE_MAX_TEXT_LENGTH);
       expect(text.endsWith("…")).toBe(true);
     }
+  });
+
+  it("入れ子の値も各文字を1回だけ数え、1行の上限より手前で後続を省略しない", () => {
+    const { run, texts } = runBridge();
+    run(`
+      console.log({ a: { b: { c: "x".repeat(330) } }, d: 1, e: 2 });
+      console.log({ a: { b: { c: "x".repeat(240) } } }, { second: true });
+      console.log("%o", { s: "x".repeat(340) }, "next");
+    `);
+    const [deep, twoArgs, withHead] = texts();
+    expect(deep.endsWith("d: 1, e: 2}")).toBe(true);
+    expect(twoArgs.endsWith("{second: true}")).toBe(true);
+    expect(withHead.endsWith(" next")).toBe(true);
+  });
+
+  it("一部の要素の getter や Proxy が投げても、その要素だけを [unprintable] にして残りを出す", () => {
+    const { run, texts } = runBridge();
+    run(`
+      console.log([1, 2, new Proxy({}, { ownKeys() { throw 1; } }), 4]);
+      const bad = new Error("x"); Object.defineProperty(bad, "name", { get() { throw 1; } });
+      console.log([1, bad, 3]);
+    `);
+    expect(texts()).toEqual(["[1, 2, [unprintable], 4]", "[1, [unprintable], 3]"]);
+  });
+
+  it("getter は呼ばずに (...) と表示する（副作用・再帰を起こさない）", () => {
+    const { run, texts } = runBridge();
+    run(`
+      let calls = 0;
+      const o = { get total() { calls++; console.log(this); return 1; }, n: 1 };
+      console.log(o, o);
+      console.log("calls", calls);
+    `);
+    expect(texts()).toEqual(["{total: (...), n: 1} {total: (...), n: 1}", "calls 0"]);
+  });
+
+  it("巨大な文字列を含む値も文字列ごと複製せず短時間で返す", () => {
+    const { run, texts } = runBridge();
+    run('var s = "y".repeat(5e7);');
+    const startedAt = Date.now();
+    run("console.log([s, s]); console.log([[[s]]]); console.log('%s!', s);");
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    for (const text of texts()) {
+      expect(text.length).toBeLessThanOrEqual(PREVIEW_CONSOLE_MAX_TEXT_LENGTH);
+    }
+  });
+
+  it("forEach を上書きして例外を握りつぶす Map / Set でも上限で打ち切る", () => {
+    const { run, texts } = runBridge();
+    run(`
+      class M extends Map {
+        forEach(cb) { for (const [k, v] of this) { try { cb(v, k, this); } catch {} } }
+      }
+      var m = new M(); for (let i = 0; i < 1e6; i++) m.set(i, i);
+    `);
+    const startedAt = Date.now();
+    run("console.log(m);");
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(texts()[0]).toMatch(/^Map\(1000000\) \{0 => 0, /);
+  });
+
+  it("元の console が多数の引数で失敗しても、受講生のコードを止めない", () => {
+    const { run, original, texts } = runBridge();
+    original.log.mockImplementation(() => {
+      throw new RangeError("Maximum call stack size exceeded");
+    });
+    expect(() => run("console.log(1, 2); console.log('next');")).not.toThrow();
+    expect(texts()).toEqual(["1 2", "next"]);
   });
 
   it("引数が1つだけなら書式指定子を置き換えない（DevTools と同じ）", () => {

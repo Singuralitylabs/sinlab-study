@@ -25,6 +25,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.restoreAllMocks();
 });
 
 const render = (content = "// a") =>
@@ -107,7 +108,6 @@ describe("HtmlPreview（コンソールの受信と実行ごとの作り直し�
     post(line("pending"));
     act(() => root.unmount());
     expect(cancel).toHaveBeenCalled();
-    cancel.mockRestore();
     root = createRoot(container);
   });
 });

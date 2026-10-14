@@ -192,6 +192,9 @@ describe("buildPreviewDocument の headPrelude（コンソール中継の差し�
 
   it("<head> が無ければ doctype の直後（document.doctype を残すため）、doctype も無ければ先頭に入れる", () => {
     expect(html("<!doctype html><p>x</p>")).toBe(`<!doctype html>${P}<p>x</p>`);
+    expect(html("<!-- license --> <!doctype html><p>x</p>")).toBe(
+      `<!-- license --> <!doctype html>${P}<p>x</p>`
+    );
     expect(html("<p>x</p><script>1</script>")).toBe(`${P}<p>x</p><script>1</script>`);
   });
 

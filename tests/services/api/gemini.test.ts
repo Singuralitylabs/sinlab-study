@@ -871,6 +871,11 @@ describe("generateReview", () => {
   });
 
   describe("リトライ中のタイムアウト", () => {
+    // The AbortSignal.timeout spy must not leak into the tests after this block.
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
     // AbortSignal.timeout runs on Node's own timers; route it through the faked setTimeout so the
     // per-attempt and overall deadlines fire in fake time.
     const useFakeSignals = () => {
