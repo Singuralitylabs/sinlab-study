@@ -195,6 +195,16 @@ describe("buildPreviewDocument の headPrelude（コンソール中継の差し�
     expect(html("<!-- license --> <!doctype html><p>x</p>")).toBe(
       `<!-- license --> <!doctype html>${P}<p>x</p>`
     );
+  });
+
+  it("doctype の無い文書の先頭にコメントが多数並んでも、差し込み位置の判定が固まらない", () => {
+    const comments = "<!-- c -->\n".repeat(200);
+    const startedAt = Date.now();
+    expect(html(`${comments}<p>x</p>`)).toBe(`${P}${comments}<p>x</p>`);
+    expect(html(`${comments}<!doctype html><p>x</p>`)).toBe(
+      `${comments}<!doctype html>${P}<p>x</p>`
+    );
+    expect(Date.now() - startedAt).toBeLessThan(200);
     expect(html("<p>x</p><script>1</script>")).toBe(`${P}<p>x</p><script>1</script>`);
   });
 

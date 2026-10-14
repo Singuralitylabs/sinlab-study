@@ -259,6 +259,57 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
     expect(texts()[0]).toMatch(/^Map\(1000000\) \{0 => 0, /);
   });
 
+  it("Map.prototype.forEach を上書き・Map を差し替えても上限で打ち切る", () => {
+    const { run, texts } = runBridge();
+    run(`
+      var m = new Map(); for (let i = 0; i < 1e6; i++) m.set(i, i);
+      Map.prototype.forEach = function (cb) {
+        for (const [k, v] of this) { try { cb(v, k, this); } catch {} }
+      };
+    `);
+    const startedAt = Date.now();
+    run("console.log(m); Map = function () {}; console.log(m);");
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    for (const text of texts()) {
+      expect(text).toMatch(/^Map\(1000000\) \{0 => 0, /);
+    }
+  });
+
+  it("巨大な Error の message・関数名・キー・Symbol の説明も先に切り、短時間で返す", () => {
+    const { run, texts } = runBridge();
+    run(`
+      var s = "y".repeat(5e7);
+      var e = new Error(s);
+      var f = function () {}; Object.defineProperty(f, "name", { value: s });
+      var o = {}; o[s] = 1;
+      var sym = Symbol(s);
+    `);
+    const startedAt = Date.now();
+    run("console.log([e, e]); console.log([f, f]); console.log([o, o]); console.log([sym, sym]);");
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    for (const text of texts()) {
+      expect(text.length).toBeLessThanOrEqual(PREVIEW_CONSOLE_MAX_TEXT_LENGTH);
+    }
+  });
+
+  it("例外を投げる値を大量に展開しても、整形できなかった分も上限に数えて残りを整形しない", () => {
+    const { run, texts } = runBridge();
+    run(`
+      var touched = 0;
+      var bad = Array.from({ length: 30000 }, () =>
+        new Proxy({}, {
+          get(target, key) { if (key === Symbol.toStringTag) touched++; return undefined; },
+          getPrototypeOf() { throw 1; },
+        })
+      );
+    `);
+    run("console.log(...bad);");
+    expect(texts()[0].endsWith("…")).toBe(true);
+    // Each formatted argument reads its tag a couple of times; without charging the fallback,
+    // all 30,000 would be formatted before the line is cut.
+    expect(run("touched")).toBeLessThan(1000);
+  });
+
   it("元の console が多数の引数で失敗しても、受講生のコードを止めない", () => {
     const { run, original, texts } = runBridge();
     original.log.mockImplementation(() => {

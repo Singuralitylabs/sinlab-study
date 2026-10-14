@@ -151,8 +151,11 @@ export function buildPreviewDocument(
 }
 
 function insertAfterDoctype(html: string, content: string): string {
-  // Comments may precede the doctype (license headers); the prelude still has to follow it.
-  const doctype = /^(?:\s|<!--[\s\S]*?-->)*<!doctype[^>]*>/i.exec(html);
+  // Comments may precede the doctype (license headers); the prelude still has to follow it. A
+  // comment body may not contain "-->": with a lazy [\s\S]*? the regex could close each comment
+  // at any later "-->" and, when no doctype follows, try every combination (exponential in the
+  // number of comments) and freeze the tab of whoever opens the submission.
+  const doctype = /^(?:\s|<!--(?:(?!-->)[\s\S])*-->)*<!doctype[^>]*>/i.exec(html);
   const at = doctype ? doctype[0].length : 0;
   return html.slice(0, at) + content + html.slice(at);
 }

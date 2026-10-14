@@ -32,6 +32,10 @@ export interface PreviewConsoleEntry {
  */
 const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLength) {
   var sent = 0;
+  // Bound before the learner's code runs, so overriding Map.prototype.forEach or replacing Map
+  // later cannot make a huge Map ignore the budget's stop marker.
+  var mapForEach = Map.prototype.forEach;
+  var setForEach = Set.prototype.forEach;
   var toTag = function (value) { return Object.prototype.toString.call(value); };
   var isNode = function (value) {
     return typeof value.nodeType === "number" && typeof value.nodeName === "string";
@@ -61,11 +65,13 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
     var nested = depth > 0;
     if (typeof value === "string") return nested ? JSON.stringify(clip(value)) : clip(value);
     if (typeof value === "bigint") return String(value) + "n";
-    if (typeof value === "function") return "ƒ " + (value.name || "anonymous") + "()";
-    if (typeof value !== "object" || value === null) return String(value);
+    if (typeof value === "function") {
+      return "ƒ " + (value.name ? clip(value.name) : "anonymous") + "()";
+    }
+    if (typeof value !== "object" || value === null) return clip(String(value));
     var tag = toTag(value);
     if (tag === "[object Error]" || tag === "[object DOMException]") {
-      return String(value.name) + ": " + String(value.message);
+      return clip(value.name) + ": " + clip(value.message);
     }
     if (isNode(value)) return describeNode(value);
     if (tag === "[object Date]" || tag === "[object RegExp]") return String(value);
@@ -119,7 +125,7 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
         try {
           // The built-in forEach, not the value's own: an override that swallows exceptions
           // would ignore the stop marker and walk every element.
-          (isMap ? Map : Set).prototype.forEach.call(value, function (v, k) {
+          (isMap ? mapForEach : setForEach).call(value, function (v, k) {
             if (!add(function () { return isMap ? child(k) + " => " + child(v) : child(v); })) {
               throw stop;
             }
@@ -134,7 +140,7 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
           // effects would otherwise run on every log, and twice for an object logged twice.
           var desc = Object.getOwnPropertyDescriptor(value, key);
           var shown = desc && desc.get ? "(...)" : child(desc ? desc.value : value[key]);
-          return keyLabel(key) + ": " + shown;
+          return keyLabel(clip(key)) + ": " + shown;
         };
         for (var j = 0; j < keys.length; j++) {
           if (!add(function () { return entry(keys[j]); })) break;
@@ -158,7 +164,11 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
       ctx.left -= Math.max(0, text.length - (before - ctx.left)) + 1;
       return text;
     } catch (e) {
-      try { return toTag(value); } catch (e2) { return "[unprintable]"; }
+      var fallback;
+      try { fallback = toTag(value); } catch (e2) { fallback = "[unprintable]"; }
+      // Charged too, or a spread of throwing values would build every fallback before the cut.
+      ctx.left -= fallback.length + 1;
+      return fallback;
     }
   };
   var render = function (values) {
