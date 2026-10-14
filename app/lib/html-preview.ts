@@ -93,15 +93,20 @@ export function buildPreviewDocument(
   const deferred: string[] = [];
   let preludePlaced = headPrelude === "";
   let preludeSearchOpen = true;
+  // Every branch may also end at the end of the document (an unclosed comment, tag or element, as
+  // the browser reads it). Otherwise each unclosed "<head" / "<link" / "<!--" would rescan to the
+  // end before failing: quadratic in the length, freezing whoever opens the submission.
+  // Unclosed matches are returned unchanged below.
   const expanded = base.content.replace(
-    /<!--[\s\S]*?-->|<style\b[^>]*>[\s\S]*?<\/style\s*>|<script\b([^>]*)>([\s\S]*?)<\/script\s*>|<link\b[^>]*>|<(head|body)\b[^>]*>/gi,
+    /<!--[\s\S]*?(?:-->|$)|<style\b[^>]*(?:>[\s\S]*?(?:<\/style\s*>|$)|$)|<script\b([^>]*)(?:>([\s\S]*?)(?:<\/script\s*>|$)|$)|<link\b[^>]*(?:>|$)|<(head|body)\b[^>]*(?:>|$)/gi,
     (match: string, scriptAttrs?: string, scriptBody?: string, element?: string) => {
       if (match.startsWith("<!--") || /^<style/i.test(match)) {
         return match;
       }
 
       if (element !== undefined) {
-        if (preludeSearchOpen && !preludePlaced && element.toLowerCase() === "head") {
+        const isHead = element.toLowerCase() === "head" && match.endsWith(">");
+        if (preludeSearchOpen && !preludePlaced && isHead) {
           preludePlaced = true;
           return match + headPrelude;
         }
@@ -113,7 +118,8 @@ export function buildPreviewDocument(
         preludeSearchOpen = false;
         const tag = `<script${scriptAttrs}>`;
         const src = getAttribute(tag, "src");
-        if (src === null || scriptBody?.trim() !== "" || !isRelativeRef(src)) {
+        const closed = /<\/script\s*>$/i.test(match);
+        if (!closed || src === null || scriptBody?.trim() !== "" || !isRelativeRef(src)) {
           return match;
         }
         const file = findFile(files, src);
@@ -131,7 +137,12 @@ export function buildPreviewDocument(
 
       const rel = getAttribute(match, "rel");
       const href = getAttribute(match, "href");
-      if (rel?.toLowerCase() !== "stylesheet" || href === null || !isRelativeRef(href)) {
+      if (
+        !match.endsWith(">") ||
+        rel?.toLowerCase() !== "stylesheet" ||
+        href === null ||
+        !isRelativeRef(href)
+      ) {
         return match;
       }
       const file = findFile(files, href);

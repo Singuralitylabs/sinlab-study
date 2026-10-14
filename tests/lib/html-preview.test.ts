@@ -234,3 +234,33 @@ describe("buildPreviewDocument の headPrelude（コンソール中継の差し�
     expect(buildPreviewDocument([f("index.html", "html", content)])).toBe(content);
   });
 });
+
+describe("buildPreviewDocument の閉じていない構文", () => {
+  const P = "<script>/*bridge*/</script>";
+  const html = (content: string) =>
+    buildPreviewDocument([f("index.html", "html", content), f("main.js", "javascript", "run()")], {
+      headPrelude: P,
+    });
+
+  it.each([
+    ["<head ", 60000],
+    ["<body ", 60000],
+    ["<link ", 60000],
+    ["<!--", 80000],
+    ["<script>", 40000],
+    ["<style>", 40000],
+  ])("%j の繰り返し（%i 回）でも線形時間で返し、内容を変えない", (unit, times) => {
+    const content = `<p>x</p>${unit.repeat(times)}`;
+    const startedAt = Date.now();
+    const out = html(content);
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(out).toBe(`${P}${content}`);
+  });
+
+  it("閉じていない <head・<link・<script src> は展開も差し込みもしない", () => {
+    expect(html('<head <link rel="stylesheet" href="main.js"')).toBe(
+      `${P}<head <link rel="stylesheet" href="main.js"`
+    );
+    expect(html('<p>x</p><script src="main.js">')).toBe(`${P}<p>x</p><script src="main.js">`);
+  });
+});
