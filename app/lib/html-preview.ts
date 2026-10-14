@@ -65,19 +65,22 @@ interface ScanGroups {
   link?: string;
   bodyClose?: string;
   element?: string;
+  template?: string;
 }
 
 // Elements whose content the tokenizer does not read as markup (scripting is on in the preview, so
-// <noscript> is one too; <template> content is inert). A "<head>", "</body>" or <link> inside them
-// is not an element, and a <script src> inside <template> must not be pulled out and run.
-const RAW_TEXT = "style|title|textarea|xmp|noscript|noembed|noframes|iframe|template";
+// <noscript> is one too). A "<head>", "</body>" or <link> inside them is not an element.
+const RAW_TEXT = "style|title|textarea|xmp|noscript|noembed|noframes|iframe";
+// A tag name runs to HTML whitespace, "/" or ">", so "</body-x>" or "<style-x>" is another element
+// (\b would stop at "-"). JS \s is wider than HTML whitespace (it includes \v and NBSP).
+const NAME_END = String.raw`(?=[\t\n\f\r />]|$)`;
 // Every tag is consumed up to its ">", so a "</body>" or "<head>" in an attribute value is not
 // taken for markup. Quoted values are not read as a whole (a ">" inside one ends the tag early):
 // a loop over quoted-or-plain alternatives costs JavaScriptCore a backtracking frame per character
 // and on a long tag it silently finds no match at all.
 const ATTRS = "[^>]*";
 // An end tag ends at whitespace, "/" or ">" after its name ("</script foo>" closes the script).
-const endTag = (name: string) => String.raw`<\/${name}(?:[\s/][^>]*)?(?:>|$)`;
+const endTag = (name: string) => String.raw`<\/${name}(?:[\t\n\f\r /][^>]*)?(?:>|$)`;
 
 // Branch order matters: comment, doctype and bogus comment ("<?xml ...?>", "<![CDATA[") all start
 // with "<!" or "<?" and the first two must win; the catch-all tag branch comes last.
@@ -91,18 +94,19 @@ const SCAN = new RegExp(
     String.raw`<!--(?:>|->|[\s\S]*?(?:--!?>|$))`,
     String.raw`<!doctype[^>]*(?:>|$)`,
     String.raw`<[!?][^>]*(?:>|$)`,
-    String.raw`<plaintext\b[\s\S]*`,
-    String.raw`<(?<raw>${RAW_TEXT})\b${ATTRS}(?:>[\s\S]*?(?:${endTag(String.raw`\k<raw>`)}|$)|$)`,
-    String.raw`<script\b(?<scriptAttrs>${ATTRS})(?:>(?<scriptBody>[\s\S]*?)(?:${endTag("script")}|$)|$)`,
-    String.raw`<(?<link>link)\b${ATTRS}(?:>|$)`,
-    String.raw`<(?<bodyClose>\/body)\b${ATTRS}(?:>|$)`,
-    String.raw`<(?<element>head|body)\b${ATTRS}(?:>|$)`,
-    String.raw`<\/?[a-z][^\s/>]*${ATTRS}(?:>|$)`,
+    String.raw`<plaintext${NAME_END}[\s\S]*`,
+    String.raw`<(?<raw>${RAW_TEXT})${NAME_END}${ATTRS}(?:>[\s\S]*?(?:${endTag(String.raw`\k<raw>`)}|$)|$)`,
+    String.raw`<script${NAME_END}(?<scriptAttrs>${ATTRS})(?:>(?<scriptBody>[\s\S]*?)(?:${endTag("script")}|$)|$)`,
+    String.raw`<(?<link>link)${NAME_END}${ATTRS}(?:>|$)`,
+    String.raw`<(?<bodyClose>\/body)${NAME_END}${ATTRS}(?:>|$)`,
+    String.raw`<(?<element>head|body)${NAME_END}${ATTRS}(?:>|$)`,
+    String.raw`<(?<template>\/?template)${NAME_END}${ATTRS}(?:>|$)`,
+    String.raw`<\/?[a-z][^\t\n\f\r />]*${ATTRS}(?:>|$)`,
   ].join("|"),
   "gi"
 );
 
-const RAW_START = new RegExp(String.raw`^<(script|plaintext|${RAW_TEXT})\b`, "i");
+const RAW_START = new RegExp(String.raw`^<(script|plaintext|${RAW_TEXT})${NAME_END}`, "i");
 
 /** False for a scan match that ran to the end of the document without its terminator. */
 function isClosed(match: string): boolean {
@@ -120,7 +124,7 @@ function isClosed(match: string): boolean {
     const last = match.toLowerCase().lastIndexOf(`</${name}`);
     return (
       last !== -1 &&
-      new RegExp(String.raw`^<\/${name}(?:[\s/][^>]*)?>$`, "i").test(match.slice(last))
+      new RegExp(String.raw`^<\/${name}(?:[\t\n\f\r /][^>]*)?>$`, "i").test(match.slice(last))
     );
   }
   return match.endsWith(">");
@@ -228,6 +232,10 @@ export function buildPreviewDocument(
   let afterDoctype = -1;
   let bodyEnd = -1;
   let unclosedTail = -1;
+  // <template> content is parsed as markup (so it is scanned, not skipped like raw text) but is
+  // inert: nothing inside may be inlined, moved out and run, or taken for <head> / </body>.
+  let templateDepth = 0;
+  let templateAt = -1;
   let expanded = "";
   let lastEnd = 0;
   for (const m of source.matchAll(SCAN)) {
@@ -245,7 +253,17 @@ export function buildPreviewDocument(
     if (inPreamble && !/^<(?:\?|!(?!doctype))/i.test(match)) {
       inPreamble = false;
     }
-    if (bodyEnd === -1 && m.groups?.bodyClose !== undefined) {
+    const groups: ScanGroups = m.groups ?? {};
+    const inTemplate = templateDepth > 0;
+    if (groups.template !== undefined && match.endsWith(">")) {
+      if (!groups.template.startsWith("/")) {
+        templateAt = templateDepth === 0 ? expanded.length : templateAt;
+        templateDepth++;
+      } else if (templateDepth > 0) {
+        templateDepth--;
+      }
+    }
+    if (bodyEnd === -1 && !inTemplate && groups.bodyClose !== undefined) {
       bodyEnd = expanded.length;
     }
     lastEnd = m.index + match.length;
@@ -254,7 +272,7 @@ export function buildPreviewDocument(
     if (lastEnd === source.length && !isClosed(match)) {
       unclosedTail = expanded.length;
     }
-    expanded += transform(match, m.groups ?? {});
+    expanded += inTemplate ? match : transform(match, groups);
   }
   expanded += source.slice(lastEnd);
 
@@ -266,7 +284,9 @@ export function buildPreviewDocument(
   if (deferred.length === 0) {
     return withPrelude;
   }
-  let deferAt = bodyEnd !== -1 ? bodyEnd : unclosedTail !== -1 ? unclosedTail : expanded.length;
+  // An unclosed <template> runs to the end, so anything appended would be inert.
+  const endAt = templateDepth > 0 ? templateAt : unclosedTail;
+  let deferAt = bodyEnd !== -1 ? bodyEnd : endAt !== -1 ? endAt : expanded.length;
   if (preludeAt !== -1 && deferAt >= preludeAt) {
     deferAt += headPrelude.length;
   }

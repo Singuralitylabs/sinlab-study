@@ -153,10 +153,62 @@ describe("buildPreviewDocument", () => {
   });
 
   it("leaves scripts inside <template> alone, as the browser never runs them", () => {
-    const content = '<body><template><script src="d.js" defer></script></template></body>';
+    const build = (content: string) =>
+      buildPreviewDocument([f("index.html", "html", content), f("d.js", "javascript", "run()")]);
+    const D = '<script src="d.js" defer></script>';
+    for (const content of [
+      `<body><template>${D}</template></body>`,
+      `<template><!-- </template> -->${D}</template><p>x</p>`,
+      `<template><template></template>${D}</template><p>x</p>`,
+      `<body><template><p>${D}</body></template></body>`,
+    ]) {
+      expect(build(content)).toBe(content);
+    }
+    expect(build(`<p>x</p>${D}<template><p>y`)).toBe(
+      "<p>x</p><script>run()</script><template><p>y"
+    );
+  });
+
+  it("reads a tag name up to whitespace, / or >, so <body-x> or <style-x> is another element", () => {
+    const build = (content: string) =>
+      buildPreviewDocument(
+        [
+          f("index.html", "html", content),
+          f("d.js", "javascript", "run()"),
+          f("s.css", "css", "p{}"),
+        ],
+        { headPrelude: "<script>/*p*/</script>" }
+      );
     expect(
-      buildPreviewDocument([f("index.html", "html", content), f("d.js", "javascript", "run()")])
-    ).toBe(content);
+      build('<body><p>a</p></body-x><div id="q"></div><script src="d.js" defer></script></body>')
+    ).toBe(
+      '<script>/*p*/</script><body><p>a</p></body-x><div id="q"></div><script>run()</script></body>'
+    );
+    expect(build('<style-x><link rel="stylesheet" href="s.css"></style-x>')).toBe(
+      "<script>/*p*/</script><style-x><style>p{}</style></style-x>"
+    );
+    expect(build("<head-x></head-x><head></head>")).toBe(
+      "<head-x></head-x><head><script>/*p*/</script></head>"
+    );
+    expect(build('<script>a</script\v><link rel="stylesheet" href="s.css"></script>')).toBe(
+      '<script>/*p*/</script><script>a</script\v><link rel="stylesheet" href="s.css"></script>'
+    );
+  });
+
+  // Regression for the scan on JavaScriptCore (also run with `bun run test:jsc`): a regex loop
+  // with a frame per attribute character found no match there on a long tag, under V8 it did.
+  it("inlines a script after a tag with a multi-megabyte attribute", () => {
+    for (const tag of [
+      `<div title="${"a".repeat(2_000_000)}">`,
+      `<div data-x=${"a".repeat(2_000_000)}>`,
+      `<div ${"a ".repeat(1_000_000)}>`,
+    ]) {
+      const doc = buildPreviewDocument([
+        f("index.html", "html", `${tag}<script src="d.js"></script>`),
+        f("d.js", "javascript", "run()"),
+      ]);
+      expect(doc.endsWith("<script>run()</script>")).toBe(true);
+    }
   });
 
   it("ends a script at </script followed by whitespace or /, as the browser does", () => {

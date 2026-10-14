@@ -80,7 +80,7 @@ Unit Tests (多数)
 | --- | --- |
 | `build.yml` | 本番相当のビルド成立性 |
 | `typecheck.yml` | 型チェック（`tsc --noEmit`） |
-| `test.yml` | ユニットテスト（Vitest） |
+| `test.yml` | ユニットテスト（Vitest）。加えて `tests/lib/html-preview.test.ts` を `bun test`（JavaScriptCore）でも実行する（`bun run test:jsc`。Safari と V8 で正規表現の失敗の仕方が違うため） |
 | `db-privileges.yml` | ローカル Supabase（Docker）に全 migration を空のDBから適用し、関数の EXECUTE 権限を `has_function_privilege()` で検証（pgTAP。`supabase/tests/database/`。4.3参照） |
 | `biome.yml` | Lint/フォーマット違反の防止（`bun run check`） |
 | `check_console_log.yml` | デバッグ用出力の混入防止 |
