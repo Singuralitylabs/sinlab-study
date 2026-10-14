@@ -131,10 +131,44 @@ describe("buildPreviewDocument", () => {
       "<script>x()",
       '<link rel="stylesheet" href="s.css" ',
       "<title>t",
+      '<p class="x"',
+      "</body",
+      "<plaintext>x</plaintext>",
     ]) {
       expect(build(`<p>x</p>${D}${tail}`)).toBe(`<p>x</p><script>run()</script>${tail}`);
     }
     expect(build(`<p>x</p>${D}<!-- memo -->`)).toBe("<p>x</p><!-- memo --><script>run()</script>");
+  });
+
+  it("does not take a </body> in an attribute value or raw text element for the element", () => {
+    const build = (content: string) =>
+      buildPreviewDocument([f("index.html", "html", content), f("d.js", "javascript", "run()")]);
+    const D = '<script src="d.js" defer></script>';
+    expect(build(`<body><div title="</body>"></div>${D}</body>`)).toBe(
+      '<body><div title="</body>"></div><script>run()</script></body>'
+    );
+    expect(build(`<body><xmp></body></xmp>${D}</body>`)).toBe(
+      "<body><xmp></body></xmp><script>run()</script></body>"
+    );
+  });
+
+  it("leaves scripts inside <template> alone, as the browser never runs them", () => {
+    const content = '<body><template><script src="d.js" defer></script></template></body>';
+    expect(
+      buildPreviewDocument([f("index.html", "html", content), f("d.js", "javascript", "run()")])
+    ).toBe(content);
+  });
+
+  it("ends a script at </script followed by whitespace or /, as the browser does", () => {
+    const doc = buildPreviewDocument([
+      f(
+        "index.html",
+        "html",
+        '<script>var a = 1;</script foo><link rel="stylesheet" href="s.css"></body>'
+      ),
+      f("s.css", "css", "p{}"),
+    ]);
+    expect(doc).toBe("<script>var a = 1;</script foo><style>p{}</style></body>");
   });
 
   it("keeps the prelude ahead of defer scripts that share its position", () => {

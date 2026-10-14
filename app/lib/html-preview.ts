@@ -62,28 +62,66 @@ interface ScanGroups {
   raw?: string;
   scriptAttrs?: string;
   scriptBody?: string;
+  link?: string;
+  bodyClose?: string;
   element?: string;
 }
 
+// Elements whose content the tokenizer does not read as markup (scripting is on in the preview, so
+// <noscript> is one too; <template> content is inert). A "<head>", "</body>" or <link> inside them
+// is not an element, and a <script src> inside <template> must not be pulled out and run.
+const RAW_TEXT = "style|title|textarea|xmp|noscript|noembed|noframes|iframe|template";
+// Every tag is consumed up to its ">", so a "</body>" or "<head>" in an attribute value is not
+// taken for markup. Quoted values are not read as a whole (a ">" inside one ends the tag early):
+// a loop over quoted-or-plain alternatives costs JavaScriptCore a backtracking frame per character
+// and on a long tag it silently finds no match at all.
+const ATTRS = "[^>]*";
+// An end tag ends at whitespace, "/" or ">" after its name ("</script foo>" closes the script).
+const endTag = (name: string) => String.raw`<\/${name}(?:[\s/][^>]*)?(?:>|$)`;
+
 // Branch order matters: comment, doctype and bogus comment ("<?xml ...?>", "<![CDATA[") all start
-// with "<!" or "<?" and the first two must win. <title> / <textarea> are raw text like <style>, so
-// a "<head>" inside them is not the element.
+// with "<!" or "<?" and the first two must win; the catch-all tag branch comes last.
 // Every branch may also end at the end of the document (an unclosed comment, tag or element, as
 // the browser reads it). Otherwise each unclosed "<head" / "<link" / "<!--" would rescan to the
 // end before failing: quadratic in the length, freezing whoever opens the submission.
 // Comments end where the browser ends them, including the abrupt "<!-->" / "<!--->" and the
 // incorrectly closed "--!>", so a typo there does not swallow the rest of the document.
-const SCAN =
-  /<!--(?:>|->|[\s\S]*?(?:--!?>|$))|<!doctype[^>]*(?:>|$)|<[!?][^>]*(?:>|$)|<(?<raw>style|title|textarea)\b[^>]*(?:>[\s\S]*?(?:<\/\k<raw>\s*>|$)|$)|<script\b(?<scriptAttrs>[^>]*)(?:>(?<scriptBody>[\s\S]*?)(?:<\/script\s*>|$)|$)|<link\b[^>]*(?:>|$)|<\/body\s*>|<(?<element>head|body)\b[^>]*(?:>|$)/gi;
+const SCAN = new RegExp(
+  [
+    String.raw`<!--(?:>|->|[\s\S]*?(?:--!?>|$))`,
+    String.raw`<!doctype[^>]*(?:>|$)`,
+    String.raw`<[!?][^>]*(?:>|$)`,
+    String.raw`<plaintext\b[\s\S]*`,
+    String.raw`<(?<raw>${RAW_TEXT})\b${ATTRS}(?:>[\s\S]*?(?:${endTag(String.raw`\k<raw>`)}|$)|$)`,
+    String.raw`<script\b(?<scriptAttrs>${ATTRS})(?:>(?<scriptBody>[\s\S]*?)(?:${endTag("script")}|$)|$)`,
+    String.raw`<(?<link>link)\b${ATTRS}(?:>|$)`,
+    String.raw`<(?<bodyClose>\/body)\b${ATTRS}(?:>|$)`,
+    String.raw`<(?<element>head|body)\b${ATTRS}(?:>|$)`,
+    String.raw`<\/?[a-z][^\s/>]*${ATTRS}(?:>|$)`,
+  ].join("|"),
+  "gi"
+);
+
+const RAW_START = new RegExp(String.raw`^<(script|plaintext|${RAW_TEXT})\b`, "i");
 
 /** False for a scan match that ran to the end of the document without its terminator. */
 function isClosed(match: string): boolean {
   if (match.startsWith("<!--")) {
     return match.endsWith("-->") || match.endsWith("--!>");
   }
-  const raw = /^<(script|style|title|textarea)\b/i.exec(match);
+  const raw = RAW_START.exec(match);
+  if (raw?.[1].toLowerCase() === "plaintext") {
+    return false;
+  }
   if (raw) {
-    return new RegExp(`</${raw[1]}\\s*>$`, "i").test(match);
+    // Only the last end tag is tested: an unanchored search would rescan from every "</name"
+    // in the body, quadratic on a long unclosed element.
+    const name = raw[1].toLowerCase();
+    const last = match.toLowerCase().lastIndexOf(`</${name}`);
+    return (
+      last !== -1 &&
+      new RegExp(String.raw`^<\/${name}(?:[\s/][^>]*)?>$`, "i").test(match.slice(last))
+    );
   }
   return match.endsWith(">");
 }
@@ -126,11 +164,8 @@ export function buildPreviewDocument(
   let preludePlaced = headPrelude === "";
   let preludeSearchOpen = true;
   const transform = (match: string, groups: ScanGroups): string => {
-    if (match.startsWith("</")) {
+    if (groups.bodyClose !== undefined) {
       preludeSearchOpen = false;
-      return match;
-    }
-    if (match.startsWith("<!") || match.startsWith("<?") || groups.raw !== undefined) {
       return match;
     }
 
@@ -169,6 +204,9 @@ export function buildPreviewDocument(
       return inlined;
     }
 
+    if (groups.link === undefined) {
+      return match;
+    }
     const rel = getAttribute(match, "rel");
     const href = getAttribute(match, "href");
     if (
@@ -207,7 +245,7 @@ export function buildPreviewDocument(
     if (inPreamble && !/^<(?:\?|!(?!doctype))/i.test(match)) {
       inPreamble = false;
     }
-    if (bodyEnd === -1 && match.startsWith("</")) {
+    if (bodyEnd === -1 && m.groups?.bodyClose !== undefined) {
       bodyEnd = expanded.length;
     }
     lastEnd = m.index + match.length;
