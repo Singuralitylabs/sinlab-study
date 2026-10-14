@@ -17,6 +17,7 @@ import {
   GEMINI_MODEL_NAME,
   GEMINI_REQUEST_TIMEOUT_MS,
   GEMINI_RETRY_BASE_DELAY_MS,
+  GEMINI_RETRY_MIN_ATTEMPT_MS,
   GEMINI_RETRYABLE_STATUSES,
   GEMINI_TEMPERATURE,
   GEMINI_THINKING_LEVEL,
@@ -531,15 +532,17 @@ async function generateValidatedJson<T>({
         });
         break;
       } catch (error) {
-        // A retry started late can be cut off by the overall deadline; reporting that abort as a
-        // timeout would hide the 503 that caused the retry, so the retried error is kept instead.
-        lastError = isTimeoutError(error) && isRetryableError(lastError) ? lastError : error;
+        // A retry cut off by the overall deadline says nothing new; reporting that abort as a
+        // timeout would hide the 503 that caused the retry, so the retried error is kept. A retry
+        // that ran out its own per-attempt timeout is a real slow response and stays a timeout.
+        const cutByDeadline = isTimeoutError(error) && overallSignal.aborted;
+        lastError = cutByDeadline && isRetryableError(lastError) ? lastError : error;
 
         const delay = GEMINI_RETRY_BASE_DELAY_MS * 2 ** attempt;
         if (
           isRetryableError(error) &&
           attempt < GEMINI_MAX_RETRIES &&
-          Date.now() + delay < deadlineAt
+          Date.now() + delay + GEMINI_RETRY_MIN_ATTEMPT_MS < deadlineAt
         ) {
           console.warn(
             `Gemini API一時エラー status=${error.status} (試行 ${attempt + 1}/${GEMINI_MAX_RETRIES + 1})、${delay}ms後にリトライ`

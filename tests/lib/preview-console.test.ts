@@ -46,7 +46,7 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
       {
         type: PREVIEW_CONSOLE_MESSAGE_TYPE,
         level: "log",
-        text: '合計 42 {"a":1} [1,2] null undefined',
+        text: "合計 42 {a: 1} [1, 2] null undefined",
       },
       { type: PREVIEW_CONSOLE_MESSAGE_TYPE, level: "log", text: "info" },
       { type: PREVIEW_CONSOLE_MESSAGE_TYPE, level: "warn", text: "注意" },
@@ -71,7 +71,7 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
   it("循環参照のオブジェクトでも例外にせず送る", () => {
     const { run, sent } = runBridge();
     expect(() => run("const c = {}; c.self = c; console.log(c)")).not.toThrow();
-    expect(sent()[0].text).toBe("[object Object]");
+    expect(sent()[0].text).toBe("{self: [Circular]}");
   });
 
   it("DOM 要素・Map / Set・クラスのインスタンス・関数を {} ではなく要約で送る", () => {
@@ -88,8 +88,8 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
     expect(texts()).toEqual([
       '<div id="x" class="box">',
       '#text "hi"',
-      'Map(1) [["a",1]] Set(2) [1,2]',
-      'Point {"x":1} Empty {}',
+      'Map(1) {"a" => 1} Set(2) {1, 2}',
+      "Point {x: 1} Empty {}",
       "ƒ greet() ƒ anonymous()",
       `/a+/g ${run("String(new Date(0))")}`,
     ]);
@@ -99,15 +99,18 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
     const { run, texts } = runBridge();
     run(`
       const li = (id) => ({ nodeType: 1, nodeName: "LI", tagName: "LI", id: id, className: "" });
-      class NodeList { constructor() { this[0] = li("a"); this[1] = li("b"); } }
+      class NodeList {
+        constructor() { this[0] = li("a"); this[1] = li("b"); this.length = 2; }
+        get [Symbol.toStringTag]() { return "NodeList"; }
+      }
       console.log(new NodeList());
       console.log([li("a")], { el: li("b"), err: new Error("x"), fn() {} });
       console.log(new Map([["k", li("c")]]));
     `);
     expect(texts()).toEqual([
-      'NodeList {"0":"<li id=\\"a\\">","1":"<li id=\\"b\\">"}',
-      '["<li id=\\"a\\">"] {"el":"<li id=\\"b\\">","err":"Error: x","fn":"ƒ fn()"}',
-      'Map(1) [["k","<li id=\\"c\\">"]]',
+      'NodeList(2) [<li id="a">, <li id="b">]',
+      '[<li id="a">] {el: <li id="b">, err: Error: x, fn: ƒ fn()}',
+      'Map(1) {"k" => <li id="c">}',
     ]);
   });
 
@@ -121,6 +124,40 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
       `)
     ).not.toThrow();
     expect(texts()[0]).toMatch(/^A /);
+  });
+
+  it("入れ子の BigInt・空文字のキー・自己参照する window も読める形で送る", () => {
+    const { run, texts } = runBridge();
+    run(`
+      console.log({ n: 1n, list: [2n] });
+      console.log({ "": { nodeType: 1, nodeName: "P", tagName: "P", id: "", className: "" } });
+      const w = { name: "win" }; w.window = w; w.self = w;
+      console.log(w, { top: w });
+    `);
+    expect(texts()).toEqual(["{n: 1n, list: [2n]}", '{"": <p>}', "Window {top: Window}"]);
+  });
+
+  it("共有参照の多い大きな構造でも、全体を組み立てずに文字数の上限で打ち切る", () => {
+    const { run, texts } = runBridge();
+    run(`
+      class G { constructor() { this.nodes = []; } }
+      class Nd { constructor(g, i) { this.g = g; this.i = i; this.peers = g.nodes; } }
+      var g = new G();
+      for (let i = 0; i < 2000; i++) g.nodes.push(new Nd(g, i));
+      class T { constructor(d) { this.k = d > 0 ? Array.from({ length: 30 }, () => new T(d - 1)) : []; } }
+      var t = new T(3);
+    `);
+    // Only the printing is timed; building 27,000 objects above is not the bridge's cost.
+    const startedAt = Date.now();
+    run("console.log(g); console.log(t);");
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    const [graph, tree] = texts();
+    expect(graph).toMatch(/^G \{nodes: \[Nd \{g: \[Circular\], i: 0, peers: \[Circular\]\}, /);
+    expect(graph.endsWith("…]}")).toBe(true);
+    expect(tree).toMatch(/^T \{k: \[T \{k: Array\(30\)\}, /);
+    for (const text of [graph, tree]) {
+      expect(text.length).toBeLessThanOrEqual(PREVIEW_CONSOLE_MAX_TEXT_LENGTH);
+    }
   });
 
   it("引数が1つだけなら書式指定子を置き換えない（DevTools と同じ）", () => {
@@ -140,7 +177,7 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
         console.log("続き");
       `)
     ).not.toThrow();
-    expect(texts()).toEqual(["NaN", "NaN", '{"toString":"ƒ toString()"}', "続き"]);
+    expect(texts()).toEqual(["NaN", "NaN", "{toString: ƒ toString()}", "続き"]);
     expect(original.log).toHaveBeenCalledTimes(4);
   });
 
@@ -156,7 +193,7 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
     expect(texts()).toEqual([
       "合計: 5 件",
       "山田 さん 20 歳 1.5",
-      '赤 と {"a":1}',
+      "赤 と {a: 1}",
       "100% 完了 extra",
       "1 と %d",
     ]);

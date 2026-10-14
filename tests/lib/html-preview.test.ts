@@ -186,12 +186,12 @@ describe("buildPreviewDocument の headPrelude（コンソール中継の差し�
 
   it("<header> を <head> と取り違えない", () => {
     expect(html("<!DOCTYPE html><body><header>h</header></body>")).toBe(
-      `${P}<!DOCTYPE html><body><header>h</header></body>`
+      `<!DOCTYPE html>${P}<body><header>h</header></body>`
     );
   });
 
-  it("<head> が無ければ先頭に入れる（srcdoc 文書は doctype の前でも quirks mode にならない）", () => {
-    expect(html("<!doctype html><p>x</p>")).toBe(`${P}<!doctype html><p>x</p>`);
+  it("<head> が無ければ doctype の直後（document.doctype を残すため）、doctype も無ければ先頭に入れる", () => {
+    expect(html("<!doctype html><p>x</p>")).toBe(`<!doctype html>${P}<p>x</p>`);
     expect(html("<p>x</p><script>1</script>")).toBe(`${P}<p>x</p><script>1</script>`);
   });
 
@@ -212,7 +212,7 @@ describe("buildPreviewDocument の headPrelude（コンソール中継の差し�
 
   it("<body> より後に現れる <head> は使わない", () => {
     expect(html("<!doctype html><body><p>x</p><head></head></body>")).toBe(
-      `${P}<!doctype html><body><p>x</p><head></head></body>`
+      `<!doctype html>${P}<body><p>x</p><head></head></body>`
     );
   });
 

@@ -9,6 +9,7 @@ import {
   GEMINI_MODEL_NAME,
   GEMINI_REQUEST_TIMEOUT_MS,
   GEMINI_RETRY_BASE_DELAY_MS,
+  GEMINI_RETRY_MIN_ATTEMPT_MS,
   GEMINI_TEMPERATURE,
   GEMINI_THINKING_LEVEL,
   GEMINI_TOTAL_BUDGET_MS,
@@ -869,25 +870,81 @@ describe("generateReview", () => {
     expect(generateContentMock).toHaveBeenCalledTimes(1);
   });
 
-  it("503 のリトライが全体の期限で打ち切られたら、タイムアウトではなく混雑として報告し status をログに残す", async () => {
-    vi.useFakeTimers();
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    generateContentMock
-      .mockRejectedValueOnce(new ApiError({ message: "overloaded", status: 503 }))
-      .mockRejectedValueOnce(new DOMException("The operation was aborted.", "AbortError"));
+  describe("リトライ中のタイムアウト", () => {
+    // AbortSignal.timeout runs on Node's own timers; route it through the faked setTimeout so the
+    // per-attempt and overall deadlines fire in fake time.
+    const useFakeSignals = () => {
+      vi.useFakeTimers();
+      vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(new DOMException("timed out", "TimeoutError")), ms);
+        return controller.signal;
+      });
+    };
+    const rejectAfter = (ms: number, error: unknown) => () =>
+      new Promise((_resolve, reject) => setTimeout(() => reject(error), ms));
+    const hangUntilAborted = (request: { config: { abortSignal: AbortSignal } }) =>
+      new Promise((_resolve, reject) =>
+        request.config.abortSignal.addEventListener("abort", () =>
+          reject(new DOMException("The operation was aborted.", "AbortError"))
+        )
+      );
+    const overloaded = new ApiError({ message: "overloaded", status: 503 });
 
-    const settled = generateReview(baseParams).catch((e: unknown) => e);
-    await vi.runAllTimersAsync();
-    const error = await settled;
+    it("503 のリトライが全体の期限で打ち切られたら、混雑として報告し status をログに残す", async () => {
+      useFakeSignals();
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      // 503 at 30s, retry at 35s: the overall 45s deadline fires before the attempt's own 25s.
+      generateContentMock
+        .mockImplementationOnce(rejectAfter(30_000, overloaded))
+        .mockImplementationOnce(hangUntilAborted);
 
-    expect((error as Error).message).toBe(
-      "AIが混み合っています。しばらく時間を置いてから再試行してください。"
-    );
-    expect(generateContentMock).toHaveBeenCalledTimes(2);
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("status=503"),
-      expect.any(String)
-    );
+      const settled = generateReview(baseParams).catch((e: unknown) => e);
+      await vi.runAllTimersAsync();
+      const error = await settled;
+
+      expect((error as Error).message).toBe(
+        "AIが混み合っています。しばらく時間を置いてから再試行してください。"
+      );
+      expect(generateContentMock).toHaveBeenCalledTimes(2);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("status=503"),
+        expect.any(String)
+      );
+    });
+
+    it("リトライが試行ごとの上限で切れた（実際に遅かった）場合はタイムアウトとして報告する", async () => {
+      useFakeSignals();
+      generateContentMock
+        .mockRejectedValueOnce(overloaded)
+        .mockImplementationOnce(hangUntilAborted);
+
+      const settled = generateReview(baseParams).catch((e: unknown) => e);
+      await vi.runAllTimersAsync();
+      const error = await settled;
+
+      expect((error as Error).message).toBe(
+        "Gemini APIの応答がタイムアウトしました。しばらく時間を置いてから再試行してください。"
+      );
+      expect(generateContentMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("待機後に GEMINI_RETRY_MIN_ATTEMPT_MS も残らないならリトライしない（課金だけされる試行を始めない）", async () => {
+      useFakeSignals();
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      // 503 at 36s: 36 + 5 (wait) + 5 (minimum attempt) > 45.
+      generateContentMock.mockImplementationOnce(rejectAfter(36_000, overloaded));
+
+      const settled = generateReview(baseParams).catch((e: unknown) => e);
+      await vi.runAllTimersAsync();
+      const error = await settled;
+
+      expect((error as Error).message).toBe(
+        "AIが混み合っています。しばらく時間を置いてから再試行してください。"
+      );
+      expect(generateContentMock).toHaveBeenCalledTimes(1);
+      expect(GEMINI_RETRY_MIN_ATTEMPT_MS).toBeGreaterThan(0);
+    });
   });
 
   it("応答がタイムアウトした場合は日本語のタイムアウトメッセージを投げ、リトライしない", async () => {

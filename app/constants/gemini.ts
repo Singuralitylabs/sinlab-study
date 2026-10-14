@@ -45,6 +45,12 @@ export const GEMINI_RETRYABLE_STATUSES: readonly number[] = [429, 500, 503];
 export const GEMINI_RETRY_BASE_DELAY_MS = 5000;
 
 /**
+ * Least time a retry must have left before GEMINI_TOTAL_BUDGET_MS (ms). A retry started closer
+ * to the deadline is aborted before Gemini can answer, yet its prompt is still billed.
+ */
+export const GEMINI_RETRY_MIN_ATTEMPT_MS = 5000;
+
+/**
  * Timeout per attempt (ms). The time an attempt actually gets is the shorter of this and the
  * remaining GEMINI_TOTAL_BUDGET_MS (combined via AbortSignal.any).
  */

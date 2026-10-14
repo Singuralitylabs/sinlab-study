@@ -23,12 +23,12 @@ export interface PreviewConsoleEntry {
  * "*" target origin the opaque-origin frame forces on us. The learner's code can replace any of
  * this, which is harmless: the parent trusts a message only by its event.source.
  * Formatting uses tag checks rather than instanceof, which misses values created in another
- * realm. JSON is used only for plain objects and arrays, and the replacer summarises any other
- * object nested inside them: DOM nodes, errors, Map / Set and class instances have no own
- * enumerable data and would all print as a misleading "{}" (a NodeList of <li> included). The
- * depth cap keeps instances that point at each other from recursing without end. Format
- * specifiers apply only with more than one argument, as in DevTools (a lone "100%%" stays as is).
- * The fallbacks cover circular objects, BigInt inside objects and a throwing toString.
+ * realm, and prints DevTools-style ({a: 1}, [<li>], Map(1) {"k" => 1}) instead of JSON: DOM nodes,
+ * errors, Map / Set and class instances have no own enumerable data and would all print as "{}".
+ * One character budget is shared by the whole value and checked before each child is printed, so
+ * a large or self-referencing structure (window, graphs with back references) costs about the
+ * budget instead of being printed whole and then cut. Format specifiers apply only with more than
+ * one argument, as in DevTools (a lone "100%%" stays as is).
  */
 const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLength) {
   var sent = 0;
@@ -36,58 +36,89 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
   var isNode = function (value) {
     return typeof value.nodeType === "number" && typeof value.nodeName === "string";
   };
-  var isPlain = function (value) {
+  var describeNode = function (value) {
+    if (value.nodeType === 1) {
+      var el = "<" + String(value.tagName).toLowerCase();
+      if (value.id) el += ' id="' + value.id + '"';
+      if (typeof value.className === "string" && value.className) {
+        el += ' class="' + value.className + '"';
+      }
+      return el + ">";
+    }
+    if (value.nodeType === 3) return '#text "' + value.data + '"';
+    return value.nodeName;
+  };
+  var keyLabel = function (key) {
+    return /^([A-Za-z_$][A-Za-z0-9_$]*|[0-9]+)$/.test(key) ? key : JSON.stringify(key);
+  };
+  var inspect = function (value, depth, ctx) {
+    var nested = depth > 0;
+    if (typeof value === "string") return nested ? JSON.stringify(value) : value;
+    if (typeof value === "bigint") return String(value) + "n";
+    if (typeof value === "function") return "ƒ " + (value.name || "anonymous") + "()";
+    if (typeof value !== "object" || value === null) return String(value);
+    var tag = toTag(value);
+    if (tag === "[object Error]" || tag === "[object DOMException]") {
+      return String(value.name) + ": " + String(value.message);
+    }
+    if (isNode(value)) return describeNode(value);
+    if (tag === "[object Date]" || tag === "[object RegExp]") return String(value);
+    if (tag === "[object Window]" || value.window === value) return "Window";
+    if (ctx.seen.indexOf(value) !== -1) return "[Circular]";
     var proto = Object.getPrototypeOf(value);
-    return Array.isArray(value) || proto === Object.prototype || proto === null;
-  };
-  var json = function (value, depth) {
-    var text = JSON.stringify(value, function (key, v) {
-      if (key === "") return v;
-      var nested = typeof v === "object" && v !== null && (isNode(v) || !isPlain(v));
-      if (typeof v === "function" || nested) {
-        return format(v, depth + 1);
-      }
-      return v;
-    });
-    return typeof text === "string" ? text : String(value);
-  };
-  var collect = function (iterable, isMap) {
-    var items = [];
-    iterable.forEach(function (v, k) { items.push(isMap ? [k, v] : v); });
-    return items;
-  };
-  var format = function (value, depth) {
-    depth = depth || 0;
-    try {
-      if (typeof value === "string") return value;
-      if (typeof value === "function") return "ƒ " + (value.name || "anonymous") + "()";
-      if (typeof value !== "object" || value === null) return String(value);
-      var tag = toTag(value);
-      if (tag === "[object Error]" || tag === "[object DOMException]") {
-        return String(value.name) + ": " + String(value.message);
-      }
-      if (isNode(value)) {
-        if (value.nodeType === 1) {
-          var el = "<" + String(value.tagName).toLowerCase();
-          if (value.id) el += ' id="' + value.id + '"';
-          if (typeof value.className === "string" && value.className) {
-            el += ' class="' + value.className + '"';
-          }
-          return el + ">";
-        }
-        if (value.nodeType === 3) return '#text "' + value.data + '"';
-        return value.nodeName;
-      }
-      if (tag === "[object Date]" || tag === "[object RegExp]") return String(value);
-      if (depth > 2) return tag;
-      if (tag === "[object Map]" || tag === "[object Set]") {
-        var items = collect(value, tag === "[object Map]");
-        return tag.slice(8, -1) + "(" + value.size + ") " + json(items, depth);
-      }
-      if (isPlain(value)) return json(value, depth);
-      var proto = Object.getPrototypeOf(value);
+    var isArray = Array.isArray(value);
+    var isMap = tag === "[object Map]";
+    var isSet = tag === "[object Set]";
+    var isList = !isArray && typeof value.length === "number" && /(List|Collection)\\]$/.test(tag);
+    var label = "";
+    if (isMap || isSet) label = tag.slice(8, -1) + "(" + value.size + ") ";
+    else if (isList) label = tag.slice(8, -1) + "(" + value.length + ") ";
+    else if (!isArray && proto !== Object.prototype && proto !== null) {
       var name = proto && proto.constructor && proto.constructor.name;
-      return (name ? name + " " : "") + json(value, depth);
+      if (name) label = name + " ";
+    }
+    if (depth > 2) {
+      if (isArray) return "Array(" + value.length + ")";
+      return label ? label.slice(0, -1) : "{…}";
+    }
+    var parts = [];
+    var more = false;
+    var add = function (print) {
+      if (ctx.left <= 0) { more = true; return false; }
+      var text = print();
+      ctx.left -= text.length + 2;
+      parts.push(text);
+      return true;
+    };
+    var child = function (v) { return inspect(v, depth + 1, ctx); };
+    ctx.seen.push(value);
+    try {
+      if (isArray || isList) {
+        for (var i = 0; i < value.length; i++) {
+          if (!add(function () { return child(value[i]); })) break;
+        }
+      } else if (isMap || isSet) {
+        value.forEach(function (v, k) {
+          if (more) return;
+          add(function () { return isMap ? child(k) + " => " + child(v) : child(v); });
+        });
+      } else {
+        var keys = Object.keys(value);
+        for (var j = 0; j < keys.length; j++) {
+          if (!add(function () { return keyLabel(keys[j]) + ": " + child(value[keys[j]]); })) break;
+        }
+      }
+    } finally {
+      ctx.seen.pop();
+    }
+    var open = isArray || isList ? "[" : "{";
+    var close = isArray || isList ? "]" : "}";
+    if (more) parts.push("…");
+    return label + open + parts.join(", ") + close;
+  };
+  var format = function (value) {
+    try {
+      return inspect(value, 0, { left: maxTextLength, seen: [] });
     } catch (e) {
       try { return toTag(value); } catch (e2) { return "[unprintable]"; }
     }
