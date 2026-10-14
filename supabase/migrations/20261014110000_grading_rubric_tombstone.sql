@@ -53,13 +53,14 @@ BEGIN
   END IF;
 
   -- 発行済み番号の高水位: 保存済みの max_key_number と、残っている r{n} キーの最大値。
+  -- キーは前後の空白を除いて数える（アプリの zod が trim するのと同じ）。
   IF jsonb_typeof(OLD.grading_rubric -> 'max_key_number') = 'number'
      AND (OLD.grading_rubric ->> 'max_key_number') ~ '^[0-9]{1,9}$' THEN
     issued_max := (OLD.grading_rubric ->> 'max_key_number')::bigint;
   END IF;
   SELECT greatest(
            issued_max,
-           coalesce(max(substring(item ->> 'key' FROM '^r([0-9]{1,9})$')::bigint), 0)
+           coalesce(max(substring(btrim(item ->> 'key') FROM '^r([0-9]{1,9})$')::bigint), 0)
          )
     INTO issued_max
     FROM jsonb_array_elements(old_requirements) AS item;
