@@ -377,7 +377,7 @@ describe("fetchThemeProgressSummaries", () => {
     ]);
   });
 
-  it("コンテンツが1件もない場合、user_progress を照会しない", async () => {
+  it("コンテンツが1件もない場合、進捗の結果を使わず完了数0を返す（進捗はテーマ取得と並列に始まる）", async () => {
     const mockClient = createPerTableMockClient({
       themes: { data: [{ id: 2, name: "Theme 2", display_order: 2, phases: [] }], error: null },
     });
@@ -393,8 +393,8 @@ describe("fetchThemeProgressSummaries", () => {
         completedContents: 0,
       },
     ]);
-    expect(mockClient.from).toHaveBeenCalledTimes(1);
     expect(mockClient.from).toHaveBeenCalledWith("learning_themes");
+    expect(mockClient.from).toHaveBeenCalledWith("user_progress");
   });
 
   it("テーマ取得エラー時、data: null とエラーを返す", async () => {

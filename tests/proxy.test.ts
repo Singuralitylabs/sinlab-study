@@ -33,7 +33,7 @@ function mockProxySupabase({
 }: {
   authUser?: { id: string } | null;
   authError?: unknown;
-  userData?: { id: number; status: string; role: string } | null;
+  userData?: { id: number; status: string; role: string; membership_type?: string | null } | null;
   userError?: unknown;
 } = {}) {
   const client = createMockSupabaseClient({
@@ -79,6 +79,7 @@ describe("proxy", () => {
       headers.set(AUTH_HEADERS.USER_ID, "999");
       headers.set(AUTH_HEADERS.USER_STATUS, "active");
       headers.set(AUTH_HEADERS.USER_ROLE, "admin");
+      headers.set(AUTH_HEADERS.MEMBERSHIP_TYPE, "general");
 
       const req = new NextRequest("http://localhost/api/admin/users", { headers });
       const res = await proxy(req);
@@ -88,6 +89,7 @@ describe("proxy", () => {
       expect(res.headers.get("x-middleware-request-x-sinlab-user-id")).toBeNull();
       expect(res.headers.get("x-middleware-request-x-sinlab-user-status")).toBeNull();
       expect(res.headers.get("x-middleware-request-x-sinlab-user-role")).toBeNull();
+      expect(res.headers.get("x-middleware-request-x-sinlab-membership-type")).toBeNull();
     });
   });
 
@@ -196,7 +198,7 @@ describe("proxy", () => {
     it("active ユーザーの場合、リクエストヘッダーにユーザー情報（auth_id, user_id, status, role）を設定して通過する", async () => {
       mockProxySupabase({
         authUser: { id: "auth-123" },
-        userData: { id: 42, status: "active", role: "member" },
+        userData: { id: 42, status: "active", role: "member", membership_type: "community" },
       });
 
       const req = new NextRequest("http://localhost/dashboard");
@@ -212,6 +214,23 @@ describe("proxy", () => {
       expect(downstreamUserId).toBe("42");
       expect(downstreamStatus).toBe("active");
       expect(downstreamRole).toBe("member");
+      expect(res.headers.get("x-middleware-request-x-sinlab-membership-type")).toBe("community");
+    });
+
+    it("会員種別が無いユーザー（お試し等）は空文字で渡し、偽装された会員種別ヘッダーは上書きされる", async () => {
+      mockProxySupabase({
+        authUser: { id: "auth-trial" },
+        userData: { id: 11, status: "trial", role: "member", membership_type: null },
+      });
+
+      const headers = new Headers();
+      headers.set(AUTH_HEADERS.MEMBERSHIP_TYPE, "general");
+
+      const req = new NextRequest("http://localhost/dashboard", { headers });
+      const res = await proxy(req);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-middleware-request-x-sinlab-membership-type")).toBe("");
     });
 
     it("受信リクエストに含まれる偽装ヘッダーは削除され、正規の認証情報で上書きされる", async () => {

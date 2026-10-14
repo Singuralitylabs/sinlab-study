@@ -5,7 +5,7 @@ import { ALLOWED_USER_STATUSES } from "@/app/constants/user";
 import { isAnnouncementTarget } from "@/app/lib/announcement-target";
 import type { AnnouncementInput } from "@/app/services/api/schemas";
 import { getServerAuth } from "@/app/services/auth/server-auth";
-import type { Announcement, UserStatusType } from "@/app/types";
+import type { Announcement, MembershipType, UserStatusType } from "@/app/types";
 import { createServerSupabaseClient } from "./supabase-server";
 
 /**
@@ -40,16 +40,25 @@ const DETAIL_COLUMNS = `${SUMMARY_COLUMNS}, body`;
 
 /**
  * Builds the viewer. Only active / trial users can view announcements; others (rejected, unknown)
- * get null. getServerAuth() has no membership type, so it is read from the user's own row
- * (readable via RLS); if unreadable return null (announcements targeted by type stay hidden, the
- * safe side).
+ * get null. The membership type comes from getServerAuth() when the proxy headers carried it (no
+ * DB access); otherwise (API routes, header mismatch) it is read from the user's own row (readable
+ * via RLS). If unreadable the type is null (announcements targeted by type stay hidden, the safe
+ * side).
  */
 export async function resolveAnnouncementViewer(auth: {
   userId: number | null;
   userStatus: UserStatusType | null;
+  membershipType?: MembershipType | null;
 }): Promise<AnnouncementViewer | null> {
   if (!auth.userId || !auth.userStatus || !ALLOWED_USER_STATUSES.includes(auth.userStatus)) {
     return null;
+  }
+  if (auth.membershipType !== undefined) {
+    return {
+      userId: auth.userId,
+      status: auth.userStatus,
+      membershipType: auth.membershipType,
+    };
   }
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
@@ -176,8 +185,8 @@ export async function isAnnouncementRead(
  * refetching (`React.cache()`).
  */
 export const getAnnouncementViewer = cache(async (): Promise<AnnouncementViewer | null> => {
-  const { userId, userStatus } = await getServerAuth();
-  return resolveAnnouncementViewer({ userId, userStatus });
+  const { userId, userStatus, membershipType } = await getServerAuth();
+  return resolveAnnouncementViewer({ userId, userStatus, membershipType });
 });
 
 /**

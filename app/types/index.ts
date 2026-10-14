@@ -195,7 +195,7 @@ export type BreadcrumbPhase = Pick<
 
 export type BreadcrumbWeek = Pick<
   LearningWeek,
-  "id" | "phase_id" | "name" | "is_published" | "is_deleted"
+  "id" | "phase_id" | "name" | "display_order" | "is_published" | "is_deleted"
 > & {
   phase: BreadcrumbPhase | null;
 };

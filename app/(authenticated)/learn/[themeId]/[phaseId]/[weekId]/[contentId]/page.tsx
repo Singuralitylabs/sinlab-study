@@ -76,16 +76,32 @@ export default async function ContentPage({ params }: PageProps) {
       : Promise.resolve(null);
 
   // Members/trial users fetch the summary via service_role; admin/maintainer use the normal client so
-  // unpublished content is included.
-  const [{ data: week }, { data: navigation }, { data: content }] = await Promise.all([
-    fetchWeekById(weekIdNum, userRole),
+  // unpublished content is included. Progress needs only the IDs (RLS-scoped client), so it runs
+  // in this first wave instead of waiting for content_type.
+  const [{ data: navigation }, { data: content }, { isCompleted }] = await Promise.all([
     fetchThemeNavigationIndex(themeIdNum, weekIdNum, userRole),
     fetchContentById(contentIdNum, userRole),
+    userId
+      ? fetchUserProgressByContentId(userId, contentIdNum)
+      : Promise.resolve({ isCompleted: false }),
   ]);
+
+  // The breadcrumb hierarchy comes from the content's embedded week -> phase -> theme. Locked
+  // trial content is hidden from the content query by RLS (content is null), so only then is the
+  // week fetched separately (the lock screen still needs its breadcrumbs).
+  const week = content ? content.week : (await fetchWeekById(weekIdNum, userRole)).data;
 
   // 404 when the URL's themeId/phaseId don't match the week's actual phase/theme (keeps breadcrumbs
   // and prev/next links from pointing at wrong URLs).
-  if (!week || week.phase_id !== phaseIdNum || week.phase?.theme_id !== themeIdNum) {
+  // The embedded week has no is_deleted filter (fetchWeekById had), so a deleted week is rejected
+  // here for admin / maintainer too instead of showing up as a preview.
+  if (
+    !week ||
+    week.is_deleted ||
+    week.id !== weekIdNum ||
+    week.phase_id !== phaseIdNum ||
+    week.phase?.theme_id !== themeIdNum
+  ) {
     notFound();
   }
 
@@ -233,19 +249,16 @@ export default async function ContentPage({ params }: PageProps) {
   // computed here on the server (the client never counts) and joins the same Promise.all because
   // it depends on none of the other fetches.
   const [
-    { isCompleted },
     { data: existingReview, submissionId: reviewedSubmissionId },
     { data: latestSubmission },
     slideSignedUrl,
     { data: quizQuestions, error: quizError },
     aiReviewUsage,
   ] = await Promise.all([
-    userId
-      ? fetchUserProgressByContentId(userId, contentIdNum)
-      : Promise.resolve({ isCompleted: false }),
     userId && content.content_type === "exercise"
       ? fetchCompletedAIReviewByContentId(userId, contentIdNum)
       : Promise.resolve({ data: null, submissionId: null }),
+    // service_role read: only after the lock / publish checks above, and only for exercises.
     userId && content.content_type === "exercise"
       ? fetchLatestSubmissionByContentId(userId, contentIdNum)
       : Promise.resolve({ data: null }),

@@ -16,7 +16,7 @@ import { getServerAuth } from "@/app/services/auth/server-auth";
  */
 export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { user, userId, userStatus } = await getServerAuth();
+    const { user, userId, userStatus, membershipType } = await getServerAuth();
     if (!user) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     }
@@ -31,7 +31,7 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: "無効なIDです" }, { status: 400 });
     }
 
-    const viewer = await resolveAnnouncementViewer({ userId, userStatus });
+    const viewer = await resolveAnnouncementViewer({ userId, userStatus, membershipType });
     if (!viewer) {
       return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
     }
