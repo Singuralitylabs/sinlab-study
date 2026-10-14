@@ -449,6 +449,22 @@ describe("buildPreviewDocument の閉じていない構文", () => {
     expect(out).toBe(`${P}${content}`);
   });
 
+  // Covers each findScriptEnd() state (escaped, double escaped, the "<!--" rewind and the
+  // "<!--" + dashes lookahead), which plain "<script>" repeats never reach.
+  it.each([
+    ["<script><!--", "<script></script>", 40000],
+    ["<script><!--", "-", 400000],
+    ["<script>", "<!---->", 60000],
+    ["<script><!--<script>", "<!--", 80000],
+    ["<script><!--", "<!--<script", 60000],
+  ])("%j に続く %j の繰り返し（%i 回）でも線形時間で返し、内容を変えない", (head, unit, times) => {
+    const content = `<p>x</p>${head}${unit.repeat(times)}x`;
+    const startedAt = Date.now();
+    const out = html(content);
+    expect(Date.now() - startedAt).toBeLessThan(3000);
+    expect(out).toBe(`${P}${content}`);
+  });
+
   it("閉じていない <head・<link・<script src> は展開も差し込みもしない", () => {
     expect(html('<head <link rel="stylesheet" href="main.js"')).toBe(
       `${P}<head <link rel="stylesheet" href="main.js"`
