@@ -69,7 +69,12 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
     var isArray = Array.isArray(value);
     var isMap = tag === "[object Map]";
     var isSet = tag === "[object Set]";
-    var isList = !isArray && typeof value.length === "number" && /(List|Collection)\\]$/.test(tag);
+    // Typed arrays (ImageData.data can hold a million bytes) are walked by index like lists, so
+    // the budget stops them early; Object.keys() would first build every index string.
+    var isTyped = typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(value);
+    var isList =
+      !isArray && typeof value.length === "number" &&
+      (isTyped || /(List|Collection)\\]$/.test(tag));
     var label = "";
     if (isMap || isSet) label = tag.slice(8, -1) + "(" + value.size + ") ";
     else if (isList) label = tag.slice(8, -1) + "(" + value.length + ") ";
@@ -98,10 +103,17 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
           if (!add(function () { return child(value[i]); })) break;
         }
       } else if (isMap || isSet) {
-        value.forEach(function (v, k) {
-          if (more) return;
-          add(function () { return isMap ? child(k) + " => " + child(v) : child(v); });
-        });
+        // forEach cannot break; throwing a private marker stops a huge Map / Set at the budget.
+        var stop = {};
+        try {
+          value.forEach(function (v, k) {
+            if (!add(function () { return isMap ? child(k) + " => " + child(v) : child(v); })) {
+              throw stop;
+            }
+          });
+        } catch (e) {
+          if (e !== stop) throw e;
+        }
       } else {
         var keys = Object.keys(value);
         for (var j = 0; j < keys.length; j++) {

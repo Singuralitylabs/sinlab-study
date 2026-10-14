@@ -160,6 +160,28 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
     }
   });
 
+  it("大きな型付き配列・Map・Set も要素数に比例せず、上限で打ち切る", () => {
+    const { run, texts } = runBridge();
+    run(`
+      var bytes = new Uint8Array(5e7);
+      var floats = new Float64Array(3e6);
+      var map = new Map(); for (let i = 0; i < 1e6; i++) map.set(i, i);
+      var set = new Set(map.keys());
+    `);
+    const startedAt = Date.now();
+    run("console.log(bytes); console.log(floats); console.log(map); console.log(set);");
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    const [b, f, m, st] = texts();
+    expect(b).toMatch(/^Uint8Array\(50000000\) \[0, 0, /);
+    expect(f).toMatch(/^Float64Array\(3000000\) \[0, 0, /);
+    expect(m).toMatch(/^Map\(1000000\) \{0 => 0, 1 => 1, /);
+    expect(st).toMatch(/^Set\(1000000\) \{0, 1, /);
+    for (const text of [b, f, m, st]) {
+      expect(text.length).toBeLessThanOrEqual(PREVIEW_CONSOLE_MAX_TEXT_LENGTH);
+      expect(text.endsWith("…")).toBe(true);
+    }
+  });
+
   it("引数が1つだけなら書式指定子を置き換えない（DevTools と同じ）", () => {
     const { run, texts, listeners } = runBridge();
     run('console.log("進捗 100%% 完了 %s")');
