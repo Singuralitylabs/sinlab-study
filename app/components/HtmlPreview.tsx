@@ -144,7 +144,7 @@ export function HtmlPreview({ files, collapsible = false }: HtmlPreviewProps) {
           </div>
           {current.entries.length === 0 ? (
             <p className="px-3 py-2 text-xs text-muted-foreground">
-              console.log の出力やエラーがここに表示されます
+              プログラムの出力（console）やエラーがここに表示されます
             </p>
           ) : (
             // Rendered as React text (textContent), never as HTML: the lines are the learner's.
