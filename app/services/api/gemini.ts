@@ -403,13 +403,16 @@ const RATE_LIMIT_MESSAGE =
 const OVERLOADED_MESSAGE = "AIが混み合っています。しばらく時間を置いてから再試行してください。";
 const TIMEOUT_MESSAGE =
   "Gemini APIの応答がタイムアウトしました。しばらく時間を置いてから再試行してください。";
+const UNKNOWN_ERROR_MESSAGE =
+  "AIレビューの生成中にエラーが発生しました。しばらく時間を置いてから再試行してください。";
 
 /**
- * The message stored in ai_reviews.error_message and shown to the learner as is. An ApiError's
- * message is the raw English JSON body of the response, so it never goes there; the status code
- * alone is enough for an operator, who gets the full (redacted) body from the server log.
+ * The message stored in ai_reviews.error_message and shown to the learner as is, so no error's own
+ * text goes there: an ApiError carries the raw English JSON body, and a network failure ("fetch
+ * failed", ECONNRESET) is just as raw. The status code alone is enough for an operator, who gets
+ * the full (redacted) text from the server log (logGeminiFailure()).
  */
-export function toUserFacingErrorMessage(error: unknown, apiKey: string): string {
+export function toUserFacingErrorMessage(error: unknown): string {
   if (isRateLimitError(error)) {
     return RATE_LIMIT_MESSAGE;
   }
@@ -422,7 +425,15 @@ export function toUserFacingErrorMessage(error: unknown, apiKey: string): string
   if (error instanceof ApiError) {
     return `AIレビューの生成中にエラーが発生しました（コード: ${error.status}）。`;
   }
-  return toSafeError(error, apiKey).message;
+  return UNKNOWN_ERROR_MESSAGE;
+}
+
+function logGeminiFailure(error: unknown, apiKey: string): void {
+  if (isTimeoutError(error)) {
+    return;
+  }
+  const label = error instanceof ApiError ? `status=${error.status}` : "(no status)";
+  console.error(`Gemini APIエラー ${label}:`, toSafeError(error, apiKey).message);
 }
 
 function toSafeError(error: unknown, apiKey: string): Error {
@@ -539,17 +550,12 @@ async function generateValidatedJson<T>({
       }
     }
 
+    // Also on the regeneration: once the call itself failed, the first response's validation
+    // reason no longer explains the failure (a 503 there must still read as "busy"). usage keeps
+    // the first response's tokens.
     if (!response) {
-      if (validationAttempt > 0) {
-        break;
-      }
-      if (lastError instanceof ApiError) {
-        console.error(
-          `Gemini APIエラー status=${lastError.status}:`,
-          toSafeError(lastError, apiKey).message
-        );
-      }
-      throw new ReviewGenerationError(toUserFacingErrorMessage(lastError, apiKey), usage);
+      logGeminiFailure(lastError, apiKey);
+      throw new ReviewGenerationError(toUserFacingErrorMessage(lastError), usage);
     }
 
     usage = addUsage(usage, response.usageMetadata);

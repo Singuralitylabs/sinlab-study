@@ -14,103 +14,93 @@ export interface PreviewConsoleEntry {
   text: string;
 }
 
-interface BridgeWindow {
-  parent: { postMessage: (message: unknown, targetOrigin: string) => void };
-  addEventListener: (type: string, listener: (event: never) => void) => void;
-}
-
-interface BridgeConsole {
-  [method: string]: unknown;
-}
-
 /**
  * Runs inside the preview iframe ahead of the learner's code and forwards console output and
- * uncaught errors to the parent. Inlined via toString(), so it must not reference outer symbols.
+ * uncaught errors to the parent. Kept as literal ES5 source rather than a compiled function's
+ * toString(), so what ships is exactly what the vm test runs: a compiled function could pick up
+ * bundler helpers (spread, async) that do not exist inside the iframe and silently kill the bridge.
  * It only ever sends: the parent never posts into the frame, so nothing secret crosses with the
  * "*" target origin the opaque-origin frame forces on us. The learner's code can replace any of
  * this, which is harmless: the parent trusts a message only by its event.source.
+ * The error formatting uses a tag check rather than instanceof, which misses errors created in
+ * another realm; the fallbacks cover circular objects, BigInt inside objects and a throwing
+ * toString.
  */
-export function previewConsoleBridge(
-  win: BridgeWindow,
-  con: BridgeConsole,
-  messageType: string,
-  maxEntries: number,
-  maxTextLength: number
-): void {
-  let sent = 0;
-
-  const format = (value: unknown): string => {
+const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLength) {
+  var sent = 0;
+  var toTag = function (value) { return Object.prototype.toString.call(value); };
+  var format = function (value) {
     try {
-      if (typeof value === "string") {
-        return value;
-      }
-      // A tag check rather than instanceof, which misses errors created in another realm.
-      const tag = Object.prototype.toString.call(value);
+      if (typeof value === "string") return value;
+      var tag = toTag(value);
       if (tag === "[object Error]" || tag === "[object DOMException]") {
-        const error = value as { name: unknown; message: unknown };
-        return `${String(error.name)}: ${String(error.message)}`;
+        return String(value.name) + ": " + String(value.message);
       }
       if (typeof value === "object" && value !== null) {
-        const json = JSON.stringify(value);
+        var json = JSON.stringify(value);
         return typeof json === "string" ? json : String(value);
       }
       return String(value);
-    } catch {
-      // Circular objects, BigInt inside objects, a throwing toString: still show something.
-      try {
-        return Object.prototype.toString.call(value);
-      } catch {
-        return "[unprintable]";
-      }
+    } catch (e) {
+      try { return toTag(value); } catch (e2) { return "[unprintable]"; }
     }
   };
-
-  const send = (level: string, values: unknown[]): void => {
-    if (sent >= maxEntries) {
-      return;
-    }
+  var send = function (level, values) {
+    if (sent >= maxEntries) return;
     sent++;
-    let text = values.map(format).join(" ");
-    if (text.length > maxTextLength) {
-      text = `${text.slice(0, maxTextLength - 1)}…`;
-    }
+    var parts = [];
+    for (var i = 0; i < values.length; i++) parts.push(format(values[i]));
+    var text = parts.join(" ");
+    if (text.length > maxTextLength) text = text.slice(0, maxTextLength - 1) + "…";
     try {
-      win.parent.postMessage({ type: messageType, level, text }, "*");
-    } catch {
-      // The parent may be gone (page navigated away); the learner's code must keep running.
-    }
+      win.parent.postMessage({ type: messageType, level: level, text: text }, "*");
+    } catch (e) {}
   };
-
-  const methods: [string, string][] = [
-    ["log", "log"],
-    ["info", "log"],
-    ["debug", "log"],
-    ["warn", "warn"],
-    ["error", "error"],
-  ];
-  for (const [method, level] of methods) {
-    const original = con[method];
-    con[method] = (...values: unknown[]) => {
+  var wrap = function (method, level) {
+    var original = con[method];
+    con[method] = function () {
+      var values = Array.prototype.slice.call(arguments);
       send(level, values);
-      if (typeof original === "function") {
-        original.apply(con, values);
-      }
+      if (typeof original === "function") original.apply(con, values);
     };
-  }
-
-  win.addEventListener("error", (event: { message?: string; error?: unknown }) => {
+  };
+  wrap("log", "log");
+  wrap("info", "log");
+  wrap("debug", "log");
+  wrap("warn", "warn");
+  wrap("error", "error");
+  win.addEventListener("error", function (event) {
     send("error", [event.message || format(event.error)]);
   });
-  win.addEventListener("unhandledrejection", (event: { reason?: unknown }) => {
+  win.addEventListener("unhandledrejection", function (event) {
     send("error", ["Uncaught (in promise)", event.reason]);
   });
-}
+}`;
 
 // One line past the parent's cap is sent so the parent can tell the output was cut off.
 export function buildPreviewConsoleBridgeScript(): string {
-  return `<script>(${previewConsoleBridge.toString()})(window,console,${JSON.stringify(
+  return `<script>(${BRIDGE_SOURCE})(window,console,${JSON.stringify(
     PREVIEW_CONSOLE_MESSAGE_TYPE
   )},${PREVIEW_CONSOLE_MAX_ENTRIES + 1},${PREVIEW_CONSOLE_MAX_TEXT_LENGTH});</script>`;
+}
+
+// Comments and <style> bodies are skipped whole; scanning stops at the first <body> or <script>,
+// because the bridge has to precede every script anyway and a "<head>" inside a script string must
+// not be taken for the element (the bridge's </script> would end the learner's script early).
+const HEAD_SCAN =
+  /<!--[\s\S]*?-->|<style\b[^>]*>[\s\S]*?<\/style\s*>|<(head|body|script)\b[^>]*>/gi;
+
+function findHeadEnd(html: string): number | null {
+  for (const match of html.matchAll(HEAD_SCAN)) {
+    const tag = match[1]?.toLowerCase();
+    if (tag === "head") {
+      return (match.index ?? 0) + match[0].length;
+    }
+    if (tag === "body" || tag === "script") {
+      return null;
+    }
+  }
+  return null;
 }
 
 /**
@@ -119,10 +109,9 @@ export function buildPreviewConsoleBridgeScript(): string {
  */
 export function injectPreviewConsoleBridge(html: string): string {
   const bridge = buildPreviewConsoleBridgeScript();
-  const head = /<head\b[^>]*>/i.exec(html);
-  if (head) {
-    const at = head.index + head[0].length;
-    return html.slice(0, at) + bridge + html.slice(at);
+  const headEnd = findHeadEnd(html);
+  if (headEnd !== null) {
+    return html.slice(0, headEnd) + bridge + html.slice(headEnd);
   }
   const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
   if (doctype) {

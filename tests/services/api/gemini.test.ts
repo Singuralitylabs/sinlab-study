@@ -167,7 +167,7 @@ describe("toUserFacingErrorMessage", () => {
 
   it("503 / 500 は混雑の案内にし、API応答の生JSONを含めない", () => {
     for (const status of [500, 503]) {
-      const message = toUserFacingErrorMessage(new ApiError({ message: rawBody, status }), "k");
+      const message = toUserFacingErrorMessage(new ApiError({ message: rawBody, status }));
       expect(message).toBe("AIが混み合っています。しばらく時間を置いてから再試行してください。");
       expect(message).not.toContain("{");
     }
@@ -178,10 +178,17 @@ describe("toUserFacingErrorMessage", () => {
       new ApiError({
         message: `{"error":{"code":400,"message":"bad ${MEMBER_KEY}"}}`,
         status: 400,
-      }),
-      MEMBER_KEY
+      })
     );
     expect(message).toBe("AIレビューの生成中にエラーが発生しました（コード: 400）。");
+  });
+
+  it("ApiError でないエラー（ネットワーク断など）も固定の日本語文言にし、元のメッセージを含めない", () => {
+    for (const error of [new TypeError("fetch failed"), new Error("ECONNRESET"), "boom", null]) {
+      expect(toUserFacingErrorMessage(error)).toBe(
+        "AIレビューの生成中にエラーが発生しました。しばらく時間を置いてから再試行してください。"
+      );
+    }
   });
 });
 
@@ -652,6 +659,7 @@ describe("generateReview", () => {
   });
 
   it("再生成の後半が失敗した場合も最初の応答の消費トークンを引き継ぐ", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     generateContentMock
       .mockResolvedValueOnce({
         text: "bad",
@@ -663,6 +671,32 @@ describe("generateReview", () => {
 
     expect(error).toBeInstanceOf(ReviewGenerationError);
     expect((error as ReviewGenerationError).usage.promptTokens).toBe(10);
+  });
+
+  it("再生成が 503 でリトライを使い切ったら、検証失敗の理由ではなく混雑の案内を出し、status をログに残す", async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    generateContentMock
+      .mockResolvedValueOnce({
+        text: "not json",
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 1 },
+      })
+      .mockRejectedValue(new ApiError({ message: '{"error":{"code":503}}', status: 503 }));
+
+    const settled = generateReview(baseParams).catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+    const error = await settled;
+
+    expect(error).toBeInstanceOf(ReviewGenerationError);
+    expect((error as Error).message).toBe(
+      "AIが混み合っています。しばらく時間を置いてから再試行してください。"
+    );
+    expect((error as ReviewGenerationError).usage.promptTokens).toBe(10);
+    expect(generateContentMock).toHaveBeenCalledTimes(1 + GEMINI_MAX_RETRIES + 1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("status=503"),
+      expect.any(String)
+    );
   });
 
   it("429 は指数バックオフで最大2回リトライする", async () => {
@@ -782,11 +816,19 @@ describe("generateReview", () => {
     expect(generateContentMock).toHaveBeenCalledTimes(1);
   });
 
-  it("429 以外のエラーはリトライせず、メッセージからキーを除去して投げる", async () => {
-    generateContentMock.mockRejectedValue(new Error(`invalid API key ${MEMBER_KEY}`));
+  it("ApiError でないエラーはリトライせず、受講生には固定の文言、ログにはキーを伏せた元のメッセージを出す", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    generateContentMock.mockRejectedValue(new TypeError(`fetch failed ${MEMBER_KEY}`));
 
-    await expect(generateReview(baseParams)).rejects.toThrow("invalid API key [redacted]");
+    const error = await generateReview(baseParams).catch((e: unknown) => e);
+
+    expect((error as Error).message).toBe(
+      "AIレビューの生成中にエラーが発生しました。しばらく時間を置いてから再試行してください。"
+    );
     expect(generateContentMock).toHaveBeenCalledTimes(1);
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    expect(logged).toContain("fetch failed [redacted]");
+    expect(logged).not.toContain(MEMBER_KEY);
   });
 
   it("GEMINI_REQUEST_TIMEOUT_MS でリクエストごとのタイムアウトを設定する", async () => {

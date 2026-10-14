@@ -129,6 +129,26 @@ describe("injectPreviewConsoleBridge", () => {
     );
   });
 
+  it('<head> が無い文書で、学習者のスクリプト内の文字列 "<head>" に差し込まない', () => {
+    const html = '<body><script>const s = "<head>";</script></body>';
+    expect(injectPreviewConsoleBridge(html)).toBe(`${bridge}${html}`);
+  });
+
+  it("コメント・<style> の中の <head> は読み飛ばし、本物の <head> の直後に入れる", () => {
+    const html =
+      "<!doctype html><!-- <head> --><style>/* <head> */</style><html><head><title>t</title></head></html>";
+    expect(injectPreviewConsoleBridge(html)).toBe(
+      `<!doctype html><!-- <head> --><style>/* <head> */</style><html><head>${bridge}<title>t</title></head></html>`
+    );
+  });
+
+  it("<body> より後に現れる <head> は使わない", () => {
+    const html = "<!doctype html><body><p>&lt;head&gt;</p><head></head></body>";
+    expect(injectPreviewConsoleBridge(html)).toBe(
+      `<!doctype html>${bridge}<body><p>&lt;head&gt;</p><head></head></body>`
+    );
+  });
+
   it("差し込むスクリプトは途中で閉じタグを含まない", () => {
     expect(bridge.match(/<\/script/gi)).toHaveLength(1);
   });
