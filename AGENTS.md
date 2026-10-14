@@ -36,7 +36,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 ### 認証・認可
 
-全体像・ロール（`admin` / `maintainer` / `member`）・ステータス（`active` / `trial` / `rejected`）は `docs/specification.md` 2章。
+全体像・ロール・ステータスは `docs/specification.md` 2章。
 
 - **サーバー側のユーザー情報取得は `getServerAuth()`（`app/services/auth/server-auth.ts`）に一本化する。** layout・page・API Route のいずれも他の手段を使わない（`docs/specification.md` 2.2）。
 - **認可は二層防御。** `proxy.ts`（Middleware の後継）が第一の砦、`app/(authenticated)/layout.tsx` でも `userStatus` の許可リスト検証を行う。**クライアント側の認証ガードは行わない。**
