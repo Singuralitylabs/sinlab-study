@@ -194,6 +194,7 @@ const render = async () => renderToStaticMarkup(await ContentPage({ params }));
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  vi.mocked(fetchLatestSubmissionByContentId).mockResolvedValue({ data: null } as never);
   vi.mocked(fetchUpgradePriceLabel).mockResolvedValue("月額1,500円（税込）");
 });
 
@@ -742,5 +743,51 @@ describe("演習ページのAIレビュー残り回数（#304）", () => {
     await render();
 
     expect(fetchAIReviewUsage).not.toHaveBeenCalled();
+  });
+});
+
+describe("パンくずの取得元（週の二重取得をやめる）", () => {
+  it("コンテンツが取得できるときは埋め込みの週を使い、fetchWeekById を呼ばない", async () => {
+    setup({ userStatus: "active", isOpenToTrial: true });
+
+    const html = await render();
+
+    expect(html).toContain("GAS");
+    expect(fetchWeekById).not.toHaveBeenCalled();
+  });
+
+  it("お試しユーザーのロック画面（コンテンツが RLS で取得できない）は fetchWeekById にフォールバックする", async () => {
+    setup({ userStatus: "trial", isOpenToTrial: false });
+    vi.mocked(fetchContentById).mockResolvedValue({ data: null, error: null } as never);
+
+    const html = await render();
+
+    expect(fetchWeekById).toHaveBeenCalledWith(3, "member");
+    expect(html).toContain("GAS");
+  });
+
+  it("埋め込みの週が URL の weekId と一致しない場合は 404", async () => {
+    setup({ userStatus: "active", isOpenToTrial: true, contentWeekOverride: { ...week, id: 99 } });
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+
+  it("コンテンツが見つからず週も取れない場合は 404", async () => {
+    setup({ userStatus: "active", isOpenToTrial: true });
+    vi.mocked(fetchContentById).mockResolvedValue({ data: null, error: null } as never);
+    vi.mocked(fetchWeekById).mockResolvedValue({ data: null, error: null } as never);
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+
+  it("論理削除された週のコンテンツは admin でも 404（プレビュー扱いにしない）", async () => {
+    setup({
+      userStatus: "active",
+      userRole: "admin",
+      isOpenToTrial: true,
+      contentWeekOverride: { ...week, is_deleted: true },
+    });
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
   });
 });

@@ -103,7 +103,7 @@ export async function proxy(request: NextRequest) {
 
     const { data: userData, error: userError } = await supabase
       .from("users")
-      .select("id, status, role")
+      .select("id, status, role, membership_type")
       .eq("auth_id", user.id)
       .eq("is_deleted", false)
       .maybeSingle();
@@ -131,6 +131,7 @@ export async function proxy(request: NextRequest) {
       downstreamHeaders.set(AUTH_HEADERS.USER_ID, String(userData.id));
       downstreamHeaders.set(AUTH_HEADERS.USER_STATUS, userData.status);
       downstreamHeaders.set(AUTH_HEADERS.USER_ROLE, userData.role);
+      downstreamHeaders.set(AUTH_HEADERS.MEMBERSHIP_TYPE, userData.membership_type ?? "");
 
       return applyResponseModifications(
         NextResponse.next({
