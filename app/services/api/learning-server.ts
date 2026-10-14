@@ -171,6 +171,10 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
 
   const hasContents = themeContents.some((t) => t.contentIds.length > 0);
 
+  // An empty tree has nothing to count: stop paging instead of reading pages nobody uses.
+  if (!hasContents) {
+    abandoned = true;
+  }
   const completedIds = hasContents ? await progressPromise : new Set<number>();
 
   const data = themeContents.map(({ theme, contentIds }) => ({
