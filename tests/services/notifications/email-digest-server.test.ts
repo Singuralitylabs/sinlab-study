@@ -11,6 +11,7 @@ import {
   ANNOUNCEMENT_EMAIL_RETRY_DAYS,
   EMAIL_DIGEST_MAX_PER_DAY,
   EMAIL_DIGEST_SEND_INTERVAL_MS,
+  EMAIL_DIGEST_TIME_BUDGET_MS,
   INACTIVITY_REMINDER_DAYS,
   TRIAL_NURTURE_DAYS,
 } from "@/app/constants/notifications";
@@ -832,7 +833,7 @@ describe("1回あたりの上限と繰り越し", () => {
     setup({ users: manyUsers(3) });
     let now = 0;
     vi.mocked(sendEmail).mockImplementation(async () => {
-      now += 30_000;
+      now += EMAIL_DIGEST_TIME_BUDGET_MS * 0.6;
       return { status: "sent", messageId: "msg" };
     });
 

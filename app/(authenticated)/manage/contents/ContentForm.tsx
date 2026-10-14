@@ -569,14 +569,14 @@ export function ContentForm({
 
           <div className="space-y-2">
             <Label>コンテンツ種別</Label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {CONTENT_TYPE_FORM_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
                   type="button"
                   onClick={() => setContentType(opt.value)}
                   disabled={opt.value === "quiz" && quizQuestionsUnavailable}
-                  className={`flex-1 rounded-lg border-2 px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`min-w-24 flex-1 rounded-lg border-2 px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     contentType === opt.value
                       ? "border-primary bg-primary/5 font-medium"
                       : "border-border hover:border-muted-foreground"
@@ -763,7 +763,7 @@ export function ContentForm({
               />
               <div className="space-y-2">
                 <Label>コード言語</Label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   {CODE_LANGUAGE_OPTIONS.map((opt) => (
                     <button
                       key={opt.value}
@@ -782,13 +782,13 @@ export function ContentForm({
               </div>
               <div className="space-y-2">
                 <Label>提出方法</Label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   {SUBMISSION_TYPE_OPTIONS.map((opt) => (
                     <button
                       key={opt.value}
                       type="button"
                       onClick={() => setAllowedSubmissionTypes(opt.value)}
-                      className={`flex-1 rounded-lg border-2 px-3 py-2 text-left text-sm transition-colors ${
+                      className={`min-w-40 flex-1 rounded-lg border-2 px-3 py-2 text-left text-sm transition-colors ${
                         allowedSubmissionTypes === opt.value
                           ? "border-primary bg-primary/5 font-medium"
                           : "border-border hover:border-muted-foreground"

@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { EMAIL_KIND_LABELS, EMAIL_KINDS, type EmailKind } from "@/app/constants/notifications";
+import { formatDateTime } from "@/app/lib/format-date";
 import type { EmailLogListItem, EmailLogStatus } from "@/app/services/api/email-settings-server";
 import { EMAIL_LOG_STATUSES } from "@/app/services/api/email-settings-server";
 import { Badge } from "@/components/ui/badge";
@@ -101,7 +102,7 @@ export function EmailLogsSection({
                 logs.map((log) => (
                   <tr key={log.id} className="border-b last:border-b-0 align-top">
                     <td className="px-4 py-3 whitespace-nowrap">
-                      {new Date(log.created_at).toLocaleString("ja-JP")}
+                      {formatDateTime(log.created_at)}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       {EMAIL_KIND_LABELS[log.kind as EmailKind] ?? log.kind}

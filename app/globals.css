@@ -80,15 +80,14 @@
 }
 
 /*
- * ログイン画面（`/login`）専用の配色。LP（SERVICE_LP_URL）の配色に合わせ、
- * `.login-theme` 配下だけセマンティックトークンを上書きする（他の画面は上の :root / .dark のまま）。
- * オーバースクロール時に body の地色が見えないよう、`.login-theme` を含むページでは
- * :root にも同じ値を適用する。セレクタは寛容なセレクタリストの :is() でまとめ、:has 非対応
- * ブラウザでも `.login-theme` 配下の上書きが無効にならないようにしている（通常のカンマ区切りだと
- * 解釈できないセレクタが1つあるだけでルール全体が破棄される）。
- * LP のアクセント #FF6B3D は文字色としてコントラスト 4.5:1 を満たさないため、ライトの
- * primary は #BF3F16（白 5.33:1・#FFF8F0 5.06:1・#FFEFE0 4.74:1）、accent-foreground は
- * #A8390F（#FFE4CB 5.28:1）まで濃くしている。
+ * Login-only palette matching the LP (SERVICE_LP_URL): semantic tokens are overridden under
+ * `.login-theme` only, so other screens keep the :root / .dark values above. The same values are
+ * applied to :root on pages containing `.login-theme` so the body background doesn't show a
+ * different color on overscroll. Selectors are grouped in a forgiving :is() list so browsers
+ * without :has support still apply the `.login-theme` override (a plain comma list would drop the
+ * whole rule because of one unparseable selector).
+ * The LP accent #FF6B3D fails 4.5:1 as text, so light primary is darkened to #BF3F16 (white 5.33:1,
+ * #FFF8F0 5.06:1, #FFEFE0 4.74:1) and accent-foreground to #A8390F (#FFE4CB 5.28:1).
  */
 :is(.login-theme, :root:has(.login-theme)) {
   --background: #fff8f0;
@@ -164,25 +163,20 @@
 }
 
 /*
- * MarkdownRendererが付与するコードブロック（`.prose pre code.hljs`）の配色。
- * @tailwindcss/typography の pre 背景（--tw-prose-pre-bg / --tw-prose-invert-pre-bg）は
- * ライト/ダークいずれのサイトテーマでも常に暗色であるため、トークン色をサイトの
- * --primary 等（:root/.dark で明暗が入れ替わる変数）に連動させると、ライトテーマ時に
- * 暗背景とのcontrastが不足する。そのため、暗背景を前提にした固定パレットを
- * --hljs-* として定義し、サイトのテーマ切り替えとは独立させる
- * （各色は prose の pre 背景・invert pre 背景の両方に対しWCAG AA 4.5:1以上を確認済み）。
- * `.prose pre code.hljs` 配下にのみ影響するようスコープし、他の暗背景の<pre>
- * （SubmissionCodeBlock等、この固定パレットを前提としていない箇所）に配色が
- * 意図せず波及しないようにする。
- * このルールは @layer に含めないため、CSS Cascade Layersの仕様上、
- * @layerに属する@tailwindcss/typographyのスタイルより優先度が高く評価される。
+ * Colors for the code blocks MarkdownRenderer emits (`.prose pre code.hljs`). The typography
+ * plugin's pre background (--tw-prose-pre-bg / --tw-prose-invert-pre-bg) is dark in both site
+ * themes, so tying token colors to --primary etc. (which flip between :root and .dark) would lose
+ * contrast on the dark background in light theme. A fixed --hljs-* palette for dark backgrounds
+ * keeps it independent of the site theme (each color checked at WCAG AA 4.5:1+ against both pre
+ * backgrounds). Scoped to `.prose pre code.hljs` so other dark <pre> elements (e.g.
+ * SubmissionCodeBlock) that don't assume this palette are unaffected.
+ * Deliberately not in a @layer: unlayered rules beat the layered @tailwindcss/typography styles.
  *
- * 対象言語（html/css/javascript/typescript/python/json/bash）が実際に出力する
- * hljs-*クラスのみを実測（highlight.js/lowlightの出力を直接確認）した上で定義しており、
- * 出力されないクラス（quote/addition/deletion/bullet/section/template-variable/
- * emphasis/strongなど、diff・Markdown等の他言語向け）は含めない。
- * hljs-punctuation（JSONの記号）・hljs-subst（テンプレートリテラルの補間部分）は
- * 実際に出力されるが、可読性のため配色せず地の文の色を継承させる。
+ * Only hljs-* classes actually emitted for the supported languages (html/css/javascript/
+ * typescript/python/json/bash) are styled, measured from highlight.js/lowlight output; classes
+ * only other languages produce (quote/addition/deletion/bullet/section/template-variable/
+ * emphasis/strong) are omitted. hljs-punctuation (JSON symbols) and hljs-subst (template literal
+ * interpolation) are emitted but left uncolored for readability, inheriting the surrounding text.
  */
 .prose pre code.hljs {
   --hljs-keyword: oklch(0.65 0.2 255);
@@ -209,9 +203,8 @@
 }
 
 /*
- * タグ名・要素名はキーワードと同系色にするが、太字にはしない。
- * 太字にすると入れ子の hljs-attr / hljs-string（属性名・属性値）まで
- * font-weightを継承して太字になってしまうため。
+ * Tag/element names share the keyword color but not its bold weight: bold would be inherited by
+ * the nested hljs-attr / hljs-string (attribute names and values).
  */
 .prose pre code.hljs .hljs-tag,
 .prose pre code.hljs .hljs-name {
