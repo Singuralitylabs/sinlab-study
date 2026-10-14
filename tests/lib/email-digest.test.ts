@@ -6,6 +6,8 @@ import {
   type DigestContent,
   type DigestUser,
   daysSinceSignup,
+  isBefore,
+  isSameOrAfter,
   isWeeklyDigestTarget,
   jstStartOfDayIso,
   lockedThemeNames,
@@ -229,5 +231,25 @@ describe("isWeeklyDigestTarget", () => {
     expect(
       isWeeklyDigestTarget({ completedLastWeek: 0, submittedLastWeek: 0, remainingContents: 0 })
     ).toBe(false);
+  });
+});
+
+describe("isBefore / isSameOrAfter（timestamptz を瞬間として比較する）", () => {
+  const cycleStart = "2026-10-05T15:00:00.000Z";
+
+  it.each([
+    "2026-10-05T15:00:00+00:00",
+    "2026-10-05T15:00:00.000+00:00",
+    "2026-10-05T15:00:00.000000+00:00",
+    "2026-10-06T00:00:00+09:00",
+  ])("同一秒の %s は同時刻として扱う", (value) => {
+    expect(isSameOrAfter(value, cycleStart)).toBe(true);
+    expect(isBefore(value, cycleStart)).toBe(false);
+  });
+
+  it("1 秒前は前、1 秒後は後として扱う", () => {
+    expect(isBefore("2026-10-05T14:59:59+00:00", cycleStart)).toBe(true);
+    expect(isSameOrAfter("2026-10-05T14:59:59+00:00", cycleStart)).toBe(false);
+    expect(isSameOrAfter("2026-10-05T15:00:01.123456+00:00", cycleStart)).toBe(true);
   });
 });
