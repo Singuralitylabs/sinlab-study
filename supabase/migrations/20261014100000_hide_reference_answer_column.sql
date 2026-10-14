@@ -27,7 +27,8 @@ GRANT SELECT (
 
 -- Visibility rule shared by the learner RPCs that read protected content columns (quiz
 -- questions, model answers), so a change to the RLS visibility conditions is made in one place.
--- Internal: not callable by API roles; the SECURITY DEFINER RPCs below run as the owner.
+-- Internal: no API role (including service_role) can call it; the SECURITY DEFINER RPCs below
+-- run as the owner.
 CREATE OR REPLACE FUNCTION public.content_visible_to_caller(p_content_id INTEGER, p_content_type TEXT)
 RETURNS BOOLEAN
 LANGUAGE sql
@@ -62,7 +63,7 @@ AS $$
 $$;
 
 REVOKE ALL ON FUNCTION public.content_visible_to_caller(INTEGER, TEXT)
-  FROM PUBLIC, anon, authenticated;
+  FROM PUBLIC, anon, authenticated, service_role;
 
 -- Same signature and ACL as before (CREATE OR REPLACE keeps the revoked grants).
 CREATE OR REPLACE FUNCTION public.quiz_content_visible_to_caller(p_content_id INTEGER)

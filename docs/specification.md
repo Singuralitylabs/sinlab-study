@@ -81,7 +81,7 @@ flowchart TD
 |:--|:--|:--|
 | プロキシ（`proxy.ts`） | 全ページ | Supabase Auth セッション + ユーザーステータス確認（第一の砦。`active` / `trial` のみ許可するフェイルクローズ方式。通過時に受信ヘッダー偽装を削除した上で `x-sinlab-*` リクエストヘッダーにユーザー情報を設定して下流へ引き渡す。スキップ対象パスでも偽装ヘッダーを削除） |
 | Server Components（`(authenticated)/layout.tsx`） | 認証必須ページ全体 | `getServerAuth()` の `userStatus` を許可リスト検証（`active` / `trial` 以外はリダイレクト。プロキシのスキップ経路・設定不備に備えた第二の砦） |
-| Server Components（layout / page） | ロール別の表示・ナビゲーション | `getServerAuth()`（`React.cache()` でリクエスト単位にメモ化。proxy からヘッダーが渡された場合は突合確認の上で `users` の再 SELECT を省略。`auth.getUser()` 検証は改ざん検知のため維持）によるロール取得・権限チェック |
+| Server Components（layout / page） | ロール別の表示・ナビゲーション | `getServerAuth()`（`React.cache()` でリクエスト単位にメモ化。proxy からヘッダーが渡された場合は突合確認の上で `users` の再 SELECT を省略。ヘッダーは `auth_id` 一致と、status / role / 会員種別（`x-sinlab-membership-type`。空文字は「会員種別なし」、値は `MEMBERSHIP_TYPES` で検証）の許可値検証を通ったときだけ信頼し、1つでも欠落・不正なら DB から取得する。`auth.getUser()` 検証は改ざん検知のため維持）によるロール取得・権限チェック |
 | Server Components（コンテンツ表示） | お試しユーザーへのコンテンツ制限 | `userStatus` と `is_open_to_trial` によるロック判定（RLSと合わせた二層防御の第一層） |
 | RLS | データベース | `auth.uid()` によるRow Level Security。お試しユーザーには `learning_contents` をお試し公開分のみに制限（二層防御の第二層） |
 | API Routes | データ更新操作 | サーバー側での認証チェック + ステータスに基づく認可（`rejected` は403、お試しユーザーはお試し公開コンテンツのみ書き込み可） |
@@ -1325,7 +1325,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 ### 11.3 画面と API
 
 - **ダッシュボード**: 未読のお知らせを新しい順に最大3件（`DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT`）。未読が無ければ枠を出さない
-- **サイドナビ**: 「お知らせ」に未読件数のバッジ。件数は `getServerAuth()` のヘッダーには載せず、レイアウトで取得する（`React.cache()` でダッシュボードと同じリクエストの取得を共有。新しい順に最大100件（`UNREAD_ANNOUNCEMENT_SCAN_LIMIT`）を見て数える。取得に失敗したら0件表示）。既読は `announcements` に本人の `announcement_reads` を埋め込んで同じクエリで読む（会員種別の取得と合わせて2往復）
+- **サイドナビ**: 「お知らせ」に未読件数のバッジ。レイアウトは `getServerAuth()`（ヘッダー由来・DB 往復なし）だけで描画を始め、件数は非同期サーバーコンポーネント `UnreadAnnouncementBadge` を `<Suspense fallback={null}>` 越しにスロットとして `SideNav` へ渡して後から流し込む（クエリの完了を待たずにシェルと各ルートの `loading.tsx` が描画される。`userStatus` の許可リスト検証はこれより前に行う）。会員種別は `getServerAuth()` の `membershipType`（proxy のヘッダー由来）を使うため `users` の再 SELECT はしない（ヘッダーの無い API Route は従来どおり DB から取得）。件数は `React.cache()` でダッシュボードと同じリクエストの取得を共有し、新しい順に最大100件（`UNREAD_ANNOUNCEMENT_SCAN_LIMIT`）を見て数える。取得に失敗したらバッジを出さない。既読は `announcements` に本人の `announcement_reads` を埋め込んで同じクエリで読む（1往復）
 - **一覧・詳細**: 一覧は `ANNOUNCEMENTS_PAGE_SIZE`（20件）ずつページングする（提出一覧と同じページャー。範囲外のページは最終ページへリダイレクト）。本文は既存の `MarkdownRenderer`（react-markdown。生 HTML を描画しない）で表示する
 - **既読**: 詳細を開いたときに、クライアントから `POST /api/announcements/[id]/read` を呼んで記録し、サイドナビのバッジを更新する（ページの描画中に記録しないのは、リンクの先読みで既読にならないようにするため）。API は通常クライアントで対象のお知らせが見えることを確かめてから INSERT する（見えなければ 404。既に既読なら成功扱い）。既読が読めないときは未読扱いにしない
 - **管理画面・管理 API**: `getServerAuth()` で認証し、`checkContentPermissions()`（admin / maintainer）で認可する（未認証 401、それ以外 403）。入力は `AnnouncementSchema`（zod）で検証し、全項目を送る。公開済みのまま更新するときは最初の公開日時を保ち、非公開にすると `published_at` を消す（アプリ内表示とメールの一斉送信が止まる。送信済みの分は `email_logs` に残るため、再公開しても同じ人には送らない）。対象ステータス・会員種別を変更したら（集合として比較）`email_sent_at` を消して一斉送信を未完了に戻し、まだ送っていない対象者にだけ次のバッチから送る。削除は論理削除

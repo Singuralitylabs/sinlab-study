@@ -16,7 +16,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { createClientSupabaseClient } from "@/app/services/api/supabase-client";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -26,7 +26,7 @@ interface NavItem {
   title: string;
   href: string;
   icon: React.ReactNode;
-  badgeCount?: number;
+  badge?: React.ReactNode;
 }
 
 const DEFAULT_NAV_ITEMS: NavItem[] = [
@@ -53,12 +53,12 @@ const CERTIFICATES_NAV_ITEM: NavItem = {
   icon: <Award className="h-5 w-5" />,
 };
 
-function announcementsNavItem(unreadCount: number): NavItem {
+function announcementsNavItem(badge: React.ReactNode): NavItem {
   return {
     title: "お知らせ",
     href: "/announcements",
     icon: <Megaphone className="h-5 w-5" />,
-    badgeCount: unreadCount,
+    badge,
   };
 }
 
@@ -114,12 +114,7 @@ function SideNavLink({
     >
       {item.icon}
       {item.title}
-      {item.badgeCount ? (
-        <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">
-          <span aria-hidden="true">{item.badgeCount > 99 ? "99+" : item.badgeCount}</span>
-          <span className="sr-only">（未読 {item.badgeCount} 件）</span>
-        </span>
-      ) : null}
+      {item.badge}
     </Link>
   );
 }
@@ -166,29 +161,29 @@ export function SideNav({
   isInstructor,
   stripeEnabled,
   showCertificates,
-  unreadAnnouncementCount,
+  announcementBadge,
 }: {
   isAdmin: boolean;
   isInstructor: boolean;
   stripeEnabled: boolean;
   showCertificates: boolean;
-  unreadAnnouncementCount: number;
+  /** Streamed unread badge slot (a Server Component under <Suspense>). */
+  announcementBadge: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
-  const navItems = useMemo<NavItem[]>(
-    () => [
-      ...DEFAULT_NAV_ITEMS,
-      ...(showCertificates ? [CERTIFICATES_NAV_ITEM] : []),
-      announcementsNavItem(unreadAnnouncementCount),
-      // No payment/billing-management entry while disabled (see AGENTS.md).
-      ...(stripeEnabled ? [UPGRADE_NAV_ITEM] : []),
-      ...(isInstructor ? [MANAGE_NAV_ITEM] : []),
-      ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),
-    ],
-    [isAdmin, isInstructor, stripeEnabled, showCertificates, unreadAnnouncementCount]
-  );
+  // Not memoized: announcementBadge is a new element on every layout render, so a useMemo keyed
+  // on it would never hit.
+  const navItems: NavItem[] = [
+    ...DEFAULT_NAV_ITEMS,
+    ...(showCertificates ? [CERTIFICATES_NAV_ITEM] : []),
+    announcementsNavItem(announcementBadge),
+    // No payment/billing-management entry while disabled (see AGENTS.md).
+    ...(stripeEnabled ? [UPGRADE_NAV_ITEM] : []),
+    ...(isInstructor ? [MANAGE_NAV_ITEM] : []),
+    ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),
+  ];
 
   const handleSignOut = async () => {
     const supabase = createClientSupabaseClient();

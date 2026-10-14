@@ -34,6 +34,7 @@ from (
     -- Internal helpers behind the quiz and model-answer RPCs
     ('public.content_visible_to_caller(integer, text)', 'anon', false),
     ('public.content_visible_to_caller(integer, text)', 'authenticated', false),
+    ('public.content_visible_to_caller(integer, text)', 'service_role', false),
     ('public.quiz_content_visible_to_caller(integer)', 'anon', false),
     ('public.quiz_content_visible_to_caller(integer)', 'authenticated', false),
     ('public.quiz_question_revision(text, text, text[])', 'anon', false),

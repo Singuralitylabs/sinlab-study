@@ -181,7 +181,8 @@ export function resolveNextContent(
     themes.set(content.themeId, theme);
   }
 
-  // Array.sort is stable, so equal recency keeps theme (learning) order.
+  // Array.sort is stable, so themes with equal recency keep splitThemesByActivity()'s order
+  // (completion rate, highest first).
   const active = splitThemesByActivity([...themes.values()]).active.sort(
     (a, b) => b.lastCompletedAt - a.lastCompletedAt
   );

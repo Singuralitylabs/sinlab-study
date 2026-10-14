@@ -2,15 +2,17 @@ import type { User } from "@supabase/supabase-js";
 import { headers } from "next/headers";
 import { cache } from "react";
 import { AUTH_HEADERS } from "@/app/constants/auth";
-import { ALLOWED_USER_STATUSES, USER_ROLES } from "@/app/constants/user";
+import { ALLOWED_USER_STATUSES, MEMBERSHIP_TYPES, USER_ROLES } from "@/app/constants/user";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
-import type { UserRoleType, UserStatusType } from "@/app/types";
+import type { MembershipType, UserRoleType, UserStatusType } from "@/app/types";
 
 export interface ServerAuthResult {
   user: User | null;
   userId: number | null;
   userStatus: UserStatusType | null;
   userRole: UserRoleType | null;
+  /** null = no membership type (e.g. trial); undefined = not resolved (callers must read the DB). */
+  membershipType?: MembershipType | null;
   error?: string;
 }
 
@@ -45,6 +47,7 @@ export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
       const headerUserId = headerList.get(AUTH_HEADERS.USER_ID);
       const headerUserStatus = headerList.get(AUTH_HEADERS.USER_STATUS);
       const headerUserRole = headerList.get(AUTH_HEADERS.USER_ROLE);
+      const headerMembershipType = headerList.get(AUTH_HEADERS.MEMBERSHIP_TYPE);
 
       // Tamper check: the auth.getUser() user.id must match the header auth_id, and status/role
       // must be valid values before trusting the headers. The proxy only sets them for active /
@@ -54,6 +57,11 @@ export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
         ALLOWED_USER_STATUSES.includes(headerUserStatus as (typeof ALLOWED_USER_STATUSES)[number]);
       const isValidRole =
         headerUserRole !== null && USER_ROLES.includes(headerUserRole as UserRoleType);
+      // "" is the proxy's encoding of "no membership type"; anything else must be an allowed value.
+      const isValidMembershipType =
+        headerMembershipType !== null &&
+        (headerMembershipType === "" ||
+          MEMBERSHIP_TYPES.includes(headerMembershipType as MembershipType));
       const isValidUserId = headerUserId !== null && /^\d+$/.test(headerUserId);
       const parsedUserId = isValidUserId ? Number(headerUserId) : null;
 
@@ -62,13 +70,15 @@ export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
         headerAuthId === user.id &&
         parsedUserId !== null &&
         isValidStatus &&
-        isValidRole
+        isValidRole &&
+        isValidMembershipType
       ) {
         return {
           user,
           userId: parsedUserId,
           userStatus: headerUserStatus as UserStatusType,
           userRole: headerUserRole as UserRoleType,
+          membershipType: (headerMembershipType || null) as MembershipType | null,
         };
       }
     } catch (headerError) {
@@ -79,7 +89,7 @@ export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
     // API routes that skip the proxy, or a header mismatch, read from the DB as before.
     const { data: userData, error: userError } = await supabase
       .from("users")
-      .select("id, status, role")
+      .select("id, status, role, membership_type")
       .eq("auth_id", user.id)
       .eq("is_deleted", false)
       .single();
@@ -100,6 +110,10 @@ export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
       userId: userData.id,
       userStatus: userData.status as UserStatusType,
       userRole: userData.role as UserRoleType,
+      // Same allowlist as the header path: an unexpected stored value is treated as no type.
+      membershipType: MEMBERSHIP_TYPES.includes(userData.membership_type as MembershipType)
+        ? (userData.membership_type as MembershipType)
+        : null,
     };
   } catch (error) {
     rethrowIfControlError(error);

@@ -1,6 +1,7 @@
 import { BookOpen, CheckCircle, Clock, TrendingUp } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { isThemeCompleted } from "@/app/lib/certificate";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
 import type { ThemeProgressSummary } from "@/app/services/api/learning-server";
 import { Badge } from "@/components/ui/badge";
@@ -87,7 +88,7 @@ function ThemeCard({
   certificatesHref?: string;
 }) {
   const { theme, totalContents, completedContents } = summary;
-  const isCompleted = totalContents > 0 && completedContents === totalContents;
+  const isCompleted = isThemeCompleted(summary);
 
   return (
     <div>
