@@ -1,8 +1,12 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { cache } from "react";
 
-export async function createServerSupabaseClient() {
+// Memoized per request so one render shares a single client (and one cookie parse). cookies() is
+// request-scoped; outside a React render (API routes) cache() is a pass-through and each call
+// builds a fresh client as before.
+export const createServerSupabaseClient = cache(async () => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) {
@@ -31,7 +35,7 @@ export async function createServerSupabaseClient() {
       },
     },
   });
-}
+});
 
 // Service role client (bypasses RLS) for permission-checked admin / instructor queries and server
 // work reading rows hidden by RLS from the normal client (users existence check in the OAuth

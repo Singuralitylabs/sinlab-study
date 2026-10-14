@@ -20,6 +20,7 @@ const mockUserData = {
   id: 1,
   status: "active",
   role: "member",
+  membership_type: null,
 };
 
 beforeEach(() => {
@@ -109,6 +110,7 @@ describe("getServerAuth", () => {
         userId: 1,
         userStatus: "active",
         userRole: "member",
+        membershipType: null,
       });
     });
 
@@ -134,6 +136,7 @@ describe("getServerAuth", () => {
       requestHeaders.set(AUTH_HEADERS.USER_ID, "10");
       requestHeaders.set(AUTH_HEADERS.USER_STATUS, "active");
       requestHeaders.set(AUTH_HEADERS.USER_ROLE, "maintainer");
+      requestHeaders.set(AUTH_HEADERS.MEMBERSHIP_TYPE, "");
       vi.mocked(headers).mockResolvedValue(requestHeaders);
 
       const mockClient = createMockSupabaseClient({
@@ -148,6 +151,7 @@ describe("getServerAuth", () => {
         userId: 10,
         userStatus: "active",
         userRole: "maintainer",
+        membershipType: null,
       });
       expect(mockClient.from).not.toHaveBeenCalled();
     });
@@ -158,6 +162,7 @@ describe("getServerAuth", () => {
       requestHeaders.set(AUTH_HEADERS.USER_ID, "999");
       requestHeaders.set(AUTH_HEADERS.USER_STATUS, "active");
       requestHeaders.set(AUTH_HEADERS.USER_ROLE, "admin");
+      requestHeaders.set(AUTH_HEADERS.MEMBERSHIP_TYPE, "");
       vi.mocked(headers).mockResolvedValue(requestHeaders);
 
       const mockClient = createMockSupabaseClient({
@@ -173,6 +178,7 @@ describe("getServerAuth", () => {
         userId: 1,
         userStatus: "active",
         userRole: "member",
+        membershipType: null,
       });
       expect(mockClient.from).toHaveBeenCalledWith("users");
     });
@@ -183,6 +189,7 @@ describe("getServerAuth", () => {
       requestHeaders.set(AUTH_HEADERS.USER_ID, "1");
       requestHeaders.set(AUTH_HEADERS.USER_STATUS, "invalid_status");
       requestHeaders.set(AUTH_HEADERS.USER_ROLE, "member");
+      requestHeaders.set(AUTH_HEADERS.MEMBERSHIP_TYPE, "");
       vi.mocked(headers).mockResolvedValue(requestHeaders);
 
       const mockClient = createMockSupabaseClient({
@@ -198,6 +205,7 @@ describe("getServerAuth", () => {
         userId: 1,
         userStatus: "active",
         userRole: "member",
+        membershipType: null,
       });
       expect(mockClient.from).toHaveBeenCalledWith("users");
     });
@@ -208,6 +216,7 @@ describe("getServerAuth", () => {
       requestHeaders.set(AUTH_HEADERS.USER_ID, "1");
       requestHeaders.set(AUTH_HEADERS.USER_STATUS, "rejected");
       requestHeaders.set(AUTH_HEADERS.USER_ROLE, "member");
+      requestHeaders.set(AUTH_HEADERS.MEMBERSHIP_TYPE, "");
       vi.mocked(headers).mockResolvedValue(requestHeaders);
 
       const mockClient = createMockSupabaseClient({
@@ -223,6 +232,7 @@ describe("getServerAuth", () => {
         userId: 1,
         userStatus: "active",
         userRole: "member",
+        membershipType: null,
       });
       expect(mockClient.from).toHaveBeenCalledWith("users");
     });
@@ -233,6 +243,7 @@ describe("getServerAuth", () => {
       requestHeaders.set(AUTH_HEADERS.USER_ID, "42abc");
       requestHeaders.set(AUTH_HEADERS.USER_STATUS, "active");
       requestHeaders.set(AUTH_HEADERS.USER_ROLE, "member");
+      requestHeaders.set(AUTH_HEADERS.MEMBERSHIP_TYPE, "");
       vi.mocked(headers).mockResolvedValue(requestHeaders);
 
       const mockClient = createMockSupabaseClient({
@@ -248,7 +259,75 @@ describe("getServerAuth", () => {
         userId: 1,
         userStatus: "active",
         userRole: "member",
+        membershipType: null,
       });
+      expect(mockClient.from).toHaveBeenCalledWith("users");
+    });
+
+    it("ヘッダーの会員種別が許可値の場合、users を照会せずその値を返す", async () => {
+      const requestHeaders = new Headers();
+      requestHeaders.set(AUTH_HEADERS.AUTH_ID, mockUser.id);
+      requestHeaders.set(AUTH_HEADERS.USER_ID, "10");
+      requestHeaders.set(AUTH_HEADERS.USER_STATUS, "active");
+      requestHeaders.set(AUTH_HEADERS.USER_ROLE, "member");
+      requestHeaders.set(AUTH_HEADERS.MEMBERSHIP_TYPE, "general");
+      vi.mocked(headers).mockResolvedValue(requestHeaders);
+
+      const mockClient = createMockSupabaseClient({
+        authResult: { data: { user: mockUser }, error: null },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+      const result = await getServerAuth();
+
+      expect(result.membershipType).toBe("general");
+      expect(mockClient.from).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["許可値以外", "premium"],
+      ["大文字違い", "General"],
+    ])(
+      "ヘッダーの会員種別が%sの場合、ヘッダーを無視して DB から取得する",
+      async (_label, value) => {
+        const requestHeaders = new Headers();
+        requestHeaders.set(AUTH_HEADERS.AUTH_ID, mockUser.id);
+        requestHeaders.set(AUTH_HEADERS.USER_ID, "1");
+        requestHeaders.set(AUTH_HEADERS.USER_STATUS, "active");
+        requestHeaders.set(AUTH_HEADERS.USER_ROLE, "member");
+        requestHeaders.set(AUTH_HEADERS.MEMBERSHIP_TYPE, value);
+        vi.mocked(headers).mockResolvedValue(requestHeaders);
+
+        const mockClient = createMockSupabaseClient({
+          authResult: { data: { user: mockUser }, error: null },
+          queryResult: { data: { ...mockUserData, membership_type: "community" }, error: null },
+        });
+        vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+        const result = await getServerAuth();
+
+        expect(result.membershipType).toBe("community");
+        expect(mockClient.from).toHaveBeenCalledWith("users");
+      }
+    );
+
+    it("会員種別ヘッダーが無い場合（旧形式・偽装除去後）、DB から取得する", async () => {
+      const requestHeaders = new Headers();
+      requestHeaders.set(AUTH_HEADERS.AUTH_ID, mockUser.id);
+      requestHeaders.set(AUTH_HEADERS.USER_ID, "1");
+      requestHeaders.set(AUTH_HEADERS.USER_STATUS, "active");
+      requestHeaders.set(AUTH_HEADERS.USER_ROLE, "member");
+      vi.mocked(headers).mockResolvedValue(requestHeaders);
+
+      const mockClient = createMockSupabaseClient({
+        authResult: { data: { user: mockUser }, error: null },
+        queryResult: { data: { ...mockUserData, membership_type: "general" }, error: null },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+      const result = await getServerAuth();
+
+      expect(result.membershipType).toBe("general");
       expect(mockClient.from).toHaveBeenCalledWith("users");
     });
 
@@ -258,6 +337,7 @@ describe("getServerAuth", () => {
       requestHeaders.set(AUTH_HEADERS.USER_ID, "1");
       requestHeaders.set(AUTH_HEADERS.USER_STATUS, "active");
       requestHeaders.set(AUTH_HEADERS.USER_ROLE, "superadmin");
+      requestHeaders.set(AUTH_HEADERS.MEMBERSHIP_TYPE, "");
       vi.mocked(headers).mockResolvedValue(requestHeaders);
 
       const mockClient = createMockSupabaseClient({
@@ -273,6 +353,7 @@ describe("getServerAuth", () => {
         userId: 1,
         userStatus: "active",
         userRole: "member",
+        membershipType: null,
       });
       expect(mockClient.from).toHaveBeenCalledWith("users");
     });
@@ -293,6 +374,7 @@ describe("getServerAuth", () => {
         userId: 1,
         userStatus: "active",
         userRole: "member",
+        membershipType: null,
       });
       expect(mockClient.from).toHaveBeenCalledWith("users");
     });
@@ -313,6 +395,7 @@ describe("getServerAuth", () => {
         userId: 1,
         userStatus: "active",
         userRole: "member",
+        membershipType: null,
       });
       expect(mockClient.from).toHaveBeenCalledWith("users");
     });

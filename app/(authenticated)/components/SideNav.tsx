@@ -25,7 +25,7 @@ interface NavItem {
   title: string;
   href: string;
   icon: React.ReactNode;
-  badgeCount?: number;
+  badge?: React.ReactNode;
 }
 
 const DEFAULT_NAV_ITEMS: NavItem[] = [
@@ -52,12 +52,12 @@ const CERTIFICATES_NAV_ITEM: NavItem = {
   icon: <Award className="h-5 w-5" />,
 };
 
-function announcementsNavItem(unreadCount: number): NavItem {
+function announcementsNavItem(badge: React.ReactNode): NavItem {
   return {
     title: "お知らせ",
     href: "/announcements",
     icon: <Megaphone className="h-5 w-5" />,
-    badgeCount: unreadCount,
+    badge,
   };
 }
 
@@ -107,12 +107,7 @@ function SideNavLink({
     >
       {item.icon}
       {item.title}
-      {item.badgeCount ? (
-        <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">
-          <span aria-hidden="true">{item.badgeCount > 99 ? "99+" : item.badgeCount}</span>
-          <span className="sr-only">（未読 {item.badgeCount} 件）</span>
-        </span>
-      ) : null}
+      {item.badge}
     </Link>
   );
 }
@@ -158,13 +153,14 @@ export function SideNav({
   isInstructor,
   stripeEnabled,
   showCertificates,
-  unreadAnnouncementCount,
+  announcementBadge,
 }: {
   isAdmin: boolean;
   isInstructor: boolean;
   stripeEnabled: boolean;
   showCertificates: boolean;
-  unreadAnnouncementCount: number;
+  /** Streamed unread badge slot (a Server Component under <Suspense>). */
+  announcementBadge: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
@@ -173,13 +169,13 @@ export function SideNav({
     () => [
       ...DEFAULT_NAV_ITEMS,
       ...(showCertificates ? [CERTIFICATES_NAV_ITEM] : []),
-      announcementsNavItem(unreadAnnouncementCount),
+      announcementsNavItem(announcementBadge),
       // No payment/billing-management entry while disabled (see AGENTS.md).
       ...(stripeEnabled ? [UPGRADE_NAV_ITEM] : []),
       ...(isInstructor ? [MANAGE_NAV_ITEM] : []),
       ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),
     ],
-    [isAdmin, isInstructor, stripeEnabled, showCertificates, unreadAnnouncementCount]
+    [isAdmin, isInstructor, stripeEnabled, showCertificates, announcementBadge]
   );
 
   const handleSignOut = async () => {

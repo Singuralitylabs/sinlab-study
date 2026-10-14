@@ -28,7 +28,7 @@ export const LEARNING_CONTENT_LIST_COLUMNS =
 /** Parent-table columns for breadcrumbs / membership checks; the DETAIL constants compose these. */
 export const BREADCRUMB_THEME_COLUMNS = "id, name, is_published, is_deleted";
 export const BREADCRUMB_PHASE_COLUMNS = `id, theme_id, name, is_published, is_deleted, theme:learning_themes(${BREADCRUMB_THEME_COLUMNS})`;
-export const BREADCRUMB_WEEK_COLUMNS = `id, phase_id, name, is_published, is_deleted, phase:learning_phases(${BREADCRUMB_PHASE_COLUMNS})`;
+export const BREADCRUMB_WEEK_COLUMNS = `id, phase_id, name, display_order, is_published, is_deleted, phase:learning_phases(${BREADCRUMB_PHASE_COLUMNS})`;
 
 export const LEARNING_WEEK_DETAIL_COLUMNS = `*, phase:learning_phases(${BREADCRUMB_PHASE_COLUMNS})`;
 
@@ -97,6 +97,38 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
 }> {
   const supabase = await createServerSupabaseClient();
 
+  // Completed content IDs for the user, without a content_id `.in()` filter: the numerator is
+  // settled by per-theme Set matching, and serializing every content ID into the query string
+  // would exceed URL length limits as the catalog grows. Paged with range so PostgREST's max rows
+  // (default 1000) does not drop rows. Independent of the theme tree, so it starts together with
+  // it and is awaited only when the tree has contents. It never rejects (a failure falls back to
+  // an empty set so the theme list still renders), so leaving it unawaited is safe.
+  const progressPromise = (async () => {
+    const completedIds = new Set<number>();
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data: progress, error: progressError } = await supabase
+        .from("user_progress")
+        .select("content_id")
+        .eq("user_id", userId)
+        .eq("is_completed", true)
+        .order("content_id")
+        .range(offset, offset + pageSize - 1);
+
+      if (progressError) {
+        console.error("テーマ進捗サマリーの進捗取得エラー:", progressError.message);
+        return new Set<number>();
+      }
+
+      for (const p of progress || []) {
+        completedIds.add(p.content_id);
+      }
+      if (!progress || progress.length < pageSize) {
+        return completedIds;
+      }
+    }
+  })();
+
   const { data: themes, error: themesError } = await supabase
     .from("learning_themes")
     .select(
@@ -126,35 +158,7 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
 
   const hasContents = themeContents.some((t) => t.contentIds.length > 0);
 
-  // Fetch all completed content IDs for the user, without a content_id `.in()` filter: the
-  // numerator is settled by per-theme Set matching, and serializing every content ID into the
-  // query string would exceed URL length limits as the catalog grows. Page with range so
-  // PostgREST's max rows (default 1000) does not drop rows.
-  const completedIds = new Set<number>();
-  const pageSize = 1000;
-  for (let offset = 0; hasContents; offset += pageSize) {
-    const { data: progress, error: progressError } = await supabase
-      .from("user_progress")
-      .select("content_id")
-      .eq("user_id", userId)
-      .eq("is_completed", true)
-      .order("content_id")
-      .range(offset, offset + pageSize - 1);
-
-    if (progressError) {
-      // Fall back to completed count 0 so the theme list is still shown.
-      console.error("テーマ進捗サマリーの進捗取得エラー:", progressError.message);
-      completedIds.clear();
-      break;
-    }
-
-    for (const p of progress || []) {
-      completedIds.add(p.content_id);
-    }
-    if (!progress || progress.length < pageSize) {
-      break;
-    }
-  }
+  const completedIds = hasContents ? await progressPromise : new Set<number>();
 
   const data = themeContents.map(({ theme, contentIds }) => ({
     theme,
@@ -341,7 +345,9 @@ export function isContentFullyPublished(
  * row's is_published, so checking later would leak titles and breadcrumbs under an unpublished
  * theme.
  */
-export function isWeekHierarchyPublished(week: BreadcrumbWeek | null | undefined): boolean {
+export function isWeekHierarchyPublished(
+  week: Omit<BreadcrumbWeek, "display_order"> | null | undefined
+): boolean {
   const phase = week?.phase;
   const theme = phase?.theme;
 

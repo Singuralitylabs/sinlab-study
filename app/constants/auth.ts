@@ -8,6 +8,8 @@ export const AUTH_HEADERS = {
   USER_ID: "x-sinlab-user-id",
   USER_STATUS: "x-sinlab-user-status",
   USER_ROLE: "x-sinlab-user-role",
+  // Empty string means "no membership type" (e.g. trial); a missing header means "not provided".
+  MEMBERSHIP_TYPE: "x-sinlab-membership-type",
 } as const;
 
 export const AUTH_HEADER_NAMES: readonly string[] = Object.values(AUTH_HEADERS);

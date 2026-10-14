@@ -7,6 +7,7 @@ describe("auth constants", () => {
     expect(AUTH_HEADERS.USER_ID).toBe("x-sinlab-user-id");
     expect(AUTH_HEADERS.USER_STATUS).toBe("x-sinlab-user-status");
     expect(AUTH_HEADERS.USER_ROLE).toBe("x-sinlab-user-role");
+    expect(AUTH_HEADERS.MEMBERSHIP_TYPE).toBe("x-sinlab-membership-type");
   });
 
   it("AUTH_HEADER_NAMES がすべてのヘッダー名を含んでいること", () => {
@@ -15,6 +16,7 @@ describe("auth constants", () => {
       "x-sinlab-user-id",
       "x-sinlab-user-status",
       "x-sinlab-user-role",
+      "x-sinlab-membership-type",
     ]);
   });
 });

@@ -143,6 +143,24 @@ describe("resolveAnnouncementViewer", () => {
   });
 });
 
+describe("resolveAnnouncementViewer（認証結果に会員種別がある場合）", () => {
+  it("users を読まずに渡された会員種別を使う", async () => {
+    const client = mockClient({ users: { data: { membership_type: "community" }, error: null } });
+
+    expect(
+      await resolveAnnouncementViewer({
+        userId: 8,
+        userStatus: "active",
+        membershipType: "general",
+      })
+    ).toEqual(generalViewer);
+    expect(
+      await resolveAnnouncementViewer({ userId: 8, userStatus: "trial", membershipType: null })
+    ).toEqual({ userId: 8, status: "trial", membershipType: null });
+    expect(client.from).not.toHaveBeenCalled();
+  });
+});
+
 describe("markAnnouncementRead", () => {
   it("既に既読（主キー違反）でも成功扱い", async () => {
     mockClient({

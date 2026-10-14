@@ -6,9 +6,9 @@ import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Separator } from "@/components/ui/separator";
 
 const INSTRUCTOR_NAV_ITEMS = [
-  { title: "ダッシュボード", href: "/instructor", icon: LayoutDashboard },
+  { title: "ダッシュボード", href: "/manage", icon: LayoutDashboard },
   { title: "コンテンツ管理", href: "/manage/contents", icon: FileText },
-  { title: "提出一覧", href: "/instructor/submissions", icon: ClipboardList },
+  { title: "提出一覧", href: "/manage/submissions", icon: ClipboardList },
 ];
 
 export default async function InstructorLayout({ children }: { children: React.ReactNode }) {

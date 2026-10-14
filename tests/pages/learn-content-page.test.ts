@@ -194,6 +194,7 @@ const render = async () => renderToStaticMarkup(await ContentPage({ params }));
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  vi.mocked(fetchLatestSubmissionByContentId).mockResolvedValue({ data: null } as never);
   vi.mocked(fetchUpgradePriceLabel).mockResolvedValue("月額1,500円（税込）");
 });
 

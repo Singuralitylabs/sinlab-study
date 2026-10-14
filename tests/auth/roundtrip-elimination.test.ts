@@ -52,6 +52,7 @@ const testUserData = {
   id: 100,
   status: "active",
   role: "member",
+  membership_type: null,
 };
 
 function extractDownstreamHeaders(proxyResponseHeaders: Headers): Headers {
@@ -60,11 +61,14 @@ function extractDownstreamHeaders(proxyResponseHeaders: Headers): Headers {
   const userId = proxyResponseHeaders.get("x-middleware-request-x-sinlab-user-id");
   const userStatus = proxyResponseHeaders.get("x-middleware-request-x-sinlab-user-status");
   const userRole = proxyResponseHeaders.get("x-middleware-request-x-sinlab-user-role");
+  const membershipType = proxyResponseHeaders.get("x-middleware-request-x-sinlab-membership-type");
 
   if (authId) passedHeaders.set(AUTH_HEADERS.AUTH_ID, authId);
   if (userId) passedHeaders.set(AUTH_HEADERS.USER_ID, userId);
   if (userStatus) passedHeaders.set(AUTH_HEADERS.USER_STATUS, userStatus);
   if (userRole) passedHeaders.set(AUTH_HEADERS.USER_ROLE, userRole);
+  // "" is a valid value (no membership type), so compare against null.
+  if (membershipType !== null) passedHeaders.set(AUTH_HEADERS.MEMBERSHIP_TYPE, membershipType);
   return passedHeaders;
 }
 
@@ -115,6 +119,7 @@ describe("認証チェックの二重ラウンドトリップ解消フロー統�
       userId: 100,
       userStatus: "active",
       userRole: "member",
+      membershipType: null,
     });
     expect(proxyUsersQueryCount).toBe(1);
     expect(rscUsersQueryCount).toBe(0);
@@ -127,6 +132,7 @@ describe("認証チェックの二重ラウンドトリップ解消フロー統�
     maliciousHeaders.set(AUTH_HEADERS.USER_ID, "999");
     maliciousHeaders.set(AUTH_HEADERS.USER_STATUS, "active");
     maliciousHeaders.set(AUTH_HEADERS.USER_ROLE, "admin");
+    maliciousHeaders.set(AUTH_HEADERS.MEMBERSHIP_TYPE, "general");
 
     const apiRequest = new NextRequest("http://localhost/api/admin/users", {
       headers: maliciousHeaders,
@@ -136,6 +142,7 @@ describe("認証チェックの二重ラウンドトリップ解消フロー統�
     expect(proxyResponse.status).toBe(200);
     expect(proxyResponse.headers.get("x-middleware-request-x-sinlab-auth-id")).toBeNull();
     expect(proxyResponse.headers.get("x-middleware-request-x-sinlab-user-role")).toBeNull();
+    expect(proxyResponse.headers.get("x-middleware-request-x-sinlab-membership-type")).toBeNull();
 
     downstreamHeaders = extractDownstreamHeaders(proxyResponse.headers);
 
@@ -160,6 +167,7 @@ describe("認証チェックの二重ラウンドトリップ解消フロー統�
       userId: 100,
       userStatus: "active",
       userRole: "member",
+      membershipType: null,
     });
     expect(apiUsersQueryCount).toBe(1);
   });
