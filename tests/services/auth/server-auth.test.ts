@@ -129,6 +129,20 @@ describe("getServerAuth", () => {
     });
   });
 
+  describe("DB から取得した会員種別の検証", () => {
+    it("許可値以外が保存されていたら null として扱う", async () => {
+      const mockClient = createMockSupabaseClient({
+        authResult: { data: { user: mockUser }, error: null },
+        queryResult: { data: { ...mockUserData, membership_type: "legacy" }, error: null },
+      });
+      vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+      const result = await getServerAuth();
+
+      expect(result.membershipType).toBeNull();
+    });
+  });
+
   describe("proxy からのヘッダー経由（案Aのキャッシュ利用）", () => {
     it("有効なヘッダーが揃っており auth.getUser().id と一致する場合、users テーブルを照会せずヘッダー値から結果を返す", async () => {
       const requestHeaders = new Headers();

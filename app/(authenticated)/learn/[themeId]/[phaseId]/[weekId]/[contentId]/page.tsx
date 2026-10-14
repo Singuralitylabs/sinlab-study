@@ -93,8 +93,11 @@ export default async function ContentPage({ params }: PageProps) {
 
   // 404 when the URL's themeId/phaseId don't match the week's actual phase/theme (keeps breadcrumbs
   // and prev/next links from pointing at wrong URLs).
+  // The embedded week has no is_deleted filter (fetchWeekById had), so a deleted week is rejected
+  // here for admin / maintainer too instead of showing up as a preview.
   if (
     !week ||
+    week.is_deleted ||
     week.id !== weekIdNum ||
     week.phase_id !== phaseIdNum ||
     week.phase?.theme_id !== themeIdNum

@@ -103,6 +103,8 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
   // (default 1000) does not drop rows. Independent of the theme tree, so it starts together with
   // it and is awaited only when the tree has contents. It never rejects (a failure falls back to
   // an empty set so the theme list still renders), so leaving it unawaited is safe.
+  // Set when the tree query fails, so the paging stops instead of reading pages nobody uses.
+  let abandoned = false;
   const progressPromise = (async () => {
     try {
       return await fetchCompletedContentIds();
@@ -115,7 +117,7 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
   async function fetchCompletedContentIds(): Promise<Set<number>> {
     const completedIds = new Set<number>();
     const pageSize = 1000;
-    for (let offset = 0; ; offset += pageSize) {
+    for (let offset = 0; !abandoned; offset += pageSize) {
       const { data: progress, error: progressError } = await supabase
         .from("user_progress")
         .select("content_id")
@@ -136,6 +138,7 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
         return completedIds;
       }
     }
+    return completedIds;
   }
 
   const { data: themes, error: themesError } = await supabase
@@ -154,6 +157,7 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
     .order("display_order");
 
   if (themesError) {
+    abandoned = true;
     console.error("テーマ進捗サマリー取得エラー:", themesError.message);
     return { data: null, error: themesError };
   }

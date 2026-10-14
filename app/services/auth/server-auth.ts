@@ -110,7 +110,10 @@ export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
       userId: userData.id,
       userStatus: userData.status as UserStatusType,
       userRole: userData.role as UserRoleType,
-      membershipType: (userData.membership_type as MembershipType | null) ?? null,
+      // Same allowlist as the header path: an unexpected stored value is treated as no type.
+      membershipType: MEMBERSHIP_TYPES.includes(userData.membership_type as MembershipType)
+        ? (userData.membership_type as MembershipType)
+        : null,
     };
   } catch (error) {
     rethrowIfControlError(error);

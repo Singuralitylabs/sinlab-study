@@ -38,7 +38,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 全体像・ロール（`admin` / `maintainer` / `member`）・ステータス（`active` / `trial` / `rejected`）は `docs/specification.md` 2章。
 
-- **サーバー側のユーザー情報取得は `getServerAuth()`（`app/services/auth/server-auth.ts`）に一本化する。** layout・page・API Route のいずれも他の手段を使わない。proxy が付ける `x-sinlab-*` ヘッダー（会員種別を含む）は受信時に必ず削除し、`getServerAuth()` が許可値検証した上でだけ使う（`docs/specification.md` 2.2）。
+- **サーバー側のユーザー情報取得は `getServerAuth()`（`app/services/auth/server-auth.ts`）に一本化する。** layout・page・API Route のいずれも他の手段を使わない（`docs/specification.md` 2.2）。
 - **認可は二層防御。** `proxy.ts`（Middleware の後継）が第一の砦、`app/(authenticated)/layout.tsx` でも `userStatus` の許可リスト検証を行う。**クライアント側の認証ガードは行わない。**
 - **プロキシはフェイルクローズ。** 環境変数欠落・例外・status null はすべて `/login` へ。
 - **Cron ルート（`app/api/cron/`）は `isAuthorizedCronRequest()` による `CRON_SECRET` の検証を必ず通す**（未設定・不一致は 401）。`/api` は proxy の対象外のため、ルート側の検証だけが防御になる。

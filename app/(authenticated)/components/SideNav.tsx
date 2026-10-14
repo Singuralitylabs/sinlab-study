@@ -15,7 +15,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { createClientSupabaseClient } from "@/app/services/api/supabase-client";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -165,18 +165,17 @@ export function SideNav({
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
-  const navItems = useMemo<NavItem[]>(
-    () => [
-      ...DEFAULT_NAV_ITEMS,
-      ...(showCertificates ? [CERTIFICATES_NAV_ITEM] : []),
-      announcementsNavItem(announcementBadge),
-      // No payment/billing-management entry while disabled (see AGENTS.md).
-      ...(stripeEnabled ? [UPGRADE_NAV_ITEM] : []),
-      ...(isInstructor ? [MANAGE_NAV_ITEM] : []),
-      ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),
-    ],
-    [isAdmin, isInstructor, stripeEnabled, showCertificates, announcementBadge]
-  );
+  // Not memoized: announcementBadge is a new element on every layout render, so a useMemo keyed
+  // on it would never hit.
+  const navItems: NavItem[] = [
+    ...DEFAULT_NAV_ITEMS,
+    ...(showCertificates ? [CERTIFICATES_NAV_ITEM] : []),
+    announcementsNavItem(announcementBadge),
+    // No payment/billing-management entry while disabled (see AGENTS.md).
+    ...(stripeEnabled ? [UPGRADE_NAV_ITEM] : []),
+    ...(isInstructor ? [MANAGE_NAV_ITEM] : []),
+    ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),
+  ];
 
   const handleSignOut = async () => {
     const supabase = createClientSupabaseClient();

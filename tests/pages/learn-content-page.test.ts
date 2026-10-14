@@ -779,4 +779,15 @@ describe("パンくずの取得元（週の二重取得をやめる）", () => {
 
     await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
   });
+
+  it("論理削除された週のコンテンツは admin でも 404（プレビュー扱いにしない）", async () => {
+    setup({
+      userStatus: "active",
+      userRole: "admin",
+      isOpenToTrial: true,
+      contentWeekOverride: { ...week, is_deleted: true },
+    });
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
+  });
 });
