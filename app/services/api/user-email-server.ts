@@ -2,8 +2,8 @@ import type { PostgrestError } from "@supabase/supabase-js";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
 /**
- * Promotional-mail unsubscribe state, set by an admin on the user's behalf (`opt_out_email`, e.g.
- * on the user's request) or reverted (`resume_email`). Guarded in the UPDATE so a stale screen
+ * Promotional-mail unsubscribe state. Shared by the admin API (`opt_out_email` / `resume_email`)
+ * and the self-service `PATCH /api/settings/email`, each passing its own target `userId`. Guarded in the UPDATE so a stale screen
  * cannot overwrite the original unsubscribe time or resume someone who is not unsubscribed;
  * `updated: false` means the target was already in that state, missing or deleted. Transactional
  * mail never reads this column. Not tied to the user's status, so it works for any user.

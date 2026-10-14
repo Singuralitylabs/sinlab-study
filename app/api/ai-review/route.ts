@@ -159,9 +159,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Learners cannot select grading_rubric or reference_answer. Read them with service_role after the claim so a
-    // failed lookup can mark the row failed instead of leaving it processing. Published and
-    // not deleted, or a reordered visibility check would grade a hidden rubric.
+    // Learners cannot select grading_rubric or reference_answer. Read them with service_role
+    // after the claim so a failed lookup can mark the row failed instead of leaving it
+    // processing. Published and not deleted, or a reordered visibility check would grade a
+    // hidden rubric.
     const admin = await createAdminSupabaseClient();
     const { data: rubricRow, error: rubricError } = await admin
       .from("learning_contents")

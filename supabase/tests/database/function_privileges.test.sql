@@ -110,5 +110,20 @@ select is(
   'every public function is covered by this file or listed here on purpose'
 );
 
+-- Learners must not read the model answer or rubric columns directly (RPC only).
+select is(
+  has_column_privilege(t.role_name, 'public.learning_contents', t.column_name, 'select'),
+  t.expected,
+  format('learning_contents.%s: %s SELECT = %s', t.column_name, t.role_name, t.expected)
+)
+from (
+  values
+    ('anon', 'reference_answer', false),
+    ('authenticated', 'reference_answer', false),
+    ('anon', 'grading_rubric', false),
+    ('authenticated', 'grading_rubric', false),
+    ('authenticated', 'exercise_instructions', true)
+) as t(role_name, column_name, expected);
+
 select * from finish();
 rollback;
