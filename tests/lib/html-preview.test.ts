@@ -115,4 +115,40 @@ describe("buildPreviewDocument", () => {
     expect(doc).toContain("/* <!-- */");
     expect(doc).toContain('"<\\!--<script>"');
   });
+
+  it("does not expand tags inside HTML comments", () => {
+    const html =
+      '<!-- <link rel="stylesheet" href="style.css"> --><!-- <script src="m.js"></script> --><p>x</p>';
+    const doc = buildPreviewDocument([
+      f("index.html", "html", html),
+      f("style.css", "css", "a{}"),
+      f("m.js", "javascript", "run()"),
+    ]);
+    expect(doc).toBe(html);
+  });
+
+  it("does not expand tag-shaped text inside inline scripts and styles", () => {
+    const html =
+      '<style>/* <link rel="stylesheet" href="style.css"> */</style><script>el.innerHTML = \'<link rel="stylesheet" href="style.css">\';</script>';
+    const doc = buildPreviewDocument([
+      f("index.html", "html", html),
+      f("style.css", "css", "a{}\nb{}"),
+    ]);
+    expect(doc).toBe(html);
+  });
+
+  it("expands real references that follow a comment", () => {
+    const doc = buildPreviewDocument([
+      f("index.html", "html", '<!-- note --><link rel="stylesheet" href="style.css">'),
+      f("style.css", "css", "a{}"),
+    ]);
+    expect(doc).toBe("<!-- note --><style>a{}</style>");
+  });
+
+  it("leaves a script that has both src and inline code untouched", () => {
+    const html = '<script src="m.js">inline()</script>';
+    expect(
+      buildPreviewDocument([f("index.html", "html", html), f("m.js", "javascript", "run()")])
+    ).toBe(html);
+  });
 });

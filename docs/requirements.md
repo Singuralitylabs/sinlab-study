@@ -290,7 +290,7 @@ admin と maintainer（講師）が共通でアクセス可能。`/admin` 配下
 - プロキシ（`proxy.ts`）によるページ単位のアクセス制御
 - Row Level Security（RLS）によるデータベースレベルのアクセス制御（お試しユーザーへのコンテンツ制限はアプリ層とRLSの二層で担保）
 - Markdown表示は react-markdown のデフォルト動作（生HTMLタグを描画しない）によりXSSを防止
-- 受講生コードのプレビューは `sandbox="allow-scripts"` の iframe（`allow-same-origin` なし）で描画し、親オリジンの Cookie・認証付き API に到達させない。react-markdown が生HTMLを描画しない方針とは別経路で、Markdown 本文には適用しない
+- 受講生コードのプレビューは `sandbox="allow-scripts"` の iframe（`allow-same-origin` なし）で描画し、親オリジンの Cookie・DOM・認証付き API に到達させない（Cookie が付かないのは認証 Cookie が `SameSite=Lax` であることにも依存する。詳細は[機能設計書](./specification.md) 5.4.7）。react-markdown が生HTMLを描画しない方針とは別経路で、Markdown 本文には適用しない
 - 認証セッションからユーザーIDを導出（API操作時、クライアント送信値では認可しない）
 - 独立認証基盤: 本アプリ独自のGoogle OAuth + ユーザー承認フロー（詳細は[機能設計書](./specification.md)のセクション2を参照）
 

@@ -76,47 +76,54 @@ export function buildPreviewDocument(files: readonly CodeFile[]): string {
     return `<!doctype html><html><head><meta charset="utf-8">${styles.join("")}</head><body>${scripts.join("")}</body></html>`;
   }
 
-  const withStyles = base.content.replace(/<link\b[^>]*>/gi, (tag) => {
-    const rel = getAttribute(tag, "rel");
-    const href = getAttribute(tag, "href");
-    if (rel?.toLowerCase() !== "stylesheet" || href === null || !isRelativeRef(href)) {
-      return tag;
-    }
-    const file = findFile(files, href);
-    return file ? `<style>${escapeClosingTag(file.content, "style")}</style>` : tag;
-  });
-
+  // One left-to-right pass so context is respected: comments and inline <script>/<style> bodies are
+  // matched as a whole and left alone, so a commented-out <link>/<script src> or a tag inside a JS
+  // string is not expanded (the browser would not load it either).
   // Inlining drops src, so defer would be lost and the script would run before the DOM exists;
   // deferred scripts are moved to the end of the document instead (module scripts defer natively).
   const deferred: string[] = [];
-  const withScripts = withStyles.replace(
-    /<script\b([^>]*)>\s*<\/script\s*>/gi,
-    (element, attrs: string) => {
-      const tag = `<script${attrs}>`;
-      const src = getAttribute(tag, "src");
-      if (src === null || !isRelativeRef(src)) {
-        return element;
+  const expanded = base.content.replace(
+    /<!--[\s\S]*?-->|<style\b[^>]*>[\s\S]*?<\/style\s*>|<script\b([^>]*)>([\s\S]*?)<\/script\s*>|<link\b[^>]*>/gi,
+    (match: string, scriptAttrs?: string, scriptBody?: string) => {
+      if (match.startsWith("<!--") || /^<style/i.test(match)) {
+        return match;
       }
-      const file = findFile(files, src);
-      if (!file) {
-        return element;
+
+      if (scriptAttrs !== undefined) {
+        const tag = `<script${scriptAttrs}>`;
+        const src = getAttribute(tag, "src");
+        if (src === null || scriptBody?.trim() !== "" || !isRelativeRef(src)) {
+          return match;
+        }
+        const file = findFile(files, src);
+        if (!file) {
+          return match;
+        }
+        const isModule = getAttribute(tag, "type")?.toLowerCase() === "module";
+        const inlined = `<script${isModule ? ' type="module"' : ""}>${escapeClosingTag(file.content, "script")}</script>`;
+        if (!isModule && /\sdefer(\s|=|>|\/)/i.test(tag)) {
+          deferred.push(inlined);
+          return "";
+        }
+        return inlined;
       }
-      const isModule = getAttribute(tag, "type")?.toLowerCase() === "module";
-      const inlined = `<script${isModule ? ' type="module"' : ""}>${escapeClosingTag(file.content, "script")}</script>`;
-      if (!isModule && /\sdefer(\s|=|>|\/)/i.test(tag)) {
-        deferred.push(inlined);
-        return "";
+
+      const rel = getAttribute(match, "rel");
+      const href = getAttribute(match, "href");
+      if (rel?.toLowerCase() !== "stylesheet" || href === null || !isRelativeRef(href)) {
+        return match;
       }
-      return inlined;
+      const file = findFile(files, href);
+      return file ? `<style>${escapeClosingTag(file.content, "style")}</style>` : match;
     }
   );
 
   if (deferred.length === 0) {
-    return withScripts;
+    return expanded;
   }
   const tail = deferred.join("");
-  const bodyEnd = withScripts.search(/<\/body\s*>/i);
+  const bodyEnd = expanded.search(/<\/body\s*>/i);
   return bodyEnd === -1
-    ? withScripts + tail
-    : withScripts.slice(0, bodyEnd) + tail + withScripts.slice(bodyEnd);
+    ? expanded + tail
+    : expanded.slice(0, bodyEnd) + tail + expanded.slice(bodyEnd);
 }
