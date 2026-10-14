@@ -82,8 +82,13 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
         if (rest.length === 0) return spec;
         var arg = rest.shift();
         if (spec === "%c") return "";
-        if (spec === "%d" || spec === "%i") return String(parseInt(arg, 10));
-        if (spec === "%f") return String(parseFloat(arg));
+        if (spec === "%d" || spec === "%i" || spec === "%f") {
+          try {
+            return String(spec === "%f" ? parseFloat(arg) : parseInt(arg, 10));
+          } catch (e) {
+            return "NaN";
+          }
+        }
         return format(arg);
       });
     }
@@ -94,7 +99,8 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
   var send = function (level, values) {
     if (sent >= maxEntries) return;
     sent++;
-    var text = render(values);
+    var text;
+    try { text = render(values); } catch (e) { text = "[unprintable]"; }
     if (text.length > maxTextLength) text = text.slice(0, maxTextLength - 1) + "…";
     try {
       win.parent.postMessage({ type: messageType, level: level, text: text }, "*");
@@ -104,7 +110,7 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
     var original = con[method];
     con[method] = function () {
       var values = Array.prototype.slice.call(arguments);
-      send(level, values);
+      try { send(level, values); } catch (e) {}
       if (typeof original === "function") original.apply(con, values);
     };
   };

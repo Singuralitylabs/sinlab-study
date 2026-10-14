@@ -95,6 +95,20 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
     ]);
   });
 
+  it("%d に Symbol や null プロトタイプのオブジェクトを渡しても受講生の console.log を止めない", () => {
+    const { run, texts, original } = runBridge();
+    expect(() =>
+      run(`
+        console.log("%d", Symbol("x"));
+        console.log("%f", Object.create(null));
+        console.log("%s", { toString() { throw new Error("boom"); } });
+        console.log("続き");
+      `)
+    ).not.toThrow();
+    expect(texts()).toEqual(["NaN", "NaN", "{}", "続き"]);
+    expect(original.log).toHaveBeenCalledTimes(4);
+  });
+
   it("%s / %d / %i / %f / %o / %c / %% を DevTools と同じように置き換える", () => {
     const { run, texts } = runBridge();
     run(`
