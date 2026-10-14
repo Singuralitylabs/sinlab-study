@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { GRADING_RUBRIC_MAX_REQUIREMENTS } from "@/app/constants/grading";
 import {
+  clearedGradingRubric,
   GradingRubricInputSchema,
   nextGradingRubric,
   parseGradingRubric,
+  parseStoredGradingRubric,
 } from "@/app/lib/grading-schema";
 
 const req = (key: string, name = `要件${key}`, description = "") => ({ key, name, description });
@@ -94,5 +96,44 @@ describe("nextGradingRubric", () => {
   it("クライアントが送った max_key_number は採用しない", () => {
     const parsed = GradingRubricInputSchema.parse({ max_key_number: 0, requirements: [req("r1")] });
     expect("max_key_number" in parsed).toBe(false);
+  });
+});
+
+describe("採点基準の墓石（#344）", () => {
+  const live = { version: 2, requirements: [req("r1"), req("r3")], max_key_number: 5 };
+
+  it("削除すると版を進め、発行済みキーの最大番号を引き継ぐ", () => {
+    expect(clearedGradingRubric(live)).toEqual({
+      version: 3,
+      requirements: [],
+      max_key_number: 5,
+    });
+    expect(clearedGradingRubric({ version: 1, requirements: [req("r4")] })?.max_key_number).toBe(4);
+  });
+
+  it("もともと基準が無ければ NULL のまま、削除済みなら変えない", () => {
+    expect(clearedGradingRubric(null)).toBeNull();
+    const tombstone = { version: 3, requirements: [], max_key_number: 5 };
+    expect(clearedGradingRubric(tombstone)).toBe(tombstone);
+  });
+
+  it("墓石から再設定すると版を引き継いで +1、番号も下がらない", () => {
+    expect(
+      nextGradingRubric(
+        { version: 3, requirements: [], max_key_number: 5 },
+        {
+          requirements: [req("r6")],
+        }
+      )
+    ).toEqual({ version: 4, requirements: [req("r6", "要件r6")], max_key_number: 6 });
+  });
+
+  it("採点では墓石を基準なしとして扱い、書き込み側だけが墓石を読む", () => {
+    const tombstone = { version: 3, requirements: [], max_key_number: 5 };
+    expect(parseGradingRubric(tombstone)).toBeNull();
+    expect(parseStoredGradingRubric(tombstone)).toEqual(tombstone);
+    expect(parseStoredGradingRubric(live)).toEqual(live);
+    expect(parseStoredGradingRubric(null)).toBeNull();
+    expect(parseStoredGradingRubric({ version: 0, requirements: [] })).toBeNull();
   });
 });

@@ -171,13 +171,22 @@ export const SCORE_KIND_BADGE_LABELS: Partial<Record<ScoreKind, string>> = {
   none: "採点対象外",
 };
 
-/** Version of a stored rubric, or null when unset or unrecognisable (no zod: client-safe). */
+/**
+ * Version of a stored rubric, or null when unset (NULL) or unrecognisable (no zod: client-safe).
+ * A deleted rubric (empty requirements, #344) still has a version: it is what the editor's
+ * optimistic lock matches. Use hasGradingRequirements to tell it from a live rubric.
+ */
 export function getGradingRubricVersion(value: unknown): number | null {
-  if (!isRecord(value) || !Array.isArray(value.requirements) || value.requirements.length === 0) {
+  if (!isRecord(value) || !Array.isArray(value.requirements)) {
     return null;
   }
   const { version } = value;
   return typeof version === "number" && Number.isInteger(version) && version > 0 ? version : null;
+}
+
+/** Whether the stored value is a live rubric (not NULL and not a deleted one). */
+export function hasGradingRequirements(value: unknown): boolean {
+  return isRecord(value) && Array.isArray(value.requirements) && value.requirements.length > 0;
 }
 
 /** Rows for the rubric editor from a stored value; empty when unset or unrecognisable. */

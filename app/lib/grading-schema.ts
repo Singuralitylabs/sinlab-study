@@ -48,10 +48,62 @@ export const GradingRubricSchema = GradingRubricInputSchema.extend({
   max_key_number: z.number().int().nonnegative().optional(),
 });
 
+/**
+ * Deleted rubric (#344): no requirements, but the version and the key high-water mark survive so
+ * a rubric set later can't reuse a (version, key) pair that past reviews already point at.
+ */
+const GradingRubricTombstoneSchema = z.object({
+  version: z.number().int().positive(),
+  max_key_number: z.number().int().nonnegative().optional(),
+  requirements: z.array(z.unknown()).length(0),
+});
+
 /** Unusable stored values count as "no rubric" so a bad row degrades to estimated grading. */
 export function parseGradingRubric(value: unknown): GradingRubric | null {
   const parsed = GradingRubricSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
+}
+
+/**
+ * Like parseGradingRubric, but also returns a deleted rubric (empty requirements). For the write
+ * path, which has to carry the version and key history forward. Grading must keep using
+ * parseGradingRubric: a deleted rubric means "no rubric" there.
+ */
+export function parseStoredGradingRubric(value: unknown): GradingRubric | null {
+  const live = parseGradingRubric(value);
+  if (live) {
+    return live;
+  }
+  const tombstone = GradingRubricTombstoneSchema.safeParse(value);
+  return tombstone.success
+    ? {
+        version: tombstone.data.version,
+        requirements: [],
+        max_key_number: tombstone.data.max_key_number,
+      }
+    : null;
+}
+
+/**
+ * What a cleared rubric is stored as: never NULL once a rubric existed. The version moves on (a
+ * rubric set later is a different one) and max_key_number keeps every issued r{n} reserved. An
+ * already-deleted rubric stays as it is, and a row that never had one stays NULL.
+ */
+export function clearedGradingRubric(current: GradingRubric | null): GradingRubric | null {
+  if (!current) {
+    return null;
+  }
+  if (current.requirements.length === 0) {
+    return current;
+  }
+  return {
+    version: current.version + 1,
+    requirements: [],
+    max_key_number: Math.max(
+      current.max_key_number ?? 0,
+      maxRequirementKeyNumber(current.requirements.map((requirement) => requirement.key))
+    ),
+  };
 }
 
 function normalizeRequirements(requirements: readonly GradingRequirement[]): GradingRequirement[] {

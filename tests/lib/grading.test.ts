@@ -9,6 +9,7 @@ import {
   computeReviewScore,
   getGradingRubricVersion,
   getRubricMaxKeyNumber,
+  hasGradingRequirements,
   isReviewPassed,
   nextRequirementKey,
   renderReviewMarkdown,
@@ -200,8 +201,16 @@ describe("getGradingRubricVersion / toRubricFormRows / nextRequirementKey / getR
     expect(getGradingRubricVersion(rubric)).toBe(4);
     expect(getGradingRubricVersion(null)).toBeNull();
     expect(getGradingRubricVersion({ version: 0, requirements: rubric.requirements })).toBeNull();
-    expect(getGradingRubricVersion({ version: 1, requirements: [] })).toBeNull();
+    // A deleted rubric (tombstone) keeps its version: the editor's optimistic lock matches it.
+    expect(getGradingRubricVersion({ version: 1, requirements: [] })).toBe(1);
+    expect(getGradingRubricVersion({ version: 1 })).toBeNull();
     expect(getGradingRubricVersion({ version: 1.5, requirements: rubric.requirements })).toBeNull();
+  });
+
+  it("墓石（空の requirements）は基準ありとは数えない", () => {
+    expect(hasGradingRequirements(rubric)).toBe(true);
+    expect(hasGradingRequirements({ version: 2, requirements: [], max_key_number: 3 })).toBe(false);
+    expect(hasGradingRequirements(null)).toBe(false);
   });
 
   it("エディタ用の行に展開する（不正は空）", () => {

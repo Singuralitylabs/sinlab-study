@@ -13,13 +13,15 @@ import {
 import {
   getGradingRubricVersion,
   getRubricMaxKeyNumber,
+  hasGradingRequirements,
   reusedRequirementKeys,
   toRubricFormRows,
 } from "@/app/lib/grading";
 import {
+  clearedGradingRubric,
   type GradingRubricInput,
   nextGradingRubric,
-  parseGradingRubric,
+  parseStoredGradingRubric,
 } from "@/app/lib/grading-schema";
 import type { QuizQuestionData } from "@/app/lib/quiz";
 import { toSlideObjectKey } from "@/app/lib/slide-object-key";
@@ -176,6 +178,7 @@ function manageContentListSelect(innerJoin: boolean): string {
   return `
     id, title, content_type, display_order, is_published, is_open_to_trial, week_id,
     grading_rubric_version:grading_rubric->version,
+    grading_rubric_requirements:grading_rubric->requirements,
     ${weekRel}(
       id, name, display_order, phase_id,
       ${phaseRel}(
@@ -1083,7 +1086,16 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
   // This cast depends on the select returning the nested shape down to the theme
   // (week.phase.theme). If you change the select, keep week.phase.theme, which the hierarchy sort
   // in content-grouping.ts reads.
-  return { data: data as unknown as ManageContentListItem[], error: null };
+  // A deleted rubric (empty requirements, #344) keeps its version but is shown as "not set".
+  const rows = (
+    data as unknown as Array<ManageContentListItem & { grading_rubric_requirements: unknown }>
+  ).map(({ grading_rubric_requirements, ...row }) => ({
+    ...row,
+    grading_rubric_version: hasGradingRequirements(grading_rubric_requirements)
+      ? row.grading_rubric_version
+      : null,
+  }));
+  return { data: rows as ManageContentListItem[], error: null };
 }
 
 /**
@@ -1574,7 +1586,7 @@ async function updateContentRow(
       if (touchesRubric) {
         // A rubric belongs to exercises only: judge the type the row will have after this update,
         // so switching a stored video to exercise keeps the rubric sent with it.
-        const stored = parseGradingRubric(current.grading_rubric);
+        const stored = parseStoredGradingRubric(current.grading_rubric);
         // zod can reject a row the CHECK allows (too many requirements, a duplicate key). The
         // version is still in the JSON; treating that as NULL makes `IS NULL` match nothing and
         // every later save 409s.
@@ -1626,7 +1638,9 @@ async function updateContentRow(
               ? { ...drafted, version: Math.max(drafted.version, lockVersion + 1) }
               : drafted;
         } else {
-          patch.grading_rubric = null;
+          // Clearing (or leaving exercise) keeps the version and key history as a tombstone
+          // instead of NULL, so the next rubric can't restart at v1 / r1 (#344).
+          patch.grading_rubric = clearedGradingRubric(basis);
         }
         rubricSnapshot = {
           grading_rubric: current.grading_rubric,
