@@ -499,7 +499,7 @@ describe("POST /api/stripe/checkout - checkout_started", () => {
     expect(JSON.stringify(vi.mocked(track).mock.calls)).not.toContain("trial@example.com");
   });
 
-  it("再利用の Checkout URL でも送る", async () => {
+  it("再利用の Checkout URL では送らない（同じ Session を二重計上しない）", async () => {
     vi.mocked(claimCheckoutSlot).mockResolvedValue({
       outcome: "reusable",
       url: "https://checkout.stripe.com/live",
@@ -508,7 +508,8 @@ describe("POST /api/stripe/checkout - checkout_started", () => {
     const res = await POST();
 
     expect(res.status).toBe(200);
-    expect(track).toHaveBeenCalledWith("checkout_started");
+    await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/live" });
+    expect(track).not.toHaveBeenCalled();
   });
 
   it("アプリ内の /upgrade へ戻すときは送らない", async () => {

@@ -40,7 +40,11 @@ function checkoutSuccessPath(sessionId: string): string {
 
 const REACTIVATED_PATH = "/upgrade";
 
-function jsonCheckoutDestination(url: string) {
+/**
+ * Record checkout_started only for a Session created by this request. Re-showing a reusable Session
+ * must not count again, or the weekly funnel overstates "Checkout started".
+ */
+function jsonNewCheckoutDestination(url: string) {
   if (isExternalCheckoutUrl(url)) {
     trackServerEvent(ANALYTICS_EVENT.CHECKOUT_STARTED);
   }
@@ -124,7 +128,7 @@ export async function POST() {
     // If the in-progress session is still valid, send the user to the same URL instead of creating
     // a second one.
     if (claim.outcome === "reusable") {
-      return jsonCheckoutDestination(claim.url);
+      return NextResponse.json({ url: claim.url });
     }
 
     try {
@@ -135,7 +139,7 @@ export async function POST() {
         claim.stripeCustomerId,
         claim.claimedAt
       );
-      return jsonCheckoutDestination(url);
+      return jsonNewCheckoutDestination(url);
     } catch (error) {
       console.error("Checkoutセッション作成エラー:", error);
       // Release the claim only when it is certain no valid session remains on Stripe's side.
