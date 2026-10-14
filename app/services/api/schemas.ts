@@ -170,6 +170,13 @@ export const AdminUserActionSchema = z.discriminatedUnion(
   { message: `action は ${USER_MANAGEMENT_ACTIONS.join(" / ")} を指定してください` }
 );
 
+/** PATCH /api/settings/email: `false` unsubscribes from promotional mail, `true` resumes it. */
+export const EmailPreferencesSchema = z
+  .object({
+    promotionalEmails: z.boolean({ message: "promotionalEmails は真偽値で指定してください" }),
+  })
+  .strict();
+
 const EmailSendDaysSchema = z
   .array(
     z

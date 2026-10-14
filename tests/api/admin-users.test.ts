@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/admin-server");
+vi.mock("@/app/services/api/user-email-server");
 vi.mock("@/app/services/notifications/user-emails");
 
 import { PATCH } from "@/app/api/admin/users/route";
@@ -11,8 +12,8 @@ import {
   changeUserRole,
   isUserCurrentlySubscribed,
   rejectUser,
-  setUserEmailOptOut,
 } from "@/app/services/api/admin-server";
+import { setUserEmailOptOut } from "@/app/services/api/user-email-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { scheduleApprovedEmail } from "@/app/services/notifications/user-emails";
 

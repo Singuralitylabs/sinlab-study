@@ -976,6 +976,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 - `/upgrade/success`: Checkoutから戻った直後の決済確認・完了表示（2.11）
 - `/certificates` / `/certificates/[id]`: 修了証の一覧と表示（本登録の member のみ。13章）
 - `/announcements` / `/announcements/[id]`: お知らせの一覧（未読表示。サイドナビ「お知らせ」に未読件数のバッジ）・詳細（開くと既読を記録）（11章）
+- `/settings`: 案内メールの配信状態（配信中 / 停止中と停止日時）の確認と、停止・再開（10.8節）。サイドナビのログアウトの上に「設定」として全ロールへ表示する
 
 ### 7.3 管理・講師向け画面（`/manage`）
 
@@ -1200,6 +1201,8 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 - **`GET /api/email/unsubscribe?token=...`**（ログイン不要）: トークンを検証し、「配信を停止する」ボタン（同じ URL への `POST` フォーム）付きの確認画面を返す。**GET では停止を確定しない**。メールのセキュリティ製品（Outlook の Safe Links 等）はリンクを事前に GET するため、GET で確定すると本人が開く前に停止されてしまう
 - **`POST /api/email/unsubscribe?token=...`**（確認画面のボタンと、`List-Unsubscribe-Post` に対応するメールクライアントのワンクリック配信停止）: 検証に成功したら `users.email_opt_out_at` を `now()` で記録し（既に停止済みなら更新せず）、完了画面を返す
 - いずれも、形式不正・改ざん・シークレット未設定は理由を区別せず 400（フェイルクローズ）。DB エラーは 500。画面にユーザー情報は出さない
+- **本人による確認・停止・再開（`/settings`、`PATCH /api/settings/email`）**: 状態は `users.email_opt_out_at` 1 本のまま（種別ごとの設定は持たない）。画面は本人の行を通常クライアントで SELECT して「配信中 / 停止中（停止日時）」を表示し、操作は `PATCH /api/settings/email`（`{ "promotionalEmails": true | false }`。`false` で停止、`true` で再開）で行う。`getServerAuth()` で本人を特定し、未認証 401・`userId` なし 403・`rejected` 403・不正ボディ 400。更新は管理者操作と共通の `setUserEmailOptOut()`（`app/services/api/user-email-server.ts`）を**本人の `userId` で**呼ぶ（service_role。RLS に本人 UPDATE ポリシーは足さない）。すでに目的の状態でもエラーにせず 200 で現在の状態 `{ "emailOptOutAt": string | null }` を返す（管理者 API の 409 は変えない）。admin / maintainer は案内メールの送信対象ではない（10.7節）ため画面に注記を出すが、操作はできる。再開はログイン後の画面に限る（署名付きリンクのルートには再開操作を置かない）
+- **手続き通知に案内を含めるときの表記**: `renderEmailLayout()` の `emailPreferencesUrl` が渡されたときだけ、フッターに「案内メールの配信設定はこちら: `<NEXT_PUBLIC_APP_URL>/settings`」の 1 行をコードで付ける（`List-Unsubscribe` は付けない。手続き通知そのものは停止対象ではない）。渡す種別は `signup`（`upgradeAvailable = true` のとき）と `subscription_ended`。`approved` / `upgraded` / `cancel_scheduled` / `certificate_issued` は案内を含まないため渡さない。案内系 4 種も、署名付きの配信停止リンクに加えてこの行を併記する。配信停止の完了画面にも、再開は設定画面から行える旨を表示する
 - **再開・停止（管理者）**: `/admin/users` で配信停止の状態を確認し、`resume_email`（`email_opt_out_at` を NULL に戻す）・`opt_out_email`（本人の依頼で停止。`now()` を記録）を実行する（2.7・6.1.3節）
 
 ### 10.9 定期メールの設定手順（運用）
@@ -1246,7 +1249,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 | 区分 | 対象 | 理由 |
 |:--|:--|:--|
 | 編集できる | サービス名（差出人名・件名の先頭 `【サービス名】`・見出し・フッターの名前）、補足（見出しの補足・フッター。空にできる）、各テンプレートの件名と本文（Markdown） | 運営が文面を調整したい部分 |
-| コードで固定 | 宛名（「〇〇 様」）、ボタンのリンク先と表示条件、自動送信・返信不可の定型文、配信停止リンクと `List-Unsubscribe` ヘッダー、送信の条件・タイミング | 法令上の必須表示（特定電子メール法）や送信ロジックに関わる。**テンプレートの内容によらず、`renderEmailLayout()` が必ず付ける** |
+| コードで固定 | 宛名（「〇〇 様」）、ボタンのリンク先と表示条件、自動送信・返信不可の定型文、配信停止リンクと `List-Unsubscribe` ヘッダー、配信設定（`/settings`）の案内行（10.8節）、送信の条件・タイミング | 法令上の必須表示（特定電子メール法）や送信ロジックに関わる。**テンプレートの内容によらず、`renderEmailLayout()` が必ず付ける** |
 
 **テンプレートキー**（`EMAIL_TEMPLATE_KEYS`。`app/lib/email-template.ts`）: `signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended` / `weekly_digest` / `inactivity_reminder` / `trial_nurture.day2` / `trial_nurture.day5` / `trial_nurture.day7` / `trial_nurture.day14` / `announcement`。お試しユーザー向け案内は段階ごとにキーを分ける（どの段階を使うかは、送る日の設定に対し従来どおりコードが決める）。`announcement` は件名の形式（`お知らせ: {{title}}`）と、お知らせ本文の前後の定型文だけを持ち、本文に `{{announcement_body}}` を**ちょうど1つ**含める（お知らせごとの本文がそこに入る。件名には使えない）。
 
