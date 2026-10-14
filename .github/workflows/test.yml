@@ -39,7 +39,7 @@ jobs:
       - name: Run unit tests
         run: bun run test
 
-      # The preview scan must also work on JavaScriptCore (Safari), whose regex engine fails
-      # differently from V8 on long inputs.
-      - name: Run preview scan tests on JavaScriptCore
+      # The preview scan and the console bridge also run in Safari (JavaScriptCore), whose regex
+      # engine fails differently from V8 on long inputs.
+      - name: Run preview tests on JavaScriptCore
         run: bun run test:jsc

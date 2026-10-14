@@ -63,18 +63,17 @@ interface ScanGroups {
   scriptAttrs?: string;
   scriptBody?: string;
   link?: string;
-  bodyClose?: string;
   element?: string;
   template?: string;
 }
 
 // Elements whose content the tokenizer does not read as markup (scripting is on in the preview, so
-// <noscript> is one too). A "<head>", "</body>" or <link> inside them is not an element.
+// <noscript> is one too). A "<head>" or <link> inside them is not an element.
 const RAW_TEXT = "style|title|textarea|xmp|noscript|noembed|noframes|iframe";
-// A tag name runs to HTML whitespace, "/" or ">", so "</body-x>" or "<style-x>" is another element
+// A tag name runs to HTML whitespace, "/" or ">", so "<head-x>" or "<style-x>" is another element
 // (\b would stop at "-"). JS \s is wider than HTML whitespace (it includes \v and NBSP).
 const NAME_END = String.raw`(?=[\t\n\f\r />]|$)`;
-// Every tag is consumed up to its ">", so a "</body>" or "<head>" in an attribute value is not
+// Every tag is consumed up to its ">", so a "<head>" or "<link" in an attribute value is not
 // taken for markup. Quoted values are not read as a whole (a ">" inside one ends the tag early):
 // a loop over quoted-or-plain alternatives costs JavaScriptCore a backtracking frame per character
 // and on a long tag it silently finds no match at all.
@@ -99,7 +98,6 @@ const SCAN = new RegExp(
     // Only the start tag: the body is found by findScriptEnd(), which a regex cannot follow.
     String.raw`<script${NAME_END}(?<scriptAttrs>${ATTRS})(?:>|$)`,
     String.raw`<(?<link>link)${NAME_END}${ATTRS}(?:>|$)`,
-    String.raw`<(?<bodyClose>\/body)${NAME_END}${ATTRS}(?:>|$)`,
     String.raw`<(?<element>head|body)${NAME_END}${ATTRS}(?:>|$)`,
     String.raw`<(?<template>\/?template)${NAME_END}${ATTRS}(?:>|$)`,
     String.raw`<\/?[a-z][^\t\n\f\r />]*${ATTRS}(?:>|$)`,
@@ -211,20 +209,16 @@ export function buildPreviewDocument(
   // matched as a whole and left alone, so a commented-out <link>/<script src> or a tag inside a JS
   // string is not expanded (the browser would not load it either).
   // Inlining drops src, so defer would be lost and the script would run before the DOM exists;
-  // deferred scripts are moved to the end of the document instead (module scripts defer natively).
-  // The same pass places headPrelude and finds </body>, so a "<head>" or "</body>" inside a comment,
-  // a style or a script string is never taken for the element (an inserted </script> would end the
-  // learner's script early, and a script inserted into a comment never runs).
+  // deferred scripts are moved to the end of the document instead (module scripts defer natively),
+  // not before </body>: the browser runs them after the whole document is parsed, so elements
+  // written after </body> exist by then too.
+  // The same pass places headPrelude, so a "<head>" inside a comment, a style or a script string is
+  // never taken for the element (an inserted </script> would end the learner's script early).
   const source = base.content;
   const deferred: string[] = [];
   let preludePlaced = headPrelude === "";
   let preludeSearchOpen = true;
   const transform = (match: string, groups: ScanGroups, closed: boolean): string => {
-    if (groups.bodyClose !== undefined) {
-      preludeSearchOpen = false;
-      return match;
-    }
-
     if (groups.element !== undefined) {
       const isHead = groups.element.toLowerCase() === "head" && match.endsWith(">");
       if (preludeSearchOpen && !preludePlaced && isHead) {
@@ -277,10 +271,9 @@ export function buildPreviewDocument(
   // few MB of leading comments, lost the doctype in Safari and threw RangeError in Chrome.
   let inPreamble = true;
   let afterDoctype = -1;
-  let bodyEnd = -1;
   let unclosedTail = -1;
   // <template> content is parsed as markup (so it is scanned, not skipped like raw text) but is
-  // inert: nothing inside may be inlined, moved out and run, or taken for <head> / </body>.
+  // inert: nothing inside may be inlined, moved out and run, or taken for <head>.
   let templateDepth = 0;
   let templateAt = -1;
   let expanded = "";
@@ -322,9 +315,6 @@ export function buildPreviewDocument(
         templateDepth--;
       }
     }
-    if (bodyEnd === -1 && !inTemplate && groups.bodyClose !== undefined) {
-      bodyEnd = expanded.length;
-    }
     lastEnd = m.index + match.length;
     // Anything appended after an unclosed construct would become its text (or attributes) and
     // never run, so deferred scripts go in front of it.
@@ -345,7 +335,7 @@ export function buildPreviewDocument(
   }
   // An unclosed <template> runs to the end, so anything appended would be inert.
   const endAt = templateDepth > 0 ? templateAt : unclosedTail;
-  let deferAt = bodyEnd !== -1 ? bodyEnd : endAt !== -1 ? endAt : expanded.length;
+  let deferAt = endAt !== -1 ? endAt : expanded.length;
   if (preludeAt !== -1 && deferAt >= preludeAt) {
     deferAt += headPrelude.length;
   }

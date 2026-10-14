@@ -82,7 +82,7 @@ describe("buildPreviewDocument", () => {
     expect(doc).toContain("$`");
   });
 
-  it("keeps type=module and moves defer scripts to the end of the body", () => {
+  it("keeps type=module and moves defer scripts to the end of the document", () => {
     const doc = buildPreviewDocument([
       f(
         "index.html",
@@ -94,7 +94,7 @@ describe("buildPreviewDocument", () => {
     ]);
     expect(doc).toContain("<script type=\"module\">import x from 'y'</script>");
     expect(doc).toBe(
-      "<head><script type=\"module\">import x from 'y'</script></head><body><p>x</p><script>run()</script></body>"
+      "<head><script type=\"module\">import x from 'y'</script></head><body><p>x</p></body><script>run()</script>"
     );
   });
 
@@ -106,18 +106,16 @@ describe("buildPreviewDocument", () => {
     expect(doc).toBe("<p>x</p><script>run()</script>");
   });
 
-  it("moves defer scripts before the real </body>, not one inside a string, comment or style", () => {
+  it("appends defer scripts at the end of the document, after </body> and what follows it", () => {
     const build = (content: string) =>
       buildPreviewDocument([f("index.html", "html", content), f("d.js", "javascript", "run()")]);
     const D = '<script src="d.js" defer></script>';
-    expect(build(`<head>${D}</head><body><script>var s = "</body>";</script><p>x</p></body>`)).toBe(
-      '<head></head><body><script>var s = "</body>";</script><p>x</p><script>run()</script></body>'
+    // The browser runs defer scripts after the whole document is parsed, so #late exists by then.
+    expect(build(`<body><p>a</p>${D}</body><p id="late"></p>`)).toBe(
+      '<body><p>a</p></body><p id="late"></p><script>run()</script>'
     );
-    expect(build(`<body>${D}<!-- old: </body> --><p>x</p></body>`)).toBe(
-      "<body><!-- old: </body> --><p>x</p><script>run()</script></body>"
-    );
-    expect(build(`<head><style>/* </body> */</style></head><body>${D}<p>x</p></body>`)).toBe(
-      "<head><style>/* </body> */</style></head><body><p>x</p><script>run()</script></body>"
+    expect(build(`<head></body>${D}</head><body><p id="late"></p></body>`)).toBe(
+      '<head></body></head><body><p id="late"></p></body><script>run()</script>'
     );
   });
 
@@ -143,18 +141,6 @@ describe("buildPreviewDocument", () => {
     expect(build(`<p>x</p>${D}<!-- memo -->`)).toBe("<p>x</p><!-- memo --><script>run()</script>");
     expect(build(`<p>x</p>${D}</ <template> >`)).toBe(
       "<p>x</p></ <template> ><script>run()</script>"
-    );
-  });
-
-  it("does not take a </body> in an attribute value or raw text element for the element", () => {
-    const build = (content: string) =>
-      buildPreviewDocument([f("index.html", "html", content), f("d.js", "javascript", "run()")]);
-    const D = '<script src="d.js" defer></script>';
-    expect(build(`<body><div title="</body>"></div>${D}</body>`)).toBe(
-      '<body><div title="</body>"></div><script>run()</script></body>'
-    );
-    expect(build(`<body><xmp></body></xmp>${D}</body>`)).toBe(
-      "<body><xmp></body></xmp><script>run()</script></body>"
     );
   });
 
@@ -188,7 +174,7 @@ describe("buildPreviewDocument", () => {
     expect(
       build('<body><p>a</p></body-x><div id="q"></div><script src="d.js" defer></script></body>')
     ).toBe(
-      '<script>/*p*/</script><body><p>a</p></body-x><div id="q"></div><script>run()</script></body>'
+      '<script>/*p*/</script><body><p>a</p></body-x><div id="q"></div></body><script>run()</script>'
     );
     expect(build('<style-x><link rel="stylesheet" href="s.css"></style-x>')).toBe(
       "<script>/*p*/</script><style-x><style>p{}</style></style-x>"
@@ -227,7 +213,7 @@ describe("buildPreviewDocument", () => {
     const legacy =
       '<script><!--\nvar s = "<script></script>"; document.write(\'<link rel="stylesheet" href="s.css"></body>\');\n//--></script>';
     expect(build(`<body>${legacy}<script defer src="d.js"></script></body>`)).toBe(
-      `<body>${legacy}<script>run()</script></body>`
+      `<body>${legacy}</body><script>run()</script>`
     );
     // Without a "<script" after "<!--", the first "</script>" still ends it.
     expect(build('<script><!-- a </script><link rel="stylesheet" href="s.css">')).toBe(
@@ -256,12 +242,12 @@ describe("buildPreviewDocument", () => {
   it("keeps the prelude ahead of defer scripts that share its position", () => {
     const doc = buildPreviewDocument(
       [
-        f("index.html", "html", '<!doctype html><script src="d.js" defer></script></body>'),
+        f("index.html", "html", '<!doctype html><script src="d.js" defer></script>'),
         f("d.js", "javascript", "run()"),
       ],
       { headPrelude: "<script>/*bridge*/</script>" }
     );
-    expect(doc).toBe("<!doctype html><script>/*bridge*/</script><script>run()</script></body>");
+    expect(doc).toBe("<!doctype html><script>/*bridge*/</script><script>run()</script>");
   });
 
   it("escapes <!-- in script content only", () => {
