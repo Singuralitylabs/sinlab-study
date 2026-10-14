@@ -336,7 +336,12 @@ export type WeeklyDigestEmailParams = PromotionalEmailParams & {
   nextContent: EmailContentLink | null;
   /** Number of viewable incomplete contents. */
   remainingContents: number;
+  /** Themes in progress, most recently studied first. */
+  activeThemes: { themeName: string; completedContents: number; totalContents: number }[];
 };
+
+/** Themes listed in the weekly digest's "in progress" line. */
+const WEEKLY_ACTIVE_THEMES_LIMIT = 3;
 
 export function buildWeeklyDigestEmail(
   params: WeeklyDigestEmailParams,
@@ -355,6 +360,10 @@ export function buildWeeklyDigestEmail(
       completed_last_week: String(params.completedLastWeek),
       submitted_last_week: String(params.submittedLastWeek),
       weekly_cheer: cheer,
+      active_themes: params.activeThemes
+        .slice(0, WEEKLY_ACTIVE_THEMES_LIMIT)
+        .map((t) => `${t.themeName}（${t.completedContents} / ${t.totalContents} 完了）`)
+        .join("、"),
       next_content_title: params.nextContent?.title ?? "",
       suggested_goal: params.nextContent
         ? String(suggestWeeklyGoal(params.completedLastWeek, params.remainingContents))

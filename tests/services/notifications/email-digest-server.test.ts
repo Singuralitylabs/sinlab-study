@@ -514,6 +514,43 @@ describe("送信対象の抽出", () => {
     expect(email.text).toContain("コンテンツ完了 1 本 / 演習の提出 1 件");
     expect(email.text).toContain("次に学ぶコンテンツ: 鍵付き");
     expect(email.text).toContain(`${APP_URL}/learn/1/10/100/1001`);
+    // Web制作 is fully done (2000), so only GAS実践 is "in progress".
+    expect(email.text).toContain("学習中のテーマ: GAS実践（1 / 2 完了）");
+    expect(email.text).not.toContain("学習中のテーマ: Web制作");
+  });
+
+  it("週次進捗: 学習中のテーマが無い（完了0件）ときは行を出さず、全体の先頭を案内する", async () => {
+    setup({
+      users: [userRow(1)],
+      submissions: [{ id: 1, user_id: 1, submitted_at: "2026-10-01T00:00:00.000Z" }],
+    });
+
+    await runDigest(MONDAY);
+
+    const email = sentEmailTo("u1@example.com");
+    expect(email.text).not.toContain("学習中のテーマ");
+    expect(email.text).toContain("次に学ぶコンテンツ: はじめての自動化");
+  });
+
+  it("週次進捗: 後ろの内容だけ完了しているときも、学習中のテーマとその未完了を案内する", async () => {
+    setup({
+      users: [userRow(1)],
+      user_progress: [
+        {
+          id: 1,
+          user_id: 1,
+          content_id: 1001,
+          is_completed: true,
+          completed_at: "2026-10-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    await runDigest(MONDAY);
+
+    const email = sentEmailTo("u1@example.com");
+    expect(email.text).toContain("学習中のテーマ: GAS実践（1 / 2 完了）");
+    expect(email.text).toContain("次に学ぶコンテンツ: はじめての自動化");
   });
 
   it("週次進捗: お試しユーザーはお試し公開コンテンツだけで次のコンテンツと残り数を判定する", async () => {

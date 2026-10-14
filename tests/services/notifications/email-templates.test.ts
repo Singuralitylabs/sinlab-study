@@ -338,15 +338,42 @@ describe("buildWeeklyDigestEmail", () => {
       submittedLastWeek: 1,
       nextContent: { title: "変数と型", path: "/learn/1/2/3/4" },
       remainingContents: 10,
+      activeThemes: [
+        { themeName: "GAS 学習", completedContents: 4, totalContents: 16 },
+        { themeName: "AI 駆動開発", completedContents: 1, totalContents: 8 },
+      ],
     });
 
     expect(email.subject).toContain("今週の学習");
     expect(email.text).toContain("コンテンツ完了 3 本 / 演習の提出 1 件");
+    expect(email.text).toContain(
+      "学習中のテーマ: GAS 学習（4 / 16 完了）、AI 駆動開発（1 / 8 完了）"
+    );
     expect(email.text).toContain("次に学ぶコンテンツ: 変数と型");
     expect(email.text).toContain("4 本完了");
     expect(email.text).toContain(`続きから学ぶ: ${APP_URL}/learn/1/2/3/4`);
     expect(email.text).toContain(UNSUBSCRIBE_URL);
     expect(email.headers?.["List-Unsubscribe"]).toBe(`<${UNSUBSCRIBE_URL}>`);
+  });
+
+  it("学習中のテーマは最大3件までで、無いときは行ごと出さない", () => {
+    const theme = (n: number) => ({ themeName: `T${n}`, completedContents: n, totalContents: 9 });
+    const build = (activeThemes: ReturnType<typeof theme>[]) =>
+      buildWeeklyDigestEmail({
+        displayName: "山田",
+        appUrl: APP_URL,
+        unsubscribeUrl: UNSUBSCRIBE_URL,
+        completedLastWeek: 1,
+        submittedLastWeek: 0,
+        nextContent: { title: "変数と型", path: "/learn/1/2/3/4" },
+        remainingContents: 10,
+        activeThemes,
+      });
+
+    const many = build([theme(1), theme(2), theme(3), theme(4)]).text;
+    expect(many).toContain("学習中のテーマ: T1（1 / 9 完了）、T2（2 / 9 完了）、T3（3 / 9 完了）");
+    expect(many).not.toContain("T4");
+    expect(build([]).text).not.toContain("学習中のテーマ");
   });
 
   it("すべて完了しているときは次のコンテンツの代わりにダッシュボードへ誘導する", () => {
@@ -358,6 +385,7 @@ describe("buildWeeklyDigestEmail", () => {
       submittedLastWeek: 0,
       nextContent: null,
       remainingContents: 0,
+      activeThemes: [],
     });
 
     expect(email.text).toContain("すべて完了しています");
@@ -588,6 +616,7 @@ describe("編集できる文面（#286）", () => {
             submittedLastWeek: 0,
             nextContent: null,
             remainingContents: 0,
+            activeThemes: [],
           },
           texts
         ),

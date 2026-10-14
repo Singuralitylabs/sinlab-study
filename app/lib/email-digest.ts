@@ -1,4 +1,5 @@
 import { USER_STATUS } from "@/app/constants/user";
+import { splitThemesByActivity, type ThemeCounts } from "@/app/lib/theme-progress";
 import type { UserRoleType, UserStatusType } from "@/app/types";
 
 /**
@@ -117,6 +118,7 @@ export function planMilestoneEmails(
 export type DigestContent = {
   id: number;
   title: string;
+  themeId: number;
   path: string;
   themeName: string;
   isOpenToTrial: boolean;
@@ -129,12 +131,70 @@ export function visibleContentsFor(
   return status === USER_STATUS.TRIAL ? contents.filter((c) => c.isOpenToTrial) : contents;
 }
 
+export type ActiveThemeLine = {
+  themeName: string;
+  completedContents: number;
+  totalContents: number;
+};
+
+/**
+ * The next content and the themes the learner is in the middle of. The next content is the first
+ * incomplete one (learning order) of the active theme with the most recent completion; when that
+ * theme has nothing left it moves to the next most recent active theme, and a learner with no
+ * active theme gets the first incomplete overall. Theme state comes from splitThemesByActivity()
+ * over the visible contents, so a trial learner is judged on the trial-open denominator.
+ * `completedAtByContentId` is epoch ms; a missing time ranks oldest.
+ */
 export function resolveNextContent(
   visibleContents: DigestContent[],
-  completedContentIds: ReadonlySet<number>
-): { next: DigestContent | null; remaining: number } {
+  completedContentIds: ReadonlySet<number>,
+  completedAtByContentId: ReadonlyMap<number, number> = new Map()
+): { next: DigestContent | null; remaining: number; activeThemes: ActiveThemeLine[] } {
   const incomplete = visibleContents.filter((c) => !completedContentIds.has(c.id));
-  return { next: incomplete[0] ?? null, remaining: incomplete.length };
+
+  const themes = new Map<
+    number,
+    ThemeCounts & {
+      themeName: string;
+      lastCompletedAt: number;
+      firstIncomplete: DigestContent | null;
+    }
+  >();
+  for (const content of visibleContents) {
+    const theme = themes.get(content.themeId) ?? {
+      themeName: content.themeName,
+      totalContents: 0,
+      completedContents: 0,
+      lastCompletedAt: Number.NEGATIVE_INFINITY,
+      firstIncomplete: null,
+    };
+    theme.totalContents += 1;
+    if (completedContentIds.has(content.id)) {
+      theme.completedContents += 1;
+      theme.lastCompletedAt = Math.max(
+        theme.lastCompletedAt,
+        completedAtByContentId.get(content.id) ?? 0
+      );
+    } else if (!theme.firstIncomplete) {
+      theme.firstIncomplete = content;
+    }
+    themes.set(content.themeId, theme);
+  }
+
+  // Array.sort is stable, so equal recency keeps theme (learning) order.
+  const active = splitThemesByActivity([...themes.values()]).active.sort(
+    (a, b) => b.lastCompletedAt - a.lastCompletedAt
+  );
+
+  return {
+    next: active.find((theme) => theme.firstIncomplete)?.firstIncomplete ?? incomplete[0] ?? null,
+    remaining: incomplete.length,
+    activeThemes: active.map(({ themeName, completedContents, totalContents }) => ({
+      themeName,
+      completedContents,
+      totalContents,
+    })),
+  };
 }
 
 /**

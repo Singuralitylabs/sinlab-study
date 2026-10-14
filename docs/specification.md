@@ -563,11 +563,13 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 ```
 
 **集計レベル**:
-- **全体**: 全公開コンテンツ中の完了数
+- **テーマ単位**: テーマ配下の全公開コンテンツ中の完了数（`fetchThemeProgressSummaries()`）。ダッシュボードの表示単位。**全テーマを合算した全体進捗率は表示しない**（テーマを追加するたびに数字が下がり、意味を失うため）
 - **Phase単位**: Phase配下の全コンテンツ中の完了数
 - **Week単位**: Week配下の全コンテンツ中の完了数
 
 **お試しユーザーの分母**: 集計は通常クライアントのネスト select で行うため、RLSによる絞り込みがそのまま分母に反映される（2.6参照）。
+
+**学習中テーマ（`app/lib/theme-progress.ts`）**: 受講テーマを選ぶ仕組みは持たず、完了実績から判定する。`isActiveTheme()` は完了が1件以上（trial は上記の分母のまま判定）。`splitThemesByActivity()` が **学習中**（完了1件以上で100%未満。完了率の高い順）/ **修了**（100%）/ **未着手**（完了0件。`display_order` 順）に分ける。判定はこの1か所に置き、ダッシュボード・週次進捗メール（10.7節）・将来の修了証一覧が共有する。ダッシュボードは「学習進捗」カードに学習中のテーマごとのバーを並べ（0件のときは最初の未着手テーマへのリンク）、「学習テーマ」一覧を「学習中」「修了」「未着手」の3区分で見出し分けする（修了テーマは「修了」バッジと、修了証の対象者には `/certificates` へのリンク）。「はじめかたチェックリスト」の完了判定と、お試しの「次のステップ」カード（全テーマの分母で100%）はテーマをまたいだ判定のため変えない。
 
 ---
 
@@ -1181,6 +1183,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 - **日付は JST の暦日で判定する**: 「登録から N 日目」は `users.created_at` を JST の暦日に丸め、登録日を0日目とする。週は月曜始まりで、「先週」は前週の月曜 0:00〜今週の月曜 0:00（JST）。日次実行が失敗した日の N 日目の分は翌日以降に拾わない（取りこぼしを許容する）
 - **1人1日1通**: `trial_nurture` と `inactivity_reminder` が同じ日に重なるお試しユーザーには `trial_nurture` だけを送る。N 日目の案内を送る日はお知らせ・週次進捗を送らず、お知らせと週次進捗が重なる日は下の「1日の上限」の並び順で先の方だけを送り、もう一方は翌日以降の実行に回す。今日（JST 0:00 以降）すでに案内系メールの `email_logs` を持つユーザーは、同じ日の再実行（手動実行・Cron の再起動）で対象から外す（朝の実行後に承認されて `status` が変わっても、別種別の2通目を送らない）
 - **お試しユーザーの範囲**: 次に学ぶコンテンツ・残り本数・最初の1本は、お試し公開（`is_open_to_trial = true`）のコンテンツだけで判定する（ダッシュボードの進捗の分母と同じ。4.2節）
+- **週次進捗の「次に学ぶ」（#308）**: 学習中のテーマ（4.2節の `splitThemesByActivity()`）のうち**最も最近完了があったテーマ**の、学習順で先頭の未完了コンテンツを選ぶ（`resolveNextContent()`。完了時刻は `user_progress.completed_at`）。そのテーマに未完了が残っていなければ次に最近のテーマへ移り、学習中のテーマが無い（完了0件）ときは全体の先頭。残り本数と対象抽出（`isWeeklyDigestTarget()`）は全テーマ通しのまま。先週の完了数・提出数も全テーマ合算（活動量の指標）。本文には「学習中のテーマ: ○○（N / M 完了）」を最近学んだ順に最大3件入れる（プレースホルダー `active_themes`。学習中が無ければ行ごと出ない。保存済みのテンプレートには自動では入らないので、必要なら `/admin/emails/templates` で追記する）
 - **集計**: 抽出はユーザーセッションの無いバッチのため service_role クライアントで行う（`user_id` 単位の集計であり、受講生へコンテンツを返す配信経路ではない）。コンテンツは `fetchThemeProgressSummaries()` と同じネスト select で全階層を `is_published = true AND is_deleted = false` に絞り、本文を含まないカラム（`id, title, display_order, is_open_to_trial, week_id` と各階層の名前・表示順）だけを読む。学習順はコンテンツ詳細の前後ナビと同じ `buildThemeContentOrder()` で並べる。新しい集計 SQL（RPC）は追加しない
 - **並行実行の排除**: 実行の最初に実行ロック（`cron_locks`。[データベース設計書](./database.md)3.12）を取り、取れなければ何もせず `skipped` を返す。Cron の重複起動・手動実行が重なっても処理するのは1つだけになる。ロックの取得自体が DB エラーなら 500
 - **二重送信の防止**: 1通ごとに `email_logs` の claim を通す（10.1節）。同じ日の再実行でも UNIQUE 違反で送らない。送信失敗は `error` を記録して再送しない（お知らせの一斉送信だけは、Resend が受け付けなかったことが確実な失敗を翌日以降に送り直す。11.4節）
@@ -1262,7 +1265,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 | `upgraded` | `monthly_price` / `next_billing_date`（取得できないときは空） |
 | `cancel_scheduled` | `access_until`（「2026年10月31日 まで」または「現在のお支払い期間の終了まで」） |
 | `subscription_ended` | なし |
-| `weekly_digest` | `completed_last_week` / `submitted_last_week` / `weekly_cheer` / `next_content_title` / `suggested_goal` / `remaining_contents` / `all_completed_message` |
+| `weekly_digest` | `completed_last_week` / `submitted_last_week` / `weekly_cheer` / `active_themes` / `next_content_title` / `suggested_goal` / `remaining_contents` / `all_completed_message` |
 | `inactivity_reminder` | `first_content_title` / `no_content_guide` |
 | `trial_nurture.day2` / `day5` | なし |
 | `trial_nurture.day7` | `elapsed_label` / `locked_themes` / `registration_guide` |
