@@ -128,14 +128,22 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
     if (more) parts.push("…");
     return label + open + parts.join(", ") + close;
   };
-  var format = function (value) {
+  var newBudget = function () { return { left: maxTextLength, seen: [] }; };
+  // ctx is the line's budget, shared by every argument of one console call.
+  var format = function (value, ctx) {
+    ctx = ctx || newBudget();
     try {
-      return inspect(value, 0, { left: maxTextLength, seen: [] });
+      var text = inspect(value, 0, ctx);
+      // Containers already charged their children; charging the whole text again only makes the
+      // next arguments stop sooner, which keeps one line bounded either way.
+      ctx.left -= text.length + 1;
+      return text;
     } catch (e) {
       try { return toTag(value); } catch (e2) { return "[unprintable]"; }
     }
   };
   var render = function (values) {
+    var ctx = newBudget();
     var rest = values.slice();
     var head = "";
     if (rest.length > 1 && typeof rest[0] === "string" && rest[0].indexOf("%") !== -1) {
@@ -151,11 +159,19 @@ const BRIDGE_SOURCE = `function (win, con, messageType, maxEntries, maxTextLengt
             return "NaN";
           }
         }
-        return format(arg);
+        return format(arg, ctx);
       });
+      ctx.left -= head.length;
     }
     var parts = head === "" ? [] : [head];
-    for (var i = 0; i < rest.length; i++) parts.push(format(rest[i]));
+    for (var i = 0; i < rest.length; i++) {
+      // console.log(...hugeArray) passes every element as an argument; stop at the budget.
+      if (ctx.left <= 0) {
+        parts.push("\u2026");
+        break;
+      }
+      parts.push(format(rest[i], ctx));
+    }
     return parts.join(" ");
   };
   var send = function (level, values) {

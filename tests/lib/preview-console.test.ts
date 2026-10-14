@@ -182,6 +182,24 @@ describe("previewConsoleBridge（iframe 内で動くスクリプト）", () => {
     }
   });
 
+  it("console.log(...大きな配列) でも1回の呼び出し全体で上限を共有し、残りの引数を整形しない", () => {
+    const { run, texts } = runBridge();
+    run(`
+      var objects = Array.from({ length: 30000 }, () => ({ a: "x".repeat(50), b: [1, 2, 3, { c: 4 }] }));
+      var buffers = Array.from({ length: 30000 }, () => new Uint8Array(1000));
+      var numbers = new Array(30000).fill(1);
+    `);
+    const startedAt = Date.now();
+    run(
+      "console.log(...objects); console.log(...buffers); console.log(...numbers); console.log('%o %o', ...objects);"
+    );
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    for (const text of texts()) {
+      expect(text.length).toBeLessThanOrEqual(PREVIEW_CONSOLE_MAX_TEXT_LENGTH);
+      expect(text.endsWith("…")).toBe(true);
+    }
+  });
+
   it("引数が1つだけなら書式指定子を置き換えない（DevTools と同じ）", () => {
     const { run, texts, listeners } = runBridge();
     run('console.log("進捗 100%% 完了 %s")');
