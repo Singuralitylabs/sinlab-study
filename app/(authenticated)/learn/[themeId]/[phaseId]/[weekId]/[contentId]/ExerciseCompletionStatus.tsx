@@ -13,6 +13,8 @@ interface ExerciseCompletionStatusProps {
   contentId: number;
   initialCompleted: boolean;
   hasPassingReview: boolean;
+  /** Empty rubric: a pass cannot be recorded, so the score promise would be false. */
+  passUnachievable: boolean;
   userStatus: UserStatusType | null;
   allowsUrlSubmission: boolean;
 }
@@ -25,6 +27,7 @@ export function ExerciseCompletionStatus({
   contentId,
   initialCompleted,
   hasPassingReview,
+  passUnachievable,
   userStatus,
   allowsUrlSubmission,
 }: ExerciseCompletionStatusProps) {
@@ -60,7 +63,7 @@ export function ExerciseCompletionStatus({
     return (
       <div className="flex w-full items-center justify-center gap-2 rounded-md border border-success/30 bg-success/10 px-4 py-3 text-success">
         <CheckCircle className="h-5 w-5" />
-        合格済み（完了）
+        {hasPassingReview ? "合格済み（完了）" : "完了"}
       </div>
     );
   }
@@ -72,6 +75,15 @@ export function ExerciseCompletionStatus({
           {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "完了を記録する"}
         </Button>
         {error && <p className="text-sm text-destructive">{error}</p>}
+      </div>
+    );
+  }
+
+  if (passUnachievable) {
+    return (
+      <div className="flex w-full items-center justify-center gap-2 rounded-md border border-border px-4 py-3 text-sm text-muted-foreground">
+        <Circle className="h-4 w-4 shrink-0" />
+        現在この演習は完了できません
       </div>
     );
   }

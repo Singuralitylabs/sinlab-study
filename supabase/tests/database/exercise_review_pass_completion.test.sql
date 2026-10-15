@@ -28,6 +28,14 @@ values (
   9105, 9101, 'video that kept a tombstone', 'video',
   '{"version": 2, "max_key_number": 1, "requirements": []}'
 );
+insert into public.learning_contents (
+  id, week_id, title, content_type, grading_rubric, allowed_submission_types
+)
+values (
+  9106, 9101, 'url only exercise', 'exercise',
+  '{"version": 1, "requirements": [{"key": "r1", "name": "A", "description": ""}]}',
+  'url'
+);
 
 insert into public.users (id, auth_id, email, display_name, status)
 values
@@ -102,6 +110,26 @@ select is(
   false,
   'a non-exercise keeps a tombstone but is not pass-gated'
 );
+select is(
+  public.learning_content_requires_review_pass(9106),
+  false,
+  'a url-only exercise is not pass-gated'
+);
+select is(
+  public.learning_content_review_pass_unachievable(9102),
+  true,
+  'an empty rubric cannot produce a pass'
+);
+select is(
+  public.learning_content_review_pass_unachievable(9101),
+  false,
+  'a live rubric can still produce a pass'
+);
+select is(
+  public.learning_content_review_pass_unachievable(9106),
+  false,
+  'a url-only exercise is not reported as unachievable'
+);
 select lives_ok(
   $$insert into public.user_progress (user_id, content_id, is_completed)
     values (9101, 9103, true)$$,
@@ -116,6 +144,11 @@ select lives_ok(
   $$insert into public.user_progress (user_id, content_id, is_completed)
     values (9101, 9105, true)$$,
   'a non-exercise with a tombstone rubric can still be completed'
+);
+select lives_ok(
+  $$insert into public.user_progress (user_id, content_id, is_completed)
+    values (9101, 9106, true)$$,
+  'a url-only exercise can be completed without a passing review'
 );
 select lives_ok(
   $$update public.user_progress set is_completed = false

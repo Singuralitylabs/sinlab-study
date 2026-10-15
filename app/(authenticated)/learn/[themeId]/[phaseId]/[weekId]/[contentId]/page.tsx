@@ -25,6 +25,7 @@ import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   fetchContentById,
   fetchContentRequiresReviewPass,
+  fetchContentReviewPassUnachievable,
   fetchExerciseReferenceAnswer,
   fetchThemeNavigationIndex,
   fetchUserHasPassingReview,
@@ -266,6 +267,7 @@ export default async function ContentPage({ params }: PageProps) {
     aiReviewUsage,
     { data: reviewNotes },
     requiresReviewPass,
+    passUnachievable,
     hasPassingReview,
   ] = await Promise.all([
     userId && exerciseContent
@@ -299,6 +301,7 @@ export default async function ContentPage({ params }: PageProps) {
       ? fetchReviewNotesForContent(userId, contentIdNum)
       : Promise.resolve({ data: [] }),
     exerciseContent ? fetchContentRequiresReviewPass(contentIdNum) : Promise.resolve(false),
+    exerciseContent ? fetchContentReviewPassUnachievable(contentIdNum) : Promise.resolve(false),
     exerciseContent && userId
       ? fetchUserHasPassingReview(userId, contentIdNum)
       : Promise.resolve(false),
@@ -524,6 +527,7 @@ export default async function ContentPage({ params }: PageProps) {
               contentId={contentIdNum}
               initialCompleted={isCompleted}
               hasPassingReview={hasPassingReview}
+              passUnachievable={passUnachievable}
               userStatus={userStatus}
               allowsUrlSubmission={
                 ((content.allowed_submission_types as "code" | "url" | "both" | null) ?? "code") !==

@@ -13,6 +13,7 @@ const renderStatus = (
   props: Partial<{
     initialCompleted: boolean;
     hasPassingReview: boolean;
+    passUnachievable: boolean;
     userStatus: "active" | "trial" | null;
     allowsUrlSubmission: boolean;
   }> = {}
@@ -22,6 +23,7 @@ const renderStatus = (
       contentId: 10,
       initialCompleted: false,
       hasPassingReview: false,
+      passUnachievable: false,
       userStatus: "active",
       allowsUrlSubmission: false,
       ...props,
@@ -63,5 +65,22 @@ describe("ExerciseCompletionStatus", () => {
     expect(html).toContain("合格済み（完了）");
     expect(html).not.toContain("完了を記録する");
     expect(html).not.toContain("<button");
+  });
+
+  it("合格レビューが無い完了は「完了」だけを出す", () => {
+    const html = renderStatus({ initialCompleted: true, hasPassingReview: false });
+
+    expect(html).toContain("完了");
+    expect(html).not.toContain("合格済み");
+    expect(html).not.toContain("<button");
+  });
+
+  it("空の採点基準では合格点の案内を出さず、完了できない旨だけを出す", () => {
+    const html = renderStatus({ passUnachievable: true, allowsUrlSubmission: true });
+
+    expect(html).toContain("現在この演習は完了できません");
+    expect(html).not.toContain("点以上");
+    expect(html).not.toContain("コードで提出してください");
+    expect(html).not.toContain("完了を記録する");
   });
 });

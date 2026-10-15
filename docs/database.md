@@ -96,7 +96,7 @@ erDiagram
 
 受講生のコンテンツ完了状態。`UNIQUE(user_id, content_id)`（1ユーザー・1コンテンツにつき1レコード）で、進捗API は upsert（`ON CONFLICT`）で完了/未完了をトグルする（8.4参照）。
 
-`grading_rubric` が NULL でない演習（`content_type = 'exercise'`。空の墓石を含む。NULL だけ対象外）は、合格レビュー（`ai_reviews.status = 'completed' AND passed = true`）があるときだけ完了にできる。強制は BEFORE INSERT/UPDATE トリガー `enforce_user_progress_review_pass()`（6.2）。すでに `is_completed = true` の行は遡って取り消さない。合格判定対象を未完了へ戻す更新は拒否する。空の墓石は合格にならないため完了できない。
+`grading_rubric` が NULL でなく提出方法が URL のみでない演習（`content_type = 'exercise'`。空の墓石を含む。NULL と `allowed_submission_types = 'url'` は対象外。`both` は対象）は、合格レビュー（`ai_reviews.status = 'completed' AND passed = true`）があるときだけ完了にできる。強制は BEFORE INSERT/UPDATE トリガー `enforce_user_progress_review_pass()`（6.2）。すでに `is_completed = true` の行は遡って取り消さない。合格判定対象を未完了へ戻す更新は拒否する。空の墓石は合格にならないため完了できない。
 
 ### 3.6 submissions（課題提出）
 
@@ -310,7 +310,7 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 
 **この `SECURITY DEFINER` の規約は、ポリシー内から呼ぶRLSヘルパーに限る。** アプリから直接叩くRPC（例: `get_students_progress_summary()`。6.2節参照）は逆に `SECURITY DEFINER` にしてはならない。`SECURITY DEFINER` にするとRLSを迂回するため、`authenticated` にGRANTしたままだと任意のmemberが他ユーザーの行まで取得できてしまう。呼び出し元の権限のままRLSに従わせる `SECURITY INVOKER`（デフォルト）を維持すること。
 
-例外はクイズの `get_quiz_questions()` / `grade_quiz_answers()`（6.17）、演習の `get_exercise_reference_answer()`（6.18）、および `content_requires_review_pass()`（6.2。採点基準の中身は返さず、可視な演習かどうかの真偽値だけ）。いずれも呼び出し元に権限の無い列を、条件を満たすときだけ読ませることが目的なので INVOKER では成り立たない。代わりに関数の中で呼び出し元の可視性を自前で確認し、返す列も限定する。この形以外で DEFINER の RPC を増やさない。
+例外はクイズの `get_quiz_questions()` / `grade_quiz_answers()`（6.17）、演習の `get_exercise_reference_answer()`（6.18）、および `content_requires_review_pass()` / `content_review_pass_unachievable()`（6.2。採点基準の中身は返さず、可視な演習かどうかの真偽値だけ）。いずれも呼び出し元に権限の無い列を、条件を満たすときだけ読ませることが目的なので INVOKER では成り立たない。代わりに関数の中で呼び出し元の可視性を自前で確認し、返す列も限定する。この形以外で DEFINER の RPC を増やさない。
 
 ---
 
@@ -368,7 +368,7 @@ maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進
 - **`active` ユーザーへの影響**: この条件はステータスを問わず適用されるため、`active` ユーザーも不可視コンテンツ（未公開・存在しないID）への書き込みができない（正常なUI経路では不可視コンテンツに到達しないため、正常系への影響はない）
 - **INSERT だけでなく UPDATE にも課す理由**: 進捗API（`/api/progress`）は upsert（`onConflict: user_id,content_id`）で、既存行がある場合は UPDATE 経路を通る。INSERT のみに条件を課すと2回目以降の更新がすり抜けるため、UPDATE にも同じ条件が必要。これにより、お試し公開フラグを後から `false` に戻したコンテンツの進捗も書き換えられなくなる
 
-**合格判定対象の完了（#367）**: RLS は本人が `is_completed` を立てられるため、BEFORE INSERT/UPDATE トリガー `enforce_user_progress_review_pass()` が追加の制約になる。対象は `learning_content_requires_review_pass()`（演習かつ `grading_rubric IS NOT NULL`。空の墓石も含む。NULL は false）。`is_completed` が true になる操作で、`NEW.user_id` の提出に合格レビューが無ければ `42501`。すでに true の行の他列更新は判定しない。対象を未完了に戻す、または完了行を別コンテンツへ移す更新も拒否する。関数は `SECURITY DEFINER`・`search_path = public`。`learning_content_requires_review_pass()` は API ロールから EXECUTE できない。`enforce_user_progress_review_pass()` は `anon` から EXECUTE できない（受講生の書き込みがトリガーを起動できるよう `authenticated` は残す）。画面と進捗 API は RPC `content_requires_review_pass(p_content_id)`（`authenticated` / `service_role`。不可視は false）で同じ真偽値を読む。既存の RLS ポリシーは維持する。
+**合格判定対象の完了（#367）**: RLS は本人が `is_completed` を立てられるため、BEFORE INSERT/UPDATE トリガー `enforce_user_progress_review_pass()` が追加の制約になる。対象は `learning_content_requires_review_pass()`（演習かつ `grading_rubric IS NOT NULL` かつ URL のみでない。空の墓石も含む。NULL と URL のみは false）。空配列で合格できないことは `content_review_pass_unachievable()` が真偽値だけ返す。`is_completed` が true になる操作で、`NEW.user_id` の提出に合格レビューが無ければ `42501`。すでに true の行の他列更新は判定しない。対象を未完了に戻す、または完了行を別コンテンツへ移す更新も拒否する。関数は `SECURITY DEFINER`・`search_path = public`。`learning_content_requires_review_pass()` は API ロールから EXECUTE できない。`enforce_user_progress_review_pass()` は `anon` から EXECUTE できない（受講生の書き込みがトリガーを起動できるよう `authenticated` は残す）。画面と進捗 API は RPC `content_requires_review_pass(p_content_id)`（`authenticated` / `service_role`。不可視は false）で同じ真偽値を読む。既存の RLS ポリシーは維持する。
 
 ### 6.3 submissions
 

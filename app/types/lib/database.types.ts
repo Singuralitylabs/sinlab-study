@@ -989,6 +989,10 @@ export type Database = {
         Args: { p_content_id: number };
         Returns: boolean;
       };
+      content_review_pass_unachievable: {
+        Args: { p_content_id: number };
+        Returns: boolean;
+      };
       content_visible_to_caller: {
         Args: { p_content_id: number; p_content_type: string };
         Returns: boolean;

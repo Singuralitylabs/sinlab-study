@@ -43,10 +43,33 @@ export async function userHasPassingReview(
   return { hasPass: (data?.length ?? 0) > 0, error: null };
 }
 
+/**
+ * True when a pass is required and the stored rubric cannot produce one (empty requirements).
+ * False when a pass is achievable, or when the exercise is not pass-gated.
+ */
+export async function contentReviewPassUnachievable(
+  supabase: ServerClient,
+  contentId: number
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc("content_review_pass_unachievable", {
+    p_content_id: contentId,
+  });
+  if (error) {
+    console.error("合格不能の確認エラー:", error.message);
+    return false;
+  }
+  return data === true;
+}
+
 export async function fetchContentRequiresReviewPass(contentId: number): Promise<boolean> {
   const supabase = await createServerSupabaseClient();
   const { requiresPass } = await contentRequiresReviewPass(supabase, contentId);
   return requiresPass;
+}
+
+export async function fetchContentReviewPassUnachievable(contentId: number): Promise<boolean> {
+  const supabase = await createServerSupabaseClient();
+  return contentReviewPassUnachievable(supabase, contentId);
 }
 
 export async function fetchUserHasPassingReview(
