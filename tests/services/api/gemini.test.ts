@@ -1140,6 +1140,30 @@ describe("generateReview", () => {
     expect(result.modelUsed).toBe(GEMINI_MODEL_NAME);
   });
 
+  it("主の再試行が 400 ならチェーンを止め、同じラウンドの代替を呼ばない", async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    generateContentMock
+      .mockRejectedValueOnce(new ApiError({ message: "busy", status: 503 }))
+      .mockRejectedValueOnce(new ApiError({ message: "busy", status: 503 }))
+      .mockRejectedValueOnce(new ApiError({ message: `bad ${MEMBER_KEY}`, status: 400 }));
+
+    const pending = generateReview(baseParams);
+    const settled = pending.catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+    const error = await settled;
+
+    expect((error as Error).message).toBe(
+      "AIレビューの生成中にエラーが発生しました（コード: 400）。"
+    );
+    expect(calledModels()).toEqual([
+      GEMINI_MODEL_NAME,
+      GEMINI_ALTERNATE_MODEL_NAME,
+      GEMINI_MODEL_NAME,
+    ]);
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(MEMBER_KEY);
+  });
+
   it("代替の 401 は主を再試行しない", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     generateContentMock

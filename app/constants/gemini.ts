@@ -64,9 +64,9 @@ export const GEMINI_TEMPERATURE = 0;
 export const GEMINI_VALIDATION_ATTEMPTS = 2;
 
 /**
- * Backoff rounds after every model in the chain has failed with a retryable status (excluding
- * the first pass). Total passes = GEMINI_MAX_RETRIES + 1. Switching models is not one of these
- * rounds (#368).
+ * Extra backoff rounds for models that already returned a retryable status (excluding the first
+ * pass). A later model's 404, per-attempt timeout, or 400 does not cancel those rounds. Total
+ * passes = GEMINI_MAX_RETRIES + 1. Switching models is not one of these rounds (#368).
  */
 export const GEMINI_MAX_RETRIES = 2;
 
