@@ -16,9 +16,7 @@ export type CodeFileInput = {
 };
 
 function resolveLanguage(language: string, fallback: CodeLanguage): CodeLanguage {
-  return CODE_LANGUAGES.includes(language as CodeLanguage)
-    ? (language as CodeLanguage)
-    : fallback;
+  return CODE_LANGUAGES.includes(language as CodeLanguage) ? (language as CodeLanguage) : fallback;
 }
 
 export function createEmptyCodeFile(
@@ -138,8 +136,5 @@ export function addCodeFile(
     assigned.push(filename);
     return { ...file, filename };
   });
-  return [
-    ...backfilled,
-    createEmptyCodeFile(defaultLanguage, assigned, { withDefaultFilename }),
-  ];
+  return [...backfilled, createEmptyCodeFile(defaultLanguage, assigned, { withDefaultFilename })];
 }

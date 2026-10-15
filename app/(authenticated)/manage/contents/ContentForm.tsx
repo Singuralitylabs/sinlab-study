@@ -4,8 +4,8 @@ import { Loader2, Save, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { CODE_LANGUAGE_OPTIONS, type CodeLanguage } from "@/app/components/code-editor-utils";
 import { CodeFilesEditor } from "@/app/components/CodeFilesEditor";
+import { CODE_LANGUAGE_OPTIONS, type CodeLanguage } from "@/app/components/code-editor-utils";
 import { CONTENT_TYPE_FORM_OPTIONS } from "@/app/constants/content";
 import { SLIDE_NUMBER_MAX } from "@/app/constants/slides";
 import {

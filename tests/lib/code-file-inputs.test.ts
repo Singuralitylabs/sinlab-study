@@ -43,9 +43,9 @@ describe("parseStarterFiles / toStarterFilesPayload", () => {
   });
 
   it("配列を CodeFile に正規化する", () => {
-    expect(
-      parseStarterFiles([{ filename: "a.js", language: "javascript", content: "1" }])
-    ).toEqual([{ filename: "a.js", language: "javascript", content: "1" }]);
+    expect(parseStarterFiles([{ filename: "a.js", language: "javascript", content: "1" }])).toEqual(
+      [{ filename: "a.js", language: "javascript", content: "1" }]
+    );
   });
 
   it("ファイル名の無い行は保存対象外（null でクリア）", () => {
