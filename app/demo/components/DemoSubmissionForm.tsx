@@ -5,8 +5,9 @@ import { useState } from "react";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { LockedCodeFilesEditor } from "@/app/components/LockedCodeFilesEditor";
-import { type CodeFileInput, isCodeEquivalentToStarter } from "@/app/lib/code-file-inputs";
+import type { CodeFileInput } from "@/app/lib/code-file-inputs";
 import {
+  blocksUneditedStarter,
   buildLockedSubmissionFiles,
   isLockedSubmissionReady,
   layoutOmitsEmptyFiles,
@@ -78,7 +79,11 @@ export function DemoSubmissionForm({
 
   // The learner form refuses an unedited starter so it cannot burn a review. Demo shows a sample
   // review instead of calling the API, so it uses the same gate.
-  const unchangedFromStarter = isCodeEquivalentToStarter(codeFiles, starterFiles);
+  const unchangedFromStarter = blocksUneditedStarter({
+    files: codeFiles,
+    submissionFileSlots,
+    starterFiles,
+  });
   const isCodeValid = isLockedSubmissionReady({
     files: codeFiles,
     submissionFileSlots,

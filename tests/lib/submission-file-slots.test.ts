@@ -201,6 +201,42 @@ describe("filesMatchSubmissionFileSlots", () => {
     ).toBe(false);
   });
 
+  it("空にしたあとに残ったファイルが初期コードのままなら提出できない", () => {
+    const starter = [
+      { filename: "index.html", language: "html", content: "<p>" },
+      { filename: "style.css", language: "css", content: "body{}" },
+    ];
+    const cleared = [
+      { filename: "index.html", language: "html", content: "<p>" },
+      { filename: "style.css", language: "css", content: "" },
+    ];
+    const edited = [
+      { filename: "index.html", language: "html", content: "<div>" },
+      { filename: "style.css", language: "css", content: "" },
+    ];
+    expect(
+      isLockedSubmissionReady({
+        files: cleared,
+        submissionFileSlots: null,
+        starterFiles: starter,
+      })
+    ).toBe(false);
+    expect(
+      isLockedSubmissionReady({
+        files: edited,
+        submissionFileSlots: null,
+        starterFiles: starter,
+      })
+    ).toBe(true);
+    expect(
+      isLockedSubmissionReady({
+        files: cleared,
+        submissionFileSlots: starter.map(({ filename, language }) => ({ filename, language })),
+        starterFiles: starter,
+      })
+    ).toBe(false);
+  });
+
   it("未指定の既定1ファイルだけ、空のファイル名・言語を既存クライアントとして受理する", () => {
     const resolved = resolveSubmissionFileSlots({
       submissionFileSlots: null,

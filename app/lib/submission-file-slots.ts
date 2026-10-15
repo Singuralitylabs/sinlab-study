@@ -135,14 +135,57 @@ export function layoutOmitsEmptyFiles(submissionFileSlots: unknown, fileCount: n
   return parseSubmissionFileSlots(submissionFileSlots) == null && fileCount > 1;
 }
 
+type SlotFile = { filename: string; language: string; content: string };
+
+/**
+ * Empty shells are dropped before save. A content-multiset compare then misses the blanked row,
+ * so clearing one starter file would look like an edit and could burn an AI review slot.
+ * Kept text must differ from that file's starter.
+ */
+export function isRemainingStarterUnchanged(
+  files: readonly SlotFile[],
+  starterFiles: readonly SlotFile[] | null | undefined
+): boolean {
+  if (!starterFiles || starterFiles.length === 0) {
+    return false;
+  }
+  const kept = files.filter((file) => file.content.trim().length > 0);
+  if (kept.length === 0) {
+    return false;
+  }
+  return kept.every((file) => {
+    const starter = starterFiles.find(
+      (row) => row.filename.trim() === file.filename.trim() && row.language === file.language
+    );
+    return starter !== undefined && starter.content.trim() === file.content.trim();
+  });
+}
+
+/** True when the body is still starter, including after optional empty shells are removed. */
+export function blocksUneditedStarter(input: {
+  files: readonly SlotFile[];
+  submissionFileSlots: unknown;
+  starterFiles?: readonly SlotFile[] | null;
+  fileCount?: number;
+}): boolean {
+  if (isCodeEquivalentToStarter(input.files, input.starterFiles)) {
+    return true;
+  }
+  const fileCount = input.fileCount ?? input.files.length;
+  if (!layoutOmitsEmptyFiles(input.submissionFileSlots, fileCount)) {
+    return false;
+  }
+  return isRemainingStarterUnchanged(input.files, input.starterFiles);
+}
+
 /** Learner and demo share this gate so one form cannot accept a submission the other rejects. */
 export function isLockedSubmissionReady(input: {
-  files: readonly { filename: string; language: string; content: string }[];
+  files: readonly SlotFile[];
   submissionFileSlots: unknown;
-  starterFiles?: readonly { filename: string; language: string; content: string }[] | null;
+  starterFiles?: readonly SlotFile[] | null;
 }): boolean {
   const { files } = input;
-  if (files.length === 0 || isCodeEquivalentToStarter(files, input.starterFiles)) {
+  if (files.length === 0 || blocksUneditedStarter(input)) {
     return false;
   }
   if (layoutOmitsEmptyFiles(input.submissionFileSlots, files.length)) {

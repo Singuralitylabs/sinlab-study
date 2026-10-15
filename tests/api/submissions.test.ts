@@ -338,6 +338,70 @@ describe("POST /api/submissions - 提出ファイル構成", () => {
     );
   });
 
+  it("空にしたあとに残ったファイルが初期コードのままなら 400", async () => {
+    vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue({
+      ...visibleContent,
+      code_language: "html",
+      submission_file_slots: null,
+      starter_files: [
+        { filename: "index.html", language: "html", content: "<p>" },
+        { filename: "style.css", language: "css", content: "body{}" },
+      ],
+    } as never);
+
+    const res = await POST(
+      request({
+        contentId: 1,
+        submissionType: "code",
+        codeFiles: [
+          { filename: "index.html", language: "html", content: "<p>" },
+          { filename: "style.css", language: "css", content: "" },
+        ],
+      }) as never
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: "初期コードから変更してください" });
+  });
+
+  it("空ファイルを外しても残りの中身を変えていれば保存する", async () => {
+    const single = vi.fn().mockResolvedValue({ data: { id: 1 }, error: null });
+    const insert = vi
+      .fn()
+      .mockReturnValue({ ...createQueryBuilder({ data: null, error: null }), single });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue({
+      from: vi.fn().mockReturnValue({ ...createQueryBuilder({ data: null, error: null }), insert }),
+    } as never);
+    vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue({
+      ...visibleContent,
+      code_language: "javascript",
+      submission_file_slots: null,
+      starter_files: [
+        { filename: "page.html", language: "html", content: "<p>" },
+        { filename: "style.css", language: "css", content: "body{}" },
+      ],
+    } as never);
+
+    const res = await POST(
+      request({
+        contentId: 1,
+        submissionType: "code",
+        codeFiles: [
+          { filename: "page.html", language: "html", content: "<div>edited</div>" },
+          { filename: "style.css", language: "css", content: "" },
+        ],
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code_content: null,
+        code_files: [{ filename: "page.html", language: "html", content: "<div>edited</div>" }],
+      })
+    );
+  });
+
   it("空のファイルは 400", async () => {
     const res = await POST(
       request({

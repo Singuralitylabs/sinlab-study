@@ -8,9 +8,10 @@ import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { HtmlPreviewNoSSR } from "@/app/components/HtmlPreviewNoSSR";
 import { LockedCodeFilesEditor } from "@/app/components/LockedCodeFilesEditor";
 import { buildReviewNotice } from "@/app/lib/ai-review-response";
-import { type CodeFileInput, isCodeEquivalentToStarter } from "@/app/lib/code-file-inputs";
+import type { CodeFileInput } from "@/app/lib/code-file-inputs";
 import { canPreviewFiles } from "@/app/lib/html-preview";
 import {
+  blocksUneditedStarter,
   buildLockedSubmissionFiles,
   isLockedSubmissionReady,
   layoutOmitsEmptyFiles,
@@ -85,7 +86,11 @@ export function SubmissionForm({
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
   const hasStarter = Boolean(starterSnapshot?.some((file) => file.content.trim().length > 0));
-  const unchangedFromStarter = isCodeEquivalentToStarter(codeFiles, starterSnapshot);
+  const unchangedFromStarter = blocksUneditedStarter({
+    files: codeFiles,
+    submissionFileSlots,
+    starterFiles: starterSnapshot,
+  });
   // Judged by the files' own languages so the UI never appears for non-web exercises.
   const showPreview = submissionType === "code" && canPreviewFiles(codeFiles);
 

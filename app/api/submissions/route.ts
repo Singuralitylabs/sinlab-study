@@ -3,6 +3,7 @@ import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { shouldTrackFirstSubmission } from "@/app/lib/analytics-funnel";
 import { isCodeEquivalentToStarter, parseStarterFiles } from "@/app/lib/code-file-inputs";
 import {
+  blocksUneditedStarter,
   EMPTY_SUBMISSION_CODE_ERROR,
   filesMatchSubmissionFileSlots,
   layoutOmitsEmptyFiles,
@@ -66,11 +67,25 @@ export async function POST(request: NextRequest) {
       if (rawFiles.length === 0) {
         return NextResponse.json({ error: EMPTY_SUBMISSION_CODE_ERROR }, { status: 400 });
       }
+      const omitEmptyFiles = layoutOmitsEmptyFiles(content.submission_file_slots, slots.length);
       const matched = filesMatchSubmissionFileSlots(rawFiles, slots, codeLanguage, {
-        omitEmptyFiles: layoutOmitsEmptyFiles(content.submission_file_slots, slots.length),
+        omitEmptyFiles,
       });
       if (!matched.ok) {
         return NextResponse.json({ error: matched.error }, { status: 400 });
+      }
+      const starterFiles = parseStarterFiles(content.starter_files);
+      // Compare before code_content drops the filename. A blanked starter file is already gone
+      // from matched.files, so the slot count has to stay the pre-omit length.
+      if (
+        blocksUneditedStarter({
+          files: matched.files,
+          submissionFileSlots: content.submission_file_slots,
+          starterFiles,
+          fileCount: slots.length,
+        })
+      ) {
+        return NextResponse.json({ error: "初期コードから変更してください" }, { status: 400 });
       }
       const stored = toStoredSubmissionCode(matched.files, codeLanguage);
       storedCodeContent = stored.codeContent;
