@@ -29,6 +29,10 @@ export type ContinueLearningTarget = ContinueLearningContent & {
  * - No completions → first content of the first theme
  * - Last-learned theme fully done → first incomplete in the next theme (display order)
  * - Everything complete → null (caller hides the card)
+ *
+ * Intentionally diverges from weekly-digest resolveNextContent() (email-digest.ts): that picks
+ * among started-and-unfinished themes by latest completion, else the first incomplete overall.
+ * Home follows #370 (last theme → next by display order) and must not be merged blindly.
  */
 export function resolveContinueLearning(
   orderedContents: readonly ContinueLearningContent[],

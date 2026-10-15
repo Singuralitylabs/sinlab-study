@@ -41,18 +41,14 @@ export default async function LearnPage() {
           {themes.map((theme) => {
             // Unpublished themes (admin/maintainer preview) have no progress rows; pass 0/0 so
             // ThemeCard's showProgress (totalContents > 0 || completedContents > 0) hides the bar.
-            const summary = progressByThemeId.get(theme.id) ?? {
-              theme,
-              totalContents: 0,
-              completedContents: 0,
-            };
             const hasProgressRow = theme.is_published !== false && progressByThemeId.has(theme.id);
+            const summary = hasProgressRow
+              ? progressByThemeId.get(theme.id)!
+              : { theme, totalContents: 0, completedContents: 0 };
             return (
               <ThemeCard
                 key={theme.id}
-                summary={
-                  hasProgressRow ? summary : { theme, totalContents: 0, completedContents: 0 }
-                }
+                summary={summary}
                 certificatesHref={
                   hasProgressRow && isThemeCompleted(summary) ? certificatesHref : undefined
                 }

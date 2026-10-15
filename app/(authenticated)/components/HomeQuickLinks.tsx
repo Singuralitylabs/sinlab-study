@@ -7,14 +7,14 @@ const LINKS = [
   { href: "/upgrade", label: "プラン・お支払い", icon: CreditCard, stripeOnly: true },
 ] as const;
 
-/** Compact row for mobile when SideNav is in a drawer. Keep visual weight small. */
+/** Compact row for mobile when SideNav is in a drawer. Hidden from md up to avoid duplicating SideNav. */
 export function HomeQuickLinks({ stripeEnabled }: { stripeEnabled: boolean }) {
   const links = LINKS.filter((link) => !("stripeOnly" in link && link.stripeOnly) || stripeEnabled);
 
   return (
     <nav
       aria-label="クイックリンク"
-      className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground"
+      className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground md:hidden"
     >
       {links.map((link) => {
         const Icon = link.icon;
