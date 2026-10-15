@@ -94,7 +94,7 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
               key={submission.id}
               className="transition-all hover:shadow-md hover:border-primary/20"
             >
-              <CardContent className="min-w-0 pt-6">
+              <CardContent className="pt-6">
                 <div className="flex items-start justify-between gap-4">
                   {/* min-width:auto grows with the pre, so overflow-x-auto never starts a scrollport. */}
                   <div className="min-w-0 flex-1">

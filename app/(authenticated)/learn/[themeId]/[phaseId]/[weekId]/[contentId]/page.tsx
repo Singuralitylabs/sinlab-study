@@ -344,7 +344,7 @@ export default async function ContentPage({ params }: PageProps) {
       />
 
       <Card className="mb-6">
-        <CardContent className="min-w-0 pt-6">
+        <CardContent className="pt-6">
           {content.content_type === "video" && content.video_url && (
             <div className="mb-6">
               <YouTubeEmbed url={content.video_url} />
@@ -497,7 +497,7 @@ export default async function ContentPage({ params }: PageProps) {
       {(content.content_type === "video" || content.content_type === "slide") &&
         content.description && (
           <Card className="mb-6">
-            <CardContent className="min-w-0 pt-6">
+            <CardContent className="pt-6">
               <h2 className="text-sm font-semibold text-muted-foreground mb-2">概要</h2>
               <MarkdownRenderer content={resolveMarkdownStorageUrls(content.description)} />
             </CardContent>

@@ -91,7 +91,7 @@ export default async function ManageSubmissionsPage({ searchParams }: PageProps)
               key={submission.id}
               className="transition-all hover:shadow-md hover:border-primary/20"
             >
-              <CardContent className="min-w-0 pt-6">
+              <CardContent className="pt-6">
                 <div className="mb-3 flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <p className="break-words font-medium">{submission.user?.display_name}</p>
