@@ -5,6 +5,7 @@
 import { existsSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { USER_STATUS } from "@/app/constants/user";
+import { parseStarterFiles } from "@/app/lib/code-file-inputs";
 import { parseGradingRubric } from "@/app/lib/grading-schema";
 import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import {
@@ -63,7 +64,9 @@ async function main() {
   const supabase = createClient<Database>(url, serviceRoleKey);
   let contentQuery = supabase
     .from("learning_contents")
-    .select("id, exercise_instructions, reference_answer, grading_rubric, code_language")
+    .select(
+      "id, exercise_instructions, reference_answer, grading_rubric, code_language, starter_files"
+    )
     .eq("content_type", "exercise")
     .eq("is_deleted", false)
     .not("grading_rubric", "is", null);
@@ -106,6 +109,7 @@ async function main() {
             submission: { type: "code", files: withFallbackLanguage(files, content.code_language) },
             referenceAnswer: content.reference_answer,
             gradingRubric: rubric,
+            starterFiles: parseStarterFiles(content.starter_files),
             apiKey,
           });
           samples.push({

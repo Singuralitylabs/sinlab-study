@@ -2,6 +2,7 @@ import {
   buildDefaultFilename,
   CODE_LANGUAGES,
   type CodeLanguage,
+  DEFAULT_FILENAME_BY_LANGUAGE,
 } from "@/app/components/code-editor-utils";
 import type { CodeFile, Json } from "@/app/types";
 
@@ -15,7 +16,11 @@ export type CodeFileInput = {
   filenameEdited: boolean;
 };
 
-function resolveLanguage(language: string, fallback: CodeLanguage): CodeLanguage {
+export type StarterFilesPayloadResult =
+  | { ok: true; files: CodeFile[] | null }
+  | { ok: false; error: string };
+
+export function resolveLanguage(language: string, fallback: CodeLanguage): CodeLanguage {
   return CODE_LANGUAGES.includes(language as CodeLanguage) ? (language as CodeLanguage) : fallback;
 }
 
@@ -37,10 +42,12 @@ export function createEmptyCodeFile(
 /**
  * Learner form initial files: starter when present, otherwise one empty file (existing behavior).
  * Starter filenames are treated as edited so language changes do not overwrite them.
+ * Pass `filenameEdited: true` for the admin starter editor (names are always intentional).
  */
 export function buildInitialCodeFiles(
   starterFiles: CodeFile[] | null | undefined,
-  codeLanguage: CodeLanguage
+  codeLanguage: CodeLanguage,
+  options?: { filenameEdited?: boolean }
 ): CodeFileInput[] {
   if (starterFiles && starterFiles.length > 0) {
     return starterFiles.map((file, index) => ({
@@ -48,7 +55,7 @@ export function buildInitialCodeFiles(
       filename: file.filename,
       language: resolveLanguage(file.language, codeLanguage),
       content: file.content,
-      filenameEdited: file.filename.trim().length > 0,
+      filenameEdited: options?.filenameEdited ?? file.filename.trim().length > 0,
     }));
   }
   return [
@@ -79,8 +86,25 @@ export function parseStarterFiles(raw: Json | null | undefined): CodeFile[] | nu
   return files.length > 0 ? files : null;
 }
 
-/** Admin save payload: null clears starter_files; empty / blank rows are dropped. */
-export function toStarterFilesPayload(files: readonly CodeFileInput[]): CodeFile[] | null {
+/**
+ * Admin save payload. null clears starter_files. Rows with content (or the sole row) but an empty
+ * filename are rejected — silently dropping them would erase starter content on save.
+ */
+export function toStarterFilesPayload(files: readonly CodeFileInput[]): StarterFilesPayloadResult {
+  if (files.length === 0) {
+    return { ok: true, files: null };
+  }
+
+  for (const file of files) {
+    const filename = file.filename.trim();
+    if (filename.length === 0 && (file.content.length > 0 || files.length === 1)) {
+      return {
+        ok: false,
+        error: "初期コードのファイル名を入力してください",
+      };
+    }
+  }
+
   const payload = files
     .map((file) => ({
       filename: file.filename.trim(),
@@ -89,7 +113,52 @@ export function toStarterFilesPayload(files: readonly CodeFileInput[]): CodeFile
     }))
     .filter((file) => file.filename.length > 0);
 
-  return payload.length > 0 ? payload : null;
+  return { ok: true, files: payload.length > 0 ? payload : null };
+}
+
+/**
+ * Payload for POST /api/submissions.
+ * Empty-content rows (optional starter shells left blank) are omitted so they do not block submit.
+ * A single file matching content code_language with no custom filename clears language/filename so
+ * the API keeps the legacy code_content path; otherwise metadata is kept and stored as code_files.
+ */
+export function buildSubmissionCodeFiles(
+  files: readonly CodeFileInput[],
+  contentCodeLanguage: CodeLanguage
+): CodeFile[] {
+  const withContent = files
+    .filter((file) => file.content.trim().length > 0)
+    .map((file) => ({
+      filename: file.filename.trim(),
+      language: file.language,
+      content: file.content,
+    }));
+
+  if (withContent.length !== 1) {
+    return withContent;
+  }
+
+  const file = withContent[0];
+  const defaultFilename = DEFAULT_FILENAME_BY_LANGUAGE[contentCodeLanguage];
+  const languageMatches = file.language === contentCodeLanguage;
+  const filenameIsDefault = file.filename.length === 0 || file.filename === defaultFilename;
+  if (languageMatches && filenameIsDefault) {
+    return [{ filename: "", language: "", content: file.content }];
+  }
+  return withContent;
+}
+
+/** True when at least one file has content; empty shells are optional and ignored. */
+export function isSubmissionCodeValid(files: readonly CodeFileInput[]): boolean {
+  const withContent = files.filter((file) => file.content.trim().length > 0);
+  if (withContent.length === 0) {
+    return false;
+  }
+  // Filename is required only when the multi-file UI is showing (more than one row).
+  if (files.length > 1) {
+    return withContent.every((file) => file.filename.trim().length > 0);
+  }
+  return true;
 }
 
 export function updateCodeFileAt(

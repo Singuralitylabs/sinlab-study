@@ -173,3 +173,57 @@ describe("POST /api/submissions - first_submission", () => {
     expect(body.submission).toEqual({ id: 1 });
   });
 });
+
+describe("POST /api/submissions - 単一ファイルの保存形式", () => {
+  it("language/filename があるときは code_files に保存する", async () => {
+    const single = vi.fn().mockResolvedValue({ data: { id: 1 }, error: null });
+    const insert = vi
+      .fn()
+      .mockReturnValue({ ...createQueryBuilder({ data: null, error: null }), single });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue({
+      from: vi.fn().mockReturnValue({ ...createQueryBuilder({ data: null, error: null }), insert }),
+    } as never);
+
+    const res = await POST(
+      request({
+        contentId: 1,
+        submissionType: "code",
+        codeFiles: [{ filename: "index.html", language: "html", content: "<div></div>" }],
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code_content: null,
+        code_files: [{ filename: "index.html", language: "html", content: "<div></div>" }],
+      })
+    );
+  });
+
+  it("language/filename が空の1ファイルは code_content に保存する（既存挙動）", async () => {
+    const single = vi.fn().mockResolvedValue({ data: { id: 1 }, error: null });
+    const insert = vi
+      .fn()
+      .mockReturnValue({ ...createQueryBuilder({ data: null, error: null }), single });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue({
+      from: vi.fn().mockReturnValue({ ...createQueryBuilder({ data: null, error: null }), insert }),
+    } as never);
+
+    const res = await POST(
+      request({
+        contentId: 1,
+        submissionType: "code",
+        codeFiles: [{ filename: "", language: "", content: "const x = 1;" }],
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code_content: "const x = 1;",
+        code_files: null,
+      })
+    );
+  });
+});

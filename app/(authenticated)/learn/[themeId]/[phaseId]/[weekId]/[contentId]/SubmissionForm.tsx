@@ -8,7 +8,12 @@ import { CodeFilesEditor } from "@/app/components/CodeFilesEditor";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { HtmlPreviewNoSSR } from "@/app/components/HtmlPreviewNoSSR";
 import { buildReviewNotice } from "@/app/lib/ai-review-response";
-import { buildInitialCodeFiles, type CodeFileInput } from "@/app/lib/code-file-inputs";
+import {
+  buildInitialCodeFiles,
+  buildSubmissionCodeFiles,
+  type CodeFileInput,
+  isSubmissionCodeValid,
+} from "@/app/lib/code-file-inputs";
 import { canPreviewFiles } from "@/app/lib/html-preview";
 import type { AIReviewListItem, CodeFile, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -64,9 +69,10 @@ export function SubmissionForm({
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
   const hasStarter = Boolean(starterFiles && starterFiles.length > 0);
-  const isMultiFile = codeFiles.length > 1;
   // Judged by the files' own languages so the UI never appears for non-web exercises.
   const showPreview = submissionType === "code" && canPreviewFiles(codeFiles);
+  const emptyShellCount = codeFiles.filter((file) => file.content.trim().length === 0).length;
+  const hasSubmittableCode = codeFiles.some((file) => file.content.trim().length > 0);
 
   const resetToStarter = () => {
     setCodeFiles(buildInitialCodeFiles(starterFiles, codeLanguage));
@@ -157,13 +163,7 @@ export function SubmissionForm({
           contentId,
           submissionType,
           codeFiles:
-            submissionType === "code"
-              ? codeFiles.map((file) => ({
-                  filename: file.filename,
-                  language: file.language,
-                  content: file.content,
-                }))
-              : null,
+            submissionType === "code" ? buildSubmissionCodeFiles(codeFiles, codeLanguage) : null,
           url: submissionType === "url" ? url : null,
         }),
       });
@@ -190,11 +190,7 @@ export function SubmissionForm({
     }
   };
 
-  const isCodeValid =
-    codeFiles.length > 0 &&
-    codeFiles.every(
-      (file) => file.content.trim().length > 0 && (!isMultiFile || file.filename.trim().length > 0)
-    );
+  const isCodeValid = isSubmissionCodeValid(codeFiles);
 
   const isValid =
     (submissionType === "code" && isCodeValid) ||
@@ -244,6 +240,11 @@ export function SubmissionForm({
                 <RotateCcw className="h-4 w-4" />
                 初期コードに戻す
               </Button>
+            )}
+            {hasSubmittableCode && emptyShellCount > 0 && (
+              <p className="text-xs text-muted-foreground">
+                内容が空のファイルは提出に含めません。
+              </p>
             )}
             {showPreview && (
               <HtmlPreviewNoSSR
