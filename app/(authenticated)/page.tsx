@@ -9,6 +9,11 @@ import { USER_STATUS } from "@/app/constants/user";
 import { isCertificateEligible } from "@/app/lib/certificate";
 import { resolveContinueLearning } from "@/app/lib/continue-learning";
 import { formatDate } from "@/app/lib/format-date";
+import {
+  countUnovercomeReviewItems,
+  deriveReviewListItems,
+  filterReviewItemsToVisibleContents,
+} from "@/app/lib/review-list";
 import { splitThemesByActivity } from "@/app/lib/theme-progress";
 import { shouldShowTrialNextStep } from "@/app/lib/trial-upgrade";
 import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
@@ -18,9 +23,9 @@ import {
   fetchGettingStartedProgress,
   fetchOnboardingStatus,
 } from "@/app/services/api/onboarding-server";
-import { countUnovercomeReviewItemsForUser } from "@/app/services/api/review-list-server";
+import { fetchReviewListSourceReviews } from "@/app/services/api/review-list-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
-import { checkInstructorPermissions } from "@/app/services/auth/permissions";
+import { checkInstructorPermissions, isLearnerRole } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { ContinueLearningCard } from "./components/ContinueLearningCard";
@@ -45,6 +50,8 @@ export default async function HomePage() {
   }
 
   const isMember = !checkInstructorPermissions(userRole);
+  // Align with SideNav / /review-list (null role must not show a count that links nowhere).
+  const showReviewList = isLearnerRole(userRole);
 
   // Started before the other fetches so a slow Stripe call overlaps them instead of adding to them.
   // Never rejects (falls back internally), so an unawaited promise is safe.
@@ -54,12 +61,14 @@ export default async function HomePage() {
       ? fetchUpgradePriceLabel()
       : Promise.resolve(null);
 
+  // Start review fetch with home learning so badge TTFB is not serial after the other awaits.
   const [
     { data: homeLearning },
     onboardingResult,
     gettingStartedResult,
     announcementsResult,
     recentCertificate,
+    reviewsResult,
   ] = await Promise.all([
     fetchHomeLearningData(userId),
     isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
@@ -68,12 +77,20 @@ export default async function HomePage() {
     isCertificateEligible(userStatus, userRole)
       ? fetchRecentCertificate(userId)
       : Promise.resolve(null),
+    showReviewList
+      ? fetchReviewListSourceReviews(userId)
+      : Promise.resolve({ data: [], error: null }),
   ]);
-  // Reuse home tree IDs so the badge does not fetch the published theme tree a third time.
   const visibleContentIds = new Set(homeLearning?.orderedContents.map((c) => c.id) ?? []);
-  const unovercomeReviewCount = isMember
-    ? await countUnovercomeReviewItemsForUser(userId, visibleContentIds)
-    : 0;
+  const unovercomeReviewCount =
+    showReviewList && !reviewsResult.error
+      ? countUnovercomeReviewItems(
+          filterReviewItemsToVisibleContents(
+            deriveReviewListItems(reviewsResult.data),
+            visibleContentIds
+          )
+        )
+      : 0;
   const unreadAnnouncements = (announcementsResult.data ?? [])
     .filter((announcement) => !announcement.isRead)
     .slice(0, DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT);
@@ -168,7 +185,7 @@ export default async function HomePage() {
 
       <HomeQuickLinks stripeEnabled={stripeEnabled} />
 
-      {isMember && <ReviewListHomeLine count={unovercomeReviewCount} />}
+      {showReviewList && <ReviewListHomeLine count={unovercomeReviewCount} />}
 
       {continueLearning && <ContinueLearningCard target={continueLearning} />}
 

@@ -3,6 +3,7 @@ import {
   countUnovercomeReviewItems,
   deriveReviewListItems,
   filterReviewItemsToVisibleContents,
+  findOrphanRequirementNotes,
   type ReviewListSourceReview,
   sortReviewItemsByLearningOrder,
 } from "@/app/lib/review-list";
@@ -339,5 +340,47 @@ describe("filterReviewItemsToVisibleContents", () => {
     expect(
       filterReviewItemsToVisibleContents(items, new Set([1, 3])).map((i) => i.contentId)
     ).toEqual([1, 3]);
+  });
+});
+
+describe("findOrphanRequirementNotes", () => {
+  it("現在の項目に無い requirement_key のメモを残し、自由メモと空行は除外する", () => {
+    const orphans = findOrphanRequirementNotes(
+      [
+        {
+          content_id: 10,
+          requirement_key: "old",
+          memo: "昔のメモ",
+          understood_at: null,
+        },
+        {
+          content_id: 10,
+          requirement_key: "keep",
+          memo: "現役",
+          understood_at: null,
+        },
+        {
+          content_id: 10,
+          requirement_key: "understood_only",
+          memo: null,
+          understood_at: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          content_id: 10,
+          requirement_key: "empty",
+          memo: "  ",
+          understood_at: null,
+        },
+        {
+          content_id: 10,
+          requirement_key: null,
+          memo: "自由メモ",
+          understood_at: null,
+        },
+      ],
+      [{ contentId: 10, requirementKey: "keep" }]
+    );
+
+    expect(orphans.map((note) => note.requirement_key)).toEqual(["old", "understood_only"]);
   });
 });

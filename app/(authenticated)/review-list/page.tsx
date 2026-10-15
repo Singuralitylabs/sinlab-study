@@ -12,7 +12,8 @@ export default async function ReviewListPage() {
     redirect("/");
   }
 
-  const { unovercome, overcome, freeMemos, error } = await buildReviewListForUser(userId);
+  const { unovercome, overcome, orphanMemos, freeMemos, error } =
+    await buildReviewListForUser(userId);
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -25,7 +26,12 @@ export default async function ReviewListPage() {
           復習リストの取得に失敗しました。時間をおいて再読み込みしてください。
         </p>
       ) : (
-        <ReviewListClient unovercome={unovercome} overcome={overcome} freeMemos={freeMemos} />
+        <ReviewListClient
+          unovercome={unovercome}
+          overcome={overcome}
+          orphanMemos={orphanMemos}
+          freeMemos={freeMemos}
+        />
       )}
     </div>
   );

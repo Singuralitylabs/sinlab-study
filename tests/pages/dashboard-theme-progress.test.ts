@@ -8,7 +8,7 @@ vi.mock("@/app/services/api/onboarding-server");
 vi.mock("@/app/services/api/announcements-server");
 vi.mock("@/app/services/api/certificates-server");
 vi.mock("@/app/services/api/review-list-server", () => ({
-  countUnovercomeReviewItemsForUser: vi.fn().mockResolvedValue(0),
+  fetchReviewListSourceReviews: vi.fn().mockResolvedValue({ data: [], error: null }),
 }));
 vi.mock("@/app/services/api/upgrade-price-server", () => ({
   fetchUpgradePriceLabel: vi.fn().mockResolvedValue("月額1,500円（税込）"),

@@ -9,6 +9,7 @@ import {
   type DerivedReviewItem,
   deriveReviewListItems,
   filterReviewItemsToVisibleContents,
+  findOrphanRequirementNotes,
   type ReviewListSourceReview,
   sortReviewItemsByLearningOrder,
 } from "@/app/lib/review-list";
@@ -48,6 +49,18 @@ export type FreeMemoView = {
   themeName: string;
   href: string;
   memo: string;
+};
+
+/** Requirement-keyed note whose item was replaced (estimated key rename) or dropped from the list. */
+export type OrphanMemoView = {
+  contentId: number;
+  contentTitle: string;
+  themeId: number;
+  themeName: string;
+  href: string;
+  requirementKey: string;
+  memo: string | null;
+  understoodAt: string | null;
 };
 
 /**
@@ -206,6 +219,7 @@ export async function fetchReviewListContentOrder(): Promise<{
 export async function buildReviewListForUser(userId: number): Promise<{
   unovercome: ReviewListItemView[];
   overcome: ReviewListItemView[];
+  orphanMemos: OrphanMemoView[];
   freeMemos: FreeMemoView[];
   unovercomeCount: number;
   error: PostgrestError | null;
@@ -220,6 +234,7 @@ export async function buildReviewListForUser(userId: number): Promise<{
     return {
       unovercome: [],
       overcome: [],
+      orphanMemos: [],
       freeMemos: [],
       unovercomeCount: 0,
       error: reviewsResult.error ?? notesResult.error ?? contentResult.error,
@@ -255,6 +270,28 @@ export async function buildReviewListForUser(userId: number): Promise<{
   const unovercome = views.filter((item) => !item.overcome);
   const overcome = views.filter((item) => item.overcome);
 
+  const orphanMemos: OrphanMemoView[] = [];
+  for (const note of findOrphanRequirementNotes(notesResult.data, views)) {
+    const meta = contentResult.metas.get(note.content_id);
+    if (!meta || note.requirement_key === null) continue;
+    orphanMemos.push({
+      contentId: note.content_id,
+      contentTitle: meta.title,
+      themeId: meta.themeId,
+      themeName: meta.themeName,
+      href: meta.href,
+      requirementKey: note.requirement_key,
+      memo: note.memo,
+      understoodAt: note.understood_at,
+    });
+  }
+  orphanMemos.sort((a, b) => {
+    const orderA = contentResult.order.get(a.contentId) ?? Number.MAX_SAFE_INTEGER;
+    const orderB = contentResult.order.get(b.contentId) ?? Number.MAX_SAFE_INTEGER;
+    if (orderA !== orderB) return orderA - orderB;
+    return a.requirementKey.localeCompare(b.requirementKey);
+  });
+
   const freeMemos: FreeMemoView[] = [];
   for (const note of notesResult.data) {
     if (note.requirement_key !== null) continue;
@@ -279,6 +316,7 @@ export async function buildReviewListForUser(userId: number): Promise<{
   return {
     unovercome,
     overcome,
+    orphanMemos,
     freeMemos,
     unovercomeCount: countUnovercomeReviewItems(views),
     error: null,

@@ -175,6 +175,27 @@ export function filterReviewItemsToVisibleContents<T extends { contentId: number
 }
 
 /**
+ * Notes keyed to a requirement that is no longer in the derived open/overcome set (e.g. estimated
+ * key renamed on resubmit). Rows stay in DB; the list surfaces them so memos are not stranded.
+ */
+export function findOrphanRequirementNotes<
+  T extends {
+    content_id: number;
+    requirement_key: string | null;
+    memo: string | null;
+    understood_at: string | null;
+  },
+>(notes: readonly T[], activeItems: readonly { contentId: number; requirementKey: string }[]): T[] {
+  const activeKeys = new Set(activeItems.map((item) => `${item.contentId}:${item.requirementKey}`));
+  return notes.filter((note) => {
+    if (note.requirement_key === null) return false;
+    if (activeKeys.has(`${note.content_id}:${note.requirement_key}`)) return false;
+    const hasMemo = note.memo != null && note.memo.trim() !== "";
+    return hasMemo || note.understood_at != null;
+  });
+}
+
+/**
  * Sort by learning order (theme → content), then requirement key. Unknown contentIds sort last.
  * `contentOrder` maps contentId → rank (0-based).
  */
