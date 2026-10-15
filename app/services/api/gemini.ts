@@ -537,10 +537,10 @@ interface ChainStop {
  * GEMINI_TOTAL_BUDGET_MS deadline so the route's maxDuration still holds. Tokens of every
  * response are summed, including a failed first one, because Gemini bills them.
  * Congestion (429/500/503), a per-attempt timeout, and 404 move to the next model without waiting.
- * A 404, a per-attempt timeout, or a 400 from a later model drops only that model. Models that
- * already failed with a retryable status are still backed off, so a removed alternate cannot
- * erase the primary's retries. A 400 from the first model stops the chain, as do 401, 403, and
- * 504: the request, the key, or the prompt is at fault.
+ * A 404, a per-attempt timeout, or a 400 from a later model drops only that model. When time
+ * remains, the rest of that round is still called; a model never called is not retried later.
+ * Models that already failed with a retryable status are still backed off. A 400 from the first
+ * model stops the chain, as do 401, 403, and 504: the request, the key, or the prompt is at fault.
  */
 async function generateValidatedJson<T>({
   apiKey,
@@ -644,10 +644,10 @@ async function generateValidatedJson<T>({
             return { error: lastRetryable ?? error };
           }
 
-          const switchToNext =
-            next !== undefined &&
-            isSwitchableGeminiError(error, overallSignal) &&
-            hasTimeForAttempt(deadlineAt);
+          // A model that this round never reaches is absent from later retries, which only
+          // call indexes that already returned 429/500/503.
+          const canTryNext = next !== undefined && hasTimeForAttempt(deadlineAt);
+          const switchToNext = canTryNext && isSwitchableGeminiError(error, overallSignal);
           const warnSwitch = () => {
             if (next === undefined) {
               return;
@@ -699,13 +699,17 @@ async function generateValidatedJson<T>({
           }
 
           if (error instanceof ApiError && error.status === 400) {
-            // The first model's 400 is the request itself. Only a later model's 400 is its own
-            // parameters, so a prior 429/500/503 must not turn the primary's 400 into a skip.
+            // The first model's 400 is the request itself. A later model's 400 is its own
+            // parameters: drop only that model and keep walking while time remains.
             if (index === chainStart) {
               return { error };
             }
             skipped.add(index);
             lastError = error;
+            if (canTryNext) {
+              warnSwitch();
+              continue;
+            }
             break;
           }
 
