@@ -27,6 +27,8 @@ export async function POST(request: NextRequest) {
       reference_answer,
       starter_files,
       submission_file_slots,
+      show_preview,
+      show_console,
       allowed_submission_types,
       code_language,
       pdf_url,
@@ -37,7 +39,7 @@ export async function POST(request: NextRequest) {
       quiz_questions,
     } = validation.data;
 
-    const { data, error, publishFailed } = await createContent({
+    const { data, error, publishFailed, previewNotAllowed } = await createContent({
       title,
       week_id,
       content_type,
@@ -49,6 +51,8 @@ export async function POST(request: NextRequest) {
       reference_answer,
       starter_files,
       submission_file_slots,
+      show_preview,
+      show_console,
       allowed_submission_types,
       code_language,
       pdf_url,
@@ -59,6 +63,9 @@ export async function POST(request: NextRequest) {
       quizQuestions: quiz_questions,
     });
 
+    if (previewNotAllowed) {
+      return NextResponse.json({ error: previewNotAllowed }, { status: 400 });
+    }
     if (error) {
       return NextResponse.json({ error: "コンテンツの作成に失敗しました" }, { status: 500 });
     }

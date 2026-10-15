@@ -1,19 +1,47 @@
 import { HtmlPreviewNoSSR } from "@/app/components/HtmlPreviewNoSSR";
-import { canPreviewFiles } from "@/app/lib/html-preview";
-import type { CodeFile } from "@/app/types";
+import { parseStarterFiles } from "@/app/lib/code-file-inputs";
+import { resolvePreviewDisplay } from "@/app/lib/html-preview";
+import { resolveSubmissionFileSlots } from "@/app/lib/submission-file-slots";
+import type { CodeFile, Json } from "@/app/types";
 import { cn } from "@/lib/utils";
+
+/** Exercise settings. Omitted when the list could not read them: the submitted files decide. */
+export interface SubmissionPreviewSource {
+  submissionFileSlots: Json | null;
+  starterFiles: Json | null;
+  codeLanguage: string | null;
+  showPreview: boolean | null;
+  showConsole: boolean | null;
+}
 
 interface SubmissionCodeBlockProps {
   files: CodeFile[];
   preClassName?: string;
+  previewSource?: SubmissionPreviewSource | null;
 }
 
-export function SubmissionCodeBlock({ files, preClassName }: SubmissionCodeBlockProps) {
+export function SubmissionCodeBlock({
+  files,
+  preClassName,
+  previewSource,
+}: SubmissionCodeBlockProps) {
   if (files.length === 0) {
     return null;
   }
 
-  if (files.length === 1 && !files[0].filename && !canPreviewFiles(files)) {
+  const display = previewSource
+    ? resolvePreviewDisplay({
+        files: resolveSubmissionFileSlots({
+          submissionFileSlots: previewSource.submissionFileSlots,
+          starterFiles: parseStarterFiles(previewSource.starterFiles),
+          codeLanguage: previewSource.codeLanguage,
+        }),
+        showPreview: previewSource.showPreview,
+        showConsole: previewSource.showConsole,
+      })
+    : resolvePreviewDisplay({ files, showPreview: null, showConsole: null });
+
+  if (files.length === 1 && !files[0].filename && !display.preview && !display.console) {
     return <pre className={cn("max-w-full overflow-x-auto", preClassName)}>{files[0].content}</pre>;
   }
 
@@ -36,7 +64,14 @@ export function SubmissionCodeBlock({ files, preClassName }: SubmissionCodeBlock
           <pre className={cn("max-w-full overflow-x-auto", preClassName)}>{file.content}</pre>
         </div>
       ))}
-      {canPreviewFiles(files) && <HtmlPreviewNoSSR files={files} collapsible />}
+      {(display.preview || display.console) && (
+        <HtmlPreviewNoSSR
+          files={files}
+          collapsible
+          showPreviewFrame={display.preview}
+          showConsolePanel={display.console}
+        />
+      )}
     </div>
   );
 }

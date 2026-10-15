@@ -30,6 +30,152 @@ export function canPreviewFiles(files: readonly CodeFile[]): boolean {
   return files.length > 0 && files.every((file) => resolveFileLanguage(file) !== null);
 }
 
+export interface PreviewLayoutFile {
+  filename?: string;
+  language?: string | null;
+}
+
+/** What the admin may turn on, and what NULL (automatic) shows. */
+export interface PreviewCapability {
+  autoPreview: boolean;
+  autoConsole: boolean;
+  previewAllowed: boolean;
+  consoleAllowed: boolean;
+}
+
+export interface PreviewDisplay {
+  preview: boolean;
+  console: boolean;
+  /** No visible frame: the hidden iframe runs only after 実行, so typing cannot hang the tab. */
+  manualRun: boolean;
+}
+
+export const PREVIEW_EXERCISE_ONLY_MESSAGE = "プレビューとコンソールの設定は演習だけに指定できます";
+export const PREVIEW_NOT_ALLOWED_MESSAGE = "このファイル構成ではプレビューを表示できません";
+export const CONSOLE_NOT_ALLOWED_MESSAGE = "このファイル構成ではコンソールを表示できません";
+
+type PreviewLayoutKind = "html" | "javascript" | "css" | "js-css" | "other";
+
+/**
+ * Admin layout (filename + language), not the language a learner picks in the form.
+ * A file whose language is outside html/css/javascript makes the whole layout "other".
+ */
+function classifyPreviewLayout(files: readonly PreviewLayoutFile[]): PreviewLayoutKind {
+  if (files.length === 0) {
+    return "other";
+  }
+  let hasHtml = false;
+  let hasCss = false;
+  let hasJs = false;
+  for (const file of files) {
+    const language = resolveFileLanguage({
+      filename: file.filename ?? "",
+      language: file.language ?? "",
+      content: "",
+    });
+    if (language === null) {
+      return "other";
+    }
+    if (language === "html") {
+      hasHtml = true;
+    } else if (language === "css") {
+      hasCss = true;
+    } else {
+      hasJs = true;
+    }
+  }
+  if (hasHtml) {
+    return "html";
+  }
+  if (hasJs && hasCss) {
+    return "js-css";
+  }
+  if (hasJs) {
+    return "javascript";
+  }
+  if (hasCss) {
+    return "css";
+  }
+  return "other";
+}
+
+/**
+ * Automatic rules (#380). CSS-only stays off until a scaffold HTML exists (#351).
+ * javascript+css has no page to preview, but the script can still run in the console.
+ */
+export function previewCapability(files: readonly PreviewLayoutFile[]): PreviewCapability {
+  switch (classifyPreviewLayout(files)) {
+    case "html":
+      return {
+        autoPreview: true,
+        autoConsole: true,
+        previewAllowed: true,
+        consoleAllowed: true,
+      };
+    case "javascript":
+    case "js-css":
+      return {
+        autoPreview: false,
+        autoConsole: true,
+        previewAllowed: false,
+        consoleAllowed: true,
+      };
+    default:
+      return {
+        autoPreview: false,
+        autoConsole: false,
+        previewAllowed: false,
+        consoleAllowed: false,
+      };
+  }
+}
+
+/** Why an explicit true cannot be stored. false and null are always legal. */
+export function previewSettingsError(input: {
+  contentType?: string;
+  files: readonly PreviewLayoutFile[];
+  showPreview?: boolean | null;
+  showConsole?: boolean | null;
+}): string | null {
+  const setsValue = input.showPreview != null || input.showConsole != null;
+  if (input.contentType !== undefined && input.contentType !== "exercise") {
+    return setsValue ? PREVIEW_EXERCISE_ONLY_MESSAGE : null;
+  }
+  const capability = previewCapability(input.files);
+  if (input.showPreview === true && !capability.previewAllowed) {
+    return PREVIEW_NOT_ALLOWED_MESSAGE;
+  }
+  if (input.showConsole === true && !capability.consoleAllowed) {
+    return CONSOLE_NOT_ALLOWED_MESSAGE;
+  }
+  return null;
+}
+
+/**
+ * NULL settings follow previewCapability(). A stored true that the layout no longer allows
+ * stays off (the API rejects that save; this keeps a stale row from rendering it).
+ */
+export function resolvePreviewDisplay(input: {
+  files: readonly PreviewLayoutFile[];
+  showPreview?: boolean | null;
+  showConsole?: boolean | null;
+}): PreviewDisplay {
+  const capability = previewCapability(input.files);
+  const preview =
+    input.showPreview == null
+      ? capability.autoPreview
+      : input.showPreview && capability.previewAllowed;
+  const showConsole =
+    input.showConsole == null
+      ? capability.autoConsole
+      : input.showConsole && capability.consoleAllowed;
+  return {
+    preview,
+    console: showConsole,
+    manualRun: showConsole && !preview,
+  };
+}
+
 // Content is inlined into <style>/<script>; a literal closing tag would end the element early and
 // let the remainder render as markup.
 function escapeClosingTag(content: string, tag: "style" | "script"): string {

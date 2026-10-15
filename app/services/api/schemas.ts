@@ -50,10 +50,18 @@ import {
   validateEmailTemplateText,
 } from "@/app/lib/email-template";
 import { GradingRubricInputSchema } from "@/app/lib/grading-schema";
+import {
+  CONSOLE_NOT_ALLOWED_MESSAGE,
+  PREVIEW_EXERCISE_ONLY_MESSAGE,
+  previewSettingsError,
+} from "@/app/lib/html-preview";
 import { parseNotificationEmail } from "@/app/lib/notification-email";
 import { QuizQuestionsSchema } from "@/app/lib/quiz";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
-import { SUBMISSION_FILE_SLOT_MAX_COUNT } from "@/app/lib/submission-file-slots";
+import {
+  resolveSubmissionFileSlots,
+  SUBMISSION_FILE_SLOT_MAX_COUNT,
+} from "@/app/lib/submission-file-slots";
 
 export const PositiveIntSchema = z
   .number({ message: "数値で指定してください" })
@@ -441,6 +449,9 @@ const ContentBaseSchema = z.object({
   reference_answer: OptionalNullableString,
   starter_files: StarterFilesSchema,
   submission_file_slots: SubmissionFileSlotsSchema,
+  // NULL is automatic (#380). true is rejected when the layout cannot show that surface.
+  show_preview: z.boolean().nullable().optional(),
+  show_console: z.boolean().nullable().optional(),
   // The DB CHECK constraint is NOT NULL (with a default), so unlike other optional fields null is
   // not allowed.
   allowed_submission_types: AllowedSubmissionTypeSchema.optional(),
@@ -510,6 +521,59 @@ function alignSubmissionFileSlots(
   }
 }
 
+function alignPreviewSettings(
+  value: {
+    content_type?: string;
+    submission_file_slots?: { filename: string; language: string }[] | null;
+    starter_files?: { filename: string; language: string; content: string }[] | null;
+    code_language?: string;
+    show_preview?: boolean | null;
+    show_console?: boolean | null;
+  },
+  ctx: z.RefinementCtx
+) {
+  if (value.show_preview === undefined && value.show_console === undefined) {
+    return;
+  }
+  if (value.content_type !== undefined && value.content_type !== "exercise") {
+    if (value.show_preview != null || value.show_console != null) {
+      ctx.addIssue({
+        code: "custom",
+        message: PREVIEW_EXERCISE_ONLY_MESSAGE,
+        path: ["show_preview"],
+      });
+    }
+    return;
+  }
+  // A partial PUT that only flips a flag has no layout here; updateContent reads the row.
+  const hasLayout =
+    value.submission_file_slots !== undefined ||
+    value.starter_files !== undefined ||
+    value.code_language !== undefined ||
+    value.content_type === "exercise";
+  if (!hasLayout || (value.show_preview !== true && value.show_console !== true)) {
+    return;
+  }
+  const message = previewSettingsError({
+    contentType: value.content_type ?? "exercise",
+    files: resolveSubmissionFileSlots({
+      submissionFileSlots: value.submission_file_slots ?? null,
+      starterFiles: value.starter_files ?? null,
+      codeLanguage: value.code_language,
+    }),
+    showPreview: value.show_preview,
+    showConsole: value.show_console,
+  });
+  if (!message) {
+    return;
+  }
+  ctx.addIssue({
+    code: "custom",
+    message,
+    path: [message === CONSOLE_NOT_ALLOWED_MESSAGE ? "show_console" : "show_preview"],
+  });
+}
+
 function requireQuizQuestions(
   value: { content_type?: string; quiz_questions?: unknown },
   ctx: z.RefinementCtx
@@ -533,8 +597,9 @@ function requireQuizQuestions(
 const ContentCreateObjectSchema = ContentBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
-export const ContentCreateSchema =
-  ContentCreateObjectSchema.superRefine(requireQuizQuestions).superRefine(alignSubmissionFileSlots);
+export const ContentCreateSchema = ContentCreateObjectSchema.superRefine(requireQuizQuestions)
+  .superRefine(alignSubmissionFileSlots)
+  .superRefine(alignPreviewSettings);
 function requireLoadedRubricVersion(
   value: {
     content_type?: string;
@@ -559,7 +624,8 @@ function requireLoadedRubricVersion(
 export const ContentUpdateSchema = ContentCreateObjectSchema.partial()
   .superRefine(requireQuizQuestions)
   .superRefine(requireLoadedRubricVersion)
-  .superRefine(alignSubmissionFileSlots);
+  .superRefine(alignSubmissionFileSlots)
+  .superRefine(alignPreviewSettings);
 
 const BULK_CREATE_MESSAGE = `contentsは1〜${MAX_BULK_CREATE_CONTENTS}件の配列で指定してください`;
 
@@ -571,7 +637,9 @@ const BULK_CREATE_MESSAGE = `contentsは1〜${MAX_BULK_CREATE_CONTENTS}件の配
 export const BulkContentCreateSchema = z.object({
   contents: z
     .array(
-      ContentBaseSchema.superRefine(requireQuizQuestions).superRefine(alignSubmissionFileSlots),
+      ContentBaseSchema.superRefine(requireQuizQuestions)
+        .superRefine(alignSubmissionFileSlots)
+        .superRefine(alignPreviewSettings),
       { message: BULK_CREATE_MESSAGE }
     )
     .min(1, { message: BULK_CREATE_MESSAGE })

@@ -425,6 +425,13 @@ export default async function ContentPage({ params }: PageProps) {
                               getSubmissionCodeFiles(latestSubmission),
                               content.code_language
                             )}
+                            previewSource={{
+                              submissionFileSlots: content.submission_file_slots,
+                              starterFiles: content.starter_files,
+                              codeLanguage: content.code_language,
+                              showPreview: content.show_preview,
+                              showConsole: content.show_console,
+                            }}
                             preClassName="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto"
                           />
                         ) : (
@@ -488,6 +495,8 @@ export default async function ContentPage({ params }: PageProps) {
                         codeLanguage={(content.code_language as CodeLanguage) ?? "javascript"}
                         starterFiles={parseStarterFiles(content.starter_files)}
                         submissionFileSlots={content.submission_file_slots}
+                        showPreview={content.show_preview}
+                        showConsole={content.show_console}
                         persistedReviewId={reviewForLatestSubmission?.id ?? null}
                         showReviewListNotes={showReviewListNotes}
                       />

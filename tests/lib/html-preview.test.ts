@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { buildPreviewDocument, canPreviewFiles, isPreviewLanguage } from "@/app/lib/html-preview";
+import {
+  buildPreviewDocument,
+  CONSOLE_NOT_ALLOWED_MESSAGE,
+  canPreviewFiles,
+  isPreviewLanguage,
+  PREVIEW_EXERCISE_ONLY_MESSAGE,
+  PREVIEW_NOT_ALLOWED_MESSAGE,
+  previewCapability,
+  previewSettingsError,
+  resolvePreviewDisplay,
+} from "@/app/lib/html-preview";
 
 const f = (filename: string, language: string, content: string) => ({
   filename,
@@ -27,6 +37,106 @@ describe("isPreviewLanguage / canPreviewFiles", () => {
   it("falls back to the extension when no language is stored", () => {
     expect(canPreviewFiles([f("index.html", "", "x")])).toBe(true);
     expect(canPreviewFiles([f("", "", "x")])).toBe(false);
+  });
+});
+
+describe("resolvePreviewDisplay", () => {
+  const html = { filename: "index.html", language: "html" };
+  const css = { filename: "style.css", language: "css" };
+  const js = { filename: "main.js", language: "javascript" };
+  const sql = { filename: "q.sql", language: "sql" };
+
+  it("NULL は構成ごとの自動規則になる", () => {
+    expect(resolvePreviewDisplay({ files: [html, css, js] })).toEqual({
+      preview: true,
+      console: true,
+      manualRun: false,
+    });
+    expect(resolvePreviewDisplay({ files: [js] })).toEqual({
+      preview: false,
+      console: true,
+      manualRun: true,
+    });
+    expect(resolvePreviewDisplay({ files: [js, css] })).toEqual({
+      preview: false,
+      console: true,
+      manualRun: true,
+    });
+    expect(resolvePreviewDisplay({ files: [css] })).toEqual({
+      preview: false,
+      console: false,
+      manualRun: false,
+    });
+    for (const files of [[sql], [html, sql], []]) {
+      expect(resolvePreviewDisplay({ files })).toEqual({
+        preview: false,
+        console: false,
+        manualRun: false,
+      });
+    }
+  });
+
+  it("管理者がオンとオフを上書きでき、許されないオンは表示しない", () => {
+    expect(
+      resolvePreviewDisplay({ files: [html], showPreview: true, showConsole: false })
+    ).toMatchObject({ preview: true, console: false, manualRun: false });
+    expect(
+      resolvePreviewDisplay({ files: [html], showPreview: false, showConsole: true })
+    ).toMatchObject({ preview: false, console: true, manualRun: true });
+    expect(resolvePreviewDisplay({ files: [js], showPreview: true })).toMatchObject({
+      preview: false,
+      console: true,
+    });
+  });
+
+  it("矛盾するオンだけを拒否する", () => {
+    expect(previewCapability([html, js])).toMatchObject({
+      previewAllowed: true,
+      consoleAllowed: true,
+    });
+    expect(previewCapability([js])).toMatchObject({
+      previewAllowed: false,
+      consoleAllowed: true,
+    });
+    expect(previewCapability([css])).toMatchObject({
+      previewAllowed: false,
+      consoleAllowed: false,
+    });
+    expect(
+      previewSettingsError({
+        contentType: "exercise",
+        files: [js],
+        showPreview: true,
+        showConsole: null,
+      })
+    ).toBe(PREVIEW_NOT_ALLOWED_MESSAGE);
+    expect(
+      previewSettingsError({
+        contentType: "exercise",
+        files: [sql],
+        showPreview: null,
+        showConsole: true,
+      })
+    ).toBe(CONSOLE_NOT_ALLOWED_MESSAGE);
+    expect(
+      previewSettingsError({
+        contentType: "exercise",
+        files: [js],
+        showPreview: false,
+        showConsole: false,
+      })
+    ).toBeNull();
+    expect(previewSettingsError({ contentType: "video", files: [], showPreview: false })).toBe(
+      PREVIEW_EXERCISE_ONLY_MESSAGE
+    );
+    expect(
+      previewSettingsError({
+        contentType: "video",
+        files: [],
+        showPreview: null,
+        showConsole: null,
+      })
+    ).toBeNull();
   });
 });
 

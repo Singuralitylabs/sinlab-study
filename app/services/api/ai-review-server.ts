@@ -27,8 +27,10 @@ const AI_REVIEW_ADMIN_COLUMNS = `${AI_REVIEW_STUDENT_COLUMNS}, prompt_tokens, co
 const AI_REVIEW_LIST_SELECT = `ai_review:ai_reviews(${AI_REVIEW_STUDENT_COLUMNS})`;
 const AI_REVIEW_ADMIN_LIST_SELECT = `ai_review:ai_reviews(${AI_REVIEW_ADMIN_COLUMNS})`;
 
-// code_language fills in the language of single-file submissions, which store none (history preview).
-const LIST_CONTENT_SELECT = "id, title, code_language";
+// Layout + preview flags decide the history preview. code_language fills a single-file submission
+// that stored no language. starter_files is only the fallback layout when slots are NULL (#377).
+const LIST_CONTENT_SELECT =
+  "id, title, code_language, submission_file_slots, starter_files, show_preview, show_console";
 
 /** Select only the columns the list needs (content and ai_reviews); no heavy text. */
 export async function fetchSubmissionsWithReviewsByUserId(
