@@ -355,8 +355,17 @@ export default async function ContentPage({ params }: PageProps) {
             <MarkdownRenderer content={resolveMarkdownStorageUrls(content.text_content)} />
           )}
 
-          {content.content_type === "slide" && content.pdf_url && (
-            <SlideContent signedUrl={slideSignedUrl} />
+          {content.content_type === "slide" && (
+            <>
+              {content.pdf_url && (
+                <div className={content.text_content ? "mb-6" : undefined}>
+                  <SlideContent signedUrl={slideSignedUrl} />
+                </div>
+              )}
+              {content.text_content && (
+                <MarkdownRenderer content={resolveMarkdownStorageUrls(content.text_content)} />
+              )}
+            </>
           )}
 
           {content.content_type === "quiz" && (

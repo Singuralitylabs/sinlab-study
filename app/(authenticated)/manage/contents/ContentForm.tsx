@@ -7,10 +7,11 @@ import { useRef, useState } from "react";
 import { CONTENT_TYPE_FORM_OPTIONS } from "@/app/constants/content";
 import { SLIDE_NUMBER_MAX } from "@/app/constants/slides";
 import { parseStarterFiles } from "@/app/lib/code-file-inputs";
-import type {
-  PhaseFilterOption,
-  ThemeFilterOption,
-  WeekFilterOption,
+import {
+  contentTypeStoresTextContent,
+  type PhaseFilterOption,
+  type ThemeFilterOption,
+  type WeekFilterOption,
 } from "@/app/lib/content-filtering";
 import {
   getGradingRubricVersion,
@@ -220,6 +221,11 @@ export function ContentForm({
   const initialInsertAfterId = useRef(insertAfterId);
 
   const [contentType, setContentType] = useState<ContentType>(initialData?.content_type ?? "video");
+  // True once this form has shown the slide article field, so leaving slide can warn before the
+  // article is cleared. Text-only rows stay false and keep the previous (no warning) behavior.
+  const [slideArticleAttached, setSlideArticleAttached] = useState(
+    initialData?.content_type === "slide"
+  );
   const [videoUrl, setVideoUrl] = useState(initialData?.video_url ?? "");
   const [description, setDescription] = useState(initialData?.description ?? "");
   const [textContent, setTextContent] = useState(initialData?.text_content ?? "");
@@ -448,7 +454,7 @@ export function ContentForm({
         contentType === "video" || contentType === "slide" || contentType === "quiz"
           ? description.trim() || null
           : null,
-      text_content: contentType === "text" ? textContent.trim() || null : null,
+      text_content: contentTypeStoresTextContent(contentType) ? textContent.trim() || null : null,
       exercise_instructions:
         contentType === "exercise" ? exerciseInstructions.trim() || null : null,
       hint: contentType === "exercise" ? hint.trim() || null : null,
@@ -605,7 +611,12 @@ export function ContentForm({
                 <button
                   key={opt.value}
                   type="button"
-                  onClick={() => setContentType(opt.value)}
+                  onClick={() => {
+                    if (opt.value === "slide" || contentType === "slide") {
+                      setSlideArticleAttached(true);
+                    }
+                    setContentType(opt.value);
+                  }}
                   disabled={opt.value === "quiz" && quizQuestionsUnavailable}
                   className={`min-w-24 flex-1 rounded-lg border-2 px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     contentType === opt.value
@@ -628,6 +639,13 @@ export function ContentForm({
                 他の種別に変更して保存すると、紐づくスライドPDFはストレージから完全に削除されます。スライドに戻す場合はPDFの再アップロードが必要です。
               </p>
             )}
+            {slideArticleAttached &&
+              textContent.trim() &&
+              !contentTypeStoresTextContent(contentType) && (
+                <p className="text-xs text-destructive">
+                  テキストとスライド以外の種別に変更して保存すると、解説記事は削除されます。
+                </p>
+              )}
           </div>
 
           {(contentType === "video" || contentType === "slide" || contentType === "quiz") && (
@@ -654,19 +672,6 @@ export function ContentForm({
                 value={videoUrl}
                 onChange={(e) => setVideoUrl(e.target.value)}
                 placeholder="https://www.youtube.com/watch?v=..."
-              />
-            </div>
-          )}
-
-          {contentType === "text" && (
-            <div className="space-y-2">
-              <Label htmlFor="textContent">テキスト（Markdown）</Label>
-              <Textarea
-                id="textContent"
-                value={textContent}
-                onChange={(e) => setTextContent(e.target.value)}
-                placeholder="Markdown形式で記述してください..."
-                className="min-h-[300px] font-mono"
               />
             </div>
           )}
@@ -745,6 +750,32 @@ export function ContentForm({
                 )}
               </div>
               {pdfUrl && <p className="text-xs text-muted-foreground break-all">{pdfUrl}</p>}
+            </div>
+          )}
+
+          {(contentType === "text" || contentType === "slide") && (
+            <div className="space-y-2">
+              <Label htmlFor="textContent">
+                {contentType === "slide" ? "解説記事（Markdown・任意）" : "テキスト（Markdown）"}
+              </Label>
+              <Textarea
+                id="textContent"
+                value={textContent}
+                onChange={(e) => setTextContent(e.target.value)}
+                placeholder={
+                  contentType === "slide"
+                    ? "スライドの補足をMarkdownで記述してください。未入力の場合は表示しません。"
+                    : "Markdown形式で記述してください..."
+                }
+                className="min-h-[300px] font-mono"
+              />
+              {contentType === "slide" && (
+                <p className="text-xs text-muted-foreground">
+                  スライドの下に表示します。画像は
+                  {` {{SUPABASE_STORAGE_URL}}/<公開バケット>/<キー> `}
+                  で参照できます。
+                </p>
+              )}
             </div>
           )}
 

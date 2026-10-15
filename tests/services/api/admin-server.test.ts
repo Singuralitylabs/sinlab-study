@@ -952,6 +952,45 @@ describe("createContent", () => {
     );
   });
 
+  it("slide と text の text_content は保存し、それ以外の種別では null にする", async () => {
+    const createdContent = { id: 100, week_id: 1, title: "スライド", display_order: 1 };
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          { data: [], error: null },
+          { data: createdContent, error: null },
+          { data: [], error: null },
+          { data: createdContent, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await createContent({
+      week_id: 1,
+      title: "スライド",
+      content_type: "slide",
+      text_content: "解説記事",
+      insertAfterId: null,
+    });
+    await createContent({
+      week_id: 1,
+      title: "動画",
+      content_type: "video",
+      text_content: "残してはいけない",
+      insertAfterId: null,
+    });
+
+    const slideInsert = mockClient.from.mock.results[1].value;
+    const videoInsert = mockClient.from.mock.results[3].value;
+    expect(slideInsert.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ content_type: "slide", text_content: "解説記事" })
+    );
+    expect(videoInsert.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ content_type: "video", text_content: null })
+    );
+  });
+
   it("insertAfterIdが削除済みコンテンツを指す場合、InvalidInsertAfterIdErrorを投げる", async () => {
     // The mock builder ignores .eq() arguments and returns the configured data, so verify
     // explicitly that is_deleted=false is applied; otherwise removing the filter would still pass.
@@ -1289,5 +1328,34 @@ describe("updateContent（編集時の再採番）", () => {
       p_table: "learning_contents",
       p_updates: [{ id: 3, display_order: 1 }],
     });
+  });
+
+  it("slide の更新は text_content を書き、それ以外の種別へ変えると null にする", async () => {
+    const current = {
+      data: { week_id: 3, pdf_url: null, content_type: "slide", grading_rubric: null },
+      error: null,
+    };
+    const written = { data: [{ id: 10, updated_at: "2026-01-01T00:00:00Z" }], error: null };
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [current, written, written, current, written, written],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const kept = await updateContent(10, { content_type: "slide", text_content: "解説記事" });
+    const cleared = await updateContent(10, {
+      content_type: "video",
+      text_content: "残してはいけない",
+    });
+
+    expect(kept).toEqual({ error: null, storageRemoved: true, gradingRubricVersion: null });
+    expect(cleared).toEqual({ error: null, storageRemoved: true, gradingRubricVersion: null });
+    const slideBody = mockClient.from.mock.results[2].value;
+    const videoBody = mockClient.from.mock.results[5].value;
+    expect(slideBody.update).toHaveBeenCalledWith(
+      expect.objectContaining({ text_content: "解説記事" })
+    );
+    expect(videoBody.update).toHaveBeenCalledWith(expect.objectContaining({ text_content: null }));
   });
 });

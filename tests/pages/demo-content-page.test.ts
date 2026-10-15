@@ -63,6 +63,7 @@ const render = async () => renderToStaticMarkup(await DemoContentPage({ params }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("デモ画面のスライド配信（署名付きURL）", () => {
@@ -87,5 +88,126 @@ describe("デモ画面のスライド配信（署名付きURL）", () => {
     expect(html).not.toContain(SIGNED_URL);
     expect(html).not.toContain(PDF_KEY);
     expect(html).toContain("このスライドはお試し公開の対象外です");
+  });
+});
+
+describe("デモ画面の解説記事とテキスト本文（#375）", () => {
+  const article = "デモの解説記事";
+  const storageMarkdown = "![図]({{SUPABASE_STORAGE_URL}}/thumbnails/demo.png)";
+
+  const renderContent = async (
+    content: Record<string, unknown>,
+    weekContents: Record<string, unknown>[] = [content]
+  ) => {
+    vi.mocked(fetchDemoContentById).mockResolvedValue({ data: content, error: null } as never);
+    vi.mocked(fetchDemoContext).mockResolvedValue({
+      data: { theme, phase, week },
+      error: null,
+    } as never);
+    vi.mocked(fetchDemoContentsByWeekId).mockResolvedValue({
+      data: weekContents,
+      error: null,
+    } as never);
+    vi.mocked(createDemoSlideSignedUrl).mockResolvedValue(SIGNED_URL);
+    return renderToStaticMarkup(await DemoContentPage({ params }));
+  };
+
+  it("お試し公開スライドの記事をビューアの下に表示し、プレースホルダを置換する", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co");
+    const content = {
+      id: 10,
+      week_id: 3,
+      title: "基礎文法（スライド）",
+      content_type: "slide",
+      pdf_url: PDF_KEY,
+      text_content: `${article}\n\n${storageMarkdown}`,
+      description: null,
+      is_published: true,
+      is_deleted: false,
+      is_open_to_trial: true,
+      week,
+    };
+
+    const html = await renderContent(content);
+
+    const slideIndex = html.indexOf('data-testid="slide-content"');
+    const articleIndex = html.indexOf(article);
+    expect(slideIndex).toBeGreaterThanOrEqual(0);
+    expect(articleIndex).toBeGreaterThan(slideIndex);
+    expect(html).toContain(
+      "https://project.supabase.co/storage/v1/object/public/thumbnails/demo.png"
+    );
+    expect(html).not.toContain("{{SUPABASE_STORAGE_URL}}");
+    expect(createDemoSlideSignedUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ is_published: true, is_open_to_trial: true })
+    );
+  });
+
+  it("記事が空のお試し公開スライドはスライドだけを表示する", async () => {
+    const content = {
+      id: 10,
+      week_id: 3,
+      title: "基礎文法（スライド）",
+      content_type: "slide",
+      pdf_url: PDF_KEY,
+      text_content: null,
+      description: null,
+      is_published: true,
+      is_deleted: false,
+      is_open_to_trial: true,
+      week,
+    };
+
+    const html = await renderContent(content);
+
+    expect(html).toContain(SIGNED_URL);
+    expect(html).not.toContain(article);
+  });
+
+  it("お試し非公開スライドでは記事を出さず、署名も発行しない", async () => {
+    const content = {
+      id: 10,
+      week_id: 3,
+      title: "基礎文法（スライド）",
+      content_type: "slide",
+      pdf_url: PDF_KEY,
+      text_content: article,
+      description: null,
+      is_published: true,
+      is_deleted: false,
+      is_open_to_trial: false,
+      week,
+    };
+
+    const html = await renderContent(content);
+
+    expect(createDemoSlideSignedUrl).not.toHaveBeenCalled();
+    expect(html).not.toContain(article);
+    expect(html).toContain("このスライドはお試し公開の対象外です");
+  });
+
+  it("テキスト種別の {{SUPABASE_STORAGE_URL}} を置換する", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co");
+    const content = {
+      id: 10,
+      week_id: 3,
+      title: "テキスト",
+      content_type: "text",
+      pdf_url: null,
+      text_content: storageMarkdown,
+      description: null,
+      is_published: true,
+      is_deleted: false,
+      is_open_to_trial: true,
+      week,
+    };
+
+    const html = await renderContent(content);
+
+    expect(html).toContain(
+      "https://project.supabase.co/storage/v1/object/public/thumbnails/demo.png"
+    );
+    expect(html).not.toContain("{{SUPABASE_STORAGE_URL}}");
+    expect(createDemoSlideSignedUrl).not.toHaveBeenCalled();
   });
 });
