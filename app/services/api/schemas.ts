@@ -442,6 +442,8 @@ function alignSubmissionFileSlots(
       path: ["submission_file_slots"],
     });
   }
+  // PUT fields are optional. Compare the pair only when this request sets both: the admin form
+  // always sends them together, and a body that omits one side leaves the stored column as-is.
   const starter = value.starter_files;
   if (slots && starter) {
     const aligned =

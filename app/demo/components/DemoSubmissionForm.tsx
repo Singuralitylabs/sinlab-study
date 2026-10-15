@@ -5,7 +5,7 @@ import { useState } from "react";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { LockedCodeFilesEditor } from "@/app/components/LockedCodeFilesEditor";
-import type { CodeFileInput } from "@/app/lib/code-file-inputs";
+import { type CodeFileInput, isCodeEquivalentToStarter } from "@/app/lib/code-file-inputs";
 import { buildLockedSubmissionFiles } from "@/app/lib/submission-file-slots";
 import type { AIReviewListItem, CodeFile, Json, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -72,8 +72,23 @@ export function DemoSubmissionForm({
   const [aiReview, setAiReview] = useState<AIReviewListItem | null>(null);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
+  // The learner form refuses an unedited starter so it cannot burn a review. Demo shows a sample
+  // review instead of calling the API, so the same gate has to live here or the sample teaches
+  // that the starter itself is a valid submission.
+  const unchangedFromStarter = isCodeEquivalentToStarter(codeFiles, starterFiles);
+  const isCodeValid =
+    codeFiles.length > 0 &&
+    codeFiles.every((file) => file.content.trim().length > 0) &&
+    !unchangedFromStarter;
+  const isValid =
+    (submissionType === "code" && isCodeValid) ||
+    (submissionType === "url" && url.trim().length > 0);
+
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!isValid) {
+      return;
+    }
     setIsLoading(true);
     setIsReviewLoading(true);
     setAiReview(null);
@@ -85,13 +100,6 @@ export function DemoSubmissionForm({
     setIsReviewLoading(false);
     setAiReview(SAMPLE_REVIEW);
   };
-
-  const isCodeValid =
-    codeFiles.length > 0 && codeFiles.every((file) => file.content.trim().length > 0);
-
-  const isValid =
-    (submissionType === "code" && isCodeValid) ||
-    (submissionType === "url" && url.trim().length > 0);
 
   return (
     <div className="space-y-4">
@@ -126,7 +134,12 @@ export function DemoSubmissionForm({
         )}
 
         {submissionType === "code" ? (
-          <LockedCodeFilesEditor files={codeFiles} onChange={setCodeFiles} />
+          <div className="space-y-3">
+            <LockedCodeFilesEditor files={codeFiles} onChange={setCodeFiles} />
+            {unchangedFromStarter && (
+              <p className="text-xs text-muted-foreground">初期コードから変更してください</p>
+            )}
+          </div>
         ) : (
           <div className="space-y-2">
             <Label htmlFor="demo-url">URL</Label>

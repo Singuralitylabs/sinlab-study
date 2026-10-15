@@ -1566,9 +1566,12 @@ async function updateContentRow(
   let expectedRubricVersion: number | null | undefined;
   // The versioned write commits before resequence. If a later step fails, put these back;
   // otherwise a quiz keeps the new type and a wiped rubric while its questions are restored.
+  // submission_file_slots is set only when this save nulls it in that same UPDATE: restoring the
+  // type without the layout would drop a file list that has no starter_files to rebuild it.
   let rubricSnapshot: {
     grading_rubric: LearningContent["grading_rubric"];
     content_type: LearningContent["content_type"];
+    submission_file_slots?: LearningContent["submission_file_slots"];
   } | null = null;
   let rubricWriteCommitted = false;
   let committedRubricVersion: number | null | undefined;
@@ -1579,7 +1582,7 @@ async function updateContentRow(
   if (needsCurrentWeek || needsCurrentPdf || touchesRubric) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
-      .select("week_id, pdf_url, grading_rubric, content_type")
+      .select("week_id, pdf_url, grading_rubric, content_type, submission_file_slots")
       .eq("id", id)
       .eq("is_deleted", false)
       .single();
@@ -1663,6 +1666,9 @@ async function updateContentRow(
           grading_rubric: current.grading_rubric,
           content_type: current.content_type,
         };
+        if (movesAwayFromExercise) {
+          rubricSnapshot.submission_file_slots = current.submission_file_slots ?? null;
+        }
         expectedRubricVersion = lockVersion;
       }
       if (needsCurrentWeek) {
