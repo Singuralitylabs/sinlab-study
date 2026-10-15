@@ -48,7 +48,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(memberAuth as never);
   vi.mocked(createServerSupabaseClient).mockResolvedValue({} as never);
-  vi.mocked(isContentVisible).mockResolvedValue(true);
+  vi.mocked(isContentVisible).mockResolvedValue({
+    id: 1,
+    starter_files: null,
+    code_language: "javascript",
+  });
   vi.mocked(gradeQuizAnswers).mockResolvedValue({ data: results as never, error: null });
 });
 

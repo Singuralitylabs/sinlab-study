@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { GEMINI_MAX_CODE_LENGTH } from "@/app/constants/gemini";
 import { limitedDecision } from "@/app/lib/ai-review-limits";
-import { isCodeEquivalentToContentStarter } from "@/app/lib/code-file-inputs";
+import { isCodeEquivalentToContentStarter, parseStarterFiles } from "@/app/lib/code-file-inputs";
 import { parseGradingRubric } from "@/app/lib/grading-schema";
 import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import {

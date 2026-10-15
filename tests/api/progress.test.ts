@@ -42,7 +42,11 @@ const request = (body: unknown = { contentId: 1, isCompleted: true }) =>
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(memberAuth as never);
-  vi.mocked(isContentVisible).mockResolvedValue(true);
+  vi.mocked(isContentVisible).mockResolvedValue({
+    id: 1,
+    starter_files: null,
+    code_language: "javascript",
+  });
   vi.mocked(issueCertificateIfEligible).mockResolvedValue(null);
   vi.mocked(createServerSupabaseClient).mockResolvedValue(
     createMockSupabaseClient({
