@@ -72,7 +72,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 設計意図・不変条件は `docs/database.md`、定義の正は `supabase/migrations/` と `app/types/lib/database.types.ts`。
 
-- **submissions** は `code_content`（単一）と `code_files`（JSONB・複数）の**どちらか一方のみが値を持つ**。表示・AIレビューは必ず `getSubmissionCodeFiles()` で正規化し、両カラムを直接分岐しない。
+- **submissions** は `code_content` と `code_files`（JSONB）の**どちらか一方のみが値を持つ**。表示・AIレビューは必ず `getSubmissionCodeFiles()` で正規化し、両カラムを直接分岐しない。
 - **Storage のキー規約**（変更するとシードSQLとアップロードAPIが揃って壊れる）
   - `slides`（**非公開**）: `<コーススラッグ>/slide-NN.pdf`（NNは最低2桁のゼロ埋め）。`learning_contents.pdf_url` には**このキーのみ**を保存し（URLは保存しない）、配信は権限チェック後に `createSlideSignedUrl()` が署名付きURLを発行する。キー以外は閲覧不能になる（`docs/specification.md` 3.2節・`docs/database.md` 6.8節）。
   - `thumbnails`（公開）: `theme-{themeId}/thumbnail.{png|jpg|webp}`。`image_url` は相対パス保存で、表示時に `resolveStorageUrl()` でURLを前置する。

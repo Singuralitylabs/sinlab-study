@@ -5,6 +5,7 @@ import {
   CONTENT_TYPES,
   MAX_BULK_CONTENT_IDS,
 } from "@/app/constants/content";
+import { STARTER_FILES_MAX_TOTAL_LENGTH } from "@/app/constants/gemini";
 import { MEMBERSHIP_TYPES, USER_MANAGEMENT_ACTIONS, USER_ROLES } from "@/app/constants/user";
 import {
   AdminUserActionSchema,
@@ -496,6 +497,73 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
         content_type: "exercise",
         code_language: null,
         insert_after_id: null,
+      }).success
+    ).toBe(false);
+  });
+
+  it("starter_files は code_files と同じ形を受理し、null でクリアできる", () => {
+    const base = {
+      title: "演習1",
+      week_id: 1,
+      content_type: "exercise" as const,
+      insert_after_id: null,
+    };
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        starter_files: [
+          { filename: "index.html", language: "html", content: "<div></div>" },
+          { filename: "style.css", language: "css", content: ".a{}" },
+        ],
+      }).success
+    ).toBe(true);
+    expect(ContentUpdateSchema.safeParse({ starter_files: null }).success).toBe(true);
+  });
+
+  it("starter_files は空ファイル名・未知言語・合計文字数超過・重複ファイル名を拒否する", () => {
+    const base = {
+      title: "演習1",
+      week_id: 1,
+      content_type: "exercise" as const,
+      insert_after_id: null,
+    };
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        starter_files: [{ filename: "  ", language: "html", content: "x" }],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        starter_files: [{ filename: "a.js", language: "cobol", content: "x" }],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        starter_files: [
+          {
+            filename: "a.js",
+            language: "javascript",
+            content: "a".repeat(STARTER_FILES_MAX_TOTAL_LENGTH + 1),
+          },
+        ],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        starter_files: [
+          { filename: "index.html", language: "html", content: "<div></div>" },
+          { filename: "index.html", language: "html", content: "<span></span>" },
+        ],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        starter_files: [],
       }).success
     ).toBe(false);
   });

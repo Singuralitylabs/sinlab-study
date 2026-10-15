@@ -20,6 +20,12 @@ export const GEMINI_REGISTERED_MODELS = [GEMINI_MODEL_NAME, GEMINI_ALTERNATE_MOD
 export const GEMINI_MAX_CODE_LENGTH = 8000;
 
 /**
+ * Max total chars for learning_contents.starter_files. Kept well below GEMINI_MAX_CODE_LENGTH so
+ * learners can still add code and the review prompt (starter + submission) stays within budget.
+ */
+export const STARTER_FILES_MAX_TOTAL_LENGTH = Math.floor(GEMINI_MAX_CODE_LENGTH / 2);
+
+/**
  * Gemini 3 spends thinking tokens (and output billing) from this budget, so leave headroom for the
  * body.
  */

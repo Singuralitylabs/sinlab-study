@@ -10,7 +10,7 @@ vi.mock("@vercel/analytics/server", () => ({
 
 import { track } from "@vercel/analytics/server";
 import { POST } from "@/app/api/submissions/route";
-import { isContentVisible } from "@/app/services/api/learning-server";
+import { fetchVisibleContentForSubmission } from "@/app/services/api/learning-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -30,10 +30,14 @@ const request = (
     body: JSON.stringify(body),
   });
 
+const visibleContent = {
+  starter_files: null,
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(memberAuth as never);
-  vi.mocked(isContentVisible).mockResolvedValue(true);
+  vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue(visibleContent as never);
   vi.mocked(createServerSupabaseClient).mockResolvedValue(
     createMockSupabaseClient({
       tableResults: { submissions: { data: { id: 1 }, error: null } },
@@ -69,7 +73,7 @@ describe("POST /api/submissions - 認可", () => {
   });
 
   it("対象コンテンツが不可視の場合は403", async () => {
-    vi.mocked(isContentVisible).mockResolvedValue(false);
+    vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue(null);
 
     const res = await POST(request() as never);
 
@@ -171,5 +175,114 @@ describe("POST /api/submissions - first_submission", () => {
     const body = await res.json();
     expect(body.success).toBe(true);
     expect(body.submission).toEqual({ id: 1 });
+  });
+});
+
+describe("POST /api/submissions - 単一ファイルの保存形式", () => {
+  it("language/filename があるときは code_files に保存する", async () => {
+    const single = vi.fn().mockResolvedValue({ data: { id: 1 }, error: null });
+    const insert = vi
+      .fn()
+      .mockReturnValue({ ...createQueryBuilder({ data: null, error: null }), single });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue({
+      from: vi.fn().mockReturnValue({ ...createQueryBuilder({ data: null, error: null }), insert }),
+    } as never);
+
+    const res = await POST(
+      request({
+        contentId: 1,
+        submissionType: "code",
+        codeFiles: [{ filename: "index.html", language: "html", content: "<div></div>" }],
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code_content: null,
+        code_files: [{ filename: "index.html", language: "html", content: "<div></div>" }],
+      })
+    );
+  });
+
+  it("language/filename が空の1ファイルは code_content に保存する（既存挙動）", async () => {
+    const single = vi.fn().mockResolvedValue({ data: { id: 1 }, error: null });
+    const insert = vi
+      .fn()
+      .mockReturnValue({ ...createQueryBuilder({ data: null, error: null }), single });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue({
+      from: vi.fn().mockReturnValue({ ...createQueryBuilder({ data: null, error: null }), insert }),
+    } as never);
+
+    const res = await POST(
+      request({
+        contentId: 1,
+        submissionType: "code",
+        codeFiles: [{ filename: "", language: "", content: "const x = 1;" }],
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code_content: "const x = 1;",
+        code_files: null,
+      })
+    );
+  });
+});
+
+describe("POST /api/submissions - 未編集の初期コード", () => {
+  const starter = [{ filename: "index.html", language: "html", content: "<div></div>" }];
+
+  it("starter と同一（末尾空白のみ）なら 400", async () => {
+    vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue({
+      starter_files: starter,
+    } as never);
+
+    const res = await POST(
+      request({
+        contentId: 1,
+        submissionType: "code",
+        codeFiles: [{ filename: "index.html", language: "html", content: "<div></div>\n" }],
+      }) as never
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: "初期コードから変更してください" });
+    expect(fetchVisibleContentForSubmission).toHaveBeenCalledTimes(1);
+  });
+
+  it("ファイル名だけ変えても 400", async () => {
+    vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue({
+      starter_files: starter,
+    } as never);
+
+    const res = await POST(
+      request({
+        contentId: 1,
+        submissionType: "code",
+        codeFiles: [{ filename: "main.html", language: "html", content: "<div></div>" }],
+      }) as never
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: "初期コードから変更してください" });
+  });
+
+  it("内容を変えていれば 200", async () => {
+    vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue({
+      starter_files: starter,
+    } as never);
+
+    const res = await POST(
+      request({
+        contentId: 1,
+        submissionType: "code",
+        codeFiles: [{ filename: "index.html", language: "html", content: "<div>edited</div>" }],
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
   });
 });

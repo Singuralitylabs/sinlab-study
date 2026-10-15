@@ -1,8 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { shouldTrackFirstSubmission } from "@/app/lib/analytics-funnel";
+import { isCodeEquivalentToStarter, parseStarterFiles } from "@/app/lib/code-file-inputs";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
-import { isContentVisible } from "@/app/services/api/learning-server";
+import { fetchVisibleContentForSubmission } from "@/app/services/api/learning-server";
 import { SubmissionCreateSchema, validateRequest } from "@/app/services/api/schemas";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { requireLearnerApi } from "@/app/services/auth/admin-guard";
@@ -29,8 +30,9 @@ export async function POST(request: NextRequest) {
     }
     const { contentId, submissionType, codeContent, codeFiles, url } = validation.data;
 
-    // Storage format: a single file goes in code_content, multiple in code_files (backward
-    // compatibility).
+    // Exactly one of code_content / code_files is set. Default: one file → code_content, two or
+    // more → code_files. A single file MAY still use code_files when filename/language must be
+    // preserved (starter or custom metadata; code_content cannot store them).
     let storedCodeContent: string | null = null;
     let storedCodeFiles: CodeFile[] | null = null;
     let storedUrl: string | null = null;
@@ -42,7 +44,12 @@ export async function POST(request: NextRequest) {
       if (files.length >= 2) {
         storedCodeFiles = files;
       } else if (files.length === 1) {
-        storedCodeContent = files[0].content;
+        const file = files[0];
+        if (file.language.trim().length > 0 || file.filename.trim().length > 0) {
+          storedCodeFiles = files;
+        } else {
+          storedCodeContent = file.content;
+        }
       } else if (hasLegacyContent) {
         storedCodeContent = codeContent;
       } else {
@@ -64,10 +71,21 @@ export async function POST(request: NextRequest) {
 
     const supabase = await createServerSupabaseClient();
 
-    // Visibility check: 403 if contentId isn't visible to the user (trial-closed, unpublished and
-    // nonexistent IDs all give 0 rows via RLS).
-    if (!(await isContentVisible(supabase, contentId))) {
+    // Visibility + starter_files in one round-trip (403 if contentId isn't visible: trial-closed,
+    // unpublished and nonexistent IDs all give 0 rows via RLS).
+    const content = await fetchVisibleContentForSubmission(supabase, contentId);
+    if (!content) {
       return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
+    }
+
+    // Reject unedited starter (content-only) so clients cannot burn AI review slots.
+    if (submissionType === "code") {
+      const submittedFiles: CodeFile[] =
+        storedCodeFiles ??
+        (storedCodeContent ? [{ filename: "", language: "", content: storedCodeContent }] : []);
+      if (isCodeEquivalentToStarter(submittedFiles, parseStarterFiles(content.starter_files))) {
+        return NextResponse.json({ error: "初期コードから変更してください" }, { status: 400 });
+      }
     }
 
     // Count before insert so the new row is not treated as a pre-existing submission.

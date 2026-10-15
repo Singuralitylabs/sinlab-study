@@ -4,9 +4,17 @@ import { Loader2, Save, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { CodeFilesEditor } from "@/app/components/CodeFilesEditor";
 import { CODE_LANGUAGE_OPTIONS, type CodeLanguage } from "@/app/components/code-editor-utils";
 import { CONTENT_TYPE_FORM_OPTIONS } from "@/app/constants/content";
 import { SLIDE_NUMBER_MAX } from "@/app/constants/slides";
+import {
+  buildInitialCodeFiles,
+  type CodeFileInput,
+  createEmptyCodeFile,
+  parseStarterFiles,
+  toStarterFilesPayload,
+} from "@/app/lib/code-file-inputs";
 import type {
   PhaseFilterOption,
   ThemeFilterOption,
@@ -244,6 +252,17 @@ export function ContentForm({
   const [codeLanguage, setCodeLanguage] = useState<CodeLanguage>(
     (initialData?.code_language as CodeLanguage) ?? "javascript"
   );
+  const [starterFiles, setStarterFiles] = useState<CodeFileInput[]>(() => {
+    const parsed = parseStarterFiles(initialData?.starter_files);
+    if (!parsed) {
+      return [];
+    }
+    return buildInitialCodeFiles(
+      parsed,
+      (initialData?.code_language as CodeLanguage) ?? "javascript",
+      { filenameEdited: true }
+    );
+  });
   // Only the object key is stored (#89). Legacy public URLs are normalized to a key; unnormalizable
   // values become empty, but requiresSlidePdf (initialData.pdf_url truthy) blocks saving until
   // re-upload, so values never vanish silently.
@@ -394,6 +413,15 @@ export function ContentForm({
       return;
     }
 
+    let starterFilesPayload: ReturnType<typeof toStarterFilesPayload> | null = null;
+    if (contentType === "exercise") {
+      starterFilesPayload = toStarterFilesPayload(starterFiles);
+      if (!starterFilesPayload.ok) {
+        setMessage({ type: "error", text: starterFilesPayload.error });
+        return;
+      }
+    }
+
     // Validate with the same schema as the API so choice counts and correct answers are reported
     // per question before sending.
     let validatedQuizQuestions: QuizQuestionData[] | undefined;
@@ -436,6 +464,7 @@ export function ContentForm({
         contentType === "exercise" ? exerciseInstructions.trim() || null : null,
       hint: contentType === "exercise" ? hint.trim() || null : null,
       reference_answer: contentType === "exercise" ? referenceAnswer.trim() || null : null,
+      starter_files: starterFilesPayload?.ok ? starterFilesPayload.files : null,
       allowed_submission_types: contentType === "exercise" ? allowedSubmissionTypes : "code",
       code_language: contentType === "exercise" ? codeLanguage : "javascript",
       pdf_url: contentType === "slide" ? pdfUrl.trim() || null : null,
@@ -788,6 +817,36 @@ export function ContentForm({
                     </button>
                   ))}
                 </div>
+              </div>
+              <div className="space-y-2">
+                <Label>初期コード（受講生の提出フォームに事前表示）</Label>
+                <p className="text-xs text-muted-foreground">
+                  未設定の場合、提出フォームは空ファイル1つから始まります。ファイルをすべて削除して保存すると初期コードをクリアします。
+                </p>
+                {starterFiles.length === 0 ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setStarterFiles([
+                        createEmptyCodeFile(codeLanguage, [], { withDefaultFilename: true }),
+                      ])
+                    }
+                  >
+                    初期コードを追加
+                  </Button>
+                ) : (
+                  <CodeFilesEditor
+                    files={starterFiles}
+                    onChange={setStarterFiles}
+                    defaultLanguage={codeLanguage}
+                    forceFileMetaUi
+                    allowEmpty
+                    contentPlaceholder="受講生に最初から表示するコードを入力..."
+                    addButtonLabel="ファイルを追加"
+                  />
+                )}
               </div>
               <div className="space-y-2">
                 <Label>提出方法</Label>

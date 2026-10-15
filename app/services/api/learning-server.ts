@@ -11,6 +11,7 @@ import { checkContentPermissions } from "@/app/services/auth/permissions";
 import type {
   BreadcrumbWeek,
   ContentType,
+  Json,
   LearningContent,
   LearningContentListItem,
   LearningContentWithBreadcrumb,
@@ -22,6 +23,31 @@ import type {
   UserStatusType,
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
+
+/** Visible content row fields used by POST /api/submissions starter checks. */
+export type VisibleLearningContent = {
+  starter_files: Json | null;
+};
+
+/**
+ * Content + week/phase/theme published hierarchy filters shared by isContentVisible() and
+ * fetchVisibleContentForSubmission(). Select strings stay separate (id-only vs starter_files).
+ * Constrained to eq-capable builders; cast through a shallow eq-chain so nested !inner
+ * PostgREST builder generics do not explode (TS2589). Returns Q so callers keep maybeSingle typing.
+ */
+function applyVisibleHierarchyFilters<Q extends { eq: unknown }>(query: Q): Q {
+  type EqChain = { eq: (column: string, value: boolean) => EqChain };
+  const chained = query as unknown as EqChain;
+  return chained
+    .eq("is_published", true)
+    .eq("is_deleted", false)
+    .eq("week.is_published", true)
+    .eq("week.is_deleted", false)
+    .eq("week.phase.is_published", true)
+    .eq("week.phase.is_deleted", false)
+    .eq("week.phase.theme.is_published", true)
+    .eq("week.phase.theme.is_deleted", false) as unknown as Q;
+}
 
 /** Excludes heavy text columns (body, instructions, model answer, hints). */
 export const LEARNING_CONTENT_LIST_COLUMNS =
@@ -41,7 +67,7 @@ export const LEARNING_WEEK_DETAIL_COLUMNS = `*, phase:learning_phases(${BREADCRU
  * after a submission through fetchExerciseReferenceAnswer(). Typed as `*` so the nested week
  * embed does not blow the type checker's instantiation depth.
  */
-export const LEARNING_CONTENT_DETAIL_COLUMN_LIST = `id, week_id, title, content_type, video_url, pdf_url, text_content, description, exercise_instructions, hint, allowed_submission_types, code_language, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
+export const LEARNING_CONTENT_DETAIL_COLUMN_LIST = `id, week_id, title, content_type, video_url, pdf_url, text_content, description, exercise_instructions, hint, allowed_submission_types, code_language, starter_files, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
 export const LEARNING_CONTENT_DETAIL_COLUMNS =
   LEARNING_CONTENT_DETAIL_COLUMN_LIST as unknown as "*";
 
@@ -522,32 +548,27 @@ export function isContentLockedForUser(
 
 /**
  * Whether the content is visible to the given client (caller's auth context); used by the
- * progress / submission / AI review APIs (specification 4.1/5.1).
+ * progress / quiz / AI review APIs (specification 4.1/5.1). Lightweight id-only select — starter
+ * JSON is not needed here.
  * Checks `is_published = true AND is_deleted = false` for the content AND its week, phase and
  * theme. The learning_contents SELECT RLS allows admin / maintainer unconditionally, so checking
  * only the content row would let them record progress, submit, or request AI review for
- * soft-deleted contents or contents under unpublished parents. Returns false if any level is
- * unpublished or deleted, regardless of role (issue #68 default).
+ * soft-deleted contents or contents under unpublished parents. False if any level is unpublished
+ * or deleted, regardless of role (issue #68 default).
  */
 export async function isContentVisible(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
   contentId: number
 ): Promise<boolean> {
-  const { data, error } = await supabase
-    .from("learning_contents")
-    .select(
-      "id, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
-    )
-    .eq("id", contentId)
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .eq("week.is_published", true)
-    .eq("week.is_deleted", false)
-    .eq("week.phase.is_published", true)
-    .eq("week.phase.is_deleted", false)
-    .eq("week.phase.theme.is_published", true)
-    .eq("week.phase.theme.is_deleted", false)
-    .maybeSingle();
+  // Select string must be a literal for the Supabase client's type parser (no template concat).
+  const { data, error } = await applyVisibleHierarchyFilters(
+    supabase
+      .from("learning_contents")
+      .select(
+        "id, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
+      )
+      .eq("id", contentId)
+  ).maybeSingle();
 
   if (error) {
     // Stay fail-closed (treat as invisible) but let logs distinguish a DB failure from truly
@@ -556,6 +577,34 @@ export async function isContentVisible(
   }
 
   return !!data;
+}
+
+/**
+ * Visibility check plus starter_files for POST /api/submissions in one round-trip. Same published
+ * hierarchy filters as isContentVisible(); returns null when invisible.
+ */
+export async function fetchVisibleContentForSubmission(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  contentId: number
+): Promise<VisibleLearningContent | null> {
+  const { data, error } = await applyVisibleHierarchyFilters(
+    supabase
+      .from("learning_contents")
+      .select(
+        "starter_files, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
+      )
+      .eq("id", contentId)
+  ).maybeSingle();
+
+  if (error) {
+    console.error("コンテンツ可視性チェックエラー:", error.message);
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return { starter_files: data.starter_files };
 }
 
 /**

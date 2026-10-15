@@ -88,6 +88,8 @@ export interface GenerateReviewParams {
   submission: ReviewSubmission;
   referenceAnswer?: string | null;
   gradingRubric?: GradingRubric | null;
+  /** Learner-visible starter; when set, the prompt asks the model to focus on changes beyond it. */
+  starterFiles?: CodeFile[] | null;
   apiKey: string;
 }
 
@@ -171,9 +173,14 @@ export function buildUserPrompt(
   exerciseInstructions: string,
   submission: ReviewSubmission,
   referenceAnswer?: string | null,
-  gradingRubric?: GradingRubric | null
+  gradingRubric?: GradingRubric | null,
+  starterFiles?: CodeFile[] | null
 ): string {
   const referenceSection = referenceAnswer ? `\n## 模範回答\n${referenceAnswer}\n` : "";
+  const starterSection =
+    starterFiles && starterFiles.length > 0
+      ? `\n## 初期コード\n以下は課題に用意された初期コードです。受講生が初期コードから書き足した・変更した部分を中心に評価してください。\n${buildCodeSection(starterFiles)}\n`
+      : "";
 
   if (submission.type === "url") {
     return `## 課題内容
@@ -189,7 +196,7 @@ ${submission.content}
 
   return `## 課題内容
 ${exerciseInstructions}
-${referenceSection}${rubricSection}
+${referenceSection}${rubricSection}${starterSection}
 ## 提出コード
 ${buildCodeSection(submission.files)}`;
 }
@@ -593,6 +600,7 @@ export async function generateReview({
   submission,
   referenceAnswer,
   gradingRubric,
+  starterFiles,
   apiKey,
 }: GenerateReviewParams): Promise<ReviewResult> {
   const scoreKind = resolveScoreKind(submission, gradingRubric);
@@ -601,7 +609,13 @@ export async function generateReview({
   const { value: reviewJson, usage } = await generateValidatedJson<ReviewJson>({
     apiKey,
     systemInstruction: SYSTEM_PROMPT,
-    contents: buildUserPrompt(exerciseInstructions, submission, referenceAnswer, rubric),
+    contents: buildUserPrompt(
+      exerciseInstructions,
+      submission,
+      referenceAnswer,
+      rubric,
+      starterFiles
+    ),
     responseSchema: buildReviewResponseSchema(scoreKind, rubric),
     parse: (text) => {
       const parsed = parseReviewResponse(text, scoreKind, rubric);

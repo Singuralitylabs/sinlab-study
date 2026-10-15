@@ -42,10 +42,10 @@ function buildPatch(
       if (!BULK_SETTABLE_CONTENT_TYPES.includes(contentType)) {
         return { error: "クイズへの変更は編集画面で設問と一緒に行ってください" };
       }
-      // A rubric only makes sense for exercises; drop it when the type moves away.
+      // Rubrics and starter code belong to exercises; drop them when the type moves away.
       return contentType === "exercise"
         ? { content_type: contentType }
-        : { content_type: contentType, grading_rubric: null };
+        : { content_type: contentType, grading_rubric: null, starter_files: null };
   }
 }
 

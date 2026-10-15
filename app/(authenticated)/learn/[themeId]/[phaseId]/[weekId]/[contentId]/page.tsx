@@ -13,6 +13,7 @@ import { ANALYTICS_EVENT, UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import { computeRemainingReviews } from "@/app/lib/ai-review-limits";
+import { parseStarterFiles } from "@/app/lib/code-file-inputs";
 import { buildThemeContentOrder, resolveContentNavigation } from "@/app/lib/content-navigation";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
@@ -453,6 +454,7 @@ export default async function ContentPage({ params }: PageProps) {
                           (content.allowed_submission_types as "code" | "url" | "both") ?? "code"
                         }
                         codeLanguage={(content.code_language as CodeLanguage) ?? "javascript"}
+                        starterFiles={parseStarterFiles(content.starter_files)}
                         persistedReviewId={reviewForLatestSubmission?.id ?? null}
                       />
                     </>
