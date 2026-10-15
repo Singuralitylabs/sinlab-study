@@ -295,6 +295,38 @@ describe("issueMissingCertificates（既に完了済みのテーマの遡及発�
     expect(certificateInserts(admin)).toHaveLength(0);
   });
 
+  it("書式文字だけの表示名は空と同じく発行しない。混在するときは除いてスナップショットする", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const blank = mockAdminClient({
+      certificates: inserted,
+      users: { data: { display_name: "\u200B" }, error: null },
+    });
+
+    const blocked = await issueMissingCertificates({
+      ...eligible,
+      summaries: [done(1)] as never,
+      issuedThemeIds: new Set(),
+    });
+
+    expect(blocked).toEqual({ issued: [], blockedByMissingName: true });
+    expect(certificateInserts(blank)).toHaveLength(0);
+
+    const admin = mockAdminClient({
+      certificates: inserted,
+      users: { data: { display_name: "\u202E山田\u200B" }, error: null },
+    });
+    const issuedResult = await issueMissingCertificates({
+      ...eligible,
+      summaries: [done(1)] as never,
+      issuedThemeIds: new Set(),
+    });
+
+    expect(issuedResult.blockedByMissingName).toBe(false);
+    expect(certificateInserts(admin)[0].insert.mock.calls[0][0]).toMatchObject({
+      recipient_name: "山田",
+    });
+  });
+
   it("表示名が入っていれば発行し、修了証行は UPDATE しない（スナップショットは変えない）", async () => {
     const admin = mockAdminClient({
       certificates: inserted,

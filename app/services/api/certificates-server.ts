@@ -7,6 +7,7 @@ import {
   isCertificateNoCollision,
   isThemeCompleted,
 } from "@/app/lib/certificate";
+import { normalizeDisplayName } from "@/app/lib/display-name";
 import {
   fetchThemeProgressSummaries,
   type ThemeProgressSummary,
@@ -98,9 +99,11 @@ async function insertCertificates(
     return NOTHING_ISSUED;
   }
 
-  // The name is snapshotted and cannot be fixed afterwards, and a blank display_name (the signup
-  // fallback when Google gives neither name nor email) would print a nameless certificate.
-  if (!user.display_name?.trim()) {
+  // The name is snapshotted and cannot be fixed afterwards. A blank display_name (the signup
+  // fallback, or only format characters such as U+200B that trim() keeps) would print a nameless
+  // certificate. The stored string is normalized the same way as the settings form.
+  const recipientName = normalizeDisplayName(user.display_name ?? "");
+  if (!recipientName) {
     console.warn("[修了証] 受講者名が空のため発行を見送りました");
     return { issued: [], blockedByMissingName: true };
   }
@@ -114,7 +117,7 @@ async function insertCertificates(
           user_id: userId,
           theme_id: summary.theme.id,
           certificate_no: generateCertificateNo(new Date()),
-          recipient_name: user.display_name,
+          recipient_name: recipientName,
           theme_name: summary.theme.name,
         })
         .select("id, theme_id, certificate_no, theme_name")

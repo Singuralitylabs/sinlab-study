@@ -986,7 +986,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 - `/certificates` / `/certificates/[id]`: 修了証の一覧と表示（本登録の member のみ。13章）
 - `/review-list`: 復習リスト（未克服 / 克服済み。`role = member` のみ。15章）
 - `/announcements` / `/announcements/[id]`: お知らせの一覧（未読表示。サイドナビ「お知らせ」に未読件数のバッジ）・詳細（開くと既読を記録）（11章）
-- `/settings`: プロフィール（表示名）と、案内メールの配信状態（配信中 / 停止中と停止日時）の確認と、停止・再開（10.8節）。サイドナビのログアウトの上に「設定」として全ロールへ表示する。表示名は `users.display_name` の1つを画面・管理画面・修了証で共用する（修了証用の氏名は別に持たない）。画面は本人の行を通常クライアントで SELECT して入力欄に出し、保存は `PATCH /api/settings/profile`（`{ "displayName": string }`）で行う。`getServerAuth()` で本人を特定し、未認証 401・`userId` なし 403・`active` / `trial` 以外（`rejected` を含む）403・検証失敗 400。更新は `updateUserDisplayName()` が service_role で本人の行の `display_name` だけを書く（RLS に本人 UPDATE は足さない。ボディの `role` や `userId` は書かない）。前後の空白を除いて空でないこと、`DISPLAY_NAME_MAX_LENGTH`（50）以内、改行などの制御文字を含まないこと。画面は同じ `parseDisplayName()` で拒否する。保存後は `router.refresh()` でサーバー描画の表示名を取り直す。修了証には発行時点の名前が印字され、発行済みの修了証には反映されない（13.2節）
+- `/settings`: プロフィール（表示名）と、案内メールの配信状態（配信中 / 停止中と停止日時）の確認と、停止・再開（10.8節）。サイドナビのログアウトの上に「設定」として全ロールへ表示する。表示名は `users.display_name` の1つを画面・管理画面・修了証で共用する（修了証用の氏名は別に持たない）。画面は本人の行を通常クライアントで SELECT して入力欄に出し、保存は `PATCH /api/settings/profile`（`{ "displayName": string }`）で行う。`getServerAuth()` で本人を特定し、未認証 401・`userId` なし 403・`active` / `trial` 以外（`rejected` を含む）403・検証失敗 400。更新は `updateUserDisplayName()` が service_role で本人の行の `display_name` だけを書く（RLS に本人 UPDATE は足さない。ボディの `role` や `userId` は書かない）。前後の空白を除いて空でないこと、`DISPLAY_NAME_MAX_LENGTH`（50）以内、改行などの制御文字を含まないこと。ゼロ幅スペースや双方向制御などの書式文字は保存前に除き（絵文字の ZWJ は、他に文字があるときだけ残す）、除いた結果が空なら空として拒否する。画面は同じ `parseDisplayName()` で拒否する。保存後は `router.refresh()` でサーバー描画の表示名を取り直す。修了証には発行時点の名前が印字され、発行済みの修了証には反映されない（13.2節）
 
 ### 7.3 管理・講師向け画面（`/manage`）
 
@@ -1408,7 +1408,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 - **冪等**: `UNIQUE (user_id, theme_id)` の違反（23505）は発行済みとして無視する（メールも送らない）。`UNIQUE (certificate_no)` の違反だけは番号を作り直して再試行する（最大 `CERTIFICATE_NO_MAX_ATTEMPTS` 回）
 - **失敗は進捗 API のレスポンスを変えない**: 関数は例外を投げず、失敗はログだけ残して `null` を返す。メール送信の失敗も同様（10.1節）。完了の保存はすでに済んでいる
 - **証明番号**: `SS-YYYYMM-XXXXXX`（`YYYYMM` は発行月（JST）、`XXXXXX` は紛らわしい `I` / `O` を除いた英数字6文字。乱数は `crypto.randomInt` で、推測できない）。一意で、将来の公開検証ページに使える。衝突の判定は制約名・`details` で行い、エラー文言には頼らない
-- **受講者名が空のときは発行しない**: 登録時の `display_name` は名前もメールも無いと空文字になり得る。スナップショットは後から直せないため、空（空白のみ）なら warn ログを出して発行を見送る。`/certificates` では完了済みのテーマに「氏名が未設定のため発行できません」と「設定画面で名前を入力してください」（`/settings` へのリンク）を案内する。表示名を保存したあと `/certificates` を開くと、完了済みで未発行のテーマは同じ INSERT 経路で発行される。発行済みの `recipient_name` は更新しない（表示名を変えても発行済みの修了証の名前は変わらない）
+- **受講者名が空のときは発行しない**: 登録時の `display_name` は名前もメールも無いと空文字になり得る。スナップショットは後から直せないため、空（空白のみ、または書式文字だけ）なら warn ログを出して発行を見送る。印字する `recipient_name` は、発行時点の表示名から書式文字を除いたものにする。`/certificates` では完了済みのテーマに「氏名が未設定のため発行できません」と「設定画面で名前を入力してください」（`/settings` へのリンク）を案内する。表示名を保存したあと `/certificates` を開くと、完了済みで未発行のテーマは同じ INSERT 経路で発行される。発行済みの `recipient_name` は更新しない（表示名を変えても発行済みの修了証の名前は変わらない）
 
 ### 13.3 画面
 

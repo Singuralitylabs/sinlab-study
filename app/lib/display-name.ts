@@ -6,12 +6,34 @@ export type DisplayNameParseResult = { ok: true; name: string } | { ok: false; m
 // whitespace, including a newline; anything left would be printed on the certificate as-is.
 const CONTROL_OR_LINE_BREAK = /\p{Cc}|\p{Zl}|\p{Zp}/u;
 
+// Format characters (zero-width space, bidi overrides, …). trim() does not remove them, so a
+// name made only of them looks blank and would be snapshotted onto a certificate that cannot
+// be corrected. ZWJ (U+200D) is the exception: it joins emoji and is kept when other characters
+// remain.
+const FORMAT_CHAR = /\p{Cf}/gu;
+const ZWJ = "\u200D";
+
+/**
+ * Visible name stored and printed. The settings form, the API schema, and certificate issuance
+ * share this so a format-only string cannot pass one check and fail the other.
+ */
+export function normalizeDisplayName(raw: string): string {
+  const stripped = raw
+    .trim()
+    .replace(FORMAT_CHAR, (char) => (char === ZWJ ? char : ""))
+    .trim();
+  if (stripped.replaceAll(ZWJ, "").length === 0) {
+    return "";
+  }
+  return stripped;
+}
+
 /**
  * Trims and checks a display name. The settings form and the API schema both call this so the
  * empty / length / control-character rules cannot drift.
  */
 export function parseDisplayName(raw: string): DisplayNameParseResult {
-  const name = raw.trim();
+  const name = normalizeDisplayName(raw);
   if (name.length === 0) {
     return { ok: false, message: "表示名を入力してください" };
   }

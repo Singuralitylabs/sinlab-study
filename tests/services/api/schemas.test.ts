@@ -736,6 +736,14 @@ describe("ProfileUpdateSchema", () => {
     }
   });
 
+  it("ゼロ幅スペースや双方向制御は保存値から除く", () => {
+    const result = ProfileUpdateSchema.safeParse({ displayName: "\u202E山田\u200B" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ displayName: "山田" });
+    }
+  });
+
   it(`${DISPLAY_NAME_MAX_LENGTH}文字ちょうどは許可する`, () => {
     const name = "あ".repeat(DISPLAY_NAME_MAX_LENGTH);
     const result = ProfileUpdateSchema.safeParse({ displayName: name });
@@ -753,6 +761,7 @@ describe("ProfileUpdateSchema", () => {
     ["タブ", "山田\t太郎"],
     ["NUL", "山田\u0000太郎"],
     ["行区切り", "山田\u2028太郎"],
+    ["書式文字だけ", "\u200B"],
   ])("%s は拒否する", (_label, displayName) => {
     expect(ProfileUpdateSchema.safeParse({ displayName }).success).toBe(false);
   });
