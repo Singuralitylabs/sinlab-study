@@ -12,6 +12,8 @@ import {
   buildCancelScheduledEmail,
   buildCertificateIssuedEmail,
   buildInactivityReminderEmail,
+  buildNotificationEmailChangedEmail,
+  buildNotificationEmailConfirmEmail,
   buildSignupEmail,
   buildSubscriptionEndedEmail,
   buildTrialNurtureEmail,
@@ -724,5 +726,28 @@ describe("編集できる文面（#286）", () => {
     expect(email.text).toContain("運営からのお知らせです。\n\n■ タイトル\n\n");
     expect(email.html).toContain('href="https://example.com"');
     expect(email.html).not.toContain('href="javascript:');
+  });
+});
+
+describe("通知先の確認メールと変更通知", () => {
+  it("配信停止リンクを付けず、差し込むアドレスはエスケープする", () => {
+    const confirm = buildNotificationEmailConfirmEmail({
+      displayName: "山田",
+      confirmUrl: `${APP_URL}/api/settings/notification-email/verify?token=sample`,
+      expiresLabel: "24時間",
+    });
+    const changed = buildNotificationEmailChangedEmail({
+      displayName: "<script>",
+      newAddress: "a<b>@example.com",
+      settingsUrl: `${APP_URL}/settings`,
+    });
+
+    expect(confirm.headers).toBeUndefined();
+    expect(confirm.text).not.toContain("api/email/unsubscribe");
+    expect(changed.headers).toBeUndefined();
+    expect(changed.text).not.toContain("api/email/unsubscribe");
+    expect(changed.text).toContain("a<b>@example.com");
+    expect(changed.html).toContain("a&lt;b&gt;@example.com");
+    expect(changed.html).not.toContain("<script>");
   });
 });

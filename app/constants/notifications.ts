@@ -212,3 +212,35 @@ export const ANNOUNCEMENT_EMAIL_RETRY_DAYS = 3;
  * resend would double-send (the email_logs claim row is what prevents that).
  */
 export const RETRYABLE_EMAIL_ERROR = /status=(429|5\d\d)$/;
+
+/**
+ * Procedural account mails for changing the notification address. Logged in `email_logs` but not
+ * members of `EMAIL_KIND`: they are not rows in `email_kind_settings`, and they are sent even when
+ * the global switch is off or the user has unsubscribed (the user asked for the change).
+ */
+export const NOTIFICATION_EMAIL_LOG_KIND = {
+  CONFIRM: "notification_email_confirm",
+  CHANGED: "notification_email_changed",
+} as const;
+
+export type NotificationEmailLogKind =
+  (typeof NOTIFICATION_EMAIL_LOG_KIND)[keyof typeof NOTIFICATION_EMAIL_LOG_KIND];
+
+export const NOTIFICATION_EMAIL_LOG_LABELS: Record<NotificationEmailLogKind, string> = {
+  notification_email_confirm: "通知先の確認",
+  notification_email_changed: "通知先の変更",
+};
+
+/** How long a confirmation link stays valid. */
+export const NOTIFICATION_EMAIL_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** Confirmation mails per user in `NOTIFICATION_EMAIL_CONFIRM_WINDOW_MS` (rolling, not a JST day). */
+export const NOTIFICATION_EMAIL_CONFIRM_LIMIT = 5;
+
+export const NOTIFICATION_EMAIL_CONFIRM_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Matches `users.email` / `users.notification_email` (`VARCHAR(255)`). */
+export const NOTIFICATION_EMAIL_MAX_LENGTH = 255;
+
+/** Shown in the confirmation mail. Derived from the TTL so the two cannot drift. */
+export const NOTIFICATION_EMAIL_TOKEN_TTL_LABEL = `${NOTIFICATION_EMAIL_TOKEN_TTL_MS / (60 * 60 * 1000)}時間`;

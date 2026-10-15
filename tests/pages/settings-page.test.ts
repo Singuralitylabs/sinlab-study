@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/user-email-server");
 vi.mock("@/app/services/api/user-profile-server");
+vi.mock("@/app/services/api/notification-email-server");
 vi.mock("next/navigation", () => ({
   redirect: vi.fn((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
@@ -13,6 +14,7 @@ vi.mock("next/navigation", () => ({
 
 import SettingsPage from "@/app/(authenticated)/settings/page";
 import { PRIVACY_URL } from "@/app/constants/legal";
+import { fetchNotificationEmailState } from "@/app/services/api/notification-email-server";
 import { fetchUserEmailOptOutAt } from "@/app/services/api/user-email-server";
 import { fetchUserDisplayName } from "@/app/services/api/user-profile-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -27,6 +29,15 @@ beforeEach(() => {
   vi.mocked(getServerAuth).mockResolvedValue(auth("member"));
   vi.mocked(fetchUserEmailOptOutAt).mockResolvedValue({ data: null, error: null });
   vi.mocked(fetchUserDisplayName).mockResolvedValue({ data: "山田 太郎", error: null });
+  vi.mocked(fetchNotificationEmailState).mockResolvedValue({
+    data: {
+      loginEmail: "login@example.com",
+      notificationEmail: "notify@example.com",
+      pendingEmail: null,
+      pendingExpiresAt: null,
+    },
+    error: null,
+  });
 });
 
 describe("/settings", () => {
@@ -45,8 +56,12 @@ describe("/settings", () => {
     const html = await render();
 
     expect(fetchUserEmailOptOutAt).toHaveBeenCalledWith(5);
-    expect(html).toContain("表示名と案内メールの配信を確認・変更できます");
-    expect(html.indexOf(">プロフィール<")).toBeLessThan(html.indexOf(">案内メールの配信<"));
+    expect(html).toContain("表示名、通知の送り先、案内メールの配信を確認・変更できます");
+    expect(html.indexOf(">プロフィール<")).toBeLessThan(html.indexOf(">通知の送り先<"));
+    expect(html.indexOf(">通知の送り先<")).toBeLessThan(html.indexOf(">案内メールの配信<"));
+    expect(html).toContain("login@example.com");
+    expect(html).toContain("notify@example.com");
+    expect(html).toContain("お支払いに関するメールは Stripe から登録時のアドレスに届きます。");
     expect(html).toContain("山田 太郎");
     expect(html).toContain(
       "修了証には発行時点の名前が印字されます。発行済みの修了証には反映されません。"

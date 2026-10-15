@@ -50,6 +50,7 @@ import {
   validateEmailTemplateText,
 } from "@/app/lib/email-template";
 import { GradingRubricInputSchema } from "@/app/lib/grading-schema";
+import { parseNotificationEmail } from "@/app/lib/notification-email";
 import { QuizQuestionsSchema } from "@/app/lib/quiz";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
 import { SUBMISSION_FILE_SLOT_MAX_COUNT } from "@/app/lib/submission-file-slots";
@@ -220,6 +221,23 @@ export const ProfileUpdateSchema = z
       return z.NEVER;
     }
     return { displayName: parsed.name };
+  });
+
+/**
+ * POST /api/settings/notification-email. Unknown keys are stripped. The stored value is the
+ * trimmed, lowercased address from parseNotificationEmail (shared with the form).
+ */
+export const NotificationEmailRequestSchema = z
+  .object({
+    email: z.string({ message: "email は文字列で指定してください" }),
+  })
+  .transform((value, ctx) => {
+    const parsed = parseNotificationEmail(value.email);
+    if (!parsed.ok) {
+      ctx.addIssue({ code: "custom", message: parsed.message, path: ["email"] });
+      return z.NEVER;
+    }
+    return { email: parsed.email };
   });
 
 const EmailSendDaysSchema = z

@@ -202,6 +202,7 @@ describe("PATCH /api/manage/contents/bulk - action→patchマッピング", () =
       grading_rubric: null,
       starter_files: null,
       submission_file_slots: null,
+      text_content: null,
     });
   });
 
@@ -209,7 +210,25 @@ describe("PATCH /api/manage/contents/bulk - action→patchマッピング", () =
     const res = await PATCH(request({ ids: [1, 2], action: "set_type", contentType: "exercise" }));
 
     expect(res.status).toBe(200);
-    expect(bulkUpdateContents).toHaveBeenCalledWith([1, 2], { content_type: "exercise" });
+    expect(bulkUpdateContents).toHaveBeenCalledWith([1, 2], {
+      content_type: "exercise",
+      text_content: null,
+    });
+  });
+
+  it("set_type で text または slide に変えても解説記事は消さない", async () => {
+    for (const contentType of ["text", "slide"] as const) {
+      vi.mocked(bulkUpdateContents).mockClear();
+      const res = await PATCH(request({ ids: [1], action: "set_type", contentType }));
+
+      expect(res.status).toBe(200);
+      expect(bulkUpdateContents).toHaveBeenCalledWith([1], {
+        content_type: contentType,
+        grading_rubric: null,
+        starter_files: null,
+        submission_file_slots: null,
+      });
+    }
   });
 });
 

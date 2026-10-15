@@ -626,6 +626,97 @@ describe("概要欄カードの表示位置（issue #221）", () => {
   });
 });
 
+describe("スライドの解説記事（#375）", () => {
+  const article = "解説記事の本文";
+  const storageArticle = "![図]({{SUPABASE_STORAGE_URL}}/thumbnails/a.png)";
+
+  it("記事があるスライドはビューアの下に表示し、空ならスライドだけ", async () => {
+    setup({ userStatus: "active", isOpenToTrial: false });
+    vi.mocked(fetchContentById).mockResolvedValue({
+      data: slideContent({ text_content: article, description: "概要テスト本文" }),
+      error: null,
+    } as never);
+
+    const html = await render();
+
+    const slideIndex = html.indexOf('data-testid="slide-content"');
+    const articleIndex = html.indexOf(article);
+    const overviewIndex = html.indexOf("概要テスト本文");
+    expect(slideIndex).toBeGreaterThanOrEqual(0);
+    expect(articleIndex).toBeGreaterThan(slideIndex);
+    expect(overviewIndex).toBeGreaterThan(articleIndex);
+
+    vi.mocked(fetchContentById).mockResolvedValue({
+      data: slideContent({ text_content: null }),
+      error: null,
+    } as never);
+    const empty = await render();
+    expect(empty).toContain('data-testid="slide-content"');
+    expect(empty).not.toContain(article);
+  });
+
+  it("記事の {{SUPABASE_STORAGE_URL}} を置換する", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co");
+    setup({ userStatus: "active", isOpenToTrial: false });
+    vi.mocked(fetchContentById).mockResolvedValue({
+      data: slideContent({ text_content: storageArticle }),
+      error: null,
+    } as never);
+
+    const html = await render();
+
+    expect(html).toContain("https://project.supabase.co/storage/v1/object/public/thumbnails/a.png");
+    expect(html).not.toContain("{{SUPABASE_STORAGE_URL}}");
+  });
+
+  it("未公開プレビューでも記事を表示する", async () => {
+    setup({
+      userStatus: "active",
+      userRole: "admin",
+      isOpenToTrial: false,
+      isPublished: false,
+    });
+    vi.mocked(fetchContentById).mockResolvedValue({
+      data: slideContent({ is_published: false, text_content: article }),
+      error: null,
+    } as never);
+
+    const html = await render();
+
+    expect(html).toContain(article);
+    expect(html).toContain('data-testid="slide-content"');
+  });
+
+  it("テキスト種別の本文は従来どおり表示し、動画に残った本文は出さない", async () => {
+    setup({ userStatus: "active", isOpenToTrial: true });
+    vi.mocked(fetchContentById).mockResolvedValue({
+      data: {
+        ...slideContent({ text_content: article }),
+        content_type: "text",
+        pdf_url: null,
+      },
+      error: null,
+    } as never);
+
+    const textHtml = await render();
+    expect(textHtml).toContain(article);
+    expect(textHtml).not.toContain('data-testid="slide-content"');
+
+    vi.mocked(fetchContentById).mockResolvedValue({
+      data: {
+        ...slideContent({ text_content: article }),
+        content_type: "video",
+        video_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        pdf_url: null,
+      },
+      error: null,
+    } as never);
+    const videoHtml = await render();
+    expect(videoHtml).toContain('data-testid="youtube-embed"');
+    expect(videoHtml).not.toContain(article);
+  });
+});
+
 describe("お試し → 有料の転換導線（ロック画面, #288）", () => {
   it("Stripe有効: 定型の概要・規模・実額・/upgrade への CTA を表示する", async () => {
     vi.stubEnv("STRIPE_ENABLED", "true");

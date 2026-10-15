@@ -72,6 +72,7 @@ export function coversPreviousWeek(createdAt: string, weekStart: string): boolea
 
 export type DigestUser = {
   userId: number;
+  /** Resolved send-to address (`notification_email ?? email`), not necessarily `users.email`. */
   email: string;
   displayName: string;
   status: UserStatusType;

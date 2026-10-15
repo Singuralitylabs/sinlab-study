@@ -4,6 +4,7 @@ import { WEEKLY_FUNNEL_WEEKS } from "@/app/constants/analytics";
 import { isQuizQuestionType } from "@/app/constants/quiz";
 import { SLIDES_BUCKET } from "@/app/constants/storage";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { contentTypeStoresTextContent } from "@/app/lib/content-filtering";
 import {
   getSiblingTailId,
   resolveSiblingRenumber,
@@ -229,7 +230,7 @@ const MANAGE_WEEK_LIST_SELECT = `
 const CONTENT_SIBLING_CANDIDATE_SELECT = "id, title, display_order, is_published, week_id";
 
 const MANAGE_USER_LIST_SELECT =
-  "id, display_name, email, role, status, membership_type, created_at, email_opt_out_at";
+  "id, display_name, email, notification_email, role, status, membership_type, created_at, email_opt_out_at";
 
 /** Structural filters for /manage/contents. The title search `q` is not included (done in JS). */
 export interface FetchContentsFilters {
@@ -1246,7 +1247,10 @@ async function createContentWith(
       title: content.title,
       content_type: content.content_type,
       video_url: content.video_url,
-      text_content: content.text_content,
+      // Same rule as the form and bulk set_type: an article exists only on text and slide.
+      text_content: contentTypeStoresTextContent(content.content_type)
+        ? content.text_content
+        : null,
       description: content.description,
       exercise_instructions: content.exercise_instructions,
       hint: content.hint,
@@ -1570,6 +1574,11 @@ async function updateContentRow(
   loadedRubricVersion: number | null | undefined
 ): Promise<ContentUpdateResult> {
   const patch: Partial<LearningContent> = { ...basePatch };
+  // A type change away from text/slide must clear the article. Leaving it set would restore the
+  // old article the next time the row becomes a slide or text.
+  if (patch.content_type !== undefined && !contentTypeStoresTextContent(patch.content_type)) {
+    patch.text_content = null;
+  }
   const movesAwayFromExercise =
     patch.content_type !== undefined && patch.content_type !== "exercise";
   // null clears, an object saves, and leaving exercise drops the rubric. undefined leaves it.

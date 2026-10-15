@@ -776,11 +776,18 @@ describe("updateContent / createContent の採点基準（#305）", () => {
 
     await updateContent(1, { content_type: "exercise", gradingRubric: input });
 
-    expect(updatePayload(mockClient).grading_rubric).toEqual({
+    const updates = mockClient.from.mock.results
+      .map((result) => result.value.update.mock.calls[0]?.[0])
+      .filter((payload) => payload !== undefined);
+    const rubricUpdate = updates.find((payload) => "grading_rubric" in payload);
+    expect(rubricUpdate?.grading_rubric).toEqual({
       version: 1,
       requirements: input.requirements,
       max_key_number: 1,
     });
+    expect(rubricUpdate?.content_type).toBe("exercise");
+    // Exercise does not keep an article, so the follow-up write clears text_content.
+    expect(updates).toContainEqual({ text_content: null });
   });
 
   it("内容が同じなら version を据え置く", async () => {
@@ -946,12 +953,17 @@ describe("updateContent / createContent の採点基準（#305）", () => {
 
     await updateContent(1, { content_type: "video", gradingRubric: input });
 
-    expect(updatePayload(mockClient).grading_rubric).toEqual({
+    const updates = mockClient.from.mock.results
+      .map((result) => result.value.update.mock.calls[0]?.[0])
+      .filter((payload) => payload !== undefined);
+    const rubricUpdate = updates.find((payload) => "grading_rubric" in payload);
+    expect(rubricUpdate?.grading_rubric).toEqual({
       version: 3,
       requirements: [],
       max_key_number: 1,
     });
-    expect(updatePayload(mockClient).content_type).toBe("video");
+    expect(rubricUpdate?.content_type).toBe("video");
+    expect(updates).toContainEqual({ text_content: null });
   });
 
   it("zod で読めない採点基準でも version で一致させ、NULL とは扱わない", async () => {
