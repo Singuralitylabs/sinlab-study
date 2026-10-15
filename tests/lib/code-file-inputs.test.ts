@@ -262,12 +262,12 @@ describe("isUnchangedFromStarter", () => {
     expect(
       isUnchangedFromStarter([{ ...snapshot[0], content: "<div>edited</div>" }], snapshot)
     ).toBe(false);
-    expect(
-      isUnchangedFromStarter([{ ...snapshot[0], filename: "app.html" }], snapshot)
-    ).toBe(false);
-    expect(
-      isUnchangedFromStarter([{ ...snapshot[0], language: "javascript" }], snapshot)
-    ).toBe(false);
+    expect(isUnchangedFromStarter([{ ...snapshot[0], filename: "app.html" }], snapshot)).toBe(
+      false
+    );
+    expect(isUnchangedFromStarter([{ ...snapshot[0], language: "javascript" }], snapshot)).toBe(
+      false
+    );
     expect(isUnchangedFromStarter([...snapshot, createEmptyLike()], snapshot)).toBe(false);
     expect(isUnchangedFromStarter(snapshot, null)).toBe(false);
     expect(isUnchangedFromStarter(snapshot, [])).toBe(false);
