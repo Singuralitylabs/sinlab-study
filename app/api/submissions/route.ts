@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
 
     const supabase = await createServerSupabaseClient();
 
-    // Visibility + starter meta in one round-trip (403 if contentId isn't visible: trial-closed,
+    // Visibility + starter_files in one round-trip (403 if contentId isn't visible: trial-closed,
     // unpublished and nonexistent IDs all give 0 rows via RLS).
     const content = await fetchVisibleContentForSubmission(supabase, contentId);
     if (!content) {

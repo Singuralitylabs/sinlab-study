@@ -31,9 +31,7 @@ const request = (
   });
 
 const visibleContent = {
-  id: 1,
   starter_files: null,
-  code_language: "javascript",
 };
 
 beforeEach(() => {
@@ -239,9 +237,7 @@ describe("POST /api/submissions - 未編集の初期コード", () => {
 
   it("starter と同一（末尾空白のみ）なら 400", async () => {
     vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue({
-      id: 1,
       starter_files: starter,
-      code_language: "javascript",
     } as never);
 
     const res = await POST(
@@ -259,9 +255,7 @@ describe("POST /api/submissions - 未編集の初期コード", () => {
 
   it("ファイル名だけ変えても 400", async () => {
     vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue({
-      id: 1,
       starter_files: starter,
-      code_language: "javascript",
     } as never);
 
     const res = await POST(
@@ -278,9 +272,7 @@ describe("POST /api/submissions - 未編集の初期コード", () => {
 
   it("内容を変えていれば 200", async () => {
     vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue({
-      id: 1,
       starter_files: starter,
-      code_language: "javascript",
     } as never);
 
     const res = await POST(

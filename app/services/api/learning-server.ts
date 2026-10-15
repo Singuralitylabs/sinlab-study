@@ -26,10 +26,31 @@ import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabas
 
 /** Visible content row fields used by POST /api/submissions starter checks. */
 export type VisibleLearningContent = {
-  id: number;
   starter_files: Json | null;
-  code_language: string | null;
 };
+
+/** Shallow builder shape so nested !inner selects do not explode through 8 .eq calls (TS2589). */
+type VisibleHierarchyQuery = {
+  eq(column: string, value: boolean): VisibleHierarchyQuery;
+  maybeSingle: () => PromiseLike<{ data: unknown; error: PostgrestError | null }>;
+};
+
+/**
+ * Content + week/phase/theme published hierarchy filters shared by isContentVisible() and
+ * fetchVisibleContentForSubmission(). Select strings stay separate (id-only vs starter_files).
+ * Callers cast into VisibleHierarchyQuery (same class of depth escape as LEARNING_CONTENT_DETAIL_COLUMNS).
+ */
+function applyVisibleHierarchyFilters(query: VisibleHierarchyQuery): VisibleHierarchyQuery {
+  return query
+    .eq("is_published", true)
+    .eq("is_deleted", false)
+    .eq("week.is_published", true)
+    .eq("week.is_deleted", false)
+    .eq("week.phase.is_published", true)
+    .eq("week.phase.is_deleted", false)
+    .eq("week.phase.theme.is_published", true)
+    .eq("week.phase.theme.is_deleted", false);
+}
 
 /** Excludes heavy text columns (body, instructions, model answer, hints). */
 export const LEARNING_CONTENT_LIST_COLUMNS =
@@ -543,21 +564,14 @@ export async function isContentVisible(
   contentId: number
 ): Promise<boolean> {
   // Select string must be a literal for the Supabase client's type parser (no template concat).
-  const { data, error } = await supabase
-    .from("learning_contents")
-    .select(
-      "id, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
-    )
-    .eq("id", contentId)
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .eq("week.is_published", true)
-    .eq("week.is_deleted", false)
-    .eq("week.phase.is_published", true)
-    .eq("week.phase.is_deleted", false)
-    .eq("week.phase.theme.is_published", true)
-    .eq("week.phase.theme.is_deleted", false)
-    .maybeSingle();
+  const { data, error } = await applyVisibleHierarchyFilters(
+    supabase
+      .from("learning_contents")
+      .select(
+        "id, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
+      )
+      .eq("id", contentId) as unknown as VisibleHierarchyQuery
+  ).maybeSingle();
 
   if (error) {
     // Stay fail-closed (treat as invisible) but let logs distinguish a DB failure from truly
@@ -569,42 +583,31 @@ export async function isContentVisible(
 }
 
 /**
- * Visibility check plus starter meta for POST /api/submissions in one round-trip. Same published
+ * Visibility check plus starter_files for POST /api/submissions in one round-trip. Same published
  * hierarchy filters as isContentVisible(); returns null when invisible.
  */
 export async function fetchVisibleContentForSubmission(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
   contentId: number
 ): Promise<VisibleLearningContent | null> {
-  const { data, error } = await supabase
-    .from("learning_contents")
-    .select(
-      "id, starter_files, code_language, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
-    )
-    .eq("id", contentId)
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .eq("week.is_published", true)
-    .eq("week.is_deleted", false)
-    .eq("week.phase.is_published", true)
-    .eq("week.phase.is_deleted", false)
-    .eq("week.phase.theme.is_published", true)
-    .eq("week.phase.theme.is_deleted", false)
-    .maybeSingle();
+  const { data, error } = await applyVisibleHierarchyFilters(
+    supabase
+      .from("learning_contents")
+      .select(
+        "starter_files, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
+      )
+      .eq("id", contentId) as unknown as VisibleHierarchyQuery
+  ).maybeSingle();
 
   if (error) {
     console.error("コンテンツ可視性チェックエラー:", error.message);
   }
 
-  if (!data) {
+  if (!data || typeof data !== "object") {
     return null;
   }
 
-  return {
-    id: data.id,
-    starter_files: data.starter_files,
-    code_language: data.code_language,
-  };
+  return { starter_files: (data as VisibleLearningContent).starter_files };
 }
 
 /**

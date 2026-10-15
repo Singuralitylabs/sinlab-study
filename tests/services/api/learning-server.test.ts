@@ -1388,21 +1388,29 @@ describe("isContentVisible", () => {
 });
 
 describe("fetchVisibleContentForSubmission", () => {
-  it("可視なら starter メタ付きで返す", async () => {
+  it("可視なら starter_files だけ返す", async () => {
     const mockClient = createMockSupabaseClient({
       queryResult: {
-        data: { id: 1, starter_files: null, code_language: "javascript" },
+        data: { starter_files: null },
         error: null,
       },
     });
 
     const result = await fetchVisibleContentForSubmission(mockClient as never, 1);
 
-    expect(result).toEqual({ id: 1, starter_files: null, code_language: "javascript" });
+    expect(result).toEqual({ starter_files: null });
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.select).toHaveBeenCalledWith(
-      "id, starter_files, code_language, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
+      "starter_files, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
     );
+    expect(builder.eq).toHaveBeenCalledWith("is_published", true);
+    expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
+    expect(builder.eq).toHaveBeenCalledWith("week.is_published", true);
+    expect(builder.eq).toHaveBeenCalledWith("week.is_deleted", false);
+    expect(builder.eq).toHaveBeenCalledWith("week.phase.is_published", true);
+    expect(builder.eq).toHaveBeenCalledWith("week.phase.is_deleted", false);
+    expect(builder.eq).toHaveBeenCalledWith("week.phase.theme.is_published", true);
+    expect(builder.eq).toHaveBeenCalledWith("week.phase.theme.is_deleted", false);
   });
 
   it("不可視なら null を返す", async () => {
