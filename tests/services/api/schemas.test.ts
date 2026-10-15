@@ -6,7 +6,12 @@ import {
   MAX_BULK_CONTENT_IDS,
 } from "@/app/constants/content";
 import { STARTER_FILES_MAX_TOTAL_LENGTH } from "@/app/constants/gemini";
-import { MEMBERSHIP_TYPES, USER_MANAGEMENT_ACTIONS, USER_ROLES } from "@/app/constants/user";
+import {
+  DISPLAY_NAME_MAX_LENGTH,
+  MEMBERSHIP_TYPES,
+  USER_MANAGEMENT_ACTIONS,
+  USER_ROLES,
+} from "@/app/constants/user";
 import { SUBMISSION_FILE_SLOT_MAX_COUNT } from "@/app/lib/submission-file-slots";
 import {
   AdminUserActionSchema,
@@ -17,6 +22,7 @@ import {
   ContentUpdateSchema,
   PhaseCreateSchema,
   PositiveIntSchema,
+  ProfileUpdateSchema,
   ProgressUpdateSchema,
   SubmissionCreateSchema,
   ThemeCreateSchema,
@@ -802,5 +808,58 @@ describe("AnnouncementSchema（#254）", () => {
         target_membership_types: ["general"],
       }).success
     ).toBe(true);
+  });
+});
+
+describe("ProfileUpdateSchema", () => {
+  it("前後の空白を除いた表示名を返し、role や userId は捨てる", () => {
+    const result = ProfileUpdateSchema.safeParse({
+      displayName: "  山田 太郎  ",
+      role: "admin",
+      userId: 99,
+      status: "rejected",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ displayName: "山田 太郎" });
+    }
+  });
+
+  it("ゼロ幅スペースや双方向制御は保存値から除く", () => {
+    const result = ProfileUpdateSchema.safeParse({ displayName: "\u202E山田\u200B" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ displayName: "山田" });
+    }
+  });
+
+  it(`${DISPLAY_NAME_MAX_LENGTH}文字ちょうどは許可する`, () => {
+    const name = "あ".repeat(DISPLAY_NAME_MAX_LENGTH);
+    const result = ProfileUpdateSchema.safeParse({ displayName: name });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.displayName).toBe(name);
+    }
+  });
+
+  it.each([
+    ["空", ""],
+    ["空白のみ", " \n\t "],
+    ["上限超え", "あ".repeat(DISPLAY_NAME_MAX_LENGTH + 1)],
+    ["改行", "山田\n太郎"],
+    ["タブ", "山田\t太郎"],
+    ["NUL", "山田\u0000太郎"],
+    ["行区切り", "山田\u2028太郎"],
+    ["書式文字だけ", "\u200B"],
+  ])("%s は拒否する", (_label, displayName) => {
+    expect(ProfileUpdateSchema.safeParse({ displayName }).success).toBe(false);
+  });
+
+  it.each([
+    ["未指定", {}],
+    ["文字列でない", { displayName: 1 }],
+    ["null", { displayName: null }],
+  ])("%s は拒否する", (_label, body) => {
+    expect(ProfileUpdateSchema.safeParse(body).success).toBe(false);
   });
 });

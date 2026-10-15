@@ -7,6 +7,7 @@ import {
   isCertificateNoCollision,
   isThemeCompleted,
 } from "@/app/lib/certificate";
+import { parseDisplayName } from "@/app/lib/display-name";
 import {
   fetchThemeProgressSummaries,
   type ThemeProgressSummary,
@@ -60,8 +61,9 @@ export type IssuedCertificate = Pick<
 export type IssueResult = {
   issued: readonly IssuedCertificate[];
   /**
-   * True when issuance was skipped because the user's display_name is blank. The user cannot fix
-   * it themselves (no profile editing), so the page tells them to contact the operators.
+   * True when issuance was skipped because display_name fails the same rules as the settings
+   * form (blank, too long, or control characters). They fix it on /settings; a certificate
+   * already issued keeps the snapshotted recipient_name.
    */
   blockedByMissingName: boolean;
 };
@@ -98,12 +100,16 @@ async function insertCertificates(
     return NOTHING_ISSUED;
   }
 
-  // The name is snapshotted and cannot be fixed afterwards, and a blank display_name (the signup
-  // fallback when Google gives neither name nor email) would print a nameless certificate.
-  if (!user.display_name?.trim()) {
-    console.warn("[修了証] 受講者名が空のため発行を見送りました");
+  // The name is snapshotted and cannot be fixed afterwards. Signup stores Google full_name
+  // (VARCHAR(255)) or a blank fallback, which the settings form would reject when it is empty,
+  // longer than DISPLAY_NAME_MAX_LENGTH, or contains control characters. Issuance uses the same
+  // parse so those strings are not printed.
+  const parsedName = parseDisplayName(user.display_name ?? "");
+  if (!parsedName.ok) {
+    console.warn("[修了証] 受講者名が発行条件を満たさないため発行を見送りました");
     return { issued: [], blockedByMissingName: true };
   }
+  const recipientName = parsedName.name;
 
   const issued: IssuedCertificate[] = [];
   for (const summary of summaries) {
@@ -114,7 +120,7 @@ async function insertCertificates(
           user_id: userId,
           theme_id: summary.theme.id,
           certificate_no: generateCertificateNo(new Date()),
-          recipient_name: user.display_name,
+          recipient_name: recipientName,
           theme_name: summary.theme.name,
         })
         .select("id, theme_id, certificate_no, theme_name")

@@ -416,7 +416,7 @@ export default async function ContentPage({ params }: PageProps) {
                               getSubmissionCodeFiles(latestSubmission),
                               content.code_language
                             )}
-                            preClassName="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre-wrap"
+                            preClassName="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto"
                           />
                         ) : (
                           <p className="text-sm text-muted-foreground break-all">
@@ -428,7 +428,9 @@ export default async function ContentPage({ params }: PageProps) {
                       {referenceAnswer && (
                         <div className="mb-6">
                           <h3 className="text-lg font-semibold mb-3">模範回答</h3>
-                          <pre className="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre-wrap">
+                          {/* Free text from the admin textarea. pre-wrap keeps a long sentence
+                              on the card. Submission code omits it so a line scrolls inside pre. */}
+                          <pre className="max-w-full overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted px-4 py-3 text-sm font-mono">
                             {referenceAnswer}
                           </pre>
                         </div>
@@ -436,7 +438,7 @@ export default async function ContentPage({ params }: PageProps) {
 
                       {reviewForLatestSubmission && (
                         <div className="mb-6">
-                          <div className="flex items-center gap-2 mb-2">
+                          <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
                             <h3 className="text-lg font-semibold">AIレビュー結果</h3>
                             <Badge
                               variant="outline"

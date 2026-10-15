@@ -236,3 +236,35 @@
 .prose pre code.hljs .hljs-meta {
   color: var(--hljs-meta);
 }
+
+/*
+ * Submission cards are flex columns, so a table's min-content width (and a long link or
+ * inline code token) widens the page. Scroll the table in its own box. anywhere breaks
+ * only a token longer than the line, so a normal word still wraps whole. break-all would
+ * split that word at the margin on every screen. Fenced code stays white-space:pre and
+ * scrolls in pre (see MarkdownPre). Unlayered so these beat @tailwindcss/typography.
+ */
+.prose .markdown-table-scroll {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  /* overflow:auto blocks margin collapse, so the table's 2em margin would stack on
+     the paragraph margin. 0.75em here keeps a prose-sm review card within a few pixels
+     of the previous height. */
+  margin-top: 0.75em;
+  margin-bottom: 0.75em;
+}
+
+.prose :is(h1, h2, h3, h4, hr) + .markdown-table-scroll {
+  margin-top: 0;
+}
+
+.prose .markdown-table-scroll > table {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.prose :where(a),
+.prose :where(:not(pre) > code) {
+  overflow-wrap: anywhere;
+}

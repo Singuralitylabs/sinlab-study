@@ -128,13 +128,25 @@ export default async function CertificatesPage() {
                         <span className="text-sm text-muted-foreground shrink-0">{progress}%</span>
                       </div>
                       <p className="text-sm text-muted-foreground mb-2">
-                        {isThemeCompleted({ totalContents, completedContents })
-                          ? // Completed but still unissued: a blank name or any other failure (logged
-                            // server-side) left it. Never say "when you complete" for a done theme.
-                            blockedByMissingName
-                            ? "氏名が未設定のため発行できません。運営へお問い合わせください。"
-                            : "修了証を発行できませんでした。時間をおいて再読み込みしてください。"
-                          : `修了すると発行されます（${completedContents} / ${totalContents}）`}
+                        {isThemeCompleted({ totalContents, completedContents }) ? (
+                          // Completed but still unissued: a name the settings form would reject, or
+                          // any other failure (logged server-side). Never say "when you complete".
+                          blockedByMissingName ? (
+                            <>
+                              この表示名では修了証を発行できません。
+                              <Link
+                                href="/settings"
+                                className="text-primary underline underline-offset-2"
+                              >
+                                設定画面で名前を入力してください
+                              </Link>
+                            </>
+                          ) : (
+                            "修了証を発行できませんでした。時間をおいて再読み込みしてください。"
+                          )
+                        ) : (
+                          `修了すると発行されます（${completedContents} / ${totalContents}）`
+                        )}
                       </p>
                       <Progress value={progress} className="h-2" />
                     </CardContent>

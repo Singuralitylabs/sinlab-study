@@ -97,6 +97,24 @@ describe("MarkdownRenderer", () => {
     expect(html).toContain("hljs-tag");
   });
 
+  it("広い表は表要素の中で横スクロールできるよう包み、コードフェンスの pre もスクロールポートを持つ", () => {
+    const content = [
+      "| a | b |",
+      "| --- | --- |",
+      "| very-long-cell-value | another-long-cell-value |",
+      "",
+      "```javascript",
+      "const a = 1;",
+      "```",
+    ].join("\n");
+
+    const html = renderToStaticMarkup(createElement(MarkdownRenderer, { content }));
+
+    expect(html).toContain('<div class="markdown-table-scroll"><table>');
+    expect(html).toMatch(/<pre class="[^"]*\boverflow-x-auto\b[^"]*">/);
+    expect(html).toContain('class="hljs language-javascript"');
+  });
+
   it("インラインコードにはハイライトのクラスが付与されず、コードブロックと区別される", () => {
     const content = "`const a = 1;`\n\n```javascript\nconst a = 1;\n```";
 
