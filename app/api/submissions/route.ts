@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { shouldTrackFirstSubmission } from "@/app/lib/analytics-funnel";
-import { isCodeEquivalentToStarter, parseStarterFiles } from "@/app/lib/code-file-inputs";
+import { parseStarterFiles } from "@/app/lib/code-file-inputs";
 import {
   blocksUneditedStarter,
   EMPTY_SUBMISSION_CODE_ERROR,
@@ -96,16 +96,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "URLが入力されていません" }, { status: 400 });
       }
       storedUrl = trimmedUrl;
-    }
-
-    // Reject unedited starter (content-only) so clients cannot burn AI review slots.
-    if (submissionType === "code") {
-      const submittedFiles: CodeFile[] =
-        storedCodeFiles ??
-        (storedCodeContent ? [{ filename: "", language: "", content: storedCodeContent }] : []);
-      if (isCodeEquivalentToStarter(submittedFiles, parseStarterFiles(content.starter_files))) {
-        return NextResponse.json({ error: "初期コードから変更してください" }, { status: 400 });
-      }
     }
 
     // Count before insert so the new row is not treated as a pre-existing submission.
