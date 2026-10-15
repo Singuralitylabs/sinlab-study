@@ -153,10 +153,14 @@ export function isSubmissionCodeValid(files: readonly CodeFileInput[]): boolean 
   return true;
 }
 
-function toComparableCodeFiles(
+/**
+ * Trimmed non-empty contents in file order after submit normalization (empty shells omitted).
+ * Filename/language are ignored so renaming or language-only changes still count as unchanged.
+ */
+function toComparableContents(
   files: readonly { filename: string; language: string; content: string }[],
   contentCodeLanguage: CodeLanguage
-): CodeFile[] {
+): string[] {
   const inputs: CodeFileInput[] = files.map((file, index) => ({
     id: `cmp-${index}`,
     filename: file.filename,
@@ -164,17 +168,12 @@ function toComparableCodeFiles(
     content: file.content,
     filenameEdited: true,
   }));
-  // Same omit-empty-shell rules as submit; trim content so whitespace-only edits do not count.
-  return buildSubmissionCodeFiles(inputs, contentCodeLanguage).map((file) => ({
-    filename: file.filename,
-    language: file.language,
-    content: file.content.trim(),
-  }));
+  return buildSubmissionCodeFiles(inputs, contentCodeLanguage).map((file) => file.content.trim());
 }
 
 /**
- * True when submitted code matches starter after submit normalization (empty shells ignored;
- * content compared trimmed). Used client- and server-side to block burning an AI review slot.
+ * True when submitted code matches starter by trimmed content sequence only (empty shells ignored;
+ * filename/language ignored). Used client- and server-side to block burning an AI review slot.
  */
 export function isCodeEquivalentToStarter(
   submitted: readonly { filename: string; language: string; content: string }[],
@@ -184,26 +183,35 @@ export function isCodeEquivalentToStarter(
   if (!starter || starter.length === 0) {
     return false;
   }
-  const left = toComparableCodeFiles(submitted, contentCodeLanguage);
-  const right = toComparableCodeFiles(starter, contentCodeLanguage);
+  const left = toComparableContents(submitted, contentCodeLanguage);
+  const right = toComparableContents(starter, contentCodeLanguage);
   if (left.length === 0 || right.length === 0 || left.length !== right.length) {
     return false;
   }
-  return left.every(
-    (file, index) =>
-      file.filename === right[index].filename &&
-      file.language === right[index].language &&
-      file.content === right[index].content
-  );
+  return left.every((content, index) => content === right[index]);
 }
 
-/** Editor still matches starter snapshot (same normalization as isCodeEquivalentToStarter). */
-export function isUnchangedFromStarter(
-  files: readonly CodeFileInput[],
-  starterSnapshot: readonly CodeFileInput[] | null | undefined,
-  contentCodeLanguage: CodeLanguage
+type ContentStarterFields = {
+  starter_files?: Json | null;
+  code_language?: string | null;
+};
+
+/**
+ * Route helper: parse content.starter_files and compare submitted files with content.code_language.
+ */
+export function isCodeEquivalentToContentStarter(
+  submitted: readonly { filename: string; language: string; content: string }[],
+  content: ContentStarterFields
 ): boolean {
-  return isCodeEquivalentToStarter(files, starterSnapshot, contentCodeLanguage);
+  const starter = parseStarterFiles(content.starter_files);
+  if (!starter) {
+    return false;
+  }
+  return isCodeEquivalentToStarter(
+    submitted,
+    starter,
+    resolveLanguage(content.code_language ?? "javascript", "javascript")
+  );
 }
 
 export function updateCodeFileAt(

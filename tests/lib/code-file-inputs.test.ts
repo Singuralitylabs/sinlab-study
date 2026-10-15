@@ -4,9 +4,9 @@ import {
   buildInitialCodeFiles,
   buildSubmissionCodeFiles,
   changeCodeFileLanguage,
+  isCodeEquivalentToContentStarter,
   isCodeEquivalentToStarter,
   isSubmissionCodeValid,
-  isUnchangedFromStarter,
   parseStarterFiles,
   resolveLanguage,
   toStarterFilesPayload,
@@ -243,16 +243,16 @@ describe("buildSubmissionCodeFiles / isSubmissionCodeValid", () => {
   });
 });
 
-describe("isUnchangedFromStarter / isCodeEquivalentToStarter", () => {
+describe("isCodeEquivalentToStarter", () => {
   const snapshot = buildInitialCodeFiles(
     [{ filename: "index.html", language: "html", content: "<div></div>" }],
     "javascript"
   );
 
   it("初期スナップショットと同一なら true", () => {
-    expect(isUnchangedFromStarter(snapshot, snapshot, "javascript")).toBe(true);
+    expect(isCodeEquivalentToStarter(snapshot, snapshot, "javascript")).toBe(true);
     expect(
-      isUnchangedFromStarter(
+      isCodeEquivalentToStarter(
         snapshot.map((file) => ({ ...file })),
         snapshot,
         "javascript"
@@ -262,36 +262,40 @@ describe("isUnchangedFromStarter / isCodeEquivalentToStarter", () => {
 
   it("末尾空白のみ・空シェル削除は未変更扱い", () => {
     expect(
-      isUnchangedFromStarter(
+      isCodeEquivalentToStarter(
         [{ ...snapshot[0], content: "<div></div>\n  " }],
         snapshot,
         "javascript"
       )
     ).toBe(true);
-    expect(isUnchangedFromStarter([...snapshot, createEmptyLike()], snapshot, "javascript")).toBe(
+    expect(isCodeEquivalentToStarter([...snapshot, createEmptyLike()], snapshot, "javascript")).toBe(
       true
     );
-    expect(isUnchangedFromStarter(snapshot, [...snapshot, createEmptyLike()], "javascript")).toBe(
+    expect(isCodeEquivalentToStarter(snapshot, [...snapshot, createEmptyLike()], "javascript")).toBe(
       true
     );
   });
 
-  it("内容・ファイル名・言語が違えば false、starter 無しは false", () => {
+  it("ファイル名・言語だけの変更は未変更、本文変更と starter 無しは false", () => {
     expect(
-      isUnchangedFromStarter(
+      isCodeEquivalentToStarter([{ ...snapshot[0], filename: "app.html" }], snapshot, "javascript")
+    ).toBe(true);
+    expect(
+      isCodeEquivalentToStarter(
+        [{ ...snapshot[0], language: "javascript" }],
+        snapshot,
+        "javascript"
+      )
+    ).toBe(true);
+    expect(
+      isCodeEquivalentToStarter(
         [{ ...snapshot[0], content: "<div>edited</div>" }],
         snapshot,
         "javascript"
       )
     ).toBe(false);
-    expect(
-      isUnchangedFromStarter([{ ...snapshot[0], filename: "app.html" }], snapshot, "javascript")
-    ).toBe(false);
-    expect(
-      isUnchangedFromStarter([{ ...snapshot[0], language: "javascript" }], snapshot, "javascript")
-    ).toBe(false);
-    expect(isUnchangedFromStarter(snapshot, null, "javascript")).toBe(false);
-    expect(isUnchangedFromStarter(snapshot, [], "javascript")).toBe(false);
+    expect(isCodeEquivalentToStarter(snapshot, null, "javascript")).toBe(false);
+    expect(isCodeEquivalentToStarter(snapshot, [], "javascript")).toBe(false);
   });
 
   it("サーバー比較: code_content 相当と starter が trim 後一致なら true", () => {
@@ -309,6 +313,28 @@ describe("isUnchangedFromStarter / isCodeEquivalentToStarter", () => {
         starter,
         "javascript"
       )
+    ).toBe(false);
+  });
+
+  it("isCodeEquivalentToContentStarter は content 行から判定する", () => {
+    const starter = [{ filename: "app.js", language: "javascript", content: "const x = 1;" }];
+    expect(
+      isCodeEquivalentToContentStarter([{ filename: "", language: "", content: "const x = 1;" }], {
+        starter_files: starter,
+        code_language: "javascript",
+      })
+    ).toBe(true);
+    expect(
+      isCodeEquivalentToContentStarter([{ filename: "", language: "", content: "const x = 2;" }], {
+        starter_files: starter,
+        code_language: "javascript",
+      })
+    ).toBe(false);
+    expect(
+      isCodeEquivalentToContentStarter([{ filename: "", language: "", content: "x" }], {
+        starter_files: null,
+        code_language: "javascript",
+      })
     ).toBe(false);
   });
 });

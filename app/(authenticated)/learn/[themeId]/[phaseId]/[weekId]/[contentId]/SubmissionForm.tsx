@@ -12,8 +12,8 @@ import {
   buildInitialCodeFiles,
   buildSubmissionCodeFiles,
   type CodeFileInput,
+  isCodeEquivalentToStarter,
   isSubmissionCodeValid,
-  isUnchangedFromStarter,
 } from "@/app/lib/code-file-inputs";
 import { canPreviewFiles } from "@/app/lib/html-preview";
 import type { AIReviewListItem, CodeFile, SubmissionType } from "@/app/types";
@@ -76,7 +76,11 @@ export function SubmissionForm({
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
   const hasStarter = Boolean(starterSnapshot && starterSnapshot.length > 0);
-  const unchangedFromStarter = isUnchangedFromStarter(codeFiles, starterSnapshot, codeLanguage);
+  const unchangedFromStarter = isCodeEquivalentToStarter(
+    codeFiles,
+    starterSnapshot,
+    codeLanguage
+  );
   // Judged by the files' own languages so the UI never appears for non-web exercises.
   const showPreview = submissionType === "code" && canPreviewFiles(codeFiles);
   const emptyShellCount = codeFiles.filter((file) => file.content.trim().length === 0).length;

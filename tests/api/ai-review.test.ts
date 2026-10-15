@@ -505,7 +505,7 @@ describe("POST /api/ai-review - 回数制限と枠の確保（#304 / #343）", (
 
   it("非公開になったコンテンツは403で、枠を確保しない（可視性チェックを維持）", async () => {
     setup({ auth: memberAuth });
-    vi.mocked(isContentVisible).mockResolvedValue(false);
+    vi.mocked(isContentVisible).mockResolvedValue(null);
 
     const res = await POST(request() as never);
 

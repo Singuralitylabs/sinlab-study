@@ -30,10 +30,16 @@ const request = (
     body: JSON.stringify(body),
   });
 
+const visibleContent = {
+  id: 1,
+  starter_files: null,
+  code_language: "javascript",
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(memberAuth as never);
-  vi.mocked(isContentVisible).mockResolvedValue(true);
+  vi.mocked(isContentVisible).mockResolvedValue(visibleContent as never);
   vi.mocked(createServerSupabaseClient).mockResolvedValue(
     createMockSupabaseClient({
       tableResults: { submissions: { data: { id: 1 }, error: null } },
@@ -69,7 +75,7 @@ describe("POST /api/submissions - 認可", () => {
   });
 
   it("対象コンテンツが不可視の場合は403", async () => {
-    vi.mocked(isContentVisible).mockResolvedValue(false);
+    vi.mocked(isContentVisible).mockResolvedValue(null);
 
     const res = await POST(request() as never);
 
@@ -232,17 +238,11 @@ describe("POST /api/submissions - 未編集の初期コード", () => {
   const starter = [{ filename: "index.html", language: "html", content: "<div></div>" }];
 
   it("starter と同一（末尾空白のみ）なら 400", async () => {
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(
-      createMockSupabaseClient({
-        tableResults: {
-          learning_contents: {
-            data: { starter_files: starter, code_language: "javascript" },
-            error: null,
-          },
-          submissions: { data: { id: 1 }, error: null },
-        },
-      }) as never
-    );
+    vi.mocked(isContentVisible).mockResolvedValue({
+      id: 1,
+      starter_files: starter,
+      code_language: "javascript",
+    } as never);
 
     const res = await POST(
       request({
@@ -254,23 +254,34 @@ describe("POST /api/submissions - 未編集の初期コード", () => {
 
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toEqual({ error: "初期コードから変更してください" });
+    expect(isContentVisible).toHaveBeenCalledTimes(1);
+  });
+
+  it("ファイル名だけ変えても 400", async () => {
+    vi.mocked(isContentVisible).mockResolvedValue({
+      id: 1,
+      starter_files: starter,
+      code_language: "javascript",
+    } as never);
+
+    const res = await POST(
+      request({
+        contentId: 1,
+        submissionType: "code",
+        codeFiles: [{ filename: "main.html", language: "html", content: "<div></div>" }],
+      }) as never
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: "初期コードから変更してください" });
   });
 
   it("内容を変えていれば 200", async () => {
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(
-      createMockSupabaseClient({
-        tableResults: {
-          learning_contents: {
-            data: { starter_files: starter, code_language: "javascript" },
-            error: null,
-          },
-          submissions: [
-            { data: null, error: null, count: 0 },
-            { data: { id: 1 }, error: null },
-          ],
-        },
-      }) as never
-    );
+    vi.mocked(isContentVisible).mockResolvedValue({
+      id: 1,
+      starter_files: starter,
+      code_language: "javascript",
+    } as never);
 
     const res = await POST(
       request({

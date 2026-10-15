@@ -9,6 +9,7 @@ import {
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import type {
   BreadcrumbWeek,
+  Json,
   LearningContent,
   LearningContentListItem,
   LearningContentWithBreadcrumb,
@@ -20,6 +21,13 @@ import type {
   UserStatusType,
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
+
+/** Visible content row fields used by submission / AI-review starter checks. */
+export type VisibleLearningContent = {
+  id: number;
+  starter_files: Json | null;
+  code_language: string | null;
+};
 
 /** Excludes heavy text columns (body, instructions, model answer, hints). */
 export const LEARNING_CONTENT_LIST_COLUMNS =
@@ -306,17 +314,19 @@ export function isContentLockedForUser(
  * Checks `is_published = true AND is_deleted = false` for the content AND its week, phase and
  * theme. The learning_contents SELECT RLS allows admin / maintainer unconditionally, so checking
  * only the content row would let them record progress, submit, or request AI review for
- * soft-deleted contents or contents under unpublished parents. Returns false if any level is
+ * soft-deleted contents or contents under unpublished parents. Returns null if any level is
  * unpublished or deleted, regardless of role (issue #68 default).
+ * Also returns starter_files / code_language so POST /api/submissions can reject unedited starter
+ * in the same round-trip.
  */
 export async function isContentVisible(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
   contentId: number
-): Promise<boolean> {
+): Promise<VisibleLearningContent | null> {
   const { data, error } = await supabase
     .from("learning_contents")
     .select(
-      "id, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
+      "id, starter_files, code_language, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
     )
     .eq("id", contentId)
     .eq("is_published", true)
@@ -335,7 +345,15 @@ export async function isContentVisible(
     console.error("コンテンツ可視性チェックエラー:", error.message);
   }
 
-  return !!data;
+  if (!data) {
+    return null;
+  }
+
+  return {
+    id: data.id,
+    starter_files: data.starter_files,
+    code_language: data.code_language,
+  };
 }
 
 /**
