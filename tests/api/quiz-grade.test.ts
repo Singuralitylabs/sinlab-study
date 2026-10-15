@@ -91,7 +91,7 @@ describe("POST /api/quiz/grade", () => {
   });
 
   it("見えないコンテンツ（未公開・お試し対象外）は403で、採点しない", async () => {
-    vi.mocked(isContentVisible).mockResolvedValue(false);
+    vi.mocked(isContentVisible).mockResolvedValue(null);
 
     const res = await POST(request() as never);
 
@@ -101,7 +101,7 @@ describe("POST /api/quiz/grade", () => {
 
   it("admin / maintainer は未公開プレビューのため可視性チェックを通さずに採点できる", async () => {
     vi.mocked(getServerAuth).mockResolvedValue({ ...memberAuth, userRole: "maintainer" } as never);
-    vi.mocked(isContentVisible).mockResolvedValue(false);
+    vi.mocked(isContentVisible).mockResolvedValue(null);
 
     const res = await POST(request() as never);
 

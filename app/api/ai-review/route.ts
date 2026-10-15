@@ -1,11 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { GEMINI_MAX_CODE_LENGTH } from "@/app/constants/gemini";
 import { limitedDecision } from "@/app/lib/ai-review-limits";
-import {
-  isCodeEquivalentToStarter,
-  parseStarterFiles,
-  resolveLanguage,
-} from "@/app/lib/code-file-inputs";
+import { isCodeEquivalentToContentStarter } from "@/app/lib/code-file-inputs";
 import { parseGradingRubric } from "@/app/lib/grading-schema";
 import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import {
@@ -103,15 +99,8 @@ export async function POST(request: NextRequest) {
 
       // Same guard as POST /api/submissions: reject before claim so an unedited starter cannot
       // consume an AI review slot (client-side check alone is bypassable).
-      const starterFiles = parseStarterFiles(content.starter_files);
-      if (starterFiles) {
-        const contentLanguage = resolveLanguage(
-          content.code_language ?? "javascript",
-          "javascript"
-        );
-        if (isCodeEquivalentToStarter(files, starterFiles, contentLanguage)) {
-          return NextResponse.json({ error: "初期コードから変更してください" }, { status: 400 });
-        }
+      if (isCodeEquivalentToContentStarter(files, content)) {
+        return NextResponse.json({ error: "初期コードから変更してください" }, { status: 400 });
       }
 
       reviewSubmission = {

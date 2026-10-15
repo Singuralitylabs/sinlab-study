@@ -79,7 +79,7 @@ describe("POST /api/progress - 認可", () => {
   });
 
   it("対象コンテンツが不可視の場合は403", async () => {
-    vi.mocked(isContentVisible).mockResolvedValue(false);
+    vi.mocked(isContentVisible).mockResolvedValue(null);
 
     const res = await POST(request() as never);
 
