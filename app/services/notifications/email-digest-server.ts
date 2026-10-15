@@ -33,6 +33,11 @@ import {
   toJstDateString,
   visibleContentsFor,
 } from "@/app/lib/email-digest";
+import {
+  countUnovercomeReviewItems,
+  deriveReviewListItems,
+  type ReviewListSourceReview,
+} from "@/app/lib/review-list";
 import type { EmailSettingsSnapshot } from "@/app/lib/email-settings";
 import type { EmailTexts } from "@/app/lib/email-template";
 import { type EmailMarkdown, renderEmailMarkdown } from "@/app/lib/markdown-email";
@@ -57,7 +62,7 @@ import {
   type DeliverResult,
   deliverUserEmail,
 } from "@/app/services/notifications/user-emails";
-import type { Announcement, UserRoleType, UserStatusType } from "@/app/types";
+import type { Announcement, ScoreKind, UserRoleType, UserStatusType } from "@/app/types";
 
 /**
  * Extraction and sending for periodic emails (weekly progress, inactivity reminder, guides for
@@ -370,6 +375,70 @@ async function fetchWeeklyStats(
     );
   }
   return stats;
+}
+
+/**
+ * Unovercome review-list counts for weekly digest body lines. Cron has no user session, so this
+ * uses service_role with an explicit user_id filter (same pattern as other digest aggregations;
+ * not a student delivery path). Targeting / send conditions are unchanged — count is body-only.
+ */
+async function fetchUnovercomeReviewCountsByUser(
+  supabase: AdminClient,
+  userIds: number[]
+): Promise<Map<number, number>> {
+  const counts = new Map<number, number>();
+  if (userIds.length === 0) {
+    return counts;
+  }
+
+  const reviewsByUser = new Map<number, ReviewListSourceReview[]>();
+  const rows = await fetchForUserIds<{
+    user_id: number;
+    content_id: number;
+    ai_review: {
+      id: number;
+      score_kind: string;
+      review_json: unknown;
+      reviewed_at: string | null;
+      created_at: string;
+    } | null;
+  }>(userIds, (ids, from, to) =>
+    supabase
+      .from("submissions")
+      .select(
+        "user_id, content_id, ai_review:ai_reviews!inner(id, score_kind, review_json, reviewed_at, created_at, status)"
+      )
+      .in("user_id", ids)
+      .eq("ai_review.status", "completed")
+      .order("id")
+      .range(from, to)
+  );
+
+  for (const row of rows) {
+    const aiReview = row.ai_review as unknown as {
+      id: number;
+      score_kind: string;
+      review_json: unknown;
+      reviewed_at: string | null;
+      created_at: string;
+    } | null;
+    if (!aiReview) continue;
+    const list = reviewsByUser.get(row.user_id) ?? [];
+    list.push({
+      id: aiReview.id,
+      contentId: row.content_id,
+      scoreKind: aiReview.score_kind as ScoreKind,
+      reviewJson: aiReview.review_json,
+      reviewedAt: aiReview.reviewed_at ?? aiReview.created_at,
+    });
+    reviewsByUser.set(row.user_id, list);
+  }
+
+  for (const userId of userIds) {
+    const items = deriveReviewListItems(reviewsByUser.get(userId) ?? []);
+    counts.set(userId, countUnovercomeReviewItems(items));
+  }
+  return counts;
 }
 
 /**
@@ -957,11 +1026,11 @@ async function buildQueue(
   }
   const logged = await fetchWeeklyDigestLoggedUserIds(supabase, poolIds(), weekStart);
   const weeklyUsers = weeklyPool.filter((user) => !logged.has(user.userId));
-  const stats = await fetchWeeklyStats(
-    supabase,
-    weeklyUsers.map((user) => user.userId),
-    weekStart
-  );
+  const weeklyUserIds = weeklyUsers.map((user) => user.userId);
+  const [stats, unovercomeByUser] = await Promise.all([
+    fetchWeeklyStats(supabase, weeklyUserIds, weekStart),
+    fetchUnovercomeReviewCountsByUser(supabase, weeklyUserIds),
+  ]);
 
   const weeklyItems: QueuedEmail[] = [];
   for (const user of weeklyUsers) {
@@ -995,6 +1064,7 @@ async function buildQueue(
             nextContent: next ? { title: next.title, path: next.path } : null,
             remainingContents: remaining,
             activeThemes,
+            unovercomeReviewCount: unovercomeByUser.get(user.userId) ?? 0,
           },
           texts
         ),

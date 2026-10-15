@@ -18,6 +18,7 @@ import {
   fetchGettingStartedProgress,
   fetchOnboardingStatus,
 } from "@/app/services/api/onboarding-server";
+import { countUnovercomeReviewItemsForUser } from "@/app/services/api/review-list-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { checkInstructorPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -28,6 +29,7 @@ import {
   GettingStartedChecklist,
 } from "./components/GettingStartedChecklist";
 import { HomeQuickLinks } from "./components/HomeQuickLinks";
+import { ReviewListHomeLine } from "./components/ReviewListHomeLine";
 import { ActiveThemesSection } from "./components/ThemeProgressSections";
 import { WelcomeDialog } from "./components/WelcomeDialog";
 
@@ -58,6 +60,7 @@ export default async function HomePage() {
     gettingStartedResult,
     announcementsResult,
     recentCertificate,
+    unovercomeReviewCount,
   ] = await Promise.all([
     fetchHomeLearningData(userId),
     isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
@@ -66,6 +69,7 @@ export default async function HomePage() {
     isCertificateEligible(userStatus, userRole)
       ? fetchRecentCertificate(userId)
       : Promise.resolve(null),
+    isMember ? countUnovercomeReviewItemsForUser(userId) : Promise.resolve(0),
   ]);
   const unreadAnnouncements = (announcementsResult.data ?? [])
     .filter((announcement) => !announcement.isRead)
@@ -160,6 +164,8 @@ export default async function HomePage() {
       )}
 
       <HomeQuickLinks stripeEnabled={stripeEnabled} />
+
+      {isMember && <ReviewListHomeLine count={unovercomeReviewCount} />}
 
       {continueLearning && <ContinueLearningCard target={continueLearning} />}
 

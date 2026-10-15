@@ -338,6 +338,8 @@ export type WeeklyDigestEmailParams = PromotionalEmailParams & {
   remainingContents: number;
   /** Themes in progress, most recently studied first. */
   activeThemes: { themeName: string; completedContents: number; totalContents: number }[];
+  /** Open review-list items; 0 omits the line. Does not affect send targeting. */
+  unovercomeReviewCount?: number;
 };
 
 /** Themes listed in the weekly digest's "in progress" line. */
@@ -351,6 +353,7 @@ export function buildWeeklyDigestEmail(
     params.completedLastWeek > 0 || params.submittedLastWeek > 0
       ? "先週もお疲れさまでした。この調子で続けていきましょう。"
       : "先週は学習の記録がありませんでした。まずは1本、短い時間から再開してみましょう。";
+  const unovercome = params.unovercomeReviewCount ?? 0;
 
   return renderTemplatedEmail({
     key: "weekly_digest",
@@ -364,6 +367,8 @@ export function buildWeeklyDigestEmail(
         .slice(0, WEEKLY_ACTIVE_THEMES_LIMIT)
         .map((t) => `${t.themeName}（${t.completedContents} / ${t.totalContents} 完了）`)
         .join("、"),
+      review_list_line:
+        unovercome > 0 ? `復習リストに未克服の項目が ${unovercome} 件あります` : "",
       next_content_title: params.nextContent?.title ?? "",
       suggested_goal: params.nextContent
         ? String(suggestWeeklyGoal(params.completedLastWeek, params.remainingContents))

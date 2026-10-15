@@ -408,6 +408,7 @@ export function SubmissionForm({
           review={aiReview}
           isLoading={isReviewLoading}
           defaultExpanded={true}
+          contentId={contentId}
           onRetry={
             lastSubmissionId && aiReview?.status === "failed"
               ? () => {

@@ -677,6 +677,54 @@ export type Database = {
           },
         ];
       };
+      review_notes: {
+        Row: {
+          content_id: number;
+          created_at: string;
+          id: number;
+          memo: string | null;
+          requirement_key: string | null;
+          understood_at: string | null;
+          updated_at: string;
+          user_id: number;
+        };
+        Insert: {
+          content_id: number;
+          created_at?: string;
+          id?: number;
+          memo?: string | null;
+          requirement_key?: string | null;
+          understood_at?: string | null;
+          updated_at?: string;
+          user_id: number;
+        };
+        Update: {
+          content_id?: number;
+          created_at?: string;
+          id?: number;
+          memo?: string | null;
+          requirement_key?: string | null;
+          understood_at?: string | null;
+          updated_at?: string;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "review_notes_content_id_fkey";
+            columns: ["content_id"];
+            isOneToOne: false;
+            referencedRelation: "learning_contents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "review_notes_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       stripe_events: {
         Row: {
           id: string;

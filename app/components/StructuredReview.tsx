@@ -1,5 +1,6 @@
 import { CircleCheck, CircleMinus, CircleX } from "lucide-react";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
+import { ReviewNoteMemoField } from "@/app/components/ReviewNoteEditor";
 import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
 import {
   getQualityLevelLabel,
@@ -29,9 +30,19 @@ interface StructuredReviewProps {
   reviewJson: ReviewJson;
   scoreKind: ScoreKind;
   passDisplay: PassDisplay | null;
+  /** When set, partial/unmet rows show the review-list cue and an inline memo field. */
+  contentId?: number;
+  /** Existing memos keyed by requirement key (from review_notes). Plain object for RSC props. */
+  memosByKey?: Readonly<Record<string, string | null>>;
 }
 
-export function StructuredReview({ reviewJson, scoreKind, passDisplay }: StructuredReviewProps) {
+export function StructuredReview({
+  reviewJson,
+  scoreKind,
+  passDisplay,
+  contentId,
+  memosByKey,
+}: StructuredReviewProps) {
   return (
     <div className="space-y-4 text-sm">
       {SCORE_KIND_NOTES[scoreKind] && (
@@ -46,13 +57,16 @@ export function StructuredReview({ reviewJson, scoreKind, passDisplay }: Structu
           <ul className="space-y-2">
             {reviewJson.requirements.map((requirement) => {
               const Icon = STATUS_ICON[requirement.status];
+              const showReviewListCue =
+                contentId != null &&
+                (requirement.status === "partial" || requirement.status === "unmet");
               return (
                 <li key={requirement.key} className="flex gap-2">
                   <Icon
                     className={`mt-0.5 h-4 w-4 shrink-0 ${STATUS_COLOR[requirement.status]}`}
                     aria-label={getRequirementStatusLabel(requirement.status)}
                   />
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <p className="font-medium">
                       {requirement.name ?? requirement.key}
                       <span className="ml-2 text-xs font-normal text-muted-foreground">
@@ -63,6 +77,16 @@ export function StructuredReview({ reviewJson, scoreKind, passDisplay }: Structu
                       content={requirement.comment}
                       className="prose-sm text-muted-foreground"
                     />
+                    {showReviewListCue && (
+                      <div className="mt-2 space-y-1">
+                        <p className="text-xs text-muted-foreground">復習リストに追加されました</p>
+                        <ReviewNoteMemoField
+                          contentId={contentId}
+                          requirementKey={requirement.key}
+                          initialMemo={memosByKey?.[requirement.key] ?? null}
+                        />
+                      </div>
+                    )}
                   </div>
                 </li>
               );

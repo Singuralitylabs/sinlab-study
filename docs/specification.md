@@ -810,6 +810,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 - **URL の扱い**: URL 提出は URL の中身を AI が確認できないため要件判定をしない（`none`）。URL 形式の妥当性と課題への適合性の所見のみ返す
 - **トークン記録**: `prompt_tokens`（入力）・`completion_tokens`（回答）・`thoughts_tokens`（思考。`usageMetadata.thoughtsTokenCount`）を保存する。再生成した場合は両方の応答を合算し、失敗時も消費分を `failed` 行に記録する（`ReviewGenerationError.usage`）。同じ提出の再試行では `failed` 行を再利用するため、各列は試行をまたいだ累計になる（再試行で消さず加算する）。取得できなかった項目は NULL。管理画面（`/manage/submissions`）の admin / maintainer にのみ表示し、受講生向けの SELECT 列には含めない
 - **表示**: `review_json` から `StructuredReview` で描画する。要件のコメント・品質のコメント・改善提案・学習アドバイスは `MarkdownRenderer` で描画する（生 HTML は描画しない）。`legacy` と、`review_json` が不正な行は従来どおり `review_content`（Markdown）を表示する。`estimated` は「参考」、`none` は「採点対象外」のバッジを付ける。`passed = false`（有効時）のときは再提出の案内を出す
+- **復習リスト**: `partial` / `unmet` の要件は復習リストに自動で載る（15章）。レビュー表示には「復習リストに追加されました」と一言メモ欄を付ける
 
 **レスポンス**:
 
@@ -981,6 +982,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 - `/upgrade`: ステータス別の出し分け。サイドナビ「プラン・お支払い」から全認証ユーザーがアクセス可能（2.11）
 - `/upgrade/success`: Checkoutから戻った直後の決済確認・完了表示（2.11）
 - `/certificates` / `/certificates/[id]`: 修了証の一覧と表示（本登録の member のみ。13章）
+- `/review-list`: 復習リスト（未克服 / 克服済み。`role = member` のみ。15章）
 - `/announcements` / `/announcements/[id]`: お知らせの一覧（未読表示。サイドナビ「お知らせ」に未読件数のバッジ）・詳細（開くと既読を記録）（11章）
 - `/settings`: 案内メールの配信状態（配信中 / 停止中と停止日時）の確認と、停止・再開（10.8節）。サイドナビのログアウトの上に「設定」として全ロールへ表示する
 
@@ -1427,3 +1429,47 @@ X 向けの共有リンク（`https://twitter.com/intent/tweet?text=...&url=...`
 ### 13.6 管理画面
 
 `/manage/students` の受講生一覧に修了証の枚数を表示する。既存の進捗 RPC には列を足さず、`certificates` の `user_id` を別クエリで取得して集計・結合する（管理者のセッションで読む。RLS は admin / maintainer に SELECT を許す）。取得に失敗しても一覧は表示する（枚数は0）。
+
+---
+
+## 15. 復習リスト
+
+AI レビューで指摘された「部分的 / 未達成」の要件を、受講生本人の復習リストとして自動で集める（#309）。AI の追加呼び出しは無く、採点ロジック・修了証の発行処理には触らない。
+
+### 15.1 復習項目の導出
+
+項目は **テーブルに複製しない**。`ai_reviews`（本人の提出に紐づく完了行）から都度導出する。純粋関数は `app/lib/review-list.ts` の `deriveReviewListItems()` に集約する。
+
+| 規則 | 内容 |
+|:--|:--|
+| 対象 | `score_kind` が `rubric` または `estimated` で、認識できる `review_json` を持つ完了レビュー。`legacy` / `none` / `incomplete` は対象外 |
+| 開く条件 | 要件の `status` が `partial` または `unmet` |
+| 識別子 | `rubric`: `(content_id, requirement key)`。`estimated`: `(content_id, review_id, key)`（AI が付番するため） |
+| `estimated` の扱い | 同じコンテンツに `rubric` レビューが1件でもあれば、`estimated` 由来の項目は表示しない |
+| 克服済み | 同じ `(content_id, key)` について、より新しいレビューで `met` になった。または `rubric` で、新しいレビューにその `key` が無い（採点基準の版変更で消えた） |
+| 「理解した」 | `review_notes.understood_at`。自己申告のみで、克服済みの判定には使わない（未克服タブに残し、見た目を薄くする） |
+
+並びはテーマ → コンテンツの学習順（`buildThemeContentOrder()` / テーマ別進捗と同じ骨格）。テーマ見出しを付ける。
+
+### 15.2 review_notes
+
+本人の一言メモと「理解した」チェックだけを持つ（[データベース設計書](./database.md)）。`requirement_key = NULL` はコンテンツ単位の自由記述（学習メモ。1コンテンツ1行）。書き込みは通常クライアント（RLS）。service_role は使わない。受講生向け配信経路の service_role 利用（ツリー一覧サマリーとコンテンツ詳細の存在チェックの2箇所）は増やさない。
+
+### 15.3 API
+
+| メソッド | パス | 内容 |
+|:--|:--|:--|
+| PUT | `/api/review-notes` | `{ contentId, requirementKey \| null, memo?, understood? }` を upsert。`memo` は 500 文字超で 400（切らない）。`understood: true` → `understood_at = now()`、`false` → NULL。未認証 401、`rejected` 403、`isContentVisible()` で不可視なら 403 |
+| DELETE | `/api/review-notes` | `{ contentId, requirementKey \| null }` で本人の行を削除 |
+
+スキーマは `app/services/api/schemas.ts`。認証は `requireLearnerApi()`。
+
+### 15.4 画面
+
+- **`/review-list`**: サイドナビ「復習リスト」（`role = member` のみ）。未克服 / 克服済みタブ。各項目にコンテンツ名（リンク）、要件名、AI コメント（最新）、一言メモ、「理解した」。メモありのコンテンツ（自由記述）も表示
+- **コンテンツ詳細**: `AIReviewDisplay` の `partial` / `unmet` 行に「復習リストに追加されました」とメモ欄。下部に「学習メモ」
+- **ホーム**: 未克服が 1 件以上なら「復習リストに N 件」を 1 行で表示（大きなカードは増やさない）
+
+### 15.5 週次進捗メール
+
+本文に「復習リストに未克服の項目が N 件あります」を 1 行添える（0 件ならプレースホルダーを空にして行ごと出さない）。対象抽出・送信条件は変えない（10.7節）。

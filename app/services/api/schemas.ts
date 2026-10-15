@@ -15,6 +15,7 @@ import {
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
 import { GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH } from "@/app/constants/grading";
+import { REVIEW_NOTE_MEMO_MAX_LENGTH } from "@/app/constants/review-list";
 import {
   EMAIL_DIGEST_DAILY_LIMIT_MAX,
   EMAIL_DIGEST_DAILY_LIMIT_MIN,
@@ -118,6 +119,30 @@ const InsertAfterIdSchema = PositiveIntSchema.nullable();
 export const ProgressUpdateSchema = z.object({
   contentId: ContentIdSchema,
   isCompleted: z.boolean({ message: "isCompletedはbooleanで指定してください" }),
+});
+
+/** PUT /api/review-notes. memo is rejected (not truncated) when longer than the max. */
+export const ReviewNoteUpsertSchema = z
+  .object({
+    contentId: ContentIdSchema,
+    requirementKey: z.string().min(1).nullable(),
+    memo: z
+      .string({ message: "memoは文字列で指定してください" })
+      .max(REVIEW_NOTE_MEMO_MAX_LENGTH, {
+        message: `memoは${REVIEW_NOTE_MEMO_MAX_LENGTH}文字以内で指定してください`,
+      })
+      .nullable()
+      .optional(),
+    understood: z.boolean({ message: "understoodはbooleanで指定してください" }).optional(),
+  })
+  .refine((value) => value.memo !== undefined || value.understood !== undefined, {
+    message: "memo または understood のいずれかを指定してください",
+  });
+
+/** DELETE /api/review-notes */
+export const ReviewNoteDeleteSchema = z.object({
+  contentId: ContentIdSchema,
+  requirementKey: z.string().min(1).nullable(),
 });
 
 export const SubmissionCreateSchema = z.object({

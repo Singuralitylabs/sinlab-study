@@ -2,6 +2,7 @@ import { Bot, Lock } from "lucide-react";
 import { notFound } from "next/navigation";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
+import { LearningMemo } from "@/app/components/LearningMemo";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
 import { SlideContent } from "@/app/components/SlideContent";
@@ -30,6 +31,7 @@ import {
   isContentLockedForUser,
   isWeekHierarchyPublished,
 } from "@/app/services/api/learning-server";
+import { fetchReviewNotesForContent } from "@/app/services/api/review-list-server";
 import { fetchQuizQuestions } from "@/app/services/api/quiz-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
@@ -256,6 +258,7 @@ export default async function ContentPage({ params }: PageProps) {
     slideSignedUrl,
     { data: quizQuestions, error: quizError },
     aiReviewUsage,
+    { data: reviewNotes },
   ] = await Promise.all([
     userId && content.content_type === "exercise"
       ? fetchCompletedAIReviewByContentId(userId, contentIdNum)
@@ -284,7 +287,18 @@ export default async function ContentPage({ params }: PageProps) {
           })
         )
       : Promise.resolve(null),
+    userId ? fetchReviewNotesForContent(userId, contentIdNum) : Promise.resolve({ data: [] }),
   ]);
+
+  const memosByKey: Record<string, string | null> = {};
+  let freeLearningMemo: string | null = null;
+  for (const note of reviewNotes) {
+    if (note.requirement_key === null) {
+      freeLearningMemo = note.memo;
+    } else {
+      memosByKey[note.requirement_key] = note.memo;
+    }
+  }
 
   // A failed lookup hides only the remaining count, not the notice.
   const aiReviewRemaining =
@@ -429,6 +443,8 @@ export default async function ContentPage({ params }: PageProps) {
                           <AIReviewDisplayNoSSR
                             review={reviewForLatestSubmission}
                             defaultExpanded={false}
+                            contentId={contentIdNum}
+                            memosByKey={memosByKey}
                           />
                         </div>
                       )}
@@ -489,6 +505,10 @@ export default async function ContentPage({ params }: PageProps) {
             refreshOnToggle={content.content_type === "quiz"}
           />
         </div>
+      )}
+
+      {userId && isFullyPublished && (
+        <LearningMemo contentId={contentIdNum} initialMemo={freeLearningMemo} />
       )}
 
       <PrevNextNav

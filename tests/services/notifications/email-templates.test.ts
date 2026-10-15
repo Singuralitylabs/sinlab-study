@@ -342,6 +342,7 @@ describe("buildWeeklyDigestEmail", () => {
         { themeName: "GAS 学習", completedContents: 4, totalContents: 16 },
         { themeName: "AI 駆動開発", completedContents: 1, totalContents: 8 },
       ],
+      unovercomeReviewCount: 2,
     });
 
     expect(email.subject).toContain("今週の学習");
@@ -349,11 +350,27 @@ describe("buildWeeklyDigestEmail", () => {
     expect(email.text).toContain(
       "学習中のテーマ: GAS 学習（4 / 16 完了）、AI 駆動開発（1 / 8 完了）"
     );
+    expect(email.text).toContain("復習リストに未克服の項目が 2 件あります");
     expect(email.text).toContain("次に学ぶコンテンツ: 変数と型");
     expect(email.text).toContain("4 本完了");
     expect(email.text).toContain(`続きから学ぶ: ${APP_URL}/learn/1/2/3/4`);
     expect(email.text).toContain(UNSUBSCRIBE_URL);
     expect(email.headers?.["List-Unsubscribe"]).toBe(`<${UNSUBSCRIBE_URL}>`);
+  });
+
+  it("復習リストの未克服が 0 件のときは行ごと出さない", () => {
+    const email = buildWeeklyDigestEmail({
+      displayName: "山田",
+      appUrl: APP_URL,
+      unsubscribeUrl: UNSUBSCRIBE_URL,
+      completedLastWeek: 1,
+      submittedLastWeek: 0,
+      nextContent: { title: "変数と型", path: "/learn/1/2/3/4" },
+      remainingContents: 10,
+      activeThemes: [],
+      unovercomeReviewCount: 0,
+    });
+    expect(email.text).not.toContain("復習リスト");
   });
 
   it("学習中のテーマは最大3件までで、無いときは行ごと出さない", () => {

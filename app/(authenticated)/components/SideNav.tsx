@@ -6,6 +6,7 @@ import {
   ClipboardList,
   CreditCard,
   House,
+  ListChecks,
   LogOut,
   Megaphone,
   Menu,
@@ -46,6 +47,12 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     icon: <ClipboardList className="h-5 w-5" />,
   },
 ];
+
+const REVIEW_LIST_NAV_ITEM: NavItem = {
+  title: "復習リスト",
+  href: "/review-list",
+  icon: <ListChecks className="h-5 w-5" />,
+};
 
 const CERTIFICATES_NAV_ITEM: NavItem = {
   title: "修了証",
@@ -161,12 +168,15 @@ export function SideNav({
   isInstructor,
   stripeEnabled,
   showCertificates,
+  showReviewList,
   announcementBadge,
 }: {
   isAdmin: boolean;
   isInstructor: boolean;
   stripeEnabled: boolean;
   showCertificates: boolean;
+  /** Learners only (role = member); staff manage courses and do not use the review list. */
+  showReviewList: boolean;
   /** Streamed unread badge slot (a Server Component under <Suspense>). */
   announcementBadge: React.ReactNode;
 }) {
@@ -177,6 +187,7 @@ export function SideNav({
   // on it would never hit.
   const navItems: NavItem[] = [
     ...DEFAULT_NAV_ITEMS,
+    ...(showReviewList ? [REVIEW_LIST_NAV_ITEM] : []),
     ...(showCertificates ? [CERTIFICATES_NAV_ITEM] : []),
     announcementsNavItem(announcementBadge),
     // No payment/billing-management entry while disabled (see AGENTS.md).
