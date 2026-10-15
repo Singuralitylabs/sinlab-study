@@ -1,39 +1,17 @@
 "use client";
 
-import {
-  Bot,
-  Code,
-  FlaskConical,
-  Link as LinkIcon,
-  Loader2,
-  Plus,
-  Send,
-  Trash2,
-} from "lucide-react";
+import { Bot, Code, FlaskConical, Link as LinkIcon, Loader2, Send } from "lucide-react";
 import { useState } from "react";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
-import { CodeEditorNoSSR as CodeEditor } from "@/app/components/CodeEditorNoSSR";
-import {
-  buildDefaultFilename,
-  CODE_LANGUAGE_OPTIONS,
-  type CodeLanguage,
-  DEFAULT_FILENAME_BY_LANGUAGE,
-} from "@/app/components/code-editor-utils";
-import type { AIReviewListItem, SubmissionType } from "@/app/types";
+import type { CodeLanguage } from "@/app/components/code-editor-utils";
+import { LockedCodeFilesEditor } from "@/app/components/LockedCodeFilesEditor";
+import type { CodeFileInput } from "@/app/lib/code-file-inputs";
+import { buildLockedSubmissionFiles } from "@/app/lib/submission-file-slots";
+import type { AIReviewListItem, CodeFile, Json, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
-interface CodeFileInput {
-  id: string;
-  filename: string;
-  language: CodeLanguage;
-  content: string;
-  // Whether the user edited the filename by hand; while false, the default follows language
-  // changes.
-  filenameEdited: boolean;
-}
 
 const SAMPLE_REVIEW: AIReviewListItem = {
   id: 0,
@@ -69,78 +47,30 @@ const SAMPLE_REVIEW: AIReviewListItem = {
 interface DemoSubmissionFormProps {
   allowedSubmissionTypes: "code" | "url" | "both";
   codeLanguage: CodeLanguage;
+  starterFiles?: CodeFile[] | null;
+  submissionFileSlots?: Json | null;
 }
 
 export function DemoSubmissionForm({
   allowedSubmissionTypes,
   codeLanguage,
+  starterFiles = null,
+  submissionFileSlots = null,
 }: DemoSubmissionFormProps) {
   const [submissionType, setSubmissionType] = useState<SubmissionType>(
     allowedSubmissionTypes === "url" ? "url" : "code"
   );
-  const [codeFiles, setCodeFiles] = useState<CodeFileInput[]>([
-    { id: "file-0", filename: "", language: codeLanguage, content: "", filenameEdited: false },
-  ]);
+  const [codeFiles, setCodeFiles] = useState<CodeFileInput[]>(() =>
+    buildLockedSubmissionFiles({
+      submissionFileSlots,
+      starterFiles,
+      codeLanguage,
+    })
+  );
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [aiReview, setAiReview] = useState<AIReviewListItem | null>(null);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
-
-  const isMultiFile = codeFiles.length > 1;
-
-  const updateCodeFile = (index: number, patch: Partial<CodeFileInput>) => {
-    setCodeFiles((prev) => prev.map((file, i) => (i === index ? { ...file, ...patch } : file)));
-  };
-
-  const handleFilenameChange = (index: number, filename: string) => {
-    updateCodeFile(index, { filename, filenameEdited: true });
-  };
-
-  const handleLanguageChange = (index: number, language: CodeLanguage) => {
-    setCodeFiles((prev) =>
-      prev.map((file, i) => {
-        if (i !== index) {
-          return file;
-        }
-        if (file.filenameEdited) {
-          return { ...file, language };
-        }
-        const otherFilenames = prev.filter((_, j) => j !== index).map((f) => f.filename);
-        return { ...file, language, filename: buildDefaultFilename(language, otherFilenames) };
-      })
-    );
-  };
-
-  const addCodeFile = () => {
-    setCodeFiles((prev) => {
-      // On the first single -> multi-file switch, fill default names for empty filenames (the
-      // filename field is hidden and blank in single-file mode, so it would become required as soon
-      // as it switches to multi).
-      const assigned: string[] = prev
-        .map((f) => f.filename)
-        .filter((name) => name.trim().length > 0);
-      const backfilled = prev.map((file) => {
-        if (file.filename.trim().length > 0) {
-          return file;
-        }
-        const filename = buildDefaultFilename(file.language, assigned);
-        assigned.push(filename);
-        return { ...file, filename };
-      });
-      const newFile: CodeFileInput = {
-        id: crypto.randomUUID(),
-        filename: buildDefaultFilename(codeLanguage, assigned),
-        language: codeLanguage,
-        content: "",
-        filenameEdited: false,
-      };
-      return [...backfilled, newFile];
-    });
-  };
-
-  const removeCodeFile = (index: number) => {
-    setCodeFiles((prev) => prev.filter((_, i) => i !== index));
-  };
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -157,10 +87,7 @@ export function DemoSubmissionForm({
   };
 
   const isCodeValid =
-    codeFiles.length > 0 &&
-    codeFiles.every(
-      (file) => file.content.trim().length > 0 && (!isMultiFile || file.filename.trim().length > 0)
-    );
+    codeFiles.length > 0 && codeFiles.every((file) => file.content.trim().length > 0);
 
   const isValid =
     (submissionType === "code" && isCodeValid) ||
@@ -199,72 +126,7 @@ export function DemoSubmissionForm({
         )}
 
         {submissionType === "code" ? (
-          <div className="space-y-3">
-            {codeFiles.map((file, index) => (
-              <div
-                key={file.id}
-                className={
-                  isMultiFile ? "space-y-2 rounded-lg border border-border p-3" : "space-y-2"
-                }
-              >
-                {isMultiFile ? (
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1 space-y-1">
-                      <Label htmlFor={`demo-filename-${index}`} className="text-xs">
-                        ファイル名
-                      </Label>
-                      <Input
-                        id={`demo-filename-${index}`}
-                        value={file.filename}
-                        onChange={(e) => handleFilenameChange(index, e.target.value)}
-                        placeholder={`例: ${DEFAULT_FILENAME_BY_LANGUAGE[file.language]}`}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor={`demo-language-${index}`} className="text-xs">
-                        言語
-                      </Label>
-                      <select
-                        id={`demo-language-${index}`}
-                        value={file.language}
-                        onChange={(e) =>
-                          handleLanguageChange(index, e.target.value as CodeLanguage)
-                        }
-                        className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
-                      >
-                        {CODE_LANGUAGE_OPTIONS.map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeCodeFile(index)}
-                      aria-label="このファイルを削除"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ) : (
-                  <Label>コード</Label>
-                )}
-                <CodeEditor
-                  value={file.content}
-                  onChange={(value) => updateCodeFile(index, { content: value })}
-                  language={file.language}
-                  placeholder="ここにコードを貼り付けてください..."
-                />
-              </div>
-            ))}
-            <Button type="button" variant="outline" size="sm" onClick={addCodeFile}>
-              <Plus className="h-4 w-4" />
-              ファイルを追加
-            </Button>
-          </div>
+          <LockedCodeFilesEditor files={codeFiles} onChange={setCodeFiles} />
         ) : (
           <div className="space-y-2">
             <Label htmlFor="demo-url">URL</Label>

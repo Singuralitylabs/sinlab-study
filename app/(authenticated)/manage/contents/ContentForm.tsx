@@ -4,17 +4,9 @@ import { Loader2, Save, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { CodeFilesEditor } from "@/app/components/CodeFilesEditor";
-import { CODE_LANGUAGE_OPTIONS, type CodeLanguage } from "@/app/components/code-editor-utils";
 import { CONTENT_TYPE_FORM_OPTIONS } from "@/app/constants/content";
 import { SLIDE_NUMBER_MAX } from "@/app/constants/slides";
-import {
-  buildInitialCodeFiles,
-  type CodeFileInput,
-  createEmptyCodeFile,
-  parseStarterFiles,
-  toStarterFilesPayload,
-} from "@/app/lib/code-file-inputs";
+import { parseStarterFiles } from "@/app/lib/code-file-inputs";
 import type {
   PhaseFilterOption,
   ThemeFilterOption,
@@ -29,6 +21,7 @@ import {
 import { type QuizQuestionData, QuizQuestionsSchema } from "@/app/lib/quiz";
 import { parseSlideObjectKey, toSlideObjectKey } from "@/app/lib/slide-object-key";
 import { getSlideStorageWarning } from "@/app/lib/slide-storage-warning";
+import { toSubmissionSlotPayload } from "@/app/lib/submission-file-slots";
 import type { ContentType, GradingRequirement, LearningContent } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -43,6 +36,11 @@ import {
   SiblingOrderField,
 } from "../components/SiblingOrderField";
 import { GradingRubricEditor } from "./GradingRubricEditor";
+import {
+  buildInitialSubmissionSlotDrafts,
+  SubmissionFileSlotsEditor,
+  type SubmissionSlotDraft,
+} from "./SubmissionFileSlotsEditor";
 
 /** The version just stored, for the rows still on screen. Ignores anything else in the body. */
 export function adoptSavedRubricVersion(
@@ -249,20 +247,13 @@ export function ContentForm({
   const [allowedSubmissionTypes, setAllowedSubmissionTypes] = useState<AllowedSubmissionTypes>(
     (initialData?.allowed_submission_types as AllowedSubmissionTypes) ?? "code"
   );
-  const [codeLanguage, setCodeLanguage] = useState<CodeLanguage>(
-    (initialData?.code_language as CodeLanguage) ?? "javascript"
+  const [submissionSlots, setSubmissionSlots] = useState<SubmissionSlotDraft[]>(() =>
+    buildInitialSubmissionSlotDrafts({
+      submissionFileSlots: initialData?.submission_file_slots,
+      starterFiles: parseStarterFiles(initialData?.starter_files),
+      codeLanguage: initialData?.code_language,
+    })
   );
-  const [starterFiles, setStarterFiles] = useState<CodeFileInput[]>(() => {
-    const parsed = parseStarterFiles(initialData?.starter_files);
-    if (!parsed) {
-      return [];
-    }
-    return buildInitialCodeFiles(
-      parsed,
-      (initialData?.code_language as CodeLanguage) ?? "javascript",
-      { filenameEdited: true }
-    );
-  });
   // Only the object key is stored (#89). Legacy public URLs are normalized to a key; unnormalizable
   // values become empty, but requiresSlidePdf (initialData.pdf_url truthy) blocks saving until
   // re-upload, so values never vanish silently.
@@ -413,13 +404,11 @@ export function ContentForm({
       return;
     }
 
-    let starterFilesPayload: ReturnType<typeof toStarterFilesPayload> | null = null;
-    if (contentType === "exercise") {
-      starterFilesPayload = toStarterFilesPayload(starterFiles);
-      if (!starterFilesPayload.ok) {
-        setMessage({ type: "error", text: starterFilesPayload.error });
-        return;
-      }
+    const slotPayload =
+      contentType === "exercise" ? toSubmissionSlotPayload(submissionSlots) : null;
+    if (slotPayload && !slotPayload.ok) {
+      setMessage({ type: "error", text: slotPayload.error });
+      return;
     }
 
     // Validate with the same schema as the API so choice counts and correct answers are reported
@@ -464,9 +453,15 @@ export function ContentForm({
         contentType === "exercise" ? exerciseInstructions.trim() || null : null,
       hint: contentType === "exercise" ? hint.trim() || null : null,
       reference_answer: contentType === "exercise" ? referenceAnswer.trim() || null : null,
-      starter_files: starterFilesPayload?.ok ? starterFilesPayload.files : null,
+      starter_files: slotPayload?.ok ? slotPayload.starterFiles : null,
+      submission_file_slots: slotPayload?.ok ? slotPayload.slots : null,
       allowed_submission_types: contentType === "exercise" ? allowedSubmissionTypes : "code",
-      code_language: contentType === "exercise" ? codeLanguage : "javascript",
+      code_language:
+        contentType === "exercise"
+          ? slotPayload?.ok
+            ? slotPayload.codeLanguage
+            : "javascript"
+          : "javascript",
       pdf_url: contentType === "slide" ? pdfUrl.trim() || null : null,
       // No rows clears the rubric. The server derives the version and bumps it only when the
       // requirements actually changed.
@@ -800,53 +795,12 @@ export function ContentForm({
                 referenceAnswer={referenceAnswer}
               />
               <div className="space-y-2">
-                <Label>コード言語</Label>
-                <div className="flex flex-wrap gap-2">
-                  {CODE_LANGUAGE_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setCodeLanguage(opt.value)}
-                      className={`rounded-lg border-2 px-3 py-2 text-sm transition-colors ${
-                        codeLanguage === opt.value
-                          ? "border-primary bg-primary/5 font-medium"
-                          : "border-border hover:border-muted-foreground"
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>初期コード（受講生の提出フォームに事前表示）</Label>
+                <Label>提出ファイル</Label>
                 <p className="text-xs text-muted-foreground">
-                  未設定の場合、提出フォームは空ファイル1つから始まります。ファイルをすべて削除して保存すると初期コードをクリアします。
+                  受講生にはこの行数の入力欄が最初から出ます。ファイル名と言語は変えられず、空のファイルは提出できません。1行目の言語が演習のコード言語として保存されます。ファイル名を言語の既定（例:
+                  code.js）の1件だけにすると構成は未指定として保存され、既存の演習と同じ単一ファイルになります。初期コードを空にすると、提出フォームは空欄から始まります。
                 </p>
-                {starterFiles.length === 0 ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      setStarterFiles([
-                        createEmptyCodeFile(codeLanguage, [], { withDefaultFilename: true }),
-                      ])
-                    }
-                  >
-                    初期コードを追加
-                  </Button>
-                ) : (
-                  <CodeFilesEditor
-                    files={starterFiles}
-                    onChange={setStarterFiles}
-                    defaultLanguage={codeLanguage}
-                    forceFileMetaUi
-                    allowEmpty
-                    contentPlaceholder="受講生に最初から表示するコードを入力..."
-                    addButtonLabel="ファイルを追加"
-                  />
-                )}
+                <SubmissionFileSlotsEditor slots={submissionSlots} onChange={setSubmissionSlots} />
               </div>
               <div className="space-y-2">
                 <Label>提出方法</Label>

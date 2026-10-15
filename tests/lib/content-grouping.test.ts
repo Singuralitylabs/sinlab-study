@@ -51,6 +51,7 @@ function makeContent(
     hint: null,
     reference_answer: null,
     starter_files: null,
+    submission_file_slots: null,
     grading_rubric: null,
     grading_rubric_version: null,
     allowed_submission_types: "code",

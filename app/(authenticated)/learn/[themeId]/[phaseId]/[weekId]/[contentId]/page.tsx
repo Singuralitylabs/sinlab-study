@@ -476,6 +476,7 @@ export default async function ContentPage({ params }: PageProps) {
                         }
                         codeLanguage={(content.code_language as CodeLanguage) ?? "javascript"}
                         starterFiles={parseStarterFiles(content.starter_files)}
+                        submissionFileSlots={content.submission_file_slots}
                         persistedReviewId={reviewForLatestSubmission?.id ?? null}
                         showReviewListNotes={showReviewListNotes}
                       />

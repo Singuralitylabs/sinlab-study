@@ -24,6 +24,7 @@ import {
 } from "@/app/lib/grading-schema";
 import type { QuizQuestionData } from "@/app/lib/quiz";
 import { toSlideObjectKey } from "@/app/lib/slide-object-key";
+import { parseSubmissionFileSlots } from "@/app/lib/submission-file-slots";
 import { WEEKLY_FUNNEL_FETCH_ERROR, type WeeklyFunnelRow } from "@/app/lib/weekly-funnel";
 import {
   fetchStripeSubscriptionByUserId,
@@ -1186,6 +1187,7 @@ type CreateContentInput = {
   hint?: string | null;
   reference_answer?: string | null;
   starter_files?: LearningContent["starter_files"];
+  submission_file_slots?: LearningContent["submission_file_slots"];
   allowed_submission_types?: "code" | "url" | "both";
   code_language?: CodeLanguage;
   pdf_url?: string | null;
@@ -1231,6 +1233,11 @@ async function createContentWith(
   // questions fail and the rollback below also fails, what remains is a hidden draft rather than
   // a published quiz with no questions.
   const quizQuestions = content.content_type === "quiz" ? content.quizQuestions : undefined;
+  // Non-exercise rows cannot store slots (CHECK). The first slot's language is code_language
+  // so AI review's single-file fallback matches the layout the learner submits.
+  const submissionFileSlots =
+    content.content_type === "exercise" ? (content.submission_file_slots ?? null) : null;
+  const firstSlotLanguage = parseSubmissionFileSlots(submissionFileSlots)?.[0]?.language;
 
   const { data, error } = await supabase
     .from("learning_contents")
@@ -1245,8 +1252,9 @@ async function createContentWith(
       hint: content.hint,
       reference_answer: content.reference_answer,
       starter_files: content.starter_files,
+      submission_file_slots: submissionFileSlots,
       allowed_submission_types: content.allowed_submission_types,
-      code_language: content.code_language,
+      code_language: firstSlotLanguage ?? content.code_language,
       pdf_url: content.pdf_url,
       // Rubrics belong to exercises only; version always starts at 1 for a new content row.
       grading_rubric:
@@ -1441,6 +1449,13 @@ export async function updateContent(
 ): Promise<ContentUpdateResult> {
   const supabase = await createAdminSupabaseClient();
   const { insertAfterId, quizQuestions, gradingRubric, loadedRubricVersion, ...patch } = content;
+  if (patch.content_type !== undefined && patch.content_type !== "exercise") {
+    patch.submission_file_slots = null;
+  }
+  const firstSlotLanguage = parseSubmissionFileSlots(patch.submission_file_slots)?.[0]?.language;
+  if (firstSlotLanguage) {
+    patch.code_language = firstSlotLanguage;
+  }
 
   if (patch.content_type !== "quiz" || !quizQuestions) {
     return updateContentRow(supabase, id, patch, insertAfterId, gradingRubric, loadedRubricVersion);
@@ -1668,6 +1683,11 @@ async function updateContentRow(
     };
     if (patch.content_type !== undefined) {
       rubricPayload.content_type = patch.content_type;
+      // The slots CHECK rejects a non-exercise row that still has a layout, so the clear has to
+      // ride this UPDATE. A later statement would run after the type has already changed.
+      if (patch.content_type !== "exercise") {
+        rubricPayload.submission_file_slots = null;
+      }
     }
     let rubricUpdate = supabase
       .from("learning_contents")
@@ -1686,6 +1706,9 @@ async function updateContentRow(
     }
     if (Array.isArray(rubricRows) && rubricRows.length === 0) {
       return { error: null, storageRemoved: true, conflict: true };
+    }
+    if (rubricPayload.submission_file_slots === null) {
+      delete patch.submission_file_slots;
     }
     rubricWriteCommitted = true;
     // The editor's next save has to lock this write, not a version a later refresh might load

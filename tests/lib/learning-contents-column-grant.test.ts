@@ -6,6 +6,8 @@ import {
   LEARNING_CONTENT_LIST_COLUMNS,
 } from "@/app/services/api/learning-server";
 
+const learningServerPath = join(process.cwd(), "app/services/api/learning-server.ts");
+
 const migrationsDir = join(process.cwd(), "supabase/migrations");
 const typesPath = join(process.cwd(), "app/types/lib/database.types.ts");
 
@@ -70,5 +72,14 @@ describe("learning_contents の受講生向け列権限", () => {
       expect(LEARNING_CONTENT_DETAIL_COLUMN_LIST).not.toContain(column);
       expect(LEARNING_CONTENT_LIST_COLUMNS).not.toContain(column);
     }
+  });
+
+  it("submission_file_slots は受講生に付与し、service_role のサマリー列には含めない", () => {
+    expect(granted).toContain("submission_file_slots");
+    expect(ownColumns(LEARNING_CONTENT_DETAIL_COLUMN_LIST)).toContain("submission_file_slots");
+    const source = readFileSync(learningServerPath, "utf8");
+    const summary = source.match(/CONTENT_VISIBILITY_SUMMARY_COLUMNS =\s*\n?\s*"([^"]+)"/);
+    expect(summary?.[1]).toBeTruthy();
+    expect(summary?.[1]).not.toContain("submission_file_slots");
   });
 });

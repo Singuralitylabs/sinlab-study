@@ -602,8 +602,24 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
    - `url` タイプ: `url` は必須
 2. `getServerAuth()` による認証チェック（ステータス取得を含む）
 3. ステータスに基づく認可: `rejected` は403
-4. コンテンツ可視性チェック: ステータスを問わず、対象 `contentId` が自分に可視でなければ403（判定方法は4.1と同じ）
-5. `submissions` テーブルへの INSERT
+4. コンテンツ可視性チェック: ステータスを問わず、対象 `contentId` が自分に可視でなければ403（判定方法は4.1と同じ）。この SELECT で `code_language`・`submission_file_slots`・`starter_files` も取る
+5. コード提出のとき、提出ファイルの数・ファイル名・言語・並び順が演習の構成と一致し、空のファイルが無いことを検証する（5.2）。一致しなければ 400。初期コードから未変更なら 400
+6. `submissions` テーブルへの INSERT
+
+### 5.2 提出ファイル構成の検証
+
+演習の提出ファイル構成は `learning_contents.submission_file_slots`（`[{ filename, language }]`、NULL 可。#377）で決まる。解決は `resolveSubmissionFileSlots()`（`app/lib/submission-file-slots.ts`）に一本化し、提出画面・`/demo`・提出 API が同じ結果を使う。
+
+- `submission_file_slots` が有効な配列なら、その並びが構成
+- NULL で `starter_files` がファイル名を持っているときは、そのファイル名・言語・並び順（#341 の初期コードを固定表示にするため。別列にしたので、両方あるときは管理 API が件数・ファイル名・言語・並び順の一致を要求する）
+- どちらも無いときは `code_language` のファイル1つ。ファイル名は `DEFAULT_FILENAME_BY_LANGUAGE`。既存の演習はデータ移行なしで、これまでどおりこの1ファイルを提出できる（ファイル名・言語を空にした単一ファイル、または `codeContent` もこの既定構成だけ受理する）
+
+`POST /api/submissions` は、可視性チェックと同じ通常クライアントの SELECT（`is_published = true` を含む階層条件）で構成を読み、次を満たさないコード提出を 400 にする。画面で入力欄を固定しても、API を直接呼ぶと同じ条件になる。
+
+- ファイルの数・ファイル名・言語・並び順が解決した構成と一致する
+- いずれかのファイルの中身が空（空白のみを含む）
+
+保存形式は変えない。既定の単一ファイル（`code_language` の既定ファイル名、またはファイル名・言語が空の既存クライアント）は `code_content`、それ以外の単一ファイルと複数ファイルは `code_files`。表示・AIレビューは従来どおり `getSubmissionCodeFiles()` で正規化する。過去の提出は提出時点の `code_content` / `code_files` のまま残り、構成をあとから変えても書き換わらない。
 
 ### 5.3 提出方法のコンテンツ別制御
 
@@ -621,9 +637,11 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 
 演習のコード提出フォームには、シンタックスハイライトと自動インデントを備えたコードエディタ（CodeMirror 6）を使用する。
 
-**対応言語**: `code_language` カラムで演習ごとに設定する（`javascript`（既定）/ `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`。#307）。許可値・既定ファイル名・表示名は `app/components/code-editor-utils.ts`（`CODE_LANGUAGES` / `DEFAULT_FILENAME_BY_LANGUAGE` / `CODE_LANGUAGE_LABELS`）に集約し、管理画面と提出フォームの言語セレクトも同じ一覧から作る。DB の CHECK 制約との一致はテストで検査する。SQL は PostgreSQL 方言、Bash は `@codemirror/legacy-modes` の shell モードで色分けする。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（エディタの言語モードは変えない）。Markdown のコードフェンスは `sql` / `bash` / `markdown` / `python` / `json` と `jsx` / `tsx` も色分けする（`MarkdownRenderer`）。
+**対応言語**: `code_language` カラムで演習ごとに設定する（`javascript`（既定）/ `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`。#307）。許可値・既定ファイル名・表示名は `app/components/code-editor-utils.ts`（`CODE_LANGUAGES` / `DEFAULT_FILENAME_BY_LANGUAGE` / `CODE_LANGUAGE_LABELS`）に集約し、管理画面の提出ファイルの言語セレクトも同じ一覧から作る。DB の CHECK 制約との一致はテストで検査する。SQL は PostgreSQL 方言、Bash は `@codemirror/legacy-modes` の shell モードで色分けする。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（エディタの言語モードは変えない）。Markdown のコードフェンスは `sql` / `bash` / `markdown` / `python` / `json` と `jsx` / `tsx` も色分けする（`MarkdownRenderer`）。
 
-**初期コード（#341）**: 演習は任意で `learning_contents.starter_files`（`[{ filename, language, content }]`。`submissions.code_files` と同じ形）を持てる。管理画面（`ContentForm`）で登録・編集し、複数ファイル編集 UI は提出フォームと共通コンポーネント（`CodeFilesEditor`）を使う。受講生の提出フォームは `starter_files` があるときその内容で開始し、「初期コードに戻す」（確認ダイアログ付き）と提出成功後のリセットも同じ初期コードへ戻す。初期コードから未変更のままでは提出できない（AIレビュー枠の消費を防ぐ）。合計文字数の上限は `STARTER_FILES_MAX_TOTAL_LENGTH`（提出・レビュー上限 `GEMINI_MAX_CODE_LENGTH` より小さい）。NULL の既存演習は従来どおり空ファイル1つから開始する。前回提出の読み込みは行わない（提出履歴として別表示）。単一ファイルでもファイル名・言語は保持する（必要なら `code_files` に1要素で保存）。秘匿ではないため列権限と詳細 SELECT に含め、`reference_answer` や service_role のツリー／サマリー用許可カラムリストとは混ぜない。
+**提出ファイルの固定表示（#377）**: 提出フォーム（`SubmissionForm`）と `/demo` の提出フォーム（`DemoSubmissionForm`）は、5.2 で解決した構成の数だけ入力欄を最初から出す。ファイル名は1件のときもラベルとして表示し、言語は表示名だけにする。ファイルの追加・削除、ファイル名と言語の入力は出さない。指定したファイルはすべて入力必須で、空のままでは提出ボタンを押せない。提出成功後のリセットも同じ構成（初期コードがあればその内容）に戻す。`/demo` の取得条件（公開かつ未削除。スライドの署名付き URL は `is_open_to_trial = true` も必要）は変えない。ライブプレビューはロックされたファイル名を `buildPreviewDocument()` に渡すので、`index.html` / `style.css` / `main.js` のような参照が提出のたびに揺れない。
+
+**初期コード（#341）**: 演習は任意で `learning_contents.starter_files`（`[{ filename, language, content }]`。`submissions.code_files` と同じ形）を持てる。管理画面では提出ファイルの行ごとに初期コードを書き、保存時のファイル名・言語は構成と揃える（中身がすべて空なら `starter_files` は NULL）。受講生の提出フォームはその内容で開始し、「初期コードに戻す」（確認ダイアログ付き）と提出成功後のリセットも同じ初期コードへ戻す。初期コードから未変更のままでは提出できない（AIレビュー枠の消費を防ぐ）。合計文字数の上限は `STARTER_FILES_MAX_TOTAL_LENGTH`（提出・レビュー上限 `GEMINI_MAX_CODE_LENGTH` より小さい）。構成も初期コードも無い既存演習は、`code_language` の空ファイル1つから開始する。前回提出の読み込みは行わない（提出履歴として別表示）。単一ファイルでもファイル名・言語は保持する（必要なら `code_files` に1要素で保存）。秘匿ではないため列権限と詳細 SELECT に含め、`reference_answer` や service_role のツリー／サマリー用許可カラムリストとは混ぜない。ファイルごとの雛形を構成とは別項目にすること、空のまま提出できる任意ファイルは、この列の追加項目として別イシューで扱う。
 
 **エディタ機能**:
 - シンタックスハイライト
@@ -705,6 +723,8 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 **お試し公開の設定**: コンテンツ作成・編集フォーム（`/manage/contents`）にチェックボックス「お試しユーザーにも公開する」を設け、`is_open_to_trial` を設定する。デフォルトは未チェック（`false`）で、種別を問わず全コンテンツで設定可能（2.6参照）。
 
 **概要欄の設定**: コンテンツ種別が動画・スライド・クイズの場合のみ、コンテンツ作成・編集フォームに概要入力欄（Markdown・任意。クイズでは「導入文」）を表示し、`description` として保存する（`exercise_instructions` / `hint` と同じ、未入力なら `null` で保存するパターン）。テキスト・演習では表示せず、`description` は常に `null` として送信する。
+
+**提出ファイルの構成（#377）**: 種別が演習のとき、作成・編集フォームに「提出ファイル」エディタを出す。行ごとにファイル名と言語を編集し、行の追加・削除・並べ替えができる（上限は `SUBMISSION_FILE_SLOT_MAX_COUNT`）。各行の初期コードは任意。1行目の言語を `code_language` として保存する（単一ファイル提出の言語補完と AI レビューがこの列を使うため、列自体は残す）。ファイル名が言語の既定値である1件だけ、かつ初期コードが空なら `submission_file_slots` は NULL（未指定。受講生にはその既定ファイル1つが出る）。それ以外の構成は `[{ filename, language }]` で保存し、初期コードに中身があるときは同じファイル名・言語・並び順の `starter_files` も保存する。演習以外では両方 NULL（一括の種別変更で演習を離れるときも `submission_file_slots` を NULL にする）。形・重複・件数・演習以外への設定・初期コードとの不一致は `ContentBaseSchema` が 400 にする。
 
 **クイズの設問の登録（#306）**: 種別がクイズのとき、フォームに設問エディタ（`QuizQuestionsEditor`）を表示する。設問ごとに形式・設問・選択肢と正解（選択式）または模範解答（入力式）・解説・ヒントを入力し、1〜3問・選択肢2〜6個まで追加・削除できる。送信前に API と同じ zod スキーマ（`QuizQuestionsSchema`。`app/lib/quiz.ts`）で検証し、エラーは設問番号付きで表示する。`POST` / `PUT /api/manage/contents` は `quiz_questions` を受け取り、`content_type` が `quiz` のときは必須（PUT で `content_type` を送らない部分更新では不要）。逆に `quiz_questions` は `content_type: "quiz"` と一緒にしか受け付けない（種別なし・別の種別では400。検証だけして黙って捨てないため）。保存は `replace_quiz_questions` RPC で全設問を置き換える。更新時は保存済みの設問と同じなら置き換えない。置き換える場合も同じ位置の設問は id を保つ（id が変わると、回答中の受講者の送信が旧 id で採点できなくなるため）。作成時、クイズは非公開で行を作ってから設問を保存し、成功したあとで指定どおり公開にする（取り消しまで失敗しても、公開中の設問ゼロのクイズを残さないため）。設問の保存が失敗したら作成した行を物理削除し（作成直後で参照する行はない）、週内の並び順を詰め直して500。設問の保存後に公開への更新だけが失敗した場合は、作成済みの非公開コンテンツとして200で返し `warning` を付ける（失敗扱いにすると再送で重複が作られるため）。フォームは警告と編集画面へのリンクを表示し、再送できないよう送信ボタンを無効にする。更新時は設問を先に保存し、失敗したら行を更新せず、その後の行の更新が失敗したら元の設問に戻す（復元自体の失敗はログのみ）。編集画面は種別に関係なく保存済みの設問を読み込む（クイズ以外へ変えた後に戻したとき、空の設問で上書きしないため。取得に失敗したとき、クイズはフォームを出さず、それ以外の種別はクイズへの種別変更だけを無効にして編集できる）。種別の選択肢・アイコンは `CONTENT_TYPE_FORM_OPTIONS` / `ContentTypeIcon` で全画面共通。まとめて登録する場合は `POST /api/manage/contents/bulk`（`{ contents: [...] }`、1〜50件）を使う。各要素は作成 API と同じ項目（`insert_after_id` を除く）で、クイズは `quiz_questions` 必須。全件を先に検証し（1件でも不正なら400で何も作らない）、配列の順に各週の末尾へ作成する。ルートは `maxDuration = 60` で、直列の作成がプラットフォーム既定のタイムアウトで打ち切られて結果が返らないことを防ぐ。途中で失敗したらそこで止め、作成済みの `created`（`{ id, title, isPublished }[]`）を返す（アトミックではない）。公開を指定したのに公開できなかった件があれば、成功・途中失敗いずれのレスポンスでも `warning` にその件名を列挙する。存在しない週（FK 違反 `23503`）や DB の CHECK 違反（`23514`）は入力の誤りとして400、それ以外は500。一括操作の種別変更（`PATCH` の `set_type`）ではクイズを指定できない（400。設問の無いクイズを公開しないため。許可する種別は `BULK_SETTABLE_CONTENT_TYPES`）。種別をクイズ以外へ変えても設問の行は残るが、受講者 RPC は `content_type = 'quiz'` のときだけ返し、再びクイズにするには編集画面で設問を送る（保存時に置き換わる）ため、古い設問が黙って復活することはない。
 

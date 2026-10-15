@@ -7,6 +7,7 @@ import {
 } from "@/app/constants/content";
 import { STARTER_FILES_MAX_TOTAL_LENGTH } from "@/app/constants/gemini";
 import { MEMBERSHIP_TYPES, USER_MANAGEMENT_ACTIONS, USER_ROLES } from "@/app/constants/user";
+import { SUBMISSION_FILE_SLOT_MAX_COUNT } from "@/app/lib/submission-file-slots";
 import {
   AdminUserActionSchema,
   AiReviewRequestSchema,
@@ -564,6 +565,94 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
       ContentCreateSchema.safeParse({
         ...base,
         starter_files: [],
+      }).success
+    ).toBe(false);
+  });
+
+  it("submission_file_slots はファイル名・言語の配列を受理し、null で未指定にできる", () => {
+    const base = {
+      title: "演習1",
+      week_id: 1,
+      content_type: "exercise" as const,
+      insert_after_id: null,
+      code_language: "html" as const,
+    };
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [
+          { filename: "index.html", language: "html" },
+          { filename: "main.js", language: "javascript" },
+        ],
+        starter_files: [
+          { filename: "index.html", language: "html", content: "<p>" },
+          { filename: "main.js", language: "javascript", content: "" },
+        ],
+      }).success
+    ).toBe(true);
+    expect(ContentUpdateSchema.safeParse({ submission_file_slots: null }).success).toBe(true);
+  });
+
+  it("submission_file_slots は空ファイル名・未知言語・重複・件数超過・演習以外・初期コードとの不一致を拒否する", () => {
+    const base = {
+      title: "演習1",
+      week_id: 1,
+      content_type: "exercise" as const,
+      insert_after_id: null,
+    };
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "  ", language: "html" }],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "a.js", language: "cobol" }],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [
+          { filename: "a.js", language: "javascript" },
+          { filename: "a.js", language: "javascript" },
+        ],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: Array.from(
+          { length: SUBMISSION_FILE_SLOT_MAX_COUNT + 1 },
+          (_, i) => ({
+            filename: `f${i}.js`,
+            language: "javascript",
+          })
+        ),
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        content_type: "video",
+        submission_file_slots: [{ filename: "code.js", language: "javascript" }],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        code_language: "html",
+        submission_file_slots: [{ filename: "index.html", language: "html" }],
+        starter_files: [{ filename: "page.html", language: "html", content: "<p>" }],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        code_language: "javascript",
+        submission_file_slots: [{ filename: "index.html", language: "html" }],
       }).success
     ).toBe(false);
   });

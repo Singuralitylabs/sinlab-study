@@ -1388,20 +1388,28 @@ describe("isContentVisible", () => {
 });
 
 describe("fetchVisibleContentForSubmission", () => {
-  it("可視なら starter_files だけ返す", async () => {
+  it("可視なら提出構成の解決に使う列だけ返す", async () => {
     const mockClient = createMockSupabaseClient({
       queryResult: {
-        data: { starter_files: null },
+        data: {
+          code_language: "javascript",
+          submission_file_slots: null,
+          starter_files: null,
+        },
         error: null,
       },
     });
 
     const result = await fetchVisibleContentForSubmission(mockClient as never, 1);
 
-    expect(result).toEqual({ starter_files: null });
+    expect(result).toEqual({
+      code_language: "javascript",
+      submission_file_slots: null,
+      starter_files: null,
+    });
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.select).toHaveBeenCalledWith(
-      "starter_files, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
+      "code_language, submission_file_slots, starter_files, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
     );
     expect(builder.eq).toHaveBeenCalledWith("is_published", true);
     expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);

@@ -201,6 +201,7 @@ describe("PATCH /api/manage/contents/bulk - action→patchマッピング", () =
       content_type: "video",
       grading_rubric: null,
       starter_files: null,
+      submission_file_slots: null,
     });
   });
 
