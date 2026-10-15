@@ -166,7 +166,7 @@ describe("buildApprovedEmail", () => {
     expect(email.subject).toContain("本登録が完了しました");
     expect(email.text).toContain("すべての学習コンテンツ");
     expect(email.text).toContain("会員種別: コミュニティ会員");
-    expect(email.text).toContain(`ダッシュボードを開く: ${APP_URL}/`);
+    expect(email.text).toContain(`ホームを開く: ${APP_URL}/`);
   });
 });
 
@@ -389,7 +389,7 @@ describe("buildWeeklyDigestEmail", () => {
     });
 
     expect(email.text).toContain("すべて完了しています");
-    expect(email.text).toContain(`ダッシュボードを開く: ${APP_URL}/`);
+    expect(email.text).toContain(`ホームを開く: ${APP_URL}/`);
     expect(email.text).not.toContain("今週の目標");
   });
 });

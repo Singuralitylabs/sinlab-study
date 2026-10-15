@@ -1,16 +1,31 @@
-import { BookOpen, ChevronRight } from "lucide-react";
-import Image from "next/image";
-import Link from "next/link";
+import { BookOpen } from "lucide-react";
 import { PageTitle } from "@/app/components/PageTitle";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
-import { resolveStorageUrl } from "@/app/lib/storage-url";
-import { fetchPublishedThemes } from "@/app/services/api/learning-server";
+import { isCertificateEligible, isThemeCompleted } from "@/app/lib/certificate";
+import {
+  fetchPublishedThemes,
+  fetchThemeProgressSummaries,
+  type ThemeProgressSummary,
+} from "@/app/services/api/learning-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card } from "@/components/ui/card";
+import { ThemeCard } from "../components/ThemeProgressSections";
 
 export default async function LearnPage() {
-  const { userRole } = await getServerAuth();
-  const { data: themes } = await fetchPublishedThemes(userRole);
+  const { userId, userRole, userStatus } = await getServerAuth();
+  const [{ data: themes }, { data: progressData }] = await Promise.all([
+    fetchPublishedThemes(userRole),
+    userId
+      ? fetchThemeProgressSummaries(userId)
+      : Promise.resolve({ data: [] as ThemeProgressSummary[], error: null }),
+  ]);
+
+  const progressByThemeId = new Map(
+    (progressData ?? []).map((summary) => [summary.theme.id, summary])
+  );
+  const certificatesHref = isCertificateEligible(userStatus, userRole)
+    ? "/certificates"
+    : undefined;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -22,45 +37,26 @@ export default async function LearnPage() {
           <p className="text-muted-foreground">学習コンテンツはまだ登録されていません。</p>
         </Card>
       ) : (
-        <div className="grid gap-6 sm:grid-cols-2">
-          {themes.map((theme) => (
-            <Link key={theme.id} href={`/learn/${theme.id}`} className="block group">
-              <Card className="overflow-hidden transition-all hover:shadow-lg hover:border-primary/30 h-full">
-                <div className="relative aspect-video bg-linear-to-br from-primary/5 to-primary/15">
-                  {theme.image_url ? (
-                    <Image
-                      src={resolveStorageUrl(theme.image_url)}
-                      alt={theme.name}
-                      fill
-                      className="object-contain group-hover:scale-105 transition-transform duration-300"
-                      sizes="(max-width: 640px) 100vw, 50vw"
-                    />
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <BookOpen className="h-16 w-16 text-primary/30" />
-                    </div>
-                  )}
-                </div>
-
-                <div className="p-5">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <h2 className="text-lg font-semibold group-hover:text-primary transition-colors truncate">
-                        {theme.name}
-                      </h2>
-                      <UnpublishedBadge isPublished={theme.is_published} />
-                    </div>
-                    <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
-                  </div>
-                  {theme.description && (
-                    <p className="text-sm text-muted-foreground line-clamp-2">
-                      {theme.description}
-                    </p>
-                  )}
-                </div>
-              </Card>
-            </Link>
-          ))}
+        <div className="grid gap-4">
+          {themes.map((theme) => {
+            // Unpublished themes (admin/maintainer preview) have no progress rows; pass 0/0 so
+            // ThemeCard's showProgress (totalContents > 0 || completedContents > 0) hides the bar.
+            const progressSummary = progressByThemeId.get(theme.id);
+            const hasProgressRow = theme.is_published !== false && progressSummary != null;
+            const summary = hasProgressRow
+              ? progressSummary
+              : { theme, totalContents: 0, completedContents: 0 };
+            return (
+              <ThemeCard
+                key={theme.id}
+                summary={summary}
+                certificatesHref={
+                  hasProgressRow && isThemeCompleted(summary) ? certificatesHref : undefined
+                }
+                unpublishedBadge={<UnpublishedBadge isPublished={theme.is_published} />}
+              />
+            );
+          })}
         </div>
       )}
     </div>

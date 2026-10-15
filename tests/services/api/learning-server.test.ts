@@ -8,6 +8,7 @@ import {
   fetchContentSummariesByWeekIds,
   fetchContentsByWeekId,
   fetchContentVisibilitySummariesByWeekIds,
+  fetchHomeLearningData,
   fetchPhaseById,
   fetchPhasesByThemeId,
   fetchPublishedPhases,
@@ -338,9 +339,44 @@ describe("fetchThemeProgressSummaries", () => {
       phases: [
         {
           id: 10,
+          name: "Phase 1",
+          display_order: 1,
           weeks: [
-            { id: 100, contents: [{ id: 1000 }, { id: 1001 }] },
-            { id: 101, contents: [{ id: 1002 }] },
+            {
+              id: 100,
+              name: "Week 1",
+              display_order: 1,
+              contents: [
+                {
+                  id: 1000,
+                  title: "C1000",
+                  content_type: "text",
+                  display_order: 1,
+                  week_id: 100,
+                },
+                {
+                  id: 1001,
+                  title: "C1001",
+                  content_type: "text",
+                  display_order: 2,
+                  week_id: 100,
+                },
+              ],
+            },
+            {
+              id: 101,
+              name: "Week 2",
+              display_order: 2,
+              contents: [
+                {
+                  id: 1002,
+                  title: "C1002",
+                  content_type: "text",
+                  display_order: 1,
+                  week_id: 101,
+                },
+              ],
+            },
           ],
         },
       ],
@@ -475,6 +511,97 @@ describe("fetchThemeProgressSummaries", () => {
       },
     ]);
     expect(mockClient.from).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("fetchHomeLearningData", () => {
+  function createPerTableMockClient(results: {
+    themes: { data: unknown; error: unknown };
+    progress?: { data: unknown; error: unknown } | { data: unknown; error: unknown }[];
+  }) {
+    const progressQueue = Array.isArray(results.progress) ? [...results.progress] : null;
+    const mockClient = createMockSupabaseClient();
+    mockClient.from = vi.fn().mockImplementation((table: string) => {
+      if (table === "learning_themes") {
+        return createQueryBuilder(results.themes);
+      }
+      if (progressQueue) {
+        return createQueryBuilder(progressQueue.shift() ?? { data: [], error: null });
+      }
+      return createQueryBuilder(
+        (results.progress as { data: unknown; error: unknown } | undefined) ?? {
+          data: null,
+          error: null,
+        }
+      );
+    });
+    return mockClient;
+  }
+
+  it("1回のツリー取得と進捗ページングからサマリーと続きから学習入力を返す", async () => {
+    const themes = [
+      {
+        id: 1,
+        name: "Theme 1",
+        display_order: 1,
+        phases: [
+          {
+            id: 10,
+            name: "Phase 1",
+            display_order: 1,
+            weeks: [
+              {
+                id: 100,
+                name: "Week 1",
+                display_order: 1,
+                contents: [
+                  {
+                    id: 1000,
+                    title: "First",
+                    content_type: "text",
+                    display_order: 1,
+                    week_id: 100,
+                  },
+                  {
+                    id: 1001,
+                    title: "Second",
+                    content_type: "text",
+                    display_order: 2,
+                    week_id: 100,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const mockClient = createPerTableMockClient({
+      themes: { data: themes, error: null },
+      progress: {
+        data: [{ content_id: 1000, completed_at: "2026-01-01T00:00:00.000Z" }],
+        error: null,
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchHomeLearningData(1);
+
+    expect(result.error).toBeNull();
+    expect(result.data?.summaries).toEqual([
+      {
+        theme: { id: 1, name: "Theme 1", display_order: 1 },
+        totalContents: 2,
+        completedContents: 1,
+      },
+    ]);
+    expect(result.data?.orderedContents.map((c) => c.id)).toEqual([1000, 1001]);
+    expect(result.data?.completedContentIds.has(1000)).toBe(true);
+    expect(result.data?.completedAtByContentId.get(1000)).toBe(
+      Date.parse("2026-01-01T00:00:00.000Z")
+    );
+    // One themes query + one progress page (no duplicate tree/progress round-trips).
+    expect(mockClient.from).toHaveBeenCalledTimes(2);
   });
 });
 
