@@ -45,8 +45,8 @@ export const USER_MEMBERSHIP_LABELS: Record<MembershipType, string> = {
 export const MEMBERSHIP_TYPES: readonly MembershipType[] = Object.values(USER_MEMBERSHIP);
 
 /**
- * Shared by the settings form and PATCH /api/settings/profile. One limit so the screen and the API
- * cannot accept different names (the certificate prints this string as-is).
+ * Shared by the settings form, PATCH /api/settings/profile, and certificate issuance. One limit
+ * so a name the form rejects is not snapshotted onto a certificate.
  */
 export const DISPLAY_NAME_MAX_LENGTH = 50;
 

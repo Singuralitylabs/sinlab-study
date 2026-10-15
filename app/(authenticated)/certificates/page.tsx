@@ -129,11 +129,11 @@ export default async function CertificatesPage() {
                       </div>
                       <p className="text-sm text-muted-foreground mb-2">
                         {isThemeCompleted({ totalContents, completedContents }) ? (
-                          // Completed but still unissued: a blank name or any other failure (logged
-                          // server-side) left it. Never say "when you complete" for a done theme.
+                          // Completed but still unissued: a name the settings form would reject, or
+                          // any other failure (logged server-side). Never say "when you complete".
                           blockedByMissingName ? (
                             <>
-                              氏名が未設定のため発行できません。
+                              この表示名では修了証を発行できません。
                               <Link
                                 href="/settings"
                                 className="text-primary underline underline-offset-2"

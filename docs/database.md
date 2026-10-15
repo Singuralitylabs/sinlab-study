@@ -245,7 +245,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 - **`UNIQUE (user_id, theme_id)`**: 1テーマ1枚。発行処理はこの違反を「発行済み」として扱い、冪等にする（二重発行・二重メールを防ぐ）
 - **`certificate_no`**: `SS-YYYYMM-XXXXXX`。一意（`UNIQUE`）で、形式は CHECK で縛る。将来の公開検証ページ用
-- **`recipient_name` / `theme_name`**: 発行時点の `users.display_name` / `learning_themes.name` の**スナップショット**。後から表示名やテーマ名を変えても、発行済みの修了証は変わらない。修了証用の氏名は別に持たず、`users.display_name` を共用する（本人は設定画面で表示名を変える。3.8節）
+- **`recipient_name` / `theme_name`**: 発行時点の `users.display_name`（設定画面と同じ `parseDisplayName()` を通した文字列。空・50文字超・制御文字は発行しない。13.2節）/ `learning_themes.name` の**スナップショット**。後から表示名やテーマ名を変えても、発行済みの修了証は変わらない。修了証用の氏名は別に持たず、`users.display_name` を共用する（本人は設定画面で表示名を変える。3.8節）
 - `user_id` は `ON DELETE CASCADE`、`theme_id` は `ON DELETE RESTRICT`（テーマの物理削除で、印刷済みの証明番号ごと修了証が消えないようにする。テーマは論理削除が基本）
 - 書き込みは service_role のみ（`POST /api/progress` の完了直後。`user_id` は認証済みの本人に固定）。受講生・管理画面からの INSERT / UPDATE / DELETE の経路は無い
 

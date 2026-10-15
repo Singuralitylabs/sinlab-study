@@ -7,7 +7,7 @@ import {
   isCertificateNoCollision,
   isThemeCompleted,
 } from "@/app/lib/certificate";
-import { normalizeDisplayName } from "@/app/lib/display-name";
+import { parseDisplayName } from "@/app/lib/display-name";
 import {
   fetchThemeProgressSummaries,
   type ThemeProgressSummary,
@@ -61,8 +61,9 @@ export type IssuedCertificate = Pick<
 export type IssueResult = {
   issued: readonly IssuedCertificate[];
   /**
-   * True when issuance was skipped because the user's display_name is blank. They set it on
-   * /settings; a certificate already issued keeps the snapshotted recipient_name.
+   * True when issuance was skipped because display_name fails the same rules as the settings
+   * form (blank, too long, or control characters). They fix it on /settings; a certificate
+   * already issued keeps the snapshotted recipient_name.
    */
   blockedByMissingName: boolean;
 };
@@ -99,14 +100,16 @@ async function insertCertificates(
     return NOTHING_ISSUED;
   }
 
-  // The name is snapshotted and cannot be fixed afterwards. A blank display_name (the signup
-  // fallback, or only format characters such as U+200B that trim() keeps) would print a nameless
-  // certificate. The stored string is normalized the same way as the settings form.
-  const recipientName = normalizeDisplayName(user.display_name ?? "");
-  if (!recipientName) {
-    console.warn("[修了証] 受講者名が空のため発行を見送りました");
+  // The name is snapshotted and cannot be fixed afterwards. Signup stores Google full_name
+  // (VARCHAR(255)) or a blank fallback, which the settings form would reject when it is empty,
+  // longer than DISPLAY_NAME_MAX_LENGTH, or contains control characters. Issuance uses the same
+  // parse so those strings are not printed.
+  const parsedName = parseDisplayName(user.display_name ?? "");
+  if (!parsedName.ok) {
+    console.warn("[修了証] 受講者名が発行条件を満たさないため発行を見送りました");
     return { issued: [], blockedByMissingName: true };
   }
+  const recipientName = parsedName.name;
 
   const issued: IssuedCertificate[] = [];
   for (const summary of summaries) {

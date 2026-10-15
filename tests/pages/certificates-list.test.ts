@@ -116,7 +116,7 @@ describe("/certificates の遡及発行", () => {
 
     const html = await render();
 
-    expect(html).toContain("氏名が未設定のため発行できません");
+    expect(html).toContain("この表示名では修了証を発行できません");
     expect(html).toContain("設定画面で名前を入力してください");
     expect(html).toContain('href="/settings"');
     expect(html).not.toContain("運営へお問い合わせください");
