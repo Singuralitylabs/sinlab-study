@@ -4,6 +4,7 @@ import { USER_MEMBERSHIP_LABELS } from "@/app/constants/user";
 import { runAfterResponse } from "@/app/lib/after-response";
 import type { EmailTexts } from "@/app/lib/email-template";
 import { formatDate } from "@/app/lib/format-date";
+import { resolveNotificationEmail } from "@/app/lib/notification-email";
 import {
   isEmailSendingEnabled,
   isTransactionalEmailEnabled,
@@ -105,7 +106,7 @@ async function fetchRecipient(
 ): Promise<Recipient | null> {
   const { data, error } = await supabase
     .from("users")
-    .select("id, email, display_name")
+    .select("id, email, notification_email, display_name")
     .eq(by.column, by.value)
     .eq("is_deleted", false)
     .maybeSingle();
@@ -117,7 +118,12 @@ async function fetchRecipient(
   if (!data) {
     return null;
   }
-  return { userId: data.id, email: data.email, displayName: data.display_name };
+  // Student-facing transactional mail uses the notification address, never users.email directly.
+  return {
+    userId: data.id,
+    email: resolveNotificationEmail(data),
+    displayName: data.display_name,
+  };
 }
 
 /**

@@ -34,6 +34,7 @@ import {
 import type { EmailSettingsSnapshot } from "@/app/lib/email-settings";
 import type { EmailTexts } from "@/app/lib/email-template";
 import { type EmailMarkdown, renderEmailMarkdown } from "@/app/lib/markdown-email";
+import { resolveNotificationEmail } from "@/app/lib/notification-email";
 import {
   applyPublishedNestedThemeFilters,
   type NestedThemeTree,
@@ -126,6 +127,7 @@ async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
   const rows = await fetchAllPages<{
     id: number;
     email: string;
+    notification_email: string | null;
     display_name: string;
     status: string;
     membership_type: string | null;
@@ -134,7 +136,9 @@ async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
   }>((from, to) =>
     supabase
       .from("users")
-      .select("id, email, display_name, status, membership_type, role, created_at")
+      .select(
+        "id, email, notification_email, display_name, status, membership_type, role, created_at"
+      )
       .eq("is_deleted", false)
       .in("status", [USER_STATUS.ACTIVE, USER_STATUS.TRIAL])
       .is("email_opt_out_at", null)
@@ -142,17 +146,27 @@ async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
       .range(from, to)
   );
 
-  return rows
-    .filter((row) => row.email && row.created_at)
-    .map((row) => ({
-      userId: row.id,
-      email: row.email,
-      displayName: row.display_name,
-      status: row.status as UserStatusType,
-      membershipType: row.membership_type ?? null,
-      role: row.role,
-      createdAt: row.created_at as string,
-    }));
+  return rows.flatMap((row) => {
+    if (!row.created_at) {
+      return [];
+    }
+    // Periodic mail and announcement broadcasts share this list, so both follow the same address.
+    const email = resolveNotificationEmail(row);
+    if (!email) {
+      return [];
+    }
+    return [
+      {
+        userId: row.id,
+        email,
+        displayName: row.display_name,
+        status: row.status as UserStatusType,
+        membershipType: row.membership_type ?? null,
+        role: row.role,
+        createdAt: row.created_at as string,
+      },
+    ];
+  });
 }
 
 /**

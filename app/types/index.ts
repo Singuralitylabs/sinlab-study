@@ -178,6 +178,7 @@ export type ManageUserListItem = Pick<
   | "id"
   | "display_name"
   | "email"
+  | "notification_email"
   | "role"
   | "status"
   | "membership_type"

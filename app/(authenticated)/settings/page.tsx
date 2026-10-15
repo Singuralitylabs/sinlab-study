@@ -2,12 +2,14 @@ import { redirect } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
 import { PRIVACY_URL } from "@/app/constants/legal";
 import { USER_ROLE } from "@/app/constants/user";
+import { fetchNotificationEmailState } from "@/app/services/api/notification-email-server";
 import { fetchUserEmailOptOutAt } from "@/app/services/api/user-email-server";
 import { fetchUserDisplayName } from "@/app/services/api/user-profile-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmailPreferencesForm } from "./EmailPreferencesForm";
+import { NotificationEmailForm } from "./NotificationEmailForm";
 import { ProfileForm } from "./ProfileForm";
 
 export default async function SettingsPage() {
@@ -17,14 +19,24 @@ export default async function SettingsPage() {
     redirect("/login");
   }
 
-  const [{ data: emailOptOutAt, error }, { data: displayName, error: profileError }] =
-    await Promise.all([fetchUserEmailOptOutAt(userId), fetchUserDisplayName(userId)]);
+  const [
+    { data: emailOptOutAt, error },
+    { data: displayName, error: profileError },
+    { data: notificationEmail, error: notificationError },
+  ] = await Promise.all([
+    fetchUserEmailOptOutAt(userId),
+    fetchUserDisplayName(userId),
+    fetchNotificationEmailState(userId),
+  ]);
   // Promotional mail goes to role = member only (docs/specification.md 10.7).
   const isMailTarget = userRole === USER_ROLE.MEMBER;
 
   return (
     <div className="max-w-3xl mx-auto">
-      <PageTitle title="設定" description="表示名と案内メールの配信を確認・変更できます" />
+      <PageTitle
+        title="設定"
+        description="表示名、通知の送り先、案内メールの配信を確認・変更できます"
+      />
 
       <div className="space-y-6">
         <Card>
@@ -38,6 +50,26 @@ export default async function SettingsPage() {
               </Alert>
             ) : (
               <ProfileForm initialDisplayName={displayName} />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="space-y-6 p-6">
+            <h2 className="text-lg font-semibold">通知の送り先</h2>
+            {notificationError || !notificationEmail ? (
+              <Alert variant="destructive">
+                <AlertDescription>
+                  通知の送り先を取得できませんでした。時間をおいて再度お試しください。
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <NotificationEmailForm
+                loginEmail={notificationEmail.loginEmail}
+                notificationEmail={notificationEmail.notificationEmail}
+                pendingEmail={notificationEmail.pendingEmail}
+                pendingExpiresAt={notificationEmail.pendingExpiresAt}
+              />
             )}
           </CardContent>
         </Card>

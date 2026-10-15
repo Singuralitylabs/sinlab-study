@@ -451,6 +451,16 @@ describe("送信対象の抽出", () => {
     expect(sentTo()).toEqual(["u1@example.com"]);
   });
 
+  it("notification_email があればログイン用ではなくそちらへ送る（お知らせも同じ抽出）", async () => {
+    setup({
+      users: [userRow(1, { email: "login@example.com", notification_email: "notify@example.com" })],
+    });
+
+    await runDigest(MONDAY);
+
+    expect(sentTo()).toEqual(["notify@example.com"]);
+  });
+
   it("学習系の定期メール（週次進捗・未学習リマインド・お試し向け案内）は admin / maintainer に送らない", async () => {
     const { db } = setup({
       users: [
