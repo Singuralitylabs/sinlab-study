@@ -110,10 +110,7 @@ export async function POST(request: NextRequest) {
           "javascript"
         );
         if (isCodeEquivalentToStarter(files, starterFiles, contentLanguage)) {
-          return NextResponse.json(
-            { error: "初期コードから変更してください" },
-            { status: 400 }
-          );
+          return NextResponse.json({ error: "初期コードから変更してください" }, { status: 400 });
         }
       }
 

@@ -268,16 +268,12 @@ describe("isUnchangedFromStarter / isCodeEquivalentToStarter", () => {
         "javascript"
       )
     ).toBe(true);
-    expect(
-      isUnchangedFromStarter([...snapshot, createEmptyLike()], snapshot, "javascript")
-    ).toBe(true);
-    expect(
-      isUnchangedFromStarter(
-        snapshot,
-        [...snapshot, createEmptyLike()],
-        "javascript"
-      )
-    ).toBe(true);
+    expect(isUnchangedFromStarter([...snapshot, createEmptyLike()], snapshot, "javascript")).toBe(
+      true
+    );
+    expect(isUnchangedFromStarter(snapshot, [...snapshot, createEmptyLike()], "javascript")).toBe(
+      true
+    );
   });
 
   it("内容・ファイル名・言語が違えば false、starter 無しは false", () => {
@@ -292,11 +288,7 @@ describe("isUnchangedFromStarter / isCodeEquivalentToStarter", () => {
       isUnchangedFromStarter([{ ...snapshot[0], filename: "app.html" }], snapshot, "javascript")
     ).toBe(false);
     expect(
-      isUnchangedFromStarter(
-        [{ ...snapshot[0], language: "javascript" }],
-        snapshot,
-        "javascript"
-      )
+      isUnchangedFromStarter([{ ...snapshot[0], language: "javascript" }], snapshot, "javascript")
     ).toBe(false);
     expect(isUnchangedFromStarter(snapshot, null, "javascript")).toBe(false);
     expect(isUnchangedFromStarter(snapshot, [], "javascript")).toBe(false);
