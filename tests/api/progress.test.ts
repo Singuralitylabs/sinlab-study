@@ -124,6 +124,7 @@ describe("POST /api/progress - 認証ユーザーIDでの書き込み", () => {
     const builder = { ...createQueryBuilder({ data: null, error: null }), upsert };
     vi.mocked(createServerSupabaseClient).mockResolvedValue({
       from: vi.fn().mockReturnValue(builder),
+      rpc: vi.fn().mockResolvedValue({ data: false, error: null }),
     } as never);
 
     const res = await POST(request(body) as never);
@@ -295,5 +296,89 @@ describe("POST /api/progress - 修了証の発行（#291）", () => {
 
     expect(withCertificate).toEqual(without);
     expect(withCertificate).toEqual({ success: true, isCompleted: true });
+  });
+});
+
+describe("POST /api/progress - 合格判定対象の演習（#367）", () => {
+  const gatedClient = (submissions: { data: unknown; error: unknown } | null) => {
+    const client = createMockSupabaseClient({
+      rpcResults: {
+        content_requires_review_pass: { data: true, error: null },
+      },
+      tableResults: {
+        ...(submissions ? { submissions } : {}),
+        user_progress: { data: null, error: null, count: 1 },
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+    return client;
+  };
+
+  it("合格レビューが無ければ手動完了を 403 にし、進捗は書かない", async () => {
+    const client = gatedClient({ data: [], error: null });
+
+    const res = await POST(request({ contentId: 1, isCompleted: true }) as never);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: "AIレビューで合格すると完了になります",
+    });
+    expect(client.from.mock.calls.map((call) => call[0])).not.toContain("user_progress");
+    expect(issueCertificateIfEligible).not.toHaveBeenCalled();
+  });
+
+  it("合格済みなら完了を許可し、修了証の判定を予約する", async () => {
+    gatedClient({ data: [{ id: 9 }], error: null });
+
+    const res = await POST(request({ contentId: 1, isCompleted: true }) as never);
+
+    expect(res.status).toBe(200);
+    expect(issueCertificateIfEligible).toHaveBeenCalledWith({
+      userId: memberAuth.userId,
+      userStatus: memberAuth.userStatus,
+      userRole: memberAuth.userRole,
+      contentId: 1,
+    });
+  });
+
+  it("未完了への変更を拒否する", async () => {
+    const client = gatedClient(null);
+
+    const res = await POST(request({ contentId: 1, isCompleted: false }) as never);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: "合格判定のある演習は未完了に戻せません",
+    });
+    expect(client.from.mock.calls.map((call) => call[0])).not.toContain("user_progress");
+    expect(issueCertificateIfEligible).not.toHaveBeenCalled();
+  });
+
+  it("トリガーの 42501 は 403 に変換する", async () => {
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(
+      createMockSupabaseClient({
+        rpcResults: {
+          content_requires_review_pass: { data: false, error: null },
+        },
+        tableResults: {
+          user_progress: {
+            data: null,
+            error: {
+              code: "42501",
+              message: "pass-gated exercise requires a passing review",
+            },
+          },
+        },
+      }) as never
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: "AIレビューで合格すると完了になります",
+    });
+    expect(issueCertificateIfEligible).not.toHaveBeenCalled();
   });
 });
