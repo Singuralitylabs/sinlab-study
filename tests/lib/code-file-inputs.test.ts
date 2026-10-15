@@ -250,7 +250,12 @@ describe("isCodeEquivalentToStarter", () => {
 
   it("初期スナップショットと同一なら true", () => {
     expect(isCodeEquivalentToStarter(snapshot, snapshot)).toBe(true);
-    expect(isCodeEquivalentToStarter(snapshot.map((file) => ({ ...file })), snapshot)).toBe(true);
+    expect(
+      isCodeEquivalentToStarter(
+        snapshot.map((file) => ({ ...file })),
+        snapshot
+      )
+    ).toBe(true);
   });
 
   it("末尾空白のみ・空シェル削除は未変更扱い", () => {
@@ -265,9 +270,9 @@ describe("isCodeEquivalentToStarter", () => {
     expect(isCodeEquivalentToStarter([{ ...snapshot[0], filename: "app.html" }], snapshot)).toBe(
       true
     );
-    expect(
-      isCodeEquivalentToStarter([{ ...snapshot[0], language: "javascript" }], snapshot)
-    ).toBe(true);
+    expect(isCodeEquivalentToStarter([{ ...snapshot[0], language: "javascript" }], snapshot)).toBe(
+      true
+    );
     expect(
       isCodeEquivalentToStarter([{ ...snapshot[0], content: "<div>edited</div>" }], snapshot)
     ).toBe(false);
@@ -278,7 +283,10 @@ describe("isCodeEquivalentToStarter", () => {
   it("サーバー比較: code_content 相当と starter が trim 後一致なら true", () => {
     const starter = [{ filename: "code.js", language: "javascript", content: "const x = 1;" }];
     expect(
-      isCodeEquivalentToStarter([{ filename: "", language: "", content: "const x = 1;\n" }], starter)
+      isCodeEquivalentToStarter(
+        [{ filename: "", language: "", content: "const x = 1;\n" }],
+        starter
+      )
     ).toBe(true);
     expect(
       isCodeEquivalentToStarter([{ filename: "", language: "", content: "const x = 2;" }], starter)
