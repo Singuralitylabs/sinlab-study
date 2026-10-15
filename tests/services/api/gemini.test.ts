@@ -1008,14 +1008,16 @@ describe("generateReview", () => {
         .mockRejectedValueOnce(overloaded)
         .mockImplementationOnce(hangUntilAborted);
 
-      const settled = generateReview(baseParams).catch((e: unknown) => e);
+      const settled = generateReview({ ...baseParams, modelName: GEMINI_MODEL_NAME }).catch(
+        (e: unknown) => e
+      );
       await vi.runAllTimersAsync();
       const error = await settled;
 
       expect((error as Error).message).toBe(
         "Gemini APIの応答がタイムアウトしました。しばらく時間を置いてから再試行してください。"
       );
-      expect(generateContentMock).toHaveBeenCalledTimes(2);
+      expect(calledModels()).toEqual([GEMINI_MODEL_NAME, GEMINI_MODEL_NAME]);
     });
 
     it("切り替え後も待機に GEMINI_RETRY_MIN_ATTEMPT_MS が残らないならバックオフしない", async () => {
@@ -1067,6 +1069,88 @@ describe("generateReview", () => {
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(GEMINI_MODEL_NAME));
     expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(MEMBER_KEY);
     expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(MEMBER_KEY);
+  });
+
+  it("主が 503 で代替が 404 でも主をバックオフ再試行し、成功なら modelUsed は主になる", async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const missing = new ApiError({ message: `gone ${MEMBER_KEY}`, status: 404 });
+    const overloaded = new ApiError({ message: "busy", status: 503 });
+    generateContentMock
+      .mockRejectedValueOnce(overloaded)
+      .mockRejectedValueOnce(missing)
+      .mockResolvedValueOnce({ text: rubricResponse() });
+
+    const pending = generateReview(baseParams);
+    await vi.runAllTimersAsync();
+    const result = await pending;
+
+    expect(calledModels()).toEqual([
+      GEMINI_MODEL_NAME,
+      GEMINI_ALTERNATE_MODEL_NAME,
+      GEMINI_MODEL_NAME,
+    ]);
+    expect(result.modelUsed).toBe(GEMINI_MODEL_NAME);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("status=404"));
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(MEMBER_KEY);
+  });
+
+  it("代替の 404 で再試行が尽きても受講生には混雑の文言を出す", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const missing = new ApiError({ message: "gone", status: 404 });
+    const overloaded = new ApiError({ message: "busy", status: 503 });
+    generateContentMock.mockImplementation((request: { model: string }) =>
+      Promise.reject(request.model === GEMINI_ALTERNATE_MODEL_NAME ? missing : overloaded)
+    );
+
+    const pending = generateReview(baseParams);
+    const settled = pending.catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+    const error = await settled;
+
+    expect((error as Error).message).toBe(
+      "AIが混み合っています。しばらく時間を置いてから再試行してください。"
+    );
+    expect(calledModels()).toEqual([
+      GEMINI_MODEL_NAME,
+      GEMINI_ALTERNATE_MODEL_NAME,
+      GEMINI_MODEL_NAME,
+      GEMINI_MODEL_NAME,
+    ]);
+  });
+
+  it("代替の 400 では主の混雑リトライを止めない", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    generateContentMock
+      .mockRejectedValueOnce(new ApiError({ message: "busy", status: 503 }))
+      .mockRejectedValueOnce(new ApiError({ message: `bad ${MEMBER_KEY}`, status: 400 }))
+      .mockResolvedValueOnce({ text: rubricResponse() });
+
+    const pending = generateReview(baseParams);
+    await vi.runAllTimersAsync();
+    const result = await pending;
+
+    expect(calledModels()).toEqual([
+      GEMINI_MODEL_NAME,
+      GEMINI_ALTERNATE_MODEL_NAME,
+      GEMINI_MODEL_NAME,
+    ]);
+    expect(result.modelUsed).toBe(GEMINI_MODEL_NAME);
+  });
+
+  it("代替の 401 は主を再試行しない", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    generateContentMock
+      .mockRejectedValueOnce(new ApiError({ message: "busy", status: 503 }))
+      .mockRejectedValueOnce(new ApiError({ message: `key ${MEMBER_KEY}`, status: 401 }));
+
+    await expect(generateReview(baseParams)).rejects.toThrow(
+      "AIレビューの生成中にエラーが発生しました（コード: 401）。"
+    );
+    expect(calledModels()).toEqual([GEMINI_MODEL_NAME, GEMINI_ALTERNATE_MODEL_NAME]);
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(MEMBER_KEY);
   });
 
   it("全モデルが 404 のときはバックオフせず、最後のステータスの文言で失敗する", async () => {

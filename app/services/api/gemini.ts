@@ -537,7 +537,9 @@ interface ChainStop {
  * GEMINI_TOTAL_BUDGET_MS deadline so the route's maxDuration still holds. Tokens of every
  * response are summed, including a failed first one, because Gemini bills them.
  * Congestion (429/500/503), a per-attempt timeout, and 404 move to the next model without waiting.
- * Backoff runs only after every model in the chain failed with a retryable status.
+ * A 404, a per-attempt timeout, or a 400 from a later model drops only that model. Models that
+ * already failed with a retryable status are still backed off, so a removed alternate cannot
+ * erase the primary's retries. 401, 403, and 504 stop the chain: the key or the prompt is at fault.
  */
 async function generateValidatedJson<T>({
   apiKey,
@@ -586,34 +588,50 @@ async function generateValidatedJson<T>({
     });
 
   const requestChain = async (chainStart: number): Promise<ChainResponse | ChainStop> => {
+    const skipped = new Set<number>();
+    const retryableIndexes = new Set<number>();
+    // Shown to the learner when a later model is simply missing or rejects its own parameters.
+    let lastRetryable: ApiError | undefined;
     let lastError: unknown;
+
+    const hasRetryableLeft = () =>
+      [...retryableIndexes].some((index) => index >= chainStart && !skipped.has(index));
 
     for (let round = 0; round <= GEMINI_MAX_RETRIES; round++) {
       if (round > 0) {
         const delay = GEMINI_RETRY_BASE_DELAY_MS * 2 ** (round - 1);
         // A retry with less than GEMINI_RETRY_MIN_ATTEMPT_MS left is aborted before Gemini
         // answers, and the prompt is still billed.
-        if (!hasTimeForAttempt(deadlineAt, delay)) {
-          return { error: lastError };
+        if (!lastRetryable || !hasTimeForAttempt(deadlineAt, delay)) {
+          return { error: lastRetryable ?? lastError };
         }
-        const status = lastError instanceof ApiError ? lastError.status : "unknown";
         console.warn(
-          `Gemini API一時エラー status=${status} (試行 ${round}/${GEMINI_MAX_RETRIES + 1})、${delay}ms後にリトライ`
+          `Gemini API一時エラー status=${lastRetryable.status} (試行 ${round}/${GEMINI_MAX_RETRIES + 1})、${delay}ms後にリトライ`
         );
         await sleep(delay);
       }
 
-      let attempted = 0;
-      // Timeout and 404 are not fixed by waiting. Only an all-retryable chain earns a backoff.
-      let retryChain = true;
-      let stopped: ChainStop | undefined;
-
+      const planned: number[] = [];
       for (let index = chainStart; index < models.length; index++) {
+        if (skipped.has(index)) {
+          continue;
+        }
+        // Later rounds call only models that were congested. A 404 or a timeout stays out.
+        if (round > 0 && !retryableIndexes.has(index)) {
+          continue;
+        }
+        planned.push(index);
+      }
+
+      let attempted = 0;
+      for (let position = 0; position < planned.length; position++) {
         if (overallSignal.aborted || (attempted > 0 && !hasTimeForAttempt(deadlineAt))) {
           break;
         }
         attempted++;
+        const index = planned[position];
         const model = models[index];
+        const next = planned[position + 1];
         try {
           const response = await callModel(model);
           return { response, modelIndex: index };
@@ -621,53 +639,81 @@ async function generateValidatedJson<T>({
           // A call cut off by the overall deadline says nothing new. Keep the status that caused
           // the retry so a 503 is not reported as a timeout. A per-attempt timeout is a slow answer.
           const cutByDeadline = isTimeoutError(error) && overallSignal.aborted;
-          lastError = cutByDeadline && isRetryableError(lastError) ? lastError : error;
           if (cutByDeadline) {
-            stopped = { error: lastError };
-            retryChain = false;
-            break;
+            return { error: lastRetryable ?? error };
           }
+
+          const switchToNext =
+            next !== undefined &&
+            isSwitchableGeminiError(error, overallSignal) &&
+            hasTimeForAttempt(deadlineAt);
+          const warnSwitch = () => {
+            if (next === undefined) {
+              return;
+            }
+            // Congestion is usually per model, so skip it instead of waiting on the same id.
+            console.warn(
+              `Geminiモデルを切り替えます ${model.name} → ${models[next].name} (${switchLabel(error)})`
+            );
+          };
+
           if (isModelMissingError(error)) {
             // Retrying a removed id will not bring it back. The pinned constant has to change.
             console.error(
               `Geminiモデルが見つかりません model=${model.name} status=404。` +
                 "app/constants/gemini.ts を更新してください"
             );
-          }
-          if (!isRetryableError(error)) {
-            retryChain = false;
-          }
-          const next = models[index + 1];
-          if (
-            next &&
-            isSwitchableGeminiError(error, overallSignal) &&
-            hasTimeForAttempt(deadlineAt)
-          ) {
-            // Congestion is usually per model, so skip it instead of waiting on the same id.
-            console.warn(
-              `Geminiモデルを切り替えます ${model.name} → ${next.name} (${switchLabel(error)})`
-            );
-            continue;
-          }
-          if (!isSwitchableGeminiError(error, overallSignal)) {
-            stopped = { error: lastError };
-            retryChain = false;
+            skipped.add(index);
+            lastError = error;
+            if (switchToNext) {
+              warnSwitch();
+              continue;
+            }
             break;
           }
-          break;
+
+          if (isPerAttemptTimeout(error, overallSignal)) {
+            skipped.add(index);
+            retryableIndexes.delete(index);
+            lastError = error;
+            if (!hasRetryableLeft()) {
+              lastRetryable = undefined;
+            }
+            if (switchToNext) {
+              warnSwitch();
+              continue;
+            }
+            break;
+          }
+
+          if (isRetryableError(error)) {
+            lastRetryable = error;
+            retryableIndexes.add(index);
+            lastError = error;
+            if (switchToNext) {
+              warnSwitch();
+              continue;
+            }
+            break;
+          }
+
+          if (error instanceof ApiError && error.status === 400 && lastRetryable) {
+            // The alternate rejected its own parameters. The congested model can still be retried.
+            skipped.add(index);
+            break;
+          }
+
+          return { error };
         }
       }
 
-      if (stopped) {
-        return stopped;
-      }
-      // attempted === 0 keeps the previous round's error (the deadline closed before a new call).
-      if (attempted === 0 || !retryChain || !isRetryableError(lastError)) {
-        return { error: lastError };
+      // attempted === 0 keeps the previous error (the deadline closed before a new call).
+      if (attempted === 0 || !hasRetryableLeft()) {
+        return { error: lastRetryable ?? lastError };
       }
     }
 
-    return { error: lastError };
+    return { error: lastRetryable ?? lastError };
   };
 
   for (
