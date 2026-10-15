@@ -10,8 +10,8 @@ import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
 import html from "highlight.js/lib/languages/xml";
 import { createLowlight } from "lowlight";
-import { memo } from "react";
-import ReactMarkdown from "react-markdown";
+import { type ComponentPropsWithoutRef, memo } from "react";
+import ReactMarkdown, { type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
 import { cn } from "@/lib/utils";
@@ -99,6 +99,22 @@ function rehypeHighlightSubset() {
   };
 }
 
+type MarkdownTagProps<T extends "pre" | "table"> = ComponentPropsWithoutRef<T> & ExtraProps;
+
+// The table's min-content width escapes a flex item and widens the page. Scroll inside this box.
+function MarkdownTable({ node: _node, ...props }: MarkdownTagProps<"table">) {
+  return (
+    <div className="markdown-table-scroll">
+      <table {...props} />
+    </div>
+  );
+}
+
+// Keep the scrollport on the pre even if a parent flex item is only barely constrained.
+function MarkdownPre({ node: _node, className, ...props }: MarkdownTagProps<"pre">) {
+  return <pre className={cn("max-w-full overflow-x-auto", className)} {...props} />;
+}
+
 interface MarkdownRendererProps {
   content: string;
   className?: string;
@@ -111,8 +127,17 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   className,
 }: MarkdownRendererProps) {
   return (
-    <div className={cn("prose prose-stone dark:prose-invert max-w-none", className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlightSubset]}>
+    <div
+      className={cn(
+        "prose prose-stone dark:prose-invert max-w-none min-w-0 break-words",
+        className
+      )}
+    >
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlightSubset]}
+        components={{ pre: MarkdownPre, table: MarkdownTable }}
+      >
         {content}
       </ReactMarkdown>
     </div>

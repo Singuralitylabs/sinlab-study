@@ -55,7 +55,8 @@ export function AIReviewStatusBadge({ review }: { review: AIReviewListItem | nul
   switch (review.status) {
     case "completed":
       return (
-        <div className="flex items-center gap-1.5">
+        // Nowrap badges are min-content; without wrapping they widen a 320px card.
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
           <Badge variant="default" className="gap-1">
             <Bot className="h-3 w-3" />
             レビュー済み

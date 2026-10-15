@@ -344,7 +344,7 @@ export default async function ContentPage({ params }: PageProps) {
       />
 
       <Card className="mb-6">
-        <CardContent className="pt-6">
+        <CardContent className="min-w-0 pt-6">
           {content.content_type === "video" && content.video_url && (
             <div className="mb-6">
               <YouTubeEmbed url={content.video_url} />
@@ -416,7 +416,7 @@ export default async function ContentPage({ params }: PageProps) {
                               getSubmissionCodeFiles(latestSubmission),
                               content.code_language
                             )}
-                            preClassName="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre-wrap"
+                            preClassName="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto"
                           />
                         ) : (
                           <p className="text-sm text-muted-foreground break-all">
@@ -428,7 +428,7 @@ export default async function ContentPage({ params }: PageProps) {
                       {referenceAnswer && (
                         <div className="mb-6">
                           <h3 className="text-lg font-semibold mb-3">模範回答</h3>
-                          <pre className="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre-wrap">
+                          <pre className="max-w-full overflow-x-auto rounded-lg bg-muted px-4 py-3 text-sm font-mono">
                             {referenceAnswer}
                           </pre>
                         </div>
@@ -436,7 +436,7 @@ export default async function ContentPage({ params }: PageProps) {
 
                       {reviewForLatestSubmission && (
                         <div className="mb-6">
-                          <div className="flex items-center gap-2 mb-2">
+                          <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
                             <h3 className="text-lg font-semibold">AIレビュー結果</h3>
                             <Badge
                               variant="outline"
@@ -495,7 +495,7 @@ export default async function ContentPage({ params }: PageProps) {
       {(content.content_type === "video" || content.content_type === "slide") &&
         content.description && (
           <Card className="mb-6">
-            <CardContent className="pt-6">
+            <CardContent className="min-w-0 pt-6">
               <h2 className="text-sm font-semibold text-muted-foreground mb-2">概要</h2>
               <MarkdownRenderer content={resolveMarkdownStorageUrls(content.description)} />
             </CardContent>
