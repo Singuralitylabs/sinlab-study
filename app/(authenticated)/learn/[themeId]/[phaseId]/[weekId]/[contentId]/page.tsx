@@ -2,6 +2,7 @@ import { Bot, Lock } from "lucide-react";
 import { notFound } from "next/navigation";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
+import { LearningMemo } from "@/app/components/LearningMemo";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
 import { SlideContent } from "@/app/components/SlideContent";
@@ -32,11 +33,12 @@ import {
   isWeekHierarchyPublished,
 } from "@/app/services/api/learning-server";
 import { fetchQuizQuestions } from "@/app/services/api/quiz-server";
+import { fetchReviewNotesForContent } from "@/app/services/api/review-list-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
-import { checkContentPermissions } from "@/app/services/auth/permissions";
+import { checkContentPermissions, isLearnerRole } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -68,6 +70,7 @@ export default async function ContentPage({ params }: PageProps) {
   }
 
   const { userId, userStatus, userRole } = await getServerAuth();
+  const showReviewListNotes = isLearnerRole(userRole);
 
   // Started before the other fetches so a slow Stripe call overlaps them instead of adding to them.
   // Never rejects (falls back internally), so an unawaited promise is safe.
@@ -257,6 +260,7 @@ export default async function ContentPage({ params }: PageProps) {
     slideSignedUrl,
     { data: quizQuestions, error: quizError },
     aiReviewUsage,
+    { data: reviewNotes },
   ] = await Promise.all([
     userId && content.content_type === "exercise"
       ? fetchCompletedAIReviewByContentId(userId, contentIdNum)
@@ -285,7 +289,22 @@ export default async function ContentPage({ params }: PageProps) {
           })
         )
       : Promise.resolve(null),
+    showReviewListNotes && userId
+      ? fetchReviewNotesForContent(userId, contentIdNum)
+      : Promise.resolve({ data: [] }),
   ]);
+
+  const memosByKey: Record<string, string | null> = {};
+  let freeLearningMemo: string | null = null;
+  if (showReviewListNotes) {
+    for (const note of reviewNotes) {
+      if (note.requirement_key === null) {
+        freeLearningMemo = note.memo;
+      } else {
+        memosByKey[note.requirement_key] = note.memo;
+      }
+    }
+  }
 
   // A failed lookup hides only the remaining count, not the notice.
   const aiReviewRemaining =
@@ -430,6 +449,8 @@ export default async function ContentPage({ params }: PageProps) {
                           <AIReviewDisplayNoSSR
                             review={reviewForLatestSubmission}
                             defaultExpanded={false}
+                            contentId={showReviewListNotes ? contentIdNum : undefined}
+                            memosByKey={showReviewListNotes ? memosByKey : undefined}
                           />
                         </div>
                       )}
@@ -456,6 +477,7 @@ export default async function ContentPage({ params }: PageProps) {
                         codeLanguage={(content.code_language as CodeLanguage) ?? "javascript"}
                         starterFiles={parseStarterFiles(content.starter_files)}
                         persistedReviewId={reviewForLatestSubmission?.id ?? null}
+                        showReviewListNotes={showReviewListNotes}
                       />
                     </>
                   ) : (
@@ -491,6 +513,10 @@ export default async function ContentPage({ params }: PageProps) {
             refreshOnToggle={content.content_type === "quiz"}
           />
         </div>
+      )}
+
+      {showReviewListNotes && userId && isFullyPublished && (
+        <LearningMemo contentId={contentIdNum} initialMemo={freeLearningMemo} />
       )}
 
       <PrevNextNav

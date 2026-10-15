@@ -139,6 +139,7 @@ const PREVIEW_VARIANTS: Record<EmailTemplateKey, VariantDefinition[]> = {
             activeThemes: [
               { themeName: "GAS 学習（基礎編）", completedContents: 4, totalContents: 16 },
             ],
+            unovercomeReviewCount: 2,
           },
           c.texts
         ),

@@ -812,6 +812,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 - **URL の扱い**: URL 提出は URL の中身を AI が確認できないため要件判定をしない（`none`）。URL 形式の妥当性と課題への適合性の所見のみ返す
 - **トークン記録**: `prompt_tokens`（入力）・`completion_tokens`（回答）・`thoughts_tokens`（思考。`usageMetadata.thoughtsTokenCount`）を保存する。再生成した場合は両方の応答を合算し、失敗時も消費分を `failed` 行に記録する（`ReviewGenerationError.usage`）。同じ提出の再試行では `failed` 行を再利用するため、各列は試行をまたいだ累計になる（再試行で消さず加算する）。取得できなかった項目は NULL。管理画面（`/manage/submissions`）の admin / maintainer にのみ表示し、受講生向けの SELECT 列には含めない
 - **表示**: `review_json` から `StructuredReview` で描画する。要件のコメント・品質のコメント・改善提案・学習アドバイスは `MarkdownRenderer` で描画する（生 HTML は描画しない）。`legacy` と、`review_json` が不正な行は従来どおり `review_content`（Markdown）を表示する。`estimated` は「参考」、`none` は「採点対象外」のバッジを付ける。`passed = false`（有効時）のときは再提出の案内を出す
+- **復習リスト**: `partial` / `unmet` の要件は復習リストに自動で載る（15章）。レビュー表示には「復習リストに追加されました」と一言メモ欄を付ける
 
 **レスポンス**:
 
@@ -983,6 +984,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 - `/upgrade`: ステータス別の出し分け。サイドナビ「プラン・お支払い」から全認証ユーザーがアクセス可能（2.11）
 - `/upgrade/success`: Checkoutから戻った直後の決済確認・完了表示（2.11）
 - `/certificates` / `/certificates/[id]`: 修了証の一覧と表示（本登録の member のみ。13章）
+- `/review-list`: 復習リスト（未克服 / 克服済み。`role = member` のみ。15章）
 - `/announcements` / `/announcements/[id]`: お知らせの一覧（未読表示。サイドナビ「お知らせ」に未読件数のバッジ）・詳細（開くと既読を記録）（11章）
 - `/settings`: 案内メールの配信状態（配信中 / 停止中と停止日時）の確認と、停止・再開（10.8節）。サイドナビのログアウトの上に「設定」として全ロールへ表示する
 
@@ -1190,7 +1192,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 - **1人1日1通**: `trial_nurture` と `inactivity_reminder` が同じ日に重なるお試しユーザーには `trial_nurture` だけを送る。N 日目の案内を送る日はお知らせ・週次進捗を送らず、お知らせと週次進捗が重なる日は下の「1日の上限」の並び順で先の方だけを送り、もう一方は翌日以降の実行に回す。今日（JST 0:00 以降）すでに案内系メールの `email_logs` を持つユーザーは、同じ日の再実行（手動実行・Cron の再起動）で対象から外す（朝の実行後に承認されて `status` が変わっても、別種別の2通目を送らない）
 - **お試しユーザーの範囲**: 次に学ぶコンテンツ・残り本数・最初の1本は、お試し公開（`is_open_to_trial = true`）のコンテンツだけで判定する（ホームの進捗の分母と同じ。4.2節）
 - **週次進捗の「次に学ぶ」（#308）**: 学習中のテーマ（4.2節の `splitThemesByActivity()`）のうち**最も最近完了があったテーマ**の、学習順で先頭の未完了コンテンツを選ぶ（`resolveNextContent()`。完了時刻は `user_progress.completed_at`）。そのテーマに未完了が残っていなければ次に最近のテーマへ移り、学習中のテーマが無い（完了0件）ときは全体の先頭。残り本数と対象抽出（`isWeeklyDigestTarget()`）は全テーマ通しのまま。先週の完了数・提出数も全テーマ合算（活動量の指標）。本文には「学習中のテーマ: ○○（N / M 完了）」を最近学んだ順に最大3件入れる（プレースホルダー `active_themes`。学習中が無ければ行ごと出ない。保存済みのテンプレートには自動では入らないので、必要なら `/admin/emails/templates` で追記する）
-- **集計**: 抽出はユーザーセッションの無いバッチのため service_role クライアントで行う（`user_id` 単位の集計であり、受講生へコンテンツを返す配信経路ではない）。コンテンツは `fetchThemeProgressSummaries()` と同じネスト select で全階層を `is_published = true AND is_deleted = false` に絞り、本文を含まないカラム（`id, title, display_order, is_open_to_trial, week_id` と各階層の名前・表示順）だけを読む。学習順はコンテンツ詳細の前後ナビと同じ `buildThemeContentOrder()` で並べる。新しい集計 SQL（RPC）は追加しない。お知らせの本文だけは、この抽出とは別に宛先確定後のお知らせ取得で読む（11.4節）
+- **集計**: 抽出はユーザーセッションの無いバッチのため service_role クライアントで行う（`user_id` 単位の集計であり、受講生へコンテンツを返す配信経路ではない）。コンテンツは `fetchThemeProgressSummaries()` と同じネスト select で全階層を `is_published = true AND is_deleted = false` に絞り、本文を含まないカラム（`id, title, display_order, is_open_to_trial, week_id` と各階層の名前・表示順）だけを読む。学習順はコンテンツ詳細の前後ナビと同じ `buildThemeContentOrder()`（`orderContentsAcrossThemes()`）で並べる。新しい集計 SQL（RPC）は追加しない。お知らせの本文だけは、この抽出とは別に宛先確定後のお知らせ取得で読む（11.4節）。**週次進捗本文の復習リスト未克服件数**だけは例外として `ai_reviews.review_json` を service_role で読む（失敗時は 0 件扱いで続行。詳細は15.5節）。受講生向け配信経路の service_role 2箇所は増やさない
 - **並行実行の排除**: 実行の最初に実行ロック（`cron_locks`。[データベース設計書](./database.md)3.12）を取り、取れなければ何もせず `skipped` を返す。Cron の重複起動・手動実行が重なっても処理するのは1つだけになる。ロックの取得自体が DB エラーなら 500
 - **二重送信の防止**: 1通ごとに `email_logs` の claim を通す（10.1節）。同じ日の再実行でも UNIQUE 違反で送らない。送信失敗は `error` を記録して再送しない（お知らせの一斉送信だけは、Resend が受け付けなかったことが確実な失敗を翌日以降に送り直す。11.4節）
 - **1日の上限**: `email_settings.digest_daily_limit`（初期値80通。Resend 無料枠の日次100通に、同日のトランザクションメールの余裕を残す。10.10節）は同じ日（JST）の実行の合計に効かせる。ロックを取った後に、今日すでに作られた案内系の `email_logs` の行数を差し引いた数を今回の上限とし、送信を試みた通数（成功・失敗）がそれに達するか、経過時間が `EMAIL_DIGEST_TIME_BUDGET_MS`（40秒。ルートの `maxDuration` は60秒。最悪ケースは予算ぎりぎりで始めた1通が `EMAIL_SEND_TIMEOUT_MS`＝15秒まで掛かる合計55秒。送信開始は500ms間隔なので1回の実行で最大80通（初期の日次上限と同数）。ロック取得・抽出・送信ごとのDBアクセスも予算に含むため実際は数通少なく、不足分は上限超過分と同様に繰り越す。予算または間隔を変えるときは「予算÷間隔」が日次上限以上であることを上限として保つ）を超えたら新しい送信を始めない。送れなかった通数は warn ログに残す。キューは N 日目の案内を先頭に並べ、その後は週次進捗の対象を決める日（月曜。取り戻しの火曜を含む）はお知らせ（公開の古い順）→ 週次進捗、それ以外の日は週次進捗（予約の繰り越し分）→ お知らせの順に並べる。週次進捗の予約は同じ週の間しか有効でないため、繰り越しの期限が無いお知らせが上限を使い切って週次進捗を週末まで押し出し、失わせることがないようにする。上限に掛かるのは通常はお知らせ・週次進捗で、翌日以降の実行で送られる。N 日目の案内だけで上限を超えた場合の残りと、週の最終日（日曜）に送れなかった週次進捗は繰り越さない（warn ログで区別する）
@@ -1429,3 +1431,49 @@ X 向けの共有リンク（`https://twitter.com/intent/tweet?text=...&url=...`
 ### 13.6 管理画面
 
 `/manage/students` の受講生一覧に修了証の枚数を表示する。既存の進捗 RPC には列を足さず、`certificates` の `user_id` を別クエリで取得して集計・結合する（管理者のセッションで読む。RLS は admin / maintainer に SELECT を許す）。取得に失敗しても一覧は表示する（枚数は0）。
+
+---
+
+## 15. 復習リスト
+
+AI レビューで指摘された「部分的 / 未達成」の要件を、受講生本人の復習リストとして自動で集める（#309）。AI の追加呼び出しは無く、採点ロジック・修了証の発行処理には触らない。
+
+### 15.1 復習項目の導出
+
+項目は **テーブルに複製しない**。`ai_reviews`（本人の提出に紐づく完了行）から都度導出する。純粋関数は `app/lib/review-list.ts` の `deriveReviewListItems()` に集約する。
+
+| 規則 | 内容 |
+|:--|:--|
+| 対象 | `score_kind` が `rubric` または `estimated` で、認識できる `review_json` を持つ完了レビュー。`legacy` / `none` / `incomplete` は対象外 |
+| 開く条件 | 要件の `status` が `partial` または `unmet` |
+| 識別子 | `rubric` / `estimated` とも `(content_id, requirement key)` |
+| `estimated` の扱い | 同じコンテンツに `rubric` レビューが1件でもあれば、`estimated` 由来の項目は表示しない（rubric 優先）。未克服の open 項目は**コンテンツごとの最新 `estimated` レビューだけ**を表示し、古い `estimated` の項目は置き換える（消えたキーを克服済みにはしない。AI がレビューごとにキー名を変えやすいため）。置き換えで一覧から外れたキーに紐づく `review_notes` は削除せず、「メモのみ（以前のレビュー）」として残す |
+| 克服済み | 同じ `(content_id, key)` について、より新しいレビュー（`estimated` または `rubric`）で `met` になった。`rubric` のみ、同じ kind の新しいレビューにその `key` が無いときも克服（採点基準版変更）。`estimated` でキーが消えただけでは克服にしない。`rubric` が現れて `estimated` が非表示になる場合も一覧から外す |
+| 「理解した」 | `review_notes.understood_at`。自己申告のみで、克服済みの判定には使わない（未克服タブに残し、見た目を薄くする） |
+
+並びはテーマ → コンテンツの学習順（`buildThemeContentOrder()` / テーマ別進捗と同じ骨格）。テーマ見出しを付ける。
+
+### 15.2 review_notes
+
+本人の一言メモと「理解した」チェックだけを持つ（[データベース設計書](./database.md)）。`requirement_key = NULL` はコンテンツ単位の自由記述（学習メモ。1コンテンツ1行）。書き込みは通常クライアント（RLS）。service_role は使わない。受講生向け配信経路の service_role 利用（ツリー一覧サマリーとコンテンツ詳細の存在チェックの2箇所）は増やさない。
+
+### 15.3 API
+
+| メソッド | パス | 内容 |
+|:--|:--|:--|
+| PUT | `/api/review-notes` | `{ contentId, requirementKey \| null, memo?, understood? }` を upsert。`memo` は 500 文字超で 400（切らない）。`understood: true` → `understood_at = now()`、`false` → NULL。未認証 401、`rejected` 403、`isContentVisible()` で不可視なら 403 |
+| DELETE | `/api/review-notes` | `{ contentId, requirementKey \| null }` で本人の行を削除 |
+
+スキーマは `app/services/api/schemas.ts`。認証は `requireLearnerApi()`。
+
+### 15.4 画面
+
+- **`/review-list`**: サイドナビ「復習リスト」（`role = member` のみ）。未克服 / 克服済みタブ。各項目にコンテンツ名（リンク）、要件名、AI コメント（最新）、一言メモ、「理解した」。現在の未克服・克服済みに無い `requirement_key` のメモは「メモのみ（以前のレビュー）」に出す（`estimated` 置き換え後の orphan）。メモありのコンテンツ（自由記述）も表示
+- **コンテンツ詳細**: `role = member` のときだけ、`AIReviewDisplay` の `partial` / `unmet` 行に「復習リストに追加されました」とメモ欄、下部に「学習メモ」を出す（admin / maintainer には出さない）
+- **ホーム**: `isLearnerRole()` のときだけ、未克服が 1 件以上なら「復習リストに N 件」を 1 行で表示（大きなカードは増やさない）。件数用のレビュー取得はホーム学習データと並行で開始する
+
+### 15.5 週次進捗メール
+
+本文に「復習リストに未克服の項目が N 件あります」を 1 行添える（プレースホルダー `{{review_list_line}}`。0 件なら空にして行ごと出さない）。対象抽出・送信条件は変えない（10.7節）。件数は公開中・可視コンテンツ上の未克服だけを数え、復習リスト画面と同じ分母にする。**`email_templates` に `weekly_digest` の上書き行がある環境では、保存済み本文に `{{review_list_line}}` を追記する必要がある**（10.11節: 上書きがあればコード既定値は使わない。`active_themes` と同様。管理画面 `/admin/emails/templates` のプレースホルダー一覧にも載る）。
+
+**service_role 例外（digest 件数）**: Cron にユーザーセッションが無いため、未克服件数だけは `ai_reviews.review_json` を service_role で読む（`user_id` フィルタ付き。受講生向け配信の2経路は増やさない）。取得に失敗したら warn/error ログを出し、全員分を 0 件として本文だけ続行する（digest 全体を abort しない）。読む列は導出に必要な `id, score_kind, review_json, reviewed_at, created_at, status` と提出側の `user_id, content_id` に限る。

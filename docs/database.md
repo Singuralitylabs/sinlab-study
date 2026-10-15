@@ -41,6 +41,8 @@ erDiagram
     users ||--o{ email_test_sends : "user_id"
     users ||--o{ certificates : "1:N"
     learning_themes ||--o{ certificates : "1:N"
+    users ||--o{ review_notes : "1:N"
+    learning_contents ||--o{ review_notes : "1:N"
     announcements ||--o{ announcement_reads : "1:N"
     users ||--o{ announcement_reads : "1:N"
 ```
@@ -256,6 +258,17 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 - **正解を含むため受講者には SELECT させない**（6.17）。learning_contents の JSONB 列にしなかったのは、learning_contents は受講者が REST で SELECT できるため（列に正解を入れると回答前に読めてしまう）
 - 入力式は自動採点しない（回答後に模範解答と解説を表示）。回答内容は保存せず、回答を送ると `user_progress` を完了にする（進捗 API 経由）
 
+### 3.21 review_notes（復習リストのメモ）
+
+復習リストの**項目自体は持たない**（`ai_reviews.review_json` から都度導出。[機能設計書](./specification.md)15章）。本人の一言メモと「理解した」チェックだけを保存する（#309）。
+
+- `user_id`（`users.id`、`ON DELETE CASCADE`）、`content_id`（`learning_contents.id`、`ON DELETE CASCADE`）
+- `requirement_key`（TEXT NULL）: 要件キー。**NULL はコンテンツ単位の自由記述メモ**（学習メモ）
+- `memo`（TEXT NULL、最大 500 文字。CHECK。超過はアプリが 400）
+- `understood_at`（TIMESTAMPTZ NULL）: 「理解した」チェック時刻。克服済み判定には使わない
+- 一意性: `UNIQUE INDEX (user_id, content_id, COALESCE(requirement_key, ''))`（NULL キーは 1 コンテンツ 1 行）
+- RLS は 6.19 節
+
 ---
 
 ## 4. インデックス
@@ -267,6 +280,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 - `user_progress` の部分インデックス（`is_completed = true`）は、RPC `get_students_progress_summary` の完了集計向け
 - `learning_contents.pdf_url` の部分インデックス `idx_learning_contents_pdf_url`（`pdf_url IS NOT NULL`）は、slides の Storage SELECT ポリシーの `EXISTS`（`pdf_url = storage.objects.name`）向け（6.8参照）
 - `announcements` は公開済み・未削除に絞った `published_at DESC` の部分インデックス（受講生向け一覧と、一斉送信の送信待ち抽出向け）、`announcement_reads` は `user_id`（未読件数の算出向け）
+- `review_notes` は `(user_id, content_id, COALESCE(requirement_key, ''))` の一意インデックス（NULL キーの自由記述を 1 コンテンツ 1 行に制限）と `user_id` / `content_id` の検索用
 - UNIQUE 制約が暗黙に作るインデックス（`user_progress(user_id, content_id)`・`ai_reviews(submission_id)`・`users(auth_id)`・`quiz_questions(content_id, display_order)` 等）と重複する covering インデックスは追加しない。`users(auth_id)` は RLS ヘルパー（5.2）の検索を賄う
 
 ---
@@ -432,6 +446,17 @@ SELECT は本人のみ。INSERT は本人かつ、`announcements` の SELECT ポ
 | SELECT | 本人 / admin・maintainer | `user_id = (select get_user_id())` または `(select get_user_role()) IN ('admin', 'maintainer')`（OR で1本） |
 
 INSERT / UPDATE / DELETE のポリシーは定義しない（受講生・管理者のセッションからは書き込めない。発行は service_role のみ）。`get_user_xxx()` は `(select ...)` で包み、同一操作のポリシーは1本にまとめる。却下ユーザーは `get_user_id()` / `get_user_role()` が NULL のため読めない。`/certificates/[id]` は RLS に加えてアプリ層で `user_id` を本人に絞り、admin / maintainer でも他人の修了証ページは開けない（[機能設計書](./specification.md)13.3節）。
+
+### 6.19 review_notes
+
+| 操作 | 対象 | 条件 |
+|:--|:--|:--|
+| SELECT | 本人のみ | `user_id = (select get_user_id())` |
+| INSERT | 本人のみ | `user_id = (select get_user_id())`（WITH CHECK） |
+| UPDATE | 本人のみ | USING / WITH CHECK とも `user_id = (select get_user_id())` |
+| DELETE | 本人のみ | `user_id = (select get_user_id())` |
+
+各操作 1 本。**admin / maintainer も他人のメモは読めない**（本人の学習記録のため）。`content_id` の可視性は `learning_contents` の SELECT RLS に委ね、アプリ層でも `isContentVisible()` で確認する（提出 API と同じ二層）。定義は `20261015012000_add_review_notes.sql`。
 
 ### 6.15 get_weekly_funnel
 

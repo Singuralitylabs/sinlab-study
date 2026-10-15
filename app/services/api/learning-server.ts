@@ -7,6 +7,10 @@ import {
   type NavigationWeek,
 } from "@/app/lib/content-navigation";
 import type { ContinueLearningContent } from "@/app/lib/continue-learning";
+import {
+  applyPublishedNestedThemeFilters,
+  orderContentsAcrossThemes,
+} from "@/app/lib/published-theme-tree";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import type {
   BreadcrumbWeek,
@@ -257,18 +261,9 @@ export async function fetchHomeLearningData(userId: number): Promise<{
     }
   })();
 
-  const { data: themes, error: themesError } = await supabase
-    .from("learning_themes")
-    .select(HOME_LEARNING_THEME_SELECT)
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .eq("phases.is_published", true)
-    .eq("phases.is_deleted", false)
-    .eq("phases.weeks.is_published", true)
-    .eq("phases.weeks.is_deleted", false)
-    .eq("phases.weeks.contents.is_published", true)
-    .eq("phases.weeks.contents.is_deleted", false)
-    .order("display_order");
+  const { data: themes, error: themesError } = await applyPublishedNestedThemeFilters(
+    supabase.from("learning_themes").select(HOME_LEARNING_THEME_SELECT)
+  ).order("display_order");
 
   if (themesError) {
     progressControl.abandoned = true;
@@ -285,40 +280,17 @@ export async function fetchHomeLearningData(userId: number): Promise<{
     ),
   }));
 
-  const orderedThemes = [...nestedThemes].sort((a, b) =>
-    compareGroupLevel(a.display_order, b.display_order, a.id, b.id)
+  const orderedContents: ContinueLearningContent[] = orderContentsAcrossThemes(nestedThemes).map(
+    ({ themeId, themeName, content, raw }) => ({
+      id: content.id,
+      title: content.title,
+      contentType: raw.content_type,
+      themeId,
+      themeName,
+      phaseId: content.phaseId,
+      weekId: content.weekId,
+    })
   );
-
-  const orderedContents: ContinueLearningContent[] = [];
-  for (const theme of orderedThemes) {
-    const weeks: NavigationWeek[] = theme.phases.flatMap((phase) =>
-      phase.weeks.map((week) => ({
-        id: week.id,
-        name: week.name,
-        display_order: week.display_order,
-        phase: {
-          id: phase.id,
-          name: phase.name,
-          display_order: phase.display_order,
-        },
-      }))
-    );
-    const contents = theme.phases.flatMap((phase) => phase.weeks.flatMap((week) => week.contents));
-    const contentById = new Map(contents.map((c) => [c.id, c]));
-    for (const ordered of buildThemeContentOrder(weeks, contents)) {
-      const raw = contentById.get(ordered.id);
-      if (!raw) continue;
-      orderedContents.push({
-        id: ordered.id,
-        title: ordered.title,
-        contentType: raw.content_type,
-        themeId: theme.id,
-        themeName: theme.name,
-        phaseId: ordered.phaseId,
-        weekId: ordered.weekId,
-      });
-    }
-  }
 
   const hasContents = themeContents.some((t) => t.contentIds.length > 0);
 
@@ -387,20 +359,13 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
     }
   })();
 
-  const { data: themes, error: themesError } = await supabase
-    .from("learning_themes")
-    .select(
-      "*, phases:learning_phases(id, weeks:learning_weeks(id, contents:learning_contents(id)))"
-    )
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .eq("phases.is_published", true)
-    .eq("phases.is_deleted", false)
-    .eq("phases.weeks.is_published", true)
-    .eq("phases.weeks.is_deleted", false)
-    .eq("phases.weeks.contents.is_published", true)
-    .eq("phases.weeks.contents.is_deleted", false)
-    .order("display_order");
+  const { data: themes, error: themesError } = await applyPublishedNestedThemeFilters(
+    supabase
+      .from("learning_themes")
+      .select(
+        "*, phases:learning_phases(id, weeks:learning_weeks(id, contents:learning_contents(id)))"
+      )
+  ).order("display_order");
 
   if (themesError) {
     progressControl.abandoned = true;

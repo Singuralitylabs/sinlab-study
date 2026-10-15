@@ -29,6 +29,8 @@ interface SubmissionFormProps {
   starterFiles?: CodeFile[] | null;
   /** Id of the completed review the page already renders for this submission. */
   persistedReviewId: number | null;
+  /** When true, partial/unmet rows show review-list cues (learners only). */
+  showReviewListNotes?: boolean;
 }
 
 function buildFailedReview(errorMessage: string): AIReviewListItem {
@@ -52,6 +54,7 @@ export function SubmissionForm({
   codeLanguage,
   starterFiles = null,
   persistedReviewId,
+  showReviewListNotes = false,
 }: SubmissionFormProps) {
   const router = useRouter();
   const [submissionType, setSubmissionType] = useState<SubmissionType>(
@@ -309,6 +312,7 @@ export function SubmissionForm({
           review={aiReview}
           isLoading={isReviewLoading}
           defaultExpanded={true}
+          contentId={showReviewListNotes ? contentId : undefined}
           onRetry={
             lastSubmissionId && aiReview?.status === "failed"
               ? () => {

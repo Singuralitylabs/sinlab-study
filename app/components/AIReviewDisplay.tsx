@@ -14,6 +14,9 @@ export interface AIReviewDisplayProps {
   isLoading?: boolean;
   onRetry?: () => void;
   defaultExpanded?: boolean;
+  /** Enables review-list cues / memo fields on partial and unmet requirements. */
+  contentId?: number;
+  memosByKey?: Readonly<Record<string, string | null>>;
 }
 
 export function AIReviewDisplay({
@@ -21,6 +24,8 @@ export function AIReviewDisplay({
   isLoading = false,
   onRetry,
   defaultExpanded = false,
+  contentId,
+  memosByKey,
 }: AIReviewDisplayProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
@@ -107,6 +112,8 @@ export function AIReviewDisplay({
             reviewJson={reviewJson}
             scoreKind={review.score_kind}
             passDisplay={passDisplay}
+            contentId={contentId}
+            memosByKey={memosByKey}
           />
         </div>
       )}

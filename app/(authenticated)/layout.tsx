@@ -5,7 +5,11 @@ import { Suspense } from "react";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import { isCertificateEligible } from "@/app/lib/certificate";
-import { checkAdminPermissions, checkInstructorPermissions } from "@/app/services/auth/permissions";
+import {
+  checkAdminPermissions,
+  checkInstructorPermissions,
+  isLearnerRole,
+} from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { SideNav } from "./components/SideNav";
 import { TrialBanner } from "./components/TrialBanner";
@@ -39,6 +43,7 @@ export default async function AuthLayout({
         isInstructor={isInstructor}
         stripeEnabled={stripeEnabled}
         showCertificates={isCertificateEligible(userStatus, userRole)}
+        showReviewList={isLearnerRole(userRole)}
         announcementBadge={
           // The unread query runs behind Suspense so the shell (and each route's loading.tsx)
           // renders without waiting on it. The userStatus gate above still runs first.
