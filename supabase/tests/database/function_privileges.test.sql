@@ -31,6 +31,8 @@ from (
     -- Trigger function: never callable through REST
     ('public.stamp_stripe_subscription_funnel_times()', 'anon', false),
     ('public.stamp_stripe_subscription_funnel_times()', 'authenticated', false),
+    ('public.keep_grading_rubric_tombstone()', 'anon', false),
+    ('public.keep_grading_rubric_tombstone()', 'authenticated', false),
     -- Internal helpers behind the quiz and model-answer RPCs
     ('public.content_visible_to_caller(integer, text)', 'anon', false),
     ('public.content_visible_to_caller(integer, text)', 'authenticated', false),
@@ -103,6 +105,7 @@ select is(
     'get_user_status()',
     'get_weekly_funnel(integer)',
     'grade_quiz_answers(integer,jsonb)',
+    'keep_grading_rubric_tombstone()',
     'keep_user_progress_ever_completed()',
     'quiz_content_visible_to_caller(integer)',
     'quiz_correct_choices_valid(text[],integer[])',

@@ -20,7 +20,10 @@ import { Textarea } from "@/components/ui/textarea";
 interface GradingRubricEditorProps {
   rows: GradingRequirement[];
   onChange: (rows: GradingRequirement[]) => void;
-  /** Stored version in edit mode; null when the rubric is unset or the content is new. */
+  /**
+   * Stored version in edit mode; null when the rubric is unset or the content is new. A deleted
+   * rubric (#344) still has one, but it is only shown while there are requirements.
+   */
   currentVersion: number | null;
   /** Highest `r{n}` number already issued for the stored rubric; 0 for a new rubric. */
   issuedMaxKeyNumber: number;
@@ -119,6 +122,7 @@ export function GradingRubricEditor({
             AIレビューは要件ごとに「達成 / 部分的 / 未達成」を判定し、点数はシステムが計算します。
             未設定の演習は AI が要件を推測する参考採点となり、修了判定には使われません。
             {currentVersion !== null &&
+              rows.length > 0 &&
               ` 現在のバージョン: v${currentVersion}（内容を変えて保存すると +1 されます）`}
           </p>
         </div>
