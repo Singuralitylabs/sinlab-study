@@ -26,10 +26,14 @@ jobs:
       # plan reads working-tree gemini.ts; apply rewrites origin/main. Both must be the same ref
       # or the PR summary (A → B) can disagree with the diff (release-pr.yml same rule).
       - name: Require main branch
+        env:
+          # Pass via env so the value is not interpolated into the shell script
+          # (workflow_dispatch can target a branch whose name contains shell metacharacters).
+          REF: ${{ github.ref }}
         run: |
           set -euo pipefail
-          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
-            echo "::error::gemini-model-check.yml must be run from main (got ${{ github.ref }})."
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::gemini-model-check.yml must be run from main (got ${REF})."
             exit 1
           fi
 
@@ -165,12 +169,12 @@ jobs:
 
           # Deduplicate: any PR (open or closed) for this head branch / exact auto title / model token.
           # Closed PRs mean a human already declined or merged that model bump; do not recreate weekly.
-          # Prefer search over --limit 100 so older closed declines are still found.
+          # Phrase-search the auto-PR title pattern (default --limit is 30; raise so older declines stay visible).
           EXISTING_PR=$(gh pr list --state all --head "$BRANCH" --json number --jq '.[0].number // empty')
           if [ -z "$EXISTING_PR" ]; then
             EXISTING_PR=$(
               TITLE="$TITLE" NEWER="$NEWER" \
-              gh pr list --search "${NEWER} in:title" --state all --json number,title \
+              gh pr list --search "\"[env] Gemini モデルを ${NEWER}\" in:title" --state all --limit 1000 --json number,title \
                 | bun -e '
                   const title = process.env.TITLE;
                   const model = process.env.NEWER ?? "";
