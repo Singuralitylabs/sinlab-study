@@ -416,11 +416,13 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 |:--|:--|
 | 動画（video） | YouTube facade（サムネイル + 再生ボタン）。クリックで `react-youtube` を遅延読み込みして autoplay 再生（URLから Video ID を自動抽出、レスポンシブ対応） |
 | テキスト（text） | Markdown形式で記述・表示（GFM対応） |
-| スライド（slide） | 非公開バケット `slides` のPDFを、閲覧権限チェック後にサーバー側で発行した署名付きURLで react-pdf によりブラウザ内表示（後述） |
+| スライド（slide） | 非公開バケット `slides` のPDFを、閲覧権限チェック後にサーバー側で発行した署名付きURLで react-pdf によりブラウザ内表示（後述）。`text_content`（Markdown・任意）があればビューアの直下に解説記事を表示する。空なら記事は出さない |
 | 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携。模範回答は提出が1件以上あるとき（admin・maintainer は提出不要）だけ、RPC `get_exercise_reference_answer()`（`docs/database.md` 6.18）で取得して表示する（列権限では読めない） |
 | クイズ（quiz） | 導入文（`description`・任意）と設問（1〜3問）を表示し、回答後に正誤・解説を表示（後述） |
 
 動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア下部に概要欄カードを表示する（テキスト・演習と同じ `MarkdownRenderer`）。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）は `"use client"` を持たない共有コンポーネントで、Server Component からはサーバーで、Client Component（`AIReviewDisplay`）からはクライアントで同じ実装のまま描画される。コンテンツ本文の Markdown 描画経路（Server Component）は client 化しない。
+
+スライドの解説記事は `learning_contents.text_content`（Markdown・任意。テキスト種別の本文と同じ列）。値があるときだけ PDF ビューアの直下に `MarkdownRenderer` と `resolveMarkdownStorageUrls()` で表示し、空なら従来どおりスライドだけを出す。未公開プレビュー（2.12）は同じ詳細ページなので同様に出る。`/demo` ではお試し公開のスライド（署名付きURLと同じく、公開済み・未削除かつ `is_open_to_trial = true` のときだけビューアを出す分岐）に限って記事を出す。公開済みでもお試し非公開のスライドは対象外の案内だけを出し、記事は出さない。テキスト種別の本文も同じ置換を通す（`{{SUPABASE_STORAGE_URL}}` を公開オブジェクトURLへ変える）。画像のアップロード手段は持たない。
 
 **YouTube facade**: クリック前は `i.ytimg.com` の hqdefault を `<img>` で直接参照する（最適化の恩恵がほぼ無いため `next/image` は使わず、クリック前に `youtube.com` へ通信しない）。クリック後に `YouTubePlayer` を動的読み込みして autoplay 再生する（クライアント読み込み方針は5.4.6）。iOS Safari では gesture 後に生成した cross-origin iframe の音声付き autoplay が拒否され、再生ボタンへの追加タップが必要になる場合がある（facade 化の既知の制約）。
 
@@ -724,6 +726,8 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 **お試し公開の設定**: コンテンツ作成・編集フォーム（`/manage/contents`）にチェックボックス「お試しユーザーにも公開する」を設け、`is_open_to_trial` を設定する。デフォルトは未チェック（`false`）で、種別を問わず全コンテンツで設定可能（2.6参照）。
 
 **概要欄の設定**: コンテンツ種別が動画・スライド・クイズの場合のみ、コンテンツ作成・編集フォームに概要入力欄（Markdown・任意。クイズでは「導入文」）を表示し、`description` として保存する（`exercise_instructions` / `hint` と同じ、未入力なら `null` で保存するパターン）。テキスト・演習では表示せず、`description` は常に `null` として送信する。
+
+**スライドの解説記事（#375）**: 種別がスライドのとき、作成・編集フォームに「解説記事（Markdown・任意）」を表示し `text_content` として保存する（未入力は `null`）。テキスト種別の本文と同じ列で、種別がテキストまたはスライドのときだけ値を持つ。それ以外の種別では `null`（作成・更新・一括の `set_type` も同じ。テキストまたはスライドへの一括変更では既存の `text_content` を消さない）。編集でスライドから記事が消える種別へ切り替えたときは、PDF削除の注意と同じ位置に注意を出す。画像のアップロードは行わず、`{{SUPABASE_STORAGE_URL}}/<公開バケット>/<キー>` を記事に書けば表示時に置換される。service_role の列許可リストと一覧用の列には本文を足さない。
 
 **提出ファイルの構成（#377）**: 種別が演習のとき、作成・編集フォームに「提出ファイル」エディタを出す。行ごとにファイル名と言語を編集し、行の追加・削除・並べ替えができる（上限は `SUBMISSION_FILE_SLOT_MAX_COUNT`）。各行の初期コードは任意。1行目の言語を `code_language` として保存する（単一ファイル提出の言語補完と AI レビューがこの列を使うため、列自体は残す）。ファイル名が言語の既定値である1件だけ、かつ初期コードが空なら `submission_file_slots` は NULL（未指定。受講生にはその既定ファイル1つが出る）。それ以外の構成は `[{ filename, language }]` で保存し、初期コードに中身があるときは同じファイル名・言語・並び順の `starter_files` も保存する。演習以外では両方 NULL（一括の種別変更で演習を離れるときも `submission_file_slots` を NULL にする）。形・重複・件数・演習以外への設定・初期コードとの不一致は `ContentBaseSchema` が 400 にする。
 

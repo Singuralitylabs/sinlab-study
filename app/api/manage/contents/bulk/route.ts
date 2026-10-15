@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { BULK_SETTABLE_CONTENT_TYPES, type BulkContentAction } from "@/app/constants/content";
-import { isContentType } from "@/app/lib/content-filtering";
+import { contentTypeStoresTextContent, isContentType } from "@/app/lib/content-filtering";
 import { bulkUpdateContents, createContentsAtTail } from "@/app/services/api/admin-server";
 import {
   BulkContentCreateSchema,
@@ -34,7 +34,7 @@ function buildPatch(
       return { is_open_to_trial: false };
     case "delete":
       return { is_deleted: true };
-    case "set_type":
+    case "set_type": {
       if (typeof contentType !== "string" || !isContentType(contentType)) {
         return { error: "有効なコンテンツ種別を指定してください" };
       }
@@ -42,15 +42,22 @@ function buildPatch(
       if (!BULK_SETTABLE_CONTENT_TYPES.includes(contentType)) {
         return { error: "クイズへの変更は編集画面で設問と一緒に行ってください" };
       }
-      // Rubrics and starter code belong to exercises; drop them when the type moves away.
-      return contentType === "exercise"
-        ? { content_type: contentType }
-        : {
-            content_type: contentType,
-            grading_rubric: null,
-            starter_files: null,
-            submission_file_slots: null,
-          };
+      // Rubrics, starter code, and file slots belong to exercises; drop them when the type moves
+      // away. The article column is shared by text and slide, so only other types clear it.
+      const patch: Partial<LearningContent> =
+        contentType === "exercise"
+          ? { content_type: contentType }
+          : {
+              content_type: contentType,
+              grading_rubric: null,
+              starter_files: null,
+              submission_file_slots: null,
+            };
+      if (!contentTypeStoresTextContent(contentType)) {
+        patch.text_content = null;
+      }
+      return patch;
+    }
   }
 }
 

@@ -5,6 +5,11 @@ export function isContentType(value: string | undefined): value is ContentType {
   return CONTENT_TYPES.includes(value as ContentType);
 }
 
+/** Article markdown is text_content for text and an optional slide article. Other types store null. */
+export function contentTypeStoresTextContent(contentType: ContentType): boolean {
+  return contentType === "text" || contentType === "slide";
+}
+
 export interface ThemeFilterOption {
   id: number;
   name: string;

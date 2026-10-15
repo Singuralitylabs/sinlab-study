@@ -127,17 +127,30 @@ export default async function DemoContentPage({ params }: PageProps) {
           )}
 
           {content.content_type === "text" && content.text_content && (
-            <MarkdownRenderer content={content.text_content} />
+            <MarkdownRenderer content={resolveMarkdownStorageUrls(content.text_content)} />
           )}
 
+          {/* The article uses the same trial-open gate as the PDF. This page still loads a
+              published, not-trial slide so it can show the lock message; rendering text_content
+              there would publish the article. */}
           {content.content_type === "slide" &&
-            content.pdf_url &&
             (content.is_open_to_trial ? (
-              <SlideContent signedUrl={slideSignedUrl} />
+              <>
+                {content.pdf_url && (
+                  <div className={content.text_content ? "mb-6" : undefined}>
+                    <SlideContent signedUrl={slideSignedUrl} />
+                  </div>
+                )}
+                {content.text_content && (
+                  <MarkdownRenderer content={resolveMarkdownStorageUrls(content.text_content)} />
+                )}
+              </>
             ) : (
-              <p className="py-8 text-center text-sm text-muted-foreground">
-                このスライドはお試し公開の対象外です。ログイン後に本登録すると閲覧できます。
-              </p>
+              content.pdf_url && (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  このスライドはお試し公開の対象外です。ログイン後に本登録すると閲覧できます。
+                </p>
+              )
             ))}
 
           {/* The demo reads via service_role, which must never reach quiz_questions (it holds the
