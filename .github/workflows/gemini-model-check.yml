@@ -169,12 +169,12 @@ jobs:
 
           # Deduplicate: any PR (open or closed) for this head branch / exact auto title / model token.
           # Closed PRs mean a human already declined or merged that model bump; do not recreate weekly.
-          # Phrase-search the auto-PR title pattern (default --limit is 30; raise so older declines stay visible).
+          # Phrase-search the model id only so manual titles also match; --limit 1000 (default is 30).
           EXISTING_PR=$(gh pr list --state all --head "$BRANCH" --json number --jq '.[0].number // empty')
           if [ -z "$EXISTING_PR" ]; then
             EXISTING_PR=$(
               TITLE="$TITLE" NEWER="$NEWER" \
-              gh pr list --search "\"[env] Gemini モデルを ${NEWER}\" in:title" --state all --limit 1000 --json number,title \
+              gh pr list --search "\"${NEWER}\" in:title" --state all --limit 1000 --json number,title \
                 | bun -e '
                   const title = process.env.TITLE;
                   const model = process.env.NEWER ?? "";
