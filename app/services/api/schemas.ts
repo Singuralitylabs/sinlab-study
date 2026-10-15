@@ -14,6 +14,7 @@ import {
   MAX_BULK_CREATE_CONTENTS,
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
+import { GEMINI_MAX_CODE_LENGTH } from "@/app/constants/gemini";
 import { GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH } from "@/app/constants/grading";
 import {
   EMAIL_DIGEST_DAILY_LIMIT_MAX,
@@ -297,6 +298,37 @@ export const WeekCreateSchema = WeekBaseSchema.extend({
 });
 export const WeekUpdateSchema = WeekCreateSchema.partial();
 
+const StarterCodeFileSchema = z.object({
+  filename: z
+    .string({ message: "文字列で指定してください" })
+    .trim()
+    .min(1, { message: "ファイル名を入力してください" }),
+  language: CodeLanguageSchema,
+  content: z.string({ message: "文字列で指定してください" }),
+});
+
+/**
+ * Exercise starter code (same shape as submissions.code_files). null clears. Total content length
+ * matches the AI review code limit so a starter cannot exceed what the review path can send.
+ */
+const StarterFilesSchema = z
+  .array(StarterCodeFileSchema)
+  .min(1, { message: "初期コードは1ファイル以上指定してください" })
+  .nullable()
+  .optional()
+  .superRefine((files, ctx) => {
+    if (!files) {
+      return;
+    }
+    const totalLength = files.reduce((sum, file) => sum + file.content.length, 0);
+    if (totalLength > GEMINI_MAX_CODE_LENGTH) {
+      ctx.addIssue({
+        code: "custom",
+        message: `初期コードが長すぎます（上限: ${GEMINI_MAX_CODE_LENGTH}文字）`,
+      });
+    }
+  });
+
 const ContentBaseSchema = z.object({
   title: RequiredStringSchema,
   week_id: PositiveIntSchema,
@@ -307,6 +339,7 @@ const ContentBaseSchema = z.object({
   exercise_instructions: OptionalNullableString,
   hint: OptionalNullableString,
   reference_answer: OptionalNullableString,
+  starter_files: StarterFilesSchema,
   // The DB CHECK constraint is NOT NULL (with a default), so unlike other optional fields null is
   // not allowed.
   allowed_submission_types: AllowedSubmissionTypeSchema.optional(),

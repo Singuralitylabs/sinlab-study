@@ -621,6 +621,8 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 
 **対応言語**: `code_language` カラムで演習ごとに設定する（`javascript`（既定）/ `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`。#307）。許可値・既定ファイル名・表示名は `app/components/code-editor-utils.ts`（`CODE_LANGUAGES` / `DEFAULT_FILENAME_BY_LANGUAGE` / `CODE_LANGUAGE_LABELS`）に集約し、管理画面と提出フォームの言語セレクトも同じ一覧から作る。DB の CHECK 制約との一致はテストで検査する。SQL は PostgreSQL 方言、Bash は `@codemirror/legacy-modes` の shell モードで色分けする。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（エディタの言語モードは変えない）。Markdown のコードフェンスは `sql` / `bash` / `markdown` / `python` / `json` と `jsx` / `tsx` も色分けする（`MarkdownRenderer`）。
 
+**初期コード（#341）**: 演習は任意で `learning_contents.starter_files`（`[{ filename, language, content }]`。`submissions.code_files` と同じ形）を持てる。管理画面（`ContentForm`）で登録・編集し、複数ファイル編集 UI は提出フォームと共通コンポーネント（`CodeFilesEditor`）を使う。受講生の提出フォームは `starter_files` があるときその内容で開始し、「初期コードに戻す」（確認ダイアログ付き）と提出成功後のリセットも同じ初期コードへ戻す。NULL の既存演習は従来どおり空ファイル1つから開始する。前回提出の読み込みは行わない（提出履歴として別表示）。単一ファイルでもファイル名・言語は保持する。秘匿ではないため列権限と詳細 SELECT に含め、`reference_answer` や service_role のツリー／サマリー用許可カラムリストとは混ぜない。
+
 **エディタ機能**:
 - シンタックスハイライト
 - 自動インデント・ブラケット補完
@@ -770,7 +772,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 2. 提出データと関連コンテンツを取得
 3. 本人の提出であることを確認し、コンテンツの可視性（`is_published = true` 付き SELECT で 0 行なら 403）を確認
 4. `claimAIReview()`（RPC `claim_ai_review()`）で回数制限（下記「回数制限」）の判定とその提出のレビュー枠の確保を原子的に行う（新規は `ON CONFLICT DO NOTHING` の INSERT、既存行は `failed` または死んだ in-flight だけを条件付き UPDATE で再利用）。確保できなければ（`busy`。直列化下では到達しない防御的な分岐）409 で Gemini を呼ばない。確保後は `pending` → `processing` → `completed` / `failed` の順に更新する（`processing` への更新に失敗したら `failed` にして 500）。再利用した行は `created_at` も現在時刻に更新する（当日の件数集計から漏れないようにするため）。トークン列は更新せず累計を保つ
-6. Gemini API にコード・演習指示・模範回答・採点基準（`grading_rubric` と `reference_answer` は受講生の列権限に無いため、service_role で `is_published = true AND is_deleted = false` を付けて1回で読む）を送信し、構造化 JSON でレビューを生成（下記「構造化採点」。単一ファイルの提出は `code_content` に言語を持たないため、演習の `code_language` を言語として渡す。コードを囲むフェンスはコード中のバッククォートの連続より長くし、Markdown 提出のコードブロック等でフェンスが途中で閉じないようにする。`GEMINI_MAX_CODE_LENGTH` を超えた分の省略は複数ファイルの提出でもファイルごとに行う）。結果の保存に失敗したときは 500 を返し、行を best-effort で `failed`（トークンも記録）にして再試行を可能にする
+6. Gemini API にコード・演習指示・模範回答・採点基準・初期コード（`grading_rubric` と `reference_answer` は受講生の列権限に無いため、service_role で `is_published = true AND is_deleted = false` を付けて1回で読む。`starter_files` は受講生に見える列なので通常クライアントの提出取得に含め、service_role では読まない）を送信し、構造化 JSON でレビューを生成（下記「構造化採点」。初期コードがあるときはプロンプトに `## 初期コード` を入れ、書き足し・変更部分を中心に評価するよう指示する。単一ファイルの提出は `code_content` に言語を持たないため、演習の `code_language` を言語として渡す。コードを囲むフェンスはコード中のバッククォートの連続より長くし、Markdown 提出のコードブロック等でフェンスが途中で閉じないようにする。`GEMINI_MAX_CODE_LENGTH` を超えた分の省略は複数ファイルの提出でもファイルごとに行う）。結果の保存に失敗したときは 500 を返し、行を best-effort で `failed`（トークンも記録）にして再試行を可能にする
 
 **回数制限（#304）**: 制限値は `app/constants/gemini.ts` の `AI_REVIEW_LIMITS` が唯一の定義で、API・画面文言・本節はここから導出する。API の判定と枠の確保は RPC `claim_ai_review()`（`claimAIReview()` 経由。下記「並行リクエスト」）が担い、コンテンツ詳細の残り回数表示は `fetchAIReviewUsage()`（`app/services/api/ai-review-usage-server.ts`）+ `computeRemainingReviews()`（`app/lib/ai-review-limits.ts`）が担う。規則を文章で表した純粋関数 `evaluateReviewRequest()` は SQL と同じ規則の定義として残し、テストで固定する。日付の境界は **JST**（`app/lib/email-digest.ts` の `toJstDateString()` / `jstStartOfDayIso()` と同じ基準）で、UTC では数えない。集計は常に `user_id` で本人の提出に絞る（admin / maintainer は RLS で全件読めるため、RLS だけに頼らない）。
 

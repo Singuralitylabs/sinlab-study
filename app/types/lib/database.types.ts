@@ -440,6 +440,7 @@ export type Database = {
           is_published: boolean | null;
           pdf_url: string | null;
           reference_answer: string | null;
+          starter_files: Json | null;
           text_content: string | null;
           title: string;
           updated_at: string | null;
@@ -462,6 +463,7 @@ export type Database = {
           is_published?: boolean | null;
           pdf_url?: string | null;
           reference_answer?: string | null;
+          starter_files?: Json | null;
           text_content?: string | null;
           title: string;
           updated_at?: string | null;
@@ -484,6 +486,7 @@ export type Database = {
           is_published?: boolean | null;
           pdf_url?: string | null;
           reference_answer?: string | null;
+          starter_files?: Json | null;
           text_content?: string | null;
           title?: string;
           updated_at?: string | null;

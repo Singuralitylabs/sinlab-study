@@ -1185,6 +1185,7 @@ type CreateContentInput = {
   exercise_instructions?: string | null;
   hint?: string | null;
   reference_answer?: string | null;
+  starter_files?: LearningContent["starter_files"];
   allowed_submission_types?: "code" | "url" | "both";
   code_language?: CodeLanguage;
   pdf_url?: string | null;
@@ -1243,6 +1244,7 @@ async function createContentWith(
       exercise_instructions: content.exercise_instructions,
       hint: content.hint,
       reference_answer: content.reference_answer,
+      starter_files: content.starter_files,
       allowed_submission_types: content.allowed_submission_types,
       code_language: content.code_language,
       pdf_url: content.pdf_url,

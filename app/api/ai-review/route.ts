@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { GEMINI_MAX_CODE_LENGTH } from "@/app/constants/gemini";
 import { limitedDecision } from "@/app/lib/ai-review-limits";
+import { parseStarterFiles } from "@/app/lib/code-file-inputs";
 import { parseGradingRubric } from "@/app/lib/grading-schema";
 import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import {
@@ -52,7 +53,9 @@ export async function POST(request: NextRequest) {
 
     const { data: submission, error: submissionError } = await supabase
       .from("submissions")
-      .select("*, content:learning_contents(id, exercise_instructions, code_language)")
+      .select(
+        "*, content:learning_contents(id, exercise_instructions, code_language, starter_files)"
+      )
       .eq("id", submissionId)
       .single();
 
@@ -183,6 +186,8 @@ export async function POST(request: NextRequest) {
         submission: reviewSubmission,
         referenceAnswer: rubricRow.reference_answer,
         gradingRubric: parseGradingRubric(rubricRow.grading_rubric),
+        // starter_files is learner-visible (column grant); do not read it via service_role.
+        starterFiles: parseStarterFiles(content.starter_files),
         apiKey,
       });
 

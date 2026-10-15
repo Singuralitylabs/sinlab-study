@@ -326,6 +326,32 @@ describe("buildUserPrompt", () => {
     expect(prompt).toContain("### コード.gs (javascript)\n```\nfunction main() {}\n```");
     expect(prompt).toContain("### index.html (html)\n```\n<p>hi</p>\n```");
   });
+
+  it("初期コードがあるときは ## 初期コード を入れ、書き足し部分を中心に評価する旨を書く", () => {
+    const prompt = buildUserPrompt(
+      "課題",
+      {
+        type: "code",
+        files: [{ filename: "index.html", language: "html", content: "<div class='cards'>x</div>" }],
+      },
+      null,
+      null,
+      [{ filename: "index.html", language: "html", content: "<div class=\"cards\"></div>" }]
+    );
+
+    expect(prompt).toContain("## 初期コード");
+    expect(prompt).toContain("書き足した・変更した部分を中心に評価");
+    expect(prompt).toContain('<div class="cards"></div>');
+    expect(prompt.indexOf("## 初期コード")).toBeLessThan(prompt.indexOf("## 提出コード"));
+  });
+
+  it("初期コードが無いときは ## 初期コード を入れない（既存挙動）", () => {
+    const prompt = buildUserPrompt("課題", {
+      type: "code",
+      files: [{ filename: "", language: "", content: "const x = 1;" }],
+    });
+    expect(prompt).not.toContain("## 初期コード");
+  });
 });
 
 describe("redactApiKey", () => {

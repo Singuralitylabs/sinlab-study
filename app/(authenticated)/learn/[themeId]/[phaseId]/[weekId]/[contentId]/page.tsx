@@ -15,6 +15,7 @@ import { USER_STATUS } from "@/app/constants/user";
 import { computeRemainingReviews } from "@/app/lib/ai-review-limits";
 import { buildThemeContentOrder, resolveContentNavigation } from "@/app/lib/content-navigation";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
+import { parseStarterFiles } from "@/app/lib/code-file-inputs";
 import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import { getLockedContentFallbackOverview } from "@/app/lib/trial-upgrade";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
@@ -453,6 +454,7 @@ export default async function ContentPage({ params }: PageProps) {
                           (content.allowed_submission_types as "code" | "url" | "both") ?? "code"
                         }
                         codeLanguage={(content.code_language as CodeLanguage) ?? "javascript"}
+                        starterFiles={parseStarterFiles(content.starter_files)}
                         persistedReviewId={reviewForLatestSubmission?.id ?? null}
                       />
                     </>
