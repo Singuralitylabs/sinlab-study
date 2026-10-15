@@ -14,10 +14,7 @@ export const GEMINI_MODEL_NAME = "gemini-3.8-flash";
 export const GEMINI_ALTERNATE_MODEL_NAME = "gemini-3.6-flash";
 
 /** Models the auto-detect workflow treats as "registered" (primary first). */
-export const GEMINI_REGISTERED_MODELS = [
-  GEMINI_MODEL_NAME,
-  GEMINI_ALTERNATE_MODEL_NAME,
-] as const;
+export const GEMINI_REGISTERED_MODELS = [GEMINI_MODEL_NAME, GEMINI_ALTERNATE_MODEL_NAME] as const;
 
 /** Max code length (chars); shared by prompt building and API validation. */
 export const GEMINI_MAX_CODE_LENGTH = 8000;

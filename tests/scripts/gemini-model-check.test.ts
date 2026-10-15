@@ -81,10 +81,7 @@ describe("findNewerStableFlash", () => {
 describe("findMissingRegisteredModels", () => {
   it("reports registered models absent from the available list", () => {
     expect(
-      findMissingRegisteredModels(["gemini-3.8-flash"], [
-        "gemini-3.8-flash",
-        "gemini-3.6-flash",
-      ])
+      findMissingRegisteredModels(["gemini-3.8-flash"], ["gemini-3.8-flash", "gemini-3.6-flash"])
     ).toEqual(["gemini-3.6-flash"]);
   });
 
@@ -139,11 +136,7 @@ describe("applyModelConstantsUpdate / readRegisteredModelsFromSource", () => {
     expect(current.primary).toBe("gemini-3.8-flash");
     expect(current.alternate).toBe("gemini-3.6-flash");
 
-    const updated = applyModelConstantsUpdate(
-      source,
-      "gemini-4.0-flash",
-      current.primary
-    );
+    const updated = applyModelConstantsUpdate(source, "gemini-4.0-flash", current.primary);
     expect(readRegisteredModelsFromSource(updated)).toEqual({
       primary: "gemini-4.0-flash",
       alternate: "gemini-3.8-flash",

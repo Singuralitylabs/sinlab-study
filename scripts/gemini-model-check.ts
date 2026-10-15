@@ -10,10 +10,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import {
-  GEMINI_ALTERNATE_MODEL_NAME,
-  GEMINI_MODEL_NAME,
-} from "../app/constants/gemini";
+import { GEMINI_ALTERNATE_MODEL_NAME, GEMINI_MODEL_NAME } from "../app/constants/gemini";
 
 const GEMINI_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const CONSTANTS_PATH = resolve(import.meta.dir, "../app/constants/gemini.ts");
@@ -104,9 +101,7 @@ export function findMissingRegisteredModels(
   registered: readonly string[]
 ): string[] {
   const available = new Set(availableModelIds.map(normalizeModelId));
-  return registered
-    .map(normalizeModelId)
-    .filter((id) => id.length > 0 && !available.has(id));
+  return registered.map(normalizeModelId).filter((id) => id.length > 0 && !available.has(id));
 }
 
 export function planModelCheck(
@@ -258,9 +253,7 @@ async function main(): Promise<void> {
     const current = readRegisteredModelsFromSource(source);
     const next = applyModelConstantsUpdate(source, applyUpdate, current.primary);
     writeFileSync(CONSTANTS_PATH, next, "utf8");
-    console.log(
-      `Updated gemini.ts: primary=${applyUpdate} alternate=${current.primary}`
-    );
+    console.log(`Updated gemini.ts: primary=${applyUpdate} alternate=${current.primary}`);
     return;
   }
 
@@ -269,8 +262,7 @@ async function main(): Promise<void> {
     alternate: GEMINI_ALTERNATE_MODEL_NAME,
   };
 
-  const availableIds =
-    available ?? (await fetchGeminiModelIds(process.env[API_KEY_ENV] ?? ""));
+  const availableIds = available ?? (await fetchGeminiModelIds(process.env[API_KEY_ENV] ?? ""));
   const plan = planModelCheck(availableIds, registered);
 
   if (json) {
