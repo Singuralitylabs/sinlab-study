@@ -9,7 +9,7 @@ import {
   DEFAULT_FILENAME_BY_LANGUAGE,
 } from "@/app/components/code-editor-utils";
 import {
-  resolveSubmissionFileSlots,
+  buildLockedSubmissionFiles,
   SUBMISSION_FILE_SLOT_MAX_COUNT,
 } from "@/app/lib/submission-file-slots";
 import type { CodeFile } from "@/app/types";
@@ -29,28 +29,16 @@ export function buildInitialSubmissionSlotDrafts(input: {
   starterFiles: CodeFile[] | null;
   codeLanguage: string | null | undefined;
 }): SubmissionSlotDraft[] {
-  const slots = resolveSubmissionFileSlots({
+  return buildLockedSubmissionFiles({
     submissionFileSlots: input.submissionFileSlots,
     starterFiles: input.starterFiles,
     codeLanguage: input.codeLanguage,
-  });
-  const starters = input.starterFiles ?? [];
-  return slots.map((slot, index) => {
-    const byIndex = starters[index];
-    const aligned =
-      byIndex !== undefined &&
-      byIndex.filename.trim() === slot.filename &&
-      byIndex.language === slot.language;
-    const fallback = starters.find(
-      (file) => file.filename.trim() === slot.filename && file.language === slot.language
-    );
-    return {
-      id: `slot-${index}`,
-      filename: slot.filename,
-      language: slot.language,
-      starterContent: aligned ? byIndex.content : (fallback?.content ?? ""),
-    };
-  });
+  }).map((file) => ({
+    id: file.id,
+    filename: file.filename,
+    language: file.language,
+    starterContent: file.content,
+  }));
 }
 
 function createSubmissionSlotDraft(

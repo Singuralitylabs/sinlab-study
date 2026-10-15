@@ -57,11 +57,14 @@ export function SubmissionForm({
   const [submissionType, setSubmissionType] = useState<SubmissionType>(
     allowedSubmissionTypes === "url" ? "url" : "code"
   );
-  // Snapshot at mount so reset and the locked layout survive later prop refreshes.
+  // Snapshot at mount so "unchanged starter" checks survive later prop refreshes.
+  const [starterSnapshot] = useState<CodeFile[] | null>(() =>
+    starterFiles && starterFiles.length > 0 ? starterFiles : null
+  );
   const [initialFiles] = useState<CodeFileInput[]>(() =>
     buildLockedSubmissionFiles({
       submissionFileSlots,
-      starterFiles,
+      starterFiles: starterSnapshot,
       codeLanguage,
     })
   );
@@ -77,8 +80,8 @@ export function SubmissionForm({
   const [aiReview, setAiReview] = useState<AIReviewListItem | null>(null);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
-  const hasStarter = Boolean(starterFiles?.some((file) => file.content.trim().length > 0));
-  const unchangedFromStarter = isCodeEquivalentToStarter(codeFiles, starterFiles);
+  const hasStarter = Boolean(starterSnapshot?.some((file) => file.content.trim().length > 0));
+  const unchangedFromStarter = isCodeEquivalentToStarter(codeFiles, starterSnapshot);
   // Judged by the files' own languages so the UI never appears for non-web exercises.
   const showPreview = submissionType === "code" && canPreviewFiles(codeFiles);
 

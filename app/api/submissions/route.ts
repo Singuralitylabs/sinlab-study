@@ -53,11 +53,14 @@ export async function POST(request: NextRequest) {
         starterFiles: parseStarterFiles(content.starter_files),
         codeLanguage,
       });
-      const rawFiles = Array.isArray(codeFiles)
-        ? codeFiles
-        : typeof codeContent === "string" && codeContent.trim().length > 0
-          ? [{ filename: "", language: "", content: codeContent }]
-          : [];
+      // An empty codeFiles array used to fall through to codeContent. Treating [] as the file
+      // list drops that legacy body and 400s even for the default single-file exercise.
+      const rawFiles =
+        Array.isArray(codeFiles) && codeFiles.length > 0
+          ? codeFiles
+          : typeof codeContent === "string" && codeContent.trim().length > 0
+            ? [{ filename: "", language: "", content: codeContent }]
+            : [];
       if (rawFiles.length === 0) {
         return NextResponse.json({ error: "コードが入力されていません" }, { status: 400 });
       }

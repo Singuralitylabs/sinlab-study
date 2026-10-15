@@ -369,6 +369,30 @@ describe("POST /api/submissions - 提出ファイル構成", () => {
     );
   });
 
+  it("空の codeFiles と codeContent は既定1ファイルとして code_content に保存する", async () => {
+    const single = vi.fn().mockResolvedValue({ data: { id: 1 }, error: null });
+    const insert = vi
+      .fn()
+      .mockReturnValue({ ...createQueryBuilder({ data: null, error: null }), single });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue({
+      from: vi.fn().mockReturnValue({ ...createQueryBuilder({ data: null, error: null }), insert }),
+    } as never);
+
+    const res = await POST(
+      request({
+        contentId: 1,
+        submissionType: "code",
+        codeFiles: [],
+        codeContent: "console.log(1)",
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({ code_content: "console.log(1)", code_files: null })
+    );
+  });
+
   it("未指定の演習は code_language の既定ファイル名でも code_content に保存する", async () => {
     const single = vi.fn().mockResolvedValue({ data: { id: 1 }, error: null });
     const insert = vi

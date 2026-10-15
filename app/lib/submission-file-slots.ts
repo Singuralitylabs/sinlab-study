@@ -184,6 +184,42 @@ export function toStoredSubmissionCode(
   return { codeContent: null, codeFiles: [...files] };
 }
 
+function starterContentForSlot(
+  slot: SubmissionFileSlot,
+  index: number,
+  slots: readonly SubmissionFileSlot[],
+  starters: readonly { filename: string; language: string; content?: string }[]
+): string {
+  const byIndex = starters[index];
+  if (
+    byIndex !== undefined &&
+    byIndex.filename.trim() === slot.filename &&
+    byIndex.language === slot.language
+  ) {
+    return byIndex.content ?? "";
+  }
+  const named = starters.find(
+    (file) => file.filename.trim() === slot.filename && file.language === slot.language
+  );
+  if (named) {
+    return named.content ?? "";
+  }
+  // #341 kept a single starter row with an empty filename. The default slot uses
+  // DEFAULT_FILENAME_BY_LANGUAGE, so a name match would drop that content and an admin save
+  // would then store starter_files as null.
+  const only = starters.length === 1 ? starters[0] : undefined;
+  if (
+    slots.length === 1 &&
+    index === 0 &&
+    only !== undefined &&
+    only.filename.trim().length === 0 &&
+    (only.language.length === 0 || only.language === slot.language)
+  ) {
+    return only.content ?? "";
+  }
+  return "";
+}
+
 /** Learner/demo initial rows: one locked editor per resolved slot, starter text filled in. */
 export function buildLockedSubmissionFiles(input: {
   submissionFileSlots: unknown;
@@ -192,24 +228,14 @@ export function buildLockedSubmissionFiles(input: {
 }): CodeFileInput[] {
   const slots = resolveSubmissionFileSlots(input);
   const starters = input.starterFiles ?? [];
-  return slots.map((slot, index) => {
-    const byIndex = starters[index];
-    const aligned =
-      byIndex !== undefined &&
-      byIndex.filename.trim() === slot.filename &&
-      byIndex.language === slot.language;
-    const fallback = starters.find(
-      (file) => file.filename.trim() === slot.filename && file.language === slot.language
-    );
-    return {
-      id: `slot-${index}`,
-      filename: slot.filename,
-      language: slot.language,
-      content: aligned ? byIndex.content : (fallback?.content ?? ""),
-      // Locked rows must not have their names rewritten if a language helper runs.
-      filenameEdited: true,
-    };
-  });
+  return slots.map((slot, index) => ({
+    id: `slot-${index}`,
+    filename: slot.filename,
+    language: slot.language,
+    content: starterContentForSlot(slot, index, slots, starters),
+    // Locked rows must not have their names rewritten if a language helper runs.
+    filenameEdited: true,
+  }));
 }
 
 /** Admin save. null slots means the single default file of the first row's language. */

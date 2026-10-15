@@ -219,6 +219,17 @@ describe("buildLockedSubmissionFiles / toSubmissionSlotPayload", () => {
     expect(files.every((file) => file.filenameEdited)).toBe(true);
   });
 
+  it("ファイル名が空の初期コード1件は既定ファイルの中身として残す", () => {
+    const files = buildLockedSubmissionFiles({
+      submissionFileSlots: null,
+      starterFiles: [{ filename: "", language: "javascript", content: "function main() {}" }],
+      codeLanguage: "javascript",
+    });
+    expect(files.map((file) => [file.filename, file.language, file.content])).toEqual([
+      [DEFAULT_FILENAME_BY_LANGUAGE.javascript, "javascript", "function main() {}"],
+    ]);
+  });
+
   it("既定の1ファイルで初期コードが空なら slots は null", () => {
     const result = toSubmissionSlotPayload([
       { filename: "code.js", language: "javascript", starterContent: "" },
