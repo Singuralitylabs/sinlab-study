@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildRequirementNameByContentKey,
   countUnovercomeReviewItems,
   countVisibleUnovercome,
   deriveReviewListItems,
+  deriveReviewListWithRequirementNames,
   filterReviewItemsToVisibleContents,
   findOrphanRequirementNotes,
   type ReviewListSourceReview,
@@ -395,9 +395,9 @@ describe("findOrphanRequirementNotes", () => {
   });
 });
 
-describe("buildRequirementNameByContentKey", () => {
+describe("deriveReviewListWithRequirementNames", () => {
   it("置き換え前の estimated 要件名を残し、新しいレビューの名前で上書きする", () => {
-    const names = buildRequirementNameByContentKey([
+    const { requirementNames: names } = deriveReviewListWithRequirementNames([
       source({
         id: 1,
         contentId: 10,

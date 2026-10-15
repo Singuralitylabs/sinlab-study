@@ -50,10 +50,10 @@ function compareReviews(a: ReviewListSourceReview, b: ReviewListSourceReview): n
 type UsableReview = ReviewListSourceReview & { reviewJson: ReviewJson };
 
 /**
- * Shared filter → parse → drop-null → sort for review-list derivation and orphan name lookup.
- * Call once per request when both deriveReviewListItems and buildRequirementNameByContentKey are needed.
+ * Shared filter → parse → drop-null → sort so item derivation and orphan name lookup use the
+ * same review set.
  */
-export function toUsableReviews(reviews: readonly ReviewListSourceReview[]): UsableReview[] {
+function toUsableReviews(reviews: readonly ReviewListSourceReview[]): UsableReview[] {
   return reviews
     .filter((review) => isReviewableKind(review.scoreKind))
     .map((review) => {
@@ -199,6 +199,10 @@ export function countVisibleUnovercome(
   );
 }
 
+/**
+ * Latest known requirement display name per (contentId, key) across usable reviews.
+ * Used for orphan memos after estimated key rename — keys alone are AI ids, not learner-facing.
+ */
 function buildRequirementNameByContentKeyFromUsable(
   usable: readonly UsableReview[]
 ): Map<string, string> {
@@ -210,16 +214,6 @@ function buildRequirementNameByContentKeyFromUsable(
     }
   }
   return names;
-}
-
-/**
- * Latest known requirement display name per (contentId, key) across all usable reviews.
- * Used for orphan memos after estimated key rename — keys alone are AI ids, not learner-facing.
- */
-export function buildRequirementNameByContentKey(
-  reviews: readonly ReviewListSourceReview[]
-): Map<string, string> {
-  return buildRequirementNameByContentKeyFromUsable(toUsableReviews(reviews));
 }
 
 /**
