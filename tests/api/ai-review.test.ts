@@ -155,11 +155,7 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
   beforeEach(() => {
     vi.stubEnv(GEMINI_API_KEY_ENV, "member-key");
     vi.mocked(getServerAuth).mockResolvedValue(memberAuth as never);
-    vi.mocked(isContentVisible).mockResolvedValue({
-      id: 1,
-      starter_files: null,
-      code_language: "javascript",
-    });
+    vi.mocked(isContentVisible).mockResolvedValue(true);
     vi.mocked(createServerSupabaseClient).mockResolvedValue(
       createMockSupabaseClient({
         tableResults: {
@@ -339,11 +335,7 @@ describe("POST /api/ai-review - 回数制限と枠の確保（#304 / #343）", (
     vi.setSystemTime(NOW);
     vi.stubEnv(GEMINI_API_KEY_ENV, "member-key");
     vi.stubEnv(GEMINI_API_KEY_TRIAL_ENV, "trial-key");
-    vi.mocked(isContentVisible).mockResolvedValue({
-      id: 1,
-      starter_files: null,
-      code_language: "javascript",
-    });
+    vi.mocked(isContentVisible).mockResolvedValue(true);
     vi.mocked(claimAIReview).mockResolvedValue({ kind: "claimed", reviewId: 10, remaining: 1 });
     vi.mocked(updateAIReviewProcessing).mockResolvedValue(true);
     vi.mocked(updateAIReviewCompleted).mockResolvedValue(true);
@@ -514,7 +506,7 @@ describe("POST /api/ai-review - 回数制限と枠の確保（#304 / #343）", (
 
   it("非公開になったコンテンツは403で、枠を確保しない（可視性チェックを維持）", async () => {
     setup({ auth: memberAuth });
-    vi.mocked(isContentVisible).mockResolvedValue(null);
+    vi.mocked(isContentVisible).mockResolvedValue(false);
 
     const res = await POST(request() as never);
 
@@ -561,11 +553,7 @@ describe("POST /api/ai-review - 単一ファイル提出の言語", () => {
   beforeEach(() => {
     vi.stubEnv(GEMINI_API_KEY_ENV, "member-key");
     vi.mocked(getServerAuth).mockResolvedValue(memberAuth as never);
-    vi.mocked(isContentVisible).mockResolvedValue({
-      id: 1,
-      starter_files: null,
-      code_language: "javascript",
-    });
+    vi.mocked(isContentVisible).mockResolvedValue(true);
     vi.mocked(claimAIReview).mockResolvedValue({ kind: "claimed", reviewId: 10, remaining: 1 });
     vi.mocked(updateAIReviewProcessing).mockResolvedValue(true);
     vi.mocked(updateAIReviewCompleted).mockResolvedValue(true);

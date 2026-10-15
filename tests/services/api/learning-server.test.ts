@@ -18,6 +18,7 @@ import {
   fetchThemeProgressSummaries,
   fetchUserProgressByContentId,
   fetchUserProgressByContentIds,
+  fetchVisibleContentForSubmission,
   fetchWeekById,
   fetchWeeksWithContentsByPhaseId,
   isContentFullyPublished,
@@ -1333,34 +1334,31 @@ describe("isContentLockedForUser", () => {
 });
 
 describe("isContentVisible", () => {
-  it("対象コンテンツが取得できる場合、starter メタ付きで返す", async () => {
+  it("対象コンテンツが取得できる場合、true を返す", async () => {
     const mockClient = createMockSupabaseClient({
-      queryResult: {
-        data: { id: 1, starter_files: null, code_language: "javascript" },
-        error: null,
-      },
+      queryResult: { data: { id: 1 }, error: null },
     });
 
     const result = await isContentVisible(mockClient as never, 1);
 
-    expect(result).toEqual({ id: 1, starter_files: null, code_language: "javascript" });
+    expect(result).toBe(true);
   });
 
-  it("0行（お試し非公開・未公開・存在しないID）の場合、null を返す", async () => {
+  it("0行（お試し非公開・未公開・存在しないID）の場合、false を返す", async () => {
     const mockClient = createMockSupabaseClient({ queryResult: { data: null, error: null } });
 
     const result = await isContentVisible(mockClient as never, 999);
 
-    expect(result).toBeNull();
+    expect(result).toBe(false);
   });
 
-  it("DB エラー時、エラーをログした上で null を返す（fail-closed）", async () => {
+  it("DB エラー時、エラーをログした上で false を返す（fail-closed）", async () => {
     const mockClient = createMockSupabaseClient({ queryResult: { data: null, error: dbError } });
     const consoleErrorSpy = vi.spyOn(console, "error");
 
     const result = await isContentVisible(mockClient as never, 1);
 
-    expect(result).toBeNull();
+    expect(result).toBe(false);
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       "コンテンツ可視性チェックエラー:",
       dbError.message
@@ -1369,17 +1367,14 @@ describe("isContentVisible", () => {
 
   it("コンテンツ自身と週・フェーズ・テーマの全階層を is_published=true / is_deleted=false で絞り込む（admin / maintainer のプレビュー中でも未公開・論理削除済みへの進捗・提出・AIレビューは常に不可）", async () => {
     const mockClient = createMockSupabaseClient({
-      queryResult: {
-        data: { id: 1, starter_files: null, code_language: "javascript" },
-        error: null,
-      },
+      queryResult: { data: { id: 1 }, error: null },
     });
 
     await isContentVisible(mockClient as never, 1);
 
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.select).toHaveBeenCalledWith(
-      "id, starter_files, code_language, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
+      "id, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
     );
     expect(builder.eq).toHaveBeenCalledWith("is_published", true);
     expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
@@ -1389,6 +1384,31 @@ describe("isContentVisible", () => {
     expect(builder.eq).toHaveBeenCalledWith("week.phase.is_deleted", false);
     expect(builder.eq).toHaveBeenCalledWith("week.phase.theme.is_published", true);
     expect(builder.eq).toHaveBeenCalledWith("week.phase.theme.is_deleted", false);
+  });
+});
+
+describe("fetchVisibleContentForSubmission", () => {
+  it("可視なら starter メタ付きで返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      queryResult: {
+        data: { id: 1, starter_files: null, code_language: "javascript" },
+        error: null,
+      },
+    });
+
+    const result = await fetchVisibleContentForSubmission(mockClient as never, 1);
+
+    expect(result).toEqual({ id: 1, starter_files: null, code_language: "javascript" });
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.select).toHaveBeenCalledWith(
+      "id, starter_files, code_language, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
+    );
+  });
+
+  it("不可視なら null を返す", async () => {
+    const mockClient = createMockSupabaseClient({ queryResult: { data: null, error: null } });
+
+    await expect(fetchVisibleContentForSubmission(mockClient as never, 999)).resolves.toBeNull();
   });
 });
 

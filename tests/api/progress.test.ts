@@ -42,11 +42,7 @@ const request = (body: unknown = { contentId: 1, isCompleted: true }) =>
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(memberAuth as never);
-  vi.mocked(isContentVisible).mockResolvedValue({
-    id: 1,
-    starter_files: null,
-    code_language: "javascript",
-  });
+  vi.mocked(isContentVisible).mockResolvedValue(true);
   vi.mocked(issueCertificateIfEligible).mockResolvedValue(null);
   vi.mocked(createServerSupabaseClient).mockResolvedValue(
     createMockSupabaseClient({
@@ -83,7 +79,7 @@ describe("POST /api/progress - 認可", () => {
   });
 
   it("対象コンテンツが不可視の場合は403", async () => {
-    vi.mocked(isContentVisible).mockResolvedValue(null);
+    vi.mocked(isContentVisible).mockResolvedValue(false);
 
     const res = await POST(request() as never);
 

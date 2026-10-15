@@ -10,7 +10,7 @@ vi.mock("@vercel/analytics/server", () => ({
 
 import { track } from "@vercel/analytics/server";
 import { POST } from "@/app/api/submissions/route";
-import { isContentVisible } from "@/app/services/api/learning-server";
+import { fetchVisibleContentForSubmission } from "@/app/services/api/learning-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
@@ -39,7 +39,7 @@ const visibleContent = {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(memberAuth as never);
-  vi.mocked(isContentVisible).mockResolvedValue(visibleContent as never);
+  vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue(visibleContent as never);
   vi.mocked(createServerSupabaseClient).mockResolvedValue(
     createMockSupabaseClient({
       tableResults: { submissions: { data: { id: 1 }, error: null } },
@@ -75,7 +75,7 @@ describe("POST /api/submissions - 認可", () => {
   });
 
   it("対象コンテンツが不可視の場合は403", async () => {
-    vi.mocked(isContentVisible).mockResolvedValue(null);
+    vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue(null);
 
     const res = await POST(request() as never);
 
@@ -238,7 +238,7 @@ describe("POST /api/submissions - 未編集の初期コード", () => {
   const starter = [{ filename: "index.html", language: "html", content: "<div></div>" }];
 
   it("starter と同一（末尾空白のみ）なら 400", async () => {
-    vi.mocked(isContentVisible).mockResolvedValue({
+    vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue({
       id: 1,
       starter_files: starter,
       code_language: "javascript",
@@ -254,11 +254,11 @@ describe("POST /api/submissions - 未編集の初期コード", () => {
 
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toEqual({ error: "初期コードから変更してください" });
-    expect(isContentVisible).toHaveBeenCalledTimes(1);
+    expect(fetchVisibleContentForSubmission).toHaveBeenCalledTimes(1);
   });
 
   it("ファイル名だけ変えても 400", async () => {
-    vi.mocked(isContentVisible).mockResolvedValue({
+    vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue({
       id: 1,
       starter_files: starter,
       code_language: "javascript",
@@ -277,7 +277,7 @@ describe("POST /api/submissions - 未編集の初期コード", () => {
   });
 
   it("内容を変えていれば 200", async () => {
-    vi.mocked(isContentVisible).mockResolvedValue({
+    vi.mocked(fetchVisibleContentForSubmission).mockResolvedValue({
       id: 1,
       starter_files: starter,
       code_language: "javascript",

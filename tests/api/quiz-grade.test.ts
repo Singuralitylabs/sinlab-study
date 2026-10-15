@@ -48,11 +48,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getServerAuth).mockResolvedValue(memberAuth as never);
   vi.mocked(createServerSupabaseClient).mockResolvedValue({} as never);
-  vi.mocked(isContentVisible).mockResolvedValue({
-    id: 1,
-    starter_files: null,
-    code_language: "javascript",
-  });
+  vi.mocked(isContentVisible).mockResolvedValue(true);
   vi.mocked(gradeQuizAnswers).mockResolvedValue({ data: results as never, error: null });
 });
 
@@ -95,7 +91,7 @@ describe("POST /api/quiz/grade", () => {
   });
 
   it("見えないコンテンツ（未公開・お試し対象外）は403で、採点しない", async () => {
-    vi.mocked(isContentVisible).mockResolvedValue(null);
+    vi.mocked(isContentVisible).mockResolvedValue(false);
 
     const res = await POST(request() as never);
 
@@ -105,7 +101,7 @@ describe("POST /api/quiz/grade", () => {
 
   it("admin / maintainer は未公開プレビューのため可視性チェックを通さずに採点できる", async () => {
     vi.mocked(getServerAuth).mockResolvedValue({ ...memberAuth, userRole: "maintainer" } as never);
-    vi.mocked(isContentVisible).mockResolvedValue(null);
+    vi.mocked(isContentVisible).mockResolvedValue(false);
 
     const res = await POST(request() as never);
 

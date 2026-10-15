@@ -24,12 +24,16 @@ import type {
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
-/** Visible content row fields used by submission / AI-review starter checks. */
+/** Visible content row fields used by POST /api/submissions starter checks. */
 export type VisibleLearningContent = {
   id: number;
   starter_files: Json | null;
   code_language: string | null;
 };
+
+/** Parent embed shared by visibility helpers; unpublished/deleted ancestors yield 0 rows. */
+const VISIBLE_CONTENT_HIERARCHY_SELECT =
+  "week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))";
 
 /** Excludes heavy text columns (body, instructions, model answer, hints). */
 export const LEARNING_CONTENT_LIST_COLUMNS =
@@ -529,25 +533,19 @@ export function isContentLockedForUser(
 }
 
 /**
- * Whether the content is visible to the given client (caller's auth context); used by the
- * progress / submission / AI review APIs (specification 4.1/5.1).
- * Checks `is_published = true AND is_deleted = false` for the content AND its week, phase and
- * theme. The learning_contents SELECT RLS allows admin / maintainer unconditionally, so checking
- * only the content row would let them record progress, submit, or request AI review for
- * soft-deleted contents or contents under unpublished parents. Returns null if any level is
- * unpublished or deleted, regardless of role (issue #68 default).
- * Also returns starter_files / code_language so POST /api/submissions can reject unedited starter
- * in the same round-trip.
+ * Shared published/deleted filters for content + week/phase/theme. learning_contents SELECT RLS
+ * allows admin / maintainer unconditionally, so checking only the content row would let them
+ * record progress, submit, or request AI review for soft-deleted contents or contents under
+ * unpublished parents (issue #68).
  */
-export async function isContentVisible(
+function queryVisibleLearningContent(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
-  contentId: number
-): Promise<VisibleLearningContent | null> {
-  const { data, error } = await supabase
+  contentId: number,
+  columns: string
+) {
+  return supabase
     .from("learning_contents")
-    .select(
-      "id, starter_files, code_language, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
-    )
+    .select(`${columns}, ${VISIBLE_CONTENT_HIERARCHY_SELECT}`)
     .eq("id", contentId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -558,10 +556,43 @@ export async function isContentVisible(
     .eq("week.phase.theme.is_published", true)
     .eq("week.phase.theme.is_deleted", false)
     .maybeSingle();
+}
+
+/**
+ * Whether the content is visible to the given client (caller's auth context); used by the
+ * progress / quiz / AI review APIs (specification 4.1/5.1). Lightweight id-only select — starter
+ * JSON is not needed here. False if any level is unpublished or deleted, regardless of role.
+ */
+export async function isContentVisible(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  contentId: number
+): Promise<boolean> {
+  const { data, error } = await queryVisibleLearningContent(supabase, contentId, "id");
 
   if (error) {
     // Stay fail-closed (treat as invisible) but let logs distinguish a DB failure from truly
     // invisible.
+    console.error("コンテンツ可視性チェックエラー:", error.message);
+  }
+
+  return data !== null;
+}
+
+/**
+ * Visibility check plus starter meta for POST /api/submissions in one round-trip. Same published
+ * filters as isContentVisible(); returns null when invisible.
+ */
+export async function fetchVisibleContentForSubmission(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  contentId: number
+): Promise<VisibleLearningContent | null> {
+  const { data, error } = await queryVisibleLearningContent(
+    supabase,
+    contentId,
+    "id, starter_files, code_language"
+  );
+
+  if (error) {
     console.error("コンテンツ可視性チェックエラー:", error.message);
   }
 

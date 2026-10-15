@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { shouldTrackFirstSubmission } from "@/app/lib/analytics-funnel";
-import { isCodeEquivalentToContentStarter } from "@/app/lib/code-file-inputs";
+import { isCodeEquivalentToStarter, parseStarterFiles } from "@/app/lib/code-file-inputs";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
-import { isContentVisible } from "@/app/services/api/learning-server";
+import { fetchVisibleContentForSubmission } from "@/app/services/api/learning-server";
 import { SubmissionCreateSchema, validateRequest } from "@/app/services/api/schemas";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { requireLearnerApi } from "@/app/services/auth/admin-guard";
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
 
     // Visibility + starter meta in one round-trip (403 if contentId isn't visible: trial-closed,
     // unpublished and nonexistent IDs all give 0 rows via RLS).
-    const content = await isContentVisible(supabase, contentId);
+    const content = await fetchVisibleContentForSubmission(supabase, contentId);
     if (!content) {
       return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
     }
@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
       const submittedFiles: CodeFile[] =
         storedCodeFiles ??
         (storedCodeContent ? [{ filename: "", language: "", content: storedCodeContent }] : []);
-      if (isCodeEquivalentToContentStarter(submittedFiles, content)) {
+      if (isCodeEquivalentToStarter(submittedFiles, parseStarterFiles(content.starter_files))) {
         return NextResponse.json({ error: "初期コードから変更してください" }, { status: 400 });
       }
     }
