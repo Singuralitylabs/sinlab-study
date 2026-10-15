@@ -9,11 +9,12 @@
  * Never logs the API key. Does not run grading dry-run (that stays a human / local step).
  */
 import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { GEMINI_ALTERNATE_MODEL_NAME, GEMINI_MODEL_NAME } from "../app/constants/gemini";
 
 const GEMINI_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-const CONSTANTS_PATH = resolve(import.meta.dir, "../app/constants/gemini.ts");
+const CONSTANTS_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "../app/constants/gemini.ts");
 const API_KEY_ENV = "GEMINI_MODEL_CHECK_API_KEY";
 
 /** Unstable / alias markers that must never become an auto-update target. */
