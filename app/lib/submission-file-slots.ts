@@ -3,13 +3,14 @@ import {
   type CodeLanguage,
   DEFAULT_FILENAME_BY_LANGUAGE,
 } from "@/app/components/code-editor-utils";
-import type { CodeFileInput } from "@/app/lib/code-file-inputs";
+import { type CodeFileInput, isCodeEquivalentToStarter } from "@/app/lib/code-file-inputs";
 import type { CodeFile } from "@/app/types";
 
 /** Upper bound for exercise submission files. Enforced by zod and the admin editor. */
 export const SUBMISSION_FILE_SLOT_MAX_COUNT = 10;
 
 export const EMPTY_SUBMISSION_FILE_ERROR = "空のファイルは提出できません";
+export const EMPTY_SUBMISSION_CODE_ERROR = "コードが入力されていません";
 export const SUBMISSION_FILE_SLOTS_MISMATCH_ERROR = "提出ファイルの構成が演習の指定と一致しません";
 
 export type SubmissionFileSlot = {
@@ -127,14 +128,39 @@ function readSubmittedFile(
 }
 
 /**
+ * Explicit slots are required files. A NULL layout only borrows starter names, so an existing
+ * empty shell (for example style.css with no content) stays optional (#341).
+ */
+export function layoutOmitsEmptyFiles(submissionFileSlots: unknown, fileCount: number): boolean {
+  return parseSubmissionFileSlots(submissionFileSlots) == null && fileCount > 1;
+}
+
+/** Learner and demo share this gate so one form cannot accept a submission the other rejects. */
+export function isLockedSubmissionReady(input: {
+  files: readonly { filename: string; language: string; content: string }[];
+  submissionFileSlots: unknown;
+  starterFiles?: readonly { filename: string; language: string; content: string }[] | null;
+}): boolean {
+  const { files } = input;
+  if (files.length === 0 || isCodeEquivalentToStarter(files, input.starterFiles)) {
+    return false;
+  }
+  if (layoutOmitsEmptyFiles(input.submissionFileSlots, files.length)) {
+    return files.some((file) => file.content.trim().length > 0);
+  }
+  return files.every((file) => file.content.trim().length > 0);
+}
+
+/**
  * Count, filename, language, and order must match the resolved slots. Blank filename and language
  * are accepted only for the default single-file exercise: older clients omit them so the row can
- * stay in code_content.
+ * stay in code_content. omitEmptyFiles drops blank shells instead of rejecting them.
  */
 export function filesMatchSubmissionFileSlots(
   rawFiles: unknown,
   slots: readonly SubmissionFileSlot[],
-  codeLanguage: CodeLanguage
+  codeLanguage: CodeLanguage,
+  options?: { omitEmptyFiles?: boolean }
 ): { ok: true; files: CodeFile[] } | { ok: false; error: string } {
   if (!Array.isArray(rawFiles) || rawFiles.length !== slots.length) {
     return { ok: false, error: SUBMISSION_FILE_SLOTS_MISMATCH_ERROR };
@@ -152,6 +178,9 @@ export function filesMatchSubmissionFileSlots(
       return { ok: false, error: SUBMISSION_FILE_SLOTS_MISMATCH_ERROR };
     }
     if (file.content.trim().length === 0) {
+      if (options?.omitEmptyFiles) {
+        continue;
+      }
       return { ok: false, error: EMPTY_SUBMISSION_FILE_ERROR };
     }
     files.push({
@@ -159,6 +188,9 @@ export function filesMatchSubmissionFileSlots(
       language: legacy ? "" : file.language,
       content: file.content,
     });
+  }
+  if (files.length === 0) {
+    return { ok: false, error: EMPTY_SUBMISSION_CODE_ERROR };
   }
   return { ok: true, files };
 }

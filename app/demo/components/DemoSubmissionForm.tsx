@@ -6,7 +6,11 @@ import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { LockedCodeFilesEditor } from "@/app/components/LockedCodeFilesEditor";
 import { type CodeFileInput, isCodeEquivalentToStarter } from "@/app/lib/code-file-inputs";
-import { buildLockedSubmissionFiles } from "@/app/lib/submission-file-slots";
+import {
+  buildLockedSubmissionFiles,
+  isLockedSubmissionReady,
+  layoutOmitsEmptyFiles,
+} from "@/app/lib/submission-file-slots";
 import type { AIReviewListItem, CodeFile, Json, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -73,13 +77,14 @@ export function DemoSubmissionForm({
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
   // The learner form refuses an unedited starter so it cannot burn a review. Demo shows a sample
-  // review instead of calling the API, so the same gate has to live here or the sample teaches
-  // that the starter itself is a valid submission.
+  // review instead of calling the API, so it uses the same gate.
   const unchangedFromStarter = isCodeEquivalentToStarter(codeFiles, starterFiles);
-  const isCodeValid =
-    codeFiles.length > 0 &&
-    codeFiles.every((file) => file.content.trim().length > 0) &&
-    !unchangedFromStarter;
+  const isCodeValid = isLockedSubmissionReady({
+    files: codeFiles,
+    submissionFileSlots,
+    starterFiles,
+  });
+  const omitsEmptyFiles = layoutOmitsEmptyFiles(submissionFileSlots, codeFiles.length);
   const isValid =
     (submissionType === "code" && isCodeValid) ||
     (submissionType === "url" && url.trim().length > 0);
@@ -138,6 +143,11 @@ export function DemoSubmissionForm({
             <LockedCodeFilesEditor files={codeFiles} onChange={setCodeFiles} />
             {unchangedFromStarter && (
               <p className="text-xs text-muted-foreground">初期コードから変更してください</p>
+            )}
+            {omitsEmptyFiles && codeFiles.some((file) => file.content.trim().length === 0) && (
+              <p className="text-xs text-muted-foreground">
+                内容が空のファイルは提出に含めません。
+              </p>
             )}
           </div>
         ) : (

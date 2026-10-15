@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_FILENAME_BY_LANGUAGE } from "@/app/components/code-editor-utils";
 import {
   buildLockedSubmissionFiles,
+  EMPTY_SUBMISSION_CODE_ERROR,
   EMPTY_SUBMISSION_FILE_ERROR,
   filesMatchSubmissionFileSlots,
   isDefaultSingleFileSlot,
+  isLockedSubmissionReady,
   parseSubmissionFileSlots,
   resolveSubmissionFileSlots,
   SUBMISSION_FILE_SLOT_MAX_COUNT,
@@ -145,6 +147,58 @@ describe("filesMatchSubmissionFileSlots", () => {
         "html"
       )
     ).toEqual({ ok: false, error: SUBMISSION_FILE_SLOTS_MISMATCH_ERROR });
+  });
+
+  it("構成未指定の複数ファイルでは空シェルを落とし、指定済みの構成では空を拒否する", () => {
+    const slots = [
+      { filename: "index.html", language: "html" as const },
+      { filename: "style.css", language: "css" as const },
+    ];
+    const submitted = [
+      { filename: "index.html", language: "html", content: "<div>edited</div>" },
+      { filename: "style.css", language: "css", content: "  " },
+    ];
+    const omitted = filesMatchSubmissionFileSlots(submitted, slots, "html", {
+      omitEmptyFiles: true,
+    });
+    expect(omitted.ok).toBe(true);
+    if (omitted.ok) {
+      expect(omitted.files).toEqual([
+        { filename: "index.html", language: "html", content: "<div>edited</div>" },
+      ]);
+    }
+    expect(filesMatchSubmissionFileSlots(submitted, slots, "html")).toEqual({
+      ok: false,
+      error: EMPTY_SUBMISSION_FILE_ERROR,
+    });
+    expect(
+      filesMatchSubmissionFileSlots(
+        [
+          { filename: "index.html", language: "html", content: " " },
+          { filename: "style.css", language: "css", content: "" },
+        ],
+        slots,
+        "html",
+        { omitEmptyFiles: true }
+      )
+    ).toEqual({ ok: false, error: EMPTY_SUBMISSION_CODE_ERROR });
+    expect(
+      isLockedSubmissionReady({
+        files: submitted,
+        submissionFileSlots: null,
+        starterFiles: [
+          { filename: "index.html", language: "html", content: "<p>" },
+          { filename: "style.css", language: "css", content: "" },
+        ],
+      })
+    ).toBe(true);
+    expect(
+      isLockedSubmissionReady({
+        files: submitted,
+        submissionFileSlots: slots,
+        starterFiles: null,
+      })
+    ).toBe(false);
   });
 
   it("未指定の既定1ファイルだけ、空のファイル名・言語を既存クライアントとして受理する", () => {

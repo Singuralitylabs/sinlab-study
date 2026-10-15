@@ -910,6 +910,22 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     expect(mockClient.from).toHaveBeenCalledTimes(2);
   });
 
+  it("content_type を省いて非演習に提出ファイル構成を送ると更新しない", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [{ data: { content_type: "video" }, error: null }],
+      },
+    });
+
+    const result = await updateContent(1, {
+      submission_file_slots: [{ filename: "code.js", language: "javascript" }],
+    });
+
+    expect(result.slotsNotAllowed).toBe(true);
+    expect(result.error).toBeNull();
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+  });
+
   it("exercise 以外へ種別変更すると採点基準を破棄する", async () => {
     const { mockClient } = mockAdminWithStorage({
       tableResults: {

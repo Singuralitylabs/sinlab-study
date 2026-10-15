@@ -1426,6 +1426,8 @@ type ContentUpdateResult = {
   conflict?: boolean;
   /** Incoming keys reuse a number this rubric already issued. */
   keyReuse?: string[];
+  /** Slots were sent without content_type onto a row that is not an exercise. */
+  slotsNotAllowed?: boolean;
   /**
    * Version stored by this save. Present only after the rubric write commits, so the editor can
    * keep locking the rows still on screen. null means the rubric was cleared.
@@ -1449,6 +1451,31 @@ export async function updateContent(
 ): Promise<ContentUpdateResult> {
   const supabase = await createAdminSupabaseClient();
   const { insertAfterId, quizQuestions, gradingRubric, loadedRubricVersion, ...patch } = content;
+  // Zod only rejects slots on a non-exercise when this request also sends content_type. A
+  // slots-only PUT would otherwise hit the exercise-only CHECK and come back as 500.
+  if (patch.submission_file_slots != null && patch.content_type === undefined) {
+    const { data: currentType, error: typeError } = await supabase
+      .from("learning_contents")
+      .select("content_type")
+      .eq("id", id)
+      .eq("is_deleted", false)
+      .single();
+    if (typeError || !currentType) {
+      console.error("コンテンツ更新エラー（現在値取得）:", typeError?.message ?? "no row");
+      return {
+        error: typeError ?? {
+          message: "コンテンツの現在値を取得できませんでした",
+          details: "",
+          hint: "",
+          code: "PGRST116",
+        },
+        storageRemoved: true,
+      };
+    }
+    if (currentType.content_type !== "exercise") {
+      return { error: null, storageRemoved: true, slotsNotAllowed: true };
+    }
+  }
   if (patch.content_type !== undefined && patch.content_type !== "exercise") {
     patch.submission_file_slots = null;
   }

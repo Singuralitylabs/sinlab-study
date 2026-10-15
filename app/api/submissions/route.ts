@@ -3,7 +3,9 @@ import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { shouldTrackFirstSubmission } from "@/app/lib/analytics-funnel";
 import { isCodeEquivalentToStarter, parseStarterFiles } from "@/app/lib/code-file-inputs";
 import {
+  EMPTY_SUBMISSION_CODE_ERROR,
   filesMatchSubmissionFileSlots,
+  layoutOmitsEmptyFiles,
   normalizeCodeLanguage,
   resolveSubmissionFileSlots,
   toStoredSubmissionCode,
@@ -62,9 +64,11 @@ export async function POST(request: NextRequest) {
             ? [{ filename: "", language: "", content: codeContent }]
             : [];
       if (rawFiles.length === 0) {
-        return NextResponse.json({ error: "コードが入力されていません" }, { status: 400 });
+        return NextResponse.json({ error: EMPTY_SUBMISSION_CODE_ERROR }, { status: 400 });
       }
-      const matched = filesMatchSubmissionFileSlots(rawFiles, slots, codeLanguage);
+      const matched = filesMatchSubmissionFileSlots(rawFiles, slots, codeLanguage, {
+        omitEmptyFiles: layoutOmitsEmptyFiles(content.submission_file_slots, slots.length),
+      });
       if (!matched.ok) {
         return NextResponse.json({ error: matched.error }, { status: 400 });
       }

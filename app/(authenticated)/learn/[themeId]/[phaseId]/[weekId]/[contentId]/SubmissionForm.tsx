@@ -10,7 +10,11 @@ import { LockedCodeFilesEditor } from "@/app/components/LockedCodeFilesEditor";
 import { buildReviewNotice } from "@/app/lib/ai-review-response";
 import { type CodeFileInput, isCodeEquivalentToStarter } from "@/app/lib/code-file-inputs";
 import { canPreviewFiles } from "@/app/lib/html-preview";
-import { buildLockedSubmissionFiles } from "@/app/lib/submission-file-slots";
+import {
+  buildLockedSubmissionFiles,
+  isLockedSubmissionReady,
+  layoutOmitsEmptyFiles,
+} from "@/app/lib/submission-file-slots";
 import type { AIReviewListItem, CodeFile, Json, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -207,10 +211,12 @@ export function SubmissionForm({
     }
   };
 
-  const isCodeValid =
-    codeFiles.length > 0 &&
-    codeFiles.every((file) => file.content.trim().length > 0) &&
-    !unchangedFromStarter;
+  const isCodeValid = isLockedSubmissionReady({
+    files: codeFiles,
+    submissionFileSlots,
+    starterFiles: starterSnapshot,
+  });
+  const omitsEmptyFiles = layoutOmitsEmptyFiles(submissionFileSlots, codeFiles.length);
 
   const isValid =
     (submissionType === "code" && isCodeValid) ||
@@ -259,6 +265,11 @@ export function SubmissionForm({
             )}
             {unchangedFromStarter && (
               <p className="text-xs text-muted-foreground">初期コードから変更してください</p>
+            )}
+            {omitsEmptyFiles && codeFiles.some((file) => file.content.trim().length === 0) && (
+              <p className="text-xs text-muted-foreground">
+                内容が空のファイルは提出に含めません。
+              </p>
             )}
             {showPreview && (
               <HtmlPreviewNoSSR
