@@ -61,7 +61,9 @@ function compareReviews(a: ReviewListSourceReview, b: ReviewListSourceReview): n
  *   estimated-derived items are omitted entirely.
  * - legacy / none / incomplete never contribute.
  */
-export function deriveReviewListItems(reviews: ReviewListSourceReview[]): DerivedReviewItem[] {
+export function deriveReviewListItems(
+  reviews: readonly ReviewListSourceReview[]
+): DerivedReviewItem[] {
   const usable = reviews
     .filter((review) => isReviewableKind(review.scoreKind))
     .map((review) => {

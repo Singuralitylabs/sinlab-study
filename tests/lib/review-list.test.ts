@@ -422,17 +422,13 @@ describe("countVisibleUnovercome", () => {
         id: 1,
         contentId: 10,
         scoreKind: "rubric",
-        reviewJson: reviewJson([
-          { key: "r1", name: "要件1", status: "unmet", comment: "未達" },
-        ]),
+        reviewJson: reviewJson([{ key: "r1", name: "要件1", status: "unmet", comment: "未達" }]),
       }),
       source({
         id: 2,
         contentId: 20,
         scoreKind: "rubric",
-        reviewJson: reviewJson([
-          { key: "r2", name: "要件2", status: "partial", comment: "ほぼ" },
-        ]),
+        reviewJson: reviewJson([{ key: "r2", name: "要件2", status: "partial", comment: "ほぼ" }]),
       }),
     ];
 
