@@ -333,20 +333,13 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
     }
   })();
 
-  const { data: themes, error: themesError } = await supabase
-    .from("learning_themes")
-    .select(
-      "*, phases:learning_phases(id, weeks:learning_weeks(id, contents:learning_contents(id)))"
-    )
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .eq("phases.is_published", true)
-    .eq("phases.is_deleted", false)
-    .eq("phases.weeks.is_published", true)
-    .eq("phases.weeks.is_deleted", false)
-    .eq("phases.weeks.contents.is_published", true)
-    .eq("phases.weeks.contents.is_deleted", false)
-    .order("display_order");
+  const { data: themes, error: themesError } = await applyPublishedNestedThemeFilters(
+    supabase
+      .from("learning_themes")
+      .select(
+        "*, phases:learning_phases(id, weeks:learning_weeks(id, contents:learning_contents(id)))"
+      )
+  ).order("display_order");
 
   if (themesError) {
     progressControl.abandoned = true;
