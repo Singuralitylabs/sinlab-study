@@ -608,6 +608,27 @@ describe("POST /api/ai-review - 単一ファイル提出の言語", () => {
       expect.objectContaining({ submission: { type: "code", files } })
     );
   });
+
+  it("提出が starter_files と同一なら 400（claim 前）", async () => {
+    const starter = [{ filename: "index.html", language: "html", content: "<div></div>" }];
+    mockSubmission({
+      code_content: null,
+      code_files: [{ filename: "index.html", language: "html", content: "<div></div>\n" }],
+      content: {
+        id: 5,
+        exercise_instructions: "課題",
+        code_language: "javascript",
+        starter_files: starter,
+      },
+    });
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: "初期コードから変更してください" });
+    expect(claimAIReview).not.toHaveBeenCalled();
+    expect(generateReview).not.toHaveBeenCalled();
+  });
 });
 
 describe("maxDurationとGEMINI_TOTAL_BUDGET_MSの整合性", () => {

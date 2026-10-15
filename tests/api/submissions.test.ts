@@ -227,3 +227,59 @@ describe("POST /api/submissions - 単一ファイルの保存形式", () => {
     );
   });
 });
+
+describe("POST /api/submissions - 未編集の初期コード", () => {
+  const starter = [{ filename: "index.html", language: "html", content: "<div></div>" }];
+
+  it("starter と同一（末尾空白のみ）なら 400", async () => {
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(
+      createMockSupabaseClient({
+        tableResults: {
+          learning_contents: {
+            data: { starter_files: starter, code_language: "javascript" },
+            error: null,
+          },
+          submissions: { data: { id: 1 }, error: null },
+        },
+      }) as never
+    );
+
+    const res = await POST(
+      request({
+        contentId: 1,
+        submissionType: "code",
+        codeFiles: [{ filename: "index.html", language: "html", content: "<div></div>\n" }],
+      }) as never
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: "初期コードから変更してください" });
+  });
+
+  it("内容を変えていれば 200", async () => {
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(
+      createMockSupabaseClient({
+        tableResults: {
+          learning_contents: {
+            data: { starter_files: starter, code_language: "javascript" },
+            error: null,
+          },
+          submissions: [
+            { data: null, error: null, count: 0 },
+            { data: { id: 1 }, error: null },
+          ],
+        },
+      }) as never
+    );
+
+    const res = await POST(
+      request({
+        contentId: 1,
+        submissionType: "code",
+        codeFiles: [{ filename: "index.html", language: "html", content: "<div>edited</div>" }],
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+  });
+});

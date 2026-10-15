@@ -76,7 +76,7 @@ export function SubmissionForm({
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
   const hasStarter = Boolean(starterSnapshot && starterSnapshot.length > 0);
-  const unchangedFromStarter = isUnchangedFromStarter(codeFiles, starterSnapshot);
+  const unchangedFromStarter = isUnchangedFromStarter(codeFiles, starterSnapshot, codeLanguage);
   // Judged by the files' own languages so the UI never appears for non-web exercises.
   const showPreview = submissionType === "code" && canPreviewFiles(codeFiles);
   const emptyShellCount = codeFiles.filter((file) => file.content.trim().length === 0).length;
