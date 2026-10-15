@@ -18,7 +18,7 @@ export default async function ReviewListPage() {
     <div className="max-w-3xl mx-auto">
       <PageTitle
         title="復習リスト"
-        description="AIレビューで部分的・未達成になった要件を集めました。再提出で達成になると克服済みに移ります。"
+        description="AIレビューで部分的・未達成になった要件を集めました。再提出で達成（met）になると克服済みに移ります。参考採点の項目は最新のレビュー内容に置き換わります。"
       />
       {error ? (
         <p className="text-sm text-destructive py-8 text-center">

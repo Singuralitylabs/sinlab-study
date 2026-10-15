@@ -182,7 +182,7 @@ describe("deriveReviewListItems", () => {
     );
   });
 
-  it("estimated で新しいレビューから消えた key は克服済みになる", () => {
+  it("estimated で新しいレビューから消えた key は置き換えられ、克服済みにはしない", () => {
     const items = deriveReviewListItems([
       source({
         id: 1,
@@ -207,10 +207,13 @@ describe("deriveReviewListItems", () => {
     ]);
 
     const byKey = Object.fromEntries(items.map((item) => [item.requirementKey, item]));
-    expect(byKey.old.overcome).toBe(true);
-    expect(byKey.keep.overcome).toBe(false);
-    expect(byKey.new.overcome).toBe(false);
-    expect(items.filter((item) => !item.overcome)).toHaveLength(2);
+    expect(byKey.old).toBeUndefined();
+    expect(byKey.keep).toEqual(
+      expect.objectContaining({ overcome: false, reviewId: 2, comment: "まだ" })
+    );
+    expect(byKey.new).toEqual(expect.objectContaining({ overcome: false, reviewId: 2 }));
+    expect(items).toHaveLength(2);
+    expect(items.every((item) => !item.overcome)).toBe(true);
   });
 
   it("estimated で新しいレビューが met にした key は克服済みになる", () => {
@@ -233,6 +236,37 @@ describe("deriveReviewListItems", () => {
 
     expect(items).toHaveLength(1);
     expect(items[0].overcome).toBe(true);
+  });
+
+  it("estimated は最新レビューの unmet/partial だけを open にし、キー改名だけでは克服しない", () => {
+    const items = deriveReviewListItems([
+      source({
+        id: 1,
+        contentId: 10,
+        scoreKind: "estimated",
+        reviewedAt: "2026-01-01T00:00:00.000Z",
+        reviewJson: reviewJson([
+          { key: "error_handling", name: "エラー処理", status: "unmet", comment: "旧" },
+        ]),
+      }),
+      source({
+        id: 2,
+        contentId: 10,
+        scoreKind: "estimated",
+        reviewedAt: "2026-01-02T00:00:00.000Z",
+        reviewJson: reviewJson([
+          { key: "input_validation", name: "入力検証", status: "partial", comment: "新" },
+        ]),
+      }),
+    ]);
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        requirementKey: "input_validation",
+        reviewId: 2,
+        overcome: false,
+      }),
+    ]);
   });
 
   it("legacy / none / incomplete は対象外", () => {

@@ -1444,9 +1444,9 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 |:--|:--|
 | 対象 | `score_kind` が `rubric` または `estimated` で、認識できる `review_json` を持つ完了レビュー。`legacy` / `none` / `incomplete` は対象外 |
 | 開く条件 | 要件の `status` が `partial` または `unmet` |
-| 識別子 | `rubric` / `estimated` とも `(content_id, requirement key)`（`estimated` も review_id を含めない。含めないと再レビューでキーが変わったときに古い項目が残り続ける） |
-| `estimated` の扱い | 同じコンテンツに `rubric` レビューが1件でもあれば、`estimated` 由来の項目は表示しない（rubric 優先） |
-| 克服済み | 同じ `(content_id, key)` について、より新しいレビューで `met` になった。または同じ kind の新しいレビューにその `key` が無い（`rubric` の採点基準版変更、または `estimated` で最新レビューが挙げなくなったキー） |
+| 識別子 | `rubric` / `estimated` とも `(content_id, requirement key)` |
+| `estimated` の扱い | 同じコンテンツに `rubric` レビューが1件でもあれば、`estimated` 由来の項目は表示しない（rubric 優先）。未克服の open 項目は**コンテンツごとの最新 `estimated` レビューだけ**を表示し、古い `estimated` の項目は置き換える（消えたキーを克服済みにはしない。AI がレビューごとにキー名を変えやすいため） |
+| 克服済み | 同じ `(content_id, key)` について、より新しいレビュー（`estimated` または `rubric`）で `met` になった。`rubric` のみ、同じ kind の新しいレビューにその `key` が無いときも克服（採点基準版変更）。`estimated` でキーが消えただけでは克服にしない。`rubric` が現れて `estimated` が非表示になる場合も一覧から外す |
 | 「理解した」 | `review_notes.understood_at`。自己申告のみで、克服済みの判定には使わない（未克服タブに残し、見た目を薄くする） |
 
 並びはテーマ → コンテンツの学習順（`buildThemeContentOrder()` / テーマ別進捗と同じ骨格）。テーマ見出しを付ける。
@@ -1467,11 +1467,11 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 ### 15.4 画面
 
 - **`/review-list`**: サイドナビ「復習リスト」（`role = member` のみ）。未克服 / 克服済みタブ。各項目にコンテンツ名（リンク）、要件名、AI コメント（最新）、一言メモ、「理解した」。メモありのコンテンツ（自由記述）も表示
-- **コンテンツ詳細**: `AIReviewDisplay` の `partial` / `unmet` 行に「復習リストに追加されました」とメモ欄。下部に「学習メモ」
+- **コンテンツ詳細**: `role = member` のときだけ、`AIReviewDisplay` の `partial` / `unmet` 行に「復習リストに追加されました」とメモ欄、下部に「学習メモ」を出す（admin / maintainer には出さない）
 - **ホーム**: 未克服が 1 件以上なら「復習リストに N 件」を 1 行で表示（大きなカードは増やさない）
 
 ### 15.5 週次進捗メール
 
-本文に「復習リストに未克服の項目が N 件あります」を 1 行添える（0 件ならプレースホルダーを空にして行ごと出さない）。対象抽出・送信条件は変えない（10.7節）。件数は公開中・可視コンテンツ上の未克服だけを数え、復習リスト画面と同じ分母にする。
+本文に「復習リストに未克服の項目が N 件あります」を 1 行添える（プレースホルダー `{{review_list_line}}`。0 件なら空にして行ごと出さない）。対象抽出・送信条件は変えない（10.7節）。件数は公開中・可視コンテンツ上の未克服だけを数え、復習リスト画面と同じ分母にする。**`email_templates` に `weekly_digest` の上書き行がある環境では、保存済み本文に `{{review_list_line}}` を追記する必要がある**（10.11節: 上書きがあればコード既定値は使わない。`active_themes` と同様。管理画面 `/admin/emails/templates` のプレースホルダー一覧にも載る）。
 
 **service_role 例外（digest 件数）**: Cron にユーザーセッションが無いため、未克服件数だけは `ai_reviews.review_json` を service_role で読む（`user_id` フィルタ付き。受講生向け配信の2経路は増やさない）。取得に失敗したら warn/error ログを出し、全員分を 0 件として本文だけ続行する（digest 全体を abort しない）。読む列は導出に必要な `id, score_kind, review_json, reviewed_at, created_at, status` と提出側の `user_id, content_id` に限る。

@@ -9,14 +9,14 @@ type Tab = "open" | "overcome";
 
 function groupByTheme(
   items: ReviewListItemView[]
-): { themeName: string; items: ReviewListItemView[] }[] {
-  const groups: { themeName: string; items: ReviewListItemView[] }[] = [];
+): { themeId: number; themeName: string; items: ReviewListItemView[] }[] {
+  const groups: { themeId: number; themeName: string; items: ReviewListItemView[] }[] = [];
   for (const item of items) {
     const last = groups[groups.length - 1];
-    if (last && last.themeName === item.themeName) {
+    if (last && last.themeId === item.themeId) {
       last.items.push(item);
     } else {
-      groups.push({ themeName: item.themeName, items: [item] });
+      groups.push({ themeId: item.themeId, themeName: item.themeName, items: [item] });
     }
   }
   return groups;
@@ -69,7 +69,7 @@ export function ReviewListClient({
       ) : (
         <div className="space-y-8">
           {groups.map((group) => (
-            <section key={group.themeName}>
+            <section key={group.themeId}>
               <h2 className="text-lg font-semibold mb-3">{group.themeName}</h2>
               <ul className="space-y-4">
                 {group.items.map((item) => {

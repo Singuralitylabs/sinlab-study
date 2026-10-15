@@ -37,7 +37,7 @@ import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
-import { checkContentPermissions } from "@/app/services/auth/permissions";
+import { checkContentPermissions, isLearnerRole } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -69,6 +69,7 @@ export default async function ContentPage({ params }: PageProps) {
   }
 
   const { userId, userStatus, userRole } = await getServerAuth();
+  const showReviewListNotes = isLearnerRole(userRole);
 
   // Started before the other fetches so a slow Stripe call overlaps them instead of adding to them.
   // Never rejects (falls back internally), so an unawaited promise is safe.
@@ -287,16 +288,20 @@ export default async function ContentPage({ params }: PageProps) {
           })
         )
       : Promise.resolve(null),
-    userId ? fetchReviewNotesForContent(userId, contentIdNum) : Promise.resolve({ data: [] }),
+    showReviewListNotes && userId
+      ? fetchReviewNotesForContent(userId, contentIdNum)
+      : Promise.resolve({ data: [] }),
   ]);
 
   const memosByKey: Record<string, string | null> = {};
   let freeLearningMemo: string | null = null;
-  for (const note of reviewNotes) {
-    if (note.requirement_key === null) {
-      freeLearningMemo = note.memo;
-    } else {
-      memosByKey[note.requirement_key] = note.memo;
+  if (showReviewListNotes) {
+    for (const note of reviewNotes) {
+      if (note.requirement_key === null) {
+        freeLearningMemo = note.memo;
+      } else {
+        memosByKey[note.requirement_key] = note.memo;
+      }
     }
   }
 
@@ -443,8 +448,8 @@ export default async function ContentPage({ params }: PageProps) {
                           <AIReviewDisplayNoSSR
                             review={reviewForLatestSubmission}
                             defaultExpanded={false}
-                            contentId={contentIdNum}
-                            memosByKey={memosByKey}
+                            contentId={showReviewListNotes ? contentIdNum : undefined}
+                            memosByKey={showReviewListNotes ? memosByKey : undefined}
                           />
                         </div>
                       )}
@@ -470,6 +475,7 @@ export default async function ContentPage({ params }: PageProps) {
                         }
                         codeLanguage={(content.code_language as CodeLanguage) ?? "javascript"}
                         persistedReviewId={reviewForLatestSubmission?.id ?? null}
+                        showReviewListNotes={showReviewListNotes}
                       />
                     </>
                   ) : (
@@ -507,7 +513,7 @@ export default async function ContentPage({ params }: PageProps) {
         </div>
       )}
 
-      {userId && isFullyPublished && (
+      {showReviewListNotes && userId && isFullyPublished && (
         <LearningMemo contentId={contentIdNum} initialMemo={freeLearningMemo} />
       )}
 

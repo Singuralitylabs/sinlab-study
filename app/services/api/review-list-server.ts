@@ -287,9 +287,23 @@ export async function buildReviewListForUser(userId: number): Promise<{
 
 /**
  * Home / nav badge: count only. Uses the same published/visible content filter as
- * buildReviewListForUser() so the number matches the list.
+ * buildReviewListForUser() so the number matches the list. Pass `visibleContentIds` from an
+ * already-fetched home/learn tree to skip a third published-tree round-trip.
  */
-export async function countUnovercomeReviewItemsForUser(userId: number): Promise<number> {
+export async function countUnovercomeReviewItemsForUser(
+  userId: number,
+  visibleContentIds?: ReadonlySet<number>
+): Promise<number> {
+  if (visibleContentIds !== undefined) {
+    const reviewsResult = await fetchReviewListSourceReviews(userId);
+    if (reviewsResult.error) {
+      return 0;
+    }
+    return countUnovercomeReviewItems(
+      filterReviewItemsToVisibleContents(deriveReviewListItems(reviewsResult.data), visibleContentIds)
+    );
+  }
+
   const [reviewsResult, contentResult] = await Promise.all([
     fetchReviewListSourceReviews(userId),
     fetchReviewListContentOrder(),

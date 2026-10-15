@@ -51,12 +51,14 @@ function compareReviews(a: ReviewListSourceReview, b: ReviewListSourceReview): n
  * Derives review-list items from the learner's completed AI reviews. Pure: no I/O, no table copy.
  * Rules (issue #309):
  * - Only score_kind rubric / estimated with a recognisable review_json contribute.
- * - An item opens on partial / unmet; overcomes when a newer review marks the same (contentId, key)
- *   as met, or the key disappears from a newer review of the same kind (rubric version change, or
- *   estimated keys the latest review no longer lists).
- * - Identity is (contentId, key) for both kinds so re-reviews with new AI keys cannot leave stale
- *   estimated items open forever. When any rubric review exists for the content, estimated-derived
- *   items are omitted entirely.
+ * - Rubric: opens on partial / unmet; overcomes when a newer review marks the same (contentId, key)
+ *   as met, or the key disappears from a newer rubric review (version change).
+ * - Estimated: only the latest estimated review per content contributes open items (older open
+ *   estimated items are replaced, not overcome — AI keys rename freely). Overcome only when a
+ *   newer review (estimated or rubric) marks the same key met, or when a rubric review exists and
+ *   estimated items are hidden.
+ * - Identity is (contentId, key) for both kinds. When any rubric review exists for the content,
+ *   estimated-derived items are omitted entirely.
  * - legacy / none / incomplete never contribute.
  */
 export function deriveReviewListItems(reviews: ReviewListSourceReview[]): DerivedReviewItem[] {
@@ -111,8 +113,7 @@ export function deriveReviewListItems(reviews: ReviewListSourceReview[]): Derive
       }
 
       if (requirement.status === "met") {
-        // Overcome every open item for this (contentId, key), including estimated ones that share
-        // the key across reviews.
+        // Newer estimated or rubric can mark the same (contentId, key) met.
         for (const [id, item] of items) {
           if (item.contentId === review.contentId && item.requirementKey === requirement.key) {
             items.set(id, { ...item, overcome: true });
@@ -121,17 +122,31 @@ export function deriveReviewListItems(reviews: ReviewListSourceReview[]): Derive
       }
     }
 
-    // Key gone from a newer review of the same kind: overcome (rubric version change, or estimated
-    // AI keys that the latest review no longer lists — without this, estimated items never close).
-    const kind = review.scoreKind === "estimated" ? "estimated" : "rubric";
-    for (const [id, item] of items) {
-      if (
-        item.contentId === review.contentId &&
-        item.scoreKind === kind &&
-        !item.overcome &&
-        !keysInReview.has(item.requirementKey)
-      ) {
-        items.set(id, { ...item, overcome: true });
+    if (review.scoreKind === "rubric") {
+      // Key gone from a newer rubric review: overcome (rubric version change).
+      for (const [id, item] of items) {
+        if (
+          item.contentId === review.contentId &&
+          item.scoreKind === "rubric" &&
+          !item.overcome &&
+          !keysInReview.has(item.requirementKey)
+        ) {
+          items.set(id, { ...item, overcome: true });
+        }
+      }
+    } else {
+      // Estimated: drop open items not from this (latest) estimated review. Missing keys are
+      // replaced, not overcome — treating disappearances as overcome falsely clears the list
+      // whenever the AI renames keys on resubmit.
+      for (const [id, item] of items) {
+        if (
+          item.contentId === review.contentId &&
+          item.scoreKind === "estimated" &&
+          !item.overcome &&
+          item.reviewId !== review.id
+        ) {
+          items.delete(id);
+        }
       }
     }
   }

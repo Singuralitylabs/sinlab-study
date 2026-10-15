@@ -80,9 +80,10 @@ export function orderContentsAcrossThemes<TContent extends NestedThemeContentRow
 /**
  * All-levels is_published / is_deleted filters for nested theme→phase→week→content selects.
  * Omitting a level here while another caller keeps it leaves counts / lists / digests mismatched.
- * Cast through a shallow eq-chain so PostgREST builder generics do not explode (TS2589).
+ * Constrained to eq-capable builders; cast through a shallow eq-chain so PostgREST builder
+ * generics do not explode (TS2589).
  */
-export function applyPublishedNestedThemeFilters<Q>(query: Q): Q {
+export function applyPublishedNestedThemeFilters<Q extends { eq: unknown }>(query: Q): Q {
   type EqChain = { eq: (column: string, value: boolean) => EqChain };
   const chained = query as unknown as EqChain;
   return chained
