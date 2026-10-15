@@ -268,12 +268,12 @@ describe("isCodeEquivalentToStarter", () => {
         "javascript"
       )
     ).toBe(true);
-    expect(isCodeEquivalentToStarter([...snapshot, createEmptyLike()], snapshot, "javascript")).toBe(
-      true
-    );
-    expect(isCodeEquivalentToStarter(snapshot, [...snapshot, createEmptyLike()], "javascript")).toBe(
-      true
-    );
+    expect(
+      isCodeEquivalentToStarter([...snapshot, createEmptyLike()], snapshot, "javascript")
+    ).toBe(true);
+    expect(
+      isCodeEquivalentToStarter(snapshot, [...snapshot, createEmptyLike()], "javascript")
+    ).toBe(true);
   });
 
   it("ファイル名・言語だけの変更は未変更、本文変更と starter 無しは false", () => {
