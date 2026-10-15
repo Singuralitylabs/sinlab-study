@@ -760,6 +760,8 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 
 **APIキーの振り分け**: `getServerAuth()` が返す `userStatus` によって使用するGemini APIキーを切り替える。`active`（コミュニティ会員・一般有料会員とも）は有料ティアの `GEMINI_API_KEY`、お試しユーザー（`trial`）は無料ティアの `GEMINI_API_KEY_TRIAL`（未設定時は `GEMINI_API_KEY` にフォールバック）を用いる。選択ロジックは `resolveGeminiApiKey()`（`app/services/api/gemini.ts`）に集約し、モデル名・上限値・環境変数名は `app/constants/gemini.ts` に定義する。キーはサーバー側でのみ扱い、レスポンス・ログへ出力しない。
 
+**モデルの更新方針（#369）**: 主モデルは `GEMINI_MODEL_NAME`、代替は `GEMINI_ALTERNATE_MODEL_NAME`（#368 のフォールバック先。未実装でも定数として登録する）にピン留めする。`gemini-flash-latest` のようなエイリアスは使わない（採点は AI のラベルからコードが点数・合否を決めるため、予告なく傾向や料金・パラメータ互換が変わると合格判定がずれる）。新モデル・非推奨化の検知は週次の GitHub Actions（`.github/workflows/gemini-model-check.yml`）が `models.list` と定数を比較し、より新しい安定版 Flash なら更新 PR、登録モデルが一覧から消えたら緊急 Issue を作る。切り替えの判断とマージは人間が行い、`scripts/grading-dry-run.ts` による比較は CI では実行しない（開発 DB の提出読み取りと Gemini 課金が発生するため）。
+
 **リクエストボディ**:
 ```json
 { "submissionId": 1 }

@@ -3,6 +3,7 @@ import {
   AI_REVIEW_STALE_AFTER_MS,
   GEMINI_API_KEY_ENV,
   GEMINI_API_KEY_TRIAL_ENV,
+  GEMINI_MODEL_NAME,
   GEMINI_TOTAL_BUDGET_MS,
 } from "@/app/constants/gemini";
 import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
@@ -50,7 +51,7 @@ const reviewResult = (overrides: Partial<ReviewResult> = {}): ReviewResult => ({
   reviewContent: "良いです。",
   overallScore: 100,
   passed: null,
-  modelUsed: "gemini-3.6-flash",
+  modelUsed: GEMINI_MODEL_NAME,
   promptTokens: 10,
   completionTokens: 20,
   thoughtsTokens: 30,
