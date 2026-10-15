@@ -8,18 +8,17 @@ import { ReviewNoteMemoField } from "@/app/components/ReviewNoteEditor";
 
 let container: HTMLDivElement;
 let root: Root;
+const fetchMock = vi.fn().mockResolvedValue({
+  ok: true,
+  json: async () => ({ note: {} }),
+});
 
 beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ note: {} }),
-    })
-  );
+  fetchMock.mockClear();
+  vi.stubGlobal("fetch", fetchMock);
 });
 
 afterEach(() => {
@@ -28,6 +27,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+function setTextareaValue(textarea: HTMLTextAreaElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+  setter?.call(textarea, value);
+  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function blur(textarea: HTMLTextAreaElement) {
+  // React 17+ delegates onBlur via bubbling focusout.
+  textarea.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+}
 
 describe("ReviewNoteMemoField", () => {
   it("保存後に初期 props へ戻しても、lastSaved と異なれば再保存する", async () => {
@@ -43,33 +53,36 @@ describe("ReviewNoteMemoField", () => {
 
     const textarea = container.querySelector("textarea");
     expect(textarea).toBeTruthy();
+    if (!textarea) throw new Error("missing textarea");
+
+    await act(() => {
+      setTextareaValue(textarea, "x");
+    });
 
     await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        "value"
-      )?.set;
-      setter?.call(textarea, "x");
-      textarea?.dispatchEvent(new Event("input", { bubbles: true }));
-      textarea?.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+      blur(textarea);
+      await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      contentId: 1,
+      requirementKey: "r1",
+      memo: "x",
+    });
+
+    await act(() => {
+      setTextareaValue(textarea, "");
+    });
 
     await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        "value"
-      )?.set;
-      setter?.call(textarea, "");
-      textarea?.dispatchEvent(new Event("input", { bubbles: true }));
-      textarea?.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+      blur(textarea);
+      await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(fetch).toHaveBeenCalledTimes(2);
-    const secondBody = JSON.parse((fetch as ReturnType<typeof vi.fn>).mock.calls[1][1].body);
-    expect(secondBody.memo).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).memo).toBeNull();
   });
 });
