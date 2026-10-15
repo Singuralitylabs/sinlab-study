@@ -10,6 +10,7 @@ import {
   Megaphone,
   Menu,
   Settings,
+  SlidersHorizontal,
   UserCog,
 } from "lucide-react";
 import Image from "next/image";
@@ -79,6 +80,12 @@ const ADMIN_USERS_NAV_ITEM: NavItem = {
   icon: <UserCog className="h-5 w-5" />,
 };
 
+const SETTINGS_NAV_ITEM: NavItem = {
+  title: "設定",
+  href: "/settings",
+  icon: <SlidersHorizontal className="h-5 w-5" />,
+};
+
 function isNavActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
   return pathname.startsWith(href);
@@ -132,6 +139,7 @@ function SideNavSidebarContent({
       </nav>
       <div className="px-3 pb-4">
         <Separator className="mb-3" />
+        <SideNavLink item={SETTINGS_NAV_ITEM} pathname={pathname} onClick={onItemClick} />
         <button
           type="button"
           onClick={() => {

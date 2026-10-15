@@ -175,6 +175,7 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
     body: [
       "先週の学習: コンテンツ完了 {{completed_last_week}} 本 / 演習の提出 {{submitted_last_week}} 件",
       "{{weekly_cheer}}",
+      "学習中のテーマ: {{active_themes}}",
       "次に学ぶコンテンツ: {{next_content_title}}",
       "今週の目標の提案: コンテンツを {{suggested_goal}} 本完了させてみましょう（残り {{remaining_contents}} 本）。",
       "{{all_completed_message}}",
@@ -183,6 +184,8 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
       completed_last_week: "先週完了したコンテンツ数",
       submitted_last_week: "先週提出した演習数",
       weekly_cheer: "先週の実績に応じた一言（コードが選ぶ）",
+      active_themes:
+        "学習中のテーマと完了数（「テーマ名（N / M 完了）」。最近学んだ順に最大3件。学習中のテーマが無いときは空で、その行は出ない）",
       next_content_title: "次に学ぶコンテンツ名（全て完了しているときは空で、その行は出ない）",
       suggested_goal: "今週の目標本数の提案（全て完了しているときは空）",
       remaining_contents: "残りのコンテンツ数（全て完了しているときは空）",

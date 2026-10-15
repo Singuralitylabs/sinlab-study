@@ -33,6 +33,14 @@ type EmailLayoutParams = {
    * Not part of the editable text, so no template edit can remove it.
    */
   unsubscribeUrl?: string;
+  /**
+   * Link to the in-app promotional-mail settings (`/settings`). Pass it for promotional emails
+   * (next to `unsubscribeUrl`, so the way to resume is reachable from the body) and for
+   * transactional ones that contain promotional guidance. Adds only a footer line: no
+   * `List-Unsubscribe` header, since the transactional notice itself cannot be unsubscribed from.
+   * Not part of the editable text, so no template edit can remove it.
+   */
+  emailPreferencesUrl?: string;
   /** Sender / header / footer name; defaults to the code defaults. */
   branding?: EmailBranding;
 };
@@ -40,6 +48,10 @@ type EmailLayoutParams = {
 /** Builds an absolute in-app URL regardless of a trailing slash in `NEXT_PUBLIC_APP_URL`. */
 export function buildAppUrl(appUrl: string, path: string): string {
   return `${appUrl.replace(/\/+$/, "")}${path}`;
+}
+
+function preferencesUrl(appUrl: string): string {
+  return buildAppUrl(appUrl, "/settings");
 }
 
 function brandLabel(branding: EmailBranding): string {
@@ -59,12 +71,14 @@ function footerLines(branding: EmailBranding): string[] {
 const UNSUBSCRIBE_LEAD =
   "学習状況のお知らせなどの案内メールが不要な場合は、こちらから配信を停止できます";
 
+const PREFERENCES_LEAD = "案内メールの配信設定はこちら";
+
 export function renderEmailLayout(params: EmailLayoutParams): EmailContent {
   const branding = params.branding ?? DEFAULT_EMAIL_TEXTS.branding;
   const greeting = `${params.greetingName} 様`;
   const footer = footerLines(branding);
   const paragraphs = params.paragraphs ?? [];
-  const { unsubscribeUrl } = params;
+  const { unsubscribeUrl, emailPreferencesUrl } = params;
 
   const text = [
     greeting,
@@ -78,6 +92,7 @@ export function renderEmailLayout(params: EmailLayoutParams): EmailContent {
     ...(branding.serviceSubtitle ? [branding.serviceSubtitle] : []),
     ...footer,
     ...(unsubscribeUrl ? [`${UNSUBSCRIBE_LEAD}: ${unsubscribeUrl}`] : []),
+    ...(emailPreferencesUrl ? [`${PREFERENCES_LEAD}: ${emailPreferencesUrl}`] : []),
   ].join("\n");
 
   const linksHtml = params.links
@@ -111,6 +126,11 @@ export function renderEmailLayout(params: EmailLayoutParams): EmailContent {
           `<p style="margin:8px 0 0;">${escapeHtml(UNSUBSCRIBE_LEAD)}: <a href="${escapeHtml(unsubscribeUrl)}" style="color:#71717a;">配信停止</a></p>`,
         ]
       : []),
+    ...(emailPreferencesUrl
+      ? [
+          `<p style="margin:8px 0 0;">${escapeHtml(PREFERENCES_LEAD)}: <a href="${escapeHtml(emailPreferencesUrl)}" style="color:#71717a;">配信設定</a></p>`,
+        ]
+      : []),
     "</div>",
     "</div></body></html>",
   ].join("");
@@ -136,6 +156,7 @@ type TemplatedEmailParams = {
   values: EmailTemplateValues;
   links: EmailLink[];
   unsubscribeUrl?: string;
+  emailPreferencesUrl?: string;
   announcementBody?: EmailMarkdown;
 };
 
@@ -157,6 +178,7 @@ function renderTemplatedEmail(params: TemplatedEmailParams): EmailContent {
     markdownBody: renderEmailBody(text.body, values, params.announcementBody),
     links: params.links,
     unsubscribeUrl: params.unsubscribeUrl,
+    emailPreferencesUrl: params.emailPreferencesUrl,
     branding,
   });
 }
@@ -194,6 +216,8 @@ export function buildSignupEmail(
         ? [{ label: "プランのアップグレード", url: buildAppUrl(params.appUrl, "/upgrade") }]
         : []),
     ],
+    // The upgrade guidance is promotional content inside a transactional notice.
+    emailPreferencesUrl: params.upgradeAvailable ? preferencesUrl(params.appUrl) : undefined,
   });
 }
 
@@ -283,6 +307,7 @@ export function buildSubscriptionEndedEmail(
     displayName: params.displayName,
     values: {},
     links: [{ label: "アップグレードページを開く", url: buildAppUrl(params.appUrl, "/upgrade") }],
+    emailPreferencesUrl: preferencesUrl(params.appUrl),
   });
 }
 
@@ -311,7 +336,12 @@ export type WeeklyDigestEmailParams = PromotionalEmailParams & {
   nextContent: EmailContentLink | null;
   /** Number of viewable incomplete contents. */
   remainingContents: number;
+  /** Themes in progress, most recently studied first. */
+  activeThemes: { themeName: string; completedContents: number; totalContents: number }[];
 };
+
+/** Themes listed in the weekly digest's "in progress" line. */
+const WEEKLY_ACTIVE_THEMES_LIMIT = 3;
 
 export function buildWeeklyDigestEmail(
   params: WeeklyDigestEmailParams,
@@ -330,6 +360,10 @@ export function buildWeeklyDigestEmail(
       completed_last_week: String(params.completedLastWeek),
       submitted_last_week: String(params.submittedLastWeek),
       weekly_cheer: cheer,
+      active_themes: params.activeThemes
+        .slice(0, WEEKLY_ACTIVE_THEMES_LIMIT)
+        .map((t) => `${t.themeName}（${t.completedContents} / ${t.totalContents} 完了）`)
+        .join("、"),
       next_content_title: params.nextContent?.title ?? "",
       suggested_goal: params.nextContent
         ? String(suggestWeeklyGoal(params.completedLastWeek, params.remainingContents))
@@ -343,6 +377,7 @@ export function buildWeeklyDigestEmail(
       ? [{ label: "続きから学ぶ", url: buildAppUrl(params.appUrl, params.nextContent.path) }]
       : [{ label: "ダッシュボードを開く", url: buildAppUrl(params.appUrl, "/") }],
     unsubscribeUrl: params.unsubscribeUrl,
+    emailPreferencesUrl: preferencesUrl(params.appUrl),
   });
 }
 
@@ -371,6 +406,7 @@ export function buildInactivityReminderEmail(
         : { label: "学習を始める", url: buildAppUrl(params.appUrl, "/learn") },
     ],
     unsubscribeUrl: params.unsubscribeUrl,
+    emailPreferencesUrl: preferencesUrl(params.appUrl),
   });
 }
 
@@ -423,6 +459,7 @@ export function buildTrialNurtureEmail(
     texts,
     displayName: params.displayName,
     unsubscribeUrl: params.unsubscribeUrl,
+    emailPreferencesUrl: preferencesUrl(params.appUrl),
   };
   const learnLinks = [{ label: "学習コンテンツを開く", url: buildAppUrl(params.appUrl, "/learn") }];
 
@@ -491,6 +528,7 @@ export function buildAnnouncementEmail(
       },
     ],
     unsubscribeUrl: params.unsubscribeUrl,
+    emailPreferencesUrl: preferencesUrl(params.appUrl),
   });
 }
 

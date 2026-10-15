@@ -52,9 +52,7 @@ export async function POST(request: NextRequest) {
 
     const { data: submission, error: submissionError } = await supabase
       .from("submissions")
-      .select(
-        "*, content:learning_contents(id, exercise_instructions, reference_answer, code_language)"
-      )
+      .select("*, content:learning_contents(id, exercise_instructions, code_language)")
       .eq("id", submissionId)
       .single();
 
@@ -161,13 +159,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Learners cannot select grading_rubric. Read it with service_role after the claim so a
-    // failed lookup can mark the row failed instead of leaving it processing. Published and
-    // not deleted, or a reordered visibility check would grade a hidden rubric.
+    // Learners cannot select grading_rubric or reference_answer. Read them with service_role
+    // after the claim so a failed lookup can mark the row failed instead of leaving it
+    // processing. Published and not deleted, or a reordered visibility check would grade a
+    // hidden rubric.
     const admin = await createAdminSupabaseClient();
     const { data: rubricRow, error: rubricError } = await admin
       .from("learning_contents")
-      .select("grading_rubric")
+      .select("grading_rubric, reference_answer")
       .eq("id", content.id)
       .eq("is_published", true)
       .eq("is_deleted", false)
@@ -182,8 +181,8 @@ export async function POST(request: NextRequest) {
       const result = await generateReview({
         exerciseInstructions: content.exercise_instructions,
         submission: reviewSubmission,
-        referenceAnswer: content.reference_answer,
-        gradingRubric: parseGradingRubric(rubricRow?.grading_rubric),
+        referenceAnswer: rubricRow.reference_answer,
+        gradingRubric: parseGradingRubric(rubricRow.grading_rubric),
         apiKey,
       });
 

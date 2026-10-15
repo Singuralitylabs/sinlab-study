@@ -77,11 +77,11 @@ erDiagram
 |:--|:--|
 | video | `video_url`（YouTube URL）、`description`（任意） |
 | text | `text_content`（Markdown） |
-| exercise | `exercise_instructions`、`reference_answer`（AIレビューの参照用の模範回答・**受講生には非公開**）、`grading_rubric`（採点基準 JSONB。下記）、`hint`（受講生に公開）、`allowed_submission_types`、`code_language` |
+| exercise | `exercise_instructions`、`reference_answer`（AIレビューの参照用の模範回答・**提出前の受講生には非公開**。列権限から外し、提出後だけ `get_exercise_reference_answer()`（6.18）で読む）、`grading_rubric`（採点基準 JSONB。下記）、`hint`（受講生に公開）、`allowed_submission_types`、`code_language` |
 | slide | `pdf_url`、`description`（任意） |
 | quiz | `description`（導入文・任意）。設問は `quiz_questions`（3.20）に持つ |
 
-- `grading_rubric`（演習のみ・NULL 可）: AIレビューの採点基準。`{ "version": 1, "max_key_number": 1, "requirements": [{ "key": "r1", "name": "...", "description": "..." }] }`。NULL は未設定で、AI が要件を推測する参考採点（`ai_reviews.score_kind = 'estimated'`）になり修了判定に使わない。CHECK 制約は形（object・version は正の整数・requirements は1件以上の配列）と、演習以外の行が基準を持たないこと（`content_type = 'exercise' OR grading_rubric IS NULL`）を検証し、件数上限・key 重複・名前の長さは API（`GradingRubricInputSchema`）が検証する。`anon` / `authenticated` のテーブル SELECT を外し、`grading_rubric` 以外の列だけを付与する（列だけの REVOKE ではテーブル権限が残るため隠れない）。詳細取得もこの列を選ばない。AIレビューと管理画面（一覧の version を含む）は service_role で読む。編集画面は、表示中の要件が属する版（無ければ null）を `grading_rubric_version` で送り、保存直前に読んだ版と違えば書き込む前に 409 にする。成功した更新は保存した版を返し、フォームは次の保存でそれを送る（画面に残ったまま props だけが新しい基準になっても追従しない）。PUT はこの項目を、採点基準を含む（null も）か演習以外へ種別を変えるときに必須にする。省略した呼び出しは読んだ版だけでロックする。そのうえで、保存は読んだ `version`（未設定なら NULL。削除と演習以外への変更も同じ）に一致する行だけを、兄弟の `display_order` 再採番より先に更新する。種別も同時に変えるときは同じ UPDATE に含め、演習以外の行へ基準を書けない CHECK を満たす。0件なら 409 で、表示順は動かさない。CHECK は通るが zod で読めない保存値でも `version` が正の整数ならその番号で一致させ、列が NULL のときだけ `IS NULL` を使う。その行から読めた key と `max_key_number` も再利用チェックに使う。key は trim して比べ、空白だけの違いは現役の key とみなす。zod で読めない行は、読めた行への投影と送信内容が一致しても version を +1 する（投影が説明の欠落や要件の脱落を隠すため）。再採番や残りの更新が失敗したら、この保存が書いた版（削除なら NULL）に一致する行だけ、先に書いた採点基準と種別を戻す。削除は版が無いので、その UPDATE が返した `updated_at` も一致させる（`IS NULL` だけだと、その後に基準を空のまま保存した行まで戻る）。時刻が取れない削除は戻さない。0件ならより新しい保存を上書きしない。クイズ設問を先に置き換えた保存は、競合・key の再利用・更新失敗で設問も戻す。発行済み番号以下の新しい `r{n}` は 400（`r{n}` 以外の key は再利用とみなさない）。`version` は**クライアントを信用せず**サーバーが保存済みの値から導出し、要件の内容が実際に変わった保存のときだけ +1 する（`nextGradingRubric()`）。`key` は基準内で再利用しない（並べ替え・削除後も過去レビューの `key` が同じ要件を指すため）。削除した番号を覚えるため、発行済みの最大番号を `max_key_number` に保存し（これもサーバーが導出し下がらない。無い旧データは現存する key の最大値で補う）、編集画面はそれより大きい番号で採番する。ただし基準を削除して `NULL` に戻す（または演習以外へ種別変更する）と `version` と採番も初期化され、再設定後は `version = 1`・`r1` から始まる（過去レビューには要件名も保存しているため表示は壊れない）。種別を演習以外へ変更すると NULL に戻す
+- `grading_rubric`（演習のみ・NULL 可）: AIレビューの採点基準。`{ "version": 1, "max_key_number": 1, "requirements": [{ "key": "r1", "name": "...", "description": "..." }] }`。NULL は未設定で、AI が要件を推測する参考採点（`ai_reviews.score_kind = 'estimated'`）になり修了判定に使わない。CHECK 制約は形（object・version は正の整数・requirements は1件以上の配列）と、演習以外の行が基準を持たないこと（`content_type = 'exercise' OR grading_rubric IS NULL`）を検証し、件数上限・key 重複・名前の長さは API（`GradingRubricInputSchema`）が検証する。`anon` / `authenticated` のテーブル SELECT を外し、`grading_rubric` と `reference_answer` 以外の列だけを付与する（列だけの REVOKE ではテーブル権限が残るため隠れない）。詳細取得もこの列を選ばない。AIレビューと管理画面（一覧の version を含む）は service_role で読む。編集画面は、表示中の要件が属する版（無ければ null）を `grading_rubric_version` で送り、保存直前に読んだ版と違えば書き込む前に 409 にする。成功した更新は保存した版を返し、フォームは次の保存でそれを送る（画面に残ったまま props だけが新しい基準になっても追従しない）。PUT はこの項目を、採点基準を含む（null も）か演習以外へ種別を変えるときに必須にする。省略した呼び出しは読んだ版だけでロックする。そのうえで、保存は読んだ `version`（未設定なら NULL。削除と演習以外への変更も同じ）に一致する行だけを、兄弟の `display_order` 再採番より先に更新する。種別も同時に変えるときは同じ UPDATE に含め、演習以外の行へ基準を書けない CHECK を満たす。0件なら 409 で、表示順は動かさない。CHECK は通るが zod で読めない保存値でも `version` が正の整数ならその番号で一致させ、列が NULL のときだけ `IS NULL` を使う。その行から読めた key と `max_key_number` も再利用チェックに使う。key は trim して比べ、空白だけの違いは現役の key とみなす。zod で読めない行は、読めた行への投影と送信内容が一致しても version を +1 する（投影が説明の欠落や要件の脱落を隠すため）。再採番や残りの更新が失敗したら、この保存が書いた版（削除なら NULL）に一致する行だけ、先に書いた採点基準と種別を戻す。削除は版が無いので、その UPDATE が返した `updated_at` も一致させる（`IS NULL` だけだと、その後に基準を空のまま保存した行まで戻る）。時刻が取れない削除は戻さない。0件ならより新しい保存を上書きしない。クイズ設問を先に置き換えた保存は、競合・key の再利用・更新失敗で設問も戻す。発行済み番号以下の新しい `r{n}` は 400（`r{n}` 以外の key は再利用とみなさない）。`version` は**クライアントを信用せず**サーバーが保存済みの値から導出し、要件の内容が実際に変わった保存のときだけ +1 する（`nextGradingRubric()`）。`key` は基準内で再利用しない（並べ替え・削除後も過去レビューの `key` が同じ要件を指すため）。削除した番号を覚えるため、発行済みの最大番号を `max_key_number` に保存し（これもサーバーが導出し下がらない。無い旧データは現存する key の最大値で補う）、編集画面はそれより大きい番号で採番する。ただし基準を削除して `NULL` に戻す（または演習以外へ種別変更する）と `version` と採番も初期化され、再設定後は `version = 1`・`r1` から始まる（過去レビューには要件名も保存しているため表示は壊れない）。種別を演習以外へ変更すると NULL に戻す
 - `description`: 概要（Markdown・任意入力）。未入力（NULL）の場合、詳細ページの概要欄カードを表示しない
 - `pdf_url`: `slides` バケット内の**オブジェクトキーのみ**（例: `gas/slide-01.pdf`）。URL を保存せず、配信時にサーバー側で署名付きURLを発行する（6.8参照）
 - `allowed_submission_types`（`code` / `url` / `both`）: 演習で許可する提出方法。`code` / `url` は提出方法の選択UIを出さず、`both` のみ選択可（既定 `code`）
@@ -121,7 +121,7 @@ erDiagram
 - `membership_type`: `community`（コミュニティ会員）/ `general`（一般有料会員）。承認前・却下ユーザーは NULL
 - `terms_accepted_at`: 利用規約・プライバシーポリシーへの同意日時。新規登録時のみ記録し、既存ユーザーは NULL のまま利用継続できる（再同意は求めない）
 - `onboarding_completed_at`: 初回利用ガイド（ウェルカムダイアログ）の完了日時。閉じたときに記録し、既存ユーザーは NULL のまま
-- `email_opt_out_at`: 案内メール（定期メール）の配信停止日時。NULL は配信対象。配信停止リンク（`/api/email/unsubscribe`）で記録し、停止・再開は管理者もユーザー管理画面（`PATCH /api/admin/users` の `opt_out_email` / `resume_email`）から行える。トランザクションメールには影響しない（[機能設計書](./specification.md)10.8節）
+- `email_opt_out_at`: 案内メール（定期メール）の配信停止日時。NULL は配信対象。配信停止リンク（`/api/email/unsubscribe`）で記録し、停止・再開は、本人が設定画面（`/settings`。`PATCH /api/settings/email`）から、または管理者がユーザー管理画面（`PATCH /api/admin/users` の `opt_out_email` / `resume_email`）から行える。トランザクションメールには影響しない（[機能設計書](./specification.md)10.8節）
 - `auth_id`: Supabase Auth UUID（UNIQUE）
 
 > CHECK制約は値の妥当性のみを検証する。「`status = 'active'` なら `membership_type` は NOT NULL」という不変条件はDBでは保証しておらず、承認・却下処理（`approveUser()` / `rejectUser()`）を通るアプリ層でのみ担保している。
@@ -291,7 +291,7 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 
 **この `SECURITY DEFINER` の規約は、ポリシー内から呼ぶRLSヘルパーに限る。** アプリから直接叩くRPC（例: `get_students_progress_summary()`。6.2節参照）は逆に `SECURITY DEFINER` にしてはならない。`SECURITY DEFINER` にするとRLSを迂回するため、`authenticated` にGRANTしたままだと任意のmemberが他ユーザーの行まで取得できてしまう。呼び出し元の権限のままRLSに従わせる `SECURITY INVOKER`（デフォルト）を維持すること。
 
-唯一の例外はクイズの `get_quiz_questions()` / `grade_quiz_answers()`（6.17）。呼び出し元に正解列を読ませないことが目的なので INVOKER では成り立たない。代わりに関数の先頭で `quiz_content_visible_to_caller()` により呼び出し元の可視性を自前で確認し、返す列も限定する。この形以外で DEFINER の RPC を増やさない。
+例外はクイズの `get_quiz_questions()` / `grade_quiz_answers()`（6.17）と、演習の `get_exercise_reference_answer()`（6.18）。いずれも呼び出し元に権限の無い列（正解・模範回答）を、回答・提出の後にだけ（模範回答の admin・maintainer は提出不要）読ませることが目的なので INVOKER では成り立たない。代わりに関数の中で呼び出し元の可視性（クイズは `quiz_content_visible_to_caller()`、模範回答は同等の可視性に加え、learner は本人の提出が必要。admin・maintainer は提出不要）を自前で確認し、返す列も限定する。この形以外で DEFINER の RPC を増やさない。
 
 ---
 
@@ -372,7 +372,7 @@ SELECT のみ: 自分の提出（`submissions.user_id` が自身）に紐づく�
 
 初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer は受講生進捗（`/manage/students`）の閲覧で `users` を参照するため SELECT のみ許可し、UPDATE は付与しない（ユーザー管理は不可）。
 
-本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため）。`email_opt_out_at` も同様に、配信停止ルート（`/api/email/unsubscribe`。署名付きリンクでログイン不要）が service_role 経由で記録する。
+本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため）。`email_opt_out_at` も同様に、配信停止ルート（`/api/email/unsubscribe`。署名付きリンクでログイン不要）と、設定画面の API（`PATCH /api/settings/email`。`getServerAuth()` で特定した本人の行だけを更新する）が service_role 経由で記録する。
 
 ### 6.6 stripe_subscriptions
 
@@ -446,11 +446,21 @@ INSERT / UPDATE / DELETE のポリシーは定義しない（受講生・管理�
 |:--|:--|:--|
 | `get_quiz_questions(p_content_id)` | `authenticated` / `service_role` | 出題用の列（`id, display_order, question_type, question, choices, hint, revision`）。正解・模範解答・解説は返さない。`revision` は形式・設問文・選択肢のハッシュ（`quiz_question_revision()`） |
 | `grade_quiz_answers(p_content_id, p_answers)` | `authenticated` / `service_role` | 全設問に回答している（選択式は1つ以上選択、入力式は空白以外）ときだけ、設問ごとの `is_correct`（入力式は NULL）・`correct_choices`・`model_answer`・`explanation` を返す。1問でも未回答、回答の数が設問の数と違う（削除された設問への回答を黙って捨てて部分採点しないため）、各回答の `revision` が現在の設問と違う（ページを開いた後に設問の中身が差し替わった。id を保つ置換では id だけで検出できず、古い設問への答えを新しい設問の正解と比べてしまうため）、または同じ `question_id` が重複していれば0行。これは「回答を送る前に正解を表示しない」ための形式上の条件で、ダミーの回答を送れば正解・解説は得られる（回答内容を保存しないため、それ以上は守らない）。選択の重複・範囲外は不正解 |
-| `quiz_content_visible_to_caller(p_content_id)` | なし（上の2関数の内部用） | `content_type = 'quiz'` かつ未削除で、admin・maintainer（未公開プレビュー。[機能設計書](./specification.md)2.12）か、4階層すべて公開・未削除で `active`、またはお試しで `is_open_to_trial = true`。`learning_contents` の SELECT RLS と `isContentVisible()` を合わせた条件 |
+| `quiz_content_visible_to_caller(p_content_id)` | なし（上の2関数の内部用。`content_visible_to_caller(p_content_id, 'quiz')` を呼ぶだけの薄い関数） | `content_type = 'quiz'` かつ未削除で、admin・maintainer（未公開プレビュー。[機能設計書](./specification.md)2.12）か、4階層すべて公開・未削除で `active`、またはお試しで `is_open_to_trial = true`。`learning_contents` の SELECT RLS と `isContentVisible()` を合わせた条件 |
 | `quiz_question_revision(p_question_type, p_question, p_choices)` | なし（内部用） | 上記の `revision` を計算する。正解・解説だけの修正では変わらない |
 | `replace_quiz_questions(p_content_id, p_questions)` | `service_role` のみ | 管理画面の保存。1トランザクションで、配列の順を `display_order` にして同じ位置の行は UPDATE（id を保つ。回答中の受講者の `question_id` を無効にしない）、増えた分を INSERT、減った分を DELETE する |
 
 前の3つは `SECURITY DEFINER`・`SET search_path = public`（5.2の例外）。未認証の `/demo` は service_role で読むが、`quiz_questions` は読まない（クイズはログイン後に解答する旨だけを表示する）。
+
+### 6.18 模範回答（reference_answer）の読み取り
+
+`learning_contents.reference_answer` は受講生の列権限（6.1）から外し、REST で直接 select できない。受講生向けの読み取りは RPC `get_exercise_reference_answer(p_content_id)` だけで、AIレビュー API は採点基準と同じ service_role の絞り込み読み（`is_published = true AND is_deleted = false`）で取る。管理画面（`/api/manage/contents/*`）は service_role で読む。
+
+| 関数 | 権限 | 内容 |
+|:--|:--|:--|
+| `get_exercise_reference_answer(p_content_id)` | `authenticated` / `service_role` | `content_type = 'exercise'` かつ未削除で、admin・maintainer（未公開プレビュー。提出は不要）か、4階層すべて公開・未削除で `active`、またはお試し公開（`is_open_to_trial`）の `trial` が、そのコンテンツに1件以上提出しているときだけ模範回答を1行返す。それ以外（提出なし・未公開・論理削除・お試し非公開・模範回答が NULL）は0行 |
+
+可視性の判定は、クイズと共通の内部関数 `content_visible_to_caller(p_content_id, p_content_type)`（API ロールには EXECUTE を与えない）に一本化している。RLS の可視条件を変えるときはこの1か所を直す。`SECURITY DEFINER`・`SET search_path = public`（5.2の例外）。`CREATE OR REPLACE` は ACL を保つが、DROP して作り直すと EXECUTE が `PUBLIC` に戻る点は6.17と同じ。`anon` / `PUBLIC` は REVOKE する。
 
 ---
 

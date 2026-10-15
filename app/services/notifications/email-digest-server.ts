@@ -219,6 +219,7 @@ async function fetchOrderedContents(supabase: AdminClient): Promise<DigestConten
     return buildThemeContentOrder(weeks, contents).map((content) => ({
       id: content.id,
       title: content.title,
+      themeId: theme.id,
       path: `/learn/${theme.id}/${content.phaseId}/${content.weekId}/${content.id}`,
       themeName: theme.name,
       isOpenToTrial: openToTrial.get(content.id) === true,
@@ -295,6 +296,8 @@ async function fetchWeeklyDigestLoggedUserIds(
 
 type WeeklyStats = {
   completedIdsByUser: Map<number, Set<number>>;
+  /** contentId -> completed_at (epoch ms) per user, to find the most recently studied theme. */
+  completedAtByUser: Map<number, Map<number, number>>;
   completedLastWeekByUser: Map<number, number>;
   submittedLastWeekByUser: Map<number, number>;
 };
@@ -337,6 +340,7 @@ async function fetchWeeklyStats(
 
   const stats: WeeklyStats = {
     completedIdsByUser: new Map(),
+    completedAtByUser: new Map(),
     completedLastWeekByUser: new Map(),
     submittedLastWeekByUser: new Map(),
   };
@@ -347,6 +351,11 @@ async function fetchWeeklyStats(
     ids.add(row.content_id);
     stats.completedIdsByUser.set(row.user_id, ids);
     const completedAt = row.completed_at ? Date.parse(row.completed_at) : Number.NaN;
+    if (!Number.isNaN(completedAt)) {
+      const times = stats.completedAtByUser.get(row.user_id) ?? new Map<number, number>();
+      times.set(row.content_id, completedAt);
+      stats.completedAtByUser.set(row.user_id, times);
+    }
     if (completedAt >= fromMs && completedAt < toMs) {
       stats.completedLastWeekByUser.set(
         row.user_id,
@@ -958,9 +967,10 @@ async function buildQueue(
   for (const user of weeklyUsers) {
     const completedLastWeek = stats.completedLastWeekByUser.get(user.userId) ?? 0;
     const submittedLastWeek = stats.submittedLastWeekByUser.get(user.userId) ?? 0;
-    const { next, remaining } = resolveNextContent(
+    const { next, remaining, activeThemes } = resolveNextContent(
       visibleContentsFor(contents, user.status),
-      stats.completedIdsByUser.get(user.userId) ?? new Set()
+      stats.completedIdsByUser.get(user.userId) ?? new Set(),
+      stats.completedAtByUser.get(user.userId)
     );
     if (
       !isWeeklyDigestTarget({ completedLastWeek, submittedLastWeek, remainingContents: remaining })
@@ -984,6 +994,7 @@ async function buildQueue(
             submittedLastWeek,
             nextContent: next ? { title: next.title, path: next.path } : null,
             remainingContents: remaining,
+            activeThemes,
           },
           texts
         ),
