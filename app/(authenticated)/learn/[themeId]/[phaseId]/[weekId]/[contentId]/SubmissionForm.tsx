@@ -4,19 +4,19 @@ import { Code, Link as LinkIcon, Loader2, RotateCcw, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
-import { CodeFilesEditor } from "@/app/components/CodeFilesEditor";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { HtmlPreviewNoSSR } from "@/app/components/HtmlPreviewNoSSR";
+import { LockedCodeFilesEditor } from "@/app/components/LockedCodeFilesEditor";
 import { buildReviewNotice } from "@/app/lib/ai-review-response";
-import {
-  buildInitialCodeFiles,
-  buildSubmissionCodeFiles,
-  type CodeFileInput,
-  isCodeEquivalentToStarter,
-  isSubmissionCodeValid,
-} from "@/app/lib/code-file-inputs";
+import type { CodeFileInput } from "@/app/lib/code-file-inputs";
 import { canPreviewFiles } from "@/app/lib/html-preview";
-import type { AIReviewListItem, CodeFile, SubmissionType } from "@/app/types";
+import {
+  blocksUneditedStarter,
+  buildLockedSubmissionFiles,
+  isLockedSubmissionReady,
+  layoutOmitsEmptyFiles,
+} from "@/app/lib/submission-file-slots";
+import type { AIReviewListItem, CodeFile, Json, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,7 @@ interface SubmissionFormProps {
   allowedSubmissionTypes: "code" | "url" | "both";
   codeLanguage: CodeLanguage;
   starterFiles?: CodeFile[] | null;
+  submissionFileSlots?: Json | null;
   /** Id of the completed review the page already renders for this submission. */
   persistedReviewId: number | null;
   /** When true, partial/unmet rows show review-list cues (learners only). */
@@ -53,6 +54,7 @@ export function SubmissionForm({
   allowedSubmissionTypes,
   codeLanguage,
   starterFiles = null,
+  submissionFileSlots = null,
   persistedReviewId,
   showReviewListNotes = false,
 }: SubmissionFormProps) {
@@ -61,13 +63,18 @@ export function SubmissionForm({
     allowedSubmissionTypes === "url" ? "url" : "code"
   );
   // Snapshot at mount so "unchanged starter" checks survive later prop refreshes.
-  const [starterSnapshot] = useState(() =>
-    starterFiles && starterFiles.length > 0
-      ? buildInitialCodeFiles(starterFiles, codeLanguage)
-      : null
+  const [starterSnapshot] = useState<CodeFile[] | null>(() =>
+    starterFiles && starterFiles.length > 0 ? starterFiles : null
   );
-  const [codeFiles, setCodeFiles] = useState<CodeFileInput[]>(
-    () => starterSnapshot ?? buildInitialCodeFiles(null, codeLanguage)
+  const [initialFiles] = useState<CodeFileInput[]>(() =>
+    buildLockedSubmissionFiles({
+      submissionFileSlots,
+      starterFiles: starterSnapshot,
+      codeLanguage,
+    })
+  );
+  const [codeFiles, setCodeFiles] = useState<CodeFileInput[]>(() =>
+    initialFiles.map((file) => ({ ...file }))
   );
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -78,19 +85,17 @@ export function SubmissionForm({
   const [aiReview, setAiReview] = useState<AIReviewListItem | null>(null);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
-  const hasStarter = Boolean(starterSnapshot && starterSnapshot.length > 0);
-  const unchangedFromStarter = isCodeEquivalentToStarter(codeFiles, starterSnapshot);
+  const hasStarter = Boolean(starterSnapshot?.some((file) => file.content.trim().length > 0));
+  const unchangedFromStarter = blocksUneditedStarter({
+    files: codeFiles,
+    submissionFileSlots,
+    starterFiles: starterSnapshot,
+  });
   // Judged by the files' own languages so the UI never appears for non-web exercises.
   const showPreview = submissionType === "code" && canPreviewFiles(codeFiles);
-  const emptyShellCount = codeFiles.filter((file) => file.content.trim().length === 0).length;
-  const hasSubmittableCode = codeFiles.some((file) => file.content.trim().length > 0);
 
   const resetToStarter = () => {
-    setCodeFiles(
-      starterSnapshot
-        ? starterSnapshot.map((file) => ({ ...file }))
-        : buildInitialCodeFiles(null, codeLanguage)
-    );
+    setCodeFiles(initialFiles.map((file) => ({ ...file })));
   };
 
   const handleResetToStarter = () => {
@@ -178,7 +183,13 @@ export function SubmissionForm({
           contentId,
           submissionType,
           codeFiles:
-            submissionType === "code" ? buildSubmissionCodeFiles(codeFiles, codeLanguage) : null,
+            submissionType === "code"
+              ? codeFiles.map(({ filename, language, content }) => ({
+                  filename,
+                  language,
+                  content,
+                }))
+              : null,
           url: submissionType === "url" ? url : null,
         }),
       });
@@ -205,7 +216,12 @@ export function SubmissionForm({
     }
   };
 
-  const isCodeValid = isSubmissionCodeValid(codeFiles) && !unchangedFromStarter;
+  const isCodeValid = isLockedSubmissionReady({
+    files: codeFiles,
+    submissionFileSlots,
+    starterFiles: starterSnapshot,
+  });
+  const omitsEmptyFiles = layoutOmitsEmptyFiles(submissionFileSlots, codeFiles.length);
 
   const isValid =
     (submissionType === "code" && isCodeValid) ||
@@ -245,24 +261,20 @@ export function SubmissionForm({
 
         {submissionType === "code" ? (
           <div className="space-y-3">
-            <CodeFilesEditor
-              files={codeFiles}
-              onChange={setCodeFiles}
-              defaultLanguage={codeLanguage}
-            />
+            <LockedCodeFilesEditor files={codeFiles} onChange={setCodeFiles} />
             {hasStarter && (
               <Button type="button" variant="outline" size="sm" onClick={handleResetToStarter}>
                 <RotateCcw className="h-4 w-4" />
                 初期コードに戻す
               </Button>
             )}
-            {hasSubmittableCode && emptyShellCount > 0 && (
+            {unchangedFromStarter && (
+              <p className="text-xs text-muted-foreground">初期コードから変更してください</p>
+            )}
+            {omitsEmptyFiles && codeFiles.some((file) => file.content.trim().length === 0) && (
               <p className="text-xs text-muted-foreground">
                 内容が空のファイルは提出に含めません。
               </p>
-            )}
-            {unchangedFromStarter && (
-              <p className="text-xs text-muted-foreground">初期コードから変更してください</p>
             )}
             {showPreview && (
               <HtmlPreviewNoSSR

@@ -28,14 +28,16 @@ import type {
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
-/** Visible content row fields used by POST /api/submissions starter checks. */
+/** Visible content fields used by POST /api/submissions slot and starter checks. */
 export type VisibleLearningContent = {
+  code_language: string;
+  submission_file_slots: Json | null;
   starter_files: Json | null;
 };
 
 /**
  * Content + week/phase/theme published hierarchy filters shared by isContentVisible() and
- * fetchVisibleContentForSubmission(). Select strings stay separate (id-only vs starter_files).
+ * fetchVisibleContentForSubmission(). Select strings stay separate (id-only vs slot columns).
  * Constrained to eq-capable builders; cast through a shallow eq-chain so nested !inner
  * PostgREST builder generics do not explode (TS2589). Returns Q so callers keep maybeSingle typing.
  */
@@ -71,7 +73,7 @@ export const LEARNING_WEEK_DETAIL_COLUMNS = `*, phase:learning_phases(${BREADCRU
  * after a submission through fetchExerciseReferenceAnswer(). Typed as `*` so the nested week
  * embed does not blow the type checker's instantiation depth.
  */
-export const LEARNING_CONTENT_DETAIL_COLUMN_LIST = `id, week_id, title, content_type, video_url, pdf_url, text_content, description, exercise_instructions, hint, allowed_submission_types, code_language, starter_files, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
+export const LEARNING_CONTENT_DETAIL_COLUMN_LIST = `id, week_id, title, content_type, video_url, pdf_url, text_content, description, exercise_instructions, hint, allowed_submission_types, code_language, starter_files, submission_file_slots, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
 export const LEARNING_CONTENT_DETAIL_COLUMNS =
   LEARNING_CONTENT_DETAIL_COLUMN_LIST as unknown as "*";
 
@@ -545,8 +547,10 @@ export async function isContentVisible(
 }
 
 /**
- * Visibility check plus starter_files for POST /api/submissions in one round-trip. Same published
- * hierarchy filters as isContentVisible(); returns null when invisible.
+ * Visibility check plus the columns POST /api/submissions needs to resolve the file layout, in
+ * one round-trip. Same published hierarchy filters as isContentVisible(); returns null when
+ * invisible. submission_file_slots is a learner column; it is not part of the service_role
+ * summary allowlist.
  */
 export async function fetchVisibleContentForSubmission(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
@@ -556,7 +560,7 @@ export async function fetchVisibleContentForSubmission(
     supabase
       .from("learning_contents")
       .select(
-        "starter_files, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
+        "code_language, submission_file_slots, starter_files, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
       )
       .eq("id", contentId)
   ).maybeSingle();
@@ -569,7 +573,11 @@ export async function fetchVisibleContentForSubmission(
     return null;
   }
 
-  return { starter_files: data.starter_files };
+  return {
+    code_language: data.code_language,
+    submission_file_slots: data.submission_file_slots,
+    starter_files: data.starter_files,
+  };
 }
 
 /**

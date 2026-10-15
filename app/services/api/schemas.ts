@@ -52,6 +52,7 @@ import {
 import { GradingRubricInputSchema } from "@/app/lib/grading-schema";
 import { QuizQuestionsSchema } from "@/app/lib/quiz";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
+import { SUBMISSION_FILE_SLOT_MAX_COUNT } from "@/app/lib/submission-file-slots";
 
 export const PositiveIntSchema = z
   .number({ message: "数値で指定してください" })
@@ -380,6 +381,36 @@ const StarterFilesSchema = z
     }
   });
 
+const SubmissionFileSlotSchema = z.object({
+  filename: z
+    .string({ message: "文字列で指定してください" })
+    .trim()
+    .min(1, { message: "ファイル名を入力してください" }),
+  language: CodeLanguageSchema,
+});
+
+/**
+ * Exercise submission layout. null clears (the app then uses one default file, or starter_files
+ * when that column already names files). Shape only; alignment with starter_files is a refine.
+ */
+const SubmissionFileSlotsSchema = z
+  .array(SubmissionFileSlotSchema)
+  .min(1, { message: "提出ファイルは1つ以上指定してください" })
+  .max(SUBMISSION_FILE_SLOT_MAX_COUNT, {
+    message: `提出ファイルは${SUBMISSION_FILE_SLOT_MAX_COUNT}個までです`,
+  })
+  .superRefine((files, ctx) => {
+    const names = files.map((file) => file.filename);
+    if (new Set(names).size !== names.length) {
+      ctx.addIssue({
+        code: "custom",
+        message: "提出ファイルのファイル名が重複しています",
+      });
+    }
+  })
+  .nullable()
+  .optional();
+
 const ContentBaseSchema = z.object({
   title: RequiredStringSchema,
   week_id: PositiveIntSchema,
@@ -391,6 +422,7 @@ const ContentBaseSchema = z.object({
   hint: OptionalNullableString,
   reference_answer: OptionalNullableString,
   starter_files: StarterFilesSchema,
+  submission_file_slots: SubmissionFileSlotsSchema,
   // The DB CHECK constraint is NOT NULL (with a default), so unlike other optional fields null is
   // not allowed.
   allowed_submission_types: AllowedSubmissionTypeSchema.optional(),
@@ -411,6 +443,55 @@ const ContentBaseSchema = z.object({
 // requires the questions. The reverse holds too: questions are only saved together with
 // content_type "quiz", so sending them without it (or with another type) is rejected instead of
 // being validated and then silently dropped. A PUT with neither leaves stored questions untouched.
+function alignSubmissionFileSlots(
+  value: {
+    content_type?: string;
+    submission_file_slots?: { filename: string; language: string }[] | null;
+    starter_files?: { filename: string; language: string; content: string }[] | null;
+    code_language?: string;
+  },
+  ctx: z.RefinementCtx
+) {
+  const slots = value.submission_file_slots;
+  if (value.content_type !== undefined && value.content_type !== "exercise" && slots != null) {
+    ctx.addIssue({
+      code: "custom",
+      message: "提出ファイルの構成は演習だけに設定できます",
+      path: ["submission_file_slots"],
+    });
+  }
+  // PUT fields are optional. Compare the pair only when this request sets both: the admin form
+  // always sends them together, and a body that omits one side leaves the stored column as-is.
+  const starter = value.starter_files;
+  if (slots && starter) {
+    const aligned =
+      slots.length === starter.length &&
+      slots.every(
+        (slot, index) =>
+          slot.filename === starter[index]?.filename && slot.language === starter[index]?.language
+      );
+    if (!aligned) {
+      ctx.addIssue({
+        code: "custom",
+        message: "提出ファイルの構成と初期コードのファイル名・言語・並び順を揃えてください",
+        path: ["submission_file_slots"],
+      });
+    }
+  }
+  if (
+    slots &&
+    slots.length > 0 &&
+    value.code_language &&
+    value.code_language !== slots[0].language
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message: "code_language は提出ファイルの1行目の言語と揃えてください",
+      path: ["code_language"],
+    });
+  }
+}
+
 function requireQuizQuestions(
   value: { content_type?: string; quiz_questions?: unknown },
   ctx: z.RefinementCtx
@@ -434,7 +515,8 @@ function requireQuizQuestions(
 const ContentCreateObjectSchema = ContentBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
-export const ContentCreateSchema = ContentCreateObjectSchema.superRefine(requireQuizQuestions);
+export const ContentCreateSchema =
+  ContentCreateObjectSchema.superRefine(requireQuizQuestions).superRefine(alignSubmissionFileSlots);
 function requireLoadedRubricVersion(
   value: {
     content_type?: string;
@@ -458,7 +540,8 @@ function requireLoadedRubricVersion(
 
 export const ContentUpdateSchema = ContentCreateObjectSchema.partial()
   .superRefine(requireQuizQuestions)
-  .superRefine(requireLoadedRubricVersion);
+  .superRefine(requireLoadedRubricVersion)
+  .superRefine(alignSubmissionFileSlots);
 
 const BULK_CREATE_MESSAGE = `contentsは1〜${MAX_BULK_CREATE_CONTENTS}件の配列で指定してください`;
 
@@ -469,7 +552,10 @@ const BULK_CREATE_MESSAGE = `contentsは1〜${MAX_BULK_CREATE_CONTENTS}件の配
  */
 export const BulkContentCreateSchema = z.object({
   contents: z
-    .array(ContentBaseSchema.superRefine(requireQuizQuestions), { message: BULK_CREATE_MESSAGE })
+    .array(
+      ContentBaseSchema.superRefine(requireQuizQuestions).superRefine(alignSubmissionFileSlots),
+      { message: BULK_CREATE_MESSAGE }
+    )
     .min(1, { message: BULK_CREATE_MESSAGE })
     .max(MAX_BULK_CREATE_CONTENTS, { message: BULK_CREATE_MESSAGE }),
 });

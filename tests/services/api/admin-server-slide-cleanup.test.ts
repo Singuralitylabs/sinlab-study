@@ -537,7 +537,7 @@ describe("updateContent の現在値取得の一本化（issue #246）", () => {
     expect(remove).not.toHaveBeenCalled();
     expect(mockClient.from).toHaveBeenCalledTimes(2);
     expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith(
-      "week_id, pdf_url, grading_rubric, content_type"
+      "week_id, pdf_url, grading_rubric, content_type, submission_file_slots"
     );
   });
 
@@ -910,6 +910,22 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     expect(mockClient.from).toHaveBeenCalledTimes(2);
   });
 
+  it("content_type を省いて非演習に提出ファイル構成を送ると更新しない", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [{ data: { content_type: "video" }, error: null }],
+      },
+    });
+
+    const result = await updateContent(1, {
+      submission_file_slots: [{ filename: "code.js", language: "javascript" }],
+    });
+
+    expect(result.slotsNotAllowed).toBe(true);
+    expect(result.error).toBeNull();
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+  });
+
   it("exercise 以外へ種別変更すると採点基準を破棄する", async () => {
     const { mockClient } = mockAdminWithStorage({
       tableResults: {
@@ -1157,10 +1173,54 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     expect(restoreBuilder.update.mock.calls[0][0]).toEqual({
       grading_rubric: storedRubric,
       content_type: "exercise",
+      submission_file_slots: null,
     });
     expect(restoreBuilder.eq).toHaveBeenCalledWith("grading_rubric->>version", "3");
     expect(restoreBuilder.eq).toHaveBeenCalledWith("updated_at", "2026-10-13T00:00:00.000Z");
     expect(restoreBuilder.is).not.toHaveBeenCalled();
+  });
+
+  it("種別変更のあと再採番が失敗したら提出ファイル構成も戻す", async () => {
+    const storedRubric = { version: 2, ...input, max_key_number: 1 };
+    const slots = [
+      { filename: "main.js", language: "javascript" },
+      { filename: "index.html", language: "html" },
+    ];
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: storedRubric,
+              submission_file_slots: slots,
+            },
+            error: null,
+          },
+          { data: [{ id: 1, updated_at: "2026-10-13T00:00:00.000Z" }], error: null },
+          { data: null, error: dbError },
+        ],
+      },
+    });
+
+    const result = await updateContent(1, {
+      content_type: "video",
+      gradingRubric: null,
+      insertAfterId: 9,
+    });
+
+    expect(result.error).toEqual(dbError);
+    const clearBuilder = mockClient.from.mock.results[1]?.value;
+    expect(clearBuilder.update.mock.calls[0][0].submission_file_slots).toBeNull();
+    expect(clearBuilder.update.mock.calls[0][0].content_type).toBe("video");
+    const restoreBuilder = mockClient.from.mock.results.at(-1)?.value;
+    expect(restoreBuilder.update.mock.calls[0][0]).toEqual({
+      grading_rubric: storedRubric,
+      content_type: "exercise",
+      submission_file_slots: slots,
+    });
   });
 
   it("初めて保存した基準を巻き戻すときは、トリガーが作る墓石と同じ値を明示して書く", async () => {

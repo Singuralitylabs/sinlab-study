@@ -1,26 +1,22 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { shouldTrackFirstSubmission } from "@/app/lib/analytics-funnel";
-import { isCodeEquivalentToStarter, parseStarterFiles } from "@/app/lib/code-file-inputs";
+import { parseStarterFiles } from "@/app/lib/code-file-inputs";
+import {
+  blocksUneditedStarter,
+  EMPTY_SUBMISSION_CODE_ERROR,
+  filesMatchSubmissionFileSlots,
+  layoutOmitsEmptyFiles,
+  normalizeCodeLanguage,
+  resolveSubmissionFileSlots,
+  toStoredSubmissionCode,
+} from "@/app/lib/submission-file-slots";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
 import { fetchVisibleContentForSubmission } from "@/app/services/api/learning-server";
 import { SubmissionCreateSchema, validateRequest } from "@/app/services/api/schemas";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { requireLearnerApi } from "@/app/services/auth/admin-guard";
 import type { CodeFile } from "@/app/types";
-
-function sanitizeCodeFiles(input: unknown): CodeFile[] {
-  if (!Array.isArray(input)) {
-    return [];
-  }
-  return input
-    .map((f) => ({
-      filename: typeof f?.filename === "string" ? f.filename.trim() : "",
-      language: typeof f?.language === "string" ? f.language : "",
-      content: typeof f?.content === "string" ? f.content : "",
-    }))
-    .filter((f) => f.content.trim().length > 0);
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -30,39 +26,6 @@ export async function POST(request: NextRequest) {
     }
     const { contentId, submissionType, codeContent, codeFiles, url } = validation.data;
 
-    // Exactly one of code_content / code_files is set. Default: one file → code_content, two or
-    // more → code_files. A single file MAY still use code_files when filename/language must be
-    // preserved (starter or custom metadata; code_content cannot store them).
-    let storedCodeContent: string | null = null;
-    let storedCodeFiles: CodeFile[] | null = null;
-    let storedUrl: string | null = null;
-
-    if (submissionType === "code") {
-      const files = sanitizeCodeFiles(codeFiles);
-      const hasLegacyContent = typeof codeContent === "string" && codeContent.trim().length > 0;
-
-      if (files.length >= 2) {
-        storedCodeFiles = files;
-      } else if (files.length === 1) {
-        const file = files[0];
-        if (file.language.trim().length > 0 || file.filename.trim().length > 0) {
-          storedCodeFiles = files;
-        } else {
-          storedCodeContent = file.content;
-        }
-      } else if (hasLegacyContent) {
-        storedCodeContent = codeContent;
-      } else {
-        return NextResponse.json({ error: "コードが入力されていません" }, { status: 400 });
-      }
-    } else {
-      const trimmedUrl = typeof url === "string" ? url.trim() : "";
-      if (trimmedUrl.length === 0) {
-        return NextResponse.json({ error: "URLが入力されていません" }, { status: 400 });
-      }
-      storedUrl = trimmedUrl;
-    }
-
     const guard = await requireLearnerApi();
     if (guard.response) {
       return guard.response;
@@ -71,21 +34,68 @@ export async function POST(request: NextRequest) {
 
     const supabase = await createServerSupabaseClient();
 
-    // Visibility + starter_files in one round-trip (403 if contentId isn't visible: trial-closed,
+    // Visibility + file layout in one round-trip (403 if contentId isn't visible: trial-closed,
     // unpublished and nonexistent IDs all give 0 rows via RLS).
     const content = await fetchVisibleContentForSubmission(supabase, contentId);
     if (!content) {
       return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
     }
 
-    // Reject unedited starter (content-only) so clients cannot burn AI review slots.
+    // Exactly one of code_content / code_files is set. Default single file → code_content, two or
+    // more → code_files. A single file MAY still use code_files when the name is not the exercise
+    // default (code_content cannot store it). Slot checks run before that split so an empty file
+    // cannot be dropped on the way in.
+    let storedCodeContent: string | null = null;
+    let storedCodeFiles: CodeFile[] | null = null;
+    let storedUrl: string | null = null;
+
     if (submissionType === "code") {
-      const submittedFiles: CodeFile[] =
-        storedCodeFiles ??
-        (storedCodeContent ? [{ filename: "", language: "", content: storedCodeContent }] : []);
-      if (isCodeEquivalentToStarter(submittedFiles, parseStarterFiles(content.starter_files))) {
+      const codeLanguage = normalizeCodeLanguage(content.code_language);
+      const slots = resolveSubmissionFileSlots({
+        submissionFileSlots: content.submission_file_slots,
+        starterFiles: parseStarterFiles(content.starter_files),
+        codeLanguage,
+      });
+      // An empty codeFiles array used to fall through to codeContent. Treating [] as the file
+      // list drops that legacy body and 400s even for the default single-file exercise.
+      const rawFiles =
+        Array.isArray(codeFiles) && codeFiles.length > 0
+          ? codeFiles
+          : typeof codeContent === "string" && codeContent.trim().length > 0
+            ? [{ filename: "", language: "", content: codeContent }]
+            : [];
+      if (rawFiles.length === 0) {
+        return NextResponse.json({ error: EMPTY_SUBMISSION_CODE_ERROR }, { status: 400 });
+      }
+      const omitEmptyFiles = layoutOmitsEmptyFiles(content.submission_file_slots, slots.length);
+      const matched = filesMatchSubmissionFileSlots(rawFiles, slots, codeLanguage, {
+        omitEmptyFiles,
+      });
+      if (!matched.ok) {
+        return NextResponse.json({ error: matched.error }, { status: 400 });
+      }
+      const starterFiles = parseStarterFiles(content.starter_files);
+      // Compare before code_content drops the filename. A blanked starter file is already gone
+      // from matched.files, so the slot count has to stay the pre-omit length.
+      if (
+        blocksUneditedStarter({
+          files: matched.files,
+          submissionFileSlots: content.submission_file_slots,
+          starterFiles,
+          fileCount: slots.length,
+        })
+      ) {
         return NextResponse.json({ error: "初期コードから変更してください" }, { status: 400 });
       }
+      const stored = toStoredSubmissionCode(matched.files, codeLanguage);
+      storedCodeContent = stored.codeContent;
+      storedCodeFiles = stored.codeFiles;
+    } else {
+      const trimmedUrl = typeof url === "string" ? url.trim() : "";
+      if (trimmedUrl.length === 0) {
+        return NextResponse.json({ error: "URLが入力されていません" }, { status: 400 });
+      }
+      storedUrl = trimmedUrl;
     }
 
     // Count before insert so the new row is not treated as a pre-existing submission.

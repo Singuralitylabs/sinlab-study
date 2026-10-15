@@ -45,7 +45,12 @@ function buildPatch(
       // Rubrics and starter code belong to exercises; drop them when the type moves away.
       return contentType === "exercise"
         ? { content_type: contentType }
-        : { content_type: contentType, grading_rubric: null, starter_files: null };
+        : {
+            content_type: contentType,
+            grading_rubric: null,
+            starter_files: null,
+            submission_file_slots: null,
+          };
   }
 }
 

@@ -6,6 +6,7 @@ import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
 import { SlideContent } from "@/app/components/SlideContent";
 import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
+import { parseStarterFiles } from "@/app/lib/code-file-inputs";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import {
   createDemoSlideSignedUrl,
@@ -181,6 +182,8 @@ export default async function DemoContentPage({ params }: PageProps) {
                     (content.allowed_submission_types as "code" | "url" | "both") ?? "code"
                   }
                   codeLanguage={(content.code_language as CodeLanguage) ?? "javascript"}
+                  starterFiles={parseStarterFiles(content.starter_files)}
+                  submissionFileSlots={content.submission_file_slots}
                 />
               </div>
             </div>

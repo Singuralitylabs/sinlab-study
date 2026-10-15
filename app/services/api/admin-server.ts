@@ -24,6 +24,7 @@ import {
 } from "@/app/lib/grading-schema";
 import type { QuizQuestionData } from "@/app/lib/quiz";
 import { toSlideObjectKey } from "@/app/lib/slide-object-key";
+import { parseSubmissionFileSlots } from "@/app/lib/submission-file-slots";
 import { WEEKLY_FUNNEL_FETCH_ERROR, type WeeklyFunnelRow } from "@/app/lib/weekly-funnel";
 import {
   fetchStripeSubscriptionByUserId,
@@ -1186,6 +1187,7 @@ type CreateContentInput = {
   hint?: string | null;
   reference_answer?: string | null;
   starter_files?: LearningContent["starter_files"];
+  submission_file_slots?: LearningContent["submission_file_slots"];
   allowed_submission_types?: "code" | "url" | "both";
   code_language?: CodeLanguage;
   pdf_url?: string | null;
@@ -1231,6 +1233,11 @@ async function createContentWith(
   // questions fail and the rollback below also fails, what remains is a hidden draft rather than
   // a published quiz with no questions.
   const quizQuestions = content.content_type === "quiz" ? content.quizQuestions : undefined;
+  // Non-exercise rows cannot store slots (CHECK). The first slot's language is code_language
+  // so AI review's single-file fallback matches the layout the learner submits.
+  const submissionFileSlots =
+    content.content_type === "exercise" ? (content.submission_file_slots ?? null) : null;
+  const firstSlotLanguage = parseSubmissionFileSlots(submissionFileSlots)?.[0]?.language;
 
   const { data, error } = await supabase
     .from("learning_contents")
@@ -1245,8 +1252,9 @@ async function createContentWith(
       hint: content.hint,
       reference_answer: content.reference_answer,
       starter_files: content.starter_files,
+      submission_file_slots: submissionFileSlots,
       allowed_submission_types: content.allowed_submission_types,
-      code_language: content.code_language,
+      code_language: firstSlotLanguage ?? content.code_language,
       pdf_url: content.pdf_url,
       // Rubrics belong to exercises only; version always starts at 1 for a new content row.
       grading_rubric:
@@ -1418,6 +1426,8 @@ type ContentUpdateResult = {
   conflict?: boolean;
   /** Incoming keys reuse a number this rubric already issued. */
   keyReuse?: string[];
+  /** Slots were sent without content_type onto a row that is not an exercise. */
+  slotsNotAllowed?: boolean;
   /**
    * Version stored by this save. Present only after the rubric write commits, so the editor can
    * keep locking the rows still on screen. null means the rubric was cleared.
@@ -1441,6 +1451,38 @@ export async function updateContent(
 ): Promise<ContentUpdateResult> {
   const supabase = await createAdminSupabaseClient();
   const { insertAfterId, quizQuestions, gradingRubric, loadedRubricVersion, ...patch } = content;
+  // Zod only rejects slots on a non-exercise when this request also sends content_type. A
+  // slots-only PUT would otherwise hit the exercise-only CHECK and come back as 500.
+  if (patch.submission_file_slots != null && patch.content_type === undefined) {
+    const { data: currentType, error: typeError } = await supabase
+      .from("learning_contents")
+      .select("content_type")
+      .eq("id", id)
+      .eq("is_deleted", false)
+      .single();
+    if (typeError || !currentType) {
+      console.error("コンテンツ更新エラー（現在値取得）:", typeError?.message ?? "no row");
+      return {
+        error: typeError ?? {
+          message: "コンテンツの現在値を取得できませんでした",
+          details: "",
+          hint: "",
+          code: "PGRST116",
+        },
+        storageRemoved: true,
+      };
+    }
+    if (currentType.content_type !== "exercise") {
+      return { error: null, storageRemoved: true, slotsNotAllowed: true };
+    }
+  }
+  if (patch.content_type !== undefined && patch.content_type !== "exercise") {
+    patch.submission_file_slots = null;
+  }
+  const firstSlotLanguage = parseSubmissionFileSlots(patch.submission_file_slots)?.[0]?.language;
+  if (firstSlotLanguage) {
+    patch.code_language = firstSlotLanguage;
+  }
 
   if (patch.content_type !== "quiz" || !quizQuestions) {
     return updateContentRow(supabase, id, patch, insertAfterId, gradingRubric, loadedRubricVersion);
@@ -1551,9 +1593,12 @@ async function updateContentRow(
   let expectedRubricVersion: number | null | undefined;
   // The versioned write commits before resequence. If a later step fails, put these back;
   // otherwise a quiz keeps the new type and a wiped rubric while its questions are restored.
+  // submission_file_slots is set only when this save nulls it in that same UPDATE: restoring the
+  // type without the layout would drop a file list that has no starter_files to rebuild it.
   let rubricSnapshot: {
     grading_rubric: LearningContent["grading_rubric"];
     content_type: LearningContent["content_type"];
+    submission_file_slots?: LearningContent["submission_file_slots"];
   } | null = null;
   let rubricWriteCommitted = false;
   let committedRubricVersion: number | null | undefined;
@@ -1564,7 +1609,7 @@ async function updateContentRow(
   if (needsCurrentWeek || needsCurrentPdf || touchesRubric) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
-      .select("week_id, pdf_url, grading_rubric, content_type")
+      .select("week_id, pdf_url, grading_rubric, content_type, submission_file_slots")
       .eq("id", id)
       .eq("is_deleted", false)
       .single();
@@ -1648,6 +1693,9 @@ async function updateContentRow(
           grading_rubric: current.grading_rubric,
           content_type: current.content_type,
         };
+        if (movesAwayFromExercise) {
+          rubricSnapshot.submission_file_slots = current.submission_file_slots ?? null;
+        }
         expectedRubricVersion = lockVersion;
       }
       if (needsCurrentWeek) {
@@ -1668,6 +1716,11 @@ async function updateContentRow(
     };
     if (patch.content_type !== undefined) {
       rubricPayload.content_type = patch.content_type;
+      // The slots CHECK rejects a non-exercise row that still has a layout, so the clear has to
+      // ride this UPDATE. A later statement would run after the type has already changed.
+      if (patch.content_type !== "exercise") {
+        rubricPayload.submission_file_slots = null;
+      }
     }
     let rubricUpdate = supabase
       .from("learning_contents")
@@ -1686,6 +1739,9 @@ async function updateContentRow(
     }
     if (Array.isArray(rubricRows) && rubricRows.length === 0) {
       return { error: null, storageRemoved: true, conflict: true };
+    }
+    if (rubricPayload.submission_file_slots === null) {
+      delete patch.submission_file_slots;
     }
     rubricWriteCommitted = true;
     // The editor's next save has to lock this write, not a version a later refresh might load

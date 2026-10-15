@@ -32,6 +32,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       hint,
       reference_answer,
       starter_files,
+      submission_file_slots,
       allowed_submission_types,
       code_language,
       pdf_url,
@@ -43,9 +44,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       quiz_questions,
     } = validation.data;
 
-    const { error, storageRemoved, conflict, keyReuse, gradingRubricVersion } = await updateContent(
-      contentId,
-      {
+    const { error, storageRemoved, conflict, keyReuse, slotsNotAllowed, gradingRubricVersion } =
+      await updateContent(contentId, {
         title,
         week_id,
         content_type,
@@ -56,6 +56,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         hint,
         reference_answer,
         starter_files,
+        submission_file_slots,
         allowed_submission_types,
         code_language,
         pdf_url,
@@ -65,9 +66,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         is_published,
         is_open_to_trial,
         quizQuestions: quiz_questions,
-      }
-    );
+      });
 
+    if (slotsNotAllowed) {
+      return NextResponse.json(
+        { error: "提出ファイルの構成は演習だけに設定できます" },
+        { status: 400 }
+      );
+    }
     if (keyReuse) {
       return NextResponse.json(
         {

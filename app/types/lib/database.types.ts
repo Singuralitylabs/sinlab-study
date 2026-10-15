@@ -441,6 +441,7 @@ export type Database = {
           pdf_url: string | null;
           reference_answer: string | null;
           starter_files: Json | null;
+          submission_file_slots: Json | null;
           text_content: string | null;
           title: string;
           updated_at: string | null;
@@ -464,6 +465,7 @@ export type Database = {
           pdf_url?: string | null;
           reference_answer?: string | null;
           starter_files?: Json | null;
+          submission_file_slots?: Json | null;
           text_content?: string | null;
           title: string;
           updated_at?: string | null;
@@ -487,6 +489,7 @@ export type Database = {
           pdf_url?: string | null;
           reference_answer?: string | null;
           starter_files?: Json | null;
+          submission_file_slots?: Json | null;
           text_content?: string | null;
           title?: string;
           updated_at?: string | null;

@@ -79,7 +79,7 @@ erDiagram
 |:--|:--|
 | video | `video_url`（YouTube URL）、`description`（任意） |
 | text | `text_content`（Markdown） |
-| exercise | `exercise_instructions`、`reference_answer`（AIレビューの参照用の模範回答・**提出前の受講生には非公開**。列権限から外し、提出後だけ `get_exercise_reference_answer()`（6.18）で読む）、`grading_rubric`（採点基準 JSONB。下記）、`hint`（受講生に公開）、`starter_files`（初期コード JSONB。下記。受講生に公開）、`allowed_submission_types`、`code_language` |
+| exercise | `exercise_instructions`、`reference_answer`（AIレビューの参照用の模範回答・**提出前の受講生には非公開**。列権限から外し、提出後だけ `get_exercise_reference_answer()`（6.18）で読む）、`grading_rubric`（採点基準 JSONB。下記）、`hint`（受講生に公開）、`starter_files`（初期コード JSONB。下記。受講生に公開）、`submission_file_slots`（提出ファイル構成 JSONB。下記。受講生に公開）、`allowed_submission_types`、`code_language` |
 | slide | `pdf_url`、`description`（任意） |
 | quiz | `description`（導入文・任意）。設問は `quiz_questions`（3.20）に持つ |
 
@@ -88,7 +88,8 @@ erDiagram
 - `pdf_url`: `slides` バケット内の**オブジェクトキーのみ**（例: `gas/slide-01.pdf`）。URL を保存せず、配信時にサーバー側で署名付きURLを発行する（6.8参照）
 - `allowed_submission_types`（`code` / `url` / `both`）: 演習で許可する提出方法。`code` / `url` は提出方法の選択UIを出さず、`both` のみ選択可（既定 `code`）
 - `code_language`: コードエディタの言語（既定 `javascript`）。許可値は `javascript` / `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`（#307）。CHECK 制約とアプリの `CODE_LANGUAGES` は `tests/lib/learning-contents-check-parity.test.ts` で一致を検査する。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（別の値は設けない）
-- `starter_files`（演習のみ・NULL 可）: 提出フォームに事前表示する初期コード。形式は `submissions.code_files` と同じ `[{ filename, language, content }]`（#341）。秘匿ではないため `reference_answer` と違い列権限に含め、詳細取得（`LEARNING_CONTENT_DETAIL_COLUMN_LIST`）でも読む。NULL は従来どおり空ファイル1つから開始。service_role のツリー／サマリー用許可カラムリストには含めない
+- `starter_files`（演習のみ・NULL 可）: 提出フォームに事前表示する初期コード。形式は `submissions.code_files` と同じ `[{ filename, language, content }]`（#341）。秘匿ではないため `reference_answer` と違い列権限に含め、詳細取得（`LEARNING_CONTENT_DETAIL_COLUMN_LIST`）でも読む。`submission_file_slots` が NULL のとき、ここがファイル名を持っていればそのファイル名・言語が提出構成になる。両方 NULL のときは `code_language` の空ファイル1つから開始する。service_role のツリー／サマリー用許可カラムリストには含めない
+- `submission_file_slots`（演習のみ・NULL 可）: 提出ファイルの構成 `[{ filename, language }]`（#377）。中身（初期コード）は持たない。NULL は未指定で、上記のとおり `starter_files` か `code_language` の既定ファイル1つとして解決する。CHECK は演習以外の行で NULL であることだけを見、ファイル名・言語・件数・重複は API（zod）が検証する。秘匿ではないため `anon` / `authenticated` の列権限と詳細取得に含める。`grading_rubric` と `reference_answer` は引き続き付与しない。service_role のツリー／サマリー用許可カラムリスト（`CONTENT_VISIBILITY_SUMMARY_COLUMNS`）には含めない
 - `is_open_to_trial`: お試し公開フラグ。`is_open_to_trial` はお試しユーザー向けの公開範囲のみを制御し、お試しユーザーに実際に見えるのは `is_published = true AND is_open_to_trial = true AND is_deleted = false` の行に限られる（`is_published` が優先。「6.1 学習コンテンツ系テーブル」参照）
 
 ### 3.5 user_progress（学習進捗）
