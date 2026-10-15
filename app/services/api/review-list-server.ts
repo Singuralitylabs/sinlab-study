@@ -5,10 +5,9 @@ import {
   orderContentsAcrossThemes,
 } from "@/app/lib/published-theme-tree";
 import {
-  buildRequirementNameByContentKey,
   countUnovercomeReviewItems,
   type DerivedReviewItem,
-  deriveReviewListItems,
+  deriveReviewListWithRequirementNames,
   filterReviewItemsToVisibleContents,
   findOrphanRequirementNotes,
   type ReviewListSourceReview,
@@ -243,7 +242,9 @@ export async function buildReviewListForUser(userId: number): Promise<{
     };
   }
 
-  const derived = deriveReviewListItems(reviewsResult.data);
+  const { items: derived, requirementNames } = deriveReviewListWithRequirementNames(
+    reviewsResult.data
+  );
   const sorted = sortReviewItemsByLearningOrder(derived, contentResult.order);
 
   const noteByKey = new Map<string, ReviewNoteRow>();
@@ -272,13 +273,10 @@ export async function buildReviewListForUser(userId: number): Promise<{
   const unovercome = views.filter((item) => !item.overcome);
   const overcome = views.filter((item) => item.overcome);
 
-  const requirementNames = buildRequirementNameByContentKey(reviewsResult.data);
   const orphanMemos: OrphanMemoView[] = [];
   for (const note of findOrphanRequirementNotes(notesResult.data, views)) {
     const meta = contentResult.metas.get(note.content_id);
-    if (!meta || note.requirement_key === null || note.memo == null) continue;
-    const memo = note.memo.trim();
-    if (memo === "") continue;
+    if (!meta) continue;
     orphanMemos.push({
       contentId: note.content_id,
       contentTitle: meta.title,
@@ -288,7 +286,7 @@ export async function buildReviewListForUser(userId: number): Promise<{
       requirementKey: note.requirement_key,
       requirementName:
         requirementNames.get(`${note.content_id}:${note.requirement_key}`) ?? note.requirement_key,
-      memo,
+      memo: note.memo,
       understoodAt: note.understood_at,
     });
   }

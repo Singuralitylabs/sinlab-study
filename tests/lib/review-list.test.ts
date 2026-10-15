@@ -357,6 +357,12 @@ describe("findOrphanRequirementNotes", () => {
         },
         {
           content_id: 10,
+          requirement_key: "spaced",
+          memo: "  indented\n",
+          understood_at: null,
+        },
+        {
+          content_id: 10,
           requirement_key: "keep",
           memo: "現役",
           understood_at: null,
@@ -383,7 +389,9 @@ describe("findOrphanRequirementNotes", () => {
       [{ contentId: 10, requirementKey: "keep" }]
     );
 
-    expect(orphans.map((note) => note.requirement_key)).toEqual(["old"]);
+    expect(orphans.map((note) => note.requirement_key)).toEqual(["old", "spaced"]);
+    // trim only for empty check — display/edit keeps leading/trailing whitespace
+    expect(orphans[1]?.memo).toBe("  indented\n");
   });
 });
 
