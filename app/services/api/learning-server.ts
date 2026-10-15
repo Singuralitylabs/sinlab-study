@@ -29,19 +29,16 @@ export type VisibleLearningContent = {
   starter_files: Json | null;
 };
 
-/** Shallow builder shape so nested !inner selects do not explode through 8 .eq calls (TS2589). */
-type VisibleHierarchyQuery = {
-  eq(column: string, value: boolean): VisibleHierarchyQuery;
-  maybeSingle: () => PromiseLike<{ data: unknown; error: PostgrestError | null }>;
-};
-
 /**
  * Content + week/phase/theme published hierarchy filters shared by isContentVisible() and
  * fetchVisibleContentForSubmission(). Select strings stay separate (id-only vs starter_files).
- * Callers cast into VisibleHierarchyQuery (same class of depth escape as LEARNING_CONTENT_DETAIL_COLUMNS).
+ * Constrained to eq-capable builders; cast through a shallow eq-chain so nested !inner
+ * PostgREST builder generics do not explode (TS2589). Returns Q so callers keep maybeSingle typing.
  */
-function applyVisibleHierarchyFilters(query: VisibleHierarchyQuery): VisibleHierarchyQuery {
-  return query
+function applyVisibleHierarchyFilters<Q extends { eq: unknown }>(query: Q): Q {
+  type EqChain = { eq: (column: string, value: boolean) => EqChain };
+  const chained = query as unknown as EqChain;
+  return chained
     .eq("is_published", true)
     .eq("is_deleted", false)
     .eq("week.is_published", true)
@@ -49,7 +46,7 @@ function applyVisibleHierarchyFilters(query: VisibleHierarchyQuery): VisibleHier
     .eq("week.phase.is_published", true)
     .eq("week.phase.is_deleted", false)
     .eq("week.phase.theme.is_published", true)
-    .eq("week.phase.theme.is_deleted", false);
+    .eq("week.phase.theme.is_deleted", false) as unknown as Q;
 }
 
 /** Excludes heavy text columns (body, instructions, model answer, hints). */
@@ -570,7 +567,7 @@ export async function isContentVisible(
       .select(
         "id, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
       )
-      .eq("id", contentId) as unknown as VisibleHierarchyQuery
+      .eq("id", contentId)
   ).maybeSingle();
 
   if (error) {
@@ -579,7 +576,7 @@ export async function isContentVisible(
     console.error("コンテンツ可視性チェックエラー:", error.message);
   }
 
-  return data !== null;
+  return !!data;
 }
 
 /**
@@ -596,18 +593,18 @@ export async function fetchVisibleContentForSubmission(
       .select(
         "starter_files, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
       )
-      .eq("id", contentId) as unknown as VisibleHierarchyQuery
+      .eq("id", contentId)
   ).maybeSingle();
 
   if (error) {
     console.error("コンテンツ可視性チェックエラー:", error.message);
   }
 
-  if (!data || typeof data !== "object") {
+  if (!data) {
     return null;
   }
 
-  return { starter_files: (data as VisibleLearningContent).starter_files };
+  return { starter_files: data.starter_files };
 }
 
 /**
