@@ -97,6 +97,7 @@ bun dev
 | `bun run test` | Vitest によるユニットテスト実行 |
 | `bun run check:comments [基準ref]` | 変更した TS/JS がコメント・整形のみの差分か（AST同一・`@ts-*`/`biome-ignore` の増減なし）を検証。未追跡ファイルも対象、コード以外の変更ファイルは「未検証」として一覧表示。差異・パース失敗があれば該当ファイルを列挙して非ゼロ終了（既定の基準は `origin/main`） |
 | `bun scripts/grading-dry-run.ts --confirm-dev [--content-id N] [--limit 5] [--repeat 1]` | 採点基準付きの演習の既存コード提出を現行ロジックで再採点し、点数分布・合格率・平均トークンを表示する（**DB へは書き込まない**。Gemini を呼び課金される。`SUPABASE_SERVICE_ROLE_KEY` と `GEMINI_API_KEY` が必要で、**本番には向けない**。合格点 `CERTIFICATE_PASS_SCORE` を決める材料にする） |
+| `bun scripts/gemini-model-check.ts [--json] [--available a,b]` | Gemini `models.list` と `app/constants/gemini.ts` の登録モデルを比較する（#369。Actions 用。キーは `GEMINI_MODEL_CHECK_API_KEY`。dry-run はしない） |
 | `bun run test:all` | build/db:types/lint/format/check/test を一括実行 |
 
 ### Claude Code から Supabase MCP を使う
@@ -124,6 +125,32 @@ Claude Code で Supabase MCP サーバーを使う場合、**必ず read-only �
 
 - マイナー・パッチのグループ PR は、CI（Biome / 型チェック / ユニットテスト / ビルド）が通れば そのままマージしてよい。
 - メジャー更新は Breaking Changes（特に `next` はリリースノート）を確認してからマージする。
+
+## Gemini モデル自動検知（GitHub Actions）
+
+`.github/workflows/gemini-model-check.yml` が週1回（および手動 `workflow_dispatch`）で Gemini API の `models.list` を取得し、`app/constants/gemini.ts` の登録モデル（主: `GEMINI_MODEL_NAME` / 代替: `GEMINI_ALTERNATE_MODEL_NAME`）と比較する。
+
+| 検知内容 | 動作 |
+|:--|:--|
+| 同系統（安定版 Flash）でより新しいモデル | `env/gemini-model-<id>` ブランチで定数更新 PR を作成（同一モデルへの open / closed PR があれば作らない） |
+| 登録モデルが一覧に無い | 緊急度高の Issue を作成（`priority-high` + `enhancement`。同一タイトルの open Issue があれば作らない） |
+| 変化なし | 何もしない |
+
+- **リポジトリ Secret**: `GEMINI_MODEL_CHECK_API_KEY` — `models.list` 読み取り専用に発行した Gemini キー。本番の `GEMINI_API_KEY` / `GEMINI_API_KEY_TRIAL` とは分ける。ログに出さない。
+- **権限**: ワークフローの `permissions` は `contents: write` / `pull-requests: write` / `issues: write` のみ。
+- **【人間タスク】dry-run は CI で実行しない。** 自動 PR 本文の【人間タスク】に従い、料金確認と `scripts/grading-dry-run.ts` での旧/新比較を人が開発環境で実施してからマージする（開発 DB 読み取りと Gemini 課金が発生するため）。
+- **`-latest` エイリアスは使わない**（仕様は `docs/specification.md` 6.1.2）。
+- `GITHUB_TOKEN` で作った PR は `pull_request` トリガの CI が動かないことがある。マージ前に Actions から Biome / Typecheck / Test / Build を `workflow_dispatch` で再実行する。
+
+手動確認の例（キーはログに出さない）:
+
+```bash
+# 比較ロジックのみ（API 不要）
+bun scripts/gemini-model-check.ts --available gemini-3.8-flash,gemini-4.0-flash --json
+
+# 実 API（ローカル。Secret と同名の環境変数）
+GEMINI_MODEL_CHECK_API_KEY=... bun scripts/gemini-model-check.ts --json
+```
 
 ## プロジェクト構成
 
