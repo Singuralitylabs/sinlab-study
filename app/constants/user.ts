@@ -44,6 +44,12 @@ export const USER_MEMBERSHIP_LABELS: Record<MembershipType, string> = {
 /** Single source for allowed values; API validation and the approval UI options derive from it. */
 export const MEMBERSHIP_TYPES: readonly MembershipType[] = Object.values(USER_MEMBERSHIP);
 
+/**
+ * Shared by the settings form and PATCH /api/settings/profile. One limit so the screen and the API
+ * cannot accept different names (the certificate prints this string as-is).
+ */
+export const DISPLAY_NAME_MAX_LENGTH = 50;
+
 /** Allowed PATCH /api/admin/users actions; validation derives from here. */
 export const USER_MANAGEMENT_ACTIONS = [
   "approve",

@@ -43,6 +43,7 @@ import {
   USER_ROLES,
   USER_STATUS,
 } from "@/app/constants/user";
+import { parseDisplayName } from "@/app/lib/display-name";
 import {
   EMAIL_TEMPLATE_KEYS,
   type EmailTemplateKey,
@@ -202,6 +203,23 @@ export const EmailPreferencesSchema = z
     promotionalEmails: z.boolean({ message: "promotionalEmails は真偽値で指定してください" }),
   })
   .strict();
+
+/**
+ * PATCH /api/settings/profile. Unknown keys (`role`, `userId`, …) are stripped so they cannot be
+ * written. The stored value is the trimmed name from parseDisplayName (shared with the form).
+ */
+export const ProfileUpdateSchema = z
+  .object({
+    displayName: z.string({ message: "displayName は文字列で指定してください" }),
+  })
+  .transform((value, ctx) => {
+    const parsed = parseDisplayName(value.displayName);
+    if (!parsed.ok) {
+      ctx.addIssue({ code: "custom", message: parsed.message, path: ["displayName"] });
+      return z.NEVER;
+    }
+    return { displayName: parsed.name };
+  });
 
 const EmailSendDaysSchema = z
   .array(

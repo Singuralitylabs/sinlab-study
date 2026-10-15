@@ -117,6 +117,9 @@ describe("/certificates の遡及発行", () => {
     const html = await render();
 
     expect(html).toContain("氏名が未設定のため発行できません");
+    expect(html).toContain("設定画面で名前を入力してください");
+    expect(html).toContain('href="/settings"');
+    expect(html).not.toContain("運営へお問い合わせください");
     // Theme 2 (1/2) is not completed yet, so it keeps the normal "when you complete" message.
     expect(html).toContain("修了すると発行されます（1 / 2）");
     expect(html).not.toContain("修了すると発行されます（2 / 2）");

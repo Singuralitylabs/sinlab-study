@@ -124,6 +124,7 @@ erDiagram
 - `membership_type`: `community`（コミュニティ会員）/ `general`（一般有料会員）。承認前・却下ユーザーは NULL
 - `terms_accepted_at`: 利用規約・プライバシーポリシーへの同意日時。新規登録時のみ記録し、既存ユーザーは NULL のまま利用継続できる（再同意は求めない）
 - `onboarding_completed_at`: 初回利用ガイド（ウェルカムダイアログ）の完了日時。閉じたときに記録し、既存ユーザーは NULL のまま
+- `display_name`: 画面・管理画面・修了証で共用する表示名（修了証用の氏名は別に持たない）。初回ログイン時に Google アカウントの名前を写し、既存ユーザーの再ログインでは上書きしない。本人の変更は設定画面の `PATCH /api/settings/profile` が service_role でこの列だけを更新する（RLS の本人 UPDATE は許可しない。6.5節）。修了証は発行時点のスナップショット（`certificates.recipient_name`）なので、変更はまだ発行していない修了証にだけ効く
 - `email_opt_out_at`: 案内メール（定期メール）の配信停止日時。NULL は配信対象。配信停止リンク（`/api/email/unsubscribe`）で記録し、停止・再開は、本人が設定画面（`/settings`。`PATCH /api/settings/email`）から、または管理者がユーザー管理画面（`PATCH /api/admin/users` の `opt_out_email` / `resume_email`）から行える。トランザクションメールには影響しない（[機能設計書](./specification.md)10.8節）
 - `auth_id`: Supabase Auth UUID（UNIQUE）
 
@@ -244,7 +245,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 - **`UNIQUE (user_id, theme_id)`**: 1テーマ1枚。発行処理はこの違反を「発行済み」として扱い、冪等にする（二重発行・二重メールを防ぐ）
 - **`certificate_no`**: `SS-YYYYMM-XXXXXX`。一意（`UNIQUE`）で、形式は CHECK で縛る。将来の公開検証ページ用
-- **`recipient_name` / `theme_name`**: 発行時点の `users.display_name` / `learning_themes.name` の**スナップショット**。後から名前やテーマ名を変えても、発行済みの修了証は変わらない。受講者名を `users.display_name` の参照にしないのは、将来「修了証に載せる氏名」をプロフィールで設定できる余地を残すため
+- **`recipient_name` / `theme_name`**: 発行時点の `users.display_name` / `learning_themes.name` の**スナップショット**。後から表示名やテーマ名を変えても、発行済みの修了証は変わらない。修了証用の氏名は別に持たず、`users.display_name` を共用する（本人は設定画面で表示名を変える。3.8節）
 - `user_id` は `ON DELETE CASCADE`、`theme_id` は `ON DELETE RESTRICT`（テーマの物理削除で、印刷済みの証明番号ごと修了証が消えないようにする。テーマは論理削除が基本）
 - 書き込みは service_role のみ（`POST /api/progress` の完了直後。`user_id` は認証済みの本人に固定）。受講生・管理画面からの INSERT / UPDATE / DELETE の経路は無い
 
@@ -387,7 +388,7 @@ SELECT のみ: 自分の提出（`submissions.user_id` が自身）に紐づく�
 
 初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer は受講生進捗（`/manage/students`）の閲覧で `users` を参照するため SELECT のみ許可し、UPDATE は付与しない（ユーザー管理は不可）。
 
-本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため）。`email_opt_out_at` も同様に、配信停止ルート（`/api/email/unsubscribe`。署名付きリンクでログイン不要）と、設定画面の API（`PATCH /api/settings/email`。`getServerAuth()` で特定した本人の行だけを更新する）が service_role 経由で記録する。
+本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため）。`email_opt_out_at` も同様に、配信停止ルート（`/api/email/unsubscribe`。署名付きリンクでログイン不要）と、設定画面の API（`PATCH /api/settings/email`。`getServerAuth()` で特定した本人の行だけを更新する）が service_role 経由で記録する。`display_name` も同様に、設定画面の API（`PATCH /api/settings/profile`。`getServerAuth()` で特定した本人の行のこの列だけ）が service_role 経由で更新する。
 
 ### 6.6 stripe_subscriptions
 

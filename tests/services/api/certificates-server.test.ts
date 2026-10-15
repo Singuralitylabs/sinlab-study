@@ -295,6 +295,28 @@ describe("issueMissingCertificates（既に完了済みのテーマの遡及発�
     expect(certificateInserts(admin)).toHaveLength(0);
   });
 
+  it("表示名が入っていれば発行し、修了証行は UPDATE しない（スナップショットは変えない）", async () => {
+    const admin = mockAdminClient({
+      certificates: inserted,
+      users: { data: { display_name: "佐藤 花子" }, error: null },
+    });
+
+    const result = await issueMissingCertificates({
+      ...eligible,
+      summaries: [done(1)] as never,
+      issuedThemeIds: new Set(),
+    });
+
+    expect(result.blockedByMissingName).toBe(false);
+    expect(result.issued).toEqual([inserted.data]);
+    expect(certificateInserts(admin)[0].insert.mock.calls[0][0]).toMatchObject({
+      recipient_name: "佐藤 花子",
+    });
+    for (const { value } of admin.from.mock.results) {
+      expect(value.update).not.toHaveBeenCalled();
+    }
+  });
+
   it.each([
     ["trial", "member"],
     ["active", "admin"],

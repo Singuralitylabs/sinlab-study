@@ -60,8 +60,8 @@ export type IssuedCertificate = Pick<
 export type IssueResult = {
   issued: readonly IssuedCertificate[];
   /**
-   * True when issuance was skipped because the user's display_name is blank. The user cannot fix
-   * it themselves (no profile editing), so the page tells them to contact the operators.
+   * True when issuance was skipped because the user's display_name is blank. They set it on
+   * /settings; a certificate already issued keeps the snapshotted recipient_name.
    */
   blockedByMissingName: boolean;
 };
