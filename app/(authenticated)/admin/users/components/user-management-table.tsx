@@ -249,6 +249,11 @@ export function UserManagementTable({
                       <div>
                         <p className="font-medium">{user.display_name}</p>
                         <p className="text-xs text-muted-foreground">{user.email}</p>
+                        {user.notification_email && (
+                          <p className="text-xs text-muted-foreground">
+                            通知先: {user.notification_email}
+                          </p>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3">

@@ -230,7 +230,7 @@ const MANAGE_WEEK_LIST_SELECT = `
 const CONTENT_SIBLING_CANDIDATE_SELECT = "id, title, display_order, is_published, week_id";
 
 const MANAGE_USER_LIST_SELECT =
-  "id, display_name, email, role, status, membership_type, created_at, email_opt_out_at";
+  "id, display_name, email, notification_email, role, status, membership_type, created_at, email_opt_out_at";
 
 /** Structural filters for /manage/contents. The title search `q` is not included (done in JS). */
 export interface FetchContentsFilters {

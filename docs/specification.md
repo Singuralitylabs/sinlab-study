@@ -1013,6 +1013,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 - `/review-list`: 復習リスト（未克服 / 克服済み。`role = member` のみ。15章）
 - `/announcements` / `/announcements/[id]`: お知らせの一覧（未読表示。サイドナビ「お知らせ」に未読件数のバッジ）・詳細（開くと既読を記録）（11章）
 - `/settings`: プロフィール（表示名）と、案内メールの配信状態（配信中 / 停止中と停止日時）の確認と、停止・再開（10.8節）。サイドナビのログアウトの上に「設定」として全ロールへ表示する。表示名は `users.display_name` の1つを画面・管理画面・修了証で共用する（修了証用の氏名は別に持たない）。画面は本人の行を通常クライアントで SELECT して入力欄に出し、保存は `PATCH /api/settings/profile`（`{ "displayName": string }`）で行う。`getServerAuth()` で本人を特定し、未認証 401・`userId` なし 403・`active` / `trial` 以外（`rejected` を含む）403・検証失敗 400。更新は `updateUserDisplayName()` が service_role で本人の行の `display_name` だけを書く（RLS に本人 UPDATE は足さない。ボディの `role` や `userId` は書かない）。前後の空白を除いて空でないこと、`DISPLAY_NAME_MAX_LENGTH`（50）以内、改行などの制御文字を含まないこと。ゼロ幅スペースや双方向制御などの書式文字は保存前に除き（絵文字の ZWJ は、他に文字があるときだけ残す）、除いた結果が空なら空として拒否する。画面は同じ `parseDisplayName()` で拒否する。保存後は `router.refresh()` でサーバー描画の表示名を取り直す。修了証には発行時点の名前が印字され、発行済みの修了証には反映されない（13.2節）
+- `/settings` の通知の送り先: ログイン用の `users.email` は表示するだけで変更しない。今の送り先は `notification_email`（NULL ならログイン用）。変更は `POST /api/settings/notification-email`（`{ "email": string }`）で確認メールを送り、リンクの確認画面で確定するまで `notification_email` は変わらない。`getServerAuth()` で本人を特定し、未認証 401・`userId` なし 403・`active` / `trial` 以外 403・形式不正 400・現在と同じアドレス 400・直近24時間の確認メールが `NOTIFICATION_EMAIL_CONFIRM_LIMIT` を超えたら 429。更新は service_role で本人の行の確認待ち列だけを書く（RLS に本人 UPDATE は足さない。`users.email` は書かない）。確認は `GET`（画面のみ）と `POST /api/settings/notification-email/verify?token=...`（確定）。ログインは要らない。解除は `DELETE /api/settings/notification-email` で `notification_email` を NULL に戻し、それまでの送り先へ変更通知を送る。確認待ちの取り消しは `POST /api/settings/notification-email/cancel`。画面には「お支払いに関するメールは Stripe から登録時のアドレスに届きます」と出す（2.11節。Stripe の Customer のアドレスは変えない）
 
 ### 7.3 管理・講師向け画面（`/manage`）
 
@@ -1157,7 +1158,7 @@ Slack App の **Incoming Webhooks** を有効化し、通知先チャンネル�
 送信基盤は次の方針で作る（Slack 通知の `postSlackWebhook()` と同じ考え方）。
 
 - **未設定はスキップ**: `RESEND_API_KEY` / `EMAIL_FROM_ADDRESS` / `NEXT_PUBLIC_APP_URL` のいずれかが未設定なら、warn ログを出して送信しない（送信ログも作らない）
-- **全体の送信スイッチ**: 受講生向けの送信はすべて `email_settings.sending_enabled`（既定 `false`。管理画面で切り替える。10.10節）を入口で確認し、`true` でなければ送らない。**読めないとき（DB エラー・行の欠落・真偽値でない値）も送らない**（フェイルクローズ）。環境変数が揃っていても、利用規約の改定が終わるまで本番で一通も送らないための仕組みで、種別ごとの有効・無効より先に効く。管理者本人へのテスト送信（10.11節）だけは対象外で、有効化の前に送信設定を確認できる
+- **全体の送信スイッチ**: 受講生向けの送信はすべて `email_settings.sending_enabled`（既定 `false`。管理画面で切り替える。10.10節）を入口で確認し、`true` でなければ送らない。**読めないとき（DB エラー・行の欠落・真偽値でない値）も送らない**（フェイルクローズ）。環境変数が揃っていても、利用規約の改定が終わるまで本番で一通も送らないための仕組みで、種別ごとの有効・無効より先に効く。管理者本人へのテスト送信（10.11節）と、通知先の確認メール・変更通知（10.4節。本人が始めた手続きの通知）だけは対象外で、スイッチが無効または読めないときも送る。確認メールと変更通知は `email_logs` に記録する
 - **失敗は握りつぶす**: 送信失敗（非2xx）・タイムアウト（`EMAIL_SEND_TIMEOUT_MS`＝15秒。送信は `after()` 内でレスポンスを待たせないため、Resend が受理済みの遅延応答を失敗にしない長さにしている。`TimeoutError` やネットワーク断は「送達不明」で、再送対象にしない）・例外はログと `email_logs.error` に残し、呼び出し元の主処理（登録・承認・Stripe Webhook・`/upgrade/success`）のレスポンスや再送判定には一切影響させない
 - **レスポンス後に送る**: 各フックは Next.js の `after()`（`next/server`）に送信処理を予約するだけで、レスポンスを遅らせない。`after()` はサーバーレス関数の終了まで処理を延長するため、送信が途中で打ち切られない。リクエストスコープ外で `after()` が使えない場合は、その場で発火だけ行う
 - **二重送信の防止**: 送信前に `email_logs` の claim（`UNIQUE (user_id, kind, reference_key)` への INSERT。仕組みは `docs/database.md` 3.11節）を取り、取れなければ送信しない。claim が他のDBエラーで失敗した場合も、重複を防げないため送信しない
@@ -1166,7 +1167,7 @@ Slack App の **Incoming Webhooks** を有効化し、通知先チャンネル�
 
 ### 10.2 実装構成
 
-実装は `app/services/notifications/`（送信 `email.ts`・テンプレート `email-templates.ts`・claim と予約 `user-emails.ts`・定期メール `email-digest-server.ts`・配信停止トークン `email-unsubscribe.ts`）、`app/services/api/cron-lock-server.ts`、`app/services/auth/cron-auth.ts`、`app/api/cron/email-digest/route.ts` と `vercel.json`、`app/api/email/unsubscribe/route.ts`。定数（種別 `EMAIL_KIND`・案内系の種別 `PROMOTIONAL_EMAIL_KINDS`・送信日・1日の上限・実行ロックの TTL）は `app/constants/notifications.ts`。共通レイアウトのフッターには送信元がサービスで返信不可である旨を入れ（サービス名・件名・本文は管理画面で編集でき、解決とエスケープの方針は10.11節）、`unsubscribeUrl` を渡したとき（案内系メール）だけ配信停止リンクと `List-Unsubscribe` / `List-Unsubscribe-Post` ヘッダーを付ける。
+実装は `app/services/notifications/`（送信 `email.ts`・テンプレート `email-templates.ts`・claim と予約 `user-emails.ts`・定期メール `email-digest-server.ts`・配信停止トークン `email-unsubscribe.ts`）、`app/services/api/cron-lock-server.ts`、`app/services/auth/cron-auth.ts`、`app/api/cron/email-digest/route.ts` と `vercel.json`、`app/api/email/unsubscribe/route.ts`。受講生向けメールの送り先は `resolveNotificationEmail()`（`app/lib/notification-email.ts`。`notification_email ?? email`）だけが決める。定数（種別 `EMAIL_KIND`・案内系の種別 `PROMOTIONAL_EMAIL_KINDS`・送信日・1日の上限・実行ロックの TTL・確認メールの期限と回数上限）は `app/constants/notifications.ts`。共通レイアウトのフッターには送信元がサービスで返信不可である旨を入れ（サービス名・件名・本文は管理画面で編集でき、解決とエスケープの方針は10.11節）、`unsubscribeUrl` を渡したとき（案内系メール）だけ配信停止リンクと `List-Unsubscribe` / `List-Unsubscribe-Post` ヘッダーを付ける。
 
 ### 10.3 環境変数
 
@@ -1194,6 +1195,17 @@ Slack App の **Incoming Webhooks** を有効化し、通知先チャンネル�
 
 対象外: 却下通知、支払い失敗のユーザー向け通知（Stripe の自動メールに任せる。運営向け Slack 通知は既存のまま）、AI レビュー完了通知。トランザクションメールは配信停止（10.8節）の対象外で、フッターに配信停止リンクを入れない。
 
+**通知の送り先を変える手続き通知**（`users.email` は変えない。10.1節の全体スイッチと 10.8節の配信停止の対象外。`email_kind_settings` の行にはしない）:
+
+| kind（`email_logs` のみ） | トリガー | reference_key | 内容 |
+|:--|:--|:--|:--|
+| `notification_email_confirm` | `POST /api/settings/notification-email` が確認待ちを保存したとき。新しいアドレスへ送る | `confirm:` + ランダム（トークンもアドレスも入れない） | 確認リンク。有効期限は `NOTIFICATION_EMAIL_TOKEN_TTL_MS`（24時間）。回数上限は `NOTIFICATION_EMAIL_CONFIRM_LIMIT`（直近 `NOTIFICATION_EMAIL_CONFIRM_WINDOW_MS` に5通。ロックの中で数える） |
+| `notification_email_changed` | 確認の確定、または解除で送り先が切り替わったとき。切り替え前の送り先へ送る | `changed:` + ランダム | 送り先が変わったことと、新しい送り先 |
+
+送り先の決定は `resolveNotificationEmail()` に一本化する。トランザクションメール（`fetchRecipient()`）、定期メール、お知らせの一斉送信はこれを通す。管理者向け Slack の承認依頼は本人の特定のためログイン用の `users.email` のまま。Stripe の Customer に登録した領収書のアドレスも変えない。管理者本人へのテスト送信（10.11節）はセッションのログイン用アドレスのままで、受講者向けの送信ではない。
+
+確認リンクはログイン不要（別の端末の受信箱から開く。本人はトークンのハッシュが指す行）。メールのセキュリティ製品がリンクを事前に GET するため、GET は確認画面だけを出し、POST で1回だけ切り替える（10.8節と同じ理由）。期限切れ・使用済み・形式が違うトークンでは `notification_email` を変えない。使用済みはハッシュを消してあるので、同じトークンの2回目は行に当たらない。
+
 ### 10.5 送信ログ（`email_logs`）
 
 テーブル定義・claim の意味は `docs/database.md` 3.11節（RLSは6.9節）。`sent_at` が入っていれば送信成功、`error` が入っていれば送信失敗、どちらも NULL なら claim 後に処理が中断したことを示す。
@@ -1213,7 +1225,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 | `announcement` | 公開後の毎日（対象者全員に送り終えるまで） | ステータス・会員種別がお知らせの対象に一致するユーザー（11.4節） | お知らせの ID | お知らせのタイトルと本文、詳細ページへのリンク |
 | `trial_nurture` | 登録から2・5・7・14日目 | `status = trial` のユーザー | `day2` / `day5` / `day7` / `day14` | Day2: 演習の提出 / Day5: AI レビュー / Day7: 本登録で学べるテーマ + 本登録の案内（`isStripeEnabled()` が true のときだけ `/upgrade` へ誘導し、false のときは承認の案内のみ）/ Day14: 最後の案内 |
 
-- **共通の対象**: `status IN (active, trial)`、`is_deleted = false`、`email_opt_out_at IS NULL`。学習系（`weekly_digest` / `inactivity_reminder` / `trial_nurture`）はさらに `role = member` に限り、admin / maintainer には送らない（学習者ではないため）。**お知らせ（`announcement`）はロールで絞らず、アプリ内の表示対象と同じ `status` / `membership_type` の判定（`isAnnouncementTarget()`）だけで宛先を決める**（アプリ内で見える人にはメールも届き、`email_sent_at` はその全員に送り終えたときに記録される。#322）
+- **共通の対象**: `status IN (active, trial)`、`is_deleted = false`、`email_opt_out_at IS NULL`。学習系（`weekly_digest` / `inactivity_reminder` / `trial_nurture`）はさらに `role = member` に限り、admin / maintainer には送らない（学習者ではないため）。**お知らせ（`announcement`）はロールで絞らず、アプリ内の表示対象と同じ `status` / `membership_type` の判定（`isAnnouncementTarget()`）だけで宛先を決める**（アプリ内で見える人にはメールも届き、`email_sent_at` はその全員に送り終えたときに記録される。#322）。**宛先アドレスは `resolveNotificationEmail()`**（`notification_email` があればそちら。NULL なら `users.email`）。確認メールと変更通知は案内系ではないので、この1日の上限（`digest_daily_limit`）には数えない。Resend の日次枠は案内系の上限（初期値80）の外にあるトランザクションメールと同じ余白を使う。確認メールの回数はユーザーごとの定数（10.4節）で抑える
 - **日付は JST の暦日で判定する**: 「登録から N 日目」は `users.created_at` を JST の暦日に丸め、登録日を0日目とする。週は月曜始まりで、「先週」は前週の月曜 0:00〜今週の月曜 0:00（JST）。日次実行が失敗した日の N 日目の分は翌日以降に拾わない（取りこぼしを許容する）
 - **1人1日1通**: `trial_nurture` と `inactivity_reminder` が同じ日に重なるお試しユーザーには `trial_nurture` だけを送る。N 日目の案内を送る日はお知らせ・週次進捗を送らず、お知らせと週次進捗が重なる日は下の「1日の上限」の並び順で先の方だけを送り、もう一方は翌日以降の実行に回す。今日（JST 0:00 以降）すでに案内系メールの `email_logs` を持つユーザーは、同じ日の再実行（手動実行・Cron の再起動）で対象から外す（朝の実行後に承認されて `status` が変わっても、別種別の2通目を送らない）
 - **お試しユーザーの範囲**: 次に学ぶコンテンツ・残り本数・最初の1本は、お試し公開（`is_open_to_trial = true`）のコンテンツだけで判定する（ホームの進捗の分母と同じ。4.2節）
@@ -1232,7 +1244,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 
 ### 10.8 配信停止
 
-- **対象**: 案内系メール（`PROMOTIONAL_EMAIL_KINDS` = 10.7節の定期メール3種とお知らせの一斉送信）だけ。トランザクションメール（10.4節）は `email_opt_out_at` を参照せず、配信停止後も届く
+- **対象**: 案内系メール（`PROMOTIONAL_EMAIL_KINDS` = 10.7節の定期メール3種とお知らせの一斉送信）だけ。トランザクションメール（10.4節）と、通知先の確認メール・変更通知は `email_opt_out_at` を参照せず、配信停止後も届く。確認メールと変更通知には配信停止リンクも `List-Unsubscribe` も付けない
 - **リンク**: 案内系メールは必ず、共通レイアウトのフッターに本人用の配信停止リンク（`<NEXT_PUBLIC_APP_URL>/api/email/unsubscribe?token=...`）を入れ、`List-Unsubscribe` / `List-Unsubscribe-Post: List-Unsubscribe=One-Click` ヘッダー（RFC 8058）を付ける
 - **トークン**: `<users.id>.<署名>`（`EMAIL_UNSUBSCRIBE_SECRET` による HMAC-SHA256）。有効期限は持たない（古いメールのリンクからも停止できる）。検証は定数時間比較
 - **`GET /api/email/unsubscribe?token=...`**（ログイン不要）: トークンを検証し、「配信を停止する」ボタン（同じ URL への `POST` フォーム）付きの確認画面を返す。**GET では停止を確定しない**。メールのセキュリティ製品（Outlook の Safe Links 等）はリンクを事前に GET するため、GET で確定すると本人が開く前に停止されてしまう
@@ -1256,7 +1268,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 
 | 種別 | 有効・無効 | 設定を読めないとき |
 |:--|:--|:--|
-| 全体の送信スイッチ（`email_settings.sending_enabled`。全種別に先立って確認） | `true` でなければ受講生向けメールを一通も送らない。トランザクション系は `deliverToUser()` が宛先を読む前に warn ログを出して終了し（種別の設定は同時に読むが、判定は全体スイッチが先）、定期メールは `runEmailDigest()` が1通も送らず `skipped` を返す（繰り越し予約も作らない） | **フェイルクローズ**: DB エラー・行の欠落・真偽値でない値のいずれでも送らない（定期メールは他の設定と同じく `failed`）。種別ごとの方針（下記）は変えない |
+| 全体の送信スイッチ（`email_settings.sending_enabled`。全種別に先立って確認） | `true` でなければ受講生向けメールを一通も送らない（通知先の確認メールと変更通知は除く。10.4節）。トランザクション系は `deliverToUser()` が宛先を読む前に warn ログを出して終了し（種別の設定は同時に読むが、判定は全体スイッチが先）、定期メールは `runEmailDigest()` が1通も送らず `skipped` を返す（繰り越し予約も作らない） | **フェイルクローズ**: DB エラー・行の欠落・真偽値でない値のいずれでも送らない（定期メールは他の設定と同じく `failed`）。種別ごとの方針（下記）は変えない。確認メールと変更通知はこのフェイルクローズの対象外 |
 | 案内系（`weekly_digest` / `inactivity_reminder` / `trial_nurture` / `announcement`） | 無効な種別は対象にしない。無効なお知らせは送信も完了記録もしない（有効に戻すと続きを送る。ただし送信失敗の再送期限 `ANNOUNCEMENT_EMAIL_RETRY_DAYS` は無効の間も進むため、期限を過ぎた失敗は再送されず、再有効化後は失敗のまま完了になる） | **フェイルクローズ**: DB エラー・行の欠落・値の不正（範囲外の `send_days` など）のとき、`runEmailDigest()` は1通も送らず `failed`（Cron は500）を返す |
 | トランザクション（`signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended` / `certificate_issued`） | `deliverToUser()` が宛先を読む前に `enabled` を確認し、無効なら warn ログを出して送らない | **フェイルセーフ**: 既定値（有効）として送る。登録・決済の通知を欠落させないため。主処理（登録・承認・Stripe Webhook）の結果には、無効化・設定の読み取り失敗のどちらも影響させない |
 
@@ -1288,7 +1300,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 | 編集できる | サービス名（差出人名・件名の先頭 `【サービス名】`・見出し・フッターの名前）、補足（見出しの補足・フッター。空にできる）、各テンプレートの件名と本文（Markdown） | 運営が文面を調整したい部分 |
 | コードで固定 | 宛名（「〇〇 様」）、ボタンのリンク先と表示条件、自動送信・返信不可の定型文、配信停止リンクと `List-Unsubscribe` ヘッダー、配信設定（`/settings`）の案内行（10.8節）、送信の条件・タイミング | 法令上の必須表示（特定電子メール法）や送信ロジックに関わる。**テンプレートの内容によらず、`renderEmailLayout()` が必ず付ける** |
 
-**テンプレートキー**（`EMAIL_TEMPLATE_KEYS`。`app/lib/email-template.ts`）: `signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended` / `weekly_digest` / `inactivity_reminder` / `trial_nurture.day2` / `trial_nurture.day5` / `trial_nurture.day7` / `trial_nurture.day14` / `announcement`。お試しユーザー向け案内は段階ごとにキーを分ける（どの段階を使うかは、送る日の設定に対し従来どおりコードが決める）。`announcement` は件名の形式（`お知らせ: {{title}}`）と、お知らせ本文の前後の定型文だけを持ち、本文に `{{announcement_body}}` を**ちょうど1つ**含める（お知らせごとの本文がそこに入る。件名には使えない）。
+**テンプレートキー**（`EMAIL_TEMPLATE_KEYS`。`app/lib/email-template.ts`）: `signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended` / `weekly_digest` / `inactivity_reminder` / `trial_nurture.day2` / `trial_nurture.day5` / `trial_nurture.day7` / `trial_nurture.day14` / `announcement` / `certificate_issued` / `notification_email_confirm` / `notification_email_changed`。お試しユーザー向け案内は段階ごとにキーを分ける（どの段階を使うかは、送る日の設定に対し従来どおりコードが決める）。`announcement` は件名の形式（`お知らせ: {{title}}`）と、お知らせ本文の前後の定型文だけを持ち、本文に `{{announcement_body}}` を**ちょうど1つ**含める（お知らせごとの本文がそこに入る。件名には使えない）。確認メールと変更通知の確認ボタン・設定画面へのリンクはコードが付ける（テンプレートに URL を書かない）。
 
 **プレースホルダー**: 本文・件名に `{{名前}}` で書く。テンプレートごとの許可リスト（`EMAIL_TEMPLATE_DEFINITIONS[key].placeholders`）にないもの（typo を含む）は保存時に400で拒否し、使えない名前を返す。全テンプレート共通で `{{display_name}}` と `{{service_name}}` が使える。
 
@@ -1305,6 +1317,8 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 | `trial_nurture.day7` | `elapsed_label` / `locked_themes` / `registration_guide` |
 | `trial_nurture.day14` | `elapsed_label` / `final_notice`（設定した最後の案内のときだけ「これが最後です」） / `registration_guide` |
 | `announcement` | `title` / `announcement_body` |
+| `notification_email_confirm` | `expires_label`（確認リンクの有効期限） |
+| `notification_email_changed` | `new_address`（変更後の送り先） |
 
 経過日数の表記（`elapsed_label`）と「これが最後です」の判定は、送る日の設定（10.10節）に追従するためコードが行い、プレースホルダーで差し込む。
 

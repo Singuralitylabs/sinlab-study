@@ -287,7 +287,7 @@ export type EmailLogListItem = {
   sent_at: string | null;
   error: string | null;
   status: EmailLogStatus;
-  user: { display_name: string; email: string } | null;
+  user: { display_name: string; email: string; notification_email: string | null } | null;
 };
 
 /**
@@ -308,7 +308,7 @@ export async function fetchEmailLogs(filters: EmailLogFilters = {}): Promise<{
     let query = supabase
       .from("email_logs")
       .select(
-        "id, created_at, kind, reference_key, sent_at, error, user:users(display_name, email)"
+        "id, created_at, kind, reference_key, sent_at, error, user:users(display_name, email, notification_email)"
       )
       .neq("kind", WEEKLY_DIGEST_RESERVATION_KIND)
       .order("created_at", { ascending: false })

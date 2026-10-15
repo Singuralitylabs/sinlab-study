@@ -128,6 +128,8 @@ erDiagram
 - `onboarding_completed_at`: 初回利用ガイド（ウェルカムダイアログ）の完了日時。閉じたときに記録し、既存ユーザーは NULL のまま
 - `display_name`: 画面・管理画面・修了証で共用する表示名（修了証用の氏名は別に持たない）。初回ログイン時に Google アカウントの名前を写し、既存ユーザーの再ログインでは上書きしない。本人の変更は設定画面の `PATCH /api/settings/profile` が service_role でこの列だけを更新する（RLS の本人 UPDATE は許可しない。6.5節）。修了証は発行時点のスナップショット（`certificates.recipient_name`）なので、変更はまだ発行していない修了証にだけ効く
 - `email_opt_out_at`: 案内メール（定期メール）の配信停止日時。NULL は配信対象。配信停止リンク（`/api/email/unsubscribe`）で記録し、停止・再開は、本人が設定画面（`/settings`。`PATCH /api/settings/email`）から、または管理者がユーザー管理画面（`PATCH /api/admin/users` の `opt_out_email` / `resume_email`）から行える。トランザクションメールには影響しない（[機能設計書](./specification.md)10.8節）
+- `notification_email`: 通知の送り先。NULL はログイン用の `email` に送る。`email` 自体は変えない。確認が済むまでこの列は更新しない（[機能設計書](./specification.md)10.4節）
+- `notification_email_pending` / `notification_email_token_hash` / `notification_email_expires_at`: 確認待ちのアドレス、トークンの SHA-256 ハッシュ、有効期限。3つとも NULL か、3つとも値がある（CHECK）。ハッシュの部分ユニーク。平文のトークンは保存しない。確認メールの回数上限は `claim_notification_email_confirm(p_user_id, p_reference_key, p_since, p_limit)` が `pg_advisory_xact_lock` の中で数えて claim する（上限なら NULL。`PUBLIC` / `anon` / `authenticated` には実行権限を与えず、service_role のみ）。列の追加だけで、既存行は NULL のまま（7章の破壊的変更には当たらない）
 - `auth_id`: Supabase Auth UUID（UNIQUE）
 
 > CHECK制約は値の妥当性のみを検証する。「`status = 'active'` なら `membership_type` は NOT NULL」という不変条件はDBでは保証しておらず、承認・却下処理（`approveUser()` / `rejectUser()`）を通るアプリ層でのみ担保している。
@@ -390,7 +392,7 @@ SELECT のみ: 自分の提出（`submissions.user_id` が自身）に紐づく�
 
 初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer は受講生進捗（`/manage/students`）の閲覧で `users` を参照するため SELECT のみ許可し、UPDATE は付与しない（ユーザー管理は不可）。
 
-本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため）。`email_opt_out_at` も同様に、配信停止ルート（`/api/email/unsubscribe`。署名付きリンクでログイン不要）と、設定画面の API（`PATCH /api/settings/email`。`getServerAuth()` で特定した本人の行だけを更新する）が service_role 経由で記録する。`display_name` も同様に、設定画面の API（`PATCH /api/settings/profile`。`getServerAuth()` で特定した本人の行のこの列だけ）が service_role 経由で更新する。
+本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため）。`email_opt_out_at` も同様に、配信停止ルート（`/api/email/unsubscribe`。署名付きリンクでログイン不要）と、設定画面の API（`PATCH /api/settings/email`。`getServerAuth()` で特定した本人の行だけを更新する）が service_role 経由で記録する。`display_name` も同様に、設定画面の API（`PATCH /api/settings/profile`。`getServerAuth()` で特定した本人の行のこの列だけ）が service_role 経由で更新する。`notification_email` と確認待ちの3列も同様に、設定画面の API と確認ルート（`/api/settings/notification-email`。変更依頼・解除・取り消しは `getServerAuth()` の本人の行だけ。確認の確定はトークンのハッシュが指す行だけ）が service_role 経由で更新する。受講者の UPDATE ポリシーは足さない。`email` は書かない。
 
 ### 6.6 stripe_subscriptions
 

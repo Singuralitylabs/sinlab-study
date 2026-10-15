@@ -13,6 +13,8 @@ import {
   EMAIL_SERVICE_NAME,
   EMAIL_SERVICE_SUBTITLE,
   type EmailKind,
+  NOTIFICATION_EMAIL_LOG_KIND,
+  type NotificationEmailLogKind,
 } from "@/app/constants/notifications";
 import { escapeHtml } from "@/app/lib/escape-html";
 import {
@@ -36,6 +38,8 @@ export const EMAIL_TEMPLATE_KEYS = [
   "trial_nurture.day14",
   "announcement",
   "certificate_issued",
+  "notification_email_confirm",
+  "notification_email_changed",
 ] as const;
 
 export type EmailTemplateKey = (typeof EMAIL_TEMPLATE_KEYS)[number];
@@ -68,7 +72,7 @@ export const ANNOUNCEMENT_BODY_PLACEHOLDER = "announcement_body";
 
 export type EmailTemplateDefinition = {
   key: EmailTemplateKey;
-  kind: EmailKind;
+  kind: EmailKind | NotificationEmailLogKind;
   label: string;
   /** Current wording; used when no `email_templates` row exists. */
   subject: string;
@@ -293,6 +297,31 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
       theme_name: "修了したテーマ名",
       certificate_no: "修了証の証明番号（例: SS-202610-ABC123）",
     },
+  }),
+  notification_email_confirm: defs({
+    key: "notification_email_confirm",
+    kind: NOTIFICATION_EMAIL_LOG_KIND.CONFIRM,
+    label: "通知先の確認",
+    subject: "通知の送り先を確認してください",
+    body: [
+      "通知の送り先を、このメールを受け取ったアドレスに変更するリクエストを受け付けました。",
+      "下のボタンを押すと変更が確定します。ボタンを押すまで、送り先は変わりません。",
+      "リンクの有効期限は {{expires_label}} です。期限を過ぎた場合は、設定画面からもう一度お試しください。",
+      "このメールに心当たりがない場合は、何もしないでください。",
+    ].join("\n\n"),
+    placeholders: { expires_label: "確認リンクの有効期限（例: 24時間）" },
+  }),
+  notification_email_changed: defs({
+    key: "notification_email_changed",
+    kind: NOTIFICATION_EMAIL_LOG_KIND.CHANGED,
+    label: "通知先の変更",
+    subject: "通知の送り先が変更されました",
+    body: [
+      "通知の送り先が変更されました。",
+      "新しい送り先: {{new_address}}",
+      "身に覚えがない場合は、ログインして設定画面から送り先を確認し、必要ならログイン用のアドレスに戻してください。",
+    ].join("\n\n"),
+    placeholders: { new_address: "変更後の通知の送り先" },
   }),
 };
 

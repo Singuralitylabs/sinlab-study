@@ -107,6 +107,24 @@ describe("送信ログ（email_logs）の claim → 送信 → 記録", () => {
     expect(record.eq).toHaveBeenCalledWith("id", 11);
   });
 
+  it("notification_email があればログイン用アドレスではなくそちらへ送る", async () => {
+    mockAdmin({
+      users: {
+        data: { ...recipientRow, notification_email: "notify@example.com" },
+        error: null,
+      },
+      email_logs: [
+        { data: { id: 11 }, error: null },
+        { data: null, error: null },
+      ],
+    });
+
+    await deliverOnce();
+
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "notify@example.com" }));
+    expect(sendEmail).not.toHaveBeenCalledWith(expect.objectContaining({ to: "user@example.com" }));
+  });
+
   it("UNIQUE 違反（同一事象を別経路・再送が送信済み）なら送信しない", async () => {
     const client = mockAdmin({ users: { data: recipientRow, error: null }, email_logs: duplicate });
 

@@ -536,6 +536,50 @@ export function buildAnnouncementEmail(
   });
 }
 
+export type NotificationEmailConfirmParams = {
+  displayName: string;
+  confirmUrl: string;
+  expiresLabel: string;
+};
+
+/**
+ * Confirmation mail to the new address. No unsubscribe link: this is an account procedure the
+ * user just started, and the link itself is the confirmation.
+ */
+export function buildNotificationEmailConfirmEmail(
+  params: NotificationEmailConfirmParams,
+  texts: EmailTexts = DEFAULT_EMAIL_TEXTS
+): EmailContent {
+  return renderTemplatedEmail({
+    key: "notification_email_confirm",
+    texts,
+    displayName: params.displayName,
+    values: { expires_label: params.expiresLabel },
+    links: [{ label: "変更を確定する", url: params.confirmUrl }],
+  });
+}
+
+export type NotificationEmailChangedParams = {
+  displayName: string;
+  newAddress: string;
+  /** Settings page. Omitted when the app URL is not configured (the notice still sends). */
+  settingsUrl: string | null;
+};
+
+/** Notice to the previous destination after a switch. No unsubscribe link. */
+export function buildNotificationEmailChangedEmail(
+  params: NotificationEmailChangedParams,
+  texts: EmailTexts = DEFAULT_EMAIL_TEXTS
+): EmailContent {
+  return renderTemplatedEmail({
+    key: "notification_email_changed",
+    texts,
+    displayName: params.displayName,
+    values: { new_address: params.newAddress },
+    links: params.settingsUrl ? [{ label: "設定画面を開く", url: params.settingsUrl }] : [],
+  });
+}
+
 export type CertificateIssuedEmailParams = {
   displayName: string;
   appUrl: string;

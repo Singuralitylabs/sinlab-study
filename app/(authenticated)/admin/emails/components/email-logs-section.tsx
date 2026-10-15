@@ -1,6 +1,12 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
-import { EMAIL_KIND_LABELS, EMAIL_KINDS, type EmailKind } from "@/app/constants/notifications";
+import {
+  EMAIL_KIND_LABELS,
+  EMAIL_KINDS,
+  type EmailKind,
+  NOTIFICATION_EMAIL_LOG_LABELS,
+  type NotificationEmailLogKind,
+} from "@/app/constants/notifications";
 import { formatDateTime } from "@/app/lib/format-date";
 import type { EmailLogListItem, EmailLogStatus } from "@/app/services/api/email-settings-server";
 import { EMAIL_LOG_STATUSES } from "@/app/services/api/email-settings-server";
@@ -105,13 +111,20 @@ export function EmailLogsSection({
                       {formatDateTime(log.created_at)}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
-                      {EMAIL_KIND_LABELS[log.kind as EmailKind] ?? log.kind}
+                      {EMAIL_KIND_LABELS[log.kind as EmailKind] ??
+                        NOTIFICATION_EMAIL_LOG_LABELS[log.kind as NotificationEmailLogKind] ??
+                        log.kind}
                     </td>
                     <td className="px-4 py-3">
                       {log.user ? (
                         <>
                           <p className="font-medium">{log.user.display_name}</p>
                           <p className="text-xs text-muted-foreground">{log.user.email}</p>
+                          {log.user.notification_email && (
+                            <p className="text-xs text-muted-foreground">
+                              通知先: {log.user.notification_email}
+                            </p>
+                          )}
                         </>
                       ) : (
                         <span className="text-muted-foreground">-</span>

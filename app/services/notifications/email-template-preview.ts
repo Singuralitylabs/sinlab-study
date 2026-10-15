@@ -1,3 +1,4 @@
+import { NOTIFICATION_EMAIL_TOKEN_TTL_LABEL } from "@/app/constants/notifications";
 import type { EmailTemplateKey, EmailTexts } from "@/app/lib/email-template";
 import { renderEmailMarkdown } from "@/app/lib/markdown-email";
 import type { EmailContent } from "@/app/services/notifications/email";
@@ -7,6 +8,8 @@ import {
   buildCancelScheduledEmail,
   buildCertificateIssuedEmail,
   buildInactivityReminderEmail,
+  buildNotificationEmailChangedEmail,
+  buildNotificationEmailConfirmEmail,
   buildSignupEmail,
   buildSubscriptionEndedEmail,
   buildTrialNurtureEmail,
@@ -284,6 +287,26 @@ const PREVIEW_VARIANTS: Record<EmailTemplateKey, VariantDefinition[]> = {
         ),
     },
   ],
+  notification_email_confirm: single((c) =>
+    buildNotificationEmailConfirmEmail(
+      {
+        ...base(c),
+        confirmUrl: `${c.appUrl.replace(/\/+$/, "")}/api/settings/notification-email/verify?token=sample`,
+        expiresLabel: NOTIFICATION_EMAIL_TOKEN_TTL_LABEL,
+      },
+      c.texts
+    )
+  ),
+  notification_email_changed: single((c) =>
+    buildNotificationEmailChangedEmail(
+      {
+        ...base(c),
+        newAddress: "notify@example.com",
+        settingsUrl: `${c.appUrl.replace(/\/+$/, "")}/settings`,
+      },
+      c.texts
+    )
+  ),
   announcement: single((c) =>
     buildAnnouncementEmail(
       {

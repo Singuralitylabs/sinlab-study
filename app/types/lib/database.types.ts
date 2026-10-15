@@ -916,6 +916,10 @@ export type Database = {
           id: number;
           is_deleted: boolean | null;
           membership_type: string | null;
+          notification_email: string | null;
+          notification_email_expires_at: string | null;
+          notification_email_pending: string | null;
+          notification_email_token_hash: string | null;
           onboarding_completed_at: string | null;
           role: string;
           status: string;
@@ -933,6 +937,10 @@ export type Database = {
           id?: number;
           is_deleted?: boolean | null;
           membership_type?: string | null;
+          notification_email?: string | null;
+          notification_email_expires_at?: string | null;
+          notification_email_pending?: string | null;
+          notification_email_token_hash?: string | null;
           onboarding_completed_at?: string | null;
           role?: string;
           status?: string;
@@ -950,6 +958,10 @@ export type Database = {
           id?: number;
           is_deleted?: boolean | null;
           membership_type?: string | null;
+          notification_email?: string | null;
+          notification_email_expires_at?: string | null;
+          notification_email_pending?: string | null;
+          notification_email_token_hash?: string | null;
           onboarding_completed_at?: string | null;
           role?: string;
           status?: string;
@@ -983,6 +995,15 @@ export type Database = {
       };
       claim_email_test_send: {
         Args: { p_day_start: string; p_limit: number; p_user_id: number };
+        Returns: number;
+      };
+      claim_notification_email_confirm: {
+        Args: {
+          p_limit: number;
+          p_reference_key: string;
+          p_since: string;
+          p_user_id: number;
+        };
         Returns: number;
       };
       content_visible_to_caller: {
