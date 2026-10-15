@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   addCodeFile,
   buildInitialCodeFiles,
+  buildSubmissionCodeFiles,
   changeCodeFileLanguage,
+  isSubmissionCodeValid,
   parseStarterFiles,
+  resolveLanguage,
   toStarterFilesPayload,
 } from "@/app/lib/code-file-inputs";
 
@@ -33,6 +36,23 @@ describe("buildInitialCodeFiles", () => {
       filenameEdited: true,
     });
   });
+
+  it("filenameEdited オプションで管理画面向けに常に true にできる", () => {
+    const files = buildInitialCodeFiles(
+      [{ filename: "", language: "css", content: "" }],
+      "javascript",
+      { filenameEdited: true }
+    );
+    expect(files[0].filenameEdited).toBe(true);
+    expect(files[0].language).toBe("css");
+  });
+});
+
+describe("resolveLanguage", () => {
+  it("未知言語は fallback に落とす", () => {
+    expect(resolveLanguage("html", "javascript")).toBe("html");
+    expect(resolveLanguage("cobol", "javascript")).toBe("javascript");
+  });
 });
 
 describe("parseStarterFiles / toStarterFilesPayload", () => {
@@ -48,7 +68,7 @@ describe("parseStarterFiles / toStarterFilesPayload", () => {
     );
   });
 
-  it("ファイル名の無い行は保存対象外（null でクリア）", () => {
+  it("ファイル名が空で本文がある行はエラーにする", () => {
     expect(
       toStarterFilesPayload([
         {
@@ -59,7 +79,165 @@ describe("parseStarterFiles / toStarterFilesPayload", () => {
           filenameEdited: false,
         },
       ])
-    ).toBeNull();
+    ).toEqual({ ok: false, error: "初期コードのファイル名を入力してください" });
+  });
+
+  it("唯一の行でファイル名が空なら本文が空でもエラーにする", () => {
+    expect(
+      toStarterFilesPayload([
+        {
+          id: "1",
+          filename: "",
+          language: "javascript",
+          content: "",
+          filenameEdited: false,
+        },
+      ])
+    ).toEqual({ ok: false, error: "初期コードのファイル名を入力してください" });
+  });
+
+  it("空配列は null（クリア）", () => {
+    expect(toStarterFilesPayload([])).toEqual({ ok: true, files: null });
+  });
+
+  it("有効な行だけを保存する", () => {
+    expect(
+      toStarterFilesPayload([
+        {
+          id: "1",
+          filename: "index.html",
+          language: "html",
+          content: "<div></div>",
+          filenameEdited: true,
+        },
+        {
+          id: "2",
+          filename: "",
+          language: "css",
+          content: "",
+          filenameEdited: false,
+        },
+      ])
+    ).toEqual({
+      ok: true,
+      files: [{ filename: "index.html", language: "html", content: "<div></div>" }],
+    });
+  });
+});
+
+describe("buildSubmissionCodeFiles / isSubmissionCodeValid", () => {
+  it("空本文のファイルは提出ペイロードから除く", () => {
+    expect(
+      buildSubmissionCodeFiles(
+        [
+          {
+            id: "1",
+            filename: "index.html",
+            language: "html",
+            content: "<div></div>",
+            filenameEdited: true,
+          },
+          {
+            id: "2",
+            filename: "style.css",
+            language: "css",
+            content: "  ",
+            filenameEdited: true,
+          },
+        ],
+        "javascript"
+      )
+    ).toEqual([{ filename: "index.html", language: "html", content: "<div></div>" }]);
+  });
+
+  it("言語もファイル名も既定どおりの1ファイルは legacy 用にメタを落とす", () => {
+    expect(
+      buildSubmissionCodeFiles(
+        [
+          {
+            id: "1",
+            filename: "",
+            language: "javascript",
+            content: "const x = 1;",
+            filenameEdited: false,
+          },
+        ],
+        "javascript"
+      )
+    ).toEqual([{ filename: "", language: "", content: "const x = 1;" }]);
+  });
+
+  it("言語が content.code_language と違う1ファイルはメタを残す", () => {
+    expect(
+      buildSubmissionCodeFiles(
+        [
+          {
+            id: "1",
+            filename: "index.html",
+            language: "html",
+            content: "<div></div>",
+            filenameEdited: true,
+          },
+        ],
+        "javascript"
+      )
+    ).toEqual([{ filename: "index.html", language: "html", content: "<div></div>" }]);
+  });
+
+  it("カスタムファイル名の1ファイルはメタを残す", () => {
+    expect(
+      buildSubmissionCodeFiles(
+        [
+          {
+            id: "1",
+            filename: "app.js",
+            language: "javascript",
+            content: "const x = 1;",
+            filenameEdited: true,
+          },
+        ],
+        "javascript"
+      )
+    ).toEqual([{ filename: "app.js", language: "javascript", content: "const x = 1;" }]);
+  });
+
+  it("全部空なら invalid、一部に本文があれば valid", () => {
+    expect(
+      isSubmissionCodeValid([
+        {
+          id: "1",
+          filename: "a.js",
+          language: "javascript",
+          content: "",
+          filenameEdited: true,
+        },
+        {
+          id: "2",
+          filename: "b.css",
+          language: "css",
+          content: "",
+          filenameEdited: true,
+        },
+      ])
+    ).toBe(false);
+    expect(
+      isSubmissionCodeValid([
+        {
+          id: "1",
+          filename: "a.js",
+          language: "javascript",
+          content: "x",
+          filenameEdited: true,
+        },
+        {
+          id: "2",
+          filename: "b.css",
+          language: "css",
+          content: "",
+          filenameEdited: true,
+        },
+      ])
+    ).toBe(true);
   });
 });
 

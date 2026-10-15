@@ -42,7 +42,14 @@ export async function POST(request: NextRequest) {
       if (files.length >= 2) {
         storedCodeFiles = files;
       } else if (files.length === 1) {
-        storedCodeContent = files[0].content;
+        const file = files[0];
+        // code_content cannot store language/filename; keep code_files when either is set so a
+        // single starter file (e.g. html while content.code_language is javascript) survives.
+        if (file.language.trim().length > 0 || file.filename.trim().length > 0) {
+          storedCodeFiles = files;
+        } else {
+          storedCodeContent = file.content;
+        }
       } else if (hasLegacyContent) {
         storedCodeContent = codeContent;
       } else {

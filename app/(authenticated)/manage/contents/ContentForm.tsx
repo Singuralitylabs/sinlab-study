@@ -9,6 +9,7 @@ import { CODE_LANGUAGE_OPTIONS, type CodeLanguage } from "@/app/components/code-
 import { CONTENT_TYPE_FORM_OPTIONS } from "@/app/constants/content";
 import { SLIDE_NUMBER_MAX } from "@/app/constants/slides";
 import {
+  buildInitialCodeFiles,
   type CodeFileInput,
   createEmptyCodeFile,
   parseStarterFiles,
@@ -256,16 +257,11 @@ export function ContentForm({
     if (!parsed) {
       return [];
     }
-    const language = (initialData?.code_language as CodeLanguage) ?? "javascript";
-    return parsed.map((file, index) => ({
-      id: `starter-${index}`,
-      filename: file.filename,
-      language: CODE_LANGUAGE_OPTIONS.some((opt) => opt.value === file.language)
-        ? (file.language as CodeLanguage)
-        : language,
-      content: file.content,
-      filenameEdited: true,
-    }));
+    return buildInitialCodeFiles(
+      parsed,
+      (initialData?.code_language as CodeLanguage) ?? "javascript",
+      { filenameEdited: true }
+    );
   });
   // Only the object key is stored (#89). Legacy public URLs are normalized to a key; unnormalizable
   // values become empty, but requiresSlidePdf (initialData.pdf_url truthy) blocks saving until
@@ -417,6 +413,15 @@ export function ContentForm({
       return;
     }
 
+    let starterFilesPayload: ReturnType<typeof toStarterFilesPayload> | null = null;
+    if (contentType === "exercise") {
+      starterFilesPayload = toStarterFilesPayload(starterFiles);
+      if (!starterFilesPayload.ok) {
+        setMessage({ type: "error", text: starterFilesPayload.error });
+        return;
+      }
+    }
+
     // Validate with the same schema as the API so choice counts and correct answers are reported
     // per question before sending.
     let validatedQuizQuestions: QuizQuestionData[] | undefined;
@@ -459,7 +464,7 @@ export function ContentForm({
         contentType === "exercise" ? exerciseInstructions.trim() || null : null,
       hint: contentType === "exercise" ? hint.trim() || null : null,
       reference_answer: contentType === "exercise" ? referenceAnswer.trim() || null : null,
-      starter_files: contentType === "exercise" ? toStarterFilesPayload(starterFiles) : null,
+      starter_files: starterFilesPayload?.ok ? starterFilesPayload.files : null,
       allowed_submission_types: contentType === "exercise" ? allowedSubmissionTypes : "code",
       code_language: contentType === "exercise" ? codeLanguage : "javascript",
       pdf_url: contentType === "slide" ? pdfUrl.trim() || null : null,
