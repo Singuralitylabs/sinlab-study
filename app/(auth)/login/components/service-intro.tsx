@@ -31,7 +31,7 @@ const FEATURES: Feature[] = [
     lead: "進捗が",
     emphasis: "「見える」",
     trail: "から、やる気が続く",
-    description: "ダッシュボードの進捗率・進捗バーで成長がビジュアルで見える",
+    description: "ホームの進捗率・進捗バーで成長がビジュアルで見える",
   },
   {
     id: "materials",

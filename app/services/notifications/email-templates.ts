@@ -236,7 +236,7 @@ export function buildApprovedEmail(
     texts,
     displayName: params.displayName,
     values: { membership_label: params.membershipLabel },
-    links: [{ label: "ダッシュボードを開く", url: buildAppUrl(params.appUrl, "/") }],
+    links: [{ label: "ホームを開く", url: buildAppUrl(params.appUrl, "/") }],
   });
 }
 
@@ -262,7 +262,7 @@ export function buildUpgradedEmail(
       next_billing_date: params.nextBillingDateLabel ?? "",
     },
     links: [
-      { label: "ダッシュボードを開く", url: buildAppUrl(params.appUrl, "/") },
+      { label: "ホームを開く", url: buildAppUrl(params.appUrl, "/") },
       { label: "お支払い情報の管理", url: buildAppUrl(params.appUrl, "/upgrade") },
     ],
   });
@@ -375,7 +375,7 @@ export function buildWeeklyDigestEmail(
     },
     links: params.nextContent
       ? [{ label: "続きから学ぶ", url: buildAppUrl(params.appUrl, params.nextContent.path) }]
-      : [{ label: "ダッシュボードを開く", url: buildAppUrl(params.appUrl, "/") }],
+      : [{ label: "ホームを開く", url: buildAppUrl(params.appUrl, "/") }],
     unsubscribeUrl: params.unsubscribeUrl,
     emailPreferencesUrl: preferencesUrl(params.appUrl),
   });
@@ -436,7 +436,7 @@ function registrationSentence(upgradeAvailable: boolean): string {
 function registrationLinks(appUrl: string, upgradeAvailable: boolean): EmailLink[] {
   return upgradeAvailable
     ? [{ label: "プランのアップグレード", url: buildAppUrl(appUrl, "/upgrade") }]
-    : [{ label: "ダッシュボードを開く", url: buildAppUrl(appUrl, "/") }];
+    : [{ label: "ホームを開く", url: buildAppUrl(appUrl, "/") }];
 }
 
 const TRIAL_NURTURE_STAGES = [14, 7, 5, 2] as const;

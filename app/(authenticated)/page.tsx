@@ -1,4 +1,4 @@
-import { Award, BookOpen, Megaphone } from "lucide-react";
+import { Award, Megaphone } from "lucide-react";
 import Link from "next/link";
 import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
@@ -7,12 +7,16 @@ import { getWelcomeStepsForStatus } from "@/app/constants/onboarding";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import { isCertificateEligible } from "@/app/lib/certificate";
+import { resolveContinueLearning } from "@/app/lib/continue-learning";
 import { formatDate } from "@/app/lib/format-date";
 import { splitThemesByActivity } from "@/app/lib/theme-progress";
 import { shouldShowTrialNextStep } from "@/app/lib/trial-upgrade";
 import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
 import { fetchRecentCertificate } from "@/app/services/api/certificates-server";
-import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
+import {
+  fetchContinueLearningInputs,
+  fetchThemeProgressSummaries,
+} from "@/app/services/api/learning-server";
 import {
   fetchGettingStartedProgress,
   fetchOnboardingStatus,
@@ -20,13 +24,14 @@ import {
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { checkInstructorPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ContinueLearningCard } from "./components/ContinueLearningCard";
 import {
   buildGettingStartedItems,
   GettingStartedChecklist,
 } from "./components/GettingStartedChecklist";
-import { ActiveThemeProgressCard, ThemeSections } from "./components/ThemeProgressSections";
+import { HomeQuickLinks } from "./components/HomeQuickLinks";
+import { ActiveThemesSection } from "./components/ThemeProgressSections";
 import { WelcomeDialog } from "./components/WelcomeDialog";
 
 export default async function HomePage() {
@@ -52,12 +57,14 @@ export default async function HomePage() {
 
   const [
     { data: themeData },
+    { data: continueLearningData },
     onboardingResult,
     gettingStartedResult,
     announcementsResult,
     recentCertificate,
   ] = await Promise.all([
     fetchThemeProgressSummaries(userId),
+    fetchContinueLearningInputs(userId),
     isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
     isMember ? fetchGettingStartedProgress(userId) : Promise.resolve({ data: null, error: null }),
     getViewerAnnouncements(),
@@ -85,9 +92,18 @@ export default async function HomePage() {
   const showTrialNextStep = shouldShowTrialNextStep(userStatus, userRole, themes);
   const priceLabel = showTrialNextStep ? await priceLabelPromise : null;
 
+  const continueLearning =
+    !showTrialNextStep && continueLearningData
+      ? resolveContinueLearning(
+          continueLearningData.orderedContents,
+          continueLearningData.completedContentIds,
+          continueLearningData.completedAtByContentId
+        )
+      : null;
+
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="text-3xl font-bold tracking-tight mb-6">ダッシュボード</h1>
+      <h1 className="text-3xl font-bold tracking-tight mb-6">ホーム</h1>
 
       {showWelcomeDialog && (
         <WelcomeDialog
@@ -148,11 +164,9 @@ export default async function HomePage() {
         </Card>
       )}
 
-      <ActiveThemeProgressCard
-        active={active}
-        firstNotStarted={notStarted.find((summary) => summary.totalContents > 0) ?? null}
-        hasCompleted={completed.length > 0}
-      />
+      <HomeQuickLinks stripeEnabled={stripeEnabled} />
+
+      {continueLearning && <ContinueLearningCard target={continueLearning} />}
 
       {showTrialNextStep && (
         <Card className="mb-6">
@@ -171,37 +185,11 @@ export default async function HomePage() {
 
       {isMember && <GettingStartedChecklist items={gettingStartedItems} />}
 
-      <div className="grid gap-4">
-        <h2 className="text-lg font-semibold flex items-center gap-2">
-          <BookOpen className="h-5 w-5" />
-          学習テーマ
-        </h2>
-
-        {themes.length === 0 ? (
-          <Card>
-            <CardContent className="py-8 text-center text-muted-foreground">
-              <p>学習コンテンツはまだ登録されていません。</p>
-            </CardContent>
-          </Card>
-        ) : (
-          <ThemeSections
-            active={active}
-            completed={completed}
-            notStarted={notStarted}
-            certificatesHref={
-              isCertificateEligible(userStatus, userRole) ? "/certificates" : undefined
-            }
-          />
-        )}
-      </div>
-
-      {themes.length > 0 && (
-        <div className="mt-6 text-center">
-          <Button asChild>
-            <Link href="/learn">学習を始める</Link>
-          </Button>
-        </div>
-      )}
+      <ActiveThemesSection
+        active={active}
+        firstNotStarted={notStarted.find((summary) => summary.totalContents > 0) ?? null}
+        hasCompleted={completed.length > 0}
+      />
     </div>
   );
 }

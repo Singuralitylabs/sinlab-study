@@ -6,9 +6,11 @@ import {
   type NavigationContent,
   type NavigationWeek,
 } from "@/app/lib/content-navigation";
+import type { ContinueLearningContent } from "@/app/lib/continue-learning";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
 import type {
   BreadcrumbWeek,
+  ContentType,
   LearningContent,
   LearningContentListItem,
   LearningContentWithBreadcrumb,
@@ -184,6 +186,164 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
   }));
 
   return { data, error: null };
+}
+
+type ContinueLearningNestedTheme = {
+  id: number;
+  name: string;
+  display_order: number | null;
+  phases: {
+    id: number;
+    name: string;
+    display_order: number | null;
+    weeks: {
+      id: number;
+      name: string;
+      display_order: number | null;
+      contents: {
+        id: number;
+        title: string;
+        content_type: ContentType;
+        display_order: number | null;
+        week_id: number;
+      }[];
+    }[];
+  }[];
+};
+
+/**
+ * Ordered visible contents plus completion timestamps for the home "続きから学習" card.
+ * Same published/deleted filters as fetchThemeProgressSummaries(); uses the user session (RLS),
+ * never service_role. Admin/maintainer still only see published contents here so the card matches
+ * the progress summaries.
+ */
+export async function fetchContinueLearningInputs(userId: number): Promise<{
+  data: {
+    orderedContents: ContinueLearningContent[];
+    completedContentIds: Set<number>;
+    completedAtByContentId: Map<number, number>;
+  } | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+
+  let abandoned = false;
+  const progressPromise = (async () => {
+    try {
+      return await fetchCompletedProgressWithTimes();
+    } catch (error) {
+      console.error("続きから学習の進捗取得エラー:", error);
+      return { completedContentIds: new Set<number>(), completedAtByContentId: new Map() };
+    }
+  })();
+
+  async function fetchCompletedProgressWithTimes(): Promise<{
+    completedContentIds: Set<number>;
+    completedAtByContentId: Map<number, number>;
+  }> {
+    const completedContentIds = new Set<number>();
+    const completedAtByContentId = new Map<number, number>();
+    const pageSize = 1000;
+    for (let offset = 0; !abandoned; offset += pageSize) {
+      const { data: progress, error: progressError } = await supabase
+        .from("user_progress")
+        .select("content_id, completed_at")
+        .eq("user_id", userId)
+        .eq("is_completed", true)
+        .order("content_id")
+        .range(offset, offset + pageSize - 1);
+
+      if (progressError) {
+        console.error("続きから学習の進捗取得エラー:", progressError.message);
+        return { completedContentIds: new Set(), completedAtByContentId: new Map() };
+      }
+
+      for (const row of progress || []) {
+        completedContentIds.add(row.content_id);
+        if (row.completed_at) {
+          completedAtByContentId.set(row.content_id, Date.parse(row.completed_at));
+        }
+      }
+      if (!progress || progress.length < pageSize) {
+        return { completedContentIds, completedAtByContentId };
+      }
+    }
+    return { completedContentIds, completedAtByContentId };
+  }
+
+  const { data: themes, error: themesError } = await supabase
+    .from("learning_themes")
+    .select(
+      "id, name, display_order, phases:learning_phases(id, name, display_order, weeks:learning_weeks(id, name, display_order, contents:learning_contents(id, title, content_type, display_order, week_id)))"
+    )
+    .eq("is_published", true)
+    .eq("is_deleted", false)
+    .eq("phases.is_published", true)
+    .eq("phases.is_deleted", false)
+    .eq("phases.weeks.is_published", true)
+    .eq("phases.weeks.is_deleted", false)
+    .eq("phases.weeks.contents.is_published", true)
+    .eq("phases.weeks.contents.is_deleted", false)
+    .order("display_order");
+
+  if (themesError) {
+    abandoned = true;
+    console.error("続きから学習のコンテンツ取得エラー:", themesError.message);
+    return { data: null, error: themesError };
+  }
+
+  const nestedThemes = (themes ?? []) as unknown as ContinueLearningNestedTheme[];
+  const orderedThemes = [...nestedThemes].sort((a, b) =>
+    compareGroupLevel(a.display_order, b.display_order, a.id, b.id)
+  );
+
+  const orderedContents: ContinueLearningContent[] = [];
+  for (const theme of orderedThemes) {
+    const weeks: NavigationWeek[] = theme.phases.flatMap((phase) =>
+      phase.weeks.map((week) => ({
+        id: week.id,
+        name: week.name,
+        display_order: week.display_order,
+        phase: {
+          id: phase.id,
+          name: phase.name,
+          display_order: phase.display_order,
+        },
+      }))
+    );
+    const contents = theme.phases.flatMap((phase) => phase.weeks.flatMap((week) => week.contents));
+    const contentById = new Map(contents.map((c) => [c.id, c]));
+    for (const ordered of buildThemeContentOrder(weeks, contents)) {
+      const raw = contentById.get(ordered.id);
+      if (!raw) continue;
+      orderedContents.push({
+        id: ordered.id,
+        title: ordered.title,
+        contentType: raw.content_type,
+        themeId: theme.id,
+        themeName: theme.name,
+        phaseId: ordered.phaseId,
+        weekId: ordered.weekId,
+      });
+    }
+  }
+
+  if (orderedContents.length === 0) {
+    abandoned = true;
+  }
+  const progress =
+    orderedContents.length > 0
+      ? await progressPromise
+      : { completedContentIds: new Set<number>(), completedAtByContentId: new Map() };
+
+  return {
+    data: {
+      orderedContents,
+      completedContentIds: progress.completedContentIds,
+      completedAtByContentId: progress.completedAtByContentId,
+    },
+    error: null,
+  };
 }
 
 /** admin / maintainer also get unpublished themes as preview (issue #68). */

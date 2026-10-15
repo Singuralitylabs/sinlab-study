@@ -1,6 +1,7 @@
-import { BookOpen, CheckCircle, Clock, TrendingUp } from "lucide-react";
+import { BookOpen, CheckCircle, Clock } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { isThemeCompleted } from "@/app/lib/certificate";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
 import type { ThemeProgressSummary } from "@/app/services/api/learning-server";
@@ -12,83 +13,21 @@ function percentOf({ totalContents, completedContents }: ThemeProgressSummary): 
   return totalContents > 0 ? Math.round((completedContents / totalContents) * 100) : 0;
 }
 
-/**
- * "Learning progress" card: one bar per theme in progress. There is deliberately no all-themes
- * percentage, which would fall every time a theme is added.
- */
-export function ActiveThemeProgressCard({
-  active,
-  firstNotStarted,
-  hasCompleted,
-}: {
-  active: ThemeProgressSummary[];
-  firstNotStarted: ThemeProgressSummary | null;
-  hasCompleted: boolean;
-}) {
-  return (
-    <Card className="mb-6">
-      <CardContent className="pt-6">
-        <div className="flex items-center gap-4 mb-4">
-          <div className="p-3 bg-primary/10 rounded-full">
-            <TrendingUp className="h-6 w-6 text-primary" />
-          </div>
-          <h2 className="text-lg font-semibold">学習進捗</h2>
-        </div>
-
-        {active.length > 0 ? (
-          <ul className="space-y-4">
-            {active.map((summary) => (
-              <li key={summary.theme.id}>
-                <div className="flex items-baseline justify-between gap-3 mb-1">
-                  <Link
-                    href={`/learn/${summary.theme.id}`}
-                    className="font-medium truncate hover:text-primary transition-colors"
-                  >
-                    {summary.theme.name}
-                  </Link>
-                  <span className="text-sm text-muted-foreground shrink-0">
-                    {summary.completedContents} / {summary.totalContents} コンテンツ完了
-                  </span>
-                </div>
-                <Progress value={percentOf(summary)} className="h-2" />
-                <p className="text-right text-sm text-muted-foreground mt-1">
-                  {percentOf(summary)}%
-                </p>
-              </li>
-            ))}
-          </ul>
-        ) : firstNotStarted ? (
-          <p className="text-sm">
-            <Link
-              href={`/learn/${firstNotStarted.theme.id}`}
-              className="text-primary hover:underline"
-            >
-              {hasCompleted ? "次のテーマを始めましょう" : "最初のテーマを始めましょう"}
-            </Link>
-            （{firstNotStarted.theme.name}）
-          </p>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            {hasCompleted
-              ? "すべてのテーマを修了しました。"
-              : "学習コンテンツはまだ登録されていません。"}
-          </p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function ThemeCard({
+/** Theme card with progress; shared by home (active themes) and /learn. */
+export function ThemeCard({
   summary,
   certificatesHref,
+  unpublishedBadge,
 }: {
   summary: ThemeProgressSummary;
   /** Set only for completed themes of learners who can hold certificates. */
   certificatesHref?: string;
+  /** Optional node shown next to the theme name (e.g. UnpublishedBadge on /learn). */
+  unpublishedBadge?: ReactNode;
 }) {
   const { theme, totalContents, completedContents } = summary;
   const isCompleted = isThemeCompleted(summary);
+  const showProgress = totalContents > 0 || completedContents > 0;
 
   return (
     <div>
@@ -124,19 +63,24 @@ function ThemeCard({
                   <h3 className="font-medium group-hover:text-primary transition-colors truncate">
                     {theme.name}
                   </h3>
+                  {unpublishedBadge}
                 </div>
-                <span className="text-sm text-muted-foreground shrink-0 ml-2">
-                  {completedContents} / {totalContents}
-                </span>
+                {showProgress && (
+                  <span className="text-sm text-muted-foreground shrink-0 ml-2">
+                    {completedContents} / {totalContents}
+                  </span>
+                )}
               </div>
               {theme.description && (
                 <p className="text-sm text-muted-foreground mb-2 ml-6 line-clamp-1">
                   {theme.description}
                 </p>
               )}
-              <div className="ml-6">
-                <Progress value={percentOf(summary)} className="h-2" />
-              </div>
+              {showProgress && (
+                <div className="ml-6">
+                  <Progress value={percentOf(summary)} className="h-2" />
+                </div>
+              )}
             </CardContent>
           </div>
         </Card>
@@ -157,7 +101,50 @@ function ThemeCard({
   );
 }
 
-/** The existing theme list, split under "learning" / "completed" / "not started" headings. */
+/**
+ * Home "学習中のテーマ" section. Empty-state copy matches the former learning-progress card
+ * (first/next theme link, all done, or no content).
+ */
+export function ActiveThemesSection({
+  active,
+  firstNotStarted,
+  hasCompleted,
+}: {
+  active: ThemeProgressSummary[];
+  firstNotStarted: ThemeProgressSummary | null;
+  hasCompleted: boolean;
+}) {
+  return (
+    <section className="mb-6 grid gap-4">
+      <h2 className="text-lg font-semibold flex items-center gap-2">
+        <BookOpen className="h-5 w-5" />
+        学習中のテーマ
+      </h2>
+
+      {active.length > 0 ? (
+        active.map((summary) => <ThemeCard key={summary.theme.id} summary={summary} />)
+      ) : firstNotStarted ? (
+        <p className="text-sm">
+          <Link
+            href={`/learn/${firstNotStarted.theme.id}`}
+            className="text-primary hover:underline"
+          >
+            {hasCompleted ? "次のテーマを始めましょう" : "最初のテーマを始めましょう"}
+          </Link>
+          （{firstNotStarted.theme.name}）
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {hasCompleted
+            ? "すべてのテーマを修了しました。"
+            : "学習コンテンツはまだ登録されていません。"}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** The theme list split under "learning" / "completed" / "not started" headings. */
 export function ThemeSections({
   active,
   completed,

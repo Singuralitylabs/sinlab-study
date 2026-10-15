@@ -100,7 +100,7 @@ export default async function UpgradeSuccessPage({
                 )}
               </div>
               <Button asChild>
-                <Link href="/">ダッシュボードへ</Link>
+                <Link href="/">ホームへ</Link>
               </Button>
             </>
           ) : (
