@@ -230,6 +230,36 @@ describe("buildLockedSubmissionFiles / toSubmissionSlotPayload", () => {
     ]);
   });
 
+  it("ファイル名が空で言語が違っても既定1ファイルの本文は残し、保存で消さない", () => {
+    const files = buildLockedSubmissionFiles({
+      submissionFileSlots: null,
+      starterFiles: [{ filename: "", language: "html", content: "function main() {}" }],
+      codeLanguage: "javascript",
+    });
+    expect(files.map((file) => [file.filename, file.language, file.content])).toEqual([
+      [DEFAULT_FILENAME_BY_LANGUAGE.javascript, "javascript", "function main() {}"],
+    ]);
+    const saved = toSubmissionSlotPayload(
+      files.map((file) => ({
+        filename: file.filename,
+        language: file.language,
+        starterContent: file.content,
+      }))
+    );
+    expect(saved).toEqual({
+      ok: true,
+      slots: null,
+      codeLanguage: "javascript",
+      starterFiles: [
+        {
+          filename: DEFAULT_FILENAME_BY_LANGUAGE.javascript,
+          language: "javascript",
+          content: "function main() {}",
+        },
+      ],
+    });
+  });
+
   it("既定の1ファイルで初期コードが空なら slots は null", () => {
     const result = toSubmissionSlotPayload([
       { filename: "code.js", language: "javascript", starterContent: "" },

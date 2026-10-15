@@ -205,15 +205,15 @@ function starterContentForSlot(
     return named.content ?? "";
   }
   // #341 kept a single starter row with an empty filename. The default slot uses
-  // DEFAULT_FILENAME_BY_LANGUAGE, so a name match would drop that content and an admin save
-  // would then store starter_files as null.
+  // DEFAULT_FILENAME_BY_LANGUAGE, so a name match would drop that content. A language that
+  // differs from the slot is the same row: dropping it leaves the editor empty and the next
+  // admin save stores starter_files as null.
   const only = starters.length === 1 ? starters[0] : undefined;
   if (
     slots.length === 1 &&
     index === 0 &&
     only !== undefined &&
-    only.filename.trim().length === 0 &&
-    (only.language.length === 0 || only.language === slot.language)
+    only.filename.trim().length === 0
   ) {
     return only.content ?? "";
   }
