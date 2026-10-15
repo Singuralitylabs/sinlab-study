@@ -175,8 +175,50 @@ export function filterReviewItemsToVisibleContents<T extends { contentId: number
 }
 
 /**
+ * Home / badge count from already-fetched reviews + visible content IDs (same filter as the list).
+ * Keeps derive → filter → count in one place so page.tsx does not re-inline the pipeline.
+ */
+export function countVisibleUnovercome(
+  reviews: readonly ReviewListSourceReview[],
+  visibleContentIds: ReadonlySet<number>
+): number {
+  return countUnovercomeReviewItems(
+    filterReviewItemsToVisibleContents(deriveReviewListItems(reviews), visibleContentIds)
+  );
+}
+
+/**
+ * Latest known requirement display name per (contentId, key) across all usable reviews.
+ * Used for orphan memos after estimated key rename — keys alone are AI ids, not learner-facing.
+ */
+export function buildRequirementNameByContentKey(
+  reviews: readonly ReviewListSourceReview[]
+): Map<string, string> {
+  const names = new Map<string, string>();
+  const usable = reviews
+    .filter((review) => isReviewableKind(review.scoreKind))
+    .map((review) => {
+      const reviewJson = asReviewJson(review.reviewJson);
+      return reviewJson ? { ...review, reviewJson } : null;
+    })
+    .filter((review): review is ReviewListSourceReview & { reviewJson: ReviewJson } =>
+      Boolean(review)
+    )
+    .sort(compareReviews);
+
+  for (const review of usable) {
+    for (const requirement of review.reviewJson.requirements) {
+      const name = requirement.name?.trim() || requirement.key;
+      names.set(`${review.contentId}:${requirement.key}`, name);
+    }
+  }
+  return names;
+}
+
+/**
  * Notes keyed to a requirement that is no longer in the derived open/overcome set (e.g. estimated
  * key renamed on resubmit). Rows stay in DB; the list surfaces them so memos are not stranded.
+ * Only notes with non-empty memo text (matches UI copy: written memos remain).
  */
 export function findOrphanRequirementNotes<
   T extends {
@@ -190,8 +232,7 @@ export function findOrphanRequirementNotes<
   return notes.filter((note) => {
     if (note.requirement_key === null) return false;
     if (activeKeys.has(`${note.content_id}:${note.requirement_key}`)) return false;
-    const hasMemo = note.memo != null && note.memo.trim() !== "";
-    return hasMemo || note.understood_at != null;
+    return note.memo != null && note.memo.trim() !== "";
   });
 }
 

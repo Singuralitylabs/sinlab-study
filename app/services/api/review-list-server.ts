@@ -5,6 +5,7 @@ import {
   orderContentsAcrossThemes,
 } from "@/app/lib/published-theme-tree";
 import {
+  buildRequirementNameByContentKey,
   countUnovercomeReviewItems,
   type DerivedReviewItem,
   deriveReviewListItems,
@@ -59,7 +60,8 @@ export type OrphanMemoView = {
   themeName: string;
   href: string;
   requirementKey: string;
-  memo: string | null;
+  requirementName: string;
+  memo: string;
   understoodAt: string | null;
 };
 
@@ -270,10 +272,13 @@ export async function buildReviewListForUser(userId: number): Promise<{
   const unovercome = views.filter((item) => !item.overcome);
   const overcome = views.filter((item) => item.overcome);
 
+  const requirementNames = buildRequirementNameByContentKey(reviewsResult.data);
   const orphanMemos: OrphanMemoView[] = [];
   for (const note of findOrphanRequirementNotes(notesResult.data, views)) {
     const meta = contentResult.metas.get(note.content_id);
-    if (!meta || note.requirement_key === null) continue;
+    if (!meta || note.requirement_key === null || note.memo == null) continue;
+    const memo = note.memo.trim();
+    if (memo === "") continue;
     orphanMemos.push({
       contentId: note.content_id,
       contentTitle: meta.title,
@@ -281,7 +286,9 @@ export async function buildReviewListForUser(userId: number): Promise<{
       themeName: meta.themeName,
       href: meta.href,
       requirementKey: note.requirement_key,
-      memo: note.memo,
+      requirementName:
+        requirementNames.get(`${note.content_id}:${note.requirement_key}`) ?? note.requirement_key,
+      memo,
       understoodAt: note.understood_at,
     });
   }
@@ -321,39 +328,4 @@ export async function buildReviewListForUser(userId: number): Promise<{
     unovercomeCount: countUnovercomeReviewItems(views),
     error: null,
   };
-}
-
-/**
- * Home / nav badge: count only. Uses the same published/visible content filter as
- * buildReviewListForUser() so the number matches the list. Pass `visibleContentIds` from an
- * already-fetched home/learn tree to skip a third published-tree round-trip.
- */
-export async function countUnovercomeReviewItemsForUser(
-  userId: number,
-  visibleContentIds?: ReadonlySet<number>
-): Promise<number> {
-  if (visibleContentIds !== undefined) {
-    const reviewsResult = await fetchReviewListSourceReviews(userId);
-    if (reviewsResult.error) {
-      return 0;
-    }
-    return countUnovercomeReviewItems(
-      filterReviewItemsToVisibleContents(
-        deriveReviewListItems(reviewsResult.data),
-        visibleContentIds
-      )
-    );
-  }
-
-  const [reviewsResult, contentResult] = await Promise.all([
-    fetchReviewListSourceReviews(userId),
-    fetchReviewListContentOrder(),
-  ]);
-  if (reviewsResult.error || contentResult.error) {
-    return 0;
-  }
-  const visibleIds = new Set(contentResult.metas.keys());
-  return countUnovercomeReviewItems(
-    filterReviewItemsToVisibleContents(deriveReviewListItems(reviewsResult.data), visibleIds)
-  );
 }

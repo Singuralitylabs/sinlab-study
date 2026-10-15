@@ -143,7 +143,7 @@ export function ReviewListClient({
                   <Link href={orphan.href} className="font-medium text-primary hover:underline">
                     {orphan.contentTitle}
                   </Link>
-                  <p className="mt-1 text-sm text-muted-foreground">{orphan.requirementKey}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{orphan.requirementName}</p>
                 </div>
                 <ReviewNoteMemoField
                   contentId={orphan.contentId}

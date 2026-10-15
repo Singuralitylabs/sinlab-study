@@ -9,11 +9,7 @@ import { USER_STATUS } from "@/app/constants/user";
 import { isCertificateEligible } from "@/app/lib/certificate";
 import { resolveContinueLearning } from "@/app/lib/continue-learning";
 import { formatDate } from "@/app/lib/format-date";
-import {
-  countUnovercomeReviewItems,
-  deriveReviewListItems,
-  filterReviewItemsToVisibleContents,
-} from "@/app/lib/review-list";
+import { countVisibleUnovercome } from "@/app/lib/review-list";
 import { splitThemesByActivity } from "@/app/lib/theme-progress";
 import { shouldShowTrialNextStep } from "@/app/lib/trial-upgrade";
 import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
@@ -84,12 +80,7 @@ export default async function HomePage() {
   const visibleContentIds = new Set(homeLearning?.orderedContents.map((c) => c.id) ?? []);
   const unovercomeReviewCount =
     showReviewList && !reviewsResult.error
-      ? countUnovercomeReviewItems(
-          filterReviewItemsToVisibleContents(
-            deriveReviewListItems(reviewsResult.data),
-            visibleContentIds
-          )
-        )
+      ? countVisibleUnovercome(reviewsResult.data, visibleContentIds)
       : 0;
   const unreadAnnouncements = (announcementsResult.data ?? [])
     .filter((announcement) => !announcement.isRead)

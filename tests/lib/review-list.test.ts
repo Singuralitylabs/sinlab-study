@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildRequirementNameByContentKey,
   countUnovercomeReviewItems,
+  countVisibleUnovercome,
   deriveReviewListItems,
   filterReviewItemsToVisibleContents,
   findOrphanRequirementNotes,
@@ -344,7 +346,7 @@ describe("filterReviewItemsToVisibleContents", () => {
 });
 
 describe("findOrphanRequirementNotes", () => {
-  it("現在の項目に無い requirement_key のメモを残し、自由メモと空行は除外する", () => {
+  it("現在の項目に無い requirement_key のメモだけ残し、理解しただけ・空・自由メモは除外する", () => {
     const orphans = findOrphanRequirementNotes(
       [
         {
@@ -369,7 +371,7 @@ describe("findOrphanRequirementNotes", () => {
           content_id: 10,
           requirement_key: "empty",
           memo: "  ",
-          understood_at: null,
+          understood_at: "2026-01-01T00:00:00.000Z",
         },
         {
           content_id: 10,
@@ -381,6 +383,61 @@ describe("findOrphanRequirementNotes", () => {
       [{ contentId: 10, requirementKey: "keep" }]
     );
 
-    expect(orphans.map((note) => note.requirement_key)).toEqual(["old", "understood_only"]);
+    expect(orphans.map((note) => note.requirement_key)).toEqual(["old"]);
+  });
+});
+
+describe("buildRequirementNameByContentKey", () => {
+  it("置き換え前の estimated 要件名を残し、新しいレビューの名前で上書きする", () => {
+    const names = buildRequirementNameByContentKey([
+      source({
+        id: 1,
+        contentId: 10,
+        scoreKind: "estimated",
+        reviewJson: reviewJson([
+          { key: "old_key", name: "エラー処理", status: "unmet", comment: "不足" },
+        ]),
+      }),
+      source({
+        id: 2,
+        contentId: 10,
+        scoreKind: "estimated",
+        reviewedAt: "2026-01-02T00:00:00.000Z",
+        reviewJson: reviewJson([
+          { key: "new_key", name: "入力検証", status: "partial", comment: "ほぼ" },
+          { key: "old_key", name: "エラー処理（改）", status: "met", comment: "ok" },
+        ]),
+      }),
+    ]);
+
+    expect(names.get("10:old_key")).toBe("エラー処理（改）");
+    expect(names.get("10:new_key")).toBe("入力検証");
+  });
+});
+
+describe("countVisibleUnovercome", () => {
+  it("可視コンテンツ上の未克服だけを数える", () => {
+    const reviews = [
+      source({
+        id: 1,
+        contentId: 10,
+        scoreKind: "rubric",
+        reviewJson: reviewJson([
+          { key: "r1", name: "要件1", status: "unmet", comment: "未達" },
+        ]),
+      }),
+      source({
+        id: 2,
+        contentId: 20,
+        scoreKind: "rubric",
+        reviewJson: reviewJson([
+          { key: "r2", name: "要件2", status: "partial", comment: "ほぼ" },
+        ]),
+      }),
+    ];
+
+    expect(countVisibleUnovercome(reviews, new Set([10]))).toBe(1);
+    expect(countVisibleUnovercome(reviews, new Set([10, 20]))).toBe(2);
+    expect(countVisibleUnovercome(reviews, new Set([99]))).toBe(0);
   });
 });
