@@ -623,7 +623,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 
 **対応言語**: `code_language` カラムで演習ごとに設定する（`javascript`（既定）/ `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`。#307）。許可値・既定ファイル名・表示名は `app/components/code-editor-utils.ts`（`CODE_LANGUAGES` / `DEFAULT_FILENAME_BY_LANGUAGE` / `CODE_LANGUAGE_LABELS`）に集約し、管理画面と提出フォームの言語セレクトも同じ一覧から作る。DB の CHECK 制約との一致はテストで検査する。SQL は PostgreSQL 方言、Bash は `@codemirror/legacy-modes` の shell モードで色分けする。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（エディタの言語モードは変えない）。Markdown のコードフェンスは `sql` / `bash` / `markdown` / `python` / `json` と `jsx` / `tsx` も色分けする（`MarkdownRenderer`）。
 
-**初期コード（#341）**: 演習は任意で `learning_contents.starter_files`（`[{ filename, language, content }]`。`submissions.code_files` と同じ形）を持てる。管理画面（`ContentForm`）で登録・編集し、複数ファイル編集 UI は提出フォームと共通コンポーネント（`CodeFilesEditor`）を使う。受講生の提出フォームは `starter_files` があるときその内容で開始し、「初期コードに戻す」（確認ダイアログ付き）と提出成功後のリセットも同じ初期コードへ戻す。NULL の既存演習は従来どおり空ファイル1つから開始する。前回提出の読み込みは行わない（提出履歴として別表示）。単一ファイルでもファイル名・言語は保持する。秘匿ではないため列権限と詳細 SELECT に含め、`reference_answer` や service_role のツリー／サマリー用許可カラムリストとは混ぜない。
+**初期コード（#341）**: 演習は任意で `learning_contents.starter_files`（`[{ filename, language, content }]`。`submissions.code_files` と同じ形）を持てる。管理画面（`ContentForm`）で登録・編集し、複数ファイル編集 UI は提出フォームと共通コンポーネント（`CodeFilesEditor`）を使う。受講生の提出フォームは `starter_files` があるときその内容で開始し、「初期コードに戻す」（確認ダイアログ付き）と提出成功後のリセットも同じ初期コードへ戻す。初期コードから未変更のままでは提出できない（AIレビュー枠の消費を防ぐ）。合計文字数の上限は `STARTER_FILES_MAX_TOTAL_LENGTH`（提出・レビュー上限 `GEMINI_MAX_CODE_LENGTH` より小さい）。NULL の既存演習は従来どおり空ファイル1つから開始する。前回提出の読み込みは行わない（提出履歴として別表示）。単一ファイルでもファイル名・言語は保持する（必要なら `code_files` に1要素で保存）。秘匿ではないため列権限と詳細 SELECT に含め、`reference_answer` や service_role のツリー／サマリー用許可カラムリストとは混ぜない。
 
 **エディタ機能**:
 - シンタックスハイライト

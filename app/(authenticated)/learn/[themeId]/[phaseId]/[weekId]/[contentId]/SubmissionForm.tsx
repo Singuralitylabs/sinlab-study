@@ -13,6 +13,7 @@ import {
   buildSubmissionCodeFiles,
   type CodeFileInput,
   isSubmissionCodeValid,
+  isUnchangedFromStarter,
 } from "@/app/lib/code-file-inputs";
 import { canPreviewFiles } from "@/app/lib/html-preview";
 import type { AIReviewListItem, CodeFile, SubmissionType } from "@/app/types";
@@ -56,8 +57,14 @@ export function SubmissionForm({
   const [submissionType, setSubmissionType] = useState<SubmissionType>(
     allowedSubmissionTypes === "url" ? "url" : "code"
   );
-  const [codeFiles, setCodeFiles] = useState<CodeFileInput[]>(() =>
-    buildInitialCodeFiles(starterFiles, codeLanguage)
+  // Snapshot at mount so "unchanged starter" checks survive later prop refreshes.
+  const [starterSnapshot] = useState(() =>
+    starterFiles && starterFiles.length > 0
+      ? buildInitialCodeFiles(starterFiles, codeLanguage)
+      : null
+  );
+  const [codeFiles, setCodeFiles] = useState<CodeFileInput[]>(
+    () => starterSnapshot ?? buildInitialCodeFiles(null, codeLanguage)
   );
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -68,14 +75,19 @@ export function SubmissionForm({
   const [aiReview, setAiReview] = useState<AIReviewListItem | null>(null);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
-  const hasStarter = Boolean(starterFiles && starterFiles.length > 0);
+  const hasStarter = Boolean(starterSnapshot && starterSnapshot.length > 0);
+  const unchangedFromStarter = isUnchangedFromStarter(codeFiles, starterSnapshot);
   // Judged by the files' own languages so the UI never appears for non-web exercises.
   const showPreview = submissionType === "code" && canPreviewFiles(codeFiles);
   const emptyShellCount = codeFiles.filter((file) => file.content.trim().length === 0).length;
   const hasSubmittableCode = codeFiles.some((file) => file.content.trim().length > 0);
 
   const resetToStarter = () => {
-    setCodeFiles(buildInitialCodeFiles(starterFiles, codeLanguage));
+    setCodeFiles(
+      starterSnapshot
+        ? starterSnapshot.map((file) => ({ ...file }))
+        : buildInitialCodeFiles(null, codeLanguage)
+    );
   };
 
   const handleResetToStarter = () => {
@@ -190,7 +202,7 @@ export function SubmissionForm({
     }
   };
 
-  const isCodeValid = isSubmissionCodeValid(codeFiles);
+  const isCodeValid = isSubmissionCodeValid(codeFiles) && !unchangedFromStarter;
 
   const isValid =
     (submissionType === "code" && isCodeValid) ||
@@ -245,6 +257,9 @@ export function SubmissionForm({
               <p className="text-xs text-muted-foreground">
                 内容が空のファイルは提出に含めません。
               </p>
+            )}
+            {unchangedFromStarter && (
+              <p className="text-xs text-muted-foreground">初期コードから変更してください</p>
             )}
             {showPreview && (
               <HtmlPreviewNoSSR

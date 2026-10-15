@@ -4,6 +4,7 @@ import {
   type CodeLanguage,
   DEFAULT_FILENAME_BY_LANGUAGE,
 } from "@/app/components/code-editor-utils";
+import { normalizeCodeFileRows } from "@/app/lib/submission-files";
 import type { CodeFile, Json } from "@/app/types";
 
 export type CodeFileInput = {
@@ -71,18 +72,9 @@ export function buildInitialCodeFiles(
 
 /** Normalize learning_contents.starter_files JSON into CodeFile[] (null when absent/empty). */
 export function parseStarterFiles(raw: Json | null | undefined): CodeFile[] | null {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    return null;
-  }
-  const files = raw
-    .filter((f): f is { [key: string]: Json | undefined } => typeof f === "object" && f !== null)
-    .map((f) => ({
-      filename: typeof f.filename === "string" ? f.filename : "",
-      language: typeof f.language === "string" ? f.language : "",
-      content: typeof f.content === "string" ? f.content : "",
-    }))
-    .filter((f) => f.filename.trim().length > 0 || f.content.length > 0);
-
+  const files = normalizeCodeFileRows(raw).filter(
+    (f) => f.filename.trim().length > 0 || f.content.length > 0
+  );
   return files.length > 0 ? files : null;
 }
 
@@ -159,6 +151,28 @@ export function isSubmissionCodeValid(files: readonly CodeFileInput[]): boolean 
     return withContent.every((file) => file.filename.trim().length > 0);
   }
   return true;
+}
+
+/**
+ * True when the editor still matches the initial starter snapshot (filename, language, content).
+ * Used to block submitting untouched starter code (would burn an AI review slot).
+ */
+export function isUnchangedFromStarter(
+  files: readonly CodeFileInput[],
+  starterSnapshot: readonly CodeFileInput[] | null | undefined
+): boolean {
+  if (!starterSnapshot || starterSnapshot.length === 0) {
+    return false;
+  }
+  if (files.length !== starterSnapshot.length) {
+    return false;
+  }
+  return files.every(
+    (file, index) =>
+      file.filename === starterSnapshot[index].filename &&
+      file.language === starterSnapshot[index].language &&
+      file.content === starterSnapshot[index].content
+  );
 }
 
 export function updateCodeFileAt(

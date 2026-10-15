@@ -5,6 +5,7 @@ import {
   buildSubmissionCodeFiles,
   changeCodeFileLanguage,
   isSubmissionCodeValid,
+  isUnchangedFromStarter,
   parseStarterFiles,
   resolveLanguage,
   toStarterFilesPayload,
@@ -240,6 +241,48 @@ describe("buildSubmissionCodeFiles / isSubmissionCodeValid", () => {
     ).toBe(true);
   });
 });
+
+describe("isUnchangedFromStarter", () => {
+  const snapshot = buildInitialCodeFiles(
+    [{ filename: "index.html", language: "html", content: "<div></div>" }],
+    "javascript"
+  );
+
+  it("初期スナップショットと同一なら true", () => {
+    expect(isUnchangedFromStarter(snapshot, snapshot)).toBe(true);
+    expect(
+      isUnchangedFromStarter(
+        snapshot.map((file) => ({ ...file })),
+        snapshot
+      )
+    ).toBe(true);
+  });
+
+  it("内容・ファイル名・言語・件数が違えば false、starter 無しは false", () => {
+    expect(
+      isUnchangedFromStarter([{ ...snapshot[0], content: "<div>edited</div>" }], snapshot)
+    ).toBe(false);
+    expect(
+      isUnchangedFromStarter([{ ...snapshot[0], filename: "app.html" }], snapshot)
+    ).toBe(false);
+    expect(
+      isUnchangedFromStarter([{ ...snapshot[0], language: "javascript" }], snapshot)
+    ).toBe(false);
+    expect(isUnchangedFromStarter([...snapshot, createEmptyLike()], snapshot)).toBe(false);
+    expect(isUnchangedFromStarter(snapshot, null)).toBe(false);
+    expect(isUnchangedFromStarter(snapshot, [])).toBe(false);
+  });
+});
+
+function createEmptyLike() {
+  return {
+    id: "extra",
+    filename: "style.css",
+    language: "css" as const,
+    content: "",
+    filenameEdited: true,
+  };
+}
 
 describe("addCodeFile / changeCodeFileLanguage", () => {
   it("単一→複数の切替で空のファイル名に既定名を埋める", () => {

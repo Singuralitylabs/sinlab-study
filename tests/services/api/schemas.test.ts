@@ -5,7 +5,7 @@ import {
   CONTENT_TYPES,
   MAX_BULK_CONTENT_IDS,
 } from "@/app/constants/content";
-import { GEMINI_MAX_CODE_LENGTH } from "@/app/constants/gemini";
+import { STARTER_FILES_MAX_TOTAL_LENGTH } from "@/app/constants/gemini";
 import { MEMBERSHIP_TYPES, USER_MANAGEMENT_ACTIONS, USER_ROLES } from "@/app/constants/user";
 import {
   AdminUserActionSchema,
@@ -520,7 +520,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(ContentUpdateSchema.safeParse({ starter_files: null }).success).toBe(true);
   });
 
-  it("starter_files は空ファイル名・未知言語・合計文字数超過を拒否する", () => {
+  it("starter_files は空ファイル名・未知言語・合計文字数超過・重複ファイル名を拒否する", () => {
     const base = {
       title: "演習1",
       week_id: 1,
@@ -546,8 +546,17 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
           {
             filename: "a.js",
             language: "javascript",
-            content: "a".repeat(GEMINI_MAX_CODE_LENGTH + 1),
+            content: "a".repeat(STARTER_FILES_MAX_TOTAL_LENGTH + 1),
           },
+        ],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        starter_files: [
+          { filename: "index.html", language: "html", content: "<div></div>" },
+          { filename: "index.html", language: "html", content: "<span></span>" },
         ],
       }).success
     ).toBe(false);
