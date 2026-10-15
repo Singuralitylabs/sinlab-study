@@ -63,27 +63,47 @@ type ProgressPagingControl = { abandoned: boolean };
 
 const PROGRESS_PAGE_SIZE = 1000;
 
-type CompletedProgressRow = {
+type CompletedProgressIdRow = {
   content_id: number;
-  completed_at?: string | null;
+};
+
+type CompletedProgressWithAtRow = {
+  content_id: number;
+  completed_at: string | null;
 };
 
 /**
  * Page completed user_progress rows (PostgREST max rows defaults to 1000). Stops when
  * control.abandoned is set (caller marks that when the theme tree fails or has no contents).
- * On query error returns [] so callers can still render the theme list. Select columns stay
- * caller-specific: id-only for counts, or content_id + completed_at for continue-learning.
+ * On query error returns [] so callers can still render the theme list.
+ * withCompletedAt true includes completed_at for continue-learning; false is id-only for counts.
  */
 async function fetchCompletedProgressPages(
   supabase: ServerSupabaseClient,
   userId: number,
-  select: "content_id" | "content_id, completed_at",
+  withCompletedAt: true,
   control: ProgressPagingControl,
   errorLabel: string
-): Promise<CompletedProgressRow[]> {
-  const rows: CompletedProgressRow[] = [];
+): Promise<CompletedProgressWithAtRow[]>;
+async function fetchCompletedProgressPages(
+  supabase: ServerSupabaseClient,
+  userId: number,
+  withCompletedAt: false,
+  control: ProgressPagingControl,
+  errorLabel: string
+): Promise<CompletedProgressIdRow[]>;
+async function fetchCompletedProgressPages(
+  supabase: ServerSupabaseClient,
+  userId: number,
+  withCompletedAt: boolean,
+  control: ProgressPagingControl,
+  errorLabel: string
+): Promise<CompletedProgressIdRow[] | CompletedProgressWithAtRow[]> {
+  const rows: CompletedProgressWithAtRow[] = [];
+  // PostgREST ParserError typing cannot discriminate a boolean-driven select string; pin the
+  // wider column set and narrow the return via overloads for callers.
+  const select = withCompletedAt ? "content_id, completed_at" : "content_id";
   for (let offset = 0; !control.abandoned; offset += PROGRESS_PAGE_SIZE) {
-    // Union select strings confuse PostgREST's ParserError typing; pin the wider shape.
     const { data: progress, error: progressError } = await supabase
       .from("user_progress")
       .select(select as "content_id, completed_at")
@@ -99,10 +119,15 @@ async function fetchCompletedProgressPages(
 
     rows.push(...(progress ?? []));
     if (!progress || progress.length < PROGRESS_PAGE_SIZE) {
-      return rows;
+      break;
     }
   }
-  return rows;
+
+  if (withCompletedAt) {
+    return rows;
+  }
+  // Drop completed_at from the typed surface for id-only callers (select may omit the column).
+  return rows.map(({ content_id }) => ({ content_id }));
 }
 
 /** admin / maintainer also get unpublished themes as preview (issue #68). */
@@ -189,7 +214,7 @@ export async function fetchHomeLearningData(userId: number): Promise<{
       const rows = await fetchCompletedProgressPages(
         supabase,
         userId,
-        "content_id, completed_at",
+        true,
         progressControl,
         "ホーム学習データの進捗取得エラー"
       );
@@ -316,7 +341,7 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
 
   // Completed content IDs without a content_id `.in()` filter: the numerator is settled by
   // per-theme Set matching, and serializing every content ID into the query string would exceed
-  // URL length limits as the catalog grows. Paged via fetchCompletedProgressPages (id-only select).
+  // URL length limits as the catalog grows. Paged via fetchCompletedProgressPages(withCompletedAt: false).
   // Independent of the theme tree, so it starts together with it and is awaited only when the
   // tree has contents. It never rejects (a failure falls back to an empty set so the theme list
   // still renders), so leaving it unawaited is safe. control.abandoned stops paging when the tree
@@ -327,7 +352,7 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
       const rows = await fetchCompletedProgressPages(
         supabase,
         userId,
-        "content_id",
+        false,
         progressControl,
         "テーマ進捗サマリーの進捗取得エラー"
       );
