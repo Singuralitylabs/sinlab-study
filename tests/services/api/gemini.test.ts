@@ -1,11 +1,13 @@
 import { ApiError } from "@google/genai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  GEMINI_ALTERNATE_MODEL_NAME,
   GEMINI_API_KEY_ENV,
   GEMINI_API_KEY_TRIAL_ENV,
   GEMINI_MAX_CODE_LENGTH,
   GEMINI_MAX_OUTPUT_TOKENS,
   GEMINI_MAX_RETRIES,
+  GEMINI_MODEL_CONFIGS,
   GEMINI_MODEL_NAME,
   GEMINI_REQUEST_TIMEOUT_MS,
   GEMINI_RETRY_BASE_DELAY_MS,
@@ -525,6 +527,8 @@ describe("parseReviewResponse", () => {
 });
 
 describe("generateReview", () => {
+  const calledModels = () => generateContentMock.mock.calls.map((call) => call[0].model as string);
+
   const baseParams = {
     exerciseInstructions: "ログイン画面を作る",
     submission: CODE_SUBMISSION,
@@ -654,6 +658,8 @@ describe("generateReview", () => {
     const result = await generateReview(baseParams);
 
     expect(generateContentMock).toHaveBeenCalledTimes(2);
+    expect(calledModels()).toEqual([GEMINI_MODEL_NAME, GEMINI_MODEL_NAME]);
+    expect(result.modelUsed).toBe(GEMINI_MODEL_NAME);
     expect(result).toMatchObject({
       promptTokens: 200,
       completionTokens: 40,
@@ -721,18 +727,22 @@ describe("generateReview", () => {
       "AIが混み合っています。しばらく時間を置いてから再試行してください。"
     );
     expect((error as ReviewGenerationError).usage.promptTokens).toBe(10);
-    expect(generateContentMock).toHaveBeenCalledTimes(1 + GEMINI_MAX_RETRIES + 1);
+    expect(generateContentMock).toHaveBeenCalledTimes(
+      1 + GEMINI_MODEL_CONFIGS.length * (GEMINI_MAX_RETRIES + 1)
+    );
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining("status=503"),
       expect.any(String)
     );
   });
 
-  it("429 は指数バックオフで最大2回リトライする", async () => {
+  it("全モデルが 429 のときは指数バックオフで最大2回リトライする", async () => {
     vi.useFakeTimers();
     const setTimeoutSpy = vi.spyOn(global, "setTimeout");
     const rateLimitError = new ApiError({ message: "Too Many Requests", status: 429 });
     generateContentMock
+      .mockRejectedValueOnce(rateLimitError)
+      .mockRejectedValueOnce(rateLimitError)
       .mockRejectedValueOnce(rateLimitError)
       .mockRejectedValueOnce(rateLimitError)
       .mockResolvedValueOnce({
@@ -744,13 +754,21 @@ describe("generateReview", () => {
     await vi.runAllTimersAsync();
     const result = await resultPromise;
 
-    expect(generateContentMock).toHaveBeenCalledTimes(GEMINI_MAX_RETRIES + 1);
+    expect(generateContentMock).toHaveBeenCalledTimes(GEMINI_MODEL_CONFIGS.length * 2 + 1);
+    expect(calledModels()).toEqual([
+      GEMINI_MODEL_NAME,
+      GEMINI_ALTERNATE_MODEL_NAME,
+      GEMINI_MODEL_NAME,
+      GEMINI_ALTERNATE_MODEL_NAME,
+      GEMINI_MODEL_NAME,
+    ]);
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), GEMINI_RETRY_BASE_DELAY_MS);
     expect(setTimeoutSpy).toHaveBeenCalledWith(
       expect.any(Function),
       GEMINI_RETRY_BASE_DELAY_MS * 2
     );
     expect(result.overallScore).toBe(80);
+    expect(result.modelUsed).toBe(GEMINI_MODEL_NAME);
   });
 
   it("429 がリトライ上限を超えたら日本語の上限メッセージを投げる", async () => {
@@ -759,35 +777,52 @@ describe("generateReview", () => {
       new ApiError({ message: "Too Many Requests", status: 429 })
     );
 
+    const startedAt = Date.now();
     const resultPromise = generateReview(baseParams);
     const assertion = expect(resultPromise).rejects.toThrow(
       "Gemini APIの利用上限に達しました。しばらく時間を置いてから再試行してください。"
     );
     await vi.runAllTimersAsync();
     await assertion;
-    expect(generateContentMock).toHaveBeenCalledTimes(GEMINI_MAX_RETRIES + 1);
+    expect(generateContentMock).toHaveBeenCalledTimes(
+      GEMINI_MODEL_CONFIGS.length * (GEMINI_MAX_RETRIES + 1)
+    );
+    expect(Date.now() - startedAt).toBeLessThanOrEqual(GEMINI_TOTAL_BUDGET_MS);
   });
 
-  it("503 は指数バックオフでリトライし、成功応答があればレビューを生成する", async () => {
-    vi.useFakeTimers();
+  it("503 は待たずに代替モデルへ切り替え、成功すれば modelUsed は代替になる", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const setTimeoutSpy = vi.spyOn(global, "setTimeout");
-    const overloadedError = new ApiError({ message: '{"error":{"code":503}}', status: 503 });
-    generateContentMock
-      .mockRejectedValueOnce(overloadedError)
-      .mockRejectedValueOnce(overloadedError)
-      .mockResolvedValueOnce({ text: rubricResponse() });
+    const overloadedError = new ApiError({
+      message: `{"error":{"code":503,"message":"high demand ${MEMBER_KEY}"}}`,
+      status: 503,
+    });
+    const startedAt = Date.now();
+    generateContentMock.mockImplementation((request: { model: string }) => {
+      if (request.model === GEMINI_MODEL_NAME) {
+        return Promise.reject(overloadedError);
+      }
+      return Promise.resolve({
+        text: rubricResponse(),
+        usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 6, thoughtsTokenCount: 8 },
+      });
+    });
 
-    const resultPromise = generateReview(baseParams);
-    await vi.runAllTimersAsync();
-    const result = await resultPromise;
+    const result = await generateReview(baseParams);
 
-    expect(generateContentMock).toHaveBeenCalledTimes(GEMINI_MAX_RETRIES + 1);
-    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), GEMINI_RETRY_BASE_DELAY_MS);
-    expect(setTimeoutSpy).toHaveBeenCalledWith(
+    expect(Date.now() - startedAt).toBeLessThanOrEqual(GEMINI_TOTAL_BUDGET_MS);
+    expect(calledModels()).toEqual([GEMINI_MODEL_NAME, GEMINI_ALTERNATE_MODEL_NAME]);
+    expect(result.modelUsed).toBe(GEMINI_ALTERNATE_MODEL_NAME);
+    expect(result).toMatchObject({ promptTokens: 4, completionTokens: 6, thoughtsTokens: 8 });
+    expect(setTimeoutSpy).not.toHaveBeenCalledWith(
       expect.any(Function),
-      GEMINI_RETRY_BASE_DELAY_MS * 2
+      GEMINI_RETRY_BASE_DELAY_MS
     );
-    expect(result.overallScore).toBe(80);
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(MEMBER_KEY);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("status=503"));
+    expect(generateContentMock.mock.calls[1][0].config.thinkingConfig.thinkingLevel).toBe(
+      GEMINI_MODEL_CONFIGS[1].thinkingLevel
+    );
   });
 
   it("503 が続いてリトライが尽きたら日本語の混雑メッセージを投げ、生JSONを含めない", async () => {
@@ -797,6 +832,7 @@ describe("generateReview", () => {
       '{"error":{"code":503,"message":"This model is currently experiencing high demand.","status":"UNAVAILABLE"}}';
     generateContentMock.mockRejectedValue(new ApiError({ message: rawBody, status: 503 }));
 
+    const startedAt = Date.now();
     const resultPromise = generateReview(baseParams);
     const settled = resultPromise.catch((e: unknown) => e);
     await vi.runAllTimersAsync();
@@ -807,7 +843,10 @@ describe("generateReview", () => {
       "AIが混み合っています。しばらく時間を置いてから再試行してください。"
     );
     expect((error as Error).message).not.toContain("UNAVAILABLE");
-    expect(generateContentMock).toHaveBeenCalledTimes(GEMINI_MAX_RETRIES + 1);
+    expect(generateContentMock).toHaveBeenCalledTimes(
+      GEMINI_MODEL_CONFIGS.length * (GEMINI_MAX_RETRIES + 1)
+    );
+    expect(Date.now() - startedAt).toBeLessThanOrEqual(GEMINI_TOTAL_BUDGET_MS);
   });
 
   it("503 が即座に返らず全体予算を使い切った場合は、リトライ回数が残っていても待機せず打ち切る", async () => {
@@ -833,16 +872,33 @@ describe("generateReview", () => {
     expect(Date.now() - startedAt).toBeLessThanOrEqual(GEMINI_TOTAL_BUDGET_MS);
   });
 
-  it("400 の ApiError はリトライせず、生JSONの代わりにステータスコードだけを示す", async () => {
+  it.each([400, 401, 403])(
+    "%i は切り替えもリトライもせず、ステータスコードだけを示す",
+    async (status) => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      generateContentMock.mockRejectedValue(
+        new ApiError({
+          message: `{"error":{"code":${status},"message":"key ${MEMBER_KEY}"}}`,
+          status,
+        })
+      );
+
+      await expect(generateReview(baseParams)).rejects.toThrow(
+        `AIレビューの生成中にエラーが発生しました（コード: ${status}）。`
+      );
+      expect(calledModels()).toEqual([GEMINI_MODEL_NAME]);
+      expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(MEMBER_KEY);
+    }
+  );
+
+  it("504 は切り替えもリトライもしない", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    generateContentMock.mockRejectedValue(
-      new ApiError({ message: `{"error":{"code":400,"message":"key ${MEMBER_KEY}"}}`, status: 400 })
-    );
+    generateContentMock.mockRejectedValue(new ApiError({ message: "deadline", status: 504 }));
 
     await expect(generateReview(baseParams)).rejects.toThrow(
-      "AIレビューの生成中にエラーが発生しました（コード: 400）。"
+      "AIレビューの生成中にエラーが発生しました（コード: 504）。"
     );
-    expect(generateContentMock).toHaveBeenCalledTimes(1);
+    expect(calledModels()).toEqual([GEMINI_MODEL_NAME]);
   });
 
   it("ApiError でないエラーはリトライせず、受講生には固定の文言、ログにはキーを伏せた元のメッセージを出す", async () => {
@@ -962,11 +1018,13 @@ describe("generateReview", () => {
       expect(generateContentMock).toHaveBeenCalledTimes(2);
     });
 
-    it("待機後に GEMINI_RETRY_MIN_ATTEMPT_MS も残らないならリトライしない（課金だけされる試行を始めない）", async () => {
+    it("切り替え後も待機に GEMINI_RETRY_MIN_ATTEMPT_MS が残らないならバックオフしない", async () => {
       useFakeSignals();
       vi.spyOn(console, "error").mockImplementation(() => {});
-      // 503 at 36s: 36 + 5 (wait) + 5 (minimum attempt) > 45.
-      generateContentMock.mockImplementationOnce(rejectAfter(36_000, overloaded));
+      // 503 at 36s: 9s left can start the next model, but not a 5s wait plus a 5s attempt.
+      generateContentMock
+        .mockImplementationOnce(rejectAfter(36_000, overloaded))
+        .mockRejectedValueOnce(overloaded);
 
       const settled = generateReview(baseParams).catch((e: unknown) => e);
       await vi.runAllTimersAsync();
@@ -975,12 +1033,12 @@ describe("generateReview", () => {
       expect((error as Error).message).toBe(
         "AIが混み合っています。しばらく時間を置いてから再試行してください。"
       );
-      expect(generateContentMock).toHaveBeenCalledTimes(1);
+      expect(calledModels()).toEqual([GEMINI_MODEL_NAME, GEMINI_ALTERNATE_MODEL_NAME]);
       expect(GEMINI_RETRY_MIN_ATTEMPT_MS).toBeGreaterThan(0);
     });
   });
 
-  it("応答がタイムアウトした場合は日本語のタイムアウトメッセージを投げ、リトライしない", async () => {
+  it("1試行のタイムアウトは次のモデルへ切り替え、全滅ならバックオフせずタイムアウト文言にする", async () => {
     generateContentMock.mockRejectedValue(
       new DOMException("The operation was aborted.", "AbortError")
     );
@@ -988,7 +1046,121 @@ describe("generateReview", () => {
     await expect(generateReview(baseParams)).rejects.toThrow(
       "Gemini APIの応答がタイムアウトしました。しばらく時間を置いてから再試行してください。"
     );
-    expect(generateContentMock).toHaveBeenCalledTimes(1);
+    expect(calledModels()).toEqual(GEMINI_MODEL_CONFIGS.map((model) => model.name));
+  });
+
+  it("404 は代替モデルへ切り替え、定数更新が必要なことを error ログに出す", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const missing = new ApiError({ message: `not found ${MEMBER_KEY}`, status: 404 });
+    generateContentMock.mockRejectedValueOnce(missing).mockResolvedValueOnce({
+      text: rubricResponse(),
+      usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 3, thoughtsTokenCount: 4 },
+    });
+
+    const result = await generateReview(baseParams);
+
+    expect(result.modelUsed).toBe(GEMINI_ALTERNATE_MODEL_NAME);
+    expect(calledModels()).toEqual([GEMINI_MODEL_NAME, GEMINI_ALTERNATE_MODEL_NAME]);
+    expect(result.promptTokens).toBe(2);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("status=404"));
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(GEMINI_MODEL_NAME));
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(MEMBER_KEY);
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(MEMBER_KEY);
+  });
+
+  it("全モデルが 404 のときはバックオフせず、最後のステータスの文言で失敗する", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    generateContentMock.mockRejectedValue(
+      new ApiError({ message: `missing ${MEMBER_KEY}`, status: 404 })
+    );
+
+    await expect(generateReview(baseParams)).rejects.toThrow(
+      "AIレビューの生成中にエラーが発生しました（コード: 404）。"
+    );
+    expect(calledModels()).toEqual(GEMINI_MODEL_CONFIGS.map((model) => model.name));
+  });
+
+  it("500 も待たずに代替へ切り替える", async () => {
+    generateContentMock
+      .mockRejectedValueOnce(new ApiError({ message: "internal", status: 500 }))
+      .mockResolvedValueOnce({ text: rubricResponse() });
+
+    const result = await generateReview(baseParams);
+
+    expect(calledModels()).toEqual([GEMINI_MODEL_NAME, GEMINI_ALTERNATE_MODEL_NAME]);
+    expect(result.modelUsed).toBe(GEMINI_ALTERNATE_MODEL_NAME);
+  });
+
+  it("1試行のタイムアウトのあと代替が成功すれば modelUsed は代替になる", async () => {
+    generateContentMock
+      .mockRejectedValueOnce(new DOMException("The operation was aborted.", "AbortError"))
+      .mockResolvedValueOnce({
+        text: rubricResponse(),
+        usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 1, thoughtsTokenCount: 0 },
+      });
+
+    const result = await generateReview(baseParams);
+
+    expect(calledModels()).toEqual([GEMINI_MODEL_NAME, GEMINI_ALTERNATE_MODEL_NAME]);
+    expect(result.modelUsed).toBe(GEMINI_ALTERNATE_MODEL_NAME);
+    expect(result.promptTokens).toBe(7);
+  });
+
+  it("検証失敗の再生成は応答したモデルで行い、トークンは試行の累計になる", async () => {
+    generateContentMock
+      .mockRejectedValueOnce(new ApiError({ message: "busy", status: 503 }))
+      .mockResolvedValueOnce({
+        text: "not json",
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 1, thoughtsTokenCount: 2 },
+      })
+      .mockResolvedValueOnce({
+        text: rubricResponse(),
+        usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 3, thoughtsTokenCount: 4 },
+      });
+
+    const result = await generateReview(baseParams);
+
+    expect(calledModels()).toEqual([
+      GEMINI_MODEL_NAME,
+      GEMINI_ALTERNATE_MODEL_NAME,
+      GEMINI_ALTERNATE_MODEL_NAME,
+    ]);
+    expect(result.modelUsed).toBe(GEMINI_ALTERNATE_MODEL_NAME);
+    expect(result).toMatchObject({
+      promptTokens: 21,
+      completionTokens: 4,
+      thoughtsTokens: 6,
+    });
+  });
+
+  it("modelName を指定したときはそのモデルだけをバックオフ再試行する", async () => {
+    vi.useFakeTimers();
+    const setTimeoutSpy = vi.spyOn(global, "setTimeout");
+    const overloaded = new ApiError({ message: "overloaded", status: 503 });
+    generateContentMock
+      .mockRejectedValueOnce(overloaded)
+      .mockRejectedValueOnce(overloaded)
+      .mockResolvedValueOnce({ text: rubricResponse() });
+
+    const resultPromise = generateReview({ ...baseParams, modelName: "gemini-candidate-flash" });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(calledModels()).toEqual([
+      "gemini-candidate-flash",
+      "gemini-candidate-flash",
+      "gemini-candidate-flash",
+    ]);
+    expect(result.modelUsed).toBe("gemini-candidate-flash");
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), GEMINI_RETRY_BASE_DELAY_MS);
+    expect(setTimeoutSpy).toHaveBeenCalledWith(
+      expect.any(Function),
+      GEMINI_RETRY_BASE_DELAY_MS * 2
+    );
+    expect(generateContentMock.mock.calls[0][0].config.thinkingConfig.thinkingLevel).toBe(
+      GEMINI_THINKING_LEVEL
+    );
   });
 
   it("apiKey が空なら SDK を呼ばない", async () => {

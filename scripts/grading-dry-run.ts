@@ -16,11 +16,12 @@ import {
 import type { Database } from "@/app/types/lib/database.types";
 import { type DryRunSample, formatSummary, summarizeByContent } from "./grading-dry-run-stats";
 
-function readArgs(argv: string[]) {
+export function readArgs(argv: string[]) {
   const contentIds: number[] = [];
   let limit = 5;
   let repeat = 1;
   let confirmed = false;
+  let model: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--confirm-dev") {
@@ -31,6 +32,13 @@ function readArgs(argv: string[]) {
       limit = Number(argv[++i]);
     } else if (arg === "--repeat") {
       repeat = Number(argv[++i]);
+    } else if (arg === "--model") {
+      // Pin one model so a fallback does not mix graders while comparing score tendency.
+      const next = argv[++i];
+      if (!next) {
+        throw new Error("--model requires a model id");
+      }
+      model = next;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -39,7 +47,7 @@ function readArgs(argv: string[]) {
   if (![...contentIds, limit, repeat].every(valid)) {
     throw new Error("--content-id / --limit / --repeat must be positive integers");
   }
-  return { contentIds, limit, repeat, confirmed };
+  return { contentIds, limit, repeat, confirmed, model };
 }
 
 async function main() {
@@ -47,9 +55,12 @@ async function main() {
     process.loadEnvFile(".env.local");
   }
 
-  const { contentIds, limit, repeat, confirmed } = readArgs(process.argv.slice(2));
+  const { contentIds, limit, repeat, confirmed, model } = readArgs(process.argv.slice(2));
   if (!confirmed) {
     throw new Error("Pass --confirm-dev to confirm this targets a dev project, not production.");
+  }
+  if (model) {
+    console.log(`Pinned model: ${model}`);
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -111,6 +122,7 @@ async function main() {
             gradingRubric: rubric,
             starterFiles: parseStarterFiles(content.starter_files),
             apiKey,
+            modelName: model,
           });
           samples.push({
             contentId: content.id,
@@ -121,7 +133,7 @@ async function main() {
             thoughtsTokens: result.thoughtsTokens,
           });
           console.log(
-            `content ${content.id} submission ${submission.id} run ${run}: score ${result.overallScore}`
+            `content ${content.id} submission ${submission.id} run ${run}: score ${result.overallScore} model ${result.modelUsed}`
           );
         } catch (error) {
           // Failed and regenerated calls are still billed. Omit them and the cost average is low.
@@ -154,7 +166,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
+}

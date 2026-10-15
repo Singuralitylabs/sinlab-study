@@ -7,14 +7,10 @@ import type { ThinkingLevel } from "@google/genai";
 export const GEMINI_MODEL_NAME = "gemini-3.8-flash";
 
 /**
- * Alternate Flash model kept as the previously verified primary. Wired as a runtime fallback by
- * #368 when that lands; until then it is registered for the model-check workflow and dry-run
- * comparisons only.
+ * Alternate Flash model. Runtime fallback when the primary is congested, times out, or 404s (#368).
+ * Kept as its own export because the model-check workflow rewrites this literal.
  */
 export const GEMINI_ALTERNATE_MODEL_NAME = "gemini-3.6-flash";
-
-/** Models the auto-detect workflow treats as "registered" (primary first). */
-export const GEMINI_REGISTERED_MODELS = [GEMINI_MODEL_NAME, GEMINI_ALTERNATE_MODEL_NAME] as const;
 
 /** Max code length (chars); shared by prompt building and API validation. */
 export const GEMINI_MAX_CODE_LENGTH = 8000;
@@ -37,6 +33,27 @@ export const GEMINI_MAX_OUTPUT_TOKENS = 4000;
  */
 export const GEMINI_THINKING_LEVEL = "low" as ThinkingLevel;
 
+export interface GeminiModelConfig {
+  /** Concrete model id. Never a `-latest` alias. */
+  name: string;
+  thinkingLevel: ThinkingLevel;
+}
+
+/**
+ * Call order for one review: primary, then alternate. Per-model settings live here so a fallback
+ * can differ (thinking level) without a second request path. Names stay the exports above so the
+ * model-check rewrite keeps this list in sync.
+ */
+export const GEMINI_MODEL_CONFIGS: readonly GeminiModelConfig[] = [
+  { name: GEMINI_MODEL_NAME, thinkingLevel: GEMINI_THINKING_LEVEL },
+  { name: GEMINI_ALTERNATE_MODEL_NAME, thinkingLevel: GEMINI_THINKING_LEVEL },
+];
+
+/** Models the auto-detect workflow treats as "registered" (primary first). */
+export const GEMINI_REGISTERED_MODELS: readonly string[] = GEMINI_MODEL_CONFIGS.map(
+  (model) => model.name
+);
+
 /** Deterministic judging: the same submission should get the same labels as far as possible. */
 export const GEMINI_TEMPERATURE = 0;
 
@@ -47,8 +64,9 @@ export const GEMINI_TEMPERATURE = 0;
 export const GEMINI_VALIDATION_ATTEMPTS = 2;
 
 /**
- * Retries on a transient error (excluding the first attempt); total attempts =
- * GEMINI_MAX_RETRIES + 1.
+ * Backoff rounds after every model in the chain has failed with a retryable status (excluding
+ * the first pass). Total passes = GEMINI_MAX_RETRIES + 1. Switching models is not one of these
+ * rounds (#368).
  */
 export const GEMINI_MAX_RETRIES = 2;
 
@@ -57,6 +75,7 @@ export const GEMINI_MAX_RETRIES = 2;
  * documents INTERNAL as transient and retryable). 504 is left out: Google returns it when the
  * request itself is too large to finish in time, so resending the same prompt only burns the
  * budget. 4xx other than 429 are permanent (bad request, key, permission) and never retried.
+ * 404 is not in this list: a missing model is switched once and logged, not waited out (#368).
  */
 export const GEMINI_RETRYABLE_STATUSES: readonly number[] = [429, 500, 503];
 
