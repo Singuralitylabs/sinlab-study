@@ -31,10 +31,6 @@ export type VisibleLearningContent = {
   code_language: string | null;
 };
 
-/** Parent embed shared by visibility helpers; unpublished/deleted ancestors yield 0 rows. */
-const VISIBLE_CONTENT_HIERARCHY_SELECT =
-  "week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))";
-
 /** Excludes heavy text columns (body, instructions, model answer, hints). */
 export const LEARNING_CONTENT_LIST_COLUMNS =
   "id, week_id, title, content_type, video_url, pdf_url, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at";
@@ -533,19 +529,25 @@ export function isContentLockedForUser(
 }
 
 /**
- * Shared published/deleted filters for content + week/phase/theme. learning_contents SELECT RLS
- * allows admin / maintainer unconditionally, so checking only the content row would let them
- * record progress, submit, or request AI review for soft-deleted contents or contents under
- * unpublished parents (issue #68).
+ * Whether the content is visible to the given client (caller's auth context); used by the
+ * progress / quiz / AI review APIs (specification 4.1/5.1). Lightweight id-only select — starter
+ * JSON is not needed here.
+ * Checks `is_published = true AND is_deleted = false` for the content AND its week, phase and
+ * theme. The learning_contents SELECT RLS allows admin / maintainer unconditionally, so checking
+ * only the content row would let them record progress, submit, or request AI review for
+ * soft-deleted contents or contents under unpublished parents. False if any level is unpublished
+ * or deleted, regardless of role (issue #68 default).
  */
-function queryVisibleLearningContent(
+export async function isContentVisible(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
-  contentId: number,
-  columns: string
-) {
-  return supabase
+  contentId: number
+): Promise<boolean> {
+  // Select string must be a literal for the Supabase client's type parser (no template concat).
+  const { data, error } = await supabase
     .from("learning_contents")
-    .select(`${columns}, ${VISIBLE_CONTENT_HIERARCHY_SELECT}`)
+    .select(
+      "id, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
+    )
     .eq("id", contentId)
     .eq("is_published", true)
     .eq("is_deleted", false)
@@ -556,18 +558,6 @@ function queryVisibleLearningContent(
     .eq("week.phase.theme.is_published", true)
     .eq("week.phase.theme.is_deleted", false)
     .maybeSingle();
-}
-
-/**
- * Whether the content is visible to the given client (caller's auth context); used by the
- * progress / quiz / AI review APIs (specification 4.1/5.1). Lightweight id-only select — starter
- * JSON is not needed here. False if any level is unpublished or deleted, regardless of role.
- */
-export async function isContentVisible(
-  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
-  contentId: number
-): Promise<boolean> {
-  const { data, error } = await queryVisibleLearningContent(supabase, contentId, "id");
 
   if (error) {
     // Stay fail-closed (treat as invisible) but let logs distinguish a DB failure from truly
@@ -580,17 +570,27 @@ export async function isContentVisible(
 
 /**
  * Visibility check plus starter meta for POST /api/submissions in one round-trip. Same published
- * filters as isContentVisible(); returns null when invisible.
+ * hierarchy filters as isContentVisible(); returns null when invisible.
  */
 export async function fetchVisibleContentForSubmission(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
   contentId: number
 ): Promise<VisibleLearningContent | null> {
-  const { data, error } = await queryVisibleLearningContent(
-    supabase,
-    contentId,
-    "id, starter_files, code_language"
-  );
+  const { data, error } = await supabase
+    .from("learning_contents")
+    .select(
+      "id, starter_files, code_language, week:learning_weeks!inner(phase:learning_phases!inner(theme:learning_themes!inner(id)))"
+    )
+    .eq("id", contentId)
+    .eq("is_published", true)
+    .eq("is_deleted", false)
+    .eq("week.is_published", true)
+    .eq("week.is_deleted", false)
+    .eq("week.phase.is_published", true)
+    .eq("week.phase.is_deleted", false)
+    .eq("week.phase.theme.is_published", true)
+    .eq("week.phase.theme.is_deleted", false)
+    .maybeSingle();
 
   if (error) {
     console.error("コンテンツ可視性チェックエラー:", error.message);

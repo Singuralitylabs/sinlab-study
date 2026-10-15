@@ -164,13 +164,15 @@ function toComparableContents(files: readonly { content: string }[]): string[] {
     .sort();
 }
 
+type CodeContentRow = { filename: string; language: string; content: string };
+
 /**
  * True when submitted code matches starter by trimmed content multiset only. Used client- and
  * server-side to block burning an AI review slot.
  */
 export function isCodeEquivalentToStarter(
-  submitted: readonly { content: string }[],
-  starter: readonly { content: string }[] | null | undefined
+  submitted: readonly CodeContentRow[],
+  starter: readonly CodeContentRow[] | null | undefined
 ): boolean {
   if (!starter || starter.length === 0) {
     return false;
