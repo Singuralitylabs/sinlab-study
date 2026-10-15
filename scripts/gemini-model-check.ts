@@ -1,13 +1,3 @@
-/**
- * Compares Gemini models.list against the registered models in app/constants/gemini.ts (#369).
- *
- * Usage:
- *   GEMINI_MODEL_CHECK_API_KEY=... bun scripts/gemini-model-check.ts [--json]
- *   bun scripts/gemini-model-check.ts --available gemini-3.8-flash,gemini-4.0-flash [--json]
- *   bun scripts/gemini-model-check.ts --apply-update gemini-4.0-flash [--missing-registered a,b]
- *
- * Never logs the API key. Does not run grading dry-run (that stays a human / local step).
- */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,6 +24,8 @@ export type ModelCheckPlan = {
   newerStableFlash: string | null;
   missingRegistered: string[];
   registered: RegisteredModels;
+  /** True when primary is not `gemini-<version>-flash`; weekly scan must not treat this as a noop. */
+  unparseablePrimary: boolean;
 };
 
 export type ConstantsUpdatePlan = {
@@ -89,6 +81,7 @@ export function findNewerStableFlash(
 ): string | null {
   const currentVersion = parseFlashVersion(currentPrimary);
   if (!currentVersion) {
+    // Null alone looks like "nothing newer"; planModelCheck.unparseablePrimary must surface this.
     return null;
   }
 
@@ -131,10 +124,14 @@ export function planModelCheck(
   registeredList: readonly string[] = GEMINI_REGISTERED_MODELS
 ): ModelCheckPlan {
   const registered = registeredModelsFromList(registeredList);
+  const unparseablePrimary = parseFlashVersion(registered.primary) === null;
   return {
-    newerStableFlash: findNewerStableFlash(availableModelIds, registered.primary),
+    newerStableFlash: unparseablePrimary
+      ? null
+      : findNewerStableFlash(availableModelIds, registered.primary),
     missingRegistered: findMissingRegisteredModels(availableModelIds, registeredList),
     registered,
+    unparseablePrimary,
   };
 }
 
@@ -205,7 +202,7 @@ type ListModelsResponse = {
   nextPageToken?: string;
 };
 
-/** Fetch all model resource names via models.list (key sent in header, never logged). */
+/** Fetch all model resource names via models.list (key in header so it is less likely to hit URL logs). */
 export async function fetchGeminiModelIds(apiKey: string): Promise<string[]> {
   if (!apiKey) {
     throw new Error(`${API_KEY_ENV} is required to call models.list`);
@@ -328,7 +325,7 @@ async function main(): Promise<void> {
   const plan = planModelCheck(availableIds);
 
   if (json) {
-    // Structured output for GitHub Actions. No secrets.
+    // Structured output for GitHub Actions. Never include secrets / API keys.
     console.log(JSON.stringify(plan));
     return;
   }
@@ -341,11 +338,19 @@ async function main(): Promise<void> {
       plan.missingRegistered.length > 0 ? plan.missingRegistered.join(", ") : "(none)"
     }`
   );
+  if (plan.unparseablePrimary) {
+    // Human-readable mode: fail loudly so a bad primary pin is not mistaken for a healthy noop.
+    console.error(
+      `Primary model "${plan.registered.primary}" is not a parseable stable Flash id (gemini-<version>-flash).`
+    );
+    process.exit(1);
+  }
 }
 
 if (import.meta.main) {
   main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : "unknown error";
+    // Keep error messages free of env / key material.
     console.error(message);
     process.exit(1);
   });

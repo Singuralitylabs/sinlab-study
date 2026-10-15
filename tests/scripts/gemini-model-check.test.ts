@@ -111,6 +111,7 @@ describe("planModelCheck / GEMINI_REGISTERED_MODELS", () => {
         primary: GEMINI_REGISTERED_MODELS[0],
         alternate: GEMINI_REGISTERED_MODELS[1],
       },
+      unparseablePrimary: false,
     });
   });
 
@@ -122,6 +123,7 @@ describe("planModelCheck / GEMINI_REGISTERED_MODELS", () => {
         primary: "gemini-3.8-flash",
         alternate: "gemini-3.6-flash",
       },
+      unparseablePrimary: false,
     });
   });
 
@@ -138,6 +140,24 @@ describe("planModelCheck / GEMINI_REGISTERED_MODELS", () => {
         primary: "gemini-3.8-flash",
         alternate: "gemini-3.6-flash",
       },
+      unparseablePrimary: false,
+    });
+  });
+
+  it("flags an unparseable primary instead of a silent noop", () => {
+    expect(
+      planModelCheck(
+        ["gemini-4.0-flash", "gemini-3.8-flash-preview"],
+        ["gemini-3.9-flash-preview", "gemini-3.6-flash"]
+      )
+    ).toEqual({
+      newerStableFlash: null,
+      missingRegistered: ["gemini-3.9-flash-preview", "gemini-3.6-flash"],
+      registered: {
+        primary: "gemini-3.9-flash-preview",
+        alternate: "gemini-3.6-flash",
+      },
+      unparseablePrimary: true,
     });
   });
 });

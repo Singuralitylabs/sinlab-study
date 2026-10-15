@@ -23,8 +23,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # plan reads working-tree gemini.ts; apply rewrites origin/main. Both must be the same ref
+      # or the PR summary (A → B) can disagree with the diff (release-pr.yml same rule).
+      - name: Require main branch
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::gemini-model-check.yml must be run from main (got ${{ github.ref }})."
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: main
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -56,13 +68,50 @@ jobs:
           PRIMARY=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write(p.registered.primary)')
           ALTERNATE=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write(p.registered.alternate)')
           PRIMARY_MISSING=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write(p.missingRegistered.includes(p.registered.primary)?"true":"false")')
+          UNPARSEABLE=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write(p.unparseablePrimary?"true":"false")')
           echo "newer=$NEWER" >> "$GITHUB_OUTPUT"
           echo "missing=$MISSING" >> "$GITHUB_OUTPUT"
           echo "primary=$PRIMARY" >> "$GITHUB_OUTPUT"
           echo "alternate=$ALTERNATE" >> "$GITHUB_OUTPUT"
           echo "primary_missing=$PRIMARY_MISSING" >> "$GITHUB_OUTPUT"
+          echo "unparseable_primary=$UNPARSEABLE" >> "$GITHUB_OUTPUT"
           echo "Newer stable Flash: ${NEWER:-"(none)"}"
           echo "Missing registered: ${MISSING:-"(none)"}"
+          echo "Unparseable primary: ${UNPARSEABLE}"
+
+      - name: Create Issue when primary model id is unparseable
+        if: ${{ steps.plan.outputs.unparseable_primary == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRIMARY: ${{ steps.plan.outputs.primary }}
+        run: |
+          set -euo pipefail
+          TITLE="[緊急] Gemini 主モデル ID を解析できません: ${PRIMARY}"
+          EXISTING=$(
+            TITLE="$TITLE" gh issue list --state open --limit 100 --json number,title \
+              | bun -e 'const t=process.env.TITLE; const rows=JSON.parse(await Bun.stdin.text()); const hit=rows.find((r)=>r.title===t); process.stdout.write(hit?String(hit.number):"")'
+          )
+          if [ -n "$EXISTING" ]; then
+            echo "Open Issue #${EXISTING} already exists for unparseable primary; skipping."
+            exit 0
+          fi
+
+          BODY=$(cat <<EOF
+          ## 緊急度: 高
+
+          \`app/constants/gemini.ts\` の主モデル（\`${PRIMARY}\`）が \`gemini-<version>-flash\` 形式として解析できません。
+
+          この状態では週次の新モデル検知が「更新なし」と同じ結果になり、警告なしで機能停止します（#369）。
+
+          - 検知ワークフロー: \`gemini-model-check.yml\`
+
+          ### 【人間タスク】
+          - [ ] 主モデルを安定版 Flash の具体 ID（例: \`gemini-3.8-flash\`）へ戻す / 更新する
+          - [ ] preview・exp・\`-latest\`・\`flash-lite\` など解析対象外の ID を主モデルに置かない
+          - [ ] 定数更新後、Actions で本ワークフローを main から再実行する
+          EOF
+          )
+          gh issue create --title "$TITLE" --body "$BODY" --label "priority-high" --label "enhancement"
 
       - name: Create Issue when a registered model is missing
         if: ${{ steps.plan.outputs.missing != '' }}
@@ -101,7 +150,7 @@ jobs:
           gh issue create --title "$TITLE" --body "$BODY" --label "priority-high" --label "enhancement"
 
       - name: Create update PR for a newer stable Flash
-        if: ${{ steps.plan.outputs.newer != '' }}
+        if: ${{ steps.plan.outputs.newer != '' && steps.plan.outputs.unparseable_primary != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEWER: ${{ steps.plan.outputs.newer }}
@@ -114,21 +163,24 @@ jobs:
           BRANCH="env/gemini-model-${NEWER}"
           TITLE="[env] Gemini モデルを ${NEWER} へ更新"
 
-          # Deduplicate: any PR (open or closed) for this head branch / title / model id.
+          # Deduplicate: any PR (open or closed) for this head branch / exact auto title / model token.
           # Closed PRs mean a human already declined or merged that model bump; do not recreate weekly.
+          # Prefer search over --limit 100 so older closed declines are still found.
           EXISTING_PR=$(gh pr list --state all --head "$BRANCH" --json number --jq '.[0].number // empty')
           if [ -z "$EXISTING_PR" ]; then
             EXISTING_PR=$(
-              TITLE="$TITLE" NEWER="$NEWER" gh pr list --state all --limit 100 --json number,title \
+              TITLE="$TITLE" NEWER="$NEWER" \
+              gh pr list --search "${NEWER} in:title" --state all --json number,title \
                 | bun -e '
                   const title = process.env.TITLE;
-                  const model = process.env.NEWER;
+                  const model = process.env.NEWER ?? "";
                   const rows = JSON.parse(await Bun.stdin.text());
-                  const hit = rows.find(
-                    (r) =>
-                      typeof r.title === "string" &&
-                      (r.title === title || r.title.includes(model))
-                  );
+                  const hit = rows.find((r) => {
+                    if (typeof r.title !== "string") return false;
+                    // Exact auto-PR title, or whole-token match (gemini-4-flash ≠ gemini-4-flash-lite).
+                    if (r.title === title) return true;
+                    return r.title.split(/[^\w.-]+/).includes(model);
+                  });
                   process.stdout.write(hit ? String(hit.number) : "");
                 '
             )
