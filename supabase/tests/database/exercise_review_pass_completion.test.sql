@@ -27,13 +27,14 @@ values (9104, 9101, 'a video', 'video');
 insert into public.users (id, auth_id, email, display_name, status)
 values
   (9101, '00000000-0000-0000-0000-000000009101', 'pass-a@example.com', 'A', 'active'),
-  (9102, '00000000-0000-0000-0000-000000009102', 'pass-b@example.com', 'B', 'active');
+  (9102, '00000000-0000-0000-0000-000000009102', 'pass-b@example.com', 'B', 'active'),
+  (9103, '00000000-0000-0000-0000-000000009103', 'pass-c@example.com', 'C', 'active');
 
 insert into public.submissions (id, user_id, content_id, submission_type, code_content)
 values
   (9101, 9101, 9101, 'code', 'passed'),
   (9102, 9101, 9101, 'code', 'failed'),
-  (9103, 9102, 9101, 'code', 'other user');
+  (9103, 9103, 9101, 'code', 'other user');
 
 insert into public.ai_reviews (submission_id, status, score_kind, passed, review_content)
 values
