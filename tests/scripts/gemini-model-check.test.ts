@@ -127,10 +127,10 @@ describe("planModelCheck / GEMINI_REGISTERED_MODELS", () => {
 
   it("is a noop plan when the list matches and nothing is newer", () => {
     expect(
-      planModelCheck(["gemini-3.8-flash", "gemini-3.6-flash"], [
-        "gemini-3.8-flash",
-        "gemini-3.6-flash",
-      ])
+      planModelCheck(
+        ["gemini-3.8-flash", "gemini-3.6-flash"],
+        ["gemini-3.8-flash", "gemini-3.6-flash"]
+      )
     ).toEqual({
       newerStableFlash: null,
       missingRegistered: [],

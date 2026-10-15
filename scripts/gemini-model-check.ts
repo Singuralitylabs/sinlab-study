@@ -288,7 +288,9 @@ function parseArgs(argv: string[]): {
     if (arg === "--missing-registered") {
       const value = argv[++i];
       if (value === undefined) {
-        throw new Error("--missing-registered requires a comma-separated model list (may be empty)");
+        throw new Error(
+          "--missing-registered requires a comma-separated model list (may be empty)"
+        );
       }
       missingRegistered = parseCsvModels(value);
       continue;
