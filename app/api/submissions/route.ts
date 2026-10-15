@@ -1,6 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { shouldTrackFirstSubmission } from "@/app/lib/analytics-funnel";
+import {
+  isCodeEquivalentToStarter,
+  parseStarterFiles,
+  resolveLanguage,
+} from "@/app/lib/code-file-inputs";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { SubmissionCreateSchema, validateRequest } from "@/app/services/api/schemas";
@@ -74,6 +79,35 @@ export async function POST(request: NextRequest) {
     // nonexistent IDs all give 0 rows via RLS).
     if (!(await isContentVisible(supabase, contentId))) {
       return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
+    }
+
+    // Reject unedited starter (trim / empty-shell normalized) so clients cannot burn AI review slots.
+    if (submissionType === "code") {
+      const { data: contentMeta, error: contentMetaError } = await supabase
+        .from("learning_contents")
+        .select("starter_files, code_language")
+        .eq("id", contentId)
+        .maybeSingle();
+      if (contentMetaError) {
+        console.error("初期コードの取得エラー:", contentMetaError.message);
+        return NextResponse.json({ error: "初期コードの確認に失敗しました" }, { status: 500 });
+      }
+      const starter = parseStarterFiles(contentMeta?.starter_files);
+      if (starter) {
+        const submittedFiles: CodeFile[] =
+          storedCodeFiles ??
+          (storedCodeContent ? [{ filename: "", language: "", content: storedCodeContent }] : []);
+        const contentLanguage = resolveLanguage(
+          contentMeta?.code_language ?? "javascript",
+          "javascript"
+        );
+        if (isCodeEquivalentToStarter(submittedFiles, starter, contentLanguage)) {
+          return NextResponse.json(
+            { error: "初期コードから変更してください" },
+            { status: 400 }
+          );
+        }
+      }
     }
 
     // Count before insert so the new row is not treated as a pre-existing submission.

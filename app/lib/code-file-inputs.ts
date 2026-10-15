@@ -153,26 +153,57 @@ export function isSubmissionCodeValid(files: readonly CodeFileInput[]): boolean 
   return true;
 }
 
+function toComparableCodeFiles(
+  files: readonly { filename: string; language: string; content: string }[],
+  contentCodeLanguage: CodeLanguage
+): CodeFile[] {
+  const inputs: CodeFileInput[] = files.map((file, index) => ({
+    id: `cmp-${index}`,
+    filename: file.filename,
+    language: resolveLanguage(file.language || contentCodeLanguage, contentCodeLanguage),
+    content: file.content,
+    filenameEdited: true,
+  }));
+  // Same omit-empty-shell rules as submit; trim content so whitespace-only edits do not count.
+  return buildSubmissionCodeFiles(inputs, contentCodeLanguage).map((file) => ({
+    filename: file.filename,
+    language: file.language,
+    content: file.content.trim(),
+  }));
+}
+
 /**
- * True when the editor still matches the initial starter snapshot (filename, language, content).
- * Used to block submitting untouched starter code (would burn an AI review slot).
+ * True when submitted code matches starter after submit normalization (empty shells ignored;
+ * content compared trimmed). Used client- and server-side to block burning an AI review slot.
  */
+export function isCodeEquivalentToStarter(
+  submitted: readonly { filename: string; language: string; content: string }[],
+  starter: readonly { filename: string; language: string; content: string }[] | null | undefined,
+  contentCodeLanguage: CodeLanguage
+): boolean {
+  if (!starter || starter.length === 0) {
+    return false;
+  }
+  const left = toComparableCodeFiles(submitted, contentCodeLanguage);
+  const right = toComparableCodeFiles(starter, contentCodeLanguage);
+  if (left.length === 0 || right.length === 0 || left.length !== right.length) {
+    return false;
+  }
+  return left.every(
+    (file, index) =>
+      file.filename === right[index].filename &&
+      file.language === right[index].language &&
+      file.content === right[index].content
+  );
+}
+
+/** Editor still matches starter snapshot (same normalization as isCodeEquivalentToStarter). */
 export function isUnchangedFromStarter(
   files: readonly CodeFileInput[],
-  starterSnapshot: readonly CodeFileInput[] | null | undefined
+  starterSnapshot: readonly CodeFileInput[] | null | undefined,
+  contentCodeLanguage: CodeLanguage
 ): boolean {
-  if (!starterSnapshot || starterSnapshot.length === 0) {
-    return false;
-  }
-  if (files.length !== starterSnapshot.length) {
-    return false;
-  }
-  return files.every(
-    (file, index) =>
-      file.filename === starterSnapshot[index].filename &&
-      file.language === starterSnapshot[index].language &&
-      file.content === starterSnapshot[index].content
-  );
+  return isCodeEquivalentToStarter(files, starterSnapshot, contentCodeLanguage);
 }
 
 export function updateCodeFileAt(
