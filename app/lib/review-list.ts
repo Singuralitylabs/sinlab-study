@@ -253,13 +253,11 @@ export function findOrphanRequirementNotes<
   activeItems: readonly { contentId: number; requirementKey: string }[]
 ): Array<T & { requirement_key: string; memo: string }> {
   const activeKeys = new Set(activeItems.map((item) => `${item.contentId}:${item.requirementKey}`));
-  return notes.filter(
-    (note): note is T & { requirement_key: string; memo: string } => {
-      if (note.requirement_key === null) return false;
-      if (activeKeys.has(`${note.content_id}:${note.requirement_key}`)) return false;
-      return note.memo != null && note.memo.trim() !== "";
-    }
-  );
+  return notes.filter((note): note is T & { requirement_key: string; memo: string } => {
+    if (note.requirement_key === null) return false;
+    if (activeKeys.has(`${note.content_id}:${note.requirement_key}`)) return false;
+    return note.memo != null && note.memo.trim() !== "";
+  });
 }
 
 /**
