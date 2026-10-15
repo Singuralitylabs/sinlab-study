@@ -300,7 +300,10 @@ export async function countUnovercomeReviewItemsForUser(
       return 0;
     }
     return countUnovercomeReviewItems(
-      filterReviewItemsToVisibleContents(deriveReviewListItems(reviewsResult.data), visibleContentIds)
+      filterReviewItemsToVisibleContents(
+        deriveReviewListItems(reviewsResult.data),
+        visibleContentIds
+      )
     );
   }
 

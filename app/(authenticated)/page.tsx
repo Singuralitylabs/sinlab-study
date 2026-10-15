@@ -54,16 +54,21 @@ export default async function HomePage() {
       ? fetchUpgradePriceLabel()
       : Promise.resolve(null);
 
-  const [{ data: homeLearning }, onboardingResult, gettingStartedResult, announcementsResult, recentCertificate] =
-    await Promise.all([
-      fetchHomeLearningData(userId),
-      isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
-      isMember ? fetchGettingStartedProgress(userId) : Promise.resolve({ data: null, error: null }),
-      getViewerAnnouncements(),
-      isCertificateEligible(userStatus, userRole)
-        ? fetchRecentCertificate(userId)
-        : Promise.resolve(null),
-    ]);
+  const [
+    { data: homeLearning },
+    onboardingResult,
+    gettingStartedResult,
+    announcementsResult,
+    recentCertificate,
+  ] = await Promise.all([
+    fetchHomeLearningData(userId),
+    isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
+    isMember ? fetchGettingStartedProgress(userId) : Promise.resolve({ data: null, error: null }),
+    getViewerAnnouncements(),
+    isCertificateEligible(userStatus, userRole)
+      ? fetchRecentCertificate(userId)
+      : Promise.resolve(null),
+  ]);
   // Reuse home tree IDs so the badge does not fetch the published theme tree a third time.
   const visibleContentIds = new Set(homeLearning?.orderedContents.map((c) => c.id) ?? []);
   const unovercomeReviewCount = isMember
