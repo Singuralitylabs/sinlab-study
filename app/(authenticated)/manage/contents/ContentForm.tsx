@@ -751,12 +751,14 @@ export function ContentForm({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="referenceAnswer">模範回答（AIレビュー採点基準・非公開）</Label>
+                <Label htmlFor="referenceAnswer">
+                  模範回答（AIレビュー採点基準・提出後に受講生へ表示）
+                </Label>
                 <Textarea
                   id="referenceAnswer"
                   value={referenceAnswer}
                   onChange={(e) => setReferenceAnswer(e.target.value)}
-                  placeholder="模範回答を記述してください。AIレビュー時の採点基準として使用され、受講生には表示されません。"
+                  placeholder="模範回答を記述してください。AIレビュー時の採点基準として使用され、受講生には提出後に表示されます（提出前は非公開）。"
                   className="min-h-[200px] font-mono"
                 />
               </div>

@@ -1544,7 +1544,8 @@ async function updateContentRow(
   let previousPdfUrl: string | null = null;
   let pdfFetchFailed = false;
   // Set whenever this write changes grading_rubric, including a clear. The UPDATE matches that
-  // version (or NULL) so a stale form cannot overwrite a newer rubric or republish an old key.
+  // version (a deleted rubric keeps its version as a tombstone; NULL only if the row never had a
+  // rubric) so a stale form cannot overwrite a newer rubric or republish an old key.
   let expectedRubricVersion: number | null | undefined;
   // The versioned write commits before resequence. If a later step fails, put these back;
   // otherwise a quiz keeps the new type and a wiped rubric while its questions are restored.
@@ -1555,8 +1556,8 @@ async function updateContentRow(
   let rubricWriteCommitted = false;
   let committedRubricVersion: number | null | undefined;
   let committedRubricValue: LearningContent["grading_rubric"] = null;
-  // The rubric UPDATE's updated_at. A later save moves it, including one that also leaves the
-  // rubric NULL, so a clear is not identified by IS NULL alone.
+  // The rubric UPDATE's updated_at. Only needed when the row had no rubric before this save and
+  // the committed value is NULL: IS NULL alone would also match a later save that left it NULL.
   let committedRubricUpdatedAt: string | null = null;
   if (needsCurrentWeek || needsCurrentPdf || touchesRubric) {
     const { data: current, error: currentError } = await supabase
@@ -1698,8 +1699,9 @@ async function updateContentRow(
     if (!rubricWriteCommitted || !rubricSnapshot || committedRubricVersion === undefined) {
       return;
     }
-    // A clear has no version. IS NULL also matches a later save that left the rubric empty,
-    // and the snapshot would put the previous rubric back. updated_at moves on that UPDATE.
+    // Only clearing a row that never had a rubric has no version (clearing a real rubric leaves a
+    // tombstone with one). IS NULL also matches a later save that left the rubric empty, and the
+    // snapshot would put the previous rubric back. updated_at moves on that UPDATE.
     if (committedRubricVersion === null && !committedRubricUpdatedAt) {
       console.error("コンテンツ更新エラー（採点基準の復元）: 削除の時刻が取れないため戻さない");
       return;
@@ -2085,37 +2087,6 @@ export async function changeMembershipType(
 
   if (error) {
     console.error("ユーザー会員種別変更エラー:", error.message);
-    return { error, updated: false };
-  }
-
-  return { error: null, updated: (data?.length ?? 0) > 0 };
-}
-
-/**
- * Promotional-mail unsubscribe state, set by an admin on the user's behalf (`opt_out_email`, e.g.
- * on the user's request) or reverted (`resume_email`). Guarded in the UPDATE so a stale screen
- * cannot overwrite the original unsubscribe time or resume someone who is not unsubscribed;
- * `updated: false` means the target was already in that state, missing or deleted. Transactional
- * mail never reads this column. Not tied to the user's status, so it works for any user.
- */
-export async function setUserEmailOptOut(
-  userId: number,
-  optOut: boolean
-): Promise<{ error: PostgrestError | null; updated: boolean }> {
-  const supabase = await createAdminSupabaseClient();
-
-  const query = supabase
-    .from("users")
-    .update({ email_opt_out_at: optOut ? new Date().toISOString() : null })
-    .eq("id", userId)
-    .eq("is_deleted", false);
-  const { data, error } = await (optOut
-    ? query.is("email_opt_out_at", null)
-    : query.not("email_opt_out_at", "is", null)
-  ).select("id");
-
-  if (error) {
-    console.error("メール配信停止状態の更新エラー:", error.message);
     return { error, updated: false };
   }
 

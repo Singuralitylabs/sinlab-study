@@ -6,9 +6,9 @@ import {
   changeUserRole,
   isUserCurrentlySubscribed,
   rejectUser,
-  setUserEmailOptOut,
 } from "@/app/services/api/admin-server";
 import { AdminUserActionSchema, validateRequest } from "@/app/services/api/schemas";
+import { setUserEmailOptOut } from "@/app/services/api/user-email-server";
 import { requireAdminApi } from "@/app/services/auth/admin-guard";
 import { scheduleApprovedEmail } from "@/app/services/notifications/user-emails";
 

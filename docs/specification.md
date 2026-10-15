@@ -417,7 +417,7 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 | 動画（video） | YouTube facade（サムネイル + 再生ボタン）。クリックで `react-youtube` を遅延読み込みして autoplay 再生（URLから Video ID を自動抽出、レスポンシブ対応） |
 | テキスト（text） | Markdown形式で記述・表示（GFM対応） |
 | スライド（slide） | 非公開バケット `slides` のPDFを、閲覧権限チェック後にサーバー側で発行した署名付きURLで react-pdf によりブラウザ内表示（後述） |
-| 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携 |
+| 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携。模範回答は提出が1件以上あるとき（admin・maintainer は提出不要）だけ、RPC `get_exercise_reference_answer()`（`docs/database.md` 6.18）で取得して表示する（列権限では読めない） |
 | クイズ（quiz） | 導入文（`description`・任意）と設問（1〜3問）を表示し、回答後に正誤・解説を表示（後述） |
 
 動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア下部に概要欄カードを表示する（テキスト・演習と同じ `MarkdownRenderer`）。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）は `"use client"` を持たない共有コンポーネントで、Server Component からはサーバーで、Client Component（`AIReviewDisplay`）からはクライアントで同じ実装のまま描画される。コンテンツ本文の Markdown 描画経路（Server Component）は client 化しない。
@@ -563,11 +563,13 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 ```
 
 **集計レベル**:
-- **全体**: 全公開コンテンツ中の完了数
+- **テーマ単位**: テーマ配下の全公開コンテンツ中の完了数（`fetchThemeProgressSummaries()`）。ダッシュボードの表示単位。**全テーマを合算した全体進捗率は表示しない**（テーマを追加するたびに数字が下がり、意味を失うため）
 - **Phase単位**: Phase配下の全コンテンツ中の完了数
 - **Week単位**: Week配下の全コンテンツ中の完了数
 
 **お試しユーザーの分母**: 集計は通常クライアントのネスト select で行うため、RLSによる絞り込みがそのまま分母に反映される（2.6参照）。
+
+**学習中テーマ（`app/lib/theme-progress.ts`）**: 受講テーマを選ぶ仕組みは持たず、完了実績から判定する。`isActiveTheme()` は完了が1件以上で修了（100%。修了証の `isThemeCompleted()` と同じ定義）に達していないこと（trial は上記の分母のまま判定）。`splitThemesByActivity()` が **学習中**（完了1件以上で100%未満。完了率の高い順）/ **修了**（100%）/ **未着手**（完了0件。`display_order` 順）に分ける。判定はこの1か所に置き、ダッシュボード・週次進捗メール（10.7節）・将来の修了証一覧が共有する。ダッシュボードは「学習進捗」カードに学習中のテーマごとのバーを並べ（0件のときは最初の未着手テーマへのリンク）、「学習テーマ」一覧を「学習中」「修了」「未着手」の3区分で見出し分けする（修了テーマは「修了」バッジと、修了証の対象者には `/certificates` へのリンク）。「はじめかたチェックリスト」の完了判定と、お試しの「次のステップ」カード（全テーマの分母で100%）はテーマをまたいだ判定のため変えない。
 
 ---
 
@@ -768,7 +770,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 2. 提出データと関連コンテンツを取得
 3. 本人の提出であることを確認し、コンテンツの可視性（`is_published = true` 付き SELECT で 0 行なら 403）を確認
 4. `claimAIReview()`（RPC `claim_ai_review()`）で回数制限（下記「回数制限」）の判定とその提出のレビュー枠の確保を原子的に行う（新規は `ON CONFLICT DO NOTHING` の INSERT、既存行は `failed` または死んだ in-flight だけを条件付き UPDATE で再利用）。確保できなければ（`busy`。直列化下では到達しない防御的な分岐）409 で Gemini を呼ばない。確保後は `pending` → `processing` → `completed` / `failed` の順に更新する（`processing` への更新に失敗したら `failed` にして 500）。再利用した行は `created_at` も現在時刻に更新する（当日の件数集計から漏れないようにするため）。トークン列は更新せず累計を保つ
-6. Gemini API にコード・演習指示・模範回答・採点基準を送信し、構造化 JSON でレビューを生成（下記「構造化採点」。単一ファイルの提出は `code_content` に言語を持たないため、演習の `code_language` を言語として渡す。コードを囲むフェンスはコード中のバッククォートの連続より長くし、Markdown 提出のコードブロック等でフェンスが途中で閉じないようにする。`GEMINI_MAX_CODE_LENGTH` を超えた分の省略は複数ファイルの提出でもファイルごとに行う）。結果の保存に失敗したときは 500 を返し、行を best-effort で `failed`（トークンも記録）にして再試行を可能にする
+6. Gemini API にコード・演習指示・模範回答・採点基準（`grading_rubric` と `reference_answer` は受講生の列権限に無いため、service_role で `is_published = true AND is_deleted = false` を付けて1回で読む）を送信し、構造化 JSON でレビューを生成（下記「構造化採点」。単一ファイルの提出は `code_content` に言語を持たないため、演習の `code_language` を言語として渡す。コードを囲むフェンスはコード中のバッククォートの連続より長くし、Markdown 提出のコードブロック等でフェンスが途中で閉じないようにする。`GEMINI_MAX_CODE_LENGTH` を超えた分の省略は複数ファイルの提出でもファイルごとに行う）。結果の保存に失敗したときは 500 を返し、行を best-effort で `failed`（トークンも記録）にして再試行を可能にする
 
 **回数制限（#304）**: 制限値は `app/constants/gemini.ts` の `AI_REVIEW_LIMITS` が唯一の定義で、API・画面文言・本節はここから導出する。API の判定と枠の確保は RPC `claim_ai_review()`（`claimAIReview()` 経由。下記「並行リクエスト」）が担い、コンテンツ詳細の残り回数表示は `fetchAIReviewUsage()`（`app/services/api/ai-review-usage-server.ts`）+ `computeRemainingReviews()`（`app/lib/ai-review-limits.ts`）が担う。規則を文章で表した純粋関数 `evaluateReviewRequest()` は SQL と同じ規則の定義として残し、テストで固定する。日付の境界は **JST**（`app/lib/email-digest.ts` の `toJstDateString()` / `jstStartOfDayIso()` と同じ基準）で、UTC では数えない。集計は常に `user_id` で本人の提出に絞る（admin / maintainer は RLS で全件読めるため、RLS だけに頼らない）。
 
@@ -976,6 +978,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 - `/upgrade/success`: Checkoutから戻った直後の決済確認・完了表示（2.11）
 - `/certificates` / `/certificates/[id]`: 修了証の一覧と表示（本登録の member のみ。13章）
 - `/announcements` / `/announcements/[id]`: お知らせの一覧（未読表示。サイドナビ「お知らせ」に未読件数のバッジ）・詳細（開くと既読を記録）（11章）
+- `/settings`: 案内メールの配信状態（配信中 / 停止中と停止日時）の確認と、停止・再開（10.8節）。サイドナビのログアウトの上に「設定」として全ロールへ表示する
 
 ### 7.3 管理・講師向け画面（`/manage`）
 
@@ -1180,7 +1183,8 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 - **日付は JST の暦日で判定する**: 「登録から N 日目」は `users.created_at` を JST の暦日に丸め、登録日を0日目とする。週は月曜始まりで、「先週」は前週の月曜 0:00〜今週の月曜 0:00（JST）。日次実行が失敗した日の N 日目の分は翌日以降に拾わない（取りこぼしを許容する）
 - **1人1日1通**: `trial_nurture` と `inactivity_reminder` が同じ日に重なるお試しユーザーには `trial_nurture` だけを送る。N 日目の案内を送る日はお知らせ・週次進捗を送らず、お知らせと週次進捗が重なる日は下の「1日の上限」の並び順で先の方だけを送り、もう一方は翌日以降の実行に回す。今日（JST 0:00 以降）すでに案内系メールの `email_logs` を持つユーザーは、同じ日の再実行（手動実行・Cron の再起動）で対象から外す（朝の実行後に承認されて `status` が変わっても、別種別の2通目を送らない）
 - **お試しユーザーの範囲**: 次に学ぶコンテンツ・残り本数・最初の1本は、お試し公開（`is_open_to_trial = true`）のコンテンツだけで判定する（ダッシュボードの進捗の分母と同じ。4.2節）
-- **集計**: 抽出はユーザーセッションの無いバッチのため service_role クライアントで行う（`user_id` 単位の集計であり、受講生へコンテンツを返す配信経路ではない）。コンテンツは `fetchThemeProgressSummaries()` と同じネスト select で全階層を `is_published = true AND is_deleted = false` に絞り、本文を含まないカラム（`id, title, display_order, is_open_to_trial, week_id` と各階層の名前・表示順）だけを読む。学習順はコンテンツ詳細の前後ナビと同じ `buildThemeContentOrder()` で並べる。新しい集計 SQL（RPC）は追加しない
+- **週次進捗の「次に学ぶ」（#308）**: 学習中のテーマ（4.2節の `splitThemesByActivity()`）のうち**最も最近完了があったテーマ**の、学習順で先頭の未完了コンテンツを選ぶ（`resolveNextContent()`。完了時刻は `user_progress.completed_at`）。そのテーマに未完了が残っていなければ次に最近のテーマへ移り、学習中のテーマが無い（完了0件）ときは全体の先頭。残り本数と対象抽出（`isWeeklyDigestTarget()`）は全テーマ通しのまま。先週の完了数・提出数も全テーマ合算（活動量の指標）。本文には「学習中のテーマ: ○○（N / M 完了）」を最近学んだ順に最大3件入れる（プレースホルダー `active_themes`。学習中が無ければ行ごと出ない。保存済みのテンプレートには自動では入らないので、必要なら `/admin/emails/templates` で追記する）
+- **集計**: 抽出はユーザーセッションの無いバッチのため service_role クライアントで行う（`user_id` 単位の集計であり、受講生へコンテンツを返す配信経路ではない）。コンテンツは `fetchThemeProgressSummaries()` と同じネスト select で全階層を `is_published = true AND is_deleted = false` に絞り、本文を含まないカラム（`id, title, display_order, is_open_to_trial, week_id` と各階層の名前・表示順）だけを読む。学習順はコンテンツ詳細の前後ナビと同じ `buildThemeContentOrder()` で並べる。新しい集計 SQL（RPC）は追加しない。お知らせの本文だけは、この抽出とは別に宛先確定後のお知らせ取得で読む（11.4節）
 - **並行実行の排除**: 実行の最初に実行ロック（`cron_locks`。[データベース設計書](./database.md)3.12）を取り、取れなければ何もせず `skipped` を返す。Cron の重複起動・手動実行が重なっても処理するのは1つだけになる。ロックの取得自体が DB エラーなら 500
 - **二重送信の防止**: 1通ごとに `email_logs` の claim を通す（10.1節）。同じ日の再実行でも UNIQUE 違反で送らない。送信失敗は `error` を記録して再送しない（お知らせの一斉送信だけは、Resend が受け付けなかったことが確実な失敗を翌日以降に送り直す。11.4節）
 - **1日の上限**: `email_settings.digest_daily_limit`（初期値80通。Resend 無料枠の日次100通に、同日のトランザクションメールの余裕を残す。10.10節）は同じ日（JST）の実行の合計に効かせる。ロックを取った後に、今日すでに作られた案内系の `email_logs` の行数を差し引いた数を今回の上限とし、送信を試みた通数（成功・失敗）がそれに達するか、経過時間が `EMAIL_DIGEST_TIME_BUDGET_MS`（40秒。ルートの `maxDuration` は60秒。最悪ケースは予算ぎりぎりで始めた1通が `EMAIL_SEND_TIMEOUT_MS`＝15秒まで掛かる合計55秒。送信開始は500ms間隔なので1回の実行で最大80通（初期の日次上限と同数）。ロック取得・抽出・送信ごとのDBアクセスも予算に含むため実際は数通少なく、不足分は上限超過分と同様に繰り越す。予算または間隔を変えるときは「予算÷間隔」が日次上限以上であることを上限として保つ）を超えたら新しい送信を始めない。送れなかった通数は warn ログに残す。キューは N 日目の案内を先頭に並べ、その後は週次進捗の対象を決める日（月曜。取り戻しの火曜を含む）はお知らせ（公開の古い順）→ 週次進捗、それ以外の日は週次進捗（予約の繰り越し分）→ お知らせの順に並べる。週次進捗の予約は同じ週の間しか有効でないため、繰り越しの期限が無いお知らせが上限を使い切って週次進捗を週末まで押し出し、失わせることがないようにする。上限に掛かるのは通常はお知らせ・週次進捗で、翌日以降の実行で送られる。N 日目の案内だけで上限を超えた場合の残りと、週の最終日（日曜）に送れなかった週次進捗は繰り越さない（warn ログで区別する）
@@ -1200,6 +1204,8 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 - **`GET /api/email/unsubscribe?token=...`**（ログイン不要）: トークンを検証し、「配信を停止する」ボタン（同じ URL への `POST` フォーム）付きの確認画面を返す。**GET では停止を確定しない**。メールのセキュリティ製品（Outlook の Safe Links 等）はリンクを事前に GET するため、GET で確定すると本人が開く前に停止されてしまう
 - **`POST /api/email/unsubscribe?token=...`**（確認画面のボタンと、`List-Unsubscribe-Post` に対応するメールクライアントのワンクリック配信停止）: 検証に成功したら `users.email_opt_out_at` を `now()` で記録し（既に停止済みなら更新せず）、完了画面を返す
 - いずれも、形式不正・改ざん・シークレット未設定は理由を区別せず 400（フェイルクローズ）。DB エラーは 500。画面にユーザー情報は出さない
+- **本人による確認・停止・再開（`/settings`、`PATCH /api/settings/email`）**: 状態は `users.email_opt_out_at` 1 本のまま（種別ごとの設定は持たない）。画面は本人の行を通常クライアントで SELECT して「配信中 / 停止中（停止日時）」を表示し、操作は `PATCH /api/settings/email`（`{ "promotionalEmails": true | false }`。`false` で停止、`true` で再開）で行う。`getServerAuth()` で本人を特定し、未認証 401・`userId` なし 403・`rejected` 403・不正ボディ 400。更新は管理者操作と共通の `setUserEmailOptOut()`（`app/services/api/user-email-server.ts`）を**本人の `userId` で**呼ぶ（service_role。RLS に本人 UPDATE ポリシーは足さない）。すでに目的の状態でもエラーにせず 200 で現在の状態 `{ "emailOptOutAt": string | null }` を返す（管理者 API の 409 は変えない）。admin / maintainer は案内メールの送信対象ではない（10.7節）ため画面に注記を出すが、操作はできる。再開はログイン後の画面に限る（署名付きリンクのルートには再開操作を置かない）
+- **手続き通知に案内を含めるときの表記**: `renderEmailLayout()` の `emailPreferencesUrl` が渡されたときだけ、フッターに「案内メールの配信設定はこちら: `<NEXT_PUBLIC_APP_URL>/settings`」の 1 行をコードで付ける（`List-Unsubscribe` は付けない。手続き通知そのものは停止対象ではない）。渡す種別は `signup`（`upgradeAvailable = true` のとき）と `subscription_ended`。`approved` / `upgraded` / `cancel_scheduled` / `certificate_issued` は案内を含まないため渡さない。案内系 4 種も、署名付きの配信停止リンクに加えてこの行を併記する。配信停止の完了画面にも、再開は設定画面から行える旨を表示する
 - **再開・停止（管理者）**: `/admin/users` で配信停止の状態を確認し、`resume_email`（`email_opt_out_at` を NULL に戻す）・`opt_out_email`（本人の依頼で停止。`now()` を記録）を実行する（2.7・6.1.3節）
 
 ### 10.9 定期メールの設定手順（運用）
@@ -1246,7 +1252,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 | 区分 | 対象 | 理由 |
 |:--|:--|:--|
 | 編集できる | サービス名（差出人名・件名の先頭 `【サービス名】`・見出し・フッターの名前）、補足（見出しの補足・フッター。空にできる）、各テンプレートの件名と本文（Markdown） | 運営が文面を調整したい部分 |
-| コードで固定 | 宛名（「〇〇 様」）、ボタンのリンク先と表示条件、自動送信・返信不可の定型文、配信停止リンクと `List-Unsubscribe` ヘッダー、送信の条件・タイミング | 法令上の必須表示（特定電子メール法）や送信ロジックに関わる。**テンプレートの内容によらず、`renderEmailLayout()` が必ず付ける** |
+| コードで固定 | 宛名（「〇〇 様」）、ボタンのリンク先と表示条件、自動送信・返信不可の定型文、配信停止リンクと `List-Unsubscribe` ヘッダー、配信設定（`/settings`）の案内行（10.8節）、送信の条件・タイミング | 法令上の必須表示（特定電子メール法）や送信ロジックに関わる。**テンプレートの内容によらず、`renderEmailLayout()` が必ず付ける** |
 
 **テンプレートキー**（`EMAIL_TEMPLATE_KEYS`。`app/lib/email-template.ts`）: `signup` / `approved` / `upgraded` / `cancel_scheduled` / `subscription_ended` / `weekly_digest` / `inactivity_reminder` / `trial_nurture.day2` / `trial_nurture.day5` / `trial_nurture.day7` / `trial_nurture.day14` / `announcement`。お試しユーザー向け案内は段階ごとにキーを分ける（どの段階を使うかは、送る日の設定に対し従来どおりコードが決める）。`announcement` は件名の形式（`お知らせ: {{title}}`）と、お知らせ本文の前後の定型文だけを持ち、本文に `{{announcement_body}}` を**ちょうど1つ**含める（お知らせごとの本文がそこに入る。件名には使えない）。
 
@@ -1259,7 +1265,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 | `upgraded` | `monthly_price` / `next_billing_date`（取得できないときは空） |
 | `cancel_scheduled` | `access_until`（「2026年10月31日 まで」または「現在のお支払い期間の終了まで」） |
 | `subscription_ended` | なし |
-| `weekly_digest` | `completed_last_week` / `submitted_last_week` / `weekly_cheer` / `next_content_title` / `suggested_goal` / `remaining_contents` / `all_completed_message` |
+| `weekly_digest` | `completed_last_week` / `submitted_last_week` / `weekly_cheer` / `active_themes` / `next_content_title` / `suggested_goal` / `remaining_contents` / `all_completed_message` |
 | `inactivity_reminder` | `first_content_title` / `no_content_guide` |
 | `trial_nurture.day2` / `day5` | なし |
 | `trial_nurture.day7` | `elapsed_label` / `locked_themes` / `registration_guide` |

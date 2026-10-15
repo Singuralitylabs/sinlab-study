@@ -136,6 +136,9 @@ const PREVIEW_VARIANTS: Record<EmailTemplateKey, VariantDefinition[]> = {
             submittedLastWeek: 2,
             nextContent: { title: "JavaScript の基本", path: "/learn/1" },
             remainingContents: 12,
+            activeThemes: [
+              { themeName: "GAS 学習（基礎編）", completedContents: 4, totalContents: 16 },
+            ],
           },
           c.texts
         ),
@@ -151,6 +154,9 @@ const PREVIEW_VARIANTS: Record<EmailTemplateKey, VariantDefinition[]> = {
             submittedLastWeek: 0,
             nextContent: { title: "JavaScript の基本", path: "/learn/1" },
             remainingContents: 12,
+            activeThemes: [
+              { themeName: "GAS 学習（基礎編）", completedContents: 4, totalContents: 16 },
+            ],
           },
           c.texts
         ),
@@ -166,6 +172,7 @@ const PREVIEW_VARIANTS: Record<EmailTemplateKey, VariantDefinition[]> = {
             submittedLastWeek: 1,
             nextContent: null,
             remainingContents: 0,
+            activeThemes: [],
           },
           c.texts
         ),

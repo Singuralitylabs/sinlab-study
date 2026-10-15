@@ -134,6 +134,7 @@ app/
 │   ├── manage/          #   コンテンツ管理画面（admin + maintainer 共通）
 │   ├── instructor/      #   講師向け画面（/manage にリダイレクト）
 │   ├── learn/           #   学習コンテンツ画面（Theme > Phase > Week > Content の4階層）
+│   ├── settings/        #   設定画面（案内メールの配信停止・再開）
 │   ├── submissions/     #   提出履歴画面
 │   ├── components/      #   認証済みレイアウト用コンポーネント
 │   └── page.tsx         #   ダッシュボード
@@ -146,6 +147,7 @@ app/
 │   ├── manage/          #   コンテンツ管理（phases/weeks/contents/themes）
 │   ├── onboarding/      #   初回利用ガイドの完了記録
 │   ├── progress/        #   進捗更新
+│   ├── settings/email/  #   案内メールの配信停止・再開（本人用）
 │   ├── submissions/     #   課題提出
 │   └── upload-pdf/      #   PDFスライドアップロード（Supabase Storage）
 ├── components/          # 共通UIコンポーネント

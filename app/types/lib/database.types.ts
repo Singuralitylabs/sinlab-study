@@ -931,6 +931,16 @@ export type Database = {
         Args: { p_day_start: string; p_limit: number; p_user_id: number };
         Returns: number;
       };
+      content_visible_to_caller: {
+        Args: { p_content_id: number; p_content_type: string };
+        Returns: boolean;
+      };
+      get_exercise_reference_answer: {
+        Args: { p_content_id: number };
+        Returns: {
+          reference_answer: string;
+        }[];
+      };
       get_quiz_questions: {
         Args: { p_content_id: number };
         Returns: {
