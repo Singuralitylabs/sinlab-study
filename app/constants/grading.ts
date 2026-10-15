@@ -26,11 +26,11 @@ export const QUALITY_POINTS: Record<QualityLevel, number> = {
 };
 
 /**
- * Minimum score for passing a rubric-graded review. 0 disables the score condition and the "no
- * unmet requirement" condition together, so `passed` stays NULL. Turn it on only in a PR that
- * changes this constant after reading the dry-run distribution (scripts/grading-dry-run.ts).
+ * Minimum score for passing a rubric-graded review. Pass is this score and no unmet requirement
+ * (`isReviewPassed`). 0 would disable both and leave `passed` NULL. 70 was chosen from the
+ * dry-run distribution (scripts/grading-dry-run.ts, #367). Screens read this constant.
  */
-export const CERTIFICATE_PASS_SCORE = 0;
+export const CERTIFICATE_PASS_SCORE = 70;
 
 export const GRADING_RUBRIC_MIN_REQUIREMENTS = 1;
 export const GRADING_RUBRIC_MAX_REQUIREMENTS = 10;

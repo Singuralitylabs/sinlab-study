@@ -985,6 +985,10 @@ export type Database = {
         Args: { p_day_start: string; p_limit: number; p_user_id: number };
         Returns: number;
       };
+      content_requires_review_pass: {
+        Args: { p_content_id: number };
+        Returns: boolean;
+      };
       content_visible_to_caller: {
         Args: { p_content_id: number; p_content_type: string };
         Returns: boolean;

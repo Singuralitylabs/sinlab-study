@@ -76,9 +76,15 @@ describe("computeReviewScore", () => {
 });
 
 describe("isReviewPassed", () => {
-  it("既定（CERTIFICATE_PASS_SCORE = 0）では判定せず null（passed は NULL のまま）", () => {
-    expect(CERTIFICATE_PASS_SCORE).toBe(0);
-    expect(isReviewPassed(review(["met"]), 100)).toBeNull();
+  it("合格点は 70。既定ではその点数以上かつ未達成なしで true", () => {
+    expect(CERTIFICATE_PASS_SCORE).toBe(70);
+    expect(isReviewPassed(review(["met"]), 100)).toBe(true);
+    expect(isReviewPassed(review(["met"]), 70)).toBe(true);
+    expect(isReviewPassed(review(["met"]), 69)).toBe(false);
+  });
+
+  it("合格点が 0 以下なら判定せず null", () => {
+    expect(isReviewPassed(review(["met"]), 100, 0)).toBeNull();
   });
 
   it("閾値が有効なとき: 点数が閾値以上かつ未達成なしで true", () => {

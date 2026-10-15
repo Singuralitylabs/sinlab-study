@@ -96,6 +96,8 @@ erDiagram
 
 受講生のコンテンツ完了状態。`UNIQUE(user_id, content_id)`（1ユーザー・1コンテンツにつき1レコード）で、進捗API は upsert（`ON CONFLICT`）で完了/未完了をトグルする（8.4参照）。
 
+採点基準ありの演習（`content_type = 'exercise'` かつ `grading_rubric` の要件が1件以上。空の墓石と NULL は対象外）は、合格レビュー（`ai_reviews.status = 'completed' AND passed = true`）があるときだけ完了にできる。強制は BEFORE INSERT/UPDATE トリガー `enforce_user_progress_review_pass()`（6.2）。すでに `is_completed = true` の行は遡って取り消さない。合格判定対象を未完了へ戻す更新は拒否する。
+
 ### 3.6 submissions（課題提出）
 
 演習課題に対する提出データ。
@@ -114,7 +116,7 @@ erDiagram
 - `score_kind`（NOT NULL・既定 `legacy`・CHECK）: `rubric` = 採点基準に基づく採点 / `estimated` = 基準未設定の参考採点 / `none` = URL 提出で採点対象外 / `legacy` = 構造化採点以前の自由文レビュー / `incomplete` = このシステムが作成し、まだ採点が完了していない行（`pending` / `processing` / `failed`）。既定は `legacy` のままなので既存行は再採点せず、新規の確保と再利用だけが `incomplete` を書く。完了時に `rubric` / `estimated` / `none` へ置き換わる
 - `overall_score`: コードが判定ラベルから計算した 0〜100（AI の出した数値ではない）。`none` は NULL
 - `rubric_version`: `score_kind = 'rubric'` のとき、採点に使った `grading_rubric.version`
-- `passed`: `score_kind = 'rubric'` かつ合格点（`app/constants/grading.ts` の `CERTIFICATE_PASS_SCORE`）が有効なときだけ値を持つ。無効（0）の間・それ以外は NULL
+- `passed`: `score_kind = 'rubric'` のとき、`isReviewPassed()` の結果（未達成の要件が無く、点数 ≥ `CERTIFICATE_PASS_SCORE`。70）。それ以外は NULL。合格点が 0 以下の間だけ rubric でも NULL。導入前の NULL は `scripts/backfill-review-passed.ts` が `review_json` から再計算して埋める（AI は再実行しない）
 - `prompt_tokens` / `completion_tokens` / `thoughts_tokens`: Gemini の使用量。`completion_tokens` は回答本文のみで、思考トークンは `thoughts_tokens` に分ける（過去分は NULL）。検証失敗による再生成では両方の応答を合算し、`failed` 行にも消費分を記録する。同じ提出の再試行は `failed` 行を再利用するので、3列は試行をまたいだ累計（再試行で NULL に戻さず加算する）。管理画面（admin / maintainer）専用で、受講生向けの SELECT 列には含めない（RLS は行単位のため、列の出し分けはアプリ層で担保する）
 
 ### 3.8 users（ユーザー）
@@ -308,7 +310,7 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 
 **この `SECURITY DEFINER` の規約は、ポリシー内から呼ぶRLSヘルパーに限る。** アプリから直接叩くRPC（例: `get_students_progress_summary()`。6.2節参照）は逆に `SECURITY DEFINER` にしてはならない。`SECURITY DEFINER` にするとRLSを迂回するため、`authenticated` にGRANTしたままだと任意のmemberが他ユーザーの行まで取得できてしまう。呼び出し元の権限のままRLSに従わせる `SECURITY INVOKER`（デフォルト）を維持すること。
 
-例外はクイズの `get_quiz_questions()` / `grade_quiz_answers()`（6.17）と、演習の `get_exercise_reference_answer()`（6.18）。いずれも呼び出し元に権限の無い列（正解・模範回答）を、回答・提出の後にだけ（模範回答の admin・maintainer は提出不要）読ませることが目的なので INVOKER では成り立たない。代わりに関数の中で呼び出し元の可視性（クイズは `quiz_content_visible_to_caller()`、模範回答は同等の可視性に加え、learner は本人の提出が必要。admin・maintainer は提出不要）を自前で確認し、返す列も限定する。この形以外で DEFINER の RPC を増やさない。
+例外はクイズの `get_quiz_questions()` / `grade_quiz_answers()`（6.17）、演習の `get_exercise_reference_answer()`（6.18）、および `content_requires_review_pass()`（6.2。採点基準の中身は返さず、可視な演習かどうかの真偽値だけ）。いずれも呼び出し元に権限の無い列を、条件を満たすときだけ読ませることが目的なので INVOKER では成り立たない。代わりに関数の中で呼び出し元の可視性を自前で確認し、返す列も限定する。この形以外で DEFINER の RPC を増やさない。
 
 ---
 
@@ -365,6 +367,8 @@ maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進
 
 - **`active` ユーザーへの影響**: この条件はステータスを問わず適用されるため、`active` ユーザーも不可視コンテンツ（未公開・存在しないID）への書き込みができない（正常なUI経路では不可視コンテンツに到達しないため、正常系への影響はない）
 - **INSERT だけでなく UPDATE にも課す理由**: 進捗API（`/api/progress`）は upsert（`onConflict: user_id,content_id`）で、既存行がある場合は UPDATE 経路を通る。INSERT のみに条件を課すと2回目以降の更新がすり抜けるため、UPDATE にも同じ条件が必要。これにより、お試し公開フラグを後から `false` に戻したコンテンツの進捗も書き換えられなくなる
+
+**合格判定対象の完了（#367）**: RLS は本人が `is_completed` を立てられるため、BEFORE INSERT/UPDATE トリガー `enforce_user_progress_review_pass()` が追加の制約になる。対象は `learning_content_requires_review_pass()`（演習かつ要件が1件以上。墓石は false）。`is_completed` が true になる操作で、`NEW.user_id` の提出に合格レビューが無ければ `42501`。すでに true の行の他列更新は判定しない。対象を未完了に戻す、または完了行を別コンテンツへ移す更新も拒否する。関数は `SECURITY DEFINER`・`search_path = public`。`learning_content_requires_review_pass()` は API ロールから EXECUTE できない。`enforce_user_progress_review_pass()` は `anon` から EXECUTE できない（受講生の書き込みがトリガーを起動できるよう `authenticated` は残す）。画面と進捗 API は RPC `content_requires_review_pass(p_content_id)`（`authenticated` / `service_role`。不可視は false）で同じ真偽値を読む。既存の RLS ポリシーは維持する。
 
 ### 6.3 submissions
 
