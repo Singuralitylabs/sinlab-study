@@ -29,8 +29,9 @@ export async function POST(request: NextRequest) {
     }
     const { contentId, submissionType, codeContent, codeFiles, url } = validation.data;
 
-    // Storage format: a single file goes in code_content, multiple in code_files (backward
-    // compatibility).
+    // Exactly one of code_content / code_files is set. Default: one file → code_content, two or
+    // more → code_files. A single file MAY still use code_files when filename/language must be
+    // preserved (starter or custom metadata; code_content cannot store them).
     let storedCodeContent: string | null = null;
     let storedCodeFiles: CodeFile[] | null = null;
     let storedUrl: string | null = null;
@@ -43,8 +44,6 @@ export async function POST(request: NextRequest) {
         storedCodeFiles = files;
       } else if (files.length === 1) {
         const file = files[0];
-        // code_content cannot store language/filename; keep code_files when either is set so a
-        // single starter file (e.g. html while content.code_language is javascript) survives.
         if (file.language.trim().length > 0 || file.filename.trim().length > 0) {
           storedCodeFiles = files;
         } else {

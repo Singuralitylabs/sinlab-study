@@ -14,7 +14,7 @@ import {
   MAX_BULK_CREATE_CONTENTS,
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
-import { GEMINI_MAX_CODE_LENGTH } from "@/app/constants/gemini";
+import { STARTER_FILES_MAX_TOTAL_LENGTH } from "@/app/constants/gemini";
 import { GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH } from "@/app/constants/grading";
 import {
   EMAIL_DIGEST_DAILY_LIMIT_MAX,
@@ -309,7 +309,8 @@ const StarterCodeFileSchema = z.object({
 
 /**
  * Exercise starter code (same shape as submissions.code_files). null clears. Total content length
- * matches the AI review code limit so a starter cannot exceed what the review path can send.
+ * is capped below the AI review submission limit so starters leave headroom for learner edits and
+ * for the prompt that includes both starter and submission.
  */
 const StarterFilesSchema = z
   .array(StarterCodeFileSchema)
@@ -320,11 +321,18 @@ const StarterFilesSchema = z
     if (!files) {
       return;
     }
-    const totalLength = files.reduce((sum, file) => sum + file.content.length, 0);
-    if (totalLength > GEMINI_MAX_CODE_LENGTH) {
+    const names = files.map((file) => file.filename);
+    if (new Set(names).size !== names.length) {
       ctx.addIssue({
         code: "custom",
-        message: `初期コードが長すぎます（上限: ${GEMINI_MAX_CODE_LENGTH}文字）`,
+        message: "初期コードのファイル名が重複しています",
+      });
+    }
+    const totalLength = files.reduce((sum, file) => sum + file.content.length, 0);
+    if (totalLength > STARTER_FILES_MAX_TOTAL_LENGTH) {
+      ctx.addIssue({
+        code: "custom",
+        message: `初期コードが長すぎます（上限: ${STARTER_FILES_MAX_TOTAL_LENGTH}文字）`,
       });
     }
   });

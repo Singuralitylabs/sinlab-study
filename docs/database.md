@@ -98,7 +98,7 @@ erDiagram
 演習課題に対する提出データ。
 
 - 同一コンテンツへの複数回提出が可能（ユニーク制約なし）
-- コード提出は、単一ファイルなら `code_content`（TEXT）、複数ファイル（例: `コード.gs` + `index.html`）なら `code_files`（JSONB。`[{filename, language, content}]`）に保存し、**もう一方は NULL**。URL 提出は `url` のみ。`code_content` のみの既存提出もそのまま有効（後方互換）
+- コード提出は `code_content`（TEXT）と `code_files`（JSONB。`[{filename, language, content}]`）の**どちらか一方のみ**が値を持つ（もう一方は NULL）。既定は単一ファイル → `code_content`、複数ファイル（例: `コード.gs` + `index.html`）→ `code_files`。単一ファイルでもファイル名・言語を残す必要があるとき（初期コードやカスタム名）は `code_files` に1要素で保存してよい。URL 提出は `url` のみ。`code_content` のみの既存提出もそのまま有効（後方互換）
 
 ### 3.7 ai_reviews（AIレビュー）
 
