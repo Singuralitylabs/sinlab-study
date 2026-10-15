@@ -79,4 +79,35 @@ describe("resolveContinueLearning", () => {
     expect(next?.completedContents).toBe(1);
     expect(next?.totalContents).toBe(3);
   });
+
+  it("実時刻があるテーマを、completed_at 欠落のテーマより優先する", () => {
+    // GAS は完了行があるが時刻なし、Web はあとから完了した実時刻あり → Web を選ぶ
+    const next = resolveContinueLearning(
+      ordered,
+      new Set([1, 4]),
+      new Map([
+        // 1 intentionally omitted (NULL completed_at)
+        [4, 2000],
+      ])
+    );
+    expect(next?.id).toBe(5);
+    expect(next?.themeName).toBe("Web");
+  });
+
+  it("どちらも completed_at 欠落なら表示順の先頭テーマにフォールバックする", () => {
+    const next = resolveContinueLearning(
+      ordered,
+      new Set([1, 4]),
+      new Map() // all completions lack timestamps
+    );
+    expect(next?.id).toBe(2);
+    expect(next?.themeName).toBe("GAS");
+  });
+
+  it("欠落時刻を epoch 0 扱いして古い実時刻に勝たせない", () => {
+    // Web にだけ欠落完了、GAS に古い実時刻 → GAS（実時刻あり）を最後に学んだテーマとする
+    const next = resolveContinueLearning(ordered, new Set([1, 4]), new Map([[1, 100]]));
+    expect(next?.id).toBe(2);
+    expect(next?.themeName).toBe("GAS");
+  });
 });

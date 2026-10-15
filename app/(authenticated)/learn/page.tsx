@@ -1,7 +1,7 @@
 import { BookOpen } from "lucide-react";
 import { PageTitle } from "@/app/components/PageTitle";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
-import { isCertificateEligible } from "@/app/lib/certificate";
+import { isCertificateEligible, isThemeCompleted } from "@/app/lib/certificate";
 import {
   fetchPublishedThemes,
   fetchThemeProgressSummaries,
@@ -39,23 +39,22 @@ export default async function LearnPage() {
       ) : (
         <div className="grid gap-4">
           {themes.map((theme) => {
+            // Unpublished themes (admin/maintainer preview) have no progress rows; pass 0/0 so
+            // ThemeCard's showProgress (totalContents > 0 || completedContents > 0) hides the bar.
             const summary = progressByThemeId.get(theme.id) ?? {
               theme,
               totalContents: 0,
               completedContents: 0,
             };
-            // Unpublished themes (admin/maintainer preview) have no progress rows; hide 0/0.
-            const showProgress = theme.is_published !== false && progressByThemeId.has(theme.id);
+            const hasProgressRow = theme.is_published !== false && progressByThemeId.has(theme.id);
             return (
               <ThemeCard
                 key={theme.id}
-                summary={showProgress ? summary : { theme, totalContents: 0, completedContents: 0 }}
+                summary={
+                  hasProgressRow ? summary : { theme, totalContents: 0, completedContents: 0 }
+                }
                 certificatesHref={
-                  showProgress &&
-                  summary.totalContents > 0 &&
-                  summary.completedContents >= summary.totalContents
-                    ? certificatesHref
-                    : undefined
+                  hasProgressRow && isThemeCompleted(summary) ? certificatesHref : undefined
                 }
                 unpublishedBadge={<UnpublishedBadge isPublished={theme.is_published} />}
               />

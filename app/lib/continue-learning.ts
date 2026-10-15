@@ -43,7 +43,8 @@ export function resolveContinueLearning(
       themeName: string;
       contents: ContinueLearningContent[];
       completedContents: number;
-      lastCompletedAt: number;
+      /** Latest real completed_at in this theme; null when every completion lacks a timestamp. */
+      lastCompletedAt: number | null;
       firstIncomplete: ContinueLearningContent | null;
     }
   >();
@@ -53,16 +54,20 @@ export function resolveContinueLearning(
       themeName: content.themeName,
       contents: [],
       completedContents: 0,
-      lastCompletedAt: Number.NEGATIVE_INFINITY,
+      lastCompletedAt: null,
       firstIncomplete: null,
     };
     theme.contents.push(content);
     if (completedContentIds.has(content.id)) {
       theme.completedContents += 1;
-      theme.lastCompletedAt = Math.max(
-        theme.lastCompletedAt,
-        completedAtByContentId.get(content.id) ?? 0
-      );
+      // Missing completed_at must not become epoch 0 — that wrongly beats older real times.
+      const completedAt = completedAtByContentId.get(content.id);
+      if (
+        completedAt != null &&
+        (theme.lastCompletedAt == null || completedAt > theme.lastCompletedAt)
+      ) {
+        theme.lastCompletedAt = completedAt;
+      }
     } else if (!theme.firstIncomplete) {
       theme.firstIncomplete = content;
     }
@@ -75,15 +80,23 @@ export function resolveContinueLearning(
 
   let chosen = incompleteThemes[0];
   if (completedContentIds.size > 0) {
-    let lastTheme = themeList[0];
+    // Prefer themes with a real completed_at; among those, max timestamp wins. Themes that only
+    // have missing times stay behind timestamped ones and keep display order among themselves.
+    let lastTheme: (typeof themeList)[number] | null = null;
     for (const theme of themeList) {
-      if (theme.lastCompletedAt > lastTheme.lastCompletedAt) {
+      if (theme.completedContents === 0) continue;
+      if (lastTheme == null) {
+        lastTheme = theme;
+        continue;
+      }
+      if (theme.lastCompletedAt == null) continue;
+      if (lastTheme.lastCompletedAt == null || theme.lastCompletedAt > lastTheme.lastCompletedAt) {
         lastTheme = theme;
       }
     }
-    if (lastTheme.firstIncomplete) {
+    if (lastTheme?.firstIncomplete) {
       chosen = lastTheme;
-    } else {
+    } else if (lastTheme) {
       // Last-learned theme is done: take the next theme (in display order) that still has work.
       const lastIndex = themeList.indexOf(lastTheme);
       chosen =

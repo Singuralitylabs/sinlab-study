@@ -13,10 +13,7 @@ import { splitThemesByActivity } from "@/app/lib/theme-progress";
 import { shouldShowTrialNextStep } from "@/app/lib/trial-upgrade";
 import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
 import { fetchRecentCertificate } from "@/app/services/api/certificates-server";
-import {
-  fetchContinueLearningInputs,
-  fetchThemeProgressSummaries,
-} from "@/app/services/api/learning-server";
+import { fetchHomeLearningData } from "@/app/services/api/learning-server";
 import {
   fetchGettingStartedProgress,
   fetchOnboardingStatus,
@@ -56,15 +53,13 @@ export default async function HomePage() {
       : Promise.resolve(null);
 
   const [
-    { data: themeData },
-    { data: continueLearningData },
+    { data: homeLearning },
     onboardingResult,
     gettingStartedResult,
     announcementsResult,
     recentCertificate,
   ] = await Promise.all([
-    fetchThemeProgressSummaries(userId),
-    fetchContinueLearningInputs(userId),
+    fetchHomeLearningData(userId),
     isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
     isMember ? fetchGettingStartedProgress(userId) : Promise.resolve({ data: null, error: null }),
     getViewerAnnouncements(),
@@ -75,7 +70,7 @@ export default async function HomePage() {
   const unreadAnnouncements = (announcementsResult.data ?? [])
     .filter((announcement) => !announcement.isRead)
     .slice(0, DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT);
-  const themes = themeData ?? [];
+  const themes = homeLearning?.summaries ?? [];
   const completedContents = themes.reduce((sum, t) => sum + t.completedContents, 0);
   const { active, completed, notStarted } = splitThemesByActivity(themes);
 
@@ -93,11 +88,11 @@ export default async function HomePage() {
   const priceLabel = showTrialNextStep ? await priceLabelPromise : null;
 
   const continueLearning =
-    !showTrialNextStep && continueLearningData
+    !showTrialNextStep && homeLearning
       ? resolveContinueLearning(
-          continueLearningData.orderedContents,
-          continueLearningData.completedContentIds,
-          continueLearningData.completedAtByContentId
+          homeLearning.orderedContents,
+          homeLearning.completedContentIds,
+          homeLearning.completedAtByContentId
         )
       : null;
 

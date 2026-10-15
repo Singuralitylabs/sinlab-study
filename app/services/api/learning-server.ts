@@ -83,115 +83,15 @@ export interface ThemeProgressSummary {
   completedContents: number;
 }
 
-/** Theme row from a nested select (phase -> week -> content IDs). */
-type ThemeWithNestedContents = LearningTheme & {
-  phases: { id: number; weeks: { id: number; contents: { id: number }[] }[] }[];
-};
-
-/**
- * Fetches themes -> phases -> weeks -> contents in one nested select and queries the user's
- * completed progress in bulk (avoids N+1 per theme). A failed progress query returns completed
- * count 0 so the theme list still renders.
- */
-export async function fetchThemeProgressSummaries(userId: number): Promise<{
-  data: ThemeProgressSummary[] | null;
-  error: PostgrestError | null;
-}> {
-  const supabase = await createServerSupabaseClient();
-
-  // Completed content IDs for the user, without a content_id `.in()` filter: the numerator is
-  // settled by per-theme Set matching, and serializing every content ID into the query string
-  // would exceed URL length limits as the catalog grows. Paged with range so PostgREST's max rows
-  // (default 1000) does not drop rows. Independent of the theme tree, so it starts together with
-  // it and is awaited only when the tree has contents. It never rejects (a failure falls back to
-  // an empty set so the theme list still renders), so leaving it unawaited is safe.
-  // Set when the tree query fails, so the paging stops instead of reading pages nobody uses.
-  let abandoned = false;
-  const progressPromise = (async () => {
-    try {
-      return await fetchCompletedContentIds();
-    } catch (error) {
-      console.error("テーマ進捗サマリーの進捗取得エラー:", error);
-      return new Set<number>();
-    }
-  })();
-
-  async function fetchCompletedContentIds(): Promise<Set<number>> {
-    const completedIds = new Set<number>();
-    const pageSize = 1000;
-    for (let offset = 0; !abandoned; offset += pageSize) {
-      const { data: progress, error: progressError } = await supabase
-        .from("user_progress")
-        .select("content_id")
-        .eq("user_id", userId)
-        .eq("is_completed", true)
-        .order("content_id")
-        .range(offset, offset + pageSize - 1);
-
-      if (progressError) {
-        console.error("テーマ進捗サマリーの進捗取得エラー:", progressError.message);
-        return new Set<number>();
-      }
-
-      for (const p of progress || []) {
-        completedIds.add(p.content_id);
-      }
-      if (!progress || progress.length < pageSize) {
-        return completedIds;
-      }
-    }
-    return completedIds;
-  }
-
-  const { data: themes, error: themesError } = await supabase
-    .from("learning_themes")
-    .select(
-      "*, phases:learning_phases(id, weeks:learning_weeks(id, contents:learning_contents(id)))"
-    )
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .eq("phases.is_published", true)
-    .eq("phases.is_deleted", false)
-    .eq("phases.weeks.is_published", true)
-    .eq("phases.weeks.is_deleted", false)
-    .eq("phases.weeks.contents.is_published", true)
-    .eq("phases.weeks.contents.is_deleted", false)
-    .order("display_order");
-
-  if (themesError) {
-    abandoned = true;
-    console.error("テーマ進捗サマリー取得エラー:", themesError.message);
-    return { data: null, error: themesError };
-  }
-
-  const themeContents = (themes as ThemeWithNestedContents[]).map(({ phases, ...theme }) => ({
-    theme,
-    contentIds: phases.flatMap((phase) =>
-      phase.weeks.flatMap((week) => week.contents.map((content) => content.id))
-    ),
-  }));
-
-  const hasContents = themeContents.some((t) => t.contentIds.length > 0);
-
-  // An empty tree has nothing to count: stop paging instead of reading pages nobody uses.
-  if (!hasContents) {
-    abandoned = true;
-  }
-  const completedIds = hasContents ? await progressPromise : new Set<number>();
-
-  const data = themeContents.map(({ theme, contentIds }) => ({
-    theme,
-    totalContents: contentIds.length,
-    completedContents: contentIds.filter((id) => completedIds.has(id)).length,
-  }));
-
-  return { data, error: null };
+export interface HomeLearningData {
+  summaries: ThemeProgressSummary[];
+  orderedContents: ContinueLearningContent[];
+  completedContentIds: Set<number>;
+  completedAtByContentId: Map<number, number>;
 }
 
-type ContinueLearningNestedTheme = {
-  id: number;
-  name: string;
-  display_order: number | null;
+/** Nested tree for home: full theme row plus ordered phase/week/content fields. */
+type HomeLearningNestedTheme = LearningTheme & {
   phases: {
     id: number;
     name: string;
@@ -211,28 +111,35 @@ type ContinueLearningNestedTheme = {
   }[];
 };
 
+const HOME_LEARNING_THEME_SELECT =
+  "*, phases:learning_phases(id, name, display_order, weeks:learning_weeks(id, name, display_order, contents:learning_contents(id, title, content_type, display_order, week_id)))";
+
 /**
- * Ordered visible contents plus completion timestamps for the home "続きから学習" card.
- * Same published/deleted filters as fetchThemeProgressSummaries(); uses the user session (RLS),
- * never service_role. Admin/maintainer still only see published contents here so the card matches
- * the progress summaries.
+ * One nested theme tree + one user_progress page walk for the home page. Derives both theme
+ * progress summaries and continue-learning inputs so the two cannot drift and the tree/progress
+ * round-trips are not duplicated. Uses the user session (RLS), never service_role. Admin/maintainer
+ * still only see published contents so cards match the progress denominators. A failed progress
+ * query returns empty completions so the theme list still renders.
  */
-export async function fetchContinueLearningInputs(userId: number): Promise<{
-  data: {
-    orderedContents: ContinueLearningContent[];
-    completedContentIds: Set<number>;
-    completedAtByContentId: Map<number, number>;
-  } | null;
+export async function fetchHomeLearningData(userId: number): Promise<{
+  data: HomeLearningData | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
+  // Completed rows without a content_id `.in()` filter: the numerator is settled by per-theme Set
+  // matching, and serializing every content ID into the query string would exceed URL length limits
+  // as the catalog grows. Paged with range so PostgREST's max rows (default 1000) does not drop
+  // rows. Independent of the theme tree, so it starts together with it and is awaited only when
+  // the tree has contents. It never rejects (a failure falls back to empty so the theme list still
+  // renders), so leaving it unawaited is safe. Set when the tree query fails, so paging stops
+  // instead of reading pages nobody uses.
   let abandoned = false;
   const progressPromise = (async () => {
     try {
       return await fetchCompletedProgressWithTimes();
     } catch (error) {
-      console.error("続きから学習の進捗取得エラー:", error);
+      console.error("ホーム学習データの進捗取得エラー:", error);
       return { completedContentIds: new Set<number>(), completedAtByContentId: new Map() };
     }
   })();
@@ -254,7 +161,7 @@ export async function fetchContinueLearningInputs(userId: number): Promise<{
         .range(offset, offset + pageSize - 1);
 
       if (progressError) {
-        console.error("続きから学習の進捗取得エラー:", progressError.message);
+        console.error("ホーム学習データの進捗取得エラー:", progressError.message);
         return { completedContentIds: new Set(), completedAtByContentId: new Map() };
       }
 
@@ -273,9 +180,7 @@ export async function fetchContinueLearningInputs(userId: number): Promise<{
 
   const { data: themes, error: themesError } = await supabase
     .from("learning_themes")
-    .select(
-      "id, name, display_order, phases:learning_phases(id, name, display_order, weeks:learning_weeks(id, name, display_order, contents:learning_contents(id, title, content_type, display_order, week_id)))"
-    )
+    .select(HOME_LEARNING_THEME_SELECT)
     .eq("is_published", true)
     .eq("is_deleted", false)
     .eq("phases.is_published", true)
@@ -288,11 +193,19 @@ export async function fetchContinueLearningInputs(userId: number): Promise<{
 
   if (themesError) {
     abandoned = true;
-    console.error("続きから学習のコンテンツ取得エラー:", themesError.message);
+    console.error("ホーム学習データのテーマ取得エラー:", themesError.message);
     return { data: null, error: themesError };
   }
 
-  const nestedThemes = (themes ?? []) as unknown as ContinueLearningNestedTheme[];
+  const nestedThemes = (themes ?? []) as unknown as HomeLearningNestedTheme[];
+
+  const themeContents = nestedThemes.map(({ phases, ...theme }) => ({
+    theme,
+    contentIds: phases.flatMap((phase) =>
+      phase.weeks.flatMap((week) => week.contents.map((content) => content.id))
+    ),
+  }));
+
   const orderedThemes = [...nestedThemes].sort((a, b) =>
     compareGroupLevel(a.display_order, b.display_order, a.id, b.id)
   );
@@ -328,22 +241,46 @@ export async function fetchContinueLearningInputs(userId: number): Promise<{
     }
   }
 
-  if (orderedContents.length === 0) {
+  const hasContents = themeContents.some((t) => t.contentIds.length > 0);
+
+  // An empty tree has nothing to count: stop paging instead of reading pages nobody uses.
+  if (!hasContents) {
     abandoned = true;
   }
-  const progress =
-    orderedContents.length > 0
-      ? await progressPromise
-      : { completedContentIds: new Set<number>(), completedAtByContentId: new Map() };
+  const progress = hasContents
+    ? await progressPromise
+    : { completedContentIds: new Set<number>(), completedAtByContentId: new Map() };
+
+  const summaries = themeContents.map(({ theme, contentIds }) => ({
+    theme,
+    totalContents: contentIds.length,
+    completedContents: contentIds.filter((id) => progress.completedContentIds.has(id)).length,
+  }));
 
   return {
     data: {
+      summaries,
       orderedContents,
       completedContentIds: progress.completedContentIds,
       completedAtByContentId: progress.completedAtByContentId,
     },
     error: null,
   };
+}
+
+/**
+ * Theme progress summaries for /learn, certificates, and other callers that only need counts.
+ * Delegates to fetchHomeLearningData() so published filters and progress paging stay shared.
+ */
+export async function fetchThemeProgressSummaries(userId: number): Promise<{
+  data: ThemeProgressSummary[] | null;
+  error: PostgrestError | null;
+}> {
+  const { data, error } = await fetchHomeLearningData(userId);
+  if (error || !data) {
+    return { data: null, error };
+  }
+  return { data: data.summaries, error: null };
 }
 
 /** admin / maintainer also get unpublished themes as preview (issue #68). */

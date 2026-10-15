@@ -36,10 +36,7 @@ vi.mock("@/app/(authenticated)/components/GettingStartedChecklist", async (impor
 import HomePage from "@/app/(authenticated)/page";
 import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
 import { fetchRecentCertificate } from "@/app/services/api/certificates-server";
-import {
-  fetchContinueLearningInputs,
-  fetchThemeProgressSummaries,
-} from "@/app/services/api/learning-server";
+import { fetchHomeLearningData } from "@/app/services/api/learning-server";
 import {
   fetchGettingStartedProgress,
   fetchOnboardingStatus,
@@ -76,12 +73,9 @@ const setup = ({
     userStatus,
     userRole,
   } as never);
-  vi.mocked(fetchThemeProgressSummaries).mockResolvedValue({
-    data: [themeSummary(completedContents)],
-    error: null,
-  } as never);
-  vi.mocked(fetchContinueLearningInputs).mockResolvedValue({
+  vi.mocked(fetchHomeLearningData).mockResolvedValue({
     data: {
+      summaries: [themeSummary(completedContents)],
       orderedContents: [],
       completedContentIds: new Set(),
       completedAtByContentId: new Map(),
