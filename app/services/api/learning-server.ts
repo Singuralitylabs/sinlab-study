@@ -123,11 +123,9 @@ async function fetchCompletedProgressPages(
     }
   }
 
-  if (withCompletedAt) {
-    return rows;
-  }
-  // Drop completed_at from the typed surface for id-only callers (select may omit the column).
-  return rows.map(({ content_id }) => ({ content_id }));
+  // CompletedProgressWithAtRow[] is assignable to CompletedProgressIdRow[]; id-only path never
+  // selected completed_at, so no need to remap rows.
+  return rows;
 }
 
 /** admin / maintainer also get unpublished themes as preview (issue #68). */
