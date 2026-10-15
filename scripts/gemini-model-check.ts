@@ -4,14 +4,14 @@
  * Usage:
  *   GEMINI_MODEL_CHECK_API_KEY=... bun scripts/gemini-model-check.ts [--json]
  *   bun scripts/gemini-model-check.ts --available gemini-3.8-flash,gemini-4.0-flash [--json]
- *   bun scripts/gemini-model-check.ts --apply-update gemini-4.0-flash
+ *   bun scripts/gemini-model-check.ts --apply-update gemini-4.0-flash [--missing-registered a,b]
  *
  * Never logs the API key. Does not run grading dry-run (that stays a human / local step).
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GEMINI_ALTERNATE_MODEL_NAME, GEMINI_MODEL_NAME } from "../app/constants/gemini";
+import { GEMINI_REGISTERED_MODELS } from "../app/constants/gemini";
 
 const GEMINI_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const CONSTANTS_PATH = resolve(
@@ -34,6 +34,12 @@ export type ModelCheckPlan = {
   newerStableFlash: string | null;
   missingRegistered: string[];
   registered: RegisteredModels;
+};
+
+export type ConstantsUpdatePlan = {
+  newPrimary: string;
+  newAlternate: string;
+  primaryWasMissing: boolean;
 };
 
 export function normalizeModelId(name: string): string {
@@ -108,15 +114,45 @@ export function findMissingRegisteredModels(
   return registered.map(normalizeModelId).filter((id) => id.length > 0 && !available.has(id));
 }
 
+/** Derive primary/alternate from the registered list (primary first). */
+export function registeredModelsFromList(
+  registeredList: readonly string[] = GEMINI_REGISTERED_MODELS
+): RegisteredModels {
+  const primary = registeredList[0];
+  const alternate = registeredList[1];
+  if (!primary || !alternate) {
+    throw new Error("Registered model list must include primary and alternate");
+  }
+  return { primary, alternate };
+}
+
 export function planModelCheck(
   availableModelIds: readonly string[],
-  registered: RegisteredModels
+  registeredList: readonly string[] = GEMINI_REGISTERED_MODELS
 ): ModelCheckPlan {
-  const registeredList = [registered.primary, registered.alternate];
+  const registered = registeredModelsFromList(registeredList);
   return {
     newerStableFlash: findNewerStableFlash(availableModelIds, registered.primary),
     missingRegistered: findMissingRegisteredModels(availableModelIds, registeredList),
     registered,
+  };
+}
+
+/**
+ * Choose the alternate for an auto-update. Never promote a primary that is already missing from
+ * models.list into GEMINI_ALTERNATE_MODEL_NAME (#368 fallback).
+ */
+export function planConstantsUpdate(
+  current: RegisteredModels,
+  newPrimary: string,
+  missingRegistered: readonly string[] = []
+): ConstantsUpdatePlan {
+  const missing = new Set(missingRegistered.map(normalizeModelId));
+  const primaryWasMissing = missing.has(normalizeModelId(current.primary));
+  return {
+    newPrimary: normalizeModelId(newPrimary),
+    newAlternate: primaryWasMissing ? current.alternate : current.primary,
+    primaryWasMissing,
   };
 }
 
@@ -209,14 +245,23 @@ export async function fetchGeminiModelIds(apiKey: string): Promise<string[]> {
   return ids;
 }
 
+function parseCsvModels(value: string): string[] {
+  return value
+    .split(",")
+    .map((part) => normalizeModelId(part))
+    .filter(Boolean);
+}
+
 function parseArgs(argv: string[]): {
   json: boolean;
   available: string[] | null;
   applyUpdate: string | null;
+  missingRegistered: string[] | null;
 } {
   let json = false;
   let available: string[] | null = null;
   let applyUpdate: string | null = null;
+  let missingRegistered: string[] | null = null;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -229,10 +274,7 @@ function parseArgs(argv: string[]): {
       if (!value) {
         throw new Error("--available requires a comma-separated model list");
       }
-      available = value
-        .split(",")
-        .map((part) => normalizeModelId(part))
-        .filter(Boolean);
+      available = parseCsvModels(value);
       continue;
     }
     if (arg === "--apply-update") {
@@ -243,31 +285,45 @@ function parseArgs(argv: string[]): {
       applyUpdate = normalizeModelId(value);
       continue;
     }
+    if (arg === "--missing-registered") {
+      const value = argv[++i];
+      if (value === undefined) {
+        throw new Error("--missing-registered requires a comma-separated model list (may be empty)");
+      }
+      missingRegistered = parseCsvModels(value);
+      continue;
+    }
     throw new Error(`Unknown argument: ${arg}`);
   }
 
-  return { json, available, applyUpdate };
+  return { json, available, applyUpdate, missingRegistered };
 }
 
 async function main(): Promise<void> {
-  const { json, available, applyUpdate } = parseArgs(process.argv.slice(2));
+  const { json, available, applyUpdate, missingRegistered } = parseArgs(process.argv.slice(2));
 
   if (applyUpdate) {
     const source = readFileSync(CONSTANTS_PATH, "utf8");
     const current = readRegisteredModelsFromSource(source);
-    const next = applyModelConstantsUpdate(source, applyUpdate, current.primary);
+    let missing = missingRegistered;
+    if (missing === null && available) {
+      missing = findMissingRegisteredModels(available, [current.primary, current.alternate]);
+    }
+    const update = planConstantsUpdate(current, applyUpdate, missing ?? []);
+    const next = applyModelConstantsUpdate(source, update.newPrimary, update.newAlternate);
     writeFileSync(CONSTANTS_PATH, next, "utf8");
-    console.log(`Updated gemini.ts: primary=${applyUpdate} alternate=${current.primary}`);
+    console.log(
+      `Updated gemini.ts: primary=${update.newPrimary} alternate=${update.newAlternate}` +
+        (update.primaryWasMissing
+          ? " (kept alternate; previous primary missing from models.list)"
+          : "")
+    );
     return;
   }
 
-  const registered: RegisteredModels = {
-    primary: GEMINI_MODEL_NAME,
-    alternate: GEMINI_ALTERNATE_MODEL_NAME,
-  };
-
   const availableIds = available ?? (await fetchGeminiModelIds(process.env[API_KEY_ENV] ?? ""));
-  const plan = planModelCheck(availableIds, registered);
+  // Single source: GEMINI_REGISTERED_MODELS (primary first, then alternate).
+  const plan = planModelCheck(availableIds);
 
   if (json) {
     // Structured output for GitHub Actions. No secrets.

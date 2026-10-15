@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { GEMINI_REGISTERED_MODELS } from "../../app/constants/gemini";
 import {
   applyModelConstantsUpdate,
   compareVersions,
@@ -9,8 +10,10 @@ import {
   isStableFlashModel,
   normalizeModelId,
   parseFlashVersion,
+  planConstantsUpdate,
   planModelCheck,
   readRegisteredModelsFromSource,
+  registeredModelsFromList,
 } from "../../scripts/gemini-model-check";
 
 describe("normalizeModelId", () => {
@@ -95,14 +98,24 @@ describe("findMissingRegisteredModels", () => {
   });
 });
 
-describe("planModelCheck", () => {
-  it("combines update and missing signals", () => {
-    expect(
-      planModelCheck(["gemini-4.0-flash"], {
-        primary: "gemini-3.8-flash",
-        alternate: "gemini-3.6-flash",
-      })
-    ).toEqual({
+describe("planModelCheck / GEMINI_REGISTERED_MODELS", () => {
+  it("uses GEMINI_REGISTERED_MODELS as the default registered list", () => {
+    expect(registeredModelsFromList()).toEqual({
+      primary: GEMINI_REGISTERED_MODELS[0],
+      alternate: GEMINI_REGISTERED_MODELS[1],
+    });
+    expect(planModelCheck([...GEMINI_REGISTERED_MODELS])).toEqual({
+      newerStableFlash: null,
+      missingRegistered: [],
+      registered: {
+        primary: GEMINI_REGISTERED_MODELS[0],
+        alternate: GEMINI_REGISTERED_MODELS[1],
+      },
+    });
+  });
+
+  it("combines update and missing signals from a registered list", () => {
+    expect(planModelCheck(["gemini-4.0-flash"], ["gemini-3.8-flash", "gemini-3.6-flash"])).toEqual({
       newerStableFlash: "gemini-4.0-flash",
       missingRegistered: ["gemini-3.8-flash", "gemini-3.6-flash"],
       registered: {
@@ -114,10 +127,10 @@ describe("planModelCheck", () => {
 
   it("is a noop plan when the list matches and nothing is newer", () => {
     expect(
-      planModelCheck(["gemini-3.8-flash", "gemini-3.6-flash"], {
-        primary: "gemini-3.8-flash",
-        alternate: "gemini-3.6-flash",
-      })
+      planModelCheck(["gemini-3.8-flash", "gemini-3.6-flash"], [
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
+      ])
     ).toEqual({
       newerStableFlash: null,
       missingRegistered: [],
@@ -129,6 +142,36 @@ describe("planModelCheck", () => {
   });
 });
 
+describe("planConstantsUpdate", () => {
+  it("promotes the previous primary to alternate when primary is still listed", () => {
+    expect(
+      planConstantsUpdate(
+        { primary: "gemini-3.8-flash", alternate: "gemini-3.6-flash" },
+        "gemini-4.0-flash",
+        []
+      )
+    ).toEqual({
+      newPrimary: "gemini-4.0-flash",
+      newAlternate: "gemini-3.8-flash",
+      primaryWasMissing: false,
+    });
+  });
+
+  it("keeps the previous alternate when the current primary is missing", () => {
+    expect(
+      planConstantsUpdate(
+        { primary: "gemini-3.8-flash", alternate: "gemini-3.6-flash" },
+        "gemini-4.0-flash",
+        ["gemini-3.8-flash"]
+      )
+    ).toEqual({
+      newPrimary: "gemini-4.0-flash",
+      newAlternate: "gemini-3.6-flash",
+      primaryWasMissing: true,
+    });
+  });
+});
+
 describe("applyModelConstantsUpdate / readRegisteredModelsFromSource", () => {
   it("rewrites primary and promotes the previous primary to alternate", () => {
     const source = readFileSync(resolve("app/constants/gemini.ts"), "utf8");
@@ -136,10 +179,22 @@ describe("applyModelConstantsUpdate / readRegisteredModelsFromSource", () => {
     expect(current.primary).toBe("gemini-3.8-flash");
     expect(current.alternate).toBe("gemini-3.6-flash");
 
-    const updated = applyModelConstantsUpdate(source, "gemini-4.0-flash", current.primary);
+    const update = planConstantsUpdate(current, "gemini-4.0-flash", []);
+    const updated = applyModelConstantsUpdate(source, update.newPrimary, update.newAlternate);
     expect(readRegisteredModelsFromSource(updated)).toEqual({
       primary: "gemini-4.0-flash",
       alternate: "gemini-3.8-flash",
+    });
+  });
+
+  it("does not write a missing primary into the alternate slot", () => {
+    const source = readFileSync(resolve("app/constants/gemini.ts"), "utf8");
+    const current = readRegisteredModelsFromSource(source);
+    const update = planConstantsUpdate(current, "gemini-4.0-flash", [current.primary]);
+    const updated = applyModelConstantsUpdate(source, update.newPrimary, update.newAlternate);
+    expect(readRegisteredModelsFromSource(updated)).toEqual({
+      primary: "gemini-4.0-flash",
+      alternate: current.alternate,
     });
   });
 

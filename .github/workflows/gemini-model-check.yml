@@ -54,9 +54,13 @@ jobs:
           NEWER=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write(p.newerStableFlash ?? "")')
           MISSING=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write((p.missingRegistered ?? []).join(","))')
           PRIMARY=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write(p.registered.primary)')
+          ALTERNATE=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write(p.registered.alternate)')
+          PRIMARY_MISSING=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write(p.missingRegistered.includes(p.registered.primary)?"true":"false")')
           echo "newer=$NEWER" >> "$GITHUB_OUTPUT"
           echo "missing=$MISSING" >> "$GITHUB_OUTPUT"
           echo "primary=$PRIMARY" >> "$GITHUB_OUTPUT"
+          echo "alternate=$ALTERNATE" >> "$GITHUB_OUTPUT"
+          echo "primary_missing=$PRIMARY_MISSING" >> "$GITHUB_OUTPUT"
           echo "Newer stable Flash: ${NEWER:-"(none)"}"
           echo "Missing registered: ${MISSING:-"(none)"}"
 
@@ -94,7 +98,7 @@ jobs:
           - [ ] 開発環境で \`scripts/grading-dry-run.ts\` を実行し、採点傾向を確認してからマージする
           EOF
           )
-          gh issue create --title "$TITLE" --body "$BODY" --label "enhancement"
+          gh issue create --title "$TITLE" --body "$BODY" --label "priority-high" --label "enhancement"
 
       - name: Create update PR for a newer stable Flash
         if: ${{ steps.plan.outputs.newer != '' }}
@@ -102,29 +106,47 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEWER: ${{ steps.plan.outputs.newer }}
           PRIMARY: ${{ steps.plan.outputs.primary }}
+          ALTERNATE: ${{ steps.plan.outputs.alternate }}
+          MISSING: ${{ steps.plan.outputs.missing }}
+          PRIMARY_MISSING: ${{ steps.plan.outputs.primary_missing }}
         run: |
           set -euo pipefail
           BRANCH="env/gemini-model-${NEWER}"
+          TITLE="[env] Gemini モデルを ${NEWER} へ更新"
 
-          # Deduplicate: open PR already on this head branch or titled for the same model.
-          EXISTING_PR=$(gh pr list --state open --head "$BRANCH" --json number --jq '.[0].number // empty')
+          # Deduplicate: any PR (open or closed) for this head branch / title / model id.
+          # Closed PRs mean a human already declined or merged that model bump; do not recreate weekly.
+          EXISTING_PR=$(gh pr list --state all --head "$BRANCH" --json number --jq '.[0].number // empty')
           if [ -z "$EXISTING_PR" ]; then
             EXISTING_PR=$(
-              NEWER="$NEWER" gh pr list --state open --limit 50 --json number,title \
-                | bun -e 'const m=process.env.NEWER; const rows=JSON.parse(await Bun.stdin.text()); const hit=rows.find((r)=>typeof r.title==="string"&&r.title.includes(m)); process.stdout.write(hit?String(hit.number):"")'
+              TITLE="$TITLE" NEWER="$NEWER" gh pr list --state all --limit 100 --json number,title \
+                | bun -e '
+                  const title = process.env.TITLE;
+                  const model = process.env.NEWER;
+                  const rows = JSON.parse(await Bun.stdin.text());
+                  const hit = rows.find(
+                    (r) =>
+                      typeof r.title === "string" &&
+                      (r.title === title || r.title.includes(model))
+                  );
+                  process.stdout.write(hit ? String(hit.number) : "");
+                '
             )
           fi
           if [ -n "$EXISTING_PR" ]; then
-            echo "Open PR #${EXISTING_PR} already targets ${NEWER}; skipping."
+            echo "PR #${EXISTING_PR} already targets ${NEWER} (open or closed); skipping."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
+          # Populate remote-tracking ref when the weekly branch still exists so --force-with-lease
+          # is not refused for "stale info" after actions/checkout (which only fetched the default ref).
+          git fetch origin "$BRANCH" || true
           git checkout -B "$BRANCH" origin/main
 
-          bun scripts/gemini-model-check.ts --apply-update "$NEWER"
+          bun scripts/gemini-model-check.ts --apply-update "$NEWER" --missing-registered "${MISSING}"
 
           if git diff --quiet -- app/constants/gemini.ts; then
             echo "No file changes after apply-update; skipping PR."
@@ -135,17 +157,27 @@ jobs:
           git commit -m "env: bump Gemini primary model to ${NEWER}"
           git push -u origin "$BRANCH" --force-with-lease
 
+          if [ "$PRIMARY_MISSING" = "true" ]; then
+            ALTERNATE_LINE="- 代替モデル: 変更なし（\`${ALTERNATE}\`）。主モデル \`${PRIMARY}\` は models.list に無いため代替へ繰り下げない"
+            PRIMARY_WARN=$'\n'"⚠️ **主モデル \`${PRIMARY}\` は models.list に存在しません。** 代替定数は前の値のままです。廃止・リネームの確認を優先してください。"
+          else
+            ALTERNATE_LINE="- 代替モデル: 直前の主モデル（\`${PRIMARY}\`）へ繰り下げ"
+            PRIMARY_WARN=""
+          fi
+
           BODY=$(cat <<EOF
           ## Summary
           Gemini \`models.list\` で、登録中の主モデル（\`${PRIMARY}\`）より新しい安定版 Flash（\`${NEWER}\`）を検知したため、\`app/constants/gemini.ts\` を更新する自動 PR です（#369）。
 
           - 主モデル: \`${PRIMARY}\` → \`${NEWER}\`
-          - 代替モデル: 直前の主モデル（\`${PRIMARY}\`）へ繰り下げ
+          ${ALTERNATE_LINE}
           - \`preview\` / \`exp\` / \`-latest\` エイリアスは候補から除外済み
+          ${PRIMARY_WARN}
 
           ## 【人間タスク】
+          CI では \`grading-dry-run\` を実行しません（開発 DB 読み取り + Gemini 課金のため）。マージ前に必ずローカルで確認してください。
           - [ ] 料金ページで \`${NEWER}\` の単価を確認する
-          - [ ] 開発環境で \`bun scripts/grading-dry-run.ts --confirm-dev\` を **旧主モデルと新モデルの両方**で実行し、ラベル傾向・点数分布・合否・トークン・応答時間を比較する（CI では dry-run しない）
+          - [ ] 開発環境で \`bun scripts/grading-dry-run.ts --confirm-dev\` を **旧主モデルと新モデルの両方**で実行し、ラベル傾向・点数分布・合否・トークン・応答時間を比較する
           - [ ] 問題なければマージする（\`GITHUB_TOKEN\` 作成 PR は CI が自動起動しない場合がある。必要なら Actions から Biome / Typecheck / Test / Build を \`workflow_dispatch\` で再実行する）
 
           ## Test plan
@@ -157,5 +189,5 @@ jobs:
           gh pr create \
             --base main \
             --head "$BRANCH" \
-            --title "[env] Gemini モデルを ${NEWER} へ更新" \
+            --title "$TITLE" \
             --body "$BODY"
