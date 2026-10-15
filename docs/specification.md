@@ -417,7 +417,7 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 | 動画（video） | YouTube facade（サムネイル + 再生ボタン）。クリックで `react-youtube` を遅延読み込みして autoplay 再生（URLから Video ID を自動抽出、レスポンシブ対応） |
 | テキスト（text） | Markdown形式で記述・表示（GFM対応） |
 | スライド（slide） | 非公開バケット `slides` のPDFを、閲覧権限チェック後にサーバー側で発行した署名付きURLで react-pdf によりブラウザ内表示（後述） |
-| 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携。模範回答は提出が1件以上あるとき（admin・maintainer は提出不要）だけ、RPC `get_exercise_reference_answer()`（`docs/database.md` 6.18）で取得して表示する（列権限では読めない）。採点基準の要件が1件以上ある演習は完了ボタンを出さず、AIレビュー合格で完了する（4.1節）。合格点は `CERTIFICATE_PASS_SCORE`。URL提出は採点対象外である旨を画面に出す。お試しは生涯1回のため、不合格だとお試し中は完了できない旨も出す。修了証はお試しには出さない |
+| 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携。模範回答は提出が1件以上あるとき（admin・maintainer は提出不要）だけ、RPC `get_exercise_reference_answer()`（`docs/database.md` 6.18）で取得して表示する（列権限では読めない）。`grading_rubric` が NULL でない演習（空の墓石を含む）は完了ボタンを出さず、AIレビュー合格で完了する（4.1節）。空の墓石は合格にならないため完了できない。合格点は `CERTIFICATE_PASS_SCORE`。URL提出は採点対象外である旨を画面に出す。お試しは生涯1回のため、不合格だとお試し中は完了できない旨も出す。修了証はお試しには出さない |
 | クイズ（quiz） | 導入文（`description`・任意）と設問（1〜3問）を表示し、回答後に正誤・解説を表示（後述） |
 
 動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア下部に概要欄カードを表示する（テキスト・演習と同じ `MarkdownRenderer`）。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）は `"use client"` を持たない共有コンポーネントで、Server Component からはサーバーで、Client Component（`AIReviewDisplay`）からはクライアントで同じ実装のまま描画される。コンテンツ本文の Markdown 描画経路（Server Component）は client 化しない。
@@ -536,7 +536,7 @@ flowchart TD
 2. `getServerAuth()` による認証チェック（ステータス取得を含む）
 3. ステータスに基づく認可: `rejected` は403
 4. コンテンツ可視性チェック: **ステータスを問わず、対象 `contentId` が自分に可視でなければ403**（後述）
-5. 合格判定対象（`content_type = 'exercise'` かつ採点基準の要件が1件以上。空の墓石と NULL は対象外。RPC `content_requires_review_pass()`）のとき:
+5. 合格判定対象（`content_type = 'exercise'` かつ `grading_rubric IS NOT NULL`。空の墓石も含む。NULL だけ対象外。RPC `content_requires_review_pass()`）のとき:
    - `isCompleted = true` でも、本人の提出に `ai_reviews.status = 'completed' AND passed = true` が無ければ 403（「AIレビューで合格すると完了になります」）。書き込まない
    - `isCompleted = false` は 403（「合格判定のある演習は未完了に戻せません」）。未完了へ戻す操作は提供しない
    - トリガーが `42501` を返したときも同じ意味の 403 にする
@@ -1033,7 +1033,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 | パンくずリスト | ページヘッダーと階層ナビゲーションの表示 |
 | Markdownレンダラー | Markdownの安全なレンダリング（GFM対応Markdown変換 → Typographyスタイリング。react-markdownは生HTMLタグを描画しないためXSSは発生しない） |
 | YouTube埋め込み | facade（サムネイル + 再生ボタン）。クリック後に react-youtube を遅延読み込みして再生 |
-| 完了ボタン | コンテンツ完了状態のトグル。進捗記録APIを呼び出し。採点基準のある演習では出さず、合格状態の表示に置き換える（3.2節） |
+| 完了ボタン | コンテンツ完了状態のトグル。進捗記録APIを呼び出し。`grading_rubric` が NULL でない演習（空の墓石を含む）では出さず、合格状態の表示に置き換える（3.2節） |
 | 提出フォーム | 課題提出フォーム。コンテンツの `allowed_submission_types` に応じてコード・URL・両方から選択して提出 |
 | AIレビューボタン | 提出後にAIレビューをリクエストし、結果を提出履歴画面に表示 |
 | PDF Viewer | Supabase Storage のPDFをブラウザ内で表示（react-pdf） |

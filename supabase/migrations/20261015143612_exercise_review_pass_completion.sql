@@ -1,7 +1,9 @@
 -- 採点基準ありの演習は、合格レビューがあるときだけ完了にできる（#367）。
 --
--- 対象は content_type = 'exercise' かつ要件が 1 件以上。空の requirements（墓石 #344）と
--- NULL は基準なしで、従来どおり手動完了できる。判定は提出の score_kind ではなくコンテンツ側。
+-- 対象は content_type = 'exercise' かつ grading_rubric IS NOT NULL（#367）。
+-- 空の requirements（墓石 #344）も NOT NULL なので合格必須。合否は isReviewPassed() だけが
+-- 付け、空配列は点数が無く passed が付かない。合格が無いのでその演習は完了できない。
+-- NULL（一度も基準が無い）と演習以外は従来どおり手動完了できる。
 --
 -- RLS は本人が is_completed を自由に立てられる。BEFORE INSERT/UPDATE で、true への遷移
 -- （INSERT、またはまだ true でない行の UPDATE）に合格レビューを要求する。すでに true の行の
@@ -25,8 +27,6 @@ AS $$
     WHERE lc.id = p_content_id
       AND lc.content_type = 'exercise'
       AND lc.grading_rubric IS NOT NULL
-      AND jsonb_typeof(lc.grading_rubric -> 'requirements') = 'array'
-      AND jsonb_array_length(lc.grading_rubric -> 'requirements') > 0
   );
 $$;
 
@@ -107,7 +107,7 @@ CREATE TRIGGER enforce_user_progress_review_pass
   EXECUTE FUNCTION public.enforce_user_progress_review_pass();
 
 COMMENT ON FUNCTION public.learning_content_requires_review_pass(INTEGER) IS
-  '演習かつ採点基準の要件が1件以上。墓石（空配列）と NULL は false。内部用';
+  '演習かつ grading_rubric IS NOT NULL。空配列の墓石も含む。NULL と演習以外は false。内部用';
 COMMENT ON FUNCTION public.content_requires_review_pass(INTEGER) IS
   '呼び出し元に見える演習だけ、合格で完了する対象かを返す。基準の中身は返さない';
 COMMENT ON FUNCTION public.enforce_user_progress_review_pass() IS

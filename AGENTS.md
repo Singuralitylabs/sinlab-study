@@ -79,7 +79,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 - ロール・ID・ステータスの参照は `get_user_role()` / `get_user_id()` / `get_user_status()` を用いる（定義・権限・`rejected` で NULL を返す挙動は `docs/database.md` 5.2節）。
 - ポリシー内では **`(select get_user_xxx())` の形で包み**（`auth_rls_initplan` 対策）、同一操作の許可ポリシーは **OR 条件で1本に統合する**（`multiple_permissive_policies` 対策）。
 - `user_progress` は INSERT だけでなく **UPDATE にも可視コンテンツ限定の EXISTS 条件を課す**（upsert のため INSERT のみだと2回目以降がすり抜ける）。
-- 採点基準ありの演習（要件が1件以上。空の墓石は対象外）の完了は合格レビューがあるときだけ。`user_progress` の BEFORE INSERT/UPDATE トリガーで強制し、すでに完了の行は遡って取り消さない（`docs/database.md` 6.2）。
+- 演習で `grading_rubric` が NULL でないとき（空の墓石を含む）は、合格レビューがあるときだけ完了できる。`user_progress` の BEFORE INSERT/UPDATE トリガーで強制し、すでに完了の行は遡って取り消さない（`docs/database.md` 6.2）。
 
 ### データベースマイグレーション
 

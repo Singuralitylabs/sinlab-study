@@ -23,6 +23,11 @@ insert into public.learning_contents (id, week_id, title, content_type)
 values (9103, 9101, 'no rubric exercise', 'exercise');
 insert into public.learning_contents (id, week_id, title, content_type)
 values (9104, 9101, 'a video', 'video');
+insert into public.learning_contents (id, week_id, title, content_type, grading_rubric)
+values (
+  9105, 9101, 'video that kept a tombstone', 'video',
+  '{"version": 2, "max_key_number": 1, "requirements": []}'
+);
 
 insert into public.users (id, auth_id, email, display_name, status)
 values
@@ -75,10 +80,27 @@ select throws_ok(
   'a pass-gated completion cannot be cleared'
 );
 
-select lives_ok(
+select is(
+  public.learning_content_requires_review_pass(9102),
+  true,
+  'an empty rubric is still pass-gated'
+);
+select throws_ok(
   $$insert into public.user_progress (user_id, content_id, is_completed)
     values (9101, 9102, true)$$,
-  'a tombstone rubric does not require a pass'
+  '42501',
+  null,
+  'an exercise with an empty rubric cannot be completed without a passing review'
+);
+select is(
+  public.learning_content_requires_review_pass(9103),
+  false,
+  'a null rubric is not pass-gated'
+);
+select is(
+  public.learning_content_requires_review_pass(9105),
+  false,
+  'a non-exercise keeps a tombstone but is not pass-gated'
 );
 select lives_ok(
   $$insert into public.user_progress (user_id, content_id, is_completed)
@@ -89,6 +111,11 @@ select lives_ok(
   $$insert into public.user_progress (user_id, content_id, is_completed)
     values (9101, 9104, true)$$,
   'a non-exercise does not require a pass'
+);
+select lives_ok(
+  $$insert into public.user_progress (user_id, content_id, is_completed)
+    values (9101, 9105, true)$$,
+  'a non-exercise with a tombstone rubric can still be completed'
 );
 select lives_ok(
   $$update public.user_progress set is_completed = false

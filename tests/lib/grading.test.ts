@@ -105,6 +105,12 @@ describe("isReviewPassed", () => {
   it("点数が null なら null", () => {
     expect(isReviewPassed(review([]), null, 70)).toBeNull();
   });
+
+  it("空の要件は点数が null で合格にならない", () => {
+    const empty = review([]);
+    expect(computeReviewScore(empty)).toBeNull();
+    expect(isReviewPassed(empty, computeReviewScore(empty))).toBeNull();
+  });
 });
 
 describe("resolvePassDisplay", () => {
