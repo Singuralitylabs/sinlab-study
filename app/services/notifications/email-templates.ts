@@ -367,8 +367,7 @@ export function buildWeeklyDigestEmail(
         .slice(0, WEEKLY_ACTIVE_THEMES_LIMIT)
         .map((t) => `${t.themeName}（${t.completedContents} / ${t.totalContents} 完了）`)
         .join("、"),
-      review_list_line:
-        unovercome > 0 ? `復習リストに未克服の項目が ${unovercome} 件あります` : "",
+      review_list_line: unovercome > 0 ? `復習リストに未克服の項目が ${unovercome} 件あります` : "",
       next_content_title: params.nextContent?.title ?? "",
       suggested_goal: params.nextContent
         ? String(suggestWeeklyGoal(params.completedLastWeek, params.remainingContents))

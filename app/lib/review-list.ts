@@ -94,15 +94,16 @@ export function deriveReviewListItems(reviews: ReviewListSourceReview[]): Derive
           : estimatedIdentity(review.contentId, review.id, requirement.key);
 
       if (requirement.status === "partial" || requirement.status === "unmet") {
+        const scoreKind = review.scoreKind === "estimated" ? "estimated" : "rubric";
         items.set(identity, {
           contentId: review.contentId,
           requirementKey: requirement.key,
-          reviewId: review.scoreKind === "estimated" ? review.id : null,
+          reviewId: scoreKind === "estimated" ? review.id : null,
           requirementName: requirement.name ?? requirement.key,
           comment: requirement.comment,
           status: requirement.status,
           overcome: false,
-          scoreKind: review.scoreKind,
+          scoreKind,
         });
         continue;
       }
@@ -149,10 +150,9 @@ export function countUnovercomeReviewItems(items: readonly DerivedReviewItem[]):
  * Sort by learning order (theme → content), then requirement key. Unknown contentIds sort last.
  * `contentOrder` maps contentId → rank (0-based).
  */
-export function sortReviewItemsByLearningOrder<T extends { contentId: number; requirementKey: string }>(
-  items: readonly T[],
-  contentOrder: ReadonlyMap<number, number>
-): T[] {
+export function sortReviewItemsByLearningOrder<
+  T extends { contentId: number; requirementKey: string },
+>(items: readonly T[], contentOrder: ReadonlyMap<number, number>): T[] {
   return [...items].sort((a, b) => {
     const orderA = contentOrder.get(a.contentId);
     const orderB = contentOrder.get(b.contentId);

@@ -47,9 +47,7 @@ describe("PUT /api/review-notes - 認可", () => {
       userRole: null,
     } as never);
 
-    const res = await PUT(
-      putRequest({ contentId: 1, requirementKey: "r1", memo: "a" }) as never
-    );
+    const res = await PUT(putRequest({ contentId: 1, requirementKey: "r1", memo: "a" }) as never);
 
     expect(res.status).toBe(401);
     expect(createServerSupabaseClient).not.toHaveBeenCalled();
@@ -61,9 +59,7 @@ describe("PUT /api/review-notes - 認可", () => {
       userStatus: "rejected",
     } as never);
 
-    const res = await PUT(
-      putRequest({ contentId: 1, requirementKey: "r1", memo: "a" }) as never
-    );
+    const res = await PUT(putRequest({ contentId: 1, requirementKey: "r1", memo: "a" }) as never);
 
     expect(res.status).toBe(403);
     expect(createServerSupabaseClient).not.toHaveBeenCalled();
@@ -71,13 +67,9 @@ describe("PUT /api/review-notes - 認可", () => {
 
   it("対象コンテンツが不可視の場合は403", async () => {
     vi.mocked(isContentVisible).mockResolvedValue(false);
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(
-      createMockSupabaseClient() as never
-    );
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(createMockSupabaseClient() as never);
 
-    const res = await PUT(
-      putRequest({ contentId: 1, requirementKey: "r1", memo: "a" }) as never
-    );
+    const res = await PUT(putRequest({ contentId: 1, requirementKey: "r1", memo: "a" }) as never);
 
     expect(res.status).toBe(403);
   });
@@ -164,9 +156,7 @@ describe("PUT /api/review-notes - upsert", () => {
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
 
-    const res = await PUT(
-      putRequest({ contentId: 1, requirementKey: "r1", memo: "新" }) as never
-    );
+    const res = await PUT(putRequest({ contentId: 1, requirementKey: "r1", memo: "新" }) as never);
 
     expect(res.status).toBe(200);
     const builders = vi.mocked(client.from).mock.results.map((r) => r.value);
@@ -208,9 +198,7 @@ describe("PUT /api/review-notes - upsert", () => {
     expect(res.status).toBe(200);
     const builders = vi.mocked(client.from).mock.results.map((r) => r.value);
     const insertBuilder = builders.find((b) => b.insert.mock.calls.length > 0);
-    expect(insertBuilder?.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ user_id: 2 })
-    );
+    expect(insertBuilder?.insert).toHaveBeenCalledWith(expect.objectContaining({ user_id: 2 }));
     expect(insertBuilder?.insert.mock.calls[0][0].user_id).not.toBe(999);
   });
 });
@@ -223,9 +211,7 @@ describe("DELETE /api/review-notes", () => {
     };
     vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
 
-    const res = await DELETE(
-      deleteRequest({ contentId: 1, requirementKey: "r1" }) as never
-    );
+    const res = await DELETE(deleteRequest({ contentId: 1, requirementKey: "r1" }) as never);
 
     expect(res.status).toBe(200);
     expect(deleteBuilder.delete).toHaveBeenCalled();

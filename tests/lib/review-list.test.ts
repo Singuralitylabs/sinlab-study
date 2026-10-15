@@ -120,9 +120,7 @@ describe("deriveReviewListItems", () => {
         contentId: 10,
         scoreKind: "rubric",
         reviewedAt: "2026-01-02T00:00:00.000Z",
-        reviewJson: reviewJson([
-          { key: "r1", name: "正式", status: "partial", comment: "rubric" },
-        ]),
+        reviewJson: reviewJson([{ key: "r1", name: "正式", status: "partial", comment: "rubric" }]),
       }),
     ]);
 

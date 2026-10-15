@@ -22,6 +22,9 @@ vi.mock("@/app/services/api/upgrade-price-server", () => ({
 vi.mock("@/app/services/api/ai-review-server");
 vi.mock("@/app/services/api/submissions-server");
 vi.mock("@/app/services/api/ai-review-usage-server");
+vi.mock("@/app/services/api/review-list-server", () => ({
+  fetchReviewNotesForContent: vi.fn().mockResolvedValue({ data: [], error: null }),
+}));
 vi.mock("@/app/services/api/supabase-server", () => ({
   createServerSupabaseClient: vi.fn().mockResolvedValue({}),
 }));

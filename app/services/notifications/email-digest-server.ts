@@ -33,14 +33,14 @@ import {
   toJstDateString,
   visibleContentsFor,
 } from "@/app/lib/email-digest";
+import type { EmailSettingsSnapshot } from "@/app/lib/email-settings";
+import type { EmailTexts } from "@/app/lib/email-template";
+import { type EmailMarkdown, renderEmailMarkdown } from "@/app/lib/markdown-email";
 import {
   countUnovercomeReviewItems,
   deriveReviewListItems,
   type ReviewListSourceReview,
 } from "@/app/lib/review-list";
-import type { EmailSettingsSnapshot } from "@/app/lib/email-settings";
-import type { EmailTexts } from "@/app/lib/email-template";
-import { type EmailMarkdown, renderEmailMarkdown } from "@/app/lib/markdown-email";
 import { type CronLock, claimCronLock, releaseCronLock } from "@/app/services/api/cron-lock-server";
 import { fetchEmailSettings } from "@/app/services/api/email-settings-server";
 import { loadEmailTexts } from "@/app/services/api/email-templates-server";
@@ -392,7 +392,8 @@ async function fetchUnovercomeReviewCountsByUser(
   }
 
   const reviewsByUser = new Map<number, ReviewListSourceReview[]>();
-  const rows = await fetchForUserIds<{
+  // PostgREST types the !inner embed as an array; runtime is to-one (UNIQUE submission_id).
+  type DigestReviewRow = {
     user_id: number;
     content_id: number;
     ai_review: {
@@ -402,26 +403,23 @@ async function fetchUnovercomeReviewCountsByUser(
       reviewed_at: string | null;
       created_at: string;
     } | null;
-  }>(userIds, (ids, from, to) =>
-    supabase
-      .from("submissions")
-      .select(
-        "user_id, content_id, ai_review:ai_reviews!inner(id, score_kind, review_json, reviewed_at, created_at, status)"
-      )
-      .in("user_id", ids)
-      .eq("ai_review.status", "completed")
-      .order("id")
-      .range(from, to)
+  };
+  const rows = await fetchForUserIds<DigestReviewRow>(
+    userIds,
+    (ids, from, to) =>
+      supabase
+        .from("submissions")
+        .select(
+          "user_id, content_id, ai_review:ai_reviews!inner(id, score_kind, review_json, reviewed_at, created_at, status)"
+        )
+        .in("user_id", ids)
+        .eq("ai_review.status", "completed")
+        .order("id")
+        .range(from, to) as unknown as PromiseLike<Page<DigestReviewRow>>
   );
 
   for (const row of rows) {
-    const aiReview = row.ai_review as unknown as {
-      id: number;
-      score_kind: string;
-      review_json: unknown;
-      reviewed_at: string | null;
-      created_at: string;
-    } | null;
+    const aiReview = row.ai_review;
     if (!aiReview) continue;
     const list = reviewsByUser.get(row.user_id) ?? [];
     list.push({

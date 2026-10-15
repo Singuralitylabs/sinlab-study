@@ -15,7 +15,6 @@ import {
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
 import { GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH } from "@/app/constants/grading";
-import { REVIEW_NOTE_MEMO_MAX_LENGTH } from "@/app/constants/review-list";
 import {
   EMAIL_DIGEST_DAILY_LIMIT_MAX,
   EMAIL_DIGEST_DAILY_LIMIT_MIN,
@@ -36,6 +35,7 @@ import {
   QUIZ_MAX_QUESTIONS,
   QUIZ_TEXT_ANSWER_MAX_LENGTH,
 } from "@/app/constants/quiz";
+import { REVIEW_NOTE_MEMO_MAX_LENGTH } from "@/app/constants/review-list";
 import {
   MEMBERSHIP_TYPES,
   USER_MANAGEMENT_ACTIONS,

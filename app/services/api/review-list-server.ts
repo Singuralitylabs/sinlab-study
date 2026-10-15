@@ -3,8 +3,8 @@ import { compareGroupLevel } from "@/app/lib/content-grouping";
 import { buildThemeContentOrder, type NavigationWeek } from "@/app/lib/content-navigation";
 import {
   countUnovercomeReviewItems,
-  deriveReviewListItems,
   type DerivedReviewItem,
+  deriveReviewListItems,
   type ReviewListSourceReview,
   sortReviewItemsByLearningOrder,
 } from "@/app/lib/review-list";
@@ -229,9 +229,7 @@ export async function fetchReviewListContentOrder(): Promise<{
         },
       }))
     );
-    const contents = theme.phases.flatMap((phase) =>
-      phase.weeks.flatMap((week) => week.contents)
-    );
+    const contents = theme.phases.flatMap((phase) => phase.weeks.flatMap((week) => week.contents));
     const ordered = buildThemeContentOrder(weeks, contents);
     for (const content of ordered) {
       order.set(content.id, rank);
