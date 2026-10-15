@@ -201,6 +201,41 @@ describe("PUT /api/review-notes - upsert", () => {
     expect(insertBuilder?.insert).toHaveBeenCalledWith(expect.objectContaining({ user_id: 2 }));
     expect(insertBuilder?.insert.mock.calls[0][0].user_id).not.toBe(999);
   });
+
+  it("INSERT が 23505 のときは既存行を再取得して UPDATE する", async () => {
+    const client = createMockSupabaseClient({
+      tableResults: {
+        review_notes: [
+          { data: null, error: null },
+          { data: null, error: { code: "23505", message: "duplicate key" } },
+          { data: { id: 9 }, error: null },
+          {
+            data: {
+              id: 9,
+              content_id: 1,
+              requirement_key: "r1",
+              memo: "競合後",
+              understood_at: null,
+              updated_at: "2026-01-02T00:00:00Z",
+            },
+            error: null,
+          },
+        ],
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(client as never);
+
+    const res = await PUT(
+      putRequest({ contentId: 1, requirementKey: "r1", memo: "競合後" }) as never
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.note.id).toBe(9);
+    const builders = vi.mocked(client.from).mock.results.map((r) => r.value);
+    expect(builders.some((b) => b.insert.mock.calls.length > 0)).toBe(true);
+    expect(builders.some((b) => b.update.mock.calls.length > 0)).toBe(true);
+  });
 });
 
 describe("DELETE /api/review-notes", () => {

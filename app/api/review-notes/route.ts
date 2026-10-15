@@ -87,6 +87,49 @@ export async function PUT(request: NextRequest) {
       .select("id, content_id, requirement_key, memo, understood_at, updated_at")
       .single();
 
+    // Concurrent blur + understood on a new note: both SELECTs miss, one INSERT wins with 23505.
+    if (error?.code === "23505") {
+      let retryQuery = supabase
+        .from("review_notes")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("content_id", contentId);
+      retryQuery =
+        requirementKey === null
+          ? retryQuery.is("requirement_key", null)
+          : retryQuery.eq("requirement_key", requirementKey);
+      const { data: raced, error: retrySelectError } = await retryQuery.maybeSingle();
+      if (retrySelectError || !raced) {
+        console.error(
+          "復習メモ作成競合後の再取得エラー:",
+          retrySelectError?.message ?? "not found"
+        );
+        return NextResponse.json({ error: "復習メモの保存に失敗しました" }, { status: 500 });
+      }
+      const retryPatch: {
+        memo?: string | null;
+        understood_at?: string | null;
+      } = {};
+      if (memo !== undefined) {
+        retryPatch.memo = memo;
+      }
+      if (understood !== undefined) {
+        retryPatch.understood_at = understood ? new Date().toISOString() : null;
+      }
+      const { data: updated, error: retryUpdateError } = await supabase
+        .from("review_notes")
+        .update(retryPatch)
+        .eq("id", raced.id)
+        .eq("user_id", userId)
+        .select("id, content_id, requirement_key, memo, understood_at, updated_at")
+        .single();
+      if (retryUpdateError) {
+        console.error("復習メモ作成競合後の更新エラー:", retryUpdateError.message);
+        return NextResponse.json({ error: "復習メモの保存に失敗しました" }, { status: 500 });
+      }
+      return NextResponse.json({ note: updated });
+    }
+
     if (error) {
       console.error("復習メモ作成エラー:", error.message);
       return NextResponse.json({ error: "復習メモの保存に失敗しました" }, { status: 500 });

@@ -1,13 +1,7 @@
--- =====================================================
--- 復習リスト用メモ review_notes (#309)
---
--- 復習項目そのものは ai_reviews.review_json から都度導出する（テーブルに複製しない）。
--- このテーブルは受講生本人の一言メモと「理解した」チェックだけを持つ。
--- requirement_key が NULL の行はコンテンツ単位の自由記述メモ（1 コンテンツ 1 行）。
---
--- RLS: 本人の行のみ SELECT / INSERT / UPDATE / DELETE（admin / maintainer も読まない）。
---   各操作 1 本。user_id = (select get_user_id())。
--- =====================================================
+-- review_notes stores learner memo / understood_at only (#309).
+-- Items are derived from ai_reviews.review_json on each read; copying them here would drift.
+-- UNIQUE uses COALESCE so one free memo (NULL requirement_key) per content is allowed.
+-- RLS: owner-only CRUD via user_id = (select get_user_id()); staff cannot read notes.
 
 CREATE TABLE IF NOT EXISTS public.review_notes (
   id SERIAL PRIMARY KEY,

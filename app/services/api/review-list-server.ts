@@ -1,10 +1,14 @@
 import type { PostgrestError } from "@supabase/supabase-js";
-import { compareGroupLevel } from "@/app/lib/content-grouping";
-import { buildThemeContentOrder, type NavigationWeek } from "@/app/lib/content-navigation";
+import {
+  applyPublishedNestedThemeFilters,
+  type NestedThemeTree,
+  orderContentsAcrossThemes,
+} from "@/app/lib/published-theme-tree";
 import {
   countUnovercomeReviewItems,
   type DerivedReviewItem,
   deriveReviewListItems,
+  filterReviewItemsToVisibleContents,
   type ReviewListSourceReview,
   sortReviewItemsByLearningOrder,
 } from "@/app/lib/review-list";
@@ -44,30 +48,6 @@ export type FreeMemoView = {
   themeName: string;
   href: string;
   memo: string;
-};
-
-type ContentRow = {
-  id: number;
-  title: string;
-  display_order: number | null;
-  week_id: number;
-};
-
-type ThemeRow = {
-  id: number;
-  name: string;
-  display_order: number | null;
-  phases: {
-    id: number;
-    name: string;
-    display_order: number | null;
-    weeks: {
-      id: number;
-      name: string;
-      display_order: number | null;
-      contents: ContentRow[];
-    }[];
-  }[];
 };
 
 /**
@@ -188,62 +168,36 @@ export async function fetchReviewListContentOrder(): Promise<{
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase
-    .from("learning_themes")
-    .select(
-      "id, name, display_order, phases:learning_phases(id, name, display_order, weeks:learning_weeks(id, name, display_order, contents:learning_contents(id, title, display_order, week_id)))"
-    )
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .eq("phases.is_published", true)
-    .eq("phases.is_deleted", false)
-    .eq("phases.weeks.is_published", true)
-    .eq("phases.weeks.is_deleted", false)
-    .eq("phases.weeks.contents.is_published", true)
-    .eq("phases.weeks.contents.is_deleted", false)
-    .order("display_order");
+  const { data, error } = await applyPublishedNestedThemeFilters(
+    supabase
+      .from("learning_themes")
+      .select(
+        "id, name, display_order, phases:learning_phases(id, name, display_order, weeks:learning_weeks(id, name, display_order, contents:learning_contents(id, title, display_order, week_id)))"
+      )
+  ).order("display_order");
 
   if (error) {
     console.error("復習リスト用コンテンツ順取得エラー:", error.message);
     return { metas: new Map(), order: new Map(), error };
   }
 
-  const themes = [...((data ?? []) as ThemeRow[])].sort((a, b) =>
-    compareGroupLevel(a.display_order, b.display_order, a.id, b.id)
-  );
-
   const metas = new Map<number, ReviewListContentMeta>();
   const order = new Map<number, number>();
   let rank = 0;
-
-  for (const theme of themes) {
-    const weeks: NavigationWeek[] = theme.phases.flatMap((phase) =>
-      phase.weeks.map((week) => ({
-        id: week.id,
-        name: week.name,
-        display_order: week.display_order,
-        phase: {
-          id: phase.id,
-          name: phase.name,
-          display_order: phase.display_order,
-        },
-      }))
-    );
-    const contents = theme.phases.flatMap((phase) => phase.weeks.flatMap((week) => week.contents));
-    const ordered = buildThemeContentOrder(weeks, contents);
-    for (const content of ordered) {
-      order.set(content.id, rank);
-      rank += 1;
-      metas.set(content.id, {
-        contentId: content.id,
-        title: content.title,
-        themeId: theme.id,
-        themeName: theme.name,
-        phaseId: content.phaseId,
-        weekId: content.weekId,
-        href: `/learn/${theme.id}/${content.phaseId}/${content.weekId}/${content.id}`,
-      });
-    }
+  for (const { themeId, themeName, content } of orderContentsAcrossThemes(
+    (data ?? []) as NestedThemeTree[]
+  )) {
+    order.set(content.id, rank);
+    rank += 1;
+    metas.set(content.id, {
+      contentId: content.id,
+      title: content.title,
+      themeId,
+      themeName,
+      phaseId: content.phaseId,
+      weekId: content.weekId,
+      href: `/learn/${themeId}/${content.phaseId}/${content.weekId}/${content.id}`,
+    });
   }
 
   return { metas, order, error: null };
@@ -280,9 +234,11 @@ export async function buildReviewListForUser(userId: number): Promise<{
     noteByKey.set(`${note.content_id}:${note.requirement_key ?? ""}`, note);
   }
 
-  const toView = (item: DerivedReviewItem): ReviewListItemView | null => {
-    const meta = contentResult.metas.get(item.contentId);
-    if (!meta) return null;
+  const visibleIds = new Set(contentResult.metas.keys());
+  const visibleSorted = filterReviewItemsToVisibleContents(sorted, visibleIds);
+
+  const toView = (item: DerivedReviewItem): ReviewListItemView => {
+    const meta = contentResult.metas.get(item.contentId) as ReviewListContentMeta;
     const note = noteByKey.get(`${item.contentId}:${item.requirementKey}`);
     return {
       ...item,
@@ -295,7 +251,7 @@ export async function buildReviewListForUser(userId: number): Promise<{
     };
   };
 
-  const views = sorted.map(toView).filter((item): item is ReviewListItemView => item != null);
+  const views = visibleSorted.map(toView);
   const unovercome = views.filter((item) => !item.overcome);
   const overcome = views.filter((item) => item.overcome);
 
@@ -329,11 +285,20 @@ export async function buildReviewListForUser(userId: number): Promise<{
   };
 }
 
-/** Home / weekly digest: count only. Avoids assembling full view models. */
+/**
+ * Home / nav badge: count only. Uses the same published/visible content filter as
+ * buildReviewListForUser() so the number matches the list.
+ */
 export async function countUnovercomeReviewItemsForUser(userId: number): Promise<number> {
-  const { data, error } = await fetchReviewListSourceReviews(userId);
-  if (error) {
+  const [reviewsResult, contentResult] = await Promise.all([
+    fetchReviewListSourceReviews(userId),
+    fetchReviewListContentOrder(),
+  ]);
+  if (reviewsResult.error || contentResult.error) {
     return 0;
   }
-  return countUnovercomeReviewItems(deriveReviewListItems(data));
+  const visibleIds = new Set(contentResult.metas.keys());
+  return countUnovercomeReviewItems(
+    filterReviewItemsToVisibleContents(deriveReviewListItems(reviewsResult.data), visibleIds)
+  );
 }

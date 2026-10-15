@@ -38,12 +38,17 @@ export function ReviewNoteMemoField({
   className?: string;
 }) {
   const [memo, setMemo] = useState(initialMemo ?? "");
+  // Compare blur against the last successful save, not mount-time props (empty → "x" → empty
+  // would otherwise skip the second save and leave "x" after reload).
+  const [lastSavedMemo, setLastSavedMemo] = useState(initialMemo ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
 
   useEffect(() => {
-    setMemo(initialMemo ?? "");
+    const next = initialMemo ?? "";
+    setMemo(next);
+    setLastSavedMemo(next);
   }, [initialMemo]);
 
   async function save(next: string) {
@@ -63,6 +68,7 @@ export function ReviewNoteMemoField({
       setError(result.error);
       return;
     }
+    setLastSavedMemo(next);
     setSavedFlash(true);
     window.setTimeout(() => setSavedFlash(false), 1200);
   }
@@ -77,7 +83,7 @@ export function ReviewNoteMemoField({
         disabled={saving}
         onChange={(event) => setMemo(event.target.value)}
         onBlur={() => {
-          if (memo !== (initialMemo ?? "")) {
+          if (memo !== lastSavedMemo) {
             void save(memo);
           }
         }}

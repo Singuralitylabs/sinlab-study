@@ -14,8 +14,11 @@ import {
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import { isAnnouncementTarget } from "@/app/lib/announcement-target";
-import { compareGroupLevel } from "@/app/lib/content-grouping";
-import { buildThemeContentOrder, type NavigationWeek } from "@/app/lib/content-navigation";
+import {
+  applyPublishedNestedThemeFilters,
+  type NestedThemeTree,
+  orderContentsAcrossThemes,
+} from "@/app/lib/published-theme-tree";
 import {
   addDays,
   coversPreviousWeek,
@@ -39,6 +42,7 @@ import { type EmailMarkdown, renderEmailMarkdown } from "@/app/lib/markdown-emai
 import {
   countUnovercomeReviewItems,
   deriveReviewListItems,
+  filterReviewItemsToVisibleContents,
   type ReviewListSourceReview,
 } from "@/app/lib/review-list";
 import { type CronLock, claimCronLock, releaseCronLock } from "@/app/services/api/cron-lock-server";
@@ -151,85 +155,42 @@ async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
     }));
 }
 
-type ContentRow = {
-  id: number;
-  title: string;
-  display_order: number | null;
-  is_open_to_trial: boolean;
-  week_id: number;
-};
-type ThemeRow = {
-  id: number;
-  name: string;
-  display_order: number | null;
-  phases: {
-    id: number;
-    name: string;
-    display_order: number | null;
-    weeks: {
-      id: number;
-      name: string;
-      display_order: number | null;
-      contents: ContentRow[];
-    }[];
-  }[];
-};
-
 /**
  * Returns the contents in circulation in learning order (theme -> phase -> week -> content
  * display order). The nested select and the all-levels published/not-deleted filters have the
- * same shape as fetchThemeProgressSummaries(); ordering is delegated to buildThemeContentOrder(),
- * the same as prev/next navigation on the detail page.
+ * same published filters as fetchThemeProgressSummaries(); ordering uses orderContentsAcrossThemes()
+ * (shared with home / review-list).
  */
 async function fetchOrderedContents(supabase: AdminClient): Promise<DigestContent[]> {
-  const { data, error } = await supabase
-    .from("learning_themes")
-    .select(
-      "id, name, display_order, phases:learning_phases(id, name, display_order, weeks:learning_weeks(id, name, display_order, contents:learning_contents(id, title, display_order, is_open_to_trial, week_id)))"
-    )
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .eq("phases.is_published", true)
-    .eq("phases.is_deleted", false)
-    .eq("phases.weeks.is_published", true)
-    .eq("phases.weeks.is_deleted", false)
-    .eq("phases.weeks.contents.is_published", true)
-    .eq("phases.weeks.contents.is_deleted", false)
-    .order("display_order");
+  const { data, error } = await applyPublishedNestedThemeFilters(
+    supabase
+      .from("learning_themes")
+      .select(
+        "id, name, display_order, phases:learning_phases(id, name, display_order, weeks:learning_weeks(id, name, display_order, contents:learning_contents(id, title, display_order, is_open_to_trial, week_id)))"
+      )
+  ).order("display_order");
 
   if (error) {
     throw new Error(error.message);
   }
 
-  const themes = [...((data ?? []) as ThemeRow[])].sort((a, b) =>
-    compareGroupLevel(a.display_order, b.display_order, a.id, b.id)
-  );
-
-  return themes.flatMap((theme) => {
-    const weeks: NavigationWeek[] = [];
-    const contents: ContentRow[] = [];
-    for (const phase of theme.phases ?? []) {
-      for (const week of phase.weeks ?? []) {
-        weeks.push({
-          id: week.id,
-          name: week.name,
-          display_order: week.display_order,
-          phase: { id: phase.id, name: phase.name, display_order: phase.display_order },
-        });
-        contents.push(...(week.contents ?? []));
-      }
-    }
-    const openToTrial = new Map(contents.map((c) => [c.id, c.is_open_to_trial]));
-
-    return buildThemeContentOrder(weeks, contents).map((content) => ({
-      id: content.id,
-      title: content.title,
-      themeId: theme.id,
-      path: `/learn/${theme.id}/${content.phaseId}/${content.weekId}/${content.id}`,
-      themeName: theme.name,
-      isOpenToTrial: openToTrial.get(content.id) === true,
-    }));
-  });
+  type DigestContentRow = {
+    id: number;
+    title: string;
+    display_order: number | null;
+    week_id: number;
+    is_open_to_trial: boolean;
+  };
+  return orderContentsAcrossThemes(
+    (data ?? []) as NestedThemeTree<DigestContentRow>[]
+  ).map(({ themeId, themeName, content, raw }) => ({
+    id: content.id,
+    title: content.title,
+    themeId,
+    path: `/learn/${themeId}/${content.phaseId}/${content.weekId}/${content.id}`,
+    themeName,
+    isOpenToTrial: raw.is_open_to_trial === true,
+  }));
 }
 
 /** IDs of users with at least one learning record (progress row or submission). */
@@ -379,64 +340,86 @@ async function fetchWeeklyStats(
 
 /**
  * Unovercome review-list counts for weekly digest body lines. Cron has no user session, so this
- * uses service_role with an explicit user_id filter (same pattern as other digest aggregations;
- * not a student delivery path). Targeting / send conditions are unchanged — count is body-only.
+ * reads ai_reviews.review_json via service_role with an explicit user_id filter (documented
+ * exception in specification.md 10.7 / 15.5 — not a student delivery path). Fail-soft: log and
+ * return 0 counts so a review_json read failure cannot abort the whole digest. Counts only items
+ * on published/visible contents (same filter as /review-list).
  */
 async function fetchUnovercomeReviewCountsByUser(
   supabase: AdminClient,
-  userIds: number[]
+  users: DigestUser[],
+  contents: DigestContent[]
 ): Promise<Map<number, number>> {
   const counts = new Map<number, number>();
-  if (userIds.length === 0) {
+  for (const user of users) {
+    counts.set(user.userId, 0);
+  }
+  if (users.length === 0) {
     return counts;
   }
 
-  const reviewsByUser = new Map<number, ReviewListSourceReview[]>();
-  // PostgREST types the !inner embed as an array; runtime is to-one (UNIQUE submission_id).
-  type DigestReviewRow = {
-    user_id: number;
-    content_id: number;
-    ai_review: {
-      id: number;
-      score_kind: string;
-      review_json: unknown;
-      reviewed_at: string | null;
-      created_at: string;
-    } | null;
-  };
-  const rows = await fetchForUserIds<DigestReviewRow>(
-    userIds,
-    (ids, from, to) =>
-      supabase
-        .from("submissions")
-        .select(
-          "user_id, content_id, ai_review:ai_reviews!inner(id, score_kind, review_json, reviewed_at, created_at, status)"
-        )
-        .in("user_id", ids)
-        .eq("ai_review.status", "completed")
-        .order("id")
-        .range(from, to) as unknown as PromiseLike<Page<DigestReviewRow>>
-  );
+  try {
+    const reviewsByUser = new Map<number, ReviewListSourceReview[]>();
+    // PostgREST types the !inner embed as an array; runtime is to-one (UNIQUE submission_id).
+    type DigestReviewRow = {
+      user_id: number;
+      content_id: number;
+      ai_review: {
+        id: number;
+        score_kind: string;
+        review_json: unknown;
+        reviewed_at: string | null;
+        created_at: string;
+      } | null;
+    };
+    const userIds = users.map((user) => user.userId);
+    // Only columns needed to derive counts (no review_content / advice prose beyond review_json).
+    const rows = await fetchForUserIds<DigestReviewRow>(
+      userIds,
+      (ids, from, to) =>
+        supabase
+          .from("submissions")
+          .select(
+            "user_id, content_id, ai_review:ai_reviews!inner(id, score_kind, review_json, reviewed_at, created_at, status)"
+          )
+          .in("user_id", ids)
+          .eq("ai_review.status", "completed")
+          .order("id")
+          .range(from, to) as unknown as PromiseLike<Page<DigestReviewRow>>
+    );
 
-  for (const row of rows) {
-    const aiReview = row.ai_review;
-    if (!aiReview) continue;
-    const list = reviewsByUser.get(row.user_id) ?? [];
-    list.push({
-      id: aiReview.id,
-      contentId: row.content_id,
-      scoreKind: aiReview.score_kind as ScoreKind,
-      reviewJson: aiReview.review_json,
-      reviewedAt: aiReview.reviewed_at ?? aiReview.created_at,
-    });
-    reviewsByUser.set(row.user_id, list);
-  }
+    for (const row of rows) {
+      const aiReview = row.ai_review;
+      if (!aiReview) continue;
+      const list = reviewsByUser.get(row.user_id) ?? [];
+      list.push({
+        id: aiReview.id,
+        contentId: row.content_id,
+        scoreKind: aiReview.score_kind as ScoreKind,
+        reviewJson: aiReview.review_json,
+        reviewedAt: aiReview.reviewed_at ?? aiReview.created_at,
+      });
+      reviewsByUser.set(row.user_id, list);
+    }
 
-  for (const userId of userIds) {
-    const items = deriveReviewListItems(reviewsByUser.get(userId) ?? []);
-    counts.set(userId, countUnovercomeReviewItems(items));
+    for (const user of users) {
+      const visibleIds = new Set(
+        visibleContentsFor(contents, user.status).map((content) => content.id)
+      );
+      const items = filterReviewItemsToVisibleContents(
+        deriveReviewListItems(reviewsByUser.get(user.userId) ?? []),
+        visibleIds
+      );
+      counts.set(user.userId, countUnovercomeReviewItems(items));
+    }
+    return counts;
+  } catch (error) {
+    console.error(
+      "[定期メール] 復習リスト未克服件数の取得に失敗したため 0 件として続行します:",
+      error
+    );
+    return counts;
   }
-  return counts;
 }
 
 /**
@@ -1027,7 +1010,7 @@ async function buildQueue(
   const weeklyUserIds = weeklyUsers.map((user) => user.userId);
   const [stats, unovercomeByUser] = await Promise.all([
     fetchWeeklyStats(supabase, weeklyUserIds, weekStart),
-    fetchUnovercomeReviewCountsByUser(supabase, weeklyUserIds),
+    fetchUnovercomeReviewCountsByUser(supabase, weeklyUsers, contents),
   ]);
 
   const weeklyItems: QueuedEmail[] = [];

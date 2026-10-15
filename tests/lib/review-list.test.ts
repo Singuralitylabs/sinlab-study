@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   countUnovercomeReviewItems,
   deriveReviewListItems,
+  filterReviewItemsToVisibleContents,
   type ReviewListSourceReview,
   sortReviewItemsByLearningOrder,
 } from "@/app/lib/review-list";
@@ -129,7 +130,7 @@ describe("deriveReviewListItems", () => {
     expect(items[0].requirementKey).toBe("r1");
   });
 
-  it("estimated のみのときは (contentId, reviewId, key) で項目になる", () => {
+  it("estimated のみのときは (contentId, key) で項目になる", () => {
     const items = deriveReviewListItems([
       source({
         id: 5,
@@ -150,6 +151,94 @@ describe("deriveReviewListItems", () => {
         overcome: false,
       }),
     ]);
+  });
+
+  it("estimated は同じ key をレビュー間で共有し、再レビューで unbounded に増えない", () => {
+    const items = deriveReviewListItems([
+      source({
+        id: 1,
+        contentId: 10,
+        scoreKind: "estimated",
+        reviewedAt: "2026-01-01T00:00:00.000Z",
+        reviewJson: reviewJson([
+          { key: "e1", name: "推測", status: "unmet", comment: "旧" },
+        ]),
+      }),
+      source({
+        id: 2,
+        contentId: 10,
+        scoreKind: "estimated",
+        reviewedAt: "2026-01-02T00:00:00.000Z",
+        reviewJson: reviewJson([
+          { key: "e1", name: "推測", status: "unmet", comment: "新" },
+        ]),
+      }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toEqual(
+      expect.objectContaining({
+        requirementKey: "e1",
+        reviewId: 2,
+        comment: "新",
+        overcome: false,
+      })
+    );
+  });
+
+  it("estimated で新しいレビューから消えた key は克服済みになる", () => {
+    const items = deriveReviewListItems([
+      source({
+        id: 1,
+        contentId: 10,
+        scoreKind: "estimated",
+        reviewedAt: "2026-01-01T00:00:00.000Z",
+        reviewJson: reviewJson([
+          { key: "old", name: "旧キー", status: "unmet", comment: "旧" },
+          { key: "keep", name: "残る", status: "partial", comment: "部分" },
+        ]),
+      }),
+      source({
+        id: 2,
+        contentId: 10,
+        scoreKind: "estimated",
+        reviewedAt: "2026-01-02T00:00:00.000Z",
+        reviewJson: reviewJson([
+          { key: "keep", name: "残る", status: "partial", comment: "まだ" },
+          { key: "new", name: "新キー", status: "unmet", comment: "新規" },
+        ]),
+      }),
+    ]);
+
+    const byKey = Object.fromEntries(items.map((item) => [item.requirementKey, item]));
+    expect(byKey.old.overcome).toBe(true);
+    expect(byKey.keep.overcome).toBe(false);
+    expect(byKey.new.overcome).toBe(false);
+    expect(items.filter((item) => !item.overcome)).toHaveLength(2);
+  });
+
+  it("estimated で新しいレビューが met にした key は克服済みになる", () => {
+    const items = deriveReviewListItems([
+      source({
+        id: 1,
+        contentId: 10,
+        scoreKind: "estimated",
+        reviewedAt: "2026-01-01T00:00:00.000Z",
+        reviewJson: reviewJson([
+          { key: "e1", name: "推測", status: "unmet", comment: "未達" },
+        ]),
+      }),
+      source({
+        id: 2,
+        contentId: 10,
+        scoreKind: "estimated",
+        reviewedAt: "2026-01-02T00:00:00.000Z",
+        reviewJson: reviewJson([{ key: "e1", name: "推測", status: "met", comment: "達成" }]),
+      }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0].overcome).toBe(true);
   });
 
   it("legacy / none / incomplete は対象外", () => {
@@ -208,6 +297,19 @@ describe("sortReviewItemsByLearningOrder", () => {
       "20:r9",
       "10:r1",
       "10:r2",
+    ]);
+  });
+});
+
+describe("filterReviewItemsToVisibleContents", () => {
+  it("公開中コンテンツに無い項目を落とす（件数と一覧の分母を揃える）", () => {
+    const items = [
+      { contentId: 1, requirementKey: "a" },
+      { contentId: 2, requirementKey: "b" },
+      { contentId: 3, requirementKey: "c" },
+    ];
+    expect(filterReviewItemsToVisibleContents(items, new Set([1, 3])).map((i) => i.contentId)).toEqual([
+      1, 3,
     ]);
   });
 });

@@ -16,8 +16,8 @@ export type DerivedReviewItem = {
   contentId: number;
   requirementKey: string;
   /**
-   * Set for estimated-derived items (identity includes the review that invented the key). Null for
-   * rubric items, which are keyed only by (contentId, requirementKey).
+   * Latest estimated review that set this open item's status/comment. Null for rubric items
+   * (identity is only (contentId, requirementKey) for both kinds).
    */
   reviewId: number | null;
   requirementName: string;
@@ -33,8 +33,8 @@ function rubricIdentity(contentId: number, key: string): ItemIdentity {
   return `rubric:${contentId}:${key}`;
 }
 
-function estimatedIdentity(contentId: number, reviewId: number, key: string): ItemIdentity {
-  return `estimated:${contentId}:${reviewId}:${key}`;
+function estimatedIdentity(contentId: number, key: string): ItemIdentity {
+  return `estimated:${contentId}:${key}`;
 }
 
 function isReviewableKind(scoreKind: ScoreKind): scoreKind is "rubric" | "estimated" {
@@ -52,9 +52,11 @@ function compareReviews(a: ReviewListSourceReview, b: ReviewListSourceReview): n
  * Rules (issue #309):
  * - Only score_kind rubric / estimated with a recognisable review_json contribute.
  * - An item opens on partial / unmet; overcomes when a newer review marks the same (contentId, key)
- *   as met, or (rubric only) the key disappears after a rubric_version change.
- * - Estimated items use (contentId, reviewId, key). When any rubric review exists for the content,
- *   estimated-derived items are omitted entirely.
+ *   as met, or the key disappears from a newer review of the same kind (rubric version change, or
+ *   estimated keys the latest review no longer lists).
+ * - Identity is (contentId, key) for both kinds so re-reviews with new AI keys cannot leave stale
+ *   estimated items open forever. When any rubric review exists for the content, estimated-derived
+ *   items are omitted entirely.
  * - legacy / none / incomplete never contribute.
  */
 export function deriveReviewListItems(reviews: ReviewListSourceReview[]): DerivedReviewItem[] {
@@ -88,13 +90,13 @@ export function deriveReviewListItems(reviews: ReviewListSourceReview[]): Derive
     );
 
     for (const requirement of review.reviewJson.requirements) {
+      const scoreKind = review.scoreKind === "estimated" ? "estimated" : "rubric";
       const identity =
-        review.scoreKind === "rubric"
+        scoreKind === "rubric"
           ? rubricIdentity(review.contentId, requirement.key)
-          : estimatedIdentity(review.contentId, review.id, requirement.key);
+          : estimatedIdentity(review.contentId, requirement.key);
 
       if (requirement.status === "partial" || requirement.status === "unmet") {
-        const scoreKind = review.scoreKind === "estimated" ? "estimated" : "rubric";
         items.set(identity, {
           contentId: review.contentId,
           requirementKey: requirement.key,
@@ -119,17 +121,17 @@ export function deriveReviewListItems(reviews: ReviewListSourceReview[]): Derive
       }
     }
 
-    // Rubric version change: a key that was open but is gone from this newer rubric is overcome.
-    if (review.scoreKind === "rubric") {
-      for (const [id, item] of items) {
-        if (
-          item.contentId === review.contentId &&
-          item.scoreKind === "rubric" &&
-          !item.overcome &&
-          !keysInReview.has(item.requirementKey)
-        ) {
-          items.set(id, { ...item, overcome: true });
-        }
+    // Key gone from a newer review of the same kind: overcome (rubric version change, or estimated
+    // AI keys that the latest review no longer lists — without this, estimated items never close).
+    const kind = review.scoreKind === "estimated" ? "estimated" : "rubric";
+    for (const [id, item] of items) {
+      if (
+        item.contentId === review.contentId &&
+        item.scoreKind === kind &&
+        !item.overcome &&
+        !keysInReview.has(item.requirementKey)
+      ) {
+        items.set(id, { ...item, overcome: true });
       }
     }
   }
@@ -144,6 +146,17 @@ export function deriveReviewListItems(reviews: ReviewListSourceReview[]): Derive
 /** Count of items still open (not overcome by a later met / disappeared key). */
 export function countUnovercomeReviewItems(items: readonly DerivedReviewItem[]): number {
   return items.reduce((sum, item) => sum + (item.overcome ? 0 : 1), 0);
+}
+
+/**
+ * Drop items whose content is not in the published/visible set (same filter as the review-list
+ * page). Counts that skip this diverge from the list when content is unpublished or deleted.
+ */
+export function filterReviewItemsToVisibleContents<T extends { contentId: number }>(
+  items: readonly T[],
+  visibleContentIds: ReadonlySet<number>
+): T[] {
+  return items.filter((item) => visibleContentIds.has(item.contentId));
 }
 
 /**
