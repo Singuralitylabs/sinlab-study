@@ -295,6 +295,114 @@ describe("issueMissingCertificates（既に完了済みのテーマの遡及発�
     expect(certificateInserts(admin)).toHaveLength(0);
   });
 
+  it("書式文字だけの表示名は空と同じく発行しない。混在するときは除いてスナップショットする", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const blank = mockAdminClient({
+      certificates: inserted,
+      users: { data: { display_name: "\u200B" }, error: null },
+    });
+
+    const blocked = await issueMissingCertificates({
+      ...eligible,
+      summaries: [done(1)] as never,
+      issuedThemeIds: new Set(),
+    });
+
+    expect(blocked).toEqual({ issued: [], blockedByMissingName: true });
+    expect(certificateInserts(blank)).toHaveLength(0);
+
+    const zwjAroundSpace = mockAdminClient({
+      certificates: inserted,
+      users: { data: { display_name: "\u200D \u200D" }, error: null },
+    });
+    const zwjBlocked = await issueMissingCertificates({
+      ...eligible,
+      summaries: [done(1)] as never,
+      issuedThemeIds: new Set(),
+    });
+    expect(zwjBlocked).toEqual({ issued: [], blockedByMissingName: true });
+    expect(certificateInserts(zwjAroundSpace)).toHaveLength(0);
+
+    const admin = mockAdminClient({
+      certificates: inserted,
+      users: { data: { display_name: "\u202E山田\u200B" }, error: null },
+    });
+    const issuedResult = await issueMissingCertificates({
+      ...eligible,
+      summaries: [done(1)] as never,
+      issuedThemeIds: new Set(),
+    });
+
+    expect(issuedResult.blockedByMissingName).toBe(false);
+    expect(certificateInserts(admin)[0].insert.mock.calls[0][0]).toMatchObject({
+      recipient_name: "山田",
+    });
+  });
+
+  it("50文字超や制御文字を含む表示名は発行しない。絵文字の ZWJ は残してスナップショットする", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const tooLong = mockAdminClient({
+      certificates: inserted,
+      users: { data: { display_name: "あ".repeat(51) }, error: null },
+    });
+    const longBlocked = await issueMissingCertificates({
+      ...eligible,
+      summaries: [done(1)] as never,
+      issuedThemeIds: new Set(),
+    });
+    expect(longBlocked).toEqual({ issued: [], blockedByMissingName: true });
+    expect(certificateInserts(tooLong)).toHaveLength(0);
+
+    const withNewline = mockAdminClient({
+      certificates: inserted,
+      users: { data: { display_name: "山田\n太郎" }, error: null },
+    });
+    const newlineBlocked = await issueMissingCertificates({
+      ...eligible,
+      summaries: [done(1)] as never,
+      issuedThemeIds: new Set(),
+    });
+    expect(newlineBlocked).toEqual({ issued: [], blockedByMissingName: true });
+    expect(certificateInserts(withNewline)).toHaveLength(0);
+
+    const family = "👨\u200D👩";
+    const admin = mockAdminClient({
+      certificates: inserted,
+      users: { data: { display_name: family }, error: null },
+    });
+    const issuedResult = await issueMissingCertificates({
+      ...eligible,
+      summaries: [done(1)] as never,
+      issuedThemeIds: new Set(),
+    });
+    expect(issuedResult.blockedByMissingName).toBe(false);
+    expect(certificateInserts(admin)[0].insert.mock.calls[0][0]).toMatchObject({
+      recipient_name: family,
+    });
+  });
+
+  it("表示名が入っていれば発行し、修了証行は UPDATE しない（スナップショットは変えない）", async () => {
+    const admin = mockAdminClient({
+      certificates: inserted,
+      users: { data: { display_name: "佐藤 花子" }, error: null },
+    });
+
+    const result = await issueMissingCertificates({
+      ...eligible,
+      summaries: [done(1)] as never,
+      issuedThemeIds: new Set(),
+    });
+
+    expect(result.blockedByMissingName).toBe(false);
+    expect(result.issued).toEqual([inserted.data]);
+    expect(certificateInserts(admin)[0].insert.mock.calls[0][0]).toMatchObject({
+      recipient_name: "佐藤 花子",
+    });
+    for (const { value } of admin.from.mock.results) {
+      expect(value.update).not.toHaveBeenCalled();
+    }
+  });
+
   it.each([
     ["trial", "member"],
     ["active", "admin"],
