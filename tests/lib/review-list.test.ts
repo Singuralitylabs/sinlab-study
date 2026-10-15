@@ -160,18 +160,14 @@ describe("deriveReviewListItems", () => {
         contentId: 10,
         scoreKind: "estimated",
         reviewedAt: "2026-01-01T00:00:00.000Z",
-        reviewJson: reviewJson([
-          { key: "e1", name: "推測", status: "unmet", comment: "旧" },
-        ]),
+        reviewJson: reviewJson([{ key: "e1", name: "推測", status: "unmet", comment: "旧" }]),
       }),
       source({
         id: 2,
         contentId: 10,
         scoreKind: "estimated",
         reviewedAt: "2026-01-02T00:00:00.000Z",
-        reviewJson: reviewJson([
-          { key: "e1", name: "推測", status: "unmet", comment: "新" },
-        ]),
+        reviewJson: reviewJson([{ key: "e1", name: "推測", status: "unmet", comment: "新" }]),
       }),
     ]);
 
@@ -224,9 +220,7 @@ describe("deriveReviewListItems", () => {
         contentId: 10,
         scoreKind: "estimated",
         reviewedAt: "2026-01-01T00:00:00.000Z",
-        reviewJson: reviewJson([
-          { key: "e1", name: "推測", status: "unmet", comment: "未達" },
-        ]),
+        reviewJson: reviewJson([{ key: "e1", name: "推測", status: "unmet", comment: "未達" }]),
       }),
       source({
         id: 2,
@@ -308,8 +302,8 @@ describe("filterReviewItemsToVisibleContents", () => {
       { contentId: 2, requirementKey: "b" },
       { contentId: 3, requirementKey: "c" },
     ];
-    expect(filterReviewItemsToVisibleContents(items, new Set([1, 3])).map((i) => i.contentId)).toEqual([
-      1, 3,
-    ]);
+    expect(
+      filterReviewItemsToVisibleContents(items, new Set([1, 3])).map((i) => i.contentId)
+    ).toEqual([1, 3]);
   });
 });

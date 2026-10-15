@@ -15,11 +15,6 @@ import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import { isAnnouncementTarget } from "@/app/lib/announcement-target";
 import {
-  applyPublishedNestedThemeFilters,
-  type NestedThemeTree,
-  orderContentsAcrossThemes,
-} from "@/app/lib/published-theme-tree";
-import {
   addDays,
   coversPreviousWeek,
   cycleStartOf,
@@ -39,6 +34,11 @@ import {
 import type { EmailSettingsSnapshot } from "@/app/lib/email-settings";
 import type { EmailTexts } from "@/app/lib/email-template";
 import { type EmailMarkdown, renderEmailMarkdown } from "@/app/lib/markdown-email";
+import {
+  applyPublishedNestedThemeFilters,
+  type NestedThemeTree,
+  orderContentsAcrossThemes,
+} from "@/app/lib/published-theme-tree";
 import {
   countUnovercomeReviewItems,
   deriveReviewListItems,
@@ -181,16 +181,16 @@ async function fetchOrderedContents(supabase: AdminClient): Promise<DigestConten
     week_id: number;
     is_open_to_trial: boolean;
   };
-  return orderContentsAcrossThemes(
-    (data ?? []) as NestedThemeTree<DigestContentRow>[]
-  ).map(({ themeId, themeName, content, raw }) => ({
-    id: content.id,
-    title: content.title,
-    themeId,
-    path: `/learn/${themeId}/${content.phaseId}/${content.weekId}/${content.id}`,
-    themeName,
-    isOpenToTrial: raw.is_open_to_trial === true,
-  }));
+  return orderContentsAcrossThemes((data ?? []) as NestedThemeTree<DigestContentRow>[]).map(
+    ({ themeId, themeName, content, raw }) => ({
+      id: content.id,
+      title: content.title,
+      themeId,
+      path: `/learn/${themeId}/${content.phaseId}/${content.weekId}/${content.id}`,
+      themeName,
+      isOpenToTrial: raw.is_open_to_trial === true,
+    })
+  );
 }
 
 /** IDs of users with at least one learning record (progress row or submission). */
