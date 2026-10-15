@@ -96,7 +96,8 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
             >
               <CardContent className="pt-6">
                 <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1">
+                  {/* min-width:auto grows with the pre, so overflow-x-auto never starts a scrollport. */}
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-2 flex-wrap">
                       <Badge variant="secondary" className="gap-1">
                         {submission.submission_type === "code" ? (
@@ -112,7 +113,7 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
                       </span>
                     </div>
 
-                    <h3 className="font-medium">
+                    <h3 className="break-words font-medium">
                       {submission.content?.title || "不明なコンテンツ"}
                     </h3>
 
@@ -133,10 +134,10 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
                         href={submission.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="mt-3 inline-flex items-center gap-1 text-primary hover:underline"
+                        className="mt-3 inline-flex max-w-full min-w-0 items-start gap-1 break-all text-primary hover:underline"
                       >
-                        {submission.url}
-                        <ExternalLink className="h-4 w-4" />
+                        <span className="min-w-0">{submission.url}</span>
+                        <ExternalLink className="mt-0.5 h-4 w-4 shrink-0" />
                       </a>
                     )}
 

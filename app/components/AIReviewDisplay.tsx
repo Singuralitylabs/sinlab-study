@@ -46,11 +46,11 @@ export function AIReviewDisplay({
 
   if (review.status === "failed") {
     return (
-      <div className="mt-4 p-4 border border-destructive/50 rounded-lg bg-destructive/5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-destructive">
-            <TriangleAlert className="h-5 w-5" />
-            <span className="text-sm">
+      <div className="mt-4 rounded-lg border border-destructive/50 bg-destructive/5 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2 text-destructive">
+            <TriangleAlert className="h-5 w-5 shrink-0" />
+            <span className="min-w-0 break-words text-sm">
               AIレビューの生成に失敗しました
               {review.error_message ? `：${review.error_message}` : ""}
             </span>
@@ -87,12 +87,13 @@ export function AIReviewDisplay({
   const passDisplay = resolvePassDisplay(review);
 
   return (
-    <div className="mt-4 border rounded-lg overflow-hidden">
-      <div className="w-full p-4 flex items-center justify-between bg-muted/30">
+    <div className="mt-4 min-w-0 overflow-hidden rounded-lg border">
+      <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-2 bg-muted/30 p-4">
+        {/* Nowrap badges are min-content; overflow-hidden on this panel would clip them at 320px. */}
         <button
           type="button"
           onClick={() => setIsExpanded(!isExpanded)}
-          className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+          className="flex min-w-0 flex-wrap items-center gap-2 transition-opacity hover:opacity-80"
         >
           <Bot className="h-5 w-5 text-primary" />
           <span className="font-medium text-sm">AIレビュー</span>
@@ -107,7 +108,7 @@ export function AIReviewDisplay({
         </button>
       </div>
       {isExpanded && reviewJson && (
-        <div className="p-4 border-t">
+        <div className="min-w-0 border-t p-4">
           <StructuredReview
             reviewJson={reviewJson}
             scoreKind={review.score_kind}
@@ -118,7 +119,7 @@ export function AIReviewDisplay({
         </div>
       )}
       {isExpanded && !reviewJson && review.review_content && (
-        <div className="p-4 border-t">
+        <div className="min-w-0 border-t p-4">
           <MarkdownRenderer content={review.review_content} className="text-sm" />
         </div>
       )}
