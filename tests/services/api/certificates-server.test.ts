@@ -311,6 +311,18 @@ describe("issueMissingCertificates（既に完了済みのテーマの遡及発�
     expect(blocked).toEqual({ issued: [], blockedByMissingName: true });
     expect(certificateInserts(blank)).toHaveLength(0);
 
+    const zwjAroundSpace = mockAdminClient({
+      certificates: inserted,
+      users: { data: { display_name: "\u200D \u200D" }, error: null },
+    });
+    const zwjBlocked = await issueMissingCertificates({
+      ...eligible,
+      summaries: [done(1)] as never,
+      issuedThemeIds: new Set(),
+    });
+    expect(zwjBlocked).toEqual({ issued: [], blockedByMissingName: true });
+    expect(certificateInserts(zwjAroundSpace)).toHaveLength(0);
+
     const admin = mockAdminClient({
       certificates: inserted,
       users: { data: { display_name: "\u202E山田\u200B" }, error: null },

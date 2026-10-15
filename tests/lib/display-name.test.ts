@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DISPLAY_NAME_MAX_LENGTH } from "@/app/constants/user";
-import { parseDisplayName } from "@/app/lib/display-name";
+import { normalizeDisplayName, parseDisplayName } from "@/app/lib/display-name";
 
 describe("parseDisplayName", () => {
   it("前後の空白を除いて返す", () => {
@@ -20,6 +20,14 @@ describe("parseDisplayName", () => {
       ok: false,
       message: "表示名を入力してください",
     });
+    // ZWJ outside spaces hides the spaces from trim(); both the form and issuance must reject them.
+    for (const raw of ["\u200D \u200D", "\u200B\u200D \u200D\u200B"]) {
+      expect(normalizeDisplayName(raw)).toBe("");
+      expect(parseDisplayName(raw)).toEqual({
+        ok: false,
+        message: "表示名を入力してください",
+      });
+    }
   });
 
   it("サロゲートペアは1文字として数え、上限ちょうどを許可する", () => {

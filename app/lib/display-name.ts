@@ -22,7 +22,9 @@ export function normalizeDisplayName(raw: string): string {
     .trim()
     .replace(FORMAT_CHAR, (char) => (char === ZWJ ? char : ""))
     .trim();
-  if (stripped.replaceAll(ZWJ, "").length === 0) {
+  // ZWJ is not whitespace, so it can sit outside spaces ("\u200D \u200D") and hide them from
+  // trim(). Removing ZWJ without trimming again would store that blank string on the certificate.
+  if (stripped.replaceAll(ZWJ, "").trim().length === 0) {
     return "";
   }
   return stripped;
