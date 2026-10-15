@@ -182,8 +182,12 @@ jobs:
                   const hit = rows.find((r) => {
                     if (typeof r.title !== "string") return false;
                     // Exact auto-PR title, or whole-token match (gemini-4-flash ≠ gemini-4-flash-lite).
+                    // Strip trailing ./- so "Bump to gemini-4.0-flash." still matches the model id.
                     if (r.title === title) return true;
-                    return r.title.split(/[^\w.-]+/).includes(model);
+                    return r.title
+                      .split(/[^\w.-]+/)
+                      .map((t) => t.replace(/[.-]+$/, ""))
+                      .includes(model);
                   });
                   process.stdout.write(hit ? String(hit.number) : "");
                 '
