@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AI_REVIEW_STALE_AFTER_MS,
+  GEMINI_ALTERNATE_MODEL_NAME,
   GEMINI_API_KEY_ENV,
   GEMINI_API_KEY_TRIAL_ENV,
   GEMINI_MODEL_NAME,
@@ -201,6 +202,44 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
       })
     );
     expect(updateAIReviewFailed).not.toHaveBeenCalled();
+  });
+
+  it("代替モデルで成功したレビューは model_used にそのモデルを保存して返す", async () => {
+    vi.mocked(generateReview).mockResolvedValue(
+      reviewResult({ modelUsed: GEMINI_ALTERNATE_MODEL_NAME })
+    );
+
+    const res = await POST(request() as never);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(updateAIReviewCompleted).toHaveBeenCalledWith(
+      10,
+      expect.objectContaining({ modelUsed: GEMINI_ALTERNATE_MODEL_NAME })
+    );
+    expect(body.review.model_used).toBe(GEMINI_ALTERNATE_MODEL_NAME);
+  });
+
+  it("全モデル失敗の混雑文言は failed に記録し、受講生にはその文言だけ返す", async () => {
+    const message = "AIが混み合っています。しばらく時間を置いてから再試行してください。";
+    vi.mocked(generateReview).mockRejectedValue(
+      new ReviewGenerationError(message, {
+        promptTokens: 3,
+        completionTokens: 1,
+        thoughtsTokens: null,
+      })
+    );
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: message });
+    expect(updateAIReviewFailed).toHaveBeenCalledWith(10, message, {
+      promptTokens: 3,
+      completionTokens: 1,
+      thoughtsTokens: null,
+    });
+    expect(updateAIReviewCompleted).not.toHaveBeenCalled();
   });
 
   it("processing への更新に失敗したら failed にして500を返し、Gemini は呼ばない", async () => {

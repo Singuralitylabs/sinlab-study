@@ -14,7 +14,7 @@ import {
   GEMINI_MAX_CODE_LENGTH,
   GEMINI_MAX_OUTPUT_TOKENS,
   GEMINI_MAX_RETRIES,
-  GEMINI_MODEL_NAME,
+  GEMINI_MODEL_CONFIGS,
   GEMINI_REQUEST_TIMEOUT_MS,
   GEMINI_RETRY_BASE_DELAY_MS,
   GEMINI_RETRY_MIN_ATTEMPT_MS,
@@ -23,6 +23,7 @@ import {
   GEMINI_THINKING_LEVEL,
   GEMINI_TOTAL_BUDGET_MS,
   GEMINI_VALIDATION_ATTEMPTS,
+  type GeminiModelConfig,
 } from "@/app/constants/gemini";
 import {
   GRADING_RUBRIC_DRAFT_MAX_REQUIREMENTS,
@@ -91,6 +92,11 @@ export interface GenerateReviewParams {
   /** Learner-visible starter; when set, the prompt asks the model to focus on changes beyond it. */
   starterFiles?: CodeFile[] | null;
   apiKey: string;
+  /**
+   * Dry-run only. Pins one model so a fallback does not mix graders in a comparison.
+   * Omitted in production, which walks GEMINI_MODEL_CONFIGS.
+   */
+  modelName?: string;
 }
 
 /**
@@ -475,13 +481,66 @@ interface StructuredRequest<T> {
   contents: string;
   responseSchema: Schema;
   parse: (text: string | undefined) => { ok: true; value: T } | { ok: false; reason: string };
+  models: readonly GeminiModelConfig[];
+}
+
+function modelChainFor(modelName?: string): readonly GeminiModelConfig[] {
+  if (!modelName) {
+    return GEMINI_MODEL_CONFIGS;
+  }
+  const registered = GEMINI_MODEL_CONFIGS.find((model) => model.name === modelName);
+  // A dry-run candidate may not be registered yet; it still needs a thinking level.
+  return [registered ?? { name: modelName, thinkingLevel: GEMINI_THINKING_LEVEL }];
+}
+
+function hasTimeForAttempt(deadlineAt: number, delayMs = 0): boolean {
+  return Date.now() + delayMs + GEMINI_RETRY_MIN_ATTEMPT_MS < deadlineAt;
+}
+
+function isModelMissingError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 404;
+}
+
+/** Per-attempt timeout only. An overall-deadline abort is not a reason to start another model. */
+function isPerAttemptTimeout(error: unknown, overallSignal: AbortSignal): boolean {
+  return isTimeoutError(error) && !overallSignal.aborted;
+}
+
+function isSwitchableGeminiError(error: unknown, overallSignal: AbortSignal): boolean {
+  return (
+    isRetryableError(error) ||
+    isModelMissingError(error) ||
+    isPerAttemptTimeout(error, overallSignal)
+  );
+}
+
+function switchLabel(error: unknown): string {
+  if (error instanceof ApiError) {
+    return `status=${error.status}`;
+  }
+  return "timeout";
+}
+
+interface ChainResponse {
+  response: GenerateContentResponse;
+  modelIndex: number;
+}
+
+interface ChainStop {
+  response?: undefined;
+  error: unknown;
 }
 
 /**
- * Calls Gemini for validated JSON. A response that fails validation is regenerated once; both
- * generations (and any retry waits) share one GEMINI_TOTAL_BUDGET_MS deadline so the route's
- * maxDuration still holds. Tokens of every response are summed, including the failed first one,
- * because Gemini bills them.
+ * Calls Gemini for validated JSON. A response that fails validation is regenerated once, on the
+ * model that produced it. Every generation, model switch, and backoff wait shares one
+ * GEMINI_TOTAL_BUDGET_MS deadline so the route's maxDuration still holds. Tokens of every
+ * response are summed, including a failed first one, because Gemini bills them.
+ * Congestion (429/500/503), a per-attempt timeout, and 404 move to the next model without waiting.
+ * A 404, a per-attempt timeout, or a 400 from a later model drops only that model. When time
+ * remains, the rest of that round is still called; a model never called is not retried later.
+ * Models that already failed with a retryable status are still backed off. A 400 from the first
+ * model stops the chain, as do 401, 403, and 504: the request, the key, or the prompt is at fault.
  */
 async function generateValidatedJson<T>({
   apiKey,
@@ -489,94 +548,214 @@ async function generateValidatedJson<T>({
   contents,
   responseSchema,
   parse,
-}: StructuredRequest<T>): Promise<{ value: T; usage: TokenUsage }> {
+  models,
+}: StructuredRequest<T>): Promise<{ value: T; usage: TokenUsage; modelUsed: string }> {
   if (!apiKey) {
     throw new Error("Gemini APIキーが設定されていません");
+  }
+  if (models.length === 0) {
+    throw new Error("Geminiモデルが設定されていません");
   }
 
   const ai = new GoogleGenAI({ apiKey });
   let usage: TokenUsage = { promptTokens: null, completionTokens: null, thoughtsTokens: null };
   let lastReason = EMPTY_RESPONSE_MESSAGE;
+  // Validation retries stay on the model that answered, so two graders are not mixed into one score.
+  let startIndex = 0;
 
-  // Cap the total of all attempts plus retry waits at GEMINI_TOTAL_BUDGET_MS even if each attempt
-  // waits close to GEMINI_REQUEST_TIMEOUT_MS instead of failing fast on a retried status
-  // (maxDuration guard).
+  // Cap attempts plus waits at GEMINI_TOTAL_BUDGET_MS even when a call hangs until its own timeout
+  // instead of failing fast (maxDuration guard).
   const deadlineAt = Date.now() + GEMINI_TOTAL_BUDGET_MS;
   const overallSignal = AbortSignal.timeout(GEMINI_TOTAL_BUDGET_MS);
+
+  const callModel = (model: GeminiModelConfig) =>
+    ai.models.generateContent({
+      model: model.name,
+      contents,
+      config: {
+        systemInstruction,
+        maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
+        temperature: GEMINI_TEMPERATURE,
+        responseMimeType: "application/json",
+        responseSchema,
+        thinkingConfig: {
+          thinkingLevel: model.thinkingLevel,
+        },
+        abortSignal: AbortSignal.any([
+          AbortSignal.timeout(GEMINI_REQUEST_TIMEOUT_MS),
+          overallSignal,
+        ]),
+      },
+    });
+
+  const requestChain = async (chainStart: number): Promise<ChainResponse | ChainStop> => {
+    const skipped = new Set<number>();
+    const retryableIndexes = new Set<number>();
+    // Shown to the learner when a later model is simply missing or rejects its own parameters.
+    let lastRetryable: ApiError | undefined;
+    let lastError: unknown;
+
+    const hasRetryableLeft = () =>
+      [...retryableIndexes].some((index) => index >= chainStart && !skipped.has(index));
+
+    for (let round = 0; round <= GEMINI_MAX_RETRIES; round++) {
+      if (round > 0) {
+        const delay = GEMINI_RETRY_BASE_DELAY_MS * 2 ** (round - 1);
+        // A retry with less than GEMINI_RETRY_MIN_ATTEMPT_MS left is aborted before Gemini
+        // answers, and the prompt is still billed.
+        if (!lastRetryable || !hasTimeForAttempt(deadlineAt, delay)) {
+          return { error: lastRetryable ?? lastError };
+        }
+        console.warn(
+          `Gemini API一時エラー status=${lastRetryable.status} (試行 ${round}/${GEMINI_MAX_RETRIES + 1})、${delay}ms後にリトライ`
+        );
+        await sleep(delay);
+      }
+
+      const planned: number[] = [];
+      for (let index = chainStart; index < models.length; index++) {
+        if (skipped.has(index)) {
+          continue;
+        }
+        // Later rounds call only models that were congested. A 404 or a timeout stays out.
+        if (round > 0 && !retryableIndexes.has(index)) {
+          continue;
+        }
+        planned.push(index);
+      }
+
+      let attempted = 0;
+      for (let position = 0; position < planned.length; position++) {
+        if (overallSignal.aborted || (attempted > 0 && !hasTimeForAttempt(deadlineAt))) {
+          break;
+        }
+        attempted++;
+        const index = planned[position];
+        const model = models[index];
+        const next = planned[position + 1];
+        try {
+          const response = await callModel(model);
+          return { response, modelIndex: index };
+        } catch (error) {
+          // A call cut off by the overall deadline says nothing new. Keep the status that caused
+          // the retry so a 503 is not reported as a timeout. A per-attempt timeout is a slow answer.
+          const cutByDeadline = isTimeoutError(error) && overallSignal.aborted;
+          if (cutByDeadline) {
+            return { error: lastRetryable ?? error };
+          }
+
+          // A model that this round never reaches is absent from later retries, which only
+          // call indexes that already returned 429/500/503.
+          const canTryNext = next !== undefined && hasTimeForAttempt(deadlineAt);
+          const switchToNext = canTryNext && isSwitchableGeminiError(error, overallSignal);
+          const warnSwitch = () => {
+            if (next === undefined) {
+              return;
+            }
+            // Congestion is usually per model, so skip it instead of waiting on the same id.
+            console.warn(
+              `Geminiモデルを切り替えます ${model.name} → ${models[next].name} (${switchLabel(error)})`
+            );
+          };
+
+          if (isModelMissingError(error)) {
+            // Retrying a removed id will not bring it back. The pinned constant has to change.
+            console.error(
+              `Geminiモデルが見つかりません model=${model.name} status=404。` +
+                "app/constants/gemini.ts を更新してください"
+            );
+            skipped.add(index);
+            lastError = error;
+            if (switchToNext) {
+              warnSwitch();
+              continue;
+            }
+            break;
+          }
+
+          if (isPerAttemptTimeout(error, overallSignal)) {
+            skipped.add(index);
+            retryableIndexes.delete(index);
+            lastError = error;
+            if (!hasRetryableLeft()) {
+              lastRetryable = undefined;
+            }
+            if (switchToNext) {
+              warnSwitch();
+              continue;
+            }
+            break;
+          }
+
+          if (isRetryableError(error)) {
+            lastRetryable = error;
+            retryableIndexes.add(index);
+            lastError = error;
+            if (switchToNext) {
+              warnSwitch();
+              continue;
+            }
+            break;
+          }
+
+          if (error instanceof ApiError && error.status === 400) {
+            // The first model's 400 is the request itself. A later model's 400 is its own
+            // parameters: drop only that model and keep walking while time remains.
+            if (index === chainStart) {
+              return { error };
+            }
+            skipped.add(index);
+            lastError = error;
+            if (canTryNext) {
+              warnSwitch();
+              continue;
+            }
+            break;
+          }
+
+          return { error };
+        }
+      }
+
+      // attempted === 0 keeps the previous error (the deadline closed before a new call).
+      if (attempted === 0 || !hasRetryableLeft()) {
+        return { error: lastRetryable ?? lastError };
+      }
+    }
+
+    return { error: lastRetryable ?? lastError };
+  };
 
   for (
     let validationAttempt = 0;
     validationAttempt < GEMINI_VALIDATION_ATTEMPTS;
     validationAttempt++
   ) {
-    // A retry that would be aborted almost immediately is reported as a timeout and still billed.
-    // Keep the schema-violation reason from the first response instead.
+    // Regeneration needs a full attempt window. Less than that is aborted, and still billed.
     if (validationAttempt > 0 && Date.now() + GEMINI_REQUEST_TIMEOUT_MS > deadlineAt) {
       break;
     }
-    let lastError: unknown;
-    let response: GenerateContentResponse | undefined;
 
-    for (let attempt = 0; attempt <= GEMINI_MAX_RETRIES; attempt++) {
-      try {
-        response = await ai.models.generateContent({
-          model: GEMINI_MODEL_NAME,
-          contents,
-          config: {
-            systemInstruction,
-            maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
-            temperature: GEMINI_TEMPERATURE,
-            responseMimeType: "application/json",
-            responseSchema,
-            thinkingConfig: {
-              thinkingLevel: GEMINI_THINKING_LEVEL,
-            },
-            abortSignal: AbortSignal.any([
-              AbortSignal.timeout(GEMINI_REQUEST_TIMEOUT_MS),
-              overallSignal,
-            ]),
-          },
-        });
-        break;
-      } catch (error) {
-        // A retry cut off by the overall deadline says nothing new; reporting that abort as a
-        // timeout would hide the 503 that caused the retry, so the retried error is kept. A retry
-        // that ran out its own per-attempt timeout is a real slow response and stays a timeout.
-        const cutByDeadline = isTimeoutError(error) && overallSignal.aborted;
-        lastError = cutByDeadline && isRetryableError(lastError) ? lastError : error;
-
-        const delay = GEMINI_RETRY_BASE_DELAY_MS * 2 ** attempt;
-        if (
-          isRetryableError(error) &&
-          attempt < GEMINI_MAX_RETRIES &&
-          Date.now() + delay + GEMINI_RETRY_MIN_ATTEMPT_MS < deadlineAt
-        ) {
-          console.warn(
-            `Gemini API一時エラー status=${error.status} (試行 ${attempt + 1}/${GEMINI_MAX_RETRIES + 1})、${delay}ms後にリトライ`
-          );
-          await sleep(delay);
-          continue;
-        }
-
-        break;
-      }
+    const outcome = await requestChain(startIndex);
+    // Once the call itself failed, the first response's validation reason no longer explains it
+    // (a 503 must still read as "busy"). usage keeps tokens from responses already received.
+    if (!outcome.response) {
+      logGeminiFailure(outcome.error, apiKey);
+      throw new ReviewGenerationError(toUserFacingErrorMessage(outcome.error), usage);
     }
 
-    // Also on the regeneration: once the call itself failed, the first response's validation
-    // reason no longer explains the failure (a 503 there must still read as "busy"). usage keeps
-    // the first response's tokens.
-    if (!response) {
-      logGeminiFailure(lastError, apiKey);
-      throw new ReviewGenerationError(toUserFacingErrorMessage(lastError), usage);
-    }
+    usage = addUsage(usage, outcome.response.usageMetadata);
 
-    usage = addUsage(usage, response.usageMetadata);
-
-    const parsed = parse(response.text);
+    const parsed = parse(outcome.response.text);
     if (parsed.ok) {
-      return { value: parsed.value, usage };
+      return {
+        value: parsed.value,
+        usage,
+        modelUsed: models[outcome.modelIndex].name,
+      };
     }
     lastReason = parsed.reason;
+    startIndex = outcome.modelIndex;
     console.warn(
       `Gemini応答の検証に失敗 (試行 ${validationAttempt + 1}/${GEMINI_VALIDATION_ATTEMPTS}): ${parsed.reason}`
     );
@@ -602,11 +781,16 @@ export async function generateReview({
   gradingRubric,
   starterFiles,
   apiKey,
+  modelName,
 }: GenerateReviewParams): Promise<ReviewResult> {
   const scoreKind = resolveScoreKind(submission, gradingRubric);
   const rubric = scoreKind === "rubric" ? (gradingRubric ?? null) : null;
 
-  const { value: reviewJson, usage } = await generateValidatedJson<ReviewJson>({
+  const {
+    value: reviewJson,
+    usage,
+    modelUsed,
+  } = await generateValidatedJson<ReviewJson>({
     apiKey,
     systemInstruction: SYSTEM_PROMPT,
     contents: buildUserPrompt(
@@ -621,6 +805,7 @@ export async function generateReview({
       const parsed = parseReviewResponse(text, scoreKind, rubric);
       return parsed.ok ? { ok: true, value: parsed.reviewJson } : parsed;
     },
+    models: modelChainFor(modelName),
   });
 
   const overallScore = computeReviewScore(reviewJson);
@@ -632,7 +817,7 @@ export async function generateReview({
     reviewContent: renderReviewMarkdown(reviewJson, overallScore, scoreKind),
     overallScore,
     passed: scoreKind === "rubric" ? isReviewPassed(reviewJson, overallScore) : null,
-    modelUsed: GEMINI_MODEL_NAME,
+    modelUsed,
     ...usage,
   };
 }
@@ -695,6 +880,7 @@ export async function generateGradingRubricDraft({
         ? { ok: true, value: parsed.data.requirements }
         : { ok: false, reason: parsed.reason };
     },
+    models: modelChainFor(),
   });
   return value;
 }
