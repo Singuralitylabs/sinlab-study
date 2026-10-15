@@ -332,11 +332,13 @@ describe("buildUserPrompt", () => {
       "課題",
       {
         type: "code",
-        files: [{ filename: "index.html", language: "html", content: "<div class='cards'>x</div>" }],
+        files: [
+          { filename: "index.html", language: "html", content: "<div class='cards'>x</div>" },
+        ],
       },
       null,
       null,
-      [{ filename: "index.html", language: "html", content: "<div class=\"cards\"></div>" }]
+      [{ filename: "index.html", language: "html", content: '<div class="cards"></div>' }]
     );
 
     expect(prompt).toContain("## 初期コード");
