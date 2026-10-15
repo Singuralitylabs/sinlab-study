@@ -143,39 +143,3 @@ export function ActiveThemesSection({
     </section>
   );
 }
-
-/** The theme list split under "learning" / "completed" / "not started" headings. */
-export function ThemeSections({
-  active,
-  completed,
-  notStarted,
-  certificatesHref,
-}: {
-  active: ThemeProgressSummary[];
-  completed: ThemeProgressSummary[];
-  notStarted: ThemeProgressSummary[];
-  certificatesHref?: string;
-}) {
-  const sections = [
-    { title: "学習中", themes: active },
-    { title: "修了", themes: completed, certificatesHref },
-    { title: "未着手", themes: notStarted },
-  ].filter((section) => section.themes.length > 0);
-
-  return (
-    <>
-      {sections.map((section) => (
-        <section key={section.title} className="grid gap-4">
-          <h3 className="text-base font-semibold text-muted-foreground">{section.title}</h3>
-          {section.themes.map((summary) => (
-            <ThemeCard
-              key={summary.theme.id}
-              summary={summary}
-              certificatesHref={section.certificatesHref}
-            />
-          ))}
-        </section>
-      ))}
-    </>
-  );
-}
