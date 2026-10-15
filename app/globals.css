@@ -239,9 +239,10 @@
 
 /*
  * Submission cards are flex columns, so a table's min-content width (and a long link or
- * inline code token) widens the page. Scroll the table in its own box. Break links and
- * inline code; fenced code stays white-space:pre and scrolls in pre (see MarkdownPre).
- * Unlayered so these beat @tailwindcss/typography.
+ * inline code token) widens the page. Scroll the table in its own box. anywhere breaks
+ * only a token longer than the line, so a normal word still wraps whole. break-all would
+ * split that word at the margin on every screen. Fenced code stays white-space:pre and
+ * scrolls in pre (see MarkdownPre). Unlayered so these beat @tailwindcss/typography.
  */
 .prose .markdown-table-scroll {
   max-width: 100%;
@@ -265,5 +266,5 @@
 
 .prose :where(a),
 .prose :where(:not(pre) > code) {
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
