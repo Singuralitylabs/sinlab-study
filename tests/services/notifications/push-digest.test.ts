@@ -100,8 +100,7 @@ describe("deliverDigestPushes", () => {
     expect(sendPushToUser).not.toHaveBeenCalled();
     expect(builders.map((builder) => builder.table)).not.toContain("users");
     const closeQuery = builders.find(
-      (builder) =>
-        builder.table === "announcements" && (builder.is?.mock.calls.length ?? 0) > 0
+      (builder) => builder.table === "announcements" && (builder.is?.mock.calls.length ?? 0) > 0
     );
     expect(closeQuery?.is).toHaveBeenCalledWith("push_sent_at", null);
     expect(closeQuery?.not).toHaveBeenCalledWith("email_sent_at", "is", null);
