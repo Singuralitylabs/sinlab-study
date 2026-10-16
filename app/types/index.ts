@@ -243,6 +243,7 @@ export interface SubmissionWithContentAndReview extends Submission {
     | "code_language"
     | "submission_file_slots"
     | "starter_files"
+    | "preview_base_html"
     | "show_preview"
     | "show_console"
   > | null;

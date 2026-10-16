@@ -31,7 +31,7 @@ const AI_REVIEW_ADMIN_LIST_SELECT = `ai_review:ai_reviews(${AI_REVIEW_ADMIN_COLU
 // that stored no language. starter_files is only the fallback layout when slots are NULL (#377);
 // names/languages matter, not starter body — strip content before returning (see below).
 const LIST_CONTENT_SELECT =
-  "id, title, code_language, submission_file_slots, starter_files, show_preview, show_console";
+  "id, title, code_language, submission_file_slots, starter_files, preview_base_html, show_preview, show_console";
 
 /** Keep filename/language for NULL-slots layout; drop starter bodies from the list payload. */
 function stripStarterContentsForList<T extends SubmissionWithContentAndReview>(rows: T[]): T[] {

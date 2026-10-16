@@ -43,6 +43,7 @@ function makeContent(
     reference_answer: null,
     starter_files: null,
     submission_file_slots: null,
+    preview_base_html: null,
     show_preview: null,
     show_console: null,
     grading_rubric: null,

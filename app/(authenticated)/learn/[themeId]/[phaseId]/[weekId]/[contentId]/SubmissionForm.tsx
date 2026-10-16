@@ -37,6 +37,8 @@ interface SubmissionFormProps {
   /** NULL follows the file layout. The learner's editor language is not consulted. */
   showPreview?: boolean | null;
   showConsole?: boolean | null;
+  /** CSS-only preview scaffold from the exercise (#351). */
+  previewBaseHtml?: string | null;
   /** Id of the completed review the page already renders for this submission. */
   persistedReviewId: number | null;
   /** When true, partial/unmet rows show review-list cues (learners only). */
@@ -66,6 +68,7 @@ export function SubmissionForm({
   submissionFileSlots = null,
   showPreview = null,
   showConsole = null,
+  previewBaseHtml = null,
   persistedReviewId,
   showReviewListNotes = false,
 }: SubmissionFormProps) {
@@ -111,6 +114,7 @@ export function SubmissionForm({
     }),
     showPreview,
     showConsole,
+    previewBaseHtml,
   });
   const showRunner =
     submissionType === "code" && (previewDisplay.preview || previewDisplay.console);
@@ -316,6 +320,7 @@ export function SubmissionForm({
                 }))}
                 showPreviewFrame={previewDisplay.preview}
                 showConsolePanel={previewDisplay.console}
+                previewBaseHtml={previewBaseHtml}
               />
             )}
           </div>

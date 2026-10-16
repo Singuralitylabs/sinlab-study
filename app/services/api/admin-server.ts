@@ -1193,6 +1193,7 @@ type CreateContentInput = {
   reference_answer?: string | null;
   starter_files?: LearningContent["starter_files"];
   submission_file_slots?: LearningContent["submission_file_slots"];
+  preview_base_html?: string | null;
   show_preview?: boolean | null;
   show_console?: boolean | null;
   allowed_submission_types?: "code" | "url" | "both";
@@ -1246,6 +1247,7 @@ async function createContentWith(
   // so AI review's single-file fallback matches the layout the learner submits.
   const exercise = content.content_type === "exercise";
   const submissionFileSlots = exercise ? (content.submission_file_slots ?? null) : null;
+  const previewBaseHtml = exercise ? (content.preview_base_html ?? null) : null;
   const showPreview = exercise ? (content.show_preview ?? null) : null;
   const showConsole = exercise ? (content.show_console ?? null) : null;
   if (exercise) {
@@ -1284,6 +1286,7 @@ async function createContentWith(
       reference_answer: content.reference_answer,
       starter_files: content.starter_files,
       submission_file_slots: submissionFileSlots,
+      preview_base_html: previewBaseHtml,
       show_preview: showPreview,
       show_console: showConsole,
       allowed_submission_types: content.allowed_submission_types,
@@ -1614,6 +1617,7 @@ export async function updateContent(
   }
   if (patch.content_type !== undefined && patch.content_type !== "exercise") {
     patch.submission_file_slots = null;
+    patch.preview_base_html = null;
     patch.show_preview = null;
     patch.show_console = null;
   } else {
@@ -1758,6 +1762,7 @@ async function updateContentRow(
     grading_rubric: LearningContent["grading_rubric"];
     content_type: LearningContent["content_type"];
     submission_file_slots?: LearningContent["submission_file_slots"];
+    preview_base_html?: LearningContent["preview_base_html"];
     show_preview?: LearningContent["show_preview"];
     show_console?: LearningContent["show_console"];
   } | null = null;
@@ -1771,7 +1776,7 @@ async function updateContentRow(
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
       .select(
-        "week_id, pdf_url, grading_rubric, content_type, submission_file_slots, show_preview, show_console"
+        "week_id, pdf_url, grading_rubric, content_type, submission_file_slots, preview_base_html, show_preview, show_console"
       )
       .eq("id", id)
       .eq("is_deleted", false)
@@ -1858,6 +1863,7 @@ async function updateContentRow(
         };
         if (movesAwayFromExercise) {
           rubricSnapshot.submission_file_slots = current.submission_file_slots ?? null;
+          rubricSnapshot.preview_base_html = current.preview_base_html ?? null;
           rubricSnapshot.show_preview = current.show_preview ?? null;
           rubricSnapshot.show_console = current.show_console ?? null;
         }
@@ -1885,6 +1891,8 @@ async function updateContentRow(
       // ride this UPDATE. A later statement would run after the type has already changed.
       if (patch.content_type !== "exercise") {
         rubricPayload.submission_file_slots = null;
+        // preview_base_html is exercise-only (CHECK); clear with the type change like slots.
+        rubricPayload.preview_base_html = null;
         rubricPayload.show_preview = null;
         rubricPayload.show_console = null;
       }
@@ -1909,6 +1917,9 @@ async function updateContentRow(
     }
     if (rubricPayload.submission_file_slots === null) {
       delete patch.submission_file_slots;
+    }
+    if (rubricPayload.preview_base_html === null) {
+      delete patch.preview_base_html;
     }
     if (rubricPayload.show_preview === null) {
       delete patch.show_preview;

@@ -537,7 +537,7 @@ describe("updateContent の現在値取得の一本化（issue #246）", () => {
     expect(remove).not.toHaveBeenCalled();
     expect(mockClient.from).toHaveBeenCalledTimes(2);
     expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith(
-      "week_id, pdf_url, grading_rubric, content_type, submission_file_slots, show_preview, show_console"
+      "week_id, pdf_url, grading_rubric, content_type, submission_file_slots, preview_base_html, show_preview, show_console"
     );
   });
 
@@ -1186,6 +1186,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       grading_rubric: storedRubric,
       content_type: "exercise",
       submission_file_slots: null,
+      preview_base_html: null,
       show_preview: null,
       show_console: null,
     });
@@ -1234,6 +1235,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       grading_rubric: storedRubric,
       content_type: "exercise",
       submission_file_slots: slots,
+      preview_base_html: null,
       show_preview: null,
       show_console: null,
     });

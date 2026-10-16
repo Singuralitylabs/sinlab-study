@@ -153,6 +153,8 @@ from (
     ('authenticated', 'grading_rubric', false),
     ('anon', 'has_grading_requirements', true),
     ('authenticated', 'has_grading_requirements', true),
+    ('anon', 'preview_base_html', true),
+    ('authenticated', 'preview_base_html', true),
     ('authenticated', 'exercise_instructions', true)
 ) as t(role_name, column_name, expected);
 

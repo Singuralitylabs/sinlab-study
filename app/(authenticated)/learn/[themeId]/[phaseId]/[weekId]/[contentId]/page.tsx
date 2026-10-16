@@ -461,6 +461,7 @@ export default async function ContentPage({ params }: PageProps) {
                                     submissionFileSlots: content.submission_file_slots,
                                     starterFiles: content.starter_files,
                                     codeLanguage: content.code_language,
+                                    previewBaseHtml: content.preview_base_html,
                                     showPreview: content.show_preview,
                                     showConsole: content.show_console,
                                   }}
@@ -488,6 +489,7 @@ export default async function ContentPage({ params }: PageProps) {
                                   submissionFileSlots: content.submission_file_slots,
                                   starterFiles: content.starter_files,
                                   codeLanguage: content.code_language,
+                                  previewBaseHtml: content.preview_base_html,
                                   showPreview: content.show_preview,
                                   showConsole: content.show_console,
                                 }}
@@ -558,6 +560,7 @@ export default async function ContentPage({ params }: PageProps) {
                         codeLanguage={(content.code_language as CodeLanguage) ?? "javascript"}
                         starterFiles={parseStarterFiles(content.starter_files)}
                         submissionFileSlots={content.submission_file_slots}
+                        previewBaseHtml={content.preview_base_html}
                         showPreview={content.show_preview}
                         showConsole={content.show_console}
                         persistedReviewId={visibleReview?.id ?? null}

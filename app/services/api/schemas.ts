@@ -489,6 +489,12 @@ const ContentBaseSchema = z.object({
   reference_answer: OptionalNullableString,
   starter_files: StarterFilesSchema,
   submission_file_slots: SubmissionFileSlotsSchema,
+  /** CSS-only preview scaffold (#351). null clears. Non-exercise must stay null (DB CHECK). */
+  preview_base_html: z
+    .string()
+    .max(100_000, { message: "土台 HTML が長すぎます" })
+    .nullable()
+    .optional(),
   // NULL is automatic (#380). true is rejected when the layout cannot show that surface.
   show_preview: z.boolean().nullable().optional(),
   show_console: z.boolean().nullable().optional(),
@@ -569,10 +575,22 @@ function alignPreviewSettings(
     code_language?: string;
     show_preview?: boolean | null;
     show_console?: boolean | null;
+    preview_base_html?: string | null;
   },
   ctx: z.RefinementCtx,
   options?: { updatePartial?: boolean }
 ) {
+  if (
+    value.content_type !== undefined &&
+    value.content_type !== "exercise" &&
+    value.preview_base_html != null
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message: "土台 HTML は演習だけに設定できます",
+      path: ["preview_base_html"],
+    });
+  }
   if (value.show_preview === undefined && value.show_console === undefined) {
     return;
   }
@@ -606,6 +624,7 @@ function alignPreviewSettings(
     }),
     showPreview: value.show_preview,
     showConsole: value.show_console,
+    previewBaseHtml: value.preview_base_html,
   });
   if (!message) {
     return;
