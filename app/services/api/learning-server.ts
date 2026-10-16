@@ -333,9 +333,71 @@ type ThemeWithNestedContents = LearningTheme & {
 };
 
 /**
+ * One theme's published-content counts for certificate issuance. Prefer this over
+ * fetchThemeProgressSummaries() on the progress / review hot path so intermediate completions do
+ * not page every theme and every completed row. Uses the same published nested filters; completion
+ * is a COUNT on that theme's content ids only (a single theme stays well under URL length limits).
+ */
+export async function fetchThemeProgressSummary(
+  userId: number,
+  themeId: number
+): Promise<{
+  data: ThemeProgressSummary | null;
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+  const { data: themeRow, error: themeError } = await applyPublishedNestedThemeFilters(
+    supabase
+      .from("learning_themes")
+      .select(
+        "*, phases:learning_phases(id, weeks:learning_weeks(id, contents:learning_contents(id)))"
+      )
+      .eq("id", themeId)
+  ).maybeSingle();
+
+  if (themeError) {
+    console.error("テーマ進捗サマリー（単一）取得エラー:", themeError.message);
+    return { data: null, error: themeError };
+  }
+  if (!themeRow) {
+    return { data: null, error: null };
+  }
+
+  const { phases, ...theme } = themeRow as ThemeWithNestedContents;
+  const contentIds = phases.flatMap((phase) =>
+    phase.weeks.flatMap((week) => week.contents.map((content) => content.id))
+  );
+  if (contentIds.length === 0) {
+    return { data: { theme, totalContents: 0, completedContents: 0 }, error: null };
+  }
+
+  const { count, error: progressError } = await supabase
+    .from("user_progress")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("is_completed", true)
+    .in("content_id", contentIds);
+
+  if (progressError) {
+    console.error("テーマ進捗サマリー（単一）の完了数取得エラー:", progressError.message);
+    return { data: null, error: progressError };
+  }
+
+  return {
+    data: {
+      theme,
+      totalContents: contentIds.length,
+      completedContents: count ?? 0,
+    },
+    error: null,
+  };
+}
+
+/**
  * Count-only theme progress for /learn, /certificates, and issueCertificateIfEligible(). Selects
  * content ids only — not the home tree (titles, types, display_order, completed_at, ordered
- * contents). Home must call fetchHomeLearningData() instead.
+ * contents). Home must call fetchHomeLearningData() instead. Hot-path issuance for one theme uses
+ * fetchThemeProgressSummary() instead.
  */
 export async function fetchThemeProgressSummaries(userId: number): Promise<{
   data: ThemeProgressSummary[] | null;

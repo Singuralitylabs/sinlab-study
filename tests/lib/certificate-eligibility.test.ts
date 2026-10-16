@@ -156,6 +156,14 @@ describe("テーマ修了の文言", () => {
     expect(source).toContain("sm:max-w-md");
     expect(source).toContain('data-testid="theme-completion-dialog"');
   });
+
+  it("通知の差し替えで開き直す（閉じたままにしない）", async () => {
+    const source = await import("node:fs/promises").then((fs) =>
+      fs.readFile("app/components/ThemeCompletionDialog.tsx", "utf8")
+    );
+    expect(source).toContain("setOpen(true)");
+    expect(source).toContain("notice.certificateId");
+  });
 });
 
 describe("pendingCertificateStatus", () => {

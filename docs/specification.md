@@ -1190,7 +1190,7 @@ Slack App の **Incoming Webhooks** を有効化し、通知先チャンネル�
 | `approved` | `approveUser()` が更新したとき（`PATCH /api/admin/users` の `approve`） | 承認時刻（`approveUser()` が `updated_at` に書いた ISO 文字列） | 本登録の完了、全コンテンツが使えること、会員種別、ホームへのリンク |
 | `upgraded` | `activateUserFromCheckoutSession()` または `reactivateUserFromMirror()`（2.11節の不整合の解消）が、まだ一般有料会員でなかったユーザーを実際に昇格させたとき（successページの再訪・Webhook の再送など、既に昇格済みの場合は予約しない）。Webhook・`/upgrade/success`・Checkout API の自己復旧が並行しても、UNIQUE で1通に抑える | `stripe_subscription_id` | 一般有料会員になったこと、月額料金（Stripe から取り直したサブスクの Price の単価×数量。JPY の1ヶ月間隔で確認できない場合と、サブスク・アイテムに割引が付いていて実請求額と食い違う場合は料金の行を載せず、`DISPLAY_MONTHLY_PRICE_JPY` では代用しない。例外として、Customer に直接付けた割引（`customer.discount`）はサブスクの `discounts` に含まれないため検知できず、定価が載る。Checkout のプロモーションコードはサブスク側に付くため通常の導線では起きず、Dashboard・API で Customer にクーポンを付けた場合に限られる）、次回請求日、`/upgrade` のお支払い管理への案内 |
 | `cancel_scheduled` | `syncSubscriptionStatus()` で、Stripe から取り直したライブ状態が解約予約中（`cancel_at_period_end` が true、または `cancel_at` が設定済み）のとき（終端状態への遷移時を除く） | `stripe_subscription_id` | 解約を受け付けたこと、利用期限（`cancel_at`、無ければ `current_period_end`）まで全コンテンツを利用できること、期限までに Portal から取り消せること |
-| `certificate_issued` | `maybeIssueCertificate()` が修了証を INSERT したとき（進捗 API・AI レビュー完了・`/certificates` の遡及。13章）。既に発行済みの場合は予約しない | `certificates.id` | 修了のお祝い、テーマ名・証明番号、修了証ページ（`/certificates/[id]`）へのリンク |
+| `certificate_issued` | `maybeIssueCertificate()` が修了証を INSERT したとき（進捗 API・提出 API・AI レビュー完了・`/certificates` の遡及。13章）。既に発行済みの場合は予約しない | `certificates.id` | 修了のお祝い、テーマ名・証明番号、修了証ページ（`/certificates/[id]`）へのリンク |
 | `subscription_ended` | `syncSubscriptionStatus()` が終端状態への遷移で `revertUserToTrial()` を呼び、実際に行を更新したとき（`membership_type = general` ガードで更新されなかった場合は送らない） | `stripe_subscription_id` | 有料会員が終了しお試しユーザーに戻ったこと、お試し公開コンテンツは引き続き利用できること、再開は `/upgrade` からできること |
 
 `cancel_scheduled` は、Stripe から取り直したライブ状態だけで判定する（2.11節の順序逆転対策と同じく、イベントのスナップショットは使わない）。
@@ -1453,17 +1453,17 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 
 ### 13.2 判定タイミングと発行処理
 
-入口は `maybeIssueCertificate(userId, themeId)`（`app/services/api/certificates-server.ts`）。`issueCertificateIfEligible()`（進捗 API）と `issueMissingCertificates()`（`/certificates` の遡及）と、AI レビューが `completed` になった直後がこれを使う。
+入口は `maybeIssueCertificate(userId, themeId)`（`app/services/api/certificates-server.ts`）。`issueCertificateIfEligible()`（進捗 API・提出 API）と `issueMissingCertificates()`（`/certificates` の遡及）と、AI レビューが `completed` になった直後がこれを使う。
 
-`POST /api/progress` が完了（`isCompleted = true`）に更新したあと、その保存でテーマが初めて 100% になったときだけ発行を**同期**で行い、結果を `themeCompletion` に載せる（13.7節）。それ以外の完了は `issueCertificateIfEligible()` を `after()` で予約する（`after()` が使えない場面ではその場で実行する）。完了の取り消しや保存失敗のときは呼ばない。合格判定対象の演習で AI レビューが `passed = true` になったときは `saveContentProgress()`（`scheduleCertificate: false`）で完了を記録したうえで、`resolveAiReviewThemeNotice()` が同じ判定を行う（`passed === false` のときは、その呼び出しで修了証を発行できた場合以外は通知しない）。発行・メール・通知判定が失敗しても、進捗 API と AI レビュー API の成否は変えない。
+`POST /api/progress` が完了（`isCompleted = true`）に更新したあと、その保存でテーマが初めて 100% になったときだけ発行を**同期**で行い、結果を `themeCompletion` に載せる（13.7節）。同期判定が済んだ途中完了では `after()` を重ねない（同じ集計の二重実行を避ける）。すでに完了済みの再保存や同期判定の例外時だけ `issueCertificateIfEligible()` を `after()` で予約する（`after()` が使えない場面ではその場で実行する）。完了の取り消しや保存失敗のときは呼ばない。`POST /api/submissions` は提出成功後に同じく `issueCertificateIfEligible()` を `after()` で予約する（テーマが先に 100% で、URL のみ・採点基準なしの演習提出や AI レビュー未実行で条件が揃う経路）。合格判定対象の演習で AI レビューが `completed` になったときは `saveContentProgress()`（`scheduleCertificate: false`）で完了を記録したうえで、`resolveAiReviewThemeNotice()` が同じ判定を行う（`passed !== true` のときは、その呼び出しで修了証を発行できた場合以外は通知しない）。発行・メール・通知判定が失敗しても、進捗 API・提出 API・AI レビュー API の成否は変えない。
 
 1. 対象かを確認（対象外なら何もしない）。INSERT は `insertCertificates()` に集約し、遡及発行（13.1節）と共用する
-2. コンテンツ → 週 → フェーズからテーマ ID を求め（通常クライアント）、そのテーマが発行済みなら終了（集計も INSERT もしない）。未発行なら `fetchThemeProgressSummaries()` でそのテーマが修了かを判定し、修了なら演習条件（13.1節）を足す。提出と `ai_reviews` は本人のセッション（RLS）で読む
+2. コンテンツ → 週 → フェーズからテーマ ID を求め（通常クライアント）、そのテーマが発行済みなら終了（集計も INSERT もしない）。未発行なら `fetchThemeProgressSummary()` で**そのテーマだけ**修了かを判定し（全テーマ集計は使わない）、修了なら演習条件（13.1節）を足す。提出と `ai_reviews` は本人のセッション（RLS）で読む
 3. 条件を満たすなら、service_role で `certificates` に INSERT する。**`user_id` は認証済みの本人に固定**し、`recipient_name`（発行時点の `users.display_name` を `parseDisplayName()` で正規化した文字列）と `theme_name` は発行時点のスナップショットとして書く
-4. INSERT 成功後にメール `certificate_issued`（10.4節）を `after()` に予約する
+4. INSERT 成功後にメール `certificate_issued`（10.4節）を `after()` に予約する（予約の throw は握りつぶし、発行結果は返す）
 
 - **service_role の使用は、この INSERT と宛先の `display_name` の読み取りに限る**。採点基準の有無は生成列 `learning_contents.has_grading_requirements`（`requirements` が1件以上なら true。NULL と墓石は false）を、公開ツリーと同じ通常クライアントの SELECT で読む。`grading_rubric` 本文は受講生起点の修了判定では読まない（本文を service_role で読むのは AI レビューの採点だけ）。`CERTIFICATE_PASS_SCORE` が 0 の間は合格を要求しない。受講生向け配信経路の service_role（AGENTS.md の2箇所）は増やさない
-- **冪等**: `UNIQUE (user_id, theme_id)` の違反（23505）は発行済みとして無視する（メールも送らない）。`UNIQUE (certificate_no)` の違反だけは番号を作り直して再試行する（最大 `CERTIFICATE_NO_MAX_ATTEMPTS` 回）
+- **冪等**: `UNIQUE (user_id, theme_id)` の違反（23505）は発行済みとして扱い、既存行を読み直して id を返す（メールは送らない。並行の進捗・提出・AI レビュー・遡及が同じテーマを突いても「発行できませんでした」に落とさない）。`UNIQUE (certificate_no)` の違反だけは番号を作り直して再試行する（最大 `CERTIFICATE_NO_MAX_ATTEMPTS` 回）
 - **失敗は進捗 API のレスポンスを変えない**: 関数は例外を投げず、失敗はログだけ残して `null` を返す。メール送信の失敗も同様（10.1節）。完了の保存はすでに済んでいる
 - **証明番号**: `SS-YYYYMM-XXXXXX`（`YYYYMM` は発行月（JST）、`XXXXXX` は紛らわしい `I` / `O` を除いた英数字6文字。乱数は `crypto.randomInt` で、推測できない）。一意で、将来の公開検証ページに使える。衝突の判定は制約名・`details` で行い、エラー文言には頼らない
 - **印字できる表示名でないときは発行しない**: 登録時の `display_name` は空、50文字超（Google の `full_name`）、改行などの制御文字になり得る。スナップショットは後から直せないため、発行時も設定画面と同じ `parseDisplayName()` を通す。空（空白のみ、書式文字だけ、ZWJ を除くと空白だけ）、`DISPLAY_NAME_MAX_LENGTH`（50）超、制御文字を含むときは warn ログを出して発行を見送る。印字する `recipient_name` は、書式文字を除いた名前にする（絵文字の ZWJ は、他に文字があるとき残す）。`/certificates` では完了済みのテーマに「この表示名では修了証を発行できません」と「設定画面で名前を入力してください」（`/settings` へのリンク）を案内する。表示名を保存したあと `/certificates` を開くと、完了済みで未発行のテーマは同じ INSERT 経路で発行される。発行済みの `recipient_name` は更新しない（表示名を変えても発行済みの修了証の名前は変わらない）
@@ -1492,7 +1492,7 @@ X 向けの共有リンク（`https://twitter.com/intent/tweet?text=...&url=...`
 
 ### 13.7 テーマ修了時の画面通知
 
-契機は、`POST /api/progress` の完了保存でそのテーマが初めて 100% になったときと、AI レビューが `completed` になり、その時点でテーマが 100% かつ修了証がまだ無いとき。そのレビューの `passed` が false（合格していない再レビュー）のときは、この呼び出しで修了証を発行できた場合を除きダイアログを出さない（条件が残ったまま同じ案内がレビューのたびに開かないようにする。発行判定自体は行う）。途中のコンテンツ、完了の取り消し、すでに完了しているコンテンツの再保存、ページの再読み込みでは出さない。
+契機は、`POST /api/progress` の完了保存でそのテーマが初めて 100% になったときと、AI レビューが `completed` になり、その時点でテーマが 100% かつ修了証がまだ無いとき。そのレビューの `passed` が true でない（不合格・`estimated` / `none`・不明）ときは、この呼び出しで修了証を発行できた場合を除きダイアログを出さない（条件が残ったまま同じ案内がレビューのたびに開かないようにする。発行判定自体は行う）。途中のコンテンツ、完了の取り消し、すでに完了しているコンテンツの再保存、ページの再読み込みでは出さない。提出フォームでは新しい通知のたびにダイアログを開き直す（一度閉じたあとの差し替えでも閉じたままにしない）。
 
 出し分けは `themeCompletion`（4.1節。AI レビューの 200 にも同じ形を任意で足す）をダイアログ（`ThemeCompletionDialog`）で表示する。
 

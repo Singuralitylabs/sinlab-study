@@ -179,6 +179,8 @@ export function SubmissionForm({
     setIsLoading(true);
     setMessage(null);
     setAiReview(null);
+    // Clear so a later notice remounts / reopens instead of staying dismissed.
+    setThemeNotice(null);
 
     try {
       const response = await fetch("/api/submissions", {
@@ -236,7 +238,12 @@ export function SubmissionForm({
 
   return (
     <div className="space-y-4">
-      {themeNotice && <ThemeCompletionDialog notice={themeNotice} />}
+      {themeNotice && (
+        <ThemeCompletionDialog
+          key={`${themeNotice.themeId}-${themeNotice.certificateId}-${themeNotice.remaining.unsubmittedExercises}-${themeNotice.remaining.exercisesNeedingRetry}-${themeNotice.blockedByMissingName}`}
+          notice={themeNotice}
+        />
+      )}
       <form onSubmit={handleSubmit} className="space-y-4">
         {allowedSubmissionTypes === "both" && (
           <div className="flex gap-4">

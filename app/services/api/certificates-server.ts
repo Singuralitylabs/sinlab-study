@@ -21,6 +21,7 @@ import { parseDisplayName } from "@/app/lib/display-name";
 import { applyPublishedNestedThemeFilters } from "@/app/lib/published-theme-tree";
 import {
   fetchThemeProgressSummaries,
+  fetchThemeProgressSummary,
   type ThemeProgressSummary,
 } from "@/app/services/api/learning-server";
 import {
@@ -49,19 +50,26 @@ async function fetchThemeIdOfContent(contentId: number): Promise<number | null> 
   return week?.phase?.theme_id ?? null;
 }
 
-async function hasCertificate(userId: number, themeId: number): Promise<boolean> {
+async function fetchExistingIssuedCertificate(
+  userId: number,
+  themeId: number
+): Promise<IssuedCertificate | null> {
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from("certificates")
-    .select("id")
+    .select("id, theme_id, certificate_no, theme_name")
     .eq("user_id", userId)
     .eq("theme_id", themeId)
     .maybeSingle();
   if (error) {
     console.error("[修了証] 発行済みの確認エラー:", error.message);
-    return false;
+    return null;
   }
-  return data !== null;
+  return data;
+}
+
+async function hasCertificate(userId: number, themeId: number): Promise<boolean> {
+  return (await fetchExistingIssuedCertificate(userId, themeId)) !== null;
 }
 
 export type IssuedCertificate = Pick<
@@ -89,7 +97,8 @@ const NOTHING_ISSUED: IssueResult = Object.freeze({
  * Inserts one certificate per completed theme summary (service_role; `user_id` fixed to the
  * caller) and schedules the email for each new row. The only service_role use of issuance, shared
  * by the progress trigger and the backfill so the insert / idempotency rules live in one place.
- * UNIQUE (user_id, theme_id) violations (23505) mean already issued and are skipped.
+ * UNIQUE (user_id, theme_id) violations (23505) mean already issued: re-read the row so concurrent
+ * callers still get an id (dialog / remaining must not fall through to "could not issue").
  */
 async function insertCertificates(
   userId: number,
@@ -139,12 +148,18 @@ async function insertCertificates(
 
       if (!insertError) {
         issued.push(inserted);
-        scheduleCertificateIssuedEmail({
-          userId,
-          certificateId: inserted.id,
-          themeName: inserted.theme_name,
-          certificateNo: inserted.certificate_no,
-        });
+        // INSERT already succeeded; a mail scheduler throw must not drop the issued id from the
+        // response (otherwise the UI shows "could not issue" for a row that exists).
+        try {
+          scheduleCertificateIssuedEmail({
+            userId,
+            certificateId: inserted.id,
+            themeName: inserted.theme_name,
+            certificateNo: inserted.certificate_no,
+          });
+        } catch (error) {
+          console.error("[修了証] メール予約エラー:", error);
+        }
         break;
       }
       if (insertError.code !== UNIQUE_VIOLATION) {
@@ -152,8 +167,12 @@ async function insertCertificates(
         break;
       }
       // Both UNIQUE (user_id, theme_id) and UNIQUE (certificate_no) raise 23505. Only a number
-      // collision is worth retrying; a duplicate (user, theme) means it is already issued.
+      // collision is worth retrying; a duplicate (user, theme) means another request won the race.
       if (!isCertificateNoCollision(insertError)) {
+        const existing = await fetchExistingIssuedCertificate(userId, summary.theme.id);
+        if (existing) {
+          issued.push(existing);
+        }
         break;
       }
       if (attempt === CERTIFICATE_NO_MAX_ATTEMPTS - 1) {
@@ -365,12 +384,12 @@ async function evaluateThemeForCertificate(params: {
   if (await hasCertificate(params.userId, params.themeId)) {
     return { status: "not-ready" };
   }
-  const { data: summaries, error } = await fetchThemeProgressSummaries(params.userId);
-  if (error || !summaries) {
-    return { status: "not-ready" };
-  }
-  const summary = summaries.find((item) => item.theme.id === params.themeId);
-  if (!summary || !isThemeCompleted(summary)) {
+  // Single-theme COUNT: intermediate completions must not page every theme's progress.
+  const { data: summary, error } = await fetchThemeProgressSummary(
+    params.userId,
+    params.themeId
+  );
+  if (error || !summary || !isThemeCompleted(summary)) {
     return { status: "not-ready" };
   }
   const gaps = await fetchThemeExerciseGaps(params.userId, passScore);
@@ -430,13 +449,13 @@ export async function maybeIssueCertificate(params: {
  * published content of it. Called after POST /api/progress marks a content complete.
  *
  * - Eligibility: active member only (trial users and admin / maintainer never receive one).
- * - Completion reuses fetchThemeProgressSummaries() so the denominator (published contents under
- *   published parents) is the one the dashboard shows. It runs with the user's own session (RLS).
+ * - Completion reuses fetchThemeProgressSummary() so the denominator (published contents under
+ *   published parents) matches the dashboard for that theme. It runs with the user's own session.
  * - Never throws and never returns an error to the caller: a failure here must not change the
  *   progress response (the user's completion is already saved).
  *
  * @returns the newly issued certificate, or null (not eligible / not complete / already issued /
- *   failed).
+ *   failed). Concurrent UNIQUE races still return the existing row via insertCertificates.
  */
 export async function issueCertificateIfEligible(params: {
   userId: number;
@@ -505,10 +524,10 @@ export async function resolveProgressThemeNotice(params: {
 /**
  * Same notice as the progress dialog, for a review that just reached `completed`. Already-issued
  * themes and themes that are not yet 100% return null so a routine review stays quiet.
- * `passed === false` is a failed re-review: issuance still runs (an earlier pass can already
- * qualify), but the dialog is returned only when this call actually issued. Otherwise the same
- * "still need a pass" dialog would reopen on every failed review. A throw is swallowed: the
- * review response must not change when issuance or mail fails.
+ * When `passed !== true` (failed, estimated, none, or unknown), issuance still runs (an earlier
+ * pass can already qualify), but the dialog is returned only when this call actually issued.
+ * Otherwise the same "still need a pass" dialog would reopen on every non-passing review. A throw
+ * is swallowed: the review response must not change when issuance or mail fails.
  */
 export async function resolveAiReviewThemeNotice(params: {
   userId: number;
@@ -536,7 +555,7 @@ export async function resolveAiReviewThemeNotice(params: {
     if (evaluation.status !== "evaluated") {
       return null;
     }
-    if (params.passed === false && evaluation.issued == null) {
+    if (params.passed !== true && evaluation.issued == null) {
       return null;
     }
     return toNotice(evaluation);

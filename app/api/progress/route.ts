@@ -55,18 +55,25 @@ export async function POST(request: NextRequest) {
 
     let themeCompletion = null;
     if (isCompleted) {
-      try {
-        themeCompletion = await resolveProgressThemeNotice({
-          userId,
-          userStatus,
-          userRole,
-          contentId,
-          contentWasAlreadyCompleted: saved.contentWasAlreadyCompleted,
-        });
-      } catch (error) {
-        console.error("[修了証] 画面通知の判定エラー:", error);
+      // Sync path settles issuance for first-time completions (issued, gaps, or not-ready).
+      // Re-saves of an already-complete content skip sync and still defer for recovery.
+      // A thrown sync evaluation also defers so a transient failure can retry after the response.
+      let deferIssuance = saved.contentWasAlreadyCompleted;
+      if (!saved.contentWasAlreadyCompleted) {
+        try {
+          themeCompletion = await resolveProgressThemeNotice({
+            userId,
+            userStatus,
+            userRole,
+            contentId,
+            contentWasAlreadyCompleted: false,
+          });
+        } catch (error) {
+          console.error("[修了証] 画面通知の判定エラー:", error);
+          deferIssuance = true;
+        }
       }
-      if (!themeCompletion) {
+      if (!themeCompletion && deferIssuance) {
         await runAfterResponse(() =>
           issueCertificateIfEligible({ userId, userStatus, userRole, contentId })
         );

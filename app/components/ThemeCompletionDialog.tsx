@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { type ThemeCompletionNotice, themeCompletionCopy } from "@/app/lib/certificate-eligibility";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,11 +15,23 @@ import {
 
 /**
  * Shown once, for the action that just finished the theme (progress save or a completed review).
- * Reloading the page does not send the payload again, so the dialog does not come back.
+ * Reloading the page does not send the payload again, so the dialog does not come back. When a
+ * newer notice replaces a dismissed one without unmounting (SubmissionForm re-review), reopen.
  */
 export function ThemeCompletionDialog({ notice }: { notice: ThemeCompletionNotice }) {
   const [open, setOpen] = useState(true);
   const copy = themeCompletionCopy(notice);
+
+  useEffect(() => {
+    setOpen(true);
+  }, [
+    notice.themeId,
+    notice.certificateId,
+    notice.blockedByMissingName,
+    notice.remaining.incompleteContents,
+    notice.remaining.unsubmittedExercises,
+    notice.remaining.exercisesNeedingRetry,
+  ]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
