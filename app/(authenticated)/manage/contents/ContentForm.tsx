@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Save, Upload, X } from "lucide-react";
+import { ImagePlus, Loader2, Save, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
@@ -13,6 +13,7 @@ import {
   type ThemeFilterOption,
   type WeekFilterOption,
 } from "@/app/lib/content-filtering";
+import { insertMarkdownAtSelection } from "@/app/lib/content-image-key";
 import {
   getGradingRubricVersion,
   getRubricMaxKeyNumber,
@@ -188,6 +189,8 @@ export function ContentForm({
 }: ContentFormProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textContentRef = useRef<HTMLTextAreaElement>(null);
+  const imageFileInputRef = useRef<HTMLInputElement>(null);
 
   const [title, setTitle] = useState(initialData?.title ?? "");
 
@@ -303,6 +306,7 @@ export function ContentForm({
 
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   // Set when a create succeeded but publishing failed: the draft exists, so the form must not be
   // submitted again (that would create a second copy); the admin publishes it from its edit page.
@@ -402,6 +406,61 @@ export function ContentForm({
       setIsUploading(false);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  // Images are keyed by content id; upload only after the row exists (edit mode).
+  const canUploadContentImage = mode === "edit" && Boolean(initialData?.id);
+
+  const handleContentImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !initialData?.id) {
+      return;
+    }
+
+    setIsUploadingImage(true);
+    setMessage(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("contentId", String(initialData.id));
+
+      const response = await fetch("/api/upload-content-image", {
+        method: "POST",
+        body: formData,
+      });
+      const data = (await response.json()) as { path?: string; error?: string };
+      if (!response.ok || !data.path) {
+        setMessage({ type: "error", text: data.error || "画像のアップロードに失敗しました" });
+        return;
+      }
+
+      const textarea = textContentRef.current;
+      const selectionStart = textarea?.selectionStart ?? textContent.length;
+      const selectionEnd = textarea?.selectionEnd ?? selectionStart;
+      const markdown = `![画像](${data.path})`;
+      const { next, caret } = insertMarkdownAtSelection(
+        textContent,
+        selectionStart,
+        selectionEnd,
+        markdown
+      );
+      setTextContent(next);
+      // Restore caret after React applies the new value.
+      requestAnimationFrame(() => {
+        const el = textContentRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(caret, caret);
+      });
+      setMessage({ type: "success", text: "画像を挿入しました" });
+    } catch {
+      setMessage({ type: "error", text: "画像のアップロード中にエラーが発生しました" });
+    } finally {
+      setIsUploadingImage(false);
+      if (imageFileInputRef.current) {
+        imageFileInputRef.current.value = "";
       }
     }
   };
@@ -794,6 +853,7 @@ export function ContentForm({
               </Label>
               <Textarea
                 id="textContent"
+                ref={textContentRef}
                 value={textContent}
                 onChange={(e) => setTextContent(e.target.value)}
                 placeholder={
@@ -803,10 +863,39 @@ export function ContentForm({
                 }
                 className="min-h-[300px] font-mono"
               />
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => imageFileInputRef.current?.click()}
+                  disabled={!canUploadContentImage || isUploadingImage}
+                >
+                  {isUploadingImage ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <ImagePlus className="h-3.5 w-3.5" />
+                  )}
+                  {isUploadingImage ? "アップロード中..." : "画像を挿入"}
+                </Button>
+                <input
+                  ref={imageFileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  className="hidden"
+                  onChange={handleContentImageSelect}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {canUploadContentImage
+                    ? "PNG / JPEG / WebP / GIF（5MB以下）。カーソル位置に Markdown を挿入します。"
+                    : "画像の挿入はコンテンツ保存後の編集画面から行えます。"}
+                </p>
+              </div>
               {contentType === "slide" && (
                 <p className="text-xs text-muted-foreground">
                   スライドの下に表示します。画像は
-                  {` {{SUPABASE_STORAGE_URL}}/<公開バケット>/<キー> `}
+                  {` {{SUPABASE_STORAGE_URL}}/content-images/... `}
                   で参照できます。
                 </p>
               )}

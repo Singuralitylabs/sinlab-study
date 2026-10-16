@@ -16,6 +16,7 @@ import { USER_STATUS } from "@/app/constants/user";
 import { computeRemainingReviews } from "@/app/lib/ai-review-limits";
 import { parseStarterFiles } from "@/app/lib/code-file-inputs";
 import { buildThemeContentOrder, resolveContentNavigation } from "@/app/lib/content-navigation";
+import { isExerciseRetryInProgress } from "@/app/lib/exercise-retry";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import { getLockedContentFallbackOverview } from "@/app/lib/trial-upgrade";
@@ -49,6 +50,7 @@ import { Separator } from "@/components/ui/separator";
 import { AIReviewLimitNotice } from "./AIReviewLimitNotice";
 import { CompleteButton } from "./CompleteButton";
 import { ExerciseCompletionStatus } from "./ExerciseCompletionStatus";
+import { ExerciseRetryButton } from "./ExerciseRetryButton";
 import { PrevNextNav } from "./PrevNextNav";
 import { QuizForm } from "./QuizForm";
 import { SubmissionForm } from "./SubmissionForm";
@@ -87,13 +89,14 @@ export default async function ContentPage({ params }: PageProps) {
   // Members/trial users fetch the summary via service_role; admin/maintainer use the normal client so
   // unpublished content is included. Progress needs only the IDs (RLS-scoped client), so it runs
   // in this first wave instead of waiting for content_type.
-  const [{ data: navigation }, { data: content }, { isCompleted }] = await Promise.all([
-    fetchThemeNavigationIndex(themeIdNum, weekIdNum, userRole),
-    fetchContentById(contentIdNum, userRole),
-    userId
-      ? fetchUserProgressByContentId(userId, contentIdNum)
-      : Promise.resolve({ isCompleted: false }),
-  ]);
+  const [{ data: navigation }, { data: content }, { isCompleted, retryStartedAt }] =
+    await Promise.all([
+      fetchThemeNavigationIndex(themeIdNum, weekIdNum, userRole),
+      fetchContentById(contentIdNum, userRole),
+      userId
+        ? fetchUserProgressByContentId(userId, contentIdNum)
+        : Promise.resolve({ isCompleted: false, retryStartedAt: null }),
+    ]);
 
   // The breadcrumb hierarchy comes from the content's embedded week -> phase -> theme. Locked
   // trial content is hidden from the content query by RLS (content is null), so only then is the
@@ -337,6 +340,14 @@ export default async function ContentPage({ params }: PageProps) {
       ? existingReview
       : null;
 
+  const isRetrying = isExerciseRetryInProgress({
+    latestSubmittedAt: latestSubmission?.submitted_at,
+    retryStartedAt,
+  });
+  // During retry, hide the model answer / AI review; only pass a review id the page actually draws.
+  const visibleReview = isRetrying ? null : reviewForLatestSubmission;
+  const showReferenceAnswer = Boolean(referenceAnswer) && !isRetrying;
+
   return (
     <div className="max-w-4xl mx-auto">
       <PageTitle
@@ -430,60 +441,99 @@ export default async function ContentPage({ params }: PageProps) {
 
                   {latestSubmission && (
                     <>
-                      <div className="mb-6">
-                        <h3 className="text-lg font-semibold mb-3">提出内容</h3>
-                        {latestSubmission.submission_type === "code" ? (
-                          <SubmissionCodeBlock
-                            files={withFallbackLanguage(
-                              getSubmissionCodeFiles(latestSubmission),
-                              content.code_language
-                            )}
-                            previewSource={{
-                              submissionFileSlots: content.submission_file_slots,
-                              starterFiles: content.starter_files,
-                              codeLanguage: content.code_language,
-                              showPreview: content.show_preview,
-                              showConsole: content.show_console,
-                            }}
-                            preClassName="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto"
-                          />
-                        ) : (
-                          <p className="text-sm text-muted-foreground break-all">
-                            {latestSubmission.url}
+                      {isRetrying ? (
+                        <>
+                          <p className="mb-4 text-sm text-muted-foreground">
+                            再挑戦中です。新しく提出すると模範回答と AI レビュー結果が表示されます
                           </p>
-                        )}
-                      </div>
-
-                      {referenceAnswer && (
-                        <div className="mb-6">
-                          <h3 className="text-lg font-semibold mb-3">模範回答</h3>
-                          {/* Free text from the admin textarea. pre-wrap keeps a long sentence
-                              on the card. Submission code omits it so a line scrolls inside pre. */}
-                          <pre className="max-w-full overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted px-4 py-3 text-sm font-mono">
-                            {referenceAnswer}
-                          </pre>
-                        </div>
-                      )}
-
-                      {reviewForLatestSubmission && (
-                        <div className="mb-6">
-                          <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
-                            <h3 className="text-lg font-semibold">AIレビュー結果</h3>
-                            <Badge
-                              variant="outline"
-                              className="gap-1 border-primary/40 text-primary"
-                            >
-                              <Bot className="h-3 w-3" />
-                              AIレビュー済み
-                            </Badge>
+                          <details className="mb-6 rounded-lg border border-border">
+                            <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-muted-foreground hover:text-foreground list-none flex items-center gap-2">
+                              前回の提出内容を見る
+                            </summary>
+                            <div className="border-t border-border px-4 py-3">
+                              {latestSubmission.submission_type === "code" ? (
+                                <SubmissionCodeBlock
+                                  files={withFallbackLanguage(
+                                    getSubmissionCodeFiles(latestSubmission),
+                                    content.code_language
+                                  )}
+                                  previewSource={{
+                                    submissionFileSlots: content.submission_file_slots,
+                                    starterFiles: content.starter_files,
+                                    codeLanguage: content.code_language,
+                                    showPreview: content.show_preview,
+                                    showConsole: content.show_console,
+                                  }}
+                                  preClassName="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto"
+                                />
+                              ) : (
+                                <p className="text-sm text-muted-foreground break-all">
+                                  {latestSubmission.url}
+                                </p>
+                              )}
+                            </div>
+                          </details>
+                        </>
+                      ) : (
+                        <>
+                          <div className="mb-6">
+                            <h3 className="text-lg font-semibold mb-3">提出内容</h3>
+                            {latestSubmission.submission_type === "code" ? (
+                              <SubmissionCodeBlock
+                                files={withFallbackLanguage(
+                                  getSubmissionCodeFiles(latestSubmission),
+                                  content.code_language
+                                )}
+                                previewSource={{
+                                  submissionFileSlots: content.submission_file_slots,
+                                  starterFiles: content.starter_files,
+                                  codeLanguage: content.code_language,
+                                  showPreview: content.show_preview,
+                                  showConsole: content.show_console,
+                                }}
+                                preClassName="rounded-lg bg-muted px-4 py-3 text-sm font-mono overflow-x-auto"
+                              />
+                            ) : (
+                              <p className="text-sm text-muted-foreground break-all">
+                                {latestSubmission.url}
+                              </p>
+                            )}
                           </div>
-                          <AIReviewDisplayNoSSR
-                            review={reviewForLatestSubmission}
-                            defaultExpanded={false}
-                            contentId={showReviewListNotes ? contentIdNum : undefined}
-                            memosByKey={showReviewListNotes ? memosByKey : undefined}
-                          />
-                        </div>
+
+                          {showReferenceAnswer && (
+                            <div className="mb-6">
+                              <h3 className="text-lg font-semibold mb-3">模範回答</h3>
+                              {/* Free text from the admin textarea. pre-wrap keeps a long sentence
+                                  on the card. Submission code omits it so a line scrolls inside pre. */}
+                              <pre className="max-w-full overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted px-4 py-3 text-sm font-mono">
+                                {referenceAnswer}
+                              </pre>
+                            </div>
+                          )}
+
+                          {visibleReview && (
+                            <div className="mb-6">
+                              <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
+                                <h3 className="text-lg font-semibold">AIレビュー結果</h3>
+                                <Badge
+                                  variant="outline"
+                                  className="gap-1 border-primary/40 text-primary"
+                                >
+                                  <Bot className="h-3 w-3" />
+                                  AIレビュー済み
+                                </Badge>
+                              </div>
+                              <AIReviewDisplayNoSSR
+                                review={visibleReview}
+                                defaultExpanded={false}
+                                contentId={showReviewListNotes ? contentIdNum : undefined}
+                                memosByKey={showReviewListNotes ? memosByKey : undefined}
+                              />
+                            </div>
+                          )}
+
+                          {isFullyPublished && <ExerciseRetryButton contentId={contentIdNum} />}
+                        </>
                       )}
 
                       <Separator className="mb-6" />
@@ -510,7 +560,7 @@ export default async function ContentPage({ params }: PageProps) {
                         submissionFileSlots={content.submission_file_slots}
                         showPreview={content.show_preview}
                         showConsole={content.show_console}
-                        persistedReviewId={reviewForLatestSubmission?.id ?? null}
+                        persistedReviewId={visibleReview?.id ?? null}
                         showReviewListNotes={showReviewListNotes}
                       />
                     </>

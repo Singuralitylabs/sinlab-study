@@ -1156,21 +1156,26 @@ export async function fetchUserProgressByContentId(
   contentId: number
 ): Promise<{
   isCompleted: boolean;
+  retryStartedAt: string | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase
     .from("user_progress")
-    .select("is_completed")
+    .select("is_completed, retry_started_at")
     .eq("user_id", userId)
     .eq("content_id", contentId)
     .maybeSingle();
 
   if (error) {
     console.error("進捗取得エラー:", error.message);
-    return { isCompleted: false, error };
+    return { isCompleted: false, retryStartedAt: null, error };
   }
 
-  return { isCompleted: data?.is_completed ?? false, error: null };
+  return {
+    isCompleted: data?.is_completed ?? false,
+    retryStartedAt: data?.retry_started_at ?? null,
+    error: null,
+  };
 }

@@ -140,6 +140,11 @@ export const ProgressUpdateSchema = z.object({
   isCompleted: z.boolean({ message: "isCompletedはbooleanで指定してください" }),
 });
 
+/** POST /api/progress/retry — start an exercise retry (hides model answer / AI review until next submit). */
+export const ProgressRetrySchema = z.object({
+  contentId: ContentIdSchema,
+});
+
 /** POST /api/feedback (#392). pageUrl / userAgent are optional auto-filled client fields. */
 export const FeedbackCreateSchema = z.object({
   category: z.enum(FEEDBACK_CATEGORIES, { message: "種別が不正です" }),

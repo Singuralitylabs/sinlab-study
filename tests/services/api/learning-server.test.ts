@@ -652,19 +652,23 @@ describe("fetchUserProgressByContentIds", () => {
 });
 
 describe("fetchUserProgressByContentId", () => {
-  it("進捗が存在し完了している場合、isCompleted: true を返す", async () => {
+  it("進捗が存在し完了している場合、isCompleted: true と retryStartedAt を返す", async () => {
     const mockClient = createMockSupabaseClient({
-      queryResult: { data: { is_completed: true }, error: null },
+      queryResult: {
+        data: { is_completed: true, retry_started_at: "2026-10-01T12:00:00.000Z" },
+        error: null,
+      },
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
 
     const result = await fetchUserProgressByContentId(1, 10);
 
     expect(result.isCompleted).toBe(true);
+    expect(result.retryStartedAt).toBe("2026-10-01T12:00:00.000Z");
     expect(result.error).toBeNull();
   });
 
-  it("進捗レコードが存在しない場合、isCompleted: false を返す", async () => {
+  it("進捗レコードが存在しない場合、isCompleted: false と retryStartedAt: null を返す", async () => {
     const mockClient = createMockSupabaseClient({
       queryResult: { data: null, error: null },
     });
@@ -673,6 +677,7 @@ describe("fetchUserProgressByContentId", () => {
     const result = await fetchUserProgressByContentId(1, 10);
 
     expect(result.isCompleted).toBe(false);
+    expect(result.retryStartedAt).toBeNull();
     expect(result.error).toBeNull();
   });
 
@@ -685,6 +690,7 @@ describe("fetchUserProgressByContentId", () => {
     const result = await fetchUserProgressByContentId(1, 10);
 
     expect(result.isCompleted).toBe(false);
+    expect(result.retryStartedAt).toBeNull();
     expect(result.error).toEqual(dbError);
   });
 });

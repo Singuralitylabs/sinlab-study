@@ -101,6 +101,8 @@ erDiagram
 
 `grading_rubric` が NULL でなく提出方法が URL のみでない演習（`content_type = 'exercise'`。空の墓石を含む。NULL と `allowed_submission_types = 'url'` は対象外。`both` は対象）は、合格レビュー（`ai_reviews.status = 'completed' AND passed = true`）があるときだけ完了にできる。強制は BEFORE INSERT/UPDATE トリガー `enforce_user_progress_review_pass()`（6.2）。すでに `is_completed = true` の行は遡って取り消さない。合格判定対象を未完了へ戻す更新は拒否する。空の墓石は合格にならないため完了できない。
 
+`retry_started_at`（TIMESTAMPTZ・NULL 可）: 演習の「再度課題に取り組む」を押した時刻。NULL は再挑戦していない。再挑戦中かどうかはアプリの純粋関数が最新提出の `submitted_at` と比較する（#355。仕様は `docs/specification.md` 3.2・5.7）。完了列（`is_completed` / `completed_at` / `ever_completed`）とは独立で、再挑戦 API は `retry_started_at` だけを upsert する。
+
 ### 3.6 submissions（課題提出）
 
 演習課題に対する提出データ。
@@ -381,6 +383,8 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 
 `ever_completed` は一度完了したら true のまま残す（完了解除は `is_completed` と `completed_at` だけを戻す）。維持はトリガー関数 `keep_user_progress_ever_completed()` が行い、`PUBLIC` / `anon` からの EXECUTE を REVOKE している（REST の RPC から呼べない）。`first_content_completed` の初回判定は、解除や再完了で件数が 0 に戻らないようにこの列を数える。SELECT は公開状態で隠れないので、非公開になったコンテンツの完了も本人の件数に残る。コンテンツ行の物理削除は `ON DELETE CASCADE` で進捗行ごと消える。
 
+`retry_started_at`（#355）の書き込みも同じ INSERT / UPDATE ポリシーに従う。再挑戦 API（`POST /api/progress/retry`）は通常クライアントで upsert し、`is_completed` / `completed_at` / `ever_completed` は送らない。可視性はアプリ層の `isContentVisible()` が親階層まで見る（下の EXISTS 注意と同じ）。
+
 maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進捗を参照するため、admin と同様に全件の SELECT を許可する。
 
 **受講生進捗一覧の集計**: `/manage/students` はユーザーごとの完了数・最終活動日時を、RPC `get_students_progress_summary()`（`GROUP BY user_id`）から取得する。この関数は `SECURITY DEFINER` を使わないプレーンな SQL 関数（デフォルトの `SECURITY INVOKER`）で、呼び出し元の権限のまま上記SELECTポリシーに従う。そのため member が直接呼び出しても本人の1行しか返らず、admin/maintainer が呼び出したときだけ全件が返る（RPC側でのロールチェックは不要）。EXECUTE は `authenticated` / `service_role` のみ（`PUBLIC, anon` を REVOKE）。
@@ -427,9 +431,9 @@ SELECT のみ: 本人 / admin（全件。maintainer は不可）。INSERT / UPDA
 
 RLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`authenticated` ロールでは SELECT を含め一切のアクセスができない）。
 
-### 6.8 storage.objects（thumbnails / slides バケット）
+### 6.8 storage.objects（thumbnails / slides / content-images バケット）
 
-テーマのサムネイルを保存する `thumbnails` は公開バケット（`public = true`）のため参照は制限しない。スライドPDFを保存する `slides` は**非公開バケット**（`public = false`）で、参照はコンテンツの可視性に連動させる。書き込み系（INSERT / UPDATE / DELETE）は両バケットともコンテンツ管理者（admin / maintainer）に限定し、操作ごとに1本のポリシーへ統合している（`multiple_permissive_policies` 対策）。
+テーマのサムネイルを保存する `thumbnails` と、Markdown 埋め込み画像の `content-images`（#376）は公開バケット（`public = true`）のため参照は制限しない。`content-images` は `file_size_limit = 5MiB`、`allowed_mime_types = png/jpeg/webp/gif`。キーは `content-{contentId}/<ランダムID>.{ext}`。スライドPDFを保存する `slides` は**非公開バケット**（`public = false`）で、参照はコンテンツの可視性に連動させる。書き込み系（INSERT / UPDATE / DELETE）は各バケットともコンテンツ管理者（admin / maintainer）に限定し、操作ごとに1本のポリシーへ統合している（`multiple_permissive_policies` 対策）。`get_user_role()` は `(select ...)` で包む。
 
 `slides` の SELECT ポリシーは、admin / maintainer はロールで無条件に許可（未公開プレビューのため。[機能設計書](./specification.md)2.12節）、それ以外は「`learning_contents.pdf_url = storage.objects.name` の行が存在し、その週・フェーズ・テーマを含む4階層すべてが `is_published = true AND is_deleted = false`」の場合のみ許可する（`learning_contents → learning_weeks → learning_phases → learning_themes` を JOIN）。
 

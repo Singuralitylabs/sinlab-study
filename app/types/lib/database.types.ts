@@ -1005,6 +1005,7 @@ export type Database = {
           ever_completed: boolean;
           id: number;
           is_completed: boolean | null;
+          retry_started_at: string | null;
           user_id: number;
         };
         Insert: {
@@ -1014,6 +1015,7 @@ export type Database = {
           ever_completed?: boolean;
           id?: number;
           is_completed?: boolean | null;
+          retry_started_at?: string | null;
           user_id: number;
         };
         Update: {
@@ -1023,6 +1025,7 @@ export type Database = {
           ever_completed?: boolean;
           id?: number;
           is_completed?: boolean | null;
+          retry_started_at?: string | null;
           user_id?: number;
         };
         Relationships: [
