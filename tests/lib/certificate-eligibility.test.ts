@@ -168,6 +168,21 @@ describe("テーマ修了の文言", () => {
     expect(form).toContain("key={");
     expect(form).toContain("themeNotice.themeId");
   });
+
+  it("進捗 API の完了呼び出しは themeCompletion をダイアログに載せる", async () => {
+    const fs = await import("node:fs/promises");
+    const paths = [
+      "app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/CompleteButton.tsx",
+      "app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/QuizForm.tsx",
+      "app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/ExerciseCompletionStatus.tsx",
+    ] as const;
+    for (const path of paths) {
+      const source = await fs.readFile(path, "utf8");
+      expect(source, path).toContain("noticeFromProgressBody");
+      expect(source, path).toContain("ThemeCompletionDialog");
+      expect(source, path).toContain("themeNotice.themeId");
+    }
+  });
 });
 
 describe("pendingCertificateStatus", () => {

@@ -561,7 +561,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 | 403 | `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） / 合格判定対象の演習を合格なしで完了にしようとした、または未完了に戻そうとした |
 | 500 | サーバーエラー |
 
-200 の本文は `{ success: true, isCompleted }`。この保存が、対象の active member のテーマを初めて 100%（`isThemeCompleted()`。分母は `fetchThemeProgressSummaries()`）にしたときだけ `themeCompletion` を足す。再完了・未完了への更新・途中のコンテンツ・お試し・admin / maintainer には付けない。中身はテーマ ID・テーマ名・発行した修了証の ID（未発行なら null）・表示名不足か・残り（未完了コンテンツ数、未提出の演習数、再挑戦が必要な演習数）。発行と集計に失敗しても 200 の成否は変えず、そのときは `themeCompletion` を付けない。
+200 の本文は `{ success: true, isCompleted }`。この保存が、対象の active member のテーマを初めて 100%（`isThemeCompleted()`。分母は当該テーマの `fetchThemeProgressSummary()`。公開ツリーの規則は `fetchThemeProgressSummaries()` と同じ）にしたときだけ `themeCompletion` を足す。再完了・未完了への更新・途中のコンテンツ・お試し・admin / maintainer には付けない。中身はテーマ ID・テーマ名・発行した修了証の ID（未発行なら null）・表示名不足か・残り（未完了コンテンツ数、未提出の演習数、再挑戦が必要な演習数）。発行と集計に失敗しても 200 の成否は変えず、そのときは `themeCompletion` を付けない。クライアントは `CompleteButton`・`QuizForm`・`ExerciseCompletionStatus` がこの通知を `ThemeCompletionDialog` に載せる（13.7節）。
 
 ### 4.2 進捗集計
 
@@ -1447,7 +1447,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 | 演習（`url` のみ） | 本人の提出が 1 件以上 |
 
 `estimated` / `none` / `legacy` は合否に使わない。`both` の URL 提出は「提出あり」にはなるが、`score_kind = none` のレビューは合格にならない。合格点が 0 の間は提出の有無だけで判定する（閾値の変更は `app/constants/grading.ts` の別 PR）
-- **分母は進捗集計と同じ**: 判定は `fetchThemeProgressSummaries()`（4.2節）を再利用し、ホームおよび `/learn` の進捗と必ず一致させる（集計ロジックを二重に持たない）。ユーザーのセッション（RLS）で実行する
+- **分母は進捗集計と同じ**: ホットパス（`maybeIssueCertificate` / 同期の `themeCompletion`）は `fetchThemeProgressSummary()` で**そのテーマだけ**を数え、`/certificates` の遡及（`issueMissingCertificates()`）は一覧用に取った `fetchThemeProgressSummaries()` を再利用する。どちらも公開ツリーの規則は 4.2節と同じで、ホームおよび `/learn` の進捗と一致させる（集計ロジックを二重に持たない）。ユーザーのセッション（RLS）で実行する
 - **既に完了済みのテーマ（遡及発行）**: `POST /api/progress` の完了が契機なので、機能の導入前に完了していたテーマや、お試し中にお試し公開分だけで完了して後から本登録になったテーマには、その契機が来ない。そのため `/certificates` を開いたとき、完了済みで未発行のテーマに `issueMissingCertificates()` が同じ INSERT 経路で発行する（冪等。メールも発行時に1通送る）。ホームのカードとサイドナビの「修了証」は、`/certificates` を開いて発行されたあとに表示される
 - 発行後に管理者がコンテンツを追加・公開しても、発行済みの修了証は取り消さない（スナップショットのため）。管理者による発行・取り消しの操作は設けない
 
@@ -1492,7 +1492,7 @@ X 向けの共有リンク（`https://twitter.com/intent/tweet?text=...&url=...`
 
 ### 13.7 テーマ修了時の画面通知
 
-契機は、`POST /api/progress` の完了保存でそのテーマが初めて 100% になったときと、AI レビューが `completed` になり、その時点でテーマが 100% かつ修了証がまだ無いとき。そのレビューの `passed` が true でない（不合格・`estimated` / `none`・不明）ときは、この呼び出しで修了証を発行できた場合を除きダイアログを出さない（条件が残ったまま同じ案内がレビューのたびに開かないようにする。発行判定自体は行う）。途中のコンテンツ、完了の取り消し、すでに完了しているコンテンツの再保存、ページの再読み込みでは出さない。提出フォームでは新しい通知のたびにダイアログを開き直す（一度閉じたあとの差し替えでも閉じたままにしない）。
+契機は、`POST /api/progress` の完了保存でそのテーマが初めて 100% になったときと、AI レビューが `completed` になり、その時点でテーマが 100% かつ修了証がまだ無いとき。そのレビューの `passed` が true でない（不合格・`estimated` / `none`・不明）ときは、この呼び出しで修了証を発行できた場合を除きダイアログを出さない（条件が残ったまま同じ案内がレビューのたびに開かないようにする。発行判定自体は行う）。途中のコンテンツ、完了の取り消し、すでに完了しているコンテンツの再保存、ページの再読み込みでは出さない。進捗 API の通知は `CompleteButton`・`QuizForm`（正解後の自動完了）・`ExerciseCompletionStatus`（「完了を記録する」）が拾う。提出フォーム（AI レビュー応答の `themeCompletion`）では新しい通知のたびにダイアログを開き直す（一度閉じたあとの差し替えでも閉じたままにしない）。
 
 出し分けは `themeCompletion`（4.1節。AI レビューの 200 にも同じ形を任意で足す）をダイアログ（`ThemeCompletionDialog`）で表示する。
 

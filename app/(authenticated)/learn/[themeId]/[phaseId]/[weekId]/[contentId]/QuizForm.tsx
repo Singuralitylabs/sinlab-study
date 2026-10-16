@@ -10,6 +10,11 @@ import {
   type QuizQuestionForLearner,
   type QuizQuestionResult,
 } from "@/app/constants/quiz";
+import { ThemeCompletionDialog } from "@/app/components/ThemeCompletionDialog";
+import {
+  noticeFromProgressBody,
+  type ThemeCompletionNotice,
+} from "@/app/lib/certificate-eligibility";
 import {
   quizCompletionAction,
   quizQuestionVersion,
@@ -67,6 +72,7 @@ export function QuizForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [progressWarning, setProgressWarning] = useState<string | null>(null);
   const [updatedNotice, setUpdatedNotice] = useState<string | null>(null);
+  const [themeNotice, setThemeNotice] = useState<ThemeCompletionNotice | null>(null);
 
   // router.refresh() (after grading, or from the completion button) can bring a question set an
   // admin changed meanwhile, even while a grade request is in flight. Results and errors are kept
@@ -117,6 +123,8 @@ export function QuizForm({
       if (!response.ok) {
         throw new Error(String(response.status));
       }
+      const body = await response.json().catch(() => null);
+      setThemeNotice(noticeFromProgressBody(true, body));
       // Re-render the server page so the completion button reflects the new progress.
       router.refresh();
     } catch {
@@ -225,6 +233,12 @@ export function QuizForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-8">
+      {themeNotice && (
+        <ThemeCompletionDialog
+          key={`${themeNotice.themeId}-${themeNotice.certificateId}-${themeNotice.remaining.unsubmittedExercises}-${themeNotice.remaining.exercisesNeedingRetry}-${themeNotice.blockedByMissingName}`}
+          notice={themeNotice}
+        />
+      )}
       {questions.map((question, questionIndex) => {
         const answer = answers[question.id];
         const result = results?.get(question.id);

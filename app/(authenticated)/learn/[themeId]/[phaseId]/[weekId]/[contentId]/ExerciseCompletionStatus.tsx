@@ -3,9 +3,14 @@
 import { CheckCircle, Circle, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { ThemeCompletionDialog } from "@/app/components/ThemeCompletionDialog";
 import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
 import { CERTIFICATE_PASS_SCORE } from "@/app/constants/grading";
 import { USER_STATUS } from "@/app/constants/user";
+import {
+  noticeFromProgressBody,
+  type ThemeCompletionNotice,
+} from "@/app/lib/certificate-eligibility";
 import type { UserStatusType } from "@/app/types";
 import { Button } from "@/components/ui/button";
 
@@ -35,10 +40,13 @@ export function ExerciseCompletionStatus({
   const [isCompleted, setIsCompleted] = useState(initialCompleted);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [themeNotice, setThemeNotice] = useState<ThemeCompletionNotice | null>(null);
 
   const recordCompletion = async () => {
     setIsLoading(true);
     setError(null);
+    // Clear so a later notice remounts / reopens instead of staying dismissed.
+    setThemeNotice(null);
     try {
       const response = await fetch("/api/progress", {
         method: "POST",
@@ -46,7 +54,9 @@ export function ExerciseCompletionStatus({
         body: JSON.stringify({ contentId, isCompleted: true }),
       });
       if (response.ok) {
+        const body = await response.json().catch(() => null);
         setIsCompleted(true);
+        setThemeNotice(noticeFromProgressBody(true, body));
         router.refresh();
       } else {
         setError("完了を記録できませんでした。時間をおいてもう一度押してください。");
@@ -59,23 +69,37 @@ export function ExerciseCompletionStatus({
     }
   };
 
+  const dialog =
+    themeNotice != null ? (
+      <ThemeCompletionDialog
+        key={`${themeNotice.themeId}-${themeNotice.certificateId}-${themeNotice.remaining.unsubmittedExercises}-${themeNotice.remaining.exercisesNeedingRetry}-${themeNotice.blockedByMissingName}`}
+        notice={themeNotice}
+      />
+    ) : null;
+
   if (isCompleted) {
     return (
-      <div className="flex w-full items-center justify-center gap-2 rounded-md border border-success/30 bg-success/10 px-4 py-3 text-success">
-        <CheckCircle className="h-5 w-5" />
-        {hasPassingReview ? "合格済み（完了）" : "完了"}
-      </div>
+      <>
+        {dialog}
+        <div className="flex w-full items-center justify-center gap-2 rounded-md border border-success/30 bg-success/10 px-4 py-3 text-success">
+          <CheckCircle className="h-5 w-5" />
+          {hasPassingReview ? "合格済み（完了）" : "完了"}
+        </div>
+      </>
     );
   }
 
   if (hasPassingReview) {
     return (
-      <div className="space-y-2">
-        <Button onClick={recordCompletion} disabled={isLoading} size="lg" className="w-full">
-          {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "完了を記録する"}
-        </Button>
-        {error && <p className="text-sm text-destructive">{error}</p>}
-      </div>
+      <>
+        {dialog}
+        <div className="space-y-2">
+          <Button onClick={recordCompletion} disabled={isLoading} size="lg" className="w-full">
+            {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "完了を記録する"}
+          </Button>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+        </div>
+      </>
     );
   }
 
