@@ -118,6 +118,7 @@ export type Database = {
           id: number;
           is_deleted: boolean;
           published_at: string | null;
+          push_sent_at: string | null;
           send_email: boolean;
           target_membership_types: string[] | null;
           target_statuses: string[];
@@ -132,6 +133,7 @@ export type Database = {
           id?: number;
           is_deleted?: boolean;
           published_at?: string | null;
+          push_sent_at?: string | null;
           send_email?: boolean;
           target_membership_types?: string[] | null;
           target_statuses: string[];
@@ -146,6 +148,7 @@ export type Database = {
           id?: number;
           is_deleted?: boolean;
           published_at?: string | null;
+          push_sent_at?: string | null;
           send_email?: boolean;
           target_membership_types?: string[] | null;
           target_statuses?: string[];

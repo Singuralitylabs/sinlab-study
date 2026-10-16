@@ -21,7 +21,7 @@ const memberAuth = {
 };
 
 const subscription = {
-  endpoint: "https://push.example/device",
+  endpoint: "https://fcm.googleapis.com/fcm/send/device",
   keys: { p256dh: "p256", auth: "authkey" },
 };
 
@@ -69,6 +69,8 @@ describe("POST /api/push/subscriptions", () => {
 
   it("スキーマ不正と他人の user_id は400", async () => {
     expect((await post({ endpoint: "not-a-url" })).status).toBe(400);
+    expect((await post({ endpoint: "http://fcm.googleapis.com/fcm/send/x" })).status).toBe(400);
+    expect((await post({ endpoint: "https://169.254.169.254/meta" })).status).toBe(400);
     expect((await post({ ...subscription, user_id: 99 })).status).toBe(400);
     expect(savePushSubscription).not.toHaveBeenCalled();
   });
@@ -90,12 +92,6 @@ describe("POST /api/push/subscriptions", () => {
       subscription,
       null
     );
-  });
-
-  it("別ユーザーの endpoint は409", async () => {
-    vi.mocked(savePushSubscription).mockResolvedValue("conflict");
-
-    expect((await post(subscription)).status).toBe(409);
   });
 });
 

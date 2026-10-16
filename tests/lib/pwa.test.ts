@@ -77,5 +77,6 @@ describe("public/sw.js", () => {
     expect(source).toContain('addEventListener("notificationclick"');
     expect(source).toContain("showNotification");
     expect(source).toContain("openWindow");
+    expect(source).toContain("focused.navigate(target)");
   });
 });

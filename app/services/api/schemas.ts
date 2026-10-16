@@ -52,6 +52,7 @@ import {
 } from "@/app/lib/email-template";
 import { GradingRubricInputSchema } from "@/app/lib/grading-schema";
 import { parseNotificationEmail } from "@/app/lib/notification-email";
+import { isAllowedPushEndpoint } from "@/app/lib/push-endpoint";
 import { QuizQuestionsSchema } from "@/app/lib/quiz";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
 import { SUBMISSION_FILE_SLOT_MAX_COUNT } from "@/app/lib/submission-file-slots";
@@ -804,12 +805,17 @@ export const EmailTemplatePreviewSchema = z
   .strict()
   .superRefine(refineTemplatePlaceholders);
 
+const PushEndpointSchema = z
+  .string({ message: "endpoint を指定してください" })
+  .url({ message: "endpoint の形式が不正です" })
+  .max(4096, { message: "endpoint が長すぎます" })
+  .refine(isAllowedPushEndpoint, {
+    message: "許可されていないプッシュエンドポイントです",
+  });
+
 export const PushSubscriptionSchema = z
   .object({
-    endpoint: z
-      .string({ message: "endpoint を指定してください" })
-      .url({ message: "endpoint の形式が不正です" })
-      .max(4096, { message: "endpoint が長すぎます" }),
+    endpoint: PushEndpointSchema,
     keys: z
       .object({
         p256dh: z
@@ -827,10 +833,7 @@ export const PushSubscriptionSchema = z
 
 export const PushSubscriptionDeleteSchema = z
   .object({
-    endpoint: z
-      .string({ message: "endpoint を指定してください" })
-      .url({ message: "endpoint の形式が不正です" })
-      .max(4096, { message: "endpoint が長すぎます" }),
+    endpoint: PushEndpointSchema,
   })
   .strict();
 

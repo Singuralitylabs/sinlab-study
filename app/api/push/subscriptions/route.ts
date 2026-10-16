@@ -36,12 +36,6 @@ export async function POST(request: Request) {
       validation.data,
       request.headers.get("user-agent")
     );
-    if (result === "conflict") {
-      return NextResponse.json(
-        { error: "この購読は別のアカウントに紐づいています" },
-        { status: 409 }
-      );
-    }
     if (result === "failed") {
       return NextResponse.json({ error: "購読の保存に失敗しました" }, { status: 500 });
     }

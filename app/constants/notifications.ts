@@ -211,6 +211,19 @@ export const EMAIL_DIGEST_SEND_INTERVAL_MS = 500;
 export const EMAIL_DIGEST_TIME_BUDGET_MS = 40_000;
 
 /**
+ * web-push `sendNotification` socket timeout (ms). Without this, a hanging endpoint can hold the
+ * digest lock until the platform kills the function.
+ */
+export const WEB_PUSH_SEND_TIMEOUT_MS = 10_000;
+
+/**
+ * Elapsed-time cap (ms) for `deliverDigestPushes` after the email digest. Stop starting new pushes
+ * so the shared cron lock is released before maxDuration (60s). Remaining targets retry on the
+ * next run via released / unclaimed `push_logs` rows.
+ */
+export const PUSH_DIGEST_TIME_BUDGET_MS = 15_000;
+
+/**
  * Retry window (days from the publish date, JST) for announcement email recipients whose send
  * failed. Only failures where Resend certainly didn't accept the mail (status=429 / 5xx) are
  * resent, from the day after the failure (never the same day, to keep the daily cap accounting

@@ -1,4 +1,4 @@
-import type { PushKind } from "@/app/constants/notifications";
+import { EMAIL_KIND, type PushKind, PUSH_DIGEST_TIME_BUDGET_MS } from "@/app/constants/notifications";
 import { USER_STATUS } from "@/app/constants/user";
 import { type DigestContent, type DigestUser, planMilestoneEmails } from "@/app/lib/email-digest";
 import {
@@ -139,6 +139,7 @@ type PushAnnouncementRow = {
   target_statuses: string[];
   target_membership_types: string[] | null;
   email_sent_at: string | null;
+  push_sent_at: string | null;
 };
 
 async function fetchPushAnnouncements(
@@ -151,19 +152,21 @@ async function fetchPushAnnouncements(
     target_statuses: string[];
     target_membership_types: string[] | null;
     emailSentAt: string | null;
+    pushSentAt: string | null;
   }[]
 > {
   // Page until 0 rows. A single response stops at db-max-rows (1000) and would drop later
   // published_at values, so those announcements would never be pushed. The body is not selected.
+  // Window is push_sent_at (not email_sent_at) so a crash after mail completion still retries.
   const rows: PushAnnouncementRow[] = [];
   for (let offset = 0; ; ) {
     const { data, error } = await supabase
       .from("announcements")
-      .select("id, title, target_statuses, target_membership_types, email_sent_at")
+      .select("id, title, target_statuses, target_membership_types, email_sent_at, push_sent_at")
       .not("published_at", "is", null)
       .eq("is_deleted", false)
       .eq("send_email", true)
-      .or(`email_sent_at.is.null,email_sent_at.gte.${sentSince}`)
+      .or(`push_sent_at.is.null,push_sent_at.gte.${sentSince}`)
       .order("published_at")
       .order("id")
       .range(offset, offset + PAGE_SIZE - 1);
@@ -177,7 +180,7 @@ async function fetchPushAnnouncements(
     offset += data.length;
   }
   return rows.flatMap((row) =>
-    isAnnouncementPushCurrent(row.email_sent_at, sentSince)
+    isAnnouncementPushCurrent(row.push_sent_at, sentSince)
       ? [
           {
             id: row.id,
@@ -185,10 +188,34 @@ async function fetchPushAnnouncements(
             target_statuses: row.target_statuses,
             target_membership_types: row.target_membership_types,
             emailSentAt: row.email_sent_at,
+            pushSentAt: row.push_sent_at,
           },
         ]
       : []
   );
+}
+
+async function markAnnouncementPushSent(
+  supabase: AdminClient,
+  announcementIds: number[]
+): Promise<void> {
+  if (announcementIds.length === 0) {
+    return;
+  }
+  const now = new Date().toISOString();
+  for (let index = 0; index < announcementIds.length; index += ID_CHUNK_SIZE) {
+    const ids = announcementIds.slice(index, index + ID_CHUNK_SIZE);
+    // Only close after the email bulk send finished. Multi-day email keeps push_sent_at null so
+    // newly eligible users still enter the queue; push_logs claim blocks duplicates.
+    const { error } = await supabase
+      .from("announcements")
+      .update({ push_sent_at: now })
+      .in("id", ids)
+      .not("email_sent_at", "is", null);
+    if (error) {
+      console.error("[Web Push] push_sent_at の更新に失敗しました:", error.message);
+    }
+  }
 }
 
 /**
@@ -250,7 +277,20 @@ export async function deliverDigestPushes(
       finalTrialDay: Math.max(...(trial.sendDays ?? [0])),
     });
 
-    for (const target of targets) {
+    const unfinishedAnnouncementKeys = new Set<string>();
+    for (let index = 0; index < targets.length; index++) {
+      if (clock() - started >= PUSH_DIGEST_TIME_BUDGET_MS) {
+        for (const remaining of targets.slice(index)) {
+          if (remaining.kind === EMAIL_KIND.ANNOUNCEMENT) {
+            unfinishedAnnouncementKeys.add(remaining.referenceKey);
+          }
+        }
+        console.warn(
+          `[Web Push] 定期配信の時間上限 ${PUSH_DIGEST_TIME_BUDGET_MS}ms に達したため打ち切りました`
+        );
+        break;
+      }
+      const target = targets[index];
       try {
         const result = await sendPushToUser(
           target.userId,
@@ -268,6 +308,15 @@ export async function deliverDigestPushes(
         );
       }
     }
+
+    const closable = announcements
+      .filter(
+        (row) =>
+          row.emailSentAt !== null && !unfinishedAnnouncementKeys.has(String(row.id))
+      )
+      .map((row) => row.id);
+    await markAnnouncementPushSent(supabase, closable);
+
     logDuration(clock() - started, counts);
   } catch (error) {
     console.error(

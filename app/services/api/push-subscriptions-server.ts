@@ -17,17 +17,27 @@ function clipUserAgent(userAgent: string | null): string | null {
 }
 
 /**
- * Upserts by endpoint for the authenticated user only. An endpoint already owned by someone
- * else is left untouched: the browser key must not be used to take over another account.
+ * Upserts by endpoint for the authenticated user. An endpoint already owned by someone else is
+ * reassigned: the browser push endpoint belongs to the device, so the signed-in account takes it
+ * over (shared-device account switch).
  */
 export async function savePushSubscription(
   supabase: AdminClient,
   userId: number,
   input: PushSubscriptionInput,
   userAgent: string | null
-): Promise<"saved" | "conflict" | "failed"> {
+): Promise<"saved" | "failed"> {
   const now = new Date().toISOString();
   const agent = clipUserAgent(userAgent);
+  const fields = {
+    user_id: userId,
+    p256dh: input.keys.p256dh,
+    auth: input.keys.auth,
+    user_agent: agent,
+    last_used_at: now,
+    disabled_at: null as string | null,
+  };
+
   const { data: existing, error: readError } = await supabase
     .from("push_subscriptions")
     .select("id, user_id")
@@ -37,22 +47,13 @@ export async function savePushSubscription(
     console.error("[Web Push] 購読の確認に失敗しました:", readError.message);
     return "failed";
   }
-  if (existing && existing.user_id !== userId) {
-    return "conflict";
-  }
 
   if (existing) {
     const { error } = await supabase
       .from("push_subscriptions")
-      .update({
-        p256dh: input.keys.p256dh,
-        auth: input.keys.auth,
-        user_agent: agent,
-        last_used_at: now,
-        disabled_at: null,
-      })
+      .update(fields)
       .eq("id", existing.id)
-      .eq("user_id", userId);
+      .eq("endpoint", input.endpoint);
     if (error) {
       console.error("[Web Push] 購読の更新に失敗しました:", error.message);
       return "failed";
@@ -61,12 +62,8 @@ export async function savePushSubscription(
   }
 
   const { error } = await supabase.from("push_subscriptions").insert({
-    user_id: userId,
+    ...fields,
     endpoint: input.endpoint,
-    p256dh: input.keys.p256dh,
-    auth: input.keys.auth,
-    user_agent: agent,
-    last_used_at: now,
   });
   if (!error) {
     return "saved";
@@ -76,25 +73,11 @@ export async function savePushSubscription(
     return "failed";
   }
 
-  const { data: raced } = await supabase
-    .from("push_subscriptions")
-    .select("user_id")
-    .eq("endpoint", input.endpoint)
-    .maybeSingle();
-  if (!raced || raced.user_id !== userId) {
-    return "conflict";
-  }
+  // Concurrent insert: take over the raced row for this signed-in user.
   const { error: updateError } = await supabase
     .from("push_subscriptions")
-    .update({
-      p256dh: input.keys.p256dh,
-      auth: input.keys.auth,
-      user_agent: agent,
-      last_used_at: now,
-      disabled_at: null,
-    })
-    .eq("endpoint", input.endpoint)
-    .eq("user_id", userId);
+    .update(fields)
+    .eq("endpoint", input.endpoint);
   if (updateError) {
     console.error("[Web Push] 購読の更新に失敗しました:", updateError.message);
     return "failed";

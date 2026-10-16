@@ -199,6 +199,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 - `published_at`: NULL なら下書き
 - `target_statuses`（`active` / `trial` の1つ以上。CHECK）/ `target_membership_types`（`community` / `general` の1つ以上。CHECK。NULL は全種別。指定するとお試しユーザー（会員種別 NULL）には見えない）
 - `send_email`: メールでも一斉送信するか。Cron の日次バッチが送り、対象者全員に送り終えた日に `email_sent_at` を記録する（対象を変更すると NULL に戻す）
+- `push_sent_at`: Web Push の一斉送信を終えた日時（`email_sent_at` と独立。対象変更で NULL に戻す。過去完了分は新規購読者へ積まない）
 - `created_by`: 作成者（`users.id`、`ON DELETE SET NULL`）。`is_deleted` で論理削除
 
 ### 3.14 announcement_reads（お知らせの既読）
@@ -280,7 +281,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 ブラウザの Push 購読（[機能設計書](./specification.md)14.2節）。`endpoint` は UNIQUE。`p256dh` / `auth` は購読鍵。`disabled_at` は送信先が 404 / 410 を返した日時で、NULL の行だけ送る。
 
 - `user_id`（`users.id`、`ON DELETE CASCADE`）
-- RLS は有効化し、ポリシーは作らない。読み書きは `getServerAuth()` 済みの API から service_role で、書き込む `user_id` は認証済みの本人に固定する。他人の endpoint は上書き・削除しない
+- RLS は有効化し、ポリシーは作らない。読み書きは `getServerAuth()` 済みの API から service_role で、書き込む `user_id` は認証済みの本人に固定する。同じ endpoint を別アカウントが購読したら、端末の所有者としてその本人へ付け替える（共有端末）
 
 ### 3.23 push_logs（Web Push の送信ログ）
 

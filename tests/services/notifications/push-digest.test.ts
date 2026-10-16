@@ -7,6 +7,7 @@ vi.mock("@/app/services/notifications/push", () => ({
 import {
   EMAIL_KINDS,
   INACTIVITY_REMINDER_DAYS,
+  PUSH_DIGEST_TIME_BUDGET_MS,
   TRIAL_NURTURE_DAYS,
 } from "@/app/constants/notifications";
 import { planMilestoneEmails } from "@/app/lib/email-digest";
@@ -142,7 +143,7 @@ describe("deliverDigestPushes", () => {
     expect(logged).toContain("[Web Push] 定期配信");
   });
 
-  it("この実行の未完了・完了直後だけ送り、それより前のメール完了は送らない", async () => {
+  it("この実行の未完了・完了直後だけ送り、それより前のプッシュ完了は送らない", async () => {
     const { client, builders } = clientWith({
       email_kind_settings: { data: kindRows({ announcement: true }), error: null },
       email_settings: { data: settingsRow, error: null },
@@ -165,6 +166,7 @@ describe("deliverDigestPushes", () => {
               target_statuses: ["active"],
               target_membership_types: null,
               email_sent_at: sentSince,
+              push_sent_at: sentSince,
             },
             {
               id: 9,
@@ -172,6 +174,7 @@ describe("deliverDigestPushes", () => {
               target_statuses: ["active"],
               target_membership_types: null,
               email_sent_at: "2026-10-01T00:00:00.000Z",
+              push_sent_at: "2026-10-01T00:00:00.000Z",
             },
             {
               id: 10,
@@ -179,6 +182,15 @@ describe("deliverDigestPushes", () => {
               target_statuses: ["active"],
               target_membership_types: null,
               email_sent_at: null,
+              push_sent_at: null,
+            },
+            {
+              id: 11,
+              title: "メール完了後の再試行",
+              target_statuses: ["active"],
+              target_membership_types: null,
+              email_sent_at: "2026-10-15T12:00:00.000Z",
+              push_sent_at: null,
             },
           ],
           error: null,
@@ -189,7 +201,7 @@ describe("deliverDigestPushes", () => {
 
     await deliverDigestPushes(client as never, today, sentSince, () => 20);
 
-    expect(sendPushToUser).toHaveBeenCalledTimes(2);
+    expect(sendPushToUser).toHaveBeenCalledTimes(3);
     expect(sendPushToUser).toHaveBeenCalledWith(
       3,
       "announcement",
@@ -204,11 +216,27 @@ describe("deliverDigestPushes", () => {
       expect.objectContaining({ title: "未完了", url: "/announcements/10" }),
       expect.anything()
     );
+    expect(sendPushToUser).toHaveBeenCalledWith(
+      3,
+      "announcement",
+      "11",
+      expect.objectContaining({ title: "メール完了後の再試行", url: "/announcements/11" }),
+      expect.anything()
+    );
     const announcementQuery = builders.find((builder) => builder.table === "announcements");
     expect(announcementQuery?.eq).toHaveBeenCalledWith("send_email", true);
     expect(announcementQuery?.or).toHaveBeenCalledWith(
-      `email_sent_at.is.null,email_sent_at.gte.${sentSince}`
+      `push_sent_at.is.null,push_sent_at.gte.${sentSince}`
     );
+    const pushSentUpdate = builders.find(
+      (builder) =>
+        builder.table === "announcements" && (builder.update?.mock.calls.length ?? 0) > 0
+    );
+    expect(pushSentUpdate?.update.mock.calls[0]?.[0]).toEqual({
+      push_sent_at: expect.any(String),
+    });
+    expect(pushSentUpdate?.in.mock.calls[0]?.[1]).toEqual(expect.arrayContaining([8, 11]));
+    expect(pushSentUpdate?.in.mock.calls[0]?.[1]).not.toContain(10);
   });
 
   it("お知らせが1000件を超えても、次のページの新しいお知らせを送る", async () => {
@@ -218,6 +246,7 @@ describe("deliverDigestPushes", () => {
       target_statuses: ["active"],
       target_membership_types: null,
       email_sent_at: "2026-01-01T00:00:00.000Z",
+      push_sent_at: "2026-01-01T00:00:00.000Z",
     }));
     const { client, builders } = clientWith({
       email_kind_settings: { data: kindRows({ announcement: true }), error: null },
@@ -236,6 +265,7 @@ describe("deliverDigestPushes", () => {
               target_statuses: ["active"],
               target_membership_types: null,
               email_sent_at: null,
+              push_sent_at: null,
             },
           ],
           error: null,
@@ -287,6 +317,34 @@ describe("deliverDigestPushes", () => {
     const progressQueries = builders.filter((builder) => builder.table === "user_progress");
     expect(progressQueries[0]?.range).toHaveBeenCalledWith(0, 999);
     expect(progressQueries[1]?.range).toHaveBeenCalledWith(1000, 1999);
+  });
+
+  it("時間上限に達したらそれ以上送らない", async () => {
+    let now = 0;
+    const { client } = clientWith({
+      email_kind_settings: {
+        data: kindRows({ inactivity_reminder: true }),
+        error: null,
+      },
+      email_settings: { data: settingsRow, error: null },
+      users: [
+        { data: [inactiveUser], error: null },
+        { data: [], error: null },
+      ],
+      user_progress: { data: [], error: null },
+      submissions: { data: [], error: null },
+      learning_themes: { data: [], error: null },
+    });
+
+    await deliverDigestPushes(client as never, today, sentSince, () => {
+      const value = now;
+      now = PUSH_DIGEST_TIME_BUDGET_MS + 1;
+      return value;
+    });
+
+    expect(sendPushToUser).not.toHaveBeenCalled();
+    const logged = vi.mocked(console.warn).mock.calls.flat().join(" ");
+    expect(logged).toContain("時間上限");
   });
 
   it("抽出に失敗しても例外を外に出さない", async () => {

@@ -1489,11 +1489,11 @@ X 向けの共有リンク（`https://twitter.com/intent/tweet?text=...&url=...`
 ### 14.2 Web Push
 
 - **環境変数**: `NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY`（購読に使う公開鍵）/ `WEB_PUSH_VAPID_PRIVATE_KEY`（サーバーのみ。レスポンス・ログ・クライアントバンドルに出さない）/ `WEB_PUSH_SUBJECT`（`mailto:`）。いずれか欠ける、または subject が `mailto:` でないときは機能全体を無効にする（購読ボタンを出さず、送信もしない）。生成は `bunx web-push generate-vapid-keys`
-- **購読 API**: `POST /api/push/subscriptions` は `endpoint` と `keys.p256dh` / `keys.auth` を upsert し、`disabled_at` を NULL に戻す。`DELETE` は endpoint を指定して本人の行だけ消す。認証は `requireLearnerApi()`（`getServerAuth()`）。未認証 401、`rejected` 403、スキーマ不正 400。書き込みは service_role で、`user_id` は認証済みの本人に固定する。他人の endpoint は上書きも削除もしない（409）
+- **購読 API**: `POST /api/push/subscriptions` は `endpoint` と `keys.p256dh` / `keys.auth` を upsert し、`disabled_at` を NULL に戻す。`endpoint` は `https:` かつ既知のプッシュサービスホストだけを許す。`DELETE` は endpoint を指定して本人の行だけ消す。認証は `requireLearnerApi()`（`getServerAuth()`）。未認証 401、`rejected` 403、スキーマ不正 400。書き込みは service_role で、`user_id` は認証済みの本人に固定する。同じ endpoint が別アカウントに紐づいていても、端末の購読として呼び出した本人へ付け替える。ログアウト時は端末の購読解除を試みる
 - **購読 UI**: ホームのインストール案内の隣。通知許可はボタン押下でのみ要求する。iOS で standalone でないときは「ホーム画面に追加すると通知を受け取れます」と出し、ボタンは出さない
-- **送信**: `sendPushToUser()`。`push_logs` への INSERT を claim とし、`UNIQUE (user_id, kind, reference_key)` 違反なら送らない。有効な購読すべてに `{ title, body, url }` だけを送る（個人情報は入れない。`url` はアプリの相対パス）。404 / 410 は `disabled_at` を記録する。失敗は握りつぶし、承認・Cron・お知らせの結果を変えない
-- **種別**: `approved`（`approveUser()` 成功時）/ `inactivity_reminder` / `trial_nurture` / `announcement`（`send_email = true` の一斉送信だけ。実行開始時点で未完了のもの、またはその実行中にメール完了を記録したものだけを、`published_at` 順にページングして送る。それより前に完了したお知らせは購読済み・新規購読の受講生へ送らない）。`weekly_digest` / `signup` / `upgraded` / 解約系は送らない。有効・無効は `email_kind_settings.push_enabled`（既定 false。`/admin/emails` のトグル）。送る日・曜日はメールと同じ列で、プッシュ用の定数や別上限は持たない。メールの `email_opt_out_at` と全体スイッチはプッシュに適用しない。定期実行は `runEmailDigest()` の同じ対象抽出を使い、所要時間をログに出す（本イシューでは上限を設けない）
-- **サービスワーカー**: `push` は `showNotification`、`notificationclick` は既存タブを `focus` し、無ければ `openWindow`。通知の URL をキャッシュしない
+- **送信**: `sendPushToUser()`。VAPID 設定のあと `push_logs` へ INSERT して claim する。`UNIQUE (user_id, kind, reference_key)` 違反なら送らない。有効な購読すべてに `{ title, body, url }` だけを送る（個人情報は入れない。`url` はアプリの相対パス）。`sendNotification` にはタイムアウトを付ける。404 / 410 / 許可外ホストは `disabled_at` を記録する。1件も送れなければ claim を削除して再試行可能にする。失敗は握りつぶし、承認・Cron・お知らせの結果を変えない
+- **種別**: `approved`（`approveUser()` 成功時）/ `inactivity_reminder` / `trial_nurture` / `announcement`（`send_email = true` の一斉送信だけ。`push_sent_at` が未完了、またはその実行中に完了したものだけを `published_at` 順にページングして送る。メール完了印とは独立。それより前にプッシュ完了したお知らせは購読済み・新規購読の受講生へ送らない。メール一斉が終わったお知らせだけ `push_sent_at` を付ける）。`weekly_digest` / `signup` / `upgraded` / 解約系は送らない。有効・無効は `email_kind_settings.push_enabled`（既定 false。`/admin/emails` のトグル）。送る日・曜日はメールと同じ列で、プッシュ用の定数や別上限は持たない。メールの `email_opt_out_at` と全体スイッチはプッシュに適用しない。定期実行は `runEmailDigest()` のあとで送り、所要時間の上限（`PUSH_DIGEST_TIME_BUDGET_MS`）とログを出す
+- **サービスワーカー**: `push` は `showNotification`、`notificationclick` は既存タブを `focus` したあと `navigate` し、無ければ `openWindow`。通知の URL をキャッシュしない
 
 ---
 

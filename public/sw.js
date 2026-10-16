@@ -124,7 +124,13 @@ self.addEventListener("notificationclick", (event) => {
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
       for (const client of windowClients) {
         if (new URL(client.url).origin === self.location.origin && "focus" in client) {
-          return client.focus();
+          // focus alone leaves the existing tab on its current URL; navigate to the payload path.
+          return client.focus().then((focused) => {
+            if (focused && "navigate" in focused) {
+              return focused.navigate(target);
+            }
+            return focused;
+          });
         }
       }
       return self.clients.openWindow(target);

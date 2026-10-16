@@ -10,8 +10,8 @@ vi.mock("@/app/services/api/supabase-server", () => ({
 }));
 
 import { after } from "next/server";
-import { sendNotification } from "web-push";
-import { EMAIL_KIND } from "@/app/constants/notifications";
+import { sendNotification, setVapidDetails } from "web-push";
+import { EMAIL_KIND, WEB_PUSH_SEND_TIMEOUT_MS } from "@/app/constants/notifications";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { scheduleApprovedPush, sendPushToUser } from "@/app/services/notifications/push";
 import { createMockSupabaseClient } from "../../helpers/supabase-mock";
@@ -24,6 +24,7 @@ async function runScheduled() {
 }
 
 const payload = { title: "件名", body: "本文", url: "/learn" };
+const endpoint = "https://fcm.googleapis.com/fcm/send/device-1";
 
 function enablePush() {
   vi.stubEnv("NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY", "public-key");
@@ -38,6 +39,7 @@ beforeEach(() => {
   vi.mocked(after).mockImplementation((task) => {
     scheduled.push(task as () => Promise<unknown>);
   });
+  vi.mocked(setVapidDetails).mockImplementation(() => undefined);
   enablePush();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -67,7 +69,21 @@ describe("sendPushToUser", () => {
     expect(sendNotification).not.toHaveBeenCalled();
   });
 
-  it("404 / 410 の購読は無効化し、秘密鍵はログに出さない", async () => {
+  it("setVapidDetails が throw したら claim せず failed を返す", async () => {
+    vi.mocked(setVapidDetails).mockImplementation(() => {
+      throw new Error("bad vapid private-key");
+    });
+    const supabase = createMockSupabaseClient();
+
+    await expect(
+      sendPushToUser(1, EMAIL_KIND.APPROVED, "t", payload, supabase as never)
+    ).resolves.toBe("failed");
+    expect(supabase.from).not.toHaveBeenCalled();
+    const logged = vi.mocked(console.error).mock.calls.flat().join(" ");
+    expect(logged).not.toContain("private-key");
+  });
+
+  it("404 / 410 の購読は無効化し、秘密鍵はログに出さない。送れなければ claim を解放する", async () => {
     vi.mocked(sendNotification).mockRejectedValue(
       Object.assign(new Error("gone private-key"), { statusCode: 410 })
     );
@@ -79,7 +95,7 @@ describe("sendPushToUser", () => {
         ],
         push_subscriptions: [
           {
-            data: [{ id: 9, endpoint: "https://push.example/1", p256dh: "p", auth: "a" }],
+            data: [{ id: 9, endpoint, p256dh: "p", auth: "a" }],
             error: null,
           },
           { data: null, error: null },
@@ -95,6 +111,21 @@ describe("sendPushToUser", () => {
       return supabase.from.mock.calls[index]?.[0] === "push_subscriptions" && index > 0;
     });
     expect(subscriptionUpdate).toBeDefined();
+    const claimDelete = supabase.from.mock.results.find((_result, index) => {
+      const builder = supabase.from.mock.results[index]?.value as {
+        delete?: { mock?: { calls: unknown[] } };
+      };
+      return (
+        supabase.from.mock.calls[index]?.[0] === "push_logs" &&
+        (builder.delete?.mock?.calls.length ?? 0) > 0
+      );
+    });
+    expect(claimDelete).toBeDefined();
+    expect(sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint }),
+      expect.any(String),
+      expect.objectContaining({ timeout: WEB_PUSH_SEND_TIMEOUT_MS })
+    );
     const logged = vi.mocked(console.error).mock.calls.flat().join(" ");
     expect(logged).not.toContain("private-key");
   });
@@ -109,7 +140,7 @@ describe("sendPushToUser", () => {
         ],
         push_subscriptions: [
           {
-            data: [{ id: 9, endpoint: "https://push.example/1", p256dh: "p", auth: "a" }],
+            data: [{ id: 9, endpoint, p256dh: "p", auth: "a" }],
             error: null,
           },
         ],
@@ -124,7 +155,7 @@ describe("sendPushToUser", () => {
     expect(logged).not.toContain("private-key");
   });
 
-  it("購読が無ければ送らない", async () => {
+  it("購読が無ければ送らず claim を解放する", async () => {
     const supabase = createMockSupabaseClient({
       tableResults: {
         push_logs: [
@@ -139,6 +170,16 @@ describe("sendPushToUser", () => {
       sendPushToUser(1, EMAIL_KIND.APPROVED, "t", payload, supabase as never)
     ).resolves.toBe("skipped");
     expect(sendNotification).not.toHaveBeenCalled();
+    const claimDelete = supabase.from.mock.results.find((_result, index) => {
+      const builder = supabase.from.mock.results[index]?.value as {
+        delete?: { mock?: { calls: unknown[] } };
+      };
+      return (
+        supabase.from.mock.calls[index]?.[0] === "push_logs" &&
+        (builder.delete?.mock?.calls.length ?? 0) > 0
+      );
+    });
+    expect(claimDelete).toBeDefined();
   });
 });
 
@@ -168,7 +209,7 @@ describe("scheduleApprovedPush", () => {
         ],
         push_subscriptions: [
           {
-            data: [{ id: 3, endpoint: "https://push.example/1", p256dh: "p", auth: "a" }],
+            data: [{ id: 3, endpoint, p256dh: "p", auth: "a" }],
             error: null,
           },
           { data: null, error: null },
@@ -181,12 +222,13 @@ describe("scheduleApprovedPush", () => {
     await runScheduled();
 
     expect(sendNotification).toHaveBeenCalledWith(
-      expect.objectContaining({ endpoint: "https://push.example/1" }),
+      expect.objectContaining({ endpoint }),
       JSON.stringify({
         title: "本登録が完了しました",
         body: "ダッシュボードから学習を続けられます",
         url: "/",
-      })
+      }),
+      expect.objectContaining({ timeout: WEB_PUSH_SEND_TIMEOUT_MS })
     );
   });
 });

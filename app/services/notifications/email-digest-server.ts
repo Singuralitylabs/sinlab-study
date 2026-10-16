@@ -1173,8 +1173,9 @@ export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<
     return skip("別の実行が進行中です");
   }
 
-  // Before sendDigest writes email_sent_at. Push keeps completions from this run and leaves
-  // earlier completions out, so a historical send_email row is not delivered once to everyone.
+  // Before sendDigest / deliverDigestPushes write completion stamps. Push uses push_sent_at
+  // (independent of email_sent_at) so a crash after mail completion still retries, while earlier
+  // push completions stay out and do not pile onto new subscribers.
   const announcementSentSince = new Date().toISOString();
   try {
     const emailResult = emailSkipReason

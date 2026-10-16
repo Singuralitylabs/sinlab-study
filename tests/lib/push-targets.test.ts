@@ -113,7 +113,7 @@ describe("selectDigestPushTargets", () => {
           title: "もくもく会",
           target_statuses: ["active"],
           target_membership_types: null,
-          emailSentAt: null,
+          pushSentAt: null,
         },
       ],
       announcementSentSince: sentSince,
@@ -133,7 +133,7 @@ describe("selectDigestPushTargets", () => {
     ]);
   });
 
-  it("実行より前にメール完了したお知らせは対象者に積まない", () => {
+  it("実行より前にプッシュ完了したお知らせは対象者に積まない", () => {
     const targets = selectDigestPushTargets({
       users: [activeLearner],
       today,
@@ -147,14 +147,14 @@ describe("selectDigestPushTargets", () => {
           title: "過去",
           target_statuses: ["active"],
           target_membership_types: null,
-          emailSentAt: "2026-10-01T00:00:00.000Z",
+          pushSentAt: "2026-10-01T00:00:00.000Z",
         },
         {
           id: 2,
           title: "この実行",
           target_statuses: ["active"],
           target_membership_types: null,
-          emailSentAt: sentSince,
+          pushSentAt: sentSince,
         },
       ],
       announcementSentSince: sentSince,

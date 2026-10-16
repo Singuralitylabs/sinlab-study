@@ -1,6 +1,12 @@
 import { sendNotification, setVapidDetails } from "web-push";
-import { EMAIL_KIND, PUSH_KINDS, type PushKind } from "@/app/constants/notifications";
+import {
+  EMAIL_KIND,
+  PUSH_KINDS,
+  type PushKind,
+  WEB_PUSH_SEND_TIMEOUT_MS,
+} from "@/app/constants/notifications";
 import { runAfterResponse } from "@/app/lib/after-response";
+import { isAllowedPushEndpoint } from "@/app/lib/push-endpoint";
 import type { PushPayload } from "@/app/lib/push-targets";
 import { isWebPushConfigured } from "@/app/lib/web-push-config";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
@@ -44,11 +50,34 @@ function isAppPath(url: string): boolean {
   return url.startsWith("/") && !url.startsWith("//") && !/\s/.test(url);
 }
 
+async function releaseClaim(client: AdminClient, id: number): Promise<void> {
+  const { error } = await client.from("push_logs").delete().eq("id", id);
+  if (error) {
+    console.error("[Web Push] push_logs 解放エラー:", error.message);
+  }
+}
+
+async function disableSubscription(
+  client: AdminClient,
+  userId: number,
+  subscriptionId: number
+): Promise<void> {
+  const { error } = await client
+    .from("push_subscriptions")
+    .update({ disabled_at: new Date().toISOString() })
+    .eq("id", subscriptionId)
+    .eq("user_id", userId);
+  if (error) {
+    console.error("[Web Push] 購読の無効化に失敗しました:", error.message);
+  }
+}
+
 /**
  * Claims `push_logs` then sends `{ title, body, url }` to every live subscription of `userId`.
- * A UNIQUE violation means this event was already claimed, so nothing is sent. 404 / 410 disable
- * that subscription. Any other failure is stored on the log and swallowed: callers (approval,
- * cron, announcement broadcast) must keep their own result.
+ * VAPID is configured before the claim so a bad key does not leave a stuck log row. A UNIQUE
+ * violation means this event was already claimed. Total failure (no delivery) deletes the claim
+ * so a later run can retry. 404 / 410 / disallowed endpoints disable that subscription. Any other
+ * per-subscription failure is swallowed: callers must keep their own result.
  */
 export async function sendPushToUser(
   userId: number,
@@ -60,6 +89,13 @@ export async function sendPushToUser(
   const config = readConfig();
   if (!config || !PUSH_KIND_SET.has(kind) || !isAppPath(payload.url)) {
     return "skipped";
+  }
+
+  try {
+    setVapidDetails(config.subject, config.publicKey, config.privateKey);
+  } catch (error) {
+    console.error("[Web Push] VAPID 設定に失敗しました:", publicError(error));
+    return "failed";
   }
 
   const client = supabase ?? (await createAdminSupabaseClient());
@@ -84,28 +120,31 @@ export async function sendPushToUser(
     .is("disabled_at", null);
 
   if (listError) {
-    await recordLog(client, claimed.id, { error: "購読の取得に失敗しました" });
+    await releaseClaim(client, claimed.id);
     console.error("[Web Push] 購読の取得に失敗しました:", listError.message);
     return "failed";
   }
 
   const live = subscriptions ?? [];
   if (live.length === 0) {
-    await recordLog(client, claimed.id, { error: "有効な購読がありません" });
+    await releaseClaim(client, claimed.id);
     return "skipped";
   }
 
-  setVapidDetails(config.subject, config.publicKey, config.privateKey);
   let sent = 0;
-  const failures: string[] = [];
   for (const subscription of live) {
+    if (!isAllowedPushEndpoint(subscription.endpoint)) {
+      await disableSubscription(client, userId, subscription.id);
+      continue;
+    }
     try {
       await sendNotification(
         {
           endpoint: subscription.endpoint,
           keys: { p256dh: subscription.p256dh, auth: subscription.auth },
         },
-        JSON.stringify({ title: payload.title, body: payload.body, url: payload.url })
+        JSON.stringify({ title: payload.title, body: payload.body, url: payload.url }),
+        { timeout: WEB_PUSH_SEND_TIMEOUT_MS }
       );
       sent += 1;
       const { error: touchError } = await client
@@ -119,39 +158,26 @@ export async function sendPushToUser(
     } catch (error) {
       const status = statusCodeOf(error);
       if (status === 404 || status === 410) {
-        const { error: disableError } = await client
-          .from("push_subscriptions")
-          .update({ disabled_at: new Date().toISOString() })
-          .eq("id", subscription.id)
-          .eq("user_id", userId);
-        if (disableError) {
-          console.error("[Web Push] 購読の無効化に失敗しました:", disableError.message);
-        }
-        failures.push(String(status));
+        await disableSubscription(client, userId, subscription.id);
       } else {
         console.error("[Web Push] 送信に失敗しました:", publicError(error));
-        failures.push(status === null ? "send failed" : String(status));
       }
     }
   }
 
   if (sent > 0) {
-    await recordLog(client, claimed.id, { sent_at: new Date().toISOString(), error: null });
+    const { error } = await client
+      .from("push_logs")
+      .update({ sent_at: new Date().toISOString(), error: null })
+      .eq("id", claimed.id);
+    if (error) {
+      console.error("[Web Push] push_logs 更新エラー:", error.message);
+    }
     return "sent";
   }
-  await recordLog(client, claimed.id, { error: failures.join(",") || "send failed" });
+  // No delivery: drop the claim so inactivity / trial day keys and announcements can retry.
+  await releaseClaim(client, claimed.id);
   return "failed";
-}
-
-async function recordLog(
-  client: AdminClient,
-  id: number,
-  patch: { sent_at?: string; error: string | null }
-): Promise<void> {
-  const { error } = await client.from("push_logs").update(patch).eq("id", id);
-  if (error) {
-    console.error("[Web Push] push_logs 更新エラー:", error.message);
-  }
 }
 
 /**
