@@ -1,12 +1,15 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
 import { PRIVACY_URL } from "@/app/constants/legal";
+import { PLAN_PAGE_TITLE } from "@/app/constants/stripe";
 import { USER_ROLE } from "@/app/constants/user";
 import { fetchNotificationEmailState } from "@/app/services/api/notification-email-server";
 import { fetchUserEmailOptOutAt } from "@/app/services/api/user-email-server";
 import { fetchUserDisplayName } from "@/app/services/api/user-profile-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmailPreferencesForm } from "./EmailPreferencesForm";
 import { NotificationEmailForm } from "./NotificationEmailForm";
@@ -71,6 +74,18 @@ export default async function SettingsPage() {
                 pendingExpiresAt={notificationEmail.pendingExpiresAt}
               />
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="space-y-4 p-6">
+            <h2 className="text-lg font-semibold">プラン</h2>
+            <p className="text-sm text-muted-foreground">
+              会員プランの内容と、お申し込み・契約状況を確認できます。
+            </p>
+            <Button asChild variant="outline">
+              <Link href="/upgrade">{PLAN_PAGE_TITLE}</Link>
+            </Button>
           </CardContent>
         </Card>
 

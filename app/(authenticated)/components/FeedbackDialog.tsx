@@ -2,7 +2,7 @@
 
 import { Loader2, MessageSquarePlus } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import {
   FEEDBACK_BODY_MAX_LENGTH,
   FEEDBACK_CATEGORIES,
@@ -23,10 +23,16 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-export function FeedbackDialog() {
+type FeedbackDialogProps = {
+  defaultCategory?: FeedbackCategory;
+  /** Custom open control (e.g.「問い合わせる」on /upgrade). Defaults to the sidenav entry. */
+  trigger?: ReactNode;
+};
+
+export function FeedbackDialog({ defaultCategory = "improvement", trigger }: FeedbackDialogProps) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const [category, setCategory] = useState<FeedbackCategory>("improvement");
+  const [category, setCategory] = useState<FeedbackCategory>(defaultCategory);
   const [body, setBody] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +61,7 @@ export function FeedbackDialog() {
       }
       setSuccess(true);
       setBody("");
-      setCategory("improvement");
+      setCategory(defaultCategory);
     } catch {
       setError("送信に失敗しました。時間をおいて再度お試しください。");
     } finally {
@@ -68,26 +74,36 @@ export function FeedbackDialog() {
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) {
+        if (next) {
+          setCategory(defaultCategory);
+        } else {
           setError(null);
           setSuccess(false);
         }
       }}
     >
       <DialogTrigger asChild>
-        <button
-          type="button"
-          className="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:text-foreground hover:bg-accent w-full text-left"
-        >
-          <MessageSquarePlus className="h-5 w-5" />
-          フィードバック
-        </button>
+        {trigger ?? (
+          <button
+            type="button"
+            className="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:text-foreground hover:bg-accent w-full text-left"
+          >
+            <MessageSquarePlus className="h-5 w-5" />
+            フィードバック
+          </button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>フィードバックを送る</DialogTitle>
+          <DialogTitle>
+            {defaultCategory === "plan_inquiry"
+              ? "プランについて問い合わせる"
+              : "フィードバックを送る"}
+          </DialogTitle>
           <DialogDescription>
-            不具合・改善要望・質問などをお送りください。ページの情報は自動で付きます。
+            {defaultCategory === "plan_inquiry"
+              ? "コミュニティ会員への変更など、プランに関するご相談をお送りください。"
+              : "不具合・改善要望・質問などをお送りください。ページの情報は自動で付きます。"}
           </DialogDescription>
         </DialogHeader>
         {success ? (

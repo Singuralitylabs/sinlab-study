@@ -180,7 +180,7 @@ export default async function HomePage() {
         </Card>
       )}
 
-      <HomeQuickLinks stripeEnabled={stripeEnabled} />
+      <HomeQuickLinks />
 
       {showReviewList && <ReviewListHomeLine count={unovercomeReviewCount} />}
 

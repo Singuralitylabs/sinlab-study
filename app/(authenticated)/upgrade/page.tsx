@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
+import { isFeedbackEnabled } from "@/app/constants/feedback";
 import {
   BILLING_ANCHOR_DAY_OF_MONTH,
   DISPLAY_MONTHLY_PRICE_JPY,
@@ -8,9 +9,10 @@ import {
   isStripeEnabled,
   logDisplayPriceDrift,
   MANAGE_SUBSCRIPTION_BUTTON_LABEL,
+  PLAN_PAGE_TITLE,
   SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
 } from "@/app/constants/stripe";
-import { USER_STATUS } from "@/app/constants/user";
+import { USER_MEMBERSHIP, USER_MEMBERSHIP_LABELS, USER_STATUS } from "@/app/constants/user";
 import {
   type SubscriptionPeriodFields,
   subscriptionPeriodLabel,
@@ -23,6 +25,8 @@ import {
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { ManageSubscriptionButton } from "./ManageSubscriptionButton";
+import { PlanComparisonTable } from "./PlanComparisonTable";
+import { PlanInquiryButton } from "./PlanInquiryButton";
 import { UpgradeCheckoutButton } from "./UpgradeCheckoutButton";
 
 const FALLBACK_MONTHLY_PRICE_LABEL = formatMonthlyJpyPrice(DISPLAY_MONTHLY_PRICE_JPY);
@@ -32,14 +36,23 @@ const CANCELLATION_POLICY_TEXT = `解約時の日割り計算・返金はあり�
 const MINOR_CONSENT_NOTICE =
   "未成年者は保護者のアカウントにより、保護者の同意を得た上でお申し込みください";
 
+const COMMUNITY_APPLY_TEXT =
+  "コミュニティ会員（シンラボ会員）への変更をご希望の方は、下記の問い合わせフォームまでご連絡ください。運営が内容を確認し、承認後にご案内します。承認までお支払いは発生しません。";
+
+const COMMUNITY_APPLY_TEXT_NO_FEEDBACK =
+  "コミュニティ会員（シンラボ会員）への変更をご希望の方は、運営までご連絡ください。運営が内容を確認し、承認後にご案内します。承認までお支払いは発生しません。";
+
 export default async function UpgradePage() {
-  const { userId, userStatus } = await getServerAuth();
+  const { userId, userStatus, membershipType } = await getServerAuth();
 
   if (!userId) {
     redirect("/login");
   }
 
   const stripeEnabled = isStripeEnabled();
+  const feedbackEnabled = isFeedbackEnabled();
+  const isCommunity = membershipType === USER_MEMBERSHIP.COMMUNITY;
+  const isGeneral = membershipType === USER_MEMBERSHIP.GENERAL;
 
   let subscriptionFetchFailed = false;
   let fetchedSubscription: ({ status: string } & SubscriptionPeriodFields) | null = null;
@@ -87,15 +100,16 @@ export default async function UpgradePage() {
   return (
     <div className="max-w-2xl mx-auto">
       <PageTitle
-        title="アップグレード"
-        description="一般有料会員になると、すべての学習コンテンツを利用できます"
+        title={PLAN_PAGE_TITLE}
+        description="会員プランの内容と、お申し込み・契約状況を確認できます"
       />
 
       <Card className="mt-6">
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
           {userStatus === USER_STATUS.TRIAL &&
             (stripeEnabled ? (
               <>
+                <PlanComparisonTable />
                 {monthlyPriceLabel && <p className="text-2xl font-bold">{monthlyPriceLabel}</p>}
                 <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
                   <li>すべての学習コンテンツ（動画・テキスト・演習）を閲覧・提出できます</li>
@@ -112,7 +126,7 @@ export default async function UpgradePage() {
                     日）までの日割り料金となります（登録タイミングによっては初回分が発生しない場合があります）
                   </li>
                   <li>
-                    解約は、本画面（プラン・お支払い）の「{MANAGE_SUBSCRIPTION_BUTTON_LABEL}
+                    解約は、本画面（{PLAN_PAGE_TITLE}）の「{MANAGE_SUBSCRIPTION_BUTTON_LABEL}
                     」からいつでもお手続きできます
                   </li>
                   <li>{CANCELLATION_POLICY_TEXT}</li>
@@ -128,37 +142,84 @@ export default async function UpgradePage() {
               </>
             ) : (
               <p className="text-sm text-muted-foreground">
-                アップグレード機能は現在準備中です。しばらくお待ちください。
+                プランの確認・変更機能は現在準備中です。しばらくお待ちください。
               </p>
             ))}
 
-          {userStatus === USER_STATUS.ACTIVE &&
-            (!stripeEnabled ? (
-              <p className="text-sm text-muted-foreground">
-                既に本登録済みです。すべての学習コンテンツをご利用いただけます。
-              </p>
-            ) : subscriptionFetchFailed ? (
-              <>
-                <p className="text-sm text-destructive">
-                  ご契約状況の取得に失敗しました。時間をおいてページを再読み込みしてください。
+          {userStatus === USER_STATUS.ACTIVE && isCommunity && (
+            <div className="space-y-3">
+              <p className="text-sm">現在のプラン：{USER_MEMBERSHIP_LABELS.community}</p>
+              {!stripeEnabled ? (
+                <p className="text-sm text-muted-foreground">お支払いは運営の案内に従います。</p>
+              ) : subscriptionFetchFailed ? (
+                <>
+                  <p className="text-sm text-destructive">
+                    ご契約状況の取得に失敗しました。時間をおいてページを再読み込みしてください。
+                  </p>
+                  <ManageSubscriptionButton />
+                </>
+              ) : subscription ? (
+                <>
+                  <p className="text-sm">
+                    ご契約中です
+                    {periodLabel && `（${periodLabel}）`}
+                  </p>
+                  <ManageSubscriptionButton />
+                  <p className="text-sm text-muted-foreground">{CANCELLATION_POLICY_TEXT}</p>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">お支払いは運営の案内に従います。</p>
+              )}
+            </div>
+          )}
+
+          {userStatus === USER_STATUS.ACTIVE && !isCommunity && (
+            <div className="space-y-6">
+              {isGeneral && (
+                <p className="text-sm">現在のプラン：{USER_MEMBERSHIP_LABELS.general}</p>
+              )}
+
+              {!stripeEnabled ? (
+                <p className="text-sm text-muted-foreground">
+                  既に本登録済みです。すべての学習コンテンツをご利用いただけます。
                 </p>
-                {/* Keep the billing-management/cancel entry even while contract status is unknown (/api/stripe/portal returns 404 without a contract, so pressing it is safe). */}
-                <ManageSubscriptionButton />
-              </>
-            ) : subscription ? (
-              <>
-                <p className="text-sm">
-                  ご契約中です
-                  {periodLabel && `（${periodLabel}）`}
+              ) : subscriptionFetchFailed ? (
+                <>
+                  <p className="text-sm text-destructive">
+                    ご契約状況の取得に失敗しました。時間をおいてページを再読み込みしてください。
+                  </p>
+                  {/* Keep the billing-management/cancel entry even while contract status is unknown (/api/stripe/portal returns 404 without a contract, so pressing it is safe). */}
+                  <ManageSubscriptionButton />
+                </>
+              ) : subscription ? (
+                <>
+                  <p className="text-sm">
+                    ご契約中です
+                    {periodLabel && `（${periodLabel}）`}
+                  </p>
+                  <ManageSubscriptionButton />
+                  <p className="text-sm text-muted-foreground">{CANCELLATION_POLICY_TEXT}</p>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  既に本登録済みです。すべての学習コンテンツをご利用いただけます。
                 </p>
-                <ManageSubscriptionButton />
-                <p className="text-sm text-muted-foreground">{CANCELLATION_POLICY_TEXT}</p>
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                既に本登録済みです。すべての学習コンテンツをご利用いただけます。
-              </p>
-            ))}
+              )}
+
+              {isGeneral && (
+                <div className="space-y-4 border-t pt-6">
+                  <h2 className="text-base font-semibold">
+                    {USER_MEMBERSHIP_LABELS.community}プランのご案内
+                  </h2>
+                  <PlanComparisonTable />
+                  <p className="text-sm text-muted-foreground">
+                    {feedbackEnabled ? COMMUNITY_APPLY_TEXT : COMMUNITY_APPLY_TEXT_NO_FEEDBACK}
+                  </p>
+                  {feedbackEnabled && <PlanInquiryButton />}
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -138,7 +138,7 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
       "お支払いを確認し、一般有料会員へのご登録が完了しました。すべての学習コンテンツをご利用いただけます。",
       "料金: {{monthly_price}}",
       "次回のお支払い予定日: {{next_billing_date}}",
-      "お支払い方法の変更や解約は、アップグレードページの「お支払い情報の管理・解約」から行えます。",
+      "お支払い方法の変更や解約は、プランの確認・変更ページの「お支払い情報の管理・解約」から行えます。",
     ].join("\n\n"),
     placeholders: {
       monthly_price: "Stripe で確認できた月額料金（確認できないときは空で、その行は出ない）",
@@ -153,7 +153,7 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
     body: [
       "一般有料会員の解約のお手続きを受け付けました。",
       "{{access_until}}、引き続きすべての学習コンテンツをご利用いただけます。",
-      "期限までは、アップグレードページの「お支払い情報の管理・解約」から解約を取り消すことができます。",
+      "期限までは、プランの確認・変更ページの「お支払い情報の管理・解約」から解約を取り消すことができます。",
     ].join("\n\n"),
     placeholders: {
       access_until:
@@ -168,7 +168,7 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
     body: [
       "一般有料会員の期間が終了し、お試しユーザーに戻りました。",
       "お試し公開の学習コンテンツは引き続きご利用いただけます。",
-      "一般有料会員は、アップグレードページからいつでも再開できます。",
+      "一般有料会員は、プランの確認・変更ページからいつでも再開できます。",
     ].join("\n\n"),
   }),
   weekly_digest: defs({

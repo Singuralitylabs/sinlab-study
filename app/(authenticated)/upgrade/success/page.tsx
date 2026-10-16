@@ -108,7 +108,7 @@ export default async function UpgradeSuccessPage({
               <XCircle className="h-12 w-12 text-destructive" />
               <p className="text-sm text-muted-foreground">{errorMessage}</p>
               <Button asChild variant="outline">
-                <Link href="/upgrade">アップグレードページへ戻る</Link>
+                <Link href="/upgrade">プランの確認・変更へ戻る</Link>
               </Button>
             </>
           )}
