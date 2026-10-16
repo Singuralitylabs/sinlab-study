@@ -109,7 +109,7 @@ export default async function UpgradePage() {
           {userStatus === USER_STATUS.TRIAL &&
             (stripeEnabled ? (
               <>
-                <PlanComparisonTable />
+                <PlanComparisonTable generalPriceLabel={monthlyPriceLabel} />
                 {monthlyPriceLabel && <p className="text-2xl font-bold">{monthlyPriceLabel}</p>}
                 <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
                   <li>すべての学習コンテンツ（動画・テキスト・演習）を閲覧・提出できます</li>
