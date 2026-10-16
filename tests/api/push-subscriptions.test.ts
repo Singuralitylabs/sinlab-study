@@ -93,6 +93,12 @@ describe("POST /api/push/subscriptions", () => {
       null
     );
   });
+
+  it("購読上限超過は409", async () => {
+    vi.mocked(savePushSubscription).mockResolvedValue("limit_exceeded");
+
+    expect((await post(subscription)).status).toBe(409);
+  });
 });
 
 describe("DELETE /api/push/subscriptions", () => {

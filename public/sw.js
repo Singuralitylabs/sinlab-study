@@ -137,9 +137,11 @@ self.addEventListener("notificationclick", (event) => {
           // navigate() may resolve to null when the navigation is refused; fall back then too.
           return client.focus().then((focused) => {
             if (focused && "navigate" in focused) {
+              // navigate() may reject (uncontrolled client) or resolve null; always open then.
               return focused
                 .navigate(target)
-                .then((navigated) => navigated ?? self.clients.openWindow(target));
+                .then((navigated) => navigated ?? self.clients.openWindow(target))
+                .catch(() => self.clients.openWindow(target));
             }
             return self.clients.openWindow(target);
           });

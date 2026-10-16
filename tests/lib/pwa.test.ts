@@ -291,7 +291,8 @@ describe("public/sw.js の挙動", () => {
     expect(source).toMatch(
       /"navigate" in focused[\s\S]*\.navigate\(target\)[\s\S]*clients\.openWindow\(target\)/
     );
-    // navigate() can resolve to null; still open the target then.
+    // navigate() can resolve to null or reject; still open the target then.
     expect(source).toContain("navigated ?? self.clients.openWindow(target)");
+    expect(source).toContain(".catch(() => self.clients.openWindow(target))");
   });
 });

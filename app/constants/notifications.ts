@@ -224,6 +224,18 @@ export const WEB_PUSH_SEND_TIMEOUT_MS = 10_000;
 export const PUSH_DIGEST_TIME_BUDGET_MS = 15_000;
 
 /**
+ * Cap on live `push_subscriptions` rows per user. Without this, a learner can register many
+ * endpoints and keep the digest lock for one user across the full send timeout each.
+ */
+export const MAX_PUSH_SUBSCRIPTIONS_PER_USER = 10;
+
+/**
+ * Abort timeout (ms) for the DELETE call in `clearLocalPushSubscription`. Logout must not wait
+ * on a hung network after the browser subscription is already gone.
+ */
+export const CLEAR_LOCAL_PUSH_FETCH_TIMEOUT_MS = 3_000;
+
+/**
  * Retry window (days from the publish date, JST) for announcement email recipients whose send
  * failed. Only failures where Resend certainly didn't accept the mail (status=429 / 5xx) are
  * resent, from the day after the failure (never the same day, to keep the daily cap accounting

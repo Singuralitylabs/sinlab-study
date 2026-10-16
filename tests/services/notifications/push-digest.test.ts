@@ -84,16 +84,34 @@ beforeEach(() => {
 });
 
 describe("deliverDigestPushes", () => {
-  it("push_enabled がすべて false なら送らず、ユーザー抽出もしない", async () => {
+  it("push_enabled がすべて false なら送らず、メール完了のお知らせだけ閉じる", async () => {
     const { client, builders } = clientWith({
       email_kind_settings: { data: kindRows(), error: null },
       email_settings: { data: settingsRow, error: null },
+      announcements: [
+        // SQL already excludes null email_sent_at; mock returns only closable ids.
+        { data: [{ id: 50 }], error: null },
+        { data: [], error: null },
+      ],
     });
 
     await deliverDigestPushes(client as never, today, sentSince, () => 10);
 
     expect(sendPushToUser).not.toHaveBeenCalled();
     expect(builders.map((builder) => builder.table)).not.toContain("users");
+    const closeQuery = builders.find(
+      (builder) =>
+        builder.table === "announcements" && (builder.is?.mock.calls.length ?? 0) > 0
+    );
+    expect(closeQuery?.is).toHaveBeenCalledWith("push_sent_at", null);
+    expect(closeQuery?.not).toHaveBeenCalledWith("email_sent_at", "is", null);
+    const pushSentUpdate = builders.find(
+      (builder) => builder.table === "announcements" && (builder.update?.mock.calls.length ?? 0) > 0
+    );
+    expect(pushSentUpdate?.update.mock.calls[0]?.[0]).toEqual({
+      push_sent_at: expect.any(String),
+    });
+    expect(pushSentUpdate?.in.mock.calls[0]?.[1]).toEqual([50]);
   });
 
   it("メールの全体スイッチがオフでも、同じ日数の未学習ユーザーへ送る", async () => {
@@ -103,6 +121,10 @@ describe("deliverDigestPushes", () => {
         error: null,
       },
       email_settings: { data: settingsRow, error: null },
+      push_subscriptions: [
+        { data: [{ user_id: inactiveUser.id }], error: null },
+        { data: [], error: null },
+      ],
       users: [
         { data: [inactiveUser], error: null },
         { data: [], error: null },
@@ -135,7 +157,8 @@ describe("deliverDigestPushes", () => {
       "inactivity_reminder",
       "day7",
       expect.objectContaining({ url: "/learn" }),
-      expect.anything()
+      expect.anything(),
+      expect.objectContaining({ budgetMs: PUSH_DIGEST_TIME_BUDGET_MS })
     );
     const usersQuery = builders.find((builder) => builder.table === "users");
     expect(usersQuery?.is).not.toHaveBeenCalledWith("email_opt_out_at", null);
@@ -147,6 +170,13 @@ describe("deliverDigestPushes", () => {
     const { client, builders } = clientWith({
       email_kind_settings: { data: kindRows({ announcement: true }), error: null },
       email_settings: { data: settingsRow, error: null },
+      push_subscriptions: [
+        {
+          data: [{ user_id: 3 }, { user_id: 4 }],
+          error: null,
+        },
+        { data: [], error: null },
+      ],
       users: [
         {
           data: [
@@ -207,21 +237,24 @@ describe("deliverDigestPushes", () => {
       "announcement",
       "8",
       expect.objectContaining({ title: "集会", url: "/announcements/8" }),
-      expect.anything()
+      expect.anything(),
+      expect.objectContaining({ budgetMs: PUSH_DIGEST_TIME_BUDGET_MS })
     );
     expect(sendPushToUser).toHaveBeenCalledWith(
       3,
       "announcement",
       "10",
       expect.objectContaining({ title: "未完了", url: "/announcements/10" }),
-      expect.anything()
+      expect.anything(),
+      expect.objectContaining({ budgetMs: PUSH_DIGEST_TIME_BUDGET_MS })
     );
     expect(sendPushToUser).toHaveBeenCalledWith(
       3,
       "announcement",
       "11",
       expect.objectContaining({ title: "メール完了後の再試行", url: "/announcements/11" }),
-      expect.anything()
+      expect.anything(),
+      expect.objectContaining({ budgetMs: PUSH_DIGEST_TIME_BUDGET_MS })
     );
     const announcementQuery = builders.find((builder) => builder.table === "announcements");
     expect(announcementQuery?.eq).toHaveBeenCalledWith("send_email", true);
@@ -250,6 +283,10 @@ describe("deliverDigestPushes", () => {
     const { client, builders } = clientWith({
       email_kind_settings: { data: kindRows({ announcement: true }), error: null },
       email_settings: { data: settingsRow, error: null },
+      push_subscriptions: [
+        { data: [{ user_id: 3 }], error: null },
+        { data: [], error: null },
+      ],
       users: [
         { data: [{ ...inactiveUser, id: 3, status: "active", role: "member" }], error: null },
         { data: [], error: null },
@@ -281,7 +318,8 @@ describe("deliverDigestPushes", () => {
       "announcement",
       "42",
       expect.objectContaining({ title: "新しいお知らせ" }),
-      expect.anything()
+      expect.anything(),
+      expect.objectContaining({ budgetMs: PUSH_DIGEST_TIME_BUDGET_MS })
     );
     const announcementQueries = builders.filter((builder) => builder.table === "announcements");
     expect(announcementQueries[0]?.order).toHaveBeenCalledWith("published_at");
@@ -297,6 +335,10 @@ describe("deliverDigestPushes", () => {
         error: null,
       },
       email_settings: { data: settingsRow, error: null },
+      push_subscriptions: [
+        { data: [{ user_id: inactiveUser.id }], error: null },
+        { data: [], error: null },
+      ],
       users: [
         { data: [inactiveUser], error: null },
         { data: [], error: null },
@@ -318,11 +360,40 @@ describe("deliverDigestPushes", () => {
     expect(progressQueries[1]?.range).toHaveBeenCalledWith(1000, 1999);
   });
 
+  it("購読の無いユーザーは対象にせず、claim ループに入れない", async () => {
+    const { client } = clientWith({
+      email_kind_settings: {
+        data: kindRows({ inactivity_reminder: true }),
+        error: null,
+      },
+      email_settings: { data: settingsRow, error: null },
+      push_subscriptions: [
+        { data: [{ user_id: 999 }], error: null },
+        { data: [], error: null },
+      ],
+      users: [
+        { data: [inactiveUser], error: null },
+        { data: [], error: null },
+      ],
+      user_progress: { data: [], error: null },
+      submissions: { data: [], error: null },
+      learning_themes: { data: [], error: null },
+    });
+
+    await deliverDigestPushes(client as never, today, sentSince, () => 10);
+
+    expect(sendPushToUser).not.toHaveBeenCalled();
+  });
+
   it("送信失敗したお知らせには push_sent_at を付けず、翌日再送できるようにする", async () => {
     vi.mocked(sendPushToUser).mockResolvedValueOnce("failed").mockResolvedValue("sent");
     const { client, builders } = clientWith({
       email_kind_settings: { data: kindRows({ announcement: true }), error: null },
       email_settings: { data: settingsRow, error: null },
+      push_subscriptions: [
+        { data: [{ user_id: 3 }], error: null },
+        { data: [], error: null },
+      ],
       users: [
         { data: [{ ...inactiveUser, id: 3, status: "active", role: "member" }], error: null },
         { data: [], error: null },
@@ -371,6 +442,10 @@ describe("deliverDigestPushes", () => {
         error: null,
       },
       email_settings: { data: settingsRow, error: null },
+      push_subscriptions: [
+        { data: [{ user_id: inactiveUser.id }], error: null },
+        { data: [], error: null },
+      ],
       users: [
         { data: [inactiveUser], error: null },
         { data: [], error: null },

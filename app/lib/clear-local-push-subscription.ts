@@ -1,3 +1,5 @@
+import { CLEAR_LOCAL_PUSH_FETCH_TIMEOUT_MS } from "@/app/constants/notifications";
+
 /**
  * Best-effort browser + server cleanup before sign-out. A shared device must not keep delivering
  * the previous account's notifications after logout; failures must not block sign-out.
@@ -17,11 +19,19 @@ export async function clearLocalPushSubscription(): Promise<void> {
     if (!endpoint) {
       return;
     }
-    await fetch("/api/push/subscriptions", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ endpoint }),
-    });
+    // Bound the DELETE so an offline / hung API cannot stall logout after unsubscribe.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CLEAR_LOCAL_PUSH_FETCH_TIMEOUT_MS);
+    try {
+      await fetch("/api/push/subscriptions", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
   } catch {
     // Sign-out continues even when push cleanup fails.
   }

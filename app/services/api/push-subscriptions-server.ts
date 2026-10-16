@@ -1,3 +1,4 @@
+import { MAX_PUSH_SUBSCRIPTIONS_PER_USER } from "@/app/constants/notifications";
 import type { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 
 type AdminClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>;
@@ -16,17 +17,35 @@ function clipUserAgent(userAgent: string | null): string | null {
   return userAgent.slice(0, USER_AGENT_MAX);
 }
 
+async function countUserSubscriptions(
+  supabase: AdminClient,
+  userId: number
+): Promise<number | null> {
+  // +1 so we can tell "at cap" from "under cap" without an exact count RPC.
+  const { data, error } = await supabase
+    .from("push_subscriptions")
+    .select("id")
+    .eq("user_id", userId)
+    .limit(MAX_PUSH_SUBSCRIPTIONS_PER_USER + 1);
+  if (error) {
+    console.error("[Web Push] 購読数の確認に失敗しました:", error.message);
+    return null;
+  }
+  return data?.length ?? 0;
+}
+
 /**
  * Upserts by endpoint for the authenticated user. An endpoint already owned by someone else is
  * reassigned: the browser push endpoint belongs to the device, so the signed-in account takes it
- * over (shared-device account switch).
+ * over (shared-device account switch). New rows are capped per user so one learner cannot flood
+ * the digest send loop.
  */
 export async function savePushSubscription(
   supabase: AdminClient,
   userId: number,
   input: PushSubscriptionInput,
   userAgent: string | null
-): Promise<"saved" | "failed"> {
+): Promise<"saved" | "limit_exceeded" | "failed"> {
   const now = new Date().toISOString();
   const agent = clipUserAgent(userAgent);
   const fields = {
@@ -49,6 +68,16 @@ export async function savePushSubscription(
   }
 
   if (existing) {
+    // Same owner: refresh keys. Other owner: take over only when under the per-user cap.
+    if (existing.user_id !== userId) {
+      const count = await countUserSubscriptions(supabase, userId);
+      if (count === null) {
+        return "failed";
+      }
+      if (count >= MAX_PUSH_SUBSCRIPTIONS_PER_USER) {
+        return "limit_exceeded";
+      }
+    }
     const { error } = await supabase
       .from("push_subscriptions")
       .update(fields)
@@ -59,6 +88,14 @@ export async function savePushSubscription(
       return "failed";
     }
     return "saved";
+  }
+
+  const count = await countUserSubscriptions(supabase, userId);
+  if (count === null) {
+    return "failed";
+  }
+  if (count >= MAX_PUSH_SUBSCRIPTIONS_PER_USER) {
+    return "limit_exceeded";
   }
 
   const { error } = await supabase.from("push_subscriptions").insert({
@@ -73,7 +110,14 @@ export async function savePushSubscription(
     return "failed";
   }
 
-  // Concurrent insert: take over the raced row for this signed-in user.
+  // Concurrent insert: take over the raced row for this signed-in user when under the cap.
+  const racedCount = await countUserSubscriptions(supabase, userId);
+  if (racedCount === null) {
+    return "failed";
+  }
+  if (racedCount >= MAX_PUSH_SUBSCRIPTIONS_PER_USER) {
+    return "limit_exceeded";
+  }
   const { error: updateError } = await supabase
     .from("push_subscriptions")
     .update(fields)

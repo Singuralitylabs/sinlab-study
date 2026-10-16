@@ -181,6 +181,43 @@ describe("sendPushToUser", () => {
     });
     expect(claimDelete).toBeDefined();
   });
+
+  it("購読ループでも時間上限に達したら打ち切る", async () => {
+    vi.mocked(sendNotification).mockResolvedValue({} as never);
+    const second = "https://fcm.googleapis.com/fcm/send/device-2";
+    const supabase = createMockSupabaseClient({
+      tableResults: {
+        push_logs: [
+          { data: { id: 4 }, error: null },
+          { data: null, error: null },
+        ],
+        push_subscriptions: [
+          {
+            data: [
+              { id: 9, endpoint, p256dh: "p", auth: "a" },
+              { id: 10, endpoint: second, p256dh: "p2", auth: "a2" },
+            ],
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+    let now = 0;
+
+    await expect(
+      sendPushToUser(1, EMAIL_KIND.APPROVED, "t", payload, supabase as never, {
+        started: 0,
+        budgetMs: 5,
+        clock: () => {
+          const value = now;
+          now = 10;
+          return value;
+        },
+      })
+    ).resolves.toBe("sent");
+    expect(sendNotification).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("scheduleApprovedPush", () => {

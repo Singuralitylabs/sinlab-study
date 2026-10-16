@@ -14,4 +14,11 @@ describe("ログアウト時のプッシュ購読解除", () => {
       expect(signOutAt).toBeGreaterThan(clearAt);
     }
   });
+
+  it("DELETE に AbortSignal のタイムアウトを付け、オフラインでログアウトを止めない", () => {
+    const source = readFileSync("app/lib/clear-local-push-subscription.ts", "utf8");
+    expect(source).toContain("CLEAR_LOCAL_PUSH_FETCH_TIMEOUT_MS");
+    expect(source).toContain("AbortController");
+    expect(source).toContain("signal: controller.signal");
+  });
 });

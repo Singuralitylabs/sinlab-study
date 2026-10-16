@@ -36,6 +36,12 @@ export async function POST(request: Request) {
       validation.data,
       request.headers.get("user-agent")
     );
+    if (result === "limit_exceeded") {
+      return NextResponse.json(
+        { error: "購読できる端末数の上限に達しています" },
+        { status: 409 }
+      );
+    }
     if (result === "failed") {
       return NextResponse.json({ error: "購読の保存に失敗しました" }, { status: 500 });
     }

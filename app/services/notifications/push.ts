@@ -72,19 +72,27 @@ async function disableSubscription(
   }
 }
 
+export type PushSendDeadline = {
+  started: number;
+  budgetMs: number;
+  clock?: () => number;
+};
+
 /**
  * Claims `push_logs` then sends `{ title, body, url }` to every live subscription of `userId`.
  * VAPID is configured before the claim so a bad key does not leave a stuck log row. A UNIQUE
  * violation means this event was already claimed. Total failure (no delivery) deletes the claim
  * so a later run can retry. 404 / 410 / disallowed endpoints disable that subscription. Any other
  * per-subscription failure is swallowed: callers must keep their own result.
+ * Optional `deadline` stops the per-subscription loop so a many-endpoint user cannot hold cron.
  */
 export async function sendPushToUser(
   userId: number,
   kind: PushKind,
   referenceKey: string,
   payload: PushPayload,
-  supabase?: AdminClient
+  supabase?: AdminClient,
+  deadline?: PushSendDeadline
 ): Promise<PushDeliverResult> {
   const config = readConfig();
   if (!config || !PUSH_KIND_SET.has(kind) || !isAppPath(payload.url)) {
@@ -132,7 +140,12 @@ export async function sendPushToUser(
   }
 
   let sent = 0;
+  const clock = deadline?.clock ?? Date.now;
   for (const subscription of live) {
+    // Digest shares this budget across users; stop mid-loop so one account cannot stall cron.
+    if (deadline && clock() - deadline.started >= deadline.budgetMs) {
+      break;
+    }
     if (!isAllowedPushEndpoint(subscription.endpoint)) {
       await disableSubscription(client, userId, subscription.id);
       continue;

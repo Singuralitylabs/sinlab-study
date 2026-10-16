@@ -223,6 +223,65 @@ async function markAnnouncementPushSent(
 }
 
 /**
+ * Live push subscribers only. Without this filter, every active/trial user pays for a claim
+ * insert → select → delete cycle and can exhaust the digest time budget before real sends.
+ */
+async function fetchSubscribedUserIds(supabase: AdminClient): Promise<Set<number>> {
+  const ids = new Set<number>();
+  for (let offset = 0; ; ) {
+    const { data, error } = await supabase
+      .from("push_subscriptions")
+      .select("user_id")
+      .is("disabled_at", null)
+      .order("id")
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (error) {
+      throw new Error(error.message);
+    }
+    if (!data || data.length === 0) {
+      break;
+    }
+    for (const row of data) {
+      ids.add(row.user_id);
+    }
+    offset += data.length;
+  }
+  return ids;
+}
+
+/**
+ * While announcement push is off, stamp email-completed rows so turning `push_enabled` on later
+ * does not flood every past `send_email` announcement at once. Multi-day email (null
+ * `email_sent_at`) stays open.
+ */
+async function closeEmailCompletedAnnouncementPushes(supabase: AdminClient): Promise<void> {
+  const ids: number[] = [];
+  for (let offset = 0; ; ) {
+    const { data, error } = await supabase
+      .from("announcements")
+      .select("id")
+      .not("published_at", "is", null)
+      .eq("is_deleted", false)
+      .eq("send_email", true)
+      .is("push_sent_at", null)
+      .not("email_sent_at", "is", null)
+      .order("id")
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (error) {
+      throw new Error(error.message);
+    }
+    if (!data || data.length === 0) {
+      break;
+    }
+    for (const row of data) {
+      ids.push(row.id);
+    }
+    offset += data.length;
+  }
+  await markAnnouncementPushSent(supabase, ids);
+}
+
+/**
  * Sends the digest kinds whose `push_enabled` is on. Days and announcement targeting match the
  * email run; the email daily cap, the global mail switch, and `email_opt_out_at` do not apply.
  * Errors stay inside this function so `runEmailDigest()` can keep its own result.
@@ -250,12 +309,19 @@ export async function deliverDigestPushes(
     const trialDays = trial.pushEnabled ? trial.sendDays : null;
     const inactivityDays = inactivity.pushEnabled ? inactivity.sendDays : null;
     const announcementOn = settings.kinds.announcement.pushEnabled;
+    // Close email-completed announcements while push is off so enabling later does not flood.
+    if (!announcementOn) {
+      await closeEmailCompletedAnnouncementPushes(supabase);
+    }
     if (!trialDays && !inactivityDays && !announcementOn) {
       logDuration(clock() - started, counts);
       return;
     }
 
-    const users = await fetchPushAudience(supabase);
+    const subscribedUserIds = await fetchSubscribedUserIds(supabase);
+    const users = (await fetchPushAudience(supabase)).filter((user) =>
+      subscribedUserIds.has(user.userId)
+    );
     const preview = planMilestoneEmails(
       users.filter((user) => isLearnerRole(user.role)),
       today,
@@ -284,6 +350,7 @@ export async function deliverDigestPushes(
     // Do not stamp push_sent_at while any target still needs a retry (time cut-off or a failed
     // send that released its claim). Closing early would drop those users permanently.
     const unfinishedAnnouncementKeys = new Set<string>();
+    const deadline = { started, budgetMs: PUSH_DIGEST_TIME_BUDGET_MS, clock };
     for (let index = 0; index < targets.length; index++) {
       if (clock() - started >= PUSH_DIGEST_TIME_BUDGET_MS) {
         for (const remaining of targets.slice(index)) {
@@ -303,7 +370,8 @@ export async function deliverDigestPushes(
           target.kind,
           target.referenceKey,
           target.payload,
-          supabase
+          supabase,
+          deadline
         );
         counts[result] += 1;
         if (target.kind === EMAIL_KIND.ANNOUNCEMENT && result === "failed") {

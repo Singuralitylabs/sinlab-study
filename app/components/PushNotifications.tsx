@@ -74,7 +74,27 @@ export function PushNotifications({ publicKey }: { publicKey: string | null }) {
       .getRegistration("/sw.js")
       .then(async (registration) => {
         const existing = await registration?.pushManager.getSubscription();
-        setStatus(existing ? "subscribed" : "unsubscribed");
+        if (!existing) {
+          setStatus("unsubscribed");
+          return;
+        }
+        // Re-POST so a leftover browser subscription is bound to the signed-in user (shared device).
+        const json = existing.toJSON();
+        if (json.endpoint && json.keys?.p256dh && json.keys.auth) {
+          const res = await fetch("/api/push/subscriptions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              endpoint: json.endpoint,
+              keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
+            }),
+          });
+          if (!res.ok) {
+            setStatus("unsubscribed");
+            return;
+          }
+        }
+        setStatus("subscribed");
       })
       .catch(() => {
         setStatus("unsubscribed");
