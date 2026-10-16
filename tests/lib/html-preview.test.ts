@@ -203,6 +203,22 @@ describe("buildPreviewDocument", () => {
     expect(doc).not.toContain("scaffold");
   });
 
+  it("ignores previewBaseHtml for javascript-only and js+css layouts (#351)", () => {
+    const jsOnly = buildPreviewDocument([f("main.js", "javascript", "console.log('hi')")], {
+      previewBaseHtml: "<p>scaffold</p>",
+    });
+    expect(jsOnly).toContain("<script>console.log('hi')</script>");
+    expect(jsOnly).not.toContain("scaffold");
+
+    const jsCss = buildPreviewDocument(
+      [f("main.js", "javascript", "console.log('hi')"), f("style.css", "css", "p{}")],
+      { previewBaseHtml: "<p>scaffold</p>" }
+    );
+    expect(jsCss).toContain("<script>console.log('hi')</script>");
+    expect(jsCss).toContain("<style>p{}</style>");
+    expect(jsCss).not.toContain("scaffold");
+  });
+
   it("does not let content close the inlined element early or expand $ patterns", () => {
     const doc = buildPreviewDocument([
       f("index.html", "html", '<link rel="stylesheet" href="s.css"><script src="m.js"></script>'),

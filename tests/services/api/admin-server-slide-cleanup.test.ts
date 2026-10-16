@@ -933,6 +933,22 @@ describe("updateContent / createContent の採点基準（#305）", () => {
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
 
+  it("content_type を省いて非演習に土台 HTML を送ると 400 相当で更新しない (#351)", async () => {
+    const { mockClient } = mockAdminWithStorage({
+      tableResults: {
+        learning_contents: [{ data: { content_type: "video" }, error: null }],
+      },
+    });
+
+    const result = await updateContent(1, {
+      preview_base_html: "<div class='box'></div>",
+    });
+
+    expect(result.previewNotAllowed).toBe("プレビューの土台 HTML は演習だけに指定できます");
+    expect(result.error).toBeNull();
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+  });
+
   it("exercise 以外へ種別変更すると採点基準を破棄する", async () => {
     const { mockClient } = mockAdminWithStorage({
       tableResults: {

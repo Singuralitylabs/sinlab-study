@@ -1599,9 +1599,12 @@ export async function updateContent(
 ): Promise<ContentUpdateResult> {
   const supabase = await createAdminSupabaseClient();
   const { insertAfterId, quizQuestions, gradingRubric, loadedRubricVersion, ...patch } = content;
-  // Zod only rejects slots on a non-exercise when this request also sends content_type. A
-  // slots-only PUT would otherwise hit the exercise-only CHECK and come back as 500.
-  if (patch.submission_file_slots != null && patch.content_type === undefined) {
+  // Zod only rejects slots / scaffold on a non-exercise when this request also sends content_type.
+  // A slots-only or scaffold-only PUT would otherwise hit the exercise-only CHECK and come back as 500.
+  if (
+    (patch.submission_file_slots != null || patch.preview_base_html != null) &&
+    patch.content_type === undefined
+  ) {
     const { data: currentType, error: typeError } = await supabase
       .from("learning_contents")
       .select("content_type")
@@ -1621,7 +1624,15 @@ export async function updateContent(
       };
     }
     if (currentType.content_type !== "exercise") {
-      return { error: null, storageRemoved: true, slotsNotAllowed: true };
+      if (patch.submission_file_slots != null) {
+        return { error: null, storageRemoved: true, slotsNotAllowed: true };
+      }
+      // preview_base_html-only PUT on a non-exercise would hit the CHECK as 500 (#351 review).
+      return {
+        error: null,
+        storageRemoved: true,
+        previewNotAllowed: "プレビューの土台 HTML は演習だけに指定できます",
+      };
     }
   }
   if (patch.content_type !== undefined && patch.content_type !== "exercise") {

@@ -367,14 +367,16 @@ export function buildPreviewDocument(
     files.find((f) => f.filename.trim().toLowerCase() === "index.html") ??
     files.find((f) => resolveFileLanguage(f) === "html");
 
-  // Admin scaffold for CSS-only exercises (#351). Submitted HTML always wins.
-  const scaffold = previewBaseHtml?.trim()
-    ? {
-        filename: "index.html",
-        language: "html",
-        content: previewBaseHtml,
-      }
-    : null;
+  // Scaffold is only for CSS-only layouts (#351 review). JS / JS+CSS must keep the empty-page
+  // script path; otherwise previewBaseHtml would drop <script> and the console stays empty.
+  const scaffold =
+    previewBaseHtml?.trim() && !submittedHtml && classifyPreviewLayout(files) === "css"
+      ? {
+          filename: "index.html",
+          language: "html",
+          content: previewBaseHtml,
+        }
+      : null;
   const base = submittedHtml ?? scaffold;
 
   if (!base) {
