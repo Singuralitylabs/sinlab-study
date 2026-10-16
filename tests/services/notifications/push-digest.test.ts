@@ -318,6 +318,51 @@ describe("deliverDigestPushes", () => {
     expect(progressQueries[1]?.range).toHaveBeenCalledWith(1000, 1999);
   });
 
+  it("送信失敗したお知らせには push_sent_at を付けず、翌日再送できるようにする", async () => {
+    vi.mocked(sendPushToUser).mockResolvedValueOnce("failed").mockResolvedValue("sent");
+    const { client, builders } = clientWith({
+      email_kind_settings: { data: kindRows({ announcement: true }), error: null },
+      email_settings: { data: settingsRow, error: null },
+      users: [
+        { data: [{ ...inactiveUser, id: 3, status: "active", role: "member" }], error: null },
+        { data: [], error: null },
+      ],
+      announcements: [
+        {
+          data: [
+            {
+              id: 21,
+              title: "失敗する",
+              target_statuses: ["active"],
+              target_membership_types: null,
+              email_sent_at: "2026-10-15T12:00:00.000Z",
+              push_sent_at: null,
+            },
+            {
+              id: 22,
+              title: "成功する",
+              target_statuses: ["active"],
+              target_membership_types: null,
+              email_sent_at: "2026-10-15T12:00:00.000Z",
+              push_sent_at: null,
+            },
+          ],
+          error: null,
+        },
+        { data: [], error: null },
+      ],
+    });
+
+    await deliverDigestPushes(client as never, today, sentSince, () => 20);
+
+    expect(sendPushToUser).toHaveBeenCalledTimes(2);
+    const pushSentUpdate = builders.find(
+      (builder) => builder.table === "announcements" && (builder.update?.mock.calls.length ?? 0) > 0
+    );
+    expect(pushSentUpdate?.in.mock.calls[0]?.[1]).toEqual([22]);
+    expect(pushSentUpdate?.in.mock.calls[0]?.[1]).not.toContain(21);
+  });
+
   it("時間上限に達したらそれ以上送らない", async () => {
     let now = 0;
     const { client } = clientWith({

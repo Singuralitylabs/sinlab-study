@@ -281,6 +281,8 @@ export async function deliverDigestPushes(
       finalTrialDay: Math.max(...(trial.sendDays ?? [0])),
     });
 
+    // Do not stamp push_sent_at while any target still needs a retry (time cut-off or a failed
+    // send that released its claim). Closing early would drop those users permanently.
     const unfinishedAnnouncementKeys = new Set<string>();
     for (let index = 0; index < targets.length; index++) {
       if (clock() - started >= PUSH_DIGEST_TIME_BUDGET_MS) {
@@ -304,8 +306,14 @@ export async function deliverDigestPushes(
           supabase
         );
         counts[result] += 1;
+        if (target.kind === EMAIL_KIND.ANNOUNCEMENT && result === "failed") {
+          unfinishedAnnouncementKeys.add(target.referenceKey);
+        }
       } catch (error) {
         counts.failed += 1;
+        if (target.kind === EMAIL_KIND.ANNOUNCEMENT) {
+          unfinishedAnnouncementKeys.add(target.referenceKey);
+        }
         console.error(
           `[Web Push] 定期配信の1件が失敗しました: kind=${target.kind as PushKind}`,
           error instanceof Error ? error.message : "unknown"

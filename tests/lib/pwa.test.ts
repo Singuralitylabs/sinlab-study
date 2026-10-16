@@ -78,5 +78,9 @@ describe("public/sw.js", () => {
     expect(source).toContain("showNotification");
     expect(source).toContain("openWindow");
     expect(source).toContain("focused.navigate(target)");
+    // Clients without WindowClient.navigate still reach the payload URL.
+    expect(source).toMatch(
+      /"navigate" in focused[\s\S]*focused\.navigate\(target\)[\s\S]*clients\.openWindow\(target\)/
+    );
   });
 });

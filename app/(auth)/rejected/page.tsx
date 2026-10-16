@@ -1,11 +1,13 @@
 "use client";
 
 import { LogOut, ShieldX } from "lucide-react";
+import { clearLocalPushSubscription } from "@/app/lib/clear-local-push-subscription";
 import { createClientSupabaseClient } from "@/app/services/api/supabase-client";
 import { Button } from "@/components/ui/button";
 
 export default function RejectedPage() {
   const handleSignOut = async () => {
+    await clearLocalPushSubscription();
     const supabase = createClientSupabaseClient();
     await supabase.auth.signOut();
     window.location.href = "/login";
