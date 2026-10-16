@@ -231,6 +231,7 @@ export async function POST(request: NextRequest) {
           userStatus,
           userRole,
           contentId: content.id,
+          passed: result.passed,
         });
       } catch (error) {
         console.error("[修了証] AIレビュー後の発行エラー:", error);

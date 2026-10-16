@@ -14,12 +14,23 @@ values (
   '{"version": 2, "max_key_number": 5, "requirements": [{"key": "r1", "name": "A", "description": ""}, {"key": "r7", "name": "B", "description": ""}]}'
 );
 
+select is(
+  (select has_grading_requirements from public.learning_contents where id = 9001),
+  true,
+  'a live rubric sets has_grading_requirements'
+);
+
 -- NULL becomes a tombstone: version + 1, the higher of max_key_number and the keys still present.
 update public.learning_contents set grading_rubric = null where id = 9001;
 select is(
   (select grading_rubric from public.learning_contents where id = 9001),
   '{"version": 3, "max_key_number": 7, "requirements": []}'::jsonb,
   'clearing a rubric stores a tombstone with the next version and the key high-water mark'
+);
+select is(
+  (select has_grading_requirements from public.learning_contents where id = 9001),
+  false,
+  'a tombstone clears has_grading_requirements'
 );
 
 -- Clearing again keeps the tombstone as it is.
@@ -38,6 +49,11 @@ select is(
   (select grading_rubric from public.learning_contents where id = 9002),
   null::jsonb,
   'a row without a rubric stays NULL'
+);
+select is(
+  (select has_grading_requirements from public.learning_contents where id = 9002),
+  false,
+  'a row without a rubric has has_grading_requirements false'
 );
 
 -- Bulk type change (SET content_type, grading_rubric = NULL) passes the exercise-only CHECK.

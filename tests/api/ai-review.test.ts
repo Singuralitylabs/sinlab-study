@@ -361,6 +361,9 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
     expect(body.success).toBe(true);
     expect(body.review.status).toBe("completed");
     expect(body.themeCompletion.certificateId).toBe(31);
+    expect(resolveAiReviewThemeNotice).toHaveBeenCalledWith(
+      expect.objectContaining({ contentId: 5, passed: true })
+    );
   });
 
   it("発行やメールが失敗しても completed の成否は変えない", async () => {

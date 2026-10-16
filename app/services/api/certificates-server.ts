@@ -18,7 +18,6 @@ import {
   type ThemeCompletionNotice,
 } from "@/app/lib/certificate-eligibility";
 import { parseDisplayName } from "@/app/lib/display-name";
-import { hasGradingRequirements } from "@/app/lib/grading";
 import { applyPublishedNestedThemeFilters } from "@/app/lib/published-theme-tree";
 import {
   fetchThemeProgressSummaries,
@@ -165,28 +164,28 @@ async function insertCertificates(
   return { issued, blockedByMissingName: false };
 }
 
-type PublishedExercise = { id: number; allowedSubmissionTypes: string };
-
 /**
  * Published exercises per theme, using the same nested published-tree filter as
  * fetchThemeProgressSummaries(). Completion still uses that function's counts; this only adds the
- * exercise subset (content_type / allowed_submission_types are on the learner column grant).
- * Null data is an empty catalog. A query error is null so callers fail closed and do not issue.
+ * exercise subset. `has_grading_requirements` is the learner-visible flag (non-empty requirements).
+ * The rubric JSON stays unselected: learners cannot read it, and this path must not open a
+ * service_role copy of the marking guide. Null data is an empty catalog. A query error is null
+ * so callers fail closed and do not issue.
  */
-async function fetchPublishedExercises(): Promise<Map<number, PublishedExercise[]> | null> {
+async function fetchPublishedExercises(): Promise<Map<number, CertificateExercise[]> | null> {
   const supabase = await createServerSupabaseClient();
   const { data, error } = await applyPublishedNestedThemeFilters(
     supabase
       .from("learning_themes")
       .select(
-        "id, phases:learning_phases(weeks:learning_weeks(contents:learning_contents(id, content_type, allowed_submission_types)))"
+        "id, phases:learning_phases(weeks:learning_weeks(contents:learning_contents(id, content_type, allowed_submission_types, has_grading_requirements)))"
       )
   );
   if (error) {
     console.error("[修了証] 演習一覧の取得エラー:", error.message);
     return null;
   }
-  const byTheme = new Map<number, PublishedExercise[]>();
+  const byTheme = new Map<number, CertificateExercise[]>();
   if (!Array.isArray(data)) {
     return byTheme;
   }
@@ -199,12 +198,17 @@ async function fetchPublishedExercises(): Promise<Map<number, PublishedExercise[
       phases:
         | {
             weeks: {
-              contents: { id: number; content_type: string; allowed_submission_types: string }[];
+              contents: {
+                id: number;
+                content_type: string;
+                allowed_submission_types: string;
+                has_grading_requirements: boolean;
+              }[];
             }[];
           }[]
         | null;
     };
-    const exercises: PublishedExercise[] = [];
+    const exercises: CertificateExercise[] = [];
     for (const phase of row.phases ?? []) {
       for (const week of phase.weeks ?? []) {
         for (const content of week.contents ?? []) {
@@ -214,6 +218,7 @@ async function fetchPublishedExercises(): Promise<Map<number, PublishedExercise[
           exercises.push({
             id: content.id,
             allowedSubmissionTypes: content.allowed_submission_types,
+            hasRubric: content.has_grading_requirements === true,
           });
         }
       }
@@ -223,44 +228,6 @@ async function fetchPublishedExercises(): Promise<Map<number, PublishedExercise[
     }
   }
   return byTheme;
-}
-
-/**
- * Learners cannot select grading_rubric. Issuance reads id + grading_rubric with service_role,
- * published and not deleted, and never returns the rubric. Skipped while CERTIFICATE_PASS_SCORE
- * is 0: a submission alone satisfies the rule, so the hidden column stays unread.
- */
-async function exercisesWithRubrics(
-  published: readonly PublishedExercise[],
-  passScore: number
-): Promise<CertificateExercise[] | null> {
-  const needsRubric =
-    passScore > 0 && published.some((exercise) => exercise.allowedSubmissionTypes !== "url");
-  if (!needsRubric) {
-    return published.map((exercise) => ({ ...exercise, hasRubric: false }));
-  }
-  const admin = await createAdminSupabaseClient();
-  const ids = published
-    .filter((exercise) => exercise.allowedSubmissionTypes !== "url")
-    .map((exercise) => exercise.id);
-  const { data, error } = await admin
-    .from("learning_contents")
-    .select("id, grading_rubric")
-    .in("id", ids)
-    .eq("is_published", true)
-    .eq("is_deleted", false);
-  if (error) {
-    console.error("[修了証] 採点基準の取得エラー:", error.message);
-    return null;
-  }
-  const withRubric = new Set(
-    (data ?? []).filter((row) => hasGradingRequirements(row.grading_rubric)).map((row) => row.id)
-  );
-  return published.map((exercise) => ({
-    id: exercise.id,
-    allowedSubmissionTypes: exercise.allowedSubmissionTypes,
-    hasRubric: withRubric.has(exercise.id),
-  }));
 }
 
 async function loadSubmissionEvidence(
@@ -331,26 +298,17 @@ export async function fetchThemeExerciseGaps(
     if (!byTheme) {
       return null;
     }
-    const published = [...byTheme.values()].flat();
-    const exercises = await exercisesWithRubrics(published, passScore);
-    if (!exercises) {
-      return null;
-    }
+    const exercises = [...byTheme.values()].flat();
     const evidence = await loadSubmissionEvidence(userId, exercises, passScore);
     if (!evidence) {
       return null;
     }
-    const byId = new Map(exercises.map((exercise) => [exercise.id, exercise]));
     const gaps = new Map<number, CertificateExerciseGap>();
     for (const [themeId, themeExercises] of byTheme) {
-      const rows = themeExercises.flatMap((exercise) => {
-        const row = byId.get(exercise.id);
-        return row ? [row] : [];
-      });
       gaps.set(
         themeId,
         certificateExerciseGaps({
-          exercises: rows,
+          exercises: themeExercises,
           submittedContentIds: evidence.submittedContentIds,
           passedContentIds: evidence.passedContentIds,
           passScore,
@@ -546,14 +504,19 @@ export async function resolveProgressThemeNotice(params: {
 
 /**
  * Same notice as the progress dialog, for a review that just reached `completed`. Already-issued
- * themes and themes that are not yet 100% return null so a routine review stays quiet. A throw
- * is swallowed: the review response must not change when issuance or mail fails.
+ * themes and themes that are not yet 100% return null so a routine review stays quiet.
+ * `passed === false` is a failed re-review: issuance still runs (an earlier pass can already
+ * qualify), but the dialog is returned only when this call actually issued. Otherwise the same
+ * "still need a pass" dialog would reopen on every failed review. A throw is swallowed: the
+ * review response must not change when issuance or mail fails.
  */
 export async function resolveAiReviewThemeNotice(params: {
   userId: number;
   userStatus: UserStatusType | null;
   userRole: UserRoleType | null;
   contentId: number;
+  passed: boolean | null;
+  passScore?: number;
 }): Promise<ThemeCompletionNotice | null> {
   try {
     if (!isCertificateEligible(params.userStatus, params.userRole)) {
@@ -568,8 +531,15 @@ export async function resolveAiReviewThemeNotice(params: {
       userStatus: params.userStatus,
       userRole: params.userRole,
       themeId,
+      passScore: params.passScore,
     });
-    return evaluation.status === "evaluated" ? toNotice(evaluation) : null;
+    if (evaluation.status !== "evaluated") {
+      return null;
+    }
+    if (params.passed === false && evaluation.issued == null) {
+      return null;
+    }
+    return toNotice(evaluation);
   } catch (error) {
     console.error("[修了証] AIレビュー後の発行エラー:", error);
     return null;

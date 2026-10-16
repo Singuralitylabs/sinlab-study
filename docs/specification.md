@@ -1457,7 +1457,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 3. 条件を満たすなら、service_role で `certificates` に INSERT する。**`user_id` は認証済みの本人に固定**し、`recipient_name`（発行時点の `users.display_name` を `parseDisplayName()` で正規化した文字列）と `theme_name` は発行時点のスナップショットとして書く
 4. INSERT 成功後にメール `certificate_issued`（10.4節）を `after()` に予約する
 
-- **service_role の使用は、この INSERT（と宛先の `display_name` の読み取り）と、合格点が有効なときの採点基準の有無の読み取りに限る**。後者は `id, grading_rubric` だけを `is_published = true AND is_deleted = false` で読み、クライアントへ返さない（受講生の列許可に `grading_rubric` は無い）。`CERTIFICATE_PASS_SCORE` が 0 の間は読まない。受講生向け配信経路の service_role（AGENTS.md の2箇所）は増やさない
+- **service_role の使用は、この INSERT と宛先の `display_name` の読み取りに限る**。採点基準の有無は生成列 `learning_contents.has_grading_requirements`（`requirements` が1件以上なら true。NULL と墓石は false）を、公開ツリーと同じ通常クライアントの SELECT で読む。`grading_rubric` 本文は受講生起点の修了判定では読まない（本文を service_role で読むのは AI レビューの採点だけ）。`CERTIFICATE_PASS_SCORE` が 0 の間は合格を要求しない。受講生向け配信経路の service_role（AGENTS.md の2箇所）は増やさない
 - **冪等**: `UNIQUE (user_id, theme_id)` の違反（23505）は発行済みとして無視する（メールも送らない）。`UNIQUE (certificate_no)` の違反だけは番号を作り直して再試行する（最大 `CERTIFICATE_NO_MAX_ATTEMPTS` 回）
 - **失敗は進捗 API のレスポンスを変えない**: 関数は例外を投げず、失敗はログだけ残して `null` を返す。メール送信の失敗も同様（10.1節）。完了の保存はすでに済んでいる
 - **証明番号**: `SS-YYYYMM-XXXXXX`（`YYYYMM` は発行月（JST）、`XXXXXX` は紛らわしい `I` / `O` を除いた英数字6文字。乱数は `crypto.randomInt` で、推測できない）。一意で、将来の公開検証ページに使える。衝突の判定は制約名・`details` で行い、エラー文言には頼らない
@@ -1487,7 +1487,7 @@ X 向けの共有リンク（`https://twitter.com/intent/tweet?text=...&url=...`
 
 ### 13.7 テーマ修了時の画面通知
 
-契機は、`POST /api/progress` の完了保存でそのテーマが初めて 100% になったときと、AI レビューが `completed` になり、その時点でテーマが 100% かつ修了証がまだ無いとき。途中のコンテンツ、完了の取り消し、すでに完了しているコンテンツの再保存、ページの再読み込みでは出さない。
+契機は、`POST /api/progress` の完了保存でそのテーマが初めて 100% になったときと、AI レビューが `completed` になり、その時点でテーマが 100% かつ修了証がまだ無いとき。そのレビューの `passed` が false（合格していない再レビュー）のときは、この呼び出しで修了証を発行できた場合を除きダイアログを出さない（条件が残ったまま同じ案内がレビューのたびに開かないようにする。発行判定自体は行う）。途中のコンテンツ、完了の取り消し、すでに完了しているコンテンツの再保存、ページの再読み込みでは出さない。
 
 出し分けは `themeCompletion`（4.1節。AI レビューの 200 にも同じ形を任意で足す）をダイアログ（`ThemeCompletionDialog`）で表示する。
 

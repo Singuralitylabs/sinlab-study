@@ -451,7 +451,7 @@ describe("issueMissingCertificates（既に完了済みのテーマの遡及発�
 
 function exerciseCatalog(
   themeId: number,
-  contents: { id: number; allowed: string; contentType?: string }[]
+  contents: { id: number; allowed: string; contentType?: string; hasRubric?: boolean }[]
 ) {
   return {
     data: [
@@ -465,6 +465,7 @@ function exerciseCatalog(
                   id: content.id,
                   content_type: content.contentType ?? "exercise",
                   allowed_submission_types: content.allowed,
+                  has_grading_requirements: content.hasRubric === true,
                 })),
               },
             ],
@@ -475,11 +476,6 @@ function exerciseCatalog(
     error: null,
   };
 }
-
-const rubric = {
-  data: [{ id: 10, grading_rubric: { version: 1, requirements: [{ key: "a" }] } }],
-  error: null,
-};
 
 describe("演習の提出・合格（#332）", () => {
   const issue = {
@@ -522,21 +518,31 @@ describe("演習の提出・合格（#332）", () => {
 
   it("採点基準ありで passed = false だけなら発行しない", async () => {
     mockUserClient({
-      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "code" }]),
+      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "code", hasRubric: true }]),
       submissions: { data: [{ id: 7, content_id: 10 }], error: null },
       ai_reviews: {
         data: [{ submission_id: 7, score_kind: "rubric", passed: false }],
         error: null,
       },
     });
-    mockAdminClient({ learning_contents: rubric, certificates: inserted });
 
     expect(await maybeIssueCertificate({ ...issue, passScore: 80 })).toBeNull();
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it("生成列が false（墓石・未設定）なら合格点があっても提出だけで発行する", async () => {
+    mockUserClient({
+      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "code", hasRubric: false }]),
+      submissions: { data: [{ id: 7, content_id: 10 }], error: null },
+    });
+    mockAdminClient({ certificates: inserted });
+
+    expect(await maybeIssueCertificate({ ...issue, passScore: 80 })).toEqual(inserted.data);
   });
 
   it("passed = true が 1 件あれば発行する", async () => {
     mockUserClient({
-      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "both" }]),
+      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "both", hasRubric: true }]),
       submissions: { data: [{ id: 7, content_id: 10 }], error: null },
       ai_reviews: {
         data: [
@@ -547,21 +553,20 @@ describe("演習の提出・合格（#332）", () => {
         error: null,
       },
     });
-    mockAdminClient({ learning_contents: rubric, certificates: inserted });
+    mockAdminClient({ certificates: inserted });
 
     expect(await maybeIssueCertificate({ ...issue, passScore: 80 })).toEqual(inserted.data);
   });
 
   it.each(["estimated", "none", "legacy"])("%s だけでは発行しない", async (scoreKind) => {
     mockUserClient({
-      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "code" }]),
+      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "code", hasRubric: true }]),
       submissions: { data: [{ id: 7, content_id: 10 }], error: null },
       ai_reviews: {
         data: [{ submission_id: 7, score_kind: scoreKind, passed: true }],
         error: null,
       },
     });
-    mockAdminClient({ learning_contents: rubric, certificates: inserted });
 
     expect(await maybeIssueCertificate({ ...issue, passScore: 80 })).toBeNull();
   });
@@ -606,6 +611,7 @@ describe("演習の提出・合格（#332）", () => {
       userStatus: "active",
       userRole: "member",
       contentId: 10,
+      passed: true,
     });
     expect(issuedNotice?.certificateId).toBe(31);
 
@@ -617,9 +623,79 @@ describe("演習の提出・合格（#332）", () => {
         userStatus: "active",
         userRole: "member",
         contentId: 10,
+        passed: true,
       })
     ).toBeNull();
     expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it("合格していない再レビューでは、条件が残るあいだ通知しない", async () => {
+    mockUserClient({
+      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "code", hasRubric: true }]),
+      submissions: { data: [{ id: 7, content_id: 10 }], error: null },
+      ai_reviews: {
+        data: [{ submission_id: 7, score_kind: "rubric", passed: false }],
+        error: null,
+      },
+    });
+
+    expect(
+      await resolveAiReviewThemeNotice({
+        userId: 2,
+        userStatus: "active",
+        userRole: "member",
+        contentId: 10,
+        passed: false,
+        passScore: 80,
+      })
+    ).toBeNull();
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it("合格したレビューで別の演習が残るときは通知する", async () => {
+    mockUserClient({
+      learning_themes: exerciseCatalog(THEME.id, [
+        { id: 10, allowed: "code", hasRubric: true },
+        { id: 11, allowed: "code", hasRubric: true },
+      ]),
+      submissions: {
+        data: [
+          { id: 7, content_id: 10 },
+          { id: 8, content_id: 11 },
+        ],
+        error: null,
+      },
+      ai_reviews: {
+        data: [{ submission_id: 7, score_kind: "rubric", passed: true }],
+        error: null,
+      },
+    });
+
+    const notice = await resolveAiReviewThemeNotice({
+      userId: 2,
+      userStatus: "active",
+      userRole: "member",
+      contentId: 10,
+      passed: true,
+      passScore: 80,
+    });
+
+    expect(notice?.certificateId).toBeNull();
+    expect(notice?.remaining.exercisesNeedingRetry).toBe(1);
+  });
+
+  it("合格していない再レビューでも、この呼び出しで発行できたときは通知する", async () => {
+    mockAdminClient({ certificates: inserted });
+
+    const notice = await resolveAiReviewThemeNotice({
+      userId: 2,
+      userStatus: "active",
+      userRole: "member",
+      contentId: 10,
+      passed: false,
+    });
+
+    expect(notice?.certificateId).toBe(31);
   });
 
   it("メール予約の失敗は AI レビュー用の判定を例外にしない", async () => {
@@ -634,6 +710,7 @@ describe("演習の提出・合格（#332）", () => {
         userStatus: "active",
         userRole: "member",
         contentId: 10,
+        passed: true,
       })
     ).resolves.toBeNull();
   });
