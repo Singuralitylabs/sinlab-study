@@ -1480,7 +1480,7 @@ X 向けの共有リンク（`https://twitter.com/intent/tweet?text=...&url=...`
 
 ### 14.1 マニフェスト・サービスワーカー・インストール案内
 
-- **マニフェスト**（`app/manifest.ts`）: `name` / `short_name` は Sinlab Study、`start_url` は `/`、`display` は `standalone`。`theme_color` / `background_color` は `app/constants/pwa.ts` の sRGB（`globals.css` の oklch トークンの代替。マニフェストは oklch を受けない）。アイコンは 192px・512px で `purpose: maskable`。`app/apple-icon.png`（180px）と `metadata.appleWebApp`、`viewport.themeColor`（ライト・ダーク）を付ける
+- **マニフェスト**（`app/manifest.ts`）: `name` / `short_name` は Sinlab Study、`start_url` は `/`、`display` は `standalone`。`theme_color` / `background_color` は `app/constants/pwa.ts` の sRGB（`globals.css` の oklch トークンの代替。マニフェストは oklch を受けない）。アイコンは 192px・512px を `purpose: any` と `purpose: maskable` の両方で載せる（`maskable` だけだと Chrome がインストール可能と判定しない）。`app/apple-icon.png`（180px）と `metadata.appleWebApp`、`viewport.themeColor`（ライト・ダーク）を付ける
 - **アイコン**: 元画像が無い間は `public/icon.png` から拡大した仮画像。差し替え前提
 - **サービスワーカー**（`public/sw.js`）: キャッシュするのは `/_next/static/*` とアイコンだけ（cache-first）。ナビゲーションは常にネットワーク優先で、失敗時だけ静的な `/offline`（「オフラインです」）を返す。認証配下の HTML と `/api/*` はキャッシュしない（降格・却下・ロックの反映が遅れないようにする）。`next.config.ts` の `headers()` で `/sw.js` に `Cache-Control: no-cache` と `Service-Worker-Allowed: /` を付ける。登録は `ServiceWorkerRegistration` が本番ビルドだけで行う
 - **プロキシ**: `shouldSkipMiddleware()` は上の 4 パスを完全一致でのみ通す。`/offline/anything` のような配下は通さない。環境変数欠落・例外・status null の `/login` へのフェイルクローズは変えない
