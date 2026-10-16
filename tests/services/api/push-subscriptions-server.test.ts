@@ -52,6 +52,32 @@ describe("savePushSubscription / deletePushSubscription", () => {
     await expect(savePushSubscription(supabase as never, 2, input, null)).resolves.toBe(
       "limit_exceeded"
     );
+    const countBuilder = supabase.from.mock.results[1]?.value as {
+      is: { mock: { calls: unknown[][] } };
+    };
+    expect(countBuilder.is.mock.calls).toEqual([["disabled_at", null]]);
+  });
+
+  it("disabled_at 付きの行は上限に数えない", async () => {
+    // Mock returns under-cap active rows; the query itself filters disabled_at IS NULL.
+    const underCap = Array.from({ length: MAX_PUSH_SUBSCRIPTIONS_PER_USER - 1 }, (_, index) => ({
+      id: index + 1,
+    }));
+    const supabase = createMockSupabaseClient({
+      tableResults: {
+        push_subscriptions: [
+          { data: null, error: null },
+          { data: underCap, error: null },
+          { data: null, error: null },
+        ],
+      },
+    });
+
+    await expect(savePushSubscription(supabase as never, 2, input, null)).resolves.toBe("saved");
+    const countBuilder = supabase.from.mock.results[1]?.value as {
+      is: { mock: { calls: unknown[][] } };
+    };
+    expect(countBuilder.is.mock.calls).toEqual([["disabled_at", null]]);
   });
 
   it("自分の endpoint の更新は上限でも許可する", async () => {

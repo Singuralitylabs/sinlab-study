@@ -21,11 +21,13 @@ async function countUserSubscriptions(
   supabase: AdminClient,
   userId: number
 ): Promise<number | null> {
+  // Active rows only: 404/410-disabled endpoints must not consume the per-user cap.
   // +1 so we can tell "at cap" from "under cap" without an exact count RPC.
   const { data, error } = await supabase
     .from("push_subscriptions")
     .select("id")
     .eq("user_id", userId)
+    .is("disabled_at", null)
     .limit(MAX_PUSH_SUBSCRIPTIONS_PER_USER + 1);
   if (error) {
     console.error("[Web Push] 購読数の確認に失敗しました:", error.message);
