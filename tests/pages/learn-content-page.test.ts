@@ -37,7 +37,10 @@ vi.mock("@/app/services/api/learning-server", async (importOriginal) => {
     fetchThemeNavigationIndex: vi.fn(),
     fetchContentById: vi.fn(),
     fetchExerciseReferenceAnswer: vi.fn().mockResolvedValue({ data: null, error: null }),
-    fetchUserProgressByContentId: vi.fn().mockResolvedValue({ isCompleted: false }),
+    fetchUserProgressByContentId: vi.fn().mockResolvedValue({
+      isCompleted: false,
+      retryStartedAt: null,
+    }),
     fetchContentRequiresReviewPass: vi.fn().mockResolvedValue(false),
     fetchContentReviewPassUnachievable: vi.fn().mockResolvedValue(false),
     fetchUserHasPassingReview: vi.fn().mockResolvedValue(false),
@@ -72,6 +75,7 @@ import {
   fetchExerciseReferenceAnswer,
   fetchThemeNavigationIndex,
   fetchUserHasPassingReview,
+  fetchUserProgressByContentId,
   fetchWeekById,
 } from "@/app/services/api/learning-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
@@ -890,6 +894,124 @@ describe("演習ページのAIレビュー残り回数（#304）", () => {
     await render();
 
     expect(fetchAIReviewUsage).not.toHaveBeenCalled();
+  });
+});
+
+describe("演習の再挑戦（#355）", () => {
+  const setupExerciseWithSubmission = ({
+    isPublished = true,
+    retryStartedAt = null as string | null,
+    submittedAt = "2026-10-01T11:00:00.000Z",
+  }: {
+    isPublished?: boolean;
+    retryStartedAt?: string | null;
+    submittedAt?: string;
+  } = {}) => {
+    setup({ userStatus: "active", userRole: "member", isOpenToTrial: true, isPublished });
+    vi.mocked(fetchContentById).mockResolvedValue({
+      data: slideContent({
+        content_type: "exercise",
+        pdf_url: null,
+        exercise_instructions: "課題文",
+        allowed_submission_types: "code",
+        is_open_to_trial: true,
+        is_published: isPublished,
+      }),
+      error: null,
+    } as never);
+    vi.mocked(fetchLatestSubmissionByContentId).mockResolvedValue({
+      data: {
+        id: 99,
+        submission_type: "url",
+        url: "https://example.com/work",
+        submitted_at: submittedAt,
+      },
+    } as never);
+    vi.mocked(fetchExerciseReferenceAnswer).mockResolvedValue({
+      data: "const answer = 1;",
+      error: null,
+    });
+    vi.mocked(fetchCompletedAIReviewByContentId).mockResolvedValue({
+      data: { id: 5, status: "completed", review_content: "良い提出です" },
+      submissionId: 99,
+    } as never);
+    vi.mocked(fetchUserProgressByContentId).mockResolvedValue({
+      isCompleted: false,
+      retryStartedAt,
+      error: null,
+    });
+    vi.mocked(fetchAIReviewUsage).mockResolvedValue({ contentReviews: [], todayTotal: 0 });
+  };
+
+  it("提出あり・再挑戦中でないとき模範回答と再挑戦ボタンを表示する", async () => {
+    setupExerciseWithSubmission();
+
+    const html = await render();
+
+    expect(html).toContain("模範回答");
+    expect(html).toContain("再度課題に取り組む");
+    expect(html).toContain("AIレビュー結果");
+    expect(html).not.toContain("再挑戦中です");
+    expect(html).not.toContain("前回の提出内容を見る");
+  });
+
+  it("再挑戦中は模範回答と AI レビューを隠し、折りたたみと案内を出す", async () => {
+    setupExerciseWithSubmission({
+      retryStartedAt: "2026-10-01T12:00:00.000Z",
+      submittedAt: "2026-10-01T11:00:00.000Z",
+    });
+
+    const html = await render();
+
+    expect(html).toContain("再挑戦中です。新しく提出すると模範回答と AI レビュー結果が表示されます");
+    expect(html).toContain("前回の提出内容を見る");
+    // Notice text mentions 模範回答 / AI レビュー結果; assert the result block headings are gone.
+    expect(html).not.toContain(">模範回答<");
+    expect(html).not.toContain(">AIレビュー結果<");
+    expect(html).not.toContain("再度課題に取り組む");
+    expect(html).not.toContain("const answer = 1;");
+  });
+
+  it("再挑戦後に新しい提出があると結果を再表示する", async () => {
+    setupExerciseWithSubmission({
+      retryStartedAt: "2026-10-01T12:00:00.000Z",
+      submittedAt: "2026-10-01T13:00:00.000Z",
+    });
+
+    const html = await render();
+
+    expect(html).toContain("模範回答");
+    expect(html).toContain("再度課題に取り組む");
+    expect(html).not.toContain("再挑戦中です");
+  });
+
+  it("未公開プレビューでは再挑戦ボタンを出さない", async () => {
+    setupExerciseWithSubmission({ isPublished: false });
+    vi.mocked(getServerAuth).mockResolvedValue({
+      user: { id: "auth-uuid" },
+      userId: 7,
+      userStatus: "active",
+      userRole: "admin",
+    } as never);
+
+    const html = await render();
+
+    expect(html).not.toContain("再度課題に取り組む");
+  });
+
+  it("提出が無い演習では再挑戦ボタンを出さない", async () => {
+    setupExerciseWithSubmission();
+    vi.mocked(fetchLatestSubmissionByContentId).mockResolvedValue({ data: null } as never);
+    vi.mocked(fetchExerciseReferenceAnswer).mockResolvedValue({ data: null, error: null });
+    vi.mocked(fetchCompletedAIReviewByContentId).mockResolvedValue({
+      data: null,
+      submissionId: null,
+    } as never);
+
+    const html = await render();
+
+    expect(html).not.toContain("再度課題に取り組む");
+    expect(html).not.toContain("模範回答");
   });
 });
 

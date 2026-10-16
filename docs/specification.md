@@ -417,7 +417,7 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 | 動画（video） | YouTube facade（サムネイル + 再生ボタン）。クリックで `react-youtube` を遅延読み込みして autoplay 再生（URLから Video ID を自動抽出、レスポンシブ対応） |
 | テキスト（text） | Markdown形式で記述・表示（GFM対応） |
 | スライド（slide） | 非公開バケット `slides` のPDFを、閲覧権限チェック後にサーバー側で発行した署名付きURLで react-pdf によりブラウザ内表示（後述）。`text_content`（Markdown・任意）があればビューアの直下に解説記事を表示する。空なら記事は出さない |
-| 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携。模範回答は提出が1件以上あるとき（admin・maintainer は提出不要）だけ、RPC `get_exercise_reference_answer()`（`docs/database.md` 6.18）で取得して表示する（列権限では読めない）。`grading_rubric` が NULL でなく提出方法が URL のみでない演習（空の墓石を含む。`both` は含む）は完了ボタンを出さず、AIレビュー合格で完了する（4.1節）。空の墓石は合格にならないため完了できず、合格点の案内ではなく「現在この演習は完了できません」と出す。URL のみは完了ボタンのまま。合格レビューが無い既存の完了は「完了」とだけ出す。合格点は `CERTIFICATE_PASS_SCORE`。`both` では URL 提出が採点対象外である旨を画面に出す。お試しは生涯1回のため、不合格だとお試し中は完了できない旨も出す。修了証はお試しには出さない |
+| 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携。模範回答は提出が1件以上あるとき（admin・maintainer は提出不要）だけ、RPC `get_exercise_reference_answer()`（`docs/database.md` 6.18）で取得して表示する（列権限では読めない）。提出済みで再挑戦中でないときは「再度課題に取り組む」を出せる（5.7節）。`grading_rubric` が NULL でなく提出方法が URL のみでない演習（空の墓石を含む。`both` は含む）は完了ボタンを出さず、AIレビュー合格で完了する（4.1節）。空の墓石は合格にならないため完了できず、合格点の案内ではなく「現在この演習は完了できません」と出す。URL のみは完了ボタンのまま。合格レビューが無い既存の完了は「完了」とだけ出す。合格点は `CERTIFICATE_PASS_SCORE`。`both` では URL 提出が採点対象外である旨を画面に出す。お試しは生涯1回のため、不合格だとお試し中は完了できない旨も出す。修了証はお試しには出さない |
 | クイズ（quiz） | 導入文（`description`・任意）と設問（1〜3問）を表示し、回答後に正誤・解説を表示（後述） |
 
 動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア下部に概要欄カードを表示する（テキスト・演習と同じ `MarkdownRenderer`）。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）は `"use client"` を持たない共有コンポーネントで、Server Component からはサーバーで、Client Component（`AIReviewDisplay`）からはクライアントで同じ実装のまま描画される。コンテンツ本文の Markdown 描画経路（Server Component）は client 化しない。
@@ -720,6 +720,25 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 
 - **受講生**: 自分の提出履歴を提出日時の降順でページネーション付き取得（`SUBMISSIONS_PAGE_SIZE`、content は id/title、ai_reviews は一覧表示用カラムのみ）
 - **管理者**: 全受講生の提出一覧を提出日時の降順でページネーション付き取得（ユーザー・コンテンツ情報付き。件数定数は受講生側と共有）
+
+### 5.7 演習の再挑戦（#355）
+
+一度提出したあと、模範回答と前回の AI レビューを見ずに再度取り組みたいとき用。クイズの「もう一度解く」と違い、提出は DB に残るため、再挑戦中であることを `user_progress.retry_started_at` に記録する。
+
+**表示ルール**（純粋関数 `isExerciseRetryInProgress()`）: `retry_started_at` が NULL でなく、最新提出の `submitted_at` が `retry_started_at` 以前なら再挑戦中。新しい提出があれば自動的に再挑戦中でなくなる（提出 API は変更しない。`retry_started_at` をクリアしない）。
+
+- 再挑戦中でない・提出あり: 提出内容・模範回答・最新提出の AI レビューを従来どおり出し、結果ブロックに「再度課題に取り組む」ボタンを置く（`isFullyPublished` のときだけ。未公開プレビューでは API が 403 になるため）
+- 再挑戦中: 模範回答と AI レビューを描画しない。提出内容は「前回の提出内容を見る」の `<details>`（ヒントと同じ折りたたみ）に入れ既定で閉じる。案内文を出す。`SubmissionForm` の `persistedReviewId` には画面が実際に描画するレビューの id だけを渡す（再挑戦中は null）
+- 提出が無い演習・`/demo`・未公開プレビューではボタンを出さない
+
+**エンドポイント**: `POST /api/progress/retry`（ボディ `{ contentId }`）
+
+1. zod で `contentId` を検証 → `requireLearnerApi()`（未認証 401・`rejected` 等 403）
+2. `isContentVisible()` で不可視なら 403
+3. 本人の提出が1件以上あること（無ければ 409）
+4. `user_progress` を `onConflict: user_id,content_id` で upsert し `retry_started_at = now()` だけを書く（`is_completed` / `completed_at` / `ever_completed` は触らない）。通常クライアント。RLS は 6.2 の本人かつ可視コンテンツ限定
+
+提出履歴ページ・フェーズ一覧の「AIレビュー済み」バッジ・AI レビュー回数制限・完了状態・`/demo` は変えない。
 
 ---
 
