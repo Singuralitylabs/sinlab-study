@@ -17,6 +17,7 @@ import {
   resolveGeminiApiKey,
 } from "@/app/services/api/gemini";
 import { isContentVisible } from "@/app/services/api/learning-server";
+import { saveContentProgress } from "@/app/services/api/progress-server";
 import { AiReviewRequestSchema, validateRequest } from "@/app/services/api/schemas";
 import {
   createAdminSupabaseClient,
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
     if (guard.response) {
       return guard.response;
     }
-    const { userId, userStatus } = guard.auth;
+    const { userId, userStatus, userRole } = guard.auth;
 
     const apiKey = resolveGeminiApiKey(userStatus);
     if (!apiKey) {
@@ -219,6 +220,27 @@ export async function POST(request: NextRequest) {
           thoughtsTokens: result.thoughtsTokens,
         });
         return NextResponse.json({ error: "AIレビューの保存に失敗しました" }, { status: 500 });
+      }
+
+      // A pass completes the exercise on the learner's session. Unpublished content never reaches
+      // here (isContentVisible already returned 403). A later failing review does not call this,
+      // so completion stays. A write failure must not change the review response.
+      if (result.passed === true) {
+        try {
+          const recorded = await saveContentProgress({
+            supabase,
+            userId,
+            userStatus,
+            userRole,
+            contentId: submission.content_id,
+            isCompleted: true,
+          });
+          if (!recorded.ok) {
+            console.error("合格後の完了記録に失敗:", recorded.error);
+          }
+        } catch (error) {
+          console.error("合格後の完了記録に失敗:", error);
+        }
       }
 
       return NextResponse.json({

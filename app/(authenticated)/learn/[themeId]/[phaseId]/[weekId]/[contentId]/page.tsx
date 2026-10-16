@@ -24,8 +24,11 @@ import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-
 import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   fetchContentById,
+  fetchContentRequiresReviewPass,
+  fetchContentReviewPassUnachievable,
   fetchExerciseReferenceAnswer,
   fetchThemeNavigationIndex,
+  fetchUserHasPassingReview,
   fetchUserProgressByContentId,
   fetchWeekById,
   isContentFullyPublished,
@@ -45,6 +48,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { AIReviewLimitNotice } from "./AIReviewLimitNotice";
 import { CompleteButton } from "./CompleteButton";
+import { ExerciseCompletionStatus } from "./ExerciseCompletionStatus";
 import { PrevNextNav } from "./PrevNextNav";
 import { QuizForm } from "./QuizForm";
 import { SubmissionForm } from "./SubmissionForm";
@@ -253,6 +257,7 @@ export default async function ContentPage({ params }: PageProps) {
   // gets here (#89). Runs in parallel with the progress fetches. The remaining-review count is
   // computed here on the server (the client never counts) and joins the same Promise.all because
   // it depends on none of the other fetches.
+  const exerciseContent = content.content_type === "exercise";
   const [
     { data: existingReview, submissionId: reviewedSubmissionId },
     { data: latestSubmission },
@@ -261,17 +266,20 @@ export default async function ContentPage({ params }: PageProps) {
     { data: quizQuestions, error: quizError },
     aiReviewUsage,
     { data: reviewNotes },
+    requiresReviewPass,
+    passUnachievable,
+    hasPassingReview,
   ] = await Promise.all([
-    userId && content.content_type === "exercise"
+    userId && exerciseContent
       ? fetchCompletedAIReviewByContentId(userId, contentIdNum)
       : Promise.resolve({ data: null, submissionId: null }),
     // service_role read: only after the lock / publish checks above, and only for exercises.
-    userId && content.content_type === "exercise"
+    userId && exerciseContent
       ? fetchLatestSubmissionByContentId(userId, contentIdNum)
       : Promise.resolve({ data: null }),
     // The RPC returns the answer only to a caller who has submitted (or admin / maintainer), so
     // it is safe to ask without waiting for the submission lookup.
-    userId && content.content_type === "exercise"
+    userId && exerciseContent
       ? fetchExerciseReferenceAnswer(contentIdNum)
       : Promise.resolve({ data: null }),
     content.content_type === "slide" && content.pdf_url
@@ -292,6 +300,11 @@ export default async function ContentPage({ params }: PageProps) {
     showReviewListNotes && userId
       ? fetchReviewNotesForContent(userId, contentIdNum)
       : Promise.resolve({ data: [] }),
+    exerciseContent ? fetchContentRequiresReviewPass(contentIdNum) : Promise.resolve(false),
+    exerciseContent ? fetchContentReviewPassUnachievable(contentIdNum) : Promise.resolve(false),
+    exerciseContent && userId
+      ? fetchUserHasPassingReview(userId, contentIdNum)
+      : Promise.resolve(false),
   ]);
 
   const memosByKey: Record<string, string | null> = {};
@@ -517,13 +530,28 @@ export default async function ContentPage({ params }: PageProps) {
       {/* Hidden while previewing unpublished content since progress can't be recorded. */}
       {userId && isFullyPublished && (
         <div className="mb-6">
-          {/* Keyed by the saved state so router.refresh() after a quiz answer remounts it. */}
-          <CompleteButton
-            key={String(isCompleted)}
-            contentId={contentIdNum}
-            initialCompleted={isCompleted}
-            refreshOnToggle={content.content_type === "quiz"}
-          />
+          {exerciseContent && requiresReviewPass ? (
+            <ExerciseCompletionStatus
+              key={String(isCompleted)}
+              contentId={contentIdNum}
+              initialCompleted={isCompleted}
+              hasPassingReview={hasPassingReview}
+              passUnachievable={passUnachievable}
+              userStatus={userStatus}
+              allowsUrlSubmission={
+                ((content.allowed_submission_types as "code" | "url" | "both" | null) ?? "code") !==
+                "code"
+              }
+            />
+          ) : (
+            // Keyed by the saved state so router.refresh() after a quiz answer remounts it.
+            <CompleteButton
+              key={String(isCompleted)}
+              contentId={contentIdNum}
+              initialCompleted={isCompleted}
+              refreshOnToggle={content.content_type === "quiz"}
+            />
+          )}
         </div>
       )}
 

@@ -13,6 +13,7 @@ vi.mock("next/navigation", () => ({
   notFound: () => {
     throw new Error("NEXT_NOT_FOUND");
   },
+  useRouter: () => ({ refresh: () => undefined }),
 }));
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/slides-server");
@@ -37,6 +38,9 @@ vi.mock("@/app/services/api/learning-server", async (importOriginal) => {
     fetchContentById: vi.fn(),
     fetchExerciseReferenceAnswer: vi.fn().mockResolvedValue({ data: null, error: null }),
     fetchUserProgressByContentId: vi.fn().mockResolvedValue({ isCompleted: false }),
+    fetchContentRequiresReviewPass: vi.fn().mockResolvedValue(false),
+    fetchContentReviewPassUnachievable: vi.fn().mockResolvedValue(false),
+    fetchUserHasPassingReview: vi.fn().mockResolvedValue(false),
   };
 });
 vi.mock("@/app/components/SlideContent", () => ({
@@ -63,8 +67,11 @@ import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-
 import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   fetchContentById,
+  fetchContentRequiresReviewPass,
+  fetchContentReviewPassUnachievable,
   fetchExerciseReferenceAnswer,
   fetchThemeNavigationIndex,
+  fetchUserHasPassingReview,
   fetchWeekById,
 } from "@/app/services/api/learning-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
@@ -844,6 +851,31 @@ describe("演習ページのAIレビュー残り回数（#304）", () => {
     expect(html).toContain("模範回答");
     expect(html).toContain("const answer = 1;");
     expect(fetchExerciseReferenceAnswer).toHaveBeenCalledWith(expect.any(Number));
+  });
+
+  it("採点基準ありの演習は完了ボタンを出さず、合格の案内を出す", async () => {
+    setupExercise({ userStatus: "trial" });
+    vi.mocked(fetchContentRequiresReviewPass).mockResolvedValue(true);
+    vi.mocked(fetchUserHasPassingReview).mockResolvedValue(false);
+
+    const html = await render();
+
+    expect(html).not.toContain('data-testid="complete-button"');
+    expect(html).toContain("点以上・未達成の要件なし");
+    expect(html).toContain("お試しの間はこの演習を完了できません");
+    expect(html).not.toContain("修了証");
+  });
+
+  it("空の採点基準では合格点の案内を出さない", async () => {
+    setupExercise({ userStatus: "active" });
+    vi.mocked(fetchContentRequiresReviewPass).mockResolvedValue(true);
+    vi.mocked(fetchContentReviewPassUnachievable).mockResolvedValue(true);
+
+    const html = await render();
+
+    expect(html).toContain("現在この演習は完了できません");
+    expect(html).not.toContain("点以上");
+    expect(html).not.toContain('data-testid="complete-button"');
   });
 
   it("未公開（プレビュー）の演習では集計しない", async () => {

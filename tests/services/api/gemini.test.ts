@@ -565,7 +565,7 @@ describe("generateReview", () => {
       scoreKind: "rubric",
       rubricVersion: 3,
       overallScore: 80,
-      passed: null,
+      passed: true,
       modelUsed: GEMINI_MODEL_NAME,
       promptTokens: 120,
       completionTokens: 40,

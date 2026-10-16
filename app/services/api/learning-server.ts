@@ -28,6 +28,12 @@ import type {
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
+export {
+  fetchContentRequiresReviewPass,
+  fetchContentReviewPassUnachievable,
+  fetchUserHasPassingReview,
+} from "./review-pass-server";
+
 /** Visible content fields used by POST /api/submissions slot and starter checks. */
 export type VisibleLearningContent = {
   code_language: string;

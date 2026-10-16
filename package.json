@@ -13,7 +13,7 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "check": "biome check --write .",
-    "db:types": "sh -e -c '[ -f .env.local ] && . ./.env.local; : \"${SUPABASE_PROJECT_ID:?SUPABASE_PROJECT_ID is not set}\"; npx supabase gen types --lang=typescript --project-id \"$SUPABASE_PROJECT_ID\" --schema public > app/types/lib/database.types.ts'",
+    "db:types": "sh scripts/db-types.sh",
     "test": "vitest run",
     "check:comments": "bun scripts/check-comment-only-diff.ts",
     "test:watch": "vitest",
