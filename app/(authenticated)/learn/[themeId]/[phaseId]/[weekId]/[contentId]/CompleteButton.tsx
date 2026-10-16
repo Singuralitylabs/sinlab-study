@@ -66,7 +66,12 @@ export function CompleteButton({
 
   return (
     <>
-      {themeNotice && <ThemeCompletionDialog notice={themeNotice} />}
+      {themeNotice && (
+        <ThemeCompletionDialog
+          key={`${themeNotice.themeId}-${themeNotice.certificateId}-${themeNotice.remaining.unsubmittedExercises}-${themeNotice.remaining.exercisesNeedingRetry}-${themeNotice.blockedByMissingName}`}
+          notice={themeNotice}
+        />
+      )}
       <Button
         onClick={handleToggle}
         disabled={isLoading}

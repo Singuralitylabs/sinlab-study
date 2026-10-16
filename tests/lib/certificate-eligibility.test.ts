@@ -158,11 +158,15 @@ describe("テーマ修了の文言", () => {
   });
 
   it("通知の差し替えで開き直す（閉じたままにしない）", async () => {
-    const source = await import("node:fs/promises").then((fs) =>
-      fs.readFile("app/components/ThemeCompletionDialog.tsx", "utf8")
+    const form = await import("node:fs/promises").then((fs) =>
+      fs.readFile(
+        "app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/SubmissionForm.tsx",
+        "utf8"
+      )
     );
-    expect(source).toContain("setOpen(true)");
-    expect(source).toContain("notice.certificateId");
+    expect(form).toContain("setThemeNotice(null)");
+    expect(form).toContain("key={");
+    expect(form).toContain("themeNotice.themeId");
   });
 });
 

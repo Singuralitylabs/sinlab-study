@@ -116,7 +116,12 @@ describe("issueCertificateIfEligible - 発行条件", () => {
   it("そのテーマが発行済みなら、集計も INSERT もせず早期に終える", async () => {
     mockUserClient({
       certificates: {
-        data: { id: 31, theme_id: THEME.id, certificate_no: "SS-202610-ABC123", theme_name: THEME.name },
+        data: {
+          id: 31,
+          theme_id: THEME.id,
+          certificate_no: "SS-202610-ABC123",
+          theme_name: THEME.name,
+        },
         error: null,
       },
     });

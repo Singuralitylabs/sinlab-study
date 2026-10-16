@@ -20,7 +20,6 @@ import {
 import { parseDisplayName } from "@/app/lib/display-name";
 import { applyPublishedNestedThemeFilters } from "@/app/lib/published-theme-tree";
 import {
-  fetchThemeProgressSummaries,
   fetchThemeProgressSummary,
   type ThemeProgressSummary,
 } from "@/app/services/api/learning-server";
@@ -385,10 +384,7 @@ async function evaluateThemeForCertificate(params: {
     return { status: "not-ready" };
   }
   // Single-theme COUNT: intermediate completions must not page every theme's progress.
-  const { data: summary, error } = await fetchThemeProgressSummary(
-    params.userId,
-    params.themeId
-  );
+  const { data: summary, error } = await fetchThemeProgressSummary(params.userId, params.themeId);
   if (error || !summary || !isThemeCompleted(summary)) {
     return { status: "not-ready" };
   }
