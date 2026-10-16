@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import { isFeedbackEnabled } from "@/app/constants/feedback";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import { isCertificateEligible } from "@/app/lib/certificate";
@@ -35,6 +36,7 @@ export default async function AuthLayout({
   const isAdmin = checkAdminPermissions(userRole);
   const isInstructor = checkInstructorPermissions(userRole);
   const stripeEnabled = isStripeEnabled();
+  const feedbackEnabled = isFeedbackEnabled();
 
   return (
     <div className="sm:flex min-h-screen">
@@ -42,6 +44,7 @@ export default async function AuthLayout({
         isAdmin={isAdmin}
         isInstructor={isInstructor}
         stripeEnabled={stripeEnabled}
+        feedbackEnabled={feedbackEnabled}
         showCertificates={isCertificateEligible(userStatus, userRole)}
         showReviewList={isLearnerRole(userRole)}
         announcementBadge={

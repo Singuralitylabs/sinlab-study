@@ -429,6 +429,47 @@ export type Database = {
           },
         ];
       };
+      feedbacks: {
+        Row: {
+          body: string;
+          category: string;
+          created_at: string;
+          id: number;
+          page_url: string | null;
+          status: string;
+          user_agent: string | null;
+          user_id: number;
+        };
+        Insert: {
+          body: string;
+          category: string;
+          created_at?: string;
+          id?: number;
+          page_url?: string | null;
+          status?: string;
+          user_agent?: string | null;
+          user_id: number;
+        };
+        Update: {
+          body?: string;
+          category?: string;
+          created_at?: string;
+          id?: number;
+          page_url?: string | null;
+          status?: string;
+          user_agent?: string | null;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "feedbacks_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       learning_contents: {
         Row: {
           allowed_submission_types: string;

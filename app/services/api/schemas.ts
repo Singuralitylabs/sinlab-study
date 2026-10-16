@@ -14,6 +14,11 @@ import {
   MAX_BULK_CREATE_CONTENTS,
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
+import {
+  FEEDBACK_BODY_MAX_LENGTH,
+  FEEDBACK_CATEGORIES,
+  FEEDBACK_STATUSES,
+} from "@/app/constants/feedback";
 import { STARTER_FILES_MAX_TOTAL_LENGTH } from "@/app/constants/gemini";
 import { GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH } from "@/app/constants/grading";
 import {
@@ -133,6 +138,25 @@ const InsertAfterIdSchema = PositiveIntSchema.nullable();
 export const ProgressUpdateSchema = z.object({
   contentId: ContentIdSchema,
   isCompleted: z.boolean({ message: "isCompletedはbooleanで指定してください" }),
+});
+
+/** POST /api/feedback (#392). pageUrl / userAgent are optional auto-filled client fields. */
+export const FeedbackCreateSchema = z.object({
+  category: z.enum(FEEDBACK_CATEGORIES, { message: "種別が不正です" }),
+  body: z
+    .string({ message: "本文は文字列で指定してください" })
+    .trim()
+    .min(1, { message: "本文を入力してください" })
+    .max(FEEDBACK_BODY_MAX_LENGTH, {
+      message: `本文は${FEEDBACK_BODY_MAX_LENGTH}文字以内で指定してください`,
+    }),
+  pageUrl: z.string().max(2000, { message: "ページURLが長すぎます" }).nullable().optional(),
+  userAgent: z.string().max(500, { message: "User-Agentが長すぎます" }).nullable().optional(),
+});
+
+/** PATCH /api/manage/feedbacks/[id] */
+export const FeedbackStatusUpdateSchema = z.object({
+  status: z.enum(FEEDBACK_STATUSES, { message: "状態が不正です" }),
 });
 
 /** PUT /api/review-notes. memo is rejected (not truncated) when longer than the max. */

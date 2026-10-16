@@ -1,3 +1,8 @@
+import {
+  FEEDBACK_CATEGORY_LABELS,
+  FEEDBACK_SLACK_BODY_PREVIEW_CHARS,
+  type FeedbackCategory,
+} from "@/app/constants/feedback";
 import { SLACK_WEBHOOK_TIMEOUT_MS } from "@/app/constants/notifications";
 import { formatDateTimeMinute } from "@/app/lib/format-date";
 
@@ -215,6 +220,83 @@ export async function sendSlackCheckoutRecoveryNotification(
           { type: "plain_text", text: params.sessionIds.join(", ") || "-" },
         ],
       },
+    ],
+  };
+
+  await postSlackWebhook(body);
+}
+
+type FeedbackNotificationParams = {
+  feedbackId: number;
+  category: FeedbackCategory;
+  body: string;
+  pageUrl: string | null;
+  /** Absolute manage URL when NEXT_PUBLIC_APP_URL is set; omit the button otherwise. */
+  manageUrl: string | null;
+};
+
+/**
+ * Operator notice for a new learner feedback. Omits email and other PII; the manage link is enough
+ * to open the row. Failures must not change the feedback API outcome.
+ */
+export async function sendSlackFeedbackNotification(
+  params: FeedbackNotificationParams
+): Promise<void> {
+  const preview =
+    params.body.length > FEEDBACK_SLACK_BODY_PREVIEW_CHARS
+      ? `${params.body.slice(0, FEEDBACK_SLACK_BODY_PREVIEW_CHARS)}…`
+      : params.body;
+
+  const body = {
+    blocks: [
+      {
+        type: "header",
+        text: {
+          type: "plain_text",
+          text: "📝 新しいフィードバックが届きました",
+          emoji: true,
+        },
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: "*種別*" },
+          {
+            type: "plain_text",
+            text: FEEDBACK_CATEGORY_LABELS[params.category],
+          },
+          { type: "mrkdwn", text: "*ID*" },
+          { type: "plain_text", text: String(params.feedbackId) },
+          { type: "mrkdwn", text: "*ページ*" },
+          { type: "plain_text", text: params.pageUrl ?? "不明" },
+        ],
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*本文（冒頭）*\n${preview}`,
+        },
+      },
+      ...(params.manageUrl
+        ? [
+            {
+              type: "actions",
+              elements: [
+                {
+                  type: "button",
+                  text: {
+                    type: "plain_text",
+                    text: "管理画面を開く",
+                    emoji: true,
+                  },
+                  url: params.manageUrl,
+                  style: "primary",
+                },
+              ],
+            },
+          ]
+        : []),
     ],
   };
 

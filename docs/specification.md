@@ -1583,3 +1583,32 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 本文に「復習リストに未克服の項目が N 件あります」を 1 行添える（プレースホルダー `{{review_list_line}}`。0 件なら空にして行ごと出さない）。対象抽出・送信条件は変えない（10.7節）。件数は公開中・可視コンテンツ上の未克服だけを数え、復習リスト画面と同じ分母にする。**`email_templates` に `weekly_digest` の上書き行がある環境では、保存済み本文に `{{review_list_line}}` を追記する必要がある**（10.11節: 上書きがあればコード既定値は使わない。`active_themes` と同様。管理画面 `/admin/emails/templates` のプレースホルダー一覧にも載る）。
 
 **service_role 例外（digest 件数）**: Cron にユーザーセッションが無いため、未克服件数だけは `ai_reviews.review_json` を service_role で読む（`user_id` フィルタ付き。受講生向け配信の2経路は増やさない）。取得に失敗したら warn/error ログを出し、全員分を 0 件として本文だけ続行する（digest 全体を abort しない）。読む列は導出に必要な `id, score_kind, review_json, reviewed_at, created_at, status` と提出側の `user_id, content_id` に限る。
+
+## 16. フィードバック機能（#392 段階1）
+
+受講生の不具合・改善要望・質問をアプリ内で受け付け、DB に保存して正とする。Slack 通知の失敗で声が消えないようにする。GitHub イシュー化は段階2（別 PR）。
+
+### 16.1 有効・無効
+
+`FEEDBACK_ENABLED === "true"` のときだけ有効（`isFeedbackEnabled()`。フェイルクローズ）。無効時はサイドナビにフォームを出さず、`POST /api/feedback` は 503。
+
+### 16.2 投稿 API
+
+**エンドポイント**: `POST /api/feedback`
+
+**ボディ**: `{ category, body, pageUrl?, userAgent? }`（`category` は `FEEDBACK_CATEGORIES`: `bug` / `improvement` / `question` / `other`。`body` は trim 後 1〜`FEEDBACK_BODY_MAX_LENGTH` 文字）
+
+1. 機能無効なら 503
+2. zod 検証 → `requireLearnerApi()`（未認証 401・`rejected` 等 403）。お試し（trial）も可
+3. 同一ユーザーの直近 `FEEDBACK_RATE_LIMIT_WINDOW_MS`（60秒）以内の件数が 1 以上なら 429
+4. `createAdminSupabaseClient()` で `feedbacks` に INSERT（`user_id` は認証ユーザーのみ。RLS 有効・ポリシーなし）
+5. `sendSlackFeedbackNotification()` を fire-and-forget（失敗しても 200）。メールアドレスは載せない。管理画面リンクは `NEXT_PUBLIC_APP_URL` があるときだけ
+
+### 16.3 画面
+
+- **受講生**: サイドナビ下部の「フィードバック」ダイアログ（ページ URL・User-Agent は自動付与）
+- **管理**（admin / maintainer）: `/manage/feedbacks` 一覧、`/manage/feedbacks/[id]` 詳細と状態変更（`open` / `in_progress` / `done`）。`PATCH /api/manage/feedbacks/[id]`（`requireContentManagerApi()`）
+
+### 16.4 スコープ外（段階1）
+
+投稿者への返信メール、画像添付、公開ボード、GitHub イシュー自動作成（段階2）。
