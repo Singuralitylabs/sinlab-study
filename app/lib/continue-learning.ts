@@ -173,11 +173,11 @@ export function resolveContinueLearning(
     if (!completedContentIds.has(latestViewedContent.id)) {
       return toTarget(latestViewedContent, lastViewedAtIso);
     }
-    const next = resolveAfterCompletedAnchor(
-      orderedContents,
-      completedContentIds,
-      latestViewedContent
-    );
+    const next =
+      resolveAfterCompletedAnchor(orderedContents, completedContentIds, latestViewedContent) ??
+      // Earlier incompletes (other themes / earlier in the same theme) must not hide the card.
+      orderedContents.find((c) => !completedContentIds.has(c.id)) ??
+      null;
     return next ? toTarget(next, lastViewedAtIso) : null;
   }
 

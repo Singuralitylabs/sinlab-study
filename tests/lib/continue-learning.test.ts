@@ -163,5 +163,16 @@ describe("resolveContinueLearning", () => {
       );
       expect(next).toBeNull();
     });
+
+    it("後続テーマを終えたあと前テーマに未完了が残るときは先頭未完了へ戻す", () => {
+      const next = resolveContinueLearning(
+        ordered,
+        new Set([4, 5, 6]),
+        new Map(),
+        new Map([[6, 10000]])
+      );
+      expect(next?.id).toBe(1);
+      expect(next?.themeName).toBe("GAS");
+    });
   });
 });
