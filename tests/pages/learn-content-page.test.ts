@@ -963,7 +963,9 @@ describe("演習の再挑戦（#355）", () => {
 
     const html = await render();
 
-    expect(html).toContain("再挑戦中です。新しく提出すると模範回答と AI レビュー結果が表示されます");
+    expect(html).toContain(
+      "再挑戦中です。新しく提出すると模範回答と AI レビュー結果が表示されます"
+    );
     expect(html).toContain("前回の提出内容を見る");
     // Notice text mentions 模範回答 / AI レビュー結果; assert the result block headings are gone.
     expect(html).not.toContain(">模範回答<");

@@ -59,9 +59,7 @@ describe("POST /api/progress/retry - 認可", () => {
 
   it("対象コンテンツが不可視の場合は403", async () => {
     vi.mocked(isContentVisible).mockResolvedValue(false);
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(
-      createMockSupabaseClient() as never
-    );
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(createMockSupabaseClient() as never);
 
     const res = await POST(request() as never);
 

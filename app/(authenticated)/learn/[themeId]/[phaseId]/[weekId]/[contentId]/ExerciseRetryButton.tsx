@@ -45,7 +45,11 @@ export function ExerciseRetryButton({ contentId }: ExerciseRetryButtonProps) {
         disabled={isPending}
         className="gap-2"
       >
-        {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+        {isPending ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <RotateCcw className="h-4 w-4" />
+        )}
         再度課題に取り組む
       </Button>
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
