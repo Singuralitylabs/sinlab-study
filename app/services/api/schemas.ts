@@ -145,6 +145,11 @@ export const ProgressRetrySchema = z.object({
   contentId: ContentIdSchema,
 });
 
+/** POST /api/progress/view — record last_viewed_at for continue-learning (#396). */
+export const ProgressViewSchema = z.object({
+  contentId: ContentIdSchema,
+});
+
 /** POST /api/feedback (#392). pageUrl / userAgent are optional auto-filled client fields. */
 export const FeedbackCreateSchema = z.object({
   category: z.enum(FEEDBACK_CATEGORIES, { message: "種別が不正です" }),

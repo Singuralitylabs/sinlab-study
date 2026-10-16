@@ -2,16 +2,11 @@ import { ArrowRight, PlayCircle } from "lucide-react";
 import Link from "next/link";
 import { CONTENT_TYPE_LABELS } from "@/app/constants/content";
 import type { ContinueLearningTarget } from "@/app/lib/continue-learning";
+import { formatDate } from "@/app/lib/format-date";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 
 export function ContinueLearningCard({ target }: { target: ContinueLearningTarget }) {
-  const percent =
-    target.totalContents > 0
-      ? Math.round((target.completedContents / target.totalContents) * 100)
-      : 0;
-
   return (
     <Card className="mb-6 border-l-4 border-l-primary">
       <CardContent className="pt-6">
@@ -28,11 +23,10 @@ export function ContinueLearningCard({ target }: { target: ContinueLearningTarge
               <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                 <span className="truncate">{target.themeName}</span>
                 <Badge variant="secondary">{CONTENT_TYPE_LABELS[target.contentType]}</Badge>
-                <span className="shrink-0">
-                  {target.completedContents} / {target.totalContents}
-                </span>
+                {target.lastViewedAt ? (
+                  <span className="shrink-0">前回: {formatDate(target.lastViewedAt)}</span>
+                ) : null}
               </div>
-              <Progress value={percent} className="h-2 mt-3" />
             </div>
             <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary shrink-0 mt-1" />
           </div>

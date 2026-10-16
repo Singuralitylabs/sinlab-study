@@ -601,8 +601,9 @@ describe("fetchHomeLearningData", () => {
     expect(result.data?.completedAtByContentId.get(1000)).toBe(
       Date.parse("2026-01-01T00:00:00.000Z")
     );
-    // One themes query + one progress page (no duplicate tree/progress round-trips).
-    expect(mockClient.from).toHaveBeenCalledTimes(2);
+    expect(result.data?.lastViewedAtByContentId.size).toBe(0);
+    // Themes + completed progress page + last_viewed page (#396).
+    expect(mockClient.from).toHaveBeenCalledTimes(3);
   });
 });
 

@@ -18,36 +18,39 @@ export type ContinueLearningContent = {
 };
 
 export type ContinueLearningTarget = ContinueLearningContent & {
-  completedContents: number;
-  totalContents: number;
   href: string;
+  /** ISO timestamp of the most recent view used as the card's 「前回」; null when no views. */
+  lastViewedAt: string | null;
 };
 
+function toTarget(
+  content: ContinueLearningContent,
+  lastViewedAt: string | null
+): ContinueLearningTarget {
+  return {
+    ...content,
+    href: `/learn/${content.themeId}/${content.phaseId}/${content.weekId}/${content.id}`,
+    lastViewedAt,
+  };
+}
+
 /**
- * Next content to open from home. Rules (#370):
- * - Theme of the most recent completion → first incomplete in that theme's learning order
- * - No completions → first content of the first theme
- * - Last-learned theme fully done → first incomplete in the next theme (display order)
- * - Everything complete → null (caller hides the card)
- *
- * Intentionally diverges from weekly-digest resolveNextContent() (email-digest.ts): that picks
- * among started-and-unfinished themes by latest completion, else the first incomplete overall.
- * Home follows #370 (last theme → next by display order) and must not be merged blindly.
+ * #370 fallback: theme of the most recent completion → first incomplete in that theme; no
+ * completions → first content of the first theme; last-learned theme fully done → next theme by
+ * display order; everything complete → null.
  */
-export function resolveContinueLearning(
+function resolveByCompletions(
   orderedContents: readonly ContinueLearningContent[],
   completedContentIds: ReadonlySet<number>,
   completedAtByContentId: ReadonlyMap<number, number>
-): ContinueLearningTarget | null {
+): ContinueLearningContent | null {
   if (orderedContents.length === 0) return null;
 
   const themes = new Map<
     number,
     {
-      themeName: string;
       contents: ContinueLearningContent[];
       completedContents: number;
-      /** Latest real completed_at in this theme; null when every completion lacks a timestamp. */
       lastCompletedAt: number | null;
       firstIncomplete: ContinueLearningContent | null;
     }
@@ -55,7 +58,6 @@ export function resolveContinueLearning(
 
   for (const content of orderedContents) {
     const theme = themes.get(content.themeId) ?? {
-      themeName: content.themeName,
       contents: [],
       completedContents: 0,
       lastCompletedAt: null,
@@ -64,7 +66,6 @@ export function resolveContinueLearning(
     theme.contents.push(content);
     if (completedContentIds.has(content.id)) {
       theme.completedContents += 1;
-      // Missing completed_at must not become epoch 0 — that wrongly beats older real times.
       const completedAt = completedAtByContentId.get(content.id);
       if (
         completedAt != null &&
@@ -84,8 +85,6 @@ export function resolveContinueLearning(
 
   let chosen = incompleteThemes[0];
   if (completedContentIds.size > 0) {
-    // Prefer themes with a real completed_at; among those, max timestamp wins. Themes that only
-    // have missing times stay behind timestamped ones and keep display order among themselves.
     let lastTheme: (typeof themeList)[number] | null = null;
     for (const theme of themeList) {
       if (theme.completedContents === 0) continue;
@@ -101,7 +100,6 @@ export function resolveContinueLearning(
     if (lastTheme?.firstIncomplete) {
       chosen = lastTheme;
     } else if (lastTheme) {
-      // Last-learned theme is done: take the next theme (in display order) that still has work.
       const lastIndex = themeList.indexOf(lastTheme);
       chosen =
         themeList.slice(lastIndex + 1).find((t) => t.firstIncomplete != null) ??
@@ -109,13 +107,84 @@ export function resolveContinueLearning(
     }
   }
 
-  const next = chosen.firstIncomplete;
-  if (!next) return null;
+  return chosen.firstIncomplete;
+}
 
-  return {
-    ...next,
-    completedContents: chosen.completedContents,
-    totalContents: chosen.contents.length,
-    href: `/learn/${next.themeId}/${next.phaseId}/${next.weekId}/${next.id}`,
-  };
+/**
+ * Next content after a completed anchor: remaining incompletes in the same theme (learning order),
+ * else the next theme's first incomplete (display order).
+ */
+function resolveAfterCompletedAnchor(
+  orderedContents: readonly ContinueLearningContent[],
+  completedContentIds: ReadonlySet<number>,
+  anchor: ContinueLearningContent
+): ContinueLearningContent | null {
+  const sameTheme = orderedContents.filter((c) => c.themeId === anchor.themeId);
+  const afterInTheme = sameTheme
+    .slice(sameTheme.findIndex((c) => c.id === anchor.id) + 1)
+    .find((c) => !completedContentIds.has(c.id));
+  if (afterInTheme) return afterInTheme;
+
+  const themeOrder: number[] = [];
+  for (const c of orderedContents) {
+    if (!themeOrder.includes(c.themeId)) themeOrder.push(c.themeId);
+  }
+  const themeIndex = themeOrder.indexOf(anchor.themeId);
+  for (const themeId of themeOrder.slice(themeIndex + 1)) {
+    const first = orderedContents.find(
+      (c) => c.themeId === themeId && !completedContentIds.has(c.id)
+    );
+    if (first) return first;
+  }
+  return null;
+}
+
+/**
+ * Next content to open from home (#396):
+ * - With any last_viewed_at: max timestamp wins. Incomplete → that content; complete → next
+ *   incomplete in the same theme, else the next theme's first incomplete.
+ * - No views → #370 completion-based rules.
+ * - Everything complete → null.
+ *
+ * Intentionally diverges from weekly-digest resolveNextContent() (email-digest.ts).
+ */
+export function resolveContinueLearning(
+  orderedContents: readonly ContinueLearningContent[],
+  completedContentIds: ReadonlySet<number>,
+  completedAtByContentId: ReadonlyMap<number, number>,
+  lastViewedAtByContentId: ReadonlyMap<number, number> = new Map()
+): ContinueLearningTarget | null {
+  if (orderedContents.length === 0) return null;
+
+  let latestViewedAt: number | null = null;
+  let latestViewedContent: ContinueLearningContent | null = null;
+  for (const content of orderedContents) {
+    const viewedAt = lastViewedAtByContentId.get(content.id);
+    if (viewedAt == null) continue;
+    if (latestViewedAt == null || viewedAt > latestViewedAt) {
+      latestViewedAt = viewedAt;
+      latestViewedContent = content;
+    }
+  }
+
+  const lastViewedAtIso = latestViewedAt != null ? new Date(latestViewedAt).toISOString() : null;
+
+  if (latestViewedContent && latestViewedAt != null) {
+    if (!completedContentIds.has(latestViewedContent.id)) {
+      return toTarget(latestViewedContent, lastViewedAtIso);
+    }
+    const next = resolveAfterCompletedAnchor(
+      orderedContents,
+      completedContentIds,
+      latestViewedContent
+    );
+    return next ? toTarget(next, lastViewedAtIso) : null;
+  }
+
+  const byCompletion = resolveByCompletions(
+    orderedContents,
+    completedContentIds,
+    completedAtByContentId
+  );
+  return byCompletion ? toTarget(byCompletion, null) : null;
 }

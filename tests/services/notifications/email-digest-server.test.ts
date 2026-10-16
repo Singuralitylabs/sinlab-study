@@ -608,13 +608,14 @@ describe("送信対象の抽出", () => {
         userRow(2, { created_at: createdOn("2026-09-29") }), // Tuesday of last week
         userRow(3, { created_at: createdOn("2026-10-04") }), // Sunday of last week (the day before this Monday)
       ],
-      // u1 is day 7, so add learning records to exclude them from the unstudied reminder.
+      // u1 is day 7, so add a completion so inactivity_reminder skips them (#396: ever_completed).
       user_progress: [
         {
           id: 1,
           user_id: 1,
           content_id: 1000,
           is_completed: true,
+          ever_completed: true,
           completed_at: "2026-09-30T00:00:00.000Z",
         },
       ],
@@ -638,23 +639,39 @@ describe("送信対象の抽出", () => {
     setup({
       users: [
         userRow(1, { created_at: createdOn("2026-09-29") }), // no activity
-        userRow(2, { created_at: createdOn("2026-09-29") }), // has progress
+        userRow(2, { created_at: createdOn("2026-09-29") }), // ever_completed
         userRow(3, { created_at: createdOn("2026-09-29") }), // has a submission
+        userRow(4, { created_at: createdOn("2026-09-29") }), // view-only progress (#396)
       ],
       user_progress: [
-        { id: 1, user_id: 2, content_id: 1000, is_completed: false, completed_at: null },
+        {
+          id: 1,
+          user_id: 2,
+          content_id: 1000,
+          is_completed: true,
+          ever_completed: true,
+          completed_at: "2026-10-01T00:00:00.000Z",
+        },
+        {
+          id: 2,
+          user_id: 4,
+          content_id: 1000,
+          is_completed: false,
+          ever_completed: false,
+          completed_at: null,
+          last_viewed_at: "2026-10-01T00:00:00.000Z",
+        },
       ],
       submissions: [{ id: 1, user_id: 3, submitted_at: "2026-10-01T00:00:00.000Z" }],
     });
 
     await runDigest(TUESDAY);
 
-    // Day 7 is 10/6 (Tue). Only u1 gets the unstudied reminder; u2/u3 have studied. (They signed up
-    // mid last week, so the Tuesday catch-up doesn't make them weekly digest targets either.)
+    // Day 7 is 10/6 (Tue). u1 and view-only u4 get the reminder; u2/u3 have studied.
+    expect(sentTo().sort()).toEqual(["u1@example.com", "u4@example.com"]);
     const reminder = sentEmailTo("u1@example.com");
     expect(reminder.subject).toContain("最初の1本");
     expect(reminder.text).toContain(`${APP_URL}/learn/1/10/100/1000`);
-    expect(sentTo()).toEqual(["u1@example.com"]);
   });
 
   it("お試しユーザーの7日目は trial_nurture だけを送り、未学習リマインド・週次進捗は同日に送らない", async () => {

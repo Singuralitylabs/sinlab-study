@@ -53,6 +53,7 @@ import { ExerciseCompletionStatus } from "./ExerciseCompletionStatus";
 import { ExerciseRetryButton } from "./ExerciseRetryButton";
 import { PrevNextNav } from "./PrevNextNav";
 import { QuizForm } from "./QuizForm";
+import { RecordContentView } from "./RecordContentView";
 import { SubmissionForm } from "./SubmissionForm";
 
 interface PageProps {
@@ -350,6 +351,7 @@ export default async function ContentPage({ params }: PageProps) {
 
   return (
     <div className="max-w-4xl mx-auto">
+      {userId ? <RecordContentView contentId={contentIdNum} /> : null}
       <PageTitle
         title={content.title}
         breadcrumbs={[

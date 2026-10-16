@@ -80,16 +80,16 @@ async function fetchActiveUserIds(supabase: AdminClient, userIds: number[]): Pro
   }
   // PostgREST stops at db-max-rows (1000). A truncated activity read would treat a learner who
   // already studied as inactive and send inactivity_reminder. Page until 0 rows, same as email.
+  // View-only user_progress rows (#396) must not count as activity for inactivity_reminder.
   for (const table of ["user_progress", "submissions"] as const) {
     for (let index = 0; index < userIds.length; index += ID_CHUNK_SIZE) {
       const ids = userIds.slice(index, index + ID_CHUNK_SIZE);
       for (let offset = 0; ; ) {
-        const { data, error } = await supabase
-          .from(table)
-          .select("user_id")
-          .in("user_id", ids)
-          .order("id")
-          .range(offset, offset + PAGE_SIZE - 1);
+        let query = supabase.from(table).select("user_id").in("user_id", ids).order("id");
+        if (table === "user_progress") {
+          query = query.eq("ever_completed", true);
+        }
+        const { data, error } = await query.range(offset, offset + PAGE_SIZE - 1);
         if (error) {
           throw new Error(error.message);
         }
