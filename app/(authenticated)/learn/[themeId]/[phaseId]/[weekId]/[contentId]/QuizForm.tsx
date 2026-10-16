@@ -4,13 +4,13 @@ import { CheckCircle2, Loader2, RotateCcw, Send, XCircle } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { ThemeCompletionDialog } from "@/app/components/ThemeCompletionDialog";
 import {
   QUIZ_QUESTION_TYPE_LABELS,
   QUIZ_TEXT_ANSWER_MAX_LENGTH,
   type QuizQuestionForLearner,
   type QuizQuestionResult,
 } from "@/app/constants/quiz";
-import { ThemeCompletionDialog } from "@/app/components/ThemeCompletionDialog";
 import {
   noticeFromProgressBody,
   type ThemeCompletionNotice,
