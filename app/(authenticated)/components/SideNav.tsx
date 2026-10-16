@@ -23,6 +23,7 @@ import { createClientSupabaseClient } from "@/app/services/api/supabase-client";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { FeedbackDialog } from "./FeedbackDialog";
 
 interface NavItem {
   title: string;
@@ -132,11 +133,13 @@ function SideNavSidebarContent({
   pathname,
   onItemClick,
   onSignOut,
+  feedbackEnabled,
 }: {
   navItems: NavItem[];
   pathname: string;
   onItemClick?: () => void;
   onSignOut: () => void;
+  feedbackEnabled: boolean;
 }) {
   return (
     <>
@@ -147,6 +150,7 @@ function SideNavSidebarContent({
       </nav>
       <div className="px-3 pb-4">
         <Separator className="mb-3" />
+        {feedbackEnabled && <FeedbackDialog />}
         <SideNavLink item={SETTINGS_NAV_ITEM} pathname={pathname} onClick={onItemClick} />
         <button
           type="button"
@@ -168,6 +172,7 @@ export function SideNav({
   isAdmin,
   isInstructor,
   stripeEnabled,
+  feedbackEnabled,
   showCertificates,
   showReviewList,
   announcementBadge,
@@ -175,6 +180,7 @@ export function SideNav({
   isAdmin: boolean;
   isInstructor: boolean;
   stripeEnabled: boolean;
+  feedbackEnabled: boolean;
   showCertificates: boolean;
   /** Learners only (role = member); staff manage courses and do not use the review list. */
   showReviewList: boolean;
@@ -236,6 +242,7 @@ export function SideNav({
               pathname={pathname}
               onItemClick={() => setOpen(false)}
               onSignOut={handleSignOut}
+              feedbackEnabled={feedbackEnabled}
             />
           </div>
         </SheetContent>
@@ -253,6 +260,7 @@ export function SideNav({
             navItems={navItems}
             pathname={pathname}
             onSignOut={handleSignOut}
+            feedbackEnabled={feedbackEnabled}
           />
         </div>
       </div>

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SLACK_WEBHOOK_TIMEOUT_MS } from "@/app/constants/notifications";
 import {
+  sendSlackFeedbackNotification,
   sendSlackNewUserNotification,
   sendSlackPaymentFailedNotification,
 } from "@/app/services/notifications/slack";
@@ -80,5 +81,43 @@ describe("sendSlackPaymentFailedNotification", () => {
         hostedInvoiceUrl: null,
       })
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("sendSlackFeedbackNotification", () => {
+  it("本文は plain_text で送り、空の pageUrl は「不明」にする", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendSlackFeedbackNotification({
+      feedbackId: 9,
+      category: "bug",
+      body: "<!channel> https://evil.example|偽リンク",
+      pageUrl: "",
+      manageUrl: "https://study.example.com/manage/feedbacks/9",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
+      blocks: Array<{ type: string; text?: { type: string; text: string }; fields?: unknown }>;
+    };
+    const fieldsBlock = payload.blocks.find((b) => b.type === "section" && Array.isArray(b.fields));
+    expect(fieldsBlock).toBeDefined();
+    const fields = fieldsBlock?.fields as Array<{ type: string; text: string }>;
+    expect(fields.some((f) => f.type === "plain_text" && f.text === "不明")).toBe(true);
+
+    const bodyBlock = payload.blocks.find(
+      (b) => b.type === "section" && b.text?.type === "plain_text"
+    );
+    expect(bodyBlock?.text).toEqual({
+      type: "plain_text",
+      text: "<!channel> https://evil.example|偽リンク",
+    });
+    expect(
+      payload.blocks.some(
+        (b) =>
+          b.type === "section" && b.text?.type === "mrkdwn" && b.text.text.includes("<!channel>")
+      )
+    ).toBe(false);
   });
 });
