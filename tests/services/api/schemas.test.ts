@@ -726,6 +726,13 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
         show_preview: true,
       }).success
     ).toBe(true);
+    // Update: code_language alone is not a layout (create still treats it as one above).
+    expect(
+      ContentUpdateSchema.safeParse({
+        code_language: "javascript",
+        show_preview: true,
+      }).success
+    ).toBe(true);
   });
 
   it("insert_after_idはnullまたは正の整数、0以下・小数は検証エラー", () => {

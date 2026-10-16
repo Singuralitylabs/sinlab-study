@@ -530,7 +530,8 @@ function alignPreviewSettings(
     show_preview?: boolean | null;
     show_console?: boolean | null;
   },
-  ctx: z.RefinementCtx
+  ctx: z.RefinementCtx,
+  options?: { updatePartial?: boolean }
 ) {
   if (value.show_preview === undefined && value.show_console === undefined) {
     return;
@@ -545,14 +546,14 @@ function alignPreviewSettings(
     }
     return;
   }
-  // Only validate when this body carries a layout. content_type alone is not enough: a partial
-  // PUT like {content_type:"exercise", show_preview:true} has no slots here, and resolving the
-  // default single file would reject a row whose DB layout still allows preview. updateContent
-  // reads the row for those cases.
-  const hasLayout =
-    value.submission_file_slots !== undefined ||
-    value.starter_files !== undefined ||
-    value.code_language !== undefined;
+  // Create/bulk: code_language alone is a full default layout. Update: only slots/starter count —
+  // code_language alone must not invent a default file and 400 a row whose DB layout still allows
+  // the flag (updateContent merges the row). content_type alone is never a layout.
+  const hasLayout = options?.updatePartial
+    ? value.submission_file_slots !== undefined || value.starter_files !== undefined
+    : value.submission_file_slots !== undefined ||
+      value.starter_files !== undefined ||
+      value.code_language !== undefined;
   if (!hasLayout || (value.show_preview !== true && value.show_console !== true)) {
     return;
   }
@@ -574,6 +575,20 @@ function alignPreviewSettings(
     message,
     path: [message === CONSOLE_NOT_ALLOWED_MESSAGE ? "show_console" : "show_preview"],
   });
+}
+
+function alignPreviewSettingsOnCreate(
+  value: Parameters<typeof alignPreviewSettings>[0],
+  ctx: z.RefinementCtx
+) {
+  alignPreviewSettings(value, ctx);
+}
+
+function alignPreviewSettingsOnUpdate(
+  value: Parameters<typeof alignPreviewSettings>[0],
+  ctx: z.RefinementCtx
+) {
+  alignPreviewSettings(value, ctx, { updatePartial: true });
 }
 
 function requireQuizQuestions(
@@ -601,7 +616,7 @@ const ContentCreateObjectSchema = ContentBaseSchema.extend({
 });
 export const ContentCreateSchema = ContentCreateObjectSchema.superRefine(requireQuizQuestions)
   .superRefine(alignSubmissionFileSlots)
-  .superRefine(alignPreviewSettings);
+  .superRefine(alignPreviewSettingsOnCreate);
 function requireLoadedRubricVersion(
   value: {
     content_type?: string;
@@ -627,7 +642,7 @@ export const ContentUpdateSchema = ContentCreateObjectSchema.partial()
   .superRefine(requireQuizQuestions)
   .superRefine(requireLoadedRubricVersion)
   .superRefine(alignSubmissionFileSlots)
-  .superRefine(alignPreviewSettings);
+  .superRefine(alignPreviewSettingsOnUpdate);
 
 const BULK_CREATE_MESSAGE = `contentsは1〜${MAX_BULK_CREATE_CONTENTS}件の配列で指定してください`;
 
@@ -641,7 +656,7 @@ export const BulkContentCreateSchema = z.object({
     .array(
       ContentBaseSchema.superRefine(requireQuizQuestions)
         .superRefine(alignSubmissionFileSlots)
-        .superRefine(alignPreviewSettings),
+        .superRefine(alignPreviewSettingsOnCreate),
       { message: BULK_CREATE_MESSAGE }
     )
     .min(1, { message: BULK_CREATE_MESSAGE })

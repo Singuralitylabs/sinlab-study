@@ -1506,8 +1506,16 @@ async function rejectIllegalPreviewSettings(
   let language = patch.code_language;
   let showPreview = patch.show_preview;
   let showConsole = patch.show_console;
-  const layoutInPatch = changesLayout;
-  const complete = contentType === "exercise" && layoutInPatch && setsFlags;
+  // Skip the row read only when every layout input and both flags are in the patch. A partial
+  // layout (e.g. code_language alone) must merge omitted slots/starter/flags from the row, or an
+  // illegal true can be stored against the real DB layout.
+  const complete =
+    contentType === "exercise" &&
+    patch.submission_file_slots !== undefined &&
+    patch.starter_files !== undefined &&
+    patch.code_language !== undefined &&
+    patch.show_preview !== undefined &&
+    patch.show_console !== undefined;
   if (!complete) {
     const { data, error } = await supabase
       .from("learning_contents")

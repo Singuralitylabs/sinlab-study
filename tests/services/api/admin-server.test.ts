@@ -1472,6 +1472,41 @@ describe("updateContent / createContent のプレビュー設定（#380 レビ�
     );
   });
 
+  it("部分レイアウト＋片方のフラグだけでは complete にせず、DB の構成で拒否する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              content_type: "exercise",
+              submission_file_slots: [{ filename: "q.sql", language: "sql" }],
+              starter_files: null,
+              code_language: "sql",
+              show_preview: null,
+              show_console: null,
+            },
+            error: null,
+          },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    // Without merging slots from the row, code_language:"html" alone would look allowed.
+    const result = await updateContent(1, {
+      content_type: "exercise",
+      code_language: "html",
+      show_preview: true,
+    });
+
+    expect(result).toEqual({
+      error: null,
+      storageRemoved: true,
+      previewNotAllowed: "このファイル構成ではプレビューを表示できません",
+    });
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+  });
+
   it("createContent は許されないプレビュー設定を previewNotAllowed で返す", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
