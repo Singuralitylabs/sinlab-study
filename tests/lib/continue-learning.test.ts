@@ -174,5 +174,16 @@ describe("resolveContinueLearning", () => {
       expect(next?.id).toBe(1);
       expect(next?.themeName).toBe("GAS");
     });
+
+    it("同テーマで後ろを完了し前が未完了なら、テーマ内の先頭未完了へ戻す", () => {
+      const next = resolveContinueLearning(
+        ordered,
+        new Set([3]),
+        new Map([[3, 100]]),
+        new Map([[3, 9000]])
+      );
+      expect(next?.id).toBe(1);
+      expect(next?.themeName).toBe("GAS");
+    });
   });
 });

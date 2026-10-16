@@ -111,7 +111,8 @@ function resolveByCompletions(
 }
 
 /**
- * Next content after a completed anchor: remaining incompletes in the same theme (learning order),
+ * Next content after a completed anchor: prefer the next incomplete after the anchor in the same
+ * theme; if the theme still has earlier incompletes, take the first of those (theme not finished);
  * else the next theme's first incomplete (display order).
  */
 function resolveAfterCompletedAnchor(
@@ -120,10 +121,14 @@ function resolveAfterCompletedAnchor(
   anchor: ContinueLearningContent
 ): ContinueLearningContent | null {
   const sameTheme = orderedContents.filter((c) => c.themeId === anchor.themeId);
+  const anchorIndex = sameTheme.findIndex((c) => c.id === anchor.id);
   const afterInTheme = sameTheme
-    .slice(sameTheme.findIndex((c) => c.id === anchor.id) + 1)
+    .slice(anchorIndex + 1)
     .find((c) => !completedContentIds.has(c.id));
   if (afterInTheme) return afterInTheme;
+
+  const earlierInTheme = sameTheme.find((c) => !completedContentIds.has(c.id));
+  if (earlierInTheme) return earlierInTheme;
 
   const themeOrder: number[] = [];
   for (const c of orderedContents) {
