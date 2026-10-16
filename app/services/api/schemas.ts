@@ -135,6 +135,11 @@ export const ProgressUpdateSchema = z.object({
   isCompleted: z.boolean({ message: "isCompletedはbooleanで指定してください" }),
 });
 
+/** POST /api/progress/retry — start an exercise retry (hides model answer / AI review until next submit). */
+export const ProgressRetrySchema = z.object({
+  contentId: ContentIdSchema,
+});
+
 /** PUT /api/review-notes. memo is rejected (not truncated) when longer than the max. */
 export const ReviewNoteUpsertSchema = z
   .object({
