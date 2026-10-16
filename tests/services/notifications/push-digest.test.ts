@@ -229,8 +229,7 @@ describe("deliverDigestPushes", () => {
       `push_sent_at.is.null,push_sent_at.gte.${sentSince}`
     );
     const pushSentUpdate = builders.find(
-      (builder) =>
-        builder.table === "announcements" && (builder.update?.mock.calls.length ?? 0) > 0
+      (builder) => builder.table === "announcements" && (builder.update?.mock.calls.length ?? 0) > 0
     );
     expect(pushSentUpdate?.update.mock.calls[0]?.[0]).toEqual({
       push_sent_at: expect.any(String),

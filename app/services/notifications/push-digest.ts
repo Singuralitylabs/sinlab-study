@@ -1,4 +1,8 @@
-import { EMAIL_KIND, type PushKind, PUSH_DIGEST_TIME_BUDGET_MS } from "@/app/constants/notifications";
+import {
+  EMAIL_KIND,
+  PUSH_DIGEST_TIME_BUDGET_MS,
+  type PushKind,
+} from "@/app/constants/notifications";
 import { USER_STATUS } from "@/app/constants/user";
 import { type DigestContent, type DigestUser, planMilestoneEmails } from "@/app/lib/email-digest";
 import {
@@ -310,10 +314,7 @@ export async function deliverDigestPushes(
     }
 
     const closable = announcements
-      .filter(
-        (row) =>
-          row.emailSentAt !== null && !unfinishedAnnouncementKeys.has(String(row.id))
-      )
+      .filter((row) => row.emailSentAt !== null && !unfinishedAnnouncementKeys.has(String(row.id)))
       .map((row) => row.id);
     await markAnnouncementPushSent(supabase, closable);
 
