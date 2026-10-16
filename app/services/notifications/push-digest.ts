@@ -74,15 +74,28 @@ async function fetchActiveUserIds(supabase: AdminClient, userIds: number[]): Pro
   if (userIds.length === 0) {
     return active;
   }
+  // PostgREST stops at db-max-rows (1000). A truncated activity read would treat a learner who
+  // already studied as inactive and send inactivity_reminder. Page until 0 rows, same as email.
   for (const table of ["user_progress", "submissions"] as const) {
     for (let index = 0; index < userIds.length; index += ID_CHUNK_SIZE) {
       const ids = userIds.slice(index, index + ID_CHUNK_SIZE);
-      const { data, error } = await supabase.from(table).select("user_id").in("user_id", ids);
-      if (error) {
-        throw new Error(error.message);
-      }
-      for (const row of data ?? []) {
-        active.add(row.user_id);
+      for (let offset = 0; ; ) {
+        const { data, error } = await supabase
+          .from(table)
+          .select("user_id")
+          .in("user_id", ids)
+          .order("id")
+          .range(offset, offset + PAGE_SIZE - 1);
+        if (error) {
+          throw new Error(error.message);
+        }
+        if (!data || data.length === 0) {
+          break;
+        }
+        for (const row of data) {
+          active.add(row.user_id);
+        }
+        offset += data.length;
       }
     }
   }
@@ -128,15 +141,15 @@ async function fetchPushAnnouncements(supabase: AdminClient): Promise<
     target_membership_types: string[] | null;
   }[]
 > {
-  // Same pending set as the email bulk send (`send_email`, not yet marked sent). The body is
-  // not selected: the push carries the title and the detail link only.
+  // Do not filter `email_sent_at`. The email pass marks it before this run's push, so a null
+  // check would drop announcements just emailed and never revisit them. `push_logs` UNIQUE is
+  // the once-only claim. The body is not selected: the push carries the title and the link only.
   const { data, error } = await supabase
     .from("announcements")
     .select("id, title, target_statuses, target_membership_types")
     .not("published_at", "is", null)
     .eq("is_deleted", false)
     .eq("send_email", true)
-    .is("email_sent_at", null)
     .order("published_at");
   if (error) {
     throw new Error(error.message);
@@ -236,7 +249,7 @@ function logDuration(
   elapsedMs: number,
   counts: Record<"sent" | "failed" | "duplicate" | "skipped", number>
 ): void {
-  console.info(
+  console.warn(
     `[Web Push] 定期配信 ${elapsedMs}ms sent=${counts.sent} failed=${counts.failed} duplicate=${counts.duplicate} skipped=${counts.skipped}`
   );
 }

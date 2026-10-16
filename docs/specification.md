@@ -1492,7 +1492,7 @@ X 向けの共有リンク（`https://twitter.com/intent/tweet?text=...&url=...`
 - **購読 API**: `POST /api/push/subscriptions` は `endpoint` と `keys.p256dh` / `keys.auth` を upsert し、`disabled_at` を NULL に戻す。`DELETE` は endpoint を指定して本人の行だけ消す。認証は `requireLearnerApi()`（`getServerAuth()`）。未認証 401、`rejected` 403、スキーマ不正 400。書き込みは service_role で、`user_id` は認証済みの本人に固定する。他人の endpoint は上書きも削除もしない（409）
 - **購読 UI**: ホームのインストール案内の隣。通知許可はボタン押下でのみ要求する。iOS で standalone でないときは「ホーム画面に追加すると通知を受け取れます」と出し、ボタンは出さない
 - **送信**: `sendPushToUser()`。`push_logs` への INSERT を claim とし、`UNIQUE (user_id, kind, reference_key)` 違反なら送らない。有効な購読すべてに `{ title, body, url }` だけを送る（個人情報は入れない。`url` はアプリの相対パス）。404 / 410 は `disabled_at` を記録する。失敗は握りつぶし、承認・Cron・お知らせの結果を変えない
-- **種別**: `approved`（`approveUser()` 成功時）/ `inactivity_reminder` / `trial_nurture` / `announcement`（`send_email = true` の一斉送信だけ）。`weekly_digest` / `signup` / `upgraded` / 解約系は送らない。有効・無効は `email_kind_settings.push_enabled`（既定 false。`/admin/emails` のトグル）。送る日・曜日はメールと同じ列で、プッシュ用の定数や別上限は持たない。メールの `email_opt_out_at` と全体スイッチはプッシュに適用しない。定期実行は `runEmailDigest()` の同じ対象抽出を使い、所要時間をログに出す（本イシューでは上限を設けない）
+- **種別**: `approved`（`approveUser()` 成功時）/ `inactivity_reminder` / `trial_nurture` / `announcement`（`send_email = true` の一斉送信だけ。`email_sent_at` では絞らない。メール完了はプッシュより先に記録されるため、同じ実行で送り終えたお知らせも `push_logs` の claim で一度だけ送る）。`weekly_digest` / `signup` / `upgraded` / 解約系は送らない。有効・無効は `email_kind_settings.push_enabled`（既定 false。`/admin/emails` のトグル）。送る日・曜日はメールと同じ列で、プッシュ用の定数や別上限は持たない。メールの `email_opt_out_at` と全体スイッチはプッシュに適用しない。定期実行は `runEmailDigest()` の同じ対象抽出を使い、所要時間をログに出す（本イシューでは上限を設けない）
 - **サービスワーカー**: `push` は `showNotification`、`notificationclick` は既存タブを `focus` し、無ければ `openWindow`。通知の URL をキャッシュしない
 
 ---

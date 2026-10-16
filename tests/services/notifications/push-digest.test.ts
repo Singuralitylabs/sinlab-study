@@ -77,7 +77,7 @@ beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY", "public-key");
   vi.stubEnv("WEB_PUSH_VAPID_PRIVATE_KEY", "private-key");
   vi.stubEnv("WEB_PUSH_SUBJECT", "mailto:ops@example.com");
-  vi.spyOn(console, "info").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -137,11 +137,11 @@ describe("deliverDigestPushes", () => {
     );
     const usersQuery = builders.find((builder) => builder.table === "users");
     expect(usersQuery?.is).not.toHaveBeenCalledWith("email_opt_out_at", null);
-    const logged = vi.mocked(console.info).mock.calls.flat().join(" ");
+    const logged = vi.mocked(console.warn).mock.calls.flat().join(" ");
     expect(logged).toContain("[Web Push] 定期配信");
   });
 
-  it("お知らせは send_email の対象だけを、メールの配信停止と無関係に送る", async () => {
+  it("お知らせは send_email の対象だけを、メール完了・配信停止と無関係に送る", async () => {
     const { client, builders } = clientWith({
       email_kind_settings: { data: kindRows({ announcement: true }), error: null },
       email_settings: { data: settingsRow, error: null },
@@ -162,6 +162,7 @@ describe("deliverDigestPushes", () => {
             title: "集会",
             target_statuses: ["active"],
             target_membership_types: null,
+            email_sent_at: "2026-10-08T00:00:00.000Z",
           },
         ],
         error: null,
@@ -180,6 +181,36 @@ describe("deliverDigestPushes", () => {
     );
     const announcementQuery = builders.find((builder) => builder.table === "announcements");
     expect(announcementQuery?.eq).toHaveBeenCalledWith("send_email", true);
+    expect(announcementQuery?.is).not.toHaveBeenCalledWith("email_sent_at", null);
+  });
+
+  it("活動行が1000件を超えても、2ページ目の受講生には未学習リマインドを送らない", async () => {
+    const firstPage = Array.from({ length: 1000 }, () => ({ user_id: 999 }));
+    const { client, builders } = clientWith({
+      email_kind_settings: {
+        data: kindRows({ inactivity_reminder: true }),
+        error: null,
+      },
+      email_settings: { data: settingsRow, error: null },
+      users: [
+        { data: [inactiveUser], error: null },
+        { data: [], error: null },
+      ],
+      user_progress: [
+        { data: firstPage, error: null },
+        { data: [{ user_id: inactiveUser.id }], error: null },
+        { data: [], error: null },
+      ],
+      submissions: { data: [], error: null },
+      learning_themes: { data: [], error: null },
+    });
+
+    await deliverDigestPushes(client as never, today, () => 10);
+
+    expect(sendPushToUser).not.toHaveBeenCalled();
+    const progressQueries = builders.filter((builder) => builder.table === "user_progress");
+    expect(progressQueries[0]?.range).toHaveBeenCalledWith(0, 999);
+    expect(progressQueries[1]?.range).toHaveBeenCalledWith(1000, 1999);
   });
 
   it("抽出に失敗しても例外を外に出さない", async () => {
