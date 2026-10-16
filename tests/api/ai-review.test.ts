@@ -14,6 +14,9 @@ vi.mock("@/app/services/api/supabase-server");
 vi.mock("@/app/services/api/learning-server");
 vi.mock("@/app/services/api/ai-review-server");
 vi.mock("@/app/services/api/certificates-server");
+vi.mock("@/app/services/api/progress-server", () => ({
+  saveContentProgress: vi.fn().mockResolvedValue({ ok: true, contentWasAlreadyCompleted: false }),
+}));
 vi.mock("@/app/services/api/gemini", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/app/services/api/gemini")>();
   return {
@@ -36,6 +39,7 @@ import {
   type ReviewResult,
 } from "@/app/services/api/gemini";
 import { isContentVisible } from "@/app/services/api/learning-server";
+import { saveContentProgress } from "@/app/services/api/progress-server";
 import {
   createAdminSupabaseClient,
   createServerSupabaseClient,
@@ -267,6 +271,61 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
       expect.stringContaining("保存に失敗"),
       expect.objectContaining({ promptTokens: 10, completionTokens: 20, thoughtsTokens: 30 })
     );
+  });
+
+  it("合格（passed = true）なら完了を記録する", async () => {
+    vi.mocked(generateReview).mockResolvedValue(reviewResult({ passed: true }));
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(200);
+    expect(saveContentProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: memberAuth.userId,
+        userStatus: memberAuth.userStatus,
+        userRole: memberAuth.userRole,
+        contentId: 5,
+        isCompleted: true,
+        scheduleCertificate: false,
+      })
+    );
+  });
+
+  it("不合格では完了を記録しない", async () => {
+    vi.mocked(generateReview).mockResolvedValue(reviewResult({ passed: false }));
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(200);
+    expect(saveContentProgress).not.toHaveBeenCalled();
+  });
+
+  it("完了の保存に失敗してもレビューは 200 のまま", async () => {
+    vi.mocked(generateReview).mockResolvedValue(reviewResult({ passed: true, overallScore: 90 }));
+    vi.mocked(saveContentProgress).mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      error: "進捗の更新に失敗しました",
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(request() as never);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.review).toMatchObject({ status: "completed", passed: true, overall_score: 90 });
+  });
+
+  it("完了の保存が例外を投げてもレビューは 200 のまま", async () => {
+    vi.mocked(generateReview).mockResolvedValue(reviewResult({ passed: true }));
+    vi.mocked(saveContentProgress).mockRejectedValueOnce(new Error("progress down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).success).toBe(true);
   });
 
   it("レスポンスには構造化結果を含めるがトークン数は含めない", async () => {

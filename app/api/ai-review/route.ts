@@ -18,6 +18,7 @@ import {
   resolveGeminiApiKey,
 } from "@/app/services/api/gemini";
 import { isContentVisible } from "@/app/services/api/learning-server";
+import { saveContentProgress } from "@/app/services/api/progress-server";
 import { AiReviewRequestSchema, validateRequest } from "@/app/services/api/schemas";
 import {
   createAdminSupabaseClient,
@@ -222,8 +223,33 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "AIレビューの保存に失敗しました" }, { status: 500 });
       }
 
+      // A pass completes the exercise on the learner's session. Unpublished content never reaches
+      // here (isContentVisible already returned 403). A later failing review does not call this,
+      // so completion stays. A write failure must not change the review response.
+      // scheduleCertificate: false — resolveAiReviewThemeNotice issues (and builds the dialog)
+      // next; a prior after() INSERT would make that evaluation return not-ready.
+      if (result.passed === true) {
+        try {
+          const recorded = await saveContentProgress({
+            supabase,
+            userId,
+            userStatus,
+            userRole,
+            contentId: submission.content_id,
+            isCompleted: true,
+            scheduleCertificate: false,
+          });
+          if (!recorded.ok) {
+            console.error("合格後の完了記録に失敗:", recorded.error);
+          }
+        } catch (error) {
+          console.error("合格後の完了記録に失敗:", error);
+        }
+      }
+
       // Issuance and the dialog payload must not change this response. A throw (mail, DB) is
-      // dropped; the review row is already completed.
+      // dropped; the review row is already completed. On passed === false, the helper only
+      // returns a notice when this call actually issued (failed re-review stays quiet otherwise).
       let themeCompletion = null;
       try {
         themeCompletion = await resolveAiReviewThemeNotice({

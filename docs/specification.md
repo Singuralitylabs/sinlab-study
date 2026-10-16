@@ -417,7 +417,7 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 | 動画（video） | YouTube facade（サムネイル + 再生ボタン）。クリックで `react-youtube` を遅延読み込みして autoplay 再生（URLから Video ID を自動抽出、レスポンシブ対応） |
 | テキスト（text） | Markdown形式で記述・表示（GFM対応） |
 | スライド（slide） | 非公開バケット `slides` のPDFを、閲覧権限チェック後にサーバー側で発行した署名付きURLで react-pdf によりブラウザ内表示（後述）。`text_content`（Markdown・任意）があればビューアの直下に解説記事を表示する。空なら記事は出さない |
-| 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携。模範回答は提出が1件以上あるとき（admin・maintainer は提出不要）だけ、RPC `get_exercise_reference_answer()`（`docs/database.md` 6.18）で取得して表示する（列権限では読めない） |
+| 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携。模範回答は提出が1件以上あるとき（admin・maintainer は提出不要）だけ、RPC `get_exercise_reference_answer()`（`docs/database.md` 6.18）で取得して表示する（列権限では読めない）。`grading_rubric` が NULL でなく提出方法が URL のみでない演習（空の墓石を含む。`both` は含む）は完了ボタンを出さず、AIレビュー合格で完了する（4.1節）。空の墓石は合格にならないため完了できず、合格点の案内ではなく「現在この演習は完了できません」と出す。URL のみは完了ボタンのまま。合格レビューが無い既存の完了は「完了」とだけ出す。合格点は `CERTIFICATE_PASS_SCORE`。`both` では URL 提出が採点対象外である旨を画面に出す。お試しは生涯1回のため、不合格だとお試し中は完了できない旨も出す。修了証はお試しには出さない |
 | クイズ（quiz） | 導入文（`description`・任意）と設問（1〜3問）を表示し、回答後に正誤・解説を表示（後述） |
 
 動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア下部に概要欄カードを表示する（テキスト・演習と同じ `MarkdownRenderer`）。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）は `"use client"` を持たない共有コンポーネントで、Server Component からはサーバーで、Client Component（`AIReviewDisplay`）からはクライアントで同じ実装のまま描画される。コンテンツ本文の Markdown 描画経路（Server Component）は client 化しない。
@@ -538,9 +538,14 @@ flowchart TD
 2. `getServerAuth()` による認証チェック（ステータス取得を含む）
 3. ステータスに基づく認可: `rejected` は403
 4. コンテンツ可視性チェック: **ステータスを問わず、対象 `contentId` が自分に可視でなければ403**（後述）
-5. `user_progress` テーブルへの upsert
+5. 合格判定対象（`content_type = 'exercise'` かつ `grading_rubric IS NOT NULL` かつ `allowed_submission_types <> 'url'`。空の墓石も含む。NULL と URL のみは対象外。RPC `content_requires_review_pass()`）のとき:
+   - `isCompleted = true` でも、本人の提出に `ai_reviews.status = 'completed' AND passed = true` が無ければ 403（「AIレビューで合格すると完了になります」）。書き込まない
+   - `isCompleted = false` は 403（「合格判定のある演習は未完了に戻せません」）。未完了へ戻す操作は提供しない
+   - トリガーが `42501` を返したときも同じ意味の 403 にする
+6. `user_progress` テーブルへの upsert（通常クライアント。service_role は使わない）
    - 完了時: `completed_at` に現在日時を設定し、`ever_completed` を true にする（一度 true にしたら解除でも戻さない。`first_content_completed` の初回判定に使う）
    - 未完了時: `completed_at` を null に設定する。`ever_completed` は変えない
+   - 完了の保存に成功したときだけ `first_content_completed` を記録する（`saveContentProgress()`。AIレビュー API の合格時も同じ関数）。進捗 API は `scheduleCertificate: false` で呼び、テーマが初めて 100% になったときだけ同期発行して `themeCompletion` を載せ、それ以外は `issueCertificateIfEligible()` を `after()` で予約する（13.2節）
 
 **可視性チェックの実装方法**: 通常クライアント（`authenticated`）で対象 `contentId` を、コンテンツ自身と週・フェーズ・テーマの全階層について `is_published = true AND is_deleted = false` 付きで SELECT し、0行なら403とする。`learning_contents` のRLSがステータスを織り込むため（データベース設計書の6.1参照）、アプリ層でステータス別の分岐を書く必要はない。`is_published` / `is_deleted` の絞り込みのみアプリ層で明示する（RLSは admin / maintainer に無条件で SELECT を許可しているため、それだけでは論理削除済みや未公開階層配下のコンテンツへの進捗登録・提出・AIレビューまで通ってしまう。2.12節のプレビュー機能でも、これらの操作は許可しない）。この方式は「存在しない contentId」「未公開コンテンツ」「お試し非公開コンテンツ」「論理削除済みコンテンツ」のいずれも同時に弾ける。
 
@@ -553,7 +558,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 | 200 | 正常（完了状態を返却） |
 | 400 | バリデーションエラー |
 | 401 | 未認証 |
-| 403 | `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
+| 403 | `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） / 合格判定対象の演習を合格なしで完了にしようとした、または未完了に戻そうとした |
 | 500 | サーバーエラー |
 
 200 の本文は `{ success: true, isCompleted }`。この保存が、対象の active member のテーマを初めて 100%（`isThemeCompleted()`。分母は `fetchThemeProgressSummaries()`）にしたときだけ `themeCompletion` を足す。再完了・未完了への更新・途中のコンテンツ・お試し・admin / maintainer には付けない。中身はテーマ ID・テーマ名・発行した修了証の ID（未発行なら null）・表示名不足か・残り（未完了コンテンツ数、未提出の演習数、再挑戦が必要な演習数）。発行と集計に失敗しても 200 の成否は変えず、そのときは `themeCompletion` を付けない。
@@ -832,7 +837,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）�
 | `legacy` | 過去分 | 既存の値のまま（再採点しない） |
 | `incomplete` | 採点完了前（`pending` / `processing` / `failed`） | なし。確保時に書き、完了時に上の3つのいずれかへ置き換わる。既定の `legacy` は使わない |
 
-- **合否**: `rubric` のときだけ `passed` を記録する。合格は「未達成の要件が 1 つもない かつ 点数 ≥ `CERTIFICATE_PASS_SCORE`」。**`CERTIFICATE_PASS_SCORE` が 0（既定）の間は無効で、`passed` は NULL のまま**・画面にも合否を出さない。値を決めるときは `scripts/grading-dry-run.ts` の分布を見たうえで定数を変える PR を出す
+- **合否**: `rubric` のときだけ `passed` を記録する。合格は「未達成の要件が 1 つもない かつ 点数 ≥ `CERTIFICATE_PASS_SCORE`」（70。`isReviewPassed()`。AI の数値は使わない）。画面の合格点もこの定数から出す。`passed = true` を保存した直後に、通常クライアントで `saveContentProgress()`（4.1節。`scheduleCertificate: false`）が `user_progress` を完了にする。続けて `resolveAiReviewThemeNotice()` が修了証の判定と画面通知を行う（`passed === false` のときは、その呼び出しで発行できた場合以外は通知しない）。未公開プレビューではここに到達しない（可視性チェックで 403）。完了の保存に失敗してもレビュー応答は変えない（ログのみ。画面の「完了を記録する」で回復できる）。不合格の再提出では進捗を戻さない。合格点が 0 以下の間だけ `passed` は NULL
 - **検証失敗時の再生成**: JSON として不正・スキーマ違反の応答は **応答したモデルに対して 1 回だけ**再生成する（`GEMINI_VALIDATION_ATTEMPTS` は 2 のまま。検証失敗そのものではモデルを変えない）。再生成の呼び出しが 429・500・503・1 試行のタイムアウト・404 になった場合は、下記の切り替えに従う。2 回とも検証に失敗したら `failed`（受講生の回数に数えない）。再生成を含む全試行と 一時エラーのリトライ待機は `GEMINI_TOTAL_BUDGET_MS` を共有する（`maxDuration` を超えない）
 - **モデルの切り替え（#368）**: 構造化リクエストは `GEMINI_MODEL_CONFIGS` の順（主 → 代替）に呼ぶ。他社モデルは呼ばない。429・500・503 は待たずに次のモデルへ切り替える。1 試行のタイムアウト（`GEMINI_REQUEST_TIMEOUT_MS`。全体期限での中断は除く）と 404（モデル廃止・名前の誤り）も次のモデルへ切り替える。404 はサーバーログに error を出し、定数の更新が必要なことを示す。404・1 試行のタイムアウト・切り替え先だけの 400 は、そのモデルを以降のラウンドから外すだけである。時間が残っていれば同じラウンドの後ろのモデルは続けて呼ぶ（一度も呼ばなかったモデルは一時エラーの再試行に入らない）。先に 429・500・503 だったモデルのバックオフは止めない（代替が廃止されていても主の混雑は再試行する）。バックオフで呼び直すのは一時エラーだったモデルだけ。最初のモデルの 400 と、401・403・504 は切り替えも再試行もしない（キー・権限・過大なプロンプトは他のモデルでも失敗する）。切り替え先の試行も、`GEMINI_RETRY_MIN_ATTEMPT_MS` が残らないときは始めない（中断されてもプロンプト分は課金されるため）。`ai_reviews.model_used` は検証を通過した応答のモデル。トークンは試行の累計（失敗した応答も含む）。全モデルで失敗したときの受講生向け文言・`failed` の記録・回数制限（`failed` は数えない）は従来どおり。文言は、一時エラーが残っていればそれを優先する（代替の 404 で「コード: 404」にしない）。一時エラーが無ければ最後のエラーに従う。切り替えのログは warn（キーは出さない）
 - **一時エラーのリトライ（#354）**: 一時エラー（`GEMINI_RETRYABLE_STATUSES`。429・500・503）だったモデルが残っているときは、そのモデルだけを、指数バックオフ（`GEMINI_RETRY_BASE_DELAY_MS` × 2^n、最大 `GEMINI_MAX_RETRIES` 回）で呼び直す。待機後に `GEMINI_RETRY_MIN_ATTEMPT_MS`（5 秒）の実行時間も残らない場合はリトライせず打ち切る（期限直前に始めた試行は応答前に中断されるのにプロンプト分は課金されるため）。リトライした試行が全体の期限（`GEMINI_TOTAL_BUDGET_MS`）で打ち切られた場合は、タイムアウトではなく直前の一時エラー（503 等）として報告・ログ出力する（試行ごとの上限で切れた場合は実際に応答が遅かったので、タイムアウトのまま）。それ以外の 4xx（400・401・403 等）は恒久的なエラーとしてリトライしない。504 はリクエスト自体が大きすぎるときに返るため、同じ内容の再送で予算を使い切らないよう対象外とする
@@ -1035,7 +1040,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 | パンくずリスト | ページヘッダーと階層ナビゲーションの表示 |
 | Markdownレンダラー | Markdownの安全なレンダリング（GFM対応Markdown変換 → Typographyスタイリング。react-markdownは生HTMLタグを描画しないためXSSは発生しない） |
 | YouTube埋め込み | facade（サムネイル + 再生ボタン）。クリック後に react-youtube を遅延読み込みして再生 |
-| 完了ボタン | コンテンツ完了状態のトグル。進捗記録APIを呼び出し |
+| 完了ボタン | コンテンツ完了状態のトグル。進捗記録APIを呼び出し。`grading_rubric` が NULL でなく URL のみでない演習（空の墓石を含む）では出さず、合格状態の表示に置き換える（3.2節） |
 | 提出フォーム | 課題提出フォーム。コンテンツの `allowed_submission_types` に応じてコード・URL・両方から選択して提出 |
 | AIレビューボタン | 提出後にAIレビューをリクエストし、結果を提出履歴画面に表示 |
 | PDF Viewer | Supabase Storage のPDFをブラウザ内で表示（react-pdf） |
@@ -1432,7 +1437,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 ### 13.1 発行条件
 
 - **対象**: `status = active` かつ `role = member`（`isCertificateEligible()`）。コミュニティ会員・一般有料会員とも対象。お試しユーザー（`trial`）、admin / maintainer には発行しない
-- **条件**: そのテーマ配下の**公開中コンテンツ（`is_published = true AND is_deleted = false`、親のフェーズ・週・テーマも公開）すべて**について `user_progress.is_completed` が true。公開コンテンツが0件のテーマは修了にならない（`isThemeCompleted()`）。演習は完了に加えて次を満たす（`app/lib/certificate-eligibility.ts`。点数は再計算しない）
+- **条件**: そのテーマ配下の**公開中コンテンツ（`is_published = true AND is_deleted = false`、親のフェーズ・週・テーマも公開）すべて**について `user_progress.is_completed` が true。採点基準のある演習（空の墓石を含む。URL のみは除く）の完了は AI レビューの合格で記録する（4.1節）。公開コンテンツが0件のテーマは修了にならない（`isThemeCompleted()`）。演習は完了に加えて次を満たす（`app/lib/certificate-eligibility.ts`。点数は再計算しない）
 
 | 種別 | 追加条件 |
 |:--|:--|
@@ -1450,7 +1455,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 
 入口は `maybeIssueCertificate(userId, themeId)`（`app/services/api/certificates-server.ts`）。`issueCertificateIfEligible()`（進捗 API）と `issueMissingCertificates()`（`/certificates` の遡及）と、AI レビューが `completed` になった直後がこれを使う。
 
-`POST /api/progress` が完了（`isCompleted = true`）に更新したあと、その保存でテーマが初めて 100% になったときだけ発行を**同期**で行い、結果を `themeCompletion` に載せる（13.7節）。それ以外の完了は `issueCertificateIfEligible()` を `after()` で予約する（`after()` が使えない場面ではその場で実行する）。完了の取り消しや保存失敗のときは呼ばない。AI レビューの `completed` 保存が成功したあとも同じ判定を行う。発行・メール・通知判定が失敗しても、進捗 API と AI レビュー API の成否は変えない。
+`POST /api/progress` が完了（`isCompleted = true`）に更新したあと、その保存でテーマが初めて 100% になったときだけ発行を**同期**で行い、結果を `themeCompletion` に載せる（13.7節）。それ以外の完了は `issueCertificateIfEligible()` を `after()` で予約する（`after()` が使えない場面ではその場で実行する）。完了の取り消しや保存失敗のときは呼ばない。合格判定対象の演習で AI レビューが `passed = true` になったときは `saveContentProgress()`（`scheduleCertificate: false`）で完了を記録したうえで、`resolveAiReviewThemeNotice()` が同じ判定を行う（`passed === false` のときは、その呼び出しで修了証を発行できた場合以外は通知しない）。発行・メール・通知判定が失敗しても、進捗 API と AI レビュー API の成否は変えない。
 
 1. 対象かを確認（対象外なら何もしない）。INSERT は `insertCertificates()` に集約し、遡及発行（13.1節）と共用する
 2. コンテンツ → 週 → フェーズからテーマ ID を求め（通常クライアント）、そのテーマが発行済みなら終了（集計も INSERT もしない）。未発行なら `fetchThemeProgressSummaries()` でそのテーマが修了かを判定し、修了なら演習条件（13.1節）を足す。提出と `ai_reviews` は本人のセッション（RLS）で読む

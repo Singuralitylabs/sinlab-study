@@ -1,13 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { runAfterResponse } from "@/app/lib/after-response";
-import { shouldTrackFirstCompletion } from "@/app/lib/analytics-funnel";
-import { trackServerEvent } from "@/app/services/analytics/track-server";
 import {
   issueCertificateIfEligible,
   resolveProgressThemeNotice,
 } from "@/app/services/api/certificates-server";
 import { isContentVisible } from "@/app/services/api/learning-server";
+import { saveContentProgress } from "@/app/services/api/progress-server";
 import { ProgressUpdateSchema, validateRequest } from "@/app/services/api/schemas";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { requireLearnerApi } from "@/app/services/auth/admin-guard";
@@ -34,73 +32,27 @@ export async function POST(request: NextRequest) {
     const supabase = await createServerSupabaseClient();
 
     // Visibility check: 403 if contentId isn't visible to the user (trial-closed, unpublished and
-    // nonexistent IDs all give 0 rows via RLS).
+    // nonexistent IDs all give 0 rows via RLS). Unpublished preview never records progress.
     if (!(await isContentVisible(supabase, contentId))) {
       return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
     }
 
-    // Count rows that have ever been completed, before the upsert. is_completed is cleared
-    // when the user toggles completion off, so counting it would send first_content_completed
-    // again on the next complete. ever_completed stays true. A count failure skips the event.
-    let existingCompletedCount: number | null = null;
-    // A read error leaves this true so we do not announce a theme that was already finished.
-    let contentWasAlreadyCompleted = true;
-    if (isCompleted) {
-      const { count, error: countError } = await supabase
-        .from("user_progress")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId)
-        .eq("ever_completed", true);
-      if (countError) {
-        console.error("進捗完了数の取得エラー:", countError.message);
-      } else {
-        existingCompletedCount = count ?? 0;
-      }
-
-      const { data: prior, error: priorError } = await supabase
-        .from("user_progress")
-        .select("is_completed")
-        .eq("user_id", userId)
-        .eq("content_id", contentId)
-        .maybeSingle();
-      if (priorError) {
-        console.error("進捗の完了前状態の取得エラー:", priorError.message);
-      } else {
-        contentWasAlreadyCompleted = prior?.is_completed === true;
-      }
+    // scheduleCertificate: false — when this save brings the theme to 100%, issue synchronously
+    // so the response can say whether a certificate was created or exercise conditions remain.
+    // Any other completion falls back to after() below.
+    const saved = await saveContentProgress({
+      supabase,
+      userId,
+      userStatus,
+      userRole,
+      contentId,
+      isCompleted,
+      scheduleCertificate: false,
+    });
+    if (!saved.ok) {
+      return NextResponse.json({ error: saved.error }, { status: saved.status });
     }
 
-    const { error: upsertError } = await supabase.from("user_progress").upsert(
-      {
-        user_id: userId,
-        content_id: contentId,
-        is_completed: isCompleted,
-        completed_at: isCompleted ? new Date().toISOString() : null,
-        // Uncomplete must not send false, or the next complete looks like the first one.
-        ...(isCompleted ? { ever_completed: true } : {}),
-      },
-      {
-        onConflict: "user_id,content_id",
-      }
-    );
-
-    if (upsertError) {
-      console.error("進捗更新エラー:", upsertError);
-      return NextResponse.json({ error: "進捗の更新に失敗しました" }, { status: 500 });
-    }
-
-    if (
-      existingCompletedCount !== null &&
-      shouldTrackFirstCompletion(isCompleted, existingCompletedCount) &&
-      userStatus
-    ) {
-      trackServerEvent(ANALYTICS_EVENT.FIRST_CONTENT_COMPLETED, { status: userStatus });
-    }
-
-    // When this save is what brought the theme to 100%, issue synchronously so the response can
-    // say whether a certificate was created or exercise conditions remain. Any other completion
-    // stays on after() (the helper no-ops until the theme is actually finished). A failure of
-    // either path must not change this response: the completion is already saved.
     let themeCompletion = null;
     if (isCompleted) {
       try {
@@ -109,7 +61,7 @@ export async function POST(request: NextRequest) {
           userStatus,
           userRole,
           contentId,
-          contentWasAlreadyCompleted,
+          contentWasAlreadyCompleted: saved.contentWasAlreadyCompleted,
         });
       } catch (error) {
         console.error("[修了証] 画面通知の判定エラー:", error);
