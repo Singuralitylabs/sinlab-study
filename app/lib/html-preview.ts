@@ -25,7 +25,11 @@ function resolveFileLanguage(file: CodeFile): PreviewLanguage | null {
   return EXTENSION_LANGUAGE[ext] ?? null;
 }
 
-/** True when every file is previewable, so a mixed submission (e.g. SQL + HTML) shows no preview. */
+/**
+ * True when every file is a preview language (mixed SQL+HTML is false). Display uses
+ * previewCapability(); this stays as the language-only gate for callers that do not need the
+ * html / js / css layout rules.
+ */
 export function canPreviewFiles(files: readonly CodeFile[]): boolean {
   return files.length > 0 && files.every((file) => resolveFileLanguage(file) !== null);
 }

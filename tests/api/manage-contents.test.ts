@@ -274,6 +274,56 @@ describe("POST / PUT / DELETE /api/manage/contents - 権限ガード（requireCo
   });
 });
 
+describe("POST / PUT /api/manage/contents - プレビュー設定（#380）", () => {
+  const params = { params: Promise.resolve({ id: "1" }) };
+
+  it("POST: createContent の previewNotAllowed は 400", async () => {
+    vi.mocked(createContent).mockResolvedValue({
+      data: null,
+      error: null,
+      previewNotAllowed: "このファイル構成ではプレビューを表示できません",
+    });
+
+    const res = await POST(
+      request({
+        title: "課題",
+        week_id: 1,
+        content_type: "exercise",
+        code_language: "html",
+        show_preview: true,
+        submission_file_slots: [{ filename: "index.html", language: "html" }],
+        insert_after_id: null,
+      }) as never
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: "このファイル構成ではプレビューを表示できません",
+    });
+  });
+
+  it("PUT: updateContent の previewNotAllowed は 400", async () => {
+    vi.mocked(updateContent).mockResolvedValue({
+      error: null,
+      storageRemoved: true,
+      previewNotAllowed: "このファイル構成ではコンソールを表示できません",
+    });
+
+    const res = await PUT(
+      request({
+        show_console: true,
+        submission_file_slots: [{ filename: "q.sql", language: "sql" }],
+      }) as never,
+      params
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: "このファイル構成ではコンソールを表示できません",
+    });
+  });
+});
+
 describe("コンテンツ作成・更新の採点基準（#305）", () => {
   const rubric = {
     requirements: [{ key: "r1", name: "フォームがある", description: "入力欄と送信ボタン" }],

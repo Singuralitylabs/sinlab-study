@@ -122,7 +122,20 @@ export function HtmlPreview({
             </Button>
           )}
           {collapsible && (
-            <Button type="button" variant="outline" size="sm" onClick={() => setOpen((o) => !o)}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                // Closing must drop a prior 実行: otherwise reopening would remount the iframe
+                // with the old manualDoc and run infinite-loop submissions without confirmation.
+                if (open && manualRun) {
+                  setManualDoc(null);
+                  setManualRunId(0);
+                }
+                setOpen((o) => !o);
+              }}
+            >
               {open ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               {open ? "閉じる" : showPreviewFrame ? "プレビューを表示" : "コンソールを表示"}
             </Button>

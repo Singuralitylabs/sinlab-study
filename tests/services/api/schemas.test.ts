@@ -718,6 +718,14 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
       }).success
     ).toBe(true);
     expect(ContentUpdateSchema.safeParse({ show_console: true }).success).toBe(true);
+    // Layout omitted: zod must not invent a default single file and reject; updateContent reads
+    // the row. content_type alone is not a layout.
+    expect(
+      ContentUpdateSchema.safeParse({
+        content_type: "exercise",
+        show_preview: true,
+      }).success
+    ).toBe(true);
   });
 
   it("insert_after_idはnullまたは正の整数、0以下・小数は検証エラー", () => {

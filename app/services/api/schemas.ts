@@ -545,12 +545,14 @@ function alignPreviewSettings(
     }
     return;
   }
-  // A partial PUT that only flips a flag has no layout here; updateContent reads the row.
+  // Only validate when this body carries a layout. content_type alone is not enough: a partial
+  // PUT like {content_type:"exercise", show_preview:true} has no slots here, and resolving the
+  // default single file would reject a row whose DB layout still allows preview. updateContent
+  // reads the row for those cases.
   const hasLayout =
     value.submission_file_slots !== undefined ||
     value.starter_files !== undefined ||
-    value.code_language !== undefined ||
-    value.content_type === "exercise";
+    value.code_language !== undefined;
   if (!hasLayout || (value.show_preview !== true && value.show_console !== true)) {
     return;
   }

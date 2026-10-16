@@ -141,4 +141,35 @@ describe("HtmlPreview（コンソールの受信と実行ごとの作り直し�
     expect(cancel).toHaveBeenCalled();
     root = createRoot(container);
   });
+
+  it("コンソールだけの折りたたみを閉じると実行結果を捨て、開き直しても自動では動かない", async () => {
+    const props = {
+      files: filesWith("while(true){}"),
+      showPreviewFrame: false,
+      showConsolePanel: true,
+      collapsible: true,
+    };
+    await act(() => root.render(createElement(HtmlPreview, props)));
+    const toggle = () =>
+      [...container.querySelectorAll("button")].find((button) =>
+        /コンソールを表示|閉じる/.test(button.textContent ?? "")
+      ) as HTMLButtonElement;
+
+    await act(() => toggle().click());
+    const runButton = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes("実行")
+    ) as HTMLButtonElement;
+    await act(() => runButton.click());
+    expect(iframe()).not.toBeNull();
+    post(line("ran"));
+    await settle();
+    expect(lines()).toEqual(["ran"]);
+
+    await act(() => toggle().click());
+    expect(container.querySelector("iframe")).toBeNull();
+
+    await act(() => toggle().click());
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(container.textContent).toContain("「実行」を押すと");
+  });
 });

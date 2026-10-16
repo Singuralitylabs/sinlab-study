@@ -45,7 +45,7 @@ import {
 } from "./SubmissionFileSlotsEditor";
 
 /** Untouched flags stay NULL (automatic). An explicit off is kept; an illegal on is dropped. */
-function storedPreviewFlag(
+export function storedPreviewFlag(
   touched: boolean,
   value: boolean | null,
   allowed: boolean

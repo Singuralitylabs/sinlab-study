@@ -1521,12 +1521,14 @@ async function rejectIllegalPreviewSettings(
       console.error("コンテンツ更新エラー（プレビュー設定）:", error?.message ?? "no row");
       return "missing";
     }
-    if (data.content_type !== "exercise") {
+    // Prefer the type this request is moving to (video→exercise with flags only must not 400).
+    const resolvedType = contentType ?? data.content_type;
+    if (resolvedType !== "exercise") {
       return patch.show_preview != null || patch.show_console != null
         ? PREVIEW_EXERCISE_ONLY_MESSAGE
         : null;
     }
-    contentType = contentType ?? "exercise";
+    contentType = "exercise";
     if (slots === undefined) {
       slots = data.submission_file_slots;
     }

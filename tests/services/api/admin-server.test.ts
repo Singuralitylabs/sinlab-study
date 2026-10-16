@@ -11,6 +11,7 @@ import {
   changeMembershipType,
   changeUserRole,
   createContent,
+  createContentsAtTail,
   createPhase,
   createTheme,
   createWeek,
@@ -1357,5 +1358,168 @@ describe("updateContent（編集時の再採番）", () => {
       expect.objectContaining({ text_content: "解説記事" })
     );
     expect(videoBody.update).toHaveBeenCalledWith(expect.objectContaining({ text_content: null }));
+  });
+});
+
+describe("updateContent / createContent のプレビュー設定（#380 レビュー）", () => {
+  it("video→exercise の部分 PUT でレイアウト無し・コンソールだけなら現在行を読んで通す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              content_type: "video",
+              submission_file_slots: null,
+              starter_files: null,
+              code_language: "javascript",
+              show_preview: null,
+              show_console: null,
+            },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await updateContent(1, { content_type: "exercise", show_console: true });
+
+    expect(result).toEqual({ error: null, storageRemoved: true });
+    expect(result.previewNotAllowed).toBeUndefined();
+    const updateBuilder = mockClient.from.mock.results[1].value;
+    expect(updateBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ content_type: "exercise", show_console: true })
+    );
+  });
+
+  it("種別を送らず video 行へプレビューをオンにすると演習専用の拒否", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              content_type: "video",
+              submission_file_slots: null,
+              starter_files: null,
+              code_language: null,
+              show_preview: null,
+              show_console: null,
+            },
+            error: null,
+          },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await updateContent(1, { show_preview: true });
+
+    expect(result).toEqual({
+      error: null,
+      storageRemoved: true,
+      previewNotAllowed: "プレビューとコンソールの設定は演習だけに指定できます",
+    });
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("プレビュー検証用の現在行が無いときは PGRST116", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [{ data: null, error: null }],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await updateContent(1, { show_console: true });
+
+    expect(result.storageRemoved).toBe(true);
+    expect(result.error).toMatchObject({ code: "PGRST116" });
+  });
+
+  it("exercise 以外へ種別変更するとプレビュー設定を NULL にする", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              week_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: null,
+              submission_file_slots: [{ filename: "main.js", language: "javascript" }],
+              show_preview: false,
+              show_console: true,
+            },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await updateContent(1, { content_type: "video" });
+
+    const updateBuilder = mockClient.from.mock.results[1].value;
+    expect(updateBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content_type: "video",
+        show_preview: null,
+        show_console: null,
+        submission_file_slots: null,
+      })
+    );
+  });
+
+  it("createContent は許されないプレビュー設定を previewNotAllowed で返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [{ data: [], error: null }],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await createContent({
+      week_id: 1,
+      title: "JS だけ",
+      content_type: "exercise",
+      code_language: "javascript",
+      show_preview: true,
+      insertAfterId: null,
+    });
+
+    expect(result).toEqual({
+      data: null,
+      error: null,
+      previewNotAllowed: "このファイル構成ではプレビューを表示できません",
+    });
+    expect(mockClient.from.mock.results[0].value.insert).not.toHaveBeenCalled();
+  });
+
+  it("createContentsAtTail は previewNotAllowed を 23514 に変換する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [{ data: [], error: null }],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await createContentsAtTail([
+      {
+        week_id: 1,
+        title: "JS だけ",
+        content_type: "exercise",
+        code_language: "javascript",
+        show_preview: true,
+      },
+    ]);
+
+    expect(result.created).toEqual([]);
+    expect(result.failedIndex).toBe(0);
+    expect(result.error).toMatchObject({
+      code: "23514",
+      message: "このファイル構成ではプレビューを表示できません",
+    });
   });
 });
