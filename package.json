@@ -13,7 +13,7 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "check": "biome check --write .",
-    "db:types": "sh -e -c '[ -f .env.local ] && . ./.env.local; : \"${SUPABASE_PROJECT_ID:?SUPABASE_PROJECT_ID is not set}\"; npx supabase gen types --lang=typescript --project-id \"$SUPABASE_PROJECT_ID\" --schema public > app/types/lib/database.types.ts'",
+    "db:types": "sh -e -c 'if [ -f .env.local ]; then   while IFS= read -r line || [ -n \"$line\" ]; do     case \"$line\" in \"\"|\\#*) continue ;; esac;     key=${line%%=*}; val=${line#*=};     eval \"cur=\\${$key-}\";     if [ -z \"$cur\" ]; then export \"$key=$val\"; fi;   done < .env.local; fi; URL=\"${SUPABASE_DB_URL:-${DATABASE_URL:-}}\"; if [ -n \"$URL\" ]; then   bun x supabase gen types --lang=typescript --db-url \"$URL\" --schema public > app/types/lib/database.types.ts; elif [ -n \"${SUPABASE_PROJECT_ID:-}\" ]; then   bun x supabase gen types --lang=typescript --project-id \"$SUPABASE_PROJECT_ID\" --schema public > app/types/lib/database.types.ts; else   echo \"Set SUPABASE_DB_URL (or DATABASE_URL) or SUPABASE_PROJECT_ID\" >&2; exit 2; fi; bun x biome format --write app/types/lib/database.types.ts'",
     "test": "vitest run",
     "check:comments": "bun scripts/check-comment-only-diff.ts",
     "test:watch": "vitest",

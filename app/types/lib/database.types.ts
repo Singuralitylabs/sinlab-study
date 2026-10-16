@@ -4,7 +4,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5";
+    PostgrestVersion: "14.4";
   };
   public: {
     Tables: {
@@ -1070,13 +1070,28 @@ export type Database = {
           question_type: string;
         }[];
       };
-      quiz_content_visible_to_caller: { Args: { p_content_id: number }; Returns: boolean };
+      learning_content_requires_review_pass: {
+        Args: { p_content_id: number };
+        Returns: boolean;
+      };
+      learning_content_review_pass_unachievable: {
+        Args: { p_content_id: number };
+        Returns: boolean;
+      };
+      quiz_content_visible_to_caller: {
+        Args: { p_content_id: number };
+        Returns: boolean;
+      };
       quiz_correct_choices_valid: {
         Args: { p_choices: string[]; p_correct: number[] };
         Returns: boolean;
       };
       quiz_question_revision: {
-        Args: { p_choices: string[]; p_question: string; p_question_type: string };
+        Args: {
+          p_choices: string[];
+          p_question: string;
+          p_question_type: string;
+        };
         Returns: string;
       };
       replace_quiz_questions: {
