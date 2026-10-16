@@ -1,5 +1,6 @@
 import { Award, Megaphone } from "lucide-react";
 import Link from "next/link";
+import { InstallPrompt } from "@/app/components/InstallPrompt";
 import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT } from "@/app/constants/announcements";
@@ -114,6 +115,8 @@ export default async function HomePage() {
   return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-3xl font-bold tracking-tight mb-6">ホーム</h1>
+
+      <InstallPrompt />
 
       {showWelcomeDialog && (
         <WelcomeDialog
