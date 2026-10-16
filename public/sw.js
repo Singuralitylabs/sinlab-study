@@ -1,24 +1,64 @@
-/* Cache only hashed build assets and icons. Navigations stay network-first so a demotion,
- * rejection, or content lock is never served from a stale authenticated HTML document.
- * /api responses are not cached. Push payloads are title/body/url only; the click opens a
- * page through the same network-first navigate handler. */
+/* Hashed /_next/static assets are cache-first. Icon URLs are unhashed placeholders, so they
+ * are network-first; a cache-first hit would keep a replaced file on devices that already
+ * loaded it. Navigations stay network-first so a demotion, rejection, or content lock is
+ * never served from a stale authenticated HTML document. /offline is precached at install
+ * because the navigate fallback only reads the cache. /api responses are not cached.
+ * Push payloads are title/body/url only; the click opens a page through the same
+ * network-first navigate handler. */
 const STATIC_CACHE = "sinlab-static-v1";
+const OFFLINE_URL = "/offline";
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(self.skipWaiting());
+  event.waitUntil(
+    caches
+      .open(STATIC_CACHE)
+      .then((cache) => cache.add(OFFLINE_URL))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-function isStaticAsset(pathname) {
+function isIcon(pathname) {
   return (
-    pathname.startsWith("/_next/static/") ||
-    pathname === "/icon.png" ||
-    pathname === "/apple-icon.png" ||
-    pathname.startsWith("/icons/")
+    pathname === "/icon.png" || pathname === "/apple-icon.png" || pathname.startsWith("/icons/")
   );
+}
+
+function isHashedBuildAsset(pathname) {
+  return pathname.startsWith("/_next/static/");
+}
+
+function storeIfOk(request, response) {
+  if (response.ok) {
+    const copy = response.clone();
+    caches.open(STATIC_CACHE).then((cache) => cache.put(request, copy));
+  }
+  return response;
+}
+
+function networkFirst(request) {
+  return fetch(request)
+    .then((response) => storeIfOk(request, response))
+    .catch(() =>
+      caches.match(request).then((cached) => {
+        if (cached) {
+          return cached;
+        }
+        return Response.error();
+      })
+    );
+}
+
+function cacheFirst(request) {
+  return caches.match(request).then((cached) => {
+    if (cached) {
+      return cached;
+    }
+    return fetch(request).then((response) => storeIfOk(request, response));
+  });
 }
 
 self.addEventListener("fetch", (event) => {
@@ -32,28 +72,18 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.mode === "navigate") {
-    event.respondWith(fetch(request).catch(() => caches.match("/offline")));
+    event.respondWith(fetch(request).catch(() => caches.match(OFFLINE_URL)));
     return;
   }
 
-  if (!isStaticAsset(url.pathname)) {
+  if (isIcon(url.pathname)) {
+    event.respondWith(networkFirst(request));
     return;
   }
 
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) {
-        return cached;
-      }
-      return fetch(request).then((response) => {
-        if (response.ok) {
-          const copy = response.clone();
-          caches.open(STATIC_CACHE).then((cache) => cache.put(request, copy));
-        }
-        return response;
-      });
-    })
-  );
+  if (isHashedBuildAsset(url.pathname)) {
+    event.respondWith(cacheFirst(request));
+  }
 });
 
 function notificationPath(data) {
