@@ -421,9 +421,9 @@ SELECT のみ: 本人 / admin（全件。maintainer は不可）。INSERT / UPDA
 
 RLSは有効化しているが、ポリシーは一切定義していない（service_role専用。`authenticated` ロールでは SELECT を含め一切のアクセスができない）。
 
-### 6.8 storage.objects（thumbnails / slides バケット）
+### 6.8 storage.objects（thumbnails / slides / content-images バケット）
 
-テーマのサムネイルを保存する `thumbnails` は公開バケット（`public = true`）のため参照は制限しない。スライドPDFを保存する `slides` は**非公開バケット**（`public = false`）で、参照はコンテンツの可視性に連動させる。書き込み系（INSERT / UPDATE / DELETE）は両バケットともコンテンツ管理者（admin / maintainer）に限定し、操作ごとに1本のポリシーへ統合している（`multiple_permissive_policies` 対策）。
+テーマのサムネイルを保存する `thumbnails` と、Markdown 埋め込み画像の `content-images`（#376）は公開バケット（`public = true`）のため参照は制限しない。`content-images` は `file_size_limit = 5MiB`、`allowed_mime_types = png/jpeg/webp/gif`。キーは `content-{contentId}/<ランダムID>.{ext}`。スライドPDFを保存する `slides` は**非公開バケット**（`public = false`）で、参照はコンテンツの可視性に連動させる。書き込み系（INSERT / UPDATE / DELETE）は各バケットともコンテンツ管理者（admin / maintainer）に限定し、操作ごとに1本のポリシーへ統合している（`multiple_permissive_policies` 対策）。`get_user_role()` は `(select ...)` で包む。
 
 `slides` の SELECT ポリシーは、admin / maintainer はロールで無条件に許可（未公開プレビューのため。[機能設計書](./specification.md)2.12節）、それ以外は「`learning_contents.pdf_url = storage.objects.name` の行が存在し、その週・フェーズ・テーマを含む4階層すべてが `is_published = true AND is_deleted = false`」の場合のみ許可する（`learning_contents → learning_weeks → learning_phases → learning_themes` を JOIN）。
 

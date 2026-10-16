@@ -422,7 +422,7 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 
 動画・スライドは、`learning_contents.description`（Markdown・任意入力）が設定されている場合のみ、プレイヤー／ビューア下部に概要欄カードを表示する（テキスト・演習と同じ `MarkdownRenderer`）。`MarkdownRenderer`（`app/components/MarkdownRenderer.tsx`）は `"use client"` を持たない共有コンポーネントで、Server Component からはサーバーで、Client Component（`AIReviewDisplay`）からはクライアントで同じ実装のまま描画される。コンテンツ本文の Markdown 描画経路（Server Component）は client 化しない。
 
-スライドの解説記事は `learning_contents.text_content`（Markdown・任意。テキスト種別の本文と同じ列）。値があるときだけ PDF ビューアの直下に `MarkdownRenderer` と `resolveMarkdownStorageUrls()` で表示し、空なら従来どおりスライドだけを出す。未公開プレビュー（2.12）は同じ詳細ページなので同様に出る。`/demo` ではお試し公開のスライド（署名付きURLと同じく、公開済み・未削除かつ `is_open_to_trial = true` のときだけビューアを出す分岐）に限って記事を出す。公開済みでもお試し非公開のスライドは対象外の案内だけを出し、記事は出さない。テキスト種別の本文も同じ置換を通す（`{{SUPABASE_STORAGE_URL}}` を公開オブジェクトURLへ変える）。画像のアップロード手段は持たない。
+スライドの解説記事は `learning_contents.text_content`（Markdown・任意。テキスト種別の本文と同じ列）。値があるときだけ PDF ビューアの直下に `MarkdownRenderer` と `resolveMarkdownStorageUrls()` で表示し、空なら従来どおりスライドだけを出す。未公開プレビュー（2.12）は同じ詳細ページなので同様に出る。`/demo` ではお試し公開のスライド（署名付きURLと同じく、公開済み・未削除かつ `is_open_to_trial = true` のときだけビューアを出す分岐）に限って記事を出す。公開済みでもお試し非公開のスライドは対象外の案内だけを出し、記事は出さない。テキスト種別の本文も同じ置換を通す（`{{SUPABASE_STORAGE_URL}}` を公開オブジェクトURLへ変える）。画像のアップロードは公開バケット `content-images`（6.1.5節）。
 
 **YouTube facade**: クリック前は `i.ytimg.com` の hqdefault を `<img>` で直接参照する（最適化の恩恵がほぼ無いため `next/image` は使わず、クリック前に `youtube.com` へ通信しない）。クリック後に `YouTubePlayer` を動的読み込みして autoplay 再生する（クライアント読み込み方針は5.4.6）。iOS Safari では gesture 後に生成した cross-origin iframe の音声付き autoplay が拒否され、再生ボタンへの追加タップが必要になる場合がある（facade 化の既知の制約）。
 
@@ -976,6 +976,38 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 | 404 | テーマが存在しない、または論理削除済み |
 | 500 | アップロード失敗 / DB更新失敗 / サーバーエラー |
 
+### 6.1.5 コンテンツ画像アップロード API（#376）
+
+テキスト種別とスライドの解説記事（Markdown）に埋め込む画像用。公開バケット `content-images`（`CONTENT_IMAGES_BUCKET`）。URL を知っていれば誰でも閲覧できる（説明用の図を想定。機密画像は載せない）。
+
+**エンドポイント**: `POST /api/upload-content-image`
+
+**リクエスト**: `multipart/form-data`（`file`・`contentId`）
+
+**命名規約**: オブジェクトキー `content-{contentId}/<ランダムUUID>.{ext}`（`ext` は `png` / `jpg` / `webp` / `gif`）。定数は `app/constants/storage.ts`。新規作成でまだ `contentId` が無いときはアップロード不可（保存後の編集画面からのみ。一時キーは作らない）。
+
+**返り値**: Markdown にそのまま貼れる参照 `{ path: "{{SUPABASE_STORAGE_URL}}/content-images/<キー>", objectKey }`。完全な URL は保存しない。表示時は既存の `resolveMarkdownStorageUrls()` がプレースホルダを公開オブジェクト URL に置換する（受講者ページ・未公開プレビュー・`/demo` とも同じ経路）。
+
+**処理フロー**:
+1. `getServerAuth()` で認証。未認証 401、`rejected` / 権限なし 403（admin / maintainer のみ）
+2. ファイル形式（PNG / JPEG / WebP / GIF）・サイズ（`CONTENT_IMAGE_MAX_BYTES`、5MB）・`contentId`（正の整数）を検証
+3. 対象コンテンツの存在確認（`is_deleted = false`）。無ければ 404
+4. `content-images` バケットへアップロード（上書きしない）
+5. プレースホルダ付き参照を返却
+
+**レスポンス**:
+
+| ステータス | 条件 |
+|:--|:--|
+| 200 | 正常（`{ path, objectKey }`） |
+| 400 | ファイルなし / サイズ超過 / 対応形式以外 / contentId 不正・未指定 |
+| 401 | 未認証 |
+| 403 | 権限なし、または `rejected` |
+| 404 | コンテンツが存在しない、または論理削除済み |
+| 500 | アップロード失敗 / サーバーエラー |
+
+管理フォーム（`ContentForm`）のテキスト・解説記事欄に「画像を挿入」があり、アップロード後にカーソル位置へ `![画像](...)` を差し込む。使われなくなった画像の掃除は本機能の範囲外。
+
 ### 6.2 受講生管理
 
 アクティブな受講生の一覧と進捗状況を表示する。
@@ -1084,7 +1116,7 @@ JSONボディを受け取る API Route の入力検証は [zod](https://zod.dev/
 
 **失敗時の統一レスポンス形式**: `{ "error": string }` を HTTP 400 で返す（成功時のレスポンス形状は Route ごとに異なる、既存の契約を維持）。`error` は該当した検証エラーメッセージを ` / ` 区切りで連結した日本語文字列で、以前から全 Route が返していた `{ error: string }` 形状と互換のため、既存のクライアント側エラーハンドリング（`.error` を読むだけの処理）に影響しない。
 
-**スコープ外の Route**: `multipart/form-data` を受け取る `POST /api/upload-pdf` / `POST /api/upload-thumbnail` は、ファイル（`File`）を含む値をzodスキーマで表現する効果が薄く、既存のフィールドごとの手書き検証（ファイル形式・サイズ・`parsePositiveInteger()` 等）をそのまま維持する。`POST /api/stripe/checkout` / `POST /api/stripe/portal` はリクエストボディを持たず、`POST /api/stripe/webhook` は署名検証のため生のテキストボディを扱う関係でJSONスキーマ検証の対象外とする。
+**スコープ外の Route**: `multipart/form-data` を受け取る `POST /api/upload-pdf` / `POST /api/upload-thumbnail` / `POST /api/upload-content-image` は、ファイル（`File`）を含む値をzodスキーマで表現する効果が薄く、既存のフィールドごとの手書き検証（ファイル形式・サイズ・`parsePositiveInteger()` 等）をそのまま維持する。`POST /api/stripe/checkout` / `POST /api/stripe/portal` はリクエストボディを持たず、`POST /api/stripe/webhook` は署名検証のため生のテキストボディを扱う関係でJSONスキーマ検証の対象外とする。
 
 ### 8.2 認証エラー
 

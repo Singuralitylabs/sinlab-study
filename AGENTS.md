@@ -76,6 +76,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 - **Storage のキー規約**（変更するとシードSQLとアップロードAPIが揃って壊れる）
   - `slides`（**非公開**）: `<コーススラッグ>/slide-NN.pdf`（NNは最低2桁のゼロ埋め）。`learning_contents.pdf_url` には**このキーのみ**を保存し（URLは保存しない）、配信は権限チェック後に `createSlideSignedUrl()` が署名付きURLを発行する。キー以外は閲覧不能になる（`docs/specification.md` 3.2節・`docs/database.md` 6.8節）。
   - `thumbnails`（公開）: `theme-{themeId}/thumbnail.{png|jpg|webp}`。`image_url` は相対パス保存で、表示時に `resolveStorageUrl()` でURLを前置する。
+  - `content-images`（公開）: `content-{contentId}/<ランダムID>.{png|jpg|webp|gif}`。Markdown には `{{SUPABASE_STORAGE_URL}}/content-images/...` を保存し、表示時に `resolveMarkdownStorageUrls()` で置換する。
 - ロール・ID・ステータスの参照は `get_user_role()` / `get_user_id()` / `get_user_status()` を用いる（定義・権限・`rejected` で NULL を返す挙動は `docs/database.md` 5.2節）。
 - ポリシー内では **`(select get_user_xxx())` の形で包み**（`auth_rls_initplan` 対策）、同一操作の許可ポリシーは **OR 条件で1本に統合する**（`multiple_permissive_policies` 対策）。
 - `user_progress` は INSERT だけでなく **UPDATE にも可視コンテンツ限定の EXISTS 条件を課す**（upsert のため INSERT のみだと2回目以降がすり抜ける）。
