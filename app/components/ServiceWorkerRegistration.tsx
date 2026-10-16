@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect } from "react";
+// Side-effect: register beforeinstallprompt listener on first client bundle eval
+// so InstallPrompt on `/` can still see an event that fired on another route.
+import "@/app/lib/before-install-prompt";
 
 /** Production only: a dev worker fights HMR and can pin a stale shell. */
 export function ServiceWorkerRegistration() {

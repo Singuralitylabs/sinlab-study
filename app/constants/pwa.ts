@@ -40,6 +40,14 @@ export function installPromptPlatform(userAgent: string, maxTouchPoints = 0): "i
   return isIosUserAgent(userAgent, maxTouchPoints) ? "ios" : "android";
 }
 
+/** iOS home-screen apps often expose navigator.standalone when display-mode is unavailable. */
+export function isStandaloneDisplay(input: {
+  displayModeStandalone: boolean;
+  navigatorStandalone?: boolean;
+}): boolean {
+  return input.displayModeStandalone || input.navigatorStandalone === true;
+}
+
 export function shouldShowInstallPrompt(input: {
   isStandalone: boolean;
   isMobile: boolean;

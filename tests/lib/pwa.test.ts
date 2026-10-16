@@ -4,6 +4,7 @@ import {
   installPromptPlatform,
   isIosUserAgent,
   isMobileUserAgent,
+  isStandaloneDisplay,
   PWA_PUBLIC_PATHS,
   shouldShowInstallPrompt,
 } from "@/app/constants/pwa";
@@ -35,6 +36,18 @@ describe("インストール案内の表示条件", () => {
     ).toBe(false);
     expect(shouldShowInstallPrompt({ isStandalone: false, isMobile: true, dismissed: true })).toBe(
       false
+    );
+  });
+
+  it("display-mode か navigator.standalone のどちらかでインストール済みとみなす", () => {
+    expect(
+      isStandaloneDisplay({ displayModeStandalone: false, navigatorStandalone: undefined })
+    ).toBe(false);
+    expect(isStandaloneDisplay({ displayModeStandalone: true, navigatorStandalone: false })).toBe(
+      true
+    );
+    expect(isStandaloneDisplay({ displayModeStandalone: false, navigatorStandalone: true })).toBe(
+      true
     );
   });
 
