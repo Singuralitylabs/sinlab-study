@@ -122,9 +122,7 @@ function resolveAfterCompletedAnchor(
 ): ContinueLearningContent | null {
   const sameTheme = orderedContents.filter((c) => c.themeId === anchor.themeId);
   const anchorIndex = sameTheme.findIndex((c) => c.id === anchor.id);
-  const afterInTheme = sameTheme
-    .slice(anchorIndex + 1)
-    .find((c) => !completedContentIds.has(c.id));
+  const afterInTheme = sameTheme.slice(anchorIndex + 1).find((c) => !completedContentIds.has(c.id));
   if (afterInTheme) return afterInTheme;
 
   const earlierInTheme = sameTheme.find((c) => !completedContentIds.has(c.id));
