@@ -74,16 +74,20 @@ export function InstallPrompt() {
     if (!installEvent) {
       return;
     }
+    // beforeinstallprompt is one-shot; after dismiss/reject clear it so we show
+    // menu steps instead of calling prompt() again on a spent event.
     void (async () => {
       try {
         await installEvent.prompt();
         const { outcome } = await installEvent.userChoice;
         if (outcome === "accepted") {
           dismiss();
+          return;
         }
       } catch {
-        // OS cancel or browser rejection must not permanently hide the banner.
+        // Fall through to menu steps; do not permanently hide the banner.
       }
+      setInstallEvent(null);
     })();
   };
 

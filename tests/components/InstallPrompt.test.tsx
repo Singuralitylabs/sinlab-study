@@ -75,7 +75,7 @@ describe("InstallPrompt", () => {
     expect(container.querySelector('[data-testid="pwa-install-prompt"]')).toBeNull();
   });
 
-  it("Android で beforeinstallprompt があるときは追加ボタンを出し、拒否では閉じない", async () => {
+  it("Android で beforeinstallprompt があるときは追加ボタンを出し、拒否後はメニュー手順へ切り替える", async () => {
     stubMobile("Mozilla/5.0 (Linux; Android 14) Chrome/120.0.0.0");
     await render();
     await act(async () => {
@@ -108,6 +108,10 @@ describe("InstallPrompt", () => {
     expect(installEvent.prompt).toHaveBeenCalledOnce();
     expect(window.localStorage.getItem(INSTALL_PROMPT_DISMISS_KEY)).toBeNull();
     expect(container.querySelector('[data-testid="pwa-install-prompt"]')).not.toBeNull();
+    expect(container.textContent).toContain("ブラウザのメニューから");
+    expect([...container.querySelectorAll("button")].map((button) => button.textContent)).toEqual([
+      "閉じる",
+    ]);
   });
 
   it("iOS は共有手順を出す", async () => {

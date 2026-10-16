@@ -72,8 +72,9 @@ describe("manifest", () => {
 });
 
 type SwListener = (event: Record<string, unknown>) => void;
+type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-function loadServiceWorker(options: { fetchImpl: typeof fetch; origin?: string }) {
+function loadServiceWorker(options: { fetchImpl: FetchLike; origin?: string }) {
   const origin = options.origin ?? "https://example.com";
   const listeners = new Map<string, SwListener>();
   const cacheStore = new Map<string, Map<string, Response>>();
@@ -158,21 +159,22 @@ describe("public/sw.js の挙動", () => {
 
   it("ナビゲーション成功時は cache.put せず、失敗時は install 済み /offline を返す", async () => {
     const html = new Response("<html>home</html>", { status: 200 });
-    const fetchImpl = vi.fn(async (input: RequestInfo) => {
-      const url = typeof input === "string" ? input : input.url;
+    const fetchImpl: FetchLike = async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       if (url.endsWith("/") || new URL(url).pathname === "/") {
         return html;
       }
       throw new Error(`unexpected fetch ${url}`);
-    });
+    };
     const { listeners, putCalls, caches } = loadServiceWorker({ fetchImpl });
 
-    const installEvent = {
-      waitUntil: (promise: Promise<unknown>) => {
-        installEvent.done = promise;
-      },
-      done: Promise.resolve(),
-    };
+    const installEvent: { waitUntil: (promise: Promise<unknown>) => void; done: Promise<unknown> } =
+      {
+        waitUntil(promise) {
+          installEvent.done = promise;
+        },
+        done: Promise.resolve(),
+      };
     listeners.get("install")?.(installEvent);
     await installEvent.done;
 
@@ -197,12 +199,15 @@ describe("public/sw.js の挙動", () => {
     await expect(successEvent.response).resolves.toBe(html);
     expect(putCalls).toEqual([]);
 
-    const failingFetch = vi.fn(async () => {
+    const failingFetch: FetchLike = async () => {
       throw new Error("offline");
-    });
+    };
     const offlineSw = loadServiceWorker({ fetchImpl: failingFetch });
-    const offlineInstall = {
-      waitUntil: (promise: Promise<unknown>) => {
+    const offlineInstall: {
+      waitUntil: (promise: Promise<unknown>) => void;
+      done: Promise<unknown>;
+    } = {
+      waitUntil(promise) {
         offlineInstall.done = promise;
       },
       done: Promise.resolve(),
@@ -229,14 +234,17 @@ describe("public/sw.js の挙動", () => {
   });
 
   it("/api と認証 HTML 以外の経路でも navigate 以外で cache.put しない。activate は旧キャッシュを消す", async () => {
-    const fetchImpl = vi.fn(async () => new Response("api", { status: 200 }));
+    const fetchImpl: FetchLike = async () => new Response("api", { status: 200 });
     const { listeners, putCalls, cacheStore, self } = loadServiceWorker({ fetchImpl });
 
     cacheStore.set("sinlab-static-v1", new Map([["/old", new Response("old")]]));
     cacheStore.set("sinlab-static-v2", new Map());
 
-    const activateEvent = {
-      waitUntil: (promise: Promise<unknown>) => {
+    const activateEvent: {
+      waitUntil: (promise: Promise<unknown>) => void;
+      done: Promise<unknown>;
+    } = {
+      waitUntil(promise) {
         activateEvent.done = promise;
       },
       done: Promise.resolve(),
