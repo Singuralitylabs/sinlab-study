@@ -3,9 +3,10 @@
  * loaded it. Navigations stay network-first so a demotion, rejection, or content lock is
  * never served from a stale authenticated HTML document. /offline is precached at install
  * because the navigate fallback only reads the cache. /api responses are not cached.
+ * Bump STATIC_CACHE when offline HTML or caching rules change so activate drops old entries.
  * Push payloads are title/body/url only; the click opens a page through the same
  * network-first navigate handler. */
-const STATIC_CACHE = "sinlab-static-v1";
+const STATIC_CACHE = "sinlab-static-v2";
 const OFFLINE_URL = "/offline";
 
 self.addEventListener("install", (event) => {
@@ -18,7 +19,14 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(keys.filter((key) => key !== STATIC_CACHE).map((key) => caches.delete(key)))
+      )
+      .then(() => self.clients.claim())
+  );
 });
 
 function isIcon(pathname) {
@@ -126,9 +134,12 @@ self.addEventListener("notificationclick", (event) => {
         if (new URL(client.url).origin === self.location.origin && "focus" in client) {
           // focus alone leaves the existing tab on its current URL; navigate when supported.
           // Older clients without navigate cannot change the URL in-place, so open the target.
+          // navigate() may resolve to null when the navigation is refused; fall back then too.
           return client.focus().then((focused) => {
             if (focused && "navigate" in focused) {
-              return focused.navigate(target);
+              return focused
+                .navigate(target)
+                .then((navigated) => navigated ?? self.clients.openWindow(target));
             }
             return self.clients.openWindow(target);
           });

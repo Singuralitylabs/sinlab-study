@@ -1482,9 +1482,9 @@ X 向けの共有リンク（`https://twitter.com/intent/tweet?text=...&url=...`
 
 - **マニフェスト**（`app/manifest.ts`）: `name` / `short_name` は Sinlab Study、`start_url` は `/`、`display` は `standalone`。`theme_color` / `background_color` は `app/constants/pwa.ts` の sRGB（`globals.css` の oklch トークンの代替。マニフェストは oklch を受けない）。アイコンは 192px・512px を `purpose: any` と `purpose: maskable` の両方で載せる（`maskable` だけだと Chrome がインストール可能と判定しない）。`app/apple-icon.png`（180px）と `metadata.appleWebApp`、`viewport.themeColor`（ライト・ダーク）を付ける
 - **アイコン**: 元画像が無い間は `public/icon.png` から拡大した仮画像。差し替え前提
-- **サービスワーカー**（`public/sw.js`）: `/_next/static/*` は cache-first。アイコン（`/icon.png`・`/apple-icon.png`・`/icons/`）は URL にハッシュが無い仮画像なので network-first（成功時にキャッシュを更新し、オフライン時だけキャッシュを使う）。`/offline` は install でキャッシュする。ナビゲーションは常にネットワーク優先で、失敗時だけそのキャッシュ（「オフラインです」）を返す。認証配下の HTML と `/api/*` はキャッシュしない（降格・却下・ロックの反映が遅れないようにする）。`next.config.ts` の `headers()` で `/sw.js` に `Cache-Control: no-cache` と `Service-Worker-Allowed: /` を付ける。登録は `ServiceWorkerRegistration` が本番ビルドだけで行う
-- **プロキシ**: `shouldSkipMiddleware()` は上の 4 パスを完全一致でのみ通す。`/offline/anything` のような配下は通さない。環境変数欠落・例外・status null の `/login` へのフェイルクローズは変えない
-- **インストール案内**: ホーム（`/`）の `InstallPrompt`。`display-mode: standalone` でない、かつモバイル UA、かつ閉じていない（`localStorage`。失敗は無視）ときだけ出す。iOS は「共有 → ホーム画面に追加」の手順。Android は `beforeinstallprompt` を保持し、ボタンで `prompt()` を呼ぶ。インストール済みでは出さない
+- **サービスワーカー**（`public/sw.js`）: `/_next/static/*` は cache-first。アイコン（`/icon.png`・`/apple-icon.png`・`/icons/`）は URL にハッシュが無い仮画像なので network-first（成功時にキャッシュを更新し、オフライン時だけキャッシュを使う）。`/offline` は install でキャッシュする。キャッシュ名（`STATIC_CACHE`）はバージョン付きで、ルールやオフライン HTML を変えたらバンプする。`activate` でそれ以外の名前のキャッシュを削除する。ナビゲーションは常にネットワーク優先で、失敗時だけそのキャッシュ（「オフラインです」）を返す。認証配下の HTML と `/api/*` はキャッシュしない（降格・却下・ロックの反映が遅れないようにする）。`next.config.ts` の `headers()` で `/sw.js` に `Cache-Control: no-cache` と `Service-Worker-Allowed: /` を付ける。登録は `ServiceWorkerRegistration` が本番ビルドだけで行う
+- **プロキシ**: `shouldSkipMiddleware()` は上の 4 パスを完全一致でのみ通す。`/offline/anything` のような配下は通さない。うち `/manifest.webmanifest`・`/sw.js`・`/apple-icon.png` は拡張子マッチでも通るが、インストールに必要なパスの許可リストとして明示する（増やさない）。環境変数欠落・例外・status null の `/login` へのフェイルクローズは変えない
+- **インストール案内**: ホーム（`/`）の `InstallPrompt`。`display-mode: standalone` でない、かつモバイル UA（iPadOS 13+ の Macintosh + タッチを含む）、かつ閉じていない（`localStorage`。失敗は無視）ときだけ出す。iOS は「共有 → ホーム画面に追加」の手順。Android は `beforeinstallprompt` があるときボタンで `prompt()` を呼び、無いときはブラウザメニューからの追加手順を出す。`prompt()` の拒否や OS ダイアログのキャンセルでは閉じた扱いにしない。インストール済みでは出さない
 
 ### 14.2 Web Push
 

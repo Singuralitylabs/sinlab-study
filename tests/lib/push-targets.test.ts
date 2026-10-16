@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { EMAIL_KIND } from "@/app/constants/notifications";
 import type { DigestUser } from "@/app/lib/email-digest";
@@ -29,6 +30,12 @@ describe("pushOffer", () => {
     expect(pushOffer({ configured: true, isIos: true, standalone: false })).toBe("ios-guide");
     expect(pushOffer({ configured: true, isIos: true, standalone: true })).toBe("subscribe");
     expect(pushOffer({ configured: true, isIos: false, standalone: false })).toBe("subscribe");
+  });
+
+  it("PushNotifications は iPadOS 向けに maxTouchPoints を渡す", () => {
+    const source = readFileSync("app/components/PushNotifications.tsx", "utf8");
+    expect(source).toContain("maxTouchPoints");
+    expect(source).toContain("installPromptPlatform(");
   });
 });
 

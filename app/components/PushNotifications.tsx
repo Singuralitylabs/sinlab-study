@@ -52,7 +52,10 @@ export function PushNotifications({ publicKey }: { publicKey: string | null }) {
     }
     const next = pushOffer({
       configured: true,
-      isIos: installPromptPlatform(window.navigator.userAgent) === "ios",
+      // iPadOS 13+ reports Macintosh; pass maxTouchPoints so browser tabs get ios-guide.
+      isIos:
+        installPromptPlatform(window.navigator.userAgent, window.navigator.maxTouchPoints ?? 0) ===
+        "ios",
       standalone: isStandalone(),
     });
     setOffer(next);
