@@ -50,13 +50,25 @@ describe("インストール案内の表示条件", () => {
 describe("public/sw.js", () => {
   const source = readFileSync("public/sw.js", "utf8");
 
-  it("ナビゲーションはネットワーク優先で、失敗時だけ /offline を返す", () => {
+  it("ナビゲーションはネットワーク優先で、失敗時は install で入れた /offline を返す", () => {
     expect(source).toContain('request.mode === "navigate"');
-    expect(source).toContain('fetch(request).catch(() => caches.match("/offline"))');
+    expect(source).toContain('const OFFLINE_URL = "/offline"');
+    expect(source).toContain("caches.match(OFFLINE_URL)");
+    expect(source).toMatch(/"install"[\s\S]*cache\.add\(OFFLINE_URL\)/);
   });
 
-  it("キャッシュ対象は静的アセットだけで、/api は含めない", () => {
+  it("ハッシュの無いアイコンは network-first、/_next/static は cache-first。/api は含めない", () => {
     expect(source).toContain('pathname.startsWith("/_next/static/")');
+    expect(source).toContain('pathname.startsWith("/icons/")');
+    expect(source).toContain("event.respondWith(networkFirst(request))");
+    expect(source).toContain("event.respondWith(cacheFirst(request))");
+    const networkFirst = source.slice(
+      source.indexOf("function networkFirst"),
+      source.indexOf("function cacheFirst")
+    );
+    expect(networkFirst.indexOf("fetch(request)")).toBeLessThan(
+      networkFirst.indexOf("caches.match")
+    );
     expect(source).not.toContain('"/api');
   });
 });
