@@ -1262,6 +1262,7 @@ async function createContentWith(
       }),
       showPreview,
       showConsole,
+      previewBaseHtml,
     });
     if (previewMessage) {
       return { data: null, error: null, previewNotAllowed: previewMessage };
@@ -1499,7 +1500,9 @@ async function rejectIllegalPreviewSettings(
     patch.submission_file_slots !== undefined ||
     patch.starter_files !== undefined ||
     patch.code_language !== undefined;
-  if (!setsFlags && !changesLayout) {
+  // Clearing the scaffold while show_preview stays true must be rejected (#351).
+  const changesScaffold = patch.preview_base_html !== undefined;
+  if (!setsFlags && !changesLayout && !changesScaffold) {
     return null;
   }
 
@@ -1509,21 +1512,23 @@ async function rejectIllegalPreviewSettings(
   let language = patch.code_language;
   let showPreview = patch.show_preview;
   let showConsole = patch.show_console;
-  // Skip the row read only when every layout input and both flags are in the patch. A partial
-  // layout (e.g. code_language alone) must merge omitted slots/starter/flags from the row, or an
-  // illegal true can be stored against the real DB layout.
+  let previewBaseHtml = patch.preview_base_html;
+  // Skip the row read only when every layout input, scaffold, and both flags are in the patch.
+  // A partial layout (e.g. code_language alone) must merge omitted slots/starter/flags/scaffold
+  // from the row, or an illegal true can be stored against the real DB layout.
   const complete =
     contentType === "exercise" &&
     patch.submission_file_slots !== undefined &&
     patch.starter_files !== undefined &&
     patch.code_language !== undefined &&
+    patch.preview_base_html !== undefined &&
     patch.show_preview !== undefined &&
     patch.show_console !== undefined;
   if (!complete) {
     const { data, error } = await supabase
       .from("learning_contents")
       .select(
-        "content_type, submission_file_slots, starter_files, code_language, show_preview, show_console"
+        "content_type, submission_file_slots, starter_files, code_language, preview_base_html, show_preview, show_console"
       )
       .eq("id", id)
       .eq("is_deleted", false)
@@ -1549,6 +1554,9 @@ async function rejectIllegalPreviewSettings(
     if (language === undefined) {
       language = data.code_language;
     }
+    if (previewBaseHtml === undefined) {
+      previewBaseHtml = data.preview_base_html;
+    }
     if (showPreview === undefined) {
       showPreview = data.show_preview;
     }
@@ -1571,6 +1579,7 @@ async function rejectIllegalPreviewSettings(
     }),
     showPreview: showPreview ?? null,
     showConsole: showConsole ?? null,
+    previewBaseHtml: previewBaseHtml ?? null,
   });
 }
 
