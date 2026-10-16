@@ -8,6 +8,7 @@ vi.mock("@/app/services/api/learning-server");
 import CertificatesPage from "@/app/(authenticated)/certificates/page";
 import {
   fetchMyCertificates,
+  fetchThemeExerciseGaps,
   issueMissingCertificates,
 } from "@/app/services/api/certificates-server";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
@@ -178,5 +179,20 @@ describe("/certificates の遡及発行", () => {
       digest: expect.stringContaining("NEXT_REDIRECT"),
     });
     expect(issueMissingCertificates).not.toHaveBeenCalled();
+  });
+
+  it("100% でも演習が未提出なら、発行失敗とは書かず残りの条件を出す", async () => {
+    vi.mocked(fetchThemeExerciseGaps).mockResolvedValue(
+      new Map([[1, { unsubmittedExercises: 1, exercisesNeedingRetry: 2 }]])
+    );
+
+    const html = await render();
+
+    expect(html).toContain(
+      "修了証の発行には、あと 未提出の演習が 1 件、再挑戦が必要な演習が 2 件 が必要です"
+    );
+    expect(html).not.toContain("修了証を発行できませんでした");
+    expect(html).toContain("修了すると発行されます（1 / 2）");
+    expect(html).toContain("未完了のコンテンツが 1 件");
   });
 });

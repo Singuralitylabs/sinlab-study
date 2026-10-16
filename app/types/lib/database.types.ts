@@ -433,6 +433,7 @@ export type Database = {
           display_order: number | null;
           exercise_instructions: string | null;
           grading_rubric: Json | null;
+          has_grading_requirements: boolean;
           hint: string | null;
           id: number;
           is_deleted: boolean | null;

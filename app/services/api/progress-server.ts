@@ -15,7 +15,7 @@ const UNCOMPLETE_FORBIDDEN_ERROR = "合格判定のある演習は未完了に�
 const PROGRESS_WRITE_ERROR = "進捗の更新に失敗しました";
 
 export type SaveContentProgressResult =
-  | { ok: true }
+  | { ok: true; contentWasAlreadyCompleted: boolean }
   | { ok: false; status: 403 | 500; error: string };
 
 /** Trigger raises 42501. Map it to the same messages as the explicit checks. */
@@ -33,9 +33,12 @@ function reviewPassViolationMessage(
 
 /**
  * Writes user_progress with the caller's session (not service_role) and, on completion, records
- * first_content_completed and schedules issueCertificateIfEligible — the same path as
- * POST /api/progress. Pass-gated exercises cannot be completed without a passing review, and
- * cannot be marked incomplete. The trigger is the backstop when the pre-check cannot run.
+ * first_content_completed. By default also schedules issueCertificateIfEligible — the same path as
+ * POST /api/progress. Pass `scheduleCertificate: false` when the caller will issue synchronously
+ * for a themeCompletion dialog (progress / AI-review notice); otherwise a prior after() INSERT
+ * makes evaluateThemeForCertificate return not-ready and the dialog never appears.
+ * Pass-gated exercises cannot be completed without a passing review, and cannot be marked
+ * incomplete. The trigger is the backstop when the pre-check cannot run.
  */
 export async function saveContentProgress(params: {
   supabase: ServerClient;
@@ -44,8 +47,17 @@ export async function saveContentProgress(params: {
   userRole: UserRoleType | null;
   contentId: number;
   isCompleted: boolean;
+  scheduleCertificate?: boolean;
 }): Promise<SaveContentProgressResult> {
-  const { supabase, userId, userStatus, userRole, contentId, isCompleted } = params;
+  const {
+    supabase,
+    userId,
+    userStatus,
+    userRole,
+    contentId,
+    isCompleted,
+    scheduleCertificate = true,
+  } = params;
 
   const gate = await contentRequiresReviewPass(supabase, contentId);
   // A lookup failure falls through to the write. The trigger still rejects a pass-gated row.
@@ -66,6 +78,8 @@ export async function saveContentProgress(params: {
   // when the user toggles completion off, so counting it would send first_content_completed
   // again on the next complete. ever_completed stays true. A count failure skips the event.
   let existingCompletedCount: number | null = null;
+  // A read error leaves this true so callers do not announce a theme that was already finished.
+  let contentWasAlreadyCompleted = true;
   if (isCompleted) {
     const { count, error: countError } = await supabase
       .from("user_progress")
@@ -76,6 +90,18 @@ export async function saveContentProgress(params: {
       console.error("進捗完了数の取得エラー:", countError.message);
     } else {
       existingCompletedCount = count ?? 0;
+    }
+
+    const { data: prior, error: priorError } = await supabase
+      .from("user_progress")
+      .select("is_completed")
+      .eq("user_id", userId)
+      .eq("content_id", contentId)
+      .maybeSingle();
+    if (priorError) {
+      console.error("進捗の完了前状態の取得エラー:", priorError.message);
+    } else {
+      contentWasAlreadyCompleted = prior?.is_completed === true;
     }
   }
 
@@ -112,11 +138,11 @@ export async function saveContentProgress(params: {
   // so the aggregation queries do not delay the response; outside request scope (where after()
   // throws) it just runs inline. The helper never throws and its result is not used: a failure
   // (or the email) must not change this response.
-  if (isCompleted) {
+  if (isCompleted && scheduleCertificate) {
     await runAfterResponse(() =>
       issueCertificateIfEligible({ userId, userStatus, userRole, contentId })
     );
   }
 
-  return { ok: true };
+  return { ok: true, contentWasAlreadyCompleted };
 }

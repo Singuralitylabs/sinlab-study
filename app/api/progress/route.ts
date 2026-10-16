@@ -1,4 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { runAfterResponse } from "@/app/lib/after-response";
+import {
+  issueCertificateIfEligible,
+  resolveProgressThemeNotice,
+} from "@/app/services/api/certificates-server";
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { saveContentProgress } from "@/app/services/api/progress-server";
 import { ProgressUpdateSchema, validateRequest } from "@/app/services/api/schemas";
@@ -32,6 +37,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
     }
 
+    // scheduleCertificate: false — when this save brings the theme to 100%, issue synchronously
+    // so the response can say whether a certificate was created or exercise conditions remain.
+    // Any other completion falls back to after() below.
     const saved = await saveContentProgress({
       supabase,
       userId,
@@ -39,12 +47,44 @@ export async function POST(request: NextRequest) {
       userRole,
       contentId,
       isCompleted,
+      scheduleCertificate: false,
     });
     if (!saved.ok) {
       return NextResponse.json({ error: saved.error }, { status: saved.status });
     }
 
-    return NextResponse.json({ success: true, isCompleted });
+    let themeCompletion = null;
+    if (isCompleted) {
+      // Sync path settles issuance for first-time completions (issued, gaps, or not-ready).
+      // Re-saves of an already-complete content skip sync and still defer for recovery.
+      // A thrown sync evaluation also defers so a transient failure can retry after the response.
+      let deferIssuance = saved.contentWasAlreadyCompleted;
+      if (!saved.contentWasAlreadyCompleted) {
+        try {
+          themeCompletion = await resolveProgressThemeNotice({
+            userId,
+            userStatus,
+            userRole,
+            contentId,
+            contentWasAlreadyCompleted: false,
+          });
+        } catch (error) {
+          console.error("[修了証] 画面通知の判定エラー:", error);
+          deferIssuance = true;
+        }
+      }
+      if (!themeCompletion && deferIssuance) {
+        await runAfterResponse(() =>
+          issueCertificateIfEligible({ userId, userStatus, userRole, contentId })
+        );
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      isCompleted,
+      ...(themeCompletion ? { themeCompletion } : {}),
+    });
   } catch (error) {
     console.error("API エラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });

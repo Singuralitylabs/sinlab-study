@@ -46,6 +46,7 @@ function makeContent(
     show_preview: null,
     show_console: null,
     grading_rubric: null,
+    has_grading_requirements: false,
     grading_rubric_version: null,
     allowed_submission_types: "code",
     code_language: "javascript",

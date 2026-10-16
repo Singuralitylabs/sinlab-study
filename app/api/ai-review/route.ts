@@ -10,6 +10,7 @@ import {
   updateAIReviewFailed,
   updateAIReviewProcessing,
 } from "@/app/services/api/ai-review-server";
+import { resolveAiReviewThemeNotice } from "@/app/services/api/certificates-server";
 import {
   generateReview,
   ReviewGenerationError,
@@ -225,6 +226,8 @@ export async function POST(request: NextRequest) {
       // A pass completes the exercise on the learner's session. Unpublished content never reaches
       // here (isContentVisible already returned 403). A later failing review does not call this,
       // so completion stays. A write failure must not change the review response.
+      // scheduleCertificate: false — resolveAiReviewThemeNotice issues (and builds the dialog)
+      // next; a prior after() INSERT would make that evaluation return not-ready.
       if (result.passed === true) {
         try {
           const recorded = await saveContentProgress({
@@ -234,6 +237,7 @@ export async function POST(request: NextRequest) {
             userRole,
             contentId: submission.content_id,
             isCompleted: true,
+            scheduleCertificate: false,
           });
           if (!recorded.ok) {
             console.error("合格後の完了記録に失敗:", recorded.error);
@@ -241,6 +245,22 @@ export async function POST(request: NextRequest) {
         } catch (error) {
           console.error("合格後の完了記録に失敗:", error);
         }
+      }
+
+      // Issuance and the dialog payload must not change this response. A throw (mail, DB) is
+      // dropped; the review row is already completed. On passed === false, the helper only
+      // returns a notice when this call actually issued (failed re-review stays quiet otherwise).
+      let themeCompletion = null;
+      try {
+        themeCompletion = await resolveAiReviewThemeNotice({
+          userId,
+          userStatus,
+          userRole,
+          contentId: content.id,
+          passed: result.passed,
+        });
+      } catch (error) {
+        console.error("[修了証] AIレビュー後の発行エラー:", error);
       }
 
       return NextResponse.json({
@@ -257,6 +277,7 @@ export async function POST(request: NextRequest) {
           model_used: result.modelUsed,
         },
         remaining: remainingAfterReview,
+        ...(themeCompletion ? { themeCompletion } : {}),
       });
     } catch (geminiError) {
       const errorMessage =

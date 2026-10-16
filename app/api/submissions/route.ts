@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { ANALYTICS_EVENT } from "@/app/constants/analytics";
+import { runAfterResponse } from "@/app/lib/after-response";
 import { shouldTrackFirstSubmission } from "@/app/lib/analytics-funnel";
 import { parseStarterFiles } from "@/app/lib/code-file-inputs";
 import {
@@ -12,6 +13,7 @@ import {
   toStoredSubmissionCode,
 } from "@/app/lib/submission-file-slots";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
+import { issueCertificateIfEligible } from "@/app/services/api/certificates-server";
 import { fetchVisibleContentForSubmission } from "@/app/services/api/learning-server";
 import { SubmissionCreateSchema, validateRequest } from "@/app/services/api/schemas";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
@@ -30,7 +32,7 @@ export async function POST(request: NextRequest) {
     if (guard.response) {
       return guard.response;
     }
-    const { userId, userStatus } = guard.auth;
+    const { userId, userStatus, userRole } = guard.auth;
 
     const supabase = await createServerSupabaseClient();
 
@@ -129,6 +131,13 @@ export async function POST(request: NextRequest) {
     if (!countError && shouldTrackFirstSubmission(existingSubmissionCount ?? 0) && userStatus) {
       trackServerEvent(ANALYTICS_EVENT.FIRST_SUBMISSION, { status: userStatus });
     }
+
+    // Theme may already be 100% with only exercise gaps left (URL-only / no-rubric, or AI review
+    // never ran). Progress and AI-review hooks miss that path; defer so issuance stays off the
+    // critical path. Failures here must not change the submission response.
+    await runAfterResponse(() =>
+      issueCertificateIfEligible({ userId, userStatus, userRole, contentId })
+    );
 
     return NextResponse.json({ success: true, submission });
   } catch (error) {

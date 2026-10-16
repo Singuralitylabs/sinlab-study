@@ -20,7 +20,10 @@ vi.mock("@vercel/analytics/server", () => ({
 import { track } from "@vercel/analytics/server";
 import { after } from "next/server";
 import { POST } from "@/app/api/progress/route";
-import { issueCertificateIfEligible } from "@/app/services/api/certificates-server";
+import {
+  issueCertificateIfEligible,
+  resolveProgressThemeNotice,
+} from "@/app/services/api/certificates-server";
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -156,7 +159,7 @@ describe("POST /api/progress - first_content_completed", () => {
       eq: { mock: { calls: unknown[][] } };
     };
     expect(countBuilder.eq.mock.calls).toContainEqual(["ever_completed", true]);
-    const writeBuilder = client.from.mock.results[1]?.value as {
+    const writeBuilder = client.from.mock.results[2]?.value as {
       upsert: { mock: { calls: unknown[][] } };
     };
     expect(writeBuilder.upsert.mock.calls[0]?.[0]).toEqual(
@@ -233,19 +236,28 @@ describe("POST /api/progress - first_content_completed", () => {
 });
 
 describe("POST /api/progress - 修了証の発行（#291）", () => {
-  it("完了に更新した直後に、認証ユーザーの ID・status・role と contentId で発行判定を呼ぶ", async () => {
+  it("初回完了で同期判定が null なら after() の発行は重ねない", async () => {
+    vi.mocked(resolveProgressThemeNotice).mockResolvedValue(null);
+
     const res = await POST(request({ contentId: 1, isCompleted: true }) as never);
 
     expect(res.status).toBe(200);
-    expect(issueCertificateIfEligible).toHaveBeenCalledWith({
-      userId: memberAuth.userId,
-      userStatus: memberAuth.userStatus,
-      userRole: memberAuth.userRole,
-      contentId: 1,
-    });
+    expect(resolveProgressThemeNotice).toHaveBeenCalled();
+    expect(issueCertificateIfEligible).not.toHaveBeenCalled();
   });
 
-  it("after() が使える場合はレスポンス後に回し、使えない場合はその場で実行する", async () => {
+  it("再完了では after() で発行判定を呼び、使える場合はレスポンス後に回す", async () => {
+    const alreadyCompletedClient = () =>
+      createMockSupabaseClient({
+        tableResults: {
+          user_progress: [
+            { data: null, error: null, count: 1 },
+            { data: { is_completed: true }, error: null },
+            { data: null, error: null },
+          ],
+        },
+      });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(alreadyCompletedClient() as never);
     const scheduled: Array<() => unknown> = [];
     vi.mocked(after).mockImplementationOnce(((task: () => unknown) => {
       scheduled.push(task);
@@ -253,9 +265,16 @@ describe("POST /api/progress - 修了証の発行（#291）", () => {
 
     await POST(request() as never);
     expect(issueCertificateIfEligible).not.toHaveBeenCalled();
+    expect(resolveProgressThemeNotice).not.toHaveBeenCalled();
     await scheduled[0]();
-    expect(issueCertificateIfEligible).toHaveBeenCalledTimes(1);
+    expect(issueCertificateIfEligible).toHaveBeenCalledWith({
+      userId: memberAuth.userId,
+      userStatus: memberAuth.userStatus,
+      userRole: memberAuth.userRole,
+      contentId: 1,
+    });
 
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(alreadyCompletedClient() as never);
     vi.mocked(after).mockImplementationOnce((() => {
       throw new Error("outside request scope");
     }) as never);
@@ -283,19 +302,102 @@ describe("POST /api/progress - 修了証の発行（#291）", () => {
     expect(issueCertificateIfEligible).not.toHaveBeenCalled();
   });
 
-  it("発行した場合も、発行しなかった場合も、レスポンスは同じ", async () => {
-    const without = await (await POST(request() as never)).json();
-
+  it("同期判定が例外のときだけ after() に回し、レスポンス形は変えない", async () => {
+    vi.mocked(resolveProgressThemeNotice).mockRejectedValue(new Error("aggregate down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(issueCertificateIfEligible).mockResolvedValue({
       id: 1,
       theme_id: 1,
       certificate_no: "SS-202610-ABC123",
       theme_name: "テーマ",
     });
-    const withCertificate = await (await POST(request() as never)).json();
 
-    expect(withCertificate).toEqual(without);
-    expect(withCertificate).toEqual({ success: true, isCompleted: true });
+    const body = await (await POST(request() as never)).json();
+
+    expect(body).toEqual({ success: true, isCompleted: true });
+    expect(issueCertificateIfEligible).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST /api/progress - テーマ修了の画面通知（#332）", () => {
+  const notice = {
+    themeId: 5,
+    themeName: "GAS 学習（基礎編）",
+    certificateId: 31,
+    blockedByMissingName: false,
+    remaining: {
+      incompleteContents: 0,
+      unsubmittedExercises: 0,
+      exercisesNeedingRetry: 0,
+    },
+  };
+
+  it("100% になった完了では通知を返し、after() の発行は重ねない", async () => {
+    vi.mocked(resolveProgressThemeNotice).mockResolvedValue(notice);
+
+    const res = await POST(request({ contentId: 1, isCompleted: true }) as never);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      success: true,
+      isCompleted: true,
+      themeCompletion: notice,
+    });
+    expect(issueCertificateIfEligible).not.toHaveBeenCalled();
+    expect(resolveProgressThemeNotice).toHaveBeenCalledWith({
+      userId: memberAuth.userId,
+      userStatus: memberAuth.userStatus,
+      userRole: memberAuth.userRole,
+      contentId: 1,
+      contentWasAlreadyCompleted: false,
+    });
+  });
+
+  it("途中の完了では通知を付けず、同期で決着したあとに after() は重ねない", async () => {
+    vi.mocked(resolveProgressThemeNotice).mockResolvedValue(null);
+
+    const body = await (await POST(request() as never)).json();
+
+    expect(body).toEqual({ success: true, isCompleted: true });
+    expect(issueCertificateIfEligible).not.toHaveBeenCalled();
+  });
+
+  it("完了の取り消しでは通知も発行もしない", async () => {
+    await POST(request({ contentId: 1, isCompleted: false }) as never);
+
+    expect(resolveProgressThemeNotice).not.toHaveBeenCalled();
+    expect(issueCertificateIfEligible).not.toHaveBeenCalled();
+  });
+
+  it("通知判定が落ちても進捗 API は成功のまま、after() で発行を試す", async () => {
+    vi.mocked(resolveProgressThemeNotice).mockRejectedValue(new Error("aggregate down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true, isCompleted: true });
+    expect(issueCertificateIfEligible).toHaveBeenCalledTimes(1);
+  });
+
+  it("お試し・admin / maintainer 向けの空通知はレスポンスに載せない", async () => {
+    vi.mocked(resolveProgressThemeNotice).mockResolvedValue(null);
+    vi.mocked(getServerAuth).mockResolvedValue({
+      ...memberAuth,
+      userStatus: "trial",
+      userRole: "member",
+    } as never);
+
+    const trial = await (await POST(request() as never)).json();
+    expect(trial).toEqual({ success: true, isCompleted: true });
+
+    vi.mocked(getServerAuth).mockResolvedValue({
+      ...memberAuth,
+      userStatus: "active",
+      userRole: "admin",
+    } as never);
+    const admin = await (await POST(request() as never)).json();
+    expect(admin).toEqual({ success: true, isCompleted: true });
   });
 });
 
@@ -327,18 +429,21 @@ describe("POST /api/progress - 合格判定対象の演習（#367）", () => {
     expect(issueCertificateIfEligible).not.toHaveBeenCalled();
   });
 
-  it("合格済みなら完了を許可し、修了証の判定を予約する", async () => {
+  it("合格済みなら完了を許可し、同期の修了証判定を呼ぶ", async () => {
     gatedClient({ data: [{ id: 9 }], error: null });
+    vi.mocked(resolveProgressThemeNotice).mockResolvedValue(null);
 
     const res = await POST(request({ contentId: 1, isCompleted: true }) as never);
 
     expect(res.status).toBe(200);
-    expect(issueCertificateIfEligible).toHaveBeenCalledWith({
+    expect(resolveProgressThemeNotice).toHaveBeenCalledWith({
       userId: memberAuth.userId,
       userStatus: memberAuth.userStatus,
       userRole: memberAuth.userRole,
       contentId: 1,
+      contentWasAlreadyCompleted: false,
     });
+    expect(issueCertificateIfEligible).not.toHaveBeenCalled();
   });
 
   it("未完了への変更を拒否する", async () => {

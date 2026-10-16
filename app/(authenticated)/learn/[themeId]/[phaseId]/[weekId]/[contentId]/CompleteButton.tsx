@@ -3,6 +3,11 @@
 import { CheckCircle, Circle, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { ThemeCompletionDialog } from "@/app/components/ThemeCompletionDialog";
+import {
+  noticeFromProgressBody,
+  type ThemeCompletionNotice,
+} from "@/app/lib/certificate-eligibility";
 import { Button } from "@/components/ui/button";
 
 interface CompleteButtonProps {
@@ -24,6 +29,7 @@ export function CompleteButton({
   const router = useRouter();
   const [isCompleted, setIsCompleted] = useState(initialCompleted);
   const [isLoading, setIsLoading] = useState(false);
+  const [themeNotice, setThemeNotice] = useState<ThemeCompletionNotice | null>(null);
 
   const handleToggle = async () => {
     setIsLoading(true);
@@ -41,7 +47,10 @@ export function CompleteButton({
       });
 
       if (response.ok) {
-        setIsCompleted(!isCompleted);
+        const nextCompleted = !isCompleted;
+        const body = await response.json().catch(() => null);
+        setIsCompleted(nextCompleted);
+        setThemeNotice(noticeFromProgressBody(nextCompleted, body));
         if (refreshOnToggle) {
           router.refresh();
         }
@@ -56,26 +65,34 @@ export function CompleteButton({
   };
 
   return (
-    <Button
-      onClick={handleToggle}
-      disabled={isLoading}
-      variant={isCompleted ? "secondary" : "default"}
-      size="lg"
-      className={`w-full ${isCompleted ? "border-success/30 bg-success/10 text-success hover:bg-success/20" : ""}`}
-    >
-      {isLoading ? (
-        <Loader2 className="h-5 w-5 animate-spin" />
-      ) : isCompleted ? (
-        <>
-          <CheckCircle className="h-5 w-5" />
-          完了済み（クリックで未完了に戻す）
-        </>
-      ) : (
-        <>
-          <Circle className="h-5 w-5" />
-          このコンテンツを完了としてマーク
-        </>
+    <>
+      {themeNotice && (
+        <ThemeCompletionDialog
+          key={`${themeNotice.themeId}-${themeNotice.certificateId}-${themeNotice.remaining.unsubmittedExercises}-${themeNotice.remaining.exercisesNeedingRetry}-${themeNotice.blockedByMissingName}`}
+          notice={themeNotice}
+        />
       )}
-    </Button>
+      <Button
+        onClick={handleToggle}
+        disabled={isLoading}
+        variant={isCompleted ? "secondary" : "default"}
+        size="lg"
+        className={`w-full ${isCompleted ? "border-success/30 bg-success/10 text-success hover:bg-success/20" : ""}`}
+      >
+        {isLoading ? (
+          <Loader2 className="h-5 w-5 animate-spin" />
+        ) : isCompleted ? (
+          <>
+            <CheckCircle className="h-5 w-5" />
+            完了済み（クリックで未完了に戻す）
+          </>
+        ) : (
+          <>
+            <Circle className="h-5 w-5" />
+            このコンテンツを完了としてマーク
+          </>
+        )}
+      </Button>
+    </>
   );
 }

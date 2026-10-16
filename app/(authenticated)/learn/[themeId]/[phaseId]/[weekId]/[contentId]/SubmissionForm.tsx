@@ -7,7 +7,12 @@ import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { HtmlPreviewNoSSR } from "@/app/components/HtmlPreviewNoSSR";
 import { LockedCodeFilesEditor } from "@/app/components/LockedCodeFilesEditor";
+import { ThemeCompletionDialog } from "@/app/components/ThemeCompletionDialog";
 import { buildReviewNotice } from "@/app/lib/ai-review-response";
+import {
+  parseThemeCompletionNotice,
+  type ThemeCompletionNotice,
+} from "@/app/lib/certificate-eligibility";
 import type { CodeFileInput } from "@/app/lib/code-file-inputs";
 import { resolvePreviewDisplay } from "@/app/lib/html-preview";
 import {
@@ -161,6 +166,7 @@ export function SubmissionForm({
           reviewed_at: new Date().toISOString(),
         });
         setMessage({ type: "success", text: "提出が完了しました。AIレビューが生成されました。" });
+        setThemeNotice(parseThemeCompletionNotice(data.themeCompletion));
         router.refresh();
       } else {
         const errorMsg = data?.error || "AIレビューの生成に失敗しました";
@@ -177,6 +183,7 @@ export function SubmissionForm({
   };
 
   const [lastSubmissionId, setLastSubmissionId] = useState<number | null>(null);
+  const [themeNotice, setThemeNotice] = useState<ThemeCompletionNotice | null>(null);
   // refresh keeps this card, so the page and the form would show the same completed row.
   const pageShowsThisReview =
     aiReview?.status === "completed" &&
@@ -188,6 +195,8 @@ export function SubmissionForm({
     setIsLoading(true);
     setMessage(null);
     setAiReview(null);
+    // Clear so a later notice remounts / reopens instead of staying dismissed.
+    setThemeNotice(null);
 
     try {
       const response = await fetch("/api/submissions", {
@@ -245,6 +254,12 @@ export function SubmissionForm({
 
   return (
     <div className="space-y-4">
+      {themeNotice && (
+        <ThemeCompletionDialog
+          key={`${themeNotice.themeId}-${themeNotice.certificateId}-${themeNotice.remaining.unsubmittedExercises}-${themeNotice.remaining.exercisesNeedingRetry}-${themeNotice.blockedByMissingName}`}
+          notice={themeNotice}
+        />
+      )}
       <form onSubmit={handleSubmit} className="space-y-4">
         {allowedSubmissionTypes === "both" && (
           <div className="flex gap-4">

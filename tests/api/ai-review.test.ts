@@ -13,8 +13,9 @@ vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/supabase-server");
 vi.mock("@/app/services/api/learning-server");
 vi.mock("@/app/services/api/ai-review-server");
+vi.mock("@/app/services/api/certificates-server");
 vi.mock("@/app/services/api/progress-server", () => ({
-  saveContentProgress: vi.fn().mockResolvedValue({ ok: true }),
+  saveContentProgress: vi.fn().mockResolvedValue({ ok: true, contentWasAlreadyCompleted: false }),
 }));
 vi.mock("@/app/services/api/gemini", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/app/services/api/gemini")>();
@@ -31,6 +32,7 @@ import {
   updateAIReviewFailed,
   updateAIReviewProcessing,
 } from "@/app/services/api/ai-review-server";
+import { resolveAiReviewThemeNotice } from "@/app/services/api/certificates-server";
 import {
   generateReview,
   ReviewGenerationError,
@@ -284,6 +286,7 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
         userRole: memberAuth.userRole,
         contentId: 5,
         isCompleted: true,
+        scheduleCertificate: false,
       })
     );
   });
@@ -394,6 +397,47 @@ describe("POST /api/ai-review - Gemini呼び出し後のステータス遷移", 
       "AIレビューの結果の形式が不正でした",
       usage
     );
+  });
+
+  it("completed の応答に発行結果を足しても、レビュー本体は completed のまま", async () => {
+    vi.mocked(generateReview).mockResolvedValue(reviewResult({ passed: true }));
+    vi.mocked(resolveAiReviewThemeNotice).mockResolvedValue({
+      themeId: 5,
+      themeName: "テーマ",
+      certificateId: 31,
+      blockedByMissingName: false,
+      remaining: {
+        incompleteContents: 0,
+        unsubmittedExercises: 0,
+        exercisesNeedingRetry: 0,
+      },
+    });
+
+    const res = await POST(request() as never);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.review.status).toBe("completed");
+    expect(body.themeCompletion.certificateId).toBe(31);
+    expect(resolveAiReviewThemeNotice).toHaveBeenCalledWith(
+      expect.objectContaining({ contentId: 5, passed: true })
+    );
+  });
+
+  it("発行やメールが失敗しても completed の成否は変えない", async () => {
+    vi.mocked(generateReview).mockResolvedValue(reviewResult());
+    vi.mocked(resolveAiReviewThemeNotice).mockRejectedValue(new Error("mail down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(request() as never);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.review.status).toBe("completed");
+    expect(body.themeCompletion).toBeUndefined();
+    expect(updateAIReviewFailed).not.toHaveBeenCalled();
   });
 });
 
