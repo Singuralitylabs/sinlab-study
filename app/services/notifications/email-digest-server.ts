@@ -1173,12 +1173,15 @@ export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<
     return skip("別の実行が進行中です");
   }
 
+  // Before sendDigest writes email_sent_at. Push keeps completions from this run and leaves
+  // earlier completions out, so a historical send_email row is not delivered once to everyone.
+  const announcementSentSince = new Date().toISOString();
   try {
     const emailResult = emailSkipReason
       ? skip(emailSkipReason)
       : await sendDigest(supabase, today, appUrl as string, { clock, sleep, startedAt });
     if (isWebPushConfigured()) {
-      await deliverDigestPushes(supabase, today, clock);
+      await deliverDigestPushes(supabase, today, announcementSentSince, clock);
     }
     return emailResult;
   } finally {

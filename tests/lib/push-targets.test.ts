@@ -6,6 +6,7 @@ import { pushOffer } from "@/app/lib/push-offer";
 import { selectDigestPushTargets } from "@/app/lib/push-targets";
 
 const today = "2026-10-08";
+const sentSince = "2026-10-16T00:00:00.000Z";
 
 function user(partial: Partial<DigestUser> & Pick<DigestUser, "userId" | "status">): DigestUser {
   return {
@@ -52,6 +53,7 @@ describe("selectDigestPushTargets", () => {
       activeUserIds: new Set([activeLearner.userId]),
       contents: [],
       announcements: [],
+      announcementSentSince: sentSince,
       finalTrialDay: 14,
     });
     const pushPlan = planMilestoneEmails(
@@ -90,6 +92,7 @@ describe("selectDigestPushTargets", () => {
       activeUserIds: new Set(),
       contents: [],
       announcements: [],
+      announcementSentSince: sentSince,
       finalTrialDay: 14,
     });
     expect(targets).toEqual([]);
@@ -110,8 +113,10 @@ describe("selectDigestPushTargets", () => {
           title: "もくもく会",
           target_statuses: ["active"],
           target_membership_types: null,
+          emailSentAt: null,
         },
       ],
+      announcementSentSince: sentSince,
       finalTrialDay: 14,
     });
     expect(targets).toEqual([
@@ -126,5 +131,35 @@ describe("selectDigestPushTargets", () => {
         },
       },
     ]);
+  });
+
+  it("実行より前にメール完了したお知らせは対象者に積まない", () => {
+    const targets = selectDigestPushTargets({
+      users: [activeLearner],
+      today,
+      trialDays: null,
+      inactivityDays: null,
+      activeUserIds: new Set(),
+      contents: [],
+      announcements: [
+        {
+          id: 1,
+          title: "過去",
+          target_statuses: ["active"],
+          target_membership_types: null,
+          emailSentAt: "2026-10-01T00:00:00.000Z",
+        },
+        {
+          id: 2,
+          title: "この実行",
+          target_statuses: ["active"],
+          target_membership_types: null,
+          emailSentAt: sentSince,
+        },
+      ],
+      announcementSentSince: sentSince,
+      finalTrialDay: 14,
+    });
+    expect(targets.map((item) => item.referenceKey)).toEqual(["2"]);
   });
 });

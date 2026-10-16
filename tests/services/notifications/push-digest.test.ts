@@ -21,6 +21,7 @@ import {
 type TaggedBuilder = ReturnType<typeof createQueryBuilder> & { table: string };
 
 const today = "2026-10-08";
+const sentSince = "2026-10-16T00:00:00.000Z";
 
 function kindRows(push: Partial<Record<string, boolean>> = {}) {
   return EMAIL_KINDS.map((kind) => ({
@@ -88,7 +89,7 @@ describe("deliverDigestPushes", () => {
       email_settings: { data: settingsRow, error: null },
     });
 
-    await deliverDigestPushes(client as never, today, () => 10);
+    await deliverDigestPushes(client as never, today, sentSince, () => 10);
 
     expect(sendPushToUser).not.toHaveBeenCalled();
     expect(builders.map((builder) => builder.table)).not.toContain("users");
@@ -110,7 +111,7 @@ describe("deliverDigestPushes", () => {
       learning_themes: { data: [], error: null },
     });
 
-    await deliverDigestPushes(client as never, today, () => 10);
+    await deliverDigestPushes(client as never, today, sentSince, () => 10);
 
     const planned = planMilestoneEmails(
       [
@@ -141,7 +142,7 @@ describe("deliverDigestPushes", () => {
     expect(logged).toContain("[Web Push] 定期配信");
   });
 
-  it("お知らせは send_email の対象だけを、メール完了・配信停止と無関係に送る", async () => {
+  it("この実行の未完了・完了直後だけ送り、それより前のメール完了は送らない", async () => {
     const { client, builders } = clientWith({
       email_kind_settings: { data: kindRows({ announcement: true }), error: null },
       email_settings: { data: settingsRow, error: null },
@@ -155,23 +156,40 @@ describe("deliverDigestPushes", () => {
         },
         { data: [], error: null },
       ],
-      announcements: {
-        data: [
-          {
-            id: 8,
-            title: "集会",
-            target_statuses: ["active"],
-            target_membership_types: null,
-            email_sent_at: "2026-10-08T00:00:00.000Z",
-          },
-        ],
-        error: null,
-      },
+      announcements: [
+        {
+          data: [
+            {
+              id: 8,
+              title: "集会",
+              target_statuses: ["active"],
+              target_membership_types: null,
+              email_sent_at: sentSince,
+            },
+            {
+              id: 9,
+              title: "過去",
+              target_statuses: ["active"],
+              target_membership_types: null,
+              email_sent_at: "2026-10-01T00:00:00.000Z",
+            },
+            {
+              id: 10,
+              title: "未完了",
+              target_statuses: ["active"],
+              target_membership_types: null,
+              email_sent_at: null,
+            },
+          ],
+          error: null,
+        },
+        { data: [], error: null },
+      ],
     });
 
-    await deliverDigestPushes(client as never, today, () => 20);
+    await deliverDigestPushes(client as never, today, sentSince, () => 20);
 
-    expect(sendPushToUser).toHaveBeenCalledTimes(1);
+    expect(sendPushToUser).toHaveBeenCalledTimes(2);
     expect(sendPushToUser).toHaveBeenCalledWith(
       3,
       "announcement",
@@ -179,9 +197,67 @@ describe("deliverDigestPushes", () => {
       expect.objectContaining({ title: "集会", url: "/announcements/8" }),
       expect.anything()
     );
+    expect(sendPushToUser).toHaveBeenCalledWith(
+      3,
+      "announcement",
+      "10",
+      expect.objectContaining({ title: "未完了", url: "/announcements/10" }),
+      expect.anything()
+    );
     const announcementQuery = builders.find((builder) => builder.table === "announcements");
     expect(announcementQuery?.eq).toHaveBeenCalledWith("send_email", true);
-    expect(announcementQuery?.is).not.toHaveBeenCalledWith("email_sent_at", null);
+    expect(announcementQuery?.or).toHaveBeenCalledWith(
+      `email_sent_at.is.null,email_sent_at.gte.${sentSince}`
+    );
+  });
+
+  it("お知らせが1000件を超えても、次のページの新しいお知らせを送る", async () => {
+    const firstPage = Array.from({ length: 1000 }, (_, index) => ({
+      id: index + 1,
+      title: "過去",
+      target_statuses: ["active"],
+      target_membership_types: null,
+      email_sent_at: "2026-01-01T00:00:00.000Z",
+    }));
+    const { client, builders } = clientWith({
+      email_kind_settings: { data: kindRows({ announcement: true }), error: null },
+      email_settings: { data: settingsRow, error: null },
+      users: [
+        { data: [{ ...inactiveUser, id: 3, status: "active", role: "member" }], error: null },
+        { data: [], error: null },
+      ],
+      announcements: [
+        { data: firstPage, error: null },
+        {
+          data: [
+            {
+              id: 42,
+              title: "新しいお知らせ",
+              target_statuses: ["active"],
+              target_membership_types: null,
+              email_sent_at: null,
+            },
+          ],
+          error: null,
+        },
+        { data: [], error: null },
+      ],
+    });
+
+    await deliverDigestPushes(client as never, today, sentSince, () => 30);
+
+    expect(sendPushToUser).toHaveBeenCalledTimes(1);
+    expect(sendPushToUser).toHaveBeenCalledWith(
+      3,
+      "announcement",
+      "42",
+      expect.objectContaining({ title: "新しいお知らせ" }),
+      expect.anything()
+    );
+    const announcementQueries = builders.filter((builder) => builder.table === "announcements");
+    expect(announcementQueries[0]?.order).toHaveBeenCalledWith("published_at");
+    expect(announcementQueries[0]?.range).toHaveBeenCalledWith(0, 999);
+    expect(announcementQueries[1]?.range).toHaveBeenCalledWith(1000, 1999);
   });
 
   it("活動行が1000件を超えても、2ページ目の受講生には未学習リマインドを送らない", async () => {
@@ -205,7 +281,7 @@ describe("deliverDigestPushes", () => {
       learning_themes: { data: [], error: null },
     });
 
-    await deliverDigestPushes(client as never, today, () => 10);
+    await deliverDigestPushes(client as never, today, sentSince, () => 10);
 
     expect(sendPushToUser).not.toHaveBeenCalled();
     const progressQueries = builders.filter((builder) => builder.table === "user_progress");
@@ -220,14 +296,16 @@ describe("deliverDigestPushes", () => {
       },
     };
 
-    await expect(deliverDigestPushes(client as never, today, () => 1)).resolves.toBeUndefined();
+    await expect(
+      deliverDigestPushes(client as never, today, sentSince, () => 1)
+    ).resolves.toBeUndefined();
   });
 
   it("VAPID が未設定なら何もしない", async () => {
     vi.stubEnv("WEB_PUSH_VAPID_PRIVATE_KEY", "");
     const { client } = clientWith({});
 
-    await deliverDigestPushes(client as never, today, () => 1);
+    await deliverDigestPushes(client as never, today, sentSince, () => 1);
 
     expect(client.from).not.toHaveBeenCalled();
     expect(sendPushToUser).not.toHaveBeenCalled();

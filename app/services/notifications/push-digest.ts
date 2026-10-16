@@ -6,7 +6,7 @@ import {
   type NestedThemeTree,
   orderContentsAcrossThemes,
 } from "@/app/lib/published-theme-tree";
-import { selectDigestPushTargets } from "@/app/lib/push-targets";
+import { isAnnouncementPushCurrent, selectDigestPushTargets } from "@/app/lib/push-targets";
 import { isWebPushConfigured } from "@/app/lib/web-push-config";
 import { fetchEmailSettings } from "@/app/services/api/email-settings-server";
 import type { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
@@ -133,33 +133,62 @@ async function fetchOrderedContents(supabase: AdminClient): Promise<DigestConten
   );
 }
 
-async function fetchPushAnnouncements(supabase: AdminClient): Promise<
+type PushAnnouncementRow = {
+  id: number;
+  title: string;
+  target_statuses: string[];
+  target_membership_types: string[] | null;
+  email_sent_at: string | null;
+};
+
+async function fetchPushAnnouncements(
+  supabase: AdminClient,
+  sentSince: string
+): Promise<
   {
     id: number;
     title: string;
     target_statuses: string[];
     target_membership_types: string[] | null;
+    emailSentAt: string | null;
   }[]
 > {
-  // Do not filter `email_sent_at`. The email pass marks it before this run's push, so a null
-  // check would drop announcements just emailed and never revisit them. `push_logs` UNIQUE is
-  // the once-only claim. The body is not selected: the push carries the title and the link only.
-  const { data, error } = await supabase
-    .from("announcements")
-    .select("id, title, target_statuses, target_membership_types")
-    .not("published_at", "is", null)
-    .eq("is_deleted", false)
-    .eq("send_email", true)
-    .order("published_at");
-  if (error) {
-    throw new Error(error.message);
+  // Page until 0 rows. A single response stops at db-max-rows (1000) and would drop later
+  // published_at values, so those announcements would never be pushed. The body is not selected.
+  const rows: PushAnnouncementRow[] = [];
+  for (let offset = 0; ; ) {
+    const { data, error } = await supabase
+      .from("announcements")
+      .select("id, title, target_statuses, target_membership_types, email_sent_at")
+      .not("published_at", "is", null)
+      .eq("is_deleted", false)
+      .eq("send_email", true)
+      .or(`email_sent_at.is.null,email_sent_at.gte.${sentSince}`)
+      .order("published_at")
+      .order("id")
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (error) {
+      throw new Error(error.message);
+    }
+    if (!data || data.length === 0) {
+      break;
+    }
+    rows.push(...(data as PushAnnouncementRow[]));
+    offset += data.length;
   }
-  return (data ?? []) as {
-    id: number;
-    title: string;
-    target_statuses: string[];
-    target_membership_types: string[] | null;
-  }[];
+  return rows.flatMap((row) =>
+    isAnnouncementPushCurrent(row.email_sent_at, sentSince)
+      ? [
+          {
+            id: row.id,
+            title: row.title,
+            target_statuses: row.target_statuses,
+            target_membership_types: row.target_membership_types,
+            emailSentAt: row.email_sent_at,
+          },
+        ]
+      : []
+  );
 }
 
 /**
@@ -170,6 +199,7 @@ async function fetchPushAnnouncements(supabase: AdminClient): Promise<
 export async function deliverDigestPushes(
   supabase: AdminClient,
   today: string,
+  announcementSentSince: string,
   clock: () => number = Date.now
 ): Promise<void> {
   if (!isWebPushConfigured()) {
@@ -205,7 +235,9 @@ export async function deliverDigestPushes(
       preview.inactivityCandidates.map((item) => item.user.userId)
     );
     const contents = inactivityDays ? await fetchOrderedContents(supabase) : [];
-    const announcements = announcementOn ? await fetchPushAnnouncements(supabase) : [];
+    const announcements = announcementOn
+      ? await fetchPushAnnouncements(supabase, announcementSentSince)
+      : [];
     const targets = selectDigestPushTargets({
       users,
       today,
@@ -214,6 +246,7 @@ export async function deliverDigestPushes(
       activeUserIds,
       contents,
       announcements,
+      announcementSentSince,
       finalTrialDay: Math.max(...(trial.sendDays ?? [0])),
     });
 

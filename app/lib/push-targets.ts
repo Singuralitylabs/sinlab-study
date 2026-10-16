@@ -23,7 +23,23 @@ type PushAnnouncement = {
   title: string;
   target_statuses: string[];
   target_membership_types: string[] | null;
+  /** Null while the email bulk send is still open. */
+  emailSentAt: string | null;
 };
+
+/**
+ * Pending bulk-send rows, plus rows this run just marked sent (`email_sent_at` >= `sentSince`).
+ * An earlier completion is history: queueing it notifies every current target once, including
+ * people who subscribed before this cron.
+ */
+export function isAnnouncementPushCurrent(emailSentAt: string | null, sentSince: string): boolean {
+  if (emailSentAt === null) {
+    return true;
+  }
+  const completedAt = Date.parse(emailSentAt);
+  const since = Date.parse(sentSince);
+  return Number.isFinite(completedAt) && Number.isFinite(since) && completedAt >= since;
+}
 
 const TRIAL_STAGE_DAYS = [14, 7, 5, 2] as const;
 
@@ -59,6 +75,8 @@ export function selectDigestPushTargets(input: {
   activeUserIds: ReadonlySet<number>;
   contents: DigestContent[];
   announcements: PushAnnouncement[];
+  /** Instant captured before this run records `email_sent_at`. */
+  announcementSentSince: string;
   finalTrialDay: number;
 }): DigestPushTarget[] {
   const learners = input.users.filter((user) => isLearnerRole(user.role));
@@ -100,6 +118,9 @@ export function selectDigestPushTargets(input: {
   }
 
   for (const announcement of input.announcements) {
+    if (!isAnnouncementPushCurrent(announcement.emailSentAt, input.announcementSentSince)) {
+      continue;
+    }
     for (const user of input.users) {
       if (
         !isAnnouncementTarget(announcement, {
