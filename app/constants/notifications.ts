@@ -103,6 +103,19 @@ export const WEEKLY_DIGEST_CATCH_UP_DAYS = 1;
  */
 export const EMAIL_KINDS: readonly EmailKind[] = Object.values(EMAIL_KIND);
 
+/**
+ * Kinds that may also be sent as Web Push. The send day, weekday, and daily cap stay on
+ * `email_kind_settings` / `email_settings`; this list is only which kinds have a push channel.
+ */
+export const PUSH_KINDS = [
+  EMAIL_KIND.APPROVED,
+  EMAIL_KIND.INACTIVITY_REMINDER,
+  EMAIL_KIND.TRIAL_NURTURE,
+  EMAIL_KIND.ANNOUNCEMENT,
+] as const;
+
+export type PushKind = (typeof PUSH_KINDS)[number];
+
 /** Kinds that use email_kind_settings.send_days ("Nth day since sign-up"). */
 export const EMAIL_KINDS_WITH_SEND_DAYS: readonly EmailKind[] = [
   EMAIL_KIND.INACTIVITY_REMINDER,

@@ -59,4 +59,11 @@ describe("public/sw.js", () => {
     expect(source).toContain('pathname.startsWith("/_next/static/")');
     expect(source).not.toContain('"/api');
   });
+
+  it("push と notificationclick を持ち、通知の URL は同一オリジンのパスだけ", () => {
+    expect(source).toContain('addEventListener("push"');
+    expect(source).toContain('addEventListener("notificationclick"');
+    expect(source).toContain("showNotification");
+    expect(source).toContain("openWindow");
+  });
 });

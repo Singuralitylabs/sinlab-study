@@ -30,6 +30,7 @@ import {
   EMAIL_TEMPLATE_BODY_MAX,
   EMAIL_TEMPLATE_SUBJECT_MAX,
   type EmailKind,
+  PUSH_KINDS,
 } from "@/app/constants/notifications";
 import {
   QUIZ_MAX_CHOICES,
@@ -269,6 +270,7 @@ export const EmailSettingsUpdateSchema = z
       .boolean({ message: "sending_enabled は真偽値で指定してください" })
       .optional(),
     enabled: z.boolean({ message: "enabled は真偽値で指定してください" }).optional(),
+    push_enabled: z.boolean({ message: "push_enabled は真偽値で指定してください" }).optional(),
     send_days: EmailSendDaysSchema.optional(),
     send_weekday: z
       .number({ message: "曜日は数値で指定してください" })
@@ -299,6 +301,7 @@ export const EmailSettingsUpdateSchema = z
       } else if (
         targets > 1 ||
         value.enabled !== undefined ||
+        value.push_enabled !== undefined ||
         value.send_days !== undefined ||
         value.send_weekday !== undefined
       ) {
@@ -311,10 +314,17 @@ export const EmailSettingsUpdateSchema = z
     }
     if (
       value.enabled === undefined &&
+      value.push_enabled === undefined &&
       value.send_days === undefined &&
       value.send_weekday === undefined
     ) {
       fail("更新する項目を指定してください");
+    }
+    if (
+      value.push_enabled !== undefined &&
+      !(PUSH_KINDS as readonly string[]).includes(value.kind)
+    ) {
+      fail("この種別はプッシュ通知に対応していません");
     }
     if (value.send_days !== undefined && !EMAIL_KINDS_WITH_SEND_DAYS.includes(value.kind)) {
       fail("この種別には送る日を設定できません");
@@ -793,6 +803,36 @@ export const EmailTemplatePreviewSchema = z
   .object(EmailPreviewShape)
   .strict()
   .superRefine(refineTemplatePlaceholders);
+
+export const PushSubscriptionSchema = z
+  .object({
+    endpoint: z
+      .string({ message: "endpoint を指定してください" })
+      .url({ message: "endpoint の形式が不正です" })
+      .max(4096, { message: "endpoint が長すぎます" }),
+    keys: z
+      .object({
+        p256dh: z
+          .string({ message: "keys.p256dh を指定してください" })
+          .min(1, { message: "keys.p256dh を指定してください" })
+          .max(256, { message: "keys.p256dh が長すぎます" }),
+        auth: z
+          .string({ message: "keys.auth を指定してください" })
+          .min(1, { message: "keys.auth を指定してください" })
+          .max(256, { message: "keys.auth が長すぎます" }),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const PushSubscriptionDeleteSchema = z
+  .object({
+    endpoint: z
+      .string({ message: "endpoint を指定してください" })
+      .url({ message: "endpoint の形式が不正です" })
+      .max(4096, { message: "endpoint が長すぎます" }),
+  })
+  .strict();
 
 export async function validateRequest<T extends z.ZodType>(
   request: Request,

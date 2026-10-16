@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/admin-server");
 vi.mock("@/app/services/api/user-email-server");
+vi.mock("@/app/services/notifications/push");
 vi.mock("@/app/services/notifications/user-emails");
 
 import { PATCH } from "@/app/api/admin/users/route";
@@ -15,6 +16,7 @@ import {
 } from "@/app/services/api/admin-server";
 import { setUserEmailOptOut } from "@/app/services/api/user-email-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
+import { scheduleApprovedPush } from "@/app/services/notifications/push";
 import { scheduleApprovedEmail } from "@/app/services/notifications/user-emails";
 
 const adminAuth = {
@@ -80,6 +82,7 @@ describe("PATCH /api/admin/users - approve", () => {
       membershipType: "general",
       approvedAt: APPROVED_AT,
     });
+    expect(scheduleApprovedPush).toHaveBeenCalledWith({ userId: 5, approvedAt: APPROVED_AT });
   });
 
   it("membershipType 未指定の場合は400で、承認処理を呼ばない", async () => {
@@ -103,6 +106,7 @@ describe("PATCH /api/admin/users - approve", () => {
 
     expect(res.status).toBe(409);
     expect(scheduleApprovedEmail).not.toHaveBeenCalled();
+    expect(scheduleApprovedPush).not.toHaveBeenCalled();
   });
 
   it("承認処理が失敗した場合は500を返す", async () => {
@@ -116,6 +120,7 @@ describe("PATCH /api/admin/users - approve", () => {
 
     expect(res.status).toBe(500);
     expect(scheduleApprovedEmail).not.toHaveBeenCalled();
+    expect(scheduleApprovedPush).not.toHaveBeenCalled();
   });
 
   it("対象ユーザーがStripe契約中で membershipType が community の場合は409で、承認処理を呼ばない", async () => {

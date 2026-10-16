@@ -17,7 +17,7 @@ import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabas
 type AdminClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>;
 type ServerClient = Awaited<ReturnType<typeof createServerSupabaseClient>>;
 
-const KIND_COLUMNS = "kind, enabled, send_days, send_weekday, updated_at, updated_by";
+const KIND_COLUMNS = "kind, enabled, push_enabled, send_days, send_weekday, updated_at, updated_by";
 const SETTINGS_COLUMNS =
   "sending_enabled, sending_updated_at, sending_updated_by, digest_daily_limit, updated_at, updated_by";
 
@@ -134,6 +134,7 @@ export type EmailKindSettingsPatch = {
   enabled?: boolean;
   send_days?: number[];
   send_weekday?: number;
+  push_enabled?: boolean;
 };
 
 /**
@@ -152,7 +153,7 @@ export async function updateEmailKindSettings(
   // setting changed this cycle" and would then hide a genuine failure of the cycle's deciding runs.
   const { data: current, error: readError } = await supabase
     .from("email_kind_settings")
-    .select("enabled, send_days, send_weekday")
+    .select("enabled, push_enabled, send_days, send_weekday")
     .eq("kind", kind)
     .maybeSingle();
   if (readError) {
@@ -162,6 +163,7 @@ export async function updateEmailKindSettings(
   if (
     current &&
     (patch.enabled === undefined || patch.enabled === current.enabled) &&
+    (patch.push_enabled === undefined || patch.push_enabled === current.push_enabled) &&
     (patch.send_weekday === undefined || patch.send_weekday === current.send_weekday) &&
     (patch.send_days === undefined ||
       [...(current.send_days ?? [])].sort((x, y) => x - y).join(",") === patch.send_days.join(","))
