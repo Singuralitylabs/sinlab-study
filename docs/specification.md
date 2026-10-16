@@ -1280,7 +1280,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 
 ### 10.10 メール通知の管理（管理画面）
 
-**設定の保存先**: `email_kind_settings`（種別ごとの `enabled`・`send_days`・`send_weekday`）と `email_settings`（全体の送信スイッチ `sending_enabled` と案内系の1日の上限 `digest_daily_limit`。1行のみ）（`docs/database.md` 3.15・3.16節）。**これらのテーブルを唯一の真実とし、送る日・曜日・上限の定数をロジックにハードコードしない**。`INACTIVITY_REMINDER_DAYS` / `TRIAL_NURTURE_DAYS` / `WEEKLY_DIGEST_WEEKDAY` / `EMAIL_DIGEST_MAX_PER_DAY` は、マイグレーションの初期値と同じであることを確認するテスト用の定数として残し（送信の判定には使わない。読めないときの代替値にもしない）、入力検証の範囲は `EMAIL_SEND_DAY_MIN/MAX` などで別に定義する。対象の種別は `EMAIL_KIND` の全値（繰り越し予約 `weekly_digest_reserved` は送信種別ではないので含めない）。
+**設定の保存先**: `email_kind_settings`（種別ごとの `enabled`・`push_enabled`・`send_days`・`send_weekday`）と `email_settings`（全体の送信スイッチ `sending_enabled` と案内系の1日の上限 `digest_daily_limit`。1行のみ）（`docs/database.md` 3.15・3.16節）。**これらのテーブルを唯一の真実とし、送る日・曜日・上限の定数をロジックにハードコードしない**。プッシュ（14.2節）の送る日・曜日・上限もこの表だけを使い、`push_enabled`（既定 false）はチャネルの有効・無効だけを分ける。`INACTIVITY_REMINDER_DAYS` / `TRIAL_NURTURE_DAYS` / `WEEKLY_DIGEST_WEEKDAY` / `EMAIL_DIGEST_MAX_PER_DAY` は、マイグレーションの初期値と同じであることを確認するテスト用の定数として残し（送信の判定には使わない。読めないときの代替値にもしない）、入力検証の範囲は `EMAIL_SEND_DAY_MIN/MAX` などで別に定義する。対象の種別は `EMAIL_KIND` の全値（繰り越し予約 `weekly_digest_reserved` は送信種別ではないので含めない）。
 
 **設定の反映と失敗時の方針**（実行のたびに読み、実行をまたいでキャッシュしない）:
 
@@ -1300,7 +1300,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 | エンドポイント | 内容 |
 |:--|:--|
 | `GET /api/admin/email-settings` | 全体の送信スイッチ・種別ごとの設定・1日の上限・更新者の表示名を返す |
-| `PUT /api/admin/email-settings` | 種別の設定（`{ "kind", "enabled"?, "send_days"?, "send_weekday"? }`）、1日の上限（`{ "digest_daily_limit" }`）、全体の送信スイッチ（`{ "sending_enabled" }`）のいずれか1つを更新する。複数の同時更新・更新項目なし・未知のフィールド・範囲外の値は400（zod。`EmailSettingsUpdateSchema`）。`send_days` は `inactivity_reminder` / `trial_nurture`、`send_weekday` は `weekly_digest` にのみ指定できる。更新者（`users.id`）と更新日時を記録し、対象が0行なら404 |
+| `PUT /api/admin/email-settings` | 種別の設定（`{ "kind", "enabled"?, "push_enabled"?, "send_days"?, "send_weekday"? }`）、1日の上限（`{ "digest_daily_limit" }`）、全体の送信スイッチ（`{ "sending_enabled" }`）のいずれか1つを更新する。複数の同時更新・更新項目なし・未知のフィールド・範囲外の値は400（zod。`EmailSettingsUpdateSchema`）。`send_days` は `inactivity_reminder` / `trial_nurture`、`send_weekday` は `weekly_digest`、`push_enabled` は `approved` / `inactivity_reminder` / `trial_nurture` / `announcement` にのみ指定できる。更新者（`users.id`）と更新日時を記録し、対象が0行なら404 |
 | `GET /api/admin/email-logs?kind=&status=&page=` | 送信履歴（新しい順。1ページ50件）。`status` は `sent` / `failed` / `pending`（`sent_at` があれば送信済み、`error` があれば失敗、どちらも無ければ未完了）。不正な絞り込みは400 |
 
 - 設定の読み書きは管理者のセッション（通常クライアント）で行い、RLS（admin のみ）を二層目の防御にする。Cron とメール送信は service_role で読む
@@ -1516,9 +1516,9 @@ X 向けの共有リンク（`https://twitter.com/intent/tweet?text=...&url=...`
 
 ---
 
-## 14. PWA
+## 14. PWA・プッシュ通知
 
-ホーム画面に追加できる Web アプリ。プッシュ通知は段階 B（#301）で、この節には含めない。
+ホーム画面に追加できる Web アプリと、Web Push（#301）。
 
 ### 14.1 マニフェスト・サービスワーカー・インストール案内
 
@@ -1528,7 +1528,17 @@ X 向けの共有リンク（`https://twitter.com/intent/tweet?text=...&url=...`
 - **プロキシ**: `shouldSkipMiddleware()` は上の 4 パスを完全一致でのみ通す。`/offline/anything` のような配下は通さない。うち `/manifest.webmanifest`・`/sw.js`・`/apple-icon.png` は拡張子マッチでも通るが、インストールに必要なパスの許可リストとして明示する（増やさない）。環境変数欠落・例外・status null の `/login` へのフェイルクローズは変えない
 - **インストール案内**: ホーム（`/`）の `InstallPrompt`。`display-mode: standalone` でも `navigator.standalone` でもない、かつモバイル UA（iPadOS 13+ の Macintosh + タッチを含む）、かつ閉じていない（`localStorage`。失敗は無視）ときだけ出す。`beforeinstallprompt` はルート layout のクライアントモジュールで先行捕捉し、`/` 以外で発火してもホームで使える。iOS は「共有 → ホーム画面に追加」の手順。Android はイベントがあるときボタンで `prompt()` を呼び、無いときはブラウザメニューからの追加手順を出す。`prompt()` の拒否や OS ダイアログのキャンセルでは閉じた扱いにしない。インストール済みでは出さない
 
+### 14.2 Web Push
+
+- **環境変数**: `NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY`（購読に使う公開鍵）/ `WEB_PUSH_VAPID_PRIVATE_KEY`（サーバーのみ。レスポンス・ログ・クライアントバンドルに出さない）/ `WEB_PUSH_SUBJECT`（`mailto:`）。いずれか欠ける、または subject が `mailto:` でないときは機能全体を無効にする（購読ボタンを出さず、送信もしない）。生成は `bunx web-push generate-vapid-keys`
+- **購読 API**: `POST /api/push/subscriptions` は `endpoint` と `keys.p256dh` / `keys.auth` を upsert し、`disabled_at` を NULL に戻す。`endpoint` は `https:` かつ既知のプッシュサービスホストだけを許す。1 ユーザーあたりの有効購読（`disabled_at IS NULL`）は `MAX_PUSH_SUBSCRIPTIONS_PER_USER` まで（超過は 409。404/410 で無効化した行は上限に数えない）。`DELETE` は endpoint を指定して本人の行だけ消す。認証は `requireLearnerApi()`（`getServerAuth()`）。未認証 401、`rejected` 403、スキーマ不正 400。書き込みは service_role で、`user_id` は認証済みの本人に固定する。同じ endpoint が別アカウントに紐づいていても、端末の購読として呼び出した本人へ付け替える。ログアウト時（サイドナビ・却下画面）は端末の購読解除を試みる（DELETE に短いタイムアウト）
+- **購読 UI**: ホームのインストール案内の隣。通知許可はボタン押下でのみ要求する。iOS で standalone でないときは「ホーム画面に追加すると通知を受け取れます」と出し、ボタンは出さない。既存のブラウザ購読があるときはマウント時に POST で再登録し、表示中アカウントへ付け替える
+- **送信**: `sendPushToUser()`。VAPID 設定のあと `push_logs` へ INSERT して claim する。`UNIQUE (user_id, kind, reference_key)` 違反なら送らない。有効な購読すべてに `{ title, body, url }` だけを送る（個人情報は入れない。`url` はアプリの相対パス）。`sendNotification` にはタイムアウトを付ける。定期配信から渡す時間上限は購読ループでも見る。404 / 410 / 許可外ホストは `disabled_at` を記録する。1件も送れなければ claim を削除して再試行可能にする。失敗は握りつぶし、承認・Cron・お知らせの結果を変えない
+- **種別**: `approved`（`approveUser()` 成功時）/ `inactivity_reminder` / `trial_nurture` / `announcement`（`send_email = true` の一斉送信だけ。`push_sent_at` が未完了、またはその実行中に完了したものだけを `published_at` 順にページングして送る。メール完了印とは独立。それより前にプッシュ完了したお知らせは購読済み・新規購読の受講生へ送らない。メール一斉が終わり、かつ時間打ち切り・送信失敗（claim 解放）の対象が無いお知らせだけ `push_sent_at` を付ける。`push_enabled` がオフのあいだも、メール完了済みのお知らせには `push_sent_at` を打って後から ON にしたときの一斉送信を防ぐ）。`weekly_digest` / `signup` / `upgraded` / 解約系は送らない。有効・無効は `email_kind_settings.push_enabled`（既定 false。`/admin/emails` のトグル）。送る日・曜日はメールと同じ列で、プッシュ用の定数や別上限は持たない。メールの `email_opt_out_at` と全体スイッチはプッシュに適用しない。定期実行は `runEmailDigest()` のあとで送り、対象は有効購読のあるユーザーに絞り、所要時間の上限（`PUSH_DIGEST_TIME_BUDGET_MS`）とログを出す
+- **サービスワーカー**: `push` は `showNotification`、`notificationclick` は既存タブを `focus` したあと `navigate` し、`navigate` が無い・null・reject のときは `openWindow`。通知の URL をキャッシュしない
+
 ---
+
 
 ## 15. 復習リスト
 

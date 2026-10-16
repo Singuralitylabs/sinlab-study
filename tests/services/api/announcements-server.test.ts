@@ -268,6 +268,7 @@ describe("updateAnnouncement の対象変更とメールの一斉送信", () => 
   it("対象ステータスを変えたら未完了に戻し、次のバッチで未送信の対象者に送る", async () => {
     expect(await updateWith({ target_statuses: ["active"] })).toMatchObject({
       email_sent_at: null,
+      push_sent_at: null,
     });
   });
 
@@ -278,9 +279,9 @@ describe("updateAnnouncement の対象変更とメールの一斉送信", () => 
         { target_statuses: ["active"], target_membership_types: ["general", "community"] },
         current
       )
-    ).toMatchObject({ email_sent_at: null });
+    ).toMatchObject({ email_sent_at: null, push_sent_at: null });
     expect(
       await updateWith({ target_statuses: ["active"], target_membership_types: null }, current)
-    ).toMatchObject({ email_sent_at: null });
+    ).toMatchObject({ email_sent_at: null, push_sent_at: null });
   });
 });

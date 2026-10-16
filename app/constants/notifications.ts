@@ -103,6 +103,19 @@ export const WEEKLY_DIGEST_CATCH_UP_DAYS = 1;
  */
 export const EMAIL_KINDS: readonly EmailKind[] = Object.values(EMAIL_KIND);
 
+/**
+ * Kinds that may also be sent as Web Push. The send day, weekday, and daily cap stay on
+ * `email_kind_settings` / `email_settings`; this list is only which kinds have a push channel.
+ */
+export const PUSH_KINDS = [
+  EMAIL_KIND.APPROVED,
+  EMAIL_KIND.INACTIVITY_REMINDER,
+  EMAIL_KIND.TRIAL_NURTURE,
+  EMAIL_KIND.ANNOUNCEMENT,
+] as const;
+
+export type PushKind = (typeof PUSH_KINDS)[number];
+
 /** Kinds that use email_kind_settings.send_days ("Nth day since sign-up"). */
 export const EMAIL_KINDS_WITH_SEND_DAYS: readonly EmailKind[] = [
   EMAIL_KIND.INACTIVITY_REMINDER,
@@ -196,6 +209,31 @@ export const EMAIL_DIGEST_SEND_INTERVAL_MS = 500;
  * bound when changing either value.
  */
 export const EMAIL_DIGEST_TIME_BUDGET_MS = 40_000;
+
+/**
+ * web-push `sendNotification` socket timeout (ms). Without this, a hanging endpoint can hold the
+ * digest lock until the platform kills the function.
+ */
+export const WEB_PUSH_SEND_TIMEOUT_MS = 10_000;
+
+/**
+ * Elapsed-time cap (ms) for `deliverDigestPushes` after the email digest. Stop starting new pushes
+ * so the shared cron lock is released before maxDuration (60s). Remaining targets retry on the
+ * next run via released / unclaimed `push_logs` rows.
+ */
+export const PUSH_DIGEST_TIME_BUDGET_MS = 15_000;
+
+/**
+ * Cap on live `push_subscriptions` rows per user. Without this, a learner can register many
+ * endpoints and keep the digest lock for one user across the full send timeout each.
+ */
+export const MAX_PUSH_SUBSCRIPTIONS_PER_USER = 10;
+
+/**
+ * Abort timeout (ms) for the DELETE call in `clearLocalPushSubscription`. Logout must not wait
+ * on a hung network after the browser subscription is already gone.
+ */
+export const CLEAR_LOCAL_PUSH_FETCH_TIMEOUT_MS = 3_000;
 
 /**
  * Retry window (days from the publish date, JST) for announcement email recipients whose send

@@ -62,6 +62,9 @@ STRIPE_WEBHOOK_SECRET=<Stripe Webhook 署名シークレット>
 STRIPE_PRICE_ID=<月額サブスクリプションの Price ID>
 CERTIFICATE_ISSUER_NAME=<任意。修了証に印刷する運営団体名。未設定・空なら団体名の行を出さない（印刷済みの修了証は訂正できないため、文言が確定してから設定する）>
 NEXT_PUBLIC_APP_URL=<Checkout/Portal のリダイレクト先URL・メール本文のリンク生成に使用>
+NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY=<任意。Web Push の公開鍵。未設定時は購読ボタンを出さず送信しない>
+WEB_PUSH_VAPID_PRIVATE_KEY=<任意。Web Push の秘密鍵。サーバー側のみ。未設定時はプッシュ全体を無効>
+WEB_PUSH_SUBJECT=<任意。VAPID の mailto: 連絡先。未設定時はプッシュ全体を無効>
 ```
 
 一覧の正本はこの節と `.env.local.example`。本番リリース時の確認は Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順) Step 5 を参照。

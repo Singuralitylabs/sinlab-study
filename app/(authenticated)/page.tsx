@@ -1,6 +1,7 @@
 import { Award, Megaphone } from "lucide-react";
 import Link from "next/link";
 import { InstallPrompt } from "@/app/components/InstallPrompt";
+import { PushNotifications } from "@/app/components/PushNotifications";
 import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT } from "@/app/constants/announcements";
@@ -13,6 +14,7 @@ import { formatDate } from "@/app/lib/format-date";
 import { countVisibleUnovercome } from "@/app/lib/review-list";
 import { splitThemesByActivity } from "@/app/lib/theme-progress";
 import { shouldShowTrialNextStep } from "@/app/lib/trial-upgrade";
+import { isWebPushConfigured, webPushPublicKey } from "@/app/lib/web-push-config";
 import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
 import { fetchRecentCertificate } from "@/app/services/api/certificates-server";
 import { fetchHomeLearningData } from "@/app/services/api/learning-server";
@@ -117,6 +119,7 @@ export default async function HomePage() {
       <h1 className="text-3xl font-bold tracking-tight mb-6">ホーム</h1>
 
       <InstallPrompt />
+      <PushNotifications publicKey={isWebPushConfigured() ? webPushPublicKey() : null} />
 
       {showWelcomeDialog && (
         <WelcomeDialog

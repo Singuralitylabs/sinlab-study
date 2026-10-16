@@ -46,6 +46,7 @@ import {
   filterReviewItemsToVisibleContents,
   type ReviewListSourceReview,
 } from "@/app/lib/review-list";
+import { isWebPushConfigured } from "@/app/lib/web-push-config";
 import { type CronLock, claimCronLock, releaseCronLock } from "@/app/services/api/cron-lock-server";
 import { fetchEmailSettings } from "@/app/services/api/email-settings-server";
 import { loadEmailTexts } from "@/app/services/api/email-templates-server";
@@ -62,6 +63,7 @@ import {
   buildUnsubscribeUrl,
   isUnsubscribeConfigured,
 } from "@/app/services/notifications/email-unsubscribe";
+import { deliverDigestPushes } from "@/app/services/notifications/push-digest";
 import {
   type AdminClient,
   type DeliverResult,
@@ -1140,15 +1142,17 @@ export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<
   const sleep = options.sleep ?? defaultSleep;
   const startedAt = clock();
 
-  if (!isEmailConfigured()) {
-    return skip("RESEND_API_KEY または EMAIL_FROM_ADDRESS が未設定です");
-  }
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-  if (!appUrl) {
-    return skip("NEXT_PUBLIC_APP_URL が未設定です");
-  }
-  if (!isUnsubscribeConfigured()) {
-    return skip("EMAIL_UNSUBSCRIBE_SECRET が未設定です");
+  const emailSkipReason = !isEmailConfigured()
+    ? "RESEND_API_KEY または EMAIL_FROM_ADDRESS が未設定です"
+    : !appUrl
+      ? "NEXT_PUBLIC_APP_URL が未設定です"
+      : !isUnsubscribeConfigured()
+        ? "EMAIL_UNSUBSCRIBE_SECRET が未設定です"
+        : null;
+  // Push does not need Resend, but it shares this lock so two crons cannot deliver twice.
+  if (emailSkipReason && !isWebPushConfigured()) {
+    return skip(emailSkipReason);
   }
 
   const today = toJstDateString(options.now ?? new Date());
@@ -1169,8 +1173,18 @@ export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<
     return skip("別の実行が進行中です");
   }
 
+  // Before sendDigest / deliverDigestPushes write completion stamps. Push uses push_sent_at
+  // (independent of email_sent_at) so a crash after mail completion still retries, while earlier
+  // push completions stay out and do not pile onto new subscribers.
+  const announcementSentSince = new Date().toISOString();
   try {
-    return await sendDigest(supabase, today, appUrl, { clock, sleep, startedAt });
+    const emailResult = emailSkipReason
+      ? skip(emailSkipReason)
+      : await sendDigest(supabase, today, appUrl as string, { clock, sleep, startedAt });
+    if (isWebPushConfigured()) {
+      await deliverDigestPushes(supabase, today, announcementSentSince, clock);
+    }
+    return emailResult;
   } finally {
     await releaseCronLock(supabase, lock);
   }

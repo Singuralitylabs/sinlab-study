@@ -203,6 +203,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 - `published_at`: NULL なら下書き
 - `target_statuses`（`active` / `trial` の1つ以上。CHECK）/ `target_membership_types`（`community` / `general` の1つ以上。CHECK。NULL は全種別。指定するとお試しユーザー（会員種別 NULL）には見えない）
 - `send_email`: メールでも一斉送信するか。Cron の日次バッチが送り、対象者全員に送り終えた日に `email_sent_at` を記録する（対象を変更すると NULL に戻す）
+- `push_sent_at`: Web Push の一斉送信を終えた日時（`email_sent_at` と独立。対象変更で NULL に戻す。過去完了分は新規購読者へ積まない）
 - `created_by`: 作成者（`users.id`、`ON DELETE SET NULL`）。`is_deleted` で論理削除
 
 ### 3.14 announcement_reads（お知らせの既読）
@@ -215,6 +216,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 - `kind`（PK）: `EMAIL_KIND` と同じ値。CHECK 制約は設けない（`email_logs.kind` と同じく、種別の追加に追従できるようにするため。行の欠落は案内系の送信側でフェイルクローズ扱いになる）
 - `enabled`: 有効・無効（既定 true）
+- `push_enabled`: 同じ種別を Web Push でも送るか（既定 false。#301）。送る日・曜日・上限の列は増やさない
 - `send_days`: 「登録から N 日目」の配列。`inactivity_reminder` / `trial_nurture` のみ使用（それ以外は NULL）。CHECK は要素数1〜10。値の範囲（1〜60）・重複・昇順は API の zod で保証する
 - `send_weekday`: 週次進捗の送信曜日（0 = 日曜〜6 = 土曜。CHECK）。`weekly_digest` のみ使用
 - `updated_at` / `updated_by`（`users.id`、`ON DELETE SET NULL`）
@@ -277,6 +279,17 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 - `understood_at`（TIMESTAMPTZ NULL）: 「理解した」チェック時刻。克服済み判定には使わない
 - 一意性: `UNIQUE INDEX (user_id, content_id, COALESCE(requirement_key, ''))`（NULL キーは 1 コンテンツ 1 行）
 - RLS は 6.19 節
+
+### 3.22 push_subscriptions（Web Push の購読）
+
+ブラウザの Push 購読（[機能設計書](./specification.md)14.2節）。`endpoint` は UNIQUE。`p256dh` / `auth` は購読鍵。`disabled_at` は送信先が 404 / 410 を返した日時で、NULL の行だけ送る。
+
+- `user_id`（`users.id`、`ON DELETE CASCADE`）
+- RLS は有効化し、ポリシーは作らない。読み書きは `getServerAuth()` 済みの API から service_role で、書き込む `user_id` は認証済みの本人に固定する。同じ endpoint を別アカウントが購読したら、端末の所有者としてその本人へ付け替える（共有端末）
+
+### 3.23 push_logs（Web Push の送信ログ）
+
+`email_logs` と同じ claim（`user_id` / `kind` / `reference_key` / `sent_at` / `error`）。`UNIQUE (user_id, kind, reference_key)` で同一事象の二重送信を防ぐ。RLS は有効化し、ポリシーは作らない（service_role 専用）。
 
 ---
 

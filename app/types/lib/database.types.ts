@@ -118,6 +118,7 @@ export type Database = {
           id: number;
           is_deleted: boolean;
           published_at: string | null;
+          push_sent_at: string | null;
           send_email: boolean;
           target_membership_types: string[] | null;
           target_statuses: string[];
@@ -132,6 +133,7 @@ export type Database = {
           id?: number;
           is_deleted?: boolean;
           published_at?: string | null;
+          push_sent_at?: string | null;
           send_email?: boolean;
           target_membership_types?: string[] | null;
           target_statuses: string[];
@@ -146,6 +148,7 @@ export type Database = {
           id?: number;
           is_deleted?: boolean;
           published_at?: string | null;
+          push_sent_at?: string | null;
           send_email?: boolean;
           target_membership_types?: string[] | null;
           target_statuses?: string[];
@@ -229,6 +232,7 @@ export type Database = {
         Row: {
           enabled: boolean;
           kind: string;
+          push_enabled: boolean;
           send_days: number[] | null;
           send_weekday: number | null;
           updated_at: string;
@@ -237,6 +241,7 @@ export type Database = {
         Insert: {
           enabled?: boolean;
           kind: string;
+          push_enabled?: boolean;
           send_days?: number[] | null;
           send_weekday?: number | null;
           updated_at?: string;
@@ -245,6 +250,7 @@ export type Database = {
         Update: {
           enabled?: boolean;
           kind?: string;
+          push_enabled?: boolean;
           send_days?: number[] | null;
           send_weekday?: number | null;
           updated_at?: string;
@@ -633,6 +639,88 @@ export type Database = {
             columns: ["phase_id"];
             isOneToOne: false;
             referencedRelation: "learning_phases";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      push_logs: {
+        Row: {
+          created_at: string;
+          error: string | null;
+          id: number;
+          kind: string;
+          reference_key: string;
+          sent_at: string | null;
+          user_id: number;
+        };
+        Insert: {
+          created_at?: string;
+          error?: string | null;
+          id?: number;
+          kind: string;
+          reference_key: string;
+          sent_at?: string | null;
+          user_id: number;
+        };
+        Update: {
+          created_at?: string;
+          error?: string | null;
+          id?: number;
+          kind?: string;
+          reference_key?: string;
+          sent_at?: string | null;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "push_logs_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      push_subscriptions: {
+        Row: {
+          auth: string;
+          created_at: string;
+          disabled_at: string | null;
+          endpoint: string;
+          id: number;
+          last_used_at: string;
+          p256dh: string;
+          user_agent: string | null;
+          user_id: number;
+        };
+        Insert: {
+          auth: string;
+          created_at?: string;
+          disabled_at?: string | null;
+          endpoint: string;
+          id?: number;
+          last_used_at?: string;
+          p256dh: string;
+          user_agent?: string | null;
+          user_id: number;
+        };
+        Update: {
+          auth?: string;
+          created_at?: string;
+          disabled_at?: string | null;
+          endpoint?: string;
+          id?: number;
+          last_used_at?: string;
+          p256dh?: string;
+          user_agent?: string | null;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "push_subscriptions_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
             referencedColumns: ["id"];
           },
         ];

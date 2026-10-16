@@ -392,7 +392,7 @@ export async function updateAnnouncement(
     .update({
       ...toRow(input),
       published_at: publishedAt,
-      ...(targetsChanged ? { email_sent_at: null } : {}),
+      ...(targetsChanged ? { email_sent_at: null, push_sent_at: null } : {}),
     })
     .eq("id", id)
     .eq("is_deleted", false)

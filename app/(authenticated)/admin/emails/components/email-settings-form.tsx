@@ -11,6 +11,7 @@ import {
   EMAIL_SEND_DAY_MIN,
   type EmailKind,
   PROMOTIONAL_EMAIL_KINDS,
+  PUSH_KINDS,
   TRANSACTIONAL_DISABLE_IMPACT,
   WEEKLY_DIGEST_WEEKDAY,
 } from "@/app/constants/notifications";
@@ -80,11 +81,13 @@ function KindRow({
   onSaved: () => void;
 }) {
   const kind = setting.kind;
+  const hasPush = (PUSH_KINDS as readonly EmailKind[]).includes(kind);
   const hasDays = EMAIL_KINDS_WITH_SEND_DAYS.includes(kind);
   const hasWeekday = kind === EMAIL_KIND_WITH_SEND_WEEKDAY;
   const isPromotional = (PROMOTIONAL_EMAIL_KINDS as readonly EmailKind[]).includes(kind);
 
   const [enabled, setEnabled] = useState(setting.enabled);
+  const [pushEnabled, setPushEnabled] = useState(setting.pushEnabled);
   const [daysText, setDaysText] = useState((setting.sendDays ?? []).join(", "));
   const [weekday, setWeekday] = useState(setting.sendWeekday ?? WEEKLY_DIGEST_WEEKDAY);
   const [saving, setSaving] = useState(false);
@@ -92,6 +95,9 @@ function KindRow({
 
   const save = async () => {
     const body: Record<string, unknown> = { kind, enabled };
+    if (hasPush) {
+      body.push_enabled = pushEnabled;
+    }
     // Sent only when edited, so a kind can be disabled even while the days field is blank.
     if (hasDays && daysText !== (setting.sendDays ?? []).join(", ")) {
       const tokens = daysText
@@ -149,6 +155,21 @@ function KindRow({
           />
           {enabled ? "有効" : "無効"}
         </label>
+      </td>
+      <td className="px-4 py-3">
+        {hasPush ? (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={pushEnabled}
+              onChange={(e) => setPushEnabled(e.target.checked)}
+              aria-label={`${EMAIL_KIND_LABELS[kind]} のプッシュを有効にする`}
+            />
+            {pushEnabled ? "有効" : "無効"}
+          </label>
+        ) : (
+          <span className="text-muted-foreground">-</span>
+        )}
       </td>
       <td className="px-4 py-3">
         {hasDays && (
@@ -327,7 +348,7 @@ export function EmailSettingsForm({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-muted/50">
-              {["種別", "状態", "送るタイミング", "最終更新", ""].map((head) => (
+              {["種別", "メール", "プッシュ", "送るタイミング", "最終更新", ""].map((head) => (
                 <th key={head || "action"} scope="col" className="text-left px-4 py-3 font-medium">
                   {head}
                 </th>
@@ -346,6 +367,9 @@ export function EmailSettingsForm({
           </tbody>
         </table>
       </div>
+      <p className="text-xs text-muted-foreground">
+        プッシュはメールと同じ送る日・曜日で対象を決めます。1日の上限とメールの配信停止は適用しません。既定はすべて無効です。
+      </p>
 
       <div className="border rounded-lg p-4 space-y-2">
         <h3 className="font-medium">案内系メールの1日の上限</h3>

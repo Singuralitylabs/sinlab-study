@@ -292,4 +292,20 @@ describe("public/sw.js の挙動", () => {
     expect(source).toContain("sinlab-static-v2");
     expect(source).not.toContain('"/api');
   });
+
+  it("push と notificationclick を持ち、通知の URL は同一オリジンのパスだけ", () => {
+    const source = readFileSync("public/sw.js", "utf8");
+    expect(source).toContain('addEventListener("push"');
+    expect(source).toContain('addEventListener("notificationclick"');
+    expect(source).toContain("showNotification");
+    expect(source).toContain("openWindow");
+    expect(source).toContain(".navigate(target)");
+    // Clients without WindowClient.navigate still reach the payload URL.
+    expect(source).toMatch(
+      /"navigate" in focused[\s\S]*\.navigate\(target\)[\s\S]*clients\.openWindow\(target\)/
+    );
+    // navigate() can resolve to null or reject; still open the target then.
+    expect(source).toContain("navigated ?? self.clients.openWindow(target)");
+    expect(source).toContain(".catch(() => self.clients.openWindow(target))");
+  });
 });

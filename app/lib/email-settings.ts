@@ -13,6 +13,8 @@ import {
 export type EmailKindSetting = {
   kind: EmailKind;
   enabled: boolean;
+  /** Web Push channel. Missing on older fixtures means the column default, false. */
+  pushEnabled: boolean;
   sendDays: number[] | null;
   sendWeekday: number | null;
   updatedAt: string;
@@ -32,6 +34,8 @@ export type EmailSettingsSnapshot = {
 export type EmailKindSettingRow = {
   kind: string;
   enabled: boolean;
+  /** Omitted rows match the column default (false). A non-boolean value fails closed. */
+  push_enabled?: boolean;
   send_days: number[] | null;
   send_weekday: number | null;
   updated_at: string;
@@ -111,9 +115,17 @@ export function parseEmailSettings(
     ) {
       throw new Error(`email_kind_settings.send_weekday が不正です: kind=${kind}`);
     }
+    if (
+      row.push_enabled !== undefined &&
+      row.push_enabled !== null &&
+      typeof row.push_enabled !== "boolean"
+    ) {
+      throw new Error(`email_kind_settings.push_enabled が真偽値ではありません: kind=${kind}`);
+    }
     kinds[kind] = {
       kind,
       enabled: row.enabled,
+      pushEnabled: row.push_enabled === true,
       sendDays: row.send_days ? [...row.send_days].sort((a, b) => a - b) : null,
       sendWeekday: row.send_weekday,
       updatedAt: row.updated_at,
