@@ -2,10 +2,15 @@ import { Award } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
-import { isCertificateEligible, isThemeCompleted } from "@/app/lib/certificate";
+import { isCertificateEligible } from "@/app/lib/certificate";
+import {
+  type CertificateExerciseGap,
+  pendingCertificateStatus,
+} from "@/app/lib/certificate-eligibility";
 import { formatDate } from "@/app/lib/format-date";
 import {
   fetchMyCertificates,
+  fetchThemeExerciseGaps,
   issueMissingCertificates,
 } from "@/app/services/api/certificates-server";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
@@ -28,6 +33,18 @@ export default async function CertificatesPage() {
 
   const [{ data: initialCertificates }, { data: summaries, error: summariesError }] =
     await Promise.all([fetchMyCertificates(userId), fetchThemeProgressSummaries(userId)]);
+
+  // Exercise gaps share the dialog's counts. A failed read leaves them unknown so a finished
+  // theme is not described as "nothing left to submit" when we could not check.
+  let exerciseGaps: Map<number, CertificateExerciseGap> | null = null;
+  if (initialCertificates) {
+    try {
+      const loaded = await fetchThemeExerciseGaps(userId);
+      exerciseGaps = loaded instanceof Map ? loaded : null;
+    } catch (error) {
+      console.error("[修了証] 残り条件の取得エラー:", error);
+    }
+  }
 
   // Themes already 100% complete without a certificate (finished before release, or while trial)
   // never hit the progress trigger, so issue them here. Idempotent, so repeat visits are safe.
@@ -118,6 +135,17 @@ export default async function CertificatesPage() {
             <div className="grid gap-3">
               {pendingThemes.map(({ theme, totalContents, completedContents }) => {
                 const progress = Math.round((completedContents / totalContents) * 100);
+                const status = pendingCertificateStatus({
+                  totalContents,
+                  completedContents,
+                  exerciseGap: exerciseGaps
+                    ? (exerciseGaps.get(theme.id) ?? {
+                        unsubmittedExercises: 0,
+                        exercisesNeedingRetry: 0,
+                      })
+                    : null,
+                  blockedByMissingName,
+                });
                 return (
                   <Card key={theme.id}>
                     <CardContent className="pt-4 pb-4">
@@ -128,24 +156,25 @@ export default async function CertificatesPage() {
                         <span className="text-sm text-muted-foreground shrink-0">{progress}%</span>
                       </div>
                       <p className="text-sm text-muted-foreground mb-2">
-                        {isThemeCompleted({ totalContents, completedContents }) ? (
-                          // Completed but still unissued: a name the settings form would reject, or
-                          // any other failure (logged server-side). Never say "when you complete".
-                          blockedByMissingName ? (
-                            <>
-                              この表示名では修了証を発行できません。
-                              <Link
-                                href="/settings"
-                                className="text-primary underline underline-offset-2"
-                              >
-                                設定画面で名前を入力してください
-                              </Link>
-                            </>
-                          ) : (
-                            "修了証を発行できませんでした。時間をおいて再読み込みしてください。"
-                          )
+                        {status.kind === "name-blocked" ? (
+                          <>
+                            この表示名では修了証を発行できません。
+                            <Link
+                              href="/settings"
+                              className="text-primary underline underline-offset-2"
+                            >
+                              設定画面で名前を入力してください
+                            </Link>
+                          </>
+                        ) : status.kind === "issue-failed" ? (
+                          "修了証を発行できませんでした。時間をおいて再読み込みしてください。"
+                        ) : status.kind === "remaining" ? (
+                          status.message
                         ) : (
-                          `修了すると発行されます（${completedContents} / ${totalContents}）`
+                          <>
+                            {status.label}
+                            {status.remainder ? `。${status.remainder}` : ""}
+                          </>
                         )}
                       </p>
                       <Progress value={progress} className="h-2" />

@@ -10,6 +10,7 @@ import {
   updateAIReviewFailed,
   updateAIReviewProcessing,
 } from "@/app/services/api/ai-review-server";
+import { resolveAiReviewThemeNotice } from "@/app/services/api/certificates-server";
 import {
   generateReview,
   ReviewGenerationError,
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
     if (guard.response) {
       return guard.response;
     }
-    const { userId, userStatus } = guard.auth;
+    const { userId, userStatus, userRole } = guard.auth;
 
     const apiKey = resolveGeminiApiKey(userStatus);
     if (!apiKey) {
@@ -221,6 +222,20 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "AIレビューの保存に失敗しました" }, { status: 500 });
       }
 
+      // Issuance and the dialog payload must not change this response. A throw (mail, DB) is
+      // dropped; the review row is already completed.
+      let themeCompletion = null;
+      try {
+        themeCompletion = await resolveAiReviewThemeNotice({
+          userId,
+          userStatus,
+          userRole,
+          contentId: content.id,
+        });
+      } catch (error) {
+        console.error("[修了証] AIレビュー後の発行エラー:", error);
+      }
+
       return NextResponse.json({
         success: true,
         review: {
@@ -235,6 +250,7 @@ export async function POST(request: NextRequest) {
           model_used: result.modelUsed,
         },
         remaining: remainingAfterReview,
+        ...(themeCompletion ? { themeCompletion } : {}),
       });
     } catch (geminiError) {
       const errorMessage =

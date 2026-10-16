@@ -3,7 +3,10 @@ import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import { runAfterResponse } from "@/app/lib/after-response";
 import { shouldTrackFirstCompletion } from "@/app/lib/analytics-funnel";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
-import { issueCertificateIfEligible } from "@/app/services/api/certificates-server";
+import {
+  issueCertificateIfEligible,
+  resolveProgressThemeNotice,
+} from "@/app/services/api/certificates-server";
 import { isContentVisible } from "@/app/services/api/learning-server";
 import { ProgressUpdateSchema, validateRequest } from "@/app/services/api/schemas";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
@@ -40,6 +43,8 @@ export async function POST(request: NextRequest) {
     // when the user toggles completion off, so counting it would send first_content_completed
     // again on the next complete. ever_completed stays true. A count failure skips the event.
     let existingCompletedCount: number | null = null;
+    // A read error leaves this true so we do not announce a theme that was already finished.
+    let contentWasAlreadyCompleted = true;
     if (isCompleted) {
       const { count, error: countError } = await supabase
         .from("user_progress")
@@ -50,6 +55,18 @@ export async function POST(request: NextRequest) {
         console.error("進捗完了数の取得エラー:", countError.message);
       } else {
         existingCompletedCount = count ?? 0;
+      }
+
+      const { data: prior, error: priorError } = await supabase
+        .from("user_progress")
+        .select("is_completed")
+        .eq("user_id", userId)
+        .eq("content_id", contentId)
+        .maybeSingle();
+      if (priorError) {
+        console.error("進捗の完了前状態の取得エラー:", priorError.message);
+      } else {
+        contentWasAlreadyCompleted = prior?.is_completed === true;
       }
     }
 
@@ -80,17 +97,35 @@ export async function POST(request: NextRequest) {
       trackServerEvent(ANALYTICS_EVENT.FIRST_CONTENT_COMPLETED, { status: userStatus });
     }
 
-    // Issue the theme certificate when this completion finished the theme. Deferred with after()
-    // so the aggregation queries do not delay the response; outside request scope (where after()
-    // throws) it just runs inline. The helper never throws and its result is not used: a failure
-    // (or the email) must not change this response.
+    // When this save is what brought the theme to 100%, issue synchronously so the response can
+    // say whether a certificate was created or exercise conditions remain. Any other completion
+    // stays on after() (the helper no-ops until the theme is actually finished). A failure of
+    // either path must not change this response: the completion is already saved.
+    let themeCompletion = null;
     if (isCompleted) {
-      await runAfterResponse(() =>
-        issueCertificateIfEligible({ userId, userStatus, userRole, contentId })
-      );
+      try {
+        themeCompletion = await resolveProgressThemeNotice({
+          userId,
+          userStatus,
+          userRole,
+          contentId,
+          contentWasAlreadyCompleted,
+        });
+      } catch (error) {
+        console.error("[修了証] 画面通知の判定エラー:", error);
+      }
+      if (!themeCompletion) {
+        await runAfterResponse(() =>
+          issueCertificateIfEligible({ userId, userStatus, userRole, contentId })
+        );
+      }
     }
 
-    return NextResponse.json({ success: true, isCompleted });
+    return NextResponse.json({
+      success: true,
+      isCompleted,
+      ...(themeCompletion ? { themeCompletion } : {}),
+    });
   } catch (error) {
     console.error("API エラー:", error);
     return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });

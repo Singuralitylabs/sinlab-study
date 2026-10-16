@@ -13,6 +13,9 @@ import {
   fetchRecentCertificate,
   issueCertificateIfEligible,
   issueMissingCertificates,
+  maybeIssueCertificate,
+  resolveAiReviewThemeNotice,
+  resolveProgressThemeNotice,
 } from "@/app/services/api/certificates-server";
 import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
 import {
@@ -443,6 +446,259 @@ describe("issueMissingCertificates（既に完了済みのテーマの遡及発�
         issuedThemeIds: new Set(),
       })
     ).resolves.toEqual({ issued: [], blockedByMissingName: false });
+  });
+});
+
+function exerciseCatalog(
+  themeId: number,
+  contents: { id: number; allowed: string; contentType?: string }[]
+) {
+  return {
+    data: [
+      {
+        id: themeId,
+        phases: [
+          {
+            weeks: [
+              {
+                contents: contents.map((content) => ({
+                  id: content.id,
+                  content_type: content.contentType ?? "exercise",
+                  allowed_submission_types: content.allowed,
+                })),
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    error: null,
+  };
+}
+
+const rubric = {
+  data: [{ id: 10, grading_rubric: { version: 1, requirements: [{ key: "a" }] } }],
+  error: null,
+};
+
+describe("演習の提出・合格（#332）", () => {
+  const issue = {
+    userId: 2,
+    userStatus: "active" as const,
+    userRole: "member" as const,
+    themeId: THEME.id,
+  };
+
+  it("演習が未提出なら発行しない", async () => {
+    mockUserClient({
+      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "code" }]),
+      submissions: { data: [], error: null },
+    });
+    mockAdminClient({ certificates: inserted });
+
+    expect(await maybeIssueCertificate(issue)).toBeNull();
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it("合格点が 0 のときは提出があれば、不合格レビューでも発行する", async () => {
+    mockUserClient({
+      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "code" }]),
+      submissions: { data: [{ id: 7, content_id: 10 }], error: null },
+    });
+    mockAdminClient({ certificates: inserted });
+
+    expect(await maybeIssueCertificate(issue)).toEqual(inserted.data);
+  });
+
+  it("URL のみの演習は提出があれば発行する", async () => {
+    mockUserClient({
+      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "url" }]),
+      submissions: { data: [{ id: 7, content_id: 10 }], error: null },
+    });
+    mockAdminClient({ certificates: inserted });
+
+    expect(await maybeIssueCertificate({ ...issue, passScore: 80 })).toEqual(inserted.data);
+  });
+
+  it("採点基準ありで passed = false だけなら発行しない", async () => {
+    mockUserClient({
+      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "code" }]),
+      submissions: { data: [{ id: 7, content_id: 10 }], error: null },
+      ai_reviews: {
+        data: [{ submission_id: 7, score_kind: "rubric", passed: false }],
+        error: null,
+      },
+    });
+    mockAdminClient({ learning_contents: rubric, certificates: inserted });
+
+    expect(await maybeIssueCertificate({ ...issue, passScore: 80 })).toBeNull();
+  });
+
+  it("passed = true が 1 件あれば発行する", async () => {
+    mockUserClient({
+      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "both" }]),
+      submissions: { data: [{ id: 7, content_id: 10 }], error: null },
+      ai_reviews: {
+        data: [
+          { submission_id: 7, score_kind: "none", passed: true },
+          { submission_id: 7, score_kind: "rubric", passed: false },
+          { submission_id: 7, score_kind: "rubric", passed: true },
+        ],
+        error: null,
+      },
+    });
+    mockAdminClient({ learning_contents: rubric, certificates: inserted });
+
+    expect(await maybeIssueCertificate({ ...issue, passScore: 80 })).toEqual(inserted.data);
+  });
+
+  it.each(["estimated", "none", "legacy"])("%s だけでは発行しない", async (scoreKind) => {
+    mockUserClient({
+      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "code" }]),
+      submissions: { data: [{ id: 7, content_id: 10 }], error: null },
+      ai_reviews: {
+        data: [{ submission_id: 7, score_kind: scoreKind, passed: true }],
+        error: null,
+      },
+    });
+    mockAdminClient({ learning_contents: rubric, certificates: inserted });
+
+    expect(await maybeIssueCertificate({ ...issue, passScore: 80 })).toBeNull();
+  });
+
+  it("動画だけのテーマは提出を見ずに発行する（分母は進捗集計のまま）", async () => {
+    mockUserClient({
+      learning_themes: exerciseCatalog(THEME.id, [
+        { id: 10, allowed: "code", contentType: "video" },
+      ]),
+    });
+    mockAdminClient({ certificates: inserted });
+
+    expect(await maybeIssueCertificate(issue)).toEqual(inserted.data);
+    expect(fetchThemeProgressSummaries).toHaveBeenCalledWith(2);
+  });
+
+  it("遡及発行も未提出の演習があるテーマは飛ばす", async () => {
+    mockUserClient({
+      learning_themes: exerciseCatalog(2, [{ id: 10, allowed: "code" }]),
+      submissions: { data: [], error: null },
+    });
+    mockAdminClient({ certificates: inserted });
+
+    const result = await issueMissingCertificates({
+      userId: 2,
+      userStatus: "active",
+      userRole: "member",
+      summaries: [
+        { theme: { id: 2, name: "テーマ2" }, totalContents: 1, completedContents: 1 },
+      ] as never,
+      issuedThemeIds: new Set(),
+    });
+
+    expect(result).toEqual({ issued: [], blockedByMissingName: false });
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it("AI レビュー完了から発行し、発行済みなら二重に作らない", async () => {
+    mockAdminClient({ certificates: inserted });
+    const issuedNotice = await resolveAiReviewThemeNotice({
+      userId: 2,
+      userStatus: "active",
+      userRole: "member",
+      contentId: 10,
+    });
+    expect(issuedNotice?.certificateId).toBe(31);
+
+    mockUserClient({ certificates: { data: { id: 31 }, error: null } });
+    vi.mocked(createAdminSupabaseClient).mockClear();
+    expect(
+      await resolveAiReviewThemeNotice({
+        userId: 2,
+        userStatus: "active",
+        userRole: "member",
+        contentId: 10,
+      })
+    ).toBeNull();
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it("メール予約の失敗は AI レビュー用の判定を例外にしない", async () => {
+    mockAdminClient({ certificates: inserted });
+    vi.mocked(scheduleCertificateIssuedEmail).mockImplementationOnce(() => {
+      throw new Error("mail down");
+    });
+
+    await expect(
+      resolveAiReviewThemeNotice({
+        userId: 2,
+        userStatus: "active",
+        userRole: "member",
+        contentId: 10,
+      })
+    ).resolves.toBeNull();
+  });
+});
+
+describe("テーマ修了の画面通知（#332）", () => {
+  const noticeParams = {
+    userId: 2,
+    userStatus: "active" as const,
+    userRole: "member" as const,
+    contentId: 10,
+    contentWasAlreadyCompleted: false,
+  };
+
+  it("最後のコンテンツで発行済みの通知を返す", async () => {
+    mockAdminClient({ certificates: inserted });
+
+    const notice = await resolveProgressThemeNotice(noticeParams);
+
+    expect(notice).toMatchObject({
+      themeId: THEME.id,
+      themeName: THEME.name,
+      certificateId: 31,
+      remaining: { incompleteContents: 0, unsubmittedExercises: 0, exercisesNeedingRetry: 0 },
+    });
+  });
+
+  it("途中では通知しない", async () => {
+    mockSummaries([summary(3, 2)]);
+
+    expect(await resolveProgressThemeNotice(noticeParams)).toBeNull();
+  });
+
+  it("条件が残るときは未発行の通知を返す", async () => {
+    mockUserClient({
+      learning_themes: exerciseCatalog(THEME.id, [{ id: 10, allowed: "code" }]),
+      submissions: { data: [], error: null },
+    });
+
+    const notice = await resolveProgressThemeNotice(noticeParams);
+
+    expect(notice?.certificateId).toBeNull();
+    expect(notice?.remaining.unsubmittedExercises).toBe(1);
+  });
+
+  it("すでに完了しているコンテンツの再保存では通知しない", async () => {
+    expect(
+      await resolveProgressThemeNotice({ ...noticeParams, contentWasAlreadyCompleted: true })
+    ).toBeNull();
+    expect(fetchThemeProgressSummaries).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["trial", "member"],
+    ["active", "admin"],
+    ["active", "maintainer"],
+  ] as const)("status=%s role=%s には通知しない", async (userStatus, userRole) => {
+    expect(await resolveProgressThemeNotice({ ...noticeParams, userStatus, userRole })).toBeNull();
+    expect(fetchThemeProgressSummaries).not.toHaveBeenCalled();
+  });
+
+  it("集計に失敗しても例外にしない", async () => {
+    vi.mocked(fetchThemeProgressSummaries).mockRejectedValue(new Error("down"));
+
+    await expect(resolveProgressThemeNotice(noticeParams)).resolves.toBeNull();
   });
 });
 
