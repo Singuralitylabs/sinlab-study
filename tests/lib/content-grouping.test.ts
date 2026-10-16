@@ -52,6 +52,8 @@ function makeContent(
     reference_answer: null,
     starter_files: null,
     submission_file_slots: null,
+    show_preview: null,
+    show_console: null,
     grading_rubric: null,
     has_grading_requirements: false,
     grading_rubric_version: null,
