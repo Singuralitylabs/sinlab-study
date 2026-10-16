@@ -36,6 +36,17 @@ const nextConfig: NextConfig = {
       "pdfjs-dist/web/pdf_viewer.mjs": "pdfjs-dist/legacy/web/pdf_viewer.mjs",
     },
   },
+  async headers() {
+    return [
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache" },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
+      },
+    ];
+  },
   webpack: (config) => {
     // react-pdf: canvas依存を除外（webpack使用時）
     config.resolve.alias.canvas = false;

@@ -1,6 +1,7 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 import { AUTH_HEADER_NAMES, AUTH_HEADERS } from "./app/constants/auth";
+import { PWA_PUBLIC_PATHS } from "./app/constants/pwa";
 import { ALLOWED_USER_STATUSES, USER_STATUS } from "./app/constants/user";
 import type { UserStatusType } from "./app/types";
 
@@ -9,7 +10,7 @@ import type { UserStatusType } from "./app/types";
 const STATIC_FILE_EXTENSIONS =
   /\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest)$/i;
 
-function shouldSkipMiddleware(pathname: string): boolean {
+export function shouldSkipMiddleware(pathname: string): boolean {
   return (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api") ||
@@ -18,7 +19,8 @@ function shouldSkipMiddleware(pathname: string): boolean {
     STATIC_FILE_EXTENSIONS.test(pathname) ||
     pathname === "/favicon.ico" ||
     pathname === "/login" ||
-    pathname === "/rejected"
+    pathname === "/rejected" ||
+    (PWA_PUBLIC_PATHS as readonly string[]).includes(pathname)
   );
 }
 

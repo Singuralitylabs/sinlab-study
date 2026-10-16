@@ -73,7 +73,7 @@ flowchart TD
     D -->|active| OK[アクセス許可]
 ```
 
-ステータス取得失敗（null）時は `/login` へ送るフェイルクローズとする。お試しユーザー（`trial`）はページアクセス自体は許可し、コンテンツ単位の制限はアプリ層とRLSで担保する（2.6参照）。
+ステータス取得失敗（null）時は `/login` へ送るフェイルクローズとする。お試しユーザー（`trial`）はページアクセス自体は許可し、コンテンツ単位の制限はアプリ層とRLSで担保する（2.6参照）。インストールに必要な `/manifest.webmanifest`・`/sw.js`・`/offline`・`/apple-icon.png` だけを完全一致でスキップする（14.1節。これ以外のパスは足さない）。
 
 ### 2.2 認証の多層構造
 
@@ -1471,6 +1471,20 @@ X 向けの共有リンク（`https://twitter.com/intent/tweet?text=...&url=...`
 ### 13.6 管理画面
 
 `/manage/students` の受講生一覧に修了証の枚数を表示する。既存の進捗 RPC には列を足さず、`certificates` の `user_id` を別クエリで取得して集計・結合する（管理者のセッションで読む。RLS は admin / maintainer に SELECT を許す）。取得に失敗しても一覧は表示する（枚数は0）。
+
+---
+
+## 14. PWA
+
+ホーム画面に追加できる Web アプリ。プッシュ通知は段階 B（#301）で、この節には含めない。
+
+### 14.1 マニフェスト・サービスワーカー・インストール案内
+
+- **マニフェスト**（`app/manifest.ts`）: `name` / `short_name` は Sinlab Study、`start_url` は `/`、`display` は `standalone`。`theme_color` / `background_color` は `app/constants/pwa.ts` の sRGB（`globals.css` の oklch トークンの代替。マニフェストは oklch を受けない）。アイコンは 192px・512px で `purpose: maskable`。`app/apple-icon.png`（180px）と `metadata.appleWebApp`、`viewport.themeColor`（ライト・ダーク）を付ける
+- **アイコン**: 元画像が無い間は `public/icon.png` から拡大した仮画像。差し替え前提
+- **サービスワーカー**（`public/sw.js`）: キャッシュするのは `/_next/static/*` とアイコンだけ（cache-first）。ナビゲーションは常にネットワーク優先で、失敗時だけ静的な `/offline`（「オフラインです」）を返す。認証配下の HTML と `/api/*` はキャッシュしない（降格・却下・ロックの反映が遅れないようにする）。`next.config.ts` の `headers()` で `/sw.js` に `Cache-Control: no-cache` と `Service-Worker-Allowed: /` を付ける。登録は `ServiceWorkerRegistration` が本番ビルドだけで行う
+- **プロキシ**: `shouldSkipMiddleware()` は上の 4 パスを完全一致でのみ通す。`/offline/anything` のような配下は通さない。環境変数欠落・例外・status null の `/login` へのフェイルクローズは変えない
+- **インストール案内**: ホーム（`/`）の `InstallPrompt`。`display-mode: standalone` でない、かつモバイル UA、かつ閉じていない（`localStorage`。失敗は無視）ときだけ出す。iOS は「共有 → ホーム画面に追加」の手順。Android は `beforeinstallprompt` を保持し、ボタンで `prompt()` を呼ぶ。インストール済みでは出さない
 
 ---
 
