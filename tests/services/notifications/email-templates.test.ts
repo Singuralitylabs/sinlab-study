@@ -232,7 +232,7 @@ describe("buildSubscriptionEndedEmail", () => {
     expect(email.subject).toContain("終了");
     expect(email.text).toContain("お試しユーザーに戻りました");
     expect(email.text).toContain("お試し公開の学習コンテンツは引き続き");
-    expect(email.text).toContain(`アップグレードページを開く: ${APP_URL}/upgrade`);
+    expect(email.text).toContain(`プランの確認・変更を開く: ${APP_URL}/upgrade`);
   });
 });
 
