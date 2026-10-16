@@ -439,7 +439,7 @@ export type Database = {
           display_order: number | null;
           exercise_instructions: string | null;
           grading_rubric: Json | null;
-          has_grading_requirements: boolean;
+          has_grading_requirements: boolean | null;
           hint: string | null;
           id: number;
           is_deleted: boolean | null;
@@ -466,6 +466,7 @@ export type Database = {
           display_order?: number | null;
           exercise_instructions?: string | null;
           grading_rubric?: Json | null;
+          has_grading_requirements?: boolean | null;
           hint?: string | null;
           id?: number;
           is_deleted?: boolean | null;
@@ -492,6 +493,7 @@ export type Database = {
           display_order?: number | null;
           exercise_instructions?: string | null;
           grading_rubric?: Json | null;
+          has_grading_requirements?: boolean | null;
           hint?: string | null;
           id?: number;
           is_deleted?: boolean | null;
