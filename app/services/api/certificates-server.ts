@@ -168,7 +168,23 @@ async function insertCertificates(
       // Both UNIQUE (user_id, theme_id) and UNIQUE (certificate_no) raise 23505. Only a number
       // collision is worth retrying; a duplicate (user, theme) means another request won the race.
       if (!isCertificateNoCollision(insertError)) {
-        const existing = await fetchExistingIssuedCertificate(userId, summary.theme.id);
+        // Learner-session re-read can flake while the row exists; UNIQUE already proved it.
+        // Fall back to the admin client already held for INSERT so the dialog does not say
+        // "could not issue" for a certificate that is already there.
+        let existing = await fetchExistingIssuedCertificate(userId, summary.theme.id);
+        if (!existing) {
+          const { data: adminRow, error: adminReadError } = await admin
+            .from("certificates")
+            .select("id, theme_id, certificate_no, theme_name")
+            .eq("user_id", userId)
+            .eq("theme_id", summary.theme.id)
+            .maybeSingle();
+          if (adminReadError) {
+            console.error("[修了証] 発行済み行の再取得エラー:", adminReadError.message);
+          } else {
+            existing = adminRow;
+          }
+        }
         if (existing) {
           issued.push(existing);
         }
@@ -342,6 +358,8 @@ export async function fetchThemeExerciseGaps(
 
 type CertificateEvaluation =
   | { status: "not-ready" }
+  /** Progress/summary/exercise reads failed; callers that settle sync must retry via after(). */
+  | { status: "check-failed" }
   | {
       status: "evaluated";
       themeId: number;
@@ -364,9 +382,10 @@ function toNotice(
 }
 
 /**
- * Shared issuance decision for one theme. Already-issued, ineligible, incomplete, and unreadable
- * checks return not-ready (no INSERT). A finished theme with exercise gaps is evaluated but not
- * inserted. Never throws; UNIQUE violations stay inside insertCertificates.
+ * Shared issuance decision for one theme. Already-issued, ineligible, and incomplete return
+ * not-ready (no INSERT). Progress/exercise read failures return check-failed so the progress API
+ * can defer a retry. A finished theme with exercise gaps is evaluated but not inserted. Never
+ * throws; UNIQUE violations stay inside insertCertificates.
  */
 async function evaluateThemeForCertificate(params: {
   userId: number;
@@ -385,12 +404,15 @@ async function evaluateThemeForCertificate(params: {
   }
   // Single-theme COUNT: intermediate completions must not page every theme's progress.
   const { data: summary, error } = await fetchThemeProgressSummary(params.userId, params.themeId);
-  if (error || !summary || !isThemeCompleted(summary)) {
+  if (error) {
+    return { status: "check-failed" };
+  }
+  if (!summary || !isThemeCompleted(summary)) {
     return { status: "not-ready" };
   }
   const gaps = await fetchThemeExerciseGaps(params.userId, passScore);
   if (!gaps) {
-    return { status: "not-ready" };
+    return { status: "check-failed" };
   }
   const exerciseGap = gaps.get(params.themeId) ?? EMPTY_EXERCISE_GAP;
   const remaining = {
@@ -484,7 +506,9 @@ export async function issueCertificateIfEligible(params: {
 /**
  * Dialog payload when this completion is what brought the theme to 100%. Already-complete
  * re-saves and ineligible users get null (no dialog). Issuance runs here, synchronously, so the
- * response can tell "issued" from "exercise conditions remain". Null on failure.
+ * response can tell "issued" from "exercise conditions remain". Settled not-ready is null; read
+ * failures and unexpected throws propagate so POST /api/progress can defer after() instead of
+ * treating a flaky check as "no certificate needed".
  */
 export async function resolveProgressThemeNotice(params: {
   userId: number;
@@ -493,28 +517,27 @@ export async function resolveProgressThemeNotice(params: {
   contentId: number;
   contentWasAlreadyCompleted: boolean;
 }): Promise<ThemeCompletionNotice | null> {
-  try {
-    if (!isCertificateEligible(params.userStatus, params.userRole)) {
-      return null;
-    }
-    if (params.contentWasAlreadyCompleted) {
-      return null;
-    }
-    const themeId = await fetchThemeIdOfContent(params.contentId);
-    if (themeId === null) {
-      return null;
-    }
-    const evaluation = await evaluateThemeForCertificate({
-      userId: params.userId,
-      userStatus: params.userStatus,
-      userRole: params.userRole,
-      themeId,
-    });
-    return evaluation.status === "evaluated" ? toNotice(evaluation) : null;
-  } catch (error) {
-    console.error("[修了証] 画面通知の判定エラー:", error);
+  if (!isCertificateEligible(params.userStatus, params.userRole)) {
     return null;
   }
+  if (params.contentWasAlreadyCompleted) {
+    return null;
+  }
+  const themeId = await fetchThemeIdOfContent(params.contentId);
+  if (themeId === null) {
+    // Cannot tell missing theme from a read error; fail open to after() so a blip can recover.
+    throw new Error("[修了証] テーマの特定に失敗しました");
+  }
+  const evaluation = await evaluateThemeForCertificate({
+    userId: params.userId,
+    userStatus: params.userStatus,
+    userRole: params.userRole,
+    themeId,
+  });
+  if (evaluation.status === "check-failed") {
+    throw new Error("[修了証] 発行判定の読み取りに失敗しました");
+  }
+  return evaluation.status === "evaluated" ? toNotice(evaluation) : null;
 }
 
 /**

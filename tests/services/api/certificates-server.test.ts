@@ -227,6 +227,41 @@ describe("issueCertificateIfEligible - 冪等性・失敗時", () => {
     expect(scheduleCertificateIssuedEmail).not.toHaveBeenCalled();
   });
 
+  it("UNIQUE 後の本人セッション再取得が失敗しても admin で既存行を返す", async () => {
+    const existing = {
+      id: 31,
+      theme_id: THEME.id,
+      certificate_no: "SS-202610-ABC123",
+      theme_name: THEME.name,
+    };
+    mockUserClient({
+      learning_contents: { data: { week: { phase: { theme_id: THEME.id } } }, error: null },
+      certificates: [
+        { data: null, error: null },
+        { data: null, error: { message: "read failed" } },
+      ],
+    });
+    const admin = mockAdminClient({
+      certificates: [
+        {
+          data: null,
+          error: {
+            code: "23505",
+            message:
+              'duplicate key value violates unique constraint "certificates_user_theme_unique"',
+          },
+        },
+        { data: existing, error: null },
+      ],
+    });
+
+    expect(await issueCertificateIfEligible(params)).toEqual(existing);
+    expect(
+      certificateInserts(admin).filter((builder) => builder.insert.mock.calls.length > 0)
+    ).toHaveLength(1);
+    expect(scheduleCertificateIssuedEmail).not.toHaveBeenCalled();
+  });
+
   it("証明番号の衝突だけは番号を作り直して再試行する", async () => {
     const admin = mockAdminClient({
       certificates: [
@@ -838,10 +873,21 @@ describe("テーマ修了の画面通知（#332）", () => {
     expect(fetchThemeProgressSummary).not.toHaveBeenCalled();
   });
 
-  it("集計に失敗しても例外にしない", async () => {
+  it("集計が throw したら例外を伝播する（進捗 API が after で再試行するため）", async () => {
     vi.mocked(fetchThemeProgressSummary).mockRejectedValue(new Error("down"));
 
-    await expect(resolveProgressThemeNotice(noticeParams)).resolves.toBeNull();
+    await expect(resolveProgressThemeNotice(noticeParams)).rejects.toThrow("down");
+  });
+
+  it("集計の読み取りエラーも例外にして、未完了扱いにはしない", async () => {
+    vi.mocked(fetchThemeProgressSummary).mockResolvedValue({
+      data: null,
+      error: { message: "x" } as never,
+    });
+
+    await expect(resolveProgressThemeNotice(noticeParams)).rejects.toThrow(
+      "発行判定の読み取りに失敗しました"
+    );
   });
 });
 
