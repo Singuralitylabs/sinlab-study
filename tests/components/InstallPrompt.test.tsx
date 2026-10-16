@@ -7,12 +7,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InstallPrompt } from "@/app/components/InstallPrompt";
 import { INSTALL_PROMPT_DISMISS_KEY } from "@/app/constants/pwa";
+import { clearBeforeInstallPromptEvent } from "@/app/lib/before-install-prompt";
 
 describe("InstallPrompt", () => {
   let container: HTMLDivElement;
   let root: Root;
 
   beforeEach(() => {
+    clearBeforeInstallPromptEvent();
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -35,6 +37,7 @@ describe("InstallPrompt", () => {
     });
     container.remove();
     window.localStorage.clear();
+    clearBeforeInstallPromptEvent();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -45,11 +48,12 @@ describe("InstallPrompt", () => {
     });
   };
 
-  const stubMobile = (userAgent: string, maxTouchPoints = 5) => {
+  const stubMobile = (userAgent: string, maxTouchPoints = 5, standalone?: boolean) => {
     vi.stubGlobal("navigator", {
       ...navigator,
       userAgent,
       maxTouchPoints,
+      ...(standalone === undefined ? {} : { standalone }),
     });
   };
 
@@ -112,6 +116,35 @@ describe("InstallPrompt", () => {
     expect([...container.querySelectorAll("button")].map((button) => button.textContent)).toEqual([
       "閉じる",
     ]);
+  });
+
+  it("マウント前に発火した beforeinstallprompt も追加ボタンに使える", async () => {
+    stubMobile("Mozilla/5.0 (Linux; Android 14) Chrome/120.0.0.0");
+    const installEvent = new Event("beforeinstallprompt") as Event & {
+      prompt: () => Promise<void>;
+      userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+    };
+    installEvent.prompt = vi.fn(async () => undefined);
+    installEvent.userChoice = Promise.resolve({ outcome: "accepted" });
+    window.dispatchEvent(installEvent);
+
+    await render();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect([...container.querySelectorAll("button")].map((button) => button.textContent)).toContain(
+      "ホーム画面に追加"
+    );
+  });
+
+  it("iOS の navigator.standalone では案内を出さない", async () => {
+    stubMobile("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", 5, true);
+    await render();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-testid="pwa-install-prompt"]')).toBeNull();
   });
 
   it("iOS は共有手順を出す", async () => {

@@ -5,15 +5,17 @@ import {
   INSTALL_PROMPT_DISMISS_KEY,
   installPromptPlatform,
   isMobileUserAgent,
+  isStandaloneDisplay,
   shouldShowInstallPrompt,
 } from "@/app/constants/pwa";
+import {
+  type BeforeInstallPromptEvent,
+  clearBeforeInstallPromptEvent,
+  getBeforeInstallPromptEvent,
+  subscribeBeforeInstallPrompt,
+} from "@/app/lib/before-install-prompt";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
 
 function readDismissed(): boolean {
   try {
@@ -43,7 +45,14 @@ export function InstallPrompt() {
   useEffect(() => {
     const userAgent = navigator.userAgent;
     const maxTouchPoints = navigator.maxTouchPoints ?? 0;
-    const isStandalone = window.matchMedia("(display-mode: standalone)").matches;
+    const isStandalone = isStandaloneDisplay({
+      displayModeStandalone: window.matchMedia("(display-mode: standalone)").matches,
+      navigatorStandalone: (
+        navigator as Navigator & {
+          standalone?: boolean;
+        }
+      ).standalone,
+    });
     setPlatform(installPromptPlatform(userAgent, maxTouchPoints));
     setVisible(
       shouldShowInstallPrompt({
@@ -53,12 +62,8 @@ export function InstallPrompt() {
       })
     );
 
-    const onPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallEvent(event as BeforeInstallPromptEvent);
-    };
-    window.addEventListener("beforeinstallprompt", onPrompt);
-    return () => window.removeEventListener("beforeinstallprompt", onPrompt);
+    setInstallEvent(getBeforeInstallPromptEvent());
+    return subscribeBeforeInstallPrompt(setInstallEvent);
   }, []);
 
   if (!visible) {
@@ -81,13 +86,14 @@ export function InstallPrompt() {
         await installEvent.prompt();
         const { outcome } = await installEvent.userChoice;
         if (outcome === "accepted") {
+          clearBeforeInstallPromptEvent();
           dismiss();
           return;
         }
       } catch {
         // Fall through to menu steps; do not permanently hide the banner.
       }
-      setInstallEvent(null);
+      clearBeforeInstallPromptEvent();
     })();
   };
 
