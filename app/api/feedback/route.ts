@@ -1,10 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { FEEDBACK_DISABLED_MESSAGE, isFeedbackEnabled } from "@/app/constants/feedback";
+import { runAfterResponse } from "@/app/lib/after-response";
 import { countRecentFeedbacksForUser, insertFeedback } from "@/app/services/api/feedback-server";
 import { FeedbackCreateSchema, validateRequest } from "@/app/services/api/schemas";
 import { requireLearnerApi } from "@/app/services/auth/admin-guard";
 import { buildAppUrl } from "@/app/services/notifications/email-templates";
 import { sendSlackFeedbackNotification } from "@/app/services/notifications/slack";
+
+// Slack runs in after(); keep the function alive past the default 10s so the webhook is not cut off.
+export const maxDuration = 30;
 
 export async function POST(request: NextRequest) {
   try {
@@ -46,14 +50,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
     }
 
-    // Slack must not change the API outcome (same as other webhook notices).
+    // Slack must not change the API outcome; after() keeps the webhook from being cut off.
     const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-    void sendSlackFeedbackNotification({
+    const slackParams = {
       feedbackId: data.id,
       category: data.category,
       body: data.body,
       pageUrl: data.page_url,
       manageUrl: appUrl ? buildAppUrl(appUrl, `/manage/feedbacks/${data.id}`) : null,
+    };
+    void runAfterResponse(async () => {
+      try {
+        await sendSlackFeedbackNotification(slackParams);
+      } catch (slackError) {
+        console.error("[Slack通知] フィードバック通知で予期しないエラー:", slackError);
+      }
     });
 
     return NextResponse.json({ success: true, id: data.id });

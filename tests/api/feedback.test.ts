@@ -3,7 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/feedback-server");
 vi.mock("@/app/services/notifications/slack");
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  // Explicit rather than the real after(), so these tests do not depend on how Next.js behaves
+  // outside a request scope: the default throws, and the route runs the task inline.
+  after: vi.fn(() => {
+    throw new Error("outside request scope");
+  }),
+}));
 
+import { after } from "next/server";
 import { POST } from "@/app/api/feedback/route";
 import { countRecentFeedbacksForUser, insertFeedback } from "@/app/services/api/feedback-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -90,7 +99,12 @@ describe("POST /api/feedback", () => {
     expect(insertFeedback).not.toHaveBeenCalled();
   });
 
-  it("保存成功時は200でSlackを呼び、Slack の成否を待たない", async () => {
+  it("保存成功時は200でSlackを after() 経由で呼び、Slack の成否を待たない", async () => {
+    const deferred: Array<() => Promise<unknown>> = [];
+    vi.mocked(after).mockImplementationOnce(((task: () => unknown) => {
+      deferred.push(task as () => Promise<unknown>);
+    }) as typeof after);
+
     const res = await POST(
       request({
         category: "bug",
@@ -104,6 +118,9 @@ describe("POST /api/feedback", () => {
     expect(insertFeedback).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 2, category: "bug" })
     );
+    expect(sendSlackFeedbackNotification).not.toHaveBeenCalled();
+    expect(deferred).toHaveLength(1);
+    await deferred[0]();
     expect(sendSlackFeedbackNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         feedbackId: 9,
@@ -118,7 +135,5 @@ describe("POST /api/feedback", () => {
     );
     const res = await POST(request({ category: "bug", body: "詳しく書く" }) as never);
     expect(res.status).toBe(200);
-    // Drain the rejected fire-and-forget so Vitest does not treat it as unhandled.
-    await Promise.resolve();
   });
 });

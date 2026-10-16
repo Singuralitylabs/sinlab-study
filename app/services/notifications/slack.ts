@@ -268,14 +268,23 @@ export async function sendSlackFeedbackNotification(
           { type: "mrkdwn", text: "*ID*" },
           { type: "plain_text", text: String(params.feedbackId) },
           { type: "mrkdwn", text: "*ページ*" },
-          { type: "plain_text", text: params.pageUrl ?? "不明" },
+          // Empty string is invalid for Slack plain_text and would drop the whole notice.
+          { type: "plain_text", text: params.pageUrl || "不明" },
         ],
       },
       {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `*本文（冒頭）*\n${preview}`,
+          text: "*本文（冒頭）*",
+        },
+      },
+      {
+        type: "section",
+        text: {
+          // Learner-written body must stay plain_text so mrkdwn (e.g. <!channel>) cannot fire.
+          type: "plain_text",
+          text: preview,
         },
       },
       ...(params.manageUrl
