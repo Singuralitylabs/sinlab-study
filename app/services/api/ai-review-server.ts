@@ -27,8 +27,33 @@ const AI_REVIEW_ADMIN_COLUMNS = `${AI_REVIEW_STUDENT_COLUMNS}, prompt_tokens, co
 const AI_REVIEW_LIST_SELECT = `ai_review:ai_reviews(${AI_REVIEW_STUDENT_COLUMNS})`;
 const AI_REVIEW_ADMIN_LIST_SELECT = `ai_review:ai_reviews(${AI_REVIEW_ADMIN_COLUMNS})`;
 
-// code_language fills in the language of single-file submissions, which store none (history preview).
-const LIST_CONTENT_SELECT = "id, title, code_language";
+// Layout + preview flags decide the history preview. code_language fills a single-file submission
+// that stored no language. starter_files is only the fallback layout when slots are NULL (#377);
+// names/languages matter, not starter body — strip content before returning (see below).
+const LIST_CONTENT_SELECT =
+  "id, title, code_language, submission_file_slots, starter_files, show_preview, show_console";
+
+/** Keep filename/language for NULL-slots layout; drop starter bodies from the list payload. */
+function stripStarterContentsForList<T extends SubmissionWithContentAndReview>(rows: T[]): T[] {
+  return rows.map((row) => {
+    const starter = row.content?.starter_files;
+    if (!row.content || !Array.isArray(starter)) {
+      return row;
+    }
+    return {
+      ...row,
+      content: {
+        ...row.content,
+        starter_files: starter.map((entry) => {
+          if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+            return entry;
+          }
+          return { ...(entry as Record<string, unknown>), content: "" };
+        }),
+      },
+    };
+  });
+}
 
 /** Select only the columns the list needs (content and ai_reviews); no heavy text. */
 export async function fetchSubmissionsWithReviewsByUserId(
@@ -64,7 +89,7 @@ export async function fetchSubmissionsWithReviewsByUserId(
   }
 
   return {
-    data: data as SubmissionWithContentAndReview[],
+    data: stripStarterContentsForList(data as SubmissionWithContentAndReview[]),
     count: count ?? 0,
     error: null,
   };
@@ -105,7 +130,11 @@ export async function fetchAllSubmissionsWithReviews({
     return { data: null, count: 0, error };
   }
 
-  return { data, count: count ?? 0, error: null };
+  return {
+    data: data ? stripStarterContentsForList(data) : data,
+    count: count ?? 0,
+    error: null,
+  };
 }
 
 /**

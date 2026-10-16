@@ -19,6 +19,7 @@ import {
   hasGradingRequirements,
   toRubricFormRows,
 } from "@/app/lib/grading";
+import { previewCapability } from "@/app/lib/html-preview";
 import { type QuizQuestionData, QuizQuestionsSchema } from "@/app/lib/quiz";
 import { parseSlideObjectKey, toSlideObjectKey } from "@/app/lib/slide-object-key";
 import { getSlideStorageWarning } from "@/app/lib/slide-storage-warning";
@@ -42,6 +43,21 @@ import {
   SubmissionFileSlotsEditor,
   type SubmissionSlotDraft,
 } from "./SubmissionFileSlotsEditor";
+
+/** Untouched flags stay NULL (automatic). An explicit off is kept; an illegal on is dropped. */
+export function storedPreviewFlag(
+  touched: boolean,
+  value: boolean | null,
+  allowed: boolean
+): boolean | null {
+  if (!touched) {
+    return null;
+  }
+  if (value === true) {
+    return allowed ? true : null;
+  }
+  return value === false ? false : null;
+}
 
 /** The version just stored, for the rows still on screen. Ignores anything else in the body. */
 export function adoptSavedRubricVersion(
@@ -260,6 +276,13 @@ export function ContentForm({
       codeLanguage: initialData?.code_language,
     })
   );
+  // NULL stays automatic and follows the layout. A saved boolean is kept until the layout makes
+  // that "on" illegal (same idea as a filename the admin already edited).
+  const [showPreview, setShowPreview] = useState<boolean | null>(initialData?.show_preview ?? null);
+  const [showConsole, setShowConsole] = useState<boolean | null>(initialData?.show_console ?? null);
+  const [previewFlagsTouched, setPreviewFlagsTouched] = useState(
+    () => initialData?.show_preview != null || initialData?.show_console != null
+  );
   // Only the object key is stored (#89). Legacy public URLs are normalized to a key; unnormalizable
   // values become empty, but requiresSlidePdf (initialData.pdf_url truthy) blocks saving until
   // re-upload, so values never vanish silently.
@@ -388,6 +411,9 @@ export function ContentForm({
   // empty pdf_url.
   const requiresSlidePdf = mode === "create" || Boolean(initialData?.pdf_url);
   const isSlidePdfMissing = contentType === "slide" && requiresSlidePdf && !pdfUrl.trim();
+  const previewCap = previewCapability(
+    submissionSlots.map((slot) => ({ filename: slot.filename, language: slot.language }))
+  );
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -461,6 +487,14 @@ export function ContentForm({
       reference_answer: contentType === "exercise" ? referenceAnswer.trim() || null : null,
       starter_files: slotPayload?.ok ? slotPayload.starterFiles : null,
       submission_file_slots: slotPayload?.ok ? slotPayload.slots : null,
+      show_preview:
+        contentType === "exercise"
+          ? storedPreviewFlag(previewFlagsTouched, showPreview, previewCap.previewAllowed)
+          : null,
+      show_console:
+        contentType === "exercise"
+          ? storedPreviewFlag(previewFlagsTouched, showConsole, previewCap.consoleAllowed)
+          : null,
       allowed_submission_types: contentType === "exercise" ? allowedSubmissionTypes : "code",
       code_language:
         contentType === "exercise"
@@ -831,7 +865,71 @@ export function ContentForm({
                   受講生にはこの行数の入力欄が最初から出ます。ファイル名と言語は変えられず、空のファイルは提出できません。1行目の言語が演習のコード言語として保存されます。ファイル名を言語の既定（例:
                   code.js）の1件だけにすると構成は未指定として保存され、既存の演習と同じ単一ファイルになります。初期コードを空にすると、提出フォームは空欄から始まります。
                 </p>
-                <SubmissionFileSlotsEditor slots={submissionSlots} onChange={setSubmissionSlots} />
+                <SubmissionFileSlotsEditor
+                  slots={submissionSlots}
+                  onChange={(next) => {
+                    setSubmissionSlots(next);
+                    if (!previewFlagsTouched) {
+                      return;
+                    }
+                    const nextCap = previewCapability(
+                      next.map((slot) => ({ filename: slot.filename, language: slot.language }))
+                    );
+                    setShowPreview((current) =>
+                      current === true && !nextCap.previewAllowed ? null : current
+                    );
+                    setShowConsole((current) =>
+                      current === true && !nextCap.consoleAllowed ? null : current
+                    );
+                  }}
+                />
+              </div>
+              <div className="space-y-3">
+                <Label>ブラウザでの表示</Label>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="showPreview"
+                      type="checkbox"
+                      checked={previewCap.previewAllowed && (showPreview ?? previewCap.autoPreview)}
+                      disabled={!previewCap.previewAllowed}
+                      onChange={(e) => {
+                        setPreviewFlagsTouched(true);
+                        setShowPreview(e.target.checked);
+                      }}
+                      className="h-4 w-4 rounded border-input disabled:opacity-50"
+                    />
+                    <Label htmlFor="showPreview">プレビューを表示</Label>
+                  </div>
+                  <p className="ml-6 text-xs text-muted-foreground">
+                    {previewCap.previewAllowed
+                      ? "HTML を含む課題で、提出内容をブラウザに表示します。"
+                      : "HTML を含む構成のときだけオンにできます。"}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="showConsole"
+                      type="checkbox"
+                      checked={previewCap.consoleAllowed && (showConsole ?? previewCap.autoConsole)}
+                      disabled={!previewCap.consoleAllowed}
+                      onChange={(e) => {
+                        setPreviewFlagsTouched(true);
+                        setShowConsole(e.target.checked);
+                      }}
+                      className="h-4 w-4 rounded border-input disabled:opacity-50"
+                    />
+                    <Label htmlFor="showConsole">コンソールを表示</Label>
+                  </div>
+                  <p className="ml-6 text-xs text-muted-foreground">
+                    {previewCap.consoleAllowed
+                      ? previewCap.autoPreview
+                        ? "スクリプトの出力とエラーをプレビューの下に出します。"
+                        : "プレビュー枠は出さず、「実行」を押したときだけ動きます。"
+                      : "HTML または JavaScript だけで、ほかの言語を含まない構成のときだけオンにできます。"}
+                  </p>
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>提出方法</Label>

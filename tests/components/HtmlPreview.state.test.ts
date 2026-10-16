@@ -102,6 +102,37 @@ describe("HtmlPreview（コンソールの受信と実行ごとの作り直し�
     expect(iframe()).toBe(newFrame);
   });
 
+  it("コンソールだけは実行を押すまで動かさず、押すたびに一覧を空にして作り直す", async () => {
+    const props = {
+      files: filesWith('console.log("hi")'),
+      showPreviewFrame: false,
+      showConsolePanel: true,
+    };
+    await act(() => root.render(createElement(HtmlPreview, props)));
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(container.textContent).not.toContain('console.log("hi")');
+
+    const runButton = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes("実行")
+    ) as HTMLButtonElement;
+    await act(() => runButton.click());
+    const first = iframe();
+    expect(first.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(first.getAttribute("sandbox")).not.toContain("allow-same-origin");
+    expect(first.className).not.toContain("h-[360px]");
+    expect(first.getAttribute("srcdoc")).toContain('console.log("hi")');
+    post(line("once"));
+    await settle();
+    expect(lines()).toEqual(["once"]);
+
+    await act(() => runButton.click());
+    expect(iframe()).not.toBe(first);
+    expect(lines()).toEqual([]);
+    post(line("stale"), first.contentWindow);
+    await settle();
+    expect(lines()).toEqual([]);
+  });
+
   it("アンマウント時に未反映の行のフレームを取り消す", async () => {
     const cancel = vi.spyOn(window, "cancelAnimationFrame");
     await render();
@@ -109,5 +140,36 @@ describe("HtmlPreview（コンソールの受信と実行ごとの作り直し�
     act(() => root.unmount());
     expect(cancel).toHaveBeenCalled();
     root = createRoot(container);
+  });
+
+  it("コンソールだけの折りたたみを閉じると実行結果を捨て、開き直しても自動では動かない", async () => {
+    const props = {
+      files: filesWith("while(true){}"),
+      showPreviewFrame: false,
+      showConsolePanel: true,
+      collapsible: true,
+    };
+    await act(() => root.render(createElement(HtmlPreview, props)));
+    const toggle = () =>
+      [...container.querySelectorAll("button")].find((button) =>
+        /コンソールを表示|閉じる/.test(button.textContent ?? "")
+      ) as HTMLButtonElement;
+
+    await act(() => toggle().click());
+    const runButton = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes("実行")
+    ) as HTMLButtonElement;
+    await act(() => runButton.click());
+    expect(iframe()).not.toBeNull();
+    post(line("ran"));
+    await settle();
+    expect(lines()).toEqual(["ran"]);
+
+    await act(() => toggle().click());
+    expect(container.querySelector("iframe")).toBeNull();
+
+    await act(() => toggle().click());
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(container.textContent).toContain("「実行」を押すと");
   });
 });

@@ -52,6 +52,8 @@ function buildPatch(
               grading_rubric: null,
               starter_files: null,
               submission_file_slots: null,
+              show_preview: null,
+              show_console: null,
             };
       if (!contentTypeStoresTextContent(contentType)) {
         patch.text_content = null;

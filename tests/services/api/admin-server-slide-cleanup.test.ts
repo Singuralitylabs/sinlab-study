@@ -537,7 +537,7 @@ describe("updateContent の現在値取得の一本化（issue #246）", () => {
     expect(remove).not.toHaveBeenCalled();
     expect(mockClient.from).toHaveBeenCalledTimes(2);
     expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith(
-      "week_id, pdf_url, grading_rubric, content_type, submission_file_slots"
+      "week_id, pdf_url, grading_rubric, content_type, submission_file_slots, show_preview, show_console"
     );
   });
 
@@ -1186,6 +1186,8 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       grading_rubric: storedRubric,
       content_type: "exercise",
       submission_file_slots: null,
+      show_preview: null,
+      show_console: null,
     });
     expect(restoreBuilder.eq).toHaveBeenCalledWith("grading_rubric->>version", "3");
     expect(restoreBuilder.eq).toHaveBeenCalledWith("updated_at", "2026-10-13T00:00:00.000Z");
@@ -1232,6 +1234,8 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       grading_rubric: storedRubric,
       content_type: "exercise",
       submission_file_slots: slots,
+      show_preview: null,
+      show_console: null,
     });
   });
 

@@ -663,6 +663,78 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     ).toBe(false);
   });
 
+  it("プレビューとコンソールは許される構成だけオンにでき、NULL は自動として通る", () => {
+    const base = {
+      title: "演習1",
+      week_id: 1,
+      content_type: "exercise" as const,
+      insert_after_id: null,
+    };
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "index.html", language: "html" }],
+        show_preview: true,
+        show_console: false,
+      }).success
+    ).toBe(true);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "main.js", language: "javascript" }],
+        show_preview: null,
+        show_console: null,
+      }).success
+    ).toBe(true);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        code_language: "javascript",
+        show_preview: true,
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "q.sql", language: "sql" }],
+        show_console: true,
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        content_type: "video",
+        show_preview: false,
+      }).success
+    ).toBe(false);
+    expect(
+      ContentUpdateSchema.safeParse({
+        show_preview: true,
+        show_console: true,
+        submission_file_slots: [
+          { filename: "index.html", language: "html" },
+          { filename: "main.js", language: "javascript" },
+        ],
+      }).success
+    ).toBe(true);
+    expect(ContentUpdateSchema.safeParse({ show_console: true }).success).toBe(true);
+    // Layout omitted: zod must not invent a default single file and reject; updateContent reads
+    // the row. content_type alone is not a layout.
+    expect(
+      ContentUpdateSchema.safeParse({
+        content_type: "exercise",
+        show_preview: true,
+      }).success
+    ).toBe(true);
+    // Update: code_language alone is not a layout (create still treats it as one above).
+    expect(
+      ContentUpdateSchema.safeParse({
+        code_language: "javascript",
+        show_preview: true,
+      }).success
+    ).toBe(true);
+  });
+
   it("insert_after_idはnullまたは正の整数、0以下・小数は検証エラー", () => {
     const base = { title: "コンテンツ1", week_id: 1, content_type: "video" as const };
     expect(ContentCreateSchema.safeParse({ ...base, insert_after_id: 2 }).success).toBe(true);

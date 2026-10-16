@@ -204,7 +204,7 @@ describe("fetchCompletedAIReviewContentIds", () => {
 
 describe("fetchSubmissionsWithReviewsByUserId", () => {
   const listSelect =
-    "*, content:learning_contents(id, title, code_language), ai_review:ai_reviews(id, status, overall_score, review_content, reviewed_at, error_message, review_json, score_kind, rubric_version, passed)";
+    "*, content:learning_contents(id, title, code_language, submission_file_slots, starter_files, show_preview, show_console), ai_review:ai_reviews(id, status, overall_score, review_content, reviewed_at, error_message, review_json, score_kind, rubric_version, passed)";
 
   it("指定ページの提出一覧と総数を返す（2ページ目は range(20, 39)）", async () => {
     const rows = [{ id: 21 }, { id: 22 }];
@@ -274,6 +274,41 @@ describe("fetchSubmissionsWithReviewsByUserId", () => {
     expect(result.error).toBeNull();
     const builder = mockClient.from.mock.results[0]?.value;
     expect(builder.select).toHaveBeenCalledWith(listSelect, { count: "exact" });
+  });
+
+  it("一覧の starter_files はファイル名・言語を残し content を空にする", async () => {
+    const rows = [
+      {
+        id: 1,
+        user_id: 10,
+        content_id: 100,
+        content: {
+          id: 100,
+          title: "課題1",
+          code_language: "html",
+          submission_file_slots: null,
+          starter_files: [
+            { filename: "index.html", language: "html", content: "<h1>huge</h1>" },
+            { filename: "app.js", language: "javascript", content: "console.log(1)" },
+          ],
+          show_preview: null,
+          show_console: null,
+        },
+        ai_review: null,
+      },
+    ];
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: rows, error: null, count: 1 },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchSubmissionsWithReviewsByUserId(10);
+
+    expect(result.error).toBeNull();
+    expect(result.data?.[0]?.content?.starter_files).toEqual([
+      { filename: "index.html", language: "html", content: "" },
+      { filename: "app.js", language: "javascript", content: "" },
+    ]);
   });
 
   it("DB エラー時、data: null / count: 0 とエラーを返す", async () => {

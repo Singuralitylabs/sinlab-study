@@ -125,6 +125,17 @@ export default async function ManageSubmissionsPage({ searchParams }: PageProps)
                       getSubmissionCodeFiles(submission),
                       submission.content?.code_language
                     )}
+                    previewSource={
+                      submission.content
+                        ? {
+                            submissionFileSlots: submission.content.submission_file_slots,
+                            starterFiles: submission.content.starter_files,
+                            codeLanguage: submission.content.code_language,
+                            showPreview: submission.content.show_preview,
+                            showConsole: submission.content.show_console,
+                          }
+                        : null
+                    }
                     preClassName="p-3 bg-muted rounded-lg text-sm overflow-x-auto max-h-40"
                   />
                 )}

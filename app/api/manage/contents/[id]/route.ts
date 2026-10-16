@@ -33,6 +33,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       reference_answer,
       starter_files,
       submission_file_slots,
+      show_preview,
+      show_console,
       allowed_submission_types,
       code_language,
       pdf_url,
@@ -44,35 +46,47 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       quiz_questions,
     } = validation.data;
 
-    const { error, storageRemoved, conflict, keyReuse, slotsNotAllowed, gradingRubricVersion } =
-      await updateContent(contentId, {
-        title,
-        week_id,
-        content_type,
-        video_url,
-        text_content,
-        description,
-        exercise_instructions,
-        hint,
-        reference_answer,
-        starter_files,
-        submission_file_slots,
-        allowed_submission_types,
-        code_language,
-        pdf_url,
-        gradingRubric: grading_rubric,
-        loadedRubricVersion: grading_rubric_version,
-        insertAfterId: insert_after_id,
-        is_published,
-        is_open_to_trial,
-        quizQuestions: quiz_questions,
-      });
+    const {
+      error,
+      storageRemoved,
+      conflict,
+      keyReuse,
+      slotsNotAllowed,
+      previewNotAllowed,
+      gradingRubricVersion,
+    } = await updateContent(contentId, {
+      title,
+      week_id,
+      content_type,
+      video_url,
+      text_content,
+      description,
+      exercise_instructions,
+      hint,
+      reference_answer,
+      starter_files,
+      submission_file_slots,
+      show_preview,
+      show_console,
+      allowed_submission_types,
+      code_language,
+      pdf_url,
+      gradingRubric: grading_rubric,
+      loadedRubricVersion: grading_rubric_version,
+      insertAfterId: insert_after_id,
+      is_published,
+      is_open_to_trial,
+      quizQuestions: quiz_questions,
+    });
 
     if (slotsNotAllowed) {
       return NextResponse.json(
         { error: "提出ファイルの構成は演習だけに設定できます" },
         { status: 400 }
       );
+    }
+    if (previewNotAllowed) {
+      return NextResponse.json({ error: previewNotAllowed }, { status: 400 });
     }
     if (keyReuse) {
       return NextResponse.json(

@@ -23,9 +23,13 @@ import {
   nextGradingRubric,
   parseStoredGradingRubric,
 } from "@/app/lib/grading-schema";
+import { PREVIEW_EXERCISE_ONLY_MESSAGE, previewSettingsError } from "@/app/lib/html-preview";
 import type { QuizQuestionData } from "@/app/lib/quiz";
 import { toSlideObjectKey } from "@/app/lib/slide-object-key";
-import { parseSubmissionFileSlots } from "@/app/lib/submission-file-slots";
+import {
+  parseSubmissionFileSlots,
+  resolveSubmissionFileSlots,
+} from "@/app/lib/submission-file-slots";
 import { WEEKLY_FUNNEL_FETCH_ERROR, type WeeklyFunnelRow } from "@/app/lib/weekly-funnel";
 import {
   fetchStripeSubscriptionByUserId,
@@ -1189,6 +1193,8 @@ type CreateContentInput = {
   reference_answer?: string | null;
   starter_files?: LearningContent["starter_files"];
   submission_file_slots?: LearningContent["submission_file_slots"];
+  show_preview?: boolean | null;
+  show_console?: boolean | null;
   allowed_submission_types?: "code" | "url" | "both";
   code_language?: CodeLanguage;
   pdf_url?: string | null;
@@ -1208,6 +1214,8 @@ type CreateContentResult = {
   data: LearningContent | null;
   error: PostgrestError | null;
   publishFailed?: boolean;
+  /** Explicit preview/console flags the file layout cannot show. */
+  previewNotAllowed?: string;
 };
 
 export async function createContent(content: CreateContentInput): Promise<CreateContentResult> {
@@ -1236,8 +1244,27 @@ async function createContentWith(
   const quizQuestions = content.content_type === "quiz" ? content.quizQuestions : undefined;
   // Non-exercise rows cannot store slots (CHECK). The first slot's language is code_language
   // so AI review's single-file fallback matches the layout the learner submits.
-  const submissionFileSlots =
-    content.content_type === "exercise" ? (content.submission_file_slots ?? null) : null;
+  const exercise = content.content_type === "exercise";
+  const submissionFileSlots = exercise ? (content.submission_file_slots ?? null) : null;
+  const showPreview = exercise ? (content.show_preview ?? null) : null;
+  const showConsole = exercise ? (content.show_console ?? null) : null;
+  if (exercise) {
+    const previewMessage = previewSettingsError({
+      contentType: "exercise",
+      files: resolveSubmissionFileSlots({
+        submissionFileSlots,
+        starterFiles: Array.isArray(content.starter_files)
+          ? (content.starter_files as { filename: string; language: string }[])
+          : null,
+        codeLanguage: content.code_language,
+      }),
+      showPreview,
+      showConsole,
+    });
+    if (previewMessage) {
+      return { data: null, error: null, previewNotAllowed: previewMessage };
+    }
+  }
   const firstSlotLanguage = parseSubmissionFileSlots(submissionFileSlots)?.[0]?.language;
 
   const { data, error } = await supabase
@@ -1257,6 +1284,8 @@ async function createContentWith(
       reference_answer: content.reference_answer,
       starter_files: content.starter_files,
       submission_file_slots: submissionFileSlots,
+      show_preview: showPreview,
+      show_console: showConsole,
       allowed_submission_types: content.allowed_submission_types,
       code_language: firstSlotLanguage ?? content.code_language,
       pdf_url: content.pdf_url,
@@ -1351,6 +1380,18 @@ export async function createContentsAtTail(
         failedIndex: index,
       };
     }
+    if (result.previewNotAllowed) {
+      return {
+        created,
+        error: {
+          message: result.previewNotAllowed,
+          code: "23514",
+          details: "",
+          hint: "",
+        } as PostgrestError,
+        failedIndex: index,
+      };
+    }
     const { data, error } = result;
     if (error || !data) {
       return {
@@ -1432,12 +1473,103 @@ type ContentUpdateResult = {
   keyReuse?: string[];
   /** Slots were sent without content_type onto a row that is not an exercise. */
   slotsNotAllowed?: boolean;
+  /** show_preview / show_console cannot be stored for this layout or content type. */
+  previewNotAllowed?: string;
   /**
    * Version stored by this save. Present only after the rubric write commits, so the editor can
    * keep locking the rows still on screen. null means the rubric was cleared.
    */
   gradingRubricVersion?: number | null;
 };
+
+/**
+ * Rejects an explicit preview/console that the resolved layout cannot show. A title-only
+ * update does not read the row. A partial body that omits the layout or the flags does.
+ */
+async function rejectIllegalPreviewSettings(
+  supabase: AdminSupabaseClient,
+  id: number,
+  patch: Partial<LearningContent>
+): Promise<string | null | "missing"> {
+  const setsFlags = patch.show_preview !== undefined || patch.show_console !== undefined;
+  const changesLayout =
+    patch.submission_file_slots !== undefined ||
+    patch.starter_files !== undefined ||
+    patch.code_language !== undefined;
+  if (!setsFlags && !changesLayout) {
+    return null;
+  }
+
+  let contentType = patch.content_type;
+  let slots = patch.submission_file_slots;
+  let starter = patch.starter_files;
+  let language = patch.code_language;
+  let showPreview = patch.show_preview;
+  let showConsole = patch.show_console;
+  // Skip the row read only when every layout input and both flags are in the patch. A partial
+  // layout (e.g. code_language alone) must merge omitted slots/starter/flags from the row, or an
+  // illegal true can be stored against the real DB layout.
+  const complete =
+    contentType === "exercise" &&
+    patch.submission_file_slots !== undefined &&
+    patch.starter_files !== undefined &&
+    patch.code_language !== undefined &&
+    patch.show_preview !== undefined &&
+    patch.show_console !== undefined;
+  if (!complete) {
+    const { data, error } = await supabase
+      .from("learning_contents")
+      .select(
+        "content_type, submission_file_slots, starter_files, code_language, show_preview, show_console"
+      )
+      .eq("id", id)
+      .eq("is_deleted", false)
+      .maybeSingle();
+    if (error || !data) {
+      console.error("コンテンツ更新エラー（プレビュー設定）:", error?.message ?? "no row");
+      return "missing";
+    }
+    // Prefer the type this request is moving to (video→exercise with flags only must not 400).
+    const resolvedType = contentType ?? data.content_type;
+    if (resolvedType !== "exercise") {
+      return patch.show_preview != null || patch.show_console != null
+        ? PREVIEW_EXERCISE_ONLY_MESSAGE
+        : null;
+    }
+    contentType = "exercise";
+    if (slots === undefined) {
+      slots = data.submission_file_slots;
+    }
+    if (starter === undefined) {
+      starter = data.starter_files;
+    }
+    if (language === undefined) {
+      language = data.code_language;
+    }
+    if (showPreview === undefined) {
+      showPreview = data.show_preview;
+    }
+    if (showConsole === undefined) {
+      showConsole = data.show_console;
+    }
+  }
+
+  if (showPreview !== true && showConsole !== true) {
+    return null;
+  }
+  return previewSettingsError({
+    contentType: "exercise",
+    files: resolveSubmissionFileSlots({
+      submissionFileSlots: slots ?? null,
+      starterFiles: Array.isArray(starter)
+        ? (starter as { filename: string; language: string }[])
+        : null,
+      codeLanguage: language,
+    }),
+    showPreview: showPreview ?? null,
+    showConsole: showConsole ?? null,
+  });
+}
 
 export async function updateContent(
   id: number,
@@ -1482,6 +1614,24 @@ export async function updateContent(
   }
   if (patch.content_type !== undefined && patch.content_type !== "exercise") {
     patch.submission_file_slots = null;
+    patch.show_preview = null;
+    patch.show_console = null;
+  } else {
+    const previewRejection = await rejectIllegalPreviewSettings(supabase, id, patch);
+    if (previewRejection === "missing") {
+      return {
+        error: {
+          message: "コンテンツの現在値を取得できませんでした",
+          details: "",
+          hint: "",
+          code: "PGRST116",
+        } as PostgrestError,
+        storageRemoved: true,
+      };
+    }
+    if (previewRejection) {
+      return { error: null, storageRemoved: true, previewNotAllowed: previewRejection };
+    }
   }
   const firstSlotLanguage = parseSubmissionFileSlots(patch.submission_file_slots)?.[0]?.language;
   if (firstSlotLanguage) {
@@ -1608,6 +1758,8 @@ async function updateContentRow(
     grading_rubric: LearningContent["grading_rubric"];
     content_type: LearningContent["content_type"];
     submission_file_slots?: LearningContent["submission_file_slots"];
+    show_preview?: LearningContent["show_preview"];
+    show_console?: LearningContent["show_console"];
   } | null = null;
   let rubricWriteCommitted = false;
   let committedRubricVersion: number | null | undefined;
@@ -1618,7 +1770,9 @@ async function updateContentRow(
   if (needsCurrentWeek || needsCurrentPdf || touchesRubric) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
-      .select("week_id, pdf_url, grading_rubric, content_type, submission_file_slots")
+      .select(
+        "week_id, pdf_url, grading_rubric, content_type, submission_file_slots, show_preview, show_console"
+      )
       .eq("id", id)
       .eq("is_deleted", false)
       .single();
@@ -1704,6 +1858,8 @@ async function updateContentRow(
         };
         if (movesAwayFromExercise) {
           rubricSnapshot.submission_file_slots = current.submission_file_slots ?? null;
+          rubricSnapshot.show_preview = current.show_preview ?? null;
+          rubricSnapshot.show_console = current.show_console ?? null;
         }
         expectedRubricVersion = lockVersion;
       }
@@ -1729,6 +1885,8 @@ async function updateContentRow(
       // ride this UPDATE. A later statement would run after the type has already changed.
       if (patch.content_type !== "exercise") {
         rubricPayload.submission_file_slots = null;
+        rubricPayload.show_preview = null;
+        rubricPayload.show_console = null;
       }
     }
     let rubricUpdate = supabase
@@ -1751,6 +1909,10 @@ async function updateContentRow(
     }
     if (rubricPayload.submission_file_slots === null) {
       delete patch.submission_file_slots;
+    }
+    if (rubricPayload.show_preview === null) {
+      delete patch.show_preview;
+      delete patch.show_console;
     }
     rubricWriteCommitted = true;
     // The editor's next save has to lock this write, not a version a later refresh might load

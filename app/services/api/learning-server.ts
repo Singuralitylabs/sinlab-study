@@ -79,7 +79,7 @@ export const LEARNING_WEEK_DETAIL_COLUMNS = `*, phase:learning_phases(${BREADCRU
  * after a submission through fetchExerciseReferenceAnswer(). Typed as `*` so the nested week
  * embed does not blow the type checker's instantiation depth.
  */
-export const LEARNING_CONTENT_DETAIL_COLUMN_LIST = `id, week_id, title, content_type, video_url, pdf_url, text_content, description, exercise_instructions, hint, allowed_submission_types, code_language, starter_files, submission_file_slots, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
+export const LEARNING_CONTENT_DETAIL_COLUMN_LIST = `id, week_id, title, content_type, video_url, pdf_url, text_content, description, exercise_instructions, hint, allowed_submission_types, code_language, starter_files, submission_file_slots, show_preview, show_console, is_open_to_trial, is_published, is_deleted, display_order, created_at, updated_at, week:learning_weeks(${BREADCRUMB_WEEK_COLUMNS})`;
 export const LEARNING_CONTENT_DETAIL_COLUMNS =
   LEARNING_CONTENT_DETAIL_COLUMN_LIST as unknown as "*";
 

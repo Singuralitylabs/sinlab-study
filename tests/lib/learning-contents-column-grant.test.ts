@@ -82,4 +82,16 @@ describe("learning_contents の受講生向け列権限", () => {
     expect(summary?.[1]).toBeTruthy();
     expect(summary?.[1]).not.toContain("submission_file_slots");
   });
+
+  it("show_preview と show_console は受講生に付与し、service_role のサマリー列には含めない", () => {
+    expect(granted).toContain("show_preview");
+    expect(granted).toContain("show_console");
+    expect(ownColumns(LEARNING_CONTENT_DETAIL_COLUMN_LIST)).toEqual(
+      expect.arrayContaining(["show_preview", "show_console"])
+    );
+    const source = readFileSync(learningServerPath, "utf8");
+    const summary = source.match(/CONTENT_VISIBILITY_SUMMARY_COLUMNS =\s*\n?\s*"([^"]+)"/);
+    expect(summary?.[1]).not.toContain("show_preview");
+    expect(summary?.[1]).not.toContain("show_console");
+  });
 });

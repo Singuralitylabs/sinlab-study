@@ -9,12 +9,13 @@ import { HtmlPreviewNoSSR } from "@/app/components/HtmlPreviewNoSSR";
 import { LockedCodeFilesEditor } from "@/app/components/LockedCodeFilesEditor";
 import { buildReviewNotice } from "@/app/lib/ai-review-response";
 import type { CodeFileInput } from "@/app/lib/code-file-inputs";
-import { canPreviewFiles } from "@/app/lib/html-preview";
+import { resolvePreviewDisplay } from "@/app/lib/html-preview";
 import {
   blocksUneditedStarter,
   buildLockedSubmissionFiles,
   isLockedSubmissionReady,
   layoutOmitsEmptyFiles,
+  resolveSubmissionFileSlots,
 } from "@/app/lib/submission-file-slots";
 import type { AIReviewListItem, CodeFile, Json, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -28,6 +29,9 @@ interface SubmissionFormProps {
   codeLanguage: CodeLanguage;
   starterFiles?: CodeFile[] | null;
   submissionFileSlots?: Json | null;
+  /** NULL follows the file layout. The learner's editor language is not consulted. */
+  showPreview?: boolean | null;
+  showConsole?: boolean | null;
   /** Id of the completed review the page already renders for this submission. */
   persistedReviewId: number | null;
   /** When true, partial/unmet rows show review-list cues (learners only). */
@@ -55,6 +59,8 @@ export function SubmissionForm({
   codeLanguage,
   starterFiles = null,
   submissionFileSlots = null,
+  showPreview = null,
+  showConsole = null,
   persistedReviewId,
   showReviewListNotes = false,
 }: SubmissionFormProps) {
@@ -91,8 +97,18 @@ export function SubmissionForm({
     submissionFileSlots,
     starterFiles: starterSnapshot,
   });
-  // Judged by the files' own languages so the UI never appears for non-web exercises.
-  const showPreview = submissionType === "code" && canPreviewFiles(codeFiles);
+  // The admin layout decides. Changing a file's text does not turn the frame on or off.
+  const previewDisplay = resolvePreviewDisplay({
+    files: resolveSubmissionFileSlots({
+      submissionFileSlots,
+      starterFiles: starterSnapshot,
+      codeLanguage,
+    }),
+    showPreview,
+    showConsole,
+  });
+  const showRunner =
+    submissionType === "code" && (previewDisplay.preview || previewDisplay.console);
 
   const resetToStarter = () => {
     setCodeFiles(initialFiles.map((file) => ({ ...file })));
@@ -276,13 +292,15 @@ export function SubmissionForm({
                 内容が空のファイルは提出に含めません。
               </p>
             )}
-            {showPreview && (
+            {showRunner && (
               <HtmlPreviewNoSSR
                 files={codeFiles.map(({ filename, language, content }) => ({
                   filename,
                   language,
                   content,
                 }))}
+                showPreviewFrame={previewDisplay.preview}
+                showConsolePanel={previewDisplay.console}
               />
             )}
           </div>
