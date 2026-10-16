@@ -1,4 +1,6 @@
-/** Exact paths the proxy may skip for installability. Do not add prefixes or extra files. */
+/** Exact paths the proxy may skip for installability. Do not add prefixes or extra files.
+ * Only `/offline` is not already covered by STATIC_FILE_EXTENSIONS / the matcher; the other
+ * three stay listed so the allowlist stays explicit and does not grow casually. */
 export const PWA_PUBLIC_PATHS = [
   "/manifest.webmanifest",
   "/sw.js",
@@ -18,13 +20,24 @@ export const PWA_BACKGROUND_COLOR = "#f3f6fb";
 
 export const INSTALL_PROMPT_DISMISS_KEY = "sinlab-pwa-install-dismissed";
 
-export function isMobileUserAgent(userAgent: string): boolean {
-  return /Android|iPhone|iPad|iPod/i.test(userAgent);
+/** iPadOS 13+ reports as Macintosh; maxTouchPoints > 1 distinguishes it from desktop Mac. */
+export function isIosUserAgent(userAgent: string, maxTouchPoints = 0): boolean {
+  if (/iPhone|iPad|iPod/i.test(userAgent)) {
+    return true;
+  }
+  return /Macintosh/i.test(userAgent) && maxTouchPoints > 1;
+}
+
+export function isMobileUserAgent(userAgent: string, maxTouchPoints = 0): boolean {
+  if (/Android/i.test(userAgent)) {
+    return true;
+  }
+  return isIosUserAgent(userAgent, maxTouchPoints);
 }
 
 /** iOS cannot fire beforeinstallprompt; any iPhone/iPad UA gets the share-sheet steps. */
-export function installPromptPlatform(userAgent: string): "ios" | "android" {
-  return /iPhone|iPad|iPod/i.test(userAgent) ? "ios" : "android";
+export function installPromptPlatform(userAgent: string, maxTouchPoints = 0): "ios" | "android" {
+  return isIosUserAgent(userAgent, maxTouchPoints) ? "ios" : "android";
 }
 
 export function shouldShowInstallPrompt(input: {

@@ -3,8 +3,9 @@
  * loaded it. Navigations stay network-first so a demotion, rejection, or content lock is
  * never served from a stale authenticated HTML document. /offline is precached at install
  * because the navigate fallback only reads the cache. /api responses are not cached.
+ * Bump STATIC_CACHE when offline HTML or caching rules change so activate drops old entries.
  * push / notificationclick are added in the push stage. */
-const STATIC_CACHE = "sinlab-static-v1";
+const STATIC_CACHE = "sinlab-static-v2";
 const OFFLINE_URL = "/offline";
 
 self.addEventListener("install", (event) => {
@@ -17,7 +18,14 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(keys.filter((key) => key !== STATIC_CACHE).map((key) => caches.delete(key)))
+      )
+      .then(() => self.clients.claim())
+  );
 });
 
 function isIcon(pathname) {
