@@ -10,21 +10,12 @@ vi.mock("@/app/(authenticated)/upgrade/UpgradeCheckoutButton", () => ({
     <div data-testid="checkout">{disabled ? "checkout-disabled" : "checkout"}</div>
   ),
 }));
-vi.mock("@/app/(authenticated)/upgrade/CommunityApplyButton", () => ({
-  CommunityApplyButton: () => (
-    <a href="https://example.com/form" target="_blank" rel="noopener noreferrer">
-      申し込む
-    </a>
-  ),
-}));
-vi.mock("@/app/(authenticated)/upgrade/PlanInquiryButton", () => ({
-  PlanInquiryButton: () => <div>inquiry-compact</div>,
-}));
 
 import { PlanCards } from "@/app/(authenticated)/upgrade/PlanCards";
+import { TrialCheckoutDetails } from "@/app/(authenticated)/upgrade/TrialCheckoutDetails";
 import { SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE } from "@/app/constants/stripe";
 
-describe("PlanCards モーダル", () => {
+describe("PlanCards", () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -41,35 +32,22 @@ describe("PlanCards モーダル", () => {
     container.remove();
   });
 
-  it("一般有料カードのモーダルでは法定表示・未成年者注意が Checkout より前にある", async () => {
-    const legalItem = "すべての学習コンテンツ（動画・テキスト・演習）を閲覧・提出できます";
-    const minorNotice =
-      "未成年者は保護者のアカウントにより、保護者の同意を得た上でお申し込みください";
-
+  it("一般有料カードを開くと TrialCheckoutDetails の並びで Checkout より前に法定表示がある", async () => {
     await act(async () => {
       root.render(
         <PlanCards
           generalPriceLabel={null}
-          generalDialog={
-            <div>
-              <p>—</p>
-              <ul>
-                <li>{legalItem}</li>
-              </ul>
-              <p>{minorNotice}</p>
-              <p>{SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE}</p>
-              <div data-testid="checkout">checkout-disabled</div>
-            </div>
-          }
+          generalDialog={<TrialCheckoutDetails monthlyPriceLabel={null} checkoutDisabled={true} />}
           communityDialog={<p>community body</p>}
         />
       );
     });
 
     const generalDetail = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("一般有料会員")
+      button.getAttribute("aria-label")?.includes("一般有料会員")
     );
     expect(generalDetail).toBeTruthy();
+    expect(container.textContent).not.toContain("詳細を見る");
 
     await act(async () => {
       generalDetail?.click();
@@ -78,6 +56,9 @@ describe("PlanCards モーダル", () => {
     const dialog = document.querySelector('[data-slot="dialog-content"]');
     expect(dialog).toBeTruthy();
     const text = dialog?.textContent ?? "";
+    const legalItem = "すべての学習コンテンツ（動画・テキスト・演習）を閲覧・提出できます";
+    const minorNotice =
+      "未成年者は保護者のアカウントにより、保護者の同意を得た上でお申し込みください";
     expect(text.indexOf(legalItem)).toBeLessThan(text.indexOf(minorNotice));
     expect(text.indexOf(minorNotice)).toBeLessThan(
       text.indexOf(SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE)
@@ -87,39 +68,24 @@ describe("PlanCards モーダル", () => {
     );
   });
 
-  it("コミュニティカードのモーダルに申し込み導線を出す", async () => {
+  it("モーダルを開くカードに › を出し、開かないカードには出さない", async () => {
     await act(async () => {
       root.render(
         <PlanCards
-          generalDialog={<p>general</p>}
-          communityDialog={
-            <div>
-              <p>申し込みフォームからお申し込みください</p>
-              <a href="https://example.com/form" target="_blank" rel="noopener noreferrer">
-                申し込む
-              </a>
-              <div>inquiry-compact</div>
-            </div>
-          }
+          currentPlan="general"
+          communityDialog={<p>community</p>}
+          generalCardFooter={<p>manage footer</p>}
         />
       );
     });
 
-    const communityDetail = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("コミュニティ会員")
-    );
-    expect(communityDetail).toBeTruthy();
-
-    await act(async () => {
-      communityDetail?.click();
-    });
-
-    const dialog = document.querySelector('[data-slot="dialog-content"]');
-    const text = dialog?.textContent ?? "";
-    expect(text).toContain("申し込みフォームからお申し込みください");
-    expect(text).toContain("申し込む");
-    expect(text).toContain("inquiry-compact");
-    expect(dialog?.querySelector('a[rel="noopener noreferrer"]')).toBeTruthy();
+    // Only community opens a dialog; general is current-plan with footer only.
+    const chevrons = container.querySelectorAll("svg.lucide-chevron-right, svg");
+    const openButtons = container.querySelectorAll('button[aria-label$="の詳細を開く"]');
+    expect(openButtons.length).toBe(1);
+    expect(openButtons[0]?.getAttribute("aria-label")).toContain("コミュニティ会員");
+    expect(chevrons.length).toBeGreaterThanOrEqual(1);
+    expect(container.textContent).toContain("manage footer");
   });
 
   it("コミュニティ特典を箇条書きで表示する", async () => {

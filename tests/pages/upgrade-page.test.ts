@@ -85,13 +85,15 @@ describe("/upgrade のプランカード", () => {
     expect(html).toContain("一般有料会員");
     expect(html).toContain("コミュニティ会員");
     expect(html).toContain("—");
-    expect(html).toContain("詳細を見る");
+    expect(html).toContain("一般有料会員の詳細を開く");
+    expect(html).toContain("コミュニティ会員の詳細を開く");
+    expect(html).not.toContain("詳細を見る");
     expect(html).toContain("Slackでのコミュニケーション");
     expect(html).toContain("Web/AIの最新情報");
     // Checkout / legal copy live in the dialog (client); not asserted on the server HTML.
   });
 
-  it("一般有料会員はご契約中バッジと解約入口をカード上に出す", async () => {
+  it("一般有料会員はご契約中バッジと解約入口をカード上に出し、一般カードはモーダルにしない", async () => {
     vi.mocked(getServerAuth).mockResolvedValue({
       user: { id: "auth-uuid" },
       userId: 7,
@@ -105,7 +107,8 @@ describe("/upgrade のプランカード", () => {
     expect(html).toContain("ご契約中");
     expect(html).toContain("ご契約中です（次回のお支払い: 2026/10/27）");
     expect(html).toContain("manage");
-    expect(html).toContain("詳細を見る");
+    expect(html).not.toContain("一般有料会員の詳細を開く");
+    expect(html).toContain("コミュニティ会員の詳細を開く");
     expect(html).toContain("Slackでのコミュニケーション");
   });
 });

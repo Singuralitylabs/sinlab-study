@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 import {
   DISPLAY_COMMUNITY_MONTHLY_PRICE_JPY,
@@ -65,7 +66,7 @@ type PlanCardsProps = {
   generalPriceLabel?: string | null;
   /** Which plan card shows the 「ご契約中」 badge and emphasized border. */
   currentPlan?: "general" | "community" | null;
-  /** Body of the dialog opened from the general card (legal notice / Checkout / manage). */
+  /** Body of the dialog opened from the general card (legal notice / Checkout). */
   generalDialog?: ReactNode;
   /** Body of the dialog opened from the community card (apply form). */
   communityDialog?: ReactNode;
@@ -93,12 +94,14 @@ function FeatureValueView({ value }: { value: FeatureValue }) {
 
 type PlanCardProps = {
   title: string;
-  subtitle?: string;
+  /** Reserved height on both cards so price/features align on sm+ (empty string = spacer). */
+  subtitle: string;
   price: string;
   features: ReadonlyArray<{ label: string; value: FeatureValue }>;
   isCurrent: boolean;
   dialogContent?: ReactNode;
   dialogDescription: string;
+  openLabel: string;
   cardFooter?: ReactNode;
 };
 
@@ -110,8 +113,11 @@ function PlanCard({
   isCurrent,
   dialogContent,
   dialogDescription,
+  openLabel,
   cardFooter,
 }: PlanCardProps) {
+  const isOpenable = Boolean(dialogContent);
+
   const featuresBlock = (
     <dl className="space-y-3 px-6 text-sm">
       {features.map((feature) => (
@@ -126,17 +132,34 @@ function PlanCard({
   const header = (
     <div className="flex flex-col gap-3 px-6">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="space-y-1">
+        <div className="space-y-1 min-w-0">
           <p className="text-base font-semibold leading-none">{title}</p>
-          {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+          {/* Keep a subtitle row on both cards so price/features share the same baseline on sm+. */}
+          <p
+            className={cn(
+              "text-xs text-muted-foreground min-h-[1rem]",
+              !subtitle && "invisible select-none"
+            )}
+            aria-hidden={!subtitle || undefined}
+          >
+            {subtitle || "\u00a0"}
+          </p>
         </div>
-        {isCurrent && <Badge variant="default">ご契約中</Badge>}
+        <div className="flex items-center gap-1 shrink-0">
+          {isCurrent && <Badge variant="default">ご契約中</Badge>}
+          {isOpenable && (
+            <ChevronRight
+              aria-hidden="true"
+              className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground group-focus-within:text-foreground"
+            />
+          )}
+        </div>
       </div>
       <p className="text-2xl font-bold">{price}</p>
     </div>
   );
 
-  if (!dialogContent) {
+  if (!isOpenable) {
     return (
       <div
         className={cn(
@@ -156,7 +179,9 @@ function PlanCard({
     <Dialog>
       <div
         className={cn(
-          "bg-card text-card-foreground flex h-full flex-col gap-6 rounded-xl border py-6 shadow-sm",
+          "group bg-card text-card-foreground flex h-full flex-col gap-6 rounded-xl border py-6 shadow-sm transition-colors",
+          "has-[>button:hover]:border-primary/60 has-[>button:hover]:bg-accent/40",
+          "has-[>button:focus-visible]:border-primary/60 has-[>button:focus-visible]:bg-accent/40",
           isCurrent && "border-primary ring-2 ring-primary/20"
         )}
         aria-current={isCurrent ? "true" : undefined}
@@ -164,13 +189,11 @@ function PlanCard({
         <DialogTrigger asChild>
           <button
             type="button"
-            className="flex flex-1 flex-col gap-6 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            aria-label={openLabel}
+            className="flex flex-1 cursor-pointer flex-col gap-6 rounded-xl text-left focus-visible:outline-none"
           >
             {header}
             {featuresBlock}
-            <p className="px-6 text-sm text-primary underline-offset-2 hover:underline">
-              詳細を見る
-            </p>
           </button>
         </DialogTrigger>
         {cardFooter && <div className="mt-auto space-y-2 px-6 pt-2">{cardFooter}</div>}
@@ -201,6 +224,7 @@ export function PlanCards({
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <PlanCard
         title={GENERAL_LABEL}
+        subtitle=""
         price={generalPrice}
         features={PLAN_FEATURES.map((feature) => ({
           label: feature.label,
@@ -209,6 +233,7 @@ export function PlanCards({
         isCurrent={currentPlan === "general"}
         dialogContent={generalDialog}
         dialogDescription="一般有料会員プランの内容とお申し込み・契約の手続き"
+        openLabel={`${GENERAL_LABEL}の詳細を開く`}
         cardFooter={generalCardFooter}
       />
       <PlanCard
@@ -222,6 +247,7 @@ export function PlanCards({
         isCurrent={currentPlan === "community"}
         dialogContent={communityDialog}
         dialogDescription="コミュニティ会員プランの内容とお申し込み"
+        openLabel={`${COMMUNITY_LABEL}の詳細を開く`}
       />
     </div>
   );

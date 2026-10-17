@@ -8,9 +8,7 @@ import {
   isChargeableSubscriptionPrice,
   isStripeEnabled,
   logDisplayPriceDrift,
-  MANAGE_SUBSCRIPTION_BUTTON_LABEL,
   PLAN_PAGE_TITLE,
-  SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
 } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP, USER_MEMBERSHIP_LABELS, USER_STATUS } from "@/app/constants/user";
 import {
@@ -28,14 +26,11 @@ import { CommunityApplyButton } from "./CommunityApplyButton";
 import { ManageSubscriptionButton } from "./ManageSubscriptionButton";
 import { PlanCards } from "./PlanCards";
 import { PlanInquiryButton } from "./PlanInquiryButton";
-import { UpgradeCheckoutButton } from "./UpgradeCheckoutButton";
+import { TrialCheckoutDetails } from "./TrialCheckoutDetails";
 
 const FALLBACK_MONTHLY_PRICE_LABEL = formatMonthlyJpyPrice(DISPLAY_MONTHLY_PRICE_JPY);
 
 const CANCELLATION_POLICY_TEXT = `解約時の日割り計算・返金はありません。解約手続き後も、当該請求期間の末日（次回${BILLING_ANCHOR_DAY_OF_MONTH}日）まで引き続きご利用いただけます。`;
-
-const MINOR_CONSENT_NOTICE =
-  "未成年者は保護者のアカウントにより、保護者の同意を得た上でお申し込みください";
 
 const COMMUNITY_APPLY_TEXT =
   "コミュニティ会員（シンラボ会員）への変更をご希望の方は、申し込みフォームからお申し込みください。運営が内容を確認し、承認後にご案内します。承認までお支払いは発生しません。";
@@ -111,86 +106,34 @@ export default async function UpgradePage() {
     </div>
   );
 
-  const trialGeneralDialog = (
-    <div className="space-y-4">
-      {monthlyPriceLabel && <p className="text-2xl font-bold">{monthlyPriceLabel}</p>}
-      <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-        <li>すべての学習コンテンツ（動画・テキスト・演習）を閲覧・提出できます</li>
-        <li>お手続き完了後、すぐにご利用いただけます</li>
-        <li>
-          月額サブスクリプション（自動更新）です。解約手続きをしない限り、毎月自動で更新・請求されます
-        </li>
-        <li>
-          お支払いは全員一律で毎月{BILLING_ANCHOR_DAY_OF_MONTH}
-          日です。この日が更新日となり、引き落としが行われます
-        </li>
-        <li>
-          初回のみ、ご登録日から次回のお支払い日（{BILLING_ANCHOR_DAY_OF_MONTH}
-          日）までの日割り料金となります（登録タイミングによっては初回分が発生しない場合があります）
-        </li>
-        <li>
-          解約は、本画面（{PLAN_PAGE_TITLE}）の「{MANAGE_SUBSCRIPTION_BUTTON_LABEL}
-          」からいつでもお手続きできます
-        </li>
-        <li>{CANCELLATION_POLICY_TEXT}</li>
-      </ul>
-      <p className="text-sm text-muted-foreground">{MINOR_CONSENT_NOTICE}</p>
-      {checkoutDisabled && (
-        <p className="text-sm text-destructive">
-          {SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE}
-          。時間をおいてページを再読み込みしてください。
-        </p>
-      )}
-      <UpgradeCheckoutButton disabled={checkoutDisabled} />
-    </div>
-  );
-
-  const activeGeneralDialog = !stripeEnabled ? (
-    <p className="text-sm text-muted-foreground">
-      既に本登録済みです。すべての学習コンテンツをご利用いただけます。
-    </p>
-  ) : subscriptionFetchFailed ? (
-    <div className="space-y-3">
-      <p className="text-sm text-destructive">
-        ご契約状況の取得に失敗しました。時間をおいてページを再読み込みしてください。
-      </p>
-      {/* Keep the billing-management/cancel entry even while contract status is unknown (/api/stripe/portal returns 404 without a contract, so pressing it is safe). */}
-      <ManageSubscriptionButton />
-    </div>
-  ) : subscription ? (
-    <div className="space-y-3">
-      <p className="text-sm">
-        ご契約中です
-        {periodLabel && `（${periodLabel}）`}
-      </p>
-      <ManageSubscriptionButton />
-      <p className="text-sm text-muted-foreground">{CANCELLATION_POLICY_TEXT}</p>
-    </div>
-  ) : (
-    <p className="text-sm text-muted-foreground">
-      既に本登録済みです。すべての学習コンテンツをご利用いただけます。
-    </p>
-  );
-
-  // Keep manage/cancel on the card face so the entry stays obvious without opening the dialog.
+  // Active general: no dialog on the general card — status + manage stay on the card face.
   const generalCardFooter =
-    userStatus === USER_STATUS.ACTIVE && !isCommunity && stripeEnabled ? (
-      subscriptionFetchFailed || subscription ? (
+    userStatus === USER_STATUS.ACTIVE && !isCommunity ? (
+      !stripeEnabled ? (
+        <p className="text-sm text-muted-foreground">
+          既に本登録済みです。すべての学習コンテンツをご利用いただけます。
+        </p>
+      ) : subscriptionFetchFailed ? (
         <div className="space-y-2">
-          {subscription && (
-            <p className="text-sm">
-              ご契約中です
-              {periodLabel && `（${periodLabel}）`}
-            </p>
-          )}
-          {subscriptionFetchFailed && (
-            <p className="text-sm text-destructive">
-              ご契約状況の取得に失敗しました。時間をおいてページを再読み込みしてください。
-            </p>
-          )}
+          <p className="text-sm text-destructive">
+            ご契約状況の取得に失敗しました。時間をおいてページを再読み込みしてください。
+          </p>
           <ManageSubscriptionButton />
         </div>
-      ) : null
+      ) : subscription ? (
+        <div className="space-y-2">
+          <p className="text-sm">
+            ご契約中です
+            {periodLabel && `（${periodLabel}）`}
+          </p>
+          <ManageSubscriptionButton />
+          <p className="text-sm text-muted-foreground">{CANCELLATION_POLICY_TEXT}</p>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          既に本登録済みです。すべての学習コンテンツをご利用いただけます。
+        </p>
+      )
     ) : null;
 
   return (
@@ -205,7 +148,12 @@ export default async function UpgradePage() {
           (stripeEnabled ? (
             <PlanCards
               generalPriceLabel={monthlyPriceLabel}
-              generalDialog={trialGeneralDialog}
+              generalDialog={
+                <TrialCheckoutDetails
+                  monthlyPriceLabel={monthlyPriceLabel}
+                  checkoutDisabled={checkoutDisabled}
+                />
+              }
               communityDialog={communityApplyDialog}
             />
           ) : (
@@ -250,7 +198,6 @@ export default async function UpgradePage() {
         {userStatus === USER_STATUS.ACTIVE && !isCommunity && (
           <PlanCards
             currentPlan={isGeneral ? "general" : null}
-            generalDialog={activeGeneralDialog}
             communityDialog={isGeneral ? communityApplyDialog : undefined}
             generalCardFooter={generalCardFooter}
           />
