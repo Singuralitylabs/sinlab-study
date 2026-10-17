@@ -59,6 +59,9 @@ describe("/settings", () => {
     expect(html).toContain("表示名、通知の送り先、案内メールの配信を確認・変更できます");
     expect(html.indexOf(">プロフィール<")).toBeLessThan(html.indexOf(">通知の送り先<"));
     expect(html.indexOf(">通知の送り先<")).toBeLessThan(html.indexOf(">案内メールの配信<"));
+    expect(html.indexOf(">案内メールの配信<")).toBeLessThan(html.indexOf(">プラン<"));
+    // Personal settings share one card; plan stays on its own (#409).
+    expect(html.match(/data-slot="card"/g)?.length).toBe(2);
     expect(html).toContain("login@example.com");
     expect(html).toContain("notify@example.com");
     expect(html).toContain("お支払いに関するメールは Stripe から登録時のアドレスに届きます。");
