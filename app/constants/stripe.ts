@@ -16,6 +16,13 @@ export const DISPLAY_MONTHLY_PRICE_JPY = 1500;
 /** Community membership list price (JPY, tax included; #394). Manual approval only for now (#395). */
 export const DISPLAY_COMMUNITY_MONTHLY_PRICE_JPY = 3000;
 
+/**
+ * External Google Form for community membership applications (#408).
+ * Replace when Stripe auto-enrollment for community lands (#395).
+ */
+export const COMMUNITY_APPLY_FORM_URL =
+  "https://docs.google.com/forms/d/e/1FAIpQLSfC8IXtoqTw_vYT3-SVS_JRQAYZMmve1UCaEJcbUcFhn1PHlg/viewform";
+
 export function formatMonthlyJpyPrice(amount: number): string {
   return `月額${amount.toLocaleString("ja-JP")}円（税込）`;
 }
@@ -37,6 +44,9 @@ export const UPGRADE_BENEFITS = [
 export const UPGRADE_APPROVAL_NOTICE = "本登録は運営の承認で行います。承認後に閲覧できます";
 
 export const MANAGE_SUBSCRIPTION_BUTTON_LABEL = "お支払い情報の管理・解約";
+
+/** Shared cancellation copy for /upgrade legal notice and active-subscription cards. */
+export const CANCELLATION_POLICY_TEXT = `解約時の日割り計算・返金はありません。解約手続き後も、当該請求期間の末日（次回${BILLING_ANCHOR_DAY_OF_MONTH}日）まで引き続きご利用いただけます。`;
 
 export const SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE =
   "料金を確認できないため、現在お申し込みを受け付けできません";
