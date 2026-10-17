@@ -77,9 +77,7 @@ export default async function ManageFeedbacksPage() {
                       {FEEDBACK_STATUS_LABELS[item.status as FeedbackStatus]}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-sm">
-                    {item.user?.display_name ?? "不明"}
-                  </TableCell>
+                  <TableCell className="text-sm">{item.user?.display_name ?? "不明"}</TableCell>
                   <TableCell className="max-w-xs truncate text-sm text-muted-foreground">
                     {item.body}
                   </TableCell>

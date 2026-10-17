@@ -3,10 +3,7 @@ import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
 
-import {
-  fetchManageFeedbackById,
-  fetchManageFeedbacks,
-} from "@/app/services/api/feedback-server";
+import { fetchManageFeedbackById, fetchManageFeedbacks } from "@/app/services/api/feedback-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 
 beforeEach(() => {
