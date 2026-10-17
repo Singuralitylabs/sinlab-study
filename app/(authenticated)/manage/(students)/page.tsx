@@ -4,12 +4,17 @@ import { PageTitle } from "@/app/components/PageTitle";
 import { formatDate } from "@/app/lib/format-date";
 import { fetchManageCounts, fetchWeeklyFunnel } from "@/app/services/api/admin-server";
 import { fetchRecentSubmissions } from "@/app/services/api/submissions-server";
+import { checkAdminPermissions } from "@/app/services/auth/permissions";
+import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { WeeklyFunnelCard } from "../components/WeeklyFunnelCard";
 
 const RECENT_SUBMISSIONS_LIMIT = 5;
 
 export default async function ManageDashboardPage() {
+  const { userRole } = await getServerAuth();
+  const isAdmin = checkAdminPermissions(userRole);
+
   const [{ data: counts }, { data: recentSubmissions, count: submissionsCount }, funnel] =
     await Promise.all([
       fetchManageCounts(),
@@ -49,7 +54,9 @@ export default async function ManageDashboardPage() {
     {
       title: "受講生数",
       value: counts.students,
-      href: "/manage/students",
+      // Spec 6.2: student progress is admin-only; keep the count visible but do not link for
+      // maintainers (#335 review).
+      href: isAdmin ? "/manage/students" : null,
       icon: Users,
       bgClass: "bg-chart-4/10 text-chart-4",
     },
@@ -67,9 +74,13 @@ export default async function ManageDashboardPage() {
       <PageTitle title="ダッシュボード" description="統計サマリーと最近の提出" />
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-        {stats.map((stat) => (
-          <Link key={stat.href} href={stat.href} className="block group">
-            <Card className="transition-all hover:shadow-md hover:border-primary/20">
+        {stats.map((stat) => {
+          const card = (
+            <Card
+              className={
+                stat.href ? "transition-all hover:shadow-md hover:border-primary/20" : undefined
+              }
+            >
               <CardContent className="pt-6">
                 <div className={`inline-flex p-2 rounded-lg ${stat.bgClass} mb-3`}>
                   <stat.icon className="h-5 w-5" />
@@ -78,8 +89,22 @@ export default async function ManageDashboardPage() {
                 <p className="text-sm text-muted-foreground">{stat.title}</p>
               </CardContent>
             </Card>
-          </Link>
-        ))}
+          );
+
+          if (!stat.href) {
+            return (
+              <div key={stat.title} className="block">
+                {card}
+              </div>
+            );
+          }
+
+          return (
+            <Link key={stat.title} href={stat.href} className="block group">
+              {card}
+            </Link>
+          );
+        })}
       </div>
 
       <WeeklyFunnelCard rows={funnel.data} errorMessage={funnel.error} />
