@@ -36,7 +36,10 @@ export default async function EditWeekPage({ params }: PageProps) {
       <div className="max-w-3xl mx-auto">
         <PageTitle
           title="週編集"
-          breadcrumbs={[{ label: "週管理", href: "/manage/weeks" }, { label: week.name }]}
+          breadcrumbs={[
+            { label: "コンテンツ管理", href: "/manage/contents" },
+            { label: week.name },
+          ]}
         />
         <Alert variant="destructive">
           <AlertDescription>
@@ -61,7 +64,7 @@ export default async function EditWeekPage({ params }: PageProps) {
     <div className="max-w-3xl mx-auto">
       <PageTitle
         title="週編集"
-        breadcrumbs={[{ label: "週管理", href: "/manage/weeks" }, { label: week.name }]}
+        breadcrumbs={[{ label: "コンテンツ管理", href: "/manage/contents" }, { label: week.name }]}
       />
       <WeekForm
         phases={phases ?? []}

@@ -35,7 +35,10 @@ export default async function EditThemePage({ params }: PageProps) {
       <div className="max-w-3xl mx-auto">
         <PageTitle
           title="テーマ編集"
-          breadcrumbs={[{ label: "テーマ管理", href: "/manage/themes" }, { label: theme.name }]}
+          breadcrumbs={[
+            { label: "コンテンツ管理", href: "/manage/contents" },
+            { label: theme.name },
+          ]}
         />
         <Alert variant="destructive">
           <AlertDescription>
@@ -55,7 +58,7 @@ export default async function EditThemePage({ params }: PageProps) {
     <div className="max-w-3xl mx-auto">
       <PageTitle
         title="テーマ編集"
-        breadcrumbs={[{ label: "テーマ管理", href: "/manage/themes" }, { label: theme.name }]}
+        breadcrumbs={[{ label: "コンテンツ管理", href: "/manage/contents" }, { label: theme.name }]}
       />
       <ThemeForm initialData={theme} siblings={siblings} mode="edit" />
     </div>

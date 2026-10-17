@@ -27,9 +27,28 @@ interface PhaseFormProps {
    */
   siblingCandidates?: SiblingCandidate[];
   mode: "create" | "edit";
+  /** Dialog embedding: close and expand the created/updated node instead of navigating away. */
+  onSuccess?: (result?: { id: number }) => void;
+  onCancel?: () => void;
+  /** Skip Card chrome so the form sits cleanly inside a Dialog. */
+  embedded?: boolean;
 }
 
-export function PhaseForm({ themes, initialData, siblingCandidates = [], mode }: PhaseFormProps) {
+function parseCreatedPhaseId(data: unknown): number | undefined {
+  if (!data || typeof data !== "object" || !("phase" in data)) return undefined;
+  const id = (data as { phase?: { id?: unknown } }).phase?.id;
+  return typeof id === "number" ? id : undefined;
+}
+
+export function PhaseForm({
+  themes,
+  initialData,
+  siblingCandidates = [],
+  mode,
+  onSuccess,
+  onCancel,
+  embedded = false,
+}: PhaseFormProps) {
   const router = useRouter();
 
   const initialThemeId = initialData?.theme_id?.toString() ?? "";
@@ -92,12 +111,19 @@ export function PhaseForm({ themes, initialData, siblingCandidates = [], mode }:
       });
 
       if (response.ok) {
+        const data: unknown = await response.json().catch(() => null);
         setMessage({
           type: "success",
           text: mode === "create" ? "フェーズを作成しました" : "フェーズを更新しました",
         });
-        router.push("/manage/phases");
-        router.refresh();
+        const id = mode === "edit" && initialData ? initialData.id : parseCreatedPhaseId(data);
+        if (onSuccess) {
+          onSuccess(id !== undefined ? { id } : undefined);
+          router.refresh();
+        } else {
+          router.push("/manage/contents");
+          router.refresh();
+        }
       } else {
         const data = await response.json();
         setMessage({ type: "error", text: data.error || "保存に失敗しました" });
@@ -109,91 +135,103 @@ export function PhaseForm({ themes, initialData, siblingCandidates = [], mode }:
     }
   };
 
+  const handleCancel = () => {
+    if (onCancel) {
+      onCancel();
+      return;
+    }
+    router.push("/manage/contents");
+  };
+
+  const fields = (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="themeId">テーマ</Label>
+        <select
+          id="themeId"
+          value={themeId}
+          onChange={(e) => handleThemeChange(e.target.value)}
+          required
+          className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+        >
+          <option value="">選択してください</option>
+          {themes.map((theme) => (
+            <option key={theme.id} value={theme.id}>
+              {theme.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="name">フェーズ名</Label>
+        <Input
+          id="name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="フェーズの名前"
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="description">説明</Label>
+        <Textarea
+          id="description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="フェーズの説明（任意）"
+          className="min-h-[100px]"
+        />
+      </div>
+
+      <SiblingOrderField
+        siblings={themeId ? visibleSiblings : null}
+        insertAfterId={insertAfterId}
+        onChange={setInsertAfterId}
+        placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
+      />
+
+      <div className="flex items-center gap-2">
+        <input
+          id="isPublished"
+          type="checkbox"
+          checked={isPublished}
+          onChange={(e) => setIsPublished(e.target.checked)}
+          className="h-4 w-4 rounded border-input"
+        />
+        <Label htmlFor="isPublished">公開する</Label>
+      </div>
+
+      {message && (
+        <Alert variant={message.type === "error" ? "destructive" : "default"}>
+          <AlertDescription className={message.type === "success" ? "text-success" : ""}>
+            {message.text}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <div className="flex gap-3">
+        <Button type="submit" disabled={isLoading || !name || !themeId}>
+          {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          {mode === "create" ? "作成" : "更新"}
+        </Button>
+        <Button type="button" variant="outline" onClick={handleCancel}>
+          キャンセル
+        </Button>
+      </div>
+    </>
+  );
+
   return (
     <form onSubmit={handleSubmit}>
-      <Card>
-        <CardContent className="space-y-6 pt-6">
-          <div className="space-y-2">
-            <Label htmlFor="themeId">テーマ</Label>
-            <select
-              id="themeId"
-              value={themeId}
-              onChange={(e) => handleThemeChange(e.target.value)}
-              required
-              className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
-            >
-              <option value="">選択してください</option>
-              {themes.map((theme) => (
-                <option key={theme.id} value={theme.id}>
-                  {theme.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="name">フェーズ名</Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="フェーズの名前"
-              required
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="description">説明</Label>
-            <Textarea
-              id="description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="フェーズの説明（任意）"
-              className="min-h-[100px]"
-            />
-          </div>
-
-          <SiblingOrderField
-            siblings={themeId ? visibleSiblings : null}
-            insertAfterId={insertAfterId}
-            onChange={setInsertAfterId}
-            placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
-          />
-
-          <div className="flex items-center gap-2">
-            <input
-              id="isPublished"
-              type="checkbox"
-              checked={isPublished}
-              onChange={(e) => setIsPublished(e.target.checked)}
-              className="h-4 w-4 rounded border-input"
-            />
-            <Label htmlFor="isPublished">公開する</Label>
-          </div>
-
-          {message && (
-            <Alert variant={message.type === "error" ? "destructive" : "default"}>
-              <AlertDescription className={message.type === "success" ? "text-success" : ""}>
-                {message.text}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          <div className="flex gap-3">
-            <Button type="submit" disabled={isLoading || !name || !themeId}>
-              {isLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
-              {mode === "create" ? "作成" : "更新"}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => router.push("/manage/phases")}>
-              キャンセル
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      {embedded ? (
+        <div className="space-y-6">{fields}</div>
+      ) : (
+        <Card>
+          <CardContent className="space-y-6 pt-6">{fields}</CardContent>
+        </Card>
+      )}
     </form>
   );
 }

@@ -25,7 +25,10 @@ export default async function DeleteWeekPage({ params }: { params: Promise<{ id:
               この週に紐づくコンテンツの表示に影響する場合があります。
             </p>
           </div>
-          <DeleteConfirmButton deleteUrl={`/api/manage/weeks/${weekId}`} backUrl="/manage/weeks" />
+          <DeleteConfirmButton
+            deleteUrl={`/api/manage/weeks/${weekId}`}
+            backUrl="/manage/contents"
+          />
         </CardContent>
       </Card>
     </div>

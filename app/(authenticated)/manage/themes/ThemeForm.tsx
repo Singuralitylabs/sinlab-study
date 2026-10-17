@@ -28,9 +28,27 @@ interface ThemeFormProps {
    */
   siblings?: SiblingOrderItem[];
   mode: "create" | "edit";
+  /** Dialog embedding: close and expand the created/updated node instead of navigating away. */
+  onSuccess?: (result?: { id: number }) => void;
+  onCancel?: () => void;
+  /** Skip Card chrome so the form sits cleanly inside a Dialog. */
+  embedded?: boolean;
 }
 
-export function ThemeForm({ initialData, siblings = [], mode }: ThemeFormProps) {
+function parseCreatedThemeId(data: unknown): number | undefined {
+  if (!data || typeof data !== "object" || !("theme" in data)) return undefined;
+  const id = (data as { theme?: { id?: unknown } }).theme?.id;
+  return typeof id === "number" ? id : undefined;
+}
+
+export function ThemeForm({
+  initialData,
+  siblings = [],
+  mode,
+  onSuccess,
+  onCancel,
+  embedded = false,
+}: ThemeFormProps) {
   const router = useRouter();
 
   const [name, setName] = useState(initialData?.name ?? "");
@@ -83,12 +101,19 @@ export function ThemeForm({ initialData, siblings = [], mode }: ThemeFormProps) 
       });
 
       if (response.ok) {
+        const data: unknown = await response.json().catch(() => null);
         setMessage({
           type: "success",
           text: mode === "create" ? "テーマを作成しました" : "テーマを更新しました",
         });
-        router.push("/manage/themes");
-        router.refresh();
+        const id = mode === "edit" && initialData ? initialData.id : parseCreatedThemeId(data);
+        if (onSuccess) {
+          onSuccess(id !== undefined ? { id } : undefined);
+          router.refresh();
+        } else {
+          router.push("/manage/contents");
+          router.refresh();
+        }
       } else {
         const data = await response.json();
         setMessage({ type: "error", text: data.error || "保存に失敗しました" });
@@ -161,117 +186,129 @@ export function ThemeForm({ initialData, siblings = [], mode }: ThemeFormProps) 
     }
   };
 
+  const handleCancel = () => {
+    if (onCancel) {
+      onCancel();
+      return;
+    }
+    router.push("/manage/contents");
+  };
+
+  const fields = (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="name">テーマ名</Label>
+        <Input
+          id="name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="テーマの名前"
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="description">説明</Label>
+        <Textarea
+          id="description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="テーマの説明（任意）"
+          className="min-h-[100px]"
+        />
+      </div>
+
+      {mode === "edit" ? (
+        <div className="space-y-3">
+          <Label htmlFor="thumbnail">サムネイル画像</Label>
+          {imageUrl && (
+            <div className="relative aspect-video w-full max-w-xs overflow-hidden rounded-md border bg-linear-to-br from-primary/5 to-primary/15">
+              <Image
+                src={resolveStorageUrl(imageUrl)}
+                alt="サムネイルのプレビュー"
+                fill
+                className="object-contain"
+                sizes="320px"
+              />
+            </div>
+          )}
+          <Input
+            ref={thumbnailInputRef}
+            id="thumbnail"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            disabled={isUploading}
+            onChange={(event) => handleThumbnailUpload(event.target.files?.[0])}
+          />
+          {imageUrl && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isUploading}
+              onClick={handleThumbnailDelete}
+            >
+              画像を削除
+            </Button>
+          )}
+          <p className="text-sm text-muted-foreground">PNG、JPEG、WebP形式、5MBまで</p>
+          {isUploading && <p className="text-sm text-muted-foreground">アップロード中です…</p>}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <Label>サムネイル画像</Label>
+          <p className="text-sm text-muted-foreground">
+            テーマを作成した後、編集画面から画像をアップロードできます。
+          </p>
+        </div>
+      )}
+
+      <SiblingOrderField
+        siblings={visibleSiblings}
+        insertAfterId={insertAfterId}
+        onChange={setInsertAfterId}
+        placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
+      />
+
+      <div className="flex items-center gap-2">
+        <input
+          id="isPublished"
+          type="checkbox"
+          checked={isPublished}
+          onChange={(e) => setIsPublished(e.target.checked)}
+          className="h-4 w-4 rounded border-input"
+        />
+        <Label htmlFor="isPublished">公開する</Label>
+      </div>
+
+      {message && (
+        <Alert variant={message.type === "error" ? "destructive" : "default"}>
+          <AlertDescription className={message.type === "success" ? "text-success" : ""}>
+            {message.text}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <div className="flex gap-3">
+        <Button type="submit" disabled={isLoading || isUploading || !name}>
+          {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          {mode === "create" ? "作成" : "更新"}
+        </Button>
+        <Button type="button" variant="outline" onClick={handleCancel}>
+          キャンセル
+        </Button>
+      </div>
+    </>
+  );
+
   return (
     <form onSubmit={handleSubmit}>
-      <Card>
-        <CardContent className="space-y-6 pt-6">
-          <div className="space-y-2">
-            <Label htmlFor="name">テーマ名</Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="テーマの名前"
-              required
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="description">説明</Label>
-            <Textarea
-              id="description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="テーマの説明（任意）"
-              className="min-h-[100px]"
-            />
-          </div>
-
-          {mode === "edit" ? (
-            <div className="space-y-3">
-              <Label htmlFor="thumbnail">サムネイル画像</Label>
-              {imageUrl && (
-                <div className="relative aspect-video w-full max-w-xs overflow-hidden rounded-md border bg-linear-to-br from-primary/5 to-primary/15">
-                  <Image
-                    src={resolveStorageUrl(imageUrl)}
-                    alt="サムネイルのプレビュー"
-                    fill
-                    className="object-contain"
-                    sizes="320px"
-                  />
-                </div>
-              )}
-              <Input
-                ref={thumbnailInputRef}
-                id="thumbnail"
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                disabled={isUploading}
-                onChange={(event) => handleThumbnailUpload(event.target.files?.[0])}
-              />
-              {imageUrl && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={isUploading}
-                  onClick={handleThumbnailDelete}
-                >
-                  画像を削除
-                </Button>
-              )}
-              <p className="text-sm text-muted-foreground">PNG、JPEG、WebP形式、5MBまで</p>
-              {isUploading && <p className="text-sm text-muted-foreground">アップロード中です…</p>}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <Label>サムネイル画像</Label>
-              <p className="text-sm text-muted-foreground">
-                テーマを作成した後、編集画面から画像をアップロードできます。
-              </p>
-            </div>
-          )}
-
-          <SiblingOrderField
-            siblings={visibleSiblings}
-            insertAfterId={insertAfterId}
-            onChange={setInsertAfterId}
-            placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
-          />
-
-          <div className="flex items-center gap-2">
-            <input
-              id="isPublished"
-              type="checkbox"
-              checked={isPublished}
-              onChange={(e) => setIsPublished(e.target.checked)}
-              className="h-4 w-4 rounded border-input"
-            />
-            <Label htmlFor="isPublished">公開する</Label>
-          </div>
-
-          {message && (
-            <Alert variant={message.type === "error" ? "destructive" : "default"}>
-              <AlertDescription className={message.type === "success" ? "text-success" : ""}>
-                {message.text}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          <div className="flex gap-3">
-            <Button type="submit" disabled={isLoading || isUploading || !name}>
-              {isLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
-              {mode === "create" ? "作成" : "更新"}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => router.push("/manage/themes")}>
-              キャンセル
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      {embedded ? (
+        <div className="space-y-6">{fields}</div>
+      ) : (
+        <Card>
+          <CardContent className="space-y-6 pt-6">{fields}</CardContent>
+        </Card>
+      )}
     </form>
   );
 }

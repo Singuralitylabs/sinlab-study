@@ -19,7 +19,10 @@ export default async function NewPhasePage() {
       <div className="max-w-3xl mx-auto">
         <PageTitle
           title="フェーズ新規作成"
-          breadcrumbs={[{ label: "フェーズ管理", href: "/manage/phases" }, { label: "新規作成" }]}
+          breadcrumbs={[
+            { label: "コンテンツ管理", href: "/manage/contents" },
+            { label: "新規作成" },
+          ]}
         />
         <Alert variant="destructive">
           <AlertDescription>
@@ -44,7 +47,7 @@ export default async function NewPhasePage() {
     <div className="max-w-3xl mx-auto">
       <PageTitle
         title="フェーズ新規作成"
-        breadcrumbs={[{ label: "フェーズ管理", href: "/manage/phases" }, { label: "新規作成" }]}
+        breadcrumbs={[{ label: "コンテンツ管理", href: "/manage/contents" }, { label: "新規作成" }]}
       />
       <PhaseForm themes={themes ?? []} siblingCandidates={siblingCandidates} mode="create" />
     </div>

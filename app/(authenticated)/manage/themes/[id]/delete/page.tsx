@@ -27,7 +27,7 @@ export default async function DeleteThemePage({ params }: { params: Promise<{ id
           </div>
           <DeleteConfirmButton
             deleteUrl={`/api/manage/themes/${themeId}`}
-            backUrl="/manage/themes"
+            backUrl="/manage/contents"
           />
         </CardContent>
       </Card>

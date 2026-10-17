@@ -19,7 +19,10 @@ export default async function NewWeekPage() {
       <div className="max-w-3xl mx-auto">
         <PageTitle
           title="週新規作成"
-          breadcrumbs={[{ label: "週管理", href: "/manage/weeks" }, { label: "新規作成" }]}
+          breadcrumbs={[
+            { label: "コンテンツ管理", href: "/manage/contents" },
+            { label: "新規作成" },
+          ]}
         />
         <Alert variant="destructive">
           <AlertDescription>
@@ -44,7 +47,7 @@ export default async function NewWeekPage() {
     <div className="max-w-3xl mx-auto">
       <PageTitle
         title="週新規作成"
-        breadcrumbs={[{ label: "週管理", href: "/manage/weeks" }, { label: "新規作成" }]}
+        breadcrumbs={[{ label: "コンテンツ管理", href: "/manage/contents" }, { label: "新規作成" }]}
       />
       <WeekForm phases={phases ?? []} siblingCandidates={siblingCandidates} mode="create" />
     </div>

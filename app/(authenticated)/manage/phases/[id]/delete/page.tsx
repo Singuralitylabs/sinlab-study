@@ -27,7 +27,7 @@ export default async function DeletePhasePage({ params }: { params: Promise<{ id
           </div>
           <DeleteConfirmButton
             deleteUrl={`/api/manage/phases/${phaseId}`}
-            backUrl="/manage/phases"
+            backUrl="/manage/contents"
           />
         </CardContent>
       </Card>

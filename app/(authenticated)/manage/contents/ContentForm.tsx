@@ -115,6 +115,17 @@ interface ContentFormProps {
    */
   siblingCandidates?: SiblingCandidate[];
   mode: "create" | "edit";
+  /** Dialog embedding: close and expand the created/updated node instead of navigating away. */
+  onSuccess?: (result?: { id: number }) => void;
+  onCancel?: () => void;
+  /** Skip Card chrome so the form sits cleanly inside a Dialog. */
+  embedded?: boolean;
+}
+
+function parseCreatedContentId(data: unknown): number | undefined {
+  if (!data || typeof data !== "object" || !("content" in data)) return undefined;
+  const id = (data as { content?: { id?: unknown } }).content?.id;
+  return typeof id === "number" ? id : undefined;
 }
 
 /**
@@ -186,6 +197,9 @@ export function ContentForm({
   initialWeekSelection,
   siblingCandidates = [],
   mode,
+  onSuccess,
+  onCancel,
+  embedded = false,
 }: ContentFormProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -597,6 +611,8 @@ export function ContentForm({
             ? String((data as { warning: unknown }).warning)
             : null;
         if (createWarning) {
+          // Stay on the form (even when embedded) so the edit link can be shown; do not call
+          // onSuccess — the parent would close the dialog before the warning is read.
           const createdId = (data as { content?: { id?: unknown } }).content?.id;
           setMessage({ type: "error", text: createWarning });
           setCreatedDraftId(typeof createdId === "number" ? createdId : null);
@@ -606,7 +622,7 @@ export function ContentForm({
         const warning = mode === "edit" ? getSlideStorageWarning(data, "update") : null;
         if (warning) {
           // The update itself succeeded; stay on this screen to warn that the old slide PDF
-          // remained in Storage (#241).
+          // remained in Storage (#241). Do not call onSuccess for the same reason as createWarning.
           setMessage({ type: "error", text: warning });
           // Adopt the saved position as the new baseline so re-saving doesn't resend
           // insert_after_id and trigger renumbering.
@@ -618,8 +634,14 @@ export function ContentForm({
           type: "success",
           text: mode === "create" ? "コンテンツを作成しました" : "コンテンツを更新しました",
         });
-        router.push("/manage/contents");
-        router.refresh();
+        const id = mode === "edit" && initialData ? initialData.id : parseCreatedContentId(data);
+        if (onSuccess) {
+          onSuccess(id !== undefined ? { id } : undefined);
+          router.refresh();
+        } else {
+          router.push("/manage/contents");
+          router.refresh();
+        }
       } else {
         const data = await response.json();
         setMessage({ type: "error", text: data.error || "保存に失敗しました" });
@@ -631,527 +653,537 @@ export function ContentForm({
     }
   };
 
-  return (
-    <form onSubmit={handleSubmit}>
-      <Card>
-        <CardContent className="space-y-6 pt-6">
+  const handleCancel = () => {
+    if (onCancel) {
+      onCancel();
+      return;
+    }
+    router.push("/manage/contents");
+  };
+
+  const fields = (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="title">タイトル</Label>
+        <Input
+          id="title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="コンテンツのタイトル"
+          required
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="space-y-2">
+          <Label htmlFor="themeId">テーマ</Label>
+          <select
+            id="themeId"
+            value={themeId}
+            onChange={(e) => handleThemeChange(e.target.value)}
+            className={SELECT_CLASS_NAME}
+          >
+            <option value="">すべて</option>
+            {themes.map((theme) => (
+              <option key={theme.id} value={theme.id}>
+                {theme.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="phaseId">フェーズ</Label>
+          <select
+            id="phaseId"
+            value={phaseId}
+            onChange={(e) => handlePhaseChange(e.target.value)}
+            className={SELECT_CLASS_NAME}
+          >
+            <option value="">すべて</option>
+            {visiblePhases.map((phase) => (
+              <option key={phase.id} value={phase.id}>
+                {phase.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="weekId">週</Label>
+          <select
+            id="weekId"
+            value={weekId}
+            onChange={(e) => handleWeekChange(e.target.value)}
+            required
+            className={SELECT_CLASS_NAME}
+          >
+            <option value="">選択してください</option>
+            {visibleWeeks.map((week) => (
+              <option key={week.id} value={week.id}>
+                {buildWeekOptionLabel(week, phases, themes, themeId, phaseId)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label>コンテンツ種別</Label>
+        <div className="flex flex-wrap gap-2">
+          {CONTENT_TYPE_FORM_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => {
+                if (opt.value === "slide" || contentType === "slide") {
+                  setSlideArticleAttached(true);
+                }
+                setContentType(opt.value);
+              }}
+              disabled={opt.value === "quiz" && quizQuestionsUnavailable}
+              className={`min-w-24 flex-1 rounded-lg border-2 px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                contentType === opt.value
+                  ? "border-primary bg-primary/5 font-medium"
+                  : "border-border hover:border-muted-foreground"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {quizQuestionsUnavailable && (
+          <p className="text-xs text-muted-foreground">
+            保存済みのクイズの設問を読み込めなかったため、クイズへの種別変更はできません。時間をおいて再度お試しください。
+          </p>
+        )}
+        {/* Changing a row that has a PDF to another type deletes the PDF from Storage (avoids orphans; not restored on revert). Bulk-changed rows keep pdf_url, so decide by pdf_url presence, not the initial type. */}
+        {mode === "edit" && Boolean(initialData?.pdf_url) && contentType !== "slide" && (
+          <p className="text-xs text-destructive">
+            他の種別に変更して保存すると、紐づくスライドPDFはストレージから完全に削除されます。スライドに戻す場合はPDFの再アップロードが必要です。
+          </p>
+        )}
+        {slideArticleAttached &&
+          textContent.trim() &&
+          !contentTypeStoresTextContent(contentType) && (
+            <p className="text-xs text-destructive">
+              テキストとスライド以外の種別に変更して保存すると、解説記事は削除されます。
+            </p>
+          )}
+      </div>
+
+      {(contentType === "video" || contentType === "slide" || contentType === "quiz") && (
+        <div className="space-y-2">
+          <Label htmlFor="description">
+            {contentType === "quiz" ? "導入文（Markdown・任意）" : "概要（Markdown・任意）"}
+          </Label>
+          <Textarea
+            id="description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="このコンテンツで学べることを記述してください。未入力の場合は概要欄を表示しません。"
+            className="min-h-[120px] font-mono"
+          />
+        </div>
+      )}
+
+      {contentType === "video" && (
+        <div className="space-y-2">
+          <Label htmlFor="videoUrl">YouTube URL</Label>
+          <Input
+            id="videoUrl"
+            type="url"
+            value={videoUrl}
+            onChange={(e) => setVideoUrl(e.target.value)}
+            placeholder="https://www.youtube.com/watch?v=..."
+          />
+        </div>
+      )}
+
+      {contentType === "slide" && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="pdfFolder">保存先フォルダ（コーススラッグ）</Label>
+              <Input
+                id="pdfFolder"
+                value={pdfFolder}
+                onChange={(e) => setPdfFolder(e.target.value)}
+                placeholder="例: gas-advanced"
+              />
+              <p className="text-xs text-muted-foreground">
+                slides/&lt;フォルダ&gt;/slide-NN.pdf として保存されます（英小文字・数字・ハイフン）
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="slideNumber">スライド番号</Label>
+              <Input
+                id="slideNumber"
+                type="number"
+                min={1}
+                step={1}
+                max={SLIDE_NUMBER_MAX}
+                value={slideNumber}
+                onChange={(e) => setSlideNumber(e.target.value)}
+                placeholder="空欄で自動採番"
+              />
+              <p className="text-xs text-muted-foreground">
+                指定するとその番号で保存（既存は上書き）。空欄なら次の番号を自動採番。
+              </p>
+            </div>
+          </div>
+          <Label>PDFファイル</Label>
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+            >
+              {isUploading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="h-4 w-4" />
+              )}
+              {isUploading ? "アップロード中..." : "PDFを選択"}
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf"
+              onChange={handlePdfUpload}
+              className="hidden"
+            />
+            {pdfUrl && (
+              <div className="flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-sm">
+                <span className="max-w-[200px] truncate">
+                  {pdfFileName || "アップロード済みPDF"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPdfUrl("");
+                    setPdfFileName(null);
+                  }}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+          </div>
+          {pdfUrl && <p className="text-xs text-muted-foreground break-all">{pdfUrl}</p>}
+        </div>
+      )}
+
+      {(contentType === "text" || contentType === "slide") && (
+        <div className="space-y-2">
+          <Label htmlFor="textContent">
+            {contentType === "slide" ? "解説記事（Markdown・任意）" : "テキスト（Markdown）"}
+          </Label>
+          <Textarea
+            id="textContent"
+            ref={textContentRef}
+            value={textContent}
+            onChange={(e) => setTextContent(e.target.value)}
+            placeholder={
+              contentType === "slide"
+                ? "スライドの補足をMarkdownで記述してください。未入力の場合は表示しません。"
+                : "Markdown形式で記述してください..."
+            }
+            className="min-h-[300px] font-mono"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => imageFileInputRef.current?.click()}
+              disabled={!canUploadContentImage || isUploadingImage}
+            >
+              {isUploadingImage ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ImagePlus className="h-3.5 w-3.5" />
+              )}
+              {isUploadingImage ? "アップロード中..." : "画像を挿入"}
+            </Button>
+            <input
+              ref={imageFileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+              onChange={handleContentImageSelect}
+            />
+            <p className="text-xs text-muted-foreground">
+              {canUploadContentImage
+                ? "PNG / JPEG / WebP / GIF（5MB以下）。カーソル位置に Markdown を挿入します。"
+                : "画像の挿入はコンテンツ保存後の編集画面から行えます。"}
+            </p>
+          </div>
+          {contentType === "slide" && (
+            <p className="text-xs text-muted-foreground">
+              スライドの下に表示します。画像は
+              {` {{SUPABASE_STORAGE_URL}}/content-images/... `}
+              で参照できます。
+            </p>
+          )}
+        </div>
+      )}
+
+      {contentType === "quiz" && (
+        <QuizQuestionsEditor questions={quizQuestions} onChange={setQuizQuestions} />
+      )}
+
+      {contentType === "exercise" && (
+        <>
           <div className="space-y-2">
-            <Label htmlFor="title">タイトル</Label>
-            <Input
-              id="title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="コンテンツのタイトル"
-              required
+            <Label htmlFor="exerciseInstructions">演習指示（Markdown）</Label>
+            <Textarea
+              id="exerciseInstructions"
+              value={exerciseInstructions}
+              onChange={(e) => setExerciseInstructions(e.target.value)}
+              placeholder="演習の指示をMarkdown形式で記述してください..."
+              className="min-h-[300px] font-mono"
             />
           </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="themeId">テーマ</Label>
-              <select
-                id="themeId"
-                value={themeId}
-                onChange={(e) => handleThemeChange(e.target.value)}
-                className={SELECT_CLASS_NAME}
-              >
-                <option value="">すべて</option>
-                {themes.map((theme) => (
-                  <option key={theme.id} value={theme.id}>
-                    {theme.name}
-                  </option>
-                ))}
-              </select>
+          <div className="space-y-2">
+            <Label htmlFor="hint">ヒント（受講生に公開）</Label>
+            <Textarea
+              id="hint"
+              value={hint}
+              onChange={(e) => setHint(e.target.value)}
+              placeholder="課題提出フォームの上部にアコーディオン形式で表示されます。受講生向けのヒントを記述してください（Markdown記法は使えますが、レンダリングされずプレーンテキストとして表示されます）。未入力の場合はヒントUIを表示しません。"
+              className="min-h-[200px] font-mono"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="referenceAnswer">
+              模範回答（AIレビュー採点基準・提出後に受講生へ表示）
+            </Label>
+            <Textarea
+              id="referenceAnswer"
+              value={referenceAnswer}
+              onChange={(e) => setReferenceAnswer(e.target.value)}
+              placeholder="模範回答を記述してください。AIレビュー時の採点基準として使用され、受講生には提出後に表示されます（提出前は非公開）。"
+              className="min-h-[200px] font-mono"
+            />
+          </div>
+          <GradingRubricEditor
+            rows={rubricRows}
+            onChange={setRubricRows}
+            currentVersion={rubricIsLive ? loadedRubricVersion : null}
+            issuedMaxKeyNumber={issuedMaxKeyNumber}
+            exerciseInstructions={exerciseInstructions}
+            referenceAnswer={referenceAnswer}
+          />
+          <div className="space-y-2">
+            <Label>提出ファイル</Label>
+            <p className="text-xs text-muted-foreground">
+              受講生にはこの行数の入力欄が最初から出ます。ファイル名と言語は変えられず、空のファイルは提出できません。1行目の言語が演習のコード言語として保存されます。ファイル名を言語の既定（例:
+              code.js）の1件だけにすると構成は未指定として保存され、既存の演習と同じ単一ファイルになります。初期コードを空にすると、提出フォームは空欄から始まります。
+            </p>
+            <SubmissionFileSlotsEditor
+              slots={submissionSlots}
+              onChange={(next) => {
+                setSubmissionSlots(next);
+                if (!previewFlagsTouched) {
+                  return;
+                }
+                const nextCap = previewCapability(
+                  next.map((slot) => ({ filename: slot.filename, language: slot.language })),
+                  { previewBaseHtml }
+                );
+                setShowPreview((current) =>
+                  current === true && !nextCap.previewAllowed ? null : current
+                );
+                setShowConsole((current) =>
+                  current === true && !nextCap.consoleAllowed ? null : current
+                );
+              }}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="previewBaseHtml">プレビューの土台 HTML（CSS 単独用）</Label>
+            <p className="text-xs text-muted-foreground">
+              CSS だけの提出でプレビューするとき、ここに装飾対象の HTML
+              を置きます。受講生は提出しません。未設定のままでは CSS 単独のプレビューは出せません。
+            </p>
+            <Textarea
+              id="previewBaseHtml"
+              value={previewBaseHtml}
+              onChange={(e) => {
+                setPreviewBaseHtml(e.target.value);
+                if (!previewFlagsTouched) {
+                  return;
+                }
+                const nextCap = previewCapability(
+                  submissionSlots.map((slot) => ({
+                    filename: slot.filename,
+                    language: slot.language,
+                  })),
+                  { previewBaseHtml: e.target.value }
+                );
+                setShowPreview((current) =>
+                  current === true && !nextCap.previewAllowed ? null : current
+                );
+              }}
+              placeholder={'<div class="box">...</div>'}
+              className="min-h-[120px] font-mono text-sm"
+            />
+          </div>
+          <div className="space-y-3">
+            <Label>ブラウザでの表示</Label>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <input
+                  id="showPreview"
+                  type="checkbox"
+                  checked={previewCap.previewAllowed && (showPreview ?? previewCap.autoPreview)}
+                  disabled={!previewCap.previewAllowed}
+                  onChange={(e) => {
+                    setPreviewFlagsTouched(true);
+                    setShowPreview(e.target.checked);
+                  }}
+                  className="h-4 w-4 rounded border-input disabled:opacity-50"
+                />
+                <Label htmlFor="showPreview">プレビューを表示</Label>
+              </div>
+              <p className="ml-6 text-xs text-muted-foreground">
+                {previewCap.previewAllowed
+                  ? "HTML を含む課題で、提出内容をブラウザに表示します。"
+                  : "HTML を含む構成のときだけオンにできます。"}
+              </p>
             </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="phaseId">フェーズ</Label>
-              <select
-                id="phaseId"
-                value={phaseId}
-                onChange={(e) => handlePhaseChange(e.target.value)}
-                className={SELECT_CLASS_NAME}
-              >
-                <option value="">すべて</option>
-                {visiblePhases.map((phase) => (
-                  <option key={phase.id} value={phase.id}>
-                    {phase.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="weekId">週</Label>
-              <select
-                id="weekId"
-                value={weekId}
-                onChange={(e) => handleWeekChange(e.target.value)}
-                required
-                className={SELECT_CLASS_NAME}
-              >
-                <option value="">選択してください</option>
-                {visibleWeeks.map((week) => (
-                  <option key={week.id} value={week.id}>
-                    {buildWeekOptionLabel(week, phases, themes, themeId, phaseId)}
-                  </option>
-                ))}
-              </select>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <input
+                  id="showConsole"
+                  type="checkbox"
+                  checked={previewCap.consoleAllowed && (showConsole ?? previewCap.autoConsole)}
+                  disabled={!previewCap.consoleAllowed}
+                  onChange={(e) => {
+                    setPreviewFlagsTouched(true);
+                    setShowConsole(e.target.checked);
+                  }}
+                  className="h-4 w-4 rounded border-input disabled:opacity-50"
+                />
+                <Label htmlFor="showConsole">コンソールを表示</Label>
+              </div>
+              <p className="ml-6 text-xs text-muted-foreground">
+                {previewCap.consoleAllowed
+                  ? previewCap.autoPreview
+                    ? "スクリプトの出力とエラーをプレビューの下に出します。"
+                    : "プレビュー枠は出さず、「実行」を押したときだけ動きます。"
+                  : "HTML または JavaScript だけで、ほかの言語を含まない構成のときだけオンにできます。"}
+              </p>
             </div>
           </div>
-
           <div className="space-y-2">
-            <Label>コンテンツ種別</Label>
+            <Label>提出方法</Label>
             <div className="flex flex-wrap gap-2">
-              {CONTENT_TYPE_FORM_OPTIONS.map((opt) => (
+              {SUBMISSION_TYPE_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
                   type="button"
-                  onClick={() => {
-                    if (opt.value === "slide" || contentType === "slide") {
-                      setSlideArticleAttached(true);
-                    }
-                    setContentType(opt.value);
-                  }}
-                  disabled={opt.value === "quiz" && quizQuestionsUnavailable}
-                  className={`min-w-24 flex-1 rounded-lg border-2 px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                    contentType === opt.value
+                  onClick={() => setAllowedSubmissionTypes(opt.value)}
+                  className={`min-w-40 flex-1 rounded-lg border-2 px-3 py-2 text-left text-sm transition-colors ${
+                    allowedSubmissionTypes === opt.value
                       ? "border-primary bg-primary/5 font-medium"
                       : "border-border hover:border-muted-foreground"
                   }`}
                 >
-                  {opt.label}
+                  <div>{opt.label}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">{opt.description}</div>
                 </button>
               ))}
             </div>
-            {quizQuestionsUnavailable && (
-              <p className="text-xs text-muted-foreground">
-                保存済みのクイズの設問を読み込めなかったため、クイズへの種別変更はできません。時間をおいて再度お試しください。
-              </p>
-            )}
-            {/* Changing a row that has a PDF to another type deletes the PDF from Storage (avoids orphans; not restored on revert). Bulk-changed rows keep pdf_url, so decide by pdf_url presence, not the initial type. */}
-            {mode === "edit" && Boolean(initialData?.pdf_url) && contentType !== "slide" && (
-              <p className="text-xs text-destructive">
-                他の種別に変更して保存すると、紐づくスライドPDFはストレージから完全に削除されます。スライドに戻す場合はPDFの再アップロードが必要です。
-              </p>
-            )}
-            {slideArticleAttached &&
-              textContent.trim() &&
-              !contentTypeStoresTextContent(contentType) && (
-                <p className="text-xs text-destructive">
-                  テキストとスライド以外の種別に変更して保存すると、解説記事は削除されます。
-                </p>
-              )}
           </div>
+        </>
+      )}
 
-          {(contentType === "video" || contentType === "slide" || contentType === "quiz") && (
-            <div className="space-y-2">
-              <Label htmlFor="description">
-                {contentType === "quiz" ? "導入文（Markdown・任意）" : "概要（Markdown・任意）"}
-              </Label>
-              <Textarea
-                id="description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="このコンテンツで学べることを記述してください。未入力の場合は概要欄を表示しません。"
-                className="min-h-[120px] font-mono"
-              />
-            </div>
-          )}
+      <SiblingOrderField
+        siblings={weekId ? visibleSiblings : null}
+        insertAfterId={insertAfterId}
+        onChange={setInsertAfterId}
+        placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
+      />
 
-          {contentType === "video" && (
-            <div className="space-y-2">
-              <Label htmlFor="videoUrl">YouTube URL</Label>
-              <Input
-                id="videoUrl"
-                type="url"
-                value={videoUrl}
-                onChange={(e) => setVideoUrl(e.target.value)}
-                placeholder="https://www.youtube.com/watch?v=..."
-              />
-            </div>
-          )}
+      <div className="flex items-center gap-2">
+        <input
+          id="isPublished"
+          type="checkbox"
+          checked={isPublished}
+          onChange={(e) => setIsPublished(e.target.checked)}
+          className="h-4 w-4 rounded border-input"
+        />
+        <Label htmlFor="isPublished">公開する</Label>
+      </div>
 
-          {contentType === "slide" && (
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="pdfFolder">保存先フォルダ（コーススラッグ）</Label>
-                  <Input
-                    id="pdfFolder"
-                    value={pdfFolder}
-                    onChange={(e) => setPdfFolder(e.target.value)}
-                    placeholder="例: gas-advanced"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    slides/&lt;フォルダ&gt;/slide-NN.pdf
-                    として保存されます（英小文字・数字・ハイフン）
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="slideNumber">スライド番号</Label>
-                  <Input
-                    id="slideNumber"
-                    type="number"
-                    min={1}
-                    step={1}
-                    max={SLIDE_NUMBER_MAX}
-                    value={slideNumber}
-                    onChange={(e) => setSlideNumber(e.target.value)}
-                    placeholder="空欄で自動採番"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    指定するとその番号で保存（既存は上書き）。空欄なら次の番号を自動採番。
-                  </p>
-                </div>
-              </div>
-              <Label>PDFファイル</Label>
-              <div className="flex items-center gap-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploading}
-                >
-                  {isUploading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Upload className="h-4 w-4" />
-                  )}
-                  {isUploading ? "アップロード中..." : "PDFを選択"}
-                </Button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="application/pdf"
-                  onChange={handlePdfUpload}
-                  className="hidden"
-                />
-                {pdfUrl && (
-                  <div className="flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-sm">
-                    <span className="max-w-[200px] truncate">
-                      {pdfFileName || "アップロード済みPDF"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPdfUrl("");
-                        setPdfFileName(null);
-                      }}
-                      className="text-muted-foreground hover:text-foreground"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                )}
-              </div>
-              {pdfUrl && <p className="text-xs text-muted-foreground break-all">{pdfUrl}</p>}
-            </div>
-          )}
-
-          {(contentType === "text" || contentType === "slide") && (
-            <div className="space-y-2">
-              <Label htmlFor="textContent">
-                {contentType === "slide" ? "解説記事（Markdown・任意）" : "テキスト（Markdown）"}
-              </Label>
-              <Textarea
-                id="textContent"
-                ref={textContentRef}
-                value={textContent}
-                onChange={(e) => setTextContent(e.target.value)}
-                placeholder={
-                  contentType === "slide"
-                    ? "スライドの補足をMarkdownで記述してください。未入力の場合は表示しません。"
-                    : "Markdown形式で記述してください..."
-                }
-                className="min-h-[300px] font-mono"
-              />
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => imageFileInputRef.current?.click()}
-                  disabled={!canUploadContentImage || isUploadingImage}
-                >
-                  {isUploadingImage ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <ImagePlus className="h-3.5 w-3.5" />
-                  )}
-                  {isUploadingImage ? "アップロード中..." : "画像を挿入"}
-                </Button>
-                <input
-                  ref={imageFileInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  className="hidden"
-                  onChange={handleContentImageSelect}
-                />
-                <p className="text-xs text-muted-foreground">
-                  {canUploadContentImage
-                    ? "PNG / JPEG / WebP / GIF（5MB以下）。カーソル位置に Markdown を挿入します。"
-                    : "画像の挿入はコンテンツ保存後の編集画面から行えます。"}
-                </p>
-              </div>
-              {contentType === "slide" && (
-                <p className="text-xs text-muted-foreground">
-                  スライドの下に表示します。画像は
-                  {` {{SUPABASE_STORAGE_URL}}/content-images/... `}
-                  で参照できます。
-                </p>
-              )}
-            </div>
-          )}
-
-          {contentType === "quiz" && (
-            <QuizQuestionsEditor questions={quizQuestions} onChange={setQuizQuestions} />
-          )}
-
-          {contentType === "exercise" && (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="exerciseInstructions">演習指示（Markdown）</Label>
-                <Textarea
-                  id="exerciseInstructions"
-                  value={exerciseInstructions}
-                  onChange={(e) => setExerciseInstructions(e.target.value)}
-                  placeholder="演習の指示をMarkdown形式で記述してください..."
-                  className="min-h-[300px] font-mono"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="hint">ヒント（受講生に公開）</Label>
-                <Textarea
-                  id="hint"
-                  value={hint}
-                  onChange={(e) => setHint(e.target.value)}
-                  placeholder="課題提出フォームの上部にアコーディオン形式で表示されます。受講生向けのヒントを記述してください（Markdown記法は使えますが、レンダリングされずプレーンテキストとして表示されます）。未入力の場合はヒントUIを表示しません。"
-                  className="min-h-[200px] font-mono"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="referenceAnswer">
-                  模範回答（AIレビュー採点基準・提出後に受講生へ表示）
-                </Label>
-                <Textarea
-                  id="referenceAnswer"
-                  value={referenceAnswer}
-                  onChange={(e) => setReferenceAnswer(e.target.value)}
-                  placeholder="模範回答を記述してください。AIレビュー時の採点基準として使用され、受講生には提出後に表示されます（提出前は非公開）。"
-                  className="min-h-[200px] font-mono"
-                />
-              </div>
-              <GradingRubricEditor
-                rows={rubricRows}
-                onChange={setRubricRows}
-                currentVersion={rubricIsLive ? loadedRubricVersion : null}
-                issuedMaxKeyNumber={issuedMaxKeyNumber}
-                exerciseInstructions={exerciseInstructions}
-                referenceAnswer={referenceAnswer}
-              />
-              <div className="space-y-2">
-                <Label>提出ファイル</Label>
-                <p className="text-xs text-muted-foreground">
-                  受講生にはこの行数の入力欄が最初から出ます。ファイル名と言語は変えられず、空のファイルは提出できません。1行目の言語が演習のコード言語として保存されます。ファイル名を言語の既定（例:
-                  code.js）の1件だけにすると構成は未指定として保存され、既存の演習と同じ単一ファイルになります。初期コードを空にすると、提出フォームは空欄から始まります。
-                </p>
-                <SubmissionFileSlotsEditor
-                  slots={submissionSlots}
-                  onChange={(next) => {
-                    setSubmissionSlots(next);
-                    if (!previewFlagsTouched) {
-                      return;
-                    }
-                    const nextCap = previewCapability(
-                      next.map((slot) => ({ filename: slot.filename, language: slot.language })),
-                      { previewBaseHtml }
-                    );
-                    setShowPreview((current) =>
-                      current === true && !nextCap.previewAllowed ? null : current
-                    );
-                    setShowConsole((current) =>
-                      current === true && !nextCap.consoleAllowed ? null : current
-                    );
-                  }}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="previewBaseHtml">プレビューの土台 HTML（CSS 単独用）</Label>
-                <p className="text-xs text-muted-foreground">
-                  CSS だけの提出でプレビューするとき、ここに装飾対象の HTML
-                  を置きます。受講生は提出しません。未設定のままでは CSS
-                  単独のプレビューは出せません。
-                </p>
-                <Textarea
-                  id="previewBaseHtml"
-                  value={previewBaseHtml}
-                  onChange={(e) => {
-                    setPreviewBaseHtml(e.target.value);
-                    if (!previewFlagsTouched) {
-                      return;
-                    }
-                    const nextCap = previewCapability(
-                      submissionSlots.map((slot) => ({
-                        filename: slot.filename,
-                        language: slot.language,
-                      })),
-                      { previewBaseHtml: e.target.value }
-                    );
-                    setShowPreview((current) =>
-                      current === true && !nextCap.previewAllowed ? null : current
-                    );
-                  }}
-                  placeholder={'<div class="box">...</div>'}
-                  className="min-h-[120px] font-mono text-sm"
-                />
-              </div>
-              <div className="space-y-3">
-                <Label>ブラウザでの表示</Label>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <input
-                      id="showPreview"
-                      type="checkbox"
-                      checked={previewCap.previewAllowed && (showPreview ?? previewCap.autoPreview)}
-                      disabled={!previewCap.previewAllowed}
-                      onChange={(e) => {
-                        setPreviewFlagsTouched(true);
-                        setShowPreview(e.target.checked);
-                      }}
-                      className="h-4 w-4 rounded border-input disabled:opacity-50"
-                    />
-                    <Label htmlFor="showPreview">プレビューを表示</Label>
-                  </div>
-                  <p className="ml-6 text-xs text-muted-foreground">
-                    {previewCap.previewAllowed
-                      ? "HTML を含む課題で、提出内容をブラウザに表示します。"
-                      : "HTML を含む構成のときだけオンにできます。"}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <input
-                      id="showConsole"
-                      type="checkbox"
-                      checked={previewCap.consoleAllowed && (showConsole ?? previewCap.autoConsole)}
-                      disabled={!previewCap.consoleAllowed}
-                      onChange={(e) => {
-                        setPreviewFlagsTouched(true);
-                        setShowConsole(e.target.checked);
-                      }}
-                      className="h-4 w-4 rounded border-input disabled:opacity-50"
-                    />
-                    <Label htmlFor="showConsole">コンソールを表示</Label>
-                  </div>
-                  <p className="ml-6 text-xs text-muted-foreground">
-                    {previewCap.consoleAllowed
-                      ? previewCap.autoPreview
-                        ? "スクリプトの出力とエラーをプレビューの下に出します。"
-                        : "プレビュー枠は出さず、「実行」を押したときだけ動きます。"
-                      : "HTML または JavaScript だけで、ほかの言語を含まない構成のときだけオンにできます。"}
-                  </p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>提出方法</Label>
-                <div className="flex flex-wrap gap-2">
-                  {SUBMISSION_TYPE_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setAllowedSubmissionTypes(opt.value)}
-                      className={`min-w-40 flex-1 rounded-lg border-2 px-3 py-2 text-left text-sm transition-colors ${
-                        allowedSubmissionTypes === opt.value
-                          ? "border-primary bg-primary/5 font-medium"
-                          : "border-border hover:border-muted-foreground"
-                      }`}
-                    >
-                      <div>{opt.label}</div>
-                      <div className="mt-0.5 text-xs text-muted-foreground">{opt.description}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-
-          <SiblingOrderField
-            siblings={weekId ? visibleSiblings : null}
-            insertAfterId={insertAfterId}
-            onChange={setInsertAfterId}
-            placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <input
+            id="isOpenToTrial"
+            type="checkbox"
+            checked={isOpenToTrial}
+            onChange={(e) => setIsOpenToTrial(e.target.checked)}
+            className="h-4 w-4 rounded border-input"
           />
+          <Label htmlFor="isOpenToTrial">お試しユーザーにも公開する</Label>
+        </div>
+        <p className="text-xs text-muted-foreground ml-6">
+          無料プラン利用中のユーザーもこのコンテンツを閲覧・提出できるようになります。
+        </p>
+      </div>
 
-          <div className="flex items-center gap-2">
-            <input
-              id="isPublished"
-              type="checkbox"
-              checked={isPublished}
-              onChange={(e) => setIsPublished(e.target.checked)}
-              className="h-4 w-4 rounded border-input"
-            />
-            <Label htmlFor="isPublished">公開する</Label>
-          </div>
+      {message && (
+        <Alert variant={message.type === "error" ? "destructive" : "default"}>
+          <AlertDescription className={message.type === "success" ? "text-success" : ""}>
+            {message.text}
+            {createdDraftId !== null && (
+              <>
+                {" "}
+                <Link href={`/manage/contents/${createdDraftId}/edit`} className="underline">
+                  編集画面を開く
+                </Link>
+              </>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
 
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <input
-                id="isOpenToTrial"
-                type="checkbox"
-                checked={isOpenToTrial}
-                onChange={(e) => setIsOpenToTrial(e.target.checked)}
-                className="h-4 w-4 rounded border-input"
-              />
-              <Label htmlFor="isOpenToTrial">お試しユーザーにも公開する</Label>
-            </div>
-            <p className="text-xs text-muted-foreground ml-6">
-              無料プラン利用中のユーザーもこのコンテンツを閲覧・提出できるようになります。
-            </p>
-          </div>
+      <div className="flex gap-3">
+        <Button
+          type="submit"
+          disabled={
+            isLoading ||
+            isUploading ||
+            !title ||
+            !weekId ||
+            isSlidePdfMissing ||
+            createdDraftId !== null
+          }
+        >
+          {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          {mode === "create" ? "作成" : "更新"}
+        </Button>
+        <Button type="button" variant="outline" onClick={handleCancel}>
+          キャンセル
+        </Button>
+      </div>
+    </>
+  );
 
-          {message && (
-            <Alert variant={message.type === "error" ? "destructive" : "default"}>
-              <AlertDescription className={message.type === "success" ? "text-success" : ""}>
-                {message.text}
-                {createdDraftId !== null && (
-                  <>
-                    {" "}
-                    <Link href={`/manage/contents/${createdDraftId}/edit`} className="underline">
-                      編集画面を開く
-                    </Link>
-                  </>
-                )}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          <div className="flex gap-3">
-            <Button
-              type="submit"
-              disabled={
-                isLoading ||
-                isUploading ||
-                !title ||
-                !weekId ||
-                isSlidePdfMissing ||
-                createdDraftId !== null
-              }
-            >
-              {isLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
-              {mode === "create" ? "作成" : "更新"}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => router.push("/manage/contents")}>
-              キャンセル
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+  return (
+    <form onSubmit={handleSubmit}>
+      {embedded ? (
+        <div className="space-y-6">{fields}</div>
+      ) : (
+        <Card>
+          <CardContent className="space-y-6 pt-6">{fields}</CardContent>
+        </Card>
+      )}
     </form>
   );
 }

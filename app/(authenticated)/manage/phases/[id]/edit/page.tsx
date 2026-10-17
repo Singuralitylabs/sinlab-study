@@ -33,7 +33,10 @@ export default async function EditPhasePage({ params }: PageProps) {
       <div className="max-w-3xl mx-auto">
         <PageTitle
           title="フェーズ編集"
-          breadcrumbs={[{ label: "フェーズ管理", href: "/manage/phases" }, { label: phase.name }]}
+          breadcrumbs={[
+            { label: "コンテンツ管理", href: "/manage/contents" },
+            { label: phase.name },
+          ]}
         />
         <Alert variant="destructive">
           <AlertDescription>
@@ -58,7 +61,7 @@ export default async function EditPhasePage({ params }: PageProps) {
     <div className="max-w-3xl mx-auto">
       <PageTitle
         title="フェーズ編集"
-        breadcrumbs={[{ label: "フェーズ管理", href: "/manage/phases" }, { label: phase.name }]}
+        breadcrumbs={[{ label: "コンテンツ管理", href: "/manage/contents" }, { label: phase.name }]}
       />
       <PhaseForm
         themes={themes ?? []}
