@@ -573,6 +573,7 @@ export default async function ContentPage({ params }: PageProps) {
                         persistedReviewId={visibleReview?.id ?? null}
                         showReviewListNotes={showReviewListNotes}
                         showEditor={showSubmissionEditor}
+                        isRetrying={isRetrying}
                       />
                     </>
                   ) : (

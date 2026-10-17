@@ -2,7 +2,7 @@
 
 import { Code, Link as LinkIcon, Loader2, RotateCcw, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { HtmlPreviewNoSSR } from "@/app/components/HtmlPreviewNoSSR";
@@ -48,6 +48,11 @@ interface SubmissionFormProps {
    * client AI review after submit survives router.refresh() (#406).
    */
   showEditor?: boolean;
+  /**
+   * When retry starts, drop client-held review/message so they do not reappear under the editor
+   * after persistedReviewId becomes null (#406 review).
+   */
+  isRetrying?: boolean;
 }
 
 function buildFailedReview(errorMessage: string): AIReviewListItem {
@@ -77,6 +82,7 @@ export function SubmissionForm({
   persistedReviewId,
   showReviewListNotes = false,
   showEditor = true,
+  isRetrying = false,
 }: SubmissionFormProps) {
   const router = useRouter();
   const [submissionType, setSubmissionType] = useState<SubmissionType>(
@@ -104,6 +110,16 @@ export function SubmissionForm({
   } | null>(null);
   const [aiReview, setAiReview] = useState<AIReviewListItem | null>(null);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
+  const [lastSubmissionId, setLastSubmissionId] = useState<number | null>(null);
+  const [themeNotice, setThemeNotice] = useState<ThemeCompletionNotice | null>(null);
+
+  useEffect(() => {
+    if (!isRetrying) return;
+    setAiReview(null);
+    setMessage(null);
+    setIsReviewLoading(false);
+    setLastSubmissionId(null);
+  }, [isRetrying]);
 
   const hasStarter = Boolean(starterSnapshot?.some((file) => file.content.trim().length > 0));
   const unchangedFromStarter = blocksUneditedStarter({
@@ -192,8 +208,6 @@ export function SubmissionForm({
     }
   };
 
-  const [lastSubmissionId, setLastSubmissionId] = useState<number | null>(null);
-  const [themeNotice, setThemeNotice] = useState<ThemeCompletionNotice | null>(null);
   // refresh keeps this card, so the page and the form would show the same completed row.
   const pageShowsThisReview =
     aiReview?.status === "completed" &&
@@ -357,7 +371,7 @@ export function SubmissionForm({
         </form>
       )}
 
-      {message && (
+      {!isRetrying && message && (
         <Alert variant={message.type === "error" ? "destructive" : "default"}>
           <AlertDescription className={message.type === "success" ? "text-success" : ""}>
             {message.text}
@@ -365,7 +379,7 @@ export function SubmissionForm({
         </Alert>
       )}
 
-      {!pageShowsThisReview && (
+      {!isRetrying && !pageShowsThisReview && (
         <AIReviewDisplayNoSSR
           review={aiReview}
           isLoading={isReviewLoading}
