@@ -1119,23 +1119,7 @@ export type Database = {
       };
     };
     Views: {
-      users_staff_view: {
-        Row: {
-          avatar_url: string | null;
-          bio: string | null;
-          created_at: string | null;
-          display_name: string | null;
-          id: number | null;
-          is_deleted: boolean | null;
-          membership_type: string | null;
-          onboarding_completed_at: string | null;
-          role: string | null;
-          status: string | null;
-          terms_accepted_at: string | null;
-          updated_at: string | null;
-        };
-        Relationships: [];
-      };
+      [_ in never]: never;
     };
     Functions: {
       bulk_update_sibling_display_order: {

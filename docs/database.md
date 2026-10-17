@@ -424,16 +424,7 @@ SELECT のみ: 自分の提出（`submissions.user_id` が自身）に紐づく�
 | INSERT | 本人（`auth_id = auth.uid()`） |
 | UPDATE | admin のみ |
 
-初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer には `users` の SELECT を付けない（メール等の個人情報を直接読めないようにする。#414）。表示名など非個人情報だけが必要なときはビュー `users_staff_view`（下記）を使う。受講生進捗（`/manage/students`）は admin のみ（[機能設計書](./specification.md)6.2節）。
-
-#### `users_staff_view`（maintainer 向け・非個人情報）
-
-| 列 | 含む |
-|:--|:--|
-| 含む | `id` / `display_name` / `role` / `status` / `membership_type` / `is_deleted` / `created_at` / `updated_at` / `avatar_url` / `bio` / `onboarding_completed_at` / `terms_accepted_at` |
-| 含まない | `email` / `notification_email` / `notification_email_*` / `email_opt_out_at` / `auth_id` など |
-
-RLS は行単位のため「`display_name` だけ読めて `email` は読めない」はポリシーだけでは書けない。ビューは **`security_invoker = false`（owner 権限）** で `users` を読み、定義内の `(SELECT get_user_role()) = 'maintainer'` で行を絞る（`security_invoker = true` だと基底テーブルの RLS が再適用され、maintainer は 0 行になる）。`authenticated` / `service_role` に SELECT のみ GRANT。admin は従来どおり `users` を直接読む。管理ダッシュボードの受講生数は service_role で数える（maintainer の JWT では `users` を数えられないため）。
+初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer には `users` の SELECT を付けない（メール等の個人情報を直接読めないようにする。#414）。RLS は行単位のため「`display_name` だけ読めて `email` は読めない」はポリシーだけでは書けない。管理画面で他ユーザーの表示名が必要な経路は service_role で取得し、select する列にメールを含めない（[機能設計書](./specification.md)6.2節・#416）。管理ダッシュボードの受講生数も service_role で数える（maintainer の JWT では `users` を数えられないため）。admin は従来どおり `users` を直接読む。受講生進捗（`/manage/students`）は admin のみ（同 6.2節）。未使用の `security_invoker = false` ビューは Security Advisor（`0010_security_definer_view`）の警告になるため置かない。
 
 本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため）。`email_opt_out_at` も同様に、配信停止ルート（`/api/email/unsubscribe`。署名付きリンクでログイン不要）と、設定画面の API（`PATCH /api/settings/email`。`getServerAuth()` で特定した本人の行だけを更新する）が service_role 経由で記録する。`display_name` も同様に、設定画面の API（`PATCH /api/settings/profile`。`getServerAuth()` で特定した本人の行のこの列だけ）が service_role 経由で更新する。`notification_email` と確認待ちの3列も同様に、設定画面の API と確認ルート（`/api/settings/notification-email`。変更依頼・解除・取り消しは `getServerAuth()` の本人の行だけ。確認の確定はトークンのハッシュが指す行だけ）が service_role 経由で更新する。受講者の UPDATE ポリシーは足さない。`email` は書かない。
 
