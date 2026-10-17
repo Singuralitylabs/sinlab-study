@@ -103,7 +103,16 @@ export function SettingsTiles({
   );
   const planLabel = currentPlanLabel(membershipType, userStatus);
 
-  const refreshOnClose = (open: boolean, setOpen: (next: boolean) => void) => {
+  // Drop ?notification_email=… when the user opens a modal so a stale success/error banner
+  // does not linger after they start another change (refresh alone keeps the query).
+  const onDialogOpenChange = (open: boolean, setOpen: (next: boolean) => void) => {
+    if (
+      open &&
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).has("notification_email")
+    ) {
+      router.replace("/settings");
+    }
     setOpen(open);
     if (!open) {
       router.refresh();
@@ -112,7 +121,7 @@ export function SettingsTiles({
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-      <Dialog open={profileOpen} onOpenChange={(open) => refreshOnClose(open, setProfileOpen)}>
+      <Dialog open={profileOpen} onOpenChange={(open) => onDialogOpenChange(open, setProfileOpen)}>
         <TileShell className="group">
           <DialogTrigger asChild>
             <button
@@ -151,7 +160,7 @@ export function SettingsTiles({
 
       <Dialog
         open={notificationOpen}
-        onOpenChange={(open) => refreshOnClose(open, setNotificationOpen)}
+        onOpenChange={(open) => onDialogOpenChange(open, setNotificationOpen)}
       >
         <TileShell className="group">
           <DialogTrigger asChild>
