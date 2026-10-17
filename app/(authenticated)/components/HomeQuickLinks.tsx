@@ -1,22 +1,19 @@
-import { BookOpen, CreditCard, Megaphone } from "lucide-react";
+import { BookOpen, Megaphone } from "lucide-react";
 import Link from "next/link";
 
 const LINKS = [
   { href: "/learn", label: "学習コンテンツ", icon: BookOpen },
   { href: "/announcements", label: "お知らせ", icon: Megaphone },
-  { href: "/upgrade", label: "プラン・お支払い", icon: CreditCard, stripeOnly: true },
 ] as const;
 
 /** Compact row for mobile when SideNav is in a drawer. Hidden from sm up to match SideNav's `hidden sm:flex`. */
-export function HomeQuickLinks({ stripeEnabled }: { stripeEnabled: boolean }) {
-  const links = LINKS.filter((link) => !("stripeOnly" in link && link.stripeOnly) || stripeEnabled);
-
+export function HomeQuickLinks() {
   return (
     <nav
       aria-label="クイックリンク"
       className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground sm:hidden"
     >
-      {links.map((link) => {
+      {LINKS.map((link) => {
         const Icon = link.icon;
         return (
           <Link

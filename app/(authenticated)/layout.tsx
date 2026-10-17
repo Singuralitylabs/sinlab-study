@@ -43,7 +43,6 @@ export default async function AuthLayout({
       <SideNav
         isAdmin={isAdmin}
         isInstructor={isInstructor}
-        stripeEnabled={stripeEnabled}
         feedbackEnabled={feedbackEnabled}
         showCertificates={isCertificateEligible(userStatus, userRole)}
         showReviewList={isLearnerRole(userRole)}

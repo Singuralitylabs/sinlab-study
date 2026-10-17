@@ -281,7 +281,8 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 |:--|:--|
 | `/upgrade` | Checkout導線（お試しユーザー向け）・お支払い管理導線（一般有料会員向け）をいずれも非表示にし、準備中である旨の案内を表示 |
 | `/upgrade/success` | 決済確認・会員昇格処理を一切行わず同様の案内を表示。Stripeのホスト型Checkoutセッションは作成から最大24時間有効なため、無効化の直前に開始されたセッションから再訪しても昇格させない |
-| トライアルバナー（`(authenticated)/components/TrialBanner.tsx`）／サイドナビ（`(authenticated)/components/SideNav.tsx`） | アップグレードボタン・「プラン・お支払い」項目を非表示 |
+| トライアルバナー（`(authenticated)/components/TrialBanner.tsx`） | アップグレードボタンを非表示 |
+| サイドナビ（`(authenticated)/components/SideNav.tsx`） | プラン導線は設定配下のため、無効時の追加変更なし（#394） |
 | `POST /api/stripe/{checkout,portal,webhook}` | 認証・署名検証より前段で503を返す（応答メッセージは `STRIPE_DISABLED_MESSAGE` に一元化） |
 
 **対象フロー**: お試しユーザー（`status=trial`）が `/upgrade` からStripe Checkout（ホスト型）で月額サブスクリプションを契約すると、決済完了と同時に**管理者承認なし**で一般有料会員（`status=active` / `membership_type=general`）へ自動昇格する。**コミュニティ会員はスコープ外**で、従来どおり2.7節の手動承認のみを経由する。
@@ -303,8 +304,8 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 | 画面 | パス | 内容 |
 |:--|:--|:--|
-| アップグレード | `/upgrade` | お試しユーザー: 月額料金（Stripe PriceからTTLキャッシュ付きで取得。JPY・1ヶ月間隔で取得できた場合は「月額N円（税込）」を表示。取得失敗時は `DISPLAY_MONTHLY_PRICE_JPY` のフォールバックで法定表示を残す。取得成功だが非月額・非JPYの場合は月額を断定せず見出しを出さない）+ 法定表示5項目（自動更新・料金・支払日/更新日・解約方法と解約後の扱い・未成年者注意文言）+ アップグレードボタン。実請求額を確認できない場合はボタンを無効化する。契約中の一般有料会員: 「ご契約中です」（次回のお支払い日、または解約予定日を表示。解約予約中の判定は `cancel_at_period_end` と `cancel_at` の両方で行い、解約予定日は `cancel_at`、無ければ `current_period_end` から表示する。flexible billing mode の Portal 解約は `cancel_at` にだけ現れるため。`docs/database.md` 3.9節）+ お支払い情報の管理・解約ボタン（Stripe Customer Portalへ遷移）+ 解約後の扱い（日割り返金なし・当該請求期間の末日まで利用可能）。それ以外の `active` ユーザー（コミュニティ会員・手動承認済みの一般有料会員）: 本登録済みの案内のみ。契約状況の取得自体に失敗した場合はエラーメッセージを表示し、契約なし・契約ありのいずれとも誤判定しない（フェイルクローズ）。取得失敗時もお支払い情報の管理・解約ボタンは表示し続けるが、契約の有無が不明なため解約ポリシー文言は出さない（契約が無ければAPI側が404を返すためボタン自体は安全） |
-| アップグレード完了 | `/upgrade/success` | Checkoutから戻った直後のページ。`session_id` をStripe APIでretrieveし、決済完了・本人のセッションであることを確認した上で会員昇格を反映し、完了表示する。日割りで少額決済された直後であるため、`activateUserFromCheckoutSession()` が返す次回のお支払い予定日（＝満額請求日、DBの再読み込みなしで返す）も表示する（取得できなくても完了表示自体は行う） |
+| プランの確認・変更 | `/upgrade` | 画面名・導線名は「プランの確認・変更」（`PLAN_PAGE_TITLE`）。左メニュー・ホームのクイックリンクには出さず、設定（`/settings`）から遷移する。お試しユーザー向けバナー・メール・ロック中案内の「アップグレード」文言と `/upgrade` 直リンクは維持（#394）。お試しユーザー: 一般有料／コミュニティのプラン比較表（一般有料の価格欄は見出しと同じ確認済み月額。未確認時は「—」。定数の固定表示にしない） + 月額料金（Stripe PriceからTTLキャッシュ付きで取得。JPY・1ヶ月間隔で取得できた場合は「月額N円（税込）」を表示。取得失敗時は `DISPLAY_MONTHLY_PRICE_JPY` のフォールバックで法定表示を残す。取得成功だが非月額・非JPYの場合は月額を断定せず見出しを出さない）+ 法定表示5項目（自動更新・料金・支払日/更新日・解約方法と解約後の扱い・未成年者注意文言）+ Checkoutボタン。実請求額を確認できない場合はボタンを無効化する。契約中の一般有料会員: 現在のプラン表示 + 「ご契約中です」（次回のお支払い日、または解約予定日を表示。解約予約中の判定は `cancel_at_period_end` と `cancel_at` の両方で行い、解約予定日は `cancel_at`、無ければ `current_period_end` から表示する。flexible billing mode の Portal 解約は `cancel_at` にだけ現れるため。`docs/database.md` 3.9節）+ お支払い情報の管理・解約ボタン（Stripe Customer Portalへ遷移）+ 解約後の扱い（日割り返金なし・当該請求期間の末日まで利用可能）+ コミュニティ会員プランの比較表と申込み案内。`FEEDBACK_ENABLED` 有効時のみ「問い合わせる」（種別 `plan_inquiry`）を出す。コミュニティ会員: 「現在のプラン：コミュニティ会員」と契約状況のみ（他プラン案内なし）。Stripe契約が無い場合は「お支払いは運営の案内に従います」。手動承認済みの一般有料会員（契約なし）: 本登録済みの案内 + コミュニティ案内。契約状況の取得自体に失敗した場合はエラーメッセージを表示し、契約なし・契約ありのいずれとも誤判定しない（フェイルクローズ）。取得失敗時もお支払い情報の管理・解約ボタンは表示し続けるが、契約の有無が不明なため解約ポリシー文言は出さない（契約が無ければAPI側が404を返すためボタン自体は安全）。コミュニティ会員のStripe自動契約は #395 |
+| プラン手続き完了 | `/upgrade/success` | Checkoutから戻った直後のページ。`session_id` をStripe APIでretrieveし、決済完了・本人のセッションであることを確認した上で会員昇格を反映し、完了表示する。日割りで少額決済された直後であるため、`activateUserFromCheckoutSession()` が返す次回のお支払い予定日（＝満額請求日、DBの再読み込みなしで返す）も表示する（取得できなくても完了表示自体は行う） |
 
 トライアルバナー（`(authenticated)/components/TrialBanner.tsx`、2.6参照）に `/upgrade` へのCTAボタンを表示する。ただし `/upgrade` 自身と週一覧・コンテンツ画面（`/learn/[themeId]/[phaseId]` 以下）ではバナーごと表示しない（2.6「承認待ちバナー」）。
 
@@ -580,7 +581,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 
 **学習中テーマ（`app/lib/theme-progress.ts`）**: 受講テーマを選ぶ仕組みは持たず、完了実績から判定する。`isActiveTheme()` は完了が1件以上で修了（100%。修了証の `isThemeCompleted()` と同じ定義）に達していないこと（trial は上記の分母のまま判定）。`splitThemesByActivity()` が **学習中**（完了1件以上で100%未満。完了率の高い順）/ **修了**（100%）/ **未着手**（完了0件。`display_order` 順）に分ける。判定はこの1か所に置き、ホーム・週次進捗メール（10.7節）・将来の修了証一覧が共有する。
 
-**ホーム（`/`）**: 見出しは「ホーム」。見出し直後にクイックリンクを小さめ1行（`/learn`・`/announcements`・Stripe有効時のみ `/upgrade`。サイドナビがドロワーに隠れるスマホ向け）。主役は「続きから学習」カード（`resolveContinueLearning()`。最後に完了したテーマの学習順先頭未完了。完了0件なら最初のテーマの先頭。最後に学んだテーマが修了済みなら並び順で次の未完了テーマ。全完了なら非表示。お試しで閲覧可能分をすべて完了したらカードの代わりに「次のステップ」）。続けて学習中のテーマ（`ThemeCard`。0件のときは最初の未着手テーマへのリンク）。修了・未着手のテーマ一覧と「学習を始める」ボタンは置かない。テーマ選択は `/learn` に一本化する。`/learn` のテーマカードにも同じ進捗・修了表示を出す（admin / maintainer の未公開テーマは進捗集計が無いため進捗を出さない）。「はじめかたチェックリスト」の完了判定と、お試しの「次のステップ」カード（全テーマの分母で100%）はテーマをまたいだ判定のため変えない。続きから学習の判定は通常クライアント（RLS）で取得した公開コンテンツと `user_progress` から計算し、service_role は使わない。
+**ホーム（`/`）**: 見出しは「ホーム」。見出し直後にクイックリンクを小さめ1行（`/learn`・`/announcements`。サイドナビがドロワーに隠れるスマホ向け。プラン導線は設定配下。#394）。主役は「続きから学習」カード（`resolveContinueLearning()`。最後に完了したテーマの学習順先頭未完了。完了0件なら最初のテーマの先頭。最後に学んだテーマが修了済みなら並び順で次の未完了テーマ。全完了なら非表示。お試しで閲覧可能分をすべて完了したらカードの代わりに「次のステップ」）。続けて学習中のテーマ（`ThemeCard`。0件のときは最初の未着手テーマへのリンク）。修了・未着手のテーマ一覧と「学習を始める」ボタンは置かない。テーマ選択は `/learn` に一本化する。`/learn` のテーマカードにも同じ進捗・修了表示を出す（admin / maintainer の未公開テーマは進捗集計が無いため進捗を出さない）。「はじめかたチェックリスト」の完了判定と、お試しの「次のステップ」カード（全テーマの分母で100%）はテーマをまたいだ判定のため変えない。続きから学習の判定は通常クライアント（RLS）で取得した公開コンテンツと `user_progress` から計算し、service_role は使わない。
 
 ---
 
@@ -1076,12 +1077,12 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 
 - `/`: ウェルカムダイアログ・はじめかたチェックリストは member のみ（3.4）、未読のお知らせ最大3件（11章）
 - `/learn/[themeId]/[phaseId]/[weekId]/[contentId]`: 前後ナビゲーションはテーマ内を通しで遷移（3.3）
-- `/upgrade`: ステータス別の出し分け。サイドナビ「プラン・お支払い」から全認証ユーザーがアクセス可能（2.11）
+- `/upgrade`: ステータス別の出し分け。設定の「プラン」入口とお試し導線から全認証ユーザーがアクセス可能（2.11・#394）
 - `/upgrade/success`: Checkoutから戻った直後の決済確認・完了表示（2.11）
 - `/certificates` / `/certificates/[id]`: 修了証の一覧と表示（本登録の member のみ。13章）
 - `/review-list`: 復習リスト（未克服 / 克服済み。`role = member` のみ。15章）
 - `/announcements` / `/announcements/[id]`: お知らせの一覧（未読表示。サイドナビ「お知らせ」に未読件数のバッジ）・詳細（開くと既読を記録）（11章）
-- `/settings`: プロフィール（表示名）と、案内メールの配信状態（配信中 / 停止中と停止日時）の確認と、停止・再開（10.8節）。サイドナビのログアウトの上に「設定」として全ロールへ表示する。表示名は `users.display_name` の1つを画面・管理画面・修了証で共用する（修了証用の氏名は別に持たない）。画面は本人の行を通常クライアントで SELECT して入力欄に出し、保存は `PATCH /api/settings/profile`（`{ "displayName": string }`）で行う。`getServerAuth()` で本人を特定し、未認証 401・`userId` なし 403・`active` / `trial` 以外（`rejected` を含む）403・検証失敗 400。更新は `updateUserDisplayName()` が service_role で本人の行の `display_name` だけを書く（RLS に本人 UPDATE は足さない。ボディの `role` や `userId` は書かない）。前後の空白を除いて空でないこと、`DISPLAY_NAME_MAX_LENGTH`（50）以内、改行などの制御文字を含まないこと。ゼロ幅スペースや双方向制御などの書式文字は保存前に除き（絵文字の ZWJ は、他に文字があるときだけ残す）、除いた結果が空なら空として拒否する。画面は同じ `parseDisplayName()` で拒否する。保存後は `router.refresh()` でサーバー描画の表示名を取り直す。修了証には発行時点の名前が印字され、発行済みの修了証には反映されない（13.2節）
+- `/settings`: プロフィール（表示名）、プラン（`/upgrade` への入口。「プランの確認・変更」。#394）、案内メールの配信状態（配信中 / 停止中と停止日時）の確認と、停止・再開（10.8節）。サイドナビのログアウトの上に「設定」として全ロールへ表示する。表示名は `users.display_name` の1つを画面・管理画面・修了証で共用する（修了証用の氏名は別に持たない）。画面は本人の行を通常クライアントで SELECT して入力欄に出し、保存は `PATCH /api/settings/profile`（`{ "displayName": string }`）で行う。`getServerAuth()` で本人を特定し、未認証 401・`userId` なし 403・`active` / `trial` 以外（`rejected` を含む）403・検証失敗 400。更新は `updateUserDisplayName()` が service_role で本人の行の `display_name` だけを書く（RLS に本人 UPDATE は足さない。ボディの `role` や `userId` は書かない）。前後の空白を除いて空でないこと、`DISPLAY_NAME_MAX_LENGTH`（50）以内、改行などの制御文字を含まないこと。ゼロ幅スペースや双方向制御などの書式文字は保存前に除き（絵文字の ZWJ は、他に文字があるときだけ残す）、除いた結果が空なら空として拒否する。画面は同じ `parseDisplayName()` で拒否する。保存後は `router.refresh()` でサーバー描画の表示名を取り直す。修了証には発行時点の名前が印字され、発行済みの修了証には反映されない（13.2節）
 - `/settings` の通知の送り先: ログイン用の `users.email` は表示するだけで変更しない。今の送り先は `notification_email`（NULL ならログイン用）。変更は `POST /api/settings/notification-email`（`{ "email": string }`）で確認メールを送り、リンクの確認画面で確定するまで `notification_email` は変わらない。`getServerAuth()` で本人を特定し、未認証 401・`userId` なし 403・`active` / `trial` 以外 403・形式不正 400・現在と同じアドレス 400・直近24時間の確認メールが `NOTIFICATION_EMAIL_CONFIRM_LIMIT` を超えたら 429。更新は service_role で本人の行の確認待ち列だけを書く（RLS に本人 UPDATE は足さない。`users.email` は書かない）。確認は `GET`（画面のみ）と `POST /api/settings/notification-email/verify?token=...`（確定）。ログインは要らない。解除は `DELETE /api/settings/notification-email` で `notification_email` を NULL に戻し、それまでの送り先へ変更通知を送る。確認待ちの取り消しは `POST /api/settings/notification-email/cancel`。画面には「お支払いに関するメールは Stripe から登録時のアドレスに届きます」と出す（2.11節。Stripe の Customer のアドレスは変えない）
 
 ### 7.3 管理・講師向け画面（`/manage`）
@@ -1482,7 +1483,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 | `checkout_completed` | `activateUserFromCheckoutSession()` がユーザーを実際に昇格したとき（`activated` は再訪でも true のままなので、行を更新した初回だけ。有料化メールと同じゲート） | なし |
 | `subscription_ended` | `revertUserToTrial()` が行を更新したとき | なし |
 
-`upgrade_cta_clicked` の配置は、ロック画面・フェーズ一覧の鍵付き案内・ホームの「次のステップ」・認証レイアウトのトライアルバナー。サイドナビの「プラン・お支払い」やウェルカムダイアログは対象にしない。
+`upgrade_cta_clicked` の配置は、ロック画面・フェーズ一覧の鍵付き案内・ホームの「次のステップ」・認証レイアウトのトライアルバナー。設定の「プラン」入口やウェルカムダイアログは対象にしない。
 
 ### 12.2 個人情報を入れない
 
@@ -1641,25 +1642,25 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 
 ### 16.1 有効・無効
 
-`FEEDBACK_ENABLED === "true"` のときだけ有効（`isFeedbackEnabled()`。フェイルクローズ）。無効時はサイドナビにフォームを出さず、`POST /api/feedback` は 503。
+`FEEDBACK_ENABLED === "true"` のときだけ有効（`isFeedbackEnabled()`。フェイルクローズ）。無効時はサイドナビと `/upgrade` の問い合わせボタンにフォームを出さず、`POST /api/feedback` は 503。
 
 ### 16.2 投稿 API
 
 **エンドポイント**: `POST /api/feedback`
 
-**ボディ**: `{ category, body, pageUrl?, userAgent? }`（`category` は `FEEDBACK_CATEGORIES`: `bug` / `improvement` / `question` / `other`。`body` は trim 後 1〜`FEEDBACK_BODY_MAX_LENGTH` 文字）
+**ボディ**: `{ category, body, pageUrl?, userAgent? }`（`category` は `FEEDBACK_CATEGORIES`: `bug` / `improvement` / `question` / `other` / `plan_inquiry`。`body` は trim 後 1〜`FEEDBACK_BODY_MAX_LENGTH` 文字）
 
 1. 機能無効なら 503
 2. zod 検証 → `requireLearnerApi()`（未認証 401・`rejected` 等 403）。お試し（trial）も可
 3. 同一ユーザーの直近 `FEEDBACK_RATE_LIMIT_WINDOW_MS`（60秒）以内の件数が 1 以上なら 429
 4. `createAdminSupabaseClient()` で `feedbacks` に INSERT（`user_id` は認証ユーザーのみ。RLS 有効・ポリシーなし）
-5. `sendSlackFeedbackNotification()` を fire-and-forget（失敗しても 200）。メールアドレスは載せない。管理画面リンクは `NEXT_PUBLIC_APP_URL` があるときだけ
+5. `sendSlackFeedbackNotification()` を fire-and-forget（失敗しても 200）。メールアドレスは載せない。`plan_inquiry` のときは見出しを「プランの相談が届きました」にする。管理画面リンクは `NEXT_PUBLIC_APP_URL` があるときだけ
 
 ### 16.3 画面
 
-- **受講生**: サイドナビ下部の「フィードバック」ダイアログ（ページ URL・User-Agent は自動付与）
-- **管理**（admin / maintainer）: `/manage/feedbacks` 一覧、`/manage/feedbacks/[id]` 詳細と状態変更（`open` / `in_progress` / `done`）。`PATCH /api/manage/feedbacks/[id]`（`requireContentManagerApi()`）
+- **受講生**: サイドナビ下部の「フィードバック」ダイアログ（ページ URL・User-Agent は自動付与）。`/upgrade` からは種別 `plan_inquiry` を選んだ状態で同じダイアログを開ける（#394）
+- **管理**（admin / maintainer）: `/manage/feedbacks` 一覧、`/manage/feedbacks/[id]` 詳細と状態変更（`open` / `in_progress` / `done`）。一覧・詳細とも投稿者のメールアドレスを表示する（返信は運営がメールで行う）。`PATCH /api/manage/feedbacks/[id]`（`requireContentManagerApi()`）
 
 ### 16.4 スコープ外（段階1）
 
-投稿者への返信メール、画像添付、公開ボード、GitHub イシュー自動作成（段階2）。
+投稿者への自動返信メール、画像添付、公開ボード、GitHub イシュー自動作成（段階2）。

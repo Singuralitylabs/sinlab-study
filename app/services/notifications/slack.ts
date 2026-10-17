@@ -247,13 +247,18 @@ export async function sendSlackFeedbackNotification(
       ? `${params.body.slice(0, FEEDBACK_SLACK_BODY_PREVIEW_CHARS)}…`
       : params.body;
 
+  const headerText =
+    params.category === "plan_inquiry"
+      ? "📝 プランの相談が届きました"
+      : "📝 新しいフィードバックが届きました";
+
   const body = {
     blocks: [
       {
         type: "header",
         text: {
           type: "plain_text",
-          text: "📝 新しいフィードバックが届きました",
+          text: headerText,
           emoji: true,
         },
       },

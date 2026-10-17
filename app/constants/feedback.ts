@@ -5,7 +5,13 @@ export function isFeedbackEnabled(): boolean {
 
 export const FEEDBACK_DISABLED_MESSAGE = "フィードバック機能は現在利用できません";
 
-export const FEEDBACK_CATEGORIES = ["bug", "improvement", "question", "other"] as const;
+export const FEEDBACK_CATEGORIES = [
+  "bug",
+  "improvement",
+  "question",
+  "other",
+  "plan_inquiry",
+] as const;
 export type FeedbackCategory = (typeof FEEDBACK_CATEGORIES)[number];
 
 export const FEEDBACK_CATEGORY_LABELS: Record<FeedbackCategory, string> = {
@@ -13,6 +19,7 @@ export const FEEDBACK_CATEGORY_LABELS: Record<FeedbackCategory, string> = {
   improvement: "改善要望",
   question: "質問",
   other: "その他",
+  plan_inquiry: "プランの相談",
 };
 
 export const FEEDBACK_STATUSES = ["open", "in_progress", "done"] as const;
