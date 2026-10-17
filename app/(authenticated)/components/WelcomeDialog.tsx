@@ -92,7 +92,7 @@ export function WelcomeDialog({
                 onClick={completeAndRefresh}
                 className="text-primary underline underline-offset-4"
               >
-                プラン・お支払いを見る
+                プランの確認・変更を見る
               </Link>
             </p>
           )}

@@ -13,9 +13,15 @@ export const BILLING_ANCHOR_HOUR_UTC = 0;
  */
 export const DISPLAY_MONTHLY_PRICE_JPY = 1500;
 
+/** Community membership list price (JPY, tax included; #394). Manual approval only for now (#395). */
+export const DISPLAY_COMMUNITY_MONTHLY_PRICE_JPY = 3000;
+
 export function formatMonthlyJpyPrice(amount: number): string {
   return `月額${amount.toLocaleString("ja-JP")}円（税込）`;
 }
+
+/** Page title / nav / settings / email copy for /upgrade (#394). Trial CTA copy keeps 「アップグレード」. */
+export const PLAN_PAGE_TITLE = "プランの確認・変更";
 
 /**
  * Value copy for the trial-to-paid prompts only. Not used on /upgrade: that page sits next to the

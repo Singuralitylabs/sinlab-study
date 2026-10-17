@@ -306,7 +306,7 @@ export function buildSubscriptionEndedEmail(
     texts,
     displayName: params.displayName,
     values: {},
-    links: [{ label: "アップグレードページを開く", url: buildAppUrl(params.appUrl, "/upgrade") }],
+    links: [{ label: "プランの確認・変更を開く", url: buildAppUrl(params.appUrl, "/upgrade") }],
     emailPreferencesUrl: preferencesUrl(params.appUrl),
   });
 }

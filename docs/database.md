@@ -297,7 +297,7 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 
 ### 3.24 feedbacks（受講生フィードバック）
 
-受講生の不具合報告・改善要望・質問（#392）。`category`（`bug` / `improvement` / `question` / `other`）、`body`、`page_url`、`user_agent`、`status`（`open` / `in_progress` / `done`）、`created_at`。`user_id` は `users` への FK。
+受講生の不具合報告・改善要望・質問・プランの相談（#392 / #394）。`category`（`bug` / `improvement` / `question` / `other` / `plan_inquiry`）、`body`、`page_url`、`user_agent`、`status`（`open` / `in_progress` / `done`）、`created_at`。`user_id` は `users` への FK。
 
 RLS は有効化しポリシーは作らない（`push_subscriptions` と同じ）。読み書きは `getServerAuth()` 済みの API が service_role で行い、INSERT 時の `user_id` は認証ユーザーに固定する。管理画面の一覧・詳細も service_role（admin / maintainer ゲートはアプリ層）。
 

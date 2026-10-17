@@ -4,7 +4,6 @@ import {
   Award,
   BookOpen,
   ClipboardList,
-  CreditCard,
   House,
   ListChecks,
   LogOut,
@@ -70,12 +69,6 @@ function announcementsNavItem(badge: React.ReactNode): NavItem {
     badge,
   };
 }
-
-const UPGRADE_NAV_ITEM: NavItem = {
-  title: "プラン・お支払い",
-  href: "/upgrade",
-  icon: <CreditCard className="h-5 w-5" />,
-};
 
 const MANAGE_NAV_ITEM: NavItem = {
   title: "管理画面",
@@ -171,7 +164,6 @@ function SideNavSidebarContent({
 export function SideNav({
   isAdmin,
   isInstructor,
-  stripeEnabled,
   feedbackEnabled,
   showCertificates,
   showReviewList,
@@ -179,7 +171,6 @@ export function SideNav({
 }: {
   isAdmin: boolean;
   isInstructor: boolean;
-  stripeEnabled: boolean;
   feedbackEnabled: boolean;
   showCertificates: boolean;
   /** Learners only (role = member); staff manage courses and do not use the review list. */
@@ -197,8 +188,6 @@ export function SideNav({
     ...(showReviewList ? [REVIEW_LIST_NAV_ITEM] : []),
     ...(showCertificates ? [CERTIFICATES_NAV_ITEM] : []),
     announcementsNavItem(announcementBadge),
-    // No payment/billing-management entry while disabled (see AGENTS.md).
-    ...(stripeEnabled ? [UPGRADE_NAV_ITEM] : []),
     ...(isInstructor ? [MANAGE_NAV_ITEM] : []),
     ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),
   ];

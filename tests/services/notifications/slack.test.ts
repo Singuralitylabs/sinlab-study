@@ -120,4 +120,23 @@ describe("sendSlackFeedbackNotification", () => {
       )
     ).toBe(false);
   });
+
+  it("plan_inquiry は見出しをプランの相談にする", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendSlackFeedbackNotification({
+      feedbackId: 12,
+      category: "plan_inquiry",
+      body: "コミュニティ会員に変更したいです",
+      pageUrl: "https://study.example.com/upgrade",
+      manageUrl: "https://study.example.com/manage/feedbacks/12",
+    });
+
+    const payload = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
+      blocks: Array<{ type: string; text?: { type: string; text: string } }>;
+    };
+    const header = payload.blocks.find((b) => b.type === "header");
+    expect(header?.text?.text).toBe("📝 プランの相談が届きました");
+  });
 });
