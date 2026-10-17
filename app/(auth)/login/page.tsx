@@ -1,5 +1,5 @@
-import { BookOpen } from "lucide-react";
 import { Noto_Sans_JP } from "next/font/google";
+import Image from "next/image";
 import { TERMS_REQUIRED_ERROR_CODE } from "@/app/constants/auth";
 import { COMMERCIAL_TRANSACTIONS_URL, PRIVACY_URL, TERMS_URL } from "@/app/constants/legal";
 import { isStripeEnabled } from "@/app/constants/stripe";
@@ -52,9 +52,14 @@ export default async function LoginPage({
     >
       <div className="mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 grid-rows-[auto_auto_auto_1fr] pt-10 lg:grid-cols-[minmax(0,1fr)_400px] lg:grid-rows-[auto_auto_auto] lg:content-center lg:items-center lg:gap-x-16 lg:gap-y-7 lg:px-8 lg:py-14">
         <header className="flex flex-col items-center gap-1.5 px-4 pb-6 text-center lg:col-start-1 lg:row-start-1 lg:flex-row lg:gap-3 lg:px-0 lg:pb-0 lg:text-left">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground lg:h-10 lg:w-10">
-            <BookOpen className="h-6 w-6" aria-hidden="true" />
-          </div>
+          <Image
+            src="/icon.png"
+            alt=""
+            width={48}
+            height={48}
+            className="h-12 w-12 rounded-xl lg:h-10 lg:w-10"
+            priority
+          />
           <h1 className="mt-1.5 text-2xl font-extrabold lg:mt-0 lg:text-xl">Sinlab Study</h1>
           <p className="text-sm text-muted-foreground">AIと学ぶ実践Web技術講座</p>
         </header>

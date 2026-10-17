@@ -69,14 +69,30 @@ describe("インストール案内の表示条件", () => {
 });
 
 describe("manifest", () => {
-  it("any と maskable の両方を 192 / 512 で載せる", () => {
+  it("any と maskable の両方を 192 / 512 で載せる（maskable は別ファイル）", () => {
     const { icons } = manifest();
     expect(icons).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ sizes: "192x192", purpose: "any" }),
-        expect.objectContaining({ sizes: "512x512", purpose: "any" }),
-        expect.objectContaining({ sizes: "192x192", purpose: "maskable" }),
-        expect.objectContaining({ sizes: "512x512", purpose: "maskable" }),
+        expect.objectContaining({
+          src: "/icons/icon-192.png",
+          sizes: "192x192",
+          purpose: "any",
+        }),
+        expect.objectContaining({
+          src: "/icons/icon-512.png",
+          sizes: "512x512",
+          purpose: "any",
+        }),
+        expect.objectContaining({
+          src: "/icons/icon-maskable-192.png",
+          sizes: "192x192",
+          purpose: "maskable",
+        }),
+        expect.objectContaining({
+          src: "/icons/icon-maskable-512.png",
+          sizes: "512x512",
+          purpose: "maskable",
+        }),
       ])
     );
     expect(icons?.filter((icon) => icon.purpose === "any")).toHaveLength(2);
@@ -243,7 +259,7 @@ describe("public/sw.js の挙動", () => {
     expect(offline).toBeDefined();
     expect(await offline?.text()).toBe("offline-html");
     expect(offlineSw.putCalls).toEqual([]);
-    expect(await caches.keys()).toContain("sinlab-static-v2");
+    expect(await caches.keys()).toContain("sinlab-static-v3");
   });
 
   it("/api と認証 HTML 以外の経路でも navigate 以外で cache.put しない。activate は旧キャッシュを消す", async () => {
@@ -251,7 +267,7 @@ describe("public/sw.js の挙動", () => {
     const { listeners, putCalls, cacheStore, self } = loadServiceWorker({ fetchImpl });
 
     cacheStore.set("sinlab-static-v1", new Map([["/old", new Response("old")]]));
-    cacheStore.set("sinlab-static-v2", new Map());
+    cacheStore.set("sinlab-static-v3", new Map());
 
     const activateEvent: {
       waitUntil: (promise: Promise<unknown>) => void;
@@ -264,7 +280,7 @@ describe("public/sw.js の挙動", () => {
     };
     listeners.get("activate")?.(activateEvent);
     await activateEvent.done;
-    expect([...cacheStore.keys()]).toEqual(["sinlab-static-v2"]);
+    expect([...cacheStore.keys()]).toEqual(["sinlab-static-v3"]);
     expect(self.clients.claim).toHaveBeenCalledOnce();
 
     const apiEvent: {
@@ -289,7 +305,7 @@ describe("public/sw.js の挙動", () => {
     expect(source).toContain("caches.match(OFFLINE_URL)");
     expect(source).toMatch(/"install"[\s\S]*cache\.add\(OFFLINE_URL\)/);
     expect(source).toMatch(/"activate"[\s\S]*caches\.delete/);
-    expect(source).toContain("sinlab-static-v2");
+    expect(source).toContain("sinlab-static-v3");
     expect(source).not.toContain('"/api');
   });
 

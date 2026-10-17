@@ -6,7 +6,7 @@
  * Bump STATIC_CACHE when offline HTML or caching rules change so activate drops old entries.
  * Push payloads are title/body/url only; the click opens a page through the same
  * network-first navigate handler. */
-const STATIC_CACHE = "sinlab-static-v2";
+const STATIC_CACHE = "sinlab-static-v3";
 const OFFLINE_URL = "/offline";
 
 self.addEventListener("install", (event) => {
