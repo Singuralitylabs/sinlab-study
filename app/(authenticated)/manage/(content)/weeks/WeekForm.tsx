@@ -117,8 +117,8 @@ export function WeekForm({
         });
         const id = mode === "edit" && initialData ? initialData.id : parseCreatedWeekId(data);
         if (onSuccess) {
+          // Caller (e.g. ContentTree) refreshes after expanding the created node.
           onSuccess(id !== undefined ? { id } : undefined);
-          router.refresh();
         } else {
           router.push("/manage/contents");
           router.refresh();

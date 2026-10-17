@@ -64,6 +64,8 @@ type ContentTreeProps = {
 };
 
 const EXPAND_STORAGE_KEY = "manage-content-tree-expand";
+/** Stable default so a new `[]` is not allocated every render (would retrigger effects). */
+const NO_EXPAND_KEYS: string[] = [];
 
 function PublishedBadge({ isPublished }: { isPublished: boolean }) {
   return (
@@ -104,23 +106,30 @@ export function ContentTree({
   contentFormThemes,
   contentFormPhases,
   contentFormWeeks,
-  initialExpandKeys = [],
+  initialExpandKeys = NO_EXPAND_KEYS,
   formDataReady,
 }: ContentTreeProps) {
   const router = useRouter();
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(initialExpandKeys));
   const [dialog, setDialog] = useState<CreateDialogState>({ kind: null });
 
+  // Mount-only: merge sessionStorage after hydration. Do not depend on initialExpandKeys — the
+  // default `[]` is a new array each render and would re-run forever once storage is non-empty.
   useEffect(() => {
     const stored = readStoredExpandKeys();
-    if (stored.length === 0 && initialExpandKeys.length === 0) return;
+    if (stored.length === 0) return;
     setExpanded((prev) => {
+      let changed = false;
       const next = new Set(prev);
-      for (const key of stored) next.add(key);
-      for (const key of initialExpandKeys) next.add(key);
-      return next;
+      for (const key of stored) {
+        if (!next.has(key)) {
+          next.add(key);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
     });
-  }, [initialExpandKeys]);
+  }, []);
 
   const dialogOpen = dialog.kind !== null;
 

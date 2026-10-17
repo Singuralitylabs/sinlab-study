@@ -21,6 +21,7 @@ import {
   fetchContentSiblingCandidates,
   hasAnyManageContents,
 } from "@/app/services/api/admin-server";
+import type { ManageContentListItem } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
 import { ContentsFilterBar } from "./ContentsFilterBar";
@@ -33,6 +34,27 @@ interface AdminContentsPageProps {
 
 function firstParam(value: string | string[] | undefined): string {
   return (Array.isArray(value) ? value[0] : value) ?? "";
+}
+
+/** Apply the same structural filters as fetchAllContents SQL, for the bulk-ops table only. */
+function filterContentsByStructure(
+  contents: ManageContentListItem[],
+  filters: {
+    themeId?: string;
+    phaseId?: string;
+    weekId?: string;
+    contentType?: ManageContentListItem["content_type"];
+  }
+): ManageContentListItem[] {
+  return contents.filter((content) => {
+    if (filters.weekId && String(content.week_id) !== filters.weekId) return false;
+    if (filters.contentType && content.content_type !== filters.contentType) return false;
+    if (filters.phaseId && String(content.week?.phase?.id ?? "") !== filters.phaseId) return false;
+    if (filters.themeId && String(content.week?.phase?.theme?.id ?? "") !== filters.themeId) {
+      return false;
+    }
+    return true;
+  });
 }
 
 export default async function AdminContentsPage({ searchParams }: AdminContentsPageProps) {
@@ -54,12 +76,14 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
   const hasStructuralFilter = Object.values(structuralFilters).some((value) => value !== undefined);
   const isFiltered = hasStructuralFilter || filters.q !== "";
 
+  // One unfiltered contents fetch: the tree always shows the full hierarchy; the bulk table
+  // applies structural + title filters in JS (#335 review).
   const [themesResult, phasesResult, weeksResult, listResult, siblingsResult, anyContentsResult] =
     await Promise.all([
       fetchAllThemes(),
       fetchAllPhases(),
       fetchAllWeeks(),
-      fetchAllContents(structuralFilters),
+      fetchAllContents(),
       fetchContentSiblingCandidates(),
       hasAnyManageContents(),
     ]);
@@ -91,8 +115,14 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
     weeks: Boolean(weeksResult.data),
     contents: Boolean(siblingsResult.data),
   };
+  const createBlocked =
+    !formDataReady.themes ||
+    !formDataReady.phases ||
+    !formDataReady.weeks ||
+    !formDataReady.contents;
 
-  const tree = buildContentTree(themes, phases, weeks, sortContentsByHierarchy(contents));
+  const sortedContents = sortContentsByHierarchy(contents);
+  const tree = buildContentTree(themes, phases, weeks, sortedContents);
   const filterOptions = deriveWeekSelectOptions(sortWeeksByHierarchy(weeks));
 
   const themeSiblings = [...themes]
@@ -128,11 +158,13 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
         }))
     : [];
 
-  const sortedContents = sortContentsByHierarchy(contents);
-  const filteredContents = filterContents(sortedContents, {
-    q: filters.q || undefined,
-  });
-  const groups = groupContentsByWeek(filteredContents);
+  const tableContents = filterContents(
+    filterContentsByStructure(sortedContents, structuralFilters),
+    {
+      q: filters.q || undefined,
+    }
+  );
+  const groups = groupContentsByWeek(tableContents);
   const tableGroups = toContentTableGroups(groups);
 
   return (
@@ -141,6 +173,13 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">構成ツリー</h2>
+        {createBlocked && (
+          <Alert variant="destructive">
+            <AlertDescription>
+              一覧の取得に失敗したため作成できません。時間をおいて再度お試しください。
+            </AlertDescription>
+          </Alert>
+        )}
         <ContentTree
           tree={tree}
           themes={themes}
@@ -159,7 +198,7 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">コンテンツの一括操作</h2>
         <p className="text-sm text-muted-foreground">
-          公開・非公開の切り替えや一括削除は、下の一覧から行えます。
+          公開・非公開の切り替えや一括削除は、下の一覧から行えます。フィルタは一覧だけに効きます。
         </p>
 
         {!hasAnyContents && !anyContentsResult.error ? (
