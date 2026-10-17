@@ -35,3 +35,7 @@ export const CERTIFICATE_DASHBOARD_DISPLAY_DAYS = 14;
 export const CERTIFICATE_SHARE_HASHTAG = "SinlabStudy";
 
 export const CERTIFICATE_SHARE_URL = "https://twitter.com/intent/tweet";
+
+export const CERTIFICATE_SHARE_URL_LINE = "https://social-plugins.line.me/lineit/share";
+
+export const CERTIFICATE_SHARE_URL_FACEBOOK = "https://www.facebook.com/sharer/sharer.php";

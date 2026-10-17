@@ -7,6 +7,8 @@ import {
   CERTIFICATE_NO_UNIQUE_CONSTRAINT,
   CERTIFICATE_SHARE_HASHTAG,
   CERTIFICATE_SHARE_URL,
+  CERTIFICATE_SHARE_URL_FACEBOOK,
+  CERTIFICATE_SHARE_URL_LINE,
 } from "@/app/constants/certificate";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import type { UserRoleType, UserStatusType } from "@/app/types";
@@ -72,16 +74,49 @@ export function dashboardCertificateCutoff(now: Date): string {
   return new Date(now.getTime() - CERTIFICATE_DASHBOARD_DISPLAY_DAYS * DAY_MS).toISOString();
 }
 
+function buildShareTargetUrl(appUrl: string | null): string | null {
+  return appUrl ? `${appUrl.replace(/\/+$/, "")}/login` : null;
+}
+
+function buildShareText(themeName: string): string {
+  return `『${themeName}』を修了しました #${CERTIFICATE_SHARE_HASHTAG}`;
+}
+
 /**
  * X (Twitter) share link. Points at the login page, never at the certificate: the certificate page
  * is viewable only by its owner and no public URL exists.
  */
 export function buildCertificateShareUrl(themeName: string, appUrl: string | null): string {
-  const params = new URLSearchParams({
-    text: `『${themeName}』を修了しました #${CERTIFICATE_SHARE_HASHTAG}`,
-  });
-  if (appUrl) {
-    params.set("url", `${appUrl.replace(/\/+$/, "")}/login`);
+  const params = new URLSearchParams({ text: buildShareText(themeName) });
+  const target = buildShareTargetUrl(appUrl);
+  if (target) {
+    params.set("url", target);
   }
   return `${CERTIFICATE_SHARE_URL}?${params.toString()}`;
+}
+
+/** LINE share link. null without an app URL: LINE needs a URL to share, unlike X. */
+export function buildCertificateLineShareUrl(
+  themeName: string,
+  appUrl: string | null
+): string | null {
+  const target = buildShareTargetUrl(appUrl);
+  if (!target) {
+    return null;
+  }
+  const params = new URLSearchParams({ url: target, text: buildShareText(themeName) });
+  return `${CERTIFICATE_SHARE_URL_LINE}?${params.toString()}`;
+}
+
+/**
+ * Facebook share link. The sharer takes no body text, so only the URL and one hashtag are passed
+ * (the hashtag parameter includes the leading `#`). null without an app URL.
+ */
+export function buildCertificateFacebookShareUrl(appUrl: string | null): string | null {
+  const target = buildShareTargetUrl(appUrl);
+  if (!target) {
+    return null;
+  }
+  const params = new URLSearchParams({ u: target, hashtag: `#${CERTIFICATE_SHARE_HASHTAG}` });
+  return `${CERTIFICATE_SHARE_URL_FACEBOOK}?${params.toString()}`;
 }
