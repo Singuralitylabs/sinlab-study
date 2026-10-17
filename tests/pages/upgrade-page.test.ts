@@ -15,9 +15,17 @@ vi.mock("@/app/(authenticated)/upgrade/ManageSubscriptionButton", () => ({
 vi.mock("@/app/(authenticated)/upgrade/UpgradeCheckoutButton", () => ({
   UpgradeCheckoutButton: () => createElement("div", null, "checkout"),
 }));
+vi.mock("@/app/(authenticated)/upgrade/PlanInquiryButton", () => ({
+  PlanInquiryButton: ({ compact }: { compact?: boolean }) =>
+    createElement("div", null, compact ? "inquiry-compact" : "inquiry"),
+}));
 
 import UpgradePage from "@/app/(authenticated)/upgrade/page";
-import { fetchStripeSubscriptionByUserId } from "@/app/services/api/stripe-server";
+import { COMMUNITY_APPLY_FORM_URL } from "@/app/constants/stripe";
+import {
+  fetchStripeSubscriptionByUserId,
+  fetchSubscriptionPrice,
+} from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 // 2026-10-26T15:00:00Z is 2026/10/27 in JST.
@@ -57,6 +65,68 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+describe("/upgrade のプランカード", () => {
+  it("お試し会員は一般有料カード内に Checkout を出し、非月額価格では「—」にする", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({
+      user: { id: "auth-uuid" },
+      userId: 7,
+      userStatus: "trial",
+      userRole: "member",
+      membershipType: null,
+    } as never);
+    // amount: null = non-monthly; Checkout stays disabled and the card must not invent a yen price.
+    vi.mocked(fetchSubscriptionPrice).mockResolvedValue({
+      amount: null,
+      currency: "jpy",
+    });
+
+    const html = renderToStaticMarkup(await UpgradePage());
+
+    expect(html).toContain("一般有料会員");
+    expect(html).toContain("コミュニティ会員");
+    expect(html).toContain("checkout");
+    expect(html).toContain("—");
+    expect(html).not.toContain(COMMUNITY_APPLY_FORM_URL);
+  });
+
+  it("一般有料会員はご契約中バッジとコミュニティ申し込みフォームへの導線を出す", async () => {
+    vi.stubEnv("FEEDBACK_ENABLED", "true");
+    vi.mocked(getServerAuth).mockResolvedValue({
+      user: { id: "auth-uuid" },
+      userId: 7,
+      userStatus: "active",
+      userRole: "member",
+      membershipType: "general",
+    } as never);
+
+    const html = await renderWithSubscription({});
+
+    expect(html).toContain("ご契約中");
+    expect(html).toContain(`href="${COMMUNITY_APPLY_FORM_URL}"`);
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain("noopener noreferrer");
+    expect(html).toContain("申し込む");
+    expect(html).toContain("inquiry-compact");
+  });
+
+  it("フィードバック無効でもコミュニティ申し込みフォームへの導線は出す", async () => {
+    vi.stubEnv("FEEDBACK_ENABLED", "false");
+    vi.mocked(getServerAuth).mockResolvedValue({
+      user: { id: "auth-uuid" },
+      userId: 7,
+      userStatus: "active",
+      userRole: "member",
+      membershipType: "general",
+    } as never);
+
+    const html = await renderWithSubscription({});
+
+    expect(html).toContain(`href="${COMMUNITY_APPLY_FORM_URL}"`);
+    expect(html).toContain("申し込む");
+    expect(html).not.toContain("inquiry-compact");
+  });
 });
 
 describe("/upgrade の契約中表示", () => {

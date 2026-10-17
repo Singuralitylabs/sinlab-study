@@ -16,6 +16,13 @@ export const DISPLAY_MONTHLY_PRICE_JPY = 1500;
 /** Community membership list price (JPY, tax included; #394). Manual approval only for now (#395). */
 export const DISPLAY_COMMUNITY_MONTHLY_PRICE_JPY = 3000;
 
+/**
+ * External Google Form for community membership applications (#408).
+ * Replace when Stripe auto-enrollment for community lands (#395).
+ */
+export const COMMUNITY_APPLY_FORM_URL =
+  "https://docs.google.com/forms/d/e/1FAIpQLSfC8IXtoqTw_vYT3-SVS_JRQAYZMmve1UCaEJcbUcFhn1PHlg/viewform";
+
 export function formatMonthlyJpyPrice(amount: number): string {
   return `月額${amount.toLocaleString("ja-JP")}円（税込）`;
 }
