@@ -43,37 +43,90 @@ export default async function SettingsPage() {
 
       <div className="space-y-6">
         <Card>
-          <CardContent className="space-y-6 p-6">
-            <h2 className="text-lg font-semibold">プロフィール</h2>
-            {profileError || displayName === null ? (
-              <Alert variant="destructive">
-                <AlertDescription>
-                  表示名を取得できませんでした。時間をおいて再度お試しください。
-                </AlertDescription>
-              </Alert>
-            ) : (
-              <ProfileForm initialDisplayName={displayName} />
-            )}
-          </CardContent>
-        </Card>
+          <CardContent className="space-y-8 p-6">
+            <section className="space-y-6" aria-labelledby="settings-profile-heading">
+              <h2 id="settings-profile-heading" className="text-lg font-semibold">
+                プロフィール
+              </h2>
+              {profileError || displayName === null ? (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    表示名を取得できませんでした。時間をおいて再度お試しください。
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <ProfileForm initialDisplayName={displayName} />
+              )}
+            </section>
 
-        <Card>
-          <CardContent className="space-y-6 p-6">
-            <h2 className="text-lg font-semibold">通知の送り先</h2>
-            {notificationError || !notificationEmail ? (
-              <Alert variant="destructive">
-                <AlertDescription>
-                  通知の送り先を取得できませんでした。時間をおいて再度お試しください。
-                </AlertDescription>
-              </Alert>
-            ) : (
-              <NotificationEmailForm
-                loginEmail={notificationEmail.loginEmail}
-                notificationEmail={notificationEmail.notificationEmail}
-                pendingEmail={notificationEmail.pendingEmail}
-                pendingExpiresAt={notificationEmail.pendingExpiresAt}
-              />
-            )}
+            <section
+              className="space-y-6 border-t pt-8"
+              aria-labelledby="settings-notification-heading"
+            >
+              <h2 id="settings-notification-heading" className="text-lg font-semibold">
+                通知の送り先
+              </h2>
+              {notificationError || !notificationEmail ? (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    通知の送り先を取得できませんでした。時間をおいて再度お試しください。
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <NotificationEmailForm
+                  loginEmail={notificationEmail.loginEmail}
+                  notificationEmail={notificationEmail.notificationEmail}
+                  pendingEmail={notificationEmail.pendingEmail}
+                  pendingExpiresAt={notificationEmail.pendingExpiresAt}
+                />
+              )}
+            </section>
+
+            <section className="space-y-6 border-t pt-8" aria-labelledby="settings-email-heading">
+              <h2 id="settings-email-heading" className="text-lg font-semibold">
+                案内メールの配信
+              </h2>
+
+              {error ? (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    配信設定を取得できませんでした。時間をおいて再度お試しください。
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <EmailPreferencesForm initialEmailOptOutAt={emailOptOutAt} />
+              )}
+
+              {!isMailTarget && (
+                <p className="text-sm text-muted-foreground">
+                  管理者・メンテナーのアカウントには、案内メールは送信されません。
+                </p>
+              )}
+
+              <div className="space-y-2 text-sm">
+                <p className="font-medium">停止できるメール（案内メール）</p>
+                <p className="text-muted-foreground">
+                  学習状況のお知らせ・リマインド、本サービスの機能および有料プランのご案内、本サービスに関するお知らせのメール。
+                </p>
+                <p className="font-medium">停止できないメール</p>
+                <p className="text-muted-foreground">
+                  アカウントの登録・承認、契約、解約等の手続に関する通知は、本サービスの提供に必要なため停止できません。ただし、これらの通知に案内メールに当たる内容を含めるときは、配信停止の方法を記載します。
+                </p>
+              </div>
+
+              <p className="text-sm">
+                詳しくは
+                <a
+                  href={PRIVACY_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary underline underline-offset-2"
+                >
+                  プライバシーポリシー
+                </a>
+                をご確認ください。
+              </p>
+            </section>
           </CardContent>
         </Card>
 
@@ -86,52 +139,6 @@ export default async function SettingsPage() {
             <Button asChild variant="outline">
               <Link href="/upgrade">{PLAN_PAGE_TITLE}</Link>
             </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="space-y-6 p-6">
-            <h2 className="text-lg font-semibold">案内メールの配信</h2>
-
-            {error ? (
-              <Alert variant="destructive">
-                <AlertDescription>
-                  配信設定を取得できませんでした。時間をおいて再度お試しください。
-                </AlertDescription>
-              </Alert>
-            ) : (
-              <EmailPreferencesForm initialEmailOptOutAt={emailOptOutAt} />
-            )}
-
-            {!isMailTarget && (
-              <p className="text-sm text-muted-foreground">
-                管理者・メンテナーのアカウントには、案内メールは送信されません。
-              </p>
-            )}
-
-            <div className="space-y-2 text-sm">
-              <p className="font-medium">停止できるメール（案内メール）</p>
-              <p className="text-muted-foreground">
-                学習状況のお知らせ・リマインド、本サービスの機能および有料プランのご案内、本サービスに関するお知らせのメール。
-              </p>
-              <p className="font-medium">停止できないメール</p>
-              <p className="text-muted-foreground">
-                アカウントの登録・承認、契約、解約等の手続に関する通知は、本サービスの提供に必要なため停止できません。ただし、これらの通知に案内メールに当たる内容を含めるときは、配信停止の方法を記載します。
-              </p>
-            </div>
-
-            <p className="text-sm">
-              詳しくは
-              <a
-                href={PRIVACY_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline underline-offset-2"
-              >
-                プライバシーポリシー
-              </a>
-              をご確認ください。
-            </p>
           </CardContent>
         </Card>
       </div>
