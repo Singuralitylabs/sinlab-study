@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adoptSavedRubricVersion } from "@/app/(authenticated)/manage/contents/ContentForm";
+import { adoptSavedRubricVersion } from "@/app/(authenticated)/manage/(content)/contents/ContentForm";
 
 describe("adoptSavedRubricVersion", () => {
   it("成功応答の版だけを、画面上の要件の版として覚える", () => {

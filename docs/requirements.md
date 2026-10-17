@@ -280,18 +280,16 @@ Theme（例：GAS学習）
 
 ### 4.2 管理・講師向け画面（`/manage`）
 
-admin と maintainer（講師）が共通でアクセス可能。`/admin` 配下のコンテンツ管理ページ（`/admin/themes`・`/admin/phases`・`/admin/weeks`・`/admin/students`・`/admin/submissions` および `/admin` ルート）と `/instructor` へのアクセスは `/manage` 配下にリダイレクトされる。ユーザー管理（`/admin/users`）は管理者専用で、リダイレクトされない（4.3参照）。
+admin と maintainer（講師）が共通でアクセス可能。サイドナビは **コンテンツ管理**（入口 `/manage/contents`）と **受講生管理**（入口 `/manage`）に分かれる。`/admin` 配下のコンテンツ管理ページ（`/admin/themes`・`/admin/phases`・`/admin/weeks`・`/admin/students`・`/admin/submissions` および `/admin` ルート）と `/instructor` へのアクセスは `/manage` 配下にリダイレクトされる。ユーザー管理（`/admin/users`）は管理者専用で、リダイレクトされない（4.3参照）。
 
 | パス | 画面名 | 概要 |
 |:--|:--|:--|
-| `/manage` | 管理ダッシュボード | 統計サマリー、最近の提出一覧 |
-| `/manage/themes` | テーマ管理 | ThemeのCRUD（サムネイル画像設定含む） |
-| `/manage/phases` | フェーズ管理 | PhaseのCRUD |
-| `/manage/weeks` | 週管理 | WeekのCRUD |
-| `/manage/contents` | コンテンツ管理 | コンテンツのCRUD（PDFスライドアップロード含む） |
-| `/manage/students` | 受講生一覧 | 全受講生の進捗率、最終アクティビティ |
+| `/manage` | ダッシュボード | 受講生管理グループ。統計サマリー、最近の提出一覧 |
+| `/manage/contents` | コンテンツ管理 | コンテンツ構成ツリーと一括操作。作成はツリー上のダイアログ（親を事前選択）。PDFスライドアップロード・サムネイルは編集画面（サムネイルは作成後のみ） |
+| `/manage/themes`・`/manage/phases`・`/manage/weeks` | （一覧はリダイレクト） | 一覧は `/manage/contents` へ。編集・削除・新規の個別ページは残す |
+| `/manage/students` | 受講生進捗 | 全受講生の進捗率、最終アクティビティ（admin のみ。maintainer にはタブ非表示・`/manage` へリダイレクト） |
 | `/manage/submissions` | 提出管理 | 全提出一覧 |
-| `/manage/announcements` | お知らせ管理 | お知らせの作成・編集・公開・削除、メール送信の状況 |
+| `/manage/announcements` | お知らせ管理 | お知らせの作成・編集・公開・削除、メール送信の状況（コンテンツ管理グループ） |
 
 ### 4.3 管理者専用画面
 

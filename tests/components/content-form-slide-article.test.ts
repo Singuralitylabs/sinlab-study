@@ -12,7 +12,7 @@ vi.mock("next/link", () => ({
     createElement("a", { href }, children),
 }));
 
-import { ContentForm } from "@/app/(authenticated)/manage/contents/ContentForm";
+import { ContentForm } from "@/app/(authenticated)/manage/(content)/contents/ContentForm";
 import type { LearningContent } from "@/app/types";
 
 const weeks = [{ id: 3, name: "第1週", phaseId: 2 }];

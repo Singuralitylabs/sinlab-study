@@ -1,0 +1,240 @@
+"use client";
+
+import { Loader2, Save } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
+import type { LearningPhase, ManageThemeListItem } from "@/app/types";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  getCurrentPositionInsertAfterId,
+  getDefaultInsertAfterId,
+  type SiblingCandidate,
+  SiblingOrderField,
+} from "../../components/SiblingOrderField";
+
+interface PhaseFormProps {
+  themes: ManageThemeListItem[];
+  initialData?: LearningPhase;
+  /**
+   * All phase candidates for the insert-position picker. Create mode passes the targets themselves;
+   * edit mode includes the edited phase (to find its current position; removed inside the form
+   * before display).
+   */
+  siblingCandidates?: SiblingCandidate[];
+  mode: "create" | "edit";
+  /** Pre-select parent theme when creating from the content tree (#335). */
+  defaultThemeId?: string;
+  /** Dialog embedding: close and expand the created/updated node instead of navigating away. */
+  onSuccess?: (result?: { id: number }) => void;
+  onCancel?: () => void;
+  /** Skip Card chrome so the form sits cleanly inside a Dialog. */
+  embedded?: boolean;
+}
+
+function parseCreatedPhaseId(data: unknown): number | undefined {
+  if (!data || typeof data !== "object" || !("phase" in data)) return undefined;
+  const id = (data as { phase?: { id?: unknown } }).phase?.id;
+  return typeof id === "number" ? id : undefined;
+}
+
+export function PhaseForm({
+  themes,
+  initialData,
+  siblingCandidates = [],
+  mode,
+  defaultThemeId = "",
+  onSuccess,
+  onCancel,
+  embedded = false,
+}: PhaseFormProps) {
+  const router = useRouter();
+
+  const initialThemeId = initialData?.theme_id?.toString() ?? defaultThemeId;
+  const [themeId, setThemeId] = useState(initialThemeId);
+  const [name, setName] = useState(initialData?.name ?? "");
+  const [description, setDescription] = useState(initialData?.description ?? "");
+  const allSiblingsForTheme = siblingCandidates.filter((c) => String(c.parentId) === themeId);
+  const visibleSiblings = allSiblingsForTheme.filter((c) => c.id !== initialData?.id);
+  const [insertAfterId, setInsertAfterId] = useState(() =>
+    mode === "edit" && initialData
+      ? getCurrentPositionInsertAfterId(initialData.id, allSiblingsForTheme)
+      : getDefaultInsertAfterId(allSiblingsForTheme)
+  );
+  // Omit insert_after_id from the PUT body when neither parent nor position was touched (the server
+  // leaves display order alone).
+  const initialInsertAfterId = useRef(insertAfterId);
+  const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  function handleThemeChange(value: string) {
+    setThemeId(value);
+    const newSiblingsForValue = siblingCandidates.filter((c) => String(c.parentId) === value);
+    // Re-selecting the original parent restores the current position; otherwise merely touching the
+    // parent select would move the item to the tail.
+    if (mode === "edit" && initialData && value === initialThemeId) {
+      setInsertAfterId(getCurrentPositionInsertAfterId(initialData.id, newSiblingsForValue));
+      return;
+    }
+    const newVisibleSiblings = newSiblingsForValue.filter((c) => c.id !== initialData?.id);
+    setInsertAfterId(getDefaultInsertAfterId(newVisibleSiblings));
+  }
+
+  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setMessage(null);
+
+    const positionUnchanged =
+      mode === "edit" &&
+      themeId === initialThemeId &&
+      insertAfterId === initialInsertAfterId.current;
+    const body = {
+      theme_id: Number(themeId),
+      name,
+      description: description || null,
+      insert_after_id: positionUnchanged ? undefined : insertAfterId,
+      is_published: isPublished,
+    };
+
+    try {
+      const url =
+        mode === "create" ? "/api/manage/phases" : `/api/manage/phases/${initialData?.id}`;
+      const method = mode === "create" ? "POST" : "PUT";
+
+      const response = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (response.ok) {
+        const data: unknown = await response.json().catch(() => null);
+        setMessage({
+          type: "success",
+          text: mode === "create" ? "フェーズを作成しました" : "フェーズを更新しました",
+        });
+        const id = mode === "edit" && initialData ? initialData.id : parseCreatedPhaseId(data);
+        if (onSuccess) {
+          // Caller (e.g. ContentTree) refreshes after expanding the created node.
+          onSuccess(id !== undefined ? { id } : undefined);
+        } else {
+          router.push("/manage/contents");
+          router.refresh();
+        }
+      } else {
+        const data = await response.json();
+        setMessage({ type: "error", text: data.error || "保存に失敗しました" });
+      }
+    } catch {
+      setMessage({ type: "error", text: "保存中にエラーが発生しました" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCancel = () => {
+    if (onCancel) {
+      onCancel();
+      return;
+    }
+    router.push("/manage/contents");
+  };
+
+  const fields = (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="themeId">テーマ</Label>
+        <select
+          id="themeId"
+          value={themeId}
+          onChange={(e) => handleThemeChange(e.target.value)}
+          required
+          className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+        >
+          <option value="">選択してください</option>
+          {themes.map((theme) => (
+            <option key={theme.id} value={theme.id}>
+              {theme.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="name">フェーズ名</Label>
+        <Input
+          id="name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="フェーズの名前"
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="description">説明</Label>
+        <Textarea
+          id="description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="フェーズの説明（任意）"
+          className="min-h-[100px]"
+        />
+      </div>
+
+      <SiblingOrderField
+        siblings={themeId ? visibleSiblings : null}
+        insertAfterId={insertAfterId}
+        onChange={setInsertAfterId}
+        placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
+      />
+
+      <div className="flex items-center gap-2">
+        <input
+          id="isPublished"
+          type="checkbox"
+          checked={isPublished}
+          onChange={(e) => setIsPublished(e.target.checked)}
+          className="h-4 w-4 rounded border-input"
+        />
+        <Label htmlFor="isPublished">公開する</Label>
+      </div>
+
+      {message && (
+        <Alert variant={message.type === "error" ? "destructive" : "default"}>
+          <AlertDescription className={message.type === "success" ? "text-success" : ""}>
+            {message.text}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <div className="flex gap-3">
+        <Button type="submit" disabled={isLoading || !name || !themeId}>
+          {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          {mode === "create" ? "作成" : "更新"}
+        </Button>
+        <Button type="button" variant="outline" onClick={handleCancel}>
+          キャンセル
+        </Button>
+      </div>
+    </>
+  );
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {embedded ? (
+        <div className="space-y-6">{fields}</div>
+      ) : (
+        <Card>
+          <CardContent className="space-y-6 pt-6">{fields}</CardContent>
+        </Card>
+      )}
+    </form>
+  );
+}
