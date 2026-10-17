@@ -420,11 +420,11 @@ SELECT のみ: 自分の提出（`submissions.user_id` が自身）に紐づく�
 
 | 操作 | 対象 |
 |:--|:--|
-| SELECT | 本人（未削除のみ）/ admin・maintainer（全件） |
+| SELECT | 本人（未削除のみ）/ admin（全件）。**maintainer は不可**（#414） |
 | INSERT | 本人（`auth_id = auth.uid()`） |
 | UPDATE | admin のみ |
 
-初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer は受講生進捗（`/manage/students`）の閲覧で `users` を参照するため SELECT のみ許可し、UPDATE は付与しない（ユーザー管理は不可）。
+初回ログイン時のレコード作成（INSERT）は本人の `auth_id` に限定される。ユーザーの承認・却下・ロール変更（UPDATE）は admin のみ可能。maintainer には `users` の SELECT を付けない（メール等の個人情報を直接読めないようにする。#414）。RLS は行単位のため「`display_name` だけ読めて `email` は読めない」はポリシーだけでは書けない。管理画面で他ユーザーの表示名が必要な経路は service_role で取得し、select する列にメールを含めない（[機能設計書](./specification.md)6.2節・#416）。管理ダッシュボードの受講生数も service_role で数える（maintainer の JWT では `users` を数えられないため）。admin は従来どおり `users` を直接読む。受講生進捗（`/manage/students`）は admin のみ（同 6.2節）。未使用の `security_invoker = false` ビューは Security Advisor（`0010_security_definer_view`）の警告になるため置かない。
 
 本人による `onboarding_completed_at` の更新は、API Route（`POST /api/onboarding/complete`）が service_role 経由で行い、RLS では許可しない（`role` / `status` の自己書き換えを防ぐため）。`email_opt_out_at` も同様に、配信停止ルート（`/api/email/unsubscribe`。署名付きリンクでログイン不要）と、設定画面の API（`PATCH /api/settings/email`。`getServerAuth()` で特定した本人の行だけを更新する）が service_role 経由で記録する。`display_name` も同様に、設定画面の API（`PATCH /api/settings/profile`。`getServerAuth()` で特定した本人の行のこの列だけ）が service_role 経由で更新する。`notification_email` と確認待ちの3列も同様に、設定画面の API と確認ルート（`/api/settings/notification-email`。変更依頼・解除・取り消しは `getServerAuth()` の本人の行だけ。確認の確定はトークンのハッシュが指す行だけ）が service_role 経由で更新する。受講者の UPDATE ポリシーは足さない。`email` は書かない。
 

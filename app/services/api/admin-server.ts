@@ -2481,12 +2481,15 @@ interface ManageCounts {
 /**
  * Counts use head + count only (no record bodies). A failed count is returned as 0 so the
  * dashboard still renders.
+ * Student count uses service_role: maintainers no longer SELECT `users` (#414); content tables
+ * stay on the user JWT (RLS already allows admin/maintainer).
  */
 export async function fetchManageCounts(): Promise<{
   data: ManageCounts;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
+  const admin = await createAdminSupabaseClient();
 
   const [themes, phases, weeks, contents, students] = await Promise.all([
     supabase
@@ -2505,7 +2508,7 @@ export async function fetchManageCounts(): Promise<{
       .from("learning_contents")
       .select("id", { count: "exact", head: true })
       .eq("is_deleted", false),
-    supabase
+    admin
       .from("users")
       .select("id", { count: "exact", head: true })
       .eq("status", USER_STATUS.ACTIVE)

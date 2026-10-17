@@ -329,35 +329,46 @@ describe("fetchStudentsProgress", () => {
 });
 
 describe("fetchManageCounts", () => {
-  it("各テーブルの件数を返す", async () => {
-    const mockClient = createMockSupabaseClient({
+  it("各テーブルの件数を返す（受講生数は service_role）", async () => {
+    const userClient = createMockSupabaseClient({
       tableResults: {
         learning_themes: { data: null, error: null, count: 2 },
         learning_phases: { data: null, error: null, count: 3 },
         learning_weeks: { data: null, error: null, count: 4 },
         learning_contents: { data: null, error: null, count: 5 },
+      },
+    });
+    const adminClient = createMockSupabaseClient({
+      tableResults: {
         users: { data: null, error: null, count: 6 },
       },
     });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(userClient as never);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(adminClient as never);
 
     const result = await fetchManageCounts();
 
     expect(result.error).toBeNull();
     expect(result.data).toEqual({ themes: 2, phases: 3, weeks: 4, contents: 5, students: 6 });
+    expect(adminClient.from).toHaveBeenCalledWith("users");
   });
 
   it("一部の件数取得に失敗した場合、失敗分は0としてエラーを返す", async () => {
-    const mockClient = createMockSupabaseClient({
+    const userClient = createMockSupabaseClient({
       tableResults: {
         learning_themes: { data: null, error: null, count: 2 },
         learning_phases: { data: null, error: dbError, count: null },
         learning_weeks: { data: null, error: null, count: 4 },
         learning_contents: { data: null, error: null, count: 5 },
+      },
+    });
+    const adminClient = createMockSupabaseClient({
+      tableResults: {
         users: { data: null, error: null, count: 6 },
       },
     });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(userClient as never);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(adminClient as never);
 
     const result = await fetchManageCounts();
 
