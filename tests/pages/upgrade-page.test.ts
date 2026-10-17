@@ -22,10 +22,6 @@ vi.mock("@/app/(authenticated)/upgrade/PlanInquiryButton", () => ({
 
 import UpgradePage from "@/app/(authenticated)/upgrade/page";
 import {
-  COMMUNITY_APPLY_FORM_URL,
-  SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
-} from "@/app/constants/stripe";
-import {
   fetchStripeSubscriptionByUserId,
   fetchSubscriptionPrice,
 } from "@/app/services/api/stripe-server";
@@ -71,7 +67,7 @@ afterEach(() => {
 });
 
 describe("/upgrade のプランカード", () => {
-  it("お試し会員はプランカードの後に法定表示を出し、その下に Checkout を置く", async () => {
+  it("お試し会員はカードだけを出し、価格未確認時は「—」にする", async () => {
     vi.mocked(getServerAuth).mockResolvedValue({
       user: { id: "auth-uuid" },
       userId: 7,
@@ -79,7 +75,6 @@ describe("/upgrade のプランカード", () => {
       userRole: "member",
       membershipType: null,
     } as never);
-    // amount: null = non-monthly; Checkout stays disabled and the card must not invent a yen price.
     vi.mocked(fetchSubscriptionPrice).mockResolvedValue({
       amount: null,
       currency: "jpy",
@@ -89,26 +84,14 @@ describe("/upgrade のプランカード", () => {
 
     expect(html).toContain("一般有料会員");
     expect(html).toContain("コミュニティ会員");
-    expect(html).toContain("checkout");
     expect(html).toContain("—");
-    expect(html).toContain(SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE);
-    const legalItem = "すべての学習コンテンツ（動画・テキスト・演習）を閲覧・提出できます";
-    const minorNotice =
-      "未成年者は保護者のアカウントにより、保護者の同意を得た上でお申し込みください";
-    // Cards → legal notice → minor consent → Checkout (disabled reason + button).
-    expect(html.indexOf("一般有料会員")).toBeLessThan(html.indexOf(legalItem));
-    expect(html.indexOf(legalItem)).toBeLessThan(html.indexOf(minorNotice));
-    expect(html.indexOf(minorNotice)).toBeLessThan(
-      html.indexOf(SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE)
-    );
-    expect(html.indexOf(SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE)).toBeLessThan(
-      html.indexOf("checkout")
-    );
-    expect(html).not.toContain(COMMUNITY_APPLY_FORM_URL);
+    expect(html).toContain("詳細を見る");
+    expect(html).toContain("Slackでのコミュニケーション");
+    expect(html).toContain("Web/AIの最新情報");
+    // Checkout / legal copy live in the dialog (client); not asserted on the server HTML.
   });
 
-  it("一般有料会員はご契約中バッジとコミュニティ申し込みフォームへの導線を出す", async () => {
-    vi.stubEnv("FEEDBACK_ENABLED", "true");
+  it("一般有料会員はご契約中バッジと解約入口をカード上に出す", async () => {
     vi.mocked(getServerAuth).mockResolvedValue({
       user: { id: "auth-uuid" },
       userId: 7,
@@ -120,33 +103,10 @@ describe("/upgrade のプランカード", () => {
     const html = await renderWithSubscription({});
 
     expect(html).toContain("ご契約中");
-    expect(html).toContain(`href="${COMMUNITY_APPLY_FORM_URL}"`);
-    expect(html).toContain('target="_blank"');
-    expect(html).toContain("noopener noreferrer");
-    expect(html).toContain("申し込む");
-    expect(html).toContain("inquiry-compact");
-    // Guide text comes before the apply button (not 「下記」 after it).
-    expect(html.indexOf("申し込みフォームからお申し込みください")).toBeLessThan(
-      html.indexOf(`href="${COMMUNITY_APPLY_FORM_URL}"`)
-    );
-    expect(html).not.toContain("下記の申し込みフォーム");
-  });
-
-  it("フィードバック無効でもコミュニティ申し込みフォームへの導線は出す", async () => {
-    vi.stubEnv("FEEDBACK_ENABLED", "false");
-    vi.mocked(getServerAuth).mockResolvedValue({
-      user: { id: "auth-uuid" },
-      userId: 7,
-      userStatus: "active",
-      userRole: "member",
-      membershipType: "general",
-    } as never);
-
-    const html = await renderWithSubscription({});
-
-    expect(html).toContain(`href="${COMMUNITY_APPLY_FORM_URL}"`);
-    expect(html).toContain("申し込む");
-    expect(html).not.toContain("inquiry-compact");
+    expect(html).toContain("ご契約中です（次回のお支払い: 2026/10/27）");
+    expect(html).toContain("manage");
+    expect(html).toContain("詳細を見る");
+    expect(html).toContain("Slackでのコミュニケーション");
   });
 });
 
