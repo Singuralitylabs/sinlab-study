@@ -28,7 +28,7 @@ export default async function LearnPage() {
     : undefined;
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-5xl mx-auto">
       <PageTitle title="学習コンテンツ" description="学習テーマを選択して学習を始めましょう" />
 
       {!themes || themes.length === 0 ? (
@@ -37,7 +37,7 @@ export default async function LearnPage() {
           <p className="text-muted-foreground">学習コンテンツはまだ登録されていません。</p>
         </Card>
       ) : (
-        <div className="grid gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {themes.map((theme) => {
             // Unpublished themes (admin/maintainer preview) have no progress rows; pass 0/0 so
             // ThemeCard's showProgress (totalContents > 0 || completedContents > 0) hides the bar.
@@ -49,6 +49,7 @@ export default async function LearnPage() {
             return (
               <ThemeCard
                 key={theme.id}
+                layout="card"
                 summary={summary}
                 certificatesHref={
                   hasProgressRow && isThemeCompleted(summary) ? certificatesHref : undefined
