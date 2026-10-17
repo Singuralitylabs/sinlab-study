@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { EMAIL_SERVICE_NAME } from "@/app/constants/notifications";
+import { NOTIFICATION_EMAIL_RESULT } from "@/app/constants/settings";
 import { escapeHtml } from "@/app/lib/escape-html";
 import {
   confirmNotificationEmail,
@@ -12,9 +13,18 @@ export const maxDuration = 30;
 /**
  * Confirmation page. No address and no token in the visible text. The token stays in the form
  * action, the same way the unsubscribe page keeps its token. GET must not switch the address:
- * mail scanners prefetch links.
+ * mail scanners prefetch links. Terminal pages link to /settings?notification_email=… so the
+ * result is visible on the settings tiles after login (#420).
  */
-function renderPage(status: number, title: string, message: string, formAction?: string): Response {
+function renderPage(
+  status: number,
+  title: string,
+  message: string,
+  options?: { formAction?: string; settingsResult?: string }
+): Response {
+  const settingsHref = options?.settingsResult
+    ? `/settings?notification_email=${encodeURIComponent(options.settingsResult)}`
+    : null;
   const html = [
     "<!DOCTYPE html>",
     '<html lang="ja"><head><meta charset="utf-8">',
@@ -26,11 +36,16 @@ function renderPage(status: number, title: string, message: string, formAction?:
     '<div style="background:#ffffff;border-radius:8px;padding:24px;line-height:1.7;">',
     `<h1 style="font-size:18px;margin:0 0 12px;">${title}</h1>`,
     `<p style="margin:0;font-size:14px;">${message}</p>`,
-    ...(formAction
+    ...(options?.formAction
       ? [
-          `<form method="post" action="${escapeHtml(formAction)}" style="margin:16px 0 0;">`,
+          `<form method="post" action="${escapeHtml(options.formAction)}" style="margin:16px 0 0;">`,
           '<button type="submit" style="padding:10px 20px;background:#2563eb;color:#ffffff;border:0;border-radius:6px;font-size:14px;cursor:pointer;">変更を確定する</button>',
           "</form>",
+        ]
+      : []),
+    ...(settingsHref
+      ? [
+          `<p style="margin:16px 0 0;font-size:14px;"><a href="${escapeHtml(settingsHref)}" style="color:#2563eb;">設定画面で確認する</a></p>`,
         ]
       : []),
     "</div>",
@@ -51,7 +66,8 @@ function invalidPage(): Response {
   return renderPage(
     400,
     "リンクが無効です",
-    "確認リンクが正しくないか、すでに使われています。設定画面からもう一度お試しください。"
+    "確認リンクが正しくないか、すでに使われています。設定画面からもう一度お試しください。",
+    { settingsResult: NOTIFICATION_EMAIL_RESULT.INVALID }
   );
 }
 
@@ -59,12 +75,15 @@ function expiredPage(): Response {
   return renderPage(
     400,
     "リンクの有効期限が切れています",
-    "確認リンクの有効期限が切れています。設定画面からもう一度お試しください。"
+    "確認リンクの有効期限が切れています。設定画面からもう一度お試しください。",
+    { settingsResult: NOTIFICATION_EMAIL_RESULT.EXPIRED }
   );
 }
 
 function errorPage(): Response {
-  return renderPage(500, "処理できませんでした", "時間をおいて、もう一度お試しください。");
+  return renderPage(500, "処理できませんでした", "時間をおいて、もう一度お試しください。", {
+    settingsResult: NOTIFICATION_EMAIL_RESULT.ERROR,
+  });
 }
 
 function readToken(request: NextRequest): string | null {
@@ -87,7 +106,7 @@ export async function GET(request: NextRequest) {
         200,
         "通知の送り先を変更します",
         "このメールを受け取ったアドレスを、通知の送り先に設定します。ボタンを押すまで変更は確定しません。",
-        `?token=${encodeURIComponent(token)}`
+        { formAction: `?token=${encodeURIComponent(token)}` }
       );
     }
     if (state === "expired") {
@@ -115,7 +134,8 @@ export async function POST(request: NextRequest) {
       return renderPage(
         200,
         "通知の送り先を変更しました",
-        "以後のメールは、このメールを受け取ったアドレスに届きます。"
+        "以後のメールは、このメールを受け取ったアドレスに届きます。",
+        { settingsResult: NOTIFICATION_EMAIL_RESULT.CONFIRMED }
       );
     }
     if (state === "expired") {
