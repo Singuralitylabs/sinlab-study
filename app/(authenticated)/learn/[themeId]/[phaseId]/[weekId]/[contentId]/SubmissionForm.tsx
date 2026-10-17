@@ -371,7 +371,9 @@ export function SubmissionForm({
         </form>
       )}
 
-      {!isRetrying && message && (
+      {/* Show submit/review messages even while retrying; only the stale ones are cleared in the
+          isRetrying effect. Hiding all messages here would swallow submit errors during retry. */}
+      {message && (
         <Alert variant={message.type === "error" ? "destructive" : "default"}>
           <AlertDescription className={message.type === "success" ? "text-success" : ""}>
             {message.text}
