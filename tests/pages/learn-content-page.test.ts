@@ -1015,6 +1015,55 @@ describe("演習の再挑戦（#355）", () => {
     expect(html).not.toContain("再度課題に取り組む");
     expect(html).not.toContain("模範回答");
   });
+
+  it("提出済み・再挑戦中でないときは課題提出の見出しを出さない (#406)", async () => {
+    setupExerciseWithSubmission();
+
+    const html = await render();
+
+    expect(html).toContain("再度課題に取り組む");
+    expect(html).not.toContain(">課題提出<");
+  });
+
+  it("再挑戦中は課題提出の見出しを出す (#406)", async () => {
+    setupExerciseWithSubmission({
+      retryStartedAt: "2026-10-01T12:00:00.000Z",
+      submittedAt: "2026-10-01T11:00:00.000Z",
+    });
+
+    const html = await render();
+
+    expect(html).toContain(">課題提出<");
+  });
+
+  it("未提出の演習では課題提出の見出しを出す (#406)", async () => {
+    setupExerciseWithSubmission();
+    vi.mocked(fetchLatestSubmissionByContentId).mockResolvedValue({ data: null } as never);
+    vi.mocked(fetchExerciseReferenceAnswer).mockResolvedValue({ data: null, error: null });
+    vi.mocked(fetchCompletedAIReviewByContentId).mockResolvedValue({
+      data: null,
+      submissionId: null,
+    } as never);
+
+    const html = await render();
+
+    expect(html).toContain(">課題提出<");
+  });
+
+  it("未公開プレビューでは課題提出の見出しを出さない (#406)", async () => {
+    setupExerciseWithSubmission({ isPublished: false });
+    vi.mocked(getServerAuth).mockResolvedValue({
+      user: { id: "auth-uuid" },
+      userId: 7,
+      userStatus: "active",
+      userRole: "admin",
+    } as never);
+
+    const html = await render();
+
+    expect(html).not.toContain(">課題提出<");
+    expect(html).toContain("非公開コンテンツのプレビュー中は課題提出・AIレビューを利用できません");
+  });
 });
 
 describe("パンくずの取得元（週の二重取得をやめる）", () => {

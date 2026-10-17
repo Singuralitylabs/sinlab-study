@@ -348,6 +348,9 @@ export default async function ContentPage({ params }: PageProps) {
   // During retry, hide the model answer / AI review; only pass a review id the page actually draws.
   const visibleReview = isRetrying ? null : reviewForLatestSubmission;
   const showReferenceAnswer = Boolean(referenceAnswer) && !isRetrying;
+  // Submitted + not retrying: hide the editor until "再度課題に取り組む" (#406). Keep the form
+  // mounted so a client AI review after submit is not torn down by router.refresh().
+  const showSubmissionEditor = !latestSubmission || isRetrying;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -546,14 +549,16 @@ export default async function ContentPage({ params }: PageProps) {
 
                   {isFullyPublished ? (
                     <>
-                      <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
-                        <h3 className="text-lg font-semibold">課題提出</h3>
-                        <AIReviewLimitNotice
-                          userStatus={userStatus}
-                          remaining={aiReviewRemaining}
-                          stripeEnabled={isStripeEnabled()}
-                        />
-                      </div>
+                      {showSubmissionEditor && (
+                        <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
+                          <h3 className="text-lg font-semibold">課題提出</h3>
+                          <AIReviewLimitNotice
+                            userStatus={userStatus}
+                            remaining={aiReviewRemaining}
+                            stripeEnabled={isStripeEnabled()}
+                          />
+                        </div>
+                      )}
                       <SubmissionForm
                         contentId={contentIdNum}
                         allowedSubmissionTypes={
@@ -567,6 +572,7 @@ export default async function ContentPage({ params }: PageProps) {
                         showConsole={content.show_console}
                         persistedReviewId={visibleReview?.id ?? null}
                         showReviewListNotes={showReviewListNotes}
+                        showEditor={showSubmissionEditor}
                       />
                     </>
                   ) : (

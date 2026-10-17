@@ -43,6 +43,11 @@ interface SubmissionFormProps {
   persistedReviewId: number | null;
   /** When true, partial/unmet rows show review-list cues (learners only). */
   showReviewListNotes?: boolean;
+  /**
+   * When false, hide the editor/submit controls but keep this component mounted so an in-flight
+   * client AI review after submit survives router.refresh() (#406).
+   */
+  showEditor?: boolean;
 }
 
 function buildFailedReview(errorMessage: string): AIReviewListItem {
@@ -71,6 +76,7 @@ export function SubmissionForm({
   previewBaseHtml = null,
   persistedReviewId,
   showReviewListNotes = false,
+  showEditor = true,
 }: SubmissionFormProps) {
   const router = useRouter();
   const [submissionType, setSubmissionType] = useState<SubmissionType>(
@@ -264,98 +270,100 @@ export function SubmissionForm({
           notice={themeNotice}
         />
       )}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {allowedSubmissionTypes === "both" && (
-          <div className="flex gap-4">
-            <button
-              type="button"
-              onClick={() => setSubmissionType("code")}
-              className={`flex-1 p-3 rounded-lg border-2 transition-colors ${
-                submissionType === "code"
-                  ? "border-primary bg-primary/5"
-                  : "border-border hover:border-muted-foreground"
-              }`}
-            >
-              <Code className="h-5 w-5 mx-auto mb-1" />
-              <span className="text-sm">コードで提出</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setSubmissionType("url")}
-              className={`flex-1 p-3 rounded-lg border-2 transition-colors ${
-                submissionType === "url"
-                  ? "border-primary bg-primary/5"
-                  : "border-border hover:border-muted-foreground"
-              }`}
-            >
-              <LinkIcon className="h-5 w-5 mx-auto mb-1" />
-              <span className="text-sm">URLで提出</span>
-            </button>
-          </div>
-        )}
-
-        {submissionType === "code" ? (
-          <div className="space-y-3">
-            <LockedCodeFilesEditor files={codeFiles} onChange={setCodeFiles} />
-            {hasStarter && (
-              <Button type="button" variant="outline" size="sm" onClick={handleResetToStarter}>
-                <RotateCcw className="h-4 w-4" />
-                初期コードに戻す
-              </Button>
-            )}
-            {unchangedFromStarter && (
-              <p className="text-xs text-muted-foreground">初期コードから変更してください</p>
-            )}
-            {omitsEmptyFiles && codeFiles.some((file) => file.content.trim().length === 0) && (
-              <p className="text-xs text-muted-foreground">
-                内容が空のファイルは提出に含めません。
-              </p>
-            )}
-            {showRunner && (
-              <HtmlPreviewNoSSR
-                files={codeFiles.map(({ filename, language, content }) => ({
-                  filename,
-                  language,
-                  content,
-                }))}
-                showPreviewFrame={previewDisplay.preview}
-                showConsolePanel={previewDisplay.console}
-                previewBaseHtml={previewBaseHtml}
-              />
-            )}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <Label htmlFor="url">URL</Label>
-            <Input
-              type="url"
-              id="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://..."
-            />
-          </div>
-        )}
-
-        {message && (
-          <Alert variant={message.type === "error" ? "destructive" : "default"}>
-            <AlertDescription className={message.type === "success" ? "text-success" : ""}>
-              {message.text}
-            </AlertDescription>
-          </Alert>
-        )}
-
-        <Button type="submit" disabled={!isValid || isLoading} className="w-full">
-          {isLoading ? (
-            <Loader2 className="h-5 w-5 animate-spin" />
-          ) : (
-            <>
-              <Send className="h-5 w-5" />
-              提出する
-            </>
+      {showEditor && (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {allowedSubmissionTypes === "both" && (
+            <div className="flex gap-4">
+              <button
+                type="button"
+                onClick={() => setSubmissionType("code")}
+                className={`flex-1 p-3 rounded-lg border-2 transition-colors ${
+                  submissionType === "code"
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-muted-foreground"
+                }`}
+              >
+                <Code className="h-5 w-5 mx-auto mb-1" />
+                <span className="text-sm">コードで提出</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubmissionType("url")}
+                className={`flex-1 p-3 rounded-lg border-2 transition-colors ${
+                  submissionType === "url"
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-muted-foreground"
+                }`}
+              >
+                <LinkIcon className="h-5 w-5 mx-auto mb-1" />
+                <span className="text-sm">URLで提出</span>
+              </button>
+            </div>
           )}
-        </Button>
-      </form>
+
+          {submissionType === "code" ? (
+            <div className="space-y-3">
+              <LockedCodeFilesEditor files={codeFiles} onChange={setCodeFiles} />
+              {hasStarter && (
+                <Button type="button" variant="outline" size="sm" onClick={handleResetToStarter}>
+                  <RotateCcw className="h-4 w-4" />
+                  初期コードに戻す
+                </Button>
+              )}
+              {unchangedFromStarter && (
+                <p className="text-xs text-muted-foreground">初期コードから変更してください</p>
+              )}
+              {omitsEmptyFiles && codeFiles.some((file) => file.content.trim().length === 0) && (
+                <p className="text-xs text-muted-foreground">
+                  内容が空のファイルは提出に含めません。
+                </p>
+              )}
+              {showRunner && (
+                <HtmlPreviewNoSSR
+                  files={codeFiles.map(({ filename, language, content }) => ({
+                    filename,
+                    language,
+                    content,
+                  }))}
+                  showPreviewFrame={previewDisplay.preview}
+                  showConsolePanel={previewDisplay.console}
+                  previewBaseHtml={previewBaseHtml}
+                />
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="url">URL</Label>
+              <Input
+                type="url"
+                id="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://..."
+              />
+            </div>
+          )}
+
+          <Button type="submit" disabled={!isValid || isLoading} className="w-full">
+            {isLoading ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <>
+                <Send className="h-5 w-5" />
+                提出する
+              </>
+            )}
+          </Button>
+        </form>
+      )}
+
+      {message && (
+        <Alert variant={message.type === "error" ? "destructive" : "default"}>
+          <AlertDescription className={message.type === "success" ? "text-success" : ""}>
+            {message.text}
+          </AlertDescription>
+        </Alert>
+      )}
 
       {!pageShowsThisReview && (
         <AIReviewDisplayNoSSR
