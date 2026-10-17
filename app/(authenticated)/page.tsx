@@ -110,7 +110,8 @@ export default async function HomePage() {
       ? resolveContinueLearning(
           homeLearning.orderedContents,
           homeLearning.completedContentIds,
-          homeLearning.completedAtByContentId
+          homeLearning.completedAtByContentId,
+          homeLearning.lastViewedAtByContentId
         )
       : null;
 

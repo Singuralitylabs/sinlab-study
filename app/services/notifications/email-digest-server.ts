@@ -217,13 +217,21 @@ async function fetchUserIdsWithActivity(
   if (userIds.length === 0) {
     return new Set();
   }
-  const [progress, submissions] = await Promise.all(
-    (["user_progress", "submissions"] as const).map((table) =>
-      fetchForUserIds<{ user_id: number }>(userIds, (ids, from, to) =>
-        supabase.from(table).select("user_id").in("user_id", ids).order("id").range(from, to)
-      )
-    )
-  );
+  // View-only user_progress rows (#396) must not count as "started learning".
+  const [progress, submissions] = await Promise.all([
+    fetchForUserIds<{ user_id: number }>(userIds, (ids, from, to) =>
+      supabase
+        .from("user_progress")
+        .select("user_id")
+        .in("user_id", ids)
+        .eq("ever_completed", true)
+        .order("id")
+        .range(from, to)
+    ),
+    fetchForUserIds<{ user_id: number }>(userIds, (ids, from, to) =>
+      supabase.from("submissions").select("user_id").in("user_id", ids).order("id").range(from, to)
+    ),
+  ]);
   return new Set([...progress, ...submissions].map((row) => row.user_id));
 }
 

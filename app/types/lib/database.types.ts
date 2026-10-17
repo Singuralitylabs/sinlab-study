@@ -1005,6 +1005,7 @@ export type Database = {
           ever_completed: boolean;
           id: number;
           is_completed: boolean | null;
+          last_viewed_at: string | null;
           retry_started_at: string | null;
           user_id: number;
         };
@@ -1015,6 +1016,7 @@ export type Database = {
           ever_completed?: boolean;
           id?: number;
           is_completed?: boolean | null;
+          last_viewed_at?: string | null;
           retry_started_at?: string | null;
           user_id: number;
         };
@@ -1025,6 +1027,7 @@ export type Database = {
           ever_completed?: boolean;
           id?: number;
           is_completed?: boolean | null;
+          last_viewed_at?: string | null;
           retry_started_at?: string | null;
           user_id?: number;
         };

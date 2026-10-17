@@ -34,8 +34,7 @@ describe("resolveContinueLearning", () => {
     const next = resolveContinueLearning(ordered, new Set(), new Map());
     expect(next?.id).toBe(1);
     expect(next?.href).toBe("/learn/1/10/100/1");
-    expect(next?.completedContents).toBe(0);
-    expect(next?.totalContents).toBe(3);
+    expect(next?.lastViewedAt).toBeNull();
   });
 
   it("最後に完了したテーマの先頭未完了を返す", () => {
@@ -76,38 +75,115 @@ describe("resolveContinueLearning", () => {
   it("同じテーマ内では学習順の先頭未完了を選ぶ", () => {
     const next = resolveContinueLearning(ordered, new Set([1]), new Map([[1, 1000]]));
     expect(next?.id).toBe(2);
-    expect(next?.completedContents).toBe(1);
-    expect(next?.totalContents).toBe(3);
   });
 
   it("実時刻があるテーマを、completed_at 欠落のテーマより優先する", () => {
-    // GAS は完了行があるが時刻なし、Web はあとから完了した実時刻あり → Web を選ぶ
-    const next = resolveContinueLearning(
-      ordered,
-      new Set([1, 4]),
-      new Map([
-        // 1 intentionally omitted (NULL completed_at)
-        [4, 2000],
-      ])
-    );
+    const next = resolveContinueLearning(ordered, new Set([1, 4]), new Map([[4, 2000]]));
     expect(next?.id).toBe(5);
     expect(next?.themeName).toBe("Web");
   });
 
   it("どちらも completed_at 欠落なら表示順の先頭テーマにフォールバックする", () => {
-    const next = resolveContinueLearning(
-      ordered,
-      new Set([1, 4]),
-      new Map() // all completions lack timestamps
-    );
+    const next = resolveContinueLearning(ordered, new Set([1, 4]), new Map());
     expect(next?.id).toBe(2);
     expect(next?.themeName).toBe("GAS");
   });
 
   it("欠落時刻を epoch 0 扱いして古い実時刻に勝たせない", () => {
-    // Web にだけ欠落完了、GAS に古い実時刻 → GAS（実時刻あり）を最後に学んだテーマとする
     const next = resolveContinueLearning(ordered, new Set([1, 4]), new Map([[1, 100]]));
     expect(next?.id).toBe(2);
     expect(next?.themeName).toBe("GAS");
+  });
+
+  describe("last_viewed_at（#396）", () => {
+    it("最後に開いた未完了コンテンツを返す", () => {
+      const next = resolveContinueLearning(
+        ordered,
+        new Set([1]),
+        new Map([[1, 1000]]),
+        new Map([
+          [1, 100],
+          [5, 5000],
+        ])
+      );
+      expect(next?.id).toBe(5);
+      expect(next?.lastViewedAt).toBe(new Date(5000).toISOString());
+    });
+
+    it("最後に開いたコンテンツが完了済みなら同テーマの次の未完了へ進む", () => {
+      const next = resolveContinueLearning(
+        ordered,
+        new Set([1, 2]),
+        new Map([
+          [1, 100],
+          [2, 200],
+        ]),
+        new Map([[2, 9000]])
+      );
+      expect(next?.id).toBe(3);
+      expect(next?.themeName).toBe("GAS");
+      expect(next?.lastViewedAt).toBe(new Date(9000).toISOString());
+    });
+
+    it("最後に開いたテーマが修了済みなら次テーマの先頭未完了へ進む", () => {
+      const next = resolveContinueLearning(
+        ordered,
+        new Set([1, 2, 3]),
+        new Map([
+          [1, 100],
+          [2, 200],
+          [3, 300],
+        ]),
+        new Map([[3, 8000]])
+      );
+      expect(next?.id).toBe(4);
+      expect(next?.themeName).toBe("Web");
+    });
+
+    it("閲覧記録が無いときは #370 の完了基準に戻る", () => {
+      const next = resolveContinueLearning(
+        ordered,
+        new Set([1, 4]),
+        new Map([
+          [1, 1000],
+          [4, 2000],
+        ]),
+        new Map()
+      );
+      expect(next?.id).toBe(5);
+      expect(next?.lastViewedAt).toBeNull();
+    });
+
+    it("閲覧済みがすべて完了で次が無いときは null", () => {
+      const next = resolveContinueLearning(
+        ordered,
+        new Set([1, 2, 3, 4, 5, 6]),
+        new Map(),
+        new Map([[6, 10000]])
+      );
+      expect(next).toBeNull();
+    });
+
+    it("後続テーマを終えたあと前テーマに未完了が残るときは先頭未完了へ戻す", () => {
+      const next = resolveContinueLearning(
+        ordered,
+        new Set([4, 5, 6]),
+        new Map(),
+        new Map([[6, 10000]])
+      );
+      expect(next?.id).toBe(1);
+      expect(next?.themeName).toBe("GAS");
+    });
+
+    it("同テーマで後ろを完了し前が未完了なら、テーマ内の先頭未完了へ戻す", () => {
+      const next = resolveContinueLearning(
+        ordered,
+        new Set([3]),
+        new Map([[3, 100]]),
+        new Map([[3, 9000]])
+      );
+      expect(next?.id).toBe(1);
+      expect(next?.themeName).toBe("GAS");
+    });
   });
 });

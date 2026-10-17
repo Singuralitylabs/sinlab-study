@@ -166,6 +166,40 @@ async function fetchCompletedProgressPages(
   return rows;
 }
 
+/** Rows with last_viewed_at for continue-learning (#396). Paged like completed progress. */
+async function fetchLastViewedProgressPages(
+  supabase: ServerSupabaseClient,
+  userId: number,
+  control: ProgressPagingControl,
+  errorLabel: string
+): Promise<Map<number, number>> {
+  const lastViewedAtByContentId = new Map<number, number>();
+  for (let offset = 0; !control.abandoned; offset += PROGRESS_PAGE_SIZE) {
+    const { data: progress, error: progressError } = await supabase
+      .from("user_progress")
+      .select("content_id, last_viewed_at")
+      .eq("user_id", userId)
+      .not("last_viewed_at", "is", null)
+      .order("content_id")
+      .range(offset, offset + PROGRESS_PAGE_SIZE - 1);
+
+    if (progressError) {
+      console.error(`${errorLabel}:`, progressError.message);
+      return new Map();
+    }
+
+    for (const row of progress ?? []) {
+      if (row.last_viewed_at) {
+        lastViewedAtByContentId.set(row.content_id, Date.parse(row.last_viewed_at));
+      }
+    }
+    if (!progress || progress.length < PROGRESS_PAGE_SIZE) {
+      break;
+    }
+  }
+  return lastViewedAtByContentId;
+}
+
 /** admin / maintainer also get unpublished themes as preview (issue #68). */
 export async function fetchPublishedThemes(userRole: UserRoleType | null = null): Promise<{
   data: LearningTheme[] | null;
@@ -198,6 +232,7 @@ export interface HomeLearningData {
   orderedContents: ContinueLearningContent[];
   completedContentIds: Set<number>;
   completedAtByContentId: Map<number, number>;
+  lastViewedAtByContentId: Map<number, number>;
 }
 
 /** Nested tree for home: full theme row plus ordered phase/week/content fields. */
@@ -245,6 +280,7 @@ export async function fetchHomeLearningData(userId: number): Promise<{
   // failure falls back to empty so the theme list still renders), so leaving it unawaited is safe.
   // control.abandoned is set when the tree query fails or is empty, so paging stops.
   const progressControl: ProgressPagingControl = { abandoned: false };
+  const viewsControl: ProgressPagingControl = { abandoned: false };
   const progressPromise = (async () => {
     try {
       const rows = await fetchCompletedProgressPages(
@@ -268,6 +304,19 @@ export async function fetchHomeLearningData(userId: number): Promise<{
       return { completedContentIds: new Set<number>(), completedAtByContentId: new Map() };
     }
   })();
+  const viewsPromise = (async () => {
+    try {
+      return await fetchLastViewedProgressPages(
+        supabase,
+        userId,
+        viewsControl,
+        "ホーム学習データの閲覧取得エラー"
+      );
+    } catch (error) {
+      console.error("ホーム学習データの閲覧取得エラー:", error);
+      return new Map<number, number>();
+    }
+  })();
 
   const { data: themes, error: themesError } = await applyPublishedNestedThemeFilters(
     supabase.from("learning_themes").select(HOME_LEARNING_THEME_SELECT)
@@ -275,6 +324,7 @@ export async function fetchHomeLearningData(userId: number): Promise<{
 
   if (themesError) {
     progressControl.abandoned = true;
+    viewsControl.abandoned = true;
     console.error("ホーム学習データのテーマ取得エラー:", themesError.message);
     return { data: null, error: themesError };
   }
@@ -305,10 +355,14 @@ export async function fetchHomeLearningData(userId: number): Promise<{
   // An empty tree has nothing to count: stop paging instead of reading pages nobody uses.
   if (!hasContents) {
     progressControl.abandoned = true;
+    viewsControl.abandoned = true;
   }
-  const progress = hasContents
-    ? await progressPromise
-    : { completedContentIds: new Set<number>(), completedAtByContentId: new Map() };
+  const [progress, lastViewedAtByContentId] = hasContents
+    ? await Promise.all([progressPromise, viewsPromise])
+    : [
+        { completedContentIds: new Set<number>(), completedAtByContentId: new Map() },
+        new Map<number, number>(),
+      ];
 
   const summaries = themeContents.map(({ theme, contentIds }) => ({
     theme,
@@ -322,6 +376,7 @@ export async function fetchHomeLearningData(userId: number): Promise<{
       orderedContents,
       completedContentIds: progress.completedContentIds,
       completedAtByContentId: progress.completedAtByContentId,
+      lastViewedAtByContentId,
     },
     error: null,
   };
