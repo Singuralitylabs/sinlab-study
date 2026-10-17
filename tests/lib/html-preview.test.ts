@@ -102,6 +102,11 @@ describe("resolvePreviewDisplay", () => {
       previewAllowed: false,
       consoleAllowed: false,
     });
+    expect(previewCapability([css], { previewBaseHtml: '<div class="box"></div>' })).toMatchObject({
+      previewAllowed: true,
+      autoPreview: true,
+      consoleAllowed: false,
+    });
     expect(
       previewSettingsError({
         contentType: "exercise",
@@ -178,6 +183,40 @@ describe("buildPreviewDocument", () => {
     const js = buildPreviewDocument([f("main.js", "javascript", "run()")]);
     expect(js).toContain("<script>run()</script>");
     expect(js).not.toContain("<style");
+  });
+
+  it("applies CSS-only submissions onto previewBaseHtml scaffold (#351)", () => {
+    const doc = buildPreviewDocument([f("style.css", "css", ".box{color:red}")], {
+      previewBaseHtml:
+        '<!doctype html><html><head></head><body><div class="box">hi</div></body></html>',
+    });
+    expect(doc).toContain('<div class="box">hi</div>');
+    expect(doc).toContain("<style>.box{color:red}</style>");
+  });
+
+  it("prefers submitted HTML over previewBaseHtml", () => {
+    const doc = buildPreviewDocument(
+      [f("index.html", "html", "<p>submitted</p>"), f("style.css", "css", "p{}")],
+      { previewBaseHtml: "<p>scaffold</p>" }
+    );
+    expect(doc).toContain("submitted");
+    expect(doc).not.toContain("scaffold");
+  });
+
+  it("ignores previewBaseHtml for javascript-only and js+css layouts (#351)", () => {
+    const jsOnly = buildPreviewDocument([f("main.js", "javascript", "console.log('hi')")], {
+      previewBaseHtml: "<p>scaffold</p>",
+    });
+    expect(jsOnly).toContain("<script>console.log('hi')</script>");
+    expect(jsOnly).not.toContain("scaffold");
+
+    const jsCss = buildPreviewDocument(
+      [f("main.js", "javascript", "console.log('hi')"), f("style.css", "css", "p{}")],
+      { previewBaseHtml: "<p>scaffold</p>" }
+    );
+    expect(jsCss).toContain("<script>console.log('hi')</script>");
+    expect(jsCss).toContain("<style>p{}</style>");
+    expect(jsCss).not.toContain("scaffold");
   });
 
   it("does not let content close the inlined element early or expand $ patterns", () => {

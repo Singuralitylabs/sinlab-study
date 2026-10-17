@@ -202,6 +202,7 @@ describe("PATCH /api/manage/contents/bulk - action→patchマッピング", () =
       grading_rubric: null,
       starter_files: null,
       submission_file_slots: null,
+      preview_base_html: null,
       show_preview: null,
       show_console: null,
       text_content: null,
@@ -229,6 +230,7 @@ describe("PATCH /api/manage/contents/bulk - action→patchマッピング", () =
         grading_rubric: null,
         starter_files: null,
         submission_file_slots: null,
+        preview_base_html: null,
         show_preview: null,
         show_console: null,
       });

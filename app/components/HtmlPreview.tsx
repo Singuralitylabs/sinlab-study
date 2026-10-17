@@ -21,6 +21,8 @@ interface HtmlPreviewProps {
   showPreviewFrame?: boolean;
   /** Console list. Off when the exercise turns the console off. */
   showConsolePanel?: boolean;
+  /** Admin scaffold HTML for CSS-only exercises (#351). */
+  previewBaseHtml?: string | null;
 }
 
 const DEBOUNCE_MS = 300;
@@ -38,13 +40,14 @@ export function HtmlPreview({
   collapsible = false,
   showPreviewFrame = true,
   showConsolePanel = true,
+  previewBaseHtml = null,
 }: HtmlPreviewProps) {
   const manualRun = showConsolePanel && !showPreviewFrame;
   const [open, setOpen] = useState(!collapsible);
   const [consoleOpen, setConsoleOpen] = useState(true);
   // Callers pass a fresh array every render; keying on the serialized content keeps the debounce
   // from restarting (and the document from being rebuilt) when nothing changed.
-  const signature = JSON.stringify(files);
+  const signature = JSON.stringify({ files, previewBaseHtml });
   const [debouncedSignature, setDebouncedSignature] = useState(signature);
   // Console-only stays idle until 実行. Typing must not rebuild the document.
   const [manualDoc, setManualDoc] = useState<string | null>(null);
@@ -58,13 +61,16 @@ export function HtmlPreview({
     return () => clearTimeout(timer);
   }, [signature, manualRun]);
 
-  const liveDoc = useMemo(
-    () =>
-      buildPreviewDocument(JSON.parse(debouncedSignature) as CodeFile[], {
-        headPrelude: showConsolePanel ? CONSOLE_BRIDGE : "",
-      }),
-    [debouncedSignature, showConsolePanel]
-  );
+  const liveDoc = useMemo(() => {
+    const parsed = JSON.parse(debouncedSignature) as {
+      files: CodeFile[];
+      previewBaseHtml: string | null;
+    };
+    return buildPreviewDocument(parsed.files, {
+      headPrelude: showConsolePanel ? CONSOLE_BRIDGE : "",
+      previewBaseHtml: parsed.previewBaseHtml,
+    });
+  }, [debouncedSignature, showConsolePanel]);
 
   // A new document or "再読み込み" starts a new run: PreviewRun is keyed by it, so the iframe is a
   // new element (the old window then fails the event.source check) and the console starts empty.
@@ -82,7 +88,12 @@ export function HtmlPreview({
   }
 
   const runManually = () => {
-    setManualDoc(buildPreviewDocument(files, { headPrelude: CONSOLE_BRIDGE }));
+    setManualDoc(
+      buildPreviewDocument(files, {
+        headPrelude: CONSOLE_BRIDGE,
+        previewBaseHtml,
+      })
+    );
     setManualRunId((id) => id + 1);
   };
 

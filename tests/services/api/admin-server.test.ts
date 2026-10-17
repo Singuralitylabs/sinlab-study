@@ -1532,6 +1532,60 @@ describe("updateContent / createContent のプレビュー設定（#380 レビ�
     expect(mockClient.from.mock.results[0].value.insert).not.toHaveBeenCalled();
   });
 
+  it("createContent は CSS 単独＋土台 HTML ならプレビューオンを通す (#351)", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          { data: [], error: null },
+          { data: { id: 1, title: "CSS", content_type: "exercise" }, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await createContent({
+      week_id: 1,
+      title: "CSS",
+      content_type: "exercise",
+      code_language: "css",
+      preview_base_html: "<div class='box'></div>",
+      show_preview: true,
+      insertAfterId: null,
+    });
+
+    expect(result.previewNotAllowed).toBeUndefined();
+    expect(result.error).toBeNull();
+    expect(result.data).not.toBeNull();
+  });
+
+  it("updateContent は CSS 単独＋土台 HTML ならプレビューオンを通す (#351)", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              content_type: "exercise",
+              submission_file_slots: [{ filename: "style.css", language: "css" }],
+              starter_files: null,
+              code_language: "css",
+              preview_base_html: "<div class='box'></div>",
+              show_preview: null,
+              show_console: null,
+            },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await updateContent(1, { show_preview: true });
+
+    expect(result).toEqual({ error: null, storageRemoved: true });
+    expect(result.previewNotAllowed).toBeUndefined();
+  });
+
   it("createContentsAtTail は previewNotAllowed を 23514 に変換する", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {

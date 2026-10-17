@@ -104,10 +104,14 @@ function classifyPreviewLayout(files: readonly PreviewLayoutFile[]): PreviewLayo
 }
 
 /**
- * Automatic rules (#380). CSS-only stays off until a scaffold HTML exists (#351).
+ * Automatic rules (#380 / #351). CSS-only is off unless previewBaseHtml is set.
  * javascript+css has no page to preview, but the script can still run in the console.
  */
-export function previewCapability(files: readonly PreviewLayoutFile[]): PreviewCapability {
+export function previewCapability(
+  files: readonly PreviewLayoutFile[],
+  options: { previewBaseHtml?: string | null } = {}
+): PreviewCapability {
+  const hasScaffold = Boolean(options.previewBaseHtml?.trim());
   switch (classifyPreviewLayout(files)) {
     case "html":
       return {
@@ -115,6 +119,13 @@ export function previewCapability(files: readonly PreviewLayoutFile[]): PreviewC
         autoConsole: true,
         previewAllowed: true,
         consoleAllowed: true,
+      };
+    case "css":
+      return {
+        autoPreview: hasScaffold,
+        autoConsole: false,
+        previewAllowed: hasScaffold,
+        consoleAllowed: false,
       };
     case "javascript":
     case "js-css":
@@ -140,12 +151,15 @@ export function previewSettingsError(input: {
   files: readonly PreviewLayoutFile[];
   showPreview?: boolean | null;
   showConsole?: boolean | null;
+  previewBaseHtml?: string | null;
 }): string | null {
   const setsValue = input.showPreview != null || input.showConsole != null;
   if (input.contentType !== undefined && input.contentType !== "exercise") {
     return setsValue ? PREVIEW_EXERCISE_ONLY_MESSAGE : null;
   }
-  const capability = previewCapability(input.files);
+  const capability = previewCapability(input.files, {
+    previewBaseHtml: input.previewBaseHtml,
+  });
   if (input.showPreview === true && !capability.previewAllowed) {
     return PREVIEW_NOT_ALLOWED_MESSAGE;
   }
@@ -163,8 +177,11 @@ export function resolvePreviewDisplay(input: {
   files: readonly PreviewLayoutFile[];
   showPreview?: boolean | null;
   showConsole?: boolean | null;
+  previewBaseHtml?: string | null;
 }): PreviewDisplay {
-  const capability = previewCapability(input.files);
+  const capability = previewCapability(input.files, {
+    previewBaseHtml: input.previewBaseHtml,
+  });
   const preview =
     input.showPreview == null
       ? capability.autoPreview
@@ -341,11 +358,26 @@ function isClosed(match: string): boolean {
  */
 export function buildPreviewDocument(
   files: readonly CodeFile[],
-  { headPrelude = "" }: { headPrelude?: string } = {}
+  {
+    headPrelude = "",
+    previewBaseHtml = null,
+  }: { headPrelude?: string; previewBaseHtml?: string | null } = {}
 ): string {
-  const base =
+  const submittedHtml =
     files.find((f) => f.filename.trim().toLowerCase() === "index.html") ??
     files.find((f) => resolveFileLanguage(f) === "html");
+
+  // Scaffold is only for CSS-only layouts (#351 review). JS / JS+CSS must keep the empty-page
+  // script path; otherwise previewBaseHtml would drop <script> and the console stays empty.
+  const scaffold =
+    previewBaseHtml?.trim() && !submittedHtml && classifyPreviewLayout(files) === "css"
+      ? {
+          filename: "index.html",
+          language: "html",
+          content: previewBaseHtml,
+        }
+      : null;
+  const base = submittedHtml ?? scaffold;
 
   if (!base) {
     const css = files.filter((f) => resolveFileLanguage(f) === "css");
@@ -354,6 +386,17 @@ export function buildPreviewDocument(
     const scripts = js.map((f) => `<script>${escapeClosingTag(f.content, "script")}</script>`);
     return `<!doctype html><html><head><meta charset="utf-8">${headPrelude}${styles.join("")}</head><body>${scripts.join("")}</body></html>`;
   }
+
+  // Scaffold path (#351): inject every CSS file as <style> so the markup has something to style
+  // even when the scaffold has no <link>. Submitted HTML keeps the existing link-expansion path.
+  const scaffoldStyles =
+    !submittedHtml && scaffold
+      ? files
+          .filter((f) => resolveFileLanguage(f) === "css")
+          .map((f) => `<style>${escapeClosingTag(f.content, "style")}</style>`)
+          .join("")
+      : "";
+  const headInsert = headPrelude + scaffoldStyles;
 
   // One left-to-right pass so context is respected: comments and inline <script>/<style> bodies are
   // matched as a whole and left alone, so a commented-out <link>/<script src> or a tag inside a JS
@@ -366,14 +409,14 @@ export function buildPreviewDocument(
   // never taken for the element (an inserted </script> would end the learner's script early).
   const source = base.content;
   const deferred: string[] = [];
-  let preludePlaced = headPrelude === "";
+  let preludePlaced = headInsert === "";
   let preludeSearchOpen = true;
   const transform = (match: string, groups: ScanGroups, closed: boolean): string => {
     if (groups.element !== undefined) {
       const isHead = groups.element.toLowerCase() === "head" && match.endsWith(">");
       if (preludeSearchOpen && !preludePlaced && isHead) {
         preludePlaced = true;
-        return match + headPrelude;
+        return match + headInsert;
       }
       preludeSearchOpen = false;
       return match;
@@ -400,6 +443,10 @@ export function buildPreviewDocument(
     }
 
     if (groups.link === undefined) {
+      return match;
+    }
+    // Scaffold already injects all CSS; expanding links would duplicate styles.
+    if (scaffoldStyles) {
       return match;
     }
     const rel = getAttribute(match, "rel");
@@ -479,7 +526,7 @@ export function buildPreviewDocument(
   const withPrelude =
     preludeAt === -1
       ? expanded
-      : expanded.slice(0, preludeAt) + headPrelude + expanded.slice(preludeAt);
+      : expanded.slice(0, preludeAt) + headInsert + expanded.slice(preludeAt);
   if (deferred.length === 0) {
     return withPrelude;
   }
@@ -487,7 +534,7 @@ export function buildPreviewDocument(
   const endAt = templateDepth > 0 ? templateAt : unclosedTail;
   let deferAt = endAt !== -1 ? endAt : expanded.length;
   if (preludeAt !== -1 && deferAt >= preludeAt) {
-    deferAt += headPrelude.length;
+    deferAt += headInsert.length;
   }
   return withPrelude.slice(0, deferAt) + deferred.join("") + withPrelude.slice(deferAt);
 }

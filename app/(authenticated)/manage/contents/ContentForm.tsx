@@ -283,6 +283,7 @@ export function ContentForm({
   // that "on" illegal (same idea as a filename the admin already edited).
   const [showPreview, setShowPreview] = useState<boolean | null>(initialData?.show_preview ?? null);
   const [showConsole, setShowConsole] = useState<boolean | null>(initialData?.show_console ?? null);
+  const [previewBaseHtml, setPreviewBaseHtml] = useState(initialData?.preview_base_html ?? "");
   const [previewFlagsTouched, setPreviewFlagsTouched] = useState(
     () => initialData?.show_preview != null || initialData?.show_console != null
   );
@@ -471,7 +472,8 @@ export function ContentForm({
   const requiresSlidePdf = mode === "create" || Boolean(initialData?.pdf_url);
   const isSlidePdfMissing = contentType === "slide" && requiresSlidePdf && !pdfUrl.trim();
   const previewCap = previewCapability(
-    submissionSlots.map((slot) => ({ filename: slot.filename, language: slot.language }))
+    submissionSlots.map((slot) => ({ filename: slot.filename, language: slot.language })),
+    { previewBaseHtml }
   );
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
@@ -546,6 +548,7 @@ export function ContentForm({
       reference_answer: contentType === "exercise" ? referenceAnswer.trim() || null : null,
       starter_files: slotPayload?.ok ? slotPayload.starterFiles : null,
       submission_file_slots: slotPayload?.ok ? slotPayload.slots : null,
+      preview_base_html: contentType === "exercise" ? previewBaseHtml.trim() || null : null,
       show_preview:
         contentType === "exercise"
           ? storedPreviewFlag(previewFlagsTouched, showPreview, previewCap.previewAllowed)
@@ -962,7 +965,8 @@ export function ContentForm({
                       return;
                     }
                     const nextCap = previewCapability(
-                      next.map((slot) => ({ filename: slot.filename, language: slot.language }))
+                      next.map((slot) => ({ filename: slot.filename, language: slot.language })),
+                      { previewBaseHtml }
                     );
                     setShowPreview((current) =>
                       current === true && !nextCap.previewAllowed ? null : current
@@ -971,6 +975,36 @@ export function ContentForm({
                       current === true && !nextCap.consoleAllowed ? null : current
                     );
                   }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="previewBaseHtml">プレビューの土台 HTML（CSS 単独用）</Label>
+                <p className="text-xs text-muted-foreground">
+                  CSS だけの提出でプレビューするとき、ここに装飾対象の HTML
+                  を置きます。受講生は提出しません。未設定のままでは CSS
+                  単独のプレビューは出せません。
+                </p>
+                <Textarea
+                  id="previewBaseHtml"
+                  value={previewBaseHtml}
+                  onChange={(e) => {
+                    setPreviewBaseHtml(e.target.value);
+                    if (!previewFlagsTouched) {
+                      return;
+                    }
+                    const nextCap = previewCapability(
+                      submissionSlots.map((slot) => ({
+                        filename: slot.filename,
+                        language: slot.language,
+                      })),
+                      { previewBaseHtml: e.target.value }
+                    );
+                    setShowPreview((current) =>
+                      current === true && !nextCap.previewAllowed ? null : current
+                    );
+                  }}
+                  placeholder={'<div class="box">...</div>'}
+                  className="min-h-[120px] font-mono text-sm"
                 />
               </div>
               <div className="space-y-3">

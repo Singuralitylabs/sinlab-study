@@ -130,6 +130,7 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
                                   submissionFileSlots: submission.content.submission_file_slots,
                                   starterFiles: submission.content.starter_files,
                                   codeLanguage: submission.content.code_language,
+                                  previewBaseHtml: submission.content.preview_base_html,
                                   showPreview: submission.content.show_preview,
                                   showConsole: submission.content.show_console,
                                 }

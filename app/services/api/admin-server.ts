@@ -1193,6 +1193,7 @@ type CreateContentInput = {
   reference_answer?: string | null;
   starter_files?: LearningContent["starter_files"];
   submission_file_slots?: LearningContent["submission_file_slots"];
+  preview_base_html?: string | null;
   show_preview?: boolean | null;
   show_console?: boolean | null;
   allowed_submission_types?: "code" | "url" | "both";
@@ -1246,6 +1247,7 @@ async function createContentWith(
   // so AI review's single-file fallback matches the layout the learner submits.
   const exercise = content.content_type === "exercise";
   const submissionFileSlots = exercise ? (content.submission_file_slots ?? null) : null;
+  const previewBaseHtml = exercise ? (content.preview_base_html ?? null) : null;
   const showPreview = exercise ? (content.show_preview ?? null) : null;
   const showConsole = exercise ? (content.show_console ?? null) : null;
   if (exercise) {
@@ -1260,6 +1262,7 @@ async function createContentWith(
       }),
       showPreview,
       showConsole,
+      previewBaseHtml,
     });
     if (previewMessage) {
       return { data: null, error: null, previewNotAllowed: previewMessage };
@@ -1284,6 +1287,7 @@ async function createContentWith(
       reference_answer: content.reference_answer,
       starter_files: content.starter_files,
       submission_file_slots: submissionFileSlots,
+      preview_base_html: previewBaseHtml,
       show_preview: showPreview,
       show_console: showConsole,
       allowed_submission_types: content.allowed_submission_types,
@@ -1496,7 +1500,9 @@ async function rejectIllegalPreviewSettings(
     patch.submission_file_slots !== undefined ||
     patch.starter_files !== undefined ||
     patch.code_language !== undefined;
-  if (!setsFlags && !changesLayout) {
+  // Clearing the scaffold while show_preview stays true must be rejected (#351).
+  const changesScaffold = patch.preview_base_html !== undefined;
+  if (!setsFlags && !changesLayout && !changesScaffold) {
     return null;
   }
 
@@ -1506,21 +1512,23 @@ async function rejectIllegalPreviewSettings(
   let language = patch.code_language;
   let showPreview = patch.show_preview;
   let showConsole = patch.show_console;
-  // Skip the row read only when every layout input and both flags are in the patch. A partial
-  // layout (e.g. code_language alone) must merge omitted slots/starter/flags from the row, or an
-  // illegal true can be stored against the real DB layout.
+  let previewBaseHtml = patch.preview_base_html;
+  // Skip the row read only when every layout input, scaffold, and both flags are in the patch.
+  // A partial layout (e.g. code_language alone) must merge omitted slots/starter/flags/scaffold
+  // from the row, or an illegal true can be stored against the real DB layout.
   const complete =
     contentType === "exercise" &&
     patch.submission_file_slots !== undefined &&
     patch.starter_files !== undefined &&
     patch.code_language !== undefined &&
+    patch.preview_base_html !== undefined &&
     patch.show_preview !== undefined &&
     patch.show_console !== undefined;
   if (!complete) {
     const { data, error } = await supabase
       .from("learning_contents")
       .select(
-        "content_type, submission_file_slots, starter_files, code_language, show_preview, show_console"
+        "content_type, submission_file_slots, starter_files, code_language, preview_base_html, show_preview, show_console"
       )
       .eq("id", id)
       .eq("is_deleted", false)
@@ -1546,6 +1554,9 @@ async function rejectIllegalPreviewSettings(
     if (language === undefined) {
       language = data.code_language;
     }
+    if (previewBaseHtml === undefined) {
+      previewBaseHtml = data.preview_base_html;
+    }
     if (showPreview === undefined) {
       showPreview = data.show_preview;
     }
@@ -1568,6 +1579,7 @@ async function rejectIllegalPreviewSettings(
     }),
     showPreview: showPreview ?? null,
     showConsole: showConsole ?? null,
+    previewBaseHtml: previewBaseHtml ?? null,
   });
 }
 
@@ -1587,9 +1599,12 @@ export async function updateContent(
 ): Promise<ContentUpdateResult> {
   const supabase = await createAdminSupabaseClient();
   const { insertAfterId, quizQuestions, gradingRubric, loadedRubricVersion, ...patch } = content;
-  // Zod only rejects slots on a non-exercise when this request also sends content_type. A
-  // slots-only PUT would otherwise hit the exercise-only CHECK and come back as 500.
-  if (patch.submission_file_slots != null && patch.content_type === undefined) {
+  // Zod only rejects slots / scaffold on a non-exercise when this request also sends content_type.
+  // A slots-only or scaffold-only PUT would otherwise hit the exercise-only CHECK and come back as 500.
+  if (
+    (patch.submission_file_slots != null || patch.preview_base_html != null) &&
+    patch.content_type === undefined
+  ) {
     const { data: currentType, error: typeError } = await supabase
       .from("learning_contents")
       .select("content_type")
@@ -1609,11 +1624,20 @@ export async function updateContent(
       };
     }
     if (currentType.content_type !== "exercise") {
-      return { error: null, storageRemoved: true, slotsNotAllowed: true };
+      if (patch.submission_file_slots != null) {
+        return { error: null, storageRemoved: true, slotsNotAllowed: true };
+      }
+      // preview_base_html-only PUT on a non-exercise would hit the CHECK as 500 (#351 review).
+      return {
+        error: null,
+        storageRemoved: true,
+        previewNotAllowed: "プレビューの土台 HTML は演習だけに指定できます",
+      };
     }
   }
   if (patch.content_type !== undefined && patch.content_type !== "exercise") {
     patch.submission_file_slots = null;
+    patch.preview_base_html = null;
     patch.show_preview = null;
     patch.show_console = null;
   } else {
@@ -1758,6 +1782,7 @@ async function updateContentRow(
     grading_rubric: LearningContent["grading_rubric"];
     content_type: LearningContent["content_type"];
     submission_file_slots?: LearningContent["submission_file_slots"];
+    preview_base_html?: LearningContent["preview_base_html"];
     show_preview?: LearningContent["show_preview"];
     show_console?: LearningContent["show_console"];
   } | null = null;
@@ -1771,7 +1796,7 @@ async function updateContentRow(
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
       .select(
-        "week_id, pdf_url, grading_rubric, content_type, submission_file_slots, show_preview, show_console"
+        "week_id, pdf_url, grading_rubric, content_type, submission_file_slots, preview_base_html, show_preview, show_console"
       )
       .eq("id", id)
       .eq("is_deleted", false)
@@ -1858,6 +1883,7 @@ async function updateContentRow(
         };
         if (movesAwayFromExercise) {
           rubricSnapshot.submission_file_slots = current.submission_file_slots ?? null;
+          rubricSnapshot.preview_base_html = current.preview_base_html ?? null;
           rubricSnapshot.show_preview = current.show_preview ?? null;
           rubricSnapshot.show_console = current.show_console ?? null;
         }
@@ -1885,6 +1911,8 @@ async function updateContentRow(
       // ride this UPDATE. A later statement would run after the type has already changed.
       if (patch.content_type !== "exercise") {
         rubricPayload.submission_file_slots = null;
+        // preview_base_html is exercise-only (CHECK); clear with the type change like slots.
+        rubricPayload.preview_base_html = null;
         rubricPayload.show_preview = null;
         rubricPayload.show_console = null;
       }
@@ -1909,6 +1937,9 @@ async function updateContentRow(
     }
     if (rubricPayload.submission_file_slots === null) {
       delete patch.submission_file_slots;
+    }
+    if (rubricPayload.preview_base_html === null) {
+      delete patch.preview_base_html;
     }
     if (rubricPayload.show_preview === null) {
       delete patch.show_preview;

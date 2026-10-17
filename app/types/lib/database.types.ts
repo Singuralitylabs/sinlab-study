@@ -487,6 +487,7 @@ export type Database = {
           is_open_to_trial: boolean;
           is_published: boolean | null;
           pdf_url: string | null;
+          preview_base_html: string | null;
           reference_answer: string | null;
           show_console: boolean | null;
           show_preview: boolean | null;
@@ -514,6 +515,7 @@ export type Database = {
           is_open_to_trial?: boolean;
           is_published?: boolean | null;
           pdf_url?: string | null;
+          preview_base_html?: string | null;
           reference_answer?: string | null;
           show_console?: boolean | null;
           show_preview?: boolean | null;
@@ -541,6 +543,7 @@ export type Database = {
           is_open_to_trial?: boolean;
           is_published?: boolean | null;
           pdf_url?: string | null;
+          preview_base_html?: string | null;
           reference_answer?: string | null;
           show_console?: boolean | null;
           show_preview?: boolean | null;

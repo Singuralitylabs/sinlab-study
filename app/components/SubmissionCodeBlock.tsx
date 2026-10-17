@@ -12,6 +12,7 @@ export interface SubmissionPreviewSource {
   codeLanguage: string | null;
   showPreview: boolean | null;
   showConsole: boolean | null;
+  previewBaseHtml?: string | null;
 }
 
 interface SubmissionCodeBlockProps {
@@ -38,6 +39,7 @@ export function SubmissionCodeBlock({
         }),
         showPreview: previewSource.showPreview,
         showConsole: previewSource.showConsole,
+        previewBaseHtml: previewSource.previewBaseHtml,
       })
     : resolvePreviewDisplay({ files, showPreview: null, showConsole: null });
 
@@ -70,6 +72,7 @@ export function SubmissionCodeBlock({
           collapsible
           showPreviewFrame={display.preview}
           showConsolePanel={display.console}
+          previewBaseHtml={previewSource?.previewBaseHtml}
         />
       )}
     </div>
