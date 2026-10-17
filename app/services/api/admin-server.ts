@@ -2354,7 +2354,8 @@ export async function changeMembershipType(
 }
 
 interface StudentProgress {
-  user: Pick<UserType, "id" | "display_name" | "email">;
+  /** Manage UI hides PII; email stays on /admin/users only (#414). */
+  user: Pick<UserType, "id" | "display_name">;
   totalContents: number;
   completedContents: number;
   lastActivity: string | null;
@@ -2380,7 +2381,7 @@ export async function fetchStudentsProgress(): Promise<{
   const [usersResult, contentsCountResult] = await Promise.all([
     supabase
       .from("users")
-      .select("id, display_name, email")
+      .select("id, display_name")
       .eq("status", USER_STATUS.ACTIVE)
       .eq("is_deleted", false)
       .order("display_name"),

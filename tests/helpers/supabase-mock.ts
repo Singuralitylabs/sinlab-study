@@ -30,8 +30,10 @@ export function createQueryBuilder(result: QueryResult) {
     range: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
     overrideTypes: vi.fn().mockReturnThis(),
-    single: vi.fn().mockResolvedValue(result),
-    maybeSingle: vi.fn().mockResolvedValue(result),
+    // Return this so chains like .maybeSingle().overrideTypes() match postgrest-js; the builder
+    // is thenable so `await builder.maybeSingle()` still resolves to result.
+    single: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn().mockReturnThis(),
     // List queries resolve by awaiting the builder itself.
     // biome-ignore lint/suspicious/noThenProperty: mimics the Supabase builder thenable
     then: (onfulfilled: (v: typeof result) => unknown, onrejected?: (r: unknown) => unknown) =>

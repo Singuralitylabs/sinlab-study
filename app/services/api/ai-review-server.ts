@@ -117,7 +117,7 @@ export async function fetchAllSubmissionsWithReviews({
   const { data, count, error } = await supabase
     .from("submissions")
     .select(
-      `*, user:users(id, display_name, email), content:learning_contents(${LIST_CONTENT_SELECT}), ${AI_REVIEW_ADMIN_LIST_SELECT}`,
+      `*, user:users(id, display_name), content:learning_contents(${LIST_CONTENT_SELECT}), ${AI_REVIEW_ADMIN_LIST_SELECT}`,
       { count: "exact" }
     )
     .order("submitted_at", { ascending: false })

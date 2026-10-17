@@ -252,7 +252,8 @@ export interface SubmissionWithContentAndReview extends Submission {
 
 export interface AdminSubmissionWithReview
   extends Omit<SubmissionWithContentAndReview, "ai_review"> {
-  user: Pick<UserType, "id" | "display_name" | "email"> | null;
+  /** Manage UI hides PII; email stays on /admin/users only (#414). */
+  user: Pick<UserType, "id" | "display_name"> | null;
   ai_review: AdminAIReviewListItem | null;
 }
 
