@@ -21,7 +21,10 @@ vi.mock("@/app/(authenticated)/upgrade/PlanInquiryButton", () => ({
 }));
 
 import UpgradePage from "@/app/(authenticated)/upgrade/page";
-import { COMMUNITY_APPLY_FORM_URL } from "@/app/constants/stripe";
+import {
+  COMMUNITY_APPLY_FORM_URL,
+  SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
+} from "@/app/constants/stripe";
 import {
   fetchStripeSubscriptionByUserId,
   fetchSubscriptionPrice,
@@ -88,6 +91,11 @@ describe("/upgrade のプランカード", () => {
     expect(html).toContain("コミュニティ会員");
     expect(html).toContain("checkout");
     expect(html).toContain("—");
+    expect(html).toContain(SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE);
+    // Disabled reason stays in the general card action, before the legal list below.
+    expect(html.indexOf(SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE)).toBeLessThan(
+      html.indexOf("すべての学習コンテンツ（動画・テキスト・演習）を閲覧・提出できます")
+    );
     expect(html).not.toContain(COMMUNITY_APPLY_FORM_URL);
   });
 
@@ -109,6 +117,11 @@ describe("/upgrade のプランカード", () => {
     expect(html).toContain("noopener noreferrer");
     expect(html).toContain("申し込む");
     expect(html).toContain("inquiry-compact");
+    // Guide text comes before the apply button (not 「下記」 after it).
+    expect(html.indexOf("申し込みフォームからお申し込みください")).toBeLessThan(
+      html.indexOf(`href="${COMMUNITY_APPLY_FORM_URL}"`)
+    );
+    expect(html).not.toContain("下記の申し込みフォーム");
   });
 
   it("フィードバック無効でもコミュニティ申し込みフォームへの導線は出す", async () => {

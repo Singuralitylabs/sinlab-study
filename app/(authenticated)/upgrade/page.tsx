@@ -38,7 +38,7 @@ const MINOR_CONSENT_NOTICE =
   "未成年者は保護者のアカウントにより、保護者の同意を得た上でお申し込みください";
 
 const COMMUNITY_APPLY_TEXT =
-  "コミュニティ会員（シンラボ会員）への変更をご希望の方は、下記の申し込みフォームからお申し込みください。運営が内容を確認し、承認後にご案内します。承認までお支払いは発生しません。";
+  "コミュニティ会員（シンラボ会員）への変更をご希望の方は、申し込みフォームからお申し込みください。運営が内容を確認し、承認後にご案内します。承認までお支払いは発生しません。";
 
 export default async function UpgradePage() {
   const { userId, userStatus, membershipType } = await getServerAuth();
@@ -97,8 +97,8 @@ export default async function UpgradePage() {
 
   const communityApplyAction = (
     <div className="space-y-2">
-      <CommunityApplyButton />
       <p className="text-sm text-muted-foreground">{COMMUNITY_APPLY_TEXT}</p>
+      <CommunityApplyButton />
       {feedbackEnabled && (
         <p className="text-sm text-muted-foreground">
           フォーム以外でのご相談は
@@ -108,6 +108,18 @@ export default async function UpgradePage() {
           からどうぞ。
         </p>
       )}
+    </div>
+  );
+
+  const trialCheckoutAction = (
+    <div className="space-y-2">
+      {checkoutDisabled && (
+        <p className="text-sm text-destructive">
+          {SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE}
+          。時間をおいてページを再読み込みしてください。
+        </p>
+      )}
+      <UpgradeCheckoutButton disabled={checkoutDisabled} />
     </div>
   );
 
@@ -124,7 +136,7 @@ export default async function UpgradePage() {
             <>
               <PlanCards
                 generalPriceLabel={monthlyPriceLabel}
-                generalAction={<UpgradeCheckoutButton disabled={checkoutDisabled} />}
+                generalAction={trialCheckoutAction}
               />
               {monthlyPriceLabel && <p className="text-2xl font-bold">{monthlyPriceLabel}</p>}
               <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
@@ -147,12 +159,6 @@ export default async function UpgradePage() {
                 </li>
                 <li>{CANCELLATION_POLICY_TEXT}</li>
               </ul>
-              {checkoutDisabled && (
-                <p className="text-sm text-destructive">
-                  {SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE}
-                  。時間をおいてページを再読み込みしてください。
-                </p>
-              )}
               <p className="text-sm text-muted-foreground">{MINOR_CONSENT_NOTICE}</p>
             </>
           ) : (
