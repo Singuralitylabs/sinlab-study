@@ -1,15 +1,16 @@
 "use client";
 
-import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { ReactNode } from "react";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 export type ManageGroupNavItem = {
   title: string;
   href: string;
-  icon: LucideIcon;
+  /** Rendered element, not a component: props must cross the server→client boundary. */
+  icon: ReactNode;
 };
 
 export function ManageGroupNav({ items }: { items: ManageGroupNavItem[] }) {
@@ -34,7 +35,7 @@ export function ManageGroupNav({ items }: { items: ManageGroupNavItem[] }) {
                   : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
               )}
             >
-              <item.icon className="h-4 w-4" />
+              {item.icon}
               {item.title}
             </Link>
           );

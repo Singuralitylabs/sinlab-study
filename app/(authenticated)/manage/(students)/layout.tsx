@@ -12,10 +12,30 @@ export default async function ManageStudentsGroupLayout({
   const isAdmin = checkAdminPermissions(userRole);
 
   const items = [
-    { title: "ダッシュボード", href: "/manage", icon: LayoutDashboard },
-    { title: "提出一覧", href: "/manage/submissions", icon: ClipboardList },
-    { title: "フィードバック", href: "/manage/feedbacks", icon: MessageSquare },
-    ...(isAdmin ? [{ title: "受講生進捗", href: "/manage/students", icon: Users }] : []),
+    {
+      title: "ダッシュボード",
+      href: "/manage",
+      icon: <LayoutDashboard className="h-4 w-4" />,
+    },
+    {
+      title: "提出一覧",
+      href: "/manage/submissions",
+      icon: <ClipboardList className="h-4 w-4" />,
+    },
+    {
+      title: "フィードバック",
+      href: "/manage/feedbacks",
+      icon: <MessageSquare className="h-4 w-4" />,
+    },
+    ...(isAdmin
+      ? [
+          {
+            title: "受講生進捗",
+            href: "/manage/students",
+            icon: <Users className="h-4 w-4" />,
+          },
+        ]
+      : []),
   ];
 
   return (
