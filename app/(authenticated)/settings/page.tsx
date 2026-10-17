@@ -1,26 +1,66 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
-import { PRIVACY_URL } from "@/app/constants/legal";
-import { PLAN_PAGE_TITLE } from "@/app/constants/stripe";
+import {
+  NOTIFICATION_EMAIL_RESULT,
+  NOTIFICATION_EMAIL_RESULT_VALUES,
+  type NotificationEmailResult,
+} from "@/app/constants/settings";
 import { USER_ROLE } from "@/app/constants/user";
 import { fetchNotificationEmailState } from "@/app/services/api/notification-email-server";
 import { fetchUserEmailOptOutAt } from "@/app/services/api/user-email-server";
 import { fetchUserDisplayName } from "@/app/services/api/user-profile-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { EmailPreferencesForm } from "./EmailPreferencesForm";
-import { NotificationEmailForm } from "./NotificationEmailForm";
-import { ProfileForm } from "./ProfileForm";
+import { SettingsTiles } from "./SettingsTiles";
 
-export default async function SettingsPage() {
-  const { userId, userRole } = await getServerAuth();
+const NOTIFICATION_EMAIL_RESULT_MESSAGES: Record<
+  NotificationEmailResult,
+  { variant: "default" | "destructive"; text: string }
+> = {
+  [NOTIFICATION_EMAIL_RESULT.CONFIRMED]: {
+    variant: "default",
+    text: "通知の送り先を変更しました。以後のメールは新しいアドレスに届きます。",
+  },
+  [NOTIFICATION_EMAIL_RESULT.EXPIRED]: {
+    variant: "destructive",
+    text: "確認リンクの有効期限が切れています。設定からもう一度お試しください。",
+  },
+  [NOTIFICATION_EMAIL_RESULT.INVALID]: {
+    variant: "destructive",
+    text: "確認リンクが正しくないか、すでに使われています。設定からもう一度お試しください。",
+  },
+  [NOTIFICATION_EMAIL_RESULT.ERROR]: {
+    variant: "destructive",
+    text: "通知の送り先を変更できませんでした。時間をおいて再度お試しください。",
+  },
+};
+
+function parseNotificationEmailResult(
+  value: string | string[] | undefined
+): NotificationEmailResult | null {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!raw) {
+    return null;
+  }
+  return NOTIFICATION_EMAIL_RESULT_VALUES.includes(raw as NotificationEmailResult)
+    ? (raw as NotificationEmailResult)
+    : null;
+}
+
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ notification_email?: string | string[] }>;
+}) {
+  const { userId, userRole, membershipType, userStatus } = await getServerAuth();
 
   if (!userId) {
     redirect("/login");
   }
+
+  const notificationEmailResult = parseNotificationEmailResult(
+    (await searchParams).notification_email
+  );
 
   const [
     { data: emailOptOutAt, error },
@@ -33,115 +73,31 @@ export default async function SettingsPage() {
   ]);
   // Promotional mail goes to role = member only (docs/specification.md 10.7).
   const isMailTarget = userRole === USER_ROLE.MEMBER;
+  const resultBanner = notificationEmailResult
+    ? NOTIFICATION_EMAIL_RESULT_MESSAGES[notificationEmailResult]
+    : null;
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <PageTitle
-        title="設定"
-        description="表示名、通知の送り先、案内メールの配信を確認・変更できます"
+    <div className="max-w-5xl mx-auto">
+      <PageTitle title="設定" description="プロフィール・通知・プランを確認・変更できます" />
+
+      {resultBanner && (
+        <Alert variant={resultBanner.variant} className="mb-6" role="status">
+          <AlertDescription>{resultBanner.text}</AlertDescription>
+        </Alert>
+      )}
+
+      <SettingsTiles
+        displayName={displayName}
+        profileError={Boolean(profileError) || displayName === null}
+        notification={notificationEmail}
+        notificationError={Boolean(notificationError) || !notificationEmail}
+        emailOptOutAt={emailOptOutAt}
+        emailOptOutError={Boolean(error)}
+        isMailTarget={isMailTarget}
+        membershipType={membershipType}
+        userStatus={userStatus}
       />
-
-      <div className="space-y-6">
-        <Card>
-          <CardContent className="space-y-8 p-6">
-            <section className="space-y-6" aria-labelledby="settings-profile-heading">
-              <h2 id="settings-profile-heading" className="text-lg font-semibold">
-                プロフィール
-              </h2>
-              {profileError || displayName === null ? (
-                <Alert variant="destructive">
-                  <AlertDescription>
-                    表示名を取得できませんでした。時間をおいて再度お試しください。
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <ProfileForm initialDisplayName={displayName} />
-              )}
-            </section>
-
-            <section
-              className="space-y-6 border-t pt-8"
-              aria-labelledby="settings-notification-heading"
-            >
-              <h2 id="settings-notification-heading" className="text-lg font-semibold">
-                通知の送り先
-              </h2>
-              {notificationError || !notificationEmail ? (
-                <Alert variant="destructive">
-                  <AlertDescription>
-                    通知の送り先を取得できませんでした。時間をおいて再度お試しください。
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <NotificationEmailForm
-                  loginEmail={notificationEmail.loginEmail}
-                  notificationEmail={notificationEmail.notificationEmail}
-                  pendingEmail={notificationEmail.pendingEmail}
-                  pendingExpiresAt={notificationEmail.pendingExpiresAt}
-                />
-              )}
-            </section>
-
-            <section className="space-y-6 border-t pt-8" aria-labelledby="settings-email-heading">
-              <h2 id="settings-email-heading" className="text-lg font-semibold">
-                案内メールの配信
-              </h2>
-
-              {error ? (
-                <Alert variant="destructive">
-                  <AlertDescription>
-                    配信設定を取得できませんでした。時間をおいて再度お試しください。
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <EmailPreferencesForm initialEmailOptOutAt={emailOptOutAt} />
-              )}
-
-              {!isMailTarget && (
-                <p className="text-sm text-muted-foreground">
-                  管理者・メンテナーのアカウントには、案内メールは送信されません。
-                </p>
-              )}
-
-              <div className="space-y-2 text-sm">
-                <p className="font-medium">停止できるメール（案内メール）</p>
-                <p className="text-muted-foreground">
-                  学習状況のお知らせ・リマインド、本サービスの機能および有料プランのご案内、本サービスに関するお知らせのメール。
-                </p>
-                <p className="font-medium">停止できないメール</p>
-                <p className="text-muted-foreground">
-                  アカウントの登録・承認、契約、解約等の手続に関する通知は、本サービスの提供に必要なため停止できません。ただし、これらの通知に案内メールに当たる内容を含めるときは、配信停止の方法を記載します。
-                </p>
-              </div>
-
-              <p className="text-sm">
-                詳しくは
-                <a
-                  href={PRIVACY_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary underline underline-offset-2"
-                >
-                  プライバシーポリシー
-                </a>
-                をご確認ください。
-              </p>
-            </section>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="space-y-4 p-6">
-            <h2 className="text-lg font-semibold">プラン</h2>
-            <p className="text-sm text-muted-foreground">
-              会員プランの内容と、お申し込み・契約状況を確認できます。
-            </p>
-            <Button asChild variant="outline">
-              <Link href="/upgrade">{PLAN_PAGE_TITLE}</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
     </div>
   );
 }

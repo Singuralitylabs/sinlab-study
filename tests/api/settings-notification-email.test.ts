@@ -390,6 +390,8 @@ describe("確認リンク", () => {
 
     expect(res.status).toBe(200);
     expect(html).toContain("変更しました");
+    expect(html).toContain("/settings?notification_email=confirmed");
+    expect(html).toContain("設定画面で確認する");
     expect(html).not.toContain("notify@example.com");
     expect(memory.user.notification_email).toBe("notify@example.com");
     expect(memory.user.email).toBe("login@example.com");
