@@ -78,12 +78,7 @@ export default async function ManageFeedbacksPage() {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-sm">
-                    <div>{item.user?.display_name ?? "不明"}</div>
-                    {item.user?.email ? (
-                      <div className="text-xs text-muted-foreground break-all">
-                        {item.user.email}
-                      </div>
-                    ) : null}
+                    {item.user?.display_name ?? "不明"}
                   </TableCell>
                   <TableCell className="max-w-xs truncate text-sm text-muted-foreground">
                     {item.body}

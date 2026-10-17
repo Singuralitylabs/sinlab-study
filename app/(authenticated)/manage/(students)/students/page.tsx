@@ -47,11 +47,10 @@ export default async function ManageStudentsPage() {
         </Card>
       ) : (
         <Card className="overflow-x-auto">
-          <Table className="min-w-[760px]">
+          <Table className="min-w-[640px]">
             <TableHeader>
               <TableRow>
                 <TableHead>名前</TableHead>
-                <TableHead>メール</TableHead>
                 <TableHead className="text-center">進捗</TableHead>
                 <TableHead className="text-center">修了証</TableHead>
                 <TableHead className="text-right">最終アクティビティ</TableHead>
@@ -67,9 +66,6 @@ export default async function ManageStudentsPage() {
                 return (
                   <TableRow key={student.user.id}>
                     <TableCell className="font-medium">{student.user.display_name}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {student.user.email}
-                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <Progress value={progress} className="flex-1" />

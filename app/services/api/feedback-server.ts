@@ -19,7 +19,8 @@ export type FeedbackRow = {
 };
 
 export type ManageFeedbackListItem = FeedbackRow & {
-  user: { display_name: string; email: string } | null;
+  /** Manage UI hides PII; email stays on /admin/users only (#414). */
+  user: { display_name: string } | null;
 };
 
 export async function countRecentFeedbacksForUser(
@@ -76,7 +77,7 @@ export async function fetchManageFeedbacks(): Promise<{
   const { data, error } = await supabase
     .from("feedbacks")
     .select(
-      "id, user_id, category, body, page_url, user_agent, status, created_at, user:users(display_name, email)"
+      "id, user_id, category, body, page_url, user_agent, status, created_at, user:users(display_name)"
     )
     .order("created_at", { ascending: false })
     .overrideTypes<ManageFeedbackListItem[], { merge: false }>();
@@ -96,7 +97,7 @@ export async function fetchManageFeedbackById(id: number): Promise<{
   const { data, error } = await supabase
     .from("feedbacks")
     .select(
-      "id, user_id, category, body, page_url, user_agent, status, created_at, user:users(display_name, email)"
+      "id, user_id, category, body, page_url, user_agent, status, created_at, user:users(display_name)"
     )
     .eq("id", id)
     .maybeSingle()

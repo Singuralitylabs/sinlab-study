@@ -56,6 +56,19 @@ describe("fetchAllSubmissionsWithReviews", () => {
     );
   });
 
+  it("/manage 向け取得では users.email を select しない (#414)", async () => {
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: [], error: null, count: 0 },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await fetchAllSubmissionsWithReviews();
+
+    const selectArg = mockClient.from.mock.results[0]?.value.select.mock.calls[0][0] as string;
+    expect(selectArg).toContain("user:users(id, display_name)");
+    expect(selectArg).not.toMatch(/user:users\([^)]*email/);
+  });
+
   it("引数省略時は1ページ目を range(0, 19) で取得する", async () => {
     const mockClient = createMockSupabaseClient({
       queryResult: { data: [], error: null, count: 0 },

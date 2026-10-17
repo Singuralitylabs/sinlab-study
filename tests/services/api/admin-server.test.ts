@@ -42,9 +42,31 @@ beforeEach(() => {
 
 describe("fetchStudentsProgress", () => {
   const users = [
-    { id: 1, display_name: "受講生A", email: "a@example.com" },
-    { id: 2, display_name: "受講生B", email: "b@example.com" },
+    { id: 1, display_name: "受講生A" },
+    { id: 2, display_name: "受講生B" },
   ];
+
+  it("users から email を select しない (#414)", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        users: { data: users, error: null },
+        learning_contents: { data: null, error: null, count: 0 },
+      },
+      rpcResults: {
+        get_students_progress_summary: { data: [], error: null },
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await fetchStudentsProgress();
+
+    const usersCallIndex = mockClient.from.mock.calls.findIndex(([table]) => table === "users");
+    expect(usersCallIndex).toBeGreaterThanOrEqual(0);
+    const selectArg = mockClient.from.mock.results[usersCallIndex]?.value.select.mock
+      .calls[0][0] as string;
+    expect(selectArg).toBe("id, display_name");
+    expect(selectArg).not.toContain("email");
+  });
 
   // Aggregation is the RPC's responsibility (migration); this only tests mapping the RPC result to
   // StudentProgress.

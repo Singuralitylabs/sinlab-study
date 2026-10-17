@@ -45,10 +45,7 @@ export default async function ManageFeedbackDetailPage({ params }: PageProps) {
         <CardContent className="pt-6 space-y-4 text-sm">
           <div>
             <p className="text-muted-foreground mb-1">投稿者</p>
-            <p>
-              {feedback.user?.display_name ?? "不明"}
-              {feedback.user?.email ? `（${feedback.user.email}）` : ""}
-            </p>
+            <p>{feedback.user?.display_name ?? "不明"}</p>
           </div>
           <div>
             <p className="text-muted-foreground mb-1">受信日時</p>
