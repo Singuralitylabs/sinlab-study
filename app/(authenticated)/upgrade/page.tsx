@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
 import { isFeedbackEnabled } from "@/app/constants/feedback";
 import {
-  BILLING_ANCHOR_DAY_OF_MONTH,
+  CANCELLATION_POLICY_TEXT,
   DISPLAY_MONTHLY_PRICE_JPY,
   formatMonthlyJpyPrice,
   isChargeableSubscriptionPrice,
@@ -29,8 +29,6 @@ import { PlanInquiryButton } from "./PlanInquiryButton";
 import { TrialCheckoutDetails } from "./TrialCheckoutDetails";
 
 const FALLBACK_MONTHLY_PRICE_LABEL = formatMonthlyJpyPrice(DISPLAY_MONTHLY_PRICE_JPY);
-
-const CANCELLATION_POLICY_TEXT = `解約時の日割り計算・返金はありません。解約手続き後も、当該請求期間の末日（次回${BILLING_ANCHOR_DAY_OF_MONTH}日）まで引き続きご利用いただけます。`;
 
 const COMMUNITY_APPLY_TEXT =
   "コミュニティ会員（シンラボ会員）への変更をご希望の方は、申し込みフォームからお申し込みください。運営が内容を確認し、承認後にご案内します。承認までお支払いは発生しません。";

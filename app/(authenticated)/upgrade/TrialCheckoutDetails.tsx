@@ -1,12 +1,11 @@
 import {
   BILLING_ANCHOR_DAY_OF_MONTH,
+  CANCELLATION_POLICY_TEXT,
   MANAGE_SUBSCRIPTION_BUTTON_LABEL,
   PLAN_PAGE_TITLE,
   SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
 } from "@/app/constants/stripe";
 import { UpgradeCheckoutButton } from "./UpgradeCheckoutButton";
-
-const CANCELLATION_POLICY_TEXT = `解約時の日割り計算・返金はありません。解約手続き後も、当該請求期間の末日（次回${BILLING_ANCHOR_DAY_OF_MONTH}日）まで引き続きご利用いただけます。`;
 
 const MINOR_CONSENT_NOTICE =
   "未成年者は保護者のアカウントにより、保護者の同意を得た上でお申し込みください";

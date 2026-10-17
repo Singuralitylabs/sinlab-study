@@ -64,7 +64,7 @@ type PlanCardsProps = {
    * Omit for the community upsell cards (uses DISPLAY_* constants; not Checkout-adjacent).
    */
   generalPriceLabel?: string | null;
-  /** Which plan card shows the 「ご契約中」 badge and emphasized border. */
+  /** Which plan card shows the 「現在のプラン」 badge and emphasized border. */
   currentPlan?: "general" | "community" | null;
   /** Body of the dialog opened from the general card (legal notice / Checkout). */
   generalDialog?: ReactNode;
@@ -146,7 +146,7 @@ function PlanCard({
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {isCurrent && <Badge variant="default">ご契約中</Badge>}
+          {isCurrent && <Badge variant="default">現在のプラン</Badge>}
           {isOpenable && (
             <ChevronRight
               aria-hidden="true"

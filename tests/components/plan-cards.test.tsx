@@ -11,9 +11,13 @@ vi.mock("@/app/(authenticated)/upgrade/UpgradeCheckoutButton", () => ({
   ),
 }));
 
+import { CommunityApplyButton } from "@/app/(authenticated)/upgrade/CommunityApplyButton";
 import { PlanCards } from "@/app/(authenticated)/upgrade/PlanCards";
 import { TrialCheckoutDetails } from "@/app/(authenticated)/upgrade/TrialCheckoutDetails";
-import { SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE } from "@/app/constants/stripe";
+import {
+  COMMUNITY_APPLY_FORM_URL,
+  SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
+} from "@/app/constants/stripe";
 
 describe("PlanCards", () => {
   let container: HTMLDivElement;
@@ -80,12 +84,46 @@ describe("PlanCards", () => {
     });
 
     // Only community opens a dialog; general is current-plan with footer only.
-    const chevrons = container.querySelectorAll("svg.lucide-chevron-right, svg");
+    const chevrons = container.querySelectorAll("svg.lucide-chevron-right");
     const openButtons = container.querySelectorAll('button[aria-label$="の詳細を開く"]');
     expect(openButtons.length).toBe(1);
     expect(openButtons[0]?.getAttribute("aria-label")).toContain("コミュニティ会員");
-    expect(chevrons.length).toBeGreaterThanOrEqual(1);
+    expect(chevrons.length).toBe(1);
+    expect(container.textContent).toContain("現在のプラン");
     expect(container.textContent).toContain("manage footer");
+  });
+
+  it("コミュニティカードを開くと申し込むリンクが新しいタブで開く", async () => {
+    await act(async () => {
+      root.render(
+        <PlanCards
+          generalDialog={<p>g</p>}
+          communityDialog={
+            <div>
+              <p>案内</p>
+              <CommunityApplyButton />
+            </div>
+          }
+        />
+      );
+    });
+
+    const communityDetail = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.getAttribute("aria-label")?.includes("コミュニティ会員")
+    );
+    expect(communityDetail).toBeTruthy();
+
+    await act(async () => {
+      communityDetail?.click();
+    });
+
+    const dialog = document.querySelector('[data-slot="dialog-content"]');
+    expect(dialog).toBeTruthy();
+    const applyLink = dialog?.querySelector(`a[href="${COMMUNITY_APPLY_FORM_URL}"]`);
+    expect(applyLink).toBeTruthy();
+    expect(applyLink?.getAttribute("target")).toBe("_blank");
+    expect(applyLink?.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(applyLink?.textContent).toContain("申し込む");
   });
 
   it("コミュニティ特典を箇条書きで表示する", async () => {
