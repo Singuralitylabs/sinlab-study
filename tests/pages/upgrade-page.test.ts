@@ -71,7 +71,7 @@ afterEach(() => {
 });
 
 describe("/upgrade のプランカード", () => {
-  it("お試し会員は一般有料カード内に Checkout を出し、非月額価格では「—」にする", async () => {
+  it("お試し会員はプランカードの後に法定表示を出し、その下に Checkout を置く", async () => {
     vi.mocked(getServerAuth).mockResolvedValue({
       user: { id: "auth-uuid" },
       userId: 7,
@@ -92,9 +92,17 @@ describe("/upgrade のプランカード", () => {
     expect(html).toContain("checkout");
     expect(html).toContain("—");
     expect(html).toContain(SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE);
-    // Disabled reason stays in the general card action, before the legal list below.
+    const legalItem = "すべての学習コンテンツ（動画・テキスト・演習）を閲覧・提出できます";
+    const minorNotice =
+      "未成年者は保護者のアカウントにより、保護者の同意を得た上でお申し込みください";
+    // Cards → legal notice → minor consent → Checkout (disabled reason + button).
+    expect(html.indexOf("一般有料会員")).toBeLessThan(html.indexOf(legalItem));
+    expect(html.indexOf(legalItem)).toBeLessThan(html.indexOf(minorNotice));
+    expect(html.indexOf(minorNotice)).toBeLessThan(
+      html.indexOf(SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE)
+    );
     expect(html.indexOf(SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE)).toBeLessThan(
-      html.indexOf("すべての学習コンテンツ（動画・テキスト・演習）を閲覧・提出できます")
+      html.indexOf("checkout")
     );
     expect(html).not.toContain(COMMUNITY_APPLY_FORM_URL);
   });

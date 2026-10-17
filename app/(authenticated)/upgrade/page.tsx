@@ -134,10 +134,8 @@ export default async function UpgradePage() {
         {userStatus === USER_STATUS.TRIAL &&
           (stripeEnabled ? (
             <>
-              <PlanCards
-                generalPriceLabel={monthlyPriceLabel}
-                generalAction={trialCheckoutAction}
-              />
+              {/* Checkout stays below the legal notice so learners can read terms before upgrading. */}
+              <PlanCards generalPriceLabel={monthlyPriceLabel} />
               {monthlyPriceLabel && <p className="text-2xl font-bold">{monthlyPriceLabel}</p>}
               <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
                 <li>すべての学習コンテンツ（動画・テキスト・演習）を閲覧・提出できます</li>
@@ -160,6 +158,7 @@ export default async function UpgradePage() {
                 <li>{CANCELLATION_POLICY_TEXT}</li>
               </ul>
               <p className="text-sm text-muted-foreground">{MINOR_CONSENT_NOTICE}</p>
+              {trialCheckoutAction}
             </>
           ) : (
             <Card>
