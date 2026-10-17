@@ -34,6 +34,9 @@ describe("ThemeCard", () => {
     expect(html).not.toContain("w-24 shrink-0");
     expect(html).toContain("テーマA");
     expect(html).toContain("line-clamp-2");
+    // Outer flex column keeps the 修了 row inside the grid cell when heights stretch.
+    expect(html).toContain("flex h-full flex-col");
+    expect(html).toContain("min-h-0 flex-1");
   });
 
   it("修了済み + certificatesHref でもカード本体リンクの外に修了証リンクがある", () => {
@@ -47,5 +50,6 @@ describe("ThemeCard", () => {
     expect(html).toContain('href="/certificates"');
     expect(html).toContain("修了証を見る");
     expect(html).toContain("border-t-success");
+    expect(html).toContain("shrink-0 items-center gap-2");
   });
 });

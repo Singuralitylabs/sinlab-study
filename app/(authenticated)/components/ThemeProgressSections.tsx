@@ -33,9 +33,10 @@ export function ThemeCard({
   const showProgress = totalContents > 0 || completedContents > 0;
 
   if (layout === "card") {
+    // Keep the 修了 row inside the grid cell: Link must not take 100% height alone.
     return (
-      <div className="h-full">
-        <Link href={`/learn/${theme.id}`} className="block group h-full">
+      <div className="flex h-full flex-col">
+        <Link href={`/learn/${theme.id}`} className="block group min-h-0 flex-1">
           <Card
             className={`h-full overflow-hidden transition-all hover:shadow-md hover:border-primary/20 ${
               isCompleted ? "border-t-4 border-t-success" : ""
@@ -85,7 +86,7 @@ export function ThemeCard({
           </Card>
         </Link>
         {isCompleted && (
-          <div className="mt-1 ml-1 flex items-center gap-2 text-sm">
+          <div className="mt-1 ml-1 flex shrink-0 items-center gap-2 text-sm">
             <Badge variant="outline" className="border-success text-success">
               修了
             </Badge>
