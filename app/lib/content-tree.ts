@@ -132,10 +132,7 @@ export function buildContentTree(
 }
 
 /** Keys used by the tree UI for expand/collapse state. */
-export function contentTreeNodeKey(
-  level: "theme" | "phase" | "week",
-  id: number
-): string {
+export function contentTreeNodeKey(level: "theme" | "phase" | "week", id: number): string {
   return `${level}:${id}`;
 }
 

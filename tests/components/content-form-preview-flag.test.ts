@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { storedPreviewFlag } from "@/app/(authenticated)/manage/contents/ContentForm";
+import { storedPreviewFlag } from "@/app/(authenticated)/manage/(content)/contents/ContentForm";
 
 describe("storedPreviewFlag", () => {
   it("未編集なら常に NULL（自動）", () => {

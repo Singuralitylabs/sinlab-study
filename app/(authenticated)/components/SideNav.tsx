@@ -4,12 +4,13 @@ import {
   Award,
   BookOpen,
   ClipboardList,
+  FileText,
   House,
+  LayoutDashboard,
   ListChecks,
   LogOut,
   Megaphone,
   Menu,
-  Settings,
   SlidersHorizontal,
   UserCog,
 } from "lucide-react";
@@ -70,10 +71,16 @@ function announcementsNavItem(badge: React.ReactNode): NavItem {
   };
 }
 
-const MANAGE_NAV_ITEM: NavItem = {
-  title: "管理画面",
+const CONTENT_MANAGE_NAV_ITEM: NavItem = {
+  title: "コンテンツ管理",
+  href: "/manage/contents",
+  icon: <FileText className="h-5 w-5" />,
+};
+
+const STUDENT_MANAGE_NAV_ITEM: NavItem = {
+  title: "受講生管理",
   href: "/manage",
-  icon: <Settings className="h-5 w-5" />,
+  icon: <LayoutDashboard className="h-5 w-5" />,
 };
 
 const ADMIN_USERS_NAV_ITEM: NavItem = {
@@ -90,6 +97,24 @@ const SETTINGS_NAV_ITEM: NavItem = {
 
 function isNavActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
+  // Student-manage group: do not highlight for /manage/contents|announcements|themes|…
+  if (href === "/manage") {
+    return (
+      pathname === "/manage" ||
+      pathname.startsWith("/manage/students") ||
+      pathname.startsWith("/manage/submissions") ||
+      pathname.startsWith("/manage/feedbacks")
+    );
+  }
+  if (href === "/manage/contents") {
+    return (
+      pathname.startsWith("/manage/contents") ||
+      pathname.startsWith("/manage/announcements") ||
+      pathname.startsWith("/manage/themes") ||
+      pathname.startsWith("/manage/phases") ||
+      pathname.startsWith("/manage/weeks")
+    );
+  }
   return pathname.startsWith(href);
 }
 
@@ -188,7 +213,7 @@ export function SideNav({
     ...(showReviewList ? [REVIEW_LIST_NAV_ITEM] : []),
     ...(showCertificates ? [CERTIFICATES_NAV_ITEM] : []),
     announcementsNavItem(announcementBadge),
-    ...(isInstructor ? [MANAGE_NAV_ITEM] : []),
+    ...(isInstructor ? [CONTENT_MANAGE_NAV_ITEM, STUDENT_MANAGE_NAV_ITEM] : []),
     ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),
   ];
 

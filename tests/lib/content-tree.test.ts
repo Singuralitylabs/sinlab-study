@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildContentTree,
-  contentTreeNodeKey,
-  expandKeysForTarget,
-} from "@/app/lib/content-tree";
+import { buildContentTree, contentTreeNodeKey, expandKeysForTarget } from "@/app/lib/content-tree";
 import type {
   ManageContentListItem,
   ManagePhaseListItem,
@@ -11,9 +7,7 @@ import type {
   ManageWeekListItem,
 } from "@/app/types";
 
-function makeTheme(
-  overrides: Partial<ManageThemeListItem> & { id: number }
-): ManageThemeListItem {
+function makeTheme(overrides: Partial<ManageThemeListItem> & { id: number }): ManageThemeListItem {
   return {
     id: overrides.id,
     name: overrides.name ?? `テーマ${overrides.id}`,
@@ -230,9 +224,7 @@ describe("buildContentTree", () => {
 
 describe("expandKeysForTarget", () => {
   it("テーマ・フェーズ・週の祖先キーを返す", () => {
-    expect(
-      expandKeysForTarget({ themeId: 1, phaseId: 2, weekId: 3, contentId: 4 })
-    ).toEqual([
+    expect(expandKeysForTarget({ themeId: 1, phaseId: 2, weekId: 3, contentId: 4 })).toEqual([
       contentTreeNodeKey("theme", 1),
       contentTreeNodeKey("phase", 2),
       contentTreeNodeKey("week", 3),
