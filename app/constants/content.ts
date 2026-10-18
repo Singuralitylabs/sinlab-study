@@ -29,6 +29,19 @@ export const CONTENT_TYPE_LABELS: Record<ContentType, string> = {
   quiz: "クイズ",
 };
 
+/**
+ * Accent per content type for the learner content rows. Green is reserved for "completed"
+ * (border-success), so no type uses it; keyed by ContentType so a new type fails to compile until
+ * it has a color.
+ */
+export const CONTENT_TYPE_ACCENT_CLASSES: Record<ContentType, string> = {
+  video: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
+  text: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  exercise: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  slide: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  quiz: "bg-teal-500/10 text-teal-700 dark:text-teal-400",
+};
+
 /** Labels for the admin type pickers, which name the slide format explicitly. */
 export const CONTENT_TYPE_FORM_LABELS: Record<ContentType, string> = {
   ...CONTENT_TYPE_LABELS,
