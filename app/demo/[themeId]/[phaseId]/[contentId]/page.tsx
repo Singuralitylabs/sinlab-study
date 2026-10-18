@@ -61,7 +61,9 @@ export default async function DemoContentPage({ params }: PageProps) {
     { label: content.title },
   ];
 
-  const isDemoAccessible = ctx !== null && content.phase_id === ctx.phase.id;
+  // Trial-open only: without this the whole first phase would be readable while logged out.
+  const isDemoAccessible =
+    ctx !== null && content.phase_id === ctx.phase.id && content.is_open_to_trial;
 
   if (!isDemoAccessible) {
     return (
@@ -76,7 +78,7 @@ export default async function DemoContentPage({ params }: PageProps) {
             <div>
               <h2 className="text-lg font-semibold mb-2">このコンテンツはデモの対象外です</h2>
               <p className="text-sm text-muted-foreground max-w-sm">
-                デモでご覧いただけるのは最初のフェーズのみです。ログインすると、本サービスでお試し公開コンテンツの閲覧・課題提出をご利用いただけます。
+                デモでご覧いただけるのは、最初のフェーズのお試し公開コンテンツのみです。ログインすると、本サービスでお試し公開コンテンツの閲覧・課題提出をご利用いただけます。
               </p>
             </div>
             <Button asChild className="mt-2">

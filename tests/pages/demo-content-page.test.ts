@@ -89,7 +89,7 @@ describe("デモ画面のスライド配信（署名付きURL）", () => {
     expect(createDemoSlideSignedUrl).not.toHaveBeenCalled();
     expect(html).not.toContain(SIGNED_URL);
     expect(html).not.toContain(PDF_KEY);
-    expect(html).toContain("このスライドはお試し公開の対象外です");
+    expect(html).toContain("このコンテンツはデモの対象外です");
   });
 });
 
@@ -104,8 +104,17 @@ describe("デモ画面のロック（最初のフェーズのみ）", () => {
     const html = await render();
 
     expect(html).toContain("このコンテンツはデモの対象外です");
-    expect(html).toContain("最初のフェーズのみ");
+    expect(html).toContain("最初のフェーズのお試し公開コンテンツのみ");
     expect(createDemoSlideSignedUrl).not.toHaveBeenCalled();
+    expect(fetchDemoContentsByPhaseId).not.toHaveBeenCalled();
+  });
+
+  it("同じフェーズでもお試し公開でないコンテンツはロック表示にする", async () => {
+    setup({ isOpenToTrial: false });
+
+    const html = await render();
+
+    expect(html).toContain("このコンテンツはデモの対象外です");
     expect(fetchDemoContentsByPhaseId).not.toHaveBeenCalled();
   });
 
@@ -212,7 +221,7 @@ describe("デモ画面の解説記事とテキスト本文（#375）", () => {
 
     expect(createDemoSlideSignedUrl).not.toHaveBeenCalled();
     expect(html).not.toContain(article);
-    expect(html).toContain("このスライドはお試し公開の対象外です");
+    expect(html).toContain("このコンテンツはデモの対象外です");
   });
 
   it("テキスト種別の {{SUPABASE_STORAGE_URL}} を置換する", async () => {
