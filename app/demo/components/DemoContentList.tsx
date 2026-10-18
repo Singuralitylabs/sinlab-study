@@ -3,7 +3,7 @@
 import { CheckCircle, Clock, Lock } from "lucide-react";
 import Link from "next/link";
 import { ContentTypeIcon } from "@/app/components/ContentTypeIcon";
-import { CONTENT_TYPE_LEARNER_LABELS } from "@/app/constants/content";
+import { CONTENT_TYPE_LEARNER_LABELS, toLearnerDisplayType } from "@/app/constants/content";
 import type { LearningContentListItem } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -73,7 +73,10 @@ export function DemoContentList({
                     </h3>
                   </div>
                   <Badge variant="secondary" className="gap-1 shrink-0 text-xs">
-                    <ContentTypeIcon type={content.content_type} className="h-4 w-4" />
+                    <ContentTypeIcon
+                      type={toLearnerDisplayType(content.content_type)}
+                      className="h-4 w-4"
+                    />
                     {CONTENT_TYPE_LEARNER_LABELS[content.content_type]}
                   </Badge>
                 </div>

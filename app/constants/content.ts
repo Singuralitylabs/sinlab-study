@@ -41,6 +41,10 @@ export const CONTENT_TYPE_LEARNER_LABELS: Record<ContentType, string> = {
   quiz: "クイズ",
 };
 
+/** Type whose icon learners see: slides share the article icon, matching their shared label. */
+export const toLearnerDisplayType = (type: ContentType): ContentType =>
+  type === "slide" ? "text" : type;
+
 /**
  * Illustrated thumbnails for the learner cards (640x360 WebP in public/images/content-types).
  * Partial on purpose: types without a picture (quiz) fall back to the drawn illustration. Slides
