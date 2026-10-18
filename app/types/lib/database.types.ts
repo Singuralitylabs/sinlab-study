@@ -515,7 +515,7 @@ export type Database = {
           is_open_to_trial?: boolean;
           is_published?: boolean | null;
           pdf_url?: string | null;
-          phase_id?: number;
+          phase_id: number;
           preview_base_html?: string | null;
           reference_answer?: string | null;
           show_console?: boolean | null;
