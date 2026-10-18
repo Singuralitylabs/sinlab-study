@@ -17,7 +17,7 @@ import {
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
-import { LearnContentRow } from "../../components/LearnContentRow";
+import { LearnContentCard } from "../../components/LearnContentCard";
 import { LockedContentUpgradeCard } from "../../components/LockedContentUpgradeCard";
 
 interface PageProps {
@@ -112,14 +112,15 @@ export default async function PhasePage({ params }: PageProps) {
         </Card>
       ) : (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-2">
-            {contentList.map((content) => {
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {contentList.map((content, index) => {
               const locked = isLocked(content);
               return (
-                <LearnContentRow
+                <LearnContentCard
                   key={content.id}
                   href={`/learn/${themeIdNum}/${phaseIdNum}/${content.id}`}
                   title={content.title}
+                  number={index + 1}
                   contentType={content.content_type}
                   isPublished={content.is_published}
                   locked={locked}

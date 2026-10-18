@@ -2,7 +2,11 @@ import { Bot, CheckCircle, Lock } from "lucide-react";
 import Link from "next/link";
 import { ContentTypeIcon } from "@/app/components/ContentTypeIcon";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
-import { CONTENT_TYPE_ACCENT_CLASSES, CONTENT_TYPE_LABELS } from "@/app/constants/content";
+import {
+  CONTENT_TYPE_ACCENT_CLASSES,
+  CONTENT_TYPE_LEARNER_LABELS,
+  toLearnerDisplayType,
+} from "@/app/constants/content";
 import type { ContentType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -43,7 +47,7 @@ export function LearnContentRow({
               {locked ? (
                 <Lock className="h-4 w-4" />
               ) : (
-                <ContentTypeIcon type={contentType} className="h-4 w-4" />
+                <ContentTypeIcon type={toLearnerDisplayType(contentType)} className="h-4 w-4" />
               )}
               {completed && (
                 <CheckCircle
@@ -58,7 +62,7 @@ export function LearnContentRow({
               </h3>
             </div>
             <Badge variant="secondary" className="shrink-0 text-xs">
-              {CONTENT_TYPE_LABELS[contentType]}
+              {CONTENT_TYPE_LEARNER_LABELS[contentType]}
             </Badge>
             {locked && (
               <Badge variant="outline" className="gap-1 shrink-0 text-xs">
