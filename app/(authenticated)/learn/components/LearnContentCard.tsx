@@ -65,7 +65,12 @@ export function LearnContentCard({
           <span className="absolute bottom-2 left-2 rounded bg-card/80 px-1.5 py-0.5 text-xs font-medium text-foreground">
             {CONTENT_TYPE_LEARNER_LABELS[contentType]}
           </span>
-          {locked && <Lock aria-label="有料会員向け" className="absolute right-2 top-2 h-4 w-4" />}
+          {locked && (
+            <Lock
+              aria-label="有料会員向け"
+              className="absolute right-2 top-2 h-6 w-6 rounded-full bg-card p-1 text-muted-foreground"
+            />
+          )}
           {completed && (
             <CheckCircle
               aria-label="完了"
