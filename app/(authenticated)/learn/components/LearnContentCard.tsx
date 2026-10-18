@@ -4,6 +4,8 @@ import Link from "next/link";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import {
   CONTENT_TYPE_ACCENT_CLASSES,
+  CONTENT_TYPE_BORDER_CLASSES,
+  CONTENT_TYPE_LABEL_CLASSES,
   CONTENT_TYPE_LEARNER_LABELS,
   CONTENT_TYPE_THUMBNAILS,
 } from "@/app/constants/content";
@@ -38,8 +40,8 @@ export function LearnContentCard({
   return (
     <Link href={href} className="block group h-full">
       <Card
-        className={`h-full gap-0 overflow-hidden py-0 transition-all hover:shadow-md hover:border-primary/20 ${
-          completed ? "border-success" : ""
+        className={`h-full gap-0 overflow-hidden border-2 py-0 transition-all hover:shadow-md ${
+          completed ? "border-success" : CONTENT_TYPE_BORDER_CLASSES[contentType]
         } ${locked ? "opacity-60" : ""}`}
       >
         <div
@@ -48,7 +50,7 @@ export function LearnContentCard({
           }`}
         >
           {thumbnail ? (
-            // Decorative: the type name is rendered as text over the thumbnail.
+            // Decorative: the type name is rendered as text below the thumbnail.
             <Image
               src={thumbnail}
               alt=""
@@ -61,9 +63,6 @@ export function LearnContentCard({
           )}
           <span className="absolute left-2 top-2 rounded-full bg-card/80 px-2 py-0.5 text-xs font-medium text-foreground">
             {number}
-          </span>
-          <span className="absolute bottom-2 left-2 rounded bg-card/80 px-1.5 py-0.5 text-xs font-medium text-foreground">
-            {CONTENT_TYPE_LEARNER_LABELS[contentType]}
           </span>
           {locked && (
             <Lock
@@ -79,6 +78,13 @@ export function LearnContentCard({
           )}
         </div>
         <div className="space-y-2 p-3">
+          <p
+            className={`text-base font-bold ${
+              locked ? "text-muted-foreground" : CONTENT_TYPE_LABEL_CLASSES[contentType]
+            }`}
+          >
+            {CONTENT_TYPE_LEARNER_LABELS[contentType]}
+          </p>
           <h3 className="line-clamp-2 text-sm font-medium group-hover:text-primary transition-colors">
             {title}
           </h3>

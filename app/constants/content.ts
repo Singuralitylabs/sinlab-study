@@ -29,20 +29,28 @@ export const CONTENT_TYPE_LABELS: Record<ContentType, string> = {
   quiz: "クイズ",
 };
 
-/** Learner-facing label: the text type reads as an explanatory article, not a generic "text". */
+/**
+ * Learner-facing label. Slides are presented as explanatory articles too, so learners see three
+ * categories (video / article / exercise) plus quiz; the admin labels above keep the real types.
+ */
 export const CONTENT_TYPE_LEARNER_LABELS: Record<ContentType, string> = {
-  ...CONTENT_TYPE_LABELS,
+  video: "解説動画",
   text: "解説記事",
+  slide: "解説記事",
+  exercise: "演習",
+  quiz: "クイズ",
 };
 
 /**
  * Illustrated thumbnails for the learner cards (640x360 WebP in public/images/content-types).
- * Partial on purpose: types without a picture (slide, quiz) fall back to the drawn illustration.
+ * Partial on purpose: types without a picture (quiz) fall back to the drawn illustration. Slides
+ * share the article picture because learners see them as articles.
  */
 export const CONTENT_TYPE_THUMBNAILS: Partial<Record<ContentType, string>> = {
   video: "/images/content-types/video.webp",
   text: "/images/content-types/text.webp",
   exercise: "/images/content-types/exercise.webp",
+  slide: "/images/content-types/text.webp",
 };
 
 /**
@@ -54,8 +62,26 @@ export const CONTENT_TYPE_ACCENT_CLASSES: Record<ContentType, string> = {
   video: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
   text: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
   exercise: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  slide: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  slide: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
   quiz: "bg-teal-500/10 text-teal-700 dark:text-teal-400",
+};
+
+/** Card frame per type for the phase page grid; same hues as the accent classes. */
+export const CONTENT_TYPE_BORDER_CLASSES: Record<ContentType, string> = {
+  video: "border-rose-400 dark:border-rose-500/70",
+  text: "border-sky-400 dark:border-sky-500/70",
+  exercise: "border-amber-400 dark:border-amber-500/70",
+  slide: "border-sky-400 dark:border-sky-500/70",
+  quiz: "border-teal-400 dark:border-teal-500/70",
+};
+
+/** Large category label color on the phase page cards. */
+export const CONTENT_TYPE_LABEL_CLASSES: Record<ContentType, string> = {
+  video: "text-rose-600 dark:text-rose-400",
+  text: "text-sky-600 dark:text-sky-400",
+  exercise: "text-amber-700 dark:text-amber-400",
+  slide: "text-sky-600 dark:text-sky-400",
+  quiz: "text-teal-700 dark:text-teal-400",
 };
 
 /** Labels for the admin type pickers, which name the slide format explicitly. */

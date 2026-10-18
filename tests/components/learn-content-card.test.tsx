@@ -24,21 +24,25 @@ describe("LearnContentCard（#433）", () => {
     expect(html).toContain('href="/learn/1/2/3"');
     expect(html).toContain("サンプル");
     expect(html).toContain(">4<");
-    expect(html).toContain(">動画<");
+    expect(html).toContain(">解説動画<");
   });
 
-  it("テキスト種別は「解説記事」と表示する", () => {
-    expect(render({ contentType: "text" })).toContain(">解説記事<");
+  it("テキストとスライドは同じ「解説記事」と同じサムネイルにする", () => {
+    const text = render({ contentType: "text" });
+    const slide = render({ contentType: "slide" });
+    expect(text).toContain(">解説記事<");
+    expect(slide).toContain(">解説記事<");
+    expect(slide).toContain("text.webp");
   });
 
-  it("動画・解説記事・演習は画像、スライド・クイズは描画イラストのサムネイルにする", () => {
-    for (const contentType of ["video", "text", "exercise"] as const) {
+  it("動画・解説記事・スライド・演習は画像、クイズは描画イラストのサムネイルにする", () => {
+    for (const contentType of ["video", "text", "slide", "exercise"] as const) {
       const html = render({ contentType });
       expect(html).toContain("images%2Fcontent-types%2F");
       expect(html).not.toContain("<svg");
     }
-    for (const contentType of ["slide", "quiz"] as const) {
-      const html = render({ contentType });
+    {
+      const html = render({ contentType: "quiz" });
       expect(html).toContain("<svg");
       expect(html).not.toContain("images%2Fcontent-types%2F");
     }
