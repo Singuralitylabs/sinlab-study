@@ -29,8 +29,8 @@ export const CONTENT_TYPE_LABELS: Record<ContentType, string> = {
   quiz: "クイズ",
 };
 
-/** Learner card label: the text type is an explanatory article there, not a generic "text". */
-export const CONTENT_TYPE_CARD_LABELS: Record<ContentType, string> = {
+/** Learner-facing label: the text type reads as an explanatory article, not a generic "text". */
+export const CONTENT_TYPE_LEARNER_LABELS: Record<ContentType, string> = {
   ...CONTENT_TYPE_LABELS,
   text: "解説記事",
 };

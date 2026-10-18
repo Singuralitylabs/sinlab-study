@@ -1,7 +1,7 @@
 import { Bot, CheckCircle, Lock } from "lucide-react";
 import Link from "next/link";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
-import { CONTENT_TYPE_ACCENT_CLASSES, CONTENT_TYPE_CARD_LABELS } from "@/app/constants/content";
+import { CONTENT_TYPE_ACCENT_CLASSES, CONTENT_TYPE_LEARNER_LABELS } from "@/app/constants/content";
 import type { ContentType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -46,7 +46,7 @@ export function LearnContentCard({
             {number}
           </span>
           <span className="absolute bottom-2 left-2 rounded bg-card/80 px-1.5 py-0.5 text-xs font-medium text-foreground">
-            {CONTENT_TYPE_CARD_LABELS[contentType]}
+            {CONTENT_TYPE_LEARNER_LABELS[contentType]}
           </span>
           {locked && <Lock aria-label="有料会員向け" className="absolute right-2 top-2 h-4 w-4" />}
           {completed && (

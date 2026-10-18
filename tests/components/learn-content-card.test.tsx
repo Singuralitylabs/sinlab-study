@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { LearnContentCard } from "@/app/(authenticated)/learn/components/LearnContentCard";
-import { CONTENT_TYPE_CARD_LABELS, CONTENT_TYPES } from "@/app/constants/content";
+import { CONTENT_TYPE_LEARNER_LABELS, CONTENT_TYPES } from "@/app/constants/content";
 import type { ContentType } from "@/app/types";
 
 const base = {
@@ -32,7 +32,7 @@ describe("LearnContentCard（#433）", () => {
   });
 
   it.each(CONTENT_TYPES)("種別 %s のラベルをサムネイルに出す", (contentType) => {
-    expect(render({ contentType })).toContain(`>${CONTENT_TYPE_CARD_LABELS[contentType]}<`);
+    expect(render({ contentType })).toContain(`>${CONTENT_TYPE_LEARNER_LABELS[contentType]}<`);
   });
 
   it("通常の状態では状態バッジを出さない", () => {
