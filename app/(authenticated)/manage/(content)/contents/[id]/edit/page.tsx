@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
-import { deriveWeekSelectOptions } from "@/app/lib/content-filtering";
-import { compareGroupLevel, sortWeeksByHierarchy } from "@/app/lib/content-grouping";
+import { derivePhaseSelectOptions } from "@/app/lib/content-filtering";
+import { compareGroupLevel, sortPhasesByHierarchy } from "@/app/lib/content-grouping";
 import {
-  fetchAllWeeks,
+  fetchAllPhases,
   fetchContentByIdForAdmin,
   fetchContentSiblingCandidates,
   fetchQuizQuestionsForAdmin,
@@ -23,10 +23,10 @@ export default async function EditContentPage({ params }: PageProps) {
     notFound();
   }
 
-  const [{ data: content }, { data: weeks }, { data: contents, error: contentsError }, quizFetch] =
+  const [{ data: content }, { data: phases }, { data: contents, error: contentsError }, quizFetch] =
     await Promise.all([
       fetchContentByIdForAdmin(contentId),
-      fetchAllWeeks(),
+      fetchAllPhases(),
       fetchContentSiblingCandidates(),
       fetchQuizQuestionsForAdmin(contentId),
     ]);
@@ -42,8 +42,8 @@ export default async function EditContentPage({ params }: PageProps) {
   const quizError = content.content_type === "quiz" ? quizFetch.error : null;
   const quizQuestions = quizFetch.data ?? [];
 
-  const sortedWeeks = weeks ? sortWeeksByHierarchy(weeks) : [];
-  const filterOptions = deriveWeekSelectOptions(sortedWeeks);
+  const sortedPhases = phases ? sortPhasesByHierarchy(phases) : [];
+  const filterOptions = derivePhaseSelectOptions(sortedPhases);
 
   // Treating a failed sibling fetch (all contents, including itself) as "no siblings" would leave
   // the current position unknown and default the insert picker to the head. If the DB recovers by
@@ -79,7 +79,7 @@ export default async function EditContentPage({ params }: PageProps) {
       id: c.id,
       label: c.title,
       isPublished: c.is_published,
-      parentId: c.week_id,
+      parentId: c.phase_id,
     }));
 
   return (
@@ -94,7 +94,6 @@ export default async function EditContentPage({ params }: PageProps) {
       <ContentForm
         themes={filterOptions.themes}
         phases={filterOptions.phases}
-        weeks={filterOptions.weeks}
         initialData={content}
         initialQuizQuestions={quizQuestions}
         quizQuestionsUnavailable={Boolean(quizFetch.error)}

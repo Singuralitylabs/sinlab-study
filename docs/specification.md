@@ -162,14 +162,14 @@ INSERT 失敗・同意 Cookie なし・論理削除済み・存在確認失敗�
 
 | 対象 | 挙動 |
 |:--|:--|
-| コースツリー（テーマ / フェーズ / 週 / コンテンツ一覧） | 全件表示する（何が学べるかを見せるため） |
+| コースツリー（テーマ / フェーズ / コンテンツ一覧） | 全件表示する（何が学べるかを見せるため） |
 | お試し非公開のコンテンツ | 鍵アイコンでロックし、中身（本文・動画・スライド）は表示しない |
 | ロック済みコンテンツへの直リンク | ロック画面を表示する（404にはしない） |
 | ロック画面の構成（#288） | ①概要: 種別ごとの定型文（`getLockedContentFallbackOverview()`）。trial はお試し非公開コンテンツを RLS で読めず（0行）、service_role のカラム許可リストを増やすのは不変条件に反するため、`description` は取得しない。②規模: 「有料会員向けのコンテンツがN件（うち演習M件）」をツリー側の取得結果（`fetchThemeNavigationIndex()` の `paidOnlyCount` / `paidOnlyExerciseCount`）から算出し、service_role クエリは増やさない。③価値3点（`UPGRADE_BENEFITS`。お試し向けの導線専用で、契約画面 `/upgrade` の説明文には使わない）。④料金とCTA: `isStripeEnabled()` が true なら `fetchSubscriptionPrice()` の実額（主要画面を止めないよう2秒でタイムアウトし、取得失敗・タイムアウト時のみ `DISPLAY_MONTHLY_PRICE_JPY`）で「月額N円（税込）で全コンテンツが使えます」と `/upgrade` へのボタン、false なら「本登録は運営の承認で行います。承認後に閲覧できます」の案内のみ（`/upgrade` への導線を出さない）。`active` / admin にはロック画面自体が出ない |
 | フェーズ一覧の鍵付き項目（#288） | タイトル横に「有料会員向け」バッジを付け、リスト末尾（お試しユーザーのみ・鍵付き項目があるとき）に1回だけCTAを置く（Stripe無効時は承認の案内） |
 | 承認待ちの通知 | アプリ内バナーで通知（`/pending` 承認待ち専用画面は設けない） |
 
-**承認待ちバナー**: `(authenticated)/layout.tsx` で `userStatus` が `trial` の場合に表示する（認証必須ページ全体で共通。ページごとの実装は不要）。ただし次のパスでは文面・ボタンとも表示しない（#353）: `/upgrade`（完全一致。ページ本文が料金・手続きを説明し、ボタンの遷移先も同じ画面のため）、週一覧 `/learn/[themeId]/[phaseId]` とそれより深いコンテンツ画面（鍵アイコン・バッジと画面側の誘導 `PHASE_LIST` / `LOCK_SCREEN` / `AI_REVIEW_LIMIT` があり、誘導が上下2箇所に並ぶため）。判定は画面の状態を見ずパスだけで行い（`shouldHideTrialBanner()`。`app/lib/trial-banner.ts`）、`/upgrade/success`・`/learn`・`/learn/[themeId]` などそれ以外では従来どおり表示する。レイアウトはクライアント遷移で再描画されず pathname も参照できないため、バナーはクライアントコンポーネント（`(authenticated)/components/TrialBanner.tsx`）が `usePathname()` で出し分ける（`trial` の判定はレイアウト側に残す）。
+**承認待ちバナー**: `(authenticated)/layout.tsx` で `userStatus` が `trial` の場合に表示する（認証必須ページ全体で共通。ページごとの実装は不要）。ただし次のパスでは文面・ボタンとも表示しない（#353）: `/upgrade`（完全一致。ページ本文が料金・手続きを説明し、ボタンの遷移先も同じ画面のため）、コンテンツ一覧 `/learn/[themeId]/[phaseId]` とそれより深いコンテンツ画面（鍵アイコン・バッジと画面側の誘導 `PHASE_LIST` / `LOCK_SCREEN` / `AI_REVIEW_LIMIT` があり、誘導が上下2箇所に並ぶため）。判定は画面の状態を見ずパスだけで行い（`shouldHideTrialBanner()`。`app/lib/trial-banner.ts`）、`/upgrade/success`・`/learn`・`/learn/[themeId]` などそれ以外では従来どおり表示する。レイアウトはクライアント遷移で再描画されず pathname も参照できないため、バナーはクライアントコンポーネント（`(authenticated)/components/TrialBanner.tsx`）が `usePathname()` で出し分ける（`trial` の判定はレイアウト側に残す）。
 
 **`/pending` の廃止**: 旧URLのブックマークからの流入に備え、404にせずプロキシ（`proxy.ts`）で `/` へリダイレクトする。`shouldSkipMiddleware()` の対象から `/pending` を外し（残すとプロキシが判定せず素通りさせ、ページ削除後は404になる）、ステータス判定を通過した `active` / `trial` について `/pending` を `/` へ送る。`rejected` / ステータス取得不能は通常パスと同じく `/rejected` / `/login` へ送られる。
 
@@ -180,7 +180,7 @@ RLS強化により、お試し非公開コンテンツはタイトルを含め�
 | 用途 | 理由 |
 |:--|:--|
 | ツリー表示の一覧サマリー取得 | ロック済みコンテンツのタイトル・並び順を表示するため |
-| コンテンツ詳細ページの存在チェック | 直リンク時に「存在しない（404）」と「ロックされている」を区別するため。通常クライアントでは両者とも0行になり判別できない。同じ取得結果を前後ナビの通し列にも用いるため `weekIds` はテーマ内の全週に広がるが、WHERE条件・カラム許可リスト・呼び出し箇所は変わらない（3.3参照） |
+| コンテンツ詳細ページの存在チェック | 直リンク時に「存在しない（404）」と「ロックされている」を区別するため。通常クライアントでは両者とも0行になり判別できない。同じ取得結果を前後ナビの通し列にも用いるため `phaseIds` はテーマ内の全フェーズに広がるが、WHERE条件・カラム許可リスト・呼び出し箇所は変わらない（3.3参照） |
 
 > この制限は受講生向けのコンテンツ配信経路に限った話であり、管理者 / 講師向けの権限チェック済みクエリ（`admin-server.ts`・`/api/admin/users`・`/api/upload-pdf`・AIレビュー等）や、`user_id` フィルタで安全性を担保している既存の service_role 利用（`submissions-server.ts` 等）は従来どおりで、本設計の対象外。
 
@@ -191,12 +191,12 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 | 項目 | 内容 |
 |:--|:--|
 | WHERE 条件 | **`is_published = true AND is_deleted = false` で必ず絞る**（RLSが効かないため、通常の公開制御をアプリ側で再現する） |
-| カラム許可リスト | `id, title, content_type, display_order, is_open_to_trial, week_id` のみ。`week_id` は週ごとのグルーピングおよびコンテンツ詳細ページの所属週判定に使用する。本文カラム（`text_content` / `video_url` / `pdf_url` / `exercise_instructions` / `reference_answer` / `hint`）は select しない |
+| カラム許可リスト | `id, title, content_type, display_order, is_open_to_trial, phase_id` のみ。`phase_id` はフェーズごとのグルーピングおよびコンテンツ詳細ページの所属フェーズ判定に使用する。本文カラム（`text_content` / `video_url` / `pdf_url` / `exercise_instructions` / `reference_answer` / `hint`）は select しない |
 | 0行だった場合 | 未公開・論理削除済み・存在しないコンテンツのいずれかであり、**404 として扱う**（ロック画面は表示しない） |
 
 ロック済み（`is_open_to_trial = false`）と判定した場合はタイトルのみ表示するロック画面を返し、本文・動画・スライドは一切取得しない。
 
-**親階層の公開判定はロック判定より先に行う**: 上記サマリーはコンテンツ行の `is_published` / `is_deleted` しか見ないため、コンテンツ詳細ページは member / お試しユーザーに対して、ロック判定の前に通常クライアントで取得した週（フェーズ・テーマの埋め込み付き）の3階層が公開済み・未削除であることを `isWeekHierarchyPublished()`（`learning-server.ts`）で確認し、満たさなければ 404 とする（コンテンツ行自体の公開・未削除はサマリーの WHERE 条件で担保される）。順序を逆にすると、未公開テーマ配下のロック対象コンテンツでタイトルとパンくずがロック画面に表示される（#242）。service_role の利用箇所・カラム許可リストはこのために増やさない。
+**親階層の公開判定はロック判定より先に行う**: 上記サマリーはコンテンツ行の `is_published` / `is_deleted` しか見ないため、コンテンツ詳細ページは member / お試しユーザーに対して、ロック判定の前に通常クライアントで取得したフェーズ（テーマの埋め込み付き）の2階層が公開済み・未削除であることを `isPhaseHierarchyPublished()`（`learning-server.ts`）で確認し、満たさなければ 404 とする（コンテンツ行自体の公開・未削除はサマリーの WHERE 条件で担保される）。順序を逆にすると、未公開テーマ配下のロック対象コンテンツでタイトルとパンくずがロック画面に表示される（#242）。service_role の利用箇所・カラム許可リストはこのために増やさない。
 
 **進捗率の分母**: ホームおよび `/learn` の進捗率は、お試しユーザーではお試し公開コンテンツのみを分母とする（体験範囲内の進捗を示す）。集計は通常クライアントのネスト select で行うため、RLSによる絞り込みがそのまま分母に反映される。ツリーは全件表示・進捗率はお試し公開分の分母、という差異は意図的なもの。
 
@@ -309,7 +309,7 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 | プランの確認・変更 | `/upgrade` | 画面名・導線名は「プランの確認・変更」（`PLAN_PAGE_TITLE`）。左メニュー・ホームのクイックリンクには出さず、設定（`/settings`）から遷移する。お試しユーザー向けバナー・メール・ロック中案内の「アップグレード」文言と `/upgrade` 直リンクは維持（#394）。お試しユーザー: 一般有料／コミュニティを別カードで並べたプラン表示（#407。スマホは縦積み。一般有料の価格欄は見出しと同じ確認済み月額。未確認時は「—」。定数の固定表示にしない。コミュニティ特典は箇条書き）。画面上はカードだけを並べ、カード押下でモーダルを開く。一般有料モーダル: 月額見出し（Stripe PriceからTTLキャッシュ付きで取得。JPY・1ヶ月間隔で取得できた場合は「月額N円（税込）」を表示。取得失敗時は `DISPLAY_MONTHLY_PRICE_JPY` のフォールバックで法定表示を残す。取得成功だが非月額・非JPYの場合は月額を断定せず見出しを出さない）→ 法定表示5項目（自動更新・料金・支払日/更新日・解約方法と解約後の扱い）→ 未成年者注意文言 → Checkout（「アップグレードする」。カード上には置かずモーダル内の法定表示より下。実請求額を確認できない場合はボタンを無効化し、理由をボタン直前に表示）。コミュニティモーダル: 申込み案内（`COMMUNITY_APPLY_FORM_URL` の Google フォームを新しいタブ・`rel="noopener noreferrer"` で開く「申し込む」。お試しにも出す。#408）と、`FEEDBACK_ENABLED` 有効時のみ補足の「問い合わせる」（種別 `plan_inquiry`）。契約中の一般有料会員: 一般有料カードに「現在のプラン」バッジと枠強調 + 「ご契約中です」（次回のお支払い日、または解約予定日を表示。解約予約中の判定は `cancel_at_period_end` と `cancel_at` の両方で行い、解約予定日は `cancel_at`、無ければ `current_period_end` から表示する。flexible billing mode の Portal 解約は `cancel_at` にだけ現れるため。`docs/database.md` 3.9節）+ お支払い情報の管理・解約ボタン（Stripe Customer Portalへ遷移。カード上にだけ出し、一般カードはモーダルを開かない）+ 解約後の扱い（日割り返金なし・当該請求期間の末日まで利用可能）+ コミュニティ会員カードのモーダルでの申込み案内。モーダルを開くカードはホバー／フォーカスで押下可能だと分かる見た目にし、右上に `ChevronRight`（装飾・`aria-hidden`）を付ける。コミュニティ会員: 「現在のプラン：コミュニティ会員」と契約状況のみ（他プラン案内なし）。Stripe契約が無い場合は「お支払いは運営の案内に従います」。手動承認済みの一般有料会員（契約なし）: 本登録済みの案内 + コミュニティ案内。契約状況の取得自体に失敗した場合はエラーメッセージを表示し、契約なし・契約ありのいずれとも誤判定しない（フェイルクローズ）。取得失敗時もお支払い情報の管理・解約ボタンは表示し続けるが、契約の有無が不明なため解約ポリシー文言は出さない（契約が無ければAPI側が404を返すためボタン自体は安全）。コミュニティ会員のStripe自動契約は #395 |
 | プラン手続き完了 | `/upgrade/success` | Checkoutから戻った直後のページ。`session_id` をStripe APIでretrieveし、決済完了・本人のセッションであることを確認した上で会員昇格を反映し、完了表示する。日割りで少額決済された直後であるため、`activateUserFromCheckoutSession()` が返す次回のお支払い予定日（＝満額請求日、DBの再読み込みなしで返す）も表示する（取得できなくても完了表示自体は行う） |
 
-トライアルバナー（`(authenticated)/components/TrialBanner.tsx`、2.6参照）に `/upgrade` へのCTAボタンを表示する。ただし `/upgrade` 自身と週一覧・コンテンツ画面（`/learn/[themeId]/[phaseId]` 以下）ではバナーごと表示しない（2.6「承認待ちバナー」）。
+トライアルバナー（`(authenticated)/components/TrialBanner.tsx`、2.6参照）に `/upgrade` へのCTAボタンを表示する。ただし `/upgrade` 自身とコンテンツ一覧・コンテンツ画面（`/learn/[themeId]/[phaseId]` 以下）ではバナーごと表示しない（2.6「承認待ちバナー」）。
 
 **会員化のタイミング（冪等性）**: Webhook（`checkout.session.completed`）を正とし、加えて `/upgrade/success` のサーバー側でも同一の冪等な有効化処理を呼ぶ。Webhookの配信遅延に関係なく、Checkoutから戻った瞬間に一般有料会員として利用開始できる。両者は同じ処理を呼ぶため、実行順序に依存しない。
 
@@ -382,21 +382,21 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 
 ### 2.12 admin / maintainer による未公開コンテンツのプレビュー
 
-`is_published = false`（下書き）のテーマ・フェーズ・週・コンテンツを、admin / maintainer ロールに限り通常の学習画面（`/learn/...`）でそのまま閲覧できる（issue #68）。公開前のコンテンツを確認するためだけに一度公開する、という運用を避けるための機能で、専用のプレビュー用ルートは設けない。
+`is_published = false`（下書き）のテーマ・フェーズ・コンテンツを、admin / maintainer ロールに限り通常の学習画面（`/learn/...`）でそのまま閲覧できる（issue #68）。公開前のコンテンツを確認するためだけに一度公開する、という運用を避けるための機能で、専用のプレビュー用ルートは設けない。
 
 **権限判定**: `app/services/auth/permissions.ts` の `checkContentPermissions()` を用いる（admin / maintainer が true）。ページコンポーネント側ではロール分岐を行わず、`learning-server.ts` の各取得関数に `getServerAuth()` の `userRole` を渡すことで、取得関数の内部だけで判定する。
 
-**RLS**: `learning_themes` / `learning_phases` / `learning_weeks` / `learning_contents` の SELECT ポリシーは admin / maintainer に未公開行を許可済み（[データベース設計書](./database.md)6.1）。変更が必要なのはアプリ層（`learning-server.ts` が独自に課す `is_published = true` の絞り込み）のみ。
+**RLS**: `learning_themes` / `learning_phases` / `learning_contents` の SELECT ポリシーは admin / maintainer に未公開行を許可済み（[データベース設計書](./database.md)6.1）。変更が必要なのはアプリ層（`learning-server.ts` が独自に課す `is_published = true` の絞り込み）のみ。
 
-**アプリ層**: `learning-server.ts` の取得関数（テーマ・フェーズ・週・コンテンツの取得と `fetchThemeNavigationIndex`）は `userRole` 引数（既定 `null`）を取り、`checkContentPermissions(userRole)` が true の場合のみ `is_published` の絞り込みを外す（`is_deleted = false` は常に維持）。`fetchThemeNavigationIndex` は週と埋め込みフェーズの双方に `is_published` 絞り込みを課す（`!inner` 結合のため未公開フェーズ配下の週はナビに現れない）。member / お試しユーザーの取得結果・RLSの適用範囲は変更しない。
+**アプリ層**: `learning-server.ts` の取得関数（テーマ・フェーズ・コンテンツの取得と `fetchThemeNavigationIndex`）は `userRole` 引数（既定 `null`）を取り、`checkContentPermissions(userRole)` が true の場合のみ `is_published` の絞り込みを外す（`is_deleted = false` は常に維持）。`fetchThemeNavigationIndex` はフェーズに `is_published` 絞り込みを課す（`!inner` 結合のため未公開フェーズ配下のコンテンツはナビに現れない）。member / お試しユーザーの取得結果・RLSの適用範囲は変更しない。
 
-**ロック表示用サマリー（2.6節）との関係**: 受講生向けのロック表示・存在チェックに使う service_role 経路（`fetchContentVisibilitySummariesByWeekIds()`）は変更しない（`is_published = true AND is_deleted = false` の絞り込みを維持）。admin / maintainer 向けには、通常クライアント（RLS適用）で未公開分も取得する別関数 `fetchContentSummariesByWeekIdsForManager()` を新設し、ロールに応じてどちらを呼ぶかを `fetchContentSummariesByWeekIds(weekIds, userRole)` が振り分ける。service_role を使ってよい箇所は2.6節の2箇所のまま増えない。
+**ロック表示用サマリー（2.6節）との関係**: 受講生向けのロック表示・存在チェックに使う service_role 経路（`fetchContentVisibilitySummariesByPhaseIds()`）は変更しない（`is_published = true AND is_deleted = false` の絞り込みを維持）。admin / maintainer 向けには、通常クライアント（RLS適用）で未公開分も取得する別関数 `fetchContentSummariesByPhaseIdsForManager()` を新設し、ロールに応じてどちらを呼ぶかを `fetchContentSummariesByPhaseIds(phaseIds, userRole)` が振り分ける。service_role を使ってよい箇所は2.6節の2箇所のまま増えない。
 
-**未公開バッジ**: プレビュー中であることを明示するため、`is_published = false` の階層・コンテンツには「非公開」バッジ（`app/components/UnpublishedBadge.tsx`。`isPublished` propを受け取り自身で表示要否を判定する。`/manage` 配下の既存バッジと文言・見た目を統一）を一覧・詳細の両方に表示する。バッジの表示可否はデータ（各行の `is_published`）で判定し、ロール分岐はコンポーネント側に書かない。コンテンツ詳細ページのみ、コンテンツ行自体は公開済みでも所属する週・フェーズ・テーマのいずれかが未公開・論理削除済みならプレビュー扱いとする必要があるため、`isContentFullyPublished()`（`learning-server.ts`）で全階層の `is_published`/`is_deleted` を判定してからバッジ・完了ボタン・提出フォームの表示可否を決める（`fetchContentById()` の select は親階層に `is_deleted` フィルタを課していないため、これを省くと論理削除済みの親を持つコンテンツでUIとAPI（`isContentVisible()`）の可否表示が食い違う）。
+**未公開バッジ**: プレビュー中であることを明示するため、`is_published = false` の階層・コンテンツには「非公開」バッジ（`app/components/UnpublishedBadge.tsx`。`isPublished` propを受け取り自身で表示要否を判定する。`/manage` 配下の既存バッジと文言・見た目を統一）を一覧・詳細の両方に表示する。バッジの表示可否はデータ（各行の `is_published`）で判定し、ロール分岐はコンポーネント側に書かない。コンテンツ詳細ページのみ、コンテンツ行自体は公開済みでも所属するフェーズ・テーマのいずれかが未公開・論理削除済みならプレビュー扱いとする必要があるため、`isContentFullyPublished()`（`learning-server.ts`）で全階層の `is_published`/`is_deleted` を判定してからバッジ・完了ボタン・提出フォームの表示可否を決める（`fetchContentById()` の select は親階層に `is_deleted` フィルタを課していないため、これを省くと論理削除済みの親を持つコンテンツでUIとAPI（`isContentVisible()`）の可否表示が食い違う）。
 
-**未公開コンテンツでの操作制限**: 進捗登録・課題提出・AIレビューはプレビュー中であっても許可しない。UI側は `isContentFullyPublished()` が false の間、完了ボタン・提出フォームを表示しない。API側は `isContentVisible()`（4.1節・5.1節参照）がコンテンツ自身に加えて週・フェーズ・テーマの全階層について `is_published = true AND is_deleted = false` を明示的に判定することで、admin / maintainer が直接APIを叩いた場合も含めて一律403にする（ロールに関わらないフェイルクローズ）。`learning_contents` の SELECT RLS は admin / maintainer に無条件で許可されるため、コンテンツ行の `is_published` だけを見ると、論理削除済みのコンテンツや未公開階層配下の（誤って公開フラグが立った）コンテンツへの操作が通ってしまう点に注意する。
+**未公開コンテンツでの操作制限**: 進捗登録・課題提出・AIレビューはプレビュー中であっても許可しない。UI側は `isContentFullyPublished()` が false の間、完了ボタン・提出フォームを表示しない。API側は `isContentVisible()`（4.1節・5.1節参照）がコンテンツ自身に加えてフェーズ・テーマの全階層について `is_published = true AND is_deleted = false` を明示的に判定することで、admin / maintainer が直接APIを叩いた場合も含めて一律403にする（ロールに関わらないフェイルクローズ）。`learning_contents` の SELECT RLS は admin / maintainer に無条件で許可されるため、コンテンツ行の `is_published` だけを見ると、論理削除済みのコンテンツや未公開階層配下の（誤って公開フラグが立った）コンテンツへの操作が通ってしまう点に注意する。
 
-**進捗率の分母**: コースツリー（フェーズページ）の進捗分母・分子は、ロック済み（お試し非公開）に加えて、コンテンツ・週・フェーズ・テーマのいずれかが未公開のものも除外する。admin / maintainer のプレビュー中は完了不能な下書きコンテンツ（公開済みでも未公開の週配下にあるコンテンツを含む）が含まれるため、分母に含めると進捗率がずれる。
+**進捗率の分母**: コースツリー（フェーズページ）の進捗分母・分子は、ロック済み（お試し非公開）に加えて、コンテンツ・フェーズ・テーマのいずれかが未公開のものも除外する。admin / maintainer のプレビュー中は完了不能な下書きコンテンツ（公開済みでも未公開のフェーズ配下にあるコンテンツを含む）が含まれるため、分母に含めると進捗率がずれる。
 
 ---
 
@@ -411,7 +411,7 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 
 お試しユーザー（`status = 'trial'`）の場合、コンテンツ（`learning_contents`）はRLSにより `is_open_to_trial = true` の行のみが返る。ロック表示に必要なサマリー・存在チェックのみ service_role クライアントで別途取得する（2.6参照）。
 
-admin / maintainer ロールの場合、上記の `is_published = true` 絞り込みをアプリ層で外し、未公開のテーマ・フェーズ・週・コンテンツもプレビューとして取得する（2.12参照）。
+admin / maintainer ロールの場合、上記の `is_published = true` 絞り込みをアプリ層で外し、未公開のテーマ・フェーズ・コンテンツもプレビューとして取得する（2.12参照）。
 
 ### 3.2 コンテンツ種別ごとの表示
 
@@ -434,11 +434,13 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 `slides` バケットは非公開（`public = false`）で、`learning_contents.pdf_url` にはオブジェクトキー（例: `gas/slide-01.pdf`）のみを保存する。配信の流れは次のとおり。
 
 1. コンテンツ詳細ページ（`app/(authenticated)/learn/.../[contentId]/page.tsx`）は、`isContentLockedForUser()` によるロック判定と、RLS適用の `fetchContentById()` によるコンテンツ行の取得を通過した後に、`createSlideSignedUrl()`（`app/services/api/slides-server.ts`）で署名付きURLを発行し `PdfSlideViewer` へ渡す。ロック済み・未公開（admin / maintainer のプレビューを除く）・存在しないコンテンツではURL自体を発行しない
-2. 署名は**通常クライアント（ログインユーザーの権限・RLS適用）**で行い、service_role は使わない。`storage.objects` の SELECT ポリシーは、member / お試しユーザーに対しては「`pdf_url` がそのオブジェクトキーと一致する `learning_contents` の行が、呼び出しユーザーの RLS 下で見え、かつ所属する週・フェーズ・テーマを含む4階層すべてが `is_published = true AND is_deleted = false`」の場合にのみ許可する（`isContentVisible()` と同じ4階層条件。#216。データベース設計書 6.8）。admin / maintainer はプレビューのためロールで無条件に許可される（2.12節。`isContentVisible()` 自体はロール非依存のフェイルクローズ）
+2. 署名は**通常クライアント（ログインユーザーの権限・RLS適用）**で行い、service_role は使わない。`storage.objects` の SELECT ポリシーは、member / お試しユーザーに対しては「`pdf_url` がそのオブジェクトキーと一致する `learning_contents` の行が、呼び出しユーザーの RLS 下で見え、かつ所属するフェーズ・テーマを含む3階層すべてが `is_published = true AND is_deleted = false`」の場合にのみ許可する（`isContentVisible()` と同じ3階層条件。#216。データベース設計書 6.8）。admin / maintainer はプレビューのためロールで無条件に許可される（2.12節。`isContentVisible()` 自体はロール非依存のフェイルクローズ）
 3. 有効期限は `SLIDE_SIGNED_URL_EXPIRES_IN_SECONDS`（`app/constants/storage.ts`、1時間）。ページ描画時に発行し、期限切れ後はリロードで再発行される。pdf.js は表示直後に残りのチャンクを裏で取得し切るため、閲覧中に期限が切れてもページ送りは失敗しない
-4. 発行に失敗した場合（Storage障害・キーとして解釈できない値・親階層未公開によるポリシー拒否）は `SlideContent`（`app/components/SlideContent.tsx`）が「現在表示できない」旨の中立なメッセージを表示し、ページ全体は落とさない（原因が一時障害か不正な保存値かを利用者側で区別できないため、再読み込みを促す文言にはしない）。学習画面のコンテンツ詳細では、member / お試しユーザーが親階層未公開のコンテンツに到達した場合は署名発行前に `notFound()` する（theme だけ未公開だと week/phase ガードをすり抜けうるため。#216）
+4. 発行に失敗した場合（Storage障害・キーとして解釈できない値・親階層未公開によるポリシー拒否）は `SlideContent`（`app/components/SlideContent.tsx`）が「現在表示できない」旨の中立なメッセージを表示し、ページ全体は落とさない（原因が一時障害か不正な保存値かを利用者側で区別できないため、再読み込みを促す文言にはしない）。学習画面のコンテンツ詳細では、member / お試しユーザーが親階層未公開のコンテンツに到達した場合は署名発行前に `notFound()` する（theme だけ未公開だと phase ガードをすり抜けうるため。#216）
 
 未認証のデモ画面（`/demo`）のルート一覧（`app/demo/page.tsx`）は ISR（`revalidate = 3600`）でキャッシュする（ビルド時に service_role が無い環境では CI が placeholder キーを渡し、誤ったキーでは取得失敗して空表示になる）。ユーザー権限のクライアントが無いため、`createDemoSlideSignedUrl()`（`demo-learning-server.ts`）が他のデモ取得関数と同じく service_role で署名する。対象は**公開済み・未削除かつ `is_open_to_trial = true` のスライドのみ**（お試しユーザーと同じ範囲を未認証に見せる）で、この条件は呼び出し側ではなく同関数自身がコンテンツ行を受け取って判定する（満たさなければ Storage を呼ばず null）。それ以外のスライドはお試し公開の対象外である旨を表示する。
+
+**デモで開ける範囲**: 最初の公開テーマの最初の公開フェーズのうち `is_open_to_trial = true` のコンテンツだけ（旧仕様は最初の公開週。週の廃止後も範囲を広げない）。それ以外は一覧で鍵表示、詳細は「デモの対象外」画面にする（`isDemoAccessible`）。
 
 **クイズ（#306）**
 
@@ -457,8 +459,8 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 ```mermaid
 flowchart TD
     A["/learn（Theme一覧）"] --> B["/learn/[themeId]（Phase一覧）"]
-    B --> C["/learn/[themeId]/[phaseId]（Week・コンテンツ一覧）"]
-    C --> D["/learn/[themeId]/[phaseId]/[weekId]/[contentId]（コンテンツ詳細）"]
+    B --> C["/learn/[themeId]/[phaseId]（コンテンツ一覧）"]
+    C --> D["/learn/[themeId]/[phaseId]/[contentId]（コンテンツ詳細）"]
     D -- 前後ナビ（テーマ内通し） --> D
 ```
 
@@ -466,19 +468,19 @@ flowchart TD
 
 #### 前後ナビゲーション
 
-コンテンツ詳細ページ（`/learn/[themeId]/[phaseId]/[weekId]/[contentId]`）の「次へ」「前へ」は、**同じテーマ内を通し**で遷移する。週末尾の次は次の週の先頭、フェーズ末尾の次は次フェーズの先頭。**テーマはまたがない。** `/demo` は対象外。
+コンテンツ詳細ページ（`/learn/[themeId]/[phaseId]/[contentId]`）の「次へ」「前へ」は、**同じテーマ内を通し**で遷移する。フェーズ末尾の次は次フェーズの先頭。**テーマはまたがない。** `/demo` は対象外。
 
 | 項目 | 仕様 |
 |:--|:--|
-| 末尾 | 通し列上のテーマ末尾では「テーマに戻る」（`/learn/[themeId]`）。ナビ縮退時（通し列が空、または現在のコンテンツが通し列に無い。未公開フェーズ配下の公開週など）は従来どおり「フェーズに戻る」（`/learn/[themeId]/[phaseId]`）に倒し、現在の週のサマリーだけで前後を出す |
+| 末尾 | 通し列上のテーマ末尾では「テーマに戻る」（`/learn/[themeId]`）。ナビ縮退時（通し列が空、または現在のコンテンツが通し列に無い。未公開フェーズ配下のコンテンツなど）は従来どおり「フェーズに戻る」（`/learn/[themeId]/[phaseId]`）に倒し、現在のフェーズのサマリーだけで前後を出す |
 | 先頭 | テーマ先頭では「前へ」を出さない（「次へ」を右端に保つための空スペーサのみ） |
-| 並び順 | フェーズ→週→コンテンツの `display_order` 昇順。同値は `id` でタイブレーク。空の週・空のフェーズは通し列に寄与せず自動スキップ |
+| 並び順 | フェーズ→コンテンツの `display_order` 昇順。同値は `id` でタイブレーク。空のフェーズは通し列に寄与せず自動スキップ |
 | ロック済み | お試し非公開コンテンツも遷移先に含める（スキップしない）。ロック画面にも前後ナビを出す |
-| 境界の併記 | 週・フェーズをまたぐときだけボタン内に「次の週: 〇〇」「次のフェーズ: 〇〇」を併記。同一週内はコンテンツ名のみ |
-| データ取得 | `fetchThemeNavigationIndex()` が通常クライアントでテーマ配下の週＋フェーズを取得し、既存の `fetchContentSummariesByWeekIds()` を1回呼ぶ。**service_role の呼び出し箇所は増えない**（受講生向けは従来どおり同じ1経路。現行カタログでは1リクエスト）。コンテンツサマリーは PostgREST の1リクエスト上限（既定1000行）を range ページングで越え、テーマ全体の `display_order` 切り詰めで現在の週が欠落しないようにする |
-| 404判定 | 従来どおり `fetchWeekById()` と現在の週のサマリーのみで行う。通し列は加算的な情報として扱い、通し列に現在のコンテンツが無くても404にはしない。サマリー側をページングしないと、1000行上限の切り詰めで現在の週が落ちて誤404になる |
+| 境界の併記 | フェーズをまたぐときだけボタン内に「次のフェーズ: 〇〇」を併記。同一フェーズ内はコンテンツ名のみ |
+| データ取得 | `fetchThemeNavigationIndex()` が通常クライアントでテーマ配下のフェーズを取得し、既存の `fetchContentSummariesByPhaseIds()` を1回呼ぶ。**service_role の呼び出し箇所は増えない**（受講生向けは従来どおり同じ1経路。現行カタログでは1リクエスト）。コンテンツサマリーは PostgREST の1リクエスト上限（既定1000行）を range ページングで越え、テーマ全体の `display_order` 切り詰めで現在のフェーズが欠落しないようにする |
+| 404判定 | 従来どおり `fetchPhaseWithBreadcrumbById()` と現在のフェーズのサマリーのみで行う。通し列は加算的な情報として扱い、通し列に現在のコンテンツが無くても404にはしない。サマリー側をページングしないと、1000行上限の切り詰めで現在のフェーズが落ちて誤404になる |
 
-リンクURLは現在URLの流用ではなく、遷移先コンテンツ自身の `phaseId` / `weekId` から組み立てる。
+リンクURLは現在URLの流用ではなく、遷移先コンテンツ自身の `phaseId` から組み立てる。
 
 ### 3.4 初回利用ガイド（オンボーディング）
 
@@ -487,7 +489,7 @@ flowchart TD
 **ウェルカムダイアログ**（`app/(authenticated)/components/WelcomeDialog.tsx`、shadcn `Dialog`）
 - 表示条件: `/` ホームで `role = member` かつ `users.onboarding_completed_at IS NULL` のとき、ページ表示時に開いた状態で1回表示する。他のページでは表示しない
 - ステップ定義は `app/constants/onboarding.ts` に集約し、サーバー側で `status` に応じて絞り込んだものを props で渡す
-  1. ようこそ: サービス概要とテーマ → フェーズ → 週 → コンテンツの4階層構成
+  1. ようこそ: サービス概要とテーマ → フェーズ → コンテンツの3階層構成
   2. 学習の進め方: 「完了」ボタンによる進捗記録、演習の提出とAIレビュー（お試しは1回、有料会員は1日2回まで。文言は `AI_REVIEW_LIMITS` から導出）
   3. プランについて（`status = trial` のときのみ）: お試し公開コンテンツのみ閲覧・提出可、鍵アイコンは本登録後に閲覧可。本登録は管理者による承認、またはプランのアップグレード（`isStripeEnabled()` が true のときは `/upgrade` へのリンクも案内）
   4. 困ったときは: 不明点は管理者に問い合わせる旨
@@ -553,7 +555,7 @@ flowchart TD
 
 **閲覧記録**: `POST /api/progress/view`（ボディ `{ contentId }`）。コンテンツ詳細のクライアントから呼ぶ（Server Component では書かない）。可視性は進捗 API と同じ。`last_viewed_at` だけを upsert し、完了列は触らない。同一コンテンツは `LAST_VIEWED_AT_DEBOUNCE_MS` 以内なら更新をスキップする。
 
-**可視性チェックの実装方法**: 通常クライアント（`authenticated`）で対象 `contentId` を、コンテンツ自身と週・フェーズ・テーマの全階層について `is_published = true AND is_deleted = false` 付きで SELECT し、0行なら403とする。`learning_contents` のRLSがステータスを織り込むため（データベース設計書の6.1参照）、アプリ層でステータス別の分岐を書く必要はない。`is_published` / `is_deleted` の絞り込みのみアプリ層で明示する（RLSは admin / maintainer に無条件で SELECT を許可しているため、それだけでは論理削除済みや未公開階層配下のコンテンツへの進捗登録・提出・AIレビューまで通ってしまう。2.12節のプレビュー機能でも、これらの操作は許可しない）。この方式は「存在しない contentId」「未公開コンテンツ」「お試し非公開コンテンツ」「論理削除済みコンテンツ」のいずれも同時に弾ける。
+**可視性チェックの実装方法**: 通常クライアント（`authenticated`）で対象 `contentId` を、コンテンツ自身とフェーズ・テーマの全階層について `is_published = true AND is_deleted = false` 付きで SELECT し、0行なら403とする。`learning_contents` のRLSがステータスを織り込むため（データベース設計書の6.1参照）、アプリ層でステータス別の分岐を書く必要はない。`is_published` / `is_deleted` の絞り込みのみアプリ層で明示する（RLSは admin / maintainer に無条件で SELECT を許可しているため、それだけでは論理削除済みや未公開階層配下のコンテンツへの進捗登録・提出・AIレビューまで通ってしまう。2.12節のプレビュー機能でも、これらの操作は許可しない）。この方式は「存在しない contentId」「未公開コンテンツ」「お試し非公開コンテンツ」「論理削除済みコンテンツ」のいずれも同時に弾ける。
 
 upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSERT / UPDATE の双方に可視コンテンツ限定の条件を課す（データベース設計書の6.2参照）。
 
@@ -580,7 +582,6 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 **集計レベル**:
 - **テーマ単位**: テーマ配下の全公開コンテンツ中の完了数（`fetchThemeProgressSummaries()`）。ホームの学習中テーマと `/learn` のテーマカードの表示単位。**全テーマを合算した全体進捗率は表示しない**（テーマを追加するたびに数字が下がり、意味を失うため）
 - **Phase単位**: Phase配下の全コンテンツ中の完了数
-- **Week単位**: Week配下の全コンテンツ中の完了数
 
 **お試しユーザーの分母**: 集計は通常クライアントのネスト select で行うため、RLSによる絞り込みがそのまま分母に反映される（2.6参照）。
 
@@ -753,17 +754,17 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 
 ### 6.1 コンテンツ管理
 
-Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可能。削除は論理削除（`is_deleted = true`）。行は物理削除せず、`user_progress` / `submissions` / `ai_reviews` の履歴を保持する。コンテンツ種別 `slide` では、PDF ファイルを Supabase Storage（`slides` バケット）にアップロードして `pdf_url` に保存する。テーマのサムネイル画像は Supabase Storage（`thumbnails` バケット）にアップロードして `image_url` に保存する。オブジェクトキーがテーマIDに依存するため、新規作成フォームではアップロードできず、テーマ作成後の編集画面から設定する。
+Theme / Phase / コンテンツそれぞれに対してCRUD操作が可能。削除は論理削除（`is_deleted = true`）。行は物理削除せず、`user_progress` / `submissions` / `ai_reviews` の履歴を保持する。コンテンツ種別 `slide` では、PDF ファイルを Supabase Storage（`slides` バケット）にアップロードして `pdf_url` に保存する。テーマのサムネイル画像は Supabase Storage（`thumbnails` バケット）にアップロードして `image_url` に保存する。オブジェクトキーがテーマIDに依存するため、新規作成フォームではアップロードできず、テーマ作成後の編集画面から設定する。
 
 **採点基準の設定（#305）**: 種別が演習のとき、コンテンツ作成・編集フォームに「採点基準」エディタ（`GradingRubricEditor`）を表示し、要件（名前・説明。最大10件）を追加・並べ替え・削除して `grading_rubric` として保存する。リクエストの `grading_rubric` は `{ requirements: [{ key, name, description }] }`（`version` は受け取らない）で、`null` を送ると基準を削除（墓石にする。下記）、省略すると変更しない。`version` は `updateContent()` が保存済みの値と比較して決め（初回 1、内容が変わった保存のみ +1、変更なしは据え置き）、現在値を取得できなければ更新しない。編集の PUT は、採点基準を送るとき（`null` で削除するときを含む）と演習以外へ種別を変えるときに、画面上の要件が属する版 `grading_rubric_version`（未設定なら `null`）を必須にする。保存直前に読んだ版と違えば書き込む前に 409 を返す。成功した更新は保存した版を `grading_rubric_version` で返し、フォームは次の保存でそれを送る。画面に残ったまま props が新しい基準に変わっても、表示中の要件を差し替えない限りその版には追従しない。項目を省略した内部呼び出しは、読んだ版だけでロックする。要件の `key`（`r{n}`）は基準内で再利用しない: 発行済みの最大番号 `max_key_number` も `updateContent()` / `createContent()` が導出して保存し（クライアントは送らず、下がらない）、エディタは削除・置換した行の番号も飛ばして採番する（基準を削除する、または演習以外へ種別変更すると、基準は `NULL` ではなく `requirements` が空の「墓石」になる（#344）。墓石の `version` は消す前の版 + 1、`max_key_number` は引き継がれ、再設定後は墓石の版 + 1 から始まり発行済みの `r{n}` は再利用できない。これで「版 + キー」が別の要件を指さない。一括種別変更など `NULL` を直接書く経路もトリガー `keep_grading_rubric_tombstone()` が墓石に置き換える。`NULL` は一度も設定されていない行だけ。墓石は基準なしとして扱い、AIレビューは参考採点になる）。一覧（`/manage/contents`）には採点基準の有無とバージョンを表示する（墓石は「未設定」）。
 
 **採点基準の AI 下書き**: `POST /api/manage/contents/grading-rubric/draft`（admin / maintainer のみ。未認証 401・権限なし 403・入力不正 400・`GEMINI_API_KEY` 未設定 503・生成失敗 502）。ボディ `{ exercise_instructions, reference_answer? }` から要件 3〜7 件（`name`・`description`）を返す。**何も保存しない**（フォームに展開し、講師が確認・編集して保存する）。講師の操作なので会員用キー（`GEMINI_API_KEY`）のみ使い、お試し用キーは使わない。生成は AI レビューと同じモデル順（#368）で、混雑時は代替モデルへ切り替える。
 
-**スライドPDFの削除方針**: コンテンツの単体・一括削除、週・フェーズ・テーマの削除（配下コンテンツの連鎖的な論理削除を含む）、および編集での `pdf_url` 差し替え（種別を `slide` 以外へ変更して `pdf_url` が `null` になる場合を含む。編集画面に警告を表示する）では、行の論理削除とあわせて、他から参照されていない `slides` オブジェクトのみ物理削除する。オブジェクトキーはコンテンツIDに依存せず複数コンテンツが同じ `pdf_url` を参照し得るため、削除前に生きた参照（`is_deleted = false`）が残っていないか必ず確認し、残る場合は Storage を削除しない（確認は対象キーを100件ごとのチャンクにまとめて行い、確認に失敗したチャンクは削除を試みない）。すべてのDB書き込みが成功した後に Storage 削除を行い、DB失敗時に「DBは失敗・PDFだけ消えた」状態を作らない。Storage の削除失敗・削除対象の `pdf_url` 取得失敗ではDBの論理削除全体を失敗させず、結果を `storageRemoved`（失敗時 false）で返す（サムネイル DELETE と同じ前例）。論理削除したコンテンツを復元してもPDFは戻らない（即時削除）。編集時は表示順判定と同じ現在値取得で旧 `pdf_url` も取得し、正規化後のキーが実際に変わった場合のみ削除処理へ進む（#246）。管理画面（削除確認画面・コンテンツ編集フォーム・一覧の一括削除）は `storageRemoved: false` を受け取ったら、DB 側の操作は成功扱いのまま「スライドPDFがストレージに残っている可能性がある」旨を警告表示する（`app/lib/slide-storage-warning.ts`。削除確認画面・編集フォームは一覧へ自動遷移せずに留まる。#241）。
+**スライドPDFの削除方針**: コンテンツの単体・一括削除、フェーズ・テーマの削除（配下コンテンツの連鎖的な論理削除を含む）、および編集での `pdf_url` 差し替え（種別を `slide` 以外へ変更して `pdf_url` が `null` になる場合を含む。編集画面に警告を表示する）では、行の論理削除とあわせて、他から参照されていない `slides` オブジェクトのみ物理削除する。オブジェクトキーはコンテンツIDに依存せず複数コンテンツが同じ `pdf_url` を参照し得るため、削除前に生きた参照（`is_deleted = false`）が残っていないか必ず確認し、残る場合は Storage を削除しない（確認は対象キーを100件ごとのチャンクにまとめて行い、確認に失敗したチャンクは削除を試みない）。すべてのDB書き込みが成功した後に Storage 削除を行い、DB失敗時に「DBは失敗・PDFだけ消えた」状態を作らない。Storage の削除失敗・削除対象の `pdf_url` 取得失敗ではDBの論理削除全体を失敗させず、結果を `storageRemoved`（失敗時 false）で返す（サムネイル DELETE と同じ前例）。論理削除したコンテンツを復元してもPDFは戻らない（即時削除）。編集時は表示順判定と同じ現在値取得で旧 `pdf_url` も取得し、正規化後のキーが実際に変わった場合のみ削除処理へ進む（#246）。管理画面（削除確認画面・コンテンツ編集フォーム・一覧の一括削除）は `storageRemoved: false` を受け取ったら、DB 側の操作は成功扱いのまま「スライドPDFがストレージに残っている可能性がある」旨を警告表示する（`app/lib/slide-storage-warning.ts`。削除確認画面・編集フォームは一覧へ自動遷移せずに留まる。#241）。
 
 **アクセス権限**: `admin` または `maintainer` ロール
 
-**管理ルート**: コンテンツ管理の主UIは `/manage/contents` の構成ツリー（テーマ→フェーズ→週→コンテンツ。`buildContentTree()`）。`/manage/themes`・`/manage/phases`・`/manage/weeks` の一覧は `/manage/contents` へリダイレクトする。編集・削除・新規の個別ページ（`/manage/{themes,phases,weeks,contents}/new`・`[id]/edit`・`[id]/delete`）は残す。ツリー上のダイアログから親を事前選択した状態で作成できる。同画面の一括操作（公開・非公開・削除等）は従来どおり `ContentsTable` を使う。テーマのサムネイルは作成後の編集画面からのみ設定する（本節冒頭のとおり）。
+**管理ルート**: コンテンツ管理の主UIは `/manage/contents` の構成ツリー（テーマ→フェーズ→コンテンツ。`buildContentTree()`）。`/manage/themes`・`/manage/phases` の一覧は `/manage/contents` へリダイレクトする。編集・削除・新規の個別ページ（`/manage/{themes,phases,contents}/new`・`[id]/edit`・`[id]/delete`）は残す。ツリー上のダイアログから親を事前選択した状態で作成できる。同画面の一括操作（公開・非公開・削除等）は従来どおり `ContentsTable` を使う。テーマのサムネイルは作成後の編集画面からのみ設定する（本節冒頭のとおり）。
 
 **お試し公開の設定**: コンテンツ作成・編集フォーム（`/manage/contents`）にチェックボックス「お試しユーザーにも公開する」を設け、`is_open_to_trial` を設定する。デフォルトは未チェック（`false`）で、種別を問わず全コンテンツで設定可能（2.6参照）。
 
@@ -775,15 +776,15 @@ Theme / Phase / Week / コンテンツそれぞれに対してCRUD操作が可�
 
 **プレビューとコンソール（#380）**: 演習の作成・編集フォームに「プレビューを表示」「コンソールを表示」を置く。初期値は上の自動規則（`previewCapability()`）。チェックを変えるまで保存値は NULL（自動のまま。構成を変えると表示も追従する）。一度変えたあとはその boolean を保ち、構成を変えて「オン」が許されなくなったときだけ外す。許されない組み合わせはチェックを無効にして理由を出し、API（zod と `createContent()` / `updateContent()`）も 400 にする。演習以外では両方 NULL（一括の種別変更で演習を離れるときも NULL。CHECK も同じ）。service_role の列許可リスト（`CONTENT_VISIBILITY_SUMMARY_COLUMNS`）には足さない。
 
-**クイズの設問の登録（#306）**: 種別がクイズのとき、フォームに設問エディタ（`QuizQuestionsEditor`）を表示する。設問ごとに形式・設問・選択肢と正解（選択式）または模範解答（入力式）・解説・ヒントを入力し、1〜3問・選択肢2〜6個まで追加・削除できる。送信前に API と同じ zod スキーマ（`QuizQuestionsSchema`。`app/lib/quiz.ts`）で検証し、エラーは設問番号付きで表示する。`POST` / `PUT /api/manage/contents` は `quiz_questions` を受け取り、`content_type` が `quiz` のときは必須（PUT で `content_type` を送らない部分更新では不要）。逆に `quiz_questions` は `content_type: "quiz"` と一緒にしか受け付けない（種別なし・別の種別では400。検証だけして黙って捨てないため）。保存は `replace_quiz_questions` RPC で全設問を置き換える。更新時は保存済みの設問と同じなら置き換えない。置き換える場合も同じ位置の設問は id を保つ（id が変わると、回答中の受講者の送信が旧 id で採点できなくなるため）。作成時、クイズは非公開で行を作ってから設問を保存し、成功したあとで指定どおり公開にする（取り消しまで失敗しても、公開中の設問ゼロのクイズを残さないため）。設問の保存が失敗したら作成した行を物理削除し（作成直後で参照する行はない）、週内の並び順を詰め直して500。設問の保存後に公開への更新だけが失敗した場合は、作成済みの非公開コンテンツとして200で返し `warning` を付ける（失敗扱いにすると再送で重複が作られるため）。フォームは警告と編集画面へのリンクを表示し、再送できないよう送信ボタンを無効にする。更新時は設問を先に保存し、失敗したら行を更新せず、その後の行の更新が失敗したら元の設問に戻す（復元自体の失敗はログのみ）。編集画面は種別に関係なく保存済みの設問を読み込む（クイズ以外へ変えた後に戻したとき、空の設問で上書きしないため。取得に失敗したとき、クイズはフォームを出さず、それ以外の種別はクイズへの種別変更だけを無効にして編集できる）。種別の選択肢・アイコンは `CONTENT_TYPE_FORM_OPTIONS` / `ContentTypeIcon` で全画面共通。まとめて登録する場合は `POST /api/manage/contents/bulk`（`{ contents: [...] }`、1〜50件）を使う。各要素は作成 API と同じ項目（`insert_after_id` を除く）で、クイズは `quiz_questions` 必須。全件を先に検証し（1件でも不正なら400で何も作らない）、配列の順に各週の末尾へ作成する。ルートは `maxDuration = 60` で、直列の作成がプラットフォーム既定のタイムアウトで打ち切られて結果が返らないことを防ぐ。途中で失敗したらそこで止め、作成済みの `created`（`{ id, title, isPublished }[]`）を返す（アトミックではない）。公開を指定したのに公開できなかった件があれば、成功・途中失敗いずれのレスポンスでも `warning` にその件名を列挙する。存在しない週（FK 違反 `23503`）や DB の CHECK 違反（`23514`）は入力の誤りとして400、それ以外は500。一括操作の種別変更（`PATCH` の `set_type`）ではクイズを指定できない（400。設問の無いクイズを公開しないため。許可する種別は `BULK_SETTABLE_CONTENT_TYPES`）。種別をクイズ以外へ変えても設問の行は残るが、受講者 RPC は `content_type = 'quiz'` のときだけ返し、再びクイズにするには編集画面で設問を送る（保存時に置き換わる）ため、古い設問が黙って復活することはない。
+**クイズの設問の登録（#306）**: 種別がクイズのとき、フォームに設問エディタ（`QuizQuestionsEditor`）を表示する。設問ごとに形式・設問・選択肢と正解（選択式）または模範解答（入力式）・解説・ヒントを入力し、1〜3問・選択肢2〜6個まで追加・削除できる。送信前に API と同じ zod スキーマ（`QuizQuestionsSchema`。`app/lib/quiz.ts`）で検証し、エラーは設問番号付きで表示する。`POST` / `PUT /api/manage/contents` は `quiz_questions` を受け取り、`content_type` が `quiz` のときは必須（PUT で `content_type` を送らない部分更新では不要）。逆に `quiz_questions` は `content_type: "quiz"` と一緒にしか受け付けない（種別なし・別の種別では400。検証だけして黙って捨てないため）。保存は `replace_quiz_questions` RPC で全設問を置き換える。更新時は保存済みの設問と同じなら置き換えない。置き換える場合も同じ位置の設問は id を保つ（id が変わると、回答中の受講者の送信が旧 id で採点できなくなるため）。作成時、クイズは非公開で行を作ってから設問を保存し、成功したあとで指定どおり公開にする（取り消しまで失敗しても、公開中の設問ゼロのクイズを残さないため）。設問の保存が失敗したら作成した行を物理削除し（作成直後で参照する行はない）、フェーズ内の並び順を詰め直して500。設問の保存後に公開への更新だけが失敗した場合は、作成済みの非公開コンテンツとして200で返し `warning` を付ける（失敗扱いにすると再送で重複が作られるため）。フォームは警告と編集画面へのリンクを表示し、再送できないよう送信ボタンを無効にする。更新時は設問を先に保存し、失敗したら行を更新せず、その後の行の更新が失敗したら元の設問に戻す（復元自体の失敗はログのみ）。編集画面は種別に関係なく保存済みの設問を読み込む（クイズ以外へ変えた後に戻したとき、空の設問で上書きしないため。取得に失敗したとき、クイズはフォームを出さず、それ以外の種別はクイズへの種別変更だけを無効にして編集できる）。種別の選択肢・アイコンは `CONTENT_TYPE_FORM_OPTIONS` / `ContentTypeIcon` で全画面共通。まとめて登録する場合は `POST /api/manage/contents/bulk`（`{ contents: [...] }`、1〜50件）を使う。各要素は作成 API と同じ項目（`insert_after_id` を除く）で、クイズは `quiz_questions` 必須。全件を先に検証し（1件でも不正なら400で何も作らない）、配列の順に各フェーズの末尾へ作成する。ルートは `maxDuration = 60` で、直列の作成がプラットフォーム既定のタイムアウトで打ち切られて結果が返らないことを防ぐ。途中で失敗したらそこで止め、作成済みの `created`（`{ id, title, isPublished }[]`）を返す（アトミックではない）。公開を指定したのに公開できなかった件があれば、成功・途中失敗いずれのレスポンスでも `warning` にその件名を列挙する。存在しないフェーズ（FK 違反 `23503`）や DB の CHECK 違反（`23514`）は入力の誤りとして400、それ以外は500。一括操作の種別変更（`PATCH` の `set_type`）ではクイズを指定できない（400。設問の無いクイズを公開しないため。許可する種別は `BULK_SETTABLE_CONTENT_TYPES`）。種別をクイズ以外へ変えても設問の行は残るが、受講者 RPC は `content_type = 'quiz'` のときだけ返し、再びクイズにするには編集画面で設問を送る（保存時に置き換わる）ため、古い設問が黙って復活することはない。
 
-**所属週の選択（テーマ→フェーズ→週の連動セレクト）**: コンテンツ作成・編集フォームの所属週選択は、`/manage/contents` の一括操作側の階層フィルタ（`ContentsFilterBar`）と同じ導出ロジックの3段セレクトにする。親を変更すると子の選択はリセットされ、必須は週セレクトのみ（テーマ・フェーズは絞り込み用）。編集画面では所属週から所属フェーズ・テーマを逆引きして初期選択する。送信するリクエストボディは `week_id` のみで、API・DBは変わらない。ツリー上の新規作成ダイアログの初期選択は、クリックしたノードの親（テーマ／フェーズ／週）を入れる。一括操作のフィルタは `ContentsTable` だけに効き、構成ツリーの表示は変えない。一括操作の `ContentsTable` は週単位グルーピング（`groupContentsByWeek`）のまま（親階層未設定は「未分類」）。
+**所属フェーズの選択（テーマ→フェーズの連動セレクト）**: コンテンツ作成・編集フォームの所属フェーズ選択は、`/manage/contents` の一括操作側の階層フィルタ（`ContentsFilterBar`）と同じ導出ロジックの2段セレクトにする。親を変更すると子の選択はリセットされ、必須はフェーズセレクトのみ（テーマは絞り込み用）。編集画面では所属フェーズから所属テーマを逆引きして初期選択する。送信するリクエストボディは `phase_id` のみで、API・DBは変わらない。ツリー上の新規作成ダイアログの初期選択は、クリックしたノードの親（テーマ／フェーズ）を入れる。一括操作のフィルタは `ContentsTable` だけに効き、構成ツリーの表示は変えない。一括操作の `ContentsTable` はフェーズ単位グルーピング（`groupContentsByPhase`）のまま（親階層未設定は「未分類」）。
 
-**新規作成・編集フォームの挿入位置指定（`SiblingOrderField`）**: テーマ・フェーズ・週・コンテンツの新規作成・編集フォームは、`display_order` の数値直接入力ではなく共通コンポーネント `SiblingOrderField` の挿入位置セレクトで指定する。親を選択すると、その配下の既存要素（非公開を含み、論理削除済みと編集対象自身は除く）を現在の並び順で表示する。テーマは親を持たないため常に全テーマを表示する。並び順は `content-grouping.ts` の階層順ソートと同じ比較関数（`compareGroupLevel`：`display_order` 昇順・同値は `id`）を用い、二重実装しない。
+**新規作成・編集フォームの挿入位置指定（`SiblingOrderField`）**: テーマ・フェーズ・コンテンツの新規作成・編集フォームは、`display_order` の数値直接入力ではなく共通コンポーネント `SiblingOrderField` の挿入位置セレクトで指定する。親を選択すると、その配下の既存要素（非公開を含み、論理削除済みと編集対象自身は除く）を現在の並び順で表示する。テーマは親を持たないため常に全テーマを表示する。並び順は `content-grouping.ts` の階層順ソートと同じ比較関数（`compareGroupLevel`：`display_order` 昇順・同値は `id`）を用い、二重実装しない。
 
-新規作成の既定の挿入位置は末尾（既存要素が無い場合は先頭のみ）で、親を選び直すと末尾へリセットする。編集フォームの既定値は、親を変更していない場合は**現在位置**（直前の兄弟要素の直後。先頭なら「先頭」）、親を変更した場合は新規作成と同じ**末尾**にリセットする（テーマは親を持たないため親変更の分岐は無い）。`ContentForm` の編集で、週セレクトの選択肢に無い週ID（未分類・削除済み等）が `week_id` に設定されている場合は、その週IDのまま兄弟候補を絞り込むため、同じ週に属する他の未削除コンテンツがあればそのまま兄弟一覧・現在位置に反映される（週を選び直せば選択肢にある週の兄弟一覧に切り替わる）。
+新規作成の既定の挿入位置は末尾（既存要素が無い場合は先頭のみ）で、親を選び直すと末尾へリセットする。編集フォームの既定値は、親を変更していない場合は**現在位置**（直前の兄弟要素の直後。先頭なら「先頭」）、親を変更した場合は新規作成と同じ**末尾**にリセットする（テーマは親を持たないため親変更の分岐は無い）。`ContentForm` の編集で、フェーズセレクトの選択肢に無いフェーズID（未分類・削除済み等）が `phase_id` に設定されている場合は、そのフェーズIDのまま兄弟候補を絞り込むため、同じフェーズに属する他の未削除コンテンツがあればそのまま兄弟一覧・現在位置に反映される（フェーズを選び直せば選択肢にあるフェーズの兄弟一覧に切り替わる）。
 
-API（`POST` / `PUT` の `/api/manage/{themes,phases,weeks,contents}[/[id]]`）は `display_order` の代わりに `insert_after_id: number | null`（`null` = 先頭、数値 = その兄弟要素IDの直後）を受け取る。`POST` は必須、`PUT` は任意項目で、**省略した場合は表示順を変更しない**（親を変更しない更新なら現状維持、親を変更する更新なら移動先の末尾に付ける）。サーバー側（`createTheme` / `createPhase` / `createWeek` / `createContent` および `updateTheme` / `updatePhase` / `updateWeek` / `updateContent`。`app/services/api/admin-server.ts`）は、`insert_after_id` が同じ親配下・未削除の兄弟要素として存在することを検証し（別の親・削除済み・存在しないID、編集時は自分自身も含めていずれも `InvalidInsertAfterIdError` を投げ、APIルートが400へ変換する）、対象範囲の兄弟を現在の並び順で取得して1からの連番に再採番してから新要素をINSERT、または対象行をUPDATEする（`display_order` が変わる行のみUPDATEし、既存の重複値も解消される）。編集で親（テーマ・フェーズ・週）を変更した場合は、移動先だけでなく移動元に残った兄弟の欠番も1からの連番に詰め直す（`resolveSiblingRenumber`）。再採番のロジック自体（`resolveSiblingResequence` / `resolveSiblingRenumber`）は `content-grouping.ts` の純粋関数で、新規作成・編集の両方から共用する。Supabase JSがトランザクションを持たないため再採番と本体のINSERT/UPDATEはアトミックではないが、途中失敗しても番号の欠番・重複が残るだけでデータは失われない。
+API（`POST` / `PUT` の `/api/manage/{themes,phases,contents}[/[id]]`）は `display_order` の代わりに `insert_after_id: number | null`（`null` = 先頭、数値 = その兄弟要素IDの直後）を受け取る。`POST` は必須、`PUT` は任意項目で、**省略した場合は表示順を変更しない**（親を変更しない更新なら現状維持、親を変更する更新なら移動先の末尾に付ける）。サーバー側（`createTheme` / `createPhase` / `createContent` および `updateTheme` / `updatePhase` / `updateContent`。`app/services/api/admin-server.ts`）は、`insert_after_id` が同じ親配下・未削除の兄弟要素として存在することを検証し（別の親・削除済み・存在しないID、編集時は自分自身も含めていずれも `InvalidInsertAfterIdError` を投げ、APIルートが400へ変換する）、対象範囲の兄弟を現在の並び順で取得して1からの連番に再採番してから新要素をINSERT、または対象行をUPDATEする（`display_order` が変わる行のみUPDATEし、既存の重複値も解消される）。編集で親（テーマ・フェーズ）を変更した場合は、移動先だけでなく移動元に残った兄弟の欠番も1からの連番に詰め直す（`resolveSiblingRenumber`）。再採番のロジック自体（`resolveSiblingResequence` / `resolveSiblingRenumber`）は `content-grouping.ts` の純粋関数で、新規作成・編集の両方から共用する。Supabase JSがトランザクションを持たないため再採番と本体のINSERT/UPDATEはアトミックではないが、途中失敗しても番号の欠番・重複が残るだけでデータは失われない。
 
 ### 6.1.1 PDFアップロード API
 
@@ -1082,7 +1083,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 パス・画面名・概要は[要件定義書](./requirements.md)4.1を参照。設計上の補足:
 
 - `/`: ウェルカムダイアログ・はじめかたチェックリストは member のみ（3.4）、未読のお知らせ最大3件（11章）
-- `/learn/[themeId]/[phaseId]/[weekId]/[contentId]`: 前後ナビゲーションはテーマ内を通しで遷移（3.3）
+- `/learn/[themeId]/[phaseId]/[contentId]`: 前後ナビゲーションはテーマ内を通しで遷移（3.3）
 - `/upgrade`: ステータス別の出し分け。設定の「プラン」入口とお試し導線から全認証ユーザーがアクセス可能（2.11・#394）
 - `/upgrade/success`: Checkoutから戻った直後の決済確認・完了表示（2.11）
 - `/certificates` / `/certificates/[id]`: 修了証の一覧と表示（本登録の member のみ。13章）
@@ -1097,7 +1098,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 
 サイドナビ（`SideNav`）は管理系を次の2グループに分ける（各グループ内は `ManageGroupNav` のタブ）:
 
-- **コンテンツ管理**（入口 `/manage/contents`）: 構成ツリー（`/manage/contents`）とお知らせ（`/manage/announcements`）。テーマ・フェーズ・週の一覧URLは構成ツリーへリダイレクトする
+- **コンテンツ管理**（入口 `/manage/contents`）: 構成ツリー（`/manage/contents`）とお知らせ（`/manage/announcements`）。テーマ・フェーズの一覧URLは構成ツリーへリダイレクトする
 - **受講生管理**（入口 `/manage`）: ダッシュボード（`/manage`）、提出一覧（`/manage/submissions`）、フィードバック（`/manage/feedbacks`）。受講生進捗（`/manage/students`）は admin のみタブ表示（6.2節）
 
 管理者専用のユーザー管理・メール通知は従来どおり `/admin/users`・`/admin/emails`（7.4節）。
@@ -1113,7 +1114,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 | コンポーネント | 責務 |
 |:--|:--|
 | サイドナビゲーション | アプリ全体のナビゲーション。デスクトップは固定サイドバー、モバイルはドロワー。管理系は「コンテンツ管理」「受講生管理」の2入口（7.3節）。ログアウト機能 |
-| コンテンツ構成ツリー | `/manage/contents` の主UI。テーマ→フェーズ→週→コンテンツを1画面で表示し、ダイアログから親付きで作成する（6.1節） |
+| コンテンツ構成ツリー | `/manage/contents` の主UI。テーマ→フェーズ→コンテンツを1画面で表示し、ダイアログから親付きで作成する（6.1節） |
 | パンくずリスト | ページヘッダーと階層ナビゲーションの表示 |
 | Markdownレンダラー | Markdownの安全なレンダリング（GFM対応Markdown変換 → Typographyスタイリング。react-markdownは生HTMLタグを描画しないためXSSは発生しない） |
 | YouTube埋め込み | facade（サムネイル + 再生ボタン）。クリック後に react-youtube を遅延読み込みして再生 |
@@ -1314,7 +1315,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 - **1人1日1通**: `trial_nurture` と `inactivity_reminder` が同じ日に重なるお試しユーザーには `trial_nurture` だけを送る。N 日目の案内を送る日はお知らせ・週次進捗を送らず、お知らせと週次進捗が重なる日は下の「1日の上限」の並び順で先の方だけを送り、もう一方は翌日以降の実行に回す。今日（JST 0:00 以降）すでに案内系メールの `email_logs` を持つユーザーは、同じ日の再実行（手動実行・Cron の再起動）で対象から外す（朝の実行後に承認されて `status` が変わっても、別種別の2通目を送らない）
 - **お試しユーザーの範囲**: 次に学ぶコンテンツ・残り本数・最初の1本は、お試し公開（`is_open_to_trial = true`）のコンテンツだけで判定する（ホームの進捗の分母と同じ。4.2節）
 - **週次進捗の「次に学ぶ」（#308）**: 学習中のテーマ（4.2節の `splitThemesByActivity()`）のうち**最も最近完了があったテーマ**の、学習順で先頭の未完了コンテンツを選ぶ（`resolveNextContent()`。完了時刻は `user_progress.completed_at`）。そのテーマに未完了が残っていなければ次に最近のテーマへ移り、学習中のテーマが無い（完了0件）ときは全体の先頭。残り本数と対象抽出（`isWeeklyDigestTarget()`）は全テーマ通しのまま。先週の完了数・提出数も全テーマ合算（活動量の指標）。本文には「学習中のテーマ: ○○（N / M 完了）」を最近学んだ順に最大3件入れる（プレースホルダー `active_themes`。学習中が無ければ行ごと出ない。保存済みのテンプレートには自動では入らないので、必要なら `/admin/emails/templates` で追記する）
-- **集計**: 抽出はユーザーセッションの無いバッチのため service_role クライアントで行う（`user_id` 単位の集計であり、受講生へコンテンツを返す配信経路ではない）。コンテンツは `fetchThemeProgressSummaries()` と同じネスト select で全階層を `is_published = true AND is_deleted = false` に絞り、本文を含まないカラム（`id, title, display_order, is_open_to_trial, week_id` と各階層の名前・表示順）だけを読む。学習順はコンテンツ詳細の前後ナビと同じ `buildThemeContentOrder()`（`orderContentsAcrossThemes()`）で並べる。新しい集計 SQL（RPC）は追加しない。お知らせの本文だけは、この抽出とは別に宛先確定後のお知らせ取得で読む（11.4節）。**週次進捗本文の復習リスト未克服件数**だけは例外として `ai_reviews.review_json` を service_role で読む（失敗時は 0 件扱いで続行。詳細は15.5節）。受講生向け配信経路の service_role 2箇所は増やさない
+- **集計**: 抽出はユーザーセッションの無いバッチのため service_role クライアントで行う（`user_id` 単位の集計であり、受講生へコンテンツを返す配信経路ではない）。コンテンツは `fetchThemeProgressSummaries()` と同じネスト select で全階層を `is_published = true AND is_deleted = false` に絞り、本文を含まないカラム（`id, title, display_order, is_open_to_trial, phase_id` と各階層の名前・表示順）だけを読む。学習順はコンテンツ詳細の前後ナビと同じ `buildThemeContentOrder()`（`orderContentsAcrossThemes()`）で並べる。新しい集計 SQL（RPC）は追加しない。お知らせの本文だけは、この抽出とは別に宛先確定後のお知らせ取得で読む（11.4節）。**週次進捗本文の復習リスト未克服件数**だけは例外として `ai_reviews.review_json` を service_role で読む（失敗時は 0 件扱いで続行。詳細は15.5節）。受講生向け配信経路の service_role 2箇所は増やさない
 - **並行実行の排除**: 実行の最初に実行ロック（`cron_locks`。[データベース設計書](./database.md)3.12）を取り、取れなければ何もせず `skipped` を返す。Cron の重複起動・手動実行が重なっても処理するのは1つだけになる。ロックの取得自体が DB エラーなら 500
 - **二重送信の防止**: 1通ごとに `email_logs` の claim を通す（10.1節）。同じ日の再実行でも UNIQUE 違反で送らない。送信失敗は `error` を記録して再送しない（お知らせの一斉送信だけは、Resend が受け付けなかったことが確実な失敗を翌日以降に送り直す。11.4節）
 - **1日の上限**: `email_settings.digest_daily_limit`（初期値80通。Resend 無料枠の日次100通に、同日のトランザクションメールの余裕を残す。10.10節）は同じ日（JST）の実行の合計に効かせる。ロックを取った後に、今日すでに作られた案内系の `email_logs` の行数を差し引いた数を今回の上限とし、送信を試みた通数（成功・失敗）がそれに達するか、経過時間が `EMAIL_DIGEST_TIME_BUDGET_MS`（40秒。ルートの `maxDuration` は60秒。最悪ケースは予算ぎりぎりで始めた1通が `EMAIL_SEND_TIMEOUT_MS`＝15秒まで掛かる合計55秒。送信開始は500ms間隔なので1回の実行で最大80通（初期の日次上限と同数）。ロック取得・抽出・送信ごとのDBアクセスも予算に含むため実際は数通少なく、不足分は上限超過分と同様に繰り越す。予算または間隔を変えるときは「予算÷間隔」が日次上限以上であることを上限として保つ）を超えたら新しい送信を始めない。送れなかった通数は warn ログに残す。キューは N 日目の案内を先頭に並べ、その後は週次進捗の対象を決める日（月曜。取り戻しの火曜を含む）はお知らせ（公開の古い順）→ 週次進捗、それ以外の日は週次進捗（予約の繰り越し分）→ お知らせの順に並べる。週次進捗の予約は同じ週の間しか有効でないため、繰り越しの期限が無いお知らせが上限を使い切って週次進捗を週末まで押し出し、失わせることがないようにする。上限に掛かるのは通常はお知らせ・週次進捗で、翌日以降の実行で送られる。N 日目の案内だけで上限を超えた場合の残りと、週の最終日（日曜）に送れなかった週次進捗は繰り越さない（warn ログで区別する）
@@ -1514,7 +1515,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 ### 13.1 発行条件
 
 - **対象**: `status = active` かつ `role = member`（`isCertificateEligible()`）。コミュニティ会員・一般有料会員とも対象。お試しユーザー（`trial`）、admin / maintainer には発行しない
-- **条件**: そのテーマ配下の**公開中コンテンツ（`is_published = true AND is_deleted = false`、親のフェーズ・週・テーマも公開）すべて**について `user_progress.is_completed` が true。採点基準のある演習（空の墓石を含む。URL のみは除く）の完了は AI レビューの合格で記録する（4.1節）。公開コンテンツが0件のテーマは修了にならない（`isThemeCompleted()`）。演習は完了に加えて次を満たす（`app/lib/certificate-eligibility.ts`。点数は再計算しない）
+- **条件**: そのテーマ配下の**公開中コンテンツ（`is_published = true AND is_deleted = false`、親のフェーズ・テーマも公開）すべて**について `user_progress.is_completed` が true。採点基準のある演習（空の墓石を含む。URL のみは除く）の完了は AI レビューの合格で記録する（4.1節）。公開コンテンツが0件のテーマは修了にならない（`isThemeCompleted()`）。演習は完了に加えて次を満たす（`app/lib/certificate-eligibility.ts`。点数は再計算しない）
 
 | 種別 | 追加条件 |
 |:--|:--|
@@ -1535,7 +1536,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 `POST /api/progress` が完了（`isCompleted = true`）に更新したあと、その保存でテーマが初めて 100% になったときだけ発行を**同期**で行い、結果を `themeCompletion` に載せる（13.7節）。同期判定が済んだ途中完了（未完了・対象外）では `after()` を重ねない（同じ集計の二重実行を避ける）。すでに完了済みの再保存、および同期判定の読み取り失敗・例外（`resolveProgressThemeNotice` が throw）のときだけ `issueCertificateIfEligible()` を `after()` で予約する（`after()` が使えない場面ではその場で実行する）。完了の取り消しや保存失敗のときは呼ばない。`POST /api/submissions` は提出成功後に同じく `issueCertificateIfEligible()` を `after()` で予約する（テーマが先に 100% で、URL のみ・採点基準なしの演習提出や AI レビュー未実行で条件が揃う経路）。合格判定対象の演習で AI レビューが `completed` になったときは `saveContentProgress()`（`scheduleCertificate: false`）で完了を記録したうえで、`resolveAiReviewThemeNotice()` が同じ判定を行う（`passed !== true` のときは、その呼び出しで修了証を発行できた場合以外は通知しない）。発行・メール・通知判定が失敗しても、進捗 API・提出 API・AI レビュー API の成否は変えない。
 
 1. 対象かを確認（対象外なら何もしない）。INSERT は `insertCertificates()` に集約し、遡及発行（13.1節）と共用する
-2. コンテンツ → 週 → フェーズからテーマ ID を求め（通常クライアント）、そのテーマが発行済みなら終了（集計も INSERT もしない）。未発行なら `fetchThemeProgressSummary()` で**そのテーマだけ**修了かを判定し（全テーマ集計は使わない）、修了なら演習条件（13.1節）を足す。提出と `ai_reviews` は本人のセッション（RLS）で読む
+2. コンテンツ → フェーズからテーマ ID を求め（通常クライアント）、そのテーマが発行済みなら終了（集計も INSERT もしない）。未発行なら `fetchThemeProgressSummary()` で**そのテーマだけ**修了かを判定し（全テーマ集計は使わない）、修了なら演習条件（13.1節）を足す。提出と `ai_reviews` は本人のセッション（RLS）で読む
 3. 条件を満たすなら、service_role で `certificates` に INSERT する。**`user_id` は認証済みの本人に固定**し、`recipient_name`（発行時点の `users.display_name` を `parseDisplayName()` で正規化した文字列）と `theme_name` は発行時点のスナップショットとして書く
 4. INSERT 成功後にメール `certificate_issued`（10.4節）を `after()` に予約する（予約の throw は握りつぶし、発行結果は返す）
 

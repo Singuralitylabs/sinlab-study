@@ -18,11 +18,6 @@ export type LearningPhase = Tables<"learning_phases"> & {
   is_published: boolean;
   is_deleted: boolean;
 };
-export type LearningWeek = Tables<"learning_weeks"> & {
-  display_order: number;
-  is_published: boolean;
-  is_deleted: boolean;
-};
 export type LearningContent = Tables<"learning_contents"> & {
   content_type: ContentType;
   display_order: number;
@@ -106,18 +101,14 @@ export interface LearningPhaseWithTheme extends LearningPhase {
   theme: LearningTheme | null;
 }
 
-export interface LearningWeekWithPhase extends LearningWeek {
+export interface LearningContentWithPhase extends LearningContent {
   phase: LearningPhaseWithTheme | null;
-}
-
-export interface LearningContentWithWeek extends LearningContent {
-  week: LearningWeekWithPhase | null;
 }
 
 export type LearningContentListItem = Pick<
   LearningContent,
   | "id"
-  | "week_id"
+  | "phase_id"
   | "title"
   | "content_type"
   | "video_url"
@@ -142,17 +133,6 @@ export type ManagePhaseListItem = Pick<
   theme: Pick<LearningTheme, "id" | "name" | "display_order"> | null;
 };
 
-export type ManageWeekListItem = Pick<
-  LearningWeek,
-  "id" | "name" | "display_order" | "is_published" | "phase_id"
-> & {
-  phase:
-    | (Pick<LearningPhase, "id" | "name" | "display_order" | "theme_id"> & {
-        theme: Pick<LearningTheme, "id" | "name" | "display_order"> | null;
-      })
-    | null;
-};
-
 export type ManageContentListItem = Pick<
   LearningContent,
   | "id"
@@ -161,16 +141,20 @@ export type ManageContentListItem = Pick<
   | "display_order"
   | "is_published"
   | "is_open_to_trial"
-  | "week_id"
+  | "phase_id"
 > & {
   /** Only the rubric's version is selected, not the whole JSONB (the list never shows the text). */
   grading_rubric_version: number | null;
-  week: ManageWeekListItem | null;
+  phase:
+    | (Pick<LearningPhase, "id" | "name" | "display_order" | "theme_id"> & {
+        theme: Pick<LearningTheme, "id" | "name" | "display_order"> | null;
+      })
+    | null;
 };
 
 export type ContentSiblingCandidateRow = Pick<
   LearningContent,
-  "id" | "title" | "display_order" | "is_published" | "week_id"
+  "id" | "title" | "display_order" | "is_published" | "phase_id"
 >;
 
 export type ManageUserListItem = Pick<
@@ -195,25 +179,18 @@ export type BreadcrumbPhase = Pick<
   theme: BreadcrumbTheme | null;
 };
 
-export type BreadcrumbWeek = Pick<
-  LearningWeek,
-  "id" | "phase_id" | "name" | "display_order" | "is_published" | "is_deleted"
-> & {
-  phase: BreadcrumbPhase | null;
-};
-
-export type LearningWeekWithBreadcrumb = LearningWeek & {
-  phase: BreadcrumbPhase | null;
+export type LearningPhaseWithBreadcrumb = LearningPhase & {
+  theme: BreadcrumbTheme | null;
 };
 
 export type LearningContentWithBreadcrumb = LearningContent & {
-  week: BreadcrumbWeek | null;
+  phase: BreadcrumbPhase | null;
 };
 
 export interface SubmissionWithContent extends Submission {
   content: Pick<
     LearningContent,
-    "id" | "title" | "content_type" | "is_published" | "is_open_to_trial" | "week_id"
+    "id" | "title" | "content_type" | "is_published" | "is_open_to_trial" | "phase_id"
   > | null;
 }
 
@@ -266,13 +243,6 @@ export interface ThemeProgress {
 
 export interface PhaseProgress {
   phase: LearningPhase;
-  totalContents: number;
-  completedContents: number;
-  progressPercent: number;
-}
-
-export interface WeekProgress {
-  week: LearningWeek;
   totalContents: number;
   completedContents: number;
   progressPercent: number;

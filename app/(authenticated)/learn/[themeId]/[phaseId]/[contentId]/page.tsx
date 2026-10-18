@@ -28,13 +28,13 @@ import {
   fetchContentRequiresReviewPass,
   fetchContentReviewPassUnachievable,
   fetchExerciseReferenceAnswer,
+  fetchPhaseWithBreadcrumbById,
   fetchThemeNavigationIndex,
   fetchUserHasPassingReview,
   fetchUserProgressByContentId,
-  fetchWeekById,
   isContentFullyPublished,
   isContentLockedForUser,
-  isWeekHierarchyPublished,
+  isPhaseHierarchyPublished,
 } from "@/app/services/api/learning-server";
 import { fetchQuizQuestions } from "@/app/services/api/quiz-server";
 import { fetchReviewNotesForContent } from "@/app/services/api/review-list-server";
@@ -57,22 +57,16 @@ import { RecordContentView } from "./RecordContentView";
 import { SubmissionForm } from "./SubmissionForm";
 
 interface PageProps {
-  params: Promise<{ themeId: string; phaseId: string; weekId: string; contentId: string }>;
+  params: Promise<{ themeId: string; phaseId: string; contentId: string }>;
 }
 
 export default async function ContentPage({ params }: PageProps) {
-  const { themeId, phaseId, weekId, contentId } = await params;
+  const { themeId, phaseId, contentId } = await params;
   const themeIdNum = Number.parseInt(themeId, 10);
   const phaseIdNum = Number.parseInt(phaseId, 10);
-  const weekIdNum = Number.parseInt(weekId, 10);
   const contentIdNum = Number.parseInt(contentId, 10);
 
-  if (
-    Number.isNaN(themeIdNum) ||
-    Number.isNaN(phaseIdNum) ||
-    Number.isNaN(weekIdNum) ||
-    Number.isNaN(contentIdNum)
-  ) {
+  if (Number.isNaN(themeIdNum) || Number.isNaN(phaseIdNum) || Number.isNaN(contentIdNum)) {
     notFound();
   }
 
@@ -92,69 +86,51 @@ export default async function ContentPage({ params }: PageProps) {
   // in this first wave instead of waiting for content_type.
   const [{ data: navigation }, { data: content }, { isCompleted, retryStartedAt }] =
     await Promise.all([
-      fetchThemeNavigationIndex(themeIdNum, weekIdNum, userRole),
+      fetchThemeNavigationIndex(themeIdNum, phaseIdNum, userRole),
       fetchContentById(contentIdNum, userRole),
       userId
         ? fetchUserProgressByContentId(userId, contentIdNum)
         : Promise.resolve({ isCompleted: false, retryStartedAt: null }),
     ]);
 
-  // The breadcrumb hierarchy comes from the content's embedded week -> phase -> theme. Locked
-  // trial content is hidden from the content query by RLS (content is null), so only then is the
-  // week fetched separately (the lock screen still needs its breadcrumbs).
-  const week = content ? content.week : (await fetchWeekById(weekIdNum, userRole)).data;
+  // The breadcrumb hierarchy comes from the content's embedded phase -> theme. Locked trial
+  // content is hidden from the content query by RLS (content is null), so only then is the phase
+  // fetched separately (the lock screen still needs its breadcrumbs).
+  const phase = content
+    ? content.phase
+    : (await fetchPhaseWithBreadcrumbById(phaseIdNum, userRole)).data;
 
-  // 404 when the URL's themeId/phaseId don't match the week's actual phase/theme (keeps breadcrumbs
-  // and prev/next links from pointing at wrong URLs).
-  // The embedded week has no is_deleted filter (fetchWeekById had), so a deleted week is rejected
-  // here for admin / maintainer too instead of showing up as a preview.
-  if (
-    !week ||
-    week.is_deleted ||
-    week.id !== weekIdNum ||
-    week.phase_id !== phaseIdNum ||
-    week.phase?.theme_id !== themeIdNum
-  ) {
+  // 404 when the URL's themeId doesn't match the phase's actual theme (keeps breadcrumbs and
+  // prev/next links from pointing at wrong URLs).
+  // The embedded phase has no is_deleted filter (fetchPhaseWithBreadcrumbById had), so a deleted
+  // phase is rejected here for admin / maintainer too instead of showing up as a preview.
+  if (!phase || phase.is_deleted || phase.id !== phaseIdNum || phase.theme_id !== themeIdNum) {
     notFound();
   }
 
-  const weekContentSummaries = navigation?.currentWeekContents;
-  const summary = weekContentSummaries?.find((c) => c.id === contentIdNum);
+  const phaseContentSummaries = navigation?.currentPhaseContents;
+  const summary = phaseContentSummaries?.find((c) => c.id === contentIdNum);
 
   if (!summary) {
     notFound();
   }
 
-  // For members/trial users, 404 before the lock check if any parent (week/phase/theme) is
-  // unpublished or deleted. The summary goes through service_role and only sees the content row's
+  // For members/trial users, 404 before the lock check if any parent (phase/theme) is unpublished
+  // or deleted. The summary goes through service_role and only sees the content row's
   // is_published, so rendering the lock screen first would leak titles/breadcrumbs under an
   // unpublished theme (#242).
-  if (!checkContentPermissions(userRole) && !isWeekHierarchyPublished(week)) {
+  if (!checkContentPermissions(userRole) && !isPhaseHierarchyPublished(phase)) {
     notFound();
   }
 
-  const weekLocalContents =
-    week.phase != null
-      ? buildThemeContentOrder(
-          [
-            {
-              id: week.id,
-              name: week.name,
-              display_order: week.display_order,
-              phase: {
-                id: week.phase.id,
-                name: week.phase.name,
-                display_order: null,
-              },
-            },
-          ],
-          weekContentSummaries ?? []
-        )
-      : [];
+  const phaseLocalContents = buildThemeContentOrder(
+    [{ id: phase.id, name: phase.name, display_order: null }],
+    phaseContentSummaries ?? []
+  );
   const { prev, next, endFallback } = resolveContentNavigation(
     navigation?.orderedContents ?? [],
     contentIdNum,
-    weekLocalContents
+    phaseLocalContents
   );
 
   const isLocked = isContentLockedForUser(userStatus, summary.is_open_to_trial);
@@ -177,9 +153,9 @@ export default async function ContentPage({ params }: PageProps) {
           title={summary.title}
           breadcrumbs={[
             { label: "学習コンテンツ", href: "/learn" },
-            { label: week.phase?.theme?.name || "テーマ", href: `/learn/${themeIdNum}` },
+            { label: phase.theme?.name || "テーマ", href: `/learn/${themeIdNum}` },
             {
-              label: week.phase?.name || "フェーズ",
+              label: phase.name || "フェーズ",
               href: `/learn/${themeIdNum}/${phaseIdNum}`,
             },
             { label: summary.title },
@@ -235,11 +211,11 @@ export default async function ContentPage({ params }: PageProps) {
     );
   }
 
-  if (!content || content.week_id !== weekIdNum) {
+  if (!content || content.phase_id !== phaseIdNum) {
     notFound();
   }
 
-  // Even when the content row is published, an unpublished/deleted week/phase/theme makes it a
+  // Even when the content row is published, an unpublished/deleted phase/theme makes it a
   // preview (badge, completion button/submission form availability); members/trial users get 404
   // (#216). They are already rejected by the guard before the lock check (#242), so this
   // re-verifies the same condition via the embedded content row as a second layer.
@@ -360,11 +336,11 @@ export default async function ContentPage({ params }: PageProps) {
         breadcrumbs={[
           { label: "学習コンテンツ", href: "/learn" },
           {
-            label: content.week?.phase?.theme?.name || "テーマ",
+            label: content.phase?.theme?.name || "テーマ",
             href: `/learn/${themeIdNum}`,
           },
           {
-            label: content.week?.phase?.name || "フェーズ",
+            label: content.phase?.name || "フェーズ",
             href: `/learn/${themeIdNum}/${phaseIdNum}`,
           },
           { label: content.title },

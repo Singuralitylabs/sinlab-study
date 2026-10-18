@@ -6,18 +6,14 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ContentTypeIcon } from "@/app/components/ContentTypeIcon";
 import { CONTENT_TYPE_LABELS } from "@/app/constants/content";
-import type {
-  PhaseFilterOption,
-  ThemeFilterOption,
-  WeekFilterOption,
-} from "@/app/lib/content-filtering";
+import type { PhaseFilterOption, ThemeFilterOption } from "@/app/lib/content-filtering";
 import {
   type ContentTreeExpandTarget,
   type ContentTreeThemeNode,
   contentTreeNodeKey,
   expandKeysForTarget,
 } from "@/app/lib/content-tree";
-import type { ManagePhaseListItem, ManageThemeListItem } from "@/app/types";
+import type { ManageThemeListItem } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,35 +26,29 @@ import {
 import type { SiblingCandidate, SiblingOrderItem } from "../../components/SiblingOrderField";
 import { PhaseForm } from "../phases/PhaseForm";
 import { ThemeForm } from "../themes/ThemeForm";
-import { WeekForm } from "../weeks/WeekForm";
 import { ContentForm } from "./ContentForm";
 
-type CreateDialogKind = "theme" | "phase" | "week" | "content" | null;
+type CreateDialogKind = "theme" | "phase" | "content" | null;
 
 type CreateDialogState = {
   kind: CreateDialogKind;
   themeId?: number;
   phaseId?: number;
-  weekId?: number;
 };
 
 type ContentTreeProps = {
   tree: ContentTreeThemeNode[];
   themes: ManageThemeListItem[];
-  phases: ManagePhaseListItem[];
   themeSiblings: SiblingOrderItem[];
   phaseSiblingCandidates: SiblingCandidate[];
-  weekSiblingCandidates: SiblingCandidate[];
   contentSiblingCandidates: SiblingCandidate[];
   contentFormThemes: ThemeFilterOption[];
   contentFormPhases: PhaseFilterOption[];
-  contentFormWeeks: WeekFilterOption[];
   /** Expand these keys after a create (from sessionStorage or server hint). */
   initialExpandKeys?: string[];
   formDataReady: {
     themes: boolean;
     phases: boolean;
-    weeks: boolean;
     contents: boolean;
   };
 };
@@ -98,14 +88,11 @@ function storeExpandKeys(keys: string[]) {
 export function ContentTree({
   tree,
   themes,
-  phases,
   themeSiblings,
   phaseSiblingCandidates,
-  weekSiblingCandidates,
   contentSiblingCandidates,
   contentFormThemes,
   contentFormPhases,
-  contentFormWeeks,
   initialExpandKeys = NO_EXPAND_KEYS,
   formDataReady,
 }: ContentTreeProps) {
@@ -169,8 +156,6 @@ export function ContentTree({
         return "テーマを追加";
       case "phase":
         return "フェーズを追加";
-      case "week":
-        return "週を追加";
       case "content":
         return "コンテンツを追加";
       default:
@@ -268,131 +253,49 @@ export function ContentTree({
                                   size="sm"
                                   onClick={() =>
                                     openCreate({
-                                      kind: "week",
+                                      kind: "content",
                                       themeId: theme.id,
                                       phaseId: phase.id,
                                     })
                                   }
-                                  disabled={!formDataReady.weeks}
+                                  disabled={!formDataReady.contents}
                                 >
-                                  <Plus className="h-3.5 w-3.5" />週
+                                  <Plus className="h-3.5 w-3.5" />
+                                  コンテンツ
                                 </Button>
                               </div>
                             </div>
 
                             {phaseOpen && (
-                              <ul className="mt-2 ml-2 sm:ml-4 space-y-2 border-l pl-3 sm:pl-4">
-                                {phase.weeks.map((week) => {
-                                  const weekKey = contentTreeNodeKey("week", week.id);
-                                  const weekOpen = expanded.has(weekKey);
-                                  return (
-                                    <li key={week.id}>
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        <button
-                                          type="button"
-                                          className="inline-flex items-center gap-1 text-sm min-w-0"
-                                          onClick={() => toggle(weekKey)}
-                                          aria-expanded={weekOpen}
-                                        >
-                                          {weekOpen ? (
-                                            <ChevronDown className="h-4 w-4 shrink-0" />
-                                          ) : (
-                                            <ChevronRight className="h-4 w-4 shrink-0" />
-                                          )}
-                                          <span className="truncate">{week.name}</span>
-                                        </button>
-                                        <PublishedBadge isPublished={week.isPublished} />
-                                        <div className="flex flex-wrap gap-1 ml-auto">
-                                          <Button asChild variant="outline" size="sm">
-                                            <Link href={`/manage/weeks/${week.id}/edit`}>
-                                              <Edit className="h-3.5 w-3.5" />
-                                              編集
-                                            </Link>
-                                          </Button>
-                                          <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() =>
-                                              openCreate({
-                                                kind: "content",
-                                                themeId: theme.id,
-                                                phaseId: phase.id,
-                                                weekId: week.id,
-                                              })
-                                            }
-                                            disabled={!formDataReady.contents}
-                                          >
-                                            <Plus className="h-3.5 w-3.5" />
-                                            コンテンツ
-                                          </Button>
-                                        </div>
-                                      </div>
-
-                                      {weekOpen && (
-                                        <ul className="mt-2 ml-2 sm:ml-4 space-y-1.5 border-l pl-3 sm:pl-4">
-                                          {week.contents.length === 0 ? (
-                                            <li className="text-xs text-muted-foreground py-1">
-                                              コンテンツはまだありません
-                                            </li>
-                                          ) : (
-                                            week.contents.map((content) => (
-                                              <li
-                                                key={content.id}
-                                                className="flex flex-wrap items-center gap-2 text-sm py-1"
-                                              >
-                                                <ContentTypeIcon
-                                                  type={content.contentType}
-                                                  className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-                                                />
-                                                <span className="truncate min-w-0">
-                                                  {content.title}
-                                                </span>
-                                                <span className="text-xs text-muted-foreground">
-                                                  ({CONTENT_TYPE_LABELS[content.contentType]})
-                                                </span>
-                                                <PublishedBadge isPublished={content.isPublished} />
-                                                <Button
-                                                  asChild
-                                                  variant="ghost"
-                                                  size="sm"
-                                                  className="ml-auto"
-                                                >
-                                                  <Link
-                                                    href={`/manage/contents/${content.id}/edit`}
-                                                  >
-                                                    <Edit className="h-3.5 w-3.5" />
-                                                    編集
-                                                  </Link>
-                                                </Button>
-                                              </li>
-                                            ))
-                                          )}
-                                          <li>
-                                            <Button
-                                              type="button"
-                                              variant="ghost"
-                                              size="sm"
-                                              className="text-muted-foreground"
-                                              onClick={() =>
-                                                openCreate({
-                                                  kind: "content",
-                                                  themeId: theme.id,
-                                                  phaseId: phase.id,
-                                                  weekId: week.id,
-                                                })
-                                              }
-                                              disabled={!formDataReady.contents}
-                                            >
-                                              <Plus className="h-3.5 w-3.5" />
-                                              コンテンツを追加
-                                            </Button>
-                                          </li>
-                                        </ul>
-                                      )}
+                              <ul className="mt-2 ml-2 sm:ml-4 space-y-1.5 border-l pl-3 sm:pl-4">
+                                {phase.contents.length === 0 ? (
+                                  <li className="text-xs text-muted-foreground py-1">
+                                    コンテンツはまだありません
+                                  </li>
+                                ) : (
+                                  phase.contents.map((content) => (
+                                    <li
+                                      key={content.id}
+                                      className="flex flex-wrap items-center gap-2 text-sm py-1"
+                                    >
+                                      <ContentTypeIcon
+                                        type={content.contentType}
+                                        className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                                      />
+                                      <span className="truncate min-w-0">{content.title}</span>
+                                      <span className="text-xs text-muted-foreground">
+                                        ({CONTENT_TYPE_LABELS[content.contentType]})
+                                      </span>
+                                      <PublishedBadge isPublished={content.isPublished} />
+                                      <Button asChild variant="ghost" size="sm" className="ml-auto">
+                                        <Link href={`/manage/contents/${content.id}/edit`}>
+                                          <Edit className="h-3.5 w-3.5" />
+                                          編集
+                                        </Link>
+                                      </Button>
                                     </li>
-                                  );
-                                })}
+                                  ))
+                                )}
                                 <li>
                                   <Button
                                     type="button"
@@ -401,15 +304,15 @@ export function ContentTree({
                                     className="text-muted-foreground"
                                     onClick={() =>
                                       openCreate({
-                                        kind: "week",
+                                        kind: "content",
                                         themeId: theme.id,
                                         phaseId: phase.id,
                                       })
                                     }
-                                    disabled={!formDataReady.weeks}
+                                    disabled={!formDataReady.contents}
                                   >
                                     <Plus className="h-3.5 w-3.5" />
-                                    週を追加
+                                    コンテンツを追加
                                   </Button>
                                 </li>
                               </ul>
@@ -465,9 +368,8 @@ export function ContentTree({
                 "新しいテーマを作成します。サムネイルは作成後の編集から設定できます。"}
               {dialog.kind === "phase" &&
                 `「${selectedTheme?.name ?? "テーマ"}」の配下にフェーズを追加します。`}
-              {dialog.kind === "week" &&
-                `「${selectedPhase?.name ?? "フェーズ"}」の配下に週を追加します。`}
-              {dialog.kind === "content" && "選択した週の配下にコンテンツを追加します。"}
+              {dialog.kind === "content" &&
+                `「${selectedPhase?.name ?? "フェーズ"}」の配下にコンテンツを追加します。`}
             </DialogDescription>
           </DialogHeader>
 
@@ -495,34 +397,14 @@ export function ContentTree({
             />
           )}
 
-          {dialog.kind === "week" && formDataReady.weeks && dialog.phaseId != null && (
-            <WeekForm
-              phases={phases}
-              siblingCandidates={weekSiblingCandidates}
-              mode="create"
-              defaultPhaseId={String(dialog.phaseId)}
-              embedded
-              onCancel={closeDialog}
-              onSuccess={(result) =>
-                handleCreated({
-                  themeId: dialog.themeId,
-                  phaseId: dialog.phaseId,
-                  weekId: result?.id,
-                })
-              }
-            />
-          )}
-
-          {dialog.kind === "content" && formDataReady.contents && dialog.weekId != null && (
+          {dialog.kind === "content" && formDataReady.contents && dialog.phaseId != null && (
             <ContentForm
               themes={contentFormThemes}
               phases={contentFormPhases}
-              weeks={contentFormWeeks}
               siblingCandidates={contentSiblingCandidates}
-              initialWeekSelection={{
+              initialPhaseSelection={{
                 themeId: dialog.themeId != null ? String(dialog.themeId) : "",
-                phaseId: dialog.phaseId != null ? String(dialog.phaseId) : "",
-                weekId: String(dialog.weekId),
+                phaseId: String(dialog.phaseId),
               }}
               mode="create"
               embedded
@@ -531,7 +413,6 @@ export function ContentTree({
                 handleCreated({
                   themeId: dialog.themeId,
                   phaseId: dialog.phaseId,
-                  weekId: dialog.weekId,
                   contentId: result?.id,
                 })
               }

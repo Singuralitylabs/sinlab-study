@@ -21,7 +21,7 @@ const tree: ContentTreeThemeNode[] = [
   },
 ];
 
-const ready = { themes: true, phases: true, weeks: true, contents: true };
+const ready = { themes: true, phases: true, contents: true };
 
 describe("ContentTree expand state", () => {
   let container: HTMLDivElement;
@@ -50,14 +50,11 @@ describe("ContentTree expand state", () => {
         <ContentTree
           tree={tree}
           themes={[]}
-          phases={[]}
           themeSiblings={[]}
           phaseSiblingCandidates={[]}
-          weekSiblingCandidates={[]}
           contentSiblingCandidates={[]}
           contentFormThemes={[]}
           contentFormPhases={[]}
-          contentFormWeeks={[]}
           formDataReady={ready}
         />
       );

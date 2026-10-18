@@ -5,10 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 function boundaryAnnotation(entry: AdjacentContent, direction: "prev" | "next"): string | null {
-  if (entry.boundary === "same-week") return null;
-  if (entry.boundary === "week") {
-    return direction === "next" ? `次の週: ${entry.weekName}` : `前の週: ${entry.weekName}`;
-  }
+  if (entry.boundary === "same-phase") return null;
   return direction === "next"
     ? `次のフェーズ: ${entry.phaseName}`
     : `前のフェーズ: ${entry.phaseName}`;
@@ -58,7 +55,7 @@ export function PrevNextNav({
           className={cn("flex-1 justify-start", prevAnnotation && "h-auto py-2")}
         >
           <Link
-            href={`/learn/${themeId}/${prev.phaseId}/${prev.weekId}/${prev.id}`}
+            href={`/learn/${themeId}/${prev.phaseId}/${prev.id}`}
             aria-label={prevAnnotation ? `${prevAnnotation} ${prev.title}` : undefined}
           >
             <ChevronLeft className="h-4 w-4 mr-2" />
@@ -77,7 +74,7 @@ export function PrevNextNav({
           className={cn("flex-1 justify-end", nextAnnotation && "h-auto py-2")}
         >
           <Link
-            href={`/learn/${themeId}/${next.phaseId}/${next.weekId}/${next.id}`}
+            href={`/learn/${themeId}/${next.phaseId}/${next.id}`}
             aria-label={nextAnnotation ? `${nextAnnotation} ${next.title}` : undefined}
           >
             <NavLinkText title={next.title} annotation={nextAnnotation} alignEnd />

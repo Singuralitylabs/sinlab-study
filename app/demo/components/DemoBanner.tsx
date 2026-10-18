@@ -15,7 +15,7 @@ export function DemoBanner() {
         <p className="text-sm font-medium">
           <span className="font-bold">デモモード</span>
           {" — "}
-          Phase 1 Week 1 のみ閲覧可。進捗はこのブラウザにのみ保存されます。
+          Phase 1 のみ閲覧可。進捗はこのブラウザにのみ保存されます。
         </p>
         <div className="flex items-center gap-3 shrink-0">
           <Link

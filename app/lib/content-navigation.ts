@@ -1,30 +1,23 @@
 import { compareGroupLevel } from "@/app/lib/content-grouping";
 
-export type NavigationBoundary = "same-week" | "week" | "phase";
+export type NavigationBoundary = "same-phase" | "phase";
 
-export interface NavigationWeek {
+export interface NavigationPhase {
   id: number;
   name: string;
   display_order: number | null;
-  phase: {
-    id: number;
-    name: string;
-    display_order: number | null;
-  } | null;
 }
 
 export interface NavigationContentInput {
   id: number;
   title: string;
-  week_id: number;
+  phase_id: number;
   display_order: number | null;
 }
 
 export interface NavigationContent {
   id: number;
   title: string;
-  weekId: number;
-  weekName: string;
   phaseId: number;
   phaseName: string;
 }
@@ -34,50 +27,35 @@ export interface AdjacentContent extends NavigationContent {
 }
 
 /**
- * Sort by phase then week via compareGroupLevel() (missing display_order last, id tiebreak). Empty
- * weeks/phases contribute nothing; weeks with a null phase and contents whose week_id isn't in the
- * week list are excluded.
+ * Sort by phase then content via compareGroupLevel() (missing display_order last, id tiebreak).
+ * Empty phases contribute nothing; contents whose phase_id isn't in the phase list are excluded.
  */
 export function buildThemeContentOrder(
-  weeks: NavigationWeek[],
+  phases: NavigationPhase[],
   contents: NavigationContentInput[]
 ): NavigationContent[] {
-  const weeksWithPhase = weeks.filter(
-    (week): week is NavigationWeek & { phase: NonNullable<NavigationWeek["phase"]> } =>
-      week.phase != null
+  const sortedPhases = [...phases].sort((a, b) =>
+    compareGroupLevel(a.display_order, b.display_order, a.id, b.id)
   );
 
-  const sortedWeeks = [...weeksWithPhase].sort((a, b) => {
-    const phaseCompare = compareGroupLevel(
-      a.phase.display_order,
-      b.phase.display_order,
-      a.phase.id,
-      b.phase.id
-    );
-    if (phaseCompare !== 0) return phaseCompare;
-    return compareGroupLevel(a.display_order, b.display_order, a.id, b.id);
-  });
-
-  const weekIds = new Set(sortedWeeks.map((week) => week.id));
-  const contentsByWeekId = new Map<number, NavigationContentInput[]>();
+  const phaseIds = new Set(sortedPhases.map((phase) => phase.id));
+  const contentsByPhaseId = new Map<number, NavigationContentInput[]>();
   for (const content of contents) {
-    if (!weekIds.has(content.week_id)) continue;
-    const list = contentsByWeekId.get(content.week_id) ?? [];
+    if (!phaseIds.has(content.phase_id)) continue;
+    const list = contentsByPhaseId.get(content.phase_id) ?? [];
     list.push(content);
-    contentsByWeekId.set(content.week_id, list);
+    contentsByPhaseId.set(content.phase_id, list);
   }
 
-  return sortedWeeks.flatMap((week) => {
-    const weekContents = [...(contentsByWeekId.get(week.id) ?? [])].sort((a, b) =>
+  return sortedPhases.flatMap((phase) => {
+    const phaseContents = [...(contentsByPhaseId.get(phase.id) ?? [])].sort((a, b) =>
       compareGroupLevel(a.display_order, b.display_order, a.id, b.id)
     );
-    return weekContents.map((content) => ({
+    return phaseContents.map((content) => ({
       id: content.id,
       title: content.title,
-      weekId: week.id,
-      weekName: week.name,
-      phaseId: week.phase.id,
-      phaseName: week.phase.name,
+      phaseId: phase.id,
+      phaseName: phase.name,
     }));
   });
 }
@@ -86,8 +64,7 @@ function resolveBoundary(
   current: NavigationContent,
   adjacent: NavigationContent
 ): NavigationBoundary {
-  if (current.weekId === adjacent.weekId) return "same-week";
-  if (current.phaseId === adjacent.phaseId) return "week";
+  if (current.phaseId === adjacent.phaseId) return "same-phase";
   return "phase";
 }
 
@@ -100,8 +77,8 @@ function toAdjacent(
 }
 
 /**
- * Boundary kind comes only from comparing phaseId / weekId of the neighbours, never from URL
- * params. Returns { prev: null, next: null } when the current content isn't in the sequence or the
+ * Boundary kind comes only from comparing phaseId of the neighbours, never from URL params.
+ * Returns { prev: null, next: null } when the current content isn't in the sequence or the
  * sequence is empty.
  */
 export function resolveAdjacentContents(
@@ -125,14 +102,14 @@ export type NavigationEndFallback = "theme" | "phase";
 
 /**
  * Normal case: navigate within the theme sequence (the end goes back to the theme). Degraded case
- * (empty sequence, or the current content isn't in it, e.g. a published week under an unpublished
- * phase): compute from the current week's summary only, and the end goes back to the phase as
- * before.
+ * (empty sequence, or the current content isn't in it, e.g. a published content under an
+ * unpublished phase): compute from the current phase's summary only, and the end goes back to the
+ * phase as before.
  */
 export function resolveContentNavigation(
   orderedContents: NavigationContent[],
   currentContentId: number,
-  weekLocalContents: NavigationContent[]
+  phaseLocalContents: NavigationContent[]
 ): {
   prev: AdjacentContent | null;
   next: AdjacentContent | null;
@@ -146,7 +123,7 @@ export function resolveContentNavigation(
   }
 
   return {
-    ...resolveAdjacentContents(weekLocalContents, currentContentId),
+    ...resolveAdjacentContents(phaseLocalContents, currentContentId),
     endFallback: "phase",
   };
 }

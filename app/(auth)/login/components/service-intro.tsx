@@ -15,7 +15,7 @@ type Feature = {
 };
 
 // Copy is quoted from the LP's (SERVICE_LP_URL) "four mechanisms" (#264). The app's hierarchy depth
-// (theme -> phase -> week -> content) differs from the LP's wording, so don't mention the depth.
+// (theme -> phase -> content) differs from the LP's wording, so don't mention the depth.
 const FEATURES: Feature[] = [
   {
     id: "roadmap",

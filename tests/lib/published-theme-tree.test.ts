@@ -13,14 +13,7 @@ describe("orderContentsAcrossThemes", () => {
             id: 20,
             name: "P",
             display_order: 1,
-            weeks: [
-              {
-                id: 200,
-                name: "W",
-                display_order: 1,
-                contents: [{ id: 2000, title: "C2", display_order: 1, week_id: 200 }],
-              },
-            ],
+            contents: [{ id: 2000, title: "C2", display_order: 1, phase_id: 20 }],
           },
         ],
       },
@@ -33,16 +26,9 @@ describe("orderContentsAcrossThemes", () => {
             id: 10,
             name: "P",
             display_order: 1,
-            weeks: [
-              {
-                id: 100,
-                name: "W",
-                display_order: 1,
-                contents: [
-                  { id: 1001, title: "C1b", display_order: 2, week_id: 100 },
-                  { id: 1000, title: "C1a", display_order: 1, week_id: 100 },
-                ],
-              },
+            contents: [
+              { id: 1001, title: "C1b", display_order: 2, phase_id: 10 },
+              { id: 1000, title: "C1a", display_order: 1, phase_id: 10 },
             ],
           },
         ],

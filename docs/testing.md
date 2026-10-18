@@ -49,7 +49,7 @@ Unit Tests (多数)
 | 認証制御 | 認証ヘルパー関数の判定ロジック | 未認証ユーザーのリダイレクト |
 | 認可制御 | 権限判定ロジック（admin/maintainer/member 別の許可/拒否） | UI・プロキシ（`proxy.ts`）でのアクセス制御 |
 | 承認ステータス制御 | ステータス判定ロジック（trial（お試し）/active/rejected） | 画面遷移の正当性、お試しユーザーへのロック表示 |
-| データアクセス | ―（ユニットでは検証困難） | RLSによるデータ分離。お試しユーザーのアクセストークンでPostgRESTに直接アクセスし、(a) `learning_contents` のSELECTでお試し非公開コンテンツが0行、(b) お試し非公開コンテンツに対する `user_progress` / `submissions` のINSERT・UPDATEが拒否されること、(c) お試し非公開スライドのオブジェクトキーに対する `POST /storage/v1/object/sign/slides/<キー>`（署名付きURLの発行）と `GET /storage/v1/object/authenticated/slides/<キー>` が拒否され、お試し公開スライドでは許可されること。(d) コンテンツ行は公開済みだが所属 week / phase / theme のいずれかが未公開または論理削除済みのスライドキーは、member / お試しの通常クライアントで署名発行が拒否されること（#216。admin / maintainer はプレビューのため許可） |
+| データアクセス | ―（ユニットでは検証困難） | RLSによるデータ分離。お試しユーザーのアクセストークンでPostgRESTに直接アクセスし、(a) `learning_contents` のSELECTでお試し非公開コンテンツが0行、(b) お試し非公開コンテンツに対する `user_progress` / `submissions` のINSERT・UPDATEが拒否されること、(c) お試し非公開スライドのオブジェクトキーに対する `POST /storage/v1/object/sign/slides/<キー>`（署名付きURLの発行）と `GET /storage/v1/object/authenticated/slides/<キー>` が拒否され、お試し公開スライドでは許可されること。(d) コンテンツ行は公開済みだが所属 phase / theme のいずれかが未公開または論理削除済みのスライドキーは、member / お試しの通常クライアントで署名発行が拒否されること（#216。admin / maintainer はプレビューのため許可） |
 
 ### 3.3 型安全性・ビルド・コード品質
 
@@ -64,7 +64,7 @@ Unit Tests (多数)
 
 - Google ログイン → ホーム表示 → コンテンツ閲覧 → ログアウト
 - 進捗の記録 → ホームへの反映
-- admin/maintainer による管理操作（フェーズ・週・コンテンツ管理）→ 一覧/詳細への反映
+- admin/maintainer による管理操作（フェーズ・コンテンツ管理）→ 一覧/詳細への反映
 - rejected ユーザーが保護ページへアクセス → `/rejected` へ誘導される
 - お試し（trial）ユーザー: ツリー全表示・お試し非公開コンテンツのロック表示・直リンク時のロック画面、お試し公開コンテンツの閲覧/完了/提出が成功、お試し非公開コンテンツへのAPI直叩きが403、旧URL `/pending` が `/`（承認待ちバナー付き）へリダイレクトされる
 - 承認（trial → active）後に承認前の提出・進捗が引き継がれ、管理者のレビュー一覧に表示される

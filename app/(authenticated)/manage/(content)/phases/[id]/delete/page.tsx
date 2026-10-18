@@ -22,7 +22,7 @@ export default async function DeletePhasePage({ params }: { params: Promise<{ id
             <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0" />
             <p className="text-sm">
               フェーズ「<strong>{phase.name}</strong>」を削除しますか？
-              このフェーズに紐づく週・コンテンツの表示に影響する場合があります。
+              このフェーズに紐づくコンテンツの表示に影響する場合があります。
             </p>
           </div>
           <DeleteConfirmButton

@@ -14,7 +14,6 @@ export type ContinueLearningContent = {
   themeId: number;
   themeName: string;
   phaseId: number;
-  weekId: number;
 };
 
 export type ContinueLearningTarget = ContinueLearningContent & {
@@ -29,7 +28,7 @@ function toTarget(
 ): ContinueLearningTarget {
   return {
     ...content,
-    href: `/learn/${content.themeId}/${content.phaseId}/${content.weekId}/${content.id}`,
+    href: `/learn/${content.themeId}/${content.phaseId}/${content.id}`,
     lastViewedAt,
   };
 }

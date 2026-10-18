@@ -1,4 +1,4 @@
-import { BookOpen, Calendar, ClipboardList, FileText, FolderOpen, Users } from "lucide-react";
+import { BookOpen, ClipboardList, FileText, FolderOpen, Users } from "lucide-react";
 import Link from "next/link";
 import { PageTitle } from "@/app/components/PageTitle";
 import { formatDate } from "@/app/lib/format-date";
@@ -38,13 +38,6 @@ export default async function ManageDashboardPage() {
       bgClass: "bg-chart-3/10 text-chart-3",
     },
     {
-      title: "週数",
-      value: counts.weeks,
-      href: "/manage/contents",
-      icon: Calendar,
-      bgClass: "bg-chart-2/10 text-chart-2",
-    },
-    {
       title: "コンテンツ数",
       value: counts.contents,
       href: "/manage/contents",
@@ -73,7 +66,7 @@ export default async function ManageDashboardPage() {
     <div className="max-w-6xl mx-auto">
       <PageTitle title="ダッシュボード" description="統計サマリーと最近の提出" />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
         {stats.map((stat) => {
           const card = (
             <Card

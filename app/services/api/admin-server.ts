@@ -43,19 +43,17 @@ import type {
   LearningContent,
   LearningPhase,
   LearningTheme,
-  LearningWeek,
   ManageContentListItem,
   ManagePhaseListItem,
   ManageThemeListItem,
   ManageUserListItem,
-  ManageWeekListItem,
   MembershipType,
   UserType,
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
-type SiblingTable = "learning_themes" | "learning_phases" | "learning_weeks" | "learning_contents";
-type SiblingParentFilter = { column: "theme_id" | "phase_id" | "week_id"; value: number } | null;
+type SiblingTable = "learning_themes" | "learning_phases" | "learning_contents";
+type SiblingParentFilter = { column: "theme_id" | "phase_id"; value: number } | null;
 
 type AdminSupabaseClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>;
 
@@ -151,17 +149,17 @@ async function fetchPdfUrlsByContentIds(
 }
 
 /** Live contents only. Returns null on fetch failure. */
-async function fetchPdfUrlsByWeekIds(
+async function fetchPdfUrlsByPhaseIds(
   supabase: AdminSupabaseClient,
-  weekIds: number[]
+  phaseIds: number[]
 ): Promise<string[] | null> {
-  if (weekIds.length === 0) {
+  if (phaseIds.length === 0) {
     return [];
   }
   const { data, error } = await supabase
     .from("learning_contents")
     .select("pdf_url")
-    .in("week_id", weekIds)
+    .in("phase_id", phaseIds)
     .eq("is_deleted", false);
   if (error) {
     console.error("スライド参照取得エラー:", error.message);
@@ -174,22 +172,18 @@ async function fetchPdfUrlsByWeekIds(
 /**
  * Nested select is the minimum needed for the list and hierarchy sort. With a theme/phase filter
  * the nesting must be `!inner`: PostgREST embedded filters only drop parent rows with an inner
- * join, which excludes unclassified contents (no week).
+ * join, which excludes unclassified contents (no phase).
  */
 function manageContentListSelect(innerJoin: boolean): string {
-  const weekRel = innerJoin ? "week:learning_weeks!inner" : "week:learning_weeks";
   const phaseRel = innerJoin ? "phase:learning_phases!inner" : "phase:learning_phases";
   const themeRel = innerJoin ? "theme:learning_themes!inner" : "theme:learning_themes";
   return `
-    id, title, content_type, display_order, is_published, is_open_to_trial, week_id,
+    id, title, content_type, display_order, is_published, is_open_to_trial, phase_id,
     grading_rubric_version:grading_rubric->version,
     grading_rubric_first_requirement:grading_rubric->requirements->0,
-    ${weekRel}(
-      id, name, display_order, phase_id,
-      ${phaseRel}(
-        id, name, display_order, theme_id,
-        ${themeRel}(id, name, display_order)
-      )
+    ${phaseRel}(
+      id, name, display_order, theme_id,
+      ${themeRel}(id, name, display_order)
     )
   `
     .replace(/\s+/g, " ")
@@ -221,17 +215,7 @@ const MANAGE_PHASE_LIST_SELECT = `
   .replace(/\s+/g, " ")
   .trim();
 
-const MANAGE_WEEK_LIST_SELECT = `
-  id, name, display_order, is_published, phase_id,
-  phase:learning_phases(
-    id, name, display_order, theme_id,
-    theme:learning_themes(id, name, display_order)
-  )
-`
-  .replace(/\s+/g, " ")
-  .trim();
-
-const CONTENT_SIBLING_CANDIDATE_SELECT = "id, title, display_order, is_published, week_id";
+const CONTENT_SIBLING_CANDIDATE_SELECT = "id, title, display_order, is_published, phase_id";
 
 const MANAGE_USER_LIST_SELECT =
   "id, display_name, email, notification_email, role, status, membership_type, created_at, email_opt_out_at";
@@ -240,7 +224,6 @@ const MANAGE_USER_LIST_SELECT =
 export interface FetchContentsFilters {
   themeId?: string;
   phaseId?: string;
-  weekId?: string;
   contentType?: ContentType;
 }
 
@@ -285,7 +268,7 @@ async function applySiblingUpdates(
 }
 
 /**
- * Shared insert-position resequencing for createTheme / createPhase / createWeek / createContent
+ * Shared insert-position resequencing for createTheme / createPhase / createContent
  * (SELECT siblings, resolveSiblingResequence, UPDATE changed rows). `parentFilter` is null only
  * for themes (no parent).
  * Callers must check the returned `error` is null before using `displayOrder` in the INSERT.
@@ -322,7 +305,7 @@ async function resequenceSiblingsForInsert(
 }
 
 /**
- * Shared resequencing for updateTheme / updatePhase / updateWeek / updateContent (issue #189);
+ * Shared resequencing for updateTheme / updatePhase / updateContent (issue #189);
  * covers only the destination parent.
  * The caller must call renumberSourceSiblingsAfterMove AFTER the main UPDATE (parent change)
  * succeeds. Compacting the source first would, if the main UPDATE then fails, leave the item
@@ -542,45 +525,21 @@ export async function deleteTheme(
   const phaseIds = phases?.map((p) => p.id) ?? [];
 
   if (phaseIds.length > 0) {
-    const { data: weeks, error: weekFetchError } = await supabase
-      .from("learning_weeks")
-      .select("id")
-      .in("phase_id", phaseIds)
-      .eq("is_deleted", false);
-    if (weekFetchError) {
-      console.error("週取得エラー:", weekFetchError.message);
-      return { error: weekFetchError, storageRemoved };
-    }
-
-    const weekIds = weeks?.map((w) => w.id) ?? [];
-
     // Fetch pdf_urls before the soft delete. On failure the targets are unknown, so skip Storage
     // cleanup and report storageRemoved: false (never treat as success).
-    targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, weekIds);
+    targetPdfUrls = await fetchPdfUrlsByPhaseIds(supabase, phaseIds);
     if (targetPdfUrls === null) {
       storageRemoved = false;
     }
 
-    if (weekIds.length > 0) {
-      const { error: contentError } = await supabase
-        .from("learning_contents")
-        .update({ is_deleted: true })
-        .in("week_id", weekIds)
-        .eq("is_deleted", false);
-      if (contentError) {
-        console.error("コンテンツ削除エラー:", contentError.message);
-        return { error: contentError, storageRemoved };
-      }
-    }
-
-    const { error: weekError } = await supabase
-      .from("learning_weeks")
+    const { error: contentError } = await supabase
+      .from("learning_contents")
       .update({ is_deleted: true })
       .in("phase_id", phaseIds)
       .eq("is_deleted", false);
-    if (weekError) {
-      console.error("週削除エラー:", weekError.message);
-      return { error: weekError, storageRemoved };
+    if (contentError) {
+      console.error("コンテンツ削除エラー:", contentError.message);
+      return { error: contentError, storageRemoved };
     }
 
     const { error: phaseError } = await supabase
@@ -779,43 +738,19 @@ export async function deletePhase(
 ): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { data: weeks, error: weekFetchError } = await supabase
-    .from("learning_weeks")
-    .select("id")
-    .eq("phase_id", id)
-    .eq("is_deleted", false);
-  if (weekFetchError) {
-    console.error("週取得エラー:", weekFetchError.message);
-    return { error: weekFetchError, storageRemoved: true };
-  }
-
-  const weekIds = weeks?.map((w) => w.id) ?? [];
-
   // Fetch pdf_urls before the soft delete; on failure report storageRemoved: false (never treat
   // as success).
-  const targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, weekIds);
+  const targetPdfUrls = await fetchPdfUrlsByPhaseIds(supabase, [id]);
   let storageRemoved = targetPdfUrls !== null;
 
-  if (weekIds.length > 0) {
-    const { error: contentError } = await supabase
-      .from("learning_contents")
-      .update({ is_deleted: true })
-      .in("week_id", weekIds)
-      .eq("is_deleted", false);
-    if (contentError) {
-      console.error("コンテンツ削除エラー:", contentError.message);
-      return { error: contentError, storageRemoved };
-    }
-
-    const { error: weekError } = await supabase
-      .from("learning_weeks")
-      .update({ is_deleted: true })
-      .eq("phase_id", id)
-      .eq("is_deleted", false);
-    if (weekError) {
-      console.error("週削除エラー:", weekError.message);
-      return { error: weekError, storageRemoved };
-    }
+  const { error: contentError } = await supabase
+    .from("learning_contents")
+    .update({ is_deleted: true })
+    .eq("phase_id", id)
+    .eq("is_deleted", false);
+  if (contentError) {
+    console.error("コンテンツ削除エラー:", contentError.message);
+    return { error: contentError, storageRemoved };
   }
 
   const { error } = await supabase
@@ -836,202 +771,7 @@ export async function deletePhase(
 }
 
 /**
- * Sorted by the week's own display_order. Callers needing theme -> phase -> week hierarchy order
- * (/manage/weeks list, ContentForm options) must pass the result through sortWeeksByHierarchy.
- */
-export async function fetchAllWeeks(): Promise<{
-  data: ManageWeekListItem[] | null;
-  error: PostgrestError | null;
-}> {
-  const supabase = await createServerSupabaseClient();
-
-  const { data, error } = await supabase
-    .from("learning_weeks")
-    .select(MANAGE_WEEK_LIST_SELECT)
-    .eq("is_deleted", false)
-    .order("display_order");
-
-  if (error) {
-    console.error("週一覧取得エラー:", error.message);
-    return { data: null, error };
-  }
-
-  return { data: data as unknown as ManageWeekListItem[], error: null };
-}
-
-export async function fetchWeekById(id: number): Promise<{
-  data: LearningWeek | null;
-  error: PostgrestError | null;
-}> {
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase
-    .from("learning_weeks")
-    .select("*")
-    .eq("id", id)
-    .eq("is_deleted", false)
-    .single();
-  if (error) {
-    console.error("週取得エラー:", error.message);
-    return { data: null, error };
-  }
-  return { data, error: null };
-}
-
-/**
- * Same approach as createTheme, renumbering siblings under the same phase_id (see
- * resolveSiblingResequence).
- */
-export async function createWeek(week: {
-  phase_id: number;
-  name: string;
-  description?: string | null;
-  insertAfterId: number | null;
-  is_published?: boolean;
-}): Promise<{ data: LearningWeek | null; error: PostgrestError | null }> {
-  const supabase = await createServerSupabaseClient();
-
-  const resequenced = await resequenceSiblingsForInsert(
-    supabase,
-    "learning_weeks",
-    { column: "phase_id", value: week.phase_id },
-    week.insertAfterId
-  );
-  if (resequenced.error) {
-    console.error("週作成エラー（再採番）:", resequenced.error.message);
-    return { data: null, error: resequenced.error };
-  }
-  const { displayOrder } = resequenced;
-
-  const { data, error } = await supabase
-    .from("learning_weeks")
-    .insert({
-      phase_id: week.phase_id,
-      name: week.name,
-      description: week.description,
-      is_published: week.is_published,
-      display_order: displayOrder,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error("週作成エラー:", error.message);
-    return { data: null, error };
-  }
-
-  return { data, error: null };
-}
-
-/**
- * Same approach as updatePhase: display order is untouched if `insertAfterId` is omitted and
- * phase_id is unchanged; otherwise renumber the destination first and the source only after the
- * main UPDATE succeeds (see resequenceDestinationForUpdate).
- */
-export async function updateWeek(
-  id: number,
-  week: Partial<LearningWeek> & { insertAfterId?: number | null }
-): Promise<{ error: PostgrestError | null }> {
-  const supabase = await createServerSupabaseClient();
-  const { insertAfterId, ...patch } = week;
-
-  let destinationFilter: SiblingParentFilter = null;
-  let sourceFilter: SiblingParentFilter = null;
-  let parentChanged = false;
-
-  if (insertAfterId !== undefined || patch.phase_id !== undefined) {
-    const { data: current, error: currentError } = await supabase
-      .from("learning_weeks")
-      .select("phase_id")
-      .eq("id", id)
-      .eq("is_deleted", false)
-      .single();
-    if (currentError) {
-      console.error("週更新エラー（現在値取得）:", currentError.message);
-      return { error: currentError };
-    }
-    const destinationPhaseId = patch.phase_id ?? current.phase_id;
-    parentChanged = destinationPhaseId !== current.phase_id;
-    destinationFilter = { column: "phase_id", value: destinationPhaseId };
-    sourceFilter = { column: "phase_id", value: current.phase_id };
-  }
-
-  const resequenced = await resequenceDestinationForUpdate(
-    supabase,
-    "learning_weeks",
-    id,
-    destinationFilter,
-    parentChanged,
-    insertAfterId
-  );
-  if (resequenced.error) {
-    console.error("週更新エラー（再採番）:", resequenced.error.message);
-    return { error: resequenced.error };
-  }
-
-  const updatePayload =
-    resequenced.displayOrder !== undefined
-      ? { ...patch, display_order: resequenced.displayOrder }
-      : patch;
-
-  const { error } = await supabase.from("learning_weeks").update(updatePayload).eq("id", id);
-
-  if (error) {
-    console.error("週更新エラー:", error.message);
-    return { error };
-  }
-
-  if (parentChanged) {
-    const sourceError = await renumberSourceSiblingsAfterMove(
-      supabase,
-      "learning_weeks",
-      id,
-      sourceFilter
-    );
-    if (sourceError) {
-      console.error("週更新エラー（移動元の再採番）:", sourceError.message);
-      return { error: sourceError };
-    }
-  }
-
-  return { error: null };
-}
-
-export async function deleteWeek(
-  id: number
-): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
-  const supabase = await createAdminSupabaseClient();
-
-  // Fetch pdf_urls before the soft delete; on failure report storageRemoved: false (never treat
-  // as success).
-  const targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, [id]);
-  let storageRemoved = targetPdfUrls !== null;
-
-  const { error: contentError } = await supabase
-    .from("learning_contents")
-    .update({ is_deleted: true })
-    .eq("week_id", id)
-    .eq("is_deleted", false);
-  if (contentError) {
-    console.error("コンテンツ削除エラー:", contentError.message);
-    return { error: contentError, storageRemoved };
-  }
-
-  const { error } = await supabase.from("learning_weeks").update({ is_deleted: true }).eq("id", id);
-  if (error) {
-    console.error("週削除エラー:", error.message);
-    return { error, storageRemoved };
-  }
-
-  // Remove unreferenced Storage objects only after all DB writes succeed.
-  if (targetPdfUrls !== null && targetPdfUrls.length > 0) {
-    storageRemoved = await removeUnreferencedSlideObjects(supabase, targetPdfUrls);
-  }
-
-  return { error: null, storageRemoved };
-}
-
-/**
- * Management list (#196); body columns are excluded. Theme/phase/week/type filters run in SQL;
+ * Management list (#196); body columns are excluded. Theme/phase/type filters run in SQL;
  * the title search stays in the caller's JS.
  */
 export async function fetchAllContents(filters: FetchContentsFilters = {}): Promise<{
@@ -1040,15 +780,10 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
 }> {
   const themeId = parseStrictFilterId(filters.themeId);
   const phaseId = parseStrictFilterId(filters.phaseId);
-  const weekId = parseStrictFilterId(filters.weekId);
 
   // An integer-invalid query string yields "no match" instead of a PostgREST 400 (same as the old
   // JS string comparison, which never matched such input).
-  if (
-    (filters.themeId && themeId === undefined) ||
-    (filters.phaseId && phaseId === undefined) ||
-    (filters.weekId && weekId === undefined)
-  ) {
+  if ((filters.themeId && themeId === undefined) || (filters.phaseId && phaseId === undefined)) {
     return { data: [], error: null };
   }
 
@@ -1068,17 +803,14 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
     .select(manageContentListSelect(needsInnerJoin))
     .eq("is_deleted", false);
 
-  if (weekId !== undefined) {
-    query = query.eq("week_id", weekId);
-  }
   if (filters.contentType) {
     query = query.eq("content_type", filters.contentType);
   }
   if (themeId !== undefined) {
-    query = query.eq("week.phase.theme_id", themeId);
+    query = query.eq("phase.theme_id", themeId);
   }
   if (phaseId !== undefined) {
-    query = query.eq("week.phase_id", phaseId);
+    query = query.eq("phase_id", phaseId);
   }
 
   const { data, error } = await query.order("display_order");
@@ -1089,7 +821,7 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
   }
 
   // This cast depends on the select returning the nested shape down to the theme
-  // (week.phase.theme). If you change the select, keep week.phase.theme, which the hierarchy sort
+  // (phase.theme). If you change the select, keep phase.theme, which the hierarchy sort
   // in content-grouping.ts reads.
   // A deleted rubric (empty requirements, #344) keeps its version but is shown as "not set".
   const rows = (
@@ -1103,7 +835,7 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
 }
 
 /**
- * Whether at least one non-deleted content exists (head count). Filter options come from the week
+ * Whether at least one non-deleted content exists (head count). Filter options come from the phase
  * list, so this is only for the empty-state check (#196 review).
  */
 export async function hasAnyManageContents(): Promise<{
@@ -1126,10 +858,10 @@ export async function hasAnyManageContents(): Promise<{
 
 /**
  * Sibling candidates for the insert-position picker in the content form (#196). No body or
- * 4-level nesting; filterable by `week_id`. Without `weekId` all weeks are returned and the form
- * filters when the week changes.
+ * nesting; filterable by `phase_id`. Without `phaseId` all phases are returned and the form
+ * filters when the phase changes.
  */
-export async function fetchContentSiblingCandidates(weekId?: number): Promise<{
+export async function fetchContentSiblingCandidates(phaseId?: number): Promise<{
   data: ContentSiblingCandidateRow[] | null;
   error: PostgrestError | null;
 }> {
@@ -1140,8 +872,8 @@ export async function fetchContentSiblingCandidates(weekId?: number): Promise<{
     .select(CONTENT_SIBLING_CANDIDATE_SELECT)
     .eq("is_deleted", false);
 
-  if (weekId !== undefined) {
-    query = query.eq("week_id", weekId);
+  if (phaseId !== undefined) {
+    query = query.eq("phase_id", phaseId);
   }
 
   const { data, error } = await query.order("display_order");
@@ -1175,14 +907,14 @@ export async function fetchContentByIdForAdmin(
 }
 
 /**
- * Same approach as createTheme, renumbering siblings under the same week_id (see
+ * Same approach as createTheme, renumbering siblings under the same phase_id (see
  * resolveSiblingResequence).
  * Unlike the other three, sibling fetch/renumber uses createAdminSupabaseClient() because
  * createContent already used service_role. The AGENTS.md service_role restriction covers
  * student-facing delivery paths, not this admin-only create path.
  */
 type CreateContentInput = {
-  week_id: number;
+  phase_id: number;
   title: string;
   content_type: ContentType;
   video_url?: string | null;
@@ -1230,7 +962,7 @@ async function createContentWith(
   const resequenced = await resequenceSiblingsForInsert(
     supabase,
     "learning_contents",
-    { column: "week_id", value: content.week_id },
+    { column: "phase_id", value: content.phase_id },
     content.insertAfterId
   );
   if (resequenced.error) {
@@ -1273,7 +1005,7 @@ async function createContentWith(
   const { data, error } = await supabase
     .from("learning_contents")
     .insert({
-      week_id: content.week_id,
+      phase_id: content.phase_id,
       title: content.title,
       content_type: content.content_type,
       video_url: content.video_url,
@@ -1327,7 +1059,7 @@ async function createContentWith(
           supabase,
           "learning_contents",
           data.id,
-          { column: "week_id", value: content.week_id }
+          { column: "phase_id", value: content.phase_id }
         );
         if (renumberError) {
           console.error("コンテンツ作成エラー（取り消し後の再採番）:", renumberError.message);
@@ -1357,7 +1089,7 @@ async function createContentWith(
 }
 
 /**
- * Creates contents one by one in array order, each at the end of its week (bulk registration).
+ * Creates contents one by one in array order, each at the end of its phase (bulk registration).
  * Not atomic: on the first failure it stops and reports what was already created, so the caller
  * can tell the admin which items to retry.
  */
@@ -1464,7 +1196,7 @@ async function selectQuizQuestions(
 
 /**
  * Same approach as updatePhase: display order is untouched if `insertAfterId` is omitted and
- * week_id is unchanged; otherwise renumber the destination first and the source only after the
+ * phase_id is unchanged; otherwise renumber the destination first and the source only after the
  * main UPDATE succeeds (see resequenceDestinationForUpdate). Uses createAdminSupabaseClient() for
  * sibling work for the same reason as createContent.
  */
@@ -1762,11 +1494,11 @@ async function updateContentRow(
   let sourceFilter: SiblingParentFilter = null;
   let parentChanged = false;
 
-  // The pre-update values needed for the move decision (week_id) and for deleting the old object
+  // The pre-update values needed for the move decision (phase_id) and for deleting the old object
   // when pdf_url changes are fetched in one SELECT (issue #246). If it was fetched only for
   // pdf_url, a failure does not abort the update: continue with the old key unknown and report
   // storageRemoved: false (same as deleteContent).
-  const needsCurrentWeek = insertAfterId !== undefined || patch.week_id !== undefined;
+  const needsCurrentPhase = insertAfterId !== undefined || patch.phase_id !== undefined;
   const needsCurrentPdf = patch.pdf_url !== undefined;
   let previousPdfUrl: string | null = null;
   let pdfFetchFailed = false;
@@ -1792,11 +1524,11 @@ async function updateContentRow(
   // The rubric UPDATE's updated_at. Only needed when the row had no rubric before this save and
   // the committed value is NULL: IS NULL alone would also match a later save that left it NULL.
   let committedRubricUpdatedAt: string | null = null;
-  if (needsCurrentWeek || needsCurrentPdf || touchesRubric) {
+  if (needsCurrentPhase || needsCurrentPdf || touchesRubric) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
       .select(
-        "week_id, pdf_url, grading_rubric, content_type, submission_file_slots, preview_base_html, show_preview, show_console"
+        "phase_id, pdf_url, grading_rubric, content_type, submission_file_slots, preview_base_html, show_preview, show_console"
       )
       .eq("id", id)
       .eq("is_deleted", false)
@@ -1804,7 +1536,7 @@ async function updateContentRow(
     if (currentError || !current) {
       console.error("コンテンツ更新エラー（現在値取得）:", currentError?.message ?? "no row");
       // The rubric version can't be derived without the stored rubric, so fail rather than guess.
-      if (needsCurrentWeek || touchesRubric) {
+      if (needsCurrentPhase || touchesRubric) {
         return {
           error: currentError ?? {
             message: "コンテンツの現在値を取得できませんでした",
@@ -1889,11 +1621,11 @@ async function updateContentRow(
         }
         expectedRubricVersion = lockVersion;
       }
-      if (needsCurrentWeek) {
-        const destinationWeekId = patch.week_id ?? current.week_id;
-        parentChanged = destinationWeekId !== current.week_id;
-        destinationFilter = { column: "week_id", value: destinationWeekId };
-        sourceFilter = { column: "week_id", value: current.week_id };
+      if (needsCurrentPhase) {
+        const destinationPhaseId = patch.phase_id ?? current.phase_id;
+        parentChanged = destinationPhaseId !== current.phase_id;
+        destinationFilter = { column: "phase_id", value: destinationPhaseId };
+        sourceFilter = { column: "phase_id", value: current.phase_id };
       }
     }
   }
@@ -2473,7 +2205,6 @@ export async function fetchStudentsProgress(): Promise<{
 interface ManageCounts {
   themes: number;
   phases: number;
-  weeks: number;
   contents: number;
   students: number;
 }
@@ -2491,17 +2222,13 @@ export async function fetchManageCounts(): Promise<{
   const supabase = await createServerSupabaseClient();
   const admin = await createAdminSupabaseClient();
 
-  const [themes, phases, weeks, contents, students] = await Promise.all([
+  const [themes, phases, contents, students] = await Promise.all([
     supabase
       .from("learning_themes")
       .select("id", { count: "exact", head: true })
       .eq("is_deleted", false),
     supabase
       .from("learning_phases")
-      .select("id", { count: "exact", head: true })
-      .eq("is_deleted", false),
-    supabase
-      .from("learning_weeks")
       .select("id", { count: "exact", head: true })
       .eq("is_deleted", false),
     supabase
@@ -2515,8 +2242,7 @@ export async function fetchManageCounts(): Promise<{
       .eq("is_deleted", false),
   ]);
 
-  const firstError =
-    themes.error ?? phases.error ?? weeks.error ?? contents.error ?? students.error ?? null;
+  const firstError = themes.error ?? phases.error ?? contents.error ?? students.error ?? null;
   if (firstError) {
     console.error("管理ダッシュボード件数取得エラー:", firstError.message);
   }
@@ -2525,7 +2251,6 @@ export async function fetchManageCounts(): Promise<{
     data: {
       themes: themes.count ?? 0,
       phases: phases.count ?? 0,
-      weeks: weeks.count ?? 0,
       contents: contents.count ?? 0,
       students: students.count ?? 0,
     },

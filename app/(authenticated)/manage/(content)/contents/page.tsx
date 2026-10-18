@@ -1,15 +1,15 @@
 import { Suspense } from "react";
 import { PageTitle } from "@/app/components/PageTitle";
 import {
-  deriveWeekSelectOptions,
+  derivePhaseSelectOptions,
   filterContents,
   isContentType,
 } from "@/app/lib/content-filtering";
 import {
   compareGroupLevel,
-  groupContentsByWeek,
+  groupContentsByPhase,
   sortContentsByHierarchy,
-  sortWeeksByHierarchy,
+  sortPhasesByHierarchy,
   toContentTableGroups,
 } from "@/app/lib/content-grouping";
 import { buildContentTree } from "@/app/lib/content-tree";
@@ -17,7 +17,6 @@ import {
   fetchAllContents,
   fetchAllPhases,
   fetchAllThemes,
-  fetchAllWeeks,
   fetchContentSiblingCandidates,
   hasAnyManageContents,
 } from "@/app/services/api/admin-server";
@@ -42,15 +41,13 @@ function filterContentsByStructure(
   filters: {
     themeId?: string;
     phaseId?: string;
-    weekId?: string;
     contentType?: ManageContentListItem["content_type"];
   }
 ): ManageContentListItem[] {
   return contents.filter((content) => {
-    if (filters.weekId && String(content.week_id) !== filters.weekId) return false;
     if (filters.contentType && content.content_type !== filters.contentType) return false;
-    if (filters.phaseId && String(content.week?.phase?.id ?? "") !== filters.phaseId) return false;
-    if (filters.themeId && String(content.week?.phase?.theme?.id ?? "") !== filters.themeId) {
+    if (filters.phaseId && String(content.phase?.id ?? "") !== filters.phaseId) return false;
+    if (filters.themeId && String(content.phase?.theme?.id ?? "") !== filters.themeId) {
       return false;
     }
     return true;
@@ -62,7 +59,6 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
   const filters = {
     theme: firstParam(params.theme),
     phase: firstParam(params.phase),
-    week: firstParam(params.week),
     type: firstParam(params.type),
     q: firstParam(params.q).trim(),
   };
@@ -70,7 +66,6 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
   const structuralFilters = {
     themeId: filters.theme || undefined,
     phaseId: filters.phase || undefined,
-    weekId: filters.week || undefined,
     contentType: isContentType(filters.type) ? filters.type : undefined,
   };
   const hasStructuralFilter = Object.values(structuralFilters).some((value) => value !== undefined);
@@ -78,17 +73,16 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
 
   // One unfiltered contents fetch: the tree always shows the full hierarchy; the bulk table
   // applies structural + title filters in JS (#335 review).
-  const [themesResult, phasesResult, weeksResult, listResult, siblingsResult, anyContentsResult] =
+  const [themesResult, phasesResult, listResult, siblingsResult, anyContentsResult] =
     await Promise.all([
       fetchAllThemes(),
       fetchAllPhases(),
-      fetchAllWeeks(),
       fetchAllContents(),
       fetchContentSiblingCandidates(),
       hasAnyManageContents(),
     ]);
 
-  if (themesResult.error || phasesResult.error || weeksResult.error || listResult.error) {
+  if (themesResult.error || phasesResult.error || listResult.error) {
     return (
       <div className="max-w-6xl mx-auto">
         <PageTitle title="コンテンツ管理" description="学習コンテンツの構成・作成・編集・削除" />
@@ -103,7 +97,6 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
 
   const themes = themesResult.data ?? [];
   const phases = phasesResult.data ?? [];
-  const weeks = weeksResult.data ?? [];
   const contents = listResult.data ?? [];
   const hasAnyContents = anyContentsResult.data === true;
 
@@ -112,18 +105,13 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
   const formDataReady = {
     themes: Boolean(themesResult.data),
     phases: Boolean(phasesResult.data),
-    weeks: Boolean(weeksResult.data),
     contents: Boolean(siblingsResult.data),
   };
-  const createBlocked =
-    !formDataReady.themes ||
-    !formDataReady.phases ||
-    !formDataReady.weeks ||
-    !formDataReady.contents;
+  const createBlocked = !formDataReady.themes || !formDataReady.phases || !formDataReady.contents;
 
   const sortedContents = sortContentsByHierarchy(contents);
-  const tree = buildContentTree(themes, phases, weeks, sortedContents);
-  const filterOptions = deriveWeekSelectOptions(sortWeeksByHierarchy(weeks));
+  const tree = buildContentTree(themes, phases, sortedContents);
+  const filterOptions = derivePhaseSelectOptions(sortPhasesByHierarchy(phases));
 
   const themeSiblings = [...themes]
     .sort((a, b) => compareGroupLevel(a.display_order, b.display_order, a.id, b.id))
@@ -138,15 +126,6 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
       parentId: phase.theme_id,
     }));
 
-  const weekSiblingCandidates = [...weeks]
-    .sort((a, b) => compareGroupLevel(a.display_order, b.display_order, a.id, b.id))
-    .map((week) => ({
-      id: week.id,
-      label: week.name,
-      isPublished: week.is_published,
-      parentId: week.phase_id,
-    }));
-
   const contentSiblingCandidates = siblingsResult.data
     ? [...siblingsResult.data]
         .sort((a, b) => compareGroupLevel(a.display_order, b.display_order, a.id, b.id))
@@ -154,7 +133,7 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
           id: content.id,
           label: content.title,
           isPublished: content.is_published,
-          parentId: content.week_id,
+          parentId: content.phase_id,
         }))
     : [];
 
@@ -164,7 +143,7 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
       q: filters.q || undefined,
     }
   );
-  const groups = groupContentsByWeek(tableContents);
+  const groups = groupContentsByPhase(tableContents);
   const tableGroups = toContentTableGroups(groups);
 
   return (
@@ -183,14 +162,11 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
         <ContentTree
           tree={tree}
           themes={themes}
-          phases={phases}
           themeSiblings={themeSiblings}
           phaseSiblingCandidates={phaseSiblingCandidates}
-          weekSiblingCandidates={weekSiblingCandidates}
           contentSiblingCandidates={contentSiblingCandidates}
           contentFormThemes={filterOptions.themes}
           contentFormPhases={filterOptions.phases}
-          contentFormWeeks={filterOptions.weeks}
           formDataReady={formDataReady}
         />
       </section>
@@ -212,11 +188,7 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
         ) : (
           <>
             <Suspense fallback={null}>
-              <ContentsFilterBar
-                themes={filterOptions.themes}
-                phases={filterOptions.phases}
-                weeks={filterOptions.weeks}
-              />
+              <ContentsFilterBar themes={filterOptions.themes} phases={filterOptions.phases} />
             </Suspense>
 
             {groups.length === 0 ? (

@@ -29,7 +29,6 @@ export type ReviewListContentMeta = {
   themeId: number;
   themeName: string;
   phaseId: number;
-  weekId: number;
   href: string;
 };
 
@@ -186,7 +185,7 @@ export async function fetchReviewListContentOrder(): Promise<{
     supabase
       .from("learning_themes")
       .select(
-        "id, name, display_order, phases:learning_phases(id, name, display_order, weeks:learning_weeks(id, name, display_order, contents:learning_contents(id, title, display_order, week_id)))"
+        "id, name, display_order, phases:learning_phases(id, name, display_order, contents:learning_contents(id, title, display_order, phase_id))"
       )
   ).order("display_order");
 
@@ -209,8 +208,7 @@ export async function fetchReviewListContentOrder(): Promise<{
       themeId,
       themeName,
       phaseId: content.phaseId,
-      weekId: content.weekId,
-      href: `/learn/${themeId}/${content.phaseId}/${content.weekId}/${content.id}`,
+      href: `/learn/${themeId}/${content.phaseId}/${content.id}`,
     });
   }
 

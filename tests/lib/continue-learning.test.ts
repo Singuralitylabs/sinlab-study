@@ -13,7 +13,6 @@ const content = (
   themeId,
   themeName,
   phaseId: themeId * 10,
-  weekId: themeId * 100,
   ...opts,
 });
 
@@ -33,7 +32,7 @@ describe("resolveContinueLearning", () => {
   it("完了が無いときは最初のテーマの先頭コンテンツを返す", () => {
     const next = resolveContinueLearning(ordered, new Set(), new Map());
     expect(next?.id).toBe(1);
-    expect(next?.href).toBe("/learn/1/10/100/1");
+    expect(next?.href).toBe("/learn/1/10/1");
     expect(next?.lastViewedAt).toBeNull();
   });
 

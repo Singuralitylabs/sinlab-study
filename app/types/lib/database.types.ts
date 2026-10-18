@@ -487,6 +487,7 @@ export type Database = {
           is_open_to_trial: boolean;
           is_published: boolean | null;
           pdf_url: string | null;
+          phase_id: number;
           preview_base_html: string | null;
           reference_answer: string | null;
           show_console: boolean | null;
@@ -497,7 +498,6 @@ export type Database = {
           title: string;
           updated_at: string | null;
           video_url: string | null;
-          week_id: number;
         };
         Insert: {
           allowed_submission_types?: string;
@@ -515,6 +515,7 @@ export type Database = {
           is_open_to_trial?: boolean;
           is_published?: boolean | null;
           pdf_url?: string | null;
+          phase_id?: number;
           preview_base_html?: string | null;
           reference_answer?: string | null;
           show_console?: boolean | null;
@@ -525,7 +526,6 @@ export type Database = {
           title: string;
           updated_at?: string | null;
           video_url?: string | null;
-          week_id: number;
         };
         Update: {
           allowed_submission_types?: string;
@@ -543,6 +543,7 @@ export type Database = {
           is_open_to_trial?: boolean;
           is_published?: boolean | null;
           pdf_url?: string | null;
+          phase_id?: number;
           preview_base_html?: string | null;
           reference_answer?: string | null;
           show_console?: boolean | null;
@@ -553,14 +554,13 @@ export type Database = {
           title?: string;
           updated_at?: string | null;
           video_url?: string | null;
-          week_id?: number;
         };
         Relationships: [
           {
-            foreignKeyName: "learning_contents_week_id_fkey";
-            columns: ["week_id"];
+            foreignKeyName: "learning_contents_phase_id_fkey";
+            columns: ["phase_id"];
             isOneToOne: false;
-            referencedRelation: "learning_weeks";
+            referencedRelation: "learning_phases";
             referencedColumns: ["id"];
           },
         ];
@@ -644,50 +644,6 @@ export type Database = {
           updated_at?: string | null;
         };
         Relationships: [];
-      };
-      learning_weeks: {
-        Row: {
-          created_at: string | null;
-          description: string | null;
-          display_order: number | null;
-          id: number;
-          is_deleted: boolean | null;
-          is_published: boolean | null;
-          name: string;
-          phase_id: number;
-          updated_at: string | null;
-        };
-        Insert: {
-          created_at?: string | null;
-          description?: string | null;
-          display_order?: number | null;
-          id?: number;
-          is_deleted?: boolean | null;
-          is_published?: boolean | null;
-          name: string;
-          phase_id: number;
-          updated_at?: string | null;
-        };
-        Update: {
-          created_at?: string | null;
-          description?: string | null;
-          display_order?: number | null;
-          id?: number;
-          is_deleted?: boolean | null;
-          is_published?: boolean | null;
-          name?: string;
-          phase_id?: number;
-          updated_at?: string | null;
-        };
-        Relationships: [
-          {
-            foreignKeyName: "learning_weeks_phase_id_fkey";
-            columns: ["phase_id"];
-            isOneToOne: false;
-            referencedRelation: "learning_phases";
-            referencedColumns: ["id"];
-          },
-        ];
       };
       push_logs: {
         Row: {

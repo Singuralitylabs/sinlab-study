@@ -15,13 +15,12 @@ vi.mock("next/link", () => ({
 import { ContentForm } from "@/app/(authenticated)/manage/(content)/contents/ContentForm";
 import type { LearningContent } from "@/app/types";
 
-const weeks = [{ id: 3, name: "第1週", phaseId: 2 }];
 const phases = [{ id: 2, name: "フェーズ", themeId: 1 }];
 const themes = [{ id: 1, name: "テーマ" }];
 
 const slide = {
   id: 10,
-  week_id: 3,
+  phase_id: 2,
   title: "基礎文法",
   content_type: "slide",
   text_content: "既存の解説",
@@ -50,7 +49,6 @@ const renderForm = async (initialData: LearningContent) => {
       createElement(ContentForm, {
         themes,
         phases,
-        weeks,
         initialData,
         mode: "edit",
         siblingCandidates: [],

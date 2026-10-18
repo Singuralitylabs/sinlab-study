@@ -160,7 +160,7 @@ describe("テーマ修了の文言", () => {
   it("通知の差し替えで開き直す（閉じたままにしない）", async () => {
     const form = await import("node:fs/promises").then((fs) =>
       fs.readFile(
-        "app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/SubmissionForm.tsx",
+        "app/(authenticated)/learn/[themeId]/[phaseId]/[contentId]/SubmissionForm.tsx",
         "utf8"
       )
     );
@@ -172,9 +172,9 @@ describe("テーマ修了の文言", () => {
   it("進捗 API の完了呼び出しは themeCompletion をダイアログに載せる", async () => {
     const fs = await import("node:fs/promises");
     const paths = [
-      "app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/CompleteButton.tsx",
-      "app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/QuizForm.tsx",
-      "app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/ExerciseCompletionStatus.tsx",
+      "app/(authenticated)/learn/[themeId]/[phaseId]/[contentId]/CompleteButton.tsx",
+      "app/(authenticated)/learn/[themeId]/[phaseId]/[contentId]/QuizForm.tsx",
+      "app/(authenticated)/learn/[themeId]/[phaseId]/[contentId]/ExerciseCompletionStatus.tsx",
     ] as const;
     for (const path of paths) {
       const source = await fs.readFile(path, "utf8");

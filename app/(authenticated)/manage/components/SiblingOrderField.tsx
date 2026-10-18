@@ -32,7 +32,7 @@ export function getDefaultInsertAfterId(siblings: SiblingOrderItem[]): number | 
 /**
  * Default (= current position) when an edit doesn't change the parent. Pass a sorted list that
  * includes the target itself. Returns null when it is first or missing from the list (an
- * unclassified/deleted week leaves the sibling list empty) (#189).
+ * unclassified/deleted phase leaves the sibling list empty) (#189).
  */
 export function getCurrentPositionInsertAfterId(
   selfId: number,

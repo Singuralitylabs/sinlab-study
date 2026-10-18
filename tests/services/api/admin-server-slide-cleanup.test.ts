@@ -8,7 +8,6 @@ import {
   deleteContent,
   deletePhase,
   deleteTheme,
-  deleteWeek,
   updateContent,
 } from "@/app/services/api/admin-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
@@ -144,29 +143,10 @@ describe("bulkUpdateContents の slides 削除（issue #145）", () => {
   });
 });
 
-describe("deleteWeek / deletePhase / deleteTheme の slides 削除（issue #145）", () => {
-  it("週削除では配下の pdf_url を削除する", async () => {
-    const { remove } = mockAdminWithStorage({
-      tableResults: {
-        learning_contents: [
-          { data: [{ pdf_url: "gas/slide-01.pdf" }], error: null },
-          { data: null, error: null },
-          { data: [], error: null },
-        ],
-        learning_weeks: { data: null, error: null },
-      },
-    });
-
-    const result = await deleteWeek(1);
-
-    expect(result).toEqual({ error: null, storageRemoved: true });
-    expect(remove).toHaveBeenCalledWith(["gas/slide-01.pdf"]);
-  });
-
+describe("deletePhase / deleteTheme の slides 削除（issue #145）", () => {
   it("フェーズ削除では配下の pdf_url を削除する", async () => {
     const { remove } = mockAdminWithStorage({
       tableResults: {
-        learning_weeks: { data: [{ id: 10 }], error: null },
         learning_contents: [
           { data: [{ pdf_url: "gas/slide-01.pdf" }], error: null },
           { data: null, error: null },
@@ -186,10 +166,6 @@ describe("deleteWeek / deletePhase / deleteTheme の slides 削除（issue #145�
     const { remove } = mockAdminWithStorage({
       tableResults: {
         learning_phases: { data: [{ id: 7 }], error: null },
-        learning_weeks: [
-          { data: [{ id: 10 }], error: null },
-          { data: null, error: null },
-        ],
         learning_contents: [
           { data: [{ pdf_url: "gas/slide-01.pdf" }], error: null },
           { data: null, error: null },
@@ -321,48 +297,9 @@ describe("レビュー指摘の回帰テスト", () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
-  it("pdf_url 取得に失敗した週削除では Storage に触れず storageRemoved: false を返す", async () => {
-    const { remove } = mockAdminWithStorage({
-      tableResults: {
-        learning_contents: [
-          { data: null, error: dbError },
-          { data: null, error: null },
-        ],
-        learning_weeks: { data: null, error: null },
-      },
-    });
-
-    const result = await deleteWeek(1);
-
-    expect(result).toEqual({ error: null, storageRemoved: false });
-    expect(remove).not.toHaveBeenCalled();
-  });
-
-  it("週の論理削除に失敗した場合は Storage 削除を行わない（DB失敗・PDF削除済みの不整合を作らない）", async () => {
-    const { remove } = mockAdminWithStorage({
-      tableResults: {
-        learning_contents: [
-          { data: [{ pdf_url: "gas/slide-01.pdf" }], error: null },
-          { data: null, error: null },
-        ],
-        learning_weeks: { data: null, error: dbError },
-      },
-    });
-
-    const result = await deleteWeek(1);
-
-    expect(result.error).toEqual(dbError);
-    expect(result.storageRemoved).toBe(true);
-    expect(remove).not.toHaveBeenCalled();
-  });
-
   it("フェーズの論理削除に失敗した場合は Storage 削除を行わない", async () => {
     const { remove } = mockAdminWithStorage({
       tableResults: {
-        learning_weeks: [
-          { data: [{ id: 10 }], error: null },
-          { data: null, error: null },
-        ],
         learning_contents: [
           { data: [{ pdf_url: "gas/slide-01.pdf" }], error: null },
           { data: null, error: null },
@@ -517,11 +454,11 @@ describe("スライド孤児削除の往復削減（issue #246）", () => {
 });
 
 describe("updateContent の現在値取得の一本化（issue #246）", () => {
-  it("PUT と同じく week_id と pdf_url を渡すタイトル修正では、現在値の取得は1回で Storage に触れない", async () => {
+  it("PUT と同じく phase_id と pdf_url を渡すタイトル修正では、現在値の取得は1回で Storage に触れない", async () => {
     const { mockClient, remove } = mockAdminWithStorage({
       tableResults: {
         learning_contents: [
-          { data: { week_id: 3, pdf_url: "gas/slide-01.pdf" }, error: null },
+          { data: { phase_id: 3, pdf_url: "gas/slide-01.pdf" }, error: null },
           { data: null, error: null },
         ],
       },
@@ -529,7 +466,7 @@ describe("updateContent の現在値取得の一本化（issue #246）", () => {
 
     const result = await updateContent(1, {
       title: "タイトル修正",
-      week_id: 3,
+      phase_id: 3,
       pdf_url: "gas/slide-01.pdf",
     });
 
@@ -537,7 +474,7 @@ describe("updateContent の現在値取得の一本化（issue #246）", () => {
     expect(remove).not.toHaveBeenCalled();
     expect(mockClient.from).toHaveBeenCalledTimes(2);
     expect(mockClient.from.mock.results[0].value.select).toHaveBeenCalledWith(
-      "week_id, pdf_url, grading_rubric, content_type, submission_file_slots, preview_base_html, show_preview, show_console"
+      "phase_id, pdf_url, grading_rubric, content_type, submission_file_slots, preview_base_html, show_preview, show_console"
     );
   });
 
@@ -545,13 +482,13 @@ describe("updateContent の現在値取得の一本化（issue #246）", () => {
     const { mockClient, remove } = mockAdminWithStorage({
       tableResults: {
         learning_contents: [
-          { data: { week_id: 3, pdf_url: null }, error: null },
+          { data: { phase_id: 3, pdf_url: null }, error: null },
           { data: null, error: null },
         ],
       },
     });
 
-    const result = await updateContent(1, { title: "タイトル修正", week_id: 3, pdf_url: null });
+    const result = await updateContent(1, { title: "タイトル修正", phase_id: 3, pdf_url: null });
 
     expect(result).toEqual({ error: null, storageRemoved: true });
     expect(remove).not.toHaveBeenCalled();
@@ -564,7 +501,7 @@ describe("updateContent の現在値取得の一本化（issue #246）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: "/storage/v1/object/public/slides/gas/slide-01.pdf",
             },
             error: null,
@@ -574,37 +511,37 @@ describe("updateContent の現在値取得の一本化（issue #246）", () => {
       },
     });
 
-    const result = await updateContent(1, { week_id: 3, pdf_url: "gas/slide-01.pdf" });
+    const result = await updateContent(1, { phase_id: 3, pdf_url: "gas/slide-01.pdf" });
 
     expect(result).toEqual({ error: null, storageRemoved: true });
     expect(remove).not.toHaveBeenCalled();
   });
 
-  it("week_id とともに pdf_url を差し替えたときは旧キーを削除する", async () => {
+  it("phase_id とともに pdf_url を差し替えたときは旧キーを削除する", async () => {
     const { remove } = mockAdminWithStorage({
       tableResults: {
         learning_contents: [
-          { data: { week_id: 3, pdf_url: "gas/slide-01.pdf" }, error: null },
+          { data: { phase_id: 3, pdf_url: "gas/slide-01.pdf" }, error: null },
           { data: null, error: null },
           { data: [], error: null },
         ],
       },
     });
 
-    const result = await updateContent(1, { week_id: 3, pdf_url: "gas/slide-02.pdf" });
+    const result = await updateContent(1, { phase_id: 3, pdf_url: "gas/slide-02.pdf" });
 
     expect(result).toEqual({ error: null, storageRemoved: true });
     expect(remove).toHaveBeenCalledWith(["gas/slide-01.pdf"]);
   });
 
-  it("週の判定に現在値が必要なときに取得が失敗したら、更新せずエラーを返す", async () => {
+  it("フェーズの判定に現在値が必要なときに取得が失敗したら、更新せずエラーを返す", async () => {
     const { mockClient, remove } = mockAdminWithStorage({
       tableResults: {
         learning_contents: [{ data: null, error: dbError }],
       },
     });
 
-    const result = await updateContent(1, { week_id: 3, pdf_url: "gas/slide-02.pdf" });
+    const result = await updateContent(1, { phase_id: 3, pdf_url: "gas/slide-02.pdf" });
 
     expect(result).toEqual({ error: dbError, storageRemoved: true });
     expect(remove).not.toHaveBeenCalled();
@@ -681,7 +618,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: {
@@ -712,7 +649,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: {
@@ -739,7 +676,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: {
@@ -766,7 +703,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       tableResults: {
         learning_contents: [
           {
-            data: { week_id: 3, pdf_url: null, content_type: "video", grading_rubric: null },
+            data: { phase_id: 3, pdf_url: null, content_type: "video", grading_rubric: null },
             error: null,
           },
           { data: null, error: null },
@@ -796,7 +733,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: { version: 2, ...input },
@@ -818,7 +755,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       tableResults: {
         learning_contents: [
           {
-            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: null },
+            data: { phase_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: null },
             error: null,
           },
           { data: null, error: null },
@@ -836,7 +773,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       tableResults: {
         learning_contents: [
           {
-            data: { week_id: 3, pdf_url: null, content_type: "video", grading_rubric: null },
+            data: { phase_id: 3, pdf_url: null, content_type: "video", grading_rubric: null },
             error: null,
           },
           { data: null, error: null },
@@ -866,7 +803,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: { version: 4, ...input },
@@ -898,7 +835,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: { version: 2, ...input },
@@ -955,7 +892,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: { version: 2, ...input },
@@ -994,7 +931,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       tableResults: {
         learning_contents: [
           {
-            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
+            data: { phase_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
             error: null,
           },
           { data: [{ id: 1 }], error: null },
@@ -1025,7 +962,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       tableResults: {
         learning_contents: [
           {
-            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
+            data: { phase_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
             error: null,
           },
         ],
@@ -1051,7 +988,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       tableResults: {
         learning_contents: [
           {
-            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
+            data: { phase_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
             error: null,
           },
           { data: [{ id: 1, updated_at: "2026-10-13T00:00:00.000Z" }], error: null },
@@ -1083,7 +1020,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       tableResults: {
         learning_contents: [
           {
-            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
+            data: { phase_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: broken },
             error: null,
           },
           { data: [{ id: 1, updated_at: "2026-10-13T00:00:00.000Z" }], error: null },
@@ -1111,7 +1048,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: storedRubric,
@@ -1142,7 +1079,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: storedRubric,
@@ -1177,7 +1114,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: storedRubric,
@@ -1222,7 +1159,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: storedRubric,
@@ -1262,7 +1199,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       tableResults: {
         learning_contents: [
           {
-            data: { week_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: null },
+            data: { phase_id: 3, pdf_url: null, content_type: "exercise", grading_rubric: null },
             error: null,
           },
           { data: [{ id: 1, updated_at: "2026-10-13T00:00:00.000Z" }], error: null },
@@ -1288,7 +1225,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
       tableResults: {
         learning_contents: [
           {
-            data: { week_id: 3, pdf_url: null, content_type: "video", grading_rubric: null },
+            data: { phase_id: 3, pdf_url: null, content_type: "video", grading_rubric: null },
             error: null,
           },
           { data: [{ id: 1 }], error: null },
@@ -1311,7 +1248,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: tombstone,
@@ -1332,7 +1269,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: tombstone,
@@ -1363,7 +1300,7 @@ describe("updateContent / createContent の採点基準（#305）", () => {
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: storedRubric,

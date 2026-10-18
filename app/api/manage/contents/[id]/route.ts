@@ -23,7 +23,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     }
     const {
       title,
-      week_id,
+      phase_id,
       content_type,
       video_url,
       text_content,
@@ -57,7 +57,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       gradingRubricVersion,
     } = await updateContent(contentId, {
       title,
-      week_id,
+      phase_id,
       content_type,
       video_url,
       text_content,

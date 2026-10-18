@@ -5,7 +5,7 @@
 
 ## 主な機能
 
-- **学習コンテンツ配信** — Theme > Phase > Week > コンテンツの4階層構造で、動画・テキスト・演習・スライドを配信
+- **学習コンテンツ配信** — Theme > Phase > コンテンツの3階層構造で、動画・テキスト・演習・スライドを配信
 - **進捗管理** — コンテンツ単位の完了トグルと、ダッシュボードでの進捗率表示
 - **課題提出** — コード貼り付けまたはURL共有による演習課題の提出
 - **AIレビュー** — 提出コードに対してGemini APIによる自動レビューを実施
@@ -164,7 +164,7 @@ app/
 │   ├── admin/           #   管理者専用画面（/admin/users・/admin/emails・/admin/emails/templates のみ。他は /manage にリダイレクト）
 │   ├── manage/          #   コンテンツ管理画面（admin + maintainer 共通）
 │   ├── instructor/      #   講師向け画面（/manage にリダイレクト）
-│   ├── learn/           #   学習コンテンツ画面（Theme > Phase > Week > Content の4階層）
+│   ├── learn/           #   学習コンテンツ画面（Theme > Phase > Content の3階層）
 │   ├── settings/        #   設定画面（案内メールの配信停止・再開）
 │   ├── submissions/     #   提出履歴画面
 │   ├── components/      #   認証済みレイアウト用コンポーネント
@@ -175,7 +175,7 @@ app/
 │   ├── admin/email-templates/ #   メール文面・サービス名の編集、プレビュー、テスト送信（admin のみ）
 │   ├── admin/email-logs/ #   メール送信履歴（admin のみ）
 │   ├── ai-review/       #   AIレビュー（Gemini API）
-│   ├── manage/          #   コンテンツ管理（phases/weeks/contents/themes）
+│   ├── manage/          #   コンテンツ管理（phases/contents/themes）
 │   ├── onboarding/      #   初回利用ガイドの完了記録
 │   ├── progress/        #   進捗更新
 │   ├── settings/email/  #   案内メールの配信停止・再開（本人用）

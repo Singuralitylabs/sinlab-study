@@ -7,29 +7,28 @@ select * from no_plan();
 
 insert into public.learning_themes (id, name) values (9101, 'pass gate theme');
 insert into public.learning_phases (id, theme_id, name) values (9101, 9101, 'pass gate phase');
-insert into public.learning_weeks (id, phase_id, name) values (9101, 9101, 'pass gate week');
 
-insert into public.learning_contents (id, week_id, title, content_type, grading_rubric)
+insert into public.learning_contents (id, phase_id, title, content_type, grading_rubric)
 values (
   9101, 9101, 'rubric exercise', 'exercise',
   '{"version": 1, "requirements": [{"key": "r1", "name": "A", "description": ""}]}'
 );
-insert into public.learning_contents (id, week_id, title, content_type, grading_rubric)
+insert into public.learning_contents (id, phase_id, title, content_type, grading_rubric)
 values (
   9102, 9101, 'tombstone exercise', 'exercise',
   '{"version": 2, "max_key_number": 1, "requirements": []}'
 );
-insert into public.learning_contents (id, week_id, title, content_type)
+insert into public.learning_contents (id, phase_id, title, content_type)
 values (9103, 9101, 'no rubric exercise', 'exercise');
-insert into public.learning_contents (id, week_id, title, content_type)
+insert into public.learning_contents (id, phase_id, title, content_type)
 values (9104, 9101, 'a video', 'video');
-insert into public.learning_contents (id, week_id, title, content_type, grading_rubric)
+insert into public.learning_contents (id, phase_id, title, content_type, grading_rubric)
 values (
   9105, 9101, 'video that kept a tombstone', 'video',
   '{"version": 2, "max_key_number": 1, "requirements": []}'
 );
 insert into public.learning_contents (
-  id, week_id, title, content_type, grading_rubric, allowed_submission_types
+  id, phase_id, title, content_type, grading_rubric, allowed_submission_types
 )
 values (
   9106, 9101, 'url only exercise', 'exercise',

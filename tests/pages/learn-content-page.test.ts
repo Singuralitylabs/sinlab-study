@@ -33,7 +33,7 @@ vi.mock("@/app/services/api/learning-server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/app/services/api/learning-server")>();
   return {
     ...actual,
-    fetchWeekById: vi.fn(),
+    fetchPhaseWithBreadcrumbById: vi.fn(),
     fetchThemeNavigationIndex: vi.fn(),
     fetchContentById: vi.fn(),
     fetchExerciseReferenceAnswer: vi.fn().mockResolvedValue({ data: null, error: null }),
@@ -54,17 +54,15 @@ vi.mock("@/app/components/AIReviewDisplayNoSSR", () => ({ AIReviewDisplayNoSSR: 
 vi.mock("@/app/components/YouTubeEmbed", () => ({
   YouTubeEmbed: () => createElement("div", { "data-testid": "youtube-embed" }),
 }));
-vi.mock(
-  "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/CompleteButton",
-  () => ({ CompleteButton: () => createElement("div", { "data-testid": "complete-button" }) })
-);
-vi.mock(
-  "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/SubmissionForm",
-  () => ({ SubmissionForm: () => null })
-);
+vi.mock("@/app/(authenticated)/learn/[themeId]/[phaseId]/[contentId]/CompleteButton", () => ({
+  CompleteButton: () => createElement("div", { "data-testid": "complete-button" }),
+}));
+vi.mock("@/app/(authenticated)/learn/[themeId]/[phaseId]/[contentId]/SubmissionForm", () => ({
+  SubmissionForm: () => null,
+}));
 
 import { track } from "@vercel/analytics/server";
-import ContentPage from "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/page";
+import ContentPage from "@/app/(authenticated)/learn/[themeId]/[phaseId]/[contentId]/page";
 import type { NavigationContent } from "@/app/lib/content-navigation";
 import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
 import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
@@ -73,10 +71,10 @@ import {
   fetchContentRequiresReviewPass,
   fetchContentReviewPassUnachievable,
   fetchExerciseReferenceAnswer,
+  fetchPhaseWithBreadcrumbById,
   fetchThemeNavigationIndex,
   fetchUserHasPassingReview,
   fetchUserProgressByContentId,
-  fetchWeekById,
 } from "@/app/services/api/learning-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
@@ -87,28 +85,20 @@ const SIGNED_URL =
   "https://project.supabase.co/storage/v1/object/sign/slides/gas/slide-01.pdf?token=x";
 const PDF_KEY = "gas/slide-01.pdf";
 
-const params = Promise.resolve({ themeId: "1", phaseId: "2", weekId: "3", contentId: "10" });
+const params = Promise.resolve({ themeId: "1", phaseId: "2", contentId: "10" });
 
 const publishedLayer = { is_published: true, is_deleted: false };
-const week = {
-  id: 3,
-  phase_id: 2,
-  name: "第1週",
+const phase = {
+  id: 2,
+  theme_id: 1,
+  name: "フェーズ1",
   ...publishedLayer,
-  phase: {
-    id: 2,
-    theme_id: 1,
-    name: "フェーズ1",
-    ...publishedLayer,
-    theme: { id: 1, name: "GAS", ...publishedLayer },
-  },
+  theme: { id: 1, name: "GAS", ...publishedLayer },
 };
 
 const currentNav: NavigationContent = {
   id: 10,
   title: "基礎文法（スライド）",
-  weekId: 3,
-  weekName: "第1週",
   phaseId: 2,
   phaseName: "フェーズ1",
 };
@@ -120,12 +110,12 @@ const currentSummary = (isOpenToTrial: boolean, isPublished: boolean) => ({
   display_order: 1,
   is_open_to_trial: isOpenToTrial,
   is_published: isPublished,
-  week_id: 3,
+  phase_id: 2,
 });
 
 const slideContent = (overrides: Record<string, unknown> = {}) => ({
   id: 10,
-  week_id: 3,
+  phase_id: 2,
   title: "基礎文法（スライド）",
   content_type: "slide",
   pdf_url: PDF_KEY,
@@ -133,7 +123,7 @@ const slideContent = (overrides: Record<string, unknown> = {}) => ({
   is_published: true,
   is_deleted: false,
   is_open_to_trial: false,
-  week,
+  phase,
   ...overrides,
 });
 
@@ -144,9 +134,9 @@ const setup = ({
   isPublished = true,
   signedUrl = SIGNED_URL,
   orderedContents,
-  extraWeekContents = [],
-  weekOverride,
-  contentWeekOverride,
+  extraPhaseContents = [],
+  phaseOverride,
+  contentPhaseOverride,
 }: {
   userStatus: "active" | "trial";
   userRole?: "member" | "admin" | "maintainer";
@@ -154,15 +144,15 @@ const setup = ({
   isPublished?: boolean;
   signedUrl?: string | null;
   orderedContents?: NavigationContent[];
-  extraWeekContents?: Array<{
+  extraPhaseContents?: Array<{
     id: number;
     title: string;
     display_order: number;
     is_open_to_trial?: boolean;
     is_published?: boolean;
   }>;
-  weekOverride?: typeof week;
-  contentWeekOverride?: typeof week;
+  phaseOverride?: typeof phase;
+  contentPhaseOverride?: typeof phase;
 }) => {
   vi.mocked(getServerAuth).mockResolvedValue({
     user: { id: "auth-uuid" },
@@ -170,8 +160,8 @@ const setup = ({
     userStatus,
     userRole,
   } as never);
-  vi.mocked(fetchWeekById).mockResolvedValue({
-    data: weekOverride ?? week,
+  vi.mocked(fetchPhaseWithBreadcrumbById).mockResolvedValue({
+    data: phaseOverride ?? phase,
     error: null,
   } as never);
   vi.mocked(fetchThemeNavigationIndex).mockResolvedValue({
@@ -179,16 +169,16 @@ const setup = ({
       orderedContents: orderedContents ?? [currentNav],
       paidOnlyCount: 3,
       paidOnlyExerciseCount: 1,
-      currentWeekContents: [
+      currentPhaseContents: [
         currentSummary(isOpenToTrial, isPublished),
-        ...extraWeekContents.map((content) => ({
+        ...extraPhaseContents.map((content) => ({
           id: content.id,
           title: content.title,
           content_type: "text" as const,
           display_order: content.display_order,
           is_open_to_trial: content.is_open_to_trial ?? true,
           is_published: content.is_published ?? true,
-          week_id: 3,
+          phase_id: 2,
         })),
       ],
     },
@@ -198,7 +188,7 @@ const setup = ({
     data: slideContent({
       is_open_to_trial: isOpenToTrial,
       is_published: isPublished,
-      week: contentWeekOverride ?? weekOverride ?? week,
+      phase: contentPhaseOverride ?? phaseOverride ?? phase,
     }),
     error: null,
   } as never);
@@ -270,20 +260,17 @@ describe("学習画面のスライド配信（署名付きURL）", () => {
   });
 
   it("member は theme だけ未公開のとき 404（署名を発行しない）", async () => {
-    // week.phase.theme_id matches but the embedded theme is unpublished (equivalent to null under
+    // phase.theme_id matches but the embedded theme is unpublished (equivalent to null under
     // RLS).
-    const weekThemeUnpublished = {
-      ...week,
-      phase: {
-        ...week.phase,
-        theme: { id: 1, name: "GAS", is_published: false, is_deleted: false },
-      },
+    const phaseThemeUnpublished = {
+      ...phase,
+      theme: { id: 1, name: "GAS", is_published: false, is_deleted: false },
     };
     setup({
       userStatus: "active",
       isOpenToTrial: false,
-      weekOverride: weekThemeUnpublished,
-      contentWeekOverride: weekThemeUnpublished,
+      phaseOverride: phaseThemeUnpublished,
+      contentPhaseOverride: phaseThemeUnpublished,
     });
 
     await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
@@ -293,19 +280,16 @@ describe("学習画面のスライド配信（署名付きURL）", () => {
   it.each(["admin", "maintainer"] as const)(
     "%s は theme 未公開でもプレビューとして署名付きURLを発行する",
     async (userRole) => {
-      const weekThemeUnpublished = {
-        ...week,
-        phase: {
-          ...week.phase,
-          theme: { id: 1, name: "GAS", is_published: false, is_deleted: false },
-        },
+      const phaseThemeUnpublished = {
+        ...phase,
+        theme: { id: 1, name: "GAS", is_published: false, is_deleted: false },
       };
       setup({
         userStatus: "active",
         userRole,
         isOpenToTrial: false,
-        weekOverride: weekThemeUnpublished,
-        contentWeekOverride: weekThemeUnpublished,
+        phaseOverride: phaseThemeUnpublished,
+        contentPhaseOverride: phaseThemeUnpublished,
       });
 
       const html = await render();
@@ -317,12 +301,9 @@ describe("学習画面のスライド配信（署名付きURL）", () => {
 });
 
 describe("親階層が未公開のロック対象コンテンツ（issue #242）", () => {
-  const themeUnpublishedWeek = {
-    ...week,
-    phase: {
-      ...week.phase,
-      theme: { id: 1, name: "非公開テーマ", is_published: false, is_deleted: false },
-    },
+  const themeUnpublishedPhase = {
+    ...phase,
+    theme: { id: 1, name: "非公開テーマ", is_published: false, is_deleted: false },
   };
 
   it("お試しユーザーは theme だけ未公開のロック対象コンテンツで、ロック画面ではなく 404 になる", async () => {
@@ -330,8 +311,8 @@ describe("親階層が未公開のロック対象コンテンツ（issue #242）
     setup({
       userStatus: "trial",
       isOpenToTrial: false,
-      weekOverride: themeUnpublishedWeek,
-      contentWeekOverride: themeUnpublishedWeek,
+      phaseOverride: themeUnpublishedPhase,
+      contentPhaseOverride: themeUnpublishedPhase,
     });
 
     await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
@@ -339,24 +320,24 @@ describe("親階層が未公開のロック対象コンテンツ（issue #242）
   });
 
   it("お試しユーザーは RLS で theme 埋め込みが null のときも 404 になる", async () => {
-    const themeHiddenWeek = { ...week, phase: { ...week.phase, theme: null } };
+    const themeHiddenPhase = { ...phase, theme: null };
     setup({
       userStatus: "trial",
       isOpenToTrial: false,
-      weekOverride: themeHiddenWeek as unknown as typeof week,
-      contentWeekOverride: themeHiddenWeek as unknown as typeof week,
+      phaseOverride: themeHiddenPhase as unknown as typeof phase,
+      contentPhaseOverride: themeHiddenPhase as unknown as typeof phase,
     });
 
     await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
   it("お試しユーザーは phase が論理削除済みのロック対象コンテンツでも 404 になる", async () => {
-    const phaseDeletedWeek = { ...week, phase: { ...week.phase, is_deleted: true } };
+    const phaseDeleted = { ...phase, is_deleted: true };
     setup({
       userStatus: "trial",
       isOpenToTrial: false,
-      weekOverride: phaseDeletedWeek,
-      contentWeekOverride: phaseDeletedWeek,
+      phaseOverride: phaseDeleted,
+      contentPhaseOverride: phaseDeleted,
     });
 
     await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
@@ -366,8 +347,8 @@ describe("親階層が未公開のロック対象コンテンツ（issue #242）
     setup({
       userStatus: "trial",
       isOpenToTrial: true,
-      weekOverride: themeUnpublishedWeek,
-      contentWeekOverride: themeUnpublishedWeek,
+      phaseOverride: themeUnpublishedPhase,
+      contentPhaseOverride: themeUnpublishedPhase,
     });
 
     await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
@@ -385,60 +366,36 @@ describe("親階層が未公開のロック対象コンテンツ（issue #242）
 });
 
 describe("コンテンツ詳細の前後ナビゲーション（issue #208）", () => {
-  const nextWeek: NavigationContent = {
+  const nextInPhase: NavigationContent = {
     id: 20,
     title: "テンプレートを作る",
-    weekId: 4,
-    weekName: "第2週",
     phaseId: 2,
     phaseName: "フェーズ1",
   };
   const nextPhase: NavigationContent = {
     id: 30,
     title: "応用の最初",
-    weekId: 5,
-    weekName: "第1週",
     phaseId: 3,
     phaseName: "フェーズ2",
   };
-  const sameWeekNext: NavigationContent = {
+  const samePhaseNext: NavigationContent = {
     id: 11,
-    title: "同じ週の次",
-    weekId: 3,
-    weekName: "第1週",
+    title: "同じフェーズの次",
     phaseId: 2,
     phaseName: "フェーズ1",
   };
   const lockedNext: NavigationContent = {
     id: 21,
     title: "ロック済みの次",
-    weekId: 4,
-    weekName: "第2週",
     phaseId: 2,
     phaseName: "フェーズ1",
   };
   const unpublishedNext: NavigationContent = {
     id: 40,
     title: "未公開の次",
-    weekId: 4,
-    weekName: "第2週",
     phaseId: 2,
     phaseName: "フェーズ1",
   };
-
-  it("週末尾: 次週の先頭への href（weekId が現在URLと違う）を含み、次の週: を含む", async () => {
-    setup({
-      userStatus: "active",
-      isOpenToTrial: false,
-      orderedContents: [currentNav, nextWeek],
-    });
-
-    const html = await render();
-
-    expect(html).toContain('href="/learn/1/2/4/20"');
-    expect(html).toContain("次の週: ");
-    expect(html).toContain("第2週");
-  });
 
   it("フェーズ末尾: 次フェーズの先頭への href（phaseId も違う）を含み、次のフェーズ: を含む", async () => {
     setup({
@@ -449,22 +406,21 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
 
     const html = await render();
 
-    expect(html).toContain('href="/learn/1/3/5/30"');
+    expect(html).toContain('href="/learn/1/3/30"');
     expect(html).toContain("次のフェーズ: ");
     expect(html).toContain("フェーズ2");
   });
 
-  it("同一週内: 次の週: も 次のフェーズ: も含まない", async () => {
+  it("同一フェーズ内: 次のフェーズ: を含まない", async () => {
     setup({
       userStatus: "active",
       isOpenToTrial: false,
-      orderedContents: [currentNav, sameWeekNext],
+      orderedContents: [currentNav, samePhaseNext],
     });
 
     const html = await render();
 
-    expect(html).toContain('href="/learn/1/2/3/11"');
-    expect(html).not.toContain("次の週:");
+    expect(html).toContain('href="/learn/1/2/11"');
     expect(html).not.toContain("次のフェーズ:");
   });
 
@@ -482,26 +438,26 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
     setup({
       userStatus: "active",
       isOpenToTrial: false,
-      orderedContents: [currentNav, sameWeekNext],
+      orderedContents: [currentNav, samePhaseNext],
     });
 
     const html = await render();
 
-    expect(html).not.toContain('href="/learn/1/2/3/9"');
-    expect(html).toContain('href="/learn/1/2/3/11"');
+    expect(html).not.toContain('href="/learn/1/2/9"');
+    expect(html).toContain('href="/learn/1/2/11"');
   });
 
   it("trial のロック画面でも前後ナビが描画される", async () => {
     setup({
       userStatus: "trial",
       isOpenToTrial: false,
-      orderedContents: [currentNav, nextWeek],
+      orderedContents: [currentNav, nextInPhase],
     });
 
     const html = await render();
 
     expect(html).toContain("このコンテンツは無料プランでは閲覧できません");
-    expect(html).toContain('href="/learn/1/2/4/20"');
+    expect(html).toContain('href="/learn/1/2/20"');
   });
 
   it("trial でロック済み（is_open_to_trial: false）コンテンツが遷移先になる", async () => {
@@ -513,7 +469,7 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
 
     const html = await render();
 
-    expect(html).toContain('href="/learn/1/2/4/21"');
+    expect(html).toContain('href="/learn/1/2/21"');
     expect(html).toContain("ロック済みの次");
   });
 
@@ -530,7 +486,7 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
 
       const html = await render();
 
-      expect(html).toContain('href="/learn/1/2/4/40"');
+      expect(html).toContain('href="/learn/1/2/40"');
       expect(html).toContain("未公開の次");
     }
   );
@@ -545,19 +501,18 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
     expect(html).not.toContain("テーマに戻る");
   });
 
-  it("ナビ縮退時でも同じ週の次へは出る", async () => {
+  it("ナビ縮退時でも同じフェーズの次へは出る", async () => {
     setup({
       userStatus: "active",
       isOpenToTrial: false,
       orderedContents: [],
-      extraWeekContents: [{ id: 11, title: "同じ週の次", display_order: 2 }],
+      extraPhaseContents: [{ id: 11, title: "同じフェーズの次", display_order: 2 }],
     });
 
     const html = await render();
 
-    expect(html).toContain('href="/learn/1/2/3/11"');
-    expect(html).toContain("同じ週の次");
-    expect(html).not.toContain("次の週:");
+    expect(html).toContain('href="/learn/1/2/11"');
+    expect(html).toContain("同じフェーズの次");
     expect(html).not.toContain("テーマに戻る");
     expect(html).not.toContain("フェーズに戻る");
   });
@@ -566,7 +521,7 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
     setup({
       userStatus: "active",
       isOpenToTrial: false,
-      orderedContents: [nextWeek],
+      orderedContents: [nextInPhase],
     });
 
     const html = await render();
@@ -1066,46 +1021,50 @@ describe("演習の再挑戦（#355）", () => {
   });
 });
 
-describe("パンくずの取得元（週の二重取得をやめる）", () => {
-  it("コンテンツが取得できるときは埋め込みの週を使い、fetchWeekById を呼ばない", async () => {
+describe("パンくずの取得元（フェーズの二重取得をやめる）", () => {
+  it("コンテンツが取得できるときは埋め込みのフェーズを使い、fetchPhaseWithBreadcrumbById を呼ばない", async () => {
     setup({ userStatus: "active", isOpenToTrial: true });
 
     const html = await render();
 
     expect(html).toContain("GAS");
-    expect(fetchWeekById).not.toHaveBeenCalled();
+    expect(fetchPhaseWithBreadcrumbById).not.toHaveBeenCalled();
   });
 
-  it("お試しユーザーのロック画面（コンテンツが RLS で取得できない）は fetchWeekById にフォールバックする", async () => {
+  it("お試しユーザーのロック画面（コンテンツが RLS で取得できない）は fetchPhaseWithBreadcrumbById にフォールバックする", async () => {
     setup({ userStatus: "trial", isOpenToTrial: false });
     vi.mocked(fetchContentById).mockResolvedValue({ data: null, error: null } as never);
 
     const html = await render();
 
-    expect(fetchWeekById).toHaveBeenCalledWith(3, "member");
+    expect(fetchPhaseWithBreadcrumbById).toHaveBeenCalledWith(2, "member");
     expect(html).toContain("GAS");
   });
 
-  it("埋め込みの週が URL の weekId と一致しない場合は 404", async () => {
-    setup({ userStatus: "active", isOpenToTrial: true, contentWeekOverride: { ...week, id: 99 } });
+  it("埋め込みのフェーズが URL の phaseId と一致しない場合は 404", async () => {
+    setup({
+      userStatus: "active",
+      isOpenToTrial: true,
+      contentPhaseOverride: { ...phase, id: 99 },
+    });
 
     await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
-  it("コンテンツが見つからず週も取れない場合は 404", async () => {
+  it("コンテンツが見つからずフェーズも取れない場合は 404", async () => {
     setup({ userStatus: "active", isOpenToTrial: true });
     vi.mocked(fetchContentById).mockResolvedValue({ data: null, error: null } as never);
-    vi.mocked(fetchWeekById).mockResolvedValue({ data: null, error: null } as never);
+    vi.mocked(fetchPhaseWithBreadcrumbById).mockResolvedValue({ data: null, error: null } as never);
 
     await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
-  it("論理削除された週のコンテンツは admin でも 404（プレビュー扱いにしない）", async () => {
+  it("論理削除されたフェーズのコンテンツは admin でも 404（プレビュー扱いにしない）", async () => {
     setup({
       userStatus: "active",
       userRole: "admin",
       isOpenToTrial: true,
-      contentWeekOverride: { ...week, is_deleted: true },
+      contentPhaseOverride: { ...phase, is_deleted: true },
     });
 
     await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");

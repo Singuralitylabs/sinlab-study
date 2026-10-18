@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
     }
     const {
       title,
-      week_id,
+      phase_id,
       content_type,
       video_url,
       text_content,
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     const { data, error, publishFailed, previewNotAllowed } = await createContent({
       title,
-      week_id,
+      phase_id,
       content_type,
       video_url,
       text_content,

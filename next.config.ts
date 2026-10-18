@@ -36,6 +36,25 @@ const nextConfig: NextConfig = {
       "pdfjs-dist/web/pdf_viewer.mjs": "pdfjs-dist/legacy/web/pdf_viewer.mjs",
     },
   },
+  async redirects() {
+    // Pre-#426 content URLs carried a week segment; mail links, certificates and bookmarks still
+    // point there. Numeric segments only so they cannot shadow other /learn or /demo routes.
+    return [
+      {
+        source: "/learn/:themeId(\\d+)/:phaseId(\\d+)/:weekId(\\d+)/:contentId(\\d+)",
+        destination: "/learn/:themeId/:phaseId/:contentId",
+        permanent: true,
+      },
+      {
+        source: "/demo/:themeId(\\d+)/:phaseId(\\d+)/:weekId(\\d+)/:contentId(\\d+)",
+        destination: "/demo/:themeId/:phaseId/:contentId",
+        permanent: true,
+      },
+      // The week admin pages are gone; the tree at /manage/contents replaces them.
+      { source: "/manage/weeks/:path*", destination: "/manage/contents", permanent: true },
+      { source: "/admin/weeks/:path*", destination: "/manage/contents", permanent: true },
+    ];
+  },
   async headers() {
     return [
       {

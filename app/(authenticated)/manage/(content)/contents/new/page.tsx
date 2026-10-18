@@ -1,7 +1,7 @@
 import { PageTitle } from "@/app/components/PageTitle";
-import { deriveWeekSelectOptions } from "@/app/lib/content-filtering";
-import { compareGroupLevel, sortWeeksByHierarchy } from "@/app/lib/content-grouping";
-import { fetchAllWeeks, fetchContentSiblingCandidates } from "@/app/services/api/admin-server";
+import { derivePhaseSelectOptions } from "@/app/lib/content-filtering";
+import { compareGroupLevel, sortPhasesByHierarchy } from "@/app/lib/content-grouping";
+import { fetchAllPhases, fetchContentSiblingCandidates } from "@/app/services/api/admin-server";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ContentForm } from "../ContentForm";
 
@@ -17,15 +17,15 @@ function firstParam(value: string | string[] | undefined): string {
 
 export default async function NewContentPage({ searchParams }: NewContentPageProps) {
   const params = await searchParams;
-  const [{ data: weeks }, { data: contents, error: contentsError }] = await Promise.all([
-    fetchAllWeeks(),
+  const [{ data: phases }, { data: contents, error: contentsError }] = await Promise.all([
+    fetchAllPhases(),
     fetchContentSiblingCandidates(),
   ]);
-  const sortedWeeks = weeks ? sortWeeksByHierarchy(weeks) : [];
-  const filterOptions = deriveWeekSelectOptions(sortedWeeks);
+  const sortedPhases = phases ? sortPhasesByHierarchy(phases) : [];
+  const filterOptions = derivePhaseSelectOptions(sortedPhases);
 
   // Treating a failed sibling fetch as "no siblings" would show an empty list although contents
-  // exist under the selected week, and submit with the default head insert. If the DB recovers by
+  // exist under the selected phase, and submit with the default head insert. If the DB recovers by
   // POST time (renumbering inside createContent), all existing contents would be renumbered
   // backward unintentionally, so don't show the form on failure.
   if (contentsError || !contents) {
@@ -54,7 +54,7 @@ export default async function NewContentPage({ searchParams }: NewContentPagePro
       id: content.id,
       label: content.title,
       isPublished: content.is_published,
-      parentId: content.week_id,
+      parentId: content.phase_id,
     }));
 
   return (
@@ -66,11 +66,9 @@ export default async function NewContentPage({ searchParams }: NewContentPagePro
       <ContentForm
         themes={filterOptions.themes}
         phases={filterOptions.phases}
-        weeks={filterOptions.weeks}
-        initialWeekSelection={{
+        initialPhaseSelection={{
           themeId: firstParam(params.theme),
           phaseId: firstParam(params.phase),
-          weekId: firstParam(params.week),
         }}
         siblingCandidates={siblingCandidates}
         mode="create"

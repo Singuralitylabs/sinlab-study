@@ -55,7 +55,7 @@ function mockSummaries(summaries: ReturnType<typeof summary>[]) {
 function mockUserClient(tableResults: Record<string, QueryResult | QueryResult[]> = {}) {
   const client = createMockSupabaseClient({
     tableResults: {
-      learning_contents: { data: { week: { phase: { theme_id: THEME.id } } }, error: null },
+      learning_contents: { data: { phase: { theme_id: THEME.id } }, error: null },
       ...tableResults,
     },
   });
@@ -189,7 +189,7 @@ describe("issueCertificateIfEligible - 発行条件", () => {
 
   it("コンテンツが属するテーマ以外の完了では発行しない", async () => {
     mockUserClient({
-      learning_contents: { data: { week: { phase: { theme_id: 99 } } }, error: null },
+      learning_contents: { data: { phase: { theme_id: 99 } }, error: null },
     });
 
     expect(await issueCertificateIfEligible(params)).toBeNull();
@@ -205,7 +205,7 @@ describe("issueCertificateIfEligible - 冪等性・失敗時", () => {
       theme_name: THEME.name,
     };
     mockUserClient({
-      learning_contents: { data: { week: { phase: { theme_id: THEME.id } } }, error: null },
+      learning_contents: { data: { phase: { theme_id: THEME.id } }, error: null },
       certificates: [
         { data: null, error: null },
         { data: existing, error: null },
@@ -235,7 +235,7 @@ describe("issueCertificateIfEligible - 冪等性・失敗時", () => {
       theme_name: THEME.name,
     };
     mockUserClient({
-      learning_contents: { data: { week: { phase: { theme_id: THEME.id } } }, error: null },
+      learning_contents: { data: { phase: { theme_id: THEME.id } }, error: null },
       certificates: [
         { data: null, error: null },
         { data: null, error: { message: "read failed" } },
@@ -526,16 +526,12 @@ function exerciseCatalog(
         id: themeId,
         phases: [
           {
-            weeks: [
-              {
-                contents: contents.map((content) => ({
-                  id: content.id,
-                  content_type: content.contentType ?? "exercise",
-                  allowed_submission_types: content.allowed,
-                  has_grading_requirements: content.hasRubric === true,
-                })),
-              },
-            ],
+            contents: contents.map((content) => ({
+              id: content.id,
+              content_type: content.contentType ?? "exercise",
+              allowed_submission_types: content.allowed,
+              has_grading_requirements: content.hasRubric === true,
+            })),
           },
         ],
       },

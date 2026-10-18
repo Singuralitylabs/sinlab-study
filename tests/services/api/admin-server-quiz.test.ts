@@ -41,7 +41,7 @@ beforeEach(() => {
 });
 
 const quizRow = {
-  data: { week_id: 3, pdf_url: null, content_type: "quiz", grading_rubric: null },
+  data: { phase_id: 3, pdf_url: null, content_type: "quiz", grading_rubric: null },
   error: null,
 };
 
@@ -104,7 +104,7 @@ describe("updateContent のクイズ設問（#306 レビュー対応）", () => 
     const client = mockAdmin([
       {
         data: {
-          week_id: 3,
+          phase_id: 3,
           pdf_url: null,
           content_type: "exercise",
           grading_rubric: {
@@ -130,7 +130,7 @@ describe("updateContent のクイズ設問（#306 レビュー対応）", () => 
     const client = mockAdmin([
       {
         data: {
-          week_id: 3,
+          phase_id: 3,
           pdf_url: null,
           content_type: "exercise",
           grading_rubric: {
@@ -173,7 +173,7 @@ describe("createContent の設問保存失敗時の取り消し（#306 レビュ
 
     const result = await createContent({
       title: "クイズ",
-      week_id: 3,
+      phase_id: 3,
       content_type: "quiz",
       insertAfterId: null,
       quizQuestions: edited,
@@ -205,7 +205,7 @@ describe("createContent はクイズを非公開で作り、設問の保存後�
 
     const result = await createContent({
       title: "クイズ",
-      week_id: 3,
+      phase_id: 3,
       content_type: "quiz",
       insertAfterId: null,
       is_published: true,
@@ -239,7 +239,7 @@ describe("createContent はクイズを非公開で作り、設問の保存後�
 
     const result = await createContent({
       title: "クイズ",
-      week_id: 3,
+      phase_id: 3,
       content_type: "quiz",
       insertAfterId: null,
       is_published: true,

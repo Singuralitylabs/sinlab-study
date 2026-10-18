@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
-import { QuizForm } from "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/QuizForm";
+import { QuizForm } from "@/app/(authenticated)/learn/[themeId]/[phaseId]/[contentId]/QuizForm";
 
 const question = {
   id: 1,

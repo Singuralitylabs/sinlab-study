@@ -1,69 +1,31 @@
 import { describe, expect, it } from "vitest";
 import {
   getSiblingTailId,
-  groupContentsByWeek,
+  groupContentsByPhase,
   groupPhasesByTheme,
-  groupWeeksByPhase,
   InvalidInsertAfterIdError,
   resolveSiblingRenumber,
   resolveSiblingResequence,
   type SiblingOrderRow,
   sortContentsByHierarchy,
   sortPhasesByHierarchy,
-  sortWeeksByHierarchy,
   toContentTableGroups,
 } from "@/app/lib/content-grouping";
-import type { LearningContentWithWeek, LearningWeekWithPhase } from "@/app/types";
+import type { ManageContentListItem } from "@/app/types";
 
-function makeWeek(
-  overrides: Partial<LearningWeekWithPhase> & { id: number; phase_id: number }
-): LearningWeekWithPhase {
+function makeContent(
+  overrides: Partial<ManageContentListItem> & { id: number; phase_id: number }
+): ManageContentListItem {
   return {
     id: overrides.id,
     phase_id: overrides.phase_id,
-    name: overrides.name ?? `週${overrides.id}`,
-    description: null,
-    display_order: overrides.display_order ?? 0,
-    is_published: true,
-    is_deleted: false,
-    created_at: null,
-    updated_at: null,
-    phase: overrides.phase ?? null,
-  };
-}
-
-function makeContent(
-  overrides: Partial<LearningContentWithWeek> & { id: number; week_id: number }
-): LearningContentWithWeek & { grading_rubric_version: number | null } {
-  return {
-    id: overrides.id,
-    week_id: overrides.week_id,
     title: overrides.title ?? `コンテンツ${overrides.id}`,
     content_type: overrides.content_type ?? "text",
     display_order: overrides.display_order ?? 0,
     is_published: true,
     is_open_to_trial: false,
-    is_deleted: false,
-    video_url: null,
-    description: null,
-    text_content: null,
-    exercise_instructions: null,
-    hint: null,
-    reference_answer: null,
-    starter_files: null,
-    submission_file_slots: null,
-    preview_base_html: null,
-    show_preview: null,
-    show_console: null,
-    grading_rubric: null,
-    has_grading_requirements: false,
     grading_rubric_version: null,
-    allowed_submission_types: "code",
-    code_language: "javascript",
-    pdf_url: null,
-    created_at: null,
-    updated_at: null,
-    week: overrides.week ?? null,
+    phase: overrides.phase ?? null,
   };
 }
 
@@ -115,9 +77,8 @@ const phase2 = {
   theme: theme2,
 };
 
-const week1 = makeWeek({ id: 1, phase_id: 1, name: "週1", display_order: 2, phase: phase1 });
-const week2 = makeWeek({ id: 2, phase_id: 1, name: "週2", display_order: 1, phase: phase1 });
-const week3 = makeWeek({ id: 3, phase_id: 2, name: "週3", display_order: 1, phase: phase2 });
+// Same theme as phase1 but later in display_order.
+const phase1Late = { ...phase1, id: 5, display_order: 2 };
 
 // display_order is number (non-null) in app types, but the DB column has no NOT NULL, so null can
 // occur at runtime. Fixture with a deliberately forged type for that regression.
@@ -144,32 +105,31 @@ const phase3 = {
   updated_at: null,
   theme: themeWithNullOrder,
 };
-const week4 = makeWeek({ id: 4, phase_id: 3, name: "週4", display_order: 1, phase: phase3 });
 
 describe("sortContentsByHierarchy", () => {
-  it("テーマ→フェーズ→週→コンテンツの display_order 順に並び替える", () => {
-    const contentA = makeContent({ id: 1, week_id: 1, display_order: 1, week: week1 });
-    const contentB = makeContent({ id: 2, week_id: 2, display_order: 1, week: week2 });
-    const contentC = makeContent({ id: 3, week_id: 3, display_order: 1, week: week3 });
+  it("テーマ→フェーズ→コンテンツの display_order 順に並び替える", () => {
+    const contentA = makeContent({ id: 1, phase_id: 5, display_order: 1, phase: phase1Late });
+    const contentB = makeContent({ id: 2, phase_id: 1, display_order: 1, phase: phase1 });
+    const contentC = makeContent({ id: 3, phase_id: 2, display_order: 1, phase: phase2 });
 
     const sorted = sortContentsByHierarchy([contentA, contentB, contentC]);
 
     expect(sorted.map((c) => c.id)).toEqual([2, 1, 3]);
   });
 
-  it("同一週内はコンテンツの display_order 順に並ぶ", () => {
-    const contentA = makeContent({ id: 1, week_id: 1, display_order: 2, week: week1 });
-    const contentB = makeContent({ id: 2, week_id: 1, display_order: 1, week: week1 });
+  it("同一フェーズ内はコンテンツの display_order 順に並ぶ", () => {
+    const contentA = makeContent({ id: 1, phase_id: 1, display_order: 2, phase: phase1 });
+    const contentB = makeContent({ id: 2, phase_id: 1, display_order: 1, phase: phase1 });
 
     const sorted = sortContentsByHierarchy([contentA, contentB]);
 
     expect(sorted.map((c) => c.id)).toEqual([2, 1]);
   });
 
-  it("週未設定のコンテンツは末尾にまとめる", () => {
-    const classified = makeContent({ id: 1, week_id: 1, display_order: 1, week: week1 });
-    const unclassifiedA = makeContent({ id: 2, week_id: 99, display_order: 2, week: null });
-    const unclassifiedB = makeContent({ id: 3, week_id: 99, display_order: 1, week: null });
+  it("フェーズ未設定のコンテンツは末尾にまとめる", () => {
+    const classified = makeContent({ id: 1, phase_id: 1, display_order: 1, phase: phase1 });
+    const unclassifiedA = makeContent({ id: 2, phase_id: 99, display_order: 2, phase: null });
+    const unclassifiedB = makeContent({ id: 3, phase_id: 99, display_order: 1, phase: null });
 
     const sorted = sortContentsByHierarchy([unclassifiedA, classified, unclassifiedB]);
 
@@ -177,10 +137,25 @@ describe("sortContentsByHierarchy", () => {
   });
 
   it("テーマの display_order が DB 上 NULL でも末尾にまとめる（number - null が0扱いで先頭に来る回帰）", () => {
-    const classified = makeContent({ id: 1, week_id: 1, display_order: 1, week: week1 });
-    const nullThemeOrder = makeContent({ id: 2, week_id: 4, display_order: 1, week: week4 });
+    const classified = makeContent({ id: 1, phase_id: 1, display_order: 1, phase: phase1 });
+    const nullThemeOrder = makeContent({ id: 2, phase_id: 3, display_order: 1, phase: phase3 });
 
     const sorted = sortContentsByHierarchy([nullThemeOrder, classified]);
+
+    expect(sorted.map((c) => c.id)).toEqual([1, 2]);
+  });
+
+  it("フェーズの display_order が DB 上 NULL でも末尾にまとめる", () => {
+    const phaseWithNullOrder = { ...phase1, id: 4, display_order: null as unknown as number };
+    const classified = makeContent({ id: 1, phase_id: 1, display_order: 1, phase: phase1 });
+    const nullPhaseOrder = makeContent({
+      id: 2,
+      phase_id: 4,
+      display_order: 1,
+      phase: phaseWithNullOrder,
+    });
+
+    const sorted = sortContentsByHierarchy([nullPhaseOrder, classified]);
 
     expect(sorted.map((c) => c.id)).toEqual([1, 2]);
   });
@@ -188,14 +163,14 @@ describe("sortContentsByHierarchy", () => {
   it("階層情報も display_order も両方欠落する場合はNaNにならずidでタイブレークする", () => {
     const contentA = makeContent({
       id: 2,
-      week_id: 99,
-      week: null,
+      phase_id: 99,
+      phase: null,
       display_order: null as unknown as number,
     });
     const contentB = makeContent({
       id: 1,
-      week_id: 99,
-      week: null,
+      phase_id: 99,
+      phase: null,
       display_order: null as unknown as number,
     });
 
@@ -205,8 +180,8 @@ describe("sortContentsByHierarchy", () => {
   });
 
   it("元の配列を破壊しない", () => {
-    const contentA = makeContent({ id: 1, week_id: 1, display_order: 2, week: week1 });
-    const contentB = makeContent({ id: 2, week_id: 1, display_order: 1, week: week1 });
+    const contentA = makeContent({ id: 1, phase_id: 1, display_order: 2, phase: phase1 });
+    const contentB = makeContent({ id: 2, phase_id: 1, display_order: 1, phase: phase1 });
     const original = [contentA, contentB];
 
     sortContentsByHierarchy(original);
@@ -216,110 +191,49 @@ describe("sortContentsByHierarchy", () => {
 
   it("テーマ・フェーズの display_order が同値でも、id タイブレークにより別の親同士のコンテンツが混在しない", () => {
     // The create form's default display_order is 0, so ties across themes/phases are common.
-    // Comparing only by the week/content display_order would interleave contents of different
+    // Comparing only by the content display_order would interleave contents of different
     // groups (regression guard).
     const themeX = { ...theme1, id: 10, display_order: 0 };
     const themeY = { ...theme1, id: 20, display_order: 0 };
     const phaseX = { ...phase1, id: 10, theme_id: 10, display_order: 0, theme: themeX };
     const phaseY = { ...phase1, id: 20, theme_id: 20, display_order: 0, theme: themeY };
-    const weekX = makeWeek({ id: 10, phase_id: 10, display_order: 5, phase: phaseX });
-    const weekY = makeWeek({ id: 20, phase_id: 20, display_order: 1, phase: phaseY });
-    const contentX = makeContent({ id: 10, week_id: 10, display_order: 1, week: weekX });
-    const contentY = makeContent({ id: 20, week_id: 20, display_order: 1, week: weekY });
+    const contentX = makeContent({ id: 10, phase_id: 10, display_order: 5, phase: phaseX });
+    const contentY = makeContent({ id: 20, phase_id: 20, display_order: 1, phase: phaseY });
 
     const sorted = sortContentsByHierarchy([contentY, contentX]);
 
-    // themeX(id10) precedes themeY(id20) via the id tiebreak; comparing only by the week
-    // display_order (weekY:1 < weekX:5) would wrongly put contentY first.
+    // themeX(id10) precedes themeY(id20) via the id tiebreak; comparing only by the content
+    // display_order (contentY:1 < contentX:5) would wrongly put contentY first.
     expect(sorted.map((c) => c.id)).toEqual([10, 20]);
   });
 });
 
-describe("sortWeeksByHierarchy", () => {
-  it("テーマ→フェーズ→週の display_order 順に並び替える", () => {
-    const sorted = sortWeeksByHierarchy([week3, week1, week2]);
+describe("groupContentsByPhase", () => {
+  it("フェーズ単位でグルーピングし、テーマ›フェーズのラベルを付与する", () => {
+    const contentA = makeContent({ id: 1, phase_id: 1, display_order: 1, phase: phase1 });
+    const contentB = makeContent({ id: 2, phase_id: 1, display_order: 2, phase: phase1 });
+    const contentC = makeContent({ id: 3, phase_id: 2, display_order: 1, phase: phase2 });
 
-    expect(sorted.map((w) => w.id)).toEqual([2, 1, 3]);
-  });
-
-  it("フェーズの display_order が DB 上 NULL でも末尾にまとめる", () => {
-    const phaseWithNullOrder = {
-      ...phase1,
-      id: 4,
-      display_order: null as unknown as number,
-    };
-    const weekWithNullPhaseOrder = makeWeek({
-      id: 5,
-      phase_id: 4,
-      name: "週5",
-      display_order: 1,
-      phase: phaseWithNullOrder,
-    });
-
-    const sorted = sortWeeksByHierarchy([weekWithNullPhaseOrder, week1]);
-
-    expect(sorted.map((w) => w.id)).toEqual([1, 5]);
-  });
-
-  it("階層情報がすべて欠落する場合はNaNにならずidでタイブレークする", () => {
-    const weekA = makeWeek({ id: 2, phase_id: 99, display_order: null as unknown as number });
-    const weekB = makeWeek({ id: 1, phase_id: 99, display_order: null as unknown as number });
-
-    const sorted = sortWeeksByHierarchy([weekA, weekB]);
-
-    expect(sorted.map((w) => w.id)).toEqual([1, 2]);
-  });
-
-  it("元の配列を破壊しない", () => {
-    const original = [week1, week2];
-
-    sortWeeksByHierarchy(original);
-
-    expect(original.map((w) => w.id)).toEqual([1, 2]);
-  });
-
-  it("テーマ・フェーズの display_order が同値でも、id タイブレークにより別の親同士の週が混在しない", () => {
-    const themeX = { ...theme1, id: 10, display_order: 0 };
-    const themeY = { ...theme1, id: 20, display_order: 0 };
-    const phaseX = { ...phase1, id: 10, theme_id: 10, display_order: 0, theme: themeX };
-    const phaseY = { ...phase1, id: 20, theme_id: 20, display_order: 0, theme: themeY };
-    const weekX = makeWeek({ id: 10, phase_id: 10, display_order: 5, phase: phaseX });
-    const weekY = makeWeek({ id: 20, phase_id: 20, display_order: 1, phase: phaseY });
-
-    const sorted = sortWeeksByHierarchy([weekY, weekX]);
-
-    // themeX(id10) precedes themeY(id20) via the id tiebreak; comparing only by the week's own
-    // display_order (weekY:1 < weekX:5) would wrongly put weekY first.
-    expect(sorted.map((w) => w.id)).toEqual([10, 20]);
-  });
-});
-
-describe("groupContentsByWeek", () => {
-  it("週単位でグルーピングし、テーマ›フェーズ›週のラベルを付与する", () => {
-    const contentA = makeContent({ id: 1, week_id: 2, display_order: 1, week: week2 });
-    const contentB = makeContent({ id: 2, week_id: 2, display_order: 2, week: week2 });
-    const contentC = makeContent({ id: 3, week_id: 1, display_order: 1, week: week1 });
-
-    const groups = groupContentsByWeek([contentA, contentB, contentC]);
+    const groups = groupContentsByPhase([contentA, contentB, contentC]);
 
     expect(groups).toHaveLength(2);
     expect(groups[0]).toMatchObject({
-      key: "2",
-      label: "テーマ1 › フェーズ1 › 週2",
+      key: "1",
+      label: "テーマ1 › フェーズ1",
     });
     expect(groups[0].contents.map((c) => c.id)).toEqual([1, 2]);
     expect(groups[1]).toMatchObject({
-      key: "1",
-      label: "テーマ1 › フェーズ1 › 週1",
+      key: "2",
+      label: "テーマ2 › フェーズ2",
     });
   });
 
-  it("週未設定のコンテンツは「未分類」グループにまとめる", () => {
-    const classified = makeContent({ id: 1, week_id: 1, display_order: 1, week: week1 });
-    const unclassifiedA = makeContent({ id: 2, week_id: 99, display_order: 1, week: null });
-    const unclassifiedB = makeContent({ id: 3, week_id: 99, display_order: 2, week: null });
+  it("フェーズ未設定のコンテンツは「未分類」グループにまとめる", () => {
+    const classified = makeContent({ id: 1, phase_id: 1, display_order: 1, phase: phase1 });
+    const unclassifiedA = makeContent({ id: 2, phase_id: 99, display_order: 1, phase: null });
+    const unclassifiedB = makeContent({ id: 3, phase_id: 99, display_order: 2, phase: null });
 
-    const groups = groupContentsByWeek([classified, unclassifiedA, unclassifiedB]);
+    const groups = groupContentsByPhase([classified, unclassifiedA, unclassifiedB]);
 
     expect(groups).toHaveLength(2);
     expect(groups[1]).toMatchObject({ key: "unclassified", label: "未分類" });
@@ -327,10 +241,10 @@ describe("groupContentsByWeek", () => {
   });
 
   it("sortContentsByHierarchy と組み合わせると「未分類」グループが末尾になる", () => {
-    const unclassified = makeContent({ id: 1, week_id: 99, display_order: 1, week: null });
-    const classified = makeContent({ id: 2, week_id: 1, display_order: 1, week: week1 });
+    const unclassified = makeContent({ id: 1, phase_id: 99, display_order: 1, phase: null });
+    const classified = makeContent({ id: 2, phase_id: 1, display_order: 1, phase: phase1 });
 
-    const groups = groupContentsByWeek(sortContentsByHierarchy([unclassified, classified]));
+    const groups = groupContentsByPhase(sortContentsByHierarchy([unclassified, classified]));
 
     expect(groups.map((g) => g.key)).toEqual(["1", "unclassified"]);
   });
@@ -395,37 +309,6 @@ describe("sortPhasesByHierarchy", () => {
     // themeX(id10) precedes themeY(id20) via the id tiebreak; comparing only by the phase's own
     // display_order (phaseY:1 < phaseX:5) would wrongly put phaseY first.
     expect(sorted.map((p) => p.id)).toEqual([100, 200]);
-  });
-});
-
-describe("groupWeeksByPhase", () => {
-  it("フェーズ単位でグルーピングし、テーマ›フェーズのラベルを付与する", () => {
-    const groups = groupWeeksByPhase(sortWeeksByHierarchy([week3, week1, week2]));
-
-    expect(groups).toHaveLength(2);
-    expect(groups[0]).toMatchObject({ key: "1", label: "テーマ1 › フェーズ1" });
-    expect(groups[0].weeks.map((w) => w.id)).toEqual([2, 1]);
-    expect(groups[1]).toMatchObject({ key: "2", label: "テーマ2 › フェーズ2" });
-    expect(groups[1].weeks.map((w) => w.id)).toEqual([3]);
-  });
-
-  it("フェーズ未設定の週は「未分類」グループにまとめる", () => {
-    const unclassifiedA = makeWeek({ id: 6, phase_id: 99, display_order: 1, phase: null });
-    const unclassifiedB = makeWeek({ id: 7, phase_id: 99, display_order: 2, phase: null });
-
-    const groups = groupWeeksByPhase([week1, unclassifiedA, unclassifiedB]);
-
-    expect(groups).toHaveLength(2);
-    expect(groups[1]).toMatchObject({ key: "unclassified", label: "未分類" });
-    expect(groups[1].weeks.map((w) => w.id)).toEqual([6, 7]);
-  });
-
-  it("sortWeeksByHierarchy と組み合わせると「未分類」グループが末尾になる", () => {
-    const unclassified = makeWeek({ id: 8, phase_id: 99, display_order: 1, phase: null });
-
-    const groups = groupWeeksByPhase(sortWeeksByHierarchy([unclassified, week1]));
-
-    expect(groups.map((g) => g.key)).toEqual(["1", "unclassified"]);
   });
 });
 
@@ -639,7 +522,7 @@ describe("getSiblingTailId", () => {
 
 describe("toContentTableGroups", () => {
   it("一覧には採点基準の本文ではなくバージョンだけを渡す", () => {
-    const content = makeContent({ id: 1, week_id: 1 });
+    const content = makeContent({ id: 1, phase_id: 1 });
     const [group] = toContentTableGroups([
       { key: "k", label: "l", contents: [{ ...content, grading_rubric_version: 3 }] },
     ] as never);

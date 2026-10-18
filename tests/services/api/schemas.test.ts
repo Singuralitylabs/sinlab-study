@@ -28,7 +28,6 @@ import {
   ThemeCreateSchema,
   ThemeUpdateSchema,
   validateRequest,
-  WeekCreateSchema,
 } from "@/app/services/api/schemas";
 
 describe("PositiveIntSchema", () => {
@@ -283,34 +282,24 @@ describe("PhaseCreateSchema", () => {
   });
 });
 
-describe("WeekCreateSchema", () => {
-  it("phase_id・name・insert_after_idが必須", () => {
-    expect(WeekCreateSchema.safeParse({ name: "週1", insert_after_id: null }).success).toBe(false);
-    expect(
-      WeekCreateSchema.safeParse({ phase_id: 1, name: "週1", insert_after_id: null }).success
-    ).toBe(true);
-    expect(WeekCreateSchema.safeParse({ phase_id: 1, name: "週1" }).success).toBe(false);
-  });
-});
-
 describe("ContentCreateSchema / ContentUpdateSchema", () => {
-  it("title・week_id・content_type・insert_after_idが必須", () => {
+  it("title・phase_id・content_type・insert_after_idが必須", () => {
     expect(ContentCreateSchema.safeParse({}).success).toBe(false);
     expect(
-      ContentCreateSchema.safeParse({ title: "コンテンツ1", week_id: 1, insert_after_id: null })
+      ContentCreateSchema.safeParse({ title: "コンテンツ1", phase_id: 1, insert_after_id: null })
         .success
     ).toBe(false);
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "video",
       }).success
     ).toBe(false);
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "video",
         insert_after_id: null,
       }).success
@@ -318,7 +307,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
   });
 
   describe("pdf_url（スライドのオブジェクトキー）", () => {
-    const base = { title: "スライド", week_id: 1, content_type: "slide", insert_after_id: null };
+    const base = { title: "スライド", phase_id: 1, content_type: "slide", insert_after_id: null };
 
     it("オブジェクトキーはそのまま受理する", () => {
       const result = ContentCreateSchema.safeParse({ ...base, pdf_url: "gas/slide-01.pdf" });
@@ -375,7 +364,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type,
         insert_after_id: null,
         ...(content_type === "quiz"
@@ -398,7 +387,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(
       ContentCreateSchema.safeParse({
         title: "クイズ",
-        week_id: 1,
+        phase_id: 1,
         content_type: "quiz",
         insert_after_id: null,
       }).success
@@ -444,7 +433,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "poll",
         insert_after_id: null,
       }).success
@@ -455,7 +444,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "exercise",
         allowed_submission_types: value,
         insert_after_id: null,
@@ -467,7 +456,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "exercise",
         code_language: value,
         insert_after_id: null,
@@ -478,7 +467,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
   it("description等のMarkdown任意項目はnullを許容する（未入力時の送信形式）", () => {
     const result = ContentCreateSchema.safeParse({
       title: "コンテンツ1",
-      week_id: 1,
+      phase_id: 1,
       content_type: "video",
       description: null,
       video_url: null,
@@ -491,7 +480,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "exercise",
         allowed_submission_types: null,
         insert_after_id: null,
@@ -500,7 +489,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "exercise",
         code_language: null,
         insert_after_id: null,
@@ -511,7 +500,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
   it("starter_files は code_files と同じ形を受理し、null でクリアできる", () => {
     const base = {
       title: "演習1",
-      week_id: 1,
+      phase_id: 1,
       content_type: "exercise" as const,
       insert_after_id: null,
     };
@@ -530,7 +519,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
   it("starter_files は空ファイル名・未知言語・合計文字数超過・重複ファイル名を拒否する", () => {
     const base = {
       title: "演習1",
-      week_id: 1,
+      phase_id: 1,
       content_type: "exercise" as const,
       insert_after_id: null,
     };
@@ -578,7 +567,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
   it("submission_file_slots はファイル名・言語の配列を受理し、null で未指定にできる", () => {
     const base = {
       title: "演習1",
-      week_id: 1,
+      phase_id: 1,
       content_type: "exercise" as const,
       insert_after_id: null,
       code_language: "html" as const,
@@ -602,7 +591,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
   it("submission_file_slots は空ファイル名・未知言語・重複・件数超過・演習以外・初期コードとの不一致を拒否する", () => {
     const base = {
       title: "演習1",
-      week_id: 1,
+      phase_id: 1,
       content_type: "exercise" as const,
       insert_after_id: null,
     };
@@ -666,7 +655,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
   it("プレビューとコンソールは許される構成だけオンにでき、NULL は自動として通る", () => {
     const base = {
       title: "演習1",
-      week_id: 1,
+      phase_id: 1,
       content_type: "exercise" as const,
       insert_after_id: null,
     };
@@ -736,7 +725,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
   });
 
   it("insert_after_idはnullまたは正の整数、0以下・小数は検証エラー", () => {
-    const base = { title: "コンテンツ1", week_id: 1, content_type: "video" as const };
+    const base = { title: "コンテンツ1", phase_id: 1, content_type: "video" as const };
     expect(ContentCreateSchema.safeParse({ ...base, insert_after_id: 2 }).success).toBe(true);
     expect(ContentCreateSchema.safeParse({ ...base, insert_after_id: 0 }).success).toBe(false);
     expect(ContentCreateSchema.safeParse({ ...base, insert_after_id: 1.5 }).success).toBe(false);
