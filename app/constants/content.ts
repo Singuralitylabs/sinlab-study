@@ -36,6 +36,16 @@ export const CONTENT_TYPE_LEARNER_LABELS: Record<ContentType, string> = {
 };
 
 /**
+ * Illustrated thumbnails for the learner cards (640x360 WebP in public/images/content-types).
+ * Partial on purpose: types without a picture (slide, quiz) fall back to the drawn illustration.
+ */
+export const CONTENT_TYPE_THUMBNAILS: Partial<Record<ContentType, string>> = {
+  video: "/images/content-types/video.webp",
+  text: "/images/content-types/text.webp",
+  exercise: "/images/content-types/exercise.webp",
+};
+
+/**
  * Accent per content type for the learner content rows. Green is reserved for "completed"
  * (border-success), so no type uses it; keyed by ContentType so a new type fails to compile until
  * it has a color.

@@ -31,6 +31,19 @@ describe("LearnContentCard（#433）", () => {
     expect(render({ contentType: "text" })).toContain(">解説記事<");
   });
 
+  it("動画・解説記事・演習は画像、スライド・クイズは描画イラストのサムネイルにする", () => {
+    for (const contentType of ["video", "text", "exercise"] as const) {
+      const html = render({ contentType });
+      expect(html).toContain("/images/content-types/");
+      expect(html).not.toContain("<svg");
+    }
+    for (const contentType of ["slide", "quiz"] as const) {
+      const html = render({ contentType });
+      expect(html).toContain("<svg");
+      expect(html).not.toContain("/images/content-types/");
+    }
+  });
+
   it.each(CONTENT_TYPES)("種別 %s のラベルをサムネイルに出す", (contentType) => {
     expect(render({ contentType })).toContain(`>${CONTENT_TYPE_LEARNER_LABELS[contentType]}<`);
   });

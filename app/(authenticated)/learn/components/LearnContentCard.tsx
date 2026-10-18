@@ -1,7 +1,12 @@
 import { Bot, CheckCircle, Lock } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
-import { CONTENT_TYPE_ACCENT_CLASSES, CONTENT_TYPE_LEARNER_LABELS } from "@/app/constants/content";
+import {
+  CONTENT_TYPE_ACCENT_CLASSES,
+  CONTENT_TYPE_LEARNER_LABELS,
+  CONTENT_TYPE_THUMBNAILS,
+} from "@/app/constants/content";
 import type { ContentType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -29,6 +34,7 @@ export function LearnContentCard({
   completed,
   aiReviewed,
 }: LearnContentCardProps) {
+  const thumbnail = CONTENT_TYPE_THUMBNAILS[contentType];
   return (
     <Link href={href} className="block group h-full">
       <Card
@@ -41,7 +47,18 @@ export function LearnContentCard({
             locked ? "bg-muted text-muted-foreground" : CONTENT_TYPE_ACCENT_CLASSES[contentType]
           }`}
         >
-          <ContentTypeIllustration type={contentType} className="h-full w-full p-3" />
+          {thumbnail ? (
+            // Decorative: the type name is rendered as text over the thumbnail.
+            <Image
+              src={thumbnail}
+              alt=""
+              fill
+              sizes="(min-width: 1024px) 280px, (min-width: 640px) 45vw, 100vw"
+              className={`object-cover ${locked ? "grayscale" : ""}`}
+            />
+          ) : (
+            <ContentTypeIllustration type={contentType} className="h-full w-full p-3" />
+          )}
           <span className="absolute left-2 top-2 rounded-full bg-card/80 px-2 py-0.5 text-xs font-medium text-foreground">
             {number}
           </span>
