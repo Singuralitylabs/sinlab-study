@@ -105,10 +105,10 @@ export function ThemeCard({
     <div>
       <Link href={`/learn/${theme.id}`} className="block group">
         <Card
-          className={`overflow-hidden transition-all hover:shadow-md hover:border-primary/20 ${isCompleted ? "border-l-4 border-l-success" : ""}`}
+          className={`overflow-hidden py-0 transition-all hover:shadow-md hover:border-primary/20 ${isCompleted ? "border-l-4 border-l-success" : ""}`}
         >
           <div className="flex">
-            <div className="relative w-36 shrink-0 sm:w-44 bg-linear-to-br from-primary/5 to-primary/15">
+            <div className="relative min-h-24 w-36 shrink-0 sm:w-44 bg-linear-to-br from-primary/5 to-primary/15">
               {theme.image_url ? (
                 <Image
                   src={resolveStorageUrl(theme.image_url)}
