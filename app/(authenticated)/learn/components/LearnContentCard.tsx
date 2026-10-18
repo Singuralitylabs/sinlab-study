@@ -14,6 +14,9 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { ContentTypeIllustration } from "./ContentTypeIllustration";
 
+// One grid row (lg: 3 columns) is above the fold; lazy-loading it makes Next warn about the LCP image.
+const EAGER_THUMBNAIL_COUNT = 3;
+
 interface LearnContentCardProps {
   href: string;
   title: string;
@@ -55,6 +58,7 @@ export function LearnContentCard({
               src={thumbnail}
               alt=""
               fill
+              loading={number <= EAGER_THUMBNAIL_COUNT ? "eager" : undefined}
               sizes="(min-width: 1024px) 280px, (min-width: 640px) 45vw, 100vw"
               className={`object-cover ${locked ? "grayscale" : ""}`}
             />
