@@ -205,25 +205,25 @@ export default async function DemoContentPage({ params }: PageProps) {
 
       <div className="flex items-center justify-between gap-4">
         {prevContent ? (
-          <Button variant="outline" asChild className="flex-1 justify-start">
+          <Button variant="outline" asChild className="min-w-0 flex-1 justify-start">
             <Link href={`${demoBasePath}/${prevContent.id}`}>
               <ChevronLeft className="h-4 w-4 mr-2" />
               <span className="truncate">{prevContent.title}</span>
             </Link>
           </Button>
         ) : (
-          <div className="flex-1" />
+          <div className="min-w-0 flex-1" />
         )}
 
         {nextContent ? (
-          <Button variant="outline" asChild className="flex-1 justify-end">
+          <Button variant="outline" asChild className="min-w-0 flex-1 justify-end">
             <Link href={`${demoBasePath}/${nextContent.id}`}>
               <span className="truncate">{nextContent.title}</span>
               <ChevronRight className="h-4 w-4 ml-2" />
             </Link>
           </Button>
         ) : (
-          <Button asChild className="flex-1 justify-center">
+          <Button asChild className="min-w-0 flex-1 justify-center">
             <Link href={`/demo/${themeIdNum}/${phaseIdNum}`}>フェーズに戻る</Link>
           </Button>
         )}
