@@ -50,6 +50,9 @@ const nextConfig: NextConfig = {
         destination: "/demo/:themeId/:phaseId/:contentId",
         permanent: true,
       },
+      // The week admin pages are gone; the tree at /manage/contents replaces them.
+      { source: "/manage/weeks/:path*", destination: "/manage/contents", permanent: true },
+      { source: "/admin/weeks/:path*", destination: "/manage/contents", permanent: true },
     ];
   },
   async headers() {
