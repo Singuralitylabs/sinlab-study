@@ -1,4 +1,4 @@
-import { BookOpen, CheckCircle, CircleDashed } from "lucide-react";
+import { BookOpen, CheckCircle, PlayCircle } from "lucide-react";
 import { PHASE_PROGRESS_STATUS, type PhaseProgressStatus } from "@/app/lib/phase-progress";
 
 export function PhaseStatusIcon({ status }: { status: PhaseProgressStatus }) {
@@ -11,8 +11,8 @@ export function PhaseStatusIcon({ status }: { status: PhaseProgressStatus }) {
   }
   if (status === PHASE_PROGRESS_STATUS.IN_PROGRESS) {
     return (
-      <div className="p-3 bg-primary/10 rounded-full shrink-0">
-        <CircleDashed aria-label="進行中" className="h-6 w-6 text-primary" />
+      <div className="p-3 bg-amber-100 rounded-full shrink-0 dark:bg-amber-500/20">
+        <PlayCircle aria-label="進行中" className="h-6 w-6 text-amber-600 dark:text-amber-400" />
       </div>
     );
   }
