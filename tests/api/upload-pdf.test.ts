@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/supabase-server");
 
-import { POST } from "@/app/api/upload-pdf/route";
+import { GET, POST } from "@/app/api/upload-pdf/route";
 import { SLIDE_NUMBER_MAX } from "@/app/constants/slides";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -21,6 +21,9 @@ const maintainerAuth = {
 interface MockStorageOptions {
   files?: { name: string }[];
   listError?: unknown;
+  /** Top-level folders of the bucket (entries without an id, as storage-js returns them). */
+  folders?: string[];
+  rootListError?: unknown;
   uploadError?: unknown;
   /**
    * data returned by upload() (built from the saved key when omitted; null reproduces "data: null
@@ -32,9 +35,24 @@ interface MockStorageOptions {
 }
 
 const mockStorage = (options: MockStorageOptions = {}) => {
-  const { files = [], listError = null, uploadError = null, exists: existsResult = true } = options;
+  const {
+    files = [],
+    listError = null,
+    folders = ["gas-advanced"],
+    rootListError = null,
+    uploadError = null,
+    exists: existsResult = true,
+  } = options;
 
-  const list = vi.fn().mockResolvedValue({ data: listError ? null : files, error: listError });
+  const list = vi.fn().mockImplementation(async (path: string) => {
+    if (path === "") {
+      return {
+        data: rootListError ? null : folders.map((name) => ({ name, id: null })),
+        error: rootListError,
+      };
+    }
+    return { data: listError ? null : files, error: listError };
+  });
 
   const upload = vi.fn().mockImplementation(async (path: string) => {
     if (uploadError) {
@@ -160,7 +178,9 @@ describe("POST /api/upload-pdf スライド番号のバリデーション", () =
       contentType: "application/pdf",
       upsert: true,
     });
-    expect(list).not.toHaveBeenCalled();
+    // Only the top-level folder check may list; the folder's files are not scanned for numbering.
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(list).toHaveBeenCalledWith("", expect.anything());
     expect(exists).toHaveBeenCalledWith(expectedPath);
   });
 
@@ -324,6 +344,106 @@ describe("POST /api/upload-pdf 自動採番", () => {
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({ error: "アップロードに失敗しました" });
+  });
+});
+
+describe("POST /api/upload-pdf 保存先フォルダの存在確認 (#440)", () => {
+  const withCreateFolder = (folder: string, createFolder?: string) => {
+    const formData = new FormData();
+    formData.append("file", pdf());
+    formData.append("folder", folder);
+    if (createFolder !== undefined) formData.append("createFolder", createFolder);
+    return new Request("http://localhost/api/upload-pdf", { method: "POST", body: formData });
+  };
+
+  it("存在しないフォルダは、新規作成の明示がなければ400で拒否する（タイプミス対策）", async () => {
+    const { upload } = mockStorage({ folders: ["gas-advanced"] });
+
+    const response = await POST(withCreateFolder("gas-advanc") as never);
+
+    expect(response.status).toBe(400);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("番号を明示した上書きでも、存在しないフォルダは400で拒否する", async () => {
+    const { upload } = mockStorage();
+    const formData = new FormData();
+    formData.append("file", pdf());
+    formData.append("folder", "gas-advanc");
+    formData.append("slideNumber", "1");
+
+    const response = await POST(
+      new Request("http://localhost/api/upload-pdf", { method: "POST", body: formData }) as never
+    );
+
+    expect(response.status).toBe(400);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("createFolder=true なら存在しないフォルダにも作成できる", async () => {
+    const { upload } = mockStorage({ folders: [] });
+
+    const response = await POST(withCreateFolder("new-course", "true") as never);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ path: "new-course/slide-01.pdf" });
+    expect(upload).toHaveBeenCalledOnce();
+  });
+
+  it("createFolder が true 以外の値なら新規作成として扱わない", async () => {
+    const { upload } = mockStorage({ folders: [] });
+
+    const response = await POST(withCreateFolder("new-course", "1") as never);
+
+    expect(response.status).toBe(400);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("フォルダ一覧の取得に失敗したら500を返し、アップロードしない", async () => {
+    const { upload } = mockStorage({ rootListError: { message: "boom" } });
+
+    const response = await POST(request() as never);
+
+    expect(response.status).toBe(500);
+    expect(upload).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/upload-pdf フォルダ一覧", () => {
+  it("フォルダ（idなしのエントリ）だけを返し、直下のファイルは含めない", async () => {
+    const list = vi.fn().mockResolvedValue({
+      data: [
+        { name: "gas-advanced", id: null },
+        { name: "web-dev", id: null },
+        { name: "123_legacy.pdf", id: "object-id" },
+      ],
+      error: null,
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue({
+      storage: { from: vi.fn().mockReturnValue({ list }) },
+    } as never);
+
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ folders: ["gas-advanced", "web-dev"] });
+  });
+
+  it("権限のないロールは403で拒否する", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({ ...maintainerAuth, userRole: "member" } as never);
+    mockStorage();
+
+    const response = await GET();
+
+    expect(response.status).toBe(403);
+  });
+
+  it("未認証は401で拒否する", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({ user: null } as never);
+
+    const response = await GET();
+
+    expect(response.status).toBe(401);
   });
 });
 

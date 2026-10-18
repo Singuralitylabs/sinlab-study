@@ -81,7 +81,8 @@ const submit = async () => {
 
 const submittedBody = () => {
   const fetchMock = vi.mocked(fetch);
-  const init = fetchMock.mock.calls[0]?.[1];
+  // Skip the slide folder listing GET that the form issues on mount.
+  const init = fetchMock.mock.calls.find(([url]) => url !== "/api/upload-pdf")?.[1];
   return JSON.parse(String(init && "body" in init ? init.body : "")) as {
     content_type: string;
     text_content: string | null;

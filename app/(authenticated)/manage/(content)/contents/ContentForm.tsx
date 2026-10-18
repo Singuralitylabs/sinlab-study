@@ -3,7 +3,7 @@
 import { ImagePlus, Loader2, Save, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CONTENT_TYPE_FORM_OPTIONS } from "@/app/constants/content";
 import { SLIDE_NUMBER_MAX } from "@/app/constants/slides";
 import { parseStarterFiles } from "@/app/lib/code-file-inputs";
@@ -171,6 +171,9 @@ const SUBMISSION_TYPE_OPTIONS: {
   { value: "both", label: "コード・URL選択", description: "受講生がどちらかを選択して提出" },
 ];
 
+/** Not a valid folder name (underscores are rejected by SLIDE_FOLDER_PATTERN), so it can't collide. */
+const NEW_FOLDER_OPTION = "__new__";
+
 export function ContentForm({
   themes,
   phases,
@@ -284,6 +287,12 @@ export function ContentForm({
   const initialSlide = parseSlideObjectKey(initialPdfKey);
   const [pdfUrl, setPdfUrl] = useState(initialPdfKey ?? "");
   const [pdfFolder, setPdfFolder] = useState(initialSlide?.folder ?? "");
+  // Existing folders come from the slides bucket; a new one is created only via NEW_FOLDER_OPTION
+  // plus an explicit confirmation, so a typo can't silently open a folder (#440).
+  const [existingFolders, setExistingFolders] = useState<string[]>([]);
+  const [folderListState, setFolderListState] = useState<"loading" | "ready" | "error">("loading");
+  const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderConfirmed, setNewFolderConfirmed] = useState(false);
   const [slideNumber, setSlideNumber] = useState(
     initialSlide ? String(initialSlide.slideNumber) : ""
   );
@@ -334,6 +343,36 @@ export function ContentForm({
     setInsertAfterId(getDefaultInsertAfterId(newVisibleSiblings));
   }
 
+  const isCreatingFolder = pdfFolder === NEW_FOLDER_OPTION;
+  const selectedFolder = isCreatingFolder ? newFolderName.trim().toLowerCase() : pdfFolder;
+  // A saved folder missing from the listing (e.g. an empty folder) must stay selectable.
+  const folderOptions = useMemo(() => {
+    const names = new Set(existingFolders);
+    if (initialSlide?.folder) names.add(initialSlide.folder);
+    return [...names].sort();
+  }, [existingFolders, initialSlide?.folder]);
+
+  useEffect(() => {
+    if (contentType !== "slide") return;
+    let cancelled = false;
+    setFolderListState("loading");
+    fetch("/api/upload-pdf")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("failed");
+        const data = (await response.json()) as { folders?: string[] };
+        if (!cancelled) {
+          setExistingFolders(data.folders ?? []);
+          setFolderListState("ready");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setFolderListState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [contentType]);
+
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -343,9 +382,14 @@ export function ContentForm({
       return;
     }
 
-    const folder = pdfFolder.trim().toLowerCase();
+    const folder = selectedFolder;
     if (!folder) {
-      setMessage({ type: "error", text: "保存先フォルダ（コーススラッグ）を入力してください" });
+      setMessage({
+        type: "error",
+        text: isCreatingFolder
+          ? "新しいフォルダ名を入力してください"
+          : "保存先フォルダを選択してください",
+      });
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -361,6 +405,23 @@ export function ContentForm({
       }
       return;
     }
+    if (isCreatingFolder && !newFolderConfirmed) {
+      setMessage({ type: "error", text: "新しいフォルダを作成する確認にチェックしてください" });
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      return;
+    }
+    if (isCreatingFolder && existingFolders.includes(folder)) {
+      setMessage({
+        type: "error",
+        text: "同名のフォルダが既に存在します。一覧から選択してください",
+      });
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      return;
+    }
 
     setIsUploading(true);
     setMessage(null);
@@ -369,6 +430,9 @@ export function ContentForm({
       const formData = new FormData();
       formData.append("file", file);
       formData.append("folder", folder);
+      if (isCreatingFolder) {
+        formData.append("createFolder", "true");
+      }
       if (slideNumber.trim()) {
         formData.append("slideNumber", slideNumber.trim());
       }
@@ -382,6 +446,13 @@ export function ContentForm({
         const data = await response.json();
         setPdfUrl(data.path);
         setPdfFileName(data.path ?? file.name);
+        if (isCreatingFolder) {
+          // The folder now exists: switch to plain selection so later uploads need no confirmation.
+          setExistingFolders((prev) => [...new Set([...prev, folder])]);
+          setPdfFolder(folder);
+          setNewFolderName("");
+          setNewFolderConfirmed(false);
+        }
         setMessage({ type: "success", text: `スライドをアップロードしました（${data.path}）` });
       } else {
         const data = await response.json();
@@ -780,12 +851,56 @@ export function ContentForm({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="pdfFolder">保存先フォルダ（コーススラッグ）</Label>
-              <Input
+              <select
                 id="pdfFolder"
                 value={pdfFolder}
-                onChange={(e) => setPdfFolder(e.target.value)}
-                placeholder="例: gas-advanced"
-              />
+                onChange={(e) => {
+                  setPdfFolder(e.target.value);
+                  setNewFolderConfirmed(false);
+                }}
+                disabled={folderListState === "loading"}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+              >
+                <option value="">
+                  {folderListState === "loading" ? "読み込み中..." : "フォルダを選択"}
+                </option>
+                {folderOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+                <option value={NEW_FOLDER_OPTION}>新しいフォルダを作成…</option>
+              </select>
+              {folderListState === "error" && (
+                <p className="text-xs text-destructive">
+                  フォルダ一覧を取得できませんでした。ページを再読み込みしてください。
+                </p>
+              )}
+              {isCreatingFolder && (
+                <div className="space-y-2">
+                  <Input
+                    value={newFolderName}
+                    onChange={(e) => {
+                      setNewFolderName(e.target.value);
+                      setNewFolderConfirmed(false);
+                    }}
+                    placeholder="例: gas-advanced"
+                    aria-label="新しいフォルダ名"
+                  />
+                  <label className="flex items-start gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={newFolderConfirmed}
+                      onChange={(e) => setNewFolderConfirmed(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      新しいフォルダ「{selectedFolder || "（未入力）"}
+                      」を作成します。既存コースの綴り違いではないことを確認しました
+                    </span>
+                  </label>
+                </div>
+              )}
               <p className="text-xs text-muted-foreground">
                 slides/&lt;フォルダ&gt;/slide-NN.pdf として保存されます（英小文字・数字・ハイフン）
               </p>

@@ -64,6 +64,88 @@ async function verifyUploadedObject(
 }
 
 /**
+ * Lists the top-level folders of the slides bucket. Folders are the entries without an id; root
+ * level files (legacy timestamped uploads) are not course folders. Throws on failure: treating a
+ * failed listing as "no folders" would let a typo pass as an existing folder or hide every choice.
+ */
+async function listSlideFolders(supabase: AdminSupabaseClient): Promise<string[]> {
+  const { data, error } = await supabase.storage
+    .from(BUCKET_NAME)
+    .list("", { limit: 1000, sortBy: { column: "name", order: "asc" } });
+
+  if (error || !data) {
+    throw new Error(`フォルダ一覧の取得に失敗しました: ${error?.message ?? "unknown error"}`);
+  }
+
+  return data
+    .filter((item) => item.id === null && SLIDE_FOLDER_PATTERN.test(item.name))
+    .map((item) => item.name);
+}
+
+async function authorize(): Promise<NextResponse | null> {
+  const { user, userId, userStatus, userRole } = await getServerAuth();
+  if (!user) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+  if (!userId) {
+    return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
+  }
+  if (userStatus === USER_STATUS.REJECTED) {
+    return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
+  }
+  if (!checkContentPermissions(userRole)) {
+    return NextResponse.json({ error: "アップロード権限がありません" }, { status: 403 });
+  }
+  return null;
+}
+
+/**
+ * A folder not yet in the bucket is created only on explicit request, so a typo can't silently
+ * open a new folder (#440). Returns an error response, or null when the folder may be used.
+ */
+async function rejectUnknownFolder(
+  supabase: AdminSupabaseClient,
+  folder: string,
+  createFolder: boolean
+): Promise<NextResponse | null> {
+  if (createFolder) {
+    return null;
+  }
+  let folders: string[];
+  try {
+    folders = await listSlideFolders(supabase);
+  } catch (listError) {
+    console.error("スライドフォルダ一覧取得エラー:", listError);
+    return NextResponse.json(
+      { error: "フォルダ一覧の取得に失敗しました。時間をおいて再度お試しください" },
+      { status: 500 }
+    );
+  }
+  if (!folders.includes(folder)) {
+    return NextResponse.json(
+      { error: "存在しないフォルダです。新しいフォルダを作成する場合は明示してください" },
+      { status: 400 }
+    );
+  }
+  return null;
+}
+
+export async function GET() {
+  try {
+    const denied = await authorize();
+    if (denied) {
+      return denied;
+    }
+
+    const supabase = await createAdminSupabaseClient();
+    return NextResponse.json({ folders: await listSlideFolders(supabase) });
+  } catch (error) {
+    console.error("スライドフォルダ一覧取得エラー:", error);
+    return NextResponse.json({ error: "フォルダ一覧の取得に失敗しました" }, { status: 500 });
+  }
+}
+
+/**
  * Returns the max existing slide-NN number + 1 (1 if none). Throws if listing fails: a wrong
  * auto-number could overwrite an existing file or misreport a 409.
  */
@@ -100,19 +182,9 @@ async function getNextSlideNumber(supabase: AdminSupabaseClient, folder: string)
 
 export async function POST(request: NextRequest) {
   try {
-    const { user, userId, userStatus, userRole } = await getServerAuth();
-    if (!user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-    }
-    if (!userId) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-    if (userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
-
-    if (!checkContentPermissions(userRole)) {
-      return NextResponse.json({ error: "アップロード権限がありません" }, { status: 403 });
+    const denied = await authorize();
+    if (denied) {
+      return denied;
     }
 
     const formData = await request.formData();
@@ -159,6 +231,8 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const createFolder = formData.get("createFolder") === "true";
+
       let slideNumber: number;
       // Only an absent field triggers auto-numbering; an empty string is invalid.
       if (slideNumberValue !== null) {
@@ -169,8 +243,16 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: invalidSlideNumberMessage() }, { status: 400 });
         }
         slideNumber = parsed;
+        const unknownFolder = await rejectUnknownFolder(supabase, folder, createFolder);
+        if (unknownFolder) {
+          return unknownFolder;
+        }
         allowOverwrite = true;
       } else {
+        const unknownFolder = await rejectUnknownFolder(supabase, folder, createFolder);
+        if (unknownFolder) {
+          return unknownFolder;
+        }
         try {
           slideNumber = await getNextSlideNumber(supabase, folder);
         } catch (listError) {
