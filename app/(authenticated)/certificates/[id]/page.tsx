@@ -2,7 +2,11 @@ import { Share2 } from "lucide-react";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
 import { CERTIFICATE_SERVICE_NAME, getCertificateIssuerName } from "@/app/constants/certificate";
-import { buildCertificateShareUrl } from "@/app/lib/certificate";
+import {
+  buildCertificateFacebookShareUrl,
+  buildCertificateLineShareUrl,
+  buildCertificateShareUrl,
+} from "@/app/lib/certificate";
 import { formatDate } from "@/app/lib/format-date";
 import { parsePositiveInteger } from "@/app/lib/positive-integer";
 import { fetchMyCertificateById } from "@/app/services/api/certificates-server";
@@ -43,10 +47,10 @@ export default async function CertificateDetailPage({
   }
 
   const issuerName = getCertificateIssuerName();
-  const shareUrl = buildCertificateShareUrl(
-    certificate.theme_name,
-    process.env.NEXT_PUBLIC_APP_URL || null
-  );
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || null;
+  const shareUrl = buildCertificateShareUrl(certificate.theme_name, appUrl);
+  const lineShareUrl = buildCertificateLineShareUrl(certificate.theme_name, appUrl);
+  const facebookShareUrl = buildCertificateFacebookShareUrl(appUrl);
 
   return (
     <div className="max-w-5xl mx-auto print:mx-0 print:max-w-none">
@@ -67,6 +71,22 @@ export default async function CertificateDetailPage({
               <Share2 className="h-4 w-4" />X で共有
             </a>
           </Button>
+          {lineShareUrl && (
+            <Button asChild variant="outline">
+              <a href={lineShareUrl} target="_blank" rel="noopener noreferrer">
+                <Share2 className="h-4 w-4" />
+                LINE で共有
+              </a>
+            </Button>
+          )}
+          {facebookShareUrl && (
+            <Button asChild variant="outline">
+              <a href={facebookShareUrl} target="_blank" rel="noopener noreferrer">
+                <Share2 className="h-4 w-4" />
+                Facebook で共有
+              </a>
+            </Button>
+          )}
         </div>
       </div>
 

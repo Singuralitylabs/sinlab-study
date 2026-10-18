@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildCertificateFacebookShareUrl,
+  buildCertificateLineShareUrl,
   buildCertificateShareUrl,
   dashboardCertificateCutoff,
   generateCertificateNo,
@@ -107,5 +109,36 @@ describe("buildCertificateShareUrl", () => {
   it("アプリ URL が未設定なら url を付けない", () => {
     const url = new URL(buildCertificateShareUrl("テーマ", null));
     expect(url.searchParams.has("url")).toBe(false);
+  });
+});
+
+describe("buildCertificateLineShareUrl", () => {
+  it("url にログインページ、text に本文を入れる", () => {
+    const url = new URL(
+      buildCertificateLineShareUrl("GAS 学習（基礎編）", "https://study.example.com/") ?? ""
+    );
+
+    expect(url.origin + url.pathname).toBe("https://social-plugins.line.me/lineit/share");
+    expect(url.searchParams.get("url")).toBe("https://study.example.com/login");
+    expect(url.searchParams.get("text")).toBe("『GAS 学習（基礎編）』を修了しました #SinlabStudy");
+  });
+
+  it("アプリ URL が未設定なら null", () => {
+    expect(buildCertificateLineShareUrl("テーマ", null)).toBeNull();
+  });
+});
+
+describe("buildCertificateFacebookShareUrl", () => {
+  it("u にログインページ、hashtag に # 付きの 1 つを入れる（本文は載せない）", () => {
+    const url = new URL(buildCertificateFacebookShareUrl("https://study.example.com") ?? "");
+
+    expect(url.origin + url.pathname).toBe("https://www.facebook.com/sharer/sharer.php");
+    expect(url.searchParams.get("u")).toBe("https://study.example.com/login");
+    expect(url.searchParams.get("hashtag")).toBe("#SinlabStudy");
+    expect(url.searchParams.has("text")).toBe(false);
+  });
+
+  it("アプリ URL が未設定なら null", () => {
+    expect(buildCertificateFacebookShareUrl(null)).toBeNull();
   });
 });

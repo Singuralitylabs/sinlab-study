@@ -1561,7 +1561,11 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 
 ### 13.5 共有
 
-X 向けの共有リンク（`https://twitter.com/intent/tweet?text=...&url=...`）を出す。本文は「『{テーマ名}』を修了しました #SinlabStudy」、`url` はログインページ（`NEXT_PUBLIC_APP_URL` + `/login`。未設定なら `url` を付けない）。**修了証ページへのリンクは載せない**（本人のみ閲覧可のため）。公開検証ページはスコープ外（法人向けチームプランで必要になった時点で別イシュー）。
+X・LINE・Facebook 向けの共有リンクを出す（印刷時は非表示）。X は `https://twitter.com/intent/tweet?text=...&url=...`、LINE は `https://social-plugins.line.me/lineit/share?url=...&text=...`、Facebook は `https://www.facebook.com/sharer/sharer.php?u=...&hashtag=%23SinlabStudy`（本文は載せられず、ハッシュタグは 1 つだけ）。LINE と Facebook は URL が必須のため、`NEXT_PUBLIC_APP_URL` が未設定ならボタンを出さない。共有先の URL 組み立ては `app/lib/certificate.ts`。Instagram は方式の設計が要るため見送り（#331）。
+
+共有先のログインページには OGP（`og:title` / `og:description` / `og:image`、`twitter:card=summary_large_image`）を設定する（`app/layout.tsx`）。画像は `public/images/ogp.png`（1200×630）。拡張子なしのルート（`opengraph-image` 等）にすると `proxy.ts` が `/login` へリダイレクトしクローラーが取得できないため、静的ファイルにする。`metadataBase` は `NEXT_PUBLIC_APP_URL`（未設定なら付けない）。
+
+X 向けの共有リンクの詳細：本文は「『{テーマ名}』を修了しました #SinlabStudy」、`url` はログインページ（`NEXT_PUBLIC_APP_URL` + `/login`。未設定なら `url` を付けない）。**修了証ページへのリンクは載せない**（本人のみ閲覧可のため）。公開検証ページはスコープ外（法人向けチームプランで必要になった時点で別イシュー）。
 
 ### 13.6 管理画面
 
