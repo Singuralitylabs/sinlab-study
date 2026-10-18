@@ -19,12 +19,15 @@ beforeEach(() => {
 });
 
 describe("TrialBanner", () => {
-  it.each(["/upgrade", "/learn/1/2", "/learn/1/2/3/4"])("%s では何も描画しない", (pathname) => {
-    expect(render(pathname, true)).toBe("");
-    expect(render(pathname, false)).toBe("");
-  });
+  it.each(["/upgrade", "/learn/1", "/learn/1/2", "/learn/1/2/3/4"])(
+    "%s では何も描画しない",
+    (pathname) => {
+      expect(render(pathname, true)).toBe("");
+      expect(render(pathname, false)).toBe("");
+    }
+  );
 
-  it.each(["/", "/learn", "/learn/1", "/upgrade/success"])(
+  it.each(["/", "/learn", "/upgrade/success"])(
     "%s では Stripe 有効時に文面とアップグレードボタンを描画する",
     (pathname) => {
       const html = render(pathname, true);
@@ -43,8 +46,8 @@ describe("TrialBanner", () => {
   });
 
   it("遷移で pathname が変われば表示と非表示が切り替わる", () => {
-    expect(render("/learn/1", true)).not.toBe("");
-    expect(render("/learn/1/2", true)).toBe("");
-    expect(render("/learn/1", true)).not.toBe("");
+    expect(render("/learn", true)).not.toBe("");
+    expect(render("/learn/1", true)).toBe("");
+    expect(render("/learn", true)).not.toBe("");
   });
 });
