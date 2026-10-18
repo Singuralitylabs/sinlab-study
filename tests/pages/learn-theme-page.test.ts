@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/learning-server", async (importOriginal) => ({
@@ -13,6 +13,10 @@ vi.mock("@/app/services/api/ai-review-server", () => ({
   fetchCompletedAIReviewContentIds: vi.fn().mockResolvedValue({ data: new Set<number>() }),
 }));
 
+vi.mock("@/app/services/api/upgrade-price-server", () => ({
+  fetchUpgradePriceLabel: vi.fn().mockResolvedValue("月額1,500円（税込）"),
+}));
+
 import ThemePage from "@/app/(authenticated)/learn/[themeId]/page";
 import {
   fetchContentSummariesByPhaseIds,
@@ -20,6 +24,7 @@ import {
   fetchThemeById,
   fetchUserProgressByContentIds,
 } from "@/app/services/api/learning-server";
+import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const summary = (id: number, phase_id: number, title: string, open = true) => ({
@@ -68,6 +73,11 @@ const render = async () =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(fetchUpgradePriceLabel).mockResolvedValue("月額1,500円（税込）");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("テーマページのフェーズ アコーディオン（#431）", () => {
@@ -98,5 +108,14 @@ describe("テーマページのフェーズ アコーディオン（#431）", ()
     expect(html).toContain("1 / 2 完了");
     expect(html).toContain("0 / 1 完了");
     expect(html).toContain("有料会員向け");
+  });
+
+  it("お試しで鍵付きがあるときだけアップグレード CTA を出す", async () => {
+    vi.stubEnv("STRIPE_ENABLED", "true");
+    setup("trial", []);
+    expect(await render()).toContain('href="/upgrade"');
+
+    setup("active", []);
+    expect(await render()).not.toContain('href="/upgrade"');
   });
 });

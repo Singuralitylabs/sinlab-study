@@ -1,9 +1,7 @@
 import { BookOpen } from "lucide-react";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
-import { UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
-import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import { summarizePhaseProgress } from "@/app/lib/phase-progress";
@@ -20,6 +18,7 @@ import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server"
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { LearnContentRow } from "../../components/LearnContentRow";
+import { LockedContentUpgradeCard } from "../../components/LockedContentUpgradeCard";
 
 interface PageProps {
   params: Promise<{ themeId: string; phaseId: string }>;
@@ -132,19 +131,7 @@ export default async function PhasePage({ params }: PageProps) {
           </div>
 
           {showUpgradeCta && (
-            <Card>
-              <CardContent className="py-4 space-y-2">
-                <p className="text-sm">
-                  鍵付きのコンテンツは有料会員になると閲覧できます
-                  {stripeEnabled && " →"}
-                </p>
-                <UpgradeCta
-                  stripeEnabled={stripeEnabled}
-                  priceLabel={priceLabel}
-                  source={UPGRADE_CTA_SOURCE.PHASE_LIST}
-                />
-              </CardContent>
-            </Card>
+            <LockedContentUpgradeCard stripeEnabled={stripeEnabled} priceLabel={priceLabel} />
           )}
         </div>
       )}

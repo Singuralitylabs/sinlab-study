@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
+import { isStripeEnabled } from "@/app/constants/stripe";
+import { USER_STATUS } from "@/app/constants/user";
 import { compareGroupLevel } from "@/app/lib/content-grouping";
 import { pickInitiallyOpenPhaseId, summarizePhaseProgress } from "@/app/lib/phase-progress";
 import { fetchCompletedAIReviewContentIds } from "@/app/services/api/ai-review-server";
@@ -14,10 +16,12 @@ import {
   fetchUserProgressByContentIds,
   isContentLockedForUser,
 } from "@/app/services/api/learning-server";
+import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { LearnContentRow } from "../components/LearnContentRow";
+import { LockedContentUpgradeCard } from "../components/LockedContentUpgradeCard";
 
 interface PageProps {
   params: Promise<{ themeId: string }>;
@@ -78,6 +82,11 @@ export default async function ThemePage({ params }: PageProps) {
       ? fetchCompletedAIReviewContentIds(userId, exerciseContentIds)
       : Promise.resolve({ data: new Set<number>() }),
   ]);
+
+  // Same condition as the phase page: only trial users with at least one locked item see the CTA.
+  const stripeEnabled = isStripeEnabled();
+  const showUpgradeCta = userStatus === USER_STATUS.TRIAL && contentList.some(isLocked);
+  const priceLabel = showUpgradeCta && stripeEnabled ? await fetchUpgradePriceLabel() : null;
 
   const phaseViews = phaseList.map((phase) => {
     const contents = contentsByPhase.get(phase.id) ?? [];
@@ -176,6 +185,12 @@ export default async function ThemePage({ params }: PageProps) {
               </details>
             );
           })}
+        </div>
+      )}
+
+      {showUpgradeCta && (
+        <div className="mt-4">
+          <LockedContentUpgradeCard stripeEnabled={stripeEnabled} priceLabel={priceLabel} />
         </div>
       )}
     </div>
