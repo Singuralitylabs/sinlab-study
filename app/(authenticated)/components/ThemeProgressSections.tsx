@@ -124,7 +124,7 @@ export function ThemeCard({
               )}
             </div>
 
-            <CardContent className="px-4 pt-4 pb-4 flex-1 min-w-0 sm:px-6">
+            <CardContent className="flex min-w-0 flex-1 flex-col justify-center px-4 pt-4 pb-4 sm:px-6">
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2 min-w-0">
                   {isCompleted ? (
