@@ -44,8 +44,8 @@ export function LearnContentCard({
     <Link href={href} className="block group h-full">
       <Card
         className={`h-full gap-0 overflow-hidden border-2 py-0 transition-all hover:shadow-md ${
-          completed ? "border-success" : CONTENT_TYPE_BORDER_CLASSES[contentType]
-        } ${locked ? "opacity-60" : ""}`}
+          CONTENT_TYPE_BORDER_CLASSES[contentType]
+        } ${completed ? "bg-success/5" : ""} ${locked ? "opacity-60" : ""}`}
       >
         <div
           className={`relative flex aspect-video items-center justify-center ${
@@ -77,7 +77,7 @@ export function LearnContentCard({
           {completed && (
             <CheckCircle
               aria-label="完了"
-              className="absolute right-2 top-2 h-5 w-5 rounded-full bg-card text-success"
+              className="absolute right-2 top-2 h-9 w-9 rounded-full bg-card text-success shadow-sm"
             />
           )}
         </div>
