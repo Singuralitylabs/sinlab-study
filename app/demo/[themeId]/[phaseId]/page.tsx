@@ -33,7 +33,10 @@ export default async function DemoPhasePage({ params }: PageProps) {
 
   const isDemoPhase = ctx !== null && ctx.phase.id === phaseIdNum;
 
-  const demoContentIds = isDemoPhase ? (contents ?? []).map((c) => c.id) : [];
+  // Locked (non-trial) contents can't be completed, so counting them would stop progress below 100%.
+  const demoContentIds = isDemoPhase
+    ? (contents ?? []).filter((c) => c.is_open_to_trial).map((c) => c.id)
+    : [];
 
   return (
     <div className="max-w-4xl mx-auto">
