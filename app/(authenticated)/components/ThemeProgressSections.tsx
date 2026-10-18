@@ -105,17 +105,17 @@ export function ThemeCard({
     <div>
       <Link href={`/learn/${theme.id}`} className="block group">
         <Card
-          className={`overflow-hidden transition-all hover:shadow-md hover:border-primary/20 ${isCompleted ? "border-l-4 border-l-success" : ""}`}
+          className={`overflow-hidden py-0 transition-all hover:shadow-md hover:border-primary/20 ${isCompleted ? "border-l-4 border-l-success" : ""}`}
         >
           <div className="flex">
-            <div className="relative w-24 shrink-0 bg-linear-to-br from-primary/5 to-primary/15">
+            <div className="relative min-h-24 w-36 shrink-0 sm:w-44 bg-linear-to-br from-primary/5 to-primary/15">
               {theme.image_url ? (
                 <Image
                   src={resolveStorageUrl(theme.image_url)}
                   alt={theme.name}
                   fill
-                  className="object-contain"
-                  sizes="96px"
+                  className="object-cover"
+                  sizes="(max-width: 640px) 144px, 176px"
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center">
@@ -124,7 +124,7 @@ export function ThemeCard({
               )}
             </div>
 
-            <CardContent className="pt-4 pb-4 flex-1 min-w-0">
+            <CardContent className="flex min-w-0 flex-1 flex-col justify-center px-4 pt-4 pb-4 sm:px-6">
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2 min-w-0">
                   {isCompleted ? (
