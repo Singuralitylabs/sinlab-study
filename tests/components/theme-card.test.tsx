@@ -23,7 +23,7 @@ describe("ThemeCard", () => {
   it("既定の layout=row は横長（左ボーダー用クラス）でホーム向け", () => {
     const html = renderToStaticMarkup(<ThemeCard summary={baseSummary} />);
     expect(html).toContain("w-28");
-    expect(html).not.toContain("aspect-video");
+    expect(html).not.toContain("h-full flex-col");
     expect(html).toContain("テーマA");
     expect(html).toContain("2 / 4");
   });
