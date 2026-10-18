@@ -14,7 +14,6 @@ import {
   createContentsAtTail,
   createPhase,
   createTheme,
-  createWeek,
   fetchAllContents,
   fetchManageCounts,
   fetchStudentsProgress,
@@ -26,7 +25,6 @@ import {
   updateContent,
   updatePhase,
   updateTheme,
-  updateWeek,
 } from "@/app/services/api/admin-server";
 import {
   createAdminSupabaseClient,
@@ -334,7 +332,6 @@ describe("fetchManageCounts", () => {
       tableResults: {
         learning_themes: { data: null, error: null, count: 2 },
         learning_phases: { data: null, error: null, count: 3 },
-        learning_weeks: { data: null, error: null, count: 4 },
         learning_contents: { data: null, error: null, count: 5 },
       },
     });
@@ -349,7 +346,7 @@ describe("fetchManageCounts", () => {
     const result = await fetchManageCounts();
 
     expect(result.error).toBeNull();
-    expect(result.data).toEqual({ themes: 2, phases: 3, weeks: 4, contents: 5, students: 6 });
+    expect(result.data).toEqual({ themes: 2, phases: 3, contents: 5, students: 6 });
     expect(adminClient.from).toHaveBeenCalledWith("users");
   });
 
@@ -358,7 +355,6 @@ describe("fetchManageCounts", () => {
       tableResults: {
         learning_themes: { data: null, error: null, count: 2 },
         learning_phases: { data: null, error: dbError, count: null },
-        learning_weeks: { data: null, error: null, count: 4 },
         learning_contents: { data: null, error: null, count: 5 },
       },
     });
@@ -373,7 +369,7 @@ describe("fetchManageCounts", () => {
     const result = await fetchManageCounts();
 
     expect(result.error).toEqual(dbError);
-    expect(result.data).toEqual({ themes: 2, phases: 0, weeks: 4, contents: 5, students: 6 });
+    expect(result.data).toEqual({ themes: 2, phases: 0, contents: 5, students: 6 });
   });
 });
 
@@ -763,11 +759,11 @@ describe("parseStrictFilterId", () => {
 });
 
 describe("fetchAllContents（不正なフィルタID）", () => {
-  it("整数として不正な weekId ではクエリを発行せず空配列を返す", async () => {
+  it("整数として不正な phaseId ではクエリを発行せず空配列を返す", async () => {
     const mockClient = createMockSupabaseClient();
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await fetchAllContents({ weekId: "abc" });
+    const result = await fetchAllContents({ phaseId: "abc" });
 
     expect(result).toEqual({ data: [], error: null });
     expect(mockClient.from).not.toHaveBeenCalled();
@@ -928,37 +924,9 @@ describe("createPhase", () => {
   });
 });
 
-describe("createWeek", () => {
-  it("同じphase_id配下だけを兄弟として絞り込み、display_orderを決定してから作成する", async () => {
-    const createdWeek = { id: 100, phase_id: 1, name: "新週", display_order: 1 };
-    const mockClient = createMockSupabaseClient({
-      tableResults: {
-        learning_weeks: [
-          { data: [{ id: 5, display_order: 1 }], error: null },
-          { data: createdWeek, error: null },
-        ],
-      },
-      rpcResults: {
-        bulk_update_sibling_display_order: { data: null, error: null },
-      },
-    });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
-
-    const result = await createWeek({ phase_id: 1, name: "新週", insertAfterId: null });
-
-    expect(result).toEqual({ data: createdWeek, error: null });
-    const siblingsBuilder = mockClient.from.mock.results[0].value;
-    expect(siblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 1);
-    expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
-      p_table: "learning_weeks",
-      p_updates: [{ id: 5, display_order: 2 }],
-    });
-  });
-});
-
 describe("createContent", () => {
-  it("createAdminSupabaseClientを使い、同じweek_id配下だけを兄弟として絞り込む", async () => {
-    const createdContent = { id: 100, week_id: 1, title: "新コンテンツ", display_order: 1 };
+  it("createAdminSupabaseClientを使い、同じphase_id配下だけを兄弟として絞り込む", async () => {
+    const createdContent = { id: 100, phase_id: 1, title: "新コンテンツ", display_order: 1 };
     const mockClient = createMockSupabaseClient({
       tableResults: {
         learning_contents: [
@@ -970,7 +938,7 @@ describe("createContent", () => {
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
     const result = await createContent({
-      week_id: 1,
+      phase_id: 1,
       title: "新コンテンツ",
       content_type: "video",
       insertAfterId: null,
@@ -979,15 +947,15 @@ describe("createContent", () => {
     expect(result).toEqual({ data: createdContent, error: null });
     expect(createAdminSupabaseClient).toHaveBeenCalled();
     const siblingsBuilder = mockClient.from.mock.results[0].value;
-    expect(siblingsBuilder.eq).toHaveBeenCalledWith("week_id", 1);
+    expect(siblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 1);
     const insertBuilder = mockClient.from.mock.results[1].value;
     expect(insertBuilder.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ week_id: 1, title: "新コンテンツ", display_order: 1 })
+      expect.objectContaining({ phase_id: 1, title: "新コンテンツ", display_order: 1 })
     );
   });
 
   it("slide と text の text_content は保存し、それ以外の種別では null にする", async () => {
-    const createdContent = { id: 100, week_id: 1, title: "スライド", display_order: 1 };
+    const createdContent = { id: 100, phase_id: 1, title: "スライド", display_order: 1 };
     const mockClient = createMockSupabaseClient({
       tableResults: {
         learning_contents: [
@@ -1001,14 +969,14 @@ describe("createContent", () => {
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
     await createContent({
-      week_id: 1,
+      phase_id: 1,
       title: "スライド",
       content_type: "slide",
       text_content: "解説記事",
       insertAfterId: null,
     });
     await createContent({
-      week_id: 1,
+      phase_id: 1,
       title: "動画",
       content_type: "video",
       text_content: "残してはいけない",
@@ -1035,7 +1003,7 @@ describe("createContent", () => {
 
     await expect(
       createContent({
-        week_id: 1,
+        phase_id: 1,
         title: "新コンテンツ",
         content_type: "video",
         insertAfterId: 999,
@@ -1264,61 +1232,8 @@ describe("updatePhase（編集時の再採番）", () => {
   });
 });
 
-describe("updateWeek（編集時の再採番）", () => {
-  it("phase_idが変わらず、insertAfterIdも省略した場合、現在値取得も再採番も行わない", async () => {
-    const mockClient = createMockSupabaseClient({
-      tableResults: { learning_weeks: { data: null, error: null } },
-    });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
-
-    const result = await updateWeek(10, { name: "名称変更のみ" });
-
-    expect(result).toEqual({ error: null });
-    expect(mockClient.from).toHaveBeenCalledTimes(1);
-  });
-
-  it("phase_idを変更した場合、移動先(phase_id)配下を対象に再採番してから本体UPDATEし、成功後に移動元(phase_id)配下も再採番する", async () => {
-    const mockClient = createMockSupabaseClient({
-      tableResults: {
-        learning_weeks: [
-          { data: { phase_id: 1 }, error: null },
-          { data: [], error: null },
-          { data: null, error: null },
-          {
-            data: [
-              { id: 2, display_order: 1 },
-              { id: 3, display_order: 3 },
-            ],
-            error: null,
-          },
-        ],
-      },
-      rpcResults: {
-        bulk_update_sibling_display_order: { data: null, error: null },
-      },
-    });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
-
-    const result = await updateWeek(10, { phase_id: 2 });
-
-    expect(result).toEqual({ error: null });
-    const destinationSiblingsBuilder = mockClient.from.mock.results[1].value;
-    expect(destinationSiblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 2);
-    const bodyUpdateBuilder = mockClient.from.mock.results[2].value;
-    expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
-      expect.objectContaining({ phase_id: 2, display_order: 1 })
-    );
-    const sourceSiblingsBuilder = mockClient.from.mock.results[3].value;
-    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 1);
-    expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
-      p_table: "learning_weeks",
-      p_updates: [{ id: 3, display_order: 2 }],
-    });
-  });
-});
-
 describe("updateContent（編集時の再採番）", () => {
-  it("createAdminSupabaseClientを使い、week_idが変わらずinsertAfterIdも省略した場合は再採番しない", async () => {
+  it("createAdminSupabaseClientを使い、phase_idが変わらずinsertAfterIdも省略した場合は再採番しない", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: { learning_contents: { data: null, error: null } },
     });
@@ -1331,11 +1246,11 @@ describe("updateContent（編集時の再採番）", () => {
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
 
-  it("week_idを変更した場合、移動先の兄弟一覧を再採番してから本体UPDATEし、成功後に移動元の欠番も詰め直す", async () => {
+  it("phase_idを変更した場合、移動先の兄弟一覧を再採番してから本体UPDATEし、成功後に移動元の欠番も詰め直す", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         learning_contents: [
-          { data: { week_id: 1 }, error: null },
+          { data: { phase_id: 1 }, error: null },
           { data: [{ id: 20, display_order: 1 }], error: null },
           { data: null, error: null },
           { data: [{ id: 3, display_order: 3 }], error: null },
@@ -1347,17 +1262,17 @@ describe("updateContent（編集時の再採番）", () => {
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await updateContent(10, { week_id: 2 });
+    const result = await updateContent(10, { phase_id: 2 });
 
     expect(result).toEqual({ error: null, storageRemoved: true });
     const destinationSiblingsBuilder = mockClient.from.mock.results[1].value;
-    expect(destinationSiblingsBuilder.eq).toHaveBeenCalledWith("week_id", 2);
+    expect(destinationSiblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 2);
     const bodyUpdateBuilder = mockClient.from.mock.results[2].value;
     expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
-      expect.objectContaining({ week_id: 2, display_order: 2 })
+      expect.objectContaining({ phase_id: 2, display_order: 2 })
     );
     const sourceSiblingsBuilder = mockClient.from.mock.results[3].value;
-    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("week_id", 1);
+    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 1);
     expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
       p_table: "learning_contents",
       p_updates: [{ id: 3, display_order: 1 }],
@@ -1366,7 +1281,7 @@ describe("updateContent（編集時の再採番）", () => {
 
   it("slide の更新は text_content を書き、それ以外の種別へ変えると null にする", async () => {
     const current = {
-      data: { week_id: 3, pdf_url: null, content_type: "slide", grading_rubric: null },
+      data: { phase_id: 3, pdf_url: null, content_type: "slide", grading_rubric: null },
       error: null,
     };
     const written = { data: [{ id: 10, updated_at: "2026-01-01T00:00:00Z" }], error: null };
@@ -1476,7 +1391,7 @@ describe("updateContent / createContent のプレビュー設定（#380 レビ�
         learning_contents: [
           {
             data: {
-              week_id: 3,
+              phase_id: 3,
               pdf_url: null,
               content_type: "exercise",
               grading_rubric: null,
@@ -1549,7 +1464,7 @@ describe("updateContent / createContent のプレビュー設定（#380 レビ�
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
     const result = await createContent({
-      week_id: 1,
+      phase_id: 1,
       title: "JS だけ",
       content_type: "exercise",
       code_language: "javascript",
@@ -1577,7 +1492,7 @@ describe("updateContent / createContent のプレビュー設定（#380 レビ�
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
     const result = await createContent({
-      week_id: 1,
+      phase_id: 1,
       title: "CSS",
       content_type: "exercise",
       code_language: "css",
@@ -1629,7 +1544,7 @@ describe("updateContent / createContent のプレビュー設定（#380 レビ�
 
     const result = await createContentsAtTail([
       {
-        week_id: 1,
+        phase_id: 1,
         title: "JS だけ",
         content_type: "exercise",
         code_language: "javascript",

@@ -11,7 +11,6 @@ import {
   contentTypeStoresTextContent,
   type PhaseFilterOption,
   type ThemeFilterOption,
-  type WeekFilterOption,
 } from "@/app/lib/content-filtering";
 import { insertMarkdownAtSelection } from "@/app/lib/content-image-key";
 import {
@@ -90,16 +89,14 @@ import {
 const SELECT_CLASS_NAME =
   "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs";
 
-interface InitialWeekSelection {
+interface InitialPhaseSelection {
   themeId?: string;
   phaseId?: string;
-  weekId?: string;
 }
 
 interface ContentFormProps {
   themes: ThemeFilterOption[];
   phases: PhaseFilterOption[];
-  weeks: WeekFilterOption[];
   initialData?: LearningContent;
   /** Stored questions (with answers) for a quiz in edit mode. */
   initialQuizQuestions?: QuizQuestionData[];
@@ -108,7 +105,7 @@ interface ContentFormProps {
    * disabled: the editor would start empty and saving would replace the stored questions.
    */
   quizQuestionsUnavailable?: boolean;
-  initialWeekSelection?: InitialWeekSelection;
+  initialPhaseSelection?: InitialPhaseSelection;
   /**
    * Includes the target itself in edit mode so its current position can be found; filtered out in
    * the form before display.
@@ -129,46 +126,30 @@ function parseCreatedContentId(data: unknown): number | undefined {
 }
 
 /**
- * Reverse-lookup of theme/phase from a week id. If the week is missing from the options
- * (unclassified/deleted), skip theme/phase preselection but keep the week value so it can be
- * re-saved.
+ * Reverse-lookup of the theme from a phase id. If the phase is missing from the options
+ * (unclassified/deleted), skip theme preselection but keep the phase value so it can be re-saved.
  */
-function resolveWeekSelection(
-  weekId: string,
-  phases: PhaseFilterOption[],
-  weeks: WeekFilterOption[]
-): { themeId: string; phaseId: string; weekId: string } {
-  const week = weekId ? weeks.find((w) => String(w.id) === weekId) : undefined;
-  if (!week) {
-    return { themeId: "", phaseId: "", weekId };
-  }
-  const phase = phases.find((p) => p.id === week.phaseId);
-  return {
-    themeId: phase ? String(phase.themeId) : "",
-    phaseId: String(week.phaseId),
-    weekId,
-  };
+function resolvePhaseSelection(
+  phaseId: string,
+  phases: PhaseFilterOption[]
+): { themeId: string; phaseId: string } {
+  const phase = phaseId ? phases.find((p) => String(p.id) === phaseId) : undefined;
+  return { themeId: phase ? String(phase.themeId) : "", phaseId };
 }
 
 /**
- * Labels include the unfiltered parent names because a week can be picked without choosing
- * theme/phase; this disambiguates same-named weeks.
+ * Labels include the unfiltered parent name because a phase can be picked without choosing a
+ * theme; this disambiguates same-named phases.
  */
-function buildWeekOptionLabel(
-  week: WeekFilterOption,
-  phases: PhaseFilterOption[],
+function buildPhaseOptionLabel(
+  phase: PhaseFilterOption,
   themes: ThemeFilterOption[],
-  themeId: string,
-  phaseId: string
+  themeId: string
 ): string {
-  if (phaseId) return week.name;
+  if (themeId) return phase.name;
 
-  const phase = phases.find((p) => p.id === week.phaseId);
-  if (themeId) return phase ? `${phase.name} / ${week.name}` : week.name;
-
-  const theme = phase ? themes.find((t) => t.id === phase.themeId) : undefined;
-  const prefix = [theme?.name, phase?.name].filter(Boolean).join(" / ");
-  return prefix ? `${prefix} / ${week.name}` : week.name;
+  const theme = themes.find((t) => t.id === phase.themeId);
+  return theme ? `${theme.name} / ${phase.name}` : phase.name;
 }
 
 type AllowedSubmissionTypes = "code" | "url" | "both";
@@ -190,11 +171,10 @@ const SUBMISSION_TYPE_OPTIONS: {
 export function ContentForm({
   themes,
   phases,
-  weeks,
   initialData,
   initialQuizQuestions = [],
   quizQuestionsUnavailable = false,
-  initialWeekSelection,
+  initialPhaseSelection,
   siblingCandidates = [],
   mode,
   onSuccess,
@@ -208,48 +188,34 @@ export function ContentForm({
 
   const [title, setTitle] = useState(initialData?.title ?? "");
 
-  // Edit mode keeps initialData.week_id even if it is not in the options so saving doesn't clobber
-  // it. Create mode adopts the query-derived selection only when theme, phase and week all exist;
-  // otherwise the form would look unselected yet be submittable.
-  const initialWeekIdValue =
+  // Edit mode keeps initialData.phase_id even if it is not in the options so saving doesn't clobber
+  // it. Create mode adopts the query-derived selection only when the phase exists; otherwise the
+  // form would look unselected yet be submittable.
+  const initialPhaseIdValue =
     mode === "edit"
-      ? (initialData?.week_id?.toString() ?? "")
-      : weeks.some((w) => String(w.id) === initialWeekSelection?.weekId)
-        ? (initialWeekSelection?.weekId ?? "")
+      ? (initialData?.phase_id?.toString() ?? "")
+      : phases.some((p) => String(p.id) === initialPhaseSelection?.phaseId)
+        ? (initialPhaseSelection?.phaseId ?? "")
         : "";
-  const resolvedInitialSelection = resolveWeekSelection(initialWeekIdValue, phases, weeks);
+  const resolvedInitialSelection = resolvePhaseSelection(initialPhaseIdValue, phases);
   const initialThemeIdFallback =
-    mode === "create" && themes.some((t) => String(t.id) === initialWeekSelection?.themeId)
-      ? (initialWeekSelection?.themeId ?? "")
-      : "";
-  // The phase must also belong to the adopted theme; a query like ?theme=1&phase=2 can be
-  // individually valid but inconsistent.
-  const initialPhaseIdFallback =
-    mode === "create" &&
-    phases.some(
-      (p) =>
-        String(p.id) === initialWeekSelection?.phaseId &&
-        (!initialThemeIdFallback || String(p.themeId) === initialThemeIdFallback)
-    )
-      ? (initialWeekSelection?.phaseId ?? "")
+    mode === "create" && themes.some((t) => String(t.id) === initialPhaseSelection?.themeId)
+      ? (initialPhaseSelection?.themeId ?? "")
       : "";
 
   const [themeId, setThemeId] = useState(
     resolvedInitialSelection.themeId || initialThemeIdFallback
   );
-  const [phaseId, setPhaseId] = useState(
-    resolvedInitialSelection.phaseId || initialPhaseIdFallback
-  );
-  const initialWeekId = resolvedInitialSelection.weekId;
-  const [weekId, setWeekId] = useState(initialWeekId);
-  const allSiblingsForWeek = siblingCandidates.filter((c) => String(c.parentId) === weekId);
-  const visibleSiblings = allSiblingsForWeek.filter((c) => c.id !== initialData?.id);
+  const initialPhaseId = resolvedInitialSelection.phaseId;
+  const [phaseId, setPhaseId] = useState(initialPhaseId);
+  const allSiblingsForPhase = siblingCandidates.filter((c) => String(c.parentId) === phaseId);
+  const visibleSiblings = allSiblingsForPhase.filter((c) => c.id !== initialData?.id);
   const [insertAfterId, setInsertAfterId] = useState(() =>
     mode === "edit" && initialData
-      ? getCurrentPositionInsertAfterId(initialData.id, allSiblingsForWeek)
-      : getDefaultInsertAfterId(allSiblingsForWeek)
+      ? getCurrentPositionInsertAfterId(initialData.id, allSiblingsForPhase)
+      : getDefaultInsertAfterId(allSiblingsForPhase)
   );
-  // Omit insert_after_id from the PUT body when neither week nor position was touched (the server
+  // Omit insert_after_id from the PUT body when neither phase nor position was touched (the server
   // then leaves display order alone).
   const initialInsertAfterId = useRef(insertAfterId);
 
@@ -329,32 +295,19 @@ export function ContentForm({
   const [pdfFileName, setPdfFileName] = useState<string | null>(initialPdfKey);
 
   const visiblePhases = phases.filter((p) => !themeId || String(p.themeId) === themeId);
-  const visiblePhaseIds = new Set(visiblePhases.map((p) => p.id));
-  const visibleWeeks = weeks.filter((w) => {
-    if (phaseId) return String(w.phaseId) === phaseId;
-    if (themeId) return visiblePhaseIds.has(w.phaseId);
-    return true;
-  });
 
   function handleThemeChange(value: string) {
     setThemeId(value);
     setPhaseId("");
-    setWeekId("");
     setInsertAfterId(null);
   }
 
   function handlePhaseChange(value: string) {
     setPhaseId(value);
-    setWeekId("");
-    setInsertAfterId(null);
-  }
-
-  function handleWeekChange(value: string) {
-    setWeekId(value);
     const newSiblingsForValue = siblingCandidates.filter((c) => String(c.parentId) === value);
-    // Re-selecting the original week restores the current position; otherwise clearing the week via
-    // the theme/phase selects and picking it again would move the item to the tail.
-    if (mode === "edit" && initialData && value === initialWeekId) {
+    // Re-selecting the original phase restores the current position; otherwise clearing the phase
+    // via the theme select and picking it again would move the item to the tail.
+    if (mode === "edit" && initialData && value === initialPhaseId) {
       setInsertAfterId(getCurrentPositionInsertAfterId(initialData.id, newSiblingsForValue));
       return;
     }
@@ -542,10 +495,12 @@ export function ContentForm({
     setMessage(null);
 
     const positionUnchanged =
-      mode === "edit" && weekId === initialWeekId && insertAfterId === initialInsertAfterId.current;
+      mode === "edit" &&
+      phaseId === initialPhaseId &&
+      insertAfterId === initialInsertAfterId.current;
     const body: Record<string, unknown> = {
       title,
-      week_id: Number(weekId),
+      phase_id: Number(phaseId),
       content_type: contentType,
       insert_after_id: positionUnchanged ? undefined : insertAfterId,
       is_published: isPublished,
@@ -674,7 +629,7 @@ export function ContentForm({
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="themeId">テーマ</Label>
           <select
@@ -698,30 +653,13 @@ export function ContentForm({
             id="phaseId"
             value={phaseId}
             onChange={(e) => handlePhaseChange(e.target.value)}
-            className={SELECT_CLASS_NAME}
-          >
-            <option value="">すべて</option>
-            {visiblePhases.map((phase) => (
-              <option key={phase.id} value={phase.id}>
-                {phase.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="weekId">週</Label>
-          <select
-            id="weekId"
-            value={weekId}
-            onChange={(e) => handleWeekChange(e.target.value)}
             required
             className={SELECT_CLASS_NAME}
           >
             <option value="">選択してください</option>
-            {visibleWeeks.map((week) => (
-              <option key={week.id} value={week.id}>
-                {buildWeekOptionLabel(week, phases, themes, themeId, phaseId)}
+            {visiblePhases.map((phase) => (
+              <option key={phase.id} value={phase.id}>
+                {buildPhaseOptionLabel(phase, themes, themeId)}
               </option>
             ))}
           </select>
@@ -1104,7 +1042,7 @@ export function ContentForm({
       )}
 
       <SiblingOrderField
-        siblings={weekId ? visibleSiblings : null}
+        siblings={phaseId ? visibleSiblings : null}
         insertAfterId={insertAfterId}
         onChange={setInsertAfterId}
         placeholderLabel={mode === "create" ? "ここに追加" : "ここに移動"}
@@ -1160,7 +1098,7 @@ export function ContentForm({
             isLoading ||
             isUploading ||
             !title ||
-            !weekId ||
+            !phaseId ||
             isSlidePdfMissing ||
             createdDraftId !== null
           }

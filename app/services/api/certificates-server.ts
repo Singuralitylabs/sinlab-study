@@ -32,12 +32,12 @@ import type { Certificate, UserRoleType, UserStatusType } from "@/app/types";
 
 const UNIQUE_VIOLATION = "23505";
 
-/** Theme the content belongs to (content -> week -> phase), read with the user's own session. */
+/** Theme the content belongs to (content -> phase), read with the user's own session. */
 async function fetchThemeIdOfContent(contentId: number): Promise<number | null> {
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from("learning_contents")
-    .select("week:learning_weeks(phase:learning_phases(theme_id))")
+    .select("phase:learning_phases(theme_id)")
     .eq("id", contentId)
     .maybeSingle();
 
@@ -45,8 +45,8 @@ async function fetchThemeIdOfContent(contentId: number): Promise<number | null> 
     console.error("[修了証] コンテンツのテーマ取得エラー:", error.message);
     return null;
   }
-  const week = data?.week as unknown as { phase: { theme_id: number } | null } | null;
-  return week?.phase?.theme_id ?? null;
+  const phase = data?.phase as unknown as { theme_id: number } | null;
+  return phase?.theme_id ?? null;
 }
 
 async function fetchExistingIssuedCertificate(
@@ -212,7 +212,7 @@ async function fetchPublishedExercises(): Promise<Map<number, CertificateExercis
     supabase
       .from("learning_themes")
       .select(
-        "id, phases:learning_phases(weeks:learning_weeks(contents:learning_contents(id, content_type, allowed_submission_types, has_grading_requirements)))"
+        "id, phases:learning_phases(contents:learning_contents(id, content_type, allowed_submission_types, has_grading_requirements))"
       )
   );
   if (error) {
@@ -231,30 +231,26 @@ async function fetchPublishedExercises(): Promise<Map<number, CertificateExercis
       id: number;
       phases:
         | {
-            weeks: {
-              contents: {
-                id: number;
-                content_type: string;
-                allowed_submission_types: string;
-                has_grading_requirements: boolean;
-              }[];
+            contents: {
+              id: number;
+              content_type: string;
+              allowed_submission_types: string;
+              has_grading_requirements: boolean;
             }[];
           }[]
         | null;
     };
     const exercises: CertificateExercise[] = [];
     for (const phase of row.phases ?? []) {
-      for (const week of phase.weeks ?? []) {
-        for (const content of week.contents ?? []) {
-          if (content.content_type !== "exercise") {
-            continue;
-          }
-          exercises.push({
-            id: content.id,
-            allowedSubmissionTypes: content.allowed_submission_types,
-            hasRubric: content.has_grading_requirements === true,
-          });
+      for (const content of phase.contents ?? []) {
+        if (content.content_type !== "exercise") {
+          continue;
         }
+        exercises.push({
+          id: content.id,
+          allowedSubmissionTypes: content.allowed_submission_types,
+          hasRubric: content.has_grading_requirements === true,
+        });
       }
     }
     if (exercises.length > 0) {

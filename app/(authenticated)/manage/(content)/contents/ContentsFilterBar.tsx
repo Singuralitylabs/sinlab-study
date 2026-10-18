@@ -7,7 +7,6 @@ import {
   isContentType,
   type PhaseFilterOption,
   type ThemeFilterOption,
-  type WeekFilterOption,
 } from "@/app/lib/content-filtering";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,30 +17,27 @@ const SELECT_CLASS_NAME =
 interface ContentsFilterBarProps {
   themes: ThemeFilterOption[];
   phases: PhaseFilterOption[];
-  weeks: WeekFilterOption[];
 }
 
 interface ContentsFilterValues {
   theme: string;
   phase: string;
-  week: string;
   type: string;
   q: string;
 }
 
 /**
- * Theme/phase/week/type render straight from useSearchParams() as the single source of truth:
+ * Theme/phase/type render straight from useSearchParams() as the single source of truth:
  * mirroring them in local state would miss URL changes from outside this component (the "clear
  * filters" link, browser back/forward) and leave a stale selection. Only the title search uses
  * debounced local state, to avoid a URL update per keystroke.
  */
-export function ContentsFilterBar({ themes, phases, weeks }: ContentsFilterBarProps) {
+export function ContentsFilterBar({ themes, phases }: ContentsFilterBarProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const theme = searchParams.get("theme") ?? "";
   const phase = searchParams.get("phase") ?? "";
-  const week = searchParams.get("week") ?? "";
   // For an invalid type from a hand-typed URL the server ignores it and shows everything, so
   // normalize the select to "all" to keep the UI consistent with the results.
   const rawType = searchParams.get("type") ?? "";
@@ -59,19 +55,12 @@ export function ContentsFilterBar({ themes, phases, weeks }: ContentsFilterBarPr
   }, [urlQ]);
 
   const visiblePhases = phases.filter((p) => !theme || String(p.themeId) === theme);
-  const visiblePhaseIds = new Set(visiblePhases.map((p) => p.id));
-  const visibleWeeks = weeks.filter((w) => {
-    if (phase) return String(w.phaseId) === phase;
-    if (theme) return visiblePhaseIds.has(w.phaseId);
-    return true;
-  });
 
   const updateQuery = useCallback(
     (next: ContentsFilterValues) => {
       const query = new URLSearchParams();
       if (next.theme) query.set("theme", next.theme);
       if (next.phase) query.set("phase", next.phase);
-      if (next.week) query.set("week", next.week);
       if (next.type) query.set("type", next.type);
       const trimmedQ = next.q.trim();
       if (trimmedQ) query.set("q", trimmedQ);
@@ -82,31 +71,27 @@ export function ContentsFilterBar({ themes, phases, weeks }: ContentsFilterBarPr
   );
 
   function handleThemeChange(value: string) {
-    updateQuery({ theme: value, phase: "", week: "", type, q });
+    updateQuery({ theme: value, phase: "", type, q });
   }
 
   function handlePhaseChange(value: string) {
-    updateQuery({ theme, phase: value, week: "", type, q });
-  }
-
-  function handleWeekChange(value: string) {
-    updateQuery({ theme, phase, week: value, type, q });
+    updateQuery({ theme, phase: value, type, q });
   }
 
   function handleTypeChange(value: string) {
-    updateQuery({ theme, phase, week, type: value, q });
+    updateQuery({ theme, phase, type: value, q });
   }
 
   useEffect(() => {
     if (q.trim() === urlQ) return;
     const timer = setTimeout(() => {
-      updateQuery({ theme, phase, week, type, q });
+      updateQuery({ theme, phase, type, q });
     }, 300);
     return () => clearTimeout(timer);
-  }, [q, urlQ, theme, phase, week, type, updateQuery]);
+  }, [q, urlQ, theme, phase, type, updateQuery]);
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5 mb-4">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 mb-4">
       <div className="space-y-1">
         <Label htmlFor="filter-theme">テーマ</Label>
         <select
@@ -136,23 +121,6 @@ export function ContentsFilterBar({ themes, phases, weeks }: ContentsFilterBarPr
           {visiblePhases.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="space-y-1">
-        <Label htmlFor="filter-week">週</Label>
-        <select
-          id="filter-week"
-          value={week}
-          onChange={(e) => handleWeekChange(e.target.value)}
-          className={SELECT_CLASS_NAME}
-        >
-          <option value="">すべて</option>
-          {visibleWeeks.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.name}
             </option>
           ))}
         </select>

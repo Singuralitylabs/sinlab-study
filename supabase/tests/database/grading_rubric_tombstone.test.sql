@@ -7,8 +7,7 @@ select * from no_plan();
 
 insert into public.learning_themes (id, name) values (9001, 'tombstone theme');
 insert into public.learning_phases (id, theme_id, name) values (9001, 9001, 'tombstone phase');
-insert into public.learning_weeks (id, phase_id, name) values (9001, 9001, 'tombstone week');
-insert into public.learning_contents (id, week_id, title, content_type, grading_rubric)
+insert into public.learning_contents (id, phase_id, title, content_type, grading_rubric)
 values (
   9001, 9001, 'tombstone exercise', 'exercise',
   '{"version": 2, "max_key_number": 5, "requirements": [{"key": "r1", "name": "A", "description": ""}, {"key": "r7", "name": "B", "description": ""}]}'
@@ -42,7 +41,7 @@ select is(
 );
 
 -- A row that never had a rubric stays NULL.
-insert into public.learning_contents (id, week_id, title, content_type)
+insert into public.learning_contents (id, phase_id, title, content_type)
 values (9002, 9001, 'never had a rubric', 'exercise');
 update public.learning_contents set grading_rubric = null where id = 9002;
 select is(

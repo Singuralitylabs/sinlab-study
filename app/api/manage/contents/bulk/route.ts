@@ -100,12 +100,12 @@ export async function POST(request: Request) {
         : undefined;
 
     if (error) {
-      // A missing week_id (FK) or a value the DB CHECK rejects is the caller's input, not a
+      // A missing phase_id (FK) or a value the DB CHECK rejects is the caller's input, not a
       // server fault, so report it as 400 to tell it apart from a DB outage.
       const isInputError = error.code === "23503" || error.code === "23514";
       return NextResponse.json(
         {
-          error: `${(failedIndex ?? 0) + 1}件目のコンテンツの作成に失敗しました（それより前の${created.length}件は作成済み）${isInputError ? "。存在しない週や許可されていない値が含まれています" : ""}`,
+          error: `${(failedIndex ?? 0) + 1}件目のコンテンツの作成に失敗しました（それより前の${created.length}件は作成済み）${isInputError ? "。存在しないフェーズや許可されていない値が含まれています" : ""}`,
           created,
           ...(warning ? { warning } : {}),
         },

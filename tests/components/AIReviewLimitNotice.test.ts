@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@vercel/analytics", () => ({ track: vi.fn() }));
 
-import { AIReviewLimitNotice } from "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/AIReviewLimitNotice";
+import { AIReviewLimitNotice } from "@/app/(authenticated)/learn/[themeId]/[phaseId]/[contentId]/AIReviewLimitNotice";
 import { trialLimitMessage } from "@/app/lib/ai-review-limits";
 
 const render = (props: Parameters<typeof AIReviewLimitNotice>[0]) =>

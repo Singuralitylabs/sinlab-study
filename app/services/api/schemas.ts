@@ -402,17 +402,6 @@ export const PhaseCreateSchema = PhaseBaseSchema.extend({
 });
 export const PhaseUpdateSchema = PhaseCreateSchema.partial();
 
-const WeekBaseSchema = z.object({
-  phase_id: PositiveIntSchema,
-  name: RequiredStringSchema,
-  description: OptionalNullableString,
-  is_published: OptionalBoolean,
-});
-export const WeekCreateSchema = WeekBaseSchema.extend({
-  insert_after_id: InsertAfterIdSchema,
-});
-export const WeekUpdateSchema = WeekCreateSchema.partial();
-
 const StarterCodeFileSchema = z.object({
   filename: z
     .string({ message: "文字列で指定してください" })
@@ -484,7 +473,7 @@ const SubmissionFileSlotsSchema = z
 
 const ContentBaseSchema = z.object({
   title: RequiredStringSchema,
-  week_id: PositiveIntSchema,
+  phase_id: PositiveIntSchema,
   content_type: ContentTypeSchema,
   video_url: OptionalNullableString,
   text_content: OptionalNullableString,
@@ -712,7 +701,7 @@ const BULK_CREATE_MESSAGE = `contentsは1〜${MAX_BULK_CREATE_CONTENTS}件の配
 
 /**
  * POST /api/manage/contents/bulk: registers many contents (e.g. a course's quizzes from the
- * manuscript) in one request. Each is appended to the end of its week in array order, so there is
+ * manuscript) in one request. Each is appended to the end of its phase in array order, so there is
  * no insert_after_id.
  */
 export const BulkContentCreateSchema = z.object({

@@ -2,7 +2,7 @@ import { compareGroupLevel } from "@/app/lib/content-grouping";
 import {
   buildThemeContentOrder,
   type NavigationContent,
-  type NavigationWeek,
+  type NavigationPhase,
 } from "@/app/lib/content-navigation";
 
 /** Content row shape required to assemble learning order (extra columns are preserved on `raw`). */
@@ -10,7 +10,7 @@ export type NestedThemeContentRow = {
   id: number;
   title: string;
   display_order: number | null;
-  week_id: number;
+  phase_id: number;
 };
 
 export type NestedThemeTree<TContent extends NestedThemeContentRow = NestedThemeContentRow> = {
@@ -21,12 +21,7 @@ export type NestedThemeTree<TContent extends NestedThemeContentRow = NestedTheme
     id: number;
     name: string;
     display_order: number | null;
-    weeks: {
-      id: number;
-      name: string;
-      display_order: number | null;
-      contents: TContent[];
-    }[];
+    contents: TContent[];
   }[];
 };
 
@@ -49,21 +44,14 @@ export function orderContentsAcrossThemes<TContent extends NestedThemeContentRow
   );
   const result: OrderedThemeContent<TContent>[] = [];
   for (const theme of orderedThemes) {
-    const weeks: NavigationWeek[] = theme.phases.flatMap((phase) =>
-      phase.weeks.map((week) => ({
-        id: week.id,
-        name: week.name,
-        display_order: week.display_order,
-        phase: {
-          id: phase.id,
-          name: phase.name,
-          display_order: phase.display_order,
-        },
-      }))
-    );
-    const contents = theme.phases.flatMap((phase) => phase.weeks.flatMap((week) => week.contents));
+    const phases: NavigationPhase[] = theme.phases.map((phase) => ({
+      id: phase.id,
+      name: phase.name,
+      display_order: phase.display_order,
+    }));
+    const contents = theme.phases.flatMap((phase) => phase.contents);
     const contentById = new Map(contents.map((c) => [c.id, c]));
-    for (const ordered of buildThemeContentOrder(weeks, contents)) {
+    for (const ordered of buildThemeContentOrder(phases, contents)) {
       const raw = contentById.get(ordered.id);
       if (!raw) continue;
       result.push({
@@ -78,7 +66,7 @@ export function orderContentsAcrossThemes<TContent extends NestedThemeContentRow
 }
 
 /**
- * All-levels is_published / is_deleted filters for nested theme→phase→week→content selects.
+ * All-levels is_published / is_deleted filters for nested theme→phase→content selects.
  * Omitting a level here while another caller keeps it leaves counts / lists / digests mismatched.
  * Constrained to eq-capable builders; cast through a shallow eq-chain so PostgREST builder
  * generics do not explode (TS2589).
@@ -91,8 +79,6 @@ export function applyPublishedNestedThemeFilters<Q extends { eq: unknown }>(quer
     .eq("is_deleted", false)
     .eq("phases.is_published", true)
     .eq("phases.is_deleted", false)
-    .eq("phases.weeks.is_published", true)
-    .eq("phases.weeks.is_deleted", false)
-    .eq("phases.weeks.contents.is_published", true)
-    .eq("phases.weeks.contents.is_deleted", false) as unknown as Q;
+    .eq("phases.contents.is_published", true)
+    .eq("phases.contents.is_deleted", false) as unknown as Q;
 }

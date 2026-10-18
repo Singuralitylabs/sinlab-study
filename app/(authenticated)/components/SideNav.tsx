@@ -111,8 +111,7 @@ function isNavActive(pathname: string, href: string) {
       pathname.startsWith("/manage/contents") ||
       pathname.startsWith("/manage/announcements") ||
       pathname.startsWith("/manage/themes") ||
-      pathname.startsWith("/manage/phases") ||
-      pathname.startsWith("/manage/weeks")
+      pathname.startsWith("/manage/phases")
     );
   }
   return pathname.startsWith(href);

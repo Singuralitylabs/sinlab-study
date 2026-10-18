@@ -26,8 +26,7 @@
 ```mermaid
 erDiagram
     learning_themes ||--o{ learning_phases : "1:N"
-    learning_phases ||--o{ learning_weeks : "1:N"
-    learning_weeks ||--o{ learning_contents : "1:N"
+    learning_phases ||--o{ learning_contents : "1:N"
     learning_contents ||--o{ user_progress : "1:N"
     learning_contents ||--o{ submissions : "1:N"
     users ||--o{ user_progress : "1:N"
@@ -57,7 +56,7 @@ erDiagram
 
 学習カリキュラムの最上位カテゴリ。複数の学習フェーズをまとめる（例：GAS学習）。
 
-`learning_themes` / `learning_phases` / `learning_weeks` / `learning_contents` は共通して `display_order`（昇順の表示順）・`is_published`（公開フラグ、既定 false）・`is_deleted`（論理削除フラグ）を持つ。
+`learning_themes` / `learning_phases` / `learning_contents` は共通して `display_order`（昇順の表示順）・`is_published`（公開フラグ、既定 false）・`is_deleted`（論理削除フラグ）を持つ。
 
 - `image_url`: サムネイル画像。Storage 配信分は環境非依存の相対パス `/storage/v1/object/public/thumbnails/theme-{id}/thumbnail.{ext}?v={timestamp}` を保存する。未設定時はプレースホルダー表示
 
@@ -65,13 +64,16 @@ erDiagram
 
 テーマ配下のグループ（例：Phase 1 - GAS基礎）。`theme_id` が親（`ON DELETE CASCADE`）。
 
-### 3.3 learning_weeks（学習週）
+### 3.3 learning_weeks（廃止）
 
-フェーズ内の週単位グループ（例：Week 1 - はじめの一歩）。`phase_id` が親（`ON DELETE CASCADE`）。
+フェーズとコンテンツの間にあった「週」のテーブル。#426 で廃止した（`20261018000000_remove_learning_weeks.sql`）。他節の参照番号を保つため、この節番号は欠番として残す。
+
+- 移行: `learning_contents.phase_id` を追加して旧 `week.phase_id` を写し、週の `is_published = false` / `is_deleted = true` はコンテンツ側へ畳み込んだ（畳み込まないと、週ごと非公開にしていたコンテンツがフェーズ直下で公開される）。`display_order` は旧順序（週の順 → 週内の順）でフェーズ内の1からの連番に振り直し、論理削除行は末尾に回した。そのうえで `week_id` と `learning_weeks`（RLS・トリガー・インデックス含む）を削除した。
+- 作り直したもの: `slides` の SELECT ポリシー、`content_visible_to_caller()`、`bulk_update_sibling_display_order()` の許可テーブル、`learning_contents` の列 GRANT（`week_id` → `phase_id`）。
 
 ### 3.4 learning_contents（学習コンテンツ）
 
-個別の学習教材。動画・テキスト・スライド・演習・クイズの5種別（`content_type`）をサポートする。`week_id` が親（`ON DELETE CASCADE`）。
+個別の学習教材。動画・テキスト・スライド・演習・クイズの5種別（`content_type`）をサポートする。`phase_id` が親（`ON DELETE CASCADE`）。階層はテーマ → フェーズ → コンテンツの3階層。
 
 **種別ごとの利用カラム**（未使用カラムは NULL）:
 
@@ -358,7 +360,7 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 
 ### 6.1 学習コンテンツ系テーブル
 
-`learning_themes`、`learning_phases`、`learning_weeks`、`learning_contents` に共通のポリシーパターン。ただし SELECT のみ、`learning_contents` はお試しユーザー向けの制限が加わるため別パターンとなる（後述）。
+`learning_themes`、`learning_phases`、`learning_contents` に共通のポリシーパターン。ただし SELECT のみ、`learning_contents` はお試しユーザー向けの制限が加わるため別パターンとなる（後述）。
 
 | 操作 | 対象 | 条件 |
 |:--|:--|:--|
@@ -371,11 +373,11 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 
 公開済み・未削除行のうち、`get_user_status()` が `active` なら全行、`trial` なら `is_open_to_trial = true` の行のみ、`rejected` / その他は不可（`CASE (select get_user_status()) WHEN 'active' THEN true WHEN 'trial' THEN is_open_to_trial ELSE false END`）。admin / maintainer は `get_user_role()` の OR 枝で未公開行も含め全件可視。却下時のロールバイパス抑止は `get_user_role()` の契約に従う（5.2参照）。
 
-親階層（`learning_themes` / `learning_phases` / `learning_weeks`）はステータスによる絞り込みを行わず、公開分を認証済み全ユーザーが参照できる。お試しユーザーにもコースツリーの骨格（テーマ・フェーズ・週）を見せてロック表示するための設計であり、これによりステータス判定の対象は `learning_contents` の1テーブルに閉じる。
+親階層（`learning_themes` / `learning_phases`）はステータスによる絞り込みを行わず、公開分を認証済み全ユーザーが参照できる。お試しユーザーにもコースツリーの骨格（テーマ・フェーズ）を見せてロック表示するための設計であり、これによりステータス判定の対象は `learning_contents` の1テーブルに閉じる。
 
 この制限により、お試し非公開コンテンツはタイトルを含めて通常クライアント（`authenticated`）から取得できなくなる。ツリー表示のロック項目と、詳細ページ直リンク時のロック画面表示に必要な最小限の情報は、アプリ層が service_role クライアント + カラム許可リスト（本文カラムを含めない）で取得する（詳細は[機能設計書](./specification.md)の2.6を参照）。service_role は RLS を素通りするため、この経路のクエリでは `is_published = true AND is_deleted = false` をアプリ側で必ず指定し、通常の公開制御を再現する。条件を省くと未公開・論理削除済みコンテンツのタイトルが露出し、`active` ユーザーにすら見えないものがお試しユーザーに見える逆転が生じる。
 
-**兄弟要素の display_order 一括更新**: 管理画面の挿入位置指定は、RPC `bulk_update_sibling_display_order(p_table, p_updates)` で変化した兄弟行の `display_order` を1回の `UPDATE … FROM` で更新する。upsert ではなく純粋な UPDATE のため INSERT 経路に乗らず、`updated_at` の BEFORE UPDATE トリガーも通常どおり発火する。`SECURITY INVOKER` で呼び出し元の UPDATE ポリシーに従う（許可テーブルは `learning_themes` / `learning_phases` / `learning_weeks` / `learning_contents` のみ）。EXECUTE は `authenticated` / `service_role` のみ（`PUBLIC, anon` を REVOKE）。
+**兄弟要素の display_order 一括更新**: 管理画面の挿入位置指定は、RPC `bulk_update_sibling_display_order(p_table, p_updates)` で変化した兄弟行の `display_order` を1回の `UPDATE … FROM` で更新する。upsert ではなく純粋な UPDATE のため INSERT 経路に乗らず、`updated_at` の BEFORE UPDATE トリガーも通常どおり発火する。`SECURITY INVOKER` で呼び出し元の UPDATE ポリシーに従う（許可テーブルは `learning_themes` / `learning_phases` / `learning_contents` のみ）。EXECUTE は `authenticated` / `service_role` のみ（`PUBLIC, anon` を REVOKE）。
 
 ### 6.2 user_progress
 
@@ -396,7 +398,7 @@ maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進
 
 **可視コンテンツ限定の EXISTS 条件**:
 
-お試しユーザーがお試し非公開コンテンツの進捗を書き込めないよう、INSERT / UPDATE に `EXISTS (SELECT 1 FROM learning_contents WHERE id = content_id)` を課す。`learning_contents` の SELECT ポリシー（6.1）が適用されるため、この EXISTS はお試しユーザーではお試し公開分のみ真になる。**親階層（week / phase / theme）の公開・削除は見ない**ため、コンテンツ行が公開済みでも親が未公開・論理削除の場合に EXISTS だけでは防げない。進捗APIはアプリ層の `isContentVisible()` で親階層まで判定すること（Storage 側のみ方針Aで親階層を閉じ、こちらはアプリ層に残す。6.8参照）。
+お試しユーザーがお試し非公開コンテンツの進捗を書き込めないよう、INSERT / UPDATE に `EXISTS (SELECT 1 FROM learning_contents WHERE id = content_id)` を課す。`learning_contents` の SELECT ポリシー（6.1）が適用されるため、この EXISTS はお試しユーザーではお試し公開分のみ真になる。**親階層（phase / theme）の公開・削除は見ない**ため、コンテンツ行が公開済みでも親が未公開・論理削除の場合に EXISTS だけでは防げない。進捗APIはアプリ層の `isContentVisible()` で親階層まで判定すること（Storage 側のみ方針Aで親階層を閉じ、こちらはアプリ層に残す。6.8参照）。
 
 - **`active` ユーザーへの影響**: この条件はステータスを問わず適用されるため、`active` ユーザーも不可視コンテンツ（未公開・存在しないID）への書き込みができない（正常なUI経路では不可視コンテンツに到達しないため、正常系への影響はない）
 - **INSERT だけでなく UPDATE にも課す理由**: 進捗API（`/api/progress`）は upsert（`onConflict: user_id,content_id`）で、既存行がある場合は UPDATE 経路を通る。INSERT のみに条件を課すと2回目以降の更新がすり抜けるため、UPDATE にも同じ条件が必要。これにより、お試し公開フラグを後から `false` に戻したコンテンツの進捗も書き換えられなくなる
@@ -440,9 +442,9 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 
 テーマのサムネイルを保存する `thumbnails` と、Markdown 埋め込み画像の `content-images`（#376）は公開バケット（`public = true`）のため参照は制限しない。`content-images` は `file_size_limit = 5MiB`、`allowed_mime_types = png/jpeg/webp/gif`。キーは `content-{contentId}/<ランダムID>.{ext}`。スライドPDFを保存する `slides` は**非公開バケット**（`public = false`）で、参照はコンテンツの可視性に連動させる。書き込み系（INSERT / UPDATE / DELETE）は各バケットともコンテンツ管理者（admin / maintainer）に限定し、操作ごとに1本のポリシーへ統合している（`multiple_permissive_policies` 対策）。`get_user_role()` は `(select ...)` で包む。
 
-`slides` の SELECT ポリシーは、admin / maintainer はロールで無条件に許可（未公開プレビューのため。[機能設計書](./specification.md)2.12節）、それ以外は「`learning_contents.pdf_url = storage.objects.name` の行が存在し、その週・フェーズ・テーマを含む4階層すべてが `is_published = true AND is_deleted = false`」の場合のみ許可する（`learning_contents → learning_weeks → learning_phases → learning_themes` を JOIN）。
+`slides` の SELECT ポリシーは、admin / maintainer はロールで無条件に許可（未公開プレビューのため。[機能設計書](./specification.md)2.12節）、それ以外は「`learning_contents.pdf_url = storage.objects.name` の行が存在し、そのフェーズ・テーマを含む3階層すべてが `is_published = true AND is_deleted = false`」の場合のみ許可する（`learning_contents → learning_phases → learning_themes` を JOIN）。
 
-- `EXISTS` サブクエリには呼び出しユーザーの RLS が適用されるため、`learning_contents` の SELECT ポリシー（`is_published` / `is_deleted` / `status` / `is_open_to_trial`）がコンテンツ行の可視範囲として効く。加えて week / phase / theme への JOIN で、**member / お試しユーザー**に対してはアプリ層の `isContentVisible()` と同じ4階層条件にする（#216 方針A: Storage 側のみ拡張し、`learning_contents` の SELECT RLS 自体は親階層を見ないまま。方針Bを採らない理由は、お試しユーザー向けの階層骨格表示と `user_progress` / `submissions` の書き込み RLS まで波及するため）。`isContentVisible()` 自体はロール非依存のフェイルクローズなので、admin / maintainer が未公開階層・orphan を見る場合はポリシーと `isContentVisible()` の真理値は一致しない
+- `EXISTS` サブクエリには呼び出しユーザーの RLS が適用されるため、`learning_contents` の SELECT ポリシー（`is_published` / `is_deleted` / `status` / `is_open_to_trial`）がコンテンツ行の可視範囲として効く。加えて phase / theme への JOIN で、**member / お試しユーザー**に対してはアプリ層の `isContentVisible()` と同じ3階層条件にする（#216 方針A: Storage 側のみ拡張し、`learning_contents` の SELECT RLS 自体は親階層を見ないまま。方針Bを採らない理由は、お試しユーザー向けの階層骨格表示と `user_progress` / `submissions` の書き込み RLS まで波及するため）。`isContentVisible()` 自体はロール非依存のフェイルクローズなので、admin / maintainer が未公開階層・orphan を見る場合はポリシーと `isContentVisible()` の真理値は一致しない
 - member / お試しでは、可視コンテンツが存在する場合だけ署名付きURLの発行（`createSignedUrl()`）やダウンロードが許可され、お試しユーザーがロック済みスライドのキーを推測しても取得できない。この等値比較のため、`pdf_url` にはオブジェクトキー以外（公開URL等）を保存してはならない
 - `anon` 向けのポリシーは無く、未認証のデモ画面はサーバー側で service_role によりお試し公開スライドのみ署名する（[機能設計書](./specification.md)3.2）
 - `learning_contents` の SELECT ポリシーは引き続きコンテンツ行自身の `is_published` / `is_deleted` しか見ない。進捗・提出・AIレビューAPIの可視性はアプリ層の `isContentVisible()` が親階層まで補う（6.2 / 6.3 の EXISTS もコンテンツ行の可視性に委譲するだけなので、親階層判定を省いてはならない）
@@ -511,7 +513,7 @@ INSERT / UPDATE / DELETE のポリシーは定義しない（受講生・管理�
 |:--|:--|:--|
 | `get_quiz_questions(p_content_id)` | `authenticated` / `service_role` | 出題用の列（`id, display_order, question_type, question, choices, hint, revision`）。正解・模範解答・解説は返さない。`revision` は形式・設問文・選択肢のハッシュ（`quiz_question_revision()`） |
 | `grade_quiz_answers(p_content_id, p_answers)` | `authenticated` / `service_role` | 全設問に回答している（選択式は1つ以上選択、入力式は空白以外）ときだけ、設問ごとの `is_correct`（入力式は NULL）・`correct_choices`・`model_answer`・`explanation` を返す。1問でも未回答、回答の数が設問の数と違う（削除された設問への回答を黙って捨てて部分採点しないため）、各回答の `revision` が現在の設問と違う（ページを開いた後に設問の中身が差し替わった。id を保つ置換では id だけで検出できず、古い設問への答えを新しい設問の正解と比べてしまうため）、または同じ `question_id` が重複していれば0行。これは「回答を送る前に正解を表示しない」ための形式上の条件で、ダミーの回答を送れば正解・解説は得られる（回答内容を保存しないため、それ以上は守らない）。選択の重複・範囲外は不正解 |
-| `quiz_content_visible_to_caller(p_content_id)` | なし（上の2関数の内部用。`content_visible_to_caller(p_content_id, 'quiz')` を呼ぶだけの薄い関数） | `content_type = 'quiz'` かつ未削除で、admin・maintainer（未公開プレビュー。[機能設計書](./specification.md)2.12）か、4階層すべて公開・未削除で `active`、またはお試しで `is_open_to_trial = true`。`learning_contents` の SELECT RLS と `isContentVisible()` を合わせた条件 |
+| `quiz_content_visible_to_caller(p_content_id)` | なし（上の2関数の内部用。`content_visible_to_caller(p_content_id, 'quiz')` を呼ぶだけの薄い関数） | `content_type = 'quiz'` かつ未削除で、admin・maintainer（未公開プレビュー。[機能設計書](./specification.md)2.12）か、3階層すべて公開・未削除で `active`、またはお試しで `is_open_to_trial = true`。`learning_contents` の SELECT RLS と `isContentVisible()` を合わせた条件 |
 | `quiz_question_revision(p_question_type, p_question, p_choices)` | なし（内部用） | 上記の `revision` を計算する。正解・解説だけの修正では変わらない |
 | `replace_quiz_questions(p_content_id, p_questions)` | `service_role` のみ | 管理画面の保存。1トランザクションで、配列の順を `display_order` にして同じ位置の行は UPDATE（id を保つ。回答中の受講者の `question_id` を無効にしない）、増えた分を INSERT、減った分を DELETE する |
 
@@ -523,7 +525,7 @@ INSERT / UPDATE / DELETE のポリシーは定義しない（受講生・管理�
 
 | 関数 | 権限 | 内容 |
 |:--|:--|:--|
-| `get_exercise_reference_answer(p_content_id)` | `authenticated` / `service_role` | `content_type = 'exercise'` かつ未削除で、admin・maintainer（未公開プレビュー。提出は不要）か、4階層すべて公開・未削除で `active`、またはお試し公開（`is_open_to_trial`）の `trial` が、そのコンテンツに1件以上提出しているときだけ模範回答を1行返す。それ以外（提出なし・未公開・論理削除・お試し非公開・模範回答が NULL）は0行 |
+| `get_exercise_reference_answer(p_content_id)` | `authenticated` / `service_role` | `content_type = 'exercise'` かつ未削除で、admin・maintainer（未公開プレビュー。提出は不要）か、3階層すべて公開・未削除で `active`、またはお試し公開（`is_open_to_trial`）の `trial` が、そのコンテンツに1件以上提出しているときだけ模範回答を1行返す。それ以外（提出なし・未公開・論理削除・お試し非公開・模範回答が NULL）は0行 |
 
 可視性の判定は、クイズと共通の内部関数 `content_visible_to_caller(p_content_id, p_content_type)`（API ロールには EXECUTE を与えない）に一本化している。RLS の可視条件を変えるときはこの1か所を直す。`SECURITY DEFINER`・`SET search_path = public`（5.2の例外）。`CREATE OR REPLACE` は ACL を保つが、DROP して作り直すと EXECUTE が `PUBLIC` に戻る点は6.17と同じ。`anon` / `PUBLIC` は REVOKE する。
 

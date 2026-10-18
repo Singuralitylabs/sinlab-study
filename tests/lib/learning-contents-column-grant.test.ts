@@ -30,7 +30,7 @@ function latestLearnerSelectColumns(): string[] {
     .filter((column) => column.length > 0);
 }
 
-/** Own columns of a PostgREST select list, dropping the first embed (`week:learning_weeks(...)`). */
+/** Own columns of a PostgREST select list, dropping the first embed (`phase:learning_phases(...)`). */
 function ownColumns(selectList: string): string[] {
   const head = selectList.split(/,\s*\w+:/)[0] ?? selectList;
   return head

@@ -338,7 +338,7 @@ describe("buildWeeklyDigestEmail", () => {
       unsubscribeUrl: UNSUBSCRIBE_URL,
       completedLastWeek: 3,
       submittedLastWeek: 1,
-      nextContent: { title: "変数と型", path: "/learn/1/2/3/4" },
+      nextContent: { title: "変数と型", path: "/learn/1/2/3" },
       remainingContents: 10,
       activeThemes: [
         { themeName: "GAS 学習", completedContents: 4, totalContents: 16 },
@@ -355,7 +355,7 @@ describe("buildWeeklyDigestEmail", () => {
     expect(email.text).toContain("復習リストに未克服の項目が 2 件あります");
     expect(email.text).toContain("次に学ぶコンテンツ: 変数と型");
     expect(email.text).toContain("4 本完了");
-    expect(email.text).toContain(`続きから学ぶ: ${APP_URL}/learn/1/2/3/4`);
+    expect(email.text).toContain(`続きから学ぶ: ${APP_URL}/learn/1/2/3`);
     expect(email.text).toContain(UNSUBSCRIBE_URL);
     expect(email.headers?.["List-Unsubscribe"]).toBe(`<${UNSUBSCRIBE_URL}>`);
   });
@@ -367,7 +367,7 @@ describe("buildWeeklyDigestEmail", () => {
       unsubscribeUrl: UNSUBSCRIBE_URL,
       completedLastWeek: 1,
       submittedLastWeek: 0,
-      nextContent: { title: "変数と型", path: "/learn/1/2/3/4" },
+      nextContent: { title: "変数と型", path: "/learn/1/2/3" },
       remainingContents: 10,
       activeThemes: [],
       unovercomeReviewCount: 0,
@@ -384,7 +384,7 @@ describe("buildWeeklyDigestEmail", () => {
         unsubscribeUrl: UNSUBSCRIBE_URL,
         completedLastWeek: 1,
         submittedLastWeek: 0,
-        nextContent: { title: "変数と型", path: "/learn/1/2/3/4" },
+        nextContent: { title: "変数と型", path: "/learn/1/2/3" },
         remainingContents: 10,
         activeThemes,
       });
@@ -419,11 +419,11 @@ describe("buildInactivityReminderEmail", () => {
       displayName: "山田",
       appUrl: APP_URL,
       unsubscribeUrl: UNSUBSCRIBE_URL,
-      firstContent: { title: "はじめての自動化", path: "/learn/1/1/1/1" },
+      firstContent: { title: "はじめての自動化", path: "/learn/1/1/1" },
     });
 
     expect(email.text).toContain("まだ学習を始められていない");
-    expect(email.text).toContain(`最初の1本を始める: ${APP_URL}/learn/1/1/1/1`);
+    expect(email.text).toContain(`最初の1本を始める: ${APP_URL}/learn/1/1/1`);
     expect(email.text).toContain("お問い合わせください");
     expect(email.text).toContain(UNSUBSCRIBE_URL);
   });

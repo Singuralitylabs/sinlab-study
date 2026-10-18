@@ -261,7 +261,7 @@ describe("POST /api/manage/contents/bulk - 一括登録（#306）", () => {
     });
   const quiz = {
     title: "クイズ1",
-    week_id: 3,
+    phase_id: 3,
     content_type: "quiz",
     quiz_questions: [
       { question_type: "single", question: "Q", choices: ["a", "b"], correct_choices: [1] },
@@ -278,7 +278,7 @@ describe("POST /api/manage/contents/bulk - 一括登録（#306）", () => {
 
   it("設問付きのクイズを含む複数件を順に作成し、作成結果を返す", async () => {
     const res = await POST(
-      post({ contents: [quiz, { title: "動画", week_id: 3, content_type: "video" }] })
+      post({ contents: [quiz, { title: "動画", phase_id: 3, content_type: "video" }] })
     );
 
     expect(res.status).toBe(200);
@@ -301,8 +301,8 @@ describe("POST /api/manage/contents/bulk - 一括登録（#306）", () => {
     const res = await POST(
       post({
         contents: [
-          { title: "演習", week_id: 3, content_type: "exercise", grading_rubric },
-          { title: "動画", week_id: 3, content_type: "video" },
+          { title: "演習", phase_id: 3, content_type: "exercise", grading_rubric },
+          { title: "動画", phase_id: 3, content_type: "video" },
         ],
       })
     );
@@ -351,7 +351,7 @@ describe("POST /api/manage/contents/bulk - 一括登録（#306）", () => {
     const res = await POST(
       post({
         contents: [
-          { title: "OK", week_id: 3, content_type: "video" },
+          { title: "OK", phase_id: 3, content_type: "video" },
           { ...quiz, quiz_questions: [{ ...quiz.quiz_questions[0], correct_choices: [] }] },
         ],
       })
@@ -405,7 +405,7 @@ describe("POST /api/manage/contents/bulk - 一括登録（#306）", () => {
     });
   });
 
-  it("存在しない週（FK違反）など入力起因の失敗は400で、作成済みの件を返す", async () => {
+  it("存在しないフェーズ（FK違反）など入力起因の失敗は400で、作成済みの件を返す", async () => {
     vi.mocked(createContentsAtTail).mockResolvedValue({
       created: [],
       error: { message: "fk", code: "23503" } as never,

@@ -7,7 +7,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => undefined }),
 }));
 
-import { ExerciseCompletionStatus } from "@/app/(authenticated)/learn/[themeId]/[phaseId]/[weekId]/[contentId]/ExerciseCompletionStatus";
+import { ExerciseCompletionStatus } from "@/app/(authenticated)/learn/[themeId]/[phaseId]/[contentId]/ExerciseCompletionStatus";
 
 const renderStatus = (
   props: Partial<{

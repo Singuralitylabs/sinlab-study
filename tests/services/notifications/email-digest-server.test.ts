@@ -247,20 +247,13 @@ const themes: Row[] = [
         id: 20,
         name: "P2",
         display_order: 1,
-        weeks: [
+        contents: [
           {
-            id: 200,
-            name: "W2",
+            id: 2000,
+            title: "HTML入門",
             display_order: 1,
-            contents: [
-              {
-                id: 2000,
-                title: "HTML入門",
-                display_order: 1,
-                is_open_to_trial: true,
-                week_id: 200,
-              },
-            ],
+            is_open_to_trial: true,
+            phase_id: 20,
           },
         ],
       },
@@ -277,27 +270,20 @@ const themes: Row[] = [
         id: 10,
         name: "P1",
         display_order: 1,
-        weeks: [
+        contents: [
           {
-            id: 100,
-            name: "W1",
+            id: 1001,
+            title: "鍵付き",
+            display_order: 2,
+            is_open_to_trial: false,
+            phase_id: 10,
+          },
+          {
+            id: 1000,
+            title: "はじめての自動化",
             display_order: 1,
-            contents: [
-              {
-                id: 1001,
-                title: "鍵付き",
-                display_order: 2,
-                is_open_to_trial: false,
-                week_id: 100,
-              },
-              {
-                id: 1000,
-                title: "はじめての自動化",
-                display_order: 1,
-                is_open_to_trial: true,
-                week_id: 100,
-              },
-            ],
+            is_open_to_trial: true,
+            phase_id: 10,
           },
         ],
       },
@@ -523,7 +509,7 @@ describe("送信対象の抽出", () => {
     expect(email.subject).toContain("今週の学習");
     expect(email.text).toContain("コンテンツ完了 1 本 / 演習の提出 1 件");
     expect(email.text).toContain("次に学ぶコンテンツ: 鍵付き");
-    expect(email.text).toContain(`${APP_URL}/learn/1/10/100/1001`);
+    expect(email.text).toContain(`${APP_URL}/learn/1/10/1001`);
     // Web制作 is fully done (2000), so only GAS実践 is "in progress".
     expect(email.text).toContain("学習中のテーマ: GAS実践（1 / 2 完了）");
     expect(email.text).not.toContain("学習中のテーマ: Web制作");
@@ -671,7 +657,7 @@ describe("送信対象の抽出", () => {
     expect(sentTo().sort()).toEqual(["u1@example.com", "u4@example.com"]);
     const reminder = sentEmailTo("u1@example.com");
     expect(reminder.subject).toContain("最初の1本");
-    expect(reminder.text).toContain(`${APP_URL}/learn/1/10/100/1000`);
+    expect(reminder.text).toContain(`${APP_URL}/learn/1/10/1000`);
   });
 
   it("お試しユーザーの7日目は trial_nurture だけを送り、未学習リマインド・週次進捗は同日に送らない", async () => {

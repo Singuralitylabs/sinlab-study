@@ -54,7 +54,6 @@ const setup = (
           themeId: 1,
           themeName: "GAS学習",
           phaseId: 1,
-          weekId: 1,
         },
       ],
       completedContentIds: new Set<number>(),

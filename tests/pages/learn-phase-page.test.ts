@@ -6,7 +6,7 @@ vi.mock("@/app/services/api/learning-server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/app/services/api/learning-server")>()),
   fetchThemeById: vi.fn(),
   fetchPhaseById: vi.fn(),
-  fetchWeeksWithContentsByPhaseId: vi.fn(),
+  fetchContentSummariesByPhaseId: vi.fn(),
   fetchUserProgressByContentIds: vi.fn(),
 }));
 vi.mock("@/app/services/api/ai-review-server", () => ({
@@ -18,10 +18,10 @@ vi.mock("@/app/services/api/upgrade-price-server", () => ({
 
 import PhasePage from "@/app/(authenticated)/learn/[themeId]/[phaseId]/page";
 import {
+  fetchContentSummariesByPhaseId,
   fetchPhaseById,
   fetchThemeById,
   fetchUserProgressByContentIds,
-  fetchWeeksWithContentsByPhaseId,
 } from "@/app/services/api/learning-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -41,28 +41,21 @@ const setup = (userStatus: "trial" | "active") => {
     data: { id: 2, theme_id: 1, name: "フェーズ", description: null, is_published: true },
     error: null,
   } as never);
-  vi.mocked(fetchWeeksWithContentsByPhaseId).mockResolvedValue({
+  vi.mocked(fetchContentSummariesByPhaseId).mockResolvedValue({
     data: [
       {
-        id: 3,
-        name: "第1週",
+        id: 10,
+        title: "公開",
+        content_type: "text",
+        is_open_to_trial: true,
         is_published: true,
-        contents: [
-          {
-            id: 10,
-            title: "公開",
-            content_type: "text",
-            is_open_to_trial: true,
-            is_published: true,
-          },
-          {
-            id: 11,
-            title: "有料のみ",
-            content_type: "text",
-            is_open_to_trial: false,
-            is_published: true,
-          },
-        ],
+      },
+      {
+        id: 11,
+        title: "有料のみ",
+        content_type: "text",
+        is_open_to_trial: false,
+        is_published: true,
       },
     ],
     error: null,

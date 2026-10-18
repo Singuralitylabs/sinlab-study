@@ -19,11 +19,11 @@ vi.mock("@/app/components/YouTubeEmbed", () => ({ YouTubeEmbed: () => null }));
 vi.mock("@/app/demo/components/DemoCompleteButton", () => ({ DemoCompleteButton: () => null }));
 vi.mock("@/app/demo/components/DemoSubmissionForm", () => ({ DemoSubmissionForm: () => null }));
 
-import DemoContentPage from "@/app/demo/[themeId]/[phaseId]/[weekId]/[contentId]/page";
+import DemoContentPage from "@/app/demo/[themeId]/[phaseId]/[contentId]/page";
 import {
   createDemoSlideSignedUrl,
   fetchDemoContentById,
-  fetchDemoContentsByWeekId,
+  fetchDemoContentsByPhaseId,
   fetchDemoContext,
 } from "@/app/services/api/demo-learning-server";
 
@@ -31,16 +31,15 @@ const SIGNED_URL =
   "https://project.supabase.co/storage/v1/object/sign/slides/gas/slide-01.pdf?token=x";
 const PDF_KEY = "gas/slide-01.pdf";
 
-const params = Promise.resolve({ themeId: "1", phaseId: "2", weekId: "3", contentId: "10" });
+const params = Promise.resolve({ themeId: "1", phaseId: "2", contentId: "10" });
 
 const theme = { id: 1, name: "GAS" };
 const phase = { id: 2, theme_id: 1, name: "フェーズ1", theme };
-const week = { id: 3, phase_id: 2, name: "第1週", phase };
 
 const setup = ({ isOpenToTrial }: { isOpenToTrial: boolean }) => {
   const content = {
     id: 10,
-    week_id: 3,
+    phase_id: 2,
     title: "基礎文法（スライド）",
     content_type: "slide",
     pdf_url: PDF_KEY,
@@ -48,14 +47,17 @@ const setup = ({ isOpenToTrial }: { isOpenToTrial: boolean }) => {
     is_published: true,
     is_deleted: false,
     is_open_to_trial: isOpenToTrial,
-    week,
+    phase,
   };
   vi.mocked(fetchDemoContentById).mockResolvedValue({ data: content, error: null } as never);
   vi.mocked(fetchDemoContext).mockResolvedValue({
-    data: { theme, phase, week },
+    data: { theme, phase },
     error: null,
   } as never);
-  vi.mocked(fetchDemoContentsByWeekId).mockResolvedValue({ data: [content], error: null } as never);
+  vi.mocked(fetchDemoContentsByPhaseId).mockResolvedValue({
+    data: [content],
+    error: null,
+  } as never);
   vi.mocked(createDemoSlideSignedUrl).mockResolvedValue(SIGNED_URL);
 };
 
@@ -91,21 +93,48 @@ describe("デモ画面のスライド配信（署名付きURL）", () => {
   });
 });
 
+describe("デモ画面のロック（最初のフェーズのみ）", () => {
+  it("デモ対象外のフェーズのコンテンツはロック表示にし、本文も署名も出さない", async () => {
+    setup({ isOpenToTrial: true });
+    vi.mocked(fetchDemoContext).mockResolvedValue({
+      data: { theme, phase: { ...phase, id: 99 } },
+      error: null,
+    } as never);
+
+    const html = await render();
+
+    expect(html).toContain("このコンテンツはデモの対象外です");
+    expect(html).toContain("最初のフェーズのみ");
+    expect(createDemoSlideSignedUrl).not.toHaveBeenCalled();
+    expect(fetchDemoContentsByPhaseId).not.toHaveBeenCalled();
+  });
+
+  it("URL のフェーズがコンテンツの所属と一致しなければ 404", async () => {
+    setup({ isOpenToTrial: true });
+    vi.mocked(fetchDemoContentById).mockResolvedValue({
+      data: { id: 10, phase_id: 77, phase },
+      error: null,
+    } as never);
+
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+});
+
 describe("デモ画面の解説記事とテキスト本文（#375）", () => {
   const article = "デモの解説記事";
   const storageMarkdown = "![図]({{SUPABASE_STORAGE_URL}}/thumbnails/demo.png)";
 
   const renderContent = async (
     content: Record<string, unknown>,
-    weekContents: Record<string, unknown>[] = [content]
+    phaseContents: Record<string, unknown>[] = [content]
   ) => {
     vi.mocked(fetchDemoContentById).mockResolvedValue({ data: content, error: null } as never);
     vi.mocked(fetchDemoContext).mockResolvedValue({
-      data: { theme, phase, week },
+      data: { theme, phase },
       error: null,
     } as never);
-    vi.mocked(fetchDemoContentsByWeekId).mockResolvedValue({
-      data: weekContents,
+    vi.mocked(fetchDemoContentsByPhaseId).mockResolvedValue({
+      data: phaseContents,
       error: null,
     } as never);
     vi.mocked(createDemoSlideSignedUrl).mockResolvedValue(SIGNED_URL);
@@ -116,7 +145,7 @@ describe("デモ画面の解説記事とテキスト本文（#375）", () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co");
     const content = {
       id: 10,
-      week_id: 3,
+      phase_id: 2,
       title: "基礎文法（スライド）",
       content_type: "slide",
       pdf_url: PDF_KEY,
@@ -125,7 +154,7 @@ describe("デモ画面の解説記事とテキスト本文（#375）", () => {
       is_published: true,
       is_deleted: false,
       is_open_to_trial: true,
-      week,
+      phase,
     };
 
     const html = await renderContent(content);
@@ -146,7 +175,7 @@ describe("デモ画面の解説記事とテキスト本文（#375）", () => {
   it("記事が空のお試し公開スライドはスライドだけを表示する", async () => {
     const content = {
       id: 10,
-      week_id: 3,
+      phase_id: 2,
       title: "基礎文法（スライド）",
       content_type: "slide",
       pdf_url: PDF_KEY,
@@ -155,7 +184,7 @@ describe("デモ画面の解説記事とテキスト本文（#375）", () => {
       is_published: true,
       is_deleted: false,
       is_open_to_trial: true,
-      week,
+      phase,
     };
 
     const html = await renderContent(content);
@@ -167,7 +196,7 @@ describe("デモ画面の解説記事とテキスト本文（#375）", () => {
   it("お試し非公開スライドでは記事を出さず、署名も発行しない", async () => {
     const content = {
       id: 10,
-      week_id: 3,
+      phase_id: 2,
       title: "基礎文法（スライド）",
       content_type: "slide",
       pdf_url: PDF_KEY,
@@ -176,7 +205,7 @@ describe("デモ画面の解説記事とテキスト本文（#375）", () => {
       is_published: true,
       is_deleted: false,
       is_open_to_trial: false,
-      week,
+      phase,
     };
 
     const html = await renderContent(content);
@@ -190,7 +219,7 @@ describe("デモ画面の解説記事とテキスト本文（#375）", () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co");
     const content = {
       id: 10,
-      week_id: 3,
+      phase_id: 2,
       title: "テキスト",
       content_type: "text",
       pdf_url: null,
@@ -199,7 +228,7 @@ describe("デモ画面の解説記事とテキスト本文（#375）", () => {
       is_published: true,
       is_deleted: false,
       is_open_to_trial: true,
-      week,
+      phase,
     };
 
     const html = await renderContent(content);

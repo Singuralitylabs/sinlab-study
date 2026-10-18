@@ -2,27 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   buildThemeContentOrder,
   type NavigationContentInput,
-  type NavigationWeek,
+  type NavigationPhase,
   resolveAdjacentContents,
   resolveContentNavigation,
 } from "@/app/lib/content-navigation";
 
-function makeWeek(
-  overrides: Partial<NavigationWeek> & {
-    id: number;
-    name?: string;
-    phase: NavigationWeek["phase"];
-  }
-): NavigationWeek {
-  return {
-    id: overrides.id,
-    name: overrides.name ?? `週${overrides.id}`,
-    display_order: overrides.display_order === undefined ? 0 : overrides.display_order,
-    phase: overrides.phase,
-  };
-}
-
-function makePhase(id: number, displayOrder: number | null, name?: string) {
+function makePhase(id: number, displayOrder: number | null, name?: string): NavigationPhase {
   return {
     id,
     name: name ?? `フェーズ${id}`,
@@ -31,108 +16,59 @@ function makePhase(id: number, displayOrder: number | null, name?: string) {
 }
 
 function makeContent(
-  overrides: Partial<NavigationContentInput> & { id: number; week_id: number }
+  overrides: Partial<NavigationContentInput> & { id: number; phase_id: number }
 ): NavigationContentInput {
   return {
     id: overrides.id,
     title: overrides.title ?? `コンテンツ${overrides.id}`,
-    week_id: overrides.week_id,
+    phase_id: overrides.phase_id,
     display_order: overrides.display_order === undefined ? 0 : overrides.display_order,
   };
 }
 
 describe("buildThemeContentOrder", () => {
-  it("フェーズ→週→コンテンツの display_order 昇順に並ぶ", () => {
-    const phase2 = makePhase(2, 2);
-    const phase1 = makePhase(1, 1);
-    const weeks = [
-      makeWeek({ id: 20, display_order: 2, phase: phase1 }),
-      makeWeek({ id: 10, display_order: 1, phase: phase1 }),
-      makeWeek({ id: 30, display_order: 1, phase: phase2 }),
-    ];
+  it("フェーズ→コンテンツの display_order 昇順に並ぶ", () => {
+    const phases = [makePhase(2, 2), makePhase(1, 1)];
     const contents = [
-      makeContent({ id: 3, week_id: 10, display_order: 2 }),
-      makeContent({ id: 1, week_id: 30, display_order: 1 }),
-      makeContent({ id: 2, week_id: 10, display_order: 1 }),
-      makeContent({ id: 4, week_id: 20, display_order: 1 }),
+      makeContent({ id: 3, phase_id: 1, display_order: 2 }),
+      makeContent({ id: 1, phase_id: 2, display_order: 1 }),
+      makeContent({ id: 2, phase_id: 1, display_order: 1 }),
     ];
 
-    expect(buildThemeContentOrder(weeks, contents).map((c) => c.id)).toEqual([2, 3, 4, 1]);
+    expect(buildThemeContentOrder(phases, contents).map((c) => c.id)).toEqual([2, 3, 1]);
   });
 
-  it("display_order 同値のフェーズ同士 / 週同士 / コンテンツ同士が id でタイブレークされる", () => {
-    const phaseB = makePhase(20, 1);
-    const phaseA = makePhase(10, 1);
-    const weeks = [
-      makeWeek({ id: 4, display_order: 1, phase: phaseB }),
-      makeWeek({ id: 3, display_order: 1, phase: phaseB }),
-      makeWeek({ id: 2, display_order: 1, phase: phaseA }),
-      makeWeek({ id: 1, display_order: 1, phase: phaseA }),
-    ];
+  it("display_order 同値のフェーズ同士 / コンテンツ同士が id でタイブレークされる", () => {
+    const phases = [makePhase(20, 1), makePhase(10, 1)];
     const contents = [
-      makeContent({ id: 40, week_id: 4, display_order: 1 }),
-      makeContent({ id: 31, week_id: 3, display_order: 1 }),
-      makeContent({ id: 30, week_id: 3, display_order: 1 }),
-      makeContent({ id: 20, week_id: 2, display_order: 1 }),
-      makeContent({ id: 10, week_id: 1, display_order: 1 }),
+      makeContent({ id: 40, phase_id: 20, display_order: 1 }),
+      makeContent({ id: 31, phase_id: 20, display_order: 1 }),
+      makeContent({ id: 30, phase_id: 20, display_order: 1 }),
+      makeContent({ id: 10, phase_id: 10, display_order: 1 }),
     ];
 
-    expect(buildThemeContentOrder(weeks, contents).map((c) => c.id)).toEqual([10, 20, 30, 31, 40]);
+    expect(buildThemeContentOrder(phases, contents).map((c) => c.id)).toEqual([10, 30, 31, 40]);
   });
 
   it("display_order が null の要素が各階層の末尾に寄る", () => {
-    const phaseOrdered = makePhase(1, 1);
-    const phaseNull = makePhase(2, null);
-    const weeks = [
-      makeWeek({ id: 2, display_order: null, phase: phaseOrdered }),
-      makeWeek({ id: 1, display_order: 1, phase: phaseOrdered }),
-      makeWeek({ id: 3, display_order: 1, phase: phaseNull }),
-    ];
+    const phases = [makePhase(2, null), makePhase(1, 1)];
     const contents = [
-      makeContent({ id: 12, week_id: 1, display_order: null }),
-      makeContent({ id: 11, week_id: 1, display_order: 1 }),
-      makeContent({ id: 21, week_id: 2, display_order: 1 }),
-      makeContent({ id: 31, week_id: 3, display_order: 1 }),
+      makeContent({ id: 12, phase_id: 1, display_order: null }),
+      makeContent({ id: 11, phase_id: 1, display_order: 1 }),
+      makeContent({ id: 21, phase_id: 2, display_order: 1 }),
     ];
 
-    expect(buildThemeContentOrder(weeks, contents).map((c) => c.id)).toEqual([11, 12, 21, 31]);
+    expect(buildThemeContentOrder(phases, contents).map((c) => c.id)).toEqual([11, 12, 21]);
   });
 
-  it("コンテンツ0件の週を挟んでも、その前後の週のコンテンツが隣接する", () => {
-    const phase = makePhase(1, 1);
-    const weeks = [
-      makeWeek({ id: 1, display_order: 1, phase }),
-      makeWeek({ id: 2, display_order: 2, phase }),
-      makeWeek({ id: 3, display_order: 3, phase }),
-    ];
+  it("コンテンツ0件のフェーズを挟んでも、前後のフェーズのコンテンツが隣接する", () => {
+    const phases = [makePhase(1, 1), makePhase(2, 2), makePhase(3, 3)];
     const contents = [
-      makeContent({ id: 1, week_id: 1, display_order: 1 }),
-      makeContent({ id: 3, week_id: 3, display_order: 1 }),
+      makeContent({ id: 1, phase_id: 1, display_order: 1 }),
+      makeContent({ id: 3, phase_id: 3, display_order: 1 }),
     ];
 
-    const ordered = buildThemeContentOrder(weeks, contents);
-    expect(ordered.map((c) => c.id)).toEqual([1, 3]);
-
-    const { next } = resolveAdjacentContents(ordered, 1);
-    expect(next?.id).toBe(3);
-    expect(next?.boundary).toBe("week");
-  });
-
-  it("コンテンツ0件のフェーズ（週はあるが全て空）を挟んでも、前後のフェーズが隣接する", () => {
-    const phase1 = makePhase(1, 1);
-    const phase2 = makePhase(2, 2);
-    const phase3 = makePhase(3, 3);
-    const weeks = [
-      makeWeek({ id: 1, display_order: 1, phase: phase1 }),
-      makeWeek({ id: 2, display_order: 1, phase: phase2 }),
-      makeWeek({ id: 3, display_order: 1, phase: phase3 }),
-    ];
-    const contents = [
-      makeContent({ id: 1, week_id: 1, display_order: 1 }),
-      makeContent({ id: 3, week_id: 3, display_order: 1 }),
-    ];
-
-    const ordered = buildThemeContentOrder(weeks, contents);
+    const ordered = buildThemeContentOrder(phases, contents);
     expect(ordered.map((c) => c.id)).toEqual([1, 3]);
 
     const { next } = resolveAdjacentContents(ordered, 1);
@@ -140,123 +76,66 @@ describe("buildThemeContentOrder", () => {
     expect(next?.boundary).toBe("phase");
   });
 
-  it("コンテンツ0件のフェーズ（週が0件）を挟んでも、前後のフェーズが隣接する", () => {
-    const phase1 = makePhase(1, 1);
-    const phase3 = makePhase(3, 3);
-    const weeks = [
-      makeWeek({ id: 1, display_order: 1, phase: phase1 }),
-      makeWeek({ id: 3, display_order: 1, phase: phase3 }),
-    ];
+  it("フェーズリストに存在しない phase_id のコンテンツは通し列に含まれない", () => {
+    const phases = [makePhase(1, 1)];
     const contents = [
-      makeContent({ id: 1, week_id: 1, display_order: 1 }),
-      makeContent({ id: 3, week_id: 3, display_order: 1 }),
+      makeContent({ id: 1, phase_id: 1, display_order: 1 }),
+      makeContent({ id: 99, phase_id: 99, display_order: 1 }),
     ];
 
-    const ordered = buildThemeContentOrder(weeks, contents);
-    const { next } = resolveAdjacentContents(ordered, 1);
-    expect(next?.id).toBe(3);
-    expect(next?.boundary).toBe("phase");
-  });
-
-  it("週リストに存在しない week_id のコンテンツは通し列に含まれない", () => {
-    const phase = makePhase(1, 1);
-    const weeks = [makeWeek({ id: 1, display_order: 1, phase })];
-    const contents = [
-      makeContent({ id: 1, week_id: 1, display_order: 1 }),
-      makeContent({ id: 99, week_id: 99, display_order: 1 }),
-    ];
-
-    expect(buildThemeContentOrder(weeks, contents).map((c) => c.id)).toEqual([1]);
-  });
-
-  it("phase が null の週は除外される", () => {
-    const phase = makePhase(1, 1);
-    const weeks = [
-      makeWeek({ id: 1, display_order: 1, phase }),
-      makeWeek({ id: 2, display_order: 2, phase: null }),
-    ];
-    const contents = [
-      makeContent({ id: 1, week_id: 1, display_order: 1 }),
-      makeContent({ id: 2, week_id: 2, display_order: 1 }),
-    ];
-
-    expect(buildThemeContentOrder(weeks, contents).map((c) => c.id)).toEqual([1]);
+    expect(buildThemeContentOrder(phases, contents).map((c) => c.id)).toEqual([1]);
   });
 });
 
 describe("resolveAdjacentContents", () => {
-  const phase1 = makePhase(1, 1, "導入");
-  const phase2 = makePhase(2, 2, "応用");
-  const weeks = [
-    makeWeek({ id: 1, name: "第1週", display_order: 1, phase: phase1 }),
-    makeWeek({ id: 2, name: "第2週", display_order: 2, phase: phase1 }),
-    makeWeek({ id: 3, name: "第3週", display_order: 1, phase: phase2 }),
-  ];
+  const phases = [makePhase(1, 1, "導入"), makePhase(2, 2, "応用")];
   const contents = [
-    makeContent({ id: 11, title: "A", week_id: 1, display_order: 1 }),
-    makeContent({ id: 12, title: "B", week_id: 1, display_order: 2 }),
-    makeContent({ id: 13, title: "C", week_id: 1, display_order: 3 }),
-    makeContent({ id: 21, title: "D", week_id: 2, display_order: 1 }),
-    makeContent({ id: 31, title: "E", week_id: 3, display_order: 1 }),
+    makeContent({ id: 11, title: "A", phase_id: 1, display_order: 1 }),
+    makeContent({ id: 12, title: "B", phase_id: 1, display_order: 2 }),
+    makeContent({ id: 13, title: "C", phase_id: 1, display_order: 3 }),
+    makeContent({ id: 21, title: "D", phase_id: 2, display_order: 1 }),
   ];
-  const ordered = buildThemeContentOrder(weeks, contents);
+  const ordered = buildThemeContentOrder(phases, contents);
 
-  it("週の途中: prev/next とも same-week", () => {
+  it("フェーズの途中: prev/next とも same-phase", () => {
     const { prev, next } = resolveAdjacentContents(ordered, 12);
     expect(prev?.id).toBe(11);
-    expect(prev?.boundary).toBe("same-week");
+    expect(prev?.boundary).toBe("same-phase");
     expect(next?.id).toBe(13);
-    expect(next?.boundary).toBe("same-week");
-  });
-
-  it("週末尾: next が次の週の先頭で week、週先頭: prev が前の週の末尾で week", () => {
-    const atWeekEnd = resolveAdjacentContents(ordered, 13);
-    expect(atWeekEnd.next?.id).toBe(21);
-    expect(atWeekEnd.next?.boundary).toBe("week");
-    expect(atWeekEnd.next?.weekName).toBe("第2週");
-
-    const atWeekStart = resolveAdjacentContents(ordered, 21);
-    expect(atWeekStart.prev?.id).toBe(13);
-    expect(atWeekStart.prev?.boundary).toBe("week");
-    expect(atWeekStart.prev?.weekName).toBe("第1週");
+    expect(next?.boundary).toBe("same-phase");
   });
 
   it("フェーズ末尾: next が次フェーズの先頭で phase、フェーズ先頭: prev が phase", () => {
-    const atPhaseEnd = resolveAdjacentContents(ordered, 21);
-    expect(atPhaseEnd.next?.id).toBe(31);
+    const atPhaseEnd = resolveAdjacentContents(ordered, 13);
+    expect(atPhaseEnd.next?.id).toBe(21);
     expect(atPhaseEnd.next?.boundary).toBe("phase");
     expect(atPhaseEnd.next?.phaseName).toBe("応用");
 
-    const atPhaseStart = resolveAdjacentContents(ordered, 31);
-    expect(atPhaseStart.prev?.id).toBe(21);
+    const atPhaseStart = resolveAdjacentContents(ordered, 21);
+    expect(atPhaseStart.prev?.id).toBe(13);
     expect(atPhaseStart.prev?.boundary).toBe("phase");
     expect(atPhaseStart.prev?.phaseName).toBe("導入");
   });
 
   it("テーマ先頭で prev === null、テーマ末尾で next === null", () => {
     expect(resolveAdjacentContents(ordered, 11).prev).toBeNull();
-    expect(resolveAdjacentContents(ordered, 31).next).toBeNull();
+    expect(resolveAdjacentContents(ordered, 21).next).toBeNull();
   });
 
-  it("コンテンツ1件だけの週を挟むと prev/next とも week", () => {
-    const singlePhase = makePhase(1, 1);
-    const singleWeeks = [
-      makeWeek({ id: 1, display_order: 1, phase: singlePhase }),
-      makeWeek({ id: 2, display_order: 2, phase: singlePhase }),
-      makeWeek({ id: 3, display_order: 3, phase: singlePhase }),
-    ];
+  it("コンテンツ1件だけのフェーズを挟むと prev/next とも phase", () => {
+    const singlePhases = [makePhase(1, 1), makePhase(2, 2), makePhase(3, 3)];
     const singleContents = [
-      makeContent({ id: 1, week_id: 1, display_order: 1 }),
-      makeContent({ id: 2, week_id: 2, display_order: 1 }),
-      makeContent({ id: 3, week_id: 3, display_order: 1 }),
+      makeContent({ id: 1, phase_id: 1, display_order: 1 }),
+      makeContent({ id: 2, phase_id: 2, display_order: 1 }),
+      makeContent({ id: 3, phase_id: 3, display_order: 1 }),
     ];
-    const singleOrdered = buildThemeContentOrder(singleWeeks, singleContents);
+    const singleOrdered = buildThemeContentOrder(singlePhases, singleContents);
 
     const { prev, next } = resolveAdjacentContents(singleOrdered, 2);
     expect(prev?.id).toBe(1);
-    expect(prev?.boundary).toBe("week");
+    expect(prev?.boundary).toBe("phase");
     expect(next?.id).toBe(3);
-    expect(next?.boundary).toBe("week");
+    expect(next?.boundary).toBe("phase");
   });
 
   it("currentContentId が列に無い / 通し列が空 → { prev: null, next: null }", () => {
@@ -266,17 +145,13 @@ describe("resolveAdjacentContents", () => {
 });
 
 describe("resolveContentNavigation", () => {
-  const phase = makePhase(1, 1, "導入");
-  const weeks = [
-    makeWeek({ id: 1, name: "第1週", display_order: 1, phase }),
-    makeWeek({ id: 2, name: "第2週", display_order: 2, phase }),
-  ];
+  const phases = [makePhase(1, 1, "導入"), makePhase(2, 2, "応用")];
   const contents = [
-    makeContent({ id: 11, title: "A", week_id: 1, display_order: 1 }),
-    makeContent({ id: 12, title: "B", week_id: 1, display_order: 2 }),
-    makeContent({ id: 21, title: "C", week_id: 2, display_order: 1 }),
+    makeContent({ id: 11, title: "A", phase_id: 1, display_order: 1 }),
+    makeContent({ id: 12, title: "B", phase_id: 1, display_order: 2 }),
+    makeContent({ id: 21, title: "C", phase_id: 2, display_order: 1 }),
   ];
-  const ordered = buildThemeContentOrder(weeks, contents);
+  const ordered = buildThemeContentOrder(phases, contents);
 
   it("通し列に現在があるテーマ末尾は endFallback が theme", () => {
     const result = resolveContentNavigation(ordered, 21, []);
@@ -285,19 +160,19 @@ describe("resolveContentNavigation", () => {
     expect(result.endFallback).toBe("theme");
   });
 
-  it("通し列が空の縮退時は週ローカルの前後を使い、endFallback が phase", () => {
-    const weekLocal = buildThemeContentOrder(
-      [makeWeek({ id: 1, name: "第1週", display_order: 1, phase })],
+  it("通し列が空の縮退時はフェーズローカルの前後を使い、endFallback が phase", () => {
+    const phaseLocal = buildThemeContentOrder(
+      [makePhase(1, 1, "導入")],
       [
-        makeContent({ id: 11, title: "A", week_id: 1, display_order: 1 }),
-        makeContent({ id: 12, title: "B", week_id: 1, display_order: 2 }),
+        makeContent({ id: 11, title: "A", phase_id: 1, display_order: 1 }),
+        makeContent({ id: 12, title: "B", phase_id: 1, display_order: 2 }),
       ]
     );
 
-    const result = resolveContentNavigation([], 11, weekLocal);
+    const result = resolveContentNavigation([], 11, phaseLocal);
     expect(result.prev).toBeNull();
     expect(result.next?.id).toBe(12);
-    expect(result.next?.boundary).toBe("same-week");
+    expect(result.next?.boundary).toBe("same-phase");
     expect(result.endFallback).toBe("phase");
   });
 

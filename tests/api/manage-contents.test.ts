@@ -32,10 +32,10 @@ beforeEach(() => {
 
 describe("POST /api/manage/contents - バリデーション", () => {
   it.each([
-    ["title未指定", { week_id: 1, content_type: "video", insert_after_id: null }],
-    ["week_id未指定", { title: "コンテンツ1", content_type: "video", insert_after_id: null }],
-    ["content_type未指定", { title: "コンテンツ1", week_id: 1, insert_after_id: null }],
-    ["insert_after_id未指定", { title: "コンテンツ1", week_id: 1, content_type: "video" }],
+    ["title未指定", { phase_id: 1, content_type: "video", insert_after_id: null }],
+    ["phase_id未指定", { title: "コンテンツ1", content_type: "video", insert_after_id: null }],
+    ["content_type未指定", { title: "コンテンツ1", phase_id: 1, insert_after_id: null }],
+    ["insert_after_id未指定", { title: "コンテンツ1", phase_id: 1, content_type: "video" }],
   ])("%sの場合は400で、作成処理を呼ばない", async (_label, body) => {
     const res = await POST(request(body) as never);
 
@@ -45,7 +45,7 @@ describe("POST /api/manage/contents - バリデーション", () => {
 
   it("content_typeが許可値以外の場合は400（従来はDBのCHECK制約違反で500になっていた）", async () => {
     const res = await POST(
-      request({ title: "コンテンツ1", week_id: 1, content_type: "poll" }) as never
+      request({ title: "コンテンツ1", phase_id: 1, content_type: "poll" }) as never
     );
 
     expect(res.status).toBe(400);
@@ -56,7 +56,7 @@ describe("POST /api/manage/contents - バリデーション", () => {
     const res = await POST(
       request({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "video",
         description: null,
         insert_after_id: null,
@@ -67,7 +67,7 @@ describe("POST /api/manage/contents - バリデーション", () => {
     expect(createContent).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "video",
         description: null,
         insertAfterId: null,
@@ -79,7 +79,7 @@ describe("POST /api/manage/contents - バリデーション", () => {
     const res = await POST(
       request({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "exercise",
         allowed_submission_types: "email",
         insert_after_id: null,
@@ -146,7 +146,7 @@ describe("POST / PUT /api/manage/contents - クイズの設問（#306）", () =>
     const res = await POST(
       request({
         title: "クイズ",
-        week_id: 1,
+        phase_id: 1,
         content_type: "quiz",
         insert_after_id: null,
         quiz_questions: quizQuestions,
@@ -169,7 +169,7 @@ describe("POST / PUT /api/manage/contents - クイズの設問（#306）", () =>
     const res = await POST(
       request({
         title: "クイズ",
-        week_id: 1,
+        phase_id: 1,
         content_type: "quiz",
         insert_after_id: null,
         quiz_questions: [{ ...quizQuestions[0], question_type: "single" }],
@@ -210,7 +210,7 @@ describe("POST / PUT /api/manage/contents - クイズの設問（#306）", () =>
     const res = await POST(
       request({
         title: "クイズ",
-        week_id: 1,
+        phase_id: 1,
         content_type: "quiz",
         insert_after_id: null,
         is_published: true,
@@ -232,7 +232,7 @@ describe("POST / PUT /api/manage/contents - クイズの設問（#306）", () =>
     const res = await POST(
       request({
         title: "クイズ",
-        week_id: 1,
+        phase_id: 1,
         content_type: "quiz",
         insert_after_id: null,
         quiz_questions: quizQuestions,
@@ -252,7 +252,7 @@ describe("POST / PUT / DELETE /api/manage/contents - 権限ガード（requireCo
 
   it("member の作成は403で、作成処理を呼ばない", async () => {
     const res = await POST(
-      request({ title: "t", week_id: 1, content_type: "video", insert_after_id: null }) as never
+      request({ title: "t", phase_id: 1, content_type: "video", insert_after_id: null }) as never
     );
 
     expect(res.status).toBe(403);
@@ -287,7 +287,7 @@ describe("POST / PUT /api/manage/contents - プレビュー設定（#380）", ()
     const res = await POST(
       request({
         title: "課題",
-        week_id: 1,
+        phase_id: 1,
         content_type: "exercise",
         code_language: "html",
         show_preview: true,
@@ -333,7 +333,7 @@ describe("コンテンツ作成・更新の採点基準（#305）", () => {
     const res = await POST(
       request({
         title: "課題",
-        week_id: 1,
+        phase_id: 1,
         content_type: "exercise",
         grading_rubric: { ...rubric, version: 99 },
         insert_after_id: null,
@@ -393,7 +393,7 @@ describe("コンテンツ作成・更新の採点基準（#305）", () => {
     const res = await POST(
       request({
         title: "課題",
-        week_id: 1,
+        phase_id: 1,
         content_type: "exercise",
         grading_rubric,
         insert_after_id: null,

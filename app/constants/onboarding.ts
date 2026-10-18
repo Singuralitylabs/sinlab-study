@@ -24,7 +24,7 @@ export const WELCOME_DIALOG_STEPS: readonly WelcomeDialogStep[] = [
   {
     id: "welcome",
     title: "ようこそ",
-    body: "「AIと学ぶ実践Web技術講座」の学習サイトへようこそ。学習コンテンツはテーマ → フェーズ → 週 → コンテンツの4階層で構成されています。",
+    body: "「AIと学ぶ実践Web技術講座」の学習サイトへようこそ。学習コンテンツはテーマ → フェーズ → コンテンツの3階層で構成されています。",
     trialOnly: false,
     showsUpgradeLink: false,
   },

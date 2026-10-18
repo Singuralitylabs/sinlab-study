@@ -11,37 +11,30 @@ import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import {
   createDemoSlideSignedUrl,
   fetchDemoContentById,
-  fetchDemoContentsByWeekId,
+  fetchDemoContentsByPhaseId,
   fetchDemoContext,
 } from "@/app/services/api/demo-learning-server";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { DemoCompleteButton } from "../../../../components/DemoCompleteButton";
-import { DemoSubmissionForm } from "../../../../components/DemoSubmissionForm";
+import { DemoCompleteButton } from "../../../components/DemoCompleteButton";
+import { DemoSubmissionForm } from "../../../components/DemoSubmissionForm";
 
 interface PageProps {
   params: Promise<{
     themeId: string;
     phaseId: string;
-    weekId: string;
     contentId: string;
   }>;
 }
 
 export default async function DemoContentPage({ params }: PageProps) {
-  const { themeId, phaseId, weekId, contentId } = await params;
+  const { themeId, phaseId, contentId } = await params;
   const themeIdNum = Number.parseInt(themeId, 10);
   const phaseIdNum = Number.parseInt(phaseId, 10);
-  const weekIdNum = Number.parseInt(weekId, 10);
   const contentIdNum = Number.parseInt(contentId, 10);
 
-  if (
-    Number.isNaN(themeIdNum) ||
-    Number.isNaN(phaseIdNum) ||
-    Number.isNaN(weekIdNum) ||
-    Number.isNaN(contentIdNum)
-  ) {
+  if (Number.isNaN(themeIdNum) || Number.isNaN(phaseIdNum) || Number.isNaN(contentIdNum)) {
     notFound();
   }
 
@@ -50,16 +43,16 @@ export default async function DemoContentPage({ params }: PageProps) {
     fetchDemoContext(),
   ]);
 
-  if (!content || content.week_id !== weekIdNum) {
+  if (!content || content.phase_id !== phaseIdNum) {
     notFound();
   }
 
-  if (content.week?.phase?.id !== phaseIdNum || content.week?.phase?.theme?.id !== themeIdNum) {
+  if (content.phase?.id !== phaseIdNum || content.phase?.theme?.id !== themeIdNum) {
     notFound();
   }
 
-  const themeName = content.week?.phase?.theme?.name ?? "テーマ";
-  const phaseName = content.week?.phase?.name ?? "フェーズ";
+  const themeName = content.phase?.theme?.name ?? "テーマ";
+  const phaseName = content.phase?.name ?? "フェーズ";
 
   const breadcrumbs = [
     { label: "学習コンテンツ", href: "/demo" },
@@ -68,7 +61,7 @@ export default async function DemoContentPage({ params }: PageProps) {
     { label: content.title },
   ];
 
-  const isDemoAccessible = ctx !== null && content.week_id === ctx.week.id;
+  const isDemoAccessible = ctx !== null && content.phase_id === ctx.phase.id;
 
   if (!isDemoAccessible) {
     return (
@@ -83,7 +76,7 @@ export default async function DemoContentPage({ params }: PageProps) {
             <div>
               <h2 className="text-lg font-semibold mb-2">このコンテンツはデモの対象外です</h2>
               <p className="text-sm text-muted-foreground max-w-sm">
-                デモでご覧いただけるのは最初の週のみです。ログインすると、本サービスでお試し公開コンテンツの閲覧・課題提出をご利用いただけます。
+                デモでご覧いただけるのは最初のフェーズのみです。ログインすると、本サービスでお試し公開コンテンツの閲覧・課題提出をご利用いただけます。
               </p>
             </div>
             <Button asChild className="mt-2">
@@ -96,23 +89,23 @@ export default async function DemoContentPage({ params }: PageProps) {
   }
 
   // Slide signed URL (same scope as trial users: only published, is_open_to_trial = true slides;
-  // decided by createDemoSlideSignedUrl() itself; #89) is fetched in parallel with the week's
+  // decided by createDemoSlideSignedUrl() itself; #89) is fetched in parallel with the phase's
   // content list.
-  const [{ data: weekContents }, slideSignedUrl] = await Promise.all([
-    fetchDemoContentsByWeekId(weekIdNum),
+  const [{ data: phaseContents }, slideSignedUrl] = await Promise.all([
+    fetchDemoContentsByPhaseId(phaseIdNum),
     content.content_type === "slide" && content.is_open_to_trial
       ? createDemoSlideSignedUrl(content)
       : Promise.resolve(null),
   ]);
 
-  const currentIndex = weekContents?.findIndex((c) => c.id === contentIdNum) ?? -1;
-  const prevContent = currentIndex > 0 ? weekContents?.[currentIndex - 1] : null;
+  const currentIndex = phaseContents?.findIndex((c) => c.id === contentIdNum) ?? -1;
+  const prevContent = currentIndex > 0 ? phaseContents?.[currentIndex - 1] : null;
   const nextContent =
-    currentIndex >= 0 && currentIndex < (weekContents?.length ?? 0) - 1
-      ? weekContents?.[currentIndex + 1]
+    currentIndex >= 0 && currentIndex < (phaseContents?.length ?? 0) - 1
+      ? phaseContents?.[currentIndex + 1]
       : null;
 
-  const demoBasePath = `/demo/${themeIdNum}/${phaseIdNum}/${weekIdNum}`;
+  const demoBasePath = `/demo/${themeIdNum}/${phaseIdNum}`;
 
   return (
     <div className="max-w-4xl mx-auto">

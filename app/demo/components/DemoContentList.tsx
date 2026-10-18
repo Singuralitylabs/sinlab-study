@@ -13,7 +13,6 @@ interface DemoContentListProps {
   contents: LearningContentListItem[];
   themeId: number;
   phaseId: number;
-  weekId: number;
   locked?: boolean;
 }
 
@@ -21,20 +20,19 @@ export function DemoContentList({
   contents,
   themeId,
   phaseId,
-  weekId,
   locked = false,
 }: DemoContentListProps) {
   const { isCompleted } = useDemoProgress();
 
   return (
-    <div className="grid gap-2 ml-5 border-l-2 border-border pl-5">
+    <div className="grid gap-2">
       {contents.map((content) => {
         const completed = !locked && isCompleted(content.id);
 
         return (
           <Link
             key={content.id}
-            href={`/demo/${themeId}/${phaseId}/${weekId}/${content.id}`}
+            href={`/demo/${themeId}/${phaseId}/${content.id}`}
             className="block group"
           >
             <Card

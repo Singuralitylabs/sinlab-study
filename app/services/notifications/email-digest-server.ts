@@ -172,7 +172,7 @@ async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
 }
 
 /**
- * Returns the contents in circulation in learning order (theme -> phase -> week -> content
+ * Returns the contents in circulation in learning order (theme -> phase -> content
  * display order). The nested select and the all-levels published/not-deleted filters have the
  * same published filters as fetchThemeProgressSummaries(); ordering uses orderContentsAcrossThemes()
  * (shared with home / review-list).
@@ -182,7 +182,7 @@ async function fetchOrderedContents(supabase: AdminClient): Promise<DigestConten
     supabase
       .from("learning_themes")
       .select(
-        "id, name, display_order, phases:learning_phases(id, name, display_order, weeks:learning_weeks(id, name, display_order, contents:learning_contents(id, title, display_order, is_open_to_trial, week_id)))"
+        "id, name, display_order, phases:learning_phases(id, name, display_order, contents:learning_contents(id, title, display_order, is_open_to_trial, phase_id))"
       )
   ).order("display_order");
 
@@ -194,7 +194,7 @@ async function fetchOrderedContents(supabase: AdminClient): Promise<DigestConten
     id: number;
     title: string;
     display_order: number | null;
-    week_id: number;
+    phase_id: number;
     is_open_to_trial: boolean;
   };
   return orderContentsAcrossThemes((data ?? []) as NestedThemeTree<DigestContentRow>[]).map(
@@ -202,7 +202,7 @@ async function fetchOrderedContents(supabase: AdminClient): Promise<DigestConten
       id: content.id,
       title: content.title,
       themeId,
-      path: `/learn/${themeId}/${content.phaseId}/${content.weekId}/${content.id}`,
+      path: `/learn/${themeId}/${content.phaseId}/${content.id}`,
       themeName,
       isOpenToTrial: raw.is_open_to_trial === true,
     })

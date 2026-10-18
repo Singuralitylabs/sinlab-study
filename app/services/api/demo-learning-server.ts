@@ -5,7 +5,6 @@ import type {
   LearningContentWithBreadcrumb,
   LearningPhase,
   LearningTheme,
-  LearningWeek,
 } from "@/app/types";
 import { LEARNING_CONTENT_DETAIL_COLUMNS, LEARNING_CONTENT_LIST_COLUMNS } from "./learning-server";
 import { createSlideSignedUrlWithClient } from "./slides-server";
@@ -14,7 +13,6 @@ import { createAdminSupabaseClient } from "./supabase-server";
 export interface DemoContext {
   theme: LearningTheme;
   phase: LearningPhase;
-  week: LearningWeek;
 }
 
 export async function fetchDemoPublishedThemes(): Promise<{
@@ -93,8 +91,7 @@ export async function fetchDemoPhaseById(phaseId: number): Promise<{
 }
 
 /**
- * Demo context: first published theme -> first published phase -> first published week, queried
- * in order. It is the lock baseline for every demo page.
+ * Demo context: first published theme -> first published phase, queried in order. It is the lock baseline for every demo page.
  */
 export async function fetchDemoContext(): Promise<{
   data: DemoContext | null;
@@ -129,31 +126,16 @@ export async function fetchDemoContext(): Promise<{
     return { data: null, error: "デモ用フェーズが見つかりません" };
   }
 
-  const { data: week, error: weekError } = await supabase
-    .from("learning_weeks")
-    .select("*")
-    .eq("phase_id", phase.id)
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .order("display_order")
-    .limit(1)
-    .single();
-
-  if (weekError || !week) {
-    return { data: null, error: "デモ用週が見つかりません" };
-  }
-
   return {
     data: {
       theme: theme as LearningTheme,
       phase: phase as LearningPhase,
-      week: week as LearningWeek,
     },
     error: null,
   };
 }
 
-export async function fetchDemoContentsByWeekId(weekId: number): Promise<{
+export async function fetchDemoContentsByPhaseId(phaseId: number): Promise<{
   data: LearningContentListItem[] | null;
   error: PostgrestError | null;
 }> {
@@ -162,10 +144,11 @@ export async function fetchDemoContentsByWeekId(weekId: number): Promise<{
   const { data, error } = await supabase
     .from("learning_contents")
     .select(LEARNING_CONTENT_LIST_COLUMNS)
-    .eq("week_id", weekId)
+    .eq("phase_id", phaseId)
     .eq("is_published", true)
     .eq("is_deleted", false)
-    .order("display_order");
+    .order("display_order")
+    .order("id");
 
   if (error) {
     console.error("デモコンテンツ一覧取得エラー:", error.message);
@@ -173,31 +156,6 @@ export async function fetchDemoContentsByWeekId(weekId: number): Promise<{
   }
 
   return { data: data as LearningContentListItem[], error: null };
-}
-
-export async function fetchDemoWeeksWithContentsByPhaseId(phaseId: number): Promise<{
-  data: (LearningWeek & { contents: LearningContentListItem[] })[] | null;
-  error: PostgrestError | null;
-}> {
-  const supabase = await createAdminSupabaseClient();
-
-  const { data, error } = await supabase
-    .from("learning_weeks")
-    .select(`*, contents:learning_contents(${LEARNING_CONTENT_LIST_COLUMNS})`)
-    .eq("phase_id", phaseId)
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .eq("contents.is_published", true)
-    .eq("contents.is_deleted", false)
-    .order("display_order")
-    .order("display_order", { referencedTable: "learning_contents" });
-
-  if (error) {
-    console.error("デモ週一覧取得エラー:", error.message);
-    return { data: null, error };
-  }
-
-  return { data: data as (LearningWeek & { contents: LearningContentListItem[] })[], error: null };
 }
 
 export async function fetchDemoContentById(contentId: number): Promise<{

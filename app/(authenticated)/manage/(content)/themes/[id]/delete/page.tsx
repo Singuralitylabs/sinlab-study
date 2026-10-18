@@ -22,7 +22,7 @@ export default async function DeleteThemePage({ params }: { params: Promise<{ id
             <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0" />
             <p className="text-sm">
               テーマ「<strong>{theme.name}</strong>」を削除しますか？
-              このテーマに紐づくフェーズ・週・コンテンツの表示に影響する場合があります。
+              このテーマに紐づくフェーズ・コンテンツの表示に影響する場合があります。
             </p>
           </div>
           <DeleteConfirmButton
