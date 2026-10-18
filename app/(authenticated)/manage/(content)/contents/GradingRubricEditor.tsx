@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowDown, ArrowUp, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import {
   GRADING_REQUIREMENT_DESCRIPTION_MAX_LENGTH,
   GRADING_REQUIREMENT_NAME_MAX_LENGTH,
@@ -31,7 +31,7 @@ interface GradingRubricEditorProps {
   referenceAnswer: string;
 }
 
-export function GradingRubricEditor({
+export const GradingRubricEditor = memo(function GradingRubricEditor({
   rows,
   onChange,
   currentVersion,
@@ -217,4 +217,4 @@ export function GradingRubricEditor({
       </Button>
     </div>
   );
-}
+});

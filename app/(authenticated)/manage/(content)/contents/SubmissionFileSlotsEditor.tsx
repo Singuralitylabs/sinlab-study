@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
+import { memo } from "react";
 import { CodeEditorNoSSR as CodeEditor } from "@/app/components/CodeEditorNoSSR";
 import {
   buildDefaultFilename,
@@ -58,7 +59,10 @@ type SubmissionFileSlotsEditorProps = {
   onChange: (slots: SubmissionSlotDraft[]) => void;
 };
 
-export function SubmissionFileSlotsEditor({ slots, onChange }: SubmissionFileSlotsEditorProps) {
+export const SubmissionFileSlotsEditor = memo(function SubmissionFileSlotsEditor({
+  slots,
+  onChange,
+}: SubmissionFileSlotsEditorProps) {
   const update = (index: number, patch: Partial<SubmissionSlotDraft>) => {
     onChange(slots.map((slot, slotIndex) => (slotIndex === index ? { ...slot, ...patch } : slot)));
   };
@@ -193,4 +197,4 @@ export function SubmissionFileSlotsEditor({ slots, onChange }: SubmissionFileSlo
       </Button>
     </div>
   );
-}
+});

@@ -3,7 +3,7 @@
 import { ImagePlus, Loader2, Save, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { CONTENT_TYPE_FORM_OPTIONS } from "@/app/constants/content";
 import { SLIDE_NUMBER_MAX } from "@/app/constants/slides";
 import { parseStarterFiles } from "@/app/lib/code-file-inputs";
@@ -85,6 +85,9 @@ import {
   toQuizQuestionDrafts,
   toQuizQuestionPayload,
 } from "./QuizQuestionsEditor";
+
+// Module-level so the default does not break the memoized sibling lists.
+const NO_SIBLING_CANDIDATES: SiblingCandidate[] = [];
 
 const SELECT_CLASS_NAME =
   "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs";
@@ -175,7 +178,7 @@ export function ContentForm({
   initialQuizQuestions = [],
   quizQuestionsUnavailable = false,
   initialPhaseSelection,
-  siblingCandidates = [],
+  siblingCandidates = NO_SIBLING_CANDIDATES,
   mode,
   onSuccess,
   onCancel,
@@ -208,8 +211,15 @@ export function ContentForm({
   );
   const initialPhaseId = resolvedInitialSelection.phaseId;
   const [phaseId, setPhaseId] = useState(initialPhaseId);
-  const allSiblingsForPhase = siblingCandidates.filter((c) => String(c.parentId) === phaseId);
-  const visibleSiblings = allSiblingsForPhase.filter((c) => c.id !== initialData?.id);
+  const allSiblingsForPhase = useMemo(
+    () => siblingCandidates.filter((c) => String(c.parentId) === phaseId),
+    [siblingCandidates, phaseId]
+  );
+  // Referentially stable across keystrokes: SiblingOrderField is memoized on this array.
+  const visibleSiblings = useMemo(
+    () => allSiblingsForPhase.filter((c) => c.id !== initialData?.id),
+    [allSiblingsForPhase, initialData?.id]
+  );
   const [insertAfterId, setInsertAfterId] = useState(() =>
     mode === "edit" && initialData
       ? getCurrentPositionInsertAfterId(initialData.id, allSiblingsForPhase)
@@ -294,7 +304,16 @@ export function ContentForm({
   const [createdDraftId, setCreatedDraftId] = useState<number | null>(null);
   const [pdfFileName, setPdfFileName] = useState<string | null>(initialPdfKey);
 
-  const visiblePhases = phases.filter((p) => !themeId || String(p.themeId) === themeId);
+  const phaseOptions = useMemo(
+    () =>
+      phases
+        .filter((p) => !themeId || String(p.themeId) === themeId)
+        .map((phase) => ({
+          id: phase.id,
+          label: buildPhaseOptionLabel(phase, themes, themeId),
+        })),
+    [phases, themes, themeId]
+  );
 
   function handleThemeChange(value: string) {
     setThemeId(value);
@@ -441,6 +460,24 @@ export function ContentForm({
   const previewCap = previewCapability(
     submissionSlots.map((slot) => ({ filename: slot.filename, language: slot.language })),
     { previewBaseHtml }
+  );
+
+  // Stable identity so the memoized SubmissionFileSlotsEditor skips re-rendering on unrelated
+  // keystrokes; it must change with previewBaseHtml / previewFlagsTouched, which it reads.
+  const handleSubmissionSlotsChange = useCallback(
+    (next: SubmissionSlotDraft[]) => {
+      setSubmissionSlots(next);
+      if (!previewFlagsTouched) {
+        return;
+      }
+      const nextCap = previewCapability(
+        next.map((slot) => ({ filename: slot.filename, language: slot.language })),
+        { previewBaseHtml }
+      );
+      setShowPreview((current) => (current === true && !nextCap.previewAllowed ? null : current));
+      setShowConsole((current) => (current === true && !nextCap.consoleAllowed ? null : current));
+    },
+    [previewFlagsTouched, previewBaseHtml]
   );
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
@@ -657,9 +694,9 @@ export function ContentForm({
             className={SELECT_CLASS_NAME}
           >
             <option value="">選択してください</option>
-            {visiblePhases.map((phase) => (
+            {phaseOptions.map((phase) => (
               <option key={phase.id} value={phase.id}>
-                {buildPhaseOptionLabel(phase, themes, themeId)}
+                {phase.label}
               </option>
             ))}
           </select>
@@ -924,22 +961,7 @@ export function ContentForm({
             </p>
             <SubmissionFileSlotsEditor
               slots={submissionSlots}
-              onChange={(next) => {
-                setSubmissionSlots(next);
-                if (!previewFlagsTouched) {
-                  return;
-                }
-                const nextCap = previewCapability(
-                  next.map((slot) => ({ filename: slot.filename, language: slot.language })),
-                  { previewBaseHtml }
-                );
-                setShowPreview((current) =>
-                  current === true && !nextCap.previewAllowed ? null : current
-                );
-                setShowConsole((current) =>
-                  current === true && !nextCap.consoleAllowed ? null : current
-                );
-              }}
+              onChange={handleSubmissionSlotsChange}
             />
           </div>
           <div className="space-y-2">
