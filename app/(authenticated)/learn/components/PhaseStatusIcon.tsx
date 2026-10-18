@@ -17,8 +17,8 @@ export function PhaseStatusIcon({ status }: { status: PhaseProgressStatus }) {
     );
   }
   return (
-    <div className="p-3 bg-muted rounded-full shrink-0">
-      <BookOpen aria-label="未着手" className="h-6 w-6 text-muted-foreground" />
+    <div className="p-3 bg-primary/10 rounded-full shrink-0">
+      <BookOpen aria-label="未着手" className="h-6 w-6 text-primary" />
     </div>
   );
 }
