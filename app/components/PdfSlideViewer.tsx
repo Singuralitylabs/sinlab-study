@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronLeft, ChevronRight, Loader2, ZoomIn, ZoomOut } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -12,6 +12,9 @@ import { Button } from "@/components/ui/button";
 // node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs.
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
+// Horizontal padding of the page area (px-4 on each side), subtracted so 100% fits without scrolling.
+const PAGE_AREA_PADDING_X = 32;
+
 interface PdfSlideViewerProps {
   url: string;
 }
@@ -21,6 +24,18 @@ export function PdfSlideViewer({ url }: PdfSlideViewerProps) {
   const [pageNumber, setPageNumber] = useState(1);
   const [scale, setScale] = useState(1.0);
   const [isLoading, setIsLoading] = useState(true);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => setContainerWidth(el.clientWidth);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const onDocumentLoadSuccess = useCallback(({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
@@ -96,7 +111,10 @@ export function PdfSlideViewer({ url }: PdfSlideViewerProps) {
         </Button>
       </div>
 
-      <div className="relative w-full overflow-auto rounded-lg border bg-muted/30">
+      <div
+        ref={containerRef}
+        className="relative w-full overflow-auto rounded-lg border bg-muted/30"
+      >
         {isLoading && (
           <div className="flex h-64 items-center justify-center">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -112,15 +130,22 @@ export function PdfSlideViewer({ url }: PdfSlideViewerProps) {
           // Boundary; disable it to keep the previous behavior that relies on our own isLoading /
           // onLoadError.
           suspense={false}
-          className="flex justify-center py-4"
+          // No justify-center: a centered flex item that overflows is clipped on the left and cannot be
+          // scrolled to. The page uses mx-auto instead, which falls back to start-aligned on overflow.
+          className="flex px-4 py-4"
         >
-          <Page
-            pageNumber={pageNumber}
-            scale={scale}
-            className="shadow-lg"
-            renderAnnotationLayer={true}
-            renderTextLayer={true}
-          />
+          {containerWidth > 0 && (
+            // react-pdf multiplies scale by width/pageWidth, so 100% means fit-to-container width
+            // regardless of the PDF's native page size.
+            <Page
+              pageNumber={pageNumber}
+              width={Math.max(containerWidth - PAGE_AREA_PADDING_X, 1)}
+              scale={scale}
+              className="mx-auto shadow-lg"
+              renderAnnotationLayer={true}
+              renderTextLayer={true}
+            />
+          )}
         </Document>
       </div>
 
