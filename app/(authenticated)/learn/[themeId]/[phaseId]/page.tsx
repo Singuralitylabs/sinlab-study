@@ -1,10 +1,14 @@
-import { BookOpen } from "lucide-react";
+import { BookOpen, CheckCircle } from "lucide-react";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
-import { summarizePhaseProgress } from "@/app/lib/phase-progress";
+import {
+  getPhaseProgressStatus,
+  PHASE_PROGRESS_STATUS,
+  summarizePhaseProgress,
+} from "@/app/lib/phase-progress";
 import { fetchCompletedAIReviewContentIds } from "@/app/services/api/ai-review-server";
 import {
   type ContentVisibilitySummary,
@@ -72,11 +76,13 @@ export default async function PhasePage({ params }: PageProps) {
       : Promise.resolve({ data: new Set<number>() }),
   ]);
 
-  const { completed: completedCount, total: totalCount } = summarizePhaseProgress(contentList, {
+  const progress = summarizePhaseProgress(contentList, {
     isLocked,
     ancestorsPublished,
     progressMap,
   });
+  const { completed: completedCount, total: totalCount } = progress;
+  const isPhaseCompleted = getPhaseProgressStatus(progress) === PHASE_PROGRESS_STATUS.COMPLETED;
 
   const hasLockedContent = contentList.some((c) => isLocked(c));
   const showUpgradeCta = userStatus === USER_STATUS.TRIAL && hasLockedContent;
@@ -95,10 +101,17 @@ export default async function PhasePage({ params }: PageProps) {
         badge={<UnpublishedBadge isPublished={phase.is_published} />}
       />
 
-      {totalCount > 0 && (
-        <p className="-mt-3 mb-6 text-sm text-muted-foreground">
-          {completedCount} / {totalCount} 完了
-        </p>
+      {isPhaseCompleted ? (
+        <div className="-mt-3 mb-6 flex items-center gap-2 rounded-lg border border-success/40 bg-success/5 px-4 py-3 text-sm font-medium text-success">
+          <CheckCircle className="h-5 w-5 shrink-0" />
+          このフェーズのコンテンツをすべて完了しました（{completedCount} / {totalCount}）
+        </div>
+      ) : (
+        totalCount > 0 && (
+          <p className="-mt-3 mb-6 text-sm text-muted-foreground">
+            {completedCount} / {totalCount} 完了
+          </p>
+        )
       )}
 
       {contentList.length === 0 ? (

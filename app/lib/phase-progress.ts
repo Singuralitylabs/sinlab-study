@@ -31,6 +31,25 @@ export function summarizePhaseProgress<T extends ProgressContent>(
   };
 }
 
+export const PHASE_PROGRESS_STATUS = {
+  NOT_STARTED: "not_started",
+  IN_PROGRESS: "in_progress",
+  COMPLETED: "completed",
+} as const;
+
+export type PhaseProgressStatus =
+  (typeof PHASE_PROGRESS_STATUS)[keyof typeof PHASE_PROGRESS_STATUS];
+
+/**
+ * An empty denominator is never "completed": a phase with nothing countable has nothing to finish,
+ * and a green check there would tell learners they finished work that doesn't exist.
+ */
+export function getPhaseProgressStatus({ completed, total }: PhaseProgress): PhaseProgressStatus {
+  if (total > 0 && completed >= total) return PHASE_PROGRESS_STATUS.COMPLETED;
+  if (completed > 0) return PHASE_PROGRESS_STATUS.IN_PROGRESS;
+  return PHASE_PROGRESS_STATUS.NOT_STARTED;
+}
+
 /**
  * The phase to expand first on the theme page: the first one with work left. When everything is
  * done (or nothing is countable) fall back to the first phase so the page never renders fully

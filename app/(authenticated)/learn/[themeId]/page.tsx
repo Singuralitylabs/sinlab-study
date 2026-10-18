@@ -6,7 +6,12 @@ import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import { compareGroupLevel } from "@/app/lib/content-grouping";
-import { pickInitiallyOpenPhaseId, summarizePhaseProgress } from "@/app/lib/phase-progress";
+import {
+  getPhaseProgressStatus,
+  PHASE_PROGRESS_STATUS,
+  pickInitiallyOpenPhaseId,
+  summarizePhaseProgress,
+} from "@/app/lib/phase-progress";
 import { fetchCompletedAIReviewContentIds } from "@/app/services/api/ai-review-server";
 import {
   type ContentVisibilitySummary,
@@ -18,10 +23,12 @@ import {
 } from "@/app/services/api/learning-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { LearnContentRow } from "../components/LearnContentRow";
 import { LockedContentUpgradeCard } from "../components/LockedContentUpgradeCard";
+import { PhaseStatusIcon } from "../components/PhaseStatusIcon";
 
 interface PageProps {
   params: Promise<{ themeId: string }>;
@@ -124,16 +131,18 @@ export default async function ThemePage({ params }: PageProps) {
           {phaseViews.map(({ phase, contents, progress }) => {
             const progressValue =
               progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
+            const status = getPhaseProgressStatus(progress);
+            const isCompleted = status === PHASE_PROGRESS_STATUS.COMPLETED;
             return (
               <details
                 key={phase.id}
                 open={phase.id === openPhaseId}
-                className="group/phase rounded-xl border bg-card text-card-foreground shadow-sm"
+                className={`group/phase rounded-xl border text-card-foreground shadow-sm ${
+                  isCompleted ? "border-success/40 bg-success/5" : "bg-card"
+                }`}
               >
                 <summary className="flex cursor-pointer list-none items-center gap-4 rounded-xl p-4 [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-ring">
-                  <div className="p-3 bg-primary/10 rounded-full shrink-0">
-                    <BookOpen className="h-6 w-6 text-primary" />
-                  </div>
+                  <PhaseStatusIcon status={status} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <h2 className="text-lg font-semibold">{phase.name}</h2>
@@ -144,10 +153,19 @@ export default async function ThemePage({ params }: PageProps) {
                     )}
                     {progress.total > 0 && (
                       <div className="mt-2 flex items-center gap-3">
-                        <Progress value={progressValue} className="h-1.5 max-w-48" />
-                        <span className="text-xs text-muted-foreground whitespace-nowrap">
-                          {progress.completed} / {progress.total} 完了
-                        </span>
+                        <Progress
+                          value={progressValue}
+                          className={`h-1.5 max-w-48 ${isCompleted ? "[&>div]:bg-success" : ""}`}
+                        />
+                        {isCompleted ? (
+                          <Badge variant="outline" className="border-success text-success">
+                            完了
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">
+                            {progress.completed} / {progress.total} 完了
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
