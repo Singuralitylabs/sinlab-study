@@ -34,13 +34,13 @@ describe("LearnContentCard（#433）", () => {
   it("動画・解説記事・演習は画像、スライド・クイズは描画イラストのサムネイルにする", () => {
     for (const contentType of ["video", "text", "exercise"] as const) {
       const html = render({ contentType });
-      expect(html).toContain("/images/content-types/");
+      expect(html).toContain("images%2Fcontent-types%2F");
       expect(html).not.toContain("<svg");
     }
     for (const contentType of ["slide", "quiz"] as const) {
       const html = render({ contentType });
       expect(html).toContain("<svg");
-      expect(html).not.toContain("/images/content-types/");
+      expect(html).not.toContain("images%2Fcontent-types%2F");
     }
   });
 
