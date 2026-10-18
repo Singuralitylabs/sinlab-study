@@ -23,7 +23,9 @@ function NavLinkText({
   return (
     <span className={cn("flex min-w-0 flex-col", alignEnd && "items-end text-right")}>
       {annotation ? (
-        <span className="text-xs leading-tight text-muted-foreground">{annotation}</span>
+        <span className="block w-full truncate text-xs leading-tight text-muted-foreground">
+          {annotation}
+        </span>
       ) : null}
       <span className="block w-full truncate">{title}</span>
     </span>
