@@ -1,7 +1,9 @@
 import { BookOpen, CheckCircle } from "lucide-react";
+import Image from "next/image";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
+import { PHASE_COMPLETION_MASCOTS } from "@/app/constants/mascot";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import {
@@ -83,6 +85,7 @@ export default async function PhasePage({ params }: PageProps) {
   });
   const { completed: completedCount, total: totalCount } = progress;
   const isPhaseCompleted = getPhaseProgressStatus(progress) === PHASE_PROGRESS_STATUS.COMPLETED;
+  const mascot = PHASE_COMPLETION_MASCOTS[theme.name];
 
   const hasLockedContent = contentList.some((c) => isLocked(c));
   const showUpgradeCta = userStatus === USER_STATUS.TRIAL && hasLockedContent;
@@ -102,9 +105,25 @@ export default async function PhasePage({ params }: PageProps) {
       />
 
       {isPhaseCompleted ? (
-        <div className="-mt-3 mb-6 flex items-center gap-2 rounded-lg border border-success/40 bg-success/5 px-4 py-3 text-sm font-medium text-success">
-          <CheckCircle className="h-5 w-5 shrink-0" />
-          このフェーズのコンテンツをすべて完了しました（{completedCount} / {totalCount}）
+        <div className="-mt-3 mb-6 flex items-center gap-4 rounded-lg border border-success/40 bg-success/5 px-4 py-3 text-success">
+          {mascot && (
+            <Image
+              src={mascot.src}
+              alt={mascot.alt}
+              width={120}
+              height={120}
+              className="h-24 w-24 shrink-0 sm:h-28 sm:w-28"
+            />
+          )}
+          <div className="flex items-center gap-2">
+            <CheckCircle className="h-5 w-5 shrink-0" />
+            <div>
+              <p className="font-bold">お疲れさまでした！</p>
+              <p className="text-sm font-medium">
+                このフェーズのコンテンツをすべて完了しました（{completedCount} / {totalCount}）
+              </p>
+            </div>
+          </div>
         </div>
       ) : (
         totalCount > 0 && (
