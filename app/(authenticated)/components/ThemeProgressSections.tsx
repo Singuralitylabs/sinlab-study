@@ -108,14 +108,14 @@ export function ThemeCard({
           className={`overflow-hidden transition-all hover:shadow-md hover:border-primary/20 ${isCompleted ? "border-l-4 border-l-success" : ""}`}
         >
           <div className="flex">
-            <div className="relative w-24 shrink-0 bg-linear-to-br from-primary/5 to-primary/15">
+            <div className="relative w-32 shrink-0 sm:w-40 bg-linear-to-br from-primary/5 to-primary/15">
               {theme.image_url ? (
                 <Image
                   src={resolveStorageUrl(theme.image_url)}
                   alt={theme.name}
                   fill
-                  className="object-contain"
-                  sizes="96px"
+                  className="object-cover"
+                  sizes="(max-width: 640px) 128px, 160px"
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center">
