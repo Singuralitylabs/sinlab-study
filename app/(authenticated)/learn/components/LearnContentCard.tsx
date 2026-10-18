@@ -1,11 +1,11 @@
 import { Bot, CheckCircle, Lock } from "lucide-react";
 import Link from "next/link";
-import { ContentTypeIcon } from "@/app/components/ContentTypeIcon";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
-import { CONTENT_TYPE_ACCENT_CLASSES, CONTENT_TYPE_LABELS } from "@/app/constants/content";
+import { CONTENT_TYPE_ACCENT_CLASSES, CONTENT_TYPE_CARD_LABELS } from "@/app/constants/content";
 import type { ContentType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { ContentTypeIllustration } from "./ContentTypeIllustration";
 
 interface LearnContentCardProps {
   href: string;
@@ -41,12 +41,12 @@ export function LearnContentCard({
             locked ? "bg-muted text-muted-foreground" : CONTENT_TYPE_ACCENT_CLASSES[contentType]
           }`}
         >
-          <ContentTypeIcon type={contentType} className="h-12 w-12" />
+          <ContentTypeIllustration type={contentType} className="h-full w-full p-3" />
           <span className="absolute left-2 top-2 rounded-full bg-card/80 px-2 py-0.5 text-xs font-medium text-foreground">
             {number}
           </span>
           <span className="absolute bottom-2 left-2 rounded bg-card/80 px-1.5 py-0.5 text-xs font-medium text-foreground">
-            {CONTENT_TYPE_LABELS[contentType]}
+            {CONTENT_TYPE_CARD_LABELS[contentType]}
           </span>
           {locked && <Lock aria-label="有料会員向け" className="absolute right-2 top-2 h-4 w-4" />}
           {completed && (
