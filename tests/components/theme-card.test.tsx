@@ -22,7 +22,7 @@ const baseSummary: ThemeProgressSummary = {
 describe("ThemeCard", () => {
   it("既定の layout=row は横長（左ボーダー用クラス）でホーム向け", () => {
     const html = renderToStaticMarkup(<ThemeCard summary={baseSummary} />);
-    expect(html).toContain("w-28");
+    expect(html).toContain("w-36");
     expect(html).not.toContain("h-full flex-col");
     expect(html).toContain("テーマA");
     expect(html).toContain("2 / 4");
@@ -31,7 +31,7 @@ describe("ThemeCard", () => {
   it("layout=card はグリッド用に aspect-video と縦積みになる (#415)", () => {
     const html = renderToStaticMarkup(<ThemeCard summary={baseSummary} layout="card" />);
     expect(html).toContain("aspect-video");
-    expect(html).not.toContain("w-28 shrink-0");
+    expect(html).not.toContain("w-36 shrink-0");
     expect(html).toContain("テーマA");
     expect(html).toContain("line-clamp-2");
     // Outer flex column keeps the 修了 row inside the grid cell when heights stretch.
