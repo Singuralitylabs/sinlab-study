@@ -1,6 +1,7 @@
 "use client";
 
 import { Plus, Trash2 } from "lucide-react";
+import { memo } from "react";
 import {
   QUIZ_MAX_CHOICES,
   QUIZ_MAX_QUESTIONS,
@@ -73,7 +74,10 @@ interface QuizQuestionsEditorProps {
   onChange: (questions: QuizQuestionDraft[]) => void;
 }
 
-export function QuizQuestionsEditor({ questions, onChange }: QuizQuestionsEditorProps) {
+export const QuizQuestionsEditor = memo(function QuizQuestionsEditor({
+  questions,
+  onChange,
+}: QuizQuestionsEditorProps) {
   function update(index: number, patch: Partial<QuizQuestionDraft>) {
     onChange(questions.map((q, i) => (i === index ? { ...q, ...patch } : q)));
   }
@@ -255,4 +259,4 @@ export function QuizQuestionsEditor({ questions, onChange }: QuizQuestionsEditor
       </Button>
     </div>
   );
-}
+});
