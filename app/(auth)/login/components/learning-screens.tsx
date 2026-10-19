@@ -31,7 +31,7 @@ export function LearningScreens() {
           実際の学習画面
         </h2>
         <p className="text-[13px] leading-relaxed text-muted-foreground lg:text-sm">
-          動画・スライドで学び、課題を提出すると、すぐにAIのレビューが届きます。
+          動画・スライドで学び、課題を提出すると、すぐにAIのレビューが届きます。指摘された点は復習リストに集まり、あとから見返せます。
         </p>
       </div>
       <ul className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
