@@ -1,7 +1,13 @@
 import { Share2 } from "lucide-react";
+import Image from "next/image";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
-import { CERTIFICATE_SERVICE_NAME, getCertificateIssuerName } from "@/app/constants/certificate";
+import {
+  CERTIFICATE_LOGO_SRC,
+  CERTIFICATE_SERVICE_NAME,
+  getCertificateIssuerName,
+} from "@/app/constants/certificate";
+import { CERTIFICATE_MASCOT } from "@/app/constants/mascot";
 import {
   buildCertificateFacebookShareUrl,
   buildCertificateLineShareUrl,
@@ -16,7 +22,10 @@ import { PrintButton } from "./PrintButton";
 
 // The sheet is a fixed light design (explicit colors, not theme tokens) so it reads the same on
 // screen in dark mode and on paper. Sizes use container units (cqw) of the sheet width, so the
-// layout scales identically on screen and at A4 landscape width (297mm) when printed.
+// layout scales identically on screen and at A4 landscape width (297mm) when printed. The mascot
+// sits in the bottom-right corner; a very long theme name wraps to two lines and nears it. Image
+// `sizes` are the printed width at 300dpi, not the screen width: the browser does not re-pick a
+// source when printing, so a screen-sized choice would print blurry.
 const PRINT_STYLE = `
 @page { size: A4 landscape; margin: 0; }
 @media print {
@@ -91,9 +100,38 @@ export default async function CertificateDetailPage({
       </div>
 
       <div className="overflow-x-auto print:overflow-visible">
-        <div className="@container certificate-sheet relative mx-auto aspect-[297/210] min-w-[640px] w-full overflow-hidden bg-white text-neutral-900 shadow-md print:h-[209mm] print:w-[297mm] print:min-w-0 print:max-w-none print:shadow-none">
+        <div className="@container certificate-sheet relative mx-auto aspect-[297/210] min-w-[640px] w-full overflow-hidden bg-gradient-to-br from-white via-indigo-50 to-emerald-50 text-neutral-900 shadow-md print:h-[209mm] print:w-[297mm] print:min-w-0 print:max-w-none print:shadow-none">
           <div className="absolute inset-[2.4cqw] border-[0.5cqw] border-indigo-900" />
           <div className="absolute inset-[3.6cqw] border-[0.15cqw] border-indigo-400" />
+
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+            <span className="absolute left-[7cqw] top-[7cqw] h-[1.4cqw] w-[1.4cqw] rotate-12 rounded-[0.2cqw] bg-pink-300" />
+            <span className="absolute left-[11cqw] top-[12cqw] h-[1cqw] w-[1cqw] rounded-full bg-amber-300" />
+            <span className="absolute left-[6cqw] top-[18cqw] h-[1.2cqw] w-[1.2cqw] -rotate-12 rounded-[0.2cqw] bg-sky-300" />
+            <span className="absolute right-[19cqw] top-[7cqw] h-[1.4cqw] w-[1.4cqw] -rotate-12 rounded-[0.2cqw] bg-sky-300" />
+            <span className="absolute right-[17cqw] top-[16cqw] h-[1cqw] w-[1cqw] rounded-full bg-pink-300" />
+            <span className="absolute right-[6cqw] top-[17cqw] h-[1.2cqw] w-[1.2cqw] rotate-12 rounded-[0.2cqw] bg-amber-300" />
+            <span className="absolute bottom-[7cqw] left-[7cqw] h-[1.2cqw] w-[1.2cqw] rotate-12 rounded-[0.2cqw] bg-amber-300" />
+            <span className="absolute bottom-[12cqw] left-[10cqw] h-[1cqw] w-[1cqw] rounded-full bg-sky-300" />
+            <span className="absolute bottom-[6.5cqw] left-[14cqw] h-[1.4cqw] w-[1.4cqw] -rotate-12 rounded-[0.2cqw] bg-pink-300" />
+          </div>
+
+          <Image
+            src={CERTIFICATE_LOGO_SRC}
+            alt={CERTIFICATE_SERVICE_NAME}
+            width={512}
+            height={512}
+            sizes="300px"
+            className="pointer-events-none absolute right-[6.5cqw] top-[6cqw] h-[8.5cqw] w-[8.5cqw] rounded-[1.6cqw] shadow-sm"
+          />
+          <Image
+            src={CERTIFICATE_MASCOT.src}
+            alt={CERTIFICATE_MASCOT.alt}
+            width={800}
+            height={800}
+            sizes="750px"
+            className="pointer-events-none absolute bottom-[4.5cqw] right-[5.5cqw] h-[21cqw] w-[21cqw]"
+          />
 
           <div className="relative flex h-full flex-col items-center justify-between px-[8cqw] py-[7cqw] text-center">
             <div>
