@@ -23,7 +23,9 @@ import { PrintButton } from "./PrintButton";
 // The sheet is a fixed light design (explicit colors, not theme tokens) so it reads the same on
 // screen in dark mode and on paper. Sizes use container units (cqw) of the sheet width, so the
 // layout scales identically on screen and at A4 landscape width (297mm) when printed. The mascot
-// sits in the bottom-right corner; a very long theme name wraps to two lines and nears it.
+// sits in the bottom-right corner; a very long theme name wraps to two lines and nears it. Image
+// `sizes` are the printed width at 300dpi, not the screen width: the browser does not re-pick a
+// source when printing, so a screen-sized choice would print blurry.
 const PRINT_STYLE = `
 @page { size: A4 landscape; margin: 0; }
 @media print {
@@ -119,7 +121,7 @@ export default async function CertificateDetailPage({
             alt={CERTIFICATE_SERVICE_NAME}
             width={512}
             height={512}
-            sizes="90px"
+            sizes="300px"
             className="pointer-events-none absolute right-[6.5cqw] top-[6cqw] h-[8.5cqw] w-[8.5cqw] rounded-[1.6cqw] shadow-sm"
           />
           <Image
@@ -127,7 +129,7 @@ export default async function CertificateDetailPage({
             alt={CERTIFICATE_MASCOT.alt}
             width={800}
             height={800}
-            sizes="220px"
+            sizes="750px"
             className="pointer-events-none absolute bottom-[4.5cqw] right-[5.5cqw] h-[21cqw] w-[21cqw]"
           />
 
