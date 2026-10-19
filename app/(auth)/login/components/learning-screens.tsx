@@ -7,7 +7,8 @@ type Screen = {
 };
 
 // Screenshots of the real app screens (public/images/login/). The video screen has the instructor's
-// wipe painted over, and the AI review screen has the model-answer code blurred.
+// wipe painted over, and the AI review screen is cropped to the result block so it shows no
+// submission or model-answer code.
 const SCREENS: Screen[] = [
   { src: "/images/login/video.webp", alt: "動画コンテンツの画面", caption: "動画で学ぶ" },
   {
@@ -27,7 +28,10 @@ export function LearningScreens() {
   return (
     <section aria-labelledby="learning-screens-heading" className="space-y-5 lg:space-y-6">
       <div className="space-y-1 lg:flex lg:items-baseline lg:gap-4 lg:space-y-0">
-        <h2 id="learning-screens-heading" className="text-xl font-extrabold lg:text-2xl">
+        <h2
+          id="learning-screens-heading"
+          className="text-xl font-extrabold lg:shrink-0 lg:text-2xl"
+        >
           実際の学習画面
         </h2>
         <p className="text-[13px] leading-relaxed text-muted-foreground lg:text-sm">

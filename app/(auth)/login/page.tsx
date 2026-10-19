@@ -62,7 +62,7 @@ export default async function LoginPage({
             priority
           />
           <h1 className="mt-1.5 text-2xl font-extrabold lg:mt-0 lg:text-xl">Sinlab Study</h1>
-          <p className="text-sm text-muted-foreground">AIと学ぶ実践Web技術講座</p>
+          <p className="text-sm text-muted-foreground">シンラビと学ぶ実践Web技術講座</p>
         </header>
 
         <div className="mx-auto w-full max-w-md space-y-5 px-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:flex lg:max-w-none lg:flex-col lg:space-y-0 lg:self-stretch lg:px-0">
