@@ -144,3 +144,14 @@ describe("テーマページのフェーズ アコーディオン（#431）", ()
     expect(await render()).not.toContain('href="/upgrade"');
   });
 });
+
+describe("テーマ完了バナーのマスコット", () => {
+  it("テーマ名に関係なく、全フェーズ完了でシンラビを表示する", async () => {
+    setup("active", [10, 11, 20, 21]);
+
+    const html = await render();
+
+    expect(html).toContain("おめでとうございます");
+    expect(html).toContain("お祝いするシンラビ");
+  });
+});

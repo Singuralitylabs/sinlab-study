@@ -110,3 +110,20 @@ describe("フェーズ一覧のアップグレード導線（#325）", () => {
     expect(html).not.toContain('href="/upgrade"');
   });
 });
+
+describe("フェーズ完了バナーのマスコット", () => {
+  it("テーマ名に関係なく、完了でシンラビを表示する", async () => {
+    setup("active");
+    vi.mocked(fetchUserProgressByContentIds).mockResolvedValue({
+      data: new Map([
+        [10, true],
+        [11, true],
+      ]),
+    } as never);
+
+    const html = await render();
+
+    expect(html).toContain("お疲れさまでした");
+    expect(html).toContain("応援するシンラビ");
+  });
+});
