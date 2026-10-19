@@ -17,7 +17,7 @@ export function HomeHero({ displayName }: HomeHeroProps) {
           <p className="inline-block rounded-full bg-primary px-3 py-1 text-xs font-bold text-primary-foreground sm:text-sm">
             Sinlab Study
           </p>
-          <p className="mt-3 text-xl font-extrabold tracking-tight sm:text-4xl">
+          <p className="mt-3 text-2xl font-extrabold tracking-tight sm:text-4xl">
             シンラビと一緒に学ぼう
           </p>
         </div>
@@ -27,7 +27,7 @@ export function HomeHero({ displayName }: HomeHeroProps) {
           width={160}
           height={160}
           priority
-          className="h-20 w-20 shrink-0 sm:h-36 sm:w-36"
+          className="h-24 w-24 shrink-0 sm:h-36 sm:w-36"
         />
       </div>
       <h1 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl break-words">
