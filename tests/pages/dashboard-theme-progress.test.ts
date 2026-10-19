@@ -10,6 +10,9 @@ vi.mock("@/app/services/api/certificates-server");
 vi.mock("@/app/services/api/review-list-server", () => ({
   fetchReviewListSourceReviews: vi.fn().mockResolvedValue({ data: [], error: null }),
 }));
+vi.mock("@/app/services/api/user-profile-server", () => ({
+  fetchUserDisplayName: vi.fn().mockResolvedValue({ data: "山田太郎", error: null }),
+}));
 vi.mock("@/app/services/api/upgrade-price-server", () => ({
   fetchUpgradePriceLabel: vi.fn().mockResolvedValue("月額1,500円（税込）"),
 }));
@@ -96,12 +99,13 @@ beforeEach(() => {
 });
 
 describe("ホームのテーマ別進捗（#370）", () => {
-  it("見出しが「ホーム」で、学習進捗カードと修了・未着手一覧を出さない", async () => {
+  it("見出しが挨拶文で、学習進捗カードと修了・未着手一覧を出さない", async () => {
     setup([GAS(2), WEB(1)]);
 
     const html = await render();
 
-    expect(html).toContain(">ホーム<");
+    expect(html).toContain("おかえりなさい、山田太郎さん");
+    expect(html).not.toContain(">ホーム<");
     expect(html).not.toContain("ダッシュボード");
     expect(html).not.toContain("学習進捗");
     expect(html).not.toContain(">修了<");

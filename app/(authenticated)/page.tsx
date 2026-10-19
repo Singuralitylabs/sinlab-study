@@ -24,6 +24,7 @@ import {
 } from "@/app/services/api/onboarding-server";
 import { fetchReviewListSourceReviews } from "@/app/services/api/review-list-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
+import { fetchUserDisplayName } from "@/app/services/api/user-profile-server";
 import { checkInstructorPermissions, isLearnerRole } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
@@ -32,6 +33,7 @@ import {
   buildGettingStartedItems,
   GettingStartedChecklist,
 } from "./components/GettingStartedChecklist";
+import { HomeHero } from "./components/HomeHero";
 import { HomeQuickLinks } from "./components/HomeQuickLinks";
 import { ReviewListHomeLine } from "./components/ReviewListHomeLine";
 import { ActiveThemesSection } from "./components/ThemeProgressSections";
@@ -68,6 +70,7 @@ export default async function HomePage() {
     announcementsResult,
     recentCertificate,
     reviewsResult,
+    displayNameResult,
   ] = await Promise.all([
     fetchHomeLearningData(userId),
     isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
@@ -79,6 +82,7 @@ export default async function HomePage() {
     showReviewList
       ? fetchReviewListSourceReviews(userId)
       : Promise.resolve({ data: [], error: null }),
+    fetchUserDisplayName(userId),
   ]);
   const visibleContentIds = new Set(homeLearning?.orderedContents.map((c) => c.id) ?? []);
   const unovercomeReviewCount =
@@ -117,7 +121,7 @@ export default async function HomePage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="text-3xl font-bold tracking-tight mb-6">ホーム</h1>
+      <HomeHero displayName={displayNameResult.data} />
 
       <InstallPrompt />
       <PushNotifications publicKey={isWebPushConfigured() ? webPushPublicKey() : null} />
