@@ -59,6 +59,7 @@ erDiagram
 `learning_themes` / `learning_phases` / `learning_contents` は共通して `display_order`（昇順の表示順）・`is_published`（公開フラグ、既定 false）・`is_deleted`（論理削除フラグ）を持つ。
 
 - `image_url`: サムネイル画像。Storage 配信分は環境非依存の相対パス `/storage/v1/object/public/thumbnails/theme-{id}/thumbnail.{ext}?v={timestamp}` を保存する。未設定時はプレースホルダー表示
+- `hero_image_url`: フェーズ一覧（`/learn/[themeId]`）の冒頭に出す横長（16:5）の専用画像（任意）。`image_url` と同じ形式で `/storage/v1/object/public/thumbnails/theme-{id}/hero.{ext}?v={timestamp}` を保存する。NULL のときは `image_url` を中央基準で切り抜いて使い、どちらも無ければヒーローを出さない
 
 ### 3.2 learning_phases（学習フェーズ）
 

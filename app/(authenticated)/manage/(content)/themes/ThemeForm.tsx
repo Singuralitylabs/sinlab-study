@@ -35,6 +35,69 @@ interface ThemeFormProps {
   embedded?: boolean;
 }
 
+type ImageKind = "thumbnail" | "hero";
+
+interface ImageFieldProps {
+  id: string;
+  label: string;
+  previewAlt: string;
+  previewClassName: string;
+  previewSizes: string;
+  hint: string;
+  imageUrl: string;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  disabled: boolean;
+  onUpload: (file: File | undefined) => void;
+  onDelete: () => void;
+}
+
+function ImageField({
+  id,
+  label,
+  previewAlt,
+  previewClassName,
+  previewSizes,
+  hint,
+  imageUrl,
+  inputRef,
+  disabled,
+  onUpload,
+  onDelete,
+}: ImageFieldProps) {
+  return (
+    <div className="space-y-3">
+      <Label htmlFor={id}>{label}</Label>
+      {imageUrl && (
+        <div
+          className={`relative w-full overflow-hidden rounded-md border bg-linear-to-br from-primary/5 to-primary/15 ${previewClassName}`}
+        >
+          <Image
+            src={resolveStorageUrl(imageUrl)}
+            alt={previewAlt}
+            fill
+            className="object-contain"
+            sizes={previewSizes}
+          />
+        </div>
+      )}
+      <Input
+        ref={inputRef}
+        id={id}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        disabled={disabled}
+        onChange={(event) => onUpload(event.target.files?.[0])}
+      />
+      {imageUrl && (
+        <Button type="button" variant="outline" disabled={disabled} onClick={onDelete}>
+          画像を削除
+        </Button>
+      )}
+      <p className="text-sm text-muted-foreground">{hint}</p>
+    </div>
+  );
+}
+
 function parseCreatedThemeId(data: unknown): number | undefined {
   if (!data || typeof data !== "object" || !("theme" in data)) return undefined;
   const id = (data as { theme?: { id?: unknown } }).theme?.id;
@@ -54,6 +117,7 @@ export function ThemeForm({
   const [name, setName] = useState(initialData?.name ?? "");
   const [description, setDescription] = useState(initialData?.description ?? "");
   const [imageUrl, setImageUrl] = useState(initialData?.image_url ?? "");
+  const [heroImageUrl, setHeroImageUrl] = useState(initialData?.hero_image_url ?? "");
   const visibleSiblings = siblings.filter((s) => s.id !== initialData?.id);
   const [insertAfterId, setInsertAfterId] = useState(() =>
     mode === "edit" && initialData
@@ -69,6 +133,7 @@ export function ThemeForm({
   const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const thumbnailInputRef = useRef<HTMLInputElement>(null);
+  const heroInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -125,7 +190,7 @@ export function ThemeForm({
     }
   };
 
-  const handleThumbnailUpload = async (file: File | undefined) => {
+  const handleImageUpload = async (kind: ImageKind, file: File | undefined) => {
     if (!file || !initialData) return;
 
     setIsUploading(true);
@@ -133,6 +198,7 @@ export function ThemeForm({
     const formData = new FormData();
     formData.append("file", file);
     formData.append("themeId", String(initialData.id));
+    formData.append("kind", kind);
 
     try {
       const response = await fetch("/api/upload-thumbnail", { method: "POST", body: formData });
@@ -141,7 +207,7 @@ export function ThemeForm({
         setMessage({ type: "error", text: data.error || "画像のアップロードに失敗しました" });
         return;
       }
-      setImageUrl(data.path);
+      (kind === "hero" ? setHeroImageUrl : setImageUrl)(data.path);
       setMessage({
         type: "success",
         text: "画像をアップロードして保存しました",
@@ -150,19 +216,18 @@ export function ThemeForm({
       setMessage({ type: "error", text: "画像のアップロード中にエラーが発生しました" });
     } finally {
       setIsUploading(false);
-      if (thumbnailInputRef.current) {
-        thumbnailInputRef.current.value = "";
-      }
+      const input = kind === "hero" ? heroInputRef.current : thumbnailInputRef.current;
+      if (input) input.value = "";
     }
   };
 
-  const handleThumbnailDelete = async () => {
+  const handleImageDelete = async (kind: ImageKind) => {
     if (!initialData) return;
 
     setIsUploading(true);
     setMessage(null);
     try {
-      const response = await fetch(`/api/upload-thumbnail?themeId=${initialData.id}`, {
+      const response = await fetch(`/api/upload-thumbnail?themeId=${initialData.id}&kind=${kind}`, {
         method: "DELETE",
       });
       const data = await response.json();
@@ -170,7 +235,7 @@ export function ThemeForm({
         setMessage({ type: "error", text: data.error || "画像の削除に失敗しました" });
         return;
       }
-      setImageUrl("");
+      (kind === "hero" ? setHeroImageUrl : setImageUrl)("");
       setMessage(
         data.storageRemoved === false
           ? {
@@ -219,43 +284,38 @@ export function ThemeForm({
       </div>
 
       {mode === "edit" ? (
-        <div className="space-y-3">
-          <Label htmlFor="thumbnail">サムネイル画像</Label>
-          {imageUrl && (
-            <div className="relative aspect-video w-full max-w-xs overflow-hidden rounded-md border bg-linear-to-br from-primary/5 to-primary/15">
-              <Image
-                src={resolveStorageUrl(imageUrl)}
-                alt="サムネイルのプレビュー"
-                fill
-                className="object-contain"
-                sizes="320px"
-              />
-            </div>
-          )}
-          <Input
-            ref={thumbnailInputRef}
+        <>
+          <ImageField
             id="thumbnail"
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
+            label="サムネイル画像"
+            previewAlt="サムネイルのプレビュー"
+            previewClassName="aspect-video max-w-xs"
+            previewSizes="320px"
+            hint="テーマ一覧のカードに表示します。PNG、JPEG、WebP形式、5MBまで"
+            imageUrl={imageUrl}
+            inputRef={thumbnailInputRef}
             disabled={isUploading}
-            onChange={(event) => handleThumbnailUpload(event.target.files?.[0])}
+            onUpload={(file) => handleImageUpload("thumbnail", file)}
+            onDelete={() => handleImageDelete("thumbnail")}
           />
-          {imageUrl && (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={isUploading}
-              onClick={handleThumbnailDelete}
-            >
-              画像を削除
-            </Button>
-          )}
-          <p className="text-sm text-muted-foreground">PNG、JPEG、WebP形式、5MBまで</p>
+          <ImageField
+            id="heroImage"
+            label="ヒーロー画像（任意）"
+            previewAlt="ヒーロー画像のプレビュー"
+            previewClassName="aspect-[16/5] max-w-md"
+            previewSizes="448px"
+            hint="フェーズ一覧の冒頭に表示する横長（16:5）の画像です。未設定のときは、サムネイル画像の上下を切り抜いて表示します。PNG、JPEG、WebP形式、5MBまで"
+            imageUrl={heroImageUrl}
+            inputRef={heroInputRef}
+            disabled={isUploading}
+            onUpload={(file) => handleImageUpload("hero", file)}
+            onDelete={() => handleImageDelete("hero")}
+          />
           {isUploading && <p className="text-sm text-muted-foreground">アップロード中です…</p>}
-        </div>
+        </>
       ) : (
         <div className="space-y-2">
-          <Label>サムネイル画像</Label>
+          <Label>サムネイル画像・ヒーロー画像</Label>
           <p className="text-sm text-muted-foreground">
             テーマを作成した後、編集画面から画像をアップロードできます。
           </p>
