@@ -65,9 +65,9 @@ export function ServiceIntro({ showMonthlyPrice }: { showMonthlyPrice: boolean }
     <section aria-labelledby="service-intro-heading" className="space-y-7">
       <div className="space-y-4">
         {/*
-          Below the heading until 1080px: the left column is 496px at lg (1024px) and reaches 552px at
-          1080px, and the 48px heading (374px) plus a side image (144px + gap) needs about 542px;
-          narrower than that the heading wraps to 4 lines.
+          Below the heading until 1080px: the left column is 496px at lg (1024px) and reaches
+          552px at 1080px, and the 48px heading (374px) plus a side image (144px + gap) needs
+          about 542px; narrower than that the heading wraps to 4 lines.
         */}
         <div className="flex flex-col gap-2 intro:flex-row intro:items-end intro:justify-between intro:gap-6">
           <h2
