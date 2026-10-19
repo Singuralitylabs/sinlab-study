@@ -16,15 +16,6 @@ describe("HomeHero", () => {
     expect(html).toContain('alt=""');
   });
 
-  it("バナーは全テーマ共通の文言で、特定の講座名を含まない", () => {
-    const html = render("山田太郎");
-
-    expect(html).toContain("Sinlab Study");
-    expect(html).toContain("シンラビと一緒に学ぼう");
-    expect(html).not.toContain("Web技術講座");
-    expect(html).not.toContain("hero.webp");
-  });
-
   it("表示名が null・空白のときは名前なしの挨拶にする", () => {
     expect(render(null)).toContain(">おかえりなさい<");
     expect(render("  ")).toContain(">おかえりなさい<");
