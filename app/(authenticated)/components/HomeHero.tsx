@@ -11,7 +11,7 @@ export function HomeHero({ displayName }: HomeHeroProps) {
   return (
     <section className="mb-6">
       {/* Full 16:9 below lg so the baked-in title is never cropped; from lg it is capped in height
-          (cropping the empty lower part) so the cards below stay near the first view. */}
+          (cropping the mascot's lower body, which carries no text) so the cards below stay near the first view. */}
       <div className="relative aspect-video w-full overflow-hidden rounded-xl border lg:aspect-[8/3]">
         <Image
           src="/images/home/hero.webp"
