@@ -62,6 +62,16 @@ describe("/certificates/[id]", () => {
     expect(html).toContain("@page { size: A4 landscape; margin: 0; }");
   });
 
+  it("テーマ名に関係なく、すべての修了証にシンラビを表示する", async () => {
+    expect(await render("31")).toContain("お祝いするシンラビ");
+
+    vi.mocked(fetchMyCertificateById).mockResolvedValue({
+      data: { ...certificate, theme_name: "シンラビのWeb開発講座" },
+      error: null,
+    });
+    expect(await render("31")).toContain("お祝いするシンラビ");
+  });
+
   it("他人の修了証・存在しない ID は 404", async () => {
     vi.mocked(fetchMyCertificateById).mockResolvedValue({ data: null, error: null });
 

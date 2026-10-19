@@ -19,3 +19,9 @@ export const THEME_COMPLETION_MASCOTS: Readonly<Record<string, PhaseCompletionMa
     alt: "お祝いするシンラビ",
   },
 };
+
+/** Shown on every certificate: シンラビ explains all themes, so no per-theme lookup. */
+export const CERTIFICATE_MASCOT: PhaseCompletionMascot = {
+  src: "/images/mascot/shinrabi-congratulations.webp",
+  alt: "お祝いするシンラビ",
+};
