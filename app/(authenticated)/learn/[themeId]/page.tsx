@@ -1,13 +1,16 @@
-import { BookOpen, ChevronDown } from "lucide-react";
+import { BookOpen, ChevronDown, PartyPopper } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
+import { THEME_COMPLETION_MASCOTS } from "@/app/constants/mascot";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import { compareGroupLevel } from "@/app/lib/content-grouping";
 import {
   getPhaseProgressStatus,
+  isThemeCompleted,
   PHASE_PROGRESS_STATUS,
   pickInitiallyOpenPhaseId,
   summarizePhaseProgress,
@@ -104,6 +107,8 @@ export default async function ThemePage({ params }: PageProps) {
     });
     return { phase, contents, progress };
   });
+  const themeCompleted = isThemeCompleted(phaseViews);
+  const mascot = THEME_COMPLETION_MASCOTS[theme.name];
   const openPhaseId = pickInitiallyOpenPhaseId(
     phaseViews.map(({ phase, progress }) => ({ id: phase.id, progress }))
   );
@@ -116,6 +121,29 @@ export default async function ThemePage({ params }: PageProps) {
         breadcrumbs={[{ label: "学習コンテンツ", href: "/learn" }, { label: theme.name }]}
         badge={<UnpublishedBadge isPublished={theme.is_published} />}
       />
+
+      {themeCompleted && (
+        <div className="-mt-3 mb-6 flex items-center gap-4 rounded-lg border border-success/40 bg-success/5 px-4 py-3 text-success">
+          {mascot && (
+            <Image
+              src={mascot.src}
+              alt={mascot.alt}
+              width={160}
+              height={160}
+              className="h-28 w-28 shrink-0 sm:h-36 sm:w-36"
+            />
+          )}
+          <div className="flex items-center gap-2">
+            <PartyPopper className="h-5 w-5 shrink-0" />
+            <div>
+              <p className="font-bold">おめでとうございます！</p>
+              <p className="text-sm font-medium">
+                「{theme.name}」のすべてのフェーズを完了しました
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {phaseViews.length === 0 ? (
         <Card>
