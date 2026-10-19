@@ -65,7 +65,7 @@ export default async function LoginPage({
           <p className="text-sm text-muted-foreground">AIと学ぶ実践Web技術講座</p>
         </header>
 
-        <div className="relative mx-auto w-full max-w-md space-y-5 px-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:flex lg:max-w-none lg:flex-col lg:self-stretch lg:px-0 lg:pt-12">
+        <div className="mx-auto w-full max-w-md space-y-5 px-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:flex lg:max-w-none lg:flex-col lg:self-stretch lg:px-0 lg:pt-12">
           <div className="space-y-6 rounded-2xl border border-border bg-card px-5 py-6 shadow-[var(--login-card-shadow)] sm:p-8">
             <div className="text-center">
               <h2 className="text-xl font-extrabold">ログイン</h2>
@@ -108,7 +108,11 @@ export default async function LoginPage({
             </a>
           </div>
 
-          {/* From lg the column stretches to the intro block, so mt-auto lands this just above the feature cards. Not absolute: it must push the column taller (error text, large fonts) instead of overlapping. */}
+          {/*
+            From lg the column stretches to the intro block, so mt-auto lands this just above the
+            feature cards. Not absolute: it must grow the column (error text, large fonts) instead
+            of overlapping.
+          */}
           <div className="flex items-center justify-center gap-3 lg:mt-auto lg:pb-8">
             <Image
               src={LOGIN_MASCOT.src}
