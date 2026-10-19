@@ -77,21 +77,6 @@ export default async function LoginPage({
             <GoogleLoginButton />
           </div>
 
-          <div className="flex items-center justify-center gap-3">
-            <Image
-              src={LOGIN_MASCOT.src}
-              alt=""
-              width={LOGIN_MASCOT.width}
-              height={LOGIN_MASCOT.height}
-              sizes="96px"
-              className="h-auto w-20 sm:w-24"
-            />
-            <p className="text-sm leading-snug">
-              <span className="block text-xs text-muted-foreground">Web技術講師</span>
-              <span className="text-base font-extrabold">シンラビちゃん</span>
-            </p>
-          </div>
-
           <p className="text-xs text-muted-foreground text-center">
             ログイン後すぐに、お試し公開コンテンツの閲覧・課題提出をご利用いただけます。
           </p>
@@ -121,6 +106,21 @@ export default async function LoginPage({
             >
               特定商取引法に基づく表記
             </a>
+          </div>
+
+          <div className="flex items-center justify-center gap-3">
+            <Image
+              src={LOGIN_MASCOT.src}
+              alt=""
+              width={LOGIN_MASCOT.width}
+              height={LOGIN_MASCOT.height}
+              sizes="(min-width: 640px) 128px, 112px"
+              className="h-auto w-28 sm:w-32"
+            />
+            <p className="leading-snug">
+              <span className="block text-sm text-muted-foreground">Web技術講師</span>
+              <span className="text-xl font-extrabold">シンラビちゃん</span>
+            </p>
           </div>
         </div>
 
