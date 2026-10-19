@@ -13,6 +13,7 @@ describe("HomeHero", () => {
     expect(html).toContain("<h1");
     expect(html).toContain("おかえりなさい、山田太郎さん");
     expect(html).toContain("今日も少しずつ、続きから進めましょう");
+    expect(html).toContain('alt=""');
   });
 
   it("表示名が null・空白のときは名前なしの挨拶にする", () => {

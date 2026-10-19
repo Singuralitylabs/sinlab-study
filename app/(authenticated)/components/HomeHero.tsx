@@ -16,11 +16,11 @@ export function HomeHero({ displayName }: HomeHeroProps) {
         </h1>
         <p className="mt-2 text-muted-foreground">今日も少しずつ、続きから進めましょう</p>
       </div>
-      {/* Fixed 16:9 box so the image never reflows the cards below it. */}
-      <div className="relative aspect-video w-full overflow-hidden rounded-xl border sm:w-[22rem] sm:shrink-0">
+      {/* Fixed-size box so the image never reflows the cards below it; short on mobile so the cards below stay near the first view. */}
+      <div className="relative h-36 w-full overflow-hidden rounded-xl border sm:aspect-video sm:h-auto sm:w-[22rem] sm:shrink-0">
         <Image
           src="/images/home/hero.webp"
-          alt="シンラビのWeb技術講座"
+          alt=""
           fill
           priority
           sizes="(min-width: 640px) 352px, 100vw"
