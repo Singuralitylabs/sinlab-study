@@ -53,7 +53,7 @@ export default async function LoginPage({
       <div className="mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 grid-rows-[auto_auto_auto_1fr] pt-10 lg:grid-cols-[minmax(0,1fr)_400px] lg:grid-rows-[auto_auto_auto] lg:content-center lg:items-center lg:gap-x-16 lg:gap-y-7 lg:px-8 lg:py-14">
         <header className="flex flex-col items-center gap-1.5 px-4 pb-6 text-center lg:col-start-1 lg:row-start-1 lg:flex-row lg:gap-3 lg:px-0 lg:pb-0 lg:text-left">
           <Image
-            src="/icon.png"
+            src="/icons/icon-192.png"
             alt=""
             width={48}
             height={48}
