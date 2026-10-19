@@ -64,8 +64,12 @@ export function ServiceIntro({ showMonthlyPrice }: { showMonthlyPrice: boolean }
   return (
     <section aria-labelledby="service-intro-heading" className="space-y-7">
       <div className="space-y-4">
-        {/* Below the heading until xl: from lg the left column is 496px, too narrow for the 48px heading plus a side image (it wraps to 4 lines). */}
-        <div className="flex flex-col gap-2 xl:flex-row xl:items-end xl:justify-between xl:gap-6">
+        {/*
+          Below the heading until 1080px: the left column is 496px at lg (1024px) and reaches 552px at
+          1080px, and the 48px heading (374px) plus a side image (144px + gap) needs about 542px;
+          narrower than that the heading wraps to 4 lines.
+        */}
+        <div className="flex flex-col gap-2 intro:flex-row intro:items-end intro:justify-between intro:gap-6">
           <h2
             id="service-intro-heading"
             className="text-[2rem] font-extrabold leading-snug tracking-tight lg:text-5xl lg:leading-tight"
@@ -79,8 +83,8 @@ export function ServiceIntro({ showMonthlyPrice }: { showMonthlyPrice: boolean }
             alt=""
             width={LOGIN_MASCOT.width}
             height={LOGIN_MASCOT.height}
-            sizes="(min-width: 1280px) 144px, (min-width: 640px) 112px, 96px"
-            className="h-auto w-24 self-end sm:w-28 xl:w-36"
+            sizes="(min-width: 1080px) 144px, (min-width: 640px) 112px, 96px"
+            className="h-auto w-24 self-end sm:w-28 intro:w-36"
           />
         </div>
         <p className="text-[15px] leading-loose text-muted-foreground lg:text-base">

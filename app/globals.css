@@ -111,6 +111,8 @@
 }
 
 @theme inline {
+  /* Registered as a breakpoint (not min-[1080px]) so Tailwind orders it after sm: and the width wins. */
+  --breakpoint-intro: 67.5rem;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

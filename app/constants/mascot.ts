@@ -24,7 +24,10 @@ export const CERTIFICATE_MASCOT: PhaseCompletionMascot = {
   alt: "お祝いするシンラビ",
 };
 
-/** Shown next to the /login catch copy (below it, or beside it from xl). Decorative: the heading beside it already carries the message. */
+/**
+ * Shown next to the /login catch copy (below it until 1080px, beside it from there). Decorative:
+ * the heading beside it already carries the message.
+ */
 export const LOGIN_MASCOT = {
   src: "/images/mascot/shinrabi-wave.webp",
   width: 360,
