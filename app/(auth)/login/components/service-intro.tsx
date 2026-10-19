@@ -64,15 +64,8 @@ export function ServiceIntro({ showMonthlyPrice }: { showMonthlyPrice: boolean }
   return (
     <section aria-labelledby="service-intro-heading" className="space-y-7">
       <div className="space-y-4">
-        {/* Above the heading below lg (the heading is too wide to share a row on a phone); beside it from lg. */}
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between lg:gap-6">
-          <Image
-            src={LOGIN_MASCOT.src}
-            alt=""
-            width={LOGIN_MASCOT.width}
-            height={LOGIN_MASCOT.height}
-            className="h-auto w-24 self-end sm:w-28 lg:order-last lg:w-36"
-          />
+        {/* Below the heading until xl: from lg the left column is 496px, too narrow for the 48px heading plus a side image (it wraps to 4 lines). */}
+        <div className="flex flex-col gap-2 xl:flex-row xl:items-end xl:justify-between xl:gap-6">
           <h2
             id="service-intro-heading"
             className="text-[2rem] font-extrabold leading-snug tracking-tight lg:text-5xl lg:leading-tight"
@@ -81,6 +74,14 @@ export function ServiceIntro({ showMonthlyPrice }: { showMonthlyPrice: boolean }
             <br />
             <span className="text-primary">仕組み</span>で解決する
           </h2>
+          <Image
+            src={LOGIN_MASCOT.src}
+            alt=""
+            width={LOGIN_MASCOT.width}
+            height={LOGIN_MASCOT.height}
+            sizes="(min-width: 1280px) 144px, (min-width: 640px) 112px, 96px"
+            className="h-auto w-24 self-end sm:w-28 xl:w-36"
+          />
         </div>
         <p className="text-[15px] leading-loose text-muted-foreground lg:text-base">
           学習の地図、進捗の見える化、AIによる即時レビュー。
