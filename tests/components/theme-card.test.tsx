@@ -9,6 +9,7 @@ const baseSummary: ThemeProgressSummary = {
     name: "テーマA",
     description: "説明文です",
     image_url: null,
+    hero_image_url: null,
     display_order: 1,
     is_published: true,
     is_deleted: false,

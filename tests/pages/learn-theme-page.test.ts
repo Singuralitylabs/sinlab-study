@@ -80,6 +80,31 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+describe("テーマページのヒーロー画像", () => {
+  it("専用画像もサムネイルも無いテーマではヒーローを描画しない", async () => {
+    setup("active", []);
+
+    expect(await render()).not.toContain("<img");
+  });
+
+  it("サムネイルだけのテーマではサムネイルをヒーローに使う", async () => {
+    setup("active", []);
+    vi.mocked(fetchThemeById).mockResolvedValue({
+      data: {
+        id: 1,
+        name: "テーマ",
+        description: null,
+        is_published: true,
+        image_url: "/storage/v1/object/public/thumbnails/theme-1/thumbnail.png?v=1",
+        hero_image_url: null,
+      },
+      error: null,
+    } as never);
+
+    expect(await render()).toContain(encodeURIComponent("theme-1/thumbnail.png"));
+  });
+});
+
 describe("テーマページのフェーズ アコーディオン（#431）", () => {
   it("フェーズ数によらずコンテンツ取得は 1 回で、コンテンツへ直接リンクする", async () => {
     setup("active", []);

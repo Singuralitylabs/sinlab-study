@@ -29,6 +29,7 @@ import { Progress } from "@/components/ui/progress";
 import { LearnContentRow } from "../components/LearnContentRow";
 import { LockedContentUpgradeCard } from "../components/LockedContentUpgradeCard";
 import { PhaseStatusIcon } from "../components/PhaseStatusIcon";
+import { ThemeHero } from "../components/ThemeHero";
 
 interface PageProps {
   params: Promise<{ themeId: string }>;
@@ -116,6 +117,8 @@ export default async function ThemePage({ params }: PageProps) {
         breadcrumbs={[{ label: "学習コンテンツ", href: "/learn" }, { label: theme.name }]}
         badge={<UnpublishedBadge isPublished={theme.is_published} />}
       />
+
+      <ThemeHero heroImageUrl={theme.hero_image_url} thumbnailUrl={theme.image_url} />
 
       {phaseViews.length === 0 ? (
         <Card>

@@ -471,6 +471,8 @@ flowchart TD
 
 **テーマページのアコーディオン（#431）**: `/learn/[themeId]` は、フェーズを `<details>` のアコーディオンで並べ、展開するとそのフェーズのコンテンツ行から詳細へ直接遷移する。初期表示で開くのは未完了の最初のフェーズ（全完了・対象なしは先頭フェーズ。`pickInitiallyOpenPhaseId()`）。見出しに「n / m 完了」と進捗バーを出す。コンテンツのサマリーはテーマ内の全フェーズ分を `fetchContentSummariesByPhaseIds()` で1回だけ取得する（service_role の呼び出し箇所は増やさない）。フェーズページは残し、各アコーディオンの末尾リンクから開ける。アコーディオン内のコンテンツ行は `LearnContentRow`。進捗の分母は `summarizePhaseProgress()` をテーマページとフェーズページで共有する。お試しユーザーで鍵付き項目があるときは、フェーズページと同じ `LockedContentUpgradeCard`（`PHASE_LIST` のCTA）を一覧の末尾に1回置く。トライアルバナーは `/learn/[themeId]` 以下では出さず（#353）、画面自身の案内に一本化する。
 
+**テーマページのヒーロー画像（#446）**: `/learn/[themeId]` は、`PageTitle` の下（フェーズ一覧の上）にヒーロー画像を出す（`ThemeHero`）。優先順は `learning_themes.hero_image_url`（専用の横長画像） → `image_url`（サムネイルを `object-cover`・中央基準で切り抜く） → 何も出さない。サムネイルは16:9で、16:5に切ると上下の文字が落ちるテーマがあるため、その場合だけ専用画像を管理画面から設定する。枠は `max-w-4xl` に収まる角丸で、PCは16:5、スマホは高さ144px（左右を切る）。装飾なので `alt` は空で、`h1` は `PageTitle` のテーマ名が担う。
+
 **コンテンツ行の見た目（#431・#433）**: テーマページのアコーディオン内は、左の丸に種別アイコンを種別ごとの色（`CONTENT_TYPE_ACCENT_CLASSES`。緑は完了専用のため使わない）で出す行（`LearnContentRow`）。フェーズページは、種別ごとの共通サムネイル付きカードのグリッド（`LearnContentCard`。スマホ1列・`sm` 2列・`lg` 3列）。サムネイルは、動画・解説記事・演習が用意したイラスト画像（スライドは解説記事と同じ画像）（`public/images/content-types/` の 640x360 WebP。`CONTENT_TYPE_THUMBNAILS`。装飾なので `alt` は空で、種別名は文字で出す）、クイズは種別色の背景に描画したSVGイラスト（`ContentTypeIllustration`。`currentColor` で描きテーマに追従する）を置き、左上に通し番号を出す。カードは種別色の枠（`CONTENT_TYPE_BORDER_CLASSES`。完了でも変えず、種別を見分けられるようにする）で囲み、サムネイルの下に種別名を大きな太字（`CONTENT_TYPE_LABEL_CLASSES`）で出す。種別名は、受講生向けの画面（フェーズページのカード・テーマページの行・ホームの「続きから学習」・`/demo`）では `CONTENT_TYPE_LEARNER_LABELS` の「解説動画」「解説記事」「演習」「クイズ」で、`text` と `slide` はどちらも「解説記事」で、行のアイコンも同じ（`toLearnerDisplayType`）。管理画面の種別名は変えない（色や絵だけに頼らない。独立した種別バッジはない）。完了は右上の大きな緑のチェックと薄い緑の背景、鍵付きはグレーのサムネイルと鍵で示し、「有料会員向け」「非公開」「AIレビュー済み」はタイトル下のバッジに出す。コンテンツごとの個別画像は持たない。フェーズページ上部の進捗バーは廃止し、見出し下に「n / m 完了」の文字だけを出す。
 
 #### 前後ナビゲーション
@@ -967,7 +969,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,contents}[/[id]]`）は `di
 
 ### 6.1.4 サムネイルアップロード API
 
-テーマのサムネイル画像を Supabase Storage へアップロード・削除する。アップロード成功時は同一リクエスト内で `learning_themes.image_url` も更新するため、フォームの「更新」操作を待たずに反映される。
+テーマのサムネイル画像とヒーロー画像（#446）を Supabase Storage へアップロード・削除する。種類は `kind`（`thumbnail` / `hero`。省略時は `thumbnail`、それ以外は400）で選び、`hero` は `learning_themes.hero_image_url` とキー `theme-{themeId}/hero.{ext}` を、`thumbnail` は `image_url` と `theme-{themeId}/thumbnail.{ext}` を使う。種類ごとにDB参照・旧オブジェクトの削除対象は独立していて、片方の操作がもう片方に触れない。アップロード成功時は同一リクエスト内で対応するカラム（`image_url` / `hero_image_url`）も更新するため、フォームの「更新」操作を待たずに反映される。
 
 **エンドポイント**: `POST /api/upload-thumbnail`（アップロード） / `DELETE /api/upload-thumbnail`（削除）
 
@@ -980,7 +982,7 @@ API（`POST` / `PUT` の `/api/manage/{themes,phases,contents}[/[id]]`）は `di
 | `file` | ○ | アップロードする画像ファイル（`image/png` / `image/jpeg` / `image/webp`） |
 | `themeId` | ○ | 対象テーマID（正の整数） |
 
-**リクエスト（DELETE）**: クエリパラメータ `themeId`（正の整数）
+**リクエスト（DELETE）**: クエリパラメータ `themeId`（正の整数）、`kind`（任意）
 
 **命名規約**: サムネイルは `thumbnails` バケット内にオブジェクトキー `theme-{themeId}/thumbnail.{ext}` で保存する（`ext` は `png` / `jpg` / `webp`）。`image_url` には環境非依存の相対パス `/storage/v1/object/public/thumbnails/theme-{id}/thumbnail.{ext}?v=<timestamp>` を保存し、表示時に `resolveStorageUrl()` が Supabase URL を前置する。`?v=` は差し替え時に Supabase CDN と `next/image` のキャッシュを切り替えるためのバージョン。
 
