@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { pickInitiallyOpenPhaseId, summarizePhaseProgress } from "@/app/lib/phase-progress";
+import {
+  getPhaseProgressStatus,
+  PHASE_PROGRESS_STATUS,
+  pickInitiallyOpenPhaseId,
+  summarizePhaseProgress,
+} from "@/app/lib/phase-progress";
 
 const content = (id: number, is_published = true, locked = false) => ({
   id,
@@ -51,5 +56,25 @@ describe("pickInitiallyOpenPhaseId", () => {
 
   it("フェーズが無ければ null", () => {
     expect(pickInitiallyOpenPhaseId([])).toBeNull();
+  });
+});
+
+describe("getPhaseProgressStatus", () => {
+  it("未着手・進行中・完了を判定する", () => {
+    expect(getPhaseProgressStatus({ completed: 0, total: 3 })).toBe(
+      PHASE_PROGRESS_STATUS.NOT_STARTED
+    );
+    expect(getPhaseProgressStatus({ completed: 1, total: 3 })).toBe(
+      PHASE_PROGRESS_STATUS.IN_PROGRESS
+    );
+    expect(getPhaseProgressStatus({ completed: 3, total: 3 })).toBe(
+      PHASE_PROGRESS_STATUS.COMPLETED
+    );
+  });
+
+  it("分母が 0 のフェーズは完了にしない", () => {
+    expect(getPhaseProgressStatus({ completed: 0, total: 0 })).toBe(
+      PHASE_PROGRESS_STATUS.NOT_STARTED
+    );
   });
 });
