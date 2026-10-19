@@ -65,8 +65,9 @@ export default async function LoginPage({
           <p className="text-sm text-muted-foreground">AIと学ぶ実践Web技術講座</p>
         </header>
 
-        <div className="mx-auto w-full max-w-md space-y-5 px-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:grid lg:max-w-none lg:grid-cols-[minmax(0,1fr)] lg:grid-rows-[1fr_auto_1fr] lg:space-y-0 lg:self-stretch lg:px-0">
-          <div className="space-y-5 lg:row-start-2 lg:pb-5">
+        <div className="mx-auto w-full max-w-md space-y-5 px-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:flex lg:max-w-none lg:flex-col lg:space-y-0 lg:self-stretch lg:px-0">
+          <div className="hidden lg:block lg:flex-1" />
+          <div className="space-y-5">
             <div className="space-y-6 rounded-2xl border border-border bg-card px-5 py-6 shadow-[var(--login-card-shadow)] sm:p-8">
               <div className="text-center">
                 <h2 className="text-xl font-extrabold">ログイン</h2>
@@ -113,23 +114,28 @@ export default async function LoginPage({
           </div>
 
           {/*
-            From lg the two 1fr rows keep the form centered in the column (the intro block's height)
-            and this sits at the bottom of the lower row, just above the feature cards. A row (not
-            absolute) so it grows the column instead of overlapping (error text, large fonts).
+            From lg the two flex-1 blocks keep the form centered in the column (the intro block's
+            height) and the mascot hangs at the bottom of the lower one, just above the feature
+            cards. It is absolute so the lower block's height is only its 13rem minimum (image 170px
+            + 32px bottom offset + clearance), which keeps it off the form when the column is taller
+            than the intro (error text, large fonts). A grid with fr rows would apply that minimum
+            to the empty top row too and push the whole page down.
           */}
-          <div className="flex items-center justify-center gap-3 lg:row-start-3 lg:self-end lg:pb-8">
-            <Image
-              src={LOGIN_MASCOT.src}
-              alt=""
-              width={LOGIN_MASCOT.width}
-              height={LOGIN_MASCOT.height}
-              sizes="(min-width: 640px) 128px, 112px"
-              className="h-auto w-28 sm:w-32"
-            />
-            <p className="leading-snug">
-              <span className="block text-sm text-muted-foreground">Web技術講師</span>
-              <span className="text-lg font-extrabold sm:text-xl">シンラビちゃん</span>
-            </p>
+          <div className="lg:relative lg:min-h-[13rem] lg:flex-1">
+            <div className="flex items-center justify-center gap-3 lg:absolute lg:inset-x-0 lg:bottom-8">
+              <Image
+                src={LOGIN_MASCOT.src}
+                alt=""
+                width={LOGIN_MASCOT.width}
+                height={LOGIN_MASCOT.height}
+                sizes="(min-width: 640px) 128px, 112px"
+                className="h-auto w-28 sm:w-32"
+              />
+              <p className="leading-snug">
+                <span className="block text-sm text-muted-foreground">Web技術講師</span>
+                <span className="text-lg font-extrabold sm:text-xl">シンラビちゃん</span>
+              </p>
+            </div>
           </div>
         </div>
 
