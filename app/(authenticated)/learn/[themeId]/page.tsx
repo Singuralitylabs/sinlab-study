@@ -1,4 +1,4 @@
-import { BookOpen, ChevronDown, PartyPopper } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, PartyPopper } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -27,6 +27,7 @@ import {
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { LearnContentRow } from "../components/LearnContentRow";
@@ -200,6 +201,14 @@ export default async function ThemePage({ params }: PageProps) {
                   <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-open/phase:rotate-180" />
                 </summary>
                 <div className="border-t p-4 space-y-2">
+                  {/* Top button: visible as soon as the accordion opens (#457). Keep out of
+                      summary — a link there fights the open/close hit target on mobile. */}
+                  <Button asChild variant="outline" className="w-full justify-between sm:w-auto">
+                    <Link href={`/learn/${themeIdNum}/${phase.id}`}>
+                      フェーズのページを開く
+                      <ChevronRight className="h-4 w-4" />
+                    </Link>
+                  </Button>
                   {contents.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
                       このフェーズにはまだコンテンツが登録されていません。

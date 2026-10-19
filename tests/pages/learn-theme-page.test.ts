@@ -117,6 +117,28 @@ describe("テーマページのフェーズ アコーディオン（#431）", ()
     expect(html).toContain('href="/learn/1/3"');
   });
 
+  it("プルダウン上部にフェーズページへのボタンがあり、下部リンクも残る（#457）", async () => {
+    setup("active", []);
+    const html = await render();
+
+    // Two links per phase (top button + bottom text): 2 phases → 4.
+    expect(html.match(/href="\/learn\/1\/2"/g)?.length).toBe(2);
+    expect(html.match(/href="\/learn\/1\/3"/g)?.length).toBe(2);
+    expect(html.match(/フェーズのページを開く/g)?.length).toBe(4);
+
+    // Top control is a button-styled link (before content rows), not inside <summary>.
+    const phaseABlock = html.match(
+      /<details[^>]*>(?:(?!<\/details>).)*フェーズA(?:(?!<\/details>).)*<\/details>/s
+    )?.[0];
+    expect(phaseABlock).toBeDefined();
+    expect(phaseABlock).toMatch(
+      /<\/summary>[\s\S]*?フェーズのページを開く[\s\S]*?href="\/learn\/1\/2\/10"/
+    );
+    expect(phaseABlock).not.toMatch(
+      /<summary[^>]*>[\s\S]*?フェーズのページを開く[\s\S]*?<\/summary>/
+    );
+  });
+
   it("未完了の最初のフェーズだけ開く", async () => {
     setup("active", [10, 11]);
     const html = await render();

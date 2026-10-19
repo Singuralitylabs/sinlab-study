@@ -6,6 +6,7 @@ import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { PHASE_COMPLETION_MASCOT } from "@/app/constants/mascot";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
+import { resolveAdjacentPhases } from "@/app/lib/phase-navigation";
 import {
   getPhaseProgressStatus,
   PHASE_PROGRESS_STATUS,
@@ -16,6 +17,7 @@ import {
   type ContentVisibilitySummary,
   fetchContentSummariesByPhaseId,
   fetchPhaseById,
+  fetchPhasesByThemeId,
   fetchThemeById,
   fetchUserProgressByContentIds,
   isContentLockedForUser,
@@ -25,6 +27,7 @@ import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { LearnContentCard } from "../../components/LearnContentCard";
 import { LockedContentUpgradeCard } from "../../components/LockedContentUpgradeCard";
+import { PhasePrevNextNav } from "./PhasePrevNextNav";
 
 interface PageProps {
   params: Promise<{ themeId: string; phaseId: string }>;
@@ -49,15 +52,27 @@ export default async function PhasePage({ params }: PageProps) {
       ? fetchUpgradePriceLabel()
       : Promise.resolve(null);
 
-  const [{ data: theme }, { data: phase }, { data: contents }] = await Promise.all([
-    fetchThemeById(themeIdNum, userRole),
-    fetchPhaseById(phaseIdNum, userRole),
-    fetchContentSummariesByPhaseId(phaseIdNum, userRole),
-  ]);
+  const [{ data: theme }, { data: phase }, { data: contents }, { data: themePhases }] =
+    await Promise.all([
+      fetchThemeById(themeIdNum, userRole),
+      fetchPhaseById(phaseIdNum, userRole),
+      fetchContentSummariesByPhaseId(phaseIdNum, userRole),
+      // Same visibility as the theme accordion (admin/maintainer preview unpublished).
+      fetchPhasesByThemeId(themeIdNum, userRole),
+    ]);
 
   if (!theme || !phase || phase.theme_id !== themeIdNum) {
     notFound();
   }
+
+  const { prev: prevPhase, next: nextPhase } = resolveAdjacentPhases(
+    (themePhases ?? []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      display_order: p.display_order,
+    })),
+    phaseIdNum
+  );
 
   const isLocked = (content: ContentVisibilitySummary) =>
     isContentLockedForUser(userStatus, content.is_open_to_trial);
@@ -165,6 +180,8 @@ export default async function PhasePage({ params }: PageProps) {
           )}
         </div>
       )}
+
+      <PhasePrevNextNav themeId={themeIdNum} prev={prevPhase} next={nextPhase} />
     </div>
   );
 }
