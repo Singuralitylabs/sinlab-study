@@ -2,6 +2,7 @@ import { Noto_Sans_JP } from "next/font/google";
 import Image from "next/image";
 import { TERMS_REQUIRED_ERROR_CODE } from "@/app/constants/auth";
 import { COMMERCIAL_TRANSACTIONS_URL, PRIVACY_URL, TERMS_URL } from "@/app/constants/legal";
+import { LOGIN_MASCOT } from "@/app/constants/mascot";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { GoogleLoginButton } from "./components/google-login-button";
 import { LearningScreens } from "./components/learning-screens";
@@ -64,47 +65,71 @@ export default async function LoginPage({
           <p className="text-sm text-muted-foreground">AIと学ぶ実践Web技術講座</p>
         </header>
 
-        <div className="mx-auto w-full max-w-md space-y-5 px-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:max-w-none lg:px-0">
-          <div className="space-y-6 rounded-2xl border border-border bg-card px-5 py-6 shadow-[var(--login-card-shadow)] sm:p-8">
-            <div className="text-center">
-              <h2 className="text-xl font-extrabold">ログイン</h2>
-              <p className="text-sm text-muted-foreground mt-1">
-                Googleアカウントでログインしてください
-              </p>
+        <div className="mx-auto w-full max-w-md space-y-5 px-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:grid lg:max-w-none lg:grid-cols-[minmax(0,1fr)] lg:grid-rows-[1fr_auto_1fr] lg:space-y-0 lg:self-stretch lg:px-0">
+          <div className="space-y-5 lg:row-start-2 lg:pb-5">
+            <div className="space-y-6 rounded-2xl border border-border bg-card px-5 py-6 shadow-[var(--login-card-shadow)] sm:p-8">
+              <div className="text-center">
+                <h2 className="text-xl font-extrabold">ログイン</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Googleアカウントでログインしてください
+                </p>
+              </div>
+              {errorMessage && (
+                <p className="text-sm text-destructive text-center">{errorMessage}</p>
+              )}
+              <GoogleLoginButton />
             </div>
-            {errorMessage && <p className="text-sm text-destructive text-center">{errorMessage}</p>}
-            <GoogleLoginButton />
+
+            <p className="text-xs text-muted-foreground text-center">
+              ログイン後すぐに、お試し公開コンテンツの閲覧・課題提出をご利用いただけます。
+            </p>
+
+            <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <a
+                href={PRIVACY_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:underline"
+              >
+                プライバシーポリシー
+              </a>
+              <a
+                href={TERMS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:underline"
+              >
+                利用規約
+              </a>
+              <a
+                href={COMMERCIAL_TRANSACTIONS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:underline"
+              >
+                特定商取引法に基づく表記
+              </a>
+            </div>
           </div>
 
-          <p className="text-xs text-muted-foreground text-center">
-            ログイン後すぐに、お試し公開コンテンツの閲覧・課題提出をご利用いただけます。
-          </p>
-
-          <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <a
-              href={PRIVACY_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:underline"
-            >
-              プライバシーポリシー
-            </a>
-            <a
-              href={TERMS_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:underline"
-            >
-              利用規約
-            </a>
-            <a
-              href={COMMERCIAL_TRANSACTIONS_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:underline"
-            >
-              特定商取引法に基づく表記
-            </a>
+          {/*
+            From lg the two 1fr rows keep the form centered in the column (the intro block's height)
+            and this sits at the bottom of the lower row, just above the feature cards. A row (not
+            absolute) so it grows the column instead of overlapping (error text, large fonts).
+          */}
+          <div className="flex items-center justify-center gap-3 lg:row-start-3 lg:self-end lg:pb-8">
+            <Image
+              src={LOGIN_MASCOT.src}
+              alt=""
+              width={LOGIN_MASCOT.width}
+              height={LOGIN_MASCOT.height}
+              sizes="(min-width: 640px) 128px, 112px"
+              className="h-auto w-28 sm:w-32"
+            />
+            <p className="leading-snug">
+              <span className="block text-sm text-muted-foreground">Web技術講師</span>
+              <span className="text-lg font-extrabold sm:text-xl">シンラビちゃん</span>
+            </p>
           </div>
         </div>
 

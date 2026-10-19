@@ -23,3 +23,10 @@ export const CERTIFICATE_MASCOT: PhaseCompletionMascot = {
   src: "/images/mascot/shinrabi-congratulations-large.webp",
   alt: "お祝いするシンラビ",
 };
+
+/** Shown under the /login card with the name caption, so visitors know who the character is. */
+export const LOGIN_MASCOT = {
+  src: "/images/mascot/shinrabi-wave.webp",
+  width: 360,
+  height: 477,
+};
