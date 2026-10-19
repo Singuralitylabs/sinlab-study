@@ -259,7 +259,7 @@ describe("public/sw.js の挙動", () => {
     expect(offline).toBeDefined();
     expect(await offline?.text()).toBe("offline-html");
     expect(offlineSw.putCalls).toEqual([]);
-    expect(await caches.keys()).toContain("sinlab-static-v3");
+    expect(await caches.keys()).toContain("sinlab-static-v4");
   });
 
   it("/api と認証 HTML 以外の経路でも navigate 以外で cache.put しない。activate は旧キャッシュを消す", async () => {
@@ -267,7 +267,7 @@ describe("public/sw.js の挙動", () => {
     const { listeners, putCalls, cacheStore, self } = loadServiceWorker({ fetchImpl });
 
     cacheStore.set("sinlab-static-v1", new Map([["/old", new Response("old")]]));
-    cacheStore.set("sinlab-static-v3", new Map());
+    cacheStore.set("sinlab-static-v4", new Map());
 
     const activateEvent: {
       waitUntil: (promise: Promise<unknown>) => void;
@@ -280,7 +280,7 @@ describe("public/sw.js の挙動", () => {
     };
     listeners.get("activate")?.(activateEvent);
     await activateEvent.done;
-    expect([...cacheStore.keys()]).toEqual(["sinlab-static-v3"]);
+    expect([...cacheStore.keys()]).toEqual(["sinlab-static-v4"]);
     expect(self.clients.claim).toHaveBeenCalledOnce();
 
     const apiEvent: {
@@ -305,7 +305,7 @@ describe("public/sw.js の挙動", () => {
     expect(source).toContain("caches.match(OFFLINE_URL)");
     expect(source).toMatch(/"install"[\s\S]*cache\.add\(OFFLINE_URL\)/);
     expect(source).toMatch(/"activate"[\s\S]*caches\.delete/);
-    expect(source).toContain("sinlab-static-v3");
+    expect(source).toContain("sinlab-static-v4");
     expect(source).not.toContain('"/api');
   });
 
