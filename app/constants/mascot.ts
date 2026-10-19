@@ -11,3 +11,11 @@ export interface PhaseCompletionMascot {
 export const PHASE_COMPLETION_MASCOTS: Readonly<Record<string, PhaseCompletionMascot>> = {
   シンラビのWeb開発講座: { src: "/images/mascot/shinrabi-cheer.webp", alt: "応援するシンラビ" },
 };
+
+/** Same name-based matching and image-free fallback as PHASE_COMPLETION_MASCOTS. */
+export const THEME_COMPLETION_MASCOTS: Readonly<Record<string, PhaseCompletionMascot>> = {
+  シンラビのWeb開発講座: {
+    src: "/images/mascot/shinrabi-congratulations.webp",
+    alt: "お祝いするシンラビ",
+  },
+};
