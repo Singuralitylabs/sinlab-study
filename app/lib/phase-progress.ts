@@ -61,3 +61,17 @@ export function pickInitiallyOpenPhaseId(
   const next = phases.find(({ progress }) => progress.completed < progress.total);
   return (next ?? phases[0])?.id ?? null;
 }
+
+/**
+ * Every phase must be completed, and a phase with nothing countable is never completed. Skipping
+ * those would show "all phases done" to a trial user who finished the only unlocked phase while
+ * the remaining phases are fully locked.
+ */
+export function isThemeCompleted(phases: { progress: PhaseProgress }[]): boolean {
+  return (
+    phases.length > 0 &&
+    phases.every(
+      ({ progress }) => getPhaseProgressStatus(progress) === PHASE_PROGRESS_STATUS.COMPLETED
+    )
+  );
+}

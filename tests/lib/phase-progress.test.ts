@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getPhaseProgressStatus,
+  isThemeCompleted,
   PHASE_PROGRESS_STATUS,
   pickInitiallyOpenPhaseId,
   summarizePhaseProgress,
@@ -76,5 +77,25 @@ describe("getPhaseProgressStatus", () => {
     expect(getPhaseProgressStatus({ completed: 0, total: 0 })).toBe(
       PHASE_PROGRESS_STATUS.NOT_STARTED
     );
+  });
+});
+
+describe("isThemeCompleted", () => {
+  const phase = (completed: number, total: number) => ({ progress: { completed, total } });
+
+  it("すべての対象フェーズが完了なら true", () => {
+    expect(isThemeCompleted([phase(2, 2), phase(3, 3)])).toBe(true);
+  });
+
+  it("未完了のフェーズが1つでもあれば false", () => {
+    expect(isThemeCompleted([phase(2, 2), phase(1, 3)])).toBe(false);
+  });
+
+  it("分母0のフェーズ（全ロック・空）が残っていれば false", () => {
+    expect(isThemeCompleted([phase(2, 2), phase(0, 0)])).toBe(false);
+  });
+
+  it("フェーズが0件なら false", () => {
+    expect(isThemeCompleted([])).toBe(false);
   });
 });
