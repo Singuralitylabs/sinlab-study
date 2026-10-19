@@ -20,8 +20,11 @@ export const THEME_COMPLETION_MASCOTS: Readonly<Record<string, PhaseCompletionMa
   },
 };
 
-/** Shown on every certificate: シンラビ explains all themes, so no per-theme lookup. */
+/**
+ * Shown on every certificate: シンラビ explains all themes, so no per-theme lookup. The 800px
+ * source (not the 480px banner image) keeps the A4 print sharp: the mascot is about 62mm wide.
+ */
 export const CERTIFICATE_MASCOT: PhaseCompletionMascot = {
-  src: "/images/mascot/shinrabi-congratulations.webp",
+  src: "/images/mascot/shinrabi-congratulations-large.webp",
   alt: "お祝いするシンラビ",
 };

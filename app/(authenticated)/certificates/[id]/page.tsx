@@ -113,9 +113,9 @@ export default async function CertificateDetailPage({
           <Image
             src={CERTIFICATE_MASCOT.src}
             alt={CERTIFICATE_MASCOT.alt}
-            width={480}
-            height={480}
-            sizes="22vw"
+            width={800}
+            height={800}
+            sizes="220px"
             className="pointer-events-none absolute bottom-[4.5cqw] right-[5.5cqw] h-[21cqw] w-[21cqw]"
           />
 
