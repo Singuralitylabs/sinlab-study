@@ -244,7 +244,7 @@ export function SideNav({
                 onClick={() => setOpen(false)}
                 className="text-lg font-bold flex items-center gap-2"
               >
-                <Image src="/icon.png" alt="Sinlab Study" width={24} height={24} />
+                <Image src="/icons/icon-192.png" alt="Sinlab Study" width={24} height={24} />
                 Sinlab Study
               </Link>
             </SheetTitle>
@@ -264,7 +264,7 @@ export function SideNav({
       <div className="hidden sm:flex print:hidden! h-screen w-64 flex-col fixed left-0 top-0 border-r border-sidebar-border bg-sidebar">
         <div className="px-6 py-5 border-b border-sidebar-border">
           <Link href="/" className="text-xl font-bold flex items-center gap-2">
-            <Image src="/icon.png" alt="Sinlab Study" width={28} height={28} />
+            <Image src="/icons/icon-192.png" alt="Sinlab Study" width={28} height={28} />
             Sinlab Study
           </Link>
         </div>
