@@ -1,7 +1,9 @@
 import type { LucideIcon } from "lucide-react";
 import { ArrowRight, ExternalLink, Layers, MapIcon, Sparkles, TrendingUp } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { FREE_TRIAL_FORM_URL, SERVICE_LP_URL } from "@/app/constants/marketing";
+import { LOGIN_MASCOT } from "@/app/constants/mascot";
 import { DISPLAY_MONTHLY_PRICE_JPY, formatMonthlyJpyPrice } from "@/app/constants/stripe";
 import { Button } from "@/components/ui/button";
 
@@ -62,14 +64,24 @@ export function ServiceIntro({ showMonthlyPrice }: { showMonthlyPrice: boolean }
   return (
     <section aria-labelledby="service-intro-heading" className="space-y-7">
       <div className="space-y-4">
-        <h2
-          id="service-intro-heading"
-          className="text-[2rem] font-extrabold leading-snug tracking-tight lg:text-5xl lg:leading-tight"
-        >
-          「続かない」を、
-          <br />
-          <span className="text-primary">仕組み</span>で解決する
-        </h2>
+        {/* Above the heading below lg (the heading is too wide to share a row on a phone); beside it from lg. */}
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between lg:gap-6">
+          <Image
+            src={LOGIN_MASCOT.src}
+            alt=""
+            width={LOGIN_MASCOT.width}
+            height={LOGIN_MASCOT.height}
+            className="h-auto w-24 self-end sm:w-28 lg:order-last lg:w-36"
+          />
+          <h2
+            id="service-intro-heading"
+            className="text-[2rem] font-extrabold leading-snug tracking-tight lg:text-5xl lg:leading-tight"
+          >
+            「続かない」を、
+            <br />
+            <span className="text-primary">仕組み</span>で解決する
+          </h2>
+        </div>
         <p className="text-[15px] leading-loose text-muted-foreground lg:text-base">
           学習の地図、進捗の見える化、AIによる即時レビュー。
           <br className="hidden lg:inline" />
