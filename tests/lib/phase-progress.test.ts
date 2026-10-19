@@ -91,12 +91,11 @@ describe("isThemeCompleted", () => {
     expect(isThemeCompleted([phase(2, 2), phase(1, 3)])).toBe(false);
   });
 
-  it("分母0のフェーズは判定から外す", () => {
-    expect(isThemeCompleted([phase(2, 2), phase(0, 0)])).toBe(true);
+  it("分母0のフェーズ（全ロック・空）が残っていれば false", () => {
+    expect(isThemeCompleted([phase(2, 2), phase(0, 0)])).toBe(false);
   });
 
-  it("フェーズが0件、または対象フェーズがなければ false", () => {
+  it("フェーズが0件なら false", () => {
     expect(isThemeCompleted([])).toBe(false);
-    expect(isThemeCompleted([phase(0, 0)])).toBe(false);
   });
 });

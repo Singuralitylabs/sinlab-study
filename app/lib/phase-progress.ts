@@ -63,14 +63,14 @@ export function pickInitiallyOpenPhaseId(
 }
 
 /**
- * Phases with nothing countable are skipped: an empty phase can never be finished, so counting it
- * would hide the banner forever. A theme with no countable phase at all is not completed.
+ * Every phase must be completed, and a phase with nothing countable is never completed. Skipping
+ * those would show "all phases done" to a trial user who finished the only unlocked phase while
+ * the remaining phases are fully locked.
  */
 export function isThemeCompleted(phases: { progress: PhaseProgress }[]): boolean {
-  const countable = phases.filter(({ progress }) => progress.total > 0);
   return (
-    countable.length > 0 &&
-    countable.every(
+    phases.length > 0 &&
+    phases.every(
       ({ progress }) => getPhaseProgressStatus(progress) === PHASE_PROGRESS_STATUS.COMPLETED
     )
   );
