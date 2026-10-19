@@ -1,9 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { ArrowRight, ExternalLink, Layers, MapIcon, Sparkles, TrendingUp } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
 import { FREE_TRIAL_FORM_URL, SERVICE_LP_URL } from "@/app/constants/marketing";
-import { LOGIN_MASCOT } from "@/app/constants/mascot";
 import { DISPLAY_MONTHLY_PRICE_JPY, formatMonthlyJpyPrice } from "@/app/constants/stripe";
 import { Button } from "@/components/ui/button";
 
@@ -64,29 +62,14 @@ export function ServiceIntro({ showMonthlyPrice }: { showMonthlyPrice: boolean }
   return (
     <section aria-labelledby="service-intro-heading" className="space-y-7">
       <div className="space-y-4">
-        {/*
-          Below the heading until 1080px: the left column is 496px at lg (1024px) and reaches
-          552px at 1080px, and the 48px heading (374px) plus a side image (144px + gap) needs
-          about 542px; narrower than that the heading wraps to 4 lines.
-        */}
-        <div className="flex flex-col gap-2 intro:flex-row intro:items-end intro:justify-between intro:gap-6">
-          <h2
-            id="service-intro-heading"
-            className="text-[2rem] font-extrabold leading-snug tracking-tight lg:text-5xl lg:leading-tight"
-          >
-            「続かない」を、
-            <br />
-            <span className="text-primary">仕組み</span>で解決する
-          </h2>
-          <Image
-            src={LOGIN_MASCOT.src}
-            alt=""
-            width={LOGIN_MASCOT.width}
-            height={LOGIN_MASCOT.height}
-            sizes="(min-width: 1080px) 144px, (min-width: 640px) 112px, 96px"
-            className="h-auto w-24 self-end sm:w-28 intro:w-36"
-          />
-        </div>
+        <h2
+          id="service-intro-heading"
+          className="text-[2rem] font-extrabold leading-snug tracking-tight lg:text-5xl lg:leading-tight"
+        >
+          「続かない」を、
+          <br />
+          <span className="text-primary">仕組み</span>で解決する
+        </h2>
         <p className="text-[15px] leading-loose text-muted-foreground lg:text-base">
           学習の地図、進捗の見える化、AIによる即時レビュー。
           <br className="hidden lg:inline" />

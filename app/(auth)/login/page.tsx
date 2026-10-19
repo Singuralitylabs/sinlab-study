@@ -2,6 +2,7 @@ import { Noto_Sans_JP } from "next/font/google";
 import Image from "next/image";
 import { TERMS_REQUIRED_ERROR_CODE } from "@/app/constants/auth";
 import { COMMERCIAL_TRANSACTIONS_URL, PRIVACY_URL, TERMS_URL } from "@/app/constants/legal";
+import { LOGIN_MASCOT } from "@/app/constants/mascot";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { GoogleLoginButton } from "./components/google-login-button";
 import { LearningScreens } from "./components/learning-screens";
@@ -74,6 +75,21 @@ export default async function LoginPage({
             </div>
             {errorMessage && <p className="text-sm text-destructive text-center">{errorMessage}</p>}
             <GoogleLoginButton />
+          </div>
+
+          <div className="flex items-center justify-center gap-3">
+            <Image
+              src={LOGIN_MASCOT.src}
+              alt=""
+              width={LOGIN_MASCOT.width}
+              height={LOGIN_MASCOT.height}
+              sizes="96px"
+              className="h-auto w-20 sm:w-24"
+            />
+            <p className="text-sm leading-snug">
+              <span className="block text-xs text-muted-foreground">Web技術講師</span>
+              <span className="text-base font-extrabold">シンラビちゃん</span>
+            </p>
           </div>
 
           <p className="text-xs text-muted-foreground text-center">
