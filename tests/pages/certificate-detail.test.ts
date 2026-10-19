@@ -72,6 +72,10 @@ describe("/certificates/[id]", () => {
     expect(await render("31")).toContain("お祝いするシンラビ");
   });
 
+  it("右上にサービスのロゴを表示する", async () => {
+    expect(await render("31")).toContain('alt="Sinlab Study"');
+  });
+
   it("他人の修了証・存在しない ID は 404", async () => {
     vi.mocked(fetchMyCertificateById).mockResolvedValue({ data: null, error: null });
 

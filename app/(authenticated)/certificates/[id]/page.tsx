@@ -2,7 +2,11 @@ import { Share2 } from "lucide-react";
 import Image from "next/image";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
-import { CERTIFICATE_SERVICE_NAME, getCertificateIssuerName } from "@/app/constants/certificate";
+import {
+  CERTIFICATE_LOGO_SRC,
+  CERTIFICATE_SERVICE_NAME,
+  getCertificateIssuerName,
+} from "@/app/constants/certificate";
 import { CERTIFICATE_MASCOT } from "@/app/constants/mascot";
 import {
   buildCertificateFacebookShareUrl,
@@ -102,14 +106,22 @@ export default async function CertificateDetailPage({
             <span className="absolute left-[7cqw] top-[7cqw] h-[1.4cqw] w-[1.4cqw] rotate-12 rounded-[0.2cqw] bg-pink-300" />
             <span className="absolute left-[11cqw] top-[12cqw] h-[1cqw] w-[1cqw] rounded-full bg-amber-300" />
             <span className="absolute left-[6cqw] top-[18cqw] h-[1.2cqw] w-[1.2cqw] -rotate-12 rounded-[0.2cqw] bg-sky-300" />
-            <span className="absolute right-[7cqw] top-[7cqw] h-[1.4cqw] w-[1.4cqw] -rotate-12 rounded-[0.2cqw] bg-sky-300" />
-            <span className="absolute right-[12cqw] top-[11cqw] h-[1cqw] w-[1cqw] rounded-full bg-pink-300" />
+            <span className="absolute right-[19cqw] top-[7cqw] h-[1.4cqw] w-[1.4cqw] -rotate-12 rounded-[0.2cqw] bg-sky-300" />
+            <span className="absolute right-[17cqw] top-[16cqw] h-[1cqw] w-[1cqw] rounded-full bg-pink-300" />
             <span className="absolute right-[6cqw] top-[17cqw] h-[1.2cqw] w-[1.2cqw] rotate-12 rounded-[0.2cqw] bg-amber-300" />
             <span className="absolute bottom-[7cqw] left-[7cqw] h-[1.2cqw] w-[1.2cqw] rotate-12 rounded-[0.2cqw] bg-amber-300" />
             <span className="absolute bottom-[12cqw] left-[10cqw] h-[1cqw] w-[1cqw] rounded-full bg-sky-300" />
             <span className="absolute bottom-[6.5cqw] left-[14cqw] h-[1.4cqw] w-[1.4cqw] -rotate-12 rounded-[0.2cqw] bg-pink-300" />
           </div>
 
+          <Image
+            src={CERTIFICATE_LOGO_SRC}
+            alt={CERTIFICATE_SERVICE_NAME}
+            width={512}
+            height={512}
+            sizes="90px"
+            className="pointer-events-none absolute right-[6.5cqw] top-[6cqw] h-[8.5cqw] w-[8.5cqw] rounded-[1.6cqw] shadow-sm"
+          />
           <Image
             src={CERTIFICATE_MASCOT.src}
             alt={CERTIFICATE_MASCOT.alt}
