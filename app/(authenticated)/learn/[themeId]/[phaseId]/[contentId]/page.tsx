@@ -2,6 +2,7 @@ import { Bot, Lock } from "lucide-react";
 import { notFound } from "next/navigation";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
+import { ExerciseHint } from "@/app/components/ExerciseHint";
 import { LearningMemo } from "@/app/components/LearningMemo";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
@@ -404,17 +405,7 @@ export default async function ContentPage({ params }: PageProps) {
             <div>
               <MarkdownRenderer content={content.exercise_instructions} />
 
-              {content.hint && (
-                <details className="mt-4 rounded-lg border border-border">
-                  <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-muted-foreground hover:text-foreground list-none flex items-center gap-2">
-                    <span className="text-base">💡</span>
-                    ヒントを見る
-                  </summary>
-                  <div className="border-t border-border px-4 py-3 text-sm text-muted-foreground whitespace-pre-wrap">
-                    {content.hint}
-                  </div>
-                </details>
-              )}
+              {content.hint && <ExerciseHint hint={content.hint} />}
 
               {userId && (
                 <div className="mt-8">
