@@ -41,7 +41,7 @@ describe("LoginPage", () => {
 
     expect(text).toContain("「続かない」を、仕組みで解決する");
     expect(text).toContain(
-      "学習の地図、進捗の見える化、AIによる即時レビュー。一人でも挫折しないWeb技術の学習環境を、シンラボがお届けします。"
+      "学習の地図、進捗の見える化、AIによる即時レビュー。一人でも挫折せずにWeb技術を学習できる環境を、シンラビが提供します。"
     );
   });
 
@@ -112,10 +112,10 @@ describe("LoginPage", () => {
     expect(text.indexOf("サービス紹介を見る")).toBeLessThan(firstFeature);
   });
 
-  it("実際の学習画面として5ステップの画面を表示する", async () => {
+  it("学習の流れとして5ステップの画面を表示する", async () => {
     const html = await render();
 
-    expect(textOf(html)).toContain("実際の学習画面");
+    expect(textOf(html)).toContain("学習の流れ");
     for (const alt of [
       "解説記事の画面",
       "課題提出の画面",

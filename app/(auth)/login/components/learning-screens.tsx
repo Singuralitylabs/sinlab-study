@@ -61,7 +61,7 @@ export function LearningScreens() {
           id="learning-screens-heading"
           className="text-xl font-extrabold lg:shrink-0 lg:text-2xl"
         >
-          実際の学習画面
+          学習の流れ
         </h2>
         <p className="text-[13px] leading-relaxed text-muted-foreground lg:text-sm">
           動画・解説記事で学び、課題を提出すると、すぐにAIのレビューが届きます。課題でつまずいた点は復習リストで振り返れます。

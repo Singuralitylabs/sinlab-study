@@ -73,8 +73,8 @@ export function ServiceIntro({ showMonthlyPrice }: { showMonthlyPrice: boolean }
         <p className="text-[15px] leading-loose text-muted-foreground lg:text-base">
           学習の地図、進捗の見える化、AIによる即時レビュー。
           <br className="hidden lg:inline" />
-          <strong className="font-bold text-foreground">一人でも挫折しない</strong>
-          Web技術の学習環境を、シンラボがお届けします。
+          <strong className="font-bold text-foreground">一人でも挫折せずに</strong>
+          Web技術を学習できる環境を、シンラビが提供します。
         </p>
       </div>
 
