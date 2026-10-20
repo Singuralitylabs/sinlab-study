@@ -26,6 +26,7 @@ export function ExerciseHint({ hint }: ExerciseHintProps) {
             width={HINT_MASCOT.open.width}
             height={HINT_MASCOT.open.height}
             sizes="64px"
+            loading="eager"
             className="hidden h-full w-full object-contain group-open:block"
           />
         </span>
@@ -33,10 +34,10 @@ export function ExerciseHint({ hint }: ExerciseHintProps) {
           シンラビにヒントを聞く
         </span>
       </summary>
-      <div className="relative mt-3 ml-6 rounded-2xl border border-border bg-muted/40 px-4 py-3 text-sm whitespace-pre-wrap">
+      <div className="relative mt-3 ml-6 rounded-2xl border border-border bg-muted px-4 py-3 text-sm whitespace-pre-wrap">
         <span
           aria-hidden="true"
-          className="absolute -top-1.5 left-6 size-3 rotate-45 border-t border-l border-border bg-background"
+          className="absolute -top-1.5 left-6 size-3 rotate-45 border-t border-l border-border bg-muted"
         />
         {hint}
       </div>
