@@ -1,6 +1,7 @@
 "use client";
 
-import { Loader2, Save } from "lucide-react";
+import { Loader2, Save, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import type { LearningPhase, ManageThemeListItem } from "@/app/types";
@@ -214,7 +215,7 @@ export function PhaseForm({
         </Alert>
       )}
 
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <Button type="submit" disabled={isLoading || !name || !themeId}>
           {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           {mode === "create" ? "作成" : "更新"}
@@ -222,6 +223,19 @@ export function PhaseForm({
         <Button type="button" variant="outline" onClick={handleCancel}>
           キャンセル
         </Button>
+        {mode === "edit" && !embedded && initialData && (
+          <Button
+            asChild
+            variant="ghost"
+            title="削除"
+            className="ml-auto text-destructive hover:text-destructive"
+          >
+            <Link href={`/manage/phases/${initialData.id}/delete`}>
+              <Trash2 className="h-4 w-4" />
+              削除
+            </Link>
+          </Button>
+        )}
       </div>
     </>
   );
