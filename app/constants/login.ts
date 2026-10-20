@@ -1,5 +1,5 @@
 /**
- * Public YouTube URL of the excerpt shown in the /login learning-screens section. Empty until the
- * clip is uploaded: the section then shows the static thumbnail instead of a player.
+ * Public YouTube URL of the excerpt shown in the /login learning-screens section. Set it to an
+ * empty string to show the static thumbnail (video.webp) instead of a player.
  */
-export const LOGIN_CLIP_URL = "";
+export const LOGIN_CLIP_URL = "https://youtu.be/-s_IsyQQnhE";

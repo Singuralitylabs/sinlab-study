@@ -117,7 +117,6 @@ describe("LoginPage", () => {
 
     expect(textOf(html)).toContain("実際の学習画面");
     for (const alt of [
-      "解説動画のサムネイル",
       "解説記事の画面",
       "課題提出の画面",
       "AIレビュー結果の画面",
@@ -125,6 +124,7 @@ describe("LoginPage", () => {
     ]) {
       expect(html).toContain(`alt="${alt}"`);
     }
+    expect(html).toContain('aria-label="動画を再生"');
   });
 
   it("ログインボタンと既存の案内・法務リンクを維持する", async () => {
