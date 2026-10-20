@@ -17,11 +17,65 @@ const tree: ContentTreeThemeNode[] = [
     name: "テーマ1",
     isPublished: true,
     displayOrder: 1,
-    phases: [],
+    phases: [
+      {
+        id: 10,
+        themeId: 1,
+        name: "フェーズ1",
+        isPublished: true,
+        displayOrder: 1,
+        contents: [],
+      },
+    ],
   },
 ];
 
 const ready = { themes: true, phases: true, contents: true };
+
+describe("ContentTree delete links (#465)", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    sessionStorage.clear();
+  });
+
+  it("テーマとフェーズの削除確認ページへのリンクがある", async () => {
+    await act(async () => {
+      root.render(
+        <ContentTree
+          tree={tree}
+          themes={[]}
+          themeSiblings={[]}
+          phaseSiblingCandidates={[]}
+          contentSiblingCandidates={[]}
+          contentFormThemes={[]}
+          contentFormPhases={[]}
+          formDataReady={ready}
+          initialExpandKeys={["theme:1"]}
+        />
+      );
+    });
+
+    const themeDelete = container.querySelector('a[href="/manage/themes/1/delete"]');
+    const phaseDelete = container.querySelector('a[href="/manage/phases/10/delete"]');
+    expect(themeDelete).toBeTruthy();
+    expect(themeDelete?.getAttribute("title")).toBe("削除");
+    expect(phaseDelete).toBeTruthy();
+    expect(phaseDelete?.getAttribute("title")).toBe("削除");
+  });
+});
 
 describe("ContentTree expand state", () => {
   let container: HTMLDivElement;

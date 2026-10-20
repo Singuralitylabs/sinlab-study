@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Edit, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Edit, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -206,6 +206,17 @@ export function ContentTree({
                         </Link>
                       </Button>
                       <Button
+                        asChild
+                        variant="ghost"
+                        size="icon-sm"
+                        title="削除"
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Link href={`/manage/themes/${theme.id}/delete`}>
+                          <Trash2 className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                      <Button
                         type="button"
                         variant="outline"
                         size="sm"
@@ -245,6 +256,17 @@ export function ContentTree({
                                   <Link href={`/manage/phases/${phase.id}/edit`}>
                                     <Edit className="h-3.5 w-3.5" />
                                     編集
+                                  </Link>
+                                </Button>
+                                <Button
+                                  asChild
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  title="削除"
+                                  className="text-destructive hover:text-destructive"
+                                >
+                                  <Link href={`/manage/phases/${phase.id}/delete`}>
+                                    <Trash2 className="h-4 w-4" />
                                   </Link>
                                 </Button>
                                 <Button

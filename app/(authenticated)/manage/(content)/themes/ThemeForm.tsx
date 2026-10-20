@@ -1,7 +1,8 @@
 "use client";
 
-import { Loader2, Save } from "lucide-react";
+import { Loader2, Save, Trash2 } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
@@ -348,7 +349,7 @@ export function ThemeForm({
         </Alert>
       )}
 
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <Button type="submit" disabled={isLoading || isUploading || !name}>
           {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           {mode === "create" ? "作成" : "更新"}
@@ -356,6 +357,19 @@ export function ThemeForm({
         <Button type="button" variant="outline" onClick={handleCancel}>
           キャンセル
         </Button>
+        {mode === "edit" && !embedded && initialData && (
+          <Button
+            asChild
+            variant="ghost"
+            title="削除"
+            className="ml-auto text-destructive hover:text-destructive"
+          >
+            <Link href={`/manage/themes/${initialData.id}/delete`}>
+              <Trash2 className="h-4 w-4" />
+              削除
+            </Link>
+          </Button>
+        )}
       </div>
     </>
   );
