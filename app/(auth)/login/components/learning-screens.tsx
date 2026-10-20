@@ -39,7 +39,7 @@ const STEPS: Step[] = [
     description: "提出するとすぐに、達成度とコメントが届きます。",
     src: "/images/login/ai-review.webp",
     alt: "AIレビュー結果の画面",
-    aspect: "aspect-[16/10]",
+    aspect: "aspect-[877/657]",
   },
   {
     title: "復習リストで振り返る",
@@ -64,7 +64,7 @@ export function LearningScreens() {
           実際の学習画面
         </h2>
         <p className="text-[13px] leading-relaxed text-muted-foreground lg:text-sm">
-          動画・解説記事で学び、課題を提出すると、すぐにAIのレビューが届きます。学んだことは復習リストで振り返れます。
+          動画・解説記事で学び、課題を提出すると、すぐにAIのレビューが届きます。課題でつまずいた点は復習リストで振り返れます。
         </p>
       </div>
       <ol className="mx-auto max-w-3xl space-y-10 lg:space-y-12">
