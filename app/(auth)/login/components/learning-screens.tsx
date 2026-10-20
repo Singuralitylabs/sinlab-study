@@ -1,58 +1,107 @@
 import Image from "next/image";
+import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
+import { LOGIN_CLIP_URL } from "@/app/constants/login";
 
-type Screen = {
+type Step = {
+  title: string;
+  description: string;
   src: string;
   alt: string;
-  caption: string;
+  aspect: string;
 };
 
-// Screenshots of the real app screens (public/images/login/). The video screen has the instructor's
-// wipe painted over, and the AI review screen has the model-answer code blurred.
-const SCREENS: Screen[] = [
-  { src: "/images/login/video.webp", alt: "動画コンテンツの画面", caption: "動画で学ぶ" },
+// Screenshots of the real app screens (public/images/login/). The AI review and review list
+// screens are cropped to results only, so they show no submission or model-answer code.
+const STEPS: Step[] = [
   {
-    src: "/images/login/slide.webp",
-    alt: "スライドコンテンツの画面",
-    caption: "スライドで確認する",
+    title: "動画で学ぶ",
+    description: "シンラビが解説する動画で、まず全体像をつかみます。",
+    src: "/images/login/video.webp",
+    alt: "解説動画のサムネイル",
+    aspect: "aspect-video",
   },
-  { src: "/images/login/exercise.webp", alt: "課題提出の画面", caption: "課題を提出する" },
   {
+    title: "解説記事で読む",
+    description: "要点とコード例を、自分のペースで読み返せます。",
+    src: "/images/login/article.webp",
+    alt: "解説記事の画面",
+    aspect: "aspect-[959/392]",
+  },
+  {
+    title: "課題を提出する",
+    description: "学んだことを、コードを書いて提出します。",
+    src: "/images/login/exercise.webp",
+    alt: "課題提出の画面",
+    aspect: "aspect-[16/10]",
+  },
+  {
+    title: "AIがすぐにレビュー",
+    description: "提出するとすぐに、達成度とコメントが届きます。",
     src: "/images/login/ai-review.webp",
     alt: "AIレビュー結果の画面",
-    caption: "AIがすぐにレビュー",
+    aspect: "aspect-[877/657]",
+  },
+  {
+    title: "復習リストで振り返る",
+    description: "部分的・未達成だった点が集まり、再提出で達成すると克服済みに移ります。",
+    src: "/images/login/review-list.webp",
+    alt: "復習リストの画面",
+    aspect: "aspect-[16/10]",
   },
 ];
+
+const FRAME =
+  "relative overflow-hidden rounded-xl border border-border bg-white shadow-[0_8px_24px_-16px_rgba(30,26,56,0.35)]";
 
 export function LearningScreens() {
   return (
     <section aria-labelledby="learning-screens-heading" className="space-y-5 lg:space-y-6">
       <div className="space-y-1 lg:flex lg:items-baseline lg:gap-4 lg:space-y-0">
-        <h2 id="learning-screens-heading" className="text-xl font-extrabold lg:text-2xl">
-          実際の学習画面
+        <h2
+          id="learning-screens-heading"
+          className="text-xl font-extrabold lg:shrink-0 lg:text-2xl"
+        >
+          学習の流れ
         </h2>
         <p className="text-[13px] leading-relaxed text-muted-foreground lg:text-sm">
-          動画・スライドで学び、課題を提出すると、すぐにAIのレビューが届きます。
+          動画・解説記事で学び、課題を提出すると、すぐにAIのレビューが届きます。課題でつまずいた点は復習リストで振り返れます。
         </p>
       </div>
-      <ul className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
-        {SCREENS.map(({ src, alt, caption }) => (
-          <li key={src}>
-            <figure className="space-y-2.5">
-              {/* Crop to a 4:3 frame anchored to the top so the top of the screen (title, start of the body) is visible. */}
-              <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-border bg-white shadow-[0_8px_24px_-16px_rgba(30,26,56,0.35)]">
+      <ol className="mx-auto max-w-3xl space-y-10 lg:space-y-12">
+        {STEPS.map(({ title, description, src, alt, aspect }, index) => (
+          <li key={src} className="space-y-3">
+            <div className="flex items-start gap-3">
+              <span
+                className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground"
+                aria-hidden
+              >
+                {index + 1}
+              </span>
+              <div>
+                <h3 className="text-base font-bold lg:text-lg">{title}</h3>
+                <p className="text-[13px] leading-relaxed text-muted-foreground lg:text-sm">
+                  {description}
+                </p>
+              </div>
+            </div>
+            {index === 0 && LOGIN_CLIP_URL ? (
+              <YouTubeEmbed url={LOGIN_CLIP_URL} className="border border-border shadow-md" />
+            ) : (
+              // Crop to a fixed frame anchored to the top so the top of the screen (title, start of
+              // the body) is visible even for tall screenshots.
+              <div className={`${FRAME} ${aspect}`}>
                 <Image
                   src={src}
                   alt={alt}
                   fill
                   className="object-cover object-left-top"
-                  sizes="(min-width: 1024px) 270px, (min-width: 640px) 280px, 100vw"
+                  sizes="(min-width: 768px) 768px, 100vw"
                 />
               </div>
-              <figcaption className="text-sm font-bold">{caption}</figcaption>
-            </figure>
+            )}
           </li>
         ))}
-      </ul>
+      </ol>
     </section>
   );
 }
