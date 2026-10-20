@@ -89,7 +89,16 @@ describe("ThemeForm / PhaseForm delete links (#465)", () => {
     await act(async () => {
       root.render(
         <PhaseForm
-          themes={[{ id: 3, name: "テーマ", is_published: true }]}
+          themes={[
+            {
+              id: 3,
+              name: "テーマ",
+              description: null,
+              image_url: null,
+              display_order: 1,
+              is_published: true,
+            },
+          ]}
           initialData={phase}
           siblingCandidates={[]}
           mode="edit"

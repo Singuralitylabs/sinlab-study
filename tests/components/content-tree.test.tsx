@@ -20,6 +20,7 @@ const tree: ContentTreeThemeNode[] = [
     phases: [
       {
         id: 10,
+        themeId: 1,
         name: "フェーズ1",
         isPublished: true,
         displayOrder: 1,
