@@ -30,3 +30,17 @@ export const LOGIN_MASCOT = {
   width: 360,
   height: 477,
 };
+
+/** シンラビ beside the exercise hint toggle: thinking while closed, idea once the hint is open. */
+export const HINT_MASCOT = {
+  closed: {
+    src: "/images/mascot/shinrabi-hint-thinking.webp",
+    width: 369,
+    height: 480,
+  },
+  open: {
+    src: "/images/mascot/shinrabi-hint-idea.webp",
+    width: 367,
+    height: 480,
+  },
+};
