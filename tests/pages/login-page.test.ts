@@ -112,15 +112,16 @@ describe("LoginPage", () => {
     expect(text.indexOf("サービス紹介を見る")).toBeLessThan(firstFeature);
   });
 
-  it("実際の学習画面として4枚の画面を表示する", async () => {
+  it("実際の学習画面として5ステップの画面を表示する", async () => {
     const html = await render();
 
     expect(textOf(html)).toContain("実際の学習画面");
     for (const alt of [
-      "動画コンテンツの画面",
-      "スライドコンテンツの画面",
+      "解説動画のサムネイル",
+      "解説記事の画面",
       "課題提出の画面",
       "AIレビュー結果の画面",
+      "復習リストの画面",
     ]) {
       expect(html).toContain(`alt="${alt}"`);
     }
