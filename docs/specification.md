@@ -775,7 +775,7 @@ Theme / Phase / コンテンツそれぞれに対してCRUD操作が可能。削
 
 **アクセス権限**: `admin` または `maintainer` ロール
 
-**管理ルート**: コンテンツ管理の主UIは `/manage/contents` の構成ツリー（テーマ→フェーズ→コンテンツ。`buildContentTree()`）。`/manage/themes`・`/manage/phases` の一覧は `/manage/contents` へリダイレクトする。編集・削除・新規の個別ページ（`/manage/{themes,phases,contents}/new`・`[id]/edit`・`[id]/delete`）は残す。ツリー上のダイアログから親を事前選択した状態で作成できる。同画面の一括操作（公開・非公開・削除等）は従来どおり `ContentsTable` を使う。テーマのサムネイルは作成後の編集画面からのみ設定する（本節冒頭のとおり）。
+**管理ルート**: コンテンツ管理はタブで分割する（7.3節）。構成ツリーは `/manage/contents`（テーマ→フェーズ→コンテンツ。`buildContentTree()`）、一括操作は `/manage/contents/bulk`（`ContentsFilterBar` + `ContentsTable`）。`/manage/themes`・`/manage/phases` の一覧は構成ツリーへリダイレクトする。編集・削除・新規の個別ページ（`/manage/{themes,phases,contents}/new`・`[id]/edit`・`[id]/delete`）は残す。ツリー上のダイアログから親を事前選択した状態で作成できる。一括操作タブからの編集・削除は `?from=bulk` で戻り先を一括操作にする。テーマのサムネイルは作成後の編集画面からのみ設定する（本節冒頭のとおり）。
 
 **お試し公開の設定**: コンテンツ作成・編集フォーム（`/manage/contents`）にチェックボックス「お試しユーザーにも公開する」を設け、`is_open_to_trial` を設定する。デフォルトは未チェック（`false`）で、種別を問わず全コンテンツで設定可能（2.6参照）。
 
@@ -1061,23 +1061,33 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 
 **パス**: `/manage`（受講生管理グループ配下。`/admin` はここへリダイレクト。7.3節）
 
-**表示統計**: テーマ数、フェーズ数、週数、コンテンツ数、受講生数、提出数、最近の提出5件、週次ファネル
+**表示統計**（#468）:
 
-**アクセス権限**: `admin` / `maintainer`（`checkContentPermissions()`）
+- **サマリー帯**: 受講生数・提出数のみ（テーマ数・フェーズ数・コンテンツ数のカードと「最近の提出」一覧は出さない。個人名も出さない）
+- **コンテンツ別の取り組み状況**: テーマ → フェーズ → コンテンツの階層。項目は閲覧人数（`user_progress.last_viewed_at` あり）、完了人数（`is_completed = true`）、完了率、演習は提出人数（提出した受講生のユニーク数）と合格率（合格レビュー `ai_reviews.passed = true` が1件以上ある受講生 / 提出人数）。完了率が低い順（同分は閲覧人数が少ない順）
+- **週次ファネル**: 折りたたみ（既定は閉じる）。列名・説明・期間選択は下記
+
+**受講生の範囲（分母）**: `fetchManageCounts()` と同じ。`users.status = active` かつ `is_deleted = false`（ロールでは絞らない）。コンテンツ別統計の閲覧・完了・提出・合格の人数もこの集合だけを数える。対象コンテンツは `is_published = true AND is_deleted = false`、かつ親フェーズ・テーマも公開かつ未削除。
+
+**アクセス権限**: `admin` / `maintainer`（`checkContentPermissions()`）。週次ファネルは admin / maintainer 共通（権限は従来どおり）。集計の取得は `fetchContentEngagementStats()`（進捗・提出はユーザー JWT。受講生 ID だけ service_role）と `fetchWeeklyFunnel()`。受講生向け配信経路の service_role 2箇所は増やさない。
 
 **週次ファネル**（グラフは出さない。目標値の 50% / 10% / 8% も出さない）:
 
-RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を渡す。引数は 1〜104 に丸める。EXECUTE は service_role のみ）。1行は JST の月曜 0:00 から翌月曜 0:00 まで。境界は `timezone('Asia/Tokyo', timestamptz)` を `date_trunc('week', ...)` した日付（PostgreSQL の週は月曜始まり）。`fetchManageCounts()` と `Promise.all` で並列に取る。取得に失敗しても他の統計は出す。
+RPC `get_weekly_funnel(weeks int)`（アプリは `resolveWeeklyFunnelWeeks()` の許可リスト `WEEKLY_FUNNEL_WEEK_OPTIONS` = 8 / 26 / 52 だけを渡す。既定は `WEEKLY_FUNNEL_WEEKS` = 8。クエリ `?weeks=` が許可リスト外なら既定へフォールバックし、任意の数値を RPC に渡さない。RPC 側の引数は従来どおり 1〜104 に丸める。EXECUTE は service_role のみ）。1行は JST の月曜 0:00 から翌月曜 0:00 まで。境界は `timezone('Asia/Tokyo', timestamptz)` を `date_trunc('week', ...)` した日付（PostgreSQL の週は月曜始まり）。`fetchManageCounts()` / `fetchContentEngagementStats()` と `Promise.all` で並列に取る。取得に失敗しても他の統計は出す。期間が長いと行が増えるため、表は折りたたみ内でスクロールする。
 
-| 列 | 算出 |
-|:--|:--|
-| 登録 `signups` | `users.created_at` がその週、`is_deleted = false` |
-| 有効化 `activated` | その週の登録者のうち、`submissions.submitted_at` が登録時刻以上かつ登録から7日以内の提出が1件以上ある人数（コホート）。週末直前の登録は翌週末まで対象なので、今週と前週は画面に未確定と出す |
-| 有料化 `upgraded` | 発生基準。`stripe_subscriptions.became_active_at`（`status` が初めて `active` になった時刻）がその週。Checkout の処理権（`checkout_pending` の INSERT）の `created_at` は使わない。後から `past_due` や終端になっても、再契約で同じ行を `checkout_pending` に戻しても週は動かない。`active` を一度も通っていない行と、手動承認の `general` は含めない。1ユーザー1行なので2回目の `active` は新しい発生にしない |
-| 解約 `ended` | 発生基準。`became_active_at` がある行の `became_terminal_at`（`active` を経由したあと、`status` が初めて終端 `canceled` / `unpaid` / `incomplete_expired` / `paused` になった時刻）がその週。`trialing` → `paused` や `incomplete` → `incomplete_expired` など、一度も `active` になっていない行は含めない。後続のミラー更新で `updated_at` が動いても、再契約で `status` が戻っても週は動かない。2回目以降の終端は同じ行では数えない |
-| 有料会員数 `paid_total` | 週末時点の `membership_type = general` かつ `status = active` の近似（途中の空白期間の履歴は無い）。現在その状態で未削除、かつ `became_active_at` が週末より前でいま終端でも `checkout_pending` でもない、または Stripe 行が無い / 終端 / `checkout_pending` で `updated_at` が週末より前（手動承認。解約後や Checkout 中断後の行も拾う。承認後の別更新で過去週から外れることがある）。いま終端でも、`became_active_at` が週末より前かつ `became_terminal_at` が週末以後ならその週末までは有料だったとみなす。再契約で現在有効な行は、最初の `became_active_at` 以降の空白週も有料に見える。論理削除に `deleted_at` が無いので削除済みは全週から除く |
+画面の列名（RPC の列名は変えない）:
 
-呼び出しは `fetchWeeklyFunnel()`（`admin-server.ts`）だけ。`checkContentPermissions()` で admin / maintainer を確認してから service_role で RPC する。`stripe_subscriptions` の SELECT は本人か admin だけなので、maintainer の JWT のままでは有料化・解約が過少になる。SELECT ポリシーは広げない（集計以外の顧客 ID を maintainer に見せない）。関数自体は `SECURITY INVOKER`。EXECUTE は service_role のみなので、member の REST 直呼びは権限エラーになる。
+| 画面の列名 | RPC | 算出 |
+|:--|:--|:--|
+| 登録数 | `signups` | `users.created_at` がその週、`is_deleted = false` |
+| 初回提出数 | `activated` | その週の登録者のうち、`submissions.submitted_at` が登録時刻以上かつ登録から7日以内の提出が1件以上ある人数（コホート）。週末直前の登録は翌週末まで対象なので、今週と前週は画面に未確定と出す。「有効化」「アクティブ」は使わない（`users.status = active` や Stripe の `active` と紛らわしいため） |
+| 有料化数 | `upgraded` | 発生基準。`stripe_subscriptions.became_active_at`（`status` が初めて `active` になった時刻）がその週。Checkout の処理権（`checkout_pending` の INSERT）の `created_at` は使わない。後から `past_due` や終端になっても、再契約で同じ行を `checkout_pending` に戻しても週は動かない。`active` を一度も通っていない行と、手動承認の `general` は含めない。1ユーザー1行なので2回目の `active` は新しい発生にしない |
+| 解約数 | `ended` | 発生基準。`became_active_at` がある行の `became_terminal_at`（`active` を経由したあと、`status` が初めて終端 `canceled` / `unpaid` / `incomplete_expired` / `paused` になった時刻）がその週。`trialing` → `paused` や `incomplete` → `incomplete_expired` など、一度も `active` になっていない行は含めない。後続のミラー更新で `updated_at` が動いても、再契約で `status` が戻っても週は動かない。2回目以降の終端は同じ行では数えない |
+| 有料会員数 | `paid_total` | 週末時点の `membership_type = general` かつ `status = active` の近似（途中の空白期間の履歴は無い）。現在その状態で未削除、かつ `became_active_at` が週末より前でいま終端でも `checkout_pending` でもない、または Stripe 行が無い / 終端 / `checkout_pending` で `updated_at` が週末より前（手動承認。解約後や Checkout 中断後の行も拾う。承認後の別更新で過去週から外れることがある）。いま終端でも、`became_active_at` が週末より前かつ `became_terminal_at` が週末以後ならその週末までは有料だったとみなす。再契約で現在有効な行は、最初の `became_active_at` 以降の空白週も有料に見える。論理削除に `deleted_at` が無いので削除済みは全週から除く |
+
+各列の意味は表下の長い説明文ではなく、列見出し横の情報アイコン（ⓘ）を Popover（クリック・タップ・キーボードフォーカスで開く。ホバーのみにしない）で出す。アイコンには `aria-label`（例: 「初回提出数の説明」）を付ける。
+
+呼び出しは `fetchWeeklyFunnel(weeks)`（`admin-server.ts`）だけ。`checkContentPermissions()` で admin / maintainer を確認してから service_role で RPC する。`stripe_subscriptions` の SELECT は本人か admin だけなので、maintainer の JWT のままでは有料化・解約が過少になる。SELECT ポリシーは広げない（集計以外の顧客 ID を maintainer に見せない）。関数自体は `SECURITY INVOKER`。EXECUTE は service_role のみなので、member の REST 直呼びは権限エラーになる。
 
 ---
 
@@ -1112,8 +1122,8 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `WEEKLY_FUNNEL_WEEKS` = 8 を�
 
 サイドナビ（`SideNav`）は管理系を次の2グループに分ける（各グループ内は `ManageGroupNav` のタブ）:
 
-- **コンテンツ管理**（入口 `/manage/contents`）: 構成ツリー（`/manage/contents`）とお知らせ（`/manage/announcements`）。テーマ・フェーズの一覧URLは構成ツリーへリダイレクトする
-- **受講生管理**（入口 `/manage`）: ダッシュボード（`/manage`）、提出一覧（`/manage/submissions`）、フィードバック（`/manage/feedbacks`）。受講生進捗（`/manage/students`）は admin のみタブ表示（6.2節）
+- **コンテンツ管理**（入口 `/manage/contents`）: 構成ツリー（`/manage/contents`）とコンテンツ一括操作（`/manage/contents/bulk`）。テーマ・フェーズの一覧URLは構成ツリーへリダイレクトする。サイドナビのハイライトは一括操作中も「コンテンツ管理」
+- **受講生管理**（入口 `/manage`）: ダッシュボード（`/manage`）、提出一覧（`/manage/submissions`）、フィードバック（`/manage/feedbacks`）、お知らせ（`/manage/announcements`。URLは据え置き。ルートグループだけ `(students)` 配下）。受講生進捗（`/manage/students`）は admin のみタブ表示（6.2節）。お知らせ表示中のサイドナビハイライトは「受講生管理」
 
 管理者専用のユーザー管理・メール通知は従来どおり `/admin/users`・`/admin/emails`（7.4節）。
 

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
 import { derivePhaseSelectOptions } from "@/app/lib/content-filtering";
 import { compareGroupLevel, sortPhasesByHierarchy } from "@/app/lib/content-grouping";
+import { manageContentsReturnPath } from "@/app/lib/manage-contents-paths";
 import {
   fetchAllPhases,
   fetchContentByIdForAdmin,
@@ -13,10 +14,17 @@ import { ContentForm } from "../../ContentForm";
 
 interface PageProps {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-export default async function EditContentPage({ params }: PageProps) {
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function EditContentPage({ params, searchParams }: PageProps) {
   const { id } = await params;
+  const query = await searchParams;
+  const returnPath = manageContentsReturnPath(firstParam(query.from));
   const contentId = Number.parseInt(id, 10);
 
   if (Number.isNaN(contentId)) {
@@ -56,10 +64,7 @@ export default async function EditContentPage({ params }: PageProps) {
       <div className="max-w-3xl mx-auto">
         <PageTitle
           title="コンテンツ編集"
-          breadcrumbs={[
-            { label: "コンテンツ管理", href: "/manage/contents" },
-            { label: content.title },
-          ]}
+          breadcrumbs={[{ label: "コンテンツ管理", href: returnPath }, { label: content.title }]}
         />
         <Alert variant="destructive">
           <AlertDescription>
@@ -86,10 +91,7 @@ export default async function EditContentPage({ params }: PageProps) {
     <div className="max-w-3xl mx-auto">
       <PageTitle
         title="コンテンツ編集"
-        breadcrumbs={[
-          { label: "コンテンツ管理", href: "/manage/contents" },
-          { label: content.title },
-        ]}
+        breadcrumbs={[{ label: "コンテンツ管理", href: returnPath }, { label: content.title }]}
       />
       <ContentForm
         themes={filterOptions.themes}
@@ -99,6 +101,7 @@ export default async function EditContentPage({ params }: PageProps) {
         quizQuestionsUnavailable={Boolean(quizFetch.error)}
         siblingCandidates={siblingCandidates}
         mode="edit"
+        returnPath={returnPath}
       />
     </div>
   );

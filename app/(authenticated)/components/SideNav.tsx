@@ -97,19 +97,19 @@ const SETTINGS_NAV_ITEM: NavItem = {
 
 function isNavActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
-  // Student-manage group: do not highlight for /manage/contents|announcements|themes|…
+  // Student-manage group: announcements moved here (#467). Do not highlight for content routes.
   if (href === "/manage") {
     return (
       pathname === "/manage" ||
       pathname.startsWith("/manage/students") ||
       pathname.startsWith("/manage/submissions") ||
-      pathname.startsWith("/manage/feedbacks")
+      pathname.startsWith("/manage/feedbacks") ||
+      pathname.startsWith("/manage/announcements")
     );
   }
   if (href === "/manage/contents") {
     return (
       pathname.startsWith("/manage/contents") ||
-      pathname.startsWith("/manage/announcements") ||
       pathname.startsWith("/manage/themes") ||
       pathname.startsWith("/manage/phases")
     );
