@@ -10,15 +10,16 @@ export function HomeHero({ displayName }: HomeHeroProps) {
 
   return (
     <section className="mb-6">
-      {/* Never crop: the title is baked into the image and the mascot's shoes sit at the bottom edge. */}
-      <div className="relative aspect-video w-full overflow-hidden rounded-xl border">
+      {/* Full 16:9 below lg so the baked-in title is never cropped; from lg it is capped in height
+          (cropping the mascot's lower body, which carries no text) so the cards below stay near the first view. */}
+      <div className="relative aspect-video w-full overflow-hidden rounded-xl border lg:aspect-[8/3]">
         <Image
           src="/images/home/hero.webp"
           alt=""
           fill
           priority
           sizes="(min-width: 1024px) 896px, 100vw"
-          className="object-cover"
+          className="object-cover object-[50%_20%]"
         />
       </div>
       <h1 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl break-words">
