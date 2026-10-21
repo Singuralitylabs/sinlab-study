@@ -112,7 +112,7 @@ type PlanCardProps = {
   /** Reserved height on both cards so price/features align on sm+ (empty string = spacer). */
   subtitle: string;
   price: string;
-  /** Optional intro under the price (community card; #472). Site link stays outside the trigger. */
+  /** Optional intro at the card bottom (community card; #472) so feature rows align across cards. */
   description?: string;
   features: ReadonlyArray<{ label: string; value: FeatureValue }>;
   isCurrent: boolean;
@@ -177,22 +177,24 @@ function PlanCard({
         </div>
       </div>
       <p className="text-2xl font-bold">{price}</p>
-      {description && <p className="text-sm text-muted-foreground">{description}</p>}
     </div>
   );
 
   // Keep the <a> outside the dialog <button> so the community site link does not open the apply
   // dialog (nested interactive content would also be invalid HTML; #472).
-  const externalLinkBlock = externalLink && (
-    <div className="px-6">
-      <a
-        href={externalLink.href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-sm text-primary underline-offset-4 hover:underline"
-      >
-        {externalLink.label}
-      </a>
+  const introBlock = (description || externalLink) && (
+    <div className="space-y-2 border-t px-6 pt-4 text-sm">
+      {description && <p className="text-muted-foreground">{description}</p>}
+      {externalLink && (
+        <a
+          href={externalLink.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-block text-primary underline-offset-4 hover:underline"
+        >
+          {externalLink.label}
+        </a>
+      )}
     </div>
   );
 
@@ -206,51 +208,35 @@ function PlanCard({
         aria-current={isCurrent ? "true" : undefined}
       >
         {header}
-        {externalLinkBlock}
         {featuresBlock}
+        {introBlock}
         {cardFooter && <div className="mt-auto space-y-2 px-6 pt-2">{cardFooter}</div>}
       </div>
     );
   }
-
-  const triggerClassName =
-    "flex flex-1 cursor-pointer flex-col gap-6 rounded-xl text-left focus-visible:outline-none";
 
   return (
     <Dialog>
       <div
         className={cn(
           "group bg-card text-card-foreground flex h-full flex-col gap-6 rounded-xl border py-6 shadow-sm transition-colors",
-          // Community card splits the trigger around the external <a>; general keeps a direct child button.
-          externalLinkBlock
-            ? "has-[button:hover]:border-primary/60 has-[button:hover]:bg-accent/40 has-[button:focus-visible]:border-primary/60 has-[button:focus-visible]:bg-accent/40"
-            : "has-[>button:hover]:border-primary/60 has-[>button:hover]:bg-accent/40 has-[>button:focus-visible]:border-primary/60 has-[>button:focus-visible]:bg-accent/40",
+          "has-[>button:hover]:border-primary/60 has-[>button:hover]:bg-accent/40",
+          "has-[>button:focus-visible]:border-primary/60 has-[>button:focus-visible]:bg-accent/40",
           isCurrent && "border-primary ring-2 ring-primary/20"
         )}
         aria-current={isCurrent ? "true" : undefined}
       >
-        {externalLinkBlock ? (
-          <>
-            <DialogTrigger asChild>
-              <button type="button" aria-label={openLabel} className={triggerClassName}>
-                {header}
-              </button>
-            </DialogTrigger>
-            {externalLinkBlock}
-            <DialogTrigger asChild>
-              <button type="button" aria-label={openLabel} className={triggerClassName}>
-                {featuresBlock}
-              </button>
-            </DialogTrigger>
-          </>
-        ) : (
-          <DialogTrigger asChild>
-            <button type="button" aria-label={openLabel} className={triggerClassName}>
-              {header}
-              {featuresBlock}
-            </button>
-          </DialogTrigger>
-        )}
+        <DialogTrigger asChild>
+          <button
+            type="button"
+            aria-label={openLabel}
+            className="flex flex-1 cursor-pointer flex-col gap-6 rounded-xl text-left focus-visible:outline-none"
+          >
+            {header}
+            {featuresBlock}
+          </button>
+        </DialogTrigger>
+        {introBlock}
         {cardFooter && <div className="mt-auto space-y-2 px-6 pt-2">{cardFooter}</div>}
       </div>
       <DialogContent className="max-h-[min(90vh,40rem)] overflow-y-auto sm:max-w-lg">

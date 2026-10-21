@@ -86,15 +86,10 @@ describe("PlanCards", () => {
     });
 
     // Only community opens a dialog; general is current-plan with footer only.
-    // Community splits the trigger around the external site link (#472), so two open buttons share the label.
     const chevrons = container.querySelectorAll("svg.lucide-chevron-right");
     const openButtons = container.querySelectorAll('button[aria-label$="の詳細を開く"]');
-    expect(openButtons.length).toBe(2);
-    expect(
-      Array.from(openButtons).every((button) =>
-        button.getAttribute("aria-label")?.includes("コミュニティ会員")
-      )
-    ).toBe(true);
+    expect(openButtons.length).toBe(1);
+    expect(openButtons[0]?.getAttribute("aria-label")).toContain("コミュニティ会員");
     expect(chevrons.length).toBe(1);
     expect(container.textContent).toContain("現在のプラン");
     expect(container.textContent).toContain("manage footer");
@@ -164,7 +159,12 @@ describe("PlanCards", () => {
       root.render(<PlanCards generalDialog={<p>g</p>} communityDialog={<p>community body</p>} />);
     });
 
-    expect(container.textContent).toContain("テックコミュニティ『シンギュラリティ・ラボ』");
+    const text = container.textContent ?? "";
+    expect(text).toContain("テックコミュニティ『シンギュラリティ・ラボ』");
+    // Intro sits below the feature rows so both cards' rows start at the same height.
+    expect(text.indexOf("テックコミュニティ『シンギュラリティ・ラボ』")).toBeGreaterThan(
+      text.indexOf("Web/AIの最新情報")
+    );
     const siteLink = Array.from(container.querySelectorAll("a")).find(
       (anchor) => anchor.getAttribute("href") === TECH_COMMUNITY_URL
     );
