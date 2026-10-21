@@ -2215,20 +2215,37 @@ interface ManageCounts {
    */
   students: number;
   submissions: number;
+  /** Non-deleted rows, published or not: these describe the structure admins maintain. */
+  themes: number;
+  phases: number;
+  contents: number;
 }
 
 /**
  * Summary strip for /manage (#468). Head + count only; a failed count is 0 so the dashboard
- * still renders. Both counts use service_role: maintainers no longer SELECT `users` (#414), and
- * submissions embed users for other screens.
+ * still renders. Students and submissions use service_role: maintainers no longer SELECT `users`
+ * (#414), and submissions embed users for other screens. Structure counts use the user JWT.
  */
 export async function fetchManageCounts(): Promise<{
   data: ManageCounts;
   error: PostgrestError | null;
 }> {
+  const supabase = await createServerSupabaseClient();
   const admin = await createAdminSupabaseClient();
 
-  const [students, submissions] = await Promise.all([
+  const [themes, phases, contents, students, submissions] = await Promise.all([
+    supabase
+      .from("learning_themes")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
+    supabase
+      .from("learning_phases")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
+    supabase
+      .from("learning_contents")
+      .select("id", { count: "exact", head: true })
+      .eq("is_deleted", false),
     admin
       .from("users")
       .select("id", { count: "exact", head: true })
@@ -2237,13 +2254,17 @@ export async function fetchManageCounts(): Promise<{
     admin.from("submissions").select("id", { count: "exact", head: true }),
   ]);
 
-  const firstError = students.error ?? submissions.error ?? null;
+  const firstError =
+    themes.error ?? phases.error ?? contents.error ?? students.error ?? submissions.error ?? null;
   if (firstError) {
     console.error("管理ダッシュボード件数取得エラー:", firstError.message);
   }
 
   return {
     data: {
+      themes: themes.count ?? 0,
+      phases: phases.count ?? 0,
+      contents: contents.count ?? 0,
       students: students.count ?? 0,
       submissions: submissions.count ?? 0,
     },

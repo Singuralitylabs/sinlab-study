@@ -327,36 +327,58 @@ describe("fetchStudentsProgress", () => {
 });
 
 describe("fetchManageCounts", () => {
-  it("受講生数と提出数を返す（どちらも service_role）", async () => {
+  function mockClients(overrides: { submissionsError?: typeof dbError } = {}) {
     const adminClient = createMockSupabaseClient({
       tableResults: {
         users: { data: null, error: null, count: 6 },
-        submissions: { data: null, error: null, count: 12 },
+        submissions: overrides.submissionsError
+          ? { data: null, error: overrides.submissionsError, count: null }
+          : { data: null, error: null, count: 12 },
+      },
+    });
+    const userClient = createMockSupabaseClient({
+      tableResults: {
+        learning_themes: { data: null, error: null, count: 3 },
+        learning_phases: { data: null, error: null, count: 8 },
+        learning_contents: { data: null, error: null, count: 40 },
       },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(adminClient as never);
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(userClient as never);
+    return { adminClient, userClient };
+  }
+
+  it("構成の件数（ユーザーJWT）と受講生数・提出数（service_role）を返す", async () => {
+    const { adminClient, userClient } = mockClients();
 
     const result = await fetchManageCounts();
 
     expect(result.error).toBeNull();
-    expect(result.data).toEqual({ students: 6, submissions: 12 });
+    expect(result.data).toEqual({
+      themes: 3,
+      phases: 8,
+      contents: 40,
+      students: 6,
+      submissions: 12,
+    });
     expect(adminClient.from).toHaveBeenCalledWith("users");
     expect(adminClient.from).toHaveBeenCalledWith("submissions");
+    expect(userClient.from).toHaveBeenCalledWith("learning_themes");
   });
 
   it("一部の件数取得に失敗した場合、失敗分は0としてエラーを返す", async () => {
-    const adminClient = createMockSupabaseClient({
-      tableResults: {
-        users: { data: null, error: null, count: 6 },
-        submissions: { data: null, error: dbError, count: null },
-      },
-    });
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(adminClient as never);
+    mockClients({ submissionsError: dbError });
 
     const result = await fetchManageCounts();
 
     expect(result.error).toEqual(dbError);
-    expect(result.data).toEqual({ students: 6, submissions: 0 });
+    expect(result.data).toEqual({
+      themes: 3,
+      phases: 8,
+      contents: 40,
+      students: 6,
+      submissions: 0,
+    });
   });
 });
 

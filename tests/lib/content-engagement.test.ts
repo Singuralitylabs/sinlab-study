@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildContentEngagement,
-  compareEngagementForSort,
+  compareEngagementByLearningOrder,
   completionRate,
   passRate,
 } from "@/app/lib/content-engagement";
@@ -43,7 +43,7 @@ describe("buildContentEngagement", () => {
     },
   ];
 
-  it("受講生集合外の進捗・提出は数えず、完了率が低い順に並べる", () => {
+  it("受講生集合外の進捗・提出は数えず、学習順（表示順）に並べる", () => {
     const studentIds = new Set([1, 2, 3]);
     const result = buildContentEngagement(
       contents,
@@ -67,7 +67,16 @@ describe("buildContentEngagement", () => {
     expect(result.studentTotal).toBe(3);
     expect(result.themes).toHaveLength(1);
     const rows = result.themes[0]?.phases[0]?.contents ?? [];
-    expect(rows.map((r) => r.contentId)).toEqual([2, 1]);
+    expect(rows.map((r) => r.contentId)).toEqual([1, 2]);
+
+    const expectedSummary = {
+      contentCount: 2,
+      viewedStudents: 2,
+      finishedStudents: 0,
+      averageCompletionRate: 1 / 6,
+    };
+    expect(result.themes[0]?.summary).toEqual(expectedSummary);
+    expect(result.themes[0]?.phases[0]?.summary).toEqual(expectedSummary);
 
     const video = rows.find((r) => r.contentId === 1);
     expect(video).toMatchObject({
@@ -89,7 +98,7 @@ describe("buildContentEngagement", () => {
     });
   });
 
-  it("compareEngagementForSort は完了率→閲覧人数→表示順", () => {
+  it("compareEngagementByLearningOrder は表示順→id（完了率・閲覧人数は見ない）", () => {
     const base = {
       contentType: "text" as const,
       phaseId: 1,
@@ -119,6 +128,10 @@ describe("buildContentEngagement", () => {
       viewedCount: 1,
       completionRate: 0.1,
     };
-    expect(compareEngagementForSort(a, b)).toBeGreaterThan(0);
+    expect(compareEngagementByLearningOrder(a, b)).toBeGreaterThan(0);
+    expect(compareEngagementByLearningOrder({ ...a, contentOrder: 1 }, b)).toBeLessThan(0);
+    expect(
+      compareEngagementByLearningOrder({ ...a, contentOrder: 1, contentId: 5 }, b)
+    ).toBeGreaterThan(0);
   });
 });

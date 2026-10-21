@@ -23,10 +23,22 @@ export type ContentEngagementStat = {
   passRate: number | null;
 };
 
+/** Roll-up over every content in a phase or theme; people are distinct students, not sums. */
+export type EngagementGroupSummary = {
+  contentCount: number;
+  /** Students who viewed at least one content in the group. */
+  viewedStudents: number;
+  /** Students who completed every content in the group (0 when the group has no contents). */
+  finishedStudents: number;
+  /** sum(completedCount) / (contentCount * studentTotal); 0 when either is 0. */
+  averageCompletionRate: number;
+};
+
 export type ContentEngagementPhaseGroup = {
   phaseId: number;
   phaseName: string;
   phaseOrder: number;
+  summary: EngagementGroupSummary;
   contents: ContentEngagementStat[];
 };
 
@@ -34,6 +46,7 @@ export type ContentEngagementThemeGroup = {
   themeId: number;
   themeName: string;
   themeOrder: number;
+  summary: EngagementGroupSummary;
   phases: ContentEngagementPhaseGroup[];
 };
 
@@ -52,17 +65,11 @@ export function passRate(passedCount: number, submitterCount: number): number | 
   return passedCount / submitterCount;
 }
 
-/** Lower completion first; then fewer views; stable by contentOrder / id. */
-export function compareEngagementForSort(
+/** Learning order inside a phase, so rows match what students see; id breaks ties. */
+export function compareEngagementByLearningOrder(
   a: ContentEngagementStat,
   b: ContentEngagementStat
 ): number {
-  if (a.completionRate !== b.completionRate) {
-    return a.completionRate - b.completionRate;
-  }
-  if (a.viewedCount !== b.viewedCount) {
-    return a.viewedCount - b.viewedCount;
-  }
   if (a.contentOrder !== b.contentOrder) {
     return a.contentOrder - b.contentOrder;
   }
@@ -81,6 +88,41 @@ export type SubmissionAggRow = {
   user_id: number;
   passed: boolean | null;
 };
+
+function emptySummary(): EngagementGroupSummary {
+  return { contentCount: 0, viewedStudents: 0, finishedStudents: 0, averageCompletionRate: 0 };
+}
+
+function summarizeGroup(
+  contents: readonly ContentEngagementStat[],
+  viewed: ReadonlyMap<number, ReadonlySet<number>>,
+  completed: ReadonlyMap<number, ReadonlySet<number>>,
+  studentTotal: number
+): EngagementGroupSummary {
+  if (contents.length === 0) return emptySummary();
+
+  const viewers = new Set<number>();
+  for (const content of contents) {
+    for (const userId of viewed.get(content.contentId) ?? []) viewers.add(userId);
+  }
+
+  // Intersection of per-content completers: only students who finished every content count.
+  const completers = contents.map(
+    (content): ReadonlySet<number> => completed.get(content.contentId) ?? new Set<number>()
+  );
+  let finished = 0;
+  for (const userId of completers[0] ?? []) {
+    if (completers.every((done) => done.has(userId))) finished += 1;
+  }
+
+  const completedTotal = contents.reduce((sum, content) => sum + content.completedCount, 0);
+  return {
+    contentCount: contents.length,
+    viewedStudents: viewers.size,
+    finishedStudents: finished,
+    averageCompletionRate: studentTotal > 0 ? completedTotal / (contents.length * studentTotal) : 0,
+  };
+}
 
 type ContentMeta = {
   id: number;
@@ -178,6 +220,7 @@ export function buildContentEngagement(
         themeId: content.theme_id,
         themeName: content.theme_name,
         themeOrder: content.theme_order,
+        summary: emptySummary(),
         phases: [],
       };
       themeMap.set(content.theme_id, theme);
@@ -189,6 +232,7 @@ export function buildContentEngagement(
         phaseId: content.phase_id,
         phaseName: content.phase_name,
         phaseOrder: content.phase_order,
+        summary: emptySummary(),
         contents: [],
       };
       theme.phases.push(phase);
@@ -207,8 +251,18 @@ export function buildContentEngagement(
       return a.phaseId - b.phaseId;
     });
     for (const phase of theme.phases) {
-      phase.contents.sort(compareEngagementForSort);
+      phase.contents.sort(compareEngagementByLearningOrder);
+      phase.summary = summarizeGroup(phase.contents, viewed, completed, studentTotal);
     }
+  }
+
+  for (const theme of themes) {
+    theme.summary = summarizeGroup(
+      theme.phases.flatMap((phase) => phase.contents),
+      viewed,
+      completed,
+      studentTotal
+    );
   }
 
   return { studentTotal, themes };

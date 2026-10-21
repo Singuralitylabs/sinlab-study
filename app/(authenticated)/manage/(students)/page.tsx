@@ -1,4 +1,4 @@
-import { ClipboardList, Users } from "lucide-react";
+import { BookOpen, ClipboardList, FileText, FolderOpen, Users } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { PageTitle } from "@/app/components/PageTitle";
@@ -31,6 +31,24 @@ export default async function ManageDashboardPage({ searchParams }: ManageDashbo
   ]);
 
   const summary = [
+    {
+      title: "テーマ数",
+      value: counts.themes,
+      href: "/manage/contents",
+      icon: FolderOpen,
+    },
+    {
+      title: "フェーズ数",
+      value: counts.phases,
+      href: "/manage/contents",
+      icon: BookOpen,
+    },
+    {
+      title: "コンテンツ数",
+      value: counts.contents,
+      href: "/manage/contents",
+      icon: FileText,
+    },
     {
       title: "受講生数",
       value: counts.students,
