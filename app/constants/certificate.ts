@@ -20,8 +20,11 @@ export const CERTIFICATE_NO_MAX_ATTEMPTS = 5;
 /** Service name printed on the certificate; the same source as the email sender name. */
 export const CERTIFICATE_SERVICE_NAME = EMAIL_FROM_NAME;
 
-/** App logo printed in the top-right corner; the same file as the PWA icon. */
-export const CERTIFICATE_LOGO_SRC = "/icons/icon-512.png";
+/**
+ * Original blue Singularity Lab icon printed in the top-right corner. Deliberately not the PWA
+ * icon (now シンラビ): the certificate must show the operating organization.
+ */
+export const CERTIFICATE_LOGO_SRC = "/images/certificate/logo.png";
 
 /**
  * Issuing organization printed on the certificate, from the CERTIFICATE_ISSUER_NAME env var. Unset
