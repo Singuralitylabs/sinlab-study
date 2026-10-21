@@ -14,6 +14,8 @@ vi.mock("@/app/(authenticated)/upgrade/UpgradeCheckoutButton", () => ({
 import { CommunityApplyButton } from "@/app/(authenticated)/upgrade/CommunityApplyButton";
 import { PlanCards } from "@/app/(authenticated)/upgrade/PlanCards";
 import { TrialCheckoutDetails } from "@/app/(authenticated)/upgrade/TrialCheckoutDetails";
+import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
+import { TECH_COMMUNITY_URL } from "@/app/constants/marketing";
 import {
   COMMUNITY_APPLY_FORM_URL,
   SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
@@ -84,10 +86,15 @@ describe("PlanCards", () => {
     });
 
     // Only community opens a dialog; general is current-plan with footer only.
+    // Community splits the trigger around the external site link (#472), so two open buttons share the label.
     const chevrons = container.querySelectorAll("svg.lucide-chevron-right");
     const openButtons = container.querySelectorAll('button[aria-label$="の詳細を開く"]');
-    expect(openButtons.length).toBe(1);
-    expect(openButtons[0]?.getAttribute("aria-label")).toContain("コミュニティ会員");
+    expect(openButtons.length).toBe(2);
+    expect(
+      Array.from(openButtons).every((button) =>
+        button.getAttribute("aria-label")?.includes("コミュニティ会員")
+      )
+    ).toBe(true);
     expect(chevrons.length).toBe(1);
     expect(container.textContent).toContain("現在のプラン");
     expect(container.textContent).toContain("manage footer");
@@ -134,5 +141,43 @@ describe("PlanCards", () => {
     expect(container.textContent).toContain("Slackでのコミュニケーション");
     expect(container.textContent).toContain("Web/AIの最新情報");
     expect(container.querySelectorAll("ul li").length).toBeGreaterThanOrEqual(6);
+  });
+
+  it("有料とお試しの差が学習・AIレビュー・もくもく会の文言から読み取れる", async () => {
+    await act(async () => {
+      root.render(<PlanCards generalDialog={<p>g</p>} communityDialog={<p>c</p>} />);
+    });
+
+    const text = container.textContent ?? "";
+    expect(text).toContain(
+      "全テーマ・全フェーズのコンテンツを閲覧できます（お試しはお試し公開分のみ）"
+    );
+    expect(text).toContain("全演習に取り組めます");
+    expect(text).toContain(
+      `演習ごとに1日${AI_REVIEW_LIMITS.active.perContentPerDay}回まで再レビューできます（お試しは1課題につき${AI_REVIEW_LIMITS.trial.perContentLifetime}回）`
+    );
+    expect(text).toContain("もくもく会に参加できます");
+  });
+
+  it("コミュニティカードに説明とサイトリンクがあり、リンク押下ではダイアログが開かない", async () => {
+    await act(async () => {
+      root.render(<PlanCards generalDialog={<p>g</p>} communityDialog={<p>community body</p>} />);
+    });
+
+    expect(container.textContent).toContain("テックコミュニティ『シンギュラリティ・ラボ』");
+    const siteLink = Array.from(container.querySelectorAll("a")).find(
+      (anchor) => anchor.getAttribute("href") === TECH_COMMUNITY_URL
+    );
+    expect(siteLink).toBeTruthy();
+    expect(siteLink?.getAttribute("target")).toBe("_blank");
+    expect(siteLink?.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(siteLink?.textContent).toContain("シンギュラリティ・ラボについて詳しく見る");
+    expect(siteLink?.closest('button[aria-label$="の詳細を開く"]')).toBeNull();
+
+    await act(async () => {
+      siteLink?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+
+    expect(document.querySelector('[data-slot="dialog-content"]')).toBeNull();
   });
 });
