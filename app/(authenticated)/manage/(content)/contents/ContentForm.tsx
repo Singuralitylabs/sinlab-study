@@ -20,6 +20,7 @@ import {
   toRubricFormRows,
 } from "@/app/lib/grading";
 import { previewCapability } from "@/app/lib/html-preview";
+import { MANAGE_CONTENTS_TREE_PATH } from "@/app/lib/manage-contents-paths";
 import { type QuizQuestionData, QuizQuestionsSchema } from "@/app/lib/quiz";
 import { parseSlideObjectKey, toSlideObjectKey } from "@/app/lib/slide-object-key";
 import { getSlideStorageWarning } from "@/app/lib/slide-storage-warning";
@@ -120,6 +121,8 @@ interface ContentFormProps {
   onCancel?: () => void;
   /** Skip Card chrome so the form sits cleanly inside a Dialog. */
   embedded?: boolean;
+  /** Where to go after save/cancel when not embedded (bulk tab vs tree). */
+  returnPath?: string;
 }
 
 function parseCreatedContentId(data: unknown): number | undefined {
@@ -186,6 +189,7 @@ export function ContentForm({
   onSuccess,
   onCancel,
   embedded = false,
+  returnPath = MANAGE_CONTENTS_TREE_PATH,
 }: ContentFormProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -702,7 +706,7 @@ export function ContentForm({
           // Caller (e.g. ContentTree) refreshes after expanding the created node.
           onSuccess(id !== undefined ? { id } : undefined);
         } else {
-          router.push("/manage/contents");
+          router.push(returnPath);
           router.refresh();
         }
       } else {
@@ -721,7 +725,7 @@ export function ContentForm({
       onCancel();
       return;
     }
-    router.push("/manage/contents");
+    router.push(returnPath);
   };
 
   const fields = (

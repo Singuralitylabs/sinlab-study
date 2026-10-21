@@ -9,6 +9,7 @@ import { ManageGroupNav } from "@/app/(authenticated)/manage/components/ManageGr
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/manage",
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 describe("ManageGroupNav", () => {

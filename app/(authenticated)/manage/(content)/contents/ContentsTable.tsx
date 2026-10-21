@@ -12,6 +12,7 @@ import {
   MAX_BULK_CONTENT_IDS,
 } from "@/app/constants/content";
 import type { ContentTableGroup, ContentTableRow } from "@/app/lib/content-grouping";
+import { manageContentsDeleteHref, manageContentsEditHref } from "@/app/lib/manage-contents-paths";
 import { getSlideStorageWarning } from "@/app/lib/slide-storage-warning";
 import type { ContentType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -38,9 +39,11 @@ import {
 
 interface ContentsTableProps {
   groups: ContentTableGroup[];
+  /** When true, edit/delete links return to the bulk tab after save/delete (#467). */
+  fromBulk?: boolean;
 }
 
-export function ContentsTable({ groups }: ContentsTableProps) {
+export function ContentsTable({ groups, fromBulk = false }: ContentsTableProps) {
   const router = useRouter();
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
@@ -354,7 +357,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
                       <TableCell>
                         <div className="flex items-center justify-end gap-1">
                           <Button variant="ghost" size="icon-sm" asChild title="編集">
-                            <Link href={`/manage/contents/${content.id}/edit`}>
+                            <Link href={manageContentsEditHref(content.id, fromBulk)}>
                               <Edit className="h-4 w-4" />
                             </Link>
                           </Button>
@@ -365,7 +368,7 @@ export function ContentsTable({ groups }: ContentsTableProps) {
                             title="削除"
                             className="text-destructive hover:text-destructive"
                           >
-                            <Link href={`/manage/contents/${content.id}/delete`}>
+                            <Link href={manageContentsDeleteHref(content.id, fromBulk)}>
                               <Trash2 className="h-4 w-4" />
                             </Link>
                           </Button>

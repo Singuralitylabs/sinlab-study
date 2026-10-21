@@ -1,9 +1,15 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
-import { WEEKLY_FUNNEL_WEEKS } from "@/app/constants/analytics";
+import { resolveWeeklyFunnelWeeks, WEEKLY_FUNNEL_WEEKS } from "@/app/constants/analytics";
 import { isQuizQuestionType } from "@/app/constants/quiz";
 import { SLIDES_BUCKET } from "@/app/constants/storage";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import {
+  buildContentEngagement,
+  type ContentEngagementResult,
+  type ProgressAggRow,
+  type SubmissionAggRow,
+} from "@/app/lib/content-engagement";
 import { contentTypeStoresTextContent } from "@/app/lib/content-filtering";
 import {
   getSiblingTailId,
@@ -2203,17 +2209,22 @@ export async function fetchStudentsProgress(): Promise<{
 }
 
 interface ManageCounts {
+  /**
+   * `status = active` and `is_deleted = false` (same denominator as content engagement).
+   * Role is not filtered — matches the pre-#468 dashboard definition.
+   */
+  students: number;
+  submissions: number;
+  /** Non-deleted rows, published or not: these describe the structure admins maintain. */
   themes: number;
   phases: number;
   contents: number;
-  students: number;
 }
 
 /**
- * Counts use head + count only (no record bodies). A failed count is returned as 0 so the
- * dashboard still renders.
- * Student count uses service_role: maintainers no longer SELECT `users` (#414); content tables
- * stay on the user JWT (RLS already allows admin/maintainer).
+ * Summary strip for /manage (#468). Head + count only; a failed count is 0 so the dashboard
+ * still renders. Students and submissions use service_role: maintainers no longer SELECT `users`
+ * (#414), and submissions embed users for other screens. Structure counts use the user JWT.
  */
 export async function fetchManageCounts(): Promise<{
   data: ManageCounts;
@@ -2222,7 +2233,7 @@ export async function fetchManageCounts(): Promise<{
   const supabase = await createServerSupabaseClient();
   const admin = await createAdminSupabaseClient();
 
-  const [themes, phases, contents, students] = await Promise.all([
+  const [themes, phases, contents, students, submissions] = await Promise.all([
     supabase
       .from("learning_themes")
       .select("id", { count: "exact", head: true })
@@ -2240,9 +2251,11 @@ export async function fetchManageCounts(): Promise<{
       .select("id", { count: "exact", head: true })
       .eq("status", USER_STATUS.ACTIVE)
       .eq("is_deleted", false),
+    admin.from("submissions").select("id", { count: "exact", head: true }),
   ]);
 
-  const firstError = themes.error ?? phases.error ?? contents.error ?? students.error ?? null;
+  const firstError =
+    themes.error ?? phases.error ?? contents.error ?? students.error ?? submissions.error ?? null;
   if (firstError) {
     console.error("管理ダッシュボード件数取得エラー:", firstError.message);
   }
@@ -2253,6 +2266,7 @@ export async function fetchManageCounts(): Promise<{
       phases: phases.count ?? 0,
       contents: contents.count ?? 0,
       students: students.count ?? 0,
+      submissions: submissions.count ?? 0,
     },
     error: firstError,
   };
@@ -2280,11 +2294,13 @@ interface WeeklyFunnelRpcRow {
  * Check admin/maintainer first, then call with service_role. Do not widen that SELECT
  * policy: maintainers should see aggregates, not every Stripe customer id.
  * A failure returns an empty list so the rest of the dashboard still renders.
+ * `weeks` must already be allowlist-resolved (`resolveWeeklyFunnelWeeks`); RPC still clamps 1–104.
  */
-export async function fetchWeeklyFunnel(): Promise<{
+export async function fetchWeeklyFunnel(weeks: number = WEEKLY_FUNNEL_WEEKS): Promise<{
   data: WeeklyFunnelRow[];
   error: string | null;
 }> {
+  const resolvedWeeks = resolveWeeklyFunnelWeeks(String(weeks));
   try {
     const { userRole } = await getServerAuth();
     if (!checkContentPermissions(userRole)) {
@@ -2293,7 +2309,7 @@ export async function fetchWeeklyFunnel(): Promise<{
 
     const supabase = await createAdminSupabaseClient();
     const { data, error } = (await supabase.rpc("get_weekly_funnel", {
-      weeks: WEEKLY_FUNNEL_WEEKS,
+      weeks: resolvedWeeks,
     })) as unknown as {
       data: WeeklyFunnelRpcRow[] | null;
       error: PostgrestError | null;
@@ -2316,5 +2332,221 @@ export async function fetchWeeklyFunnel(): Promise<{
   } catch (error) {
     console.error("週次ファネル取得エラー:", error);
     return { data: [], error: WEEKLY_FUNNEL_FETCH_ERROR };
+  }
+}
+
+const ENGAGEMENT_PAGE_SIZE = 1000;
+
+export const CONTENT_ENGAGEMENT_FETCH_ERROR = "コンテンツ別の取り組み状況を取得できませんでした";
+
+type EngagementContentRow = {
+  id: number;
+  title: string;
+  content_type: ContentType;
+  display_order: number;
+  phase: {
+    id: number;
+    name: string;
+    display_order: number;
+    theme: {
+      id: number;
+      name: string;
+      display_order: number;
+    } | null;
+  } | null;
+};
+
+/**
+ * Theme → phase → content engagement for /manage (#468). Denominator matches fetchManageCounts
+ * (active, not deleted). Only published, non-deleted contents under published parents.
+ * Progress / submissions use the user JWT (admin/maintainer RLS); student IDs use service_role.
+ * Failure returns null data so other dashboard blocks still render.
+ */
+export async function fetchContentEngagementStats(): Promise<{
+  data: ContentEngagementResult | null;
+  error: string | null;
+}> {
+  try {
+    const { userRole } = await getServerAuth();
+    if (!checkContentPermissions(userRole)) {
+      return { data: null, error: null };
+    }
+
+    const supabase = await createServerSupabaseClient();
+    const admin = await createAdminSupabaseClient();
+
+    const [studentsResult, contentsResult] = await Promise.all([
+      admin
+        .from("users")
+        .select("id")
+        .eq("status", USER_STATUS.ACTIVE)
+        .eq("is_deleted", false)
+        .order("id"),
+      supabase
+        .from("learning_contents")
+        .select(
+          "id, title, content_type, display_order, phase:learning_phases!inner(id, name, display_order, is_published, is_deleted, theme:learning_themes!inner(id, name, display_order, is_published, is_deleted))"
+        )
+        .eq("is_published", true)
+        .eq("is_deleted", false)
+        .eq("phase.is_published", true)
+        .eq("phase.is_deleted", false)
+        .eq("phase.theme.is_published", true)
+        .eq("phase.theme.is_deleted", false)
+        .order("id"),
+    ]);
+
+    if (studentsResult.error) {
+      console.error("取り組み状況: 受講生取得エラー:", studentsResult.error.message);
+      return { data: null, error: CONTENT_ENGAGEMENT_FETCH_ERROR };
+    }
+    if (contentsResult.error) {
+      console.error("取り組み状況: コンテンツ取得エラー:", contentsResult.error.message);
+      return { data: null, error: CONTENT_ENGAGEMENT_FETCH_ERROR };
+    }
+
+    const studentRows = [...(studentsResult.data ?? [])];
+    // PostgREST max-rows: page student ids if the first page is full.
+    if (studentRows.length >= ENGAGEMENT_PAGE_SIZE) {
+      let offset = ENGAGEMENT_PAGE_SIZE;
+      for (;;) {
+        const { data: more, error } = await admin
+          .from("users")
+          .select("id")
+          .eq("status", USER_STATUS.ACTIVE)
+          .eq("is_deleted", false)
+          .order("id")
+          .range(offset, offset + ENGAGEMENT_PAGE_SIZE - 1);
+        if (error) {
+          console.error("取り組み状況: 受講生取得エラー:", error.message);
+          return { data: null, error: CONTENT_ENGAGEMENT_FETCH_ERROR };
+        }
+        const page = more ?? [];
+        studentRows.push(...page);
+        if (page.length < ENGAGEMENT_PAGE_SIZE) break;
+        offset += page.length;
+      }
+    }
+
+    const contentRows = (contentsResult.data ?? []) as unknown as EngagementContentRow[];
+    if (contentRows.length >= ENGAGEMENT_PAGE_SIZE) {
+      let offset = ENGAGEMENT_PAGE_SIZE;
+      for (;;) {
+        const { data: more, error } = await supabase
+          .from("learning_contents")
+          .select(
+            "id, title, content_type, display_order, phase:learning_phases!inner(id, name, display_order, is_published, is_deleted, theme:learning_themes!inner(id, name, display_order, is_published, is_deleted))"
+          )
+          .eq("is_published", true)
+          .eq("is_deleted", false)
+          .eq("phase.is_published", true)
+          .eq("phase.is_deleted", false)
+          .eq("phase.theme.is_published", true)
+          .eq("phase.theme.is_deleted", false)
+          .order("id")
+          .range(offset, offset + ENGAGEMENT_PAGE_SIZE - 1);
+        if (error) {
+          console.error("取り組み状況: コンテンツ取得エラー:", error.message);
+          return { data: null, error: CONTENT_ENGAGEMENT_FETCH_ERROR };
+        }
+        const page = (more ?? []) as unknown as EngagementContentRow[];
+        contentRows.push(...page);
+        if (page.length < ENGAGEMENT_PAGE_SIZE) break;
+        offset += page.length;
+      }
+    }
+
+    const studentIds = new Set(studentRows.map((row) => row.id));
+    const studentTotal = studentIds.size;
+
+    const contentsMeta = contentRows.flatMap((row) => {
+      const phase = row.phase;
+      const theme = phase?.theme;
+      if (!phase || !theme) return [];
+      return [
+        {
+          id: row.id,
+          title: row.title,
+          content_type: row.content_type,
+          display_order: row.display_order,
+          phase_id: phase.id,
+          phase_name: phase.name,
+          phase_order: phase.display_order,
+          theme_id: theme.id,
+          theme_name: theme.name,
+          theme_order: theme.display_order,
+        },
+      ];
+    });
+
+    const contentIdSet = new Set(contentsMeta.map((c) => c.id));
+    const exerciseIds = contentsMeta.filter((c) => c.content_type === "exercise").map((c) => c.id);
+
+    const progressRows: ProgressAggRow[] = [];
+    for (let offset = 0; ; offset += ENGAGEMENT_PAGE_SIZE) {
+      const { data, error } = await supabase
+        .from("user_progress")
+        .select("content_id, user_id, is_completed, last_viewed_at")
+        .order("content_id")
+        .order("user_id")
+        .range(offset, offset + ENGAGEMENT_PAGE_SIZE - 1);
+      if (error) {
+        console.error("取り組み状況: 進捗取得エラー:", error.message);
+        return { data: null, error: CONTENT_ENGAGEMENT_FETCH_ERROR };
+      }
+      const page = (data ?? []) as ProgressAggRow[];
+      for (const row of page) {
+        if (contentIdSet.has(row.content_id)) {
+          progressRows.push(row);
+        }
+      }
+      if (page.length < ENGAGEMENT_PAGE_SIZE) break;
+    }
+
+    const submissionRows: SubmissionAggRow[] = [];
+    if (exerciseIds.length > 0) {
+      for (let offset = 0; ; offset += ENGAGEMENT_PAGE_SIZE) {
+        const { data, error } = await supabase
+          .from("submissions")
+          .select("content_id, user_id, ai_reviews(passed)")
+          .in("content_id", exerciseIds)
+          .order("content_id")
+          .order("user_id")
+          .order("id")
+          .range(offset, offset + ENGAGEMENT_PAGE_SIZE - 1);
+        if (error) {
+          console.error("取り組み状況: 提出取得エラー:", error.message);
+          return { data: null, error: CONTENT_ENGAGEMENT_FETCH_ERROR };
+        }
+        const page = (data ?? []) as unknown as {
+          content_id: number;
+          user_id: number;
+          ai_reviews: { passed: boolean | null } | { passed: boolean | null }[] | null;
+        }[];
+        for (const row of page) {
+          const review = Array.isArray(row.ai_reviews) ? row.ai_reviews[0] : row.ai_reviews;
+          submissionRows.push({
+            content_id: row.content_id,
+            user_id: row.user_id,
+            passed: review?.passed ?? null,
+          });
+        }
+        if (page.length < ENGAGEMENT_PAGE_SIZE) break;
+      }
+    }
+
+    return {
+      data: buildContentEngagement(
+        contentsMeta,
+        studentIds,
+        progressRows,
+        submissionRows,
+        studentTotal
+      ),
+      error: null,
+    };
+  } catch (error) {
+    console.error("取り組み状況取得エラー:", error);
+    return { data: null, error: CONTENT_ENGAGEMENT_FETCH_ERROR };
   }
 }

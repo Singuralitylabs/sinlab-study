@@ -1,4 +1,4 @@
-import { ClipboardList, LayoutDashboard, MessageSquare, Users } from "lucide-react";
+import { ClipboardList, LayoutDashboard, Megaphone, MessageSquare, Users } from "lucide-react";
 import { checkAdminPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { ManageGroupNav } from "../components/ManageGroupNav";
@@ -26,6 +26,11 @@ export default async function ManageStudentsGroupLayout({
       title: "フィードバック",
       href: "/manage/feedbacks",
       icon: <MessageSquare className="h-4 w-4" />,
+    },
+    {
+      title: "お知らせ",
+      href: "/manage/announcements",
+      icon: <Megaphone className="h-4 w-4" />,
     },
     ...(isAdmin
       ? [

@@ -1,16 +1,9 @@
-import { Suspense } from "react";
 import { PageTitle } from "@/app/components/PageTitle";
-import {
-  derivePhaseSelectOptions,
-  filterContents,
-  isContentType,
-} from "@/app/lib/content-filtering";
+import { derivePhaseSelectOptions } from "@/app/lib/content-filtering";
 import {
   compareGroupLevel,
-  groupContentsByPhase,
   sortContentsByHierarchy,
   sortPhasesByHierarchy,
-  toContentTableGroups,
 } from "@/app/lib/content-grouping";
 import { buildContentTree } from "@/app/lib/content-tree";
 import {
@@ -18,74 +11,22 @@ import {
   fetchAllPhases,
   fetchAllThemes,
   fetchContentSiblingCandidates,
-  hasAnyManageContents,
 } from "@/app/services/api/admin-server";
-import type { ManageContentListItem } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Card, CardContent } from "@/components/ui/card";
-import { ContentsFilterBar } from "./ContentsFilterBar";
-import { ContentsTable } from "./ContentsTable";
 import { ContentTree } from "./ContentTree";
 
-interface AdminContentsPageProps {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}
-
-function firstParam(value: string | string[] | undefined): string {
-  return (Array.isArray(value) ? value[0] : value) ?? "";
-}
-
-/** Apply the same structural filters as fetchAllContents SQL, for the bulk-ops table only. */
-function filterContentsByStructure(
-  contents: ManageContentListItem[],
-  filters: {
-    themeId?: string;
-    phaseId?: string;
-    contentType?: ManageContentListItem["content_type"];
-  }
-): ManageContentListItem[] {
-  return contents.filter((content) => {
-    if (filters.contentType && content.content_type !== filters.contentType) return false;
-    if (filters.phaseId && String(content.phase?.id ?? "") !== filters.phaseId) return false;
-    if (filters.themeId && String(content.phase?.theme?.id ?? "") !== filters.themeId) {
-      return false;
-    }
-    return true;
-  });
-}
-
-export default async function AdminContentsPage({ searchParams }: AdminContentsPageProps) {
-  const params = await searchParams;
-  const filters = {
-    theme: firstParam(params.theme),
-    phase: firstParam(params.phase),
-    type: firstParam(params.type),
-    q: firstParam(params.q).trim(),
-  };
-
-  const structuralFilters = {
-    themeId: filters.theme || undefined,
-    phaseId: filters.phase || undefined,
-    contentType: isContentType(filters.type) ? filters.type : undefined,
-  };
-  const hasStructuralFilter = Object.values(structuralFilters).some((value) => value !== undefined);
-  const isFiltered = hasStructuralFilter || filters.q !== "";
-
-  // One unfiltered contents fetch: the tree always shows the full hierarchy; the bulk table
-  // applies structural + title filters in JS (#335 review).
-  const [themesResult, phasesResult, listResult, siblingsResult, anyContentsResult] =
-    await Promise.all([
-      fetchAllThemes(),
-      fetchAllPhases(),
-      fetchAllContents(),
-      fetchContentSiblingCandidates(),
-      hasAnyManageContents(),
-    ]);
+export default async function AdminContentsTreePage() {
+  const [themesResult, phasesResult, listResult, siblingsResult] = await Promise.all([
+    fetchAllThemes(),
+    fetchAllPhases(),
+    fetchAllContents(),
+    fetchContentSiblingCandidates(),
+  ]);
 
   if (themesResult.error || phasesResult.error || listResult.error) {
     return (
       <div className="max-w-6xl mx-auto">
-        <PageTitle title="コンテンツ管理" description="学習コンテンツの構成・作成・編集・削除" />
+        <PageTitle title="構成ツリー" description="テーマ〜コンテンツの構成を編集します" />
         <Alert variant="destructive">
           <AlertDescription>
             コンテンツ構成の取得に失敗しました。時間をおいて再度お試しください。
@@ -98,7 +39,6 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
   const themes = themesResult.data ?? [];
   const phases = phasesResult.data ?? [];
   const contents = listResult.data ?? [];
-  const hasAnyContents = anyContentsResult.data === true;
 
   // Fail closed for create dialogs: missing sibling lists must not open an empty picker (#335 /
   // SiblingOrderField invariant).
@@ -137,21 +77,11 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
         }))
     : [];
 
-  const tableContents = filterContents(
-    filterContentsByStructure(sortedContents, structuralFilters),
-    {
-      q: filters.q || undefined,
-    }
-  );
-  const groups = groupContentsByPhase(tableContents);
-  const tableGroups = toContentTableGroups(groups);
-
   return (
     <div className="max-w-6xl mx-auto space-y-8">
-      <PageTitle title="コンテンツ管理" description="テーマ〜コンテンツの構成を1画面で編集します" />
+      <PageTitle title="構成ツリー" description="テーマ〜コンテンツの構成を1画面で編集します" />
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">構成ツリー</h2>
         {createBlocked && (
           <Alert variant="destructive">
             <AlertDescription>
@@ -169,44 +99,6 @@ export default async function AdminContentsPage({ searchParams }: AdminContentsP
           contentFormPhases={filterOptions.phases}
           formDataReady={formDataReady}
         />
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">コンテンツの一括操作</h2>
-        <p className="text-sm text-muted-foreground">
-          公開・非公開の切り替えや一括削除は、下の一覧から行えます。フィルタは一覧だけに効きます。
-        </p>
-
-        {!hasAnyContents && !anyContentsResult.error ? (
-          <Card>
-            <CardContent className="py-8 text-center">
-              <p className="text-muted-foreground">
-                コンテンツがまだ登録されていません。上のツリーから作成してください。
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            <Suspense fallback={null}>
-              <ContentsFilterBar themes={filterOptions.themes} phases={filterOptions.phases} />
-            </Suspense>
-
-            {groups.length === 0 ? (
-              <Card>
-                <CardContent className="py-8 text-center">
-                  <p className="text-muted-foreground">この条件のコンテンツはありません。</p>
-                  {isFiltered && (
-                    <p className="text-sm text-muted-foreground mt-2">
-                      フィルタを変更してください。
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            ) : (
-              <ContentsTable groups={tableGroups} />
-            )}
-          </>
-        )}
       </section>
     </div>
   );

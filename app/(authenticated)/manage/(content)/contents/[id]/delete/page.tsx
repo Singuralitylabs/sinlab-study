@@ -1,14 +1,27 @@
 import { AlertTriangle } from "lucide-react";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
+import { manageContentsReturnPath } from "@/app/lib/manage-contents-paths";
 import { fetchContentByIdForAdmin } from "@/app/services/api/admin-server";
 import { Card, CardContent } from "@/components/ui/card";
 import { DeleteConfirmButton } from "../../../../components/DeleteConfirmButton";
 
-export default async function DeleteContentPage({ params }: { params: Promise<{ id: string }> }) {
+interface PageProps {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function DeleteContentPage({ params, searchParams }: PageProps) {
   const { id } = await params;
+  const query = await searchParams;
   const contentId = Number.parseInt(id, 10);
   if (Number.isNaN(contentId)) notFound();
+
+  const returnPath = manageContentsReturnPath(firstParam(query.from));
 
   const { data: content } = await fetchContentByIdForAdmin(contentId);
   if (!content) notFound();
@@ -28,7 +41,7 @@ export default async function DeleteContentPage({ params }: { params: Promise<{ 
           </div>
           <DeleteConfirmButton
             deleteUrl={`/api/manage/contents/${contentId}`}
-            backUrl="/manage/contents"
+            backUrl={returnPath}
           />
         </CardContent>
       </Card>

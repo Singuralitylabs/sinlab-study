@@ -35,8 +35,25 @@ export type AnalyticsPropertyKey = (typeof ANALYTICS_PROPERTY_KEYS)[number];
 
 export type AnalyticsProperties = Partial<Record<AnalyticsPropertyKey, string>>;
 
-/** Rows returned by get_weekly_funnel. The screen does not hardcode a different window. */
+/** Default window for get_weekly_funnel on the manage dashboard. */
 export const WEEKLY_FUNNEL_WEEKS = 8;
+
+/** Allowlist for `?weeks=` on /manage. Values outside this list fall back to WEEKLY_FUNNEL_WEEKS. */
+export const WEEKLY_FUNNEL_WEEK_OPTIONS = [8, 26, 52] as const;
+
+export type WeeklyFunnelWeekOption = (typeof WEEKLY_FUNNEL_WEEK_OPTIONS)[number];
+
+export function resolveWeeklyFunnelWeeks(raw: string | string[] | undefined | null): number {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const parsed = Number(value);
+  if (
+    Number.isInteger(parsed) &&
+    (WEEKLY_FUNNEL_WEEK_OPTIONS as readonly number[]).includes(parsed)
+  ) {
+    return parsed;
+  }
+  return WEEKLY_FUNNEL_WEEKS;
+}
 
 const ALLOWED_PROPERTY_KEYS = new Set<string>(ANALYTICS_PROPERTY_KEYS);
 

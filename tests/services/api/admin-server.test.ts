@@ -327,49 +327,58 @@ describe("fetchStudentsProgress", () => {
 });
 
 describe("fetchManageCounts", () => {
-  it("各テーブルの件数を返す（受講生数は service_role）", async () => {
-    const userClient = createMockSupabaseClient({
-      tableResults: {
-        learning_themes: { data: null, error: null, count: 2 },
-        learning_phases: { data: null, error: null, count: 3 },
-        learning_contents: { data: null, error: null, count: 5 },
-      },
-    });
+  function mockClients(overrides: { submissionsError?: typeof dbError } = {}) {
     const adminClient = createMockSupabaseClient({
       tableResults: {
         users: { data: null, error: null, count: 6 },
+        submissions: overrides.submissionsError
+          ? { data: null, error: overrides.submissionsError, count: null }
+          : { data: null, error: null, count: 12 },
       },
     });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(userClient as never);
+    const userClient = createMockSupabaseClient({
+      tableResults: {
+        learning_themes: { data: null, error: null, count: 3 },
+        learning_phases: { data: null, error: null, count: 8 },
+        learning_contents: { data: null, error: null, count: 40 },
+      },
+    });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(adminClient as never);
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(userClient as never);
+    return { adminClient, userClient };
+  }
+
+  it("構成の件数（ユーザーJWT）と受講生数・提出数（service_role）を返す", async () => {
+    const { adminClient, userClient } = mockClients();
 
     const result = await fetchManageCounts();
 
     expect(result.error).toBeNull();
-    expect(result.data).toEqual({ themes: 2, phases: 3, contents: 5, students: 6 });
+    expect(result.data).toEqual({
+      themes: 3,
+      phases: 8,
+      contents: 40,
+      students: 6,
+      submissions: 12,
+    });
     expect(adminClient.from).toHaveBeenCalledWith("users");
+    expect(adminClient.from).toHaveBeenCalledWith("submissions");
+    expect(userClient.from).toHaveBeenCalledWith("learning_themes");
   });
 
   it("一部の件数取得に失敗した場合、失敗分は0としてエラーを返す", async () => {
-    const userClient = createMockSupabaseClient({
-      tableResults: {
-        learning_themes: { data: null, error: null, count: 2 },
-        learning_phases: { data: null, error: dbError, count: null },
-        learning_contents: { data: null, error: null, count: 5 },
-      },
-    });
-    const adminClient = createMockSupabaseClient({
-      tableResults: {
-        users: { data: null, error: null, count: 6 },
-      },
-    });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(userClient as never);
-    vi.mocked(createAdminSupabaseClient).mockResolvedValue(adminClient as never);
+    mockClients({ submissionsError: dbError });
 
     const result = await fetchManageCounts();
 
     expect(result.error).toEqual(dbError);
-    expect(result.data).toEqual({ themes: 2, phases: 0, contents: 5, students: 6 });
+    expect(result.data).toEqual({
+      themes: 3,
+      phases: 8,
+      contents: 40,
+      students: 6,
+      submissions: 0,
+    });
   });
 });
 
@@ -420,6 +429,20 @@ describe("fetchWeeklyFunnel", () => {
       ]);
     }
   );
+
+  it("許可リストの週数を RPC に渡し、許可外は8に丸める", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({ userRole: "admin" } as never);
+    const mockClient = createMockSupabaseClient({
+      rpcResults: { get_weekly_funnel: { data: [], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await fetchWeeklyFunnel(26);
+    expect(mockClient.rpc).toHaveBeenCalledWith("get_weekly_funnel", { weeks: 26 });
+
+    await fetchWeeklyFunnel(99);
+    expect(mockClient.rpc).toHaveBeenCalledWith("get_weekly_funnel", { weeks: 8 });
+  });
 
   it("RPC が失敗しても DB のメッセージは返さず、ダッシュボード用の文言だけを返す", async () => {
     vi.mocked(getServerAuth).mockResolvedValue({ userRole: "admin" } as never);

@@ -1,138 +1,107 @@
 import { BookOpen, ClipboardList, FileText, FolderOpen, Users } from "lucide-react";
 import Link from "next/link";
+import { Suspense } from "react";
 import { PageTitle } from "@/app/components/PageTitle";
-import { formatDate } from "@/app/lib/format-date";
-import { fetchManageCounts, fetchWeeklyFunnel } from "@/app/services/api/admin-server";
-import { fetchRecentSubmissions } from "@/app/services/api/submissions-server";
+import { resolveWeeklyFunnelWeeks } from "@/app/constants/analytics";
+import {
+  fetchContentEngagementStats,
+  fetchManageCounts,
+  fetchWeeklyFunnel,
+} from "@/app/services/api/admin-server";
 import { checkAdminPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
-import { Card, CardContent } from "@/components/ui/card";
+import { ContentEngagementCard } from "../components/ContentEngagementCard";
 import { WeeklyFunnelCard } from "../components/WeeklyFunnelCard";
 
-const RECENT_SUBMISSIONS_LIMIT = 5;
+interface ManageDashboardPageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
 
-export default async function ManageDashboardPage() {
+export default async function ManageDashboardPage({ searchParams }: ManageDashboardPageProps) {
+  const params = await searchParams;
+  const weeks = resolveWeeklyFunnelWeeks(params.weeks);
+
   const { userRole } = await getServerAuth();
   const isAdmin = checkAdminPermissions(userRole);
 
-  const [{ data: counts }, { data: recentSubmissions, count: submissionsCount }, funnel] =
-    await Promise.all([
-      fetchManageCounts(),
-      fetchRecentSubmissions(RECENT_SUBMISSIONS_LIMIT),
-      fetchWeeklyFunnel(),
-    ]);
+  const [{ data: counts }, funnel, engagement] = await Promise.all([
+    fetchManageCounts(),
+    fetchWeeklyFunnel(weeks),
+    fetchContentEngagementStats(),
+  ]);
 
-  const stats = [
+  const summary = [
     {
       title: "テーマ数",
       value: counts.themes,
       href: "/manage/contents",
       icon: FolderOpen,
-      bgClass: "bg-chart-1/10 text-chart-1",
     },
     {
       title: "フェーズ数",
       value: counts.phases,
       href: "/manage/contents",
       icon: BookOpen,
-      bgClass: "bg-chart-3/10 text-chart-3",
     },
     {
       title: "コンテンツ数",
       value: counts.contents,
       href: "/manage/contents",
       icon: FileText,
-      bgClass: "bg-chart-5/10 text-chart-5",
     },
     {
       title: "受講生数",
       value: counts.students,
-      // Spec 6.2: student progress is admin-only; keep the count visible but do not link for
-      // maintainers (#335 review).
       href: isAdmin ? "/manage/students" : null,
       icon: Users,
-      bgClass: "bg-chart-4/10 text-chart-4",
     },
     {
       title: "提出数",
-      value: submissionsCount,
+      value: counts.submissions,
       href: "/manage/submissions",
       icon: ClipboardList,
-      bgClass: "bg-primary/10 text-primary",
     },
   ];
 
   return (
     <div className="max-w-6xl mx-auto">
-      <PageTitle title="ダッシュボード" description="統計サマリーと最近の提出" />
+      <PageTitle title="ダッシュボード" description="受講生サマリーとコンテンツ別の取り組み状況" />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
-        {stats.map((stat) => {
-          const card = (
-            <Card
-              className={
-                stat.href ? "transition-all hover:shadow-md hover:border-primary/20" : undefined
-              }
-            >
-              <CardContent className="pt-6">
-                <div className={`inline-flex p-2 rounded-lg ${stat.bgClass} mb-3`}>
-                  <stat.icon className="h-5 w-5" />
-                </div>
-                <p className="text-2xl font-bold">{stat.value}</p>
-                <p className="text-sm text-muted-foreground">{stat.title}</p>
-              </CardContent>
-            </Card>
+      <div className="mb-8 flex flex-wrap gap-4 rounded-lg border bg-muted/30 px-4 py-3">
+        {summary.map((stat) => {
+          const body = (
+            <div className="flex items-center gap-3">
+              <stat.icon className="h-4 w-4 text-muted-foreground" />
+              <div>
+                <p className="text-xs text-muted-foreground">{stat.title}</p>
+                <p className="text-lg font-semibold leading-none">{stat.value}</p>
+              </div>
+            </div>
           );
-
           if (!stat.href) {
             return (
-              <div key={stat.title} className="block">
-                {card}
+              <div key={stat.title} className="min-w-[8rem]">
+                {body}
               </div>
             );
           }
-
           return (
-            <Link key={stat.title} href={stat.href} className="block group">
-              {card}
+            <Link
+              key={stat.title}
+              href={stat.href}
+              className="min-w-[8rem] rounded-md transition-colors hover:bg-accent/60"
+            >
+              {body}
             </Link>
           );
         })}
       </div>
 
-      <WeeklyFunnelCard rows={funnel.data} errorMessage={funnel.error} />
+      <ContentEngagementCard data={engagement.data} errorMessage={engagement.error} />
 
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold">最近の提出</h2>
-            <Link href="/manage/submissions" className="text-sm text-primary hover:underline">
-              すべて表示
-            </Link>
-          </div>
-
-          {!recentSubmissions || recentSubmissions.length === 0 ? (
-            <p className="text-muted-foreground">まだ提出がありません。</p>
-          ) : (
-            <div className="space-y-3">
-              {recentSubmissions.map((submission) => (
-                <div
-                  key={submission.id}
-                  className="flex items-center justify-between py-2 border-b border-border last:border-0"
-                >
-                  <div>
-                    <p className="font-medium">{submission.user?.display_name}</p>
-                    <p className="text-sm text-muted-foreground">{submission.content?.title}</p>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {submission.submitted_at ? formatDate(submission.submitted_at) : "-"}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <Suspense fallback={null}>
+        <WeeklyFunnelCard rows={funnel.data} errorMessage={funnel.error} weeks={weeks} />
+      </Suspense>
     </div>
   );
 }

@@ -17,6 +17,8 @@ const SELECT_CLASS_NAME =
 interface ContentsFilterBarProps {
   themes: ThemeFilterOption[];
   phases: PhaseFilterOption[];
+  /** List URL that owns the query string (tree vs bulk tab). */
+  basePath: string;
 }
 
 interface ContentsFilterValues {
@@ -32,7 +34,7 @@ interface ContentsFilterValues {
  * filters" link, browser back/forward) and leave a stale selection. Only the title search uses
  * debounced local state, to avoid a URL update per keystroke.
  */
-export function ContentsFilterBar({ themes, phases }: ContentsFilterBarProps) {
+export function ContentsFilterBar({ themes, phases, basePath }: ContentsFilterBarProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -65,9 +67,9 @@ export function ContentsFilterBar({ themes, phases }: ContentsFilterBarProps) {
       const trimmedQ = next.q.trim();
       if (trimmedQ) query.set("q", trimmedQ);
       const queryString = query.toString();
-      router.replace(queryString ? `/manage/contents?${queryString}` : "/manage/contents");
+      router.replace(queryString ? `${basePath}?${queryString}` : basePath);
     },
-    [router]
+    [router, basePath]
   );
 
   function handleThemeChange(value: string) {
