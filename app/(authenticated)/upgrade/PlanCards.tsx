@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronRight } from "lucide-react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
 import { TECH_COMMUNITY_URL } from "@/app/constants/marketing";
 import {
@@ -68,8 +68,22 @@ const PLAN_FEATURES: ReadonlyArray<{
   },
 ];
 
+// Benefits are listed right above; keep this to one line so it does not repeat them.
 const COMMUNITY_CARD_DESCRIPTION =
-  "テックコミュニティ『シンギュラリティ・ラボ』のメンバー向けプランです。勉強会やイベント、現役エンジニアへの相談など、学習コンテンツ以外の特典も受けられます。";
+  "テックコミュニティ『シンギュラリティ・ラボ』のメンバー向けプランです。";
+
+// On sm+ both cards share the grid's row tracks (header, one per feature, bottom) via nested
+// subgrid so every feature row lines up; stacked cards on mobile need no alignment.
+const FEATURE_ROWS = PLAN_FEATURES.length;
+const GRID_ROW_VARS = {
+  "--plan-feature-rows": FEATURE_ROWS,
+  "--plan-body-rows": FEATURE_ROWS + 1,
+  "--plan-card-rows": FEATURE_ROWS + 2,
+} as CSSProperties;
+const CARD_LAYOUT_CLASS =
+  "sm:grid sm:grid-rows-subgrid sm:gap-y-0 sm:[grid-row:span_var(--plan-card-rows)]";
+const BODY_LAYOUT_CLASS =
+  "flex flex-col gap-6 sm:grid sm:grid-rows-subgrid sm:gap-y-0 sm:[grid-row:span_var(--plan-body-rows)]";
 
 type PlanCardsProps = {
   /**
@@ -140,7 +154,7 @@ function PlanCard({
   const isOpenable = Boolean(dialogContent);
 
   const featuresBlock = (
-    <dl className="space-y-3 px-6 text-sm">
+    <dl className="space-y-3 px-6 text-sm sm:grid sm:grid-rows-subgrid sm:[grid-row:span_var(--plan-feature-rows)]">
       {features.map((feature) => (
         <div key={feature.label}>
           <dt className="font-medium text-muted-foreground">{feature.label}</dt>
@@ -151,7 +165,7 @@ function PlanCard({
   );
 
   const header = (
-    <div className="flex flex-col gap-3 px-6">
+    <div className="flex flex-col gap-3 px-6 sm:mb-6">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="space-y-1 min-w-0">
           <p className="text-base font-semibold leading-none">{title}</p>
@@ -198,19 +212,29 @@ function PlanCard({
     </div>
   );
 
+  const hasBottom = Boolean(introBlock || cardFooter);
+  const bottomBlock = (
+    <div className={cn("flex flex-col gap-6 sm:mt-6", !hasBottom && "max-sm:hidden")}>
+      {introBlock}
+      {cardFooter && <div className="space-y-2 px-6">{cardFooter}</div>}
+    </div>
+  );
+
   if (!isOpenable) {
     return (
       <div
         className={cn(
           "bg-card text-card-foreground flex h-full flex-col gap-6 rounded-xl border py-6 shadow-sm",
+          CARD_LAYOUT_CLASS,
           isCurrent && "border-primary ring-2 ring-primary/20"
         )}
         aria-current={isCurrent ? "true" : undefined}
       >
-        {header}
-        {featuresBlock}
-        {introBlock}
-        {cardFooter && <div className="mt-auto space-y-2 px-6 pt-2">{cardFooter}</div>}
+        <div className={BODY_LAYOUT_CLASS}>
+          {header}
+          {featuresBlock}
+        </div>
+        {bottomBlock}
       </div>
     );
   }
@@ -220,6 +244,7 @@ function PlanCard({
       <div
         className={cn(
           "group bg-card text-card-foreground flex h-full flex-col gap-6 rounded-xl border py-6 shadow-sm transition-colors",
+          CARD_LAYOUT_CLASS,
           "has-[>button:hover]:border-primary/60 has-[>button:hover]:bg-accent/40",
           "has-[>button:focus-visible]:border-primary/60 has-[>button:focus-visible]:bg-accent/40",
           isCurrent && "border-primary ring-2 ring-primary/20"
@@ -230,14 +255,16 @@ function PlanCard({
           <button
             type="button"
             aria-label={openLabel}
-            className="flex flex-1 cursor-pointer flex-col gap-6 rounded-xl text-left focus-visible:outline-none"
+            className={cn(
+              BODY_LAYOUT_CLASS,
+              "cursor-pointer rounded-xl text-left focus-visible:outline-none"
+            )}
           >
             {header}
             {featuresBlock}
           </button>
         </DialogTrigger>
-        {introBlock}
-        {cardFooter && <div className="mt-auto space-y-2 px-6 pt-2">{cardFooter}</div>}
+        {bottomBlock}
       </div>
       <DialogContent className="max-h-[min(90vh,40rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
@@ -262,7 +289,7 @@ export function PlanCards({
     generalPriceLabel === undefined ? FALLBACK_GENERAL_PRICE : (generalPriceLabel ?? "—");
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-y-0" style={GRID_ROW_VARS}>
       <PlanCard
         title={GENERAL_LABEL}
         subtitle=""
