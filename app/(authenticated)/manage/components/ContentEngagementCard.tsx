@@ -62,16 +62,16 @@ export function ContentEngagementCard({
                             <TableHead scope="col">コンテンツ</TableHead>
                             <TableHead scope="col">種別</TableHead>
                             <TableHead scope="col" className="text-right">
-                              閲覧
+                              閲覧人数
                             </TableHead>
                             <TableHead scope="col" className="text-right">
-                              完了
+                              完了人数
                             </TableHead>
                             <TableHead scope="col" className="text-right">
                               完了率
                             </TableHead>
                             <TableHead scope="col" className="text-right">
-                              提出
+                              提出人数
                             </TableHead>
                             <TableHead scope="col" className="text-right">
                               合格率

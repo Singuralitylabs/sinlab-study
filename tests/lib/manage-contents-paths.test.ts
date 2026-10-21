@@ -33,6 +33,14 @@ describe("isManageGroupNavActive", () => {
     );
     expect(isManageGroupNavActive("/manage/contents/9/edit", "/manage/contents", hrefs)).toBe(true);
   });
+
+  it("一括操作から開いた編集・削除では一括操作タブがアクティブになる", () => {
+    const edit = "/manage/contents/9/edit";
+    expect(isManageGroupNavActive(edit, "/manage/contents/bulk", hrefs, "bulk")).toBe(true);
+    expect(isManageGroupNavActive(edit, "/manage/contents", hrefs, "bulk")).toBe(false);
+    expect(isManageGroupNavActive(edit, "/manage/contents", hrefs, "tree")).toBe(true);
+    expect(isManageGroupNavActive(edit, "/manage/contents/bulk", hrefs, null)).toBe(false);
+  });
 });
 
 describe("resolveWeeklyFunnelWeeks", () => {
