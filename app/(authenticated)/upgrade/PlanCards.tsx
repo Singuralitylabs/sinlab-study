@@ -2,6 +2,8 @@
 
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
+import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
+import { TECH_COMMUNITY_URL } from "@/app/constants/marketing";
 import {
   DISPLAY_COMMUNITY_MONTHLY_PRICE_JPY,
   DISPLAY_MONTHLY_PRICE_JPY,
@@ -25,6 +27,8 @@ const COMMUNITY_LABEL = USER_MEMBERSHIP_LABELS.community;
 const FALLBACK_GENERAL_PRICE = formatMonthlyJpyPrice(DISPLAY_MONTHLY_PRICE_JPY);
 const COMMUNITY_PRICE = formatMonthlyJpyPrice(DISPLAY_COMMUNITY_MONTHLY_PRICE_JPY);
 
+const AI_REVIEW_FEATURE = `演習ごとに1日${AI_REVIEW_LIMITS.active.perContentPerDay}回まで再レビューできます（お試しは1課題につき${AI_REVIEW_LIMITS.trial.perContentLifetime}回）`;
+
 type FeatureValue = string | readonly string[];
 
 const PLAN_FEATURES: ReadonlyArray<{
@@ -34,13 +38,21 @@ const PLAN_FEATURES: ReadonlyArray<{
 }> = [
   {
     label: "学習コンテンツ",
-    general: "閲覧・演習の提出",
+    general: [
+      "全テーマ・全フェーズのコンテンツを閲覧できます（お試しはお試し公開分のみ）",
+      "全演習に取り組めます",
+    ],
     community: "一般有料会員と同じ",
   },
   {
     label: "AIレビュー",
-    general: "利用可",
-    community: "利用可",
+    general: AI_REVIEW_FEATURE,
+    community: AI_REVIEW_FEATURE,
+  },
+  {
+    label: "もくもく会",
+    general: "もくもく会に参加できます",
+    community: "一般有料会員と同じ",
   },
   {
     label: "コミュニティ特典",
@@ -55,6 +67,9 @@ const PLAN_FEATURES: ReadonlyArray<{
     ],
   },
 ];
+
+const COMMUNITY_CARD_DESCRIPTION =
+  "テックコミュニティ『シンギュラリティ・ラボ』のメンバー向けプランです。勉強会やイベント、現役エンジニアへの相談など、学習コンテンツ以外の特典も受けられます。";
 
 type PlanCardsProps = {
   /**
@@ -97,11 +112,15 @@ type PlanCardProps = {
   /** Reserved height on both cards so price/features align on sm+ (empty string = spacer). */
   subtitle: string;
   price: string;
+  /** Optional intro under the price (community card; #472). Site link stays outside the trigger. */
+  description?: string;
   features: ReadonlyArray<{ label: string; value: FeatureValue }>;
   isCurrent: boolean;
   dialogContent?: ReactNode;
   dialogDescription: string;
   openLabel: string;
+  /** Link outside the dialog trigger so it does not open the modal (#472). */
+  externalLink?: { href: string; label: string };
   cardFooter?: ReactNode;
 };
 
@@ -109,11 +128,13 @@ function PlanCard({
   title,
   subtitle,
   price,
+  description,
   features,
   isCurrent,
   dialogContent,
   dialogDescription,
   openLabel,
+  externalLink,
   cardFooter,
 }: PlanCardProps) {
   const isOpenable = Boolean(dialogContent);
@@ -156,6 +177,22 @@ function PlanCard({
         </div>
       </div>
       <p className="text-2xl font-bold">{price}</p>
+      {description && <p className="text-sm text-muted-foreground">{description}</p>}
+    </div>
+  );
+
+  // Keep the <a> outside the dialog <button> so the community site link does not open the apply
+  // dialog (nested interactive content would also be invalid HTML; #472).
+  const externalLinkBlock = externalLink && (
+    <div className="px-6">
+      <a
+        href={externalLink.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-sm text-primary underline-offset-4 hover:underline"
+      >
+        {externalLink.label}
+      </a>
     </div>
   );
 
@@ -169,33 +206,51 @@ function PlanCard({
         aria-current={isCurrent ? "true" : undefined}
       >
         {header}
+        {externalLinkBlock}
         {featuresBlock}
         {cardFooter && <div className="mt-auto space-y-2 px-6 pt-2">{cardFooter}</div>}
       </div>
     );
   }
 
+  const triggerClassName =
+    "flex flex-1 cursor-pointer flex-col gap-6 rounded-xl text-left focus-visible:outline-none";
+
   return (
     <Dialog>
       <div
         className={cn(
           "group bg-card text-card-foreground flex h-full flex-col gap-6 rounded-xl border py-6 shadow-sm transition-colors",
-          "has-[>button:hover]:border-primary/60 has-[>button:hover]:bg-accent/40",
-          "has-[>button:focus-visible]:border-primary/60 has-[>button:focus-visible]:bg-accent/40",
+          // Community card splits the trigger around the external <a>; general keeps a direct child button.
+          externalLinkBlock
+            ? "has-[button:hover]:border-primary/60 has-[button:hover]:bg-accent/40 has-[button:focus-visible]:border-primary/60 has-[button:focus-visible]:bg-accent/40"
+            : "has-[>button:hover]:border-primary/60 has-[>button:hover]:bg-accent/40 has-[>button:focus-visible]:border-primary/60 has-[>button:focus-visible]:bg-accent/40",
           isCurrent && "border-primary ring-2 ring-primary/20"
         )}
         aria-current={isCurrent ? "true" : undefined}
       >
-        <DialogTrigger asChild>
-          <button
-            type="button"
-            aria-label={openLabel}
-            className="flex flex-1 cursor-pointer flex-col gap-6 rounded-xl text-left focus-visible:outline-none"
-          >
-            {header}
-            {featuresBlock}
-          </button>
-        </DialogTrigger>
+        {externalLinkBlock ? (
+          <>
+            <DialogTrigger asChild>
+              <button type="button" aria-label={openLabel} className={triggerClassName}>
+                {header}
+              </button>
+            </DialogTrigger>
+            {externalLinkBlock}
+            <DialogTrigger asChild>
+              <button type="button" aria-label={openLabel} className={triggerClassName}>
+                {featuresBlock}
+              </button>
+            </DialogTrigger>
+          </>
+        ) : (
+          <DialogTrigger asChild>
+            <button type="button" aria-label={openLabel} className={triggerClassName}>
+              {header}
+              {featuresBlock}
+            </button>
+          </DialogTrigger>
+        )}
         {cardFooter && <div className="mt-auto space-y-2 px-6 pt-2">{cardFooter}</div>}
       </div>
       <DialogContent className="max-h-[min(90vh,40rem)] overflow-y-auto sm:max-w-lg">
@@ -240,6 +295,7 @@ export function PlanCards({
         title={COMMUNITY_LABEL}
         subtitle="（シンラボ会員）"
         price={COMMUNITY_PRICE}
+        description={COMMUNITY_CARD_DESCRIPTION}
         features={PLAN_FEATURES.map((feature) => ({
           label: feature.label,
           value: feature.community,
@@ -248,6 +304,10 @@ export function PlanCards({
         dialogContent={communityDialog}
         dialogDescription="コミュニティ会員プランの内容とお申し込み"
         openLabel={`${COMMUNITY_LABEL}の詳細を開く`}
+        externalLink={{
+          href: TECH_COMMUNITY_URL,
+          label: "シンギュラリティ・ラボについて詳しく見る",
+        }}
       />
     </div>
   );
