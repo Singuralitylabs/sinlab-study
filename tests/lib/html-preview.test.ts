@@ -692,6 +692,12 @@ describe("buildPreviewDocument（React 構成 #475）", () => {
     expect(doc).not.toContain('src="/vendor/');
   });
 
+  it("React 内部のエラーをコンソールへ出す（opaque origin で Script error. になるため）", () => {
+    const doc = buildPreviewDocument([appAlone], { vendorBaseUrl: vendor });
+    expect(doc).toContain("onUncaughtError");
+    expect(doc).toContain("onCaughtError");
+  });
+
   it("2ファイル import と CSS を文書に載せる", () => {
     const doc = buildPreviewDocument(
       [

@@ -688,7 +688,15 @@ try{
   if(!App){
     throw new Error("App has no default export");
   }
-  ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+  // The vendor scripts are cross-origin for this opaque-origin frame, so errors thrown inside React
+  // reach window.onerror as an opaque "Script error."; reporting them here keeps the message.
+  var report=function(err){
+    console.error("[preview] "+(err&&err.message?err.message:String(err)));
+  };
+  ReactDOM.createRoot(document.getElementById("root"),{
+    onUncaughtError:report,
+    onCaughtError:report
+  }).render(React.createElement(App));
 }catch(err){
   console.error("[preview] "+(err&&err.message?err.message:String(err)));
 }
