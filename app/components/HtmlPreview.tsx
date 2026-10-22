@@ -66,9 +66,12 @@ export function HtmlPreview({
       files: CodeFile[];
       previewBaseHtml: string | null;
     };
+    // Opaque-origin srcDoc cannot resolve relative /vendor/... URLs; absolute origin is required.
+    const vendorBaseUrl = typeof window !== "undefined" ? window.location.origin : "";
     return buildPreviewDocument(parsed.files, {
       headPrelude: showConsolePanel ? CONSOLE_BRIDGE : "",
       previewBaseHtml: parsed.previewBaseHtml,
+      vendorBaseUrl,
     });
   }, [debouncedSignature, showConsolePanel]);
 
@@ -88,10 +91,12 @@ export function HtmlPreview({
   }
 
   const runManually = () => {
+    const vendorBaseUrl = typeof window !== "undefined" ? window.location.origin : "";
     setManualDoc(
       buildPreviewDocument(files, {
         headPrelude: CONSOLE_BRIDGE,
         previewBaseHtml,
+        vendorBaseUrl,
       })
     );
     setManualRunId((id) => id + 1);

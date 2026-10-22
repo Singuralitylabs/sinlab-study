@@ -76,6 +76,48 @@ describe("resolvePreviewDisplay", () => {
     }
   });
 
+  it("React 構成（App.jsx / App.js）はプレビューとコンソールが自動オン", () => {
+    const appJsx = { filename: "App.jsx", language: "javascript" };
+    const appJs = { filename: "App.js", language: "javascript" };
+    const child = { filename: "ProductCard.jsx", language: "javascript" };
+    expect(resolvePreviewDisplay({ files: [appJsx] })).toEqual({
+      preview: true,
+      console: true,
+      manualRun: false,
+    });
+    expect(resolvePreviewDisplay({ files: [appJs, css] })).toEqual({
+      preview: true,
+      console: true,
+      manualRun: false,
+    });
+    expect(resolvePreviewDisplay({ files: [appJsx, child, css] })).toEqual({
+      preview: true,
+      console: true,
+      manualRun: false,
+    });
+    // main.js alone stays javascript-only (console, no preview)
+    expect(resolvePreviewDisplay({ files: [js] }).preview).toBe(false);
+    // App.jsx + html leaves the React layout (not only .jsx/.js/.css)
+    expect(
+      resolvePreviewDisplay({
+        files: [appJsx, html],
+      })
+    ).toMatchObject({ preview: true, console: true });
+    expect(previewCapability([appJsx])).toMatchObject({
+      previewAllowed: true,
+      consoleAllowed: true,
+      autoPreview: true,
+    });
+    expect(
+      previewSettingsError({
+        contentType: "exercise",
+        files: [appJsx],
+        showPreview: true,
+        showConsole: true,
+      })
+    ).toBeNull();
+  });
+
   it("管理者がオンとオフを上書きでき、許されないオンは表示しない", () => {
     expect(
       resolvePreviewDisplay({ files: [html], showPreview: true, showConsole: false })
@@ -628,5 +670,101 @@ describe("buildPreviewDocument のコメントの終わり（ブラウザと同�
     expect(html('<!----><!-- <link rel="stylesheet" href="style.css"> --><head></head>')).toBe(
       `<!----><!-- <link rel="stylesheet" href="style.css"> --><head>${P}</head>`
     );
+  });
+});
+
+describe("buildPreviewDocument（React 構成 #475）", () => {
+  const vendor = "https://study.example";
+  const appAlone = f(
+    "App.jsx",
+    "javascript",
+    "export default function App(){ return <h1>Hi</h1>; }"
+  );
+
+  it("単体 App.jsx で root・vendor 絶対 URL・Babel を含む", () => {
+    const doc = buildPreviewDocument([appAlone], { vendorBaseUrl: vendor });
+    expect(doc).toContain('<div id="root"></div>');
+    expect(doc).toContain(`${vendor}/vendor/react/react.production.min.js`);
+    expect(doc).toContain(`${vendor}/vendor/react/react-dom.production.min.js`);
+    expect(doc).toContain(`${vendor}/vendor/react/babel.min.js`);
+    expect(doc).toContain("App.jsx");
+    expect(doc).toContain("createRoot");
+    expect(doc).not.toContain('src="/vendor/');
+  });
+
+  it("2ファイル import と CSS を文書に載せる", () => {
+    const doc = buildPreviewDocument(
+      [
+        f(
+          "App.jsx",
+          "javascript",
+          'import ProductCard from "./ProductCard";\nexport default function App(){ return <ProductCard name="Tea" />; }'
+        ),
+        f(
+          "ProductCard.jsx",
+          "javascript",
+          "export default function ProductCard({ name }){ return <p>{name}</p>; }"
+        ),
+        f("style.css", "css", ".card{color:red}"),
+      ],
+      { vendorBaseUrl: vendor }
+    );
+    expect(doc).toContain("ProductCard.jsx");
+    expect(doc).toContain("./ProductCard");
+    expect(doc).toContain("<style>.card{color:red}</style>");
+  });
+
+  it("欠落 import でも文書は組み立て、require 解決失敗の経路を残す", () => {
+    const doc = buildPreviewDocument(
+      [
+        f(
+          "App.jsx",
+          "javascript",
+          'import Missing from "./Missing";\nexport default function App(){ return <Missing />; }'
+        ),
+      ],
+      { vendorBaseUrl: vendor }
+    );
+    expect(doc).toContain("./Missing");
+    expect(doc).toContain('<div id="root"></div>');
+    expect(doc).toContain("babel.min.js");
+  });
+
+  it("学習者コードの </script と <!-- をエスケープする", () => {
+    const doc = buildPreviewDocument(
+      [
+        f(
+          "App.jsx",
+          "javascript",
+          'export default function App(){ const s = "</script><img>"; const c = "<!--"; return <p>{s}</p>; }'
+        ),
+      ],
+      { vendorBaseUrl: vendor }
+    );
+    expect(doc).toContain("<\\/script");
+    expect(doc).toContain("<\\!--");
+    // The raw sequence must not appear as an HTML end tag that would close the bootstrap script.
+    expect(doc.match(/<\/script>/gi)?.length).toBeGreaterThanOrEqual(1);
+    expect(doc).not.toMatch(/const s = "<\/script>/);
+  });
+
+  it("headPrelude を vendor スクリプトより前に置く", () => {
+    const doc = buildPreviewDocument([appAlone], {
+      headPrelude: "<script>/*bridge*/</script>",
+      vendorBaseUrl: vendor,
+    });
+    const bridgeAt = doc.indexOf("/*bridge*/");
+    const reactAt = doc.indexOf("react.production.min.js");
+    expect(bridgeAt).toBeGreaterThan(-1);
+    expect(reactAt).toBeGreaterThan(bridgeAt);
+  });
+
+  it("main.js のみは React 文書にしない（従来の JS 空ページ）", () => {
+    const doc = buildPreviewDocument([f("main.js", "javascript", "console.log(1)")], {
+      vendorBaseUrl: vendor,
+    });
+    expect(doc).not.toContain("babel.min.js");
+    expect(doc).not.toContain('id="root"');
+    expect(doc).toContain("<script>console.log(1)</script>");
   });
 });

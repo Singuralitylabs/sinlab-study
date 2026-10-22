@@ -47,4 +47,24 @@ describe("HtmlPreview", () => {
     expect(html).not.toContain("コンソールを隠す");
     expect(html).toContain("プレビューを表示");
   });
+
+  it("React 構成ではプレビュー枠とコンソールを出し、sandbox は allow-scripts のみ", () => {
+    const html = render({
+      files: [
+        {
+          filename: "App.jsx",
+          language: "javascript",
+          content: "export default function App(){ return <h1>Hi</h1>; }",
+        },
+      ],
+      showPreviewFrame: true,
+      showConsolePanel: true,
+    });
+    expect(html).toContain('sandbox="allow-scripts"');
+    expect(html).not.toContain("allow-same-origin");
+    expect(html).toContain("h-[360px]");
+    expect(html).toContain("コンソール");
+    expect(html).toContain("プレビュー");
+    expect(html).toContain(PREVIEW_CONSOLE_MESSAGE_TYPE);
+  });
 });

@@ -18,7 +18,8 @@
     "check:comments": "bun scripts/check-comment-only-diff.ts",
     "test:watch": "vitest",
     "test:jsc": "bun test tests/lib/html-preview.test.ts tests/lib/preview-console.test.ts",
-    "test:all": "bun run build && bun run db:types && bun run lint && bun run format && bun run check && bun run test && bun run test:jsc"
+    "test:all": "bun run build && bun run db:types && bun run lint && bun run format && bun run check && bun run test && bun run test:jsc",
+    "vendor:react-preview": "bash scripts/vendor-react-preview.sh"
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",
@@ -58,6 +59,7 @@
   },
   "devDependencies": {
     "@babel/parser": "^8.0.7",
+    "@babel/standalone": "^8.0.7",
     "@biomejs/biome": "^2.5.15",
     "@tailwindcss/postcss": "^4",
     "@tailwindcss/typography": "^0.5.20",
@@ -66,6 +68,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/web-push": "^3.6.4",
+    "esbuild": "^0.28.2",
     "happy-dom": "^21.0.1",
     "supabase": "^2.121.0",
     "tailwindcss": "^4",
