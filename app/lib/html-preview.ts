@@ -9,7 +9,17 @@ const EXTENSION_LANGUAGE: Record<string, PreviewLanguage> = {
   htm: "html",
   css: "css",
   js: "javascript",
+  // React exercises store JSX under the javascript language; the extension fills empty language.
+  jsx: "javascript",
 };
+
+/** Served from `public/vendor/react/` (fixed versions). srcDoc must use absolute URLs (#475). */
+export const PREVIEW_REACT_VENDOR_DIR = "/vendor/react";
+const REACT_VENDOR_FILES = {
+  react: "react.production.min.js",
+  reactDom: "react-dom.production.min.js",
+  babel: "babel.min.js",
+} as const;
 
 export function isPreviewLanguage(language: string | null | undefined): boolean {
   return PREVIEW_LANGUAGES.includes(language as PreviewLanguage);
@@ -58,7 +68,35 @@ export const PREVIEW_EXERCISE_ONLY_MESSAGE = "プレビューとコンソール�
 export const PREVIEW_NOT_ALLOWED_MESSAGE = "このファイル構成ではプレビューを表示できません";
 export const CONSOLE_NOT_ALLOWED_MESSAGE = "このファイル構成ではコンソールを表示できません";
 
-type PreviewLayoutKind = "html" | "javascript" | "css" | "js-css" | "other";
+type PreviewLayoutKind = "html" | "javascript" | "css" | "js-css" | "react" | "other";
+
+function fileExtension(filename: string): string {
+  const name = filename.trim().toLowerCase();
+  const dot = name.lastIndexOf(".");
+  return dot === -1 ? "" : name.slice(dot + 1);
+}
+
+/**
+ * React layout (#475): must include App.jsx or App.js, and every file is only .jsx / .js / .css.
+ * Checked before the language-based kinds so App.js is not classified as javascript-only.
+ */
+function isReactPreviewLayout(files: readonly PreviewLayoutFile[]): boolean {
+  if (files.length === 0) {
+    return false;
+  }
+  let hasApp = false;
+  for (const file of files) {
+    const name = (file.filename ?? "").trim();
+    const ext = fileExtension(name);
+    if (ext !== "js" && ext !== "jsx" && ext !== "css") {
+      return false;
+    }
+    if (name === "App.jsx" || name === "App.js") {
+      hasApp = true;
+    }
+  }
+  return hasApp;
+}
 
 /**
  * Admin layout (filename + language), not the language a learner picks in the form.
@@ -67,6 +105,9 @@ type PreviewLayoutKind = "html" | "javascript" | "css" | "js-css" | "other";
 function classifyPreviewLayout(files: readonly PreviewLayoutFile[]): PreviewLayoutKind {
   if (files.length === 0) {
     return "other";
+  }
+  if (isReactPreviewLayout(files)) {
+    return "react";
   }
   let hasHtml = false;
   let hasCss = false;
@@ -114,6 +155,7 @@ export function previewCapability(
   const hasScaffold = Boolean(options.previewBaseHtml?.trim());
   switch (classifyPreviewLayout(files)) {
     case "html":
+    case "react":
       return {
         autoPreview: true,
         autoConsole: true,
@@ -361,8 +403,13 @@ export function buildPreviewDocument(
   {
     headPrelude = "",
     previewBaseHtml = null,
-  }: { headPrelude?: string; previewBaseHtml?: string | null } = {}
+    vendorBaseUrl = "",
+  }: { headPrelude?: string; previewBaseHtml?: string | null; vendorBaseUrl?: string } = {}
 ): string {
+  if (classifyPreviewLayout(files) === "react") {
+    return buildReactPreviewDocument(files, { headPrelude, vendorBaseUrl });
+  }
+
   const submittedHtml =
     files.find((f) => f.filename.trim().toLowerCase() === "index.html") ??
     files.find((f) => resolveFileLanguage(f) === "html");
@@ -537,4 +584,125 @@ export function buildPreviewDocument(
     deferAt += headInsert.length;
   }
   return withPrelude.slice(0, deferAt) + deferred.join("") + withPrelude.slice(deferAt);
+}
+
+function vendorScriptUrl(vendorBaseUrl: string, file: string): string {
+  const base = vendorBaseUrl.replace(/\/$/, "");
+  return `${base}${PREVIEW_REACT_VENDOR_DIR}/${file}`;
+}
+
+/**
+ * Builds a srcDoc document that loads pinned React / ReactDOM / Babel from this origin, transforms
+ * each .jsx/.js file, resolves relative imports with a tiny require, and mounts App into #root.
+ * headPrelude (console bridge) is placed before the vendor scripts so it can catch transform errors.
+ */
+function buildReactPreviewDocument(
+  files: readonly CodeFile[],
+  { headPrelude = "", vendorBaseUrl = "" }: { headPrelude?: string; vendorBaseUrl?: string }
+): string {
+  const cssFiles = files.filter((f) => fileExtension(f.filename) === "css");
+  const styles = cssFiles
+    .map((f) => `<style>${escapeClosingTag(f.content, "style")}</style>`)
+    .join("");
+  const scriptFiles = files.filter((f) => {
+    const ext = fileExtension(f.filename);
+    return ext === "js" || ext === "jsx";
+  });
+
+  // JSON inside a <script>: escape </script and <!-- so learner source cannot break out of the tag.
+  const sourcesJson = escapeClosingTag(
+    JSON.stringify(Object.fromEntries(scriptFiles.map((f) => [f.filename.trim(), f.content]))),
+    "script"
+  );
+  // CSS is already in <style>; register empty modules so `import "./App.css"` (Vite/CRA style) resolves.
+  const cssModuleNamesJson = escapeClosingTag(
+    JSON.stringify(cssFiles.map((f) => f.filename.trim())),
+    "script"
+  );
+
+  const reactUrl = vendorScriptUrl(vendorBaseUrl, REACT_VENDOR_FILES.react);
+  const reactDomUrl = vendorScriptUrl(vendorBaseUrl, REACT_VENDOR_FILES.reactDom);
+  const babelUrl = vendorScriptUrl(vendorBaseUrl, REACT_VENDOR_FILES.babel);
+
+  // Runs after Babel loads. Kept as an ES5 string so the preview does not depend on the app bundle.
+  const bootstrap = escapeClosingTag(
+    `(function(){
+var sources=${sourcesJson};
+var cssNames=${cssModuleNamesJson};
+var modules={};
+var cache={};
+function normalize(id){
+  if(id==="react")return "react";
+  var name=String(id).replace(/^\\.\\//,"");
+  if(modules[name])return name;
+  if(modules[name+".js"])return name+".js";
+  if(modules[name+".jsx"])return name+".jsx";
+  if(modules[name+".css"])return name+".css";
+  return name;
+}
+function req(id){
+  if(id==="react")return window.React;
+  var name=normalize(id);
+  if(cache[name])return cache[name].exports;
+  var factory=modules[name];
+  if(!factory){
+    throw new Error("Cannot find module '"+id+"'");
+  }
+  var module={exports:{}};
+  cache[name]=module;
+  factory(module,module.exports,req);
+  return module.exports;
+}
+for(var c=0;c<cssNames.length;c++){
+  modules[cssNames[c]]=function(module){module.exports={};};
+}
+var names=Object.keys(sources);
+for(var i=0;i<names.length;i++){
+  (function(filename){
+    var src=sources[filename];
+    try{
+      if(typeof Babel==="undefined"||!Babel.transform){
+        throw new Error("Babel failed to load");
+      }
+      var result=Babel.transform(src,{
+        presets:[["react",{runtime:"classic"}]],
+        plugins:["transform-modules-commonjs"],
+        filename:filename
+      });
+      modules[filename]=new Function("module","exports","require",result.code);
+    }catch(err){
+      console.error("[preview] "+filename+": "+(err&&err.message?err.message:String(err)));
+    }
+  })(names[i]);
+}
+try{
+  if(typeof React==="undefined"||typeof ReactDOM==="undefined"||!ReactDOM.createRoot){
+    throw new Error("React failed to load");
+  }
+  var appName=modules["App.jsx"]?"App.jsx":modules["App.js"]?"App.js":null;
+  if(!appName){
+    throw new Error("App.jsx (or App.js) did not compile");
+  }
+  var exp=req("./"+appName);
+  var App=exp&&(exp.default||exp);
+  if(!App){
+    throw new Error("App has no default export");
+  }
+  // The vendor scripts are cross-origin for this opaque-origin frame, so errors thrown inside React
+  // reach window.onerror as an opaque "Script error."; reporting them here keeps the message.
+  var report=function(err){
+    console.error("[preview] "+(err&&err.message?err.message:String(err)));
+  };
+  ReactDOM.createRoot(document.getElementById("root"),{
+    onUncaughtError:report,
+    onCaughtError:report
+  }).render(React.createElement(App));
+}catch(err){
+  console.error("[preview] "+(err&&err.message?err.message:String(err)));
+}
+})();`,
+    "script"
+  );
+
+  return `<!doctype html><html><head><meta charset="utf-8">${headPrelude}<script src="${reactUrl}"></script><script src="${reactDomUrl}"></script><script src="${babelUrl}"></script>${styles}</head><body><div id="root"></div><script>${bootstrap}</script></body></html>`;
 }

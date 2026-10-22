@@ -13,7 +13,8 @@
       "!**/.next",
       "!**/dist",
       "!**/build",
-      "!**/public/pdf.worker.min.mjs"
+      "!**/public/pdf.worker.min.mjs",
+      "!**/public/vendor"
     ]
   },
   "css": {

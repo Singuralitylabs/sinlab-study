@@ -72,4 +72,26 @@ describe("SubmissionCodeBlock の previewSource", () => {
     });
     expect(html).not.toContain("preview-host");
   });
+
+  it("React 構成（App.jsx）はプレビューとコンソールの両方を出す", () => {
+    const reactFiles = [
+      {
+        filename: "App.jsx",
+        language: "javascript",
+        content: "export default function App(){ return <h1>Hi</h1>; }",
+      },
+    ];
+    const html = render({
+      files: reactFiles,
+      previewSource: {
+        submissionFileSlots: [{ filename: "App.jsx", language: "javascript" }],
+        starterFiles: null,
+        codeLanguage: "javascript",
+        showPreview: null,
+        showConsole: null,
+      },
+    });
+    expect(html).toContain('data-preview="true"');
+    expect(html).toContain('data-console="true"');
+  });
 });
