@@ -47,7 +47,7 @@ const PLAN_FEATURES: ReadonlyArray<{
   {
     label: "AIレビュー",
     general: AI_REVIEW_FEATURE,
-    community: AI_REVIEW_FEATURE,
+    community: "一般有料会員と同じ",
   },
   {
     label: "もくもく会",

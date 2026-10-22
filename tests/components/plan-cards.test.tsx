@@ -152,6 +152,8 @@ describe("PlanCards", () => {
       `演習ごとに1日${AI_REVIEW_LIMITS.active.perContentPerDay}回まで再レビューできます（お試しは1課題につき${AI_REVIEW_LIMITS.trial.perContentLifetime}回）`
     );
     expect(text).toContain("もくもく会に参加できます");
+    // Community repeats learning / AI review / mokumoku as "same as general" instead of restating.
+    expect(text.split("一般有料会員と同じ").length - 1).toBe(3);
   });
 
   it("コミュニティカードに説明とサイトリンクがあり、リンク押下ではダイアログが開かない", async () => {
