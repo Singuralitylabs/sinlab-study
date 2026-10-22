@@ -714,6 +714,25 @@ describe("buildPreviewDocument（React 構成 #475）", () => {
     expect(doc).toContain("<style>.card{color:red}</style>");
   });
 
+  it('import "./App.css" が解決できるよう CSS を空モジュール登録する', () => {
+    const doc = buildPreviewDocument(
+      [
+        f(
+          "App.jsx",
+          "javascript",
+          'import "./App.css";\nexport default function App(){ return <div className="x">Hi</div>; }'
+        ),
+        f("App.css", "css", ".x{color:red}"),
+      ],
+      { vendorBaseUrl: vendor }
+    );
+    expect(doc).toContain("<style>.x{color:red}</style>");
+    expect(doc).toContain("App.css");
+    expect(doc).toContain('modules[name+".css"]');
+    // Source is JSON-embedded; assert the CSS import path survived into the bootstrap.
+    expect(doc).toContain("./App.css");
+  });
+
   it("欠落 import でも文書は組み立て、require 解決失敗の経路を残す", () => {
     const doc = buildPreviewDocument(
       [

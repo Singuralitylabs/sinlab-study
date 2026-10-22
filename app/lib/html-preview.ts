@@ -600,8 +600,8 @@ function buildReactPreviewDocument(
   files: readonly CodeFile[],
   { headPrelude = "", vendorBaseUrl = "" }: { headPrelude?: string; vendorBaseUrl?: string }
 ): string {
-  const styles = files
-    .filter((f) => fileExtension(f.filename) === "css")
+  const cssFiles = files.filter((f) => fileExtension(f.filename) === "css");
+  const styles = cssFiles
     .map((f) => `<style>${escapeClosingTag(f.content, "style")}</style>`)
     .join("");
   const scriptFiles = files.filter((f) => {
@@ -614,6 +614,11 @@ function buildReactPreviewDocument(
     JSON.stringify(Object.fromEntries(scriptFiles.map((f) => [f.filename.trim(), f.content]))),
     "script"
   );
+  // CSS is already in <style>; register empty modules so `import "./App.css"` (Vite/CRA style) resolves.
+  const cssModuleNamesJson = escapeClosingTag(
+    JSON.stringify(cssFiles.map((f) => f.filename.trim())),
+    "script"
+  );
 
   const reactUrl = vendorScriptUrl(vendorBaseUrl, REACT_VENDOR_FILES.react);
   const reactDomUrl = vendorScriptUrl(vendorBaseUrl, REACT_VENDOR_FILES.reactDom);
@@ -623,6 +628,7 @@ function buildReactPreviewDocument(
   const bootstrap = escapeClosingTag(
     `(function(){
 var sources=${sourcesJson};
+var cssNames=${cssModuleNamesJson};
 var modules={};
 var cache={};
 function normalize(id){
@@ -631,6 +637,7 @@ function normalize(id){
   if(modules[name])return name;
   if(modules[name+".js"])return name+".js";
   if(modules[name+".jsx"])return name+".jsx";
+  if(modules[name+".css"])return name+".css";
   return name;
 }
 function req(id){
@@ -645,6 +652,9 @@ function req(id){
   cache[name]=module;
   factory(module,module.exports,req);
   return module.exports;
+}
+for(var c=0;c<cssNames.length;c++){
+  modules[cssNames[c]]=function(module){module.exports={};};
 }
 var names=Object.keys(sources);
 for(var i=0;i<names.length;i++){
