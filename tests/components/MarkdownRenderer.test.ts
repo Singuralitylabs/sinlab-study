@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
+import { MARKDOWN_IMAGE_DEFAULT_MAX_WIDTH_PX } from "@/app/constants/markdown";
 
 describe("MarkdownRenderer", () => {
   it("Markdown中の生HTML（script・onerror属性）をエスケープされたテキストとして描画し、DOMに反映しない", () => {
@@ -122,5 +123,45 @@ describe("MarkdownRenderer", () => {
 
     expect(html).toMatch(/<code>const a = 1;<\/code>/);
     expect(html).toContain('class="hljs language-javascript"');
+  });
+
+  it("指定なしの Markdown 画像は既定の最大幅・中央寄せで描画される", () => {
+    const content = "![図](https://example.com/a.png)";
+
+    const html = renderToStaticMarkup(createElement(MarkdownRenderer, { content }));
+
+    expect(html).toMatch(/<img[^>]*src="https:\/\/example\.com\/a\.png"/);
+    expect(html).toMatch(/\bmx-auto\b/);
+    expect(html).toContain(`max-width:min(100%, ${MARKDOWN_IMAGE_DEFAULT_MAX_WIDTH_PX}px)`);
+    expect(html).not.toMatch(/title=/);
+  });
+
+  it("title の w=数値 で幅を指定でき、title 属性は残らない", () => {
+    const content = '![図](https://example.com/a.png "w=400")';
+
+    const html = renderToStaticMarkup(createElement(MarkdownRenderer, { content }));
+
+    expect(html).toContain("width:400px");
+    expect(html).toContain("max-width:100%");
+    expect(html).not.toMatch(/title=/);
+  });
+
+  it("不正な w= 指定は既定幅に落ち、title も残らない", () => {
+    const content = '![図](https://example.com/a.png "w=abc")';
+
+    const html = renderToStaticMarkup(createElement(MarkdownRenderer, { content }));
+
+    expect(html).toContain(`max-width:min(100%, ${MARKDOWN_IMAGE_DEFAULT_MAX_WIDTH_PX}px)`);
+    expect(html).not.toContain("width:abc");
+    expect(html).not.toMatch(/title=/);
+  });
+
+  it("通常の title はツールチップ用に残り、幅は既定", () => {
+    const content = '![図](https://example.com/a.png "キャプション")';
+
+    const html = renderToStaticMarkup(createElement(MarkdownRenderer, { content }));
+
+    expect(html).toContain('title="キャプション"');
+    expect(html).toContain(`max-width:min(100%, ${MARKDOWN_IMAGE_DEFAULT_MAX_WIDTH_PX}px)`);
   });
 });
