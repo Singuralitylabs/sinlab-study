@@ -397,10 +397,19 @@ const RELATIVE_IMPORT = /(\bfrom\s*|\bimport\s*)(["'])(\.{1,2}\/[^"'\n]+)\2/g;
 const dataModuleUrl = (source: string) =>
   `data:text/javascript;charset=utf-8,${encodeURIComponent(source).replace(/'/g, "%27")}`;
 
-/** Blanks comments (same length) so a commented-out import is not mistaken for a real one. */
-function blankComments(source: string): string {
+/** Last token before a "/" that makes it a regex literal rather than a division. */
+const REGEX_CONTEXT =
+  /(?:^|[(,=:[!&|?{};+\-*%<>~^]|\b(?:return|typeof|case|in|of|delete|void|throw|new))\s*$/;
+
+/**
+ * Blanks comments, regex literals and string contents (same length) so an import-looking text in
+ * them is not mistaken for a real one. A string right after `from` / `import` is the specifier
+ * and is kept. Template literals are blanked whole, so a `${}` body is not scanned.
+ */
+function maskNonCode(source: string): string {
   let out = "";
   let i = 0;
+  const blank = (text: string) => text.replace(/[^\n]/g, " ");
   while (i < source.length) {
     const c = source[i];
     const next = source[i + 1];
@@ -409,7 +418,8 @@ function blankComments(source: string): string {
       while (j < source.length && source[j] !== c && (c === "`" || source[j] !== "\n")) {
         j += source[j] === "\\" ? 2 : 1;
       }
-      out += source.slice(i, j + 1);
+      const literal = source.slice(i, j + 1);
+      out += c !== "`" && /\b(?:from|import)\s*$/.test(out) ? literal : blank(literal);
       i = j + 1;
     } else if (c === "/" && next === "/") {
       const j = source.indexOf("\n", i);
@@ -419,8 +429,19 @@ function blankComments(source: string): string {
     } else if (c === "/" && next === "*") {
       const j = source.indexOf("*/", i + 2);
       const end = j === -1 ? source.length : j + 2;
-      out += source.slice(i, end).replace(/[^\n]/g, " ");
+      out += blank(source.slice(i, end));
       i = end;
+    } else if (c === "/" && REGEX_CONTEXT.test(out)) {
+      let j = i + 1;
+      let inClass = false;
+      while (j < source.length && source[j] !== "\n" && (inClass || source[j] !== "/")) {
+        if (source[j] === "\\") j += 1;
+        else if (source[j] === "[") inClass = true;
+        else if (source[j] === "]") inClass = false;
+        j += 1;
+      }
+      out += blank(source.slice(i, j + 1));
+      i = j + 1;
     } else {
       out += c;
       i += 1;
@@ -438,7 +459,7 @@ interface RelativeImport {
 }
 
 function findRelativeImports(source: string): RelativeImport[] {
-  return [...blankComments(source).matchAll(RELATIVE_IMPORT)].map((m) => ({
+  return [...maskNonCode(source).matchAll(RELATIVE_IMPORT)].map((m) => ({
     index: m.index,
     length: m[0].length,
     head: m[1],
@@ -542,7 +563,7 @@ export function buildPreviewDocument(
     const css = files.filter((f) => resolveFileLanguage(f) === "css");
     const js = files.filter((f) => resolveFileLanguage(f) === "javascript");
     const styles = css.map((f) => `<style>${escapeClosingTag(f.content, "style")}</style>`);
-    const scripts = js.some((f) => MODULE_SYNTAX.test(f.content))
+    const scripts = js.some((f) => MODULE_SYNTAX.test(maskNonCode(f.content)))
       ? [buildModuleScript(js)]
       : js.map((f) => `<script>${escapeClosingTag(f.content, "script")}</script>`);
     return `<!doctype html><html><head><meta charset="utf-8">${headPrelude}${styles.join("")}</head><body>${scripts.join("")}</body></html>`;

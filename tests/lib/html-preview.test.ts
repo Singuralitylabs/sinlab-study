@@ -289,6 +289,33 @@ describe("buildPreviewDocument", () => {
     expect(doc).not.toContain('"./store.js"');
   });
 
+  it("does not treat commented-out import lines, strings or regex literals as modules", () => {
+    const blockComment = buildPreviewDocument([
+      f("util.js", "javascript", "function greet() {}"),
+      f("main.js", "javascript", '/*\nimport { greet } from "./util.js";\n*/\ngreet();'),
+    ]);
+    expect(blockComment).not.toContain('type="module"');
+    const inString = buildPreviewDocument([
+      f("a.js", "javascript", "export const a = 1;"),
+      f(
+        "main.js",
+        "javascript",
+        'import { a } from "./a.js";\nconsole.log("loaded from \'./data.js\'", a);'
+      ),
+    ]);
+    expect(inString).not.toContain("Cannot find module");
+    const regex = buildPreviewDocument([
+      f("a.js", "javascript", "export const a = 1;"),
+      f(
+        "main.js",
+        "javascript",
+        'import { a } from "./a.js";\nconst r = /`/g; // import "./nope.js";\nconsole.log(a, r);'
+      ),
+    ]);
+    expect(regex).not.toContain("Cannot find module");
+    expect(regex).toContain('type="module"');
+  });
+
   it("keeps classic scripts for javascript-only submissions without import/export", () => {
     const doc = buildPreviewDocument([
       f("a.js", "javascript", "const exported = 1; // import is a word"),
