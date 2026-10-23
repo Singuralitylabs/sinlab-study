@@ -130,7 +130,7 @@ export function ExerciseCompletionStatus({
       )}
       {userStatus === USER_STATUS.ACTIVE && (
         <p>
-          {`不合格が続くと、この課題の AI レビューは 1 日 ${AI_REVIEW_LIMITS.active.perContentPerDay} 回までのため、その日のうちは完了できないことがあります。`}
+          {`不合格が続くと、AI レビューは 1 課題につき 1 日 ${AI_REVIEW_LIMITS.active.perContentPerDay} 回、全課題の合計で 1 日 ${AI_REVIEW_LIMITS.active.perDay} 回までのため、その日のうちは完了できないことがあります。`}
         </p>
       )}
     </div>

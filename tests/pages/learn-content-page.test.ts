@@ -790,7 +790,7 @@ describe("演習ページのAIレビュー残り回数（#304）", () => {
 
     const html = await render();
 
-    expect(html).toContain("AIレビューは新しい提出に対して1日");
+    expect(html).toContain("AIレビューは新しい提出に対して1課題につき1日");
     expect(html).not.toContain("本日の残り回数");
   });
 

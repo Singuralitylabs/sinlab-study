@@ -97,7 +97,16 @@ export function computeRemainingReviews({
 }
 
 export function trialLimitMessage(): string {
-  return `お試しプランでは AI レビューは 1 課題につき ${AI_REVIEW_LIMITS.trial.perContentLifetime} 回です。有料会員は 1 日 ${AI_REVIEW_LIMITS.active.perContentPerDay} 回まで再レビューできます`;
+  return `お試しプランでは AI レビューは 1 課題につき ${AI_REVIEW_LIMITS.trial.perContentLifetime} 回です。有料会員は ${activeLimitSummary()}まで再レビューできます`;
+}
+
+/** Both active caps in one phrase; the per-day total is shared across every exercise. */
+export function activeLimitSummary(): string {
+  return `1課題につき1日${AI_REVIEW_LIMITS.active.perContentPerDay}回、全課題の合計で1日${AI_REVIEW_LIMITS.active.perDay}回`;
+}
+
+export function isDailyTotalReached(todayTotal: number): boolean {
+  return todayTotal >= AI_REVIEW_LIMITS.active.perDay;
 }
 
 function contentDailyMessage(): string {

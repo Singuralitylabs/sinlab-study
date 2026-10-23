@@ -238,7 +238,7 @@ describe("evaluateReviewRequest - trial", () => {
       message: trialLimitMessage(),
     });
     expect(trialLimitMessage()).toBe(
-      "お試しプランでは AI レビューは 1 課題につき 1 回です。有料会員は 1 日 2 回まで再レビューできます"
+      "お試しプランでは AI レビューは 1 課題につき 1 回です。有料会員は 1課題につき1日2回、全課題の合計で1日10回まで再レビューできます"
     );
   });
 
