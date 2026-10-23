@@ -389,6 +389,52 @@ function isClosed(match: string): boolean {
   return match.endsWith(">");
 }
 
+const MODULE_SYNTAX =
+  /^[ \t]*(?:import\s*(?:[\w${}*,\s]+\s+from\s*)?["']|export\s+(?:default\b|const\b|let\b|var\b|function\b|class\b|async\b|\{|\*))/m;
+const RELATIVE_IMPORT = /(\bfrom\s*|\bimport\s*)(["'])(\.{1,2}\/[^"'\n]+)\2/g;
+
+/**
+ * JS-only submissions with import/export cannot run as classic scripts (SyntaxError), and the
+ * opaque-origin srcDoc has no URL to resolve "./cart.js" against. Each dependency becomes a data:
+ * module and the specifiers are rewritten to it in dependency order, because a data: referrer
+ * cannot resolve relative specifiers (so an import map would only cover the entry file).
+ * Unresolvable or cyclic imports are left as written and surface as a console error.
+ */
+function buildModuleScript(js: readonly CodeFile[]): string {
+  const byName = new Map(js.map((f) => [f.filename.trim().replace(/^\.\//, ""), f]));
+  const resolve = (spec: string): CodeFile | undefined => {
+    const name = spec.replace(/^\.\//, "");
+    return byName.get(name) ?? byName.get(`${name}.js`);
+  };
+  const urls = new Map<CodeFile, string>();
+  const visiting = new Set<CodeFile>();
+  const toSource = (file: CodeFile): string => {
+    visiting.add(file);
+    const source = file.content.replace(RELATIVE_IMPORT, (match, head, quote, spec) => {
+      const dep = resolve(spec);
+      if (!dep || visiting.has(dep)) return match;
+      if (!urls.has(dep)) {
+        urls.set(dep, `data:text/javascript;charset=utf-8,${encodeURIComponent(toSource(dep))}`);
+      }
+      return `${head}${quote}${urls.get(dep)}${quote}`;
+    });
+    visiting.delete(file);
+    return source;
+  };
+  const imported = new Set<CodeFile>();
+  for (const file of js) {
+    for (const m of file.content.matchAll(RELATIVE_IMPORT)) {
+      const dep = resolve(m[3]);
+      if (dep && dep !== file) imported.add(dep);
+    }
+  }
+  const entry =
+    js.find((f) => f.filename.trim().toLowerCase() === "main.js") ??
+    [...js].reverse().find((f) => !imported.has(f)) ??
+    js[js.length - 1];
+  return `<script type="module">${escapeClosingTag(toSource(entry), "script")}</script>`;
+}
+
 /**
  * Builds one HTML document from a submission's files. Same-name references (`<link
  * rel="stylesheet" href="style.css">`, `<script src="main.js">`) are inlined because the sandboxed
@@ -430,7 +476,9 @@ export function buildPreviewDocument(
     const css = files.filter((f) => resolveFileLanguage(f) === "css");
     const js = files.filter((f) => resolveFileLanguage(f) === "javascript");
     const styles = css.map((f) => `<style>${escapeClosingTag(f.content, "style")}</style>`);
-    const scripts = js.map((f) => `<script>${escapeClosingTag(f.content, "script")}</script>`);
+    const scripts = js.some((f) => MODULE_SYNTAX.test(f.content))
+      ? [buildModuleScript(js)]
+      : js.map((f) => `<script>${escapeClosingTag(f.content, "script")}</script>`);
     return `<!doctype html><html><head><meta charset="utf-8">${headPrelude}${styles.join("")}</head><body>${scripts.join("")}</body></html>`;
   }
 

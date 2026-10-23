@@ -227,6 +227,36 @@ describe("buildPreviewDocument", () => {
     expect(js).not.toContain("<style");
   });
 
+  it("runs javascript-only import/export submissions as a module graph", () => {
+    const doc = buildPreviewDocument([
+      f("cart.js", "javascript", "export const add = (a, b) => a + b;"),
+      f("main.js", "javascript", 'import { add } from "./cart.js";\nconsole.log(add(1, 2));'),
+    ]);
+    expect(doc.match(/<script/g)).toHaveLength(1);
+    expect(doc).toContain('<script type="module">');
+    expect(doc).not.toContain('"./cart.js"');
+    expect(doc).toContain("data:text/javascript;charset=utf-8,export%20const%20add");
+  });
+
+  it("resolves nested imports and leaves cycles and missing files as written", () => {
+    const doc = buildPreviewDocument([
+      f("a.js", "javascript", 'import { b } from "./b";\nexport const a = b;'),
+      f("b.js", "javascript", 'import { a } from "./a.js";\nexport const b = 1;'),
+      f("main.js", "javascript", 'import { a } from "./a.js";\nimport "./nope.js";'),
+    ]);
+    expect(doc).toContain('"./nope.js"');
+    expect(decodeURIComponent(decodeURIComponent(doc))).toContain('from "./a.js"');
+  });
+
+  it("keeps classic scripts for javascript-only submissions without import/export", () => {
+    const doc = buildPreviewDocument([
+      f("a.js", "javascript", "const exported = 1; // import is a word"),
+      f("main.js", "javascript", "run()"),
+    ]);
+    expect(doc).not.toContain('type="module"');
+    expect(doc.match(/<script>/g)).toHaveLength(2);
+  });
+
   it("applies CSS-only submissions onto previewBaseHtml scaffold (#351)", () => {
     const doc = buildPreviewDocument([f("style.css", "css", ".box{color:red}")], {
       previewBaseHtml:
