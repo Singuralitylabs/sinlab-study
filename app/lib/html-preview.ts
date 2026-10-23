@@ -393,17 +393,67 @@ const MODULE_SYNTAX =
   /^[ \t]*(?:import\s*(?:[\w${}*,\s]+\s+from\s*)?["']|export\s+(?:default\b|const\b|let\b|var\b|function\b|class\b|async\b|\{|\*))/m;
 const RELATIVE_IMPORT = /(\bfrom\s*|\bimport\s*)(["'])(\.{1,2}\/[^"'\n]+)\2/g;
 
+// encodeURIComponent leaves ' alone, which would end a single-quoted import specifier early.
+const dataModuleUrl = (source: string) =>
+  `data:text/javascript;charset=utf-8,${encodeURIComponent(source).replace(/'/g, "%27")}`;
+
+/** Blanks comments (same length) so a commented-out import is not mistaken for a real one. */
+function blankComments(source: string): string {
+  let out = "";
+  let i = 0;
+  while (i < source.length) {
+    const c = source[i];
+    const next = source[i + 1];
+    if (c === '"' || c === "'" || c === "`") {
+      let j = i + 1;
+      while (j < source.length && source[j] !== c && (c === "`" || source[j] !== "\n")) {
+        j += source[j] === "\\" ? 2 : 1;
+      }
+      out += source.slice(i, j + 1);
+      i = j + 1;
+    } else if (c === "/" && next === "/") {
+      const j = source.indexOf("\n", i);
+      const end = j === -1 ? source.length : j;
+      out += " ".repeat(end - i);
+      i = end;
+    } else if (c === "/" && next === "*") {
+      const j = source.indexOf("*/", i + 2);
+      const end = j === -1 ? source.length : j + 2;
+      out += source.slice(i, end).replace(/[^\n]/g, " ");
+      i = end;
+    } else {
+      out += c;
+      i += 1;
+    }
+  }
+  return out.slice(0, source.length);
+}
+
+interface RelativeImport {
+  index: number;
+  length: number;
+  head: string;
+  quote: string;
+  spec: string;
+}
+
+function findRelativeImports(source: string): RelativeImport[] {
+  return [...blankComments(source).matchAll(RELATIVE_IMPORT)].map((m) => ({
+    index: m.index,
+    length: m[0].length,
+    head: m[1],
+    quote: m[2],
+    spec: m[3],
+  }));
+}
+
 /**
  * JS-only submissions with import/export cannot run as classic scripts (SyntaxError), and the
  * opaque-origin srcDoc has no URL to resolve "./cart.js" against. Each dependency becomes a data:
  * module and the specifiers are rewritten to it in dependency order, because a data: referrer
  * cannot resolve relative specifiers (so an import map would only cover the entry file).
- * Unresolvable or cyclic imports are left as written and surface as a console error.
+ * Cyclic imports are left as written and surface as a browser error; a missing file throws.
  */
-// encodeURIComponent leaves ' alone, which would end a single-quoted import specifier early.
-const dataModuleUrl = (source: string) =>
-  `data:text/javascript;charset=utf-8,${encodeURIComponent(source).replace(/'/g, "%27")}`;
-
 function buildModuleScript(js: readonly CodeFile[]): string {
   const byName = new Map(js.map((f) => [f.filename.trim().replace(/^\.\//, ""), f]));
   const resolve = (spec: string): CodeFile | undefined => {
@@ -415,24 +465,25 @@ function buildModuleScript(js: readonly CodeFile[]): string {
   const visiting = new Set<CodeFile>();
   const toSource = (file: CodeFile): string => {
     visiting.add(file);
-    const source = file.content.replace(RELATIVE_IMPORT, (match, head, quote, spec) => {
-      const dep = resolve(spec);
-      if (dep && visiting.has(dep)) return match;
+    let source = file.content;
+    for (const imp of findRelativeImports(file.content).reverse()) {
+      const dep = resolve(imp.spec);
       if (!dep) {
-        missing.push(spec);
-        return match;
+        missing.push(imp.spec);
+        continue;
       }
-      const key = dep;
-      if (!urls.has(key)) urls.set(key, dataModuleUrl(toSource(dep)));
-      return `${head}${quote}${urls.get(key)}${quote}`;
-    });
+      if (visiting.has(dep)) continue;
+      if (!urls.has(dep)) urls.set(dep, dataModuleUrl(toSource(dep)));
+      const rewritten = `${imp.head}${imp.quote}${urls.get(dep)}${imp.quote}`;
+      source = source.slice(0, imp.index) + rewritten + source.slice(imp.index + imp.length);
+    }
     visiting.delete(file);
     return source;
   };
   const imported = new Set<CodeFile>();
   for (const file of js) {
-    for (const m of file.content.matchAll(RELATIVE_IMPORT)) {
-      const dep = resolve(m[3]);
+    for (const imp of findRelativeImports(file.content)) {
+      const dep = resolve(imp.spec);
       if (dep && dep !== file) imported.add(dep);
     }
   }

@@ -275,6 +275,20 @@ describe("buildPreviewDocument", () => {
     expect(doc).not.toContain("'hi'");
   });
 
+  it("ignores commented-out imports but not specifiers that merely contain //", () => {
+    const doc = buildPreviewDocument([
+      f("store.js", "javascript", "export const add = (a, b) => a + b;"),
+      f(
+        "main.js",
+        "javascript",
+        '// import { add } from "./cart.js";\n/* import "./gone.js"; */\nimport { add } from "./store.js";\nconsole.log("http://x", add(1, 2));'
+      ),
+    ]);
+    expect(doc).not.toContain("Cannot find module");
+    expect(doc).toContain('type="module"');
+    expect(doc).not.toContain('"./store.js"');
+  });
+
   it("keeps classic scripts for javascript-only submissions without import/export", () => {
     const doc = buildPreviewDocument([
       f("a.js", "javascript", "const exported = 1; // import is a word"),
