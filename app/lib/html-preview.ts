@@ -410,20 +410,20 @@ function buildModuleScript(js: readonly CodeFile[]): string {
     const name = spec.replace(/^\.\//, "");
     return byName.get(name) ?? byName.get(`${name}.js`);
   };
-  const urls = new Map<CodeFile | string, string>();
+  const urls = new Map<CodeFile, string>();
+  const missing: string[] = [];
   const visiting = new Set<CodeFile>();
   const toSource = (file: CodeFile): string => {
     visiting.add(file);
     const source = file.content.replace(RELATIVE_IMPORT, (match, head, quote, spec) => {
       const dep = resolve(spec);
-      if (visiting.has(dep as CodeFile)) return match;
-      // A missing file would be fetched from the app origin and fail silently (the error fires on
-      // the <script> element, not window); a throwing module reports it in the console instead.
-      const source = dep
-        ? toSource(dep)
-        : `throw new Error(${JSON.stringify(`Cannot find module '${spec}'`)});`;
-      const key = dep ?? spec;
-      if (!urls.has(key)) urls.set(key, dataModuleUrl(source));
+      if (dep && visiting.has(dep)) return match;
+      if (!dep) {
+        missing.push(spec);
+        return match;
+      }
+      const key = dep;
+      if (!urls.has(key)) urls.set(key, dataModuleUrl(toSource(dep)));
       return `${head}${quote}${urls.get(key)}${quote}`;
     });
     visiting.delete(file);
@@ -440,7 +440,14 @@ function buildModuleScript(js: readonly CodeFile[]): string {
     js.find((f) => f.filename.trim().toLowerCase() === "main.js") ??
     [...js].reverse().find((f) => !imported.has(f)) ??
     js[js.length - 1];
-  return `<script type="module">${escapeClosingTag(toSource(entry), "script")}</script>`;
+  const entrySource = toSource(entry);
+  if (missing.length > 0) {
+    // A missing file would be fetched from the app origin and fail silently (the error fires on
+    // the <script> element, not window), and a stub module fails at link time for named imports.
+    const message = `Cannot find module '${missing[0]}'`;
+    return `<script>throw new Error(${JSON.stringify(message)});</script>`;
+  }
+  return `<script type="module">${escapeClosingTag(entrySource, "script")}</script>`;
 }
 
 /**

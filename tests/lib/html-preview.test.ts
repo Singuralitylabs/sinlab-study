@@ -238,24 +238,41 @@ describe("buildPreviewDocument", () => {
     expect(doc).toContain("data:text/javascript;charset=utf-8,export%20const%20add");
   });
 
-  it("resolves nested imports and leaves cycles as written", () => {
+  it("throws for a missing import instead of building the module graph", () => {
     const doc = buildPreviewDocument([
       f("a.js", "javascript", 'import { b } from "./b";\nexport const a = b;'),
       f("b.js", "javascript", 'import { a } from "./a.js";\nexport const b = 1;'),
       f("main.js", "javascript", 'import { a } from "./a.js";\nimport "./nope.js";'),
     ]);
-    expect(decodeURIComponent(doc)).toContain("Cannot find module './nope.js'");
+    expect(doc).toContain("Cannot find module './nope.js'");
+    expect(doc).not.toContain("data:text");
+  });
+
+  it("reports a missing named-import file as a thrown error", () => {
+    const doc = buildPreviewDocument([
+      f("cart.js", "javascript", "export const add = 1;"),
+      f("main.js", "javascript", 'import { add } from "./Cart.js";'),
+    ]);
+    expect(doc).toContain("<script>throw new Error(");
+    expect(doc).toContain("Cannot find module './Cart.js'");
+  });
+
+  it("resolves nested imports and leaves cycles as written", () => {
+    const doc = buildPreviewDocument([
+      f("a.js", "javascript", 'import { b } from "./b";\nexport const a = b;'),
+      f("b.js", "javascript", 'import { a } from "./a.js";\nexport const b = 1;'),
+      f("main.js", "javascript", 'import { a } from "./a.js";'),
+    ]);
     expect(decodeURIComponent(decodeURIComponent(doc))).toContain('from "./a.js"');
   });
 
-  it("encodes single quotes and turns missing imports into a console error", () => {
+  it("encodes single quotes in imported sources", () => {
     const doc = buildPreviewDocument([
       f("cart.js", "javascript", "export const msg = 'hi';"),
-      f("main.js", "javascript", "import { msg } from './cart.js';\nimport './Cart2.js';"),
+      f("main.js", "javascript", "import { msg } from './cart.js';"),
     ]);
     expect(doc).toContain("%27hi%27");
     expect(doc).not.toContain("'hi'");
-    expect(decodeURIComponent(doc)).toContain("Cannot find module './Cart2.js'");
   });
 
   it("keeps classic scripts for javascript-only submissions without import/export", () => {
