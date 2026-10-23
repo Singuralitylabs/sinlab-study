@@ -149,7 +149,7 @@ describe("PlanCards", () => {
     );
     expect(text).toContain("全演習に取り組めます");
     expect(text).toContain(
-      `演習ごとに1日${AI_REVIEW_LIMITS.active.perContentPerDay}回まで再レビューできます（お試しは1課題につき${AI_REVIEW_LIMITS.trial.perContentLifetime}回）`
+      `新しい提出ごとに再レビューできます（1課題につき1日${AI_REVIEW_LIMITS.active.perContentPerDay}回、全課題の合計で1日${AI_REVIEW_LIMITS.active.perDay}回まで。お試しは1課題につき${AI_REVIEW_LIMITS.trial.perContentLifetime}回）`
     );
     expect(text).toContain("もくもく会に参加できます");
     // Community repeats learning / AI review / mokumoku as "same as general" instead of restating.

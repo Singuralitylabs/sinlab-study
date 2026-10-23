@@ -36,7 +36,7 @@ export const PLAN_PAGE_TITLE = "プランの確認・変更";
  */
 export const UPGRADE_BENEFITS = [
   "すべての学習コンテンツ",
-  `演習のAIレビュー（1日${AI_REVIEW_LIMITS.active.perContentPerDay}回まで再レビュー）`,
+  `演習のAIレビュー（${AI_REVIEW_LIMITS.active.perContentPerDay}回/課題/日、全課題の合計で${AI_REVIEW_LIMITS.active.perDay}回/日まで）`,
   "もくもく会への参加",
 ] as const;
 

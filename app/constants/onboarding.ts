@@ -31,7 +31,7 @@ export const WELCOME_DIALOG_STEPS: readonly WelcomeDialogStep[] = [
   {
     id: "how-to-learn",
     title: "学習の進め方",
-    body: `動画・テキスト・スライドを見たら「完了」ボタンで進捗を記録します。演習はコードまたはURLを提出でき、提出後にAIレビューを受けられます（お試しは${AI_REVIEW_LIMITS.trial.perContentLifetime}回、有料会員は1日${AI_REVIEW_LIMITS.active.perContentPerDay}回までです）。`,
+    body: `動画・テキスト・スライドを見たら「完了」ボタンで進捗を記録します。演習はコードまたはURLを提出でき、提出後にAIレビューを受けられます（お試しは${AI_REVIEW_LIMITS.trial.perContentLifetime}回、有料会員は1課題につき1日${AI_REVIEW_LIMITS.active.perContentPerDay}回、全課題の合計で1日${AI_REVIEW_LIMITS.active.perDay}回までです）。`,
     trialOnly: false,
     showsUpgradeLink: false,
   },

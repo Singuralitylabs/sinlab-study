@@ -10,6 +10,7 @@ import {
   formatMonthlyJpyPrice,
 } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP_LABELS } from "@/app/constants/user";
+import { activeLimitSummary } from "@/app/lib/ai-review-limits";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -27,7 +28,7 @@ const COMMUNITY_LABEL = USER_MEMBERSHIP_LABELS.community;
 const FALLBACK_GENERAL_PRICE = formatMonthlyJpyPrice(DISPLAY_MONTHLY_PRICE_JPY);
 const COMMUNITY_PRICE = formatMonthlyJpyPrice(DISPLAY_COMMUNITY_MONTHLY_PRICE_JPY);
 
-const AI_REVIEW_FEATURE = `演習ごとに1日${AI_REVIEW_LIMITS.active.perContentPerDay}回まで再レビューできます（お試しは1課題につき${AI_REVIEW_LIMITS.trial.perContentLifetime}回）`;
+const AI_REVIEW_FEATURE = `新しい提出ごとに再レビューできます（${activeLimitSummary()}まで。お試しは1課題につき${AI_REVIEW_LIMITS.trial.perContentLifetime}回）`;
 
 type FeatureValue = string | readonly string[];
 

@@ -23,7 +23,7 @@ const STATUS_COLOR: Record<RequirementStatus, string> = {
 };
 
 export function retryGuidance(): string {
-  return `未達成の要件を直して再提出すると、再レビューできます（有料会員は 1 日 ${AI_REVIEW_LIMITS.active.perContentPerDay} 回まで）`;
+  return `未達成の要件を直して再提出すると、再レビューできます（有料会員は 1 課題につき 1 日 ${AI_REVIEW_LIMITS.active.perContentPerDay} 回、全課題の合計で 1 日 ${AI_REVIEW_LIMITS.active.perDay} 回まで）`;
 }
 
 interface StructuredReviewProps {

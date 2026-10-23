@@ -581,7 +581,7 @@ describe("POST /api/ai-review - 回数制限と枠の確保（#304 / #343）", (
       remaining: 0,
       body: {
         error:
-          "お試しプランでは AI レビューは 1 課題につき 1 回です。有料会員は 1 日 2 回まで再レビューできます",
+          "お試しプランでは AI レビューは 1 課題につき 1 回です。有料会員は 1課題につき1日2回、全課題の合計で1日10回まで再レビューできます",
         reason: "trial_lifetime",
         remaining: 0,
         resetsAt: null,
