@@ -389,6 +389,139 @@ function isClosed(match: string): boolean {
   return match.endsWith(">");
 }
 
+const MODULE_SYNTAX =
+  /^[ \t]*(?:import\s*(?:[\w${}*,\s]+\s+from\s*)?["']|export\s+(?:default\b|const\b|let\b|var\b|function\b|class\b|async\b|\{|\*))/m;
+const RELATIVE_IMPORT = /(\bfrom\s*|\bimport\s*)(["'])(\.{1,2}\/[^"'\n]+)\2/g;
+
+// encodeURIComponent leaves ' alone, which would end a single-quoted import specifier early.
+const dataModuleUrl = (source: string) =>
+  `data:text/javascript;charset=utf-8,${encodeURIComponent(source).replace(/'/g, "%27")}`;
+
+/** Last token before a "/" that makes it a regex literal rather than a division. */
+const REGEX_CONTEXT =
+  /(?:^|[(,=:[!&|?{};+\-*%<>~^]|\b(?:return|typeof|case|in|of|delete|void|throw|new))\s*$/;
+
+/**
+ * Blanks comments, regex literals and string contents (same length) so an import-looking text in
+ * them is not mistaken for a real one. A string right after `from` / `import` is the specifier
+ * and is kept. Template literals are blanked whole, so a `${}` body is not scanned.
+ */
+function maskNonCode(source: string): string {
+  let out = "";
+  let i = 0;
+  const blank = (text: string) => text.replace(/[^\n]/g, " ");
+  while (i < source.length) {
+    const c = source[i];
+    const next = source[i + 1];
+    if (c === '"' || c === "'" || c === "`") {
+      let j = i + 1;
+      while (j < source.length && source[j] !== c && (c === "`" || source[j] !== "\n")) {
+        j += source[j] === "\\" ? 2 : 1;
+      }
+      const literal = source.slice(i, j + 1);
+      out += c !== "`" && /\b(?:from|import)\s*$/.test(out) ? literal : blank(literal);
+      i = j + 1;
+    } else if (c === "/" && next === "/") {
+      const j = source.indexOf("\n", i);
+      const end = j === -1 ? source.length : j;
+      out += " ".repeat(end - i);
+      i = end;
+    } else if (c === "/" && next === "*") {
+      const j = source.indexOf("*/", i + 2);
+      const end = j === -1 ? source.length : j + 2;
+      out += blank(source.slice(i, end));
+      i = end;
+    } else if (c === "/" && REGEX_CONTEXT.test(out)) {
+      let j = i + 1;
+      let inClass = false;
+      while (j < source.length && source[j] !== "\n" && (inClass || source[j] !== "/")) {
+        if (source[j] === "\\") j += 1;
+        else if (source[j] === "[") inClass = true;
+        else if (source[j] === "]") inClass = false;
+        j += 1;
+      }
+      out += blank(source.slice(i, j + 1));
+      i = j + 1;
+    } else {
+      out += c;
+      i += 1;
+    }
+  }
+  return out.slice(0, source.length);
+}
+
+interface RelativeImport {
+  index: number;
+  length: number;
+  head: string;
+  quote: string;
+  spec: string;
+}
+
+function findRelativeImports(source: string): RelativeImport[] {
+  return [...maskNonCode(source).matchAll(RELATIVE_IMPORT)].map((m) => ({
+    index: m.index,
+    length: m[0].length,
+    head: m[1],
+    quote: m[2],
+    spec: m[3],
+  }));
+}
+
+/**
+ * JS-only submissions with import/export cannot run as classic scripts (SyntaxError), and the
+ * opaque-origin srcDoc has no URL to resolve "./cart.js" against. Each dependency becomes a data:
+ * module and the specifiers are rewritten to it in dependency order, because a data: referrer
+ * cannot resolve relative specifiers (so an import map would only cover the entry file).
+ * Cyclic imports are left as written and surface as a browser error; a missing file throws.
+ */
+function buildModuleScript(js: readonly CodeFile[]): string {
+  const byName = new Map(js.map((f) => [f.filename.trim().replace(/^\.\//, ""), f]));
+  const resolve = (spec: string): CodeFile | undefined => {
+    const name = spec.replace(/^\.\//, "");
+    return byName.get(name) ?? byName.get(`${name}.js`);
+  };
+  const urls = new Map<CodeFile, string>();
+  const missing: string[] = [];
+  const visiting = new Set<CodeFile>();
+  const toSource = (file: CodeFile): string => {
+    visiting.add(file);
+    let source = file.content;
+    for (const imp of findRelativeImports(file.content).reverse()) {
+      const dep = resolve(imp.spec);
+      if (!dep) {
+        missing.push(imp.spec);
+        continue;
+      }
+      if (visiting.has(dep)) continue;
+      if (!urls.has(dep)) urls.set(dep, dataModuleUrl(toSource(dep)));
+      const rewritten = `${imp.head}${imp.quote}${urls.get(dep)}${imp.quote}`;
+      source = source.slice(0, imp.index) + rewritten + source.slice(imp.index + imp.length);
+    }
+    visiting.delete(file);
+    return source;
+  };
+  const imported = new Set<CodeFile>();
+  for (const file of js) {
+    for (const imp of findRelativeImports(file.content)) {
+      const dep = resolve(imp.spec);
+      if (dep && dep !== file) imported.add(dep);
+    }
+  }
+  const entry =
+    js.find((f) => f.filename.trim().toLowerCase() === "main.js") ??
+    [...js].reverse().find((f) => !imported.has(f)) ??
+    js[js.length - 1];
+  const entrySource = toSource(entry);
+  if (missing.length > 0) {
+    // A missing file would be fetched from the app origin and fail silently (the error fires on
+    // the <script> element, not window), and a stub module fails at link time for named imports.
+    const message = `Cannot find module '${missing[0]}'`;
+    return `<script>throw new Error(${JSON.stringify(message)});</script>`;
+  }
+  return `<script type="module">${escapeClosingTag(entrySource, "script")}</script>`;
+}
+
 /**
  * Builds one HTML document from a submission's files. Same-name references (`<link
  * rel="stylesheet" href="style.css">`, `<script src="main.js">`) are inlined because the sandboxed
@@ -430,7 +563,9 @@ export function buildPreviewDocument(
     const css = files.filter((f) => resolveFileLanguage(f) === "css");
     const js = files.filter((f) => resolveFileLanguage(f) === "javascript");
     const styles = css.map((f) => `<style>${escapeClosingTag(f.content, "style")}</style>`);
-    const scripts = js.map((f) => `<script>${escapeClosingTag(f.content, "script")}</script>`);
+    const scripts = js.some((f) => MODULE_SYNTAX.test(maskNonCode(f.content)))
+      ? [buildModuleScript(js)]
+      : js.map((f) => `<script>${escapeClosingTag(f.content, "script")}</script>`);
     return `<!doctype html><html><head><meta charset="utf-8">${headPrelude}${styles.join("")}</head><body>${scripts.join("")}</body></html>`;
   }
 

@@ -227,6 +227,104 @@ describe("buildPreviewDocument", () => {
     expect(js).not.toContain("<style");
   });
 
+  it("runs javascript-only import/export submissions as a module graph", () => {
+    const doc = buildPreviewDocument([
+      f("cart.js", "javascript", "export const add = (a, b) => a + b;"),
+      f("main.js", "javascript", 'import { add } from "./cart.js";\nconsole.log(add(1, 2));'),
+    ]);
+    expect(doc.match(/<script/g)).toHaveLength(1);
+    expect(doc).toContain('<script type="module">');
+    expect(doc).not.toContain('"./cart.js"');
+    expect(doc).toContain("data:text/javascript;charset=utf-8,export%20const%20add");
+  });
+
+  it("throws for a missing import instead of building the module graph", () => {
+    const doc = buildPreviewDocument([
+      f("a.js", "javascript", 'import { b } from "./b";\nexport const a = b;'),
+      f("b.js", "javascript", 'import { a } from "./a.js";\nexport const b = 1;'),
+      f("main.js", "javascript", 'import { a } from "./a.js";\nimport "./nope.js";'),
+    ]);
+    expect(doc).toContain("Cannot find module './nope.js'");
+    expect(doc).not.toContain("data:text");
+  });
+
+  it("reports a missing named-import file as a thrown error", () => {
+    const doc = buildPreviewDocument([
+      f("cart.js", "javascript", "export const add = 1;"),
+      f("main.js", "javascript", 'import { add } from "./Cart.js";'),
+    ]);
+    expect(doc).toContain("<script>throw new Error(");
+    expect(doc).toContain("Cannot find module './Cart.js'");
+  });
+
+  it("resolves nested imports and leaves cycles as written", () => {
+    const doc = buildPreviewDocument([
+      f("a.js", "javascript", 'import { b } from "./b";\nexport const a = b;'),
+      f("b.js", "javascript", 'import { a } from "./a.js";\nexport const b = 1;'),
+      f("main.js", "javascript", 'import { a } from "./a.js";'),
+    ]);
+    expect(decodeURIComponent(decodeURIComponent(doc))).toContain('from "./a.js"');
+  });
+
+  it("encodes single quotes in imported sources", () => {
+    const doc = buildPreviewDocument([
+      f("cart.js", "javascript", "export const msg = 'hi';"),
+      f("main.js", "javascript", "import { msg } from './cart.js';"),
+    ]);
+    expect(doc).toContain("%27hi%27");
+    expect(doc).not.toContain("'hi'");
+  });
+
+  it("ignores commented-out imports but not specifiers that merely contain //", () => {
+    const doc = buildPreviewDocument([
+      f("store.js", "javascript", "export const add = (a, b) => a + b;"),
+      f(
+        "main.js",
+        "javascript",
+        '// import { add } from "./cart.js";\n/* import "./gone.js"; */\nimport { add } from "./store.js";\nconsole.log("http://x", add(1, 2));'
+      ),
+    ]);
+    expect(doc).not.toContain("Cannot find module");
+    expect(doc).toContain('type="module"');
+    expect(doc).not.toContain('"./store.js"');
+  });
+
+  it("does not treat commented-out import lines, strings or regex literals as modules", () => {
+    const blockComment = buildPreviewDocument([
+      f("util.js", "javascript", "function greet() {}"),
+      f("main.js", "javascript", '/*\nimport { greet } from "./util.js";\n*/\ngreet();'),
+    ]);
+    expect(blockComment).not.toContain('type="module"');
+    const inString = buildPreviewDocument([
+      f("a.js", "javascript", "export const a = 1;"),
+      f(
+        "main.js",
+        "javascript",
+        'import { a } from "./a.js";\nconsole.log("loaded from \'./data.js\'", a);'
+      ),
+    ]);
+    expect(inString).not.toContain("Cannot find module");
+    const regex = buildPreviewDocument([
+      f("a.js", "javascript", "export const a = 1;"),
+      f(
+        "main.js",
+        "javascript",
+        'import { a } from "./a.js";\nconst r = /`/g; // import "./nope.js";\nconsole.log(a, r);'
+      ),
+    ]);
+    expect(regex).not.toContain("Cannot find module");
+    expect(regex).toContain('type="module"');
+  });
+
+  it("keeps classic scripts for javascript-only submissions without import/export", () => {
+    const doc = buildPreviewDocument([
+      f("a.js", "javascript", "const exported = 1; // import is a word"),
+      f("main.js", "javascript", "run()"),
+    ]);
+    expect(doc).not.toContain('type="module"');
+    expect(doc.match(/<script>/g)).toHaveLength(2);
+  });
+
   it("applies CSS-only submissions onto previewBaseHtml scaffold (#351)", () => {
     const doc = buildPreviewDocument([f("style.css", "css", ".box{color:red}")], {
       previewBaseHtml:
