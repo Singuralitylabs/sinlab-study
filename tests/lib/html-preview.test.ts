@@ -238,14 +238,24 @@ describe("buildPreviewDocument", () => {
     expect(doc).toContain("data:text/javascript;charset=utf-8,export%20const%20add");
   });
 
-  it("resolves nested imports and leaves cycles and missing files as written", () => {
+  it("resolves nested imports and leaves cycles as written", () => {
     const doc = buildPreviewDocument([
       f("a.js", "javascript", 'import { b } from "./b";\nexport const a = b;'),
       f("b.js", "javascript", 'import { a } from "./a.js";\nexport const b = 1;'),
       f("main.js", "javascript", 'import { a } from "./a.js";\nimport "./nope.js";'),
     ]);
-    expect(doc).toContain('"./nope.js"');
+    expect(decodeURIComponent(doc)).toContain("Cannot find module './nope.js'");
     expect(decodeURIComponent(decodeURIComponent(doc))).toContain('from "./a.js"');
+  });
+
+  it("encodes single quotes and turns missing imports into a console error", () => {
+    const doc = buildPreviewDocument([
+      f("cart.js", "javascript", "export const msg = 'hi';"),
+      f("main.js", "javascript", "import { msg } from './cart.js';\nimport './Cart2.js';"),
+    ]);
+    expect(doc).toContain("%27hi%27");
+    expect(doc).not.toContain("'hi'");
+    expect(decodeURIComponent(doc)).toContain("Cannot find module './Cart2.js'");
   });
 
   it("keeps classic scripts for javascript-only submissions without import/export", () => {

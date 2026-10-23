@@ -400,23 +400,31 @@ const RELATIVE_IMPORT = /(\bfrom\s*|\bimport\s*)(["'])(\.{1,2}\/[^"'\n]+)\2/g;
  * cannot resolve relative specifiers (so an import map would only cover the entry file).
  * Unresolvable or cyclic imports are left as written and surface as a console error.
  */
+// encodeURIComponent leaves ' alone, which would end a single-quoted import specifier early.
+const dataModuleUrl = (source: string) =>
+  `data:text/javascript;charset=utf-8,${encodeURIComponent(source).replace(/'/g, "%27")}`;
+
 function buildModuleScript(js: readonly CodeFile[]): string {
   const byName = new Map(js.map((f) => [f.filename.trim().replace(/^\.\//, ""), f]));
   const resolve = (spec: string): CodeFile | undefined => {
     const name = spec.replace(/^\.\//, "");
     return byName.get(name) ?? byName.get(`${name}.js`);
   };
-  const urls = new Map<CodeFile, string>();
+  const urls = new Map<CodeFile | string, string>();
   const visiting = new Set<CodeFile>();
   const toSource = (file: CodeFile): string => {
     visiting.add(file);
     const source = file.content.replace(RELATIVE_IMPORT, (match, head, quote, spec) => {
       const dep = resolve(spec);
-      if (!dep || visiting.has(dep)) return match;
-      if (!urls.has(dep)) {
-        urls.set(dep, `data:text/javascript;charset=utf-8,${encodeURIComponent(toSource(dep))}`);
-      }
-      return `${head}${quote}${urls.get(dep)}${quote}`;
+      if (visiting.has(dep as CodeFile)) return match;
+      // A missing file would be fetched from the app origin and fail silently (the error fires on
+      // the <script> element, not window); a throwing module reports it in the console instead.
+      const source = dep
+        ? toSource(dep)
+        : `throw new Error(${JSON.stringify(`Cannot find module '${spec}'`)});`;
+      const key = dep ?? spec;
+      if (!urls.has(key)) urls.set(key, dataModuleUrl(source));
+      return `${head}${quote}${urls.get(key)}${quote}`;
     });
     visiting.delete(file);
     return source;
