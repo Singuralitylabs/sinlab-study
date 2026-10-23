@@ -105,8 +105,9 @@ export function activeLimitSummary(): string {
   return `1課題につき1日${AI_REVIEW_LIMITS.active.perContentPerDay}回、全課題の合計で1日${AI_REVIEW_LIMITS.active.perDay}回`;
 }
 
-export function isDailyTotalReached(todayTotal: number): boolean {
-  return todayTotal >= AI_REVIEW_LIMITS.active.perDay;
+/** Remaining reviews under the per-day total alone, ignoring the per-content cap. */
+export function computeDailyTotalRemaining(todayTotal: number): number {
+  return Math.max(0, AI_REVIEW_LIMITS.active.perDay - todayTotal);
 }
 
 function contentDailyMessage(): string {

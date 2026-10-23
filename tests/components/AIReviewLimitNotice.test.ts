@@ -23,11 +23,26 @@ describe("AIReviewLimitNotice", () => {
     expect(html).not.toContain("全課題の合計上限に達しています");
   });
 
+  it("active: 全課題の合計の残り回数も表示する", () => {
+    const html = render({
+      userStatus: "active",
+      remaining: 1,
+      dailyTotalRemaining: 7,
+      stripeEnabled: true,
+    });
+    expect(html).toContain("全課題の合計の残り回数: 7回");
+  });
+
+  it("active: 合計の残り回数の取得に失敗したときは出さない", () => {
+    const html = render({ userStatus: "active", remaining: null, stripeEnabled: true });
+    expect(html).not.toContain("全課題の合計の残り回数");
+  });
+
   it("active: 全体上限で残り0のときは理由を出す", () => {
     const html = render({
       userStatus: "active",
       remaining: 0,
-      dailyTotalReached: true,
+      dailyTotalRemaining: 0,
       stripeEnabled: true,
     });
     expect(html).toContain("本日の残り回数: 0回");

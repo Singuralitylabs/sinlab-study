@@ -14,7 +14,7 @@ import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
 import { ANALYTICS_EVENT, UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
-import { computeRemainingReviews, isDailyTotalReached } from "@/app/lib/ai-review-limits";
+import { computeDailyTotalRemaining, computeRemainingReviews } from "@/app/lib/ai-review-limits";
 import { parseStarterFiles } from "@/app/lib/code-file-inputs";
 import { buildThemeContentOrder, resolveContentNavigation } from "@/app/lib/content-navigation";
 import { isExerciseRetryInProgress } from "@/app/lib/exercise-retry";
@@ -311,9 +311,10 @@ export default async function ContentPage({ params }: PageProps) {
         })
       : null;
 
-  const aiReviewDailyTotalReached = aiReviewUsage
-    ? isDailyTotalReached(aiReviewUsage.todayTotal)
-    : false;
+  const aiReviewDailyTotalRemaining =
+    showsAIReviewLimit && aiReviewUsage
+      ? computeDailyTotalRemaining(aiReviewUsage.todayTotal)
+      : null;
 
   // The completed-review query is the newest submission that has one, which can be older than
   // the latest submission. Showing it under the newer code would present the old score as this one.
@@ -526,7 +527,7 @@ export default async function ContentPage({ params }: PageProps) {
                           <AIReviewLimitNotice
                             userStatus={userStatus}
                             remaining={aiReviewRemaining}
-                            dailyTotalReached={aiReviewDailyTotalReached}
+                            dailyTotalRemaining={aiReviewDailyTotalRemaining}
                             stripeEnabled={isStripeEnabled()}
                           />
                         </div>
