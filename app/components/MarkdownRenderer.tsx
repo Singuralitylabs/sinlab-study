@@ -14,6 +14,7 @@ import { type ComponentPropsWithoutRef, memo } from "react";
 import ReactMarkdown, { type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
+import { resolveMarkdownImageWidth } from "@/app/lib/markdown-image-width";
 import { cn } from "@/lib/utils";
 
 // Shared component without "use client": no hooks or Node-only APIs, so the same implementation
@@ -99,7 +100,7 @@ function rehypeHighlightSubset() {
   };
 }
 
-type MarkdownTagProps<T extends "pre" | "table"> = ComponentPropsWithoutRef<T> & ExtraProps;
+type MarkdownTagProps<T extends "pre" | "table" | "img"> = ComponentPropsWithoutRef<T> & ExtraProps;
 
 // The table's min-content width escapes a flex item and widens the page. Scroll inside this box.
 function MarkdownTable({ node: _node, ...props }: MarkdownTagProps<"table">) {
@@ -113,6 +114,35 @@ function MarkdownTable({ node: _node, ...props }: MarkdownTagProps<"table">) {
 // Keep the scrollport on the pre even if a parent flex item is only barely constrained.
 function MarkdownPre({ node: _node, className, ...props }: MarkdownTagProps<"pre">) {
   return <pre className={cn("max-w-full overflow-x-auto", className)} {...props} />;
+}
+
+// Cap default images; optional title `w=400` sets width (title is not shown as a tooltip then).
+// maxWidth 100% keeps oversized w= values inside the prose column. No rehype-raw / raw HTML.
+// Plain <img>: Markdown src may be any content-images / external URL; next/image would need a
+// remote pattern per host and is not used for article embeds elsewhere either.
+function MarkdownImage({
+  node: _node,
+  title,
+  alt,
+  className,
+  style,
+  ...props
+}: MarkdownTagProps<"img">) {
+  const resolved = resolveMarkdownImageWidth(typeof title === "string" ? title : undefined);
+  const widthStyle = resolved.hasExplicitWidth
+    ? { width: resolved.widthPx, maxWidth: "100%" as const }
+    : { maxWidth: `min(100%, ${resolved.widthPx}px)` };
+
+  return (
+    // biome-ignore lint/performance/noImgElement: Markdown embeds use arbitrary Storage / URL hosts
+    <img
+      {...props}
+      alt={alt ?? ""}
+      title={resolved.displayTitle}
+      className={cn("mx-auto block h-auto", className)}
+      style={{ ...style, ...widthStyle }}
+    />
+  );
 }
 
 interface MarkdownRendererProps {
@@ -136,7 +166,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlightSubset]}
-        components={{ pre: MarkdownPre, table: MarkdownTable }}
+        components={{ pre: MarkdownPre, table: MarkdownTable, img: MarkdownImage }}
       >
         {content}
       </ReactMarkdown>

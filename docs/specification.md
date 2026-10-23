@@ -429,6 +429,8 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 
 スライドの解説記事は `learning_contents.text_content`（Markdown・任意。テキスト種別の本文と同じ列）。値があるときだけ PDF ビューアの直下に `MarkdownRenderer` と `resolveMarkdownStorageUrls()` で表示し、空なら従来どおりスライドだけを出す。未公開プレビュー（2.12）は同じ詳細ページなので同様に出る。`/demo` ではお試し公開のスライド（署名付きURLと同じく、公開済み・未削除かつ `is_open_to_trial = true` のときだけビューアを出す分岐）に限って記事を出す。公開済みでもお試し非公開のスライドは対象外の案内だけを出し、記事は出さない。テキスト種別の本文も同じ置換を通す（`{{SUPABASE_STORAGE_URL}}` を公開オブジェクトURLへ変える）。画像のアップロードは公開バケット `content-images`（6.1.5節）。
 
+**Markdown 画像の幅（#478）**: `MarkdownRenderer` は画像を中央寄せし、指定なしでは最大幅 `MARKDOWN_IMAGE_DEFAULT_MAX_WIDTH_PX`（560px。定数は `app/constants/markdown.ts`）に抑える（本文幅より狭いときは本文幅に収まる）。画像ごとの幅は Markdown の title に `w=400` のように書く（例: `![説明](url "w=400")`）。`resolveMarkdownImageWidth()` が title を数値へ変換し、有効ならその幅で表示する（本文幅を超える指定も本文幅に収まる）。下限・上限（`MARKDOWN_IMAGE_MIN_WIDTH_PX` / `MARKDOWN_IMAGE_MAX_WIDTH_PX`）外・数値以外・負数は無視して既定の最大幅にする。`w=` 記法の title はツールチップとして残さない。通常の title（`w=` 以外）は従来どおりツールチップ用に残す。生 HTML（`rehype-raw`）は許可しない。
+
 **YouTube facade**: クリック前は `i.ytimg.com` の hqdefault を `<img>` で直接参照する（最適化の恩恵がほぼ無いため `next/image` は使わず、クリック前に `youtube.com` へ通信しない）。クリック後に `YouTubePlayer` を動的読み込みして autoplay 再生する（クライアント読み込み方針は5.4.6）。iOS Safari では gesture 後に生成した cross-origin iframe の音声付き autoplay が拒否され、再生ボタンへの追加タップが必要になる場合がある（facade 化の既知の制約）。
 
 **スライドPDFの配信（署名付きURL、#89）**
@@ -1049,7 +1051,7 @@ Storage オブジェクトの削除に失敗した場合も、DB参照は既に�
 | 404 | コンテンツが存在しない、または論理削除済み |
 | 500 | アップロード失敗 / サーバーエラー |
 
-管理フォーム（`ContentForm`）のテキスト・解説記事欄に「画像を挿入」があり、アップロード後にカーソル位置へ `![画像](...)` を差し込む。使われなくなった画像の掃除は本機能の範囲外。
+管理フォーム（`ContentForm`）のテキスト・解説記事欄に「画像を挿入」があり、アップロード後にカーソル位置へ `![画像](...)` を差し込む。幅を指定するときは title に `w=数値` を付ける（3.2節・#478。例: `![画像](... "w=400")`）。使われなくなった画像の掃除は本機能の範囲外。
 
 ### 6.2 受講生管理
 
@@ -1144,7 +1146,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `resolveWeeklyFunnelWeeks()` �
 | サイドナビゲーション | アプリ全体のナビゲーション。デスクトップは固定サイドバー、モバイルはドロワー。管理系は「コンテンツ管理」「受講生管理」の2入口（7.3節）。ログアウト機能 |
 | コンテンツ構成ツリー | `/manage/contents` の主UI。テーマ→フェーズ→コンテンツを1画面で表示し、ダイアログから親付きで作成する（6.1節） |
 | パンくずリスト | ページヘッダーと階層ナビゲーションの表示 |
-| Markdownレンダラー | Markdownの安全なレンダリング（GFM対応Markdown変換 → Typographyスタイリング。react-markdownは生HTMLタグを描画しないためXSSは発生しない） |
+| Markdownレンダラー | Markdownの安全なレンダリング（GFM対応Markdown変換 → Typographyスタイリング。react-markdownは生HTMLタグを描画しないためXSSは発生しない）。画像は中央寄せ・既定最大幅、title の `w=` で個別幅（3.2節・#478） |
 | YouTube埋め込み | facade（サムネイル + 再生ボタン）。クリック後に react-youtube を遅延読み込みして再生 |
 | 完了ボタン | コンテンツ完了状態のトグル。進捗記録APIを呼び出し。`grading_rubric` が NULL でなく URL のみでない演習（空の墓石を含む）では出さず、合格状態の表示に置き換える（3.2節） |
 | 提出フォーム | 課題提出フォーム。コンテンツの `allowed_submission_types` に応じてコード・URL・両方から選択して提出 |
