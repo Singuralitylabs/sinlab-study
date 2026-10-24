@@ -20,7 +20,7 @@ import { USER_STATUS } from "@/app/constants/user";
 
 const { generateContentMock, GoogleGenAIMock } = vi.hoisted(() => {
   const generateContentMock = vi.fn();
-  const GoogleGenAIMock = vi.fn(function GoogleGenAI() {
+  const GoogleGenAIMock = vi.fn(function googleGenAI() {
     return { models: { generateContent: generateContentMock } };
   });
   return { generateContentMock, GoogleGenAIMock };
@@ -962,7 +962,7 @@ describe("generateReview", () => {
 
     // AbortSignal.timeout runs on Node's own timers; route it through the faked setTimeout so the
     // per-attempt and overall deadlines fire in fake time.
-    const useFakeSignals = () => {
+    const installFakeSignals = () => {
       vi.useFakeTimers();
       vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => {
         const controller = new AbortController();
@@ -981,7 +981,7 @@ describe("generateReview", () => {
     const overloaded = new ApiError({ message: "overloaded", status: 503 });
 
     it("503 のリトライが全体の期限で打ち切られたら、混雑として報告し status をログに残す", async () => {
-      useFakeSignals();
+      installFakeSignals();
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       // 503 at 30s, retry at 35s: the overall 45s deadline fires before the attempt's own 25s.
       generateContentMock
@@ -1003,7 +1003,7 @@ describe("generateReview", () => {
     });
 
     it("リトライが試行ごとの上限で切れた（実際に遅かった）場合はタイムアウトとして報告する", async () => {
-      useFakeSignals();
+      installFakeSignals();
       generateContentMock
         .mockRejectedValueOnce(overloaded)
         .mockImplementationOnce(hangUntilAborted);
@@ -1021,7 +1021,7 @@ describe("generateReview", () => {
     });
 
     it("切り替え後も待機に GEMINI_RETRY_MIN_ATTEMPT_MS が残らないならバックオフしない", async () => {
-      useFakeSignals();
+      installFakeSignals();
       vi.spyOn(console, "error").mockImplementation(() => {});
       // 503 at 36s: 9s left can start the next model, but not a 5s wait plus a 5s attempt.
       generateContentMock

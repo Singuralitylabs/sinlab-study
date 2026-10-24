@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.3.14/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.2/schema.json",
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -14,7 +14,9 @@
       "!**/dist",
       "!**/build",
       "!**/public/pdf.worker.min.mjs",
-      "!**/public/vendor"
+      "!**/public/vendor",
+      "!**/*.md",
+      "!**/*.{yml,yaml}"
     ]
   },
   "css": {
@@ -33,7 +35,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "correctness": {
         "noUnusedVariables": "warn",
         "noUnusedImports": "warn"

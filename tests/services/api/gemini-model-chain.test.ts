@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { generateContentMock, GoogleGenAIMock, THIRD_MODEL_NAME } = vi.hoisted(() => {
   const generateContentMock = vi.fn();
-  const GoogleGenAIMock = vi.fn(function GoogleGenAI() {
+  const GoogleGenAIMock = vi.fn(function googleGenAI() {
     return { models: { generateContent: generateContentMock } };
   });
   return {
