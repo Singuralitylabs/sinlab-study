@@ -113,6 +113,7 @@ export function AIReviewDisplay({
             reviewJson={reviewJson}
             scoreKind={review.score_kind}
             passDisplay={passDisplay}
+            score={review.overall_score}
             contentId={contentId}
             memosByKey={memosByKey}
           />

@@ -7,6 +7,7 @@ import {
 import {
   asReviewJson,
   computeReviewScore,
+  describeNotPassedReasons,
   getGradingRubricVersion,
   getRubricMaxKeyNumber,
   hasGradingRequirements,
@@ -131,6 +132,27 @@ describe("resolvePassDisplay", () => {
   it("rubric + 有効な閾値: passed に応じて passed / retry", () => {
     expect(resolvePassDisplay({ score_kind: "rubric", passed: true }, 70)).toBe("passed");
     expect(resolvePassDisplay({ score_kind: "rubric", passed: false }, 70)).toBe("retry");
+  });
+});
+
+describe("describeNotPassedReasons", () => {
+  it("合格点ちょうどでも未達成があれば、その理由だけを返す", () => {
+    expect(describeNotPassedReasons(review(["met", "unmet"]), 70, 70)).toEqual([
+      "点数は合格点（70点）に届いていますが、未達成の要件が 1 件あります",
+    ]);
+  });
+
+  it("点数不足と未達成の両方を返す", () => {
+    expect(describeNotPassedReasons(review(["unmet", "partial"]), 40, 70)).toEqual([
+      "未達成の要件が 1 件あります",
+      "点数が合格点（70点）に届いていません",
+    ]);
+  });
+
+  it("未達成なしで点数不足なら点数の理由だけ", () => {
+    expect(describeNotPassedReasons(review(["partial"]), 60, 70)).toEqual([
+      "点数が合格点（70点）に届いていません",
+    ]);
   });
 });
 

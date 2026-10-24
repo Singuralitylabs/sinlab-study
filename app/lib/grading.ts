@@ -166,6 +166,30 @@ export function resolvePassDisplay(
   return review.passed ? "passed" : "retry";
 }
 
+/**
+ * Why a rubric review did not pass. A score at or above the pass line can still fail on an unmet
+ * requirement, which the score badge alone hides.
+ */
+export function describeNotPassedReasons(
+  reviewJson: ReviewJson,
+  score: number | null,
+  passScore: number = CERTIFICATE_PASS_SCORE
+): string[] {
+  const reasons: string[] = [];
+  const unmetCount = reviewJson.requirements.filter((item) => item.status === "unmet").length;
+  if (unmetCount > 0) {
+    reasons.push(
+      score !== null && score >= passScore
+        ? `点数は合格点（${passScore}点）に届いていますが、未達成の要件が ${unmetCount} 件あります`
+        : `未達成の要件が ${unmetCount} 件あります`
+    );
+  }
+  if (score !== null && score < passScore) {
+    reasons.push(`点数が合格点（${passScore}点）に届いていません`);
+  }
+  return reasons;
+}
+
 export const SCORE_KIND_BADGE_LABELS: Partial<Record<ScoreKind, string>> = {
   estimated: "参考",
   none: "採点対象外",

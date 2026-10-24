@@ -1151,7 +1151,11 @@ export type Database = {
         Returns: boolean;
       };
       admin_reset_ai_review_limits: {
-        Args: { p_content_id: number; p_performed_by: number; p_user_id: number };
+        Args: {
+          p_content_id: number;
+          p_performed_by: number;
+          p_user_id: number;
+        };
         Returns: number;
       };
       bulk_update_sibling_display_order: {
