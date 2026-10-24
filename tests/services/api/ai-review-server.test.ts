@@ -8,7 +8,11 @@ import {
   fetchAllSubmissionsWithReviews,
   fetchCompletedAIReviewByContentId,
   fetchCompletedAIReviewContentIds,
+  fetchFailedAIReviewBySubmissionId,
+  fetchLatestSubmissionIds,
   fetchSubmissionsWithReviewsByUserId,
+  reopenAIReview,
+  resetAIReviewLimits,
   updateAIReviewCompleted,
   updateAIReviewFailed,
 } from "@/app/services/api/ai-review-server";
@@ -550,5 +554,137 @@ describe("claimAIReview", () => {
     await claimAIReview({ ...params, userStatus: null });
 
     expect(mockClient.rpc.mock.calls[0][1]).toMatchObject({ p_user_status: "" });
+  });
+});
+
+describe("resetAIReviewLimits / reopenAIReview", () => {
+  const mockRpc = (result: { data: unknown; error: unknown }) => {
+    const mockClient = createMockSupabaseClient();
+    mockClient.rpc.mockResolvedValue(result);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    return mockClient;
+  };
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("リセットはユーザーと課題を RPC に渡し、更新件数を返す", async () => {
+    const client = mockRpc({ data: 3, error: null });
+
+    await expect(resetAIReviewLimits({ userId: 2, contentId: 5, performedBy: 1 })).resolves.toEqual(
+      { affected: 3 }
+    );
+    expect(client.rpc).toHaveBeenCalledWith("admin_reset_ai_review_limits", {
+      p_user_id: 2,
+      p_content_id: 5,
+      p_performed_by: 1,
+    });
+  });
+
+  it("課題未指定なら p_content_id に null を渡す", async () => {
+    const client = mockRpc({ data: 0, error: null });
+
+    await resetAIReviewLimits({ userId: 2, contentId: null, performedBy: 1 });
+
+    expect(client.rpc.mock.calls[0][1]).toMatchObject({ p_content_id: null });
+  });
+
+  it("外部キー違反（対象なし）は notFound、それ以外の DB エラーは null", async () => {
+    mockRpc({ data: null, error: { message: "fk", code: "23503" } });
+    await expect(
+      resetAIReviewLimits({ userId: 99, contentId: null, performedBy: 1 })
+    ).resolves.toEqual({ notFound: true });
+
+    mockRpc({ data: null, error: dbError });
+    await expect(
+      resetAIReviewLimits({ userId: 2, contentId: null, performedBy: 1 })
+    ).resolves.toBeNull();
+  });
+
+  it("再レビューの許可は RPC の真偽を reopened として返す", async () => {
+    const client = mockRpc({ data: true, error: null });
+    await expect(reopenAIReview({ submissionId: 7, performedBy: 1 })).resolves.toEqual({
+      reopened: true,
+    });
+    expect(client.rpc).toHaveBeenCalledWith("admin_reopen_ai_review", {
+      p_submission_id: 7,
+      p_performed_by: 1,
+    });
+
+    mockRpc({ data: false, error: null });
+    await expect(reopenAIReview({ submissionId: 7, performedBy: 1 })).resolves.toEqual({
+      reopened: false,
+    });
+
+    mockRpc({ data: null, error: dbError });
+    await expect(reopenAIReview({ submissionId: 7, performedBy: 1 })).resolves.toBeNull();
+  });
+});
+
+describe("fetchFailedAIReviewBySubmissionId", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("本人の提出の failed レビューのエラー文を返す", async () => {
+    const client = createMockSupabaseClient({
+      queryResult: { data: { id: 7, ai_review: { error_message: "再許可" } }, error: null },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    await expect(fetchFailedAIReviewBySubmissionId(2, 7)).resolves.toEqual({
+      errorMessage: "再許可",
+    });
+    const builder = client.from.mock.results[0].value;
+    expect(builder.eq).toHaveBeenCalledWith("user_id", 2);
+    expect(builder.eq).toHaveBeenCalledWith("ai_review.status", "failed");
+  });
+
+  it("該当なし・DBエラーは null", async () => {
+    const client = createMockSupabaseClient({ queryResult: { data: null, error: null } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+    await expect(fetchFailedAIReviewBySubmissionId(2, 7)).resolves.toBeNull();
+
+    const failing = createMockSupabaseClient({ queryResult: { data: null, error: dbError } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(failing as never);
+    await expect(fetchFailedAIReviewBySubmissionId(2, 7)).resolves.toBeNull();
+  });
+});
+
+describe("fetchLatestSubmissionIds", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("ユーザー×課題ごとの最新の提出だけを返す", async () => {
+    const client = createMockSupabaseClient({
+      queryResult: {
+        data: [
+          { id: 9, user_id: 2, content_id: 5 },
+          { id: 4, user_id: 2, content_id: 5 },
+          { id: 6, user_id: 3, content_id: 5 },
+        ],
+        error: null,
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const ids = await fetchLatestSubmissionIds([
+      { id: 4, user_id: 2, content_id: 5 },
+      { id: 9, user_id: 2, content_id: 5 },
+      { id: 6, user_id: 3, content_id: 5 },
+    ]);
+
+    expect([...ids].sort()).toEqual([6, 9]);
+  });
+
+  it("取得エラー時は空（再レビューのボタンを出さない）", async () => {
+    const client = createMockSupabaseClient({ queryResult: { data: null, error: dbError } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const ids = await fetchLatestSubmissionIds([{ id: 4, user_id: 2, content_id: 5 }]);
+
+    expect(ids.size).toBe(0);
   });
 });

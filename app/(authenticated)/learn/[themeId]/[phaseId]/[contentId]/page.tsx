@@ -22,7 +22,10 @@ import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import { getLockedContentFallbackOverview } from "@/app/lib/trial-upgrade";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
-import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-server";
+import {
+  fetchCompletedAIReviewByContentId,
+  fetchFailedAIReviewBySubmissionId,
+} from "@/app/services/api/ai-review-server";
 import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   fetchContentById,
@@ -323,6 +326,13 @@ export default async function ContentPage({ params }: PageProps) {
       ? existingReview
       : null;
 
+  // A failed review of the latest submission (e.g. an admin reopened it, #482) has no completed
+  // review to show, so without this the learner would see nothing and have no way to run it again.
+  const failedReviewForLatest =
+    userId && latestSubmission && !reviewForLatestSubmission
+      ? await fetchFailedAIReviewBySubmissionId(userId, latestSubmission.id)
+      : null;
+
   const isRetrying = isExerciseRetryInProgress({
     latestSubmittedAt: latestSubmission?.submitted_at,
     retryStartedAt,
@@ -544,6 +554,14 @@ export default async function ContentPage({ params }: PageProps) {
                         showPreview={content.show_preview}
                         showConsole={content.show_console}
                         persistedReviewId={visibleReview?.id ?? null}
+                        failedReview={
+                          latestSubmission && failedReviewForLatest
+                            ? {
+                                submissionId: latestSubmission.id,
+                                errorMessage: failedReviewForLatest.errorMessage,
+                              }
+                            : null
+                        }
                         showReviewListNotes={showReviewListNotes}
                         showEditor={showSubmissionEditor}
                         isRetrying={isRetrying}

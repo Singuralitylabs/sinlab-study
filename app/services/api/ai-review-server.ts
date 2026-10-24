@@ -181,6 +181,32 @@ export async function fetchCompletedAIReviewByContentId(
   };
 }
 
+/**
+ * The failed review of one of the user's own submissions, so a page load can offer the retry again
+ * (an admin reopening a review leaves exactly this state). The userId filter is the safety.
+ */
+export async function fetchFailedAIReviewBySubmissionId(
+  userId: number,
+  submissionId: number
+): Promise<{ errorMessage: string | null } | null> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("submissions")
+    .select("id, ai_review:ai_reviews!inner(status, error_message)")
+    .eq("id", submissionId)
+    .eq("user_id", userId)
+    .eq("ai_review.status", "failed")
+    .maybeSingle();
+
+  if (error) {
+    console.error("AIレビュー取得エラー (fetchFailedAIReviewBySubmissionId):", error.message);
+    return null;
+  }
+  const review = data?.ai_review as unknown as { error_message: string | null } | null | undefined;
+  return review ? { errorMessage: review.error_message } : null;
+}
+
 /** Uses the admin client to avoid depending on RLS; safety comes from the userId filter. */
 export async function fetchCompletedAIReviewContentIds(
   userId: number,
@@ -402,4 +428,99 @@ export async function updateAIReviewFailed(
   }
 
   return true;
+}
+
+/**
+ * Excludes a user's completed reviews from the allowance counts (rows and history are kept).
+ * Runs in the DB under the same per-user lock as claim_ai_review(). `notFound` = no such user.
+ */
+export async function resetAIReviewLimits({
+  userId,
+  contentId,
+  performedBy,
+}: {
+  userId: number;
+  contentId: number | null;
+  performedBy: number;
+}): Promise<{ affected: number } | { notFound: true } | null> {
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase.rpc("admin_reset_ai_review_limits", {
+    p_user_id: userId,
+    // The generated type has no null for a nullable RPC argument; NULL means "every content".
+    p_content_id: contentId as number,
+    p_performed_by: performedBy,
+  });
+
+  if (error) {
+    // 23503: the audit row's user / content foreign key failed, i.e. the target doesn't exist.
+    if (error.code === "23503") {
+      return { notFound: true };
+    }
+    console.error("AIレビュー回数リセットエラー:", error.message);
+    return null;
+  }
+  return { affected: typeof data === "number" ? data : 0 };
+}
+
+/**
+ * Returns a completed review to `failed` so claim_ai_review() lets the learner run it again
+ * without using up the allowance. `reopened: false` = no completed review on that submission.
+ */
+export async function reopenAIReview({
+  submissionId,
+  performedBy,
+}: {
+  submissionId: number;
+  performedBy: number;
+}): Promise<{ reopened: boolean } | null> {
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase.rpc("admin_reopen_ai_review", {
+    p_submission_id: submissionId,
+    p_performed_by: performedBy,
+  });
+
+  if (error) {
+    console.error("AIレビュー再レビュー許可エラー:", error.message);
+    return null;
+  }
+  return { reopened: data === true };
+}
+
+/**
+ * Ids of the submissions in `rows` that are their user's latest for the content (same ordering as
+ * fetchLatestSubmissionByContentId). Only the latest can be reopened for a retry (#482).
+ */
+export async function fetchLatestSubmissionIds(
+  rows: readonly { id: number; user_id: number; content_id: number | null }[]
+): Promise<Set<number>> {
+  const userIds = [...new Set(rows.map((row) => row.user_id))];
+  if (userIds.length === 0) {
+    return new Set();
+  }
+  const contentIds = [...new Set(rows.flatMap((row) => (row.content_id ? [row.content_id] : [])))];
+
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase
+    .from("submissions")
+    .select("id, user_id, content_id")
+    .in("user_id", userIds)
+    .in("content_id", contentIds)
+    .order("submitted_at", { ascending: false })
+    .order("id", { ascending: false });
+
+  if (error) {
+    console.error("最新提出取得エラー (fetchLatestSubmissionIds):", error.message);
+    return new Set();
+  }
+
+  const latest = new Map<string, number>();
+  for (const row of data ?? []) {
+    const key = `${row.user_id}:${row.content_id}`;
+    if (!latest.has(key)) {
+      latest.set(key, row.id);
+    }
+  }
+  return new Set(
+    rows.filter((row) => latest.get(`${row.user_id}:${row.content_id}`) === row.id).map((r) => r.id)
+  );
 }

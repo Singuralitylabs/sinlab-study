@@ -313,3 +313,39 @@ describe("computeRemainingReviews", () => {
     expect(remaining(null, [])).toBe(0);
   });
 });
+
+describe("管理者がリセットした行 (counts_toward_limit = false)", () => {
+  it("上限に数えないので、残り回数が回復する", () => {
+    const reset = [row(1, { counts_toward_limit: false }), row(2, { counts_toward_limit: false })];
+    expect(
+      computeRemainingReviews({
+        userStatus: "active",
+        contentReviews: reset,
+        todayTotal: 0,
+        now: NOW,
+      })
+    ).toBe(AI_REVIEW_LIMITS.active.perContentPerDay);
+  });
+
+  it("お試しの生涯上限も回復する", () => {
+    expect(
+      computeRemainingReviews({
+        userStatus: "trial",
+        contentReviews: [row(1, { counts_toward_limit: false })],
+        todayTotal: 0,
+        now: NOW,
+      })
+    ).toBe(AI_REVIEW_LIMITS.trial.perContentLifetime);
+  });
+
+  it("別の提出は通るが、レビュー済みの同じ提出は submission_reviewed のまま", () => {
+    const contentReviews = [row(1, { counts_toward_limit: false })];
+    const base = { userStatus: "active" as const, contentReviews, todayTotal: 0, now: NOW };
+
+    expect(evaluateReviewRequest({ ...base, submissionId: 2 }).kind).toBe("allowed");
+    expect(evaluateReviewRequest({ ...base, submissionId: 1 })).toMatchObject({
+      kind: "limited",
+      reason: "submission_reviewed",
+    });
+  });
+});

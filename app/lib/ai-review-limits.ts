@@ -8,6 +8,8 @@ export interface ReviewUsageRow {
   submission_id: number;
   status: string;
   created_at: string;
+  /** false once an admin reset the allowance (#482); the row stays but no longer counts. */
+  counts_toward_limit?: boolean;
 }
 
 export type ReviewLimitReason =
@@ -43,9 +45,9 @@ export function staleReviewCutoff(now: Date): Date {
 
 /**
  * Rows must already be limited to the user's own submissions for the content. `failed` rows and
- * dead pending / processing rows (see AI_REVIEW_STALE_AFTER_MS) don't count.
+ * dead pending / processing rows (see AI_REVIEW_STALE_AFTER_MS) are not live.
  */
-function countableRows<T extends { status: string; created_at: string }>(
+function liveRows<T extends { status: string; created_at: string }>(
   rows: readonly T[],
   now: Date
 ): T[] {
@@ -57,6 +59,16 @@ function countableRows<T extends { status: string; created_at: string }>(
     const inFlight = row.status === "pending" || row.status === "processing";
     return !(inFlight && Date.parse(row.created_at) < cutoffMs);
   });
+}
+
+/** Live rows minus the ones an admin reset. A reset frees the allowance, not the submission slot. */
+function countableRows<T extends { status: string; created_at: string }>(
+  rows: readonly T[],
+  now: Date
+): T[] {
+  return liveRows(rows, now).filter(
+    (row) => (row as { counts_toward_limit?: boolean }).counts_toward_limit !== false
+  );
 }
 
 function countCreatedSince(rows: readonly ReviewUsageRow[], startIso: string): number {
@@ -182,7 +194,9 @@ export function evaluateReviewRequest({
   const countable = countableRows(contentReviews, now);
   const { startIso } = getJstDayWindow(now);
 
-  const sameSubmission = countable.find((row) => row.submission_id === submissionId);
+  const sameSubmission = liveRows(contentReviews, now).find(
+    (row) => row.submission_id === submissionId
+  );
   if (sameSubmission?.status === "processing" || sameSubmission?.status === "pending") {
     return { kind: "processing", reviewId: sameSubmission.id };
   }

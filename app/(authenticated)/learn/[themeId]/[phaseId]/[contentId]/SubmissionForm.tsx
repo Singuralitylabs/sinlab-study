@@ -41,6 +41,8 @@ interface SubmissionFormProps {
   previewBaseHtml?: string | null;
   /** Id of the completed review the page already renders for this submission. */
   persistedReviewId: number | null;
+  /** A failed review of the latest submission, shown with a retry on load (#482). */
+  failedReview?: { submissionId: number; errorMessage: string | null } | null;
   /** When true, partial/unmet rows show review-list cues (learners only). */
   showReviewListNotes?: boolean;
   /**
@@ -80,6 +82,7 @@ export function SubmissionForm({
   showConsole = null,
   previewBaseHtml = null,
   persistedReviewId,
+  failedReview = null,
   showReviewListNotes = false,
   showEditor = true,
   isRetrying = false,
@@ -108,9 +111,15 @@ export function SubmissionForm({
     type: "success" | "error" | "info";
     text: string;
   } | null>(null);
-  const [aiReview, setAiReview] = useState<AIReviewListItem | null>(null);
+  const [aiReview, setAiReview] = useState<AIReviewListItem | null>(() =>
+    failedReview
+      ? buildFailedReview(failedReview.errorMessage ?? "AIレビューが失敗しました。")
+      : null
+  );
   const [isReviewLoading, setIsReviewLoading] = useState(false);
-  const [lastSubmissionId, setLastSubmissionId] = useState<number | null>(null);
+  const [lastSubmissionId, setLastSubmissionId] = useState<number | null>(
+    failedReview?.submissionId ?? null
+  );
   const [themeNotice, setThemeNotice] = useState<ThemeCompletionNotice | null>(null);
 
   useEffect(() => {

@@ -8,9 +8,72 @@ export type Database = {
   };
   public: {
     Tables: {
+      ai_review_limit_resets: {
+        Row: {
+          action: string;
+          affected_count: number;
+          content_id: number | null;
+          created_at: string;
+          id: number;
+          performed_by: number | null;
+          submission_id: number | null;
+          user_id: number;
+        };
+        Insert: {
+          action: string;
+          affected_count: number;
+          content_id?: number | null;
+          created_at?: string;
+          id?: number;
+          performed_by?: number | null;
+          submission_id?: number | null;
+          user_id: number;
+        };
+        Update: {
+          action?: string;
+          affected_count?: number;
+          content_id?: number | null;
+          created_at?: string;
+          id?: number;
+          performed_by?: number | null;
+          submission_id?: number | null;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ai_review_limit_resets_content_id_fkey";
+            columns: ["content_id"];
+            isOneToOne: false;
+            referencedRelation: "learning_contents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ai_review_limit_resets_performed_by_fkey";
+            columns: ["performed_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ai_review_limit_resets_submission_id_fkey";
+            columns: ["submission_id"];
+            isOneToOne: false;
+            referencedRelation: "submissions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ai_review_limit_resets_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       ai_reviews: {
         Row: {
           completion_tokens: number | null;
+          counts_toward_limit: boolean;
           created_at: string;
           error_message: string | null;
           id: number;
@@ -30,6 +93,7 @@ export type Database = {
         };
         Insert: {
           completion_tokens?: number | null;
+          counts_toward_limit?: boolean;
           created_at?: string;
           error_message?: string | null;
           id?: number;
@@ -49,6 +113,7 @@ export type Database = {
         };
         Update: {
           completion_tokens?: number | null;
+          counts_toward_limit?: boolean;
           created_at?: string;
           error_message?: string | null;
           id?: number;
@@ -1081,6 +1146,14 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      admin_reopen_ai_review: {
+        Args: { p_performed_by: number; p_submission_id: number };
+        Returns: boolean;
+      };
+      admin_reset_ai_review_limits: {
+        Args: { p_content_id: number; p_performed_by: number; p_user_id: number };
+        Returns: number;
+      };
       bulk_update_sibling_display_order: {
         Args: { p_table: string; p_updates: Json };
         Returns: undefined;
