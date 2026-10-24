@@ -41,17 +41,17 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "ai_review_limit_resets_user_id_fkey";
-            columns: ["user_id"];
-            isOneToOne: false;
-            referencedRelation: "users";
-            referencedColumns: ["id"];
-          },
-          {
             foreignKeyName: "ai_review_limit_resets_content_id_fkey";
             columns: ["content_id"];
             isOneToOne: false;
             referencedRelation: "learning_contents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ai_review_limit_resets_performed_by_fkey";
+            columns: ["performed_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
             referencedColumns: ["id"];
           },
           {
@@ -62,8 +62,8 @@ export type Database = {
             referencedColumns: ["id"];
           },
           {
-            foreignKeyName: "ai_review_limit_resets_performed_by_fkey";
-            columns: ["performed_by"];
+            foreignKeyName: "ai_review_limit_resets_user_id_fkey";
+            columns: ["user_id"];
             isOneToOne: false;
             referencedRelation: "users";
             referencedColumns: ["id"];
