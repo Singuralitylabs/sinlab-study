@@ -1,4 +1,4 @@
-import { Mail, UserCog } from "lucide-react";
+import { Bot, Mail, UserCog } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { checkAdminPermissions } from "@/app/services/auth/permissions";
@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator";
 const ADMIN_NAV_ITEMS = [
   { title: "ユーザー管理", href: "/admin/users", icon: UserCog },
   { title: "メール通知", href: "/admin/emails", icon: Mail },
+  { title: "AIレビュー", href: "/admin/ai-review", icon: Bot },
 ];
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {

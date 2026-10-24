@@ -19,7 +19,11 @@ import {
   FEEDBACK_CATEGORIES,
   FEEDBACK_STATUSES,
 } from "@/app/constants/feedback";
-import { STARTER_FILES_MAX_TOTAL_LENGTH } from "@/app/constants/gemini";
+import {
+  AI_REVIEW_LIMIT_BOUNDS,
+  type AIReviewLimits,
+  STARTER_FILES_MAX_TOTAL_LENGTH,
+} from "@/app/constants/gemini";
 import { GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH } from "@/app/constants/grading";
 import {
   EMAIL_DIGEST_DAILY_LIMIT_MAX,
@@ -49,6 +53,7 @@ import {
   USER_ROLES,
   USER_STATUS,
 } from "@/app/constants/user";
+import { areAIReviewLimitsValid } from "@/app/lib/ai-review-limits";
 import { parseDisplayName } from "@/app/lib/display-name";
 import {
   EMAIL_TEMPLATE_KEYS,
@@ -206,6 +211,37 @@ export const SubmissionCreateSchema = z.object({
 export const AiReviewRequestSchema = z.object({
   submissionId: PositiveIntSchema,
 });
+
+/**
+ * PUT /api/admin/ai-review-settings. All three limits at once, so the cross-field rule
+ * (perDay >= perContentPerDay) is checked on the values that will be stored.
+ */
+export const AiReviewSettingsUpdateSchema = z
+  .object({
+    activePerContentPerDay: z.number({
+      message: "activePerContentPerDay は数値で指定してください",
+    }),
+    activePerDay: z.number({ message: "activePerDay は数値で指定してください" }),
+    trialPerContentLifetime: z.number({
+      message: "trialPerContentLifetime は数値で指定してください",
+    }),
+  })
+  .strict()
+  .transform((value, ctx) => {
+    const limits: AIReviewLimits = {
+      active: { perContentPerDay: value.activePerContentPerDay, perDay: value.activePerDay },
+      trial: { perContentLifetime: value.trialPerContentLifetime },
+    };
+    if (!areAIReviewLimitsValid(limits)) {
+      const { perContentPerDay, perDay, perContentLifetime } = AI_REVIEW_LIMIT_BOUNDS;
+      ctx.addIssue({
+        code: "custom",
+        message: `1課題1日は${perContentPerDay.min}〜${perContentPerDay.max}、全課題合計は${perDay.min}〜${perDay.max}（1課題1日以上）、お試しは${perContentLifetime.min}〜${perContentLifetime.max}の整数で指定してください`,
+      });
+      return z.NEVER;
+    }
+    return limits;
+  });
 
 /**
  * POST /api/admin/ai-review-limits. `reset` frees the allowance of one user (all contents, or one

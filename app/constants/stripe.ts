@@ -1,4 +1,4 @@
-import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
+import type { AIReviewLimits } from "@/app/constants/gemini";
 
 export const BILLING_ANCHOR_DAY_OF_MONTH = 27;
 /** UTC hour; 0 = 09:00 JST. */
@@ -34,11 +34,13 @@ export const PLAN_PAGE_TITLE = "プランの確認・変更";
  * Value copy for the trial-to-paid prompts only. Not used on /upgrade: that page sits next to the
  * legal notice right before Checkout, so its description of what is provided must stay exact.
  */
-export const UPGRADE_BENEFITS = [
-  "すべての学習コンテンツ",
-  `演習のAIレビュー（${AI_REVIEW_LIMITS.active.perContentPerDay}回/課題/日、全課題の合計で${AI_REVIEW_LIMITS.active.perDay}回/日まで）`,
-  "もくもく会への参加",
-] as const;
+export function buildUpgradeBenefits(limits: AIReviewLimits): readonly string[] {
+  return [
+    "すべての学習コンテンツ",
+    `演習のAIレビュー（${limits.active.perContentPerDay}回/課題/日、全課題の合計で${limits.active.perDay}回/日まで）`,
+    "もくもく会への参加",
+  ];
+}
 
 /** Shown instead of a CTA when payments are disabled (same branching as the trial banner). */
 export const UPGRADE_APPROVAL_NOTICE = "本登録は運営の承認で行います。承認後に閲覧できます";

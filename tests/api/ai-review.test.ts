@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  AI_REVIEW_LIMITS,
   AI_REVIEW_STALE_AFTER_MS,
   GEMINI_ALTERNATE_MODEL_NAME,
   GEMINI_API_KEY_ENV,
@@ -593,6 +594,7 @@ describe("POST /api/ai-review - 回数制限と枠の確保（#304 / #343）", (
       kind: "limited",
       reason: c.reason,
       remaining: c.remaining,
+      limits: AI_REVIEW_LIMITS,
     });
 
     const res = await POST(request() as never);

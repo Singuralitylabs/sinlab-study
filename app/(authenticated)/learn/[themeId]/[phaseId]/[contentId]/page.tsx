@@ -26,6 +26,7 @@ import {
   fetchCompletedAIReviewByContentId,
   fetchFailedAIReviewBySubmissionId,
 } from "@/app/services/api/ai-review-server";
+import { fetchCurrentAIReviewLimits } from "@/app/services/api/ai-review-settings-server";
 import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   fetchContentById,
@@ -84,6 +85,8 @@ export default async function ContentPage({ params }: PageProps) {
     stripeEnabled && userStatus === USER_STATUS.TRIAL
       ? fetchUpgradePriceLabel()
       : Promise.resolve(null);
+  // Started with the other first-wave fetches; never rejects (falls back to the code defaults).
+  const limitsPromise = fetchCurrentAIReviewLimits();
 
   // Members/trial users fetch the summary via service_role; admin/maintainer use the normal client so
   // unpublished content is included. Progress needs only the IDs (RLS-scoped client), so it runs
@@ -144,6 +147,7 @@ export default async function ContentPage({ params }: PageProps) {
     // never show, and widening the service_role allow-list would break the AGENTS.md invariant.
     // The counts reuse the navigation summaries, so no new service_role call is added.
     const priceLabel = await priceLabelPromise;
+    const limits = await limitsPromise;
     const paidOnlyCount = navigation?.paidOnlyCount ?? 0;
     const paidOnlyExerciseCount = navigation?.paidOnlyExerciseCount ?? 0;
 
@@ -194,7 +198,7 @@ export default async function ContentPage({ params }: PageProps) {
               <h2 className="text-sm font-semibold text-muted-foreground">
                 有料会員になると使えるもの
               </h2>
-              <UpgradeBenefitsList />
+              <UpgradeBenefitsList limits={limits} />
               <UpgradeCta
                 stripeEnabled={stripeEnabled}
                 priceLabel={priceLabel}
@@ -242,6 +246,7 @@ export default async function ContentPage({ params }: PageProps) {
   // computed here on the server (the client never counts) and joins the same Promise.all because
   // it depends on none of the other fetches.
   const exerciseContent = content.content_type === "exercise";
+  const limits = await limitsPromise;
   const [
     { data: existingReview, submissionId: reviewedSubmissionId },
     { data: latestSubmission },
@@ -311,12 +316,13 @@ export default async function ContentPage({ params }: PageProps) {
           contentReviews: aiReviewUsage.contentReviews,
           todayTotal: aiReviewUsage.todayTotal,
           now: new Date(),
+          limits,
         })
       : null;
 
   const aiReviewDailyTotalRemaining =
     showsAIReviewLimit && aiReviewUsage
-      ? computeDailyTotalRemaining(aiReviewUsage.todayTotal)
+      ? computeDailyTotalRemaining(aiReviewUsage.todayTotal, limits)
       : null;
 
   // The completed-review query is the newest submission that has one, which can be older than
@@ -535,6 +541,7 @@ export default async function ContentPage({ params }: PageProps) {
                         <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
                           <h3 className="text-lg font-semibold">課題提出</h3>
                           <AIReviewLimitNotice
+                            limits={limits}
                             userStatus={userStatus}
                             remaining={aiReviewRemaining}
                             dailyTotalRemaining={aiReviewDailyTotalRemaining}
@@ -594,6 +601,7 @@ export default async function ContentPage({ params }: PageProps) {
         <div className="mb-6">
           {exerciseContent && requiresReviewPass ? (
             <ExerciseCompletionStatus
+              limits={limits}
               key={String(isCompleted)}
               contentId={contentIdNum}
               initialCompleted={isCompleted}

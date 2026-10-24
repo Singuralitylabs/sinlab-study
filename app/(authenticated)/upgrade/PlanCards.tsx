@@ -2,7 +2,7 @@
 
 import { ChevronRight } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
-import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
+import { AI_REVIEW_LIMITS, type AIReviewLimits } from "@/app/constants/gemini";
 import { TECH_COMMUNITY_URL } from "@/app/constants/marketing";
 import {
   DISPLAY_COMMUNITY_MONTHLY_PRICE_JPY,
@@ -28,46 +28,49 @@ const COMMUNITY_LABEL = USER_MEMBERSHIP_LABELS.community;
 const FALLBACK_GENERAL_PRICE = formatMonthlyJpyPrice(DISPLAY_MONTHLY_PRICE_JPY);
 const COMMUNITY_PRICE = formatMonthlyJpyPrice(DISPLAY_COMMUNITY_MONTHLY_PRICE_JPY);
 
-const AI_REVIEW_FEATURE = `新しい提出ごとに再レビューできます（${activeLimitSummary()}まで。お試しは1課題につき${AI_REVIEW_LIMITS.trial.perContentLifetime}回）`;
-
 type FeatureValue = string | readonly string[];
 
-const PLAN_FEATURES: ReadonlyArray<{
+type PlanFeature = {
   label: string;
   general: FeatureValue;
   community: FeatureValue;
-}> = [
-  {
-    label: "学習コンテンツ",
-    general: [
-      "全テーマ・全フェーズのコンテンツを閲覧できます（お試しはお試し公開分のみ）",
-      "全演習に取り組めます",
-    ],
-    community: "一般有料会員と同じ",
-  },
-  {
-    label: "AIレビュー",
-    general: AI_REVIEW_FEATURE,
-    community: "一般有料会員と同じ",
-  },
-  {
-    label: "もくもく会",
-    general: "もくもく会に参加できます",
-    community: "一般有料会員と同じ",
-  },
-  {
-    label: "コミュニティ特典",
-    general: "—",
-    community: [
-      "限定講座・勉強会",
-      "交流イベント",
-      "限定サービス",
-      "現役エンジニアへの相談",
-      "Slackでのコミュニケーション",
-      "Web/AIの最新情報",
-    ],
-  },
-];
+};
+
+function buildPlanFeatures(limits: AIReviewLimits): readonly PlanFeature[] {
+  const aiReviewFeature = `新しい提出ごとに再レビューできます（${activeLimitSummary(limits)}まで。お試しは1課題につき${limits.trial.perContentLifetime}回）`;
+  return [
+    {
+      label: "学習コンテンツ",
+      general: [
+        "全テーマ・全フェーズのコンテンツを閲覧できます（お試しはお試し公開分のみ）",
+        "全演習に取り組めます",
+      ],
+      community: "一般有料会員と同じ",
+    },
+    {
+      label: "AIレビュー",
+      general: aiReviewFeature,
+      community: "一般有料会員と同じ",
+    },
+    {
+      label: "もくもく会",
+      general: "もくもく会に参加できます",
+      community: "一般有料会員と同じ",
+    },
+    {
+      label: "コミュニティ特典",
+      general: "—",
+      community: [
+        "限定講座・勉強会",
+        "交流イベント",
+        "限定サービス",
+        "現役エンジニアへの相談",
+        "Slackでのコミュニケーション",
+        "Web/AIの最新情報",
+      ],
+    },
+  ];
+}
 
 // Benefits are listed right above; keep this to one line so it does not repeat them.
 const COMMUNITY_CARD_DESCRIPTION =
@@ -75,7 +78,7 @@ const COMMUNITY_CARD_DESCRIPTION =
 
 // On sm+ both cards share the grid's row tracks (header, one per feature, bottom) via nested
 // subgrid so every feature row lines up; stacked cards on mobile need no alignment.
-const FEATURE_ROWS = PLAN_FEATURES.length;
+const FEATURE_ROWS = buildPlanFeatures(AI_REVIEW_LIMITS).length;
 const GRID_ROW_VARS = {
   "--plan-feature-rows": FEATURE_ROWS,
   "--plan-body-rows": FEATURE_ROWS + 1,
@@ -87,6 +90,8 @@ const BODY_LAYOUT_CLASS =
   "flex flex-col gap-6 sm:grid sm:grid-rows-subgrid sm:gap-y-0 sm:[grid-row:span_var(--plan-body-rows)]";
 
 type PlanCardsProps = {
+  /** Admin-editable AI review limits (#482); the feature text must match what is enforced. */
+  limits: AIReviewLimits;
   /**
    * Trial checkout: pass the same label as the legal/Checkout heading (`monthlyPriceLabel`).
    * `null` means the monthly JPY amount is not confirmed — show "—" instead of the display
@@ -280,12 +285,14 @@ function PlanCard({
 
 /** Side-by-side plan cards for /upgrade (#407). Stacks on small screens; details open in a dialog. */
 export function PlanCards({
+  limits,
   generalPriceLabel,
   currentPlan = null,
   generalDialog,
   communityDialog,
   generalCardFooter,
-}: PlanCardsProps = {}) {
+}: PlanCardsProps) {
+  const planFeatures = buildPlanFeatures(limits);
   const generalPrice =
     generalPriceLabel === undefined ? FALLBACK_GENERAL_PRICE : (generalPriceLabel ?? "—");
 
@@ -295,7 +302,7 @@ export function PlanCards({
         title={GENERAL_LABEL}
         subtitle=""
         price={generalPrice}
-        features={PLAN_FEATURES.map((feature) => ({
+        features={planFeatures.map((feature) => ({
           label: feature.label,
           value: feature.general,
         }))}
@@ -310,7 +317,7 @@ export function PlanCards({
         subtitle="（シンラボ会員）"
         price={COMMUNITY_PRICE}
         description={COMMUNITY_CARD_DESCRIPTION}
-        features={PLAN_FEATURES.map((feature) => ({
+        features={planFeatures.map((feature) => ({
           label: feature.label,
           value: feature.community,
         }))}

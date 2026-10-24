@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
 import {
+  areAIReviewLimitsValid,
   computeRemainingReviews,
   evaluateReviewRequest,
   getJstDayWindow,
   limitedDecision,
+  parseAIReviewLimits,
   type ReviewUsageRow,
   trialLimitMessage,
 } from "@/app/lib/ai-review-limits";
@@ -56,16 +58,18 @@ describe("getJstDayWindow", () => {
 
 describe("limitedDecision", () => {
   it("日次の理由には JST 翌0時の resetsAt を付け、解除されない理由には付けない", () => {
-    expect(limitedDecision("content_daily", 0, NOW)).toMatchObject({
+    expect(limitedDecision("content_daily", 0, NOW, AI_REVIEW_LIMITS)).toMatchObject({
       remaining: 0,
       resetsAt: "2026-10-12T15:00:00.000Z",
     });
-    expect(limitedDecision("user_daily", 0, NOW).resetsAt).toBe("2026-10-12T15:00:00.000Z");
-    expect(limitedDecision("trial_lifetime", 0, NOW)).toMatchObject({
+    expect(limitedDecision("user_daily", 0, NOW, AI_REVIEW_LIMITS).resetsAt).toBe(
+      "2026-10-12T15:00:00.000Z"
+    );
+    expect(limitedDecision("trial_lifetime", 0, NOW, AI_REVIEW_LIMITS)).toMatchObject({
       resetsAt: null,
-      message: trialLimitMessage(),
+      message: trialLimitMessage(AI_REVIEW_LIMITS),
     });
-    expect(limitedDecision("submission_reviewed", 1, NOW)).toMatchObject({
+    expect(limitedDecision("submission_reviewed", 1, NOW, AI_REVIEW_LIMITS)).toMatchObject({
       remaining: 1,
       resetsAt: null,
     });
@@ -84,6 +88,7 @@ describe("evaluateReviewRequest - active", () => {
       contentReviews,
       todayTotal,
       now: NOW,
+      limits: AI_REVIEW_LIMITS,
     });
 
   it("allows the 1st review of the day and counts it toward remaining", () => {
@@ -222,6 +227,7 @@ describe("evaluateReviewRequest - trial", () => {
       contentReviews,
       todayTotal: 0,
       now: NOW,
+      limits: AI_REVIEW_LIMITS,
     });
 
   it("allows the first review", () => {
@@ -235,9 +241,9 @@ describe("evaluateReviewRequest - trial", () => {
       reason: "trial_lifetime",
       remaining: 0,
       resetsAt: null,
-      message: trialLimitMessage(),
+      message: trialLimitMessage(AI_REVIEW_LIMITS),
     });
-    expect(trialLimitMessage()).toBe(
+    expect(trialLimitMessage(AI_REVIEW_LIMITS)).toBe(
       "お試しプランでは AI レビューは 1 課題につき 1 回です。有料会員は 1課題につき1日2回、全課題の合計で1日10回まで再レビューできます"
     );
   });
@@ -273,6 +279,7 @@ describe("evaluateReviewRequest - trial", () => {
         contentReviews: [],
         todayTotal: 999,
         now: NOW,
+        limits: AI_REVIEW_LIMITS,
       })
     ).toEqual({ kind: "allowed", remaining: 1 });
   });
@@ -283,7 +290,14 @@ describe("computeRemainingReviews", () => {
     userStatus: "active" | "trial" | null,
     contentReviews: ReturnType<typeof row>[],
     todayTotal = 0
-  ) => computeRemainingReviews({ userStatus, contentReviews, todayTotal, now: NOW });
+  ) =>
+    computeRemainingReviews({
+      userStatus,
+      contentReviews,
+      todayTotal,
+      now: NOW,
+      limits: AI_REVIEW_LIMITS,
+    });
 
   it("active: starts at the per-content daily limit and drops per review", () => {
     expect(remaining("active", [])).toBe(2);
@@ -323,6 +337,7 @@ describe("管理者がリセットした行 (counts_toward_limit = false)", () =
         contentReviews: reset,
         todayTotal: 0,
         now: NOW,
+        limits: AI_REVIEW_LIMITS,
       })
     ).toBe(AI_REVIEW_LIMITS.active.perContentPerDay);
   });
@@ -334,18 +349,113 @@ describe("管理者がリセットした行 (counts_toward_limit = false)", () =
         contentReviews: [row(1, { counts_toward_limit: false })],
         todayTotal: 0,
         now: NOW,
+        limits: AI_REVIEW_LIMITS,
       })
     ).toBe(AI_REVIEW_LIMITS.trial.perContentLifetime);
   });
 
   it("別の提出は通るが、レビュー済みの同じ提出は submission_reviewed のまま", () => {
     const contentReviews = [row(1, { counts_toward_limit: false })];
-    const base = { userStatus: "active" as const, contentReviews, todayTotal: 0, now: NOW };
+    const base = {
+      userStatus: "active" as const,
+      contentReviews,
+      todayTotal: 0,
+      now: NOW,
+      limits: AI_REVIEW_LIMITS,
+    };
 
     expect(evaluateReviewRequest({ ...base, submissionId: 2 }).kind).toBe("allowed");
     expect(evaluateReviewRequest({ ...base, submissionId: 1 })).toMatchObject({
       kind: "limited",
       reason: "submission_reviewed",
     });
+  });
+});
+
+describe("カスタム上限値", () => {
+  const custom = {
+    active: { perContentPerDay: 5, perDay: 30 },
+    trial: { perContentLifetime: 3 },
+  };
+
+  it("有料: 設定した回数で残りと拒否が決まる", () => {
+    const base = { userStatus: "active" as const, submissionId: 99, todayTotal: 4, now: NOW };
+    const reviews = [row(1), row(2), row(3)];
+
+    expect(evaluateReviewRequest({ ...base, contentReviews: reviews, limits: custom })).toEqual({
+      kind: "allowed",
+      remaining: 2,
+    });
+    expect(
+      evaluateReviewRequest({
+        ...base,
+        contentReviews: [...reviews, row(4), row(5)],
+        limits: custom,
+      })
+    ).toMatchObject({ kind: "limited", reason: "content_daily" });
+    expect(
+      evaluateReviewRequest({
+        ...base,
+        contentReviews: reviews,
+        todayTotal: 30,
+        limits: custom,
+      })
+    ).toMatchObject({ kind: "limited", reason: "user_daily" });
+  });
+
+  it("お試し: 生涯回数は設定値で、メッセージにも設定値が入る", () => {
+    const decision = evaluateReviewRequest({
+      userStatus: "trial",
+      submissionId: 99,
+      contentReviews: [row(1), row(2), row(3)],
+      todayTotal: 0,
+      now: NOW,
+      limits: custom,
+    });
+
+    expect(decision).toMatchObject({ kind: "limited", reason: "trial_lifetime" });
+    expect(trialLimitMessage(custom)).toContain("1 課題につき 3 回");
+    expect(trialLimitMessage(custom)).toContain("1課題につき1日5回、全課題の合計で1日30回");
+  });
+});
+
+describe("parseAIReviewLimits / areAIReviewLimitsValid", () => {
+  const rowOf = (a: unknown, b: unknown, c: unknown) => ({
+    active_per_content_per_day: a,
+    active_per_day: b,
+    trial_per_content_lifetime: c,
+  });
+
+  it("正常な行はその値を返す", () => {
+    expect(parseAIReviewLimits(rowOf(3, 20, 2))).toEqual({
+      active: { perContentPerDay: 3, perDay: 20 },
+      trial: { perContentLifetime: 2 },
+    });
+  });
+
+  it.each([
+    ["行なし", null],
+    ["範囲外", rowOf(21, 30, 1)],
+    ["0回", rowOf(0, 10, 1)],
+    ["小数", rowOf(2.5, 10, 1)],
+    ["文字列", rowOf("2", 10, 1)],
+    ["合計が課題ごとより小さい", rowOf(5, 4, 1)],
+  ])("%s は既定値に戻す", (_label, input) => {
+    expect(parseAIReviewLimits(input)).toBe(AI_REVIEW_LIMITS);
+  });
+
+  it("境界値（最小・最大）は有効", () => {
+    expect(
+      areAIReviewLimitsValid({
+        active: { perContentPerDay: 1, perDay: 1 },
+        trial: { perContentLifetime: 1 },
+      })
+    ).toBe(true);
+    expect(
+      areAIReviewLimitsValid({
+        active: { perContentPerDay: 20, perDay: 100 },
+        trial: { perContentLifetime: 10 },
+      })
+    ).toBe(true);
   });
 });

@@ -42,6 +42,7 @@ describe("PlanCards", () => {
     await act(async () => {
       root.render(
         <PlanCards
+          limits={AI_REVIEW_LIMITS}
           generalPriceLabel={null}
           generalDialog={<TrialCheckoutDetails monthlyPriceLabel={null} checkoutDisabled={true} />}
           communityDialog={<p>community body</p>}
@@ -78,6 +79,7 @@ describe("PlanCards", () => {
     await act(async () => {
       root.render(
         <PlanCards
+          limits={AI_REVIEW_LIMITS}
           currentPlan="general"
           communityDialog={<p>community</p>}
           generalCardFooter={<p>manage footer</p>}
@@ -99,6 +101,7 @@ describe("PlanCards", () => {
     await act(async () => {
       root.render(
         <PlanCards
+          limits={AI_REVIEW_LIMITS}
           generalDialog={<p>g</p>}
           communityDialog={
             <div>
@@ -130,7 +133,9 @@ describe("PlanCards", () => {
 
   it("コミュニティ特典を箇条書きで表示する", async () => {
     await act(async () => {
-      root.render(<PlanCards generalDialog={<p>g</p>} communityDialog={<p>c</p>} />);
+      root.render(
+        <PlanCards limits={AI_REVIEW_LIMITS} generalDialog={<p>g</p>} communityDialog={<p>c</p>} />
+      );
     });
 
     expect(container.textContent).toContain("Slackでのコミュニケーション");
@@ -140,7 +145,9 @@ describe("PlanCards", () => {
 
   it("有料とお試しの差が学習・AIレビュー・もくもく会の文言から読み取れる", async () => {
     await act(async () => {
-      root.render(<PlanCards generalDialog={<p>g</p>} communityDialog={<p>c</p>} />);
+      root.render(
+        <PlanCards limits={AI_REVIEW_LIMITS} generalDialog={<p>g</p>} communityDialog={<p>c</p>} />
+      );
     });
 
     const text = container.textContent ?? "";
@@ -158,7 +165,13 @@ describe("PlanCards", () => {
 
   it("コミュニティカードに説明とサイトリンクがあり、リンク押下ではダイアログが開かない", async () => {
     await act(async () => {
-      root.render(<PlanCards generalDialog={<p>g</p>} communityDialog={<p>community body</p>} />);
+      root.render(
+        <PlanCards
+          limits={AI_REVIEW_LIMITS}
+          generalDialog={<p>g</p>}
+          communityDialog={<p>community body</p>}
+        />
+      );
     });
 
     const text = container.textContent ?? "";
