@@ -2,6 +2,7 @@ import { CircleCheck, CircleMinus, CircleX } from "lucide-react";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { ReviewNoteMemoField } from "@/app/components/ReviewNoteEditor";
 import {
+  describeNotPassedReasons,
   getQualityLevelLabel,
   getRequirementStatusLabel,
   type PassDisplay,
@@ -21,14 +22,15 @@ const STATUS_COLOR: Record<RequirementStatus, string> = {
   unmet: "text-destructive",
 };
 
-export function retryGuidance(): string {
-  return "未達成の要件を直して再提出すると、再レビューできます（回数の上限があります）";
+export function retryGuidance(hasUnmet = true): string {
+  return `${hasUnmet ? "未達成の要件を直して" : "要件の達成度を上げて"}再提出すると、再レビューできます（回数の上限があります）`;
 }
 
 interface StructuredReviewProps {
   reviewJson: ReviewJson;
   scoreKind: ScoreKind;
   passDisplay: PassDisplay | null;
+  score?: number | null;
   /** When set, partial/unmet rows show the review-list cue and an inline memo field. */
   contentId?: number;
   /** Existing memos keyed by requirement key (from review_notes). Plain object for RSC props. */
@@ -39,6 +41,7 @@ export function StructuredReview({
   reviewJson,
   scoreKind,
   passDisplay,
+  score = null,
   contentId,
   memosByKey,
 }: StructuredReviewProps) {
@@ -130,9 +133,14 @@ export function StructuredReview({
       </section>
 
       {passDisplay === "retry" && (
-        <p className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
-          {retryGuidance()}
-        </p>
+        <div className="space-y-1 rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
+          {describeNotPassedReasons(reviewJson, score).map((reason) => (
+            <p key={reason} className="font-medium">
+              不合格の理由：{reason}
+            </p>
+          ))}
+          <p>{retryGuidance(reviewJson.requirements.some((item) => item.status === "unmet"))}</p>
+        </div>
       )}
     </div>
   );
