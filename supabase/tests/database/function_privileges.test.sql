@@ -28,6 +28,12 @@ from (
     ('public.claim_ai_review(integer, integer, integer, text, timestamp with time zone, timestamp with time zone, integer, integer, integer)', 'anon', false),
     ('public.claim_ai_review(integer, integer, integer, text, timestamp with time zone, timestamp with time zone, integer, integer, integer)', 'authenticated', false),
     ('public.claim_ai_review(integer, integer, integer, text, timestamp with time zone, timestamp with time zone, integer, integer, integer)', 'service_role', true),
+    ('public.admin_reset_ai_review_limits(integer, integer, integer)', 'anon', false),
+    ('public.admin_reset_ai_review_limits(integer, integer, integer)', 'authenticated', false),
+    ('public.admin_reset_ai_review_limits(integer, integer, integer)', 'service_role', true),
+    ('public.admin_reopen_ai_review(integer, integer)', 'anon', false),
+    ('public.admin_reopen_ai_review(integer, integer)', 'authenticated', false),
+    ('public.admin_reopen_ai_review(integer, integer)', 'service_role', true),
     ('public.replace_quiz_questions(integer, jsonb)', 'anon', false),
     ('public.replace_quiz_questions(integer, jsonb)', 'authenticated', false),
     ('public.replace_quiz_questions(integer, jsonb)', 'service_role', true),
@@ -108,6 +114,8 @@ select is(
       )
   ),
   array[
+    'admin_reopen_ai_review(integer,integer)',
+    'admin_reset_ai_review_limits(integer,integer,integer)',
     'bulk_update_sibling_display_order(text,jsonb)',
     'claim_ai_review(integer,integer,integer,text,timestamp with time zone,timestamp with time zone,integer,integer,integer)',
     'claim_email_test_send(integer,timestamp with time zone,integer)',
