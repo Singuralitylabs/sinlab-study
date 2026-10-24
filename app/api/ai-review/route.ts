@@ -140,7 +140,7 @@ export async function POST(request: NextRequest) {
       );
     }
     if (claim.kind === "limited") {
-      const decision = limitedDecision(claim.reason, claim.remaining, now);
+      const decision = limitedDecision(claim.reason, claim.remaining, now, claim.limits);
       return NextResponse.json(
         {
           error: decision.message,

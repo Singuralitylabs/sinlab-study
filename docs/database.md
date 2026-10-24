@@ -36,6 +36,7 @@ erDiagram
     users ||--o{ email_logs : "1:N"
     users ||--o{ email_kind_settings : "updated_by"
     users ||--o{ email_settings : "updated_by"
+    users ||--o{ ai_review_settings : "updated_by"
     users ||--o{ email_templates : "updated_by"
     users ||--o{ email_test_sends : "user_id"
     users ||--o{ certificates : "1:N"
@@ -46,7 +47,7 @@ erDiagram
     users ||--o{ announcement_reads : "1:N"
 ```
 
-`stripe_events` / `cron_locks` は他テーブルと関連を持たない独立テーブル。`email_kind_settings` / `email_settings` / `email_templates` は更新者（`updated_by`）でのみ `users` を参照する。
+`stripe_events` / `cron_locks` は他テーブルと関連を持たない独立テーブル。`email_kind_settings` / `email_settings` / `email_templates` / `ai_review_settings` は更新者（`updated_by`）でのみ `users` を参照する。
 
 ---
 
@@ -330,6 +331,18 @@ RLS は有効化しポリシーは作らない（`push_subscriptions` と同じ�
 
 ## 5. トリガー
 
+
+### 3.26 ai_review_settings（AIレビュー回数の上限値）
+
+`id = 1` の1行だけのテーブル（CHECK 制約）で、管理者が `/admin/ai-review` から変える（#482）。値の範囲は CHECK で固定する（コスト急増を防ぐため上限も設ける。アプリ側は `AI_REVIEW_LIMIT_BOUNDS` で同じ範囲を検証する）。
+
+- `active_per_content_per_day`（既定 2、1〜20）: 有料会員の1課題あたり1日（JST）の回数
+- `active_per_day`（既定 10、1〜100）: 有料会員の全課題合計の1日（JST）の回数。**`active_per_content_per_day` 以上**（CHECK）
+- `trial_per_content_lifetime`（既定 1、1〜10）: お試しの1課題あたりの生涯回数
+- `updated_at` / `updated_by`（`users.id`、`ON DELETE SET NULL`）: 最終更新。変更履歴は持たない
+
+初期値は `app/constants/gemini.ts` の `AI_REVIEW_LIMITS` と同じなので、適用直後の挙動は変わらない。**行が読めない・範囲外のときは、アプリが `AI_REVIEW_LIMITS` で動く**（設定の障害でレビューを止めない）。
+
 ### 5.1 updated_at 自動更新トリガー
 
 `updated_at` を持つテーブルに `BEFORE UPDATE` トリガー（関数 `update_updated_at_column()`）を設定し、更新時に自動で `updated_at` を更新する。定義は `20260412010000_create_tables.sql`。
@@ -470,6 +483,15 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | UPDATE | admin | 同上（USING / WITH CHECK とも） |
 
 同一操作のポリシーは1本にまとめ、`get_user_role()` は `(select ...)` で包む。INSERT / DELETE のポリシーは定義しない（行はマイグレーションで投入し、消さない）。maintainer には開放しない。Cron（`runEmailDigest()`）とメール送信（`deliverToUser()`）は service_role で読む（RLS をバイパスする）。
+
+### 6.20 ai_review_settings
+
+| 操作 | 対象 | 条件 |
+|:--|:--|:--|
+| SELECT | 認証済み全員 | `true`（受講生の画面に上限を表示するため。機微な値ではない） |
+| UPDATE | admin | `(select get_user_role()) = 'admin'`（USING / WITH CHECK とも） |
+
+INSERT / DELETE のポリシーは定義しない（行はマイグレーションで投入し、消さない）。maintainer には開放しない。`claim_ai_review()` を呼ぶ前の読み出しは service_role で行う。
 
 ### 6.11 announcements
 

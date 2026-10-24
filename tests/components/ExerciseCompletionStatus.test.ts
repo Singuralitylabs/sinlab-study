@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
 import { CERTIFICATE_PASS_SCORE } from "@/app/constants/grading";
 
 vi.mock("next/navigation", () => ({
@@ -21,6 +22,7 @@ const renderStatus = (
   renderToStaticMarkup(
     createElement(ExerciseCompletionStatus, {
       contentId: 10,
+      limits: AI_REVIEW_LIMITS,
       initialCompleted: false,
       hasPassingReview: false,
       passUnachievable: false,

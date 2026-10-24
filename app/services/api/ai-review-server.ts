@@ -1,5 +1,5 @@
 import type { PostgrestError } from "@supabase/supabase-js";
-import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
+import type { AIReviewLimits } from "@/app/constants/gemini";
 import { SUBMISSIONS_PAGE_SIZE } from "@/app/constants/submissions";
 import {
   getJstDayWindow,
@@ -16,6 +16,7 @@ import type {
   SubmissionWithContentAndReview,
   UserStatusType,
 } from "@/app/types";
+import { fetchAIReviewLimits } from "./ai-review-settings-server";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
 const AI_REVIEW_STUDENT_COLUMNS =
@@ -238,7 +239,7 @@ export async function fetchCompletedAIReviewContentIds(
 export type AIReviewClaim =
   | { kind: "claimed"; reviewId: number; remaining: number }
   | { kind: "processing"; reviewId: number }
-  | { kind: "limited"; reason: ReviewLimitReason; remaining: number }
+  | { kind: "limited"; reason: ReviewLimitReason; remaining: number; limits: AIReviewLimits }
   | { kind: "busy" };
 
 const LIMIT_REASONS: readonly ReviewLimitReason[] = [
@@ -270,6 +271,8 @@ export async function claimAIReview({
   now: Date;
 }): Promise<AIReviewClaim | null> {
   const supabase = await createAdminSupabaseClient();
+  // Read per request: an admin's change applies from the next claim (#482).
+  const limits = await fetchAIReviewLimits(supabase);
   const { data, error } = await supabase.rpc("claim_ai_review", {
     p_user_id: userId,
     p_submission_id: submissionId,
@@ -278,9 +281,9 @@ export async function claimAIReview({
     p_user_status: userStatus ?? "",
     p_stale_before: staleReviewCutoff(now).toISOString(),
     p_day_start: getJstDayWindow(now).startIso,
-    p_active_per_content_per_day: AI_REVIEW_LIMITS.active.perContentPerDay,
-    p_active_per_day: AI_REVIEW_LIMITS.active.perDay,
-    p_trial_per_content_lifetime: AI_REVIEW_LIMITS.trial.perContentLifetime,
+    p_active_per_content_per_day: limits.active.perContentPerDay,
+    p_active_per_day: limits.active.perDay,
+    p_trial_per_content_lifetime: limits.trial.perContentLifetime,
   });
 
   if (error) {
@@ -308,7 +311,7 @@ export async function claimAIReview({
     case "limited": {
       const reason = LIMIT_REASONS.find((r) => r === result.reason);
       if (reason) {
-        return { kind: "limited", reason, remaining: result.remaining ?? 0 };
+        return { kind: "limited", reason, remaining: result.remaining ?? 0, limits };
       }
       break;
     }

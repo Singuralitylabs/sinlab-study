@@ -15,6 +15,7 @@ import {
   type SubscriptionPeriodFields,
   subscriptionPeriodLabel,
 } from "@/app/lib/subscription-period";
+import { fetchCurrentAIReviewLimits } from "@/app/services/api/ai-review-settings-server";
 import {
   fetchStripeSubscriptionByUserId,
   fetchSubscriptionPrice,
@@ -40,6 +41,7 @@ export default async function UpgradePage() {
     redirect("/login");
   }
 
+  const limits = await fetchCurrentAIReviewLimits();
   const stripeEnabled = isStripeEnabled();
   const feedbackEnabled = isFeedbackEnabled();
   const isCommunity = membershipType === USER_MEMBERSHIP.COMMUNITY;
@@ -145,6 +147,7 @@ export default async function UpgradePage() {
         {userStatus === USER_STATUS.TRIAL &&
           (stripeEnabled ? (
             <PlanCards
+              limits={limits}
               generalPriceLabel={monthlyPriceLabel}
               generalDialog={
                 <TrialCheckoutDetails
@@ -195,6 +198,7 @@ export default async function UpgradePage() {
 
         {userStatus === USER_STATUS.ACTIVE && !isCommunity && (
           <PlanCards
+            limits={limits}
             currentPlan={isGeneral ? "general" : null}
             communityDialog={isGeneral ? communityApplyDialog : undefined}
             generalCardFooter={generalCardFooter}

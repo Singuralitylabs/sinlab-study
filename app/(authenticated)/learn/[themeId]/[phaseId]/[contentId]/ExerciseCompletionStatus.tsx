@@ -4,7 +4,7 @@ import { CheckCircle, Circle, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ThemeCompletionDialog } from "@/app/components/ThemeCompletionDialog";
-import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
+import type { AIReviewLimits } from "@/app/constants/gemini";
 import { CERTIFICATE_PASS_SCORE } from "@/app/constants/grading";
 import { USER_STATUS } from "@/app/constants/user";
 import {
@@ -22,6 +22,7 @@ interface ExerciseCompletionStatusProps {
   passUnachievable: boolean;
   userStatus: UserStatusType | null;
   allowsUrlSubmission: boolean;
+  limits: AIReviewLimits;
 }
 
 /**
@@ -35,6 +36,7 @@ export function ExerciseCompletionStatus({
   passUnachievable,
   userStatus,
   allowsUrlSubmission,
+  limits,
 }: ExerciseCompletionStatusProps) {
   const router = useRouter();
   const [isCompleted, setIsCompleted] = useState(initialCompleted);
@@ -125,12 +127,12 @@ export function ExerciseCompletionStatus({
       )}
       {userStatus === USER_STATUS.TRIAL && (
         <p>
-          {`お試しプランでは AI レビューは 1 課題につき ${AI_REVIEW_LIMITS.trial.perContentLifetime} 回です。不合格だと、お試しの間はこの演習を完了できません。`}
+          {`お試しプランでは AI レビューは 1 課題につき ${limits.trial.perContentLifetime} 回です。不合格だと、お試しの間はこの演習を完了できません。`}
         </p>
       )}
       {userStatus === USER_STATUS.ACTIVE && (
         <p>
-          {`不合格が続くと、AI レビューは 1 課題につき 1 日 ${AI_REVIEW_LIMITS.active.perContentPerDay} 回、全課題の合計で 1 日 ${AI_REVIEW_LIMITS.active.perDay} 回までのため、その日のうちは完了できないことがあります。`}
+          {`不合格が続くと、AI レビューは 1 課題につき 1 日 ${limits.active.perContentPerDay} 回、全課題の合計で 1 日 ${limits.active.perDay} 回までのため、その日のうちは完了できないことがあります。`}
         </p>
       )}
     </div>

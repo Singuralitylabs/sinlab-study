@@ -129,3 +129,18 @@ export const AI_REVIEW_LIMITS = {
     perContentLifetime: 1,
   },
 } as const;
+
+export interface AIReviewLimits {
+  active: { perContentPerDay: number; perDay: number };
+  trial: { perContentLifetime: number };
+}
+
+/**
+ * Accepted range of each limit the admin can set (#482). The upper ends cap the Gemini cost of a
+ * wrong entry; the DB CHECK constraints mirror them. perDay must also be >= perContentPerDay.
+ */
+export const AI_REVIEW_LIMIT_BOUNDS = {
+  perContentPerDay: { min: 1, max: 20 },
+  perDay: { min: 1, max: 100 },
+  perContentLifetime: { min: 1, max: 10 },
+} as const;
