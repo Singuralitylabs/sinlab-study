@@ -15,7 +15,8 @@ export interface AIReviewUsage {
 /**
  * Every query is pinned to `userId`: admin / maintainer RLS lets them SELECT all ai_reviews, so
  * relying on RLS alone would count other users' reviews against them. `failed` rows are excluded
- * so a Gemini failure never consumes an allowance. todayTotal is skipped (0) for callers that
+ * so a Gemini failure never consumes an allowance. Rows an admin reset (counts_toward_limit = false) are
+ * still returned: they don't count, but they still occupy their submission's single review slot. todayTotal is skipped (0) for callers that
  * don't apply the daily total (trial).
  */
 export async function fetchAIReviewUsage(
@@ -31,7 +32,7 @@ export async function fetchAIReviewUsage(
     const { data, error } = await supabase
       .from("ai_reviews")
       .select(
-        "id, submission_id, status, created_at, submission:submissions!inner(user_id, content_id)"
+        "id, submission_id, status, created_at, counts_toward_limit, submission:submissions!inner(user_id, content_id)"
       )
       .eq("submission.user_id", userId)
       .eq("submission.content_id", contentId)
@@ -41,11 +42,12 @@ export async function fetchAIReviewUsage(
       console.error("AIレビュー回数集計エラー (ai_reviews):", error.message);
       return null;
     }
-    return (data ?? []).map(({ id, submission_id, status, created_at }) => ({
+    return (data ?? []).map(({ id, submission_id, status, created_at, counts_toward_limit }) => ({
       id,
       submission_id,
       status,
       created_at,
+      counts_toward_limit,
     }));
   };
 
@@ -60,6 +62,7 @@ export async function fetchAIReviewUsage(
       .select("id, submission:submissions!inner(user_id)", { count: "exact", head: true })
       .eq("submission.user_id", userId)
       .neq("status", "failed")
+      .eq("counts_toward_limit", true)
       // A dead pending / processing row (killed run) must not count, same as in the per-content
       // lookup (countableRows).
       .or(`status.eq.completed,created_at.gt.${staleReviewCutoff(now).toISOString()}`)

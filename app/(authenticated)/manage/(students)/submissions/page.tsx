@@ -6,6 +6,7 @@ import { PageTitle } from "@/app/components/PageTitle";
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { SubmissionsPager } from "@/app/components/SubmissionsPager";
 import { SUBMISSIONS_PAGE_SIZE } from "@/app/constants/submissions";
+import { USER_ROLE } from "@/app/constants/user";
 import { formatDateTimeMinute } from "@/app/lib/format-date";
 import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import {
@@ -14,8 +15,10 @@ import {
   shouldRedirectOutOfRangePage,
 } from "@/app/lib/submissions-pagination";
 import { fetchAllSubmissionsWithReviews } from "@/app/services/api/ai-review-server";
+import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { AiReviewAdminActions } from "./AiReviewAdminActions";
 
 function isValidUrl(url: string): boolean {
   try {
@@ -72,6 +75,9 @@ export default async function ManageSubmissionsPage({ searchParams }: PageProps)
   }
 
   const totalPages = calcTotalPages(count, SUBMISSIONS_PAGE_SIZE);
+  // Reset / reopen are admin-only; maintainers reach this page but get no buttons.
+  const { userRole } = await getServerAuth();
+  const isAdmin = userRole === USER_ROLE.ADMIN;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -162,6 +168,15 @@ export default async function ManageSubmissionsPage({ searchParams }: PageProps)
                     回答: {formatTokenCount(submission.ai_review.completion_tokens)} / 思考:{" "}
                     {formatTokenCount(submission.ai_review.thoughts_tokens)}
                   </p>
+                )}
+
+                {isAdmin && (
+                  <AiReviewAdminActions
+                    userId={submission.user_id}
+                    contentId={submission.content_id}
+                    submissionId={submission.id}
+                    canReopen={submission.ai_review?.status === "completed"}
+                  />
                 )}
 
                 {submission.ai_review && <AIReviewDisplayClient review={submission.ai_review} />}

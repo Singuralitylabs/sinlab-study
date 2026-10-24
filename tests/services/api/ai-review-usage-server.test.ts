@@ -19,6 +19,7 @@ describe("fetchAIReviewUsage", () => {
         submission_id: 11,
         status: "completed",
         created_at: "2026-10-12T01:00:00Z",
+        counts_toward_limit: false,
         submission: embedded,
       },
     ];
@@ -40,7 +41,13 @@ describe("fetchAIReviewUsage", () => {
 
     expect(usage).toEqual({
       contentReviews: [
-        { id: 1, submission_id: 11, status: "completed", created_at: "2026-10-12T01:00:00Z" },
+        {
+          id: 1,
+          submission_id: 11,
+          status: "completed",
+          created_at: "2026-10-12T01:00:00Z",
+          counts_toward_limit: false,
+        },
       ],
       todayTotal: 4,
     });
@@ -54,6 +61,8 @@ describe("fetchAIReviewUsage", () => {
     const totalBuilder = client.from.mock.results[1].value;
     expect(totalBuilder.eq).toHaveBeenCalledWith("submission.user_id", 2);
     expect(totalBuilder.neq).toHaveBeenCalledWith("status", "failed");
+    // Rows an admin reset don't count toward the daily total.
+    expect(totalBuilder.eq).toHaveBeenCalledWith("counts_toward_limit", true);
     // JST day start (not the UTC day start).
     expect(totalBuilder.gte).toHaveBeenCalledWith("created_at", "2026-10-11T15:00:00.000Z");
     // A pending / processing row older than the stale cutoff (NOW - 90s) must not count.

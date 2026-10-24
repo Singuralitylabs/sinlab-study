@@ -123,6 +123,8 @@ erDiagram
 - ステータス遷移: `pending` → `processing` → `completed` / `failed`
 - 回数上限の判定と行の確保は RPC `claim_ai_review()`（`SECURITY INVOKER`・service_role のみ実行可）がユーザー単位の `pg_advisory_xact_lock` の中で行う（#343。仕様は specification.md 6.1.2）
 - 受講生は自分の提出に紐づくレビューのみ閲覧でき、admin / maintainer は全件閲覧できる（6.4参照）
+- `counts_toward_limit`（NOT NULL・既定 `true`）: 管理者のリセット（#482）で `false` になった行は、回数の上限の集計に数えない。行・履歴・合格判定・トークン記録は残す。**1提出1行の枠は解放しない**（レビュー済みの提出を再実行するには再レビューの許可が要る）。再レビューの許可は完了済みの行を `failed` に戻し、あわせて `false` にする（再実行は回数を消費しない。`claim_ai_review()` は再利用時にこの列を触らない）
+- 管理者の操作は RPC `admin_reset_ai_review_limits()` / `admin_reopen_ai_review()`（service_role のみ。`claim_ai_review()` と同じユーザー単位の advisory lock の中で実行）。操作履歴は `ai_review_limit_resets`（3.25）
 - `review_json`（JSONB）: 構造化結果 `{ requirements: [{ key, name, status, comment }], code_quality: { level, comment }, suggestions, advice }`。`review_content` には同じ内容を Markdown に描画した文字列を保存し、旧来の表示との互換を保つ
 - `score_kind`（NOT NULL・既定 `legacy`・CHECK）: `rubric` = 採点基準に基づく採点 / `estimated` = 基準未設定の参考採点 / `none` = URL 提出で採点対象外 / `legacy` = 構造化採点以前の自由文レビュー / `incomplete` = このシステムが作成し、まだ採点が完了していない行（`pending` / `processing` / `failed`）。既定は `legacy` のままなので既存行は再採点せず、新規の確保と再利用だけが `incomplete` を書く。完了時に `rubric` / `estimated` / `none` へ置き換わる
 - `overall_score`: コードが判定ラベルから計算した 0〜100（AI の出した数値ではない）。`none` は NULL
@@ -304,6 +306,11 @@ Stripe Webhookイベントの処理権（claim）記録。`event.id`（`evt_...`
 受講生の不具合報告・改善要望・質問・プランの相談（#392 / #394）。`category`（`bug` / `improvement` / `question` / `other` / `plan_inquiry`）、`body`、`page_url`、`user_agent`、`status`（`open` / `in_progress` / `done`）、`created_at`。`user_id` は `users` への FK。
 
 RLS は有効化しポリシーは作らない（`push_subscriptions` と同じ）。読み書きは `getServerAuth()` 済みの API が service_role で行い、INSERT 時の `user_id` は認証ユーザーに固定する。管理画面の一覧・詳細も service_role（admin / maintainer ゲートはアプリ層）。
+
+
+### 3.25 ai_review_limit_resets（AIレビュー回数の管理者操作の履歴）
+
+`user_id`（対象）、`content_id`（リセットを課題に絞った場合のみ）、`submission_id`（再レビューの許可のみ）、`action`（`reset` / `reopen`）、`affected_count`、`performed_by`（操作した admin）、`created_at`。追記のみ。RLS は有効でポリシーなし（service_role 専用）。
 
 ---
 

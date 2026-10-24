@@ -403,3 +403,59 @@ export async function updateAIReviewFailed(
 
   return true;
 }
+
+/**
+ * Excludes a user's completed reviews from the allowance counts (rows and history are kept).
+ * Runs in the DB under the same per-user lock as claim_ai_review(). `notFound` = no such user.
+ */
+export async function resetAIReviewLimits({
+  userId,
+  contentId,
+  performedBy,
+}: {
+  userId: number;
+  contentId: number | null;
+  performedBy: number;
+}): Promise<{ affected: number } | { notFound: true } | null> {
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase.rpc("admin_reset_ai_review_limits", {
+    p_user_id: userId,
+    // The generated type has no null for a nullable RPC argument; NULL means "every content".
+    p_content_id: contentId as number,
+    p_performed_by: performedBy,
+  });
+
+  if (error) {
+    // 23503: the audit row's user / content foreign key failed, i.e. the target doesn't exist.
+    if (error.code === "23503") {
+      return { notFound: true };
+    }
+    console.error("AIレビュー回数リセットエラー:", error.message);
+    return null;
+  }
+  return { affected: typeof data === "number" ? data : 0 };
+}
+
+/**
+ * Returns a completed review to `failed` so claim_ai_review() lets the learner run it again
+ * without using up the allowance. `reopened: false` = no completed review on that submission.
+ */
+export async function reopenAIReview({
+  submissionId,
+  performedBy,
+}: {
+  submissionId: number;
+  performedBy: number;
+}): Promise<{ reopened: boolean } | null> {
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase.rpc("admin_reopen_ai_review", {
+    p_submission_id: submissionId,
+    p_performed_by: performedBy,
+  });
+
+  if (error) {
+    console.error("AIレビュー再レビュー許可エラー:", error.message);
+    return null;
+  }
+  return { reopened: data === true };
+}

@@ -207,6 +207,19 @@ export const AiReviewRequestSchema = z.object({
   submissionId: PositiveIntSchema,
 });
 
+/**
+ * POST /api/admin/ai-review-limits. `reset` frees the allowance of one user (all contents, or one
+ * when contentId is given); `reopen` lets one completed review run again (#482).
+ */
+export const AdminAiReviewLimitActionSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("reset"),
+    userId: UserIdSchema,
+    contentId: PositiveIntSchema.optional(),
+  }),
+  z.object({ action: z.literal("reopen"), submissionId: PositiveIntSchema }),
+]);
+
 const AdminUserBaseSchema = z.object({ userId: UserIdSchema });
 
 /**
