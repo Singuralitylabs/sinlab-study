@@ -191,6 +191,10 @@ export function UserManagementTable({
         alert(data?.error || "AIレビュー回数のリセットに失敗しました");
         return;
       }
+      const data = await res.json().catch(() => null);
+      if (typeof data?.affected === "number") {
+        alert(`リセットしました（対象 ${data.affected} 件）`);
+      }
       router.refresh();
     } catch {
       alert("エラーが発生しました");

@@ -217,7 +217,8 @@ $$;
 
 -- Returns a completed review to `failed` so the learner can run it again (claim_ai_review() reuses
 -- failed rows). The re-run does not use up the allowance. Returns false when the submission has no
--- completed review.
+-- completed review, or when that review passed: certificates count a passing completed review, so
+-- reopening it would silently take the certificate basis away.
 CREATE OR REPLACE FUNCTION public.admin_reopen_ai_review(
   p_submission_id INTEGER,
   p_performed_by INTEGER
@@ -249,7 +250,8 @@ BEGIN
       error_message = '管理者が再レビューを許可しました',
       counts_toward_limit = false
   WHERE submission_id = p_submission_id
-    AND status = 'completed';
+    AND status = 'completed'
+    AND passed IS DISTINCT FROM true;
   GET DIAGNOSTICS v_updated = ROW_COUNT;
 
   IF v_updated = 0 THEN

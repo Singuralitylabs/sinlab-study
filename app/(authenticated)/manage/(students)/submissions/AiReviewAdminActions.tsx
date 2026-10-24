@@ -34,6 +34,10 @@ export function AiReviewAdminActions({
         alert(data?.error || failure);
         return;
       }
+      const data = await res.json().catch(() => null);
+      if (typeof data?.affected === "number") {
+        alert(`リセットしました（対象 ${data.affected} 件）`);
+      }
       router.refresh();
     } catch {
       alert("エラーが発生しました");

@@ -181,6 +181,32 @@ export async function fetchCompletedAIReviewByContentId(
   };
 }
 
+/**
+ * The failed review of one of the user's own submissions, so a page load can offer the retry again
+ * (an admin reopening a review leaves exactly this state). The userId filter is the safety.
+ */
+export async function fetchFailedAIReviewBySubmissionId(
+  userId: number,
+  submissionId: number
+): Promise<{ errorMessage: string | null } | null> {
+  const supabase = await createAdminSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("submissions")
+    .select("id, ai_review:ai_reviews!inner(status, error_message)")
+    .eq("id", submissionId)
+    .eq("user_id", userId)
+    .eq("ai_review.status", "failed")
+    .maybeSingle();
+
+  if (error) {
+    console.error("AIレビュー取得エラー (fetchFailedAIReviewBySubmissionId):", error.message);
+    return null;
+  }
+  const review = data?.ai_review as unknown as { error_message: string | null } | null | undefined;
+  return review ? { errorMessage: review.error_message } : null;
+}
+
 /** Uses the admin client to avoid depending on RLS; safety comes from the userId filter. */
 export async function fetchCompletedAIReviewContentIds(
   userId: number,

@@ -8,6 +8,7 @@ import {
   fetchAllSubmissionsWithReviews,
   fetchCompletedAIReviewByContentId,
   fetchCompletedAIReviewContentIds,
+  fetchFailedAIReviewBySubmissionId,
   fetchSubmissionsWithReviewsByUserId,
   reopenAIReview,
   resetAIReviewLimits,
@@ -617,5 +618,35 @@ describe("resetAIReviewLimits / reopenAIReview", () => {
 
     mockRpc({ data: null, error: dbError });
     await expect(reopenAIReview({ submissionId: 7, performedBy: 1 })).resolves.toBeNull();
+  });
+});
+
+describe("fetchFailedAIReviewBySubmissionId", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("本人の提出の failed レビューのエラー文を返す", async () => {
+    const client = createMockSupabaseClient({
+      queryResult: { data: { id: 7, ai_review: { error_message: "再許可" } }, error: null },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    await expect(fetchFailedAIReviewBySubmissionId(2, 7)).resolves.toEqual({
+      errorMessage: "再許可",
+    });
+    const builder = client.from.mock.results[0].value;
+    expect(builder.eq).toHaveBeenCalledWith("user_id", 2);
+    expect(builder.eq).toHaveBeenCalledWith("ai_review.status", "failed");
+  });
+
+  it("該当なし・DBエラーは null", async () => {
+    const client = createMockSupabaseClient({ queryResult: { data: null, error: null } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+    await expect(fetchFailedAIReviewBySubmissionId(2, 7)).resolves.toBeNull();
+
+    const failing = createMockSupabaseClient({ queryResult: { data: null, error: dbError } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(failing as never);
+    await expect(fetchFailedAIReviewBySubmissionId(2, 7)).resolves.toBeNull();
   });
 });

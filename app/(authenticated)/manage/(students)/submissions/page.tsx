@@ -175,7 +175,10 @@ export default async function ManageSubmissionsPage({ searchParams }: PageProps)
                     userId={submission.user_id}
                     contentId={submission.content_id}
                     submissionId={submission.id}
-                    canReopen={submission.ai_review?.status === "completed"}
+                    canReopen={
+                      submission.ai_review?.status === "completed" &&
+                      submission.ai_review.passed !== true
+                    }
                   />
                 )}
 

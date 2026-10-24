@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "再レビューを許可できません（完了したレビューがないか、すでに許可済みです）。画面を更新して確認してください",
+            "再レビューを許可できません（完了したレビューがないか、すでに許可済みか、合格済みです）。画面を更新して確認してください",
         },
         { status: 409 }
       );
