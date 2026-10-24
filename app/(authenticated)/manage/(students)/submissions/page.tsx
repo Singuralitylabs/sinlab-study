@@ -182,6 +182,7 @@ export default async function ManageSubmissionsPage({ searchParams }: PageProps)
                     contentId={submission.content_id}
                     submissionId={submission.id}
                     canReopen={
+                      latestSubmissionIds.has(submission.id) &&
                       submission.ai_review?.status === "completed" &&
                       submission.ai_review.passed !== true
                     }
