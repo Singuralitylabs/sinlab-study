@@ -23,8 +23,8 @@ const STATUS_COLOR: Record<RequirementStatus, string> = {
   unmet: "text-destructive",
 };
 
-export function retryGuidance(): string {
-  return `未達成の要件を直して再提出すると、再レビューできます（有料会員は 1 課題につき 1 日 ${AI_REVIEW_LIMITS.active.perContentPerDay} 回、全課題の合計で 1 日 ${AI_REVIEW_LIMITS.active.perDay} 回まで）`;
+export function retryGuidance(hasUnmet = true): string {
+  return `${hasUnmet ? "未達成の要件を直して" : "要件の達成度を上げて"}再提出すると、再レビューできます（有料会員は 1 課題につき 1 日 ${AI_REVIEW_LIMITS.active.perContentPerDay} 回、全課題の合計で 1 日 ${AI_REVIEW_LIMITS.active.perDay} 回まで）`;
 }
 
 interface StructuredReviewProps {
@@ -140,7 +140,7 @@ export function StructuredReview({
               不合格の理由：{reason}
             </p>
           ))}
-          <p>{retryGuidance()}</p>
+          <p>{retryGuidance(reviewJson.requirements.some((item) => item.status === "unmet"))}</p>
         </div>
       )}
     </div>
