@@ -127,7 +127,7 @@ export function ExerciseCompletionStatus({
       )}
       {userStatus === USER_STATUS.TRIAL && (
         <p>
-          {`お試しプランでは AI レビューは 1 課題につき ${limits.trial.perContentLifetime} 回です。不合格だと、お試しの間はこの演習を完了できません。`}
+          {`お試しプランでは AI レビューは 1 課題につき ${limits.trial.perContentLifetime} 回です。${limits.trial.perContentLifetime > 1 ? "合格できないまま回数を使い切ると" : "不合格だと"}、お試しの間はこの演習を完了できません。`}
         </p>
       )}
       {userStatus === USER_STATUS.ACTIVE && (
