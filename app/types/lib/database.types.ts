@@ -70,6 +70,41 @@ export type Database = {
           },
         ];
       };
+      ai_review_settings: {
+        Row: {
+          active_per_content_per_day: number;
+          active_per_day: number;
+          id: number;
+          trial_per_content_lifetime: number;
+          updated_at: string;
+          updated_by: number | null;
+        };
+        Insert: {
+          active_per_content_per_day?: number;
+          active_per_day?: number;
+          id?: number;
+          trial_per_content_lifetime?: number;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Update: {
+          active_per_content_per_day?: number;
+          active_per_day?: number;
+          id?: number;
+          trial_per_content_lifetime?: number;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ai_review_settings_updated_by_fkey";
+            columns: ["updated_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       ai_reviews: {
         Row: {
           completion_tokens: number | null;

@@ -15,6 +15,7 @@ import { countVisibleUnovercome } from "@/app/lib/review-list";
 import { splitThemesByActivity } from "@/app/lib/theme-progress";
 import { shouldShowTrialNextStep } from "@/app/lib/trial-upgrade";
 import { isWebPushConfigured, webPushPublicKey } from "@/app/lib/web-push-config";
+import { fetchCurrentAIReviewLimits } from "@/app/services/api/ai-review-settings-server";
 import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
 import { fetchRecentCertificate } from "@/app/services/api/certificates-server";
 import { fetchHomeLearningData } from "@/app/services/api/learning-server";
@@ -61,6 +62,7 @@ export default async function HomePage() {
     stripeEnabled && userStatus === USER_STATUS.TRIAL
       ? fetchUpgradePriceLabel()
       : Promise.resolve(null);
+  const limitsPromise = fetchCurrentAIReviewLimits();
 
   // Start review fetch with home learning so badge TTFB is not serial after the other awaits.
   const [
@@ -107,6 +109,7 @@ export default async function HomePage() {
   );
 
   const showTrialNextStep = shouldShowTrialNextStep(userStatus, userRole, themes);
+  const limits = await limitsPromise;
   const priceLabel = showTrialNextStep ? await priceLabelPromise : null;
 
   const continueLearning =
@@ -128,7 +131,7 @@ export default async function HomePage() {
 
       {showWelcomeDialog && (
         <WelcomeDialog
-          steps={getWelcomeStepsForStatus(userStatus)}
+          steps={getWelcomeStepsForStatus(userStatus, limits)}
           stripeEnabled={isStripeEnabled()}
         />
       )}
@@ -196,7 +199,7 @@ export default async function HomePage() {
           <CardContent className="pt-6 space-y-3">
             <h2 className="text-lg font-semibold">次のステップ</h2>
             <p className="text-sm">お試しコンテンツをすべて完了しました。続きは有料会員で</p>
-            <UpgradeBenefitsList />
+            <UpgradeBenefitsList limits={limits} />
             <UpgradeCta
               stripeEnabled={stripeEnabled}
               priceLabel={priceLabel}

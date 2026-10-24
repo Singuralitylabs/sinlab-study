@@ -161,7 +161,7 @@ GEMINI_MODEL_CHECK_API_KEY=... bun scripts/gemini-model-check.ts --json
 ```
 app/
 ├── (authenticated)/     # 認証必須のページ群
-│   ├── admin/           #   管理者専用画面（/admin/users・/admin/emails・/admin/emails/templates のみ。他は /manage にリダイレクト）
+│   ├── admin/           #   管理者専用画面（/admin/users・/admin/emails・/admin/emails/templates・/admin/ai-review のみ。他は /manage にリダイレクト）
 │   ├── manage/          #   コンテンツ管理画面（admin + maintainer 共通）
 │   ├── instructor/      #   講師向け画面（/manage にリダイレクト）
 │   ├── learn/           #   学習コンテンツ画面（Theme > Phase > Content の3階層）

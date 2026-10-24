@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
 import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
@@ -514,6 +515,73 @@ describe("claimAIReview", () => {
     });
   });
 
+  it("設定テーブルの上限値を RPC に渡し、limited の結果にも載せる", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        ai_review_settings: {
+          data: {
+            active_per_content_per_day: 5,
+            active_per_day: 30,
+            trial_per_content_lifetime: 3,
+          },
+          error: null,
+        },
+      },
+      rpcResults: {
+        claim_ai_review: {
+          data: { outcome: "limited", reason: "content_daily", remaining: 0 },
+          error: null,
+        },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await claimAIReview(params);
+
+    expect(mockClient.rpc).toHaveBeenCalledWith(
+      "claim_ai_review",
+      expect.objectContaining({
+        p_active_per_content_per_day: 5,
+        p_active_per_day: 30,
+        p_trial_per_content_lifetime: 3,
+      })
+    );
+    expect(result).toMatchObject({
+      kind: "limited",
+      limits: { active: { perContentPerDay: 5, perDay: 30 }, trial: { perContentLifetime: 3 } },
+    });
+  });
+
+  it("設定が範囲外・読めないときは既定値で枠を確保する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        ai_review_settings: {
+          data: {
+            active_per_content_per_day: 50,
+            active_per_day: 30,
+            trial_per_content_lifetime: 3,
+          },
+          error: null,
+        },
+      },
+      rpcResults: {
+        claim_ai_review: { data: { outcome: "claimed", review_id: 1, remaining: 1 }, error: null },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await claimAIReview(params);
+
+    expect(mockClient.rpc).toHaveBeenCalledWith(
+      "claim_ai_review",
+      expect.objectContaining({
+        p_active_per_content_per_day: AI_REVIEW_LIMITS.active.perContentPerDay,
+        p_active_per_day: AI_REVIEW_LIMITS.active.perDay,
+        p_trial_per_content_lifetime: AI_REVIEW_LIMITS.trial.perContentLifetime,
+      })
+    );
+  });
+
   it.each([
     [
       { outcome: "processing", review_id: 3 },
@@ -521,11 +589,11 @@ describe("claimAIReview", () => {
     ],
     [
       { outcome: "limited", reason: "content_daily", remaining: 0 },
-      { kind: "limited", reason: "content_daily", remaining: 0 },
+      { kind: "limited", reason: "content_daily", remaining: 0, limits: AI_REVIEW_LIMITS },
     ],
     [
       { outcome: "limited", reason: "submission_reviewed", remaining: 1 },
-      { kind: "limited", reason: "submission_reviewed", remaining: 1 },
+      { kind: "limited", reason: "submission_reviewed", remaining: 1, limits: AI_REVIEW_LIMITS },
     ],
     [{ outcome: "busy" }, { kind: "busy" }],
   ])("応答 %j を分類して返す", async (data, expected) => {

@@ -1,11 +1,12 @@
 import { UpgradeCtaLink } from "@/app/components/UpgradeCtaLink";
 import type { UpgradeCtaSource } from "@/app/constants/analytics";
-import { UPGRADE_APPROVAL_NOTICE, UPGRADE_BENEFITS } from "@/app/constants/stripe";
+import type { AIReviewLimits } from "@/app/constants/gemini";
+import { buildUpgradeBenefits, UPGRADE_APPROVAL_NOTICE } from "@/app/constants/stripe";
 
-export function UpgradeBenefitsList() {
+export function UpgradeBenefitsList({ limits }: { limits: AIReviewLimits }) {
   return (
     <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-      {UPGRADE_BENEFITS.map((benefit) => (
+      {buildUpgradeBenefits(limits).map((benefit) => (
         <li key={benefit}>{benefit}</li>
       ))}
     </ul>
