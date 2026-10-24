@@ -485,3 +485,42 @@ export async function reopenAIReview({
   }
   return { reopened: data === true };
 }
+
+/**
+ * Ids of the submissions in `rows` that are their user's latest for the content (same ordering as
+ * fetchLatestSubmissionByContentId). Only the latest can be reopened for a retry (#482).
+ */
+export async function fetchLatestSubmissionIds(
+  rows: readonly { id: number; user_id: number; content_id: number | null }[]
+): Promise<Set<number>> {
+  const userIds = [...new Set(rows.map((row) => row.user_id))];
+  if (userIds.length === 0) {
+    return new Set();
+  }
+  const contentIds = [...new Set(rows.flatMap((row) => (row.content_id ? [row.content_id] : [])))];
+
+  const supabase = await createAdminSupabaseClient();
+  const { data, error } = await supabase
+    .from("submissions")
+    .select("id, user_id, content_id")
+    .in("user_id", userIds)
+    .in("content_id", contentIds)
+    .order("submitted_at", { ascending: false })
+    .order("id", { ascending: false });
+
+  if (error) {
+    console.error("最新提出取得エラー (fetchLatestSubmissionIds):", error.message);
+    return new Set();
+  }
+
+  const latest = new Map<string, number>();
+  for (const row of data ?? []) {
+    const key = `${row.user_id}:${row.content_id}`;
+    if (!latest.has(key)) {
+      latest.set(key, row.id);
+    }
+  }
+  return new Set(
+    rows.filter((row) => latest.get(`${row.user_id}:${row.content_id}`) === row.id).map((r) => r.id)
+  );
+}

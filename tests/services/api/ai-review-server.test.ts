@@ -9,6 +9,7 @@ import {
   fetchCompletedAIReviewByContentId,
   fetchCompletedAIReviewContentIds,
   fetchFailedAIReviewBySubmissionId,
+  fetchLatestSubmissionIds,
   fetchSubmissionsWithReviewsByUserId,
   reopenAIReview,
   resetAIReviewLimits,
@@ -648,5 +649,42 @@ describe("fetchFailedAIReviewBySubmissionId", () => {
     const failing = createMockSupabaseClient({ queryResult: { data: null, error: dbError } });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(failing as never);
     await expect(fetchFailedAIReviewBySubmissionId(2, 7)).resolves.toBeNull();
+  });
+});
+
+describe("fetchLatestSubmissionIds", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("ユーザー×課題ごとの最新の提出だけを返す", async () => {
+    const client = createMockSupabaseClient({
+      queryResult: {
+        data: [
+          { id: 9, user_id: 2, content_id: 5 },
+          { id: 4, user_id: 2, content_id: 5 },
+          { id: 6, user_id: 3, content_id: 5 },
+        ],
+        error: null,
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const ids = await fetchLatestSubmissionIds([
+      { id: 4, user_id: 2, content_id: 5 },
+      { id: 9, user_id: 2, content_id: 5 },
+      { id: 6, user_id: 3, content_id: 5 },
+    ]);
+
+    expect([...ids].sort()).toEqual([6, 9]);
+  });
+
+  it("取得エラー時は空（再レビューのボタンを出さない）", async () => {
+    const client = createMockSupabaseClient({ queryResult: { data: null, error: dbError } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const ids = await fetchLatestSubmissionIds([{ id: 4, user_id: 2, content_id: 5 }]);
+
+    expect(ids.size).toBe(0);
   });
 });

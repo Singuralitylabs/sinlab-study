@@ -218,7 +218,8 @@ $$;
 -- Returns a completed review to `failed` so the learner can run it again (claim_ai_review() reuses
 -- failed rows). The re-run does not use up the allowance. Returns false when the submission has no
 -- completed review, or when that review passed: certificates count a passing completed review, so
--- reopening it would silently take the certificate basis away.
+-- reopening it would silently take the certificate basis away. Only the user's latest submission
+-- for the content can be reopened: the learner page offers the retry for that one only.
 CREATE OR REPLACE FUNCTION public.admin_reopen_ai_review(
   p_submission_id INTEGER,
   p_performed_by INTEGER
@@ -244,6 +245,17 @@ BEGIN
   END IF;
 
   PERFORM pg_advisory_xact_lock(hashtext('claim_ai_review'), v_user_id);
+
+  -- Same ordering as fetchLatestSubmissionByContentId().
+  IF p_submission_id IS DISTINCT FROM (
+    SELECT s.id
+    FROM public.submissions s
+    WHERE s.user_id = v_user_id AND s.content_id = v_content_id
+    ORDER BY s.submitted_at DESC NULLS LAST, s.id DESC
+    LIMIT 1
+  ) THEN
+    RETURN false;
+  END IF;
 
   UPDATE public.ai_reviews
   SET status = 'failed',

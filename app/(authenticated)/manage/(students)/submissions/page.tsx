@@ -14,7 +14,10 @@ import {
   parsePageParam,
   shouldRedirectOutOfRangePage,
 } from "@/app/lib/submissions-pagination";
-import { fetchAllSubmissionsWithReviews } from "@/app/services/api/ai-review-server";
+import {
+  fetchAllSubmissionsWithReviews,
+  fetchLatestSubmissionIds,
+} from "@/app/services/api/ai-review-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -78,6 +81,9 @@ export default async function ManageSubmissionsPage({ searchParams }: PageProps)
   // Reset / reopen are admin-only; maintainers reach this page but get no buttons.
   const { userRole } = await getServerAuth();
   const isAdmin = userRole === USER_ROLE.ADMIN;
+  const latestSubmissionIds = isAdmin
+    ? await fetchLatestSubmissionIds(submissions ?? [])
+    : new Set<number>();
 
   return (
     <div className="max-w-4xl mx-auto">
