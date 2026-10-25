@@ -25,12 +25,22 @@ const CUSTOMER_CODE_PATTERN = /^[a-z0-9]+$/i;
  * Fail closed: any missing or malformed setting disables Stream playback rather than minting a
  * token with a bad key. Values are never logged (spec 6.1.2).
  */
-function readStreamConfig(): StreamConfig | null {
-  const customerCode = process.env.CLOUDFLARE_STREAM_CUSTOMER_CODE?.trim();
+function readStreamConfig(): { config: StreamConfig } | { reason: string } {
+  // Operators often paste the whole host (customer-<code>.cloudflarestream.com); accept it.
+  const customerCode = process.env.CLOUDFLARE_STREAM_CUSTOMER_CODE?.trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/^customer-/i, "")
+    .replace(/\.cloudflarestream\.com.*$/i, "");
   const signingKeyId = process.env.CLOUDFLARE_STREAM_SIGNING_KEY_ID?.trim();
   const rawPem = process.env.CLOUDFLARE_STREAM_SIGNING_KEY_PEM?.trim();
-  if (!customerCode || !signingKeyId || !rawPem || !CUSTOMER_CODE_PATTERN.test(customerCode)) {
-    return null;
+  if (!customerCode || !CUSTOMER_CODE_PATTERN.test(customerCode)) {
+    return { reason: "CLOUDFLARE_STREAM_CUSTOMER_CODE が未設定または不正" };
+  }
+  if (!signingKeyId) {
+    return { reason: "CLOUDFLARE_STREAM_SIGNING_KEY_ID が未設定" };
+  }
+  if (!rawPem) {
+    return { reason: "CLOUDFLARE_STREAM_SIGNING_KEY_PEM が未設定" };
   }
 
   // The Cloudflare API returns `result.pem` Base64-encoded; accept a raw PEM too for local setups.
@@ -38,10 +48,10 @@ function readStreamConfig(): StreamConfig | null {
     ? rawPem.replace(/\\n/g, "\n")
     : Buffer.from(rawPem, "base64").toString("utf8");
   if (!signingKeyPem.includes("-----BEGIN")) {
-    return null;
+    return { reason: "CLOUDFLARE_STREAM_SIGNING_KEY_PEM が PEM として解釈できない" };
   }
 
-  return { customerCode, signingKeyId, signingKeyPem };
+  return { config: { customerCode, signingKeyId, signingKeyPem } };
 }
 
 function base64Url(input: Buffer | string): string {
@@ -73,11 +83,16 @@ export function signStreamToken(
 
 function createStreamPlayback(videoValue: string, expiresInSeconds: number): StreamPlayback | null {
   const uid = toStreamVideoUid(videoValue);
-  const config = readStreamConfig();
-  if (!uid || !config) {
-    console.error("Stream 再生トークンを発行できません（動画IDまたは設定が不正）");
+  if (!uid) {
+    console.error("Stream 再生トークンを発行できません: 動画IDが32桁の16進ではありません");
     return null;
   }
+  const result = readStreamConfig();
+  if (!("config" in result)) {
+    console.error(`Stream 再生トークンを発行できません: ${result.reason}`);
+    return null;
+  }
+  const { config } = result;
 
   try {
     const token = signStreamToken(uid, config, expiresInSeconds);
@@ -86,9 +101,12 @@ function createStreamPlayback(videoValue: string, expiresInSeconds: number): Str
       iframeSrc: `${base}/iframe?autoplay=true&preload=true`,
       thumbnailSrc: `${base}/thumbnails/thumbnail.jpg?height=${STREAM_THUMBNAIL_HEIGHT_PX}`,
     };
-  } catch {
-    // Do not include the error: it can echo key material.
-    console.error("Stream 再生トークンの署名に失敗しました");
+  } catch (error) {
+    // Log only the Node error code (e.g. ERR_OSSL_UNSUPPORTED): the message can echo key material.
+    const code = (error as { code?: unknown }).code;
+    console.error(
+      `Stream 再生トークンの署名に失敗しました（${typeof code === "string" ? code : "unknown"}）`
+    );
     return null;
   }
 }

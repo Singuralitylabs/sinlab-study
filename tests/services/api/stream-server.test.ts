@@ -64,6 +64,13 @@ describe("createStreamPlaybackForMember", () => {
     expect(payload.exp - now).toBeLessThanOrEqual(STREAM_TOKEN_EXPIRES_IN_SECONDS + 5);
   });
 
+  it("customer-<code>.cloudflarestream.com の形で設定されていても受け付ける", () => {
+    vi.stubEnv("CLOUDFLARE_STREAM_CUSTOMER_CODE", "customer-abc123.cloudflarestream.com");
+    expect(createStreamPlaybackForMember(UID)?.iframeSrc).toMatch(
+      /^https:\/\/customer-abc123\.cloudflarestream\.com\//
+    );
+  });
+
   it("Base64 でない生の PEM も受け付ける", () => {
     vi.stubEnv("CLOUDFLARE_STREAM_SIGNING_KEY_PEM", privateKey);
     expect(createStreamPlaybackForMember(UID)).not.toBeNull();
