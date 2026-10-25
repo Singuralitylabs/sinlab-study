@@ -8,5 +8,6 @@ layout preview opens — not part of the Next.js client bundle.
 | `react.production.min.js` | `react` (IIFE global `React`) | same as root `package.json` |
 | `react-dom.production.min.js` | `react-dom/client` (IIFE global `ReactDOM`) | same as root `package.json` |
 | `babel.min.js` | `@babel/standalone` | see `package.json` devDependency |
+| `tailwind.browser.js` | `@tailwindcss/browser` (loaded only when a submitted CSS file has `@import "tailwindcss"`) | see `package.json` devDependency |
 
 Licenses: MIT (see `LICENSE-*.txt`). Regenerate with `bun run vendor:react-preview`.

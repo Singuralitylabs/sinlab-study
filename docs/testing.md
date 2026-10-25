@@ -111,7 +111,7 @@ Unit Tests (多数)
 - ファイル名は `*.test.ts` に統一し、「対象 + 期待する振る舞い」が想像できる名前にする（例: `tests/services/auth/permissions.test.ts`）。実装済みテストの一覧は `tests/` を参照。
 - **検証する**: 関数の入力に対する出力（返り値）、副作用の結果（状態変化）、エラー時の振る舞い。返り値を持たない関数は副作用の結果（更新値・更新対象）を検証する。
 - **検証しない**: 内部実装の呼び出し手順（クエリメソッドをどの引数で呼んだか等）。モックは外部依存を切り離すために使い、モック呼び出し引数の逐次検証は原則行わない。
-- **ライブプレビュー（React・#475）**: `tests/lib/html-preview.test.ts` で構成判定（`App.jsx` / `App.js` 境界、非 React の `main.js`）と `buildPreviewDocument()`（単体・2 ファイル import・欠落 import・`</script` エスケープ・vendor 絶対 URL）を検証する。`tests/components/HtmlPreview.test.ts` で React 構成時にプレビュー枠とコンソールが出ること、`/demo` 経路では出さないことを維持する。実ブラウザ確認は Chromium で `public/vendor/react/` を読み込み、Web 技術 06（`App.jsx` + 子コンポーネント）・07 相当の構造が描画できることを見る（模範回答本文はリポジトリに置かない）。
+- **ライブプレビュー（React・#475）**: `tests/lib/html-preview.test.ts` で構成判定（`App.jsx` / `App.js` 境界、非 React の `main.js`）と `buildPreviewDocument()`（単体・2 ファイル import・欠落 import・`</script` エスケープ・vendor 絶対 URL）を検証する。`tests/components/HtmlPreview.test.ts` で React 構成時にプレビュー枠とコンソールが出ること、`/demo` 経路では出さないことを維持する。実ブラウザ確認は Chromium で `public/vendor/react/` を読み込み、Web 技術 06（`App.jsx` + 子コンポーネント）・07 相当の構造が描画できることを見る（模範回答本文はリポジトリに置かない）。Tailwind 演習（#489）は、`page.js` 入口と `@import "tailwindcss"` の有無による Tailwind 読み込みの切り替え（無い構成に Tailwind を入れない）をユニットで見る。実ブラウザでは `sandbox="allow-scripts"` の iframe に第10回課題3・4相当の `page.js` + `globals.css` を入れ、`md:grid-cols-3` が幅の広・狭で 3 列・1 列になることを確認する。
 
 ## 6. AIコードレビューの運用
 

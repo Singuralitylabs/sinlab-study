@@ -891,3 +891,49 @@ describe("buildPreviewDocument（React 構成 #475）", () => {
     expect(doc).toContain("<script>console.log(1)</script>");
   });
 });
+
+describe("buildPreviewDocument（Tailwind 構成）", () => {
+  const vendor = "https://study.example";
+  const page = f(
+    "page.js",
+    "javascript",
+    'export default function Home(){ return <main className="p-4">Hi</main>; }'
+  );
+  const globals = f("globals.css", "css", '@import "tailwindcss";');
+
+  it("page.js を入口にした React 構成として扱う", () => {
+    expect(previewCapability([page, globals])).toMatchObject({
+      autoPreview: true,
+      previewAllowed: true,
+    });
+    const doc = buildPreviewDocument([page, globals], { vendorBaseUrl: vendor });
+    expect(doc).toContain('"page.js"');
+    expect(doc).toContain("babel.min.js");
+  });
+
+  it("CSS が無い page.js は React 構成にしない（サーバーコンポーネント演習を壊さない）", () => {
+    expect(previewCapability([page])).not.toMatchObject({ autoPreview: true });
+    expect(
+      previewCapability([page, f("loading.js", "javascript", "export default () => null;")])
+    ).not.toMatchObject({ autoPreview: true });
+  });
+
+  it('@import "tailwindcss" を含む CSS があるときだけ Tailwind を読み込む', () => {
+    const doc = buildPreviewDocument([page, globals], { vendorBaseUrl: vendor });
+    expect(doc).toContain(`<script src="${vendor}/vendor/react/tailwind.browser.js"></script>`);
+    expect(doc).toContain('<style type="text/tailwindcss">@import "tailwindcss";</style>');
+
+    const plain = buildPreviewDocument([page, f("globals.css", "css", "body{margin:0}")], {
+      vendorBaseUrl: vendor,
+    });
+    expect(plain).not.toContain("tailwind.browser.js");
+    expect(plain).toContain("<style>body{margin:0}</style>");
+  });
+
+  it("Tailwind を使わない App.jsx 構成は従来どおり（リセット CSS を持ち込まない）", () => {
+    const doc = buildPreviewDocument([f("App.jsx", "javascript", "export default () => null;")], {
+      vendorBaseUrl: vendor,
+    });
+    expect(doc).not.toContain("tailwind");
+  });
+});

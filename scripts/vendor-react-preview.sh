@@ -21,7 +21,9 @@ bunx esbuild scripts/vendor-entries/react-dom-client.js \
   --footer:js='window.ReactDOM=ReactDOM.default||ReactDOM;' \
   --outfile=public/vendor/react/react-dom.production.min.js
 cp node_modules/@babel/standalone/babel.min.js public/vendor/react/babel.min.js
+cp node_modules/@tailwindcss/browser/dist/index.global.js public/vendor/react/tailwind.browser.js
 cp node_modules/react/LICENSE public/vendor/react/LICENSE-react.txt
 cp node_modules/react-dom/LICENSE public/vendor/react/LICENSE-react-dom.txt
 cp node_modules/@babel/standalone/LICENSE public/vendor/react/LICENSE-babel.txt
-echo "Wrote public/vendor/react (react $(node -p "require('react/package.json').version"), babel $(node -p "require('@babel/standalone/package.json').version"))"
+cp node_modules/@tailwindcss/browser/LICENSE public/vendor/react/LICENSE-tailwindcss.txt
+echo "Wrote public/vendor/react (react $(node -p "require('react/package.json').version"), tailwind $(node -p "require('@tailwindcss/browser/package.json').version"), babel $(node -p "require('@babel/standalone/package.json').version"))"
