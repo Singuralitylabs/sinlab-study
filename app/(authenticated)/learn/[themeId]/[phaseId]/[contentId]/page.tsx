@@ -10,7 +10,7 @@ import { SlideContent } from "@/app/components/SlideContent";
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
-import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
+import { VideoContent } from "@/app/components/VideoContent";
 import { ANALYTICS_EVENT, UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
@@ -21,6 +21,7 @@ import { isExerciseRetryInProgress } from "@/app/lib/exercise-retry";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import { getLockedContentFallbackOverview } from "@/app/lib/trial-upgrade";
+import { parseVideoSource } from "@/app/lib/video-source";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
 import {
   fetchCompletedAIReviewByContentId,
@@ -44,6 +45,7 @@ import {
 import { fetchQuizQuestions } from "@/app/services/api/quiz-server";
 import { fetchReviewNotesForContent } from "@/app/services/api/review-list-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
+import { createStreamPlaybackForMember } from "@/app/services/api/stream-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
@@ -246,12 +248,15 @@ export default async function ContentPage({ params }: PageProps) {
   // computed here on the server (the client never counts) and joins the same Promise.all because
   // it depends on none of the other fetches.
   const exerciseContent = content.content_type === "exercise";
+  const videoSource = content.content_type === "video" ? parseVideoSource(content.video_url) : null;
+  const videoStreamUid = videoSource?.kind === "stream" ? videoSource.uid : null;
   const limits = await limitsPromise;
   const [
     { data: existingReview, submissionId: reviewedSubmissionId },
     { data: latestSubmission },
     { data: referenceAnswer },
     slideSignedUrl,
+    streamPlayback,
     { data: quizQuestions, error: quizError },
     aiReviewUsage,
     { data: reviewNotes },
@@ -274,6 +279,8 @@ export default async function ContentPage({ params }: PageProps) {
     content.content_type === "slide" && content.pdf_url
       ? createSlideSignedUrl(content.pdf_url)
       : Promise.resolve(null),
+    // Same gate as the slide URL: reached only after the lock / RLS visibility checks (#488).
+    videoStreamUid ? createStreamPlaybackForMember(videoStreamUid) : null,
     content.content_type === "quiz"
       ? fetchQuizQuestions(contentIdNum)
       : Promise.resolve({ data: [], error: null }),
@@ -374,7 +381,7 @@ export default async function ContentPage({ params }: PageProps) {
         <CardContent className="pt-6">
           {content.content_type === "video" && content.video_url && (
             <div className="mb-6">
-              <YouTubeEmbed url={content.video_url} />
+              <VideoContent videoUrl={content.video_url} streamPlayback={streamPlayback} />
             </div>
           )}
 

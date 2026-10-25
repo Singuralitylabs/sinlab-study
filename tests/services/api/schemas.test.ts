@@ -476,6 +476,23 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("video_urlはYouTube URLまたはStream UIDだけを受け付ける（空白はnull、UIDは小文字化）", () => {
+    const base = {
+      title: "動画",
+      phase_id: 1,
+      content_type: "video" as const,
+      insert_after_id: null,
+    };
+    const uid = "0123456789abcdef0123456789abcdef";
+    const parse = (video_url: string) => ContentCreateSchema.safeParse({ ...base, video_url });
+
+    expect(parse("https://www.youtube.com/watch?v=dQw4w9WgXcQ").success).toBe(true);
+    expect(parse(` ${uid.toUpperCase()} `).data?.video_url).toBe(uid);
+    expect(parse("  ").data?.video_url).toBeNull();
+    expect(parse("https://example.com/video.mp4").success).toBe(false);
+    expect(parse("abc").success).toBe(false);
+  });
+
   it("allowed_submission_types・code_languageはDBがNOT NULLのためnullを許容しない", () => {
     expect(
       ContentCreateSchema.safeParse({

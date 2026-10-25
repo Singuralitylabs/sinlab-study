@@ -17,6 +17,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/slides-server");
+vi.mock("@/app/services/api/stream-server");
 vi.mock("@/app/services/api/upgrade-price-server", () => ({
   fetchUpgradePriceLabel: vi.fn().mockResolvedValue("月額1,500円（税込）"),
 }));
@@ -51,6 +52,10 @@ vi.mock("@/app/components/SlideContent", () => ({
     createElement("div", { "data-testid": "slide-content" }, signedUrl ?? "SLIDE_UNAVAILABLE"),
 }));
 vi.mock("@/app/components/AIReviewDisplayNoSSR", () => ({ AIReviewDisplayNoSSR: () => null }));
+vi.mock("@/app/components/StreamEmbed", () => ({
+  StreamEmbed: ({ iframeSrc }: { iframeSrc: string }) =>
+    createElement("div", { "data-testid": "stream-embed" }, iframeSrc),
+}));
 vi.mock("@/app/components/YouTubeEmbed", () => ({
   YouTubeEmbed: () => createElement("div", { "data-testid": "youtube-embed" }),
 }));
@@ -77,6 +82,7 @@ import {
   fetchUserProgressByContentId,
 } from "@/app/services/api/learning-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
+import { createStreamPlaybackForMember } from "@/app/services/api/stream-server";
 import { fetchLatestSubmissionByContentId } from "@/app/services/api/submissions-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -673,6 +679,51 @@ describe("スライドの解説記事（#375）", () => {
     const videoHtml = await render();
     expect(videoHtml).toContain('data-testid="youtube-embed"');
     expect(videoHtml).not.toContain(article);
+  });
+});
+
+describe("Stream 動画の再生トークン発行（#488）", () => {
+  const STREAM_UID = "0123456789abcdef0123456789abcdef";
+  const videoContent = () => ({
+    ...slideContent({}),
+    content_type: "video",
+    video_url: STREAM_UID,
+    pdf_url: null,
+  });
+
+  it("閲覧権限があるときだけ UID で発行し、Stream プレイヤーを表示する", async () => {
+    setup({ userStatus: "active", isOpenToTrial: false });
+    vi.mocked(fetchContentById).mockResolvedValue({ data: videoContent(), error: null } as never);
+    vi.mocked(createStreamPlaybackForMember).mockReturnValue({
+      iframeSrc: "https://customer-x.cloudflarestream.com/TOKEN/iframe",
+      thumbnailSrc: "https://customer-x.cloudflarestream.com/TOKEN/thumbnails/thumbnail.jpg",
+    });
+
+    const html = await render();
+
+    expect(createStreamPlaybackForMember).toHaveBeenCalledWith(STREAM_UID);
+    expect(html).toContain('data-testid="stream-embed"');
+  });
+
+  it("ロック中（お試しで非公開開放）は発行しない", async () => {
+    setup({ userStatus: "trial", isOpenToTrial: false });
+    vi.mocked(fetchContentById).mockResolvedValue({ data: videoContent(), error: null } as never);
+
+    const html = await render();
+
+    expect(createStreamPlaybackForMember).not.toHaveBeenCalled();
+    expect(html).not.toContain('data-testid="stream-embed"');
+  });
+
+  it("発行に失敗したら読み込めない旨を表示する", async () => {
+    setup({ userStatus: "active", isOpenToTrial: false });
+    vi.mocked(fetchContentById).mockResolvedValue({ data: videoContent(), error: null } as never);
+    vi.mocked(createStreamPlaybackForMember).mockReturnValue(null);
+
+    const html = await render();
+
+    expect(html).toContain("動画を読み込めませんでした");
+    expect(html).not.toContain('data-testid="youtube-embed"');
   });
 });
 
