@@ -911,6 +911,13 @@ describe("buildPreviewDocument（Tailwind 構成）", () => {
     expect(doc).toContain("babel.min.js");
   });
 
+  it("CSS が無い page.js は React 構成にしない（サーバーコンポーネント演習を壊さない）", () => {
+    expect(previewCapability([page])).not.toMatchObject({ autoPreview: true });
+    expect(
+      previewCapability([page, f("loading.js", "javascript", "export default () => null;")])
+    ).not.toMatchObject({ autoPreview: true });
+  });
+
   it('@import "tailwindcss" を含む CSS があるときだけ Tailwind を読み込む', () => {
     const doc = buildPreviewDocument([page, globals], { vendorBaseUrl: vendor });
     expect(doc).toContain(`<script src="${vendor}/vendor/react/tailwind.browser.js"></script>`);

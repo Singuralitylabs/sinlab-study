@@ -80,18 +80,23 @@ function fileExtension(filename: string): string {
   return dot === -1 ? "" : name.slice(dot + 1);
 }
 
+const REACT_ENTRY_NAMES = ["App.jsx", "App.js"] as const;
+// page.js alone is also the name of server-component exercises (fetch, next/*) that cannot render here,
+// so it only counts as an entry beside a CSS file (the Tailwind starter's globals.css).
+const NEXT_ENTRY_NAMES = ["page.jsx", "page.js"] as const;
+
 /**
- * React layout (#475): must include an entry (App.jsx / App.js, or Next.js-style page.jsx /
- * page.js for Tailwind exercises), and every file is only .jsx / .js / .css.
+ * React layout (#475): must include App.jsx / App.js (or page.jsx / page.js beside a .css file, for
+ * Tailwind exercises), and every file is only .jsx / .js / .css.
  * Checked before the language-based kinds so App.js is not classified as javascript-only.
  */
-const REACT_ENTRY_NAMES = ["App.jsx", "App.js", "page.jsx", "page.js"] as const;
-
 function isReactPreviewLayout(files: readonly PreviewLayoutFile[]): boolean {
   if (files.length === 0) {
     return false;
   }
   let hasApp = false;
+  let hasNextPage = false;
+  let hasCss = false;
   for (const file of files) {
     const name = (file.filename ?? "").trim();
     const ext = fileExtension(name);
@@ -101,8 +106,14 @@ function isReactPreviewLayout(files: readonly PreviewLayoutFile[]): boolean {
     if ((REACT_ENTRY_NAMES as readonly string[]).includes(name)) {
       hasApp = true;
     }
+    if ((NEXT_ENTRY_NAMES as readonly string[]).includes(name)) {
+      hasNextPage = true;
+    }
+    if (ext === "css") {
+      hasCss = true;
+    }
   }
-  return hasApp;
+  return hasApp || (hasNextPage && hasCss);
 }
 
 /**
