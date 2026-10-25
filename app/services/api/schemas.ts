@@ -74,6 +74,7 @@ import {
   resolveSubmissionFileSlots,
   SUBMISSION_FILE_SLOT_MAX_COUNT,
 } from "@/app/lib/submission-file-slots";
+import { parseVideoSource } from "@/app/lib/video-source";
 
 export const PositiveIntSchema = z
   .number({ message: "数値で指定してください" })
@@ -130,6 +131,32 @@ const SlidePdfUrlSchema = z
       return z.NEVER;
     }
     return objectKey;
+  });
+/**
+ * Stored video value: a YouTube URL or a Cloudflare Stream UID (#488). Blank becomes null; any
+ * other external URL is rejected so only players we know how to sandbox are ever rendered.
+ */
+const VideoUrlSchema = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((value, ctx) => {
+    if (value === undefined || value === null) {
+      return value;
+    }
+    const trimmed = value.trim();
+    if (trimmed === "") {
+      return null;
+    }
+    const source = parseVideoSource(trimmed);
+    if (!source) {
+      ctx.addIssue({
+        code: "custom",
+        message: "video_urlはYouTubeのURLまたはCloudflare Streamの動画ID（32桁）で指定してください",
+      });
+      return z.NEVER;
+    }
+    return source.kind === "stream" ? source.uid : trimmed;
   });
 const OptionalBoolean = z.boolean().optional();
 /**
@@ -524,7 +551,7 @@ const ContentBaseSchema = z.object({
   title: RequiredStringSchema,
   phase_id: PositiveIntSchema,
   content_type: ContentTypeSchema,
-  video_url: OptionalNullableString,
+  video_url: VideoUrlSchema,
   text_content: OptionalNullableString,
   description: OptionalNullableString,
   exercise_instructions: OptionalNullableString,

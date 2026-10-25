@@ -839,13 +839,13 @@ export function ContentForm({
 
       {contentType === "video" && (
         <div className="space-y-2">
-          <Label htmlFor="videoUrl">YouTube URL</Label>
+          <Label htmlFor="videoUrl">動画（YouTube URL または Cloudflare Stream の動画ID）</Label>
           <Input
             id="videoUrl"
-            type="url"
+            type="text"
             value={videoUrl}
             onChange={(e) => setVideoUrl(e.target.value)}
-            placeholder="https://www.youtube.com/watch?v=..."
+            placeholder="https://www.youtube.com/watch?v=... または 32桁の動画ID"
           />
         </div>
       )}

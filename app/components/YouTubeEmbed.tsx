@@ -2,27 +2,13 @@
 
 import dynamic from "next/dynamic";
 import { useState } from "react";
+import { extractYouTubeVideoId } from "@/app/lib/video-source";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 interface YouTubeEmbedProps {
   url: string;
   className?: string;
-}
-
-function extractVideoId(url: string): string | null {
-  // Allow a trailing slash while capturing only the ID (so `.../embed/abc123/` doesn't yield
-  // //hqdefault).
-  const patterns = [/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#/]+)/];
-
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match?.[1]) {
-      return match[1];
-    }
-  }
-
-  return null;
 }
 
 function YouTubePlayerLoading() {
@@ -52,7 +38,7 @@ const YouTubePlayerNoSSR = dynamic(
  * Image Optimizer (avoids source-image quota use and spec drift).
  */
 export function YouTubeEmbed({ url, className }: YouTubeEmbedProps) {
-  const videoId = extractVideoId(url);
+  const videoId = extractYouTubeVideoId(url);
   const [activated, setActivated] = useState(false);
 
   if (!videoId) {

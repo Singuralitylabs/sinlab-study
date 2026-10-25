@@ -81,7 +81,7 @@ erDiagram
 
 | content_type | 使用するカラム |
 |:--|:--|
-| video | `video_url`（YouTube URL）、`description`（任意） |
+| video | `video_url`（YouTube URL または Cloudflare Stream の動画 UID＝32桁の小文字16進。判定は `parseVideoSource()`）、`description`（任意） |
 | text | `text_content`（Markdown） |
 | exercise | `exercise_instructions`、`reference_answer`（AIレビューの参照用の模範回答・**提出前の受講生には非公開**。列権限から外し、提出後だけ `get_exercise_reference_answer()`（6.18）で読む）、`grading_rubric`（採点基準 JSONB。下記）、`hint`（受講生に公開）、`starter_files`（初期コード JSONB。下記。受講生に公開）、`submission_file_slots`（提出ファイル構成 JSONB。下記。受講生に公開）、`show_preview` / `show_console`（ライブプレビューとコンソール。下記。受講生に公開）、`allowed_submission_types`、`code_language` |
 | slide | `pdf_url`、`description`（任意）、`text_content`（解説記事・Markdown・任意。テキスト種別と共用。空なら NULL） |

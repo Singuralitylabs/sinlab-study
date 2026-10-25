@@ -6,7 +6,7 @@ import { ExerciseHint } from "@/app/components/ExerciseHint";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { PageTitle } from "@/app/components/PageTitle";
 import { SlideContent } from "@/app/components/SlideContent";
-import { YouTubeEmbed } from "@/app/components/YouTubeEmbed";
+import { VideoContent } from "@/app/components/VideoContent";
 import { parseStarterFiles } from "@/app/lib/code-file-inputs";
 import { resolveMarkdownStorageUrls } from "@/app/lib/storage-url";
 import {
@@ -15,6 +15,7 @@ import {
   fetchDemoContentsByPhaseId,
   fetchDemoContext,
 } from "@/app/services/api/demo-learning-server";
+import { createStreamPlaybackForDemo } from "@/app/services/api/stream-server";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -101,6 +102,9 @@ export default async function DemoContentPage({ params }: PageProps) {
       : Promise.resolve(null),
   ]);
 
+  // Stream token for trial-open videos only; createStreamPlaybackForDemo() re-checks the scope.
+  const streamPlayback = createStreamPlaybackForDemo(content);
+
   const currentIndex = phaseContents?.findIndex((c) => c.id === contentIdNum) ?? -1;
   const prevContent = currentIndex > 0 ? phaseContents?.[currentIndex - 1] : null;
   const nextContent =
@@ -118,7 +122,7 @@ export default async function DemoContentPage({ params }: PageProps) {
         <CardContent className="pt-6">
           {content.content_type === "video" && content.video_url && (
             <div className="mb-6">
-              <YouTubeEmbed url={content.video_url} />
+              <VideoContent videoUrl={content.video_url} streamPlayback={streamPlayback} />
             </div>
           )}
 

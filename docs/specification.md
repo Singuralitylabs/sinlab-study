@@ -419,7 +419,7 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 
 | 種別 | 表示方法 |
 |:--|:--|
-| 動画（video） | YouTube facade（サムネイル + 再生ボタン）。クリックで `react-youtube` を遅延読み込みして autoplay 再生（URLから Video ID を自動抽出、レスポンシブ対応） |
+| 動画（video） | `video_url` が Cloudflare Stream の動画 UID なら Stream facade、YouTube URL なら YouTube facade（サムネイル + 再生ボタン。いずれもクリックで遅延読み込みして autoplay 再生、レスポンシブ対応）。判定は `parseVideoSource()`（`app/lib/video-source.ts`） |
 | テキスト（text） | Markdown形式で記述・表示（GFM対応） |
 | スライド（slide） | 非公開バケット `slides` のPDFを、閲覧権限チェック後にサーバー側で発行した署名付きURLで react-pdf によりブラウザ内表示（後述）。`text_content`（Markdown・任意）があればビューアの直下に解説記事を表示する。空なら記事は出さない |
 | 演習（exercise） | Markdown形式の演習指示を表示。課題提出フォームと連携。模範回答は提出が1件以上あるとき（admin・maintainer は提出不要）だけ、RPC `get_exercise_reference_answer()`（`docs/database.md` 6.18）で取得して表示する（列権限では読めない）。提出済みで再挑戦中でないときは「再度課題に取り組む」を出せる（5.7節）。`grading_rubric` が NULL でなく提出方法が URL のみでない演習（空の墓石を含む。`both` は含む）は完了ボタンを出さず、AIレビュー合格で完了する（4.1節）。空の墓石は合格にならないため完了できず、合格点の案内ではなく「現在この演習は完了できません」と出す。URL のみは完了ボタンのまま。合格レビューが無い既存の完了は「完了」とだけ出す。合格点は `CERTIFICATE_PASS_SCORE`。`both` では URL 提出が採点対象外である旨を画面に出す。お試しは生涯の回数（初期値1回）を使い切ると、不合格のままお試し中は完了できない旨も出す。修了証はお試しには出さない |
@@ -432,6 +432,15 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 **Markdown 画像の幅（#478）**: `MarkdownRenderer` は画像を中央寄せし、指定なしでは最大幅 `MARKDOWN_IMAGE_DEFAULT_MAX_WIDTH_PX`（560px。定数は `app/constants/markdown.ts`）に抑える（本文幅より狭いときは本文幅に収まる）。画像ごとの幅は Markdown の title に `w=400` のように書く（例: `![説明](url "w=400")`）。`resolveMarkdownImageWidth()` が title を数値へ変換し、有効ならその幅で表示する（本文幅を超える指定も本文幅に収まる）。下限・上限（`MARKDOWN_IMAGE_MIN_WIDTH_PX` / `MARKDOWN_IMAGE_MAX_WIDTH_PX`）外・数値以外・負数は無視して既定の最大幅にする。`w=` 記法の title はツールチップとして残さない。通常の title（`w=` 以外）は従来どおりツールチップ用に残す。生 HTML（`rehype-raw`）は許可しない。
 
 **YouTube facade**: クリック前は `i.ytimg.com` の hqdefault を `<img>` で直接参照する（最適化の恩恵がほぼ無いため `next/image` は使わず、クリック前に `youtube.com` へ通信しない）。クリック後に `YouTubePlayer` を動的読み込みして autoplay 再生する（クライアント読み込み方針は5.4.6）。iOS Safari では gesture 後に生成した cross-origin iframe の音声付き autoplay が拒否され、再生ボタンへの追加タップが必要になる場合がある（facade 化の既知の制約）。
+
+**Cloudflare Stream の配信（署名付きトークン、#488）**: 有料会員向け動画の移行先。YouTube の埋め込みには「埋め込みプレーヤーでの視聴に課金してはならない」という API ポリシーがあり、限定公開リンクは流出しうるため、動画ごとに `requireSignedURLs` を有効にして配信する。
+- `video_url` には YouTube URL または Stream の動画 UID（32桁の小文字16進）のどちらかを保存する（新カラムなし）。管理 API・管理フォームは `parseVideoSource()` で判定し、それ以外の外部 URL は拒否する。既存の YouTube 動画は触らず、回ごとに差し替えて移行する。
+- トークンはサーバー側で RS256 の JWT を自前署名して発行する（`app/services/api/stream-server.ts`。Cloudflare API は呼ばない）。署名後のトークンは再生 URL の動画 UID の位置に入れる（`https://customer-<code>.cloudflarestream.com/<token>/iframe`、サムネイルは同 `/thumbnails/thumbnail.jpg`）。
+- **発行は閲覧権限チェックの後だけ。** 学習画面は `getServerAuth()` → 通常クライアントの `fetchContentById()`（`is_published` 絞り込み・RLS）→ `isContentLockedForUser()` を通った後に `createStreamPlaybackForMember()` を呼ぶ（スライドの署名と同じ位置）。ロック済み・未公開・お試し非公開では発行しない。service_role は使わない。
+- `/demo` は `createStreamPlaybackForDemo()` が `is_published = true AND is_deleted = false AND is_open_to_trial = true` の動画にだけ発行する。期限は会員向けより短い。
+- 期限は `app/constants/stream.ts`（会員 6 時間、デモ 1 時間。プレーヤーはトークンを更新できないため再生途中で切れない長さにする）。
+- 環境変数 `CLOUDFLARE_STREAM_CUSTOMER_CODE` / `CLOUDFLARE_STREAM_SIGNING_KEY_ID` / `CLOUDFLARE_STREAM_SIGNING_KEY_PEM`（API が返す Base64 の PEM をそのまま。コードでデコード）のどれかが欠けるか不正なら、トークンを発行せず「動画を読み込めませんでした」を表示する（フェイルクローズ）。鍵はサーバー側でのみ扱い、レスポンス・ログへ出さない。
+- Stream 側の設定（人間タスク）: 動画ごとに Require Signed URLs を ON、Allowed Origins に本番・プレビュー・ローカル、Downloads は OFF。
 
 **スライドPDFの配信（署名付きURL、#89）**
 
