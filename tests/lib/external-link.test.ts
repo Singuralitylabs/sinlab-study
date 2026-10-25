@@ -15,4 +15,11 @@ describe("isExternalHref", () => {
       expect(isExternalHref(href)).toBe(false);
     }
   );
+
+  it("treats the app's own origin as internal when appUrl is given", () => {
+    expect(isExternalHref("https://app.example.com/learn/1", "https://app.example.com")).toBe(
+      false
+    );
+    expect(isExternalHref("https://other.example.com/", "https://app.example.com")).toBe(true);
+  });
 });

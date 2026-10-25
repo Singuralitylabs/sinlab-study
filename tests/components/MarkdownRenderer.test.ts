@@ -34,6 +34,18 @@ describe("MarkdownRenderer", () => {
     expect(html).toContain("新しいタブで開きます");
   });
 
+  it("画像だけのリンクにはアイコンを付けないが、別タブと注記は維持する", () => {
+    const html = renderToStaticMarkup(
+      createElement(MarkdownRenderer, {
+        content: "[![図](https://example.com/a.png)](https://example.com)",
+      })
+    );
+
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain("新しいタブで開きます");
+    expect(html).not.toContain("lucide");
+  });
+
   it("内部リンク・アンカー・mailto は同じタブのまま", () => {
     const content = "[a](/learn/1) [b](#x) [c](mailto:a@example.com)";
 

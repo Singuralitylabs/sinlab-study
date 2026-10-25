@@ -148,9 +148,14 @@ function MarkdownImage({
   );
 }
 
+// Structural type: react-markdown ships its own copy of the hast types, which doesn't match ours.
+function isImageElement(child: { type: string; tagName?: string } | undefined): boolean {
+  return child?.type === "element" && child.tagName === "img";
+}
+
 // External links open in a new tab so learners keep their place in the lesson. noreferrer avoids
 // leaking the learner's page URL; the icon and sr-only text announce the new tab.
-function MarkdownLink({ node: _node, href, children, ...props }: MarkdownTagProps<"a">) {
+function MarkdownLink({ node, href, children, ...props }: MarkdownTagProps<"a">) {
   if (!isExternalHref(href)) {
     return (
       <a href={href} {...props}>
@@ -158,13 +163,17 @@ function MarkdownLink({ node: _node, href, children, ...props }: MarkdownTagProp
       </a>
     );
   }
+  // A block-level image link would put the icon alone on the next line, so skip it there.
+  const isImageOnly = node?.children.length === 1 && isImageElement(node.children[0]);
   return (
     <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
       {children}
-      <ExternalLink
-        aria-hidden="true"
-        className="ml-0.5 inline-block size-[0.85em] align-baseline"
-      />
+      {!isImageOnly && (
+        <ExternalLink
+          aria-hidden="true"
+          className="ml-0.5 inline-block size-[0.85em] align-baseline"
+        />
+      )}
       <span className="sr-only">（新しいタブで開きます）</span>
     </a>
   );
