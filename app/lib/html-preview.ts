@@ -19,7 +19,11 @@ const REACT_VENDOR_FILES = {
   react: "react.production.min.js",
   reactDom: "react-dom.production.min.js",
   babel: "babel.min.js",
+  tailwind: "tailwind.browser.js",
 } as const;
+
+/** Tailwind v4 entry CSS (what create-next-app puts in globals.css); its presence turns Tailwind on. */
+const TAILWIND_IMPORT = /@import\s+(?:url\()?\s*["']tailwindcss["']/;
 
 export function isPreviewLanguage(language: string | null | undefined): boolean {
   return PREVIEW_LANGUAGES.includes(language as PreviewLanguage);
@@ -77,9 +81,12 @@ function fileExtension(filename: string): string {
 }
 
 /**
- * React layout (#475): must include App.jsx or App.js, and every file is only .jsx / .js / .css.
+ * React layout (#475): must include an entry (App.jsx / App.js, or Next.js-style page.jsx /
+ * page.js for Tailwind exercises), and every file is only .jsx / .js / .css.
  * Checked before the language-based kinds so App.js is not classified as javascript-only.
  */
+const REACT_ENTRY_NAMES = ["App.jsx", "App.js", "page.jsx", "page.js"] as const;
+
 function isReactPreviewLayout(files: readonly PreviewLayoutFile[]): boolean {
   if (files.length === 0) {
     return false;
@@ -91,7 +98,7 @@ function isReactPreviewLayout(files: readonly PreviewLayoutFile[]): boolean {
     if (ext !== "js" && ext !== "jsx" && ext !== "css") {
       return false;
     }
-    if (name === "App.jsx" || name === "App.js") {
+    if ((REACT_ENTRY_NAMES as readonly string[]).includes(name)) {
       hasApp = true;
     }
   }
@@ -736,8 +743,14 @@ function buildReactPreviewDocument(
   { headPrelude = "", vendorBaseUrl = "" }: { headPrelude?: string; vendorBaseUrl?: string }
 ): string {
   const cssFiles = files.filter((f) => fileExtension(f.filename) === "css");
+  // The Tailwind browser build compiles only <style type="text/tailwindcss">; plain <style> would
+  // leave `@import "tailwindcss"` unresolved. Other CSS files stay plain so React exercises are unchanged.
+  const useTailwind = cssFiles.some((f) => TAILWIND_IMPORT.test(f.content));
   const styles = cssFiles
-    .map((f) => `<style>${escapeClosingTag(f.content, "style")}</style>`)
+    .map((f) => {
+      const type = useTailwind && TAILWIND_IMPORT.test(f.content) ? ' type="text/tailwindcss"' : "";
+      return `<style${type}>${escapeClosingTag(f.content, "style")}</style>`;
+    })
     .join("");
   const scriptFiles = files.filter((f) => {
     const ext = fileExtension(f.filename);
@@ -758,6 +771,9 @@ function buildReactPreviewDocument(
   const reactUrl = vendorScriptUrl(vendorBaseUrl, REACT_VENDOR_FILES.react);
   const reactDomUrl = vendorScriptUrl(vendorBaseUrl, REACT_VENDOR_FILES.reactDom);
   const babelUrl = vendorScriptUrl(vendorBaseUrl, REACT_VENDOR_FILES.babel);
+  const tailwindScript = useTailwind
+    ? `<script src="${vendorScriptUrl(vendorBaseUrl, REACT_VENDOR_FILES.tailwind)}"></script>`
+    : "";
 
   // Runs after Babel loads. Kept as an ES5 string so the preview does not depend on the app bundle.
   const bootstrap = escapeClosingTag(
@@ -814,9 +830,11 @@ try{
   if(typeof React==="undefined"||typeof ReactDOM==="undefined"||!ReactDOM.createRoot){
     throw new Error("React failed to load");
   }
-  var appName=modules["App.jsx"]?"App.jsx":modules["App.js"]?"App.js":null;
+  var entries=["App.jsx","App.js","page.jsx","page.js"];
+  var appName=null;
+  for(var e=0;e<entries.length&&!appName;e++){if(modules[entries[e]])appName=entries[e];}
   if(!appName){
-    throw new Error("App.jsx (or App.js) did not compile");
+    throw new Error("App.jsx (or App.js / page.js) did not compile");
   }
   var exp=req("./"+appName);
   var App=exp&&(exp.default||exp);
@@ -839,5 +857,5 @@ try{
     "script"
   );
 
-  return `<!doctype html><html><head><meta charset="utf-8">${headPrelude}<script src="${reactUrl}"></script><script src="${reactDomUrl}"></script><script src="${babelUrl}"></script>${styles}</head><body><div id="root"></div><script>${bootstrap}</script></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8">${headPrelude}<script src="${reactUrl}"></script><script src="${reactDomUrl}"></script><script src="${babelUrl}"></script>${tailwindScript}${styles}</head><body><div id="root"></div><script>${bootstrap}</script></body></html>`;
 }
