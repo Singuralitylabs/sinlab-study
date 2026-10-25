@@ -3,7 +3,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ColorSchemeSync } from "./components/ColorSchemeSync";
 import { ServiceWorkerRegistration } from "./components/ServiceWorkerRegistration";
-import { OGP_IMAGE_PATH, SITE_DESCRIPTION } from "./constants/ogp";
+import { OGP_IMAGE_ALT, OGP_IMAGE_PATH, SITE_DESCRIPTION, SITE_TITLE } from "./constants/ogp";
 import { PWA_NAME, PWA_THEME_COLOR_DARK, PWA_THEME_COLOR_LIGHT } from "./constants/pwa";
 import { buildColorSchemeInitScript } from "./lib/color-scheme";
 import "./globals.css";
@@ -25,19 +25,19 @@ const appUrl = process.env.NEXT_PUBLIC_APP_URL;
 
 export const metadata: Metadata = {
   ...(appUrl ? { metadataBase: new URL(appUrl) } : {}),
-  title: PWA_NAME,
+  title: SITE_TITLE,
   description: SITE_DESCRIPTION,
   openGraph: {
     type: "website",
     siteName: PWA_NAME,
     locale: "ja_JP",
-    title: PWA_NAME,
+    title: SITE_TITLE,
     description: SITE_DESCRIPTION,
-    images: [{ url: OGP_IMAGE_PATH, width: 1200, height: 630, alt: PWA_NAME }],
+    images: [{ url: OGP_IMAGE_PATH, width: 1200, height: 630, alt: OGP_IMAGE_ALT }],
   },
   twitter: {
     card: "summary_large_image",
-    title: PWA_NAME,
+    title: SITE_TITLE,
     description: SITE_DESCRIPTION,
     images: [OGP_IMAGE_PATH],
   },
