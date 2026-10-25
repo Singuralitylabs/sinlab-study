@@ -1131,8 +1131,8 @@ export function ContentForm({
               </div>
               <p className="ml-6 text-xs text-muted-foreground">
                 {previewCap.previewAllowed
-                  ? "HTML を含む課題、または App.jsx / App.js / page.js を含む React 構成で、提出内容をブラウザに表示します。"
-                  : "HTML を含む構成、または App.jsx / App.js / page.js を含む React 構成（.jsx / .js / .css のみ）のときだけオンにできます。"}
+                  ? "HTML を含む課題、または App.jsx / App.js（または .css と一緒の page.js）を含む React 構成で、提出内容をブラウザに表示します。"
+                  : "HTML を含む構成、または App.jsx / App.js（または .css と一緒の page.js）を含む React 構成（.jsx / .js / .css のみ）のときだけオンにできます。"}
               </p>
             </div>
             <div className="space-y-1">
@@ -1155,7 +1155,7 @@ export function ContentForm({
                   ? previewCap.autoPreview
                     ? "スクリプトの出力とエラーをプレビューの下に出します。"
                     : "プレビュー枠は出さず、「実行」を押したときだけ動きます。"
-                  : "HTML・JavaScript・または React（App.jsx / App.js / page.js）構成で、ほかの言語を含まないときだけオンにできます。"}
+                  : "HTML・JavaScript・または React（App.jsx / App.js、または .css と一緒の page.js）構成で、ほかの言語を含まないときだけオンにできます。"}
               </p>
             </div>
           </div>
