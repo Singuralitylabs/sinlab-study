@@ -24,6 +24,25 @@ describe("MarkdownRenderer", () => {
     expect(html).not.toContain('href="javascript:alert(1)"');
   });
 
+  it("外部リンクは別タブで開き、noopener noreferrer と読み上げ用の注記を付ける", () => {
+    const html = renderToStaticMarkup(
+      createElement(MarkdownRenderer, { content: "[公式](https://example.com/docs)" })
+    );
+
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(html).toContain("新しいタブで開きます");
+  });
+
+  it("内部リンク・アンカー・mailto は同じタブのまま", () => {
+    const content = "[a](/learn/1) [b](#x) [c](mailto:a@example.com)";
+
+    const html = renderToStaticMarkup(createElement(MarkdownRenderer, { content }));
+
+    expect(html).not.toContain("_blank");
+    expect(html).not.toContain("新しいタブ");
+  });
+
   it("コードフェンス内のHTML/JSはエスケープされたテキストとして表示され、内容が破損しない", () => {
     const content = '```html\n<div class="a">hi</div>\n```';
 

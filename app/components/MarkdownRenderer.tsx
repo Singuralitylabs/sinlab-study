@@ -10,10 +10,12 @@ import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
 import html from "highlight.js/lib/languages/xml";
 import { createLowlight } from "lowlight";
+import { ExternalLink } from "lucide-react";
 import { type ComponentPropsWithoutRef, memo } from "react";
 import ReactMarkdown, { type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
+import { isExternalHref } from "@/app/lib/external-link";
 import { resolveMarkdownImageWidth } from "@/app/lib/markdown-image-width";
 import { cn } from "@/lib/utils";
 
@@ -100,7 +102,8 @@ function rehypeHighlightSubset() {
   };
 }
 
-type MarkdownTagProps<T extends "pre" | "table" | "img"> = ComponentPropsWithoutRef<T> & ExtraProps;
+type MarkdownTagProps<T extends "pre" | "table" | "img" | "a"> = ComponentPropsWithoutRef<T> &
+  ExtraProps;
 
 // The table's min-content width escapes a flex item and widens the page. Scroll inside this box.
 function MarkdownTable({ node: _node, ...props }: MarkdownTagProps<"table">) {
@@ -145,6 +148,28 @@ function MarkdownImage({
   );
 }
 
+// External links open in a new tab so learners keep their place in the lesson. noreferrer avoids
+// leaking the learner's page URL; the icon and sr-only text announce the new tab.
+function MarkdownLink({ node: _node, href, children, ...props }: MarkdownTagProps<"a">) {
+  if (!isExternalHref(href)) {
+    return (
+      <a href={href} {...props}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+      {children}
+      <ExternalLink
+        aria-hidden="true"
+        className="ml-0.5 inline-block size-[0.85em] align-baseline"
+      />
+      <span className="sr-only">（新しいタブで開きます）</span>
+    </a>
+  );
+}
+
 interface MarkdownRendererProps {
   content: string;
   className?: string;
@@ -166,7 +191,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlightSubset]}
-        components={{ pre: MarkdownPre, table: MarkdownTable, img: MarkdownImage }}
+        components={{ pre: MarkdownPre, table: MarkdownTable, img: MarkdownImage, a: MarkdownLink }}
       >
         {content}
       </ReactMarkdown>
