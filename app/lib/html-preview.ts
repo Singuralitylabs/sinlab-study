@@ -9,6 +9,7 @@ const EXTENSION_LANGUAGE: Record<string, PreviewLanguage> = {
   htm: "html",
   css: "css",
   js: "javascript",
+  mjs: "javascript",
   // React exercises store JSX under the javascript language; the extension fills empty language.
   jsx: "javascript",
 };
@@ -415,6 +416,17 @@ const RELATIVE_IMPORT = /(\bfrom\s*|\bimport\s*)(["'])(\.{1,2}\/[^"'\n]+)\2/g;
 const dataModuleUrl = (source: string) =>
   `data:text/javascript;charset=utf-8,${encodeURIComponent(source).replace(/'/g, "%27")}`;
 
+/**
+ * `.mjs` is Node's explicit module marker: its exercises use top-level await without any
+ * import/export, which a classic script rejects as a SyntaxError.
+ */
+function needsModuleScript(file: CodeFile): boolean {
+  return (
+    file.filename.trim().toLowerCase().endsWith(".mjs") ||
+    MODULE_SYNTAX.test(maskNonCode(file.content))
+  );
+}
+
 /** Last token before a "/" that makes it a regex literal rather than a division. */
 const REGEX_CONTEXT =
   /(?:^|[(,=:[!&|?{};+\-*%<>~^]|\b(?:return|typeof|case|in|of|delete|void|throw|new))\s*$/;
@@ -527,7 +539,7 @@ function buildModuleScript(js: readonly CodeFile[]): string {
     }
   }
   const entry =
-    js.find((f) => f.filename.trim().toLowerCase() === "main.js") ??
+    js.find((f) => ["main.js", "main.mjs"].includes(f.filename.trim().toLowerCase())) ??
     [...js].reverse().find((f) => !imported.has(f)) ??
     js[js.length - 1];
   const entrySource = toSource(entry);
@@ -581,7 +593,7 @@ export function buildPreviewDocument(
     const css = files.filter((f) => resolveFileLanguage(f) === "css");
     const js = files.filter((f) => resolveFileLanguage(f) === "javascript");
     const styles = css.map((f) => `<style>${escapeClosingTag(f.content, "style")}</style>`);
-    const scripts = js.some((f) => MODULE_SYNTAX.test(maskNonCode(f.content)))
+    const scripts = js.some(needsModuleScript)
       ? [buildModuleScript(js)]
       : js.map((f) => `<script>${escapeClosingTag(f.content, "script")}</script>`);
     return `<!doctype html><html><head><meta charset="utf-8">${headPrelude}${styles.join("")}</head><body>${scripts.join("")}</body></html>`;

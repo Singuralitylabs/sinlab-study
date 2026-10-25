@@ -238,6 +238,24 @@ describe("buildPreviewDocument", () => {
     expect(doc).toContain("data:text/javascript;charset=utf-8,export%20const%20add");
   });
 
+  it("runs a .mjs file as a module even without import/export (top-level await)", () => {
+    const doc = buildPreviewDocument([
+      f(
+        "main.mjs",
+        "javascript",
+        'const res = await fetch("https://example.com");\nconsole.log(res.ok);'
+      ),
+    ]);
+    expect(doc).toContain('<script type="module">');
+    expect(doc).toContain("await fetch");
+  });
+
+  it("keeps a plain .js file without import/export as a classic script", () => {
+    const doc = buildPreviewDocument([f("main.js", "javascript", "console.log(1);")]);
+    expect(doc).toContain("<script>console.log(1);</script>");
+    expect(doc).not.toContain('type="module"');
+  });
+
   it("throws for a missing import instead of building the module graph", () => {
     const doc = buildPreviewDocument([
       f("a.js", "javascript", 'import { b } from "./b";\nexport const a = b;'),
