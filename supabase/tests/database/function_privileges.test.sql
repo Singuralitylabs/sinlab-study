@@ -66,6 +66,9 @@ from (
     ('public.get_students_progress_summary()', 'anon', false),
     ('public.get_students_progress_summary()', 'authenticated', true),
     ('public.get_students_progress_summary()', 'service_role', true),
+    ('public.record_content_view(integer, integer)', 'anon', false),
+    ('public.record_content_view(integer, integer)', 'authenticated', true),
+    ('public.record_content_view(integer, integer)', 'service_role', true),
     ('public.bulk_update_sibling_display_order(text, jsonb)', 'anon', false),
     ('public.bulk_update_sibling_display_order(text, jsonb)', 'authenticated', true),
     ('public.bulk_update_sibling_display_order(text, jsonb)', 'service_role', true),
@@ -140,6 +143,7 @@ select is(
     'quiz_content_visible_to_caller(integer)',
     'quiz_correct_choices_valid(text[],integer[])',
     'quiz_question_revision(text,text,text[])',
+    'record_content_view(integer,integer)',
     'replace_quiz_questions(integer,jsonb)',
     'stamp_stripe_subscription_funnel_times()',
     'update_updated_at_column()'
