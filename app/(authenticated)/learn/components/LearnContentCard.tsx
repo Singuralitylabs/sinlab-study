@@ -41,7 +41,7 @@ export function LearnContentCard({
 }: LearnContentCardProps) {
   const thumbnail = CONTENT_TYPE_THUMBNAILS[contentType];
   return (
-    <Link href={href} className="block group h-full">
+    <Link href={href} prefetch={false} className="block group h-full">
       <Card
         className={`h-full gap-0 overflow-hidden border-2 py-0 transition-all hover:shadow-md ${
           CONTENT_TYPE_BORDER_CLASSES[contentType]

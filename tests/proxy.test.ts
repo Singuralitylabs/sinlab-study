@@ -294,13 +294,20 @@ describe("proxy", () => {
       vi.mocked(createServerClient).mockImplementation((_url, _key, options) => {
         return {
           auth: {
-            getUser: vi.fn().mockImplementation(async () => {
+            getClaims: vi.fn().mockImplementation(async () => {
               // Reproduces @supabase/ssr detecting a token refresh and calling setAll.
               options.cookies?.setAll?.(
                 [{ name: "sb-token", value: "new-token-value", options: { path: "/" } }],
                 { "cache-control": "private, no-store" }
               );
-              return { data: { user: { id: "auth-123" } }, error: null };
+              return {
+                data: {
+                  claims: { sub: "auth-123" },
+                  header: { alg: "ES256", typ: "JWT" },
+                  signature: new Uint8Array(),
+                },
+                error: null,
+              };
             }),
           },
           from: vi.fn().mockImplementation(() =>
