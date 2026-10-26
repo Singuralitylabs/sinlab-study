@@ -1316,6 +1316,10 @@ export type Database = {
         };
         Returns: string;
       };
+      record_content_view: {
+        Args: { p_content_id: number; p_debounce_ms: number };
+        Returns: Json;
+      };
       replace_quiz_questions: {
         Args: { p_content_id: number; p_questions: Json };
         Returns: undefined;
