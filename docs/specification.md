@@ -573,7 +573,7 @@ flowchart TD
    - `last_viewed_at` は送らない（完了 / 完了解除で閲覧時刻を消さない。#396）
    - 完了の保存に成功したときだけ `first_content_completed` を記録する（`saveContentProgress()`。AIレビュー API の合格時も同じ関数）。進捗 API は `scheduleCertificate: false` で呼び、テーマが初めて 100% になったときだけ同期発行して `themeCompletion` を載せ、それ以外は `issueCertificateIfEligible()` を `after()` で予約する（13.2節）
 
-**閲覧記録**: `POST /api/progress/view`（ボディ `{ contentId }`）。コンテンツ詳細のクライアントから呼ぶ（Server Component では書かない）。可視性は進捗 API と同じ。`last_viewed_at` だけを upsert し、完了列は触らない。同一コンテンツは `LAST_VIEWED_AT_DEBOUNCE_MS` 以内なら更新をスキップする。
+**閲覧記録**: `POST /api/progress/view`（ボディ `{ contentId }`）。コンテンツ詳細のクライアントから呼ぶ（Server Component では書かない）。`requireLearnerApi()` のあと RPC `record_content_view(p_content_id, p_debounce_ms)` を 1 回呼ぶ（#501。可視性・debounce・upsert は RPC 内。service_role は使わない）。`last_viewed_at` だけを書き、完了列は触らない。同一コンテンツは `LAST_VIEWED_AT_DEBOUNCE_MS` 以内かつ最新閲覧がそのコンテンツのときだけスキップし、別コンテンツ閲覧後の再表示は上書きする（#396）。不可視は RPC が `42501` → API は 403。
 
 **可視性チェックの実装方法**: 通常クライアント（`authenticated`）で対象 `contentId` を、コンテンツ自身とフェーズ・テーマの全階層について `is_published = true AND is_deleted = false` 付きで SELECT し、0行なら403とする。`learning_contents` のRLSがステータスを織り込むため（データベース設計書の6.1参照）、アプリ層でステータス別の分岐を書く必要はない。`is_published` / `is_deleted` の絞り込みのみアプリ層で明示する（RLSは admin / maintainer に無条件で SELECT を許可しているため、それだけでは論理削除済みや未公開階層配下のコンテンツへの進捗登録・提出・AIレビューまで通ってしまう。2.12節のプレビュー機能でも、これらの操作は許可しない）。この方式は「存在しない contentId」「未公開コンテンツ」「お試し非公開コンテンツ」「論理削除済みコンテンツ」のいずれも同時に弾ける。
 

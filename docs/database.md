@@ -108,7 +108,7 @@ erDiagram
 
 `retry_started_at`（TIMESTAMPTZ・NULL 可）: 演習の「再度課題に取り組む」を押した時刻。NULL は再挑戦していない。再挑戦中かどうかはアプリの純粋関数が最新提出の `submitted_at` と比較する（#355。仕様は `docs/specification.md` 3.2・5.7）。完了列（`is_completed` / `completed_at` / `ever_completed`）とは独立で、再挑戦 API は `retry_started_at` だけを upsert する。
 
-`last_viewed_at`（TIMESTAMPTZ・NULL 可）: コンテンツ詳細を最後に開いた時刻（#396）。閲覧記録 API（`POST /api/progress/view`）がこの列だけを upsert する。完了 / 完了解除の upsert はこの列を送らず消さない。閲覧だけの行が増えても `inactivity_reminder` は `ever_completed = true` または `submissions` があるユーザーだけを「学習済み」とみなす。
+`last_viewed_at`（TIMESTAMPTZ・NULL 可）: コンテンツ詳細を最後に開いた時刻（#396）。閲覧記録 API（`POST /api/progress/view`）は RPC `record_content_view()` 経由でこの列だけを upsert する（#501）。完了 / 完了解除の upsert はこの列を送らず消さない。閲覧だけの行が増えても `inactivity_reminder` は `ever_completed = true` または `submissions` があるユーザーだけを「学習済み」とみなす。
 
 ### 3.6 submissions（課題提出）
 
@@ -411,7 +411,7 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 
 `retry_started_at`（#355）の書き込みも同じ INSERT / UPDATE ポリシーに従う。再挑戦 API（`POST /api/progress/retry`）は通常クライアントで upsert し、`is_completed` / `completed_at` / `ever_completed` は送らない。可視性はアプリ層の `isContentVisible()` が親階層まで見る（下の EXISTS 注意と同じ）。
 
-`last_viewed_at`（#396）の書き込みも同じ INSERT / UPDATE ポリシーに従う。閲覧記録 API（`POST /api/progress/view`）は通常クライアントで upsert し、完了列と `retry_started_at` は送らない。同一コンテンツへの連続書き込みはアプリ側で一定時間スキップする（`LAST_VIEWED_AT_DEBOUNCE_MS`）。可視性は進捗 API と同じく `isContentVisible()`。
+`last_viewed_at`（#396）の書き込みも同じ INSERT / UPDATE ポリシーに従う。閲覧記録 API（`POST /api/progress/view`）は RPC `record_content_view(p_content_id, p_debounce_ms)`（`SECURITY INVOKER`。#501）で可視性チェック・debounce・upsert を 1 トランザクションにまとめる。完了列と `retry_started_at` は送らない。可視性は `learning_contents` / phase / theme を `is_published = true AND is_deleted = false` 付きで EXISTS し、INVOKER の RLS（お試しの `is_open_to_trial` 等）も効く。0 行なら `42501`（API は 403）。同一コンテンツへの連続書き込みは `p_debounce_ms`（アプリの `LAST_VIEWED_AT_DEBOUNCE_MS`）以内かつ、その行が本人の最新 `last_viewed_at` のときだけ `{ success, skipped: true }` でスキップする（別コンテンツを見た後の再表示は上書き。#396）。`enforce_user_progress_review_pass()` は `is_completed` が変わらない更新では完了制約を課さない。EXECUTE は `authenticated` / `service_role` のみ（`PUBLIC, anon` を REVOKE）。
 
 maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進捗を参照するため、admin と同様に全件の SELECT を許可する。
 
