@@ -31,6 +31,21 @@ export function summarizePhaseProgress<T extends ProgressContent>(
   };
 }
 
+/**
+ * Theme-page phase icon: true when every published content in the phase is locked for the
+ * viewer (trial + not open to trial). Empty phases and phases with no published content stay
+ * unlocked so they keep the not-started book icon (#505). Uses already-fetched summaries —
+ * no extra query. Callers pass isContentLockedForUser (false for non-trial), so members /
+ * admin / maintainer never see a locked phase.
+ */
+export function isPhaseFullyLockedForUser<T extends { is_published: boolean }>(
+  contents: T[],
+  isLocked: (content: T) => boolean
+): boolean {
+  const published = contents.filter((content) => content.is_published);
+  return published.length > 0 && published.every(isLocked);
+}
+
 export const PHASE_PROGRESS_STATUS = {
   NOT_STARTED: "not_started",
   IN_PROGRESS: "in_progress",

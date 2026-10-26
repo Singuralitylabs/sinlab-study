@@ -165,6 +165,46 @@ describe("テーマページのフェーズ アコーディオン（#431）", ()
     setup("active", []);
     expect(await render()).not.toContain('href="/upgrade"');
   });
+
+  it("公開済みがすべて鍵のフェーズは鍵アイコンと有料案内を出し進捗バーは出さない（#505）", async () => {
+    setup("trial", []);
+    vi.mocked(fetchContentSummariesByPhaseIds).mockResolvedValue({
+      data: [
+        summary(10, 2, "A-1"),
+        summary(11, 2, "A-2"),
+        summary(20, 3, "B-1", false),
+        summary(21, 3, "B-2", false),
+      ],
+      error: null,
+    } as never);
+
+    const html = await render();
+    const phaseB = html.match(
+      /<details[^>]*>(?:(?!<\/details>).)*フェーズB(?:(?!<\/details>).)*<\/details>/s
+    )?.[0];
+    expect(phaseB).toBeDefined();
+    expect(phaseB).toContain('aria-label="有料会員向け"');
+    expect(phaseB).toContain("有料会員になると利用できます");
+    expect(phaseB).not.toContain("完了");
+
+    const phaseA = html.match(
+      /<details[^>]*>(?:(?!<\/details>).)*フェーズA(?:(?!<\/details>).)*<\/details>/s
+    )?.[0];
+    expect(phaseA).toContain('aria-label="未着手"');
+    expect(phaseA).not.toContain("有料会員になると利用できます");
+  });
+
+  it("会員にはフェーズの鍵アイコンを出さない（#505）", async () => {
+    setup("active", []);
+    vi.mocked(fetchContentSummariesByPhaseIds).mockResolvedValue({
+      data: [summary(20, 3, "B-1", false), summary(21, 3, "B-2", false)],
+      error: null,
+    } as never);
+
+    const html = await render();
+    expect(html).not.toContain('aria-label="有料会員向け"');
+    expect(html).not.toContain("有料会員になると利用できます");
+  });
 });
 
 describe("テーマ完了バナーのマスコット", () => {
