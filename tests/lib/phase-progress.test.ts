@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getPhaseProgressStatus,
+  isPhaseFullyLockedForUser,
   isThemeCompleted,
   PHASE_PROGRESS_STATUS,
   pickInitiallyOpenPhaseId,
@@ -97,5 +98,34 @@ describe("isThemeCompleted", () => {
 
   it("フェーズが0件なら false", () => {
     expect(isThemeCompleted([])).toBe(false);
+  });
+});
+
+describe("isPhaseFullyLockedForUser（#505）", () => {
+  const content = (is_published: boolean, locked: boolean) => ({ is_published, locked });
+  const isLocked = (c: { locked: boolean }) => c.locked;
+
+  it("公開済みが1件以上ありすべて鍵なら true", () => {
+    expect(
+      isPhaseFullyLockedForUser(
+        [content(true, true), content(true, true), content(false, false)],
+        isLocked
+      )
+    ).toBe(true);
+  });
+
+  it("公開済みに鍵でないものが1件でもあれば false", () => {
+    expect(isPhaseFullyLockedForUser([content(true, true), content(true, false)], isLocked)).toBe(
+      false
+    );
+  });
+
+  it("コンテンツ0件・公開済み0件は鍵にしない", () => {
+    expect(isPhaseFullyLockedForUser([], isLocked)).toBe(false);
+    expect(isPhaseFullyLockedForUser([content(false, true)], isLocked)).toBe(false);
+  });
+
+  it("isLocked が常に false（会員など）なら鍵にしない", () => {
+    expect(isPhaseFullyLockedForUser([content(true, true)], () => false)).toBe(false);
   });
 });

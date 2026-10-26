@@ -10,6 +10,7 @@ import { USER_STATUS } from "@/app/constants/user";
 import { compareGroupLevel } from "@/app/lib/content-grouping";
 import {
   getPhaseProgressStatus,
+  isPhaseFullyLockedForUser,
   isThemeCompleted,
   PHASE_PROGRESS_STATUS,
   pickInitiallyOpenPhaseId,
@@ -162,6 +163,9 @@ export default async function ThemePage({ params }: PageProps) {
               progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
             const status = getPhaseProgressStatus(progress);
             const isCompleted = status === PHASE_PROGRESS_STATUS.COMPLETED;
+            // Trial-only: published contents exist and every one is locked (#505). Non-trial
+            // isLocked is always false, so this stays false for members / admin / maintainer.
+            const phaseLocked = isPhaseFullyLockedForUser(contents, isLocked);
             return (
               <details
                 key={phase.id}
@@ -171,7 +175,7 @@ export default async function ThemePage({ params }: PageProps) {
                 }`}
               >
                 <summary className="flex cursor-pointer list-none items-center gap-4 rounded-xl p-4 [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-ring">
-                  <PhaseStatusIcon status={status} />
+                  <PhaseStatusIcon status={status} locked={phaseLocked} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <h2 className="text-lg font-semibold">{phase.name}</h2>
@@ -180,22 +184,28 @@ export default async function ThemePage({ params }: PageProps) {
                     {phase.description && (
                       <p className="text-sm text-muted-foreground mt-1">{phase.description}</p>
                     )}
-                    {progress.total > 0 && (
-                      <div className="mt-2 flex items-center gap-3">
-                        <Progress
-                          value={progressValue}
-                          className={`h-1.5 max-w-48 ${isCompleted ? "[&>div]:bg-success" : ""}`}
-                        />
-                        {isCompleted ? (
-                          <Badge variant="outline" className="border-success text-success">
-                            完了
-                          </Badge>
-                        ) : (
-                          <span className="text-xs text-muted-foreground whitespace-nowrap">
-                            {progress.completed} / {progress.total} 完了
-                          </span>
-                        )}
-                      </div>
+                    {phaseLocked ? (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        有料会員になると利用できます
+                      </p>
+                    ) : (
+                      progress.total > 0 && (
+                        <div className="mt-2 flex items-center gap-3">
+                          <Progress
+                            value={progressValue}
+                            className={`h-1.5 max-w-48 ${isCompleted ? "[&>div]:bg-success" : ""}`}
+                          />
+                          {isCompleted ? (
+                            <Badge variant="outline" className="border-success text-success">
+                              完了
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">
+                              {progress.completed} / {progress.total} 完了
+                            </span>
+                          )}
+                        </div>
+                      )
                     )}
                   </div>
                   <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-open/phase:rotate-180" />
