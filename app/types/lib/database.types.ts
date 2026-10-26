@@ -1242,6 +1242,10 @@ export type Database = {
           reference_answer: string;
         }[];
       };
+      get_exercise_review_pass_state: {
+        Args: { p_content_id: number };
+        Returns: Json;
+      };
       get_quiz_questions: {
         Args: { p_content_id: number };
         Returns: {

@@ -42,11 +42,19 @@ vi.mock("@/app/services/api/learning-server", async (importOriginal) => {
       isCompleted: false,
       retryStartedAt: null,
     }),
-    fetchContentRequiresReviewPass: vi.fn().mockResolvedValue(false),
-    fetchContentReviewPassUnachievable: vi.fn().mockResolvedValue(false),
-    fetchUserHasPassingReview: vi.fn().mockResolvedValue(false),
+    fetchExerciseReviewPassState: vi.fn().mockResolvedValue({
+      requiresPass: false,
+      passUnachievable: false,
+      hasPassingReview: false,
+    }),
   };
 });
+vi.mock("@/app/services/api/ai-review-settings-server", () => ({
+  fetchCurrentAIReviewLimits: vi.fn().mockResolvedValue({
+    active: { perContentPerDay: 2, perDay: 10 },
+    trial: { perContentLifetime: 1 },
+  }),
+}));
 vi.mock("@/app/components/SlideContent", () => ({
   SlideContent: ({ signedUrl }: { signedUrl: string | null }) =>
     createElement("div", { "data-testid": "slide-content" }, signedUrl ?? "SLIDE_UNAVAILABLE"),
@@ -73,12 +81,10 @@ import { fetchCompletedAIReviewByContentId } from "@/app/services/api/ai-review-
 import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   fetchContentById,
-  fetchContentRequiresReviewPass,
-  fetchContentReviewPassUnachievable,
   fetchExerciseReferenceAnswer,
+  fetchExerciseReviewPassState,
   fetchPhaseWithBreadcrumbById,
   fetchThemeNavigationIndex,
-  fetchUserHasPassingReview,
   fetchUserProgressByContentId,
 } from "@/app/services/api/learning-server";
 import { createSlideSignedUrl } from "@/app/services/api/slides-server";
@@ -865,8 +871,11 @@ describe("演習ページのAIレビュー残り回数（#304）", () => {
 
   it("採点基準ありの演習は完了ボタンを出さず、合格の案内を出す", async () => {
     setupExercise({ userStatus: "trial" });
-    vi.mocked(fetchContentRequiresReviewPass).mockResolvedValue(true);
-    vi.mocked(fetchUserHasPassingReview).mockResolvedValue(false);
+    vi.mocked(fetchExerciseReviewPassState).mockResolvedValue({
+      requiresPass: true,
+      passUnachievable: false,
+      hasPassingReview: false,
+    });
 
     const html = await render();
 
@@ -878,8 +887,11 @@ describe("演習ページのAIレビュー残り回数（#304）", () => {
 
   it("空の採点基準では合格点の案内を出さない", async () => {
     setupExercise({ userStatus: "active" });
-    vi.mocked(fetchContentRequiresReviewPass).mockResolvedValue(true);
-    vi.mocked(fetchContentReviewPassUnachievable).mockResolvedValue(true);
+    vi.mocked(fetchExerciseReviewPassState).mockResolvedValue({
+      requiresPass: true,
+      passUnachievable: true,
+      hasPassingReview: false,
+    });
 
     const html = await render();
 

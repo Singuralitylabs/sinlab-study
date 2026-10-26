@@ -424,7 +424,7 @@ maintainer は受講生進捗一覧（`/manage/students`）で全受講生の進
 - **`active` ユーザーへの影響**: この条件はステータスを問わず適用されるため、`active` ユーザーも不可視コンテンツ（未公開・存在しないID）への書き込みができない（正常なUI経路では不可視コンテンツに到達しないため、正常系への影響はない）
 - **INSERT だけでなく UPDATE にも課す理由**: 進捗API（`/api/progress`）は upsert（`onConflict: user_id,content_id`）で、既存行がある場合は UPDATE 経路を通る。INSERT のみに条件を課すと2回目以降の更新がすり抜けるため、UPDATE にも同じ条件が必要。これにより、お試し公開フラグを後から `false` に戻したコンテンツの進捗も書き換えられなくなる
 
-**合格判定対象の完了（#367）**: RLS は本人が `is_completed` を立てられるため、BEFORE INSERT/UPDATE トリガー `enforce_user_progress_review_pass()` が追加の制約になる。対象は `learning_content_requires_review_pass()`（演習かつ `grading_rubric IS NOT NULL` かつ URL のみでない。空の墓石も含む。NULL と URL のみは false）。空配列で合格できないことは `content_review_pass_unachievable()` が真偽値だけ返す。`is_completed` が true になる操作で、`NEW.user_id` の提出に合格レビューが無ければ `42501`。すでに true の行の他列更新は判定しない。対象を未完了に戻す、または完了行を別コンテンツへ移す更新も拒否する。関数は `SECURITY DEFINER`・`search_path = public`。`learning_content_requires_review_pass()` は API ロールから EXECUTE できない。`enforce_user_progress_review_pass()` は `anon` から EXECUTE できない（受講生の書き込みがトリガーを起動できるよう `authenticated` は残す）。画面と進捗 API は RPC `content_requires_review_pass(p_content_id)`（`authenticated` / `service_role`。不可視は false）で同じ真偽値を読む。既存の RLS ポリシーは維持する。
+**合格判定対象の完了（#367）**: RLS は本人が `is_completed` を立てられるため、BEFORE INSERT/UPDATE トリガー `enforce_user_progress_review_pass()` が追加の制約になる。対象は `learning_content_requires_review_pass()`（演習かつ `grading_rubric IS NOT NULL` かつ URL のみでない。空の墓石も含む。NULL と URL のみは false）。空配列で合格できないことは `content_review_pass_unachievable()` が真偽値だけ返す。`is_completed` が true になる操作で、`NEW.user_id` の提出に合格レビューが無ければ `42501`。すでに true の行の他列更新は判定しない。対象を未完了に戻す、または完了行を別コンテンツへ移す更新も拒否する。関数は `SECURITY DEFINER`・`search_path = public`。`learning_content_requires_review_pass()` は API ロールから EXECUTE できない。`enforce_user_progress_review_pass()` は `anon` から EXECUTE できない（受講生の書き込みがトリガーを起動できるよう `authenticated` は残す）。進捗 API・証明書判定は RPC `content_requires_review_pass(p_content_id)` / `content_review_pass_unachievable(p_content_id)`（`authenticated` / `service_role`。不可視は false）で同じ真偽値を読む。**演習コンテンツ詳細ページ**は往復削減のため RPC `get_exercise_review_pass_state(p_content_id)`（`SECURITY INVOKER`。#502）を 1 回呼び、`{ requires_pass, pass_unachievable, has_passing_review }` を得る（採点基準・模範回答の本文は返さない。前2値は既存 DEFINER ヘルパー経由、合格有無は呼び出し元 RLS 下の `submissions` / `ai_reviews`）。既存の 2 RPC は残す。EXECUTE は `authenticated` / `service_role` のみ（`PUBLIC, anon` を REVOKE）。既存の RLS ポリシーは維持する。
 
 ### 6.3 submissions
 
@@ -491,7 +491,7 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | SELECT | 認証済み全員 | `true`（受講生の画面に上限を表示するため。機微な値ではない） |
 | UPDATE | admin | `(select get_user_role()) = 'admin'`（USING / WITH CHECK とも） |
 
-INSERT / DELETE のポリシーは定義しない（行はマイグレーションで投入し、消さない）。maintainer には開放しない。`claim_ai_review()` を呼ぶ前の読み出しは service_role で行う。
+INSERT / DELETE のポリシーは定義しない（行はマイグレーションで投入し、消さない）。maintainer には開放しない。`claim_ai_review()` を呼ぶ前の読み出しは service_role で行い、**キャッシュしない**（コスト上限は常に最新。`fetchAIReviewLimits()`）。ホーム・コンテンツ詳細・`/upgrade` の表示用だけ `fetchCurrentAIReviewLimits()` が `unstable_cache`（約 60 秒・タグ `ai-review-limits`）する（#502）。管理画面の `PUT /api/admin/ai-review-settings` 成功後に `revalidateTag` で即時無効化する。読めない・範囲外のときは `AI_REVIEW_LIMITS` へ戻す。
 
 ### 6.11 announcements
 

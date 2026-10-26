@@ -1,8 +1,8 @@
 import type { PostgrestError } from "@supabase/supabase-js";
+import { revalidateTag, unstable_cache } from "next/cache";
 import { AI_REVIEW_LIMITS, type AIReviewLimits } from "@/app/constants/gemini";
 import { parseAIReviewLimits } from "@/app/lib/ai-review-limits";
-import type { createAdminSupabaseClient } from "./supabase-server";
-import { createServerSupabaseClient } from "./supabase-server";
+import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
 type SettingsClient =
   | Awaited<ReturnType<typeof createAdminSupabaseClient>>
@@ -11,9 +11,16 @@ type SettingsClient =
 const SETTINGS_COLUMNS =
   "active_per_content_per_day, active_per_day, trial_per_content_lifetime, updated_at, updated_by";
 
+/** Tag for display-only limits cache. Claim path must not use this cache (#502). */
+export const AI_REVIEW_LIMITS_CACHE_TAG = "ai-review-limits";
+
+/** 30–60s window from #502; admin save revalidateTag clears immediately. */
+const AI_REVIEW_LIMITS_CACHE_SECONDS = 60;
+
 /**
  * The limits in force. Never throws and never caches: a read error or an out-of-range row falls
  * back to AI_REVIEW_LIMITS so a settings outage cannot stop learners from getting reviews.
+ * Used by claim / admin paths that must see the latest values.
  */
 export async function fetchAIReviewLimits(supabase: SettingsClient): Promise<AIReviewLimits> {
   try {
@@ -33,10 +40,23 @@ export async function fetchAIReviewLimits(supabase: SettingsClient): Promise<AIR
   }
 }
 
-/** For pages: the limits in force, read with the viewer's own session (SELECT is open to all). */
+/**
+ * Cookie-free read for the shared display cache. Settings SELECT is non-sensitive (database.md
+ * 6.20); service_role avoids putting cookies() inside unstable_cache (#502).
+ */
+const readCachedDisplayLimits = unstable_cache(
+  async (): Promise<AIReviewLimits> => fetchAIReviewLimits(await createAdminSupabaseClient()),
+  ["ai-review-limits-display"],
+  { revalidate: AI_REVIEW_LIMITS_CACHE_SECONDS, tags: [AI_REVIEW_LIMITS_CACHE_TAG] }
+);
+
+/**
+ * Display-only limits for home / content / upgrade. Short-lived cache; admin PUT revalidates.
+ * Fail-safe to AI_REVIEW_LIMITS. Must not be used for claim / cost gating.
+ */
 export async function fetchCurrentAIReviewLimits(): Promise<AIReviewLimits> {
   try {
-    return await fetchAIReviewLimits(await createServerSupabaseClient());
+    return await readCachedDisplayLimits();
   } catch (error) {
     console.error("AIレビュー上限値の取得エラー（既定値を使います）:", error);
     return AI_REVIEW_LIMITS;
@@ -112,5 +132,10 @@ export async function updateAIReviewLimits(
     console.error("AIレビュー上限値の更新エラー:", error.message);
     return { error, updated: false };
   }
-  return { error: null, updated: (data?.length ?? 0) > 0 };
+  const updated = (data?.length ?? 0) > 0;
+  if (updated) {
+    // Immediate expire so home / content / upgrade show the new caps on the next request (#502).
+    revalidateTag(AI_REVIEW_LIMITS_CACHE_TAG, { expire: 0 });
+  }
+  return { error: null, updated };
 }

@@ -31,12 +31,10 @@ import { fetchCurrentAIReviewLimits } from "@/app/services/api/ai-review-setting
 import { fetchAIReviewUsage } from "@/app/services/api/ai-review-usage-server";
 import {
   fetchContentById,
-  fetchContentRequiresReviewPass,
-  fetchContentReviewPassUnachievable,
   fetchExerciseReferenceAnswer,
+  fetchExerciseReviewPassState,
   fetchPhaseWithBreadcrumbById,
   fetchThemeNavigationIndex,
-  fetchUserHasPassingReview,
   fetchUserProgressByContentId,
   isContentFullyPublished,
   isContentLockedForUser,
@@ -260,9 +258,7 @@ export default async function ContentPage({ params }: PageProps) {
     { data: quizQuestions, error: quizError },
     aiReviewUsage,
     { data: reviewNotes },
-    requiresReviewPass,
-    passUnachievable,
-    hasPassingReview,
+    reviewPassState,
   ] = await Promise.all([
     userId && exerciseContent
       ? fetchCompletedAIReviewByContentId(userId, contentIdNum)
@@ -296,12 +292,16 @@ export default async function ContentPage({ params }: PageProps) {
     showReviewListNotes && userId
       ? fetchReviewNotesForContent(userId, contentIdNum)
       : Promise.resolve({ data: [] }),
-    exerciseContent ? fetchContentRequiresReviewPass(contentIdNum) : Promise.resolve(false),
-    exerciseContent ? fetchContentReviewPassUnachievable(contentIdNum) : Promise.resolve(false),
-    exerciseContent && userId
-      ? fetchUserHasPassingReview(userId, contentIdNum)
-      : Promise.resolve(false),
+    // One RPC for requires / unachievable / has-pass (#502). Non-exercise skips.
+    exerciseContent
+      ? fetchExerciseReviewPassState(contentIdNum)
+      : Promise.resolve({
+          requiresPass: false,
+          passUnachievable: false,
+          hasPassingReview: false,
+        }),
   ]);
+  const { requiresPass: requiresReviewPass, passUnachievable, hasPassingReview } = reviewPassState;
 
   const memosByKey: Record<string, string | null> = {};
   let freeLearningMemo: string | null = null;
