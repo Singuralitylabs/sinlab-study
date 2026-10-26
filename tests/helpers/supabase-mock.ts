@@ -64,9 +64,42 @@ function pickConfiguredResult(
   return configured[index];
 }
 
+type AuthUserLike = { id?: string; email?: string | null } | null;
+
+/**
+ * Map legacy auth.getUser()-shaped fixtures to getClaims() results so existing tests keep working
+ * after proxy / getServerAuth switched to JWKS-local verification.
+ */
+function claimsResultFromAuthUser(authResult?: { data: { user: AuthUserLike }; error: unknown }) {
+  const resolved = authResult ?? { data: { user: null }, error: null };
+  const user = resolved.data.user;
+  if (resolved.error || !user?.id) {
+    return { data: null, error: resolved.error ?? null };
+  }
+  return {
+    data: {
+      claims: {
+        sub: user.id,
+        email: typeof user.email === "string" ? user.email : undefined,
+        aud: "authenticated",
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        iat: Math.floor(Date.now() / 1000),
+        iss: "https://example.supabase.co/auth/v1",
+        role: "authenticated",
+        aal: "aal1",
+        session_id: "test-session",
+      },
+      header: { alg: "ES256", typ: "JWT" },
+      signature: new Uint8Array(),
+    },
+    error: null,
+  };
+}
+
 /**
  * Creates a Supabase client mock.
- * @param authResult auth.getUser() result (default { data: { user: null }, error: null })
+ * @param authResult auth.getUser() / getClaims() fixture (default { data: { user: null }, error:
+ * null }). getClaims() is derived from `user.id` / `user.email` so auth-gate tests stay compatible.
  * @param queryResult resolved value of from().select()... / rpc() chains (default { data: null,
  * error: null })
  * @param tableResults per-table results, taking precedence over queryResult (for functions querying
@@ -83,17 +116,19 @@ export function createMockSupabaseClient({
   tableResults,
   rpcResults,
 }: {
-  authResult?: { data: { user: unknown }; error: unknown };
+  authResult?: { data: { user: AuthUserLike }; error: unknown };
   queryResult?: QueryResult;
   tableResults?: Record<string, QueryResult | QueryResult[]>;
   rpcResults?: Record<string, QueryResult | QueryResult[]>;
 } = {}) {
   const callCounts: Record<string, number> = {};
   const rpcCallCounts: Record<string, number> = {};
+  const resolvedAuth = authResult ?? { data: { user: null }, error: null };
 
   return {
     auth: {
-      getUser: vi.fn().mockResolvedValue(authResult ?? { data: { user: null }, error: null }),
+      getUser: vi.fn().mockResolvedValue(resolvedAuth),
+      getClaims: vi.fn().mockResolvedValue(claimsResultFromAuthUser(resolvedAuth)),
     },
     from: vi.fn().mockImplementation((table: string) => {
       const result = pickConfiguredResult(tableResults?.[table], callCounts, table);

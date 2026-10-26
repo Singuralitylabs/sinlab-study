@@ -200,7 +200,7 @@ export function ContentTree({
                     <PublishedBadge isPublished={theme.isPublished} />
                     <div className="flex flex-wrap gap-1 ml-auto">
                       <Button asChild variant="outline" size="sm">
-                        <Link href={`/manage/themes/${theme.id}/edit`}>
+                        <Link href={`/manage/themes/${theme.id}/edit`} prefetch={false}>
                           <Edit className="h-3.5 w-3.5" />
                           編集
                         </Link>
@@ -212,7 +212,7 @@ export function ContentTree({
                         title="削除"
                         className="text-destructive hover:text-destructive"
                       >
-                        <Link href={`/manage/themes/${theme.id}/delete`}>
+                        <Link href={`/manage/themes/${theme.id}/delete`} prefetch={false}>
                           <Trash2 className="h-4 w-4" />
                         </Link>
                       </Button>
@@ -253,7 +253,7 @@ export function ContentTree({
                               <PublishedBadge isPublished={phase.isPublished} />
                               <div className="flex flex-wrap gap-1 ml-auto">
                                 <Button asChild variant="outline" size="sm">
-                                  <Link href={`/manage/phases/${phase.id}/edit`}>
+                                  <Link href={`/manage/phases/${phase.id}/edit`} prefetch={false}>
                                     <Edit className="h-3.5 w-3.5" />
                                     編集
                                   </Link>
@@ -265,7 +265,7 @@ export function ContentTree({
                                   title="削除"
                                   className="text-destructive hover:text-destructive"
                                 >
-                                  <Link href={`/manage/phases/${phase.id}/delete`}>
+                                  <Link href={`/manage/phases/${phase.id}/delete`} prefetch={false}>
                                     <Trash2 className="h-4 w-4" />
                                   </Link>
                                 </Button>
@@ -310,7 +310,10 @@ export function ContentTree({
                                       </span>
                                       <PublishedBadge isPublished={content.isPublished} />
                                       <Button asChild variant="ghost" size="sm" className="ml-auto">
-                                        <Link href={`/manage/contents/${content.id}/edit`}>
+                                        <Link
+                                          href={`/manage/contents/${content.id}/edit`}
+                                          prefetch={false}
+                                        >
                                           <Edit className="h-3.5 w-3.5" />
                                           編集
                                         </Link>

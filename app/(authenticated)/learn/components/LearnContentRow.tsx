@@ -31,7 +31,7 @@ export function LearnContentRow({
   aiReviewed,
 }: LearnContentRowProps) {
   return (
-    <Link href={href} className="block group">
+    <Link href={href} prefetch={false} className="block group">
       <Card
         className={`transition-all hover:shadow-sm hover:border-primary/20 ${
           completed ? "border-l-4 border-l-success" : ""

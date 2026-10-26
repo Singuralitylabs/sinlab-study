@@ -144,7 +144,7 @@ describe("getServerAuth", () => {
   });
 
   describe("proxy からのヘッダー経由（案Aのキャッシュ利用）", () => {
-    it("有効なヘッダーが揃っており auth.getUser().id と一致する場合、users テーブルを照会せずヘッダー値から結果を返す", async () => {
+    it("有効なヘッダーが揃っており getClaims().sub と一致する場合、users テーブルを照会せずヘッダー値から結果を返す", async () => {
       const requestHeaders = new Headers();
       requestHeaders.set(AUTH_HEADERS.AUTH_ID, mockUser.id);
       requestHeaders.set(AUTH_HEADERS.USER_ID, "10");
@@ -170,7 +170,7 @@ describe("getServerAuth", () => {
       expect(mockClient.from).not.toHaveBeenCalled();
     });
 
-    it("ヘッダーの auth_id と auth.getUser() の user.id が不一致の場合、ヘッダーを無視して DB から取得する", async () => {
+    it("ヘッダーの auth_id と getClaims().sub が不一致の場合、ヘッダーを無視して DB から取得する", async () => {
       const requestHeaders = new Headers();
       requestHeaders.set(AUTH_HEADERS.AUTH_ID, "forged-auth-id");
       requestHeaders.set(AUTH_HEADERS.USER_ID, "999");

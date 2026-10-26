@@ -38,9 +38,9 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 全体像・ロール・ステータスは `docs/specification.md` 2章。
 
-- **サーバー側のユーザー情報取得は `getServerAuth()`（`app/services/auth/server-auth.ts`）に一本化する。** layout・page・API Route のいずれも他の手段を使わない（`docs/specification.md` 2.2）。
+- **サーバー側のユーザー情報取得は `getServerAuth()`（`app/services/auth/server-auth.ts`）に一本化する。** layout・page・API Route のいずれも他の手段を使わない（`docs/specification.md` 2.2）。`proxy.ts` / `getServerAuth()` とも `auth.getClaims()`（非対称鍵なら JWKS ローカル検証）。`user` は `sub` / `email` の `AuthIdentity`（最新 Auth User が要るときだけ `getUser()`）。
 - **認可は二層防御。** `proxy.ts`（Middleware の後継）が第一の砦、`app/(authenticated)/layout.tsx` でも `userStatus` の許可リスト検証を行う。**クライアント側の認証ガードは行わない。**
-- **プロキシはフェイルクローズ。** 環境変数欠落・例外・status null はすべて `/login` へ。PWA のプロキシ除外と SW のキャッシュ境界は `docs/specification.md` 14.1。
+- **プロキシはフェイルクローズ。** 環境変数欠落・例外・status null・`getClaims()` 失敗はすべて `/login` へ。PWA のプロキシ除外と SW のキャッシュ境界は `docs/specification.md` 14.1。
 - **Cron ルート（`app/api/cron/`）は `isAuthorizedCronRequest()` による `CRON_SECRET` の検証を必ず通す**（未設定・不一致は 401）。`/api` は proxy の対象外のため、ルート側の検証だけが防御になる。
 - **定期メールの送る日・曜日・上限は `email_kind_settings` / `email_settings` が唯一の真実。定数をハードコードしない**（`docs/specification.md` 10.10）。**受講生向けの送信経路は入口で全体スイッチ `email_settings.sending_enabled` を確認する**（`isEmailSendingEnabled()` / `fetchEmailSettings()`。既定 false・読めなければ送らない。10.1節）。
 - **メール文面は `email_templates` → コードの既定値の順で解決し、差し込む値は Markdown 変換の後に入れ HTML ではエスケープする。** 配信停止リンクと `List-Unsubscribe` はテンプレートに含めずコードが必ず付ける（`docs/specification.md` 10.11）。

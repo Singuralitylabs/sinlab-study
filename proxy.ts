@@ -94,19 +94,18 @@ export async function proxy(request: NextRequest) {
       },
     });
 
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser();
-
-    if (error || !user) {
+    // Local JWKS verify when asymmetric JWT keys are enabled; avoids /auth/v1/user on every hit.
+    // Fail closed on expired / bad signature / missing JWKS the same way getUser() did.
+    const { data: claimsData, error } = await supabase.auth.getClaims();
+    const authId = claimsData?.claims?.sub;
+    if (error || !authId) {
       return applyResponseModifications(NextResponse.redirect(new URL("/login", request.url)));
     }
 
     const { data: userData, error: userError } = await supabase
       .from("users")
       .select("id, status, role, membership_type")
-      .eq("auth_id", user.id)
+      .eq("auth_id", authId)
       .eq("is_deleted", false)
       .maybeSingle();
 
@@ -129,7 +128,7 @@ export async function proxy(request: NextRequest) {
 
       // Build downstream headers from the latest request.headers after the token refresh.
       const downstreamHeaders = sanitizeRequestHeaders(request.headers);
-      downstreamHeaders.set(AUTH_HEADERS.AUTH_ID, user.id);
+      downstreamHeaders.set(AUTH_HEADERS.AUTH_ID, authId);
       downstreamHeaders.set(AUTH_HEADERS.USER_ID, String(userData.id));
       downstreamHeaders.set(AUTH_HEADERS.USER_STATUS, userData.status);
       downstreamHeaders.set(AUTH_HEADERS.USER_ROLE, userData.role);

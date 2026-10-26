@@ -1,4 +1,3 @@
-import type { User } from "@supabase/supabase-js";
 import { headers } from "next/headers";
 import { cache } from "react";
 import { AUTH_HEADERS } from "@/app/constants/auth";
@@ -6,8 +5,18 @@ import { ALLOWED_USER_STATUSES, MEMBERSHIP_TYPES, USER_ROLES } from "@/app/const
 import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
 import type { MembershipType, UserRoleType, UserStatusType } from "@/app/types";
 
+/**
+ * Identity from a JWKS-verified access token (`getClaims()`), not the Auth server User record.
+ * Call sites only need `id` (sub) and optional `email`; reach for `getUser()` only when a fresh
+ * Auth-server user object is required.
+ */
+export interface AuthIdentity {
+  id: string;
+  email: string | undefined;
+}
+
 export interface ServerAuthResult {
-  user: User | null;
+  user: AuthIdentity | null;
   userId: number | null;
   userStatus: UserStatusType | null;
   userRole: UserRoleType | null;
@@ -26,19 +35,26 @@ function rethrowIfControlError(error: unknown): void {
   }
 }
 
+function identityFromClaims(claims: { sub: string; email?: string }): AuthIdentity {
+  return {
+    id: claims.sub,
+    email: typeof claims.email === "string" ? claims.email : undefined,
+  };
+}
+
 // Memoized per request via React.cache(), so layouts and pages do not repeat it.
 export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
   try {
     const supabase = await createServerSupabaseClient();
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
+    // Local JWKS verify when the project uses asymmetric JWT keys; avoids /auth/v1/user per request.
+    const { data: claimsData, error: authError } = await supabase.auth.getClaims();
+    const claims = claimsData?.claims;
+    if (authError || !claims?.sub) {
       return { user: null, userId: null, userStatus: null, userRole: null };
     }
+
+    const user = identityFromClaims(claims);
 
     // Use the headers set by proxy.ts: pages that go through the proxy skip the DB re-query.
     try {
@@ -49,9 +65,9 @@ export const getServerAuth = cache(async (): Promise<ServerAuthResult> => {
       const headerUserRole = headerList.get(AUTH_HEADERS.USER_ROLE);
       const headerMembershipType = headerList.get(AUTH_HEADERS.MEMBERSHIP_TYPE);
 
-      // Tamper check: the auth.getUser() user.id must match the header auth_id, and status/role
-      // must be valid values before trusting the headers. The proxy only sets them for active /
-      // trial, so status is limited to ALLOWED_USER_STATUSES.
+      // Tamper check: claims.sub must match the header auth_id, and status/role must be valid
+      // values before trusting the headers. The proxy only sets them for active / trial, so status
+      // is limited to ALLOWED_USER_STATUSES.
       const isValidStatus =
         headerUserStatus !== null &&
         ALLOWED_USER_STATUSES.includes(headerUserStatus as (typeof ALLOWED_USER_STATUSES)[number]);

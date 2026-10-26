@@ -357,7 +357,10 @@ export function ContentsTable({ groups, fromBulk = false }: ContentsTableProps) 
                       <TableCell>
                         <div className="flex items-center justify-end gap-1">
                           <Button variant="ghost" size="icon-sm" asChild title="編集">
-                            <Link href={manageContentsEditHref(content.id, fromBulk)}>
+                            <Link
+                              href={manageContentsEditHref(content.id, fromBulk)}
+                              prefetch={false}
+                            >
                               <Edit className="h-4 w-4" />
                             </Link>
                           </Button>
@@ -368,7 +371,10 @@ export function ContentsTable({ groups, fromBulk = false }: ContentsTableProps) 
                             title="削除"
                             className="text-destructive hover:text-destructive"
                           >
-                            <Link href={manageContentsDeleteHref(content.id, fromBulk)}>
+                            <Link
+                              href={manageContentsDeleteHref(content.id, fromBulk)}
+                              prefetch={false}
+                            >
                               <Trash2 className="h-4 w-4" />
                             </Link>
                           </Button>
