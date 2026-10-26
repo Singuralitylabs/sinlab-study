@@ -29,6 +29,7 @@ import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabas
 export {
   fetchContentRequiresReviewPass,
   fetchContentReviewPassUnachievable,
+  fetchExerciseReviewPassState,
   fetchUserHasPassingReview,
 } from "./review-pass-server";
 

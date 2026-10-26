@@ -80,3 +80,35 @@ export async function fetchUserHasPassingReview(
   const { hasPass } = await userHasPassingReview(supabase, userId, contentId);
   return hasPass;
 }
+
+export type ExerciseReviewPassState = {
+  requiresPass: boolean;
+  passUnachievable: boolean;
+  hasPassingReview: boolean;
+};
+
+/**
+ * One round-trip for the exercise content page (#502). Keeps the existing two RPCs for progress /
+ * certificates / triggers. Fail-closed: RPC errors yield all-false.
+ */
+export async function fetchExerciseReviewPassState(
+  contentId: number
+): Promise<ExerciseReviewPassState> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase.rpc("get_exercise_review_pass_state", {
+    p_content_id: contentId,
+  });
+  if (error) {
+    console.error("演習の合格要否の確認エラー:", error.message);
+    return { requiresPass: false, passUnachievable: false, hasPassingReview: false };
+  }
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    return { requiresPass: false, passUnachievable: false, hasPassingReview: false };
+  }
+  const row = data as Record<string, unknown>;
+  return {
+    requiresPass: row.requires_pass === true,
+    passUnachievable: row.pass_unachievable === true,
+    hasPassingReview: row.has_passing_review === true,
+  };
+}
