@@ -45,7 +45,25 @@ select is(
   'authenticated has no TRUNCATE / REFERENCES / TRIGGER in public'
 );
 
--- Tables used only through service_role (no RLS policy).
+-- Any RLS table without a policy is service_role only, so authenticated must hold nothing on it.
+-- Derived from the catalog so a new policy-less table that misses its REVOKE fails here.
+select is(
+  (
+    select coalesce(array_agg(c.relname::text order by c.relname), '{}')
+    from pg_class c
+    where c.relnamespace = 'public'::regnamespace
+      and c.relrowsecurity
+      and not exists (select 1 from pg_policy p where p.polrelid = c.oid)
+      and case when c.relkind in ('r', 'p') then
+        has_table_privilege('authenticated', c.oid, 'SELECT, INSERT, UPDATE, DELETE')
+        or has_any_column_privilege('authenticated', c.oid, 'SELECT, INSERT, UPDATE')
+      else false end
+  ),
+  '{}'::text[],
+  'authenticated has no privilege on policy-less tables'
+);
+
+-- The tables docs/database.md names as service_role only.
 select is(
   has_table_privilege(r.role_name, s.table_name, p.privilege),
   r.expected,
