@@ -347,6 +347,8 @@ describe("proxy", () => {
       expect(matcherRegex.test("/sample.xml")).toBe(false);
       expect(matcherRegex.test("/sample.json")).toBe(false);
       expect(matcherRegex.test("/sample.map")).toBe(false);
+      expect(matcherRegex.test("/vendor/pglite/pglite.wasm")).toBe(false);
+      expect(matcherRegex.test("/vendor/pglite/pglite.data")).toBe(false);
       expect(matcherRegex.test("/_next/static/chunk.js")).toBe(false);
     });
   });

@@ -705,6 +705,20 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
         submission_file_slots: [{ filename: "q.sql", language: "sql" }],
         show_console: true,
       }).success
+    ).toBe(true);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "q.sql", language: "sql" }],
+        show_preview: true,
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "main.py", language: "python" }],
+        show_console: true,
+      }).success
     ).toBe(false);
     expect(
       ContentCreateSchema.safeParse({

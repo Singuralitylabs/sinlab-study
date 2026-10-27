@@ -2,7 +2,8 @@
 
 import { Eye, EyeOff, Play, RefreshCw, Terminal } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { buildPreviewDocument } from "@/app/lib/html-preview";
+import { SqlConsole } from "@/app/components/SqlConsole";
+import { buildPreviewDocument, isSqlLayout } from "@/app/lib/html-preview";
 import {
   acceptPreviewConsoleMessage,
   buildPreviewConsoleBridgeScript,
@@ -35,7 +36,17 @@ const LEVEL_CLASS: Record<PreviewConsoleEntry["level"], string> = {
   error: "text-destructive",
 };
 
-export function HtmlPreview({
+export function HtmlPreview(props: HtmlPreviewProps) {
+  // SQL has no page and no JavaScript: it runs on PGlite in a worker instead of an iframe.
+  if (isSqlLayout(props.files)) {
+    return props.showConsolePanel === false ? null : (
+      <SqlConsole files={props.files} collapsible={props.collapsible} />
+    );
+  }
+  return <ScriptPreview {...props} />;
+}
+
+function ScriptPreview({
   files,
   collapsible = false,
   showPreviewFrame = true,

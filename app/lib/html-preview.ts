@@ -73,12 +73,26 @@ export const PREVIEW_EXERCISE_ONLY_MESSAGE = "プレビューとコンソール�
 export const PREVIEW_NOT_ALLOWED_MESSAGE = "このファイル構成ではプレビューを表示できません";
 export const CONSOLE_NOT_ALLOWED_MESSAGE = "このファイル構成ではコンソールを表示できません";
 
-type PreviewLayoutKind = "html" | "javascript" | "css" | "js-css" | "react" | "other";
+type PreviewLayoutKind = "html" | "javascript" | "css" | "js-css" | "react" | "sql" | "other";
 
 function fileExtension(filename: string): string {
   const name = filename.trim().toLowerCase();
   const dot = name.lastIndexOf(".");
   return dot === -1 ? "" : name.slice(dot + 1);
+}
+
+/**
+ * SQL layout: every file is SQL (stored language "sql", or no language and a .sql extension). It runs
+ * on PGlite in a worker from the console 実行 button; there is no page to preview.
+ */
+export function isSqlLayout(files: readonly PreviewLayoutFile[]): boolean {
+  return (
+    files.length > 0 &&
+    files.every((file) => {
+      const language = (file.language ?? "").trim().toLowerCase();
+      return language ? language === "sql" : fileExtension(file.filename ?? "") === "sql";
+    })
+  );
 }
 
 const REACT_ENTRY_NAMES = ["App.jsx", "App.js"] as const;
@@ -124,6 +138,9 @@ function isReactPreviewLayout(files: readonly PreviewLayoutFile[]): boolean {
 function classifyPreviewLayout(files: readonly PreviewLayoutFile[]): PreviewLayoutKind {
   if (files.length === 0) {
     return "other";
+  }
+  if (isSqlLayout(files)) {
+    return "sql";
   }
   if (isReactPreviewLayout(files)) {
     return "react";
@@ -190,6 +207,7 @@ export function previewCapability(
       };
     case "javascript":
     case "js-css":
+    case "sql":
       return {
         autoPreview: false,
         autoConsole: true,
