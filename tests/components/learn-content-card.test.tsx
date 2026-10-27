@@ -35,17 +35,13 @@ describe("LearnContentCard（#433）", () => {
     expect(slide).toContain("text.webp");
   });
 
-  it("動画・解説記事・スライド・演習は画像、クイズは描画イラストのサムネイルにする", () => {
-    for (const contentType of ["video", "text", "slide", "exercise"] as const) {
+  it("全種別を画像のサムネイルにする", () => {
+    for (const contentType of CONTENT_TYPES) {
       const html = render({ contentType });
       expect(html).toContain("images%2Fcontent-types%2F");
       expect(html).not.toContain("<svg");
     }
-    {
-      const html = render({ contentType: "quiz" });
-      expect(html).toContain("<svg");
-      expect(html).not.toContain("images%2Fcontent-types%2F");
-    }
+    expect(render({ contentType: "quiz" })).toContain("quiz.webp");
   });
 
   it.each(CONTENT_TYPES)("種別 %s のラベルをサムネイルに出す", (contentType) => {

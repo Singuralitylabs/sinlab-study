@@ -47,7 +47,7 @@ export const toLearnerDisplayType = (type: ContentType): ContentType =>
 
 /**
  * Illustrated thumbnails for the learner cards (640x360 WebP in public/images/content-types).
- * Partial on purpose: types without a picture (quiz) fall back to the drawn illustration. Slides
+ * Partial on purpose: types without a picture fall back to the drawn illustration. Slides
  * share the article picture because learners see them as articles.
  */
 export const CONTENT_TYPE_THUMBNAILS: Partial<Record<ContentType, string>> = {
@@ -55,6 +55,7 @@ export const CONTENT_TYPE_THUMBNAILS: Partial<Record<ContentType, string>> = {
   text: "/images/content-types/text.webp",
   exercise: "/images/content-types/exercise.webp",
   slide: "/images/content-types/text.webp",
+  quiz: "/images/content-types/quiz.webp",
 };
 
 /**
