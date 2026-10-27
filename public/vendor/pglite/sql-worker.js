@@ -18,6 +18,9 @@ function getDb() {
 
 // Each run starts from an empty database: the exercises are scripts that run from the top.
 async function reset(db) {
+  // A script that ends inside BEGIN leaves the session in a transaction, and DISCARD ALL cannot run
+  // there. ROLLBACK outside a transaction is only a warning.
+  await db.query("ROLLBACK");
   await db.query("DISCARD ALL");
   await db.query("DROP SCHEMA IF EXISTS public CASCADE");
   await db.query("CREATE SCHEMA public");
