@@ -6,8 +6,13 @@ import { PGlite } from "./index.js";
 const MAX_ROWS = 100;
 let dbPromise = null;
 
+// date / timestamp / timestamptz: PGlite would turn them into JavaScript Dates, which show a
+// different value than PostgreSQL does (DATE becomes midnight UTC, TIMESTAMP shifts by the
+// browser's time zone). The raw text is what psql prints.
+const KEEP_AS_TEXT = { 1082: (value) => value, 1114: (value) => value, 1184: (value) => value };
+
 function getDb() {
-  dbPromise ??= PGlite.create();
+  dbPromise ??= PGlite.create({ parsers: KEEP_AS_TEXT });
   return dbPromise;
 }
 

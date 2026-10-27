@@ -69,19 +69,26 @@ export function SqlConsole({ files, collapsible = false }: SqlConsoleProps) {
       statements.length > shown.length
         ? `SQL が多いため、先頭の ${SQL_MAX_STATEMENTS} 件だけ実行しました`
         : null;
-    stopWorker();
+    clearTimer();
     setOutput({ statements: shown, results: [], notice });
     setState("loading");
 
-    let worker: Worker;
-    try {
-      worker = new Worker(SQL_WORKER_URL, { type: "module" });
-    } catch {
-      setOutput({ statements: shown, results: [], notice: "SQL の実行環境を開始できませんでした" });
-      setState("done");
-      return;
+    // The worker keeps PGlite loaded between runs, so only the first run pays for the download.
+    let worker = workerRef.current;
+    if (!worker) {
+      try {
+        worker = new Worker(SQL_WORKER_URL, { type: "module" });
+      } catch {
+        setOutput({
+          statements: shown,
+          results: [],
+          notice: "SQL の実行環境を開始できませんでした",
+        });
+        setState("done");
+        return;
+      }
+      workerRef.current = worker;
     }
-    workerRef.current = worker;
     const fail = (message: string) => {
       stopWorker();
       setOutput((prev) => ({
@@ -115,7 +122,7 @@ export function SqlConsole({ files, collapsible = false }: SqlConsoleProps) {
           prev ? { ...prev, results: [...prev.results, message.result] } : prev
         );
       } else if (message.type === "done") {
-        stopWorker();
+        clearTimer();
         setState("done");
       } else {
         fail(`SQL の実行環境でエラーが起きました: ${message.message}`);
