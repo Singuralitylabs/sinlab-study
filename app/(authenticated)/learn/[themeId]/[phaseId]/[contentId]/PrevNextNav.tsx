@@ -48,10 +48,13 @@ export function PrevNextNav({
   const prevAnnotation = prev ? boundaryAnnotation(prev, "prev") : null;
   const nextAnnotation = next ? boundaryAnnotation(next, "next") : null;
 
-  // min-w-0: Button is shrink-0 + whitespace-nowrap, so without it a long title keeps the flex item
+  // When "next" is absent in the degraded case, the primary end button already links to the phase.
+  const showPhaseBack = next !== null || endFallback === "theme";
+
+  // min-w-0: Button is shrink-0 + whitespace-nowrap, so without it a long title keeps the grid item
   // at its full text width and the row overflows on narrow screens.
   return (
-    <div className="flex items-center justify-between gap-4">
+    <div className="grid grid-cols-2 items-center gap-4 sm:grid-cols-[1fr_auto_1fr]">
       {prev ? (
         <Button
           variant="outline"
@@ -69,6 +72,17 @@ export function PrevNextNav({
       ) : (
         // Intentional spacer: keeps "next" at the right edge.
         <div className="min-w-0 flex-1" />
+      )}
+
+      {showPhaseBack && (
+        // order-last on mobile drops it to a full-width second row; the sm grid puts it between.
+        <Button
+          variant="outline"
+          asChild
+          className="order-last col-span-2 sm:order-none sm:col-span-1"
+        >
+          <Link href={`/learn/${themeId}/${phaseId}`}>フェーズに戻る</Link>
+        </Button>
       )}
 
       {next ? (

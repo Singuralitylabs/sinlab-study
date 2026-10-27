@@ -436,14 +436,28 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
     expect(html).not.toContain("次のフェーズ:");
   });
 
-  it("テーマ末尾: テーマに戻る と href=/learn/{themeId} を含み、フェーズに戻る を含まない", async () => {
+  it("テーマ末尾: テーマに戻る と フェーズに戻る の両方を含む", async () => {
     setup({ userStatus: "active", isOpenToTrial: false, orderedContents: [currentNav] });
 
     const html = await render();
 
     expect(html).toContain("テーマに戻る");
     expect(html).toContain('href="/learn/1"');
-    expect(html).not.toContain("フェーズに戻る");
+    expect(html).toContain("フェーズに戻る");
+    expect(html).toContain('href="/learn/1/2"');
+  });
+
+  it("途中のコンテンツでも フェーズに戻る が出る", async () => {
+    setup({
+      userStatus: "active",
+      isOpenToTrial: false,
+      orderedContents: [currentNav, samePhaseNext],
+    });
+
+    const html = await render();
+
+    expect(html).toContain("フェーズに戻る");
+    expect(html).toContain('href="/learn/1/2"');
   });
 
   it("テーマ先頭: 「前へ」リンクが無い", async () => {
@@ -526,7 +540,7 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
     expect(html).toContain('href="/learn/1/2/11"');
     expect(html).toContain("同じフェーズの次");
     expect(html).not.toContain("テーマに戻る");
-    expect(html).not.toContain("フェーズに戻る");
+    expect(html).toContain("フェーズに戻る");
   });
 
   it("通し列に現在が無い縮退時は フェーズに戻る（テーマ末尾と区別）", async () => {
