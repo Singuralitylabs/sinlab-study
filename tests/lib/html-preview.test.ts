@@ -4,6 +4,7 @@ import {
   CONSOLE_NOT_ALLOWED_MESSAGE,
   canPreviewFiles,
   isPreviewLanguage,
+  isSqlLayout,
   PREVIEW_EXERCISE_ONLY_MESSAGE,
   PREVIEW_NOT_ALLOWED_MESSAGE,
   previewCapability,
@@ -40,6 +41,22 @@ describe("isPreviewLanguage / canPreviewFiles", () => {
   });
 });
 
+describe("isSqlLayout", () => {
+  it("すべてのファイルが SQL のときだけ true（言語が空なら拡張子で見る）", () => {
+    expect(isSqlLayout([{ filename: "ex1.sql", language: "sql" }])).toBe(true);
+    expect(isSqlLayout([{ filename: "ex1.sql", language: "" }])).toBe(true);
+    expect(isSqlLayout([{ filename: "ex1", language: "SQL" }])).toBe(true);
+    expect(isSqlLayout([{ filename: "ex1.txt", language: "" }])).toBe(false);
+    expect(
+      isSqlLayout([
+        { filename: "a.sql", language: "sql" },
+        { filename: "b.js", language: "javascript" },
+      ])
+    ).toBe(false);
+    expect(isSqlLayout([])).toBe(false);
+  });
+});
+
 describe("resolvePreviewDisplay", () => {
   const html = { filename: "index.html", language: "html" };
   const css = { filename: "style.css", language: "css" };
@@ -67,7 +84,13 @@ describe("resolvePreviewDisplay", () => {
       console: false,
       manualRun: false,
     });
-    for (const files of [[sql], [html, sql], []]) {
+    // SQL only: no page, but it runs from the console 実行 button (PGlite)
+    expect(resolvePreviewDisplay({ files: [sql] })).toEqual({
+      preview: false,
+      console: true,
+      manualRun: true,
+    });
+    for (const files of [[html, sql], []]) {
       expect(resolvePreviewDisplay({ files })).toEqual({
         preview: false,
         console: false,
@@ -161,6 +184,22 @@ describe("resolvePreviewDisplay", () => {
       previewSettingsError({
         contentType: "exercise",
         files: [sql],
+        showPreview: true,
+        showConsole: null,
+      })
+    ).toBe(PREVIEW_NOT_ALLOWED_MESSAGE);
+    expect(
+      previewSettingsError({
+        contentType: "exercise",
+        files: [sql],
+        showPreview: null,
+        showConsole: true,
+      })
+    ).toBeNull();
+    expect(
+      previewSettingsError({
+        contentType: "exercise",
+        files: [sql, { filename: "index.html", language: "html" }],
         showPreview: null,
         showConsole: true,
       })

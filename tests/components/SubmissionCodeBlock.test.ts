@@ -61,6 +61,20 @@ describe("SubmissionCodeBlock の previewSource", () => {
 
   it("どちらもオフならプレビュー宿主を出さない", () => {
     const html = render({
+      files: [{ filename: "main.py", language: "python", content: "print(1)" }],
+      previewSource: {
+        submissionFileSlots: [{ filename: "main.py", language: "python" }],
+        starterFiles: null,
+        codeLanguage: "python",
+        showPreview: null,
+        showConsole: null,
+      },
+    });
+    expect(html).not.toContain("preview-host");
+  });
+
+  it("課題が SQL だけならコンソールのみ（SQL の実行。#507）", () => {
+    const html = render({
       files: [{ filename: "q.sql", language: "sql", content: "select 1" }],
       previewSource: {
         submissionFileSlots: [{ filename: "q.sql", language: "sql" }],
@@ -70,7 +84,8 @@ describe("SubmissionCodeBlock の previewSource", () => {
         showConsole: null,
       },
     });
-    expect(html).not.toContain("preview-host");
+    expect(html).toContain('data-preview="false"');
+    expect(html).toContain('data-console="true"');
   });
 
   it("React 構成（App.jsx）はプレビューとコンソールの両方を出す", () => {

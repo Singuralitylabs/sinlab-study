@@ -8,7 +8,7 @@ import type { UserStatusType } from "./app/types";
 // Extensions treated as static assets (suffix match only). Don't use "path contains .": crafted
 // URLs like /learn/1/2/3/4. would bypass auth.
 const STATIC_FILE_EXTENSIONS =
-  /\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest)$/i;
+  /\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest|wasm|data)$/i;
 
 export function shouldSkipMiddleware(pathname: string): boolean {
   return (
@@ -158,6 +158,6 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     // Exclude Next.js internals and static assets (matching STATIC_FILE_EXTENSIONS).
-    "/((?!_next|[^?]*\\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest)).*)",
+    "/((?!_next|[^?]*\\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest|wasm|data)).*)",
   ],
 };
