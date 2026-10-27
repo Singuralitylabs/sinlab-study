@@ -443,7 +443,7 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
 
     expect(html).toContain("テーマに戻る");
     expect(html).toContain('href="/learn/1"');
-    expect(html).toContain("フェーズに戻る");
+    expect(html.match(/<a[^>]*href="\/learn\/1\/2"[^>]*>フェーズに戻る</g)).toHaveLength(1);
     expect(html).toContain('href="/learn/1/2"');
   });
 
@@ -456,7 +456,7 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
 
     const html = await render();
 
-    expect(html).toContain("フェーズに戻る");
+    expect(html.match(/<a[^>]*href="\/learn\/1\/2"[^>]*>フェーズに戻る</g)).toHaveLength(1);
     expect(html).toContain('href="/learn/1/2"');
   });
 
@@ -522,7 +522,7 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
 
     const html = await render();
 
-    expect(html).toContain("フェーズに戻る");
+    expect(html.match(/<a[^>]*href="\/learn\/1\/2"[^>]*>フェーズに戻る</g)).toHaveLength(1);
     expect(html).toContain('href="/learn/1/2"');
     expect(html).not.toContain("テーマに戻る");
   });
@@ -540,7 +540,7 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
     expect(html).toContain('href="/learn/1/2/11"');
     expect(html).toContain("同じフェーズの次");
     expect(html).not.toContain("テーマに戻る");
-    expect(html).toContain("フェーズに戻る");
+    expect(html.match(/<a[^>]*href="\/learn\/1\/2"[^>]*>フェーズに戻る</g)).toHaveLength(1);
   });
 
   it("通し列に現在が無い縮退時は フェーズに戻る（テーマ末尾と区別）", async () => {
@@ -552,7 +552,7 @@ describe("コンテンツ詳細の前後ナビゲーション（issue #208）", 
 
     const html = await render();
 
-    expect(html).toContain("フェーズに戻る");
+    expect(html.match(/<a[^>]*href="\/learn\/1\/2"[^>]*>フェーズに戻る</g)).toHaveLength(1);
     expect(html).toContain('href="/learn/1/2"');
     expect(html).not.toContain("テーマに戻る");
   });

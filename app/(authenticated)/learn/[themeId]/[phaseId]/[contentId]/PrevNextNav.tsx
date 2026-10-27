@@ -100,7 +100,9 @@ export function PrevNextNav({
           </Link>
         </Button>
       ) : (
-        <Button asChild className="min-w-0 flex-1 justify-center">
+        // sm:col-start-3: without the middle button the auto-placed end button would land in the narrow
+        // center column.
+        <Button asChild className="min-w-0 flex-1 justify-center sm:col-start-3">
           {endFallback === "phase" ? (
             <Link href={`/learn/${themeId}/${phaseId}`}>フェーズに戻る</Link>
           ) : (
