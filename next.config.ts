@@ -19,6 +19,23 @@ if (supabaseUrlParts && supabaseProtocol) {
   });
 }
 
+// Script-restricting CSP directives are left out on purpose: the exercise preview is a srcdoc
+// iframe, which inherits this page's CSP, so limiting script-src would stop learners' inline
+// scripts and the React preview's Babel (eval). frame-ancestors / X-Frame-Options do not apply to
+// srcdoc frames, so the preview still loads.
+// Referrer-Policy must keep sending the origin cross-site: Cloudflare Stream checks Allowed Origins.
+const SECURITY_HEADERS = [
+  { key: "X-Frame-Options", value: "DENY" },
+  {
+    key: "Content-Security-Policy",
+    value: "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'",
+  },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+];
+
 const nextConfig: NextConfig = {
   images: {
     remotePatterns,
@@ -57,6 +74,10 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
+      {
+        source: "/:path*",
+        headers: SECURITY_HEADERS,
+      },
       {
         source: "/sw.js",
         headers: [
