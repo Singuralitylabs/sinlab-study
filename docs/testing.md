@@ -81,7 +81,7 @@ Unit Tests (多数)
 | `build.yml` | 本番相当のビルド成立性 |
 | `typecheck.yml` | 型チェック（`tsc --noEmit`） |
 | `test.yml` | ユニットテスト（Vitest）。加えて `tests/lib/html-preview.test.ts` と `tests/lib/preview-console.test.ts`（iframe 内で動く中継スクリプト）を `bun test`（JavaScriptCore）でも実行する（`bun run test:jsc`。Safari と V8 で正規表現の失敗の仕方が違うため） |
-| `db-privileges.yml` | ローカル Supabase（Docker）に全 migration を空のDBから適用し、関数の EXECUTE 権限を `has_function_privilege()` で検証（pgTAP。`supabase/tests/database/`。4.3参照） |
+| `db-privileges.yml` | ローカル Supabase（Docker）に全 migration を空のDBから適用し、関数の EXECUTE 権限を `has_function_privilege()` で、テーブル・シーケンスの権限を `has_table_privilege()` などで検証（pgTAP。`supabase/tests/database/`。4.3参照） |
 | `biome.yml` | Lint/フォーマット違反の防止（`bun run check`） |
 | `check_console_log.yml` | デバッグ用出力の混入防止 |
 | `release-pr.yml` | main→release のリリース PR 作成（上記の品質ゲートを再利用し、マイグレーション・新規環境変数・migration list などの事前作業を検出） |
@@ -102,6 +102,7 @@ Unit Tests (多数)
 - **service_role の期待値**: docs が service_role を名指ししている関数だけ検証する。内部用の関数は Supabase の既定権限で service_role に付くため、契約に含めない。
 - **Postgres のバージョン**: `supabase/config.toml` の `[db] major_version` は本番の Supabase プロジェクトの Postgres メジャーバージョンと揃える（本番を変えたら同時に更新する）。
 - **ローカル実行**: Docker を起動して `bunx supabase start`（必要なら `-x` で不要なサービスを省く）→ `bunx supabase test db`。本番の project-ref や DB URL は渡さない。
+- **テーブル権限**: `supabase/tests/database/table_privileges.test.sql` が、`anon` に `public` のテーブル・シーケンスの権限が無いこと、`authenticated` に `TRUNCATE` / `REFERENCES` / `TRIGGER` が無いこと、ポリシー0本の表に `authenticated` の権限が無いことを確かめる。期待値は `docs/database.md` 6章の「テーブル権限」と一致させる。ポリシー0本の表はカタログから導くので、表を足すときは作成する migration で `REVOKE ALL ... FROM authenticated` すればよい（docs の一覧とテスト内の名指しの一覧も足す）。検出力は、対象の表に `GRANT SELECT ... TO anon` する migration を一時的に足すと失敗することで確かめる。
 - **検出力の確認**: 対象関数に `GRANT EXECUTE ... TO authenticated` する migration を一時的に足すと、`supabase test db` が失敗する（確認後に migration は削除する）。
 
 ## 5. テスト規約

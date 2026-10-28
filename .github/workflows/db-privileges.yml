@@ -52,7 +52,7 @@ jobs:
           bunx supabase start
           -x realtime,imgproxy,mailpit,studio,edge-runtime,logflare,vector,supavisor,postgres-meta
 
-      - name: Check function EXECUTE privileges (pgTAP)
+      - name: Check function and table privileges (pgTAP)
         run: bunx supabase test db
 
       - name: Stop local Supabase

@@ -167,9 +167,9 @@ from (
     ('authenticated', 'reference_answer', false),
     ('anon', 'grading_rubric', false),
     ('authenticated', 'grading_rubric', false),
-    ('anon', 'has_grading_requirements', true),
+    ('anon', 'has_grading_requirements', false),
     ('authenticated', 'has_grading_requirements', true),
-    ('anon', 'preview_base_html', true),
+    ('anon', 'preview_base_html', false),
     ('authenticated', 'preview_base_html', true),
     ('authenticated', 'exercise_instructions', true)
 ) as t(role_name, column_name, expected);
