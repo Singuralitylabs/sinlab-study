@@ -3,9 +3,7 @@ import { CERTIFICATE_NO_MAX_ATTEMPTS } from "@/app/constants/certificate";
 import { CERTIFICATE_PASS_SCORE } from "@/app/constants/grading";
 import {
   dashboardCertificateCutoff,
-  generateCertificateNo,
   isCertificateEligible,
-  isCertificateNoCollision,
   isThemeCompleted,
 } from "@/app/lib/certificate";
 import {
@@ -17,6 +15,7 @@ import {
   passedContentIdsFromReviews,
   type ThemeCompletionNotice,
 } from "@/app/lib/certificate-eligibility";
+import { generateCertificateNo, isCertificateNoCollision } from "@/app/lib/certificate-number";
 import { parseDisplayName } from "@/app/lib/display-name";
 import { applyPublishedNestedThemeFilters } from "@/app/lib/published-theme-tree";
 import {

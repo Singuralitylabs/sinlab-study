@@ -64,8 +64,8 @@ describe("proxy", () => {
       expect(createServerClient).not.toHaveBeenCalled();
     });
 
-    it("/login や /rejected はスキップする", async () => {
-      for (const path of ["/login", "/rejected"]) {
+    it("/login や /rejected、/auth/signout はスキップする", async () => {
+      for (const path of ["/login", "/rejected", "/auth/signout"]) {
         const req = new NextRequest(`http://localhost${path}`);
         const res = await proxy(req);
         expect(res.status).toBe(200);

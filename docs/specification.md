@@ -245,7 +245,9 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 ### 2.8 ログアウト
 
-サイドナビゲーションからSupabase Authのセッションを破棄し、`/login` にリダイレクトする。
+サイドナビゲーションと `/rejected` のログアウトは `signOutAndRedirect()`（`app/lib/sign-out.ts`）で行う。端末のプッシュ購読を解除（14.2節）してから `POST /auth/signout` を呼び、`/login` へ遷移する。ブラウザ側では supabase-js を読み込まない（ログインページの Google OAuth だけが使う）。
+
+`POST /auth/signout`（`app/auth/signout/route.ts`）はサーバー側クライアントで `signOut()`（global スコープ。全端末のリフレッシュトークンを失効）を呼び、`/login` へ 303 で返す。Auth 側の失敗・環境変数欠落・例外でもセッション Cookie（`sb-*-auth-token*`）は応答で必ず失効させる（フェイルクローズ）。`Origin` ヘッダが自オリジンと異なる POST は 403。`proxy.ts` はこのパスをスキップする（`rejected` ユーザーは proxy で `/rejected` へ戻されるため、スキップしないとログアウトできない）。
 
 ### 2.9 OAuthセキュリティ
 
