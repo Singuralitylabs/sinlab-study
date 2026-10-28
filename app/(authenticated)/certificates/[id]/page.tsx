@@ -13,6 +13,7 @@ import {
   buildCertificateLineShareUrl,
   buildCertificateShareUrl,
 } from "@/app/lib/certificate";
+import { getCertificatePalette } from "@/app/lib/certificate-palette";
 import { formatDate } from "@/app/lib/format-date";
 import { parsePositiveInteger } from "@/app/lib/positive-integer";
 import { fetchMyCertificateById } from "@/app/services/api/certificates-server";
@@ -55,6 +56,7 @@ export default async function CertificateDetailPage({
     notFound();
   }
 
+  const palette = getCertificatePalette(certificate.theme_id);
   const issuerName = getCertificateIssuerName();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || null;
   const shareUrl = buildCertificateShareUrl(certificate.theme_name, appUrl);
@@ -100,9 +102,11 @@ export default async function CertificateDetailPage({
       </div>
 
       <div className="overflow-x-auto print:overflow-visible">
-        <div className="@container certificate-sheet relative mx-auto aspect-[297/210] min-w-[640px] w-full overflow-hidden bg-gradient-to-br from-white via-indigo-50 to-emerald-50 text-neutral-900 shadow-md print:h-[209mm] print:w-[297mm] print:min-w-0 print:max-w-none print:shadow-none">
-          <div className="absolute inset-[2.4cqw] border-[0.5cqw] border-indigo-900" />
-          <div className="absolute inset-[3.6cqw] border-[0.15cqw] border-indigo-400" />
+        <div
+          className={`@container certificate-sheet relative mx-auto aspect-[297/210] min-w-[640px] w-full overflow-hidden bg-gradient-to-br ${palette.sheet} text-neutral-900 shadow-md print:h-[209mm] print:w-[297mm] print:min-w-0 print:max-w-none print:shadow-none`}
+        >
+          <div className={`absolute inset-[2.4cqw] border-[0.5cqw] ${palette.outerBorder}`} />
+          <div className={`absolute inset-[3.6cqw] border-[0.15cqw] ${palette.innerBorder}`} />
 
           <div aria-hidden="true" className="pointer-events-none absolute inset-0">
             <span className="absolute left-[7cqw] top-[7cqw] h-[1.4cqw] w-[1.4cqw] rotate-12 rounded-[0.2cqw] bg-pink-300" />
@@ -135,10 +139,10 @@ export default async function CertificateDetailPage({
 
           <div className="relative flex h-full flex-col items-center justify-between px-[8cqw] py-[7cqw] text-center">
             <div>
-              <p className="text-[1.6cqw] tracking-[0.4em] text-indigo-700">
+              <p className={`text-[1.6cqw] tracking-[0.4em] ${palette.subtitle}`}>
                 CERTIFICATE OF COMPLETION
               </p>
-              <h2 className="mt-[1cqw] text-[6cqw] font-bold tracking-[0.5em] text-indigo-950">
+              <h2 className={`mt-[1cqw] text-[6cqw] font-bold tracking-[0.5em] ${palette.heading}`}>
                 修了証
               </h2>
             </div>
@@ -159,7 +163,7 @@ export default async function CertificateDetailPage({
               <p className="mt-[0.8cqw] text-[1.5cqw] text-neutral-600">
                 証明番号 {certificate.certificate_no}
               </p>
-              <p className="mt-[1.6cqw] text-[2.2cqw] font-bold text-indigo-950">
+              <p className={`mt-[1.6cqw] text-[2.2cqw] font-bold ${palette.heading}`}>
                 {CERTIFICATE_SERVICE_NAME}
               </p>
               {issuerName && <p className="text-[1.6cqw]">{issuerName}</p>}
