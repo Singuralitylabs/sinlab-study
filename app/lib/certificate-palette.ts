@@ -51,6 +51,48 @@ export const CERTIFICATE_PALETTES: readonly CertificatePalette[] = [
     subtitle: "text-violet-700",
     heading: "text-violet-950",
   },
+  {
+    sheet: "from-white via-teal-50 to-sky-50",
+    outerBorder: "border-teal-900",
+    innerBorder: "border-teal-400",
+    subtitle: "text-teal-700",
+    heading: "text-teal-950",
+  },
+  {
+    sheet: "from-white via-orange-50 to-rose-50",
+    outerBorder: "border-orange-900",
+    innerBorder: "border-orange-400",
+    subtitle: "text-orange-700",
+    heading: "text-orange-950",
+  },
+  {
+    sheet: "from-white via-fuchsia-50 to-indigo-50",
+    outerBorder: "border-fuchsia-900",
+    innerBorder: "border-fuchsia-400",
+    subtitle: "text-fuchsia-700",
+    heading: "text-fuchsia-950",
+  },
+  {
+    sheet: "from-white via-cyan-50 to-emerald-50",
+    outerBorder: "border-cyan-900",
+    innerBorder: "border-cyan-400",
+    subtitle: "text-cyan-700",
+    heading: "text-cyan-950",
+  },
+  {
+    sheet: "from-white via-lime-50 to-amber-50",
+    outerBorder: "border-lime-900",
+    innerBorder: "border-lime-400",
+    subtitle: "text-lime-700",
+    heading: "text-lime-950",
+  },
+  {
+    sheet: "from-white via-slate-50 to-sky-50",
+    outerBorder: "border-slate-900",
+    innerBorder: "border-slate-400",
+    subtitle: "text-slate-700",
+    heading: "text-slate-950",
+  },
 ];
 
 /**
