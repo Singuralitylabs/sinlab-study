@@ -33,3 +33,10 @@ export const TERMS_CONSENT_COOKIE_VALUE = "1";
 export const TERMS_CONSENT_COOKIE_MAX_AGE = 1800;
 
 export const TERMS_REQUIRED_ERROR_CODE = "terms_required";
+
+/**
+ * Sign-out endpoint (POST). The browser never loads supabase-js for sign-out: the Route Handler
+ * revokes the session and clears the cookies server-side. proxy.ts skips this path so a `rejected`
+ * user (redirected to /rejected elsewhere) can still sign out.
+ */
+export const SIGN_OUT_PATH = "/auth/signout";

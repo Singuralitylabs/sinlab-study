@@ -1,6 +1,6 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
-import { AUTH_HEADER_NAMES, AUTH_HEADERS } from "./app/constants/auth";
+import { AUTH_HEADER_NAMES, AUTH_HEADERS, SIGN_OUT_PATH } from "./app/constants/auth";
 import { PWA_PUBLIC_PATHS } from "./app/constants/pwa";
 import { ALLOWED_USER_STATUSES, USER_STATUS } from "./app/constants/user";
 import type { UserStatusType } from "./app/types";
@@ -15,6 +15,8 @@ export function shouldSkipMiddleware(pathname: string): boolean {
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api") ||
     pathname.startsWith("/auth/callback") ||
+    // Sign-out must reach the handler even for rejected / unknown-status users.
+    pathname === SIGN_OUT_PATH ||
     pathname.startsWith("/demo") ||
     STATIC_FILE_EXTENSIONS.test(pathname) ||
     pathname === "/favicon.ico" ||

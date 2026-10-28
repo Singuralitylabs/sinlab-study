@@ -18,8 +18,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { clearLocalPushSubscription } from "@/app/lib/clear-local-push-subscription";
-import { createClientSupabaseClient } from "@/app/services/api/supabase-client";
+import { signOutAndRedirect } from "@/app/lib/sign-out";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -216,12 +215,7 @@ export function SideNav({
     ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),
   ];
 
-  const handleSignOut = async () => {
-    await clearLocalPushSubscription();
-    const supabase = createClientSupabaseClient();
-    await supabase.auth.signOut();
-    window.location.href = "/login";
-  };
+  const handleSignOut = () => signOutAndRedirect();
 
   return (
     <>
