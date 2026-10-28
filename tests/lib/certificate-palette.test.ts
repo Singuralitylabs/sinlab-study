@@ -6,6 +6,10 @@ describe("getCertificatePalette", () => {
     expect(getCertificatePalette(7)).toBe(getCertificatePalette(7));
   });
 
+  it("theme_id 1 は従来のインディゴ（0番目）", () => {
+    expect(getCertificatePalette(1)).toBe(CERTIFICATE_PALETTES[0]);
+  });
+
   it("連続した id は別のパレットになり、一巡すると戻る", () => {
     const count = CERTIFICATE_PALETTES.length;
     expect(getCertificatePalette(1)).not.toBe(getCertificatePalette(2));

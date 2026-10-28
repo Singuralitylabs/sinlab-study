@@ -7,7 +7,7 @@ export interface CertificatePalette {
 }
 
 // Full class strings, not built from parts: Tailwind only emits classes it can see literally.
-// Index 0 is the original indigo design.
+// Index 0 is the original indigo design (theme_id 1).
 export const CERTIFICATE_PALETTES: readonly CertificatePalette[] = [
   {
     sheet: "from-white via-indigo-50 to-emerald-50",
@@ -59,6 +59,7 @@ export const CERTIFICATE_PALETTES: readonly CertificatePalette[] = [
  */
 export function getCertificatePalette(themeId: number): CertificatePalette {
   const count = CERTIFICATE_PALETTES.length;
-  const index = ((Math.trunc(themeId) % count) + count) % count;
+  // ids start at 1 (SERIAL), so subtract 1 to keep the first theme on the original design.
+  const index = (((Math.trunc(themeId) - 1) % count) + count) % count;
   return CERTIFICATE_PALETTES[index];
 }
