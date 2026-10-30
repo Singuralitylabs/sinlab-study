@@ -158,8 +158,6 @@ async function handleCallback(request: NextRequest) {
 
     const adminUsersUrl = `${origin}/admin/users`;
     void sendSlackNewUserNotification({
-      displayName: user.user_metadata?.full_name || user.email || "",
-      email: user.email || "",
       adminUsersUrl,
     }).catch((error) => {
       console.error("[Slack通知] 予期しないエラーが発生しました:", error);

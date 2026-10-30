@@ -42,11 +42,13 @@ async function postSlackWebhook(
 }
 
 type NewUserNotificationParams = {
-  displayName: string;
-  email: string;
   adminUsersUrl: string;
 };
 
+/**
+ * Carries no name or email: the Slack channel is also read by non-admins, so identity is only
+ * visible behind the admin login.
+ */
 export async function sendSlackNewUserNotification(
   params: NewUserNotificationParams
 ): Promise<void> {
@@ -65,22 +67,6 @@ export async function sendSlackNewUserNotification(
       {
         type: "section",
         fields: [
-          {
-            type: "mrkdwn",
-            text: "*表示名*",
-          },
-          {
-            type: "plain_text",
-            text: params.displayName,
-          },
-          {
-            type: "mrkdwn",
-            text: "*メール*",
-          },
-          {
-            type: "plain_text",
-            text: params.email,
-          },
           {
             type: "mrkdwn",
             text: "*登録日時*",
@@ -110,15 +96,24 @@ export async function sendSlackNewUserNotification(
   };
 
   await postSlackWebhook(body, () => {
-    console.log("[Slack通知] 承認依頼通知を送信しました:", params.email); // allow-console
+    console.log("[Slack通知] 承認依頼通知を送信しました"); // allow-console
   });
 }
 
 type PaymentFailedNotificationParams = {
-  customerEmail: string | null;
+  userId: number;
   amountDue: number;
-  hostedInvoiceUrl: string | null;
+  invoiceId: string | null;
+  livemode: boolean;
 };
+
+/**
+ * Stripe dashboard page: needs a Stripe login, unlike the invoice's public hosted page, which shows
+ * the customer's identity to anyone holding the link (this channel is read by non-admins).
+ */
+function buildStripeDashboardInvoiceUrl(invoiceId: string, livemode: boolean): string {
+  return `https://dashboard.stripe.com/${livemode ? "" : "test/"}invoices/${invoiceId}`;
+}
 
 /**
  * Notifies operators only: the first payment failure does not demote the user and is left to
@@ -142,11 +137,11 @@ export async function sendSlackPaymentFailedNotification(
         fields: [
           {
             type: "mrkdwn",
-            text: "*メール*",
+            text: "*ユーザーID*",
           },
           {
             type: "plain_text",
-            text: params.customerEmail ?? "不明",
+            text: String(params.userId),
           },
           {
             type: "mrkdwn",
@@ -160,7 +155,7 @@ export async function sendSlackPaymentFailedNotification(
           },
         ],
       },
-      ...(params.hostedInvoiceUrl
+      ...(params.invoiceId
         ? [
             {
               type: "actions",
@@ -169,10 +164,10 @@ export async function sendSlackPaymentFailedNotification(
                   type: "button",
                   text: {
                     type: "plain_text",
-                    text: "請求書を開く",
+                    text: "Stripeで請求書を開く",
                     emoji: true,
                   },
-                  url: params.hostedInvoiceUrl,
+                  url: buildStripeDashboardInvoiceUrl(params.invoiceId, params.livemode),
                 },
               ],
             },
