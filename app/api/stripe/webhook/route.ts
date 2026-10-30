@@ -159,9 +159,10 @@ async function planEvent(event: Stripe.Event): Promise<EventPlan> {
         run: async () => {
           // Don't demote on the first failure; leave it to Smart Retries and only notify operators.
           await sendSlackPaymentFailedNotification({
-            customerEmail: invoice.customer_email,
+            userId,
             amountDue: invoice.amount_due,
-            hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+            invoiceId: invoice.id ?? null,
+            livemode: invoice.livemode,
           });
           return null;
         },

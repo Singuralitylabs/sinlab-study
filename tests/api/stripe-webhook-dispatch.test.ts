@@ -145,6 +145,7 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
       customer_email: "user@example.com",
       amount_due: 1000,
       hosted_invoice_url: "https://invoice.stripe.com/xxx",
+      livemode: false,
     };
     mockConstructEvent.mockReturnValue({
       id: "evt_3",
@@ -157,9 +158,10 @@ describe("POST /api/stripe/webhook - イベントディスパッチ", () => {
     expect(res.status).toBe(200);
     expect(findMirrorOwner).toHaveBeenCalledWith("stripe_customer_id", "cus_1");
     expect(sendSlackPaymentFailedNotification).toHaveBeenCalledWith({
-      customerEmail: "user@example.com",
+      userId: expect.any(Number),
       amountDue: 1000,
-      hostedInvoiceUrl: "https://invoice.stripe.com/xxx",
+      invoiceId: "in_1",
+      livemode: false,
     });
     expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
     expect(syncSubscriptionStatus).not.toHaveBeenCalled();

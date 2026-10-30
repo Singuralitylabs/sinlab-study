@@ -25,8 +25,6 @@ describe("sendSlackNewUserNotification", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await sendSlackNewUserNotification({
-      displayName: "テスト太郎",
-      email: "test@example.com",
       adminUsersUrl: "https://example.com/admin/users",
     });
 
@@ -43,8 +41,6 @@ describe("sendSlackNewUserNotification", () => {
 
     await expect(
       sendSlackNewUserNotification({
-        displayName: "テスト太郎",
-        email: "test@example.com",
         adminUsersUrl: "https://example.com/admin/users",
       })
     ).resolves.toBeUndefined();
@@ -58,9 +54,10 @@ describe("sendSlackPaymentFailedNotification", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await sendSlackPaymentFailedNotification({
-      customerEmail: "test@example.com",
+      userId: 1,
       amountDue: 1000,
-      hostedInvoiceUrl: null,
+      invoiceId: null,
+      livemode: true,
     });
 
     expect(timeoutSpy).toHaveBeenCalledWith(SLACK_WEBHOOK_TIMEOUT_MS);
@@ -76,11 +73,42 @@ describe("sendSlackPaymentFailedNotification", () => {
 
     await expect(
       sendSlackPaymentFailedNotification({
-        customerEmail: "test@example.com",
+        userId: 1,
         amountDue: 1000,
-        hostedInvoiceUrl: null,
+        invoiceId: null,
+        livemode: true,
       })
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("Slack通知に個人情報を含めない", () => {
+  it("承認待ち通知にメール・表示名のフィールドを含めない", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendSlackNewUserNotification({ adminUsersUrl: "https://example.com/admin/users" });
+
+    const sent = String(fetchMock.mock.calls[0][1].body);
+    expect(sent).not.toContain("メール");
+    expect(sent).not.toContain("表示名");
+  });
+
+  it("支払い失敗通知はユーザーIDを出し、請求書ボタンはStripeダッシュボードへ向ける", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendSlackPaymentFailedNotification({
+      userId: 42,
+      amountDue: 1000,
+      invoiceId: "in_1",
+      livemode: false,
+    });
+
+    const sent = String(fetchMock.mock.calls[0][1].body);
+    expect(sent).not.toContain("メール");
+    expect(sent).toContain("42");
+    expect(sent).toContain("https://dashboard.stripe.com/test/invoices/in_1");
   });
 });
 
