@@ -53,6 +53,8 @@ export const CANCELLATION_POLICY_TEXT = `解約時の日割り計算・返金は
 export const SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE =
   "料金を確認できないため、現在お申し込みを受け付けできません";
 
+export const PROMOTION_CODE_NOTICE = "プロモーションコードをお持ちの方は決済画面で入力できます";
+
 export type SubscriptionPrice = {
   amount: number | null;
   currency: string;

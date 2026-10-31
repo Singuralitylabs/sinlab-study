@@ -302,6 +302,17 @@ describe("createCheckoutSession", () => {
     expect(params).not.toHaveProperty("customer_email");
   });
 
+  it("Checkoutでプロモーションコードの入力を許可し、line_itemsは定価のPriceのままにする", async () => {
+    mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
+
+    await createCheckoutSession(5, "auth-uuid", "cus_existing", midMonth);
+
+    const params = mockSessionsCreate.mock.calls[0][0];
+    expect(params.allow_promotion_codes).toBe(true);
+    expect(params.line_items).toEqual([{ price: "price_dummy", quantity: 1 }]);
+    expect(params).not.toHaveProperty("discounts");
+  });
+
   it("決済手段をカードのみに限定する（遅延通知系の決済手段を許可しない）", async () => {
     mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
 

@@ -295,6 +295,8 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 
 **データモデル**: 専用テーブル `stripe_subscriptions`（ユーザーごとの課金状態のミラー、1ユーザー1行）と `stripe_events`（Webhook冪等性用）を用いる。アプリの認可判定は引き続き `users.status` / `users.membership_type` が唯一の真実であり、`users` テーブルにStripe関連カラムは追加しない（詳細は[データベース設計書](./database.md)の3.9/3.10・6.6/6.7を参照）。
 
+**プロモーションコード**（#290 段階A）: `createCheckoutSession()` は `allow_promotion_codes: true` を指定し、Checkout画面にコード入力欄を出す。コード（Coupon + Promotion Code）の作成・配布はStripeダッシュボードで運営が行い、アプリ側に管理画面は作らない。法定表示と `isChargeableSubscriptionPrice()` の判定は常にPriceの定価で行い（割引は Checkout 画面で Stripe が表示）、割引と初回日割りの併用はStripeの既定動作に任せてアプリ側で金額計算をしない。`/upgrade` のCheckoutボタン付近に案内文（`PROMOTION_CODE_NOTICE`）を出す。紹介特典は2種類のクーポンで運用する。被紹介者向けは「100%オフ・`duration: repeating`・`duration_in_months: 1`」とし、決済日が27日固定で初回請求が日割りになるため、日割り分と最初の満額請求の両方に効き、被紹介者は1か月以上無料（申し込み日により最大で約2か月）になる。紹介者向けは「100%オフ×1回（`once`）」とし、運営がダッシュボードで該当サブスクに手動適用する（次回の請求1回分が無料）。乱用を防ぐため、コードには有効期限・利用回数上限・初回購入のみの制限をStripe側で設定する。
+
 **決済日の固定**: 決済日（請求サイクルのアンカー）は登録日ベースではなく、全ユーザー一律で**毎月27日 UTC 0:00（＝JST 9:00）**に固定する（`app/constants/stripe.ts` の `BILLING_ANCHOR_DAY_OF_MONTH` / `BILLING_ANCHOR_HOUR_UTC`）。27日を選んだのは全ての月に存在する日付で短い月の繰り上げ処理が不要なため、UTC 0:00（JST 9:00）を選んだのは決済失敗の検知・対応がしやすい日中帯のためである。`createCheckoutSession()` は `subscription_data.billing_cycle_anchor_config` を指定し、月の長さ・うるう年の考慮をStripe側に委ねる。この設定はCheckoutセッション作成時にのみ適用されるため、既存契約者への遡及適用（アンカー移行）は行わない（スコープ外）。
 
 初回請求は日割り（`proration_behavior: "create_prorations"`）とする。無償（`"none"`）にすると「27日直前に登録して1ヶ月弱を無償で使い切って解約する」抜け道ができるため。ただし、アンカー直前の登録では日割り額がStripeの最低請求額（JPY ¥50）を下回りCheckout作成・決済が失敗しうるため、`isProrationBelowMinimum()` で判定し、下回る場合に限り `"none"` に切り替える。無償化されるウィンドウは月額に反比例して狭く（月額¥3000なら約12.4時間）、全面 `"none"` 採用時の1ヶ月弱とは規模が異なるため抜け道にはならない、という判断で採用している。判定にはPriceの `unit_amount`（`fetchSubscriptionPrice()` と共有するTTLキャッシュ）を用い、Priceが1ヶ月間隔でない（誤設定）場合や取得が一時的に失敗した場合は、Checkout作成全体を失敗させず `create_prorations`（安全側）にフォールバックする。
@@ -364,7 +366,7 @@ portal は自分の行を読むSELECTのみだが、checkout は処理権のclai
 
 **Stripe APIバージョン**: `getStripeClient()` は `apiVersion` を明示せず、SDKが固定する版（`Stripe.API_VERSION`）を使う。stripe-node はマイナー版ごと（ほぼ毎月）に同じリリース名（例: `.dahlia`）内の後方互換な版へ固定版を上げ、破壊的変更を含むリリース名の変更はメジャー版でのみ行う。明示すると型（`Stripe.LatestApiVersion`）により毎月のマイナー更新で型チェックが失敗し、Dependabot のグループ更新全体を止めるため明示しない。リリース名が変わるメジャー更新は Dependabot でもグループ外の個別PRになるため、そこで下記手順4に従いWebhookエンドポイント側も合わせる。
 
-**スコープ外**: プランカタログ・複数通貨・クーポン・領収書カスタマイズ・却下時のサブスク自動キャンセル連携・年額プラン・プラン変更時のアンカー再設定・既存契約者へのアンカー移行（`billing_cycle_anchor_config` はサブスク作成時にのみ適用されるため、決済日固定の導入は本番での実課金開始前に行うことが前提）。
+**スコープ外**: プランカタログ・複数通貨・クーポン／プロモーションコードの管理画面・紹介特典の自動付与・領収書カスタマイズ・却下時のサブスク自動キャンセル連携・年額プラン・プラン変更時のアンカー再設定・既存契約者へのアンカー移行（`billing_cycle_anchor_config` はサブスク作成時にのみ適用されるため、決済日固定の導入は本番での実課金開始前に行うことが前提）。
 
 #### Stripe Webhook 設定手順（運用）
 
