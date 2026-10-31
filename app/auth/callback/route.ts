@@ -12,6 +12,11 @@ import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { sendSlackNewUserNotification } from "@/app/services/notifications/slack";
 import { scheduleSignupEmail } from "@/app/services/notifications/user-emails";
 
+// Mail is sent in after() and the platform caps that at this route's maxDuration; the default
+// (10s without Fluid Compute) would kill the function before EMAIL_SEND_TIMEOUT_MS (15s) aborts,
+// leaving the email_logs claim row neither sent nor failed.
+export const maxDuration = 30;
+
 const REGISTRATION_FAILED_PATH = "/login?error=registration_failed";
 const TERMS_REQUIRED_PATH = `/login?error=${TERMS_REQUIRED_ERROR_CODE}`;
 
@@ -153,8 +158,6 @@ async function handleCallback(request: NextRequest) {
 
     const adminUsersUrl = `${origin}/admin/users`;
     void sendSlackNewUserNotification({
-      displayName: user.user_metadata?.full_name || user.email || "",
-      email: user.email || "",
       adminUsersUrl,
     }).catch((error) => {
       console.error("[Slack通知] 予期しないエラーが発生しました:", error);

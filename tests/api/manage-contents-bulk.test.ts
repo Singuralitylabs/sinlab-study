@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/admin-server");
 
-import { PATCH } from "@/app/api/manage/contents/bulk/route";
-import { bulkUpdateContents } from "@/app/services/api/admin-server";
+import { PATCH, POST } from "@/app/api/manage/contents/bulk/route";
+import { bulkUpdateContents, createContentsAtTail } from "@/app/services/api/admin-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const maintainerAuth = {
@@ -159,9 +159,21 @@ describe("PATCH /api/manage/contents/bulk - バリデーション", () => {
   });
 
   it("set_typeでcontentTypeが不正な値の場合は400", async () => {
+    const res = await PATCH(request({ ids: [1], action: "set_type", contentType: "poll" }));
+
+    expect(res.status).toBe(400);
+    expect(bulkUpdateContents).not.toHaveBeenCalled();
+  });
+});
+
+describe("PATCH /api/manage/contents/bulk - set_type で quiz は不可（#306）", () => {
+  it("設問のないクイズを作らないよう、set_type で quiz を指定したら400", async () => {
     const res = await PATCH(request({ ids: [1], action: "set_type", contentType: "quiz" }));
 
     expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: "クイズへの変更は編集画面で設問と一緒に行ってください",
+    });
     expect(bulkUpdateContents).not.toHaveBeenCalled();
   });
 });
@@ -181,11 +193,48 @@ describe("PATCH /api/manage/contents/bulk - action→patchマッピング", () =
     await expect(res.json()).resolves.toEqual({ success: true, updated: 3, storageRemoved: true });
   });
 
+  it("set_type で exercise 以外に変えると採点基準と初期コードを空にする", async () => {
+    const res = await PATCH(request({ ids: [1], action: "set_type", contentType: "video" }));
+
+    expect(res.status).toBe(200);
+    expect(bulkUpdateContents).toHaveBeenCalledWith([1], {
+      content_type: "video",
+      grading_rubric: null,
+      starter_files: null,
+      submission_file_slots: null,
+      preview_base_html: null,
+      show_preview: null,
+      show_console: null,
+      text_content: null,
+    });
+  });
+
   it("set_typeはcontentTypeをcontent_typeとして渡す", async () => {
     const res = await PATCH(request({ ids: [1, 2], action: "set_type", contentType: "exercise" }));
 
     expect(res.status).toBe(200);
-    expect(bulkUpdateContents).toHaveBeenCalledWith([1, 2], { content_type: "exercise" });
+    expect(bulkUpdateContents).toHaveBeenCalledWith([1, 2], {
+      content_type: "exercise",
+      text_content: null,
+    });
+  });
+
+  it("set_type で text または slide に変えても解説記事は消さない", async () => {
+    for (const contentType of ["text", "slide"] as const) {
+      vi.mocked(bulkUpdateContents).mockClear();
+      const res = await PATCH(request({ ids: [1], action: "set_type", contentType }));
+
+      expect(res.status).toBe(200);
+      expect(bulkUpdateContents).toHaveBeenCalledWith([1], {
+        content_type: contentType,
+        grading_rubric: null,
+        starter_files: null,
+        submission_file_slots: null,
+        preview_base_html: null,
+        show_preview: null,
+        show_console: null,
+      });
+    }
   });
 });
 
@@ -200,5 +249,181 @@ describe("PATCH /api/manage/contents/bulk - 更新失敗", () => {
     const res = await PATCH(request({ ids: [1], action: "publish" }));
 
     expect(res.status).toBe(500);
+  });
+});
+
+describe("POST /api/manage/contents/bulk - 一括登録（#306）", () => {
+  const post = (body: unknown) =>
+    new Request("http://localhost/api/manage/contents/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const quiz = {
+    title: "クイズ1",
+    phase_id: 3,
+    content_type: "quiz",
+    quiz_questions: [
+      { question_type: "single", question: "Q", choices: ["a", "b"], correct_choices: [1] },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.mocked(createContentsAtTail).mockResolvedValue({
+      created: [{ id: 10, title: "クイズ1", isPublished: false }],
+      error: null,
+      failedIndex: null,
+    });
+  });
+
+  it("設問付きのクイズを含む複数件を順に作成し、作成結果を返す", async () => {
+    const res = await POST(
+      post({ contents: [quiz, { title: "動画", phase_id: 3, content_type: "video" }] })
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      success: true,
+      created: [{ id: 10, title: "クイズ1", isPublished: false }],
+    });
+    expect(createContentsAtTail).toHaveBeenCalledWith([
+      expect.objectContaining({
+        content_type: "quiz",
+        quizQuestions: [expect.objectContaining({ correct_choices: [1] })],
+      }),
+      expect.objectContaining({ content_type: "video", quizQuestions: undefined }),
+    ]);
+  });
+
+  it("演習の採点基準は gradingRubric として渡す（捨てない）", async () => {
+    const grading_rubric = { requirements: [{ key: "r1", name: "要件", description: "" }] };
+
+    const res = await POST(
+      post({
+        contents: [
+          { title: "演習", phase_id: 3, content_type: "exercise", grading_rubric },
+          { title: "動画", phase_id: 3, content_type: "video" },
+        ],
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(createContentsAtTail).toHaveBeenCalledWith([
+      expect.objectContaining({ gradingRubric: grading_rubric }),
+      expect.objectContaining({ gradingRubric: undefined }),
+    ]);
+  });
+
+  it("公開指定なのに公開できなかった件は200のまま warning で名前を返す", async () => {
+    vi.mocked(createContentsAtTail).mockResolvedValue({
+      created: [
+        { id: 10, title: "クイズ1", isPublished: false },
+        { id: 11, title: "クイズ2", isPublished: true },
+      ],
+      error: null,
+      failedIndex: null,
+    });
+
+    const res = await POST(
+      post({
+        contents: [
+          { ...quiz, is_published: true },
+          { ...quiz, title: "クイズ2", is_published: true },
+        ],
+      })
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      success: true,
+      warning: "公開に失敗したため非公開で作成したコンテンツがあります: クイズ1",
+    });
+  });
+
+  it("非公開指定の件は公開されていなくても warning を返さない", async () => {
+    const res = await POST(post({ contents: [quiz] }));
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.not.toHaveProperty("warning");
+  });
+
+  it("1件でも不正な設問があれば400で、1件も作成しない", async () => {
+    const res = await POST(
+      post({
+        contents: [
+          { title: "OK", phase_id: 3, content_type: "video" },
+          { ...quiz, quiz_questions: [{ ...quiz.quiz_questions[0], correct_choices: [] }] },
+        ],
+      })
+    );
+
+    expect(res.status).toBe(400);
+    expect(createContentsAtTail).not.toHaveBeenCalled();
+  });
+
+  it("設問のないクイズは400", async () => {
+    const res = await POST(post({ contents: [{ ...quiz, quiz_questions: undefined }] }));
+
+    expect(res.status).toBe(400);
+    expect(createContentsAtTail).not.toHaveBeenCalled();
+  });
+
+  it("空配列は400", async () => {
+    const res = await POST(post({ contents: [] }));
+
+    expect(res.status).toBe(400);
+  });
+
+  it("途中で失敗したら500で、作成済みの件を返す", async () => {
+    vi.mocked(createContentsAtTail).mockResolvedValue({
+      created: [{ id: 10, title: "クイズ1", isPublished: false }],
+      error: { message: "x" } as never,
+      failedIndex: 1,
+    });
+
+    const res = await POST(post({ contents: [quiz, quiz] }));
+
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toEqual({
+      error: "2件目のコンテンツの作成に失敗しました（それより前の1件は作成済み）",
+      created: [{ id: 10, title: "クイズ1", isPublished: false }],
+    });
+  });
+
+  it("途中で失敗した場合も、公開できずに作成済みの件を warning で返す", async () => {
+    vi.mocked(createContentsAtTail).mockResolvedValue({
+      created: [{ id: 10, title: "クイズ1", isPublished: false }],
+      error: { message: "x" } as never,
+      failedIndex: 1,
+    });
+
+    const res = await POST(post({ contents: [{ ...quiz, is_published: true }, quiz] }));
+
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toMatchObject({
+      warning: "公開に失敗したため非公開で作成したコンテンツがあります: クイズ1",
+    });
+  });
+
+  it("存在しないフェーズ（FK違反）など入力起因の失敗は400で、作成済みの件を返す", async () => {
+    vi.mocked(createContentsAtTail).mockResolvedValue({
+      created: [],
+      error: { message: "fk", code: "23503" } as never,
+      failedIndex: 0,
+    });
+
+    const res = await POST(post({ contents: [quiz] }));
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ created: [] });
+  });
+
+  it("コンテンツ管理権限がなければ403で、作成しない", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({ ...maintainerAuth, userRole: "member" } as never);
+
+    const res = await POST(post({ contents: [quiz] }));
+
+    expect(res.status).toBe(403);
+    expect(createContentsAtTail).not.toHaveBeenCalled();
   });
 });

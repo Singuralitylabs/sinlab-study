@@ -17,7 +17,7 @@ const maintainerAuth = {
 
 interface MockSupabaseOptions {
   imageUrl?: string | null;
-  theme?: { image_url: string | null } | null;
+  theme?: { image_url: string | null; hero_image_url?: string | null } | null;
   themeError?: unknown;
   updateError?: unknown;
   uploadError?: unknown;
@@ -58,10 +58,11 @@ const createMockSupabase = ({
   return { client: { from: vi.fn().mockReturnValue(query), storage }, query, upload, remove };
 };
 
-const request = (file: File | null, themeId = "12") => {
+const request = (file: File | null, themeId = "12", kind?: string) => {
   const formData = new FormData();
   if (file) formData.append("file", file);
   formData.append("themeId", themeId);
+  if (kind !== undefined) formData.append("kind", kind);
   return new Request("http://localhost/api/upload-thumbnail", { method: "POST", body: formData });
 };
 
@@ -99,7 +100,7 @@ describe("POST /api/upload-thumbnail", () => {
       path: "/storage/v1/object/public/thumbnails/theme-12/thumbnail.png?v=1723500000",
       url: "https://project.supabase.co/storage/v1/object/public/thumbnails/theme-12/thumbnail.png?v=1723500000",
     });
-    expect(query.select).toHaveBeenCalledWith("image_url");
+    expect(query.select).toHaveBeenCalledWith("image_url, hero_image_url");
     expect(upload).toHaveBeenCalledWith("theme-12/thumbnail.png", expect.any(Uint8Array), {
       contentType: "image/png",
       upsert: true,
@@ -182,7 +183,70 @@ describe("POST /api/upload-thumbnail", () => {
   });
 });
 
+describe("POST /api/upload-thumbnail (kind=hero)", () => {
+  it("ヒーロー画像は別のキーとカラムへ保存し、サムネイルの参照には触れない", async () => {
+    freezeNow(1723500000);
+    const { client, query, upload, remove } = createMockSupabase({
+      theme: {
+        image_url: "/storage/v1/object/public/thumbnails/theme-12/thumbnail.png?v=1",
+        hero_image_url: "/storage/v1/object/public/thumbnails/theme-12/hero.png?v=1",
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const response = await POST(
+      request(new File(["jpg"], "hero.jpg", { type: "image/jpeg" }), "12", "hero") as never
+    );
+
+    expect(response.status).toBe(200);
+    expect(upload).toHaveBeenCalledWith("theme-12/hero.jpg", expect.any(Uint8Array), {
+      contentType: "image/jpeg",
+      upsert: true,
+    });
+    expect(query.update).toHaveBeenCalledWith({
+      hero_image_url: "/storage/v1/object/public/thumbnails/theme-12/hero.jpg?v=1723500000",
+    });
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith(["theme-12/hero.png"]);
+  });
+
+  it("未知の kind は400で、Storageにもアクセスしない", async () => {
+    const response = await POST(
+      request(new File(["png"], "x.png", { type: "image/png" }), "12", "banner") as never
+    );
+
+    expect(response.status).toBe(400);
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+});
+
 describe("DELETE /api/upload-thumbnail", () => {
+  it("kind=hero はヒーロー画像の参照だけを消し、サムネイルのオブジェクトは残す", async () => {
+    const { client, query, remove } = createMockSupabase({
+      theme: {
+        image_url: "/storage/v1/object/public/thumbnails/theme-12/thumbnail.png?v=1",
+        hero_image_url: "/storage/v1/object/public/thumbnails/theme-12/hero.webp?v=2",
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const response = await DELETE(
+      new NextRequest("http://localhost/api/upload-thumbnail?themeId=12&kind=hero")
+    );
+
+    expect(response.status).toBe(200);
+    expect(query.update).toHaveBeenCalledWith({ hero_image_url: null });
+    expect(remove).toHaveBeenCalledWith(["theme-12/hero.webp"]);
+  });
+
+  it("未知の kind は400を返す", async () => {
+    const response = await DELETE(
+      new NextRequest("http://localhost/api/upload-thumbnail?themeId=12&kind=banner")
+    );
+
+    expect(response.status).toBe(400);
+  });
+
   it("DB参照を消してから対応するStorageオブジェクトを削除する", async () => {
     const { client, query, remove } = createMockSupabase({
       imageUrl: "/storage/v1/object/public/thumbnails/theme-12/thumbnail.png?v=1",

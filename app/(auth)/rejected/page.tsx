@@ -1,15 +1,11 @@
 "use client";
 
 import { LogOut, ShieldX } from "lucide-react";
-import { createClientSupabaseClient } from "@/app/services/api/supabase-client";
+import { signOutAndRedirect } from "@/app/lib/sign-out";
 import { Button } from "@/components/ui/button";
 
 export default function RejectedPage() {
-  const handleSignOut = async () => {
-    const supabase = createClientSupabaseClient();
-    await supabase.auth.signOut();
-    window.location.href = "/login";
-  };
+  const handleSignOut = () => signOutAndRedirect();
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">

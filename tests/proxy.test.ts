@@ -33,7 +33,7 @@ function mockProxySupabase({
 }: {
   authUser?: { id: string } | null;
   authError?: unknown;
-  userData?: { id: number; status: string; role: string } | null;
+  userData?: { id: number; status: string; role: string; membership_type?: string | null } | null;
   userError?: unknown;
 } = {}) {
   const client = createMockSupabaseClient({
@@ -64,8 +64,8 @@ describe("proxy", () => {
       expect(createServerClient).not.toHaveBeenCalled();
     });
 
-    it("/login や /rejected はスキップする", async () => {
-      for (const path of ["/login", "/rejected"]) {
+    it("/login や /rejected、/auth/signout はスキップする", async () => {
+      for (const path of ["/login", "/rejected", "/auth/signout"]) {
         const req = new NextRequest(`http://localhost${path}`);
         const res = await proxy(req);
         expect(res.status).toBe(200);
@@ -79,6 +79,7 @@ describe("proxy", () => {
       headers.set(AUTH_HEADERS.USER_ID, "999");
       headers.set(AUTH_HEADERS.USER_STATUS, "active");
       headers.set(AUTH_HEADERS.USER_ROLE, "admin");
+      headers.set(AUTH_HEADERS.MEMBERSHIP_TYPE, "general");
 
       const req = new NextRequest("http://localhost/api/admin/users", { headers });
       const res = await proxy(req);
@@ -88,6 +89,7 @@ describe("proxy", () => {
       expect(res.headers.get("x-middleware-request-x-sinlab-user-id")).toBeNull();
       expect(res.headers.get("x-middleware-request-x-sinlab-user-status")).toBeNull();
       expect(res.headers.get("x-middleware-request-x-sinlab-user-role")).toBeNull();
+      expect(res.headers.get("x-middleware-request-x-sinlab-membership-type")).toBeNull();
     });
   });
 
@@ -196,7 +198,7 @@ describe("proxy", () => {
     it("active ユーザーの場合、リクエストヘッダーにユーザー情報（auth_id, user_id, status, role）を設定して通過する", async () => {
       mockProxySupabase({
         authUser: { id: "auth-123" },
-        userData: { id: 42, status: "active", role: "member" },
+        userData: { id: 42, status: "active", role: "member", membership_type: "community" },
       });
 
       const req = new NextRequest("http://localhost/dashboard");
@@ -212,6 +214,23 @@ describe("proxy", () => {
       expect(downstreamUserId).toBe("42");
       expect(downstreamStatus).toBe("active");
       expect(downstreamRole).toBe("member");
+      expect(res.headers.get("x-middleware-request-x-sinlab-membership-type")).toBe("community");
+    });
+
+    it("会員種別が無いユーザー（お試し等）は空文字で渡し、偽装された会員種別ヘッダーは上書きされる", async () => {
+      mockProxySupabase({
+        authUser: { id: "auth-trial" },
+        userData: { id: 11, status: "trial", role: "member", membership_type: null },
+      });
+
+      const headers = new Headers();
+      headers.set(AUTH_HEADERS.MEMBERSHIP_TYPE, "general");
+
+      const req = new NextRequest("http://localhost/dashboard", { headers });
+      const res = await proxy(req);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-middleware-request-x-sinlab-membership-type")).toBe("");
     });
 
     it("受信リクエストに含まれる偽装ヘッダーは削除され、正規の認証情報で上書きされる", async () => {
@@ -275,13 +294,20 @@ describe("proxy", () => {
       vi.mocked(createServerClient).mockImplementation((_url, _key, options) => {
         return {
           auth: {
-            getUser: vi.fn().mockImplementation(async () => {
+            getClaims: vi.fn().mockImplementation(async () => {
               // Reproduces @supabase/ssr detecting a token refresh and calling setAll.
               options.cookies?.setAll?.(
                 [{ name: "sb-token", value: "new-token-value", options: { path: "/" } }],
                 { "cache-control": "private, no-store" }
               );
-              return { data: { user: { id: "auth-123" } }, error: null };
+              return {
+                data: {
+                  claims: { sub: "auth-123" },
+                  header: { alg: "ES256", typ: "JWT" },
+                  signature: new Uint8Array(),
+                },
+                error: null,
+              };
             }),
           },
           from: vi.fn().mockImplementation(() =>
@@ -321,6 +347,8 @@ describe("proxy", () => {
       expect(matcherRegex.test("/sample.xml")).toBe(false);
       expect(matcherRegex.test("/sample.json")).toBe(false);
       expect(matcherRegex.test("/sample.map")).toBe(false);
+      expect(matcherRegex.test("/vendor/pglite/pglite.wasm")).toBe(false);
+      expect(matcherRegex.test("/vendor/pglite/pglite.data")).toBe(false);
       expect(matcherRegex.test("/_next/static/chunk.js")).toBe(false);
     });
   });

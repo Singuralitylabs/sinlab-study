@@ -1,56 +1,36 @@
-import { Bot, Calendar, CheckCircle, Clock, FileText, Lock, PenLine, Play } from "lucide-react";
-import Link from "next/link";
+import { BookOpen, CheckCircle } from "lucide-react";
+import Image from "next/image";
 import { notFound } from "next/navigation";
 import { PageTitle } from "@/app/components/PageTitle";
-import { UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
-import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
+import { PHASE_COMPLETION_MASCOT } from "@/app/constants/mascot";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
+import { resolveAdjacentPhases } from "@/app/lib/phase-navigation";
+import {
+  getPhaseProgressStatus,
+  PHASE_PROGRESS_STATUS,
+  summarizePhaseProgress,
+} from "@/app/lib/phase-progress";
 import { fetchCompletedAIReviewContentIds } from "@/app/services/api/ai-review-server";
 import {
   type ContentVisibilitySummary,
+  fetchContentSummariesByPhaseId,
   fetchPhaseById,
+  fetchPhasesByThemeId,
   fetchThemeById,
   fetchUserProgressByContentIds,
-  fetchWeeksWithContentsByPhaseId,
   isContentLockedForUser,
 } from "@/app/services/api/learning-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
-import type { ContentType } from "@/app/types";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+import { LearnContentCard } from "../../components/LearnContentCard";
+import { LockedContentUpgradeCard } from "../../components/LockedContentUpgradeCard";
+import { PhasePrevNextNav } from "./PhasePrevNextNav";
 
 interface PageProps {
   params: Promise<{ themeId: string; phaseId: string }>;
-}
-
-function getContentIcon(type: ContentType) {
-  switch (type) {
-    case "video":
-      return <Play className="h-4 w-4" />;
-    case "text":
-      return <FileText className="h-4 w-4" />;
-    case "exercise":
-      return <PenLine className="h-4 w-4" />;
-    default:
-      return <FileText className="h-4 w-4" />;
-  }
-}
-
-function getContentTypeLabel(type: ContentType) {
-  switch (type) {
-    case "video":
-      return "動画";
-    case "text":
-      return "テキスト";
-    case "exercise":
-      return "演習";
-    default:
-      return type;
-  }
 }
 
 export default async function PhasePage({ params }: PageProps) {
@@ -64,33 +44,45 @@ export default async function PhasePage({ params }: PageProps) {
 
   const { userId, userStatus, userRole } = await getServerAuth();
 
-  const [{ data: theme }, { data: phase }, { data: weeks }] = await Promise.all([
-    fetchThemeById(themeIdNum, userRole),
-    fetchPhaseById(phaseIdNum, userRole),
-    fetchWeeksWithContentsByPhaseId(phaseIdNum, userRole),
-  ]);
+  // Started before the other fetches so a slow Stripe call overlaps them instead of adding to them.
+  // Never rejects (falls back internally), so an unawaited promise is safe.
+  const stripeEnabled = isStripeEnabled();
+  const priceLabelPromise =
+    stripeEnabled && userStatus === USER_STATUS.TRIAL
+      ? fetchUpgradePriceLabel()
+      : Promise.resolve(null);
+
+  const [{ data: theme }, { data: phase }, { data: contents }, { data: themePhases }] =
+    await Promise.all([
+      fetchThemeById(themeIdNum, userRole),
+      fetchPhaseById(phaseIdNum, userRole),
+      fetchContentSummariesByPhaseId(phaseIdNum, userRole),
+      // Same visibility as the theme accordion (admin/maintainer preview unpublished).
+      fetchPhasesByThemeId(themeIdNum, userRole),
+    ]);
 
   if (!theme || !phase || phase.theme_id !== themeIdNum) {
     notFound();
   }
 
+  const { prev: prevPhase, next: nextPhase } = resolveAdjacentPhases(
+    (themePhases ?? []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      display_order: p.display_order,
+    })),
+    phaseIdNum
+  );
+
   const isLocked = (content: ContentVisibilitySummary) =>
     isContentLockedForUser(userStatus, content.is_open_to_trial);
 
-  // The progress denominator counts only visible (unlocked) content whose content/week/phase/theme
-  // are all published (trial users see progress within their scope; spec 2.6). Unpublished content
-  // previewed by admin/maintainer and content under unpublished weeks can't be completed, so
-  // exclude it (#68).
   const ancestorsPublished = theme.is_published && phase.is_published;
-  const isCountable = (content: ContentVisibilitySummary, week: { is_published: boolean }) =>
-    !isLocked(content) && content.is_published && week.is_published && ancestorsPublished;
-  const allContentIds = weeks?.flatMap((w) => w.contents.map((c) => c.id)) || [];
-  const visibleContentIds =
-    weeks?.flatMap((w) => w.contents.filter((c) => isCountable(c, w)).map((c) => c.id)) || [];
-  const exerciseContentIds =
-    weeks?.flatMap((w) =>
-      w.contents.filter((c) => c.content_type === "exercise" && !isLocked(c)).map((c) => c.id)
-    ) ?? [];
+  const contentList = contents ?? [];
+  const allContentIds = contentList.map((c) => c.id);
+  const exerciseContentIds = contentList
+    .filter((c) => c.content_type === "exercise" && !isLocked(c))
+    .map((c) => c.id);
 
   const [{ data: progressMap }, { data: reviewedContentIds }] = await Promise.all([
     userId
@@ -101,14 +93,17 @@ export default async function PhasePage({ params }: PageProps) {
       : Promise.resolve({ data: new Set<number>() }),
   ]);
 
-  const completedCount = visibleContentIds.filter((id) => progressMap.get(id)).length;
-  const totalCount = visibleContentIds.length;
-  const progressValue = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  const progress = summarizePhaseProgress(contentList, {
+    isLocked,
+    ancestorsPublished,
+    progressMap,
+  });
+  const { completed: completedCount, total: totalCount } = progress;
+  const isPhaseCompleted = getPhaseProgressStatus(progress) === PHASE_PROGRESS_STATUS.COMPLETED;
 
-  const hasLockedContent = weeks?.some((w) => w.contents.some((c) => isLocked(c))) ?? false;
+  const hasLockedContent = contentList.some((c) => isLocked(c));
   const showUpgradeCta = userStatus === USER_STATUS.TRIAL && hasLockedContent;
-  const stripeEnabled = isStripeEnabled();
-  const priceLabel = showUpgradeCta && stripeEnabled ? await fetchUpgradePriceLabel() : null;
+  const priceLabel = showUpgradeCta ? await priceLabelPromise : null;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -123,161 +118,70 @@ export default async function PhasePage({ params }: PageProps) {
         badge={<UnpublishedBadge isPublished={phase.is_published} />}
       />
 
-      {totalCount > 0 && (
-        <Card className="mb-6">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-muted-foreground">
-                進捗: {completedCount} / {totalCount} 完了
-              </span>
-              <span className="text-sm font-medium">{progressValue}%</span>
+      {isPhaseCompleted ? (
+        <div className="-mt-3 mb-6 flex items-center gap-4 rounded-lg border border-success/40 bg-success/5 px-4 py-3 text-success">
+          <Image
+            src={PHASE_COMPLETION_MASCOT.src}
+            alt={PHASE_COMPLETION_MASCOT.alt}
+            width={120}
+            height={120}
+            className="h-24 w-24 shrink-0 sm:h-28 sm:w-28"
+          />
+          <div className="flex items-center gap-2">
+            <CheckCircle className="h-5 w-5 shrink-0" />
+            <div>
+              <p className="font-bold">お疲れさまでした！</p>
+              <p className="text-sm font-medium">
+                このフェーズのコンテンツをすべて完了しました（{completedCount} / {totalCount}）
+              </p>
             </div>
-            <Progress value={progressValue} className="h-2" />
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+      ) : (
+        totalCount > 0 && (
+          <p className="-mt-3 mb-6 text-sm text-muted-foreground">
+            {completedCount} / {totalCount} 完了
+          </p>
+        )
       )}
 
-      {!weeks || weeks.length === 0 ? (
+      {contentList.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center">
-            <Calendar className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">このフェーズにはまだ週が登録されていません。</p>
+            <BookOpen className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+            <p className="text-muted-foreground">
+              このフェーズにはまだコンテンツが登録されていません。
+            </p>
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-6">
-          {weeks.map((week) => {
-            const weekVisibleContents = week.contents.filter((c) => isCountable(c, week));
-            const weekCompletedCount = weekVisibleContents.filter((c) =>
-              progressMap.get(c.id)
-            ).length;
-            const weekTotalCount = weekVisibleContents.length;
-            const allCompleted = weekTotalCount > 0 && weekCompletedCount === weekTotalCount;
-
-            return (
-              <div key={week.id}>
-                <div className="flex items-center gap-3 mb-3">
-                  <div
-                    className={`p-2 rounded-full ${
-                      allCompleted ? "bg-success/10 text-success" : "bg-primary/10 text-primary"
-                    }`}
-                  >
-                    {allCompleted ? (
-                      <CheckCircle className="h-5 w-5" />
-                    ) : (
-                      <Calendar className="h-5 w-5" />
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-base font-semibold">{week.name}</h2>
-                      <UnpublishedBadge isPublished={week.is_published} />
-                    </div>
-                    {week.description && (
-                      <p className="text-sm text-muted-foreground">{week.description}</p>
-                    )}
-                  </div>
-                  {weekTotalCount > 0 && (
-                    <span className="text-sm text-muted-foreground">
-                      {weekCompletedCount} / {weekTotalCount}
-                    </span>
-                  )}
-                </div>
-
-                {week.contents.length === 0 ? (
-                  <p className="text-sm text-muted-foreground ml-12">
-                    コンテンツはまだ登録されていません。
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-1 gap-2 ml-5 border-l-2 border-border pl-5">
-                    {week.contents.map((content) => {
-                      const locked = isLocked(content);
-                      const isCompleted = !locked && (progressMap.get(content.id) || false);
-
-                      return (
-                        <Link
-                          key={content.id}
-                          href={`/learn/${themeIdNum}/${phaseIdNum}/${week.id}/${content.id}`}
-                          className="block group"
-                        >
-                          <Card
-                            className={`transition-all hover:shadow-sm hover:border-primary/20 ${
-                              isCompleted ? "border-l-4 border-l-success" : ""
-                            } ${locked ? "opacity-60" : ""}`}
-                          >
-                            <CardContent className="py-3 px-4">
-                              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                                <div
-                                  className={`p-1.5 rounded-full shrink-0 ${
-                                    isCompleted
-                                      ? "bg-success/10 text-success"
-                                      : "bg-muted text-muted-foreground"
-                                  }`}
-                                >
-                                  {locked ? (
-                                    <Lock className="h-4 w-4" />
-                                  ) : isCompleted ? (
-                                    <CheckCircle className="h-4 w-4" />
-                                  ) : (
-                                    <Clock className="h-4 w-4" />
-                                  )}
-                                </div>
-                                <div className="flex-1 min-w-40">
-                                  <h3 className="text-sm font-medium group-hover:text-primary transition-colors sm:truncate">
-                                    {content.title}
-                                  </h3>
-                                </div>
-                                <Badge variant="secondary" className="gap-1 shrink-0 text-xs">
-                                  {getContentIcon(content.content_type)}
-                                  {getContentTypeLabel(content.content_type)}
-                                </Badge>
-                                {locked && (
-                                  <Badge variant="outline" className="gap-1 shrink-0 text-xs">
-                                    <Lock className="h-3 w-3" />
-                                    有料会員向け
-                                  </Badge>
-                                )}
-                                <UnpublishedBadge isPublished={content.is_published} />
-                                {!locked &&
-                                  content.content_type === "exercise" &&
-                                  reviewedContentIds.has(content.id) && (
-                                    <Badge
-                                      variant="outline"
-                                      className="gap-1 shrink-0 text-xs border-primary/40 text-primary"
-                                    >
-                                      <Bot className="h-3 w-3" />
-                                      AIレビュー済み
-                                    </Badge>
-                                  )}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {contentList.map((content, index) => {
+              const locked = isLocked(content);
+              return (
+                <LearnContentCard
+                  key={content.id}
+                  href={`/learn/${themeIdNum}/${phaseIdNum}/${content.id}`}
+                  title={content.title}
+                  number={index + 1}
+                  contentType={content.content_type}
+                  isPublished={content.is_published}
+                  locked={locked}
+                  completed={!locked && (progressMap.get(content.id) || false)}
+                  aiReviewed={reviewedContentIds.has(content.id)}
+                />
+              );
+            })}
+          </div>
 
           {showUpgradeCta && (
-            <Card>
-              <CardContent className="py-4 space-y-2">
-                <p className="text-sm">
-                  鍵付きのコンテンツは有料会員になると閲覧できます
-                  {stripeEnabled && " →"}
-                </p>
-                <UpgradeCta
-                  stripeEnabled={stripeEnabled}
-                  priceLabel={priceLabel}
-                  source={UPGRADE_CTA_SOURCE.PHASE_LIST}
-                />
-              </CardContent>
-            </Card>
+            <LockedContentUpgradeCard stripeEnabled={stripeEnabled} priceLabel={priceLabel} />
           )}
         </div>
       )}
+
+      <PhasePrevNextNav themeId={themeIdNum} prev={prevPhase} next={nextPhase} />
     </div>
   );
 }

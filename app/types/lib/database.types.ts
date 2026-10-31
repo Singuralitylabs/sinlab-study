@@ -4,51 +4,166 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5";
+    PostgrestVersion: "14.4";
   };
   public: {
     Tables: {
+      ai_review_limit_resets: {
+        Row: {
+          action: string;
+          affected_count: number;
+          content_id: number | null;
+          created_at: string;
+          id: number;
+          performed_by: number | null;
+          submission_id: number | null;
+          user_id: number;
+        };
+        Insert: {
+          action: string;
+          affected_count: number;
+          content_id?: number | null;
+          created_at?: string;
+          id?: number;
+          performed_by?: number | null;
+          submission_id?: number | null;
+          user_id: number;
+        };
+        Update: {
+          action?: string;
+          affected_count?: number;
+          content_id?: number | null;
+          created_at?: string;
+          id?: number;
+          performed_by?: number | null;
+          submission_id?: number | null;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ai_review_limit_resets_content_id_fkey";
+            columns: ["content_id"];
+            isOneToOne: false;
+            referencedRelation: "learning_contents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ai_review_limit_resets_performed_by_fkey";
+            columns: ["performed_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ai_review_limit_resets_submission_id_fkey";
+            columns: ["submission_id"];
+            isOneToOne: false;
+            referencedRelation: "submissions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ai_review_limit_resets_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ai_review_settings: {
+        Row: {
+          active_per_content_per_day: number;
+          active_per_day: number;
+          id: number;
+          trial_per_content_lifetime: number;
+          updated_at: string;
+          updated_by: number | null;
+        };
+        Insert: {
+          active_per_content_per_day?: number;
+          active_per_day?: number;
+          id?: number;
+          trial_per_content_lifetime?: number;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Update: {
+          active_per_content_per_day?: number;
+          active_per_day?: number;
+          id?: number;
+          trial_per_content_lifetime?: number;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ai_review_settings_updated_by_fkey";
+            columns: ["updated_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       ai_reviews: {
         Row: {
           completion_tokens: number | null;
+          counts_toward_limit: boolean;
           created_at: string;
           error_message: string | null;
           id: number;
           model_used: string | null;
           overall_score: number | null;
+          passed: boolean | null;
           prompt_tokens: number | null;
           review_content: string | null;
+          review_json: Json | null;
           reviewed_at: string | null;
+          rubric_version: number | null;
+          score_kind: string;
           status: string;
           submission_id: number;
+          thoughts_tokens: number | null;
           updated_at: string;
         };
         Insert: {
           completion_tokens?: number | null;
+          counts_toward_limit?: boolean;
           created_at?: string;
           error_message?: string | null;
           id?: number;
           model_used?: string | null;
           overall_score?: number | null;
+          passed?: boolean | null;
           prompt_tokens?: number | null;
           review_content?: string | null;
+          review_json?: Json | null;
           reviewed_at?: string | null;
+          rubric_version?: number | null;
+          score_kind?: string;
           status?: string;
           submission_id: number;
+          thoughts_tokens?: number | null;
           updated_at?: string;
         };
         Update: {
           completion_tokens?: number | null;
+          counts_toward_limit?: boolean;
           created_at?: string;
           error_message?: string | null;
           id?: number;
           model_used?: string | null;
           overall_score?: number | null;
+          passed?: boolean | null;
           prompt_tokens?: number | null;
           review_content?: string | null;
+          review_json?: Json | null;
           reviewed_at?: string | null;
+          rubric_version?: number | null;
+          score_kind?: string;
           status?: string;
           submission_id?: number;
+          thoughts_tokens?: number | null;
           updated_at?: string;
         };
         Relationships: [
@@ -103,6 +218,7 @@ export type Database = {
           id: number;
           is_deleted: boolean;
           published_at: string | null;
+          push_sent_at: string | null;
           send_email: boolean;
           target_membership_types: string[] | null;
           target_statuses: string[];
@@ -117,6 +233,7 @@ export type Database = {
           id?: number;
           is_deleted?: boolean;
           published_at?: string | null;
+          push_sent_at?: string | null;
           send_email?: boolean;
           target_membership_types?: string[] | null;
           target_statuses: string[];
@@ -131,6 +248,7 @@ export type Database = {
           id?: number;
           is_deleted?: boolean;
           published_at?: string | null;
+          push_sent_at?: string | null;
           send_email?: boolean;
           target_membership_types?: string[] | null;
           target_statuses?: string[];
@@ -141,6 +259,54 @@ export type Database = {
           {
             foreignKeyName: "announcements_created_by_fkey";
             columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      certificates: {
+        Row: {
+          certificate_no: string;
+          created_at: string;
+          id: number;
+          issued_at: string;
+          recipient_name: string;
+          theme_id: number;
+          theme_name: string;
+          user_id: number;
+        };
+        Insert: {
+          certificate_no: string;
+          created_at?: string;
+          id?: number;
+          issued_at?: string;
+          recipient_name: string;
+          theme_id: number;
+          theme_name: string;
+          user_id: number;
+        };
+        Update: {
+          certificate_no?: string;
+          created_at?: string;
+          id?: number;
+          issued_at?: string;
+          recipient_name?: string;
+          theme_id?: number;
+          theme_name?: string;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "certificates_theme_id_fkey";
+            columns: ["theme_id"];
+            isOneToOne: false;
+            referencedRelation: "learning_themes";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "certificates_user_id_fkey";
+            columns: ["user_id"];
             isOneToOne: false;
             referencedRelation: "users";
             referencedColumns: ["id"];
@@ -166,6 +332,7 @@ export type Database = {
         Row: {
           enabled: boolean;
           kind: string;
+          push_enabled: boolean;
           send_days: number[] | null;
           send_weekday: number | null;
           updated_at: string;
@@ -174,6 +341,7 @@ export type Database = {
         Insert: {
           enabled?: boolean;
           kind: string;
+          push_enabled?: boolean;
           send_days?: number[] | null;
           send_weekday?: number | null;
           updated_at?: string;
@@ -182,6 +350,7 @@ export type Database = {
         Update: {
           enabled?: boolean;
           kind?: string;
+          push_enabled?: boolean;
           send_days?: number[] | null;
           send_weekday?: number | null;
           updated_at?: string;
@@ -360,6 +529,47 @@ export type Database = {
           },
         ];
       };
+      feedbacks: {
+        Row: {
+          body: string;
+          category: string;
+          created_at: string;
+          id: number;
+          page_url: string | null;
+          status: string;
+          user_agent: string | null;
+          user_id: number;
+        };
+        Insert: {
+          body: string;
+          category: string;
+          created_at?: string;
+          id?: number;
+          page_url?: string | null;
+          status?: string;
+          user_agent?: string | null;
+          user_id: number;
+        };
+        Update: {
+          body?: string;
+          category?: string;
+          created_at?: string;
+          id?: number;
+          page_url?: string | null;
+          status?: string;
+          user_agent?: string | null;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "feedbacks_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       learning_contents: {
         Row: {
           allowed_submission_types: string;
@@ -369,18 +579,25 @@ export type Database = {
           description: string | null;
           display_order: number | null;
           exercise_instructions: string | null;
+          grading_rubric: Json | null;
+          has_grading_requirements: boolean | null;
           hint: string | null;
           id: number;
           is_deleted: boolean | null;
           is_open_to_trial: boolean;
           is_published: boolean | null;
           pdf_url: string | null;
+          phase_id: number;
+          preview_base_html: string | null;
           reference_answer: string | null;
+          show_console: boolean | null;
+          show_preview: boolean | null;
+          starter_files: Json | null;
+          submission_file_slots: Json | null;
           text_content: string | null;
           title: string;
           updated_at: string | null;
           video_url: string | null;
-          week_id: number;
         };
         Insert: {
           allowed_submission_types?: string;
@@ -390,18 +607,25 @@ export type Database = {
           description?: string | null;
           display_order?: number | null;
           exercise_instructions?: string | null;
+          grading_rubric?: Json | null;
+          has_grading_requirements?: boolean | null;
           hint?: string | null;
           id?: number;
           is_deleted?: boolean | null;
           is_open_to_trial?: boolean;
           is_published?: boolean | null;
           pdf_url?: string | null;
+          phase_id: number;
+          preview_base_html?: string | null;
           reference_answer?: string | null;
+          show_console?: boolean | null;
+          show_preview?: boolean | null;
+          starter_files?: Json | null;
+          submission_file_slots?: Json | null;
           text_content?: string | null;
           title: string;
           updated_at?: string | null;
           video_url?: string | null;
-          week_id: number;
         };
         Update: {
           allowed_submission_types?: string;
@@ -411,25 +635,32 @@ export type Database = {
           description?: string | null;
           display_order?: number | null;
           exercise_instructions?: string | null;
+          grading_rubric?: Json | null;
+          has_grading_requirements?: boolean | null;
           hint?: string | null;
           id?: number;
           is_deleted?: boolean | null;
           is_open_to_trial?: boolean;
           is_published?: boolean | null;
           pdf_url?: string | null;
+          phase_id?: number;
+          preview_base_html?: string | null;
           reference_answer?: string | null;
+          show_console?: boolean | null;
+          show_preview?: boolean | null;
+          starter_files?: Json | null;
+          submission_file_slots?: Json | null;
           text_content?: string | null;
           title?: string;
           updated_at?: string | null;
           video_url?: string | null;
-          week_id?: number;
         };
         Relationships: [
           {
-            foreignKeyName: "learning_contents_week_id_fkey";
-            columns: ["week_id"];
+            foreignKeyName: "learning_contents_phase_id_fkey";
+            columns: ["phase_id"];
             isOneToOne: false;
-            referencedRelation: "learning_weeks";
+            referencedRelation: "learning_phases";
             referencedColumns: ["id"];
           },
         ];
@@ -483,6 +714,7 @@ export type Database = {
           created_at: string | null;
           description: string | null;
           display_order: number | null;
+          hero_image_url: string | null;
           id: number;
           image_url: string | null;
           is_deleted: boolean | null;
@@ -494,6 +726,7 @@ export type Database = {
           created_at?: string | null;
           description?: string | null;
           display_order?: number | null;
+          hero_image_url?: string | null;
           id?: number;
           image_url?: string | null;
           is_deleted?: boolean | null;
@@ -505,6 +738,7 @@ export type Database = {
           created_at?: string | null;
           description?: string | null;
           display_order?: number | null;
+          hero_image_url?: string | null;
           id?: number;
           image_url?: string | null;
           is_deleted?: boolean | null;
@@ -514,46 +748,185 @@ export type Database = {
         };
         Relationships: [];
       };
-      learning_weeks: {
+      push_logs: {
         Row: {
-          created_at: string | null;
-          description: string | null;
-          display_order: number | null;
+          created_at: string;
+          error: string | null;
           id: number;
-          is_deleted: boolean | null;
-          is_published: boolean | null;
-          name: string;
-          phase_id: number;
-          updated_at: string | null;
+          kind: string;
+          reference_key: string;
+          sent_at: string | null;
+          user_id: number;
         };
         Insert: {
-          created_at?: string | null;
-          description?: string | null;
-          display_order?: number | null;
+          created_at?: string;
+          error?: string | null;
           id?: number;
-          is_deleted?: boolean | null;
-          is_published?: boolean | null;
-          name: string;
-          phase_id: number;
-          updated_at?: string | null;
+          kind: string;
+          reference_key: string;
+          sent_at?: string | null;
+          user_id: number;
         };
         Update: {
-          created_at?: string | null;
-          description?: string | null;
-          display_order?: number | null;
+          created_at?: string;
+          error?: string | null;
           id?: number;
-          is_deleted?: boolean | null;
-          is_published?: boolean | null;
-          name?: string;
-          phase_id?: number;
-          updated_at?: string | null;
+          kind?: string;
+          reference_key?: string;
+          sent_at?: string | null;
+          user_id?: number;
         };
         Relationships: [
           {
-            foreignKeyName: "learning_weeks_phase_id_fkey";
-            columns: ["phase_id"];
+            foreignKeyName: "push_logs_user_id_fkey";
+            columns: ["user_id"];
             isOneToOne: false;
-            referencedRelation: "learning_phases";
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      push_subscriptions: {
+        Row: {
+          auth: string;
+          created_at: string;
+          disabled_at: string | null;
+          endpoint: string;
+          id: number;
+          last_used_at: string;
+          p256dh: string;
+          user_agent: string | null;
+          user_id: number;
+        };
+        Insert: {
+          auth: string;
+          created_at?: string;
+          disabled_at?: string | null;
+          endpoint: string;
+          id?: number;
+          last_used_at?: string;
+          p256dh: string;
+          user_agent?: string | null;
+          user_id: number;
+        };
+        Update: {
+          auth?: string;
+          created_at?: string;
+          disabled_at?: string | null;
+          endpoint?: string;
+          id?: number;
+          last_used_at?: string;
+          p256dh?: string;
+          user_agent?: string | null;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "push_subscriptions_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      quiz_questions: {
+        Row: {
+          choices: string[];
+          content_id: number;
+          correct_choices: number[];
+          created_at: string;
+          display_order: number;
+          explanation: string | null;
+          hint: string | null;
+          id: number;
+          model_answer: string | null;
+          question: string;
+          question_type: string;
+          updated_at: string;
+        };
+        Insert: {
+          choices?: string[];
+          content_id: number;
+          correct_choices?: number[];
+          created_at?: string;
+          display_order: number;
+          explanation?: string | null;
+          hint?: string | null;
+          id?: number;
+          model_answer?: string | null;
+          question: string;
+          question_type: string;
+          updated_at?: string;
+        };
+        Update: {
+          choices?: string[];
+          content_id?: number;
+          correct_choices?: number[];
+          created_at?: string;
+          display_order?: number;
+          explanation?: string | null;
+          hint?: string | null;
+          id?: number;
+          model_answer?: string | null;
+          question?: string;
+          question_type?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "quiz_questions_content_id_fkey";
+            columns: ["content_id"];
+            isOneToOne: false;
+            referencedRelation: "learning_contents";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      review_notes: {
+        Row: {
+          content_id: number;
+          created_at: string;
+          id: number;
+          memo: string | null;
+          requirement_key: string | null;
+          understood_at: string | null;
+          updated_at: string;
+          user_id: number;
+        };
+        Insert: {
+          content_id: number;
+          created_at?: string;
+          id?: number;
+          memo?: string | null;
+          requirement_key?: string | null;
+          understood_at?: string | null;
+          updated_at?: string;
+          user_id: number;
+        };
+        Update: {
+          content_id?: number;
+          created_at?: string;
+          id?: number;
+          memo?: string | null;
+          requirement_key?: string | null;
+          understood_at?: string | null;
+          updated_at?: string;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "review_notes_content_id_fkey";
+            columns: ["content_id"];
+            isOneToOne: false;
+            referencedRelation: "learning_contents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "review_notes_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
             referencedColumns: ["id"];
           },
         ];
@@ -694,6 +1067,8 @@ export type Database = {
           ever_completed: boolean;
           id: number;
           is_completed: boolean | null;
+          last_viewed_at: string | null;
+          retry_started_at: string | null;
           user_id: number;
         };
         Insert: {
@@ -703,6 +1078,8 @@ export type Database = {
           ever_completed?: boolean;
           id?: number;
           is_completed?: boolean | null;
+          last_viewed_at?: string | null;
+          retry_started_at?: string | null;
           user_id: number;
         };
         Update: {
@@ -712,6 +1089,8 @@ export type Database = {
           ever_completed?: boolean;
           id?: number;
           is_completed?: boolean | null;
+          last_viewed_at?: string | null;
+          retry_started_at?: string | null;
           user_id?: number;
         };
         Relationships: [
@@ -743,6 +1122,10 @@ export type Database = {
           id: number;
           is_deleted: boolean | null;
           membership_type: string | null;
+          notification_email: string | null;
+          notification_email_expires_at: string | null;
+          notification_email_pending: string | null;
+          notification_email_token_hash: string | null;
           onboarding_completed_at: string | null;
           role: string;
           status: string;
@@ -760,6 +1143,10 @@ export type Database = {
           id?: number;
           is_deleted?: boolean | null;
           membership_type?: string | null;
+          notification_email?: string | null;
+          notification_email_expires_at?: string | null;
+          notification_email_pending?: string | null;
+          notification_email_token_hash?: string | null;
           onboarding_completed_at?: string | null;
           role?: string;
           status?: string;
@@ -777,6 +1164,10 @@ export type Database = {
           id?: number;
           is_deleted?: boolean | null;
           membership_type?: string | null;
+          notification_email?: string | null;
+          notification_email_expires_at?: string | null;
+          notification_email_pending?: string | null;
+          notification_email_token_hash?: string | null;
           onboarding_completed_at?: string | null;
           role?: string;
           status?: string;
@@ -790,13 +1181,82 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      admin_reopen_ai_review: {
+        Args: { p_performed_by: number; p_submission_id: number };
+        Returns: boolean;
+      };
+      admin_reset_ai_review_limits: {
+        Args: {
+          p_content_id: number;
+          p_performed_by: number;
+          p_user_id: number;
+        };
+        Returns: number;
+      };
       bulk_update_sibling_display_order: {
         Args: { p_table: string; p_updates: Json };
         Returns: undefined;
       };
+      claim_ai_review: {
+        Args: {
+          p_active_per_content_per_day: number;
+          p_active_per_day: number;
+          p_content_id: number;
+          p_day_start: string;
+          p_stale_before: string;
+          p_submission_id: number;
+          p_trial_per_content_lifetime: number;
+          p_user_id: number;
+          p_user_status: string;
+        };
+        Returns: Json;
+      };
       claim_email_test_send: {
         Args: { p_day_start: string; p_limit: number; p_user_id: number };
         Returns: number;
+      };
+      claim_notification_email_confirm: {
+        Args: {
+          p_limit: number;
+          p_reference_key: string;
+          p_since: string;
+          p_user_id: number;
+        };
+        Returns: number;
+      };
+      content_requires_review_pass: {
+        Args: { p_content_id: number };
+        Returns: boolean;
+      };
+      content_review_pass_unachievable: {
+        Args: { p_content_id: number };
+        Returns: boolean;
+      };
+      content_visible_to_caller: {
+        Args: { p_content_id: number; p_content_type: string };
+        Returns: boolean;
+      };
+      get_exercise_reference_answer: {
+        Args: { p_content_id: number };
+        Returns: {
+          reference_answer: string;
+        }[];
+      };
+      get_exercise_review_pass_state: {
+        Args: { p_content_id: number };
+        Returns: Json;
+      };
+      get_quiz_questions: {
+        Args: { p_content_id: number };
+        Returns: {
+          choices: string[];
+          display_order: number;
+          hint: string;
+          id: number;
+          question: string;
+          question_type: string;
+          revision: string;
+        }[];
       };
       get_students_progress_summary: {
         Args: never;
@@ -820,6 +1280,49 @@ export type Database = {
           upgraded: number;
           week_start: string;
         }[];
+      };
+      grade_quiz_answers: {
+        Args: { p_answers: Json; p_content_id: number };
+        Returns: {
+          correct_choices: number[];
+          explanation: string;
+          is_correct: boolean;
+          model_answer: string;
+          question_id: number;
+          question_type: string;
+        }[];
+      };
+      learning_content_requires_review_pass: {
+        Args: { p_content_id: number };
+        Returns: boolean;
+      };
+      learning_content_review_pass_unachievable: {
+        Args: { p_content_id: number };
+        Returns: boolean;
+      };
+      quiz_content_visible_to_caller: {
+        Args: { p_content_id: number };
+        Returns: boolean;
+      };
+      quiz_correct_choices_valid: {
+        Args: { p_choices: string[]; p_correct: number[] };
+        Returns: boolean;
+      };
+      quiz_question_revision: {
+        Args: {
+          p_choices: string[];
+          p_question: string;
+          p_question_type: string;
+        };
+        Returns: string;
+      };
+      record_content_view: {
+        Args: { p_content_id: number; p_debounce_ms: number };
+        Returns: Json;
+      };
+      replace_quiz_questions: {
+        Args: { p_content_id: number; p_questions: Json };
+        Returns: undefined;
       };
     };
     Enums: {

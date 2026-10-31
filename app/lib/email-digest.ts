@@ -1,5 +1,6 @@
 import { USER_STATUS } from "@/app/constants/user";
-import type { UserStatusType } from "@/app/types";
+import { splitThemesByActivity, type ThemeCounts } from "@/app/lib/theme-progress";
+import type { UserRoleType, UserStatusType } from "@/app/types";
 
 /**
  * Pure functions deciding periodic mail (GET /api/cron/email-digest) targets; no DB or sending
@@ -41,6 +42,18 @@ export function jstStartOfDayIso(date: string): string {
 }
 
 /**
+ * Compare timestamps as instants. PostgREST returns `+00:00` with variable fractional digits while
+ * `toISOString()` returns `.000Z`, so string comparison flips at the same second (`+` < `.`).
+ */
+export function isBefore(a: string, b: string): boolean {
+  return Date.parse(a) < Date.parse(b);
+}
+
+export function isSameOrAfter(a: string, b: string): boolean {
+  return Date.parse(a) >= Date.parse(b);
+}
+
+/**
  * Days since sign-up: users.created_at rounded to the JST calendar date, with the sign-up date as
  * day 0 (e.g. a user who signs up 10/1 23:30 JST has day 7 on 10/8).
  */
@@ -59,10 +72,13 @@ export function coversPreviousWeek(createdAt: string, weekStart: string): boolea
 
 export type DigestUser = {
   userId: number;
+  /** Resolved send-to address (`notification_email ?? email`), not necessarily `users.email`. */
   email: string;
   displayName: string;
   status: UserStatusType;
   membershipType: string | null;
+  /** Only announcements go to admin / maintainer; the learning emails are for members (10.7). */
+  role: UserRoleType;
   createdAt: string;
 };
 
@@ -103,6 +119,7 @@ export function planMilestoneEmails(
 export type DigestContent = {
   id: number;
   title: string;
+  themeId: number;
   path: string;
   themeName: string;
   isOpenToTrial: boolean;
@@ -115,12 +132,72 @@ export function visibleContentsFor(
   return status === USER_STATUS.TRIAL ? contents.filter((c) => c.isOpenToTrial) : contents;
 }
 
+export type ActiveThemeLine = {
+  themeName: string;
+  completedContents: number;
+  totalContents: number;
+};
+
+/**
+ * The next content and the themes the learner is in the middle of. The next content is the first
+ * incomplete one (learning order) of the active theme with the most recent completion; a learner
+ * with no active theme gets the first incomplete overall. Theme state comes from
+ * splitThemesByActivity() over the visible contents, so a trial learner is judged on the
+ * trial-open denominator.
+ * `completedAtByContentId` is epoch ms; a missing time ranks oldest.
+ */
 export function resolveNextContent(
   visibleContents: DigestContent[],
-  completedContentIds: ReadonlySet<number>
-): { next: DigestContent | null; remaining: number } {
+  completedContentIds: ReadonlySet<number>,
+  completedAtByContentId: ReadonlyMap<number, number> = new Map()
+): { next: DigestContent | null; remaining: number; activeThemes: ActiveThemeLine[] } {
   const incomplete = visibleContents.filter((c) => !completedContentIds.has(c.id));
-  return { next: incomplete[0] ?? null, remaining: incomplete.length };
+
+  const themes = new Map<
+    number,
+    ThemeCounts & {
+      themeName: string;
+      lastCompletedAt: number;
+      firstIncomplete: DigestContent | null;
+    }
+  >();
+  for (const content of visibleContents) {
+    const theme = themes.get(content.themeId) ?? {
+      themeName: content.themeName,
+      totalContents: 0,
+      completedContents: 0,
+      lastCompletedAt: Number.NEGATIVE_INFINITY,
+      firstIncomplete: null,
+    };
+    theme.totalContents += 1;
+    if (completedContentIds.has(content.id)) {
+      theme.completedContents += 1;
+      theme.lastCompletedAt = Math.max(
+        theme.lastCompletedAt,
+        completedAtByContentId.get(content.id) ?? 0
+      );
+    } else if (!theme.firstIncomplete) {
+      theme.firstIncomplete = content;
+    }
+    themes.set(content.themeId, theme);
+  }
+
+  // Array.sort is stable, so themes with equal recency keep splitThemesByActivity()'s order
+  // (completion rate, highest first).
+  const active = splitThemesByActivity([...themes.values()]).active.sort(
+    (a, b) => b.lastCompletedAt - a.lastCompletedAt
+  );
+
+  return {
+    // An active theme is started and unfinished, so it always has an incomplete content.
+    next: active[0]?.firstIncomplete ?? incomplete[0] ?? null,
+    remaining: incomplete.length,
+    activeThemes: active.map(({ themeName, completedContents, totalContents }) => ({
+      themeName,
+      completedContents,
+      totalContents,
+    })),
+  };
 }
 
 /**

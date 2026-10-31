@@ -1,3 +1,4 @@
+import { NOTIFICATION_EMAIL_TOKEN_TTL_LABEL } from "@/app/constants/notifications";
 import type { EmailTemplateKey, EmailTexts } from "@/app/lib/email-template";
 import { renderEmailMarkdown } from "@/app/lib/markdown-email";
 import type { EmailContent } from "@/app/services/notifications/email";
@@ -5,7 +6,10 @@ import {
   buildAnnouncementEmail,
   buildApprovedEmail,
   buildCancelScheduledEmail,
+  buildCertificateIssuedEmail,
   buildInactivityReminderEmail,
+  buildNotificationEmailChangedEmail,
+  buildNotificationEmailConfirmEmail,
   buildSignupEmail,
   buildSubscriptionEndedEmail,
   buildTrialNurtureEmail,
@@ -112,6 +116,17 @@ const PREVIEW_VARIANTS: Record<EmailTemplateKey, VariantDefinition[]> = {
     },
   ],
   subscription_ended: single((c) => buildSubscriptionEndedEmail(base(c), c.texts)),
+  certificate_issued: single((c) =>
+    buildCertificateIssuedEmail(
+      {
+        ...base(c),
+        certificateId: 1,
+        themeName: "GAS 学習（基礎編）",
+        certificateNo: "SS-202610-ABC123",
+      },
+      c.texts
+    )
+  ),
   weekly_digest: [
     {
       id: "active",
@@ -124,6 +139,10 @@ const PREVIEW_VARIANTS: Record<EmailTemplateKey, VariantDefinition[]> = {
             submittedLastWeek: 2,
             nextContent: { title: "JavaScript の基本", path: "/learn/1" },
             remainingContents: 12,
+            activeThemes: [
+              { themeName: "GAS 学習（基礎編）", completedContents: 4, totalContents: 16 },
+            ],
+            unovercomeReviewCount: 2,
           },
           c.texts
         ),
@@ -139,6 +158,9 @@ const PREVIEW_VARIANTS: Record<EmailTemplateKey, VariantDefinition[]> = {
             submittedLastWeek: 0,
             nextContent: { title: "JavaScript の基本", path: "/learn/1" },
             remainingContents: 12,
+            activeThemes: [
+              { themeName: "GAS 学習（基礎編）", completedContents: 4, totalContents: 16 },
+            ],
           },
           c.texts
         ),
@@ -154,6 +176,7 @@ const PREVIEW_VARIANTS: Record<EmailTemplateKey, VariantDefinition[]> = {
             submittedLastWeek: 1,
             nextContent: null,
             remainingContents: 0,
+            activeThemes: [],
           },
           c.texts
         ),
@@ -264,6 +287,26 @@ const PREVIEW_VARIANTS: Record<EmailTemplateKey, VariantDefinition[]> = {
         ),
     },
   ],
+  notification_email_confirm: single((c) =>
+    buildNotificationEmailConfirmEmail(
+      {
+        ...base(c),
+        confirmUrl: `${c.appUrl.replace(/\/+$/, "")}/api/settings/notification-email/verify?token=sample`,
+        expiresLabel: NOTIFICATION_EMAIL_TOKEN_TTL_LABEL,
+      },
+      c.texts
+    )
+  ),
+  notification_email_changed: single((c) =>
+    buildNotificationEmailChangedEmail(
+      {
+        ...base(c),
+        newAddress: "notify@example.com",
+        settingsUrl: `${c.appUrl.replace(/\/+$/, "")}/settings`,
+      },
+      c.texts
+    )
+  ),
   announcement: single((c) =>
     buildAnnouncementEmail(
       {

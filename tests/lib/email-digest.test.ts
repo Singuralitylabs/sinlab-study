@@ -6,6 +6,8 @@ import {
   type DigestContent,
   type DigestUser,
   daysSinceSignup,
+  isBefore,
+  isSameOrAfter,
   isWeeklyDigestTarget,
   jstStartOfDayIso,
   lockedThemeNames,
@@ -91,6 +93,7 @@ function user(userId: number, status: "active" | "trial", createdAt: string): Di
     displayName: `u${userId}`,
     status,
     membershipType: null,
+    role: "member",
     createdAt,
   };
 }
@@ -180,10 +183,10 @@ describe("planMilestoneEmails", () => {
 });
 
 const contents: DigestContent[] = [
-  { id: 1, title: "A", path: "/learn/1/1/1/1", themeName: "T1", isOpenToTrial: true },
-  { id: 2, title: "B", path: "/learn/1/1/1/2", themeName: "T1", isOpenToTrial: false },
-  { id: 3, title: "C", path: "/learn/2/2/2/3", themeName: "T2", isOpenToTrial: true },
-  { id: 4, title: "D", path: "/learn/2/2/2/4", themeName: "T2", isOpenToTrial: false },
+  { id: 1, title: "A", themeId: 1, path: "/learn/1/1/1/1", themeName: "T1", isOpenToTrial: true },
+  { id: 2, title: "B", themeId: 1, path: "/learn/1/1/1/2", themeName: "T1", isOpenToTrial: false },
+  { id: 3, title: "C", themeId: 2, path: "/learn/2/2/2/3", themeName: "T2", isOpenToTrial: true },
+  { id: 4, title: "D", themeId: 2, path: "/learn/2/2/2/4", themeName: "T2", isOpenToTrial: false },
 ];
 
 describe("次に学ぶコンテンツ", () => {
@@ -205,6 +208,74 @@ describe("次に学ぶコンテンツ", () => {
     );
     expect(next).toBeNull();
     expect(remaining).toBe(0);
+  });
+
+  describe("学習中のテーマの中から選ぶ（#308）", () => {
+    // Two themes with three contents each; ids 1-3 are T1, 4-6 are T2.
+    const themed: DigestContent[] = [1, 2, 3, 4, 5, 6].map((id) => ({
+      id,
+      title: `C${id}`,
+      themeId: id <= 3 ? 1 : 2,
+      path: `/learn/${id <= 3 ? 1 : 2}/1/1/${id}`,
+      themeName: id <= 3 ? "T1" : "T2",
+      isOpenToTrial: true,
+    }));
+
+    it("完了が無ければ全体の先頭で、学習中のテーマは空", () => {
+      const result = resolveNextContent(themed, new Set());
+      expect(result.next?.id).toBe(1);
+      expect(result.remaining).toBe(6);
+      expect(result.activeThemes).toEqual([]);
+    });
+
+    it("学習中が1テーマなら、そのテーマ内の先頭の未完了を選ぶ（別テーマの先頭に飛ばない）", () => {
+      const { next, activeThemes } = resolveNextContent(themed, new Set([4]), new Map([[4, 1000]]));
+      expect(next?.id).toBe(5);
+      expect(activeThemes).toEqual([{ themeName: "T2", completedContents: 1, totalContents: 3 }]);
+    });
+
+    it("学習中が複数なら、最近完了があったテーマを選ぶ", () => {
+      const completedAt = new Map([
+        [1, 5000],
+        [4, 9000],
+      ]);
+      const { next, activeThemes } = resolveNextContent(themed, new Set([1, 4]), completedAt);
+      expect(next?.id).toBe(5);
+      expect(activeThemes.map((t) => t.themeName)).toEqual(["T2", "T1"]);
+
+      completedAt.set(1, 12000);
+      expect(resolveNextContent(themed, new Set([1, 4]), completedAt).next?.id).toBe(2);
+    });
+
+    it("最近のテーマを全て完了していれば、次に最近の学習中テーマへ移る", () => {
+      const completedAt = new Map([
+        [1, 1000],
+        [4, 2000],
+        [5, 3000],
+        [6, 4000],
+      ]);
+      const { next, activeThemes } = resolveNextContent(themed, new Set([1, 4, 5, 6]), completedAt);
+      expect(next?.id).toBe(2);
+      // T2 is fully done, so it is "completed", not "active".
+      expect(activeThemes.map((t) => t.themeName)).toEqual(["T1"]);
+    });
+
+    it("学習中のテーマが無い（全て修了）ときは全体の先頭の未完了に戻る", () => {
+      const { next } = resolveNextContent(themed.slice(0, 3), new Set([1, 2, 3]));
+      expect(next).toBeNull();
+    });
+
+    it("完了時刻が不明でも落ちず、学習順で決める", () => {
+      const { next } = resolveNextContent(themed, new Set([1, 4]));
+      expect(next?.id).toBe(2);
+    });
+
+    it("お試しは分母がお試し公開分なので、お試し範囲を全て完了したテーマは学習中に入らない", () => {
+      const trialVisible = visibleContentsFor(contents, "trial");
+      const { next, activeThemes } = resolveNextContent(trialVisible, new Set([1]));
+      expect(activeThemes).toEqual([]);
+      expect(next?.id).toBe(3);
+    });
   });
 
   it("鍵が掛かるコンテンツを含むテーマ名を学習順・重複なしで返す", () => {
@@ -229,5 +300,25 @@ describe("isWeeklyDigestTarget", () => {
     expect(
       isWeeklyDigestTarget({ completedLastWeek: 0, submittedLastWeek: 0, remainingContents: 0 })
     ).toBe(false);
+  });
+});
+
+describe("isBefore / isSameOrAfter（timestamptz を瞬間として比較する）", () => {
+  const cycleStart = "2026-10-05T15:00:00.000Z";
+
+  it.each([
+    "2026-10-05T15:00:00+00:00",
+    "2026-10-05T15:00:00.000+00:00",
+    "2026-10-05T15:00:00.000000+00:00",
+    "2026-10-06T00:00:00+09:00",
+  ])("同一秒の %s は同時刻として扱う", (value) => {
+    expect(isSameOrAfter(value, cycleStart)).toBe(true);
+    expect(isBefore(value, cycleStart)).toBe(false);
+  });
+
+  it("1 秒前は前、1 秒後は後として扱う", () => {
+    expect(isBefore("2026-10-05T14:59:59+00:00", cycleStart)).toBe(true);
+    expect(isSameOrAfter("2026-10-05T14:59:59+00:00", cycleStart)).toBe(false);
+    expect(isSameOrAfter("2026-10-05T15:00:01.123456+00:00", cycleStart)).toBe(true);
   });
 });

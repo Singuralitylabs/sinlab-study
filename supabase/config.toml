@@ -1,0 +1,26 @@
+# Local stack used by CI (.github/workflows/db-privileges.yml) and `supabase start`.
+# project_id only names the Docker containers; it is not the production project ref.
+project_id = "sinlab-study"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+# Must match the production Postgres major version, or migrations may behave differently.
+major_version = 17
+
+[db.migrations]
+enabled = true
+
+[storage]
+enabled = true
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3000"

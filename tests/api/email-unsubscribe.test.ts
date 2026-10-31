@@ -70,7 +70,9 @@ describe("POST /api/email/unsubscribe（確定。確認画面のボタンと RFC
     const res = await POST(request(createUnsubscribeToken(42), "POST"));
 
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain("配信を停止しました");
+    const body = await res.text();
+    expect(body).toContain("配信を停止しました");
+    expect(body).toContain("/settings");
     const builder = client.from.mock.results[0].value;
     expect(client.from).toHaveBeenCalledWith("users");
     expect(builder.update).toHaveBeenCalledWith({ email_opt_out_at: expect.any(String) });

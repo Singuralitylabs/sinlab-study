@@ -11,6 +11,7 @@ import {
   ANNOUNCEMENT_EMAIL_RETRY_DAYS,
   EMAIL_DIGEST_MAX_PER_DAY,
   EMAIL_DIGEST_SEND_INTERVAL_MS,
+  EMAIL_DIGEST_TIME_BUDGET_MS,
   INACTIVITY_REMINDER_DAYS,
   TRIAL_NURTURE_DAYS,
 } from "@/app/constants/notifications";
@@ -246,20 +247,13 @@ const themes: Row[] = [
         id: 20,
         name: "P2",
         display_order: 1,
-        weeks: [
+        contents: [
           {
-            id: 200,
-            name: "W2",
+            id: 2000,
+            title: "HTML入門",
             display_order: 1,
-            contents: [
-              {
-                id: 2000,
-                title: "HTML入門",
-                display_order: 1,
-                is_open_to_trial: true,
-                week_id: 200,
-              },
-            ],
+            is_open_to_trial: true,
+            phase_id: 20,
           },
         ],
       },
@@ -276,27 +270,20 @@ const themes: Row[] = [
         id: 10,
         name: "P1",
         display_order: 1,
-        weeks: [
+        contents: [
           {
-            id: 100,
-            name: "W1",
+            id: 1001,
+            title: "鍵付き",
+            display_order: 2,
+            is_open_to_trial: false,
+            phase_id: 10,
+          },
+          {
+            id: 1000,
+            title: "はじめての自動化",
             display_order: 1,
-            contents: [
-              {
-                id: 1001,
-                title: "鍵付き",
-                display_order: 2,
-                is_open_to_trial: false,
-                week_id: 100,
-              },
-              {
-                id: 1000,
-                title: "はじめての自動化",
-                display_order: 1,
-                is_open_to_trial: true,
-                week_id: 100,
-              },
-            ],
+            is_open_to_trial: true,
+            phase_id: 10,
           },
         ],
       },
@@ -325,6 +312,7 @@ function defaultKindRows(): Row[] {
     row("inactivity_reminder", { send_days: [...INACTIVITY_REMINDER_DAYS] }),
     row("trial_nurture", { send_days: [...TRIAL_NURTURE_DAYS] }),
     row("announcement"),
+    row("certificate_issued"),
   ];
 }
 
@@ -353,6 +341,7 @@ function setup(
     user_progress?: Row[];
     submissions?: Row[];
     announcements?: Row[];
+    email_logs?: Row[];
     email_kind_settings?: Row[];
     email_settings?: Row[];
     email_templates?: Row[];
@@ -433,20 +422,58 @@ describe("送信設定（フェイルクローズ）", () => {
 });
 
 describe("送信対象の抽出", () => {
-  it("配信停止・却下・論理削除・受講生以外のロールのユーザーには送らない", async () => {
+  it("配信停止・却下・論理削除のユーザーには送らない", async () => {
     setup({
       users: [
         userRow(1),
         userRow(2, { email_opt_out_at: "2026-10-01T00:00:00Z" }),
         userRow(3, { status: "rejected" }),
         userRow(4, { is_deleted: true }),
-        userRow(5, { role: "admin" }),
       ],
     });
 
     await runDigest(MONDAY);
 
     expect(sentTo()).toEqual(["u1@example.com"]);
+  });
+
+  it("notification_email があればログイン用ではなくそちらへ送る（お知らせも同じ抽出）", async () => {
+    setup({
+      users: [userRow(1, { email: "login@example.com", notification_email: "notify@example.com" })],
+    });
+
+    await runDigest(MONDAY);
+
+    expect(sentTo()).toEqual(["notify@example.com"]);
+  });
+
+  it("学習系の定期メール（週次進捗・未学習リマインド・お試し向け案内）は admin / maintainer に送らない", async () => {
+    const { db } = setup({
+      users: [
+        // Weekly digest targets (registered long ago).
+        userRow(1),
+        userRow(2, { role: "admin" }),
+        userRow(3, { role: "maintainer" }),
+        // Day 7 on 10/5: trial_nurture for trial, inactivity_reminder for active.
+        userRow(4, { status: "trial", created_at: createdOn("2026-09-28") }),
+        userRow(5, { role: "maintainer", status: "trial", created_at: createdOn("2026-09-28") }),
+        userRow(6, { created_at: createdOn("2026-09-28") }),
+        userRow(7, { role: "admin", created_at: createdOn("2026-09-28") }),
+      ],
+    });
+
+    await runDigest(MONDAY);
+
+    const sentKinds = db.email_logs
+      .filter((row) => row.kind !== "weekly_digest_reserved")
+      .map((row) => [row.user_id, row.kind])
+      .sort((a, b) => Number(a[0]) - Number(b[0]));
+    expect(sentKinds).toEqual([
+      [1, "weekly_digest"],
+      [4, "trial_nurture"],
+      [6, "inactivity_reminder"],
+    ]);
+    expect(sentTo().sort()).toEqual(["u1@example.com", "u4@example.com", "u6@example.com"]);
   });
 
   it("週次進捗: 先週（JST の月〜日）の完了数・提出数と、次に学ぶコンテンツを載せる", async () => {
@@ -482,7 +509,44 @@ describe("送信対象の抽出", () => {
     expect(email.subject).toContain("今週の学習");
     expect(email.text).toContain("コンテンツ完了 1 本 / 演習の提出 1 件");
     expect(email.text).toContain("次に学ぶコンテンツ: 鍵付き");
-    expect(email.text).toContain(`${APP_URL}/learn/1/10/100/1001`);
+    expect(email.text).toContain(`${APP_URL}/learn/1/10/1001`);
+    // Web制作 is fully done (2000), so only GAS実践 is "in progress".
+    expect(email.text).toContain("学習中のテーマ: GAS実践（1 / 2 完了）");
+    expect(email.text).not.toContain("学習中のテーマ: Web制作");
+  });
+
+  it("週次進捗: 学習中のテーマが無い（完了0件）ときは行を出さず、全体の先頭を案内する", async () => {
+    setup({
+      users: [userRow(1)],
+      submissions: [{ id: 1, user_id: 1, submitted_at: "2026-10-01T00:00:00.000Z" }],
+    });
+
+    await runDigest(MONDAY);
+
+    const email = sentEmailTo("u1@example.com");
+    expect(email.text).not.toContain("学習中のテーマ");
+    expect(email.text).toContain("次に学ぶコンテンツ: はじめての自動化");
+  });
+
+  it("週次進捗: 後ろの内容だけ完了しているときも、学習中のテーマとその未完了を案内する", async () => {
+    setup({
+      users: [userRow(1)],
+      user_progress: [
+        {
+          id: 1,
+          user_id: 1,
+          content_id: 1001,
+          is_completed: true,
+          completed_at: "2026-10-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    await runDigest(MONDAY);
+
+    const email = sentEmailTo("u1@example.com");
+    expect(email.text).toContain("学習中のテーマ: GAS実践（1 / 2 完了）");
+    expect(email.text).toContain("次に学ぶコンテンツ: はじめての自動化");
   });
 
   it("週次進捗: お試しユーザーはお試し公開コンテンツだけで次のコンテンツと残り数を判定する", async () => {
@@ -530,13 +594,14 @@ describe("送信対象の抽出", () => {
         userRow(2, { created_at: createdOn("2026-09-29") }), // Tuesday of last week
         userRow(3, { created_at: createdOn("2026-10-04") }), // Sunday of last week (the day before this Monday)
       ],
-      // u1 is day 7, so add learning records to exclude them from the unstudied reminder.
+      // u1 is day 7, so add a completion so inactivity_reminder skips them (#396: ever_completed).
       user_progress: [
         {
           id: 1,
           user_id: 1,
           content_id: 1000,
           is_completed: true,
+          ever_completed: true,
           completed_at: "2026-09-30T00:00:00.000Z",
         },
       ],
@@ -560,23 +625,39 @@ describe("送信対象の抽出", () => {
     setup({
       users: [
         userRow(1, { created_at: createdOn("2026-09-29") }), // no activity
-        userRow(2, { created_at: createdOn("2026-09-29") }), // has progress
+        userRow(2, { created_at: createdOn("2026-09-29") }), // ever_completed
         userRow(3, { created_at: createdOn("2026-09-29") }), // has a submission
+        userRow(4, { created_at: createdOn("2026-09-29") }), // view-only progress (#396)
       ],
       user_progress: [
-        { id: 1, user_id: 2, content_id: 1000, is_completed: false, completed_at: null },
+        {
+          id: 1,
+          user_id: 2,
+          content_id: 1000,
+          is_completed: true,
+          ever_completed: true,
+          completed_at: "2026-10-01T00:00:00.000Z",
+        },
+        {
+          id: 2,
+          user_id: 4,
+          content_id: 1000,
+          is_completed: false,
+          ever_completed: false,
+          completed_at: null,
+          last_viewed_at: "2026-10-01T00:00:00.000Z",
+        },
       ],
       submissions: [{ id: 1, user_id: 3, submitted_at: "2026-10-01T00:00:00.000Z" }],
     });
 
     await runDigest(TUESDAY);
 
-    // Day 7 is 10/6 (Tue). Only u1 gets the unstudied reminder; u2/u3 have studied. (They signed up
-    // mid last week, so the Tuesday catch-up doesn't make them weekly digest targets either.)
+    // Day 7 is 10/6 (Tue). u1 and view-only u4 get the reminder; u2/u3 have studied.
+    expect(sentTo().sort()).toEqual(["u1@example.com", "u4@example.com"]);
     const reminder = sentEmailTo("u1@example.com");
     expect(reminder.subject).toContain("最初の1本");
-    expect(reminder.text).toContain(`${APP_URL}/learn/1/10/100/1000`);
-    expect(sentTo()).toEqual(["u1@example.com"]);
+    expect(reminder.text).toContain(`${APP_URL}/learn/1/10/1000`);
   });
 
   it("お試しユーザーの7日目は trial_nurture だけを送り、未学習リマインド・週次進捗は同日に送らない", async () => {
@@ -830,7 +911,7 @@ describe("1回あたりの上限と繰り越し", () => {
     setup({ users: manyUsers(3) });
     let now = 0;
     vi.mocked(sendEmail).mockImplementation(async () => {
-      now += 30_000;
+      now += EMAIL_DIGEST_TIME_BUDGET_MS * 0.6;
       return { status: "sent", messageId: "msg" };
     });
 
@@ -936,14 +1017,14 @@ describe("お知らせのメール一斉送信（#254）", () => {
   const announcementLogs = (db: Record<string, Row[]>) =>
     db.email_logs.filter((row) => row.kind === "announcement");
 
-  it("対象のステータス・会員種別に一致し、配信停止していない受講生にだけ送り、全員に送り終えたら email_sent_at を記録する", async () => {
+  it("対象のステータス・会員種別に一致し、配信停止していないユーザーにだけ送り、全員に送り終えたら email_sent_at を記録する", async () => {
     const { db } = setup({
       users: [
         userRow(1, { membership_type: "general" }),
         userRow(2, { membership_type: "community" }),
         userRow(3, { status: "trial" }),
         userRow(4, { membership_type: "general", email_opt_out_at: "2026-10-01T00:00:00Z" }),
-        userRow(5, { role: "maintainer", membership_type: "general" }),
+        userRow(5, { role: "maintainer", membership_type: "community" }),
       ],
       announcements: [
         announcementRow({ target_statuses: ["active"], target_membership_types: ["general"] }),
@@ -958,6 +1039,51 @@ describe("お知らせのメール一斉送信（#254）", () => {
     expect(announcementLogs(db).map((row) => [row.user_id, row.reference_key])).toEqual([
       [1, "501"],
     ]);
+  });
+
+  it("アプリ内の表示対象と同じくロールは見ず、対象に一致する maintainer / admin にも送ってから email_sent_at を記録する（#322）", async () => {
+    const { db } = setup({
+      users: [
+        userRow(1, { membership_type: "general" }),
+        userRow(2, { role: "maintainer", membership_type: "general" }),
+        userRow(3, { role: "admin", membership_type: null }),
+        userRow(4, { role: "maintainer", status: "trial" }),
+        userRow(5, {
+          role: "admin",
+          membership_type: "general",
+          email_opt_out_at: "2026-10-01T00:00:00Z",
+        }),
+      ],
+      announcements: [
+        announcementRow({ target_statuses: ["active"], target_membership_types: null }),
+      ],
+    });
+
+    const result = await runDigest(WEDNESDAY);
+
+    expect(sentTo().sort()).toEqual(["u1@example.com", "u2@example.com", "u3@example.com"]);
+    expect(result).toMatchObject({ sent: 3, announcementsCompleted: 1 });
+    expect(
+      announcementLogs(db)
+        .map((row) => row.user_id)
+        .sort()
+    ).toEqual([1, 2, 3]);
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
+  });
+
+  it("受講生（member）が居なくても、対象の maintainer にはお知らせを送る", async () => {
+    const { db } = setup({
+      users: [userRow(2, { role: "maintainer", membership_type: "general" })],
+      announcements: [
+        announcementRow({ target_statuses: ["active"], target_membership_types: null }),
+      ],
+    });
+
+    const result = await runDigest(WEDNESDAY);
+
+    expect(sentTo()).toEqual(["u2@example.com"]);
+    expect(result).toMatchObject({ announcementsCompleted: 1 });
+    expect(db.announcements[0].email_sent_at).toEqual(expect.any(String));
   });
 
   it("本文の Markdown をメールに載せ、詳細ページへのリンクと配信停止リンクを付ける", async () => {
@@ -1115,6 +1241,64 @@ describe("お知らせのメール一斉送信（#254）", () => {
     ).toEqual([
       [1, true, null],
       [2, true, null],
+    ]);
+  });
+
+  it("当日送れない宛先（別の販促メール受信済み）の前日の失敗行は消さず、完了にもしない", async () => {
+    const { db } = setup({
+      users: [userRow(1)],
+      announcements: [announcementRow()],
+      email_logs: [
+        {
+          id: 9001,
+          user_id: 1,
+          kind: "announcement",
+          reference_key: "501",
+          sent_at: null,
+          error: "Resend API がエラーを返しました: status=500",
+          created_at: "2026-10-06T10:00:00.000Z",
+        },
+        {
+          id: 9002,
+          user_id: 1,
+          kind: "inactivity_reminder",
+          reference_key: "2026-10-07",
+          sent_at: "2026-10-06T23:00:00.000Z",
+          error: null,
+          created_at: "2026-10-06T23:00:00.000Z",
+        },
+      ],
+    });
+
+    const wednesday = await runDigest(WEDNESDAY);
+
+    expect(wednesday).toMatchObject({ sent: 0, announcementsCompleted: 0 });
+    expect(announcementLogs(db).map((row) => row.id)).toEqual([9001]);
+    expect(db.announcements[0].email_sent_at).toBeNull();
+  });
+
+  it("同じ宛先に複数のお知らせの前日の失敗行があるとき、この実行で送る1件だけ消し、残りは残す", async () => {
+    const failedRow = (id: number, referenceKey: string): Row => ({
+      id,
+      user_id: 1,
+      kind: "announcement",
+      reference_key: referenceKey,
+      sent_at: null,
+      error: "Resend API がエラーを返しました: status=500",
+      created_at: "2026-10-06T10:00:00.000Z",
+    });
+    const { db } = setup({
+      users: [userRow(1)],
+      announcements: [announcementRow({ id: 501 }), announcementRow({ id: 502 })],
+      email_logs: [failedRow(9001, "501"), failedRow(9002, "502")],
+    });
+
+    const wednesday = await runDigest(WEDNESDAY);
+
+    expect(wednesday).toMatchObject({ sent: 1, announcementsCompleted: 1 });
+    expect(announcementLogs(db).map((row) => [row.id, row.reference_key])).toEqual([
+      [9002, "502"],
+      [expect.any(Number), "501"],
     ]);
   });
 
@@ -1563,6 +1747,24 @@ describe("メール通知の管理設定（#272）", () => {
       expect(monday).toMatchObject({ sent: 0, weeklyReservationMissing: false });
       expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining("予約が無い"));
       expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("設定が今サイクル"));
+    });
+
+    it("設定の更新時刻が PostgREST 形式（+00:00）で今サイクルの開始と同一秒でも、変更ありとして扱う", async () => {
+      for (const updatedAt of [
+        "2026-10-04T15:00:00+00:00",
+        "2026-10-04T15:00:00.000+00:00",
+        "2026-10-04T15:00:00.000000+00:00",
+      ]) {
+        vi.clearAllMocks();
+        const { db } = setup({ users: [userRow(1)] });
+        const weekly = db.email_kind_settings.find((row) => row.kind === "weekly_digest") as Row;
+        weekly.updated_at = updatedAt; // Mon 10/5 00:00 JST sharp = cycleStart
+
+        const result = await runDigest(new Date("2026-10-07T23:00:00Z")); // Thu, past catch-up
+
+        expect(result).toMatchObject({ sent: 0, weeklyReservationMissing: false });
+        expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("設定が今サイクル"));
+      }
     });
 
     it("無効から再有効化した週は、警告せずに次の送信日から再開する", async () => {

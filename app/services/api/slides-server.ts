@@ -36,8 +36,8 @@ export async function createSlideSignedUrlWithClient(
 /**
  * Signs with the logged-in user's client (normal client, RLS applied), never service_role.
  * The `storage.objects` SELECT policy allows member / trial users only when a `learning_contents`
- * row with `pdf_url = storage.objects.name` is visible under the caller's RLS and all four levels
- * including week / phase / theme are published and not deleted (same four-level rule as
+ * row with `pdf_url = storage.objects.name` is visible under the caller's RLS and all three levels
+ * including phase / theme are published and not deleted (same three-level rule as
  * isContentVisible(); #216). admin / maintainer are allowed unconditionally by role for preview
  * (spec 2.12; isContentVisible() itself is role-independent and fail-closed). A trial user
  * guessing the key of a locked content gets no signature, via this path or the Storage API

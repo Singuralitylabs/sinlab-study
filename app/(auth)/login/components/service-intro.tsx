@@ -15,7 +15,7 @@ type Feature = {
 };
 
 // Copy is quoted from the LP's (SERVICE_LP_URL) "four mechanisms" (#264). The app's hierarchy depth
-// (theme -> phase -> week -> content) differs from the LP's wording, so don't mention the depth.
+// (theme -> phase -> content) differs from the LP's wording, so don't mention the depth.
 const FEATURES: Feature[] = [
   {
     id: "roadmap",
@@ -31,7 +31,7 @@ const FEATURES: Feature[] = [
     lead: "進捗が",
     emphasis: "「見える」",
     trail: "から、やる気が続く",
-    description: "ダッシュボードの進捗率・進捗バーで成長がビジュアルで見える",
+    description: "ホームの進捗率・進捗バーで成長がビジュアルで見える",
   },
   {
     id: "materials",
@@ -73,8 +73,8 @@ export function ServiceIntro({ showMonthlyPrice }: { showMonthlyPrice: boolean }
         <p className="text-[15px] leading-loose text-muted-foreground lg:text-base">
           学習の地図、進捗の見える化、AIによる即時レビュー。
           <br className="hidden lg:inline" />
-          <strong className="font-bold text-foreground">一人でも挫折しない</strong>
-          Web技術の学習環境を、シンラボがお届けします。
+          <strong className="font-bold text-foreground">一人でも挫折せずに</strong>
+          Web技術を学習できる環境を、シンラビが提供します。
         </p>
       </div>
 

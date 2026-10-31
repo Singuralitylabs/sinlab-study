@@ -1,113 +1,67 @@
 import { describe, expect, it } from "vitest";
 import {
   deriveFilterOptions,
-  deriveWeekSelectOptions,
+  derivePhaseSelectOptions,
   filterContents,
 } from "@/app/lib/content-filtering";
-import type { LearningContentWithWeek, LearningWeekWithPhase } from "@/app/types";
+import type { ManageContentListItem, ManagePhaseListItem } from "@/app/types";
 
-function makeWeek(
-  overrides: Partial<LearningWeekWithPhase> & { id: number; phase_id: number }
-): LearningWeekWithPhase {
+function makeContent(
+  overrides: Partial<ManageContentListItem> & { id: number; phase_id: number }
+): ManageContentListItem {
   return {
     id: overrides.id,
     phase_id: overrides.phase_id,
-    name: overrides.name ?? `週${overrides.id}`,
-    description: null,
-    display_order: overrides.display_order ?? 0,
-    is_published: true,
-    is_deleted: false,
-    created_at: null,
-    updated_at: null,
-    phase: overrides.phase ?? null,
-  };
-}
-
-function makeContent(
-  overrides: Partial<LearningContentWithWeek> & { id: number; week_id: number }
-): LearningContentWithWeek {
-  return {
-    id: overrides.id,
-    week_id: overrides.week_id,
     title: overrides.title ?? `コンテンツ${overrides.id}`,
     content_type: overrides.content_type ?? "text",
     display_order: overrides.display_order ?? 0,
     is_published: true,
     is_open_to_trial: false,
-    is_deleted: false,
-    video_url: null,
-    description: null,
-    text_content: null,
-    exercise_instructions: null,
-    hint: null,
-    reference_answer: null,
-    allowed_submission_types: "code",
-    code_language: "javascript",
-    pdf_url: null,
-    created_at: null,
-    updated_at: null,
-    week: overrides.week ?? null,
+    grading_rubric_version: null,
+    phase: overrides.phase ?? null,
   };
 }
-
-const theme1 = {
-  id: 1,
-  name: "テーマ1",
-  description: null,
-  display_order: 1,
-  is_published: true,
-  is_deleted: false,
-  image_url: null,
-  created_at: null,
-  updated_at: null,
-};
-const theme2 = {
-  id: 2,
-  name: "テーマ2",
-  description: null,
-  display_order: 2,
-  is_published: true,
-  is_deleted: false,
-  image_url: null,
-  created_at: null,
-  updated_at: null,
-};
 
 const phase1 = {
   id: 1,
   theme_id: 1,
   name: "フェーズ1",
-  description: null,
   display_order: 1,
-  is_published: true,
-  is_deleted: false,
-  created_at: null,
-  updated_at: null,
-  theme: theme1,
+  theme: { id: 1, name: "テーマ1", display_order: 1 },
 };
 const phase2 = {
   id: 2,
-  theme_id: 2,
+  theme_id: 1,
   name: "フェーズ2",
-  description: null,
+  display_order: 2,
+  theme: { id: 1, name: "テーマ1", display_order: 1 },
+};
+const phase3 = {
+  id: 3,
+  theme_id: 2,
+  name: "フェーズ3",
   display_order: 1,
-  is_published: true,
-  is_deleted: false,
-  created_at: null,
-  updated_at: null,
-  theme: theme2,
+  theme: { id: 2, name: "テーマ2", display_order: 2 },
 };
 
-const week1 = makeWeek({ id: 1, phase_id: 1, name: "週1", display_order: 1, phase: phase1 });
-const week2 = makeWeek({ id: 2, phase_id: 1, name: "週2", display_order: 2, phase: phase1 });
-const week3 = makeWeek({ id: 3, phase_id: 2, name: "週3", display_order: 1, phase: phase2 });
+function makePhaseListItem(phase: typeof phase1 | null, id = 0, themeId = 0): ManagePhaseListItem {
+  return {
+    id: phase?.id ?? id,
+    theme_id: phase?.theme_id ?? themeId,
+    name: phase?.name ?? `フェーズ${id}`,
+    description: null,
+    display_order: phase?.display_order ?? 0,
+    is_published: true,
+    theme: phase?.theme ?? null,
+  };
+}
 
 describe("deriveFilterOptions", () => {
-  it("join結果から重複のないテーマ・フェーズ・週の選択肢を導出する", () => {
+  it("join結果から重複のないテーマ・フェーズの選択肢を導出する", () => {
     const contents = [
-      makeContent({ id: 1, week_id: 1, week: week1 }),
-      makeContent({ id: 2, week_id: 1, week: week1 }),
-      makeContent({ id: 3, week_id: 3, week: week3 }),
+      makeContent({ id: 1, phase_id: 1, phase: phase1 }),
+      makeContent({ id: 2, phase_id: 1, phase: phase1 }),
+      makeContent({ id: 3, phase_id: 3, phase: phase3 }),
     ];
 
     const options = deriveFilterOptions(contents);
@@ -118,26 +72,24 @@ describe("deriveFilterOptions", () => {
     ]);
     expect(options.phases).toEqual([
       { id: 1, name: "フェーズ1", themeId: 1 },
-      { id: 2, name: "フェーズ2", themeId: 2 },
-    ]);
-    expect(options.weeks).toEqual([
-      { id: 1, name: "週1", phaseId: 1 },
-      { id: 3, name: "週3", phaseId: 2 },
+      { id: 3, name: "フェーズ3", themeId: 2 },
     ]);
   });
 
-  it("週未設定（未分類）のコンテンツは選択肢に含めない", () => {
-    const contents = [makeContent({ id: 1, week_id: 99, week: null })];
+  it("フェーズ未設定（未分類）のコンテンツは選択肢に含めない", () => {
+    const contents = [makeContent({ id: 1, phase_id: 99, phase: null })];
 
-    const options = deriveFilterOptions(contents);
-
-    expect(options).toEqual({ themes: [], phases: [], weeks: [] });
+    expect(deriveFilterOptions(contents)).toEqual({ themes: [], phases: [] });
   });
 });
 
-describe("deriveWeekSelectOptions", () => {
-  it("週一覧から重複のないテーマ・フェーズ・週の選択肢を導出する", () => {
-    const options = deriveWeekSelectOptions([week1, week2, week3]);
+describe("derivePhaseSelectOptions", () => {
+  it("フェーズ一覧から重複のないテーマ・フェーズの選択肢を導出する", () => {
+    const options = derivePhaseSelectOptions([
+      makePhaseListItem(phase1),
+      makePhaseListItem(phase2),
+      makePhaseListItem(phase3),
+    ]);
 
     expect(options.themes).toEqual([
       { id: 1, name: "テーマ1" },
@@ -145,55 +97,48 @@ describe("deriveWeekSelectOptions", () => {
     ]);
     expect(options.phases).toEqual([
       { id: 1, name: "フェーズ1", themeId: 1 },
-      { id: 2, name: "フェーズ2", themeId: 2 },
-    ]);
-    expect(options.weeks).toEqual([
-      { id: 1, name: "週1", phaseId: 1 },
-      { id: 2, name: "週2", phaseId: 1 },
-      { id: 3, name: "週3", phaseId: 2 },
+      { id: 2, name: "フェーズ2", themeId: 1 },
+      { id: 3, name: "フェーズ3", themeId: 2 },
     ]);
   });
 
-  it("週のフェーズ join が欠落していても週自体は選択肢に含める（phase_id は NOT NULL のため）", () => {
-    const weekWithoutPhaseJoin = makeWeek({ id: 4, phase_id: 99, name: "週4", phase: null });
-
-    const options = deriveWeekSelectOptions([weekWithoutPhaseJoin]);
+  it("フェーズのテーマ join が欠落していてもフェーズ自体は選択肢に含める（theme_id は NOT NULL のため）", () => {
+    const options = derivePhaseSelectOptions([makePhaseListItem(null, 4, 99)]);
 
     expect(options).toEqual({
       themes: [],
-      phases: [],
-      weeks: [{ id: 4, name: "週4", phaseId: 99 }],
+      phases: [{ id: 4, name: "フェーズ4", themeId: 99 }],
     });
   });
 
   it("空配列を渡すと全て空配列を返す", () => {
-    expect(deriveWeekSelectOptions([])).toEqual({ themes: [], phases: [], weeks: [] });
+    expect(derivePhaseSelectOptions([])).toEqual({ themes: [], phases: [] });
   });
 });
 
 describe("filterContents", () => {
   const contentA = makeContent({
     id: 1,
-    week_id: 1,
+    phase_id: 1,
     title: "GASの基礎",
     content_type: "video",
-    week: week1,
+    phase: phase1,
   });
   const contentB = makeContent({
     id: 2,
-    week_id: 2,
+    phase_id: 2,
     title: "GASの応用演習",
     content_type: "exercise",
-    week: week2,
+    phase: phase2,
   });
   const contentC = makeContent({
     id: 3,
-    week_id: 3,
+    phase_id: 3,
     title: "Reactハンズオン",
     content_type: "video",
-    week: week3,
+    phase: phase3,
   });
-  const unclassified = makeContent({ id: 4, week_id: 99, title: "未分類コンテンツ", week: null });
+  const unclassified = makeContent({ id: 4, phase_id: 99, title: "未分類コンテンツ", phase: null });
   const contents = [contentA, contentB, contentC, unclassified];
 
   it("フィルタ未指定なら全件を返す", () => {

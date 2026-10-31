@@ -1,14 +1,26 @@
 import { ClipboardList, FileText, LayoutDashboard } from "lucide-react";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { checkInstructorPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
-import { Separator } from "@/components/ui/separator";
+import { ManageGroupNav } from "../manage/components/ManageGroupNav";
 
+/** Legacy /instructor chrome; pages redirect into /manage (#335). */
 const INSTRUCTOR_NAV_ITEMS = [
-  { title: "ダッシュボード", href: "/instructor", icon: LayoutDashboard },
-  { title: "コンテンツ管理", href: "/manage/contents", icon: FileText },
-  { title: "提出一覧", href: "/instructor/submissions", icon: ClipboardList },
+  {
+    title: "受講生管理",
+    href: "/manage",
+    icon: <LayoutDashboard className="h-4 w-4" />,
+  },
+  {
+    title: "コンテンツ管理",
+    href: "/manage/contents",
+    icon: <FileText className="h-4 w-4" />,
+  },
+  {
+    title: "提出一覧",
+    href: "/manage/submissions",
+    icon: <ClipboardList className="h-4 w-4" />,
+  },
 ];
 
 export default async function InstructorLayout({ children }: { children: React.ReactNode }) {
@@ -20,22 +32,7 @@ export default async function InstructorLayout({ children }: { children: React.R
 
   return (
     <div>
-      <nav className="mb-6 overflow-x-auto">
-        <div className="flex gap-1 pb-2">
-          {INSTRUCTOR_NAV_ITEMS.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            >
-              <item.icon className="h-4 w-4" />
-              {item.title}
-            </Link>
-          ))}
-        </div>
-        <Separator />
-      </nav>
-
+      <ManageGroupNav items={INSTRUCTOR_NAV_ITEMS} />
       {children}
     </div>
   );

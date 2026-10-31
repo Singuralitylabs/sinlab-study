@@ -1,0 +1,46 @@
+export interface PhaseCompletionMascot {
+  src: string;
+  alt: string;
+}
+
+/** Shown on every phase completion banner: シンラビ explains all themes, so no per-theme lookup. */
+export const PHASE_COMPLETION_MASCOT: PhaseCompletionMascot = {
+  src: "/images/mascot/shinrabi-cheer.webp",
+  alt: "応援するシンラビ",
+};
+
+/** Shown on every theme completion banner, for the same reason as PHASE_COMPLETION_MASCOT. */
+export const THEME_COMPLETION_MASCOT: PhaseCompletionMascot = {
+  src: "/images/mascot/shinrabi-congratulations.webp",
+  alt: "お祝いするシンラビ",
+};
+
+/**
+ * Shown on every certificate: シンラビ explains all themes, so no per-theme lookup. The 800px
+ * source (not the 480px banner image) keeps the A4 print sharp: the mascot is about 62mm wide.
+ */
+export const CERTIFICATE_MASCOT: PhaseCompletionMascot = {
+  src: "/images/mascot/shinrabi-congratulations-large.webp",
+  alt: "お祝いするシンラビ",
+};
+
+/** Shown under the /login card with the name caption, so visitors know who the character is. */
+export const LOGIN_MASCOT = {
+  src: "/images/mascot/shinrabi-wave.webp",
+  width: 360,
+  height: 477,
+};
+
+/** シンラビ beside the exercise hint toggle: thinking while closed, idea once the hint is open. */
+export const HINT_MASCOT = {
+  closed: {
+    src: "/images/mascot/shinrabi-hint-thinking.webp",
+    width: 369,
+    height: 480,
+  },
+  open: {
+    src: "/images/mascot/shinrabi-hint-idea.webp",
+    width: 367,
+    height: 480,
+  },
+};

@@ -1,22 +1,30 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { GEMINI_MAX_CODE_LENGTH } from "@/app/constants/gemini";
-import { USER_STATUS } from "@/app/constants/user";
-import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
+import { limitedDecision } from "@/app/lib/ai-review-limits";
+import { isCodeEquivalentToStarter, parseStarterFiles } from "@/app/lib/code-file-inputs";
+import { parseGradingRubric } from "@/app/lib/grading-schema";
+import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import {
+  claimAIReview,
   updateAIReviewCompleted,
   updateAIReviewFailed,
   updateAIReviewProcessing,
-  upsertPendingAIReview,
 } from "@/app/services/api/ai-review-server";
+import { resolveAiReviewThemeNotice } from "@/app/services/api/certificates-server";
 import {
   generateReview,
+  ReviewGenerationError,
   type ReviewSubmission,
   resolveGeminiApiKey,
 } from "@/app/services/api/gemini";
 import { isContentVisible } from "@/app/services/api/learning-server";
+import { saveContentProgress } from "@/app/services/api/progress-server";
 import { AiReviewRequestSchema, validateRequest } from "@/app/services/api/schemas";
-import { createServerSupabaseClient } from "@/app/services/api/supabase-server";
-import { getServerAuth } from "@/app/services/auth/server-auth";
+import {
+  createAdminSupabaseClient,
+  createServerSupabaseClient,
+} from "@/app/services/api/supabase-server";
+import { requireLearnerApi } from "@/app/services/auth/admin-guard";
 
 // Next.js route segment config is statically analyzed as literals only, so this can't be a
 // constant. generateReview() caps all attempts + retry waits at GEMINI_TOTAL_BUDGET_MS
@@ -32,16 +40,11 @@ export async function POST(request: NextRequest) {
     }
     const { submissionId } = validation.data;
 
-    const { user, userId, userStatus } = await getServerAuth();
-    if (!user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    const guard = await requireLearnerApi();
+    if (guard.response) {
+      return guard.response;
     }
-    if (!userId) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-    if (userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
+    const { userId, userStatus, userRole } = guard.auth;
 
     const apiKey = resolveGeminiApiKey(userStatus);
     if (!apiKey) {
@@ -52,7 +55,9 @@ export async function POST(request: NextRequest) {
 
     const { data: submission, error: submissionError } = await supabase
       .from("submissions")
-      .select("*, content:learning_contents(*)")
+      .select(
+        "*, content:learning_contents(id, exercise_instructions, code_language, starter_files)"
+      )
       .eq("id", submissionId)
       .single();
 
@@ -94,7 +99,16 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      reviewSubmission = { type: "code", files };
+      // Same guard as POST /api/submissions: use nested content.starter_files (no second fetch).
+      // Reject before claim so an unedited starter cannot consume an AI review slot.
+      if (isCodeEquivalentToStarter(files, parseStarterFiles(content.starter_files))) {
+        return NextResponse.json({ error: "初期コードから変更してください" }, { status: 400 });
+      }
+
+      reviewSubmission = {
+        type: "code",
+        files: withFallbackLanguage(files, content.code_language),
+      };
     } else {
       if (!submission.url) {
         return NextResponse.json({ error: "提出内容が空です" }, { status: 400 });
@@ -102,70 +116,152 @@ export async function POST(request: NextRequest) {
       reviewSubmission = { type: "url", content: submission.url };
     }
 
-    // One AI review per user and content.
-    const contentId = submission.content_id;
-    const { data: userSubmissionsForContent } = await supabase
-      .from("submissions")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("content_id", contentId);
-
-    const allSubmissionIdsForContent = (userSubmissionsForContent ?? []).map((s) => s.id);
-
-    if (allSubmissionIdsForContent.length > 0) {
-      const { data: activeReview } = await supabase
-        .from("ai_reviews")
-        .select("id, status, submission_id")
-        .in("submission_id", allSubmissionIdsForContent)
-        .in("status", ["completed", "processing", "pending"])
-        .limit(1)
-        .maybeSingle();
-
-      if (activeReview) {
-        if (activeReview.status === "processing" && activeReview.submission_id === submissionId) {
-          return NextResponse.json(
-            {
-              message: "AIレビューは現在生成中です",
-              review: { id: activeReview.id, status: "processing" },
-            },
-            { status: 202 }
-          );
-        }
-        return NextResponse.json(
-          { error: "この課題のAIレビューは1回のみ利用できます" },
-          { status: 429 }
-        );
-      }
+    // One transaction checks the count limits and takes the review slot, so concurrent requests
+    // cannot all pass on the same counts (#343).
+    const now = new Date();
+    const claim = await claimAIReview({
+      userId,
+      submissionId,
+      contentId: submission.content_id,
+      userStatus,
+      now,
+    });
+    if (!claim) {
+      return NextResponse.json({ error: "AIレビュー回数の確認に失敗しました" }, { status: 500 });
     }
 
-    const reviewRecord = await upsertPendingAIReview(submissionId);
-    if (!reviewRecord) {
-      return NextResponse.json({ error: "AIレビューの初期化に失敗しました" }, { status: 500 });
+    if (claim.kind === "processing") {
+      return NextResponse.json(
+        {
+          message: "AIレビューは現在生成中です",
+          review: { id: claim.reviewId, status: "processing" },
+        },
+        { status: 202 }
+      );
     }
+    if (claim.kind === "limited") {
+      const decision = limitedDecision(claim.reason, claim.remaining, now, claim.limits);
+      return NextResponse.json(
+        {
+          error: decision.message,
+          reason: decision.reason,
+          remaining: decision.remaining,
+          resetsAt: decision.resetsAt,
+        },
+        { status: 429 }
+      );
+    }
+    if (claim.kind === "busy") {
+      return NextResponse.json(
+        { error: "この提出のAIレビューは別のリクエストで処理中、または実行済みです" },
+        { status: 409 }
+      );
+    }
+    const reviewRecord = { id: claim.reviewId };
+    const remainingAfterReview = claim.remaining;
 
     const processingResult = await updateAIReviewProcessing(reviewRecord.id);
     if (!processingResult) {
+      // The claim already made the row `pending`; without this a retry would get a 202 until stale.
+      await updateAIReviewFailed(reviewRecord.id, "AIレビューのステータス更新に失敗しました");
       return NextResponse.json(
         { error: "AIレビューのステータス更新に失敗しました" },
         { status: 500 }
       );
     }
 
+    // Learners cannot select grading_rubric or reference_answer. Read them with service_role
+    // after the claim so a failed lookup can mark the row failed instead of leaving it
+    // processing. Published and not deleted, or a reordered visibility check would grade a
+    // hidden rubric.
+    const admin = await createAdminSupabaseClient();
+    const { data: rubricRow, error: rubricError } = await admin
+      .from("learning_contents")
+      .select("grading_rubric, reference_answer")
+      .eq("id", content.id)
+      .eq("is_published", true)
+      .eq("is_deleted", false)
+      .maybeSingle();
+    if (rubricError || !rubricRow) {
+      console.error("採点基準の取得エラー:", rubricError?.message ?? "no row");
+      await updateAIReviewFailed(reviewRecord.id, "採点基準の取得に失敗しました");
+      return NextResponse.json({ error: "採点基準の取得に失敗しました" }, { status: 500 });
+    }
+
     try {
       const result = await generateReview({
         exerciseInstructions: content.exercise_instructions,
         submission: reviewSubmission,
-        referenceAnswer: content.reference_answer,
+        referenceAnswer: rubricRow.reference_answer,
+        gradingRubric: parseGradingRubric(rubricRow.grading_rubric),
+        // starter_files is learner-visible (column grant); do not read it via service_role.
+        starterFiles: parseStarterFiles(content.starter_files),
         apiKey,
       });
 
-      await updateAIReviewCompleted(reviewRecord.id, {
+      const saved = await updateAIReviewCompleted(reviewRecord.id, {
         reviewContent: result.reviewContent,
         overallScore: result.overallScore,
+        reviewJson: result.reviewJson,
+        scoreKind: result.scoreKind,
+        rubricVersion: result.rubricVersion,
+        passed: result.passed,
         modelUsed: result.modelUsed,
         promptTokens: result.promptTokens,
         completionTokens: result.completionTokens,
+        thoughtsTokens: result.thoughtsTokens,
       });
+
+      if (!saved) {
+        // Best effort: a row left `processing` would block a retry with a misleading 202 for
+        // AI_REVIEW_STALE_AFTER_MS and the already-billed tokens would go unrecorded.
+        await updateAIReviewFailed(reviewRecord.id, "AIレビューの保存に失敗しました", {
+          promptTokens: result.promptTokens,
+          completionTokens: result.completionTokens,
+          thoughtsTokens: result.thoughtsTokens,
+        });
+        return NextResponse.json({ error: "AIレビューの保存に失敗しました" }, { status: 500 });
+      }
+
+      // A pass completes the exercise on the learner's session. Unpublished content never reaches
+      // here (isContentVisible already returned 403). A later failing review does not call this,
+      // so completion stays. A write failure must not change the review response.
+      // scheduleCertificate: false — resolveAiReviewThemeNotice issues (and builds the dialog)
+      // next; a prior after() INSERT would make that evaluation return not-ready.
+      if (result.passed === true) {
+        try {
+          const recorded = await saveContentProgress({
+            supabase,
+            userId,
+            userStatus,
+            userRole,
+            contentId: submission.content_id,
+            isCompleted: true,
+            scheduleCertificate: false,
+          });
+          if (!recorded.ok) {
+            console.error("合格後の完了記録に失敗:", recorded.error);
+          }
+        } catch (error) {
+          console.error("合格後の完了記録に失敗:", error);
+        }
+      }
+
+      // Issuance and the dialog payload must not change this response. A throw (mail, DB) is
+      // dropped; the review row is already completed. On passed === false, the helper only
+      // returns a notice when this call actually issued (failed re-review stays quiet otherwise).
+      let themeCompletion = null;
+      try {
+        themeCompletion = await resolveAiReviewThemeNotice({
+          userId,
+          userStatus,
+          userRole,
+          contentId: content.id,
+          passed: result.passed,
+        });
+      } catch (error) {
+        console.error("[修了証] AIレビュー後の発行エラー:", error);
+      }
 
       return NextResponse.json({
         success: true,
@@ -174,15 +270,26 @@ export async function POST(request: NextRequest) {
           status: "completed",
           review_content: result.reviewContent,
           overall_score: result.overallScore,
+          review_json: result.reviewJson,
+          score_kind: result.scoreKind,
+          rubric_version: result.rubricVersion,
+          passed: result.passed,
           model_used: result.modelUsed,
         },
+        remaining: remainingAfterReview,
+        ...(themeCompletion ? { themeCompletion } : {}),
       });
     } catch (geminiError) {
       const errorMessage =
         geminiError instanceof Error ? geminiError.message : "AI レビュー生成に失敗しました";
-      console.error("Gemini APIエラー:", errorMessage);
+      // gemini.ts already logged the raw cause; this records what the learner was shown.
+      console.error("AIレビューの生成に失敗:", errorMessage);
 
-      await updateAIReviewFailed(reviewRecord.id, errorMessage);
+      await updateAIReviewFailed(
+        reviewRecord.id,
+        errorMessage,
+        geminiError instanceof ReviewGenerationError ? geminiError.usage : undefined
+      );
 
       return NextResponse.json({ error: errorMessage }, { status: 502 });
     }

@@ -1,13 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
 import { createMockSupabaseClient } from "@/tests/helpers/supabase-mock";
 
 vi.mock("@/app/services/api/supabase-server");
 
 import {
+  claimAIReview,
   fetchAllSubmissionsWithReviews,
   fetchCompletedAIReviewByContentId,
   fetchCompletedAIReviewContentIds,
+  fetchFailedAIReviewBySubmissionId,
+  fetchLatestSubmissionIds,
   fetchSubmissionsWithReviewsByUserId,
+  reopenAIReview,
+  resetAIReviewLimits,
+  updateAIReviewCompleted,
+  updateAIReviewFailed,
 } from "@/app/services/api/ai-review-server";
 import {
   createAdminSupabaseClient,
@@ -37,6 +45,33 @@ describe("fetchAllSubmissionsWithReviews", () => {
     expect(builder.range).toHaveBeenCalledWith(20, 39);
     expect(builder.order).toHaveBeenCalledWith("submitted_at", { ascending: false });
     expect(builder.order).toHaveBeenCalledWith("id", { ascending: false });
+  });
+
+  it("管理画面向けにだけトークン数のカラムを select する", async () => {
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: [], error: null, count: 0 },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await fetchAllSubmissionsWithReviews();
+
+    const builder = mockClient.from.mock.results[0]?.value;
+    expect(builder.select.mock.calls[0][0]).toContain(
+      "prompt_tokens, completion_tokens, thoughts_tokens"
+    );
+  });
+
+  it("/manage 向け取得では users.email を select しない (#414)", async () => {
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: [], error: null, count: 0 },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await fetchAllSubmissionsWithReviews();
+
+    const selectArg = mockClient.from.mock.results[0]?.value.select.mock.calls[0][0] as string;
+    expect(selectArg).toContain("user:users(id, display_name)");
+    expect(selectArg).not.toMatch(/user:users\([^)]*email/);
   });
 
   it("引数省略時は1ページ目を range(0, 19) で取得する", async () => {
@@ -93,11 +128,15 @@ describe("fetchCompletedAIReviewByContentId", () => {
     const result = await fetchCompletedAIReviewByContentId(2, 5);
 
     expect(result.data).toEqual(reviewData);
+    expect(result.submissionId).toBe(1);
     expect(result.error).toBeNull();
     expect(mockClient.from).toHaveBeenCalledTimes(1);
     expect(mockClient.from).toHaveBeenCalledWith("submissions");
     const builder = mockClient.from.mock.results[0].value;
-    expect(builder.select).toHaveBeenCalledWith("id, content_id, ai_review:ai_reviews!inner(*)");
+    const [selectArg] = builder.select.mock.calls[0];
+    expect(selectArg).toContain("review_json, score_kind, rubric_version, passed");
+    expect(selectArg).not.toContain("*");
+    expect(selectArg).not.toContain("tokens");
     expect(builder.eq).toHaveBeenCalledWith("user_id", 2);
     expect(builder.eq).toHaveBeenCalledWith("content_id", 5);
     expect(builder.eq).toHaveBeenCalledWith("ai_review.status", "completed");
@@ -112,6 +151,7 @@ describe("fetchCompletedAIReviewByContentId", () => {
     const result = await fetchCompletedAIReviewByContentId(2, 5);
 
     expect(result.data).toBeNull();
+    expect(result.submissionId).toBeNull();
     expect(result.error).toBeNull();
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
@@ -125,6 +165,7 @@ describe("fetchCompletedAIReviewByContentId", () => {
     const result = await fetchCompletedAIReviewByContentId(2, 5);
 
     expect(result.data).toBeNull();
+    expect(result.submissionId).toBeNull();
     expect(result.error).toEqual(dbError);
   });
 });
@@ -181,7 +222,7 @@ describe("fetchCompletedAIReviewContentIds", () => {
 
 describe("fetchSubmissionsWithReviewsByUserId", () => {
   const listSelect =
-    "*, content:learning_contents(id, title), ai_review:ai_reviews(id, status, overall_score, review_content, reviewed_at, error_message)";
+    "*, content:learning_contents(id, title, code_language, submission_file_slots, starter_files, preview_base_html, show_preview, show_console), ai_review:ai_reviews(id, status, overall_score, review_content, reviewed_at, error_message, review_json, score_kind, rubric_version, passed)";
 
   it("指定ページの提出一覧と総数を返す（2ページ目は range(20, 39)）", async () => {
     const rows = [{ id: 21 }, { id: 22 }];
@@ -197,6 +238,7 @@ describe("fetchSubmissionsWithReviewsByUserId", () => {
     expect(result.error).toBeNull();
     const builder = mockClient.from.mock.results[0]?.value;
     expect(builder.select).toHaveBeenCalledWith(listSelect, { count: "exact" });
+    expect(listSelect).not.toContain("tokens");
     expect(builder.eq).toHaveBeenCalledWith("user_id", 10);
     expect(builder.range).toHaveBeenCalledWith(20, 39);
     expect(builder.order).toHaveBeenCalledWith("submitted_at", { ascending: false });
@@ -252,6 +294,41 @@ describe("fetchSubmissionsWithReviewsByUserId", () => {
     expect(builder.select).toHaveBeenCalledWith(listSelect, { count: "exact" });
   });
 
+  it("一覧の starter_files はファイル名・言語を残し content を空にする", async () => {
+    const rows = [
+      {
+        id: 1,
+        user_id: 10,
+        content_id: 100,
+        content: {
+          id: 100,
+          title: "課題1",
+          code_language: "html",
+          submission_file_slots: null,
+          starter_files: [
+            { filename: "index.html", language: "html", content: "<h1>huge</h1>" },
+            { filename: "app.js", language: "javascript", content: "console.log(1)" },
+          ],
+          show_preview: null,
+          show_console: null,
+        },
+        ai_review: null,
+      },
+    ];
+    const mockClient = createMockSupabaseClient({
+      queryResult: { data: rows, error: null, count: 1 },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchSubmissionsWithReviewsByUserId(10);
+
+    expect(result.error).toBeNull();
+    expect(result.data?.[0]?.content?.starter_files).toEqual([
+      { filename: "index.html", language: "html", content: "" },
+      { filename: "app.js", language: "javascript", content: "" },
+    ]);
+  });
+
   it("DB エラー時、data: null / count: 0 とエラーを返す", async () => {
     const mockClient = createMockSupabaseClient({
       queryResult: { data: null, error: dbError, count: null },
@@ -263,5 +340,419 @@ describe("fetchSubmissionsWithReviewsByUserId", () => {
     expect(result.data).toBeNull();
     expect(result.count).toBe(0);
     expect(result.error).toEqual(dbError);
+  });
+});
+
+describe("updateAIReviewFailed / updateAIReviewCompleted", () => {
+  const priorTokens = {
+    data: { prompt_tokens: 100, completion_tokens: 20, thoughts_tokens: null },
+    error: null,
+  };
+
+  it("failed 行に消費トークンを前回までの分へ加算して記録する（失敗でも課金されるため）", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { ai_reviews: [priorTokens, { data: null, error: null }] },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await updateAIReviewFailed(4, "bad", {
+      promptTokens: 10,
+      completionTokens: 2,
+      thoughtsTokens: null,
+    });
+
+    const update = mockClient.from.mock.results[1].value;
+    expect(update.update).toHaveBeenCalledWith({
+      status: "failed",
+      error_message: "bad",
+      prompt_tokens: 110,
+      completion_tokens: 22,
+      thoughts_tokens: null,
+    });
+  });
+
+  it("トークン情報がない失敗ではトークン列に触れない", async () => {
+    const mockClient = createMockSupabaseClient({ queryResult: { data: null, error: null } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await updateAIReviewFailed(4, "bad");
+
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+    const builder = mockClient.from.mock.results[0].value;
+    expect(builder.update).toHaveBeenCalledWith({ status: "failed", error_message: "bad" });
+  });
+
+  it("completed 行に構造化結果・score_kind・rubric_version・passed・累計トークンを保存する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: { ai_reviews: [priorTokens, { data: null, error: null }] },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    const reviewJson = {
+      requirements: [],
+      code_quality: { level: "fair" as const, comment: "c" },
+      suggestions: [],
+      advice: "a",
+    };
+
+    await updateAIReviewCompleted(4, {
+      reviewContent: "md",
+      overallScore: 50,
+      reviewJson,
+      scoreKind: "rubric",
+      rubricVersion: 2,
+      passed: null,
+      modelUsed: "m",
+      promptTokens: 1,
+      completionTokens: 2,
+      thoughtsTokens: 3,
+    });
+
+    const update = mockClient.from.mock.results[1].value;
+    expect(update.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "completed",
+        review_json: reviewJson,
+        score_kind: "rubric",
+        rubric_version: 2,
+        passed: null,
+        prompt_tokens: 101,
+        completion_tokens: 22,
+        thoughts_tokens: 3,
+      })
+    );
+  });
+
+  it("累計の読み取りに失敗したときは、前回までの記録を小さい値で上書きしないようトークン列に触れない", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        ai_reviews: [
+          { data: null, error: dbError },
+          { data: null, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await updateAIReviewFailed(4, "bad", {
+      promptTokens: 5,
+      completionTokens: 1,
+      thoughtsTokens: null,
+    });
+
+    const update = mockClient.from.mock.results[1].value;
+    expect(update.update).toHaveBeenCalledWith({ status: "failed", error_message: "bad" });
+  });
+
+  it("前回の記録がなければ今回の値だけを保存し、双方 NULL の項目は NULL のままにする", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        ai_reviews: [
+          {
+            data: { prompt_tokens: null, completion_tokens: null, thoughts_tokens: null },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await updateAIReviewFailed(4, "bad", {
+      promptTokens: 5,
+      completionTokens: null,
+      thoughtsTokens: null,
+    });
+
+    const update = mockClient.from.mock.results[1].value;
+    expect(update.update).toHaveBeenCalledWith({
+      status: "failed",
+      error_message: "bad",
+      prompt_tokens: 5,
+      completion_tokens: null,
+      thoughts_tokens: null,
+    });
+  });
+});
+
+describe("claimAIReview", () => {
+  const NOW = new Date("2026-10-12T05:00:00Z");
+  const params = {
+    userId: 2,
+    submissionId: 7,
+    contentId: 5,
+    userStatus: "active" as const,
+    now: NOW,
+  };
+
+  const mockRpc = (result: { data: unknown; error: unknown }) => {
+    const mockClient = createMockSupabaseClient();
+    mockClient.rpc.mockResolvedValue(result);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    return mockClient;
+  };
+
+  it("上限値・JST当日の開始・死んだ行の境界を引数にして claim_ai_review を1回だけ呼ぶ", async () => {
+    const mockClient = mockRpc({
+      data: { outcome: "claimed", review_id: 10, remaining: 1 },
+      error: null,
+    });
+
+    const result = await claimAIReview(params);
+
+    expect(result).toEqual({ kind: "claimed", reviewId: 10, remaining: 1 });
+    expect(mockClient.rpc).toHaveBeenCalledTimes(1);
+    expect(mockClient.rpc).toHaveBeenCalledWith("claim_ai_review", {
+      p_user_id: 2,
+      p_submission_id: 7,
+      p_content_id: 5,
+      p_user_status: "active",
+      p_stale_before: "2026-10-12T04:58:30.000Z",
+      p_day_start: "2026-10-11T15:00:00.000Z",
+      p_active_per_content_per_day: 2,
+      p_active_per_day: 10,
+      p_trial_per_content_lifetime: 1,
+    });
+  });
+
+  it("設定テーブルの上限値を RPC に渡し、limited の結果にも載せる", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        ai_review_settings: {
+          data: {
+            active_per_content_per_day: 5,
+            active_per_day: 30,
+            trial_per_content_lifetime: 3,
+          },
+          error: null,
+        },
+      },
+      rpcResults: {
+        claim_ai_review: {
+          data: { outcome: "limited", reason: "content_daily", remaining: 0 },
+          error: null,
+        },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await claimAIReview(params);
+
+    expect(mockClient.rpc).toHaveBeenCalledWith(
+      "claim_ai_review",
+      expect.objectContaining({
+        p_active_per_content_per_day: 5,
+        p_active_per_day: 30,
+        p_trial_per_content_lifetime: 3,
+      })
+    );
+    expect(result).toMatchObject({
+      kind: "limited",
+      limits: { active: { perContentPerDay: 5, perDay: 30 }, trial: { perContentLifetime: 3 } },
+    });
+  });
+
+  it("設定が範囲外・読めないときは既定値で枠を確保する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        ai_review_settings: {
+          data: {
+            active_per_content_per_day: 50,
+            active_per_day: 30,
+            trial_per_content_lifetime: 3,
+          },
+          error: null,
+        },
+      },
+      rpcResults: {
+        claim_ai_review: { data: { outcome: "claimed", review_id: 1, remaining: 1 }, error: null },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await claimAIReview(params);
+
+    expect(mockClient.rpc).toHaveBeenCalledWith(
+      "claim_ai_review",
+      expect.objectContaining({
+        p_active_per_content_per_day: AI_REVIEW_LIMITS.active.perContentPerDay,
+        p_active_per_day: AI_REVIEW_LIMITS.active.perDay,
+        p_trial_per_content_lifetime: AI_REVIEW_LIMITS.trial.perContentLifetime,
+      })
+    );
+  });
+
+  it.each([
+    [
+      { outcome: "processing", review_id: 3 },
+      { kind: "processing", reviewId: 3 },
+    ],
+    [
+      { outcome: "limited", reason: "content_daily", remaining: 0 },
+      { kind: "limited", reason: "content_daily", remaining: 0, limits: AI_REVIEW_LIMITS },
+    ],
+    [
+      { outcome: "limited", reason: "submission_reviewed", remaining: 1 },
+      { kind: "limited", reason: "submission_reviewed", remaining: 1, limits: AI_REVIEW_LIMITS },
+    ],
+    [{ outcome: "busy" }, { kind: "busy" }],
+  ])("応答 %j を分類して返す", async (data, expected) => {
+    mockRpc({ data, error: null });
+
+    await expect(claimAIReview(params)).resolves.toEqual(expected);
+  });
+
+  it.each([
+    ["RPC のエラー", { data: null, error: dbError }],
+    ["想定外の outcome", { data: { outcome: "unknown" }, error: null }],
+    ["review_id の無い claimed", { data: { outcome: "claimed" }, error: null }],
+    ["未知の理由の limited", { data: { outcome: "limited", reason: "x" }, error: null }],
+    ["空の応答", { data: null, error: null }],
+  ])("%s では null を返す（枠を確保したことにしない）", async (_label, result) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mockRpc(result);
+
+    await expect(claimAIReview(params)).resolves.toBeNull();
+  });
+
+  it("learner 以外の状態（null）は空文字で渡し、RPC 側の拒否に委ねる", async () => {
+    const mockClient = mockRpc({ data: null, error: dbError });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await claimAIReview({ ...params, userStatus: null });
+
+    expect(mockClient.rpc.mock.calls[0][1]).toMatchObject({ p_user_status: "" });
+  });
+});
+
+describe("resetAIReviewLimits / reopenAIReview", () => {
+  const mockRpc = (result: { data: unknown; error: unknown }) => {
+    const mockClient = createMockSupabaseClient();
+    mockClient.rpc.mockResolvedValue(result);
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    return mockClient;
+  };
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("リセットはユーザーと課題を RPC に渡し、更新件数を返す", async () => {
+    const client = mockRpc({ data: 3, error: null });
+
+    await expect(resetAIReviewLimits({ userId: 2, contentId: 5, performedBy: 1 })).resolves.toEqual(
+      { affected: 3 }
+    );
+    expect(client.rpc).toHaveBeenCalledWith("admin_reset_ai_review_limits", {
+      p_user_id: 2,
+      p_content_id: 5,
+      p_performed_by: 1,
+    });
+  });
+
+  it("課題未指定なら p_content_id に null を渡す", async () => {
+    const client = mockRpc({ data: 0, error: null });
+
+    await resetAIReviewLimits({ userId: 2, contentId: null, performedBy: 1 });
+
+    expect(client.rpc.mock.calls[0][1]).toMatchObject({ p_content_id: null });
+  });
+
+  it("外部キー違反（対象なし）は notFound、それ以外の DB エラーは null", async () => {
+    mockRpc({ data: null, error: { message: "fk", code: "23503" } });
+    await expect(
+      resetAIReviewLimits({ userId: 99, contentId: null, performedBy: 1 })
+    ).resolves.toEqual({ notFound: true });
+
+    mockRpc({ data: null, error: dbError });
+    await expect(
+      resetAIReviewLimits({ userId: 2, contentId: null, performedBy: 1 })
+    ).resolves.toBeNull();
+  });
+
+  it("再レビューの許可は RPC の真偽を reopened として返す", async () => {
+    const client = mockRpc({ data: true, error: null });
+    await expect(reopenAIReview({ submissionId: 7, performedBy: 1 })).resolves.toEqual({
+      reopened: true,
+    });
+    expect(client.rpc).toHaveBeenCalledWith("admin_reopen_ai_review", {
+      p_submission_id: 7,
+      p_performed_by: 1,
+    });
+
+    mockRpc({ data: false, error: null });
+    await expect(reopenAIReview({ submissionId: 7, performedBy: 1 })).resolves.toEqual({
+      reopened: false,
+    });
+
+    mockRpc({ data: null, error: dbError });
+    await expect(reopenAIReview({ submissionId: 7, performedBy: 1 })).resolves.toBeNull();
+  });
+});
+
+describe("fetchFailedAIReviewBySubmissionId", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("本人の提出の failed レビューのエラー文を返す", async () => {
+    const client = createMockSupabaseClient({
+      queryResult: { data: { id: 7, ai_review: { error_message: "再許可" } }, error: null },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    await expect(fetchFailedAIReviewBySubmissionId(2, 7)).resolves.toEqual({
+      errorMessage: "再許可",
+    });
+    const builder = client.from.mock.results[0].value;
+    expect(builder.eq).toHaveBeenCalledWith("user_id", 2);
+    expect(builder.eq).toHaveBeenCalledWith("ai_review.status", "failed");
+  });
+
+  it("該当なし・DBエラーは null", async () => {
+    const client = createMockSupabaseClient({ queryResult: { data: null, error: null } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+    await expect(fetchFailedAIReviewBySubmissionId(2, 7)).resolves.toBeNull();
+
+    const failing = createMockSupabaseClient({ queryResult: { data: null, error: dbError } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(failing as never);
+    await expect(fetchFailedAIReviewBySubmissionId(2, 7)).resolves.toBeNull();
+  });
+});
+
+describe("fetchLatestSubmissionIds", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("ユーザー×課題ごとの最新の提出だけを返す", async () => {
+    const client = createMockSupabaseClient({
+      queryResult: {
+        data: [
+          { id: 9, user_id: 2, content_id: 5 },
+          { id: 4, user_id: 2, content_id: 5 },
+          { id: 6, user_id: 3, content_id: 5 },
+        ],
+        error: null,
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const ids = await fetchLatestSubmissionIds([
+      { id: 4, user_id: 2, content_id: 5 },
+      { id: 9, user_id: 2, content_id: 5 },
+      { id: 6, user_id: 3, content_id: 5 },
+    ]);
+
+    expect([...ids].sort()).toEqual([6, 9]);
+  });
+
+  it("取得エラー時は空（再レビューのボタンを出さない）", async () => {
+    const client = createMockSupabaseClient({ queryResult: { data: null, error: dbError } });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(client as never);
+
+    const ids = await fetchLatestSubmissionIds([{ id: 4, user_id: 2, content_id: 5 }]);
+
+    expect(ids.size).toBe(0);
   });
 });

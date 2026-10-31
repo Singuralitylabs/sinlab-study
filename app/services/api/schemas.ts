@@ -11,8 +11,20 @@ import {
   BULK_CONTENT_ACTIONS,
   CONTENT_TYPES,
   MAX_BULK_CONTENT_IDS,
+  MAX_BULK_CREATE_CONTENTS,
   SUBMISSION_TYPES,
 } from "@/app/constants/content";
+import {
+  FEEDBACK_BODY_MAX_LENGTH,
+  FEEDBACK_CATEGORIES,
+  FEEDBACK_STATUSES,
+} from "@/app/constants/feedback";
+import {
+  AI_REVIEW_LIMIT_BOUNDS,
+  type AIReviewLimits,
+  STARTER_FILES_MAX_TOTAL_LENGTH,
+} from "@/app/constants/gemini";
+import { GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH } from "@/app/constants/grading";
 import {
   EMAIL_DIGEST_DAILY_LIMIT_MAX,
   EMAIL_DIGEST_DAILY_LIMIT_MIN,
@@ -27,19 +39,42 @@ import {
   EMAIL_TEMPLATE_BODY_MAX,
   EMAIL_TEMPLATE_SUBJECT_MAX,
   type EmailKind,
+  PUSH_KINDS,
 } from "@/app/constants/notifications";
+import {
+  QUIZ_MAX_CHOICES,
+  QUIZ_MAX_QUESTIONS,
+  QUIZ_TEXT_ANSWER_MAX_LENGTH,
+} from "@/app/constants/quiz";
+import { REVIEW_NOTE_MEMO_MAX_LENGTH } from "@/app/constants/review-list";
 import {
   MEMBERSHIP_TYPES,
   USER_MANAGEMENT_ACTIONS,
   USER_ROLES,
   USER_STATUS,
 } from "@/app/constants/user";
+import { areAIReviewLimitsValid } from "@/app/lib/ai-review-limits";
+import { parseDisplayName } from "@/app/lib/display-name";
 import {
   EMAIL_TEMPLATE_KEYS,
   type EmailTemplateKey,
   validateEmailTemplateText,
 } from "@/app/lib/email-template";
+import { GradingRubricInputSchema } from "@/app/lib/grading-schema";
+import {
+  CONSOLE_NOT_ALLOWED_MESSAGE,
+  PREVIEW_EXERCISE_ONLY_MESSAGE,
+  previewSettingsError,
+} from "@/app/lib/html-preview";
+import { parseNotificationEmail } from "@/app/lib/notification-email";
+import { isAllowedPushEndpoint } from "@/app/lib/push-endpoint";
+import { QuizQuestionsSchema } from "@/app/lib/quiz";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
+import {
+  resolveSubmissionFileSlots,
+  SUBMISSION_FILE_SLOT_MAX_COUNT,
+} from "@/app/lib/submission-file-slots";
+import { parseVideoSource } from "@/app/lib/video-source";
 
 export const PositiveIntSchema = z
   .number({ message: "数値で指定してください" })
@@ -97,6 +132,32 @@ const SlidePdfUrlSchema = z
     }
     return objectKey;
   });
+/**
+ * Stored video value: a YouTube URL or a Cloudflare Stream UID (#488). Blank becomes null; any
+ * other external URL is rejected so only players we know how to sandbox are ever rendered.
+ */
+const VideoUrlSchema = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((value, ctx) => {
+    if (value === undefined || value === null) {
+      return value;
+    }
+    const trimmed = value.trim();
+    if (trimmed === "") {
+      return null;
+    }
+    const source = parseVideoSource(trimmed);
+    if (!source) {
+      ctx.addIssue({
+        code: "custom",
+        message: "video_urlはYouTubeのURLまたはCloudflare Streamの動画ID（32桁）で指定してください",
+      });
+      return z.NEVER;
+    }
+    return source.kind === "stream" ? source.uid : trimmed;
+  });
 const OptionalBoolean = z.boolean().optional();
 /**
  * null means "first"; a number means right after that sibling ID. Required on create; optional on
@@ -109,6 +170,59 @@ const InsertAfterIdSchema = PositiveIntSchema.nullable();
 export const ProgressUpdateSchema = z.object({
   contentId: ContentIdSchema,
   isCompleted: z.boolean({ message: "isCompletedはbooleanで指定してください" }),
+});
+
+/** POST /api/progress/retry — start an exercise retry (hides model answer / AI review until next submit). */
+export const ProgressRetrySchema = z.object({
+  contentId: ContentIdSchema,
+});
+
+/** POST /api/progress/view — record last_viewed_at for continue-learning (#396). */
+export const ProgressViewSchema = z.object({
+  contentId: ContentIdSchema,
+});
+
+/** POST /api/feedback (#392). pageUrl / userAgent are optional auto-filled client fields. */
+export const FeedbackCreateSchema = z.object({
+  category: z.enum(FEEDBACK_CATEGORIES, { message: "種別が不正です" }),
+  body: z
+    .string({ message: "本文は文字列で指定してください" })
+    .trim()
+    .min(1, { message: "本文を入力してください" })
+    .max(FEEDBACK_BODY_MAX_LENGTH, {
+      message: `本文は${FEEDBACK_BODY_MAX_LENGTH}文字以内で指定してください`,
+    }),
+  pageUrl: z.string().max(2000, { message: "ページURLが長すぎます" }).nullable().optional(),
+  userAgent: z.string().max(500, { message: "User-Agentが長すぎます" }).nullable().optional(),
+});
+
+/** PATCH /api/manage/feedbacks/[id] */
+export const FeedbackStatusUpdateSchema = z.object({
+  status: z.enum(FEEDBACK_STATUSES, { message: "状態が不正です" }),
+});
+
+/** PUT /api/review-notes. memo is rejected (not truncated) when longer than the max. */
+export const ReviewNoteUpsertSchema = z
+  .object({
+    contentId: ContentIdSchema,
+    requirementKey: z.string().min(1).nullable(),
+    memo: z
+      .string({ message: "memoは文字列で指定してください" })
+      .max(REVIEW_NOTE_MEMO_MAX_LENGTH, {
+        message: `memoは${REVIEW_NOTE_MEMO_MAX_LENGTH}文字以内で指定してください`,
+      })
+      .nullable()
+      .optional(),
+    understood: z.boolean({ message: "understoodはbooleanで指定してください" }).optional(),
+  })
+  .refine((value) => value.memo !== undefined || value.understood !== undefined, {
+    message: "memo または understood のいずれかを指定してください",
+  });
+
+/** DELETE /api/review-notes */
+export const ReviewNoteDeleteSchema = z.object({
+  contentId: ContentIdSchema,
+  requirementKey: z.string().min(1).nullable(),
 });
 
 export const SubmissionCreateSchema = z.object({
@@ -124,6 +238,50 @@ export const SubmissionCreateSchema = z.object({
 export const AiReviewRequestSchema = z.object({
   submissionId: PositiveIntSchema,
 });
+
+/**
+ * PUT /api/admin/ai-review-settings. All three limits at once, so the cross-field rule
+ * (perDay >= perContentPerDay) is checked on the values that will be stored.
+ */
+export const AiReviewSettingsUpdateSchema = z
+  .object({
+    activePerContentPerDay: z.number({
+      message: "activePerContentPerDay は数値で指定してください",
+    }),
+    activePerDay: z.number({ message: "activePerDay は数値で指定してください" }),
+    trialPerContentLifetime: z.number({
+      message: "trialPerContentLifetime は数値で指定してください",
+    }),
+  })
+  .strict()
+  .transform((value, ctx) => {
+    const limits: AIReviewLimits = {
+      active: { perContentPerDay: value.activePerContentPerDay, perDay: value.activePerDay },
+      trial: { perContentLifetime: value.trialPerContentLifetime },
+    };
+    if (!areAIReviewLimitsValid(limits)) {
+      const { perContentPerDay, perDay, perContentLifetime } = AI_REVIEW_LIMIT_BOUNDS;
+      ctx.addIssue({
+        code: "custom",
+        message: `1課題1日は${perContentPerDay.min}〜${perContentPerDay.max}、全課題合計は${perDay.min}〜${perDay.max}（1課題1日以上）、お試しは${perContentLifetime.min}〜${perContentLifetime.max}の整数で指定してください`,
+      });
+      return z.NEVER;
+    }
+    return limits;
+  });
+
+/**
+ * POST /api/admin/ai-review-limits. `reset` frees the allowance of one user (all contents, or one
+ * when contentId is given); `reopen` lets one completed review run again (#482).
+ */
+export const AdminAiReviewLimitActionSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("reset"),
+    userId: UserIdSchema,
+    contentId: PositiveIntSchema.optional(),
+  }),
+  z.object({ action: z.literal("reopen"), submissionId: PositiveIntSchema }),
+]);
 
 const AdminUserBaseSchema = z.object({ userId: UserIdSchema });
 
@@ -161,6 +319,47 @@ export const AdminUserActionSchema = z.discriminatedUnion(
   { message: `action は ${USER_MANAGEMENT_ACTIONS.join(" / ")} を指定してください` }
 );
 
+/** PATCH /api/settings/email: `false` unsubscribes from promotional mail, `true` resumes it. */
+export const EmailPreferencesSchema = z
+  .object({
+    promotionalEmails: z.boolean({ message: "promotionalEmails は真偽値で指定してください" }),
+  })
+  .strict();
+
+/**
+ * PATCH /api/settings/profile. Unknown keys (`role`, `userId`, …) are stripped so they cannot be
+ * written. The stored value is the trimmed name from parseDisplayName (shared with the form).
+ */
+export const ProfileUpdateSchema = z
+  .object({
+    displayName: z.string({ message: "displayName は文字列で指定してください" }),
+  })
+  .transform((value, ctx) => {
+    const parsed = parseDisplayName(value.displayName);
+    if (!parsed.ok) {
+      ctx.addIssue({ code: "custom", message: parsed.message, path: ["displayName"] });
+      return z.NEVER;
+    }
+    return { displayName: parsed.name };
+  });
+
+/**
+ * POST /api/settings/notification-email. Unknown keys are stripped. The stored value is the
+ * trimmed, lowercased address from parseNotificationEmail (shared with the form).
+ */
+export const NotificationEmailRequestSchema = z
+  .object({
+    email: z.string({ message: "email は文字列で指定してください" }),
+  })
+  .transform((value, ctx) => {
+    const parsed = parseNotificationEmail(value.email);
+    if (!parsed.ok) {
+      ctx.addIssue({ code: "custom", message: parsed.message, path: ["email"] });
+      return z.NEVER;
+    }
+    return { email: parsed.email };
+  });
+
 const EmailSendDaysSchema = z
   .array(
     z
@@ -190,6 +389,7 @@ export const EmailSettingsUpdateSchema = z
       .boolean({ message: "sending_enabled は真偽値で指定してください" })
       .optional(),
     enabled: z.boolean({ message: "enabled は真偽値で指定してください" }).optional(),
+    push_enabled: z.boolean({ message: "push_enabled は真偽値で指定してください" }).optional(),
     send_days: EmailSendDaysSchema.optional(),
     send_weekday: z
       .number({ message: "曜日は数値で指定してください" })
@@ -220,6 +420,7 @@ export const EmailSettingsUpdateSchema = z
       } else if (
         targets > 1 ||
         value.enabled !== undefined ||
+        value.push_enabled !== undefined ||
         value.send_days !== undefined ||
         value.send_weekday !== undefined
       ) {
@@ -232,10 +433,17 @@ export const EmailSettingsUpdateSchema = z
     }
     if (
       value.enabled === undefined &&
+      value.push_enabled === undefined &&
       value.send_days === undefined &&
       value.send_weekday === undefined
     ) {
       fail("更新する項目を指定してください");
+    }
+    if (
+      value.push_enabled !== undefined &&
+      !(PUSH_KINDS as readonly string[]).includes(value.kind)
+    ) {
+      fail("この種別はプッシュ通知に対応していません");
     }
     if (value.send_days !== undefined && !EMAIL_KINDS_WITH_SEND_DAYS.includes(value.kind)) {
       fail("この種別には送る日を設定できません");
@@ -270,39 +478,374 @@ export const PhaseCreateSchema = PhaseBaseSchema.extend({
 });
 export const PhaseUpdateSchema = PhaseCreateSchema.partial();
 
-const WeekBaseSchema = z.object({
-  phase_id: PositiveIntSchema,
-  name: RequiredStringSchema,
-  description: OptionalNullableString,
-  is_published: OptionalBoolean,
+const StarterCodeFileSchema = z.object({
+  filename: z
+    .string({ message: "文字列で指定してください" })
+    .trim()
+    .min(1, { message: "ファイル名を入力してください" }),
+  language: CodeLanguageSchema,
+  content: z.string({ message: "文字列で指定してください" }),
 });
-export const WeekCreateSchema = WeekBaseSchema.extend({
-  insert_after_id: InsertAfterIdSchema,
+
+/**
+ * Exercise starter code (same shape as submissions.code_files). null clears. Total content length
+ * is capped below the AI review submission limit so starters leave headroom for learner edits and
+ * for the prompt that includes both starter and submission.
+ */
+const StarterFilesSchema = z
+  .array(StarterCodeFileSchema)
+  .min(1, { message: "初期コードは1ファイル以上指定してください" })
+  .nullable()
+  .optional()
+  .superRefine((files, ctx) => {
+    if (!files) {
+      return;
+    }
+    const names = files.map((file) => file.filename);
+    if (new Set(names).size !== names.length) {
+      ctx.addIssue({
+        code: "custom",
+        message: "初期コードのファイル名が重複しています",
+      });
+    }
+    const totalLength = files.reduce((sum, file) => sum + file.content.length, 0);
+    if (totalLength > STARTER_FILES_MAX_TOTAL_LENGTH) {
+      ctx.addIssue({
+        code: "custom",
+        message: `初期コードが長すぎます（上限: ${STARTER_FILES_MAX_TOTAL_LENGTH}文字）`,
+      });
+    }
+  });
+
+const SubmissionFileSlotSchema = z.object({
+  filename: z
+    .string({ message: "文字列で指定してください" })
+    .trim()
+    .min(1, { message: "ファイル名を入力してください" }),
+  language: CodeLanguageSchema,
 });
-export const WeekUpdateSchema = WeekCreateSchema.partial();
+
+/**
+ * Exercise submission layout. null clears (the app then uses one default file, or starter_files
+ * when that column already names files). Shape only; alignment with starter_files is a refine.
+ */
+const SubmissionFileSlotsSchema = z
+  .array(SubmissionFileSlotSchema)
+  .min(1, { message: "提出ファイルは1つ以上指定してください" })
+  .max(SUBMISSION_FILE_SLOT_MAX_COUNT, {
+    message: `提出ファイルは${SUBMISSION_FILE_SLOT_MAX_COUNT}個までです`,
+  })
+  .superRefine((files, ctx) => {
+    const names = files.map((file) => file.filename);
+    if (new Set(names).size !== names.length) {
+      ctx.addIssue({
+        code: "custom",
+        message: "提出ファイルのファイル名が重複しています",
+      });
+    }
+  })
+  .nullable()
+  .optional();
 
 const ContentBaseSchema = z.object({
   title: RequiredStringSchema,
-  week_id: PositiveIntSchema,
+  phase_id: PositiveIntSchema,
   content_type: ContentTypeSchema,
-  video_url: OptionalNullableString,
+  video_url: VideoUrlSchema,
   text_content: OptionalNullableString,
   description: OptionalNullableString,
   exercise_instructions: OptionalNullableString,
   hint: OptionalNullableString,
   reference_answer: OptionalNullableString,
+  starter_files: StarterFilesSchema,
+  submission_file_slots: SubmissionFileSlotsSchema,
+  /** CSS-only preview scaffold (#351). null clears. Non-exercise must stay null (DB CHECK). */
+  preview_base_html: z
+    .string()
+    .max(100_000, { message: "土台 HTML が長すぎます" })
+    .nullable()
+    .optional(),
+  // NULL is automatic (#380). true is rejected when the layout cannot show that surface.
+  show_preview: z.boolean().nullable().optional(),
+  show_console: z.boolean().nullable().optional(),
   // The DB CHECK constraint is NOT NULL (with a default), so unlike other optional fields null is
   // not allowed.
   allowed_submission_types: AllowedSubmissionTypeSchema.optional(),
   code_language: CodeLanguageSchema.optional(),
   pdf_url: SlidePdfUrlSchema,
+  // null clears the rubric. The stored version is derived server-side (nextGradingRubric), never
+  // taken from the client. grading_rubric_version is only the version the editor loaded, so a
+  // stale form cannot overwrite a newer save.
+  grading_rubric: GradingRubricInputSchema.nullable().optional(),
+  grading_rubric_version: z.number().int().positive().nullable().optional(),
   is_published: OptionalBoolean,
   is_open_to_trial: OptionalBoolean,
+  // Only read when content_type is "quiz"; saved to quiz_questions, not learning_contents.
+  quiz_questions: QuizQuestionsSchema.optional(),
 });
-export const ContentCreateSchema = ContentBaseSchema.extend({
+
+// A quiz without questions would show learners an empty quiz, so content_type "quiz" in the body
+// requires the questions. The reverse holds too: questions are only saved together with
+// content_type "quiz", so sending them without it (or with another type) is rejected instead of
+// being validated and then silently dropped. A PUT with neither leaves stored questions untouched.
+function alignSubmissionFileSlots(
+  value: {
+    content_type?: string;
+    submission_file_slots?: { filename: string; language: string }[] | null;
+    starter_files?: { filename: string; language: string; content: string }[] | null;
+    code_language?: string;
+  },
+  ctx: z.RefinementCtx
+) {
+  const slots = value.submission_file_slots;
+  if (value.content_type !== undefined && value.content_type !== "exercise" && slots != null) {
+    ctx.addIssue({
+      code: "custom",
+      message: "提出ファイルの構成は演習だけに設定できます",
+      path: ["submission_file_slots"],
+    });
+  }
+  // PUT fields are optional. Compare the pair only when this request sets both: the admin form
+  // always sends them together, and a body that omits one side leaves the stored column as-is.
+  const starter = value.starter_files;
+  if (slots && starter) {
+    const aligned =
+      slots.length === starter.length &&
+      slots.every(
+        (slot, index) =>
+          slot.filename === starter[index]?.filename && slot.language === starter[index]?.language
+      );
+    if (!aligned) {
+      ctx.addIssue({
+        code: "custom",
+        message: "提出ファイルの構成と初期コードのファイル名・言語・並び順を揃えてください",
+        path: ["submission_file_slots"],
+      });
+    }
+  }
+  if (
+    slots &&
+    slots.length > 0 &&
+    value.code_language &&
+    value.code_language !== slots[0].language
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message: "code_language は提出ファイルの1行目の言語と揃えてください",
+      path: ["code_language"],
+    });
+  }
+}
+
+function alignPreviewSettings(
+  value: {
+    content_type?: string;
+    submission_file_slots?: { filename: string; language: string }[] | null;
+    starter_files?: { filename: string; language: string; content: string }[] | null;
+    code_language?: string;
+    show_preview?: boolean | null;
+    show_console?: boolean | null;
+    preview_base_html?: string | null;
+  },
+  ctx: z.RefinementCtx,
+  options?: { updatePartial?: boolean }
+) {
+  if (
+    value.content_type !== undefined &&
+    value.content_type !== "exercise" &&
+    value.preview_base_html != null
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message: "土台 HTML は演習だけに設定できます",
+      path: ["preview_base_html"],
+    });
+  }
+  if (value.show_preview === undefined && value.show_console === undefined) {
+    return;
+  }
+  if (value.content_type !== undefined && value.content_type !== "exercise") {
+    if (value.show_preview != null || value.show_console != null) {
+      ctx.addIssue({
+        code: "custom",
+        message: PREVIEW_EXERCISE_ONLY_MESSAGE,
+        path: ["show_preview"],
+      });
+    }
+    return;
+  }
+  // Create/bulk: code_language alone is a full default layout. Update: only slots/starter count —
+  // code_language alone must not invent a default file and 400 a row whose DB layout still allows
+  // the flag (updateContent merges the row). content_type alone is never a layout.
+  const hasLayout = options?.updatePartial
+    ? value.submission_file_slots !== undefined || value.starter_files !== undefined
+    : value.submission_file_slots !== undefined ||
+      value.starter_files !== undefined ||
+      value.code_language !== undefined;
+  if (!hasLayout || (value.show_preview !== true && value.show_console !== true)) {
+    return;
+  }
+  const message = previewSettingsError({
+    contentType: value.content_type ?? "exercise",
+    files: resolveSubmissionFileSlots({
+      submissionFileSlots: value.submission_file_slots ?? null,
+      starterFiles: value.starter_files ?? null,
+      codeLanguage: value.code_language,
+    }),
+    showPreview: value.show_preview,
+    showConsole: value.show_console,
+    previewBaseHtml: value.preview_base_html,
+  });
+  if (!message) {
+    return;
+  }
+  ctx.addIssue({
+    code: "custom",
+    message,
+    path: [message === CONSOLE_NOT_ALLOWED_MESSAGE ? "show_console" : "show_preview"],
+  });
+}
+
+function alignPreviewSettingsOnCreate(
+  value: Parameters<typeof alignPreviewSettings>[0],
+  ctx: z.RefinementCtx
+) {
+  alignPreviewSettings(value, ctx);
+}
+
+function alignPreviewSettingsOnUpdate(
+  value: Parameters<typeof alignPreviewSettings>[0],
+  ctx: z.RefinementCtx
+) {
+  alignPreviewSettings(value, ctx, { updatePartial: true });
+}
+
+function requireQuizQuestions(
+  value: { content_type?: string; quiz_questions?: unknown },
+  ctx: z.RefinementCtx
+) {
+  if (value.content_type === "quiz" && value.quiz_questions === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "クイズには設問を登録してください",
+      path: ["quiz_questions"],
+    });
+  }
+  if (value.quiz_questions !== undefined && value.content_type !== "quiz") {
+    ctx.addIssue({
+      code: "custom",
+      message: "設問を保存するときは content_type に quiz を指定してください",
+      path: ["content_type"],
+    });
+  }
+}
+
+const ContentCreateObjectSchema = ContentBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
 });
-export const ContentUpdateSchema = ContentCreateSchema.partial();
+export const ContentCreateSchema = ContentCreateObjectSchema.superRefine(requireQuizQuestions)
+  .superRefine(alignSubmissionFileSlots)
+  .superRefine(alignPreviewSettingsOnCreate);
+function requireLoadedRubricVersion(
+  value: {
+    content_type?: string;
+    grading_rubric?: unknown;
+    grading_rubric_version?: number | null;
+  },
+  ctx: z.RefinementCtx
+) {
+  const clearsByType = value.content_type !== undefined && value.content_type !== "exercise";
+  if (
+    (value.grading_rubric !== undefined || clearsByType) &&
+    value.grading_rubric_version === undefined
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message: "画面を開いたときの採点基準の版を指定してください",
+      path: ["grading_rubric_version"],
+    });
+  }
+}
+
+export const ContentUpdateSchema = ContentCreateObjectSchema.partial()
+  .superRefine(requireQuizQuestions)
+  .superRefine(requireLoadedRubricVersion)
+  .superRefine(alignSubmissionFileSlots)
+  .superRefine(alignPreviewSettingsOnUpdate);
+
+const BULK_CREATE_MESSAGE = `contentsは1〜${MAX_BULK_CREATE_CONTENTS}件の配列で指定してください`;
+
+/**
+ * POST /api/manage/contents/bulk: registers many contents (e.g. a course's quizzes from the
+ * manuscript) in one request. Each is appended to the end of its phase in array order, so there is
+ * no insert_after_id.
+ */
+export const BulkContentCreateSchema = z.object({
+  contents: z
+    .array(
+      ContentBaseSchema.superRefine(requireQuizQuestions)
+        .superRefine(alignSubmissionFileSlots)
+        .superRefine(alignPreviewSettingsOnCreate),
+      { message: BULK_CREATE_MESSAGE }
+    )
+    .min(1, { message: BULK_CREATE_MESSAGE })
+    .max(MAX_BULK_CREATE_CONTENTS, { message: BULK_CREATE_MESSAGE }),
+});
+export type BulkContentCreateItem = z.infer<typeof BulkContentCreateSchema>["contents"][number];
+
+/**
+ * POST /api/quiz/grade. Whether every question is answered is checked by grade_quiz_answers()
+ * (the API cannot read the questions), so here only the shape is validated.
+ */
+export const QuizGradeRequestSchema = z.object({
+  contentId: ContentIdSchema,
+  answers: z
+    .array(
+      z.object({
+        questionId: PositiveIntSchema,
+        revision: z
+          .string({ message: "設問の版を指定してください。ページを再読み込みしてください" })
+          .max(64, { message: "設問の版が不正です" }),
+        choices: z
+          .array(
+            z
+              .number({ message: "選択肢は番号で指定してください" })
+              .int({ message: "選択肢は整数の番号で指定してください" })
+              .min(0, { message: "選択肢の番号は0以上で指定してください" }),
+            { message: "選択肢は番号の配列で指定してください" }
+          )
+          .max(QUIZ_MAX_CHOICES, { message: `選択肢は${QUIZ_MAX_CHOICES}個までです` })
+          .optional(),
+        text: z
+          .string()
+          .max(QUIZ_TEXT_ANSWER_MAX_LENGTH, {
+            message: `回答は${QUIZ_TEXT_ANSWER_MAX_LENGTH}文字以内で入力してください`,
+          })
+          .optional(),
+      }),
+      { message: "answersは配列で指定してください" }
+    )
+    .min(1, { message: "回答を入力してください" })
+    .max(QUIZ_MAX_QUESTIONS, {
+      message: "回答の数が設問の数を超えています。ページを再読み込みしてください",
+    })
+    .refine((answers) => new Set(answers.map((a) => a.questionId)).size === answers.length, {
+      message: "同じ設問への回答が重複しています",
+    }),
+});
+
+export const GradingRubricDraftRequestSchema = z.object({
+  exercise_instructions: z
+    .string()
+    .trim()
+    .min(1, { message: "演習指示を入力してください" })
+    .max(GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH, { message: "演習指示が長すぎます" }),
+  reference_answer: z
+    .string()
+    .trim()
+    .max(GRADING_RUBRIC_DRAFT_INPUT_MAX_LENGTH, { message: "模範回答が長すぎます" })
+    .nullish(),
+});
 
 const BULK_CONTENT_IDS_MESSAGE = `idsは1〜${MAX_BULK_CONTENT_IDS}件の正の整数で指定してください`;
 
@@ -465,7 +1008,37 @@ export const EmailTemplatePreviewSchema = z
   .strict()
   .superRefine(refineTemplatePlaceholders);
 
-export const EmailTemplateResetSchema = z.object({ template_key: EmailTemplateKeySchema }).strict();
+const PushEndpointSchema = z
+  .string({ message: "endpoint を指定してください" })
+  .url({ message: "endpoint の形式が不正です" })
+  .max(4096, { message: "endpoint が長すぎます" })
+  .refine(isAllowedPushEndpoint, {
+    message: "許可されていないプッシュエンドポイントです",
+  });
+
+export const PushSubscriptionSchema = z
+  .object({
+    endpoint: PushEndpointSchema,
+    keys: z
+      .object({
+        p256dh: z
+          .string({ message: "keys.p256dh を指定してください" })
+          .min(1, { message: "keys.p256dh を指定してください" })
+          .max(256, { message: "keys.p256dh が長すぎます" }),
+        auth: z
+          .string({ message: "keys.auth を指定してください" })
+          .min(1, { message: "keys.auth を指定してください" })
+          .max(256, { message: "keys.auth が長すぎます" }),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const PushSubscriptionDeleteSchema = z
+  .object({
+    endpoint: PushEndpointSchema,
+  })
+  .strict();
 
 export async function validateRequest<T extends z.ZodType>(
   request: Request,

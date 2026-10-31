@@ -5,7 +5,14 @@ import {
   CONTENT_TYPES,
   MAX_BULK_CONTENT_IDS,
 } from "@/app/constants/content";
-import { MEMBERSHIP_TYPES, USER_MANAGEMENT_ACTIONS, USER_ROLES } from "@/app/constants/user";
+import { STARTER_FILES_MAX_TOTAL_LENGTH } from "@/app/constants/gemini";
+import {
+  DISPLAY_NAME_MAX_LENGTH,
+  MEMBERSHIP_TYPES,
+  USER_MANAGEMENT_ACTIONS,
+  USER_ROLES,
+} from "@/app/constants/user";
+import { SUBMISSION_FILE_SLOT_MAX_COUNT } from "@/app/lib/submission-file-slots";
 import {
   AdminUserActionSchema,
   AiReviewRequestSchema,
@@ -15,12 +22,12 @@ import {
   ContentUpdateSchema,
   PhaseCreateSchema,
   PositiveIntSchema,
+  ProfileUpdateSchema,
   ProgressUpdateSchema,
   SubmissionCreateSchema,
   ThemeCreateSchema,
   ThemeUpdateSchema,
   validateRequest,
-  WeekCreateSchema,
 } from "@/app/services/api/schemas";
 
 describe("PositiveIntSchema", () => {
@@ -275,34 +282,24 @@ describe("PhaseCreateSchema", () => {
   });
 });
 
-describe("WeekCreateSchema", () => {
-  it("phase_id・name・insert_after_idが必須", () => {
-    expect(WeekCreateSchema.safeParse({ name: "週1", insert_after_id: null }).success).toBe(false);
-    expect(
-      WeekCreateSchema.safeParse({ phase_id: 1, name: "週1", insert_after_id: null }).success
-    ).toBe(true);
-    expect(WeekCreateSchema.safeParse({ phase_id: 1, name: "週1" }).success).toBe(false);
-  });
-});
-
 describe("ContentCreateSchema / ContentUpdateSchema", () => {
-  it("title・week_id・content_type・insert_after_idが必須", () => {
+  it("title・phase_id・content_type・insert_after_idが必須", () => {
     expect(ContentCreateSchema.safeParse({}).success).toBe(false);
     expect(
-      ContentCreateSchema.safeParse({ title: "コンテンツ1", week_id: 1, insert_after_id: null })
+      ContentCreateSchema.safeParse({ title: "コンテンツ1", phase_id: 1, insert_after_id: null })
         .success
     ).toBe(false);
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "video",
       }).success
     ).toBe(false);
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "video",
         insert_after_id: null,
       }).success
@@ -310,7 +307,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
   });
 
   describe("pdf_url（スライドのオブジェクトキー）", () => {
-    const base = { title: "スライド", week_id: 1, content_type: "slide", insert_after_id: null };
+    const base = { title: "スライド", phase_id: 1, content_type: "slide", insert_after_id: null };
 
     it("オブジェクトキーはそのまま受理する", () => {
       const result = ContentCreateSchema.safeParse({ ...base, pdf_url: "gas/slide-01.pdf" });
@@ -367,19 +364,77 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type,
         insert_after_id: null,
+        ...(content_type === "quiz"
+          ? {
+              quiz_questions: [
+                {
+                  question_type: "single",
+                  question: "Q",
+                  choices: ["a", "b"],
+                  correct_choices: [0],
+                },
+              ],
+            }
+          : {}),
       }).success
     ).toBe(true);
+  });
+
+  it("content_typeがquizで設問がない場合は検証エラー（作成・更新とも）", () => {
+    expect(
+      ContentCreateSchema.safeParse({
+        title: "クイズ",
+        phase_id: 1,
+        content_type: "quiz",
+        insert_after_id: null,
+      }).success
+    ).toBe(false);
+    expect(ContentUpdateSchema.safeParse({ content_type: "quiz" }).success).toBe(false);
+    // A partial update that does not touch content_type leaves the questions alone.
+    expect(ContentUpdateSchema.safeParse({ title: "改題" }).success).toBe(true);
+  });
+
+  it("設問だけを送る（content_type なし・別の種別）場合は検証エラー（黙って捨てない）", () => {
+    const quiz_questions = [
+      { question_type: "single", question: "Q", choices: ["a", "b"], correct_choices: [0] },
+    ];
+    expect(ContentUpdateSchema.safeParse({ quiz_questions }).success).toBe(false);
+    expect(ContentUpdateSchema.safeParse({ content_type: "video", quiz_questions }).success).toBe(
+      false
+    );
+    expect(
+      ContentUpdateSchema.safeParse({
+        content_type: "quiz",
+        quiz_questions,
+        grading_rubric_version: null,
+      }).success
+    ).toBe(true);
+  });
+
+  it("採点基準を変える更新と演習以外への種別変更は、開いたときの版が必須", () => {
+    const rubric = { requirements: [{ key: "r1", name: "A", description: "" }] };
+    expect(ContentUpdateSchema.safeParse({ grading_rubric: rubric }).success).toBe(false);
+    expect(ContentUpdateSchema.safeParse({ grading_rubric: null }).success).toBe(false);
+    expect(ContentUpdateSchema.safeParse({ content_type: "video" }).success).toBe(false);
+    expect(
+      ContentUpdateSchema.safeParse({ grading_rubric: rubric, grading_rubric_version: 2 }).success
+    ).toBe(true);
+    expect(
+      ContentUpdateSchema.safeParse({ content_type: "video", grading_rubric_version: null }).success
+    ).toBe(true);
+    expect(ContentUpdateSchema.safeParse({ content_type: "exercise" }).success).toBe(true);
+    expect(ContentUpdateSchema.safeParse({ title: "改題" }).success).toBe(true);
   });
 
   it("content_typeが許可値以外の場合は検証エラー（DBのCHECK制約違反による500を未然に防ぐ）", () => {
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
-        content_type: "quiz",
+        phase_id: 1,
+        content_type: "poll",
         insert_after_id: null,
       }).success
     ).toBe(false);
@@ -389,7 +444,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "exercise",
         allowed_submission_types: value,
         insert_after_id: null,
@@ -401,7 +456,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "exercise",
         code_language: value,
         insert_after_id: null,
@@ -412,7 +467,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
   it("description等のMarkdown任意項目はnullを許容する（未入力時の送信形式）", () => {
     const result = ContentCreateSchema.safeParse({
       title: "コンテンツ1",
-      week_id: 1,
+      phase_id: 1,
       content_type: "video",
       description: null,
       video_url: null,
@@ -421,11 +476,28 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("video_urlはYouTube URLまたはStream UIDだけを受け付ける（空白はnull、UIDは小文字化）", () => {
+    const base = {
+      title: "動画",
+      phase_id: 1,
+      content_type: "video" as const,
+      insert_after_id: null,
+    };
+    const uid = "0123456789abcdef0123456789abcdef";
+    const parse = (video_url: string) => ContentCreateSchema.safeParse({ ...base, video_url });
+
+    expect(parse("https://www.youtube.com/watch?v=dQw4w9WgXcQ").success).toBe(true);
+    expect(parse(` ${uid.toUpperCase()} `).data?.video_url).toBe(uid);
+    expect(parse("  ").data?.video_url).toBeNull();
+    expect(parse("https://example.com/video.mp4").success).toBe(false);
+    expect(parse("abc").success).toBe(false);
+  });
+
   it("allowed_submission_types・code_languageはDBがNOT NULLのためnullを許容しない", () => {
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "exercise",
         allowed_submission_types: null,
         insert_after_id: null,
@@ -434,7 +506,7 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     expect(
       ContentCreateSchema.safeParse({
         title: "コンテンツ1",
-        week_id: 1,
+        phase_id: 1,
         content_type: "exercise",
         code_language: null,
         insert_after_id: null,
@@ -442,8 +514,249 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
     ).toBe(false);
   });
 
+  it("starter_files は code_files と同じ形を受理し、null でクリアできる", () => {
+    const base = {
+      title: "演習1",
+      phase_id: 1,
+      content_type: "exercise" as const,
+      insert_after_id: null,
+    };
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        starter_files: [
+          { filename: "index.html", language: "html", content: "<div></div>" },
+          { filename: "style.css", language: "css", content: ".a{}" },
+        ],
+      }).success
+    ).toBe(true);
+    expect(ContentUpdateSchema.safeParse({ starter_files: null }).success).toBe(true);
+  });
+
+  it("starter_files は空ファイル名・未知言語・合計文字数超過・重複ファイル名を拒否する", () => {
+    const base = {
+      title: "演習1",
+      phase_id: 1,
+      content_type: "exercise" as const,
+      insert_after_id: null,
+    };
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        starter_files: [{ filename: "  ", language: "html", content: "x" }],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        starter_files: [{ filename: "a.js", language: "cobol", content: "x" }],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        starter_files: [
+          {
+            filename: "a.js",
+            language: "javascript",
+            content: "a".repeat(STARTER_FILES_MAX_TOTAL_LENGTH + 1),
+          },
+        ],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        starter_files: [
+          { filename: "index.html", language: "html", content: "<div></div>" },
+          { filename: "index.html", language: "html", content: "<span></span>" },
+        ],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        starter_files: [],
+      }).success
+    ).toBe(false);
+  });
+
+  it("submission_file_slots はファイル名・言語の配列を受理し、null で未指定にできる", () => {
+    const base = {
+      title: "演習1",
+      phase_id: 1,
+      content_type: "exercise" as const,
+      insert_after_id: null,
+      code_language: "html" as const,
+    };
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [
+          { filename: "index.html", language: "html" },
+          { filename: "main.js", language: "javascript" },
+        ],
+        starter_files: [
+          { filename: "index.html", language: "html", content: "<p>" },
+          { filename: "main.js", language: "javascript", content: "" },
+        ],
+      }).success
+    ).toBe(true);
+    expect(ContentUpdateSchema.safeParse({ submission_file_slots: null }).success).toBe(true);
+  });
+
+  it("submission_file_slots は空ファイル名・未知言語・重複・件数超過・演習以外・初期コードとの不一致を拒否する", () => {
+    const base = {
+      title: "演習1",
+      phase_id: 1,
+      content_type: "exercise" as const,
+      insert_after_id: null,
+    };
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "  ", language: "html" }],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "a.js", language: "cobol" }],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [
+          { filename: "a.js", language: "javascript" },
+          { filename: "a.js", language: "javascript" },
+        ],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: Array.from(
+          { length: SUBMISSION_FILE_SLOT_MAX_COUNT + 1 },
+          (_, i) => ({
+            filename: `f${i}.js`,
+            language: "javascript",
+          })
+        ),
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        content_type: "video",
+        submission_file_slots: [{ filename: "code.js", language: "javascript" }],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        code_language: "html",
+        submission_file_slots: [{ filename: "index.html", language: "html" }],
+        starter_files: [{ filename: "page.html", language: "html", content: "<p>" }],
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        code_language: "javascript",
+        submission_file_slots: [{ filename: "index.html", language: "html" }],
+      }).success
+    ).toBe(false);
+  });
+
+  it("プレビューとコンソールは許される構成だけオンにでき、NULL は自動として通る", () => {
+    const base = {
+      title: "演習1",
+      phase_id: 1,
+      content_type: "exercise" as const,
+      insert_after_id: null,
+    };
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "index.html", language: "html" }],
+        show_preview: true,
+        show_console: false,
+      }).success
+    ).toBe(true);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "main.js", language: "javascript" }],
+        show_preview: null,
+        show_console: null,
+      }).success
+    ).toBe(true);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        code_language: "javascript",
+        show_preview: true,
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "q.sql", language: "sql" }],
+        show_console: true,
+      }).success
+    ).toBe(true);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "q.sql", language: "sql" }],
+        show_preview: true,
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "main.py", language: "python" }],
+        show_console: true,
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        content_type: "video",
+        show_preview: false,
+      }).success
+    ).toBe(false);
+    expect(
+      ContentUpdateSchema.safeParse({
+        show_preview: true,
+        show_console: true,
+        submission_file_slots: [
+          { filename: "index.html", language: "html" },
+          { filename: "main.js", language: "javascript" },
+        ],
+      }).success
+    ).toBe(true);
+    expect(ContentUpdateSchema.safeParse({ show_console: true }).success).toBe(true);
+    // Layout omitted: zod must not invent a default single file and reject; updateContent reads
+    // the row. content_type alone is not a layout.
+    expect(
+      ContentUpdateSchema.safeParse({
+        content_type: "exercise",
+        show_preview: true,
+      }).success
+    ).toBe(true);
+    // Update: code_language alone is not a layout (create still treats it as one above).
+    expect(
+      ContentUpdateSchema.safeParse({
+        code_language: "javascript",
+        show_preview: true,
+      }).success
+    ).toBe(true);
+  });
+
   it("insert_after_idはnullまたは正の整数、0以下・小数は検証エラー", () => {
-    const base = { title: "コンテンツ1", week_id: 1, content_type: "video" as const };
+    const base = { title: "コンテンツ1", phase_id: 1, content_type: "video" as const };
     expect(ContentCreateSchema.safeParse({ ...base, insert_after_id: 2 }).success).toBe(true);
     expect(ContentCreateSchema.safeParse({ ...base, insert_after_id: 0 }).success).toBe(false);
     expect(ContentCreateSchema.safeParse({ ...base, insert_after_id: 1.5 }).success).toBe(false);
@@ -587,5 +900,58 @@ describe("AnnouncementSchema（#254）", () => {
         target_membership_types: ["general"],
       }).success
     ).toBe(true);
+  });
+});
+
+describe("ProfileUpdateSchema", () => {
+  it("前後の空白を除いた表示名を返し、role や userId は捨てる", () => {
+    const result = ProfileUpdateSchema.safeParse({
+      displayName: "  山田 太郎  ",
+      role: "admin",
+      userId: 99,
+      status: "rejected",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ displayName: "山田 太郎" });
+    }
+  });
+
+  it("ゼロ幅スペースや双方向制御は保存値から除く", () => {
+    const result = ProfileUpdateSchema.safeParse({ displayName: "\u202E山田\u200B" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ displayName: "山田" });
+    }
+  });
+
+  it(`${DISPLAY_NAME_MAX_LENGTH}文字ちょうどは許可する`, () => {
+    const name = "あ".repeat(DISPLAY_NAME_MAX_LENGTH);
+    const result = ProfileUpdateSchema.safeParse({ displayName: name });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.displayName).toBe(name);
+    }
+  });
+
+  it.each([
+    ["空", ""],
+    ["空白のみ", " \n\t "],
+    ["上限超え", "あ".repeat(DISPLAY_NAME_MAX_LENGTH + 1)],
+    ["改行", "山田\n太郎"],
+    ["タブ", "山田\t太郎"],
+    ["NUL", "山田\u0000太郎"],
+    ["行区切り", "山田\u2028太郎"],
+    ["書式文字だけ", "\u200B"],
+  ])("%s は拒否する", (_label, displayName) => {
+    expect(ProfileUpdateSchema.safeParse({ displayName }).success).toBe(false);
+  });
+
+  it.each([
+    ["未指定", {}],
+    ["文字列でない", { displayName: 1 }],
+    ["null", { displayName: null }],
+  ])("%s は拒否する", (_label, body) => {
+    expect(ProfileUpdateSchema.safeParse(body).success).toBe(false);
   });
 });

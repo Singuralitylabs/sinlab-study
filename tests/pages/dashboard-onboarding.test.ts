@@ -6,6 +6,13 @@ vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/learning-server");
 vi.mock("@/app/services/api/onboarding-server");
 vi.mock("@/app/services/api/announcements-server");
+vi.mock("@/app/services/api/certificates-server");
+vi.mock("@/app/services/api/review-list-server", () => ({
+  fetchReviewListSourceReviews: vi.fn().mockResolvedValue({ data: [], error: null }),
+}));
+vi.mock("@/app/services/api/user-profile-server", () => ({
+  fetchUserDisplayName: vi.fn().mockResolvedValue({ data: "山田太郎", error: null }),
+}));
 vi.mock("@/app/services/api/upgrade-price-server", () => ({
   fetchUpgradePriceLabel: vi.fn().mockResolvedValue("月額1,500円（税込）"),
 }));
@@ -34,11 +41,13 @@ vi.mock("@/app/(authenticated)/components/GettingStartedChecklist", async (impor
 
 import HomePage from "@/app/(authenticated)/page";
 import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
-import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
+import { fetchRecentCertificate } from "@/app/services/api/certificates-server";
+import { fetchHomeLearningData } from "@/app/services/api/learning-server";
 import {
   fetchGettingStartedProgress,
   fetchOnboardingStatus,
 } from "@/app/services/api/onboarding-server";
+import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const themeSummary = (completedContents: number) => ({
@@ -70,8 +79,13 @@ const setup = ({
     userStatus,
     userRole,
   } as never);
-  vi.mocked(fetchThemeProgressSummaries).mockResolvedValue({
-    data: [themeSummary(completedContents)],
+  vi.mocked(fetchHomeLearningData).mockResolvedValue({
+    data: {
+      summaries: [themeSummary(completedContents)],
+      orderedContents: [],
+      completedContentIds: new Set(),
+      completedAtByContentId: new Map(),
+    },
     error: null,
   } as never);
   vi.mocked(fetchOnboardingStatus).mockResolvedValue({
@@ -83,6 +97,7 @@ const setup = ({
     error: null,
   } as never);
   vi.mocked(getViewerAnnouncements).mockResolvedValue({ data: [], error: null });
+  vi.mocked(fetchRecentCertificate).mockResolvedValue(null);
 };
 
 const render = async () => renderToStaticMarkup(await HomePage());
@@ -206,6 +221,7 @@ describe("ダッシュボードの「次のステップ」カード（issue #288
     expect(html).toContain("お試しコンテンツをすべて完了しました");
     expect(html).toContain('href="/upgrade"');
     expect(html).toContain('data-analytics-source="dashboard_card"');
+    expect(html).toContain("月額1,500円（税込）");
     expect(html.indexOf("次のステップ")).toBeLessThan(
       html.indexOf('data-testid="getting-started"') === -1
         ? Number.POSITIVE_INFINITY
@@ -221,6 +237,7 @@ describe("ダッシュボードの「次のステップ」カード（issue #288
 
     expect(html).toContain("本登録は運営の承認で行います");
     expect(html).not.toContain('href="/upgrade"');
+    expect(fetchUpgradePriceLabel).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -233,5 +250,47 @@ describe("ダッシュボードの「次のステップ」カード（issue #288
     const html = await render();
 
     expect(html).not.toContain("お試しコンテンツをすべて完了しました");
+  });
+});
+
+describe("ダッシュボードの修了証カード（issue #291）", () => {
+  const certificate = {
+    id: 7,
+    user_id: 2,
+    theme_id: 1,
+    certificate_no: "SS-202610-ABC123",
+    recipient_name: "山田 太郎",
+    theme_name: "GAS学習",
+    issued_at: "2026-10-04T00:00:00Z",
+    created_at: "2026-10-04T00:00:00Z",
+  };
+
+  it("直近に発行された修了証があれば、リンク付きのカードを表示する", async () => {
+    setup({ completedAt: "2026-09-01T00:00:00Z" });
+    vi.mocked(fetchRecentCertificate).mockResolvedValue(certificate);
+
+    const html = await render();
+
+    expect(html).toContain("修了証が発行されました");
+    expect(html).toContain('href="/certificates/7"');
+  });
+
+  it("修了証が無ければ表示しない", async () => {
+    setup({ completedAt: "2026-09-01T00:00:00Z" });
+
+    const html = await render();
+
+    expect(html).not.toContain("修了証が発行されました");
+  });
+
+  it.each([
+    ["trial", "member", "trial"],
+    ["admin", "admin", "active"],
+  ] as const)("%s には修了証を取得しない（発行対象外）", async (_label, userRole, userStatus) => {
+    setup({ userRole, userStatus, completedAt: "2026-09-01T00:00:00Z" });
+
+    await render();
+
+    expect(fetchRecentCertificate).not.toHaveBeenCalled();
   });
 });

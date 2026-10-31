@@ -10,7 +10,10 @@ import {
   buildApprovedEmail,
   buildAppUrl,
   buildCancelScheduledEmail,
+  buildCertificateIssuedEmail,
   buildInactivityReminderEmail,
+  buildNotificationEmailChangedEmail,
+  buildNotificationEmailConfirmEmail,
   buildSignupEmail,
   buildSubscriptionEndedEmail,
   buildTrialNurtureEmail,
@@ -82,6 +85,32 @@ describe("renderEmailLayout", () => {
   });
 });
 
+describe("renderEmailLayout の配信設定の案内（emailPreferencesUrl）", () => {
+  const url = "https://study.example.com/settings";
+  const base = { subject: "件名", greetingName: "山田", paragraphs: ["本文"], links: [] };
+
+  it("渡したときだけフッターに設定画面への案内を付け、List-Unsubscribe は付けない", () => {
+    const withPreferences = renderEmailLayout({ ...base, emailPreferencesUrl: url });
+
+    expect(withPreferences.text).toContain(`案内メールの配信設定はこちら: ${url}`);
+    expect(withPreferences.html).toContain(`href="${url}"`);
+    expect(withPreferences.headers).toBeUndefined();
+
+    const without = renderEmailLayout(base);
+    expect(without.text).not.toContain("配信設定");
+    expect(without.html).not.toContain("配信設定");
+  });
+
+  it("配信停止リンクと併記でき、ヘッダーは配信停止リンクがあるときだけ付く", () => {
+    const unsubscribeUrl = "https://study.example.com/api/email/unsubscribe?token=7.abc";
+    const both = renderEmailLayout({ ...base, unsubscribeUrl, emailPreferencesUrl: url });
+
+    expect(both.text).toContain(`配信を停止できます: ${unsubscribeUrl}`);
+    expect(both.text).toContain(`案内メールの配信設定はこちら: ${url}`);
+    expect(both.headers?.["List-Unsubscribe"]).toBe(`<${unsubscribeUrl}>`);
+  });
+});
+
 describe("buildSignupEmail", () => {
   it("お試しでできること・最初の学習コンテンツへのリンク・本登録の案内を含める", () => {
     const email = buildSignupEmail({
@@ -96,6 +125,23 @@ describe("buildSignupEmail", () => {
     expect(email.text).toContain("管理者による承認、またはプランのアップグレード");
     expect(email.text).toContain(`${APP_URL}/upgrade`);
     expect(email.html).toContain(`href="${APP_URL}/learn"`);
+  });
+
+  it("アップグレード案内があるときだけ、フッターに配信設定の案内が付く", () => {
+    const withUpgrade = buildSignupEmail({
+      displayName: "山田",
+      appUrl: APP_URL,
+      upgradeAvailable: true,
+    });
+    const withoutUpgrade = buildSignupEmail({
+      displayName: "山田",
+      appUrl: APP_URL,
+      upgradeAvailable: false,
+    });
+
+    expect(withUpgrade.text).toContain(`案内メールの配信設定はこちら: ${APP_URL}/settings`);
+    expect(withoutUpgrade.text).not.toContain("配信設定");
+    expect(withUpgrade.headers).toBeUndefined();
   });
 
   it("決済機能が無効なときはアップグレードを案内しない", () => {
@@ -122,7 +168,7 @@ describe("buildApprovedEmail", () => {
     expect(email.subject).toContain("本登録が完了しました");
     expect(email.text).toContain("すべての学習コンテンツ");
     expect(email.text).toContain("会員種別: コミュニティ会員");
-    expect(email.text).toContain(`ダッシュボードを開く: ${APP_URL}/`);
+    expect(email.text).toContain(`ホームを開く: ${APP_URL}/`);
   });
 });
 
@@ -186,7 +232,43 @@ describe("buildSubscriptionEndedEmail", () => {
     expect(email.subject).toContain("終了");
     expect(email.text).toContain("お試しユーザーに戻りました");
     expect(email.text).toContain("お試し公開の学習コンテンツは引き続き");
-    expect(email.text).toContain(`アップグレードページを開く: ${APP_URL}/upgrade`);
+    expect(email.text).toContain(`プランの確認・変更を開く: ${APP_URL}/upgrade`);
+  });
+});
+
+describe("buildCertificateIssuedEmail（#291）", () => {
+  const email = buildCertificateIssuedEmail({
+    displayName: "山田",
+    appUrl: APP_URL,
+    certificateId: 31,
+    themeName: "GAS 学習（基礎編）",
+    certificateNo: "SS-202610-ABC123",
+  });
+
+  it("おめでとう・テーマ名・証明番号と、修了証ページへのリンクを含める", () => {
+    expect(email.subject).toContain("修了証が発行されました");
+    expect(email.text).toContain("修了おめでとうございます");
+    expect(email.text).toContain("「GAS 学習（基礎編）」");
+    expect(email.text).toContain("SS-202610-ABC123");
+    expect(email.text).toContain(`修了証を表示する: ${APP_URL}/certificates/31`);
+  });
+
+  it("トランザクションメールなので配信停止リンクは入れない", () => {
+    expect(email.text).not.toContain("/api/email/unsubscribe");
+    expect(email.headers).toBeUndefined();
+  });
+
+  it("テーマ名の HTML は差し込み時にエスケープする", () => {
+    const html = buildCertificateIssuedEmail({
+      displayName: "山田",
+      appUrl: APP_URL,
+      certificateId: 1,
+      themeName: "<script>alert(1)</script>",
+      certificateNo: "SS-202610-ABC123",
+    }).html;
+
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;");
   });
 });
 
@@ -200,6 +282,43 @@ describe("トランザクションメールには配信停止リンクを入れ�
   ])("%#", (email) => {
     expect(email.text).not.toContain("/api/email/unsubscribe");
     expect(email.headers).toBeUndefined();
+  });
+});
+
+describe("手続き通知の配信設定の案内", () => {
+  it("subscription_ended は設定画面への案内を付け、配信停止ヘッダーは付けない", () => {
+    const email = buildSubscriptionEndedEmail({ displayName: "山田", appUrl: APP_URL });
+
+    expect(email.text).toContain(`案内メールの配信設定はこちら: ${APP_URL}/settings`);
+    expect(email.headers).toBeUndefined();
+  });
+
+  it("案内を含まない approved / upgraded / cancel_scheduled / certificate_issued には付けない", () => {
+    const emails = [
+      buildApprovedEmail({ displayName: "山田", appUrl: APP_URL, membershipLabel: "一般有料会員" }),
+      buildUpgradedEmail({
+        displayName: "山田",
+        appUrl: APP_URL,
+        monthlyPriceLabel: null,
+        nextBillingDateLabel: null,
+      }),
+      buildCancelScheduledEmail({
+        displayName: "山田",
+        appUrl: APP_URL,
+        periodEndDateLabel: null,
+      }),
+      buildCertificateIssuedEmail({
+        displayName: "山田",
+        appUrl: APP_URL,
+        certificateId: 1,
+        themeName: "GAS",
+        certificateNo: "A-1",
+      }),
+    ];
+
+    for (const email of emails) {
+      expect(email.text).not.toContain("配信設定");
+    }
   });
 });
 
@@ -219,17 +338,61 @@ describe("buildWeeklyDigestEmail", () => {
       unsubscribeUrl: UNSUBSCRIBE_URL,
       completedLastWeek: 3,
       submittedLastWeek: 1,
-      nextContent: { title: "変数と型", path: "/learn/1/2/3/4" },
+      nextContent: { title: "変数と型", path: "/learn/1/2/3" },
       remainingContents: 10,
+      activeThemes: [
+        { themeName: "GAS 学習", completedContents: 4, totalContents: 16 },
+        { themeName: "AI 駆動開発", completedContents: 1, totalContents: 8 },
+      ],
+      unovercomeReviewCount: 2,
     });
 
     expect(email.subject).toContain("今週の学習");
     expect(email.text).toContain("コンテンツ完了 3 本 / 演習の提出 1 件");
+    expect(email.text).toContain(
+      "学習中のテーマ: GAS 学習（4 / 16 完了）、AI 駆動開発（1 / 8 完了）"
+    );
+    expect(email.text).toContain("復習リストに未克服の項目が 2 件あります");
     expect(email.text).toContain("次に学ぶコンテンツ: 変数と型");
     expect(email.text).toContain("4 本完了");
-    expect(email.text).toContain(`続きから学ぶ: ${APP_URL}/learn/1/2/3/4`);
+    expect(email.text).toContain(`続きから学ぶ: ${APP_URL}/learn/1/2/3`);
     expect(email.text).toContain(UNSUBSCRIBE_URL);
     expect(email.headers?.["List-Unsubscribe"]).toBe(`<${UNSUBSCRIBE_URL}>`);
+  });
+
+  it("復習リストの未克服が 0 件のときは行ごと出さない", () => {
+    const email = buildWeeklyDigestEmail({
+      displayName: "山田",
+      appUrl: APP_URL,
+      unsubscribeUrl: UNSUBSCRIBE_URL,
+      completedLastWeek: 1,
+      submittedLastWeek: 0,
+      nextContent: { title: "変数と型", path: "/learn/1/2/3" },
+      remainingContents: 10,
+      activeThemes: [],
+      unovercomeReviewCount: 0,
+    });
+    expect(email.text).not.toContain("復習リスト");
+  });
+
+  it("学習中のテーマは最大3件までで、無いときは行ごと出さない", () => {
+    const theme = (n: number) => ({ themeName: `T${n}`, completedContents: n, totalContents: 9 });
+    const build = (activeThemes: ReturnType<typeof theme>[]) =>
+      buildWeeklyDigestEmail({
+        displayName: "山田",
+        appUrl: APP_URL,
+        unsubscribeUrl: UNSUBSCRIBE_URL,
+        completedLastWeek: 1,
+        submittedLastWeek: 0,
+        nextContent: { title: "変数と型", path: "/learn/1/2/3" },
+        remainingContents: 10,
+        activeThemes,
+      });
+
+    const many = build([theme(1), theme(2), theme(3), theme(4)]).text;
+    expect(many).toContain("学習中のテーマ: T1（1 / 9 完了）、T2（2 / 9 完了）、T3（3 / 9 完了）");
+    expect(many).not.toContain("T4");
+    expect(build([]).text).not.toContain("学習中のテーマ");
   });
 
   it("すべて完了しているときは次のコンテンツの代わりにダッシュボードへ誘導する", () => {
@@ -241,10 +404,11 @@ describe("buildWeeklyDigestEmail", () => {
       submittedLastWeek: 0,
       nextContent: null,
       remainingContents: 0,
+      activeThemes: [],
     });
 
     expect(email.text).toContain("すべて完了しています");
-    expect(email.text).toContain(`ダッシュボードを開く: ${APP_URL}/`);
+    expect(email.text).toContain(`ホームを開く: ${APP_URL}/`);
     expect(email.text).not.toContain("今週の目標");
   });
 });
@@ -255,11 +419,11 @@ describe("buildInactivityReminderEmail", () => {
       displayName: "山田",
       appUrl: APP_URL,
       unsubscribeUrl: UNSUBSCRIBE_URL,
-      firstContent: { title: "はじめての自動化", path: "/learn/1/1/1/1" },
+      firstContent: { title: "はじめての自動化", path: "/learn/1/1/1" },
     });
 
     expect(email.text).toContain("まだ学習を始められていない");
-    expect(email.text).toContain(`最初の1本を始める: ${APP_URL}/learn/1/1/1/1`);
+    expect(email.text).toContain(`最初の1本を始める: ${APP_URL}/learn/1/1/1`);
     expect(email.text).toContain("お問い合わせください");
     expect(email.text).toContain(UNSUBSCRIBE_URL);
   });
@@ -471,6 +635,7 @@ describe("編集できる文面（#286）", () => {
             submittedLastWeek: 0,
             nextContent: null,
             remainingContents: 0,
+            activeThemes: [],
           },
           texts
         ),
@@ -511,6 +676,7 @@ describe("編集できる文面（#286）", () => {
       const email = build(minimal("短い本文"));
 
       expect(email.text).toContain(`配信を停止できます: ${unsubscribeUrl}`);
+      expect(email.text).toContain(`案内メールの配信設定はこちら: ${APP_URL}/settings`);
       expect(email.html).toContain(`href="${unsubscribeUrl}"`);
       expect(email.headers).toEqual({
         "List-Unsubscribe": `<${unsubscribeUrl}>`,
@@ -532,6 +698,8 @@ describe("編集できる文面（#286）", () => {
 
     expect(email.headers).toBeUndefined();
     expect(email.text).not.toContain("api/email/unsubscribe");
+    // The settings pointer is code, so a template rewrite cannot drop it.
+    expect(email.text).toContain(`案内メールの配信設定はこちら: ${APP_URL}/settings`);
   });
 
   it("お試し 14日目: 最後の案内のときだけ「これが最後です」が入り、経過日数の表記はコードが決める", () => {
@@ -558,5 +726,28 @@ describe("編集できる文面（#286）", () => {
     expect(email.text).toContain("運営からのお知らせです。\n\n■ タイトル\n\n");
     expect(email.html).toContain('href="https://example.com"');
     expect(email.html).not.toContain('href="javascript:');
+  });
+});
+
+describe("通知先の確認メールと変更通知", () => {
+  it("配信停止リンクを付けず、差し込むアドレスはエスケープする", () => {
+    const confirm = buildNotificationEmailConfirmEmail({
+      displayName: "山田",
+      confirmUrl: `${APP_URL}/api/settings/notification-email/verify?token=sample`,
+      expiresLabel: "24時間",
+    });
+    const changed = buildNotificationEmailChangedEmail({
+      displayName: "<script>",
+      newAddress: "a<b>@example.com",
+      settingsUrl: `${APP_URL}/settings`,
+    });
+
+    expect(confirm.headers).toBeUndefined();
+    expect(confirm.text).not.toContain("api/email/unsubscribe");
+    expect(changed.headers).toBeUndefined();
+    expect(changed.text).not.toContain("api/email/unsubscribe");
+    expect(changed.text).toContain("a<b>@example.com");
+    expect(changed.html).toContain("a&lt;b&gt;@example.com");
+    expect(changed.html).not.toContain("<script>");
   });
 });

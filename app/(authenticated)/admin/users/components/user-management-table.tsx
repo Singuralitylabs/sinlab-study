@@ -10,6 +10,7 @@ import {
   USER_ROLE,
   USER_STATUS,
 } from "@/app/constants/user";
+import { formatDate, formatDateTime } from "@/app/lib/format-date";
 import type { ManageUserListItem, MembershipType, UserRoleType, UserStatusType } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -171,6 +172,37 @@ export function UserManagementTable({
     await patchUser(userId, { action }, "配信停止状態の変更に失敗しました");
   };
 
+  const handleResetAiReviewLimits = async (userId: number) => {
+    if (
+      !confirm(
+        "このユーザーのAIレビュー回数をすべての課題でリセットしますか？\n過去のレビュー結果は残ります。"
+      )
+    )
+      return;
+    setLoading(userId, true);
+    try {
+      const res = await fetch("/api/admin/ai-review-limits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset", userId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        alert(data?.error || "AIレビュー回数のリセットに失敗しました");
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (typeof data?.affected === "number") {
+        alert(`リセットしました（対象 ${data.affected} 件）`);
+      }
+      router.refresh();
+    } catch {
+      alert("エラーが発生しました");
+    } finally {
+      setLoading(userId, false);
+    }
+  };
+
   const handleRoleChange = (userId: number, role: UserRoleType) =>
     patchUser(userId, { action: "change_role", role }, "ロール変更に失敗しました");
 
@@ -248,6 +280,11 @@ export function UserManagementTable({
                       <div>
                         <p className="font-medium">{user.display_name}</p>
                         <p className="text-xs text-muted-foreground">{user.email}</p>
+                        {user.notification_email && (
+                          <p className="text-xs text-muted-foreground">
+                            通知先: {user.notification_email}
+                          </p>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -336,7 +373,7 @@ export function UserManagementTable({
                             <>
                               <Badge variant="destructive">配信停止中</Badge>
                               <span className="text-xs text-muted-foreground">
-                                {new Date(user.email_opt_out_at).toLocaleString("ja-JP")}
+                                {formatDateTime(user.email_opt_out_at)}
                               </span>
                             </>
                           ) : (
@@ -358,16 +395,14 @@ export function UserManagementTable({
                       )}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {user.created_at
-                        ? new Date(user.created_at).toLocaleDateString("ja-JP")
-                        : "-"}
+                      {user.created_at ? formatDate(user.created_at) : "-"}
                     </td>
                     <td className="px-4 py-3">
                       {isLoading ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <div className="flex flex-col gap-1">
-                          <div className="flex gap-2 items-center">
+                          <div className="flex flex-wrap gap-2 items-center">
                             {(user.status === USER_STATUS.TRIAL ||
                               user.status === USER_STATUS.REJECTED) && (
                               <>
@@ -408,6 +443,16 @@ export function UserManagementTable({
                                   却下
                                 </Button>
                               )}
+                            {(user.status === USER_STATUS.TRIAL ||
+                              user.status === USER_STATUS.ACTIVE) && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleResetAiReviewLimits(user.id)}
+                              >
+                                AIレビュー回数をリセット
+                              </Button>
+                            )}
                           </div>
                           {(user.status === USER_STATUS.TRIAL ||
                             user.status === USER_STATUS.REJECTED) &&

@@ -7,7 +7,8 @@ import { PageTitle } from "@/app/components/PageTitle";
 import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { SubmissionsPager } from "@/app/components/SubmissionsPager";
 import { SUBMISSIONS_PAGE_SIZE } from "@/app/constants/submissions";
-import { getSubmissionCodeFiles } from "@/app/lib/submission-files";
+import { formatDateTimeMinute } from "@/app/lib/format-date";
+import { getSubmissionCodeFiles, withFallbackLanguage } from "@/app/lib/submission-files";
 import {
   calcTotalPages,
   parsePageParam,
@@ -21,13 +22,7 @@ import { Card, CardContent } from "@/components/ui/card";
 
 function formatDate(dateString: string | null) {
   if (!dateString) return "-";
-  return new Date(dateString).toLocaleString("ja-JP", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatDateTimeMinute(dateString);
 }
 
 interface PageProps {
@@ -101,7 +96,8 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
             >
               <CardContent className="pt-6">
                 <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1">
+                  {/* min-width:auto grows with the pre, so overflow-x-auto never starts a scrollport. */}
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-2 flex-wrap">
                       <Badge variant="secondary" className="gap-1">
                         {submission.submission_type === "code" ? (
@@ -117,14 +113,29 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
                       </span>
                     </div>
 
-                    <h3 className="font-medium">
+                    <h3 className="break-words font-medium">
                       {submission.content?.title || "不明なコンテンツ"}
                     </h3>
 
                     {submission.submission_type === "code" && (
                       <div className="mt-3">
                         <SubmissionCodeBlock
-                          files={getSubmissionCodeFiles(submission)}
+                          files={withFallbackLanguage(
+                            getSubmissionCodeFiles(submission),
+                            submission.content?.code_language
+                          )}
+                          previewSource={
+                            submission.content
+                              ? {
+                                  submissionFileSlots: submission.content.submission_file_slots,
+                                  starterFiles: submission.content.starter_files,
+                                  codeLanguage: submission.content.code_language,
+                                  previewBaseHtml: submission.content.preview_base_html,
+                                  showPreview: submission.content.show_preview,
+                                  showConsole: submission.content.show_console,
+                                }
+                              : null
+                          }
                           preClassName="p-3 bg-muted rounded-lg text-sm overflow-x-auto max-h-40"
                         />
                       </div>
@@ -135,10 +146,10 @@ export default async function SubmissionsPage({ searchParams }: PageProps) {
                         href={submission.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="mt-3 inline-flex items-center gap-1 text-primary hover:underline"
+                        className="mt-3 inline-flex max-w-full min-w-0 items-start gap-1 break-all text-primary hover:underline"
                       >
-                        {submission.url}
-                        <ExternalLink className="h-4 w-4" />
+                        <span className="min-w-0">{submission.url}</span>
+                        <ExternalLink className="mt-0.5 h-4 w-4 shrink-0" />
                       </a>
                     )}
 

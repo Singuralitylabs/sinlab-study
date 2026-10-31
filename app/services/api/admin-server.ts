@@ -1,15 +1,41 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
-import { WEEKLY_FUNNEL_WEEKS } from "@/app/constants/analytics";
+import { resolveWeeklyFunnelWeeks, WEEKLY_FUNNEL_WEEKS } from "@/app/constants/analytics";
+import { isQuizQuestionType } from "@/app/constants/quiz";
 import { SLIDES_BUCKET } from "@/app/constants/storage";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import {
+  buildContentEngagement,
+  type ContentEngagementResult,
+  type ProgressAggRow,
+  type SubmissionAggRow,
+} from "@/app/lib/content-engagement";
+import { contentTypeStoresTextContent } from "@/app/lib/content-filtering";
 import {
   getSiblingTailId,
   resolveSiblingRenumber,
   resolveSiblingResequence,
   type SiblingOrderRow,
 } from "@/app/lib/content-grouping";
+import {
+  getGradingRubricVersion,
+  getRubricMaxKeyNumber,
+  reusedRequirementKeys,
+  toRubricFormRows,
+} from "@/app/lib/grading";
+import {
+  clearedGradingRubric,
+  type GradingRubricInput,
+  nextGradingRubric,
+  parseStoredGradingRubric,
+} from "@/app/lib/grading-schema";
+import { PREVIEW_EXERCISE_ONLY_MESSAGE, previewSettingsError } from "@/app/lib/html-preview";
+import type { QuizQuestionData } from "@/app/lib/quiz";
 import { toSlideObjectKey } from "@/app/lib/slide-object-key";
+import {
+  parseSubmissionFileSlots,
+  resolveSubmissionFileSlots,
+} from "@/app/lib/submission-file-slots";
 import { WEEKLY_FUNNEL_FETCH_ERROR, type WeeklyFunnelRow } from "@/app/lib/weekly-funnel";
 import {
   fetchStripeSubscriptionByUserId,
@@ -23,19 +49,17 @@ import type {
   LearningContent,
   LearningPhase,
   LearningTheme,
-  LearningWeek,
   ManageContentListItem,
   ManagePhaseListItem,
   ManageThemeListItem,
   ManageUserListItem,
-  ManageWeekListItem,
   MembershipType,
   UserType,
 } from "@/app/types";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabase-server";
 
-type SiblingTable = "learning_themes" | "learning_phases" | "learning_weeks" | "learning_contents";
-type SiblingParentFilter = { column: "theme_id" | "phase_id" | "week_id"; value: number } | null;
+type SiblingTable = "learning_themes" | "learning_phases" | "learning_contents";
+type SiblingParentFilter = { column: "theme_id" | "phase_id"; value: number } | null;
 
 type AdminSupabaseClient = Awaited<ReturnType<typeof createAdminSupabaseClient>>;
 
@@ -131,17 +155,17 @@ async function fetchPdfUrlsByContentIds(
 }
 
 /** Live contents only. Returns null on fetch failure. */
-async function fetchPdfUrlsByWeekIds(
+async function fetchPdfUrlsByPhaseIds(
   supabase: AdminSupabaseClient,
-  weekIds: number[]
+  phaseIds: number[]
 ): Promise<string[] | null> {
-  if (weekIds.length === 0) {
+  if (phaseIds.length === 0) {
     return [];
   }
   const { data, error } = await supabase
     .from("learning_contents")
     .select("pdf_url")
-    .in("week_id", weekIds)
+    .in("phase_id", phaseIds)
     .eq("is_deleted", false);
   if (error) {
     console.error("スライド参照取得エラー:", error.message);
@@ -154,20 +178,18 @@ async function fetchPdfUrlsByWeekIds(
 /**
  * Nested select is the minimum needed for the list and hierarchy sort. With a theme/phase filter
  * the nesting must be `!inner`: PostgREST embedded filters only drop parent rows with an inner
- * join, which excludes unclassified contents (no week).
+ * join, which excludes unclassified contents (no phase).
  */
 function manageContentListSelect(innerJoin: boolean): string {
-  const weekRel = innerJoin ? "week:learning_weeks!inner" : "week:learning_weeks";
   const phaseRel = innerJoin ? "phase:learning_phases!inner" : "phase:learning_phases";
   const themeRel = innerJoin ? "theme:learning_themes!inner" : "theme:learning_themes";
   return `
-    id, title, content_type, display_order, is_published, is_open_to_trial, week_id,
-    ${weekRel}(
-      id, name, display_order, phase_id,
-      ${phaseRel}(
-        id, name, display_order, theme_id,
-        ${themeRel}(id, name, display_order)
-      )
+    id, title, content_type, display_order, is_published, is_open_to_trial, phase_id,
+    grading_rubric_version:grading_rubric->version,
+    grading_rubric_first_requirement:grading_rubric->requirements->0,
+    ${phaseRel}(
+      id, name, display_order, theme_id,
+      ${themeRel}(id, name, display_order)
     )
   `
     .replace(/\s+/g, " ")
@@ -199,26 +221,15 @@ const MANAGE_PHASE_LIST_SELECT = `
   .replace(/\s+/g, " ")
   .trim();
 
-const MANAGE_WEEK_LIST_SELECT = `
-  id, name, display_order, is_published, phase_id,
-  phase:learning_phases(
-    id, name, display_order, theme_id,
-    theme:learning_themes(id, name, display_order)
-  )
-`
-  .replace(/\s+/g, " ")
-  .trim();
-
-const CONTENT_SIBLING_CANDIDATE_SELECT = "id, title, display_order, is_published, week_id";
+const CONTENT_SIBLING_CANDIDATE_SELECT = "id, title, display_order, is_published, phase_id";
 
 const MANAGE_USER_LIST_SELECT =
-  "id, display_name, email, role, status, membership_type, created_at, email_opt_out_at";
+  "id, display_name, email, notification_email, role, status, membership_type, created_at, email_opt_out_at";
 
 /** Structural filters for /manage/contents. The title search `q` is not included (done in JS). */
 export interface FetchContentsFilters {
   themeId?: string;
   phaseId?: string;
-  weekId?: string;
   contentType?: ContentType;
 }
 
@@ -263,7 +274,7 @@ async function applySiblingUpdates(
 }
 
 /**
- * Shared insert-position resequencing for createTheme / createPhase / createWeek / createContent
+ * Shared insert-position resequencing for createTheme / createPhase / createContent
  * (SELECT siblings, resolveSiblingResequence, UPDATE changed rows). `parentFilter` is null only
  * for themes (no parent).
  * Callers must check the returned `error` is null before using `displayOrder` in the INSERT.
@@ -274,7 +285,7 @@ async function resequenceSiblingsForInsert(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
   table: SiblingTable,
   parentFilter: SiblingParentFilter,
-  insertAfterId: number | null
+  insertAfterId: number | null | "tail"
 ): Promise<{ displayOrder: number; error: null } | { displayOrder: null; error: PostgrestError }> {
   const { data: siblings, error: siblingsError } = await fetchSiblings(
     supabase,
@@ -285,7 +296,11 @@ async function resequenceSiblingsForInsert(
     return { displayOrder: null, error: siblingsError };
   }
 
-  const { displayOrder, updates } = resolveSiblingResequence(siblings ?? [], insertAfterId);
+  // "tail" resolves against the siblings just fetched, so bulk creation needs no second fetch.
+  const { displayOrder, updates } = resolveSiblingResequence(
+    siblings ?? [],
+    insertAfterId === "tail" ? getSiblingTailId(siblings ?? []) : insertAfterId
+  );
 
   const updateError = await applySiblingUpdates(supabase, table, updates);
   if (updateError) {
@@ -296,7 +311,7 @@ async function resequenceSiblingsForInsert(
 }
 
 /**
- * Shared resequencing for updateTheme / updatePhase / updateWeek / updateContent (issue #189);
+ * Shared resequencing for updateTheme / updatePhase / updateContent (issue #189);
  * covers only the destination parent.
  * The caller must call renumberSourceSiblingsAfterMove AFTER the main UPDATE (parent change)
  * succeeds. Compacting the source first would, if the main UPDATE then fails, leave the item
@@ -516,45 +531,21 @@ export async function deleteTheme(
   const phaseIds = phases?.map((p) => p.id) ?? [];
 
   if (phaseIds.length > 0) {
-    const { data: weeks, error: weekFetchError } = await supabase
-      .from("learning_weeks")
-      .select("id")
-      .in("phase_id", phaseIds)
-      .eq("is_deleted", false);
-    if (weekFetchError) {
-      console.error("週取得エラー:", weekFetchError.message);
-      return { error: weekFetchError, storageRemoved };
-    }
-
-    const weekIds = weeks?.map((w) => w.id) ?? [];
-
     // Fetch pdf_urls before the soft delete. On failure the targets are unknown, so skip Storage
     // cleanup and report storageRemoved: false (never treat as success).
-    targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, weekIds);
+    targetPdfUrls = await fetchPdfUrlsByPhaseIds(supabase, phaseIds);
     if (targetPdfUrls === null) {
       storageRemoved = false;
     }
 
-    if (weekIds.length > 0) {
-      const { error: contentError } = await supabase
-        .from("learning_contents")
-        .update({ is_deleted: true })
-        .in("week_id", weekIds)
-        .eq("is_deleted", false);
-      if (contentError) {
-        console.error("コンテンツ削除エラー:", contentError.message);
-        return { error: contentError, storageRemoved };
-      }
-    }
-
-    const { error: weekError } = await supabase
-      .from("learning_weeks")
+    const { error: contentError } = await supabase
+      .from("learning_contents")
       .update({ is_deleted: true })
       .in("phase_id", phaseIds)
       .eq("is_deleted", false);
-    if (weekError) {
-      console.error("週削除エラー:", weekError.message);
-      return { error: weekError, storageRemoved };
+    if (contentError) {
+      console.error("コンテンツ削除エラー:", contentError.message);
+      return { error: contentError, storageRemoved };
     }
 
     const { error: phaseError } = await supabase
@@ -753,43 +744,19 @@ export async function deletePhase(
 ): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
   const supabase = await createAdminSupabaseClient();
 
-  const { data: weeks, error: weekFetchError } = await supabase
-    .from("learning_weeks")
-    .select("id")
-    .eq("phase_id", id)
-    .eq("is_deleted", false);
-  if (weekFetchError) {
-    console.error("週取得エラー:", weekFetchError.message);
-    return { error: weekFetchError, storageRemoved: true };
-  }
-
-  const weekIds = weeks?.map((w) => w.id) ?? [];
-
   // Fetch pdf_urls before the soft delete; on failure report storageRemoved: false (never treat
   // as success).
-  const targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, weekIds);
+  const targetPdfUrls = await fetchPdfUrlsByPhaseIds(supabase, [id]);
   let storageRemoved = targetPdfUrls !== null;
 
-  if (weekIds.length > 0) {
-    const { error: contentError } = await supabase
-      .from("learning_contents")
-      .update({ is_deleted: true })
-      .in("week_id", weekIds)
-      .eq("is_deleted", false);
-    if (contentError) {
-      console.error("コンテンツ削除エラー:", contentError.message);
-      return { error: contentError, storageRemoved };
-    }
-
-    const { error: weekError } = await supabase
-      .from("learning_weeks")
-      .update({ is_deleted: true })
-      .eq("phase_id", id)
-      .eq("is_deleted", false);
-    if (weekError) {
-      console.error("週削除エラー:", weekError.message);
-      return { error: weekError, storageRemoved };
-    }
+  const { error: contentError } = await supabase
+    .from("learning_contents")
+    .update({ is_deleted: true })
+    .eq("phase_id", id)
+    .eq("is_deleted", false);
+  if (contentError) {
+    console.error("コンテンツ削除エラー:", contentError.message);
+    return { error: contentError, storageRemoved };
   }
 
   const { error } = await supabase
@@ -810,202 +777,7 @@ export async function deletePhase(
 }
 
 /**
- * Sorted by the week's own display_order. Callers needing theme -> phase -> week hierarchy order
- * (/manage/weeks list, ContentForm options) must pass the result through sortWeeksByHierarchy.
- */
-export async function fetchAllWeeks(): Promise<{
-  data: ManageWeekListItem[] | null;
-  error: PostgrestError | null;
-}> {
-  const supabase = await createServerSupabaseClient();
-
-  const { data, error } = await supabase
-    .from("learning_weeks")
-    .select(MANAGE_WEEK_LIST_SELECT)
-    .eq("is_deleted", false)
-    .order("display_order");
-
-  if (error) {
-    console.error("週一覧取得エラー:", error.message);
-    return { data: null, error };
-  }
-
-  return { data: data as unknown as ManageWeekListItem[], error: null };
-}
-
-export async function fetchWeekById(id: number): Promise<{
-  data: LearningWeek | null;
-  error: PostgrestError | null;
-}> {
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase
-    .from("learning_weeks")
-    .select("*")
-    .eq("id", id)
-    .eq("is_deleted", false)
-    .single();
-  if (error) {
-    console.error("週取得エラー:", error.message);
-    return { data: null, error };
-  }
-  return { data, error: null };
-}
-
-/**
- * Same approach as createTheme, renumbering siblings under the same phase_id (see
- * resolveSiblingResequence).
- */
-export async function createWeek(week: {
-  phase_id: number;
-  name: string;
-  description?: string | null;
-  insertAfterId: number | null;
-  is_published?: boolean;
-}): Promise<{ data: LearningWeek | null; error: PostgrestError | null }> {
-  const supabase = await createServerSupabaseClient();
-
-  const resequenced = await resequenceSiblingsForInsert(
-    supabase,
-    "learning_weeks",
-    { column: "phase_id", value: week.phase_id },
-    week.insertAfterId
-  );
-  if (resequenced.error) {
-    console.error("週作成エラー（再採番）:", resequenced.error.message);
-    return { data: null, error: resequenced.error };
-  }
-  const { displayOrder } = resequenced;
-
-  const { data, error } = await supabase
-    .from("learning_weeks")
-    .insert({
-      phase_id: week.phase_id,
-      name: week.name,
-      description: week.description,
-      is_published: week.is_published,
-      display_order: displayOrder,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error("週作成エラー:", error.message);
-    return { data: null, error };
-  }
-
-  return { data, error: null };
-}
-
-/**
- * Same approach as updatePhase: display order is untouched if `insertAfterId` is omitted and
- * phase_id is unchanged; otherwise renumber the destination first and the source only after the
- * main UPDATE succeeds (see resequenceDestinationForUpdate).
- */
-export async function updateWeek(
-  id: number,
-  week: Partial<LearningWeek> & { insertAfterId?: number | null }
-): Promise<{ error: PostgrestError | null }> {
-  const supabase = await createServerSupabaseClient();
-  const { insertAfterId, ...patch } = week;
-
-  let destinationFilter: SiblingParentFilter = null;
-  let sourceFilter: SiblingParentFilter = null;
-  let parentChanged = false;
-
-  if (insertAfterId !== undefined || patch.phase_id !== undefined) {
-    const { data: current, error: currentError } = await supabase
-      .from("learning_weeks")
-      .select("phase_id")
-      .eq("id", id)
-      .eq("is_deleted", false)
-      .single();
-    if (currentError) {
-      console.error("週更新エラー（現在値取得）:", currentError.message);
-      return { error: currentError };
-    }
-    const destinationPhaseId = patch.phase_id ?? current.phase_id;
-    parentChanged = destinationPhaseId !== current.phase_id;
-    destinationFilter = { column: "phase_id", value: destinationPhaseId };
-    sourceFilter = { column: "phase_id", value: current.phase_id };
-  }
-
-  const resequenced = await resequenceDestinationForUpdate(
-    supabase,
-    "learning_weeks",
-    id,
-    destinationFilter,
-    parentChanged,
-    insertAfterId
-  );
-  if (resequenced.error) {
-    console.error("週更新エラー（再採番）:", resequenced.error.message);
-    return { error: resequenced.error };
-  }
-
-  const updatePayload =
-    resequenced.displayOrder !== undefined
-      ? { ...patch, display_order: resequenced.displayOrder }
-      : patch;
-
-  const { error } = await supabase.from("learning_weeks").update(updatePayload).eq("id", id);
-
-  if (error) {
-    console.error("週更新エラー:", error.message);
-    return { error };
-  }
-
-  if (parentChanged) {
-    const sourceError = await renumberSourceSiblingsAfterMove(
-      supabase,
-      "learning_weeks",
-      id,
-      sourceFilter
-    );
-    if (sourceError) {
-      console.error("週更新エラー（移動元の再採番）:", sourceError.message);
-      return { error: sourceError };
-    }
-  }
-
-  return { error: null };
-}
-
-export async function deleteWeek(
-  id: number
-): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
-  const supabase = await createAdminSupabaseClient();
-
-  // Fetch pdf_urls before the soft delete; on failure report storageRemoved: false (never treat
-  // as success).
-  const targetPdfUrls = await fetchPdfUrlsByWeekIds(supabase, [id]);
-  let storageRemoved = targetPdfUrls !== null;
-
-  const { error: contentError } = await supabase
-    .from("learning_contents")
-    .update({ is_deleted: true })
-    .eq("week_id", id)
-    .eq("is_deleted", false);
-  if (contentError) {
-    console.error("コンテンツ削除エラー:", contentError.message);
-    return { error: contentError, storageRemoved };
-  }
-
-  const { error } = await supabase.from("learning_weeks").update({ is_deleted: true }).eq("id", id);
-  if (error) {
-    console.error("週削除エラー:", error.message);
-    return { error, storageRemoved };
-  }
-
-  // Remove unreferenced Storage objects only after all DB writes succeed.
-  if (targetPdfUrls !== null && targetPdfUrls.length > 0) {
-    storageRemoved = await removeUnreferencedSlideObjects(supabase, targetPdfUrls);
-  }
-
-  return { error: null, storageRemoved };
-}
-
-/**
- * Management list (#196); body columns are excluded. Theme/phase/week/type filters run in SQL;
+ * Management list (#196); body columns are excluded. Theme/phase/type filters run in SQL;
  * the title search stays in the caller's JS.
  */
 export async function fetchAllContents(filters: FetchContentsFilters = {}): Promise<{
@@ -1014,19 +786,22 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
 }> {
   const themeId = parseStrictFilterId(filters.themeId);
   const phaseId = parseStrictFilterId(filters.phaseId);
-  const weekId = parseStrictFilterId(filters.weekId);
 
   // An integer-invalid query string yields "no match" instead of a PostgREST 400 (same as the old
   // JS string comparison, which never matched such input).
-  if (
-    (filters.themeId && themeId === undefined) ||
-    (filters.phaseId && phaseId === undefined) ||
-    (filters.weekId && weekId === undefined)
-  ) {
+  if ((filters.themeId && themeId === undefined) || (filters.phaseId && phaseId === undefined)) {
     return { data: [], error: null };
   }
 
-  const supabase = await createServerSupabaseClient();
+  // The list reads grading_rubric->version. That column is absent from the anon/authenticated
+  // grant, and staff share the authenticated role, so the user client cannot select it.
+  // service_role bypasses RLS, so the role check has to live here: a member caller would
+  // otherwise see every unpublished row.
+  const { userRole } = await getServerAuth();
+  if (!checkContentPermissions(userRole)) {
+    return { data: [], error: null };
+  }
+  const supabase = await createAdminSupabaseClient();
   const needsInnerJoin = themeId !== undefined || phaseId !== undefined;
 
   let query = supabase
@@ -1034,17 +809,14 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
     .select(manageContentListSelect(needsInnerJoin))
     .eq("is_deleted", false);
 
-  if (weekId !== undefined) {
-    query = query.eq("week_id", weekId);
-  }
   if (filters.contentType) {
     query = query.eq("content_type", filters.contentType);
   }
   if (themeId !== undefined) {
-    query = query.eq("week.phase.theme_id", themeId);
+    query = query.eq("phase.theme_id", themeId);
   }
   if (phaseId !== undefined) {
-    query = query.eq("week.phase_id", phaseId);
+    query = query.eq("phase_id", phaseId);
   }
 
   const { data, error } = await query.order("display_order");
@@ -1055,13 +827,21 @@ export async function fetchAllContents(filters: FetchContentsFilters = {}): Prom
   }
 
   // This cast depends on the select returning the nested shape down to the theme
-  // (week.phase.theme). If you change the select, keep week.phase.theme, which the hierarchy sort
+  // (phase.theme). If you change the select, keep phase.theme, which the hierarchy sort
   // in content-grouping.ts reads.
-  return { data: data as unknown as ManageContentListItem[], error: null };
+  // A deleted rubric (empty requirements, #344) keeps its version but is shown as "not set".
+  const rows = (
+    data as unknown as Array<ManageContentListItem & { grading_rubric_first_requirement: unknown }>
+  ).map(({ grading_rubric_first_requirement, ...row }) => ({
+    ...row,
+    grading_rubric_version:
+      grading_rubric_first_requirement != null ? row.grading_rubric_version : null,
+  }));
+  return { data: rows as ManageContentListItem[], error: null };
 }
 
 /**
- * Whether at least one non-deleted content exists (head count). Filter options come from the week
+ * Whether at least one non-deleted content exists (head count). Filter options come from the phase
  * list, so this is only for the empty-state check (#196 review).
  */
 export async function hasAnyManageContents(): Promise<{
@@ -1084,10 +864,10 @@ export async function hasAnyManageContents(): Promise<{
 
 /**
  * Sibling candidates for the insert-position picker in the content form (#196). No body or
- * 4-level nesting; filterable by `week_id`. Without `weekId` all weeks are returned and the form
- * filters when the week changes.
+ * nesting; filterable by `phase_id`. Without `phaseId` all phases are returned and the form
+ * filters when the phase changes.
  */
-export async function fetchContentSiblingCandidates(weekId?: number): Promise<{
+export async function fetchContentSiblingCandidates(phaseId?: number): Promise<{
   data: ContentSiblingCandidateRow[] | null;
   error: PostgrestError | null;
 }> {
@@ -1098,8 +878,8 @@ export async function fetchContentSiblingCandidates(weekId?: number): Promise<{
     .select(CONTENT_SIBLING_CANDIDATE_SELECT)
     .eq("is_deleted", false);
 
-  if (weekId !== undefined) {
-    query = query.eq("week_id", weekId);
+  if (phaseId !== undefined) {
+    query = query.eq("phase_id", phaseId);
   }
 
   const { data, error } = await query.order("display_order");
@@ -1133,35 +913,62 @@ export async function fetchContentByIdForAdmin(
 }
 
 /**
- * Same approach as createTheme, renumbering siblings under the same week_id (see
+ * Same approach as createTheme, renumbering siblings under the same phase_id (see
  * resolveSiblingResequence).
  * Unlike the other three, sibling fetch/renumber uses createAdminSupabaseClient() because
  * createContent already used service_role. The AGENTS.md service_role restriction covers
  * student-facing delivery paths, not this admin-only create path.
  */
-export async function createContent(content: {
-  week_id: number;
+type CreateContentInput = {
+  phase_id: number;
   title: string;
-  content_type: "video" | "text" | "exercise" | "slide";
+  content_type: ContentType;
   video_url?: string | null;
   text_content?: string | null;
   description?: string | null;
   exercise_instructions?: string | null;
   hint?: string | null;
   reference_answer?: string | null;
+  starter_files?: LearningContent["starter_files"];
+  submission_file_slots?: LearningContent["submission_file_slots"];
+  preview_base_html?: string | null;
+  show_preview?: boolean | null;
+  show_console?: boolean | null;
   allowed_submission_types?: "code" | "url" | "both";
   code_language?: CodeLanguage;
   pdf_url?: string | null;
+  gradingRubric?: GradingRubricInput | null;
   insertAfterId: number | null;
   is_published?: boolean;
   is_open_to_trial?: boolean;
-}): Promise<{ data: LearningContent | null; error: PostgrestError | null }> {
-  const supabase = await createAdminSupabaseClient();
+  quizQuestions?: QuizQuestionData[];
+};
 
+/**
+ * `publishFailed`: the content (and its quiz questions) was created but could not be switched to
+ * published afterwards, so it exists as a draft. Callers report it as created-but-unpublished, not
+ * as a failure, or a retry would create a duplicate.
+ */
+type CreateContentResult = {
+  data: LearningContent | null;
+  error: PostgrestError | null;
+  publishFailed?: boolean;
+  /** Explicit preview/console flags the file layout cannot show. */
+  previewNotAllowed?: string;
+};
+
+export async function createContent(content: CreateContentInput): Promise<CreateContentResult> {
+  return createContentWith(await createAdminSupabaseClient(), content);
+}
+
+async function createContentWith(
+  supabase: AdminSupabaseClient,
+  content: Omit<CreateContentInput, "insertAfterId"> & { insertAfterId: number | null | "tail" }
+): Promise<CreateContentResult> {
   const resequenced = await resequenceSiblingsForInsert(
     supabase,
     "learning_contents",
-    { column: "week_id", value: content.week_id },
+    { column: "phase_id", value: content.phase_id },
     content.insertAfterId
   );
   if (resequenced.error) {
@@ -1170,22 +977,66 @@ export async function createContent(content: {
   }
   const { displayOrder } = resequenced;
 
+  // A quiz is inserted unpublished and published only after its questions are saved: if the
+  // questions fail and the rollback below also fails, what remains is a hidden draft rather than
+  // a published quiz with no questions.
+  const quizQuestions = content.content_type === "quiz" ? content.quizQuestions : undefined;
+  // Non-exercise rows cannot store slots (CHECK). The first slot's language is code_language
+  // so AI review's single-file fallback matches the layout the learner submits.
+  const exercise = content.content_type === "exercise";
+  const submissionFileSlots = exercise ? (content.submission_file_slots ?? null) : null;
+  const previewBaseHtml = exercise ? (content.preview_base_html ?? null) : null;
+  const showPreview = exercise ? (content.show_preview ?? null) : null;
+  const showConsole = exercise ? (content.show_console ?? null) : null;
+  if (exercise) {
+    const previewMessage = previewSettingsError({
+      contentType: "exercise",
+      files: resolveSubmissionFileSlots({
+        submissionFileSlots,
+        starterFiles: Array.isArray(content.starter_files)
+          ? (content.starter_files as { filename: string; language: string }[])
+          : null,
+        codeLanguage: content.code_language,
+      }),
+      showPreview,
+      showConsole,
+      previewBaseHtml,
+    });
+    if (previewMessage) {
+      return { data: null, error: null, previewNotAllowed: previewMessage };
+    }
+  }
+  const firstSlotLanguage = parseSubmissionFileSlots(submissionFileSlots)?.[0]?.language;
+
   const { data, error } = await supabase
     .from("learning_contents")
     .insert({
-      week_id: content.week_id,
+      phase_id: content.phase_id,
       title: content.title,
       content_type: content.content_type,
       video_url: content.video_url,
-      text_content: content.text_content,
+      // Same rule as the form and bulk set_type: an article exists only on text and slide.
+      text_content: contentTypeStoresTextContent(content.content_type)
+        ? content.text_content
+        : null,
       description: content.description,
       exercise_instructions: content.exercise_instructions,
       hint: content.hint,
       reference_answer: content.reference_answer,
+      starter_files: content.starter_files,
+      submission_file_slots: submissionFileSlots,
+      preview_base_html: previewBaseHtml,
+      show_preview: showPreview,
+      show_console: showConsole,
       allowed_submission_types: content.allowed_submission_types,
-      code_language: content.code_language,
+      code_language: firstSlotLanguage ?? content.code_language,
       pdf_url: content.pdf_url,
-      is_published: content.is_published,
+      // Rubrics belong to exercises only; version always starts at 1 for a new content row.
+      grading_rubric:
+        content.content_type === "exercise" && content.gradingRubric
+          ? nextGradingRubric(null, content.gradingRubric)
+          : null,
+      is_published: quizQuestions ? false : content.is_published,
       is_open_to_trial: content.is_open_to_trial,
       display_order: displayOrder,
     })
@@ -1197,114 +1048,780 @@ export async function createContent(content: {
     return { data: null, error };
   }
 
+  if (quizQuestions) {
+    const quizError = await replaceQuizQuestions(supabase, data.id, quizQuestions);
+    if (quizError) {
+      // Leaving the row would publish a quiz with no questions. Nothing can reference a row created
+      // a moment ago, so remove it outright (a soft-deleted half-made row would linger in lists)
+      // and close the display_order gap the insert opened.
+      const { error: rollbackError } = await supabase
+        .from("learning_contents")
+        .delete()
+        .eq("id", data.id);
+      if (rollbackError) {
+        console.error("コンテンツ作成エラー（設問保存失敗後の取り消し）:", rollbackError.message);
+      } else {
+        const renumberError = await renumberSourceSiblingsAfterMove(
+          supabase,
+          "learning_contents",
+          data.id,
+          { column: "phase_id", value: content.phase_id }
+        );
+        if (renumberError) {
+          console.error("コンテンツ作成エラー（取り消し後の再採番）:", renumberError.message);
+        }
+      }
+      return { data: null, error: quizError };
+    }
+
+    if (content.is_published) {
+      const { data: published, error: publishError } = await supabase
+        .from("learning_contents")
+        .update({ is_published: true })
+        .eq("id", data.id)
+        .select()
+        .single();
+      if (publishError) {
+        // The quiz and its questions exist; only publishing failed. Return the draft so the caller
+        // reports it as created, otherwise a retry would add a second copy.
+        console.error("コンテンツ作成エラー（設問保存後の公開）:", publishError.message);
+        return { data, error: null, publishFailed: true };
+      }
+      return { data: published, error: null };
+    }
+  }
+
   return { data, error: null };
 }
 
 /**
+ * Creates contents one by one in array order, each at the end of its phase (bulk registration).
+ * Not atomic: on the first failure it stops and reports what was already created, so the caller
+ * can tell the admin which items to retry.
+ */
+export async function createContentsAtTail(
+  items: Omit<CreateContentInput, "insertAfterId">[]
+): Promise<{
+  created: { id: number; title: string; isPublished: boolean }[];
+  error: PostgrestError | null;
+  failedIndex: number | null;
+}> {
+  const supabase = await createAdminSupabaseClient();
+  const created: { id: number; title: string; isPublished: boolean }[] = [];
+
+  for (const [index, item] of items.entries()) {
+    let result: Awaited<ReturnType<typeof createContentWith>>;
+    try {
+      result = await createContentWith(supabase, { ...item, insertAfterId: "tail" });
+    } catch (thrown) {
+      // Report like any other failure so the already-created items are not lost from the response.
+      console.error("コンテンツ一括作成エラー:", thrown);
+      return {
+        created,
+        error: { message: String(thrown) } as PostgrestError,
+        failedIndex: index,
+      };
+    }
+    if (result.previewNotAllowed) {
+      return {
+        created,
+        error: {
+          message: result.previewNotAllowed,
+          code: "23514",
+          details: "",
+          hint: "",
+        } as PostgrestError,
+        failedIndex: index,
+      };
+    }
+    const { data, error } = result;
+    if (error || !data) {
+      return {
+        created,
+        error: error ?? ({ message: "no row returned" } as PostgrestError),
+        failedIndex: index,
+      };
+    }
+    created.push({ id: data.id, title: data.title, isPublished: Boolean(data.is_published) });
+  }
+
+  return { created, error: null, failedIndex: null };
+}
+
+/**
+ * Replaces all questions of a quiz in one transaction (replace_quiz_questions RPC), so a failure
+ * never leaves a partial set. Order follows the array.
+ */
+async function replaceQuizQuestions(
+  supabase: AdminSupabaseClient,
+  contentId: number,
+  questions: QuizQuestionData[]
+): Promise<PostgrestError | null> {
+  const { error } = await supabase.rpc("replace_quiz_questions", {
+    p_content_id: contentId,
+    p_questions: questions,
+  });
+  if (error) {
+    console.error("クイズ設問の保存エラー:", error.message);
+  }
+  return error;
+}
+
+/** Questions including answers, for the admin edit form only (service_role). */
+export async function fetchQuizQuestionsForAdmin(
+  contentId: number
+): Promise<{ data: QuizQuestionData[] | null; error: PostgrestError | null }> {
+  return selectQuizQuestions(await createAdminSupabaseClient(), contentId);
+}
+
+async function selectQuizQuestions(
+  supabase: AdminSupabaseClient,
+  contentId: number
+): Promise<{ data: QuizQuestionData[] | null; error: PostgrestError | null }> {
+  const { data, error } = await supabase
+    .from("quiz_questions")
+    .select("question_type, question, choices, correct_choices, model_answer, explanation, hint")
+    .eq("content_id", contentId)
+    .order("display_order", { ascending: true });
+
+  if (error) {
+    console.error("クイズ設問の取得エラー:", error.message);
+    return { data: null, error };
+  }
+
+  return {
+    data: data
+      .filter((row) => isQuizQuestionType(row.question_type))
+      .map((row) => ({
+        ...row,
+        question_type: row.question_type as QuizQuestionData["question_type"],
+      })),
+    error: null,
+  };
+}
+
+/**
  * Same approach as updatePhase: display order is untouched if `insertAfterId` is omitted and
- * week_id is unchanged; otherwise renumber the destination first and the source only after the
+ * phase_id is unchanged; otherwise renumber the destination first and the source only after the
  * main UPDATE succeeds (see resequenceDestinationForUpdate). Uses createAdminSupabaseClient() for
  * sibling work for the same reason as createContent.
  */
+type ContentUpdateResult = {
+  error: PostgrestError | null;
+  storageRemoved: boolean;
+  /** Another save changed the rubric between the read and this write. */
+  conflict?: boolean;
+  /** Incoming keys reuse a number this rubric already issued. */
+  keyReuse?: string[];
+  /** Slots were sent without content_type onto a row that is not an exercise. */
+  slotsNotAllowed?: boolean;
+  /** show_preview / show_console cannot be stored for this layout or content type. */
+  previewNotAllowed?: string;
+  /**
+   * Version stored by this save. Present only after the rubric write commits, so the editor can
+   * keep locking the rows still on screen. null means the rubric was cleared.
+   */
+  gradingRubricVersion?: number | null;
+};
+
+/**
+ * Rejects an explicit preview/console that the resolved layout cannot show. A title-only
+ * update does not read the row. A partial body that omits the layout or the flags does.
+ */
+async function rejectIllegalPreviewSettings(
+  supabase: AdminSupabaseClient,
+  id: number,
+  patch: Partial<LearningContent>
+): Promise<string | null | "missing"> {
+  const setsFlags = patch.show_preview !== undefined || patch.show_console !== undefined;
+  const changesLayout =
+    patch.submission_file_slots !== undefined ||
+    patch.starter_files !== undefined ||
+    patch.code_language !== undefined;
+  // Clearing the scaffold while show_preview stays true must be rejected (#351).
+  const changesScaffold = patch.preview_base_html !== undefined;
+  if (!setsFlags && !changesLayout && !changesScaffold) {
+    return null;
+  }
+
+  let contentType = patch.content_type;
+  let slots = patch.submission_file_slots;
+  let starter = patch.starter_files;
+  let language = patch.code_language;
+  let showPreview = patch.show_preview;
+  let showConsole = patch.show_console;
+  let previewBaseHtml = patch.preview_base_html;
+  // Skip the row read only when every layout input, scaffold, and both flags are in the patch.
+  // A partial layout (e.g. code_language alone) must merge omitted slots/starter/flags/scaffold
+  // from the row, or an illegal true can be stored against the real DB layout.
+  const complete =
+    contentType === "exercise" &&
+    patch.submission_file_slots !== undefined &&
+    patch.starter_files !== undefined &&
+    patch.code_language !== undefined &&
+    patch.preview_base_html !== undefined &&
+    patch.show_preview !== undefined &&
+    patch.show_console !== undefined;
+  if (!complete) {
+    const { data, error } = await supabase
+      .from("learning_contents")
+      .select(
+        "content_type, submission_file_slots, starter_files, code_language, preview_base_html, show_preview, show_console"
+      )
+      .eq("id", id)
+      .eq("is_deleted", false)
+      .maybeSingle();
+    if (error || !data) {
+      console.error("コンテンツ更新エラー（プレビュー設定）:", error?.message ?? "no row");
+      return "missing";
+    }
+    // Prefer the type this request is moving to (video→exercise with flags only must not 400).
+    const resolvedType = contentType ?? data.content_type;
+    if (resolvedType !== "exercise") {
+      return patch.show_preview != null || patch.show_console != null
+        ? PREVIEW_EXERCISE_ONLY_MESSAGE
+        : null;
+    }
+    contentType = "exercise";
+    if (slots === undefined) {
+      slots = data.submission_file_slots;
+    }
+    if (starter === undefined) {
+      starter = data.starter_files;
+    }
+    if (language === undefined) {
+      language = data.code_language;
+    }
+    if (previewBaseHtml === undefined) {
+      previewBaseHtml = data.preview_base_html;
+    }
+    if (showPreview === undefined) {
+      showPreview = data.show_preview;
+    }
+    if (showConsole === undefined) {
+      showConsole = data.show_console;
+    }
+  }
+
+  if (showPreview !== true && showConsole !== true) {
+    return null;
+  }
+  return previewSettingsError({
+    contentType: "exercise",
+    files: resolveSubmissionFileSlots({
+      submissionFileSlots: slots ?? null,
+      starterFiles: Array.isArray(starter)
+        ? (starter as { filename: string; language: string }[])
+        : null,
+      codeLanguage: language,
+    }),
+    showPreview: showPreview ?? null,
+    showConsole: showConsole ?? null,
+    previewBaseHtml: previewBaseHtml ?? null,
+  });
+}
+
 export async function updateContent(
   id: number,
-  content: Partial<LearningContent> & { insertAfterId?: number | null }
-): Promise<{ error: PostgrestError | null; storageRemoved: boolean }> {
+  content: Omit<Partial<LearningContent>, "grading_rubric"> & {
+    insertAfterId?: number | null;
+    quizQuestions?: QuizQuestionData[];
+    /** undefined = leave as is, null = clear, object = save (version derived here). */
+    gradingRubric?: GradingRubricInput | null;
+    /**
+     * Version the editor loaded. undefined = the caller has no form (lock against the row just
+     * read). null or a number = that loaded version, so a stale form cannot overwrite a newer one.
+     */
+    loadedRubricVersion?: number | null;
+  }
+): Promise<ContentUpdateResult> {
   const supabase = await createAdminSupabaseClient();
-  const { insertAfterId, ...patch } = content;
+  const { insertAfterId, quizQuestions, gradingRubric, loadedRubricVersion, ...patch } = content;
+  // Zod only rejects slots / scaffold on a non-exercise when this request also sends content_type.
+  // A slots-only or scaffold-only PUT would otherwise hit the exercise-only CHECK and come back as 500.
+  if (
+    (patch.submission_file_slots != null || patch.preview_base_html != null) &&
+    patch.content_type === undefined
+  ) {
+    const { data: currentType, error: typeError } = await supabase
+      .from("learning_contents")
+      .select("content_type")
+      .eq("id", id)
+      .eq("is_deleted", false)
+      .single();
+    if (typeError || !currentType) {
+      console.error("コンテンツ更新エラー（現在値取得）:", typeError?.message ?? "no row");
+      return {
+        error: typeError ?? {
+          message: "コンテンツの現在値を取得できませんでした",
+          details: "",
+          hint: "",
+          code: "PGRST116",
+        },
+        storageRemoved: true,
+      };
+    }
+    if (currentType.content_type !== "exercise") {
+      if (patch.submission_file_slots != null) {
+        return { error: null, storageRemoved: true, slotsNotAllowed: true };
+      }
+      // preview_base_html-only PUT on a non-exercise would hit the CHECK as 500 (#351 review).
+      return {
+        error: null,
+        storageRemoved: true,
+        previewNotAllowed: "プレビューの土台 HTML は演習だけに指定できます",
+      };
+    }
+  }
+  if (patch.content_type !== undefined && patch.content_type !== "exercise") {
+    patch.submission_file_slots = null;
+    patch.preview_base_html = null;
+    patch.show_preview = null;
+    patch.show_console = null;
+  } else {
+    const previewRejection = await rejectIllegalPreviewSettings(supabase, id, patch);
+    if (previewRejection === "missing") {
+      return {
+        error: {
+          message: "コンテンツの現在値を取得できませんでした",
+          details: "",
+          hint: "",
+          code: "PGRST116",
+        } as PostgrestError,
+        storageRemoved: true,
+      };
+    }
+    if (previewRejection) {
+      return { error: null, storageRemoved: true, previewNotAllowed: previewRejection };
+    }
+  }
+  const firstSlotLanguage = parseSubmissionFileSlots(patch.submission_file_slots)?.[0]?.language;
+  if (firstSlotLanguage) {
+    patch.code_language = firstSlotLanguage;
+  }
+
+  if (patch.content_type !== "quiz" || !quizQuestions) {
+    return updateContentRow(supabase, id, patch, insertAfterId, gradingRubric, loadedRubricVersion);
+  }
+
+  const { data: previous, error: previousError } = await selectQuizQuestions(supabase, id);
+  if (previousError || !previous) {
+    return { error: previousError, storageRemoved: true };
+  }
+  // The edit form always sends the questions. Replacing unchanged ones would renumber their ids,
+  // and a learner answering at that moment would be graded against ids that no longer exist.
+  if (sameQuizQuestions(previous, quizQuestions)) {
+    return updateContentRow(supabase, id, patch, insertAfterId, gradingRubric, loadedRubricVersion);
+  }
+
+  // Questions go first so a failure here never leaves a quiz row with stale or no questions. If
+  // the row update then fails, the previous questions are written back (best effort: the restore
+  // can itself fail, which is only logged). replace_quiz_questions updates rows in place by
+  // position, so neither the replace nor the restore renumbers the question ids.
+  const quizError = await replaceQuizQuestions(supabase, id, quizQuestions);
+  if (quizError) {
+    return { error: quizError, storageRemoved: true };
+  }
+  const restorePrevious = async () => {
+    const restoreError = await replaceQuizQuestions(supabase, id, previous);
+    if (restoreError) {
+      console.error("コンテンツ更新エラー（設問の復元）:", restoreError.message);
+    }
+  };
+  try {
+    const result = await updateContentRow(
+      supabase,
+      id,
+      patch,
+      insertAfterId,
+      gradingRubric,
+      loadedRubricVersion
+    );
+    // conflict and keyReuse leave the row unchanged but carry error: null. The questions were
+    // already replaced, so those outcomes have to restore them too or the quiz and the row diverge.
+    if (result.error || result.conflict || result.keyReuse) {
+      await restorePrevious();
+    }
+    return result;
+  } catch (thrown) {
+    await restorePrevious();
+    throw thrown;
+  }
+}
+
+function sameQuizQuestions(a: QuizQuestionData[], b: QuizQuestionData[]): boolean {
+  const normalize = (questions: QuizQuestionData[]) =>
+    JSON.stringify(
+      questions.map((q) => [
+        q.question_type,
+        q.question,
+        q.choices,
+        q.correct_choices,
+        q.model_answer ?? null,
+        q.explanation ?? null,
+        q.hint ?? null,
+      ])
+    );
+  return normalize(a) === normalize(b);
+}
+
+function writtenRowUpdatedAt(data: unknown): string | null {
+  if (!Array.isArray(data) || data.length === 0) {
+    return null;
+  }
+  const row = data[0];
+  if (!row || typeof row !== "object" || !("updated_at" in row)) {
+    return null;
+  }
+  const updatedAt = (row as { updated_at: unknown }).updated_at;
+  return typeof updatedAt === "string" && updatedAt.length > 0 ? updatedAt : null;
+}
+
+async function updateContentRow(
+  supabase: AdminSupabaseClient,
+  id: number,
+  basePatch: Omit<Partial<LearningContent>, "grading_rubric">,
+  insertAfterId: number | null | undefined,
+  gradingRubric: GradingRubricInput | null | undefined,
+  loadedRubricVersion: number | null | undefined
+): Promise<ContentUpdateResult> {
+  const patch: Partial<LearningContent> = { ...basePatch };
+  // A type change away from text/slide must clear the article. Leaving it set would restore the
+  // old article the next time the row becomes a slide or text.
+  if (patch.content_type !== undefined && !contentTypeStoresTextContent(patch.content_type)) {
+    patch.text_content = null;
+  }
+  const movesAwayFromExercise =
+    patch.content_type !== undefined && patch.content_type !== "exercise";
+  // null clears, an object saves, and leaving exercise drops the rubric. undefined leaves it.
+  const touchesRubric = movesAwayFromExercise || gradingRubric !== undefined;
 
   let destinationFilter: SiblingParentFilter = null;
   let sourceFilter: SiblingParentFilter = null;
   let parentChanged = false;
 
-  // The pre-update values needed for the move decision (week_id) and for deleting the old object
+  // The pre-update values needed for the move decision (phase_id) and for deleting the old object
   // when pdf_url changes are fetched in one SELECT (issue #246). If it was fetched only for
   // pdf_url, a failure does not abort the update: continue with the old key unknown and report
   // storageRemoved: false (same as deleteContent).
-  const needsCurrentWeek = insertAfterId !== undefined || patch.week_id !== undefined;
+  const needsCurrentPhase = insertAfterId !== undefined || patch.phase_id !== undefined;
   const needsCurrentPdf = patch.pdf_url !== undefined;
   let previousPdfUrl: string | null = null;
   let pdfFetchFailed = false;
-  if (needsCurrentWeek || needsCurrentPdf) {
+  // Set whenever this write changes grading_rubric, including a clear. The UPDATE matches that
+  // version (a deleted rubric keeps its version as a tombstone; NULL only if the row never had a
+  // rubric) so a stale form cannot overwrite a newer rubric or republish an old key.
+  let expectedRubricVersion: number | null | undefined;
+  // The versioned write commits before resequence. If a later step fails, put these back;
+  // otherwise a quiz keeps the new type and a wiped rubric while its questions are restored.
+  // submission_file_slots is set only when this save nulls it in that same UPDATE: restoring the
+  // type without the layout would drop a file list that has no starter_files to rebuild it.
+  let rubricSnapshot: {
+    grading_rubric: LearningContent["grading_rubric"];
+    content_type: LearningContent["content_type"];
+    submission_file_slots?: LearningContent["submission_file_slots"];
+    preview_base_html?: LearningContent["preview_base_html"];
+    show_preview?: LearningContent["show_preview"];
+    show_console?: LearningContent["show_console"];
+  } | null = null;
+  let rubricWriteCommitted = false;
+  let committedRubricVersion: number | null | undefined;
+  let committedRubricValue: LearningContent["grading_rubric"] = null;
+  // The rubric UPDATE's updated_at. Only needed when the row had no rubric before this save and
+  // the committed value is NULL: IS NULL alone would also match a later save that left it NULL.
+  let committedRubricUpdatedAt: string | null = null;
+  if (needsCurrentPhase || needsCurrentPdf || touchesRubric) {
     const { data: current, error: currentError } = await supabase
       .from("learning_contents")
-      .select("week_id, pdf_url")
+      .select(
+        "phase_id, pdf_url, grading_rubric, content_type, submission_file_slots, preview_base_html, show_preview, show_console"
+      )
       .eq("id", id)
       .eq("is_deleted", false)
       .single();
-    if (currentError) {
-      console.error("コンテンツ更新エラー（現在値取得）:", currentError.message);
-      if (needsCurrentWeek) {
-        return { error: currentError, storageRemoved: true };
+    if (currentError || !current) {
+      console.error("コンテンツ更新エラー（現在値取得）:", currentError?.message ?? "no row");
+      // The rubric version can't be derived without the stored rubric, so fail rather than guess.
+      if (needsCurrentPhase || touchesRubric) {
+        return {
+          error: currentError ?? {
+            message: "コンテンツの現在値を取得できませんでした",
+            details: "",
+            hint: "",
+            code: "PGRST116",
+          },
+          storageRemoved: true,
+        };
       }
       pdfFetchFailed = true;
     } else {
       previousPdfUrl = current.pdf_url;
-      if (needsCurrentWeek) {
-        const destinationWeekId = patch.week_id ?? current.week_id;
-        parentChanged = destinationWeekId !== current.week_id;
-        destinationFilter = { column: "week_id", value: destinationWeekId };
-        sourceFilter = { column: "week_id", value: current.week_id };
+      if (touchesRubric) {
+        // A rubric belongs to exercises only: judge the type the row will have after this update,
+        // so switching a stored video to exercise keeps the rubric sent with it.
+        const stored = parseStoredGradingRubric(current.grading_rubric);
+        // zod can reject a row the CHECK allows (too many requirements, a duplicate key). The
+        // version is still in the JSON; treating that as NULL makes `IS NULL` match nothing and
+        // every later save 409s.
+        const lockVersion = getGradingRubricVersion(current.grading_rubric);
+        if (current.grading_rubric != null && lockVersion == null) {
+          return {
+            error: {
+              message: "保存済みの採点基準を読み取れませんでした",
+              details: "",
+              hint: "",
+              code: "PGRST116",
+            } as PostgrestError,
+            storageRemoved: true,
+          };
+        }
+        // The version just read only closes the gap until this UPDATE. A form opened on an older
+        // version would otherwise be applied on top of the newer row.
+        if (loadedRubricVersion !== undefined && loadedRubricVersion !== lockVersion) {
+          return { error: null, storageRemoved: true, conflict: true };
+        }
+        const resultingType = patch.content_type ?? current.content_type;
+        // zod can reject a CHECK-valid row. Reuse still has to see those keys, or a removed
+        // r{n} can name a different requirement while old reviews still point at it.
+        // The form projection drops non-string keys and turns a non-string description into "".
+        // Using it as the "unchanged" baseline would keep the old version while replacing the
+        // criteria that past reviews stored under that version.
+        const unparsedBasis =
+          stored == null && lockVersion != null
+            ? {
+                version: lockVersion,
+                requirements: toRubricFormRows(current.grading_rubric),
+                max_key_number: getRubricMaxKeyNumber(current.grading_rubric),
+              }
+            : null;
+        const basis = stored ?? unparsedBasis;
+        if (gradingRubric && resultingType === "exercise") {
+          const reused = basis
+            ? reusedRequirementKeys(
+                basis,
+                gradingRubric.requirements.map((requirement) => requirement.key)
+              )
+            : [];
+          if (reused.length > 0) {
+            return { error: null, storageRemoved: true, keyReuse: reused };
+          }
+          const drafted = nextGradingRubric(basis, gradingRubric);
+          patch.grading_rubric =
+            unparsedBasis != null && lockVersion != null
+              ? { ...drafted, version: Math.max(drafted.version, lockVersion + 1) }
+              : drafted;
+        } else {
+          // Clearing (or leaving exercise) keeps the version and key history as a tombstone
+          // instead of NULL, so the next rubric can't restart at v1 / r1 (#344).
+          patch.grading_rubric = clearedGradingRubric(basis);
+        }
+        rubricSnapshot = {
+          grading_rubric: current.grading_rubric,
+          content_type: current.content_type,
+        };
+        if (movesAwayFromExercise) {
+          rubricSnapshot.submission_file_slots = current.submission_file_slots ?? null;
+          rubricSnapshot.preview_base_html = current.preview_base_html ?? null;
+          rubricSnapshot.show_preview = current.show_preview ?? null;
+          rubricSnapshot.show_console = current.show_console ?? null;
+        }
+        expectedRubricVersion = lockVersion;
+      }
+      if (needsCurrentPhase) {
+        const destinationPhaseId = patch.phase_id ?? current.phase_id;
+        parentChanged = destinationPhaseId !== current.phase_id;
+        destinationFilter = { column: "phase_id", value: destinationPhaseId };
+        sourceFilter = { column: "phase_id", value: current.phase_id };
       }
     }
   }
 
-  const resequenced = await resequenceDestinationForUpdate(
-    supabase,
-    "learning_contents",
-    id,
-    destinationFilter,
-    parentChanged,
-    insertAfterId
-  );
-  if (resequenced.error) {
-    console.error("コンテンツ更新エラー（再採番）:", resequenced.error.message);
-    return { error: resequenced.error, storageRemoved: true };
+  // Version check before sibling display_order writes. A lost race must not leave duplicate
+  // orders, and content_type moves with the rubric so the exercise-only CHECK still holds
+  // (a rubric written onto a video row, or a type change that leaves a rubric behind, fails).
+  if (expectedRubricVersion !== undefined) {
+    const rubricPayload: Partial<LearningContent> = {
+      grading_rubric: patch.grading_rubric ?? null,
+    };
+    if (patch.content_type !== undefined) {
+      rubricPayload.content_type = patch.content_type;
+      // The slots CHECK rejects a non-exercise row that still has a layout, so the clear has to
+      // ride this UPDATE. A later statement would run after the type has already changed.
+      if (patch.content_type !== "exercise") {
+        rubricPayload.submission_file_slots = null;
+        // preview_base_html is exercise-only (CHECK); clear with the type change like slots.
+        rubricPayload.preview_base_html = null;
+        rubricPayload.show_preview = null;
+        rubricPayload.show_console = null;
+      }
+    }
+    let rubricUpdate = supabase
+      .from("learning_contents")
+      .update(rubricPayload)
+      .eq("id", id)
+      .eq("is_deleted", false);
+    if (expectedRubricVersion === null) {
+      rubricUpdate = rubricUpdate.is("grading_rubric", null);
+    } else {
+      rubricUpdate = rubricUpdate.eq("grading_rubric->>version", String(expectedRubricVersion));
+    }
+    const { data: rubricRows, error: rubricError } = await rubricUpdate.select("id, updated_at");
+    if (rubricError) {
+      console.error("コンテンツ更新エラー:", rubricError.message);
+      return { error: rubricError, storageRemoved: true };
+    }
+    if (Array.isArray(rubricRows) && rubricRows.length === 0) {
+      return { error: null, storageRemoved: true, conflict: true };
+    }
+    if (rubricPayload.submission_file_slots === null) {
+      delete patch.submission_file_slots;
+    }
+    if (rubricPayload.preview_base_html === null) {
+      delete patch.preview_base_html;
+    }
+    if (rubricPayload.show_preview === null) {
+      delete patch.show_preview;
+      delete patch.show_console;
+    }
+    rubricWriteCommitted = true;
+    // The editor's next save has to lock this write, not a version a later refresh might load
+    // for different rows.
+    committedRubricVersion = getGradingRubricVersion(rubricPayload.grading_rubric);
+    committedRubricValue = rubricPayload.grading_rubric ?? null;
+    committedRubricUpdatedAt = writtenRowUpdatedAt(rubricRows);
+    delete patch.grading_rubric;
+    delete patch.content_type;
   }
 
-  const updatePayload =
-    resequenced.displayOrder !== undefined
-      ? { ...patch, display_order: resequenced.displayOrder }
-      : patch;
+  const restoreRubricWrite = async () => {
+    if (!rubricWriteCommitted || !rubricSnapshot || committedRubricVersion === undefined) {
+      return;
+    }
+    // Only clearing a row that never had a rubric has no version (clearing a real rubric leaves a
+    // tombstone with one). IS NULL also matches a later save that left the rubric empty, and the
+    // snapshot would put the previous rubric back. updated_at moves on that UPDATE.
+    if (committedRubricVersion === null && !committedRubricUpdatedAt) {
+      console.error("コンテンツ更新エラー（採点基準の復元）: 削除の時刻が取れないため戻さない");
+      return;
+    }
+    // Match the version this save wrote. Another save can commit a newer rubric before
+    // resequence or the remaining UPDATE fails; an unconditional snapshot write replaces it.
+    // The row had no rubric before this save, but writing NULL over the rubric it holds now would
+    // be turned into a tombstone by the DB trigger anyway. Write that tombstone explicitly so
+    // the stored value is what we expect (the version moves on; the form must reload).
+    const restoreValue =
+      rubricSnapshot.grading_rubric == null && committedRubricValue != null
+        ? clearedGradingRubric(parseStoredGradingRubric(committedRubricValue))
+        : rubricSnapshot.grading_rubric;
+    let restore = supabase
+      .from("learning_contents")
+      .update({ ...rubricSnapshot, grading_rubric: restoreValue })
+      .eq("id", id)
+      .eq("is_deleted", false);
+    if (committedRubricVersion === null) {
+      restore = restore.is("grading_rubric", null);
+    } else {
+      restore = restore.eq("grading_rubric->>version", String(committedRubricVersion));
+    }
+    if (committedRubricUpdatedAt) {
+      restore = restore.eq("updated_at", committedRubricUpdatedAt);
+    }
+    const { data: restoredRows, error: restoreError } = await restore.select("id");
+    if (restoreError) {
+      console.error("コンテンツ更新エラー（採点基準の復元）:", restoreError.message);
+      return;
+    }
+    if (Array.isArray(restoredRows) && restoredRows.length === 0) {
+      console.error(
+        "コンテンツ更新エラー（採点基準の復元）: より新しい保存が先に入ったため戻さない"
+      );
+    }
+  };
 
-  const { error } = await supabase.from("learning_contents").update(updatePayload).eq("id", id);
-
-  if (error) {
-    console.error("コンテンツ更新エラー:", error.message);
-    return { error, storageRemoved: true };
-  }
-
-  if (parentChanged) {
-    const sourceError = await renumberSourceSiblingsAfterMove(
+  // InvalidInsertAfterIdError is thrown, not returned, and it happens after the rubric
+  // write has committed. A returned error restores above; a throw has to restore here too,
+  // or the quiz catch puts the old questions back onto the new type and a wiped rubric.
+  try {
+    const resequenced = await resequenceDestinationForUpdate(
       supabase,
       "learning_contents",
       id,
-      sourceFilter
+      destinationFilter,
+      parentChanged,
+      insertAfterId
     );
-    if (sourceError) {
-      console.error("コンテンツ更新エラー（移動元の再採番）:", sourceError.message);
-      return { error: sourceError, storageRemoved: true };
+    if (resequenced.error) {
+      console.error("コンテンツ更新エラー（再採番）:", resequenced.error.message);
+      await restoreRubricWrite();
+      return { error: resequenced.error, storageRemoved: true };
     }
-  }
 
-  // Delete the old object (if unreferenced elsewhere) only when the normalized pdf_url key
-  // actually changed. PUT always sends pdf_url (null for non-slides), so updates that keep the
-  // same key (title edits, overwriting the same folder/number) must not delete anything. If the
-  // pre-fetch failed the old key is unknown, so skip deletion and report false.
-  let storageRemoved = true;
-  if (needsCurrentPdf) {
-    if (pdfFetchFailed) {
-      storageRemoved = false;
-    } else {
-      const previousKey = toSlideObjectKey(previousPdfUrl);
-      const nextKey = toSlideObjectKey(patch.pdf_url ?? null);
-      if (previousKey !== null && previousKey !== nextKey) {
-        storageRemoved = await removeUnreferencedSlideObjects(supabase, [previousKey]);
+    const updatePayload =
+      resequenced.displayOrder !== undefined
+        ? { ...patch, display_order: resequenced.displayOrder }
+        : patch;
+
+    // The rubric (and content_type, when this save changes it) was already written under the
+    // version predicate. Filtering this update on the old version would match 0 rows.
+    if (Object.keys(updatePayload).length > 0) {
+      const { data: updatedRows, error } = await supabase
+        .from("learning_contents")
+        .update(updatePayload)
+        .eq("id", id)
+        .select("updated_at");
+      if (error) {
+        console.error("コンテンツ更新エラー:", error.message);
+        await restoreRubricWrite();
+        return { error, storageRemoved: true };
+      }
+      // A throw after this UPDATE still has to match the row this save last wrote.
+      const stamped = writtenRowUpdatedAt(updatedRows);
+      if (stamped) {
+        committedRubricUpdatedAt = stamped;
       }
     }
-  }
 
-  return { error: null, storageRemoved };
+    if (parentChanged) {
+      const sourceError = await renumberSourceSiblingsAfterMove(
+        supabase,
+        "learning_contents",
+        id,
+        sourceFilter
+      );
+      if (sourceError) {
+        console.error("コンテンツ更新エラー（移動元の再採番）:", sourceError.message);
+        return { error: sourceError, storageRemoved: true };
+      }
+    }
+
+    // Delete the old object (if unreferenced elsewhere) only when the normalized pdf_url key
+    // actually changed. PUT always sends pdf_url (null for non-slides), so updates that keep the
+    // same key (title edits, overwriting the same folder/number) must not delete anything. If the
+    // pre-fetch failed the old key is unknown, so skip deletion and report false.
+    let storageRemoved = true;
+    if (needsCurrentPdf) {
+      if (pdfFetchFailed) {
+        storageRemoved = false;
+      } else {
+        const previousKey = toSlideObjectKey(previousPdfUrl);
+        const nextKey = toSlideObjectKey(patch.pdf_url ?? null);
+        if (previousKey !== null && previousKey !== nextKey) {
+          storageRemoved = await removeUnreferencedSlideObjects(supabase, [previousKey]);
+        }
+      }
+    }
+
+    return {
+      error: null,
+      storageRemoved,
+      ...(committedRubricVersion !== undefined
+        ? { gradingRubricVersion: committedRubricVersion }
+        : {}),
+    };
+  } catch (thrown) {
+    await restoreRubricWrite();
+    throw thrown;
+  }
 }
 
 /**
@@ -1574,39 +2091,9 @@ export async function changeMembershipType(
   return { error: null, updated: (data?.length ?? 0) > 0 };
 }
 
-/**
- * Promotional-mail unsubscribe state, set by an admin on the user's behalf (`opt_out_email`, e.g.
- * on the user's request) or reverted (`resume_email`). Guarded in the UPDATE so a stale screen
- * cannot overwrite the original unsubscribe time or resume someone who is not unsubscribed;
- * `updated: false` means the target was already in that state, missing or deleted. Transactional
- * mail never reads this column. Not tied to the user's status, so it works for any user.
- */
-export async function setUserEmailOptOut(
-  userId: number,
-  optOut: boolean
-): Promise<{ error: PostgrestError | null; updated: boolean }> {
-  const supabase = await createAdminSupabaseClient();
-
-  const query = supabase
-    .from("users")
-    .update({ email_opt_out_at: optOut ? new Date().toISOString() : null })
-    .eq("id", userId)
-    .eq("is_deleted", false);
-  const { data, error } = await (optOut
-    ? query.is("email_opt_out_at", null)
-    : query.not("email_opt_out_at", "is", null)
-  ).select("id");
-
-  if (error) {
-    console.error("メール配信停止状態の更新エラー:", error.message);
-    return { error, updated: false };
-  }
-
-  return { error: null, updated: (data?.length ?? 0) > 0 };
-}
-
 interface StudentProgress {
-  user: Pick<UserType, "id" | "display_name" | "email">;
+  /** Manage UI hides PII; email stays on /admin/users only (#414). */
+  user: Pick<UserType, "id" | "display_name">;
   totalContents: number;
   completedContents: number;
   lastActivity: string | null;
@@ -1632,7 +2119,7 @@ export async function fetchStudentsProgress(): Promise<{
   const [usersResult, contentsCountResult] = await Promise.all([
     supabase
       .from("users")
-      .select("id, display_name, email")
+      .select("id, display_name")
       .eq("status", USER_STATUS.ACTIVE)
       .eq("is_deleted", false)
       .order("display_name"),
@@ -1722,24 +2209,31 @@ export async function fetchStudentsProgress(): Promise<{
 }
 
 interface ManageCounts {
+  /**
+   * `status = active` and `is_deleted = false` (same denominator as content engagement).
+   * Role is not filtered — matches the pre-#468 dashboard definition.
+   */
+  students: number;
+  submissions: number;
+  /** Non-deleted rows, published or not: these describe the structure admins maintain. */
   themes: number;
   phases: number;
-  weeks: number;
   contents: number;
-  students: number;
 }
 
 /**
- * Counts use head + count only (no record bodies). A failed count is returned as 0 so the
- * dashboard still renders.
+ * Summary strip for /manage (#468). Head + count only; a failed count is 0 so the dashboard
+ * still renders. Students and submissions use service_role: maintainers no longer SELECT `users`
+ * (#414), and submissions embed users for other screens. Structure counts use the user JWT.
  */
 export async function fetchManageCounts(): Promise<{
   data: ManageCounts;
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
+  const admin = await createAdminSupabaseClient();
 
-  const [themes, phases, weeks, contents, students] = await Promise.all([
+  const [themes, phases, contents, students, submissions] = await Promise.all([
     supabase
       .from("learning_themes")
       .select("id", { count: "exact", head: true })
@@ -1749,22 +2243,19 @@ export async function fetchManageCounts(): Promise<{
       .select("id", { count: "exact", head: true })
       .eq("is_deleted", false),
     supabase
-      .from("learning_weeks")
-      .select("id", { count: "exact", head: true })
-      .eq("is_deleted", false),
-    supabase
       .from("learning_contents")
       .select("id", { count: "exact", head: true })
       .eq("is_deleted", false),
-    supabase
+    admin
       .from("users")
       .select("id", { count: "exact", head: true })
       .eq("status", USER_STATUS.ACTIVE)
       .eq("is_deleted", false),
+    admin.from("submissions").select("id", { count: "exact", head: true }),
   ]);
 
   const firstError =
-    themes.error ?? phases.error ?? weeks.error ?? contents.error ?? students.error ?? null;
+    themes.error ?? phases.error ?? contents.error ?? students.error ?? submissions.error ?? null;
   if (firstError) {
     console.error("管理ダッシュボード件数取得エラー:", firstError.message);
   }
@@ -1773,9 +2264,9 @@ export async function fetchManageCounts(): Promise<{
     data: {
       themes: themes.count ?? 0,
       phases: phases.count ?? 0,
-      weeks: weeks.count ?? 0,
       contents: contents.count ?? 0,
       students: students.count ?? 0,
+      submissions: submissions.count ?? 0,
     },
     error: firstError,
   };
@@ -1803,11 +2294,13 @@ interface WeeklyFunnelRpcRow {
  * Check admin/maintainer first, then call with service_role. Do not widen that SELECT
  * policy: maintainers should see aggregates, not every Stripe customer id.
  * A failure returns an empty list so the rest of the dashboard still renders.
+ * `weeks` must already be allowlist-resolved (`resolveWeeklyFunnelWeeks`); RPC still clamps 1–104.
  */
-export async function fetchWeeklyFunnel(): Promise<{
+export async function fetchWeeklyFunnel(weeks: number = WEEKLY_FUNNEL_WEEKS): Promise<{
   data: WeeklyFunnelRow[];
   error: string | null;
 }> {
+  const resolvedWeeks = resolveWeeklyFunnelWeeks(String(weeks));
   try {
     const { userRole } = await getServerAuth();
     if (!checkContentPermissions(userRole)) {
@@ -1816,7 +2309,7 @@ export async function fetchWeeklyFunnel(): Promise<{
 
     const supabase = await createAdminSupabaseClient();
     const { data, error } = (await supabase.rpc("get_weekly_funnel", {
-      weeks: WEEKLY_FUNNEL_WEEKS,
+      weeks: resolvedWeeks,
     })) as unknown as {
       data: WeeklyFunnelRpcRow[] | null;
       error: PostgrestError | null;
@@ -1839,5 +2332,221 @@ export async function fetchWeeklyFunnel(): Promise<{
   } catch (error) {
     console.error("週次ファネル取得エラー:", error);
     return { data: [], error: WEEKLY_FUNNEL_FETCH_ERROR };
+  }
+}
+
+const ENGAGEMENT_PAGE_SIZE = 1000;
+
+export const CONTENT_ENGAGEMENT_FETCH_ERROR = "コンテンツ別の取り組み状況を取得できませんでした";
+
+type EngagementContentRow = {
+  id: number;
+  title: string;
+  content_type: ContentType;
+  display_order: number;
+  phase: {
+    id: number;
+    name: string;
+    display_order: number;
+    theme: {
+      id: number;
+      name: string;
+      display_order: number;
+    } | null;
+  } | null;
+};
+
+/**
+ * Theme → phase → content engagement for /manage (#468). Denominator matches fetchManageCounts
+ * (active, not deleted). Only published, non-deleted contents under published parents.
+ * Progress / submissions use the user JWT (admin/maintainer RLS); student IDs use service_role.
+ * Failure returns null data so other dashboard blocks still render.
+ */
+export async function fetchContentEngagementStats(): Promise<{
+  data: ContentEngagementResult | null;
+  error: string | null;
+}> {
+  try {
+    const { userRole } = await getServerAuth();
+    if (!checkContentPermissions(userRole)) {
+      return { data: null, error: null };
+    }
+
+    const supabase = await createServerSupabaseClient();
+    const admin = await createAdminSupabaseClient();
+
+    const [studentsResult, contentsResult] = await Promise.all([
+      admin
+        .from("users")
+        .select("id")
+        .eq("status", USER_STATUS.ACTIVE)
+        .eq("is_deleted", false)
+        .order("id"),
+      supabase
+        .from("learning_contents")
+        .select(
+          "id, title, content_type, display_order, phase:learning_phases!inner(id, name, display_order, is_published, is_deleted, theme:learning_themes!inner(id, name, display_order, is_published, is_deleted))"
+        )
+        .eq("is_published", true)
+        .eq("is_deleted", false)
+        .eq("phase.is_published", true)
+        .eq("phase.is_deleted", false)
+        .eq("phase.theme.is_published", true)
+        .eq("phase.theme.is_deleted", false)
+        .order("id"),
+    ]);
+
+    if (studentsResult.error) {
+      console.error("取り組み状況: 受講生取得エラー:", studentsResult.error.message);
+      return { data: null, error: CONTENT_ENGAGEMENT_FETCH_ERROR };
+    }
+    if (contentsResult.error) {
+      console.error("取り組み状況: コンテンツ取得エラー:", contentsResult.error.message);
+      return { data: null, error: CONTENT_ENGAGEMENT_FETCH_ERROR };
+    }
+
+    const studentRows = [...(studentsResult.data ?? [])];
+    // PostgREST max-rows: page student ids if the first page is full.
+    if (studentRows.length >= ENGAGEMENT_PAGE_SIZE) {
+      let offset = ENGAGEMENT_PAGE_SIZE;
+      for (;;) {
+        const { data: more, error } = await admin
+          .from("users")
+          .select("id")
+          .eq("status", USER_STATUS.ACTIVE)
+          .eq("is_deleted", false)
+          .order("id")
+          .range(offset, offset + ENGAGEMENT_PAGE_SIZE - 1);
+        if (error) {
+          console.error("取り組み状況: 受講生取得エラー:", error.message);
+          return { data: null, error: CONTENT_ENGAGEMENT_FETCH_ERROR };
+        }
+        const page = more ?? [];
+        studentRows.push(...page);
+        if (page.length < ENGAGEMENT_PAGE_SIZE) break;
+        offset += page.length;
+      }
+    }
+
+    const contentRows = (contentsResult.data ?? []) as unknown as EngagementContentRow[];
+    if (contentRows.length >= ENGAGEMENT_PAGE_SIZE) {
+      let offset = ENGAGEMENT_PAGE_SIZE;
+      for (;;) {
+        const { data: more, error } = await supabase
+          .from("learning_contents")
+          .select(
+            "id, title, content_type, display_order, phase:learning_phases!inner(id, name, display_order, is_published, is_deleted, theme:learning_themes!inner(id, name, display_order, is_published, is_deleted))"
+          )
+          .eq("is_published", true)
+          .eq("is_deleted", false)
+          .eq("phase.is_published", true)
+          .eq("phase.is_deleted", false)
+          .eq("phase.theme.is_published", true)
+          .eq("phase.theme.is_deleted", false)
+          .order("id")
+          .range(offset, offset + ENGAGEMENT_PAGE_SIZE - 1);
+        if (error) {
+          console.error("取り組み状況: コンテンツ取得エラー:", error.message);
+          return { data: null, error: CONTENT_ENGAGEMENT_FETCH_ERROR };
+        }
+        const page = (more ?? []) as unknown as EngagementContentRow[];
+        contentRows.push(...page);
+        if (page.length < ENGAGEMENT_PAGE_SIZE) break;
+        offset += page.length;
+      }
+    }
+
+    const studentIds = new Set(studentRows.map((row) => row.id));
+    const studentTotal = studentIds.size;
+
+    const contentsMeta = contentRows.flatMap((row) => {
+      const phase = row.phase;
+      const theme = phase?.theme;
+      if (!phase || !theme) return [];
+      return [
+        {
+          id: row.id,
+          title: row.title,
+          content_type: row.content_type,
+          display_order: row.display_order,
+          phase_id: phase.id,
+          phase_name: phase.name,
+          phase_order: phase.display_order,
+          theme_id: theme.id,
+          theme_name: theme.name,
+          theme_order: theme.display_order,
+        },
+      ];
+    });
+
+    const contentIdSet = new Set(contentsMeta.map((c) => c.id));
+    const exerciseIds = contentsMeta.filter((c) => c.content_type === "exercise").map((c) => c.id);
+
+    const progressRows: ProgressAggRow[] = [];
+    for (let offset = 0; ; offset += ENGAGEMENT_PAGE_SIZE) {
+      const { data, error } = await supabase
+        .from("user_progress")
+        .select("content_id, user_id, is_completed, last_viewed_at")
+        .order("content_id")
+        .order("user_id")
+        .range(offset, offset + ENGAGEMENT_PAGE_SIZE - 1);
+      if (error) {
+        console.error("取り組み状況: 進捗取得エラー:", error.message);
+        return { data: null, error: CONTENT_ENGAGEMENT_FETCH_ERROR };
+      }
+      const page = (data ?? []) as ProgressAggRow[];
+      for (const row of page) {
+        if (contentIdSet.has(row.content_id)) {
+          progressRows.push(row);
+        }
+      }
+      if (page.length < ENGAGEMENT_PAGE_SIZE) break;
+    }
+
+    const submissionRows: SubmissionAggRow[] = [];
+    if (exerciseIds.length > 0) {
+      for (let offset = 0; ; offset += ENGAGEMENT_PAGE_SIZE) {
+        const { data, error } = await supabase
+          .from("submissions")
+          .select("content_id, user_id, ai_reviews(passed)")
+          .in("content_id", exerciseIds)
+          .order("content_id")
+          .order("user_id")
+          .order("id")
+          .range(offset, offset + ENGAGEMENT_PAGE_SIZE - 1);
+        if (error) {
+          console.error("取り組み状況: 提出取得エラー:", error.message);
+          return { data: null, error: CONTENT_ENGAGEMENT_FETCH_ERROR };
+        }
+        const page = (data ?? []) as unknown as {
+          content_id: number;
+          user_id: number;
+          ai_reviews: { passed: boolean | null } | { passed: boolean | null }[] | null;
+        }[];
+        for (const row of page) {
+          const review = Array.isArray(row.ai_reviews) ? row.ai_reviews[0] : row.ai_reviews;
+          submissionRows.push({
+            content_id: row.content_id,
+            user_id: row.user_id,
+            passed: review?.passed ?? null,
+          });
+        }
+        if (page.length < ENGAGEMENT_PAGE_SIZE) break;
+      }
+    }
+
+    return {
+      data: buildContentEngagement(
+        contentsMeta,
+        studentIds,
+        progressRows,
+        submissionRows,
+        studentTotal
+      ),
+      error: null,
+    };
+  } catch (error) {
+    console.error("取り組み状況取得エラー:", error);
+    return { data: null, error: CONTENT_ENGAGEMENT_FETCH_ERROR };
   }
 }

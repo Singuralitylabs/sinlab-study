@@ -1,15 +1,10 @@
-import type {
-  ContentType,
-  ManageContentListItem,
-  ManagePhaseListItem,
-  ManageWeekListItem,
-} from "@/app/types";
+import type { ContentType, ManageContentListItem, ManagePhaseListItem } from "@/app/types";
 
 const UNCLASSIFIED_LABEL = "未分類";
 const UNCLASSIFIED_KEY = "unclassified";
 
 /**
- * Trimmed shape for the client table: passing the nested week/phase/theme and body fields would
+ * Trimmed shape for the client table: passing the nested phase/theme and body fields would
  * bloat the RSC payload.
  */
 export interface ContentTableRow {
@@ -19,6 +14,8 @@ export interface ContentTableRow {
   content_type: ContentType;
   is_published: boolean;
   is_open_to_trial: boolean;
+  /** Stored rubric version; null when the content has no grading rubric saved. */
+  grading_rubric_version: number | null;
 }
 
 export interface ContentTableGroup {
@@ -31,12 +28,6 @@ export interface ContentGroup {
   key: string;
   label: string;
   contents: ManageContentListItem[];
-}
-
-export interface WeekGroup {
-  key: string;
-  label: string;
-  weeks: ManageWeekListItem[];
 }
 
 export interface PhaseGroup {
@@ -83,44 +74,6 @@ export function sortContentsByHierarchy(
 ): ManageContentListItem[] {
   return [...contents].sort((a, b) => {
     const themeCompare = compareGroupLevel(
-      a.week?.phase?.theme?.display_order,
-      b.week?.phase?.theme?.display_order,
-      a.week?.phase?.theme?.id,
-      b.week?.phase?.theme?.id
-    );
-    if (themeCompare !== 0) return themeCompare;
-
-    const phaseCompare = compareGroupLevel(
-      a.week?.phase?.display_order,
-      b.week?.phase?.display_order,
-      a.week?.phase?.id,
-      b.week?.phase?.id
-    );
-    if (phaseCompare !== 0) return phaseCompare;
-
-    const weekCompare = compareGroupLevel(
-      a.week?.display_order,
-      b.week?.display_order,
-      a.week?.id,
-      b.week?.id
-    );
-    if (weekCompare !== 0) return weekCompare;
-
-    const contentCompare = compareOrder(orderOrLast(a.display_order), orderOrLast(b.display_order));
-    if (contentCompare !== 0) return contentCompare;
-
-    // The comparator must always return a number, so break remaining ties by id.
-    return a.id - b.id;
-  });
-}
-
-/**
- * Client-side sort (PostgREST cannot order by nested columns); same rules as
- * sortContentsByHierarchy.
- */
-export function sortWeeksByHierarchy(weeks: ManageWeekListItem[]): ManageWeekListItem[] {
-  return [...weeks].sort((a, b) => {
-    const themeCompare = compareGroupLevel(
       a.phase?.theme?.display_order,
       b.phase?.theme?.display_order,
       a.phase?.theme?.id,
@@ -136,9 +89,10 @@ export function sortWeeksByHierarchy(weeks: ManageWeekListItem[]): ManageWeekLis
     );
     if (phaseCompare !== 0) return phaseCompare;
 
-    const weekCompare = compareOrder(orderOrLast(a.display_order), orderOrLast(b.display_order));
-    if (weekCompare !== 0) return weekCompare;
+    const contentCompare = compareOrder(orderOrLast(a.display_order), orderOrLast(b.display_order));
+    if (contentCompare !== 0) return contentCompare;
 
+    // The comparator must always return a number, so break remaining ties by id.
     return a.id - b.id;
   });
 }
@@ -194,25 +148,12 @@ function joinHierarchyLabel(...names: Array<string | undefined>): string {
   );
 }
 
-export function groupContentsByWeek(contents: ManageContentListItem[]): ContentGroup[] {
+export function groupContentsByPhase(contents: ManageContentListItem[]): ContentGroup[] {
   return groupByKeyLabel(
     contents,
-    (content) => (content.week ? String(content.week.id) : UNCLASSIFIED_KEY),
-    (content) =>
-      joinHierarchyLabel(
-        content.week?.phase?.theme?.name,
-        content.week?.phase?.name,
-        content.week?.name
-      )
+    (content) => (content.phase ? String(content.phase.id) : UNCLASSIFIED_KEY),
+    (content) => joinHierarchyLabel(content.phase?.theme?.name, content.phase?.name)
   ).map((group) => ({ key: group.key, label: group.label, contents: group.items }));
-}
-
-export function groupWeeksByPhase(weeks: ManageWeekListItem[]): WeekGroup[] {
-  return groupByKeyLabel(
-    weeks,
-    (week) => (week.phase ? String(week.phase.id) : UNCLASSIFIED_KEY),
-    (week) => joinHierarchyLabel(week.phase?.theme?.name, week.phase?.name)
-  ).map((group) => ({ key: group.key, label: group.label, weeks: group.items }));
 }
 
 export function groupPhasesByTheme(phases: ManagePhaseListItem[]): PhaseGroup[] {
@@ -238,6 +179,7 @@ export function toContentTableGroups(groups: ContentGroup[]): ContentTableGroup[
       content_type: content.content_type,
       is_published: content.is_published,
       is_open_to_trial: content.is_open_to_trial,
+      grading_rubric_version: content.grading_rubric_version,
     })),
   }));
 }

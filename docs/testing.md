@@ -49,7 +49,7 @@ Unit Tests (多数)
 | 認証制御 | 認証ヘルパー関数の判定ロジック | 未認証ユーザーのリダイレクト |
 | 認可制御 | 権限判定ロジック（admin/maintainer/member 別の許可/拒否） | UI・プロキシ（`proxy.ts`）でのアクセス制御 |
 | 承認ステータス制御 | ステータス判定ロジック（trial（お試し）/active/rejected） | 画面遷移の正当性、お試しユーザーへのロック表示 |
-| データアクセス | ―（ユニットでは検証困難） | RLSによるデータ分離。お試しユーザーのアクセストークンでPostgRESTに直接アクセスし、(a) `learning_contents` のSELECTでお試し非公開コンテンツが0行、(b) お試し非公開コンテンツに対する `user_progress` / `submissions` のINSERT・UPDATEが拒否されること、(c) お試し非公開スライドのオブジェクトキーに対する `POST /storage/v1/object/sign/slides/<キー>`（署名付きURLの発行）と `GET /storage/v1/object/authenticated/slides/<キー>` が拒否され、お試し公開スライドでは許可されること。(d) コンテンツ行は公開済みだが所属 week / phase / theme のいずれかが未公開または論理削除済みのスライドキーは、member / お試しの通常クライアントで署名発行が拒否されること（#216。admin / maintainer はプレビューのため許可） |
+| データアクセス | ―（ユニットでは検証困難） | RLSによるデータ分離。お試しユーザーのアクセストークンでPostgRESTに直接アクセスし、(a) `learning_contents` のSELECTでお試し非公開コンテンツが0行、(b) お試し非公開コンテンツに対する `user_progress` / `submissions` のINSERT・UPDATEが拒否されること、(c) お試し非公開スライドのオブジェクトキーに対する `POST /storage/v1/object/sign/slides/<キー>`（署名付きURLの発行）と `GET /storage/v1/object/authenticated/slides/<キー>` が拒否され、お試し公開スライドでは許可されること。(d) コンテンツ行は公開済みだが所属 phase / theme のいずれかが未公開または論理削除済みのスライドキーは、member / お試しの通常クライアントで署名発行が拒否されること（#216。admin / maintainer はプレビューのため許可） |
 
 ### 3.3 型安全性・ビルド・コード品質
 
@@ -62,9 +62,9 @@ Unit Tests (多数)
 
 実ユーザー視点の主要ジャーニーを、単一ブラウザで1〜2本の少数ケースに絞って確認する（当面は手動。実施条件は2.2のリリース前と同じ）。対象フロー例:
 
-- Google ログイン → ダッシュボード表示 → コンテンツ閲覧 → ログアウト
-- 進捗の記録 → ダッシュボードへの反映
-- admin/maintainer による管理操作（フェーズ・週・コンテンツ管理）→ 一覧/詳細への反映
+- Google ログイン → ホーム表示 → コンテンツ閲覧 → ログアウト
+- 進捗の記録 → ホームへの反映
+- admin/maintainer による管理操作（フェーズ・コンテンツ管理）→ 一覧/詳細への反映
 - rejected ユーザーが保護ページへアクセス → `/rejected` へ誘導される
 - お試し（trial）ユーザー: ツリー全表示・お試し非公開コンテンツのロック表示・直リンク時のロック画面、お試し公開コンテンツの閲覧/完了/提出が成功、お試し非公開コンテンツへのAPI直叩きが403、旧URL `/pending` が `/`（承認待ちバナー付き）へリダイレクトされる
 - 承認（trial → active）後に承認前の提出・進捗が引き継がれ、管理者のレビュー一覧に表示される
@@ -80,7 +80,8 @@ Unit Tests (多数)
 | --- | --- |
 | `build.yml` | 本番相当のビルド成立性 |
 | `typecheck.yml` | 型チェック（`tsc --noEmit`） |
-| `test.yml` | ユニットテスト（Vitest） |
+| `test.yml` | ユニットテスト（Vitest）。加えて `tests/lib/html-preview.test.ts` と `tests/lib/preview-console.test.ts`（iframe 内で動く中継スクリプト）を `bun test`（JavaScriptCore）でも実行する（`bun run test:jsc`。Safari と V8 で正規表現の失敗の仕方が違うため） |
+| `db-privileges.yml` | ローカル Supabase（Docker）に全 migration を空のDBから適用し、関数の EXECUTE 権限を `has_function_privilege()` で、テーブル・シーケンスの権限を `has_table_privilege()` などで検証（pgTAP。`supabase/tests/database/`。4.3参照） |
 | `biome.yml` | Lint/フォーマット違反の防止（`bun run check`） |
 | `check_console_log.yml` | デバッグ用出力の混入防止 |
 | `release-pr.yml` | main→release のリリース PR 作成（上記の品質ゲートを再利用し、マイグレーション・新規環境変数・migration list などの事前作業を検出） |
@@ -90,11 +91,45 @@ Unit Tests (多数)
 
 - **Bun**: パッケージマネージャー兼実行環境（CI でも bun を使用）
 - **Node.js 20.x**: bun が利用できない CI ステップの代替実行環境
-- **Supabase CLI**: 型生成・スキーマ整合性確認（CI は準備中、現状は手動）
+- **Supabase CLI**: 型生成（CI は準備中、現状は手動）と、`db-privileges.yml` でのローカルスタック起動・pgTAP 実行（バージョンは `bun.lock` で固定）
+
+### 4.3 DB 権限テスト（pgTAP）
+
+`supabase/tests/database/function_privileges.test.sql` が、`public` の関数ごとに `anon` / `authenticated` / `service_role` の EXECUTE を実DBの ACL で確かめる。期待値は `docs/database.md`（3.7・3.18・5.2・6.2・6.15・6.17）と一致させる。migration の SQL を文字列解析して権限を推定しない（`OWNER TO`・動的SQL・`RENAME` などを自前で解釈し続けることになるため）。
+
+- **関数を追加・権限を変更したとき**: 同ファイルの期待値の表と、末尾の「`public` の全関数一覧」を更新する。一覧と実DBが食い違うと失敗するので、新しい関数の ACL を人が確認する機会になる。
+- **トリガー関数**: `update_updated_at_column()` は docs が EXECUTE を名指ししていないため一覧に載せるだけにする。`keep_user_progress_ever_completed()` と `enforce_user_progress_review_pass()` は docs（6.2）が名指しする `anon` の REVOKE だけを検証する。
+- **service_role の期待値**: docs が service_role を名指ししている関数だけ検証する。内部用の関数は Supabase の既定権限で service_role に付くため、契約に含めない。
+- **Postgres のバージョン**: `supabase/config.toml` の `[db] major_version` は本番の Supabase プロジェクトの Postgres メジャーバージョンと揃える（本番を変えたら同時に更新する）。
+- **ローカル実行**: Docker を起動して `bunx supabase start`（必要なら `-x` で不要なサービスを省く）→ `bunx supabase test db`。本番の project-ref や DB URL は渡さない。
+- **テーブル権限**: `supabase/tests/database/table_privileges.test.sql` が、`anon` に `public` のテーブル・シーケンスの権限が無いこと、`authenticated` に `TRUNCATE` / `REFERENCES` / `TRIGGER` が無いこと、ポリシー0本の表に `authenticated` の権限が無いことを確かめる。期待値は `docs/database.md` 6章の「テーブル権限」と一致させる。ポリシー0本の表はカタログから導くので、表を足すときは作成する migration で `REVOKE ALL ... FROM authenticated` すればよい（docs の一覧とテスト内の名指しの一覧も足す）。検出力は、対象の表に `GRANT SELECT ... TO anon` する migration を一時的に足すと失敗することで確かめる。
+- **検出力の確認**: 対象関数に `GRANT EXECUTE ... TO authenticated` する migration を一時的に足すと、`supabase test db` が失敗する（確認後に migration は削除する）。
 
 ## 5. テスト規約
 
 - テストコードは `tests/` 配下に、対象コード（`app/` 配下）の構造に寄せて配置する。
+- Vitest の既定環境は `node`。DOM での状態遷移（イベント受信・再マウント）を確かめるコンポーネントテストだけ、ファイル先頭の `// @vitest-environment happy-dom` で `happy-dom` に切り替え、`react-dom/client` と `act()` で描画する（例: `tests/components/HtmlPreview.state.test.ts`）。静的な出力だけを見るものは `renderToStaticMarkup` のまま `node` で書く。
 - ファイル名は `*.test.ts` に統一し、「対象 + 期待する振る舞い」が想像できる名前にする（例: `tests/services/auth/permissions.test.ts`）。実装済みテストの一覧は `tests/` を参照。
 - **検証する**: 関数の入力に対する出力（返り値）、副作用の結果（状態変化）、エラー時の振る舞い。返り値を持たない関数は副作用の結果（更新値・更新対象）を検証する。
 - **検証しない**: 内部実装の呼び出し手順（クエリメソッドをどの引数で呼んだか等）。モックは外部依存を切り離すために使い、モック呼び出し引数の逐次検証は原則行わない。
+- **ライブプレビュー（React・#475）**: `tests/lib/html-preview.test.ts` で構成判定（`App.jsx` / `App.js` 境界、非 React の `main.js`）と `buildPreviewDocument()`（単体・2 ファイル import・欠落 import・`</script` エスケープ・vendor 絶対 URL）を検証する。`tests/components/HtmlPreview.test.ts` で React 構成時にプレビュー枠とコンソールが出ること、`/demo` 経路では出さないことを維持する。実ブラウザ確認は Chromium で `public/vendor/react/` を読み込み、Web 技術 06（`App.jsx` + 子コンポーネント）・07 相当の構造が描画できることを見る（模範回答本文はリポジトリに置かない）。Tailwind 演習（#489）は、`page.js` 入口と `@import "tailwindcss"` の有無による Tailwind 読み込みの切り替え（無い構成に Tailwind を入れない）をユニットで見る。実ブラウザでは `sandbox="allow-scripts"` の iframe に第10回課題3・4相当の `page.js` + `globals.css` を入れ、`md:grid-cols-3` が幅の広・狭で 3 列・1 列になることを確認する。
+
+## 6. AIコードレビューの運用
+
+`/code-review` 等による AI レビューを繰り返しても指摘が収束しない事態を避けるための方針（#362）。環境構築 Issue のレビュー往復上限（最大3回）もこの方針に従う。
+
+- **強度**: 初回は `medium`、再レビューは `low`。`--max-findings 5` 程度で上限を付ける。強度は前回の値を引き継ぐため、**毎回明示する**。
+- **再レビューの範囲**: 前回指摘の対応確認に限定する。新規指摘は「受講生・運用者が通常利用で踏むもの」のみとし、全体の再スイープや vm での実行検証の再依頼はしない。
+- **修正対象の基準**: 通常利用で表示・動作が期待と違って見えるものだけ修正する。意図的な異常入力への耐性、リファクタ提案、テスト追加提案は、必要なら `docs/specification.md` の既知の制限に記載するか別 Issue にし、同じ PR では対応しない。
+- **指摘の足切り（初回から適用）**: 指摘には「受講生・運用者が通常の操作だけで再現する手順」を必須とする。手順を書けない指摘（巨大・不正な入力、悪意ある操作、現実的でない件数・サイズ）は報告させない。レビュー依頼のプロンプトにこの基準を毎回含める。修正のたびにコードが増える提案も対象外とする。
+- **ラウンド上限**: 再レビューは 2 回まで（初回を含め最大 3 回）。残った指摘は別 Issue か仕様書の制限事項に落とし、PR はマージする。
+- **レビューループは 1 本**: 別セッションのレビューと並走させない（高強度レビューが交互に指摘を出して収束しなくなる）。
+- **プロンプトの型**（例）:
+
+  ```
+  /code-review pr#NNN low 前回コメント（URL）の指摘が対応されたかだけ確認してください。
+  新規指摘は、受講生や運用者が通常利用で踏むものに限り、最大3件まで。
+  異常入力への耐性・リファクタ・テスト追加の提案は不要です。
+  ```
+
+  初回も同様に、末尾へ「指摘には通常操作での再現手順を付け、書けないものは出さないでください」を添える。

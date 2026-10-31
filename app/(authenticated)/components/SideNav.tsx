@@ -1,30 +1,34 @@
 "use client";
 
 import {
+  Award,
   BookOpen,
   ClipboardList,
-  CreditCard,
+  FileText,
   House,
+  LayoutDashboard,
+  ListChecks,
   LogOut,
   Megaphone,
   Menu,
-  Settings,
+  SlidersHorizontal,
   UserCog,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
-import { createClientSupabaseClient } from "@/app/services/api/supabase-client";
+import { useState } from "react";
+import { signOutAndRedirect } from "@/app/lib/sign-out";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { FeedbackDialog } from "./FeedbackDialog";
 
 interface NavItem {
   title: string;
   href: string;
   icon: React.ReactNode;
-  badgeCount?: number;
+  badge?: React.ReactNode;
 }
 
 const DEFAULT_NAV_ITEMS: NavItem[] = [
@@ -45,25 +49,37 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
   },
 ];
 
-function announcementsNavItem(unreadCount: number): NavItem {
+const REVIEW_LIST_NAV_ITEM: NavItem = {
+  title: "復習リスト",
+  href: "/review-list",
+  icon: <ListChecks className="h-5 w-5" />,
+};
+
+const CERTIFICATES_NAV_ITEM: NavItem = {
+  title: "修了証",
+  href: "/certificates",
+  icon: <Award className="h-5 w-5" />,
+};
+
+function announcementsNavItem(badge: React.ReactNode): NavItem {
   return {
     title: "お知らせ",
     href: "/announcements",
     icon: <Megaphone className="h-5 w-5" />,
-    badgeCount: unreadCount,
+    badge,
   };
 }
 
-const UPGRADE_NAV_ITEM: NavItem = {
-  title: "プラン・お支払い",
-  href: "/upgrade",
-  icon: <CreditCard className="h-5 w-5" />,
+const CONTENT_MANAGE_NAV_ITEM: NavItem = {
+  title: "コンテンツ管理",
+  href: "/manage/contents",
+  icon: <FileText className="h-5 w-5" />,
 };
 
-const MANAGE_NAV_ITEM: NavItem = {
-  title: "管理画面",
+const STUDENT_MANAGE_NAV_ITEM: NavItem = {
+  title: "受講生管理",
   href: "/manage",
-  icon: <Settings className="h-5 w-5" />,
+  icon: <LayoutDashboard className="h-5 w-5" />,
 };
 
 const ADMIN_USERS_NAV_ITEM: NavItem = {
@@ -72,8 +88,31 @@ const ADMIN_USERS_NAV_ITEM: NavItem = {
   icon: <UserCog className="h-5 w-5" />,
 };
 
+const SETTINGS_NAV_ITEM: NavItem = {
+  title: "設定",
+  href: "/settings",
+  icon: <SlidersHorizontal className="h-5 w-5" />,
+};
+
 function isNavActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
+  // Student-manage group: announcements moved here (#467). Do not highlight for content routes.
+  if (href === "/manage") {
+    return (
+      pathname === "/manage" ||
+      pathname.startsWith("/manage/students") ||
+      pathname.startsWith("/manage/submissions") ||
+      pathname.startsWith("/manage/feedbacks") ||
+      pathname.startsWith("/manage/announcements")
+    );
+  }
+  if (href === "/manage/contents") {
+    return (
+      pathname.startsWith("/manage/contents") ||
+      pathname.startsWith("/manage/themes") ||
+      pathname.startsWith("/manage/phases")
+    );
+  }
   return pathname.startsWith(href);
 }
 
@@ -100,12 +139,7 @@ function SideNavLink({
     >
       {item.icon}
       {item.title}
-      {item.badgeCount ? (
-        <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">
-          <span aria-hidden="true">{item.badgeCount > 99 ? "99+" : item.badgeCount}</span>
-          <span className="sr-only">（未読 {item.badgeCount} 件）</span>
-        </span>
-      ) : null}
+      {item.badge}
     </Link>
   );
 }
@@ -115,11 +149,13 @@ function SideNavSidebarContent({
   pathname,
   onItemClick,
   onSignOut,
+  feedbackEnabled,
 }: {
   navItems: NavItem[];
   pathname: string;
   onItemClick?: () => void;
   onSignOut: () => void;
+  feedbackEnabled: boolean;
 }) {
   return (
     <>
@@ -130,6 +166,8 @@ function SideNavSidebarContent({
       </nav>
       <div className="px-3 pb-4">
         <Separator className="mb-3" />
+        {feedbackEnabled && <FeedbackDialog />}
+        <SideNavLink item={SETTINGS_NAV_ITEM} pathname={pathname} onClick={onItemClick} />
         <button
           type="button"
           onClick={() => {
@@ -149,34 +187,35 @@ function SideNavSidebarContent({
 export function SideNav({
   isAdmin,
   isInstructor,
-  stripeEnabled,
-  unreadAnnouncementCount,
+  feedbackEnabled,
+  showCertificates,
+  showReviewList,
+  announcementBadge,
 }: {
   isAdmin: boolean;
   isInstructor: boolean;
-  stripeEnabled: boolean;
-  unreadAnnouncementCount: number;
+  feedbackEnabled: boolean;
+  showCertificates: boolean;
+  /** Learners only (role = member); staff manage courses and do not use the review list. */
+  showReviewList: boolean;
+  /** Streamed unread badge slot (a Server Component under <Suspense>). */
+  announcementBadge: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
-  const navItems = useMemo<NavItem[]>(
-    () => [
-      ...DEFAULT_NAV_ITEMS,
-      announcementsNavItem(unreadAnnouncementCount),
-      // No payment/billing-management entry while disabled (see AGENTS.md).
-      ...(stripeEnabled ? [UPGRADE_NAV_ITEM] : []),
-      ...(isInstructor ? [MANAGE_NAV_ITEM] : []),
-      ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),
-    ],
-    [isAdmin, isInstructor, stripeEnabled, unreadAnnouncementCount]
-  );
+  // Not memoized: announcementBadge is a new element on every layout render, so a useMemo keyed
+  // on it would never hit.
+  const navItems: NavItem[] = [
+    ...DEFAULT_NAV_ITEMS,
+    ...(showReviewList ? [REVIEW_LIST_NAV_ITEM] : []),
+    ...(showCertificates ? [CERTIFICATES_NAV_ITEM] : []),
+    announcementsNavItem(announcementBadge),
+    ...(isInstructor ? [CONTENT_MANAGE_NAV_ITEM, STUDENT_MANAGE_NAV_ITEM] : []),
+    ...(isAdmin ? [ADMIN_USERS_NAV_ITEM] : []),
+  ];
 
-  const handleSignOut = async () => {
-    const supabase = createClientSupabaseClient();
-    await supabase.auth.signOut();
-    window.location.href = "/login";
-  };
+  const handleSignOut = () => signOutAndRedirect();
 
   return (
     <>
@@ -184,7 +223,7 @@ export function SideNav({
         variant="outline"
         size="icon"
         onClick={() => setOpen(true)}
-        className="sm:hidden fixed top-4 left-4 z-50"
+        className="sm:hidden fixed top-4 left-4 z-50 print:hidden"
         aria-label="メニューを開く"
       >
         <Menu className="h-5 w-5" />
@@ -199,7 +238,7 @@ export function SideNav({
                 onClick={() => setOpen(false)}
                 className="text-lg font-bold flex items-center gap-2"
               >
-                <Image src="/icon.png" alt="Sinlab Study" width={24} height={24} />
+                <Image src="/icons/icon-192.png" alt="Sinlab Study" width={24} height={24} />
                 Sinlab Study
               </Link>
             </SheetTitle>
@@ -210,15 +249,16 @@ export function SideNav({
               pathname={pathname}
               onItemClick={() => setOpen(false)}
               onSignOut={handleSignOut}
+              feedbackEnabled={feedbackEnabled}
             />
           </div>
         </SheetContent>
       </Sheet>
 
-      <div className="hidden sm:flex h-screen w-64 flex-col fixed left-0 top-0 border-r border-sidebar-border bg-sidebar">
+      <div className="hidden sm:flex print:hidden! h-screen w-64 flex-col fixed left-0 top-0 border-r border-sidebar-border bg-sidebar">
         <div className="px-6 py-5 border-b border-sidebar-border">
           <Link href="/" className="text-xl font-bold flex items-center gap-2">
-            <Image src="/icon.png" alt="Sinlab Study" width={28} height={28} />
+            <Image src="/icons/icon-192.png" alt="Sinlab Study" width={28} height={28} />
             Sinlab Study
           </Link>
         </div>
@@ -227,6 +267,7 @@ export function SideNav({
             navItems={navItems}
             pathname={pathname}
             onSignOut={handleSignOut}
+            feedbackEnabled={feedbackEnabled}
           />
         </div>
       </div>

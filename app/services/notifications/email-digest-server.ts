@@ -12,10 +12,8 @@ import {
   WEEKLY_DIGEST_RESERVATION_KIND,
 } from "@/app/constants/notifications";
 import { isStripeEnabled } from "@/app/constants/stripe";
-import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import { USER_STATUS } from "@/app/constants/user";
 import { isAnnouncementTarget } from "@/app/lib/announcement-target";
-import { compareGroupLevel } from "@/app/lib/content-grouping";
-import { buildThemeContentOrder, type NavigationWeek } from "@/app/lib/content-navigation";
 import {
   addDays,
   coversPreviousWeek,
@@ -23,6 +21,8 @@ import {
   type DigestContent,
   type DigestUser,
   daysBetween,
+  isBefore,
+  isSameOrAfter,
   isWeeklyDigestTarget,
   jstStartOfDayIso,
   lockedThemeNames,
@@ -34,10 +34,24 @@ import {
 import type { EmailSettingsSnapshot } from "@/app/lib/email-settings";
 import type { EmailTexts } from "@/app/lib/email-template";
 import { type EmailMarkdown, renderEmailMarkdown } from "@/app/lib/markdown-email";
+import { resolveNotificationEmail } from "@/app/lib/notification-email";
+import {
+  applyPublishedNestedThemeFilters,
+  type NestedThemeTree,
+  orderContentsAcrossThemes,
+} from "@/app/lib/published-theme-tree";
+import {
+  countUnovercomeReviewItems,
+  deriveReviewListItems,
+  filterReviewItemsToVisibleContents,
+  type ReviewListSourceReview,
+} from "@/app/lib/review-list";
+import { isWebPushConfigured } from "@/app/lib/web-push-config";
 import { type CronLock, claimCronLock, releaseCronLock } from "@/app/services/api/cron-lock-server";
 import { fetchEmailSettings } from "@/app/services/api/email-settings-server";
 import { loadEmailTexts } from "@/app/services/api/email-templates-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
+import { isLearnerRole } from "@/app/services/auth/permissions";
 import { type EmailContent, isEmailConfigured } from "@/app/services/notifications/email";
 import {
   buildAnnouncementEmail,
@@ -49,12 +63,13 @@ import {
   buildUnsubscribeUrl,
   isUnsubscribeConfigured,
 } from "@/app/services/notifications/email-unsubscribe";
+import { deliverDigestPushes } from "@/app/services/notifications/push-digest";
 import {
   type AdminClient,
   type DeliverResult,
   deliverUserEmail,
 } from "@/app/services/notifications/user-emails";
-import type { Announcement, UserStatusType } from "@/app/types";
+import type { Announcement, ScoreKind, UserRoleType, UserStatusType } from "@/app/types";
 
 /**
  * Extraction and sending for periodic emails (weekly progress, inactivity reminder, guides for
@@ -105,117 +120,93 @@ async function fetchForUserIds<T>(
   return rows;
 }
 
-/** Send candidates: member active / trial users who have not unsubscribed. */
+/**
+ * Send candidates: active / trial users of any role who have not unsubscribed. Announcements
+ * follow the in-app display target, which ignores the role (#322), so an active maintainer who sees
+ * an announcement also gets its email; the learning emails narrow to members in buildQueue().
+ */
 async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
   const rows = await fetchAllPages<{
     id: number;
     email: string;
+    notification_email: string | null;
     display_name: string;
     status: string;
     membership_type: string | null;
+    role: UserRoleType;
     created_at: string | null;
   }>((from, to) =>
     supabase
       .from("users")
-      .select("id, email, display_name, status, membership_type, created_at")
+      .select(
+        "id, email, notification_email, display_name, status, membership_type, role, created_at"
+      )
       .eq("is_deleted", false)
-      .eq("role", USER_ROLE.MEMBER)
       .in("status", [USER_STATUS.ACTIVE, USER_STATUS.TRIAL])
       .is("email_opt_out_at", null)
       .order("id")
       .range(from, to)
   );
 
-  return rows
-    .filter((row) => row.email && row.created_at)
-    .map((row) => ({
-      userId: row.id,
-      email: row.email,
-      displayName: row.display_name,
-      status: row.status as UserStatusType,
-      membershipType: row.membership_type ?? null,
-      createdAt: row.created_at as string,
-    }));
+  return rows.flatMap((row) => {
+    if (!row.created_at) {
+      return [];
+    }
+    // Periodic mail and announcement broadcasts share this list, so both follow the same address.
+    const email = resolveNotificationEmail(row);
+    if (!email) {
+      return [];
+    }
+    return [
+      {
+        userId: row.id,
+        email,
+        displayName: row.display_name,
+        status: row.status as UserStatusType,
+        membershipType: row.membership_type ?? null,
+        role: row.role,
+        createdAt: row.created_at as string,
+      },
+    ];
+  });
 }
 
-type ContentRow = {
-  id: number;
-  title: string;
-  display_order: number | null;
-  is_open_to_trial: boolean;
-  week_id: number;
-};
-type ThemeRow = {
-  id: number;
-  name: string;
-  display_order: number | null;
-  phases: {
-    id: number;
-    name: string;
-    display_order: number | null;
-    weeks: {
-      id: number;
-      name: string;
-      display_order: number | null;
-      contents: ContentRow[];
-    }[];
-  }[];
-};
-
 /**
- * Returns the contents in circulation in learning order (theme -> phase -> week -> content
+ * Returns the contents in circulation in learning order (theme -> phase -> content
  * display order). The nested select and the all-levels published/not-deleted filters have the
- * same shape as fetchThemeProgressSummaries(); ordering is delegated to buildThemeContentOrder(),
- * the same as prev/next navigation on the detail page.
+ * same published filters as fetchThemeProgressSummaries(); ordering uses orderContentsAcrossThemes()
+ * (shared with home / review-list).
  */
 async function fetchOrderedContents(supabase: AdminClient): Promise<DigestContent[]> {
-  const { data, error } = await supabase
-    .from("learning_themes")
-    .select(
-      "id, name, display_order, phases:learning_phases(id, name, display_order, weeks:learning_weeks(id, name, display_order, contents:learning_contents(id, title, display_order, is_open_to_trial, week_id)))"
-    )
-    .eq("is_published", true)
-    .eq("is_deleted", false)
-    .eq("phases.is_published", true)
-    .eq("phases.is_deleted", false)
-    .eq("phases.weeks.is_published", true)
-    .eq("phases.weeks.is_deleted", false)
-    .eq("phases.weeks.contents.is_published", true)
-    .eq("phases.weeks.contents.is_deleted", false)
-    .order("display_order");
+  const { data, error } = await applyPublishedNestedThemeFilters(
+    supabase
+      .from("learning_themes")
+      .select(
+        "id, name, display_order, phases:learning_phases(id, name, display_order, contents:learning_contents(id, title, display_order, is_open_to_trial, phase_id))"
+      )
+  ).order("display_order");
 
   if (error) {
     throw new Error(error.message);
   }
 
-  const themes = [...((data ?? []) as ThemeRow[])].sort((a, b) =>
-    compareGroupLevel(a.display_order, b.display_order, a.id, b.id)
-  );
-
-  return themes.flatMap((theme) => {
-    const weeks: NavigationWeek[] = [];
-    const contents: ContentRow[] = [];
-    for (const phase of theme.phases ?? []) {
-      for (const week of phase.weeks ?? []) {
-        weeks.push({
-          id: week.id,
-          name: week.name,
-          display_order: week.display_order,
-          phase: { id: phase.id, name: phase.name, display_order: phase.display_order },
-        });
-        contents.push(...(week.contents ?? []));
-      }
-    }
-    const openToTrial = new Map(contents.map((c) => [c.id, c.is_open_to_trial]));
-
-    return buildThemeContentOrder(weeks, contents).map((content) => ({
+  type DigestContentRow = {
+    id: number;
+    title: string;
+    display_order: number | null;
+    phase_id: number;
+    is_open_to_trial: boolean;
+  };
+  return orderContentsAcrossThemes((data ?? []) as NestedThemeTree<DigestContentRow>[]).map(
+    ({ themeId, themeName, content, raw }) => ({
       id: content.id,
       title: content.title,
-      path: `/learn/${theme.id}/${content.phaseId}/${content.weekId}/${content.id}`,
-      themeName: theme.name,
-      isOpenToTrial: openToTrial.get(content.id) === true,
-    }));
-  });
+      themeId,
+      path: `/learn/${themeId}/${content.phaseId}/${content.id}`,
+      themeName,
+      isOpenToTrial: raw.is_open_to_trial === true,
+    })
+  );
 }
 
 /** IDs of users with at least one learning record (progress row or submission). */
@@ -226,13 +217,21 @@ async function fetchUserIdsWithActivity(
   if (userIds.length === 0) {
     return new Set();
   }
-  const [progress, submissions] = await Promise.all(
-    (["user_progress", "submissions"] as const).map((table) =>
-      fetchForUserIds<{ user_id: number }>(userIds, (ids, from, to) =>
-        supabase.from(table).select("user_id").in("user_id", ids).order("id").range(from, to)
-      )
-    )
-  );
+  // View-only user_progress rows (#396) must not count as "started learning".
+  const [progress, submissions] = await Promise.all([
+    fetchForUserIds<{ user_id: number }>(userIds, (ids, from, to) =>
+      supabase
+        .from("user_progress")
+        .select("user_id")
+        .in("user_id", ids)
+        .eq("ever_completed", true)
+        .order("id")
+        .range(from, to)
+    ),
+    fetchForUserIds<{ user_id: number }>(userIds, (ids, from, to) =>
+      supabase.from("submissions").select("user_id").in("user_id", ids).order("id").range(from, to)
+    ),
+  ]);
   return new Set([...progress, ...submissions].map((row) => row.user_id));
 }
 
@@ -287,6 +286,8 @@ async function fetchWeeklyDigestLoggedUserIds(
 
 type WeeklyStats = {
   completedIdsByUser: Map<number, Set<number>>;
+  /** contentId -> completed_at (epoch ms) per user, to find the most recently studied theme. */
+  completedAtByUser: Map<number, Map<number, number>>;
   completedLastWeekByUser: Map<number, number>;
   submittedLastWeekByUser: Map<number, number>;
 };
@@ -329,6 +330,7 @@ async function fetchWeeklyStats(
 
   const stats: WeeklyStats = {
     completedIdsByUser: new Map(),
+    completedAtByUser: new Map(),
     completedLastWeekByUser: new Map(),
     submittedLastWeekByUser: new Map(),
   };
@@ -339,6 +341,11 @@ async function fetchWeeklyStats(
     ids.add(row.content_id);
     stats.completedIdsByUser.set(row.user_id, ids);
     const completedAt = row.completed_at ? Date.parse(row.completed_at) : Number.NaN;
+    if (!Number.isNaN(completedAt)) {
+      const times = stats.completedAtByUser.get(row.user_id) ?? new Map<number, number>();
+      times.set(row.content_id, completedAt);
+      stats.completedAtByUser.set(row.user_id, times);
+    }
     if (completedAt >= fromMs && completedAt < toMs) {
       stats.completedLastWeekByUser.set(
         row.user_id,
@@ -353,6 +360,90 @@ async function fetchWeeklyStats(
     );
   }
   return stats;
+}
+
+/**
+ * Unovercome review-list counts for weekly digest body lines. Cron has no user session, so this
+ * reads ai_reviews.review_json via service_role with an explicit user_id filter (documented
+ * exception in specification.md 10.7 / 15.5 — not a student delivery path). Fail-soft: log and
+ * return 0 counts so a review_json read failure cannot abort the whole digest. Counts only items
+ * on published/visible contents (same filter as /review-list).
+ */
+async function fetchUnovercomeReviewCountsByUser(
+  supabase: AdminClient,
+  users: DigestUser[],
+  contents: DigestContent[]
+): Promise<Map<number, number>> {
+  const counts = new Map<number, number>();
+  for (const user of users) {
+    counts.set(user.userId, 0);
+  }
+  if (users.length === 0) {
+    return counts;
+  }
+
+  try {
+    const reviewsByUser = new Map<number, ReviewListSourceReview[]>();
+    // PostgREST types the !inner embed as an array; runtime is to-one (UNIQUE submission_id).
+    type DigestReviewRow = {
+      user_id: number;
+      content_id: number;
+      ai_review: {
+        id: number;
+        score_kind: string;
+        review_json: unknown;
+        reviewed_at: string | null;
+        created_at: string;
+      } | null;
+    };
+    const userIds = users.map((user) => user.userId);
+    // Only columns needed to derive counts (no review_content / advice prose beyond review_json).
+    const rows = await fetchForUserIds<DigestReviewRow>(
+      userIds,
+      (ids, from, to) =>
+        supabase
+          .from("submissions")
+          .select(
+            "user_id, content_id, ai_review:ai_reviews!inner(id, score_kind, review_json, reviewed_at, created_at, status)"
+          )
+          .in("user_id", ids)
+          .eq("ai_review.status", "completed")
+          .order("id")
+          .range(from, to) as unknown as PromiseLike<Page<DigestReviewRow>>
+    );
+
+    for (const row of rows) {
+      const aiReview = row.ai_review;
+      if (!aiReview) continue;
+      const list = reviewsByUser.get(row.user_id) ?? [];
+      list.push({
+        id: aiReview.id,
+        contentId: row.content_id,
+        scoreKind: aiReview.score_kind as ScoreKind,
+        reviewJson: aiReview.review_json,
+        reviewedAt: aiReview.reviewed_at ?? aiReview.created_at,
+      });
+      reviewsByUser.set(row.user_id, list);
+    }
+
+    for (const user of users) {
+      const visibleIds = new Set(
+        visibleContentsFor(contents, user.status).map((content) => content.id)
+      );
+      const items = filterReviewItemsToVisibleContents(
+        deriveReviewListItems(reviewsByUser.get(user.userId) ?? []),
+        visibleIds
+      );
+      counts.set(user.userId, countUnovercomeReviewItems(items));
+    }
+    return counts;
+  } catch (error) {
+    console.error(
+      "[定期メール] 復習リスト未克服件数の取得に失敗したため 0 件として続行します:",
+      error
+    );
+    return counts;
+  }
 }
 
 /**
@@ -587,9 +678,49 @@ export type EmailDigestOptions = {
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Decides which user is claimed by which announcement in this run: a sendable user not yet queued
+ * is claimed by the first announcement (in order) that targets them, has not finished for them and
+ * has no failure row blocking the `<referenceKey>:<userId>` pair.
+ */
+function assignAnnouncementClaims(
+  announcements: PendingAnnouncement[],
+  allUsers: DigestUser[],
+  sendableUserIds: ReadonlySet<number>,
+  queuedUserIds: ReadonlySet<number>,
+  done: ReadonlyMap<string, ReadonlySet<number>>,
+  blockedKeys: ReadonlySet<string>
+): Map<string, Set<number>> {
+  const claims = new Map<string, Set<number>>();
+  const claimed = new Set<number>();
+  for (const announcement of announcements) {
+    const referenceKey = String(announcement.id);
+    const doneUserIds = done.get(referenceKey);
+    const ids = new Set<number>();
+    for (const user of allUsers) {
+      if (
+        sendableUserIds.has(user.userId) &&
+        !queuedUserIds.has(user.userId) &&
+        !claimed.has(user.userId) &&
+        !doneUserIds?.has(user.userId) &&
+        !blockedKeys.has(`${referenceKey}:${user.userId}`) &&
+        isAnnouncementTarget(announcement, {
+          status: user.status,
+          membershipType: user.membershipType,
+        })
+      ) {
+        claimed.add(user.userId);
+        ids.add(user.userId);
+      }
+    }
+    claims.set(referenceKey, ids);
+  }
+  return claims;
+}
+
+/**
  * Adds the announcement bulk email to the send queue (kind = `announcement`, reference_key =
- * announcement ID). Targets are non-unsubscribed students whose status / membership type match
- * the announcement target (`isAnnouncementTarget()`, same condition as in-app display).
+ * announcement ID). Targets are non-unsubscribed users of any role whose status / membership type
+ * match the announcement target (`isAnnouncementTarget()`, same condition as in-app display).
  * When everyone cannot be sent in one run (daily cap, run time, one per user per day), unfinished
  * users are sent in following days (split sending). Users who already received a promotional
  * email today (not in `sendableUserIds`) and users receiving another guide in this run are
@@ -625,7 +756,7 @@ async function appendAnnouncementEmails(
   const startOfToday = jstStartOfDayIso(today);
   const tomorrow = addDays(today, 1);
   const retryNow = (log: AnnouncementLog) =>
-    log.created_at < startOfToday &&
+    isBefore(log.created_at, startOfToday) &&
     isRetryableFailure(log, publishedAt.get(log.reference_key) as string, today);
   const { done, retryable } = classifyAnnouncementLogs(
     await fetchAnnouncementLogs(supabase, [...publishedAt.keys()]),
@@ -633,27 +764,41 @@ async function appendAnnouncementEmails(
       retryNow(log) ||
       isRetryableFailure(log, publishedAt.get(log.reference_key) as string, tomorrow)
   );
-  const retryNowLogs = retryable.filter(retryNow);
-
-  // Recipients not sent today: those with failures to resend on following days and those whose
-  // failure row could not be deleted (the claim would hit the UNIQUE violation). They stay
-  // unfinished, so completion is not recorded either.
-  let notClaimable = retryable.filter((log) => !retryNow(log));
-  if (retryNowLogs.length > 0) {
-    const { error } = await supabase
-      .from("email_logs")
-      .delete()
-      .in(
-        "id",
-        retryNowLogs.map((log) => log.id)
-      );
+  // Delete only rows of recipients claimed in this run. Deleting the row of a user who cannot be
+  // sent today (already mailed, or queued for another guide) would erase the failure record from
+  // /admin/emails without any resend. The claim assignment is computed once and consumed by the
+  // queuing below, so the deletion and the sending cannot disagree.
+  const keyOf = (log: AnnouncementLog) => `${log.reference_key}:${log.user_id}`;
+  const assign = (blockedKeys: ReadonlySet<string>) =>
+    assignAnnouncementClaims(
+      announcements,
+      allUsers,
+      sendableUserIds,
+      queuedUserIds,
+      done,
+      blockedKeys
+    );
+  // Recipients not sent today: those with failures to resend on following days, those who cannot
+  // be claimed today, and those whose failure row could not be deleted (the claim would hit the
+  // UNIQUE violation). They stay unfinished, so completion is not recorded either.
+  let claims = assign(new Set(retryable.filter((log) => !retryNow(log)).map(keyOf)));
+  const deletableIds = retryable
+    .filter((log) => retryNow(log) && claims.get(log.reference_key)?.has(log.user_id))
+    .map((log) => log.id);
+  const deletedIds = new Set<number>(deletableIds);
+  if (deletableIds.length > 0) {
+    const { error } = await supabase.from("email_logs").delete().in("id", deletableIds);
     if (error) {
       console.error("[定期メール] お知らせの送信失敗の行を削除できませんでした:", error.message);
-      notClaimable = retryable;
+      deletedIds.clear();
+      claims = assign(new Set(retryable.map(keyOf)));
     }
   }
   const blocked = new Map<string, Set<number>>();
-  for (const log of notClaimable) {
+  for (const log of retryable) {
+    if (deletedIds.has(log.id)) {
+      continue;
+    }
     const ids = blocked.get(log.reference_key) ?? new Set<number>();
     ids.add(log.user_id);
     blocked.set(log.reference_key, ids);
@@ -678,12 +823,9 @@ async function appendAnnouncementEmails(
         })
     );
 
+    const claimedUserIds = claims.get(referenceKey);
     for (const user of pending) {
-      if (
-        !sendableUserIds.has(user.userId) ||
-        queuedUserIds.has(user.userId) ||
-        blockedUserIds.has(user.userId)
-      ) {
+      if (!claimedUserIds?.has(user.userId) || blockedUserIds.has(user.userId)) {
         continue;
       }
       queue.push({
@@ -740,6 +882,9 @@ async function buildQueue(
   announcementBatches: AnnouncementBatch[];
 }> {
   const users = allUsers.filter((user) => !excludedToday.has(user.userId));
+  // Staff review the courses rather than take them; progress nudges and trial guides would be
+  // noise to them, so only announcements reach them.
+  const learners = users.filter((user) => isLearnerRole(user.role));
   const trialNurtureSetting = settings.kinds.trial_nurture;
   const inactivitySetting = settings.kinds.inactivity_reminder;
   const weeklySetting = settings.kinds.weekly_digest;
@@ -767,7 +912,7 @@ async function buildQueue(
   const queue: QueuedEmail[] = [];
   const queuedUserIds = new Set<number>();
 
-  const { trialNurture, inactivityCandidates } = planMilestoneEmails(users, today, {
+  const { trialNurture, inactivityCandidates } = planMilestoneEmails(learners, today, {
     trialNurture: trialNurtureSetting.enabled ? trialNurtureSetting.sendDays : null,
     inactivityReminder: inactivitySetting.enabled ? inactivitySetting.sendDays : null,
   });
@@ -855,8 +1000,8 @@ async function buildQueue(
         `[定期メール] 今週（${weekStart}）の週次進捗の予約が無いため、今日の実行で対象を決めて送ります`
       );
     } else if (
-      weeklySetting.updatedAt >= cycleStart ||
-      (settings.sendingUpdatedAt !== null && settings.sendingUpdatedAt >= cycleStart)
+      isSameOrAfter(weeklySetting.updatedAt, cycleStart) ||
+      (settings.sendingUpdatedAt !== null && isSameOrAfter(settings.sendingUpdatedAt, cycleStart))
     ) {
       weeklySkipped = true;
       console.warn(
@@ -870,7 +1015,7 @@ async function buildQueue(
     }
   }
   let weeklyPool = weeklyEnabled
-    ? users.filter((user) => coversPreviousWeek(user.createdAt, weekStart))
+    ? learners.filter((user) => coversPreviousWeek(user.createdAt, weekStart))
     : [];
   const poolIds = () => weeklyPool.map((user) => user.userId);
   if (weeklyReservationMissing || weeklySkipped) {
@@ -886,19 +1031,20 @@ async function buildQueue(
   }
   const logged = await fetchWeeklyDigestLoggedUserIds(supabase, poolIds(), weekStart);
   const weeklyUsers = weeklyPool.filter((user) => !logged.has(user.userId));
-  const stats = await fetchWeeklyStats(
-    supabase,
-    weeklyUsers.map((user) => user.userId),
-    weekStart
-  );
+  const weeklyUserIds = weeklyUsers.map((user) => user.userId);
+  const [stats, unovercomeByUser] = await Promise.all([
+    fetchWeeklyStats(supabase, weeklyUserIds, weekStart),
+    fetchUnovercomeReviewCountsByUser(supabase, weeklyUsers, contents),
+  ]);
 
   const weeklyItems: QueuedEmail[] = [];
   for (const user of weeklyUsers) {
     const completedLastWeek = stats.completedLastWeekByUser.get(user.userId) ?? 0;
     const submittedLastWeek = stats.submittedLastWeekByUser.get(user.userId) ?? 0;
-    const { next, remaining } = resolveNextContent(
+    const { next, remaining, activeThemes } = resolveNextContent(
       visibleContentsFor(contents, user.status),
-      stats.completedIdsByUser.get(user.userId) ?? new Set()
+      stats.completedIdsByUser.get(user.userId) ?? new Set(),
+      stats.completedAtByUser.get(user.userId)
     );
     if (
       !isWeeklyDigestTarget({ completedLastWeek, submittedLastWeek, remainingContents: remaining })
@@ -922,6 +1068,8 @@ async function buildQueue(
             submittedLastWeek,
             nextContent: next ? { title: next.title, path: next.path } : null,
             remainingContents: remaining,
+            activeThemes,
+            unovercomeReviewCount: unovercomeByUser.get(user.userId) ?? 0,
           },
           texts
         ),
@@ -1002,15 +1150,17 @@ export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<
   const sleep = options.sleep ?? defaultSleep;
   const startedAt = clock();
 
-  if (!isEmailConfigured()) {
-    return skip("RESEND_API_KEY または EMAIL_FROM_ADDRESS が未設定です");
-  }
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-  if (!appUrl) {
-    return skip("NEXT_PUBLIC_APP_URL が未設定です");
-  }
-  if (!isUnsubscribeConfigured()) {
-    return skip("EMAIL_UNSUBSCRIBE_SECRET が未設定です");
+  const emailSkipReason = !isEmailConfigured()
+    ? "RESEND_API_KEY または EMAIL_FROM_ADDRESS が未設定です"
+    : !appUrl
+      ? "NEXT_PUBLIC_APP_URL が未設定です"
+      : !isUnsubscribeConfigured()
+        ? "EMAIL_UNSUBSCRIBE_SECRET が未設定です"
+        : null;
+  // Push does not need Resend, but it shares this lock so two crons cannot deliver twice.
+  if (emailSkipReason && !isWebPushConfigured()) {
+    return skip(emailSkipReason);
   }
 
   const today = toJstDateString(options.now ?? new Date());
@@ -1031,8 +1181,18 @@ export async function runEmailDigest(options: EmailDigestOptions = {}): Promise<
     return skip("別の実行が進行中です");
   }
 
+  // Before sendDigest / deliverDigestPushes write completion stamps. Push uses push_sent_at
+  // (independent of email_sent_at) so a crash after mail completion still retries, while earlier
+  // push completions stay out and do not pile onto new subscribers.
+  const announcementSentSince = new Date().toISOString();
   try {
-    return await sendDigest(supabase, today, appUrl, { clock, sleep, startedAt });
+    const emailResult = emailSkipReason
+      ? skip(emailSkipReason)
+      : await sendDigest(supabase, today, appUrl as string, { clock, sleep, startedAt });
+    if (isWebPushConfigured()) {
+      await deliverDigestPushes(supabase, today, announcementSentSince, clock);
+    }
+    return emailResult;
   } finally {
     await releaseCronLock(supabase, lock);
   }

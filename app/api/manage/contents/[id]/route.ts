@@ -1,25 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { USER_STATUS } from "@/app/constants/user";
 import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
 import { deleteContent, updateContent } from "@/app/services/api/admin-server";
 import { ContentUpdateSchema, validateRequest } from "@/app/services/api/schemas";
-import { checkContentPermissions } from "@/app/services/auth/permissions";
-import { getServerAuth } from "@/app/services/auth/server-auth";
+import { requireContentManagerApi } from "@/app/services/auth/admin-guard";
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { user, userId, userStatus, userRole } = await getServerAuth();
-    if (!user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-    }
-    if (!userId) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-    if (userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
-    if (!checkContentPermissions(userRole)) {
-      return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
+    const { response: denied } = await requireContentManagerApi();
+    if (denied) {
+      return denied;
     }
 
     const { id } = await params;
@@ -34,7 +23,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     }
     const {
       title,
-      week_id,
+      phase_id,
       content_type,
       video_url,
       text_content,
@@ -42,17 +31,33 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       exercise_instructions,
       hint,
       reference_answer,
+      starter_files,
+      submission_file_slots,
+      preview_base_html,
+      show_preview,
+      show_console,
       allowed_submission_types,
       code_language,
       pdf_url,
+      grading_rubric,
+      grading_rubric_version,
       insert_after_id,
       is_published,
       is_open_to_trial,
+      quiz_questions,
     } = validation.data;
 
-    const { error, storageRemoved } = await updateContent(contentId, {
+    const {
+      error,
+      storageRemoved,
+      conflict,
+      keyReuse,
+      slotsNotAllowed,
+      previewNotAllowed,
+      gradingRubricVersion,
+    } = await updateContent(contentId, {
       title,
-      week_id,
+      phase_id,
       content_type,
       video_url,
       text_content,
@@ -60,19 +65,58 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       exercise_instructions,
       hint,
       reference_answer,
+      starter_files,
+      submission_file_slots,
+      preview_base_html,
+      show_preview,
+      show_console,
       allowed_submission_types,
       code_language,
       pdf_url,
+      gradingRubric: grading_rubric,
+      loadedRubricVersion: grading_rubric_version,
       insertAfterId: insert_after_id,
       is_published,
       is_open_to_trial,
+      quizQuestions: quiz_questions,
     });
 
+    if (slotsNotAllowed) {
+      return NextResponse.json(
+        { error: "提出ファイルの構成は演習だけに設定できます" },
+        { status: 400 }
+      );
+    }
+    if (previewNotAllowed) {
+      return NextResponse.json({ error: previewNotAllowed }, { status: 400 });
+    }
+    if (keyReuse) {
+      return NextResponse.json(
+        {
+          error: `要件キー（${keyReuse.join(", ")}）は過去のレビューで使った番号なので再利用できません`,
+        },
+        { status: 400 }
+      );
+    }
+    if (conflict) {
+      return NextResponse.json(
+        { error: "採点基準が別の保存で更新されています。画面を読み込み直してください" },
+        { status: 409 }
+      );
+    }
     if (error) {
       return NextResponse.json({ error: "コンテンツの更新に失敗しました" }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, storageRemoved });
+    return NextResponse.json({
+      success: true,
+      storageRemoved,
+      // Only after a rubric write. The form adopts this instead of a refreshed prop, whose rows
+      // it has not loaded.
+      ...(gradingRubricVersion !== undefined
+        ? { grading_rubric_version: gradingRubricVersion }
+        : {}),
+    });
   } catch (error) {
     if (error instanceof InvalidInsertAfterIdError) {
       console.error("コンテンツ更新エラー（insert_after_id不正）:", error.insertAfterId);
@@ -88,18 +132,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { user, userId, userStatus, userRole } = await getServerAuth();
-    if (!user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-    }
-    if (!userId) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-    if (userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
-    if (!checkContentPermissions(userRole)) {
-      return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
+    const { response: denied } = await requireContentManagerApi();
+    if (denied) {
+      return denied;
     }
     const { id } = await params;
     const contentId = Number.parseInt(id, 10);

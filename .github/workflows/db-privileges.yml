@@ -1,0 +1,60 @@
+name: DB Privileges Test
+
+on:
+  push:
+    paths:
+      - "supabase/**"
+      - ".github/workflows/db-privileges.yml"
+      - "package.json"
+      - "bun.lock"
+      - ".bun-version"
+  pull_request:
+    paths:
+      - "supabase/**"
+      - ".github/workflows/db-privileges.yml"
+      - "package.json"
+      - "bun.lock"
+      - ".bun-version"
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  privileges:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ".bun-version"
+
+      # Only bun packages are cached; the Supabase Docker images are pulled on every run (~2 min total).
+      - name: Cache bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      # The CLI version is pinned by bun.lock (devDependency "supabase").
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Local Docker stack only. No --db-url / --project-ref, so nothing here can reach
+      # the production project. Skipped services are not needed to apply migrations
+      # (gotrue and storage-api stay: migrations touch auth.* and storage.*).
+      - name: Start local Supabase and apply all migrations to an empty database
+        run: >-
+          bunx supabase start
+          -x realtime,imgproxy,mailpit,studio,edge-runtime,logflare,vector,supavisor,postgres-meta
+
+      - name: Check function and table privileges (pgTAP)
+        run: bunx supabase test db
+
+      - name: Stop local Supabase
+        if: always()
+        run: bunx supabase stop --no-backup

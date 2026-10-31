@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "app/**"
+      - "scripts/**"
       - "tests/**"
       - "vitest.config.ts"
       - "package.json"
@@ -12,6 +13,7 @@ on:
   pull_request:
     paths:
       - "app/**"
+      - "scripts/**"
       - "tests/**"
       - "vitest.config.ts"
       - "package.json"
@@ -38,3 +40,8 @@ jobs:
 
       - name: Run unit tests
         run: bun run test
+
+      # The preview scan and the console bridge also run in Safari (JavaScriptCore), whose regex
+      # engine fails differently from V8 on long inputs.
+      - name: Run preview tests on JavaScriptCore
+        run: bun run test:jsc

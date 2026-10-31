@@ -15,9 +15,16 @@ vi.mock("@/app/(authenticated)/upgrade/ManageSubscriptionButton", () => ({
 vi.mock("@/app/(authenticated)/upgrade/UpgradeCheckoutButton", () => ({
   UpgradeCheckoutButton: () => createElement("div", null, "checkout"),
 }));
+vi.mock("@/app/(authenticated)/upgrade/PlanInquiryButton", () => ({
+  PlanInquiryButton: ({ compact }: { compact?: boolean }) =>
+    createElement("div", null, compact ? "inquiry-compact" : "inquiry"),
+}));
 
 import UpgradePage from "@/app/(authenticated)/upgrade/page";
-import { fetchStripeSubscriptionByUserId } from "@/app/services/api/stripe-server";
+import {
+  fetchStripeSubscriptionByUserId,
+  fetchSubscriptionPrice,
+} from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 // 2026-10-26T15:00:00Z is 2026/10/27 in JST.
@@ -57,6 +64,53 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+describe("/upgrade のプランカード", () => {
+  it("お試し会員はカードだけを出し、価格未確認時は「—」にする", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({
+      user: { id: "auth-uuid" },
+      userId: 7,
+      userStatus: "trial",
+      userRole: "member",
+      membershipType: null,
+    } as never);
+    vi.mocked(fetchSubscriptionPrice).mockResolvedValue({
+      amount: null,
+      currency: "jpy",
+    });
+
+    const html = renderToStaticMarkup(await UpgradePage());
+
+    expect(html).toContain("一般有料会員");
+    expect(html).toContain("コミュニティ会員");
+    expect(html).toContain("—");
+    expect(html).toContain("一般有料会員の詳細を開く");
+    expect(html).toContain("コミュニティ会員の詳細を開く");
+    expect(html).not.toContain("詳細を見る");
+    expect(html).toContain("Slackでのコミュニケーション");
+    expect(html).toContain("Web/AIの最新情報");
+    // Checkout / legal copy live in the dialog (client); not asserted on the server HTML.
+  });
+
+  it("一般有料会員は現在のプランバッジと解約入口をカード上に出し、一般カードはモーダルにしない", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({
+      user: { id: "auth-uuid" },
+      userId: 7,
+      userStatus: "active",
+      userRole: "member",
+      membershipType: "general",
+    } as never);
+
+    const html = await renderWithSubscription({});
+
+    expect(html).toContain("現在のプラン");
+    expect(html).toContain("ご契約中です（次回のお支払い: 2026/10/27）");
+    expect(html).toContain("manage");
+    expect(html).not.toContain("一般有料会員の詳細を開く");
+    expect(html).toContain("コミュニティ会員の詳細を開く");
+    expect(html).toContain("Slackでのコミュニケーション");
+  });
 });
 
 describe("/upgrade の契約中表示", () => {

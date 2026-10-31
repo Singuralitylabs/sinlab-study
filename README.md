@@ -5,7 +5,7 @@
 
 ## 主な機能
 
-- **学習コンテンツ配信** — Theme > Phase > Week > コンテンツの4階層構造で、動画・テキスト・演習・スライドを配信
+- **学習コンテンツ配信** — Theme > Phase > コンテンツの3階層構造で、動画・テキスト・演習・スライドを配信
 - **進捗管理** — コンテンツ単位の完了トグルと、ダッシュボードでの進捗率表示
 - **課題提出** — コード貼り付けまたはURL共有による演習課題の提出
 - **AIレビュー** — 提出コードに対してGemini APIによる自動レビューを実施
@@ -31,6 +31,8 @@
 
 - [Bun](https://bun.sh/) がインストール済みであること（バージョンは下記「Bun のインストール手順」を参照）
 - Supabase プロジェクトが作成済みであること
+- 本番（Vercel）の Node.js は `package.json` の `engines.node` で決まる（Vercel はプロジェクト設定より `engines` を優先し、範囲内の最新メジャーを選ぶ）。上限を付けているのは、新しいメジャーが出たときに無確認で切り替わらないようにするため。上げるときは `engines` と Vercel のプロジェクト設定を揃えて更新する
+- Vercel の関数リージョンは Supabase プロジェクトと同じ東京（`hnd1`）にする（`vercel.json` の `regions`）。離れているとリクエストごとの往復遅延が支配的になる（#358, #359）
 
 ### Bun のインストール手順
 
@@ -48,8 +50,12 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase Publishable Key>
 SUPABASE_SERVICE_ROLE_KEY=<Supabase Service Role Key>
 SUPABASE_PROJECT_ID=<Supabase プロジェクトID>
 GEMINI_API_KEY=<Gemini API Key（会員用・有料ティア。AIレビュー機能）>
+CLOUDFLARE_STREAM_CUSTOMER_CODE=<任意。Cloudflare Stream の再生URL customer-<code>.cloudflarestream.com の <code>。講座動画の署名付き再生（Stream の動画IDを video_url に入れた回）に必要>
+CLOUDFLARE_STREAM_SIGNING_KEY_ID=<任意。Stream 署名鍵の result.id>
+CLOUDFLARE_STREAM_SIGNING_KEY_PEM=<任意。Stream 署名鍵の result.pem（API が返す Base64 の1行をそのまま）。サーバー側のみ・NEXT_PUBLIC_ を付けない。3つのどれかが欠けると Stream 動画は再生できない>
 GEMINI_API_KEY_TRIAL=<任意。お試しユーザー用・無料ティア。未設定時は GEMINI_API_KEY にフォールバック>
-SLACK_NOTIFICATION_WEBHOOK_URL=<任意。初回ログイン承認依頼・Stripe支払い失敗のSlack通知。未設定時は通知をスキップ>
+SLACK_NOTIFICATION_WEBHOOK_URL=<任意。初回ログイン承認依頼・Stripe支払い失敗・フィードバックのSlack通知。未設定時は通知をスキップ>
+FEEDBACK_ENABLED=<フィードバック機能の有効化。"true" 以外はフェイルクローズで無効>
 RESEND_API_KEY=<任意。受講生向けメール通知（Resend）の API キー。未設定時はメール送信をスキップ>
 EMAIL_FROM_ADDRESS=<任意。メールの送信元（返信不可の noreply@...。開発時は onboarding@resend.dev）。未設定時はメール送信をスキップ>
 CRON_SECRET=<任意。定期メールの Cron ルートの認証（Vercel Cron が Bearer で送る）。未設定時は Cron ルートが常に 401>
@@ -58,7 +64,11 @@ STRIPE_ENABLED=<Stripe決済機能の有効化フラグ。"true" 以外はフェ
 STRIPE_SECRET_KEY=<Stripe Secret Key>
 STRIPE_WEBHOOK_SECRET=<Stripe Webhook 署名シークレット>
 STRIPE_PRICE_ID=<月額サブスクリプションの Price ID>
-NEXT_PUBLIC_APP_URL=<Checkout/Portal のリダイレクト先URL・メール本文のリンク生成に使用>
+CERTIFICATE_ISSUER_NAME=<任意。修了証に印刷する運営団体名。未設定・空なら団体名の行を出さない（印刷済みの修了証は訂正できないため、文言が確定してから設定する）>
+NEXT_PUBLIC_APP_URL=<Checkout/Portal のリダイレクト先URL・メール本文のリンク生成・OGP の metadataBase・修了証の LINE/Facebook 共有（未設定なら非表示）に使用>
+NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY=<任意。Web Push の公開鍵。未設定時は購読ボタンを出さず送信しない>
+WEB_PUSH_VAPID_PRIVATE_KEY=<任意。Web Push の秘密鍵。サーバー側のみ。未設定時はプッシュ全体を無効>
+WEB_PUSH_SUBJECT=<任意。VAPID の mailto: 連絡先。未設定時はプッシュ全体を無効>
 ```
 
 一覧の正本はこの節と `.env.local.example`。本番リリース時の確認は Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順) Step 5 を参照。
@@ -90,9 +100,11 @@ bun dev
 | `bun run lint` | Biome によるリント |
 | `bun run format` | Biome によるフォーマット |
 | `bun run check` | Biome によるリント + フォーマット |
-| `bun run db:types` | Supabase から TypeScript 型定義を生成（`.env.local` があれば読み込み、なければ環境変数 `SUPABASE_PROJECT_ID` を使用） |
+| `bun run db:types` | Supabase から TypeScript 型定義を生成（`SUPABASE_DB_URL` があればその DB へ `--db-url`、なければ `SUPABASE_PROJECT_ID` + `SUPABASE_ACCESS_TOKEN` でリモート。`.env.local` は未設定の変数だけ補う。CLI は devDependency の `supabase`。`DATABASE_URL` は使わない） |
 | `bun run test` | Vitest によるユニットテスト実行 |
 | `bun run check:comments [基準ref]` | 変更した TS/JS がコメント・整形のみの差分か（AST同一・`@ts-*`/`biome-ignore` の増減なし）を検証。未追跡ファイルも対象、コード以外の変更ファイルは「未検証」として一覧表示。差異・パース失敗があれば該当ファイルを列挙して非ゼロ終了（既定の基準は `origin/main`） |
+| `bun scripts/grading-dry-run.ts --confirm-dev [--content-id N] [--limit 5] [--repeat 1] [--model <モデルID>]` | 採点基準付きの演習の既存コード提出を現行ロジックで再採点し、点数分布・合格率・平均トークンを表示する（**DB へは書き込まない**。Gemini を呼び課金される。`SUPABASE_SERVICE_ROLE_KEY` と `GEMINI_API_KEY` が必要で、**本番には向けない**。合格点 `CERTIFICATE_PASS_SCORE` を決める材料にする。未指定は本番と同じフォールバックになるため、モデル比較では `--model` で 1 つに固定する） |
+| `bun scripts/gemini-model-check.ts [--json] [--available a,b]` | Gemini `models.list` と `app/constants/gemini.ts` の登録モデルを比較する（#369。Actions 用。キーは `GEMINI_MODEL_CHECK_API_KEY`。dry-run はしない） |
 | `bun run test:all` | build/db:types/lint/format/check/test を一括実行 |
 
 ### Claude Code から Supabase MCP を使う
@@ -121,15 +133,42 @@ Claude Code で Supabase MCP サーバーを使う場合、**必ず read-only �
 - マイナー・パッチのグループ PR は、CI（Biome / 型チェック / ユニットテスト / ビルド）が通れば そのままマージしてよい。
 - メジャー更新は Breaking Changes（特に `next` はリリースノート）を確認してからマージする。
 
+## Gemini モデル自動検知（GitHub Actions）
+
+`.github/workflows/gemini-model-check.yml` が週1回（および手動 `workflow_dispatch`）で Gemini API の `models.list` を取得し、`app/constants/gemini.ts` の登録モデル（主: `GEMINI_MODEL_NAME` / 代替: `GEMINI_ALTERNATE_MODEL_NAME`）と比較する。
+
+| 検知内容 | 動作 |
+|:--|:--|
+| 同系統（安定版 Flash）でより新しいモデル | `env/gemini-model-<id>` ブランチで定数更新 PR を作成（同一モデルへの open / closed PR があれば作らない） |
+| 登録モデルが一覧に無い | 緊急度高の Issue を作成（`priority-high` + `enhancement`。同一タイトルの open Issue があれば作らない） |
+| 変化なし | 何もしない |
+
+- **リポジトリ Secret**: `GEMINI_MODEL_CHECK_API_KEY` — `models.list` 読み取り専用に発行した Gemini キー。本番の `GEMINI_API_KEY` / `GEMINI_API_KEY_TRIAL` とは分ける。ログに出さない。
+- **権限**: ワークフローの `permissions` は `contents: write` / `pull-requests: write` / `issues: write` のみ。
+- **【人間タスク】dry-run は CI で実行しない。** 自動 PR 本文の【人間タスク】に従い、料金確認と `scripts/grading-dry-run.ts` での旧/新比較を人が開発環境で実施してからマージする（開発 DB 読み取りと Gemini 課金が発生するため）。
+- **`-latest` エイリアスは使わない**（仕様は `docs/specification.md` 6.1.2）。
+- `GITHUB_TOKEN` で作った PR は `pull_request` トリガの CI が動かないことがある。マージ前に Actions から Biome / Typecheck / Test / Build を `workflow_dispatch` で再実行する。
+
+手動確認の例（キーはログに出さない）:
+
+```bash
+# 比較ロジックのみ（API 不要）
+bun scripts/gemini-model-check.ts --available gemini-3.8-flash,gemini-4.0-flash --json
+
+# 実 API（ローカル。Secret と同名の環境変数）
+GEMINI_MODEL_CHECK_API_KEY=... bun scripts/gemini-model-check.ts --json
+```
+
 ## プロジェクト構成
 
 ```
 app/
 ├── (authenticated)/     # 認証必須のページ群
-│   ├── admin/           #   管理者専用画面（/admin/users・/admin/emails・/admin/emails/templates のみ。他は /manage にリダイレクト）
+│   ├── admin/           #   管理者専用画面（/admin/users・/admin/emails・/admin/emails/templates・/admin/ai-review のみ。他は /manage にリダイレクト）
 │   ├── manage/          #   コンテンツ管理画面（admin + maintainer 共通）
 │   ├── instructor/      #   講師向け画面（/manage にリダイレクト）
-│   ├── learn/           #   学習コンテンツ画面（Theme > Phase > Week > Content の4階層）
+│   ├── learn/           #   学習コンテンツ画面（Theme > Phase > Content の3階層）
+│   ├── settings/        #   設定画面（案内メールの配信停止・再開）
 │   ├── submissions/     #   提出履歴画面
 │   ├── components/      #   認証済みレイアウト用コンポーネント
 │   └── page.tsx         #   ダッシュボード
@@ -139,9 +178,10 @@ app/
 │   ├── admin/email-templates/ #   メール文面・サービス名の編集、プレビュー、テスト送信（admin のみ）
 │   ├── admin/email-logs/ #   メール送信履歴（admin のみ）
 │   ├── ai-review/       #   AIレビュー（Gemini API）
-│   ├── manage/          #   コンテンツ管理（phases/weeks/contents/themes）
+│   ├── manage/          #   コンテンツ管理（phases/contents/themes）
 │   ├── onboarding/      #   初回利用ガイドの完了記録
 │   ├── progress/        #   進捗更新
+│   ├── settings/email/  #   案内メールの配信停止・再開（本人用）
 │   ├── submissions/     #   課題提出
 │   └── upload-pdf/      #   PDFスライドアップロード（Supabase Storage）
 ├── components/          # 共通UIコンポーネント
@@ -152,7 +192,8 @@ app/
 │   └── auth/            #   認証・権限チェック
 └── types/               # TypeScript 型定義
 supabase/
-└── migrations/          # DBマイグレーションSQL
+├── migrations/          # DBマイグレーションSQL
+└── tests/database/      # pgTAP（関数の EXECUTE 権限。docs/testing.md 4.3）
 proxy.ts                 # 認証プロキシ（Next.js 16 の Middleware 後継）
 docs/                    # 設計ドキュメント
 ```

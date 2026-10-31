@@ -2,18 +2,10 @@ import Link from "next/link";
 import { PageTitle } from "@/app/components/PageTitle";
 import { EMAIL_SERVICE_NAME_MAX, EMAIL_SERVICE_SUBTITLE_MAX } from "@/app/constants/notifications";
 import { EMAIL_TEMPLATE_DEFINITIONS } from "@/app/lib/email-template";
+import { formatUpdatedWithEditor } from "@/app/lib/format-date";
 import { fetchEmailTemplatesForAdmin } from "@/app/services/api/email-templates-server";
 import { Badge } from "@/components/ui/badge";
 import { BrandingForm } from "./components/branding-form";
-
-function formatUpdated(
-  updatedAt: string,
-  updatedBy: number | null,
-  editorNames: Record<number, string>
-) {
-  const who = updatedBy !== null ? (editorNames[updatedBy] ?? "不明") : "不明";
-  return `${new Date(updatedAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}（${who}）`;
-}
 
 export default async function AdminEmailTemplatesPage() {
   const { data, error } = await fetchEmailTemplatesForAdmin();
@@ -45,7 +37,7 @@ export default async function AdminEmailTemplatesPage() {
               subtitleMax={EMAIL_SERVICE_SUBTITLE_MAX}
               updatedLabel={
                 data.branding.updatedAt
-                  ? formatUpdated(
+                  ? formatUpdatedWithEditor(
                       data.branding.updatedAt,
                       data.branding.updatedBy,
                       data.editorNames
@@ -84,7 +76,11 @@ export default async function AdminEmailTemplatesPage() {
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {stored
-                          ? formatUpdated(stored.updatedAt, stored.updatedBy, data.editorNames)
+                          ? formatUpdatedWithEditor(
+                              stored.updatedAt,
+                              stored.updatedBy,
+                              data.editorNames
+                            )
                           : "-"}
                       </td>
                       <td className="px-4 py-3">

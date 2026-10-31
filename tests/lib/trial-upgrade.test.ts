@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DISPLAY_MONTHLY_PRICE_JPY, UPGRADE_BENEFITS } from "@/app/constants/stripe";
+import { AI_REVIEW_LIMITS } from "@/app/constants/gemini";
+import { buildUpgradeBenefits, DISPLAY_MONTHLY_PRICE_JPY } from "@/app/constants/stripe";
 import {
   getLockedContentFallbackOverview,
   resolveUpgradePriceLabel,
@@ -63,6 +64,6 @@ describe("定型文・価値訴求", () => {
   });
 
   it("価値は3点", () => {
-    expect(UPGRADE_BENEFITS).toHaveLength(3);
+    expect(buildUpgradeBenefits(AI_REVIEW_LIMITS)).toHaveLength(3);
   });
 });

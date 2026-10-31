@@ -12,8 +12,8 @@ export default function PhaseLoading() {
       </div>
 
       <div className="grid gap-4">
-        {[1, 2].map((week) => (
-          <Card key={week}>
+        {[1, 2].map((item) => (
+          <Card key={item}>
             <CardContent className="pt-6">
               <div className="flex items-center gap-3 mb-4">
                 <Skeleton className="h-8 w-8 rounded-full" />

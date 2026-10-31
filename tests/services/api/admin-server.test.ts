@@ -11,9 +11,9 @@ import {
   changeMembershipType,
   changeUserRole,
   createContent,
+  createContentsAtTail,
   createPhase,
   createTheme,
-  createWeek,
   fetchAllContents,
   fetchManageCounts,
   fetchStudentsProgress,
@@ -22,11 +22,9 @@ import {
   isUserCurrentlySubscribed,
   parseStrictFilterId,
   rejectUser,
-  setUserEmailOptOut,
   updateContent,
   updatePhase,
   updateTheme,
-  updateWeek,
 } from "@/app/services/api/admin-server";
 import {
   createAdminSupabaseClient,
@@ -42,9 +40,31 @@ beforeEach(() => {
 
 describe("fetchStudentsProgress", () => {
   const users = [
-    { id: 1, display_name: "受講生A", email: "a@example.com" },
-    { id: 2, display_name: "受講生B", email: "b@example.com" },
+    { id: 1, display_name: "受講生A" },
+    { id: 2, display_name: "受講生B" },
   ];
+
+  it("users から email を select しない (#414)", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        users: { data: users, error: null },
+        learning_contents: { data: null, error: null, count: 0 },
+      },
+      rpcResults: {
+        get_students_progress_summary: { data: [], error: null },
+      },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await fetchStudentsProgress();
+
+    const usersCallIndex = mockClient.from.mock.calls.findIndex(([table]) => table === "users");
+    expect(usersCallIndex).toBeGreaterThanOrEqual(0);
+    const selectArg = mockClient.from.mock.results[usersCallIndex]?.value.select.mock
+      .calls[0][0] as string;
+    expect(selectArg).toBe("id, display_name");
+    expect(selectArg).not.toContain("email");
+  });
 
   // Aggregation is the RPC's responsibility (migration); this only tests mapping the RPC result to
   // StudentProgress.
@@ -307,40 +327,58 @@ describe("fetchStudentsProgress", () => {
 });
 
 describe("fetchManageCounts", () => {
-  it("各テーブルの件数を返す", async () => {
-    const mockClient = createMockSupabaseClient({
+  function mockClients(overrides: { submissionsError?: typeof dbError } = {}) {
+    const adminClient = createMockSupabaseClient({
       tableResults: {
-        learning_themes: { data: null, error: null, count: 2 },
-        learning_phases: { data: null, error: null, count: 3 },
-        learning_weeks: { data: null, error: null, count: 4 },
-        learning_contents: { data: null, error: null, count: 5 },
         users: { data: null, error: null, count: 6 },
+        submissions: overrides.submissionsError
+          ? { data: null, error: overrides.submissionsError, count: null }
+          : { data: null, error: null, count: 12 },
       },
     });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+    const userClient = createMockSupabaseClient({
+      tableResults: {
+        learning_themes: { data: null, error: null, count: 3 },
+        learning_phases: { data: null, error: null, count: 8 },
+        learning_contents: { data: null, error: null, count: 40 },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(adminClient as never);
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(userClient as never);
+    return { adminClient, userClient };
+  }
+
+  it("構成の件数（ユーザーJWT）と受講生数・提出数（service_role）を返す", async () => {
+    const { adminClient, userClient } = mockClients();
 
     const result = await fetchManageCounts();
 
     expect(result.error).toBeNull();
-    expect(result.data).toEqual({ themes: 2, phases: 3, weeks: 4, contents: 5, students: 6 });
+    expect(result.data).toEqual({
+      themes: 3,
+      phases: 8,
+      contents: 40,
+      students: 6,
+      submissions: 12,
+    });
+    expect(adminClient.from).toHaveBeenCalledWith("users");
+    expect(adminClient.from).toHaveBeenCalledWith("submissions");
+    expect(userClient.from).toHaveBeenCalledWith("learning_themes");
   });
 
   it("一部の件数取得に失敗した場合、失敗分は0としてエラーを返す", async () => {
-    const mockClient = createMockSupabaseClient({
-      tableResults: {
-        learning_themes: { data: null, error: null, count: 2 },
-        learning_phases: { data: null, error: dbError, count: null },
-        learning_weeks: { data: null, error: null, count: 4 },
-        learning_contents: { data: null, error: null, count: 5 },
-        users: { data: null, error: null, count: 6 },
-      },
-    });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+    mockClients({ submissionsError: dbError });
 
     const result = await fetchManageCounts();
 
     expect(result.error).toEqual(dbError);
-    expect(result.data).toEqual({ themes: 2, phases: 0, weeks: 4, contents: 5, students: 6 });
+    expect(result.data).toEqual({
+      themes: 3,
+      phases: 8,
+      contents: 40,
+      students: 6,
+      submissions: 0,
+    });
   });
 });
 
@@ -391,6 +429,20 @@ describe("fetchWeeklyFunnel", () => {
       ]);
     }
   );
+
+  it("許可リストの週数を RPC に渡し、許可外は8に丸める", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({ userRole: "admin" } as never);
+    const mockClient = createMockSupabaseClient({
+      rpcResults: { get_weekly_funnel: { data: [], error: null } },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await fetchWeeklyFunnel(26);
+    expect(mockClient.rpc).toHaveBeenCalledWith("get_weekly_funnel", { weeks: 26 });
+
+    await fetchWeeklyFunnel(99);
+    expect(mockClient.rpc).toHaveBeenCalledWith("get_weekly_funnel", { weeks: 8 });
+  });
 
   it("RPC が失敗しても DB のメッセージは返さず、ダッシュボード用の文言だけを返す", async () => {
     vi.mocked(getServerAuth).mockResolvedValue({ userRole: "admin" } as never);
@@ -730,14 +782,23 @@ describe("parseStrictFilterId", () => {
 });
 
 describe("fetchAllContents（不正なフィルタID）", () => {
-  it("整数として不正な weekId ではクエリを発行せず空配列を返す", async () => {
+  it("整数として不正な phaseId ではクエリを発行せず空配列を返す", async () => {
     const mockClient = createMockSupabaseClient();
     vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await fetchAllContents({ weekId: "abc" });
+    const result = await fetchAllContents({ phaseId: "abc" });
 
     expect(result).toEqual({ data: [], error: null });
     expect(mockClient.from).not.toHaveBeenCalled();
+  });
+
+  it("member では service_role を使わず空配列を返す", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({ userRole: "member" } as never);
+
+    const result = await fetchAllContents({});
+
+    expect(result).toEqual({ data: [], error: null });
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
   });
 });
 
@@ -886,37 +947,9 @@ describe("createPhase", () => {
   });
 });
 
-describe("createWeek", () => {
-  it("同じphase_id配下だけを兄弟として絞り込み、display_orderを決定してから作成する", async () => {
-    const createdWeek = { id: 100, phase_id: 1, name: "新週", display_order: 1 };
-    const mockClient = createMockSupabaseClient({
-      tableResults: {
-        learning_weeks: [
-          { data: [{ id: 5, display_order: 1 }], error: null },
-          { data: createdWeek, error: null },
-        ],
-      },
-      rpcResults: {
-        bulk_update_sibling_display_order: { data: null, error: null },
-      },
-    });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
-
-    const result = await createWeek({ phase_id: 1, name: "新週", insertAfterId: null });
-
-    expect(result).toEqual({ data: createdWeek, error: null });
-    const siblingsBuilder = mockClient.from.mock.results[0].value;
-    expect(siblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 1);
-    expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
-      p_table: "learning_weeks",
-      p_updates: [{ id: 5, display_order: 2 }],
-    });
-  });
-});
-
 describe("createContent", () => {
-  it("createAdminSupabaseClientを使い、同じweek_id配下だけを兄弟として絞り込む", async () => {
-    const createdContent = { id: 100, week_id: 1, title: "新コンテンツ", display_order: 1 };
+  it("createAdminSupabaseClientを使い、同じphase_id配下だけを兄弟として絞り込む", async () => {
+    const createdContent = { id: 100, phase_id: 1, title: "新コンテンツ", display_order: 1 };
     const mockClient = createMockSupabaseClient({
       tableResults: {
         learning_contents: [
@@ -928,7 +961,7 @@ describe("createContent", () => {
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
     const result = await createContent({
-      week_id: 1,
+      phase_id: 1,
       title: "新コンテンツ",
       content_type: "video",
       insertAfterId: null,
@@ -937,10 +970,49 @@ describe("createContent", () => {
     expect(result).toEqual({ data: createdContent, error: null });
     expect(createAdminSupabaseClient).toHaveBeenCalled();
     const siblingsBuilder = mockClient.from.mock.results[0].value;
-    expect(siblingsBuilder.eq).toHaveBeenCalledWith("week_id", 1);
+    expect(siblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 1);
     const insertBuilder = mockClient.from.mock.results[1].value;
     expect(insertBuilder.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ week_id: 1, title: "新コンテンツ", display_order: 1 })
+      expect.objectContaining({ phase_id: 1, title: "新コンテンツ", display_order: 1 })
+    );
+  });
+
+  it("slide と text の text_content は保存し、それ以外の種別では null にする", async () => {
+    const createdContent = { id: 100, phase_id: 1, title: "スライド", display_order: 1 };
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          { data: [], error: null },
+          { data: createdContent, error: null },
+          { data: [], error: null },
+          { data: createdContent, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await createContent({
+      phase_id: 1,
+      title: "スライド",
+      content_type: "slide",
+      text_content: "解説記事",
+      insertAfterId: null,
+    });
+    await createContent({
+      phase_id: 1,
+      title: "動画",
+      content_type: "video",
+      text_content: "残してはいけない",
+      insertAfterId: null,
+    });
+
+    const slideInsert = mockClient.from.mock.results[1].value;
+    const videoInsert = mockClient.from.mock.results[3].value;
+    expect(slideInsert.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ content_type: "slide", text_content: "解説記事" })
+    );
+    expect(videoInsert.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ content_type: "video", text_content: null })
     );
   });
 
@@ -954,7 +1026,7 @@ describe("createContent", () => {
 
     await expect(
       createContent({
-        week_id: 1,
+        phase_id: 1,
         title: "新コンテンツ",
         content_type: "video",
         insertAfterId: 999,
@@ -1183,61 +1255,8 @@ describe("updatePhase（編集時の再採番）", () => {
   });
 });
 
-describe("updateWeek（編集時の再採番）", () => {
-  it("phase_idが変わらず、insertAfterIdも省略した場合、現在値取得も再採番も行わない", async () => {
-    const mockClient = createMockSupabaseClient({
-      tableResults: { learning_weeks: { data: null, error: null } },
-    });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
-
-    const result = await updateWeek(10, { name: "名称変更のみ" });
-
-    expect(result).toEqual({ error: null });
-    expect(mockClient.from).toHaveBeenCalledTimes(1);
-  });
-
-  it("phase_idを変更した場合、移動先(phase_id)配下を対象に再採番してから本体UPDATEし、成功後に移動元(phase_id)配下も再採番する", async () => {
-    const mockClient = createMockSupabaseClient({
-      tableResults: {
-        learning_weeks: [
-          { data: { phase_id: 1 }, error: null },
-          { data: [], error: null },
-          { data: null, error: null },
-          {
-            data: [
-              { id: 2, display_order: 1 },
-              { id: 3, display_order: 3 },
-            ],
-            error: null,
-          },
-        ],
-      },
-      rpcResults: {
-        bulk_update_sibling_display_order: { data: null, error: null },
-      },
-    });
-    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
-
-    const result = await updateWeek(10, { phase_id: 2 });
-
-    expect(result).toEqual({ error: null });
-    const destinationSiblingsBuilder = mockClient.from.mock.results[1].value;
-    expect(destinationSiblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 2);
-    const bodyUpdateBuilder = mockClient.from.mock.results[2].value;
-    expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
-      expect.objectContaining({ phase_id: 2, display_order: 1 })
-    );
-    const sourceSiblingsBuilder = mockClient.from.mock.results[3].value;
-    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 1);
-    expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
-      p_table: "learning_weeks",
-      p_updates: [{ id: 3, display_order: 2 }],
-    });
-  });
-});
-
 describe("updateContent（編集時の再採番）", () => {
-  it("createAdminSupabaseClientを使い、week_idが変わらずinsertAfterIdも省略した場合は再採番しない", async () => {
+  it("createAdminSupabaseClientを使い、phase_idが変わらずinsertAfterIdも省略した場合は再採番しない", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: { learning_contents: { data: null, error: null } },
     });
@@ -1250,11 +1269,11 @@ describe("updateContent（編集時の再採番）", () => {
     expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
 
-  it("week_idを変更した場合、移動先の兄弟一覧を再採番してから本体UPDATEし、成功後に移動元の欠番も詰め直す", async () => {
+  it("phase_idを変更した場合、移動先の兄弟一覧を再採番してから本体UPDATEし、成功後に移動元の欠番も詰め直す", async () => {
     const mockClient = createMockSupabaseClient({
       tableResults: {
         learning_contents: [
-          { data: { week_id: 1 }, error: null },
+          { data: { phase_id: 1 }, error: null },
           { data: [{ id: 20, display_order: 1 }], error: null },
           { data: null, error: null },
           { data: [{ id: 3, display_order: 3 }], error: null },
@@ -1266,61 +1285,301 @@ describe("updateContent（編集時の再採番）", () => {
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await updateContent(10, { week_id: 2 });
+    const result = await updateContent(10, { phase_id: 2 });
 
     expect(result).toEqual({ error: null, storageRemoved: true });
     const destinationSiblingsBuilder = mockClient.from.mock.results[1].value;
-    expect(destinationSiblingsBuilder.eq).toHaveBeenCalledWith("week_id", 2);
+    expect(destinationSiblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 2);
     const bodyUpdateBuilder = mockClient.from.mock.results[2].value;
     expect(bodyUpdateBuilder.update).toHaveBeenCalledWith(
-      expect.objectContaining({ week_id: 2, display_order: 2 })
+      expect.objectContaining({ phase_id: 2, display_order: 2 })
     );
     const sourceSiblingsBuilder = mockClient.from.mock.results[3].value;
-    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("week_id", 1);
+    expect(sourceSiblingsBuilder.eq).toHaveBeenCalledWith("phase_id", 1);
     expect(mockClient.rpc).toHaveBeenCalledWith("bulk_update_sibling_display_order", {
       p_table: "learning_contents",
       p_updates: [{ id: 3, display_order: 1 }],
     });
   });
+
+  it("slide の更新は text_content を書き、それ以外の種別へ変えると null にする", async () => {
+    const current = {
+      data: { phase_id: 3, pdf_url: null, content_type: "slide", grading_rubric: null },
+      error: null,
+    };
+    const written = { data: [{ id: 10, updated_at: "2026-01-01T00:00:00Z" }], error: null };
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [current, written, written, current, written, written],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const kept = await updateContent(10, { content_type: "slide", text_content: "解説記事" });
+    const cleared = await updateContent(10, {
+      content_type: "video",
+      text_content: "残してはいけない",
+    });
+
+    expect(kept).toEqual({ error: null, storageRemoved: true, gradingRubricVersion: null });
+    expect(cleared).toEqual({ error: null, storageRemoved: true, gradingRubricVersion: null });
+    const slideBody = mockClient.from.mock.results[2].value;
+    const videoBody = mockClient.from.mock.results[5].value;
+    expect(slideBody.update).toHaveBeenCalledWith(
+      expect.objectContaining({ text_content: "解説記事" })
+    );
+    expect(videoBody.update).toHaveBeenCalledWith(expect.objectContaining({ text_content: null }));
+  });
 });
 
-describe("setUserEmailOptOut", () => {
-  const clientReturning = (data: unknown, error: unknown = null) => {
-    const mockClient = createMockSupabaseClient({ tableResults: { users: { data, error } } });
+describe("updateContent / createContent のプレビュー設定（#380 レビュー）", () => {
+  it("video→exercise の部分 PUT でレイアウト無し・コンソールだけなら現在行を読んで通す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              content_type: "video",
+              submission_file_slots: null,
+              starter_files: null,
+              code_language: "javascript",
+              show_preview: null,
+              show_console: null,
+            },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
-    return mockClient;
-  };
 
-  it("停止: 現在時刻を記録し、未停止の行だけを更新する（元の停止日時を上書きしない）", async () => {
-    const mockClient = clientReturning([{ id: 3 }]);
+    const result = await updateContent(1, { content_type: "exercise", show_console: true });
 
-    const result = await setUserEmailOptOut(3, true);
-
-    expect(result).toEqual({ error: null, updated: true });
-    const builder = mockClient.from.mock.results[0].value;
-    expect(builder.update).toHaveBeenCalledWith({ email_opt_out_at: expect.any(String) });
-    expect(builder.eq).toHaveBeenCalledWith("id", 3);
-    expect(builder.eq).toHaveBeenCalledWith("is_deleted", false);
-    expect(builder.is).toHaveBeenCalledWith("email_opt_out_at", null);
+    expect(result).toEqual({ error: null, storageRemoved: true });
+    expect(result.previewNotAllowed).toBeUndefined();
+    const updateBuilder = mockClient.from.mock.results[1].value;
+    expect(updateBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ content_type: "exercise", show_console: true })
+    );
   });
 
-  it("再開: NULL に戻し、停止中の行だけを更新する", async () => {
-    const mockClient = clientReturning([{ id: 3 }]);
+  it("種別を送らず video 行へプレビューをオンにすると演習専用の拒否", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              content_type: "video",
+              submission_file_slots: null,
+              starter_files: null,
+              code_language: null,
+              show_preview: null,
+              show_console: null,
+            },
+            error: null,
+          },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await setUserEmailOptOut(3, false);
+    const result = await updateContent(1, { show_preview: true });
 
-    expect(result.updated).toBe(true);
-    const builder = mockClient.from.mock.results[0].value;
-    expect(builder.update).toHaveBeenCalledWith({ email_opt_out_at: null });
-    expect(builder.not).toHaveBeenCalledWith("email_opt_out_at", "is", null);
+    expect(result).toEqual({
+      error: null,
+      storageRemoved: true,
+      previewNotAllowed: "プレビューとコンソールの設定は演習だけに指定できます",
+    });
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
   });
 
-  it("対象が0行なら updated: false、DBエラーなら error を返す", async () => {
-    clientReturning([]);
-    expect(await setUserEmailOptOut(3, true)).toEqual({ error: null, updated: false });
+  it("プレビュー検証用の現在行が無いときは PGRST116", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [{ data: null, error: null }],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    clientReturning(null, dbError);
-    expect(await setUserEmailOptOut(3, false)).toEqual({ error: dbError, updated: false });
+    const result = await updateContent(1, { show_console: true });
+
+    expect(result.storageRemoved).toBe(true);
+    expect(result.error).toMatchObject({ code: "PGRST116" });
+  });
+
+  it("exercise 以外へ種別変更するとプレビュー設定を NULL にする", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              phase_id: 3,
+              pdf_url: null,
+              content_type: "exercise",
+              grading_rubric: null,
+              submission_file_slots: [{ filename: "main.js", language: "javascript" }],
+              show_preview: false,
+              show_console: true,
+            },
+            error: null,
+          },
+          { data: [{ id: 1 }], error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await updateContent(1, { content_type: "video" });
+
+    const updateBuilder = mockClient.from.mock.results[1].value;
+    expect(updateBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content_type: "video",
+        show_preview: null,
+        show_console: null,
+        submission_file_slots: null,
+      })
+    );
+  });
+
+  it("部分レイアウト＋片方のフラグだけでは complete にせず、DB の構成で拒否する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              content_type: "exercise",
+              submission_file_slots: [{ filename: "q.sql", language: "sql" }],
+              starter_files: null,
+              code_language: "sql",
+              show_preview: null,
+              show_console: null,
+            },
+            error: null,
+          },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    // Without merging slots from the row, code_language:"html" alone would look allowed.
+    const result = await updateContent(1, {
+      content_type: "exercise",
+      code_language: "html",
+      show_preview: true,
+    });
+
+    expect(result).toEqual({
+      error: null,
+      storageRemoved: true,
+      previewNotAllowed: "このファイル構成ではプレビューを表示できません",
+    });
+    expect(mockClient.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("createContent は許されないプレビュー設定を previewNotAllowed で返す", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [{ data: [], error: null }],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await createContent({
+      phase_id: 1,
+      title: "JS だけ",
+      content_type: "exercise",
+      code_language: "javascript",
+      show_preview: true,
+      insertAfterId: null,
+    });
+
+    expect(result).toEqual({
+      data: null,
+      error: null,
+      previewNotAllowed: "このファイル構成ではプレビューを表示できません",
+    });
+    expect(mockClient.from.mock.results[0].value.insert).not.toHaveBeenCalled();
+  });
+
+  it("createContent は CSS 単独＋土台 HTML ならプレビューオンを通す (#351)", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          { data: [], error: null },
+          { data: { id: 1, title: "CSS", content_type: "exercise" }, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await createContent({
+      phase_id: 1,
+      title: "CSS",
+      content_type: "exercise",
+      code_language: "css",
+      preview_base_html: "<div class='box'></div>",
+      show_preview: true,
+      insertAfterId: null,
+    });
+
+    expect(result.previewNotAllowed).toBeUndefined();
+    expect(result.error).toBeNull();
+    expect(result.data).not.toBeNull();
+  });
+
+  it("updateContent は CSS 単独＋土台 HTML ならプレビューオンを通す (#351)", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [
+          {
+            data: {
+              content_type: "exercise",
+              submission_file_slots: [{ filename: "style.css", language: "css" }],
+              starter_files: null,
+              code_language: "css",
+              preview_base_html: "<div class='box'></div>",
+              show_preview: null,
+              show_console: null,
+            },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await updateContent(1, { show_preview: true });
+
+    expect(result).toEqual({ error: null, storageRemoved: true });
+    expect(result.previewNotAllowed).toBeUndefined();
+  });
+
+  it("createContentsAtTail は previewNotAllowed を 23514 に変換する", async () => {
+    const mockClient = createMockSupabaseClient({
+      tableResults: {
+        learning_contents: [{ data: [], error: null }],
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await createContentsAtTail([
+      {
+        phase_id: 1,
+        title: "JS だけ",
+        content_type: "exercise",
+        code_language: "javascript",
+        show_preview: true,
+      },
+    ]);
+
+    expect(result.created).toEqual([]);
+    expect(result.failedIndex).toBe(0);
+    expect(result.error).toMatchObject({
+      code: "23514",
+      message: "このファイル構成ではプレビューを表示できません",
+    });
   });
 });

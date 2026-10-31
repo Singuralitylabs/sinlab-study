@@ -1,4 +1,10 @@
+import {
+  FEEDBACK_CATEGORY_LABELS,
+  FEEDBACK_SLACK_BODY_PREVIEW_CHARS,
+  type FeedbackCategory,
+} from "@/app/constants/feedback";
 import { SLACK_WEBHOOK_TIMEOUT_MS } from "@/app/constants/notifications";
+import { formatDateTimeMinute } from "@/app/lib/format-date";
 
 /**
  * Shared Slack webhook block sender. Skips when the URL is unset; failures (non-2xx, exceptions)
@@ -36,22 +42,17 @@ async function postSlackWebhook(
 }
 
 type NewUserNotificationParams = {
-  displayName: string;
-  email: string;
   adminUsersUrl: string;
 };
 
+/**
+ * Carries no name or email: the Slack channel is also read by non-admins, so identity is only
+ * visible behind the admin login.
+ */
 export async function sendSlackNewUserNotification(
   params: NewUserNotificationParams
 ): Promise<void> {
-  const registeredAt = new Date().toLocaleString("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const registeredAt = formatDateTimeMinute(new Date());
 
   const body = {
     blocks: [
@@ -66,22 +67,6 @@ export async function sendSlackNewUserNotification(
       {
         type: "section",
         fields: [
-          {
-            type: "mrkdwn",
-            text: "*表示名*",
-          },
-          {
-            type: "plain_text",
-            text: params.displayName,
-          },
-          {
-            type: "mrkdwn",
-            text: "*メール*",
-          },
-          {
-            type: "plain_text",
-            text: params.email,
-          },
           {
             type: "mrkdwn",
             text: "*登録日時*",
@@ -111,15 +96,24 @@ export async function sendSlackNewUserNotification(
   };
 
   await postSlackWebhook(body, () => {
-    console.log("[Slack通知] 承認依頼通知を送信しました:", params.email); // allow-console
+    console.log("[Slack通知] 承認依頼通知を送信しました"); // allow-console
   });
 }
 
 type PaymentFailedNotificationParams = {
-  customerEmail: string | null;
+  userId: number;
   amountDue: number;
-  hostedInvoiceUrl: string | null;
+  invoiceId: string | null;
+  livemode: boolean;
 };
+
+/**
+ * Stripe dashboard page: needs a Stripe login, unlike the invoice's public hosted page, which shows
+ * the customer's identity to anyone holding the link (this channel is read by non-admins).
+ */
+function buildStripeDashboardInvoiceUrl(invoiceId: string, livemode: boolean): string {
+  return `https://dashboard.stripe.com/${livemode ? "" : "test/"}invoices/${invoiceId}`;
+}
 
 /**
  * Notifies operators only: the first payment failure does not demote the user and is left to
@@ -143,11 +137,11 @@ export async function sendSlackPaymentFailedNotification(
         fields: [
           {
             type: "mrkdwn",
-            text: "*メール*",
+            text: "*ユーザーID*",
           },
           {
             type: "plain_text",
-            text: params.customerEmail ?? "不明",
+            text: String(params.userId),
           },
           {
             type: "mrkdwn",
@@ -161,7 +155,7 @@ export async function sendSlackPaymentFailedNotification(
           },
         ],
       },
-      ...(params.hostedInvoiceUrl
+      ...(params.invoiceId
         ? [
             {
               type: "actions",
@@ -170,10 +164,10 @@ export async function sendSlackPaymentFailedNotification(
                   type: "button",
                   text: {
                     type: "plain_text",
-                    text: "請求書を開く",
+                    text: "Stripeで請求書を開く",
                     emoji: true,
                   },
-                  url: params.hostedInvoiceUrl,
+                  url: buildStripeDashboardInvoiceUrl(params.invoiceId, params.livemode),
                 },
               ],
             },
@@ -221,6 +215,97 @@ export async function sendSlackCheckoutRecoveryNotification(
           { type: "plain_text", text: params.sessionIds.join(", ") || "-" },
         ],
       },
+    ],
+  };
+
+  await postSlackWebhook(body);
+}
+
+type FeedbackNotificationParams = {
+  feedbackId: number;
+  category: FeedbackCategory;
+  body: string;
+  pageUrl: string | null;
+  /** Absolute manage URL when NEXT_PUBLIC_APP_URL is set; omit the button otherwise. */
+  manageUrl: string | null;
+};
+
+/**
+ * Operator notice for a new learner feedback. Omits email and other PII; the manage link is enough
+ * to open the row. Failures must not change the feedback API outcome.
+ */
+export async function sendSlackFeedbackNotification(
+  params: FeedbackNotificationParams
+): Promise<void> {
+  const preview =
+    params.body.length > FEEDBACK_SLACK_BODY_PREVIEW_CHARS
+      ? `${params.body.slice(0, FEEDBACK_SLACK_BODY_PREVIEW_CHARS)}…`
+      : params.body;
+
+  const headerText =
+    params.category === "plan_inquiry"
+      ? "📝 プランの相談が届きました"
+      : "📝 新しいフィードバックが届きました";
+
+  const body = {
+    blocks: [
+      {
+        type: "header",
+        text: {
+          type: "plain_text",
+          text: headerText,
+          emoji: true,
+        },
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: "*種別*" },
+          {
+            type: "plain_text",
+            text: FEEDBACK_CATEGORY_LABELS[params.category],
+          },
+          { type: "mrkdwn", text: "*ID*" },
+          { type: "plain_text", text: String(params.feedbackId) },
+          { type: "mrkdwn", text: "*ページ*" },
+          // Empty string is invalid for Slack plain_text and would drop the whole notice.
+          { type: "plain_text", text: params.pageUrl || "不明" },
+        ],
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "*本文（冒頭）*",
+        },
+      },
+      {
+        type: "section",
+        text: {
+          // Learner-written body must stay plain_text so mrkdwn (e.g. <!channel>) cannot fire.
+          type: "plain_text",
+          text: preview,
+        },
+      },
+      ...(params.manageUrl
+        ? [
+            {
+              type: "actions",
+              elements: [
+                {
+                  type: "button",
+                  text: {
+                    type: "plain_text",
+                    text: "管理画面を開く",
+                    emoji: true,
+                  },
+                  url: params.manageUrl,
+                  style: "primary",
+                },
+              ],
+            },
+          ]
+        : []),
     ],
   };
 

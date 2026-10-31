@@ -13,14 +13,46 @@ const ALLOWED_CONTENT_TYPES = {
   "image/webp": "webp",
 } as const;
 
-const THUMBNAIL_PATH_PATTERN =
-  /^\/storage\/v1\/object\/public\/thumbnails\/(theme-\d+\/thumbnail\.(?:jpg|png|webp))(?:\?.*)?$/;
+// "hero" is the optional wide image for the phase list header (falls back to a crop of the
+// thumbnail). Both live in the same bucket under fixed per-theme keys.
+const IMAGE_KINDS = ["thumbnail", "hero"] as const;
+type ImageKind = (typeof IMAGE_KINDS)[number];
 
-function getThumbnailPath(imageUrl: string | null, themeId: number): string | null {
+const IMAGE_KIND_CONFIG = {
+  thumbnail: {
+    column: "image_url",
+    pathPattern:
+      /^\/storage\/v1\/object\/public\/thumbnails\/(theme-\d+\/thumbnail\.(?:jpg|png|webp))(?:\?.*)?$/,
+  },
+  hero: {
+    column: "hero_image_url",
+    pathPattern:
+      /^\/storage\/v1\/object\/public\/thumbnails\/(theme-\d+\/hero\.(?:jpg|png|webp))(?:\?.*)?$/,
+  },
+} as const;
+
+// Absent means thumbnail so callers predating "hero" keep working; an unknown value is rejected.
+function parseImageKind(value: FormDataEntryValue | string | null): ImageKind | null {
+  if (value === null || value === "") return "thumbnail";
+  return IMAGE_KINDS.find((kind) => kind === value) ?? null;
+}
+
+function getImagePath(imageUrl: string | null, themeId: number, kind: ImageKind): string | null {
   if (!imageUrl) return null;
 
-  const match = imageUrl.match(THUMBNAIL_PATH_PATTERN);
+  const match = imageUrl.match(IMAGE_KIND_CONFIG[kind].pathPattern);
   return match?.[1].startsWith(`theme-${themeId}/`) ? match[1] : null;
+}
+
+function imageColumnPatch(kind: ImageKind, value: string | null) {
+  return kind === "hero" ? { hero_image_url: value } : { image_url: value };
+}
+
+function currentImageUrl(
+  theme: { image_url: string | null; hero_image_url?: string | null },
+  kind: ImageKind
+): string | null {
+  return (kind === "hero" ? theme.hero_image_url : theme.image_url) ?? null;
 }
 
 async function getTheme(
@@ -29,7 +61,7 @@ async function getTheme(
 ) {
   return supabase
     .from("learning_themes")
-    .select("image_url")
+    .select("image_url, hero_image_url")
     .eq("id", themeId)
     .eq("is_deleted", false)
     .maybeSingle();
@@ -55,7 +87,11 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get("file");
     const themeId = parsePositiveInteger(formData.get("themeId"));
+    const kind = parseImageKind(formData.get("kind"));
 
+    if (!kind) {
+      return NextResponse.json({ error: "画像の種類が不正です" }, { status: 400 });
+    }
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "画像ファイルを選択してください" }, { status: 400 });
     }
@@ -74,7 +110,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "ファイルサイズは5MB以下にしてください" }, { status: 400 });
     }
 
-    const path = `theme-${themeId}/thumbnail.${extension}`;
+    const path = `theme-${themeId}/${kind === "hero" ? "hero" : "thumbnail"}.${extension}`;
     const supabase = await createAdminSupabaseClient();
     const { data: theme, error: themeError } = await getTheme(supabase, themeId);
     if (themeError) {
@@ -101,18 +137,18 @@ export async function POST(request: NextRequest) {
     const relativeUrl = `/storage/v1/object/public/${BUCKET_NAME}/${path}?v=${version}`;
     const { error: updateError } = await supabase
       .from("learning_themes")
-      .update({ image_url: relativeUrl })
+      .update(imageColumnPatch(kind, relativeUrl))
       .eq("id", themeId)
       .eq("is_deleted", false);
     if (updateError) {
-      if (getThumbnailPath(theme.image_url, themeId) !== path) {
+      if (getImagePath(currentImageUrl(theme, kind), themeId, kind) !== path) {
         await supabase.storage.from(BUCKET_NAME).remove([path]);
       }
       console.error("テーマ更新エラー:", updateError);
       return NextResponse.json({ error: "テーマへの画像保存に失敗しました" }, { status: 500 });
     }
 
-    const previousPath = getThumbnailPath(theme.image_url, themeId);
+    const previousPath = getImagePath(currentImageUrl(theme, kind), themeId, kind);
     if (previousPath && previousPath !== path) {
       const { error: removeError } = await supabase.storage
         .from(BUCKET_NAME)
@@ -134,6 +170,10 @@ export async function DELETE(request: NextRequest) {
     if (authError) return authError;
 
     const themeId = parsePositiveInteger(request.nextUrl.searchParams.get("themeId"));
+    const kind = parseImageKind(request.nextUrl.searchParams.get("kind"));
+    if (!kind) {
+      return NextResponse.json({ error: "画像の種類が不正です" }, { status: 400 });
+    }
     if (!themeId) {
       return NextResponse.json({ error: "テーマIDが不正です" }, { status: 400 });
     }
@@ -150,7 +190,7 @@ export async function DELETE(request: NextRequest) {
 
     const { error: updateError } = await supabase
       .from("learning_themes")
-      .update({ image_url: null })
+      .update(imageColumnPatch(kind, null))
       .eq("id", themeId)
       .eq("is_deleted", false);
     if (updateError) {
@@ -161,7 +201,7 @@ export async function DELETE(request: NextRequest) {
     // The DB reference is already removed, so a deletion failure doesn't return 500 (retrying can't
     // identify the target since image_url is already NULL). Return the result so callers can detect
     // a partial failure.
-    const previousPath = getThumbnailPath(theme.image_url, themeId);
+    const previousPath = getImagePath(currentImageUrl(theme, kind), themeId, kind);
     let storageRemoved = true;
     if (previousPath) {
       const { error: removeError } = await supabase.storage

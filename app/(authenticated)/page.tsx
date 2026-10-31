@@ -1,30 +1,43 @@
-import { BookOpen, CheckCircle, Clock, Megaphone, TrendingUp } from "lucide-react";
-import Image from "next/image";
+import { Award, Megaphone } from "lucide-react";
 import Link from "next/link";
+import { InstallPrompt } from "@/app/components/InstallPrompt";
+import { PushNotifications } from "@/app/components/PushNotifications";
 import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT } from "@/app/constants/announcements";
 import { getWelcomeStepsForStatus } from "@/app/constants/onboarding";
 import { isStripeEnabled } from "@/app/constants/stripe";
+import { USER_STATUS } from "@/app/constants/user";
+import { isCertificateEligible } from "@/app/lib/certificate";
+import { resolveContinueLearning } from "@/app/lib/continue-learning";
 import { formatDate } from "@/app/lib/format-date";
-import { resolveStorageUrl } from "@/app/lib/storage-url";
+import { countVisibleUnovercome } from "@/app/lib/review-list";
+import { splitThemesByActivity } from "@/app/lib/theme-progress";
 import { shouldShowTrialNextStep } from "@/app/lib/trial-upgrade";
+import { isWebPushConfigured, webPushPublicKey } from "@/app/lib/web-push-config";
+import { fetchCurrentAIReviewLimits } from "@/app/services/api/ai-review-settings-server";
 import { getViewerAnnouncements } from "@/app/services/api/announcements-server";
-import { fetchThemeProgressSummaries } from "@/app/services/api/learning-server";
+import { fetchRecentCertificate } from "@/app/services/api/certificates-server";
+import { fetchHomeLearningData } from "@/app/services/api/learning-server";
 import {
   fetchGettingStartedProgress,
   fetchOnboardingStatus,
 } from "@/app/services/api/onboarding-server";
+import { fetchReviewListSourceReviews } from "@/app/services/api/review-list-server";
 import { fetchUpgradePriceLabel } from "@/app/services/api/upgrade-price-server";
-import { checkInstructorPermissions } from "@/app/services/auth/permissions";
+import { fetchUserDisplayName } from "@/app/services/api/user-profile-server";
+import { checkInstructorPermissions, isLearnerRole } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+import { ContinueLearningCard } from "./components/ContinueLearningCard";
 import {
   buildGettingStartedItems,
   GettingStartedChecklist,
 } from "./components/GettingStartedChecklist";
+import { HomeHero } from "./components/HomeHero";
+import { HomeQuickLinks } from "./components/HomeQuickLinks";
+import { ReviewListHomeLine } from "./components/ReviewListHomeLine";
+import { ActiveThemesSection } from "./components/ThemeProgressSections";
 import { WelcomeDialog } from "./components/WelcomeDialog";
 
 export default async function HomePage() {
@@ -39,22 +52,51 @@ export default async function HomePage() {
   }
 
   const isMember = !checkInstructorPermissions(userRole);
+  // Align with SideNav / /review-list (null role must not show a count that links nowhere).
+  const showReviewList = isLearnerRole(userRole);
 
-  const [{ data: themeData }, onboardingResult, gettingStartedResult, announcementsResult] =
-    await Promise.all([
-      fetchThemeProgressSummaries(userId),
-      isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
-      isMember ? fetchGettingStartedProgress(userId) : Promise.resolve({ data: null, error: null }),
-      getViewerAnnouncements(),
-    ]);
+  // Started before the other fetches so a slow Stripe call overlaps them instead of adding to them.
+  // Never rejects (falls back internally), so an unawaited promise is safe.
+  const stripeEnabled = isStripeEnabled();
+  const priceLabelPromise =
+    stripeEnabled && userStatus === USER_STATUS.TRIAL
+      ? fetchUpgradePriceLabel()
+      : Promise.resolve(null);
+  const limitsPromise = fetchCurrentAIReviewLimits();
+
+  // Start review fetch with home learning so badge TTFB is not serial after the other awaits.
+  const [
+    { data: homeLearning },
+    onboardingResult,
+    gettingStartedResult,
+    announcementsResult,
+    recentCertificate,
+    reviewsResult,
+    displayNameResult,
+  ] = await Promise.all([
+    fetchHomeLearningData(userId),
+    isMember ? fetchOnboardingStatus(userId) : Promise.resolve({ data: null, error: null }),
+    isMember ? fetchGettingStartedProgress(userId) : Promise.resolve({ data: null, error: null }),
+    getViewerAnnouncements(),
+    isCertificateEligible(userStatus, userRole)
+      ? fetchRecentCertificate(userId)
+      : Promise.resolve(null),
+    showReviewList
+      ? fetchReviewListSourceReviews(userId)
+      : Promise.resolve({ data: [], error: null }),
+    fetchUserDisplayName(userId),
+  ]);
+  const visibleContentIds = new Set(homeLearning?.orderedContents.map((c) => c.id) ?? []);
+  const unovercomeReviewCount =
+    showReviewList && !reviewsResult.error
+      ? countVisibleUnovercome(reviewsResult.data, visibleContentIds)
+      : 0;
   const unreadAnnouncements = (announcementsResult.data ?? [])
     .filter((announcement) => !announcement.isRead)
     .slice(0, DASHBOARD_UNREAD_ANNOUNCEMENT_LIMIT);
-  const themes = themeData ?? [];
-  const totalContents = themes.reduce((sum, t) => sum + t.totalContents, 0);
+  const themes = homeLearning?.summaries ?? [];
   const completedContents = themes.reduce((sum, t) => sum + t.completedContents, 0);
-  const overallProgress =
-    totalContents > 0 ? Math.round((completedContents / totalContents) * 100) : 0;
+  const { active, completed, notStarted } = splitThemesByActivity(themes);
 
   const showWelcomeDialog =
     isMember && onboardingResult.error === null && onboardingResult.data?.completedAt == null;
@@ -67,18 +109,50 @@ export default async function HomePage() {
   );
 
   const showTrialNextStep = shouldShowTrialNextStep(userStatus, userRole, themes);
-  const stripeEnabled = isStripeEnabled();
-  const priceLabel = showTrialNextStep && stripeEnabled ? await fetchUpgradePriceLabel() : null;
+  const limits = await limitsPromise;
+  const priceLabel = showTrialNextStep ? await priceLabelPromise : null;
+
+  const continueLearning =
+    !showTrialNextStep && homeLearning
+      ? resolveContinueLearning(
+          homeLearning.orderedContents,
+          homeLearning.completedContentIds,
+          homeLearning.completedAtByContentId,
+          homeLearning.lastViewedAtByContentId
+        )
+      : null;
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="text-3xl font-bold tracking-tight mb-6">ダッシュボード</h1>
+      <HomeHero displayName={displayNameResult.data} />
+
+      <InstallPrompt />
+      <PushNotifications publicKey={isWebPushConfigured() ? webPushPublicKey() : null} />
 
       {showWelcomeDialog && (
         <WelcomeDialog
-          steps={getWelcomeStepsForStatus(userStatus)}
+          steps={getWelcomeStepsForStatus(userStatus, limits)}
           stripeEnabled={isStripeEnabled()}
         />
+      )}
+
+      {recentCertificate && (
+        <Card className="mb-6 border-l-4 border-l-success">
+          <CardContent className="pt-6">
+            <Link
+              href={`/certificates/${recentCertificate.id}`}
+              className="flex items-center gap-3 hover:text-primary"
+            >
+              <Award className="h-6 w-6 text-success shrink-0" />
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold">修了証が発行されました</h2>
+                <p className="text-sm text-muted-foreground truncate">
+                  {recentCertificate.theme_name}
+                </p>
+              </div>
+            </Link>
+          </CardContent>
+        </Card>
       )}
 
       {unreadAnnouncements.length > 0 && (
@@ -114,30 +188,18 @@ export default async function HomePage() {
         </Card>
       )}
 
-      <Card className="mb-6">
-        <CardContent className="pt-6">
-          <div className="flex items-center gap-4 mb-4">
-            <div className="p-3 bg-primary/10 rounded-full">
-              <TrendingUp className="h-6 w-6 text-primary" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold">学習進捗</h2>
-              <p className="text-sm text-muted-foreground">
-                {completedContents} / {totalContents} コンテンツ完了
-              </p>
-            </div>
-          </div>
-          <Progress value={overallProgress} className="h-2" />
-          <p className="text-right text-sm text-muted-foreground mt-2">{overallProgress}%</p>
-        </CardContent>
-      </Card>
+      <HomeQuickLinks />
+
+      {showReviewList && <ReviewListHomeLine count={unovercomeReviewCount} />}
+
+      {continueLearning && <ContinueLearningCard target={continueLearning} />}
 
       {showTrialNextStep && (
         <Card className="mb-6">
           <CardContent className="pt-6 space-y-3">
             <h2 className="text-lg font-semibold">次のステップ</h2>
             <p className="text-sm">お試しコンテンツをすべて完了しました。続きは有料会員で</p>
-            <UpgradeBenefitsList />
+            <UpgradeBenefitsList limits={limits} />
             <UpgradeCta
               stripeEnabled={stripeEnabled}
               priceLabel={priceLabel}
@@ -149,86 +211,11 @@ export default async function HomePage() {
 
       {isMember && <GettingStartedChecklist items={gettingStartedItems} />}
 
-      <div className="grid gap-4">
-        <h2 className="text-lg font-semibold flex items-center gap-2">
-          <BookOpen className="h-5 w-5" />
-          学習テーマ
-        </h2>
-
-        {themes.length === 0 ? (
-          <Card>
-            <CardContent className="py-8 text-center text-muted-foreground">
-              <p>学習コンテンツはまだ登録されていません。</p>
-            </CardContent>
-          </Card>
-        ) : (
-          themes.map(({ theme, totalContents, completedContents }) => {
-            const progress =
-              totalContents > 0 ? Math.round((completedContents / totalContents) * 100) : 0;
-            const isCompleted = totalContents > 0 && completedContents === totalContents;
-
-            return (
-              <Link key={theme.id} href={`/learn/${theme.id}`} className="block group">
-                <Card
-                  className={`overflow-hidden transition-all hover:shadow-md hover:border-primary/20 ${isCompleted ? "border-l-4 border-l-success" : ""}`}
-                >
-                  <div className="flex">
-                    <div className="relative w-24 shrink-0 bg-linear-to-br from-primary/5 to-primary/15">
-                      {theme.image_url ? (
-                        <Image
-                          src={resolveStorageUrl(theme.image_url)}
-                          alt={theme.name}
-                          fill
-                          className="object-contain"
-                          sizes="96px"
-                        />
-                      ) : (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <BookOpen className="h-8 w-8 text-primary/30" />
-                        </div>
-                      )}
-                    </div>
-
-                    <CardContent className="pt-4 pb-4 flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2 min-w-0">
-                          {isCompleted ? (
-                            <CheckCircle className="h-4 w-4 text-success shrink-0" />
-                          ) : (
-                            <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
-                          )}
-                          <h3 className="font-medium group-hover:text-primary transition-colors truncate">
-                            {theme.name}
-                          </h3>
-                        </div>
-                        <span className="text-sm text-muted-foreground shrink-0 ml-2">
-                          {completedContents} / {totalContents}
-                        </span>
-                      </div>
-                      {theme.description && (
-                        <p className="text-sm text-muted-foreground mb-2 ml-6 line-clamp-1">
-                          {theme.description}
-                        </p>
-                      )}
-                      <div className="ml-6">
-                        <Progress value={progress} className="h-2" />
-                      </div>
-                    </CardContent>
-                  </div>
-                </Card>
-              </Link>
-            );
-          })
-        )}
-      </div>
-
-      {themes.length > 0 && (
-        <div className="mt-6 text-center">
-          <Button asChild>
-            <Link href="/learn">学習を始める</Link>
-          </Button>
-        </div>
-      )}
+      <ActiveThemesSection
+        active={active}
+        firstNotStarted={notStarted.find((summary) => summary.totalContents > 0) ?? null}
+        hasCompleted={completed.length > 0}
+      />
     </div>
   );
 }

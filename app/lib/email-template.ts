@@ -13,6 +13,8 @@ import {
   EMAIL_SERVICE_NAME,
   EMAIL_SERVICE_SUBTITLE,
   type EmailKind,
+  NOTIFICATION_EMAIL_LOG_KIND,
+  type NotificationEmailLogKind,
 } from "@/app/constants/notifications";
 import { escapeHtml } from "@/app/lib/escape-html";
 import {
@@ -35,6 +37,9 @@ export const EMAIL_TEMPLATE_KEYS = [
   "trial_nurture.day7",
   "trial_nurture.day14",
   "announcement",
+  "certificate_issued",
+  "notification_email_confirm",
+  "notification_email_changed",
 ] as const;
 
 export type EmailTemplateKey = (typeof EMAIL_TEMPLATE_KEYS)[number];
@@ -67,7 +72,7 @@ export const ANNOUNCEMENT_BODY_PLACEHOLDER = "announcement_body";
 
 export type EmailTemplateDefinition = {
   key: EmailTemplateKey;
-  kind: EmailKind;
+  kind: EmailKind | NotificationEmailLogKind;
   label: string;
   /** Current wording; used when no `email_templates` row exists. */
   subject: string;
@@ -95,7 +100,7 @@ const defs = (
 });
 
 const SUPPORT_GUIDE =
-  "学習の進め方で困ったときは、ダッシュボードの「はじめかた」を確認するか、講座の運営（管理者）までお問い合わせください。";
+  "学習の進め方で困ったときは、ホームの「はじめかた」を確認するか、講座の運営（管理者）までお問い合わせください。";
 
 const REGISTRATION_GUIDE_DESC =
   "本登録の案内文（Stripe 決済の有効・無効で文面が変わる。コードが選ぶ）";
@@ -133,7 +138,7 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
       "お支払いを確認し、一般有料会員へのご登録が完了しました。すべての学習コンテンツをご利用いただけます。",
       "料金: {{monthly_price}}",
       "次回のお支払い予定日: {{next_billing_date}}",
-      "お支払い方法の変更や解約は、アップグレードページの「お支払い情報の管理・解約」から行えます。",
+      "お支払い方法の変更や解約は、プランの確認・変更ページの「お支払い情報の管理・解約」から行えます。",
     ].join("\n\n"),
     placeholders: {
       monthly_price: "Stripe で確認できた月額料金（確認できないときは空で、その行は出ない）",
@@ -148,7 +153,7 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
     body: [
       "一般有料会員の解約のお手続きを受け付けました。",
       "{{access_until}}、引き続きすべての学習コンテンツをご利用いただけます。",
-      "期限までは、アップグレードページの「お支払い情報の管理・解約」から解約を取り消すことができます。",
+      "期限までは、プランの確認・変更ページの「お支払い情報の管理・解約」から解約を取り消すことができます。",
     ].join("\n\n"),
     placeholders: {
       access_until:
@@ -163,7 +168,7 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
     body: [
       "一般有料会員の期間が終了し、お試しユーザーに戻りました。",
       "お試し公開の学習コンテンツは引き続きご利用いただけます。",
-      "一般有料会員は、アップグレードページからいつでも再開できます。",
+      "一般有料会員は、プランの確認・変更ページからいつでも再開できます。",
     ].join("\n\n"),
   }),
   weekly_digest: defs({
@@ -174,6 +179,8 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
     body: [
       "先週の学習: コンテンツ完了 {{completed_last_week}} 本 / 演習の提出 {{submitted_last_week}} 件",
       "{{weekly_cheer}}",
+      "学習中のテーマ: {{active_themes}}",
+      "{{review_list_line}}",
       "次に学ぶコンテンツ: {{next_content_title}}",
       "今週の目標の提案: コンテンツを {{suggested_goal}} 本完了させてみましょう（残り {{remaining_contents}} 本）。",
       "{{all_completed_message}}",
@@ -182,6 +189,9 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
       completed_last_week: "先週完了したコンテンツ数",
       submitted_last_week: "先週提出した演習数",
       weekly_cheer: "先週の実績に応じた一言（コードが選ぶ）",
+      active_themes:
+        "学習中のテーマと完了数（「テーマ名（N / M 完了）」。最近学んだ順に最大3件。学習中のテーマが無いときは空で、その行は出ない）",
+      review_list_line: "復習リストの未克服件数の一行（0件のときは空で、その行は出ない）",
       next_content_title: "次に学ぶコンテンツ名（全て完了しているときは空で、その行は出ない）",
       suggested_goal: "今週の目標本数の提案（全て完了しているときは空）",
       remaining_contents: "残りのコンテンツ数（全て完了しているときは空）",
@@ -272,6 +282,46 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
         "お知らせ本文（お知らせ管理で書いたMarkdownがここに入る。本文中に1回だけ必要）",
     },
     required: [ANNOUNCEMENT_BODY_PLACEHOLDER],
+  }),
+  certificate_issued: defs({
+    key: "certificate_issued",
+    kind: EMAIL_KIND.CERTIFICATE_ISSUED,
+    label: "修了証の発行",
+    subject: "修了証が発行されました",
+    body: [
+      "「{{theme_name}}」の修了おめでとうございます。修了証を発行しました。",
+      "証明番号: {{certificate_no}}",
+      "修了証は下のボタンから表示できます。ブラウザの印刷機能で PDF として保存することもできます。",
+    ].join("\n\n"),
+    placeholders: {
+      theme_name: "修了したテーマ名",
+      certificate_no: "修了証の証明番号（例: SS-202610-ABC123）",
+    },
+  }),
+  notification_email_confirm: defs({
+    key: "notification_email_confirm",
+    kind: NOTIFICATION_EMAIL_LOG_KIND.CONFIRM,
+    label: "通知先の確認",
+    subject: "通知の送り先を確認してください",
+    body: [
+      "通知の送り先を、このメールを受け取ったアドレスに変更するリクエストを受け付けました。",
+      "下のボタンを押すと変更が確定します。ボタンを押すまで、送り先は変わりません。",
+      "リンクの有効期限は {{expires_label}} です。期限を過ぎた場合は、設定画面からもう一度お試しください。",
+      "このメールに心当たりがない場合は、何もしないでください。",
+    ].join("\n\n"),
+    placeholders: { expires_label: "確認リンクの有効期限（例: 24時間）" },
+  }),
+  notification_email_changed: defs({
+    key: "notification_email_changed",
+    kind: NOTIFICATION_EMAIL_LOG_KIND.CHANGED,
+    label: "通知先の変更",
+    subject: "通知の送り先が変更されました",
+    body: [
+      "通知の送り先が変更されました。",
+      "新しい送り先: {{new_address}}",
+      "身に覚えがない場合は、ログインして設定画面から送り先を確認し、必要ならログイン用のアドレスに戻してください。",
+    ].join("\n\n"),
+    placeholders: { new_address: "変更後の通知の送り先" },
   }),
 };
 

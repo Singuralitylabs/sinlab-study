@@ -19,6 +19,23 @@ if (supabaseUrlParts && supabaseProtocol) {
   });
 }
 
+// Script-restricting CSP directives are left out on purpose: the exercise preview is a srcdoc
+// iframe, which inherits this page's CSP, so limiting script-src would stop learners' inline
+// scripts and the React preview's Babel (eval). frame-ancestors / X-Frame-Options do not apply to
+// srcdoc frames, so the preview still loads.
+// Referrer-Policy must keep sending the origin cross-site: Cloudflare Stream checks Allowed Origins.
+const SECURITY_HEADERS = [
+  { key: "X-Frame-Options", value: "DENY" },
+  {
+    key: "Content-Security-Policy",
+    value: "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'",
+  },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+];
+
 const nextConfig: NextConfig = {
   images: {
     remotePatterns,
@@ -35,6 +52,40 @@ const nextConfig: NextConfig = {
       "pdfjs-dist": "pdfjs-dist/legacy/build/pdf.mjs",
       "pdfjs-dist/web/pdf_viewer.mjs": "pdfjs-dist/legacy/web/pdf_viewer.mjs",
     },
+  },
+  async redirects() {
+    // Pre-#426 content URLs carried a week segment; mail links, certificates and bookmarks still
+    // point there. Numeric segments only so they cannot shadow other /learn or /demo routes.
+    return [
+      {
+        source: "/learn/:themeId(\\d+)/:phaseId(\\d+)/:weekId(\\d+)/:contentId(\\d+)",
+        destination: "/learn/:themeId/:phaseId/:contentId",
+        permanent: true,
+      },
+      {
+        source: "/demo/:themeId(\\d+)/:phaseId(\\d+)/:weekId(\\d+)/:contentId(\\d+)",
+        destination: "/demo/:themeId/:phaseId/:contentId",
+        permanent: true,
+      },
+      // The week admin pages are gone; the tree at /manage/contents replaces them.
+      { source: "/manage/weeks/:path*", destination: "/manage/contents", permanent: true },
+      { source: "/admin/weeks/:path*", destination: "/manage/contents", permanent: true },
+    ];
+  },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: SECURITY_HEADERS,
+      },
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache" },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
+      },
+    ];
   },
   webpack: (config) => {
     // react-pdf: canvas依存を除外（webpack使用時）

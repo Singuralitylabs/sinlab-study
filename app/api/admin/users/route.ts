@@ -6,11 +6,17 @@ import {
   changeUserRole,
   isUserCurrentlySubscribed,
   rejectUser,
-  setUserEmailOptOut,
 } from "@/app/services/api/admin-server";
 import { AdminUserActionSchema, validateRequest } from "@/app/services/api/schemas";
+import { setUserEmailOptOut } from "@/app/services/api/user-email-server";
 import { requireAdminApi } from "@/app/services/auth/admin-guard";
+import { scheduleApprovedPush } from "@/app/services/notifications/push";
 import { scheduleApprovedEmail } from "@/app/services/notifications/user-emails";
+
+// Mail is sent in after() and the platform caps that at this route's maxDuration; the default
+// (10s without Fluid Compute) would kill the function before EMAIL_SEND_TIMEOUT_MS (15s) aborts,
+// leaving the email_logs claim row neither sent nor failed.
+export const maxDuration = 30;
 
 export async function PATCH(request: Request) {
   try {
@@ -132,6 +138,7 @@ export async function PATCH(request: Request) {
         );
       }
       scheduleApprovedEmail({ userId, membershipType: data.membershipType, approvedAt });
+      scheduleApprovedPush({ userId, approvedAt });
       return NextResponse.json({ success: true, action });
     }
 

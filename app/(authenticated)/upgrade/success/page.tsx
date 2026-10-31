@@ -14,6 +14,11 @@ import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
+// Mail is sent in after() and the platform caps that at this route's maxDuration; the default
+// (10s without Fluid Compute) would kill the function before EMAIL_SEND_TIMEOUT_MS (15s) aborts,
+// leaving the email_logs claim row neither sent nor failed.
+export const maxDuration = 30;
+
 export default async function UpgradeSuccessPage({
   searchParams,
 }: {
@@ -95,7 +100,7 @@ export default async function UpgradeSuccessPage({
                 )}
               </div>
               <Button asChild>
-                <Link href="/">ダッシュボードへ</Link>
+                <Link href="/">ホームへ</Link>
               </Button>
             </>
           ) : (
@@ -103,7 +108,7 @@ export default async function UpgradeSuccessPage({
               <XCircle className="h-12 w-12 text-destructive" />
               <p className="text-sm text-muted-foreground">{errorMessage}</p>
               <Button asChild variant="outline">
-                <Link href="/upgrade">アップグレードページへ戻る</Link>
+                <Link href="/upgrade">プランの確認・変更へ戻る</Link>
               </Button>
             </>
           )}

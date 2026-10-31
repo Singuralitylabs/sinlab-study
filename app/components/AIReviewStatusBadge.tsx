@@ -1,7 +1,8 @@
 "use client";
 
 import { Bot, Loader2, TriangleAlert } from "lucide-react";
-import type { AIReviewListItem } from "@/app/types";
+import { type PassDisplay, resolvePassDisplay, SCORE_KIND_BADGE_LABELS } from "@/app/lib/grading";
+import type { AIReviewListItem, ScoreKind } from "@/app/types";
 import { Badge } from "@/components/ui/badge";
 
 /** Score badge shared by list and detail (thresholds 50/70 kept in one place). */
@@ -20,18 +21,49 @@ export function ScoreBadge({ score }: { score: number }) {
   );
 }
 
+/** "参考" (estimated) / "採点対象外" (none); nothing for rubric and legacy. */
+export function ScoreKindBadge({ scoreKind }: { scoreKind: ScoreKind }) {
+  const label = SCORE_KIND_BADGE_LABELS[scoreKind];
+  if (!label) {
+    return null;
+  }
+  return (
+    <Badge variant="outline" className="text-xs">
+      {label}
+    </Badge>
+  );
+}
+
+export function PassBadge({ passDisplay }: { passDisplay: PassDisplay | null }) {
+  if (!passDisplay) {
+    return null;
+  }
+  return passDisplay === "passed" ? (
+    <Badge variant="default" className="text-xs">
+      合格
+    </Badge>
+  ) : (
+    <Badge variant="secondary" className="text-xs">
+      再挑戦
+    </Badge>
+  );
+}
+
 export function AIReviewStatusBadge({ review }: { review: AIReviewListItem | null }) {
   if (!review) return null;
 
   switch (review.status) {
     case "completed":
       return (
-        <div className="flex items-center gap-1.5">
+        // Nowrap badges are min-content; without wrapping they widen a 320px card.
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
           <Badge variant="default" className="gap-1">
             <Bot className="h-3 w-3" />
             レビュー済み
           </Badge>
           {review.overall_score != null && <ScoreBadge score={review.overall_score} />}
+          <ScoreKindBadge scoreKind={review.score_kind} />
+          <PassBadge passDisplay={resolvePassDisplay(review)} />
         </div>
       );
     case "processing":

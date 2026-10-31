@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { Label } from "@/components/ui/label";
 
@@ -32,7 +33,7 @@ export function getDefaultInsertAfterId(siblings: SiblingOrderItem[]): number | 
 /**
  * Default (= current position) when an edit doesn't change the parent. Pass a sorted list that
  * includes the target itself. Returns null when it is first or missing from the list (an
- * unclassified/deleted week leaves the sibling list empty) (#189).
+ * unclassified/deleted phase leaves the sibling list empty) (#189).
  */
 export function getCurrentPositionInsertAfterId(
   selfId: number,
@@ -59,7 +60,7 @@ interface SiblingOrderFieldProps {
  * row at the chosen position. Sort order is decided by the caller (each new/edit page.tsx, per
  * compareGroupLevel), so this component doesn't sort.
  */
-export function SiblingOrderField({
+export const SiblingOrderField = memo(function SiblingOrderField({
   siblings,
   insertAfterId,
   onChange,
@@ -112,4 +113,4 @@ export function SiblingOrderField({
       </ul>
     </div>
   );
-}
+});

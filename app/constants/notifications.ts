@@ -5,10 +5,15 @@
 export const SLACK_WEBHOOK_TIMEOUT_MS = 5_000;
 
 /**
- * Resend API fetch timeout (ms). Sending happens in after() once the response is returned; keep it
- * short like Slack so serverless execution time isn't needlessly extended.
+ * Resend API fetch timeout (ms). Sending happens in after() once the response is returned, so no
+ * user-facing response waits on it; a short value would only abort requests Resend has already
+ * accepted (cold start / slow response), leaving a delivered mail logged as failed. Long enough to
+ * ride out that latency, short enough that one send plus EMAIL_DIGEST_TIME_BUDGET_MS still fits in
+ * the cron route's maxDuration (60s). Every other route or page that sends mail declares
+ * maxDuration = 30 so the abort fires before the platform kills the function. A TimeoutError means
+ * "delivery unknown" and is never retried (see RETRYABLE_EMAIL_ERROR).
  */
-export const EMAIL_SEND_TIMEOUT_MS = 5_000;
+export const EMAIL_SEND_TIMEOUT_MS = 15_000;
 
 export const RESEND_API_URL = "https://api.resend.com/emails";
 
@@ -56,6 +61,7 @@ export const EMAIL_KIND = {
   INACTIVITY_REMINDER: "inactivity_reminder",
   TRIAL_NURTURE: "trial_nurture",
   ANNOUNCEMENT: "announcement",
+  CERTIFICATE_ISSUED: "certificate_issued",
 } as const;
 
 export type EmailKind = (typeof EMAIL_KIND)[keyof typeof EMAIL_KIND];
@@ -96,6 +102,19 @@ export const WEEKLY_DIGEST_CATCH_UP_DAYS = 1;
  * reservation sends no mail and is excluded).
  */
 export const EMAIL_KINDS: readonly EmailKind[] = Object.values(EMAIL_KIND);
+
+/**
+ * Kinds that may also be sent as Web Push. The send day, weekday, and daily cap stay on
+ * `email_kind_settings` / `email_settings`; this list is only which kinds have a push channel.
+ */
+export const PUSH_KINDS = [
+  EMAIL_KIND.APPROVED,
+  EMAIL_KIND.INACTIVITY_REMINDER,
+  EMAIL_KIND.TRIAL_NURTURE,
+  EMAIL_KIND.ANNOUNCEMENT,
+] as const;
+
+export type PushKind = (typeof PUSH_KINDS)[number];
 
 /** Kinds that use email_kind_settings.send_days ("Nth day since sign-up"). */
 export const EMAIL_KINDS_WITH_SEND_DAYS: readonly EmailKind[] = [
@@ -149,6 +168,7 @@ export const EMAIL_KIND_LABELS: Record<EmailKind, string> = {
   inactivity_reminder: "未学習リマインド",
   trial_nurture: "お試しユーザー向け案内",
   announcement: "お知らせ一斉送信",
+  certificate_issued: "修了証の発行",
 };
 
 /** Consequence shown in the confirmation dialog when a transactional kind is disabled. */
@@ -158,6 +178,7 @@ export const TRANSACTIONAL_DISABLE_IMPACT: Partial<Record<EmailKind, string>> = 
   upgraded: "有料会員になったことのメールが本人に届かなくなります。",
   cancel_scheduled: "解約予約のメールが本人に届かなくなります。",
   subscription_ended: "有料会員の終了がメールで伝わらなくなります。",
+  certificate_issued: "修了証が発行されたことのメールが本人に届かなくなります。",
 };
 
 export const EMAIL_LOG_PAGE_SIZE = 50;
@@ -179,10 +200,40 @@ export const EMAIL_DIGEST_SEND_INTERVAL_MS = 500;
 
 /**
  * Elapsed-time cap (ms) after which cron may not start new sends. Stop before the route's
- * maxDuration (60s) cuts it off and carry the rest over like cap overflow (leaving room for a
- * single send's EMAIL_SEND_TIMEOUT_MS and DB round trips).
+ * maxDuration (60s) cuts it off and carry the rest over like cap overflow. Worst case is a send
+ * started just under the cap that runs to EMAIL_SEND_TIMEOUT_MS: 40s + 15s = 55s, leaving ~5s for
+ * DB round trips and the lock release. Sends start at least EMAIL_DIGEST_SEND_INTERVAL_MS apart,
+ * so 40s allows at most 80 starts. The clock also covers the lock, extraction and per-send DB
+ * calls, so a run reaches a few sends under the default daily cap (EMAIL_DIGEST_MAX_PER_DAY = 80);
+ * the shortfall carries over like cap overflow. Keep (budget / interval) >= that cap as the upper
+ * bound when changing either value.
  */
-export const EMAIL_DIGEST_TIME_BUDGET_MS = 45_000;
+export const EMAIL_DIGEST_TIME_BUDGET_MS = 40_000;
+
+/**
+ * web-push `sendNotification` socket timeout (ms). Without this, a hanging endpoint can hold the
+ * digest lock until the platform kills the function.
+ */
+export const WEB_PUSH_SEND_TIMEOUT_MS = 10_000;
+
+/**
+ * Elapsed-time cap (ms) for `deliverDigestPushes` after the email digest. Stop starting new pushes
+ * so the shared cron lock is released before maxDuration (60s). Remaining targets retry on the
+ * next run via released / unclaimed `push_logs` rows.
+ */
+export const PUSH_DIGEST_TIME_BUDGET_MS = 15_000;
+
+/**
+ * Cap on live `push_subscriptions` rows per user. Without this, a learner can register many
+ * endpoints and keep the digest lock for one user across the full send timeout each.
+ */
+export const MAX_PUSH_SUBSCRIPTIONS_PER_USER = 10;
+
+/**
+ * Abort timeout (ms) for the DELETE call in `clearLocalPushSubscription`. Logout must not wait
+ * on a hung network after the browser subscription is already gone.
+ */
+export const CLEAR_LOCAL_PUSH_FETCH_TIMEOUT_MS = 3_000;
 
 /**
  * Retry window (days from the publish date, JST) for announcement email recipients whose send
@@ -193,5 +244,41 @@ export const EMAIL_DIGEST_TIME_BUDGET_MS = 45_000;
  */
 export const ANNOUNCEMENT_EMAIL_RETRY_DAYS = 3;
 
-/** Retryable send failures (email_logs.error): the Resend response code recorded by sendEmail(). */
+/**
+ * Retryable send failures (email_logs.error): the Resend response code recorded by sendEmail().
+ * Timeouts and network errors are deliberately excluded: Resend may have accepted the mail, and a
+ * resend would double-send (the email_logs claim row is what prevents that).
+ */
 export const RETRYABLE_EMAIL_ERROR = /status=(429|5\d\d)$/;
+
+/**
+ * Procedural account mails for changing the notification address. Logged in `email_logs` but not
+ * members of `EMAIL_KIND`: they are not rows in `email_kind_settings`, and they are sent even when
+ * the global switch is off or the user has unsubscribed (the user asked for the change).
+ */
+export const NOTIFICATION_EMAIL_LOG_KIND = {
+  CONFIRM: "notification_email_confirm",
+  CHANGED: "notification_email_changed",
+} as const;
+
+export type NotificationEmailLogKind =
+  (typeof NOTIFICATION_EMAIL_LOG_KIND)[keyof typeof NOTIFICATION_EMAIL_LOG_KIND];
+
+export const NOTIFICATION_EMAIL_LOG_LABELS: Record<NotificationEmailLogKind, string> = {
+  notification_email_confirm: "通知先の確認",
+  notification_email_changed: "通知先の変更",
+};
+
+/** How long a confirmation link stays valid. */
+export const NOTIFICATION_EMAIL_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** Confirmation mails per user in `NOTIFICATION_EMAIL_CONFIRM_WINDOW_MS` (rolling, not a JST day). */
+export const NOTIFICATION_EMAIL_CONFIRM_LIMIT = 5;
+
+export const NOTIFICATION_EMAIL_CONFIRM_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Matches `users.email` / `users.notification_email` (`VARCHAR(255)`). */
+export const NOTIFICATION_EMAIL_MAX_LENGTH = 255;
+
+/** Shown in the confirmation mail. Derived from the TTL so the two cannot drift. */
+export const NOTIFICATION_EMAIL_TOKEN_TTL_LABEL = `${NOTIFICATION_EMAIL_TOKEN_TTL_MS / (60 * 60 * 1000)}時間`;

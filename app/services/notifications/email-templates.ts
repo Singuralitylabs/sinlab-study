@@ -33,6 +33,14 @@ type EmailLayoutParams = {
    * Not part of the editable text, so no template edit can remove it.
    */
   unsubscribeUrl?: string;
+  /**
+   * Link to the in-app promotional-mail settings (`/settings`). Pass it for promotional emails
+   * (next to `unsubscribeUrl`, so the way to resume is reachable from the body) and for
+   * transactional ones that contain promotional guidance. Adds only a footer line: no
+   * `List-Unsubscribe` header, since the transactional notice itself cannot be unsubscribed from.
+   * Not part of the editable text, so no template edit can remove it.
+   */
+  emailPreferencesUrl?: string;
   /** Sender / header / footer name; defaults to the code defaults. */
   branding?: EmailBranding;
 };
@@ -40,6 +48,10 @@ type EmailLayoutParams = {
 /** Builds an absolute in-app URL regardless of a trailing slash in `NEXT_PUBLIC_APP_URL`. */
 export function buildAppUrl(appUrl: string, path: string): string {
   return `${appUrl.replace(/\/+$/, "")}${path}`;
+}
+
+function preferencesUrl(appUrl: string): string {
+  return buildAppUrl(appUrl, "/settings");
 }
 
 function brandLabel(branding: EmailBranding): string {
@@ -59,12 +71,14 @@ function footerLines(branding: EmailBranding): string[] {
 const UNSUBSCRIBE_LEAD =
   "学習状況のお知らせなどの案内メールが不要な場合は、こちらから配信を停止できます";
 
+const PREFERENCES_LEAD = "案内メールの配信設定はこちら";
+
 export function renderEmailLayout(params: EmailLayoutParams): EmailContent {
   const branding = params.branding ?? DEFAULT_EMAIL_TEXTS.branding;
   const greeting = `${params.greetingName} 様`;
   const footer = footerLines(branding);
   const paragraphs = params.paragraphs ?? [];
-  const { unsubscribeUrl } = params;
+  const { unsubscribeUrl, emailPreferencesUrl } = params;
 
   const text = [
     greeting,
@@ -78,6 +92,7 @@ export function renderEmailLayout(params: EmailLayoutParams): EmailContent {
     ...(branding.serviceSubtitle ? [branding.serviceSubtitle] : []),
     ...footer,
     ...(unsubscribeUrl ? [`${UNSUBSCRIBE_LEAD}: ${unsubscribeUrl}`] : []),
+    ...(emailPreferencesUrl ? [`${PREFERENCES_LEAD}: ${emailPreferencesUrl}`] : []),
   ].join("\n");
 
   const linksHtml = params.links
@@ -111,6 +126,11 @@ export function renderEmailLayout(params: EmailLayoutParams): EmailContent {
           `<p style="margin:8px 0 0;">${escapeHtml(UNSUBSCRIBE_LEAD)}: <a href="${escapeHtml(unsubscribeUrl)}" style="color:#71717a;">配信停止</a></p>`,
         ]
       : []),
+    ...(emailPreferencesUrl
+      ? [
+          `<p style="margin:8px 0 0;">${escapeHtml(PREFERENCES_LEAD)}: <a href="${escapeHtml(emailPreferencesUrl)}" style="color:#71717a;">配信設定</a></p>`,
+        ]
+      : []),
     "</div>",
     "</div></body></html>",
   ].join("");
@@ -136,6 +156,7 @@ type TemplatedEmailParams = {
   values: EmailTemplateValues;
   links: EmailLink[];
   unsubscribeUrl?: string;
+  emailPreferencesUrl?: string;
   announcementBody?: EmailMarkdown;
 };
 
@@ -157,6 +178,7 @@ function renderTemplatedEmail(params: TemplatedEmailParams): EmailContent {
     markdownBody: renderEmailBody(text.body, values, params.announcementBody),
     links: params.links,
     unsubscribeUrl: params.unsubscribeUrl,
+    emailPreferencesUrl: params.emailPreferencesUrl,
     branding,
   });
 }
@@ -194,6 +216,8 @@ export function buildSignupEmail(
         ? [{ label: "プランのアップグレード", url: buildAppUrl(params.appUrl, "/upgrade") }]
         : []),
     ],
+    // The upgrade guidance is promotional content inside a transactional notice.
+    emailPreferencesUrl: params.upgradeAvailable ? preferencesUrl(params.appUrl) : undefined,
   });
 }
 
@@ -212,7 +236,7 @@ export function buildApprovedEmail(
     texts,
     displayName: params.displayName,
     values: { membership_label: params.membershipLabel },
-    links: [{ label: "ダッシュボードを開く", url: buildAppUrl(params.appUrl, "/") }],
+    links: [{ label: "ホームを開く", url: buildAppUrl(params.appUrl, "/") }],
   });
 }
 
@@ -238,7 +262,7 @@ export function buildUpgradedEmail(
       next_billing_date: params.nextBillingDateLabel ?? "",
     },
     links: [
-      { label: "ダッシュボードを開く", url: buildAppUrl(params.appUrl, "/") },
+      { label: "ホームを開く", url: buildAppUrl(params.appUrl, "/") },
       { label: "お支払い情報の管理", url: buildAppUrl(params.appUrl, "/upgrade") },
     ],
   });
@@ -282,7 +306,8 @@ export function buildSubscriptionEndedEmail(
     texts,
     displayName: params.displayName,
     values: {},
-    links: [{ label: "アップグレードページを開く", url: buildAppUrl(params.appUrl, "/upgrade") }],
+    links: [{ label: "プランの確認・変更を開く", url: buildAppUrl(params.appUrl, "/upgrade") }],
+    emailPreferencesUrl: preferencesUrl(params.appUrl),
   });
 }
 
@@ -311,7 +336,14 @@ export type WeeklyDigestEmailParams = PromotionalEmailParams & {
   nextContent: EmailContentLink | null;
   /** Number of viewable incomplete contents. */
   remainingContents: number;
+  /** Themes in progress, most recently studied first. */
+  activeThemes: { themeName: string; completedContents: number; totalContents: number }[];
+  /** Open review-list items; 0 omits the line. Does not affect send targeting. */
+  unovercomeReviewCount?: number;
 };
+
+/** Themes listed in the weekly digest's "in progress" line. */
+const WEEKLY_ACTIVE_THEMES_LIMIT = 3;
 
 export function buildWeeklyDigestEmail(
   params: WeeklyDigestEmailParams,
@@ -321,6 +353,7 @@ export function buildWeeklyDigestEmail(
     params.completedLastWeek > 0 || params.submittedLastWeek > 0
       ? "先週もお疲れさまでした。この調子で続けていきましょう。"
       : "先週は学習の記録がありませんでした。まずは1本、短い時間から再開してみましょう。";
+  const unovercome = params.unovercomeReviewCount ?? 0;
 
   return renderTemplatedEmail({
     key: "weekly_digest",
@@ -330,6 +363,11 @@ export function buildWeeklyDigestEmail(
       completed_last_week: String(params.completedLastWeek),
       submitted_last_week: String(params.submittedLastWeek),
       weekly_cheer: cheer,
+      active_themes: params.activeThemes
+        .slice(0, WEEKLY_ACTIVE_THEMES_LIMIT)
+        .map((t) => `${t.themeName}（${t.completedContents} / ${t.totalContents} 完了）`)
+        .join("、"),
+      review_list_line: unovercome > 0 ? `復習リストに未克服の項目が ${unovercome} 件あります` : "",
       next_content_title: params.nextContent?.title ?? "",
       suggested_goal: params.nextContent
         ? String(suggestWeeklyGoal(params.completedLastWeek, params.remainingContents))
@@ -341,8 +379,9 @@ export function buildWeeklyDigestEmail(
     },
     links: params.nextContent
       ? [{ label: "続きから学ぶ", url: buildAppUrl(params.appUrl, params.nextContent.path) }]
-      : [{ label: "ダッシュボードを開く", url: buildAppUrl(params.appUrl, "/") }],
+      : [{ label: "ホームを開く", url: buildAppUrl(params.appUrl, "/") }],
     unsubscribeUrl: params.unsubscribeUrl,
+    emailPreferencesUrl: preferencesUrl(params.appUrl),
   });
 }
 
@@ -371,6 +410,7 @@ export function buildInactivityReminderEmail(
         : { label: "学習を始める", url: buildAppUrl(params.appUrl, "/learn") },
     ],
     unsubscribeUrl: params.unsubscribeUrl,
+    emailPreferencesUrl: preferencesUrl(params.appUrl),
   });
 }
 
@@ -400,7 +440,7 @@ function registrationSentence(upgradeAvailable: boolean): string {
 function registrationLinks(appUrl: string, upgradeAvailable: boolean): EmailLink[] {
   return upgradeAvailable
     ? [{ label: "プランのアップグレード", url: buildAppUrl(appUrl, "/upgrade") }]
-    : [{ label: "ダッシュボードを開く", url: buildAppUrl(appUrl, "/") }];
+    : [{ label: "ホームを開く", url: buildAppUrl(appUrl, "/") }];
 }
 
 const TRIAL_NURTURE_STAGES = [14, 7, 5, 2] as const;
@@ -423,6 +463,7 @@ export function buildTrialNurtureEmail(
     texts,
     displayName: params.displayName,
     unsubscribeUrl: params.unsubscribeUrl,
+    emailPreferencesUrl: preferencesUrl(params.appUrl),
   };
   const learnLinks = [{ label: "学習コンテンツを開く", url: buildAppUrl(params.appUrl, "/learn") }];
 
@@ -491,5 +532,77 @@ export function buildAnnouncementEmail(
       },
     ],
     unsubscribeUrl: params.unsubscribeUrl,
+    emailPreferencesUrl: preferencesUrl(params.appUrl),
+  });
+}
+
+export type NotificationEmailConfirmParams = {
+  displayName: string;
+  confirmUrl: string;
+  expiresLabel: string;
+};
+
+/**
+ * Confirmation mail to the new address. No unsubscribe link: this is an account procedure the
+ * user just started, and the link itself is the confirmation.
+ */
+export function buildNotificationEmailConfirmEmail(
+  params: NotificationEmailConfirmParams,
+  texts: EmailTexts = DEFAULT_EMAIL_TEXTS
+): EmailContent {
+  return renderTemplatedEmail({
+    key: "notification_email_confirm",
+    texts,
+    displayName: params.displayName,
+    values: { expires_label: params.expiresLabel },
+    links: [{ label: "変更を確定する", url: params.confirmUrl }],
+  });
+}
+
+export type NotificationEmailChangedParams = {
+  displayName: string;
+  newAddress: string;
+  /** Settings page. Omitted when the app URL is not configured (the notice still sends). */
+  settingsUrl: string | null;
+};
+
+/** Notice to the previous destination after a switch. No unsubscribe link. */
+export function buildNotificationEmailChangedEmail(
+  params: NotificationEmailChangedParams,
+  texts: EmailTexts = DEFAULT_EMAIL_TEXTS
+): EmailContent {
+  return renderTemplatedEmail({
+    key: "notification_email_changed",
+    texts,
+    displayName: params.displayName,
+    values: { new_address: params.newAddress },
+    links: params.settingsUrl ? [{ label: "設定画面を開く", url: params.settingsUrl }] : [],
+  });
+}
+
+export type CertificateIssuedEmailParams = {
+  displayName: string;
+  appUrl: string;
+  certificateId: number;
+  themeName: string;
+  certificateNo: string;
+};
+
+/** Certificate issued (transactional). The link opens the owner-only certificate page. */
+export function buildCertificateIssuedEmail(
+  params: CertificateIssuedEmailParams,
+  texts: EmailTexts = DEFAULT_EMAIL_TEXTS
+): EmailContent {
+  return renderTemplatedEmail({
+    key: "certificate_issued",
+    texts,
+    displayName: params.displayName,
+    values: { theme_name: params.themeName, certificate_no: params.certificateNo },
+    links: [
+      {
+        label: "修了証を表示する",
+        url: buildAppUrl(params.appUrl, `/certificates/${params.certificateId}`),
+      },
+    ],
   });
 }

@@ -1,0 +1,159 @@
+"use client";
+
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { CONTENT_TYPE_FORM_OPTIONS } from "@/app/constants/content";
+import {
+  isContentType,
+  type PhaseFilterOption,
+  type ThemeFilterOption,
+} from "@/app/lib/content-filtering";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+const SELECT_CLASS_NAME =
+  "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs";
+
+interface ContentsFilterBarProps {
+  themes: ThemeFilterOption[];
+  phases: PhaseFilterOption[];
+  /** List URL that owns the query string (tree vs bulk tab). */
+  basePath: string;
+}
+
+interface ContentsFilterValues {
+  theme: string;
+  phase: string;
+  type: string;
+  q: string;
+}
+
+/**
+ * Theme/phase/type render straight from useSearchParams() as the single source of truth:
+ * mirroring them in local state would miss URL changes from outside this component (the "clear
+ * filters" link, browser back/forward) and leave a stale selection. Only the title search uses
+ * debounced local state, to avoid a URL update per keystroke.
+ */
+export function ContentsFilterBar({ themes, phases, basePath }: ContentsFilterBarProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const theme = searchParams.get("theme") ?? "";
+  const phase = searchParams.get("phase") ?? "";
+  // For an invalid type from a hand-typed URL the server ignores it and shows everything, so
+  // normalize the select to "all" to keep the UI consistent with the results.
+  const rawType = searchParams.get("type") ?? "";
+  const type = isContentType(rawType) ? rawType : "";
+  const urlQ = searchParams.get("q") ?? "";
+
+  const [q, setQ] = useState(urlQ);
+
+  // Follow external changes to q in the URL (clear, back/forward) in the input. Don't overwrite
+  // when our own debounce commit (trailing-space trim) wrote back a semantically equal value; e.g.
+  // syncing q="hello" while typing "hello " would concatenate the next characters without the
+  // space.
+  useEffect(() => {
+    setQ((prevQ) => (urlQ === prevQ.trim() ? prevQ : urlQ));
+  }, [urlQ]);
+
+  const visiblePhases = phases.filter((p) => !theme || String(p.themeId) === theme);
+
+  const updateQuery = useCallback(
+    (next: ContentsFilterValues) => {
+      const query = new URLSearchParams();
+      if (next.theme) query.set("theme", next.theme);
+      if (next.phase) query.set("phase", next.phase);
+      if (next.type) query.set("type", next.type);
+      const trimmedQ = next.q.trim();
+      if (trimmedQ) query.set("q", trimmedQ);
+      const queryString = query.toString();
+      router.replace(queryString ? `${basePath}?${queryString}` : basePath);
+    },
+    [router, basePath]
+  );
+
+  function handleThemeChange(value: string) {
+    updateQuery({ theme: value, phase: "", type, q });
+  }
+
+  function handlePhaseChange(value: string) {
+    updateQuery({ theme, phase: value, type, q });
+  }
+
+  function handleTypeChange(value: string) {
+    updateQuery({ theme, phase, type: value, q });
+  }
+
+  useEffect(() => {
+    if (q.trim() === urlQ) return;
+    const timer = setTimeout(() => {
+      updateQuery({ theme, phase, type, q });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [q, urlQ, theme, phase, type, updateQuery]);
+
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 mb-4">
+      <div className="space-y-1">
+        <Label htmlFor="filter-theme">テーマ</Label>
+        <select
+          id="filter-theme"
+          value={theme}
+          onChange={(e) => handleThemeChange(e.target.value)}
+          className={SELECT_CLASS_NAME}
+        >
+          <option value="">すべて</option>
+          {themes.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="space-y-1">
+        <Label htmlFor="filter-phase">フェーズ</Label>
+        <select
+          id="filter-phase"
+          value={phase}
+          onChange={(e) => handlePhaseChange(e.target.value)}
+          className={SELECT_CLASS_NAME}
+        >
+          <option value="">すべて</option>
+          {visiblePhases.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="space-y-1">
+        <Label htmlFor="filter-type">種別</Label>
+        <select
+          id="filter-type"
+          value={type}
+          onChange={(e) => handleTypeChange(e.target.value)}
+          className={SELECT_CLASS_NAME}
+        >
+          <option value="">すべて</option>
+          {CONTENT_TYPE_FORM_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="space-y-1">
+        <Label htmlFor="filter-q">タイトル検索</Label>
+        <Input
+          id="filter-q"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="タイトルで検索"
+        />
+      </div>
+    </div>
+  );
+}

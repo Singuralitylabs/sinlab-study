@@ -4,7 +4,7 @@ import { createAdminSupabaseClient, createServerSupabaseClient } from "./supabas
 
 /** Minimal content columns for the history list (no heavy text such as bodies). */
 export const SUBMISSION_CONTENT_COLUMNS =
-  "id, title, content_type, is_published, is_open_to_trial, week_id";
+  "id, title, content_type, is_published, is_open_to_trial, phase_id";
 
 export async function fetchSubmissionsByUserId(userId: number): Promise<{
   data: SubmissionWithContent[] | null;

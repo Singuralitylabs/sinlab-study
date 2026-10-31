@@ -55,7 +55,10 @@ export function GoogleLoginButton() {
           onCheckedChange={(checked) => setAgreed(checked === true)}
           aria-describedby={agreed ? undefined : "terms-consent-description"}
         />
-        <label htmlFor="terms-consent" className="text-xs text-muted-foreground leading-relaxed">
+        <label
+          htmlFor="terms-consent"
+          className="text-xs text-muted-foreground leading-relaxed [word-break:normal]"
+        >
           <a
             href={TERMS_URL}
             target="_blank"

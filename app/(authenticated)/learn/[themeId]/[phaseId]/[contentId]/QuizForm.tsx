@@ -1,0 +1,398 @@
+"use client";
+
+import { CheckCircle2, Loader2, RotateCcw, Send, XCircle } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { ThemeCompletionDialog } from "@/app/components/ThemeCompletionDialog";
+import {
+  QUIZ_QUESTION_TYPE_LABELS,
+  QUIZ_TEXT_ANSWER_MAX_LENGTH,
+  type QuizQuestionForLearner,
+  type QuizQuestionResult,
+} from "@/app/constants/quiz";
+import {
+  noticeFromProgressBody,
+  type ThemeCompletionNotice,
+} from "@/app/lib/certificate-eligibility";
+import {
+  quizCompletionAction,
+  quizQuestionVersion,
+  resetForNewQuizVersion,
+  type VersionedValue,
+  valueForVersion,
+} from "@/app/lib/quiz-form";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+
+// The model answer / explanation only exist after grading, so their Markdown pipeline
+// (react-markdown + lowlight) is loaded on demand instead of in the quiz page's First Load JS.
+const ResultMarkdown = dynamic(
+  () => import("@/app/components/MarkdownRenderer").then((m) => m.MarkdownRenderer),
+  { ssr: false, loading: () => <Skeleton className="h-5 w-full" /> }
+);
+
+/**
+ * Question and choices arrive already rendered by the server page (MarkdownRenderer there), which
+ * keeps the Markdown pipeline out of this client component's bundle.
+ */
+export type QuizFormQuestion = Omit<QuizQuestionForLearner, "question" | "choices"> & {
+  question: ReactNode;
+  choices: ReactNode[];
+};
+
+interface QuizFormProps {
+  contentId: number;
+  questions: QuizFormQuestion[];
+  /** false while previewing unpublished content: grading works but progress is not recorded. */
+  canRecordProgress: boolean;
+  initialCompleted: boolean;
+}
+
+type Answer = { choices: number[]; text: string };
+
+function isAnswered(question: QuizFormQuestion, answer: Answer | undefined): boolean {
+  if (!answer) return false;
+  return question.question_type === "text"
+    ? answer.text.trim().length > 0
+    : answer.choices.length > 0;
+}
+
+export function QuizForm({
+  contentId,
+  questions,
+  canRecordProgress,
+  initialCompleted,
+}: QuizFormProps) {
+  const router = useRouter();
+  const [answers, setAnswers] = useState<Record<number, Answer>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [progressWarning, setProgressWarning] = useState<string | null>(null);
+  const [updatedNotice, setUpdatedNotice] = useState<string | null>(null);
+  const [themeNotice, setThemeNotice] = useState<ThemeCompletionNotice | null>(null);
+
+  // router.refresh() (after grading, or from the completion button) can bring a question set an
+  // admin changed meanwhile, even while a grade request is in flight. Results and errors are kept
+  // with the version they were produced for and shown only while it is still current, so a late
+  // response can never put old results under new text (ids are kept across edits).
+  const questionVersion = quizQuestionVersion(questions);
+  const [gradeResult, setGradeResult] = useState<VersionedValue<
+    Map<number, QuizQuestionResult>
+  > | null>(null);
+  const [errorState, setErrorState] = useState<VersionedValue<string> | null>(null);
+  const results = valueForVersion(gradeResult, questionVersion);
+  const error = valueForVersion(errorState, questionVersion);
+
+  // Drop the answers too (they are keyed by id and would be sent with the new revision). The
+  // progress warning is kept: it is about the completion record, not the question set.
+  const [seenQuestionVersion, setSeenQuestionVersion] = useState(questionVersion);
+  if (seenQuestionVersion !== questionVersion) {
+    setSeenQuestionVersion(questionVersion);
+    const next = resetForNewQuizVersion({ gradeResult, errorState }, seenQuestionVersion, {
+      questionCount: questions.length,
+      // An entry left empty (a choice ticked and unticked, text typed and cleared) is no answer.
+      hasAnswer: Object.values(answers).some((a) => a.choices.length > 0 || a.text.trim() !== ""),
+      isSubmitting,
+    });
+    setAnswers({});
+    setGradeResult(next.gradeResult);
+    setErrorState(next.errorState);
+    setUpdatedNotice(next.notice);
+  }
+
+  // Set while a completion record is in flight or sent but the refresh that turns
+  // initialCompleted true has not landed yet, so a quick re-answer does not post a second time.
+  const completionPending = useRef(false);
+  useEffect(() => {
+    // Once the saved progress says completed it guards by itself; clearing the flag lets a later
+    // un-complete (completion button) followed by a re-answer record again.
+    if (initialCompleted) completionPending.current = false;
+  }, [initialCompleted]);
+
+  const markCompleted = useCallback(async () => {
+    completionPending.current = true;
+    try {
+      const response = await fetch("/api/progress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contentId, isCompleted: true }),
+      });
+      if (!response.ok) {
+        throw new Error(String(response.status));
+      }
+      const body = await response.json().catch(() => null);
+      setThemeNotice(noticeFromProgressBody(true, body));
+      // Re-render the server page so the completion button reflects the new progress.
+      router.refresh();
+    } catch {
+      completionPending.current = false;
+      setProgressWarning("完了状態を記録できませんでした。下のボタンから完了にしてください。");
+    }
+  }, [contentId, router]);
+
+  // Completion is recorded from the committed state, so a result that is no longer current (the
+  // set changed before it arrived) is never recorded.
+  const recordedResult = useRef<VersionedValue<Map<number, QuizQuestionResult>> | null>(null);
+  useEffect(() => {
+    const action = quizCompletionAction({
+      resultVersion: gradeResult?.version ?? null,
+      questionVersion,
+      handled: recordedResult.current === gradeResult,
+      completionPending: completionPending.current,
+      canRecordProgress,
+      initialCompleted,
+    });
+    if (action === "skip") return;
+    recordedResult.current = gradeResult;
+    if (action === "record") {
+      void markCompleted();
+    }
+  }, [gradeResult, questionVersion, canRecordProgress, initialCompleted, markCompleted]);
+
+  const allAnswered = questions.every((q) => isAnswered(q, answers[q.id]));
+  const autoGraded = results ? [...results.values()].filter((r) => r.isCorrect !== null) : [];
+  const correctCount = autoGraded.filter((r) => r.isCorrect).length;
+
+  function updateAnswer(questionId: number, update: (prev: Answer) => Answer) {
+    setAnswers((prev) => ({
+      ...prev,
+      [questionId]: update(prev[questionId] ?? { choices: [], text: "" }),
+    }));
+  }
+
+  function toggleChoice(question: QuizFormQuestion, index: number) {
+    updateAnswer(question.id, (prev) => {
+      if (question.question_type === "single") {
+        return { ...prev, choices: [index] };
+      }
+      const choices = prev.choices.includes(index)
+        ? prev.choices.filter((c) => c !== index)
+        : [...prev.choices, index];
+      return { ...prev, choices };
+    });
+  }
+
+  async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const sentVersion = questionVersion;
+    if (!allAnswered) {
+      setErrorState({ version: sentVersion, value: "すべての設問に回答してください" });
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorState(null);
+    setUpdatedNotice(null);
+    setProgressWarning(null);
+    try {
+      const response = await fetch("/api/quiz/grade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contentId,
+          answers: questions.map((q) =>
+            q.question_type === "text"
+              ? { questionId: q.id, revision: q.revision, text: answers[q.id]?.text ?? "" }
+              : { questionId: q.id, revision: q.revision, choices: answers[q.id]?.choices ?? [] }
+          ),
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        setErrorState({ version: sentVersion, value: data?.error ?? "採点に失敗しました" });
+        return;
+      }
+      const graded: QuizQuestionResult[] = data?.results ?? [];
+      setGradeResult({
+        version: sentVersion,
+        value: new Map(graded.map((r) => [r.questionId, r])),
+      });
+    } catch {
+      setErrorState({ version: sentVersion, value: "採点中にエラーが発生しました" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function handleRetry() {
+    setAnswers({});
+    setGradeResult(null);
+    setErrorState(null);
+    setUpdatedNotice(null);
+    setProgressWarning(null);
+  }
+
+  if (questions.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">このクイズには設問が登録されていません。</p>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-8">
+      {themeNotice && (
+        <ThemeCompletionDialog
+          key={`${themeNotice.themeId}-${themeNotice.certificateId}-${themeNotice.remaining.unsubmittedExercises}-${themeNotice.remaining.exercisesNeedingRetry}-${themeNotice.blockedByMissingName}`}
+          notice={themeNotice}
+        />
+      )}
+      {questions.map((question, questionIndex) => {
+        const answer = answers[question.id];
+        const result = results?.get(question.id);
+        const inputType = question.question_type === "single" ? "radio" : "checkbox";
+        return (
+          <fieldset key={question.id} className="space-y-3" disabled={results !== null}>
+            <legend className="mb-2 flex items-center gap-2 text-sm font-semibold">
+              <span>設問 {questionIndex + 1}</span>
+              <Badge variant="outline">{QUIZ_QUESTION_TYPE_LABELS[question.question_type]}</Badge>
+              {result?.isCorrect === true && (
+                <Badge className="gap-1 bg-success text-white">
+                  <CheckCircle2 className="h-3 w-3" />
+                  正解
+                </Badge>
+              )}
+              {result?.isCorrect === false && (
+                <Badge variant="destructive" className="gap-1">
+                  <XCircle className="h-3 w-3" />
+                  不正解
+                </Badge>
+              )}
+            </legend>
+
+            {question.question}
+
+            {question.question_type === "text" ? (
+              <Textarea
+                value={answer?.text ?? ""}
+                onChange={(e) =>
+                  updateAnswer(question.id, (prev) => ({ ...prev, text: e.target.value }))
+                }
+                maxLength={QUIZ_TEXT_ANSWER_MAX_LENGTH}
+                placeholder="回答を入力してください"
+                className="min-h-[120px]"
+                aria-label={`設問 ${questionIndex + 1} の回答`}
+              />
+            ) : (
+              <div className="space-y-2">
+                {question.choices.map((choice, index) => {
+                  const checked = answer?.choices.includes(index) ?? false;
+                  const isCorrectChoice = result?.correctChoices.includes(index) ?? false;
+                  return (
+                    // A <div>, not a <label>: MarkdownRenderer emits block elements (invalid
+                    // inside a label), and a link in a choice must open without toggling it.
+                    // Keyboard users operate the input itself, so the row click is a shortcut.
+                    // biome-ignore lint/a11y/useKeyWithClickEvents: the input is the keyboard target
+                    // biome-ignore lint/a11y/noStaticElementInteractions: same as above
+                    <div
+                      // biome-ignore lint/suspicious/noArrayIndexKey: choices are fixed per question and may repeat
+                      key={index}
+                      onClick={(e) => {
+                        const target = e.target as HTMLElement;
+                        if (results || target.closest("a") || target.tagName === "INPUT") return;
+                        toggleChoice(question, index);
+                      }}
+                      className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 ${
+                        result && isCorrectChoice
+                          ? "border-success bg-success/10"
+                          : result && checked
+                            ? "border-destructive bg-destructive/5"
+                            : "border-border"
+                      }`}
+                    >
+                      <input
+                        type={inputType}
+                        name={`question-${question.id}`}
+                        checked={checked}
+                        onChange={() => toggleChoice(question, index)}
+                        aria-labelledby={`question-${question.id}-choice-${index}`}
+                        className="mt-1.5 h-4 w-4"
+                      />
+                      <div id={`question-${question.id}-choice-${index}`} className="flex-1">
+                        {choice}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {question.hint && !result && (
+              <details className="rounded-lg border border-border">
+                <summary className="cursor-pointer select-none list-none px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground">
+                  💡 ヒントを見る
+                </summary>
+                <div className="whitespace-pre-wrap border-t border-border px-4 py-2 text-sm text-muted-foreground">
+                  {question.hint}
+                </div>
+              </details>
+            )}
+
+            {result && (
+              <div className="space-y-3 rounded-lg bg-muted px-4 py-3">
+                {result.modelAnswer && (
+                  <div>
+                    <h4 className="mb-1 text-sm font-semibold">模範解答</h4>
+                    <ResultMarkdown content={result.modelAnswer} />
+                  </div>
+                )}
+                {result.explanation && (
+                  <div>
+                    <h4 className="mb-1 text-sm font-semibold">解説</h4>
+                    <ResultMarkdown content={result.explanation} />
+                  </div>
+                )}
+              </div>
+            )}
+          </fieldset>
+        );
+      })}
+
+      {(updatedNotice || error) && (
+        <Alert variant="destructive">
+          <AlertDescription>{updatedNotice ?? error}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Outside the results block: the record can fail after the set changed and the results
+          were cleared, and the learner still needs to know to use the completion button. */}
+      {/* Hidden once the saved progress is completed (e.g. via the completion button), which is
+          what the warning asks for. */}
+      {progressWarning && !initialCompleted && (
+        <Alert variant="destructive">
+          <AlertDescription>{progressWarning}</AlertDescription>
+        </Alert>
+      )}
+
+      {results ? (
+        <div className="space-y-3">
+          {autoGraded.length > 0 && (
+            <p className="text-sm font-medium">
+              選択式 {autoGraded.length} 問中 {correctCount} 問正解
+            </p>
+          )}
+          {!canRecordProgress && (
+            <p className="text-sm text-muted-foreground">
+              非公開コンテンツのプレビュー中のため、完了状態は記録されません。
+            </p>
+          )}
+          <Button type="button" variant="outline" onClick={handleRetry}>
+            <RotateCcw className="h-4 w-4" />
+            もう一度解く
+          </Button>
+        </div>
+      ) : (
+        <Button type="submit" disabled={isSubmitting || !allAnswered}>
+          {isSubmitting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Send className="h-4 w-4" />
+          )}
+          回答を送信
+        </Button>
+      )}
+    </form>
+  );
+}

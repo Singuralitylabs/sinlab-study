@@ -102,6 +102,13 @@ describe("PUT /api/admin/email-settings", () => {
     );
   });
 
+  it("プッシュ対象の種別は push_enabled を更新できる", async () => {
+    const res = await put({ kind: "approved", push_enabled: true });
+
+    expect(res.status).toBe(200);
+    expect(updateEmailKindSettings).toHaveBeenCalledWith("approved", { push_enabled: true }, 1);
+  });
+
   it("週次進捗の曜日を更新する", async () => {
     await put({ kind: "weekly_digest", send_weekday: 6 });
 
@@ -143,6 +150,7 @@ describe("PUT /api/admin/email-settings", () => {
     ["send_weekday が 7", { kind: "weekly_digest", send_weekday: 7 }],
     ["send_weekday が -1", { kind: "weekly_digest", send_weekday: -1 }],
     ["未知の種別", { kind: "weekly_digest_reserved", enabled: false }],
+    ["プッシュ対象外の種別", { kind: "weekly_digest", push_enabled: true }],
     ["send_days を持たない種別に send_days", { kind: "signup", send_days: [3] }],
     ["weekly_digest 以外に send_weekday", { kind: "signup", send_weekday: 1 }],
     ["更新項目が無い", { kind: "signup" }],

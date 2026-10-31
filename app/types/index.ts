@@ -18,11 +18,6 @@ export type LearningPhase = Tables<"learning_phases"> & {
   is_published: boolean;
   is_deleted: boolean;
 };
-export type LearningWeek = Tables<"learning_weeks"> & {
-  display_order: number;
-  is_published: boolean;
-  is_deleted: boolean;
-};
 export type LearningContent = Tables<"learning_contents"> & {
   content_type: ContentType;
   display_order: number;
@@ -35,22 +30,66 @@ export type UserProgress = Tables<"user_progress"> & {
 export type Submission = Tables<"submissions"> & {
   submission_type: SubmissionType;
 };
-export type AIReview = Tables<"ai_reviews"> & {
+export type AIReview = Omit<Tables<"ai_reviews">, "review_json" | "score_kind"> & {
   status: AIReviewStatus;
+  review_json: ReviewJson | null;
+  score_kind: ScoreKind;
 };
 
 export type UserStatusType = "trial" | "active" | "rejected";
 export type UserRoleType = "admin" | "maintainer" | "member";
 /** null for unapproved and rejected users. */
 export type MembershipType = "community" | "general";
-export type ContentType = "video" | "text" | "exercise" | "slide";
+export type ContentType = "video" | "text" | "exercise" | "slide" | "quiz";
 export type SubmissionType = "code" | "url";
 export type AIReviewStatus = "pending" | "processing" | "completed" | "failed";
 
+export type { QualityLevel, RequirementStatus, ScoreKind } from "@/app/constants/grading";
+
+import type { QualityLevel, RequirementStatus, ScoreKind } from "@/app/constants/grading";
+
+/** Defined as `type` (not `interface`) so it is assignable to Supabase's Json. */
+export type GradingRequirement = {
+  key: string;
+  name: string;
+  description: string;
+};
+
+export type GradingRubric = {
+  version: number;
+  requirements: GradingRequirement[];
+  /**
+   * Highest `r{n}` number ever issued for this rubric. Kept apart from `requirements` because a
+   * deleted requirement's number must not be handed to a new one. Absent on rubrics saved before
+   * it existed; readers fall back to the highest key still present.
+   */
+  max_key_number?: number;
+};
+
 /**
- * One file of a multi-file submission (submissions.code_files element). language/filename may be
- * empty for compatibility with single-file submissions (code_content). Defined as `type`, not
- * `interface`: assigning to Supabase's Json type needs an implicit index signature.
+ * `name` is stored beside `key` so a review stays readable after the rubric is edited (the rubric
+ * can change version afterwards). The AI only ever returns `key` for rubric grading; the code
+ * fills `name` from the rubric.
+ */
+export type ReviewRequirementResult = {
+  key: string;
+  name?: string;
+  status: RequirementStatus;
+  comment: string;
+};
+
+export type ReviewJson = {
+  requirements: ReviewRequirementResult[];
+  code_quality: { level: QualityLevel; comment: string };
+  suggestions: string[];
+  advice: string;
+};
+
+/**
+ * One file of a multi-file submission (submissions.code_files) or exercise starter
+ * (learning_contents.starter_files). language/filename may be empty for compatibility with
+ * single-file submissions (code_content). Defined as `type`, not `interface`: assigning to
+ * Supabase's Json type needs an implicit index signature.
  */
 export type CodeFile = {
   filename: string;
@@ -62,18 +101,14 @@ export interface LearningPhaseWithTheme extends LearningPhase {
   theme: LearningTheme | null;
 }
 
-export interface LearningWeekWithPhase extends LearningWeek {
+export interface LearningContentWithPhase extends LearningContent {
   phase: LearningPhaseWithTheme | null;
-}
-
-export interface LearningContentWithWeek extends LearningContent {
-  week: LearningWeekWithPhase | null;
 }
 
 export type LearningContentListItem = Pick<
   LearningContent,
   | "id"
-  | "week_id"
+  | "phase_id"
   | "title"
   | "content_type"
   | "video_url"
@@ -98,17 +133,6 @@ export type ManagePhaseListItem = Pick<
   theme: Pick<LearningTheme, "id" | "name" | "display_order"> | null;
 };
 
-export type ManageWeekListItem = Pick<
-  LearningWeek,
-  "id" | "name" | "display_order" | "is_published" | "phase_id"
-> & {
-  phase:
-    | (Pick<LearningPhase, "id" | "name" | "display_order" | "theme_id"> & {
-        theme: Pick<LearningTheme, "id" | "name" | "display_order"> | null;
-      })
-    | null;
-};
-
 export type ManageContentListItem = Pick<
   LearningContent,
   | "id"
@@ -117,14 +141,20 @@ export type ManageContentListItem = Pick<
   | "display_order"
   | "is_published"
   | "is_open_to_trial"
-  | "week_id"
+  | "phase_id"
 > & {
-  week: ManageWeekListItem | null;
+  /** Only the rubric's version is selected, not the whole JSONB (the list never shows the text). */
+  grading_rubric_version: number | null;
+  phase:
+    | (Pick<LearningPhase, "id" | "name" | "display_order" | "theme_id"> & {
+        theme: Pick<LearningTheme, "id" | "name" | "display_order"> | null;
+      })
+    | null;
 };
 
 export type ContentSiblingCandidateRow = Pick<
   LearningContent,
-  "id" | "title" | "display_order" | "is_published" | "week_id"
+  "id" | "title" | "display_order" | "is_published" | "phase_id"
 >;
 
 export type ManageUserListItem = Pick<
@@ -132,6 +162,7 @@ export type ManageUserListItem = Pick<
   | "id"
   | "display_name"
   | "email"
+  | "notification_email"
   | "role"
   | "status"
   | "membership_type"
@@ -148,40 +179,59 @@ export type BreadcrumbPhase = Pick<
   theme: BreadcrumbTheme | null;
 };
 
-export type BreadcrumbWeek = Pick<
-  LearningWeek,
-  "id" | "phase_id" | "name" | "is_published" | "is_deleted"
-> & {
-  phase: BreadcrumbPhase | null;
-};
-
-export type LearningWeekWithBreadcrumb = LearningWeek & {
-  phase: BreadcrumbPhase | null;
+export type LearningPhaseWithBreadcrumb = LearningPhase & {
+  theme: BreadcrumbTheme | null;
 };
 
 export type LearningContentWithBreadcrumb = LearningContent & {
-  week: BreadcrumbWeek | null;
+  phase: BreadcrumbPhase | null;
 };
 
 export interface SubmissionWithContent extends Submission {
   content: Pick<
     LearningContent,
-    "id" | "title" | "content_type" | "is_published" | "is_open_to_trial" | "week_id"
+    "id" | "title" | "content_type" | "is_published" | "is_open_to_trial" | "phase_id"
   > | null;
 }
 
+/** Columns students may read. Token counts are admin-only (AdminAIReviewListItem). */
 export type AIReviewListItem = Pick<
   AIReview,
-  "id" | "status" | "overall_score" | "review_content" | "reviewed_at" | "error_message"
+  | "id"
+  | "status"
+  | "overall_score"
+  | "review_content"
+  | "reviewed_at"
+  | "error_message"
+  | "review_json"
+  | "score_kind"
+  | "rubric_version"
+  | "passed"
 >;
 
+export type AdminAIReviewListItem = AIReviewListItem &
+  Pick<AIReview, "prompt_tokens" | "completion_tokens" | "thoughts_tokens">;
+
 export interface SubmissionWithContentAndReview extends Submission {
-  content: Pick<LearningContent, "id" | "title"> | null;
+  content: Pick<
+    LearningContent,
+    | "id"
+    | "title"
+    | "code_language"
+    | "submission_file_slots"
+    | "starter_files"
+    | "preview_base_html"
+    | "show_preview"
+    | "show_console"
+  > | null;
   ai_review: AIReviewListItem | null;
 }
 
-export interface AdminSubmissionWithReview extends SubmissionWithContentAndReview {
-  user: Pick<UserType, "id" | "display_name" | "email"> | null;
+export interface AdminSubmissionWithReview
+  extends Omit<SubmissionWithContentAndReview, "ai_review"> {
+  /** Manage UI hides PII; email stays on /admin/users only (#414). */
+  user: Pick<UserType, "id" | "display_name"> | null;
+  ai_review: AdminAIReviewListItem | null;
 }
 
 export interface ThemeProgress {
@@ -198,11 +248,5 @@ export interface PhaseProgress {
   progressPercent: number;
 }
 
-export interface WeekProgress {
-  week: LearningWeek;
-  totalContents: number;
-  completedContents: number;
-  progressPercent: number;
-}
-
 export type Announcement = Tables<"announcements">;
+export type Certificate = Tables<"certificates">;

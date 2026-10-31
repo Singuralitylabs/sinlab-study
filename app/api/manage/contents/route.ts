@@ -1,25 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { USER_STATUS } from "@/app/constants/user";
 import { InvalidInsertAfterIdError } from "@/app/lib/content-grouping";
 import { createContent } from "@/app/services/api/admin-server";
 import { ContentCreateSchema, validateRequest } from "@/app/services/api/schemas";
-import { checkContentPermissions } from "@/app/services/auth/permissions";
-import { getServerAuth } from "@/app/services/auth/server-auth";
+import { requireContentManagerApi } from "@/app/services/auth/admin-guard";
 
 export async function POST(request: NextRequest) {
   try {
-    const { user, userId, userStatus, userRole } = await getServerAuth();
-    if (!user) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-    }
-    if (!userId) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません" }, { status: 403 });
-    }
-    if (userStatus === USER_STATUS.REJECTED) {
-      return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
-    }
-    if (!checkContentPermissions(userRole)) {
-      return NextResponse.json({ error: "コンテンツ管理権限がありません" }, { status: 403 });
+    const { response: denied } = await requireContentManagerApi();
+    if (denied) {
+      return denied;
     }
 
     const validation = await validateRequest(request, ContentCreateSchema);
@@ -28,7 +17,7 @@ export async function POST(request: NextRequest) {
     }
     const {
       title,
-      week_id,
+      phase_id,
       content_type,
       video_url,
       text_content,
@@ -36,17 +25,24 @@ export async function POST(request: NextRequest) {
       exercise_instructions,
       hint,
       reference_answer,
+      starter_files,
+      submission_file_slots,
+      preview_base_html,
+      show_preview,
+      show_console,
       allowed_submission_types,
       code_language,
       pdf_url,
+      grading_rubric,
       insert_after_id,
       is_published,
       is_open_to_trial,
+      quiz_questions,
     } = validation.data;
 
-    const { data, error } = await createContent({
+    const { data, error, publishFailed, previewNotAllowed } = await createContent({
       title,
-      week_id,
+      phase_id,
       content_type,
       video_url,
       text_content,
@@ -54,19 +50,38 @@ export async function POST(request: NextRequest) {
       exercise_instructions,
       hint,
       reference_answer,
+      starter_files,
+      submission_file_slots,
+      preview_base_html,
+      show_preview,
+      show_console,
       allowed_submission_types,
       code_language,
       pdf_url,
+      gradingRubric: grading_rubric,
       insertAfterId: insert_after_id,
       is_published,
       is_open_to_trial,
+      quizQuestions: quiz_questions,
     });
 
+    if (previewNotAllowed) {
+      return NextResponse.json({ error: previewNotAllowed }, { status: 400 });
+    }
     if (error) {
       return NextResponse.json({ error: "コンテンツの作成に失敗しました" }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, content: data });
+    return NextResponse.json({
+      success: true,
+      content: data,
+      ...(publishFailed
+        ? {
+            warning:
+              "コンテンツは作成しましたが、公開に失敗したため非公開のままです。編集画面から公開してください",
+          }
+        : {}),
+    });
   } catch (error) {
     if (error instanceof InvalidInsertAfterIdError) {
       console.error("コンテンツ作成エラー（insert_after_id不正）:", error.insertAfterId);

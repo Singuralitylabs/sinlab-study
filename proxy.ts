@@ -1,24 +1,28 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
-import { AUTH_HEADER_NAMES, AUTH_HEADERS } from "./app/constants/auth";
+import { AUTH_HEADER_NAMES, AUTH_HEADERS, SIGN_OUT_PATH } from "./app/constants/auth";
+import { PWA_PUBLIC_PATHS } from "./app/constants/pwa";
 import { ALLOWED_USER_STATUSES, USER_STATUS } from "./app/constants/user";
 import type { UserStatusType } from "./app/types";
 
 // Extensions treated as static assets (suffix match only). Don't use "path contains .": crafted
 // URLs like /learn/1/2/3/4. would bypass auth.
 const STATIC_FILE_EXTENSIONS =
-  /\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest)$/i;
+  /\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest|wasm|data)$/i;
 
-function shouldSkipMiddleware(pathname: string): boolean {
+export function shouldSkipMiddleware(pathname: string): boolean {
   return (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api") ||
     pathname.startsWith("/auth/callback") ||
+    // Sign-out must reach the handler even for rejected / unknown-status users.
+    pathname === SIGN_OUT_PATH ||
     pathname.startsWith("/demo") ||
     STATIC_FILE_EXTENSIONS.test(pathname) ||
     pathname === "/favicon.ico" ||
     pathname === "/login" ||
-    pathname === "/rejected"
+    pathname === "/rejected" ||
+    (PWA_PUBLIC_PATHS as readonly string[]).includes(pathname)
   );
 }
 
@@ -92,19 +96,18 @@ export async function proxy(request: NextRequest) {
       },
     });
 
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser();
-
-    if (error || !user) {
+    // Local JWKS verify when asymmetric JWT keys are enabled; avoids /auth/v1/user on every hit.
+    // Fail closed on expired / bad signature / missing JWKS the same way getUser() did.
+    const { data: claimsData, error } = await supabase.auth.getClaims();
+    const authId = claimsData?.claims?.sub;
+    if (error || !authId) {
       return applyResponseModifications(NextResponse.redirect(new URL("/login", request.url)));
     }
 
     const { data: userData, error: userError } = await supabase
       .from("users")
-      .select("id, status, role")
-      .eq("auth_id", user.id)
+      .select("id, status, role, membership_type")
+      .eq("auth_id", authId)
       .eq("is_deleted", false)
       .maybeSingle();
 
@@ -127,10 +130,11 @@ export async function proxy(request: NextRequest) {
 
       // Build downstream headers from the latest request.headers after the token refresh.
       const downstreamHeaders = sanitizeRequestHeaders(request.headers);
-      downstreamHeaders.set(AUTH_HEADERS.AUTH_ID, user.id);
+      downstreamHeaders.set(AUTH_HEADERS.AUTH_ID, authId);
       downstreamHeaders.set(AUTH_HEADERS.USER_ID, String(userData.id));
       downstreamHeaders.set(AUTH_HEADERS.USER_STATUS, userData.status);
       downstreamHeaders.set(AUTH_HEADERS.USER_ROLE, userData.role);
+      downstreamHeaders.set(AUTH_HEADERS.MEMBERSHIP_TYPE, userData.membership_type ?? "");
 
       return applyResponseModifications(
         NextResponse.next({
@@ -156,6 +160,6 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     // Exclude Next.js internals and static assets (matching STATIC_FILE_EXTENSIONS).
-    "/((?!_next|[^?]*\\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest)).*)",
+    "/((?!_next|[^?]*\\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest|wasm|data)).*)",
   ],
 };

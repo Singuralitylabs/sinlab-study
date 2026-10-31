@@ -1,16 +1,20 @@
 export const dynamic = "force-dynamic";
 
-import { Clock } from "lucide-react";
 import { redirect } from "next/navigation";
-import { UpgradeCtaLink } from "@/app/components/UpgradeCtaLink";
-import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
+import { Suspense } from "react";
+import { isFeedbackEnabled } from "@/app/constants/feedback";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
-import { fetchUnreadAnnouncementCount } from "@/app/services/api/announcements-server";
-import { checkAdminPermissions, checkInstructorPermissions } from "@/app/services/auth/permissions";
+import { isCertificateEligible } from "@/app/lib/certificate";
+import {
+  checkAdminPermissions,
+  checkInstructorPermissions,
+  isLearnerRole,
+} from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { SideNav } from "./components/SideNav";
+import { TrialBanner } from "./components/TrialBanner";
+import { UnreadAnnouncementBadge } from "./components/UnreadAnnouncementBadge";
 
 export default async function AuthLayout({
   children,
@@ -32,36 +36,26 @@ export default async function AuthLayout({
   const isAdmin = checkAdminPermissions(userRole);
   const isInstructor = checkInstructorPermissions(userRole);
   const stripeEnabled = isStripeEnabled();
-  // The unread count isn't carried in getServerAuth()'s headers; fetch it here (a failure shows 0).
-  const unreadAnnouncementCount = await fetchUnreadAnnouncementCount();
+  const feedbackEnabled = isFeedbackEnabled();
 
   return (
     <div className="sm:flex min-h-screen">
       <SideNav
         isAdmin={isAdmin}
         isInstructor={isInstructor}
-        stripeEnabled={stripeEnabled}
-        unreadAnnouncementCount={unreadAnnouncementCount}
+        feedbackEnabled={feedbackEnabled}
+        showCertificates={isCertificateEligible(userStatus, userRole)}
+        showReviewList={isLearnerRole(userRole)}
+        announcementBadge={
+          // The unread query runs behind Suspense so the shell (and each route's loading.tsx)
+          // renders without waiting on it. The userStatus gate above still runs first.
+          <Suspense fallback={null}>
+            <UnreadAnnouncementBadge />
+          </Suspense>
+        }
       />
-      <main className="flex-1 sm:ml-64 p-6 pt-20 sm:pt-6">
-        {userStatus === USER_STATUS.TRIAL && (
-          <Alert className="mb-6">
-            <Clock />
-            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
-              <span>
-                現在は無料プランでご利用中です。「お試し公開」コンテンツの閲覧・提出が可能です。
-                {stripeEnabled
-                  ? "すべての学習コンテンツを利用するには、アップグレードまたは管理者による本登録が必要です。"
-                  : "すべての学習コンテンツを利用するには、管理者による本登録が必要です。"}
-              </span>
-              {stripeEnabled && (
-                <UpgradeCtaLink source={UPGRADE_CTA_SOURCE.BANNER} size="sm">
-                  アップグレード
-                </UpgradeCtaLink>
-              )}
-            </AlertDescription>
-          </Alert>
-        )}
+      <main className="flex-1 sm:ml-64 p-6 pt-20 sm:pt-6 print:ml-0 print:p-0">
+        {userStatus === USER_STATUS.TRIAL && <TrialBanner stripeEnabled={stripeEnabled} />}
         {children}
       </main>
     </div>

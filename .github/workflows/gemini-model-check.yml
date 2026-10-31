@@ -1,0 +1,253 @@
+name: Gemini Model Check
+
+# Weekly scan of Gemini models.list vs app/constants/gemini.ts (#369).
+# Newer stable Flash → update PR. Missing registered model → high-urgency Issue.
+# grading-dry-run is NEVER run here (dev DB + Gemini billing; humans run it locally).
+on:
+  schedule:
+    # Weekly Monday 00:00 JST (Sunday 15:00 UTC)
+    - cron: "0 15 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: gemini-model-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # plan reads working-tree gemini.ts; apply rewrites origin/main. Both must be the same ref
+      # or the PR summary (A → B) can disagree with the diff (release-pr.yml same rule).
+      - name: Require main branch
+        env:
+          # Pass via env so the value is not interpolated into the shell script
+          # (workflow_dispatch can target a branch whose name contains shell metacharacters).
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::gemini-model-check.yml must be run from main (got ${REF})."
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ".bun-version"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Compare models.list with registered constants
+        id: plan
+        env:
+          # models.list-only key; never the production GEMINI_API_KEY / GEMINI_API_KEY_TRIAL.
+          # Do not echo this value. Prefer x-goog-api-key inside the script (no ?key= in URLs).
+          GEMINI_MODEL_CHECK_API_KEY: ${{ secrets.GEMINI_MODEL_CHECK_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GEMINI_MODEL_CHECK_API_KEY:-}" ]; then
+            echo "::error::GEMINI_MODEL_CHECK_API_KEY secret is not set."
+            exit 1
+          fi
+          # Capture JSON only; do not print env or curl debug.
+          PLAN_JSON=$(bun scripts/gemini-model-check.ts --json)
+          echo "plan<<PLAN_EOF" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$PLAN_JSON" >> "$GITHUB_OUTPUT"
+          echo "PLAN_EOF" >> "$GITHUB_OUTPUT"
+          NEWER=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write(p.newerStableFlash ?? "")')
+          MISSING=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write((p.missingRegistered ?? []).join(","))')
+          PRIMARY=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write(p.registered.primary)')
+          ALTERNATE=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write(p.registered.alternate)')
+          PRIMARY_MISSING=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write(p.missingRegistered.includes(p.registered.primary)?"true":"false")')
+          UNPARSEABLE=$(printf '%s' "$PLAN_JSON" | bun -e 'const p=JSON.parse(await Bun.stdin.text()); process.stdout.write(p.unparseablePrimary?"true":"false")')
+          echo "newer=$NEWER" >> "$GITHUB_OUTPUT"
+          echo "missing=$MISSING" >> "$GITHUB_OUTPUT"
+          echo "primary=$PRIMARY" >> "$GITHUB_OUTPUT"
+          echo "alternate=$ALTERNATE" >> "$GITHUB_OUTPUT"
+          echo "primary_missing=$PRIMARY_MISSING" >> "$GITHUB_OUTPUT"
+          echo "unparseable_primary=$UNPARSEABLE" >> "$GITHUB_OUTPUT"
+          echo "Newer stable Flash: ${NEWER:-"(none)"}"
+          echo "Missing registered: ${MISSING:-"(none)"}"
+          echo "Unparseable primary: ${UNPARSEABLE}"
+
+      - name: Create Issue when primary model id is unparseable
+        if: ${{ steps.plan.outputs.unparseable_primary == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRIMARY: ${{ steps.plan.outputs.primary }}
+        run: |
+          set -euo pipefail
+          TITLE="[緊急] Gemini 主モデル ID を解析できません: ${PRIMARY}"
+          EXISTING=$(
+            TITLE="$TITLE" gh issue list --state open --limit 100 --json number,title \
+              | bun -e 'const t=process.env.TITLE; const rows=JSON.parse(await Bun.stdin.text()); const hit=rows.find((r)=>r.title===t); process.stdout.write(hit?String(hit.number):"")'
+          )
+          if [ -n "$EXISTING" ]; then
+            echo "Open Issue #${EXISTING} already exists for unparseable primary; skipping."
+            exit 0
+          fi
+
+          BODY=$(cat <<EOF
+          ## 緊急度: 高
+
+          \`app/constants/gemini.ts\` の主モデル（\`${PRIMARY}\`）が \`gemini-<version>-flash\` 形式として解析できません。
+
+          この状態では週次の新モデル検知が「更新なし」と同じ結果になり、警告なしで機能停止します（#369）。
+
+          - 検知ワークフロー: \`gemini-model-check.yml\`
+
+          ### 【人間タスク】
+          - [ ] 主モデルを安定版 Flash の具体 ID（例: \`gemini-3.8-flash\`）へ戻す / 更新する
+          - [ ] preview・exp・\`-latest\`・\`flash-lite\` など解析対象外の ID を主モデルに置かない
+          - [ ] 定数更新後、Actions で本ワークフローを main から再実行する
+          EOF
+          )
+          gh issue create --title "$TITLE" --body "$BODY" --label "priority-high" --label "enhancement"
+
+      - name: Create Issue when a registered model is missing
+        if: ${{ steps.plan.outputs.missing != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MISSING: ${{ steps.plan.outputs.missing }}
+        run: |
+          set -euo pipefail
+          TITLE="[緊急] 登録中の Gemini モデルが一覧にありません: ${MISSING}"
+          # Deduplicate on exact open title (same missing set).
+          EXISTING=$(
+            TITLE="$TITLE" gh issue list --state open --limit 100 --json number,title \
+              | bun -e 'const t=process.env.TITLE; const rows=JSON.parse(await Bun.stdin.text()); const hit=rows.find((r)=>r.title===t); process.stdout.write(hit?String(hit.number):"")'
+          )
+          if [ -n "$EXISTING" ]; then
+            echo "Open Issue #${EXISTING} already exists for this missing set; skipping."
+            exit 0
+          fi
+
+          BODY=$(cat <<EOF
+          ## 緊急度: 高
+
+          Gemini API の \`models.list\` に、\`app/constants/gemini.ts\` へ登録済みのモデルが見つかりませんでした。
+
+          - 欠落: \`${MISSING}\`
+          - 検知ワークフロー: \`gemini-model-check.yml\`（#369）
+
+          モデル廃止・リネームの可能性があるため、定数の更新と AI レビューの動作確認を優先してください。
+
+          ### 【人間タスク】
+          - [ ] [Deprecations](https://ai.google.dev/gemini-api/docs/deprecations) / [Release notes](https://ai.google.dev/gemini-api/docs/changelog) を確認する
+          - [ ] 代替の安定版 Flash を選定し、定数更新 PR を出す（\`-latest\` エイリアスは使わない）
+          - [ ] 開発環境で \`scripts/grading-dry-run.ts\` を実行し、採点傾向を確認してからマージする
+          EOF
+          )
+          gh issue create --title "$TITLE" --body "$BODY" --label "priority-high" --label "enhancement"
+
+      - name: Create update PR for a newer stable Flash
+        if: ${{ steps.plan.outputs.newer != '' && steps.plan.outputs.unparseable_primary != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEWER: ${{ steps.plan.outputs.newer }}
+          PRIMARY: ${{ steps.plan.outputs.primary }}
+          ALTERNATE: ${{ steps.plan.outputs.alternate }}
+          MISSING: ${{ steps.plan.outputs.missing }}
+          PRIMARY_MISSING: ${{ steps.plan.outputs.primary_missing }}
+        run: |
+          set -euo pipefail
+          BRANCH="env/gemini-model-${NEWER}"
+          TITLE="[env] Gemini モデルを ${NEWER} へ更新"
+
+          # Deduplicate: any PR (open or closed) for this head branch / exact auto title / model token.
+          # Closed PRs mean a human already declined or merged that model bump; do not recreate weekly.
+          # Phrase-search the model id only so manual titles also match; --limit 1000 (default is 30).
+          EXISTING_PR=$(gh pr list --state all --head "$BRANCH" --json number --jq '.[0].number // empty')
+          if [ -z "$EXISTING_PR" ]; then
+            EXISTING_PR=$(
+              TITLE="$TITLE" NEWER="$NEWER" \
+              gh pr list --search "\"${NEWER}\" in:title" --state all --limit 1000 --json number,title \
+                | bun -e '
+                  const title = process.env.TITLE;
+                  const model = process.env.NEWER ?? "";
+                  const rows = JSON.parse(await Bun.stdin.text());
+                  const hit = rows.find((r) => {
+                    if (typeof r.title !== "string") return false;
+                    // Exact auto-PR title, or whole-token match (gemini-4-flash ≠ gemini-4-flash-lite).
+                    // Strip trailing ./- so "Bump to gemini-4.0-flash." still matches the model id.
+                    if (r.title === title) return true;
+                    return r.title
+                      .split(/[^\w.-]+/)
+                      .map((t) => t.replace(/[.-]+$/, ""))
+                      .includes(model);
+                  });
+                  process.stdout.write(hit ? String(hit.number) : "");
+                '
+            )
+          fi
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR #${EXISTING_PR} already targets ${NEWER} (open or closed); skipping."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          # Populate remote-tracking ref when the weekly branch still exists so --force-with-lease
+          # is not refused for "stale info" after actions/checkout (which only fetched the default ref).
+          git fetch origin "$BRANCH" || true
+          git checkout -B "$BRANCH" origin/main
+
+          bun scripts/gemini-model-check.ts --apply-update "$NEWER" --missing-registered "${MISSING}"
+
+          if git diff --quiet -- app/constants/gemini.ts; then
+            echo "No file changes after apply-update; skipping PR."
+            exit 0
+          fi
+
+          git add app/constants/gemini.ts
+          git commit -m "env: bump Gemini primary model to ${NEWER}"
+          git push -u origin "$BRANCH" --force-with-lease
+
+          if [ "$PRIMARY_MISSING" = "true" ]; then
+            ALTERNATE_LINE="- 代替モデル: 変更なし（\`${ALTERNATE}\`）。主モデル \`${PRIMARY}\` は models.list に無いため代替へ繰り下げない"
+            PRIMARY_WARN=$'\n'"⚠️ **主モデル \`${PRIMARY}\` は models.list に存在しません。** 代替定数は前の値のままです。廃止・リネームの確認を優先してください。"
+          else
+            ALTERNATE_LINE="- 代替モデル: 直前の主モデル（\`${PRIMARY}\`）へ繰り下げ"
+            PRIMARY_WARN=""
+          fi
+
+          BODY=$(cat <<EOF
+          ## Summary
+          Gemini \`models.list\` で、登録中の主モデル（\`${PRIMARY}\`）より新しい安定版 Flash（\`${NEWER}\`）を検知したため、\`app/constants/gemini.ts\` を更新する自動 PR です（#369）。
+
+          - 主モデル: \`${PRIMARY}\` → \`${NEWER}\`
+          ${ALTERNATE_LINE}
+          - \`preview\` / \`exp\` / \`-latest\` エイリアスは候補から除外済み
+          ${PRIMARY_WARN}
+
+          ## 【人間タスク】
+          CI では \`grading-dry-run\` を実行しません（開発 DB 読み取り + Gemini 課金のため）。マージ前に必ずローカルで確認してください。
+          - [ ] 料金ページで \`${NEWER}\` の単価を確認する
+          - [ ] 開発環境で \`bun scripts/grading-dry-run.ts --confirm-dev\` を **旧主モデルと新モデルの両方**で実行し、ラベル傾向・点数分布・合否・トークン・応答時間を比較する
+          - [ ] 問題なければマージする（\`GITHUB_TOKEN\` 作成 PR は CI が自動起動しない場合がある。必要なら Actions から Biome / Typecheck / Test / Build を \`workflow_dispatch\` で再実行する）
+
+          ## Test plan
+          - [ ] 単体テスト（比較ロジック）が緑
+          - [ ] マージ後に AI レビューが新モデルで完了することを開発環境で確認
+          EOF
+          )
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "$TITLE" \
+            --body "$BODY"

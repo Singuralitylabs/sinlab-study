@@ -1,3 +1,4 @@
+import type { AIReviewLimits } from "@/app/constants/gemini";
 import { USER_STATUS } from "@/app/constants/user";
 import type { UserStatusType } from "@/app/types";
 
@@ -19,42 +20,48 @@ export type GettingStartedStep = {
   description: string;
 };
 
-export const WELCOME_DIALOG_STEPS: readonly WelcomeDialogStep[] = [
-  {
-    id: "welcome",
-    title: "ようこそ",
-    body: "「AIと学ぶ実践Web技術講座」の学習サイトへようこそ。学習コンテンツはテーマ → フェーズ → 週 → コンテンツの4階層で構成されています。",
-    trialOnly: false,
-    showsUpgradeLink: false,
-  },
-  {
-    id: "how-to-learn",
-    title: "学習の進め方",
-    body: "動画・テキスト・スライドを見たら「完了」ボタンで進捗を記録します。演習はコードまたはURLを提出でき、提出後にAIレビューを受けられます（AIレビューは1コンテンツにつき1回です）。",
-    trialOnly: false,
-    showsUpgradeLink: false,
-  },
-  {
-    id: "plan",
-    title: "プランについて",
-    body: "無料プランではお試し公開コンテンツのみ閲覧・提出でき、鍵アイコンのコンテンツは本登録後に閲覧できます。本登録は管理者による承認、またはプランのアップグレードで行います。",
-    trialOnly: true,
-    showsUpgradeLink: true,
-  },
-  {
-    id: "help",
-    title: "困ったときは",
-    body: "不明点がある場合は、管理者にお問い合わせください。",
-    trialOnly: false,
-    showsUpgradeLink: false,
-  },
-];
+export function buildWelcomeDialogSteps(limits: AIReviewLimits): readonly WelcomeDialogStep[] {
+  return [
+    {
+      id: "welcome",
+      title: "ようこそ",
+      body: "「AIと学ぶ実践Web技術講座」の学習サイトへようこそ。学習コンテンツはテーマ → フェーズ → コンテンツの3階層で構成されています。",
+      trialOnly: false,
+      showsUpgradeLink: false,
+    },
+    {
+      id: "how-to-learn",
+      title: "学習の進め方",
+      body: `動画・テキスト・スライドを見たら「完了」ボタンで進捗を記録します。演習はコードまたはURLを提出でき、提出後にAIレビューを受けられます（お試しは${limits.trial.perContentLifetime}回、有料会員は1課題につき1日${limits.active.perContentPerDay}回、全課題の合計で1日${limits.active.perDay}回までです）。`,
+      trialOnly: false,
+      showsUpgradeLink: false,
+    },
+    {
+      id: "plan",
+      title: "プランについて",
+      body: "無料プランではお試し公開コンテンツのみ閲覧・提出でき、鍵アイコンのコンテンツは本登録後に閲覧できます。本登録は管理者による承認、またはプランのアップグレードで行います。",
+      trialOnly: true,
+      showsUpgradeLink: true,
+    },
+    {
+      id: "help",
+      title: "困ったときは",
+      body: "不明点がある場合は、管理者にお問い合わせください。",
+      trialOnly: false,
+      showsUpgradeLink: false,
+    },
+  ];
+}
 
-export function getWelcomeStepsForStatus(status: UserStatusType | null): WelcomeDialogStep[] {
+export function getWelcomeStepsForStatus(
+  status: UserStatusType | null,
+  limits: AIReviewLimits
+): WelcomeDialogStep[] {
+  const steps = buildWelcomeDialogSteps(limits);
   if (status === USER_STATUS.TRIAL) {
-    return [...WELCOME_DIALOG_STEPS];
+    return [...steps];
   }
-  return WELCOME_DIALOG_STEPS.filter((step) => !step.trialOnly);
+  return steps.filter((step) => !step.trialOnly);
 }
 
 export const GETTING_STARTED_STEPS: readonly GettingStartedStep[] = [
