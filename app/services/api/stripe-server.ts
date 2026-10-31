@@ -176,6 +176,9 @@ export async function createCheckoutSession(
     // assumption that membership starts on return from Checkout.
     allowed_payment_method_types: ["card"],
     line_items: [{ price: priceId, quantity: 1 }],
+    // Codes are issued in the Stripe Dashboard only. Legal pricing stays on the list price
+    // (isChargeableSubscriptionPrice()); the discount is shown by Stripe on the Checkout page.
+    allow_promotion_codes: true,
     client_reference_id: String(userId),
     customer: customerId,
     expires_at: expiresAtUnix,

@@ -3,6 +3,7 @@ import {
   CANCELLATION_POLICY_TEXT,
   MANAGE_SUBSCRIPTION_BUTTON_LABEL,
   PLAN_PAGE_TITLE,
+  PROMOTION_CODE_NOTICE,
   SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
 } from "@/app/constants/stripe";
 import { UpgradeCheckoutButton } from "./UpgradeCheckoutButton";
@@ -50,6 +51,7 @@ export function TrialCheckoutDetails({
           。時間をおいてページを再読み込みしてください。
         </p>
       )}
+      <p className="text-sm text-muted-foreground">{PROMOTION_CODE_NOTICE}</p>
       <UpgradeCheckoutButton disabled={checkoutDisabled} />
     </div>
   );

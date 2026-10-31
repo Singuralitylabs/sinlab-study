@@ -12,7 +12,10 @@ vi.mock("@/app/(authenticated)/upgrade/UpgradeCheckoutButton", () => ({
 }));
 
 import { TrialCheckoutDetails } from "@/app/(authenticated)/upgrade/TrialCheckoutDetails";
-import { SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE } from "@/app/constants/stripe";
+import {
+  PROMOTION_CODE_NOTICE,
+  SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
+} from "@/app/constants/stripe";
 
 describe("TrialCheckoutDetails", () => {
   it("法定表示・未成年者注意・無効理由・Checkout の順で並べる", () => {
@@ -41,5 +44,14 @@ describe("TrialCheckoutDetails", () => {
     expect(html).toContain("月額1,500円（税込）");
     expect(html).not.toContain(SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE);
     expect(html).toContain(">checkout<");
+  });
+
+  it("プロモーションコードの案内をCheckoutボタンの前に出す", () => {
+    const html = renderToStaticMarkup(
+      <TrialCheckoutDetails monthlyPriceLabel="月額1,500円（税込）" checkoutDisabled={false} />
+    );
+
+    expect(html).toContain(PROMOTION_CODE_NOTICE);
+    expect(html.indexOf(PROMOTION_CODE_NOTICE)).toBeLessThan(html.indexOf(">checkout<"));
   });
 });
