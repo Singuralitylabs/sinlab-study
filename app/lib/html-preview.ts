@@ -12,6 +12,7 @@ const EXTENSION_LANGUAGE: Record<string, PreviewLanguage> = {
   mjs: "javascript",
   // React exercises store JSX under the javascript language; the extension fills empty language.
   jsx: "javascript",
+  gs: "javascript",
 };
 
 /** Served from `public/vendor/react/` (fixed versions). srcDoc must use absolute URLs (#475). */
@@ -32,7 +33,10 @@ export function isPreviewLanguage(language: string | null | undefined): boolean 
 
 /** Stored language wins; the extension only fills in when a file has no language recorded. */
 function resolveFileLanguage(file: CodeFile): PreviewLanguage | null {
-  const language = file.language.trim().toLowerCase();
+  const rawLanguage = file.language.trim().toLowerCase();
+  // GAS is JavaScript with a different extension; without this alias a "gas" layout would classify
+  // as "other" and lose the console.
+  const language = rawLanguage === "gas" ? "javascript" : rawLanguage;
   if (language) {
     return isPreviewLanguage(language) ? (language as PreviewLanguage) : null;
   }
