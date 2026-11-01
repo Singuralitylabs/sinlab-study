@@ -35,6 +35,16 @@ describe("isPreviewLanguage / canPreviewFiles", () => {
     );
   });
 
+  it("treats gas like javascript, by language and by .gs extension", () => {
+    expect(canPreviewFiles([f("main.gs", "gas", "x")])).toBe(true);
+    expect(canPreviewFiles([f("main.gs", "", "x")])).toBe(true);
+    expect(previewCapability([f("main.gs", "gas", "x")])).toMatchObject({
+      previewAllowed: false,
+      consoleAllowed: true,
+      autoConsole: true,
+    });
+  });
+
   it("falls back to the extension when no language is stored", () => {
     expect(canPreviewFiles([f("index.html", "", "x")])).toBe(true);
     expect(canPreviewFiles([f("", "", "x")])).toBe(false);
