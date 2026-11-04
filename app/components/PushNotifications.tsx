@@ -201,7 +201,7 @@ export function PushNotifications({
             学習リマインドとお知らせをブラウザの通知で受け取れます。現在の状態:{" "}
             {STATUS_LABEL[status]}
           </p>
-          {status !== "unsupported" && status !== "denied" && (
+          {status !== "loading" && status !== "unsupported" && status !== "denied" && (
             <Button
               type="button"
               size="sm"
@@ -211,6 +211,11 @@ export function PushNotifications({
             >
               {status === "subscribed" ? "通知を停止する" : "通知を受け取る"}
             </Button>
+          )}
+          {status === "denied" && placement === "settings" && (
+            <p className="text-sm text-muted-foreground">
+              通知はブラウザでブロックされています。受け取るには、ブラウザのサイト設定で通知を許可してください。
+            </p>
           )}
           {message && <p className="text-sm text-destructive">{message}</p>}
         </>
