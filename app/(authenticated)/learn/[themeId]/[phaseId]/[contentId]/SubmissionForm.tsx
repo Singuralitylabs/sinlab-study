@@ -126,6 +126,9 @@ export function SubmissionForm({
   );
   const [themeNotice, setThemeNotice] = useState<ThemeCompletionNotice | null>(null);
 
+  // A boolean, not the slots JSON: that prop is a new object after every router.refresh() and
+  // would rerun the effect below, overwriting edits made during the retry.
+  const omitsEmptyFilesForRetry = layoutOmitsEmptyFiles(submissionFileSlots, initialFiles.length);
   // Read through a ref so a refreshed prop does not rerun the effect and overwrite edits in progress.
   const previousFilesRef = useRef(previousFiles);
   previousFilesRef.current = previousFiles;
@@ -135,7 +138,7 @@ export function SubmissionForm({
     if (previousFilesRef.current && previousFilesRef.current.length > 0) {
       setCodeFiles(
         restoreFilesFromPreviousSubmission(initialFiles, previousFilesRef.current, {
-          emptyUnmatched: layoutOmitsEmptyFiles(submissionFileSlots, initialFiles.length),
+          emptyUnmatched: omitsEmptyFilesForRetry,
         })
       );
     }
@@ -143,7 +146,7 @@ export function SubmissionForm({
     setMessage(null);
     setIsReviewLoading(false);
     setLastSubmissionId(null);
-  }, [isRetrying, initialFiles, submissionFileSlots]);
+  }, [isRetrying, initialFiles, omitsEmptyFilesForRetry]);
 
   const hasStarter = Boolean(starterSnapshot?.some((file) => file.content.trim().length > 0));
   const unchangedFromStarter = blocksUneditedStarter({

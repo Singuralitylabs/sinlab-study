@@ -326,6 +326,11 @@ export function restoreFilesFromPreviousSubmission(
   options: { emptyUnmatched?: boolean } = {}
 ): CodeFileInput[] {
   const previousFiles = previous ?? [];
+  // A lone file saved under the default name comes back without a filename (code_content). When
+  // nothing matches by name, blanking every slot would wipe the code the learner did write.
+  const anyNameMatch = files.some((file) =>
+    previousFiles.some((p) => p.filename !== "" && p.filename === file.filename)
+  );
   return files.map((file) => {
     const byName = previousFiles.find((p) => p.filename !== "" && p.filename === file.filename);
     const unnamedSingle =
@@ -334,7 +339,7 @@ export function restoreFilesFromPreviousSubmission(
         : undefined;
     const match = byName ?? unnamedSingle;
     if (match) return { ...file, content: match.content };
-    const emptied = options.emptyUnmatched && previousFiles.length > 0;
+    const emptied = options.emptyUnmatched && anyNameMatch;
     return emptied ? { ...file, content: "" } : { ...file };
   });
 }

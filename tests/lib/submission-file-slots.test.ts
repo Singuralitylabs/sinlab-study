@@ -434,6 +434,13 @@ describe("restoreFilesFromPreviousSubmission", () => {
     ];
     const restored = restoreFilesFromPreviousSubmission(files, previous, { emptyUnmatched: true });
     expect(restored.map((f) => f.content)).toEqual(["export default 1;", ""]);
+    // A name-less single file (code_content) matches no slot: keep the starters, do not blank all.
+    const unnamed = [{ filename: "", language: "", content: "const a = 1;" }];
+    expect(
+      restoreFilesFromPreviousSubmission(files, unnamed, { emptyUnmatched: true }).map(
+        (f) => f.content
+      )
+    ).toEqual(["// starter A", "// starter B"]);
     expect(
       restoreFilesFromPreviousSubmission(files, null, { emptyUnmatched: true }).map(
         (f) => f.content
