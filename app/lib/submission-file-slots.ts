@@ -326,9 +326,13 @@ export function restoreFilesFromPreviousSubmission(
   options: { emptyUnmatched?: boolean; defaultFilename?: string } = {}
 ): CodeFileInput[] {
   // A lone file saved under the default name is stored as code_content and comes back without a
-  // filename, so it is given that name back; otherwise it would match no slot.
+  // filename, so it is given that name back when a slot has it. Without such a slot it stays
+  // nameless and fills the only slot below.
   const previousFiles =
-    previous?.length === 1 && previous[0].filename === "" && options.defaultFilename
+    previous?.length === 1 &&
+    previous[0].filename === "" &&
+    options.defaultFilename &&
+    files.some((file) => file.filename === options.defaultFilename)
       ? [{ ...previous[0], filename: options.defaultFilename }]
       : (previous ?? []);
   // When nothing matches by name, blanking every slot would wipe the code the learner did write.

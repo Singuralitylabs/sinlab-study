@@ -442,6 +442,12 @@ describe("restoreFilesFromPreviousSubmission", () => {
         defaultFilename: "globals.css",
       }).map((f) => f.content)
     ).toEqual(["", "const a = 1;"]);
+    // One slot with a non-default name: the name-less file still fills it.
+    expect(
+      restoreFilesFromPreviousSubmission([files[0]], unnamedDefault, {
+        defaultFilename: "code.js",
+      })[0].content
+    ).toBe("const a = 1;");
     // Without a matching default name nothing matches: keep the starters, do not blank all.
     const unnamed = [{ filename: "", language: "", content: "const a = 1;" }];
     expect(
