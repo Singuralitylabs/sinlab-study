@@ -428,6 +428,19 @@ describe("restoreFilesFromPreviousSubmission", () => {
     ]);
   });
 
+  it("提出ファイルの指定がない複数ファイルでは、前回に保存されなかったファイルを空で戻す", () => {
+    const previous = [
+      { filename: "page.js", language: "javascript", content: "export default 1;" },
+    ];
+    const restored = restoreFilesFromPreviousSubmission(files, previous, { emptyUnmatched: true });
+    expect(restored.map((f) => f.content)).toEqual(["export default 1;", ""]);
+    expect(
+      restoreFilesFromPreviousSubmission(files, null, { emptyUnmatched: true }).map(
+        (f) => f.content
+      )
+    ).toEqual(["// starter A", "// starter B"]);
+  });
+
   it("前回のコードがないときは初期コードのまま（元の配列は書き換えない）", () => {
     const restored = restoreFilesFromPreviousSubmission(files, null);
     expect(restored).toEqual(files);

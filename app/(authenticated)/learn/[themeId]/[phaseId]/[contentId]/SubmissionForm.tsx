@@ -133,13 +133,17 @@ export function SubmissionForm({
   useEffect(() => {
     if (!isRetrying) return;
     if (previousFilesRef.current && previousFilesRef.current.length > 0) {
-      setCodeFiles(restoreFilesFromPreviousSubmission(initialFiles, previousFilesRef.current));
+      setCodeFiles(
+        restoreFilesFromPreviousSubmission(initialFiles, previousFilesRef.current, {
+          emptyUnmatched: layoutOmitsEmptyFiles(submissionFileSlots, initialFiles.length),
+        })
+      );
     }
     setAiReview(null);
     setMessage(null);
     setIsReviewLoading(false);
     setLastSubmissionId(null);
-  }, [isRetrying, initialFiles]);
+  }, [isRetrying, initialFiles, submissionFileSlots]);
 
   const hasStarter = Boolean(starterSnapshot?.some((file) => file.content.trim().length > 0));
   const unchangedFromStarter = blocksUneditedStarter({
