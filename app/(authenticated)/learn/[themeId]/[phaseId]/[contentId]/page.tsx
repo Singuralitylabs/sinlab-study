@@ -579,6 +579,11 @@ export default async function ContentPage({ params }: PageProps) {
                         showReviewListNotes={showReviewListNotes}
                         showEditor={showSubmissionEditor}
                         isRetrying={isRetrying}
+                        previousFiles={
+                          latestSubmission?.submission_type === "code"
+                            ? getSubmissionCodeFiles(latestSubmission)
+                            : null
+                        }
                       />
                     </>
                   ) : (

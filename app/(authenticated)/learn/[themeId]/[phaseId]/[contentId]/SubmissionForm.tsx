@@ -2,7 +2,7 @@
 
 import { Code, Link as LinkIcon, Loader2, RotateCcw, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { HtmlPreviewNoSSR } from "@/app/components/HtmlPreviewNoSSR";
@@ -21,6 +21,7 @@ import {
   isLockedSubmissionReady,
   layoutOmitsEmptyFiles,
   resolveSubmissionFileSlots,
+  restoreFilesFromPreviousSubmission,
 } from "@/app/lib/submission-file-slots";
 import type { AIReviewListItem, CodeFile, Json, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -55,6 +56,8 @@ interface SubmissionFormProps {
    * after persistedReviewId becomes null (#406 review).
    */
   isRetrying?: boolean;
+  /** The last submitted code. A retry starts from it instead of the starter code. */
+  previousFiles?: CodeFile[] | null;
 }
 
 function buildFailedReview(errorMessage: string): AIReviewListItem {
@@ -86,6 +89,7 @@ export function SubmissionForm({
   showReviewListNotes = false,
   showEditor = true,
   isRetrying = false,
+  previousFiles = null,
 }: SubmissionFormProps) {
   const router = useRouter();
   const [submissionType, setSubmissionType] = useState<SubmissionType>(
@@ -122,13 +126,20 @@ export function SubmissionForm({
   );
   const [themeNotice, setThemeNotice] = useState<ThemeCompletionNotice | null>(null);
 
+  // Read through a ref so a refreshed prop does not rerun the effect and overwrite edits in progress.
+  const previousFilesRef = useRef(previousFiles);
+  previousFilesRef.current = previousFiles;
+
   useEffect(() => {
     if (!isRetrying) return;
+    if (previousFilesRef.current && previousFilesRef.current.length > 0) {
+      setCodeFiles(restoreFilesFromPreviousSubmission(initialFiles, previousFilesRef.current));
+    }
     setAiReview(null);
     setMessage(null);
     setIsReviewLoading(false);
     setLastSubmissionId(null);
-  }, [isRetrying]);
+  }, [isRetrying, initialFiles]);
 
   const hasStarter = Boolean(starterSnapshot?.some((file) => file.content.trim().length > 0));
   const unchangedFromStarter = blocksUneditedStarter({

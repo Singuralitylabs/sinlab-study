@@ -313,6 +313,27 @@ export function buildLockedSubmissionFiles(input: {
   }));
 }
 
+/**
+ * Puts the learner's last submitted code back into the locked slots when they retry. A slot takes
+ * the previous file with the same name; a single-file submission is stored without a filename
+ * (code_content), so it fills the only slot. Anything unmatched keeps the starter content.
+ */
+export function restoreFilesFromPreviousSubmission(
+  files: readonly CodeFileInput[],
+  previous: readonly CodeFile[] | null | undefined
+): CodeFileInput[] {
+  const previousFiles = previous ?? [];
+  return files.map((file) => {
+    const byName = previousFiles.find((p) => p.filename !== "" && p.filename === file.filename);
+    const unnamedSingle =
+      files.length === 1 && previousFiles.length === 1 && previousFiles[0].filename === ""
+        ? previousFiles[0]
+        : undefined;
+    const match = byName ?? unnamedSingle;
+    return match ? { ...file, content: match.content } : { ...file };
+  });
+}
+
 /** Admin save. null slots means the single default file of the first row's language. */
 export function toSubmissionSlotPayload(
   drafts: readonly SubmissionSlotDraftInput[]

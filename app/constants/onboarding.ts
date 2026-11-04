@@ -32,7 +32,7 @@ export function buildWelcomeDialogSteps(limits: AIReviewLimits): readonly Welcom
     {
       id: "how-to-learn",
       title: "学習の進め方",
-      body: `動画・テキスト・スライドを見たら「完了」ボタンで進捗を記録します。演習はコードまたはURLを提出でき、提出後にAIレビューを受けられます（お試しは${limits.trial.perContentLifetime}回、有料会員は1課題につき1日${limits.active.perContentPerDay}回、全課題の合計で1日${limits.active.perDay}回までです）。`,
+      body: `動画・テキスト・スライドを見たら「完了」ボタンで進捗を記録します。演習はコードを提出でき（課題によってはURLでも提出できます）、提出後にAIレビューを受けられます（お試しは${limits.trial.perContentLifetime}回、有料会員は1課題につき1日${limits.active.perContentPerDay}回、全課題の合計で1日${limits.active.perDay}回までです）。`,
       trialOnly: false,
       showsUpgradeLink: false,
     },
@@ -73,7 +73,7 @@ export const GETTING_STARTED_STEPS: readonly GettingStartedStep[] = [
   {
     key: "submit-exercise",
     label: "演習課題を提出する",
-    description: "演習コンテンツからコードまたはURLを提出しましょう。",
+    description: "演習コンテンツからコードを提出しましょう。",
   },
   {
     key: "receive-ai-review",
