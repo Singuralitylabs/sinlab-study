@@ -434,7 +434,15 @@ describe("restoreFilesFromPreviousSubmission", () => {
     ];
     const restored = restoreFilesFromPreviousSubmission(files, previous, { emptyUnmatched: true });
     expect(restored.map((f) => f.content)).toEqual(["export default 1;", ""]);
-    // A name-less single file (code_content) matches no slot: keep the starters, do not blank all.
+    // A name-less single file (code_content) is the default-named file: it fills that slot.
+    const unnamedDefault = [{ filename: "", language: "", content: "const a = 1;" }];
+    expect(
+      restoreFilesFromPreviousSubmission(files, unnamedDefault, {
+        emptyUnmatched: true,
+        defaultFilename: "globals.css",
+      }).map((f) => f.content)
+    ).toEqual(["", "const a = 1;"]);
+    // Without a matching default name nothing matches: keep the starters, do not blank all.
     const unnamed = [{ filename: "", language: "", content: "const a = 1;" }];
     expect(
       restoreFilesFromPreviousSubmission(files, unnamed, { emptyUnmatched: true }).map(

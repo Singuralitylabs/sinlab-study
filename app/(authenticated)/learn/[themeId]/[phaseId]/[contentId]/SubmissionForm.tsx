@@ -4,7 +4,10 @@ import { Code, Link as LinkIcon, Loader2, RotateCcw, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
-import type { CodeLanguage } from "@/app/components/code-editor-utils";
+import {
+  type CodeLanguage,
+  DEFAULT_FILENAME_BY_LANGUAGE,
+} from "@/app/components/code-editor-utils";
 import { HtmlPreviewNoSSR } from "@/app/components/HtmlPreviewNoSSR";
 import { LockedCodeFilesEditor } from "@/app/components/LockedCodeFilesEditor";
 import { ThemeCompletionDialog } from "@/app/components/ThemeCompletionDialog";
@@ -139,6 +142,7 @@ export function SubmissionForm({
       setCodeFiles(
         restoreFilesFromPreviousSubmission(initialFiles, previousFilesRef.current, {
           emptyUnmatched: omitsEmptyFilesForRetry,
+          defaultFilename: DEFAULT_FILENAME_BY_LANGUAGE[codeLanguage],
         })
       );
     }
@@ -146,7 +150,7 @@ export function SubmissionForm({
     setMessage(null);
     setIsReviewLoading(false);
     setLastSubmissionId(null);
-  }, [isRetrying, initialFiles, omitsEmptyFilesForRetry]);
+  }, [isRetrying, initialFiles, omitsEmptyFilesForRetry, codeLanguage]);
 
   const hasStarter = Boolean(starterSnapshot?.some((file) => file.content.trim().length > 0));
   const unchangedFromStarter = blocksUneditedStarter({

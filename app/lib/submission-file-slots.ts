@@ -323,11 +323,15 @@ export function buildLockedSubmissionFiles(input: {
 export function restoreFilesFromPreviousSubmission(
   files: readonly CodeFileInput[],
   previous: readonly CodeFile[] | null | undefined,
-  options: { emptyUnmatched?: boolean } = {}
+  options: { emptyUnmatched?: boolean; defaultFilename?: string } = {}
 ): CodeFileInput[] {
-  const previousFiles = previous ?? [];
-  // A lone file saved under the default name comes back without a filename (code_content). When
-  // nothing matches by name, blanking every slot would wipe the code the learner did write.
+  // A lone file saved under the default name is stored as code_content and comes back without a
+  // filename, so it is given that name back; otherwise it would match no slot.
+  const previousFiles =
+    previous?.length === 1 && previous[0].filename === "" && options.defaultFilename
+      ? [{ ...previous[0], filename: options.defaultFilename }]
+      : (previous ?? []);
+  // When nothing matches by name, blanking every slot would wipe the code the learner did write.
   const anyNameMatch = files.some((file) =>
     previousFiles.some((p) => p.filename !== "" && p.filename === file.filename)
   );
