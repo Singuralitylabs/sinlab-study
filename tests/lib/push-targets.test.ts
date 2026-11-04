@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { EMAIL_KIND } from "@/app/constants/notifications";
 import type { DigestUser } from "@/app/lib/email-digest";
 import { planMilestoneEmails } from "@/app/lib/email-digest";
-import { pushOffer } from "@/app/lib/push-offer";
+import { pushOffer, showPushOnHome } from "@/app/lib/push-offer";
 import { selectDigestPushTargets } from "@/app/lib/push-targets";
 
 const today = "2026-10-08";
@@ -30,6 +30,16 @@ describe("pushOffer", () => {
     expect(pushOffer({ configured: true, isIos: true, standalone: false })).toBe("ios-guide");
     expect(pushOffer({ configured: true, isIos: true, standalone: true })).toBe("subscribe");
     expect(pushOffer({ configured: true, isIos: false, standalone: false })).toBe("subscribe");
+  });
+
+  it("ホームは未購読と iOS 案内だけ出し、購読中・拒否済み・未対応・確認中は出さない", () => {
+    expect(showPushOnHome("subscribe", "unsubscribed")).toBe(true);
+    expect(showPushOnHome("ios-guide", "loading")).toBe(true);
+    for (const status of ["loading", "subscribed", "denied", "unsupported"] as const) {
+      expect(showPushOnHome("subscribe", status)).toBe(false);
+    }
+    expect(showPushOnHome("hidden", "unsubscribed")).toBe(false);
+    expect(showPushOnHome(null, "unsubscribed")).toBe(false);
   });
 
   it("PushNotifications は iPadOS 向けに maxTouchPoints を渡す", () => {
