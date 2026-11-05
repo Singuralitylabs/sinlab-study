@@ -444,8 +444,10 @@ export default async function ContentPage({ params }: PageProps) {
                       {isRetrying ? (
                         <>
                           <p className="mb-4 text-sm text-muted-foreground">
-                            再挑戦中です。前回のコードを入れてあります。最初から書き直したいときは、コード欄の下のボタンで戻せます。新しく提出すると模範回答と
-                            AI レビュー結果が表示されます
+                            再挑戦中です。
+                            {latestSubmission.submission_type === "code" &&
+                              "前回のコードを入れてあります。最初から書き直したいときは、コード欄の下のボタンで戻せます。"}
+                            新しく提出すると模範回答と AI レビュー結果が表示されます
                           </p>
                           <details className="mb-6 rounded-lg border border-border">
                             <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-muted-foreground hover:text-foreground list-none flex items-center gap-2">

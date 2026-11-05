@@ -934,10 +934,12 @@ describe("演習の再挑戦（#355）", () => {
     isPublished = true,
     retryStartedAt = null as string | null,
     submittedAt = "2026-10-01T11:00:00.000Z",
+    submissionType = "url" as "url" | "code",
   }: {
     isPublished?: boolean;
     retryStartedAt?: string | null;
     submittedAt?: string;
+    submissionType?: "url" | "code";
   } = {}) => {
     setup({ userStatus: "active", userRole: "member", isOpenToTrial: true, isPublished });
     vi.mocked(fetchContentById).mockResolvedValue({
@@ -954,8 +956,10 @@ describe("演習の再挑戦（#355）", () => {
     vi.mocked(fetchLatestSubmissionByContentId).mockResolvedValue({
       data: {
         id: 99,
-        submission_type: "url",
-        url: "https://example.com/work",
+        submission_type: submissionType,
+        ...(submissionType === "code"
+          ? { code_content: "const a = 1;", code_files: null, url: null }
+          : { url: "https://example.com/work" }),
         submitted_at: submittedAt,
       },
     } as never);
@@ -988,6 +992,18 @@ describe("演習の再挑戦（#355）", () => {
     expect(html).not.toContain("前回の提出内容を見る");
   });
 
+  it("前回がコード提出の再挑戦中は、コードを入れてあることと戻し方を案内する", async () => {
+    setupExerciseWithSubmission({
+      retryStartedAt: "2026-10-01T12:00:00.000Z",
+      submittedAt: "2026-10-01T11:00:00.000Z",
+      submissionType: "code",
+    });
+
+    const html = await render();
+
+    expect(html).toContain("前回のコードを入れてあります。");
+  });
+
   it("再挑戦中は模範回答と AI レビューを隠し、折りたたみと案内を出す", async () => {
     setupExerciseWithSubmission({
       retryStartedAt: "2026-10-01T12:00:00.000Z",
@@ -996,9 +1012,10 @@ describe("演習の再挑戦（#355）", () => {
 
     const html = await render();
 
-    expect(html).toContain(
-      "再挑戦中です。前回のコードを入れてあります。最初から書き直したいときは、コード欄の下のボタンで戻せます。新しく提出すると模範回答と AI レビュー結果が表示されます"
-    );
+    expect(html).toContain("再挑戦中です。");
+    // The previous submission was a URL, so no code is put back into the editor.
+    expect(html).not.toContain("前回のコードを入れてあります。");
+    expect(html).toContain("新しく提出すると模範回答と AI レビュー結果が表示されます");
     expect(html).toContain("前回の提出内容を見る");
     // Notice text mentions 模範回答 / AI レビュー結果; assert the result block headings are gone.
     expect(html).not.toContain(">模範回答<");
