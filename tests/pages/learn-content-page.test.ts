@@ -980,7 +980,8 @@ describe("演習の再挑戦（#355）", () => {
 
     const html = await render();
 
-    expect(html).toContain("模範回答");
+    expect(html).toContain("模範回答を見る");
+    expect(html).not.toMatch(/<details[^>]*\sopen/);
     expect(html).toContain("再度課題に取り組む");
     expect(html).toContain("AIレビュー結果");
     expect(html).not.toContain("再挑戦中です");
@@ -996,7 +997,7 @@ describe("演習の再挑戦（#355）", () => {
     const html = await render();
 
     expect(html).toContain(
-      "再挑戦中です。新しく提出すると模範回答と AI レビュー結果が表示されます"
+      "再挑戦中です。前回のコードを入れてあります。最初から書き直したいときは、コード欄の下のボタンで戻せます。新しく提出すると模範回答と AI レビュー結果が表示されます"
     );
     expect(html).toContain("前回の提出内容を見る");
     // Notice text mentions 模範回答 / AI レビュー結果; assert the result block headings are gone.

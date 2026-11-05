@@ -177,7 +177,10 @@ export function SubmissionForm({
   };
 
   const handleResetToStarter = () => {
-    if (!confirm("編集中のコードを破棄して、初期コードに戻しますか？")) {
+    const message = hasStarter
+      ? "編集中のコードを破棄して、初期コードに戻しますか？"
+      : "編集中のコードを破棄して、最初からやり直しますか？";
+    if (!confirm(message)) {
       return;
     }
     resetToStarter();
@@ -349,10 +352,10 @@ export function SubmissionForm({
           {submissionType === "code" ? (
             <div className="space-y-3">
               <LockedCodeFilesEditor files={codeFiles} onChange={setCodeFiles} />
-              {hasStarter && (
+              {(hasStarter || (isRetrying && previousFiles && previousFiles.length > 0)) && (
                 <Button type="button" variant="outline" size="sm" onClick={handleResetToStarter}>
                   <RotateCcw className="h-4 w-4" />
-                  初期コードに戻す
+                  {hasStarter ? "初期コードに戻す" : "最初からやり直す"}
                 </Button>
               )}
               {unchangedFromStarter && (
