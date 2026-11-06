@@ -5,13 +5,19 @@ export type PushStatus = "loading" | "unsupported" | "denied" | "subscribed" | "
 /**
  * The home page only nudges users who can still act on it. Subscribed, denied and unsupported
  * users manage push from /settings, and "loading" stays hidden so the card does not flash in
- * before the browser subscription is known.
+ * before the browser subscription is known. A device that stopped push from /settings
+ * (`optedOut`) is not nudged again; the iOS install hint is unaffected because it is not a
+ * subscription prompt.
  */
-export function showPushOnHome(offer: PushOffer | null, status: PushStatus): boolean {
+export function showPushOnHome(
+  offer: PushOffer | null,
+  status: PushStatus,
+  optedOut = false
+): boolean {
   if (offer === "ios-guide") {
     return true;
   }
-  return offer === "subscribe" && status === "unsubscribed";
+  return offer === "subscribe" && status === "unsubscribed" && !optedOut;
 }
 
 /**

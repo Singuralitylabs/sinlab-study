@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { installPromptPlatform } from "@/app/constants/pwa";
+import { isPushHomeOptedOut, setPushHomeOptOut } from "@/app/lib/push-home-optout";
 import { type PushOffer, type PushStatus, pushOffer, showPushOnHome } from "@/app/lib/push-offer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -49,6 +50,7 @@ export function PushNotifications({
   const [offer, setOffer] = useState<PushOffer | null>(null);
   const [status, setStatus] = useState<PushStatus>("loading");
   const [busy, setBusy] = useState(false);
+  const [optedOut, setOptedOut] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -65,6 +67,7 @@ export function PushNotifications({
       standalone: isStandalone(),
     });
     setOffer(next);
+    setOptedOut(isPushHomeOptedOut());
     if (next !== "subscribe") {
       return;
     }
@@ -110,7 +113,7 @@ export function PushNotifications({
   if (!publicKey || offer === null || offer === "hidden") {
     return null;
   }
-  if (placement === "home" && !showPushOnHome(offer, status)) {
+  if (placement === "home" && !showPushOnHome(offer, status, optedOut)) {
     return null;
   }
 
@@ -149,6 +152,7 @@ export function PushNotifications({
         setMessage("購読の保存に失敗しました");
         return;
       }
+      setPushHomeOptOut(false);
       setStatus("subscribed");
     } catch {
       setMessage("通知を有効にできませんでした");
@@ -175,6 +179,9 @@ export function PushNotifications({
           setMessage("購読の解除に失敗しました");
           return;
         }
+      }
+      if (placement === "settings") {
+        setPushHomeOptOut(true);
       }
       setStatus("unsubscribed");
     } catch {

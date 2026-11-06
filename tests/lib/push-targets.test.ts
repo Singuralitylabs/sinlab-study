@@ -38,6 +38,8 @@ describe("pushOffer", () => {
     for (const status of ["loading", "subscribed", "denied", "unsupported"] as const) {
       expect(showPushOnHome("subscribe", status)).toBe(false);
     }
+    expect(showPushOnHome("subscribe", "unsubscribed", true)).toBe(false);
+    expect(showPushOnHome("ios-guide", "loading", true)).toBe(true);
     expect(showPushOnHome("hidden", "unsubscribed")).toBe(false);
     expect(showPushOnHome(null, "unsubscribed")).toBe(false);
   });
