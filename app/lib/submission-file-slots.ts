@@ -313,6 +313,45 @@ export function buildLockedSubmissionFiles(input: {
   }));
 }
 
+/**
+ * Puts the learner's last submitted code back into the locked slots when they retry. A slot takes
+ * the previous file with the same name; a single-file submission is stored without a filename
+ * (code_content), so it fills the only slot. Anything unmatched keeps the starter content, except
+ * when empty shells are optional: a file the learner emptied is not saved, so it must come back
+ * empty, not as the starter text that would be submitted along with the rest.
+ */
+export function restoreFilesFromPreviousSubmission(
+  files: readonly CodeFileInput[],
+  previous: readonly CodeFile[] | null | undefined,
+  options: { emptyUnmatched?: boolean; defaultFilename?: string } = {}
+): CodeFileInput[] {
+  // A lone file saved under the default name is stored as code_content and comes back without a
+  // filename, so it is given that name back when a slot has it. Without such a slot it stays
+  // nameless and fills the only slot below.
+  const previousFiles =
+    previous?.length === 1 &&
+    previous[0].filename === "" &&
+    options.defaultFilename &&
+    files.some((file) => file.filename === options.defaultFilename)
+      ? [{ ...previous[0], filename: options.defaultFilename }]
+      : (previous ?? []);
+  // When nothing matches by name, blanking every slot would wipe the code the learner did write.
+  const anyNameMatch = files.some((file) =>
+    previousFiles.some((p) => p.filename !== "" && p.filename === file.filename)
+  );
+  return files.map((file) => {
+    const byName = previousFiles.find((p) => p.filename !== "" && p.filename === file.filename);
+    const unnamedSingle =
+      files.length === 1 && previousFiles.length === 1 && previousFiles[0].filename === ""
+        ? previousFiles[0]
+        : undefined;
+    const match = byName ?? unnamedSingle;
+    if (match) return { ...file, content: match.content };
+    const emptied = options.emptyUnmatched && anyNameMatch;
+    return emptied ? { ...file, content: "" } : { ...file };
+  });
+}
+
 /** Admin save. null slots means the single default file of the first row's language. */
 export function toSubmissionSlotPayload(
   drafts: readonly SubmissionSlotDraftInput[]

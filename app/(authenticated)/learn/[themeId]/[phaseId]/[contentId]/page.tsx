@@ -444,7 +444,10 @@ export default async function ContentPage({ params }: PageProps) {
                       {isRetrying ? (
                         <>
                           <p className="mb-4 text-sm text-muted-foreground">
-                            再挑戦中です。新しく提出すると模範回答と AI レビュー結果が表示されます
+                            再挑戦中です。
+                            {latestSubmission.submission_type === "code" &&
+                              "前回のコードを入れてあります。最初から書き直したいときは、コード欄の下のボタンで戻せます。"}
+                            新しく提出すると模範回答と AI レビュー結果が表示されます
                           </p>
                           <details className="mb-6 rounded-lg border border-border">
                             <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-muted-foreground hover:text-foreground list-none flex items-center gap-2">
@@ -503,14 +506,20 @@ export default async function ContentPage({ params }: PageProps) {
                           </div>
 
                           {showReferenceAnswer && (
-                            <div className="mb-6">
-                              <h3 className="text-lg font-semibold mb-3">模範回答</h3>
-                              {/* Free text from the admin textarea. pre-wrap keeps a long sentence
-                                  on the card. Submission code omits it so a line scrolls inside pre. */}
-                              <pre className="max-w-full overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted px-4 py-3 text-sm font-mono">
-                                {referenceAnswer}
-                              </pre>
-                            </div>
+                            // Closed by default: some learners want to think it through before
+                            // seeing the answer, so it opens only on request.
+                            <details className="mb-6 rounded-lg border border-border">
+                              <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium hover:text-foreground list-none flex items-center gap-2">
+                                模範回答を見る
+                              </summary>
+                              <div className="border-t border-border px-4 py-3">
+                                {/* Free text from the admin textarea. pre-wrap keeps a long sentence
+                                    on the card. Submission code omits it so a line scrolls inside pre. */}
+                                <pre className="max-w-full overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted px-4 py-3 text-sm font-mono">
+                                  {referenceAnswer}
+                                </pre>
+                              </div>
+                            </details>
                           )}
 
                           {visibleReview && (
@@ -579,6 +588,11 @@ export default async function ContentPage({ params }: PageProps) {
                         showReviewListNotes={showReviewListNotes}
                         showEditor={showSubmissionEditor}
                         isRetrying={isRetrying}
+                        previousFiles={
+                          latestSubmission?.submission_type === "code"
+                            ? getSubmissionCodeFiles(latestSubmission)
+                            : null
+                        }
                       />
                     </>
                   ) : (
