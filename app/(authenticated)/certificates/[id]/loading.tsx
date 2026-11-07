@@ -10,7 +10,9 @@ export default function CertificateDetailLoading() {
         <Skeleton className="h-9 w-28" />
         <Skeleton className="h-9 w-32" />
       </div>
-      <Skeleton className="mx-auto aspect-[297/210] w-full min-w-[640px] rounded-lg" />
+      <div className="overflow-x-auto">
+        <Skeleton className="mx-auto aspect-[297/210] w-full min-w-[640px] rounded-lg" />
+      </div>
     </div>
   );
 }
