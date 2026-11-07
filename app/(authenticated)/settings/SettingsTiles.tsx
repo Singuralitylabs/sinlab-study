@@ -4,6 +4,7 @@ import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
+import { PushNotifications } from "@/app/components/PushNotifications";
 import { PRIVACY_URL } from "@/app/constants/legal";
 import { PLAN_PAGE_TITLE } from "@/app/constants/stripe";
 import { MEMBERSHIP_TYPES, USER_MEMBERSHIP_LABELS, USER_STATUS } from "@/app/constants/user";
@@ -54,6 +55,7 @@ type SettingsTilesProps = {
   isMailTarget: boolean;
   membershipType: MembershipType | null | undefined;
   userStatus: UserStatusType | null | undefined;
+  pushPublicKey: string | null;
 };
 
 function TileShell({ className, children }: { className?: string; children: ReactNode }) {
@@ -88,6 +90,7 @@ export function SettingsTiles({
   isMailTarget,
   membershipType,
   userStatus,
+  pushPublicKey,
 }: SettingsTilesProps) {
   const router = useRouter();
   const [profileOpen, setProfileOpen] = useState(false);
@@ -209,7 +212,12 @@ export function SettingsTiles({
             <DialogDescription>通知の送り先と、案内メールの配信を設定できます。</DialogDescription>
           </DialogHeader>
           <div className="space-y-8">
-            <section className="space-y-4" aria-labelledby="settings-notification-heading">
+            <PushNotifications publicKey={pushPublicKey} placement="settings" />
+
+            <section
+              className="space-y-4 border-t pt-6"
+              aria-labelledby="settings-notification-heading"
+            >
               <h3 id="settings-notification-heading" className="text-sm font-semibold">
                 通知の送り先
               </h3>
