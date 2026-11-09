@@ -75,14 +75,14 @@ WEB_PUSH_SUBJECT=<任意。VAPID の mailto: 連絡先。未設定時はプッ�
 
 ### インストール・起動
 
-**既にマイグレーション適用履歴があるプロジェクトに接続する場合は、`db push` の前に `supabase migration list` でローカルとリモートの履歴が一致していることを確認すること**（未整合だと既存オブジェクトの作成でエラーになる。対処は Issue #185 のコメント、本番適用は Wiki の[本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)を参照）。マイグレーションの配置規約は `AGENTS.md` を参照。
+**既にマイグレーション適用履歴があるプロジェクトに接続する場合は、`db push` の前に `bunx supabase migration list --remote` でローカルとリモートの履歴が一致していることを確認すること**（未整合だと既存オブジェクトの作成でエラーになる。対処は Issue #185 のコメント、本番適用は Wiki の[本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)を参照）。マイグレーションの配置規約は `AGENTS.md` を参照。
 
 ```bash
 # 依存関係のインストール
 bun install
 
-# データベースマイグレーション（Supabase CLIを使用。既存環境は上記の注意を参照）
-bunx supabase db push
+# データベースマイグレーション（Supabase CLI v3 は対象省略時にローカルDBへ向くため --remote でリンク先へ。既存環境は上記の注意を参照）
+bunx supabase db push --remote
 
 # 開発サーバー起動
 bun dev
@@ -100,7 +100,7 @@ bun dev
 | `bun run lint` | Biome によるリント |
 | `bun run format` | Biome によるフォーマット |
 | `bun run check` | Biome によるリント + フォーマット |
-| `bun run db:types` | Supabase から TypeScript 型定義を生成（`SUPABASE_DB_URL` があればその DB へ `--db-url`、なければ `SUPABASE_PROJECT_ID` + `SUPABASE_ACCESS_TOKEN` でリモート。`.env.local` は未設定の変数だけ補う。CLI は devDependency の `supabase`。`DATABASE_URL` は使わない） |
+| `bun run db:types` | Supabase から TypeScript 型定義を生成（`SUPABASE_DB_URL` があればその DB へ、なければ `SUPABASE_PROJECT_ID` + `SUPABASE_ACCESS_TOKEN` でリモート（いずれも `--remote=<…>`）。`.env.local` は未設定の変数だけ補う。CLI は devDependency の `supabase`。`DATABASE_URL` は使わない） |
 | `bun run test` | Vitest によるユニットテスト実行 |
 | `bun run check:comments [基準ref]` | 変更した TS/JS がコメント・整形のみの差分か（AST同一・`@ts-*`/`biome-ignore` の増減なし）を検証。未追跡ファイルも対象、コード以外の変更ファイルは「未検証」として一覧表示。差異・パース失敗があれば該当ファイルを列挙して非ゼロ終了（既定の基準は `origin/main`） |
 | `bun scripts/grading-dry-run.ts --confirm-dev [--content-id N] [--limit 5] [--repeat 1] [--model <モデルID>]` | 採点基準付きの演習の既存コード提出を現行ロジックで再採点し、点数分布・合格率・平均トークンを表示する（**DB へは書き込まない**。Gemini を呼び課金される。`SUPABASE_SERVICE_ROLE_KEY` と `GEMINI_API_KEY` が必要で、**本番には向けない**。合格点 `CERTIFICATE_PASS_SCORE` を決める材料にする。未指定は本番と同じフォールバックになるため、モデル比較では `--model` で 1 つに固定する） |

@@ -422,15 +422,16 @@ jobs:
           if [ -z "${SUPABASE_READONLY_DB_URL:-}" ]; then
             {
               echo "body<<MIGRATION_LIST_EOF"
-              echo "自動確認できませんでした（Secret 未設定）。手元で \`bunx supabase migration list\` を実行して確認してください。"
+              echo "自動確認できませんでした（Secret 未設定）。手元で \`bunx supabase migration list --remote=<本番DB URL>\` を実行して確認してください。"
               echo "MIGRATION_LIST_EOF"
               echo "confirmed=false"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Session Pooler の接続文字列を使うこと（直接接続は IPv6 のみで到達できない場合がある）。
-          # --db-url は環境変数経由で渡し、コマンドライン展開をログに出さない。
-          if OUTPUT=$(bunx supabase migration list --db-url "$SUPABASE_READONLY_DB_URL" 2>&1); then
+          # DB URL は環境変数経由で渡し、コマンドライン展開をログに出さない。
+          # CLI v3 は TTY でないと JSON を出すため、PR 本文用に表形式を明示する。
+          if OUTPUT=$(bunx supabase migration list --output-format text --remote="$SUPABASE_READONLY_DB_URL" 2>&1); then
             {
               echo "body<<MIGRATION_LIST_EOF"
               echo '```'
@@ -442,7 +443,7 @@ jobs:
           else
             {
               echo "body<<MIGRATION_LIST_EOF"
-              echo "自動確認できませんでした（DB Pause 等の可能性あり）。手元で \`bunx supabase migration list\` を実行して確認してください。"
+              echo "自動確認できませんでした（DB Pause 等の可能性あり）。手元で \`bunx supabase migration list --remote=<本番DB URL>\` を実行して確認してください。"
               echo "MIGRATION_LIST_EOF"
               echo "confirmed=false"
             } >> "$GITHUB_OUTPUT"
@@ -511,7 +512,7 @@ jobs:
           fi
 
           if [ "$MIGRATION_CONFIRMED" != "true" ]; then
-            MIGRATION_NOTICE="> ⚠️ 本番DBへの自動接続ができなかったため、手元で \`bunx supabase migration list\` を実行して未適用分を確認してください。"
+            MIGRATION_NOTICE="> ⚠️ 本番DBへの自動接続ができなかったため、手元で \`bunx supabase migration list --remote=<本番DB URL>\` を実行して未適用分を確認してください。"
           else
             MIGRATION_NOTICE=""
           fi

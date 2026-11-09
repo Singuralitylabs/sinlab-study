@@ -85,7 +85,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 
 ### データベースマイグレーション
 
-`supabase/migrations/` **直下にフラットな SQL で管理する（サブディレクトリ禁止。CLI が再帰走査しないため #149）**。ファイル名は `<14桁タイムスタンプ>_<説明>.sql`。**タイムスタンプはリモート適用履歴と比較されるため、既存ファイルのリネームは必ず `supabase migration list` で対応を確認してから行う**。RLSは参照先カラム・関数を追加した migration より後にする。
+`supabase/migrations/` **直下にフラットな SQL で管理する（サブディレクトリ禁止。CLI が再帰走査しないため #149）**。ファイル名は `<14桁タイムスタンプ>_<説明>.sql`。**タイムスタンプはリモート適用履歴と比較されるため、既存ファイルのリネームは必ず `supabase migration list --remote` で対応を確認してから行う**。RLSは参照先カラム・関数を追加した migration より後にする。
 
 追加後の確認は `docs/database.md` 7.1節。**破壊的変更（定義は `docs/database.md` 7章）は、本番反映前に Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)に従う。** 適用済み SQL 内の `CLAUDE.md` 参照は本ファイルを指す。
 

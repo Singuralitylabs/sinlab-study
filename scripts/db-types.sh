@@ -44,9 +44,9 @@ trap 'rm -f "$tmp"' EXIT
 # Prefer dedicated DB URL, then project-id + access token.
 # DATABASE_URL is intentionally not used (often pooler/prod; see README).
 if [ -n "${SUPABASE_DB_URL:-}" ]; then
-  bun x supabase gen types --lang=typescript --db-url "$SUPABASE_DB_URL" --schema public >"$tmp"
+  bun x supabase gen types --lang=typescript --remote="$SUPABASE_DB_URL" --schema public >"$tmp"
 elif [ -n "${SUPABASE_PROJECT_ID:-}" ]; then
-  bun x supabase gen types --lang=typescript --project-id "$SUPABASE_PROJECT_ID" --schema public >"$tmp"
+  bun x supabase gen types --lang=typescript --remote="$SUPABASE_PROJECT_ID" --schema public >"$tmp"
 else
   echo "Set SUPABASE_DB_URL or SUPABASE_PROJECT_ID (+ SUPABASE_ACCESS_TOKEN)" >&2
   exit 2
