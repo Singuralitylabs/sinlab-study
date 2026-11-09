@@ -583,12 +583,12 @@ INSERT / UPDATE / DELETE のポリシーは定義しない（受講生・管理�
 
 ### 7.1 マイグレーション追加後の運用
 
-本番への適用は、リリース時に `supabase migration list --db-url <本番>` で未適用分（`Remote` が空の行）だけであることを確認したうえで `bunx supabase db push --db-url <本番>` で行う（詳細は Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順) Step 3）。SQL Editor で手動適用すると履歴に記録されず、次回の `db push` で再実行されるため行わないこと。
+本番への適用は、リリース時に `bunx supabase migration list --remote=<本番DB URL>` で未適用分（`Remote` が空の行）だけであることを確認したうえで `bunx supabase db push --remote=<本番DB URL>` で行う（詳細は Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順) Step 3）。SQL Editor で手動適用すると履歴に記録されず、次回の `db push` で再実行されるため行わないこと。
 
-このリポジトリには `supabase/config.toml` がなく、Docker上のローカルSupabaseスタック（`supabase start` / `supabase db reset`）は未整備。そのため動作確認は `.env.local` がリンクしている開発用プロジェクトに対して行う。
+Docker上のローカルSupabaseスタック（`supabase/config.toml`）は CI の権限テスト（`docs/testing.md`）用で、シードデータはない。そのため動作確認は `.env.local` がリンクしている開発用プロジェクトに対して行う。**Supabase CLI v3 は `db push` / `migration list` などを対象省略時にローカルスタックへ向けるため、リモートには必ず `--remote`（リンク先）か `--remote=<ref|DB URL>` を付ける。** ホスト側を変更するコマンドは確認が入り、既定の答えは No。
 
 1. `bunx supabase migration new <説明>` でファイルを作成し、内容を実装する。
-2. `bunx supabase db push` で開発用プロジェクトに適用し、アプリを動かして動作確認する。
+2. `bunx supabase db push --remote` で開発用プロジェクトに適用し、アプリを動かして動作確認する。
 3. **`bun run db:types` はリンク先プロジェクトのリモートスキーマから型を生成するため、必ず上記の `db push` の後に実行する**（`db push` 前に実行しても新しいカラム等は反映されない）。生成物（`app/types/lib/database.types.ts`）もコミットする。
 4. 対応する Issue / PR にマイグレーションファイルをひも付けてレビューを受ける。
 
