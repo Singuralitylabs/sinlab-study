@@ -31,6 +31,11 @@ const LANGUAGE_LOADERS: Record<CodeLanguage, () => Promise<Extension[]>> = {
   markdown: () => import("@codemirror/lang-markdown").then((m) => [m.markdown()]),
   python: () => import("@codemirror/lang-python").then((m) => [m.python()]),
   json: () => import("@codemirror/lang-json").then((m) => [m.json()]),
+  yaml: () =>
+    Promise.all([
+      import("@codemirror/language"),
+      import("@codemirror/legacy-modes/mode/yaml"),
+    ]).then(([{ StreamLanguage }, { yaml }]) => [StreamLanguage.define(yaml)]),
 };
 
 const NO_EXTENSIONS: Extension[] = [];

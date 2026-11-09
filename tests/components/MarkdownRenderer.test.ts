@@ -109,6 +109,8 @@ describe("MarkdownRenderer", () => {
     ["markdown", "# 見出し"],
     ["python", "def main():\n    pass"],
     ["json", '{"a": 1}'],
+    ["yaml", "services:\n  web:\n    image: nginx"],
+    ["yml", "services:\n  web:\n    image: nginx"],
     ["jsx", "const a = <div />;"],
     ["tsx", "const a: number = 1;"],
   ])("演習の提出言語 %s のコードフェンスがハイライトされる", (language, code) => {
