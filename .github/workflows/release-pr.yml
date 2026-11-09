@@ -430,7 +430,7 @@ jobs:
           fi
           # Session Pooler の接続文字列を使うこと（直接接続は IPv6 のみで到達できない場合がある）。
           # DB URL は環境変数経由で渡し、コマンドライン展開をログに出さない。
-          # CLI v3 は TTY でないと JSON を出すため、PR 本文用に表形式を明示する。
+          # CLI v3 は AI エージェント等の環境を検知すると JSON を出すため、PR 本文用に表形式を明示する。
           if OUTPUT=$(bunx supabase migration list --output-format text --remote="$SUPABASE_READONLY_DB_URL" 2>&1); then
             {
               echo "body<<MIGRATION_LIST_EOF"
