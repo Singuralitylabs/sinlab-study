@@ -39,7 +39,8 @@ describe("ThemeCard", () => {
     expect(html).toContain("テーマA");
     expect(html).toContain("line-clamp-2");
     expect(html).toContain("h-full");
-    expect(html).toContain("min-h-0 flex-1");
+    // Link replaces Card as the parent of thumbnail + body, so it must keep Card's gap-6.
+    expect(html).toContain("flex min-h-0 flex-1 flex-col gap-6");
     expect(html).not.toContain("修了");
     expect(html).not.toContain("border-success");
   });
@@ -61,6 +62,7 @@ describe("ThemeCard", () => {
       expect(certificateLink?.textContent).toContain("修了証を見る");
       expect(card?.querySelector('a[href="/learn/1"]')?.textContent).toContain("修了");
       expect(root.querySelector("a a")).toBeNull();
+      expect(card?.textContent).toMatch(/4 \/ 4\s*修了/);
       expect(card?.querySelector('[data-slot="progress"]')?.className).toContain("bg-success/20");
     }
   );

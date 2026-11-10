@@ -60,11 +60,18 @@ export function ThemeCard({
   const certificateHref = isCompleted ? certificatesHref : undefined;
   const cardStateClass = isCompleted ? COMPLETED_CARD_CLASS : "hover:border-primary/20";
   const progressClass = `h-2 ${isCompleted ? COMPLETED_PROGRESS_CLASS : ""}`;
+  const countClass = isCompleted ? "font-medium text-success" : "text-muted-foreground";
+  const count = (
+    <>
+      {completedContents} / {totalContents}
+      {isCompleted && <span className="ml-1.5">修了</span>}
+    </>
+  );
 
   if (layout === "card") {
     return (
       <Card className={`h-full overflow-hidden transition-all hover:shadow-md ${cardStateClass}`}>
-        <Link href={`/learn/${theme.id}`} className="group block min-h-0 flex-1">
+        <Link href={`/learn/${theme.id}`} className="group flex min-h-0 flex-1 flex-col gap-6">
           <div className="relative aspect-video w-full bg-linear-to-br from-primary/5 to-primary/15">
             {theme.image_url ? (
               <Image
@@ -95,11 +102,7 @@ export function ThemeCard({
                   </h3>
                   {unpublishedBadge}
                 </div>
-                {showProgress && (
-                  <p className="text-sm text-muted-foreground mt-0.5">
-                    {completedContents} / {totalContents}
-                  </p>
-                )}
+                {showProgress && <p className={`text-sm mt-0.5 ${countClass}`}>{count}</p>}
               </div>
             </div>
             {theme.description && (
@@ -148,11 +151,7 @@ export function ThemeCard({
               </h3>
               {unpublishedBadge}
             </div>
-            {showProgress && (
-              <span className="text-sm text-muted-foreground shrink-0 ml-2">
-                {completedContents} / {totalContents}
-              </span>
-            )}
+            {showProgress && <span className={`text-sm shrink-0 ml-2 ${countClass}`}>{count}</span>}
           </div>
           {theme.description && (
             <p className="text-sm text-muted-foreground mb-2 ml-6 line-clamp-1">
