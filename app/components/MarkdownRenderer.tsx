@@ -9,6 +9,7 @@ import python from "highlight.js/lib/languages/python";
 import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
 import html from "highlight.js/lib/languages/xml";
+import yaml from "highlight.js/lib/languages/yaml";
 import { createLowlight } from "lowlight";
 import { ExternalLink } from "lucide-react";
 import { type ComponentPropsWithoutRef, memo } from "react";
@@ -38,12 +39,14 @@ const lowlight = createLowlight({
   bash,
   sql,
   markdown,
+  yaml,
 });
 lowlight.registerAlias({
   html: ["xml"],
   javascript: ["js", "gas"],
   typescript: ["ts"],
   bash: ["sh", "shell"],
+  yaml: ["yml"],
 });
 
 const languageClassPrefix = "language-";
