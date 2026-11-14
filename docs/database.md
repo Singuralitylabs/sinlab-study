@@ -66,6 +66,8 @@ erDiagram
 
 テーマ配下のグループ（例：Phase 1 - GAS基礎）。`theme_id` が親（`ON DELETE CASCADE`）。
 
+- `is_appendix`（`NOT NULL`、既定 false。#556）: 付録のフェーズなら true。付録は内容を差し替える前提のため、テーマの修了判定・進捗率・続きから学習・週次メール／Push の集計から外す（アプリの `applyMainCourseNestedThemeFilters()`。[機能設計書](./specification.md)4.2・13.1節）。受講生の画面では本編の後ろに「付録」として分けて表示する（`comparePhaseLevel()` で本編 → 付録の順）。RLS・公開判定は変わらない
+
 ### 3.3 learning_weeks（廃止）
 
 フェーズとコンテンツの間にあった「週」のテーブル。#426 で廃止した（`20261018000000_remove_learning_weeks.sql`）。他節の参照番号を保つため、この節番号は欠番として残す。

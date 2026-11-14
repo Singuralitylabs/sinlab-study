@@ -51,3 +51,19 @@ describe("resolveAdjacentPhases", () => {
     });
   });
 });
+
+describe("resolveAdjacentPhases の付録 (#556)", () => {
+  it("付録は本編のすべての後ろに並び、テーマページの並びと一致する", () => {
+    const phases = [
+      { ...makePhase(1, 1, "付録A"), is_appendix: true },
+      makePhase(2, 2, "本編1"),
+      makePhase(3, 3, "本編2"),
+      { ...makePhase(4, 0, "付録B"), is_appendix: true },
+    ];
+
+    expect(resolveAdjacentPhases(phases, 3).next?.id).toBe(4);
+    expect(resolveAdjacentPhases(phases, 2).prev).toBeNull();
+    expect(resolveAdjacentPhases(phases, 4).next?.id).toBe(1);
+    expect(resolveAdjacentPhases(phases, 1).next).toBeNull();
+  });
+});

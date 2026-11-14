@@ -128,7 +128,7 @@ export type ManageThemeListItem = Pick<
 
 export type ManagePhaseListItem = Pick<
   LearningPhase,
-  "id" | "name" | "description" | "display_order" | "is_published" | "theme_id"
+  "id" | "name" | "description" | "display_order" | "is_published" | "is_appendix" | "theme_id"
 > & {
   theme: Pick<LearningTheme, "id" | "name" | "display_order"> | null;
 };
@@ -174,7 +174,7 @@ export type BreadcrumbTheme = Pick<LearningTheme, "id" | "name" | "is_published"
 
 export type BreadcrumbPhase = Pick<
   LearningPhase,
-  "id" | "theme_id" | "name" | "is_published" | "is_deleted"
+  "id" | "theme_id" | "name" | "is_appendix" | "is_published" | "is_deleted"
 > & {
   theme: BreadcrumbTheme | null;
 };

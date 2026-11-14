@@ -2,12 +2,13 @@ import { BookOpen, ChevronDown, ChevronRight, PartyPopper } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AppendixBadge } from "@/app/components/AppendixBadge";
 import { PageTitle } from "@/app/components/PageTitle";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { THEME_COMPLETION_MASCOT } from "@/app/constants/mascot";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
-import { compareGroupLevel } from "@/app/lib/content-grouping";
+import { compareGroupLevel, comparePhaseLevel } from "@/app/lib/content-grouping";
 import {
   getPhaseProgressStatus,
   isPhaseFullyLockedForUser,
@@ -59,7 +60,8 @@ export default async function ThemePage({ params }: PageProps) {
     notFound();
   }
 
-  const phaseList = phases ?? [];
+  // Main phases first, then appendices (#556), so the two sections and prev/next agree.
+  const phaseList = [...(phases ?? [])].sort(comparePhaseLevel);
   // One batched call for the whole theme (not per phase) so the query count doesn't grow with the
   // number of phases.
   const { data: allContents } = await fetchContentSummariesByPhaseIds(
@@ -110,10 +112,105 @@ export default async function ThemePage({ params }: PageProps) {
     });
     return { phase, contents, progress };
   });
-  const themeCompleted = isThemeCompleted(phaseViews);
+  const mainPhaseViews = phaseViews.filter(({ phase }) => !phase.is_appendix);
+  const appendixPhaseViews = phaseViews.filter(({ phase }) => phase.is_appendix);
+  // Appendices never count toward completion (#556): the theme is done when the main course is.
+  const themeCompleted = isThemeCompleted(mainPhaseViews);
   const openPhaseId = pickInitiallyOpenPhaseId(
     phaseViews.map(({ phase, progress }) => ({ id: phase.id, progress }))
   );
+
+  const renderPhase = ({ phase, contents, progress }: (typeof phaseViews)[number]) => {
+    const progressValue =
+      progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
+    const status = getPhaseProgressStatus(progress);
+    const isCompleted = status === PHASE_PROGRESS_STATUS.COMPLETED;
+    // Trial-only: published contents exist and every one is locked (#505). Non-trial
+    // isLocked is always false, so this stays false for members / admin / maintainer.
+    const phaseLocked = isPhaseFullyLockedForUser(contents, isLocked);
+    return (
+      <details
+        key={phase.id}
+        open={phase.id === openPhaseId}
+        className={`group/phase rounded-xl border text-card-foreground shadow-sm ${
+          isCompleted ? "border-success/40 bg-success/5" : "bg-card"
+        }`}
+      >
+        <summary className="flex cursor-pointer list-none items-center gap-4 rounded-xl p-4 [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-ring">
+          <PhaseStatusIcon status={status} locked={phaseLocked} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold">{phase.name}</h2>
+              <AppendixBadge isAppendix={phase.is_appendix} />
+              <UnpublishedBadge isPublished={phase.is_published} />
+            </div>
+            {phase.description && (
+              <p className="text-sm text-muted-foreground mt-1">{phase.description}</p>
+            )}
+            {phaseLocked ? (
+              <p className="mt-2 text-xs text-muted-foreground">有料会員になると利用できます</p>
+            ) : (
+              progress.total > 0 && (
+                <div className="mt-2 flex items-center gap-3">
+                  <Progress
+                    value={progressValue}
+                    className={`h-1.5 max-w-48 ${isCompleted ? "[&>div]:bg-success" : ""}`}
+                  />
+                  {isCompleted ? (
+                    <Badge variant="outline" className="border-success text-success">
+                      完了
+                    </Badge>
+                  ) : (
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {progress.completed} / {progress.total} 完了
+                    </span>
+                  )}
+                </div>
+              )
+            )}
+          </div>
+          <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-open/phase:rotate-180" />
+        </summary>
+        <div className="border-t p-4 space-y-2">
+          {/* Top button: visible as soon as the accordion opens (#457). Keep out of
+              summary — a link there fights the open/close hit target on mobile. */}
+          <Button asChild variant="outline" className="w-full justify-between sm:w-auto">
+            <Link href={`/learn/${themeIdNum}/${phase.id}`}>
+              フェーズのページを開く
+              <ChevronRight className="h-4 w-4" />
+            </Link>
+          </Button>
+          {contents.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              このフェーズにはまだコンテンツが登録されていません。
+            </p>
+          ) : (
+            contents.map((content) => {
+              const locked = isLocked(content);
+              return (
+                <LearnContentRow
+                  key={content.id}
+                  href={`/learn/${themeIdNum}/${phase.id}/${content.id}`}
+                  title={content.title}
+                  contentType={content.content_type}
+                  isPublished={content.is_published}
+                  locked={locked}
+                  completed={!locked && (progressMap.get(content.id) || false)}
+                  aiReviewed={reviewedContentIds.has(content.id)}
+                />
+              );
+            })
+          )}
+          <Link
+            href={`/learn/${themeIdNum}/${phase.id}`}
+            className="inline-block pt-1 text-sm text-primary hover:underline"
+          >
+            フェーズのページを開く
+          </Link>
+        </div>
+      </details>
+    );
+  };
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -140,7 +237,8 @@ export default async function ThemePage({ params }: PageProps) {
             <div>
               <p className="font-bold">おめでとうございます！</p>
               <p className="text-sm font-medium">
-                「{theme.name}」のすべてのフェーズを完了しました
+                「{theme.name}」の{appendixPhaseViews.length > 0 ? "本編の" : ""}
+                すべてのフェーズを完了しました
               </p>
             </div>
           </div>
@@ -157,100 +255,19 @@ export default async function ThemePage({ params }: PageProps) {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4">
-          {phaseViews.map(({ phase, contents, progress }) => {
-            const progressValue =
-              progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
-            const status = getPhaseProgressStatus(progress);
-            const isCompleted = status === PHASE_PROGRESS_STATUS.COMPLETED;
-            // Trial-only: published contents exist and every one is locked (#505). Non-trial
-            // isLocked is always false, so this stays false for members / admin / maintainer.
-            const phaseLocked = isPhaseFullyLockedForUser(contents, isLocked);
-            return (
-              <details
-                key={phase.id}
-                open={phase.id === openPhaseId}
-                className={`group/phase rounded-xl border text-card-foreground shadow-sm ${
-                  isCompleted ? "border-success/40 bg-success/5" : "bg-card"
-                }`}
-              >
-                <summary className="flex cursor-pointer list-none items-center gap-4 rounded-xl p-4 [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-ring">
-                  <PhaseStatusIcon status={status} locked={phaseLocked} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-lg font-semibold">{phase.name}</h2>
-                      <UnpublishedBadge isPublished={phase.is_published} />
-                    </div>
-                    {phase.description && (
-                      <p className="text-sm text-muted-foreground mt-1">{phase.description}</p>
-                    )}
-                    {phaseLocked ? (
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        有料会員になると利用できます
-                      </p>
-                    ) : (
-                      progress.total > 0 && (
-                        <div className="mt-2 flex items-center gap-3">
-                          <Progress
-                            value={progressValue}
-                            className={`h-1.5 max-w-48 ${isCompleted ? "[&>div]:bg-success" : ""}`}
-                          />
-                          {isCompleted ? (
-                            <Badge variant="outline" className="border-success text-success">
-                              完了
-                            </Badge>
-                          ) : (
-                            <span className="text-xs text-muted-foreground whitespace-nowrap">
-                              {progress.completed} / {progress.total} 完了
-                            </span>
-                          )}
-                        </div>
-                      )
-                    )}
-                  </div>
-                  <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-open/phase:rotate-180" />
-                </summary>
-                <div className="border-t p-4 space-y-2">
-                  {/* Top button: visible as soon as the accordion opens (#457). Keep out of
-                      summary — a link there fights the open/close hit target on mobile. */}
-                  <Button asChild variant="outline" className="w-full justify-between sm:w-auto">
-                    <Link href={`/learn/${themeIdNum}/${phase.id}`}>
-                      フェーズのページを開く
-                      <ChevronRight className="h-4 w-4" />
-                    </Link>
-                  </Button>
-                  {contents.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      このフェーズにはまだコンテンツが登録されていません。
-                    </p>
-                  ) : (
-                    contents.map((content) => {
-                      const locked = isLocked(content);
-                      return (
-                        <LearnContentRow
-                          key={content.id}
-                          href={`/learn/${themeIdNum}/${phase.id}/${content.id}`}
-                          title={content.title}
-                          contentType={content.content_type}
-                          isPublished={content.is_published}
-                          locked={locked}
-                          completed={!locked && (progressMap.get(content.id) || false)}
-                          aiReviewed={reviewedContentIds.has(content.id)}
-                        />
-                      );
-                    })
-                  )}
-                  <Link
-                    href={`/learn/${themeIdNum}/${phase.id}`}
-                    className="inline-block pt-1 text-sm text-primary hover:underline"
-                  >
-                    フェーズのページを開く
-                  </Link>
-                </div>
-              </details>
-            );
-          })}
-        </div>
+        <div className="grid gap-4">{mainPhaseViews.map(renderPhase)}</div>
+      )}
+
+      {appendixPhaseViews.length > 0 && (
+        <section aria-labelledby="appendix-heading" className="mt-8">
+          <h2 id="appendix-heading" className="text-xl font-bold">
+            付録
+          </h2>
+          <p className="mt-1 mb-4 text-sm text-muted-foreground">
+            付録は修了の条件に含まれません。内容は随時更新します。
+          </p>
+          <div className="grid gap-4">{appendixPhaseViews.map(renderPhase)}</div>
+        </section>
       )}
 
       {showUpgradeCta && (

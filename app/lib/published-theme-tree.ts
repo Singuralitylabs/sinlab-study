@@ -21,6 +21,7 @@ export type NestedThemeTree<TContent extends NestedThemeContentRow = NestedTheme
     id: number;
     name: string;
     display_order: number | null;
+    is_appendix?: boolean | null;
     contents: TContent[];
   }[];
 };
@@ -48,6 +49,7 @@ export function orderContentsAcrossThemes<TContent extends NestedThemeContentRow
       id: phase.id,
       name: phase.name,
       display_order: phase.display_order,
+      is_appendix: phase.is_appendix,
     }));
     const contents = theme.phases.flatMap((phase) => phase.contents);
     const contentById = new Map(contents.map((c) => [c.id, c]));
@@ -81,4 +83,17 @@ export function applyPublishedNestedThemeFilters<Q extends { eq: unknown }>(quer
     .eq("phases.is_deleted", false)
     .eq("phases.contents.is_published", true)
     .eq("phases.contents.is_deleted", false) as unknown as Q;
+}
+
+/**
+ * Published tree without appendix phases (#556): the single filter for everything that counts
+ * toward theme completion or progress (certificates, progress rates, continue-learning, digests).
+ * Appendices are swapped over time, so letting even one counting path include them would push
+ * finished learners back under 100% on that screen only. Lists that merely show contents
+ * (review list) keep applyPublishedNestedThemeFilters().
+ */
+export function applyMainCourseNestedThemeFilters<Q extends { eq: unknown }>(query: Q): Q {
+  type EqChain = { eq: (column: string, value: boolean) => EqChain };
+  const chained = applyPublishedNestedThemeFilters(query) as unknown as EqChain;
+  return chained.eq("phases.is_appendix", false) as unknown as Q;
 }

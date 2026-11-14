@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, Edit, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { AppendixBadge } from "@/app/components/AppendixBadge";
 import { ContentTypeIcon } from "@/app/components/ContentTypeIcon";
 import { CONTENT_TYPE_LABELS } from "@/app/constants/content";
 import type { PhaseFilterOption, ThemeFilterOption } from "@/app/lib/content-filtering";
@@ -250,6 +251,7 @@ export function ContentTree({
                                 )}
                                 <span className="truncate">{phase.name}</span>
                               </button>
+                              <AppendixBadge isAppendix={phase.isAppendix} />
                               <PublishedBadge isPublished={phase.isPublished} />
                               <div className="flex flex-wrap gap-1 ml-auto">
                                 <Button asChild variant="outline" size="sm">
