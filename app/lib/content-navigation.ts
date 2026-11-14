@@ -1,4 +1,4 @@
-import { compareGroupLevel } from "@/app/lib/content-grouping";
+import { compareGroupLevel, comparePhaseLevel } from "@/app/lib/content-grouping";
 
 export type NavigationBoundary = "same-phase" | "phase";
 
@@ -6,6 +6,7 @@ export interface NavigationPhase {
   id: number;
   name: string;
   display_order: number | null;
+  is_appendix?: boolean | null;
 }
 
 export interface NavigationContentInput {
@@ -27,16 +28,15 @@ export interface AdjacentContent extends NavigationContent {
 }
 
 /**
- * Sort by phase then content via compareGroupLevel() (missing display_order last, id tiebreak).
+ * Sort by phase (comparePhaseLevel(): main before appendix) then content via compareGroupLevel()
+ * (missing display_order last, id tiebreak).
  * Empty phases contribute nothing; contents whose phase_id isn't in the phase list are excluded.
  */
 export function buildThemeContentOrder(
   phases: NavigationPhase[],
   contents: NavigationContentInput[]
 ): NavigationContent[] {
-  const sortedPhases = [...phases].sort((a, b) =>
-    compareGroupLevel(a.display_order, b.display_order, a.id, b.id)
-  );
+  const sortedPhases = [...phases].sort(comparePhaseLevel);
 
   const phaseIds = new Set(sortedPhases.map((phase) => phase.id));
   const contentsByPhaseId = new Map<number, NavigationContentInput[]>();

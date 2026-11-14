@@ -31,7 +31,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (!validation.success) {
       return validation.response;
     }
-    const { theme_id, name, description, insert_after_id, is_published } = validation.data;
+    const { theme_id, name, description, insert_after_id, is_published, is_appendix } =
+      validation.data;
 
     const { error } = await updatePhase(phaseId, {
       theme_id,
@@ -39,6 +40,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       description,
       insertAfterId: insert_after_id,
       is_published,
+      is_appendix,
     });
     if (error) {
       return NextResponse.json({ error: "フェーズの更新に失敗しました" }, { status: 500 });

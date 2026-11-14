@@ -1,6 +1,7 @@
 import { Bot, Lock } from "lucide-react";
 import { notFound } from "next/navigation";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
+import { AppendixBadge } from "@/app/components/AppendixBadge";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { ExerciseHint } from "@/app/components/ExerciseHint";
 import { LearningMemo } from "@/app/components/LearningMemo";
@@ -168,7 +169,12 @@ export default async function ContentPage({ params }: PageProps) {
             },
             { label: summary.title },
           ]}
-          badge={<UnpublishedBadge isPublished={summary.is_published} />}
+          badge={
+            <>
+              <AppendixBadge isAppendix={phase.is_appendix} />
+              <UnpublishedBadge isPublished={summary.is_published} />
+            </>
+          }
         />
 
         <Card className="mb-6">
@@ -374,7 +380,12 @@ export default async function ContentPage({ params }: PageProps) {
           },
           { label: content.title },
         ]}
-        badge={<UnpublishedBadge isPublished={isFullyPublished} />}
+        badge={
+          <>
+            <AppendixBadge isAppendix={phase.is_appendix} />
+            <UnpublishedBadge isPublished={isFullyPublished} />
+          </>
+        }
       />
 
       <Card className="mb-6">

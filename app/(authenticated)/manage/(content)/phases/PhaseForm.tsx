@@ -70,6 +70,7 @@ export function PhaseForm({
   // leaves display order alone).
   const initialInsertAfterId = useRef(insertAfterId);
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
+  const [isAppendix, setIsAppendix] = useState(initialData?.is_appendix ?? false);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -101,6 +102,7 @@ export function PhaseForm({
       description: description || null,
       insert_after_id: positionUnchanged ? undefined : insertAfterId,
       is_published: isPublished,
+      is_appendix: isAppendix,
     };
 
     try {
@@ -205,6 +207,24 @@ export function PhaseForm({
           className="h-4 w-4 rounded border-input"
         />
         <Label htmlFor="isPublished">公開する</Label>
+      </div>
+
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <input
+            id="isAppendix"
+            type="checkbox"
+            checked={isAppendix}
+            onChange={(e) => setIsAppendix(e.target.checked)}
+            aria-describedby="isAppendixHelp"
+            className="h-4 w-4 rounded border-input"
+          />
+          <Label htmlFor="isAppendix">付録にする（修了の対象外）</Label>
+        </div>
+        <p id="isAppendixHelp" className="text-xs text-muted-foreground">
+          付録は修了判定と進捗率に含めず、受講生の画面では本編の後ろに「付録」として表示します。
+          公開後に切り替えると、受講生の進捗率が変わります（発行済みの修了証は取り消しません）。
+        </p>
       </div>
 
       {message && (

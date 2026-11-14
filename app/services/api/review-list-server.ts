@@ -185,7 +185,7 @@ export async function fetchReviewListContentOrder(): Promise<{
     supabase
       .from("learning_themes")
       .select(
-        "id, name, display_order, phases:learning_phases(id, name, display_order, contents:learning_contents(id, title, display_order, phase_id))"
+        "id, name, display_order, phases:learning_phases(id, name, display_order, is_appendix, contents:learning_contents(id, title, display_order, phase_id))"
       )
   ).order("display_order");
 

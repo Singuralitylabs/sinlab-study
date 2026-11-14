@@ -23,6 +23,7 @@ const tree: ContentTreeThemeNode[] = [
         themeId: 1,
         name: "フェーズ1",
         isPublished: true,
+        isAppendix: false,
         displayOrder: 1,
         contents: [],
       },
