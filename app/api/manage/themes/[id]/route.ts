@@ -31,7 +31,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (!validation.success) {
       return validation.response;
     }
-    const { name, description, insert_after_id, is_published, image_url } = validation.data;
+    const { name, description, insert_after_id, is_published, image_url, theme_color } =
+      validation.data;
 
     const { error } = await updateTheme(themeId, {
       name,
@@ -39,6 +40,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       insertAfterId: insert_after_id,
       is_published,
       image_url,
+      theme_color,
     });
     if (error) {
       return NextResponse.json({ error: "テーマの更新に失敗しました" }, { status: 500 });

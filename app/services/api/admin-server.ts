@@ -434,6 +434,7 @@ export async function createTheme(theme: {
   insertAfterId: number | null;
   is_published?: boolean;
   image_url?: string | null;
+  theme_color?: string | null;
 }): Promise<{ data: LearningTheme | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
@@ -456,6 +457,7 @@ export async function createTheme(theme: {
       description: theme.description,
       is_published: theme.is_published,
       image_url: theme.image_url,
+      theme_color: theme.theme_color,
       display_order: displayOrder,
     })
     .select()

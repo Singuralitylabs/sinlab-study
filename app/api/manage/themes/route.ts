@@ -26,7 +26,8 @@ export async function POST(request: NextRequest) {
     if (!validation.success) {
       return validation.response;
     }
-    const { name, description, insert_after_id, is_published, image_url } = validation.data;
+    const { name, description, insert_after_id, is_published, image_url, theme_color } =
+      validation.data;
 
     const { data, error } = await createTheme({
       name,
@@ -34,6 +35,7 @@ export async function POST(request: NextRequest) {
       insertAfterId: insert_after_id,
       is_published,
       image_url,
+      theme_color,
     });
     if (error) {
       return NextResponse.json({ error: "テーマの作成に失敗しました" }, { status: 500 });

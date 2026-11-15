@@ -676,6 +676,26 @@ export async function fetchMyCertificateById(
   return { data, error: null };
 }
 
+/**
+ * Theme color for the certificate sheet, read with the learner's session (no service_role). A theme
+ * hidden or deleted after issuing is not readable under RLS and returns null, so the page falls
+ * back to the theme_id palette instead of failing.
+ */
+export async function fetchCertificateThemeColor(themeId: number): Promise<string | null> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("learning_themes")
+    .select("theme_color")
+    .eq("id", themeId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("テーマカラー取得エラー:", error.message);
+    return null;
+  }
+  return data?.theme_color ?? null;
+}
+
 /** Latest certificate issued within the dashboard display window, or null. */
 export async function fetchRecentCertificate(
   userId: number,
