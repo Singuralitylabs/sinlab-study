@@ -17,6 +17,7 @@ import {
   type ThemeCompletionNotice,
 } from "@/app/lib/certificate-eligibility";
 import {
+  isQuizAttemptPassed,
   quizCompletionAction,
   quizQuestionVersion,
   resetForNewQuizVersion,
@@ -72,6 +73,7 @@ export function QuizForm({
   const [answers, setAnswers] = useState<Record<number, Answer>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [progressWarning, setProgressWarning] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
   const [updatedNotice, setUpdatedNotice] = useState<string | null>(null);
   const [themeNotice, setThemeNotice] = useState<ThemeCompletionNotice | null>(null);
 
@@ -115,6 +117,7 @@ export function QuizForm({
 
   const markCompleted = useCallback(async () => {
     completionPending.current = true;
+    setIsRecording(true);
     try {
       const response = await fetch("/api/progress", {
         method: "POST",
@@ -124,13 +127,19 @@ export function QuizForm({
       if (!response.ok) {
         throw new Error(String(response.status));
       }
+      // Cleared only on success: the retry button lives inside the warning, so clearing it up
+      // front would hide the button (and its spinner) the moment it is pressed.
+      setProgressWarning(null);
       const body = await response.json().catch(() => null);
       setThemeNotice(noticeFromProgressBody(true, body));
       // Re-render the server page so the completion button reflects the new progress.
       router.refresh();
     } catch {
       completionPending.current = false;
-      setProgressWarning("完了状態を記録できませんでした。下のボタンから完了にしてください。");
+      // The page shows no completion button for an uncompleted quiz, so the retry lives here.
+      setProgressWarning("完了状態を記録できませんでした。もう一度お試しください。");
+    } finally {
+      setIsRecording(false);
     }
   }, [contentId, router]);
 
@@ -142,6 +151,7 @@ export function QuizForm({
       resultVersion: gradeResult?.version ?? null,
       questionVersion,
       handled: recordedResult.current === gradeResult,
+      passed: gradeResult ? isQuizAttemptPassed(gradeResult.value.values()) : false,
       completionPending: completionPending.current,
       canRecordProgress,
       initialCompleted,
@@ -156,6 +166,7 @@ export function QuizForm({
   const allAnswered = questions.every((q) => isAnswered(q, answers[q.id]));
   const autoGraded = results ? [...results.values()].filter((r) => r.isCorrect !== null) : [];
   const correctCount = autoGraded.filter((r) => r.isCorrect).length;
+  const attemptPassed = results ? isQuizAttemptPassed(results.values()) : false;
 
   function updateAnswer(questionId: number, update: (prev: Answer) => Answer) {
     setAnswers((prev) => ({
@@ -349,13 +360,22 @@ export function QuizForm({
       )}
 
       {/* Outside the results block: the record can fail after the set changed and the results
-          were cleared, and the learner still needs to know to use the completion button. */}
-      {/* Hidden once the saved progress is completed (e.g. via the completion button), which is
-          what the warning asks for. */}
+          were cleared, and the learner still needs the retry button below. */}
+      {/* Hidden once the saved progress is completed, which is what the warning asks for. */}
       {progressWarning && !initialCompleted && (
-        <Alert variant="destructive">
-          <AlertDescription>{progressWarning}</AlertDescription>
-        </Alert>
+        <div className="space-y-3">
+          <Alert variant="destructive">
+            <AlertDescription>{progressWarning}</AlertDescription>
+          </Alert>
+          <Button type="button" onClick={() => void markCompleted()} disabled={isRecording}>
+            {isRecording ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            完了を記録する
+          </Button>
+        </div>
       )}
 
       {results ? (
@@ -364,6 +384,9 @@ export function QuizForm({
             <p className="text-sm font-medium">
               選択式 {autoGraded.length} 問中 {correctCount} 問正解
             </p>
+          )}
+          {!attemptPassed && (
+            <p className="text-sm font-medium">解説を読んで、もう一度解いてみよう。</p>
           )}
           {!canRecordProgress && (
             <p className="text-sm text-muted-foreground">
