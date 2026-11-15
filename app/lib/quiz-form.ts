@@ -66,17 +66,30 @@ export function resetForNewQuizVersion<R>(
 }
 
 /**
+ * Whether a graded attempt may complete the quiz. Text questions are not auto-graded
+ * (`isCorrect: null`), so only a wrong choice question blocks: a text-only quiz still completes
+ * on submission (#567).
+ */
+export function isQuizAttemptPassed(results: Iterable<{ isCorrect: boolean | null }>): boolean {
+  for (const result of results) {
+    if (result.isCorrect === false) return false;
+  }
+  return true;
+}
+
+/**
  * What to do with a committed grade result for the completion record.
  * - "skip": nothing to handle (no result, a result for an older set, or one already handled)
- * - "mark-handled": current, but must not be recorded (preview, already completed, or a record
- *   already sent whose refresh has not landed yet: re-answering then must not post again and
- *   re-run the certificate / first-completion checks)
+ * - "mark-handled": current, but must not be recorded (a wrong answer, preview, already
+ *   completed, or a record already sent whose refresh has not landed yet: re-answering then must
+ *   not post again and re-run the certificate / first-completion checks)
  * - "record": post the completion
  */
 export function quizCompletionAction({
   resultVersion,
   questionVersion,
   handled,
+  passed,
   completionPending,
   canRecordProgress,
   initialCompleted,
@@ -84,11 +97,14 @@ export function quizCompletionAction({
   resultVersion: string | null;
   questionVersion: string;
   handled: boolean;
+  passed: boolean;
   completionPending: boolean;
   canRecordProgress: boolean;
   initialCompleted: boolean;
 }): "skip" | "mark-handled" | "record" {
   if (resultVersion === null || resultVersion !== questionVersion || handled) return "skip";
-  if (!canRecordProgress || initialCompleted || completionPending) return "mark-handled";
+  if (!passed || !canRecordProgress || initialCompleted || completionPending) {
+    return "mark-handled";
+  }
   return "record";
 }

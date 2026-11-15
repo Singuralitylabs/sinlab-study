@@ -308,6 +308,11 @@ export default async function ContentPage({ params }: PageProps) {
         }),
   ]);
   const { requiresPass: requiresReviewPass, passUnachievable, hasPassingReview } = reviewPassState;
+  // An uncompleted quiz gets no manual button: only an all-correct attempt completes it
+  // (QuizForm, #567). It stays once completed so the learner can undo, and when the questions
+  // could not be shown (load error, none registered) so the learner is not left unable to finish.
+  const quizCompletesByAnswer =
+    content.content_type === "quiz" && !isCompleted && !quizError && quizQuestions.length > 0;
 
   const memosByKey: Record<string, string | null> = {};
   let freeLearningMemo: string | null = null;
@@ -645,7 +650,7 @@ export default async function ContentPage({ params }: PageProps) {
                 "code"
               }
             />
-          ) : (
+          ) : quizCompletesByAnswer ? null : (
             // Keyed by the saved state so router.refresh() after a quiz answer remounts it.
             <CompleteButton
               key={String(isCompleted)}
