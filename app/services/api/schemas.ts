@@ -472,6 +472,7 @@ const PhaseBaseSchema = z.object({
   name: RequiredStringSchema,
   description: OptionalNullableString,
   is_published: OptionalBoolean,
+  is_appendix: OptionalBoolean,
 });
 export const PhaseCreateSchema = PhaseBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,

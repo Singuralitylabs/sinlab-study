@@ -40,6 +40,7 @@ const phase: LearningPhase = {
   name: "フェーズ編集",
   description: null,
   display_order: 1,
+  is_appendix: false,
   is_published: true,
   is_deleted: false,
   created_at: null,

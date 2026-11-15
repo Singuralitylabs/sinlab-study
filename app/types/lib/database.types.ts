@@ -671,6 +671,7 @@ export type Database = {
           description: string | null;
           display_order: number | null;
           id: number;
+          is_appendix: boolean;
           is_deleted: boolean | null;
           is_published: boolean | null;
           name: string;
@@ -682,6 +683,7 @@ export type Database = {
           description?: string | null;
           display_order?: number | null;
           id?: number;
+          is_appendix?: boolean;
           is_deleted?: boolean | null;
           is_published?: boolean | null;
           name: string;
@@ -693,6 +695,7 @@ export type Database = {
           description?: string | null;
           display_order?: number | null;
           id?: number;
+          is_appendix?: boolean;
           is_deleted?: boolean | null;
           is_published?: boolean | null;
           name?: string;

@@ -65,6 +65,23 @@ export function compareGroupLevel(
   return compareOrder(orderOrLast(idA), orderOrLast(idB));
 }
 
+export type PhaseOrderKey = {
+  id: number;
+  display_order: number | null;
+  is_appendix?: boolean | null;
+};
+
+/**
+ * Learner-facing phase order: appendix phases after every main phase, whatever their
+ * display_order (#556). The theme page draws appendices in their own section below the main
+ * course, so ordering by display_order alone would make prev/next jump between the sections.
+ */
+export function comparePhaseLevel(a: PhaseOrderKey, b: PhaseOrderKey): number {
+  const appendixCompare = Number(a.is_appendix === true) - Number(b.is_appendix === true);
+  if (appendixCompare !== 0) return appendixCompare;
+  return compareGroupLevel(a.display_order, b.display_order, a.id, b.id);
+}
+
 /**
  * PostgREST cannot order top-level rows by nested-table columns, so sort client-side. Missing
  * display_order sorts last.

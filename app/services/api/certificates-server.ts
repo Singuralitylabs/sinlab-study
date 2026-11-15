@@ -17,7 +17,7 @@ import {
 } from "@/app/lib/certificate-eligibility";
 import { generateCertificateNo, isCertificateNoCollision } from "@/app/lib/certificate-number";
 import { parseDisplayName } from "@/app/lib/display-name";
-import { applyPublishedNestedThemeFilters } from "@/app/lib/published-theme-tree";
+import { applyMainCourseNestedThemeFilters } from "@/app/lib/published-theme-tree";
 import {
   fetchThemeProgressSummary,
   type ThemeProgressSummary,
@@ -31,12 +31,18 @@ import type { Certificate, UserRoleType, UserStatusType } from "@/app/types";
 
 const UNIQUE_VIOLATION = "23505";
 
-/** Theme the content belongs to (content -> phase), read with the user's own session. */
-async function fetchThemeIdOfContent(contentId: number): Promise<number | null> {
+type ContentThemeRef = { themeId: number; isAppendix: boolean };
+
+/**
+ * Theme the content belongs to (content -> phase), read with the user's own session. isAppendix
+ * lets callers skip appendix contents (#556): they never count toward completion, so finishing
+ * one must not reopen the completion dialog for a theme that was already at 100%.
+ */
+async function fetchContentThemeRef(contentId: number): Promise<ContentThemeRef | null> {
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from("learning_contents")
-    .select("phase:learning_phases(theme_id)")
+    .select("phase:learning_phases(theme_id, is_appendix)")
     .eq("id", contentId)
     .maybeSingle();
 
@@ -44,8 +50,11 @@ async function fetchThemeIdOfContent(contentId: number): Promise<number | null> 
     console.error("[修了証] コンテンツのテーマ取得エラー:", error.message);
     return null;
   }
-  const phase = data?.phase as unknown as { theme_id: number } | null;
-  return phase?.theme_id ?? null;
+  const phase = data?.phase as unknown as { theme_id: number; is_appendix: boolean } | null;
+  if (!phase) {
+    return null;
+  }
+  return { themeId: phase.theme_id, isAppendix: phase.is_appendix === true };
 }
 
 async function fetchExistingIssuedCertificate(
@@ -207,7 +216,7 @@ async function insertCertificates(
  */
 async function fetchPublishedExercises(): Promise<Map<number, CertificateExercise[]> | null> {
   const supabase = await createServerSupabaseClient();
-  const { data, error } = await applyPublishedNestedThemeFilters(
+  const { data, error } = await applyMainCourseNestedThemeFilters(
     supabase
       .from("learning_themes")
       .select(
@@ -481,8 +490,8 @@ export async function issueCertificateIfEligible(params: {
       return null;
     }
 
-    const themeId = await fetchThemeIdOfContent(params.contentId);
-    if (themeId === null) {
+    const ref = await fetchContentThemeRef(params.contentId);
+    if (ref === null || ref.isAppendix) {
       return null;
     }
 
@@ -490,7 +499,7 @@ export async function issueCertificateIfEligible(params: {
       userId: params.userId,
       userStatus: params.userStatus,
       userRole: params.userRole,
-      themeId,
+      themeId: ref.themeId,
     });
   } catch (error) {
     console.error("[修了証] 予期しないエラー:", error);
@@ -518,16 +527,19 @@ export async function resolveProgressThemeNotice(params: {
   if (params.contentWasAlreadyCompleted) {
     return null;
   }
-  const themeId = await fetchThemeIdOfContent(params.contentId);
-  if (themeId === null) {
+  const ref = await fetchContentThemeRef(params.contentId);
+  if (ref === null) {
     // Cannot tell missing theme from a read error; fail open to after() so a blip can recover.
     throw new Error("[修了証] テーマの特定に失敗しました");
+  }
+  if (ref.isAppendix) {
+    return null;
   }
   const evaluation = await evaluateThemeForCertificate({
     userId: params.userId,
     userStatus: params.userStatus,
     userRole: params.userRole,
-    themeId,
+    themeId: ref.themeId,
   });
   if (evaluation.status === "check-failed") {
     throw new Error("[修了証] 発行判定の読み取りに失敗しました");
@@ -555,15 +567,15 @@ export async function resolveAiReviewThemeNotice(params: {
     if (!isCertificateEligible(params.userStatus, params.userRole)) {
       return null;
     }
-    const themeId = await fetchThemeIdOfContent(params.contentId);
-    if (themeId === null) {
+    const ref = await fetchContentThemeRef(params.contentId);
+    if (ref === null || ref.isAppendix) {
       return null;
     }
     const evaluation = await evaluateThemeForCertificate({
       userId: params.userId,
       userStatus: params.userStatus,
       userRole: params.userRole,
-      themeId,
+      themeId: ref.themeId,
       passScore: params.passScore,
     });
     if (evaluation.status !== "evaluated") {
