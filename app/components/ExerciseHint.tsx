@@ -3,15 +3,21 @@ import { HINT_MASCOT } from "@/app/constants/mascot";
 
 interface ExerciseHintProps {
   hint: string;
+  // Quiz pages stack one hint per question, so full-size mascots would dominate the form.
+  compact?: boolean;
 }
 
 // Native <details> keeps keyboard toggling and screen-reader semantics without client state; the
 // mascot swap and bubble are pure CSS via group-open.
-export function ExerciseHint({ hint }: ExerciseHintProps) {
+export function ExerciseHint({ hint, compact = false }: ExerciseHintProps) {
   return (
-    <details className="group mt-4">
+    <details className={compact ? "group" : "group mt-4"}>
       <summary className="flex cursor-pointer list-none items-center gap-3 [&::-webkit-details-marker]:hidden">
-        <span className="relative h-16 w-14 shrink-0 sm:h-20 sm:w-16">
+        <span
+          className={
+            compact ? "relative h-12 w-10 shrink-0" : "relative h-16 w-14 shrink-0 sm:h-20 sm:w-16"
+          }
+        >
           <Image
             src={HINT_MASCOT.closed.src}
             alt=""
@@ -34,7 +40,9 @@ export function ExerciseHint({ hint }: ExerciseHintProps) {
           シンラビにヒントを聞く
         </span>
       </summary>
-      <div className="relative mt-3 ml-6 rounded-2xl border border-border bg-muted px-4 py-3 text-sm whitespace-pre-wrap">
+      <div
+        className={`relative mt-3 rounded-2xl ${compact ? "ml-4" : "ml-6"} border border-border bg-muted px-4 py-3 text-sm whitespace-pre-wrap`}
+      >
         <span
           aria-hidden="true"
           className="absolute -top-1.5 left-6 size-3 rotate-45 border-t border-l border-border bg-muted"

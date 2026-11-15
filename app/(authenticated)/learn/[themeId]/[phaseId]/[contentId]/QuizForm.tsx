@@ -4,6 +4,7 @@ import { CheckCircle2, Loader2, RotateCcw, Send, XCircle } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { ExerciseHint } from "@/app/components/ExerciseHint";
 import { ThemeCompletionDialog } from "@/app/components/ThemeCompletionDialog";
 import {
   QUIZ_QUESTION_TYPE_LABELS,
@@ -319,16 +320,7 @@ export function QuizForm({
               </div>
             )}
 
-            {question.hint && !result && (
-              <details className="rounded-lg border border-border">
-                <summary className="cursor-pointer select-none list-none px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground">
-                  💡 ヒントを見る
-                </summary>
-                <div className="whitespace-pre-wrap border-t border-border px-4 py-2 text-sm text-muted-foreground">
-                  {question.hint}
-                </div>
-              </details>
-            )}
+            {question.hint && !result && <ExerciseHint hint={question.hint} compact />}
 
             {result && (
               <div className="space-y-3 rounded-lg bg-muted px-4 py-3">
