@@ -9,6 +9,7 @@ vi.mock("@/app/services/notifications/user-emails", () => ({
 
 import {
   fetchCertificateCountsByUser,
+  fetchCertificateThemeColor,
   fetchMyCertificateById,
   fetchRecentCertificate,
   issueCertificateIfEligible,
@@ -937,6 +938,24 @@ describe("閲覧用クエリ", () => {
       ["id", 31],
       ["user_id", 2],
     ]);
+  });
+
+  it("テーマカラーは通常クライアントでテーマの行から読む", async () => {
+    const client = mockUserClient({
+      learning_themes: { data: { theme_color: "#3B77D8" }, error: null },
+    });
+
+    expect(await fetchCertificateThemeColor(5)).toBe("#3B77D8");
+    expect(client.from).toHaveBeenCalledWith("learning_themes");
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it("テーマが読めない（RLS で 0 行・エラー）ときは null", async () => {
+    mockUserClient({ learning_themes: { data: null, error: null } });
+    expect(await fetchCertificateThemeColor(5)).toBeNull();
+
+    mockUserClient({ learning_themes: { data: null, error: { message: "boom" } as never } });
+    expect(await fetchCertificateThemeColor(5)).toBeNull();
   });
 
   it("ダッシュボード用は発行から14日以内に絞る", async () => {

@@ -27,6 +27,7 @@ const theme: LearningTheme = {
   description: null,
   image_url: null,
   hero_image_url: null,
+  theme_color: null,
   display_order: 1,
   is_published: true,
   is_deleted: false,

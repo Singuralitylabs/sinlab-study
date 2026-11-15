@@ -74,6 +74,7 @@ import {
   resolveSubmissionFileSlots,
   SUBMISSION_FILE_SLOT_MAX_COUNT,
 } from "@/app/lib/submission-file-slots";
+import { isThemeColor, normalizeThemeColor } from "@/app/lib/theme-color";
 import { parseVideoSource } from "@/app/lib/video-source";
 
 export const PositiveIntSchema = z
@@ -456,11 +457,26 @@ export const EmailSettingsUpdateSchema = z
 // Both POST (create) and PUT (update) take the insert position (insert_after_id). Update only
 // makes every Create field optional, so it derives from `XxxCreateSchema.partial()`
 // (insert_after_id is required on Create, optional on Update).
+/**
+ * `#RRGGBB` upper-cased; "" (a cleared input) and null both mean unset. Matches the DB CHECK so a
+ * bad value is a 400 here, not a 500 from the constraint.
+ */
+const ThemeColorSchema = z
+  .string({ message: "文字列で指定してください" })
+  .trim()
+  .refine((value) => value === "" || isThemeColor(value), {
+    message: "テーマカラーは #RRGGBB の形式で入力してください",
+  })
+  .transform((value) => normalizeThemeColor(value))
+  .nullable()
+  .optional();
+
 const ThemeBaseSchema = z.object({
   name: RequiredStringSchema,
   description: OptionalNullableString,
   is_published: OptionalBoolean,
   image_url: OptionalNullableString,
+  theme_color: ThemeColorSchema,
 });
 export const ThemeCreateSchema = ThemeBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,

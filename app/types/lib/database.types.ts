@@ -723,6 +723,7 @@ export type Database = {
           is_deleted: boolean | null;
           is_published: boolean | null;
           name: string;
+          theme_color: string | null;
           updated_at: string | null;
         };
         Insert: {
@@ -735,6 +736,7 @@ export type Database = {
           is_deleted?: boolean | null;
           is_published?: boolean | null;
           name: string;
+          theme_color?: string | null;
           updated_at?: string | null;
         };
         Update: {
@@ -747,6 +749,7 @@ export type Database = {
           is_deleted?: boolean | null;
           is_published?: boolean | null;
           name?: string;
+          theme_color?: string | null;
           updated_at?: string | null;
         };
         Relationships: [];
