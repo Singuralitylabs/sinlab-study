@@ -60,11 +60,14 @@ erDiagram
 `learning_themes` / `learning_phases` / `learning_contents` は共通して `display_order`（昇順の表示順）・`is_published`（公開フラグ、既定 false）・`is_deleted`（論理削除フラグ）を持つ。
 
 - `image_url`: サムネイル画像。Storage 配信分は環境非依存の相対パス `/storage/v1/object/public/thumbnails/theme-{id}/thumbnail.{ext}?v={timestamp}` を保存する。未設定時はプレースホルダー表示
+- `theme_color`: テーマカラー（`#RRGGBB`。CHECK で形式を固定。NULL 可）。サムネイル画像の背景色を `/manage` で登録し、修了証の配色に使う（[機能設計書](./specification.md)13.4節）。NULL は未設定で、修了証は `theme_id` で選ぶ既定のパレットになる。本番と開発で `theme_id` が違うため、値はマイグレーションで入れず `/manage` で環境ごとに登録する
 - `hero_image_url`: フェーズ一覧（`/learn/[themeId]`）の冒頭に出す横長（16:5）の専用画像（任意）。`image_url` と同じ形式で `/storage/v1/object/public/thumbnails/theme-{id}/hero.{ext}?v={timestamp}` を保存する。NULL のときは `image_url` を中央基準で切り抜いて使い、どちらも無ければヒーローを出さない
 
 ### 3.2 learning_phases（学習フェーズ）
 
 テーマ配下のグループ（例：Phase 1 - GAS基礎）。`theme_id` が親（`ON DELETE CASCADE`）。
+
+- `is_appendix`（`NOT NULL`、既定 false。#556）: 付録のフェーズなら true。付録は内容を差し替える前提のため、テーマの修了判定・進捗率・続きから学習・週次メール／Push の集計から外す（アプリの `applyMainCourseNestedThemeFilters()`。[機能設計書](./specification.md)4.2・13.1節）。受講生の画面では本編の後ろに「付録」として分けて表示する（`comparePhaseLevel()` で本編 → 付録の順）。RLS・公開判定は変わらない
 
 ### 3.3 learning_weeks（廃止）
 

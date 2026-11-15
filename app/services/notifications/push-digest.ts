@@ -6,7 +6,7 @@ import {
 import { USER_STATUS } from "@/app/constants/user";
 import { type DigestContent, type DigestUser, planMilestoneEmails } from "@/app/lib/email-digest";
 import {
-  applyPublishedNestedThemeFilters,
+  applyMainCourseNestedThemeFilters,
   type NestedThemeTree,
   orderContentsAcrossThemes,
 } from "@/app/lib/published-theme-tree";
@@ -108,7 +108,7 @@ async function fetchActiveUserIds(supabase: AdminClient, userIds: number[]): Pro
 
 /** Same published-tree filter as the email digest, so the "first content" link cannot drift. */
 async function fetchOrderedContents(supabase: AdminClient): Promise<DigestContent[]> {
-  const { data, error } = await applyPublishedNestedThemeFilters(
+  const { data, error } = await applyMainCourseNestedThemeFilters(
     supabase
       .from("learning_themes")
       .select(

@@ -22,6 +22,7 @@ function makePhase(
     description: overrides.description ?? null,
     display_order: overrides.display_order ?? 0,
     is_published: overrides.is_published ?? true,
+    is_appendix: overrides.is_appendix ?? false,
     theme_id: overrides.theme_id,
     theme: overrides.theme ?? null,
   };

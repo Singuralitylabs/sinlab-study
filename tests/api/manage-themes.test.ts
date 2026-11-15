@@ -74,6 +74,46 @@ describe("POST /api/manage/themes - バリデーション", () => {
   });
 });
 
+describe("テーマカラー（theme_color）", () => {
+  const params = Promise.resolve({ id: "1" });
+
+  it("作成時は大文字にそろえて渡す", async () => {
+    const res = await POST(
+      request({ name: "テーマ1", insert_after_id: null, theme_color: " #3b77d8 " }) as never
+    );
+
+    expect(res.status).toBe(200);
+    expect(createTheme).toHaveBeenCalledWith(expect.objectContaining({ theme_color: "#3B77D8" }));
+  });
+
+  it.each(["#12345", "3B77D8", "#GGGGGG", "red", 123])(
+    "形式外（%s）は400で保存しない",
+    async (v) => {
+      const res = await PUT(request({ theme_color: v }) as never, { params });
+
+      expect(res.status).toBe(400);
+      expect(updateTheme).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["", null])("空（%s）は null（未設定）として渡す", async (v) => {
+    const res = await PUT(request({ theme_color: v }) as never, { params });
+
+    expect(res.status).toBe(200);
+    expect(updateTheme).toHaveBeenCalledWith(1, expect.objectContaining({ theme_color: null }));
+  });
+
+  it("省略したときは undefined（今の値を変えない）", async () => {
+    const res = await PUT(request({ name: "テーマ1" }) as never, { params });
+
+    expect(res.status).toBe(200);
+    expect(updateTheme).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ theme_color: undefined })
+    );
+  });
+});
+
 describe("PUT /api/manage/themes/[id] - バリデーション", () => {
   const params = Promise.resolve({ id: "1" });
 

@@ -87,6 +87,29 @@ describe("buildThemeContentOrder", () => {
   });
 });
 
+describe("buildThemeContentOrder の付録 (#556)", () => {
+  it("付録のフェーズは display_order が本編より前でも、本編のすべての後ろに並ぶ", () => {
+    const phases = [{ ...makePhase(1, 1), is_appendix: true }, makePhase(2, 2), makePhase(3, 3)];
+    const contents = [
+      makeContent({ id: 10, phase_id: 1, display_order: 1 }),
+      makeContent({ id: 20, phase_id: 2, display_order: 1 }),
+      makeContent({ id: 30, phase_id: 3, display_order: 1 }),
+    ];
+
+    expect(buildThemeContentOrder(phases, contents).map((c) => c.id)).toEqual([20, 30, 10]);
+  });
+
+  it("本編の最終回の次は、付録の先頭になる", () => {
+    const phases = [makePhase(1, 1), { ...makePhase(2, 2), is_appendix: true }];
+    const ordered = buildThemeContentOrder(phases, [
+      makeContent({ id: 10, phase_id: 1, display_order: 1 }),
+      makeContent({ id: 20, phase_id: 2, display_order: 1 }),
+    ]);
+
+    expect(resolveAdjacentContents(ordered, 10).next?.id).toBe(20);
+  });
+});
+
 describe("resolveAdjacentContents", () => {
   const phases = [makePhase(1, 1, "導入"), makePhase(2, 2, "応用")];
   const contents = [

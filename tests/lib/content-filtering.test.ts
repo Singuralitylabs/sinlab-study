@@ -52,6 +52,7 @@ function makePhaseListItem(phase: typeof phase1 | null, id = 0, themeId = 0): Ma
     description: null,
     display_order: phase?.display_order ?? 0,
     is_published: true,
+    is_appendix: false,
     theme: phase?.theme ?? null,
   };
 }

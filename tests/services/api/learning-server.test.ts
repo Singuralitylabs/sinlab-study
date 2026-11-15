@@ -370,6 +370,24 @@ describe("fetchThemeProgressSummaries", () => {
     ]);
   });
 
+  it("付録のフェーズを外した公開ツリーで数える（#556）", async () => {
+    const themesBuilder = createQueryBuilder({ data: nestedThemes, error: null });
+    const mockClient = createMockSupabaseClient();
+    mockClient.from = vi
+      .fn()
+      .mockImplementation((table: string) =>
+        table === "learning_themes"
+          ? themesBuilder
+          : createQueryBuilder({ data: [{ content_id: 1000 }], error: null })
+      );
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    await fetchThemeProgressSummaries(1);
+
+    expect(themesBuilder.eq).toHaveBeenCalledWith("phases.is_appendix", false);
+    expect(themesBuilder.eq).toHaveBeenCalledWith("phases.is_published", true);
+  });
+
   it("コンテンツが1件もない場合、進捗の結果を使わず完了数0を返す（進捗はテーマ取得と並列に始まる）", async () => {
     const mockClient = createPerTableMockClient({
       themes: { data: [{ id: 2, name: "Theme 2", display_order: 2, phases: [] }], error: null },
@@ -1285,6 +1303,7 @@ describe("isPhaseHierarchyPublished", () => {
     id: 10,
     theme_id: 1,
     name: "フェーズ1",
+    is_appendix: false,
     is_published: true,
     is_deleted: false,
     theme: { id: 1, name: "GAS", is_published: true, is_deleted: false },

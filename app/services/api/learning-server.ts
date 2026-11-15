@@ -8,7 +8,7 @@ import {
 } from "@/app/lib/content-navigation";
 import type { ContinueLearningContent } from "@/app/lib/continue-learning";
 import {
-  applyPublishedNestedThemeFilters,
+  applyMainCourseNestedThemeFilters,
   orderContentsAcrossThemes,
 } from "@/app/lib/published-theme-tree";
 import { checkContentPermissions } from "@/app/services/auth/permissions";
@@ -64,7 +64,7 @@ export const LEARNING_CONTENT_LIST_COLUMNS =
 
 /** Parent-table columns for breadcrumbs / membership checks; the DETAIL constants compose these. */
 export const BREADCRUMB_THEME_COLUMNS = "id, name, is_published, is_deleted";
-export const BREADCRUMB_PHASE_COLUMNS = `id, theme_id, name, is_published, is_deleted, theme:learning_themes(${BREADCRUMB_THEME_COLUMNS})`;
+export const BREADCRUMB_PHASE_COLUMNS = `id, theme_id, name, is_appendix, is_published, is_deleted, theme:learning_themes(${BREADCRUMB_THEME_COLUMNS})`;
 
 export const LEARNING_PHASE_DETAIL_COLUMNS = `*, theme:learning_themes(${BREADCRUMB_THEME_COLUMNS})`;
 
@@ -309,7 +309,7 @@ export async function fetchHomeLearningData(userId: number): Promise<{
     }
   })();
 
-  const { data: themes, error: themesError } = await applyPublishedNestedThemeFilters(
+  const { data: themes, error: themesError } = await applyMainCourseNestedThemeFilters(
     supabase.from("learning_themes").select(HOME_LEARNING_THEME_SELECT)
   ).order("display_order");
 
@@ -389,7 +389,7 @@ export async function fetchThemeProgressSummary(
   error: PostgrestError | null;
 }> {
   const supabase = await createServerSupabaseClient();
-  const { data: themeRow, error: themeError } = await applyPublishedNestedThemeFilters(
+  const { data: themeRow, error: themeError } = await applyMainCourseNestedThemeFilters(
     supabase
       .from("learning_themes")
       .select("*, phases:learning_phases(id, contents:learning_contents(id))")
@@ -468,7 +468,7 @@ export async function fetchThemeProgressSummaries(userId: number): Promise<{
     }
   })();
 
-  const { data: themes, error: themesError } = await applyPublishedNestedThemeFilters(
+  const { data: themes, error: themesError } = await applyMainCourseNestedThemeFilters(
     supabase
       .from("learning_themes")
       .select("*, phases:learning_phases(id, contents:learning_contents(id))")
@@ -847,7 +847,7 @@ export async function fetchContentSummariesByPhaseIds(
   return fetchContentVisibilitySummariesByPhaseIds(phaseIds);
 }
 
-const THEME_NAVIGATION_PHASE_COLUMNS = "id, name, display_order";
+const THEME_NAVIGATION_PHASE_COLUMNS = "id, name, display_order, is_appendix";
 
 export interface ThemeNavigationIndex {
   orderedContents: NavigationContent[];
@@ -903,6 +903,7 @@ export async function fetchThemeNavigationIndex(
       id: row.id,
       name: row.name,
       display_order: row.display_order,
+      is_appendix: row.is_appendix,
     }));
   }
 

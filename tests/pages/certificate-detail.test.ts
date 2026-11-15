@@ -9,7 +9,10 @@ vi.mock("@/app/(authenticated)/certificates/[id]/PrintButton", () => ({
 }));
 
 import CertificateDetailPage from "@/app/(authenticated)/certificates/[id]/page";
-import { fetchMyCertificateById } from "@/app/services/api/certificates-server";
+import {
+  fetchCertificateThemeColor,
+  fetchMyCertificateById,
+} from "@/app/services/api/certificates-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const certificate = {
@@ -35,6 +38,7 @@ beforeEach(() => {
     userRole: "member",
   } as never);
   vi.mocked(fetchMyCertificateById).mockResolvedValue({ data: certificate, error: null });
+  vi.mocked(fetchCertificateThemeColor).mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -70,6 +74,23 @@ describe("/certificates/[id]", () => {
       error: null,
     });
     expect(await render("31")).toContain("お祝いするシンラビ");
+  });
+
+  it("テーマカラーがあれば、その色の配色で描く", async () => {
+    vi.mocked(fetchCertificateThemeColor).mockResolvedValue("#3B77D8");
+
+    const html = await render("31");
+
+    expect(fetchCertificateThemeColor).toHaveBeenCalledWith(5);
+    expect(html).toContain("background-image:linear-gradient(to bottom right, #FFFFFF");
+    expect(html).not.toContain("bg-gradient-to-br");
+  });
+
+  it("テーマカラーが無ければ、theme_id のパレット（クラス）で描く", async () => {
+    const html = await render("31");
+
+    expect(html).toContain("bg-gradient-to-br");
+    expect(html).not.toContain("background-image");
   });
 
   it("右上にサービスのロゴを表示する", async () => {

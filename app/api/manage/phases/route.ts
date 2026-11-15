@@ -26,7 +26,8 @@ export async function POST(request: NextRequest) {
     if (!validation.success) {
       return validation.response;
     }
-    const { theme_id, name, description, insert_after_id, is_published } = validation.data;
+    const { theme_id, name, description, insert_after_id, is_published, is_appendix } =
+      validation.data;
 
     const { data, error } = await createPhase({
       theme_id,
@@ -34,6 +35,7 @@ export async function POST(request: NextRequest) {
       description,
       insertAfterId: insert_after_id,
       is_published,
+      is_appendix,
     });
     if (error) {
       return NextResponse.json({ error: "フェーズの作成に失敗しました" }, { status: 500 });

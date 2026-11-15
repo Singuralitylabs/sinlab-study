@@ -9,6 +9,7 @@ vi.mock("@/app/services/notifications/user-emails", () => ({
 
 import {
   fetchCertificateCountsByUser,
+  fetchCertificateThemeColor,
   fetchMyCertificateById,
   fetchRecentCertificate,
   issueCertificateIfEligible,
@@ -887,6 +888,44 @@ describe("テーマ修了の画面通知（#332）", () => {
   });
 });
 
+describe("付録のコンテンツ (#556)", () => {
+  const appendixContent = {
+    learning_contents: { data: { phase: { theme_id: THEME.id, is_appendix: true } }, error: null },
+  };
+
+  it("付録の完了では、本編が 100% でも画面通知を出さず、集計もしない", async () => {
+    mockUserClient(appendixContent);
+    mockAdminClient({ certificates: inserted });
+
+    expect(
+      await resolveProgressThemeNotice({ ...params, contentWasAlreadyCompleted: false })
+    ).toBeNull();
+    expect(fetchThemeProgressSummary).not.toHaveBeenCalled();
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it("付録の完了・提出を契機にした発行判定と AI レビュー後の通知は何もしない", async () => {
+    mockUserClient(appendixContent);
+    mockAdminClient({ certificates: inserted });
+
+    expect(await issueCertificateIfEligible(params)).toBeNull();
+    expect(await resolveAiReviewThemeNotice({ ...params, passed: true })).toBeNull();
+    expect(fetchThemeProgressSummary).not.toHaveBeenCalled();
+  });
+
+  it("本編のコンテンツ（is_appendix = false）は今まで通り発行する", async () => {
+    mockUserClient({
+      learning_contents: {
+        data: { phase: { theme_id: THEME.id, is_appendix: false } },
+        error: null,
+      },
+    });
+    mockAdminClient({ certificates: inserted });
+
+    expect(await issueCertificateIfEligible(params)).toEqual(inserted.data);
+  });
+});
+
 describe("閲覧用クエリ", () => {
   it("修了証の取得は id と user_id の両方で絞る（他人の修了証は取れない）", async () => {
     const client = mockUserClient({ certificates: { data: null, error: null } });
@@ -899,6 +938,24 @@ describe("閲覧用クエリ", () => {
       ["id", 31],
       ["user_id", 2],
     ]);
+  });
+
+  it("テーマカラーは通常クライアントでテーマの行から読む", async () => {
+    const client = mockUserClient({
+      learning_themes: { data: { theme_color: "#3B77D8" }, error: null },
+    });
+
+    expect(await fetchCertificateThemeColor(5)).toBe("#3B77D8");
+    expect(client.from).toHaveBeenCalledWith("learning_themes");
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it("テーマが読めない（RLS で 0 行・エラー）ときは null", async () => {
+    mockUserClient({ learning_themes: { data: null, error: null } });
+    expect(await fetchCertificateThemeColor(5)).toBeNull();
+
+    mockUserClient({ learning_themes: { data: null, error: { message: "boom" } as never } });
+    expect(await fetchCertificateThemeColor(5)).toBeNull();
   });
 
   it("ダッシュボード用は発行から14日以内に絞る", async () => {
