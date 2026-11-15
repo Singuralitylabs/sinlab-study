@@ -134,7 +134,7 @@ export default async function LoginPage({
                 className="h-auto w-28 sm:w-32"
               />
               <p className="leading-snug">
-                <span className="block text-sm text-muted-foreground">Web技術講師</span>
+                <span className="block text-sm text-muted-foreground">Web技術ナビゲーター</span>
                 <span className="text-lg font-extrabold sm:text-xl">シンラビちゃん</span>
               </p>
             </div>
