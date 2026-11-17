@@ -11,7 +11,7 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-import { SavedChatNotesList } from "@/app/(authenticated)/review-list/SavedChatNotesList";
+import { ReviewListClient } from "@/app/(authenticated)/review-list/ReviewListClient";
 
 const note = (id: number) => ({
   id,
@@ -25,7 +25,7 @@ const note = (id: number) => ({
   createdAt: "2026-11-17T00:00:00Z",
 });
 
-describe("SavedChatNotesList", () => {
+describe("復習リストの「シンラビに聞いたこと」", () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -41,7 +41,10 @@ describe("SavedChatNotesList", () => {
     vi.unstubAllGlobals();
   });
 
-  it("続けて2件消しても両方消え、件数を親に伝える", async () => {
+  const buttonByText = (text: string) =>
+    [...container.querySelectorAll("button")].find((b) => b.textContent?.includes(text));
+
+  it("続けて2件消しても両方消え、別のタブから戻っても消えたまま。件数も減る", async () => {
     const resolvers: (() => void)[] = [];
     vi.stubGlobal(
       "fetch",
@@ -52,15 +55,19 @@ describe("SavedChatNotesList", () => {
           })
       )
     );
-    const onCountChange = vi.fn();
     await act(async () => {
       root.render(
-        <SavedChatNotesList
-          initialNotes={[note(1), note(2), note(3)]}
-          loadFailed={false}
-          onCountChange={onCountChange}
+        <ReviewListClient
+          unovercome={[]}
+          overcome={[]}
+          orphanMemos={[]}
+          freeMemos={[]}
+          savedChatNotes={{ notes: [note(1), note(2), note(3)], loadFailed: false }}
         />
       );
+    });
+    await act(async () => {
+      buttonByText("シンラビに聞いたこと")?.click();
     });
     const deleteButtons = () => [...container.querySelectorAll('button[aria-label="削除"]')];
     await act(async () => {
@@ -73,6 +80,15 @@ describe("SavedChatNotesList", () => {
     expect(container.textContent).not.toContain("質問1");
     expect(container.textContent).not.toContain("質問2");
     expect(container.textContent).toContain("質問3");
-    expect(onCountChange).toHaveBeenLastCalledWith(1);
+    expect(container.textContent).toContain("シンラビに聞いたこと（1）");
+
+    await act(async () => {
+      buttonByText("未克服")?.click();
+    });
+    await act(async () => {
+      buttonByText("シンラビに聞いたこと")?.click();
+    });
+    expect(container.textContent).not.toContain("質問1");
+    expect(container.textContent).toContain("質問3");
   });
 });

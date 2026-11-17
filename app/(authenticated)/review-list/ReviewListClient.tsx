@@ -43,7 +43,7 @@ export function ReviewListClient({
   savedChatNotes: { notes: SavedChatNoteView[]; loadFailed: boolean } | null;
 }) {
   const [tab, setTab] = useState<Tab>("open");
-  const [savedChatCount, setSavedChatCount] = useState(savedChatNotes?.notes.length ?? 0);
+  const [chatNotes, setChatNotes] = useState(savedChatNotes?.notes ?? []);
   const items = tab === "open" ? unovercome : overcome;
   const groups = groupByTheme(items);
 
@@ -82,16 +82,17 @@ export function ReviewListClient({
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
-            シンラビに聞いたこと（{savedChatCount}）
+            シンラビに聞いたこと（{chatNotes.length}）
           </button>
         )}
       </div>
 
       {tab === "chat" && savedChatNotes ? (
         <SavedChatNotesList
-          initialNotes={savedChatNotes.notes}
+          notes={chatNotes}
           loadFailed={savedChatNotes.loadFailed}
-          onCountChange={setSavedChatCount}
+          // Functional update: two quick deletes must both stick.
+          onDeleted={(id) => setChatNotes((prev) => prev.filter((note) => note.id !== id))}
         />
       ) : items.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8 text-center">

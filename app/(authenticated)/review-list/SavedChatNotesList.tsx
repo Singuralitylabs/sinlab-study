@@ -2,7 +2,7 @@
 
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import type { SavedChatNoteView } from "@/app/lib/ai-chat-saved-notes";
 import { formatDate } from "@/app/lib/format-date";
@@ -21,23 +21,21 @@ function groupByTheme(notes: SavedChatNoteView[]) {
   return groups;
 }
 
+/**
+ * The list is owned by ReviewListClient: this component unmounts on a tab switch, so keeping it
+ * here would bring a deleted item back on return.
+ */
 export function SavedChatNotesList({
-  initialNotes,
+  notes,
   loadFailed,
-  onCountChange,
+  onDeleted,
 }: {
-  initialNotes: SavedChatNoteView[];
+  notes: SavedChatNoteView[];
   loadFailed: boolean;
-  /** Keeps the tab label's count in step after a delete. */
-  onCountChange: (count: number) => void;
+  onDeleted: (id: number) => void;
 }) {
-  const [notes, setNotes] = useState(initialNotes);
   const [deleting, setDeleting] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    onCountChange(notes.length);
-  }, [notes.length, onCountChange]);
 
   if (loadFailed) {
     return (
@@ -58,8 +56,7 @@ export function SavedChatNotesList({
       });
       // 404 means it is already gone (deleted in another tab), which is what the learner wanted.
       if (res.ok || res.status === 404) {
-        // Functional update: two quick deletes would otherwise each start from a stale list.
-        setNotes((prev) => prev.filter((note) => note.id !== id));
+        onDeleted(id);
       } else {
         setError("削除に失敗しました。時間をおいてもう一度試してください。");
       }
