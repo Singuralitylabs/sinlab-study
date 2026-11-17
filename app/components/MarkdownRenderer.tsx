@@ -17,6 +17,7 @@ import ReactMarkdown, { type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
 import { isExternalHref } from "@/app/lib/external-link";
+import hcl from "@/app/lib/highlight-hcl";
 import { resolveMarkdownImageWidth } from "@/app/lib/markdown-image-width";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +41,7 @@ const lowlight = createLowlight({
   sql,
   markdown,
   yaml,
+  hcl,
 });
 lowlight.registerAlias({
   html: ["xml"],
@@ -47,6 +49,7 @@ lowlight.registerAlias({
   typescript: ["ts"],
   bash: ["sh", "shell"],
   yaml: ["yml"],
+  hcl: ["terraform", "tf"],
 });
 
 const languageClassPrefix = "language-";

@@ -36,6 +36,10 @@ const LANGUAGE_LOADERS: Record<CodeLanguage, () => Promise<Extension[]>> = {
       import("@codemirror/language"),
       import("@codemirror/legacy-modes/mode/yaml"),
     ]).then(([{ StreamLanguage }, { yaml }]) => [StreamLanguage.define(yaml)]),
+  hcl: () =>
+    Promise.all([import("@codemirror/language"), import("@/app/lib/hcl-stream-mode")]).then(
+      ([{ StreamLanguage }, { hcl }]) => [StreamLanguage.define(hcl)]
+    ),
 };
 
 const NO_EXTENSIONS: Extension[] = [];
