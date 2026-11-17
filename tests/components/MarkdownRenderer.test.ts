@@ -113,7 +113,7 @@ describe("MarkdownRenderer", () => {
     ["yml", "services:\n  web:\n    image: nginx"],
     ["hcl", 'resource "aws_s3_bucket" "site" {\n  bucket = "example"\n}'],
     ["terraform", 'variable "region" {\n  default = "ap-northeast-1"\n}'],
-    ["tf", 'output "name" {\n  value = "${var.region}"\n}'],
+    ["tf", `output "name" {\n  value = "\${var.region}"\n}`],
     ["jsx", "const a = <div />;"],
     ["tsx", "const a: number = 1;"],
   ])("演習の提出言語 %s のコードフェンスがハイライトされる", (language, code) => {

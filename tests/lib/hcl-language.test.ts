@@ -54,7 +54,7 @@ describe("エディタの HCL トークナイザ", () => {
       [
         "# comment",
         'resource "aws_s3_bucket" "site" {',
-        '  bucket = "name-${var.env}"',
+        `  bucket = "name-\${var.env}"`,
         "  force_destroy = true",
         "  count = 2 // two",
         "}",
@@ -64,15 +64,35 @@ describe("エディタの HCL トークナイザ", () => {
     expect(tokens).toContainEqual(["resource", "keyword"]);
     expect(tokens).toContainEqual(['"aws_s3_bucket"', "string"]);
     expect(tokens).toContainEqual(["bucket", "property"]);
-    expect(tokens).toContainEqual(['"name-${var.env}"', "string"]);
+    expect(tokens).toContainEqual([`"name-\${var.env}"`, "string"]);
     expect(tokens).toContainEqual(["true", "atom"]);
     expect(tokens).toContainEqual(["2", "number"]);
     expect(tokens).toContainEqual(["// two", "comment"]);
   });
 
+  it("複数行のリストや引数の行頭にある参照はブロックの種類として塗らない", () => {
+    const tokens = tokenize(
+      [
+        'resource "aws_s3_bucket_policy" "site" {',
+        "  depends_on = [",
+        "    aws_s3_bucket_public_access_block.site,",
+        "  ]",
+        "  tags = merge(",
+        "    local.common_tags,",
+        "  )",
+        "  lifecycle {",
+        "  }",
+        "}",
+      ].join("\n")
+    );
+    expect(tokens).toContainEqual(["aws_s3_bucket_public_access_block", "variable"]);
+    expect(tokens).toContainEqual(["local", "variable"]);
+    expect(tokens).toContainEqual(["lifecycle", "keyword"]);
+  });
+
   it("補間の中の引用符で文字列が途中で切れない", () => {
-    const tokens = tokenize('  name = "${lookup(var.m, "k", "d")}-x"');
-    expect(tokens).toContainEqual(['"${lookup(var.m, "k", "d")}-x"', "string"]);
+    const tokens = tokenize(`  name = "\${lookup(var.m, "k", "d")}-x"`);
+    expect(tokens).toContainEqual([`"\${lookup(var.m, "k", "d")}-x"`, "string"]);
   });
 
   it("ヒアドキュメントとブロックコメントは終わりの行まで続く", () => {

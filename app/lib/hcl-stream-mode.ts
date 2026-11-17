@@ -79,8 +79,11 @@ export const hcl: StreamParser<HclState> = {
       if (LITERALS.has(name)) return "atom";
       if (EXPRESSION_KEYWORDS.has(name)) return "keyword";
       if (stream.match(/^\s*=(?!=)/, false)) return "property";
-      // A word that opens a line and is not an assignment is a block type (resource, variable...).
-      if (stream.string.slice(0, stream.start).trim() === "") return "keyword";
+      // Block types open a line and are followed by a label or `{`. A bare word at line start
+      // without them is a reference inside a multi-line list or call (depends_on = [\n  aws_x.y]).
+      if (stream.string.slice(0, stream.start).trim() === "" && stream.match(/^\s*["{]/, false)) {
+        return "keyword";
+      }
       return "variable";
     }
     if (stream.match(/^[{}[\]()]/)) return "bracket";
