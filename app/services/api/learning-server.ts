@@ -681,6 +681,58 @@ export async function fetchVisibleContentForSubmission(
   };
 }
 
+export interface VisibleContentForChat {
+  id: number;
+  title: string;
+  content_type: ContentType;
+  text_content: string | null;
+  exercise_instructions: string | null;
+  hint: string | null;
+  starter_files: Json | null;
+  phaseName: string | null;
+  themeName: string | null;
+}
+
+/**
+ * Same published-hierarchy filters as isContentVisible() (null = invisible), with the columns the
+ * シンラビ chat may put in its prompt. Normal client only: reference_answer / grading_rubric are
+ * not granted to learners and must never reach the chat (#569).
+ */
+export async function fetchVisibleContentForChat(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  contentId: number
+): Promise<VisibleContentForChat | null> {
+  const { data, error } = await applyVisibleHierarchyFilters(
+    supabase
+      .from("learning_contents")
+      .select(
+        "id, title, content_type, text_content, exercise_instructions, hint, starter_files, phase:learning_phases!inner(name, theme:learning_themes!inner(name))"
+      )
+      .eq("id", contentId)
+  ).maybeSingle();
+
+  if (error) {
+    console.error("コンテンツ可視性チェックエラー:", error.message);
+  }
+  if (!data) {
+    return null;
+  }
+
+  // The embed is many-to-one, but the type parser types !inner embeds as arrays.
+  const phase = data.phase as unknown as { name: string; theme: { name: string } | null } | null;
+  return {
+    id: data.id,
+    title: data.title,
+    content_type: data.content_type as ContentType,
+    text_content: data.text_content,
+    exercise_instructions: data.exercise_instructions,
+    hint: data.hint,
+    starter_files: data.starter_files,
+    phaseName: phase?.name ?? null,
+    themeName: phase?.theme?.name ?? null,
+  };
+}
+
 /**
  * Whether the content and its phase / theme are all published and not deleted. Used in
  * admin / maintainer preview for the "unpublished" badge and for showing the complete button /

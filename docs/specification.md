@@ -1752,3 +1752,75 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 ### 16.4 スコープ外（段階1）
 
 投稿者への自動返信メール、画像添付、公開ボード、GitHub イシュー自動作成（段階2）。
+
+## 17. シンラビに相談（AIチャット。#569 段階1）
+
+記事・演習の画面で、全テーマのナビゲーター「シンラビ」にチャットで質問できる。シンラビは、いま見ているコンテンツの内容を文脈として答える。生成AIの費用は回数に比例するため、プランごとに回数の上限を設ける。会話の本文は DB に保存しない。
+
+### 17.1 有効・無効
+
+`AI_CHAT_ENABLED === "true"` のときだけ有効（`isAiChatEnabled()`。`app/constants/ai-chat.ts`。フェイルクローズ）。無効時は画面に入口を出さず、`POST /api/ai-chat`・`GET /api/ai-chat/usage`・`POST /api/ai-chat/saved-notes` は 503。保存済みの回答の表示と削除（`DELETE /api/ai-chat/saved-notes`）は無効時も続ける。
+
+### 17.2 対象と回数制限
+
+| 区分 | 使えるか | 上限（初期値） |
+|:--|:--|:--|
+| 有料会員（`status = active`。admin / maintainer を含む） | 使える | 1日 20 回（全コンテンツ合計、JST 0時リセット） |
+| お試し（`status = trial`） | お試し公開のコンテンツだけ（RLS で絞られる） | 通算 5 回（リセットなし） |
+| それ以外 | 使えない（403） | — |
+
+- 対象のコンテンツ種別は `text`（記事）と `exercise`（演習）だけ（`AI_CHAT_CONTENT_TYPES`）。動画・スライドは文脈（台本）が DB に無いため、クイズは AI が代わりに解く経路を作らないため対象外（400）。
+- 1回 = 質問1つ（Gemini 呼び出し1回）。上限値は `ai_chat_settings`（1行。[データベース設計書](./database.md) 3.28節）が唯一の真実で、`AI_CHAT_LIMITS` はその初期値と、読めない・範囲外のときの代替値。範囲は `AI_CHAT_LIMIT_BOUNDS`（DB の CHECK と同じ）。管理者が `PUT /api/admin/ai-chat-settings`（`requireAdminApi()`）で変え、次の質問から反映される（キャッシュしない）。
+- 判定と枠の確保は RPC `claim_ai_chat()`（`claimAIChat()`。ユーザー単位の advisory lock の中で数えて `pending` 行を INSERT）で 1 トランザクションに行い、同時に送られても上限を超えない。`failed`（Gemini の失敗）と、`AI_CHAT_STALE_AFTER_MS`（60秒）より古い `pending`（関数が落ちた行）は数えない。`counts_toward_limit = false` の行も数えない（管理者のリセット用。段階1に画面は無い）。
+- 残り回数の表示は `GET /api/ai-chat/usage`（通常クライアントで本人の行を読み、`computeChatUsage()`（`app/lib/ai-chat-limits.ts`）で計算）。返す値は `{ remaining, limit, period: "daily" | "lifetime", resetsAt }`。
+
+### 17.3 質問 API
+
+**エンドポイント**: `POST /api/ai-chat`
+
+**ボディ**: `{ contentId, message, history }`（zod。`message` は trim 後 1〜500 文字。`history` は `{ role: "user" | "assistant", content }` の配列で最大 6 件＝3往復。質問は 500 文字、回答は 2,000 文字まで）
+
+1. 機能が無効なら 503
+2. zod 検証 → `requireLearnerApi()`（未認証 401、`rejected` 403）。`active` / `trial` 以外は 403
+3. `resolveGeminiApiKey(userStatus)` でキーを決める（AIレビューと同じ振り分け。6.1.2節）。無ければ 503
+4. 通常クライアントで `fetchVisibleContentForChat()`（`isContentVisible()` と同じ親階層までの公開・未削除の絞り込みで、文脈に使う列だけを取る）。0行なら 403、対象外の種別なら 400
+5. 演習なら、本人の最新の提出 1 件と、その完了したレビューを通常クライアントで読む（`fetchLatestSubmissionForChat()`）
+6. `claim_ai_chat()` で枠を確保。上限なら 429（`{ error, reason: "user_daily" | "trial_lifetime", remaining: 0, resetsAt }`。お試しは `resetsAt = null`）
+7. プロンプトを作り Gemini を呼ぶ。成功したら利用行を `completed` にしてモデル名とトークン数を保存し、`{ answer, remaining, limit }` を返す。失敗したら行を `failed`（回数に数えない。受け取ったトークン数は残す）にして 502
+
+- モデルは AIレビューと同じ `GEMINI_MODEL_CONFIGS`（主 → 代替のフォールバック、`generateChatReply()`）。出力上限 `AI_CHAT_MAX_OUTPUT_TOKENS`、1回あたり `AI_CHAT_REQUEST_TIMEOUT_MS`、全体 `AI_CHAT_TOTAL_BUDGET_MS`（25秒）、`maxDuration` 40 秒。ストリーミングはしない（段階2で検討）。
+- 回答は `AI_CHAT_ANSWER_MAX_LENGTH`（2,000文字）で切ってから返す（履歴・保存の上限に収めるため）。
+- **質問・履歴・回答の本文と API キーを `console` に出さない**（Vercel のログに残さない）。
+
+### 17.4 文脈（プロンプトに渡すもの）
+
+取得はすべて通常クライアント（RLS と列権限が効く）で行い、service_role は使わない（受講生向け配信の service_role 2経路を増やさない）。プロンプトは `app/lib/ai-chat-prompt.ts` が組み立てる。
+
+| 画面 | 渡すもの | 渡さないもの |
+|:--|:--|:--|
+| 記事 | テーマ名・フェーズ名・タイトル、`text_content`（本文そのもの。要約しない） | — |
+| 演習 | タイトル、`exercise_instructions`、`hint`、`starter_files`、本人の最新の提出（あれば）、その AI レビューの要約（あれば） | `reference_answer`・`grading_rubric`（列権限で受講生から読めず、service_role でも読まない）、クイズの正解、他人の提出、過去の提出、`review_content` の全文 |
+
+- 文字数の上限（定数）: 記事本文 `AI_CHAT_ARTICLE_MAX_CHARS`（20,000）、演習の指示文・ヒント・初期コード `AI_CHAT_EXERCISE_MAX_CHARS`（8,000）、提出コード `AI_CHAT_SUBMISSION_MAX_CHARS`（全ファイル合計 6,000）、レビューのコメント 1 件 `AI_CHAT_REVIEW_COMMENT_MAX_CHARS`（200）。超えた分は末尾を落とし、省略したことをプロンプトに書く。
+- 提出は、初期コードと trim 後の内容が同じファイルと空のファイルを省く。レビューは要件ごとの判定（達成 / 部分的 / 未達成）と短いコメント、合否・点数だけを渡す。提出もレビューも無ければ節ごと省く。
+- 並びは「システムプロンプト → 教材 → これまでの会話 → 今回の質問」に固定する。同じコンテンツなら先頭が毎回同じになり、Gemini の暗黙的なキャッシュが効きやすい。履歴は直近 3 往復だけ（`trimHistory()`）。
+- 教材・履歴・質問・提出コードは、中のバッククォートの連続より長いフェンスで囲む（`fenceFor()`。AIレビューと共通）。履歴はクライアントが送るため改ざんできるが、影響は本人への回答だけなので許容し、システムプロンプトで「正しいとは限らない記録」として扱わせる。
+
+### 17.5 シンラビの振る舞い（システムプロンプト）
+
+`AI_CHAT_SYSTEM_PROMPT`。一人称「僕」、明るく砕けた話し言葉。答える範囲は教材と、それを理解するのに必要な Web 技術の一般知識だけで、関係のない依頼は一言で断って教材の話に戻す。演習では完成コード・模範回答を書かず（頼まれても同じ）、考え方・確認の手順・数行までの部分コードにとどめる。分からないことや変わりやすい情報（料金・版番号など）は言い切らない。回答は目安 400 文字（長くても 800 文字）で、最後に次に試すことを1つ添える。個人情報やキーを貼られたら注意する。**プロンプトだけで「答えを教えない」を保証することはできない**（教えにくくするまでが目標。会話を保存しないため、品質は運営が実際に試して確かめる）。
+
+### 17.6 復習リストへの保存
+
+会話は画面の中（クライアントの状態）にだけ持ち、別のコンテンツへ移る・再読み込みすると消える。残したい回答は受講生が保存する。
+
+| メソッド | パス | 内容 |
+|:--|:--|:--|
+| POST | `/api/ai-chat/saved-notes` | `{ contentId, question, answer }`（質問 500・回答 2,000 文字まで）。`requireLearnerApi()`・`isContentVisible()`（不可視 403）。1人 `AI_CHAT_SAVED_NOTES_MAX_PER_USER`（300）件に達していたら 409。通常クライアントで INSERT（RLS が `user_id` を本人に固定し、可視コンテンツに限る）。Gemini を呼ばないので回数に数えない |
+| DELETE | `/api/ai-chat/saved-notes` | `{ id }`。本人の行だけ（RLS と `user_id` の絞り込み）。無ければ 404 |
+
+保存先は `ai_chat_saved_notes`（[データベース設計書](./database.md) 3.29節）。`review_notes` の学習メモには書き足さない（受講生のメモを上書きしないため）。保存した項目は、復習リストの未克服・克服済みの件数（ホーム・週次メール）に数えない。
+
+### 17.7 費用の目安
+
+入力は記事の画面で約 10,000〜17,000 トークン（システムプロンプト約 1,000、本文 8,000〜15,000、履歴と質問約 1,500）、演習の画面は文脈が約 4,000〜7,500 で記事より小さい。出力は回答と思考で約 1,000〜1,500。上限まで使われた場合の費用の安全弁は、管理画面で上限値を下げることと、`AI_CHAT_ENABLED` で機能全体を止めること。単価は `GEMINI_MODEL_NAME` の公式の料金で確かめる（変わるため本書に数値を置かない）。費用が問題になったら、まず記事を `##` 見出しごとに分けて質問に関係する節だけを渡す形を検討する（段階2以降、別 Issue）。利用実績は `ai_chat_usage` のトークン数を SQL で集計する（集計画面は段階2）。
