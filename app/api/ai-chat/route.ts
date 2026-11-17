@@ -64,7 +64,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "アクセスが拒否されています" }, { status: 403 });
     }
 
-    const apiKey = resolveGeminiApiKey(userStatus);
+    // Trial users get the paid key too: the free tier is the first to get 503s and timeouts when
+    // Gemini is busy, and its prompts may be used by Google. Trial questions are capped (lifetime).
+    const apiKey = resolveGeminiApiKey(USER_STATUS.ACTIVE);
     if (!apiKey) {
       return NextResponse.json({ error: AI_CHAT_DISABLED_MESSAGE }, { status: 503 });
     }
