@@ -24,9 +24,12 @@ function groupByTheme(notes: SavedChatNoteView[]) {
 export function SavedChatNotesList({
   initialNotes,
   loadFailed,
+  onCountChange,
 }: {
   initialNotes: SavedChatNoteView[];
   loadFailed: boolean;
+  /** Keeps the tab label's count in step after a delete. */
+  onCountChange: (count: number) => void;
 }) {
   const [notes, setNotes] = useState(initialNotes);
   const [deleting, setDeleting] = useState<number | null>(null);
@@ -51,7 +54,9 @@ export function SavedChatNotesList({
       });
       // 404 means it is already gone (deleted in another tab), which is what the learner wanted.
       if (res.ok || res.status === 404) {
-        setNotes((prev) => prev.filter((note) => note.id !== id));
+        const remaining = notes.filter((note) => note.id !== id);
+        setNotes(remaining);
+        onCountChange(remaining.length);
       } else {
         setError("削除に失敗しました。時間をおいてもう一度試してください。");
       }

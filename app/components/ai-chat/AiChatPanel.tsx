@@ -25,6 +25,8 @@ interface AiChatPanelProps {
   contentId: number;
   contentType: "text" | "exercise";
   stripeEnabled: boolean;
+  /** Only members have /review-list, so admin / maintainer get no save button (nowhere to read it). */
+  canSave: boolean;
 }
 
 const DISCLAIMER =
@@ -49,7 +51,7 @@ function Mascot({ thinking, size }: { thinking: boolean; size: "sm" | "md" }) {
  * move to another content (the page remounts it per content). Nothing is fetched until the panel
  * is first opened.
  */
-export function AiChatPanel({ contentId, contentType, stripeEnabled }: AiChatPanelProps) {
+export function AiChatPanel({ contentId, contentType, stripeEnabled, canSave }: AiChatPanelProps) {
   const [open, setOpen] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [saveStates, setSaveStates] = useState<Record<number, SaveState>>({});
@@ -237,7 +239,9 @@ export function AiChatPanel({ contentId, contentType, stripeEnabled }: AiChatPan
           </header>
 
           <p className="border-b border-border bg-muted/50 px-4 py-2 text-xs text-muted-foreground">
-            画面を移ると会話は消えます。残したい回答は「復習リストに残す」で保存してね
+            {canSave
+              ? "画面を移ると会話は消えます。残したい回答は「復習リストに残す」で保存してね"
+              : "画面を移ると会話は消えます"}
           </p>
 
           <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
@@ -288,25 +292,27 @@ export function AiChatPanel({ contentId, contentType, stripeEnabled }: AiChatPan
                           <div className="rounded-2xl border border-border bg-muted px-3 py-2 text-sm [&_pre]:text-xs">
                             <MarkdownRenderer content={turn.answer} />
                           </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="mt-1 h-7 px-2 text-xs"
-                            disabled={saveState === "saving" || saveState === "saved"}
-                            onClick={() => void save(turn)}
-                          >
-                            {saveState === "saved" ? (
-                              <BookmarkCheck className="size-3.5" />
-                            ) : (
-                              <Bookmark className="size-3.5" />
-                            )}
-                            {saveState === "saved"
-                              ? "保存しました"
-                              : saveState === "saving"
-                                ? "保存中…"
-                                : "復習リストに残す"}
-                          </Button>
+                          {canSave && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="mt-1 h-7 px-2 text-xs"
+                              disabled={saveState === "saving" || saveState === "saved"}
+                              onClick={() => void save(turn)}
+                            >
+                              {saveState === "saved" ? (
+                                <BookmarkCheck className="size-3.5" />
+                              ) : (
+                                <Bookmark className="size-3.5" />
+                              )}
+                              {saveState === "saved"
+                                ? "保存しました"
+                                : saveState === "saving"
+                                  ? "保存中…"
+                                  : "復習リストに残す"}
+                            </Button>
+                          )}
                         </>
                       )}
                     </div>

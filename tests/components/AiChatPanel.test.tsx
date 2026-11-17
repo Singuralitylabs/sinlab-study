@@ -53,9 +53,16 @@ describe("AiChatPanel", () => {
     vi.restoreAllMocks();
   });
 
-  const render = async (stripeEnabled = true) => {
+  const render = async (stripeEnabled = true, canSave = true) => {
     await act(async () => {
-      root.render(<AiChatPanel contentId={10} contentType="text" stripeEnabled={stripeEnabled} />);
+      root.render(
+        <AiChatPanel
+          contentId={10}
+          contentType="text"
+          stripeEnabled={stripeEnabled}
+          canSave={canSave}
+        />
+      );
     });
   };
 
@@ -182,5 +189,24 @@ describe("AiChatPanel", () => {
     await click(buttonByText("シンラビに相談"));
     expect(container.querySelector('a[href="/upgrade"]')).toBeNull();
     expect(container.textContent).toContain("運営の承認");
+  });
+
+  it("admin / maintainer（canSave = false）には「復習リストに残す」を出さない", async () => {
+    stubFetch({
+      "GET /api/ai-chat/usage": [
+        {
+          status: 200,
+          body: { usage: { remaining: 18, limit: 20, period: "daily", resetsAt: "x" } },
+        },
+      ],
+      "POST /api/ai-chat": [{ status: 200, body: { answer: "回答", remaining: 17, limit: 20 } }],
+    });
+    await render(true, false);
+    await click(buttonByText("シンラビに相談"));
+    await typeQuestion("質問");
+    await submit();
+    expect(container.textContent).toContain("回答");
+    expect(buttonByText("復習リストに残す")).toBeUndefined();
+    expect(container.textContent).not.toContain("「復習リストに残す」で保存してね");
   });
 });

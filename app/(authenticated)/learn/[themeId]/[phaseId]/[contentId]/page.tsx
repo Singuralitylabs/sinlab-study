@@ -696,6 +696,7 @@ export default async function ContentPage({ params }: PageProps) {
           contentId={contentIdNum}
           contentType={content.content_type === "text" ? "text" : "exercise"}
           stripeEnabled={stripeEnabled}
+          canSave={showReviewListNotes}
         />
       )}
     </div>
