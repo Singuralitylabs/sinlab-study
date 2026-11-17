@@ -22,6 +22,16 @@ export function formatDatePadded(isoString: string): string {
   });
 }
 
+/** JST date with 年月日 (e.g. 2026年10月5日), for the printed certificate. */
+export function formatDateLong(isoString: string): string {
+  return new Date(isoString).toLocaleDateString("ja-JP", {
+    timeZone: JST,
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
 /** JST date and time with seconds (e.g. 2026/10/11 8:00:00). */
 export function formatDateTime(isoString: string): string {
   return new Date(isoString).toLocaleString("ja-JP", { timeZone: JST });
