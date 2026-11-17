@@ -1,38 +1,40 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCertificateThemeColors,
+  CERTIFICATE_FALLBACK_COLORS,
   CERTIFICATE_MIN_CONTRAST,
-  CERTIFICATE_PALETTES,
   contrastRatio,
-  getCertificatePalette,
-  resolveCertificateStyles,
+  getCertificateFallbackColor,
+  resolveCertificateColors,
 } from "@/app/lib/certificate-palette";
 import { normalizeThemeColor } from "@/app/lib/theme-color";
 
-describe("getCertificatePalette", () => {
-  it("同じテーマは常に同じパレット", () => {
-    expect(getCertificatePalette(7)).toBe(getCertificatePalette(7));
+describe("getCertificateFallbackColor", () => {
+  it("同じテーマは常に同じ色", () => {
+    expect(getCertificateFallbackColor(7)).toBe(getCertificateFallbackColor(7));
   });
 
   it("theme_id 1 は従来のインディゴ（0番目）", () => {
-    expect(getCertificatePalette(1)).toBe(CERTIFICATE_PALETTES[0]);
+    expect(getCertificateFallbackColor(1)).toBe(CERTIFICATE_FALLBACK_COLORS[0]);
   });
 
-  it("連続した id は別のパレットになり、一巡すると戻る", () => {
-    const count = CERTIFICATE_PALETTES.length;
-    expect(getCertificatePalette(1)).not.toBe(getCertificatePalette(2));
-    expect(getCertificatePalette(1)).toBe(getCertificatePalette(1 + count));
+  it("連続した id は別の色になり、一巡すると戻る", () => {
+    const count = CERTIFICATE_FALLBACK_COLORS.length;
+    expect(getCertificateFallbackColor(1)).not.toBe(getCertificateFallbackColor(2));
+    expect(getCertificateFallbackColor(1)).toBe(getCertificateFallbackColor(1 + count));
   });
 
-  it("0・負数・小数でも範囲内のパレットを返す", () => {
+  it("0・負数・小数でも範囲内の色を返す", () => {
     for (const id of [0, -1, -7, 2.5]) {
-      expect(CERTIFICATE_PALETTES).toContain(getCertificatePalette(id));
+      expect(CERTIFICATE_FALLBACK_COLORS).toContain(getCertificateFallbackColor(id));
     }
   });
 
-  it("パレットの色クラスは重複しない", () => {
-    const sheets = CERTIFICATE_PALETTES.map((p) => p.sheet);
-    expect(new Set(sheets).size).toBe(sheets.length);
+  it("色は重複せず、すべて #RRGGBB", () => {
+    expect(new Set(CERTIFICATE_FALLBACK_COLORS).size).toBe(CERTIFICATE_FALLBACK_COLORS.length);
+    for (const hex of CERTIFICATE_FALLBACK_COLORS) {
+      expect(normalizeThemeColor(hex)).toBe(hex);
+    }
   });
 });
 
@@ -63,35 +65,35 @@ const lightnessOf = (hex: string) => {
 
 describe("buildCertificateThemeColors", () => {
   it.each(SAMPLE_COLORS)(
-    "%s: 文字と外枠はシートの濃い側の地色に対して基準のコントラストを満たす",
+    "%s: 文字と外枠は紙の濃い側の地色に対して基準のコントラストを満たす",
     (hex) => {
       const colors = buildCertificateThemeColors(hex);
       expect(colors).not.toBeNull();
       if (!colors) return;
-      expect(contrastRatio(colors.heading, colors.sheetTo)).toBeGreaterThanOrEqual(
+      expect(contrastRatio(colors.heading, colors.paper)).toBeGreaterThanOrEqual(
         CERTIFICATE_MIN_CONTRAST.heading
       );
-      expect(contrastRatio(colors.subtitle, colors.sheetTo)).toBeGreaterThanOrEqual(
-        CERTIFICATE_MIN_CONTRAST.subtitle
+      expect(contrastRatio(colors.accent, colors.paper)).toBeGreaterThanOrEqual(
+        CERTIFICATE_MIN_CONTRAST.accent
       );
-      expect(contrastRatio(colors.outerBorder, colors.sheetTo)).toBeGreaterThanOrEqual(
-        CERTIFICATE_MIN_CONTRAST.outerBorder
+      expect(contrastRatio(colors.frame, colors.paper)).toBeGreaterThanOrEqual(
+        CERTIFICATE_MIN_CONTRAST.frame
       );
     }
   );
 
-  it("元の色の明るさに関係なく、シートは淡く、見出しは濃くなる", () => {
+  it("元の色の明るさに関係なく、紙は淡く、見出しは濃くなる", () => {
     for (const hex of ["#D8F8A2", "#0A3E2A"]) {
       const colors = buildCertificateThemeColors(hex);
-      expect(lightnessOf(colors?.sheetTo ?? "#000000")).toBeGreaterThan(0.9);
+      expect(lightnessOf(colors?.paper ?? "#000000")).toBeGreaterThan(0.95);
       expect(lightnessOf(colors?.heading ?? "#FFFFFF")).toBeLessThan(0.2);
     }
   });
 
-  it("彩度は上限で抑える（原色でもシートがどぎつくならない）", () => {
+  it("彩度は上限で抑える（原色でも紙がどぎつくならない）", () => {
     const colors = buildCertificateThemeColors("#FF0000");
-    // hsl(0, 85%, 92%) = #FCD9D9; full saturation would give #FFD6D6
-    expect(colors?.sheetTo).toBe("#FCD9D9");
+    // hsl(0, 85%, 82%) = #F8AAAA; full saturation would give #FFA3A3
+    expect(colors?.pattern).toBe("#F8AAAA");
   });
 
   it("大文字・小文字・前後の空白は同じ結果になる", () => {
@@ -105,28 +107,17 @@ describe("buildCertificateThemeColors", () => {
   });
 });
 
-describe("resolveCertificateStyles", () => {
-  it("テーマカラーがあれば、その色のインライン style で描く（クラスは使わない）", () => {
-    const styles = resolveCertificateStyles(1, "#3B77D8");
-    const colors = buildCertificateThemeColors("#3B77D8");
-    expect(styles.sheet.className).toBe("");
-    expect(styles.sheet.style?.backgroundImage).toContain(colors?.sheetTo);
-    expect(styles.outerBorder.style?.borderColor).toBe(colors?.outerBorder);
-    expect(styles.heading.style?.color).toBe(colors?.heading);
-    expect(styles.subtitle.style?.color).toBe(colors?.subtitle);
+describe("resolveCertificateColors", () => {
+  it("テーマカラーがあれば、その色から作る", () => {
+    expect(resolveCertificateColors(1, "#3B77D8")).toEqual(buildCertificateThemeColors("#3B77D8"));
   });
 
   it.each([null, "", "#12345"])(
-    "テーマカラーが無い・形式外（%s）なら、theme_id のパレットに戻る",
+    "テーマカラーが無い・形式外（%s）なら、theme_id の色から作る",
     (themeColor) => {
-      const styles = resolveCertificateStyles(3, themeColor);
-      const palette = getCertificatePalette(3);
-      expect(styles.sheet.className).toBe(`bg-gradient-to-br ${palette.sheet}`);
-      expect(styles.sheet.style).toBeUndefined();
-      expect(styles.outerBorder.className).toBe(palette.outerBorder);
-      expect(styles.innerBorder.className).toBe(palette.innerBorder);
-      expect(styles.subtitle.className).toBe(palette.subtitle);
-      expect(styles.heading.className).toBe(palette.heading);
+      expect(resolveCertificateColors(3, themeColor)).toEqual(
+        buildCertificateThemeColors(getCertificateFallbackColor(3))
+      );
     }
   );
 });

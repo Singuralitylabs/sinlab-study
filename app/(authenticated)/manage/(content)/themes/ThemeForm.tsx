@@ -141,8 +141,8 @@ function ThemeColorField({ value, onChange }: ThemeColorFieldProps) {
             aria-hidden="true"
             className="flex h-12 w-24 items-center justify-center border-4 text-sm font-bold"
             style={{
-              backgroundImage: `linear-gradient(to bottom right, #FFFFFF, ${colors.sheetVia}, ${colors.sheetTo})`,
-              borderColor: colors.outerBorder,
+              backgroundImage: `radial-gradient(ellipse at 50% 40%, #FFFFFF 0%, ${colors.paper} 100%)`,
+              borderColor: colors.frame,
               color: colors.heading,
             }}
           >
