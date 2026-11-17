@@ -721,7 +721,7 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 | 403 | `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
 | 500 | サーバーエラー |
 
-#### 5.4.7 ライブプレビュー（HTML / CSS / JavaScript / React）と SQL の実行
+#### 5.4.7 ライブプレビュー（HTML / CSS / JavaScript / React）と SQL・Python の実行
 
 ライブプレビューとコンソールは、提出フォーム（`SubmissionForm`）と `SubmissionCodeBlock` を使う 3 か所（提出履歴 `/submissions`・`/manage/submissions` とコンテンツ詳細の「提出内容」）で、`resolvePreviewDisplay()`（`app/lib/html-preview.ts`）の結果に従って別々に出す。判定に使う構成は管理者が決めた提出ファイル（`resolveSubmissionFileSlots()`。#377）で、受講者が選ぶ言語は使わない。`show_preview` / `show_console` が NULL のときは次の自動規則、boolean のときはその上書き（許可されない「オン」は保存できない。画面ではチェックを無効にし、API は 400）。設定を読めない経路は、表示している提出ファイル自身に自動規則を当てる。
 
@@ -731,6 +731,7 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 | React（`App.jsx` または `App.js` があり、ほかは `.jsx` / `.js` / `.css` だけ） | オン | オン |
 | `javascript` だけ、または `javascript` と `css` だけ（上記 React 以外） | オフ | オン（「実行」ボタン。押すまで動かない） |
 | `sql` だけ（#507） | オフ | オン（「実行」ボタン。PostgreSQL で実行して結果を表で出す。押すまで動かない） |
+| `python` だけ（#545） | オフ | オン（「実行」ボタン。Pyodide で実行して出力を出す。押すまで動かない） |
 | `css` だけ（土台 HTML あり） | オン | オフ |
 | `css` だけ（土台 HTML なし） | オフ | オフ |
 | それ以外の言語を含む、または空 | オフ | オフ |
@@ -1673,7 +1674,7 @@ X 向けの共有リンクの詳細：本文は「『{テーマ名}』を修了�
 
 - **マニフェスト**（`app/manifest.ts`）: `name` / `short_name` は Sinlab Study、`start_url` は `/`、`display` は `standalone`。`theme_color` / `background_color` は `app/constants/pwa.ts` の sRGB（`globals.css` の oklch トークンの代替。マニフェストは oklch を受けない）。アイコンは 192px・512px を `purpose: any`（`/icons/icon-*.png`）と `purpose: maskable`（`/icons/icon-maskable-*.png`。余白つき別ファイル）の両方で載せる（`maskable` だけだと Chrome がインストール可能と判定しない）。`app/apple-icon.png`（180px）と `metadata.appleWebApp`、`viewport.themeColor`（ライト・ダーク）を付ける
 - **アイコン**: ナビゲーター・シンラビのイラスト（青空背景・Sinlab Study ロゴ入り）。(1) 通常版 → `public/icons/icon-192.png` / `icon-512.png`（PWA `any`・Web Push）、`app/apple-icon.png`（180px）。元絵の角丸の外（白）を背景色で埋めた全面塗りで、角丸はOS側のマスクに任せる。(2) 小サイズ版 → `app/icon.png` / `public/icon.png`（132px。ブラウザのタブのみ。サイドバー・`/demo`・ログイン画面のヘッダーは、統一感を優先して通常版 `/icons/icon-192.png`。24〜28px では全身・文字は判読しづらいが、ブランドの一貫性のため許容する）。タブの 32px は全身だと潰れるため、顔まわり（耳・キャップ・表情。ロゴや文字は入れない）を切り出す。(3) maskable 版 → `icon-maskable-192.png` / `icon-maskable-512.png`（イラストを 66% に縮小して中央に置き、縁をぼかして余白（元絵の上下端の色のグラデーション）になじませる。絵の輪郭（ロゴ・耳先）が直径 80% の円形安全領域に収まるよう縮小率を決めている）
-- **サービスワーカー**（`public/sw.js`）: `/_next/static/*` は cache-first。アイコン（`/icon.png`・`/apple-icon.png`・`/icons/`）は URL にハッシュが無いので network-first（成功時にキャッシュを更新し、オフライン時だけキャッシュを使う）。`/offline` は install でキャッシュする。キャッシュ名（`STATIC_CACHE`）はバージョン付きで、ルール・オフライン HTML・アイコン差し替え時にバンプする。`activate` でそれ以外の名前のキャッシュを削除する。ナビゲーションは常にネットワーク優先で、失敗時だけそのキャッシュ（「オフラインです」）を返す。認証配下の HTML と `/api/*` はキャッシュしない（降格・却下・ロックの反映が遅れないようにする）。`/vendor/`（React プレビュー・SQL の実行用。5.4.7）も cache-first 対象外（差し替えが古いキャッシュに残らない）。`next.config.ts` の `headers()` で `/sw.js` に `Cache-Control: no-cache` と `Service-Worker-Allowed: /` を付ける。登録は `ServiceWorkerRegistration` が本番ビルドだけで行う
+- **サービスワーカー**（`public/sw.js`）: `/_next/static/*` は cache-first。アイコン（`/icon.png`・`/apple-icon.png`・`/icons/`）は URL にハッシュが無いので network-first（成功時にキャッシュを更新し、オフライン時だけキャッシュを使う）。`/offline` は install でキャッシュする。キャッシュ名（`STATIC_CACHE`）はバージョン付きで、ルール・オフライン HTML・アイコン差し替え時にバンプする。`activate` でそれ以外の名前のキャッシュを削除する。ナビゲーションは常にネットワーク優先で、失敗時だけそのキャッシュ（「オフラインです」）を返す。認証配下の HTML と `/api/*` はキャッシュしない（降格・却下・ロックの反映が遅れないようにする）。`/vendor/`（React プレビュー・SQL と Python の実行用。5.4.7）も cache-first 対象外（差し替えが古いキャッシュに残らない）。`next.config.ts` の `headers()` で `/sw.js` に `Cache-Control: no-cache` と `Service-Worker-Allowed: /` を付ける。登録は `ServiceWorkerRegistration` が本番ビルドだけで行う
 - **プロキシ**: `shouldSkipMiddleware()` は上の 4 パスを完全一致でのみ通す。`/offline/anything` のような配下は通さない。うち `/manifest.webmanifest`・`/sw.js`・`/apple-icon.png` は拡張子マッチでも通るが、インストールに必要なパスの許可リストとして明示する（増やさない）。`/vendor/react/*.js`・`/vendor/pglite/*`（`.js` / `.wasm` / `.data`）・`/vendor/pyodide/*`（`.js` / `.mjs` / `.wasm` / `.zip` / `.json`）は静的拡張子マッチでスキップされるため許可リストには足さない。環境変数欠落・例外・status null の `/login` へのフェイルクローズは変えない
 - **インストール案内**: ホーム（`/`）の `InstallPrompt`。`display-mode: standalone` でも `navigator.standalone` でもない、かつモバイル UA（iPadOS 13+ の Macintosh + タッチを含む）、かつ閉じていない（`localStorage`。失敗は無視）ときだけ出す。`beforeinstallprompt` はルート layout のクライアントモジュールで先行捕捉し、`/` 以外で発火してもホームで使える。iOS は「共有 → ホーム画面に追加」の手順。Android はイベントがあるときボタンで `prompt()` を呼び、無いときはブラウザメニューからの追加手順を出す。`prompt()` の拒否や OS ダイアログのキャンセルでは閉じた扱いにしない。インストール済みでは出さない
 
