@@ -1,5 +1,6 @@
 import {
   ApiError,
+  FinishReason,
   type GenerateContentResponse,
   type GenerateContentResponseUsageMetadata,
   GoogleGenAI,
@@ -8,6 +9,14 @@ import {
 } from "@google/genai";
 import type { ZodType } from "zod";
 import { CODE_LANGUAGES, type CodeLanguage } from "@/app/components/code-editor-utils";
+import {
+  AI_CHAT_CUT_NOTE,
+  AI_CHAT_MAX_OUTPUT_TOKENS,
+  AI_CHAT_REQUEST_TIMEOUT_MS,
+  AI_CHAT_TEMPERATURE,
+  AI_CHAT_THINKING_LEVEL,
+  AI_CHAT_TOTAL_BUDGET_MS,
+} from "@/app/constants/ai-chat";
 import {
   GEMINI_API_KEY_ENV,
   GEMINI_API_KEY_TRIAL_ENV,
@@ -40,6 +49,7 @@ import {
   GradingRubricDraftSchema,
   UrlReviewSchema,
 } from "@/app/lib/grading-schema";
+import { fenceFor } from "@/app/lib/prompt-fence";
 import { addTokenCount, type TokenUsage } from "@/app/lib/token-usage";
 import type { CodeFile, GradingRubric, ReviewJson, ScoreKind, UserStatusType } from "@/app/types";
 
@@ -115,20 +125,6 @@ export function resolveGeminiApiKey(userStatus: UserStatusType | null): string |
     return process.env[GEMINI_API_KEY_TRIAL_ENV] || memberKey || undefined;
   }
   return undefined;
-}
-
-/**
- * A fence longer than any backtick run in the content, so submitted code (a Markdown README with
- * its own ``` blocks, a template literal containing them) cannot close it early and turn the rest
- * into prompt text at the same level as the instructions.
- */
-function fenceFor(content: string): string {
-  // reduce, not Math.max(...runs): a long submission can have more runs than the argument limit.
-  const longestRun = (content.match(/`+/g) ?? []).reduce(
-    (max, run) => Math.max(max, run.length),
-    0
-  );
-  return "`".repeat(Math.max(3, longestRun + 1));
 }
 
 // Applied per file in the multi-file branch too: codeFiles has no length limit at the API, and a
@@ -477,13 +473,33 @@ function addUsage(
   };
 }
 
+/** Per-call knobs. Review and rubric drafts use the defaults; the chat passes its own. */
+interface GenerationTuning {
+  maxOutputTokens: number;
+  temperature: number;
+  requestTimeoutMs: number;
+  totalBudgetMs: number;
+}
+
+const REVIEW_TUNING: GenerationTuning = {
+  maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
+  temperature: GEMINI_TEMPERATURE,
+  requestTimeoutMs: GEMINI_REQUEST_TIMEOUT_MS,
+  totalBudgetMs: GEMINI_TOTAL_BUDGET_MS,
+};
+
 interface StructuredRequest<T> {
   apiKey: string;
   systemInstruction: string;
   contents: string;
-  responseSchema: Schema;
-  parse: (text: string | undefined) => { ok: true; value: T } | { ok: false; reason: string };
+  /** null asks for plain text (the chat answers in Markdown, not JSON). */
+  responseSchema: Schema | null;
+  parse: (
+    text: string | undefined,
+    response: GenerateContentResponse
+  ) => { ok: true; value: T } | { ok: false; reason: string };
   models: readonly GeminiModelConfig[];
+  tuning?: GenerationTuning;
 }
 
 function modelChainFor(modelName?: string): readonly GeminiModelConfig[] {
@@ -551,6 +567,7 @@ async function generateValidatedJson<T>({
   responseSchema,
   parse,
   models,
+  tuning = REVIEW_TUNING,
 }: StructuredRequest<T>): Promise<{ value: T; usage: TokenUsage; modelUsed: string }> {
   if (!apiKey) {
     throw new Error("Gemini APIキーが設定されていません");
@@ -567,8 +584,8 @@ async function generateValidatedJson<T>({
 
   // Cap attempts plus waits at GEMINI_TOTAL_BUDGET_MS even when a call hangs until its own timeout
   // instead of failing fast (maxDuration guard).
-  const deadlineAt = Date.now() + GEMINI_TOTAL_BUDGET_MS;
-  const overallSignal = AbortSignal.timeout(GEMINI_TOTAL_BUDGET_MS);
+  const deadlineAt = Date.now() + tuning.totalBudgetMs;
+  const overallSignal = AbortSignal.timeout(tuning.totalBudgetMs);
 
   const callModel = (model: GeminiModelConfig) =>
     ai.models.generateContent({
@@ -576,17 +593,15 @@ async function generateValidatedJson<T>({
       contents,
       config: {
         systemInstruction,
-        maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
-        temperature: GEMINI_TEMPERATURE,
-        responseMimeType: "application/json",
-        responseSchema,
+        maxOutputTokens: tuning.maxOutputTokens,
+        temperature: tuning.temperature,
+        ...(responseSchema
+          ? { responseMimeType: "application/json", responseSchema }
+          : { responseMimeType: "text/plain" }),
         thinkingConfig: {
           thinkingLevel: model.thinkingLevel,
         },
-        abortSignal: AbortSignal.any([
-          AbortSignal.timeout(GEMINI_REQUEST_TIMEOUT_MS),
-          overallSignal,
-        ]),
+        abortSignal: AbortSignal.any([AbortSignal.timeout(tuning.requestTimeoutMs), overallSignal]),
       },
     });
 
@@ -734,7 +749,7 @@ async function generateValidatedJson<T>({
     validationAttempt++
   ) {
     // Regeneration needs a full attempt window. Less than that is aborted, and still billed.
-    if (validationAttempt > 0 && Date.now() + GEMINI_REQUEST_TIMEOUT_MS > deadlineAt) {
+    if (validationAttempt > 0 && Date.now() + tuning.requestTimeoutMs > deadlineAt) {
       break;
     }
 
@@ -748,7 +763,7 @@ async function generateValidatedJson<T>({
 
     usage = addUsage(usage, outcome.response.usageMetadata);
 
-    const parsed = parse(outcome.response.text);
+    const parsed = parse(outcome.response.text, outcome.response);
     if (parsed.ok) {
       return {
         value: parsed.value,
@@ -885,4 +900,52 @@ export async function generateGradingRubricDraft({
     models: modelChainFor(),
   });
   return value;
+}
+
+export interface ChatReplyResult extends TokenUsage {
+  answer: string;
+  modelUsed: string;
+}
+
+/**
+ * One シンラビ chat answer in plain Markdown. Same model chain and key routing as the review, with
+ * the chat's own output cap and time budget. A failure throws ReviewGenerationError with the tokens
+ * already billed, so the caller can record them on the failed usage row.
+ */
+export async function generateChatReply({
+  systemInstruction,
+  contents,
+  apiKey,
+}: {
+  systemInstruction: string;
+  contents: string;
+  apiKey: string;
+}): Promise<ChatReplyResult> {
+  const { value, usage, modelUsed } = await generateValidatedJson<string>({
+    apiKey,
+    systemInstruction,
+    contents,
+    responseSchema: null,
+    parse: (text, response) => {
+      const answer = text?.trim() ?? "";
+      if (answer.length === 0) {
+        return { ok: false, reason: "empty" };
+      }
+      // Plain text has no JSON to break, so a reply cut at the output cap would otherwise read as
+      // complete. Say so instead of regenerating (a second call costs as much and may stop again).
+      const cut = response.candidates?.[0]?.finishReason === FinishReason.MAX_TOKENS;
+      return { ok: true, value: cut ? `${answer}${AI_CHAT_CUT_NOTE}` : answer };
+    },
+    models: GEMINI_MODEL_CONFIGS.map((model) => ({
+      ...model,
+      thinkingLevel: AI_CHAT_THINKING_LEVEL,
+    })),
+    tuning: {
+      maxOutputTokens: AI_CHAT_MAX_OUTPUT_TOKENS,
+      temperature: AI_CHAT_TEMPERATURE,
+      requestTimeoutMs: AI_CHAT_REQUEST_TIMEOUT_MS,
+      totalBudgetMs: AI_CHAT_TOTAL_BUDGET_MS,
+    },
+  });
+  return { answer: value, modelUsed, ...usage };
 }

@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { CODE_LANGUAGES } from "@/app/components/code-editor-utils";
 import {
+  AI_CHAT_ANSWER_MAX_LENGTH,
+  AI_CHAT_HISTORY_MAX_MESSAGES,
+  AI_CHAT_LIMIT_BOUNDS,
+  AI_CHAT_MESSAGE_MAX_LENGTH,
+  type AIChatLimits,
+} from "@/app/constants/ai-chat";
+import {
   ANNOUNCEMENT_BODY_MAX_LENGTH,
   ANNOUNCEMENT_TARGET_STATUSES,
   ANNOUNCEMENT_TITLE_MAX_LENGTH,
@@ -53,6 +60,7 @@ import {
   USER_ROLES,
   USER_STATUS,
 } from "@/app/constants/user";
+import { areAIChatLimitsValid } from "@/app/lib/ai-chat-limits";
 import { areAIReviewLimitsValid } from "@/app/lib/ai-review-limits";
 import { parseDisplayName } from "@/app/lib/display-name";
 import {
@@ -265,6 +273,75 @@ export const AiReviewSettingsUpdateSchema = z
       ctx.addIssue({
         code: "custom",
         message: `1課題1日は${perContentPerDay.min}〜${perContentPerDay.max}、全課題合計は${perDay.min}〜${perDay.max}（1課題1日以上）、お試しは${perContentLifetime.min}〜${perContentLifetime.max}の整数で指定してください`,
+      });
+      return z.NEVER;
+    }
+    return limits;
+  });
+
+const AiChatQuestionSchema = z
+  .string({ message: "質問は文字列で指定してください" })
+  .trim()
+  .min(1, { message: "質問を入力してください" })
+  .max(AI_CHAT_MESSAGE_MAX_LENGTH, {
+    message: `質問は${AI_CHAT_MESSAGE_MAX_LENGTH}文字以内で入力してください`,
+  });
+
+const AiChatAnswerSchema = z
+  .string({ message: "回答は文字列で指定してください" })
+  .min(1, { message: "回答が空です" })
+  .max(AI_CHAT_ANSWER_MAX_LENGTH, {
+    message: `回答は${AI_CHAT_ANSWER_MAX_LENGTH}文字以内で指定してください`,
+  });
+
+/**
+ * POST /api/ai-chat. The conversation lives only in the browser, so the client sends the recent
+ * turns; their count and length are capped here because they go into the (billed) prompt.
+ */
+export const AiChatRequestSchema = z.object({
+  contentId: ContentIdSchema,
+  message: AiChatQuestionSchema,
+  history: z
+    .array(
+      z.discriminatedUnion("role", [
+        z.object({ role: z.literal("user"), content: AiChatQuestionSchema }),
+        z.object({ role: z.literal("assistant"), content: AiChatAnswerSchema }),
+      ]),
+      { message: "history は配列で指定してください" }
+    )
+    .max(AI_CHAT_HISTORY_MAX_MESSAGES, {
+      message: `history は${AI_CHAT_HISTORY_MAX_MESSAGES}件以内で指定してください`,
+    })
+    .default([]),
+});
+
+export const AiChatSavedNoteCreateSchema = z.object({
+  contentId: ContentIdSchema,
+  question: AiChatQuestionSchema,
+  answer: AiChatAnswerSchema,
+});
+
+export const AiChatSavedNoteDeleteSchema = z.object({
+  id: PositiveIntSchema,
+});
+
+/** PUT /api/admin/ai-chat-settings. Both limits at once. */
+export const AiChatSettingsUpdateSchema = z
+  .object({
+    activePerDay: z.number({ message: "activePerDay は数値で指定してください" }),
+    trialLifetime: z.number({ message: "trialLifetime は数値で指定してください" }),
+  })
+  .strict()
+  .transform((value, ctx) => {
+    const limits: AIChatLimits = {
+      activePerDay: value.activePerDay,
+      trialLifetime: value.trialLifetime,
+    };
+    if (!areAIChatLimitsValid(limits)) {
+      const { activePerDay, trialLifetime } = AI_CHAT_LIMIT_BOUNDS;
+      ctx.addIssue({
+        code: "custom",
+        message: `有料会員の1日は${activePerDay.min}〜${activePerDay.max}、お試しの通算は${trialLifetime.min}〜${trialLifetime.max}の整数で指定してください`,
       });
       return z.NEVER;
     }
