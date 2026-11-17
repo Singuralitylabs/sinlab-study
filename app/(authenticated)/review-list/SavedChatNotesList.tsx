@@ -2,7 +2,7 @@
 
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import type { SavedChatNoteView } from "@/app/lib/ai-chat-saved-notes";
 import { formatDate } from "@/app/lib/format-date";
@@ -35,6 +35,10 @@ export function SavedChatNotesList({
   const [deleting, setDeleting] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    onCountChange(notes.length);
+  }, [notes.length, onCountChange]);
+
   if (loadFailed) {
     return (
       <p className="text-sm text-destructive py-8 text-center">
@@ -54,9 +58,8 @@ export function SavedChatNotesList({
       });
       // 404 means it is already gone (deleted in another tab), which is what the learner wanted.
       if (res.ok || res.status === 404) {
-        const remaining = notes.filter((note) => note.id !== id);
-        setNotes(remaining);
-        onCountChange(remaining.length);
+        // Functional update: two quick deletes would otherwise each start from a stale list.
+        setNotes((prev) => prev.filter((note) => note.id !== id));
       } else {
         setError("削除に失敗しました。時間をおいてもう一度試してください。");
       }
