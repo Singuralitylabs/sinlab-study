@@ -3,13 +3,15 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ReviewNoteMemoField, UnderstoodCheckbox } from "@/app/components/ReviewNoteEditor";
+import type { SavedChatNoteView } from "@/app/lib/ai-chat-saved-notes";
 import type {
   FreeMemoView,
   OrphanMemoView,
   ReviewListItemView,
 } from "@/app/services/api/review-list-server";
+import { SavedChatNotesList } from "./SavedChatNotesList";
 
-type Tab = "open" | "overcome";
+type Tab = "open" | "overcome" | "chat";
 
 function groupByTheme(
   items: ReviewListItemView[]
@@ -31,11 +33,14 @@ export function ReviewListClient({
   overcome,
   orphanMemos,
   freeMemos,
+  savedChatNotes,
 }: {
   unovercome: ReviewListItemView[];
   overcome: ReviewListItemView[];
   orphanMemos: OrphanMemoView[];
   freeMemos: FreeMemoView[];
+  /** null hides the tab (chat off and nothing saved). */
+  savedChatNotes: { notes: SavedChatNoteView[]; loadFailed: boolean } | null;
 }) {
   const [tab, setTab] = useState<Tab>("open");
   const items = tab === "open" ? unovercome : overcome;
@@ -66,9 +71,27 @@ export function ReviewListClient({
         >
           克服済み（{overcome.length}）
         </button>
+        {savedChatNotes && (
+          <button
+            type="button"
+            onClick={() => setTab("chat")}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
+              tab === "chat"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            シンラビに聞いたこと（{savedChatNotes.notes.length}）
+          </button>
+        )}
       </div>
 
-      {items.length === 0 ? (
+      {tab === "chat" && savedChatNotes ? (
+        <SavedChatNotesList
+          initialNotes={savedChatNotes.notes}
+          loadFailed={savedChatNotes.loadFailed}
+        />
+      ) : items.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8 text-center">
           {tab === "open" ? "未克服の項目はありません。" : "克服済みの項目はまだありません。"}
         </p>
@@ -124,7 +147,7 @@ export function ReviewListClient({
         </div>
       )}
 
-      {orphanMemos.length > 0 && (
+      {tab !== "chat" && orphanMemos.length > 0 && (
         <section className="pt-4 border-t border-border">
           <h2 className="text-base font-medium text-muted-foreground mb-1">
             メモのみ（以前のレビュー）
@@ -161,7 +184,7 @@ export function ReviewListClient({
         </section>
       )}
 
-      {freeMemos.length > 0 && (
+      {tab !== "chat" && freeMemos.length > 0 && (
         <section className="pt-4 border-t border-border">
           <h2 className="text-lg font-semibold mb-3">学習メモがあるコンテンツ</h2>
           <ul className="space-y-3">
