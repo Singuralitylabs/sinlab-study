@@ -39,8 +39,14 @@ export const AI_CHAT_SUBMISSION_MAX_CHARS = 6000;
 /** Requirement comments from the latest review are cut to this many chars each. */
 export const AI_CHAT_REVIEW_COMMENT_MAX_CHARS = 200;
 
-/** Includes thinking tokens on Gemini 3, so it leaves room above the ~800-char answer target. */
-export const AI_CHAT_MAX_OUTPUT_TOKENS = 1500;
+/**
+ * Includes thinking tokens on Gemini 3, so it leaves room above the ~800-char answer target. A
+ * reply that still hits it gets AI_CHAT_CUT_NOTE appended.
+ */
+export const AI_CHAT_MAX_OUTPUT_TOKENS = 2500;
+
+/** Appended to a reply that was cut (output cap or AI_CHAT_ANSWER_MAX_LENGTH). */
+export const AI_CHAT_CUT_NOTE = "\n\n…（長いので、ここで切ったよ）";
 
 export const AI_CHAT_THINKING_LEVEL = "low" as ThinkingLevel;
 

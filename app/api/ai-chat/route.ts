@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   AI_CHAT_ANSWER_MAX_LENGTH,
   AI_CHAT_CONTENT_TYPES,
+  AI_CHAT_CUT_NOTE,
   AI_CHAT_DISABLED_MESSAGE,
   isAiChatEnabled,
 } from "@/app/constants/ai-chat";
@@ -38,8 +39,7 @@ function capAnswer(answer: string): string {
   if (answer.length <= AI_CHAT_ANSWER_MAX_LENGTH) {
     return answer;
   }
-  const note = "\n\n…（長いので、ここで切ったよ）";
-  return `${answer.slice(0, AI_CHAT_ANSWER_MAX_LENGTH - note.length)}${note}`;
+  return `${answer.slice(0, AI_CHAT_ANSWER_MAX_LENGTH - AI_CHAT_CUT_NOTE.length)}${AI_CHAT_CUT_NOTE}`;
 }
 
 // Never log the question, the history or the answer: Vercel keeps function logs.
@@ -92,6 +92,12 @@ export async function POST(request: Request) {
     const claim = await claimAIChat({ userId, contentId, userStatus, now });
     if (!claim) {
       return NextResponse.json({ error: "相談回数の確認に失敗しました" }, { status: 500 });
+    }
+    if (claim.kind === "busy") {
+      return NextResponse.json(
+        { error: "前の質問にシンラビが答えているところだよ。回答が返ってから送ってね" },
+        { status: 409 }
+      );
     }
     if (claim.kind === "limited") {
       const limited = chatLimitedResponse(claim.reason, now, claim.limits);

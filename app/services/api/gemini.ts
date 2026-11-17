@@ -1,5 +1,6 @@
 import {
   ApiError,
+  FinishReason,
   type GenerateContentResponse,
   type GenerateContentResponseUsageMetadata,
   GoogleGenAI,
@@ -9,6 +10,7 @@ import {
 import type { ZodType } from "zod";
 import { CODE_LANGUAGES, type CodeLanguage } from "@/app/components/code-editor-utils";
 import {
+  AI_CHAT_CUT_NOTE,
   AI_CHAT_MAX_OUTPUT_TOKENS,
   AI_CHAT_REQUEST_TIMEOUT_MS,
   AI_CHAT_TEMPERATURE,
@@ -492,7 +494,10 @@ interface StructuredRequest<T> {
   contents: string;
   /** null asks for plain text (the chat answers in Markdown, not JSON). */
   responseSchema: Schema | null;
-  parse: (text: string | undefined) => { ok: true; value: T } | { ok: false; reason: string };
+  parse: (
+    text: string | undefined,
+    response: GenerateContentResponse
+  ) => { ok: true; value: T } | { ok: false; reason: string };
   models: readonly GeminiModelConfig[];
   tuning?: GenerationTuning;
 }
@@ -758,7 +763,7 @@ async function generateValidatedJson<T>({
 
     usage = addUsage(usage, outcome.response.usageMetadata);
 
-    const parsed = parse(outcome.response.text);
+    const parsed = parse(outcome.response.text, outcome.response);
     if (parsed.ok) {
       return {
         value: parsed.value,
@@ -921,9 +926,15 @@ export async function generateChatReply({
     systemInstruction,
     contents,
     responseSchema: null,
-    parse: (text) => {
+    parse: (text, response) => {
       const answer = text?.trim() ?? "";
-      return answer.length > 0 ? { ok: true, value: answer } : { ok: false, reason: "empty" };
+      if (answer.length === 0) {
+        return { ok: false, reason: "empty" };
+      }
+      // Plain text has no JSON to break, so a reply cut at the output cap would otherwise read as
+      // complete. Say so instead of regenerating (a second call costs as much and may stop again).
+      const cut = response.candidates?.[0]?.finishReason === FinishReason.MAX_TOKENS;
+      return { ok: true, value: cut ? `${answer}${AI_CHAT_CUT_NOTE}` : answer };
     },
     models: GEMINI_MODEL_CONFIGS.map((model) => ({
       ...model,

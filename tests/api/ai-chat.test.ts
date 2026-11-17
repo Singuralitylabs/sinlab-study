@@ -242,6 +242,12 @@ describe("POST /api/ai-chat - 回数制限と Gemini", () => {
     expectNoTextInLogs();
   });
 
+  it("前の質問の回答待ちなら 409 で Gemini を呼ばない", async () => {
+    vi.mocked(claimAIChat).mockResolvedValue({ kind: "busy" });
+    expect((await post(valid)).status).toBe(409);
+    expect(generateChatReply).not.toHaveBeenCalled();
+  });
+
   it("枠の確保に失敗したら 500 で Gemini を呼ばない", async () => {
     vi.mocked(claimAIChat).mockResolvedValue(null);
     expect((await post(valid)).status).toBe(500);

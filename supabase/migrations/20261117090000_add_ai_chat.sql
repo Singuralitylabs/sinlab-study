@@ -158,7 +158,8 @@ REVOKE UPDATE ON public.ai_chat_saved_notes FROM authenticated;
 -- ---------- claim_ai_chat() ----------
 
 -- Checks the count and takes one question's slot in one transaction. Returns
--- {outcome: 'claimed', usage_id, remaining} or {outcome: 'limited', reason, remaining: 0}.
+-- {outcome: 'claimed', usage_id, remaining}, {outcome: 'limited', reason, remaining: 0}, or
+-- {outcome: 'busy'} while the user's previous question is still being answered.
 -- Active: rows created since p_day_start (JST midnight). Trial: every row, ever.
 CREATE OR REPLACE FUNCTION public.claim_ai_chat(
   p_user_id INTEGER,
@@ -187,6 +188,17 @@ BEGIN
   END IF;
 
   PERFORM pg_advisory_xact_lock(hashtext('claim_ai_chat'), p_user_id);
+
+  -- One question at a time per user (another tab included): a live pending row means the previous
+  -- answer has not come back yet.
+  IF EXISTS (
+    SELECT 1 FROM public.ai_chat_usage u
+    WHERE u.user_id = p_user_id
+      AND u.status = 'pending'
+      AND u.created_at >= p_stale_before
+  ) THEN
+    RETURN jsonb_build_object('outcome', 'busy');
+  END IF;
 
   SELECT count(*)
   INTO v_used

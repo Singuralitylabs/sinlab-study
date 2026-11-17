@@ -57,6 +57,14 @@ describe("ai_chat マイグレーション (#569)", () => {
     );
   });
 
+  it("回答待ちの pending があれば busy を返す（数える前に判定）", () => {
+    const busy = migration.indexOf("RETURN jsonb_build_object('outcome', 'busy')");
+    expect(busy).toBeGreaterThan(
+      migration.indexOf("pg_advisory_xact_lock(hashtext('claim_ai_chat')")
+    );
+    expect(busy).toBeLessThan(migration.indexOf("INSERT INTO public.ai_chat_usage"));
+  });
+
   it("failed と古い pending を数えない", () => {
     expect(migration).toContain("u.status <> 'failed'");
     expect(migration).toContain("NOT (u.status = 'pending' AND u.created_at < p_stale_before)");

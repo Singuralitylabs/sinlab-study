@@ -537,7 +537,7 @@ INSERT / DELETE のポリシーは定義しない（行はマイグレーショ�
 | `ai_chat_saved_notes` | SELECT / DELETE | 本人のみ | `user_id = (select get_user_id())` |
 | `ai_chat_saved_notes` | INSERT | 本人のみ | `user_id = (select get_user_id()) AND EXISTS (SELECT 1 FROM learning_contents lc WHERE lc.id = content_id)`（可視性は `learning_contents` の SELECT RLS に委ねる。お試しはお試し公開のコンテンツだけ） |
 
-`ai_chat_usage` の INSERT / UPDATE / DELETE は `authenticated` から REVOKE し、書き込みは `claim_ai_chat()`（service_role のみ EXECUTE。ユーザー単位の advisory lock の中で数えて INSERT）と API の service_role だけにする。`ai_chat_settings` の INSERT / DELETE と `ai_chat_saved_notes` の UPDATE も REVOKE する。**admin / maintainer も他人の保存した回答は読めない**。定義は `20261117090000_add_ai_chat.sql`。
+`ai_chat_usage` の INSERT / UPDATE / DELETE は `authenticated` から REVOKE し、書き込みは `claim_ai_chat()`（service_role のみ EXECUTE。ユーザー単位の advisory lock の中で、回答待ちの `pending` 行があれば `busy`、無ければ数えて INSERT）と API の service_role だけにする。`ai_chat_settings` の INSERT / DELETE と `ai_chat_saved_notes` の UPDATE も REVOKE する。**admin / maintainer も他人の保存した回答は読めない**。定義は `20261117090000_add_ai_chat.sql`。
 
 ### 6.11 announcements
 

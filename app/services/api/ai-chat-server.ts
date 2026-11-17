@@ -48,7 +48,8 @@ export async function fetchAIChatLimits(supabase: SettingsClient): Promise<AICha
 
 export type AIChatClaim =
   | { kind: "claimed"; usageId: number; remaining: number; limits: AIChatLimits }
-  | { kind: "limited"; reason: ChatLimitReason; limits: AIChatLimits };
+  | { kind: "limited"; reason: ChatLimitReason; limits: AIChatLimits }
+  | { kind: "busy" };
 
 /**
  * Checks the count and takes one question's slot in one transaction (claim_ai_chat()), so
@@ -94,6 +95,9 @@ export async function claimAIChat({
     (result.reason === "user_daily" || result.reason === "trial_lifetime")
   ) {
     return { kind: "limited", reason: result.reason, limits };
+  }
+  if (result?.outcome === "busy") {
+    return { kind: "busy" };
   }
   console.error("AIチャット枠確保の応答が不正です:", result?.outcome ?? "null");
   return null;
