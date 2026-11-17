@@ -24,6 +24,7 @@ export const UPGRADE_CTA_SOURCE = {
   DASHBOARD_CARD: "dashboard_card",
   BANNER: "banner",
   AI_REVIEW_LIMIT: "ai_review_limit",
+  AI_CHAT_LIMIT: "ai_chat_limit",
 } as const;
 
 export type UpgradeCtaSource = (typeof UPGRADE_CTA_SOURCE)[keyof typeof UPGRADE_CTA_SOURCE];

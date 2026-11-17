@@ -2,6 +2,7 @@ import { Bot, Lock } from "lucide-react";
 import { notFound } from "next/navigation";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
 import { AppendixBadge } from "@/app/components/AppendixBadge";
+import { AiChatPanel } from "@/app/components/ai-chat/AiChatPanel";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { ExerciseHint } from "@/app/components/ExerciseHint";
 import { LearningMemo } from "@/app/components/LearningMemo";
@@ -12,6 +13,7 @@ import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { VideoContent } from "@/app/components/VideoContent";
+import { isAiChatEnabled } from "@/app/constants/ai-chat";
 import { ANALYTICS_EVENT, UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
@@ -237,6 +239,15 @@ export default async function ContentPage({ params }: PageProps) {
   if (!isFullyPublished && !checkContentPermissions(userRole)) {
     notFound();
   }
+
+  // Same gate as POST /api/ai-chat: learners on published article / exercise pages only (an
+  // unpublished preview would always get 403 from isContentVisible()).
+  const showsAiChat =
+    isAiChatEnabled() &&
+    Boolean(userId) &&
+    isFullyPublished &&
+    (content.content_type === "text" || content.content_type === "exercise") &&
+    (userStatus === USER_STATUS.ACTIVE || userStatus === USER_STATUS.TRIAL);
 
   const showsAIReviewLimit =
     Boolean(userId) &&
@@ -673,6 +684,21 @@ export default async function ContentPage({ params }: PageProps) {
         next={next}
         endFallback={endFallback}
       />
+
+      {showsAiChat && (
+        // Spacer: the floating button must not cover the prev / next links at the bottom.
+        <div aria-hidden="true" className="h-16" />
+      )}
+      {showsAiChat && (
+        // Keyed by content so moving to another content starts an empty conversation.
+        <AiChatPanel
+          key={contentIdNum}
+          contentId={contentIdNum}
+          contentType={content.content_type === "text" ? "text" : "exercise"}
+          stripeEnabled={stripeEnabled}
+          canSave={showReviewListNotes}
+        />
+      )}
     </div>
   );
 }
