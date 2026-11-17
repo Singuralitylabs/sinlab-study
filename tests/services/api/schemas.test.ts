@@ -722,10 +722,25 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
         show_preview: true,
       }).success
     ).toBe(false);
+    // Python runs on Pyodide (#545): console only, like SQL.
     expect(
       ContentCreateSchema.safeParse({
         ...base,
         submission_file_slots: [{ filename: "main.py", language: "python" }],
+        show_console: true,
+      }).success
+    ).toBe(true);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "main.py", language: "python" }],
+        show_preview: true,
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "run.sh", language: "bash" }],
         show_console: true,
       }).success
     ).toBe(false);

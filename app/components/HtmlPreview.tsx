@@ -2,8 +2,9 @@
 
 import { Eye, EyeOff, Play, RefreshCw, Terminal } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { PythonConsole } from "@/app/components/PythonConsole";
 import { SqlConsole } from "@/app/components/SqlConsole";
-import { buildPreviewDocument, isSqlLayout } from "@/app/lib/html-preview";
+import { buildPreviewDocument, isPythonLayout, isSqlLayout } from "@/app/lib/html-preview";
 import {
   acceptPreviewConsoleMessage,
   buildPreviewConsoleBridgeScript,
@@ -41,6 +42,12 @@ export function HtmlPreview(props: HtmlPreviewProps) {
   if (isSqlLayout(props.files)) {
     return props.showConsolePanel === false ? null : (
       <SqlConsole files={props.files} collapsible={props.collapsible} />
+    );
+  }
+  // Python runs on Pyodide in a worker for the same reason.
+  if (isPythonLayout(props.files)) {
+    return props.showConsolePanel === false ? null : (
+      <PythonConsole files={props.files} collapsible={props.collapsible} />
     );
   }
   return <ScriptPreview {...props} />;

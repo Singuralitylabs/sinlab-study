@@ -61,11 +61,11 @@ describe("SubmissionCodeBlock の previewSource", () => {
 
   it("どちらもオフならプレビュー宿主を出さない", () => {
     const html = render({
-      files: [{ filename: "main.py", language: "python", content: "print(1)" }],
+      files: [{ filename: "run.sh", language: "bash", content: "echo 1" }],
       previewSource: {
-        submissionFileSlots: [{ filename: "main.py", language: "python" }],
+        submissionFileSlots: [{ filename: "run.sh", language: "bash" }],
         starterFiles: null,
-        codeLanguage: "python",
+        codeLanguage: "bash",
         showPreview: null,
         showConsole: null,
       },
@@ -80,6 +80,21 @@ describe("SubmissionCodeBlock の previewSource", () => {
         submissionFileSlots: [{ filename: "q.sql", language: "sql" }],
         starterFiles: null,
         codeLanguage: "sql",
+        showPreview: null,
+        showConsole: null,
+      },
+    });
+    expect(html).toContain('data-preview="false"');
+    expect(html).toContain('data-console="true"');
+  });
+
+  it("課題が Python だけならコンソールのみ（Python の実行。#545）", () => {
+    const html = render({
+      files: [{ filename: "main.py", language: "python", content: "print(1)" }],
+      previewSource: {
+        submissionFileSlots: [{ filename: "main.py", language: "python" }],
+        starterFiles: null,
+        codeLanguage: "python",
         showPreview: null,
         showConsole: null,
       },

@@ -1155,7 +1155,7 @@ export function ContentForm({
                   ? previewCap.autoPreview
                     ? "スクリプトの出力とエラーをプレビューの下に出します。"
                     : "プレビュー枠は出さず、「実行」を押したときだけ動きます。"
-                  : "HTML・JavaScript・または React（App.jsx / App.js、または .css と一緒の page.js）構成で、ほかの言語を含まないときだけオンにできます。"}
+                  : "HTML・JavaScript・または React（App.jsx / App.js、または .css と一緒の page.js）構成で、ほかの言語を含まないとき、または SQL だけ・Python だけの構成のときだけオンにできます。"}
               </p>
             </div>
           </div>
