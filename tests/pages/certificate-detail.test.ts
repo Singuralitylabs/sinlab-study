@@ -66,7 +66,7 @@ describe("/certificates/[id]", () => {
     const html = await render("31");
 
     expect(fetchMyCertificateById).toHaveBeenCalledWith(2, 31);
-    expect(html).toContain("山田 太郎");
+    expect(html.replace(/<[^>]+>/g, "")).toContain("山田 太郎殿");
     expect(html).toContain("GAS 学習（基礎編）");
     expect(html).toContain("SS-202610-ABC123");
     expect(html).toContain("印刷 / PDF で保存");
@@ -97,6 +97,12 @@ describe("/certificates/[id]", () => {
     const html = await render("31");
 
     expect(html).toContain(`border-color:${resolveCertificateColors(5, null).frame}`);
+  });
+
+  it("「殿」は名前の最後の1文字と同じ行に置く（「殿」だけが改行されない）", async () => {
+    expect(await render("31")).toMatch(
+      /<span class="whitespace-nowrap">郎<span[^>]*>殿<\/span><\/span>/
+    );
   });
 
   it("発行日は年月日の形（JST）で印字する", async () => {

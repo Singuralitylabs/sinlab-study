@@ -160,6 +160,9 @@ export function CertificateSheet({
   colors,
 }: CertificateSheetProps) {
   const goldRule = { backgroundImage: GOLD_GRADIENT };
+  const nameChars = [...recipientName];
+  const nameHead = nameChars.slice(0, -1).join("");
+  const nameTail = nameChars.at(-1) ?? "";
   return (
     <div
       className={`@container certificate-sheet relative mx-auto aspect-[297/210] min-w-[640px] w-full overflow-hidden text-neutral-900 shadow-md print:h-[209mm] print:w-[297mm] print:min-w-0 print:max-w-none print:shadow-none ${serifJp.className}`}
@@ -261,10 +264,14 @@ export function CertificateSheet({
         </div>
 
         <p
-          className={`mt-[3.6cqw] max-w-[60cqw] break-words font-bold leading-[1.35] ${recipientNameSize(recipientName)}`}
+          className={`mt-[3.6cqw] max-w-[60cqw] break-words text-balance font-bold leading-[1.35] ${recipientNameSize(recipientName)}`}
         >
-          {recipientName}
-          <span className="ml-[1.2cqw] text-[2cqw] font-medium">殿</span>
+          {nameHead}
+          {/* Keeps 「殿」 with the name's last character so it never wraps onto a line alone. */}
+          <span className="whitespace-nowrap">
+            {nameTail}
+            <span className="ml-[1.2cqw] text-[2cqw] font-medium">殿</span>
+          </span>
         </p>
         <span aria-hidden="true" className="mt-[0.6cqw] h-[0.22cqw] w-[48cqw]" style={goldRule} />
         <p
