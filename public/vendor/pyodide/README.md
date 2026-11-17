@@ -7,7 +7,7 @@ client bundle.
 | File | Source |
 | --- | --- |
 | `pyodide.mjs`, `pyodide.asm.mjs`, `pyodide.asm.wasm`, `python_stdlib.zip`, `pyodide-lock.json` | `pyodide` npm package (version in `package.json`) — **generated, not committed** |
-| `*.whl` (NumPy, pandas, matplotlib, Beautiful Soup and their dependencies) | release archive of the same Pyodide version, SHA-256 pinned in `scripts/vendor-pyodide.sh` — **generated, not committed** |
+| `*.whl` (NumPy, pandas, matplotlib, Beautiful Soup, lxml and their dependencies) | release archive of the same Pyodide version, SHA-256 pinned in `scripts/vendor-pyodide.sh` — **generated, not committed** |
 | `NotoSansJP-Regular.ttf`, `LICENSE-NotoSansJP.txt` | `@expo-google-fonts/noto-sans-jp` (version in `package.json`), for Japanese text in matplotlib — **generated, not committed** |
 | `python-worker.js` | hand-written Web Worker that runs one program per worker (committed) |
 

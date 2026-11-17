@@ -16,7 +16,7 @@ archive_version=314.0.8
 archive_sha256=ce4ac9b450c22b1cee278ddda7c12ee5b83acb1f967d0675fff189be6739e574
 # Top-level packages; their dependencies are added from pyodide-lock.json. Keep in step with
 # PACKAGE_BY_IMPORT in public/vendor/pyodide/python-worker.js.
-packages="numpy pandas matplotlib beautifulsoup4"
+packages="numpy pandas matplotlib beautifulsoup4 lxml"
 
 if [ "$version" != "$archive_version" ]; then
   echo "pyodide $version in package.json, but the package archive is pinned to $archive_version." >&2

@@ -38,7 +38,17 @@ const PACKAGE_BY_IMPORT = {
   packaging: "packaging",
   pyparsing: "pyparsing",
   typing_extensions: "typing-extensions",
+  lxml: "lxml",
 };
+
+// Packages pandas or Beautiful Soup load on their own, which find_imports cannot see: df.plot()
+// imports matplotlib (a notebook habit is to skip the import), read_html needs lxml, and
+// BeautifulSoup(html, "lxml") names its parser as a string.
+const IMPLIED_PACKAGES = [
+  { when: "pandas", pattern: /\.(?:plot|hist|boxplot)\b/, add: "matplotlib" },
+  { when: "pandas", pattern: /\bread_(?:html|xml)\s*\(/, add: "lxml" },
+  { when: "beautifulsoup4", pattern: /["']lxml(?:-xml)?["']|["']xml["']/, add: "lxml" },
+];
 
 // Loading starts as soon as the worker exists, so a worker the page starts ahead of time is ready by
 // the time the learner presses 実行. Packages are only ever read from this directory: there is no
@@ -239,6 +249,11 @@ function packagesFor(pyodide, files) {
     imports.destroy();
   }
   findImports.destroy();
+  for (const { when, pattern, add } of IMPLIED_PACKAGES) {
+    if (names.has(when) && files.some((file) => pattern.test(file.content))) {
+      names.add(add);
+    }
+  }
   return [...names].sort();
 }
 
