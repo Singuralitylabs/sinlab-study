@@ -1782,7 +1782,7 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 
 1. 機能が無効なら 503
 2. zod 検証 → `requireLearnerApi()`（未認証 401、`rejected` 403）。`active` / `trial` 以外は 403
-3. `resolveGeminiApiKey(userStatus)` でキーを決める（AIレビューと同じ振り分け。6.1.2節）。無ければ 503
+3. お試しユーザーも含めて有料ティアの `GEMINI_API_KEY` を使う（`resolveGeminiApiKey(USER_STATUS.ACTIVE)`。AIレビューの振り分け（6.1.2節）とは違う。無料ティアは混雑時に先に 503・タイムアウトになり、送った内容が Google のサービス改善に使われうるため。お試しは通算回数で上限があり費用は小さい）。無ければ 503
 4. 通常クライアントで `fetchVisibleContentForChat()`（`isContentVisible()` と同じ親階層までの公開・未削除の絞り込みで、文脈に使う列だけを取る）。0行なら 403、対象外の種別なら 400
 5. 演習なら、本人の最新の提出 1 件と、その完了したレビューを通常クライアントで読む（`fetchLatestSubmissionForChat()`）
 6. `claim_ai_chat()` で枠を確保。前の質問の回答待ちなら 409、上限なら 429（`{ error, reason: "user_daily" | "trial_lifetime", remaining: 0, resetsAt }`。お試しは `resetsAt = null`）

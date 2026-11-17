@@ -134,6 +134,13 @@ describe("POST /api/ai-chat - 有効・無効と認可", () => {
     expect(claimAIChat).not.toHaveBeenCalled();
   });
 
+  it("お試しでも有料ティアのキーを使う", async () => {
+    vi.mocked(getServerAuth).mockResolvedValue({ ...memberAuth, userStatus: "trial" } as never);
+    await post(valid);
+    expect(resolveGeminiApiKey).toHaveBeenCalledWith("active");
+    expect(resolveGeminiApiKey).not.toHaveBeenCalledWith("trial");
+  });
+
   it("キーが無いと 503", async () => {
     vi.mocked(resolveGeminiApiKey).mockReturnValue(undefined);
     expect((await post(valid)).status).toBe(503);
