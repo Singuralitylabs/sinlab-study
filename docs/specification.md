@@ -685,7 +685,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 
 演習のコード提出フォームには、シンタックスハイライトと自動インデントを備えたコードエディタ（CodeMirror 6）を使用する。
 
-**対応言語**: `code_language` カラムで演習ごとに設定する（`javascript`（既定）/ `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`。#307。`yaml` は #551）。許可値・既定ファイル名・表示名は `app/components/code-editor-utils.ts`（`CODE_LANGUAGES` / `DEFAULT_FILENAME_BY_LANGUAGE` / `CODE_LANGUAGE_LABELS`）に集約し、管理画面の提出ファイルの言語セレクトも同じ一覧から作る。DB の CHECK 制約との一致はテストで検査する。SQL は PostgreSQL 方言、Bash と YAML は `@codemirror/legacy-modes` の shell / yaml モードで色分けする。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（エディタの言語モードは変えない）。Markdown のコードフェンスは `sql` / `bash` / `markdown` / `python` / `json` / `yaml`（`yml`）と `jsx` / `tsx` も色分けする（`MarkdownRenderer`）。
+**対応言語**: `code_language` カラムで演習ごとに設定する（`javascript`（既定）/ `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`。#307。`yaml` は #551、`hcl` は #555）。許可値・既定ファイル名・表示名は `app/components/code-editor-utils.ts`（`CODE_LANGUAGES` / `DEFAULT_FILENAME_BY_LANGUAGE` / `CODE_LANGUAGE_LABELS`）に集約し、管理画面の提出ファイルの言語セレクトも同じ一覧から作る。DB の CHECK 制約との一致はテストで検査する。SQL は PostgreSQL 方言、Bash と YAML は `@codemirror/legacy-modes` の shell / yaml モードで色分けする。HCL（Terraform の `.tf`）は `@codemirror/legacy-modes` にモードがないため、自前の小さなトークナイザ（`app/lib/hcl-stream-mode.ts`）で色分けする。HCL は実行しないので、プレビュー・コンソールは出さない。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（エディタの言語モードは変えない）。Markdown のコードフェンスは `sql` / `bash` / `markdown` / `python` / `json` / `yaml`（`yml`）/ `hcl`（`terraform` / `tf`。highlight.js に文法がないため `app/lib/highlight-hcl.ts` で定義）と `jsx` / `tsx` も色分けする（`MarkdownRenderer`）。
 
 **提出ファイルの固定表示（#377）**: 提出フォーム（`SubmissionForm`）と `/demo` の提出フォーム（`DemoSubmissionForm`）は、5.2 で解決した構成の数だけ入力欄を最初から出す。ファイル名は1件のときもラベルとして表示し、言語は表示名だけにする。ファイルの追加・削除、ファイル名と言語の入力は出さない。管理者が構成を指定したファイルはすべて入力必須で、空のままでは提出ボタンを押せない。構成が NULL で初期コードのファイルが2件以上のときは、空のファイルを残したまま提出でき、そのファイルは提出に含まれない。残したファイルが初期コードのままなら、受講生フォームも `/demo` も提出できない。提出成功後のリセットも同じ構成（初期コードがあればその内容）に戻す。`/demo` の取得条件（公開かつ未削除。スライドの署名付き URL は `is_open_to_trial = true` も必要）は変えない。`/demo` の提出フォームにはライブプレビューとコンソールを出さない。受講生の提出フォームでは、ライブプレビューはロックされたファイル名を `buildPreviewDocument()` に渡すので、`index.html` / `style.css` / `main.js` のような参照が提出のたびに揺れない。
 
@@ -1727,7 +1727,7 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 
 ### 15.4 画面
 
-- **`/review-list`**: サイドナビ「復習リスト」（`role = member` のみ）。未克服 / 克服済みタブ。各項目にコンテンツ名（リンク）、要件名、AI コメント（最新）、一言メモ、「理解した」。現在の未克服・克服済みに無い `requirement_key` のメモは「メモのみ（以前のレビュー）」に出す（`estimated` 置き換え後の orphan）。メモありのコンテンツ（自由記述）も表示
+- **`/review-list`**: サイドナビ「復習リスト」（`role = member` のみ）。未克服 / 克服済みタブ（シンラビ AI チャットで保存した回答は「シンラビに聞いたこと」タブ。17.7節）。各項目にコンテンツ名（リンク）、要件名、AI コメント（最新）、一言メモ、「理解した」。現在の未克服・克服済みに無い `requirement_key` のメモは「メモのみ（以前のレビュー）」に出す（`estimated` 置き換え後の orphan）。メモありのコンテンツ（自由記述）も表示
 - **コンテンツ詳細**: `role = member` のときだけ、`AIReviewDisplay` の `partial` / `unmet` 行に「復習リストに追加されました」とメモ欄、下部に「学習メモ」を出す（admin / maintainer には出さない）
 - **ホーム**: `isLearnerRole()` のときだけ、未克服が 1 件以上なら「復習リストに N 件」を 1 行で表示（大きなカードは増やさない）。件数用のレビュー取得はホーム学習データと並行で開始する
 
@@ -1765,3 +1765,86 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 ### 16.4 スコープ外（段階1）
 
 投稿者への自動返信メール、画像添付、公開ボード、GitHub イシュー自動作成（段階2）。
+
+## 17. シンラビに相談（AIチャット。#569 段階1）
+
+記事・演習の画面で、全テーマのナビゲーター「シンラビ」にチャットで質問できる。シンラビは、いま見ているコンテンツの内容を文脈として答える。生成AIの費用は回数に比例するため、プランごとに回数の上限を設ける。会話の本文は DB に保存しない。
+
+### 17.1 有効・無効
+
+`AI_CHAT_ENABLED === "true"` のときだけ有効（`isAiChatEnabled()`。`app/constants/ai-chat.ts`。フェイルクローズ）。無効時は画面に入口を出さず、`POST /api/ai-chat`・`GET /api/ai-chat/usage`・`POST /api/ai-chat/saved-notes` は 503。保存済みの回答の表示と削除（`DELETE /api/ai-chat/saved-notes`）は無効時も続ける。
+
+### 17.2 対象と回数制限
+
+| 区分 | 使えるか | 上限（初期値） |
+|:--|:--|:--|
+| 有料会員（`status = active`。admin / maintainer を含む） | 使える | 1日 20 回（全コンテンツ合計、JST 0時リセット） |
+| お試し（`status = trial`） | お試し公開のコンテンツだけ（RLS で絞られる） | 通算 5 回（リセットなし） |
+| それ以外 | 使えない（403） | — |
+
+- 対象のコンテンツ種別は `text`（記事）と `exercise`（演習）だけ（`AI_CHAT_CONTENT_TYPES`）。動画・スライドは文脈（台本）が DB に無いため、クイズは AI が代わりに解く経路を作らないため対象外（400）。
+- 1回 = 質問1つ（Gemini 呼び出し1回）。上限値は `ai_chat_settings`（1行。[データベース設計書](./database.md) 3.28節）が唯一の真実で、`AI_CHAT_LIMITS` はその初期値と、読めない・範囲外のときの代替値。範囲は `AI_CHAT_LIMIT_BOUNDS`（DB の CHECK と同じ）。管理者が `PUT /api/admin/ai-chat-settings`（`requireAdminApi()`）で変え、次の質問から反映される（キャッシュしない）。
+- 判定と枠の確保は RPC `claim_ai_chat()`（`claimAIChat()`。ユーザー単位の advisory lock の中で数えて `pending` 行を INSERT）で 1 トランザクションに行い、同時に送られても上限を超えない。同じユーザーの `pending` 行（60秒以内）があるあいだは次の質問を受け付けず `busy` を返す（前の回答が返るまで次を送れない。別タブからの送信も含む。画面でも送信中は送信ボタンを無効にする）。`failed`（Gemini の失敗）と、`AI_CHAT_STALE_AFTER_MS`（60秒）より古い `pending`（関数が落ちた行）は数えない。`counts_toward_limit = false` の行も数えない（管理者のリセット用。段階1に画面は無い）。
+- 残り回数の表示は `GET /api/ai-chat/usage`（通常クライアントで本人の行を読み、`computeChatUsage()`（`app/lib/ai-chat-limits.ts`）で計算）。返す値は `{ remaining, limit, period: "daily" | "lifetime", resetsAt }`。
+
+### 17.3 質問 API
+
+**エンドポイント**: `POST /api/ai-chat`
+
+**ボディ**: `{ contentId, message, history }`（zod。`message` は trim 後 1〜500 文字。`history` は `{ role: "user" | "assistant", content }` の配列で最大 6 件＝3往復。質問は 500 文字、回答は 2,000 文字まで）
+
+1. 機能が無効なら 503
+2. zod 検証 → `requireLearnerApi()`（未認証 401、`rejected` 403）。`active` / `trial` 以外は 403
+3. お試しユーザーも含めて有料ティアの `GEMINI_API_KEY` を使う（`resolveGeminiApiKey(USER_STATUS.ACTIVE)`。AIレビューの振り分け（6.1.2節）とは違う。無料ティアは混雑時に先に 503・タイムアウトになり、送った内容が Google のサービス改善に使われうるため。お試しは通算回数で上限があり費用は小さい）。無ければ 503
+4. 通常クライアントで `fetchVisibleContentForChat()`（`isContentVisible()` と同じ親階層までの公開・未削除の絞り込みで、文脈に使う列だけを取る）。0行なら 403、対象外の種別なら 400
+5. 演習なら、本人の最新の提出 1 件と、その完了したレビューを通常クライアントで読む（`fetchLatestSubmissionForChat()`）
+6. `claim_ai_chat()` で枠を確保。前の質問の回答待ちなら 409、上限なら 429（`{ error, reason: "user_daily" | "trial_lifetime", remaining: 0, resetsAt }`。お試しは `resetsAt = null`）
+7. プロンプトを作り Gemini を呼ぶ。成功したら利用行を `completed` にしてモデル名とトークン数を保存し、`{ answer, remaining, limit }` を返す。失敗したら行を `failed`（回数に数えない。受け取ったトークン数は残す）にして 502
+
+- モデルは AIレビューと同じ `GEMINI_MODEL_CONFIGS`（主 → 代替のフォールバック、`generateChatReply()`）。出力上限 `AI_CHAT_MAX_OUTPUT_TOKENS`、1回あたり `AI_CHAT_REQUEST_TIMEOUT_MS`、全体 `AI_CHAT_TOTAL_BUDGET_MS`（25秒）、`maxDuration` 40 秒。ストリーミングはしない（段階2で検討）。
+- 回答は `AI_CHAT_ANSWER_MAX_LENGTH`（2,000文字）で切ってから返す（履歴・保存の上限に収めるため）。出力上限（`finishReason = MAX_TOKENS`）や文字数で切れた回答には、末尾に `AI_CHAT_CUT_NOTE`（「…（長いので、ここで切ったよ）」）を付けて、切れたことが分かるようにする（回答は返しているので回数には数える）。
+- **質問・履歴・回答の本文と API キーを `console` に出さない**（Vercel のログに残さない）。
+
+### 17.4 文脈（プロンプトに渡すもの）
+
+取得はすべて通常クライアント（RLS と列権限が効く）で行い、service_role は使わない（受講生向け配信の service_role 2経路を増やさない）。プロンプトは `app/lib/ai-chat-prompt.ts` が組み立てる。
+
+| 画面 | 渡すもの | 渡さないもの |
+|:--|:--|:--|
+| 記事 | テーマ名・フェーズ名・タイトル、`text_content`（本文そのもの。要約しない） | — |
+| 演習 | タイトル、`exercise_instructions`、`hint`、`starter_files`、本人の最新の提出（あれば）、その AI レビューの要約（あれば） | `reference_answer`・`grading_rubric`（列権限で受講生から読めず、service_role でも読まない）、クイズの正解、他人の提出、過去の提出、`review_content` の全文 |
+
+- 文字数の上限（定数）: 記事本文 `AI_CHAT_ARTICLE_MAX_CHARS`（20,000）、演習の指示文・ヒント・初期コード `AI_CHAT_EXERCISE_MAX_CHARS`（8,000）、提出コード `AI_CHAT_SUBMISSION_MAX_CHARS`（全ファイル合計 6,000）、レビューのコメント 1 件 `AI_CHAT_REVIEW_COMMENT_MAX_CHARS`（200）。超えた分は末尾を落とし、省略したことをプロンプトに書く。
+- 提出は、初期コードと trim 後の内容が同じファイルと空のファイルを省く。レビューは要件ごとの判定（達成 / 部分的 / 未達成）と短いコメント、合否・点数だけを渡す。提出もレビューも無ければ節ごと省く。
+- 並びは「システムプロンプト → 教材 → これまでの会話 → 今回の質問」に固定する。同じコンテンツなら先頭が毎回同じになり、Gemini の暗黙的なキャッシュが効きやすい。履歴は直近 3 往復だけ（`trimHistory()`）。
+- 教材・履歴・質問・提出コードは、中のバッククォートの連続より長いフェンスで囲む（`fenceFor()`。AIレビューと共通）。履歴はクライアントが送るため改ざんできるが、影響は本人への回答だけなので許容し、システムプロンプトで「正しいとは限らない記録」として扱わせる。
+
+### 17.5 シンラビの振る舞い（システムプロンプト）
+
+`AI_CHAT_SYSTEM_PROMPT`。一人称「僕」、明るく砕けた話し言葉。答える範囲は教材と、それを理解するのに必要な Web 技術の一般知識だけで、関係のない依頼は一言で断って教材の話に戻す。演習では完成コード・模範回答を書かず（頼まれても同じ）、考え方・確認の手順・数行までの部分コードにとどめる。分からないことや変わりやすい情報（料金・版番号など）は言い切らない。回答は目安 400 文字（長くても 800 文字）で、最後に次に試すことを1つ添える。個人情報やキーを貼られたら注意する。**プロンプトだけで「答えを教えない」を保証することはできない**（教えにくくするまでが目標。会話を保存しないため、品質は運営が実際に試して確かめる）。
+
+### 17.6 復習リストへの保存
+
+会話は画面の中（クライアントの状態）にだけ持ち、別のコンテンツへ移る・再読み込みすると消える。残したい回答は受講生が保存する。
+
+| メソッド | パス | 内容 |
+|:--|:--|:--|
+| POST | `/api/ai-chat/saved-notes` | `{ contentId, question, answer }`（質問 500・回答 2,000 文字まで）。`requireLearnerApi()`・`isContentVisible()`（不可視 403）。1人 `AI_CHAT_SAVED_NOTES_MAX_PER_USER`（300）件に達していたら 409。通常クライアントで INSERT（RLS が `user_id` を本人に固定し、可視コンテンツに限る）。Gemini を呼ばないので回数に数えない |
+| DELETE | `/api/ai-chat/saved-notes` | `{ id }`。本人の行だけ（RLS と `user_id` の絞り込み）。無ければ 404 |
+
+保存先は `ai_chat_saved_notes`（[データベース設計書](./database.md) 3.29節）。`review_notes` の学習メモには書き足さない（受講生のメモを上書きしないため）。保存した項目は、復習リストの未克服・克服済みの件数（ホーム・週次メール）に数えない。
+
+### 17.7 画面
+
+- **入口**（`AiChatPanel`。`app/components/ai-chat/`）: コンテンツ詳細画面の右下に、シンラビの画像付きの丸ボタン「シンラビに相談」。機能が有効で、ログイン済みの `active` / `trial`、公開中（プレビューでない）の記事・演習のときだけ出す（API と同じ条件。クライアント側の認証ガードはしない）。押すまで API を呼ばない。
+- **パネル**: PC（md 以上）は右側のサイドパネル（本文を見ながら質問できるよう、背景を覆わない）、スマホは下からのシート。Esc・×で閉じる（閉じても会話は残り、別のコンテンツへ移る・再読み込みで消える。`key` をコンテンツ ID にして作り直す）。上部にシンラビの画像・残り回数（「今日はあと N 回」/「お試しであと N 回」）・会話のリセット、その下に「画面を移ると会話は消えます。残したい回答は『復習リストに残す』で保存してね」。
+- **本文**: 受講生の質問とシンラビの吹き出し（回答は `MarkdownRenderer`。生の HTML は描画しない）。最初は質問の例をチップで出し、押すと入力欄に入る。送信中は「考え中」の画像（`HINT_MASCOT.closed`）と送信ボタンの無効化。失敗した質問は会話から外して入力欄に戻す（回数は減っていない）。
+- **入力欄**: 500 文字まで。Ctrl / ⌘ + Enter でも送れる（IME 変換中の Enter では送らない）。下部に常に「シンラビは AI です。間違えることがあるので、大事なところは記事や公式ドキュメントで確かめてね」。
+- **上限に達したとき**: 入力欄を無効にし、有料会員には「明日また使えるよ」、お試しには `/upgrade` へのリンク（`UpgradeCtaLink`、計測の source は `ai_chat_limit`。Stripe 無効時は承認の案内）を出す。
+- **復習リストに残す**: 各回答の下のボタン（`role = member` のときだけ。`/review-list` は member 専用のため、admin / maintainer には出さず、上部の案内からも外す）。押すと直前の質問と 1 組で保存し、「保存しました」に変えて押せなくする（二重保存を防ぐ）。
+- **`/review-list`**: 「シンラビに聞いたこと（N）」タブ（機能が有効、または保存済みが 1 件以上のとき）。テーマ → コンテンツの学習順（同じコンテンツは古い順）に、コンテンツ名（リンク）・保存日・質問・回答（折りたたみ、Markdown）・削除ボタン。見られなくなったコンテンツの項目は出さない（消さない）。未克服・克服済みの件数には含めない。
+- **`/admin/ai-review`**: AIレビューの上限の下に「シンラビに相談（AIチャット）の回数上限」（有料会員の1日・お試しの通算）。admin のみ。
+
+### 17.8 費用の目安
+
+入力は記事の画面で約 10,000〜17,000 トークン（システムプロンプト約 1,000、本文 8,000〜15,000、履歴と質問約 1,500）、演習の画面は文脈が約 4,000〜7,500 で記事より小さい。出力は回答と思考で約 1,000〜1,500。上限まで使われた場合の費用の安全弁は、管理画面で上限値を下げることと、`AI_CHAT_ENABLED` で機能全体を止めること。単価は `GEMINI_MODEL_NAME` の公式の料金で確かめる（変わるため本書に数値を置かない）。費用が問題になったら、まず記事を `##` 見出しごとに分けて質問に関係する節だけを渡す形を検討する（段階2以降、別 Issue）。利用実績は `ai_chat_usage` のトークン数を SQL で集計する（集計画面は段階2）。

@@ -96,7 +96,7 @@ erDiagram
 - `description`: 概要（Markdown・任意入力）。未入力（NULL）の場合、詳細ページの概要欄カードを表示しない
 - `pdf_url`: `slides` バケット内の**オブジェクトキーのみ**（例: `gas/slide-01.pdf`）。URL を保存せず、配信時にサーバー側で署名付きURLを発行する（6.8参照）
 - `allowed_submission_types`（`code` / `url` / `both`）: 演習で許可する提出方法。`code` / `url` は提出方法の選択UIを出さず、`both` のみ選択可（既定 `code`）
-- `code_language`: コードエディタの言語（既定 `javascript`）。許可値は `javascript` / `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`（#307）/ `yaml`（#551）。CHECK 制約とアプリの `CODE_LANGUAGES` は `tests/lib/learning-contents-check-parity.test.ts` で一致を検査する。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（別の値は設けない）
+- `code_language`: コードエディタの言語（既定 `javascript`）。許可値は `javascript` / `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`（#307）/ `yaml`（#551）/ `hcl`（#555）。CHECK 制約とアプリの `CODE_LANGUAGES` は `tests/lib/learning-contents-check-parity.test.ts` で一致を検査する。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（別の値は設けない）
 - `starter_files`（演習のみ・NULL 可）: 提出フォームに事前表示する初期コード。形式は `submissions.code_files` と同じ `[{ filename, language, content }]`（#341）。秘匿ではないため `reference_answer` と違い列権限に含め、詳細取得（`LEARNING_CONTENT_DETAIL_COLUMN_LIST`）でも読む。`submission_file_slots` が NULL のとき、ここがファイル名を持っていればそのファイル名・言語が提出構成になる。両方 NULL のときは `code_language` の空ファイル1つから開始する。service_role のツリー／サマリー用許可カラムリストには含めない
 - `submission_file_slots`（演習のみ・NULL 可）: 提出ファイルの構成 `[{ filename, language }]`（#377）。中身（初期コード）は持たない。NULL は未指定で、上記のとおり `starter_files` か `code_language` の既定ファイル1つとして解決する。CHECK は演習以外の行で NULL であることだけを見、ファイル名・言語・件数・重複は API（zod）が検証する。秘匿ではないため `authenticated` の列権限と詳細取得に含める。`grading_rubric` と `reference_answer` は引き続き付与しない。service_role のツリー／サマリー用許可カラムリスト（`CONTENT_VISIBILITY_SUMMARY_COLUMNS`）には含めない
 - `show_preview` / `show_console`（演習のみ・NULL 可）: ライブプレビューとコンソールを課題ごとに上書きする（#380）。NULL はファイル構成からの自動で、既存行は移行しなくても自動の規則で動く。CHECK は演習以外の行で両方 NULL であることだけを見る。矛盾する「オン」（HTML を含まないプレビュー、HTML でも JavaScript でもない、またはほかの言語を含むコンソール）は API が 400 にする。秘匿ではないため列権限と詳細取得（`LEARNING_CONTENT_DETAIL_COLUMN_LIST`）と提出履歴の content 取得に含める。`CONTENT_VISIBILITY_SUMMARY_COLUMNS` には含めない
@@ -316,6 +316,30 @@ RLS は有効化しポリシーは作らない（`push_subscriptions` と同じ�
 
 `user_id`（対象）、`content_id`（リセットを課題に絞った場合のみ）、`submission_id`（再レビューの許可のみ）、`action`（`reset` / `reopen`）、`affected_count`、`performed_by`（操作した admin）、`created_at`。追記のみ。RLS は有効でポリシーなし（service_role 専用）。
 
+### 3.27 ai_chat_usage（シンラビに相談の利用記録）
+
+1行 = 質問1回（[機能設計書](./specification.md)17章）。**質問・回答の本文は持たない**（回数制限と費用の集計だけに使う）。
+
+- `user_id`（`users.id`、`ON DELETE CASCADE`）、`content_id`（`learning_contents.id`、`ON DELETE SET NULL`）
+- `status`（`pending` / `completed` / `failed`）: `claim_ai_chat()` が `pending` で INSERT し、API が `completed`（回答済み）か `failed`（Gemini の失敗。回数に数えない）に更新する
+- `counts_toward_limit`（既定 true）: false の行は回数に数えない（管理者のリセット用。行は残す）
+- `model_used`、`prompt_tokens`、`completion_tokens`、`thoughts_tokens`: 費用の集計用
+- 回数の数え方: `failed` と、`AI_CHAT_STALE_AFTER_MS`（60秒）より古い `pending` は数えない。有料会員は JST の当日分、お試しは通算
+
+### 3.28 ai_chat_settings（シンラビに相談の上限値）
+
+`id = 1` の1行だけ（CHECK）。`ai_review_settings`（3.26節）と同じ形。
+
+- `active_per_day`（既定 20、1〜100）: 有料会員の1日（JST）の回数
+- `trial_lifetime`（既定 5、1〜30）: お試しの通算の回数
+- `updated_at` / `updated_by`（`users.id`、`ON DELETE SET NULL`）
+
+範囲は `AI_CHAT_LIMIT_BOUNDS`（`app/constants/ai-chat.ts`）と同じ。**行が読めない・範囲外のときは、アプリが `AI_CHAT_LIMITS` で動く**。
+
+### 3.29 ai_chat_saved_notes（シンラビに聞いたこと）
+
+受講生が「復習リストに残す」を押したシンラビの回答と、その直前の質問。`user_id`（`ON DELETE CASCADE`）、`content_id`（`ON DELETE CASCADE`）、`question`（1〜500文字。CHECK）、`answer`（1〜2,000文字。CHECK）、`created_at`。1人あたりの件数の上限（300件）はアプリが確かめる。
+
 ---
 
 ## 4. インデックス
@@ -502,6 +526,18 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 | UPDATE | admin | `(select get_user_role()) = 'admin'`（USING / WITH CHECK とも） |
 
 INSERT / DELETE のポリシーは定義しない（行はマイグレーションで投入し、消さない）。maintainer には開放しない。`claim_ai_review()` を呼ぶ前の読み出しは service_role で行い、**キャッシュしない**（コスト上限は常に最新。`fetchAIReviewLimits()`）。ホーム・コンテンツ詳細・`/upgrade` の表示用だけ `fetchCurrentAIReviewLimits()` が `unstable_cache`（約 60 秒・タグ `ai-review-limits`）する（#502）。管理画面の `PUT /api/admin/ai-review-settings` 成功後に `revalidateTag` で即時無効化する。読めない・範囲外のときは `AI_REVIEW_LIMITS` へ戻す。
+
+### 6.21 ai_chat_usage / ai_chat_settings / ai_chat_saved_notes
+
+| テーブル | 操作 | 対象 | 条件 |
+|:--|:--|:--|:--|
+| `ai_chat_usage` | SELECT | 本人・admin | `user_id = (select get_user_id()) OR (select get_user_role()) = 'admin'`（本人は残り回数の表示、admin は費用の集計） |
+| `ai_chat_settings` | SELECT | 認証済み全員 | `true`（機微な値ではない） |
+| `ai_chat_settings` | UPDATE | admin | `(select get_user_role()) = 'admin'`（USING / WITH CHECK とも） |
+| `ai_chat_saved_notes` | SELECT / DELETE | 本人のみ | `user_id = (select get_user_id())` |
+| `ai_chat_saved_notes` | INSERT | 本人のみ | `user_id = (select get_user_id()) AND EXISTS (SELECT 1 FROM learning_contents lc WHERE lc.id = content_id)`（可視性は `learning_contents` の SELECT RLS に委ねる。お試しはお試し公開のコンテンツだけ） |
+
+`ai_chat_usage` の INSERT / UPDATE / DELETE は `authenticated` から REVOKE し、書き込みは `claim_ai_chat()`（service_role のみ EXECUTE。ユーザー単位の advisory lock の中で、回答待ちの `pending` 行があれば `busy`、無ければ数えて INSERT）と API の service_role だけにする。`ai_chat_settings` の INSERT / DELETE と `ai_chat_saved_notes` の UPDATE も REVOKE する。**admin / maintainer も他人の保存した回答は読めない**。定義は `20261117090000_add_ai_chat.sql`。
 
 ### 6.11 announcements
 

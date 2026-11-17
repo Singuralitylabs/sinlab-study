@@ -17,7 +17,7 @@ interface FieldProps {
   onChange: (value: string) => void;
 }
 
-function Field({ id, label, hint, bound, value, onChange }: FieldProps) {
+export function Field({ id, label, hint, bound, value, onChange }: FieldProps) {
   return (
     <div className="space-y-1">
       <label htmlFor={id} className="text-sm font-medium">
