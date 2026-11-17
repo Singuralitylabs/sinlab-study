@@ -55,7 +55,7 @@ describe("proxy", () => {
     });
 
     it("静的アセット（拡張子一致）はスキップする", async () => {
-      const extensions = ["pdf", "txt", "xml", "map", "json", "png", "css", "js"];
+      const extensions = ["pdf", "txt", "xml", "map", "json", "png", "css", "js", "whl", "ttf"];
       for (const ext of extensions) {
         const req = new NextRequest(`http://localhost/files/sample.${ext}`);
         const res = await proxy(req);
@@ -349,6 +349,10 @@ describe("proxy", () => {
       expect(matcherRegex.test("/sample.map")).toBe(false);
       expect(matcherRegex.test("/vendor/pglite/pglite.wasm")).toBe(false);
       expect(matcherRegex.test("/vendor/pglite/pglite.data")).toBe(false);
+      expect(
+        matcherRegex.test("/vendor/pyodide/numpy-2.4.6-cp314-cp314-pyemscripten_2026_0_wasm32.whl")
+      ).toBe(false);
+      expect(matcherRegex.test("/vendor/pyodide/NotoSansJP-Regular.ttf")).toBe(false);
       expect(matcherRegex.test("/_next/static/chunk.js")).toBe(false);
     });
   });

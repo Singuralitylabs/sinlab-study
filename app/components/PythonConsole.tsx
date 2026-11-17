@@ -6,10 +6,12 @@ import {
   acceptPythonWorkerMessage,
   appendPythonOutput,
   PYTHON_LOAD_TIMEOUT_MS,
+  PYTHON_MAX_FIGURES,
   PYTHON_MAX_OUTPUT_LENGTH,
   PYTHON_RUN_TIMEOUT_MS,
   PYTHON_WORKER_URL,
   type PythonOutputChunk,
+  type PythonRunFile,
   preparePythonRun,
 } from "@/app/lib/python-runner";
 import type { CodeFile } from "@/app/types";
@@ -26,6 +28,11 @@ type RunState = "idle" | "loading" | "running" | "done";
 interface RunOutput {
   chunks: PythonOutputChunk[];
   truncated: boolean;
+  /** Object URLs of the PNGs matplotlib drew, in order. */
+  figures: string[];
+  figuresSkipped: boolean;
+  /** Packages being loaded before the program starts (pandas etc.), for the loading message. */
+  packages: string[];
   notice: string | null;
 }
 
@@ -35,7 +42,14 @@ interface SpareWorker {
   failed: boolean;
 }
 
-const EMPTY_OUTPUT: RunOutput = { chunks: [], truncated: false, notice: null };
+const EMPTY_OUTPUT: RunOutput = {
+  chunks: [],
+  truncated: false,
+  figures: [],
+  figuresSkipped: false,
+  packages: [],
+  notice: null,
+};
 
 function startWorker(): SpareWorker | null {
   try {
@@ -65,6 +79,15 @@ export function PythonConsole({ files, collapsible = false }: PythonConsoleProps
   // does not re-render the page thousands of times.
   const pendingRef = useRef<RunOutput>(EMPTY_OUTPUT);
   const frameRef = useRef<number | null>(null);
+  // Figure URLs hold the PNG in memory until revoked: on the next run, on 閉じる and on unmount.
+  const figureUrlsRef = useRef<string[]>([]);
+
+  const revokeFigures = useCallback(() => {
+    for (const url of figureUrlsRef.current) {
+      URL.revokeObjectURL(url);
+    }
+    figureUrlsRef.current = [];
+  }, []);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -103,17 +126,24 @@ export function PythonConsole({ files, collapsible = false }: PythonConsoleProps
       cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
     }
-  }, [stopRun]);
+    revokeFigures();
+  }, [stopRun, revokeFigures]);
 
   useEffect(() => stopAll, [stopAll]);
 
-  const prepareNext = useCallback(() => {
-    spareRef.current ??= startWorker();
+  // The next worker starts loading Pyodide, and the packages the files just run import, while the
+  // learner reads the result.
+  const prepareNext = useCallback((runFiles: PythonRunFile[]) => {
+    if (!spareRef.current) {
+      spareRef.current = startWorker();
+      spareRef.current?.worker.postMessage({ type: "prepare", files: runFiles });
+    }
   }, []);
 
   const run = () => {
     const plan = preparePythonRun(files);
     stopRun();
+    revokeFigures();
     pendingRef.current = EMPTY_OUTPUT;
     if (!plan.ok) {
       pendingRef.current = { ...EMPTY_OUTPUT, notice: plan.message };
@@ -150,7 +180,7 @@ export function PythonConsole({ files, collapsible = false }: PythonConsoleProps
       flush();
       setState("done");
       if (startSpare) {
-        prepareNext();
+        prepareNext(plan.files);
       }
     };
     timerRef.current = setTimeout(
@@ -189,6 +219,24 @@ export function PythonConsole({ files, collapsible = false }: PythonConsoleProps
           scheduleFlush();
           break;
         }
+        case "packages":
+          pendingRef.current = { ...pendingRef.current, packages: message.names };
+          scheduleFlush();
+          break;
+        case "figure": {
+          const url = URL.createObjectURL(new Blob([message.png], { type: "image/png" }));
+          figureUrlsRef.current.push(url);
+          pendingRef.current = {
+            ...pendingRef.current,
+            figures: [...pendingRef.current.figures, url],
+          };
+          scheduleFlush();
+          break;
+        }
+        case "figure-skipped":
+          pendingRef.current = { ...pendingRef.current, figuresSkipped: true };
+          scheduleFlush();
+          break;
         case "truncated":
           pendingRef.current = { ...pendingRef.current, truncated: true };
           scheduleFlush();
@@ -197,7 +245,8 @@ export function PythonConsole({ files, collapsible = false }: PythonConsoleProps
           finish(null, true);
           break;
         default:
-          finish(`Python の実行環境でエラーが起きました: ${message.message}`, false);
+          // The worker writes these for the learner (load failures, an unexpected error).
+          finish(message.message, false);
       }
     };
     worker.onerror = () => {
@@ -206,7 +255,7 @@ export function PythonConsole({ files, collapsible = false }: PythonConsoleProps
         false
       );
     };
-    worker.postMessage({ entry: plan.entry, files: plan.files });
+    worker.postMessage({ type: "run", entry: plan.entry, files: plan.files });
   };
 
   const busy = state === "loading" || state === "running";
@@ -250,7 +299,8 @@ export function PythonConsole({ files, collapsible = false }: PythonConsoleProps
           {output === null ? (
             <p className="px-3 py-2 text-xs text-muted-foreground">
               「実行」を押すと、コードを上から実行して、print
-              の出力やエラーをここに表示します。毎回、新しい状態から始まります。input()
+              の出力やエラーをここに表示します。matplotlib
+              のグラフは、出力の下に画像で出ます。毎回、新しい状態から始まります。input()
               は使えません。
             </p>
           ) : (
@@ -264,34 +314,57 @@ export function PythonConsole({ files, collapsible = false }: PythonConsoleProps
 
 function PythonOutput({ output, state }: { output: RunOutput; state: RunState }) {
   return (
-    <div className="max-h-96 space-y-2 overflow-y-auto px-3 py-2">
-      {state === "loading" && (
-        <p className="text-xs text-muted-foreground">
-          Python の実行環境を準備しています（初回は数秒〜十数秒かかります）…
-        </p>
-      )}
-      {output.chunks.length > 0 && (
-        <pre className="whitespace-pre-wrap break-all font-mono text-xs">
-          {output.chunks.map((chunk, index) => (
-            <span
-              // biome-ignore lint/suspicious/noArrayIndexKey: chunks are append-only.
-              key={index}
-              className={chunk.stream === "stderr" ? "text-destructive" : undefined}
-            >
-              {chunk.text}
-            </span>
+    <>
+      <div className="max-h-96 space-y-2 overflow-y-auto px-3 py-2">
+        {state === "loading" && (
+          <p className="text-xs text-muted-foreground">
+            {output.packages.length > 0
+              ? `${output.packages.join("・")} を読み込んでいます（初回は十数秒かかることがあります）…`
+              : "Python の実行環境を準備しています（初回は数秒〜十数秒かかります）…"}
+          </p>
+        )}
+        {output.chunks.length > 0 && (
+          <pre className="whitespace-pre-wrap break-all font-mono text-xs">
+            {output.chunks.map((chunk, index) => (
+              <span
+                // biome-ignore lint/suspicious/noArrayIndexKey: chunks are append-only.
+                key={index}
+                className={chunk.stream === "stderr" ? "text-destructive" : undefined}
+              >
+                {chunk.text}
+              </span>
+            ))}
+          </pre>
+        )}
+        {state === "done" &&
+          output.chunks.length === 0 &&
+          output.figures.length === 0 &&
+          !output.notice && <p className="text-xs text-muted-foreground">（出力はありません）</p>}
+        {output.truncated && (
+          <p className="text-xs text-muted-foreground">
+            出力が多いため、先頭の {PYTHON_MAX_OUTPUT_LENGTH.toLocaleString()} 文字だけ表示しました
+          </p>
+        )}
+        {output.notice && <p className="text-xs text-destructive">{output.notice}</p>}
+      </div>
+      {(output.figures.length > 0 || output.figuresSkipped) && (
+        <div className="space-y-2 border-t px-3 py-2">
+          {output.figures.map((url, index) => (
+            // biome-ignore lint/performance/noImgElement: a blob: URL made in the browser; next/image cannot optimize it.
+            <img
+              key={url}
+              src={url}
+              alt={`グラフ ${index + 1}`}
+              className="h-auto max-w-full rounded border bg-white"
+            />
           ))}
-        </pre>
+          {output.figuresSkipped && (
+            <p className="text-xs text-muted-foreground">
+              グラフが多いか大きすぎるため、先頭の {PYTHON_MAX_FIGURES} 枚までだけ表示しました
+            </p>
+          )}
+        </div>
       )}
-      {state === "done" && output.chunks.length === 0 && !output.notice && (
-        <p className="text-xs text-muted-foreground">（出力はありません）</p>
-      )}
-      {output.truncated && (
-        <p className="text-xs text-muted-foreground">
-          出力が多いため、先頭の {PYTHON_MAX_OUTPUT_LENGTH.toLocaleString()} 文字だけ表示しました
-        </p>
-      )}
-      {output.notice && <p className="text-xs text-destructive">{output.notice}</p>}
-    </div>
+    </>
   );
 }
