@@ -135,6 +135,7 @@ describe("playground terminal", () => {
   it("$HOME などの変数を展開し、シングルクォートの中はそのまま", () => {
     const state = start();
     expect(run(state, "echo $HOME").stdout).toBe(`${TERMINAL_HOME}\n`);
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the shell syntax ${USER} is the input under test
     expect(run(state, 'echo "user=${USER}"').stdout).toBe("user=sinlab\n");
     expect(run(state, "echo '$HOME'").stdout).toBe("$HOME\n");
     expect(run(state, "echo a $NOPE b").stdout).toBe("a b\n");
