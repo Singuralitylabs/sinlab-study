@@ -680,6 +680,15 @@ function runCommand(session: Session, name: string, args: string[], io: CommandI
             io.err.push(`cp: -r not specified; omitting directory '${source}'`);
             continue;
           }
+          // A directory never replaces a file (that would silently lose the file's content).
+          if (fs.get(target)?.type === "file") {
+            io.err.push(
+              destination.endsWith("/")
+                ? `${name}: cannot stat '${destination}': Not a directory`
+                : `${name}: cannot overwrite non-directory '${destination}' with directory '${source}'`
+            );
+            continue;
+          }
           if (target.startsWith(`${sourcePath}/`)) {
             io.err.push(
               `${name}: cannot ${name === "cp" ? "copy" : "move"} a directory, '${source}', into itself`

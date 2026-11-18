@@ -117,6 +117,13 @@ describe("playground terminal", () => {
     const tree = run(state, "mkdir proj", "touch proj/a.txt").state;
     expect(run(tree, "cp -r proj backup/", "ls backup").stdout).toBe("a.txt\n");
     expect(run(tree, "mv proj newproj/", "ls").stdout).toBe("memo.txt  newproj  notes.md\n");
+    expect(run(tree, "mv proj memo.txt/").stderr).toBe(
+      "mv: cannot stat 'memo.txt/': Not a directory\n"
+    );
+    expect(run(tree, "cp -r proj memo.txt").stderr).toBe(
+      "cp: cannot overwrite non-directory 'memo.txt' with directory 'proj'\n"
+    );
+    expect(run(tree, "mv proj memo.txt", "cat memo.txt").stdout).toContain("りんご");
   });
 
   it("> は先に出力先を空にし、cat は出力先と同じファイルを読まない", () => {
