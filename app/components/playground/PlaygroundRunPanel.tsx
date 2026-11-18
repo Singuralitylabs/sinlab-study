@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import { HtmlPreviewNoSSR } from "@/app/components/HtmlPreviewNoSSR";
 import type { PlaygroundKind } from "@/app/constants/playground";
@@ -12,9 +13,23 @@ import {
   toPlaygroundCodeFiles,
 } from "@/app/lib/playground";
 import { Button } from "@/components/ui/button";
-import { PlaygroundDataPanel } from "./PlaygroundDataPanel";
-import { PlaygroundMarkdownPanel } from "./PlaygroundMarkdownPanel";
-import { PlaygroundTerminal } from "./PlaygroundTerminal";
+
+const panelLoading = () => <p className="text-sm text-muted-foreground">読み込み中...</p>;
+
+// Each kind's panel is its own chunk: opening Web / Python / SQL must not download the terminal or
+// the JSON / YAML checker, and vice versa (#583: this page is a side feature and stays light).
+const PlaygroundMarkdownPanel = dynamic(
+  () => import("./PlaygroundMarkdownPanel").then((m) => m.PlaygroundMarkdownPanel),
+  { ssr: false, loading: panelLoading }
+);
+const PlaygroundDataPanel = dynamic(
+  () => import("./PlaygroundDataPanel").then((m) => m.PlaygroundDataPanel),
+  { ssr: false, loading: panelLoading }
+);
+const PlaygroundTerminal = dynamic(
+  () => import("./PlaygroundTerminal").then((m) => m.PlaygroundTerminal),
+  { ssr: false, loading: panelLoading }
+);
 
 /** How added files take part in a run; without it, a new file that does nothing looks broken. */
 const RUN_HINTS: Record<PlaygroundKind, string> = {

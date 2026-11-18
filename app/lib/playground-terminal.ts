@@ -62,7 +62,7 @@ const HELP_TEXT = `このターミナルは練習用です。次のコマンド�
   grep [-i] [-n] [-v] 文字 文字を含む行
   sort [-r] [-n]          並べ替え
   whoami / clear          ユーザー名 / 画面を消す
-パイプ（|）とリダイレクト（> >>）、* によるファイル名の指定も使えます。`;
+パイプ（|）とリダイレクト（> >>）、* によるファイル名の指定、$HOME $USER $PWD も使えます。`;
 
 const NOT_SUPPORTED = (name: string) =>
   `${name}: このターミナルでは使えません（練習用に一部のコマンドだけ再現しています。help で一覧を表示）`;
@@ -134,7 +134,31 @@ function childrenOf(nodes: ReadonlyMap<string, TerminalNode>, dir: string): stri
 type Token = { text: string; quoted: boolean } | { op: "|" | ">" | ">>" };
 
 /** Splits like a shell for the parts this terminal supports; other operators are reported. */
-function tokenize(line: string): { tokens: Token[]; error: string | null } {
+const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*/;
+
+/**
+ * `$NAME` / `${NAME}` outside single quotes, as bash does. Unknown names become empty (bash prints
+ * nothing for an unset variable); a lone `$` stays as typed. Returns the text and characters used.
+ */
+function expandVariable(
+  line: string,
+  start: number,
+  variables: Readonly<Record<string, string>>
+): { text: string; length: number } {
+  const braced = line[start + 1] === "{";
+  const rest = line.slice(start + (braced ? 2 : 1));
+  const name = VARIABLE_NAME.exec(rest)?.[0];
+  if (!name || (braced && rest[name.length] !== "}")) {
+    return { text: "$", length: 1 };
+  }
+  return { text: variables[name] ?? "", length: name.length + (braced ? 3 : 1) };
+}
+
+/** Splits like a shell for the parts this terminal supports; other operators are reported. */
+function tokenize(
+  line: string,
+  variables: Readonly<Record<string, string>>
+): { tokens: Token[]; error: string | null } {
   const tokens: Token[] = [];
   let i = 0;
   while (i < line.length) {
@@ -157,14 +181,8 @@ function tokenize(line: string): { tokens: Token[]; error: string | null } {
       i += append ? 2 : 1;
       continue;
     }
-    if (
-      ch === ";" ||
-      ch === "&" ||
-      ch === "<" ||
-      ch === "`" ||
-      (ch === "$" && line[i + 1] === "(")
-    ) {
-      const op = ch === "&" && line[i + 1] === "&" ? "&&" : ch === "$" ? "$(" : ch;
+    if (ch === ";" || ch === "&" || ch === "<" || ch === "`") {
+      const op = ch === "&" && line[i + 1] === "&" ? "&&" : ch;
       return {
         tokens,
         error: `${op} は、このターミナルでは使えません（1行に1つのコマンドを書いてください）`,
@@ -174,7 +192,10 @@ function tokenize(line: string): { tokens: Token[]; error: string | null } {
     let quoted = false;
     while (i < line.length && !" \t|><;&`".includes(line[i])) {
       const c = line[i];
-      if (c === "'" || c === '"') {
+      if (c === "$" && line[i + 1] === "(") {
+        return { tokens, error: "$( は、このターミナルでは使えません" };
+      }
+      if (c === "'") {
         const end = line.indexOf(c, i + 1);
         if (end === -1) {
           return { tokens, error: "引用符（' または \"）が閉じていません" };
@@ -182,16 +203,44 @@ function tokenize(line: string): { tokens: Token[]; error: string | null } {
         text += line.slice(i + 1, end);
         quoted = true;
         i = end + 1;
+      } else if (c === '"') {
+        const end = line.indexOf(c, i + 1);
+        if (end === -1) {
+          return { tokens, error: "引用符（' または \"）が閉じていません" };
+        }
+        let j = i + 1;
+        while (j < end) {
+          if (line[j] === "$" && line[j + 1] === "(") {
+            return { tokens, error: "$( は、このターミナルでは使えません" };
+          }
+          if (line[j] === "$") {
+            const expanded = expandVariable(line, j, variables);
+            text += expanded.text;
+            j += expanded.length;
+          } else {
+            text += line[j];
+            j++;
+          }
+        }
+        quoted = true;
+        i = end + 1;
       } else if (c === "\\" && i + 1 < line.length) {
         text += line[i + 1];
         quoted = true;
         i += 2;
+      } else if (c === "$") {
+        const expanded = expandVariable(line, i, variables);
+        text += expanded.text;
+        i += expanded.length;
       } else {
         text += c;
         i++;
       }
     }
-    tokens.push({ text, quoted });
+    // An unquoted variable that expands to nothing leaves no word, as in bash.
+    if (quoted || text !== "") {
+      tokens.push({ text, quoted });
+    }
   }
   return { tokens, error: null };
 }
@@ -364,6 +413,8 @@ interface Session {
   cwd: string;
   previousCwd: string | null;
   clear: boolean;
+  /** Target of `>` / `>>` on this line; cat refuses to read it, as GNU cat does. */
+  redirectPath: string | null;
 }
 
 function runCommand(session: Session, name: string, args: string[], io: CommandIo): void {
@@ -522,7 +573,17 @@ function runCommand(session: Session, name: string, args: string[], io: CommandI
       if (!parsed) {
         return;
       }
-      const text = readInputs(fs, session.cwd, "cat", parsed.rest, io).join("");
+      const inputs = parsed.rest.filter((file) => {
+        if (at(file) !== session.redirectPath) {
+          return true;
+        }
+        io.err.push(`cat: ${file}: input file is output file`);
+        return false;
+      });
+      if (parsed.rest.length > 0 && inputs.length === 0) {
+        return;
+      }
+      const text = readInputs(fs, session.cwd, "cat", inputs, io).join("");
       io.out.push(
         parsed.flags.has("n")
           ? joinLines(splitLines(text).map((line, i) => `${String(i + 1).padStart(6)}\t${line}`))
@@ -584,6 +645,15 @@ function runCommand(session: Session, name: string, args: string[], io: CommandI
       const destination = parsed.rest[parsed.rest.length - 1];
       const destinationPath = at(destination);
       const destinationIsDir = fs.get(destinationPath)?.type === "dir";
+      // resolvePath drops the trailing slash, so `mv a.txt nodir/` would otherwise create a file.
+      if (destination.endsWith("/") && !destinationIsDir) {
+        io.err.push(
+          name === "mv"
+            ? `mv: cannot move '${sources[0]}' to '${destination}': Not a directory`
+            : `cp: cannot create regular file '${destination}': Not a directory`
+        );
+        return;
+      }
       if (sources.length > 1 && !destinationIsDir) {
         io.err.push(`${name}: target '${destination}': Not a directory`);
         return;
@@ -730,7 +800,12 @@ function runCommand(session: Session, name: string, args: string[], io: CommandI
 
 export function runTerminalLine(state: TerminalState, line: string): TerminalResult {
   const unchanged = { state, stdout: "", stderr: "", clear: false };
-  const { tokens, error } = tokenize(line);
+  const { tokens, error } = tokenize(line, {
+    HOME: TERMINAL_HOME,
+    USER: TERMINAL_USER,
+    PWD: state.cwd,
+    OLDPWD: state.previousCwd ?? "",
+  });
   if (error) {
     return { ...unchanged, stderr: `${error}\n` };
   }
@@ -773,8 +848,19 @@ export function runTerminalLine(state: TerminalState, line: string): TerminalRes
     cwd: state.cwd,
     previousCwd: state.previousCwd,
     clear: false,
+    redirectPath: redirect ? resolvePath(state.cwd, redirect.target) : null,
   };
   const stderr: string[] = [];
+  // bash opens (and with `>` empties) the target before the command runs, so `sort a > a` leaves
+  // an empty file; a target it cannot open stops the line before anything runs.
+  if (redirect && session.redirectPath) {
+    const existing = session.fs.get(session.redirectPath);
+    const opened: string[] = [];
+    const content = redirect.append && existing?.type === "file" ? existing.content : "";
+    if (!writeFile(session.fs, session.redirectPath, content, opened, "bash")) {
+      return { ...unchanged, stderr: opened.map((message) => `${message}\n`).join("") };
+    }
+  }
   let stdin: string | null = null;
   for (const stage of stages) {
     const words = stage.flatMap((token) =>
@@ -793,9 +879,9 @@ export function runTerminalLine(state: TerminalState, line: string): TerminalRes
 
   let stdout = stdin ?? "";
   if (redirect) {
-    const path = resolvePath(session.cwd, redirect.target);
+    const path = session.redirectPath ?? resolvePath(state.cwd, redirect.target);
     const existing = session.fs.get(path);
-    const previous = redirect.append && existing?.type === "file" ? existing.content : "";
+    const previous = existing?.type === "file" ? existing.content : "";
     const redirectErr: string[] = [];
     writeFile(session.fs, path, previous + stdout, redirectErr, "bash");
     stderr.push(...redirectErr.map((message) => `${message}\n`));

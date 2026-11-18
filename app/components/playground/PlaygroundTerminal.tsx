@@ -102,7 +102,12 @@ export function PlaygroundTerminal({
           "overflow-y-auto rounded-md bg-zinc-950 p-3 font-mono text-sm text-zinc-100",
           heightClassName ?? "h-[360px]"
         )}
-        onClick={() => inputRef.current?.focus()}
+        onClick={() => {
+          // Focusing after a drag-select would clear it, and the learner could not copy output.
+          if (!window.getSelection()?.toString()) {
+            inputRef.current?.focus();
+          }
+        }}
       >
         <div role="log" aria-live="polite" aria-label="ターミナルの出力">
           {entries.map((item) => (

@@ -1891,12 +1891,12 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 
 ### 18.4 Markdown・JSON・YAML・ターミナル（#583）
 
-実行パネル（`PlaygroundRunPanel`）は種類ごとに自分の部品だけを読み込む（ほかの種類の表示を遅くしないため）。
+実行パネル（`PlaygroundRunPanel`）は Markdown・JSON / YAML・ターミナルの部品を `next/dynamic` で別々に読み込み、開いた種類の部品だけを取得する（ほかの種類の表示を遅くしないため）。
 
 - **Markdown**（`PlaygroundMarkdownPanel`）: 記事と同じ `MarkdownRenderer` を `next/dynamic` で読み込んで表示する（生の HTML は描画しない）。`README.md`（無ければ左端）を表示し、2つ以上あれば「表示するファイル」で切り替える
 - **JSON / YAML**（`PlaygroundDataPanel`）: ファイルごとに書き方を確かめ、正しければ整形した JSON を、誤りなら行・列つきのエラーを出す（`checkJson()` / `checkYaml()`。`app/lib/playground-data.ts`）。JSON はブラウザ標準の `JSON.parse`。YAML は `js-yaml` を YAML を開いたときだけ読み込み、既定のスキーマ（JavaScript の型のタグなし）で読む
 - **ターミナル**（`PlaygroundTerminal`、処理は `app/lib/playground-terminal.ts`）: 本物のシェルではなく、メモリ上のファイルの木で基本コマンドを再現する。左のファイルを `/home/sinlab`（`~`）に置いて始め、変更は左のファイルにも保存にも反映しない（「やり直す」で左のファイルから作り直す）
-  - コマンド: `help pwd ls(-a -l) cd mkdir(-p) touch cat(-n) echo rm(-r -f) mv cp(-r) head tail(-n) wc(-l -w -c) grep(-i -n -v。固定文字列) sort(-r -n) whoami clear`。パイプ `|`、行末のリダイレクト `>` `>>`、最後の階層の `*` `?` を使える
+  - コマンド: `help pwd ls(-a -l) cd mkdir(-p) touch cat(-n) echo rm(-r -f) mv cp(-r) head tail(-n) wc(-l -w -c) grep(-i -n -v。固定文字列) sort(-r -n) whoami clear`。パイプ `|`、行末のリダイレクト `>` `>>`（bash と同じく先に開き、`>` は先に空にする。`cat` は出力先と同じファイルを読まない）、最後の階層の `*` `?`、変数 `$HOME` `$USER` `$PWD` `$OLDPWD`（ほかの名前は空。シングルクォートの中は展開しない）を使える
   - エラーの文面は GNU coreutils / bash に合わせる（本物の Ubuntu と同じに見えるように）。未対応のコマンド・`;` `&&` などは日本語で「使えません」と返す
   - ファイルの合計は `TERMINAL_MAX_TOTAL_LENGTH`（100 万文字）まで、画面の行は 500 件まで残す。いまいる場所やホームは消せない（練習用の制限）
 

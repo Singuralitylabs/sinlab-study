@@ -98,7 +98,7 @@ describe("playground terminal", () => {
   it("ファイルの合計が上限を超える書き込みは断る", () => {
     const big = "x".repeat(TERMINAL_MAX_TOTAL_LENGTH / 2 + 1);
     const state = createTerminalState([{ filename: "big.txt", content: big }]);
-    const result = run(state, "cat big.txt >> big.txt");
+    const result = run(state, "cat big.txt > copy.txt");
     expect(result.stderr).toContain("大きすぎます");
     expect(run(result.state, "wc -c big.txt").stdout).toBe(`${big.length} big.txt\n`);
   });
@@ -106,5 +106,35 @@ describe("playground terminal", () => {
   it("clear と help", () => {
     expect(run(start(), "clear").clear).toBe(true);
     expect(run(start(), "help").stdout).toContain("grep");
+  });
+
+  it("存在しないディレクトリ名/ への mv・cp は、ファイルを作らずに断る", () => {
+    const state = start();
+    const moved = run(state, "mv memo.txt nodir/");
+    expect(moved.stderr).toBe("mv: cannot move 'memo.txt' to 'nodir/': Not a directory\n");
+    expect(run(moved.state, "ls").stdout).toBe("memo.txt  notes.md\n");
+    expect(run(state, "cp memo.txt backup/").stderr).toContain("Not a directory");
+  });
+
+  it("> は先に出力先を空にし、cat は出力先と同じファイルを読まない", () => {
+    const state = start();
+    const same = run(state, "cat memo.txt > memo.txt");
+    expect(same.stderr).toBe("cat: memo.txt: input file is output file\n");
+    expect(run(same.state, "wc -c memo.txt").stdout).toBe("0 memo.txt\n");
+    const appended = run(state, "cat memo.txt >> memo.txt");
+    expect(appended.stderr).toContain("input file is output file");
+    expect(run(appended.state, "wc -l memo.txt").stdout).toBe("3 memo.txt\n");
+    expect(run(state, "sort memo.txt > memo.txt", "cat memo.txt").stdout).toBe("");
+    expect(run(state, "echo x > nodir/a.txt").stderr).toContain("No such file or directory");
+  });
+
+  it("$HOME などの変数を展開し、シングルクォートの中はそのまま", () => {
+    const state = start();
+    expect(run(state, "echo $HOME").stdout).toBe(`${TERMINAL_HOME}\n`);
+    expect(run(state, 'echo "user=${USER}"').stdout).toBe("user=sinlab\n");
+    expect(run(state, "echo '$HOME'").stdout).toBe("$HOME\n");
+    expect(run(state, "echo a $NOPE b").stdout).toBe("a b\n");
+    expect(run(state, "mkdir w", "cd w", "cd $HOME", "pwd").stdout).toBe(`${TERMINAL_HOME}\n`);
+    expect(run(state, "echo $(pwd)").stderr).toContain("$( は");
   });
 });
