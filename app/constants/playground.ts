@@ -52,7 +52,7 @@ export const PLAYGROUND_DEFAULT_FILES: Record<
     {
       filename: "script.js",
       content:
-        'const button = document.getElementById("button");\n\nbutton.addEventListener("click", () => {\n  console.log("ボタンが押されました");\n});\n',
+        'const button = document.getElementById("button");\n\nbutton.addEventListener("click", () => {\n  console.log("ボタンが押されました");\n});\n', // allow-console: starter code shown to the visitor, not app output
     },
   ],
   python: [
