@@ -26,6 +26,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { PlaygroundGuideDialog } from "./PlaygroundGuideDialog";
 
 export interface PlaygroundTemplateSource {
   slug: string;
@@ -164,23 +165,28 @@ export function PlaygroundWorkspace({
 
   return (
     <div className="space-y-4">
-      {!template && (
-        <div className="flex flex-wrap gap-2" role="tablist" aria-label="実行の種類">
-          {PLAYGROUND_KINDS.map((option) => (
-            <Button
-              key={option}
-              type="button"
-              role="tab"
-              aria-selected={option === kind}
-              variant={option === kind ? "default" : "outline"}
-              size="sm"
-              onClick={() => switchKind(option)}
-            >
-              {PLAYGROUND_KIND_LABELS[option]}
-            </Button>
-          ))}
-        </div>
-      )}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {template ? (
+          <span />
+        ) : (
+          <div className="flex flex-wrap gap-2" role="tablist" aria-label="実行の種類">
+            {PLAYGROUND_KINDS.map((option) => (
+              <Button
+                key={option}
+                type="button"
+                role="tab"
+                aria-selected={option === kind}
+                variant={option === kind ? "default" : "outline"}
+                size="sm"
+                onClick={() => switchKind(option)}
+              >
+                {PLAYGROUND_KIND_LABELS[option]}
+              </Button>
+            ))}
+          </div>
+        )}
+        <PlaygroundGuideDialog />
+      </div>
 
       {/* min-w-0: a long code line must scroll inside the editor, not widen the page on phones. */}
       <div className="grid gap-4 lg:grid-cols-2">

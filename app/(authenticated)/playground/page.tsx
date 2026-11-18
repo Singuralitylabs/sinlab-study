@@ -14,7 +14,7 @@ export default async function PlaygroundPage() {
     <div className="max-w-7xl mx-auto">
       <PageTitle
         title={PLAYGROUND_NAV_TITLE}
-        description="講座とは別に、HTML・CSS・JavaScript、Python、SQL を自由に書いて動かせます。"
+        description="HTML・CSS・JavaScript、Python、SQL を自由に書いて動かせます。"
       />
       <PlaygroundWorkspace userId={userId} />
     </div>

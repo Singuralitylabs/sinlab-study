@@ -138,4 +138,15 @@ describe("PlaygroundWorkspace", () => {
     expect(container.textContent).toContain("保存できませんでした");
     setItem.mockRestore();
   });
+
+  it("「このページでできること」で、できることと言語ごとの制限を開ける", () => {
+    act(() => root.render(<PlaygroundWorkspace userId={7} />));
+    clickButton("このページでできること");
+    // The dialog is portaled to document.body, outside the render container.
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("できないこと・制限");
+    expect(text).toContain("input() は使えません");
+    expect(text).toContain("実行のたびに空のデータベース");
+    expect(text).toContain("1回の実行は10秒まで");
+  });
 });
