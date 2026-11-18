@@ -180,3 +180,29 @@ export function generatePlaygroundTemplateSlug(
   }
   return slug;
 }
+
+/** HTML files the Web preview can show, in tab order. */
+export function playgroundHtmlPages(files: readonly CodeFile[]): string[] {
+  return files.filter((file) => file.language === "html").map((file) => file.filename);
+}
+
+/**
+ * The preview renders index.html (else the first HTML file) and ignores the rest. To show another
+ * page, the other HTML files are left out so the chosen one becomes the document; CSS / JS stay so
+ * its link / script tags still resolve. A missing choice (renamed or deleted) falls back silently.
+ */
+export function selectPlaygroundPreviewPage(
+  files: readonly CodeFile[],
+  page: string | null
+): CodeFile[] {
+  if (!page || !playgroundHtmlPages(files).includes(page)) {
+    return [...files];
+  }
+  return files.filter((file) => file.language !== "html" || file.filename === page);
+}
+
+/** The page the preview shows when nothing is chosen (same rule as buildPreviewDocument). */
+export function defaultPlaygroundPreviewPage(files: readonly CodeFile[]): string | null {
+  const pages = playgroundHtmlPages(files);
+  return pages.find((name) => name.toLowerCase() === "index.html") ?? pages[0] ?? null;
+}

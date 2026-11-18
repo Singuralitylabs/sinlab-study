@@ -33,6 +33,11 @@ export interface PlaygroundTemplateSource {
   files: PlaygroundFileInput[];
 }
 
+// The page has nothing else to show, so the editor and preview fill most of the viewport (with a
+// floor for short laptop screens) instead of the exercise form's 200px / 360px.
+const PLAYGROUND_EDITOR_MIN_HEIGHT = "max(320px, calc(100vh - 400px))";
+const PLAYGROUND_FRAME_HEIGHT_CLASS = "h-[max(360px,calc(100vh-400px))]";
+
 type SaveState = "idle" | "saved" | "invalid" | "unavailable";
 
 const SAVE_STATE_TEXT: Record<SaveState, string> = {
@@ -180,13 +185,14 @@ export function PlaygroundWorkspace({
       {/* min-w-0: a long code line must scroll inside the editor, not widen the page on phones. */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="min-w-0">
-          <CardContent className="space-y-3 pt-6">
+          <CardContent className="space-y-3">
             {files ? (
               <PlaygroundFilesEditor
                 key={storageKey}
                 kind={kind}
                 files={files}
                 onChange={updateFiles}
+                editorMinHeight={PLAYGROUND_EDITOR_MIN_HEIGHT}
               />
             ) : (
               <div className="flex min-h-[200px] items-center justify-center text-sm text-muted-foreground">
@@ -241,8 +247,14 @@ export function PlaygroundWorkspace({
         </Card>
 
         <Card className="min-w-0">
-          <CardContent className="pt-6">
-            {files && <PlaygroundRunPanel kind={kind} files={withoutPlaygroundFileIds(files)} />}
+          <CardContent>
+            {files && (
+              <PlaygroundRunPanel
+                kind={kind}
+                files={withoutPlaygroundFileIds(files)}
+                frameHeightClassName={PLAYGROUND_FRAME_HEIGHT_CLASS}
+              />
+            )}
           </CardContent>
         </Card>
       </div>

@@ -39,9 +39,15 @@ interface PlaygroundFilesEditorProps {
   kind: PlaygroundKind;
   files: PlaygroundEditorFile[];
   onChange: (files: PlaygroundEditorFile[]) => void;
+  editorMinHeight?: string;
 }
 
-export function PlaygroundFilesEditor({ kind, files, onChange }: PlaygroundFilesEditorProps) {
+export function PlaygroundFilesEditor({
+  kind,
+  files,
+  onChange,
+  editorMinHeight,
+}: PlaygroundFilesEditorProps) {
   const [activeId, setActiveId] = useState<string | null>(files[0]?.id ?? null);
   const [nameForm, setNameForm] = useState<NameForm | null>(null);
   const [nameInput, setNameInput] = useState("");
@@ -218,6 +224,7 @@ export function PlaygroundFilesEditor({ kind, files, onChange }: PlaygroundFiles
             }
             language={playgroundLanguageFor(kind, active.filename) ?? "javascript"}
             placeholder="ここにコードを書いてください"
+            minHeight={editorMinHeight}
           />
         </>
       )}

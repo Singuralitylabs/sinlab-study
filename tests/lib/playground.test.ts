@@ -7,14 +7,22 @@ import {
   PLAYGROUND_MAX_TOTAL_LENGTH,
   PLAYGROUND_TEMPLATE_SLUG_PATTERN,
 } from "@/app/constants/playground";
-import { isPythonLayout, isSqlLayout, resolvePreviewDisplay } from "@/app/lib/html-preview";
 import {
+  buildPreviewDocument,
+  isPythonLayout,
+  isSqlLayout,
+  resolvePreviewDisplay,
+} from "@/app/lib/html-preview";
+import {
+  defaultPlaygroundPreviewPage,
   generatePlaygroundTemplateSlug,
   parsePlaygroundDraft,
   playgroundFilenameError,
   playgroundFilesError,
+  playgroundHtmlPages,
   playgroundLanguageFor,
   playgroundStorageKey,
+  selectPlaygroundPreviewPage,
   serializePlaygroundDraft,
   toPlaygroundCodeFiles,
 } from "@/app/lib/playground";
@@ -138,5 +146,30 @@ describe("generatePlaygroundTemplateSlug", () => {
     });
     expect(slug).toBe("aaaaaaaaaa");
     expect(call).toBe(2);
+  });
+});
+
+describe("表示するページの切り替え", () => {
+  const files = toPlaygroundCodeFiles("web", [
+    { filename: "about.html", content: "<p>about</p>" },
+    { filename: "index.html", content: "<p>top</p>" },
+    { filename: "style.css", content: "p{}" },
+  ]);
+
+  it("選んでいないときは index.html を表示する", () => {
+    expect(playgroundHtmlPages(files)).toEqual(["about.html", "index.html"]);
+    expect(defaultPlaygroundPreviewPage(files)).toBe("index.html");
+    expect(selectPlaygroundPreviewPage(files, null)).toHaveLength(3);
+  });
+
+  it("選んだ HTML を表示する（CSS は残す）", () => {
+    const selected = selectPlaygroundPreviewPage(files, "about.html");
+    expect(selected.map((f) => f.filename)).toEqual(["about.html", "style.css"]);
+    expect(buildPreviewDocument(selected)).toContain("about");
+    expect(buildPreviewDocument(selected)).not.toContain("top");
+  });
+
+  it("消えた・名前の変わったページは、既定に戻す", () => {
+    expect(selectPlaygroundPreviewPage(files, "gone.html")).toHaveLength(3);
   });
 });

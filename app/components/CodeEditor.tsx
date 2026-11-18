@@ -9,6 +9,8 @@ export interface CodeEditorProps {
   onChange: (value: string) => void;
   language: CodeLanguage;
   placeholder?: string;
+  /** CSS min-height; exercises keep 200px to match CodeEditorNoSSR's loading placeholder. */
+  minHeight?: string;
 }
 
 // One dynamic import per language: a static import of every package would put all of them (SQL
@@ -43,6 +45,7 @@ const LANGUAGE_LOADERS: Record<CodeLanguage, () => Promise<Extension[]>> = {
 };
 
 const NO_EXTENSIONS: Extension[] = [];
+const DEFAULT_MIN_HEIGHT = "200px";
 
 function subscribeDarkClass(onStoreChange: () => void) {
   const root = document.documentElement;
@@ -59,7 +62,13 @@ function getDarkClassServerSnapshot() {
   return false;
 }
 
-export function CodeEditor({ value, onChange, language, placeholder }: CodeEditorProps) {
+export function CodeEditor({
+  value,
+  onChange,
+  language,
+  placeholder,
+  minHeight = DEFAULT_MIN_HEIGHT,
+}: CodeEditorProps) {
   // Read the .dark class set before first paint so dark users don't mount in light first.
   const isDark = useSyncExternalStore(
     subscribeDarkClass,
@@ -104,7 +113,10 @@ export function CodeEditor({ value, onChange, language, placeholder }: CodeEdito
         closeBrackets: true,
         indentOnInput: true,
       }}
-      style={{ minHeight: "200px" }}
+      // A taller box also goes on CodeMirror itself, or the strip below the gutter takes no clicks.
+      // The 200px default stays wrapper-only so exercise editors render exactly as before.
+      minHeight={minHeight === DEFAULT_MIN_HEIGHT ? undefined : minHeight}
+      style={{ minHeight }}
       className="overflow-hidden rounded-md border border-input text-sm"
     />
   );

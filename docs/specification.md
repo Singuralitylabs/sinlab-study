@@ -1868,7 +1868,7 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 
 ### 18.2 画面と保存
 
-- `PlaygroundWorkspace`（`app/(authenticated)/playground/components/`）。左にファイルのタブとエディタ（`PlaygroundFilesEditor`。ファイルの追加・名前変更・削除ができる）、右に実行結果（`PlaygroundRunPanel`。`resolvePreviewDisplay()` の自動規則でプレビュー／コンソールを決める）
+- `PlaygroundWorkspace`（`app/(authenticated)/playground/components/`）。左にファイルのタブとエディタ（`PlaygroundFilesEditor`。ファイルの追加・名前変更・削除ができる）、右に実行結果（`PlaygroundRunPanel`）。エディタとプレビューは画面の高さに合わせて広げる（`CodeEditor` の `minHeight`・`HtmlPreview` の `frameHeightClassName`。演習の 200px / 360px は変えない）。実行結果は `resolvePreviewDisplay()` の自動規則でプレビュー／コンソールを決める。Web のプレビューは `index.html`（無ければ最初の HTML）を表示し、HTML が2つ以上あるときは「表示するページ」で切り替える（選んだ HTML 以外の HTML を外して渡す。`selectPlaygroundPreviewPage()`。ページ間のリンクでの移動は sandbox を緩めないとできないため扱わない）。実行結果の下に、追加したファイルの使われ方（Web は HTML から読み込む、Python は `main.py` を実行し他の `.py` は import、SQL はタブの順にすべて実行）を1行で出す
 - ファイル名は半角英数字と `- _ .` だけ（先頭は英数字か `- _`。フォルダ不可）で、種類ごとの拡張子（`PLAYGROUND_EXTENSION_LANGUAGES`。Web は `.html .css .js .jsx`、Python は `.py`、SQL は `.sql`）。言語は拡張子からコードが決める。上限はファイル数 `PLAYGROUND_MAX_FILES`（10）・1ファイル `PLAYGROUND_MAX_FILE_LENGTH`（50,000 文字）・合計 `PLAYGROUND_MAX_TOTAL_LENGTH`（200,000 文字）。判定は `playgroundFilesError()` に一本化し、画面・ひな形 API・下書きの読み込みで共用する
 - **保存はこのブラウザの `localStorage` だけ**（DB には保存しない）。キーは `sinlab-playground:v1:u<ユーザーID>:kind:<種類>` または `...:template:<slug>`。ユーザー ID を含めるのは、体験会の会場 PC などを複数人で使うときに前の人のコードを出さないため。編集から 500ms 後と、種類の切り替え・ページを離れるとき（`pagehide`）に書く。読めない・壊れた・種類に合わない下書きは無かったものとして既定のコードで始める。上限を超えた内容は保存せず、その旨を出す。`localStorage` が使えないときも編集・実行は続け、「保存できませんでした」と出す
 - 「最初のコードに戻す」（ひな形では「ひな形に戻す」）は確認の後、下書きを消して元の内容に戻す
