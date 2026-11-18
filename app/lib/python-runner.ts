@@ -5,12 +5,16 @@ export const PYTHON_WORKER_URL = "/vendor/pyodide/python-worker.js";
 
 /** Time allowed for the program after Pyodide is ready. Loading Pyodide is not counted. */
 export const PYTHON_RUN_TIMEOUT_MS = 10_000;
-export const PYTHON_LOAD_TIMEOUT_MS = 60_000;
+/** Pyodide plus pandas and matplotlib is about 30MB on the first run. */
+export const PYTHON_LOAD_TIMEOUT_MS = 120_000;
 /**
  * Characters of output kept per run. python-worker.js stops sending at the same number, so a print
  * loop cannot flood the page; keep the two in step.
  */
 export const PYTHON_MAX_OUTPUT_LENGTH = 100_000;
+/** Figures (matplotlib PNGs) kept per run, and the size of one. python-worker.js uses the same numbers. */
+export const PYTHON_MAX_FIGURES = 20;
+export const PYTHON_MAX_FIGURE_BYTES = 5_000_000;
 /** Run first when present; otherwise the first file the exercise lists. */
 export const PYTHON_ENTRY_FILENAME = "main.py";
 
@@ -22,7 +26,10 @@ export interface PythonOutputChunk {
 }
 
 export type PythonWorkerMessage =
+  | { type: "packages"; names: string[] }
   | { type: "ready" }
+  | { type: "figure"; png: Uint8Array<ArrayBuffer> }
+  | { type: "figure-skipped" }
   | { type: "output"; stream: PythonStream; text: string }
   | { type: "truncated" }
   | { type: "done" }
@@ -116,8 +123,15 @@ export function acceptPythonWorkerMessage(raw: unknown): PythonWorkerMessage | n
   switch (data.type) {
     case "ready":
     case "truncated":
+    case "figure-skipped":
     case "done":
       return { type: data.type };
+    case "packages":
+      return Array.isArray(data.names) && data.names.every((name) => typeof name === "string")
+        ? { type: "packages", names: data.names as string[] }
+        : null;
+    case "figure":
+      return isPng(data.png) ? { type: "figure", png: data.png } : null;
     case "output":
       return (data.stream === "stdout" || data.stream === "stderr") && typeof data.text === "string"
         ? { type: "output", stream: data.stream, text: data.text }
@@ -127,4 +141,17 @@ export function acceptPythonWorkerMessage(raw: unknown): PythonWorkerMessage | n
     default:
       return null;
   }
+}
+
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/** Only a PNG within the size limit is shown; the page turns it into an image, never into markup. */
+function isPng(value: unknown): value is Uint8Array<ArrayBuffer> {
+  return (
+    value instanceof Uint8Array &&
+    value.buffer instanceof ArrayBuffer &&
+    value.byteLength > PNG_SIGNATURE.length &&
+    value.byteLength <= PYTHON_MAX_FIGURE_BYTES &&
+    PNG_SIGNATURE.every((byte, index) => value[index] === byte)
+  );
 }

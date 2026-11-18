@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   acceptPythonWorkerMessage,
   appendPythonOutput,
+  PYTHON_MAX_FIGURE_BYTES,
   PYTHON_MAX_OUTPUT_LENGTH,
   preparePythonRun,
 } from "@/app/lib/python-runner";
@@ -84,6 +85,34 @@ describe("acceptPythonWorkerMessage", () => {
       type: "fatal",
       message: "m",
     });
+  });
+
+  it("読み込むパッケージ名と、PNG のグラフを通す", () => {
+    expect(acceptPythonWorkerMessage({ type: "packages", names: ["numpy", "pandas"] })).toEqual({
+      type: "packages",
+      names: ["numpy", "pandas"],
+    });
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
+    expect(acceptPythonWorkerMessage({ type: "figure", png })).toEqual({ type: "figure", png });
+    expect(acceptPythonWorkerMessage({ type: "figure-skipped" })).toEqual({
+      type: "figure-skipped",
+    });
+  });
+
+  it("PNG でないもの・大きすぎる画像は捨てる", () => {
+    const header = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    const tooLarge = new Uint8Array(PYTHON_MAX_FIGURE_BYTES + 1);
+    tooLarge.set(header);
+    for (const png of [
+      new Uint8Array([0x3c, 0x73, 0x76, 0x67, 0x3e, 0, 0, 0, 0]),
+      new Uint8Array(header),
+      tooLarge,
+      Array.from(header),
+      "data:image/png;base64,AAAA",
+    ]) {
+      expect(acceptPythonWorkerMessage({ type: "figure", png })).toBeNull();
+    }
+    expect(acceptPythonWorkerMessage({ type: "packages", names: [1] })).toBeNull();
   });
 
   it("形の違うメッセージは捨てる", () => {
