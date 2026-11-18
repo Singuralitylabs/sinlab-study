@@ -8,11 +8,16 @@ import {
   TERMS_CONSENT_COOKIE_VALUE,
 } from "@/app/constants/auth";
 import { PRIVACY_URL, TERMS_URL } from "@/app/constants/legal";
+import {
+  POST_LOGIN_NEXT_COOKIE_MAX_AGE,
+  POST_LOGIN_NEXT_COOKIE_NAME,
+} from "@/app/lib/post-login-redirect";
 import { createClientSupabaseClient } from "@/app/services/api/supabase-client";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 
-export function GoogleLoginButton() {
+/** nextPath must already be sanitized (the callback checks it again). */
+export function GoogleLoginButton({ nextPath = null }: { nextPath?: string | null }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [agreed, setAgreed] = useState(false);
@@ -30,6 +35,12 @@ export function GoogleLoginButton() {
     const secure = window.location.protocol === "https:" ? "; Secure" : "";
     // biome-ignore lint/suspicious/noDocumentCookie: the Cookie Store API can't be used (see above)
     document.cookie = `${TERMS_CONSENT_COOKIE_NAME}=${TERMS_CONSENT_COOKIE_VALUE}; Max-Age=${TERMS_CONSENT_COOKIE_MAX_AGE}; Path=/; SameSite=Lax${secure}`;
+    // Always written (Max-Age=0 when absent) so a destination left over from an abandoned login
+    // cannot redirect this one.
+    // biome-ignore lint/suspicious/noDocumentCookie: the Cookie Store API can't be used (see above)
+    document.cookie = nextPath
+      ? `${POST_LOGIN_NEXT_COOKIE_NAME}=${encodeURIComponent(nextPath)}; Max-Age=${POST_LOGIN_NEXT_COOKIE_MAX_AGE}; Path=/; SameSite=Lax${secure}`
+      : `${POST_LOGIN_NEXT_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax${secure}`;
 
     const supabase = createClientSupabaseClient();
     const { error } = await supabase.auth.signInWithOAuth({

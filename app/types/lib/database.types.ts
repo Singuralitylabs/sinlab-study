@@ -885,6 +885,50 @@ export type Database = {
         };
         Relationships: [];
       };
+      playground_templates: {
+        Row: {
+          created_at: string;
+          created_by: number | null;
+          files: Json;
+          id: number;
+          is_published: boolean;
+          kind: string;
+          slug: string;
+          title: string;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: number | null;
+          files: Json;
+          id?: number;
+          is_published?: boolean;
+          kind: string;
+          slug: string;
+          title: string;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: number | null;
+          files?: Json;
+          id?: number;
+          is_published?: boolean;
+          kind?: string;
+          slug?: string;
+          title?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "playground_templates_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       push_logs: {
         Row: {
           created_at: string;

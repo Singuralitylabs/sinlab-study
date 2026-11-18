@@ -169,6 +169,7 @@ app/
 │   ├── manage/          #   コンテンツ管理画面（admin + maintainer 共通）
 │   ├── instructor/      #   講師向け画面（/manage にリダイレクト）
 │   ├── learn/           #   学習コンテンツ画面（Theme > Phase > Content の3階層）
+│   ├── playground/      #   コードを試す（講座の外でコードを書いて動かす。ひな形のリンク /playground/t/[slug]）
 │   ├── settings/        #   設定画面（案内メールの配信停止・再開）
 │   ├── submissions/     #   提出履歴画面
 │   ├── components/      #   認証済みレイアウト用コンポーネント
@@ -179,7 +180,7 @@ app/
 │   ├── admin/email-templates/ #   メール文面・サービス名の編集、プレビュー、テスト送信（admin のみ）
 │   ├── admin/email-logs/ #   メール送信履歴（admin のみ）
 │   ├── ai-review/       #   AIレビュー（Gemini API）
-│   ├── manage/          #   コンテンツ管理（phases/contents/themes）
+│   ├── manage/          #   コンテンツ管理（phases/contents/themes/playground-templates）
 │   ├── onboarding/      #   初回利用ガイドの完了記録
 │   ├── progress/        #   進捗更新
 │   ├── settings/email/  #   案内メールの配信停止・再開（本人用）

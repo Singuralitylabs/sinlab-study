@@ -4,6 +4,7 @@ import { TERMS_REQUIRED_ERROR_CODE } from "@/app/constants/auth";
 import { COMMERCIAL_TRANSACTIONS_URL, PRIVACY_URL, TERMS_URL } from "@/app/constants/legal";
 import { LOGIN_MASCOT } from "@/app/constants/mascot";
 import { isStripeEnabled } from "@/app/constants/stripe";
+import { sanitizePostLoginPath } from "@/app/lib/post-login-redirect";
 import { GoogleLoginButton } from "./components/google-login-button";
 import { LearningScreens } from "./components/learning-screens";
 import { ServiceIntro } from "./components/service-intro";
@@ -36,9 +37,10 @@ function loginErrorMessage(error: string | undefined): string | null {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; next?: string | string[] }>;
 }) {
-  const { error } = await searchParams;
+  const { error, next } = await searchParams;
+  const nextPath = sanitizePostLoginPath(typeof next === "string" ? next : null);
   const errorMessage = loginErrorMessage(error);
 
   // Below lg the DOM order is brand -> login card -> intro -> learning screens, stacked. The intro
@@ -80,7 +82,7 @@ export default async function LoginPage({
               {errorMessage && (
                 <p className="text-sm text-destructive text-center">{errorMessage}</p>
               )}
-              <GoogleLoginButton />
+              <GoogleLoginButton nextPath={nextPath} />
             </div>
 
             <p className="text-xs text-muted-foreground text-center">

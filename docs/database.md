@@ -45,6 +45,7 @@ erDiagram
     learning_contents ||--o{ review_notes : "1:N"
     announcements ||--o{ announcement_reads : "1:N"
     users ||--o{ announcement_reads : "1:N"
+    users ||--o{ playground_templates : "created_by"
 ```
 
 `stripe_events` / `cron_locks` は他テーブルと関連を持たない独立テーブル。`email_kind_settings` / `email_settings` / `email_templates` / `ai_review_settings` は更新者（`updated_by`）でのみ `users` を参照する。
@@ -340,6 +341,16 @@ RLS は有効化しポリシーは作らない（`push_subscriptions` と同じ�
 
 受講生が「復習リストに残す」を押したシンラビの回答と、その直前の質問。`user_id`（`ON DELETE CASCADE`）、`content_id`（`ON DELETE CASCADE`）、`question`（1〜500文字。CHECK）、`answer`（1〜2,000文字。CHECK）、`created_at`。1人あたりの件数の上限（300件）はアプリが確かめる。
 
+### 3.30 playground_templates（コードを試す のひな形）
+
+運営が作り、短いリンク（`/playground/t/<slug>`）で配るコード一式（[機能設計書](./specification.md)18.3節）。**利用者が書いたコードは DB に持たない**（ブラウザの `localStorage` だけ。18.2節）。
+
+- `slug`（UNIQUE。`^[a-z0-9]{10}$` の CHECK）: アプリが作成時に発行するランダム文字列。編集では変えない
+- `title`（空白だけ不可・100 文字まで）、`kind`（`web` / `python` / `sql`）
+- `files`（JSONB）: `[{ filename, language, content }]`（`submissions.code_files` と同じ形。`language` は拡張子からアプリが決める）。CHECK は配列・1〜10 件・JSON 全体で 700,000 バイトまで（アプリの合計 200,000 文字に全角と記号の分を足した余裕）。ファイル名・拡張子・1ファイルの上限はアプリ（`playgroundFilesError()`）が検証する
+- `is_published`（既定 false）、`created_by`（`users.id`、`ON DELETE SET NULL`）、`created_at` / `updated_at`（トリガー）
+- 削除は物理削除（参照する行が無い）
+
 ---
 
 ## 4. インデックス
@@ -538,6 +549,15 @@ INSERT / DELETE のポリシーは定義しない（行はマイグレーショ�
 | `ai_chat_saved_notes` | INSERT | 本人のみ | `user_id = (select get_user_id()) AND EXISTS (SELECT 1 FROM learning_contents lc WHERE lc.id = content_id)`（可視性は `learning_contents` の SELECT RLS に委ねる。お試しはお試し公開のコンテンツだけ） |
 
 `ai_chat_usage` の INSERT / UPDATE / DELETE は `authenticated` から REVOKE し、書き込みは `claim_ai_chat()`（service_role のみ EXECUTE。ユーザー単位の advisory lock の中で、回答待ちの `pending` 行があれば `busy`、無ければ数えて INSERT）と API の service_role だけにする。`ai_chat_settings` の INSERT / DELETE と `ai_chat_saved_notes` の UPDATE も REVOKE する。**admin / maintainer も他人の保存した回答は読めない**。定義は `20261117090000_add_ai_chat.sql`。
+
+### 6.22 playground_templates
+
+| 操作 | 対象 | 条件 |
+|:--|:--|:--|
+| SELECT | 受講者（公開中だけ） / admin・maintainer（全件） | `(is_published = true AND (select get_user_status()) IN ('active', 'trial')) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+| INSERT / UPDATE / DELETE | admin・maintainer | ロールが admin・maintainer |
+
+却下ユーザーは `get_user_status()` が `rejected` で、ロールも NULL のため何も見えない。admin / maintainer が非公開のひな形を読めるのは、配る前にリンクで確かめるため（画面に「非公開」と出す）。定義は `20261118090000_add_playground_templates.sql`。
 
 ### 6.11 announcements
 
