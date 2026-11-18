@@ -114,6 +114,9 @@ describe("playground terminal", () => {
     expect(moved.stderr).toBe("mv: cannot move 'memo.txt' to 'nodir/': Not a directory\n");
     expect(run(moved.state, "ls").stdout).toBe("memo.txt  notes.md\n");
     expect(run(state, "cp memo.txt backup/").stderr).toContain("Not a directory");
+    const tree = run(state, "mkdir proj", "touch proj/a.txt").state;
+    expect(run(tree, "cp -r proj backup/", "ls backup").stdout).toBe("a.txt\n");
+    expect(run(tree, "mv proj newproj/", "ls").stdout).toBe("memo.txt  newproj  notes.md\n");
   });
 
   it("> は先に出力先を空にし、cat は出力先と同じファイルを読まない", () => {
@@ -125,6 +128,7 @@ describe("playground terminal", () => {
     expect(appended.stderr).toContain("input file is output file");
     expect(run(appended.state, "wc -l memo.txt").stdout).toBe("3 memo.txt\n");
     expect(run(state, "sort memo.txt > memo.txt", "cat memo.txt").stdout).toBe("");
+    expect(run(state, "cat memo.txt | sort > memo.txt").stderr).toBe("");
     expect(run(state, "echo x > nodir/a.txt").stderr).toContain("No such file or directory");
   });
 

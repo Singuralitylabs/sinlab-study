@@ -413,8 +413,10 @@ interface Session {
   cwd: string;
   previousCwd: string | null;
   clear: boolean;
-  /** Target of `>` / `>>` on this line; cat refuses to read it, as GNU cat does. */
+  /** Target of `>` / `>>` on this line. */
   redirectPath: string | null;
+  /** Where this command's stdout goes when it is a file: cat refuses to read it, as GNU cat does. */
+  stdoutPath: string | null;
 }
 
 function runCommand(session: Session, name: string, args: string[], io: CommandIo): void {
@@ -574,7 +576,7 @@ function runCommand(session: Session, name: string, args: string[], io: CommandI
         return;
       }
       const inputs = parsed.rest.filter((file) => {
-        if (at(file) !== session.redirectPath) {
+        if (at(file) !== session.stdoutPath) {
           return true;
         }
         io.err.push(`cat: ${file}: input file is output file`);
@@ -645,15 +647,6 @@ function runCommand(session: Session, name: string, args: string[], io: CommandI
       const destination = parsed.rest[parsed.rest.length - 1];
       const destinationPath = at(destination);
       const destinationIsDir = fs.get(destinationPath)?.type === "dir";
-      // resolvePath drops the trailing slash, so `mv a.txt nodir/` would otherwise create a file.
-      if (destination.endsWith("/") && !destinationIsDir) {
-        io.err.push(
-          name === "mv"
-            ? `mv: cannot move '${sources[0]}' to '${destination}': Not a directory`
-            : `cp: cannot create regular file '${destination}': Not a directory`
-        );
-        return;
-      }
       if (sources.length > 1 && !destinationIsDir) {
         io.err.push(`${name}: target '${destination}': Not a directory`);
         return;
@@ -663,6 +656,16 @@ function runCommand(session: Session, name: string, args: string[], io: CommandI
         const node = fs.get(sourcePath);
         if (!node) {
           io.err.push(`${name}: cannot stat '${source}': No such file or directory`);
+          continue;
+        }
+        // resolvePath drops the trailing slash, so `mv a.txt nodir/` would otherwise create a
+        // file. A directory source may take a new name ending in / (`cp -r proj backup/`).
+        if (destination.endsWith("/") && !destinationIsDir && node.type === "file") {
+          io.err.push(
+            name === "mv"
+              ? `mv: cannot move '${source}' to '${destination}': Not a directory`
+              : `cp: cannot create regular file '${destination}': Not a directory`
+          );
           continue;
         }
         const target = destinationIsDir
@@ -849,6 +852,7 @@ export function runTerminalLine(state: TerminalState, line: string): TerminalRes
     previousCwd: state.previousCwd,
     clear: false,
     redirectPath: redirect ? resolvePath(state.cwd, redirect.target) : null,
+    stdoutPath: null,
   };
   const stderr: string[] = [];
   // bash opens (and with `>` empties) the target before the command runs, so `sort a > a` leaves
@@ -862,7 +866,9 @@ export function runTerminalLine(state: TerminalState, line: string): TerminalRes
     }
   }
   let stdin: string | null = null;
-  for (const stage of stages) {
+  for (const [index, stage] of stages.entries()) {
+    // Only the last command writes to the file; an earlier one in a pipe writes to the next.
+    session.stdoutPath = index === stages.length - 1 ? session.redirectPath : null;
     const words = stage.flatMap((token) =>
       "op" in token
         ? []
