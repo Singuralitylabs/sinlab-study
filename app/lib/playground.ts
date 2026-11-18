@@ -1,4 +1,3 @@
-import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import {
   PLAYGROUND_DEFAULT_FILES,
   PLAYGROUND_EXTENSION_LANGUAGES,
@@ -10,6 +9,7 @@ import {
   PLAYGROUND_STORAGE_PREFIX,
   PLAYGROUND_TEMPLATE_SLUG_LENGTH,
   type PlaygroundKind,
+  type PlaygroundLanguage,
 } from "@/app/constants/playground";
 import type { CodeFile } from "@/app/types";
 
@@ -28,7 +28,10 @@ function extensionOf(filename: string): string {
 }
 
 /** null when the extension does not belong to the kind. */
-export function playgroundLanguageFor(kind: PlaygroundKind, filename: string): CodeLanguage | null {
+export function playgroundLanguageFor(
+  kind: PlaygroundKind,
+  filename: string
+): PlaygroundLanguage | null {
   return PLAYGROUND_EXTENSION_LANGUAGES[kind][extensionOf(filename.trim())] ?? null;
 }
 

@@ -19,6 +19,7 @@ const seconds = (ms: number) => ms / 1000;
 // Limits come from the runners' own constants so the text cannot drift from what actually happens.
 const CAN_DO = [
   "Web（HTML・CSS・JavaScript）、Python、SQL のコードを、このブラウザの中で動かせます。",
+  "Markdown の表示、JSON・YAML の書き方の確認、ターミナルの基本コマンドの練習ができます。",
   `ファイルを追加して、複数のファイルに分けて書けます（${PLAYGROUND_MAX_FILES}個まで）。`,
   "書いたコードは、このブラウザに自動で保存されます。",
   "配られたリンクや QR コードから、ひな形のコードで始められます。",
@@ -48,11 +49,26 @@ const LIMITS: { title: string; items: string[] }[] = [
     ],
   },
   {
+    title: "Markdown・JSON・YAML",
+    items: [
+      "Markdown は表示だけです。HTML のタグはそのまま文字として表示されます。",
+      "JSON・YAML は、書き方が正しいかの確認と、整えた形での表示だけです。",
+    ],
+  },
+  {
+    title: "ターミナル（基本コマンド）",
+    items: [
+      "本物の Linux ではなく、練習用に基本のコマンドだけを再現しています（help で一覧を表示）。",
+      "sudo・apt・chmod などや、; && によるコマンドのつなぎは使えません。パイプ（|）とリダイレクト（> >>）は使えます。",
+      "ターミナルで作ったファイルは保存されず、左のファイルにも反映されません。",
+    ],
+  },
+  {
     title: "共通",
     items: [
       "AI レビューとシンラビへの相談はありません。講座の進捗や提出にもなりません。",
       "ほかの端末やブラウザでは、続きは見えません。",
-      "ターミナルの操作や、サーバーを立てることはできません。ファイルは画面にあるものだけ使えます。",
+      "サーバーを立てたり、パソコンのファイルを読み書きしたりすることはできません。",
     ],
   },
 ];

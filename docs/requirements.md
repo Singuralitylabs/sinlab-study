@@ -276,7 +276,7 @@ Theme（例：GAS学習）
 | `/learn/[themeId]` | Phase一覧 | Theme内のPhase一覧、進捗表示 |
 | `/learn/[themeId]/[phaseId]` | コンテンツ一覧 | Phase内のコンテンツを一覧表示、進捗表示 |
 | `/learn/[themeId]/[phaseId]/[contentId]` | コンテンツ詳細 | 動画/テキスト/スライド/演習の表示、完了ボタン、課題提出、学習メモ |
-| `/playground` | コードを試す | 講座とは別に、HTML・CSS・JavaScript / Python / SQL を自由に書いてブラウザ内で動かす。コードはこのブラウザにだけ自動保存（ログインした全員。お試しも可） |
+| `/playground` | コードを試す | 講座とは別に、HTML・CSS・JavaScript / Python / SQL を自由に書いてブラウザ内で動かす（Markdown の表示、JSON・YAML の確認、基本コマンドを再現したターミナルも）。コードはこのブラウザにだけ自動保存（ログインした全員。お試しも可） |
 | `/playground/t/[slug]` | コードを試す（ひな形） | 運営が配ったひな形のコードで開く（公開中のものだけ。体験会で QR コードから開く想定） |
 | `/review-list` | 復習リスト | AIレビューで部分的・未達成になった要件の一覧（未克服 / 克服済み）。一言メモと「理解した」チェック（`role = member` のみ） |
 | `/submissions` | 提出履歴 | 自分の提出済み課題一覧（AIレビュー結果表示含む） |
