@@ -49,6 +49,11 @@ import {
   PUSH_KINDS,
 } from "@/app/constants/notifications";
 import {
+  PLAYGROUND_KINDS,
+  PLAYGROUND_MAX_FILES,
+  PLAYGROUND_TEMPLATE_TITLE_MAX_LENGTH,
+} from "@/app/constants/playground";
+import {
   QUIZ_MAX_CHOICES,
   QUIZ_MAX_QUESTIONS,
   QUIZ_TEXT_ANSWER_MAX_LENGTH,
@@ -75,6 +80,7 @@ import {
   previewSettingsError,
 } from "@/app/lib/html-preview";
 import { parseNotificationEmail } from "@/app/lib/notification-email";
+import { playgroundFilesError } from "@/app/lib/playground";
 import { isAllowedPushEndpoint } from "@/app/lib/push-endpoint";
 import { QuizQuestionsSchema } from "@/app/lib/quiz";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
@@ -1004,6 +1010,38 @@ export const AnnouncementSchema = z
   );
 
 export type AnnouncementInput = z.infer<typeof AnnouncementSchema>;
+
+/** Language is not accepted from the client: the server derives it from the extension. */
+export const PlaygroundTemplateSchema = z
+  .object({
+    title: z
+      .string({ message: "題名は文字列で指定してください" })
+      .trim()
+      .min(1, { message: "題名を入力してください" })
+      .max(PLAYGROUND_TEMPLATE_TITLE_MAX_LENGTH, {
+        message: `題名は${PLAYGROUND_TEMPLATE_TITLE_MAX_LENGTH}文字以内で入力してください`,
+      }),
+    kind: z.enum(PLAYGROUND_KINDS, { message: "実行の種類が正しくありません" }),
+    files: z
+      .array(
+        z.object({
+          filename: z.string({ message: "ファイル名は文字列で指定してください" }).trim(),
+          content: z.string({ message: "コードは文字列で指定してください" }),
+        }),
+        { message: "ファイルを指定してください" }
+      )
+      .min(1, { message: "ファイルを1つ以上追加してください" })
+      .max(PLAYGROUND_MAX_FILES, { message: `ファイルは${PLAYGROUND_MAX_FILES}個までです` }),
+    is_published: z.boolean({ message: "is_publishedは真偽値で指定してください" }),
+  })
+  .superRefine((value, ctx) => {
+    const error = playgroundFilesError(value.kind, value.files);
+    if (error) {
+      ctx.addIssue({ code: "custom", message: error, path: ["files"] });
+    }
+  });
+
+export type PlaygroundTemplateInput = z.infer<typeof PlaygroundTemplateSchema>;
 
 export type ValidationResult<T> =
   | { success: true; data: T }

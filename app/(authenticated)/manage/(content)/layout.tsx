@@ -1,4 +1,5 @@
-import { FileText, ListFilter } from "lucide-react";
+import { CodeXml, FileText, ListFilter } from "lucide-react";
+import { MANAGE_PLAYGROUND_TEMPLATES_PATH } from "@/app/constants/playground";
 import {
   MANAGE_CONTENTS_BULK_PATH,
   MANAGE_CONTENTS_TREE_PATH,
@@ -15,6 +16,11 @@ const CONTENT_NAV_ITEMS = [
     title: "コンテンツ一括操作",
     href: MANAGE_CONTENTS_BULK_PATH,
     icon: <ListFilter className="h-4 w-4" />,
+  },
+  {
+    title: "コードを試す ひな形",
+    href: MANAGE_PLAYGROUND_TEMPLATES_PATH,
+    icon: <CodeXml className="h-4 w-4" />,
   },
 ];
 

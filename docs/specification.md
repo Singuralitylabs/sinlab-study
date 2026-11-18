@@ -73,7 +73,7 @@ flowchart TD
     D -->|active| OK[アクセス許可]
 ```
 
-ステータス取得失敗（null）時は `/login` へ送るフェイルクローズとする。お試しユーザー（`trial`）はページアクセス自体は許可し、コンテンツ単位の制限はアプリ層とRLSで担保する（2.6参照）。インストールに必要な `/manifest.webmanifest`・`/sw.js`・`/offline`・`/apple-icon.png` だけを完全一致でスキップする（14.1節。これ以外のパスは足さない）。
+ステータス取得失敗（null）時は `/login` へ送るフェイルクローズとする。未ログイン（セッションなし）で GET したページだけは、`/login?next=<パス>` として戻り先を付ける（2.4節「ログイン後の戻り先」。トップ・GET 以外・その他のフェイルクローズでは付けない）。お試しユーザー（`trial`）はページアクセス自体は許可し、コンテンツ単位の制限はアプリ層とRLSで担保する（2.6参照）。インストールに必要な `/manifest.webmanifest`・`/sw.js`・`/offline`・`/apple-icon.png` だけを完全一致でスキップする（14.1節。これ以外のパスは足さない）。
 
 ### 2.2 認証の多層構造
 
@@ -120,7 +120,7 @@ sequenceDiagram
     U->>App: 7. /auth/callback
     App->>SB: 8. セッション確立
     App->>App: 9. ユーザー初回判定
-    App-->>U: 10. リダイレクト（却下済: /rejected、それ以外: /）
+    App-->>U: 10. リダイレクト（却下済: /rejected、それ以外: 戻り先があればそこ、なければ /）
 ```
 
 **OAuthコールバック処理**:
@@ -143,6 +143,12 @@ flowchart TD
 ```
 
 初回ログイン（自動登録）後もお試しユーザーとしてそのままホームへ遷移する。承認待ちであることはアプリ内バナーで通知する。同意 Cookie・登録失敗などのエラー導線は2.5・8.2を参照。
+
+**ログイン後の戻り先（#580）**: 体験会で配ったリンク（「コードを試す」のひな形など）を未ログインで開いた人を、ログイン（新規登録を含む）の後に同じページへ戻す。
+
+- `proxy.ts` が未ログインの GET を `/login?next=<パス+クエリ>` へ送る。`/login` は `next` を検証し、`GoogleLoginButton` が `signInWithOAuth` 直前に短寿命の Cookie `sinlab-post-login-next`（`SameSite=Lax`・30分。同意 Cookie と同じ持ち回り方。`redirectTo` のクエリにはしないので、Supabase のリダイレクト URL 許可リストは増やさない）へ書く。`next` が無いときは Cookie を消す（前の中断したログインの戻り先を使わない）
+- callback は Cookie を**もう一度**検証し、却下済み以外（既存の active / trial と新規登録）だけその戻り先へ送る。Cookie は callback のすべての応答で消す。同意 Cookie が無く `/login?error=terms_required` へ戻すときは、戻り先を `next` に付け直す
+- 検証は `sanitizePostLoginPath()`（`app/lib/post-login-redirect.ts`）だけで行う（オープンリダイレクト対策）。`/` で始まり `//` で始まらない 512 文字以内の相対パスだけを受け付け、`\`・制御文字・デコードすると `//` や `\` になるもの・`/login`・`/auth/`・`/rejected`・`/api/` は捨てる。返すのは URL として解釈し直した同一オリジンのパスとクエリ（ハッシュは落とす）
 
 ### 2.5 初回ログイン時のユーザー自動登録
 
@@ -1163,6 +1169,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `resolveWeeklyFunnelWeeks()` �
 - `/upgrade`: ステータス別の出し分け。設定の「プラン」入口とお試し導線から全認証ユーザーがアクセス可能（2.11・#394）
 - `/upgrade/success`: Checkoutから戻った直後の決済確認・完了表示（2.11）
 - `/certificates` / `/certificates/[id]`: 修了証の一覧と表示（本登録の member のみ。13章）
+- `/playground` / `/playground/t/[slug]`: コードを試す（ひな形のリンク）。18章
 - `/review-list`: 復習リスト（未克服 / 克服済み。`role = member` のみ。15章）
 - `/announcements` / `/announcements/[id]`: お知らせの一覧（未読表示。サイドナビ「お知らせ」に未読件数のバッジ）・詳細（開くと既読を記録）（11章）
 - `/settings`: プロフィール・通知・プランの**同じ大きさの3タイル**（#420。#409 の1カード構成を置き換え）。各タイルに現在値を出し、プロフィール／通知はモーダルで編集、プランは `/upgrade` へ遷移する（入口ラベルは「プランの確認・変更」。#394）。通知タイルは送り先と案内メールの配信オン／オフを要約し、確認待ちがあるときはタイル上でも分かる。通知モーダルに `NotificationEmailForm`・`EmailPreferencesForm`・停止できる／できないメールの説明・プライバシーポリシーへのリンクを入れる。案内メールは配信状態（配信中 / 停止中と停止日時）の確認と停止・再開（10.8節）。各フォームの保存は項目ごとに独立したまま。モーダルは Radix Dialog（Esc・フォーカストラップ・タイトル／説明）。サイドナビのログアウトの上に「設定」として全ロールへ表示する。表示名は `users.display_name` の1つを画面・管理画面・修了証で共用する（修了証用の氏名は別に持たない）。画面は本人の行を通常クライアントで SELECT して入力欄に出し、保存は `PATCH /api/settings/profile`（`{ "displayName": string }`）で行う。`getServerAuth()` で本人を特定し、未認証 401・`userId` なし 403・`active` / `trial` 以外（`rejected` を含む）403・検証失敗 400。更新は `updateUserDisplayName()` が service_role で本人の行の `display_name` だけを書く（RLS に本人 UPDATE は足さない。ボディの `role` や `userId` は書かない）。前後の空白を除いて空でないこと、`DISPLAY_NAME_MAX_LENGTH`（50）以内、改行などの制御文字を含まないこと。ゼロ幅スペースや双方向制御などの書式文字は保存前に除き（絵文字の ZWJ は、他に文字があるときだけ残す）、除いた結果が空なら空として拒否する。画面は同じ `parseDisplayName()` で拒否する。保存後は `router.refresh()` でサーバー描画の表示名を取り直す。修了証には発行時点の名前が印字され、発行済みの修了証には反映されない（13.2節）
@@ -1174,7 +1181,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `resolveWeeklyFunnelWeeks()` �
 
 サイドナビ（`SideNav`）は管理系を次の2グループに分ける（各グループ内は `ManageGroupNav` のタブ）:
 
-- **コンテンツ管理**（入口 `/manage/contents`）: 構成ツリー（`/manage/contents`）とコンテンツ一括操作（`/manage/contents/bulk`）。テーマ・フェーズの一覧URLは構成ツリーへリダイレクトする。サイドナビのハイライトは一括操作中も「コンテンツ管理」
+- **コンテンツ管理**（入口 `/manage/contents`）: 構成ツリー（`/manage/contents`）、コンテンツ一括操作（`/manage/contents/bulk`）、コードを試す ひな形（`/manage/playground-templates`。18.3節）。テーマ・フェーズの一覧URLは構成ツリーへリダイレクトする。サイドナビのハイライトは一括操作中も「コンテンツ管理」
 - **受講生管理**（入口 `/manage`）: ダッシュボード（`/manage`）、提出一覧（`/manage/submissions`）、フィードバック（`/manage/feedbacks`）、お知らせ（`/manage/announcements`。URLは据え置き。ルートグループだけ `(students)` 配下）。受講生進捗（`/manage/students`）は admin のみタブ表示（6.2節）。お知らせ表示中のサイドナビハイライトは「受講生管理」
 
 管理者専用のユーザー管理・メール通知は従来どおり `/admin/users`・`/admin/emails`（7.4節）。
@@ -1848,3 +1855,37 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 ### 17.8 費用の目安
 
 入力は記事の画面で約 10,000〜17,000 トークン（システムプロンプト約 1,000、本文 8,000〜15,000、履歴と質問約 1,500）、演習の画面は文脈が約 4,000〜7,500 で記事より小さい。出力は回答と思考で約 1,000〜1,500。上限まで使われた場合の費用の安全弁は、管理画面で上限値を下げることと、`AI_CHAT_ENABLED` で機能全体を止めること。単価は `GEMINI_MODEL_NAME` の公式の料金で確かめる（変わるため本書に数値を置かない）。費用が問題になったら、まず記事を `##` 見出しごとに分けて質問に関係する節だけを渡す形を検討する（段階2以降、別 Issue）。利用実績は `ai_chat_usage` のトークン数を SQL で集計する（集計画面は段階2）。
+
+## 18. コードを試す（#580）
+
+講座の外で、HTML・CSS・JavaScript、Python、SQL を自由に書いて動かすページ。体験会の実演・手を動かす場所として使い、参加者にログイン（お試し登録）してもらう入口にもする。サイドナビ「コードを試す」（「学習コンテンツ」の下）から開く。
+
+### 18.1 対象と範囲
+
+- ログインした全員（`active` / `trial`。全ロール）。お試しユーザーの「講座01だけ」の制限（2.6節）の対象外。proxy と `(authenticated)/layout.tsx` の既存の認可だけで守り、クライアント側の認証ガードはしない
+- 実行はブラウザ内だけ（演習と同じ部品。5.4節）。Web は sandbox iframe（`allow-scripts` のみ）のプレビュー・コンソール、Python は Pyodide、SQL は PGlite。種類（`PLAYGROUND_KINDS`）はこの3つだけで、実行できない言語（TypeScript・Bash・HCL など）は出さない。本物のシェルは作らない
+- AIレビュー・AIチャットは付けない（トークン費用を出さないため）。サーバーへのコード送信もない（ひな形の管理を除く）
+
+### 18.2 画面と保存
+
+- `PlaygroundWorkspace`（`app/(authenticated)/playground/components/`）。左にファイルのタブとエディタ（`PlaygroundFilesEditor`。ファイルの追加・名前変更・削除ができる）、右に実行結果（`PlaygroundRunPanel`）。エディタとプレビューは画面の高さに合わせて広げる（`CodeEditor` の `minHeight`・`HtmlPreview` の `frameHeightClassName`。演習の 200px / 360px は変えない）。実行結果は `resolvePreviewDisplay()` の自動規則でプレビュー／コンソールを決める。Web のプレビューは `index.html`（無ければ最初の HTML）を表示し、HTML が2つ以上あるときは「表示するページ」で切り替える（選んだ HTML 以外の HTML を外して渡す。`selectPlaygroundPreviewPage()`。ページ間のリンクでの移動は sandbox を緩めないとできないため扱わない）。実行結果の下に、追加したファイルの使われ方（Web は HTML から読み込む、Python は `main.py` を実行し他の `.py` は import、SQL はタブの順にすべて実行）を1行で出す
+- 種類のタブの右に「このページでできること」（`PlaygroundGuideDialog`）を置き、できること・言語ごとの制限（Python のパッケージ・`input()`、SQL の毎回空のデータベース、Web の sandbox で使えない機能、AI レビューや進捗の対象外など）をモーダルで示す。時間・行数・ファイル数は実行環境の定数から差し込む（説明と実際の制限をずらさないため）。
+- ファイル名は半角英数字と `- _ .` だけ（先頭は英数字か `- _`。フォルダ不可）で、種類ごとの拡張子（`PLAYGROUND_EXTENSION_LANGUAGES`。Web は `.html .css .js .jsx`、Python は `.py`、SQL は `.sql`）。言語は拡張子からコードが決める。上限はファイル数 `PLAYGROUND_MAX_FILES`（10）・1ファイル `PLAYGROUND_MAX_FILE_LENGTH`（50,000 文字）・合計 `PLAYGROUND_MAX_TOTAL_LENGTH`（200,000 文字）。判定は `playgroundFilesError()` に一本化し、画面・ひな形 API・下書きの読み込みで共用する
+- **保存はこのブラウザの `localStorage` だけ**（DB には保存しない）。キーは `sinlab-playground:v1:u<ユーザーID>:kind:<種類>` または `...:template:<slug>`。ユーザー ID を含めるのは、体験会の会場 PC などを複数人で使うときに前の人のコードを出さないため。編集から 500ms 後と、種類の切り替え・ページを離れるとき（`pagehide`）に書く。読めない・壊れた・種類に合わない下書きは無かったものとして既定のコードで始める。上限を超えた内容は保存せず、その旨を出す。`localStorage` が使えないときも編集・実行は続け、「保存できませんでした」と出す
+- 「最初のコードに戻す」（ひな形では「ひな形に戻す」）は確認の後、下書きを消して元の内容に戻す
+
+### 18.3 ひな形と短いリンク
+
+- 運営（admin / maintainer）が `/manage/playground-templates` で作るコード一式。テーブルは `playground_templates`（[データベース設計書](./database.md) 3.30節）。題名・種類・ファイル・公開フラグを持つ
+- リンクは `/playground/t/<slug>`。slug は作成時にサーバーが発行する `[a-z0-9]` 10 文字のランダム文字列（`generatePlaygroundTemplateSlug()`。約 52 ビット）で、編集しても変わらない（印刷した QR コードが使えなくなるのを防ぐ）。利用者がコードを共有リンクにする機能や、URL にコードを埋め込む方式は作らない
+- 一覧から「リンクをコピー」と「QR コード」（ブラウザ内で生成。1024px の PNG を保存できる）。リンクは表示中のオリジンで作る
+- 開いたときは通常クライアントで SELECT する（RLS が受講者には公開中だけを返す）。存在しない・非公開・中身が壊れているひな形は 404。admin / maintainer は非公開のものも開け、画面に「非公開」と出す（配る前の確認用）。ひな形ごとの下書きがあれば下書きを優先する
+- 未ログインでリンクを開いた人は、ログイン後に同じリンクへ戻る（2.4節「ログイン後の戻り先」）
+- API（`checkContentPermissions()`。未認証 401・`userId` なし 403・`rejected` 403・admin / maintainer 以外 403・検証失敗 400・存在しない 404）
+
+| メソッド | パス | 内容 |
+|:--|:--|:--|
+| POST | `/api/manage/playground-templates` | `{ title, kind, files: [{ filename, content }], is_published }`。`PlaygroundTemplateSchema`（題名 100 文字まで・ファイルは 18.2 節の規則）。slug が重なったら作り直す（3 回まで） |
+| PUT | `/api/manage/playground-templates/[id]` | 同じ形で更新（slug は変えない） |
+| DELETE | `/api/manage/playground-templates/[id]` | 物理削除（配ったリンクは 404 になる） |
+

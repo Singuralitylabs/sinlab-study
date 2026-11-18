@@ -249,4 +249,5 @@ export interface PhaseProgress {
 }
 
 export type Announcement = Tables<"announcements">;
+export type PlaygroundTemplate = Tables<"playground_templates">;
 export type Certificate = Tables<"certificates">;

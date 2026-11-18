@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { AUTH_HEADER_NAMES, AUTH_HEADERS, SIGN_OUT_PATH } from "./app/constants/auth";
 import { PWA_PUBLIC_PATHS } from "./app/constants/pwa";
 import { ALLOWED_USER_STATUSES, USER_STATUS } from "./app/constants/user";
+import { buildLoginPath } from "./app/lib/post-login-redirect";
 import type { UserStatusType } from "./app/types";
 
 // Extensions treated as static assets (suffix match only). Don't use "path contains .": crafted
@@ -101,7 +102,13 @@ export async function proxy(request: NextRequest) {
     const { data: claimsData, error } = await supabase.auth.getClaims();
     const authId = claimsData?.claims?.sub;
     if (error || !authId) {
-      return applyResponseModifications(NextResponse.redirect(new URL("/login", request.url)));
+      // Only a signed-out page view carries its destination (#580: a workshop link opened before
+      // signing in should land back on itself). Other fail-closed branches stay a bare /login.
+      const loginPath =
+        request.method === "GET"
+          ? buildLoginPath(`${pathname}${request.nextUrl.search}`)
+          : "/login";
+      return applyResponseModifications(NextResponse.redirect(new URL(loginPath, request.url)));
     }
 
     const { data: userData, error: userError } = await supabase

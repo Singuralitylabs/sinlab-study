@@ -4,6 +4,7 @@ import {
   Award,
   BookOpen,
   ClipboardList,
+  CodeXml,
   FileText,
   House,
   LayoutDashboard,
@@ -18,6 +19,11 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import {
+  MANAGE_PLAYGROUND_TEMPLATES_PATH,
+  PLAYGROUND_NAV_TITLE,
+  PLAYGROUND_PATH,
+} from "@/app/constants/playground";
 import { signOutAndRedirect } from "@/app/lib/sign-out";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -41,6 +47,11 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     title: "学習コンテンツ",
     href: "/learn",
     icon: <BookOpen className="h-5 w-5" />,
+  },
+  {
+    title: PLAYGROUND_NAV_TITLE,
+    href: PLAYGROUND_PATH,
+    icon: <CodeXml className="h-5 w-5" />,
   },
   {
     title: "提出履歴",
@@ -110,7 +121,8 @@ function isNavActive(pathname: string, href: string) {
     return (
       pathname.startsWith("/manage/contents") ||
       pathname.startsWith("/manage/themes") ||
-      pathname.startsWith("/manage/phases")
+      pathname.startsWith("/manage/phases") ||
+      pathname.startsWith(MANAGE_PLAYGROUND_TEMPLATES_PATH)
     );
   }
   return pathname.startsWith(href);
