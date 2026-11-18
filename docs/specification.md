@@ -1856,21 +1856,21 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 
 入力は記事の画面で約 10,000〜17,000 トークン（システムプロンプト約 1,000、本文 8,000〜15,000、履歴と質問約 1,500）、演習の画面は文脈が約 4,000〜7,500 で記事より小さい。出力は回答と思考で約 1,000〜1,500。上限まで使われた場合の費用の安全弁は、管理画面で上限値を下げることと、`AI_CHAT_ENABLED` で機能全体を止めること。単価は `GEMINI_MODEL_NAME` の公式の料金で確かめる（変わるため本書に数値を置かない）。費用が問題になったら、まず記事を `##` 見出しごとに分けて質問に関係する節だけを渡す形を検討する（段階2以降、別 Issue）。利用実績は `ai_chat_usage` のトークン数を SQL で集計する（集計画面は段階2）。
 
-## 18. コードを試す（#580）
+## 18. コードを試す（#580・#583）
 
 講座の外で、HTML・CSS・JavaScript、Python、SQL を自由に書いて動かすページ。体験会の実演・手を動かす場所として使い、参加者にログイン（お試し登録）してもらう入口にもする。サイドナビ「コードを試す」（「学習コンテンツ」の下）から開く。
 
 ### 18.1 対象と範囲
 
 - ログインした全員（`active` / `trial`。全ロール）。お試しユーザーの「講座01だけ」の制限（2.6節）の対象外。proxy と `(authenticated)/layout.tsx` の既存の認可だけで守り、クライアント側の認証ガードはしない
-- 実行はブラウザ内だけ（演習と同じ部品。5.4節）。Web は sandbox iframe（`allow-scripts` のみ）のプレビュー・コンソール、Python は Pyodide、SQL は PGlite。種類（`PLAYGROUND_KINDS`）はこの3つだけで、実行できない言語（TypeScript・Bash・HCL など）は出さない。本物のシェルは作らない
+- 実行はブラウザ内だけ（演習と同じ部品。5.4節）。Web は sandbox iframe（`allow-scripts` のみ）のプレビュー・コンソール、Python は Pyodide、SQL は PGlite。Markdown・JSON・YAML とターミナルも選べる（18.4節）。種類（`PLAYGROUND_KINDS`）はこの7つで、実行できない言語（TypeScript・GAS・HCL など）は出さない。本物のシェルは作らない。**おまけの機能なので、重い実行環境（WebAssembly の Linux、TypeScript コンパイラなど）は入れない**
 - AIレビュー・AIチャットは付けない（トークン費用を出さないため）。サーバーへのコード送信もない（ひな形の管理を除く）
 
 ### 18.2 画面と保存
 
 - `PlaygroundWorkspace`（`app/(authenticated)/playground/components/`）。左にファイルのタブとエディタ（`PlaygroundFilesEditor`。ファイルの追加・名前変更・削除ができる）、右に実行結果（`PlaygroundRunPanel`）。エディタとプレビューは画面の高さに合わせて広げる（`CodeEditor` の `minHeight`・`HtmlPreview` の `frameHeightClassName`。演習の 200px / 360px は変えない）。実行結果は `resolvePreviewDisplay()` の自動規則でプレビュー／コンソールを決める。Web のプレビューは `index.html`（無ければ最初の HTML）を表示し、HTML が2つ以上あるときは「表示するページ」で切り替える（選んだ HTML 以外の HTML を外して渡す。`selectPlaygroundPreviewPage()`。ページ間のリンクでの移動は sandbox を緩めないとできないため扱わない）。実行結果の下に、追加したファイルの使われ方（Web は HTML から読み込む、Python は `main.py` を実行し他の `.py` は import、SQL はタブの順にすべて実行）を1行で出す
 - 種類のタブの右に「このページでできること」（`PlaygroundGuideDialog`）を置き、できること・言語ごとの制限（Python のパッケージ・`input()`、SQL の毎回空のデータベース、Web の sandbox で使えない機能、AI レビューや進捗の対象外など）をモーダルで示す。時間・行数・ファイル数は実行環境の定数から差し込む（説明と実際の制限をずらさないため）。
-- ファイル名は半角英数字と `- _ .` だけ（先頭は英数字か `- _`。フォルダ不可）で、種類ごとの拡張子（`PLAYGROUND_EXTENSION_LANGUAGES`。Web は `.html .css .js .jsx`、Python は `.py`、SQL は `.sql`）。言語は拡張子からコードが決める。上限はファイル数 `PLAYGROUND_MAX_FILES`（10）・1ファイル `PLAYGROUND_MAX_FILE_LENGTH`（50,000 文字）・合計 `PLAYGROUND_MAX_TOTAL_LENGTH`（200,000 文字）。判定は `playgroundFilesError()` に一本化し、画面・ひな形 API・下書きの読み込みで共用する
+- ファイル名は半角英数字と `- _ .` だけ（先頭は英数字か `- _`。フォルダ不可）で、種類ごとの拡張子（`PLAYGROUND_EXTENSION_LANGUAGES`。Web は `.html .css .js .jsx`、Python は `.py`、SQL は `.sql`、Markdown は `.md`、JSON は `.json`、YAML は `.yaml .yml`、ターミナルは `.txt .md .csv .json`。`.txt` `.csv` は色付けなし）。言語は拡張子からコードが決める。上限はファイル数 `PLAYGROUND_MAX_FILES`（10）・1ファイル `PLAYGROUND_MAX_FILE_LENGTH`（50,000 文字）・合計 `PLAYGROUND_MAX_TOTAL_LENGTH`（200,000 文字）。判定は `playgroundFilesError()` に一本化し、画面・ひな形 API・下書きの読み込みで共用する
 - **保存はこのブラウザの `localStorage` だけ**（DB には保存しない）。キーは `sinlab-playground:v1:u<ユーザーID>:kind:<種類>` または `...:template:<slug>`。ユーザー ID を含めるのは、体験会の会場 PC などを複数人で使うときに前の人のコードを出さないため。編集から 500ms 後と、種類の切り替え・ページを離れるとき（`pagehide`）に書く。読めない・壊れた・種類に合わない下書きは無かったものとして既定のコードで始める。上限を超えた内容は保存せず、その旨を出す。`localStorage` が使えないときも編集・実行は続け、「保存できませんでした」と出す
 - 「最初のコードに戻す」（ひな形では「ひな形に戻す」）は確認の後、下書きを消して元の内容に戻す
 
@@ -1888,4 +1888,15 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 | POST | `/api/manage/playground-templates` | `{ title, kind, files: [{ filename, content }], is_published }`。`PlaygroundTemplateSchema`（題名 100 文字まで・ファイルは 18.2 節の規則）。slug が重なったら作り直す（3 回まで） |
 | PUT | `/api/manage/playground-templates/[id]` | 同じ形で更新（slug は変えない） |
 | DELETE | `/api/manage/playground-templates/[id]` | 物理削除（配ったリンクは 404 になる） |
+
+### 18.4 Markdown・JSON・YAML・ターミナル（#583）
+
+実行パネル（`PlaygroundRunPanel`）は種類ごとに自分の部品だけを読み込む（ほかの種類の表示を遅くしないため）。
+
+- **Markdown**（`PlaygroundMarkdownPanel`）: 記事と同じ `MarkdownRenderer` を `next/dynamic` で読み込んで表示する（生の HTML は描画しない）。`README.md`（無ければ左端）を表示し、2つ以上あれば「表示するファイル」で切り替える
+- **JSON / YAML**（`PlaygroundDataPanel`）: ファイルごとに書き方を確かめ、正しければ整形した JSON を、誤りなら行・列つきのエラーを出す（`checkJson()` / `checkYaml()`。`app/lib/playground-data.ts`）。JSON はブラウザ標準の `JSON.parse`。YAML は `js-yaml` を YAML を開いたときだけ読み込み、既定のスキーマ（JavaScript の型のタグなし）で読む
+- **ターミナル**（`PlaygroundTerminal`、処理は `app/lib/playground-terminal.ts`）: 本物のシェルではなく、メモリ上のファイルの木で基本コマンドを再現する。左のファイルを `/home/sinlab`（`~`）に置いて始め、変更は左のファイルにも保存にも反映しない（「やり直す」で左のファイルから作り直す）
+  - コマンド: `help pwd ls(-a -l) cd mkdir(-p) touch cat(-n) echo rm(-r -f) mv cp(-r) head tail(-n) wc(-l -w -c) grep(-i -n -v。固定文字列) sort(-r -n) whoami clear`。パイプ `|`、行末のリダイレクト `>` `>>`、最後の階層の `*` `?` を使える
+  - エラーの文面は GNU coreutils / bash に合わせる（本物の Ubuntu と同じに見えるように）。未対応のコマンド・`;` `&&` などは日本語で「使えません」と返す
+  - ファイルの合計は `TERMINAL_MAX_TOTAL_LENGTH`（100 万文字）まで、画面の行は 500 件まで残す。いまいる場所やホームは消せない（練習用の制限）
 

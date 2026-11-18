@@ -10,17 +10,34 @@ export function playgroundTemplatePath(slug: string): string {
 }
 
 /**
- * Only what runs in the browser (iframe preview, Pyodide, PGlite). Languages that the editor can
- * highlight but nothing can run (TypeScript, Bash, HCL...) are left out on purpose.
+ * Only what runs in the browser (iframe preview, Pyodide, PGlite; Markdown / JSON / YAML are shown,
+ * the terminal is a small simulation). Languages that the editor can highlight but nothing can run
+ * (TypeScript, GAS, HCL, a real shell...) are left out on purpose: this page is a side feature and
+ * must not pull in a heavy runtime (#583).
  */
-export const PLAYGROUND_KINDS = ["web", "python", "sql"] as const;
+export const PLAYGROUND_KINDS = [
+  "web",
+  "python",
+  "sql",
+  "markdown",
+  "json",
+  "yaml",
+  "terminal",
+] as const;
 export type PlaygroundKind = (typeof PLAYGROUND_KINDS)[number];
 
 export const PLAYGROUND_KIND_LABELS: Record<PlaygroundKind, string> = {
   web: "Web（HTML・CSS・JavaScript）",
   python: "Python",
   sql: "SQL",
+  markdown: "Markdown",
+  json: "JSON",
+  yaml: "YAML",
+  terminal: "ターミナル（基本コマンド）",
 };
+
+/** "text": no highlighting, for the terminal's .txt / .csv (no CodeLanguage fits, and none runs them). */
+export type PlaygroundLanguage = CodeLanguage | "text";
 
 /**
  * Extension -> stored language per kind. Mixing kinds would fall into a layout no runner accepts
@@ -28,11 +45,15 @@ export const PLAYGROUND_KIND_LABELS: Record<PlaygroundKind, string> = {
  */
 export const PLAYGROUND_EXTENSION_LANGUAGES: Record<
   PlaygroundKind,
-  Readonly<Record<string, CodeLanguage>>
+  Readonly<Record<string, PlaygroundLanguage>>
 > = {
   web: { html: "html", css: "css", js: "javascript", jsx: "javascript" },
   python: { py: "python" },
   sql: { sql: "sql" },
+  markdown: { md: "markdown" },
+  json: { json: "json" },
+  yaml: { yaml: "yaml", yml: "yaml" },
+  terminal: { txt: "text", md: "markdown", csv: "text", json: "json" },
 };
 
 export const PLAYGROUND_DEFAULT_FILES: Record<
@@ -66,6 +87,33 @@ export const PLAYGROUND_DEFAULT_FILES: Record<
       filename: "query.sql",
       content:
         "CREATE TABLE fruits (id SERIAL PRIMARY KEY, name TEXT, price INTEGER);\n\nINSERT INTO fruits (name, price) VALUES ('りんご', 150), ('バナナ', 100);\n\nSELECT * FROM fruits;\n",
+    },
+  ],
+  markdown: [
+    {
+      filename: "README.md",
+      content:
+        '# はじめての Markdown\n\n**太字**や*斜体*、[リンク](https://www.markdownguide.org/)が書けます。\n\n## 買い物リスト\n\n- りんご\n- バナナ\n- [x] 牛乳\n\n| 品物 | 値段 |\n| --- | ---: |\n| りんご | 150 |\n| バナナ | 100 |\n\n```python\nprint("こんにちは")\n```\n',
+    },
+  ],
+  json: [
+    {
+      filename: "data.json",
+      content:
+        '{\n  "name": "シンラビ",\n  "age": 3,\n  "skills": ["HTML", "CSS", "JavaScript"],\n  "isMember": true\n}\n',
+    },
+  ],
+  yaml: [
+    {
+      filename: "config.yaml",
+      content:
+        "name: シンラビ\nage: 3\nskills:\n  - HTML\n  - CSS\n  - JavaScript\nisMember: true\naddress:\n  city: 東京\n",
+    },
+  ],
+  terminal: [
+    {
+      filename: "memo.txt",
+      content: "りんごを買う\nバナナを買う\n部屋をそうじする\nりんごジュースを作る\n",
     },
   ],
 };

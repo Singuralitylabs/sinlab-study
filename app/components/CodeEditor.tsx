@@ -7,7 +7,8 @@ import type { CodeLanguage } from "@/app/components/code-editor-utils";
 export interface CodeEditorProps {
   value: string;
   onChange: (value: string) => void;
-  language: CodeLanguage;
+  /** "text" (the playground's .txt / .csv) gets no highlighting. */
+  language: CodeLanguage | "text";
   placeholder?: string;
   /** CSS min-height; exercises keep 200px to match CodeEditorNoSSR's loading placeholder. */
   minHeight?: string;
@@ -78,14 +79,17 @@ export function CodeEditor({
 
   // The editor mounts at once without highlighting and gains it when the language chunk arrives,
   // so typing is never blocked on the download.
-  const [loaded, setLoaded] = useState<{ language: CodeLanguage; extensions: Extension[] } | null>(
-    null
-  );
+  const [loaded, setLoaded] = useState<{
+    language: CodeEditorProps["language"];
+    extensions: Extension[];
+  } | null>(null);
   useEffect(() => {
     let cancelled = false;
     // code_language comes from the DB as-is; a value outside the map (DB CHECK and CODE_LANGUAGES
     // out of sync) must leave a plain editor, not throw here and take the exercise page down.
-    const load = LANGUAGE_LOADERS[language] ?? (() => Promise.resolve(NO_EXTENSIONS));
+    const load =
+      (language === "text" ? undefined : LANGUAGE_LOADERS[language]) ??
+      (() => Promise.resolve(NO_EXTENSIONS));
     load()
       .then((extensions) => {
         // Ignore a slower chunk for a language the user already switched away from.

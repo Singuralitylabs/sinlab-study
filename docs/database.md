@@ -346,7 +346,7 @@ RLS は有効化しポリシーは作らない（`push_subscriptions` と同じ�
 運営が作り、短いリンク（`/playground/t/<slug>`）で配るコード一式（[機能設計書](./specification.md)18.3節）。**利用者が書いたコードは DB に持たない**（ブラウザの `localStorage` だけ。18.2節）。
 
 - `slug`（UNIQUE。`^[a-z0-9]{10}$` の CHECK）: アプリが作成時に発行するランダム文字列。編集では変えない
-- `title`（空白だけ不可・100 文字まで）、`kind`（`web` / `python` / `sql`）
+- `title`（空白だけ不可・100 文字まで）、`kind`（`web` / `python` / `sql` / `markdown` / `json` / `yaml` / `terminal`。`PLAYGROUND_KINDS` と同じ。#583 で追加した4つは `20261118120000_add_playground_template_kinds.sql`）
 - `files`（JSONB）: `[{ filename, language, content }]`（`submissions.code_files` と同じ形。`language` は拡張子からアプリが決める）。CHECK は配列・1〜10 件・JSON 全体で 700,000 バイトまで（アプリの合計 200,000 文字に全角と記号の分を足した余裕）。ファイル名・拡張子・1ファイルの上限はアプリ（`playgroundFilesError()`）が検証する
 - `is_published`（既定 false）、`created_by`（`users.id`、`ON DELETE SET NULL`）、`created_at` / `updated_at`（トリガー）
 - 削除は物理削除（参照する行が無い）
