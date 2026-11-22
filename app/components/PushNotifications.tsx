@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { installPromptPlatform } from "@/app/constants/pwa";
-import { type PushOffer, pushOffer } from "@/app/lib/push-offer";
+import { isPushHomeOptedOut, setPushHomeOptOut } from "@/app/lib/push-home-optout";
+import { type PushOffer, type PushStatus, pushOffer, showPushOnHome } from "@/app/lib/push-offer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
-type PushStatus = "unsupported" | "denied" | "subscribed" | "unsubscribed";
-
 const STATUS_LABEL: Record<PushStatus, string> = {
+  loading: "確認中",
   unsupported: "未対応",
   denied: "拒否済み",
   subscribed: "購読中",
@@ -36,13 +36,21 @@ function canPush(): boolean {
 }
 
 /**
- * Home-page notification control. Permission is requested only from the button click.
- * `publicKey` is null when VAPID is incomplete, which hides the whole section.
+ * Notification control for the home page (nudge only) and /settings (full control). Permission
+ * is requested only from the button click. `publicKey` is null when VAPID is incomplete, which
+ * hides the whole section.
  */
-export function PushNotifications({ publicKey }: { publicKey: string | null }) {
+export function PushNotifications({
+  publicKey,
+  placement = "home",
+}: {
+  publicKey: string | null;
+  placement?: "home" | "settings";
+}) {
   const [offer, setOffer] = useState<PushOffer | null>(null);
-  const [status, setStatus] = useState<PushStatus>("unsubscribed");
+  const [status, setStatus] = useState<PushStatus>("loading");
   const [busy, setBusy] = useState(false);
+  const [optedOut, setOptedOut] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -59,6 +67,7 @@ export function PushNotifications({ publicKey }: { publicKey: string | null }) {
       standalone: isStandalone(),
     });
     setOffer(next);
+    setOptedOut(isPushHomeOptedOut());
     if (next !== "subscribe") {
       return;
     }
@@ -104,6 +113,9 @@ export function PushNotifications({ publicKey }: { publicKey: string | null }) {
   if (!publicKey || offer === null || offer === "hidden") {
     return null;
   }
+  if (placement === "home" && !showPushOnHome(offer, status, optedOut)) {
+    return null;
+  }
 
   const enable = async () => {
     if (!canPush()) {
@@ -140,6 +152,7 @@ export function PushNotifications({ publicKey }: { publicKey: string | null }) {
         setMessage("購読の保存に失敗しました");
         return;
       }
+      setPushHomeOptOut(false);
       setStatus("subscribed");
     } catch {
       setMessage("通知を有効にできませんでした");
@@ -167,6 +180,9 @@ export function PushNotifications({ publicKey }: { publicKey: string | null }) {
           return;
         }
       }
+      if (placement === "settings") {
+        setPushHomeOptOut(true);
+      }
       setStatus("unsubscribed");
     } catch {
       setMessage("通知を停止できませんでした");
@@ -175,33 +191,55 @@ export function PushNotifications({ publicKey }: { publicKey: string | null }) {
     }
   };
 
+  const body = (
+    <>
+      {placement === "home" ? (
+        <h2 className="text-lg font-semibold">通知</h2>
+      ) : (
+        <h3 id="settings-push-heading" className="text-sm font-semibold">
+          ブラウザ通知
+        </h3>
+      )}
+      {offer === "ios-guide" ? (
+        <p className="text-sm text-muted-foreground">ホーム画面に追加すると通知を受け取れます</p>
+      ) : (
+        <>
+          <p className="text-sm text-muted-foreground">
+            学習リマインドとお知らせをブラウザの通知で受け取れます。現在の状態:{" "}
+            {STATUS_LABEL[status]}
+          </p>
+          {status !== "loading" && status !== "unsupported" && status !== "denied" && (
+            <Button
+              type="button"
+              size="sm"
+              variant={status === "subscribed" ? "outline" : "default"}
+              onClick={status === "subscribed" ? disable : enable}
+              disabled={busy}
+            >
+              {status === "subscribed" ? "通知を停止する" : "通知を受け取る"}
+            </Button>
+          )}
+          {status === "denied" && placement === "settings" && (
+            <p className="text-sm text-muted-foreground">
+              通知はブラウザでブロックされています。受け取るには、ブラウザのサイト設定で通知を許可してください。
+            </p>
+          )}
+          {message && <p className="text-sm text-destructive">{message}</p>}
+        </>
+      )}
+    </>
+  );
+
+  if (placement === "settings") {
+    return (
+      <section className="space-y-2" aria-labelledby="settings-push-heading">
+        {body}
+      </section>
+    );
+  }
   return (
     <Card className="mb-6">
-      <CardContent className="pt-6 space-y-2">
-        <h2 className="text-lg font-semibold">通知</h2>
-        {offer === "ios-guide" ? (
-          <p className="text-sm text-muted-foreground">ホーム画面に追加すると通知を受け取れます</p>
-        ) : (
-          <>
-            <p className="text-sm text-muted-foreground">
-              学習リマインドとお知らせをブラウザの通知で受け取れます。現在の状態:{" "}
-              {STATUS_LABEL[status]}
-            </p>
-            {status !== "unsupported" && status !== "denied" && (
-              <Button
-                type="button"
-                size="sm"
-                variant={status === "subscribed" ? "outline" : "default"}
-                onClick={status === "subscribed" ? disable : enable}
-                disabled={busy}
-              >
-                {status === "subscribed" ? "通知を停止する" : "通知を受け取る"}
-              </Button>
-            )}
-            {message && <p className="text-sm text-destructive">{message}</p>}
-          </>
-        )}
-      </CardContent>
+      <CardContent className="pt-6 space-y-2">{body}</CardContent>
     </Card>
   );
 }

@@ -4,6 +4,7 @@ import {
   CONSOLE_NOT_ALLOWED_MESSAGE,
   canPreviewFiles,
   isPreviewLanguage,
+  isPythonLayout,
   isSqlLayout,
   PREVIEW_EXERCISE_ONLY_MESSAGE,
   PREVIEW_NOT_ALLOWED_MESSAGE,
@@ -35,6 +36,16 @@ describe("isPreviewLanguage / canPreviewFiles", () => {
     );
   });
 
+  it("treats gas like javascript, by language and by .gs extension", () => {
+    expect(canPreviewFiles([f("main.gs", "gas", "x")])).toBe(true);
+    expect(canPreviewFiles([f("main.gs", "", "x")])).toBe(true);
+    expect(previewCapability([f("main.gs", "gas", "x")])).toMatchObject({
+      previewAllowed: false,
+      consoleAllowed: true,
+      autoConsole: true,
+    });
+  });
+
   it("falls back to the extension when no language is stored", () => {
     expect(canPreviewFiles([f("index.html", "", "x")])).toBe(true);
     expect(canPreviewFiles([f("", "", "x")])).toBe(false);
@@ -57,11 +68,35 @@ describe("isSqlLayout", () => {
   });
 });
 
+describe("isPythonLayout", () => {
+  it("すべてのファイルが Python のときだけ true（言語が空なら拡張子で見る）", () => {
+    expect(isPythonLayout([{ filename: "main.py", language: "python" }])).toBe(true);
+    expect(isPythonLayout([{ filename: "main.py", language: "" }])).toBe(true);
+    expect(isPythonLayout([{ filename: "main", language: "Python" }])).toBe(true);
+    expect(
+      isPythonLayout([
+        { filename: "main.py", language: "python" },
+        { filename: "helper.py", language: "" },
+      ])
+    ).toBe(true);
+    expect(isPythonLayout([{ filename: "main.pyc", language: "" }])).toBe(false);
+    expect(isPythonLayout([{ filename: "data.csv", language: "" }])).toBe(false);
+    expect(
+      isPythonLayout([
+        { filename: "main.py", language: "python" },
+        { filename: "q.sql", language: "sql" },
+      ])
+    ).toBe(false);
+    expect(isPythonLayout([])).toBe(false);
+  });
+});
+
 describe("resolvePreviewDisplay", () => {
   const html = { filename: "index.html", language: "html" };
   const css = { filename: "style.css", language: "css" };
   const js = { filename: "main.js", language: "javascript" };
   const sql = { filename: "q.sql", language: "sql" };
+  const py = { filename: "main.py", language: "python" };
 
   it("NULL は構成ごとの自動規則になる", () => {
     expect(resolvePreviewDisplay({ files: [html, css, js] })).toEqual({
@@ -90,7 +125,13 @@ describe("resolvePreviewDisplay", () => {
       console: true,
       manualRun: true,
     });
-    for (const files of [[html, sql], []]) {
+    // Python only: same as SQL (Pyodide in a worker)
+    expect(resolvePreviewDisplay({ files: [py] })).toEqual({
+      preview: false,
+      console: true,
+      manualRun: true,
+    });
+    for (const files of [[html, sql], [py, js], [py, sql], []]) {
       expect(resolvePreviewDisplay({ files })).toEqual({
         preview: false,
         console: false,
@@ -204,6 +245,23 @@ describe("resolvePreviewDisplay", () => {
         showConsole: true,
       })
     ).toBe(CONSOLE_NOT_ALLOWED_MESSAGE);
+    // The admin may turn the Python console on (Pyodide), but there is no page to preview.
+    expect(
+      previewSettingsError({
+        contentType: "exercise",
+        files: [py],
+        showPreview: null,
+        showConsole: true,
+      })
+    ).toBeNull();
+    expect(
+      previewSettingsError({
+        contentType: "exercise",
+        files: [py],
+        showPreview: true,
+        showConsole: null,
+      })
+    ).toBe(PREVIEW_NOT_ALLOWED_MESSAGE);
     expect(
       previewSettingsError({
         contentType: "exercise",

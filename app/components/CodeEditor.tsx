@@ -7,8 +7,11 @@ import type { CodeLanguage } from "@/app/components/code-editor-utils";
 export interface CodeEditorProps {
   value: string;
   onChange: (value: string) => void;
-  language: CodeLanguage;
+  /** "text" (the playground's .txt / .csv) gets no highlighting. */
+  language: CodeLanguage | "text";
   placeholder?: string;
+  /** CSS min-height; exercises keep 200px to match CodeEditorNoSSR's loading placeholder. */
+  minHeight?: string;
 }
 
 // One dynamic import per language: a static import of every package would put all of them (SQL
@@ -31,9 +34,19 @@ const LANGUAGE_LOADERS: Record<CodeLanguage, () => Promise<Extension[]>> = {
   markdown: () => import("@codemirror/lang-markdown").then((m) => [m.markdown()]),
   python: () => import("@codemirror/lang-python").then((m) => [m.python()]),
   json: () => import("@codemirror/lang-json").then((m) => [m.json()]),
+  yaml: () =>
+    Promise.all([
+      import("@codemirror/language"),
+      import("@codemirror/legacy-modes/mode/yaml"),
+    ]).then(([{ StreamLanguage }, { yaml }]) => [StreamLanguage.define(yaml)]),
+  hcl: () =>
+    Promise.all([import("@codemirror/language"), import("@/app/lib/hcl-stream-mode")]).then(
+      ([{ StreamLanguage }, { hcl }]) => [StreamLanguage.define(hcl)]
+    ),
 };
 
 const NO_EXTENSIONS: Extension[] = [];
+const DEFAULT_MIN_HEIGHT = "200px";
 
 function subscribeDarkClass(onStoreChange: () => void) {
   const root = document.documentElement;
@@ -50,7 +63,13 @@ function getDarkClassServerSnapshot() {
   return false;
 }
 
-export function CodeEditor({ value, onChange, language, placeholder }: CodeEditorProps) {
+export function CodeEditor({
+  value,
+  onChange,
+  language,
+  placeholder,
+  minHeight = DEFAULT_MIN_HEIGHT,
+}: CodeEditorProps) {
   // Read the .dark class set before first paint so dark users don't mount in light first.
   const isDark = useSyncExternalStore(
     subscribeDarkClass,
@@ -60,14 +79,17 @@ export function CodeEditor({ value, onChange, language, placeholder }: CodeEdito
 
   // The editor mounts at once without highlighting and gains it when the language chunk arrives,
   // so typing is never blocked on the download.
-  const [loaded, setLoaded] = useState<{ language: CodeLanguage; extensions: Extension[] } | null>(
-    null
-  );
+  const [loaded, setLoaded] = useState<{
+    language: CodeEditorProps["language"];
+    extensions: Extension[];
+  } | null>(null);
   useEffect(() => {
     let cancelled = false;
     // code_language comes from the DB as-is; a value outside the map (DB CHECK and CODE_LANGUAGES
     // out of sync) must leave a plain editor, not throw here and take the exercise page down.
-    const load = LANGUAGE_LOADERS[language] ?? (() => Promise.resolve(NO_EXTENSIONS));
+    const load =
+      (language === "text" ? undefined : LANGUAGE_LOADERS[language]) ??
+      (() => Promise.resolve(NO_EXTENSIONS));
     load()
       .then((extensions) => {
         // Ignore a slower chunk for a language the user already switched away from.
@@ -95,7 +117,10 @@ export function CodeEditor({ value, onChange, language, placeholder }: CodeEdito
         closeBrackets: true,
         indentOnInput: true,
       }}
-      style={{ minHeight: "200px" }}
+      // A taller box also goes on CodeMirror itself, or the strip below the gutter takes no clicks.
+      // The 200px default stays wrapper-only so exercise editors render exactly as before.
+      minHeight={minHeight === DEFAULT_MIN_HEIGHT ? undefined : minHeight}
+      style={{ minHeight }}
       className="overflow-hidden rounded-md border border-input text-sm"
     />
   );

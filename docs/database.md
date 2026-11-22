@@ -45,6 +45,7 @@ erDiagram
     learning_contents ||--o{ review_notes : "1:N"
     announcements ||--o{ announcement_reads : "1:N"
     users ||--o{ announcement_reads : "1:N"
+    users ||--o{ playground_templates : "created_by"
 ```
 
 `stripe_events` / `cron_locks` は他テーブルと関連を持たない独立テーブル。`email_kind_settings` / `email_settings` / `email_templates` / `ai_review_settings` は更新者（`updated_by`）でのみ `users` を参照する。
@@ -60,11 +61,14 @@ erDiagram
 `learning_themes` / `learning_phases` / `learning_contents` は共通して `display_order`（昇順の表示順）・`is_published`（公開フラグ、既定 false）・`is_deleted`（論理削除フラグ）を持つ。
 
 - `image_url`: サムネイル画像。Storage 配信分は環境非依存の相対パス `/storage/v1/object/public/thumbnails/theme-{id}/thumbnail.{ext}?v={timestamp}` を保存する。未設定時はプレースホルダー表示
+- `theme_color`: テーマカラー（`#RRGGBB`。CHECK で形式を固定。NULL 可）。サムネイル画像の背景色を `/manage` で登録し、修了証の配色に使う（[機能設計書](./specification.md)13.4節）。NULL は未設定で、修了証は `theme_id` で選ぶ既定のパレットになる。本番と開発で `theme_id` が違うため、値はマイグレーションで入れず `/manage` で環境ごとに登録する
 - `hero_image_url`: フェーズ一覧（`/learn/[themeId]`）の冒頭に出す横長（16:5）の専用画像（任意）。`image_url` と同じ形式で `/storage/v1/object/public/thumbnails/theme-{id}/hero.{ext}?v={timestamp}` を保存する。NULL のときは `image_url` を中央基準で切り抜いて使い、どちらも無ければヒーローを出さない
 
 ### 3.2 learning_phases（学習フェーズ）
 
 テーマ配下のグループ（例：Phase 1 - GAS基礎）。`theme_id` が親（`ON DELETE CASCADE`）。
+
+- `is_appendix`（`NOT NULL`、既定 false。#556）: 付録のフェーズなら true。付録は内容を差し替える前提のため、テーマの修了判定・進捗率・続きから学習・週次メール／Push の集計から外す（アプリの `applyMainCourseNestedThemeFilters()`。[機能設計書](./specification.md)4.2・13.1節）。受講生の画面では本編の後ろに「付録」として分けて表示する（`comparePhaseLevel()` で本編 → 付録の順）。RLS・公開判定は変わらない
 
 ### 3.3 learning_weeks（廃止）
 
@@ -93,7 +97,7 @@ erDiagram
 - `description`: 概要（Markdown・任意入力）。未入力（NULL）の場合、詳細ページの概要欄カードを表示しない
 - `pdf_url`: `slides` バケット内の**オブジェクトキーのみ**（例: `gas/slide-01.pdf`）。URL を保存せず、配信時にサーバー側で署名付きURLを発行する（6.8参照）
 - `allowed_submission_types`（`code` / `url` / `both`）: 演習で許可する提出方法。`code` / `url` は提出方法の選択UIを出さず、`both` のみ選択可（既定 `code`）
-- `code_language`: コードエディタの言語（既定 `javascript`）。許可値は `javascript` / `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`（#307）。CHECK 制約とアプリの `CODE_LANGUAGES` は `tests/lib/learning-contents-check-parity.test.ts` で一致を検査する。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（別の値は設けない）
+- `code_language`: コードエディタの言語（既定 `javascript`）。許可値は `javascript` / `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`（#307）/ `yaml`（#551）/ `hcl`（#555）。CHECK 制約とアプリの `CODE_LANGUAGES` は `tests/lib/learning-contents-check-parity.test.ts` で一致を検査する。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（別の値は設けない）
 - `starter_files`（演習のみ・NULL 可）: 提出フォームに事前表示する初期コード。形式は `submissions.code_files` と同じ `[{ filename, language, content }]`（#341）。秘匿ではないため `reference_answer` と違い列権限に含め、詳細取得（`LEARNING_CONTENT_DETAIL_COLUMN_LIST`）でも読む。`submission_file_slots` が NULL のとき、ここがファイル名を持っていればそのファイル名・言語が提出構成になる。両方 NULL のときは `code_language` の空ファイル1つから開始する。service_role のツリー／サマリー用許可カラムリストには含めない
 - `submission_file_slots`（演習のみ・NULL 可）: 提出ファイルの構成 `[{ filename, language }]`（#377）。中身（初期コード）は持たない。NULL は未指定で、上記のとおり `starter_files` か `code_language` の既定ファイル1つとして解決する。CHECK は演習以外の行で NULL であることだけを見、ファイル名・言語・件数・重複は API（zod）が検証する。秘匿ではないため `authenticated` の列権限と詳細取得に含める。`grading_rubric` と `reference_answer` は引き続き付与しない。service_role のツリー／サマリー用許可カラムリスト（`CONTENT_VISIBILITY_SUMMARY_COLUMNS`）には含めない
 - `show_preview` / `show_console`（演習のみ・NULL 可）: ライブプレビューとコンソールを課題ごとに上書きする（#380）。NULL はファイル構成からの自動で、既存行は移行しなくても自動の規則で動く。CHECK は演習以外の行で両方 NULL であることだけを見る。矛盾する「オン」（HTML を含まないプレビュー、HTML でも JavaScript でもない、またはほかの言語を含むコンソール）は API が 400 にする。秘匿ではないため列権限と詳細取得（`LEARNING_CONTENT_DETAIL_COLUMN_LIST`）と提出履歴の content 取得に含める。`CONTENT_VISIBILITY_SUMMARY_COLUMNS` には含めない
@@ -313,6 +317,40 @@ RLS は有効化しポリシーは作らない（`push_subscriptions` と同じ�
 
 `user_id`（対象）、`content_id`（リセットを課題に絞った場合のみ）、`submission_id`（再レビューの許可のみ）、`action`（`reset` / `reopen`）、`affected_count`、`performed_by`（操作した admin）、`created_at`。追記のみ。RLS は有効でポリシーなし（service_role 専用）。
 
+### 3.27 ai_chat_usage（シンラビに相談の利用記録）
+
+1行 = 質問1回（[機能設計書](./specification.md)17章）。**質問・回答の本文は持たない**（回数制限と費用の集計だけに使う）。
+
+- `user_id`（`users.id`、`ON DELETE CASCADE`）、`content_id`（`learning_contents.id`、`ON DELETE SET NULL`）
+- `status`（`pending` / `completed` / `failed`）: `claim_ai_chat()` が `pending` で INSERT し、API が `completed`（回答済み）か `failed`（Gemini の失敗。回数に数えない）に更新する
+- `counts_toward_limit`（既定 true）: false の行は回数に数えない（管理者のリセット用。行は残す）
+- `model_used`、`prompt_tokens`、`completion_tokens`、`thoughts_tokens`: 費用の集計用
+- 回数の数え方: `failed` と、`AI_CHAT_STALE_AFTER_MS`（60秒）より古い `pending` は数えない。有料会員は JST の当日分、お試しは通算
+
+### 3.28 ai_chat_settings（シンラビに相談の上限値）
+
+`id = 1` の1行だけ（CHECK）。`ai_review_settings`（3.26節）と同じ形。
+
+- `active_per_day`（既定 20、1〜100）: 有料会員の1日（JST）の回数
+- `trial_lifetime`（既定 5、1〜30）: お試しの通算の回数
+- `updated_at` / `updated_by`（`users.id`、`ON DELETE SET NULL`）
+
+範囲は `AI_CHAT_LIMIT_BOUNDS`（`app/constants/ai-chat.ts`）と同じ。**行が読めない・範囲外のときは、アプリが `AI_CHAT_LIMITS` で動く**。
+
+### 3.29 ai_chat_saved_notes（シンラビに聞いたこと）
+
+受講生が「復習リストに残す」を押したシンラビの回答と、その直前の質問。`user_id`（`ON DELETE CASCADE`）、`content_id`（`ON DELETE CASCADE`）、`question`（1〜500文字。CHECK）、`answer`（1〜2,000文字。CHECK）、`created_at`。1人あたりの件数の上限（300件）はアプリが確かめる。
+
+### 3.30 playground_templates（コードを試す のひな形）
+
+運営が作り、短いリンク（`/playground/t/<slug>`）で配るコード一式（[機能設計書](./specification.md)18.3節）。**利用者が書いたコードは DB に持たない**（ブラウザの `localStorage` だけ。18.2節）。
+
+- `slug`（UNIQUE。`^[a-z0-9]{10}$` の CHECK）: アプリが作成時に発行するランダム文字列。編集では変えない
+- `title`（空白だけ不可・100 文字まで）、`kind`（`web` / `python` / `sql` / `markdown` / `json` / `yaml` / `terminal`。`PLAYGROUND_KINDS` と同じ。#583 で追加した4つは `20261118120000_add_playground_template_kinds.sql`）
+- `files`（JSONB）: `[{ filename, language, content }]`（`submissions.code_files` と同じ形。`language` は拡張子からアプリが決める）。CHECK は配列・1〜10 件・JSON 全体で 700,000 バイトまで（アプリの合計 200,000 文字に全角と記号の分を足した余裕）。ファイル名・拡張子・1ファイルの上限はアプリ（`playgroundFilesError()`）が検証する
+- `is_published`（既定 false）、`created_by`（`users.id`、`ON DELETE SET NULL`）、`created_at` / `updated_at`（トリガー）
+- 削除は物理削除（参照する行が無い）
+
 ---
 
 ## 4. インデックス
@@ -500,6 +538,27 @@ RLSは有効化しているが、ポリシーは一切定義していない（se
 
 INSERT / DELETE のポリシーは定義しない（行はマイグレーションで投入し、消さない）。maintainer には開放しない。`claim_ai_review()` を呼ぶ前の読み出しは service_role で行い、**キャッシュしない**（コスト上限は常に最新。`fetchAIReviewLimits()`）。ホーム・コンテンツ詳細・`/upgrade` の表示用だけ `fetchCurrentAIReviewLimits()` が `unstable_cache`（約 60 秒・タグ `ai-review-limits`）する（#502）。管理画面の `PUT /api/admin/ai-review-settings` 成功後に `revalidateTag` で即時無効化する。読めない・範囲外のときは `AI_REVIEW_LIMITS` へ戻す。
 
+### 6.21 ai_chat_usage / ai_chat_settings / ai_chat_saved_notes
+
+| テーブル | 操作 | 対象 | 条件 |
+|:--|:--|:--|:--|
+| `ai_chat_usage` | SELECT | 本人・admin | `user_id = (select get_user_id()) OR (select get_user_role()) = 'admin'`（本人は残り回数の表示、admin は費用の集計） |
+| `ai_chat_settings` | SELECT | 認証済み全員 | `true`（機微な値ではない） |
+| `ai_chat_settings` | UPDATE | admin | `(select get_user_role()) = 'admin'`（USING / WITH CHECK とも） |
+| `ai_chat_saved_notes` | SELECT / DELETE | 本人のみ | `user_id = (select get_user_id())` |
+| `ai_chat_saved_notes` | INSERT | 本人のみ | `user_id = (select get_user_id()) AND EXISTS (SELECT 1 FROM learning_contents lc WHERE lc.id = content_id)`（可視性は `learning_contents` の SELECT RLS に委ねる。お試しはお試し公開のコンテンツだけ） |
+
+`ai_chat_usage` の INSERT / UPDATE / DELETE は `authenticated` から REVOKE し、書き込みは `claim_ai_chat()`（service_role のみ EXECUTE。ユーザー単位の advisory lock の中で、回答待ちの `pending` 行があれば `busy`、無ければ数えて INSERT）と API の service_role だけにする。`ai_chat_settings` の INSERT / DELETE と `ai_chat_saved_notes` の UPDATE も REVOKE する。**admin / maintainer も他人の保存した回答は読めない**。定義は `20261117090000_add_ai_chat.sql`。
+
+### 6.22 playground_templates
+
+| 操作 | 対象 | 条件 |
+|:--|:--|:--|
+| SELECT | 受講者（公開中だけ） / admin・maintainer（全件） | `(is_published = true AND (select get_user_status()) IN ('active', 'trial')) OR (select get_user_role()) IN ('admin', 'maintainer')` |
+| INSERT / UPDATE / DELETE | admin・maintainer | ロールが admin・maintainer |
+
+却下ユーザーは `get_user_status()` が `rejected` で、ロールも NULL のため何も見えない。admin / maintainer が非公開のひな形を読めるのは、配る前にリンクで確かめるため（画面に「非公開」と出す）。定義は `20261118090000_add_playground_templates.sql`。
+
 ### 6.11 announcements
 
 | 操作 | 対象 | 条件 |
@@ -583,12 +642,12 @@ INSERT / UPDATE / DELETE のポリシーは定義しない（受講生・管理�
 
 ### 7.1 マイグレーション追加後の運用
 
-本番への適用は、リリース時に `supabase migration list --db-url <本番>` で未適用分（`Remote` が空の行）だけであることを確認したうえで `bunx supabase db push --db-url <本番>` で行う（詳細は Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順) Step 3）。SQL Editor で手動適用すると履歴に記録されず、次回の `db push` で再実行されるため行わないこと。
+本番への適用は、リリース時に `bunx supabase migration list --remote=<本番DB URL>` で未適用分（`Remote` が空の行）だけであることを確認したうえで `bunx supabase db push --remote=<本番DB URL>` で行う（詳細は Wiki の [本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順) Step 3）。SQL Editor で手動適用すると履歴に記録されず、次回の `db push` で再実行されるため行わないこと。
 
-このリポジトリには `supabase/config.toml` がなく、Docker上のローカルSupabaseスタック（`supabase start` / `supabase db reset`）は未整備。そのため動作確認は `.env.local` がリンクしている開発用プロジェクトに対して行う。
+Docker上のローカルSupabaseスタック（`supabase/config.toml`）は CI の権限テスト（`docs/testing.md`）用で、シードデータはない。そのため動作確認は `.env.local` がリンクしている開発用プロジェクトに対して行う。**Supabase CLI v3 は `db push` / `migration list` などを対象省略時にローカルスタックへ向けるため、リモートには必ず `--remote`（リンク先）か `--remote=<ref|DB URL>` を付ける。** ホスト側を変更するコマンドは確認が入り、既定の答えは No。
 
 1. `bunx supabase migration new <説明>` でファイルを作成し、内容を実装する。
-2. `bunx supabase db push` で開発用プロジェクトに適用し、アプリを動かして動作確認する。
+2. `bunx supabase db push --remote` で開発用プロジェクトに適用し、アプリを動かして動作確認する。
 3. **`bun run db:types` はリンク先プロジェクトのリモートスキーマから型を生成するため、必ず上記の `db push` の後に実行する**（`db push` 前に実行しても新しいカラム等は反映されない）。生成物（`app/types/lib/database.types.ts`）もコミットする。
 4. 対応する Issue / PR にマイグレーションファイルをひも付けてレビューを受ける。
 

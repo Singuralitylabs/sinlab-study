@@ -422,15 +422,16 @@ jobs:
           if [ -z "${SUPABASE_READONLY_DB_URL:-}" ]; then
             {
               echo "body<<MIGRATION_LIST_EOF"
-              echo "自動確認できませんでした（Secret 未設定）。手元で \`bunx supabase migration list\` を実行して確認してください。"
+              echo "自動確認できませんでした（Secret 未設定）。手元で \`bunx supabase migration list --remote=<本番DB URL>\` を実行して確認してください。"
               echo "MIGRATION_LIST_EOF"
               echo "confirmed=false"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Session Pooler の接続文字列を使うこと（直接接続は IPv6 のみで到達できない場合がある）。
-          # --db-url は環境変数経由で渡し、コマンドライン展開をログに出さない。
-          if OUTPUT=$(bunx supabase migration list --db-url "$SUPABASE_READONLY_DB_URL" 2>&1); then
+          # DB URL は環境変数経由で渡し、コマンドライン展開をログに出さない。
+          # CLI v3 は AI エージェント等の環境を検知すると JSON を出すため、PR 本文用に表形式を明示する。
+          if OUTPUT=$(bunx supabase migration list --output-format text --remote="$SUPABASE_READONLY_DB_URL" 2>&1); then
             {
               echo "body<<MIGRATION_LIST_EOF"
               echo '```'
@@ -442,7 +443,7 @@ jobs:
           else
             {
               echo "body<<MIGRATION_LIST_EOF"
-              echo "自動確認できませんでした（DB Pause 等の可能性あり）。手元で \`bunx supabase migration list\` を実行して確認してください。"
+              echo "自動確認できませんでした（DB Pause 等の可能性あり）。手元で \`bunx supabase migration list --remote=<本番DB URL>\` を実行して確認してください。"
               echo "MIGRATION_LIST_EOF"
               echo "confirmed=false"
             } >> "$GITHUB_OUTPUT"
@@ -499,7 +500,7 @@ jobs:
           fi
 
           if [ "$HAS_MIGRATIONS_CHANGED" = "true" ]; then
-            MIGRATIONS_CHANGED_SECTION=$(printf '**適用済みマイグレーションの変更・削除（後方互換の検出対象外）:**\n\n`release` に含まれるファイルは本番に適用済みである前提で、内容を変更しても再適用されません。意図した変更か、`supabase migration list` の履歴と不整合が生じないかを確認してください（前回リリースで未適用のまま残ったファイルがある場合は、下の migration list で確認してください）。\n\n%s' "$MIGRATIONS_CHANGED_LIST")
+            MIGRATIONS_CHANGED_SECTION=$(printf '**適用済みマイグレーションの変更・削除（後方互換の検出対象外）:**\n\n`release` に含まれるファイルは本番に適用済みである前提で、内容を変更しても再適用されません。意図した変更か、`bunx supabase migration list --remote=<本番DB URL>` の履歴と不整合が生じないかを確認してください（前回リリースで未適用のまま残ったファイルがある場合は、下の migration list で確認してください）。\n\n%s' "$MIGRATIONS_CHANGED_LIST")
           else
             MIGRATIONS_CHANGED_SECTION=""
           fi
@@ -511,7 +512,7 @@ jobs:
           fi
 
           if [ "$MIGRATION_CONFIRMED" != "true" ]; then
-            MIGRATION_NOTICE="> ⚠️ 本番DBへの自動接続ができなかったため、手元で \`bunx supabase migration list\` を実行して未適用分を確認してください。"
+            MIGRATION_NOTICE="> ⚠️ 本番DBへの自動接続ができなかったため、手元で \`bunx supabase migration list --remote=<本番DB URL>\` を実行して未適用分を確認してください。"
           else
             MIGRATION_NOTICE=""
           fi
@@ -550,7 +551,7 @@ jobs:
 
           ### マージ前チェックリスト
 
-          - [ ] 上記マイグレーションを本番 Supabase に適用済み（\`supabase migration list\` で履歴一致を確認）
+          - [ ] 上記マイグレーションを本番 Supabase に適用済み（\`bunx supabase migration list --remote=<本番DB URL>\` で履歴一致を確認）
           - [ ] 上記環境変数を本番環境（Vercel）に登録済み
           - [ ] 後方互換でない変更が無いか確認済み（ある場合はリリース分割の判断済み）
           - [ ] 差分内容を確認済み

@@ -1,4 +1,6 @@
 import type { PostgrestError } from "@supabase/supabase-js";
+import { cache } from "react";
+import { buildSavedChatNoteViews, type SavedChatNoteView } from "@/app/lib/ai-chat-saved-notes";
 import {
   applyPublishedNestedThemeFilters,
   type NestedThemeTree,
@@ -175,45 +177,48 @@ export async function fetchReviewNotesForContent(
  * Visible contents in learning order (same published filters as theme progress). Session client;
  * no service_role.
  */
-export async function fetchReviewListContentOrder(): Promise<{
-  metas: Map<number, ReviewListContentMeta>;
-  order: Map<number, number>;
-  error: PostgrestError | null;
-}> {
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await applyPublishedNestedThemeFilters(
-    supabase
-      .from("learning_themes")
-      .select(
-        "id, name, display_order, phases:learning_phases(id, name, display_order, contents:learning_contents(id, title, display_order, phase_id))"
-      )
-  ).order("display_order");
+/** Per-request cache: the review list and its 「シンラビに聞いたこと」 tab both need the order. */
+export const fetchReviewListContentOrder = cache(
+  async (): Promise<{
+    metas: Map<number, ReviewListContentMeta>;
+    order: Map<number, number>;
+    error: PostgrestError | null;
+  }> => {
+    const supabase = await createServerSupabaseClient();
+    const { data, error } = await applyPublishedNestedThemeFilters(
+      supabase
+        .from("learning_themes")
+        .select(
+          "id, name, display_order, phases:learning_phases(id, name, display_order, is_appendix, contents:learning_contents(id, title, display_order, phase_id))"
+        )
+    ).order("display_order");
 
-  if (error) {
-    console.error("復習リスト用コンテンツ順取得エラー:", error.message);
-    return { metas: new Map(), order: new Map(), error };
+    if (error) {
+      console.error("復習リスト用コンテンツ順取得エラー:", error.message);
+      return { metas: new Map(), order: new Map(), error };
+    }
+
+    const metas = new Map<number, ReviewListContentMeta>();
+    const order = new Map<number, number>();
+    let rank = 0;
+    for (const { themeId, themeName, content } of orderContentsAcrossThemes(
+      (data ?? []) as NestedThemeTree[]
+    )) {
+      order.set(content.id, rank);
+      rank += 1;
+      metas.set(content.id, {
+        contentId: content.id,
+        title: content.title,
+        themeId,
+        themeName,
+        phaseId: content.phaseId,
+        href: `/learn/${themeId}/${content.phaseId}/${content.id}`,
+      });
+    }
+
+    return { metas, order, error: null };
   }
-
-  const metas = new Map<number, ReviewListContentMeta>();
-  const order = new Map<number, number>();
-  let rank = 0;
-  for (const { themeId, themeName, content } of orderContentsAcrossThemes(
-    (data ?? []) as NestedThemeTree[]
-  )) {
-    order.set(content.id, rank);
-    rank += 1;
-    metas.set(content.id, {
-      contentId: content.id,
-      title: content.title,
-      themeId,
-      themeName,
-      phaseId: content.phaseId,
-      href: `/learn/${themeId}/${content.phaseId}/${content.id}`,
-    });
-  }
-
-  return { metas, order, error: null };
-}
+);
 
 export async function buildReviewListForUser(userId: number): Promise<{
   unovercome: ReviewListItemView[];
@@ -322,6 +327,34 @@ export async function buildReviewListForUser(userId: number): Promise<{
     orphanMemos,
     freeMemos,
     unovercomeCount: countUnovercomeReviewItems(views),
+    error: null,
+  };
+}
+
+/**
+ * The learner's saved シンラビ answers (#569), session client + RLS (own rows only). Shown in their
+ * own tab and never counted with the unovercome items (home line, weekly digest).
+ */
+export async function buildSavedChatNotesForUser(userId: number): Promise<{
+  notes: SavedChatNoteView[];
+  error: PostgrestError | null;
+}> {
+  const supabase = await createServerSupabaseClient();
+  const [{ data, error }, contentResult] = await Promise.all([
+    supabase
+      .from("ai_chat_saved_notes")
+      .select("id, content_id, question, answer, created_at")
+      .eq("user_id", userId),
+    fetchReviewListContentOrder(),
+  ]);
+  if (error || contentResult.error) {
+    if (error) {
+      console.error("シンラビに聞いたことの取得エラー:", error.message);
+    }
+    return { notes: [], error: error ?? contentResult.error };
+  }
+  return {
+    notes: buildSavedChatNoteViews(data ?? [], contentResult.metas, contentResult.order),
     error: null,
   };
 }

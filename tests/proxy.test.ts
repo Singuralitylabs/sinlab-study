@@ -55,7 +55,7 @@ describe("proxy", () => {
     });
 
     it("静的アセット（拡張子一致）はスキップする", async () => {
-      const extensions = ["pdf", "txt", "xml", "map", "json", "png", "css", "js"];
+      const extensions = ["pdf", "txt", "xml", "map", "json", "png", "css", "js", "whl", "ttf"];
       for (const ext of extensions) {
         const req = new NextRequest(`http://localhost/files/sample.${ext}`);
         const res = await proxy(req);
@@ -111,7 +111,27 @@ describe("proxy", () => {
       const res = await proxy(req);
 
       expect(res.status).toBe(307);
-      expect(res.headers.get("location")).toBe("http://localhost/login");
+      expect(res.headers.get("location")).toBe("http://localhost/login?next=%2Fdashboard");
+    });
+
+    it("未認証で開いたページは、ログイン後の戻り先として next に付ける（クエリも保つ）", async () => {
+      mockProxySupabase({ authUser: null });
+
+      const res = await proxy(new NextRequest("http://localhost/playground/t/abcdefghij?x=1"));
+
+      const location = new URL(res.headers.get("location") ?? "");
+      expect(location.pathname).toBe("/login");
+      expect(location.searchParams.get("next")).toBe("/playground/t/abcdefghij?x=1");
+    });
+
+    it("トップページや GET 以外では next を付けない", async () => {
+      mockProxySupabase({ authUser: null });
+      const top = await proxy(new NextRequest("http://localhost/"));
+      expect(top.headers.get("location")).toBe("http://localhost/login");
+
+      mockProxySupabase({ authUser: null });
+      const post = await proxy(new NextRequest("http://localhost/settings", { method: "POST" }));
+      expect(post.headers.get("location")).toBe("http://localhost/login");
     });
 
     it("DB取得でエラーが発生した場合、/login へリダイレクトする", async () => {
@@ -268,7 +288,7 @@ describe("proxy", () => {
       const res = await proxy(req);
 
       expect(res.status).toBe(307);
-      expect(res.headers.get("location")).toBe("http://localhost/login");
+      expect(res.headers.get("location")).toBe("http://localhost/login?next=%2Fdashboard");
     });
 
     it("ステータス取得エラー時、受信ヘッダーが偽装されていても /login へリダイレクトする（ヘッダーで素通りしない）", async () => {
@@ -349,6 +369,10 @@ describe("proxy", () => {
       expect(matcherRegex.test("/sample.map")).toBe(false);
       expect(matcherRegex.test("/vendor/pglite/pglite.wasm")).toBe(false);
       expect(matcherRegex.test("/vendor/pglite/pglite.data")).toBe(false);
+      expect(
+        matcherRegex.test("/vendor/pyodide/numpy-2.4.6-cp314-cp314-pyemscripten_2026_0_wasm32.whl")
+      ).toBe(false);
+      expect(matcherRegex.test("/vendor/pyodide/NotoSansJP-Regular.ttf")).toBe(false);
       expect(matcherRegex.test("/_next/static/chunk.js")).toBe(false);
     });
   });

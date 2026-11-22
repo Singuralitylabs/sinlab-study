@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatDate,
+  formatDateLong,
   formatDatePadded,
   formatDateTime,
   formatDateTimeMinute,
@@ -14,6 +15,7 @@ describe("format-date (JST fixed)", () => {
   it("formats in Asia/Tokyo regardless of the runtime time zone", () => {
     expect(formatDate(ISO)).toBe("2026/10/11");
     expect(formatDatePadded("2026-10-04T15:30:00Z")).toBe("2026/10/05");
+    expect(formatDateLong("2026-10-04T15:30:00Z")).toBe("2026年10月5日");
     expect(formatDateTime(ISO)).toBe("2026/10/11 8:00:00");
     expect(formatDateTimeMinute(ISO)).toBe("2026/10/11 08:00");
   });

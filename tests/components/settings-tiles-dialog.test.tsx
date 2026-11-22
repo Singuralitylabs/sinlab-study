@@ -44,6 +44,7 @@ const baseProps = {
   isMailTarget: true,
   membershipType: "general" as const,
   userStatus: "active" as const,
+  pushPublicKey: null,
 };
 
 describe("SettingsTiles dialogs", () => {

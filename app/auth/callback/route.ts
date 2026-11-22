@@ -7,6 +7,11 @@ import {
   TERMS_REQUIRED_ERROR_CODE,
 } from "@/app/constants/auth";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
+import {
+  buildLoginPath,
+  POST_LOGIN_NEXT_COOKIE_NAME,
+  sanitizePostLoginPath,
+} from "@/app/lib/post-login-redirect";
 import { trackServerEvent } from "@/app/services/analytics/track-server";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { sendSlackNewUserNotification } from "@/app/services/notifications/slack";
@@ -18,7 +23,6 @@ import { scheduleSignupEmail } from "@/app/services/notifications/user-emails";
 export const maxDuration = 30;
 
 const REGISTRATION_FAILED_PATH = "/login?error=registration_failed";
-const TERMS_REQUIRED_PATH = `/login?error=${TERMS_REQUIRED_ERROR_CODE}`;
 
 type CookieToSet = {
   name: string;
@@ -35,8 +39,10 @@ function redirectWithSessionCookies(
   for (const { name, value, options } of cookies) {
     redirectResponse.cookies.set(name, value, options);
   }
-  // The consent cookie is single-use; delete it reliably even on session-carrying responses.
+  // The consent and destination cookies are single-use; delete them reliably even on
+  // session-carrying responses.
   redirectResponse.cookies.delete(TERMS_CONSENT_COOKIE_NAME);
+  redirectResponse.cookies.delete(POST_LOGIN_NEXT_COOKIE_NAME);
   // Responses carrying session cookies must not be CDN-cached (Cache-Control etc. from
   // @supabase/ssr).
   for (const [key, value] of Object.entries(headers)) {
@@ -45,10 +51,11 @@ function redirectWithSessionCookies(
   return redirectResponse;
 }
 
-/** Error redirect without session cookies; only deletes the consent cookie. */
+/** Error redirect without session cookies; only deletes the single-use cookies. */
 function redirectWithoutSession(url: URL) {
   const redirectResponse = NextResponse.redirect(url);
   redirectResponse.cookies.delete(TERMS_CONSENT_COOKIE_NAME);
+  redirectResponse.cookies.delete(POST_LOGIN_NEXT_COOKIE_NAME);
   return redirectResponse;
 }
 
@@ -128,7 +135,9 @@ async function handleCallback(request: NextRequest) {
     return redirectWithoutSession(new URL(REGISTRATION_FAILED_PATH, origin));
   }
 
-  let redirectPath = "/";
+  // Re-checked here: the cookie is client-written, so the login page's sanitizing proves nothing.
+  const nextPath = sanitizePostLoginPath(request.cookies.get(POST_LOGIN_NEXT_COOKIE_NAME)?.value);
+  let redirectPath = nextPath ?? "/";
 
   if (!existingUser) {
     // First login: don't create a users row without the consent cookie (prevents bypassing the
@@ -136,7 +145,10 @@ async function handleCallback(request: NextRequest) {
     const hasConsented =
       request.cookies.get(TERMS_CONSENT_COOKIE_NAME)?.value === TERMS_CONSENT_COOKIE_VALUE;
     if (!hasConsented) {
-      return redirectWithoutSession(new URL(TERMS_REQUIRED_PATH, origin));
+      // Keep the destination on the retry link: this response deletes the cookie that carried it.
+      return redirectWithoutSession(
+        new URL(buildLoginPath(nextPath, TERMS_REQUIRED_ERROR_CODE), origin)
+      );
     }
 
     const { error: insertError } = await supabase.from("users").insert({
@@ -163,8 +175,6 @@ async function handleCallback(request: NextRequest) {
       console.error("[Slack通知] 予期しないエラーが発生しました:", error);
     });
     scheduleSignupEmail({ authId: user.id });
-
-    redirectPath = "/";
   } else if (existingUser.status === USER_STATUS.REJECTED) {
     redirectPath = "/rejected";
   }

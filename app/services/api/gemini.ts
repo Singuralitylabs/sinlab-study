@@ -1,5 +1,6 @@
 import {
   ApiError,
+  FinishReason,
   type GenerateContentResponse,
   type GenerateContentResponseUsageMetadata,
   GoogleGenAI,
@@ -8,6 +9,14 @@ import {
 } from "@google/genai";
 import type { ZodType } from "zod";
 import { CODE_LANGUAGES, type CodeLanguage } from "@/app/components/code-editor-utils";
+import {
+  AI_CHAT_CUT_NOTE,
+  AI_CHAT_MAX_OUTPUT_TOKENS,
+  AI_CHAT_REQUEST_TIMEOUT_MS,
+  AI_CHAT_TEMPERATURE,
+  AI_CHAT_THINKING_LEVEL,
+  AI_CHAT_TOTAL_BUDGET_MS,
+} from "@/app/constants/ai-chat";
 import {
   GEMINI_API_KEY_ENV,
   GEMINI_API_KEY_TRIAL_ENV,
@@ -40,6 +49,7 @@ import {
   GradingRubricDraftSchema,
   UrlReviewSchema,
 } from "@/app/lib/grading-schema";
+import { fenceFor } from "@/app/lib/prompt-fence";
 import { addTokenCount, type TokenUsage } from "@/app/lib/token-usage";
 import type { CodeFile, GradingRubric, ReviewJson, ScoreKind, UserStatusType } from "@/app/types";
 
@@ -49,6 +59,8 @@ export const SYSTEM_PROMPT = `Web技術講座のAI採点アシスタントです
 - code_quality.level はコードの構造・命名・ベストプラクティスから good / fair / poor のいずれかで判定し、根拠を comment に書く
 - suggestions は改善提案を最大${REVIEW_MAX_SUGGESTIONS}件（要点のみ。コード例は必要な場合のみ）
 - advice は次のステップを1〜2文で書く
+- 次の違いだけでは、要件の判定もコード品質も下げず、suggestions にも挙げない: 表示する文字列・コメントの中の全角/半角や、意味が同じ文言の違い、空白・改行、HTML の属性値・CSS・JavaScript の文字列を囲む ' と " の違い、省略しても動くセミコロン、指定のない変数名のうち意味が読める名前の違い。文法や処理の理解、課題の指示に沿った動作を中心に評価する
+- ただし次は通常どおり判定に反映する: コードの構文や動作が変わるもの（文字列の中身が識別子・セレクタ・イベント名として使われる場合、文字列・コメントの外の全角記号、必要なセミコロンの欠落、JSON の引用符、YAML・Python などインデントで構造が決まる記法のインデント、シェルなど空白に意味がある記法の空白、\${} を使うときのバッククォートなど記法で決まっているもの）、意味が読めない名前（命名の改善提案は可）、課題が指定した関数名・変数名・ファイル名、採点基準が「表記も含めて」と求めている文字列、指示と明らかに異なる意味の出力や動作
 - 点数・合否・パーセンテージは出力しない（点数はシステムが判定ラベルから計算する）`;
 
 export type { TokenUsage };
@@ -113,20 +125,6 @@ export function resolveGeminiApiKey(userStatus: UserStatusType | null): string |
     return process.env[GEMINI_API_KEY_TRIAL_ENV] || memberKey || undefined;
   }
   return undefined;
-}
-
-/**
- * A fence longer than any backtick run in the content, so submitted code (a Markdown README with
- * its own ``` blocks, a template literal containing them) cannot close it early and turn the rest
- * into prompt text at the same level as the instructions.
- */
-function fenceFor(content: string): string {
-  // reduce, not Math.max(...runs): a long submission can have more runs than the argument limit.
-  const longestRun = (content.match(/`+/g) ?? []).reduce(
-    (max, run) => Math.max(max, run.length),
-    0
-  );
-  return "`".repeat(Math.max(3, longestRun + 1));
 }
 
 // Applied per file in the multi-file branch too: codeFiles has no length limit at the API, and a
@@ -475,13 +473,33 @@ function addUsage(
   };
 }
 
+/** Per-call knobs. Review and rubric drafts use the defaults; the chat passes its own. */
+interface GenerationTuning {
+  maxOutputTokens: number;
+  temperature: number;
+  requestTimeoutMs: number;
+  totalBudgetMs: number;
+}
+
+const REVIEW_TUNING: GenerationTuning = {
+  maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
+  temperature: GEMINI_TEMPERATURE,
+  requestTimeoutMs: GEMINI_REQUEST_TIMEOUT_MS,
+  totalBudgetMs: GEMINI_TOTAL_BUDGET_MS,
+};
+
 interface StructuredRequest<T> {
   apiKey: string;
   systemInstruction: string;
   contents: string;
-  responseSchema: Schema;
-  parse: (text: string | undefined) => { ok: true; value: T } | { ok: false; reason: string };
+  /** null asks for plain text (the chat answers in Markdown, not JSON). */
+  responseSchema: Schema | null;
+  parse: (
+    text: string | undefined,
+    response: GenerateContentResponse
+  ) => { ok: true; value: T } | { ok: false; reason: string };
   models: readonly GeminiModelConfig[];
+  tuning?: GenerationTuning;
 }
 
 function modelChainFor(modelName?: string): readonly GeminiModelConfig[] {
@@ -549,6 +567,7 @@ async function generateValidatedJson<T>({
   responseSchema,
   parse,
   models,
+  tuning = REVIEW_TUNING,
 }: StructuredRequest<T>): Promise<{ value: T; usage: TokenUsage; modelUsed: string }> {
   if (!apiKey) {
     throw new Error("Gemini APIキーが設定されていません");
@@ -565,8 +584,8 @@ async function generateValidatedJson<T>({
 
   // Cap attempts plus waits at GEMINI_TOTAL_BUDGET_MS even when a call hangs until its own timeout
   // instead of failing fast (maxDuration guard).
-  const deadlineAt = Date.now() + GEMINI_TOTAL_BUDGET_MS;
-  const overallSignal = AbortSignal.timeout(GEMINI_TOTAL_BUDGET_MS);
+  const deadlineAt = Date.now() + tuning.totalBudgetMs;
+  const overallSignal = AbortSignal.timeout(tuning.totalBudgetMs);
 
   const callModel = (model: GeminiModelConfig) =>
     ai.models.generateContent({
@@ -574,17 +593,15 @@ async function generateValidatedJson<T>({
       contents,
       config: {
         systemInstruction,
-        maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
-        temperature: GEMINI_TEMPERATURE,
-        responseMimeType: "application/json",
-        responseSchema,
+        maxOutputTokens: tuning.maxOutputTokens,
+        temperature: tuning.temperature,
+        ...(responseSchema
+          ? { responseMimeType: "application/json", responseSchema }
+          : { responseMimeType: "text/plain" }),
         thinkingConfig: {
           thinkingLevel: model.thinkingLevel,
         },
-        abortSignal: AbortSignal.any([
-          AbortSignal.timeout(GEMINI_REQUEST_TIMEOUT_MS),
-          overallSignal,
-        ]),
+        abortSignal: AbortSignal.any([AbortSignal.timeout(tuning.requestTimeoutMs), overallSignal]),
       },
     });
 
@@ -732,7 +749,7 @@ async function generateValidatedJson<T>({
     validationAttempt++
   ) {
     // Regeneration needs a full attempt window. Less than that is aborted, and still billed.
-    if (validationAttempt > 0 && Date.now() + GEMINI_REQUEST_TIMEOUT_MS > deadlineAt) {
+    if (validationAttempt > 0 && Date.now() + tuning.requestTimeoutMs > deadlineAt) {
       break;
     }
 
@@ -746,7 +763,7 @@ async function generateValidatedJson<T>({
 
     usage = addUsage(usage, outcome.response.usageMetadata);
 
-    const parsed = parse(outcome.response.text);
+    const parsed = parse(outcome.response.text, outcome.response);
     if (parsed.ok) {
       return {
         value: parsed.value,
@@ -883,4 +900,52 @@ export async function generateGradingRubricDraft({
     models: modelChainFor(),
   });
   return value;
+}
+
+export interface ChatReplyResult extends TokenUsage {
+  answer: string;
+  modelUsed: string;
+}
+
+/**
+ * One シンラビ chat answer in plain Markdown. Same model chain and key routing as the review, with
+ * the chat's own output cap and time budget. A failure throws ReviewGenerationError with the tokens
+ * already billed, so the caller can record them on the failed usage row.
+ */
+export async function generateChatReply({
+  systemInstruction,
+  contents,
+  apiKey,
+}: {
+  systemInstruction: string;
+  contents: string;
+  apiKey: string;
+}): Promise<ChatReplyResult> {
+  const { value, usage, modelUsed } = await generateValidatedJson<string>({
+    apiKey,
+    systemInstruction,
+    contents,
+    responseSchema: null,
+    parse: (text, response) => {
+      const answer = text?.trim() ?? "";
+      if (answer.length === 0) {
+        return { ok: false, reason: "empty" };
+      }
+      // Plain text has no JSON to break, so a reply cut at the output cap would otherwise read as
+      // complete. Say so instead of regenerating (a second call costs as much and may stop again).
+      const cut = response.candidates?.[0]?.finishReason === FinishReason.MAX_TOKENS;
+      return { ok: true, value: cut ? `${answer}${AI_CHAT_CUT_NOTE}` : answer };
+    },
+    models: GEMINI_MODEL_CONFIGS.map((model) => ({
+      ...model,
+      thinkingLevel: AI_CHAT_THINKING_LEVEL,
+    })),
+    tuning: {
+      maxOutputTokens: AI_CHAT_MAX_OUTPUT_TOKENS,
+      temperature: AI_CHAT_TEMPERATURE,
+      requestTimeoutMs: AI_CHAT_REQUEST_TIMEOUT_MS,
+      totalBudgetMs: AI_CHAT_TOTAL_BUDGET_MS,
+    },
+  });
+  return { answer: value, modelUsed, ...usage };
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isQuizAttemptPassed,
   quizCompletionAction,
   quizQuestionsUpdatedNotice,
   quizQuestionVersion,
@@ -118,6 +119,7 @@ describe("quizCompletionAction", () => {
     resultVersion: "v1",
     questionVersion: "v1",
     handled: false,
+    passed: true,
     completionPending: false,
     canRecordProgress: true,
     initialCompleted: false,
@@ -136,10 +138,26 @@ describe("quizCompletionAction", () => {
   });
 
   it.each([
+    ["不正解の設問がある", { passed: false }],
     ["プレビュー中", { canRecordProgress: false }],
     ["完了済み", { initialCompleted: true }],
     ["記録の送信後で再描画がまだ（すぐに解き直した）", { completionPending: true }],
   ])("%sなら記録せず処理済みにする", (_label, override) => {
     expect(quizCompletionAction({ ...base, ...override })).toBe("mark-handled");
+  });
+});
+
+describe("isQuizAttemptPassed", () => {
+  it("選択式がすべて正解なら合格", () => {
+    expect(isQuizAttemptPassed([{ isCorrect: true }, { isCorrect: true }])).toBe(true);
+  });
+
+  it("選択式に1問でも不正解があれば不合格", () => {
+    expect(isQuizAttemptPassed([{ isCorrect: true }, { isCorrect: false }])).toBe(false);
+  });
+
+  it("入力式（自動採点しない）は条件に含めない", () => {
+    expect(isQuizAttemptPassed([{ isCorrect: null }])).toBe(true);
+    expect(isQuizAttemptPassed([{ isCorrect: null }, { isCorrect: false }])).toBe(false);
   });
 });

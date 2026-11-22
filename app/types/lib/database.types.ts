@@ -8,6 +8,137 @@ export type Database = {
   };
   public: {
     Tables: {
+      ai_chat_saved_notes: {
+        Row: {
+          answer: string;
+          content_id: number;
+          created_at: string;
+          id: number;
+          question: string;
+          user_id: number;
+        };
+        Insert: {
+          answer: string;
+          content_id: number;
+          created_at?: string;
+          id?: number;
+          question: string;
+          user_id: number;
+        };
+        Update: {
+          answer?: string;
+          content_id?: number;
+          created_at?: string;
+          id?: number;
+          question?: string;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ai_chat_saved_notes_content_id_fkey";
+            columns: ["content_id"];
+            isOneToOne: false;
+            referencedRelation: "learning_contents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ai_chat_saved_notes_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ai_chat_settings: {
+        Row: {
+          active_per_day: number;
+          id: number;
+          trial_lifetime: number;
+          updated_at: string;
+          updated_by: number | null;
+        };
+        Insert: {
+          active_per_day?: number;
+          id?: number;
+          trial_lifetime?: number;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Update: {
+          active_per_day?: number;
+          id?: number;
+          trial_lifetime?: number;
+          updated_at?: string;
+          updated_by?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ai_chat_settings_updated_by_fkey";
+            columns: ["updated_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ai_chat_usage: {
+        Row: {
+          completion_tokens: number | null;
+          content_id: number | null;
+          counts_toward_limit: boolean;
+          created_at: string;
+          id: number;
+          model_used: string | null;
+          prompt_tokens: number | null;
+          status: string;
+          thoughts_tokens: number | null;
+          updated_at: string;
+          user_id: number;
+        };
+        Insert: {
+          completion_tokens?: number | null;
+          content_id?: number | null;
+          counts_toward_limit?: boolean;
+          created_at?: string;
+          id?: number;
+          model_used?: string | null;
+          prompt_tokens?: number | null;
+          status?: string;
+          thoughts_tokens?: number | null;
+          updated_at?: string;
+          user_id: number;
+        };
+        Update: {
+          completion_tokens?: number | null;
+          content_id?: number | null;
+          counts_toward_limit?: boolean;
+          created_at?: string;
+          id?: number;
+          model_used?: string | null;
+          prompt_tokens?: number | null;
+          status?: string;
+          thoughts_tokens?: number | null;
+          updated_at?: string;
+          user_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ai_chat_usage_content_id_fkey";
+            columns: ["content_id"];
+            isOneToOne: false;
+            referencedRelation: "learning_contents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ai_chat_usage_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       ai_review_limit_resets: {
         Row: {
           action: string;
@@ -671,6 +802,7 @@ export type Database = {
           description: string | null;
           display_order: number | null;
           id: number;
+          is_appendix: boolean;
           is_deleted: boolean | null;
           is_published: boolean | null;
           name: string;
@@ -682,6 +814,7 @@ export type Database = {
           description?: string | null;
           display_order?: number | null;
           id?: number;
+          is_appendix?: boolean;
           is_deleted?: boolean | null;
           is_published?: boolean | null;
           name: string;
@@ -693,6 +826,7 @@ export type Database = {
           description?: string | null;
           display_order?: number | null;
           id?: number;
+          is_appendix?: boolean;
           is_deleted?: boolean | null;
           is_published?: boolean | null;
           name?: string;
@@ -720,6 +854,7 @@ export type Database = {
           is_deleted: boolean | null;
           is_published: boolean | null;
           name: string;
+          theme_color: string | null;
           updated_at: string | null;
         };
         Insert: {
@@ -732,6 +867,7 @@ export type Database = {
           is_deleted?: boolean | null;
           is_published?: boolean | null;
           name: string;
+          theme_color?: string | null;
           updated_at?: string | null;
         };
         Update: {
@@ -744,9 +880,54 @@ export type Database = {
           is_deleted?: boolean | null;
           is_published?: boolean | null;
           name?: string;
+          theme_color?: string | null;
           updated_at?: string | null;
         };
         Relationships: [];
+      };
+      playground_templates: {
+        Row: {
+          created_at: string;
+          created_by: number | null;
+          files: Json;
+          id: number;
+          is_published: boolean;
+          kind: string;
+          slug: string;
+          title: string;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: number | null;
+          files: Json;
+          id?: number;
+          is_published?: boolean;
+          kind: string;
+          slug: string;
+          title: string;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: number | null;
+          files?: Json;
+          id?: number;
+          is_published?: boolean;
+          kind?: string;
+          slug?: string;
+          title?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "playground_templates_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       push_logs: {
         Row: {
@@ -1196,6 +1377,18 @@ export type Database = {
       bulk_update_sibling_display_order: {
         Args: { p_table: string; p_updates: Json };
         Returns: undefined;
+      };
+      claim_ai_chat: {
+        Args: {
+          p_active_per_day: number;
+          p_content_id: number;
+          p_day_start: string;
+          p_stale_before: string;
+          p_trial_lifetime: number;
+          p_user_id: number;
+          p_user_status: string;
+        };
+        Returns: Json;
       };
       claim_ai_review: {
         Args: {

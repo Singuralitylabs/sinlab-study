@@ -5,7 +5,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { buildCertificateThemeColors } from "@/app/lib/certificate-palette";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
+import { isThemeColor, normalizeThemeColor } from "@/app/lib/theme-color";
 import type { LearningTheme } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -99,6 +101,66 @@ function ImageField({
   );
 }
 
+interface ThemeColorFieldProps {
+  value: string;
+  onChange: (value: string) => void;
+}
+
+function ThemeColorField({ value, onChange }: ThemeColorFieldProps) {
+  const trimmed = value.trim();
+  const invalid = trimmed !== "" && !isThemeColor(trimmed);
+  const colors = buildCertificateThemeColors(trimmed);
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="themeColor">テーマカラー（修了証の色・任意）</Label>
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          type="color"
+          aria-label="テーマカラーを選ぶ"
+          // The picker cannot be empty, so it shows white while unset; only the text field is saved.
+          value={normalizeThemeColor(trimmed) ?? "#FFFFFF"}
+          onChange={(e) => onChange(e.target.value.toUpperCase())}
+          className="h-9 w-12 cursor-pointer rounded-md border border-input bg-transparent p-1"
+        />
+        <Input
+          id="themeColor"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="#RRGGBB"
+          maxLength={7}
+          aria-invalid={invalid}
+          className="w-32 font-mono"
+        />
+        {trimmed !== "" && (
+          <Button type="button" variant="outline" onClick={() => onChange("")}>
+            クリア
+          </Button>
+        )}
+        {colors && (
+          <div
+            aria-hidden="true"
+            className="flex h-12 w-24 items-center justify-center border-4 text-sm font-bold"
+            style={{
+              backgroundImage: `radial-gradient(ellipse at 50% 40%, #FFFFFF 0%, ${colors.paper} 100%)`,
+              borderColor: colors.frame,
+              color: colors.heading,
+            }}
+          >
+            修了証
+          </div>
+        )}
+      </div>
+      {invalid ? (
+        <p className="text-sm text-destructive">#RRGGBB の形式（例 #3B77D8）で入力してください</p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          サムネイル画像の背景色に合わせます。空欄のときは自動の配色になります。
+        </p>
+      )}
+    </div>
+  );
+}
+
 function parseCreatedThemeId(data: unknown): number | undefined {
   if (!data || typeof data !== "object" || !("theme" in data)) return undefined;
   const id = (data as { theme?: { id?: unknown } }).theme?.id;
@@ -119,6 +181,8 @@ export function ThemeForm({
   const [description, setDescription] = useState(initialData?.description ?? "");
   const [imageUrl, setImageUrl] = useState(initialData?.image_url ?? "");
   const [heroImageUrl, setHeroImageUrl] = useState(initialData?.hero_image_url ?? "");
+  const [themeColor, setThemeColor] = useState(initialData?.theme_color ?? "");
+  const themeColorInvalid = themeColor.trim() !== "" && !isThemeColor(themeColor.trim());
   const visibleSiblings = siblings.filter((s) => s.id !== initialData?.id);
   const [insertAfterId, setInsertAfterId] = useState(() =>
     mode === "edit" && initialData
@@ -148,6 +212,7 @@ export function ThemeForm({
       name,
       description: description || null,
       image_url: imageUrl || null,
+      theme_color: normalizeThemeColor(themeColor),
       insert_after_id:
         mode === "edit" && insertAfterId === initialInsertAfterId.current
           ? undefined
@@ -284,6 +349,8 @@ export function ThemeForm({
         />
       </div>
 
+      <ThemeColorField value={themeColor} onChange={setThemeColor} />
+
       {mode === "edit" ? (
         <>
           <ImageField
@@ -350,7 +417,7 @@ export function ThemeForm({
       )}
 
       <div className="flex flex-wrap gap-3">
-        <Button type="submit" disabled={isLoading || isUploading || !name}>
+        <Button type="submit" disabled={isLoading || isUploading || !name || themeColorInvalid}>
           {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           {mode === "create" ? "作成" : "更新"}
         </Button>

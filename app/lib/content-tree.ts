@@ -20,6 +20,7 @@ export type ContentTreePhaseNode = {
   id: number;
   name: string;
   isPublished: boolean;
+  isAppendix: boolean;
   displayOrder: number | null;
   themeId: number | null;
   contents: ContentTreeContentNode[];
@@ -83,6 +84,7 @@ export function buildContentTree(
       id: phase.id,
       name: phase.name,
       isPublished: phase.is_published,
+      isAppendix: phase.is_appendix === true,
       displayOrder: phase.display_order,
       themeId: phase.theme_id,
       contents: contentsByPhase.get(phase.id) ?? [],

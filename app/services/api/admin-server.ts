@@ -215,7 +215,7 @@ export function parseStrictFilterId(value: string | undefined): number | undefin
 const MANAGE_THEME_LIST_SELECT = "id, name, description, image_url, display_order, is_published";
 
 const MANAGE_PHASE_LIST_SELECT = `
-  id, name, description, display_order, is_published, theme_id,
+  id, name, description, display_order, is_published, is_appendix, theme_id,
   theme:learning_themes(id, name, display_order)
 `
   .replace(/\s+/g, " ")
@@ -434,6 +434,7 @@ export async function createTheme(theme: {
   insertAfterId: number | null;
   is_published?: boolean;
   image_url?: string | null;
+  theme_color?: string | null;
 }): Promise<{ data: LearningTheme | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
@@ -456,6 +457,7 @@ export async function createTheme(theme: {
       description: theme.description,
       is_published: theme.is_published,
       image_url: theme.image_url,
+      theme_color: theme.theme_color,
       display_order: displayOrder,
     })
     .select()
@@ -629,6 +631,7 @@ export async function createPhase(phase: {
   description?: string | null;
   insertAfterId: number | null;
   is_published?: boolean;
+  is_appendix?: boolean;
 }): Promise<{ data: LearningPhase | null; error: PostgrestError | null }> {
   const supabase = await createServerSupabaseClient();
 
@@ -651,6 +654,7 @@ export async function createPhase(phase: {
       name: phase.name,
       description: phase.description,
       is_published: phase.is_published,
+      is_appendix: phase.is_appendix,
       display_order: displayOrder,
     })
     .select()

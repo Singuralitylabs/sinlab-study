@@ -8,7 +8,9 @@ export type CodeLanguage =
   | "bash"
   | "markdown"
   | "python"
-  | "json";
+  | "json"
+  | "yaml"
+  | "hcl";
 
 // Default file name per language (form initial values and placeholders). JavaScript (.js) and GAS
 // (.gs) have different extensions, so they count as separate languages.
@@ -23,6 +25,8 @@ export const DEFAULT_FILENAME_BY_LANGUAGE: Record<CodeLanguage, string> = {
   markdown: "README.md",
   python: "main.py",
   json: "data.json",
+  yaml: "config.yaml",
+  hcl: "main.tf",
 };
 
 /**
@@ -40,6 +44,8 @@ export const CODE_LANGUAGE_LABELS: Record<CodeLanguage, string> = {
   markdown: "Markdown",
   python: "Python",
   json: "JSON",
+  yaml: "YAML",
+  hcl: "HCL（Terraform）",
 };
 
 /**

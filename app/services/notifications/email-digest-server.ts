@@ -36,7 +36,7 @@ import type { EmailTexts } from "@/app/lib/email-template";
 import { type EmailMarkdown, renderEmailMarkdown } from "@/app/lib/markdown-email";
 import { resolveNotificationEmail } from "@/app/lib/notification-email";
 import {
-  applyPublishedNestedThemeFilters,
+  applyMainCourseNestedThemeFilters,
   type NestedThemeTree,
   orderContentsAcrossThemes,
 } from "@/app/lib/published-theme-tree";
@@ -178,7 +178,7 @@ async function fetchDigestUsers(supabase: AdminClient): Promise<DigestUser[]> {
  * (shared with home / review-list).
  */
 async function fetchOrderedContents(supabase: AdminClient): Promise<DigestContent[]> {
-  const { data, error } = await applyPublishedNestedThemeFilters(
+  const { data, error } = await applyMainCourseNestedThemeFilters(
     supabase
       .from("learning_themes")
       .select(

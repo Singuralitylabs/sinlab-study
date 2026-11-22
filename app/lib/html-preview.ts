@@ -12,6 +12,7 @@ const EXTENSION_LANGUAGE: Record<string, PreviewLanguage> = {
   mjs: "javascript",
   // React exercises store JSX under the javascript language; the extension fills empty language.
   jsx: "javascript",
+  gs: "javascript",
 };
 
 /** Served from `public/vendor/react/` (fixed versions). srcDoc must use absolute URLs (#475). */
@@ -32,7 +33,10 @@ export function isPreviewLanguage(language: string | null | undefined): boolean 
 
 /** Stored language wins; the extension only fills in when a file has no language recorded. */
 function resolveFileLanguage(file: CodeFile): PreviewLanguage | null {
-  const language = file.language.trim().toLowerCase();
+  const rawLanguage = file.language.trim().toLowerCase();
+  // GAS is JavaScript with a different extension; without this alias a "gas" layout would classify
+  // as "other" and lose the console.
+  const language = rawLanguage === "gas" ? "javascript" : rawLanguage;
   if (language) {
     return isPreviewLanguage(language) ? (language as PreviewLanguage) : null;
   }
@@ -73,7 +77,15 @@ export const PREVIEW_EXERCISE_ONLY_MESSAGE = "プレビューとコンソール�
 export const PREVIEW_NOT_ALLOWED_MESSAGE = "このファイル構成ではプレビューを表示できません";
 export const CONSOLE_NOT_ALLOWED_MESSAGE = "このファイル構成ではコンソールを表示できません";
 
-type PreviewLayoutKind = "html" | "javascript" | "css" | "js-css" | "react" | "sql" | "other";
+type PreviewLayoutKind =
+  | "html"
+  | "javascript"
+  | "css"
+  | "js-css"
+  | "react"
+  | "sql"
+  | "python"
+  | "other";
 
 function fileExtension(filename: string): string {
   const name = filename.trim().toLowerCase();
@@ -86,11 +98,27 @@ function fileExtension(filename: string): string {
  * on PGlite in a worker from the console 実行 button; there is no page to preview.
  */
 export function isSqlLayout(files: readonly PreviewLayoutFile[]): boolean {
+  return isSingleLanguageLayout(files, "sql", "sql");
+}
+
+/**
+ * Python layout (#545): every file is Python (stored language "python", or no language and a .py
+ * extension). It runs on Pyodide in a worker from the console 実行 button; there is no page.
+ */
+export function isPythonLayout(files: readonly PreviewLayoutFile[]): boolean {
+  return isSingleLanguageLayout(files, "python", "py");
+}
+
+function isSingleLanguageLayout(
+  files: readonly PreviewLayoutFile[],
+  language: string,
+  extension: string
+): boolean {
   return (
     files.length > 0 &&
     files.every((file) => {
-      const language = (file.language ?? "").trim().toLowerCase();
-      return language ? language === "sql" : fileExtension(file.filename ?? "") === "sql";
+      const stored = (file.language ?? "").trim().toLowerCase();
+      return stored ? stored === language : fileExtension(file.filename ?? "") === extension;
     })
   );
 }
@@ -141,6 +169,9 @@ function classifyPreviewLayout(files: readonly PreviewLayoutFile[]): PreviewLayo
   }
   if (isSqlLayout(files)) {
     return "sql";
+  }
+  if (isPythonLayout(files)) {
+    return "python";
   }
   if (isReactPreviewLayout(files)) {
     return "react";
@@ -208,6 +239,7 @@ export function previewCapability(
     case "javascript":
     case "js-css":
     case "sql":
+    case "python":
       return {
         autoPreview: false,
         autoConsole: true,

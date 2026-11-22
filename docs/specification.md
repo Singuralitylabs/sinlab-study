@@ -73,7 +73,7 @@ flowchart TD
     D -->|active| OK[アクセス許可]
 ```
 
-ステータス取得失敗（null）時は `/login` へ送るフェイルクローズとする。お試しユーザー（`trial`）はページアクセス自体は許可し、コンテンツ単位の制限はアプリ層とRLSで担保する（2.6参照）。インストールに必要な `/manifest.webmanifest`・`/sw.js`・`/offline`・`/apple-icon.png` だけを完全一致でスキップする（14.1節。これ以外のパスは足さない）。
+ステータス取得失敗（null）時は `/login` へ送るフェイルクローズとする。未ログイン（セッションなし）で GET したページだけは、`/login?next=<パス>` として戻り先を付ける（2.4節「ログイン後の戻り先」。トップ・GET 以外・その他のフェイルクローズでは付けない）。お試しユーザー（`trial`）はページアクセス自体は許可し、コンテンツ単位の制限はアプリ層とRLSで担保する（2.6参照）。インストールに必要な `/manifest.webmanifest`・`/sw.js`・`/offline`・`/apple-icon.png` だけを完全一致でスキップする（14.1節。これ以外のパスは足さない）。
 
 ### 2.2 認証の多層構造
 
@@ -120,7 +120,7 @@ sequenceDiagram
     U->>App: 7. /auth/callback
     App->>SB: 8. セッション確立
     App->>App: 9. ユーザー初回判定
-    App-->>U: 10. リダイレクト（却下済: /rejected、それ以外: /）
+    App-->>U: 10. リダイレクト（却下済: /rejected、それ以外: 戻り先があればそこ、なければ /）
 ```
 
 **OAuthコールバック処理**:
@@ -143,6 +143,12 @@ flowchart TD
 ```
 
 初回ログイン（自動登録）後もお試しユーザーとしてそのままホームへ遷移する。承認待ちであることはアプリ内バナーで通知する。同意 Cookie・登録失敗などのエラー導線は2.5・8.2を参照。
+
+**ログイン後の戻り先（#580）**: 体験会で配ったリンク（「コードを試す」のひな形など）を未ログインで開いた人を、ログイン（新規登録を含む）の後に同じページへ戻す。
+
+- `proxy.ts` が未ログインの GET を `/login?next=<パス+クエリ>` へ送る。`/login` は `next` を検証し、`GoogleLoginButton` が `signInWithOAuth` 直前に短寿命の Cookie `sinlab-post-login-next`（`SameSite=Lax`・30分。同意 Cookie と同じ持ち回り方。`redirectTo` のクエリにはしないので、Supabase のリダイレクト URL 許可リストは増やさない）へ書く。`next` が無いときは Cookie を消す（前の中断したログインの戻り先を使わない）
+- callback は Cookie を**もう一度**検証し、却下済み以外（既存の active / trial と新規登録）だけその戻り先へ送る。Cookie は callback のすべての応答で消す。同意 Cookie が無く `/login?error=terms_required` へ戻すときは、戻り先を `next` に付け直す
+- 検証は `sanitizePostLoginPath()`（`app/lib/post-login-redirect.ts`）だけで行う（オープンリダイレクト対策）。`/` で始まり `//` で始まらない 512 文字以内の相対パスだけを受け付け、`\`・制御文字・デコードすると `//` や `\` になるもの・`/login`・`/auth/`・`/rejected`・`/api/` は捨てる。返すのは URL として解釈し直した同一オリジンのパスとクエリ（ハッシュは落とす）
 
 ### 2.5 初回ログイン時のユーザー自動登録
 
@@ -201,6 +207,8 @@ service_role は RLS を素通りするため、上記2箇所のクエリには�
 **進捗率の分母**: ホームおよび `/learn` の進捗率は、お試しユーザーではお試し公開コンテンツのみを分母とする（体験範囲内の進捗を示す）。集計は通常クライアントのネスト select で行うため、RLSによる絞り込みがそのまま分母に反映される。ツリーは全件表示・進捗率はお試し公開分の分母、という差異は意図的なもの。
 
 **フェーズの完了表示**: フェーズの状態は `getPhaseProgressStatus()`（`phase-progress.ts`）が `summarizePhaseProgress()` の分子・分母から未着手 / 進行中 / 完了に判定し、テーマページとフェーズページで共有する。分母が0のフェーズは完了にしない。テーマページでは状態に応じて左のアイコンを切り替え、完了時は枠・背景・進捗バーを緑にして「完了」バッジを出す。**お試しで公開済みコンテンツがすべて鍵のフェーズ（#505）**: `isPhaseFullyLockedForUser()` が真のとき、左アイコンを鍵にし進捗バー（0/0）の代わりに「有料会員になると利用できます」を小さく出す（取得済みサマリーのみで判定しクエリは増やさない。コンテンツ0件・公開済み0件は鍵にしない。アコーディオンは開いて鍵付き一覧を見られる。会員・admin・maintainer とフェーズページ見出しは対象外）。フェーズページでは完了時に緑のバナーと「お疲れさまでした！」を出し、シンラビの画像も添える（`PHASE_COMPLETION_MASCOT`。シンラビが全テーマを解説するため、テーマによる出し分けはしない）。**テーマの完了表示**: テーマページは、全フェーズが完了のとき（`isThemeCompleted()`。分母0のフェーズ＝お試しで全ロック・空のフェーズが残っていれば出さない。フェーズが0件でも出さない）、フェーズ一覧の上に緑のお祝いバナーを出す。画像は `THEME_COMPLETION_MASCOT`（シンラビ。全テーマ共通）。進行中のアイコンは未着手と区別できるよう橙系にする。色だけに頼らずアイコンと文字を併記する。
+
+**付録の表示（#556）**: テーマページは、付録のフェーズを本編の一覧の下に「付録」の見出しで分け、「付録は修了の条件に含まれません。内容は随時更新します。」を添える（付録が無いテーマは今まで通り）。各フェーズの見出し、フェーズページ・コンテンツページの見出しに「付録」バッジ（`AppendixBadge`）を出す。テーマの完了バナーは本編のフェーズだけで判定し（`isThemeCompleted(mainPhaseViews)`）、付録があるときは「本編のすべてのフェーズを完了しました」と書く。フェーズ・コンテンツの前後ナビはテーマページと同じ本編 → 付録の順（`comparePhaseLevel()`。付録の `display_order` が本編の途中でも後ろに回す）で、本編の最終回の次は付録の先頭。お試しユーザーには付録も本編と同じくロック表示する
 
 **提出物の引き継ぎ**: 承認前の提出・進捗は `user_id` ベースで記録されるため、承認後（`trial` → `active`）もそのまま引き継がれる。管理者 / メンテナーのレビュー一覧にもお試しユーザーの提出が表示される。
 
@@ -465,8 +473,8 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 
 1. コンテンツ詳細ページは `fetchQuizQuestions()`（`app/services/api/quiz-server.ts`）で RPC `get_quiz_questions` を**通常クライアント**で呼び、正解を含まない設問を `QuizForm` に渡す。service_role では読まない。取得に失敗したら「設問を読み込めませんでした」と表示する（設問ゼロの表示と区別する）。設問・選択肢・解説・模範解答の `{{SUPABASE_STORAGE_URL}}` は本文と同じく `resolveMarkdownStorageUrls()` で置換する
 2. 回答は `POST /api/quiz/grade`（`{ contentId, answers: [{ questionId, revision, choices? , text? }] }`。`revision` は出題時に受け取った設問の版で、置換で id が保たれても中身が差し替わった設問への回答を採点しないため）。認証・rejected の403のあと、member / お試しは提出 API と同じ `isContentVisible()` で403を判定する（admin / maintainer は未公開プレビューで試せるよう通さない。RPC 側も可視性を再確認する）。RPC `grade_quiz_answers` が全設問に回答し、各 `revision` が現在の設問と一致し、回答の数が設問の数と同じ（削除された設問への回答を含まない）ときだけ結果を返し、空なら400「採点できませんでした。すべての設問に回答し、設問が更新された場合はページを再読み込みしてください」（クイズ以外の `contentId` でも RPC は空を返す。画面は全問回答しないと送信できないため、画面から空になるのはページ表示後に設問の形式・設問文・選択肢が編集・削除された場合。正解・解説だけの修正では空にならない）。正解・解説がレスポンスに含まれるのはこの採点後だけ
-3. 画面は設問ごとに正解・不正解と解説を表示する。入力式は自動採点せず、模範解答と解説を表示する（AIレビューは流用しない。AIレビューの回数上限や Gemini の費用が設問単位の確認に見合わないため）。「もう一度解く」で回答をやり直せる。再描画で設問（id・`revision`）が変わったときは回答・結果・エラーを破棄し（`revision` は内容のハッシュで、編集を戻すと版も戻るため、古いエラーも残さない）、表示されていたものを破棄したときだけ「設問が更新されたため、回答をやり直してください」と表示する（古い選択を新しい版の設問として送らないため。設問が0件になったときは「設問が登録されていません」だけを出す）。採点結果とエラーは送信時の設問の版と組で持ち、現在の版と一致するときだけ表示・完了記録する（応答待ちの間に版が変わると、id が保たれるため古い版の結果が新しい設問の下に出てしまう。届く順序に依らず防ぐため）。完了記録に失敗した警告は結果の表示とは独立に出し、完了ボタン等で完了済みになったら消す。記録の送信後、再描画で完了済みが反映される前に解き直しても、もう一度は記録しない
-4. 採点に成功したら、未完了なら進捗 API（`POST /api/progress`）で完了にし、画面を再描画して完了ボタンに反映する。クイズのページでは完了ボタンの切り替え後も再描画し、`QuizForm` の完了状態を揃える（他の種別では再描画しない。スライドは署名付きURLが再発行され PDF を読み直すため）。未公開プレビュー中は記録しない。回答内容は保存しない
+3. 画面は設問ごとに正解・不正解と解説を表示する。入力式は自動採点せず、模範解答と解説を表示する（AIレビューは流用しない。AIレビューの回数上限や Gemini の費用が設問単位の確認に見合わないため）。「もう一度解く」で回答をやり直せる。再描画で設問（id・`revision`）が変わったときは回答・結果・エラーを破棄し（`revision` は内容のハッシュで、編集を戻すと版も戻るため、古いエラーも残さない）、表示されていたものを破棄したときだけ「設問が更新されたため、回答をやり直してください」と表示する（古い選択を新しい版の設問として送らないため。設問が0件になったときは「設問が登録されていません」だけを出す）。採点結果とエラーは送信時の設問の版と組で持ち、現在の版と一致するときだけ表示・完了記録する（応答待ちの間に版が変わると、id が保たれるため古い版の結果が新しい設問の下に出てしまう。届く順序に依らず防ぐため）。完了記録に失敗した警告は結果の表示とは独立に出し、警告内の「完了を記録する」ボタンでの再送などで完了済みになったら消す。記録の送信後、再描画で完了済みが反映される前に解き直しても、もう一度は記録しない
+4. 採点に成功し、選択式の設問がすべて正解なら（入力式は自動採点しないので条件に含めない。入力式だけのクイズは送信で完了。`isQuizAttemptPassed()`）、未完了なら進捗 API（`POST /api/progress`）で完了にし、画面を再描画して完了ボタンに反映する。不正解の設問があれば完了にせず、「解説を読んで、もう一度解いてみよう。」と出す（#567）。未完了のクイズのページには手動の完了ボタンを出さず、完了済みのときだけ「未完了に戻す」ボタンを出す（設問の取得に失敗したとき・設問がないときは、完了できなくならないよう従来どおり出す）。記録に失敗したら、`QuizForm` 内の「完了を記録する」ボタンで再送する。サーバー（進捗 API・DB）はクイズの正誤を見ない（採点後に正解と解説が出るため、厳密に止めても修了の信頼性は上がらない。修了の重みは合格レビュー必須の演習で担保する）。クイズのページでは完了ボタンの切り替え後も再描画し、`QuizForm` の完了状態を揃える（他の種別では再描画しない。スライドは署名付きURLが再発行され PDF を読み直すため）。未公開プレビュー中は記録しない。回答内容は保存しない
 5. 設問・選択肢・解説・模範解答の描画は本文と同じ `MarkdownRenderer`。設問・選択肢はページ（Server Component）で描画して `QuizForm` に渡し、採点後に出る解説・模範解答だけを `next/dynamic` で遅延読み込みする（Markdown の描画一式を初期 JS に含めないため）。ヒントは演習のヒントと同じくプレーンテキスト
 
 `pdf_url` の旧形式（公開URL）は `20260908000000_secure_slides_bucket.sql` でキーへ正規化済み。アプリ側の `toSlideObjectKey()`（`app/lib/slide-object-key.ts`）も同じ規則で正規化するため、旧形式が管理画面やコンテンツ管理APIに流れてきてもキーとして保存され、外部URLなどキーとして解釈できない値は400で拒否する。空文字・空白のみは「未設定」として `null` に正規化して保存し、空文字の `pdf_url` を作らない（アプリは空文字を「スライド無し」として扱う一方、マイグレーションの `pdf_url` 検証は不正値として中断するため。#243）。親階層の公開判定は Storage ポリシー側にある（[データベース設計書](./database.md)6.8）。
@@ -608,13 +616,15 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 - **テーマ単位**: テーマ配下の全公開コンテンツ中の完了数（`fetchThemeProgressSummaries()`）。ホームの学習中テーマと `/learn` のテーマカードの表示単位。**全テーマを合算した全体進捗率は表示しない**（テーマを追加するたびに数字が下がり、意味を失うため）
 - **Phase単位**: Phase配下の全コンテンツ中の完了数
 
+**付録のフェーズ（#556）**: `learning_phases.is_appendix = true` のフェーズ（付録）は、テーマ単位の進捗率・修了・学習中の判定に入れない。集計は公開ツリーの絞り込みに付録を外す条件を足した `applyMainCourseNestedThemeFilters()`（`app/lib/published-theme-tree.ts`）に一本化し、`fetchThemeProgressSummary()` / `fetchThemeProgressSummaries()` / `fetchHomeLearningData()`、修了証の演習条件（`fetchPublishedExercises()`）、週次進捗メール・Push のダイジェストが使う（どれか1つでも漏れると、その画面だけ付録が分母に入り、修了済みの人が100%未満に戻る。`tests/lib/appendix-exclusion-parity.test.ts`）。付録は差し替える前提のため、付録の追加・公開・削除で本編の進捗率は変わらない。付録だけを完了してもテーマの進捗は上がらない（本編の完了が0件なら未着手のまま）。続きから学習も本編だけを案内する（付録を最後に見ていても本編基準）。復習リストは表示だけなので付録も含める（並びは本編 → 付録）。お試しユーザーの分母は RLS の絞り込みにこの条件が重なるだけで、付録をお試し公開しても分母には入らない。フェーズ単位の進捗は付録にも出す（テーマの進捗には入れない）。`/manage/students` の完了件数（`get_students_progress_summary()`）は完了行の件数なので付録も数える
+
 **お試しユーザーの分母**: 集計は通常クライアントのネスト select で行うため、RLSによる絞り込みがそのまま分母に反映される（2.6参照）。
 
 **学習中テーマ（`app/lib/theme-progress.ts`）**: 受講テーマを選ぶ仕組みは持たず、完了実績から判定する。`isActiveTheme()` は完了が1件以上で修了（100%。修了証の `isThemeCompleted()` と同じ定義）に達していないこと（trial は上記の分母のまま判定）。`splitThemesByActivity()` が **学習中**（完了1件以上で100%未満。完了率の高い順）/ **修了**（100%）/ **未着手**（完了0件。`display_order` 順）に分ける。判定はこの1か所に置き、ホーム・週次進捗メール（10.7節）・将来の修了証一覧が共有する。
 
 **ホームの見出し（#441）**: 先頭にコンテンツ幅いっぱいのバナー画像（`public/images/home/hero.webp`、16:9、装飾の位置付け）を置き、その直下に `h1`「おかえりなさい、{表示名}さん」と補助文を出す（`HomeHero`）。画像は `lg` 未満は16:9のまま、`lg` 以上は高さを抑えるため8:3に切り抜く（下側＝マスコットの下半身を落とす。題字は切れない）。表示名は `fetchUserDisplayName()`（通常クライアント）で取り、取得できないとき・空のときは名前なしの「おかえりなさい」にする（ホーム全体は失敗させない）。
 
-**ホーム（`/`）**: 見出しは上記の挨拶文（`HomeHero`）。見出し直後にクイックリンクを小さめ1行（`/learn`・`/announcements`。サイドナビがドロワーに隠れるスマホ向け。プラン導線は設定配下。#394）。主役は「続きから学習」カード（`resolveContinueLearning()`。`last_viewed_at` が最大のコンテンツを基準にし、未完了ならそのコンテンツ、完了済みなら同テーマ学習順の次の未完了、テーマ修了なら次テーマの先頭未完了。閲覧記録が1件も無いときは #370 の完了基準（最後に完了したテーマの学習順先頭未完了。完了0件なら最初のテーマの先頭。最後に学んだテーマが修了済みなら並び順で次の未完了テーマ）。全完了なら非表示。カードは進捗バーを出さず「前回: ○月○日」（`last_viewed_at`。記録が無いときは日付なし）を出す。お試しで閲覧可能分をすべて完了したらカードの代わりに「次のステップ」）。続けて学習中のテーマ（`ThemeCard` の横長 `layout="row"`。0件のときは最初の未着手テーマへのリンク）。修了・未着手のテーマ一覧と「学習を始める」ボタンは置かない。テーマ選択は `/learn` に一本化する。`/learn` はテーマをカードのグリッド（`layout="card"`。スマホ1列・`sm` 2列・`lg` 3列、コンテナ `max-w-5xl`）で並べ、上にサムネイル（`aspect-video` / `object-contain`）、下に進捗・説明を置く（#415）。進捗・修了表示の意味はホームと同じ（admin / maintainer の未公開テーマは進捗集計が無いため進捗を出さない）。「はじめかたチェックリスト」の完了判定と、お試しの「次のステップ」カード（全テーマの分母で100%）はテーマをまたいだ判定のため変えない。続きから学習の判定は通常クライアント（RLS）で取得した公開コンテンツと `user_progress` から計算し、service_role は使わない。閲覧の書き込みは `POST /api/progress/view`（Server Component では書かない。RPC `record_content_view`。#396 / #501）。
+**ホーム（`/`）**: 見出しは上記の挨拶文（`HomeHero`）。見出し直後にクイックリンクを小さめ1行（`/learn`・`/announcements`。サイドナビがドロワーに隠れるスマホ向け。プラン導線は設定配下。#394）。主役は「続きから学習」カード（`resolveContinueLearning()`。`last_viewed_at` が最大のコンテンツを基準にし、未完了ならそのコンテンツ、完了済みなら同テーマ学習順の次の未完了、テーマ修了なら次テーマの先頭未完了。閲覧記録が1件も無いときは #370 の完了基準（最後に完了したテーマの学習順先頭未完了。完了0件なら最初のテーマの先頭。最後に学んだテーマが修了済みなら並び順で次の未完了テーマ）。全完了なら非表示。カードは進捗バーを出さず「前回: ○月○日」（`last_viewed_at`。記録が無いときは日付なし）を出す。お試しで閲覧可能分をすべて完了したらカードの代わりに「次のステップ」）。続けて学習中のテーマ（`ThemeCard` の横長 `layout="row"`。0件のときは最初の未着手テーマへのリンク）。修了・未着手のテーマ一覧と「学習を始める」ボタンは置かない。テーマ選択は `/learn` に一本化する。`/learn` はテーマをカードのグリッド（`layout="card"`。スマホ1列・`sm` 2列・`lg` 3列、コンテナ `max-w-5xl`）で並べ、上にサムネイル（`aspect-video` / `object-contain`）、下に進捗・説明を置く（#415）。修了したテーマはカード全体を緑の枠・薄い緑の背景・緑の進捗バーにし、サムネイル左上に「修了」バッジ、カード内の下端に「修了証を見る」（修了証を持てる受講生のみ）を置く。修了証リンクはカード本体のリンクと兄弟にし、`<a>` を入れ子にしない（#553）。進捗・修了表示の意味はホームと同じ（admin / maintainer の未公開テーマは進捗集計が無いため進捗を出さない）。「はじめかたチェックリスト」の完了判定と、お試しの「次のステップ」カード（全テーマの分母で100%）はテーマをまたいだ判定のため変えない。続きから学習の判定は通常クライアント（RLS）で取得した公開コンテンツと `user_progress` から計算し、service_role は使わない。閲覧の書き込みは `POST /api/progress/view`（Server Component では書かない。RPC `record_content_view`。#396 / #501）。
 
 ---
 
@@ -681,7 +691,7 @@ upsert は既存行がある場合 UPDATE 経路を通るため、RLS側も INSE
 
 演習のコード提出フォームには、シンタックスハイライトと自動インデントを備えたコードエディタ（CodeMirror 6）を使用する。
 
-**対応言語**: `code_language` カラムで演習ごとに設定する（`javascript`（既定）/ `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`。#307）。許可値・既定ファイル名・表示名は `app/components/code-editor-utils.ts`（`CODE_LANGUAGES` / `DEFAULT_FILENAME_BY_LANGUAGE` / `CODE_LANGUAGE_LABELS`）に集約し、管理画面の提出ファイルの言語セレクトも同じ一覧から作る。DB の CHECK 制約との一致はテストで検査する。SQL は PostgreSQL 方言、Bash は `@codemirror/legacy-modes` の shell モードで色分けする。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（エディタの言語モードは変えない）。Markdown のコードフェンスは `sql` / `bash` / `markdown` / `python` / `json` と `jsx` / `tsx` も色分けする（`MarkdownRenderer`）。
+**対応言語**: `code_language` カラムで演習ごとに設定する（`javascript`（既定）/ `typescript` / `gas` / `html` / `css` / `sql` / `bash` / `markdown` / `python` / `json`。#307。`yaml` は #551、`hcl` は #555）。許可値・既定ファイル名・表示名は `app/components/code-editor-utils.ts`（`CODE_LANGUAGES` / `DEFAULT_FILENAME_BY_LANGUAGE` / `CODE_LANGUAGE_LABELS`）に集約し、管理画面の提出ファイルの言語セレクトも同じ一覧から作る。DB の CHECK 制約との一致はテストで検査する。SQL は PostgreSQL 方言、Bash と YAML は `@codemirror/legacy-modes` の shell / yaml モードで色分けする。HCL（Terraform の `.tf`）は `@codemirror/legacy-modes` にモードがないため、自前の小さなトークナイザ（`app/lib/hcl-stream-mode.ts`）で色分けする。HCL は実行しないので、プレビュー・コンソールは出さない。React の `.jsx` / `.tsx` は `javascript` / `typescript` のまま提出する（エディタの言語モードは変えない）。Markdown のコードフェンスは `sql` / `bash` / `markdown` / `python` / `json` / `yaml`（`yml`）/ `hcl`（`terraform` / `tf`。highlight.js に文法がないため `app/lib/highlight-hcl.ts` で定義）と `jsx` / `tsx` も色分けする（`MarkdownRenderer`）。
 
 **提出ファイルの固定表示（#377）**: 提出フォーム（`SubmissionForm`）と `/demo` の提出フォーム（`DemoSubmissionForm`）は、5.2 で解決した構成の数だけ入力欄を最初から出す。ファイル名は1件のときもラベルとして表示し、言語は表示名だけにする。ファイルの追加・削除、ファイル名と言語の入力は出さない。管理者が構成を指定したファイルはすべて入力必須で、空のままでは提出ボタンを押せない。構成が NULL で初期コードのファイルが2件以上のときは、空のファイルを残したまま提出でき、そのファイルは提出に含まれない。残したファイルが初期コードのままなら、受講生フォームも `/demo` も提出できない。提出成功後のリセットも同じ構成（初期コードがあればその内容）に戻す。`/demo` の取得条件（公開かつ未削除。スライドの署名付き URL は `is_open_to_trial = true` も必要）は変えない。`/demo` の提出フォームにはライブプレビューとコンソールを出さない。受講生の提出フォームでは、ライブプレビューはロックされたファイル名を `buildPreviewDocument()` に渡すので、`index.html` / `style.css` / `main.js` のような参照が提出のたびに揺れない。
 
@@ -717,7 +727,7 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 | 403 | `rejected` ユーザー / 対象コンテンツが自分に不可視（お試し非公開・未公開・存在しないID） |
 | 500 | サーバーエラー |
 
-#### 5.4.7 ライブプレビュー（HTML / CSS / JavaScript / React）と SQL の実行
+#### 5.4.7 ライブプレビュー（HTML / CSS / JavaScript / React）と SQL・Python の実行
 
 ライブプレビューとコンソールは、提出フォーム（`SubmissionForm`）と `SubmissionCodeBlock` を使う 3 か所（提出履歴 `/submissions`・`/manage/submissions` とコンテンツ詳細の「提出内容」）で、`resolvePreviewDisplay()`（`app/lib/html-preview.ts`）の結果に従って別々に出す。判定に使う構成は管理者が決めた提出ファイル（`resolveSubmissionFileSlots()`。#377）で、受講者が選ぶ言語は使わない。`show_preview` / `show_console` が NULL のときは次の自動規則、boolean のときはその上書き（許可されない「オン」は保存できない。画面ではチェックを無効にし、API は 400）。設定を読めない経路は、表示している提出ファイル自身に自動規則を当てる。
 
@@ -727,11 +737,12 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 | React（`App.jsx` または `App.js` があり、ほかは `.jsx` / `.js` / `.css` だけ） | オン | オン |
 | `javascript` だけ、または `javascript` と `css` だけ（上記 React 以外） | オフ | オン（「実行」ボタン。押すまで動かない） |
 | `sql` だけ（#507） | オフ | オン（「実行」ボタン。PostgreSQL で実行して結果を表で出す。押すまで動かない） |
+| `python` だけ（#545） | オフ | オン（「実行」ボタン。Pyodide で実行して出力とグラフを出す。押すまで動かない） |
 | `css` だけ（土台 HTML あり） | オン | オフ |
 | `css` だけ（土台 HTML なし） | オフ | オフ |
 | それ以外の言語を含む、または空 | オフ | オフ |
 
-プレビューをオンにできるのは `html` を含む構成、React 構成、または `css` だけで `preview_base_html`（土台 HTML）が設定されているとき（#351）。コンソールをオンにできるのは `html`・`javascript`・React を含み、ほかの言語を含まない構成と、`sql` だけの構成。JavaScript だけの課題（プレビューがオフでコンソールがオン）は見えない iframe（`sandbox="allow-scripts"` のみ）で、「実行」のたびにコンソールを空にして動かし直す。HTML / React でコンソールをオフにした課題はプレビュー枠だけを出す。サーバーではコードを実行しない（GAS / Python / SQL / Next.js の実行は対象外）。`/demo` の提出フォームにはプレビューもコンソールも出さない（未認証のデモで受講生のスクリプトを実行しない。この仕様は変えない）。
+プレビューをオンにできるのは `html` を含む構成、React 構成、または `css` だけで `preview_base_html`（土台 HTML）が設定されているとき（#351）。コンソールをオンにできるのは `html`・`javascript`・React を含み、ほかの言語を含まない構成と、`sql` だけの構成、`python` だけの構成。JavaScript だけの課題（プレビューがオフでコンソールがオン）は見えない iframe（`sandbox="allow-scripts"` のみ）で、「実行」のたびにコンソールを空にして動かし直す。HTML / React でコンソールをオフにした課題はプレビュー枠だけを出す。サーバーではコードを実行しない（GAS / Next.js の実行は対象外。SQL と Python は下記のとおりブラウザの中で動かす）。`/demo` の提出フォームにはプレビューもコンソールも出さない（未認証のデモで受講生のスクリプトを実行しない。この仕様は変えない）。
 
 - **文書の組み立て**: `buildPreviewDocument()`（純粋関数）が構成に応じて文書を作る。**React 構成**（#475）は `<div id="root">` を置き、自サイトの `public/vendor/react/` から React / ReactDOM（UMD・`package.json` と同じ版）と `@babel/standalone` を絶対 URL で読み込む（opaque origin の `srcDoc` は相対パスを解決できないため。Babel は約 3MB なので iframe を開いたときだけ取得し、Next.js の初期バンドルには入れない）。各 `.jsx` / `.js` を Babel（preset `react`・modules は commonjs）で変換し、小さな `require` で `./X` / `./X.jsx` / `./X.css` / `react` を解決して `App` の default export を `createRoot(#root).render` する（学習者は `index.jsx` を書かない）。提出 CSS は `<style>` に注入しつつ空モジュールとしても登録し、`import "./App.css"` が落ちないようにする。入口は `App.jsx` / `App.js` のほか、Next.js 流の `page.jsx` / `page.js`（Tailwind 演習用。`.css` が一緒にあるときだけ入口として扱う。`page.js` だけの提出は 11・12 回のサーバーコンポーネント演習と同じ名前で、描画できないため React 構成にしない。`export default` を描画する。`next/*` や npm パッケージは使えない）。**提出 CSS のどれかに `@import "tailwindcss"` があるときだけ**、`public/vendor/react/tailwind.browser.js`（`@tailwindcss/browser`・版固定）を読み込み、その CSS を `<style type="text/tailwindcss">` で差し込む（常時読み込むと Tailwind のリセット CSS が 06・07 の React 演習の見た目を変えるため。#489）。クラスの生成は iframe 内の実行時で、`md:` などは iframe の幅で切り替わる。CSS Modules（`.module.css`）は対象外で、`import` しても空モジュールのまま。変換・実行エラーはコンソールへ出す（React 内部のエラーは vendor スクリプトが opaque origin では別オリジン扱いで `Script error.` に伏せられるため、`createRoot` の `onUncaughtError` / `onCaughtError` で受けて出す）。`headPrelude`（コンソールブリッジ）は vendor スクリプトより前に置く。それ以外の構成では `index.html`（無ければ最初の html ファイル）を土台にし、提出に HTML が無くファイル構成が `css` だけで `preview_base_html` があるときはその土台を使い受講生の CSS を `<style>` で差し込む（#351。JS や JS+CSS では土台を使わず、従来どおり空ページにスクリプトを載せる）。提出に HTML があるときは土台より提出を優先する。通常は`<link rel="stylesheet" href="style.css">` / `<script src="main.js">` のように同名ファイルを指す相対参照を `<style>` / `<script>` にインライン展開する。コメント（`<!-- -->`。`<?xml ?>`・`</ x>` などブラウザがコメントとして読み飛ばすものを含む）、タグの属性、インラインの `<script>` と中身をマークアップとして読まない要素（`<style>` / `<title>` / `<textarea>` / `<xmp>` / `<noscript>` / `<noembed>` / `<noframes>` / `<iframe>` / `<plaintext>`）の中は文脈を見て触らない（コメントアウトした `<link>` は展開しない）。`<template>` の中（入れ子を含む）は実行されないため、展開・`defer` の移動・`<head>` の判定を行わない。タグ名は空白・`/`・`>` までとし（`<head-x>` は `<head>` ではない）、終了タグは名前の後の空白・`/` でも終わる（`</script foo>`）。インラインの `<script>` の終わりはブラウザの読み方に合わせ、`<!--` の後に `<script` が来た場合はその次の `</script>` では閉じない（旧式の `<!-- document.write("<script></script>") -->`）。属性値の中の `>` はタグの終わりとみなす（引用符の中を丸ごと読む正規表現は Safari で長いタグに対して一致を返さなくなるため。下記「既知の制約」）。ファイル名は大文字小文字を区別して照合する（ブラウザの挙動に合わせる）。外部 URL・ルートパス・該当ファイルが無い参照は触らない。html が無ければ css / js のみの空ページにする。JS のみの構成で `import` / `export` があるときは、通常の script では SyntaxError になり、`srcDoc` では相対パスも解決できないため、各ファイルを `data:` URL のモジュールにして、依存順に import の指定先を書き換え、`main.js`（無ければ他から import されていないファイル）を `type="module"` で実行する（`data:` 参照元は相対指定を解決できず import map ではエントリしか覆えないため。循環は書き換えず、ブラウザのエラーがコンソールに出る。存在しないファイルへの参照があるときは、読み込み失敗が `window` に届かず無言になり、名前付き import ではリンク段階の構文エラーでファイル名が埋もれるため、モジュールを作らず `Cannot find module` を投げるスクリプトだけを出す）。インライン化する内容中の `</style` / `</script`（スクリプトは `<!--` も）はエスケープし、要素が途中で閉じないようにする。コメントはブラウザと同じ位置で終わる（`<!-->`・`<!--->`・`--!>` も閉じたものとして扱う）。閉じていないコメント・タグ・要素は（ブラウザと同じく）文書の末尾まで続くものとして扱い、展開や差し込みはしない。先頭の doctype（空白・コメントの後）も同じ1回の走査で見つける。走査は入力長に対して線形で、閉じていない構文を大量に含む提出でも閲覧者のタブを固まらせない。`type="module"` は引き継ぎ、`defer` 付きの通常スクリプトは `src` を失って DOM 生成前に走らないよう文書の末尾（末尾が閉じていないコメント・タグ・要素ならその手前）へ移す。ブラウザの `defer` は文書全体の解析後に走るため、`</body>` の後に書かれた要素もその時点で存在する。単一ファイル提出は `code_content` に言語が残らないため、提出履歴では演習の `code_language` で補う。
 - **サンドボックス**: `<iframe sandbox="allow-scripts" srcDoc referrerPolicy="no-referrer">`。**`allow-same-origin` は付けない**（iframe 内のスクリプトが親オリジンの Cookie・Supabase セッション・`/api` に到達できないよう、opaque origin にするため）。`allow-forms` / `allow-popups` / `allow-top-navigation` / `allow-modals` も付けない。**認証 Cookie が付かない直接の理由は `SameSite=Lax`（`@supabase/ssr` の既定。リポジトリ内に上書きは無い）で、opaque origin は iframe からのリクエストを cross-site にして、応答と親 DOM を読めなくする。`srcdoc` 文書の base URL は親と同じなので、`fetch("/api/...")` 自体はアプリのオリジンへ届く。認証 Cookie を `SameSite=None` にする変更を入れるときは、この前提が崩れる（応答は読めなくても副作用のある POST が発火しうる）ため、先にここを見直すこと。**メールテンプレートのプレビュー（`sandbox=""`）より緩いのは、受講生のスクリプト実行を見せるため。親子間の `postMessage` はコンソール表示（下記）の iframe → 親の一方向だけに使う。管理者が受講生のコードを描画する場合も同じ条件。
@@ -752,6 +763,18 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 - **上限**: 1 回の実行で 100 文まで（`SQL_MAX_STATEMENTS`）、1 つの結果は先頭 100 行まで（`SQL_MAX_ROWS`）、1 つのセルは 200 文字まで（`SQL_MAX_CELL_LENGTH`）。準備ができてから 10 秒（`SQL_RUN_TIMEOUT_MS`）で止める。読み込みは 60 秒（`SQL_LOAD_TIMEOUT_MS`）で諦める。結果は React のテキストとして描画し、HTML として解釈しない。Worker からのメッセージは `acceptSqlWorkerMessage()` で形を検証する。
 - **表示場所**: JavaScript のコンソールと同じ。提出フォーム、提出履歴、コンテンツ詳細の「提出内容」（提出履歴は既定で折りたたみ、開いて「実行」を押すまで何も読み込まない）。`/demo` には出さない。
 - **既知の制約**: PGlite の拡張機能（PostGIS など）や、複数の接続・永続化は使えない。実行環境の取得に失敗したとき（オフラインなど）は、その旨をエラーで出す。
+
+**Python の実行（#545）**: 提出ファイルが `python` だけの演習は、「実行」ボタンで、ブラウザの中で Python を動かして、標準出力・標準エラーとトレースバック、matplotlib のグラフ（PNG）を出す（`PythonConsole`。`HtmlPreview` が `isPythonLayout()` で振り分ける。言語が空のファイルは拡張子 `.py` で判定）。実行環境は Pyodide（CPython を WebAssembly にしたもの）で、サーバーには何も送らない。
+
+- **配信**: `public/vendor/pyodide/` に、Pyodide の本体（`pyodide.mjs`・`pyodide.asm.mjs`・`pyodide.asm.wasm`）・標準ライブラリ（`python_stdlib.zip`）・パッケージ一覧（`pyodide-lock.json`）（約 13MB。圧縮して約 6MB）と、パッケージ NumPy・pandas・matplotlib・Beautiful Soup（`beautifulsoup4`）・lxml とその依存の wheel 17 個（約 20MB。wheel は圧縮済みでほぼ縮まない）、matplotlib 用の日本語フォント（Noto Sans JP Regular。約 6MB・OFL）を置く。PGlite と同じく、コミットせず `scripts/vendor-pyodide.sh`（`bun run vendor:pyodide`。`predev` / `prebuild` で自動実行）が用意する（`.gitignore`）。本体は `node_modules/pyodide`（`package.json` で exact）から、フォントは `@expo-google-fonts/noto-sans-jp`（exact）から複製する。npm の `pyodide` にはパッケージが無いため、wheel は同じ版のリリース一式（GitHub Releases の `pyodide-<版>.tar.bz2`。約 340MB）を取得し、スクリプトに固定した SHA-256 と照合したうえで必要な wheel だけを取り出し、各 wheel も `pyodide-lock.json` の SHA-256 と照合する。取り出した wheel は `node_modules/.cache/pyodide-packages/` に置き、次のビルドからは取得しない（Vercel のビルドキャッシュ、CI は `actions/cache`）。版を上げるときは、スクリプトの版と SHA-256 も一緒に直す（ずれるとビルドが止まる）。実行用の `python-worker.js` と README だけコミットする。Python の演習ページで「実行」を押したときだけ取得し、Next.js の初期バンドルには入れない。`.whl` を `proxy.ts` の静的拡張子（`STATIC_FILE_EXTENSIONS` とマッチャー）に足している（足さないと、認証プロキシが wheel の取得を `/login` に飛ばして、パッケージの読み込みが壊れる）。ほかの拡張子（`.mjs` / `.wasm` / `.zip` / `.json` / `.ttf`）は既存のまま。パッケージは自ホストのファイルだけから読み込み、`micropip` や CDN から取得しない（外部へ通信しない）。
+- **実行**: 同一オリジンの Web Worker（`type: "module"`）で動かす。提出ファイルを Worker の作業ディレクトリに同じ名前で書き、`main.py`（無ければ最初のファイル）を `__main__` として実行する（ほかのファイルは `import` できる。名前のない 1 ファイルの提出は `main.py` として扱う。フォルダを含む名前・重複した名前は実行しない。`preparePythonRun()`）。`print` の出力は書き込みのたびに送り、表示は描画フレームごとにまとめる（終わらない繰り返しの前に出した行も見える）。標準エラーとトレースバックは赤で出す。トレースバックは `python main.py` と同じ形にそろえ、実行用の枠組み（runpy など）の行を除く。`input()` は使えない旨のエラーにする（標準入力は扱わない）。`sys.exit()` は途中終了として扱い、エラーにしない（文字列を渡したときはそれを標準エラーに出す）。
+- **パッケージ**: 実行の前に、提出ファイルの `import` を Pyodide の `find_imports` で読み、上の 5 つ（と依存）のうち使うものだけを読み込む（`python-worker.js` の `PACKAGE_BY_IMPORT`。配信するものと揃える）。`import` に出てこないが pandas / Beautiful Soup が内部で使うものは、コードの文字で補う（`IMPLIED_PACKAGES`。pandas の `.plot` / `.hist` / `.boxplot` は matplotlib、`read_html` / `read_xml` は lxml、Beautiful Soup のパーサー指定 `"lxml"` / `"xml"` は lxml。ノートブックの癖で `import matplotlib.pyplot` を書かずに `df.plot()` としても、グラフが出る）。それ以外（`requests`・`openpyxl`・`scipy` など）は取得を試みず、手元の Python と同じく `ModuleNotFoundError` になる。読み込みに失敗したとき（オフラインなど）は、その旨をエラーで出す。読み込み中はパッケージ名を表示する。pandas と pyplot は WebAssembly では import に数秒かかるため、読み込んだ直後に import しておく（受講生のコードはまだ動いていないので、前の実行の影響にはならない）。
+- **表の表示（pandas）**: `display.unicode.east_asian_width` をオンにして、日本語を含む `print(df)` の列をそろえる。表示はテキストのまま（HTML の表にはしない）。
+- **グラフ（matplotlib）**: バックエンドを Agg を使う専用のものにし、`plt.show()` のたびに開いている図を PNG（`bbox_inches="tight"`。ノートブックと同じく、回した目盛りの文字が切れない）にして出力の下に画像で出し、図を閉じる（ウィンドウを閉じたのと同じ扱いで、`show` の後の `savefig` は空の図になる）。実行の終わりに開いたままの図も出す（`savefig` だけのコードでもグラフが見える）。日本語は同梱の Noto Sans JP で描く。既定の sans-serif の先頭に置くほか、講座や一般的な記事がコードの先頭で指定するフォント名（`Meiryo`・`Yu Gothic`・`Hiragino Sans`・`IPAexGothic` など）も、このフォントで描くように登録する（指定したまま □ にならない）。画像は `blob:` URL の `<img>` で表示し、次の実行・「閉じる」・ページを離れるときに破棄する。
+- **毎回、新しい状態から**: 1 つの Worker は 1 回だけ実行し、終わったら `terminate()` する。前の実行の変数・`import`・書き込んだファイルは次に残らない。待ち時間を減らすため、実行が終わると次の Worker を先に起動して Pyodide を読み込ませておく（ページを離れる・「閉じる」で止める）。
+- **上限**: 準備ができてから 10 秒（`PYTHON_RUN_TIMEOUT_MS`）で Worker を止めて、時間切れを表示する。読み込み（パッケージを含む）は 120 秒（`PYTHON_LOAD_TIMEOUT_MS`）で諦める。出力は 1 回の実行で 100,000 文字（`PYTHON_MAX_OUTPUT_LENGTH`）、グラフは 20 枚（`PYTHON_MAX_FIGURES`）・1 枚 5MB（`PYTHON_MAX_FIGURE_BYTES`）まで（Worker 側も同じ数で送るのをやめる）。出力は React のテキストとして描画し、HTML として解釈しない。Worker からのメッセージは `acceptPythonWorkerMessage()` で形を検証する（グラフは PNG の先頭 8 バイトと大きさを確かめる）。
+- **表示場所**: SQL と同じ。提出フォーム、提出履歴、コンテンツ詳細の「提出内容」（提出履歴は既定で折りたたみ）。`/demo` には出さない。
+- **既知の制約**: 使えるのは標準ライブラリと上の 5 つのパッケージ（と依存）だけ。Excel の読み書き（`openpyxl`）、ネットワーク（`requests`・`urllib` での取得、`http.server`）、標準入力、ローカルのファイル（提出していない CSV など）、タイムゾーンのデータベース（`zoneinfo` の `Asia/Tokyo` など。`tzdata` を配信していない）は使えない。`savefig` で書いたファイルは Worker の中に残るだけで、ダウンロードはできない。Pyodide の起動に毎回 1〜2 秒、初回のパッケージの読み込みに数秒〜十数秒かかる（2 回目以降は、先に起動した Worker で隠れることが多い）。
 
 ### 5.5 ヒント表示
 
@@ -774,8 +797,9 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 
 **表示ルール**（純粋関数 `isExerciseRetryInProgress()`）: `retry_started_at` が NULL でなく、最新提出の `submitted_at` が `retry_started_at` 以前なら再挑戦中。新しい提出があれば自動的に再挑戦中でなくなる（提出 API は変更しない。`retry_started_at` をクリアしない）。
 
-- 再挑戦中でない・提出あり: 提出内容・模範回答・最新提出の AI レビューを従来どおり出し、結果ブロックに「再度課題に取り組む」ボタンを置く（`isFullyPublished` のときだけ。未公開プレビューでは API が 403 になるため）。課題提出欄（見出し・入力・提出ボタン）は出さない（#406）。`SubmissionForm` 自体はマウントしたままにし、提出直後のクライアント側 AI レビュー表示が `router.refresh()` で消えないようにする
-- 再挑戦中: 模範回答と AI レビューを描画しない。提出内容は「前回の提出内容を見る」の `<details>`に入れ既定で閉じる。案内文を出す。課題提出欄を出す。`SubmissionForm` の `persistedReviewId` には画面が実際に描画するレビューの id だけを渡す（再挑戦中は null）。再挑戦開始時はクライアント側に残った提出直後のレビュー／成功メッセージも消す（`isRetrying`）
+- 再挑戦中でない・提出あり: 提出内容・最新提出の AI レビューを従来どおり出し、模範回答は `<details>`（「模範回答を見る」）に入れ既定で閉じる。結果ブロックに「再度課題に取り組む」ボタンを置く（`isFullyPublished` のときだけ。未公開プレビューでは API が 403 になるため）。課題提出欄（見出し・入力・提出ボタン）は出さない（#406）。`SubmissionForm` 自体はマウントしたままにし、提出直後のクライアント側 AI レビュー表示が `router.refresh()` で消えないようにする
+- 再挑戦中: 模範回答と AI レビューを描画しない。提出内容は「前回の提出内容を見る」の `<details>`に入れ既定で閉じる。案内文（前回のコードを入れてあること、最初から書き直すときはコード欄下の「初期コードに戻す」（初期コードがない課題では「最初からやり直す」）で戻せること）を出す。課題提出欄を出す。`SubmissionForm` の `persistedReviewId` には画面が実際に描画するレビューの id だけを渡す（再挑戦中は null）。再挑戦開始時はクライアント側に残った提出直後のレビュー／成功メッセージも消す（`isRetrying`）
+- 再挑戦中の編集欄の初期値: 前回の提出コード（`restoreFilesFromPreviousSubmission()`）。同じファイル名の枠に前回のコードを入れ、ファイル名のない1ファイル提出（`code_content`）は、その言語の既定のファイル名の枠があればそこへ、なければ枠が1つのときだけ入れる。一致しない枠と URL 提出は初期コードのまま。ただし提出ファイルの指定が NULL で複数ファイルの演習は、前回に保存されなかった（空にした）ファイルを空で戻す。「初期コードに戻す」は従来どおり初期コードに戻す。前回と同じコードのままでも提出できる（AIレビューを1回使う）
 - 提出が無い演習: 従来どおり最初から課題提出欄を出す。「再度課題に取り組む」ボタンは出さない。`/demo`・未公開プレビューではボタンを出さない
 
 **エンドポイント**: `POST /api/progress/retry`（ボディ `{ contentId }`）
@@ -793,7 +817,7 @@ CodeMirror本体は数百KB規模のため遅延読み込みする（クライ�
 
 ### 6.1 コンテンツ管理
 
-Theme / Phase / コンテンツそれぞれに対してCRUD操作が可能。削除は論理削除（`is_deleted = true`）。行は物理削除せず、`user_progress` / `submissions` / `ai_reviews` の履歴を保持する。コンテンツ種別 `slide` では、PDF ファイルを Supabase Storage（`slides` バケット）にアップロードして `pdf_url` に保存する。テーマのサムネイル画像は Supabase Storage（`thumbnails` バケット）にアップロードして `image_url` に保存する。オブジェクトキーがテーマIDに依存するため、新規作成フォームではアップロードできず、テーマ作成後の編集画面から設定する。
+Theme / Phase / コンテンツそれぞれに対してCRUD操作が可能。削除は論理削除（`is_deleted = true`）。行は物理削除せず、`user_progress` / `submissions` / `ai_reviews` の履歴を保持する。コンテンツ種別 `slide` では、PDF ファイルを Supabase Storage（`slides` バケット）にアップロードして `pdf_url` に保存する。テーマのサムネイル画像は Supabase Storage（`thumbnails` バケット）にアップロードして `image_url` に保存する。オブジェクトキーがテーマIDに依存するため、新規作成フォームではアップロードできず、テーマ作成後の編集画面から設定する。テーマのフォームには「テーマカラー（修了証の色・任意）」（`theme_color`。サムネイルの背景色。13.4節）を置く。カラーピッカーと `#RRGGBB` の入力欄を同期させ、横に修了証の配色の小さな見本を出す。空欄は未設定（既定のパレット）。API（`POST` / `PUT` の `/api/manage/themes[/[id]]`）は前後の空白を除き、`#RRGGBB` 以外を400、空文字と `null` を `null`（未設定）にし、大文字にそろえて保存する（`ThemeColorSchema`。形式の正は `THEME_COLOR_PATTERN`。DB の CHECK と同じ）。`PUT` で省略したときは今の値を変えない。
 
 **採点基準の設定（#305）**: 種別が演習のとき、コンテンツ作成・編集フォームに「採点基準」エディタ（`GradingRubricEditor`）を表示し、要件（名前・説明。最大10件）を追加・並べ替え・削除して `grading_rubric` として保存する。リクエストの `grading_rubric` は `{ requirements: [{ key, name, description }] }`（`version` は受け取らない）で、`null` を送ると基準を削除（墓石にする。下記）、省略すると変更しない。`version` は `updateContent()` が保存済みの値と比較して決め（初回 1、内容が変わった保存のみ +1、変更なしは据え置き）、現在値を取得できなければ更新しない。編集の PUT は、採点基準を送るとき（`null` で削除するときを含む）と演習以外へ種別を変えるときに、画面上の要件が属する版 `grading_rubric_version`（未設定なら `null`）を必須にする。保存直前に読んだ版と違えば書き込む前に 409 を返す。成功した更新は保存した版を `grading_rubric_version` で返し、フォームは次の保存でそれを送る。画面に残ったまま props が新しい基準に変わっても、表示中の要件を差し替えない限りその版には追従しない。項目を省略した内部呼び出しは、読んだ版だけでロックする。要件の `key`（`r{n}`）は基準内で再利用しない: 発行済みの最大番号 `max_key_number` も `updateContent()` / `createContent()` が導出して保存し（クライアントは送らず、下がらない）、エディタは削除・置換した行の番号も飛ばして採番する（基準を削除する、または演習以外へ種別変更すると、基準は `NULL` ではなく `requirements` が空の「墓石」になる（#344）。墓石の `version` は消す前の版 + 1、`max_key_number` は引き継がれ、再設定後は墓石の版 + 1 から始まり発行済みの `r{n}` は再利用できない。これで「版 + キー」が別の要件を指さない。一括種別変更など `NULL` を直接書く経路もトリガー `keep_grading_rubric_tombstone()` が墓石に置き換える。`NULL` は一度も設定されていない行だけ。墓石は基準なしとして扱い、AIレビューは参考採点になる）。一覧（`/manage/contents`）には採点基準の有無とバージョンを表示する（墓石は「未設定」）。
 
@@ -806,6 +830,8 @@ Theme / Phase / コンテンツそれぞれに対してCRUD操作が可能。削
 **管理ルート**: コンテンツ管理はタブで分割する（7.3節）。構成ツリーは `/manage/contents`（テーマ→フェーズ→コンテンツ。`buildContentTree()`）、一括操作は `/manage/contents/bulk`（`ContentsFilterBar` + `ContentsTable`）。`/manage/themes`・`/manage/phases` の一覧は構成ツリーへリダイレクトする。編集・削除・新規の個別ページ（`/manage/{themes,phases,contents}/new`・`[id]/edit`・`[id]/delete`）は残す。ツリー上のダイアログから親を事前選択した状態で作成できる。一括操作タブからの編集・削除は `?from=bulk` で戻り先を一括操作にする。テーマのサムネイルは作成後の編集画面からのみ設定する（本節冒頭のとおり）。
 
 **お試し公開の設定**: コンテンツ作成・編集フォーム（`/manage/contents`）にチェックボックス「お試しユーザーにも公開する」を設け、`is_open_to_trial` を設定する。デフォルトは未チェック（`false`）で、種別を問わず全コンテンツで設定可能（2.6参照）。
+
+**付録の設定（#556）**: フェーズの作成・編集フォームにチェックボックス「付録にする（修了の対象外）」を設け、`is_appendix` を設定する（既定は未チェック。API は `PhaseCreateSchema` / `PhaseUpdateSchema` の任意の真偽値）。構成ツリーでは付録のフェーズに「付録」バッジを出す（並びは `display_order` のまま）。公開後に切り替えると受講生の進捗率が変わる（付録 → 本編にすると、修了済みの人が100%未満に戻る）ため、フォームに注意書きを出す。発行済みの修了証は取り消さない（13.1節）
 
 **概要欄の設定**: コンテンツ種別が動画・スライド・クイズの場合のみ、コンテンツ作成・編集フォームに概要入力欄（Markdown・任意。クイズでは「導入文」）を表示し、`description` として保存する（`exercise_instructions` / `hint` と同じ、未入力なら `null` で保存するパターン）。テキスト・演習では表示せず、`description` は常に `null` として送信する。
 
@@ -1129,7 +1155,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `resolveWeeklyFunnelWeeks()` �
 
 | パス | 画面名 | 表示内容 |
 |:--|:--|:--|
-| `/login` | ログイン画面 | サービス名、利用規約・プライバシーポリシーへの同意チェックボックス（未チェックの間は「Googleでログイン」ボタンを無効化）、「Googleでログイン」ボタン、ログインカード列の末尾（注意書き・規約リンクの下。PC幅は左の4つの仕組みカードの下端より少し上）に手を振るシンラビ（`LOGIN_MASCOT`、装飾扱いで `alt=""`）と名前「Web技術講師 シンラビちゃん」、サービス説明。`error=registration_failed` のときは登録失敗メッセージ、`error=terms_required` のときは同意要求メッセージを表示（未知の `error` 値は何も出さない）。LP の内容を引用したサービス紹介ブロック（キャッチコピー、サブコピー、料金1行、「デモを試す」（`/demo` への内部リンク）・「無料体験会に申込む」・「サービス紹介を見る」（LP）の3リンク、4つの仕組みの順）と、「学習の流れ」（動画・解説記事・課題提出・AIレビュー・復習リストの5ステップを縦並びで、各画面を大きく表示する。`public/images/login/` のスクリーンショット。AIレビュー・復習リストの画面は結果部分だけを切り出し、提出内容・模範回答のコードを含めない。動画のステップは、`LOGIN_CLIP_URL`（`app/constants/login.ts`）に YouTube の切り抜き動画の URL があれば `YouTubeEmbed`（クリックで読み込む）、空ならサムネイル画像だけを出す（現在は切り抜き動画の URL を設定済み）。見出しの説明文で復習リスト（課題でつまずいた点）にも触れる。復習リストの仕様は15章）を表示する。料金1行は、決済機能が有効（`isStripeEnabled()`）なときだけ月額（`DISPLAY_MONTHLY_PRICE_JPY` から `formatMonthlyJpyPrice()` で導出）を含め、無効時は「まずは無料で始められます。」のみとする（登録後に `/upgrade` で申し込めない料金をうたわないため）。未認証画面から Stripe Price は取得せず、実請求額の確認と法定表示は `/upgrade` が担う。料金改定時は Stripe Price・定数・LP をそろえて更新する。紹介ブロックのリンクは枠線・文字リンクに留め、ログインを主導線とする。PC幅（`lg` 以上）は左に紹介・右にログインカードの2カラムで、学習画面はその下に5ステップの縦並び（中央寄せ、最大幅 `max-w-3xl`）、スマホ・タブレット幅（`lg` 未満）はログインカード → 紹介 → 学習画面の縦積みで、ログインカードは `max-w-md`、紹介は `max-w-xl` に幅を制限する。配色・書体は LP に合わせ、`.login-theme`（`app/globals.css`）でこの画面だけセマンティックトークンを上書きする（他の画面の配色は変えない）。常にライト表示（OS設定に連動しない）。 |
+| `/login` | ログイン画面 | サービス名、利用規約・プライバシーポリシーへの同意チェックボックス（未チェックの間は「Googleでログイン」ボタンを無効化）、「Googleでログイン」ボタン、ログインカード列の末尾（注意書き・規約リンクの下。PC幅は左の4つの仕組みカードの下端より少し上）に手を振るシンラビ（`LOGIN_MASCOT`、装飾扱いで `alt=""`）と名前「Web技術ナビゲーター シンラビちゃん」、サービス説明。`error=registration_failed` のときは登録失敗メッセージ、`error=terms_required` のときは同意要求メッセージを表示（未知の `error` 値は何も出さない）。LP の内容を引用したサービス紹介ブロック（キャッチコピー、サブコピー、料金1行、「デモを試す」（`/demo` への内部リンク）・「無料体験会に申込む」・「サービス紹介を見る」（LP）の3リンク、4つの仕組みの順）と、「学習の流れ」（動画・解説記事・課題提出・AIレビュー・復習リストの5ステップを縦並びで、各画面を大きく表示する。`public/images/login/` のスクリーンショット。AIレビュー・復習リストの画面は結果部分だけを切り出し、提出内容・模範回答のコードを含めない。動画のステップは、`LOGIN_CLIP_URL`（`app/constants/login.ts`）に YouTube の切り抜き動画の URL があれば `YouTubeEmbed`（クリックで読み込む）、空ならサムネイル画像だけを出す（現在は切り抜き動画の URL を設定済み）。見出しの説明文で復習リスト（課題でつまずいた点）にも触れる。復習リストの仕様は15章）を表示する。料金1行は、決済機能が有効（`isStripeEnabled()`）なときだけ月額（`DISPLAY_MONTHLY_PRICE_JPY` から `formatMonthlyJpyPrice()` で導出）を含め、無効時は「まずは無料で始められます。」のみとする（登録後に `/upgrade` で申し込めない料金をうたわないため）。未認証画面から Stripe Price は取得せず、実請求額の確認と法定表示は `/upgrade` が担う。料金改定時は Stripe Price・定数・LP をそろえて更新する。紹介ブロックのリンクは枠線・文字リンクに留め、ログインを主導線とする。PC幅（`lg` 以上）は左に紹介・右にログインカードの2カラムで、学習画面はその下に5ステップの縦並び（中央寄せ、最大幅 `max-w-3xl`）、スマホ・タブレット幅（`lg` 未満）はログインカード → 紹介 → 学習画面の縦積みで、ログインカードは `max-w-md`、紹介は `max-w-xl` に幅を制限する。配色・書体は LP に合わせ、`.login-theme`（`app/globals.css`）でこの画面だけセマンティックトークンを上書きする（他の画面の配色は変えない）。常にライト表示（OS設定に連動しない）。 |
 | `/rejected` | 却下画面 | 却下メッセージ、問い合わせ案内、ログアウトボタン。常にライト表示（OS設定に連動しない） |
 
 承認待ち専用画面（`/pending`）は設けない。お試しユーザーはホームを含む通常画面にアクセスでき、承認待ちであることはアプリ内バナーで通知する（2.6参照）。`/pending` へのアクセスは `/` にリダイレクトする。
@@ -1143,6 +1169,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `resolveWeeklyFunnelWeeks()` �
 - `/upgrade`: ステータス別の出し分け。設定の「プラン」入口とお試し導線から全認証ユーザーがアクセス可能（2.11・#394）
 - `/upgrade/success`: Checkoutから戻った直後の決済確認・完了表示（2.11）
 - `/certificates` / `/certificates/[id]`: 修了証の一覧と表示（本登録の member のみ。13章）
+- `/playground` / `/playground/t/[slug]`: コードを試す（ひな形のリンク）。18章
 - `/review-list`: 復習リスト（未克服 / 克服済み。`role = member` のみ。15章）
 - `/announcements` / `/announcements/[id]`: お知らせの一覧（未読表示。サイドナビ「お知らせ」に未読件数のバッジ）・詳細（開くと既読を記録）（11章）
 - `/settings`: プロフィール・通知・プランの**同じ大きさの3タイル**（#420。#409 の1カード構成を置き換え）。各タイルに現在値を出し、プロフィール／通知はモーダルで編集、プランは `/upgrade` へ遷移する（入口ラベルは「プランの確認・変更」。#394）。通知タイルは送り先と案内メールの配信オン／オフを要約し、確認待ちがあるときはタイル上でも分かる。通知モーダルに `NotificationEmailForm`・`EmailPreferencesForm`・停止できる／できないメールの説明・プライバシーポリシーへのリンクを入れる。案内メールは配信状態（配信中 / 停止中と停止日時）の確認と停止・再開（10.8節）。各フォームの保存は項目ごとに独立したまま。モーダルは Radix Dialog（Esc・フォーカストラップ・タイトル／説明）。サイドナビのログアウトの上に「設定」として全ロールへ表示する。表示名は `users.display_name` の1つを画面・管理画面・修了証で共用する（修了証用の氏名は別に持たない）。画面は本人の行を通常クライアントで SELECT して入力欄に出し、保存は `PATCH /api/settings/profile`（`{ "displayName": string }`）で行う。`getServerAuth()` で本人を特定し、未認証 401・`userId` なし 403・`active` / `trial` 以外（`rejected` を含む）403・検証失敗 400。更新は `updateUserDisplayName()` が service_role で本人の行の `display_name` だけを書く（RLS に本人 UPDATE は足さない。ボディの `role` や `userId` は書かない）。前後の空白を除いて空でないこと、`DISPLAY_NAME_MAX_LENGTH`（50）以内、改行などの制御文字を含まないこと。ゼロ幅スペースや双方向制御などの書式文字は保存前に除き（絵文字の ZWJ は、他に文字があるときだけ残す）、除いた結果が空なら空として拒否する。画面は同じ `parseDisplayName()` で拒否する。保存後は `router.refresh()` でサーバー描画の表示名を取り直す。修了証には発行時点の名前が印字され、発行済みの修了証には反映されない（13.2節）
@@ -1154,7 +1181,7 @@ RPC `get_weekly_funnel(weeks int)`（アプリは `resolveWeeklyFunnelWeeks()` �
 
 サイドナビ（`SideNav`）は管理系を次の2グループに分ける（各グループ内は `ManageGroupNav` のタブ）:
 
-- **コンテンツ管理**（入口 `/manage/contents`）: 構成ツリー（`/manage/contents`）とコンテンツ一括操作（`/manage/contents/bulk`）。テーマ・フェーズの一覧URLは構成ツリーへリダイレクトする。サイドナビのハイライトは一括操作中も「コンテンツ管理」
+- **コンテンツ管理**（入口 `/manage/contents`）: 構成ツリー（`/manage/contents`）、コンテンツ一括操作（`/manage/contents/bulk`）、コードを試す ひな形（`/manage/playground-templates`。18.3節）。テーマ・フェーズの一覧URLは構成ツリーへリダイレクトする。サイドナビのハイライトは一括操作中も「コンテンツ管理」
 - **受講生管理**（入口 `/manage`）: ダッシュボード（`/manage`）、提出一覧（`/manage/submissions`）、フィードバック（`/manage/feedbacks`）、お知らせ（`/manage/announcements`。URLは据え置き。ルートグループだけ `(students)` 配下）。受講生進捗（`/manage/students`）は admin のみタブ表示（6.2節）。お知らせ表示中のサイドナビハイライトは「受講生管理」
 
 管理者専用のユーザー管理・メール通知は従来どおり `/admin/users`・`/admin/emails`（7.4節）。
@@ -1571,7 +1598,7 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 ### 13.1 発行条件
 
 - **対象**: `status = active` かつ `role = member`（`isCertificateEligible()`）。コミュニティ会員・一般有料会員とも対象。お試しユーザー（`trial`）、admin / maintainer には発行しない
-- **条件**: そのテーマ配下の**公開中コンテンツ（`is_published = true AND is_deleted = false`、親のフェーズ・テーマも公開）すべて**について `user_progress.is_completed` が true。採点基準のある演習（空の墓石を含む。URL のみは除く）の完了は AI レビューの合格で記録する（4.1節）。公開コンテンツが0件のテーマは修了にならない（`isThemeCompleted()`）。演習は完了に加えて次を満たす（`app/lib/certificate-eligibility.ts`。点数は再計算しない）
+- **条件**: そのテーマ配下の**公開中コンテンツ（`is_published = true AND is_deleted = false`、親のフェーズ・テーマも公開）すべて**について `user_progress.is_completed` が true。採点基準のある演習（空の墓石を含む。URL のみは除く）の完了は AI レビューの合格で記録する（4.1節）。公開コンテンツが0件のテーマは修了にならない（`isThemeCompleted()`）。付録のフェーズ（`is_appendix = true`）のコンテンツは分母にも分子にも入れない（4.2節。付録が未読でも本編を終えれば修了。本編が0件で付録だけ公開されたテーマは修了にならない）。付録のコンテンツの完了・提出・AI レビューは発行判定と画面通知（13.7節）の契機にしない（本編がすでに100%でも、付録の完了で修了ダイアログを出し直さない）。演習は完了に加えて次を満たす（`app/lib/certificate-eligibility.ts`。点数は再計算しない）
 
 | 種別 | 追加条件 |
 |:--|:--|
@@ -1615,7 +1642,12 @@ Resend でアカウントを作成して送信ドメイン（`future-tech-associ
 - 「印刷 / PDF で保存」ボタンは `window.print()` を呼ぶだけ（PDF 生成ライブラリは使わない）
 - 修了証のページだけが `@page { size: A4 landscape; margin: 0 }` を持つ（ページ内の `<style>`）。印刷時はサイドナビ・パンくず・ボタンを隠し（`print:hidden`）、シートを 297mm × 209mm に固定して A4 横1枚に収める
 - シートはテーマ（ライト・ダーク）に依存しない固定配色（白地・濃色の文字）で、文字サイズはシート幅の `cqw` 単位にして、画面と印刷で同じ比率にする。スマホ幅ではシートの最小幅（640px）を保って横スクロールにする（文字が潰れないように）。背景色も印刷する（`print-color-adjust: exact`）
-- 配色は白から淡い色へのグラデーションで（`theme_id` 1 は従来のインディゴ・ミント）、紙吹雪の飾りと右下のシンラビ（`CERTIFICATE_MASCOT`。お祝い画像の800px版。全テーマ共通）を重ねる。**アクセント色（グラデーション・枠線・見出し）はテーマごとに変える**（#524）。`getCertificatePalette(theme_id)`（`app/lib/certificate-palette.ts`）が固定の12種のパレットを `theme_id - 1` の剰余で引く（13番目以降のテーマは循環して色がかぶる。テーマ数が増えたらパレットを足す。足しても、足す前のパレット数以下の `theme_id` の色は変わらないが、すでに循環したテーマ（`theme_id` が足す前のパレット数を超えるもの）は発行済みの修了証も含めて色が変わるため、循環が始まる前に足す）（`theme_id` 1 が従来の配色）ため、テーマ追加時の設定は不要。表示名でなく `theme_id` で決めるので、テーマ名を変えても色は変わらない。パレットの Tailwind クラスはリテラルで書く（組み立てるとビルドに出力されない）。右上には運営元を示す元の青いアイコン（`CERTIFICATE_LOGO_SRC`。`public/images/certificate/logo.png`。PWA アイコンのシンラビ版とは別ファイルで、修了証では運営元を強調する）を置く。画像は本文・証明番号とは重ならない位置に置く
+- デザインは賞状風（#526）。中心が白で外周がテーマ色の淡い紙に、外周だけに見える地紋、テーマ色の太い額縁と金の細線、四隅の金飾りを置く。「修了証」と本文は明朝体（Noto Serif JP。`next/font` で修了証のページだけ読み込み、preload しない）、英字の副題は Cormorant Garamond。下段は左に発行日（「2026年11月15日」の形。`formatDateLong()`）・証明番号・サービス名・運営団体名、中央に金のロゼット（勲章）、右下にシンラビ（`CERTIFICATE_MASCOT`。お祝い画像の800px版。全テーマ共通）。金は全テーマ共通で、淡い色・濃い色のどちらのテーマでも賞状らしく見せる。受講者名は長さに応じて3段階に縮め（12文字以下・20文字以下・それ以上）、行の長さをそろえて折り返し、「殿」は名前の最後の1文字と同じ行に置く。テーマ名が24文字を超えると本文を小さくして、本文がロゼットとシンラビに重ならないようにする。シートの描画は `CertificateSheet`（`app/(authenticated)/certificates/[id]/CertificateSheet.tsx`）
+- **アクセント色（紙の外周・地紋・額縁・見出し・副題とテーマ名・ロゼットの中心とリボン）はテーマごとに変える**（#524・#557）。`resolveCertificateColors(theme_id, theme_color)`（`app/lib/certificate-palette.ts`）が決め、色は動的なので Tailwind のクラスではなくインラインの `style` で当てる:
+  - **テーマカラー（`learning_themes.theme_color`）があるとき**: サムネイル画像の背景色として `/manage` で登録した色から、色相と彩度（上限 85%）だけを取り、明度は役割ごとに固定して作る（`buildCertificateThemeColors()`。紙の外周 97%、地紋 82%、額縁 25%、副題・テーマ名 40%、見出し 15%）。サムネイルの色は淡い色から黒に近い色まで幅があり、元の明度のままでは淡い色で文字が読めず、濃い色でシートが暗くなるため。黄・黄緑は同じ明度でも明るく見えるので、見出し・副題・額縁は紙の外周の色に対するコントラスト比（見出し 7、副題 4.5、額縁 3 以上。`CERTIFICATE_MIN_CONTRAST`）を満たすまで暗くする
+  - **テーマカラーが無い・形式外・テーマが読めないとき**: `getCertificateFallbackColor(theme_id)` が固定の12色（`CERTIFICATE_FALLBACK_COLORS`）を `theme_id - 1` の剰余で引き、上と同じ方法で作る（`theme_id` 1 は従来のインディゴ。13番目以降のテーマは循環して色がかぶる。色は末尾に足すだけにする。途中に足す・消すと、すでに循環したテーマの色が発行済みの修了証も含めて変わる）。表示名でなく `theme_id` で決めるので、テーマ名を変えても色は変わらない
+- テーマカラーは、ページを開くたびに受講生のセッション（通常クライアント・RLS）でテーマの行から読む（`fetchCertificateThemeColor()`。service_role は使わない）。発行後にテーマが非公開・論理削除されて読めないときは、上のパレットに戻る。**色はスナップショットにしない**（`certificates` に保存しない）。テーマカラーを直すと、発行済みの修了証の色も変わる。テーマ名・受講者名（13.2節のスナップショット）と違い、色は証明の内容ではなく見た目のため
+- 右上には運営元を示す元の青いアイコン（`CERTIFICATE_LOGO_SRC`。`public/images/certificate/logo.png`。PWA アイコンのシンラビ版とは別ファイルで、修了証では運営元を強調する）を置く。画像・ロゼットは本文・証明番号とは重ならない位置に置く
 
 ### 13.5 共有
 
@@ -1652,15 +1684,15 @@ X 向けの共有リンクの詳細：本文は「『{テーマ名}』を修了�
 
 - **マニフェスト**（`app/manifest.ts`）: `name` / `short_name` は Sinlab Study、`start_url` は `/`、`display` は `standalone`。`theme_color` / `background_color` は `app/constants/pwa.ts` の sRGB（`globals.css` の oklch トークンの代替。マニフェストは oklch を受けない）。アイコンは 192px・512px を `purpose: any`（`/icons/icon-*.png`）と `purpose: maskable`（`/icons/icon-maskable-*.png`。余白つき別ファイル）の両方で載せる（`maskable` だけだと Chrome がインストール可能と判定しない）。`app/apple-icon.png`（180px）と `metadata.appleWebApp`、`viewport.themeColor`（ライト・ダーク）を付ける
 - **アイコン**: ナビゲーター・シンラビのイラスト（青空背景・Sinlab Study ロゴ入り）。(1) 通常版 → `public/icons/icon-192.png` / `icon-512.png`（PWA `any`・Web Push）、`app/apple-icon.png`（180px）。元絵の角丸の外（白）を背景色で埋めた全面塗りで、角丸はOS側のマスクに任せる。(2) 小サイズ版 → `app/icon.png` / `public/icon.png`（132px。ブラウザのタブのみ。サイドバー・`/demo`・ログイン画面のヘッダーは、統一感を優先して通常版 `/icons/icon-192.png`。24〜28px では全身・文字は判読しづらいが、ブランドの一貫性のため許容する）。タブの 32px は全身だと潰れるため、顔まわり（耳・キャップ・表情。ロゴや文字は入れない）を切り出す。(3) maskable 版 → `icon-maskable-192.png` / `icon-maskable-512.png`（イラストを 66% に縮小して中央に置き、縁をぼかして余白（元絵の上下端の色のグラデーション）になじませる。絵の輪郭（ロゴ・耳先）が直径 80% の円形安全領域に収まるよう縮小率を決めている）
-- **サービスワーカー**（`public/sw.js`）: `/_next/static/*` は cache-first。アイコン（`/icon.png`・`/apple-icon.png`・`/icons/`）は URL にハッシュが無いので network-first（成功時にキャッシュを更新し、オフライン時だけキャッシュを使う）。`/offline` は install でキャッシュする。キャッシュ名（`STATIC_CACHE`）はバージョン付きで、ルール・オフライン HTML・アイコン差し替え時にバンプする。`activate` でそれ以外の名前のキャッシュを削除する。ナビゲーションは常にネットワーク優先で、失敗時だけそのキャッシュ（「オフラインです」）を返す。認証配下の HTML と `/api/*` はキャッシュしない（降格・却下・ロックの反映が遅れないようにする）。`/vendor/`（React プレビュー・SQL の実行用。5.4.7）も cache-first 対象外（差し替えが古いキャッシュに残らない）。`next.config.ts` の `headers()` で `/sw.js` に `Cache-Control: no-cache` と `Service-Worker-Allowed: /` を付ける。登録は `ServiceWorkerRegistration` が本番ビルドだけで行う
-- **プロキシ**: `shouldSkipMiddleware()` は上の 4 パスを完全一致でのみ通す。`/offline/anything` のような配下は通さない。うち `/manifest.webmanifest`・`/sw.js`・`/apple-icon.png` は拡張子マッチでも通るが、インストールに必要なパスの許可リストとして明示する（増やさない）。`/vendor/react/*.js` と `/vendor/pglite/*`（`.js` / `.wasm` / `.data`）は静的拡張子マッチでスキップされるため許可リストには足さない。環境変数欠落・例外・status null の `/login` へのフェイルクローズは変えない
+- **サービスワーカー**（`public/sw.js`）: `/_next/static/*` は cache-first。アイコン（`/icon.png`・`/apple-icon.png`・`/icons/`）は URL にハッシュが無いので network-first（成功時にキャッシュを更新し、オフライン時だけキャッシュを使う）。`/offline` は install でキャッシュする。キャッシュ名（`STATIC_CACHE`）はバージョン付きで、ルール・オフライン HTML・アイコン差し替え時にバンプする。`activate` でそれ以外の名前のキャッシュを削除する。ナビゲーションは常にネットワーク優先で、失敗時だけそのキャッシュ（「オフラインです」）を返す。認証配下の HTML と `/api/*` はキャッシュしない（降格・却下・ロックの反映が遅れないようにする）。`/vendor/`（React プレビュー・SQL と Python の実行用。5.4.7）も cache-first 対象外（差し替えが古いキャッシュに残らない）。`next.config.ts` の `headers()` で `/sw.js` に `Cache-Control: no-cache` と `Service-Worker-Allowed: /` を付ける。登録は `ServiceWorkerRegistration` が本番ビルドだけで行う
+- **プロキシ**: `shouldSkipMiddleware()` は上の 4 パスを完全一致でのみ通す。`/offline/anything` のような配下は通さない。うち `/manifest.webmanifest`・`/sw.js`・`/apple-icon.png` は拡張子マッチでも通るが、インストールに必要なパスの許可リストとして明示する（増やさない）。`/vendor/react/*.js`・`/vendor/pglite/*`（`.js` / `.wasm` / `.data`）・`/vendor/pyodide/*`（`.js` / `.mjs` / `.wasm` / `.zip` / `.json` / `.whl` / `.ttf`）は静的拡張子マッチでスキップされるため許可リストには足さない。環境変数欠落・例外・status null の `/login` へのフェイルクローズは変えない
 - **インストール案内**: ホーム（`/`）の `InstallPrompt`。`display-mode: standalone` でも `navigator.standalone` でもない、かつモバイル UA（iPadOS 13+ の Macintosh + タッチを含む）、かつ閉じていない（`localStorage`。失敗は無視）ときだけ出す。`beforeinstallprompt` はルート layout のクライアントモジュールで先行捕捉し、`/` 以外で発火してもホームで使える。iOS は「共有 → ホーム画面に追加」の手順。Android はイベントがあるときボタンで `prompt()` を呼び、無いときはブラウザメニューからの追加手順を出す。`prompt()` の拒否や OS ダイアログのキャンセルでは閉じた扱いにしない。インストール済みでは出さない
 
 ### 14.2 Web Push
 
 - **環境変数**: `NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY`（購読に使う公開鍵）/ `WEB_PUSH_VAPID_PRIVATE_KEY`（サーバーのみ。レスポンス・ログ・クライアントバンドルに出さない）/ `WEB_PUSH_SUBJECT`（`mailto:`）。いずれか欠ける、または subject が `mailto:` でないときは機能全体を無効にする（購読ボタンを出さず、送信もしない）。生成は `bunx web-push generate-vapid-keys`
 - **購読 API**: `POST /api/push/subscriptions` は `endpoint` と `keys.p256dh` / `keys.auth` を upsert し、`disabled_at` を NULL に戻す。`endpoint` は `https:` かつ既知のプッシュサービスホストだけを許す。1 ユーザーあたりの有効購読（`disabled_at IS NULL`）は `MAX_PUSH_SUBSCRIPTIONS_PER_USER` まで（超過は 409。404/410 で無効化した行は上限に数えない）。`DELETE` は endpoint を指定して本人の行だけ消す。認証は `requireLearnerApi()`（`getServerAuth()`）。未認証 401、`rejected` 403、スキーマ不正 400。書き込みは service_role で、`user_id` は認証済みの本人に固定する。同じ endpoint が別アカウントに紐づいていても、端末の購読として呼び出した本人へ付け替える。ログアウト時（サイドナビ・却下画面）は端末の購読解除を試みる（DELETE に短いタイムアウト）
-- **購読 UI**: ホームのインストール案内の隣。通知許可はボタン押下でのみ要求する。iOS で standalone でないときは「ホーム画面に追加すると通知を受け取れます」と出し、ボタンは出さない。既存のブラウザ購読があるときはマウント時に POST で再登録し、表示中アカウントへ付け替える
+- **購読 UI**: ホームのインストール案内の隣と、設定の通知モーダル（`placement="settings"`）。ホームは購読を促す場面だけに出し、未購読と iOS の案内のときだけ表示する（購読中・拒否済み・未対応・状態の確認中は非表示）。購読の開始・停止と状態の確認は設定の通知モーダルから常にできる（拒否済みはブラウザの設定で許可が必要）。設定の通知モーダルで停止した端末には `localStorage`（`sinlab:push-home-optout`）に印を残し、その端末ではホームの購読案内を再表示しない（再開は設定画面からだけ。再購読で印を消す。保存できない環境では案内を出す側に倒す。iOS の案内は対象外）。通知許可はボタン押下でのみ要求する。iOS で standalone でないときは「ホーム画面に追加すると通知を受け取れます」と出し、ボタンは出さない。既存のブラウザ購読があるときはマウント時に POST で再登録し、表示中アカウントへ付け替える
 - **送信**: `sendPushToUser()`。VAPID 設定のあと `push_logs` へ INSERT して claim する。`UNIQUE (user_id, kind, reference_key)` 違反なら送らない。有効な購読すべてに `{ title, body, url }` だけを送る（個人情報は入れない。`url` はアプリの相対パス）。`sendNotification` にはタイムアウトを付ける。定期配信から渡す時間上限は購読ループでも見る。404 / 410 / 許可外ホストは `disabled_at` を記録する。1件も送れなければ claim を削除して再試行可能にする。失敗は握りつぶし、承認・Cron・お知らせの結果を変えない
 - **種別**: `approved`（`approveUser()` 成功時）/ `inactivity_reminder` / `trial_nurture` / `announcement`（`send_email = true` の一斉送信だけ。`push_sent_at` が未完了、またはその実行中に完了したものだけを `published_at` 順にページングして送る。メール完了印とは独立。それより前にプッシュ完了したお知らせは購読済み・新規購読の受講生へ送らない。メール一斉が終わり、かつ時間打ち切り・送信失敗（claim 解放）の対象が無いお知らせだけ `push_sent_at` を付ける。`push_enabled` がオフのあいだも、メール完了済みのお知らせには `push_sent_at` を打って後から ON にしたときの一斉送信を防ぐ）。`weekly_digest` / `signup` / `upgraded` / 解約系は送らない。有効・無効は `email_kind_settings.push_enabled`（既定 false。`/admin/emails` のトグル）。送る日・曜日はメールと同じ列で、プッシュ用の定数や別上限は持たない。メールの `email_opt_out_at` と全体スイッチはプッシュに適用しない。定期実行は `runEmailDigest()` のあとで送り、対象は有効購読のあるユーザーに絞り、所要時間の上限（`PUSH_DIGEST_TIME_BUDGET_MS`）とログを出す
 - **サービスワーカー**: `push` は `showNotification`、`notificationclick` は既存タブを `focus` したあと `navigate` し、`navigate` が無い・null・reject のときは `openWindow`。通知の URL をキャッシュしない
@@ -1702,7 +1734,7 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 
 ### 15.4 画面
 
-- **`/review-list`**: サイドナビ「復習リスト」（`role = member` のみ）。未克服 / 克服済みタブ。各項目にコンテンツ名（リンク）、要件名、AI コメント（最新）、一言メモ、「理解した」。現在の未克服・克服済みに無い `requirement_key` のメモは「メモのみ（以前のレビュー）」に出す（`estimated` 置き換え後の orphan）。メモありのコンテンツ（自由記述）も表示
+- **`/review-list`**: サイドナビ「復習リスト」（`role = member` のみ）。未克服 / 克服済みタブ（シンラビ AI チャットで保存した回答は「シンラビに聞いたこと」タブ。17.7節）。各項目にコンテンツ名（リンク）、要件名、AI コメント（最新）、一言メモ、「理解した」。現在の未克服・克服済みに無い `requirement_key` のメモは「メモのみ（以前のレビュー）」に出す（`estimated` 置き換え後の orphan）。メモありのコンテンツ（自由記述）も表示
 - **コンテンツ詳細**: `role = member` のときだけ、`AIReviewDisplay` の `partial` / `unmet` 行に「復習リストに追加されました」とメモ欄、下部に「学習メモ」を出す（admin / maintainer には出さない）
 - **ホーム**: `isLearnerRole()` のときだけ、未克服が 1 件以上なら「復習リストに N 件」を 1 行で表示（大きなカードは増やさない）。件数用のレビュー取得はホーム学習データと並行で開始する
 
@@ -1740,3 +1772,131 @@ AI レビューで指摘された「部分的 / 未達成」の要件を、受�
 ### 16.4 スコープ外（段階1）
 
 投稿者への自動返信メール、画像添付、公開ボード、GitHub イシュー自動作成（段階2）。
+
+## 17. シンラビに相談（AIチャット。#569 段階1）
+
+記事・演習の画面で、全テーマのナビゲーター「シンラビ」にチャットで質問できる。シンラビは、いま見ているコンテンツの内容を文脈として答える。生成AIの費用は回数に比例するため、プランごとに回数の上限を設ける。会話の本文は DB に保存しない。
+
+### 17.1 有効・無効
+
+`AI_CHAT_ENABLED === "true"` のときだけ有効（`isAiChatEnabled()`。`app/constants/ai-chat.ts`。フェイルクローズ）。無効時は画面に入口を出さず、`POST /api/ai-chat`・`GET /api/ai-chat/usage`・`POST /api/ai-chat/saved-notes` は 503。保存済みの回答の表示と削除（`DELETE /api/ai-chat/saved-notes`）は無効時も続ける。
+
+### 17.2 対象と回数制限
+
+| 区分 | 使えるか | 上限（初期値） |
+|:--|:--|:--|
+| 有料会員（`status = active`。admin / maintainer を含む） | 使える | 1日 20 回（全コンテンツ合計、JST 0時リセット） |
+| お試し（`status = trial`） | お試し公開のコンテンツだけ（RLS で絞られる） | 通算 5 回（リセットなし） |
+| それ以外 | 使えない（403） | — |
+
+- 対象のコンテンツ種別は `text`（記事）と `exercise`（演習）だけ（`AI_CHAT_CONTENT_TYPES`）。動画・スライドは文脈（台本）が DB に無いため、クイズは AI が代わりに解く経路を作らないため対象外（400）。
+- 1回 = 質問1つ（Gemini 呼び出し1回）。上限値は `ai_chat_settings`（1行。[データベース設計書](./database.md) 3.28節）が唯一の真実で、`AI_CHAT_LIMITS` はその初期値と、読めない・範囲外のときの代替値。範囲は `AI_CHAT_LIMIT_BOUNDS`（DB の CHECK と同じ）。管理者が `PUT /api/admin/ai-chat-settings`（`requireAdminApi()`）で変え、次の質問から反映される（キャッシュしない）。
+- 判定と枠の確保は RPC `claim_ai_chat()`（`claimAIChat()`。ユーザー単位の advisory lock の中で数えて `pending` 行を INSERT）で 1 トランザクションに行い、同時に送られても上限を超えない。同じユーザーの `pending` 行（60秒以内）があるあいだは次の質問を受け付けず `busy` を返す（前の回答が返るまで次を送れない。別タブからの送信も含む。画面でも送信中は送信ボタンを無効にする）。`failed`（Gemini の失敗）と、`AI_CHAT_STALE_AFTER_MS`（60秒）より古い `pending`（関数が落ちた行）は数えない。`counts_toward_limit = false` の行も数えない（管理者のリセット用。段階1に画面は無い）。
+- 残り回数の表示は `GET /api/ai-chat/usage`（通常クライアントで本人の行を読み、`computeChatUsage()`（`app/lib/ai-chat-limits.ts`）で計算）。返す値は `{ remaining, limit, period: "daily" | "lifetime", resetsAt }`。
+
+### 17.3 質問 API
+
+**エンドポイント**: `POST /api/ai-chat`
+
+**ボディ**: `{ contentId, message, history }`（zod。`message` は trim 後 1〜500 文字。`history` は `{ role: "user" | "assistant", content }` の配列で最大 6 件＝3往復。質問は 500 文字、回答は 2,000 文字まで）
+
+1. 機能が無効なら 503
+2. zod 検証 → `requireLearnerApi()`（未認証 401、`rejected` 403）。`active` / `trial` 以外は 403
+3. お試しユーザーも含めて有料ティアの `GEMINI_API_KEY` を使う（`resolveGeminiApiKey(USER_STATUS.ACTIVE)`。AIレビューの振り分け（6.1.2節）とは違う。無料ティアは混雑時に先に 503・タイムアウトになり、送った内容が Google のサービス改善に使われうるため。お試しは通算回数で上限があり費用は小さい）。無ければ 503
+4. 通常クライアントで `fetchVisibleContentForChat()`（`isContentVisible()` と同じ親階層までの公開・未削除の絞り込みで、文脈に使う列だけを取る）。0行なら 403、対象外の種別なら 400
+5. 演習なら、本人の最新の提出 1 件と、その完了したレビューを通常クライアントで読む（`fetchLatestSubmissionForChat()`）
+6. `claim_ai_chat()` で枠を確保。前の質問の回答待ちなら 409、上限なら 429（`{ error, reason: "user_daily" | "trial_lifetime", remaining: 0, resetsAt }`。お試しは `resetsAt = null`）
+7. プロンプトを作り Gemini を呼ぶ。成功したら利用行を `completed` にしてモデル名とトークン数を保存し、`{ answer, remaining, limit }` を返す。失敗したら行を `failed`（回数に数えない。受け取ったトークン数は残す）にして 502
+
+- モデルは AIレビューと同じ `GEMINI_MODEL_CONFIGS`（主 → 代替のフォールバック、`generateChatReply()`）。出力上限 `AI_CHAT_MAX_OUTPUT_TOKENS`、1回あたり `AI_CHAT_REQUEST_TIMEOUT_MS`、全体 `AI_CHAT_TOTAL_BUDGET_MS`（25秒）、`maxDuration` 40 秒。ストリーミングはしない（段階2で検討）。
+- 回答は `AI_CHAT_ANSWER_MAX_LENGTH`（2,000文字）で切ってから返す（履歴・保存の上限に収めるため）。出力上限（`finishReason = MAX_TOKENS`）や文字数で切れた回答には、末尾に `AI_CHAT_CUT_NOTE`（「…（長いので、ここで切ったよ）」）を付けて、切れたことが分かるようにする（回答は返しているので回数には数える）。
+- **質問・履歴・回答の本文と API キーを `console` に出さない**（Vercel のログに残さない）。
+
+### 17.4 文脈（プロンプトに渡すもの）
+
+取得はすべて通常クライアント（RLS と列権限が効く）で行い、service_role は使わない（受講生向け配信の service_role 2経路を増やさない）。プロンプトは `app/lib/ai-chat-prompt.ts` が組み立てる。
+
+| 画面 | 渡すもの | 渡さないもの |
+|:--|:--|:--|
+| 記事 | テーマ名・フェーズ名・タイトル、`text_content`（本文そのもの。要約しない） | — |
+| 演習 | タイトル、`exercise_instructions`、`hint`、`starter_files`、本人の最新の提出（あれば）、その AI レビューの要約（あれば） | `reference_answer`・`grading_rubric`（列権限で受講生から読めず、service_role でも読まない）、クイズの正解、他人の提出、過去の提出、`review_content` の全文 |
+
+- 文字数の上限（定数）: 記事本文 `AI_CHAT_ARTICLE_MAX_CHARS`（20,000）、演習の指示文・ヒント・初期コード `AI_CHAT_EXERCISE_MAX_CHARS`（8,000）、提出コード `AI_CHAT_SUBMISSION_MAX_CHARS`（全ファイル合計 6,000）、レビューのコメント 1 件 `AI_CHAT_REVIEW_COMMENT_MAX_CHARS`（200）。超えた分は末尾を落とし、省略したことをプロンプトに書く。
+- 提出は、初期コードと trim 後の内容が同じファイルと空のファイルを省く。レビューは要件ごとの判定（達成 / 部分的 / 未達成）と短いコメント、合否・点数だけを渡す。提出もレビューも無ければ節ごと省く。
+- 並びは「システムプロンプト → 教材 → これまでの会話 → 今回の質問」に固定する。同じコンテンツなら先頭が毎回同じになり、Gemini の暗黙的なキャッシュが効きやすい。履歴は直近 3 往復だけ（`trimHistory()`）。
+- 教材・履歴・質問・提出コードは、中のバッククォートの連続より長いフェンスで囲む（`fenceFor()`。AIレビューと共通）。履歴はクライアントが送るため改ざんできるが、影響は本人への回答だけなので許容し、システムプロンプトで「正しいとは限らない記録」として扱わせる。
+
+### 17.5 シンラビの振る舞い（システムプロンプト）
+
+`AI_CHAT_SYSTEM_PROMPT`。一人称「僕」、明るく砕けた話し言葉。答える範囲は教材と、それを理解するのに必要な Web 技術の一般知識だけで、関係のない依頼は一言で断って教材の話に戻す。演習では完成コード・模範回答を書かず（頼まれても同じ）、考え方・確認の手順・数行までの部分コードにとどめる。分からないことや変わりやすい情報（料金・版番号など）は言い切らない。回答は目安 400 文字（長くても 800 文字）で、最後に次に試すことを1つ添える。個人情報やキーを貼られたら注意する。**プロンプトだけで「答えを教えない」を保証することはできない**（教えにくくするまでが目標。会話を保存しないため、品質は運営が実際に試して確かめる）。
+
+### 17.6 復習リストへの保存
+
+会話は画面の中（クライアントの状態）にだけ持ち、別のコンテンツへ移る・再読み込みすると消える。残したい回答は受講生が保存する。
+
+| メソッド | パス | 内容 |
+|:--|:--|:--|
+| POST | `/api/ai-chat/saved-notes` | `{ contentId, question, answer }`（質問 500・回答 2,000 文字まで）。`requireLearnerApi()`・`isContentVisible()`（不可視 403）。1人 `AI_CHAT_SAVED_NOTES_MAX_PER_USER`（300）件に達していたら 409。通常クライアントで INSERT（RLS が `user_id` を本人に固定し、可視コンテンツに限る）。Gemini を呼ばないので回数に数えない |
+| DELETE | `/api/ai-chat/saved-notes` | `{ id }`。本人の行だけ（RLS と `user_id` の絞り込み）。無ければ 404 |
+
+保存先は `ai_chat_saved_notes`（[データベース設計書](./database.md) 3.29節）。`review_notes` の学習メモには書き足さない（受講生のメモを上書きしないため）。保存した項目は、復習リストの未克服・克服済みの件数（ホーム・週次メール）に数えない。
+
+### 17.7 画面
+
+- **入口**（`AiChatPanel`。`app/components/ai-chat/`）: コンテンツ詳細画面の右下に、シンラビの画像付きの丸ボタン「シンラビに相談」。機能が有効で、ログイン済みの `active` / `trial`、公開中（プレビューでない）の記事・演習のときだけ出す（API と同じ条件。クライアント側の認証ガードはしない）。押すまで API を呼ばない。
+- **パネル**: PC（md 以上）は右側のサイドパネル（本文を見ながら質問できるよう、背景を覆わない）、スマホは下からのシート。Esc・×で閉じる（閉じても会話は残り、別のコンテンツへ移る・再読み込みで消える。`key` をコンテンツ ID にして作り直す）。上部にシンラビの画像・残り回数（「今日はあと N 回」/「お試しであと N 回」）・会話のリセット、その下に「画面を移ると会話は消えます。残したい回答は『復習リストに残す』で保存してね」。
+- **本文**: 受講生の質問とシンラビの吹き出し（回答は `MarkdownRenderer`。生の HTML は描画しない）。最初は質問の例をチップで出し、押すと入力欄に入る。送信中は「考え中」の画像（`HINT_MASCOT.closed`）と送信ボタンの無効化。失敗した質問は会話から外して入力欄に戻す（回数は減っていない）。
+- **入力欄**: 500 文字まで。Ctrl / ⌘ + Enter でも送れる（IME 変換中の Enter では送らない）。下部に常に「シンラビは AI です。間違えることがあるので、大事なところは記事や公式ドキュメントで確かめてね」。
+- **上限に達したとき**: 入力欄を無効にし、有料会員には「明日また使えるよ」、お試しには `/upgrade` へのリンク（`UpgradeCtaLink`、計測の source は `ai_chat_limit`。Stripe 無効時は承認の案内）を出す。
+- **復習リストに残す**: 各回答の下のボタン（`role = member` のときだけ。`/review-list` は member 専用のため、admin / maintainer には出さず、上部の案内からも外す）。押すと直前の質問と 1 組で保存し、「保存しました」に変えて押せなくする（二重保存を防ぐ）。
+- **`/review-list`**: 「シンラビに聞いたこと（N）」タブ（機能が有効、または保存済みが 1 件以上のとき）。テーマ → コンテンツの学習順（同じコンテンツは古い順）に、コンテンツ名（リンク）・保存日・質問・回答（折りたたみ、Markdown）・削除ボタン。見られなくなったコンテンツの項目は出さない（消さない）。未克服・克服済みの件数には含めない。
+- **`/admin/ai-review`**: AIレビューの上限の下に「シンラビに相談（AIチャット）の回数上限」（有料会員の1日・お試しの通算）。admin のみ。
+
+### 17.8 費用の目安
+
+入力は記事の画面で約 10,000〜17,000 トークン（システムプロンプト約 1,000、本文 8,000〜15,000、履歴と質問約 1,500）、演習の画面は文脈が約 4,000〜7,500 で記事より小さい。出力は回答と思考で約 1,000〜1,500。上限まで使われた場合の費用の安全弁は、管理画面で上限値を下げることと、`AI_CHAT_ENABLED` で機能全体を止めること。単価は `GEMINI_MODEL_NAME` の公式の料金で確かめる（変わるため本書に数値を置かない）。費用が問題になったら、まず記事を `##` 見出しごとに分けて質問に関係する節だけを渡す形を検討する（段階2以降、別 Issue）。利用実績は `ai_chat_usage` のトークン数を SQL で集計する（集計画面は段階2）。
+
+## 18. コードを試す（#580・#583）
+
+講座の外で、HTML・CSS・JavaScript、Python、SQL を自由に書いて動かすページ。体験会の実演・手を動かす場所として使い、参加者にログイン（お試し登録）してもらう入口にもする。サイドナビ「コードを試す」（「学習コンテンツ」の下）から開く。
+
+### 18.1 対象と範囲
+
+- ログインした全員（`active` / `trial`。全ロール）。お試しユーザーの「講座01だけ」の制限（2.6節）の対象外。proxy と `(authenticated)/layout.tsx` の既存の認可だけで守り、クライアント側の認証ガードはしない
+- 実行はブラウザ内だけ（演習と同じ部品。5.4節）。Web は sandbox iframe（`allow-scripts` のみ）のプレビュー・コンソール、Python は Pyodide、SQL は PGlite。Markdown・JSON・YAML とターミナルも選べる（18.4節）。種類（`PLAYGROUND_KINDS`）はこの7つで、実行できない言語（TypeScript・GAS・HCL など）は出さない。本物のシェルは作らない。**おまけの機能なので、重い実行環境（WebAssembly の Linux、TypeScript コンパイラなど）は入れない**
+- AIレビュー・AIチャットは付けない（トークン費用を出さないため）。サーバーへのコード送信もない（ひな形の管理を除く）
+
+### 18.2 画面と保存
+
+- `PlaygroundWorkspace`（`app/(authenticated)/playground/components/`）。左にファイルのタブとエディタ（`PlaygroundFilesEditor`。ファイルの追加・名前変更・削除ができる）、右に実行結果（`PlaygroundRunPanel`）。エディタとプレビューは画面の高さに合わせて広げる（`CodeEditor` の `minHeight`・`HtmlPreview` の `frameHeightClassName`。演習の 200px / 360px は変えない）。実行結果は `resolvePreviewDisplay()` の自動規則でプレビュー／コンソールを決める。Web のプレビューは `index.html`（無ければ最初の HTML）を表示し、HTML が2つ以上あるときは「表示するページ」で切り替える（選んだ HTML 以外の HTML を外して渡す。`selectPlaygroundPreviewPage()`。ページ間のリンクでの移動は sandbox を緩めないとできないため扱わない）。実行結果の下に、追加したファイルの使われ方（Web は HTML から読み込む、Python は `main.py` を実行し他の `.py` は import、SQL はタブの順にすべて実行）を1行で出す
+- 種類のタブの右に「このページでできること」（`PlaygroundGuideDialog`）を置き、できること・言語ごとの制限（Python のパッケージ・`input()`、SQL の毎回空のデータベース、Web の sandbox で使えない機能、AI レビューや進捗の対象外など）をモーダルで示す。時間・行数・ファイル数は実行環境の定数から差し込む（説明と実際の制限をずらさないため）。
+- ファイル名は半角英数字と `- _ .` だけ（先頭は英数字か `- _`。フォルダ不可）で、種類ごとの拡張子（`PLAYGROUND_EXTENSION_LANGUAGES`。Web は `.html .css .js .jsx`、Python は `.py`、SQL は `.sql`、Markdown は `.md`、JSON は `.json`、YAML は `.yaml .yml`、ターミナルは `.txt .md .csv .json`。`.txt` `.csv` は色付けなし）。言語は拡張子からコードが決める。上限はファイル数 `PLAYGROUND_MAX_FILES`（10）・1ファイル `PLAYGROUND_MAX_FILE_LENGTH`（50,000 文字）・合計 `PLAYGROUND_MAX_TOTAL_LENGTH`（200,000 文字）。判定は `playgroundFilesError()` に一本化し、画面・ひな形 API・下書きの読み込みで共用する
+- **保存はこのブラウザの `localStorage` だけ**（DB には保存しない）。キーは `sinlab-playground:v1:u<ユーザーID>:kind:<種類>` または `...:template:<slug>`。ユーザー ID を含めるのは、体験会の会場 PC などを複数人で使うときに前の人のコードを出さないため。編集から 500ms 後と、種類の切り替え・ページを離れるとき（`pagehide`）に書く。読めない・壊れた・種類に合わない下書きは無かったものとして既定のコードで始める。上限を超えた内容は保存せず、その旨を出す。`localStorage` が使えないときも編集・実行は続け、「保存できませんでした」と出す
+- 「最初のコードに戻す」（ひな形では「ひな形に戻す」）は確認の後、下書きを消して元の内容に戻す
+
+### 18.3 ひな形と短いリンク
+
+- 運営（admin / maintainer）が `/manage/playground-templates` で作るコード一式。テーブルは `playground_templates`（[データベース設計書](./database.md) 3.30節）。題名・種類・ファイル・公開フラグを持つ
+- リンクは `/playground/t/<slug>`。slug は作成時にサーバーが発行する `[a-z0-9]` 10 文字のランダム文字列（`generatePlaygroundTemplateSlug()`。約 52 ビット）で、編集しても変わらない（印刷した QR コードが使えなくなるのを防ぐ）。利用者がコードを共有リンクにする機能や、URL にコードを埋め込む方式は作らない
+- 一覧から「リンクをコピー」と「QR コード」（ブラウザ内で生成。1024px の PNG を保存できる）。リンクは表示中のオリジンで作る
+- 開いたときは通常クライアントで SELECT する（RLS が受講者には公開中だけを返す）。存在しない・非公開・中身が壊れているひな形は 404。admin / maintainer は非公開のものも開け、画面に「非公開」と出す（配る前の確認用）。ひな形ごとの下書きがあれば下書きを優先する
+- 未ログインでリンクを開いた人は、ログイン後に同じリンクへ戻る（2.4節「ログイン後の戻り先」）
+- API（`checkContentPermissions()`。未認証 401・`userId` なし 403・`rejected` 403・admin / maintainer 以外 403・検証失敗 400・存在しない 404）
+
+| メソッド | パス | 内容 |
+|:--|:--|:--|
+| POST | `/api/manage/playground-templates` | `{ title, kind, files: [{ filename, content }], is_published }`。`PlaygroundTemplateSchema`（題名 100 文字まで・ファイルは 18.2 節の規則）。slug が重なったら作り直す（3 回まで） |
+| PUT | `/api/manage/playground-templates/[id]` | 同じ形で更新（slug は変えない） |
+| DELETE | `/api/manage/playground-templates/[id]` | 物理削除（配ったリンクは 404 になる） |
+
+### 18.4 Markdown・JSON・YAML・ターミナル（#583）
+
+実行パネル（`PlaygroundRunPanel`）は Markdown・JSON / YAML・ターミナルの部品を `next/dynamic` で別々に読み込み、開いた種類の部品だけを取得する（ほかの種類の表示を遅くしないため）。
+
+- **Markdown**（`PlaygroundMarkdownPanel`）: 記事と同じ `MarkdownRenderer` を `next/dynamic` で読み込んで表示する（生の HTML は描画しない）。`README.md`（無ければ左端）を表示し、2つ以上あれば「表示するファイル」で切り替える
+- **JSON / YAML**（`PlaygroundDataPanel`）: ファイルごとに書き方を確かめ、正しければ整形した JSON を、誤りなら行・列つきのエラーを出す（`checkJson()` / `checkYaml()`。`app/lib/playground-data.ts`）。JSON はブラウザ標準の `JSON.parse`。YAML は `js-yaml` を YAML を開いたときだけ読み込み、既定のスキーマ（JavaScript の型のタグなし）で読む
+- **ターミナル**（`PlaygroundTerminal`、処理は `app/lib/playground-terminal.ts`）: 本物のシェルではなく、メモリ上のファイルの木で基本コマンドを再現する。左のファイルを `/home/sinlab`（`~`）に置いて始め、変更は左のファイルにも保存にも反映しない（「やり直す」で左のファイルから作り直す）
+  - コマンド: `help pwd ls(-a -l) cd mkdir(-p) touch cat(-n) echo rm(-r -f) mv cp(-r) head tail(-n) wc(-l -w -c) grep(-i -n -v。固定文字列) sort(-r -n) whoami clear`。パイプ `|`、行末のリダイレクト `>` `>>`（bash と同じく先に開き、`>` は先に空にする。`cat` は出力先と同じファイルを読まない）、最後の階層の `*` `?`、変数 `$HOME` `$USER` `$PWD` `$OLDPWD`（ほかの名前は空。シングルクォートの中は展開しない）を使える
+  - エラーの文面は GNU coreutils / bash に合わせる（本物の Ubuntu と同じに見えるように）。未対応のコマンド・`;` `&&` などは日本語で「使えません」と返す
+  - ファイルの合計は `TERMINAL_MAX_TOTAL_LENGTH`（100 万文字）まで、画面の行は 500 件まで残す。いまいる場所やホームは消せない（練習用の制限）
+

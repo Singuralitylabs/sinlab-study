@@ -2,9 +2,12 @@
 
 import { Code, Link as LinkIcon, Loader2, RotateCcw, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
-import type { CodeLanguage } from "@/app/components/code-editor-utils";
+import {
+  type CodeLanguage,
+  DEFAULT_FILENAME_BY_LANGUAGE,
+} from "@/app/components/code-editor-utils";
 import { HtmlPreviewNoSSR } from "@/app/components/HtmlPreviewNoSSR";
 import { LockedCodeFilesEditor } from "@/app/components/LockedCodeFilesEditor";
 import { ThemeCompletionDialog } from "@/app/components/ThemeCompletionDialog";
@@ -21,6 +24,7 @@ import {
   isLockedSubmissionReady,
   layoutOmitsEmptyFiles,
   resolveSubmissionFileSlots,
+  restoreFilesFromPreviousSubmission,
 } from "@/app/lib/submission-file-slots";
 import type { AIReviewListItem, CodeFile, Json, SubmissionType } from "@/app/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -55,6 +59,8 @@ interface SubmissionFormProps {
    * after persistedReviewId becomes null (#406 review).
    */
   isRetrying?: boolean;
+  /** The last submitted code. A retry starts from it instead of the starter code. */
+  previousFiles?: CodeFile[] | null;
 }
 
 function buildFailedReview(errorMessage: string): AIReviewListItem {
@@ -86,6 +92,7 @@ export function SubmissionForm({
   showReviewListNotes = false,
   showEditor = true,
   isRetrying = false,
+  previousFiles = null,
 }: SubmissionFormProps) {
   const router = useRouter();
   const [submissionType, setSubmissionType] = useState<SubmissionType>(
@@ -122,13 +129,28 @@ export function SubmissionForm({
   );
   const [themeNotice, setThemeNotice] = useState<ThemeCompletionNotice | null>(null);
 
+  // A boolean, not the slots JSON: that prop is a new object after every router.refresh() and
+  // would rerun the effect below, overwriting edits made during the retry.
+  const omitsEmptyFilesForRetry = layoutOmitsEmptyFiles(submissionFileSlots, initialFiles.length);
+  // Read through a ref so a refreshed prop does not rerun the effect and overwrite edits in progress.
+  const previousFilesRef = useRef(previousFiles);
+  previousFilesRef.current = previousFiles;
+
   useEffect(() => {
     if (!isRetrying) return;
+    if (previousFilesRef.current && previousFilesRef.current.length > 0) {
+      setCodeFiles(
+        restoreFilesFromPreviousSubmission(initialFiles, previousFilesRef.current, {
+          emptyUnmatched: omitsEmptyFilesForRetry,
+          defaultFilename: DEFAULT_FILENAME_BY_LANGUAGE[codeLanguage],
+        })
+      );
+    }
     setAiReview(null);
     setMessage(null);
     setIsReviewLoading(false);
     setLastSubmissionId(null);
-  }, [isRetrying]);
+  }, [isRetrying, initialFiles, omitsEmptyFilesForRetry, codeLanguage]);
 
   const hasStarter = Boolean(starterSnapshot?.some((file) => file.content.trim().length > 0));
   const unchangedFromStarter = blocksUneditedStarter({
@@ -155,7 +177,10 @@ export function SubmissionForm({
   };
 
   const handleResetToStarter = () => {
-    if (!confirm("編集中のコードを破棄して、初期コードに戻しますか？")) {
+    const message = hasStarter
+      ? "編集中のコードを破棄して、初期コードに戻しますか？"
+      : "編集中のコードを破棄して、最初からやり直しますか？";
+    if (!confirm(message)) {
       return;
     }
     resetToStarter();
@@ -327,10 +352,10 @@ export function SubmissionForm({
           {submissionType === "code" ? (
             <div className="space-y-3">
               <LockedCodeFilesEditor files={codeFiles} onChange={setCodeFiles} />
-              {hasStarter && (
+              {(hasStarter || (isRetrying && previousFiles && previousFiles.length > 0)) && (
                 <Button type="button" variant="outline" size="sm" onClick={handleResetToStarter}>
                   <RotateCcw className="h-4 w-4" />
-                  初期コードに戻す
+                  {hasStarter ? "初期コードに戻す" : "最初からやり直す"}
                 </Button>
               )}
               {unchangedFromStarter && (

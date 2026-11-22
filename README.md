@@ -56,6 +56,7 @@ CLOUDFLARE_STREAM_SIGNING_KEY_PEM=<任意。Stream 署名鍵の result.pem（API
 GEMINI_API_KEY_TRIAL=<任意。お試しユーザー用・無料ティア。未設定時は GEMINI_API_KEY にフォールバック>
 SLACK_NOTIFICATION_WEBHOOK_URL=<任意。初回ログイン承認依頼・Stripe支払い失敗・フィードバックのSlack通知。未設定時は通知をスキップ>
 FEEDBACK_ENABLED=<フィードバック機能の有効化。"true" 以外はフェイルクローズで無効>
+AI_CHAT_ENABLED=<シンラビに相談（AIチャット）の有効化。"true" 以外はフェイルクローズで無効。お試しユーザーも GEMINI_API_KEY を使う（GEMINI_API_KEY_TRIAL は使わない）>
 RESEND_API_KEY=<任意。受講生向けメール通知（Resend）の API キー。未設定時はメール送信をスキップ>
 EMAIL_FROM_ADDRESS=<任意。メールの送信元（返信不可の noreply@...。開発時は onboarding@resend.dev）。未設定時はメール送信をスキップ>
 CRON_SECRET=<任意。定期メールの Cron ルートの認証（Vercel Cron が Bearer で送る）。未設定時は Cron ルートが常に 401>
@@ -75,14 +76,14 @@ WEB_PUSH_SUBJECT=<任意。VAPID の mailto: 連絡先。未設定時はプッ�
 
 ### インストール・起動
 
-**既にマイグレーション適用履歴があるプロジェクトに接続する場合は、`db push` の前に `supabase migration list` でローカルとリモートの履歴が一致していることを確認すること**（未整合だと既存オブジェクトの作成でエラーになる。対処は Issue #185 のコメント、本番適用は Wiki の[本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)を参照）。マイグレーションの配置規約は `AGENTS.md` を参照。
+**既にマイグレーション適用履歴があるプロジェクトに接続する場合は、`db push` の前に `bunx supabase migration list --remote` でローカルとリモートの履歴が一致していることを確認すること**（未整合だと既存オブジェクトの作成でエラーになる。対処は Issue #185 のコメント、本番適用は Wiki の[本番環境リリース手順](https://github.com/Singuralitylabs/sinlab-study/wiki/本番環境リリース手順)を参照）。マイグレーションの配置規約は `AGENTS.md` を参照。
 
 ```bash
 # 依存関係のインストール
 bun install
 
-# データベースマイグレーション（Supabase CLIを使用。既存環境は上記の注意を参照）
-bunx supabase db push
+# データベースマイグレーション（Supabase CLI v3 は対象省略時にローカルDBへ向くため --remote でリンク先へ。既存環境は上記の注意を参照）
+bunx supabase db push --remote
 
 # 開発サーバー起動
 bun dev
@@ -100,7 +101,7 @@ bun dev
 | `bun run lint` | Biome によるリント |
 | `bun run format` | Biome によるフォーマット |
 | `bun run check` | Biome によるリント + フォーマット |
-| `bun run db:types` | Supabase から TypeScript 型定義を生成（`SUPABASE_DB_URL` があればその DB へ `--db-url`、なければ `SUPABASE_PROJECT_ID` + `SUPABASE_ACCESS_TOKEN` でリモート。`.env.local` は未設定の変数だけ補う。CLI は devDependency の `supabase`。`DATABASE_URL` は使わない） |
+| `bun run db:types` | Supabase から TypeScript 型定義を生成（`SUPABASE_DB_URL` があればその DB へ、なければ `SUPABASE_PROJECT_ID` + `SUPABASE_ACCESS_TOKEN` でリモート（いずれも `--remote=<…>`）。`.env.local` は未設定の変数だけ補う。CLI は devDependency の `supabase`。`DATABASE_URL` は使わない） |
 | `bun run test` | Vitest によるユニットテスト実行 |
 | `bun run check:comments [基準ref]` | 変更した TS/JS がコメント・整形のみの差分か（AST同一・`@ts-*`/`biome-ignore` の増減なし）を検証。未追跡ファイルも対象、コード以外の変更ファイルは「未検証」として一覧表示。差異・パース失敗があれば該当ファイルを列挙して非ゼロ終了（既定の基準は `origin/main`） |
 | `bun scripts/grading-dry-run.ts --confirm-dev [--content-id N] [--limit 5] [--repeat 1] [--model <モデルID>]` | 採点基準付きの演習の既存コード提出を現行ロジックで再採点し、点数分布・合格率・平均トークンを表示する（**DB へは書き込まない**。Gemini を呼び課金される。`SUPABASE_SERVICE_ROLE_KEY` と `GEMINI_API_KEY` が必要で、**本番には向けない**。合格点 `CERTIFICATE_PASS_SCORE` を決める材料にする。未指定は本番と同じフォールバックになるため、モデル比較では `--model` で 1 つに固定する） |
@@ -168,6 +169,7 @@ app/
 │   ├── manage/          #   コンテンツ管理画面（admin + maintainer 共通）
 │   ├── instructor/      #   講師向け画面（/manage にリダイレクト）
 │   ├── learn/           #   学習コンテンツ画面（Theme > Phase > Content の3階層）
+│   ├── playground/      #   コードを試す（講座の外でコードを書いて動かす。ひな形のリンク /playground/t/[slug]）
 │   ├── settings/        #   設定画面（案内メールの配信停止・再開）
 │   ├── submissions/     #   提出履歴画面
 │   ├── components/      #   認証済みレイアウト用コンポーネント
@@ -178,7 +180,7 @@ app/
 │   ├── admin/email-templates/ #   メール文面・サービス名の編集、プレビュー、テスト送信（admin のみ）
 │   ├── admin/email-logs/ #   メール送信履歴（admin のみ）
 │   ├── ai-review/       #   AIレビュー（Gemini API）
-│   ├── manage/          #   コンテンツ管理（phases/contents/themes）
+│   ├── manage/          #   コンテンツ管理（phases/contents/themes/playground-templates）
 │   ├── onboarding/      #   初回利用ガイドの完了記録
 │   ├── progress/        #   進捗更新
 │   ├── settings/email/  #   案内メールの配信停止・再開（本人用）

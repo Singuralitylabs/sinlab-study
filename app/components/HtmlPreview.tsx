@@ -2,8 +2,9 @@
 
 import { Eye, EyeOff, Play, RefreshCw, Terminal } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { PythonConsole } from "@/app/components/PythonConsole";
 import { SqlConsole } from "@/app/components/SqlConsole";
-import { buildPreviewDocument, isSqlLayout } from "@/app/lib/html-preview";
+import { buildPreviewDocument, isPythonLayout, isSqlLayout } from "@/app/lib/html-preview";
 import {
   acceptPreviewConsoleMessage,
   buildPreviewConsoleBridgeScript,
@@ -20,6 +21,8 @@ interface HtmlPreviewProps {
   collapsible?: boolean;
   /** Visible 360px frame. Off for a console-only exercise. */
   showPreviewFrame?: boolean;
+  /** Height of the visible frame; the playground fills the viewport instead of 360px. */
+  frameHeightClassName?: string;
   /** Console list. Off when the exercise turns the console off. */
   showConsolePanel?: boolean;
   /** Admin scaffold HTML for CSS-only exercises (#351). */
@@ -43,6 +46,12 @@ export function HtmlPreview(props: HtmlPreviewProps) {
       <SqlConsole files={props.files} collapsible={props.collapsible} />
     );
   }
+  // Python runs on Pyodide in a worker for the same reason.
+  if (isPythonLayout(props.files)) {
+    return props.showConsolePanel === false ? null : (
+      <PythonConsole files={props.files} collapsible={props.collapsible} />
+    );
+  }
   return <ScriptPreview {...props} />;
 }
 
@@ -52,6 +61,7 @@ function ScriptPreview({
   showPreviewFrame = true,
   showConsolePanel = true,
   previewBaseHtml = null,
+  frameHeightClassName = "h-[360px]",
 }: HtmlPreviewProps) {
   const manualRun = showConsolePanel && !showPreviewFrame;
   const [open, setOpen] = useState(!collapsible);
@@ -180,6 +190,7 @@ function ScriptPreview({
           srcDoc={frameDoc}
           showConsole={showConsolePanel && (manualRun || consoleOpen)}
           hiddenFrame={!showPreviewFrame}
+          frameHeightClassName={frameHeightClassName}
         />
       )}
     </div>
@@ -190,10 +201,12 @@ function PreviewRun({
   srcDoc,
   showConsole,
   hiddenFrame,
+  frameHeightClassName,
 }: {
   srcDoc: string;
   showConsole: boolean;
   hiddenFrame: boolean;
+  frameHeightClassName: string;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   // Holds up to MAX + 1 lines; the extra one only signals that output was cut off.
@@ -249,7 +262,7 @@ function PreviewRun({
         className={
           hiddenFrame
             ? "pointer-events-none absolute h-px w-px overflow-hidden opacity-0"
-            : "h-[360px] w-full rounded-md border bg-white"
+            : cn(frameHeightClassName, "w-full rounded-md border bg-white")
         }
       />
       {showConsole && (

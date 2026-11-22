@@ -1,6 +1,8 @@
 import { Bot, Lock } from "lucide-react";
 import { notFound } from "next/navigation";
 import { AIReviewDisplayNoSSR } from "@/app/components/AIReviewDisplayNoSSR";
+import { AppendixBadge } from "@/app/components/AppendixBadge";
+import { AiChatPanel } from "@/app/components/ai-chat/AiChatPanel";
 import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { ExerciseHint } from "@/app/components/ExerciseHint";
 import { LearningMemo } from "@/app/components/LearningMemo";
@@ -11,6 +13,7 @@ import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { VideoContent } from "@/app/components/VideoContent";
+import { isAiChatEnabled } from "@/app/constants/ai-chat";
 import { ANALYTICS_EVENT, UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
@@ -168,7 +171,12 @@ export default async function ContentPage({ params }: PageProps) {
             },
             { label: summary.title },
           ]}
-          badge={<UnpublishedBadge isPublished={summary.is_published} />}
+          badge={
+            <>
+              <AppendixBadge isAppendix={phase.is_appendix} />
+              <UnpublishedBadge isPublished={summary.is_published} />
+            </>
+          }
         />
 
         <Card className="mb-6">
@@ -231,6 +239,15 @@ export default async function ContentPage({ params }: PageProps) {
   if (!isFullyPublished && !checkContentPermissions(userRole)) {
     notFound();
   }
+
+  // Same gate as POST /api/ai-chat: learners on published article / exercise pages only (an
+  // unpublished preview would always get 403 from isContentVisible()).
+  const showsAiChat =
+    isAiChatEnabled() &&
+    Boolean(userId) &&
+    isFullyPublished &&
+    (content.content_type === "text" || content.content_type === "exercise") &&
+    (userStatus === USER_STATUS.ACTIVE || userStatus === USER_STATUS.TRIAL);
 
   const showsAIReviewLimit =
     Boolean(userId) &&
@@ -302,6 +319,11 @@ export default async function ContentPage({ params }: PageProps) {
         }),
   ]);
   const { requiresPass: requiresReviewPass, passUnachievable, hasPassingReview } = reviewPassState;
+  // An uncompleted quiz gets no manual button: only an all-correct attempt completes it
+  // (QuizForm, #567). It stays once completed so the learner can undo, and when the questions
+  // could not be shown (load error, none registered) so the learner is not left unable to finish.
+  const quizCompletesByAnswer =
+    content.content_type === "quiz" && !isCompleted && !quizError && quizQuestions.length > 0;
 
   const memosByKey: Record<string, string | null> = {};
   let freeLearningMemo: string | null = null;
@@ -374,7 +396,12 @@ export default async function ContentPage({ params }: PageProps) {
           },
           { label: content.title },
         ]}
-        badge={<UnpublishedBadge isPublished={isFullyPublished} />}
+        badge={
+          <>
+            <AppendixBadge isAppendix={phase.is_appendix} />
+            <UnpublishedBadge isPublished={isFullyPublished} />
+          </>
+        }
       />
 
       <Card className="mb-6">
@@ -444,7 +471,10 @@ export default async function ContentPage({ params }: PageProps) {
                       {isRetrying ? (
                         <>
                           <p className="mb-4 text-sm text-muted-foreground">
-                            再挑戦中です。新しく提出すると模範回答と AI レビュー結果が表示されます
+                            再挑戦中です。
+                            {latestSubmission.submission_type === "code" &&
+                              "前回のコードを入れてあります。最初から書き直したいときは、コード欄の下のボタンで戻せます。"}
+                            新しく提出すると模範回答と AI レビュー結果が表示されます
                           </p>
                           <details className="mb-6 rounded-lg border border-border">
                             <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-muted-foreground hover:text-foreground list-none flex items-center gap-2">
@@ -503,14 +533,20 @@ export default async function ContentPage({ params }: PageProps) {
                           </div>
 
                           {showReferenceAnswer && (
-                            <div className="mb-6">
-                              <h3 className="text-lg font-semibold mb-3">模範回答</h3>
-                              {/* Free text from the admin textarea. pre-wrap keeps a long sentence
-                                  on the card. Submission code omits it so a line scrolls inside pre. */}
-                              <pre className="max-w-full overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted px-4 py-3 text-sm font-mono">
-                                {referenceAnswer}
-                              </pre>
-                            </div>
+                            // Closed by default: some learners want to think it through before
+                            // seeing the answer, so it opens only on request.
+                            <details className="mb-6 rounded-lg border border-border">
+                              <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium hover:text-foreground list-none flex items-center gap-2">
+                                模範回答を見る
+                              </summary>
+                              <div className="border-t border-border px-4 py-3">
+                                {/* Free text from the admin textarea. pre-wrap keeps a long sentence
+                                    on the card. Submission code omits it so a line scrolls inside pre. */}
+                                <pre className="max-w-full overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted px-4 py-3 text-sm font-mono">
+                                  {referenceAnswer}
+                                </pre>
+                              </div>
+                            </details>
                           )}
 
                           {visibleReview && (
@@ -579,6 +615,11 @@ export default async function ContentPage({ params }: PageProps) {
                         showReviewListNotes={showReviewListNotes}
                         showEditor={showSubmissionEditor}
                         isRetrying={isRetrying}
+                        previousFiles={
+                          latestSubmission?.submission_type === "code"
+                            ? getSubmissionCodeFiles(latestSubmission)
+                            : null
+                        }
                       />
                     </>
                   ) : (
@@ -620,7 +661,7 @@ export default async function ContentPage({ params }: PageProps) {
                 "code"
               }
             />
-          ) : (
+          ) : quizCompletesByAnswer ? null : (
             // Keyed by the saved state so router.refresh() after a quiz answer remounts it.
             <CompleteButton
               key={String(isCompleted)}
@@ -643,6 +684,21 @@ export default async function ContentPage({ params }: PageProps) {
         next={next}
         endFallback={endFallback}
       />
+
+      {showsAiChat && (
+        // Spacer: the floating button must not cover the prev / next links at the bottom.
+        <div aria-hidden="true" className="h-16" />
+      )}
+      {showsAiChat && (
+        // Keyed by content so moving to another content starts an empty conversation.
+        <AiChatPanel
+          key={contentIdNum}
+          contentId={contentIdNum}
+          contentType={content.content_type === "text" ? "text" : "exercise"}
+          stripeEnabled={stripeEnabled}
+          canSave={showReviewListNotes}
+        />
+      )}
     </div>
   );
 }

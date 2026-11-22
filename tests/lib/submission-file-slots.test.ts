@@ -9,6 +9,7 @@ import {
   isLockedSubmissionReady,
   parseSubmissionFileSlots,
   resolveSubmissionFileSlots,
+  restoreFilesFromPreviousSubmission,
   SUBMISSION_FILE_SLOT_MAX_COUNT,
   SUBMISSION_FILE_SLOTS_MISMATCH_ERROR,
   toStoredSubmissionCode,
@@ -388,5 +389,82 @@ describe("buildLockedSubmissionFiles / toSubmissionSlotPayload", () => {
         { filename: "a.js", language: "javascript", starterContent: "" },
       ]).ok
     ).toBe(false);
+  });
+});
+
+describe("restoreFilesFromPreviousSubmission", () => {
+  const files = [
+    {
+      id: "slot-0",
+      filename: "page.js",
+      language: "javascript" as const,
+      content: "// starter A",
+      filenameEdited: true,
+    },
+    {
+      id: "slot-1",
+      filename: "globals.css",
+      language: "css" as const,
+      content: "// starter B",
+      filenameEdited: true,
+    },
+  ];
+
+  it("同じファイル名の前回のコードを入れ、見つからないスロットは初期コードのまま", () => {
+    const restored = restoreFilesFromPreviousSubmission(files, [
+      { filename: "page.js", language: "javascript", content: "export default 1;" },
+    ]);
+    expect(restored.map((f) => f.content)).toEqual(["export default 1;", "// starter B"]);
+    expect(restored.map((f) => f.filename)).toEqual(["page.js", "globals.css"]);
+  });
+
+  it("ファイル名なしの1ファイル提出（code_content）は、スロットが1つのときだけ入れる", () => {
+    const single = [files[0]];
+    const previous = [{ filename: "", language: "", content: "const a = 1;" }];
+    expect(restoreFilesFromPreviousSubmission(single, previous)[0].content).toBe("const a = 1;");
+    expect(restoreFilesFromPreviousSubmission(files, previous).map((f) => f.content)).toEqual([
+      "// starter A",
+      "// starter B",
+    ]);
+  });
+
+  it("提出ファイルの指定がない複数ファイルでは、前回に保存されなかったファイルを空で戻す", () => {
+    const previous = [
+      { filename: "page.js", language: "javascript", content: "export default 1;" },
+    ];
+    const restored = restoreFilesFromPreviousSubmission(files, previous, { emptyUnmatched: true });
+    expect(restored.map((f) => f.content)).toEqual(["export default 1;", ""]);
+    // A name-less single file (code_content) is the default-named file: it fills that slot.
+    const unnamedDefault = [{ filename: "", language: "", content: "const a = 1;" }];
+    expect(
+      restoreFilesFromPreviousSubmission(files, unnamedDefault, {
+        emptyUnmatched: true,
+        defaultFilename: "globals.css",
+      }).map((f) => f.content)
+    ).toEqual(["", "const a = 1;"]);
+    // One slot with a non-default name: the name-less file still fills it.
+    expect(
+      restoreFilesFromPreviousSubmission([files[0]], unnamedDefault, {
+        defaultFilename: "code.js",
+      })[0].content
+    ).toBe("const a = 1;");
+    // Without a matching default name nothing matches: keep the starters, do not blank all.
+    const unnamed = [{ filename: "", language: "", content: "const a = 1;" }];
+    expect(
+      restoreFilesFromPreviousSubmission(files, unnamed, { emptyUnmatched: true }).map(
+        (f) => f.content
+      )
+    ).toEqual(["// starter A", "// starter B"]);
+    expect(
+      restoreFilesFromPreviousSubmission(files, null, { emptyUnmatched: true }).map(
+        (f) => f.content
+      )
+    ).toEqual(["// starter A", "// starter B"]);
+  });
+
+  it("前回のコードがないときは初期コードのまま（元の配列は書き換えない）", () => {
+    const restored = restoreFilesFromPreviousSubmission(files, null);
+    expect(restored).toEqual(files);
+    expect(restored[0]).not.toBe(files[0]);
   });
 });

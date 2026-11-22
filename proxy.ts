@@ -3,12 +3,13 @@ import { type NextRequest, NextResponse } from "next/server";
 import { AUTH_HEADER_NAMES, AUTH_HEADERS, SIGN_OUT_PATH } from "./app/constants/auth";
 import { PWA_PUBLIC_PATHS } from "./app/constants/pwa";
 import { ALLOWED_USER_STATUSES, USER_STATUS } from "./app/constants/user";
+import { buildLoginPath } from "./app/lib/post-login-redirect";
 import type { UserStatusType } from "./app/types";
 
 // Extensions treated as static assets (suffix match only). Don't use "path contains .": crafted
 // URLs like /learn/1/2/3/4. would bypass auth.
 const STATIC_FILE_EXTENSIONS =
-  /\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest|wasm|data)$/i;
+  /\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest|wasm|data|whl)$/i;
 
 export function shouldSkipMiddleware(pathname: string): boolean {
   return (
@@ -101,7 +102,13 @@ export async function proxy(request: NextRequest) {
     const { data: claimsData, error } = await supabase.auth.getClaims();
     const authId = claimsData?.claims?.sub;
     if (error || !authId) {
-      return applyResponseModifications(NextResponse.redirect(new URL("/login", request.url)));
+      // Only a signed-out page view carries its destination (#580: a workshop link opened before
+      // signing in should land back on itself). Other fail-closed branches stay a bare /login.
+      const loginPath =
+        request.method === "GET"
+          ? buildLoginPath(`${pathname}${request.nextUrl.search}`)
+          : "/login";
+      return applyResponseModifications(NextResponse.redirect(new URL(loginPath, request.url)));
     }
 
     const { data: userData, error: userError } = await supabase
@@ -160,6 +167,6 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     // Exclude Next.js internals and static assets (matching STATIC_FILE_EXTENSIONS).
-    "/((?!_next|[^?]*\\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest|wasm|data)).*)",
+    "/((?!_next|[^?]*\\.(?:html?|css|m?js|json|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|pdf|txt|xml|map|webmanifest|wasm|data|whl)).*)",
   ],
 };

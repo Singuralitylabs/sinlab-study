@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { CODE_LANGUAGES } from "@/app/components/code-editor-utils";
 import {
+  AI_CHAT_ANSWER_MAX_LENGTH,
+  AI_CHAT_HISTORY_MAX_MESSAGES,
+  AI_CHAT_LIMIT_BOUNDS,
+  AI_CHAT_MESSAGE_MAX_LENGTH,
+  type AIChatLimits,
+} from "@/app/constants/ai-chat";
+import {
   ANNOUNCEMENT_BODY_MAX_LENGTH,
   ANNOUNCEMENT_TARGET_STATUSES,
   ANNOUNCEMENT_TITLE_MAX_LENGTH,
@@ -42,6 +49,11 @@ import {
   PUSH_KINDS,
 } from "@/app/constants/notifications";
 import {
+  PLAYGROUND_KINDS,
+  PLAYGROUND_MAX_FILES,
+  PLAYGROUND_TEMPLATE_TITLE_MAX_LENGTH,
+} from "@/app/constants/playground";
+import {
   QUIZ_MAX_CHOICES,
   QUIZ_MAX_QUESTIONS,
   QUIZ_TEXT_ANSWER_MAX_LENGTH,
@@ -53,6 +65,7 @@ import {
   USER_ROLES,
   USER_STATUS,
 } from "@/app/constants/user";
+import { areAIChatLimitsValid } from "@/app/lib/ai-chat-limits";
 import { areAIReviewLimitsValid } from "@/app/lib/ai-review-limits";
 import { parseDisplayName } from "@/app/lib/display-name";
 import {
@@ -67,6 +80,7 @@ import {
   previewSettingsError,
 } from "@/app/lib/html-preview";
 import { parseNotificationEmail } from "@/app/lib/notification-email";
+import { playgroundFilesError } from "@/app/lib/playground";
 import { isAllowedPushEndpoint } from "@/app/lib/push-endpoint";
 import { QuizQuestionsSchema } from "@/app/lib/quiz";
 import { isBlankSlidePdfUrl, toSlideObjectKey } from "@/app/lib/slide-object-key";
@@ -74,6 +88,7 @@ import {
   resolveSubmissionFileSlots,
   SUBMISSION_FILE_SLOT_MAX_COUNT,
 } from "@/app/lib/submission-file-slots";
+import { isThemeColor, normalizeThemeColor } from "@/app/lib/theme-color";
 import { parseVideoSource } from "@/app/lib/video-source";
 
 export const PositiveIntSchema = z
@@ -270,6 +285,75 @@ export const AiReviewSettingsUpdateSchema = z
     return limits;
   });
 
+const AiChatQuestionSchema = z
+  .string({ message: "質問は文字列で指定してください" })
+  .trim()
+  .min(1, { message: "質問を入力してください" })
+  .max(AI_CHAT_MESSAGE_MAX_LENGTH, {
+    message: `質問は${AI_CHAT_MESSAGE_MAX_LENGTH}文字以内で入力してください`,
+  });
+
+const AiChatAnswerSchema = z
+  .string({ message: "回答は文字列で指定してください" })
+  .min(1, { message: "回答が空です" })
+  .max(AI_CHAT_ANSWER_MAX_LENGTH, {
+    message: `回答は${AI_CHAT_ANSWER_MAX_LENGTH}文字以内で指定してください`,
+  });
+
+/**
+ * POST /api/ai-chat. The conversation lives only in the browser, so the client sends the recent
+ * turns; their count and length are capped here because they go into the (billed) prompt.
+ */
+export const AiChatRequestSchema = z.object({
+  contentId: ContentIdSchema,
+  message: AiChatQuestionSchema,
+  history: z
+    .array(
+      z.discriminatedUnion("role", [
+        z.object({ role: z.literal("user"), content: AiChatQuestionSchema }),
+        z.object({ role: z.literal("assistant"), content: AiChatAnswerSchema }),
+      ]),
+      { message: "history は配列で指定してください" }
+    )
+    .max(AI_CHAT_HISTORY_MAX_MESSAGES, {
+      message: `history は${AI_CHAT_HISTORY_MAX_MESSAGES}件以内で指定してください`,
+    })
+    .default([]),
+});
+
+export const AiChatSavedNoteCreateSchema = z.object({
+  contentId: ContentIdSchema,
+  question: AiChatQuestionSchema,
+  answer: AiChatAnswerSchema,
+});
+
+export const AiChatSavedNoteDeleteSchema = z.object({
+  id: PositiveIntSchema,
+});
+
+/** PUT /api/admin/ai-chat-settings. Both limits at once. */
+export const AiChatSettingsUpdateSchema = z
+  .object({
+    activePerDay: z.number({ message: "activePerDay は数値で指定してください" }),
+    trialLifetime: z.number({ message: "trialLifetime は数値で指定してください" }),
+  })
+  .strict()
+  .transform((value, ctx) => {
+    const limits: AIChatLimits = {
+      activePerDay: value.activePerDay,
+      trialLifetime: value.trialLifetime,
+    };
+    if (!areAIChatLimitsValid(limits)) {
+      const { activePerDay, trialLifetime } = AI_CHAT_LIMIT_BOUNDS;
+      ctx.addIssue({
+        code: "custom",
+        message: `有料会員の1日は${activePerDay.min}〜${activePerDay.max}、お試しの通算は${trialLifetime.min}〜${trialLifetime.max}の整数で指定してください`,
+      });
+      return z.NEVER;
+    }
+    return limits;
+  });
+
 /**
  * POST /api/admin/ai-review-limits. `reset` frees the allowance of one user (all contents, or one
  * when contentId is given); `reopen` lets one completed review run again (#482).
@@ -456,11 +540,26 @@ export const EmailSettingsUpdateSchema = z
 // Both POST (create) and PUT (update) take the insert position (insert_after_id). Update only
 // makes every Create field optional, so it derives from `XxxCreateSchema.partial()`
 // (insert_after_id is required on Create, optional on Update).
+/**
+ * `#RRGGBB` upper-cased; "" (a cleared input) and null both mean unset. Matches the DB CHECK so a
+ * bad value is a 400 here, not a 500 from the constraint.
+ */
+const ThemeColorSchema = z
+  .string({ message: "文字列で指定してください" })
+  .trim()
+  .refine((value) => value === "" || isThemeColor(value), {
+    message: "テーマカラーは #RRGGBB の形式で入力してください",
+  })
+  .transform((value) => normalizeThemeColor(value))
+  .nullable()
+  .optional();
+
 const ThemeBaseSchema = z.object({
   name: RequiredStringSchema,
   description: OptionalNullableString,
   is_published: OptionalBoolean,
   image_url: OptionalNullableString,
+  theme_color: ThemeColorSchema,
 });
 export const ThemeCreateSchema = ThemeBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
@@ -472,6 +571,7 @@ const PhaseBaseSchema = z.object({
   name: RequiredStringSchema,
   description: OptionalNullableString,
   is_published: OptionalBoolean,
+  is_appendix: OptionalBoolean,
 });
 export const PhaseCreateSchema = PhaseBaseSchema.extend({
   insert_after_id: InsertAfterIdSchema,
@@ -910,6 +1010,38 @@ export const AnnouncementSchema = z
   );
 
 export type AnnouncementInput = z.infer<typeof AnnouncementSchema>;
+
+/** Language is not accepted from the client: the server derives it from the extension. */
+export const PlaygroundTemplateSchema = z
+  .object({
+    title: z
+      .string({ message: "題名は文字列で指定してください" })
+      .trim()
+      .min(1, { message: "題名を入力してください" })
+      .max(PLAYGROUND_TEMPLATE_TITLE_MAX_LENGTH, {
+        message: `題名は${PLAYGROUND_TEMPLATE_TITLE_MAX_LENGTH}文字以内で入力してください`,
+      }),
+    kind: z.enum(PLAYGROUND_KINDS, { message: "実行の種類が正しくありません" }),
+    files: z
+      .array(
+        z.object({
+          filename: z.string({ message: "ファイル名は文字列で指定してください" }).trim(),
+          content: z.string({ message: "コードは文字列で指定してください" }),
+        }),
+        { message: "ファイルを指定してください" }
+      )
+      .min(1, { message: "ファイルを1つ以上追加してください" })
+      .max(PLAYGROUND_MAX_FILES, { message: `ファイルは${PLAYGROUND_MAX_FILES}個までです` }),
+    is_published: z.boolean({ message: "is_publishedは真偽値で指定してください" }),
+  })
+  .superRefine((value, ctx) => {
+    const error = playgroundFilesError(value.kind, value.files);
+    if (error) {
+      ctx.addIssue({ code: "custom", message: error, path: ["files"] });
+    }
+  });
+
+export type PlaygroundTemplateInput = z.infer<typeof PlaygroundTemplateSchema>;
 
 export type ValidationResult<T> =
   | { success: true; data: T }

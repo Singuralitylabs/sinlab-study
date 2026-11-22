@@ -15,6 +15,7 @@ import { createServerClient } from "@supabase/ssr";
 import { track } from "@vercel/analytics/server";
 import { GET } from "@/app/auth/callback/route";
 import { TERMS_CONSENT_COOKIE_NAME, TERMS_CONSENT_COOKIE_VALUE } from "@/app/constants/auth";
+import { POST_LOGIN_NEXT_COOKIE_NAME } from "@/app/lib/post-login-redirect";
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { sendSlackNewUserNotification } from "@/app/services/notifications/slack";
 import { scheduleSignupEmail } from "@/app/services/notifications/user-emails";
@@ -32,6 +33,16 @@ function callbackRequest(code = "oauth-code") {
 function callbackRequestWithConsent(code = "oauth-code") {
   return new NextRequest(`http://localhost/auth/callback?code=${code}`, {
     headers: { cookie: `${TERMS_CONSENT_COOKIE_NAME}=${TERMS_CONSENT_COOKIE_VALUE}` },
+  });
+}
+
+function callbackRequestWithNext(next: string, { consent = false } = {}) {
+  const cookies = [`${POST_LOGIN_NEXT_COOKIE_NAME}=${encodeURIComponent(next)}`];
+  if (consent) {
+    cookies.push(`${TERMS_CONSENT_COOKIE_NAME}=${TERMS_CONSENT_COOKIE_VALUE}`);
+  }
+  return new NextRequest("http://localhost/auth/callback?code=oauth-code", {
+    headers: { cookie: cookies.join("; ") },
   });
 }
 
@@ -329,4 +340,77 @@ describe("GET /auth/callback", () => {
       expect(console.error).toHaveBeenCalled();
     }
   );
+
+  describe("ログイン後の戻り先（#580）", () => {
+    function expectNextCookieDeleted(res: Response) {
+      expect(setCookieHeaders(res).join("\n")).toMatch(
+        new RegExp(`${POST_LOGIN_NEXT_COOKIE_NAME}=;|${POST_LOGIN_NEXT_COOKIE_NAME}=,`)
+      );
+    }
+
+    it("既存ユーザーは戻り先 Cookie のページへ戻り、Cookie は消す", async () => {
+      mockSessionClient(createSessionClient());
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(
+        createAdminClient({ existingUser: { id: 1, status: "trial", is_deleted: false } }) as never
+      );
+
+      const res = await GET(callbackRequestWithNext("/playground/t/abcdefghij"));
+
+      expect(res.headers.get("location")).toBe("http://localhost/playground/t/abcdefghij");
+      expect(setCookieHeader(res)).toContain("sb-access-token=token");
+      expectNextCookieDeleted(res);
+    });
+
+    it("同意ありの初回登録も戻り先へ戻る", async () => {
+      mockSessionClient(createSessionClient());
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(createAdminClient() as never);
+
+      const res = await GET(callbackRequestWithNext("/playground", { consent: true }));
+
+      expect(res.headers.get("location")).toBe("http://localhost/playground");
+      expectNextCookieDeleted(res);
+    });
+
+    it("同意なしの初回登録は、戻り先を付けたまま /login へ戻す", async () => {
+      mockSessionClient(createSessionClient());
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(createAdminClient() as never);
+
+      const res = await GET(callbackRequestWithNext("/playground/t/abcdefghij"));
+
+      const location = new URL(res.headers.get("location") ?? "");
+      expect(location.pathname).toBe("/login");
+      expect(location.searchParams.get("error")).toBe("terms_required");
+      expect(location.searchParams.get("next")).toBe("/playground/t/abcdefghij");
+      expectNextCookieDeleted(res);
+    });
+
+    it("却下済みユーザーは戻り先より /rejected を優先する", async () => {
+      mockSessionClient(createSessionClient());
+      vi.mocked(createAdminSupabaseClient).mockResolvedValue(
+        createAdminClient({
+          existingUser: { id: 1, status: "rejected", is_deleted: false },
+        }) as never
+      );
+
+      const res = await GET(callbackRequestWithNext("/playground"));
+
+      expect(res.headers.get("location")).toBe("http://localhost/rejected");
+    });
+
+    it("サイトの外を指す戻り先は無視して / へ戻す", async () => {
+      for (const next of ["https://evil.example/", "//evil.example", "/\\evil.example"]) {
+        vi.clearAllMocks();
+        mockSessionClient(createSessionClient());
+        vi.mocked(createAdminSupabaseClient).mockResolvedValue(
+          createAdminClient({
+            existingUser: { id: 1, status: "active", is_deleted: false },
+          }) as never
+        );
+
+        const res = await GET(callbackRequestWithNext(next));
+
+        expect(res.headers.get("location")).toBe("http://localhost/");
+      }
+    });
+  });
 });

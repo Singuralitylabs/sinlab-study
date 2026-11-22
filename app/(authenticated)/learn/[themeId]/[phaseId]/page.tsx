@@ -1,6 +1,7 @@
 import { BookOpen, CheckCircle } from "lucide-react";
 import Image from "next/image";
 import { notFound } from "next/navigation";
+import { AppendixBadge } from "@/app/components/AppendixBadge";
 import { PageTitle } from "@/app/components/PageTitle";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { PHASE_COMPLETION_MASCOT } from "@/app/constants/mascot";
@@ -70,6 +71,7 @@ export default async function PhasePage({ params }: PageProps) {
       id: p.id,
       name: p.name,
       display_order: p.display_order,
+      is_appendix: p.is_appendix,
     })),
     phaseIdNum
   );
@@ -115,7 +117,12 @@ export default async function PhasePage({ params }: PageProps) {
           { label: theme.name, href: `/learn/${themeIdNum}` },
           { label: phase.name },
         ]}
-        badge={<UnpublishedBadge isPublished={phase.is_published} />}
+        badge={
+          <>
+            <AppendixBadge isAppendix={phase.is_appendix} />
+            <UnpublishedBadge isPublished={phase.is_published} />
+          </>
+        }
       />
 
       {isPhaseCompleted ? (

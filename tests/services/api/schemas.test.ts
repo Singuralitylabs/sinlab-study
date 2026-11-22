@@ -21,6 +21,7 @@ import {
   ContentCreateSchema,
   ContentUpdateSchema,
   PhaseCreateSchema,
+  PhaseUpdateSchema,
   PositiveIntSchema,
   ProfileUpdateSchema,
   ProgressUpdateSchema,
@@ -279,6 +280,14 @@ describe("PhaseCreateSchema", () => {
     expect(
       PhaseCreateSchema.safeParse({ theme_id: 0, name: "フェーズ1", insert_after_id: null }).success
     ).toBe(false);
+  });
+
+  it("is_appendix は任意の真偽値で、真偽値以外は検証エラー（#556）", () => {
+    const base = { theme_id: 1, name: "付録", insert_after_id: null };
+    const parsed = PhaseCreateSchema.safeParse({ ...base, is_appendix: true });
+    expect(parsed.success && parsed.data.is_appendix).toBe(true);
+    expect(PhaseCreateSchema.safeParse({ ...base, is_appendix: "yes" }).success).toBe(false);
+    expect(PhaseUpdateSchema.safeParse({ is_appendix: false }).success).toBe(true);
   });
 });
 
@@ -713,10 +722,25 @@ describe("ContentCreateSchema / ContentUpdateSchema", () => {
         show_preview: true,
       }).success
     ).toBe(false);
+    // Python runs on Pyodide (#545): console only, like SQL.
     expect(
       ContentCreateSchema.safeParse({
         ...base,
         submission_file_slots: [{ filename: "main.py", language: "python" }],
+        show_console: true,
+      }).success
+    ).toBe(true);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "main.py", language: "python" }],
+        show_preview: true,
+      }).success
+    ).toBe(false);
+    expect(
+      ContentCreateSchema.safeParse({
+        ...base,
+        submission_file_slots: [{ filename: "run.sh", language: "bash" }],
         show_console: true,
       }).success
     ).toBe(false);

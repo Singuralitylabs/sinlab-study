@@ -9,6 +9,7 @@ import python from "highlight.js/lib/languages/python";
 import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
 import html from "highlight.js/lib/languages/xml";
+import yaml from "highlight.js/lib/languages/yaml";
 import { createLowlight } from "lowlight";
 import { ExternalLink } from "lucide-react";
 import { type ComponentPropsWithoutRef, memo } from "react";
@@ -16,6 +17,7 @@ import ReactMarkdown, { type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
 import { isExternalHref } from "@/app/lib/external-link";
+import hcl from "@/app/lib/highlight-hcl";
 import { resolveMarkdownImageWidth } from "@/app/lib/markdown-image-width";
 import { cn } from "@/lib/utils";
 
@@ -38,12 +40,16 @@ const lowlight = createLowlight({
   bash,
   sql,
   markdown,
+  yaml,
+  hcl,
 });
 lowlight.registerAlias({
   html: ["xml"],
   javascript: ["js", "gas"],
   typescript: ["ts"],
   bash: ["sh", "shell"],
+  yaml: ["yml"],
+  hcl: ["terraform", "tf"],
 });
 
 const languageClassPrefix = "language-";

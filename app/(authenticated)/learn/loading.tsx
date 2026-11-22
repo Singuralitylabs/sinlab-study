@@ -1,17 +1,14 @@
+import { PageTitleSkeleton } from "@/app/components/skeletons";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function LearnLoading() {
   return (
-    <div className="max-w-4xl mx-auto">
-      {/* PageTitle skeleton */}
-      <div className="mb-6">
-        <Skeleton className="h-8 w-48 mb-2" />
-        <Skeleton className="h-4 w-64" />
-      </div>
+    <div className="max-w-5xl mx-auto">
+      <PageTitleSkeleton />
 
-      <div className="grid gap-6 sm:grid-cols-2">
-        {[1, 2, 3, 4].map((i) => (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {[1, 2, 3, 4, 5, 6].map((i) => (
           <Card key={i} className="overflow-hidden">
             <Skeleton className="aspect-[16/9] w-full rounded-none" />
             <div className="p-5">

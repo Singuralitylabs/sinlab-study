@@ -2,6 +2,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("next/font/google", () => ({
+  Noto_Serif_JP: () => ({ className: "font-serif-jp", style: { fontFamily: "Serif JP" } }),
+  Cormorant_Garamond: () => ({ className: "font-latin-serif", style: { fontFamily: "Latin" } }),
+}));
 vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/api/certificates-server");
 vi.mock("@/app/(authenticated)/certificates/[id]/PrintButton", () => ({
@@ -9,7 +13,14 @@ vi.mock("@/app/(authenticated)/certificates/[id]/PrintButton", () => ({
 }));
 
 import CertificateDetailPage from "@/app/(authenticated)/certificates/[id]/page";
-import { fetchMyCertificateById } from "@/app/services/api/certificates-server";
+import {
+  buildCertificateThemeColors,
+  resolveCertificateColors,
+} from "@/app/lib/certificate-palette";
+import {
+  fetchCertificateThemeColor,
+  fetchMyCertificateById,
+} from "@/app/services/api/certificates-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 
 const certificate = {
@@ -35,6 +46,7 @@ beforeEach(() => {
     userRole: "member",
   } as never);
   vi.mocked(fetchMyCertificateById).mockResolvedValue({ data: certificate, error: null });
+  vi.mocked(fetchCertificateThemeColor).mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -54,7 +66,7 @@ describe("/certificates/[id]", () => {
     const html = await render("31");
 
     expect(fetchMyCertificateById).toHaveBeenCalledWith(2, 31);
-    expect(html).toContain("山田 太郎");
+    expect(html.replace(/<[^>]+>/g, "")).toContain("山田 太郎殿");
     expect(html).toContain("GAS 学習（基礎編）");
     expect(html).toContain("SS-202610-ABC123");
     expect(html).toContain("印刷 / PDF で保存");
@@ -70,6 +82,31 @@ describe("/certificates/[id]", () => {
       error: null,
     });
     expect(await render("31")).toContain("お祝いするシンラビ");
+  });
+
+  it("テーマカラーがあれば、その色から作った額縁の色で描く", async () => {
+    vi.mocked(fetchCertificateThemeColor).mockResolvedValue("#3B77D8");
+
+    const html = await render("31");
+
+    expect(fetchCertificateThemeColor).toHaveBeenCalledWith(5);
+    expect(html).toContain(`border-color:${buildCertificateThemeColors("#3B77D8")?.frame}`);
+  });
+
+  it("テーマカラーが無ければ、theme_id の色から作った額縁の色で描く", async () => {
+    const html = await render("31");
+
+    expect(html).toContain(`border-color:${resolveCertificateColors(5, null).frame}`);
+  });
+
+  it("「殿」は名前の最後の1文字と同じ行に置く（「殿」だけが改行されない）", async () => {
+    expect(await render("31")).toMatch(
+      /<span class="whitespace-nowrap">郎<span[^>]*>殿<\/span><\/span>/
+    );
+  });
+
+  it("発行日は年月日の形（JST）で印字する", async () => {
+    expect(await render("31")).toContain("2026年10月4日");
   });
 
   it("右上にサービスのロゴを表示する", async () => {

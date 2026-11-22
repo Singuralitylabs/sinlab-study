@@ -6,6 +6,7 @@ import {
   type NotificationEmailResult,
 } from "@/app/constants/settings";
 import { USER_ROLE } from "@/app/constants/user";
+import { isWebPushConfigured, webPushPublicKey } from "@/app/lib/web-push-config";
 import { fetchNotificationEmailState } from "@/app/services/api/notification-email-server";
 import { fetchUserEmailOptOutAt } from "@/app/services/api/user-email-server";
 import { fetchUserDisplayName } from "@/app/services/api/user-profile-server";
@@ -97,6 +98,7 @@ export default async function SettingsPage({
         isMailTarget={isMailTarget}
         membershipType={membershipType}
         userStatus={userStatus}
+        pushPublicKey={isWebPushConfigured() ? webPushPublicKey() : null}
       />
     </div>
   );

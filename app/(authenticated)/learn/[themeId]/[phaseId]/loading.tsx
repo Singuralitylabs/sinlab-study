@@ -1,34 +1,22 @@
-import { Card, CardContent } from "@/components/ui/card";
+import { PageTitleSkeleton } from "@/app/components/skeletons";
+import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function PhaseLoading() {
   return (
     <div className="max-w-4xl mx-auto">
-      {/* PageTitle + breadcrumbs skeleton */}
-      <div className="mb-6">
-        <Skeleton className="h-4 w-64 mb-3" />
-        <Skeleton className="h-8 w-48 mb-2" />
-        <Skeleton className="h-4 w-72" />
-      </div>
+      <PageTitleSkeleton breadcrumbs />
+      <Skeleton className="-mt-3 mb-6 h-4 w-20" />
 
-      <div className="grid gap-4">
-        {[1, 2].map((item) => (
-          <Card key={item}>
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-3 mb-4">
-                <Skeleton className="h-8 w-8 rounded-full" />
-                <Skeleton className="h-6 w-32" />
-              </div>
-              <div className="space-y-2 ml-11">
-                {[1, 2, 3].map((content) => (
-                  <div key={content} className="flex items-center gap-3 py-2">
-                    <Skeleton className="h-4 w-4 rounded-full shrink-0" />
-                    <Skeleton className="h-4 flex-1" />
-                    <Skeleton className="h-5 w-12 rounded-full" />
-                  </div>
-                ))}
-              </div>
-            </CardContent>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {[1, 2, 3, 4, 5, 6].map((i) => (
+          <Card key={i} className="gap-0 overflow-hidden py-0">
+            <Skeleton className="aspect-video w-full rounded-none" />
+            <div className="space-y-2 p-3">
+              <Skeleton className="h-5 w-20" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-2/3" />
+            </div>
           </Card>
         ))}
       </div>

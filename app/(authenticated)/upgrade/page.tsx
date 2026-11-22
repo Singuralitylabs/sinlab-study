@@ -140,7 +140,11 @@ export default async function UpgradePage() {
     <div className="max-w-3xl mx-auto">
       <PageTitle
         title={PLAN_PAGE_TITLE}
-        description="会員プランの内容と、お申し込み・契約状況を確認できます"
+        description={
+          stripeEnabled
+            ? "会員プランの内容と、お申し込み・契約状況を確認できます"
+            : "現在のプランを確認できます"
+        }
       />
 
       <div className="mt-6 space-y-6">
