@@ -1,4 +1,4 @@
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { describe, expect, it } from "vitest";
 import { checkJson, checkYaml, lineColumnAt } from "@/app/lib/playground-data";
 
