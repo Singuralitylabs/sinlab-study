@@ -13,7 +13,7 @@ import { SubmissionCodeBlock } from "@/app/components/SubmissionCodeBlock";
 import { UpgradeBenefitsList, UpgradeCta } from "@/app/components/TrialUpgradePrompt";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { VideoContent } from "@/app/components/VideoContent";
-import { isAiChatEnabled } from "@/app/constants/ai-chat";
+import { aiChatKindOf, isAiChatEnabled } from "@/app/constants/ai-chat";
 import { ANALYTICS_EVENT, UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
@@ -240,13 +240,14 @@ export default async function ContentPage({ params }: PageProps) {
     notFound();
   }
 
-  // Same gate as POST /api/ai-chat: learners on published article / exercise pages only (an
+  // Same gate as POST /api/ai-chat (aiChatKindOf): learners on published pages only (an
   // unpublished preview would always get 403 from isContentVisible()).
+  const aiChatKind = aiChatKindOf(content);
   const showsAiChat =
     isAiChatEnabled() &&
     Boolean(userId) &&
     isFullyPublished &&
-    (content.content_type === "text" || content.content_type === "exercise") &&
+    aiChatKind !== null &&
     (userStatus === USER_STATUS.ACTIVE || userStatus === USER_STATUS.TRIAL);
 
   const showsAIReviewLimit =
@@ -689,12 +690,12 @@ export default async function ContentPage({ params }: PageProps) {
         // Spacer: the floating button must not cover the prev / next links at the bottom.
         <div aria-hidden="true" className="h-16" />
       )}
-      {showsAiChat && (
+      {showsAiChat && aiChatKind && (
         // Keyed by content so moving to another content starts an empty conversation.
         <AiChatPanel
           key={contentIdNum}
           contentId={contentIdNum}
-          contentType={content.content_type === "text" ? "text" : "exercise"}
+          contentType={aiChatKind}
           stripeEnabled={stripeEnabled}
           canSave={showReviewListNotes}
         />

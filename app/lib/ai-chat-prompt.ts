@@ -4,6 +4,7 @@ import {
   AI_CHAT_HISTORY_MAX_MESSAGES,
   AI_CHAT_REVIEW_COMMENT_MAX_CHARS,
   AI_CHAT_SUBMISSION_MAX_CHARS,
+  type AiChatKind,
 } from "@/app/constants/ai-chat";
 import type { RequirementStatus } from "@/app/constants/grading";
 import type { CodeFile, ReviewRequirementResult } from "@/app/types";
@@ -52,7 +53,8 @@ export interface ChatContentContext {
   themeName: string | null;
   phaseName: string | null;
   title: string;
-  contentType: "text" | "exercise";
+  /** A slide carrying an article (#589) is "text": the learner reads it as an article. */
+  contentType: AiChatKind;
   textContent: string | null;
   exerciseInstructions: string | null;
   hint: string | null;
