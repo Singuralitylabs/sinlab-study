@@ -93,7 +93,7 @@ from (
     -- Trigger function: REVOKE ALL FROM PUBLIC, anon (authenticated is not documented)
     ('public.keep_user_progress_ever_completed()', 'anon', false),
     ('public.enforce_user_progress_review_pass()', 'anon', false),
-    -- Keepalive RPC for the scheduled workflow: anon only (no table access)
+    -- Keepalive RPC for the scheduled workflow: anon may call it, signed-in users may not
     ('public.keepalive()', 'anon', true),
     ('public.keepalive()', 'authenticated', false),
     ('public.keepalive()', 'service_role', true),
