@@ -422,6 +422,7 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 - `anon` には `public` のテーブル・シーケンスの権限を一切与えない（アプリは未認証でテーブルを読み書きしない。未認証の画面は `auth` の呼び出しだけで、`/demo` は service_role）。`postgres` が作る新しいテーブル・シーケンスにも付かないよう既定の付与を外してあるので、列を足すときの `GRANT SELECT (列)` も `authenticated` だけに書く
 - `authenticated` には `TRUNCATE` / `REFERENCES` / `TRIGGER` を与えない（`TRUNCATE` は RLS が効かない）。こちらも既定の付与から外してある
 - ポリシーが0本で service_role だけが使うテーブル（`email_logs` `cron_locks` `stripe_events` `push_subscriptions` `push_logs` `feedbacks` `email_test_sends` `ai_review_limit_resets`）は `authenticated` の権限も外す。この形のテーブルを足すときは、作成する migration で同じく `REVOKE ALL ... FROM authenticated` する
+- `anon` が EXECUTE できる関数は `keepalive()`（`SELECT 1` を返すだけで表を読まない）だけ。Supabase Keepalive ワークフロー（`.github/workflows/supabase-keepalive.yml`）が publishable key で `POST /rest/v1/rpc/keepalive` を毎日呼び、無料プランの自動停止を防ぐ（#591）。到達先を変えるときは、このワークフローも直す
 - 検証は `supabase/tests/database/table_privileges.test.sql`（CI の DB Privileges Test）
 
 ### 6.1 学習コンテンツ系テーブル

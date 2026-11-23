@@ -1485,6 +1485,7 @@ export type Database = {
           question_type: string;
         }[];
       };
+      keepalive: { Args: never; Returns: number };
       learning_content_requires_review_pass: {
         Args: { p_content_id: number };
         Returns: boolean;
