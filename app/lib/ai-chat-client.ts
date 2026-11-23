@@ -1,4 +1,4 @@
-import { AI_CHAT_HISTORY_MAX_MESSAGES } from "@/app/constants/ai-chat";
+import { AI_CHAT_HISTORY_MAX_MESSAGES, type AiChatKind } from "@/app/constants/ai-chat";
 import type { ChatUsageSummary } from "./ai-chat-limits";
 
 export interface ChatTurn {
@@ -31,7 +31,8 @@ export function formatChatRemaining(usage: ChatUsageSummary): string {
 }
 
 /** Starter questions shown before the first message; tapping one fills the input. */
-export function chatSuggestions(contentType: "text" | "exercise"): string[] {
+/** A slide with an article (#589) arrives as "text", so it gets the article suggestions. */
+export function chatSuggestions(contentType: AiChatKind): string[] {
   return contentType === "text"
     ? [
         "この記事の要点を3行で教えて",

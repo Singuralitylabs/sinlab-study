@@ -5,7 +5,7 @@ import Image from "next/image";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer";
 import { UpgradeCtaLink } from "@/app/components/UpgradeCtaLink";
-import { AI_CHAT_MESSAGE_MAX_LENGTH } from "@/app/constants/ai-chat";
+import { AI_CHAT_MESSAGE_MAX_LENGTH, type AiChatKind } from "@/app/constants/ai-chat";
 import { UPGRADE_CTA_SOURCE } from "@/app/constants/analytics";
 import { HINT_MASCOT } from "@/app/constants/mascot";
 import { UPGRADE_APPROVAL_NOTICE } from "@/app/constants/stripe";
@@ -23,7 +23,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 
 interface AiChatPanelProps {
   contentId: number;
-  contentType: "text" | "exercise";
+  contentType: AiChatKind;
   stripeEnabled: boolean;
   /** Only members have /review-list, so admin / maintainer get no save button (nowhere to read it). */
   canSave: boolean;

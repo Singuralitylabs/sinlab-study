@@ -152,10 +152,20 @@ describe("POST /api/ai-chat - 有効・無効と認可", () => {
     expect(claimAIChat).not.toHaveBeenCalled();
   });
 
-  it.each(["video", "slide", "quiz"])("%s のコンテンツは 400", async (type) => {
+  it.each(["video", "quiz"])("%s のコンテンツは 400", async (type) => {
     vi.mocked(fetchVisibleContentForChat).mockResolvedValue({
       ...articleContent,
       content_type: type,
+    } as never);
+    expect((await post(valid)).status).toBe(400);
+    expect(claimAIChat).not.toHaveBeenCalled();
+  });
+
+  it.each([null, "", "  \n"])("記事（text_content）の無いスライド（%j）は 400", async (text) => {
+    vi.mocked(fetchVisibleContentForChat).mockResolvedValue({
+      ...articleContent,
+      content_type: "slide",
+      text_content: text,
     } as never);
     expect((await post(valid)).status).toBe(400);
     expect(claimAIChat).not.toHaveBeenCalled();
@@ -289,6 +299,21 @@ describe("POST /api/ai-chat - 回数制限と Gemini", () => {
     const { contents } = vi.mocked(generateChatReply).mock.calls[0][0];
     expect(contents).toContain("<p>x</p>");
     expect(contents).toContain("ボタンを置く");
+  });
+
+  it("記事のあるスライドは記事として答え、text_content をプロンプトに入れる", async () => {
+    vi.mocked(fetchVisibleContentForChat).mockResolvedValue({
+      ...articleContent,
+      content_type: "slide",
+      text_content: "スライドの解説記事",
+    } as never);
+    expect((await post(valid)).status).toBe(200);
+    expect(claimAIChat).toHaveBeenCalled();
+    expect(fetchLatestSubmissionForChat).not.toHaveBeenCalled();
+    const { contents } = vi.mocked(generateChatReply).mock.calls[0][0];
+    expect(contents).toContain("種別: 記事");
+    expect(contents).toContain("## 記事の本文");
+    expect(contents).toContain("スライドの解説記事");
   });
 
   it("記事では提出を取りに行かない", async () => {
