@@ -31,14 +31,22 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (!validation.success) {
       return validation.response;
     }
-    const { name, description, insert_after_id, is_published, image_url, theme_color } =
-      validation.data;
+    const {
+      name,
+      description,
+      insert_after_id,
+      is_published,
+      is_coming_soon,
+      image_url,
+      theme_color,
+    } = validation.data;
 
     const { error } = await updateTheme(themeId, {
       name,
       description,
       insertAfterId: insert_after_id,
       is_published,
+      is_coming_soon,
       image_url,
       theme_color,
     });

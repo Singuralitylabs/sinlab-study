@@ -1,10 +1,10 @@
-import { Award, BookOpen, CheckCircle, Clock } from "lucide-react";
+import { Award, BookOpen, CheckCircle, Clock, Hourglass } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { isThemeCompleted } from "@/app/lib/certificate";
 import { resolveStorageUrl } from "@/app/lib/storage-url";
-import type { ThemeProgressSummary } from "@/app/services/api/learning-server";
+import type { ComingSoonTheme, ThemeProgressSummary } from "@/app/services/api/learning-server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 
@@ -168,6 +168,49 @@ export function ThemeCard({
       {certificateHref && (
         <CertificateFooter href={certificateHref} className="px-4 py-2 sm:px-6" />
       )}
+    </Card>
+  );
+}
+
+/**
+ * Not-yet-released theme on /learn (#593). Deliberately not a Link: the theme's phases and
+ * contents are hidden by RLS, so a link would only lead to a 404. Never shows a release date.
+ */
+export function ComingSoonThemeCard({ theme }: { theme: ComingSoonTheme }) {
+  return (
+    <Card
+      aria-disabled="true"
+      className="h-full gap-6 overflow-hidden border-dashed bg-muted/40 opacity-70"
+    >
+      <div className="relative aspect-video w-full bg-linear-to-br from-muted to-muted/60 grayscale">
+        {theme.image_url ? (
+          <Image
+            src={resolveStorageUrl(theme.image_url)}
+            alt={theme.name}
+            fill
+            className="object-contain"
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <BookOpen className="h-10 w-10 text-muted-foreground/40" />
+          </div>
+        )}
+      </div>
+      <CardContent className="pt-4 pb-4 space-y-2">
+        <div className="flex items-start gap-2 min-w-0">
+          <Hourglass className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <h3 className="font-medium text-muted-foreground">{theme.name}</h3>
+            <p className="text-sm mt-0.5 font-medium italic text-muted-foreground">
+              coming soon...
+            </p>
+          </div>
+        </div>
+        {theme.description && (
+          <p className="text-sm text-muted-foreground line-clamp-2">{theme.description}</p>
+        )}
+      </CardContent>
     </Card>
   );
 }

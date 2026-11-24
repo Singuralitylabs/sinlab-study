@@ -16,6 +16,7 @@ const tree: ContentTreeThemeNode[] = [
     id: 1,
     name: "テーマ1",
     isPublished: true,
+    isComingSoon: false,
     displayOrder: 1,
     phases: [
       {

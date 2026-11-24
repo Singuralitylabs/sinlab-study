@@ -26,14 +26,22 @@ export async function POST(request: NextRequest) {
     if (!validation.success) {
       return validation.response;
     }
-    const { name, description, insert_after_id, is_published, image_url, theme_color } =
-      validation.data;
+    const {
+      name,
+      description,
+      insert_after_id,
+      is_published,
+      is_coming_soon,
+      image_url,
+      theme_color,
+    } = validation.data;
 
     const { data, error } = await createTheme({
       name,
       description,
       insertAfterId: insert_after_id,
       is_published,
+      is_coming_soon,
       image_url,
       theme_color,
     });
