@@ -30,6 +30,7 @@ export type ContentTreeThemeNode = {
   id: number;
   name: string;
   isPublished: boolean;
+  isComingSoon: boolean;
   displayOrder: number | null;
   phases: ContentTreePhaseNode[];
 };
@@ -96,6 +97,7 @@ export function buildContentTree(
     id: theme.id,
     name: theme.name,
     isPublished: theme.is_published,
+    isComingSoon: theme.is_coming_soon,
     displayOrder: theme.display_order,
     phases: phasesByTheme.get(theme.id) ?? [],
   }));

@@ -10,6 +10,7 @@ function makeTheme(overrides: Partial<ManageThemeListItem> & { id: number }): Ma
     image_url: overrides.image_url ?? null,
     display_order: overrides.display_order ?? 0,
     is_published: overrides.is_published ?? true,
+    is_coming_soon: overrides.is_coming_soon ?? false,
   };
 }
 

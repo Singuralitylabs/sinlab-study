@@ -217,6 +217,31 @@ export async function fetchPublishedThemes(userRole: UserRoleType | null = null)
   return { data, error: null };
 }
 
+/**
+ * Not the generated RPC type: it marks every column non-null, but description / image_url /
+ * display_order can be NULL.
+ */
+export type ComingSoonTheme = Pick<LearningTheme, "id" | "name" | "description" | "image_url"> & {
+  display_order: number | null;
+};
+
+/**
+ * Unpublished themes flagged as coming soon, headings only (#593). Goes through the
+ * get_coming_soon_themes() RPC instead of widening learning_themes RLS, which would leak
+ * unpublished themes into the tree / progress queries that rely on RLS for learners. Managers
+ * already see these rows via fetchPublishedThemes, so callers skip this for them. Errors degrade
+ * to an empty list: the section is decorative and must not break /learn.
+ */
+export async function fetchComingSoonThemes(): Promise<ComingSoonTheme[]> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase.rpc("get_coming_soon_themes");
+  if (error) {
+    console.error("準備中テーマ取得エラー:", error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
 export interface ThemeProgressSummary {
   theme: LearningTheme;
   totalContents: number;

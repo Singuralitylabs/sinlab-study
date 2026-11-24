@@ -30,6 +30,7 @@ const theme: LearningTheme = {
   theme_color: null,
   display_order: 1,
   is_published: true,
+  is_coming_soon: false,
   is_deleted: false,
   created_at: null,
   updated_at: null,
@@ -99,6 +100,7 @@ describe("ThemeForm / PhaseForm delete links (#465)", () => {
               image_url: null,
               display_order: 1,
               is_published: true,
+              is_coming_soon: false,
             },
           ]}
           initialData={phase}

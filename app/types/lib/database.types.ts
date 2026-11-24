@@ -851,6 +851,7 @@ export type Database = {
           hero_image_url: string | null;
           id: number;
           image_url: string | null;
+          is_coming_soon: boolean;
           is_deleted: boolean | null;
           is_published: boolean | null;
           name: string;
@@ -864,6 +865,7 @@ export type Database = {
           hero_image_url?: string | null;
           id?: number;
           image_url?: string | null;
+          is_coming_soon?: boolean;
           is_deleted?: boolean | null;
           is_published?: boolean | null;
           name: string;
@@ -877,6 +879,7 @@ export type Database = {
           hero_image_url?: string | null;
           id?: number;
           image_url?: string | null;
+          is_coming_soon?: boolean;
           is_deleted?: boolean | null;
           is_published?: boolean | null;
           name?: string;
@@ -1428,6 +1431,16 @@ export type Database = {
       content_visible_to_caller: {
         Args: { p_content_id: number; p_content_type: string };
         Returns: boolean;
+      };
+      get_coming_soon_themes: {
+        Args: never;
+        Returns: {
+          description: string;
+          display_order: number;
+          id: number;
+          image_url: string;
+          name: string;
+        }[];
       };
       get_exercise_reference_answer: {
         Args: { p_content_id: number };

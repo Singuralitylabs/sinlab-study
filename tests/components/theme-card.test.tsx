@@ -3,7 +3,10 @@
  */
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ThemeCard } from "@/app/(authenticated)/components/ThemeProgressSections";
+import {
+  ComingSoonThemeCard,
+  ThemeCard,
+} from "@/app/(authenticated)/components/ThemeProgressSections";
 import type { ThemeProgressSummary } from "@/app/services/api/learning-server";
 
 const baseSummary: ThemeProgressSummary = {
@@ -16,6 +19,7 @@ const baseSummary: ThemeProgressSummary = {
     theme_color: null,
     display_order: 1,
     is_published: true,
+    is_coming_soon: false,
     is_deleted: false,
     created_at: null,
     updated_at: null,
@@ -79,5 +83,26 @@ describe("ThemeCard", () => {
       <ThemeCard summary={baseSummary} layout="card" certificatesHref="/certificates" />
     );
     expect(html).not.toContain("修了証を見る");
+  });
+});
+
+describe("ComingSoonThemeCard (#593)", () => {
+  const theme = {
+    id: 9,
+    name: "準備中テーマ",
+    description: "準備中の説明",
+    image_url: null,
+    display_order: 5,
+  };
+
+  it("名前・説明・coming soon を出し、リンクにしない", () => {
+    const html = renderToStaticMarkup(<ComingSoonThemeCard theme={theme} />);
+    const root = new DOMParser().parseFromString(html, "text/html").body;
+    expect(root.textContent).toContain("準備中テーマ");
+    expect(root.textContent).toContain("準備中の説明");
+    expect(root.textContent).toContain("coming soon...");
+    expect(root.querySelector("a")).toBeNull();
+    expect(root.querySelector('[data-slot="card"]')?.getAttribute("aria-disabled")).toBe("true");
+    expect(root.querySelector('[data-slot="progress"]')).toBeNull();
   });
 });

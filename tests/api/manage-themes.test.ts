@@ -114,6 +114,40 @@ describe("テーマカラー（theme_color）", () => {
   });
 });
 
+describe("準備中として表示（is_coming_soon） (#593)", () => {
+  const params = Promise.resolve({ id: "1" });
+
+  it("POST は is_coming_soon を作成処理へ渡す", async () => {
+    const res = await POST(
+      request({ name: "テーマ1", insert_after_id: null, is_coming_soon: true }) as never
+    );
+
+    expect(res.status).toBe(200);
+    expect(createTheme).toHaveBeenCalledWith(expect.objectContaining({ is_coming_soon: true }));
+  });
+
+  it("PUT は is_coming_soon を更新処理へ渡し、省略時は undefined（今の値を変えない）", async () => {
+    await PUT(request({ is_coming_soon: false }) as never, { params });
+    expect(updateTheme).toHaveBeenLastCalledWith(
+      1,
+      expect.objectContaining({ is_coming_soon: false })
+    );
+
+    await PUT(request({ name: "テーマ1" }) as never, { params });
+    expect(updateTheme).toHaveBeenLastCalledWith(
+      1,
+      expect.objectContaining({ is_coming_soon: undefined })
+    );
+  });
+
+  it("真偽値でなければ400で、更新処理を呼ばない", async () => {
+    const res = await PUT(request({ is_coming_soon: "true" }) as never, { params });
+
+    expect(res.status).toBe(400);
+    expect(updateTheme).not.toHaveBeenCalled();
+  });
+});
+
 describe("PUT /api/manage/themes/[id] - バリデーション", () => {
   const params = Promise.resolve({ id: "1" });
 

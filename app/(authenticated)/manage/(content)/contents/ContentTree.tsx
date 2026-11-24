@@ -66,6 +66,14 @@ function PublishedBadge({ isPublished }: { isPublished: boolean }) {
   );
 }
 
+function ComingSoonBadge() {
+  return (
+    <Badge variant="outline" className="shrink-0">
+      準備中として表示
+    </Badge>
+  );
+}
+
 function readStoredExpandKeys(): string[] {
   if (typeof window === "undefined") return [];
   try {
@@ -199,6 +207,7 @@ export function ContentTree({
                       <span className="truncate">{theme.name}</span>
                     </button>
                     <PublishedBadge isPublished={theme.isPublished} />
+                    {!theme.isPublished && theme.isComingSoon && <ComingSoonBadge />}
                     <div className="flex flex-wrap gap-1 ml-auto">
                       <Button asChild variant="outline" size="sm">
                         <Link href={`/manage/themes/${theme.id}/edit`} prefetch={false}>
