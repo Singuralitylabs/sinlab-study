@@ -30,10 +30,11 @@ export function TrialCheckoutDetails({
           月額サブスクリプション（自動更新）です。解約手続きをしない限り、毎月自動で更新・請求されます
         </li>
         <li>お申し込み時に、初回分として1か月分の料金をお支払いいただきます</li>
-        {/* Stripe counts months in UTC, so a signup before 09:00 JST on the 29th-31st can renew on
-            the 1st of the next JST month; hence "around month-end", not "the last day". */}
+        {/* Stripe counts months in UTC, so a signup before 09:00 JST renews on a JST date that can
+            differ from the signup day (1st -> previous month's end; 29th-31st -> next month's 1st).
+            Hence no promise of "the same day". */}
         <li>
-          以後は毎月、お申し込み日と同じ日が更新日となり、引き落としが行われます（その日がない月は月末前後の日）。次回のお支払い日は、お申し込み後に本画面で確認できます
+          以後は1か月ごとに自動で更新・請求されます（更新日はお申し込み日と同じ日が基本ですが、月の日数やお申し込みの時刻によって前後することがあります）。次回のお支払い日は、お申し込み後に本画面で確認できます
         </li>
         <li>
           解約は、本画面（{PLAN_PAGE_TITLE}）の「{MANAGE_SUBSCRIPTION_BUTTON_LABEL}

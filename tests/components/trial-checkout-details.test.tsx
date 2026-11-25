@@ -53,7 +53,7 @@ describe("TrialCheckoutDetails", () => {
     );
 
     expect(html).toContain("お申し込み時に、初回分として1か月分の料金をお支払いいただきます");
-    expect(html).toContain("以後は毎月、お申し込み日と同じ日が更新日となり");
+    expect(html).toContain("以後は1か月ごとに自動で更新・請求されます");
     expect(html).toContain(CANCELLATION_POLICY_TEXT);
     expect(html).not.toContain("全員一律");
     expect(html).not.toContain("日割り料金");
