@@ -1,5 +1,4 @@
 import {
-  BILLING_ANCHOR_DAY_OF_MONTH,
   CANCELLATION_POLICY_TEXT,
   MANAGE_SUBSCRIPTION_BUTTON_LABEL,
   PLAN_PAGE_TITLE,
@@ -30,13 +29,11 @@ export function TrialCheckoutDetails({
         <li>
           月額サブスクリプション（自動更新）です。解約手続きをしない限り、毎月自動で更新・請求されます
         </li>
+        <li>お申し込み時に、初回分として1か月分の料金をお支払いいただきます</li>
+        {/* Stripe counts months in UTC, so a signup before 09:00 JST on the 29th-31st can renew on
+            the 1st of the next JST month; hence "around month-end", not "the last day". */}
         <li>
-          お支払いは全員一律で毎月{BILLING_ANCHOR_DAY_OF_MONTH}
-          日です。この日が更新日となり、引き落としが行われます
-        </li>
-        <li>
-          初回のみ、ご登録日から次回のお支払い日（{BILLING_ANCHOR_DAY_OF_MONTH}
-          日）までの日割り料金となります（登録タイミングによっては初回分が発生しない場合があります）
+          以後は毎月、お申し込み日と同じ日が更新日となり、引き落としが行われます（その日がない月は月末前後の日）。次回のお支払い日は、お申し込み後に本画面で確認できます
         </li>
         <li>
           解約は、本画面（{PLAN_PAGE_TITLE}）の「{MANAGE_SUBSCRIPTION_BUTTON_LABEL}

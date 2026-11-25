@@ -67,9 +67,9 @@ export default async function UpgradeSuccessPage({
           errorMessage = "このお申し込みは現在有効ではありません";
         } else {
           succeeded = true;
-          // Right after a small prorated charge, show the next full-charge date to reduce
-          // inquiries. activateUserFromCheckoutSession() already returns the value fetched from
-          // Stripe, so no DB re-read.
+          // The renewal date depends on the signup moment, so show it here to reduce inquiries.
+          // activateUserFromCheckoutSession() already returns the value fetched from Stripe, so
+          // no DB re-read.
           if (currentPeriodEnd) {
             nextBillingDateLabel = formatDate(currentPeriodEnd);
           }
