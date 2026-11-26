@@ -58,7 +58,6 @@ import {
   createCheckoutSessionForUser,
   fetchStripeSubscriptionByUserId,
   fetchSubscriptionPrice,
-  isProrationBelowMinimum,
   isStripeEnabled,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
   releaseCheckoutSlot,
@@ -212,8 +211,7 @@ function createRaceSupabaseClient(initialRow?: Partial<FakeSubscriptionRow>) {
 }
 
 // The module-scope price cache (5 min TTL) must not leak between tests, so advance the fake clock
-// 10 minutes per test. Explicit `now` args (anchor computation) don't use Date.now() and are
-// unaffected.
+// 10 minutes per test. Explicit `now` args don't use Date.now() and are unaffected.
 let fakeNowMs = new Date("2099-01-01T00:00:00.000Z").getTime();
 
 beforeEach(() => {
@@ -271,8 +269,6 @@ describe("fetchStripeSubscriptionByUserId", () => {
 });
 
 describe("createCheckoutSession", () => {
-  // Mid-month fixed time: far from the anchor, so proration isn't below the minimum. Override for
-  // boundary tests.
   const midMonth = new Date("2026-08-10T00:00:00.000Z");
   /** Checkout Session lifetime: Stripe minimum 30 min + 2 min margin. */
   const sessionLifetimeMs = 32 * 60 * 1000;
@@ -280,7 +276,6 @@ describe("createCheckoutSession", () => {
   beforeEach(() => {
     mockSessionsCreate.mockReset();
     mockPricesRetrieve.mockReset();
-    mockPrice();
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_dummy");
     vi.stubEnv("STRIPE_PRICE_ID", "price_dummy");
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://example.com");
@@ -322,37 +317,25 @@ describe("createCheckoutSession", () => {
     expect(params.allowed_payment_method_types).toEqual(["card"]);
   });
 
-  it("billing_cycle_anchor_configを定数どおりに渡す", async () => {
+  it("請求サイクルを契約日時から始め、初回から満額にする（アンカー・日割りの指定を渡さない）", async () => {
     mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
 
     await createCheckoutSession(5, "auth-uuid", "cus_existing", midMonth);
 
     const params = mockSessionsCreate.mock.calls[0][0];
-    expect(params.subscription_data.billing_cycle_anchor_config).toEqual({
-      day_of_month: 27,
-      hour: 0,
-      minute: 0,
-      second: 0,
+    expect(params.subscription_data).toEqual({
+      metadata: { user_id: "5", auth_id: "auth-uuid" },
     });
+    expect(params).not.toHaveProperty("subscription_data.billing_cycle_anchor_config");
+    expect(params).not.toHaveProperty("subscription_data.proration_behavior");
   });
 
-  it("日割り額が最低請求額以上のときはproration_behaviorがcreate_prorationsになる", async () => {
+  it("Checkout作成時にPriceを取得しない（Price取得の失敗でCheckoutを止めない）", async () => {
     mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
 
     await createCheckoutSession(5, "auth-uuid", "cus_existing", midMonth);
 
-    const params = mockSessionsCreate.mock.calls[0][0];
-    expect(params.subscription_data.proration_behavior).toBe("create_prorations");
-  });
-
-  it("アンカー直前（日割り額が最低請求額を下回る）の登録はproration_behaviorがnoneになる", async () => {
-    mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
-    const justBeforeAnchor = new Date("2026-08-26T23:30:00.000Z");
-
-    await createCheckoutSession(5, "auth-uuid", "cus_existing", justBeforeAnchor);
-
-    const params = mockSessionsCreate.mock.calls[0][0];
-    expect(params.subscription_data.proration_behavior).toBe("none");
+    expect(mockPricesRetrieve).not.toHaveBeenCalled();
   });
 
   it("expires_atを常に32分後に固定する（claimのTTLより短く保ち二重契約の窓を塞ぐ）", async () => {
@@ -367,30 +350,6 @@ describe("createCheckoutSession", () => {
   it("Checkout Sessionの有効期限はclaimのTTLより短い（TTL経過時に古いセッションが必ず失効する）", () => {
     // The TTL is derived from the expiry, so this inequality holds structurally (regression guard).
     expect(sessionLifetimeMs).toBeLessThan(CHECKOUT_CLAIM_TTL_MS);
-  });
-
-  it("アンカー直前でもexpires_atは32分後（アンカーを跨ぐ猶予はStripeの最低30分要件の範囲内）", async () => {
-    mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
-    const justBeforeAnchor = new Date("2026-08-26T23:30:00.000Z");
-
-    await createCheckoutSession(5, "auth-uuid", "cus_existing", justBeforeAnchor);
-
-    const params = mockSessionsCreate.mock.calls[0][0];
-    expect(params.expires_at).toBe(
-      Math.floor(new Date("2026-08-27T00:02:00.000Z").getTime() / 1000)
-    );
-  });
-
-  it("Price取得に失敗した場合はcreate_prorationsにフォールバックし、Checkout作成自体は継続する", async () => {
-    mockPricesRetrieve.mockReset();
-    mockPricesRetrieve.mockRejectedValue(new Error("Stripe API一時エラー"));
-    mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
-
-    const result = await createCheckoutSession(5, "auth-uuid", "cus_existing", midMonth);
-
-    expect(result).toEqual({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
-    const params = mockSessionsCreate.mock.calls[0][0];
-    expect(params.subscription_data.proration_behavior).toBe("create_prorations");
   });
 
   it("Stripeのエラーはそのままthrowする（Customerの作り直しは呼び出し元の責務）", async () => {
@@ -1113,80 +1072,6 @@ describe("createCheckoutSessionForUser", () => {
         now
       )
     ).rejects.toMatchObject({ name: "CheckoutCreationError", claimReleasable: false });
-  });
-});
-
-describe("isProrationBelowMinimum", () => {
-  beforeEach(() => {
-    mockPricesRetrieve.mockReset();
-    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_dummy");
-    vi.stubEnv("STRIPE_PRICE_ID", "price_dummy");
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it("月中の登録では最低請求額を下回らない", async () => {
-    mockPrice();
-
-    const result = await isProrationBelowMinimum(new Date("2026-08-10T00:00:00.000Z"));
-
-    expect(result).toBe(false);
-  });
-
-  it("アンカー30分前の登録は最低請求額を下回る（遠く下回る側のサニティチェック）", async () => {
-    mockPrice();
-
-    const result = await isProrationBelowMinimum(new Date("2026-08-26T23:30:00.000Z"));
-
-    expect(result).toBe(true);
-  });
-
-  it("アンカー24時間前の登録は最低請求額を下回らない（遠く下回らない側のサニティチェック）", async () => {
-    mockPrice();
-
-    const result = await isProrationBelowMinimum(new Date("2026-08-26T00:00:00.000Z"));
-
-    expect(result).toBe(false);
-  });
-
-  it("日割り額がちょうど49円のとき（¥50未満の境界）はtrueを返す", async () => {
-    mockPrice();
-
-    // Boundary: July cycle is 31 days = 2,678,400,000 ms; remainingMs = 49 * 892,800 = 43,747,200
-    // ms gives a proration of exactly 49 yen (Math.round(49) = 49 < 50).
-    const result = await isProrationBelowMinimum(new Date("2026-08-26T11:50:52.800Z"));
-
-    expect(result).toBe(true);
-  });
-
-  it("日割り額がちょうど50円のとき（¥50ちょうどの境界）はfalseを返す", async () => {
-    mockPrice();
-
-    // remainingMs = 50 * 892,800 = 44,640,000 ms (12h24m) gives exactly 50 yen (not below, due to
-    // the strict `< 50`).
-    const result = await isProrationBelowMinimum(new Date("2026-08-26T11:36:00.000Z"));
-
-    expect(result).toBe(false);
-  });
-
-  it("JPY以外の通貨の場合は判定できないためfalseを返す", async () => {
-    mockPrice({ currency: "usd" });
-
-    const result = await isProrationBelowMinimum(new Date("2026-08-26T23:30:00.000Z"));
-
-    expect(result).toBe(false);
-  });
-
-  it("1ヶ月間隔でないPrice（誤設定）の場合は判定できないためfalseを返す", async () => {
-    mockPrice({ unitAmount: 30000, interval: "year" });
-
-    // Would normally be a tiny proration on a yearly price, but the monthly premise fails, so skip
-    // the check and return false.
-    const result = await isProrationBelowMinimum(new Date("2026-08-26T23:30:00.000Z"));
-
-    expect(result).toBe(false);
   });
 });
 

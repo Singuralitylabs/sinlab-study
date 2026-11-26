@@ -66,7 +66,7 @@ Next.js 16 App Router + Supabase。パッケージマネージャは **bun**（n
 - 有効・無効は `STRIPE_ENABLED`。判定は `isStripeEnabled()` に集約し、`"true"` 以外はフェイルクローズで無効。決済系の追加時は無効時の経路も用意する。
 - 認可は `users.status` / `membership_type` が唯一の真実。`users` にStripe関連カラムは足さず、課金状態は `stripe_subscriptions` のミラーで持つ。
 - **Checkout は「処理権の確保 → Customer の確保 → Stripe 呼び出し」の順を崩さない。** `claimCheckoutSlot()` / `releaseCheckoutSlot()` と `ensureCheckoutCustomer()` の迂回は二重契約・二重課金と解約不能な契約を招く。契約の有無は `NON_CURRENT_SUBSCRIPTION_STATUSES` で判定する（`database.md` 3.9）。
-- **`/upgrade` の法定表示と Checkout 可否は連動させる。** 実請求額を確認できないときは画面の Checkout を無効化し `POST /api/stripe/checkout` も 503。判定は `isChargeableSubscriptionPrice()`、料金は `DISPLAY_MONTHLY_PRICE_JPY`、決済日は `BILLING_ANCHOR_DAY_OF_MONTH` を使い、リテラルをハードコードしない。
+- **`/upgrade` の法定表示と Checkout 可否は連動させる。** 実請求額を確認できないときは画面の Checkout を無効化し `POST /api/stripe/checkout` も 503。判定は `isChargeableSubscriptionPrice()`、料金は `DISPLAY_MONTHLY_PRICE_JPY` を使い、リテラルをハードコードしない。決済日は契約日基準で、表示は契約ごとの `current_period_end` から出す。
 
 ### データモデル・Storage・RLS
 
