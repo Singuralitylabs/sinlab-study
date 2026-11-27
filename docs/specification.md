@@ -434,7 +434,7 @@ admin / maintainer ロールの場合、上記の `is_published = true` 絞り�
 
 スライドの解説記事は `learning_contents.text_content`（Markdown・任意。テキスト種別の本文と同じ列）。値があるときだけ PDF ビューアの直下に `MarkdownRenderer` と `resolveMarkdownStorageUrls()` で表示し、空なら従来どおりスライドだけを出す。未公開プレビュー（2.12）は同じ詳細ページなので同様に出る。`/demo` ではお試し公開のスライド（署名付きURLと同じく、公開済み・未削除かつ `is_open_to_trial = true` のときだけビューアを出す分岐）に限って記事を出す。公開済みでもお試し非公開のスライドは対象外の案内だけを出し、記事は出さない。テキスト種別の本文も同じ置換を通す（`{{SUPABASE_STORAGE_URL}}` を公開オブジェクトURLへ変える）。画像のアップロードは公開バケット `content-images`（6.1.5節）。
 
-**Markdown 画像の幅（#478）**: `MarkdownRenderer` は画像を中央寄せし、指定なしでは最大幅 `MARKDOWN_IMAGE_DEFAULT_MAX_WIDTH_PX`（560px。定数は `app/constants/markdown.ts`）に抑える（本文幅より狭いときは本文幅に収まる）。画像ごとの幅は Markdown の title に `w=400` のように書く（例: `![説明](url "w=400")`）。`resolveMarkdownImageWidth()` が title を数値へ変換し、有効ならその幅で表示する（本文幅を超える指定も本文幅に収まる）。下限・上限（`MARKDOWN_IMAGE_MIN_WIDTH_PX` / `MARKDOWN_IMAGE_MAX_WIDTH_PX`）外・数値以外・負数は無視して既定の最大幅にする。`w=` 記法の title はツールチップとして残さない。通常の title（`w=` 以外）は従来どおりツールチップ用に残す。生 HTML（`rehype-raw`）は許可しない。
+**Markdown 画像の幅（#478）**: `MarkdownRenderer` は画像を中央寄せし、指定なしでは本文の幅いっぱいまで表示する（`max-width: 100%`。画像そのものが本文より狭いときは引き伸ばさず元の大きさ。#596）。画像ごとの幅は Markdown の title に `w=400` のように書く（例: `![説明](url "w=400")`）。`resolveMarkdownImageWidth()` が title を数値へ変換し、有効ならその幅で表示する（本文幅を超える指定も本文幅に収まる）。下限・上限（`MARKDOWN_IMAGE_MIN_WIDTH_PX` / `MARKDOWN_IMAGE_MAX_WIDTH_PX`）外・数値以外・負数は無視して指定なしと同じ表示にする。`w=` 記法の title はツールチップとして残さない。通常の title（`w=` 以外）は従来どおりツールチップ用に残す。生 HTML（`rehype-raw`）は許可しない。
 
 **YouTube facade**: クリック前は `i.ytimg.com` の hqdefault を `<img>` で直接参照する（最適化の恩恵がほぼ無いため `next/image` は使わず、クリック前に `youtube.com` へ通信しない）。クリック後に `YouTubePlayer` を動的読み込みして autoplay 再生する（クライアント読み込み方針は5.4.6）。iOS Safari では gesture 後に生成した cross-origin iframe の音声付き autoplay が拒否され、再生ボタンへの追加タップが必要になる場合がある（facade 化の既知の制約）。
 
