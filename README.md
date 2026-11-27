@@ -46,8 +46,8 @@ Bun は **`1.3.8`** に固定している（`.bun-version` と `package.json` �
 
 ```
 NEXT_PUBLIC_SUPABASE_URL=<Supabase プロジェクトURL>
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase Publishable Key>
-SUPABASE_SERVICE_ROLE_KEY=<Supabase Service Role Key>
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase の Publishable Key（sb_publishable_...）。旧 anon キー（eyJ...）は使わない>
+SUPABASE_SERVICE_ROLE_KEY=<Supabase の Secret Key（sb_secret_...）。変数名は旧 service_role キーの名残。旧 JWT 形式のキー（eyJ...）は使わない>
 SUPABASE_PROJECT_ID=<Supabase プロジェクトID>
 GEMINI_API_KEY=<Gemini API Key（会員用・有料ティア。AIレビュー機能）>
 CLOUDFLARE_STREAM_CUSTOMER_CODE=<任意。Cloudflare Stream の再生URL customer-<code>.cloudflarestream.com の <code>。講座動画の署名付き再生（Stream の動画IDを video_url に入れた回）に必要>
