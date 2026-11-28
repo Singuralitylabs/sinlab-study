@@ -177,7 +177,7 @@ describe("buildUpgradedEmail", () => {
     const email = buildUpgradedEmail({
       displayName: "山田",
       appUrl: APP_URL,
-      monthlyPriceLabel: "月額1,500円（税込）",
+      priceLabel: "月額1,500円（税込）",
       nextBillingDateLabel: "2026/10/27",
     });
 
@@ -191,7 +191,7 @@ describe("buildUpgradedEmail", () => {
     const email = buildUpgradedEmail({
       displayName: "山田",
       appUrl: APP_URL,
-      monthlyPriceLabel: null,
+      priceLabel: null,
       nextBillingDateLabel: null,
     });
 
@@ -299,7 +299,7 @@ describe("手続き通知の配信設定の案内", () => {
       buildUpgradedEmail({
         displayName: "山田",
         appUrl: APP_URL,
-        monthlyPriceLabel: null,
+        priceLabel: null,
         nextBillingDateLabel: null,
       }),
       buildCancelScheduledEmail({
@@ -615,7 +615,7 @@ describe("編集できる文面（#286）", () => {
     const email = buildUpgradedEmail({
       displayName: "山田",
       appUrl: APP_URL,
-      monthlyPriceLabel: null,
+      priceLabel: null,
       nextBillingDateLabel: null,
     });
 

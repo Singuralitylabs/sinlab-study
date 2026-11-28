@@ -1136,6 +1136,7 @@ export type Database = {
       stripe_subscriptions: {
         Row: {
           became_active_at: string | null;
+          billing_interval: string | null;
           became_terminal_at: string | null;
           cancel_at: string | null;
           cancel_at_period_end: boolean;
@@ -1144,6 +1145,7 @@ export type Database = {
           created_at: string;
           current_period_end: string | null;
           id: number;
+          price_id: string | null;
           status: string;
           stripe_customer_id: string | null;
           stripe_subscription_id: string | null;
@@ -1152,6 +1154,7 @@ export type Database = {
         };
         Insert: {
           became_active_at?: string | null;
+          billing_interval?: string | null;
           became_terminal_at?: string | null;
           cancel_at?: string | null;
           cancel_at_period_end?: boolean;
@@ -1160,6 +1163,7 @@ export type Database = {
           created_at?: string;
           current_period_end?: string | null;
           id?: number;
+          price_id?: string | null;
           status: string;
           stripe_customer_id?: string | null;
           stripe_subscription_id?: string | null;
@@ -1168,6 +1172,7 @@ export type Database = {
         };
         Update: {
           became_active_at?: string | null;
+          billing_interval?: string | null;
           became_terminal_at?: string | null;
           cancel_at?: string | null;
           cancel_at_period_end?: boolean;
@@ -1176,6 +1181,7 @@ export type Database = {
           created_at?: string;
           current_period_end?: string | null;
           id?: number;
+          price_id?: string | null;
           status?: string;
           stripe_customer_id?: string | null;
           stripe_subscription_id?: string | null;

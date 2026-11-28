@@ -281,6 +281,58 @@ describe("activateUserFromCheckoutSession", () => {
     expect(userBuilder.neq).toHaveBeenCalledWith("status", "rejected");
   });
 
+  it("ミラーに契約中の Price と請求間隔を書く（プラン種別の表示用。#290）", async () => {
+    const mockClient = mockActivateClient({
+      tableResults: {
+        stripe_subscriptions: { data: null, error: null },
+        users: { data: [{ id: 1 }], error: null },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(getStripeClient).mockReturnValue({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue({
+          ...subscription,
+          items: {
+            data: [
+              {
+                current_period_end: 1750000000,
+                price: { id: "price_yearly", recurring: { interval: "year", interval_count: 1 } },
+              },
+            ],
+          },
+        }),
+      },
+    } as never);
+
+    await activateUserFromCheckoutSession(baseSession as never);
+
+    const subBuilder = mockClient.from.mock.results[2].value;
+    expect(subBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ price_id: "price_yearly", billing_interval: "year" })
+    );
+  });
+
+  it("Price が取れないサブスクは price_id / billing_interval を null で書く", async () => {
+    const mockClient = mockActivateClient({
+      tableResults: {
+        stripe_subscriptions: { data: null, error: null },
+        users: { data: [{ id: 1 }], error: null },
+      },
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+    vi.mocked(getStripeClient).mockReturnValue({
+      subscriptions: { retrieve: vi.fn().mockResolvedValue(subscription) },
+    } as never);
+
+    await activateUserFromCheckoutSession(baseSession as never);
+
+    const subBuilder = mockClient.from.mock.results[2].value;
+    expect(subBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ price_id: null, billing_interval: null })
+    );
+  });
+
   it("同一契約（stripe_subscription_idが一致）の既存行はミラーを上書きし、昇格する", async () => {
     const mockClient = mockActivateClient({
       tableResults: {
@@ -1253,7 +1305,7 @@ describe("トランザクションメールのフック", () => {
       expect(scheduleUpgradedEmail).toHaveBeenCalledWith({
         userId: 1,
         subscriptionId: "sub_123",
-        monthlyAmountJpy: 1500,
+        priceLabel: "月額1,500円（税込）",
         currentPeriodEnd: periodEndIso,
       });
     });
@@ -1301,7 +1353,7 @@ describe("トランザクションメールのフック", () => {
       await activateUserFromCheckoutSession(baseSession as never);
 
       expect(scheduleUpgradedEmail).toHaveBeenCalledWith(
-        expect.objectContaining({ monthlyAmountJpy: null })
+        expect.objectContaining({ priceLabel: null })
       );
     });
 
@@ -1326,9 +1378,37 @@ describe("トランザクションメールのフック", () => {
 
     it.each([
       ["JPY以外", { unit_amount: 1500, currency: "usd", recurring: { interval: "month" } }],
-      ["年額", { unit_amount: 15000, currency: "jpy", recurring: { interval: "year" } }],
+      [
+        "3か月ごと",
+        { unit_amount: 4500, currency: "jpy", recurring: { interval: "month", interval_count: 3 } },
+      ],
+      ["週ごと", { unit_amount: 500, currency: "jpy", recurring: { interval: "week" } }],
       ["金額なし", { unit_amount: null, currency: "jpy", recurring: { interval: "month" } }],
-    ])("実請求額を月額JPYで確認できない（%s）場合は料金をnullで渡す", async (_label, price) => {
+    ])(
+      "実請求額を月額・年額のJPYで確認できない（%s）場合は料金をnullで渡す",
+      async (_label, price) => {
+        const mockClient = mockActivateClient({
+          tableResults: {
+            stripe_subscriptions: { data: null, error: null },
+            users: { data: [{ id: 1 }], error: null },
+          },
+        });
+        vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
+        mockRetrieve(
+          liveSubscription({
+            items: { data: [{ current_period_end: periodEndUnix, quantity: 1, price }] },
+          })
+        );
+
+        await activateUserFromCheckoutSession(baseSession as never);
+
+        expect(scheduleUpgradedEmail).toHaveBeenCalledWith(
+          expect.objectContaining({ priceLabel: null })
+        );
+      }
+    );
+
+    it("年額の Price なら料金を年額で渡す", async () => {
       const mockClient = mockActivateClient({
         tableResults: {
           stripe_subscriptions: { data: null, error: null },
@@ -1338,14 +1418,22 @@ describe("トランザクションメールのフック", () => {
       vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
       mockRetrieve(
         liveSubscription({
-          items: { data: [{ current_period_end: periodEndUnix, quantity: 1, price }] },
+          items: {
+            data: [
+              {
+                current_period_end: periodEndUnix,
+                quantity: 1,
+                price: { unit_amount: 15000, currency: "jpy", recurring: { interval: "year" } },
+              },
+            ],
+          },
         })
       );
 
       await activateUserFromCheckoutSession(baseSession as never);
 
       expect(scheduleUpgradedEmail).toHaveBeenCalledWith(
-        expect.objectContaining({ monthlyAmountJpy: null })
+        expect.objectContaining({ priceLabel: "年額15,000円（税込）" })
       );
     });
 
@@ -1422,7 +1510,7 @@ describe("トランザクションメールのフック", () => {
       expect(scheduleUpgradedEmail).toHaveBeenCalledWith({
         userId: 1,
         subscriptionId: "sub_123",
-        monthlyAmountJpy: 1500,
+        priceLabel: "月額1,500円（税込）",
         currentPeriodEnd: periodEndIso,
       });
     });

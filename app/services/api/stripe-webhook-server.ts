@@ -1,6 +1,6 @@
 import type Stripe from "stripe";
 import { ANALYTICS_EVENT } from "@/app/constants/analytics";
-import { isChargeableSubscriptionPrice } from "@/app/constants/stripe";
+import { formatPlanJpyPrice, isChargeableSubscriptionPrice } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP, USER_STATUS } from "@/app/constants/user";
 import { shouldTrackCheckoutCompleted } from "@/app/lib/analytics-funnel";
 import { cancellationEndsAt, isCancellationScheduled } from "@/app/lib/subscription-period";
@@ -9,6 +9,7 @@ import {
   ACTIVATABLE_SUBSCRIPTION_STATUSES,
   getStripeClient,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
+  planOfPrice,
   TERMINAL_SUBSCRIPTION_STATUSES,
   toSubscriptionPrice,
 } from "@/app/services/api/stripe-server";
@@ -183,15 +184,15 @@ function toIsoOrNull(unixSeconds: number | null | undefined): string | null {
 }
 
 /**
- * Monthly price (JPY, unit price x quantity) of the subscription re-fetched from Stripe. Returns
- * null when it is not a monthly JPY price (no line in the upgrade email) or when the subscription
- * / item carries a discount (coupon etc.), since it would differ from the real charge. A discount
- * attached directly to the Customer (`customer.discount`) is not in `subscription.discounts` and
- * is undetected, so list price shows (detecting needs an extra Customer fetch; Checkout promotion
- * codes attach to the subscription, so this only happens with manual Dashboard/API grants and is
- * accepted).
+ * Charged price label (JPY, unit price x quantity, "月額…" or "年額…" by the Price interval) of
+ * the subscription re-fetched from Stripe. Returns null when it is not a monthly / yearly JPY
+ * price (no line in the upgrade email) or when the subscription / item carries a discount (coupon
+ * etc.), since it would differ from the real charge. A discount attached directly to the Customer
+ * (`customer.discount`) is not in `subscription.discounts` and is undetected, so list price shows
+ * (detecting needs an extra Customer fetch; Checkout promotion codes attach to the subscription,
+ * so this only happens with manual Dashboard/API grants and is accepted).
  */
-function chargedMonthlyAmountJpy(subscription: Stripe.Subscription): number | null {
+function chargedPriceLabel(subscription: Stripe.Subscription): string | null {
   const item = subscription.items.data[0];
   if (!item?.price) {
     return null;
@@ -199,11 +200,15 @@ function chargedMonthlyAmountJpy(subscription: Stripe.Subscription): number | nu
   if ((subscription.discounts?.length ?? 0) > 0 || (item.discounts?.length ?? 0) > 0) {
     return null;
   }
-  const price = toSubscriptionPrice(item.price);
+  const plan = planOfPrice(item.price);
+  if (plan === null) {
+    return null;
+  }
+  const price = toSubscriptionPrice(item.price, plan);
   if (!isChargeableSubscriptionPrice(price)) {
     return null;
   }
-  return price.amount * (item.quantity ?? 1);
+  return formatPlanJpyPrice(plan, price.amount * (item.quantity ?? 1));
 }
 
 /**
@@ -221,7 +226,7 @@ function scheduleUpgradedEmailFor(
     scheduleUpgradedEmail({
       userId,
       subscriptionId: subscription.id,
-      monthlyAmountJpy: chargedMonthlyAmountJpy(subscription),
+      priceLabel: chargedPriceLabel(subscription),
       currentPeriodEnd,
     });
   } catch (error) {
@@ -235,6 +240,7 @@ function scheduleUpgradedEmailFor(
  * drift when a column is added.
  */
 function subscriptionMirrorFields(subscription: Stripe.Subscription) {
+  const price = subscription.items.data[0]?.price;
   return {
     status: subscription.status,
     cancel_at_period_end: subscription.cancel_at_period_end,
@@ -242,6 +248,10 @@ function subscriptionMirrorFields(subscription: Stripe.Subscription) {
     // isCancellationScheduled()).
     cancel_at: toIsoOrNull(subscription.cancel_at),
     current_period_end: toIsoOrNull(subscription.items.data[0]?.current_period_end),
+    // The plan shown on /upgrade and /admin/users comes from the interval, not from matching
+    // price_id to env vars: a repriced Price gets a new id and old contracts would lose their plan.
+    price_id: price?.id ?? null,
+    billing_interval: price?.recurring?.interval ?? null,
     updated_at: new Date().toISOString(),
   };
 }

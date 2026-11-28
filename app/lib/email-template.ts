@@ -141,7 +141,8 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
       "お支払い方法の変更や解約は、プランの確認・変更ページの「お支払い情報の管理・解約」から行えます。",
     ].join("\n\n"),
     placeholders: {
-      monthly_price: "Stripe で確認できた月額料金（確認できないときは空で、その行は出ない）",
+      monthly_price:
+        "Stripe で確認できた料金（例: 月額1,500円（税込）、年額なら 年額15,000円（税込）。確認できないときは空で、その行は出ない）",
       next_billing_date: "次回のお支払い予定日（取得できないときは空で、その行は出ない）",
     },
   }),

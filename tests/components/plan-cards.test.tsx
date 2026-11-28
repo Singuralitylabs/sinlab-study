@@ -44,7 +44,11 @@ describe("PlanCards", () => {
         <PlanCards
           limits={AI_REVIEW_LIMITS}
           generalPriceLabel={null}
-          generalDialog={<TrialCheckoutDetails monthlyPriceLabel={null} checkoutDisabled={true} />}
+          generalDialog={
+            <TrialCheckoutDetails
+              offers={[{ plan: "monthly", priceLabel: null, checkoutDisabled: true }]}
+            />
+          }
           communityDialog={<p>community body</p>}
         />
       );

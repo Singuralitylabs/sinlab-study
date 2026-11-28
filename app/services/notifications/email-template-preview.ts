@@ -77,7 +77,7 @@ const PREVIEW_VARIANTS: Record<EmailTemplateKey, VariantDefinition[]> = {
         buildUpgradedEmail(
           {
             ...base(c),
-            monthlyPriceLabel: "月額 1,000 円（税込）",
+            priceLabel: "月額 1,000 円（税込）",
             nextBillingDateLabel: "2026年11月1日",
           },
           c.texts
@@ -88,7 +88,7 @@ const PREVIEW_VARIANTS: Record<EmailTemplateKey, VariantDefinition[]> = {
       label: "料金を取得できない",
       build: (c) =>
         buildUpgradedEmail(
-          { ...base(c), monthlyPriceLabel: null, nextBillingDateLabel: "2026年11月1日" },
+          { ...base(c), priceLabel: null, nextBillingDateLabel: "2026年11月1日" },
           c.texts
         ),
     },
@@ -97,7 +97,7 @@ const PREVIEW_VARIANTS: Record<EmailTemplateKey, VariantDefinition[]> = {
       label: "次回日を取得できない",
       build: (c) =>
         buildUpgradedEmail(
-          { ...base(c), monthlyPriceLabel: "月額 1,000 円（税込）", nextBillingDateLabel: null },
+          { ...base(c), priceLabel: "月額 1,000 円（税込）", nextBillingDateLabel: null },
           c.texts
         ),
     },

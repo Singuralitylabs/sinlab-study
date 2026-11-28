@@ -65,6 +65,7 @@ STRIPE_ENABLED=<Stripe決済機能の有効化フラグ。"true" 以外はフェ
 STRIPE_SECRET_KEY=<Stripe Secret Key>
 STRIPE_WEBHOOK_SECRET=<Stripe Webhook 署名シークレット>
 STRIPE_PRICE_ID=<月額サブスクリプションの Price ID>
+STRIPE_PRICE_ID_YEARLY=<任意。年額サブスクリプションの Price ID（JPY・1年ごと）。未設定時は年額プランを出さず、Checkout も受け付けない>
 CERTIFICATE_ISSUER_NAME=<任意。修了証に印刷する運営団体名。未設定・空なら団体名の行を出さない（印刷済みの修了証は訂正できないため、文言が確定してから設定する）>
 NEXT_PUBLIC_APP_URL=<Checkout/Portal のリダイレクト先URL・メール本文のリンク生成・OGP の metadataBase・修了証の LINE/Facebook 共有（未設定なら非表示）に使用>
 NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY=<任意。Web Push の公開鍵。未設定時は購読ボタンを出さず送信しない>

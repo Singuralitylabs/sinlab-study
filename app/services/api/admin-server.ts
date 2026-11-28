@@ -3,6 +3,7 @@ import type { CodeLanguage } from "@/app/components/code-editor-utils";
 import { resolveWeeklyFunnelWeeks, WEEKLY_FUNNEL_WEEKS } from "@/app/constants/analytics";
 import { isQuizQuestionType } from "@/app/constants/quiz";
 import { SLIDES_BUCKET } from "@/app/constants/storage";
+import { planOfBillingInterval, type SubscriptionPlan } from "@/app/constants/stripe";
 import { USER_ROLE, USER_STATUS } from "@/app/constants/user";
 import {
   buildContentEngagement,
@@ -1915,20 +1916,21 @@ export async function fetchAllUsers(): Promise<{
 }
 
 /**
- * User IDs with a current Stripe subscription row (for the badge in /admin/users).
+ * Users with a current Stripe subscription row and the plan of that contract (for the badge in
+ * /admin/users; plan is null when the mirror has no billing_interval yet).
  * stripe_subscriptions has one row per user that survives cancellation, so rows with no recorded
  * subscription (NON_CURRENT_SUBSCRIPTION_STATUSES: terminal states and Checkout in progress) are
  * excluded.
  */
-export async function fetchUserIdsWithStripeSubscription(): Promise<{
-  data: number[] | null;
+export async function fetchStripeSubscribedUsers(): Promise<{
+  data: { userId: number; plan: SubscriptionPlan | null }[] | null;
   error: PostgrestError | null;
 }> {
   const supabase = await createAdminSupabaseClient();
 
   const { data, error } = await supabase
     .from("stripe_subscriptions")
-    .select("user_id")
+    .select("user_id, billing_interval")
     .not("status", "in", `(${NON_CURRENT_SUBSCRIPTION_STATUSES.join(",")})`);
 
   if (error) {
@@ -1937,14 +1939,17 @@ export async function fetchUserIdsWithStripeSubscription(): Promise<{
   }
 
   return {
-    data: data.map((row) => row.user_id),
+    data: data.map((row) => ({
+      userId: row.user_id,
+      plan: planOfBillingInterval(row.billing_interval),
+    })),
     error: null,
   };
 }
 
 /**
  * Single-user version of the subscription check used to lock approval / membership-type changes.
- * Same NON_CURRENT_SUBSCRIPTION_STATUSES rule as fetchUserIdsWithStripeSubscription(), using
+ * Same NON_CURRENT_SUBSCRIPTION_STATUSES rule as fetchStripeSubscribedUsers(), using
  * fetchStripeSubscriptionByUserId() (stripe-server.ts) to query one user. Admin can read other
  * users' rows via RLS (stripe_subscriptions SELECT policy).
  */

@@ -372,7 +372,7 @@ describe("schedule*Email（after() による予約）", () => {
     scheduleUpgradedEmail({
       userId: 7,
       subscriptionId: "sub_123",
-      monthlyAmountJpy: 1500,
+      priceLabel: "月額1,500円（税込）",
       currentPeriodEnd: "2026-10-26T15:00:00.000Z",
     });
     await runScheduled();
@@ -400,7 +400,7 @@ describe("schedule*Email（after() による予約）", () => {
     scheduleUpgradedEmail({
       userId: 7,
       subscriptionId: "sub_123",
-      monthlyAmountJpy: null,
+      priceLabel: null,
       currentPeriodEnd: null,
     });
     await runScheduled();
@@ -517,7 +517,7 @@ describe("全体の送信スイッチ（#315・フェイルクローズ）", () 
         scheduleUpgradedEmail({
           userId: 7,
           subscriptionId: "sub_1",
-          monthlyAmountJpy: 1000,
+          priceLabel: "月額1,000円（税込）",
           currentPeriodEnd: null,
         }),
     ],
@@ -630,7 +630,7 @@ describe("管理設定による有効・無効（#272）", () => {
         scheduleUpgradedEmail({
           userId: 7,
           subscriptionId: "sub_1",
-          monthlyAmountJpy: 1000,
+          priceLabel: "月額1,000円（税込）",
           currentPeriodEnd: null,
         }),
     ],

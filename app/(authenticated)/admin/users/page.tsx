@@ -1,10 +1,10 @@
 import { PageTitle } from "@/app/components/PageTitle";
-import { fetchAllUsers, fetchUserIdsWithStripeSubscription } from "@/app/services/api/admin-server";
+import { fetchAllUsers, fetchStripeSubscribedUsers } from "@/app/services/api/admin-server";
 import { UserManagementTable } from "./components/user-management-table";
 
 export default async function AdminUsersPage() {
-  const [{ data: users, error }, { data: subscribedUserIds, error: subscriptionsError }] =
-    await Promise.all([fetchAllUsers(), fetchUserIdsWithStripeSubscription()]);
+  const [{ data: users, error }, { data: subscribedUsers, error: subscriptionsError }] =
+    await Promise.all([fetchAllUsers(), fetchStripeSubscribedUsers()]);
 
   return (
     <div>
@@ -21,7 +21,7 @@ export default async function AdminUsersPage() {
       {users && (
         <UserManagementTable
           users={users}
-          subscribedUserIds={subscribedUserIds ?? []}
+          subscribedUsers={subscribedUsers ?? []}
           subscriptionDataUnavailable={subscriptionsError != null}
         />
       )}
