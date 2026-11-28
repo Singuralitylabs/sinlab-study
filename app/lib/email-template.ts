@@ -16,6 +16,11 @@ import {
   NOTIFICATION_EMAIL_LOG_KIND,
   type NotificationEmailLogKind,
 } from "@/app/constants/notifications";
+import {
+  DISPLAY_MONTHLY_PRICE_JPY,
+  DISPLAY_YEARLY_PRICE_JPY,
+  formatPlanJpyPrice,
+} from "@/app/constants/stripe";
 import { escapeHtml } from "@/app/lib/escape-html";
 import {
   type EmailMarkdown,
@@ -141,8 +146,7 @@ export const EMAIL_TEMPLATE_DEFINITIONS: Record<EmailTemplateKey, EmailTemplateD
       "お支払い方法の変更や解約は、プランの確認・変更ページの「お支払い情報の管理・解約」から行えます。",
     ].join("\n\n"),
     placeholders: {
-      monthly_price:
-        "Stripe で確認できた料金（例: 月額1,500円（税込）、年額なら 年額15,000円（税込）。確認できないときは空で、その行は出ない）",
+      monthly_price: `Stripe で確認できた料金（例: ${formatPlanJpyPrice("monthly", DISPLAY_MONTHLY_PRICE_JPY)}、年額なら ${formatPlanJpyPrice("yearly", DISPLAY_YEARLY_PRICE_JPY)}。確認できないときは空で、その行は出ない）`,
       next_billing_date: "次回のお支払い予定日（取得できないときは空で、その行は出ない）",
     },
   }),
