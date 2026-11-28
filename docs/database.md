@@ -63,6 +63,7 @@ erDiagram
 - `image_url`: サムネイル画像。Storage 配信分は環境非依存の相対パス `/storage/v1/object/public/thumbnails/theme-{id}/thumbnail.{ext}?v={timestamp}` を保存する。未設定時はプレースホルダー表示
 - `theme_color`: テーマカラー（`#RRGGBB`。CHECK で形式を固定。NULL 可）。サムネイル画像の背景色を `/manage` で登録し、修了証の配色に使う（[機能設計書](./specification.md)13.4節）。NULL は未設定で、修了証は `theme_id` で選ぶ既定のパレットになる。本番と開発で `theme_id` が違うため、値はマイグレーションで入れず `/manage` で環境ごとに登録する
 - `hero_image_url`: フェーズ一覧（`/learn/[themeId]`）の冒頭に出す横長（16:5）の専用画像（任意）。`image_url` と同じ形式で `/storage/v1/object/public/thumbnails/theme-{id}/hero.{ext}?v={timestamp}` を保存する。NULL のときは `image_url` を中央基準で切り抜いて使い、どちらも無ければヒーローを出さない
+- `is_coming_soon`: 準備中として表示するか（NOT NULL、既定 false。#593）。`is_published` が true でない間だけ意味を持ち、受講者の `/learn` に「coming soon...」のカードとして見出しだけを出す（[機能設計書](./specification.md)3.3節）。公開済みの行では無視する。受講者は RLS で未公開テーマの行を読めないため、表示用の値は `get_coming_soon_themes()`（`SECURITY DEFINER`。`is_coming_soon = true AND is_published IS NOT TRUE AND is_deleted = false` の行の `id, name, description, image_url, display_order` だけを返し、呼び出し元の `get_user_status()` が `active` / `trial` でなければ0行。EXECUTE は `authenticated` / `service_role` のみ）から取る。**RLS を広げて見せない**（フェーズ・コンテンツの取得や進捗の集計は RLS に頼って未公開テーマを除いているため、混ざる）。定義は `20261124090000_add_theme_coming_soon.sql`
 
 ### 3.2 learning_phases（学習フェーズ）
 
@@ -422,6 +423,7 @@ RLSポリシーのロール判定・本人判定・ステータス判定に使�
 - `anon` には `public` のテーブル・シーケンスの権限を一切与えない（アプリは未認証でテーブルを読み書きしない。未認証の画面は `auth` の呼び出しだけで、`/demo` は service_role）。`postgres` が作る新しいテーブル・シーケンスにも付かないよう既定の付与を外してあるので、列を足すときの `GRANT SELECT (列)` も `authenticated` だけに書く
 - `authenticated` には `TRUNCATE` / `REFERENCES` / `TRIGGER` を与えない（`TRUNCATE` は RLS が効かない）。こちらも既定の付与から外してある
 - ポリシーが0本で service_role だけが使うテーブル（`email_logs` `cron_locks` `stripe_events` `push_subscriptions` `push_logs` `feedbacks` `email_test_sends` `ai_review_limit_resets`）は `authenticated` の権限も外す。この形のテーブルを足すときは、作成する migration で同じく `REVOKE ALL ... FROM authenticated` する
+- REST の RPC として呼べる関数（トリガー関数を除く）で `anon` が EXECUTE できるのは `keepalive()`（`SELECT 1` を返すだけで表を読まない）だけ。Supabase Keepalive ワークフロー（`.github/workflows/supabase-keepalive.yml`）が publishable key で `POST /rest/v1/rpc/keepalive` を毎日呼び、無料プランの自動停止を防ぐ（#591）。到達先を変えるときは、このワークフローも直す
 - 検証は `supabase/tests/database/table_privileges.test.sql`（CI の DB Privileges Test）
 
 ### 6.1 学習コンテンツ系テーブル

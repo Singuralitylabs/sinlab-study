@@ -558,6 +558,7 @@ const ThemeBaseSchema = z.object({
   name: RequiredStringSchema,
   description: OptionalNullableString,
   is_published: OptionalBoolean,
+  is_coming_soon: OptionalBoolean,
   image_url: OptionalNullableString,
   theme_color: ThemeColorSchema,
 });

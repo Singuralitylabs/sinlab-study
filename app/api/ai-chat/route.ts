@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import {
   AI_CHAT_ANSWER_MAX_LENGTH,
-  AI_CHAT_CONTENT_TYPES,
   AI_CHAT_CUT_NOTE,
   AI_CHAT_DISABLED_MESSAGE,
+  aiChatKindOf,
   isAiChatEnabled,
 } from "@/app/constants/ai-chat";
 import { USER_STATUS } from "@/app/constants/user";
@@ -78,7 +78,8 @@ export async function POST(request: Request) {
     if (!content) {
       return NextResponse.json({ error: "対象のコンテンツにアクセスできません" }, { status: 403 });
     }
-    if (!AI_CHAT_CONTENT_TYPES.includes(content.content_type)) {
+    const chatKind = aiChatKindOf(content);
+    if (!chatKind) {
       return NextResponse.json(
         { error: "このコンテンツではシンラビに相談できません" },
         { status: 400 }
@@ -86,7 +87,7 @@ export async function POST(request: Request) {
     }
 
     const latest =
-      content.content_type === "exercise"
+      chatKind === "exercise"
         ? await fetchLatestSubmissionForChat(supabase, userId, contentId)
         : { submission: null, review: null };
 
@@ -119,7 +120,7 @@ export async function POST(request: Request) {
         themeName: content.themeName,
         phaseName: content.phaseName,
         title: content.title,
-        contentType: content.content_type === "text" ? "text" : "exercise",
+        contentType: chatKind,
         textContent: content.text_content,
         exerciseInstructions: content.exercise_instructions,
         hint: content.hint,

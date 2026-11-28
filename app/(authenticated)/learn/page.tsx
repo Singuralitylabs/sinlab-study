@@ -3,21 +3,28 @@ import { PageTitle } from "@/app/components/PageTitle";
 import { UnpublishedBadge } from "@/app/components/UnpublishedBadge";
 import { isCertificateEligible, isThemeCompleted } from "@/app/lib/certificate";
 import {
+  fetchComingSoonThemes,
   fetchPublishedThemes,
   fetchThemeProgressSummaries,
   type ThemeProgressSummary,
 } from "@/app/services/api/learning-server";
+import { checkContentPermissions } from "@/app/services/auth/permissions";
 import { getServerAuth } from "@/app/services/auth/server-auth";
+import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { ThemeCard } from "../components/ThemeProgressSections";
+import { ComingSoonThemeCard, ThemeCard } from "../components/ThemeProgressSections";
 
 export default async function LearnPage() {
   const { userId, userRole, userStatus } = await getServerAuth();
-  const [{ data: themes }, { data: progressData }] = await Promise.all([
+  // Managers already get unpublished themes (coming-soon ones included) from fetchPublishedThemes,
+  // so fetching them again would list those themes twice.
+  const isManager = checkContentPermissions(userRole);
+  const [{ data: themes }, { data: progressData }, comingSoonThemes] = await Promise.all([
     fetchPublishedThemes(userRole),
     userId
       ? fetchThemeProgressSummaries(userId)
       : Promise.resolve({ data: [] as ThemeProgressSummary[], error: null }),
+    isManager ? Promise.resolve([]) : fetchComingSoonThemes(),
   ]);
 
   const progressByThemeId = new Map(
@@ -31,14 +38,14 @@ export default async function LearnPage() {
     <div className="max-w-5xl mx-auto">
       <PageTitle title="学習コンテンツ" description="学習テーマを選択して学習を始めましょう" />
 
-      {!themes || themes.length === 0 ? (
+      {(!themes || themes.length === 0) && comingSoonThemes.length === 0 ? (
         <Card className="py-12 text-center">
           <BookOpen className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
           <p className="text-muted-foreground">学習コンテンツはまだ登録されていません。</p>
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {themes.map((theme) => {
+          {(themes ?? []).map((theme) => {
             // Unpublished themes (admin/maintainer preview) have no progress rows; pass 0/0 so
             // ThemeCard's showProgress (totalContents > 0 || completedContents > 0) hides the bar.
             const progressSummary = progressByThemeId.get(theme.id);
@@ -54,10 +61,22 @@ export default async function LearnPage() {
                 certificatesHref={
                   hasProgressRow && isThemeCompleted(summary) ? certificatesHref : undefined
                 }
-                unpublishedBadge={<UnpublishedBadge isPublished={theme.is_published} />}
+                unpublishedBadge={
+                  <>
+                    <UnpublishedBadge isPublished={theme.is_published} />
+                    {!theme.is_published && theme.is_coming_soon && (
+                      <Badge variant="outline" className="shrink-0 text-xs">
+                        準備中として表示中
+                      </Badge>
+                    )}
+                  </>
+                }
               />
             );
           })}
+          {comingSoonThemes.map((theme) => (
+            <ComingSoonThemeCard key={`coming-soon-${theme.id}`} theme={theme} />
+          ))}
         </div>
       )}
     </div>

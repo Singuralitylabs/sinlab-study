@@ -1,10 +1,10 @@
 name: Supabase Keepalive
 
 # Supabase 無料プランの自動 Pause 防止のため、REST API に毎日アクセスする。
-# learning_themes への publishable key での SELECT が HTTP 200 で返ればカウントされる。
-# 200 (0 行含む) になるのは anon ロールにテーブル SELECT 権限 (Supabase 既定 GRANT) が
-# 残っていることが前提。anon から REVOKE すると 401/403 で毎日失敗するため、
-# テーブル権限を見直す場合はこの到達先も更新すること。
+# publishable key (anon) で RPC keepalive() を呼び、HTTP 200 で返ればカウントされる。
+# anon はテーブル権限を持たない (#520) ため、表を読まない専用関数を到達先にしている (#591)。
+# keepalive() の EXECUTE を anon から外すと 401/403 で毎日失敗するので、関数の権限を
+# 見直す場合はこの到達先も更新すること (docs/database.md 6章「テーブル権限」)。
 # push / pull_request では起動しない (Secrets を fork PR に晒さないため)。
 on:
   schedule:
@@ -44,7 +44,9 @@ jobs:
           # -v / --show-error は使わない (URL・key・ホスト名がログに出るため)。
           # HTTP 200 以外は --fail-with-body でジョブを失敗させる。
           if ! curl --fail-with-body --silent --max-time 60 -o /dev/null \
-            "${SUPABASE_URL}/rest/v1/learning_themes?select=id&limit=1" \
+            -X POST "${SUPABASE_URL}/rest/v1/rpc/keepalive" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
             -H "apikey: ${SUPABASE_KEY}" \
             -H "Authorization: Bearer ${SUPABASE_KEY}"; then
             echo "::error::Supabase keepalive request failed for target '${TARGET}'."

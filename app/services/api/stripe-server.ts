@@ -1,12 +1,7 @@
 import { createHash } from "node:crypto";
 import type { PostgrestError } from "@supabase/supabase-js";
 import Stripe from "stripe";
-import {
-  BILLING_ANCHOR_DAY_OF_MONTH,
-  BILLING_ANCHOR_HOUR_UTC,
-  STRIPE_MINIMUM_CHARGE_AMOUNT_JPY,
-  type SubscriptionPrice,
-} from "@/app/constants/stripe";
+import type { SubscriptionPrice } from "@/app/constants/stripe";
 import {
   createAdminSupabaseClient,
   createServerSupabaseClient,
@@ -19,16 +14,16 @@ export { isStripeEnabled } from "@/app/constants/stripe";
 const MIN_CHECKOUT_SESSION_LIFETIME_MS = 30 * 60 * 1000;
 
 /**
- * Headroom for the gap between `now` and the moment Stripe actually creates the session (Price
- * fetch + network round trip). Without it, expires_at can fall under Stripe's 30-minute minimum
+ * Headroom for the gap between `now` and the moment Stripe actually creates the session (Customer
+ * setup + network round trip). Without it, expires_at can fall under Stripe's 30-minute minimum
  * and Checkout creation fails.
  */
 const CHECKOUT_SESSION_EXPIRY_SAFETY_MARGIN_MS = 2 * 60 * 1000;
 
 /**
  * Fixed to the minimum instead of Stripe's 24h default: the claim TTL (CHECKOUT_CLAIM_TTL_MS)
- * releases abandoned claims, so any older session must already be expired by then. See expires_at
- * in createCheckoutSession().
+ * releases abandoned claims, so any older session must already be expired by then, or old and new
+ * sessions could both complete (double subscription).
  */
 const CHECKOUT_SESSION_LIFETIME_MS =
   MIN_CHECKOUT_SESSION_LIFETIME_MS + CHECKOUT_SESSION_EXPIRY_SAFETY_MARGIN_MS;
@@ -147,26 +142,6 @@ export async function createCheckoutSession(
   }
   const appUrl = getAppUrl();
   const stripe = getStripeClient();
-  // On failure to determine proration, fall back to the safe side (prorate) so a transient Price
-  // fetch error does not fail Checkout.
-  let belowMinimum = false;
-  try {
-    belowMinimum = await isProrationBelowMinimum(now);
-  } catch (error) {
-    console.error("最低請求額判定エラー:", error);
-  }
-  const prorationBehavior: Stripe.Checkout.SessionCreateParams.SubscriptionData.ProrationBehavior =
-    belowMinimum ? "none" : "create_prorations";
-
-  // Fixed to the minimum lifetime instead of Stripe's 24h default, for two reasons.
-  // 1. The claim TTL releases abandoned claims; if the old session were still payable at that
-  //   point, old and new sessions could both complete (double subscription).
-  // 2. Proration is waived (proration_behavior: "none") because the anchor is near. If a session
-  //   opened in the free window were paid after the anchor passes, Stripe would pick the next
-  //   anchor a month later and grant ~1 month free. Expiring before the anchor prevents this
-  //   whenever the anchor is 32+ minutes away; closer than that Stripe's 30-minute minimum
-  //   prevents it, but the free window is small so the exposure is accepted (fully closing it
-  //   needs pausing new Checkouts near the anchor, out of scope).
   const expiresAtUnix = Math.floor((now.getTime() + CHECKOUT_SESSION_LIFETIME_MS) / 1000);
 
   const session = await stripe.checkout.sessions.create({
@@ -184,16 +159,9 @@ export async function createCheckoutSession(
     expires_at: expiresAtUnix,
     metadata: { user_id: String(userId), auth_id: authId },
     subscription_data: {
+      // No billing_cycle_anchor_config / proration_behavior: the cycle starts at signup and the
+      // first charge is the full price, which the /upgrade legal notice promises.
       metadata: { user_id: String(userId), auth_id: authId },
-      // Billing day is fixed for all users. hour/minute/second must be explicit, otherwise the
-      // subscription creation time is used and billing time varies per user.
-      billing_cycle_anchor_config: {
-        day_of_month: BILLING_ANCHOR_DAY_OF_MONTH,
-        hour: BILLING_ANCHOR_HOUR_UTC,
-        minute: 0,
-        second: 0,
-      },
-      proration_behavior: prorationBehavior,
     },
     success_url: `${appUrl}/upgrade/success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${appUrl}/upgrade`,
@@ -433,8 +401,7 @@ let cachedPrice: { data: Stripe.Price; expiresAt: number } | null = null;
 
 /**
  * Module-scope TTL cache: the Price rarely changes (edited by operators in the dashboard).
- * Per-instance on serverless but effective on warm instances. Shared by fetchSubscriptionPrice()
- * and isProrationBelowMinimum().
+ * Per-instance on serverless but effective on warm instances.
  */
 async function getCachedPrice(): Promise<Stripe.Price> {
   if (cachedPrice && cachedPrice.expiresAt > Date.now()) {
@@ -453,9 +420,8 @@ async function getCachedPrice(): Promise<Stripe.Price> {
 }
 
 /**
- * The anchor and proration math assume monthly billing; used to catch misconfigured Prices (e.g.
- * yearly) so callers fall back to the safe side (shared by toSubscriptionPrice() and
- * isProrationBelowMinimum()).
+ * The legal notice promises a monthly charge; used to catch misconfigured Prices (e.g. yearly) so
+ * Checkout is refused instead of billing a different interval than displayed.
  */
 function isPlainMonthlyPrice(price: Stripe.Price): boolean {
   return price.recurring?.interval === "month" && (price.recurring.interval_count ?? 1) === 1;
@@ -477,49 +443,6 @@ export function toSubscriptionPrice(price: Stripe.Price): SubscriptionPrice {
 
 export async function fetchSubscriptionPrice(): Promise<SubscriptionPrice> {
   return toSubscriptionPrice(await getCachedPrice());
-}
-
-function anchorAt(year: number, monthIndex: number): Date {
-  return new Date(
-    Date.UTC(year, monthIndex, BILLING_ANCHOR_DAY_OF_MONTH, BILLING_ANCHOR_HOUR_UTC, 0, 0)
-  );
-}
-
-/**
- * `nextAnchor - previousAnchor` is one full-price cycle for the first charge; computed from dates
- * so month length and leap years are handled like Stripe's proration.
- */
-function getBillingAnchorWindow(now: Date): { previousAnchor: Date; nextAnchor: Date } {
-  const anchorThisMonth = anchorAt(now.getUTCFullYear(), now.getUTCMonth());
-  const nextAnchor =
-    now < anchorThisMonth ? anchorThisMonth : anchorAt(now.getUTCFullYear(), now.getUTCMonth() + 1);
-  const previousAnchor = anchorAt(nextAnchor.getUTCFullYear(), nextAnchor.getUTCMonth() - 1);
-  return { previousAnchor, nextAnchor };
-}
-
-/**
- * True only for a signup right before the anchor, where the caller switches to
- * `proration_behavior: "none"`. The free window is inversely proportional to the monthly price
- * (~12.4h at JPY 3000), unlike blanket "none" which would allow nearly a month free, so it is not
- * an exploitable gap.
- * For unexpected Prices (non-JPY, no amount, not monthly per isPlainMonthlyPrice()) it returns
- * false (prorate) so Stripe errors surface the misconfiguration.
- */
-export async function isProrationBelowMinimum(now: Date = new Date()): Promise<boolean> {
-  const price = await getCachedPrice();
-  if (price.currency.toLowerCase() !== "jpy" || price.unit_amount === null) {
-    return false;
-  }
-  if (!isPlainMonthlyPrice(price)) {
-    return false;
-  }
-
-  const { previousAnchor, nextAnchor } = getBillingAnchorWindow(now);
-  const remainingMs = nextAnchor.getTime() - now.getTime();
-  const fullPeriodMs = nextAnchor.getTime() - previousAnchor.getTime();
-  const proratedAmount = Math.round((price.unit_amount * remainingMs) / fullPeriodMs);
-
-  return proratedAmount < STRIPE_MINIMUM_CHARGE_AMOUNT_JPY;
 }
 
 /** Uses the regular client: RLS returns only the user's own row (or any row for admin). */

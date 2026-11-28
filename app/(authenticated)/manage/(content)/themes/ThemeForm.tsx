@@ -194,6 +194,7 @@ export function ThemeForm({
   // when the sibling list is stale.
   const initialInsertAfterId = useRef(insertAfterId);
   const [isPublished, setIsPublished] = useState(initialData?.is_published ?? false);
+  const [isComingSoon, setIsComingSoon] = useState(initialData?.is_coming_soon ?? false);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -218,6 +219,7 @@ export function ThemeForm({
           ? undefined
           : insertAfterId,
       is_published: isPublished,
+      is_coming_soon: isComingSoon,
     };
 
     try {
@@ -406,6 +408,24 @@ export function ThemeForm({
           className="h-4 w-4 rounded border-input"
         />
         <Label htmlFor="isPublished">公開する</Label>
+      </div>
+
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <input
+            id="isComingSoon"
+            type="checkbox"
+            checked={isComingSoon}
+            onChange={(e) => setIsComingSoon(e.target.checked)}
+            className="h-4 w-4 rounded border-input"
+          />
+          <Label htmlFor="isComingSoon">準備中として表示する</Label>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {isPublished
+            ? "公開中のテーマでは使いません（非公開に戻したときに使われます）。"
+            : "非公開の間、受講者の学習コンテンツ一覧に「coming soon...」として名前と説明だけを表示します。開くことはできません。"}
+        </p>
       </div>
 
       {message && (

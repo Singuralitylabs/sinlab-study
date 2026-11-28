@@ -69,6 +69,9 @@ from (
     ('public.get_students_progress_summary()', 'anon', false),
     ('public.get_students_progress_summary()', 'authenticated', true),
     ('public.get_students_progress_summary()', 'service_role', true),
+    ('public.get_coming_soon_themes()', 'anon', false),
+    ('public.get_coming_soon_themes()', 'authenticated', true),
+    ('public.get_coming_soon_themes()', 'service_role', true),
     ('public.get_exercise_review_pass_state(integer)', 'anon', false),
     ('public.get_exercise_review_pass_state(integer)', 'authenticated', true),
     ('public.get_exercise_review_pass_state(integer)', 'service_role', true),
@@ -93,6 +96,10 @@ from (
     -- Trigger function: REVOKE ALL FROM PUBLIC, anon (authenticated is not documented)
     ('public.keep_user_progress_ever_completed()', 'anon', false),
     ('public.enforce_user_progress_review_pass()', 'anon', false),
+    -- Keepalive RPC for the scheduled workflow: anon may call it, signed-in users may not
+    ('public.keepalive()', 'anon', true),
+    ('public.keepalive()', 'authenticated', false),
+    ('public.keepalive()', 'service_role', true),
     -- RLS helpers
     ('public.get_user_role()', 'anon', false),
     ('public.get_user_role()', 'authenticated', true),
@@ -112,9 +119,10 @@ from (
 -- name, so it is only inventoried. keep_user_progress_ever_completed() is asserted for anon above.
 --
 -- Catches a new public function that this file does not cover, so its ACL gets a human look.
+-- Sorted with "C" so the order of names like keep_* and keepalive does not depend on the DB locale.
 select is(
   (
-    select coalesce(array_agg(p.oid::regprocedure::text order by p.oid::regprocedure::text), '{}')
+    select coalesce(array_agg(p.oid::regprocedure::text order by p.oid::regprocedure::text collate "C"), '{}')
     from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
@@ -134,6 +142,7 @@ select is(
     'content_review_pass_unachievable(integer)',
     'content_visible_to_caller(integer,text)',
     'enforce_user_progress_review_pass()',
+    'get_coming_soon_themes()',
     'get_exercise_reference_answer(integer)',
     'get_exercise_review_pass_state(integer)',
     'get_quiz_questions(integer)',
@@ -146,6 +155,7 @@ select is(
     'grade_quiz_answers(integer,jsonb)',
     'keep_grading_rubric_tombstone()',
     'keep_user_progress_ever_completed()',
+    'keepalive()',
     'learning_content_requires_review_pass(integer)',
     'learning_content_review_pass_unachievable(integer)',
     'quiz_content_visible_to_caller(integer)',

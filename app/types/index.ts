@@ -123,7 +123,7 @@ export type LearningContentListItem = Pick<
 
 export type ManageThemeListItem = Pick<
   LearningTheme,
-  "id" | "name" | "description" | "image_url" | "display_order" | "is_published"
+  "id" | "name" | "description" | "image_url" | "display_order" | "is_published" | "is_coming_soon"
 >;
 
 export type ManagePhaseListItem = Pick<

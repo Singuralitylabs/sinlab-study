@@ -4,6 +4,7 @@ import { createMockSupabaseClient, createQueryBuilder } from "@/tests/helpers/su
 vi.mock("@/app/services/api/supabase-server");
 
 import {
+  fetchComingSoonThemes,
   fetchContentById,
   fetchContentSummariesByPhaseId,
   fetchContentSummariesByPhaseIds,
@@ -154,6 +155,34 @@ describe("fetchPublishedThemes", () => {
 
     expect(result.data).toBeNull();
     expect(result.error).toEqual(dbError);
+  });
+});
+
+describe("fetchComingSoonThemes (#593)", () => {
+  it("通常クライアントで get_coming_soon_themes RPC を呼び、テーブルは直接読まない", async () => {
+    const rows = [
+      { id: 5, name: "準備中テーマ", description: "説明", image_url: null, display_order: 4 },
+    ];
+    const mockClient = createMockSupabaseClient({
+      rpcResults: { get_coming_soon_themes: { data: rows, error: null } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    const result = await fetchComingSoonThemes();
+
+    expect(result).toEqual(rows);
+    expect(mockClient.rpc).toHaveBeenCalledWith("get_coming_soon_themes");
+    expect(mockClient.from).not.toHaveBeenCalled();
+    expect(createAdminSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it("RPC エラー時は空配列（一覧の表示を止めない）", async () => {
+    const mockClient = createMockSupabaseClient({
+      rpcResults: { get_coming_soon_themes: { data: null, error: dbError } },
+    });
+    vi.mocked(createServerSupabaseClient).mockResolvedValue(mockClient as never);
+
+    expect(await fetchComingSoonThemes()).toEqual([]);
   });
 });
 

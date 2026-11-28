@@ -212,7 +212,8 @@ export function parseStrictFilterId(value: string | undefined): number | undefin
   return parsed;
 }
 
-const MANAGE_THEME_LIST_SELECT = "id, name, description, image_url, display_order, is_published";
+const MANAGE_THEME_LIST_SELECT =
+  "id, name, description, image_url, display_order, is_published, is_coming_soon";
 
 const MANAGE_PHASE_LIST_SELECT = `
   id, name, description, display_order, is_published, is_appendix, theme_id,
@@ -433,6 +434,7 @@ export async function createTheme(theme: {
   description?: string | null;
   insertAfterId: number | null;
   is_published?: boolean;
+  is_coming_soon?: boolean;
   image_url?: string | null;
   theme_color?: string | null;
 }): Promise<{ data: LearningTheme | null; error: PostgrestError | null }> {
@@ -456,6 +458,7 @@ export async function createTheme(theme: {
       name: theme.name,
       description: theme.description,
       is_published: theme.is_published,
+      is_coming_soon: theme.is_coming_soon,
       image_url: theme.image_url,
       theme_color: theme.theme_color,
       display_order: displayOrder,

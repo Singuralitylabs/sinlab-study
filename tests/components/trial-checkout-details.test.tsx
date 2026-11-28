@@ -13,6 +13,7 @@ vi.mock("@/app/(authenticated)/upgrade/UpgradeCheckoutButton", () => ({
 
 import { TrialCheckoutDetails } from "@/app/(authenticated)/upgrade/TrialCheckoutDetails";
 import {
+  CANCELLATION_POLICY_TEXT,
   PROMOTION_CODE_NOTICE,
   SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
 } from "@/app/constants/stripe";
@@ -44,6 +45,18 @@ describe("TrialCheckoutDetails", () => {
     expect(html).toContain("月額1,500円（税込）");
     expect(html).not.toContain(SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE);
     expect(html).toContain(">checkout<");
+  });
+
+  it("決済日は契約日基準で、初回は1か月分の満額と案内する（固定日・日割りの案内を出さない）", () => {
+    const html = renderToStaticMarkup(
+      <TrialCheckoutDetails monthlyPriceLabel="月額1,500円（税込）" checkoutDisabled={false} />
+    );
+
+    expect(html).toContain("お申し込み時に、初回分として1か月分の料金をお支払いいただきます");
+    expect(html).toContain("以後は1か月ごとに自動で更新・請求されます");
+    expect(html).toContain(CANCELLATION_POLICY_TEXT);
+    expect(html).not.toContain("全員一律");
+    expect(html).not.toContain("日割り料金");
   });
 
   it("プロモーションコードの案内をCheckoutボタンの前に出す", () => {

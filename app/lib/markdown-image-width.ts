@@ -1,8 +1,4 @@
-import {
-  MARKDOWN_IMAGE_DEFAULT_MAX_WIDTH_PX,
-  MARKDOWN_IMAGE_MAX_WIDTH_PX,
-  MARKDOWN_IMAGE_MIN_WIDTH_PX,
-} from "@/app/constants/markdown";
+import { MARKDOWN_IMAGE_MAX_WIDTH_PX, MARKDOWN_IMAGE_MIN_WIDTH_PX } from "@/app/constants/markdown";
 
 /** Title that looks like a width directive (`w=...`), including invalid values. */
 const WIDTH_DIRECTIVE_PATTERN = /^\s*w=(.*)$/i;
@@ -11,8 +7,8 @@ const WIDTH_DIRECTIVE_PATTERN = /^\s*w=(.*)$/i;
 const WIDTH_VALUE_PATTERN = /^\d+$/;
 
 export type MarkdownImageWidthResult = {
-  /** Pixel width when `w=` is valid; otherwise the default max width. */
-  widthPx: number;
+  /** Pixel width when `w=` is valid; otherwise null (capped only by the prose column). */
+  widthPx: number | null;
   /** True when width came from a valid `w=` title (set as CSS `width`). */
   hasExplicitWidth: boolean;
   /** Tooltip title; omitted when the title was a `w=` directive (valid or not). */
@@ -21,7 +17,7 @@ export type MarkdownImageWidthResult = {
 
 /**
  * Resolve Markdown image title into display width. `w=<digits>` is a width directive (not a
- * tooltip). Invalid or out-of-range values fall back to the default max width and still strip
+ * tooltip). Invalid or out-of-range values fall back to no explicit width and still strip
  * the title so the raw directive never appears as a tooltip.
  */
 export function resolveMarkdownImageWidth(
@@ -29,7 +25,7 @@ export function resolveMarkdownImageWidth(
 ): MarkdownImageWidthResult {
   if (title == null || title === "") {
     return {
-      widthPx: MARKDOWN_IMAGE_DEFAULT_MAX_WIDTH_PX,
+      widthPx: null,
       hasExplicitWidth: false,
       displayTitle: undefined,
     };
@@ -38,7 +34,7 @@ export function resolveMarkdownImageWidth(
   const directive = WIDTH_DIRECTIVE_PATTERN.exec(title);
   if (!directive) {
     return {
-      widthPx: MARKDOWN_IMAGE_DEFAULT_MAX_WIDTH_PX,
+      widthPx: null,
       hasExplicitWidth: false,
       displayTitle: title,
     };
@@ -47,7 +43,7 @@ export function resolveMarkdownImageWidth(
   const rawValue = directive[1].trim();
   if (!WIDTH_VALUE_PATTERN.test(rawValue)) {
     return {
-      widthPx: MARKDOWN_IMAGE_DEFAULT_MAX_WIDTH_PX,
+      widthPx: null,
       hasExplicitWidth: false,
       displayTitle: undefined,
     };
@@ -60,7 +56,7 @@ export function resolveMarkdownImageWidth(
     parsed > MARKDOWN_IMAGE_MAX_WIDTH_PX
   ) {
     return {
-      widthPx: MARKDOWN_IMAGE_DEFAULT_MAX_WIDTH_PX,
+      widthPx: null,
       hasExplicitWidth: false,
       displayTitle: undefined,
     };

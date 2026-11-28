@@ -8,11 +8,30 @@ export function isAiChatEnabled(): boolean {
 
 export const AI_CHAT_DISABLED_MESSAGE = "シンラビに相談は現在利用できません";
 
+/** How the chat treats a content: as an article, as an exercise, or not at all. */
+export type AiChatKind = "text" | "exercise";
+
 /**
- * Stage 1 covers articles and exercises only. Video / slide context lives outside the DB, and a
- * quiz must not get an AI that solves it (its answers stay in quiz_questions).
+ * The single gate shared by the page (button) and POST /api/ai-chat (400), so the two never drift.
+ * A slide counts as an article when it carries text_content: published lectures put the article
+ * there (#589). A slide without it, a video (script lives outside the DB) and a quiz (an AI must
+ * not solve it; answers stay in quiz_questions) get no chat. The AI can't read the slide PDF.
  */
-export const AI_CHAT_CONTENT_TYPES: readonly ContentType[] = ["text", "exercise"];
+export function aiChatKindOf(content: {
+  content_type: ContentType;
+  text_content: string | null;
+}): AiChatKind | null {
+  switch (content.content_type) {
+    case "text":
+      return "text";
+    case "exercise":
+      return "exercise";
+    case "slide":
+      return content.text_content?.trim() ? "text" : null;
+    default:
+      return null;
+  }
+}
 
 /** One learner question (trimmed). Shared by the API schema and the input box. */
 export const AI_CHAT_MESSAGE_MAX_LENGTH = 500;
