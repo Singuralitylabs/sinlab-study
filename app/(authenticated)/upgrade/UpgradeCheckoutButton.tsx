@@ -2,9 +2,16 @@
 
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
+import { DEFAULT_SUBSCRIPTION_PLAN, type SubscriptionPlan } from "@/app/constants/stripe";
 import { Button } from "@/components/ui/button";
 
-export function UpgradeCheckoutButton({ disabled = false }: { disabled?: boolean }) {
+export function UpgradeCheckoutButton({
+  plan = DEFAULT_SUBSCRIPTION_PLAN,
+  disabled = false,
+}: {
+  plan?: SubscriptionPlan;
+  disabled?: boolean;
+}) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -13,7 +20,11 @@ export function UpgradeCheckoutButton({ disabled = false }: { disabled?: boolean
     setError(null);
 
     try {
-      const res = await fetch("/api/stripe/checkout", { method: "POST" });
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan }),
+      });
       const data = await res.json();
 
       if (!res.ok) {

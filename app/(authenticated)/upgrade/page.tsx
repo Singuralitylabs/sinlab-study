@@ -3,12 +3,15 @@ import { PageTitle } from "@/app/components/PageTitle";
 import { isFeedbackEnabled } from "@/app/constants/feedback";
 import {
   CANCELLATION_POLICY_TEXT,
-  DISPLAY_MONTHLY_PRICE_JPY,
-  formatMonthlyJpyPrice,
+  DISPLAY_PRICE_JPY,
+  formatPlanJpyPrice,
   isChargeableSubscriptionPrice,
   isStripeEnabled,
   logDisplayPriceDrift,
   PLAN_PAGE_TITLE,
+  planOfBillingInterval,
+  SUBSCRIPTION_PLAN_LABELS,
+  type SubscriptionPlan,
 } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP, USER_MEMBERSHIP_LABELS, USER_STATUS } from "@/app/constants/user";
 import {
@@ -20,6 +23,7 @@ import {
   fetchStripeSubscriptionByUserId,
   fetchSubscriptionPrice,
   NON_CURRENT_SUBSCRIPTION_STATUSES,
+  priceIdForPlan,
 } from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,9 +31,47 @@ import { CommunityApplyButton } from "./CommunityApplyButton";
 import { ManageSubscriptionButton } from "./ManageSubscriptionButton";
 import { PlanCards } from "./PlanCards";
 import { PlanInquiryButton } from "./PlanInquiryButton";
-import { TrialCheckoutDetails } from "./TrialCheckoutDetails";
+import { type CheckoutPlanOffer, TrialCheckoutDetails } from "./TrialCheckoutDetails";
 
-const FALLBACK_MONTHLY_PRICE_LABEL = formatMonthlyJpyPrice(DISPLAY_MONTHLY_PRICE_JPY);
+/**
+ * Only a confirmed actual price enables Checkout. On fetch failure the legal display falls back to
+ * DISPLAY_PRICE_JPY with Checkout disabled; a Price billing at another interval or currency shows
+ * no amount at all (never assert an amount the Price does not charge).
+ */
+async function fetchPlanOffer(plan: SubscriptionPlan): Promise<CheckoutPlanOffer> {
+  try {
+    const price = await fetchSubscriptionPrice(plan);
+    if (isChargeableSubscriptionPrice(price)) {
+      logDisplayPriceDrift(price.amount, plan);
+      return {
+        plan,
+        priceLabel: formatPlanJpyPrice(plan, price.amount),
+        checkoutDisabled: false,
+      };
+    }
+    return { plan, priceLabel: null, checkoutDisabled: true };
+  } catch (error) {
+    console.error(`料金情報取得エラー（${plan}）:`, error);
+    return {
+      plan,
+      priceLabel: formatPlanJpyPrice(plan, DISPLAY_PRICE_JPY[plan]),
+      checkoutDisabled: true,
+    };
+  }
+}
+
+/**
+ * Monthly is always offered (its legal notice stays even when the price is unconfirmed). Yearly is
+ * offered only when STRIPE_PRICE_ID_YEARLY is set and its real price was confirmed, so a broken
+ * yearly setup hides the option instead of showing a disabled one.
+ */
+async function fetchCheckoutPlanOffers(): Promise<CheckoutPlanOffer[]> {
+  const [monthly, yearly] = await Promise.all([
+    fetchPlanOffer("monthly"),
+    priceIdForPlan("yearly") ? fetchPlanOffer("yearly") : Promise.resolve(null),
+  ]);
+  return yearly && !yearly.checkoutDisabled ? [monthly, yearly] : [monthly];
+}
 
 const COMMUNITY_APPLY_TEXT =
   "コミュニティ会員（シンラボ会員）への変更をご希望の方は、申し込みフォームからお申し込みください。運営が内容を確認し、承認後にご案内します。承認までお支払いは発生しません。";
@@ -48,7 +90,9 @@ export default async function UpgradePage() {
   const isGeneral = membershipType === USER_MEMBERSHIP.GENERAL;
 
   let subscriptionFetchFailed = false;
-  let fetchedSubscription: ({ status: string } & SubscriptionPeriodFields) | null = null;
+  let fetchedSubscription:
+    | ({ status: string; billing_interval: string | null } & SubscriptionPeriodFields)
+    | null = null;
   if (stripeEnabled && userStatus === USER_STATUS.ACTIVE) {
     const { data, error } = await fetchStripeSubscriptionByUserId(userId);
     if (error) {
@@ -65,30 +109,23 @@ export default async function UpgradePage() {
       : null;
   const periodLabel = subscription ? subscriptionPeriodLabel(subscription) : null;
 
-  // Only a confirmed actual price counts; don't enable Checkout when it is unconfirmed.
-  let confirmedPrice: { amount: number; currency: string } | null = null;
-  let priceFetchFailed = false;
-  if (stripeEnabled && userStatus === USER_STATUS.TRIAL) {
-    try {
-      const price = await fetchSubscriptionPrice();
-      if (isChargeableSubscriptionPrice(price)) {
-        logDisplayPriceDrift(price.amount);
-        confirmedPrice = price;
-      }
-    } catch (error) {
-      priceFetchFailed = true;
-      console.error("料金情報取得エラー:", error);
-    }
-  }
-
-  const checkoutDisabled = confirmedPrice === null;
-  // Fall back to the legal display only on fetch failure. Non-monthly/non-JPY prices don't assert a
-  // monthly amount.
-  const monthlyPriceLabel = confirmedPrice
-    ? formatMonthlyJpyPrice(confirmedPrice.amount)
-    : priceFetchFailed
-      ? FALLBACK_MONTHLY_PRICE_LABEL
+  const planOffers =
+    stripeEnabled && userStatus === USER_STATUS.TRIAL ? await fetchCheckoutPlanOffers() : [];
+  // The card face lists every offered price so it cannot disagree with the dialog; "—" (null)
+  // when monthly is unconfirmed, as before.
+  const generalPriceLabel =
+    planOffers.length > 0 && planOffers.every((offer) => offer.priceLabel !== null)
+      ? planOffers.map((offer) => offer.priceLabel).join(" / ")
       : null;
+  const subscriptionPlan = subscription
+    ? planOfBillingInterval(subscription.billing_interval)
+    : null;
+  const contractDetail = [
+    subscriptionPlan ? SUBSCRIPTION_PLAN_LABELS[subscriptionPlan] : null,
+    periodLabel,
+  ]
+    .filter((part) => part !== null)
+    .join("、");
 
   const communityApplyDialog = (
     <div className="space-y-4">
@@ -124,7 +161,7 @@ export default async function UpgradePage() {
         <div className="space-y-2">
           <p className="text-sm">
             ご契約中です
-            {periodLabel && `（${periodLabel}）`}
+            {contractDetail && `（${contractDetail}）`}
           </p>
           <ManageSubscriptionButton />
           <p className="text-sm text-muted-foreground">{CANCELLATION_POLICY_TEXT}</p>
@@ -152,13 +189,8 @@ export default async function UpgradePage() {
           (stripeEnabled ? (
             <PlanCards
               limits={limits}
-              generalPriceLabel={monthlyPriceLabel}
-              generalDialog={
-                <TrialCheckoutDetails
-                  monthlyPriceLabel={monthlyPriceLabel}
-                  checkoutDisabled={checkoutDisabled}
-                />
-              }
+              generalPriceLabel={generalPriceLabel}
+              generalDialog={<TrialCheckoutDetails offers={planOffers} />}
               communityDialog={communityApplyDialog}
             />
           ) : (
@@ -188,7 +220,7 @@ export default async function UpgradePage() {
                 <>
                   <p className="text-sm">
                     ご契約中です
-                    {periodLabel && `（${periodLabel}）`}
+                    {contractDetail && `（${contractDetail}）`}
                   </p>
                   <ManageSubscriptionButton />
                   <p className="text-sm text-muted-foreground">{CANCELLATION_POLICY_TEXT}</p>

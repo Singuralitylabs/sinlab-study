@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { ANALYTICS_EVENT } from "@/app/constants/analytics";
 import {
+  DEFAULT_SUBSCRIPTION_PLAN,
   isChargeableSubscriptionPrice,
+  isSubscriptionPlan,
   logDisplayPriceDrift,
   STRIPE_DISABLED_MESSAGE,
   SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE,
+  type SubscriptionPlan,
 } from "@/app/constants/stripe";
 import { USER_STATUS } from "@/app/constants/user";
 import { isExternalCheckoutUrl } from "@/app/lib/analytics-funnel";
@@ -19,6 +22,7 @@ import {
   createCheckoutSessionForUser,
   fetchSubscriptionPrice,
   isStripeEnabled,
+  priceIdForPlan,
   releaseCheckoutSlot,
 } from "@/app/services/api/stripe-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
@@ -56,7 +60,33 @@ function jsonNewCheckoutDestination(url: string) {
   return NextResponse.json({ url });
 }
 
-export async function POST() {
+/**
+ * A missing body or `plan` means monthly: tabs opened before the yearly plan existed post no body.
+ * Anything else that is not a known plan is rejected rather than defaulted, so a typo can't
+ * silently bill a different plan than the one shown.
+ */
+async function parsePlan(request: Request): Promise<SubscriptionPlan | null> {
+  const text = await request.text();
+  if (text.trim() === "") {
+    return DEFAULT_SUBSCRIPTION_PLAN;
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return null;
+  }
+  const plan = (body as { plan?: unknown }).plan;
+  if (plan === undefined) {
+    return DEFAULT_SUBSCRIPTION_PLAN;
+  }
+  return isSubscriptionPlan(plan) ? plan : null;
+}
+
+export async function POST(request: Request) {
   if (!isStripeEnabled()) {
     return NextResponse.json({ error: STRIPE_DISABLED_MESSAGE }, { status: 503 });
   }
@@ -76,12 +106,22 @@ export async function POST() {
       );
     }
 
+    const plan = await parsePlan(request);
+    if (plan === null) {
+      return NextResponse.json({ error: "プランの指定が正しくありません" }, { status: 400 });
+    }
+    // Fail closed: an unset yearly Price hides the option on /upgrade, and a direct POST must not
+    // get further than the page would.
+    if (priceIdForPlan(plan) === null) {
+      return NextResponse.json({ error: SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE }, { status: 503 });
+    }
+
     // UI disabled alone doesn't stop stale tabs or direct POSTs, so re-check the real price right
     // before creation. Price retrieval (a cached read) creates no Checkout Session, so do it before
     // acquiring the claim; a request that only can't confirm the price must not write to the DB.
     let price: { amount: number | null; currency: string };
     try {
-      price = await fetchSubscriptionPrice();
+      price = await fetchSubscriptionPrice(plan);
     } catch (error) {
       console.error("料金情報取得エラー:", error);
       return NextResponse.json({ error: SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE }, { status: 503 });
@@ -89,12 +129,12 @@ export async function POST() {
     if (!isChargeableSubscriptionPrice(price)) {
       return NextResponse.json({ error: SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE }, { status: 503 });
     }
-    logDisplayPriceDrift(price.amount);
+    logDisplayPriceDrift(price.amount, plan);
 
     // Acquire the claim atomically before creating a Checkout Session. A plain SELECT existence
     // check lets concurrent requests through while no mirror row exists until payment completes,
     // creating two sessions (double contract and double billing; #103).
-    let claim = await claimCheckoutSlot(auth.userId);
+    let claim = await claimCheckoutSlot(auth.userId, new Date(), plan);
     // A claim left paid-but-unapplied never clears with time (not covered by the TTL). Apply it
     // here to self-recover and retry the claim once (#250).
     if (claim.outcome === "blocked") {
@@ -112,7 +152,7 @@ export async function POST() {
       if (recovery.kind === "activated") {
         return NextResponse.json({ url: checkoutSuccessPath(recovery.sessionId) });
       }
-      claim = await claimCheckoutSlot(auth.userId);
+      claim = await claimCheckoutSlot(auth.userId, new Date(), plan);
     }
     if (claim.outcome === "error") {
       return NextResponse.json({ error: "内部エラーが発生しました" }, { status: 500 });
@@ -142,7 +182,9 @@ export async function POST() {
         auth.user.id,
         auth.user.email,
         claim.stripeCustomerId,
-        claim.claimedAt
+        claim.claimedAt,
+        new Date(),
+        plan
       );
       return jsonNewCheckoutDestination(url);
     } catch (error) {

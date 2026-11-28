@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 import type { PostgrestError } from "@supabase/supabase-js";
 import Stripe from "stripe";
-import type { SubscriptionPrice } from "@/app/constants/stripe";
+import {
+  DEFAULT_SUBSCRIPTION_PLAN,
+  isSubscriptionPlan,
+  SUBSCRIPTION_PLAN_INTERVALS,
+  SUBSCRIPTION_PLANS,
+  type SubscriptionPlan,
+  type SubscriptionPrice,
+} from "@/app/constants/stripe";
 import {
   createAdminSupabaseClient,
   createServerSupabaseClient,
@@ -114,6 +121,36 @@ export function getStripeClient(): Stripe {
   return cachedClient;
 }
 
+const PRICE_ID_ENV: Record<SubscriptionPlan, string> = {
+  monthly: "STRIPE_PRICE_ID",
+  yearly: "STRIPE_PRICE_ID_YEARLY",
+};
+
+/** null when the plan's env var is unset; the yearly plan is then hidden and refused. */
+export function priceIdForPlan(plan: SubscriptionPlan): string | null {
+  return process.env[PRICE_ID_ENV[plan]] || null;
+}
+
+function requirePriceId(plan: SubscriptionPlan): string {
+  const priceId = priceIdForPlan(plan);
+  if (!priceId) {
+    throw new Error(`Stripe環境変数が設定されていません: ${PRICE_ID_ENV[plan]}`);
+  }
+  return priceId;
+}
+
+/**
+ * Plan recorded on a Checkout Session by createCheckoutSession(). Sessions created before the
+ * yearly plan carry no `plan` and were all monthly.
+ */
+export function planOfCheckoutSession(session: Stripe.Checkout.Session): SubscriptionPlan | null {
+  const plan = session.metadata?.plan;
+  if (plan === undefined) {
+    return DEFAULT_SUBSCRIPTION_PLAN;
+  }
+  return isSubscriptionPlan(plan) ? plan : null;
+}
+
 function getAppUrl(): string {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
   if (!appUrl) {
@@ -134,12 +171,10 @@ export async function createCheckoutSession(
   userId: number,
   authId: string,
   customerId: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  plan: SubscriptionPlan = DEFAULT_SUBSCRIPTION_PLAN
 ): Promise<{ url: string; id: string }> {
-  const priceId = process.env.STRIPE_PRICE_ID;
-  if (!priceId) {
-    throw new Error("Stripe環境変数が設定されていません: STRIPE_PRICE_ID");
-  }
+  const priceId = requirePriceId(plan);
   const appUrl = getAppUrl();
   const stripe = getStripeClient();
   const expiresAtUnix = Math.floor((now.getTime() + CHECKOUT_SESSION_LIFETIME_MS) / 1000);
@@ -157,10 +192,12 @@ export async function createCheckoutSession(
     client_reference_id: String(userId),
     customer: customerId,
     expires_at: expiresAtUnix,
-    metadata: { user_id: String(userId), auth_id: authId },
+    // `plan` lets claimCheckoutSlot() reuse an open session only for the plan the user chose.
+    metadata: { user_id: String(userId), auth_id: authId, plan },
     subscription_data: {
       // No billing_cycle_anchor_config / proration_behavior: the cycle starts at signup and the
-      // first charge is the full price, which the /upgrade legal notice promises.
+      // first charge is the full price (a month or a year), which the /upgrade legal notice
+      // promises.
       metadata: { user_id: String(userId), auth_id: authId },
     },
     success_url: `${appUrl}/upgrade/success?session_id={CHECKOUT_SESSION_ID}`,
@@ -300,7 +337,8 @@ export async function createCheckoutSessionForUser(
   email: string | undefined,
   existingCustomerId: string | null,
   claimedAt: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  plan: SubscriptionPlan = DEFAULT_SUBSCRIPTION_PLAN
 ): Promise<{ url: string }> {
   const customerId = await ensureCheckoutCustomer(
     userId,
@@ -318,7 +356,8 @@ export async function createCheckoutSessionForUser(
       email,
       customerId,
       claimedAt,
-      now
+      now,
+      plan
     );
   } catch (error) {
     // Only a 4xx proves no session was created; timeouts/5xx may have created one, so the claim
@@ -348,10 +387,11 @@ async function createSessionWithCustomerRecovery(
   email: string | undefined,
   customerId: string,
   claimedAt: string,
-  now: Date
+  now: Date,
+  plan: SubscriptionPlan
 ): Promise<{ url: string; id: string }> {
   try {
-    return await createCheckoutSession(userId, authId, customerId, now);
+    return await createCheckoutSession(userId, authId, customerId, now, plan);
   } catch (error) {
     if (!isMissingCustomerError(error)) {
       throw error;
@@ -363,7 +403,7 @@ async function createSessionWithCustomerRecovery(
       claimedAt,
       `${customerIdempotencyKey(userId, email)}-replace-${customerId}`
     );
-    return await createCheckoutSession(userId, authId, replacementId, now);
+    return await createCheckoutSession(userId, authId, replacementId, now, plan);
   }
 }
 
@@ -397,52 +437,63 @@ export async function retrieveCheckoutSession(sessionId: string): Promise<Stripe
 }
 
 const PRICE_CACHE_TTL_MS = 5 * 60 * 1000;
-let cachedPrice: { data: Stripe.Price; expiresAt: number } | null = null;
+const cachedPrices = new Map<string, { data: Stripe.Price; expiresAt: number }>();
 
 /**
- * Module-scope TTL cache: the Price rarely changes (edited by operators in the dashboard).
- * Per-instance on serverless but effective on warm instances.
+ * Module-scope TTL cache keyed by Price id: Prices rarely change (edited by operators in the
+ * dashboard). Per-instance on serverless but effective on warm instances.
  */
-async function getCachedPrice(): Promise<Stripe.Price> {
-  if (cachedPrice && cachedPrice.expiresAt > Date.now()) {
-    return cachedPrice.data;
+async function getCachedPrice(plan: SubscriptionPlan): Promise<Stripe.Price> {
+  const priceId = requirePriceId(plan);
+  const cached = cachedPrices.get(priceId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
   }
 
-  const priceId = process.env.STRIPE_PRICE_ID;
-  if (!priceId) {
-    throw new Error("Stripe環境変数が設定されていません: STRIPE_PRICE_ID");
-  }
   const stripe = getStripeClient();
   const price = await stripe.prices.retrieve(priceId);
 
-  cachedPrice = { data: price, expiresAt: Date.now() + PRICE_CACHE_TTL_MS };
+  cachedPrices.set(priceId, { data: price, expiresAt: Date.now() + PRICE_CACHE_TTL_MS });
   return price;
 }
 
 /**
- * The legal notice promises a monthly charge; used to catch misconfigured Prices (e.g. yearly) so
- * Checkout is refused instead of billing a different interval than displayed.
+ * Plan whose interval the Price bills at (every 1 month / 1 year); null for anything else (e.g.
+ * every 3 months), which no legal display describes.
  */
-function isPlainMonthlyPrice(price: Stripe.Price): boolean {
-  return price.recurring?.interval === "month" && (price.recurring.interval_count ?? 1) === 1;
+export function planOfPrice(price: Stripe.Price): SubscriptionPlan | null {
+  if ((price.recurring?.interval_count ?? 1) !== 1) {
+    return null;
+  }
+  return (
+    SUBSCRIPTION_PLANS.find(
+      (plan) => SUBSCRIPTION_PLAN_INTERVALS[plan] === price.recurring?.interval
+    ) ?? null
+  );
 }
 
 /**
  * Converts a Stripe Price into the `SubscriptionPrice` used for price display and the Checkout
  * gate. unit_amount is treated as JPY yen (zero-decimal currency); multi-currency is out of scope
- * (same assumption as the Slack payment-failure notice). A non-monthly Price yields `amount:
- * null` so callers reject Checkout / omit the price (avoids "/ month" display diverging from the
- * real interval). Shared by the /upgrade price and the upgrade email price.
+ * (same assumption as the Slack payment-failure notice). A Price that does not bill at the plan's
+ * interval yields `amount: null` so callers reject Checkout / omit the price (a monthly legal
+ * notice must not sit on a yearly charge, or the reverse). Shared by the /upgrade price and the
+ * upgrade email price.
  */
-export function toSubscriptionPrice(price: Stripe.Price): SubscriptionPrice {
+export function toSubscriptionPrice(
+  price: Stripe.Price,
+  plan: SubscriptionPlan = DEFAULT_SUBSCRIPTION_PLAN
+): SubscriptionPrice {
   return {
-    amount: isPlainMonthlyPrice(price) ? price.unit_amount : null,
+    amount: planOfPrice(price) === plan ? price.unit_amount : null,
     currency: price.currency,
   };
 }
 
-export async function fetchSubscriptionPrice(): Promise<SubscriptionPrice> {
-  return toSubscriptionPrice(await getCachedPrice());
+export async function fetchSubscriptionPrice(
+  plan: SubscriptionPlan = DEFAULT_SUBSCRIPTION_PLAN
+): Promise<SubscriptionPrice> {
+  return toSubscriptionPrice(await getCachedPrice(plan), plan);
 }
 
 /** Uses the regular client: RLS returns only the user's own row (or any row for admin). */
@@ -452,6 +503,7 @@ export async function fetchStripeSubscriptionByUserId(userId: number): Promise<{
     cancel_at_period_end: boolean;
     cancel_at: string | null;
     current_period_end: string | null;
+    billing_interval: string | null;
   } | null;
   error: PostgrestError | null;
 }> {
@@ -459,7 +511,7 @@ export async function fetchStripeSubscriptionByUserId(userId: number): Promise<{
 
   const { data, error } = await supabase
     .from("stripe_subscriptions")
-    .select("status, cancel_at_period_end, cancel_at, current_period_end")
+    .select("status, cancel_at_period_end, cancel_at, current_period_end, billing_interval")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -513,11 +565,14 @@ type ClaimCondition =
  *   return `blocked` and let the caller reflect it and release the claim
  * Only when Stripe cannot be queried (no session id recorded, API outage) fall back to TTL
  * recovery.
+ * @param plan the plan the user chose; an open session for another plan is expired rather than
+ *   reused, or the user would land on a Checkout for a plan they did not pick (#290)
  * @returns claimed.stripeCustomerId is the Customer already saved on the row (null for new users)
  */
 export async function claimCheckoutSlot(
   userId: number,
-  now: Date = new Date()
+  now: Date = new Date(),
+  plan: SubscriptionPlan = DEFAULT_SUBSCRIPTION_PLAN
 ): Promise<CheckoutSlotClaim> {
   const supabase = await createAdminSupabaseClient();
   const claimedAt = now.toISOString();
@@ -569,7 +624,8 @@ export async function claimCheckoutSlot(
       existing.checkout_session_id,
       existing.stripe_customer_id,
       heldClaimedAt,
-      existing.stripe_subscription_id
+      existing.stripe_subscription_id,
+      plan
     );
     if (resolution.kind === "reusable") {
       return { outcome: "reusable", url: resolution.url };
@@ -603,7 +659,7 @@ export async function claimCheckoutSlot(
 
 /**
  * Determines the state of the Checkout Session held by a live claim.
- * - reusable: a payable session exists (send the user to the same URL)
+ * - reusable: a payable session for the chosen plan exists (send the user to the same URL)
  * - blocked: paid and awaiting reflection (must not be taken over); returns the paid sessions to
  *   reflect
  * - pending: a paid session coexists with a still-payable one that could not be expired (neither
@@ -620,12 +676,15 @@ export async function claimCheckoutSlot(
  * previous subscription's session can appear. Counting it would re-reflect an already reflected
  * session and release the in-progress claim, or count as "multiple" and block automatic recovery
  * permanently.
+ * Payable sessions for another plan are expired first and then treated like expired ones; if one
+ * cannot be expired (e.g. paid meanwhile), make the user wait.
  */
 async function resolveHeldSession(
   sessionId: string | null,
   customerId: string | null,
   claimedAt: string,
-  mirroredSubscriptionId: string | null
+  mirroredSubscriptionId: string | null,
+  plan: SubscriptionPlan
 ): Promise<
   | { kind: "reusable"; url: string }
   | { kind: "blocked"; completedSessions: Stripe.Checkout.Session[] }
@@ -657,7 +716,21 @@ async function resolveHeldSession(
     }
     return { kind: "blocked", completedSessions };
   }
-  const openSession = sessions.find((session) => session.status === "open" && session.url);
+  const openSessions = sessions.filter((session) => session.status === "open");
+  const otherPlanSessions = openSessions.filter(
+    (session) => planOfCheckoutSession(session) !== plan
+  );
+  if (otherPlanSessions.length > 0) {
+    const expired = await Promise.all(
+      otherPlanSessions.map((otherSession) => expireCheckoutSession(otherSession.id))
+    );
+    if (expired.includes(false)) {
+      return { kind: "pending" };
+    }
+  }
+  const openSession = openSessions.find(
+    (session) => planOfCheckoutSession(session) === plan && session.url
+  );
   if (openSession?.url) {
     return { kind: "reusable", url: openSession.url };
   }

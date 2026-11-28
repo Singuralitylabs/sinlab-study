@@ -1,5 +1,5 @@
 import { EMAIL_KIND, type EmailKind } from "@/app/constants/notifications";
-import { formatMonthlyJpyPrice, isStripeEnabled } from "@/app/constants/stripe";
+import { isStripeEnabled } from "@/app/constants/stripe";
 import { USER_MEMBERSHIP_LABELS } from "@/app/constants/user";
 import { runAfterResponse } from "@/app/lib/after-response";
 import type { EmailTexts } from "@/app/lib/email-template";
@@ -256,14 +256,14 @@ export function scheduleApprovedEmail(params: {
 /**
  * Paid membership (when activateUserFromCheckoutSession() promoted). Called from both the webhook
  * and /upgrade/success, so reference_key `stripe_subscription_id` limits it to one email.
- * @param monthlyAmountJpy actual charged amount of the subscription re-fetched from Stripe. Pass
- *   null when it cannot be confirmed as a JPY monthly amount and the price line is omitted (never
- *   substitute DISPLAY_MONTHLY_PRICE_JPY).
+ * @param priceLabel actual charged price ("月額…" / "年額…") of the subscription re-fetched from
+ *   Stripe. Pass null when it cannot be confirmed as a JPY monthly / yearly amount and the price
+ *   line is omitted (never substitute the DISPLAY_* constants).
  */
 export function scheduleUpgradedEmail(params: {
   userId: number;
   subscriptionId: string;
-  monthlyAmountJpy: number | null;
+  priceLabel: string | null;
   currentPeriodEnd: string | null;
 }): void {
   scheduleEmail(EMAIL_KIND.UPGRADED, () =>
@@ -276,10 +276,7 @@ export function scheduleUpgradedEmail(params: {
           {
             displayName: recipient.displayName,
             appUrl,
-            monthlyPriceLabel:
-              params.monthlyAmountJpy !== null
-                ? formatMonthlyJpyPrice(params.monthlyAmountJpy)
-                : null,
+            priceLabel: params.priceLabel,
             nextBillingDateLabel: params.currentPeriodEnd
               ? formatDate(params.currentPeriodEnd)
               : null,

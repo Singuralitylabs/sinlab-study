@@ -243,8 +243,11 @@ export function buildApprovedEmail(
 export type UpgradedEmailParams = {
   displayName: string;
   appUrl: string;
-  /** Actual charged amount (JPY) from Stripe; null if unavailable (price line omitted). */
-  monthlyPriceLabel: string | null;
+  /**
+   * Actual charged price from Stripe ("月額…" / "年額…"); null if unavailable (price line omitted).
+   * Fills `{{monthly_price}}`: the key is kept because saved email_templates rows use it.
+   */
+  priceLabel: string | null;
   /** Display string of the next billing date; null if unavailable. */
   nextBillingDateLabel: string | null;
 };
@@ -258,7 +261,7 @@ export function buildUpgradedEmail(
     texts,
     displayName: params.displayName,
     values: {
-      monthly_price: params.monthlyPriceLabel ?? "",
+      monthly_price: params.priceLabel ?? "",
       next_billing_date: params.nextBillingDateLabel ?? "",
     },
     links: [

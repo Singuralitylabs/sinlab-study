@@ -53,6 +53,15 @@ vi.mock("@/app/services/auth/server-auth");
 vi.mock("@/app/services/notifications/slack");
 
 import { POST } from "@/app/api/stripe/checkout/route";
+
+/** The button sends no body in pre-yearly tabs; an empty body must mean monthly. */
+function checkoutRequest(body?: unknown): Request {
+  return new Request("http://localhost/api/stripe/checkout", {
+    method: "POST",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
 import { createAdminSupabaseClient } from "@/app/services/api/supabase-server";
 import { getServerAuth } from "@/app/services/auth/server-auth";
 import { sendSlackCheckoutRecoveryNotification } from "@/app/services/notifications/slack";
@@ -255,7 +264,7 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
     mockSubscriptionsRetrieve.mockResolvedValue(subscriptionWithStatus("canceled"));
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/cs_new" });
@@ -274,7 +283,7 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     expect(db.subscription().checkout_claimed_at).not.toBe(HELD_CLAIMED_AT);
     expect(db.user()).toMatchObject({ status: "trial", membership_type: null });
 
-    const again = await POST();
+    const again = await POST(checkoutRequest());
     expect(again.status).toBe(200);
     await expect(again.json()).resolves.toEqual({ url: "https://checkout.stripe.com/cs_new" });
     expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
@@ -285,7 +294,7 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
     mockSubscriptionsRetrieve.mockResolvedValue(subscriptionWithStatus("active"));
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({
@@ -306,7 +315,7 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
     mockSubscriptionsRetrieve.mockResolvedValue(subscriptionWithStatus("incomplete"));
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toEqual({ error: "既に決済手続き中、またはご契約済みです" });
@@ -324,7 +333,7 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
     mockSubscriptionsRetrieve.mockRejectedValueOnce(new Error("Stripe API一時エラー"));
 
-    const failed = await POST();
+    const failed = await POST(checkoutRequest());
 
     expect(failed.status).toBe(500);
     expect(mockSessionsCreate).not.toHaveBeenCalled();
@@ -335,7 +344,7 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     });
 
     mockSubscriptionsRetrieve.mockResolvedValue(subscriptionWithStatus("canceled"));
-    const retried = await POST();
+    const retried = await POST(checkoutRequest());
 
     expect(retried.status).toBe(200);
     await expect(retried.json()).resolves.toEqual({ url: "https://checkout.stripe.com/cs_new" });
@@ -348,7 +357,7 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     mockSessionsList.mockResolvedValue({ data: [paidSession] });
     mockSubscriptionsRetrieve.mockResolvedValue(subscriptionWithStatus("canceled"));
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/cs_new" });
@@ -371,8 +380,8 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
       throw new Error("Stripe API一時エラー");
     });
 
-    const first = await POST();
-    const second = await POST();
+    const first = await POST(checkoutRequest());
+    const second = await POST(checkoutRequest());
 
     expect(first.status).toBe(409);
     expect(second.status).toBe(409);
@@ -403,7 +412,7 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     mockSessionsExpire.mockResolvedValue({ id: "cs_open", status: "expired" });
     mockSubscriptionsRetrieve.mockResolvedValue(subscriptionWithStatus("active"));
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(mockSessionsExpire).toHaveBeenCalledWith("cs_open");
     expect(res.status).toBe(200);
@@ -426,7 +435,7 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     });
     mockSessionsExpire.mockRejectedValue(new Error("Stripe API一時エラー"));
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(409);
     expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
@@ -442,7 +451,7 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(db as never);
     mockSessionsRetrieve.mockResolvedValue({ ...paidSession, subscription: null });
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(409);
     expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledWith(
@@ -457,13 +466,13 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     mockSubscriptionsRetrieve.mockResolvedValue(subscriptionWithStatus("active"));
     db.failNextUpdate("users");
 
-    const failed = await POST();
+    const failed = await POST(checkoutRequest());
 
     expect(failed.status).toBe(500);
     expect(db.subscription()).toMatchObject({ status: "active", checkout_claimed_at: null });
     expect(db.user()).toMatchObject({ status: "trial" });
 
-    const retried = await POST();
+    const retried = await POST(checkoutRequest());
 
     expect(retried.status).toBe(200);
     await expect(retried.json()).resolves.toEqual({ url: "/upgrade" });
@@ -480,7 +489,7 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
       metadata: { user_id: "99", auth_id: "other-auth" },
     });
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(409);
     expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
@@ -506,7 +515,7 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     });
     mockSubscriptionsRetrieve.mockRejectedValue(notFound);
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(409);
     expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledWith(
@@ -521,7 +530,7 @@ describe("決済済みのまま反映されなかった処理権の自己復旧�
     mockSessionsRetrieve.mockResolvedValue({ ...paidSession, subscription: null });
 
     for (let i = 0; i < 5; i++) {
-      expect((await POST()).status).toBe(409);
+      expect((await POST(checkoutRequest())).status).toBe(409);
     }
 
     expect(sendSlackCheckoutRecoveryNotification).toHaveBeenCalledTimes(1);

@@ -9,6 +9,46 @@ import type { AIReviewLimits } from "@/app/constants/gemini";
  */
 export const DISPLAY_MONTHLY_PRICE_JPY = 1500;
 
+/** Yearly counterpart of DISPLAY_MONTHLY_PRICE_JPY (#290); same update rule. */
+export const DISPLAY_YEARLY_PRICE_JPY = 15000;
+
+/**
+ * Plans a trial user can check out (#290). The API's accepted `plan` values and the Stripe Price
+ * interval each plan must have are both derived from here, so a new plan cannot be accepted
+ * without a matching legal display and Price check.
+ */
+export const SUBSCRIPTION_PLANS = ["monthly", "yearly"] as const;
+export type SubscriptionPlan = (typeof SUBSCRIPTION_PLANS)[number];
+
+/** Default for requests without a plan (tabs opened before the yearly plan existed). */
+export const DEFAULT_SUBSCRIPTION_PLAN: SubscriptionPlan = "monthly";
+
+export const SUBSCRIPTION_PLAN_INTERVALS: Record<SubscriptionPlan, "month" | "year"> = {
+  monthly: "month",
+  yearly: "year",
+};
+
+export const SUBSCRIPTION_PLAN_LABELS: Record<SubscriptionPlan, string> = {
+  monthly: "月額プラン",
+  yearly: "年額プラン",
+};
+
+export const DISPLAY_PRICE_JPY: Record<SubscriptionPlan, number> = {
+  monthly: DISPLAY_MONTHLY_PRICE_JPY,
+  yearly: DISPLAY_YEARLY_PRICE_JPY,
+};
+
+export function isSubscriptionPlan(value: unknown): value is SubscriptionPlan {
+  return typeof value === "string" && (SUBSCRIPTION_PLANS as readonly string[]).includes(value);
+}
+
+/** Plan for a mirrored `billing_interval`; null for unknown or unrecorded intervals. */
+export function planOfBillingInterval(
+  interval: string | null | undefined
+): SubscriptionPlan | null {
+  return SUBSCRIPTION_PLANS.find((plan) => SUBSCRIPTION_PLAN_INTERVALS[plan] === interval) ?? null;
+}
+
 /** Community membership list price (JPY, tax included; #394). Manual approval only for now (#395). */
 export const DISPLAY_COMMUNITY_MONTHLY_PRICE_JPY = 3000;
 
@@ -21,6 +61,11 @@ export const COMMUNITY_APPLY_FORM_URL =
 
 export function formatMonthlyJpyPrice(amount: number): string {
   return `月額${amount.toLocaleString("ja-JP")}円（税込）`;
+}
+
+export function formatPlanJpyPrice(plan: SubscriptionPlan, amount: number): string {
+  const prefix = plan === "yearly" ? "年額" : "月額";
+  return `${prefix}${amount.toLocaleString("ja-JP")}円（税込）`;
 }
 
 /** Page title / nav / settings / email copy for /upgrade (#394). Trial CTA copy keeps 「アップグレード」. */
@@ -58,8 +103,8 @@ export type SubscriptionPrice = {
 };
 
 /**
- * Allow Checkout only for monthly JPY prices; non-monthly (amount: null) and non-JPY prices are
- * rejected because they would diverge from the legal display.
+ * Allow Checkout only for JPY prices whose interval matches the plan (toSubscriptionPrice() sets
+ * amount to null otherwise); anything else would diverge from the legal display.
  */
 export function isChargeableSubscriptionPrice(
   price: SubscriptionPrice
@@ -68,11 +113,13 @@ export function isChargeableSubscriptionPrice(
 }
 
 /** Log drift between the fetched amount and the fallback (Checkout uses the real amount). */
-export function logDisplayPriceDrift(amount: number): void {
-  if (amount !== DISPLAY_MONTHLY_PRICE_JPY) {
-    console.error(
-      `Stripe Price(${amount}) が DISPLAY_MONTHLY_PRICE_JPY(${DISPLAY_MONTHLY_PRICE_JPY}) と異なります`
-    );
+export function logDisplayPriceDrift(
+  amount: number,
+  plan: SubscriptionPlan = DEFAULT_SUBSCRIPTION_PLAN
+): void {
+  const fallback = DISPLAY_PRICE_JPY[plan];
+  if (amount !== fallback) {
+    console.error(`Stripe Price(${plan}: ${amount}) が表示用の定数(${fallback}) と異なります`);
   }
 }
 

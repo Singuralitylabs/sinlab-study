@@ -16,8 +16,8 @@ import {
   createTheme,
   fetchAllContents,
   fetchManageCounts,
+  fetchStripeSubscribedUsers,
   fetchStudentsProgress,
-  fetchUserIdsWithStripeSubscription,
   fetchWeeklyFunnel,
   isUserCurrentlySubscribed,
   parseStrictFilterId,
@@ -731,24 +731,32 @@ describe("isUserCurrentlySubscribed", () => {
   });
 });
 
-describe("fetchUserIdsWithStripeSubscription", () => {
-  it("契約が無い行をSQL側で除外するクエリを発行し、返された行をそのままIDにマップする", async () => {
+describe("fetchStripeSubscribedUsers", () => {
+  it("契約が無い行をSQL側で除外するクエリを発行し、返された行をIDとプランにマップする", async () => {
     // Terminal/checkout-pending exclusion happens in SQL (.not), so the mock returns post-filter
     // rows.
     const mockClient = createMockSupabaseClient({
       tableResults: {
         stripe_subscriptions: {
-          data: [{ user_id: 1 }, { user_id: 3 }],
+          data: [
+            { user_id: 1, billing_interval: "month" },
+            { user_id: 3, billing_interval: "year" },
+            { user_id: 4, billing_interval: null },
+          ],
           error: null,
         },
       },
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await fetchUserIdsWithStripeSubscription();
+    const result = await fetchStripeSubscribedUsers();
 
     expect(result.error).toBeNull();
-    expect(result.data).toEqual([1, 3]);
+    expect(result.data).toEqual([
+      { userId: 1, plan: "monthly" },
+      { userId: 3, plan: "yearly" },
+      { userId: 4, plan: null },
+    ]);
     const builder = mockClient.from.mock.results[0].value;
     expect(builder.not).toHaveBeenCalledWith(
       "status",
@@ -763,7 +771,7 @@ describe("fetchUserIdsWithStripeSubscription", () => {
     });
     vi.mocked(createAdminSupabaseClient).mockResolvedValue(mockClient as never);
 
-    const result = await fetchUserIdsWithStripeSubscription();
+    const result = await fetchStripeSubscribedUsers();
 
     expect(result.data).toBeNull();
     expect(result.error).toEqual(dbError);

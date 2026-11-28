@@ -160,6 +160,7 @@ erDiagram
 
 - `stripe_customer_id`（UNIQUE）: ユーザーごとに一意で、確保後は必ず再利用する。claim直後〜Customer作成前のみ NULL
 - `stripe_subscription_id`（UNIQUE）
+- `price_id` / `billing_interval`: 契約中の Price の id と請求間隔（`recurring.interval`。`month` / `year`）のミラー（#290）。プラン種別（月額 / 年額）の表示は `billing_interval` から出す（`price_id` を環境変数と突き合わせると、料金改定で Price を作り直したときに旧契約のプランが分からなくなるため）。列の追加前に記録された行は、次のミラー更新まで NULL（表示はプラン種別なし）
 - `cancel_at_period_end` / `cancel_at`: Stripe の `subscription.cancel_at_period_end` / `cancel_at`（解約予定日時）をそのままミラーする（下記「解約予約の判定は2列で行う」）
 - `status`: Stripeの `subscription.status` をそのままミラーする。CHECK制約は設けず、Stripe側の値追加にそのまま追従する。例外として、Checkout作成の処理権を確保している間だけ番兵値 `checkout_pending`（Stripe側には存在しない値）が入る
 - `checkout_claimed_at`: Checkout作成の処理権を確保した日時。NULLは処理権なし（未確保・解放済み・契約記録済み）

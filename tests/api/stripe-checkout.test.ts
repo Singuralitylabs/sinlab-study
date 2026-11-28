@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/services/auth/server-auth");
 // Keep the real constants (messages etc.) and mock only side-effecting functions.
@@ -24,6 +24,15 @@ vi.mock("@vercel/analytics/server", () => ({
 
 import { track } from "@vercel/analytics/server";
 import { POST } from "@/app/api/stripe/checkout/route";
+
+/** The button sends no body in pre-yearly tabs; an empty body must mean monthly. */
+function checkoutRequest(body?: unknown): Request {
+  return new Request("http://localhost/api/stripe/checkout", {
+    method: "POST",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
 import { SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE } from "@/app/constants/stripe";
 import {
   claimCheckoutSlot,
@@ -51,6 +60,8 @@ const claimedAt = "2026-08-10T00:00:00.000Z";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("STRIPE_PRICE_ID", "price_monthly");
+  vi.stubEnv("STRIPE_PRICE_ID_YEARLY", "price_yearly");
   vi.mocked(isStripeEnabled).mockReturnValue(true);
   vi.mocked(getServerAuth).mockResolvedValue(trialAuth as never);
   vi.mocked(claimCheckoutSlot).mockResolvedValue({
@@ -67,9 +78,84 @@ beforeEach(() => {
   vi.mocked(claimEvent).mockResolvedValue({ claimed: true, processedAt: claimedAt, error: null });
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("POST /api/stripe/checkout（プランの選択 #290）", () => {
+  it("plan: yearly なら年額の料金を確認し、年額で処理権の確保とCheckout作成を行う", async () => {
+    vi.mocked(fetchSubscriptionPrice).mockResolvedValue({ amount: 15000, currency: "jpy" });
+
+    const response = await POST(checkoutRequest({ plan: "yearly" }));
+
+    expect(response.status).toBe(200);
+    expect(fetchSubscriptionPrice).toHaveBeenCalledWith("yearly");
+    expect(claimCheckoutSlot).toHaveBeenCalledWith(5, expect.any(Date), "yearly");
+    expect(createCheckoutSessionForUser).toHaveBeenCalledWith(
+      5,
+      "auth-uuid",
+      "trial@example.com",
+      null,
+      claimedAt,
+      expect.any(Date),
+      "yearly"
+    );
+  });
+
+  it("本文なし・plan なしは月額として扱う（年額の追加前に開いたタブを壊さない）", async () => {
+    await POST(checkoutRequest());
+    await POST(checkoutRequest({}));
+
+    expect(fetchSubscriptionPrice).toHaveBeenNthCalledWith(1, "monthly");
+    expect(fetchSubscriptionPrice).toHaveBeenNthCalledWith(2, "monthly");
+  });
+
+  it.each([
+    ["許可値以外のプラン", { plan: "weekly" }],
+    ["文字列以外のプラン", { plan: 1 }],
+    ["配列の本文", ["yearly"]],
+  ])("%s は400で拒否し、料金確認も処理権の確保もしない", async (_label, body) => {
+    const response = await POST(checkoutRequest(body));
+
+    expect(response.status).toBe(400);
+    expect(fetchSubscriptionPrice).not.toHaveBeenCalled();
+    expect(claimCheckoutSlot).not.toHaveBeenCalled();
+  });
+
+  it("JSONとして読めない本文は400", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/stripe/checkout", { method: "POST", body: "{" })
+    );
+
+    expect(response.status).toBe(400);
+    expect(claimCheckoutSlot).not.toHaveBeenCalled();
+  });
+
+  it("STRIPE_PRICE_ID_YEARLY が未設定なら年額を503で拒否する（月額は通す）", async () => {
+    vi.stubEnv("STRIPE_PRICE_ID_YEARLY", "");
+
+    const yearly = await POST(checkoutRequest({ plan: "yearly" }));
+    expect(yearly.status).toBe(503);
+    expect(await yearly.json()).toEqual({ error: SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE });
+    expect(claimCheckoutSlot).not.toHaveBeenCalled();
+
+    const monthly = await POST(checkoutRequest({ plan: "monthly" }));
+    expect(monthly.status).toBe(200);
+  });
+
+  it("年額の Price が年額JPYでなければ503で拒否する", async () => {
+    vi.mocked(fetchSubscriptionPrice).mockResolvedValue({ amount: null, currency: "jpy" });
+
+    const response = await POST(checkoutRequest({ plan: "yearly" }));
+
+    expect(response.status).toBe(503);
+    expect(claimCheckoutSlot).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/stripe/checkout", () => {
   it("お試しユーザーはCheckoutセッションを作成できる", async () => {
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/xxx" });
@@ -78,7 +164,9 @@ describe("POST /api/stripe/checkout", () => {
       "auth-uuid",
       "trial@example.com",
       null,
-      claimedAt
+      claimedAt,
+      expect.any(Date),
+      "monthly"
     );
     expect(releaseCheckoutSlot).not.toHaveBeenCalled();
   });
@@ -98,7 +186,7 @@ describe("POST /api/stripe/checkout", () => {
       return { url: "https://checkout.stripe.com/xxx" };
     });
 
-    await POST();
+    await POST(checkoutRequest());
 
     expect(order).toEqual(["price", "claim", "checkout"]);
   });
@@ -109,7 +197,7 @@ describe("POST /api/stripe/checkout", () => {
       url: "https://checkout.stripe.com/live",
     });
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/live" });
@@ -125,7 +213,7 @@ describe("POST /api/stripe/checkout", () => {
       userRole: null,
     } as never);
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(401);
     expect(claimCheckoutSlot).not.toHaveBeenCalled();
@@ -135,7 +223,7 @@ describe("POST /api/stripe/checkout", () => {
   it.each(["active", "rejected"])("%sユーザーは403を返す", async (userStatus) => {
     vi.mocked(getServerAuth).mockResolvedValue({ ...trialAuth, userStatus } as never);
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(403);
     expect(claimCheckoutSlot).not.toHaveBeenCalled();
@@ -145,7 +233,7 @@ describe("POST /api/stripe/checkout", () => {
   it("既に契約中・手続き中の場合は409を返す（二重Checkout防止）", async () => {
     vi.mocked(claimCheckoutSlot).mockResolvedValue({ outcome: "conflict" });
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toEqual({ error: "既に決済手続き中、またはご契約済みです" });
@@ -160,7 +248,7 @@ describe("POST /api/stripe/checkout", () => {
       .mockResolvedValueOnce({ outcome: "claimed", claimedAt, stripeCustomerId: null })
       .mockResolvedValue({ outcome: "conflict" });
 
-    const [first, second] = await Promise.all([POST(), POST()]);
+    const [first, second] = await Promise.all([POST(checkoutRequest()), POST(checkoutRequest())]);
 
     expect([first.status, second.status].sort()).toEqual([200, 409]);
     expect(createCheckoutSessionForUser).toHaveBeenCalledTimes(1);
@@ -173,7 +261,7 @@ describe("POST /api/stripe/checkout", () => {
       stripeCustomerId: "cus_old",
     });
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(200);
     expect(createCheckoutSessionForUser).toHaveBeenCalledWith(
@@ -181,14 +269,16 @@ describe("POST /api/stripe/checkout", () => {
       "auth-uuid",
       "trial@example.com",
       "cus_old",
-      claimedAt
+      claimedAt,
+      expect.any(Date),
+      "monthly"
     );
   });
 
   it("処理権の確保に失敗した場合は500を返す", async () => {
     vi.mocked(claimCheckoutSlot).mockResolvedValue({ outcome: "error", message: "db error" });
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(500);
     expect(createCheckoutSessionForUser).not.toHaveBeenCalled();
@@ -198,7 +288,7 @@ describe("POST /api/stripe/checkout", () => {
   it("STRIPE_ENABLEDが無効な場合は認証チェック前に503を返す", async () => {
     vi.mocked(isStripeEnabled).mockReturnValue(false);
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(503);
     expect(getServerAuth).not.toHaveBeenCalled();
@@ -209,7 +299,7 @@ describe("POST /api/stripe/checkout", () => {
   it("料金取得に失敗した場合は503を返し、処理権を確保しない", async () => {
     vi.mocked(fetchSubscriptionPrice).mockRejectedValue(new Error("stripe unavailable"));
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(503);
     await expect(res.json()).resolves.toEqual({ error: SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE });
@@ -224,7 +314,7 @@ describe("POST /api/stripe/checkout", () => {
   ])("確認できない料金（amount=$amount, currency=$currency）は503を返す", async (price) => {
     vi.mocked(fetchSubscriptionPrice).mockResolvedValue(price);
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(503);
     await expect(res.json()).resolves.toEqual({ error: SUBSCRIPTION_PRICE_UNAVAILABLE_MESSAGE });
@@ -236,7 +326,7 @@ describe("POST /api/stripe/checkout", () => {
   it("Checkoutセッションの作成に失敗した場合は500を返し、処理権を解放する", async () => {
     vi.mocked(createCheckoutSessionForUser).mockRejectedValue(new Error("stripe error"));
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(500);
     expect(releaseCheckoutSlot).toHaveBeenCalledWith(5, claimedAt);
@@ -272,7 +362,7 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
       .mockResolvedValueOnce({ outcome: "claimed", claimedAt, stripeCustomerId: "cus_1" });
     vi.mocked(activateUserFromCheckoutSession).mockResolvedValue(notActivated);
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/xxx" });
@@ -286,7 +376,9 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
       "auth-uuid",
       "trial@example.com",
       "cus_1",
-      claimedAt
+      claimedAt,
+      expect.any(Date),
+      "monthly"
     );
   });
 
@@ -307,7 +399,7 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
       return { url: "https://checkout.stripe.com/xxx" };
     });
 
-    await POST();
+    await POST(checkoutRequest());
 
     expect(order).toEqual(["claim", "activate", "claim", "checkout"]);
   });
@@ -320,7 +412,7 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
       currentPeriodEnd: "2026-10-27T00:00:00.000Z",
     });
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     // Return the URL with 200 so it is handled as a normal redirect, not an error (the success page
     // applies the same idempotent promotion and shows the completion screen with the next billing
@@ -339,7 +431,7 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
       .mockResolvedValueOnce({ outcome: "conflict" });
     vi.mocked(activateUserFromCheckoutSession).mockResolvedValue(notActivated);
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toEqual({ error: "既に決済手続き中、またはご契約済みです" });
@@ -356,7 +448,7 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
       currentPeriodEnd: null,
     });
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(500);
     expect(claimCheckoutSlot).toHaveBeenCalledTimes(1);
@@ -370,7 +462,7 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
     vi.mocked(claimCheckoutSlot).mockResolvedValue(mockBlocked());
     vi.mocked(activateUserFromCheckoutSession).mockRejectedValue(new Error("stripe unavailable"));
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(500);
     expect(claimCheckoutSlot).toHaveBeenCalledTimes(1);
@@ -398,7 +490,7 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
     async ({ reason, sessions }) => {
       vi.mocked(claimCheckoutSlot).mockResolvedValue(mockBlocked(sessions));
 
-      const res = await POST();
+      const res = await POST(checkoutRequest());
 
       expect(res.status).toBe(409);
       await expect(res.json()).resolves.toEqual({
@@ -419,7 +511,7 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
     vi.mocked(claimCheckoutSlot).mockResolvedValue(mockBlocked());
     vi.mocked(activateUserFromCheckoutSession).mockResolvedValue(notActivated);
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toEqual({ error: "既に決済手続き中、またはご契約済みです" });
@@ -437,7 +529,7 @@ describe("POST /api/stripe/checkout（決済済みのまま反映されていな
     async (claim) => {
       vi.mocked(claimCheckoutSlot).mockResolvedValue(claim);
 
-      await POST();
+      await POST(checkoutRequest());
 
       expect(activateUserFromCheckoutSession).not.toHaveBeenCalled();
       expect(claimCheckoutSlot).toHaveBeenCalledTimes(1);
@@ -450,7 +542,7 @@ describe("POST /api/stripe/checkout（契約済みなのにお試しのままの
     vi.mocked(claimCheckoutSlot).mockResolvedValue({ outcome: "conflict" });
     vi.mocked(reactivateUserFromMirror).mockResolvedValue({ error: null, activated: true });
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "/upgrade" });
@@ -464,8 +556,8 @@ describe("POST /api/stripe/checkout（契約済みなのにお試しのままの
       .mockResolvedValueOnce({ error: "db error", activated: false })
       .mockRejectedValueOnce(new Error("stripe unavailable"));
 
-    const first = await POST();
-    const second = await POST();
+    const first = await POST(checkoutRequest());
+    const second = await POST(checkoutRequest());
 
     expect(first.status).toBe(409);
     expect(second.status).toBe(409);
@@ -482,7 +574,7 @@ describe("POST /api/stripe/checkout（契約済みなのにお試しのままの
   ])("conflict 以外（$outcome）では再昇格を試みない", async (claim) => {
     vi.mocked(claimCheckoutSlot).mockResolvedValue(claim);
 
-    await POST();
+    await POST(checkoutRequest());
 
     expect(reactivateUserFromMirror).not.toHaveBeenCalled();
   });
@@ -490,7 +582,7 @@ describe("POST /api/stripe/checkout（契約済みなのにお試しのままの
 
 describe("POST /api/stripe/checkout - checkout_started", () => {
   it("新規の Checkout URL を返すときだけ送り、メールアドレスは含めない", async () => {
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/xxx" });
@@ -505,7 +597,7 @@ describe("POST /api/stripe/checkout - checkout_started", () => {
       url: "https://checkout.stripe.com/live",
     });
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/live" });
@@ -516,7 +608,7 @@ describe("POST /api/stripe/checkout - checkout_started", () => {
     vi.mocked(claimCheckoutSlot).mockResolvedValue({ outcome: "conflict" });
     vi.mocked(reactivateUserFromMirror).mockResolvedValue({ error: null, activated: true });
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "/upgrade" });
@@ -526,7 +618,7 @@ describe("POST /api/stripe/checkout - checkout_started", () => {
   it("track が拒否しても Checkout URL のレスポンスは変わらない", async () => {
     vi.mocked(track).mockRejectedValueOnce(new Error("analytics down"));
 
-    const res = await POST();
+    const res = await POST(checkoutRequest());
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ url: "https://checkout.stripe.com/xxx" });

@@ -3,6 +3,7 @@
 import { Check, Loader2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { SUBSCRIPTION_PLAN_LABELS, type SubscriptionPlan } from "@/app/constants/stripe";
 import {
   MEMBERSHIP_TYPES,
   USER_MEMBERSHIP,
@@ -29,6 +30,11 @@ const ROLE_LABELS: Record<UserRoleType, string> = {
   maintainer: "講師/運営",
   member: "受講生",
 };
+
+/** Plan is null for rows mirrored before billing_interval existed; show the badge without it. */
+function subscriptionBadgeLabel(plan: SubscriptionPlan | null | undefined): string {
+  return plan ? `サブスク契約中（${SUBSCRIPTION_PLAN_LABELS[plan]}）` : "サブスク契約中";
+}
 
 const SELECT_CLASS =
   "h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring";
@@ -59,11 +65,11 @@ function MembershipOptions({ restrictToGeneral }: { restrictToGeneral: boolean }
 
 export function UserManagementTable({
   users,
-  subscribedUserIds,
+  subscribedUsers,
   subscriptionDataUnavailable = false,
 }: {
   users: ManageUserListItem[];
-  subscribedUserIds: number[];
+  subscribedUsers: { userId: number; plan: SubscriptionPlan | null }[];
   subscriptionDataUnavailable?: boolean;
 }) {
   const router = useRouter();
@@ -72,7 +78,14 @@ export function UserManagementTable({
   // Membership chosen on approval, per user id. Default is community, but general for
   // Stripe-subscribed users since they can't pick community.
   const [membershipByUserId, setMembershipByUserId] = useState<Record<number, MembershipType>>({});
-  const subscribedUserIdSet = useMemo(() => new Set(subscribedUserIds), [subscribedUserIds]);
+  const subscriptionPlanByUserId = useMemo(
+    () => new Map(subscribedUsers.map(({ userId, plan }) => [userId, plan])),
+    [subscribedUsers]
+  );
+  const subscribedUserIdSet = useMemo(
+    () => new Set(subscriptionPlanByUserId.keys()),
+    [subscriptionPlanByUserId]
+  );
 
   const filteredUsers = useMemo(
     () => (filter === "all" ? users : users.filter((u) => u.status === filter)),
@@ -347,7 +360,11 @@ export function UserManagementTable({
                             ) : (
                               <span className="text-muted-foreground">-</span>
                             )}
-                            {isSubscribed && <Badge variant="secondary">サブスク契約中</Badge>}
+                            {isSubscribed && (
+                              <Badge variant="secondary">
+                                {subscriptionBadgeLabel(subscriptionPlanByUserId.get(user.id))}
+                              </Badge>
+                            )}
                           </div>
                           {user.status === USER_STATUS.ACTIVE &&
                             (subscriptionDataUnavailable ? (

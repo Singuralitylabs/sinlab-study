@@ -308,6 +308,42 @@ describe("createCheckoutSession", () => {
     expect(params).not.toHaveProperty("discounts");
   });
 
+  it("年額は STRIPE_PRICE_ID_YEARLY の Price で作り、セッションの metadata にプランを記録する", async () => {
+    vi.stubEnv("STRIPE_PRICE_ID_YEARLY", "price_yearly");
+    mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
+
+    await createCheckoutSession(5, "auth-uuid", "cus_existing", midMonth, "yearly");
+
+    const params = mockSessionsCreate.mock.calls[0][0];
+    expect(params.line_items).toEqual([{ price: "price_yearly", quantity: 1 }]);
+    expect(params.metadata).toEqual({ user_id: "5", auth_id: "auth-uuid", plan: "yearly" });
+    // Contract-date billing for yearly too: no anchor, no proration.
+    expect(params.subscription_data).toEqual({
+      metadata: { user_id: "5", auth_id: "auth-uuid" },
+    });
+  });
+
+  it("月額は metadata に plan: monthly を記録する", async () => {
+    mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
+
+    await createCheckoutSession(5, "auth-uuid", "cus_existing", midMonth);
+
+    expect(mockSessionsCreate.mock.calls[0][0].metadata).toEqual({
+      user_id: "5",
+      auth_id: "auth-uuid",
+      plan: "monthly",
+    });
+  });
+
+  it("STRIPE_PRICE_ID_YEARLY が未設定なら年額のセッションを作らない", async () => {
+    vi.stubEnv("STRIPE_PRICE_ID_YEARLY", "");
+
+    await expect(
+      createCheckoutSession(5, "auth-uuid", "cus_existing", midMonth, "yearly")
+    ).rejects.toThrow("STRIPE_PRICE_ID_YEARLY");
+    expect(mockSessionsCreate).not.toHaveBeenCalled();
+  });
+
   it("決済手段をカードのみに限定する（遅延通知系の決済手段を許可しない）", async () => {
     mockSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/xxx", id: "cs_test" });
 
@@ -510,6 +546,71 @@ describe("claimCheckoutSlot（既存行の状態別）", () => {
 
     expect(result).toEqual({ outcome: "reusable", url: "https://checkout.stripe.com/live" });
     expect(mockSessionsRetrieve).toHaveBeenCalledWith("cs_live");
+    expect(fake.getRow()?.checkout_claimed_at).toBe(now.toISOString());
+  });
+
+  it("plan の無い既存セッションは月額として再利用する", async () => {
+    const fake = createRaceSupabaseClient({
+      status: CHECKOUT_PENDING_STATUS,
+      checkout_claimed_at: now.toISOString(),
+      checkout_session_id: "cs_live",
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
+    mockSessionsRetrieve.mockResolvedValue({
+      id: "cs_live",
+      status: "open",
+      url: "https://checkout.stripe.com/live",
+      metadata: { user_id: "5" },
+    });
+
+    const result = await claimCheckoutSlot(5, new Date(now.getTime() + 60 * 1000), "monthly");
+
+    expect(result).toEqual({ outcome: "reusable", url: "https://checkout.stripe.com/live" });
+    expect(mockSessionsExpire).not.toHaveBeenCalled();
+  });
+
+  it("手続き中のセッションが別のプランなら、失効させてから奪う（選んでいないプランの決済画面へ案内しない）", async () => {
+    const fake = createRaceSupabaseClient({
+      status: CHECKOUT_PENDING_STATUS,
+      checkout_claimed_at: now.toISOString(),
+      checkout_session_id: "cs_monthly",
+      stripe_customer_id: "cus_1",
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
+    mockSessionsRetrieve.mockResolvedValue({
+      id: "cs_monthly",
+      status: "open",
+      url: "https://checkout.stripe.com/monthly",
+      metadata: { plan: "monthly" },
+    });
+    mockSessionsExpire.mockResolvedValue({ id: "cs_monthly", status: "expired" });
+
+    const claimedAt = new Date(now.getTime() + 60 * 1000);
+    const result = await claimCheckoutSlot(5, claimedAt, "yearly");
+
+    expect(mockSessionsExpire).toHaveBeenCalledWith("cs_monthly");
+    expect(result).toMatchObject({ outcome: "claimed", stripeCustomerId: "cus_1" });
+    expect(fake.getRow()?.checkout_claimed_at).toBe(claimedAt.toISOString());
+  });
+
+  it("別のプランのセッションを失効できなければ、奪わずに待たせる", async () => {
+    const fake = createRaceSupabaseClient({
+      status: CHECKOUT_PENDING_STATUS,
+      checkout_claimed_at: now.toISOString(),
+      checkout_session_id: "cs_monthly",
+    });
+    vi.mocked(createAdminSupabaseClient).mockResolvedValue(fake as never);
+    mockSessionsRetrieve.mockResolvedValue({
+      id: "cs_monthly",
+      status: "open",
+      url: "https://checkout.stripe.com/monthly",
+      metadata: { plan: "monthly" },
+    });
+    mockSessionsExpire.mockRejectedValue(new Error("session is not open"));
+
+    const result = await claimCheckoutSlot(5, new Date(now.getTime() + 60 * 1000), "yearly");
+
+    expect(result).toEqual({ outcome: "conflict" });
     expect(fake.getRow()?.checkout_claimed_at).toBe(now.toISOString());
   });
 
@@ -1092,6 +1193,55 @@ describe("fetchSubscriptionPrice", () => {
     const result = await fetchSubscriptionPrice();
 
     expect(result).toEqual({ amount: 3000, currency: "jpy" });
+  });
+
+  it("年額は STRIPE_PRICE_ID_YEARLY の Price を取り、1年間隔なら金額を返す", async () => {
+    vi.stubEnv("STRIPE_PRICE_ID_YEARLY", "price_yearly");
+    mockPrice({ unitAmount: 15000, interval: "year" });
+
+    const result = await fetchSubscriptionPrice("yearly");
+
+    expect(result).toEqual({ amount: 15000, currency: "jpy" });
+    expect(mockPricesRetrieve).toHaveBeenCalledWith("price_yearly");
+  });
+
+  it.each([
+    ["月額の Price", { interval: "month" }],
+    ["2年間隔の Price", { interval: "year", intervalCount: 2 }],
+  ])("年額で %s は amount: null を返す", async (_label, overrides) => {
+    vi.stubEnv("STRIPE_PRICE_ID_YEARLY", "price_yearly");
+    mockPrice({ unitAmount: 15000, ...overrides });
+
+    const result = await fetchSubscriptionPrice("yearly");
+
+    expect(result).toEqual({ amount: null, currency: "jpy" });
+  });
+
+  it("STRIPE_PRICE_ID_YEARLY が未設定なら年額の取得は失敗する", async () => {
+    vi.stubEnv("STRIPE_PRICE_ID_YEARLY", "");
+
+    await expect(fetchSubscriptionPrice("yearly")).rejects.toThrow("STRIPE_PRICE_ID_YEARLY");
+    expect(mockPricesRetrieve).not.toHaveBeenCalled();
+  });
+
+  it("キャッシュは Price ごとに持つ（月額の取得結果を年額に流用しない）", async () => {
+    vi.stubEnv("STRIPE_PRICE_ID_YEARLY", "price_yearly");
+    mockPricesRetrieve.mockImplementation(async (id: string) =>
+      id === "price_yearly"
+        ? {
+            unit_amount: 15000,
+            currency: "jpy",
+            recurring: { interval: "year", interval_count: 1 },
+          }
+        : {
+            unit_amount: 1500,
+            currency: "jpy",
+            recurring: { interval: "month", interval_count: 1 },
+          }
+    );
+
+    expect(await fetchSubscriptionPrice("monthly")).toEqual({ amount: 1500, currency: "jpy" });
+    expect(await fetchSubscriptionPrice("yearly")).toEqual({ amount: 15000, currency: "jpy" });
   });
 
   it("月額以外の間隔のPriceはamount: nullを返す", async () => {
